@@ -1,6 +1,8 @@
-# hevm [![Build Status](https://travis-ci.com/dapphub/dapptools.svg?branch=master)](https://travis-ci.com/dapphub/dapptools)
+# hevm
 
-The `hevm` project is an implementation of the Ethereum virtual machine (EVM) made specifically for symbolic execution, unit testing and debugging of smart contracts. It was forked from the [dapptools](https://github.com/dapphub/dapptools/). The `hevm` command line program can symbolically execute smart contracts, run unit tests, interactively debug contracts while showing the Solidity source, or run arbitrary EVM code. Computations can be performed using local state set up in a `dapp` testing harness, or fetched on demand from live networks using `rpc` calls.
+The `hevm` project is an implementation of the Ethereum virtual machine (EVM) made specifically for symbolic execution, unit testing and debugging of smart contracts. The `hevm` command line program can symbolically execute smart contracts, run unit tests, interactively debug contracts while showing the Solidity source, or run arbitrary EVM code. Computations can be performed using local state set up in a `dapp` testing harness, or fetched on demand from live networks using `rpc` calls.
+
+It was originally developed as part of the [dapptools](https://github.com/dapphub/dapptools/) project, and was forked to this repo by the formal methods team at the Ethereum Foundation in August 2022.
 
 ### Usage
 
