@@ -1,3 +1,4 @@
 result
 result-*
 dist-newstyle/
+.direnv/

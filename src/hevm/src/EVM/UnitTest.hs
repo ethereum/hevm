@@ -8,7 +8,6 @@ import Prelude hiding (Word)
 
 import EVM
 import EVM.ABI
-import EVM.Symbolic
 import EVM.Dapp
 import EVM.Debug (srcMapCodePos)
 import EVM.Exec
