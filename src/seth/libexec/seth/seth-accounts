@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-set -e
-if [[ -z $ETH_RPC_ACCOUNTS ]]; then
-  ethsign ls
-else
-  seth rpc eth_accounts | awk "{print \$1 \" $ETH_RPC_URL\"}"
-fi

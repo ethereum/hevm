@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-set -e
-grep "^$1\\s" | { read -r _ value && echo "$value"; }

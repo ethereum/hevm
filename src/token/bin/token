@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-PATH=${0%/*/*}/libexec/token:$PATH token "$@"

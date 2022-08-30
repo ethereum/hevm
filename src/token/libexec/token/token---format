@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -e
-decimals=$(seth --lookup "$1-decimals" 2>/dev/null) || decimals=18
-seth --to-fix "$decimals" "$2"

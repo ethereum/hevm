@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-### seth---from-ascii -- convert text data into hexdata
-### Usage: seth --from-ascii <text>...
-set -e
-[[ $1 ]] || set -- "$(cat)"
-printf %s "$*" | seth --from-bin 

@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-set -e
-seth rpc web3_clientVersion
