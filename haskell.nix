@@ -16,8 +16,6 @@ in self-hs: super-hs:
   in {
     restless-git = dontCheck "restless-git" (./src/restless-git);
 
-    blade = pkgs.haskell.lib.dontHaddock (self-hs.callCabal2nix "blade" (./src/blade) {});
-
     hevm = pkgs.haskell.lib.dontHaddock ((
       self-hs.callCabal2nix "hevm" (./src/hevm) {
         # Haskell libs with the same names as C libs...

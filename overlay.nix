@@ -28,10 +28,6 @@ in rec {
     );
   });
 
-  solidityPackage = import ./nix/solidity-package.nix {
-    inherit (self) pkgs;
-  };
-
   # experimental dapp builder, allows for easy overriding of phases
   buildDappPackage = import ./nix/build-dapp-package.nix { inherit (self) pkgs; };
 
@@ -41,43 +37,6 @@ in rec {
   # These are tests that verify the correctness of hevm symbolic using various
   # external test suites (e.g. the solc tests)
   hevm-tests = import ./nix/hevm-tests { pkgs = self.pkgs; };
-
-  bashScript = { name, version ? "0", deps ? [], text, check ? true } :
-    self.pkgs.writeTextFile {
-      name = "${name}-${version}";
-      executable = true;
-      destination = "/bin/${name}";
-      text = ''
-        #!${self.pkgs.bash}/bin/bash
-        set -euo pipefail
-        shopt -s lastpipe
-        export PATH="${lib.makeBinPath deps}:/run/wrappers/bin"
-        ${text}
-      '';
-      checkPhase = ''
-        ${self.pkgs.bash}/bin/bash -n $out/bin/${name}
-      '' + (if check then ''
-        ${self.pkgs.shellcheck}/bin/shellcheck -s bash $out/bin/${name}
-      '' else "");
-    };
-
-  solc-versions =
-    let
-      fetchSolcVersions = { owner, attr }:
-        super.lib.mapAttrs
-          (_: nixpkgs: (importNixpkgs { inherit owner; inherit (nixpkgs) rev sha256; }).solc)
-          (builtins.getAttr attr (import ./nix/solc-versions.nix));
-      importNixpkgs = { owner, rev, sha256 }:
-        import (self.pkgs.fetchFromGitHub {
-          inherit owner rev sha256;
-          repo = "nixpkgs";
-        }) { inherit (super) system; };
-      in
-        self.pkgs.recurseIntoAttrs (
-          fetchSolcVersions { owner = "NixOS";   attr = super.system; }
-          //
-          fetchSolcVersions { owner = "dapphub"; attr = "unreleased_" + super.system; }
-        );
 
   solc = self.pkgs.runCommand "solc" { } "mkdir -p $out/bin; ln -s ${solc-static-versions.solc_0_8_6}/bin/solc-0.8.6 $out/bin/solc";
 
@@ -101,62 +60,7 @@ in rec {
 
   libff = self.callPackage (import ./nix/libff.nix) {};
 
-  jays = (
-    self.pkgs.haskell.lib.justStaticExecutables
-      (self.haskellPackages.callCabal2nix "jays" (./src/jays) {})
-  ).overrideAttrs (_: { postInstall = "cp $out/bin/{jays,jshon}"; });
-
   blade = self.pkgs.haskell.lib.justStaticExecutables self.haskellPackages.hevm;
-
-  # Override buggy jshon program with Haskell-based replacement.
-  jshon = self.jays;
-
-  seth = self.callPackage (import ./src/seth) {};
-  dapp = self.callPackage (import ./src/dapp) {};
-
-  ethsign = (self.callPackage (import ./src/ethsign) {});
-
-  token = self.callPackage (import ./src/token) {};
-
-  # We use this to run private testnets without
-  # the pesky transaction size limit.
-  go-ethereum-unlimited = (self.callPackage (import ./nix/geth.nix) {}).overrideAttrs (geth: rec {
-    name = "${geth.pname}-unlimited-${geth.version}";
-    preConfigure = ''
-      # Huge transaction calldata
-      substituteInPlace core/tx_pool.go --replace 'return ErrOversizedData' ""
-
-      # Huge contracts
-      substituteInPlace params/protocol_params.go --replace \
-        'MaxCodeSize = 24576' \
-        'MaxCodeSize = 1000000'
-
-      # Huge block gas limit in --dev mode
-      substituteInPlace core/genesis.go --replace \
-        'GasLimit:   11500000,' \
-        'GasLimit:   0xffffffffffffffff,'
-    '';
-  });
-
-  qrtx = self.bashScript {
-    name = "qrtx";
-    version = "0";
-    deps = with self.pkgs; [qrencode feh vim gnused coreutils];
-    text = ''
-      sed 's/^0x//' | tr -d '[:space:]' | xxd -r -p | base64 -w0 |
-        qrencode -s 1 -o - | feh -ZB white --force-aliasing -
-    '';
-  };
-
-  qrtx-term = self.bashScript {
-    name = "qrtx-term";
-    version = "0";
-    deps = with self.pkgs; [qrencode vim gnused coreutils];
-    text = ''
-      sed 's/^0x//' | tr -d '[:space:]' | xxd -r -p | base64 -w0 |
-        qrencode -t ANSIUTF8
-    '';
-  };
 
   secp256k1 = super.secp256k1.overrideDerivation (_: {
     dontDisableStatic = true;
