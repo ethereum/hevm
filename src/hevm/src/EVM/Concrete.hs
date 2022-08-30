@@ -55,37 +55,6 @@ writeMemory bs1 n src dst bs0 =
   in
     a <> a' <> c <> b'
 
---readMemoryWord :: Word -> ByteString -> Word
---readMemoryWord (C _ i) m =
-  --if i > (num $ BS.length m) then 0 else
-  --let
-    --go !a (-1) = a
-    --go !a !n = go (a + shiftL (num $ readByteOrZero (num i + n) m)
-                              --(8 * (31 - n))) (n - 1)
-    --w = go (0 :: W256) (31 :: Int)
-  --in [># SCC "readMemoryWord" #<]
-    --C (Lit w) w
-
---readMemoryWord32 :: Word -> ByteString -> Word
---readMemoryWord32 (C _ i) m =
-  --let
-    --go !a (-1) = a
-    --go !a !n = go (a + shiftL (num $ readByteOrZero (num i + n) m)
-                              --(8 * (3 - n))) (n - 1)
-  --in [># SCC "readMemoryWord32" #<]
-    --w256 $ go (0 :: W256) (3 :: Int)
-
---setMemoryWord :: Word -> Word -> ByteString -> ByteString
---setMemoryWord (C _ i) (C _ x) =
-  --writeMemory (word256Bytes x) 32 0 (num i)
-
---setMemoryByte :: Word -> Word8 -> ByteString -> ByteString
---setMemoryByte (C _ i) x =
-  --writeMemory (BS.singleton x) 1 0 (num i)
-
---keccakBlob :: ByteString -> Word
---keccakBlob x = C (FromKeccak (ConcreteBuffer x)) (keccak x)
-
 -- Copied from the standard library just to get specialization.
 -- We also use bit operations instead of modulo and multiply.
 -- (This operation was significantly slow.)

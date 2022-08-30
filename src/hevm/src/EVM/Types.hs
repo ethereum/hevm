@@ -63,71 +63,6 @@ newtype W256 = W256 Word256
     , Bits , FiniteBits, Enum, Eq , Bounded
     )
 
---data Word = C (Expr EWord) W256 --maybe to remove completely in the future
-
---instance Show Word where
-  --show (C _ x) = show x
-
---instance Read Word where
-  --readsPrec n s =
-    --case readsPrec n s of
-      --[(x, r)] -> [(C (Lit x) x, r)]
-      --_ -> []
-
---w256 :: W256 -> Word
---w256 w = C (Lit w) w
-
---instance Bits Word where
-  --(C a x) .&. (C b y) = C (And a b) (x .&. y)
-  --(C a x) .|. (C b y) = C (Or  a b) (x .|. y)
-  --(C a x) `xor` (C b y) = C (Xor a b) (x `xor` y)
-  --complement (C a x) = C (Not a) (complement x)
-  --shiftL (C a x) i = C (SHL a (Lit $ fromIntegral i)) (shiftL x i)
-  --shiftR (C a x) i = C (SHR a (Lit $ fromIntegral i)) (shiftR x i)
-  --rotate (C a x) i = C (Todo "rotate " a) (rotate x i) -- unused.
-  --bitSize (C _ x) = bitSize x
-  --bitSizeMaybe (C _ x) = bitSizeMaybe x
-  --isSigned (C _ x) = isSigned x
-  --testBit (C _ x) i = testBit x i
-  --bit i = w256 (bit i)
-  --popCount (C _ x) = popCount x
-
---instance FiniteBits Word where
-  --finiteBitSize (C _ x) = finiteBitSize x
-  --countLeadingZeros (C _ x) = countLeadingZeros x
-  --countTrailingZeros (C _ x) = countTrailingZeros x
-
---instance Bounded Word where
-  --minBound = w256 minBound
-  --maxBound = w256 maxBound
-
---instance Eq Word where
-  --(C _ x) == (C _ y) = x == y
-
---instance Enum Word where
-  --toEnum i = w256 (toEnum i)
-  --fromEnum (C _ x) = fromEnum x
-
---instance Integral Word where
-  --quotRem (C _ x) (C _ y) =
-    --let (a, b) = quotRem x y
-    --in (w256 a, w256 b)
-  --toInteger (C _ x) = toInteger x
-
---instance Num Word where
-  --(C a x) + (C b y) = C (Add a b) (x + y)
-  --(C a x) * (C b y) = C (Mul a b) (x * y)
-  --abs (C a x) = C (Todo "abs" a) (abs x)
-  --signum (C a x) = C (Todo "signum" a) (signum x)
-  --fromInteger x = C (Lit (fromInteger x)) (fromInteger x)
-  --negate (C a x) = C (Sub (Lit 0) a) (negate x)
-
---instance Real Word where
-  --toRational (C _ x) = toRational x
-
---instance Ord Word where
-  --compare (C _ x) (C _ y) = compare x y
-
 {- |
   Expr implements an abstract respresentation of an EVM program
 
@@ -948,141 +883,15 @@ instance Show ByteStringS where
 instance JSON.ToJSON ByteStringS where
   toJSON = JSON.String . Text.pack . show
 
--- | Symbolic words of 256 bits, possibly annotated with additional
---   "insightful" information
---data SymWord = S (Expr EWord) (SWord 256)
-
---instance Show SymWord where
-  --show (S w _) = show w
-
---var :: String -> SWord 256 -> SymWord
---var name = S (Var name)
-
----- | Custom instances for SymWord, many of which have direct
----- analogues for concrete words defined in Concrete.hs
---instance EqSymbolic SymWord where
-  --(.==) (S _ x) (S _ y) = x .== y
-
---instance Num SymWord where
-  --(S a x) + (S b y) = S (Add a b) (x + y)
-  --(S a x) * (S b y) = S (Mul a b) (x * y)
-  --abs (S a x) = S (Todo "abs" a) (abs x)
-  --signum (S a x) = S (Todo "signum" a) (signum x)
-  --fromInteger x = S (Lit (fromInteger x)) (fromInteger x)
-  --negate (S a x) = S (Todo "negate" a) (negate x)
-
---instance Bits SymWord where
-  --(S a x) .&. (S b y) = S (And a b) (x .&. y)
-  --(S a x) .|. (S b y) = S (Or  a b) (x .|. y)
-  --(S a x) `xor` (S b y) = S (Xor a b) (x `xor` y)
-  --complement (S a x) = S (Not a) (complement x)
-  --shiftL (S a x) i = S (SHL a (Lit $ fromIntegral i)) (shiftL x i)
-  --shiftR (S a x) i = S (SHR a (Lit $ fromIntegral i)) (shiftR x i)
-  --rotate (S a x) i = S (Todo "rotate " a) (rotate x i) -- unused.
-  --bitSize (S _ x) = bitSize x
-  --bitSizeMaybe (S _ x) = bitSizeMaybe x
-  --isSigned (S _ x) = isSigned x
-  --testBit (S _ x) i = testBit x i
-  --bit i = w256lit (bit i)
-  --popCount (S _ x) = popCount x
-
----- sQuotRem and sDivMod are identical for SWord 256
----- prove $ \x y -> x `sQuotRem` (y :: SWord 256) .== x `sDivMod` y
----- Q.E.D.
---instance SDivisible SymWord where
-  --sQuotRem (S x' x) (S y' y) = let (a, b) = x `sQuotRem` y
-                               --in (S (Div x' y') a, S (Mod x' y') b)
-  --sDivMod = sQuotRem
-
--- | Instead of supporting a Mergeable instance directly,
--- we use one which carries the Whiff around:
---iteExpr :: (Expr EWord) -> SBool -> SWord 256 -> SWord 256 -> SymWord
---iteExpr e b x y = S e (ite b x y)
-
---instance Bounded SymWord where
-  --minBound = w256lit minBound
-  --maxBound = w256lit maxBound
-
---instance Eq SymWord where
-  --(S _ x) == (S _ y) = x == y
-
---instance Enum SymWord where
-  --toEnum i = w256lit (toEnum i)
-  --fromEnum (S _ x) = fromEnum x
-
 newtype Addr = Addr { addressWord160 :: Word160 }
   deriving
     ( Num, Integral, Real, Ord, Enum
     , Eq, Generic, Bits, FiniteBits
     )
 
---newtype SAddr = SAddr { saddressWord160 :: SWord 160 }
-  --deriving (Num)
-
--- | Capture the correspondence between sized and fixed-sized BVs
--- (This is blatant copypasta of `FromSized` from sbv, which just
--- happens to be defined up to 64 bits)
---type family FromSizzle (t :: Type) :: Type where
-   --FromSizzle (WordN 256) = W256
-   --FromSizzle (WordN 160) = Addr
-
--- | Conversion from a sized BV to a fixed-sized bit-vector.
---class FromSizzleBV a where
-   -- | Convert a sized bit-vector to the corresponding fixed-sized bit-vector,
-   -- for instance 'SWord 16' to 'SWord16'. See also 'toSized'.
-   --fromSizzle :: a -> FromSizzle a
-
-   --default fromSizzle :: (Num (FromSizzle a), Integral a) => a -> FromSizzle a
-   --fromSizzle = fromIntegral
-
-
 maybeLitWord :: Expr EWord -> Maybe W256
 maybeLitWord (Lit w) = Just w
 maybeLitWord _ = Nothing
-
--- | convert between (WordN 256) and Word256
---type family ToSizzle (t :: Type) :: Type where
-    --ToSizzle W256 = (WordN 256)
-    --ToSizzle Addr = (WordN 160)
-
--- | Conversion from a fixed-sized BV to a sized bit-vector.
---class ToSizzleBV a where
-   -- | Convert a fixed-sized bit-vector to the corresponding sized bit-vector,
-   --toSizzle :: a -> ToSizzle a
-
-   --default toSizzle :: (Num (ToSizzle a), Integral a) => (a -> ToSizzle a)
-   --toSizzle = fromIntegral
-
-
---instance (ToSizzleBV W256)
---instance (FromSizzleBV (WordN 256))
---instance (ToSizzleBV Addr)
---instance (FromSizzleBV (WordN 160))
-
--- | Operations over buffers (concrete or symbolic)
-
--- | A buffer is a list of bytes. For concrete execution, this is simply `ByteString`.
--- In symbolic settings, it is a list of symbolic bitvectors of size 8.
---instance Show Buffer where
-  --show (ConcreteBuffer b) = show $ ByteStringS b
-  --show (SymbolicBuffer b) = show (length b) ++ " bytes"
-
-
---instance Semigroup Buffer where
-  --ConcreteBuffer a <> ConcreteBuffer b = ConcreteBuffer (a <> b)
-  --ConcreteBuffer a <> SymbolicBuffer b = SymbolicBuffer (litBytes a <> b)
-  --SymbolicBuffer a <> ConcreteBuffer b = SymbolicBuffer (a <> litBytes b)
-  --SymbolicBuffer a <> SymbolicBuffer b = SymbolicBuffer (a <> b)
-
---instance Monoid Buffer where
-  --mempty = ConcreteBuffer mempty
-
---instance EqSymbolic Buffer where
-  --ConcreteBuffer a .== ConcreteBuffer b = literal (a == b)
-  --ConcreteBuffer a .== SymbolicBuffer b = litBytes a .== b
-  --SymbolicBuffer a .== ConcreteBuffer b = a .== litBytes b
-  --SymbolicBuffer a .== SymbolicBuffer b = a .== b
-
 
 instance Read W256 where
   readsPrec _ "0x" = [(0, "")]
@@ -1103,11 +912,6 @@ instance Show Addr where
     let hex = showHex addr next
         str = replicate (40 - length hex) '0' ++ hex
     in "0x" ++ toChecksumAddress str ++ drop 40 str
-
---instance Show SAddr where
-  --show (SAddr a) = case unliteral a of
-    --Nothing -> "<symbolic addr>"
-    --Just c -> show $ fromSizzle c
 
 -- https://eips.ethereum.org/EIPS/eip-55
 toChecksumAddress :: String -> String

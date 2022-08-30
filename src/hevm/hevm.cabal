@@ -56,7 +56,6 @@ library
     EVM.Solidity,
     EVM.Stepper,
     EVM.StorageLayout,
-    EVM.Symbolic,
     EVM.SymExec
     EVM.Transaction,
     EVM.TTY,

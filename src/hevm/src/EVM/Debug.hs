@@ -43,66 +43,6 @@ prettyContracts x =
     (map (\(a, b) -> (text (show a), prettyContract b))
      (Map.toList x))
 
--- debugger :: Maybe SourceCache -> VM -> IO VM
--- debugger maybeCache vm = do
---   -- cpprint (view state vm)
---   cpprint ("pc" :: Text, view (state . pc) vm)
---   cpprint (view (state . stack) vm)
---   -- cpprint (view logs vm)
---   cpprint (vmOp vm)
---   cpprint (opParams vm)
---   cpprint (length (view frames vm))
-
---   -- putDoc (prettyContracts (view (env . contracts) vm))
-
---   case maybeCache of
---     Nothing ->
---       return ()
---     Just cache ->
---       case currentSrcMap vm of
---         Nothing -> cpprint ("no srcmap" :: Text)
---         Just sm -> cpprint (srcMapCode cache sm)
-
---   if vm ^. result /= Nothing
---     then do
---       print (vm ^. result)
---       return vm
---     else
---     -- readline "(evm) " >>=
---     return (Just "") >>=
---       \case
---         Nothing ->
---           return vm
---         Just cmdline ->
---           case words cmdline of
---             [] ->
---               debugger maybeCache (execState exec1 vm)
-
---             ["block"] ->
---               do cpprint (view block vm)
---                  debugger maybeCache vm
-
---             ["storage"] ->
---               do cpprint (view (env . contracts) vm)
---                  debugger maybeCache vm
-
---             ["contracts"] ->
---               do putDoc (prettyContracts (view (env . contracts) vm))
---                  debugger maybeCache vm
-
---             -- ["disassemble"] ->
---             --   do cpprint (mkCodeOps (view (state . code) vm))
---             --      debugger maybeCache vm
-
---             _  -> debugger maybeCache vm
-
--- lookupSolc :: VM -> W256 -> Maybe SolcContract
--- lookupSolc vm hash =
---   case vm ^? env . solcByRuntimeHash . ix hash of
---     Just x -> Just x
---     Nothing ->
---       vm ^? env . solcByCreationHash . ix hash
-
 srcMapCodePos :: SourceCache -> SrcMap -> Maybe (Text, Int)
 srcMapCodePos cache sm =
   fmap (second f) $ cache ^? sourceFiles . ix (srcMapFile sm)
