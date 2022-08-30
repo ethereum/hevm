@@ -345,7 +345,3 @@ These can be accessed by calling into a contract (typically called `Hevm`) at ad
 - `function ffi(string[] calldata) external returns (bytes memory)`
   Executes the arguments as a command in the system shell and returns stdout. Expects abi encoded values to be returned from the shell or an error will be thrown. Note that this
   cheatcode means test authors can execute arbitrary code on user machines as part of a call to `dapp test`, for this reason all calls to `ffi` will fail unless the `--ffi` flag is passed.
-
-## Contact
-
-You can find us in the DappHub chat at https://dapphub.chat/, especially the `#dev` channel.
