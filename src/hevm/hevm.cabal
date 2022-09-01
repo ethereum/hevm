@@ -80,7 +80,7 @@ library
   cxx-sources:
     ethjet/ethjet-ff.cc, ethjet/blake2.cc
   cxx-options:
-    -std=c++11
+    -std=c++0x
   install-includes:
     ethjet/tinykeccak.h, ethjet/ethjet.h, ethjet/ethjet-ff.h, ethjet/blake2.h
   build-depends:
