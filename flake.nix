@@ -31,7 +31,6 @@
               inherit (pkgs) secp256k1;
             }
           ).overrideAttrs (attrs: {
-            hardeningDisable = ["pic"];
             postInstall = ''
                 wrapProgram $out/bin/hevm --prefix PATH \
                   : "${pkgs.lib.makeBinPath (with pkgs; [bash coreutils git solc])}"
@@ -46,8 +45,10 @@
             nativeBuildInputs = attrs.nativeBuildInputs ++ [pkgs.makeWrapper];
             configureFlags = attrs.configureFlags ++ [
                 "--ghc-option=-O2"
+                "--enable-static"
                 "--enable-executable-static"
-                "--extra-lib-dirs=${pkgs.gmp.override { withStatic = true; }}/lib"
+                "--extra-lib-dirs=${pkgs.gmp.static}/lib"
+                "--extra-lib-dirs=${pkgs.glibc}/lib"
                 "--extra-lib-dirs=${pkgs.glibc.static}/lib"
                 "--extra-lib-dirs=${packages.libff.override { enableStatic = true; }}/lib"
                 "--extra-lib-dirs=${pkgs.ncurses.override {enableStatic = true; }}/lib"
