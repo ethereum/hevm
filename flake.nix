@@ -22,6 +22,7 @@
         # --- packages ----
 
         packages = flake-utils.lib.flattenTree {
+          libsecp256k1 = pkgs.callPackage (import ./nix/libsecp256k1.nix) {};
           libff = pkgs.callPackage (import ./nix/libff.nix) {};
           hevm = pkgs.haskell.lib.dontHaddock ((
             pkgs.haskellPackages.callCabal2nix "hevm" (./src/hevm) {
@@ -47,10 +48,11 @@
                 "--ghc-option=-O2"
                 "--enable-static"
                 "--enable-executable-static"
-                "--extra-lib-dirs=${pkgs.gmp.static}/lib"
+                "--extra-lib-dirs=${pkgs.gmp.override { withStatic = true; }}/lib"
                 "--extra-lib-dirs=${pkgs.glibc}/lib"
                 "--extra-lib-dirs=${pkgs.glibc.static}/lib"
-                "--extra-lib-dirs=${packages.libff.override { enableStatic = true; }}/lib"
+                "--extra-lib-dirs=${packages.libsecp256k1}/lib"
+                "--extra-lib-dirs=${packages.libff}/lib"
                 "--extra-lib-dirs=${pkgs.ncurses.override {enableStatic = true; }}/lib"
                 "--extra-lib-dirs=${pkgs.zlib.static}/lib"
                 "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"

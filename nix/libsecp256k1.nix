@@ -26,7 +26,7 @@ stdenv.mkDerivation {
     "--enable-module-recovery"
     "--enable-module-schnorrsig"
     "--enable-tests=yes"
-    "--enable-static=yes"
+    "--enable-static"
   ];
 
   doCheck = true;
