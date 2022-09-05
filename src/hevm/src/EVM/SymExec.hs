@@ -35,6 +35,7 @@ import qualified Data.Text as T
 import Data.List (find)
 import Data.Maybe (isJust, fromJust)
 import Debug.Trace
+import EVM.Format (formatExpr)
 
 data ProofResult a b c = Qed a | Cex b | Timeout c
   deriving (Show)
