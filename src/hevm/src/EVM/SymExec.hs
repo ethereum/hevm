@@ -339,6 +339,9 @@ simplify e = if (mapExpr go e == e)
     go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
 
     -- simplify buffers
+    go o@(ReadWord off1 (WriteWord off2 x _))
+      | off1 == off2 = x
+      | otherwise = o
     go o@(ReadWord (Lit _) _) = Expr.simplifyReads o
     go o@(ReadByte (Lit _) _) = Expr.simplifyReads o
 
@@ -365,6 +368,34 @@ simplify e = if (mapExpr go e == e)
       | otherwise = o
     go o@(And a (And b c))
       | a == b = (And b c)
+      | otherwise = o
+    go o@(Add a b)
+      | b == (Lit 0) = a
+      | a == (Lit 0) = b
+      | otherwise = o
+    go o@(EVM.Types.LT (Lit a) (Lit b))
+      | (a < b) = Lit 1
+      | otherwise = Lit 0
+    go o@(IsZero (CallValue x))
+      | x == 0 = Lit 0x1
+      | otherwise = Lit 0x0
+    -- we write at least 32, so if x <= 32, it's FALSE
+    go o@(EVM.Types.LT (BufLength (WriteWord {})) x)
+      | x <= Lit 0x32 = Lit 0x0
+      | otherwise = o
+    -- we write at least 32, so if x < 32, it's TRUE
+    go o@(EVM.Types.GT (BufLength (WriteWord {})) x)
+      | x < Lit 0x32 = Lit 0x1
+      | otherwise = o
+    go o@(SLT (Lit a) (Lit b))
+      | (a < 128)  && (b < 128)  && (a < b)  = Lit 1
+      | (a < 128)  && (b < 128)  && (a >= b) = Lit 0
+      | (a >= 128) && (b >= 128) && (a < b)  = Lit 0
+      | (a >= 128) && (b >= 128) && (a >= b) = Lit 1
+      | otherwise = o
+    go o@(Sub a b)
+      | a == b = Lit 0
+      | b == (Lit 0) = a
       | otherwise = o
     go a = a
 
