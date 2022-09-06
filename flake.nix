@@ -82,6 +82,7 @@
           withHoogle = true;
         }).overrideAttrs (_: {
           LD_LIBRARY_PATH = "${pkgs.secp256k1}/lib:${pkgs.libff}/lib";
+          DYLD_LIBRARY_PATH = "${pkgs.secp256k1}/lib:${pkgs.libff}/lib";
         });
       }
     );
