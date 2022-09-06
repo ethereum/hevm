@@ -22,7 +22,7 @@
         # --- packages ----
 
         packages = flake-utils.lib.flattenTree {
-          libsecp256k1 = pkgs.callPackage (import ./nix/libsecp256k1.nix) {};
+          libsecp256k1 = pkgs.secp256k1.overrideAttrs (attrs: { configureFlags = attrs.configureFlags ++ ["--enable-static"]; });
           libff = pkgs.callPackage (import ./nix/libff.nix) {};
           hevm = pkgs.haskell.lib.dontHaddock ((
             pkgs.haskellPackages.callCabal2nix "hevm" (./src/hevm) {
