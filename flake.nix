@@ -84,8 +84,8 @@
           ];
           withHoogle = true;
         }).overrideAttrs (_: {
-          LD_LIBRARY_PATH = "${pkgs.secp256k1}/lib:${packages.libff}/lib";
-          DYLD_LIBRARY_PATH = "${pkgs.secp256k1}/lib:${packages.libff}/lib";
+          LD_LIBRARY_PATH = "${pkgs.secp256k1}/lib:${packages.libff.override {enableStatic = false;}}/lib";
+          DYLD_LIBRARY_PATH = "${pkgs.secp256k1}/lib:${packages.libff.override {enableStatic = false;}}/lib";
         });
       }
     );
