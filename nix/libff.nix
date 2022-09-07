@@ -1,4 +1,4 @@
-{ lib, stdenv, fetchFromGitHub, cmake, boost, gmp, openssl, pkg-config, enableStatic ? false }:
+{ lib, stdenv, fetchFromGitHub, cmake, boost, gmp, openssl, pkg-config, enableStatic ? true }:
 
 stdenv.mkDerivation rec {
   pname = "libff";
@@ -12,7 +12,7 @@ stdenv.mkDerivation rec {
     fetchSubmodules = true;
   };
 
-  cmakeFlags = [ "-DWITH_PROCPS=Off" ];
+  cmakeFlags = [ "-DWITH_PROCPS=OFF -DBUILD_SHARED_LIBS=OFF" ];
 
   # CMake is hardcoded to always build static library which causes linker
   # failure for Haskell applications depending on haskellPackages.hevm on macOS.
