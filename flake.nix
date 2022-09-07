@@ -51,15 +51,15 @@
                 "--extra-lib-dirs=${pkgs.gmp.override { withStatic = true; }}/lib"
                 "--extra-lib-dirs=${packages.libsecp256k1}/lib"
                 "--extra-lib-dirs=${packages.libff}/lib"
-                "--extra-lib-dirs=${pkgs.ncurses.override {enableStatic = true; }}/lib"
+                "--extra-lib-dirs=${pkgs.ncurses.override { enableStatic = true; }}/lib"
                 "--extra-lib-dirs=${pkgs.zlib.static}/lib"
                 "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
             ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
                 "--extra-lib-dirs=${pkgs.libiconv}/lib"
                 "--extra-lib-dirs=${pkgs.libiconv.override { enableStatic = true; }}/lib"
            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-                "--extra-lib-dirs=${pkgs.glibc.static}/lib"
                 "--extra-lib-dirs=${pkgs.glibc}/lib"
+                "--extra-lib-dirs=${pkgs.glibc.static}/lib"
             ];
           }));
         };
