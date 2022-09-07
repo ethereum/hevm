@@ -71,9 +71,7 @@ library
     -Wall -Wno-deprecations -Wno-unticked-promoted-constructors
   extra-libraries:
     secp256k1, ff
-  if os(darwin)
-     extra-libraries: c++
-  else
+  if os(linux)
      extra-libraries: stdc++
   c-sources:
     ethjet/tinykeccak.c, ethjet/ethjet.c
@@ -211,6 +209,10 @@ test-suite test
     test.hs
   extra-libraries:
     secp256k1
+  if os(darwin)
+     extra-libraries: c++
+  else
+     extra-libraries: stdc++
   build-depends:
     HUnit >= 1.6,
     QuickCheck,
@@ -219,7 +221,6 @@ test-suite test
     binary,
     containers,
     bytestring,
-    free,
     here,
     hevm,
     lens,
@@ -228,5 +229,4 @@ test-suite test
     tasty-hunit >= 0.10,
     tasty-quickcheck >= 0.9,
     text,
-    vector,
-    sbv
+    vector
