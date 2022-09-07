@@ -14,8 +14,6 @@ homepage:
   https://github.com/dapphub/dapptools
 license:
   AGPL-3.0-only
-license-file:
-  COPYING
 author:
   Mikael Brockman, Martin Lundfall, dxo
 maintainer:
