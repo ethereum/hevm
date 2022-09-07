@@ -32,6 +32,10 @@
               inherit (pkgs) secp256k1;
             }
           ).overrideAttrs (attrs: {
+            preInstall = ''
+              pwd
+              ls
+            '';
             postInstall = ''
                 wrapProgram $out/bin/hevm --prefix PATH \
                   : "${pkgs.lib.makeBinPath (with pkgs; [bash coreutils git solc])}"

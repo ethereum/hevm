@@ -1,6 +1,5 @@
 {-# Language CPP #-}
 {-# Language TemplateHaskell #-}
-{-# Language ScopedTypeVariables #-}
 {-# Language TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GADTs #-}
