@@ -377,9 +377,6 @@ simplify e = if (mapExpr go e == e)
     go o@(EVM.Types.LT (Lit a) (Lit b))
       | (a < b) = Lit 1
       | otherwise = Lit 0
-    go o@(IsZero (CallValue x))
-      | x == 0 = Lit 0x1
-      | otherwise = Lit 0x0
     -- we write at least 32, so if x <= 32, it's FALSE
     go o@(EVM.Types.LT (BufLength (WriteWord {})) x)
       | x <= Lit 0x32 = Lit 0x0
