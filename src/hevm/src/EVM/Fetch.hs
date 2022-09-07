@@ -162,8 +162,8 @@ fetchSlotFrom n url addr slot =
 http :: SolverGroup -> BlockNumber -> Text -> Fetcher
 http s n url = oracle s (Just (n, url))
 
---zero :: Fetcher
---zero = oracle Nothing True
+zero :: Fetcher
+zero = undefined
 
 -- smtsolving + (http or zero)
 oracle :: SolverGroup -> Maybe (BlockNumber, Text) -> Fetcher

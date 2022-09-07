@@ -506,7 +506,7 @@ assert cmd = do
   preState <- symvmFromCommand cmd
   let errCodes = fromMaybe defaultPanicCodes (assertions cmd)
   withSolvers EVM.SMT.Z3 4 $ \solvers -> do
-    res <- verify solvers preState (maxIterations cmd) (askSmtIterations cmd) rpcinfo Nothing (Just $ checkAssertions errCodes)
+    res <- verify solvers preState (maxIterations cmd) (askSmtIterations cmd) rpcinfo (Just $ checkAssertions errCodes)
     case res of
       [Qed _] -> putStrLn "QED: No reachable property violations discovered"
       cexs -> do
@@ -682,7 +682,7 @@ launchExec cmd = do
     --Debug -> void $ EVM.TTY.runFromVM Nothing dapp fetcher vm
     --JsonTrace -> void $ execStateT (interpretWithTrace fetcher EVM.Stepper.runFully) vm
     _ -> error "TODO"
-   where fetcher = maybe EVM.Fetch.zero (EVM.Fetch.http block') (rpc cmd)
+   where fetcher = undefined -- maybe EVM.Fetch.zero (EVM.Fetch.http block') (rpc cmd)
          block'  = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
 
 data Testcase = Testcase {
@@ -864,7 +864,7 @@ symvmFromCommand cmd = do
     (Nothing, Just sig') -> do
       method' <- functionAbi sig'
       let typs = snd <$> view methodInputs method'
-      pure $ symCalldata (view methodSignature method') typs (arg cmd) EmptyBuf
+      pure . fst $ symCalldata (view methodSignature method') typs (arg cmd) EmptyBuf
     _ -> error "incompatible options: calldata and abi"
 
   -- TODO: rework this, ConcreteS not needed anymore
