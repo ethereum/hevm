@@ -475,8 +475,9 @@ reachable solvers = go []
 evalProp :: Prop -> Prop
 evalProp = \case
   PBool b -> PBool b
-  PNeg (PBool b) -> PBool (not b)
-  PNeg p -> PNeg p
+  PNeg p -> case p of
+              (PBool b) -> PBool (not b)
+              _ -> PNeg p
   PEq l r -> if l == r
              then PBool True
              else PEq l r
