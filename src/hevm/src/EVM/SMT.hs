@@ -651,9 +651,9 @@ checkSat' a@(SolverGroup taskQueue) b@(script, models) = do
   snd . head <$> checkSat a [b]
 
 checkSat :: SolverGroup -> [(SMT2, [Text])] -> IO [(SMT2, CheckSatResult)]
-checkSat (SolverGroup taskQueue) scripts = do
+checkSat (SolverGroup taskQueue) scriptsmodels = do
   -- prepare tasks
-  tasks <- forM scripts $ \(s, ms) -> do
+  tasks <- forM scriptsmodels $ \(s, ms) -> do
     res <- newChan
     pure $ Task s ms res
 
