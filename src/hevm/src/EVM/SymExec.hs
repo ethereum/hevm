@@ -471,12 +471,13 @@ reachable solvers = go []
       EVM.Types.IllegalOverflow -> pure ([], EVM.Types.IllegalOverflow)
       TmpErr e -> error $ "TmpErr: " <> show e
 
--- | Evaluate the provided proposition down to it's most concrete result
+-- | Evaluate the provided proposition down to its most concrete result
 evalProp :: Prop -> Prop
 evalProp = \case
   PBool b -> PBool b
-  PNeg (PBool b) -> PBool (not b)
-  PNeg p -> p
+  PNeg p -> case p of
+              (PBool b) -> PBool (not b)
+              _ -> PNeg p
   PEq l r -> if l == r
              then PBool True
              else PEq l r
