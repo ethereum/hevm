@@ -161,7 +161,10 @@ executable hevm
   other-modules:
     Paths_hevm
   if os(darwin)
+    extra-libraries: c++
     ld-options: -Wl,-keep_dwarf_unwind
+  else
+    extra-libraries: stdc++
   build-depends:
     QuickCheck,
     aeson,
