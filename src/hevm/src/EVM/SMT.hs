@@ -647,7 +647,7 @@ isUnsat Unsat = True
 isUnsat _ = False
 
 checkSat' :: SolverGroup -> (SMT2, [Text]) -> IO (CheckSatResult)
-checkSat' a@(SolverGroup taskQueue) b@(script, models) = do
+checkSat' a b = do
   snd . head <$> checkSat a [b]
 
 checkSat :: SolverGroup -> [(SMT2, [Text])] -> IO [(SMT2, CheckSatResult)]
