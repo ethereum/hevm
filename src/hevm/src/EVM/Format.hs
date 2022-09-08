@@ -1,7 +1,7 @@
 {-# Language DataKinds #-}
 {-# Language ImplicitParams #-}
 {-# Language TemplateHaskell #-}
-module EVM.Format where
+module EVM.Format (formatExpr, contractNamePart, contractPathPart, showTree, showTraceTree) where
 
 import Prelude hiding (Word)
 import qualified EVM
@@ -9,7 +9,6 @@ import EVM.Dapp (DappInfo (..), dappSolcByHash, dappAbiMap, showTraceLocation, d
 import EVM.Dapp (DappContext (..), contextInfo, contextEnv)
 import EVM (VM, VMResult(..), cheatCode, traceForest, traceData, Error (..), result)
 import EVM (Trace, TraceData (..), Query (..), FrameContext (..))
-import EVM.SymExec
 import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..), hexByteString, foldExpr, mapExpr)
 import EVM.Types (Addr, ByteStringS(..))
 import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..))
