@@ -647,16 +647,8 @@ isUnsat Unsat = True
 isUnsat _ = False
 
 checkSat' :: SolverGroup -> (SMT2, [Text]) -> IO (CheckSatResult)
-checkSat' (SolverGroup taskQueue) (script, models) = do
-  -- prepare tasks
-  res <- newChan
-  let task = Task script models res
-
-  -- send tasks to solver group
-  writeChan taskQueue task
-
-  -- collect results
-  readChan res
+checkSat' a@(SolverGroup taskQueue) b@(script, models) = do
+  snd . head <$> checkSat a [b]
 
 checkSat :: SolverGroup -> [(SMT2, [Text])] -> IO [(SMT2, CheckSatResult)]
 checkSat (SolverGroup taskQueue) scripts = do
