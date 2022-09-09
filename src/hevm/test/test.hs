@@ -398,23 +398,22 @@ tests = testGroup "hevm"
           [Cex _, Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256, AbiUIntType 256])) []
           putStrLn "expected 2 counterexamples found"
         ,
-        expectFail $ testCase "Deposit contract loop (z3)" $ do
+        testCase "Deposit contract loop (z3)" $ do
           Just c <- solcRuntime "Deposit"
             [i|
             contract Deposit {
               function deposit(uint256 deposit_count) external pure {
-                //require(deposit_count < 2**32 - 1);
-                //++deposit_count;
-                //bool found = false;
-                // for (uint height = 0; height < 32; height++) {
-                //   if ((deposit_count & 1) == 1) {
-                //     found = false;
-                //     break;
-                //   }
-                //  deposit_count = deposit_count >> 1;
-                //  }
-                //assert(found);
-                assert(false);
+                require(deposit_count < 2**32 - 1);
+                ++deposit_count;
+                bool found = false;
+                 for (uint height = 0; height < 32; height++) {
+                   if ((deposit_count & 1) == 1) {
+                     found = true;
+                     break;
+                   }
+                  deposit_count = deposit_count >> 1;
+                 }
+                assert(found);
               }
              }
             |]
