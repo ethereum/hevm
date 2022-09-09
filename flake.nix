@@ -42,7 +42,7 @@
             haskell.lib.dontHaddock
           ];
         hevmWrapped = with pkgs; symlinkJoin {
-          name = "hevm-wrapped";
+          name = "hevm";
           paths = [ hevm ];
           buildInputs = [ makeWrapper ];
           postBuild = ''
@@ -60,7 +60,7 @@
         # --- apps ----
 
         apps.hevm = flake-utils.lib.mkApp { drv = hevmWrapped; };
-        defaultApp = apps.hevm;
+        apps.default = apps.hevm;
 
         # --- shell ---
 
@@ -72,9 +72,7 @@
             });
             libraryPath = "${lib.makeLibraryPath [ libff-dynamic secp256k1 ]}";
           in haskellPackages.shellFor {
-            packages = _: [
-              packages.hevm
-            ];
+            packages = _: [ hevm ];
             buildInputs = [
               z3
               cvc4
