@@ -55,7 +55,7 @@
         # --- packages ----
 
         packages.hevm = hevmWrapped;
-        defaultPackage = hevmWrapped;
+        packages.default = hevmWrapped;
 
         # --- apps ----
 
