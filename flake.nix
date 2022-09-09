@@ -17,52 +17,49 @@
         secp256k1-static = pkgs.secp256k1.overrideAttrs (attrs: {
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         });
-        hevm = with pkgs; haskell.lib.dontHaddock ((
-          haskellPackages.callCabal2nix "hevm" (./src/hevm) {
+        hevm = with pkgs; lib.pipe (
+          haskellPackages.callCabal2nix "hevm" ./src/hevm {
             # Haskell libs with the same names as C libs...
             # Depend on the C libs, not the Haskell libs.
             # These are system deps, not Cabal deps.
             inherit secp256k1;
-          }).overrideAttrs (attrs: {
-            preInstall = ''
-              pwd
-              ls
-            '';
-            postInstall = ''
-              wrapProgram $out/bin/hevm --prefix PATH \
-                : "${lib.makeBinPath ([ bash coreutils git solc ])}"
-            '';
-
-            buildInputs = attrs.buildInputs ++ [ solc z3 cvc4 ];
-            nativeBuildInputs = attrs.nativeBuildInputs ++ [ makeWrapper ];
-            configureFlags = attrs.configureFlags ++ [
-              "--ghc-option=-O2"
-              "--enable-static"
-              (lib.optionalString stdenv.isLinux "--enable-executable-static")
-              "--extra-lib-dirs=${gmp.override { withStatic = true; }}/lib"
-              "--extra-lib-dirs=${secp256k1-static}/lib"
-              "--extra-lib-dirs=${libff}/lib"
-              "--extra-lib-dirs=${ncurses.override { enableStatic = true; }}/lib"
-              "--extra-lib-dirs=${zlib.static}/lib"
-              "--extra-lib-dirs=${libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
-            ] ++ lib.optionals stdenv.isDarwin [
-              "--extra-lib-dirs=${libiconv}/lib"
-              "--extra-lib-dirs=${libiconv.override { enableStatic = true; }}/lib"
-            ] ++ lib.optionals stdenv.isLinux [
-              "--extra-lib-dirs=${glibc}/lib"
-              "--extra-lib-dirs=${glibc.static}/lib"
-            ];
-          }));
+          })
+          [
+            (haskell.lib.compose.addTestToolDepends [ solc z3 cvc4 ])
+            (haskell.lib.compose.appendConfigureFlags (
+              [ "--ghc-option=-O2" ]
+              ++ lib.optionals stdenv.isLinux [
+                "--enable-executable-static"
+                "--extra-lib-dirs=${gmp.override { withStatic = true; }}/lib"
+                "--extra-lib-dirs=${secp256k1-static}/lib"
+                "--extra-lib-dirs=${libff}/lib"
+                "--extra-lib-dirs=${ncurses.override { enableStatic = true; }}/lib"
+                "--extra-lib-dirs=${zlib.static}/lib"
+                "--extra-lib-dirs=${libffi.overrideAttrs (_: { dontDisableStatic = true; })}/lib"
+                "--extra-lib-dirs=${glibc}/lib"
+                "--extra-lib-dirs=${glibc.static}/lib"
+              ]))
+            haskell.lib.dontHaddock
+          ];
+        hevmWrapped = with pkgs; symlinkJoin {
+          name = "hevm-wrapped";
+          paths = [ hevm ];
+          buildInputs = [ makeWrapper ];
+          postBuild = ''
+            wrapProgram $out/bin/hevm \
+              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc ])}"
+          '';
+        };
       in rec {
 
         # --- packages ----
 
-        packages.hevm = hevm;
-        defaultPackage = hevm;
+        packages.hevm = hevmWrapped;
+        defaultPackage = hevmWrapped;
 
         # --- apps ----
 
-        apps.hevm = flake-utils.lib.mkApp { drv = hevm; };
+        apps.hevm = flake-utils.lib.mkApp { drv = hevmWrapped; };
         defaultApp = apps.hevm;
 
         # --- shell ---
