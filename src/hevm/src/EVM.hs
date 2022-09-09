@@ -1067,10 +1067,10 @@ exec1 = do
             (x:y:xs) -> forceConcrete x "JUMPI: symbolic jumpdest" $ \x' ->
                 burn g_high $
                   let jump :: Bool -> EVM ()
-                      jump True = assign (state . stack) xs >> next
+                      jump False = assign (state . stack) xs >> next
                       jump _    = checkJump x' xs
                   in case maybeLitWord y of
-                      Just y' -> jump (0 == y')
+                      Just y' -> jump (0 /= y')
                       -- if the jump condition is symbolic, we explore both sides
                       Nothing -> do
                         loc <- codeloc
