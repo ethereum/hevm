@@ -420,9 +420,8 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
           putStrLn $ formatExpr res
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        {-
         ,
-                testCase "Deposit contract loop (cvc4)" $ do
+        testCase "Deposit contract loop (cvc4)" $ do
           Just c <- solcRuntime "Deposit"
             [i|
             contract Deposit {
@@ -441,8 +440,9 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (Qed res, _) <- runSMTWith cvc4 $ query $ checkAssert defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
-          putStrLn $ "successfully explored: " <> show (length res) <> " paths"
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
+          putStrLn $ formatExpr res
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "Deposit contract loop (error version)" $ do
           Just c <- solcRuntime "Deposit"
@@ -463,12 +463,14 @@ tests = testGroup "hevm"
               }
              }
             |]
-          bs <- runSMT $ query $ do
-            (Cex _, vm) <- checkAssert allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
-            case view (state . calldata . _1) vm of
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
+          putStrLn $ formatExpr res
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+          {-bs <- runSMT $ query $ do
+            (Cex, -) <- checkAssert allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
+              case view (state . calldata . _1) vm of
               SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
               ConcreteBuffer _ -> error "unexpected"
-
           let [deposit] = decodeAbiValues [AbiUIntType 8] bs
           assertEqual "overflowing uint8" deposit (AbiUInt 8 255)
      ,
@@ -711,7 +713,6 @@ tests = testGroup "hevm"
           Cex _ <- equivalenceCheck aPrgm bPrgm Nothing Nothing Nothing
           return ()
           -}
-
     ]
   ]
   where
