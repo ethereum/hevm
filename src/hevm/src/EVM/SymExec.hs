@@ -378,12 +378,12 @@ simplify e = if (mapExpr go e == e)
       | (a < b) = Lit 1
       | otherwise = Lit 0
     -- we write at least 32, so if x <= 32, it's FALSE
-    go o@(EVM.Types.LT (BufLength (WriteWord {})) x)
-      | x <= Lit 32 = Lit 0x0
+    go o@(EVM.Types.LT (BufLength (WriteWord {})) (Lit x))
+      | x <= 32 = Lit 0x0
       | otherwise = o
     -- we write at least 32, so if x < 32, it's TRUE
-    go o@(EVM.Types.GT (BufLength (WriteWord {})) x)
-      | x < Lit 32 = Lit 0x1
+    go o@(EVM.Types.GT (BufLength (WriteWord {})) (Lit x))
+      | x < 32 = Lit 0x1
       | otherwise = o
     go o@(Sub a b)
       | a == b = Lit 0
