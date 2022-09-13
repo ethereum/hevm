@@ -83,7 +83,7 @@
           buildInputs = with pkgs.haskellPackages; [
             pkgs.z3
             pkgs.cvc4
-	    pkgs.solc
+            pkgs.solc
             cabal-install
             haskell-language-server
           ];
