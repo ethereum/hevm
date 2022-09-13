@@ -35,10 +35,8 @@ import EVM.SMT
 import EVM.Solidity
 import EVM.Expr (litAddr)
 import EVM.Types hiding (word)
---import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract)
---import EVM.UnitTest (runUnitTestContract)
---import EVM.UnitTest (getParametersFromEnvironmentVariables, testNumber)
-import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
+import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, runUnitTestContract, getParametersFromEnvironmentVariables, testNumber)
+import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp, isSymbolic)
 --import EVM.Format (showTraceTree, showTree', renderTree, showBranchInfoWithAbi, showLeafInfo)
 import EVM.RLP (rlpdecode)
 import qualified EVM.Patricia as Patricia
@@ -63,8 +61,6 @@ import Data.Text.IO               (hPutStr)
 import Data.Maybe                 (fromMaybe, fromJust)
 import Data.Version               (showVersion)
 import Data.DoubleWord            (Word256)
-import Data.SBV hiding (Word, solver, verbose, name)
-import Data.SBV.Control hiding (Version, timeout, create)
 import System.IO                  (hFlush, stdout, stderr)
 import System.Directory           (withCurrentDirectory, listDirectory)
 import System.Exit                (exitFailure, exitWith, ExitCode(..))
@@ -219,7 +215,6 @@ data Command w
     , jsonFile   :: w ::: Maybe String <?> "Filename or path to dapp build output (default: out/*.solc.json)"
     , dappRoot   :: w ::: Maybe String <?> "Path to dapp project root directory (default: . )"
     }
-  | Emacs
   | Version
   | Rlp  -- RLP decode a string and print the result
   { decode :: w ::: ByteString <?> "RLP encoded hexstring"
@@ -272,19 +267,17 @@ applyCache (state, cache) =
       stateFacts <- Git.loadFacts (Git.RepoAt statePath)
       pure $ (applyState stateFacts) . (applyCache' cacheFacts)
 
-  {-
-unitTestOptions :: Command Options.Unwrapped -> String -> Query UnitTestOptions
-unitTestOptions cmd testFile = do
+unitTestOptions :: Command Options.Unwrapped -> Maybe SolverGroup -> String -> IO UnitTestOptions
+unitTestOptions cmd solvers testFile = do
   let root = fromMaybe "." (dappRoot cmd)
-  srcInfo <- liftIO $ readSolc testFile >>= \case
+  srcInfo <- readSolc testFile >>= \case
     Nothing -> error "Could not read .sol.json file"
     Just (contractMap, sourceCache) ->
       pure $ dappInfo root contractMap sourceCache
 
-  vmModifier <- liftIO $ applyCache (state cmd, cache cmd)
+  vmModifier <- applyCache (state cmd, cache cmd)
 
-  params <- liftIO $ getParametersFromEnvironmentVariables (rpc cmd)
-  state <- queryState
+  params <- getParametersFromEnvironmentVariables (rpc cmd)
 
   let
     testn = testNumber params
@@ -295,14 +288,13 @@ unitTestOptions cmd testFile = do
   pure EVM.UnitTest.UnitTestOptions
     { EVM.UnitTest.oracle =
         case rpc cmd of
-         Just url -> EVM.Fetch.oracle (Just state) (Just (block', url)) True
-         Nothing  -> EVM.Fetch.oracle (Just state) Nothing True
+         Just url -> EVM.Fetch.oracle solvers (Just (block', url))
+         Nothing  -> EVM.Fetch.oracle solvers Nothing
     , EVM.UnitTest.maxIter = maxIterations cmd
     , EVM.UnitTest.askSmtIters = askSmtIterations cmd
     , EVM.UnitTest.smtTimeout = smttimeout cmd
     , EVM.UnitTest.solver = solver cmd
     , EVM.UnitTest.covMatch = pack <$> covMatch cmd
-    , EVM.UnitTest.smtState = Just state
     , EVM.UnitTest.verbose = verbose cmd
     , EVM.UnitTest.match = pack $ fromMaybe ".*" (match cmd)
     , EVM.UnitTest.maxDepth = depth cmd
@@ -315,7 +307,6 @@ unitTestOptions cmd testFile = do
     , EVM.UnitTest.dapp = srcInfo
     , EVM.UnitTest.ffiAllowed = ffi cmd
     }
-  -}
 
 main :: IO ()
 main = do
@@ -332,18 +323,15 @@ main = do
       print . ByteStringS $ abiencode (abi cmd) (arg cmd)
     BcTest {} ->
       launchTest cmd
-    DappTest {} -> undefined
-      {-
+    DappTest {} ->
       withCurrentDirectory root $ do
         testFile <- findJsonFile (jsonFile cmd)
-        runSMTWithTimeOut (solver cmd) (smttimeout cmd) (smtdebug cmd) $ query $ do
-          testOpts <- unitTestOptions cmd testFile
-          case (coverage cmd, optsMode cmd) of
-            (False, Run) -> dappTest testOpts testFile (cache cmd)
-            --(False, Debug) -> liftIO $ EVM.TTY.main testOpts root testFile
-            (False, JsonTrace) -> error "json traces not implemented for dappTest"
-            (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) testFile
-          -}
+        testOpts <- unitTestOptions cmd testFile
+        case (coverage cmd, optsMode cmd) of
+          (False, Run) -> dappTest testOpts testFile (cache cmd)
+          --(False, Debug) -> liftIO $ EVM.TTY.main testOpts root testFile
+          (False, JsonTrace) -> error "json traces not implemented for dappTest"
+          (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) testFile
     Compliance {} ->
       case (group cmd) of
         Just "Blockchain" -> launchScript "/run-blockchain-tests" cmd
@@ -400,14 +388,17 @@ findJsonFile Nothing = do
         , intercalate ", " xs
         ]
 
-  {-
-dappTest :: UnitTestOptions -> String -> Maybe String -> Query ()
+dappTest :: UnitTestOptions -> String -> Maybe String -> IO ()
 dappTest opts solcFile cache = do
   out <- liftIO $ readSolc solcFile
   case out of
     Just (contractMap, _) -> do
       let unitTests = findUnitTests (EVM.UnitTest.match opts) $ Map.elems contractMap
-      results <- concatMapM (runUnitTestContract opts contractMap) unitTests
+          testTypes = concatMap (fmap fst) (snd <$> unitTests)
+          hasSymbolic = any isSymbolic testTypes
+      results <- if hasSymbolic
+                 then withSolvers Z3 4 $ \s -> concatMapM (runUnitTestContract opts (Just s) contractMap) unitTests
+                 else concatMapM (runUnitTestContract opts Nothing contractMap) unitTests
       let (passing, vms) = unzip results
       case cache of
         Nothing ->
@@ -422,7 +413,6 @@ dappTest opts solcFile cache = do
       liftIO $ unless (and passing) exitFailure
     Nothing ->
       error ("Failed to read Solidity JSON for `" ++ solcFile ++ "'")
-  -}
 
 equivalence :: Command Options.Unwrapped -> IO ()
 equivalence cmd = undefined
@@ -450,23 +440,6 @@ equivalence cmd = undefined
            hPutStr stderr "Solver timeout!"
            exitFailure
       -}
-
--- cvc4 sets timeout via a commandline option instead of smtlib `(set-option)`
-runSMTWithTimeOut :: Maybe Text -> Maybe Integer -> Bool -> Symbolic a -> IO a
-runSMTWithTimeOut solver maybeTimeout smtdebug symb
-  | solver == Just "cvc4" = runwithcvc4
-  | solver == Just "z3" = runwithz3
-  | solver == Nothing = runwithz3
-  | otherwise = error "Unknown solver. Currently supported solvers; z3, cvc4"
- where timeout = fromMaybe 60000 maybeTimeout
-       runwithz3 = runSMTWith z3{SBV.verbose=smtdebug} $ (setTimeOut timeout) >> symb
-       runwithcvc4 = do
-         setEnv "SBV_CVC4_OPTIONS" ("--lang=smt --incremental --interactive --no-interactive-prompt --model-witness-value --tlimit-per=" <> show timeout)
-         a <- runSMTWith cvc4{SBV.verbose=smtdebug} symb
-         setEnv "SBV_CVC4_OPTIONS" ""
-         return a
-
-
 
 checkForVMErrors :: [EVM.VM] -> [String]
 checkForVMErrors [] = []
