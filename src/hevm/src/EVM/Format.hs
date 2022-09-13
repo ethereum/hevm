@@ -1,7 +1,7 @@
 {-# Language DataKinds #-}
 {-# Language ImplicitParams #-}
 {-# Language TemplateHaskell #-}
-module EVM.Format (formatExpr, contractNamePart, contractPathPart, showTree, showTraceTree) where
+module EVM.Format (formatExpr, contractNamePart, contractPathPart, showTree, showTraceTree, prettyvmresult, showCall) where
 
 import Prelude hiding (Word)
 import qualified EVM
@@ -357,7 +357,9 @@ contractNamePart x = Text.split (== ':') x !! 1
 contractPathPart :: Text -> Text
 contractPathPart x = Text.split (== ':') x !! 0
 
-prettyvmresult :: (?context :: DappContext) => VMResult -> String
+prettyvmresult :: (?context :: DappContext) => Expr End -> String
+prettyvmresult = undefined
+  {-
 --prettyvmresult (EVM.VMFailure (EVM.Revert ""))  = "Revert"
 prettyvmresult (EVM.VMFailure (EVM.Revert msg)) = "Revert" ++ (unpack $ showError msg)
 prettyvmresult (EVM.VMFailure (EVM.UnrecognizedOpcode 254)) = "Assertion violation"
@@ -369,6 +371,7 @@ prettyvmresult (EVM.VMSuccess (ConcreteBuf msg)) =
 prettyvmresult _ = error "TODO: sym prettyVmResult"
 --prettyvmresult (EVM.VMSuccess (SymbolicBuffer msg)) =
   --"Return: " <> show (length msg) <> " symbolic bytes"
+  -}
 
 currentSolc :: DappInfo -> VM -> Maybe SolcContract
 currentSolc dapp vm = undefined

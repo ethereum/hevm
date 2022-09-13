@@ -62,6 +62,10 @@ makeLenses ''DappContext
 instance Show Test where
   show t = unpack $ extractSig t
 
+isSymbolic :: Test -> Bool
+isSymbolic (SymbolicTest _) = True
+isSymbolic _ = False
+
 dappInfo
   :: FilePath -> Map Text SolcContract -> SourceCache -> DappInfo
 dappInfo root solcByName sources =
