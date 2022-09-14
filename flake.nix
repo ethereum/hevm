@@ -14,84 +14,80 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        dontCheck = x: y:
-          pkgs.haskell.lib.dontCheck
-            (pkgs.haskellPackages.callCabal2nix x y {});
+        secp256k1-static = pkgs.secp256k1.overrideAttrs (attrs: {
+          configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
+        });
+        hevm = with pkgs; lib.pipe (
+          haskellPackages.callCabal2nix "hevm" ./src/hevm {
+            # Haskell libs with the same names as C libs...
+            # Depend on the C libs, not the Haskell libs.
+            # These are system deps, not Cabal deps.
+            inherit secp256k1;
+          })
+          [
+            (haskell.lib.compose.addTestToolDepends [ solc z3 cvc4 ])
+            (haskell.lib.compose.appendConfigureFlags (
+              [ "--ghc-option=-O2" ]
+              ++ lib.optionals stdenv.isLinux [
+                "--enable-executable-static"
+                "--extra-lib-dirs=${gmp.override { withStatic = true; }}/lib"
+                "--extra-lib-dirs=${secp256k1-static}/lib"
+                "--extra-lib-dirs=${libff}/lib"
+                "--extra-lib-dirs=${ncurses.override { enableStatic = true; }}/lib"
+                "--extra-lib-dirs=${zlib.static}/lib"
+                "--extra-lib-dirs=${libffi.overrideAttrs (_: { dontDisableStatic = true; })}/lib"
+                "--extra-lib-dirs=${glibc}/lib"
+                "--extra-lib-dirs=${glibc.static}/lib"
+              ]))
+            haskell.lib.dontHaddock
+          ];
+        hevmWrapped = with pkgs; symlinkJoin {
+          name = "hevm";
+          paths = [ hevm ];
+          buildInputs = [ makeWrapper ];
+          postBuild = ''
+            wrapProgram $out/bin/hevm \
+              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc ])}"
+          '';
+        };
       in rec {
 
         # --- packages ----
 
-        packages = flake-utils.lib.flattenTree {
-          libsecp256k1 = pkgs.secp256k1.overrideAttrs (attrs: { configureFlags = attrs.configureFlags ++ ["--enable-static"]; });
-          libff = pkgs.callPackage (import ./nix/libff.nix) {};
-          hevm = pkgs.haskell.lib.dontHaddock ((
-            pkgs.haskellPackages.callCabal2nix "hevm" (./src/hevm) {
-              # Haskell libs with the same names as C libs...
-              # Depend on the C libs, not the Haskell libs.
-              # These are system deps, not Cabal deps.
-              inherit (pkgs) secp256k1;
-            }
-          ).overrideAttrs (attrs: {
-            preInstall = ''
-              pwd
-              ls
-            '';
-            postInstall = ''
-                wrapProgram $out/bin/hevm --prefix PATH \
-                  : "${pkgs.lib.makeBinPath (with pkgs; [bash coreutils git solc])}"
-              '';
-
-            enableSeparateDataOutput = true;
-            buildInputs = attrs.buildInputs ++ [
-              pkgs.solc
-              pkgs.z3
-              pkgs.cvc4
-            ];
-            nativeBuildInputs = attrs.nativeBuildInputs ++ [pkgs.makeWrapper];
-            configureFlags = attrs.configureFlags ++ [
-                "--ghc-option=-O2"
-                "--enable-static"
-                "--enable-executable-static"
-                "--extra-lib-dirs=${pkgs.gmp.override { withStatic = true; }}/lib"
-                "--extra-lib-dirs=${packages.libsecp256k1}/lib"
-                "--extra-lib-dirs=${packages.libff}/lib"
-                "--extra-lib-dirs=${pkgs.ncurses.override { enableStatic = true; }}/lib"
-                "--extra-lib-dirs=${pkgs.zlib.static}/lib"
-                "--extra-lib-dirs=${pkgs.libffi.overrideAttrs (old: { dontDisableStatic = true; })}/lib"
-            ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-                "--extra-lib-dirs=${pkgs.libiconv}/lib"
-                "--extra-lib-dirs=${pkgs.libiconv.override { enableStatic = true; }}/lib"
-           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-                "--extra-lib-dirs=${pkgs.glibc}/lib"
-                "--extra-lib-dirs=${pkgs.glibc.static}/lib"
-            ];
-          }));
-        };
-        defaultPackage = packages.hevm;
+        packages.hevm = hevmWrapped;
+        packages.default = hevmWrapped;
 
         # --- apps ----
 
-        apps.hevm = flake-utils.lib.mkApp { drv = packages.hevm; };
-        defaultApp = apps.hevm;
+        apps.hevm = flake-utils.lib.mkApp { drv = hevmWrapped; };
+        apps.default = apps.hevm;
 
         # --- shell ---
 
-        devShell = (pkgs.haskellPackages.shellFor {
-          packages = _: [
-            packages.hevm
-          ];
-          buildInputs = with pkgs.haskellPackages; [
-            pkgs.z3
-            pkgs.cvc4
-            pkgs.solc
-            cabal-install
-            haskell-language-server
-          ];
-          withHoogle = true;
-        }).overrideAttrs (_: {
-          LD_LIBRARY_PATH = "${pkgs.secp256k1}/lib:${packages.libff.override {enableStatic = false;}}/lib";
-          DYLD_LIBRARY_PATH = "${pkgs.secp256k1}/lib:${packages.libff.override {enableStatic = false;}}/lib";
-        });
+        devShell = with pkgs;
+          let
+            # libff is static on Linux, ghci needs dynamic
+            libff-dynamic = pkgs.libff.overrideAttrs (_: {
+              postPatch = ''substituteInPlace libff/CMakeLists.txt --replace "STATIC" "SHARED"'';
+            });
+            libraryPath = "${lib.makeLibraryPath [ libff-dynamic secp256k1 ]}";
+          in haskellPackages.shellFor {
+            packages = _: [ hevm ];
+            buildInputs = [
+              z3
+              cvc4
+	      solc
+              haskellPackages.cabal-install
+              haskellPackages.haskell-language-server
+            ];
+            withHoogle = true;
+
+            # NOTE: hacks for bugged cabal new-repl
+            LD_LIBRARY_PATH = libraryPath;
+            shellHook = lib.optionalString stdenv.isDarwin ''
+              export DYLD_LIBRARY_PATH="${libraryPath}";
+            '';
+          };
       }
     );
 }

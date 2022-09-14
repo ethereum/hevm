@@ -6,7 +6,14 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ ubuntu-latest ] # TODO: enable macos once nix-build is working there
+       os: [ ubuntu-latest, macos-latest ]
+       # we need this to map platform names as used by github to
+       # the attribute names defined in release.nix
+       include:
+         - os: ubuntu-latest
+           os_attr: linux
+         - os: macos-latest
+           os_attr: darwin
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
