@@ -32,6 +32,7 @@ import EVM.Debug
 import EVM.ABI
 import qualified EVM.Expr as Expr
 import EVM.SMT
+import qualified EVM.TTY as TTY
 import EVM.Solidity
 import EVM.Expr (litAddr)
 import EVM.Types hiding (word)
@@ -332,7 +333,7 @@ main = do
           testOpts <- unitTestOptions cmd solvers testFile
           case (coverage cmd, optsMode cmd) of
             (False, Run) -> dappTest testOpts solvers testFile (cache cmd)
-            --(False, Debug) -> liftIO $ EVM.TTY.main testOpts root testFile
+            (False, Debug) -> liftIO $ TTY.main testOpts root testFile
             (False, JsonTrace) -> error "json traces not implemented for dappTest"
             --(True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) testFile
     Compliance {} ->

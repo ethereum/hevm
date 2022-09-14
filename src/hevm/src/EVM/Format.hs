@@ -1,7 +1,7 @@
 {-# Language DataKinds #-}
 {-# Language ImplicitParams #-}
 {-# Language TemplateHaskell #-}
-module EVM.Format (formatExpr, contractNamePart, contractPathPart, showTree, showTraceTree, prettyvmresult, showCall, showWordExact) where
+module EVM.Format (formatExpr, contractNamePart, contractPathPart, showTree, showTraceTree, prettyvmresult, showCall, showWordExact, showWordExplanation) where
 
 import Prelude hiding (Word)
 import qualified EVM
@@ -60,8 +60,8 @@ showDec signed (W256 w) =
     then "MAX_UINT256"
     else Text.pack (show (i :: Integer))
 
---showWordExact :: W256 -> Text
---showWordExact = humanizeInteger w
+showWordExact :: W256 -> Text
+showWordExact w = humanizeInteger w
 
 showWordExplanation :: W256 -> DappInfo -> Text
 showWordExplanation w _ | w > 0xffffffff = showDec Unsigned w
