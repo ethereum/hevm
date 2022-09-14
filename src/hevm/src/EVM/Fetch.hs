@@ -160,13 +160,13 @@ fetchSlotFrom n url addr slot =
     (\s -> fetchSlotWithSession n url s addr slot)
 
 http :: SolverGroup -> BlockNumber -> Text -> Fetcher
-http s n url = oracle (Just s) (Just (n, url))
+http s n url = oracle s (Just (n, url))
 
 zero :: Fetcher
 zero = undefined
 
 -- smtsolving + (http or zero)
-oracle :: Maybe SolverGroup -> Maybe (BlockNumber, Text) -> Fetcher
+oracle :: SolverGroup -> Maybe (BlockNumber, Text) -> Fetcher
 oracle solvers info q = do
   case q of
     EVM.PleaseDoFFI vals continue -> case vals of
@@ -178,9 +178,8 @@ oracle solvers info q = do
 
     EVM.PleaseAskSMT branchcondition pathconditions continue -> do
          let pathconds = foldl' PAnd (PBool True) pathconditions
-             solvers' = fromMaybe (error "Internal Error: encountered SMT query, but missing solvers") solvers
          -- Is is possible to satisfy the condition?
-         continue <$> checkBranch solvers' (branchcondition .== (Lit 1)) pathconds
+         continue <$> checkBranch solvers (branchcondition .== (Lit 1)) pathconds
 
     -- if we are using a symbolic storage model,
     -- we generate a new array to the fetched contract here

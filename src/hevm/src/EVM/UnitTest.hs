@@ -378,7 +378,7 @@ coverageForUnitTestContract
 
 runUnitTestContract
   :: UnitTestOptions
-  -> Maybe SolverGroup
+  -> SolverGroup
   -> Map Text SolcContract
   -> (Text, [(Test, [AbiType])])
   -> IO [(Bool, VM)]
@@ -437,7 +437,7 @@ runUnitTestContract
           pure [(isRight r, vm) | (r, vm) <- details]
 
 
-runTest :: UnitTestOptions -> Maybe SolverGroup -> VM -> (Test, [AbiType]) -> IO (Text, Either Text Text, VM)
+runTest :: UnitTestOptions -> SolverGroup -> VM -> (Test, [AbiType]) -> IO (Text, Either Text Text, VM)
 runTest opts@UnitTestOptions{} _ vm (ConcreteTest testName, []) = liftIO $ runOne opts vm testName emptyAbi
 runTest opts@UnitTestOptions{..} _ vm (ConcreteTest testName, types) = liftIO $ case replay of
   Nothing ->

@@ -48,6 +48,7 @@ import qualified EVM.UnitTest
 
 import GHC.IO.Encoding
 import GHC.Stack
+import GHC.Conc
 import Control.Concurrent.Async   (async, waitCatch)
 import Control.Lens hiding (pre, passing)
 import Control.Monad              (void, when, forM_, unless)
@@ -267,7 +268,7 @@ applyCache (state, cache) =
       stateFacts <- Git.loadFacts (Git.RepoAt statePath)
       pure $ (applyState stateFacts) . (applyCache' cacheFacts)
 
-unitTestOptions :: Command Options.Unwrapped -> Maybe SolverGroup -> String -> IO UnitTestOptions
+unitTestOptions :: Command Options.Unwrapped -> SolverGroup -> String -> IO UnitTestOptions
 unitTestOptions cmd solvers testFile = do
   let root = fromMaybe "." (dappRoot cmd)
   srcInfo <- readSolc testFile >>= \case
@@ -325,13 +326,15 @@ main = do
       launchTest cmd
     DappTest {} ->
       withCurrentDirectory root $ do
-        testFile <- findJsonFile (jsonFile cmd)
-        testOpts <- unitTestOptions cmd testFile
-        case (coverage cmd, optsMode cmd) of
-          (False, Run) -> dappTest testOpts testFile (cache cmd)
-          --(False, Debug) -> liftIO $ EVM.TTY.main testOpts root testFile
-          (False, JsonTrace) -> error "json traces not implemented for dappTest"
-          (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) testFile
+        cores <- num <$> getNumProcessors
+        withSolvers Z3 cores $ \solvers -> do
+          testFile <- findJsonFile (jsonFile cmd)
+          testOpts <- unitTestOptions cmd solvers testFile
+          case (coverage cmd, optsMode cmd) of
+            (False, Run) -> dappTest testOpts solvers testFile (cache cmd)
+            --(False, Debug) -> liftIO $ EVM.TTY.main testOpts root testFile
+            (False, JsonTrace) -> error "json traces not implemented for dappTest"
+            --(True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) testFile
     Compliance {} ->
       case (group cmd) of
         Just "Blockchain" -> launchScript "/run-blockchain-tests" cmd
@@ -388,17 +391,13 @@ findJsonFile Nothing = do
         , intercalate ", " xs
         ]
 
-dappTest :: UnitTestOptions -> String -> Maybe String -> IO ()
-dappTest opts solcFile cache = do
+dappTest :: UnitTestOptions -> SolverGroup -> String -> Maybe String -> IO ()
+dappTest opts solvers solcFile cache = do
   out <- liftIO $ readSolc solcFile
   case out of
     Just (contractMap, _) -> do
       let unitTests = findUnitTests (EVM.UnitTest.match opts) $ Map.elems contractMap
-          testTypes = concatMap (fmap fst) (snd <$> unitTests)
-          hasSymbolic = any isSymbolic testTypes
-      results <- if hasSymbolic
-                 then withSolvers Z3 4 $ \s -> concatMapM (runUnitTestContract opts (Just s) contractMap) unitTests
-                 else concatMapM (runUnitTestContract opts Nothing contractMap) unitTests
+      results <- concatMapM (runUnitTestContract opts solvers contractMap) unitTests
       let (passing, vms) = unzip results
       case cache of
         Nothing ->
