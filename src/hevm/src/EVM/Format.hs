@@ -1,7 +1,7 @@
 {-# Language DataKinds #-}
 {-# Language ImplicitParams #-}
 {-# Language TemplateHaskell #-}
-module EVM.Format (formatExpr, contractNamePart, contractPathPart, showTree, showTraceTree, prettyvmresult, showCall) where
+module EVM.Format (formatExpr, contractNamePart, contractPathPart, showTree, showTraceTree, prettyvmresult, showCall, showWordExact) where
 
 import Prelude hiding (Word)
 import qualified EVM

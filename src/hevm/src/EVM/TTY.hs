@@ -10,7 +10,7 @@ import Brick.Widgets.Border
 import Brick.Widgets.Center
 import Brick.Widgets.List
 
-import EVM
+import EVM hiding (Revert)
 import EVM.ABI (abiTypeSolidity, decodeAbiValue, AbiType(..), emptyAbi)
 import EVM.SymExec (maxIterationsReached, symCalldata)
 import EVM.Dapp (DappInfo, dappInfo, Test, extractSig, Test(..), srcMap)
@@ -56,8 +56,6 @@ import qualified System.Console.Haskeline as Readline
 import qualified EVM.TTYCenteredList as Centered
 
 import qualified Paths_hevm as Paths
-
-  {-
 
 data Name
   = AbiPane
@@ -238,7 +236,6 @@ runFromVM maxIter' dappinfo oracle' vm = do
       , maxIter       = maxIter'
       , askSmtIters   = Nothing
       , smtTimeout    = Nothing
-      , smtState      = Nothing
       , solver        = Nothing
       , maxDepth      = Nothing
       , match         = ""
@@ -623,9 +620,8 @@ initialUiVmStateForTest
   -> (Text, Text)
   -> IO UiVmState
 initialUiVmStateForTest opts@UnitTestOptions{..} (theContractName, theTestName) = do
-  let state' = fromMaybe (error "Internal Error: missing smtState") smtState
-  (buf, len) <- case test of
-    SymbolicTest _ -> flip runReaderT state' $ SBV.runQueryT $ symCalldata theTestName types []
+  (cd, cdProps) <- case test of
+    SymbolicTest _ -> symCalldata theTestName types []
     _ -> return (error "unreachable", error "unreachable")
   let script = do
         Stepper.evm . pushTrace . EntryTrace $
@@ -761,8 +757,8 @@ drawVmBrowser ui =
               ]
       ]
   ]
-  where storageDisplay (Concrete s) = pack ( show ( Map.toList s))
-        storageDisplay (Symbolic v _) = pack $ show v
+  where storageDisplay (ConcreteStore s) = pack ( show ( Map.toList s))
+        storageDisplay (v) = pack $ show v
         dapp' = dapp (view (browserVm . uiTestOpts) ui)
         Just (_, (_, c)) = listSelectedElement (view browserContractList ui)
 --        currentContract  = view (dappSolcByHash . ix ) dapp
@@ -882,7 +878,7 @@ drawStackPane ui =
     stackList = list StackPane (Vec.fromList $ zip [(1 :: Int)..] (view (uiVm . state . stack) ui)) 2
   in hBorderWithLabel labelText <=>
     renderList
-      (\_ (i, x@(S _ w)) ->
+      (\_ (i, w) ->
          vBox
            [ withHighlight True (str ("#" ++ show i ++ " "))
                <+> str (show x)
@@ -896,9 +892,9 @@ drawStackPane ui =
 message :: VM -> String
 message vm =
   case view result vm of
-    Just (VMSuccess (ConcreteBuffer msg)) ->
+    Just (VMSuccess (ConcreteBuf msg)) ->
       "VMSuccess: " <> (show $ ByteStringS msg)
-    Just (VMSuccess (SymbolicBuffer msg)) ->
+    Just (VMSuccess (msg)) ->
       "VMSuccess: <symbolicbuffer> " <> (show msg)
     Just (VMFailure (Revert msg)) ->
       "VMFailure: " <> (show . ByteStringS $ msg)
@@ -932,9 +928,9 @@ withHighlight :: Bool -> Widget n -> Widget n
 withHighlight False = withDefAttr dimAttr
 withHighlight True  = withDefAttr boldAttr
 
-prettyIfConcrete :: Buffer -> String
-prettyIfConcrete (SymbolicBuffer x) = show x
-prettyIfConcrete (ConcreteBuffer x) = prettyHex 40 x
+prettyIfConcrete :: Expr Buf -> String
+prettyIfConcrete (ConcreteBuf x) = prettyHex 40 x
+prettyIfConcrete x = show x
 
 drawTracePane :: UiVmState -> UiWidget
 drawTracePane s =
@@ -1047,4 +1043,3 @@ dimAttr :: AttrName; dimAttr = "dim"
 wordAttr :: AttrName; wordAttr = "word"
 boldAttr :: AttrName; boldAttr = "bold"
 activeAttr :: AttrName; activeAttr = "active"
--}
