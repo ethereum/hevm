@@ -76,6 +76,7 @@
             buildInputs = [
               z3
               cvc4
+              solc
               haskellPackages.cabal-install
               haskellPackages.haskell-language-server
             ];
