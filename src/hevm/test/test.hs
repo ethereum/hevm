@@ -418,7 +418,6 @@ tests = testGroup "hevm"
              }
             |]
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
-          putStrLn $ formatExpr res
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "Deposit contract loop (cvc4)" $ do
@@ -441,7 +440,6 @@ tests = testGroup "hevm"
              }
             |]
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
-          putStrLn $ formatExpr res
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "Deposit contract loop (error version)" $ do
