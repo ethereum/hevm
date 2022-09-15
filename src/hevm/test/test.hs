@@ -442,7 +442,7 @@ tests = testGroup "hevm"
         --     |]
         --   [Qed res] <- withSolvers CVC5 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
         --   putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        ,
+        -- ,
         testCase "Deposit contract loop (error version)" $ do
           Just c <- solcRuntime "Deposit"
             [i|
