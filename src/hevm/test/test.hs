@@ -412,7 +412,7 @@ tests = testGroup "hevm"
                     break;
                   }
                  deposit_count = deposit_count >> 1;
-                }
+                 }
                 assert(found);
               }
              }
