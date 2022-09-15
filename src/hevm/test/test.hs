@@ -462,7 +462,6 @@ tests = testGroup "hevm"
              }
             |]
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
-          putStrLn $ formatExpr res
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
           {-bs <- runSMT $ query $ do
             (Cex, -) <- checkAssert allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
