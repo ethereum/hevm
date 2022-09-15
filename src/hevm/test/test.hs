@@ -372,7 +372,7 @@ tests = testGroup "hevm"
           [Cex _, Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
           putStrLn "expected 2 counterexamples found"
         ,
-        expectFail $ testCase "assert-fail-notequal" $ do
+        testCase "assert-fail-notequal" $ do
           Just c <- solcRuntime "AssertFailNotEqual"
             [i|
             contract AssertFailNotEqual {
