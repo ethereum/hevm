@@ -464,9 +464,10 @@ tests = testGroup "hevm"
             |]
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-          {-bs <- runSMT $ query $ do
-            (Cex, -) <- checkAssert allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
-              case view (state . calldata . _1) vm of
+          {-
+          bs <- runSMT $ query $ do
+            (Cex _, vm) <- checkAssert allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
+            case view (state . calldata . _1) vm of
               SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
               ConcreteBuffer _ -> error "unexpected"
 
