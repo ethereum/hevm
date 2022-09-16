@@ -210,6 +210,126 @@ tests = testGroup "hevm"
                               (r, mempty), (s, mempty), (t, mempty)]
        === (Just $ Patricia.Literal Patricia.Empty)
     ]
+ , testGroup "Panic code tests via symbolic execution"
+  [
+     testCase "assert-fail" $ do
+       Just c <- solcRuntime "MyContract"
+           [i|
+           contract MyContract {
+             function fun(uint256 a) external pure {
+               assert(a != 0);
+             }
+            }
+           |]
+       [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) []
+       putStrLn "expected counterexample found"
+     ,
+     testCase "safeAdd-fail" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 a, uint256 b) external pure returns (uint256 c) {
+               c = a+b;
+              }
+             }
+            |]
+        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x11] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+        putStrLn "expected counterexample found"
+     ,
+     testCase "div-by-zero-fail" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 a, uint256 b) external pure returns (uint256 c) {
+               c = a/b;
+              }
+             }
+            |]
+        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x12] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+        putStrLn "expected counterexample found"
+     ,
+     testCase "enum-conversion-fail" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              enum MyEnum { ONE, TWO }
+              function fun(uint256 a) external pure returns (MyEnum b) {
+                b = MyEnum(a);
+              }
+             }
+            |]
+        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x21] c (Just ("fun(uint256)", [AbiUIntType 256])) []
+        putStrLn "expected counterexample found"
+     ,
+     -- TODO 0x22 is missing: "0x22: If you access a storage byte array that is incorrectly encoded."
+     -- TODO below should NOT fail
+     expectFail $ testCase "pop-empty-array" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              uint[] private arr;
+              function fun(uint8 a) external {
+                arr.push(1);
+                arr.push(2);
+                for (uint i = 0; i < a; i++) {
+                  arr.pop();
+                }
+              }
+             }
+            |]
+        a <- withSolvers Z3 1 $ \s -> checkAssert s [0x31] c (Just ("fun(uint8)", [AbiUIntType 8])) []
+        print $ length a
+        print $ show a
+        putStrLn "expected counterexample found"
+     ,
+     testCase "access-out-of-bounds-array" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              uint[] private arr;
+              function fun(uint8 a) external returns (uint x){
+                arr.push(1);
+                arr.push(2);
+                x = arr[a];
+              }
+             }
+            |]
+        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) []
+        putStrLn "expected counterexample found"
+      ,
+      -- TODO the system currently does not allow for symbolic array size allocation
+      expectFail $ testCase "alloc-too-much" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 a) external {
+                uint[] memory arr = new uint[](a);
+              }
+             }
+            |]
+        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x41] c (Just ("fun(uint256)", [AbiUIntType 256])) []
+        putStrLn "expected counterexample found"
+      ,
+      -- TODO the system currently does not allow for symbolic JUMP
+      expectFail $ testCase "call-zero-inited-var-thats-a-function" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function (uint256) internal returns (uint) funvar;
+              function fun2(uint256 a) internal returns (uint){
+                return a;
+              }
+              function fun(uint256 a) external returns (uint) {
+                if (a == 0) {
+                  funvar = fun2;
+                }
+                return funvar(a);
+              }
+             }
+            |]
+        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x51] c (Just ("funn(uint256)", [AbiUIntType 256])) []
+        putStrLn "expected counterexample found"
+ ]
 
   , testGroup "Symbolic execution"
       [
