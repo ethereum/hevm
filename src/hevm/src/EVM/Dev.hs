@@ -22,10 +22,56 @@ import EVM.Types
 import EVM.Expr (numBranches)
 import EVM.SymExec
 import EVM.Solidity
+import EVM.UnitTest
 import EVM.Format (formatExpr)
+import EVM.Dapp (dappInfo)
+import GHC.Conc
+import qualified Data.ByteString.Lazy  as Lazy
 import qualified Data.ByteString.Base16 as BS16
 import qualified EVM.Fetch as Fetch
 import qualified EVM.FeeSchedule as FeeSchedule
+
+runDappTest :: FilePath -> IO ()
+runDappTest root =
+  withCurrentDirectory root $ do
+    cores <- num <$> getNumProcessors
+    let testFile = root <> "/out/dapp.sol.json"
+    withSolvers Z3 cores $ \solvers -> do
+      opts <- testOpts solvers root testFile
+      dappTest opts solvers testFile Nothing
+
+testOpts :: SolverGroup -> FilePath -> FilePath -> IO UnitTestOptions
+testOpts solvers root testFile = do
+  srcInfo <- readSolc testFile >>= \case
+    Nothing -> error "Could not read .sol.json file"
+    Just (contractMap, sourceCache) ->
+      pure $ dappInfo root contractMap sourceCache
+
+  params <- getParametersFromEnvironmentVariables Nothing
+
+  let
+    testn = testNumber params
+    block' = if 0 == testn
+       then Fetch.Latest
+       else Fetch.BlockNumber testn
+
+  pure EVM.UnitTest.UnitTestOptions
+    { EVM.UnitTest.oracle = Fetch.oracle solvers Nothing
+    , EVM.UnitTest.maxIter = Nothing
+    , EVM.UnitTest.askSmtIters = Nothing
+    , EVM.UnitTest.smtTimeout = Nothing
+    , EVM.UnitTest.solver = Nothing
+    , EVM.UnitTest.covMatch = Nothing
+    , EVM.UnitTest.verbose = Nothing
+    , EVM.UnitTest.match = ".*"
+    , EVM.UnitTest.maxDepth = Nothing
+    , EVM.UnitTest.fuzzRuns = 100
+    , EVM.UnitTest.replay = Nothing
+    , EVM.UnitTest.vmModifier = id
+    , EVM.UnitTest.testParams = params
+    , EVM.UnitTest.dapp = srcInfo
+    , EVM.UnitTest.ffiAllowed = True
+    }
 
 dumpQueries :: FilePath -> IO ()
 dumpQueries root = withCurrentDirectory root $ do

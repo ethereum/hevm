@@ -36,7 +36,7 @@ import qualified EVM.TTY as TTY
 import EVM.Solidity
 import EVM.Expr (litAddr)
 import EVM.Types hiding (word)
-import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, runUnitTestContract, getParametersFromEnvironmentVariables, testNumber)
+import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, runUnitTestContract, getParametersFromEnvironmentVariables, testNumber, dappTest)
 import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp, isSymbolic)
 --import EVM.Format (showTraceTree, showTree', renderTree, showBranchInfoWithAbi, showLeafInfo)
 import EVM.RLP (rlpdecode)
@@ -391,28 +391,6 @@ findJsonFile Nothing = do
         , "Files found: "
         , intercalate ", " xs
         ]
-
-dappTest :: UnitTestOptions -> SolverGroup -> String -> Maybe String -> IO ()
-dappTest opts solvers solcFile cache = do
-  out <- liftIO $ readSolc solcFile
-  case out of
-    Just (contractMap, _) -> do
-      let unitTests = findUnitTests (EVM.UnitTest.match opts) $ Map.elems contractMap
-      results <- concatMapM (runUnitTestContract opts solvers contractMap) unitTests
-      let (passing, vms) = unzip results
-      case cache of
-        Nothing ->
-          pure ()
-        Just path ->
-          -- merge all of the post-vm caches and save into the state
-          let
-            cache' = mconcat [view EVM.cache vm | vm <- vms]
-          in
-            liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts cache')
-
-      liftIO $ unless (and passing) exitFailure
-    Nothing ->
-      error ("Failed to read Solidity JSON for `" ++ solcFile ++ "'")
 
 equivalence :: Command Options.Unwrapped -> IO ()
 equivalence cmd = undefined

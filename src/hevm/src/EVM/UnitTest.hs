@@ -20,6 +20,8 @@ import EVM.SymExec
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.RLP
+import qualified EVM.Facts     as Facts
+import qualified EVM.Facts.Git as Git
 import qualified EVM.Fetch
 
 import qualified EVM.FeeSchedule as FeeSchedule
@@ -48,6 +50,7 @@ import Data.Word          (Word8, Word32)
 import Data.Text.Encoding (encodeUtf8)
 import System.Environment (lookupEnv)
 import System.IO          (hFlush, stdout)
+import System.Exit        (exitFailure)
 
 import qualified Control.Monad.Par.Class as Par
 import qualified Data.ByteString as BS
@@ -117,6 +120,30 @@ defaultMaxCodeSize :: W256
 defaultMaxCodeSize = 0xffffffff
 
 type ABIMethod = Text
+
+-- | Top level CLI endpoint for dapp-test
+dappTest :: UnitTestOptions -> SolverGroup -> String -> Maybe String -> IO ()
+dappTest opts solvers solcFile cache = do
+  out <- liftIO $ readSolc solcFile
+  case out of
+    Just (contractMap, _) -> do
+      let unitTests = findUnitTests (EVM.UnitTest.match opts) $ Map.elems contractMap
+      results <- concatMapM (runUnitTestContract opts solvers contractMap) unitTests
+      let (passing, vms) = unzip results
+      case cache of
+        Nothing ->
+          pure ()
+        Just path ->
+          -- merge all of the post-vm caches and save into the state
+          let
+            cache' = mconcat [view EVM.cache vm | vm <- vms]
+          in
+            liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts cache')
+
+      liftIO $ unless (and passing) exitFailure
+    Nothing ->
+      error ("Failed to read Solidity JSON for `" ++ solcFile ++ "'")
+
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
 -- to create the test contract, give it an initial balance, and run `setUp()'.
