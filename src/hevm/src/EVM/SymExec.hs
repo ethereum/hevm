@@ -480,28 +480,28 @@ evalProp = \case
               (PBool b) -> PBool (not b)
               _ -> o
   o@(PEq l r) -> if l == r
-             then PBool True
-             else o
-  o@(PLT l r) -> if l < r
-             then PBool True
-             else o
-  o@(PGT l r) -> if l > r
-             then PBool True
-             else o
-  o@(PGEq l r) -> if l >= r
-             then PBool True
-             else o
-  o@(PLEq l r) -> if l <= r
-             then PBool True
-             else o
+                 then PBool True
+                 else o
+  o@(PLT (Lit l) (Lit r)) -> if l < r
+                             then PBool True
+                             else o
+  o@(PGT (Lit l) (Lit r)) -> if l > r
+                             then PBool True
+                             else o
+  o@(PGEq (Lit l) (Lit r)) -> if l >= r
+                              then PBool True
+                              else o
+  o@(PLEq (Lit l) (Lit r)) -> if l <= r
+                              then PBool True
+                              else o
   o@(PAnd l r) -> case (evalProp l, evalProp r) of
-                (PBool True, PBool True) -> PBool True
-                (PBool _, PBool _) -> PBool False
-                _ -> o
+                    (PBool True, PBool True) -> PBool True
+                    (PBool _, PBool _) -> PBool False
+                    _ -> o
   o@(POr l r) -> case (evalProp l, evalProp r) of
-                (PBool False, PBool False) -> PBool False
-                (PBool _, PBool _) -> PBool True
-                _ -> o
+                   (PBool False, PBool False) -> PBool False
+                   (PBool _, PBool _) -> PBool True
+                   _ -> o
 
 
 -- | Symbolically execute the VM and check all endstates against the postcondition, if available.
