@@ -5,7 +5,6 @@
 {-# Language TypeApplications #-}
 {-# Language LambdaCase #-}
 {-# Language QuasiQuotes #-}
-{-# Language DeriveAnyClass #-}
 
 {- |
     Module: EVM.SMT
@@ -48,18 +47,35 @@ data CexVars = CexVars
   , blockContextV :: [Text]
   , txContextV :: [Text]
   }
-  deriving (Eq, Show, Semigroup, Monoid)
+  deriving (Eq, Show)
+
+instance Semigroup CexVars where
+  (CexVars a b c d) <> (CexVars a2 b2 c2 d2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2)
+
+instance Monoid CexVars where
+    mempty = CexVars
+      { calldataV = mempty
+      , storageV = mempty
+      , blockContextV = mempty
+      , txContextV = mempty
+      }
 
 data SMTCex = SMTCex
-  { calldata :: Text
+  { calldata :: Map Text Text
   , storage :: Text
   , blockContext :: Map Text Text
   , txContext :: Map Text Text
   }
-  deriving (Eq, Show, Semigroup, Monoid)
+  deriving (Eq, Show)
 
 data SMT2 = SMT2 [Text] CexVars
-  deriving (Eq, Show, Semigroup, Monoid)
+  deriving (Eq, Show)
+
+instance Semigroup SMT2 where
+  (SMT2 a b) <> (SMT2 a2 b2) = SMT2 (a <> a2) (b <> b2)
+
+instance Monoid SMT2 where
+  mempty = SMT2 mempty mempty
 
 formatSMT2 :: SMT2 -> Text
 formatSMT2 (SMT2 ls _) = T.unlines ls
@@ -621,13 +637,12 @@ newtype SolverGroup = SolverGroup (Chan Task)
 -- | A script to be executed, a list of models to be extracted in the case of a sat result, and a channel where the result should be written
 data Task = Task
   { script :: SMT2
-  , models :: [Text]
   , resultChan :: Chan CheckSatResult
   }
 
 -- | The result of a call to (check-sat)
 data CheckSatResult
-  = Sat [Text]
+  = Sat SMTCex
   | Unsat
   | Unknown
   | Error Text
@@ -645,22 +660,22 @@ isUnsat :: CheckSatResult -> Bool
 isUnsat Unsat = True
 isUnsat _ = False
 
-checkSat' :: SolverGroup -> (SMT2, [Text]) -> IO (CheckSatResult)
-checkSat' a b = do
-  snd . head <$> checkSat a [b]
+checkSat' :: SolverGroup -> SMT2 -> IO (CheckSatResult)
+checkSat' solvers smt = do
+  snd . head <$> checkSat solvers [smt]
 
-checkSat :: SolverGroup -> [(SMT2, [Text])] -> IO [(SMT2, CheckSatResult)]
+checkSat :: SolverGroup -> [SMT2] -> IO [(SMT2, CheckSatResult)]
 checkSat (SolverGroup taskQueue) scripts = do
   -- prepare tasks
-  tasks <- forM scripts $ \(s, ms) -> do
+  tasks <- forM scripts $ \s -> do
     res <- newChan
-    pure $ Task s ms res
+    pure $ Task s res
 
   -- send tasks to solver group
   forM_ tasks (writeChan taskQueue)
 
   -- collect results
-  forM tasks $ \(Task s _ r) -> do
+  forM tasks $ \(Task s r) -> do
     res <- readChan r
     pure (s, res)
 
@@ -690,7 +705,7 @@ withSolvers solver count cont = do
       _ <- forkIO $ runTask task inst avail
       orchestrate queue avail
 
-    runTask (Task s@(SMT2 cmds cexvars) ms r) inst availableInstances = do
+    runTask (Task s@(SMT2 cmds cexvars) r) inst availableInstances = do
       -- reset solver and send all lines of provided script
       out <- sendScript inst (SMT2 ("(reset)" : cmds) cexvars)
       case out of
@@ -701,9 +716,16 @@ withSolvers solver count cont = do
           sat <- sendLine inst "(check-sat)"
           res <- case sat of
             "sat" -> do
-              models <- forM ms $ \m -> do
-                getValue inst m
-              pure $ Sat models
+              calldatamodels <- foldM (\a n -> do
+                                         v <- getValue inst n
+                                         pure $ Map.insert n v a)
+                              mempty (calldataV cexvars)
+              pure $ Sat $ SMTCex
+                { calldata = calldatamodels
+                , storage = mempty
+                , blockContext = mempty
+                , txContext = mempty
+                }
             "unsat" -> pure Unsat
             "timeout" -> pure Unknown
             "unknown" -> pure Unknown

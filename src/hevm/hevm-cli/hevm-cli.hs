@@ -31,7 +31,7 @@ import EVM.SymExec
 import EVM.Debug
 import EVM.ABI
 import qualified EVM.Expr as Expr
-import EVM.SMT
+import EVM.SMT hiding (calldata)
 import EVM.Solidity
 import EVM.Expr (litAddr)
 import EVM.Types hiding (word)

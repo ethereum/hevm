@@ -46,7 +46,7 @@ import EVM.Precompiled
 import EVM.RLP
 import EVM.Solidity
 import EVM.Types
-import EVM.SMT
+import EVM.SMT hiding (storage, calldata)
 import qualified Data.ByteString.Base16 as BS16
 import qualified EVM.Expr as Expr
 
@@ -382,8 +382,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex _, Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
-          putStrLn "expected 2 counterexamples found"
+          [Cex a, Cex b] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
+          putStrLn $ "expected 2 counterexamples found:" <> show a <> "," <> show b
         ,
         expectFail $ testCase "assert-fail-twoargs" $ do
           Just c <- solcRuntime "AssertFailTwoParams"
