@@ -340,9 +340,6 @@ simplify e = if (mapExpr go e == e)
     go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
 
     -- simplify buffers
-    go o@(ReadWord off1 (WriteWord off2 x _))
-      | off1 == off2 = x
-      | otherwise = o
     go o@(ReadWord (Lit _) _) = Expr.simplifyReads o
     go o@(ReadByte (Lit _) _) = Expr.simplifyReads o
 
