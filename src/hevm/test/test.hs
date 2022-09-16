@@ -320,14 +320,14 @@ tests = testGroup "hevm"
                 return a;
               }
               function fun(uint256 a) external returns (uint) {
-                if (a == 0) {
+                if (a != 44) {
                   funvar = fun2;
                 }
                 return funvar(a);
               }
              }
             |]
-        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x51] c (Just ("funn(uint256)", [AbiUIntType 256])) []
+        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x51] c (Just ("fun(uint256)", [AbiUIntType 256])) []
         putStrLn "expected counterexample found"
  ]
 
