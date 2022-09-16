@@ -263,7 +263,7 @@ tests = testGroup "hevm"
      ,
      -- TODO 0x22 is missing: "0x22: If you access a storage byte array that is incorrectly encoded."
      -- TODO below should NOT fail
-     expectFail $ testCase "pop-empty-array" $ do
+     testCase "pop-empty-array" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
