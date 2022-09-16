@@ -419,30 +419,32 @@ tests = testGroup "hevm"
             |]
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        {-
         ,
         -- TODO: CVC5 is not installed by nix, disabling
-        -- testCase "Deposit contract loop (cvc5)" $ do
-        --   Just c <- solcRuntime "Deposit"
-        --     [i|
-        --     contract Deposit {
-        --       function deposit(uint256 deposit_count) external pure {
-        --         require(deposit_count < 2**32 - 1);
-        --         ++deposit_count;
-        --         bool found = false;
-        --         for (uint height = 0; height < 32; height++) {
-        --           if ((deposit_count & 1) == 1) {
-        --             found = true;
-        --             break;
-        --           }
-        --          deposit_count = deposit_count >> 1;
-        --          }
-        --         assert(found);
-        --       }
-        --      }
-        --     |]
-        --   [Qed res] <- withSolvers CVC5 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
-        --   putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        -- ,
+        testCase "Deposit contract loop (cvc5)" $ do
+          Just c <- solcRuntime "Deposit"
+            [i|
+            contract Deposit {
+              function deposit(uint256 deposit_count) external pure {
+                require(deposit_count < 2**32 - 1);
+                ++deposit_count;
+                bool found = false;
+                for (uint height = 0; height < 32; height++) {
+                  if ((deposit_count & 1) == 1) {
+                    found = true;
+                    break;
+                  }
+                 deposit_count = deposit_count >> 1;
+                 }
+                assert(found);
+              }
+             }
+            |]
+          [Qed res] <- withSolvers CVC5 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
+        -- TODO: this is supposed to return a Cex but instead returns a Qed
         testCase "Deposit contract loop (error version)" $ do
           Just c <- solcRuntime "Deposit"
             [i|
@@ -462,9 +464,6 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
-          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-          {-
           bs <- runSMT $ query $ do
             (Cex _, vm) <- checkAssert allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
             case view (state . calldata . _1) vm of
