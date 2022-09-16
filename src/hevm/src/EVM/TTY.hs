@@ -719,7 +719,7 @@ drawVmBrowser ui =
               (\selected (k, c') ->
                  withHighlight selected . txt . mconcat $
                    [ fromMaybe "<unknown contract>" . flip preview dapp' $
-                       ( dappSolcByHash . ix (maybeHash c)
+                       ( dappSolcByHash . ix (maybeHash c')
                        . _2 . contractName )
                    , "\n"
                    , "  ", pack (show k)
