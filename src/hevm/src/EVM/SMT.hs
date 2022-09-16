@@ -207,7 +207,7 @@ prelude = SMT2 . fmap (T.drop 2) . T.lines $ [i|
 
   (define-fun writeWord ((idx Word) (val Word) (buf Buf)) Buf
       (store (store (store (store (store (store (store (store (store (store (store (store (store (store (store (store (store
-      (store (store (store (store (store (store (store (store (store (store (store (store (store (store (store (store (store buf
+      (store (store (store (store (store (store (store (store (store (store (store (store (store (store (store buf
       (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001f) (indexWord31 val))
       (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001e) (indexWord30 val))
       (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001d) (indexWord29 val))
@@ -235,11 +235,9 @@ prelude = SMT2 . fmap (T.drop 2) . T.lines $ [i|
       (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000007) (indexWord7 val))
       (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000006) (indexWord6 val))
       (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000005) (indexWord5 val))
-      (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000005) (indexWord5 val))
       (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000004) (indexWord4 val))
       (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000003) (indexWord3 val))
       (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000002) (indexWord2 val))
-      (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000001) (indexWord1 val))
       (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000001) (indexWord1 val))
       idx (indexWord0 val))
   )
