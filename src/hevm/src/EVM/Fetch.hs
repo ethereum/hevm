@@ -8,7 +8,7 @@ module EVM.Fetch where
 import Prelude hiding (Word)
 
 import EVM.ABI
-import EVM.Types    (Addr, W256, hexText, Expr(Lit, LitByte), Expr(..), Prop(..), (.&&), (.==))
+import EVM.Types    (Addr, W256, hexText, Expr(Lit, LitByte), Expr(..), Prop(..), (.&&), (.==), (./=))
 import EVM.SMT
 import EVM          (EVM, Contract, Block, initialContract, nonce, balance, external)
 import qualified EVM.FeeSchedule as FeeSchedule
@@ -179,7 +179,7 @@ oracle solvers info q = do
     EVM.PleaseAskSMT branchcondition pathconditions continue -> do
          let pathconds = foldl' PAnd (PBool True) pathconditions
          -- Is is possible to satisfy the condition?
-         continue <$> checkBranch solvers (branchcondition .== (Lit 1)) pathconds
+         continue <$> checkBranch solvers (branchcondition ./= (Lit 0)) pathconds
 
     -- if we are using a symbolic storage model,
     -- we generate a new array to the fetched contract here

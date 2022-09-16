@@ -1070,7 +1070,7 @@ exec1 = do
                       jump False = assign (state . stack) xs >> next
                       jump _    = checkJump x' xs
                   in case maybeLitWord y of
-                      Just y' -> jump (1 == y')
+                      Just y' -> jump (0 /= y')
                       -- if the jump condition is symbolic, we explore both sides
                       Nothing -> do
                         loc <- codeloc
@@ -1622,7 +1622,7 @@ branch loc cond continue = do
   assign result . Just . VMFailure . Query $ PleaseAskSMT cond pathconds choosePath
   where
      choosePath (Case v) = do assign result Nothing
-                              pushTo constraints $ if v then (cond .== (Lit 1)) else (cond .== (Lit 0))
+                              pushTo constraints $ if v then (cond ./= (Lit 0)) else (cond .== (Lit 0))
                               iteration <- use (iterations . at loc . non 0)
                               assign (cache . path . at (loc, iteration)) (Just v)
                               assign (iterations . at loc) (Just (iteration + 1))
