@@ -167,7 +167,7 @@ loadSymVM x initStore addr callvalue' calldata' =
     , vmoptAllowFFI = False
     }) & set (env . contracts . at (createAddress ethrunAddress 1))
              (Just (initialContract x))
-       & set (env . storage) initStore
+       & set (env . EVM.storage) initStore
 
 doInterpret :: Fetch.Fetcher -> Maybe Integer -> Maybe Integer -> VM -> Expr End
 doInterpret fetcher maxIter askSmtIters vm = undefined
@@ -305,7 +305,7 @@ runExpr = do
   vm <- Stepper.runFully
   pure $ case view result vm of
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
-    Just (VMSuccess buf) -> Return buf (view (env . storage) vm)
+    Just (VMSuccess buf) -> Return buf (view (env . EVM.storage) vm)
     Just (VMFailure e) -> case e of
       UnrecognizedOpcode _ -> Invalid
       SelfDestruction -> SelfDestruct

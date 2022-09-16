@@ -5,6 +5,7 @@
 {-# Language TypeApplications #-}
 {-# Language LambdaCase #-}
 {-# Language QuasiQuotes #-}
+{-# Language DeriveAnyClass #-}
 
 {- |
     Module: EVM.SMT
@@ -39,13 +40,29 @@ import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
 
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
+-- variable names in SMT that we want to get values for to
+--    reproduce the
+data CexVars = CexVars
+  { calldataV :: [Text]
+  , storageV :: Text
+  , blockContextV :: [Text]
+  , txContextV :: [Text]
+  }
+  deriving (Eq, Show, Semigroup, Monoid)
 
+data SMTCex = SMTCex
+  { calldata :: Text
+  , storage :: Text
+  , blockContext :: Map Text Text
+  , txContext :: Map Text Text
+  }
+  deriving (Eq, Show, Semigroup, Monoid)
 
-newtype SMT2 = SMT2 [Text]
+data SMT2 = SMT2 [Text] CexVars
   deriving (Eq, Show, Semigroup, Monoid)
 
 formatSMT2 :: SMT2 -> Text
-formatSMT2 (SMT2 ls) = T.unlines ls
+formatSMT2 (SMT2 ls _) = T.unlines ls
 
 -- | Reads all intermediate variables from the builder state and produces SMT declaring them as constants
 declareIntermediates :: State BuilderState SMT2
@@ -57,33 +74,9 @@ declareIntermediates = do
     pure $ "(define-const buf" <> (T.pack . show $ n) <> " Buf " <> enc <> ")"
   declSs <- forM ss $ \(_, (n, enc)) -> do
     pure $ "(define-const store" <> (T.pack . show $ n) <> " Storage " <> enc <> ")"
-  pure $ SMT2 $ ["; buffers"] <> declBs <> ["", "; stores"] <> declSs
+  pure $ SMT2 (["; intermediate buffers"] <> declBs <> ["", "; intermediate stores"] <> declSs) mempty
   where
     sortPred (_, (a, _)) (_, (b, _)) = compare a b
-
-assertWord :: Expr EWord -> SMT2
-assertWord e = flip evalState initState $ do
-  enc <- exprToSMT e
-  intermediates <- declareIntermediates
-  pure $ prelude
-      <> (declareVars $ referencedVars e)
-      <> SMT2 [""]
-      <> (declareFrameContext $ referencedFrameContext e)
-      <> intermediates
-      <> SMT2 [""]
-      <> SMT2 ["(assert (= " <> enc `sp` one <> "))"]
-
-assertWords :: [Expr EWord] -> SMT2
-assertWords es = flip evalState initState $ do
-  encs <- mapM exprToSMT es
-  intermediates <- declareIntermediates
-  pure $ prelude
-       <> (declareVars . nubOrd $ foldl (<>) [] (fmap (referencedVars) es))
-       <> SMT2 [""]
-       <> (declareFrameContext . nubOrd $ foldl (<>) [] (fmap (referencedFrameContext) es))
-       <> intermediates
-       <> SMT2 [""]
-       <> (SMT2 $ fmap (\e -> "(assert (= " <> e `sp` one <> "))") encs)
 
 assertProp :: Prop -> SMT2
 assertProp p = flip evalState initState $ do
@@ -91,13 +84,13 @@ assertProp p = flip evalState initState $ do
   intermediates <- declareIntermediates
   pure $ prelude
        <> (declareBufs . referencedBufs' $ p)
-       <> SMT2 [""]
+       <> SMT2 [""] mempty
        <> (declareVars . referencedVars' $ p)
-       <> SMT2 [""]
+       <> SMT2 [""] mempty
        <> (declareFrameContext . referencedFrameContext' $ p)
        <> intermediates
-       <> SMT2 [""]
-       <> SMT2 ["(assert " <> enc <> ")"]
+       <> SMT2 [""] mempty
+       <> SMT2 ["(assert " <> enc <> ")"] mempty
 
 assertProps :: [Prop] -> SMT2
 assertProps ps = flip evalState initState $ do
@@ -105,16 +98,16 @@ assertProps ps = flip evalState initState $ do
   intermediates <- declareIntermediates
   pure $ prelude
        <> (declareBufs . nubOrd $ foldl (<>) [] (fmap (referencedBufs') ps))
-       <> SMT2 [""]
+       <> SMT2 [""] mempty
        <> (declareVars . nubOrd $ foldl (<>) [] (fmap (referencedVars') ps))
-       <> SMT2 [""]
+       <> SMT2 [""] mempty
        <> (declareFrameContext . nubOrd $ foldl (<>) [] (fmap (referencedFrameContext') ps))
        <> intermediates
-       <> SMT2 [""]
-       <> (SMT2 $ fmap (\p -> "(assert " <> p <> ")") encs)
+       <> SMT2 [""] mempty
+       <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
 
 prelude :: SMT2
-prelude = SMT2 . fmap (T.drop 2) . T.lines $ [i|
+prelude =  (flip SMT2) mempty $ fmap (T.drop 2) . T.lines $ [i|
   ; logic
   ; TODO: this creates an error when used with z3?
   ;(set-logic QF_AUFBV)
@@ -267,7 +260,7 @@ prelude = SMT2 . fmap (T.drop 2) . T.lines $ [i|
   |]
 
 declareBufs :: [Text] -> SMT2
-declareBufs names = SMT2 $ ["; buffers"] <> fmap declare names
+declareBufs names = SMT2 (["; buffers"] <> fmap declare names) mempty
   where
     declare n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
 
@@ -316,9 +309,15 @@ referencedFrameContext' = \case
   PBool _ -> []
 
 declareVars :: [Text] -> SMT2
-declareVars names = SMT2 $ ["; variables"] <> fmap declare names
+declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
+    cexvars = CexVars
+      { calldataV = names
+      , storageV = mempty
+      , blockContextV = mempty
+      , txContextV = mempty
+      }
 
 referencedVars :: Expr a -> [Text]
 referencedVars expr = nubOrd (foldExpr go [] expr)
@@ -329,7 +328,7 @@ referencedVars expr = nubOrd (foldExpr go [] expr)
       _ -> []
 
 declareFrameContext :: [Text] -> SMT2
-declareFrameContext names = SMT2 $ ["; frame context"] <> fmap declare names
+declareFrameContext names = SMT2 (["; frame context"] <> fmap declare names) mempty
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
 
@@ -691,9 +690,9 @@ withSolvers solver count cont = do
       _ <- forkIO $ runTask task inst avail
       orchestrate queue avail
 
-    runTask (Task s@(SMT2 cmds) ms r) inst availableInstances = do
+    runTask (Task s@(SMT2 cmds cexvars) ms r) inst availableInstances = do
       -- reset solver and send all lines of provided script
-      out <- sendScript inst (SMT2 $ "(reset)" : cmds)
+      out <- sendScript inst (SMT2 ("(reset)" : cmds) cexvars)
       case out of
         -- if we got an error then return it
         Left e -> writeChan r (Error e)
@@ -745,7 +744,7 @@ stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just
 
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
 sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
-sendScript solver (SMT2 cmds) = do
+sendScript solver (SMT2 cmds _) = do
   sendLine' solver (T.unlines cmds)
   pure $ Right()
 
