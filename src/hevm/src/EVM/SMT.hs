@@ -493,7 +493,7 @@ exprToSMT = \case
             newBs = Map.insert e (count', "(writeWord " <> encIdx `sp` encVal `sp` prevName <> ")") bs'
           put $ s{bufs=(count' + 1, newBs)}
           pure . T.pack $ "buf" <> show count'
-  e@(CopySlice dstIdx srcIdx size src dst) -> do
+  e@(CopySlice srcIdx dstIdx size src dst) -> do
     traceShowM e
     s <- get
     let (_, bs) = bufs s
@@ -509,7 +509,7 @@ exprToSMT = \case
                      Just (_, n') -> pure n'
                      Nothing -> exprToSMT dst
         s'' <- get
-        enc <- copySlice dstIdx srcIdx size srcName dstName
+        enc <- copySlice srcIdx dstIdx size srcName dstName
         let (count, bs'') = bufs s''
         put $ s{bufs=(count + 1, Map.insert e (count, enc) bs'')}
         pure . T.pack $ "buf" <> show count
@@ -804,7 +804,7 @@ readSExpr h = go 0 0 []
 
 -- | Stores a region of src into dst
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Text -> Text -> State BuilderState Text
-copySlice dstOffset srcOffset size@(Lit _) src dst
+copySlice srcOffset dstOffset size@(Lit _) src dst
   | size == (Lit 0) = do
     encDstOff <- exprToSMT dstOffset
     encSrcOff <- exprToSMT srcOffset
@@ -812,7 +812,7 @@ copySlice dstOffset srcOffset size@(Lit _) src dst
   | otherwise = do
     encDstOff <- exprToSMT (add dstOffset size)
     encSrcOff <- exprToSMT (add srcOffset size)
-    child <- copySlice dstOffset srcOffset (sub size (Lit 1)) src dst
+    child <- copySlice srcOffset dstOffset (sub size (Lit 1)) src dst
     pure $ "(store " <> child `sp` encDstOff `sp` "(select " <> src `sp` encSrcOff <> "))"
 copySlice _ _ _ _ _ = error "TODO: implement copySlice with a symbolically sized region"
 
