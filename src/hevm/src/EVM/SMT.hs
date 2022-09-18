@@ -805,14 +805,12 @@ readSExpr h = go 0 0 []
 -- | Stores a region of src into dst
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Text -> Text -> State BuilderState Text
 copySlice srcOffset dstOffset size@(Lit _) src dst
-  | size == (Lit 0) = do
-    encDstOff <- exprToSMT dstOffset
-    encSrcOff <- exprToSMT srcOffset
-    pure $ "(store " <> dst `sp` encDstOff <> " (select " <> src `sp` encSrcOff <> "))"
+  | size == (Lit 0) = pure $ src
   | otherwise = do
-    encDstOff <- exprToSMT (add dstOffset size)
-    encSrcOff <- exprToSMT (add srcOffset size)
-    child <- copySlice srcOffset dstOffset (sub size (Lit 1)) src dst
+    let size' = (sub size (Lit 1))
+    encDstOff <- exprToSMT (add dstOffset size')
+    encSrcOff <- exprToSMT (add srcOffset size')
+    child <- copySlice srcOffset dstOffset size' src dst
     pure $ "(store " <> child `sp` encDstOff `sp` "(select " <> src `sp` encSrcOff <> "))"
 copySlice _ _ _ _ _ = error "TODO: implement copySlice with a symbolically sized region"
 
