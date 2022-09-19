@@ -37,7 +37,7 @@ import EVM.Solidity
 import EVM.Expr (litAddr)
 import EVM.Types hiding (word)
 import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, runUnitTestContract, getParametersFromEnvironmentVariables, testNumber, dappTest)
-import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp, isSymbolic)
+import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
 --import EVM.Format (showTraceTree, showTree', renderTree, showBranchInfoWithAbi, showLeafInfo)
 import EVM.RLP (rlpdecode)
 import qualified EVM.Patricia as Patricia
