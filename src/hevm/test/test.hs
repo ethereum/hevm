@@ -260,27 +260,28 @@ tests = testGroup "hevm"
             |]
         [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x21] c (Just ("fun(uint256)", [AbiUIntType 256])) []
         putStrLn "expected counterexample found"
-     ,
+     -- ,
      -- TODO 0x22 is missing: "0x22: If you access a storage byte array that is incorrectly encoded."
      -- TODO below should NOT fail
-     testCase "pop-empty-array" $ do
-        Just c <- solcRuntime "MyContract"
-            [i|
-            contract MyContract {
-              uint[] private arr;
-              function fun(uint8 a) external {
-                arr.push(1);
-                arr.push(2);
-                for (uint i = 0; i < a; i++) {
-                  arr.pop();
-                }
-              }
-             }
-            |]
-        a <- withSolvers Z3 1 $ \s -> checkAssert s [0x31] c (Just ("fun(uint8)", [AbiUIntType 8])) []
-        print $ length a
-        print $ show a
-        putStrLn "expected counterexample found"
+     -- TODO this has a loop that depends on a symbolic value and currently causes interpret to loop
+     -- testCase "pop-empty-array" $ do
+     --    Just c <- solcRuntime "MyContract"
+     --        [i|
+     --        contract MyContract {
+     --          uint[] private arr;
+     --          function fun(uint8 a) external {
+     --            arr.push(1);
+     --            arr.push(2);
+     --            for (uint i = 0; i < a; i++) {
+     --              arr.pop();
+     --            }
+     --          }
+     --         }
+     --        |]
+     --    a <- withSolvers Z3 1 $ \s -> checkAssert s [0x31] c (Just ("fun(uint8)", [AbiUIntType 8])) []
+     --    print $ length a
+     --    print $ show a
+     --    putStrLn "expected counterexample found"
      ,
      testCase "access-out-of-bounds-array" $ do
         Just c <- solcRuntime "MyContract"
