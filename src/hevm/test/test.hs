@@ -335,7 +335,7 @@ tests = testGroup "hevm"
       [
       -- Somewhat tautological since we are asserting the precondition
       -- on the same form as the actual "requires" clause.
-      expectFail $ testCase "SafeAdd success case" $ do
+      testCase "SafeAdd success case" $ do
         Just safeAdd <- solcRuntime "SafeAdd"
           [i|
           contract SafeAdd {
@@ -356,7 +356,7 @@ tests = testGroup "hevm"
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
 
-      expectFail $ testCase "x == y => x + y == 2 * y" $ do
+      testCase "x == y => x + y == 2 * y" $ do
         Just safeAdd <- solcRuntime "SafeAdd"
           [i|
           contract SafeAdd {
