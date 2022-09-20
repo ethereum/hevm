@@ -42,6 +42,14 @@ data ProofResult a b c = Qed a | Cex b | Timeout c
 type VerifyResult = ProofResult (Expr End) (Expr End, [Text]) (Expr End)
 type EquivalenceResult = ProofResult ([VM], [VM]) VM ()
 
+isQed :: ProofResult a b c -> Bool
+isQed (Qed _) = True
+isQed _ = False
+
+extractCex :: VerifyResult -> Maybe (Expr End, [Text])
+extractCex (Cex c) = Just c
+extractCex _ = Nothing
+
 inRange :: Int -> Expr EWord -> Prop
 inRange sz e = PAnd (PGEq e (Lit 0)) (PLEq e (Lit $ 2 ^ sz - 1))
 

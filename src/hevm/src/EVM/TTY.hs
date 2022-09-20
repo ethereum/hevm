@@ -17,7 +17,7 @@ import EVM.Dapp (DappInfo, dappInfo, Test, extractSig, Test(..), srcMap)
 import EVM.Dapp (dappUnitTests, unitTestMethods, dappSolcByName, dappSolcByHash, dappSources)
 import EVM.Dapp (dappAstSrcMap)
 import EVM.Debug
---import EVM.Format (showWordExact, showWordExplanation)
+import EVM.Format (showWordExact, showWordExplanation)
 import EVM.Format (contractNamePart, contractPathPart, showTraceTree)
 import EVM.Hexdump (prettyHex)
 import EVM.Op
@@ -56,8 +56,6 @@ import qualified System.Console.Haskeline as Readline
 import qualified EVM.TTYCenteredList as Centered
 
 import qualified Paths_hevm as Paths
-
-  {-
 
 data Name
   = AbiPane
@@ -238,7 +236,6 @@ runFromVM maxIter' dappinfo oracle' vm = do
       , maxIter       = maxIter'
       , askSmtIters   = Nothing
       , smtTimeout    = Nothing
-      , smtState      = Nothing
       , solver        = Nothing
       , maxDepth      = Nothing
       , match         = ""
@@ -567,7 +564,7 @@ appEvent (ViewPicker s) (VtyEvent (V.EvKey V.KEnter [])) =
   case listSelectedElement (view testPickerList s) of
     Nothing -> error "nothing selected"
     Just (_, x) -> do
-      initVm <- liftIO $ initialUiVmStateForTest (view testOpts s) x
+      let initVm  = initialUiVmStateForTest (view testOpts s) x
       continue . ViewVm $ initVm
 
 -- UnitTest Picker: (main) - render list
@@ -621,44 +618,41 @@ app opts =
 initialUiVmStateForTest
   :: UnitTestOptions
   -> (Text, Text)
-  -> IO UiVmState
-initialUiVmStateForTest opts@UnitTestOptions{..} (theContractName, theTestName) = do
-  let state' = fromMaybe (error "Internal Error: missing smtState") smtState
-  (buf, len) <- case test of
-    SymbolicTest _ -> flip runReaderT state' $ SBV.runQueryT $ symCalldata theTestName types []
-    _ -> return (error "unreachable", error "unreachable")
-  let script = do
-        Stepper.evm . pushTrace . EntryTrace $
-          "test " <> theTestName <> " (" <> theContractName <> ")"
-        initializeUnitTest opts testContract
-        case test of
-          ConcreteTest _ -> do
-            let args = case replay of
-                         Nothing -> emptyAbi
-                         Just (sig, callData) ->
-                           if theTestName == sig
-                           then decodeAbiValue (AbiTupleType (Vec.fromList types)) callData
-                           else emptyAbi
-            void (runUnitTest opts theTestName args)
-          SymbolicTest _ -> do
-            Stepper.evm $ modify symbolify
-            void (execSymTest opts theTestName (SymbolicBuffer buf, w256lit len))
-          InvariantTest _ -> do
-            targets <- getTargetContracts opts
-            let randomRun = initialExplorationStepper opts theTestName [] targets (fromMaybe 20 maxDepth)
-            void $ case replay of
-              Nothing -> randomRun
-              Just (sig, cd) ->
-                if theTestName == sig
-                then initialExplorationStepper opts theTestName (decodeCalls cd) targets (length (decodeCalls cd))
-                else randomRun
-  pure $ initUiVmState vm0 opts script
+  -> UiVmState
+initialUiVmStateForTest opts@UnitTestOptions{..} (theContractName, theTestName) = initUiVmState vm0 opts script
   where
+    cd = case test of
+      SymbolicTest _ -> symCalldata theTestName types [] (AbstractBuf "txdata")
+      _ -> (error "unreachable", error "unreachable")
     Just (test, types) = find (\(test',_) -> extractSig test' == theTestName) $ unitTestMethods testContract
     Just testContract =
       view (dappSolcByName . at theContractName) dapp
     vm0 =
       initialUnitTestVm opts testContract
+    script = do
+      Stepper.evm . pushTrace . EntryTrace $
+        "test " <> theTestName <> " (" <> theContractName <> ")"
+      initializeUnitTest opts testContract
+      case test of
+        ConcreteTest _ -> do
+          let args = case replay of
+                       Nothing -> emptyAbi
+                       Just (sig, callData) ->
+                         if theTestName == sig
+                         then decodeAbiValue (AbiTupleType (Vec.fromList types)) callData
+                         else emptyAbi
+          void (runUnitTest opts theTestName args)
+        SymbolicTest _ -> do
+          void (execSymTest opts theTestName cd)
+        InvariantTest _ -> do
+          targets <- getTargetContracts opts
+          let randomRun = initialExplorationStepper opts theTestName [] targets (fromMaybe 20 maxDepth)
+          void $ case replay of
+            Nothing -> randomRun
+            Just (sig, cd') ->
+              if theTestName == sig
+              then initialExplorationStepper opts theTestName (decodeCalls cd') targets (length (decodeCalls cd'))
+              else randomRun
 
 myTheme :: [(AttrName, V.Attr)]
 myTheme =
@@ -725,21 +719,21 @@ drawVmBrowser ui =
               (\selected (k, c') ->
                  withHighlight selected . txt . mconcat $
                    [ fromMaybe "<unknown contract>" . flip preview dapp' $
-                       ( dappSolcByHash . ix (view codehash c')
+                       ( dappSolcByHash . ix (maybeHash c')
                        . _2 . contractName )
                    , "\n"
                    , "  ", pack (show k)
                    ])
               True
               (view browserContractList ui)
-      , case flip preview dapp' (dappSolcByHash . ix (view codehash c) . _2) of
+      , case flip preview dapp' (dappSolcByHash . ix (maybeHash c) . _2) of
           Nothing ->
             hBox
               [ borderWithLabel (txt "Contract information") . padBottom Max . padRight Max $ vBox
                   [ txt ("Codehash: " <>    pack (show (view codehash c)))
                   , txt ("Nonce: "    <> showWordExact (view nonce    c))
                   , txt ("Balance: "  <> showWordExact (view balance  c))
-                  , txt ("Storage: "  <> storageDisplay (view storage c))
+                  --, txt ("Storage: "  <> storageDisplay (view storage c)) -- TODO: fix this
                   ]
                 ]
           Just sol ->
@@ -754,18 +748,19 @@ drawVmBrowser ui =
                   , txt "Public methods:"
                   , vBox . flip map (sort (Map.elems (view abiMap sol))) $
                       \method -> txt ("  " <> view methodSignature method)
-                  , txt ("Storage:" <> storageDisplay (view storage c))
+                  --, txt ("Storage:" <> storageDisplay (view storage c)) -- TODO: fix this
                   ]
               , borderWithLabel (txt "Storage slots") . padBottom Max . padRight Max $ vBox
                   (map txt (storageLayout dapp' sol))
               ]
       ]
   ]
-  where storageDisplay (Concrete s) = pack ( show ( Map.toList s))
-        storageDisplay (Symbolic v _) = pack $ show v
+  where storageDisplay (ConcreteStore s) = pack ( show ( Map.toList s))
+        storageDisplay (v) = pack $ show v
         dapp' = dapp (view (browserVm . uiTestOpts) ui)
         Just (_, (_, c)) = listSelectedElement (view browserContractList ui)
 --        currentContract  = view (dappSolcByHash . ix ) dapp
+        maybeHash c = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord (view codehash c))
 
 drawVm :: UiVmState -> [UiWidget]
 drawVm ui =
@@ -882,13 +877,13 @@ drawStackPane ui =
     stackList = list StackPane (Vec.fromList $ zip [(1 :: Int)..] (view (uiVm . state . stack) ui)) 2
   in hBorderWithLabel labelText <=>
     renderList
-      (\_ (i, x@(S _ w)) ->
+      (\_ (i, w) ->
          vBox
            [ withHighlight True (str ("#" ++ show i ++ " "))
-               <+> str (show x)
-           , dim (txt ("   " <> case unliteral w of
+               <+> str (show w)
+           , dim (txt ("   " <> case unlit w of
                        Nothing -> ""
-                       Just u -> showWordExplanation (fromSizzle u) $ dapp (view uiTestOpts ui)))
+                       Just u -> showWordExplanation u $ dapp (view uiTestOpts ui)))
            ])
       False
       stackList
@@ -896,12 +891,12 @@ drawStackPane ui =
 message :: VM -> String
 message vm =
   case view result vm of
-    Just (VMSuccess (ConcreteBuffer msg)) ->
+    Just (VMSuccess (ConcreteBuf msg)) ->
       "VMSuccess: " <> (show $ ByteStringS msg)
-    Just (VMSuccess (SymbolicBuffer msg)) ->
+    Just (VMSuccess (msg)) ->
       "VMSuccess: <symbolicbuffer> " <> (show msg)
-    Just (VMFailure (Revert msg)) ->
-      "VMFailure: " <> (show . ByteStringS $ msg)
+    Just (VMFailure (EVM.Revert msg)) ->
+      "VMFailure: " <> (show msg)
     Just (VMFailure err) ->
       "VMFailure: " <> show err
     Nothing ->
@@ -932,9 +927,9 @@ withHighlight :: Bool -> Widget n -> Widget n
 withHighlight False = withDefAttr dimAttr
 withHighlight True  = withDefAttr boldAttr
 
-prettyIfConcrete :: Buffer -> String
-prettyIfConcrete (SymbolicBuffer x) = show x
-prettyIfConcrete (ConcreteBuffer x) = prettyHex 40 x
+prettyIfConcrete :: Expr Buf -> String
+prettyIfConcrete (ConcreteBuf x) = prettyHex 40 x
+prettyIfConcrete x = show x
 
 drawTracePane :: UiVmState -> UiWidget
 drawTracePane s =
@@ -952,7 +947,7 @@ drawTracePane s =
   in case view uiShowMemory s of
     True ->
       hBorderWithLabel (txt "Calldata")
-      <=> str (prettyIfConcrete $ fst (view (state . calldata) vm))
+      <=> str (prettyIfConcrete (view (state . calldata) vm))
       <=> hBorderWithLabel (txt "Returndata")
       <=> str (prettyIfConcrete (view (state . returndata) vm))
       <=> hBorderWithLabel (txt "Output")
@@ -960,7 +955,7 @@ drawTracePane s =
       <=> hBorderWithLabel (txt "Cache")
       <=> str (show (view (cache . path) vm))
       <=> hBorderWithLabel (txt "Path Conditions")
-      <=> (str $ show $ snd <$> view constraints vm)
+      <=> (str $ show $ view constraints vm)
       <=> hBorderWithLabel (txt "Memory")
       <=> viewport TracePane Vertical
             (str (prettyIfConcrete (view (state . memory) vm)))
@@ -1047,4 +1042,3 @@ dimAttr :: AttrName; dimAttr = "dim"
 wordAttr :: AttrName; wordAttr = "word"
 boldAttr :: AttrName; boldAttr = "bold"
 activeAttr :: AttrName; activeAttr = "active"
--}
