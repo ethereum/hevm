@@ -1,4 +1,3 @@
-{-# Language FlexibleInstances #-}
 {-# Language StrictData #-}
 
 module EVM.Concrete where

@@ -1,11 +1,7 @@
 {-# Language PartialTypeSignatures #-}
 {-# Language DataKinds #-}
-{-# Language FlexibleInstances #-}
 {-# Language ExtendedDefaultRules #-}
 {-# Language PatternSynonyms #-}
-{-# Language RecordWildCards #-}
-{-# Language ScopedTypeVariables #-}
-{-# Language ViewPatterns #-}
 
 -- Converts between Ethereum contract states and simple trees of
 -- texts.  Dumps and loads such trees as Git repositories (the state

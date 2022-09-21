@@ -1,9 +1,6 @@
 {-# Language DataKinds #-}
 {-# Language GADTs #-}
-{-# Language PolyKinds #-}
-{-# Language ScopedTypeVariables #-}
 {-# Language TypeApplications #-}
-{-# Language LambdaCase #-}
 {-# Language QuasiQuotes #-}
 
 {- |

@@ -1,5 +1,3 @@
-{-# Language ForeignFunctionInterface #-}
-
 module EVM.Precompiled (execute) where
 
 import Data.ByteString (ByteString)

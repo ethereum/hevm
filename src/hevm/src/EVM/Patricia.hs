@@ -1,7 +1,3 @@
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE FlexibleInstances #-}
-
 module EVM.Patricia where
 
 import EVM.RLP

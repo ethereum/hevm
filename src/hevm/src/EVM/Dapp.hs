@@ -1,5 +1,4 @@
 {-# Language TemplateHaskell #-}
-{-# Language OverloadedStrings #-}
 
 module EVM.Dapp where
 

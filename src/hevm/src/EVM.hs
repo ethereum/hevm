@@ -1,15 +1,8 @@
 {-# Language ImplicitParams #-}
-{-# Language ConstraintKinds #-}
-{-# Language FlexibleInstances #-}
 {-# Language DataKinds #-}
 {-# Language GADTs #-}
-{-# Language RecordWildCards #-}
-{-# Language ScopedTypeVariables #-}
-{-# Language StandaloneDeriving #-}
 {-# Language StrictData #-}
 {-# Language TemplateHaskell #-}
-{-# Language TypeOperators #-}
-{-# Language ViewPatterns #-}
 
 module EVM where
 
