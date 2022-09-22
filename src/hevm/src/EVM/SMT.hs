@@ -25,10 +25,12 @@ import Data.Char (isSpace)
 import Data.Containers.ListUtils (nubOrd)
 import Control.Monad.State.Strict
 
+import qualified Data.ByteString as BS
 import qualified Data.List as List
+import Data.List.NonEmpty (NonEmpty((:|)))
+import qualified Data.List.NonEmpty as NE
 import Data.String.Here
 import Data.Map (Map)
-import Data.Maybe
 import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -367,8 +369,8 @@ exprToSMT = \case
     eight nine ten eleven twelve thirteen fourteen fifteen
     sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree
     twentyfour twentyfive twentysix twentyseven twentyeight twentynine thirty thirtyone
-    -> concatBytes
-        [ z, o, two, three, four, five, six, seven
+    -> concatBytes $ z :|
+        [ o, two, three, four, five, six, seven
         , eight, nine, ten, eleven, twelve, thirteen, fourteen, fifteen
         , sixteen, seventeen, eighteen, nineteen, twenty, twentyone, twentytwo, twentythree
         , twentyfour, twentyfive, twentysix, twentyseven, twentyeight, twentynine, thirty, thirtyone]
@@ -446,9 +448,7 @@ exprToSMT = \case
   ReadByte idx src -> op2 "select" src idx
 
   EmptyBuf -> pure "emptyBuf"
-  e@(ConcreteBuf _) -> case toList e of
-    Just bs -> writeBytes (Lit 0) bs EmptyBuf
-    Nothing -> error "Internal Error: could not convert concrete bytes to list"
+  ConcreteBuf bs -> writeBytes $ LitByte <$> BS.unpack bs
   AbstractBuf s -> pure s
   ReadWord idx prev -> op2 "readWord" idx prev
   BufLength b -> op1 "bufLength" b
@@ -805,7 +805,7 @@ readSExpr h = go 0 0 []
 -- | Stores a region of src into dst
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Text -> Text -> State BuilderState Text
 copySlice srcOffset dstOffset size@(Lit _) src dst
-  | size == (Lit 0) = pure $ src
+  | size == (Lit 0) = pure src
   | otherwise = do
     let size' = (sub size (Lit 1))
     encDstOff <- exprToSMT (add dstOffset size')
@@ -824,24 +824,20 @@ expandExp base expnt
     pure $ "(* " <> b `sp` n <> ")"
 
 -- | Concatenates a list of bytes into a larger bitvector
-concatBytes :: [Expr Byte] -> State BuilderState Text
-concatBytes [b] = exprToSMT b
-concatBytes (hd : tl) = do
-  eHd <- exprToSMT hd
-  eTl <- concatBytes tl
-  pure $ "(concat " <> eHd `sp` eTl <> ")"
-concatBytes [] = error "cannot concat an empty list of bytes" -- TODO: use nonempty here?
+concatBytes :: NonEmpty (Expr Byte) -> State BuilderState Text
+concatBytes bytes = foldM wrap "" $ NE.reverse bytes
+  where
+    wrap inner byte = do
+      byteSMT <- exprToSMT byte
+      pure $ "(concat " <> byteSMT `sp` inner <> ")"
 
 -- | Concatenates a list of bytes into a larger bitvector
-writeBytes :: Expr EWord -> [Expr Byte] -> Expr Buf -> State BuilderState Text
-writeBytes _ [] buf = exprToSMT buf
-writeBytes idx [b] buf = do
-  eBuf <- exprToSMT buf
-  eIdx <- exprToSMT idx
-  eByte <- exprToSMT b
-  pure $ "(store " <> eBuf `sp` eIdx `sp` eByte <> ")"
-writeBytes idx (hd : tl) buf = do
-  eHd <- exprToSMT hd
-  eIdx <- exprToSMT idx
-  eTl <- writeBytes (add idx (Lit 1)) tl buf
-  pure $ "(store " <> eTl `sp` eIdx `sp` eHd <> ")"
+writeBytes :: [Expr Byte] -> State BuilderState Text
+writeBytes bytes = do
+  empty <- exprToSMT EmptyBuf
+  foldM wrap empty $ reverse (zip [0..] bytes)
+  where
+    wrap inner (idx, byte) = do
+      byteSMT <- exprToSMT byte
+      idxSMT <- exprToSMT $ Lit idx
+      pure $ "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")"
