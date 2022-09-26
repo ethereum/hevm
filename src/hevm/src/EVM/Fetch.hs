@@ -1,7 +1,5 @@
 {-# Language GADTs #-}
 {-# Language DataKinds #-}
-{-# Language StandaloneDeriving #-}
-{-# Language LambdaCase #-}
 
 module EVM.Fetch where
 

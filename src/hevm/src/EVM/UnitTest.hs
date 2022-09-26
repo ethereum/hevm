@@ -1,4 +1,3 @@
-{-# Language LambdaCase #-}
 {-# Language DataKinds #-}
 {-# Language ImplicitParams #-}
 

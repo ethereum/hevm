@@ -1,5 +1,4 @@
 {-# Language DataKinds #-}
-{-# Language FlexibleInstances #-}
 
 {-|
    Helper functions for working with Expr instances.

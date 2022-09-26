@@ -28,7 +28,33 @@ data-files:
 extra-source-files:
   CHANGELOG.md
 
+common shared
+  default-extensions:
+    LambdaCase
+    OverloadedStrings
+    RecordWildCards
+    TypeFamilies
+    ViewPatterns
+    -- GHC2021 default extensions, remove me when GHC is updated to 9.2
+    BangPatterns
+    ConstraintKinds
+    DeriveDataTypeable
+    DeriveFunctor
+    DeriveGeneric
+    DoAndIfThenElse
+    EmptyDataDecls
+    FlexibleContexts
+    FlexibleInstances
+    ForeignFunctionInterface
+    GeneralizedNewtypeDeriving
+    PolyKinds
+    RankNTypes
+    ScopedTypeVariables
+    StandaloneDeriving
+    TypeOperators
+
 library
+  import: shared
   exposed-modules:
     EVM,
     EVM.ABI,
@@ -132,24 +158,9 @@ library
     tuple                             >= 0.3.0.2 && < 0.4,
   hs-source-dirs:
     src
-  default-language:
-    Haskell2010
-  default-extensions:
-    BangPatterns,
-    DeriveDataTypeable,
-    DeriveGeneric,
-    FlexibleContexts,
-    GeneralizedNewtypeDeriving,
-    LambdaCase,
-    OverloadedStrings,
-    Rank2Types,
-    RecordWildCards,
-    TypeFamilies,
-    ViewPatterns
 
 executable hevm
-  default-language:
-    Haskell2010
+  import: shared
   hs-source-dirs:
     hevm-cli
   main-is:
@@ -198,8 +209,7 @@ executable hevm
     vty
 
 test-suite test
-  default-language:
-    Haskell2010
+  import: shared
   ghc-options:
     -Wall
   type:

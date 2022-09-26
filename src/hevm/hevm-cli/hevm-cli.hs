@@ -2,15 +2,8 @@
 
 {-# Language CPP #-}
 {-# Language DataKinds #-}
-{-# Language StandaloneDeriving #-}
 {-# Language DeriveAnyClass #-}
-{-# Language FlexibleInstances #-}
-{-# Language DeriveGeneric #-}
 {-# Language GADTs #-}
-{-# Language LambdaCase #-}
-{-# Language OverloadedStrings #-}
-{-# Language TypeOperators #-}
-{-# Language RecordWildCards #-}
 
 module Main where
 

@@ -1,5 +1,4 @@
 {-# Language DataKinds #-}
-{-# Language OverloadedStrings #-}
 
 module EVM.SymExec where
 

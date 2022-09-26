@@ -1,13 +1,6 @@
-{-# Language OverloadedStrings #-}
 {-# Language GADTs #-}
-{-# Language ViewPatterns #-}
-{-# Language ScopedTypeVariables #-}
-{-# Language LambdaCase #-}
 {-# Language QuasiQuotes #-}
-{-# Language FlexibleInstances #-}
-{-# Language GeneralizedNewtypeDeriving #-}
 {-# Language DataKinds #-}
-{-# Language StandaloneDeriving #-}
 
 module Main where
 

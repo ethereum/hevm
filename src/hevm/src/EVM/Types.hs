@@ -1,13 +1,9 @@
 {-# Language CPP #-}
 {-# Language TemplateHaskell #-}
 {-# Language TypeApplications #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
 module EVM.Types where
 

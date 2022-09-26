@@ -2,7 +2,6 @@
 {-# Language DataKinds #-}
 {-# Language StrictData #-}
 {-# Language TemplateHaskell #-}
-{-# Language OverloadedStrings #-}
 {-# Language QuasiQuotes #-}
 
 module EVM.Solidity
