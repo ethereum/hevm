@@ -448,7 +448,7 @@ exprToSMT = \case
   ReadByte idx src -> op2 "select" src idx
 
   EmptyBuf -> pure "emptyBuf"
-  ConcreteBuf bs -> writeBytes $ LitByte <$> BS.unpack bs
+  ConcreteBuf bs -> writeBytes (LitByte <$> BS.unpack bs) EmptyBuf
   AbstractBuf s -> pure s
   ReadWord idx prev -> op2 "readWord" idx prev
   BufLength b -> op1 "bufLength" b
@@ -832,10 +832,10 @@ concatBytes bytes = foldM wrap "" $ NE.reverse bytes
       pure $ "(concat " <> byteSMT `sp` inner <> ")"
 
 -- | Concatenates a list of bytes into a larger bitvector
-writeBytes :: [Expr Byte] -> State BuilderState Text
-writeBytes bytes = do
-  empty <- exprToSMT EmptyBuf
-  foldM wrap empty $ reverse (zip [0..] bytes)
+writeBytes :: [Expr Byte] -> Expr Buf -> State BuilderState Text
+writeBytes bytes buf = do
+  bufSMT <- exprToSMT buf
+  foldM wrap bufSMT $ reverse (zip [0..] bytes)
   where
     wrap inner (idx, byte) = do
       byteSMT <- exprToSMT byte
