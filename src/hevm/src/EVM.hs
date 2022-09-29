@@ -1402,7 +1402,7 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
         0x2 ->
           let
             hash = case input of
-                     ConcreteBuf input' -> ConcreteBuf $ BS.pack $ BA.unpack (Crypto.hash input' :: Digest SHA256)
+                     ConcreteBuf input' -> ConcreteBuf $ BA.convert (Crypto.hash input' :: Digest SHA256)
                      _ -> WriteWord (Lit 0) (SHA256 input) EmptyBuf
           in do
             assign (state . stack) (Lit 1 : xs)
@@ -1417,7 +1417,7 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
 
           let
             padding = BS.pack $ replicate 12 0
-            hash' = BS.pack $ BA.unpack (Crypto.hash input' :: Digest RIPEMD160)
+            hash' = BA.convert (Crypto.hash input' :: Digest RIPEMD160)
             hash  = ConcreteBuf $ padding <> hash'
           in do
             assign (state . stack) (Lit 1 : xs)
