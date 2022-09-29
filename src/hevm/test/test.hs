@@ -592,22 +592,20 @@ tests = testGroup "hevm"
               ConcreteBuffer _ -> error "unexpected"
 
           let [deposit] = decodeAbiValues [AbiUIntType 8] bs
-          assertEqual "overflowing uint8" deposit (AbiUInt 8 255)
-     ,
-        testCase "explore function dispatch" $ do
-        Just c <- solcRuntime "A"
-          [i|
-          contract A {
-            function f(uint x) public pure returns (uint) {
-              return x;
-            }
-          }
-          |]
-        (Qed res, _) <- runSMTWith z3 $ do
-          setTimeOut 5000
-          query $ checkAssert defaultPanicCodes c Nothing []
-        putStrLn $ "successfully explored: " <> show (length res) <> " paths"
+          assertEqual "overflowing uint8" deposit (AbiUInt 8 255) -}
         ,
+        testCase "explore function dispatch" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint x) public pure returns (uint) {
+                return x;
+              }
+            }
+            |]
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c Nothing []
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+{-      ,
 
         testCase "injectivity of keccak (32 bytes)" $ do
           Just c <- solcRuntime "A"
