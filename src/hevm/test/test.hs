@@ -589,29 +589,6 @@ tests = testGroup "hevm"
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         {-
         ,
-        -- TODO: CVC5 is not installed by nix, disabling
-        testCase "Deposit contract loop (cvc5)" $ do
-          Just c <- solcRuntime "Deposit"
-            [i|
-            contract Deposit {
-              function deposit(uint256 deposit_count) external pure {
-                require(deposit_count < 2**32 - 1);
-                ++deposit_count;
-                bool found = false;
-                for (uint height = 0; height < 32; height++) {
-                  if ((deposit_count & 1) == 1) {
-                    found = true;
-                    break;
-                  }
-                 deposit_count = deposit_count >> 1;
-                 }
-                assert(found);
-              }
-             }
-            |]
-          [Qed res] <- withSolvers CVC5 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
-          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        ,
         -- TODO: this is supposed to return a Cex but instead returns a Qed
         testCase "Deposit contract loop (error version)" $ do
           Just c <- solcRuntime "Deposit"
@@ -652,19 +629,6 @@ tests = testGroup "hevm"
             |]
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c Nothing []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-{-      ,
-
-        testCase "injectivity of keccak (32 bytes)" $ do
-          Just c <- solcRuntime "A"
-            [i|
-            contract A {
-              function f(uint x, uint y) public pure {
-                if (keccak256(abi.encodePacked(x)) == keccak256(abi.encodePacked(y))) assert(x == y);
-              }
-            }
-            |]
-          (Qed res, _) <- runSMTWith cvc4 $ query $ checkAssert defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
-          putStrLn $ "successfully explored: " <> show (length res) <> " paths" -}
         ,
         testCase "injectivity of keccak (32 bytes)" $ do
           Just c <- solcRuntime "A"
