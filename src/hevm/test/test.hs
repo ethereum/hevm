@@ -720,9 +720,9 @@ tests = testGroup "hevm"
             |]
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c Nothing []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-{-     ,
-
-        testCase "keccak soundness" $ do
+        ,
+        ignoreTest $ testCase "keccak soundness" $ do
+        --- using ignore to suppress huge output     
           Just c <- solcRuntime "C"
             [i|
               contract C {
@@ -733,13 +733,12 @@ tests = testGroup "hevm"
                 }
               }
             |]
+
           -- should find a counterexample
-          Cex _ <- runSMTWith cvc4 $ query $ fst <$> checkAssert defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
-          putStrLn "found counterexample:"
-
-
-      ,
-         testCase "multiple contracts" $ do
+          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+          putStrLn "expected counterexample found"
+{-      ,
+        testCase "multiple contracts" $ do
           let code' =
                 [i|
                   contract C {
@@ -817,35 +816,34 @@ tests = testGroup "hevm"
             let yulsafeDistributivity = hex "6355a79a6260003560e01c14156016576015601f565b5b60006000fd60a1565b603d602d604435600435607c565b6039602435600435607c565b605d565b6052604b604435602435605d565b600435607c565b141515605a57fe5b5b565b6000828201821115151560705760006000fd5b82820190505b92915050565b6000818384048302146000841417151560955760006000fd5b82820290505b92915050565b"
             vm <- abstractVM (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] yulsafeDistributivity SymbolicS
             verify vm Nothing Nothing Nothing (Just $ checkAssertions defaultPanicCodes)
+          putStrLn "Proven" -}
+
+        ,
+        expectFail $ testCase "safemath distributivity (sol)" $ do
+          Just c <- solcRuntime "A"
+            [i|
+              contract C {
+                function distributivity(uint x, uint y, uint z) public {
+                  assert(mul(x, add(y, z)) == add(mul(x, y), mul(x, z)));
+                }
+
+                function add(uint x, uint y) internal pure returns (uint z) {
+                  unchecked {
+                    require((z = x + y) >= x, "ds-math-add-overflow");
+                    }
+                }
+
+                function mul(uint x, uint y) internal pure returns (uint z) {
+                  unchecked {
+                    require(y == 0 || (z = x * y) / y == x, "ds-math-mul-overflow");
+                  }
+                }
+              }
+            |]
+
+          [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []
           putStrLn "Proven"
-
-      , testCase "safemath distributivity (sol)" $ do
-          let code' =
-                [i|
-                  contract C {
-                      function distributivity(uint x, uint y, uint z) public {
-                          assert(mul(x, add(y, z)) == add(mul(x, y), mul(x, z)));
-                      }
-
-                      function add(uint x, uint y) internal pure returns (uint z) {
-                          unchecked {
-                            require((z = x + y) >= x, "ds-math-add-overflow");
-                          }
-                      }
-                      function mul(uint x, uint y) internal pure returns (uint z) {
-                          unchecked {
-                            require(y == 0 || (z = x * y) / y == x, "ds-math-mul-overflow");
-                          }
-                      }
-                 }
-                |]
-          Just c <- solcRuntime "C" code'
-
-          Qed _ <- runSMTWith cvc4 $ query $ do
-            vm <- abstractVM (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] c SymbolicS
-            verify vm Nothing Nothing Nothing (Just $ checkAssertions defaultPanicCodes)
-          putStrLn "Proven"
-    ]
+ {- ]
   , testGroup "Equivalence checking"
     [
       testCase "yul optimized" $ do
