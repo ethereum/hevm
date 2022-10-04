@@ -324,6 +324,7 @@ referencedFrameContext' = \case
   PNeg a -> referencedFrameContext' a
   PBool _ -> []
 
+-- Given a list of 256b VM variable names, create an SMT2 object with the variables declared
 declareVars :: [Text] -> SMT2
 declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
   where
@@ -716,6 +717,7 @@ withSolvers solver count cont = do
           sat <- sendLine inst "(check-sat)"
           res <- case sat of
             "sat" -> do
+              -- get values for all cexvars' calldataV-s
               calldatamodels <- foldM (\a n -> do
                                          v <- getValue inst n
                                          pure $ Map.insert n v a)
