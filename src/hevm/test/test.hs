@@ -666,7 +666,7 @@ tests = testGroup "hevm"
           (Qed res, _) <- runSMTWith cvc4 $ query $ checkAssert defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
           putStrLn $ "successfully explored: " <> show (length res) <> " paths" -}
         ,
-        expectFail $ testCase "injectivity of keccak (32 bytes)" $ do
+        testCase "injectivity of keccak (32 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
