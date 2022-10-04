@@ -39,8 +39,7 @@ import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
 
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
--- variable names in SMT that we want to get values for to
---    reproduce the
+-- variable names in SMT that we want to get values for
 data CexVars = CexVars
   { calldataV :: [Text]
   , storageV :: Text
