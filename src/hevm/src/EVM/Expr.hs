@@ -173,14 +173,14 @@ readByte (Lit x) (ConcreteBuf b)
     then LitByte (BS.index b (num x))
     else LitByte 0x0
 readByte i@(Lit x) (WriteByte (Lit idx) val src)
-  = if num x == idx
+  = if x == idx
     then val
     else readByte i src
 readByte i@(Lit x) (WriteWord (Lit idx) val src)
-  = if num x <= idx && idx < num (x + 8)
+  = if idx <= x && x <= idx + 31
     then case val of
-           (Lit _) -> indexWord i val
-           _ -> IndexWord (Lit $ idx - num x) val
+           (Lit _) -> indexWord (Lit $ x - idx) val
+           _ -> IndexWord (Lit $ x - idx) val
     else readByte i src
 readByte i@(Lit x) (CopySlice (Lit dstOffset) (Lit srcOffset) (Lit size) src dst)
   = if dstOffset <= num x && num x < (dstOffset + size)
@@ -480,7 +480,7 @@ isLitByte _ = False
 
 -- | Returns the byte at idx from the given word.
 indexWord :: Expr EWord -> Expr EWord -> Expr Byte
-indexWord (Lit idx) (Lit w) = LitByte . fromIntegral $ shiftR w (num idx * 8)
+indexWord (Lit idx) (Lit w) = LitByte . fromIntegral $ shiftR w (248 - num idx * 8)
 indexWord (Lit idx) (JoinBytes zero        one        two       three
                                four        five       six       seven
                                eight       nine       ten       eleven

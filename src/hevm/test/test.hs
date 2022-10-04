@@ -54,7 +54,61 @@ runSubSet p = defaultMain . applyPattern p $ tests
 
 tests :: TestTree
 tests = testGroup "hevm"
-  [ testGroup "ABI"
+  [ testGroup "MemoryTests"
+    [ testCase "read-write-same-byte"  $ assertEqual ""
+        (LitByte 0x12)
+        (Expr.readByte (Lit 0x20) (WriteByte (Lit 0x20) (LitByte 0x12) EmptyBuf))
+    , testCase "read-write-same-word"  $ assertEqual ""
+        (Lit 0x12)
+        (Expr.readWord (Lit 0x20) (WriteWord (Lit 0x20) (Lit 0x12) EmptyBuf))
+    , testCase "read-byte-write-word"  $ assertEqual ""
+        -- reading at byte 31 a word that's been written should return LSB
+        (LitByte 0x12)
+        (Expr.readByte (Lit 0x1f) (WriteWord (Lit 0x0) (Lit 0x12) EmptyBuf))
+    , testCase "read-byte-write-word2"  $ assertEqual ""
+        -- Same as above, but offset not 0
+        (LitByte 0x12)
+        (Expr.readByte (Lit 0x20) (WriteWord (Lit 0x1) (Lit 0x12) EmptyBuf))
+    ,testCase "read-write-with-offset"  $ assertEqual ""
+        -- 0x3F = 63 decimal, 0x20 = 32. 0x12 = 18
+        --    We write 128bits (32 Bytes), representing 18 at offset 32.
+        --    Hence, when reading out the 63rd byte, we should read out the LSB 8 bits
+        --           which is 0x12
+        (LitByte 0x12)
+        (Expr.readByte (Lit 0x3F) (WriteWord (Lit 0x20) (Lit 0x12) EmptyBuf))
+    ,testCase "read-write-with-offset2"  $ assertEqual ""
+        --  0x20 = 32, 0x3D = 61
+        --  we write 128 bits (32 Bytes) representing 0x10012, at offset 32.
+        --  we then read out a byte at offset 61.
+        --  So, at 63 we'd read 0x12, at 62 we'd read 0x00, at 61 we should read 0x1
+        (LitByte 0x1)
+        (Expr.readByte (Lit 0x3D) (WriteWord (Lit 0x20) (Lit 0x10012) EmptyBuf))
+    , testCase "read-write-with-extension-to-zero" $ assertEqual ""
+        -- write word and read it at the same place (i.e. 0 offset)
+        (Lit 0x12)
+        (Expr.readWord (Lit 0x0) (WriteWord (Lit 0x0) (Lit 0x12) EmptyBuf))
+    , testCase "read-write-with-extension-to-zero-with-offset" $ assertEqual ""
+        -- write word and read it at the same offset of 4
+        (Lit 0x12)
+        (Expr.readWord (Lit 0x4) (WriteWord (Lit 0x4) (Lit 0x12) EmptyBuf))
+    , testCase "read-write-with-extension-to-zero-with-offset2" $ assertEqual ""
+        -- write word and read it at the same offset of 16
+        (Lit 0x12)
+        (Expr.readWord (Lit 0x20) (WriteWord (Lit 0x20) (Lit 0x12) EmptyBuf))
+    , testCase "indexword-MSB" $ assertEqual ""
+        -- 31st is the LSB byte (of 32)
+        (LitByte 0x78)
+        (Expr.indexWord (Lit 31) (Lit 0x12345678))
+    , testCase "indexword-LSB" $ assertEqual ""
+        -- 0th is the MSB byte (of 32), Lit 0xff22bb... is exactly 32 Bytes.
+        (LitByte 0xff)
+        (Expr.indexWord (Lit 0) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
+    , testCase "indexword-LSB2" $ assertEqual ""
+        -- same as above, but with offset 2
+        (LitByte 0xbb)
+        (Expr.indexWord (Lit 2) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
+    ]
+  , testGroup "ABI"
     [ testProperty "Put/get inverse" $ \x ->
         case runGetOrFail (getAbi (abiValueType x)) (runPut (putAbi x)) of
           Right ("", _, x') -> x' == x
@@ -612,7 +666,7 @@ tests = testGroup "hevm"
           (Qed res, _) <- runSMTWith cvc4 $ query $ checkAssert defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
           putStrLn $ "successfully explored: " <> show (length res) <> " paths" -}
         ,
-        expectFail $ testCase "injectivity of keccak (32 bytes)" $ do
+        testCase "injectivity of keccak (32 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
