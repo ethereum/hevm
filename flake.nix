@@ -25,7 +25,7 @@
             inherit secp256k1;
           })
           [
-            (haskell.lib.compose.addTestToolDepends [ solc z3 cvc4 ])
+            (haskell.lib.compose.addTestToolDepends [ solc z3 cvc5 ])
             (haskell.lib.compose.appendConfigureFlags (
               [ "--ghc-option=-O2" ]
               ++ lib.optionals stdenv.isLinux [
@@ -75,7 +75,7 @@
             packages = _: [ hevm ];
             buildInputs = [
               z3
-              cvc4
+              cvc5
               solc
               haskellPackages.cabal-install
               haskellPackages.haskell-language-server

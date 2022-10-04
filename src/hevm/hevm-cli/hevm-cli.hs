@@ -121,7 +121,7 @@ data Command w
       , showTree      :: w ::: Bool               <?> "Print branches explored in tree view"
       , smttimeout    :: w ::: Maybe Integer      <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
       , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point"
-      , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default) or cvc4"
+      , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
       , assertions    :: w ::: Maybe [Word256]    <?> "Comma seperated list of solc panic codes to check for (default: everything except arithmetic overflow)"
       , askSmtIterations :: w ::: Maybe Integer   <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
@@ -132,7 +132,7 @@ data Command w
       , sig           :: w ::: Maybe Text       <?> "Signature of types to decode / encode"
       , smttimeout    :: w ::: Maybe Integer    <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
       , maxIterations :: w ::: Maybe Integer    <?> "Number of times we may revisit a particular branching point"
-      , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default) or cvc4"
+      , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default) or cvc5"
       , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
       , smtdebug      :: w ::: Bool             <?> "Print smt queries sent to the solver"
       , askSmtIterations :: w ::: Maybe Integer <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
@@ -182,7 +182,7 @@ data Command w
       , cache         :: w ::: Maybe String             <?> "Path to rpc cache repository"
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
       , covMatch      :: w ::: Maybe String             <?> "Coverage filter - only print coverage for files matching regex"
-      , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default) or cvc4"
+      , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
       , ffi           :: w ::: Bool                     <?> "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)"
       , smttimeout    :: w ::: Maybe Integer            <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
@@ -439,7 +439,7 @@ getSrcInfo cmd =
 
 -- Although it is tempting to fully abstract calldata and give any hints about
 -- the nature of the signature doing so results in significant time spent in
--- consulting z3 about rather trivial matters. But with cvc4 it is quite
+-- consulting z3 about rather trivial matters. But with cvc5 it is quite
 -- pleasant!
 
 -- If function signatures are known, they should always be given for best results.
