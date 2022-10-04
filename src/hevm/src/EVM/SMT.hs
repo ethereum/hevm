@@ -84,20 +84,6 @@ assertWords es = flip evalState initState $ do
        <> SMT2 [""]
        <> (SMT2 $ fmap (\e -> "(assert (= " <> e `sp` one <> "))") encs)
 
-assertProp :: Prop -> SMT2
-assertProp p = flip evalState initState $ do
-  enc <- propToSMT p
-  intermediates <- declareIntermediates
-  pure $ prelude
-       <> (declareBufs . referencedBufs' $ p)
-       <> SMT2 [""]
-       <> (declareVars . referencedVars' $ p)
-       <> SMT2 [""]
-       <> (declareFrameContext . referencedFrameContext' $ p)
-       <> intermediates
-       <> SMT2 [""]
-       <> SMT2 ["(assert " <> enc <> ")"]
-
 assertProps :: [Prop] -> SMT2
 assertProps ps = flip evalState initState $ do
   encs <- mapM propToSMT ps
