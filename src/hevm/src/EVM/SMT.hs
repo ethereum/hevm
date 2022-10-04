@@ -242,11 +242,9 @@ prelude = SMT2 . fmap (T.drop 2) . T.lines $ [i|
   (declare-const abstractStore Storage)
   (define-const emptyStore Storage ((as const Storage) ((as const (Array (_ BitVec 256) (_ BitVec 256))) #x0000000000000000000000000000000000000000000000000000000000000000)))
 
-  (define-fun sstore ((addr Word) (key Word) (val Word) (storage Storage)) Storage (
-      store storage addr (store (select storage addr) key val)))
+  (define-fun sstore ((addr Word) (key Word) (val Word) (storage Storage)) Storage (store storage addr (store (select storage addr) key val)))
 
-  (define-fun sload ((addr Word) (key Word) (storage Storage)) Word (
-      select (select storage addr) key))
+  (define-fun sload ((addr Word) (key Word) (storage Storage)) Word (select (select storage addr) key))
   |]
 
 declareBufs :: [Text] -> SMT2
@@ -704,8 +702,7 @@ solverArgs = \case
     [ "-in" ]
   CVC5 ->
     [ "--lang=smt"
-    , "--interactive"
-    , "--no-interactive-prompt"
+    , "--no-interactive"
     , "--produce-models"
     ]
   Custom _ -> []

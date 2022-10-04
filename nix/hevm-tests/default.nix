@@ -11,9 +11,9 @@ let
 in
   pkgs.recurseIntoAttrs {
     yulEquivalence-z3 = runWithSolver ./yul-equivalence.nix "z3";
-    yulEquivalence-cvc4 = runWithSolver ./yul-equivalence.nix "cvc4";
+    yulEquivalence-cvc5 = runWithSolver ./yul-equivalence.nix "cvc5";
 
     # z3 takes 3hrs to run these tests on a fast machine, and even then ~180 timeout
     #smtChecker-z3 = runWithSolver ./smt-checker.nix "z3";
-    smtChecker-cvc4 = runWithSolver ./smt-checker.nix "cvc4";
+    smtChecker-cvc5 = runWithSolver ./smt-checker.nix "cvc5";
   }
