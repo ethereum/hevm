@@ -25,6 +25,7 @@ import Control.Lens hiding (List, pre, (.>))
 
 import qualified Data.Vector as Vector
 import Data.String.Here
+import qualified Data.Map.Strict as Map
 
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
@@ -587,30 +588,6 @@ tests = testGroup "hevm"
             |]
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        {-
-        ,
-        -- TODO: CVC5 is not installed by nix, disabling
-        testCase "Deposit contract loop (cvc5)" $ do
-          Just c <- solcRuntime "Deposit"
-            [i|
-            contract Deposit {
-              function deposit(uint256 deposit_count) external pure {
-                require(deposit_count < 2**32 - 1);
-                ++deposit_count;
-                bool found = false;
-                for (uint height = 0; height < 32; height++) {
-                  if ((deposit_count & 1) == 1) {
-                    found = true;
-                    break;
-                  }
-                 deposit_count = deposit_count >> 1;
-                 }
-                assert(found);
-              }
-             }
-            |]
-          [Qed res] <- withSolvers CVC5 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
-          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         -- TODO: this is supposed to return a Cex but instead returns a Qed
         testCase "Deposit contract loop (error version)" $ do
@@ -632,14 +609,15 @@ tests = testGroup "hevm"
               }
              }
             |]
-          bs <- runSMT $ query $ do
-            (Cex _, vm) <- checkAssert allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
-            case view (state . calldata . _1) vm of
-              SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
-              ConcreteBuffer _ -> error "unexpected"
+          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
+          putStrLn "expected counterexample found"
+          -- TODO: check that the cex is 255
+          --   case view (state . calldata . _1) vm of
+          --     SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
+          --     ConcreteBuffer _ -> error "unexpected"
 
-          let [deposit] = decodeAbiValues [AbiUIntType 8] bs
-          assertEqual "overflowing uint8" deposit (AbiUInt 8 255) -}
+          -- let [deposit] = decodeAbiValues [AbiUIntType 8] bs
+          -- assertEqual "overflowing uint8" deposit (AbiUInt 8 255)
         ,
         testCase "explore function dispatch" $ do
           Just c <- solcRuntime "A"
@@ -652,19 +630,6 @@ tests = testGroup "hevm"
             |]
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c Nothing []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-{-      ,
-
-        testCase "injectivity of keccak (32 bytes)" $ do
-          Just c <- solcRuntime "A"
-            [i|
-            contract A {
-              function f(uint x, uint y) public pure {
-                if (keccak256(abi.encodePacked(x)) == keccak256(abi.encodePacked(y))) assert(x == y);
-              }
-            }
-            |]
-          (Qed res, _) <- runSMTWith cvc4 $ query $ checkAssert defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
-          putStrLn $ "successfully explored: " <> show (length res) <> " paths" -}
         ,
         testCase "injectivity of keccak (32 bytes)" $ do
           Just c <- solcRuntime "A"
@@ -677,9 +642,8 @@ tests = testGroup "hevm"
             |]
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-{-     ,
-
-        testCase "injectivity of keccak (64 bytes)" $ do
+        ,
+        expectFail $ testCase "injectivity of keccak (64 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -688,21 +652,22 @@ tests = testGroup "hevm"
               }
             }
             |]
-          bs <- runSMTWith z3 $ query $ do
-            (Cex _, vm) <- checkAssert defaultPanicCodes c (Just ("f(uint256,uint256,uint256,uint256)", replicate 4 (AbiUIntType 256))) []
-            case view (state . calldata . _1) vm of
-              SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
-              ConcreteBuffer _ -> error "unexpected"
+          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256,uint256,uint256)", replicate 4 (AbiUIntType 256))) []
+          putStrLn "expected counterexample found"
+          -- TODO check that x == w and y == z in cex
+          --   case view (state . calldata . _1) vm of
+          --     SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
+          --     ConcreteBuffer _ -> error "unexpected"
 
-          let [AbiUInt 256 x,
-               AbiUInt 256 y,
-               AbiUInt 256 w,
-               AbiUInt 256 z] = decodeAbiValues [AbiUIntType 256,
-                                                 AbiUIntType 256,
-                                                 AbiUIntType 256,
-                                                 AbiUIntType 256] bs
-          assertEqual "x == w" x w
-          assertEqual "y == z" y z -}
+          -- let [AbiUInt 256 x,
+          --      AbiUInt 256 y,
+          --      AbiUInt 256 w,
+          --      AbiUInt 256 z] = decodeAbiValues [AbiUIntType 256,
+          --                                        AbiUIntType 256,
+          --                                        AbiUIntType 256,
+          --                                        AbiUIntType 256] bs
+          -- assertEqual "x == w" x w
+          -- assertEqual "y == z" y z -
         ,
         expectFail $ testCase "calldata beyond calldatasize is 0 (z3)" $ do
           Just c <- solcRuntime "A"
@@ -720,9 +685,9 @@ tests = testGroup "hevm"
             |]
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c Nothing []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-{-     ,
-
-        testCase "keccak soundness" $ do
+        ,
+        ignoreTest $ testCase "keccak soundness" $ do
+        --- using ignore to suppress huge output     
           Just c <- solcRuntime "C"
             [i|
               contract C {
@@ -733,13 +698,12 @@ tests = testGroup "hevm"
                 }
               }
             |]
+
           -- should find a counterexample
-          Cex _ <- runSMTWith cvc4 $ query $ fst <$> checkAssert defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
-          putStrLn "found counterexample:"
-
-
-      ,
-         testCase "multiple contracts" $ do
+          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+          putStrLn "expected counterexample found"
+        ,
+        expectFail $ testCase "multiple contracts" $ do
           let code' =
                 [i|
                   contract C {
@@ -758,94 +722,83 @@ tests = testGroup "hevm"
               aAddr = Addr 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
           Just c <- solcRuntime "C" code'
           Just a <- solcRuntime "A" code'
-          Cex _ <- runSMT $ query $ do
-            vm0 <- abstractVM (Just ("call_A()", [])) [] c SymbolicS
-            store <- freshArray (show aAddr) Nothing
+          [Cex _] <- withSolvers Z3 1 $ \s -> do
+            let vm0 = abstractVM (Just ("call_A()", [])) [] c Nothing SymbolicS
             let vm = vm0
-                  & set (state . callvalue) 0
+                  & set (state . callvalue) (Lit 0)
                   & over (env . contracts)
-                       (Map.insert aAddr (initialContract (RuntimeCode $ ConcreteBuffer a) &
-                                           set EVM.storage (EVM.Symbolic [] store)))
-            verify vm Nothing Nothing Nothing (Just $ checkAssertions defaultPanicCodes)
+                       (Map.insert aAddr (initialContract (RuntimeCode (fromJust $ Expr.toList $ ConcreteBuf a))))
+                  -- NOTE: this used to as follows, but there is no _storage field in Contract record
+                  -- (Map.insert aAddr (initialContract (RuntimeCode $ ConcreteBuffer a) &
+                  --                     set EVM.storage (EVM.Symbolic [] store)))
+            verify s vm Nothing Nothing Nothing (Just $ checkAssertions defaultPanicCodes)
           putStrLn "found counterexample:"
-      ,
-         testCase "calling unique contracts (read from storage)" $ do
-          let code' =
-                [i|
-                  contract C {
-                    uint x;
-                    A a;
+        ,
+        expectFail $ testCase "calling unique contracts (read from storage)" $ do
+          Just c <- solcRuntime "C"
+            [i|
+              contract C {
+                uint x;
+                A a;
 
-                    function call_A() public {
-                      a = new A();
-                      // should fail since x can be anything
-                      assert(a.x() == x);
-                    }
+                function call_A() public {
+                  a = new A();
+                  // should fail since x can be anything
+                  assert(a.x() == x);
+                }
+              }
+              contract A {
+                uint public x;
+              }
+            |]
+          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("call_A()", [])) []
+          putStrLn "expected counterexample found"
+        ,
+        testCase "keccak concrete and sym agree" $ do
+          Just c <- solcRuntime "C"
+            [i|
+              contract C {
+                function kecc(uint x) public pure {
+                  if (x == 0) {
+                    assert(keccak256(abi.encode(x)) == keccak256(abi.encode(0)));
                   }
-                  contract A {
-                    uint public x;
-                  }
-                |]
-          Just c <- solcRuntime "C" code'
-          Cex _ <- runSMT $ query $ do
-            vm0 <- abstractVM (Just ("call_A()", [])) [] c SymbolicS
-            let vm = vm0 & set (state . callvalue) 0
-            verify vm Nothing Nothing Nothing (Just $ checkAssertions defaultPanicCodes)
-          putStrLn "found counterexample:"
-      ,
-
-         testCase "keccak concrete and sym agree" $ do
-          let code' =
-                [i|
-                  contract C {
-                    function kecc(uint x) public pure {
-                      if (x == 0) {
-                         assert(keccak256(abi.encode(x)) == keccak256(abi.encode(0)));
-                      }
-                    }
-                  }
-                |]
-          Just c <- solcRuntime "C" code'
-          Qed _ <- runSMT $ query $ do
-            vm0 <- abstractVM (Just ("kecc(uint256)", [AbiUIntType 256])) [] c SymbolicS
-            let vm = vm0 & set (state . callvalue) 0
-            verify vm Nothing Nothing Nothing (Just $ checkAssertions defaultPanicCodes)
-          putStrLn "found counterexample:"
-
-      , testCase "safemath distributivity (yul)" $ do
-          Qed _ <- runSMTWith cvc4 $ query $ do
-            let yulsafeDistributivity = hex "6355a79a6260003560e01c14156016576015601f565b5b60006000fd60a1565b603d602d604435600435607c565b6039602435600435607c565b605d565b6052604b604435602435605d565b600435607c565b141515605a57fe5b5b565b6000828201821115151560705760006000fd5b82820190505b92915050565b6000818384048302146000841417151560955760006000fd5b82820290505b92915050565b"
-            vm <- abstractVM (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] yulsafeDistributivity SymbolicS
-            verify vm Nothing Nothing Nothing (Just $ checkAssertions defaultPanicCodes)
+                }
+              }
+            |]
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("kecc(uint256)", [AbiUIntType 256])) []
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
+        ignoreTest $ testCase "safemath distributivity (yul)" $ do
+          let yulsafeDistributivity = hex "6355a79a6260003560e01c14156016576015601f565b5b60006000fd60a1565b603d602d604435600435607c565b6039602435600435607c565b605d565b6052604b604435602435605d565b600435607c565b141515605a57fe5b5b565b6000828201821115151560705760006000fd5b82820190505b92915050565b6000818384048302146000841417151560955760006000fd5b82820290505b92915050565b"
+          let vm =  abstractVM (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] yulsafeDistributivity Nothing SymbolicS
+          [Qed _] <-  withSolvers Z3 1 $ \s -> verify s vm Nothing Nothing Nothing (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
+        ,
+        expectFail $ testCase "safemath distributivity (sol)" $ do
+          Just c <- solcRuntime "A"
+            [i|
+              contract C {
+                function distributivity(uint x, uint y, uint z) public {
+                  assert(mul(x, add(y, z)) == add(mul(x, y), mul(x, z)));
+                }
 
-      , testCase "safemath distributivity (sol)" $ do
-          let code' =
-                [i|
-                  contract C {
-                      function distributivity(uint x, uint y, uint z) public {
-                          assert(mul(x, add(y, z)) == add(mul(x, y), mul(x, z)));
-                      }
+                function add(uint x, uint y) internal pure returns (uint z) {
+                  unchecked {
+                    require((z = x + y) >= x, "ds-math-add-overflow");
+                    }
+                }
 
-                      function add(uint x, uint y) internal pure returns (uint z) {
-                          unchecked {
-                            require((z = x + y) >= x, "ds-math-add-overflow");
-                          }
-                      }
-                      function mul(uint x, uint y) internal pure returns (uint z) {
-                          unchecked {
-                            require(y == 0 || (z = x * y) / y == x, "ds-math-mul-overflow");
-                          }
-                      }
-                 }
-                |]
-          Just c <- solcRuntime "C" code'
+                function mul(uint x, uint y) internal pure returns (uint z) {
+                  unchecked {
+                    require(y == 0 || (z = x * y) / y == x, "ds-math-mul-overflow");
+                  }
+                }
+              }
+            |]
 
-          Qed _ <- runSMTWith cvc4 $ query $ do
-            vm <- abstractVM (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] c SymbolicS
-            verify vm Nothing Nothing Nothing (Just $ checkAssertions defaultPanicCodes)
+          [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []
           putStrLn "Proven"
-    ]
+ {- ]
   , testGroup "Equivalence checking"
     [
       testCase "yul optimized" $ do
