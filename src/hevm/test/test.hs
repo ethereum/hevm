@@ -571,17 +571,17 @@ tests = testGroup "hevm"
           Just c <- solcRuntime "C"
             [i|
            contract C {
-              function foo(uint32 x) external pure {
-                x &= 0xffffff00;
+              function foo(uint256 x) external pure {
+                x &= 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00;
                 uint8 y;
                 assembly {
-                    y := byte(x, 3)
+                    y := byte(x, 31)
                 }
                 assert(y != 8);
               }
             }
             |]
-          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint32)", [AbiUIntType 32])) []
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "check-lsb-msb2" $ do
