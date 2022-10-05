@@ -177,10 +177,7 @@ readByte i@(Lit x) (WriteByte (Lit idx) val src)
     then val
     else readByte i src
 readByte i@(Lit x) (WriteWord (Lit idx) val src)
-  = if idx <= x && x <= idx + 31
-    then case val of
-           (Lit _) -> indexWord (Lit $ x - idx) val
-           _ -> IndexWord (Lit $ x - idx) val
+  = if idx <= x && x <= idx + 31 then indexWord (Lit $ x - idx) val
     else readByte i src
 readByte i@(Lit x) (CopySlice (Lit dstOffset) (Lit srcOffset) (Lit size) src dst)
   = if dstOffset <= num x && num x < (dstOffset + size)
