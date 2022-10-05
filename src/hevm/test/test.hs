@@ -601,11 +601,11 @@ tests = testGroup "hevm"
             contract C {
               function foo(uint256 x) external pure {
                 uint8 y = uint8(x);
-                assert(y != 8);
+                assert(y != 9);
               }
             }
             |]
-          [Cex c] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256", [AbiUIntType 256])) []
+          [Cex c] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
           putStrLn $ "successfully found Cex" <> show c
         ,
         testCase "check-chop-off4" $ do
@@ -618,7 +618,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Cex c] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256", [AbiUIntType 256])) []
+          [Cex c] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
           putStrLn $ "successfully found Cex" <> show c
         ,
         testCase "Deposit contract loop (z3)" $ do
