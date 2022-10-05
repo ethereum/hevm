@@ -423,7 +423,7 @@ exprToSMT = \case
     Lit n -> if n >= 0 && n < 32
              then do
               enc <- exprToSMT w
-              pure $ "(indexWord" <> (T.pack . show $ n) <> " " <> enc <> ")"
+              pure $ "(indexWord" <> T.pack (show (num n :: Integer)) <> " " <> enc <> ")"
              else error $ "indexWord: unsupported index: " <> show n
     n -> error $ "indexWord: unsupported index: " <> show n
   ReadByte idx src -> op2 "select" src idx
