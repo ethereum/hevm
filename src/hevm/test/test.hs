@@ -567,6 +567,60 @@ tests = testGroup "hevm"
           [Cex _, Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
           putStrLn "expected 2 counterexamples found"
         ,
+        testCase "check-chop-off1" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 x) external pure {
+                x &= 0xffffff00;
+                uint8 y = uint8(x);
+                assert(y != 8);
+              }
+            }
+            |]
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
+        testCase "check-chop-off2" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 x) external pure {
+                x &= 0xffffff00;
+                uint8 y = uint8(x);
+                assert(y == 0);
+              }
+            }
+            |]
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
+        testCase "check-chop-off3" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 x) external pure {
+                uint8 y = uint8(x);
+                assert(y != 8);
+              }
+            }
+            |]
+          [Cex c] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256", [AbiUIntType 256])) []
+          putStrLn $ "successfully found Cex" <> show c
+        ,
+        testCase "check-chop-off4" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 x) external pure {
+                uint8 y = uint8(x);
+                assert(y == 0);
+              }
+            }
+            |]
+          [Cex c] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256", [AbiUIntType 256])) []
+          putStrLn $ "successfully found Cex" <> show c
+        ,
         testCase "Deposit contract loop (z3)" $ do
           Just c <- solcRuntime "Deposit"
             [i|
