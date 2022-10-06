@@ -590,6 +590,7 @@ tests = testGroup "hevm"
             contract C {
               function foo(uint256 x) external pure {
                 x &= 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00;
+                uint8 y;
                 assembly {
                     y := byte(x, 31)
                 }
