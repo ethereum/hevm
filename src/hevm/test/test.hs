@@ -575,7 +575,7 @@ tests = testGroup "hevm"
                 x &= 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00;
                 uint8 y;
                 assembly {
-                    y := byte(x, 31)
+                    y := byte(31,x)
                 }
                 assert(y != 8);
               }
@@ -592,7 +592,7 @@ tests = testGroup "hevm"
                 x &= 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00;
                 uint8 y;
                 assembly {
-                    y := byte(x, 31)
+                    y := byte(31,x)
                 }
                 assert(y == 0);
               }

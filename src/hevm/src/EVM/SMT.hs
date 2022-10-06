@@ -419,7 +419,7 @@ exprToSMT = \case
 
   -- TODO: make me binary...
   LitByte b -> pure $ "(_ bv" <> T.pack (show (num b :: Integer)) <> " 8)"
-  IndexWord w idx -> case idx of
+  IndexWord idx w -> case idx of
     Lit n -> if n >= 0 && n < 32
              then do
               enc <- exprToSMT w
