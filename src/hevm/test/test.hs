@@ -567,32 +567,66 @@ tests = testGroup "hevm"
           [Cex _, Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
           putStrLn "expected 2 counterexamples found"
         ,
+        -- LSB is zeroed out, byte(31,x) takes LSB, so y==0 always holds
         testCase "check-lsb-msb1" $ do
           Just c <- solcRuntime "C"
             [i|
-           contract C {
+            contract C {
               function foo(uint256 x) external pure {
                 x &= 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00;
                 uint8 y;
-                assembly {
-                    y := byte(31,x)
-                }
-                assert(y != 8);
+                assembly { y := byte(31,x) }
+                assert(y == 0);
               }
             }
             |]
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
+        -- We zero out everything but the LSB byte. However, byte(31,x) takes the LSB byte
+        -- so there is a counterexamle, where LSB of x is not zero
         testCase "check-lsb-msb2" $ do
           Just c <- solcRuntime "C"
             [i|
             contract C {
               function foo(uint256 x) external pure {
-                x &= 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00;
+                x &= 0x00000000000000000000000000000000000000000000000000000000000000ff;
+                uint8 y;
+                assembly { y := byte(31,x) }
+                assert(y == 0);
+              }
+            }
+            |]
+          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          putStrLn $ "Expected counterexample found"
+        ,
+        -- We zero out everything but the 2nd LSB byte. However, byte(31,x) takes the 2nd LSB byte
+        -- so there is a counterexamle, where 2nd LSB of x is not zero
+        testCase "check-lsb-msb3 -- 2nd byte" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 x) external pure {
+                x &= 0x000000000000000000000000000000000000000000000000000000000000ff00;
+                uint8 y;
+                assembly { y := byte(30,x) }
+                assert(y == 0);
+              }
+            }
+            |]
+          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          putStrLn $ "Expected counterexample found"
+        ,
+        -- Reverse of thest above
+        testCase "check-lsb-msb4 2nd byte rev" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 x) external pure {
+                x &= 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00ff;
                 uint8 y;
                 assembly {
-                    y := byte(31,x)
+                    y := byte(30,x)
                 }
                 assert(y == 0);
               }
@@ -600,32 +634,6 @@ tests = testGroup "hevm"
             |]
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        ,
-        testCase "check-lsb-msb3" $ do
-          Just c <- solcRuntime "C"
-            [i|
-            contract C {
-              function foo(uint256 x) external pure {
-                uint8 y = uint8(x);
-                assert(y != 9);
-              }
-            }
-            |]
-          [Cex c] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
-          putStrLn $ "successfully found Cex" <> show c
-        ,
-        testCase "check-lsb-msb4" $ do
-          Just c <- solcRuntime "C"
-            [i|
-            contract C {
-              function foo(uint256 x) external pure {
-                uint8 y = uint8(x);
-                assert(y == 0);
-              }
-            }
-            |]
-          [Cex c] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
-          putStrLn $ "successfully found Cex" <> show c
         ,
         testCase "Deposit contract loop (z3)" $ do
           Just c <- solcRuntime "Deposit"
