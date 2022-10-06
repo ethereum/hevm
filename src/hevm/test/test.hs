@@ -11,7 +11,7 @@
 
 module Main where
 
-import Data.Text (Text)
+import Data.Text (Text, pack)
 import Data.ByteString (ByteString)
 
 import Prelude hiding (fail)
@@ -21,11 +21,13 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BS (fromStrict)
 import qualified Data.ByteString.Base16 as Hex
 import Data.Maybe
+import Data.Map (lookup)
 import Test.Tasty
 import Test.Tasty.QuickCheck
 import Test.Tasty.HUnit
 import Test.Tasty.Runners
 import Test.Tasty.ExpectedFailure
+import Language.SMT2.Parser
 
 import Control.Monad.State.Strict (execState, runState)
 import Control.Lens hiding (List, pre, (.>))
@@ -383,7 +385,12 @@ tests = testGroup "hevm"
              }
             |]
           [Cex a, Cex b] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
-          putStrLn $ "expected 2 counterexamples found:" <> show a <> "," <> show b
+          putStrLn "expected 2 counterexamples found."
+          let extractCalldata (EVM.SMT.SMTCex x _ _ _) = x
+          arg1 <- pure $ fromJust . Data.Map.lookup "arg1" $ extractCalldata $ snd a
+          putStrLn $ show $ arg1
+          putStrLn $ show $ parseFileMsg Language.SMT2.Parser.getValueRes arg1
+          putStrLn $ "B:" <> show b
         ,
         expectFail $ testCase "assert-fail-twoargs" $ do
           Just c <- solcRuntime "AssertFailTwoParams"
@@ -487,7 +494,6 @@ tests = testGroup "hevm"
           query $ checkAssert defaultPanicCodes c Nothing []
         putStrLn $ "successfully explored: " <> show (length res) <> " paths"
         ,
-
         testCase "injectivity of keccak (32 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
@@ -499,8 +505,47 @@ tests = testGroup "hevm"
             |]
           (Qed res, _) <- runSMTWith cvc4 $ query $ checkAssert defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
           putStrLn $ "successfully explored: " <> show (length res) <> " paths"
+        -}
         ,
-        testCase "injectivity of keccak (32 bytes)" $ do
+        testCase "injectivity of keccak 8 bytes" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint8 x, uint8 y) public pure {
+                if (keccak256(abi.encodePacked(x)) == keccak256(abi.encodePacked(y))) assert(x == y);
+              }
+            }
+            |]
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint8,uint8)", replicate 2 (AbiUIntType 8))) []
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
+        testCase "injectivity of keccak 8 bytes rev" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint8 x, uint8 y) public pure {
+                assert(keccak256(abi.encodePacked(x)) != keccak256(abi.encodePacked(y)));
+              }
+            }
+            |]
+          [Cex c] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint8,uint8)", replicate 2 (AbiUIntType 8))) []
+          -- TODO check that x == w and y == z in cex
+          --   case view (state . calldata . _1) vm of
+          --     SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
+          --     ConcreteBuffer _ -> error "unexpected"
+
+          -- let [AbiUInt 256 x,
+          --      AbiUInt 256 y,
+          --      AbiUInt 256 w,
+          --      AbiUInt 256 z] = decodeAbiValues [AbiUIntType 256,
+          --                                        AbiUIntType 256,
+          --                                        AbiUIntType 256,
+          --                                        AbiUIntType 256] bs
+          -- assertEqual "x == w" x w
+          -- assertEqual "y == z" y z -
+          putStrLn $ "Checked Cex"
+        ,
+        testCase "injectivity of keccak 32 bytes" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -509,36 +554,49 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (Qed res, _) <- runSMTWith z3 $ query $ checkAssert defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
-          putStrLn $ "successfully explored: " <> show (length res) <> " paths"
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", replicate 4 (AbiUIntType 256))) []
+          putStrLn $ "Counterexample found"
        ,
-
-        testCase "injectivity of keccak (64 bytes)" $ do
+        testCase "injectivity of keccak 64 bytes" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
               function f(uint x, uint y, uint w, uint z) public pure {
-                assert (keccak256(abi.encodePacked(x,y)) != keccak256(abi.encodePacked(w,z)));
+                if (keccak256(abi.encodePacked(x,y)) == keccak256(abi.encodePacked(w,z)))
+                    assert(x==w && y == z);
               }
             }
             |]
-          bs <- runSMTWith z3 $ query $ do
-            (Cex _, vm) <- checkAssert defaultPanicCodes c (Just ("f(uint256,uint256,uint256,uint256)", replicate 4 (AbiUIntType 256))) []
-            case view (state . calldata . _1) vm of
-              SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
-              ConcreteBuffer _ -> error "unexpected"
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256,uint256,uint256)", replicate 4 (AbiUIntType 256))) []
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+          ,
+          testCase "injectivity of keccak 64 bytes reverse" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint x, uint y, uint w, uint z) public pure {
+                assert(keccak256(abi.encodePacked(x,y)) == keccak256(abi.encodePacked(w,z)));
+              }
+            }
+            |]
+          [Cex k] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256,uint256,uint256)", replicate 4 (AbiUIntType 256))) []
+          putStrLn "expected counterexample found"
+          -- TODO check that x == w and y == z in cex
+          --   case view (state . calldata . _1) vm of
+          --     SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
+          --     ConcreteBuffer _ -> error "unexpected"
 
-          let [AbiUInt 256 x,
-               AbiUInt 256 y,
-               AbiUInt 256 w,
-               AbiUInt 256 z] = decodeAbiValues [AbiUIntType 256,
-                                                 AbiUIntType 256,
-                                                 AbiUIntType 256,
-                                                 AbiUIntType 256] bs
-          assertEqual "x == w" x w
-          assertEqual "y == z" y z
+--          let [AbiUInt 256 x,
+--               AbiUInt 256 y,
+--               AbiUInt 256 w,
+--               AbiUInt 256 z] = decodeAbiValues [AbiUIntType 256,
+--                                                 AbiUIntType 256,
+--                                                 AbiUIntType 256,
+--                                                 AbiUIntType 256] bs
+--          assertEqual "x == w" x w
+--          assertEqual "y == z" y z
+       {-
        ,
-
         testCase "calldata beyond calldatasize is 0 (z3)" $ do
           Just c <- solcRuntime "A"
             [i|
@@ -656,7 +714,6 @@ tests = testGroup "hevm"
             vm <- abstractVM (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] yulsafeDistributivity SymbolicS
             verify vm Nothing Nothing Nothing (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
-
       , testCase "safemath distributivity (sol)" $ do
           let code' =
                 [i|
@@ -711,8 +768,7 @@ tests = testGroup "hevm"
         runSMTWith z3 $ query $ do
           Cex _ <- equivalenceCheck aPrgm bPrgm Nothing Nothing Nothing
           return ()
-          -}
-
+-}
     ]
   ]
   where
