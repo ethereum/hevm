@@ -16,9 +16,9 @@ import qualified EVM.Fetch
 import qualified EVM.Flatten
 import qualified EVM.Stepper
 
-#if MIN_VERSION_aeson(1, 0, 0)
+
 import qualified EVM.VMTest as VMTest
-#endif
+
 
 import EVM.SymExec
 import EVM.Debug
@@ -622,11 +622,10 @@ launchExec cmd = do
             Just path ->
               Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts (view EVM.cache vm'))
 
-    Debug -> undefined
-    --Debug -> void $ EVM.TTY.runFromVM Nothing dapp fetcher vm
+    Debug -> void $ TTY.runFromVM Nothing dapp fetcher vm
     --JsonTrace -> void $ execStateT (interpretWithTrace fetcher EVM.Stepper.runFully) vm
     _ -> error "TODO"
-   where fetcher = undefined -- maybe EVM.Fetch.zero (EVM.Fetch.http block') (rpc cmd)
+   where fetcher = maybe EVM.Fetch.zero (EVM.Fetch.http block') (rpc cmd)
          block'  = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
 
 data Testcase = Testcase {
@@ -890,7 +889,6 @@ symvmFromCommand cmd = do
 
 launchTest :: HasCallStack => Command Options.Unwrapped ->  IO ()
 launchTest cmd = do
-#if MIN_VERSION_aeson(1, 0, 0)
   parsed <- VMTest.parseBCSuite <$> LazyByteString.readFile (file cmd)
   case parsed of
      Left "No cases to check." -> putStrLn "no-cases ok"
@@ -903,14 +901,8 @@ launchTest cmd = do
        in
          mapM_ (runVMTest (diff cmd) (optsMode cmd) (timeout cmd)) $
            testFilter (Map.toList allTests)
-#else
-  putStrLn "Not supported"
-#endif
 
-#if MIN_VERSION_aeson(1, 0, 0)
 runVMTest :: HasCallStack => Bool -> Mode -> Maybe Int -> (String, VMTest.Case) -> IO Bool
-runVMTest = undefined
-  {-
 runVMTest diffmode mode timelimit (name, x) =
  do
   let vm0 = VMTest.vmForCase x
@@ -922,10 +914,11 @@ runVMTest diffmode mode timelimit (name, x) =
         Run ->
           Timeout.timeout (1000000 * (fromMaybe 10 timelimit)) $
             execStateT (EVM.Stepper.interpret EVM.Fetch.zero . void $ EVM.Stepper.execFully) vm0
-        Debug -> undefined
-          --Just <$> EVM.TTY.runFromVM Nothing emptyDapp EVM.Fetch.zero vm0
+        Debug ->
+          Just <$> TTY.runFromVM Nothing emptyDapp EVM.Fetch.zero vm0
         JsonTrace ->
-          Just <$> execStateT (interpretWithTrace EVM.Fetch.zero EVM.Stepper.runFully) vm0
+          error "JsonTrace: implement me"
+          -- Just <$> execStateT (EVM.UnitTest.interpretWithCoverage EVM.Fetch.zero EVM.Stepper.runFully) vm0
     waitCatch action
   case result of
     Right (Just vm1) -> do
@@ -941,18 +934,12 @@ runVMTest diffmode mode timelimit (name, x) =
         else (head . lines . show) e
       return False
 
-#endif
--}
-
 parseAbi :: (AsValue s) => s -> (Text, [AbiType])
-parseAbi = undefined
-  {-
 parseAbi abijson =
   (signature abijson, snd
     <$> parseMethodInput
     <$> V.toList
       (fromMaybe (error "Malformed function abi") (abijson ^? key "inputs" . _Array)))
-  -}
 
 abiencode :: (AsValue s) => Maybe s -> [String] -> ByteString
 abiencode Nothing _ = error "missing required argument: abi"

@@ -157,11 +157,15 @@ fetchSlotFrom n url addr slot =
   Session.withAPISession
     (\s -> fetchSlotWithSession n url s addr slot)
 
-http :: SolverGroup -> BlockNumber -> Text -> Fetcher
-http s n url = oracle s (Just (n, url))
+http :: BlockNumber -> Text -> Fetcher
+http n url q =
+  withSolvers Z3 4 $ \s ->
+    oracle s (Just (n, url)) q
 
 zero :: Fetcher
-zero = undefined
+zero q =
+  withSolvers Z3 4 $ \s ->
+    oracle s Nothing q
 
 -- smtsolving + (http or zero)
 oracle :: SolverGroup -> Maybe (BlockNumber, Text) -> Fetcher
