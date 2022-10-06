@@ -375,7 +375,7 @@ fromList bs = case Prelude.and (fmap isLitByte bs) of
       applySyms (buf, syms) = foldl' (\acc (idx, b) -> writeByte (Lit idx) b acc) buf syms
 
 instance Semigroup (Expr Buf) where
-  a <> b = copySlice (Lit 0) (bufLength a) (bufLength b) a b
+  a <> b = copySlice (Lit 0) (bufLength a) (bufLength b) b a
 
 instance Monoid (Expr Buf) where
   mempty = EmptyBuf
