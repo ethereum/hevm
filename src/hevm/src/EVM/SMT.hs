@@ -24,8 +24,11 @@ import Control.Concurrent (forkIO, killThread)
 import Data.Char (isSpace)
 import Data.Containers.ListUtils (nubOrd)
 import Control.Monad.State.Strict
+import Language.SMT2.Parser (getValueRes, parseFileMsg)
+import Data.Either
 
 import qualified Data.List as List
+import Data.List.NonEmpty (NonEmpty, NonEmpty((:|)))
 import Data.String.Here
 import Data.Map (Map)
 import Data.Maybe
@@ -36,6 +39,7 @@ import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_i
 
 import EVM.Types
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
+import qualified Language.SMT2.Syntax as Language.SMT2.Parser
 
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
@@ -60,7 +64,7 @@ instance Monoid CexVars where
       }
 
 data SMTCex = SMTCex
-  { calldata :: Map Text Text
+  { calldata :: Map Text Language.SMT2.Parser.SpecConstant
   , storage :: Text
   , blockContext :: Map Text Text
   , txContext :: Map Text Text
@@ -718,9 +722,21 @@ withSolvers solver count cont = do
             "sat" -> do
               -- get values for all cexvars' calldataV-s
               calldatamodels <- foldM (\a n -> do
-                                         v <- getValue inst n
-                                         pure $ Map.insert n v a)
-                              mempty (calldataV cexvars)
+                      val <- getValue inst n
+                      tmp <- pure $ parseFileMsg Language.SMT2.Parser.getValueRes val
+                      idConst <- case tmp of
+                        Right (Language.SMT2.Parser.ResSpecific (valParsed :| [])) -> pure valParsed
+                        _ -> undefined
+                      theConst <- case idConst of
+                       (Language.SMT2.Parser.TermQualIdentifier (
+                         Language.SMT2.Parser.Unqualified (Language.SMT2.Parser.IdSymbol symbol)),
+                         Language.SMT2.Parser.TermSpecConstant ext2) -> if symbol == n
+                                                                           then pure ext2
+                                                                           else undefined
+                       _ -> undefined
+                      pure $ Map.insert n theConst a
+                  )
+                  mempty (calldataV cexvars)
               pure $ Sat $ SMTCex
                 { calldata = calldatamodels
                 , storage = mempty
