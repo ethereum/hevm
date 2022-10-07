@@ -443,6 +443,9 @@ reachable2 solvers e = do
       leaf -> do
         let query = assertProps pcs
         res <- checkSat' solvers (query, [])
+        putStrLn "--- res BEGIN ---"
+        print res
+        putStrLn "--- res END ---"
         case res of
           Sat _ -> pure ([query], Just leaf)
           Unsat -> pure ([query], Nothing)
@@ -538,6 +541,9 @@ verify solvers preState maxIter askSmtIters rpcinfo maybepost = do
   expr <- simplify <$> evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) preState
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
   let leaves = flattenExpr expr
+  putStrLn " --- leaves BEGIN --- "
+  print leaves
+  putStrLn "--- leaves END --- "
   case maybepost of
     Nothing -> pure [Qed expr]
     Just post -> do
@@ -550,10 +556,19 @@ verify solvers preState maxIter askSmtIters rpcinfo maybepost = do
         assumes = view constraints preState
         withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> pcs), leaf)) canViolate
       -- Dispatch the remaining branches to the solver to check for violations
+      putStrLn "--- canViolate BEGIN"
+      print canViolate
+      putStrLn "--- canViolate END"
       putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violations"
       --putStrLn $ T.unpack . formatSMT2 . fst $ withQueries !! 0
       results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
+        putStrLn "--- query BEGIN ---"
+        print query
+        putStrLn "--- query END ---"
         res <- checkSat' solvers (query, ["txdata", "storage"])
+        putStrLn "--- res BEGIN ---"
+        print res
+        putStrLn "--- res END ---"
         pure (res, leaf)
       let cexs = filter (\(res, _) -> not . isUnsat $ res) results
       pure $ if null cexs then [Qed expr] else fmap toVRes cexs

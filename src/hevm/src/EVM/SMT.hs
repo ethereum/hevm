@@ -683,6 +683,7 @@ withSolvers solver count cont = do
             "sat" -> do
               models <- forM ms $ \m -> do
                 getValue inst m
+              print $ [(T.pack "models:")] ++ models
               pure $ Sat models
             "unsat" -> pure Unsat
             "timeout" -> pure Unknown
