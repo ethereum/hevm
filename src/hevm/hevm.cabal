@@ -86,7 +86,9 @@ library
     EVM.TTYCenteredList,
     EVM.Types,
     EVM.UnitTest,
-    EVM.VMTest
+    EVM.VMTest,
+    Language.SMT2.Parser,
+    Language.SMT2.Syntax
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -156,6 +158,7 @@ library
     base                              >= 4.9 && < 5,
     here                              >= 1.2.13 && < 1.3,
     tuple                             >= 0.3.0.2 && < 0.4,
+    parsec
   hs-source-dirs:
     src
 

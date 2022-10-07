@@ -38,7 +38,7 @@ import EVM.Format (formatExpr)
 
 data ProofResult a b c = Qed a | Cex b | Timeout c
   deriving (Show)
-type VerifyResult = ProofResult (Expr End) (Expr End, [Text]) (Expr End)
+type VerifyResult = ProofResult (Expr End) (Expr End, SMTCex) (Expr End)
 type EquivalenceResult = ProofResult ([VM], [VM]) VM ()
 
 isQed :: ProofResult a b c -> Bool
@@ -174,7 +174,7 @@ loadSymVM x initStore addr callvalue' calldata' =
     , vmoptAllowFFI = False
     }) & set (env . contracts . at (createAddress ethrunAddress 1))
              (Just (initialContract x))
-       & set (env . storage) initStore
+       & set (env . EVM.storage) initStore
 
 doInterpret :: Fetch.Fetcher -> Maybe Integer -> Maybe Integer -> VM -> Expr End
 doInterpret fetcher maxIter askSmtIters vm = undefined
@@ -312,7 +312,7 @@ runExpr = do
   vm <- Stepper.runFully
   pure $ case view result vm of
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
-    Just (VMSuccess buf) -> Return buf (view (env . storage) vm)
+    Just (VMSuccess buf) -> Return buf (view (env . EVM.storage) vm)
     Just (VMFailure e) -> case e of
       UnrecognizedOpcode _ -> Invalid
       SelfDestruction -> SelfDestruct
@@ -442,7 +442,7 @@ reachable2 solvers e = do
         pure (fst tres <> fst fres, subexpr)
       leaf -> do
         let query = assertProps pcs
-        res <- checkSat' solvers (query, [])
+        res <- checkSat' solvers query
         putStrLn "--- res BEGIN ---"
         print res
         putStrLn "--- res END ---"
@@ -469,8 +469,8 @@ reachable solvers = go []
         let
           tquery = assertProps (PEq c (Lit 1) : pcs)
           fquery = assertProps (PEq c (Lit 0) : pcs)
-        tres <- (checkSat' solvers (tquery, []))
-        fres <- (checkSat' solvers (fquery, []))
+        tres <- (checkSat' solvers tquery)
+        fres <- (checkSat' solvers fquery)
         print (tres, fres)
         case (tres, fres) of
           (Error tm, Error fm) -> do
@@ -565,7 +565,7 @@ verify solvers preState maxIter askSmtIters rpcinfo maybepost = do
         putStrLn "--- query BEGIN ---"
         print query
         putStrLn "--- query END ---"
-        res <- checkSat' solvers (query, ["txdata", "storage"])
+        res <- checkSat' solvers query
         putStrLn "--- res BEGIN ---"
         print res
         putStrLn "--- res END ---"
