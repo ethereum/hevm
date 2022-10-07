@@ -34,6 +34,7 @@ import Control.Lens hiding (List, pre, (.>))
 
 import qualified Data.Vector as Vector
 import Data.String.Here
+import Data.Map (Map)
 
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
@@ -51,6 +52,15 @@ import EVM.Types
 import EVM.SMT hiding (storage, calldata)
 import qualified Data.ByteString.Base16 as BS16
 import qualified EVM.Expr as Expr
+import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
+
+getArgInteger :: EVM.SMT.SMTCex -> String -> Integer
+getArgInteger a name = getIntegerFromSCHex $ getScHexa a
+  where
+    getScHexa :: EVM.SMT.SMTCex -> Language.SMT2.Syntax.SpecConstant
+    getScHexa tmp = fromJust . Data.Map.lookup (Data.Text.pack name) $ smtcex tmp
+    smtcex :: EVM.SMT.SMTCex -> Map Text Language.SMT2.Syntax.SpecConstant
+    smtcex (EVM.SMT.SMTCex x _ _ _) = x
 
 
 main :: IO ()
@@ -361,6 +371,19 @@ tests = testGroup "hevm"
           [Cex (l, _)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo()", [])) []
           assertEqual "incorrect revert msg" l (EVM.Types.Revert (ConcreteBuf $ panicMsg 0x01))
         ,
+        testCase "simple-assert-2" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 x) external pure {
+                assert(x != 10);
+              }
+             }
+            |]
+          [(Cex (_, ctr))] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          print $ show ctr
+          assertEqual "Must be 99" 99 $ getArgInteger ctr "arg1"
+        ,
         testCase "assert-fail-equal" $ do
           Just c <- solcRuntime "AssertFailEqual"
             [i|
@@ -384,12 +407,9 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex a, Cex b] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
+          [Cex (_, a), Cex b] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
           putStrLn "expected 2 counterexamples found."
-          let extractCalldata (EVM.SMT.SMTCex x _ _ _) = x
-          arg1 <- pure $ fromJust . Data.Map.lookup "arg1" $ extractCalldata $ snd a
-          putStrLn $ show $ arg1
-          -- putStrLn $ "B:" <> show b
+          putStrLn $ show $ getArgInteger a "arg1"
         ,
         expectFail $ testCase "assert-fail-twoargs" $ do
           Just c <- solcRuntime "AssertFailTwoParams"

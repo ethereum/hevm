@@ -1,5 +1,5 @@
 {-# Language DataKinds #-}
-{-# Language GADTs #-}
+{-# Languag GADTs #-}
 {-# Language PolyKinds #-}
 {-# Language ScopedTypeVariables #-}
 {-# Language TypeApplications #-}
@@ -40,6 +40,7 @@ import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_i
 import EVM.Types
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
 import qualified Language.SMT2.Syntax as Language.SMT2.Parser
+import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
 
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
@@ -752,6 +753,17 @@ withSolvers solver count cont = do
       -- put the instance back in the list of available instances
       writeChan availableInstances inst
 
+hexChar :: Char -> Int
+hexChar ch = fromMaybe (error $ "illegal char " ++ [ch]) $
+    List.elemIndex ch "0123456789abcdef"
+
+parseHex :: String -> Integer
+parseHex hex = List.foldl' f (0 ::Integer) hex where
+    f n c = (16 :: Integer)*n + toInteger (hexChar c)
+
+getIntegerFromSCHex :: SpecConstant -> Integer
+getIntegerFromSCHex (SCHexadecimal a) = parseHex (T.unpack a)
+getIntegerFromSCHex _ = undefined
 
 -- | Arguments used when spawing a solver instance
 solverArgs :: Solver -> [Text]
