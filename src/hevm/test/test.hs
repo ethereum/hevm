@@ -388,7 +388,8 @@ tests = testGroup "hevm"
           putStrLn "expected 2 counterexamples found."
           let extractCalldata (EVM.SMT.SMTCex x _ _ _) = x
           arg1 <- pure $ fromJust . Data.Map.lookup "arg1" $ extractCalldata $ snd a
-          putStrLn $ show $ arg1
+          x <- pure $ parseFileMsg Language.SMT2.Parser.getValueRes arg1
+          putStrLn $ show $ x
           putStrLn $ show $ parseFileMsg Language.SMT2.Parser.getValueRes arg1
           putStrLn $ "B:" <> show b
         ,
