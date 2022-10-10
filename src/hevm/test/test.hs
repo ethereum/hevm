@@ -725,44 +725,6 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c Nothing []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        testCase "injectivity of keccak 8 bytes" $ do
-          Just c <- solcRuntime "A"
-            [i|
-            contract A {
-              function f(uint8 x, uint8 y) public pure {
-                if (keccak256(abi.encodePacked(x)) == keccak256(abi.encodePacked(y))) assert(x == y);
-              }
-            }
-            |]
-          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint8,uint8)", replicate 2 (AbiUIntType 8))) []
-          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        ,
-        testCase "injectivity of keccak 8 bytes rev" $ do
-          Just c <- solcRuntime "A"
-            [i|
-            contract A {
-              function f(uint8 x, uint8 y) public pure {
-                assert(keccak256(abi.encodePacked(x)) != keccak256(abi.encodePacked(y)));
-              }
-            }
-            |]
-          [Cex c] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint8,uint8)", replicate 2 (AbiUIntType 8))) []
-          -- TODO check that x == w and y == z in cex
-          --   case view (state . calldata . _1) vm of
-          --     SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
-          --     ConcreteBuffer _ -> error "unexpected"
-
-          -- let [AbiUInt 256 x,
-          --      AbiUInt 256 y,
-          --      AbiUInt 256 w,
-          --      AbiUInt 256 z] = decodeAbiValues [AbiUIntType 256,
-          --                                        AbiUIntType 256,
-          --                                        AbiUIntType 256,
-          --                                        AbiUIntType 256] bs
-          -- assertEqual "x == w" x w
-          -- assertEqual "y == z" y z -
-          putStrLn $ "Checked Cex"
-        ,
         testCase "injectivity of keccak 32 bytes" $ do
           Just c <- solcRuntime "A"
             [i|
