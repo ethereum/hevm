@@ -8,6 +8,7 @@ module EVM.Expr where
 
 import Prelude hiding (LT, GT)
 import Data.Bits
+import Data.DoubleWord (Int256)
 import Data.Word
 import Data.Maybe
 import Data.List
@@ -115,14 +116,14 @@ geq = op2 GEq (\x y -> if x >= y then 1 else 0)
 
 slt :: Expr EWord -> Expr EWord -> Expr EWord
 slt = op2 SLT (\x y ->
-  let sx, sy :: Integer
+  let sx, sy :: Int256
       sx = fromIntegral x
       sy = fromIntegral y
   in if sx < sy then 1 else 0)
 
 sgt :: Expr EWord -> Expr EWord -> Expr EWord
 sgt = op2 SLT (\x y ->
-  let sx, sy :: Integer
+  let sx, sy :: Int256
       sx = fromIntegral x
       sy = fromIntegral y
   in if sx > sy then 1 else 0)
