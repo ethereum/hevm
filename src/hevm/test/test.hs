@@ -282,8 +282,9 @@ tests = testGroup "hevm"
              }
             }
            |]
-       [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) []
-       putStrLn "expected counterexample found"
+       [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) []
+       assertEqual "Must be 0" 0 $ getArgInteger ctr "arg1"
+       putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getArgInteger ctr "arg1")
      ,
      testCase "safeAdd-fail" $ do
         Just c <- solcRuntime "MyContract"
