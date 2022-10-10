@@ -48,6 +48,7 @@ import EVM.SMT hiding (storage, calldata)
 import qualified Data.ByteString.Base16 as BS16
 import qualified EVM.Expr as Expr
 import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
+import EVM.ABI (AbiType(AbiUIntType))
 
 getArgInteger :: EVM.SMT.SMTCex -> String -> Integer
 getArgInteger a name = getIntegerFromSCHex $ getScHexa a
