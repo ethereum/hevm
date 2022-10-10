@@ -2551,17 +2551,21 @@ checkJump x xs = do
         InitCode ops' _ -> fmap LitByte $ BS.unpack ops'
         RuntimeCode ops' -> ops'
       op = do
-        b <- ops !? num x
+        -- TODO: not a big fan of how bounds are checked, change this
+        b <- if x < num (length ops) then ops !? num x else Nothing
         unlitByte b
   case op of
     Nothing -> vmError BadJumpDestination
-    Just b
-      -> if 0x5b == b && OpJumpdest == snd (theCodeOps RegularVector.! (theOpIxMap Vector.! num x))
+    Just b ->
+      if 0x5b == b && OpJumpdest == snd (theCodeOps RegularVector.! (theOpIxMap Vector.! num x))
          then do
            state . stack .= xs
            state . pc .= num x
          else
            vmError BadJumpDestination
+
+-- >>> 0x1000000000000000b :: Int
+-- 11
 
 opSize :: Word8 -> Int
 opSize x | x >= 0x60 && x <= 0x7f = num x - 0x60 + 2
