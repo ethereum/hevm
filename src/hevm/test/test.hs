@@ -15,6 +15,7 @@ import qualified Data.ByteString.Lazy as BS (fromStrict)
 import qualified Data.ByteString.Base16 as Hex
 import Data.Maybe
 import Data.Map (lookup)
+import Data.List (elemIndex)
 import Test.Tasty
 import Test.Tasty.QuickCheck
 import Test.Tasty.HUnit
@@ -563,8 +564,11 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex _, Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
-          putStrLn "expected 2 counterexamples found"
+          [Cex (_, a), Cex (_, b)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
+          let ints = map (flip getArgInteger "arg1") [a,b]
+          let pos = elemIndex (0::Integer) ints
+          assertBool "0 must be one of the Cex-es" $ isJust pos
+          putStrLn "expected 2 counterexamples found, one Cex is the 0 value"
         ,
         testCase "assert-fail-notequal" $ do
           Just c <- solcRuntime "AssertFailNotEqual"
@@ -576,9 +580,10 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex (_, a), Cex b] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
+          [Cex (_, a), Cex (_, b)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
           putStrLn "expected 2 counterexamples found."
           putStrLn $ show $ getArgInteger a "arg1"
+          putStrLn $ show $ getArgInteger b "arg1"
         ,
         testCase "assert-fail-twoargs" $ do
           Just c <- solcRuntime "AssertFailTwoParams"
