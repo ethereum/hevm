@@ -475,7 +475,6 @@ exprToSMT = \case
           put $ s{bufs=(count' + 1, newBs)}
           pure . T.pack $ "buf" <> show count'
   e@(CopySlice srcIdx dstIdx size src dst) -> do
-    traceShowM e
     s <- get
     let (_, bs) = bufs s
     case Map.lookup e bs of
@@ -785,7 +784,7 @@ readSExpr h = go 0 0 []
 -- | Stores a region of src into dst
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Text -> Text -> State BuilderState Text
 copySlice srcOffset dstOffset size@(Lit _) src dst
-  | size == (Lit 0) = pure src
+  | size == (Lit 0) = pure dst
   | otherwise = do
     let size' = (sub size (Lit 1))
     encDstOff <- exprToSMT (add dstOffset size')
