@@ -643,13 +643,12 @@ runOne opts@UnitTestOptions{..} vm testName args = do
           , vm''
           )
       else
-        undefined
---        pure
---          ("\x1b[31m[FAIL]\x1b[0m "
---           <> testName <> argInfo
---          , Left (failOutput vm'' opts testName)
---          , vm''
---          )
+        pure
+          ("\x1b[31m[FAIL]\x1b[0m "
+           <> testName <> argInfo
+          , Left (failOutput vm'' opts testName)
+          , vm''
+          )
 
 -- | Define the thread spawner for property based tests
 fuzzRun :: UnitTestOptions -> VM -> Text -> [AbiType] -> IO (Text, Either SMTCex Text, VM)
@@ -717,40 +716,43 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
 
     -- display results
     if all isQed results
-    then
+    then do
       return ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "", vm)
-    else
-      return undefined
-      -- return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left $ symFailure opts testName (mapMaybe extractCex results), vm)
+    else do
+      let x = mapMaybe extractCex results
+      let y = head $ symFailure opts testName x -- TODO this is WRONG, only returns FIRST Cex
+      return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y, vm)
 
-symFailure :: UnitTestOptions -> Text -> [(Expr End, SMTCex)] -> Text
-symFailure UnitTestOptions {..} testName failures' = mconcat
-  [ "Failure: "
-  , testName
-  , "\n\n"
-  -- , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
-  ]
-  where
-    showRes = \case
-                     Return _ _ -> if "proveFail" `isPrefixOf` testName
-                                    then "Successful execution"
-                                    else "Failed: DSTest Assertion Violation"
-                     res ->
-                       --let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
-                       let ?context = DappContext { _contextInfo = dapp, _contextEnv = mempty }
-                       in prettyvmresult res
-    mkMsg (leaf, cexs) = pack $ unlines
-      ["Counterexample:"
-      ,""
-      ,"  result:   " <> showRes leaf
-      ,"  calldata: " <> Text.unpack (Text.unlines cexs)
-      , case verbose of
-          --Just _ -> unlines
-            --[ ""
-            --, unpack $ indentLines 2 (showTraceTree dapp vm)
-            --]
-          _ -> ""
-      ]
+symFailure :: UnitTestOptions -> Text -> [(Expr End, SMTCex)] -> [SMTCex]
+symFailure UnitTestOptions {..} testName failures' =
+    map snd failures'
+--mconcat
+--  [ "Failure: "
+--  , testName
+--  , "\n\n"
+--  -- , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
+--  ]
+--  where
+--    showRes = \case
+--                     Return _ _ -> if "proveFail" `isPrefixOf` testName
+--                                    then "Successful execution"
+--                                    else "Failed: DSTest Assertion Violation"
+--                     res ->
+--                       --let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
+--                       let ?context = DappContext { _contextInfo = dapp, _contextEnv = mempty }
+--                       in prettyvmresult res
+--    mkMsg (leaf, cexs) = pack $ unlines
+--      ["Counterexample:"
+--      ,""
+--      ,"  result:   " <> showRes leaf
+--      ,"  calldata: " <> Text.unpack (Text.unlines cexs)
+--      , case verbose of
+--          --Just _ -> unlines
+--            --[ ""
+--            --, unpack $ indentLines 2 (showTraceTree dapp vm)
+--            --]
+--          _ -> ""
+--      ]
 
 prettyCalldata :: (?context :: DappContext) => Expr Buf -> Text -> [AbiType]-> IO Text
 prettyCalldata = undefined
@@ -798,19 +800,20 @@ passOutput vm UnitTestOptions { .. } testName =
       ]
     else ""
 
+-- TODO
 failOutput :: VM -> UnitTestOptions -> Text -> SMTCex
-failOutput vm UnitTestOptions { .. } testName = undefined
---  let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
---  in mconcat
---  [ "Failure: "
---  , fromMaybe "" (stripSuffix "()" testName)
---  , "\n"
---  , case verbose of
---      Just _ -> indentLines 2 (showTraceTree dapp vm)
---      _ -> ""
---  , indentLines 2 (formatTestLogs (view dappEventMap dapp) (view logs vm))
---  , "\n"
---  ]
+failOutput vm UnitTestOptions { .. } testName =  undefined
+  -- let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
+  -- in mconcat
+  -- [ "Failure: "
+  -- , fromMaybe "" (stripSuffix "()" testName)
+  -- , "\n"
+  -- , case verbose of
+  --     Just _ -> indentLines 2 (showTraceTree dapp vm)
+  --     _ -> ""
+  -- , indentLines 2 (formatTestLogs (view dappEventMap dapp) (view logs vm))
+  -- , "\n"
+  -- ]
 
 formatTestLogs :: (?context :: DappContext) => Map W256 Event -> Expr Logs -> Text
 formatTestLogs = undefined
