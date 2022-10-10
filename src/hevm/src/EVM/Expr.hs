@@ -53,14 +53,16 @@ sub = op2 Sub (-)
 mul :: Expr EWord -> Expr EWord -> Expr EWord
 mul = op2 Mul (*)
 
+-- TODO: should this return 0 on div by 0 or revert?
 div :: Expr EWord -> Expr EWord -> Expr EWord
-div = op2 Div Prelude.div
+div = op2 Div (\x y -> if y == 0 then 0 else Prelude.div x y)
 
+-- TODO: should this return 0 on div by 0 or revert?
 sdiv :: Expr EWord -> Expr EWord -> Expr EWord
 sdiv = op2 SDiv (\x y -> let sx, sy :: Integer
                              sx = fromIntegral x
                              sy = fromIntegral y
-                         in fromIntegral (sx `quot` sy))
+                         in if y == 0 then 0 else fromIntegral (sx `quot` sy))
 
 mod :: Expr EWord -> Expr EWord -> Expr EWord
 mod = op2 Mod (\x y -> if y == 0 then 0 else x `Prelude.mod` y)
