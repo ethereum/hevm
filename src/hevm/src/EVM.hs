@@ -238,7 +238,7 @@ data FrameContext
     , callContextCodehash  :: Expr EWord
     , callContextAbi       :: Maybe W256
     , callContextData      :: Expr Buf
-    , callContextReversion :: Map Addr Contract
+    , callContextReversion :: (Map Addr Contract, Expr Storage)
     , callContextSubState  :: SubState
     }
   deriving (Show)
@@ -2088,7 +2088,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                                     , callContextOffset    = xOutOffset
                                     , callContextSize      = xOutSize
                                     , callContextCodehash  = view codehash target
-                                    , callContextReversion = view (env . contracts) vm0
+                                    , callContextReversion = (view (env . contracts) vm0, view (env . storage) vm0)
                                     , callContextSubState  = view (tx . substate) vm0
                                     , callContextAbi =
                                         if xInSize >= 4
@@ -2315,7 +2315,9 @@ finishFrame how = do
 
           let
             substate'' = over touchedAccounts (maybe id cons (find (3 ==) touched)) substate'
-            revertContracts = assign (env . contracts) reversion
+            (contractsReversion, storageReversion) = reversion
+            revertContracts = assign (env . contracts) contractsReversion
+            revertStorage = assign (env . storage) storageReversion
             revertSubstate  = assign (tx . substate) substate''
 
           case how of
@@ -2329,6 +2331,7 @@ finishFrame how = do
             -- Case 2: Reverting during a call?
             FrameReverted output -> do
               revertContracts
+              revertStorage
               revertSubstate
               assign (state . returndata) output
               copyCallBytesToMemory output outSize (Lit 0) outOffset
@@ -2338,6 +2341,7 @@ finishFrame how = do
             -- Case 3: Error during a call?
             FrameErrored _ -> do
               revertContracts
+              revertStorage
               revertSubstate
               assign (state . returndata) mempty
               push 0
