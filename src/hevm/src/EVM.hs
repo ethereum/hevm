@@ -1866,6 +1866,7 @@ forceConcrete6 (k,l,m,n,o,p) msg continue = case (maybeLitWord k, maybeLitWord l
 
 forceConcreteBuf :: Expr Buf -> String -> (ByteString -> EVM ()) -> EVM ()
 forceConcreteBuf (ConcreteBuf b) _ continue = continue b
+forceConcreteBuf (EmptyBuf) _ continue = continue "" -- TODO: is this correct?
 forceConcreteBuf b msg _ = do
     vm <- get
     vmError $ UnexpectedSymbolicArg (view (state . pc) vm) msg [b]
