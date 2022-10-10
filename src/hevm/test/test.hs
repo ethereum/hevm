@@ -566,8 +566,7 @@ tests = testGroup "hevm"
             |]
           [Cex (_, a), Cex (_, b)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
           let ints = map (flip getArgInteger "arg1") [a,b]
-          let pos = elemIndex (0::Integer) ints
-          assertBool "0 must be one of the Cex-es" $ isJust pos
+          assertBool "0 must be one of the Cex-es" $ isJust $ elemIndex 0 ints
           putStrLn "expected 2 counterexamples found, one Cex is the 0 value"
         ,
         testCase "assert-fail-notequal" $ do
@@ -597,6 +596,19 @@ tests = testGroup "hevm"
             |]
           [Cex _, Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
           putStrLn "expected 2 counterexamples found"
+        ,
+        testCase "assert-2nd-arg" $ do
+          Just c <- solcRuntime "AssertFailTwoParams"
+            [i|
+            contract AssertFailTwoParams {
+              function fun(uint256 deposit_count1, uint256 deposit_count2) external pure {
+                assert(deposit_count2 != 666);
+              }
+             }
+            |]
+          [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+          assertEqual "Must be 666" 666 $ getArgInteger ctr "arg2"
+          putStrLn "Found arg2 Ctx to be 666"
         ,
         -- LSB is zeroed out, byte(31,x) takes LSB, so y==0 always holds
         testCase "check-lsb-msb1" $ do
