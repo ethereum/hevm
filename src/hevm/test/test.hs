@@ -700,8 +700,7 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        -- TODO: this is supposed to return a Cex but instead returns a Qed
-        testCase "Deposit contract loop (error version)" $ do
+        testCase "Deposit-contract-loop-error-version" $ do
           Just c <- solcRuntime "Deposit"
             [i|
             contract Deposit {
@@ -720,8 +719,9 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
-          putStrLn "expected counterexample found"
+          [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
+          assertEqual "Must be 255" 255 $ getArgInteger ctr "arg1"
+          putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getArgInteger ctr "arg1")
           -- TODO: check that the cex is 255
           --   case view (state . calldata . _1) vm of
           --     SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
