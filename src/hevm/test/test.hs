@@ -868,6 +868,7 @@ tests = testGroup "hevm"
           let vm =  abstractVM (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] yulsafeDistributivity Nothing SymbolicS
           [Qed _] <-  withSolvers Z3 1 $ \s -> verify s vm Nothing Nothing Nothing (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
+        ,
         expectFail $ testCase "safemath distributivity (sol)" $ do
           Just c <- solcRuntime "A"
             [i|
