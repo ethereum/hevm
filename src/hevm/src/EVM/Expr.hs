@@ -171,7 +171,7 @@ readByte _ EmptyBuf = LitByte 0x0
 
 -- fuly concrete reads
 readByte (Lit x) (ConcreteBuf b)
-  = if num x < BS.length b
+  = if x < num (BS.length b)
     then LitByte (BS.index b (num x))
     else LitByte 0x0
 readByte i@(Lit x) (WriteByte (Lit idx) val src)
