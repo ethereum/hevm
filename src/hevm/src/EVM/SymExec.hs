@@ -45,7 +45,7 @@ isQed :: ProofResult a b c -> Bool
 isQed (Qed _) = True
 isQed _ = False
 
-extractCex :: VerifyResult -> Maybe (Expr End, [Text])
+extractCex :: VerifyResult -> Maybe (Expr End, SMTCex)
 extractCex (Cex c) = Just c
 extractCex _ = Nothing
 

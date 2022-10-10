@@ -24,12 +24,9 @@ import EVM.SymExec
 import EVM.Debug
 import EVM.ABI
 import qualified EVM.Expr as Expr
-<<<<<<< HEAD
 import EVM.SMT
 import qualified EVM.TTY as TTY
-=======
 import EVM.SMT hiding (calldata)
->>>>>>> countexamples
 import EVM.Solidity
 import EVM.Expr (litAddr)
 import EVM.Types hiding (word)

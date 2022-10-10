@@ -435,13 +435,13 @@ runUnitTestContract
         Just (VMFailure _) -> liftIO $ do
           Text.putStrLn "\x1b[31m[BAIL]\x1b[0m setUp() "
           tick "\n"
-          tick $ failOutput vm1 opts "setUp()"
+          tick $ (Data.Text.pack $ show $ failOutput vm1 opts "setUp()")
           pure [(False, vm1)]
         Just (VMSuccess _) -> do
           let
 
-            runCache :: ([(Either Text Text, VM)], VM) -> (Test, [AbiType])
-                        -> IO ([(Either Text Text, VM)], VM)
+            runCache :: ([(Either SMTCex Text, VM)], VM) -> (Test, [AbiType])
+                        -> IO ([(Either SMTCex Text, VM)], VM)
             runCache (results, vm) (test, types) = do
               (t, r, vm') <- runTest opts solvers vm (test, types)
               liftIO $ Text.putStrLn t
@@ -458,12 +458,12 @@ runUnitTestContract
           liftIO $ do
             tick "\n"
             tick (Text.unlines (filter (not . Text.null) running))
-            tick (Text.unlines (filter (not . Text.null) bailing))
+            tick (Data.Text.pack . show $ bailing)
 
           pure [(isRight r, vm) | (r, vm) <- details]
 
 
-runTest :: UnitTestOptions -> SolverGroup -> VM -> (Test, [AbiType]) -> IO (Text, Either Text Text, VM)
+runTest :: UnitTestOptions -> SolverGroup -> VM -> (Test, [AbiType]) -> IO (Text, Either SMTCex Text, VM)
 runTest opts@UnitTestOptions{} _ vm (ConcreteTest testName, []) = liftIO $ runOne opts vm testName emptyAbi
 runTest opts@UnitTestOptions{..} _ vm (ConcreteTest testName, types) = liftIO $ case replay of
   Nothing ->
@@ -588,7 +588,7 @@ getTargetContracts UnitTestOptions{..} = do
           in return $ fmap (\(AbiAddress a) -> a) (Vector.toList targets)
         _ -> error "internal error: unexpected failure code"
 
-exploreRun :: UnitTestOptions -> VM -> ABIMethod -> [ExploreTx] -> IO (Text, Either Text Text, VM)
+exploreRun :: UnitTestOptions -> VM -> ABIMethod -> [ExploreTx] -> IO (Text, Either SMTCex Text, VM)
 exploreRun opts@UnitTestOptions{..} initialVm testName replayTxs = do
   (targets, _) <- runStateT (EVM.Stepper.interpret oracle (getTargetContracts opts)) initialVm
   let depth = fromMaybe 20 maxDepth
@@ -617,7 +617,7 @@ execTest opts@UnitTestOptions{..} vm testName args =
     vm
 
 -- | Define the thread spawner for normal test cases
-runOne :: UnitTestOptions -> VM -> ABIMethod -> AbiValue -> IO (Text, Either Text Text, VM)
+runOne :: UnitTestOptions -> VM -> ABIMethod -> AbiValue -> IO (Text, Either SMTCex Text, VM)
 runOne opts@UnitTestOptions{..} vm testName args = do
   let argInfo = pack (if args == emptyAbi then "" else " with arguments: " <> show args)
   (bailed, vm') <- execTest opts vm testName args
@@ -643,15 +643,16 @@ runOne opts@UnitTestOptions{..} vm testName args = do
           , vm''
           )
       else
-        pure
-          ("\x1b[31m[FAIL]\x1b[0m "
-           <> testName <> argInfo
-          , Left (failOutput vm'' opts testName)
-          , vm''
-          )
+        undefined
+--        pure
+--          ("\x1b[31m[FAIL]\x1b[0m "
+--           <> testName <> argInfo
+--          , Left (failOutput vm'' opts testName)
+--          , vm''
+--          )
 
 -- | Define the thread spawner for property based tests
-fuzzRun :: UnitTestOptions -> VM -> Text -> [AbiType] -> IO (Text, Either Text Text, VM)
+fuzzRun :: UnitTestOptions -> VM -> Text -> [AbiType] -> IO (Text, Either SMTCex Text, VM)
 fuzzRun opts@UnitTestOptions{..} vm testName types = do
   let args = Args{ replay          = Nothing
                  , maxSuccess      = fuzzRuns
@@ -690,7 +691,7 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
               )
 
 -- | Define the thread spawner for symbolic tests
-symRun :: UnitTestOptions -> SolverGroup -> VM -> Text -> [AbiType] -> IO (Text, Either Text Text, VM)
+symRun :: UnitTestOptions -> SolverGroup -> VM -> Text -> [AbiType] -> IO (Text, Either SMTCex Text, VM)
 symRun opts@UnitTestOptions{..} solvers vm testName types = do
     let (cd, cdProps) = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName
@@ -708,7 +709,7 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
                                    _ -> PBool False
 
         -- add calldata to vm
-        vm' = vm & set (state . calldata) cd
+        vm' = vm & set (state . EVM.calldata) cd
                  & over (constraints) (<> cdProps)
 
     -- check postconditions against vm
@@ -719,14 +720,15 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
     then
       return ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "", vm)
     else
-      return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left $ symFailure opts testName (mapMaybe extractCex results), vm)
+      return undefined
+      -- return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left $ symFailure opts testName (mapMaybe extractCex results), vm)
 
-symFailure :: UnitTestOptions -> Text -> [(Expr End, [Text])] -> Text
+symFailure :: UnitTestOptions -> Text -> [(Expr End, SMTCex)] -> Text
 symFailure UnitTestOptions {..} testName failures' = mconcat
   [ "Failure: "
   , testName
   , "\n\n"
-  , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
+  -- , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
   ]
   where
     showRes = \case
@@ -796,19 +798,19 @@ passOutput vm UnitTestOptions { .. } testName =
       ]
     else ""
 
-failOutput :: VM -> UnitTestOptions -> Text -> Text
-failOutput vm UnitTestOptions { .. } testName =
-  let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
-  in mconcat
-  [ "Failure: "
-  , fromMaybe "" (stripSuffix "()" testName)
-  , "\n"
-  , case verbose of
-      Just _ -> indentLines 2 (showTraceTree dapp vm)
-      _ -> ""
-  , indentLines 2 (formatTestLogs (view dappEventMap dapp) (view logs vm))
-  , "\n"
-  ]
+failOutput :: VM -> UnitTestOptions -> Text -> SMTCex
+failOutput vm UnitTestOptions { .. } testName = undefined
+--  let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
+--  in mconcat
+--  [ "Failure: "
+--  , fromMaybe "" (stripSuffix "()" testName)
+--  , "\n"
+--  , case verbose of
+--      Just _ -> indentLines 2 (showTraceTree dapp vm)
+--      _ -> ""
+--  , indentLines 2 (formatTestLogs (view dappEventMap dapp) (view logs vm))
+--  , "\n"
+--  ]
 
 formatTestLogs :: (?context :: DappContext) => Map W256 Event -> Expr Logs -> Text
 formatTestLogs = undefined
@@ -898,7 +900,7 @@ makeTxCall TestVMParams{..} (cd, cdProps) = do
   resetState
   assign (tx . isCreate) False
   loadContract testAddress
-  assign (state . calldata) cd
+  assign (state . EVM.calldata) cd
   constraints %= (<> cdProps)
   assign (state . caller) (litAddr testCaller)
   assign (state . gas) testGasCall

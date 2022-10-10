@@ -25,6 +25,7 @@ import Data.Containers.ListUtils (nubOrd)
 import Control.Monad.State.Strict
 import Language.SMT2.Parser (getValueRes, parseFileMsg)
 import Data.Either
+import Data.Maybe
 
 import qualified Data.ByteString as BS
 import qualified Data.List as List
@@ -734,7 +735,7 @@ withSolvers solver count cont = do
       writeChan availableInstances inst
 
 hexChar :: Char -> Int
-hexChar ch = fromMaybe (error $ "illegal char " ++ [ch]) $
+hexChar ch = Data.Maybe.fromMaybe (error $ "illegal char " ++ [ch]) $
     List.elemIndex ch "0123456789abcdef"
 
 parseHex :: String -> Integer
