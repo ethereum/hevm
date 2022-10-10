@@ -2126,7 +2126,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
 collision :: Maybe Contract -> Bool
 collision c' = case c' of
   Just c -> (view nonce c /= 0) || case view contractcode c of
-    RuntimeCode b -> null b
+    RuntimeCode b -> not $ null b
     _ -> True
   Nothing -> False
 
