@@ -906,13 +906,19 @@ tests = testGroup "hevm"
           let vm =  abstractVM (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] yulsafeDistributivity Nothing SymbolicS
           [Qed _] <-  withSolvers Z3 1 $ \s -> verify s vm Nothing Nothing Nothing (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
-      , testCase "safemath distributivity (sol)" $ do
-          let code' =
-                [i|
-                  contract C {
-                      function distributivity(uint x, uint y, uint z) public {
-                          assert(mul(x, add(y, z)) == add(mul(x, y), mul(x, z)));
-                      }
+        expectFail $ testCase "safemath distributivity (sol)" $ do
+          Just c <- solcRuntime "A"
+            [i|
+              contract C {
+                function distributivity(uint x, uint y, uint z) public {
+                  assert(mul(x, add(y, z)) == add(mul(x, y), mul(x, z)));
+                }
+
+                function add(uint x, uint y) internal pure returns (uint z) {
+                  unchecked {
+                    require((z = x + y) >= x, "ds-math-add-overflow");
+                    }
+                }
 
                 function mul(uint x, uint y) internal pure returns (uint z) {
                   unchecked {
