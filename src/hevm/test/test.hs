@@ -722,13 +722,6 @@ tests = testGroup "hevm"
           [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
           assertEqual "Must be 255" 255 $ getArgInteger ctr "arg1"
           putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getArgInteger ctr "arg1")
-          -- TODO: check that the cex is 255
-          --   case view (state . calldata . _1) vm of
-          --     SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
-          --     ConcreteBuffer _ -> error "unexpected"
-
-          -- let [deposit] = decodeAbiValues [AbiUIntType 8] bs
-          -- assertEqual "overflowing uint8" deposit (AbiUInt 8 255)
         ,
         testCase "explore function dispatch" $ do
           Just c <- solcRuntime "A"
