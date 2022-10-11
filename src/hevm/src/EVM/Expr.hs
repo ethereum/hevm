@@ -60,7 +60,7 @@ div = op2 Div (\x y -> if y == 0 then 0 else Prelude.div x y)
 
 -- TODO: should this return 0 on div by 0 or revert?
 sdiv :: Expr EWord -> Expr EWord -> Expr EWord
-sdiv = op2 SDiv (\x y -> let sx, sy :: Integer
+sdiv = op2 SDiv (\x y -> let sx, sy :: Int256
                              sx = fromIntegral x
                              sy = fromIntegral y
                          in if y == 0 then 0 else fromIntegral (sx `quot` sy))
@@ -70,7 +70,7 @@ mod = op2 Mod (\x y -> if y == 0 then 0 else x `Prelude.mod` y)
 
 smod :: Expr EWord -> Expr EWord -> Expr EWord
 smod = op2 SMod (\x y ->
-  let sx, sy :: Integer
+  let sx, sy :: Int256
       sx = fromIntegral x
       sy = fromIntegral y
   in if y == 0
