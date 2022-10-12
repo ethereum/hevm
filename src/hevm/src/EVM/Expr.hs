@@ -149,14 +149,16 @@ not :: Expr EWord -> Expr EWord
 not = op1 Not complement
 
 shl :: Expr EWord -> Expr EWord -> Expr EWord
-shl = op2 SHL (\x y -> shiftL x (fromIntegral y))
+shl = op2 SHL (\x y -> if x > 256 then 0 else shiftL y (fromIntegral x))
 
 shr :: Expr EWord -> Expr EWord -> Expr EWord
-shr = op2 SHR (\x y -> shiftR x (fromIntegral y))
+shr = op2 SHR (\x y -> if x > 256 then 0 else shiftR y (fromIntegral x))
 
 sar :: Expr EWord -> Expr EWord -> Expr EWord
-sar = shr -- TODO: almost certainly wrong
-
+sar = op2 SAR (\x y ->
+  let msb = testBit y 255
+      shifted = if x > 256 then 0 else shiftR y (fromIntegral x)
+  in if msb then setBit shifted 255 else shifted)
 
 -- ** Bufs ** --------------------------------------------------------------------------------------
 
