@@ -2840,7 +2840,8 @@ costOfPrecompile (FeeSchedule {..}) precompileAddr input' = let
     -- MODEXP
     0x5 -> case input' of
              ConcreteBuf i -> concreteModexpGasFee i
-             _ -> error "Unsupported symbolic modexp gas calc"
+             EmptyBuf -> 0 -- TODO: is this correct?
+             _ -> error "Unsupported symbolic modexp gas calc "
     -- ECADD
     0x6 -> g_ecadd
     -- ECMUL
