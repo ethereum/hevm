@@ -29,6 +29,7 @@ import Network.Wreq.Session (Session)
 import System.Process
 
 import qualified Network.Wreq.Session as Session
+import qualified Data.Vector as V
 
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where
@@ -127,7 +128,7 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
   theBalance <- MaybeT $ fetch (QueryBalance addr)
 
   return $
-    initialContract (EVM.RuntimeCode (fmap LitByte $ BS.unpack theCode))
+    initialContract (EVM.RuntimeCode (V.fromList $ LitByte <$> BS.unpack theCode))
       & set nonce    theNonce
       & set balance  theBalance
       & set external True

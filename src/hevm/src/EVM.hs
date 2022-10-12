@@ -302,8 +302,8 @@ data SubState = SubState
   hopefully we do not have to deal with dynamic immutable before we get a real data section...
 -}
 data ContractCode
-  = InitCode ByteString (Expr Buf)  -- ^ "Constructor" code, during contract creation
-  | RuntimeCode [Expr Byte]         -- ^ "Instance" code, after contract creation
+  = InitCode ByteString (Expr Buf)     -- ^ "Constructor" code, during contract creation
+  | RuntimeCode (V.Vector (Expr Byte)) -- ^ "Instance" code, after contract creation
   deriving (Show)
 
 -- runtime err when used for symbolic code
@@ -389,7 +389,7 @@ blankState :: FrameState
 blankState = FrameState
   { _contract     = 0
   , _codeContract = 0
-  , _code         = RuntimeCode []
+  , _code         = RuntimeCode mempty
   , _pc           = 0
   , _stack        = mempty
   , _memory       = mempty
@@ -599,7 +599,7 @@ exec1 = do
                   InitCode conc _ -> BS.index conc (the state pc)
                   RuntimeCode ops ->
                     fromMaybe (error "could not analyze symbolic code") $
-                      unlitByte $ ops !! the state pc
+                      unlitByte $ ops V.! the state pc
 
       case ?op of
 
@@ -608,7 +608,7 @@ exec1 = do
           let !n = num x - 0x60 + 1
               !xs = case the state code of
                 InitCode conc _ -> Lit $ word $ padRight n $ BS.take n (BS.drop (1 + the state pc) conc)
-                RuntimeCode ops -> readWord (Lit 0) $ Expr.fromList $ padLeft' 32 $ take n $ drop (1 + the state pc) ops
+                RuntimeCode ops -> readWord (Lit 0) $ Expr.fromList $ padLeft' 32 $ V.take n $ V.drop (1 + the state pc) ops
           limitStack 1 $
             burn g_verylow $ do
               next
@@ -2172,7 +2172,7 @@ create self this xGas' xValue xs newAddr initCode = do
           prefix <- Expr.toList $ Expr.take (num minLength) initCode
           let sym = Expr.drop (num minLength) initCode
           conc <- mapM unlitByte prefix
-          pure $ InitCode (BS.pack conc) sym
+          pure $ InitCode (BS.pack $ V.toList conc) sym
     case contract' of
       Nothing ->
         vmError $ UnexpectedSymbolicArg (view (state . pc) vm0) "initcode must have a concrete prefix" []
@@ -2557,7 +2557,7 @@ checkJump x xs = do
   theCodeOps <- use (env . contracts . ix self . codeOps)
   theOpIxMap <- use (env . contracts . ix self . opIxMap)
   let ops = case theCode of
-        InitCode ops' _ -> fmap LitByte $ BS.unpack ops'
+        InitCode ops' _ -> V.fromList $ LitByte <$> BS.unpack ops'
         RuntimeCode ops' -> ops'
       op = do
         -- TODO: not a big fan of how bounds are checked, change this
@@ -2603,7 +2603,7 @@ mkOpIxMap (InitCode conc _)
 
 mkOpIxMap (RuntimeCode ops)
   = Vector.create $ Vector.new (length ops) >>= \v ->
-      let (_, _, _, m) = foldl (go v) (0, 0, 0, return ()) (stripBytecodeMetadataSym ops)
+      let (_, _, _, m) = foldl (go v) (0, 0, 0, return ()) (stripBytecodeMetadataSym $ V.toList ops)
       in m >> return v
       where
         go v (0, !i, !j, !m) x = case unlitByte x of
@@ -2677,7 +2677,7 @@ readOp x _  | x >= 0x90 && x <= 0x9f = OpSwap (x - 0x90 + 1)
 readOp x _  | x >= 0xa0 && x <= 0xa4 = OpLog (x - 0xa0)
 readOp x xs | x >= 0x60 && x <= 0x7f =
   let n = num $ x - 0x60 + 1
-  in OpPush (readBytes n (Lit . num $ x) (Expr.fromList xs))
+  in OpPush (readBytes n (Lit . num $ x) (Expr.fromList $ V.fromList xs))
 readOp x _ = case x of
   0x00 -> OpStop
   0x01 -> OpAdd
@@ -2764,7 +2764,7 @@ mkCodeOps (InitCode bytes _) = RegularVector.fromList . toList $ go 0 bytes
         Just (x, xs') ->
           let j = opSize x
           in (i, readOp x (fmap LitByte $ BS.unpack xs')) Seq.<| go (i + j) (BS.drop j xs)
-mkCodeOps (RuntimeCode ops) = RegularVector.fromList . toList $ go' 0 (stripBytecodeMetadataSym ops)
+mkCodeOps (RuntimeCode ops) = RegularVector.fromList . toList $ go' 0 (stripBytecodeMetadataSym $ V.toList ops)
   where
     go' !i !xs =
       case uncons xs of

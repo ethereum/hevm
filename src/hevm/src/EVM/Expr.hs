@@ -20,6 +20,7 @@ import Control.Lens (lens)
 import EVM.Types
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
+import qualified Data.Vector as V
 
 
 -- ** Stack Ops ** ---------------------------------------------------------------------------------
@@ -348,25 +349,25 @@ slice :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
 slice offset size src = copySlice offset (Lit 0) size src EmptyBuf
 
 
-toList :: Expr Buf -> Maybe [Expr Byte]
-toList EmptyBuf = Just []
+toList :: Expr Buf -> Maybe (V.Vector (Expr Byte))
+toList EmptyBuf = Just mempty
 toList (AbstractBuf _) = Nothing
-toList (ConcreteBuf bs) = Just . (fmap LitByte) $ BS.unpack bs
+toList (ConcreteBuf bs) = Just $ V.fromList $ LitByte <$> BS.unpack bs
 toList buf = case bufLength buf of
-  Lit l -> Just $ go l
+  Lit l -> Just $ V.fromList $ go l
   _ -> Nothing
   where
     go 0 = [readByte (Lit 0) buf]
     go i = readByte (Lit i) buf : go (i - 1)
 
 
-fromList :: [Expr Byte] -> Expr Buf
+fromList :: V.Vector (Expr Byte) -> Expr Buf
 fromList bs = case Prelude.and (fmap isLitByte bs) of
-  True -> ConcreteBuf . BS.pack . mapMaybe unlitByte $ bs
+  True -> ConcreteBuf . BS.pack . V.toList . V.mapMaybe unlitByte $ bs
   -- we want the resulting buffer to be a concrete base with any symbolic
   -- writes stacked on top, so we write all concrete bytes in a first pass and
   -- then write any symbolic bytes afterwards
-  False -> applySyms . applyConcrete $ bs
+  False -> applySyms . applyConcrete . V.toList $ bs
     where
       applyConcrete :: [Expr Byte] -> (Expr Buf, [(W256, Expr Byte)])
       applyConcrete bytes = let

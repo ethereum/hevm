@@ -39,6 +39,7 @@ import qualified Data.Map          as Map
 import qualified Data.Aeson        as JSON
 import qualified Data.Aeson.Types  as JSON
 import qualified Data.ByteString.Lazy  as Lazy
+import qualified Data.Vector as V
 
 type Storage = Map W256 W256
 
@@ -178,7 +179,7 @@ newtype ContractWithStorage = ContractWithStorage { unContractWithStorage :: (EV
 
 instance FromJSON ContractWithStorage where
   parseJSON (JSON.Object v) = do
-    code <- (EVM.RuntimeCode . litCode <$> (hexText <$> v .: "code"))
+    code <- (EVM.RuntimeCode . V.fromList . litCode <$> (hexText <$> v .: "code"))
     storage' <- v .: "storage"
     balance' <- v .: "balance"
     nonce'   <- v .: "nonce"

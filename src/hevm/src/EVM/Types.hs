@@ -42,6 +42,7 @@ import qualified Text.Read
 
 -- Some stuff for "generic programming", needed to create Word512
 import Data.Data
+import qualified Data.Vector as V
 
 -- We need a 512-bit word for doing ADDMOD and MULMOD with full precision.
 mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
@@ -1019,8 +1020,8 @@ padRight' n xs = xs <> replicate (n - length xs) '0'
                 --else mappend xs (replicate (n - m) 0)
   --where m = length xs
 
-padLeft' :: Int -> [Expr Byte] -> [Expr Byte]
-padLeft' n xs = replicate (n - length xs) (LitByte 0) <> xs
+padLeft' :: Int -> V.Vector (Expr Byte) -> V.Vector (Expr Byte)
+padLeft' n xs = V.replicate (n - length xs) (LitByte 0) <> xs
 
 word256 :: ByteString -> Word256
 word256 xs = case Cereal.runGet m (padLeft 32 xs) of
