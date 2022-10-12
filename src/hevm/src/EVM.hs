@@ -1405,8 +1405,10 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
         0x2 ->
           let
             hash = case input of
-                     ConcreteBuf input' -> ConcreteBuf $ BA.convert (Crypto.hash input' :: Digest SHA256)
+                     ConcreteBuf input' -> sha256Buf input'
+                     EmptyBuf -> sha256Buf BS.empty
                      _ -> WriteWord (Lit 0) (SHA256 input) EmptyBuf
+            sha256Buf x = ConcreteBuf $ BA.convert (Crypto.hash x :: Digest SHA256)
           in do
             assign (state . stack) (Lit 1 : xs)
             assign (state . returndata) hash
