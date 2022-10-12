@@ -239,19 +239,25 @@ readWord idx buf = ReadWord idx buf
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf -> Expr Buf
 
 -- copies from empty bufs
-copySlice _ _ _ EmptyBuf EmptyBuf = EmptyBuf
+copySlice _ _ (Lit 0) EmptyBuf EmptyBuf = EmptyBuf
+copySlice _ _ (Lit size) EmptyBuf EmptyBuf =
+  ConcreteBuf $ BS.replicate (num size) 0
 copySlice _ _ _ EmptyBuf (ConcreteBuf dst) = ConcreteBuf dst
 
 -- fully concrete copies
-copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) EmptyBuf = let
+copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) EmptyBuf
+  | srcOffset > num (BS.length src) = ConcreteBuf $ BS.replicate (num size) 0
+  | otherwise = let
     hd = BS.replicate (num dstOffset) 0
     sl = padRight (num size) $ BS.take (num size) (BS.drop (num srcOffset) src)
   in ConcreteBuf $ hd <> sl
-copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) (ConcreteBuf dst) = let
-    hd = padRight (num dstOffset) $ BS.take (num dstOffset) dst
-    sl = padRight (num size) $ BS.take (num size) (BS.drop (num srcOffset) src)
-    tl = BS.drop (num dstOffset + num size) dst
-  in ConcreteBuf $ hd <> sl <> tl
+copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) (ConcreteBuf dst)
+  = let hd = padRight (num dstOffset) $ BS.take (num dstOffset) dst
+        sl = if srcOffset > num (BS.length src)
+          then BS.replicate (num size) 0
+          else padRight (num size) $ BS.take (num size) (BS.drop (num srcOffset) src)
+        tl = BS.drop (num dstOffset + num size) dst
+    in ConcreteBuf $ hd <> sl <> tl
 
 -- concrete indicies & abstract src (may produce a concrete result if we are
 -- copying from a concrete region of src)
