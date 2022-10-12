@@ -43,6 +43,7 @@ import qualified Data.Char as Char
 import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified EVM.Expr as Expr
+import qualified Data.Text as T
 
 data Signedness = Signed | Unsigned
   deriving (Show)
@@ -127,7 +128,7 @@ showCall = undefined
 --showCall ts (ConcreteBuffer bs) = showValues ts $ ConcreteBuffer (BS.drop 4 bs)
 
 showError :: (?context :: DappContext) => Expr Buf -> Text
-showError bs = undefined
+showError bs = T.pack $ show bs
   {-
   let dappinfo = view contextInfo ?context
       bs4 = BS.take 4 bs
@@ -174,9 +175,10 @@ formatBinary =
   (<>) "0x" . decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
 formatSBinary :: Expr Buf -> Text
-formatSBinary = undefined
---formatSBinary (SymbolicBuffer bs) = "<" <> pack (show (length bs)) <> " symbolic bytes>"
---formatSBinary (ConcreteBuffer bs) = formatBinary bs
+formatSBinary EmptyBuf = "<empty buffer>"
+formatSBinary (ConcreteBuf bs) = formatBinary bs
+formatSBinary (AbstractBuf t) = "<" <> t <> " abstract buf>"
+formatSBinary _ = error "formatSBinary: implement me"
 
 showTraceTree :: DappInfo -> VM -> Text
 showTraceTree dapp vm =
@@ -222,36 +224,36 @@ showTrace dapp vm trace =
           logn
         (t1:_) ->
           case maybeLitWord t1 of
-            Just topic -> undefined
-              --case Map.lookup (wordValue topic) (view dappEventMap dapp) of
-                --Just (Event name _ types) ->
-                  --knownTopic name types
-                --Nothing ->
-                  --case topics of
-                    --[_, t2, _, _] ->
-                      ---- check for ds-note logs.. possibly catching false positives
-                      ---- event LogNote(
-                      ----     bytes4   indexed  sig,
-                      ----     address  indexed  usr,
-                      ----     bytes32  indexed  arg1,
-                      ----     bytes32  indexed  arg2,
-                      ----     bytes             data
-                      ---- ) anonymous;
-                      --let
-                        --sig = fromIntegral $ shiftR (wordValue topic) 224 :: Word32
-                        --usr = case maybeLitWord t2 of
-                          --Just w ->
-                            --pack $ show (fromIntegral w :: Addr)
-                          --Nothing  ->
-                            --"<symbolic>"
-                      --in
-                        --case Map.lookup sig (view dappAbiMap dapp) of
-                          --Just m ->
-                           --lognote (view methodSignature m) usr
-                          --Nothing ->
-                            --logn
-                    --_ ->
-                      --logn
+            Just topic ->
+              case Map.lookup (topic) (view dappEventMap dapp) of
+                Just (Event name _ types) ->
+                  knownTopic name types
+                Nothing ->
+                  case topics of
+                    [_, t2, _, _] ->
+                      -- check for ds-note logs.. possibly catching false positives
+                      -- event LogNote(
+                      --     bytes4   indexed  sig,
+                      --     address  indexed  usr,
+                      --     bytes32  indexed  arg1,
+                      --     bytes32  indexed  arg2,
+                      --     bytes             data
+                      -- ) anonymous;
+                      let
+                        sig = fromIntegral $ shiftR topic 224 :: Word32
+                        usr = case maybeLitWord t2 of
+                          Just w ->
+                            pack $ show (fromIntegral w :: Addr)
+                          Nothing  ->
+                            "<symbolic>"
+                      in
+                        case Map.lookup sig (view dappAbiMap dapp) of
+                          Just m ->
+                            lognote (view methodSignature m) usr
+                          Nothing ->
+                            logn
+                    _ ->
+                      logn
             Nothing ->
               logn
 
@@ -288,22 +290,25 @@ showTrace dapp vm trace =
             formatSBinary out
     ReturnTrace out (CallContext {}) ->
       "← " <> formatSBinary out
-    ReturnTrace out (CreationContext {}) -> undefined
-      --"← " <> pack (show (len out)) <> " bytes of code"
-
+    ReturnTrace out (CreationContext {}) ->
+      let l = case out of
+                ConcreteBuf bs -> BS.length bs
+                EmptyBuf -> 0
+                _ -> error "panik :o"
+      in "← " <> pack (show l) <> " bytes of code"
     EntryTrace t ->
       t
-    FrameTrace (CreationContext addr hash _ _ ) -> undefined
-      -- "create "
-      -- <> maybeContractName (preview (dappSolcByHash . ix hash . _2) dapp)
-      -- <> "@" <> pack (show addr)
-      -- <> pos
-    FrameTrace (CallContext target context _ _ hash abi calldata _ _) -> undefined
-      {-
+    FrameTrace (CreationContext addr (Lit hash) _ _ ) -> -- FIXME: irrefutable pattern
+      "create "
+      <> maybeContractName (preview (dappSolcByHash . ix hash . _2) dapp)
+      <> "@" <> pack (show addr)
+      <> pos
+    FrameTrace (CallContext target context _ _ hash abi calldata _ _) ->
       let calltype = if target == context
                      then "call "
                      else "delegatecall "
-      in case preview (dappSolcByHash . ix hash . _2) dapp of
+          Lit hash' = hash -- FIXME: irrefutable pattern, handle symbolic
+      in case preview (dappSolcByHash . ix hash' . _2) dapp of
         Nothing ->
           calltype
             <> pack (show target)
@@ -331,7 +336,6 @@ showTrace dapp vm trace =
                  (abi >>= fmap getAbiTypes . maybeAbiName solc)
             <> "\x1b[0m"
             <> pos
-          -}
 
 getAbiTypes :: Text -> [Maybe AbiType]
 getAbiTypes abi = map (parseTypeName mempty) types
