@@ -1230,7 +1230,7 @@ exec1 = do
                   forceConcreteBuf (readMemory xOffset' xSize' vm) "CREATE2" $
                     \initCode -> do
                       let
-                        newAddr  = create2Address self (num xSalt) initCode
+                        newAddr  = create2Address self xSalt initCode
                         (cost, gas') = costOfCreate fees availableGas xSize
                       _ <- accessAccountForGas newAddr
                       burn (cost - gas') $ create self this (num gas') xValue xs newAddr (ConcreteBuf initCode)
@@ -2072,7 +2072,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
     \((num -> xTo'), (num -> xContext')) ->
       if xTo' > 0 && xTo' <= 9
       then precompiledContract this gasGiven xTo' xContext' xValue xInOffset xInSize xOutOffset xOutSize xs
-      else if num xTo' == cheatCode then
+      else if xTo' == cheatCode then
         do
           assign (state . stack) xs
           cheat (xInOffset, xInSize) (xOutOffset, xOutSize)
