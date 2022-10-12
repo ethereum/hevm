@@ -731,6 +731,9 @@ exec1 = do
                                           ConcreteBuf bs -> do
                                             let hash' = keccak' bs
                                             pure (Lit hash', Map.singleton hash' bs)
+                                          EmptyBuf -> do
+                                            let hash' = keccak' ""
+                                            pure (Lit hash', Map.singleton hash' "")
                                           buf -> pure (Keccak buf, mempty)
                       next
                       assign (state . stack) (hash : xs)
