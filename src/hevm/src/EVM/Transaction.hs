@@ -216,7 +216,9 @@ initTx vm = let
          then Map.insert toAddr (toContract & balance .~ oldBalance)
          else touchAccount toAddr)
       $ preState
-
+    resetStore s = if creation then Map.insert (num toAddr) mempty s else s
     in
       vm & EVM.env . EVM.contracts .~ initState
          & EVM.tx . EVM.txReversion .~ preState
+         & EVM.env . EVM.storage %~ (\(ConcreteStore s) -> ConcreteStore $ resetStore s)
+         & EVM.env . EVM.origStorage %~ resetStore
