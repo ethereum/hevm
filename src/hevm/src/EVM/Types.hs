@@ -1120,11 +1120,3 @@ regexMatches regexSource =
     regex = Regex.makeRegexOpts compOpts execOpts (Text.unpack regexSource)
   in
     Regex.matchTest regex . Seq.fromList . Text.unpack
-
--- | A total variant of (!!)
-(!?) :: Foldable f => f a -> Int -> Maybe a
-xs !? n
-  | n < 0     = Nothing
-  | otherwise = foldr (\x r k -> case k of
-                                   0 -> Just x
-                                   _ -> r (k-1)) (const Nothing) xs n

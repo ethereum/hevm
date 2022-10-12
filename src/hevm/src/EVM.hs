@@ -2561,7 +2561,7 @@ checkJump x xs = do
         RuntimeCode ops' -> ops'
       op = do
         -- TODO: not a big fan of how bounds are checked, change this
-        b <- if x < num (length ops) then ops !? num x else Nothing
+        b <- if x < num (length ops) then ops V.!? num x else Nothing
         unlitByte b
   case op of
     Nothing -> vmError BadJumpDestination
