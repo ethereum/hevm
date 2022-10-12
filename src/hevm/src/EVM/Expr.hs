@@ -483,7 +483,9 @@ isLitByte _ = False
 
 -- | Returns the byte at idx from the given word.
 indexWord :: Expr EWord -> Expr EWord -> Expr Byte
-indexWord (Lit idx) (Lit w) = LitByte . fromIntegral $ shiftR w (248 - num idx * 8)
+indexWord (Lit idx) (Lit w)
+  | idx <= 31 = LitByte . fromIntegral $ shiftR w (248 - num idx * 8)
+  | otherwise = LitByte 0 -- TODO: is this correct?
 indexWord (Lit idx) (JoinBytes zero        one        two       three
                                four        five       six       seven
                                eight       nine       ten       eleven
