@@ -416,7 +416,9 @@ makeLenses ''VM
 -- | An "external" view of a contract's bytecode, appropriate for
 -- e.g. @EXTCODEHASH@.
 bytecode :: Getter Contract (Expr Buf)
-bytecode = contractcode . to toBuf
+bytecode = contractcode . to f
+  where f (InitCode _ _) = mempty
+        f (RuntimeCode ops) = Expr.fromList ops
 
 instance Semigroup Cache where
   a <> b = Cache
