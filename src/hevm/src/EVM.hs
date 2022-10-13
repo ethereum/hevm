@@ -2202,6 +2202,12 @@ create self this xGas' xValue xs newAddr initCode = do
           assign (at newAddr) (Just (newContract & balance .~ oldBal))
           modifying (ix self . nonce) succ
 
+        let resetStorage = \case
+              ConcreteStore s -> ConcreteStore (Map.delete (num newAddr) s)
+              s -> s -- TODO: what about symbolic storage?
+        modifying (env . storage) resetStorage
+        modifying (env . origStorage) (Map.delete (num newAddr))
+
         transfer self newAddr xValue
 
         pushTrace (FrameTrace newContext)
