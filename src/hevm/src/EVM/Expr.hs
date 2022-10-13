@@ -242,7 +242,8 @@ copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf -> E
 copySlice _ _ (Lit 0) EmptyBuf EmptyBuf = EmptyBuf
 copySlice _ _ (Lit size) EmptyBuf EmptyBuf =
   ConcreteBuf $ BS.replicate (num size) 0
-copySlice _ _ _ EmptyBuf (ConcreteBuf dst) = ConcreteBuf dst
+copySlice _ dstOffset size EmptyBuf dst =
+  copySlice (Lit 1) dstOffset size (ConcreteBuf "") dst -- TODO: ugly!
 
 -- fully concrete copies
 copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) EmptyBuf
