@@ -32,7 +32,7 @@ import Data.Maybe                   (fromMaybe)
 import Data.Sequence                (Seq)
 import Data.Vector.Storable         (Vector)
 import Data.Foldable                (toList)
-import Data.Word                    (Word8, Word32)
+import Data.Word                    (Word8, Word32, Word64)
 import Data.Bits                    (FiniteBits, countLeadingZeros, finiteBitSize)
 
 import Data.Tree
@@ -86,6 +86,7 @@ data Error
   | NotUnique (Expr EWord)
   | SMTTimeout
   | FFI [AbiValue]
+  | NonceOverflow
 deriving instance Show Error
 
 -- | The possible result states of a VM
@@ -2144,7 +2145,13 @@ create :: (?op :: Word8)
 create self this xGas' xValue xs newAddr initCode = do
   vm0 <- get
   let xGas = num xGas'
-  if xValue > view balance this
+  if view nonce this == num (maxBound :: Word64)
+  then do
+    assign (state . stack) (Lit 0 : xs)
+    assign (state . returndata) mempty
+    pushTrace $ ErrorTrace NonceOverflow
+    next
+  else if xValue > view balance this
   then do
     assign (state . stack) (Lit 0 : xs)
     assign (state . returndata) mempty
