@@ -2632,7 +2632,7 @@ vmOp vm =
         InitCode xs' _ ->
           (BS.index xs' i, fmap LitByte $ BS.unpack $ BS.drop i xs')
         RuntimeCode xs' ->
-          ( fromMaybe (error "unexpected symbolic code") . unlitByte $ xs' !! i , drop i xs')
+          ( fromMaybe (error "unexpected symbolic code") . unlitByte $ xs' V.! i , V.toList $ V.drop i xs')
   in if (opslen code' < i)
      then Nothing
      else Just (readOp op pushdata)
