@@ -2844,19 +2844,26 @@ concreteModexpGasFee input = max 200 ((multiplicationComplexity * iterCount) `di
 
 -- Gas cost of precompiles
 costOfPrecompile :: FeeSchedule Integer -> Addr -> Expr Buf -> Integer
-costOfPrecompile (FeeSchedule {..}) precompileAddr input' = let
-    input = fromMaybe (error "precompile input cannot have a dynamic size") $ Expr.toList input'
+costOfPrecompile (FeeSchedule {..}) precompileAddr input =
+  let errorDynamicSize = error "precompile input cannot have a dynamic size"
+      inputLen = case input of
+                   EmptyBuf -> 0
+                   ConcreteBuf bs -> BS.length bs
+                   AbstractBuf _ -> errorDynamicSize
+                   buf -> case bufLength buf of
+                            Lit l -> num l -- TODO: overflow
+                            _ -> errorDynamicSize
   in case precompileAddr of
     -- ECRECOVER
     0x1 -> 3000
     -- SHA2-256
-    0x2 -> num $ (((length input + 31) `div` 32) * 12) + 60
+    0x2 -> num $ (((inputLen + 31) `div` 32) * 12) + 60
     -- RIPEMD-160
-    0x3 -> num $ (((length input + 31) `div` 32) * 120) + 600
+    0x3 -> num $ (((inputLen + 31) `div` 32) * 120) + 600
     -- IDENTITY
-    0x4 -> num $ (((length input + 31) `div` 32) * 3) + 15
+    0x4 -> num $ (((inputLen + 31) `div` 32) * 3) + 15
     -- MODEXP
-    0x5 -> case input' of
+    0x5 -> case input of
              ConcreteBuf i -> concreteModexpGasFee i
              EmptyBuf -> concreteModexpGasFee ""
              _ -> error "Unsupported symbolic modexp gas calc "
@@ -2865,9 +2872,9 @@ costOfPrecompile (FeeSchedule {..}) precompileAddr input' = let
     -- ECMUL
     0x7 -> g_ecmul
     -- ECPAIRING
-    0x8 -> num $ ((length input) `div` 192) * (num g_pairing_point) + (num g_pairing_base)
+    0x8 -> num $ (inputLen `div` 192) * (num g_pairing_point) + (num g_pairing_base)
     -- BLAKE2
-    0x9 -> case input' of
+    0x9 -> case input of
              ConcreteBuf i -> g_fround * (num $ asInteger $ lazySlice 0 4 i)
              EmptyBuf -> 0
              _ -> error "Unsupported symbolic blake2 gas calc"
