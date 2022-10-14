@@ -1093,6 +1093,7 @@ word32 xs = sum [ fromIntegral x `shiftL` (8*n)
 
 keccak :: Expr Buf -> Expr EWord
 keccak (ConcreteBuf bs) = Lit $ keccak' bs
+keccak EmptyBuf = Lit $ keccak' ""
 keccak buf = Keccak buf
 
 keccak' :: ByteString -> W256
