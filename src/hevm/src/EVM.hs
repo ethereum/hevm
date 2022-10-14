@@ -15,7 +15,7 @@ import EVM.Types hiding (IllegalOverflow)
 import EVM.Solidity
 import EVM.Concrete (createAddress, create2Address)
 import EVM.Op
-import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord, writeByte, bufLength, indexWord, litAddr, readBytes, word256At, copySlice)
+import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord, writeByte, bufLength, indexWord, litAddr, readBytes, word256At, copySlice, isLitByte)
 import EVM.FeeSchedule (FeeSchedule (..))
 import Options.Generic as Options
 import qualified EVM.Precompiled
@@ -611,7 +611,13 @@ exec1 = do
           let !n = num x - 0x60 + 1
               !xs = case the state code of
                 InitCode conc _ -> Lit $ word $ padRight n $ BS.take n (BS.drop (1 + the state pc) conc)
-                RuntimeCode ops -> readWord (Lit 0) $ Expr.fromList $ padLeft' 32 $ V.take n $ V.drop (1 + the state pc) ops
+                RuntimeCode ops ->
+                  let bytes = V.take n $ V.drop (1 + the state pc) ops
+                  in if all isLitByte bytes then -- optimize concrete path
+                       let litBytes = V.toList $ V.catMaybes $ unlitByte <$> bytes
+                           padded = BS.replicate (32 - length litBytes) 0 <> BS.pack litBytes
+                       in Lit $ word padded
+                     else readWord (Lit 0) $ Expr.fromList $ padLeft' 32 bytes
           limitStack 1 $
             burn g_verylow $ do
               next
