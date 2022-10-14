@@ -2166,6 +2166,7 @@ create self this xGas' xValue xs newAddr initCode = do
   else if collision $ view (env . contracts . at newAddr) vm0
   then burn xGas $ do
     assign (state . stack) (Lit 0 : xs)
+    assign (state . returndata) mempty
     modifying (env . contracts . ix self . nonce) succ
     next
   else burn xGas $ do
