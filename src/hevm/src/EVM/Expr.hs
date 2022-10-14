@@ -8,7 +8,7 @@ module EVM.Expr where
 
 import Prelude hiding (LT, GT)
 import Data.Bits
-import Data.DoubleWord (Int256)
+import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
 import Data.Word
 import Data.Maybe
 import Data.List
@@ -175,9 +175,14 @@ readByte _ EmptyBuf = LitByte 0x0
 
 -- fuly concrete reads
 readByte (Lit x) (ConcreteBuf b)
-  = if x < num (BS.length b)
-    then LitByte (BS.index b (num x))
+  = if x <= num (maxBound :: Int) && i < BS.length b
+    then LitByte (BS.index b i)
     else LitByte 0x0
+  where
+    i :: Int
+    i = case x of
+          (W256 (Word256 _ (Word128 _ x'))) -> num x'
+
 readByte i@(Lit x) (WriteByte (Lit idx) val src)
   = if x == idx
     then val
