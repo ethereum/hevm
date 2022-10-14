@@ -1377,12 +1377,12 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
       fees = view (block . schedule) vm
       cost = costOfPrecompile fees preCompileAddr input
       notImplemented = error $ "precompile at address " <> show preCompileAddr <> " not yet implemented"
-      precompileFail = burn (num gasCap - cost) $ do
+      precompileFail = burn (gasCap - cost) $ do
                          assign (state . stack) (Lit 0 : xs)
                          pushTrace $ ErrorTrace PrecompileFailure
                          next
-  if cost > num gasCap then
-    burn (num gasCap) $ do
+  if cost > gasCap then
+    burn gasCap $ do
       assign (state . stack) (Lit 0 : xs)
       next
   else
