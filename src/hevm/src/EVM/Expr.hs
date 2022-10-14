@@ -170,10 +170,9 @@ sar = op2 SAR (\x y ->
 -- an abstract expresion if nescessary. Note that a Buf is an infinite
 -- structure, so reads outside of the bounds of a ConcreteBuf return 0. This is
 -- inline with the semantics of calldata and memory, but not of returndata.
-readByte :: Expr EWord -> Expr Buf -> Expr Byte
-readByte _ EmptyBuf = LitByte 0x0
 
 -- fuly concrete reads
+readByte :: Expr EWord -> Expr Buf -> Expr Byte
 readByte (Lit x) (ConcreteBuf b)
   = if x <= num (maxBound :: Int) && i < BS.length b
     then LitByte (BS.index b i)
@@ -244,14 +243,14 @@ readWord idx buf = ReadWord idx buf
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf -> Expr Buf
 
 -- copies from empty bufs
-copySlice _ _ (Lit 0) EmptyBuf EmptyBuf = EmptyBuf
-copySlice _ _ (Lit size) EmptyBuf EmptyBuf =
+copySlice _ _ (Lit 0) (ConcreteBuf "") dst = dst
+copySlice _ _ (Lit size) (ConcreteBuf "") (ConcreteBuf "") =
   ConcreteBuf $ BS.replicate (num size) 0
-copySlice _ dstOffset size EmptyBuf dst =
-  copySlice (Lit 1) dstOffset size (ConcreteBuf "") dst -- TODO: ugly!
+copySlice srcOffset dstOffset (Lit size) (ConcreteBuf "") dst =
+  copySlice srcOffset dstOffset (Lit size) (ConcreteBuf $ BS.replicate (num size) 0) dst -- TODO: ugly!
 
 -- fully concrete copies
-copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) EmptyBuf
+copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) (ConcreteBuf "")
   | srcOffset > num (BS.length src) = ConcreteBuf $ BS.replicate (num size) 0
   | otherwise = let
     hd = BS.replicate (num dstOffset) 0
@@ -279,7 +278,7 @@ copySlice srcOffset dstOffset size src dst = CopySlice srcOffset dstOffset size 
 
 
 writeByte :: Expr EWord -> Expr Byte -> Expr Buf -> Expr Buf
-writeByte (Lit offset) (LitByte val) EmptyBuf
+writeByte (Lit offset) (LitByte val) (ConcreteBuf "")
   = ConcreteBuf $ BS.replicate (num offset) 0 <> BS.singleton val
 writeByte (Lit offset) (LitByte byte) (ConcreteBuf src)
   = ConcreteBuf $ (padRight (num offset) $ BS.take (num offset) src)
@@ -289,7 +288,7 @@ writeByte offset byte src = WriteByte offset byte src
 
 
 writeWord :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
-writeWord (Lit offset) (Lit val) EmptyBuf
+writeWord (Lit offset) (Lit val) (ConcreteBuf "")
   = ConcreteBuf $ BS.replicate (num offset) 0 <> word256Bytes val
 writeWord (Lit offset) (Lit val) (ConcreteBuf src)
   = ConcreteBuf $ (padRight (num offset) $ BS.take (num offset) src)
@@ -308,7 +307,6 @@ bufLength buf = case go 0 buf of
                   Nothing -> BufLength buf
   where
     go :: W256 -> Expr Buf -> Maybe (Expr EWord)
-    go l EmptyBuf = Just . Lit $ l
     go l (ConcreteBuf b) = Just . Lit $ max (num . BS.length $ b) l
     go l (WriteWord (Lit idx) _ b) = go (max l (idx + 31)) b
     go l (WriteByte (Lit idx) _ b) = go (max l idx) b
@@ -323,7 +321,6 @@ minLength = go 0
   where
     go :: W256 -> Expr Buf -> Maybe Int
     -- base cases
-    go l EmptyBuf = Just . num $ l
     go _ (AbstractBuf _) = Nothing
     go l (ConcreteBuf b) = Just . num $ max (num . BS.length $ b) l
 
@@ -356,13 +353,11 @@ take n = slice (Lit 0) (Lit n)
 drop :: W256 -> Expr Buf -> Expr Buf
 drop n buf = slice (Lit n) (sub (bufLength buf) (Lit n)) buf
 
-
 slice :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
-slice offset size src = copySlice offset (Lit 0) size src EmptyBuf
+slice offset size src = copySlice offset (Lit 0) size src mempty
 
 
 toList :: Expr Buf -> Maybe (V.Vector (Expr Byte))
-toList EmptyBuf = Just mempty
 toList (AbstractBuf _) = Nothing
 toList (ConcreteBuf bs) = Just $ V.fromList $ LitByte <$> BS.unpack bs
 toList buf = case bufLength buf of
@@ -387,16 +382,17 @@ fromList bs = case Prelude.and (fmap isLitByte bs) of
           go (buf, syms) b = case b of
                        (idx, LitByte b') -> (writeByte (Lit idx) (LitByte b') buf, syms)
                        _ -> (buf, b : syms)
-        in foldl' go (EmptyBuf, []) (zip [0..] bytes)
+        in foldl' go (mempty, []) (zip [0..] bytes)
 
       applySyms :: (Expr Buf, [(W256, Expr Byte)]) -> Expr Buf
       applySyms (buf, syms) = foldl' (\acc (idx, b) -> writeByte (Lit idx) b acc) buf syms
 
 instance Semigroup (Expr Buf) where
+  (ConcreteBuf a) <> (ConcreteBuf b) = ConcreteBuf $ a <> b
   a <> b = copySlice (Lit 0) (bufLength a) (bufLength b) b a
 
 instance Monoid (Expr Buf) where
-  mempty = EmptyBuf
+  mempty = ConcreteBuf ""
 
 -- | Removes any irrelevant writes when reading from a buffer
 simplifyReads :: Expr a -> Expr a
@@ -409,7 +405,6 @@ simplifyReads = \case
 -- TODO: are the bounds here correct? think there might be some off by one mistakes...
 stripWrites :: W256 -> W256 -> Expr Buf -> Expr Buf
 stripWrites bottom top = \case
-  EmptyBuf -> EmptyBuf
   AbstractBuf s -> AbstractBuf s
   ConcreteBuf b -> ConcreteBuf $ BS.take (num top) b
   WriteByte (Lit idx) v prev

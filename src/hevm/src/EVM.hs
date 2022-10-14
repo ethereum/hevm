@@ -740,9 +740,6 @@ exec1 = do
                                           ConcreteBuf bs -> do
                                             let hash' = keccak' bs
                                             pure (Lit hash', Map.singleton hash' bs)
-                                          EmptyBuf -> do
-                                            let hash' = keccak' ""
-                                            pure (Lit hash', Map.singleton hash' "")
                                           buf -> pure (Keccak buf, mempty)
                       next
                       assign (state . stack) (hash : xs)
@@ -1415,8 +1412,7 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
           let
             hash = case input of
                      ConcreteBuf input' -> sha256Buf input'
-                     EmptyBuf -> sha256Buf BS.empty
-                     _ -> WriteWord (Lit 0) (SHA256 input) EmptyBuf
+                     _ -> WriteWord (Lit 0) (SHA256 input) mempty
             sha256Buf x = ConcreteBuf $ BA.convert (Crypto.hash x :: Digest SHA256)
           in do
             assign (state . stack) (Lit 1 : xs)
@@ -1880,7 +1876,6 @@ forceConcrete6 (k,l,m,n,o,p) msg continue = case (maybeLitWord k, maybeLitWord l
 
 forceConcreteBuf :: Expr Buf -> String -> (ByteString -> EVM ()) -> EVM ()
 forceConcreteBuf (ConcreteBuf b) _ continue = continue b
-forceConcreteBuf (EmptyBuf) _ continue = continue "" -- TODO: is this correct?
 forceConcreteBuf b msg _ = do
     vm <- get
     vmError $ UnexpectedSymbolicArg (view (state . pc) vm) msg [b]
@@ -2135,7 +2130,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                     assign memory mempty
                     assign memorySize 0
                     assign returndata mempty
-                    assign calldata (copySlice (Lit xInOffset) (Lit 0) (Lit xInSize) (view (state . memory) vm0) EmptyBuf)
+                    assign calldata (copySlice (Lit xInOffset) (Lit 0) (Lit xInSize) (view (state . memory) vm0) mempty)
 
                   continue xTo'
 
@@ -2470,7 +2465,7 @@ copyCallBytesToMemory bs size xOffset yOffset =
       copySlice xOffset yOffset (Expr.min size (bufLength bs)) bs mem
 
 readMemory :: Expr EWord -> Expr EWord -> VM -> Expr Buf
-readMemory offset size vm = copySlice offset (Lit 0) size (view (state . memory) vm) EmptyBuf
+readMemory offset size vm = copySlice offset (Lit 0) size (view (state . memory) vm) mempty
 
 -- * Tracing
 
@@ -2598,9 +2593,6 @@ checkJump x xs = do
            state . pc .= num x
          else
            vmError BadJumpDestination
-
--- >>> 0x1000000000000000b :: Int
--- 11
 
 opSize :: Word8 -> Int
 opSize x | x >= 0x60 && x <= 0x7f = num x - 0x60 + 2
@@ -2857,7 +2849,6 @@ costOfPrecompile :: FeeSchedule Integer -> Addr -> Expr Buf -> Integer
 costOfPrecompile (FeeSchedule {..}) precompileAddr input =
   let errorDynamicSize = error "precompile input cannot have a dynamic size"
       inputLen = case input of
-                   EmptyBuf -> 0
                    ConcreteBuf bs -> BS.length bs
                    AbstractBuf _ -> errorDynamicSize
                    buf -> case bufLength buf of
@@ -2875,7 +2866,6 @@ costOfPrecompile (FeeSchedule {..}) precompileAddr input =
     -- MODEXP
     0x5 -> case input of
              ConcreteBuf i -> concreteModexpGasFee i
-             EmptyBuf -> concreteModexpGasFee ""
              _ -> error "Unsupported symbolic modexp gas calc "
     -- ECADD
     0x6 -> g_ecadd
@@ -2886,7 +2876,6 @@ costOfPrecompile (FeeSchedule {..}) precompileAddr input =
     -- BLAKE2
     0x9 -> case input of
              ConcreteBuf i -> g_fround * (num $ asInteger $ lazySlice 0 4 i)
-             EmptyBuf -> 0
              _ -> error "Unsupported symbolic blake2 gas calc"
     _ -> error ("unimplemented precompiled contract " ++ show precompileAddr)
 

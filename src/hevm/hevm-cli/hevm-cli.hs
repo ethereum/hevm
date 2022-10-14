@@ -807,7 +807,7 @@ symvmFromCommand cmd = do
     (Nothing, Just sig') -> do
       method' <- functionAbi sig'
       let typs = snd <$> view methodInputs method'
-      pure . fst $ symCalldata (view methodSignature method') typs (arg cmd) EmptyBuf
+      pure . fst $ symCalldata (view methodSignature method') typs (arg cmd) mempty
     _ -> error "incompatible options: calldata and abi"
 
   -- TODO: rework this, ConcreteS not needed anymore
@@ -854,7 +854,7 @@ symvmFromCommand cmd = do
     block'   = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
     origin'  = addr origin 0
     mkCode bs = if create cmd
-                   then EVM.InitCode bs EmptyBuf
+                   then EVM.InitCode bs mempty
                    else EVM.RuntimeCode (fromJust . Expr.toList $ ConcreteBuf bs)
     address' = if create cmd
           then addr address (createAddress origin' (word nonce 0))

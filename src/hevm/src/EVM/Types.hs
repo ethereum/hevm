@@ -70,8 +70,7 @@ newtype W256 = W256 Word256
   Memory, calldata, and returndata are all represented as a Buf. Semantically
   speaking a Buf is a byte array with of size 2^256.
 
-  Bufs have three base constructors:
-    - EmptyBuf:       all elements are zero
+  Bufs have two base constructors:
     - AbstractBuf:    all elements are fully abstract values
     - ConcreteBuf bs: all elements past (length bs) are zero
 
@@ -326,7 +325,6 @@ data Expr (a :: EType) where
 
   -- buffers
 
-  EmptyBuf       :: Expr Buf
   ConcreteBuf    :: ByteString -> Expr Buf
   AbstractBuf    :: Text -> Expr Buf
 
@@ -633,7 +631,6 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- buffers
 
-      e@(EmptyBuf) -> f e
       e@(ConcreteBuf _) -> f e
       e@(AbstractBuf _) -> f e
       e@(ReadWord a b) -> f e <> (go a) <> (go b)
@@ -843,7 +840,6 @@ mapExpr f expr = case (f expr) of
 
   -- buffers
 
-  EmptyBuf -> EmptyBuf
   ConcreteBuf a -> ConcreteBuf a
   AbstractBuf a -> AbstractBuf a
   ReadWord a b -> ReadWord (mapExpr f (f a)) (mapExpr f (f b))
@@ -1093,7 +1089,6 @@ word32 xs = sum [ fromIntegral x `shiftL` (8*n)
 
 keccak :: Expr Buf -> Expr EWord
 keccak (ConcreteBuf bs) = Lit $ keccak' bs
-keccak EmptyBuf = Lit $ keccak' ""
 keccak buf = Keccak buf
 
 keccak' :: ByteString -> W256

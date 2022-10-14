@@ -175,7 +175,6 @@ formatBinary =
   (<>) "0x" . decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
 formatSBinary :: Expr Buf -> Text
-formatSBinary EmptyBuf = "<empty buffer>"
 formatSBinary (ConcreteBuf bs) = formatBinary bs
 formatSBinary (AbstractBuf t) = "<" <> t <> " abstract buf>"
 formatSBinary _ = error "formatSBinary: implement me"
@@ -293,7 +292,6 @@ showTrace dapp vm trace =
     ReturnTrace out (CreationContext {}) ->
       let l = case out of
                 ConcreteBuf bs -> BS.length bs
-                EmptyBuf -> 0
                 _ -> error "panik :o"
       in "← " <> pack (show l) <> " bytes of code"
     EntryTrace t ->
