@@ -2857,7 +2857,7 @@ costOfPrecompile (FeeSchedule {..}) precompileAddr input' = let
     -- MODEXP
     0x5 -> case input' of
              ConcreteBuf i -> concreteModexpGasFee i
-             EmptyBuf -> 0 -- TODO: is this correct?
+             EmptyBuf -> concreteModexpGasFee ""
              _ -> error "Unsupported symbolic modexp gas calc "
     -- ECADD
     0x6 -> g_ecadd
@@ -2868,7 +2868,7 @@ costOfPrecompile (FeeSchedule {..}) precompileAddr input' = let
     -- BLAKE2
     0x9 -> case input' of
              ConcreteBuf i -> g_fround * (num $ asInteger $ lazySlice 0 4 i)
-             EmptyBuf -> 0 -- TODO: is this correct?
+             EmptyBuf -> 0
              _ -> error "Unsupported symbolic blake2 gas calc"
     _ -> error ("unimplemented precompiled contract " ++ show precompileAddr)
 
