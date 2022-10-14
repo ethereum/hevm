@@ -2116,10 +2116,14 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                     , _frameContext = newContext
                     }
 
+                  let clearInitCode = \case
+                        (InitCode _ _) -> InitCode mempty mempty
+                        a -> a
+
                   zoom state $ do
                     assign gas (num xGas)
                     assign pc 0
-                    assign code (view contractcode target)
+                    assign code (clearInitCode (view contractcode target))
                     assign codeContract xTo'
                     assign stack mempty
                     assign memory mempty
