@@ -116,21 +116,21 @@ tests = testGroup "hevm"
           _ -> False
     ]
   , testGroup "Solidity expressions"
-    [ expectFail $ testCase "Trivial" $
+    [ testCase "Trivial" $
         SolidityCall "x = 3;" []
           ===> AbiUInt 256 3
 
-    , expectFail $ testCase "Arithmetic" $ do
+    , testCase "Arithmetic" $ do
         SolidityCall "x = a + 1;"
           [AbiUInt 256 1] ===> AbiUInt 256 2
         SolidityCall "unchecked { x = a - 1; }"
           [AbiUInt 8 0] ===> AbiUInt 8 255
 
-    , expectFail $ testCase "keccak256()" $
+    , testCase "keccak256()" $
         SolidityCall "x = uint(keccak256(abi.encodePacked(a)));"
           [AbiString ""] ===> AbiUInt 256 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
 
-    , expectFail $ testProperty "abi encoding vs. solidity" $ withMaxSuccess 20 $ forAll (arbitrary >>= genAbiValue) $
+    , testProperty "abi encoding vs. solidity" $ withMaxSuccess 20 $ forAll (arbitrary >>= genAbiValue) $
       \y -> ioProperty $ do
           -- traceM ("encoding: " ++ (show y) ++ " : " ++ show (abiValueType y))
           Just encoded <- runStatements [i| x = abi.encode(a);|]
@@ -141,7 +141,7 @@ tests = testGroup "hevm"
           -- traceM ("encoded (hevm): " ++ show (AbiBytesDynamic hevmEncoded))
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
 
-    , expectFail $ testProperty "abi encoding vs. solidity (2 args)" $ withMaxSuccess 20 $ forAll (arbitrary >>= bothM genAbiValue) $
+    , testProperty "abi encoding vs. solidity (2 args)" $ withMaxSuccess 20 $ forAll (arbitrary >>= bothM genAbiValue) $
       \(x', y') -> ioProperty $ do
           -- traceM ("encoding: " ++ (show x') ++ ", " ++ (show y')  ++ " : " ++ show (abiValueType x') ++ ", " ++ show (abiValueType y'))
           Just encoded <- runStatements [i| x = abi.encode(a, b);|]
@@ -699,7 +699,7 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c Nothing []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        expectFail $ testCase "injectivity of keccak (32 bytes)" $ do
+        testCase "injectivity of keccak (32 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -711,7 +711,7 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        testCase "injectivity of keccak (64 bytes)" $ do
+        expectFail $ testCase "injectivity of keccak (64 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -822,7 +822,7 @@ tests = testGroup "hevm"
           [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("call_A()", [])) []
           putStrLn "expected counterexample found"
         ,
-        expectFail $ testCase "keccak concrete and sym agree" $ do
+        testCase "keccak concrete and sym agree" $ do
           Just c <- solcRuntime "C"
             [i|
               contract C {
