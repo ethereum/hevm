@@ -13,8 +13,6 @@ import Data.Word
 import Data.Maybe
 import Data.List
 
-import Debug.Trace
-
 import Control.Lens (lens)
 
 import EVM.Types
@@ -268,7 +266,7 @@ copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) (Concrete
 -- copying from a concrete region of src)
 copySlice s@(Lit srcOffset) d@(Lit dstOffset) sz@(Lit size) src ds@(ConcreteBuf dst) = let
     hd = padRight (num dstOffset) $ BS.take (num dstOffset) dst
-    sl = [readByte (Lit i) src | i <- [srcOffset .. srcOffset + size]]
+    sl = [readByte (Lit i) src | i <- [srcOffset .. srcOffset + (size - 1)]]
   in if Prelude.and . (fmap isLitByte) $ sl
      then ConcreteBuf $ hd <> (BS.pack . (mapMaybe unlitByte) $ sl)
      else CopySlice s d sz src ds

@@ -699,7 +699,7 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c Nothing []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        testCase "injectivity of keccak (32 bytes)" $ do
+        expectFail $ testCase "injectivity of keccak (32 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -711,7 +711,7 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        expectFail $ testCase "injectivity of keccak (64 bytes)" $ do
+        testCase "injectivity of keccak (64 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -822,7 +822,7 @@ tests = testGroup "hevm"
           [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("call_A()", [])) []
           putStrLn "expected counterexample found"
         ,
-        testCase "keccak concrete and sym agree" $ do
+        expectFail $ testCase "keccak concrete and sym agree" $ do
           Just c <- solcRuntime "C"
             [i|
               contract C {
@@ -949,7 +949,6 @@ defaultDataLocation t =
 runFunction :: Text -> ByteString -> IO (Maybe ByteString)
 runFunction c input = do
   Just x <- singleContract "X" c
-  print $ BS16.encode x
   return $ runSimpleVM x input
 
 runStatements
