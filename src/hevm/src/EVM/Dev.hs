@@ -16,7 +16,6 @@ import Data.String.Here
 import qualified Data.Text as T
 
 import EVM
---import EVM.SMT (withSolvers, Solver(..), formatSMT2, exprToSMT, initState)
 import EVM.SMT
 import EVM.Types
 import EVM.Expr (numBranches)
@@ -26,8 +25,6 @@ import EVM.UnitTest
 import EVM.Format (formatExpr)
 import EVM.Dapp (dappInfo)
 import GHC.Conc
-import qualified Data.ByteString.Lazy  as Lazy
-import qualified Data.ByteString.Base16 as BS16
 import qualified EVM.Fetch as Fetch
 import qualified EVM.FeeSchedule as FeeSchedule
 import qualified Data.Vector as V

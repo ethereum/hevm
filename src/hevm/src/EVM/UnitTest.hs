@@ -231,7 +231,7 @@ checkFailures UnitTestOptions { .. } method bailed = do
       Right (ConcreteBuf r) ->
         let AbiBool failed = decodeAbiValue AbiBoolType (BSLazy.fromStrict r)
         in pure (shouldFail == failed)
-      _ -> error "internal error: unexpected failure code"
+      c -> error $ "internal error: unexpected failure code: " <> show c
 
 -- | Randomly generates the calldata arguments and runs the test
 fuzzTest :: UnitTestOptions -> Text -> [AbiType] -> VM -> Property

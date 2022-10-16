@@ -6,10 +6,13 @@ module Main where
 
 import Data.Text (Text)
 import Data.ByteString (ByteString)
+import System.Directory
+import System.IO.Temp
+import System.Process (readProcess)
+import GHC.IO.Handle (hClose)
 
 import Prelude hiding (fail)
 
-import qualified Data.Text as Text
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BS (fromStrict)
 import qualified Data.ByteString.Base16 as Hex
@@ -32,9 +35,11 @@ import Data.Binary.Get (runGetOrFail)
 
 import EVM hiding (Query)
 import EVM.SymExec
+import EVM.UnitTest (dappTest, UnitTestOptions, getParametersFromEnvironmentVariables)
 import EVM.ABI
 import EVM.Format
 import EVM.Exec
+import EVM.Dapp
 import qualified EVM.Patricia as Patricia
 import EVM.Precompiled
 import EVM.RLP
@@ -43,7 +48,11 @@ import EVM.Types
 import EVM.SMT
 import qualified Data.ByteString.Base16 as BS16
 import qualified EVM.Expr as Expr
-
+import qualified EVM.Fetch as Fetch
+import qualified EVM.UnitTest
+import qualified Paths_hevm as Paths
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 
 main :: IO ()
 main = defaultMain tests
@@ -380,6 +389,11 @@ tests = testGroup "hevm"
         putStrLn "expected counterexample found"
  ]
 
+  , testGroup "Dapp Tests"
+    [ testCase "Trivial" $ do
+        let testFile = "test/contracts/pass/trivial.sol"
+        runDappTest testFile ".*"
+    ]
   , testGroup "Symbolic execution"
       [
       -- Somewhat tautological since we are asserting the precondition
@@ -956,13 +970,13 @@ runStatements
   -> IO (Maybe ByteString)
 runStatements stmts args t = do
   let params =
-        Text.intercalate ", "
+        T.intercalate ", "
           (map (\(x, c) -> abiTypeSolidity (abiValueType x)
                              <> " " <> defaultDataLocation (abiValueType x)
-                             <> " " <> Text.pack [c])
+                             <> " " <> T.pack [c])
             (zip args "abcdefg"))
       s =
-        "foo(" <> Text.intercalate ","
+        "foo(" <> T.intercalate ","
                     (map (abiTypeSolidity . abiValueType) args) <> ")"
 
   runFunction [i|
@@ -1013,7 +1027,7 @@ data Invocation
 assertSolidityComputation :: Invocation -> AbiValue -> IO ()
 assertSolidityComputation (SolidityCall s args) x =
   do y <- runStatements s args (abiValueType x)
-     assertEqual (Text.unpack s)
+     assertEqual (T.unpack s)
        (fmap Bytes (Just (encodeAbiValue x)))
        (fmap Bytes y)
 
@@ -1025,3 +1039,97 @@ bothM f (a, a') = do
 
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
+
+runDappTest :: FilePath -> Text -> IO ()
+runDappTest testFile match = do
+  root <- Paths.getDataDir
+  (json, _) <- compileWithDSTest testFile
+  withCurrentDirectory root $ do
+    withSystemTempFile "output.json" $ \file handle -> do
+      hClose handle
+      TIO.writeFile file json
+      withSolvers Z3 1 $ \solvers -> do
+        opts <- testOpts solvers root json match
+        dappTest opts solvers file Nothing
+
+testOpts :: SolverGroup -> FilePath -> Text -> Text -> IO UnitTestOptions
+testOpts solvers root solcJson match = do
+  srcInfo <- case readJSON solcJson of
+               Nothing -> error "Could not read solc json"
+               Just (contractMap, asts, sources) -> do
+                 sourceCache <- makeSourceCache sources asts
+                 pure $ dappInfo root contractMap sourceCache
+
+  params <- getParametersFromEnvironmentVariables Nothing
+
+  pure EVM.UnitTest.UnitTestOptions
+    { EVM.UnitTest.oracle = Fetch.oracle solvers Nothing
+    , EVM.UnitTest.maxIter = Nothing
+    , EVM.UnitTest.askSmtIters = Nothing
+    , EVM.UnitTest.smtTimeout = Nothing
+    , EVM.UnitTest.solver = Nothing
+    , EVM.UnitTest.covMatch = Nothing
+    , EVM.UnitTest.verbose = Nothing
+    , EVM.UnitTest.match = match
+    , EVM.UnitTest.maxDepth = Nothing
+    , EVM.UnitTest.fuzzRuns = 100
+    , EVM.UnitTest.replay = Nothing
+    , EVM.UnitTest.vmModifier = id
+    , EVM.UnitTest.testParams = params
+    , EVM.UnitTest.dapp = srcInfo
+    , EVM.UnitTest.ffiAllowed = True
+    }
+
+compileWithDSTest :: FilePath -> IO (Text, Text)
+compileWithDSTest src =
+  withSystemTempFile "input.json" $ \file handle -> do
+    hClose handle
+    dsTest <- readFile =<< Paths.getDataFileName "test/contracts/lib/test.sol"
+    testFilePath <- Paths.getDataFileName src
+    testFile <- readFile testFilePath
+    TIO.writeFile file
+      [i|
+      {
+        "language": "Solidity",
+        "sources": {
+          "ds-test/test.sol": {
+            "content": ${dsTest}
+          },
+          "test.sol": {
+            "content": ${testFile}
+          }
+        },
+        "settings": {
+          "metadata": {
+            "useLiteralContent": true
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "metadata",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "abi",
+                "storageLayout",
+                "evm.bytecode.sourceMap",
+                "evm.bytecode.linkReferences",
+                "evm.bytecode.generatedSources",
+                "evm.deployedBytecode.sourceMap",
+                "evm.deployedBytecode.linkReferences",
+                "evm.deployedBytecode.generatedSources"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      }
+      |]
+    putStrLn =<< readFile file
+    x <- T.pack <$>
+      readProcess
+        "solc"
+        ["--allow-paths", file, "--standard-json", file]
+        ""
+    return (x, T.pack testFilePath)

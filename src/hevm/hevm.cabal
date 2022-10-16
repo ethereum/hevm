@@ -25,6 +25,18 @@ build-type:
 data-files:
   run-blockchain-tests
   run-consensus-tests
+  test/contracts/lib/ds-test.sol
+  test/contracts/pass/trivial.sol
+  test/contracts/pass/abstract.sol
+  test/contracts/pass/cheatCodes.sol
+  test/contracts/pass/constantinople.sol
+  test/contracts/pass/dsProvePass.sol
+  test/contracts/pass/invariants.sol
+  test/contracts/pass/libraries.sol
+  test/contracts/fail/trivial.sol
+  test/contracts/fail/cheatCodes.sol
+  test/contracts/fail/dsProveFail.sol
+  test/contracts/fail/invariantFail.sol
 extra-source-files:
   CHANGELOG.md
 
@@ -211,7 +223,7 @@ executable hevm
 test-suite test
   import: shared
   ghc-options:
-    -Wall
+    -Wall -Wno-unticked-promoted-constructors
   type:
     exitcode-stdio-1.0
   hs-source-dirs:
@@ -224,6 +236,10 @@ test-suite test
      extra-libraries: c++
   else
      extra-libraries: stdc++
+  other-modules:
+    Paths_hevm
+  autogen-modules:
+    Paths_hevm
   build-depends:
     HUnit >= 1.6,
     QuickCheck,
@@ -231,14 +247,17 @@ test-suite test
     base16-bytestring,
     binary,
     containers,
+    directory,
     bytestring,
     here,
     hevm,
     lens,
     mtl,
+    process,
     tasty >= 1.0,
     tasty-hunit >= 0.10,
     tasty-quickcheck >= 0.9,
     tasty-expected-failure >= 0.12,
+    temporary,
     text,
     vector

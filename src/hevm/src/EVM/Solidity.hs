@@ -58,6 +58,7 @@ module EVM.Solidity
   , astIdMap
   , astSrcMap
   , containsLinkerHole
+  , makeSourceCache
 ) where
 
 import EVM.ABI
