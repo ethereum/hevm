@@ -842,8 +842,8 @@ tests = testGroup "hevm"
           [Qed _] <-  withSolvers Z3 1 $ \s -> verify s vm Nothing Nothing Nothing (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
         ,
-        expectFail $ testCase "safemath distributivity (sol)" $ do
-          Just c <- solcRuntime "A"
+        testCase "safemath distributivity (sol)" $ do
+          Just c <- solcRuntime "C"
             [i|
               contract C {
                 function distributivity(uint x, uint y, uint z) public {
