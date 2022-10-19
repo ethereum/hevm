@@ -1,18 +1,17 @@
-pragma solidity ^0.6.7;
-
 import "ds-test/test.sol";
-import "ds-token/token.sol";
-import "ds-math/math.sol";
+import "lib/erc20.sol";
 
-contract SolidityTest is DSTest, DSMath {
-    DSToken token;
+contract SolidityTest is DSTest {
+    ERC20 token;
 
     function setUp() public {
-        token = new DSToken("TKN");
+        token = new ERC20("TOKEN", "TKN", 18);
     }
 
     function prove_add(uint x, uint y) public {
-        assertTrue(x + y >= x);
+        unchecked {
+            assertTrue(x + y >= x);
+        }
     }
 
     function proveFail_shouldFail(address usr) public {
@@ -44,11 +43,11 @@ contract SolidityTest is DSTest, DSMath {
     }
 
     function prove_distributivity(uint120 x, uint120 y, uint120 z) public {
-        assertEq(add(x, mul(y, z)), mul(add(x, y), add(x, z)));
+        assertEq(x + (y * z), (x + y) * (x + z));
     }
 
     function prove_transfer(uint supply, address usr, uint amt) public {
-        token.mint(supply);
+        token.mint(address(this), supply);
 
         uint prebal = token.balanceOf(usr);
         token.transfer(usr, amt);

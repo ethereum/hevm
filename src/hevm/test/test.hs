@@ -12,6 +12,7 @@ import System.Directory
 import System.IO.Temp
 import System.Process (readProcess)
 import GHC.IO.Handle (hClose)
+import Control.Monad
 
 import Prelude hiding (fail)
 
@@ -392,25 +393,43 @@ tests = testGroup "hevm"
  ]
 
   , testGroup "Dapp Tests"
-    [ testCase "Trivial" $ do
+    [ testCase "Trivial (Pass)" $ do
         let testFile = "test/contracts/pass/trivial.sol"
-        runDappTest testFile ".*"
+        runDappTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "Trivial (Fail)" $ do
+        let testFile = "test/contracts/fail/trivial.sol"
+        runDappTest testFile "testFalse" >>= assertEqual "test result" False
     , testCase "Abstract" $ do
         let testFile = "test/contracts/pass/abstract.sol"
-        runDappTest testFile ".*"
-    -- TODO: there is a bug in SAR
-    , expectFail $ testCase "Constantinople" $ do
+        runDappTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "Constantinople" $ do
         let testFile = "test/contracts/pass/constantinople.sol"
-        runDappTest testFile ".*"
-    , testCase "Prove Tests" $ do
+        runDappTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "Prove Tests (Pass)" $ do
         let testFile = "test/contracts/pass/dsProvePass.sol"
-        runDappTest testFile ".*"
-    , testCase "Invariant Tests" $ do
+        runDappTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "Prove Tests (Fail)" $ do
+        let testFile = "test/contracts/fail/dsProveFail.sol"
+        runDappTest testFile "prove_add" >>= assertEqual "test result" False
+        runDappTest testFile "proveFail_shouldFail" >>= assertEqual "test result" False
+        runDappTest testFile "prove_smtTimeout" >>= assertEqual "test result" False
+        runDappTest testFile "prove_multi" >>= assertEqual "test result" False
+        runDappTest testFile "prove_mul" >>= assertEqual "test result" False
+        runDappTest testFile "prove_distributivity" >>= assertEqual "test result" False
+        runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
+    , testCase "Invariant Tests (Pass)" $ do
         let testFile = "test/contracts/pass/invariants.sol"
-        runDappTest testFile ".*"
-    , testCase "Cheat Codes" $ do
+        runDappTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "Invariant Tests (Fail)" $ do
+        let testFile = "test/contracts/fail/invariantFail.sol"
+        runDappTest testFile "invariantTestUserBal" >>= assertEqual "test result" False
+        runDappTest testFile "invariantCount" >>= assertEqual "test result" False
+    , testCase "Cheat Codes (Pass)" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
-        runDappTest testFile ".*"
+        runDappTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "Cheat Codes (Fail)" $ do
+        let testFile = "test/contracts/fail/cheatCodes.sol"
+        runDappTest testFile "testBadFFI" >>= assertEqual "test result" False
     ]
   , testGroup "Symbolic execution"
       [
@@ -1058,11 +1077,11 @@ bothM f (a, a') = do
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
 
-runDappTest :: FilePath -> Text -> IO ()
+runDappTest :: FilePath -> Text -> IO Bool
 runDappTest testFile match = do
   root <- Paths.getDataDir
   (json, _) <- compileWithDSTest testFile
-  TIO.writeFile "output.json" json
+  --TIO.writeFile "output.json" json
   withCurrentDirectory root $ do
     withSystemTempFile "output.json" $ \file handle -> do
       hClose handle
