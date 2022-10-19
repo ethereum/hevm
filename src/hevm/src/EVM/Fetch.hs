@@ -30,6 +30,7 @@ import System.Process
 
 import qualified Network.Wreq.Session as Session
 import qualified Data.Vector as V
+import Numeric.Natural (Natural)
 
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where
@@ -158,14 +159,14 @@ fetchSlotFrom n url addr slot =
   Session.withAPISession
     (\s -> fetchSlotWithSession n url s addr slot)
 
-http :: BlockNumber -> Text -> Fetcher
-http n url q =
-  withSolvers Z3 4 $ \s ->
+http :: Natural -> BlockNumber -> Text -> Fetcher
+http smtjobs n url q =
+  withSolvers Z3 smtjobs $ \s ->
     oracle s (Just (n, url)) q
 
-zero :: Fetcher
-zero q =
-  withSolvers Z3 4 $ \s ->
+zero :: Natural -> Fetcher
+zero smtjobs q =
+  withSolvers Z3 smtjobs $ \s ->
     oracle s Nothing q
 
 -- smtsolving + (http or zero)

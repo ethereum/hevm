@@ -592,9 +592,10 @@ launchExec :: Command Options.Unwrapped -> IO ()
 launchExec cmd = do
   dapp <- getSrcInfo cmd
   vm <- vmFromCommand cmd
+  smtjobs <- fromIntegral <$> getNumProcessors
   case optsMode cmd of
     Run -> do
-      vm' <- execStateT (EVM.Stepper.interpret fetcher . void $ EVM.Stepper.execFully) vm
+      vm' <- execStateT (EVM.Stepper.interpret (fetcher smtjobs) . void $ EVM.Stepper.execFully) vm
       --when (trace cmd) $ hPutStr stderr (showTraceTree dapp vm')
       case view EVM.result vm' of
         Nothing ->
@@ -622,11 +623,11 @@ launchExec cmd = do
             Just path ->
               Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts (view EVM.cache vm'))
 
-    Debug -> void $ TTY.runFromVM Nothing dapp fetcher vm
+    Debug -> void $ TTY.runFromVM Nothing dapp (fetcher smtjobs) vm
     --JsonTrace -> void $ execStateT (interpretWithTrace fetcher EVM.Stepper.runFully) vm
     _ -> error "TODO"
-   where fetcher = maybe EVM.Fetch.zero (EVM.Fetch.http block') (rpc cmd)
-         block'  = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
+   where fetcher smtjobs = maybe (EVM.Fetch.zero smtjobs) (EVM.Fetch.http smtjobs block') (rpc cmd)
+         block' = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
 
 data Testcase = Testcase {
   _entries :: [(Text, Maybe Text)],
@@ -913,9 +914,9 @@ runVMTest diffmode mode timelimit (name, x) =
       case mode of
         Run ->
           Timeout.timeout (1000000 * (fromMaybe 10 timelimit)) $
-            execStateT (EVM.Stepper.interpret EVM.Fetch.zero . void $ EVM.Stepper.execFully) vm0
+            execStateT (EVM.Stepper.interpret (EVM.Fetch.zero 0) . void $ EVM.Stepper.execFully) vm0
         Debug ->
-          Just <$> TTY.runFromVM Nothing emptyDapp EVM.Fetch.zero vm0
+          Just <$> TTY.runFromVM Nothing emptyDapp (EVM.Fetch.zero 0) vm0
         JsonTrace ->
           error "JsonTrace: implement me"
           -- Just <$> execStateT (EVM.UnitTest.interpretWithCoverage EVM.Fetch.zero EVM.Stepper.runFully) vm0
