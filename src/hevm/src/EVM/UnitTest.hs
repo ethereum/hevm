@@ -480,9 +480,7 @@ runTest opts@UnitTestOptions{..} _ vm (InvariantTest testName, []) = liftIO $ ca
     then exploreRun opts vm testName (decodeCalls cds)
     else exploreRun opts vm testName []
 runTest _ _ _ (InvariantTest _, types) = error $ "invariant testing with arguments: " <> show types <> " is not implemented (yet!)"
-runTest opts solvers vm (SymbolicTest testName, types) = let
-    solvers' =fromJust (error "Internal Error: missing solver group for symbolic test") solvers
-  in symRun opts solvers' vm testName types
+runTest opts solvers vm (SymbolicTest testName, types) = symRun opts solvers vm testName types
 
 type ExploreTx = (Addr, Addr, ByteString, W256)
 

@@ -154,7 +154,10 @@ shr = op2 SHR (\x y -> if x > 256 then 0 else shiftR y (fromIntegral x))
 sar :: Expr EWord -> Expr EWord -> Expr EWord
 sar = op2 SAR (\x y ->
   let msb = testBit y 255
-      shifted = if x > 256 then 0 else shiftR y (fromIntegral x)
+      shifted
+        | x > 256 && Prelude.not msb = 0
+        | x > 256 && msb = - 1
+        | otherwise = shiftR y (fromIntegral x)
   in if msb then setBit shifted 255 else shifted)
 
 -- ** Bufs ** --------------------------------------------------------------------------------------

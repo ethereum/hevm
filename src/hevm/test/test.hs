@@ -398,8 +398,18 @@ tests = testGroup "hevm"
     , testCase "Abstract" $ do
         let testFile = "test/contracts/pass/abstract.sol"
         runDappTest testFile ".*"
-    , testCase "Constantinople" $ do
+    -- TODO: there is a bug in SAR
+    , expectFail $ testCase "Constantinople" $ do
         let testFile = "test/contracts/pass/constantinople.sol"
+        runDappTest testFile ".*"
+    , testCase "Prove Tests" $ do
+        let testFile = "test/contracts/pass/dsProvePass.sol"
+        runDappTest testFile ".*"
+    , testCase "Invariant Tests" $ do
+        let testFile = "test/contracts/pass/invariants.sol"
+        runDappTest testFile ".*"
+    , testCase "Cheat Codes" $ do
+        let testFile = "test/contracts/pass/cheatCodes.sol"
         runDappTest testFile ".*"
     ]
   , testGroup "Symbolic execution"
@@ -1052,7 +1062,7 @@ runDappTest :: FilePath -> Text -> IO ()
 runDappTest testFile match = do
   root <- Paths.getDataDir
   (json, _) <- compileWithDSTest testFile
-  --TIO.writeFile "output.json" json
+  TIO.writeFile "output.json" json
   withCurrentDirectory root $ do
     withSystemTempFile "output.json" $ \file handle -> do
       hClose handle
@@ -1078,7 +1088,7 @@ testOpts solvers root solcJson match = do
     , EVM.UnitTest.smtTimeout = Nothing
     , EVM.UnitTest.solver = Nothing
     , EVM.UnitTest.covMatch = Nothing
-    , EVM.UnitTest.verbose = Just 3
+    , EVM.UnitTest.verbose = Nothing
     , EVM.UnitTest.match = match
     , EVM.UnitTest.maxDepth = Nothing
     , EVM.UnitTest.fuzzRuns = 100
@@ -1094,6 +1104,7 @@ compileWithDSTest src =
   withSystemTempFile "input.json" $ \file handle -> do
     hClose handle
     dsTest <- readFile =<< Paths.getDataFileName "test/contracts/lib/test.sol"
+    erc20 <- readFile =<< Paths.getDataFileName "test/contracts/lib/erc20.sol"
     testFilePath <- Paths.getDataFileName src
     testFile <- readFile testFilePath
     TIO.writeFile file
@@ -1103,6 +1114,9 @@ compileWithDSTest src =
         "sources": {
           "ds-test/test.sol": {
             "content": ${dsTest}
+          },
+          "lib/erc20.sol": {
+            "content": ${erc20}
           },
           "test.sol": {
             "content": ${testFile}

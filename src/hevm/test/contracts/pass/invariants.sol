@@ -1,9 +1,8 @@
 import "ds-test/test.sol";
-import "ds-token/token.sol";
-import "ds-math/math.sol";
+import "lib/erc20.sol";
 
 contract InvariantTest is DSTest {
-    DSToken token;
+    ERC20 token;
     User user;
     address[] targetContracts_;
 
@@ -12,8 +11,8 @@ contract InvariantTest is DSTest {
     }
 
     function setUp() public {
-        token = new DSToken("TKN");
-        token.mint(100 ether);
+        token = new ERC20("TOKEN", "TKN", 18);
+        token.mint(address(this), 100 ether);
         user = new User(token);
         token.transfer(address(user), 100 ether);
         targetContracts_.push(address(user));
@@ -28,8 +27,8 @@ contract InvariantTest is DSTest {
 }
 
 contract User {
-  DSToken token;
-  constructor(DSToken token_) public {
+  ERC20 token;
+  constructor(ERC20 token_) public {
     token = token_;
   }
 

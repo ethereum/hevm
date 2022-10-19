@@ -1,6 +1,5 @@
 import "ds-test/test.sol";
-import "ds-token/token.sol";
-import "ds-math/math.sol";
+import "lib/erc20.sol";
 
 contract ConstructorArg {
     address immutable public a;
@@ -9,16 +8,18 @@ contract ConstructorArg {
     }
 }
 
-contract SolidityTest is DSTest, DSMath {
-    DSToken token;
+contract SolidityTest is DSTest {
+    ERC20 token;
 
     function setUp() public {
-        token = new DSToken("TKN");
+        token = new ERC20("Token", "TKN", 18);
     }
 
     function prove_add(uint x, uint y) public {
-        if (x + y < x) return; // no overflow
-        assertTrue(x + y >= x);
+        unchecked {
+            if (x + y < x) return; // no overflow
+            assertTrue(x + y >= x);
+        }
     }
 
     function prove_balance(address usr, uint amt) public {
@@ -28,7 +29,7 @@ contract SolidityTest is DSTest, DSMath {
     }
 
     function prove_supply(uint supply) public {
-        token.mint(supply);
+        token.mint(address(this), supply);
         uint actual = token.totalSupply();
         assertEq(supply, actual);
     }
@@ -49,7 +50,7 @@ contract SolidityTest is DSTest, DSMath {
     function prove_transfer(uint supply, address usr, uint amt) public {
         if (amt > supply) return; // no underflow
 
-        token.mint(supply);
+        token.mint(address(this), supply);
 
         uint prebal = token.balanceOf(usr);
         token.transfer(usr, amt);
@@ -64,8 +65,8 @@ contract SolidityTest is DSTest, DSMath {
     function prove_burn(uint supply, uint amt) public {
         if (amt > supply) return; // no undeflow
 
-        token.mint(supply);
-        token.burn(amt);
+        token.mint(address(this), supply);
+        token.burn(address(this), amt);
 
         assertEq(supply - amt, token.totalSupply());
     }
