@@ -2210,7 +2210,10 @@ create self this xGas' xValue xs newAddr initCode = do
 
         let resetStorage = \case
               ConcreteStore s -> ConcreteStore (Map.delete (num newAddr) s)
-              s -> s -- TODO: what about symbolic storage?
+              AbstractStore -> AbstractStore
+              EmptyStore -> EmptyStore
+              SStore {} -> error "trying to reset symbolic storage with writes in create"
+
         modifying (env . storage) resetStorage
         modifying (env . origStorage) (Map.delete (num newAddr))
 
