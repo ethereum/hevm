@@ -4,6 +4,8 @@
 
 module Main where
 
+import Debug.Trace
+
 import Data.Text (Text)
 import Data.ByteString (ByteString)
 import System.Directory
@@ -392,6 +394,12 @@ tests = testGroup "hevm"
   , testGroup "Dapp Tests"
     [ testCase "Trivial" $ do
         let testFile = "test/contracts/pass/trivial.sol"
+        runDappTest testFile ".*"
+    , testCase "Abstract" $ do
+        let testFile = "test/contracts/pass/abstract.sol"
+        runDappTest testFile ".*"
+    , testCase "Constantinople" $ do
+        let testFile = "test/contracts/pass/constantinople.sol"
         runDappTest testFile ".*"
     ]
   , testGroup "Symbolic execution"
@@ -1044,6 +1052,8 @@ runDappTest :: FilePath -> Text -> IO ()
 runDappTest testFile match = do
   root <- Paths.getDataDir
   (json, _) <- compileWithDSTest testFile
+  --print json
+  TIO.writeFile "output.json" json
   withCurrentDirectory root $ do
     withSystemTempFile "output.json" $ \file handle -> do
       hClose handle
@@ -1054,6 +1064,7 @@ runDappTest testFile match = do
 
 testOpts :: SolverGroup -> FilePath -> Text -> Text -> IO UnitTestOptions
 testOpts solvers root solcJson match = do
+  traceM "testOpts1"
   srcInfo <- case readJSON solcJson of
                Nothing -> error "Could not read solc json"
                Just (contractMap, asts, sources) -> do
@@ -1069,7 +1080,7 @@ testOpts solvers root solcJson match = do
     , EVM.UnitTest.smtTimeout = Nothing
     , EVM.UnitTest.solver = Nothing
     , EVM.UnitTest.covMatch = Nothing
-    , EVM.UnitTest.verbose = Nothing
+    , EVM.UnitTest.verbose = Just 3
     , EVM.UnitTest.match = match
     , EVM.UnitTest.maxDepth = Nothing
     , EVM.UnitTest.fuzzRuns = 100
@@ -1126,7 +1137,6 @@ compileWithDSTest src =
         }
       }
       |]
-    putStrLn =<< readFile file
     x <- T.pack <$>
       readProcess
         "solc"

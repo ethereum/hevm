@@ -1,5 +1,3 @@
-pragma solidity ^0.6.7;
-
 import "ds-test/test.sol";
 import "ds-token/token.sol";
 import "ds-math/math.sol";
