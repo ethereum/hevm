@@ -879,12 +879,17 @@ exec1 = do
                     next
                     assign (state . stack) xs
 
-                    let oob = Expr.lt (bufLength $ the state returndata) (Expr.add xFrom xSize')
-                        overflow = Expr.lt (Expr.add xFrom xSize') (xFrom)
-                        jump True = vmError InvalidMemoryAccess
+                    let jump True = vmError InvalidMemoryAccess
                         jump False = copyBytesToMemory (the state returndata) xSize' xFrom xTo'
-                    loc <- codeloc
-                    branch loc (Expr.or oob overflow) jump
+
+                    case (xFrom, bufLength (the state returndata)) of
+                      (Lit f, Lit l) ->
+                        jump $ l < f + xSize || f + xSize < f
+                      _ -> do
+                        let oob = Expr.lt (bufLength $ the state returndata) (Expr.add xFrom xSize')
+                            overflow = Expr.lt (Expr.add xFrom xSize') (xFrom)
+                        loc <- codeloc
+                        branch loc (Expr.or oob overflow) jump
             _ -> underrun
 
         -- op: EXTCODEHASH
@@ -1199,12 +1204,17 @@ exec1 = do
                   then
                     finishFrame (FrameErrored (MaxCodeSizeExceeded maxsize codesize))
                   else do
-                    loc <- codeloc
-                    branch loc (Expr.eqByte (readByte (Lit 0) output) (LitByte 0xef)) $ \case
-                      True -> finishFrame $ FrameErrored InvalidFormat
-                      False -> do
-                        burn (g_codedeposit * num codesize) $
-                          finishFrame (FrameReturned output)
+                    let frameReturned = burn (g_codedeposit * num codesize) $
+                                          finishFrame (FrameReturned output)
+                        frameErrored = finishFrame $ FrameErrored InvalidFormat
+                    case readByte (Lit 0) output of
+                      LitByte 0xef -> frameErrored
+                      LitByte _ -> frameReturned
+                      y -> do
+                        loc <- codeloc
+                        branch loc (Expr.eqByte y (LitByte 0xef)) $ \case
+                          True -> frameErrored
+                          False -> frameReturned
                 else
                    finishFrame (FrameReturned output)
             _ -> underrun
