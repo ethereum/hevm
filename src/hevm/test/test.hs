@@ -1052,8 +1052,7 @@ runDappTest :: FilePath -> Text -> IO ()
 runDappTest testFile match = do
   root <- Paths.getDataDir
   (json, _) <- compileWithDSTest testFile
-  --print json
-  TIO.writeFile "output.json" json
+  --TIO.writeFile "output.json" json
   withCurrentDirectory root $ do
     withSystemTempFile "output.json" $ \file handle -> do
       hClose handle
@@ -1064,7 +1063,6 @@ runDappTest testFile match = do
 
 testOpts :: SolverGroup -> FilePath -> Text -> Text -> IO UnitTestOptions
 testOpts solvers root solcJson match = do
-  traceM "testOpts1"
   srcInfo <- case readJSON solcJson of
                Nothing -> error "Could not read solc json"
                Just (contractMap, asts, sources) -> do

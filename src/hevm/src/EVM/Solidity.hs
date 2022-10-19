@@ -64,8 +64,6 @@ module EVM.Solidity
 import EVM.ABI
 import EVM.Types
 
-import Debug.Trace
-
 import Control.Applicative
 import Control.Monad
 import Control.Lens         hiding (Indexed, (.=))
@@ -297,11 +295,9 @@ readSolc :: FilePath -> IO (Maybe (Map Text SolcContract, SourceCache))
 readSolc fp =
   (readJSON <$> readFile fp) >>=
     \case
-      Nothing -> trace "OOPS" $ return Nothing
+      Nothing -> return Nothing
       Just (contracts, asts, sources) -> do
-        traceM "readSolc1"
         sourceCache <- makeSourceCache sources asts
-        traceM "readSolc2"
         return (Just (contracts, sourceCache))
 
 yul :: Text -> Text -> IO (Maybe ByteString)
@@ -345,8 +341,8 @@ force s = fromMaybe (error s)
 
 readJSON :: Text -> Maybe (Map Text SolcContract, Map Text Value, [(Text, Maybe ByteString)])
 readJSON json = case json ^? key "sourceList" of
-  Nothing -> trace "readJSON0" $ readStdJSON json
-  _ -> trace "readJSON1" $ readCombinedJSON json
+  Nothing -> readStdJSON json
+  _ -> readCombinedJSON json
 
 -- deprecate me soon
 readCombinedJSON :: Text -> Maybe (Map Text SolcContract, Map Text Value, [(Text, Maybe ByteString)])
@@ -382,16 +378,12 @@ readCombinedJSON json = do
 
 readStdJSON :: Text -> Maybe (Map Text SolcContract, Map Text Value, [(Text, Maybe ByteString)])
 readStdJSON json = do
-  traceM "HI"
   contracts <- json ^? key "contracts" ._Object
   -- TODO: support the general case of "urls" and "content" in the standard json
-  traceM "HI1"
   sources <- json ^? key "sources" . _Object
-  traceM "HI2"
   let asts = force "JSON lacks abstract syntax trees." . preview (key "ast") <$> sources
       contractMap = f contracts
       contents src = (src, encodeUtf8 <$> HMap.lookup src (mconcat $ Map.elems $ snd <$> contractMap))
-  traceM "HI3"
   return (fst <$> contractMap, Map.fromList (HMap.toList asts), contents <$> (sort $ HMap.keys sources))
   where
     f :: (AsValue s) => HMap.HashMap Text s -> (Map Text (SolcContract, (HMap.HashMap Text Text)))

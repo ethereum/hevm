@@ -811,10 +811,11 @@ failOutput vm UnitTestOptions { .. } testName =
   ]
 
 formatTestLogs :: (?context :: DappContext) => Map W256 Event -> Expr Logs -> Text
-formatTestLogs events xs =
-  case catMaybes (toList (fmap (formatTestLog events) xs)) of
-    [] -> "\n"
-    ys -> "\n" <> intercalate "\n" ys <> "\n\n"
+formatTestLogs = undefined
+--formatTestLogs events xs =
+  --case catMaybes (toList (fmap (formatTestLog events) xs)) of
+    --[] -> "\n"
+    --ys -> "\n" <> intercalate "\n" ys <> "\n\n"
 
 -- Here we catch and render some special logs emitted by ds-test,
 -- with the intent to then present them in a separate view to the
