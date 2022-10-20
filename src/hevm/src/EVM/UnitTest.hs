@@ -913,7 +913,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
   let
     TestVMParams {..} = testParams
     vm = makeVm $ VMOpts
-           { vmoptContract = initialContract (InitCode (view creationCode theContract) EmptyBuf)
+           { vmoptContract = initialContract (InitCode (view creationCode theContract) mempty)
            , vmoptCalldata = mempty
            , vmoptValue = Lit 0
            , vmoptAddress = testAddress

@@ -58,44 +58,44 @@ tests = testGroup "hevm"
   [ testGroup "MemoryTests"
     [ testCase "read-write-same-byte"  $ assertEqual ""
         (LitByte 0x12)
-        (Expr.readByte (Lit 0x20) (WriteByte (Lit 0x20) (LitByte 0x12) EmptyBuf))
+        (Expr.readByte (Lit 0x20) (WriteByte (Lit 0x20) (LitByte 0x12) mempty))
     , testCase "read-write-same-word"  $ assertEqual ""
         (Lit 0x12)
-        (Expr.readWord (Lit 0x20) (WriteWord (Lit 0x20) (Lit 0x12) EmptyBuf))
+        (Expr.readWord (Lit 0x20) (WriteWord (Lit 0x20) (Lit 0x12) mempty))
     , testCase "read-byte-write-word"  $ assertEqual ""
         -- reading at byte 31 a word that's been written should return LSB
         (LitByte 0x12)
-        (Expr.readByte (Lit 0x1f) (WriteWord (Lit 0x0) (Lit 0x12) EmptyBuf))
+        (Expr.readByte (Lit 0x1f) (WriteWord (Lit 0x0) (Lit 0x12) mempty))
     , testCase "read-byte-write-word2"  $ assertEqual ""
         -- Same as above, but offset not 0
         (LitByte 0x12)
-        (Expr.readByte (Lit 0x20) (WriteWord (Lit 0x1) (Lit 0x12) EmptyBuf))
+        (Expr.readByte (Lit 0x20) (WriteWord (Lit 0x1) (Lit 0x12) mempty))
     ,testCase "read-write-with-offset"  $ assertEqual ""
         -- 0x3F = 63 decimal, 0x20 = 32. 0x12 = 18
         --    We write 128bits (32 Bytes), representing 18 at offset 32.
         --    Hence, when reading out the 63rd byte, we should read out the LSB 8 bits
         --           which is 0x12
         (LitByte 0x12)
-        (Expr.readByte (Lit 0x3F) (WriteWord (Lit 0x20) (Lit 0x12) EmptyBuf))
+        (Expr.readByte (Lit 0x3F) (WriteWord (Lit 0x20) (Lit 0x12) mempty))
     ,testCase "read-write-with-offset2"  $ assertEqual ""
         --  0x20 = 32, 0x3D = 61
         --  we write 128 bits (32 Bytes) representing 0x10012, at offset 32.
         --  we then read out a byte at offset 61.
         --  So, at 63 we'd read 0x12, at 62 we'd read 0x00, at 61 we should read 0x1
         (LitByte 0x1)
-        (Expr.readByte (Lit 0x3D) (WriteWord (Lit 0x20) (Lit 0x10012) EmptyBuf))
+        (Expr.readByte (Lit 0x3D) (WriteWord (Lit 0x20) (Lit 0x10012) mempty))
     , testCase "read-write-with-extension-to-zero" $ assertEqual ""
         -- write word and read it at the same place (i.e. 0 offset)
         (Lit 0x12)
-        (Expr.readWord (Lit 0x0) (WriteWord (Lit 0x0) (Lit 0x12) EmptyBuf))
+        (Expr.readWord (Lit 0x0) (WriteWord (Lit 0x0) (Lit 0x12) mempty))
     , testCase "read-write-with-extension-to-zero-with-offset" $ assertEqual ""
         -- write word and read it at the same offset of 4
         (Lit 0x12)
-        (Expr.readWord (Lit 0x4) (WriteWord (Lit 0x4) (Lit 0x12) EmptyBuf))
+        (Expr.readWord (Lit 0x4) (WriteWord (Lit 0x4) (Lit 0x12) mempty))
     , testCase "read-write-with-extension-to-zero-with-offset2" $ assertEqual ""
         -- write word and read it at the same offset of 16
         (Lit 0x12)
-        (Expr.readWord (Lit 0x20) (WriteWord (Lit 0x20) (Lit 0x12) EmptyBuf))
+        (Expr.readWord (Lit 0x20) (WriteWord (Lit 0x20) (Lit 0x12) mempty))
     , testCase "indexword-MSB" $ assertEqual ""
         -- 31st is the LSB byte (of 32)
         (LitByte 0x78)
@@ -116,21 +116,21 @@ tests = testGroup "hevm"
           _ -> False
     ]
   , testGroup "Solidity expressions"
-    [ expectFail $ testCase "Trivial" $
+    [ testCase "Trivial" $
         SolidityCall "x = 3;" []
           ===> AbiUInt 256 3
 
-    , expectFail $ testCase "Arithmetic" $ do
+    , testCase "Arithmetic" $ do
         SolidityCall "x = a + 1;"
           [AbiUInt 256 1] ===> AbiUInt 256 2
         SolidityCall "unchecked { x = a - 1; }"
           [AbiUInt 8 0] ===> AbiUInt 8 255
 
-    , expectFail $ testCase "keccak256()" $
+    , testCase "keccak256()" $
         SolidityCall "x = uint(keccak256(abi.encodePacked(a)));"
           [AbiString ""] ===> AbiUInt 256 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
 
-    , expectFail $ testProperty "abi encoding vs. solidity" $ withMaxSuccess 20 $ forAll (arbitrary >>= genAbiValue) $
+    , testProperty "abi encoding vs. solidity" $ withMaxSuccess 20 $ forAll (arbitrary >>= genAbiValue) $
       \y -> ioProperty $ do
           -- traceM ("encoding: " ++ (show y) ++ " : " ++ show (abiValueType y))
           Just encoded <- runStatements [i| x = abi.encode(a);|]
@@ -141,7 +141,7 @@ tests = testGroup "hevm"
           -- traceM ("encoded (hevm): " ++ show (AbiBytesDynamic hevmEncoded))
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
 
-    , expectFail $ testProperty "abi encoding vs. solidity (2 args)" $ withMaxSuccess 20 $ forAll (arbitrary >>= bothM genAbiValue) $
+    , testProperty "abi encoding vs. solidity (2 args)" $ withMaxSuccess 20 $ forAll (arbitrary >>= bothM genAbiValue) $
       \(x', y') -> ioProperty $ do
           -- traceM ("encoding: " ++ (show x') ++ ", " ++ (show y')  ++ " : " ++ show (abiValueType x') ++ ", " ++ show (abiValueType y'))
           Just encoded <- runStatements [i| x = abi.encode(a, b);|]
@@ -755,7 +755,7 @@ tests = testGroup "hevm"
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "keccak soundness" $ do
-        --- using ignore to suppress huge output     
+        --- using ignore to suppress huge output
           Just c <- solcRuntime "C"
             [i|
               contract C {
@@ -949,7 +949,6 @@ defaultDataLocation t =
 runFunction :: Text -> ByteString -> IO (Maybe ByteString)
 runFunction c input = do
   Just x <- singleContract "X" c
-  print $ BS16.encode x
   return $ runSimpleVM x input
 
 runStatements

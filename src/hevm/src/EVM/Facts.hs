@@ -55,6 +55,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import qualified Data.Vector as V
 
 -- We treat everything as ASCII byte strings because
 -- we only use hex digits (and the letter 'x').
@@ -159,7 +160,7 @@ apply1 :: VM -> Fact -> VM
 apply1 vm fact =
   case fact of
     CodeFact    {..} -> flip execState vm $ do
-      assign (env . contracts . at addr) (Just (EVM.initialContract (EVM.RuntimeCode (fmap LitByte $ BS.unpack blob))))
+      assign (env . contracts . at addr) (Just (EVM.initialContract (EVM.RuntimeCode (V.fromList $ LitByte <$> BS.unpack blob))))
       when (view (state . contract) vm == addr) $ EVM.loadContract addr
     StorageFact {..} ->
       vm & over (env . storage) (writeStorage (litAddr addr) (Lit which) (Lit what))
@@ -172,7 +173,7 @@ apply2 :: VM -> Fact -> VM
 apply2 vm fact =
   case fact of
     CodeFact    {..} -> flip execState vm $ do
-      assign (cache . fetchedContracts . at addr) (Just (EVM.initialContract (EVM.RuntimeCode (fmap LitByte $ BS.unpack blob))))
+      assign (cache . fetchedContracts . at addr) (Just (EVM.initialContract (EVM.RuntimeCode (V.fromList $ LitByte <$> BS.unpack blob))))
       when (view (state . contract) vm == addr) $ EVM.loadContract addr
     StorageFact {..} -> let
         store = view (cache . fetchedStorage) vm

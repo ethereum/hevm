@@ -15,7 +15,7 @@ import EVM.Types hiding (IllegalOverflow)
 import EVM.Solidity
 import EVM.Concrete (createAddress, create2Address)
 import EVM.Op
-import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord, writeByte, bufLength, indexWord, litAddr, readBytes, word256At, copySlice)
+import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord, writeByte, bufLength, indexWord, litAddr, readBytes, word256At, copySlice, isLitByte)
 import EVM.FeeSchedule (FeeSchedule (..))
 import Options.Generic as Options
 import qualified EVM.Precompiled
@@ -32,7 +32,7 @@ import Data.Maybe                   (fromMaybe)
 import Data.Sequence                (Seq)
 import Data.Vector.Storable         (Vector)
 import Data.Foldable                (toList)
-import Data.Word                    (Word8, Word32)
+import Data.Word                    (Word8, Word32, Word64)
 import Data.Bits                    (FiniteBits, countLeadingZeros, finiteBitSize)
 
 import Data.Tree
@@ -86,6 +86,7 @@ data Error
   | NotUnique (Expr EWord)
   | SMTTimeout
   | FFI [AbiValue]
+  | NonceOverflow
 deriving instance Show Error
 
 -- | The possible result states of a VM
@@ -238,7 +239,7 @@ data FrameContext
     , callContextCodehash  :: Expr EWord
     , callContextAbi       :: Maybe W256
     , callContextData      :: Expr Buf
-    , callContextReversion :: Map Addr Contract
+    , callContextReversion :: (Map Addr Contract, Expr Storage)
     , callContextSubState  :: SubState
     }
   deriving (Show)
@@ -302,8 +303,8 @@ data SubState = SubState
   hopefully we do not have to deal with dynamic immutable before we get a real data section...
 -}
 data ContractCode
-  = InitCode ByteString (Expr Buf)  -- ^ "Constructor" code, during contract creation
-  | RuntimeCode [Expr Byte]         -- ^ "Instance" code, after contract creation
+  = InitCode ByteString (Expr Buf)     -- ^ "Constructor" code, during contract creation
+  | RuntimeCode (V.Vector (Expr Byte)) -- ^ "Instance" code, after contract creation
   deriving (Show)
 
 -- runtime err when used for symbolic code
@@ -389,7 +390,7 @@ blankState :: FrameState
 blankState = FrameState
   { _contract     = 0
   , _codeContract = 0
-  , _code         = RuntimeCode []
+  , _code         = RuntimeCode mempty
   , _pc           = 0
   , _stack        = mempty
   , _memory       = mempty
@@ -416,7 +417,9 @@ makeLenses ''VM
 -- | An "external" view of a contract's bytecode, appropriate for
 -- e.g. @EXTCODEHASH@.
 bytecode :: Getter Contract (Expr Buf)
-bytecode = contractcode . to toBuf
+bytecode = contractcode . to f
+  where f (InitCode _ _) = mempty
+        f (RuntimeCode ops) = Expr.fromList ops
 
 instance Semigroup Cache where
   a <> b = Cache
@@ -599,7 +602,7 @@ exec1 = do
                   InitCode conc _ -> BS.index conc (the state pc)
                   RuntimeCode ops ->
                     fromMaybe (error "could not analyze symbolic code") $
-                      unlitByte $ ops !! the state pc
+                      unlitByte $ ops V.! the state pc
 
       case ?op of
 
@@ -608,7 +611,13 @@ exec1 = do
           let !n = num x - 0x60 + 1
               !xs = case the state code of
                 InitCode conc _ -> Lit $ word $ padRight n $ BS.take n (BS.drop (1 + the state pc) conc)
-                RuntimeCode ops -> readWord (Lit 0) $ Expr.fromList $ padLeft' 32 $ take n $ drop (1 + the state pc) ops
+                RuntimeCode ops ->
+                  let bytes = V.take n $ V.drop (1 + the state pc) ops
+                  in if all isLitByte bytes then -- optimize concrete path
+                       let litBytes = V.toList $ V.catMaybes $ unlitByte <$> bytes
+                           padded = BS.replicate (32 - length litBytes) 0 <> BS.pack litBytes
+                       in Lit $ word padded
+                     else readWord (Lit 0) $ Expr.fromList $ padLeft' 32 bytes
           limitStack 1 $
             burn g_verylow $ do
               next
@@ -870,12 +879,17 @@ exec1 = do
                     next
                     assign (state . stack) xs
 
-                    let oob = Expr.lt (bufLength $ the state returndata) (Expr.add xFrom xSize')
-                        overflow = Expr.lt (Expr.add xFrom xSize') (xFrom)
-                        jump True = vmError InvalidMemoryAccess
+                    let jump True = vmError InvalidMemoryAccess
                         jump False = copyBytesToMemory (the state returndata) xSize' xFrom xTo'
-                    loc <- codeloc
-                    branch loc (Expr.or oob overflow) jump
+
+                    case (xFrom, bufLength (the state returndata)) of
+                      (Lit f, Lit l) ->
+                        jump $ l < f + xSize || f + xSize < f
+                      _ -> do
+                        let oob = Expr.lt (bufLength $ the state returndata) (Expr.add xFrom xSize')
+                            overflow = Expr.lt (Expr.add xFrom xSize') (xFrom)
+                        loc <- codeloc
+                        branch loc (Expr.or oob overflow) jump
             _ -> underrun
 
         -- op: EXTCODEHASH
@@ -1190,12 +1204,17 @@ exec1 = do
                   then
                     finishFrame (FrameErrored (MaxCodeSizeExceeded maxsize codesize))
                   else do
-                    loc <- codeloc
-                    branch loc (Expr.eqByte (readByte (Lit 0) output) (LitByte 0xef)) $ \case
-                      True -> finishFrame $ FrameErrored InvalidFormat
-                      False -> do
-                        burn (g_codedeposit * num codesize) $
-                          finishFrame (FrameReturned output)
+                    let frameReturned = burn (g_codedeposit * num codesize) $
+                                          finishFrame (FrameReturned output)
+                        frameErrored = finishFrame $ FrameErrored InvalidFormat
+                    case readByte (Lit 0) output of
+                      LitByte 0xef -> frameErrored
+                      LitByte _ -> frameReturned
+                      y -> do
+                        loc <- codeloc
+                        branch loc (Expr.eqByte y (LitByte 0xef)) $ \case
+                          True -> frameErrored
+                          False -> frameReturned
                 else
                    finishFrame (FrameReturned output)
             _ -> underrun
@@ -1230,7 +1249,7 @@ exec1 = do
                   forceConcreteBuf (readMemory xOffset' xSize' vm) "CREATE2" $
                     \initCode -> do
                       let
-                        newAddr  = create2Address self (num xSalt) initCode
+                        newAddr  = create2Address self xSalt initCode
                         (cost, gas') = costOfCreate fees availableGas xSize
                       _ <- accessAccountForGas newAddr
                       burn (cost - gas') $ create self this (num gas') xValue xs newAddr (ConcreteBuf initCode)
@@ -1371,12 +1390,12 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
       fees = view (block . schedule) vm
       cost = costOfPrecompile fees preCompileAddr input
       notImplemented = error $ "precompile at address " <> show preCompileAddr <> " not yet implemented"
-      precompileFail = burn (num gasCap - cost) $ do
+      precompileFail = burn (gasCap - cost) $ do
                          assign (state . stack) (Lit 0 : xs)
                          pushTrace $ ErrorTrace PrecompileFailure
                          next
-  if cost > num gasCap then
-    burn (num gasCap) $ do
+  if cost > gasCap then
+    burn gasCap $ do
       assign (state . stack) (Lit 0 : xs)
       next
   else
@@ -1402,8 +1421,9 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
         0x2 ->
           let
             hash = case input of
-                     ConcreteBuf input' -> ConcreteBuf $ BA.convert (Crypto.hash input' :: Digest SHA256)
-                     _ -> WriteWord (Lit 0) (SHA256 input) EmptyBuf
+                     ConcreteBuf input' -> sha256Buf input'
+                     _ -> WriteWord (Lit 0) (SHA256 input) mempty
+            sha256Buf x = ConcreteBuf $ BA.convert (Crypto.hash x :: Digest SHA256)
           in do
             assign (state . stack) (Lit 1 : xs)
             assign (state . returndata) hash
@@ -2071,7 +2091,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
     \((num -> xTo'), (num -> xContext')) ->
       if xTo' > 0 && xTo' <= 9
       then precompiledContract this gasGiven xTo' xContext' xValue xInOffset xInSize xOutOffset xOutSize xs
-      else if num xTo' == cheatCode then
+      else if xTo' == cheatCode then
         do
           assign (state . stack) xs
           cheat (xInOffset, xInSize) (xOutOffset, xOutSize)
@@ -2087,7 +2107,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                                     , callContextOffset    = xOutOffset
                                     , callContextSize      = xOutSize
                                     , callContextCodehash  = view codehash target
-                                    , callContextReversion = view (env . contracts) vm0
+                                    , callContextReversion = (view (env . contracts) vm0, view (env . storage) vm0)
                                     , callContextSubState  = view (tx . substate) vm0
                                     , callContextAbi =
                                         if xInSize >= 4
@@ -2107,16 +2127,20 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                     , _frameContext = newContext
                     }
 
+                  let clearInitCode = \case
+                        (InitCode _ _) -> InitCode mempty mempty
+                        a -> a
+
                   zoom state $ do
                     assign gas (num xGas)
                     assign pc 0
-                    assign code (view contractcode target)
+                    assign code (clearInitCode (view contractcode target))
                     assign codeContract xTo'
                     assign stack mempty
                     assign memory mempty
                     assign memorySize 0
                     assign returndata mempty
-                    assign calldata (copySlice (Lit xInOffset) (Lit 0) (Lit xInSize) (view (state . memory) vm0) EmptyBuf)
+                    assign calldata (copySlice (Lit xInOffset) (Lit 0) (Lit xInSize) (view (state . memory) vm0) mempty)
 
                   continue xTo'
 
@@ -2126,7 +2150,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
 collision :: Maybe Contract -> Bool
 collision c' = case c' of
   Just c -> (view nonce c /= 0) || case view contractcode c of
-    RuntimeCode b -> null b
+    RuntimeCode b -> not $ null b
     _ -> True
   Nothing -> False
 
@@ -2136,7 +2160,13 @@ create :: (?op :: Word8)
 create self this xGas' xValue xs newAddr initCode = do
   vm0 <- get
   let xGas = num xGas'
-  if xValue > view balance this
+  if view nonce this == num (maxBound :: Word64)
+  then do
+    assign (state . stack) (Lit 0 : xs)
+    assign (state . returndata) mempty
+    pushTrace $ ErrorTrace NonceOverflow
+    next
+  else if xValue > view balance this
   then do
     assign (state . stack) (Lit 0 : xs)
     assign (state . returndata) mempty
@@ -2151,6 +2181,7 @@ create self this xGas' xValue xs newAddr initCode = do
   else if collision $ view (env . contracts . at newAddr) vm0
   then burn xGas $ do
     assign (state . stack) (Lit 0 : xs)
+    assign (state . returndata) mempty
     modifying (env . contracts . ix self . nonce) succ
     next
   else burn xGas $ do
@@ -2166,7 +2197,7 @@ create self this xGas' xValue xs newAddr initCode = do
           prefix <- Expr.toList $ Expr.take (num minLength) initCode
           let sym = Expr.drop (num minLength) initCode
           conc <- mapM unlitByte prefix
-          pure $ InitCode (BS.pack conc) sym
+          pure $ InitCode (BS.pack $ V.toList conc) sym
     case contract' of
       Nothing ->
         vmError $ UnexpectedSymbolicArg (view (state . pc) vm0) "initcode must have a concrete prefix" []
@@ -2186,6 +2217,15 @@ create self this xGas' xValue xs newAddr initCode = do
 
           assign (at newAddr) (Just (newContract & balance .~ oldBal))
           modifying (ix self . nonce) succ
+
+        let resetStorage = \case
+              ConcreteStore s -> ConcreteStore (Map.delete (num newAddr) s)
+              AbstractStore -> AbstractStore
+              EmptyStore -> EmptyStore
+              SStore {} -> error "trying to reset symbolic storage with writes in create"
+
+        modifying (env . storage) resetStorage
+        modifying (env . origStorage) (Map.delete (num newAddr))
 
         transfer self newAddr xValue
 
@@ -2314,7 +2354,9 @@ finishFrame how = do
 
           let
             substate'' = over touchedAccounts (maybe id cons (find (3 ==) touched)) substate'
-            revertContracts = assign (env . contracts) reversion
+            (contractsReversion, storageReversion) = reversion
+            revertContracts = assign (env . contracts) contractsReversion
+            revertStorage = assign (env . storage) storageReversion
             revertSubstate  = assign (tx . substate) substate''
 
           case how of
@@ -2328,6 +2370,7 @@ finishFrame how = do
             -- Case 2: Reverting during a call?
             FrameReverted output -> do
               revertContracts
+              revertStorage
               revertSubstate
               assign (state . returndata) output
               copyCallBytesToMemory output outSize (Lit 0) outOffset
@@ -2337,6 +2380,7 @@ finishFrame how = do
             -- Case 3: Error during a call?
             FrameErrored _ -> do
               revertContracts
+              revertStorage
               revertSubstate
               assign (state . returndata) mempty
               push 0
@@ -2434,7 +2478,7 @@ copyCallBytesToMemory bs size xOffset yOffset =
       copySlice xOffset yOffset (Expr.min size (bufLength bs)) bs mem
 
 readMemory :: Expr EWord -> Expr EWord -> VM -> Expr Buf
-readMemory offset size vm = copySlice offset (Lit 0) size (view (state . memory) vm) EmptyBuf
+readMemory offset size vm = copySlice offset (Lit 0) size (view (state . memory) vm) mempty
 
 -- * Tracing
 
@@ -2547,15 +2591,16 @@ checkJump x xs = do
   theCodeOps <- use (env . contracts . ix self . codeOps)
   theOpIxMap <- use (env . contracts . ix self . opIxMap)
   let ops = case theCode of
-        InitCode ops' _ -> fmap LitByte $ BS.unpack ops'
+        InitCode ops' _ -> V.fromList $ LitByte <$> BS.unpack ops'
         RuntimeCode ops' -> ops'
       op = do
-        b <- ops !? num x
+        -- TODO: not a big fan of how bounds are checked, change this
+        b <- if x < num (length ops) then ops V.!? num x else Nothing
         unlitByte b
   case op of
     Nothing -> vmError BadJumpDestination
-    Just b
-      -> if 0x5b == b && OpJumpdest == snd (theCodeOps RegularVector.! (theOpIxMap Vector.! num x))
+    Just b ->
+      if 0x5b == b && OpJumpdest == snd (theCodeOps RegularVector.! (theOpIxMap Vector.! num x))
          then do
            state . stack .= xs
            state . pc .= num x
@@ -2589,7 +2634,7 @@ mkOpIxMap (InitCode conc _)
 
 mkOpIxMap (RuntimeCode ops)
   = Vector.create $ Vector.new (length ops) >>= \v ->
-      let (_, _, _, m) = foldl (go v) (0, 0, 0, return ()) (stripBytecodeMetadataSym ops)
+      let (_, _, _, m) = foldl (go v) (0, 0, 0, return ()) (stripBytecodeMetadataSym $ V.toList ops)
       in m >> return v
       where
         go v (0, !i, !j, !m) x = case unlitByte x of
@@ -2618,7 +2663,7 @@ vmOp vm =
         InitCode xs' _ ->
           (BS.index xs' i, fmap LitByte $ BS.unpack $ BS.drop i xs')
         RuntimeCode xs' ->
-          ( fromMaybe (error "unexpected symbolic code") . unlitByte $ xs' !! i , drop i xs')
+          ( fromMaybe (error "unexpected symbolic code") . unlitByte $ xs' V.! i , V.toList $ V.drop i xs')
   in if (opslen code' < i)
      then Nothing
      else Just (readOp op pushdata)
@@ -2663,7 +2708,7 @@ readOp x _  | x >= 0x90 && x <= 0x9f = OpSwap (x - 0x90 + 1)
 readOp x _  | x >= 0xa0 && x <= 0xa4 = OpLog (x - 0xa0)
 readOp x xs | x >= 0x60 && x <= 0x7f =
   let n = num $ x - 0x60 + 1
-  in OpPush (readBytes n (Lit . num $ x) (Expr.fromList xs))
+  in OpPush (readBytes n (Lit . num $ x) (Expr.fromList $ V.fromList xs))
 readOp x _ = case x of
   0x00 -> OpStop
   0x01 -> OpAdd
@@ -2750,7 +2795,7 @@ mkCodeOps (InitCode bytes _) = RegularVector.fromList . toList $ go 0 bytes
         Just (x, xs') ->
           let j = opSize x
           in (i, readOp x (fmap LitByte $ BS.unpack xs')) Seq.<| go (i + j) (BS.drop j xs)
-mkCodeOps (RuntimeCode ops) = RegularVector.fromList . toList $ go' 0 (stripBytecodeMetadataSym ops)
+mkCodeOps (RuntimeCode ops) = RegularVector.fromList . toList $ go' 0 (stripBytecodeMetadataSym $ V.toList ops)
   where
     go' !i !xs =
       case uncons xs of
@@ -2814,29 +2859,35 @@ concreteModexpGasFee input = max 200 ((multiplicationComplexity * iterCount) `di
 
 -- Gas cost of precompiles
 costOfPrecompile :: FeeSchedule Integer -> Addr -> Expr Buf -> Integer
-costOfPrecompile (FeeSchedule {..}) precompileAddr input' = let
-    input = fromMaybe (error "precompile input cannot have a dynamic size") $ Expr.toList input'
+costOfPrecompile (FeeSchedule {..}) precompileAddr input =
+  let errorDynamicSize = error "precompile input cannot have a dynamic size"
+      inputLen = case input of
+                   ConcreteBuf bs -> BS.length bs
+                   AbstractBuf _ -> errorDynamicSize
+                   buf -> case bufLength buf of
+                            Lit l -> num l -- TODO: overflow
+                            _ -> errorDynamicSize
   in case precompileAddr of
     -- ECRECOVER
     0x1 -> 3000
     -- SHA2-256
-    0x2 -> num $ (((length input + 31) `div` 32) * 12) + 60
+    0x2 -> num $ (((inputLen + 31) `div` 32) * 12) + 60
     -- RIPEMD-160
-    0x3 -> num $ (((length input + 31) `div` 32) * 120) + 600
+    0x3 -> num $ (((inputLen + 31) `div` 32) * 120) + 600
     -- IDENTITY
-    0x4 -> num $ (((length input + 31) `div` 32) * 3) + 15
+    0x4 -> num $ (((inputLen + 31) `div` 32) * 3) + 15
     -- MODEXP
-    0x5 -> case input' of
+    0x5 -> case input of
              ConcreteBuf i -> concreteModexpGasFee i
-             _ -> error "Unsupported symbolic modexp gas calc"
+             _ -> error "Unsupported symbolic modexp gas calc "
     -- ECADD
     0x6 -> g_ecadd
     -- ECMUL
     0x7 -> g_ecmul
     -- ECPAIRING
-    0x8 -> num $ ((length input) `div` 192) * (num g_pairing_point) + (num g_pairing_base)
+    0x8 -> num $ (inputLen `div` 192) * (num g_pairing_point) + (num g_pairing_base)
     -- BLAKE2
-    0x9 -> case input' of
+    0x9 -> case input of
              ConcreteBuf i -> g_fround * (num $ asInteger $ lazySlice 0 4 i)
              _ -> error "Unsupported symbolic blake2 gas calc"
     _ -> error ("unimplemented precompiled contract " ++ show precompileAddr)

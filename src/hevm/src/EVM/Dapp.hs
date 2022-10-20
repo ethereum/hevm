@@ -25,6 +25,7 @@ import Control.Lens
 
 import Data.List (find)
 import qualified Data.Map        as Map
+import qualified Data.Vector as V
 
 data DappInfo = DappInfo
   { _dappRoot       :: FilePath
@@ -176,7 +177,7 @@ lookupCode :: ContractCode -> DappInfo -> Maybe SolcContract
 lookupCode (InitCode c _) a =
   snd <$> preview (dappSolcByHash . ix (keccak' (stripBytecodeMetadata c))) a
 lookupCode (RuntimeCode c) a = let
-    code = BS.pack $ mapMaybe unlitByte c
+    code = BS.pack $ mapMaybe unlitByte $ V.toList c
   in case snd <$> preview (dappSolcByHash . ix (keccak' (stripBytecodeMetadata code))) a of
     Just x -> return x
     Nothing -> snd <$> find (compareCode code . fst) (view dappSolcByCode a)

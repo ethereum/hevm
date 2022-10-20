@@ -29,6 +29,8 @@ import Network.Wreq.Session (Session)
 import System.Process
 
 import qualified Network.Wreq.Session as Session
+import qualified Data.Vector as V
+import Numeric.Natural (Natural)
 
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where
@@ -127,7 +129,7 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
   theBalance <- MaybeT $ fetch (QueryBalance addr)
 
   return $
-    initialContract (EVM.RuntimeCode (fmap LitByte $ BS.unpack theCode))
+    initialContract (EVM.RuntimeCode (V.fromList $ LitByte <$> BS.unpack theCode))
       & set nonce    theNonce
       & set balance  theBalance
       & set external True
@@ -157,11 +159,15 @@ fetchSlotFrom n url addr slot =
   Session.withAPISession
     (\s -> fetchSlotWithSession n url s addr slot)
 
-http :: SolverGroup -> BlockNumber -> Text -> Fetcher
-http s n url = oracle s (Just (n, url))
+http :: Natural -> BlockNumber -> Text -> Fetcher
+http smtjobs n url q =
+  withSolvers Z3 smtjobs $ \s ->
+    oracle s (Just (n, url)) q
 
-zero :: Fetcher
-zero = undefined
+zero :: Natural -> Fetcher
+zero smtjobs q =
+  withSolvers Z3 smtjobs $ \s ->
+    oracle s Nothing q
 
 -- smtsolving + (http or zero)
 oracle :: SolverGroup -> Maybe (BlockNumber, Text) -> Fetcher

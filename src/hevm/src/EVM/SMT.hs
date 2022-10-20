@@ -428,8 +428,8 @@ exprToSMT = \case
     n -> error $ "indexWord: unsupported index: " <> show n
   ReadByte idx src -> op2 "select" src idx
 
-  EmptyBuf -> pure "emptyBuf"
-  ConcreteBuf bs -> writeBytes (LitByte <$> BS.unpack bs) EmptyBuf
+  ConcreteBuf "" -> pure "emptyBuf"
+  ConcreteBuf bs -> writeBytes (LitByte <$> BS.unpack bs) mempty
   AbstractBuf s -> pure s
   ReadWord idx prev -> op2 "readWord" idx prev
   BufLength b -> op1 "bufLength" b
