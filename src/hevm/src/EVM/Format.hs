@@ -99,19 +99,18 @@ humanizeInteger =
 showAbiValue :: (?context :: DappContext) => AbiValue -> Text
 showAbiValue (AbiBytes _ bs) =
   formatBytes bs  -- opportunistically decodes recognisable strings
-showAbiValue (AbiAddress addr) = undefined
-  {-
+showAbiValue (AbiAddress addr) =
   let dappinfo = view contextInfo ?context
       contracts = view contextEnv ?context
       name = case (Map.lookup addr contracts) of
         Nothing -> ""
         Just contract ->
-          let hash = view EVM.codehash contract
-              solcContract = (preview (dappSolcByHash . ix hash . _2) dappinfo)
-          in maybeContractName' solcContract
+          let hash = maybeLitWord $ view EVM.codehash contract
+          in case hash of
+               Just h -> maybeContractName' (preview (dappSolcByHash . ix h . _2) dappinfo)
+               Nothing -> ""
   in
     name <> "@" <> (pack $ show addr)
-  -}
 showAbiValue v = pack $ show v
 
 showAbiValues :: (?context :: DappContext) => Vector AbiValue -> Text
@@ -137,22 +136,20 @@ showValue :: (?context :: DappContext) => AbiType -> Expr Buf -> Text
 showValue t b = head $ textValues [t] b
 
 showCall :: (?context :: DappContext) => [AbiType] -> Expr Buf -> Text
-showCall = undefined
---showCall ts (SymbolicBuffer bs) = showValues ts $ SymbolicBuffer (drop 4 bs)
---showCall ts (ConcreteBuffer bs) = showValues ts $ ConcreteBuffer (BS.drop 4 bs)
+showCall ts (ConcreteBuf bs) = showValues ts $ ConcreteBuf (BS.drop 4 bs)
+showCall _ _ = "<symbolic>"
 
 showError :: (?context :: DappContext) => Expr Buf -> Text
-showError bs = T.pack $ show bs
-  {-
+showError (ConcreteBuf bs) =
   let dappinfo = view contextInfo ?context
       bs4 = BS.take 4 bs
   in case Map.lookup (word bs4) (view dappErrorMap dappinfo) of
-      Just (SolError errName ts) -> errName <> " " <> showCall ts (ConcreteBuffer bs)
+      Just (SolError errName ts) -> errName <> " " <> showCall ts (ConcreteBuf bs)
       Nothing -> case bs4 of
                   -- Method ID for Error(string)
-                  "\b\195y\160" -> showCall [AbiStringType] (ConcreteBuffer bs)
+                  "\b\195y\160" -> showCall [AbiStringType] (ConcreteBuf bs)
                   _             -> formatBinary bs
-                -}
+showError b = T.pack $ show b
 
 -- the conditions under which bytes will be decoded and rendered as a string
 isPrintable :: ByteString -> Bool
