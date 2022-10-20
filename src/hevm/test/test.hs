@@ -49,6 +49,7 @@ import EVM.RLP
 import EVM.Solidity
 import EVM.Types
 import EVM.SMT
+import qualified EVM.TTY as TTY
 import qualified Data.ByteString.Base16 as BS16
 import qualified EVM.Expr as Expr
 import qualified EVM.Fetch as Fetch
@@ -1089,6 +1090,20 @@ runDappTest testFile match = do
       withSolvers Z3 1 $ \solvers -> do
         opts <- testOpts solvers root json match
         dappTest opts solvers file Nothing
+
+debugDappTest :: FilePath -> IO ()
+debugDappTest testFile = do
+  root <- Paths.getDataDir
+  (json, _) <- compileWithDSTest testFile
+  --TIO.writeFile "output.json" json
+  withCurrentDirectory root $ do
+    withSystemTempFile "output.json" $ \file handle -> do
+      hClose handle
+      TIO.writeFile file json
+      withSolvers Z3 1 $ \solvers -> do
+        opts <- testOpts solvers root json ".*"
+        TTY.main opts root file
+
 
 testOpts :: SolverGroup -> FilePath -> Text -> Text -> IO UnitTestOptions
 testOpts solvers root solcJson match = do
