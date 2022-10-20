@@ -1,7 +1,22 @@
 {-# Language DataKinds #-}
 {-# Language ImplicitParams #-}
 {-# Language TemplateHaskell #-}
-module EVM.Format (formatExpr, contractNamePart, contractPathPart, showTree, showTraceTree, prettyvmresult, showCall, showWordExact, showWordExplanation) where
+module EVM.Format
+  ( formatExpr
+  , contractNamePart
+  , contractPathPart
+  , showTree
+  , showTraceTree
+  , prettyvmresult
+  , showCall
+  , showWordExact
+  , showWordExplanation
+  , parenthesise
+  , unindexed
+  , showValue
+  , textValues
+  , showAbiValue
+  ) where
 
 import Prelude hiding (Word)
 import qualified EVM
@@ -106,12 +121,11 @@ textAbiValues :: (?context :: DappContext) => Vector AbiValue -> [Text]
 textAbiValues vs = toList (fmap showAbiValue vs)
 
 textValues :: (?context :: DappContext) => [AbiType] -> Expr Buf -> [Text]
-textValues = undefined
---textValues ts (SymbolicBuffer  _) = [pack $ show t | t <- ts]
---textValues ts (ConcreteBuffer bs) =
-  --case runGetOrFail (getAbiSeq (length ts) ts) (fromStrict bs) of
-    --Right (_, _, xs) -> textAbiValues xs
-    --Left (_, _, _)   -> [formatBinary bs]
+textValues ts (ConcreteBuf bs) =
+  case runGetOrFail (getAbiSeq (length ts) ts) (fromStrict bs) of
+    Right (_, _, xs) -> textAbiValues xs
+    Left (_, _, _)   -> [formatBinary bs]
+textValues ts _ = fmap (const "<symbolic>") ts
 
 parenthesise :: [Text] -> Text
 parenthesise ts = "(" <> intercalate ", " ts <> ")"

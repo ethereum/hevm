@@ -104,7 +104,7 @@ data VM = VM
   , _env            :: Env
   , _block          :: Block
   , _tx             :: TxState
-  , _logs           :: Expr Logs
+  , _logs           :: [Expr Log]
   , _traces         :: Zipper.TreePos Zipper.Empty Trace
   , _cache          :: Cache
   , _burned         :: W256
@@ -483,7 +483,7 @@ makeVm o =
     , _txReversion = Map.fromList
       [(vmoptAddress o, vmoptContract o)]
     }
-  , _logs = EmptyLog
+  , _logs = []
   , _traces = Zipper.fromForest []
   , _block = Block
     { _coinbase = vmoptCoinbase o
@@ -658,7 +658,7 @@ exec1 = do
                 forceConcrete2 (xOffset', xSize') "LOG" $ \(xOffset, xSize) -> do
                     let (topics, xs') = splitAt n xs
                         bytes         = readMemory xOffset' xSize' vm
-                        logs'         = Log (litAddr self) bytes topics (view logs vm)
+                        logs'         = (LogEntry (litAddr self) bytes topics) : (view logs vm)
                     burn (g_log + g_logdata * (num xSize) + num n * g_logtopic) $
                       accessMemoryRange fees xOffset xSize $ do
                         traceTopLog logs'
@@ -2523,9 +2523,9 @@ zipperRootForest z =
 traceForest :: VM -> Forest Trace
 traceForest = view (traces . to zipperRootForest)
 
-traceTopLog :: (MonadState VM m) => Expr Logs -> m ()
-traceTopLog EmptyLog = noop
-traceTopLog (Log addr bytes topics _) = do
+traceTopLog :: (MonadState VM m) => [Expr Log] -> m ()
+traceTopLog [] = noop
+traceTopLog ((LogEntry addr bytes topics) : _) = do
   trace <- withTraceLocation (EventTrace addr bytes topics)
   modifying traces $
     \t -> Zipper.nextSpace (Zipper.insert (Node trace []) t)

@@ -809,22 +809,19 @@ failOutput vm UnitTestOptions { .. } testName =
   , "\n"
   ]
 
-formatTestLogs :: (?context :: DappContext) => Map W256 Event -> Expr Logs -> Text
-formatTestLogs = undefined
---formatTestLogs events xs =
-  --case catMaybes (toList (fmap (formatTestLog events) xs)) of
-    --[] -> "\n"
-    --ys -> "\n" <> intercalate "\n" ys <> "\n\n"
+formatTestLogs :: (?context :: DappContext) => Map W256 Event -> [Expr Log] -> Text
+formatTestLogs events xs =
+  case catMaybes (toList (fmap (formatTestLog events) xs)) of
+    [] -> "\n"
+    ys -> "\n" <> intercalate "\n" ys <> "\n\n"
 
 -- Here we catch and render some special logs emitted by ds-test,
 -- with the intent to then present them in a separate view to the
 -- regular trace output.
-formatTestLog :: (?context :: DappContext) => Map W256 Event -> Expr Logs -> Maybe Text
-formatTestLog = undefined
-  {-
-formatTestLog _ (Log _ _ []) = Nothing
-formatTestLog events (Log _ args (topic:_)) =
-  case maybeLitWord topic >>= \t1 -> (Map.lookup (wordValue t1) events) of
+formatTestLog :: (?context :: DappContext) => Map W256 Event -> Expr Log -> Maybe Text
+formatTestLog _ (LogEntry _ _ []) = Nothing
+formatTestLog events (LogEntry _ args (topic:_)) =
+  case maybeLitWord topic >>= \t1 -> (Map.lookup t1 events) of
     Nothing -> Nothing
     Just (Event name _ types) ->
       case (name <> parenthesise (abiTypeSolidity <$> (unindexed types))) of
@@ -879,7 +876,6 @@ formatTestLog events (Log _ args (topic:_)) =
                     Just $ (unquote (showAbiValue key)) <> ": " <> showDecimal dec val
                   _ -> Nothing
               _ -> Just "<symbolic decimal>"
-            -}
 
 
 word32Bytes :: Word32 -> ByteString
