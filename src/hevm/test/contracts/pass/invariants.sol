@@ -12,17 +12,16 @@ contract InvariantTest is DSTest {
 
     function setUp() public {
         token = new ERC20("TOKEN", "TKN", 18);
-        token.mint(address(this), 100 ether);
         user = new User(token);
-        token.transfer(address(user), 100 ether);
+        token.mint(address(user), type(uint).max);
         targetContracts_.push(address(user));
     }
 
     function invariantTestThisBal() public {
-        assertLe(token.balanceOf(address(user)), 100 ether);
+        assertLe(token.balanceOf(address(user)), type(uint).max);
     }
     function invariantTotSupply() public {
-        assertEq(token.totalSupply(), 100 ether);
+        assertEq(token.totalSupply(), type(uint).max);
     }
 }
 
