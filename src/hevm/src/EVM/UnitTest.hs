@@ -29,7 +29,7 @@ import EVM.Stepper (Stepper, interpret)
 import qualified EVM.Stepper as Stepper
 import qualified Control.Monad.Operational as Operational
 
-import Control.Lens hiding (Indexed, elements, List)
+import Control.Lens hiding (Indexed, elements, List, passing)
 import Control.Monad.State.Strict hiding (state)
 import qualified Control.Monad.State.Strict as State
 

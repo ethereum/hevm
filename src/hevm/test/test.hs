@@ -423,7 +423,7 @@ tests = testGroup "hevm"
         runDappTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Invariant Tests (Fail)" $ do
         let testFile = "test/contracts/fail/invariantFail.sol"
-        runDappTest testFile "invariantTestUserBal" >>= assertEqual "test result" False
+        runDappTest testFile "invariantFirst" >>= assertEqual "test result" False
         runDappTest testFile "invariantCount" >>= assertEqual "test result" False
     , testCase "Cheat Codes (Pass)" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
