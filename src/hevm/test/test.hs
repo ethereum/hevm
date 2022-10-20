@@ -123,6 +123,14 @@ tests = testGroup "hevm"
         -- same as above, but with offset 2
         (LitByte 0xbb)
         (Expr.indexWord (Lit 2) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
+    , testCase "indexword-oob-sym" $ assertEqual ""
+        -- indexWord should return 0 for oob access
+        (LitByte 0x0)
+        (Expr.indexWord (Lit 100) (JoinBytes
+          (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0)
+          (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0)
+          (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0)
+          (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0)))
     ]
   , testGroup "ABI"
     [ testProperty "Put/get inverse" $ \x ->

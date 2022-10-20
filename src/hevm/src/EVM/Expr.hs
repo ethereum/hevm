@@ -532,7 +532,7 @@ indexWord (Lit idx) (JoinBytes zero        one        two       three
   | idx == 29 = twentynine
   | idx == 30 = thirty
   | idx == 31 = thirtyone
-  | otherwise = error $ "Internal error: idx must be <= 31 (actual: " <> (show . num $ idx) <> ")"
+  | otherwise = LitByte 0
 indexWord idx w = IndexWord idx w
 
 
