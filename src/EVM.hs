@@ -2491,8 +2491,7 @@ readMemory offset size vm = copySlice offset (Lit 0) size (view (state . memory)
 
 -- * Tracing
 
-withTraceLocation
-  :: (MonadState VM m) => TraceData -> m Trace
+withTraceLocation :: TraceData -> EVM Trace
 withTraceLocation x = do
   vm <- get
   let this = fromJust $ currentContract vm
@@ -2530,7 +2529,7 @@ zipperRootForest z =
 traceForest :: VM -> Forest Trace
 traceForest = view (traces . to zipperRootForest)
 
-traceTopLog :: (MonadState VM m) => [Expr Log] -> m ()
+traceTopLog :: [Expr Log] -> EVM ()
 traceTopLog [] = noop
 traceTopLog ((LogEntry addr bytes topics) : _) = do
   trace <- withTraceLocation (EventTrace addr bytes topics)
