@@ -49,10 +49,6 @@ mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
   [''Typeable, ''Data, ''Generic]
 
 
---data Buffer
---  = ConcreteBuffer ByteString
---  | SymbolicBuffer [SWord 8]
-
 newtype W256 = W256 Word256
   deriving
     ( Num, Integral, Real, Ord, Generic
