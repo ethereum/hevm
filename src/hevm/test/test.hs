@@ -553,8 +553,8 @@ tests = testGroup "hevm"
              }
             |]
           [(Cex (_, ctr))] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
-          print $ show ctr
           assertEqual "Must be 10" 10 $ getArgInteger ctr "arg1"
+          putStrLn "Got 10 Cex, as expected"
         ,
         testCase "assert-fail-equal" $ do
           Just c <- solcRuntime "AssertFailEqual"
@@ -737,7 +737,7 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c Nothing []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        testCase "injectivity of keccak 32 bytes" $ do
+        testCase "injectivity of keccak (32 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
