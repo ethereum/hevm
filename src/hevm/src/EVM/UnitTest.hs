@@ -440,8 +440,8 @@ runUnitTestContract
         Just (VMSuccess _) -> do
           let
 
-            runCache :: ([(Either SMTCex Text, VM)], VM) -> (Test, [AbiType])
-                        -> IO ([(Either SMTCex Text, VM)], VM)
+            runCache :: ([(Either Text Text, VM)], VM) -> (Test, [AbiType])
+                        -> IO ([(Either Text Text, VM)], VM)
             runCache (results, vm) (test, types) = do
               (t, r, vm') <- runTest opts solvers vm (test, types)
               liftIO $ Text.putStrLn t
@@ -463,7 +463,7 @@ runUnitTestContract
           pure [(isRight r, vm) | (r, vm) <- details]
 
 
-runTest :: UnitTestOptions -> SolverGroup -> VM -> (Test, [AbiType]) -> IO (Text, Either SMTCex Text, VM)
+runTest :: UnitTestOptions -> SolverGroup -> VM -> (Test, [AbiType]) -> IO (Text, Either Text Text, VM)
 runTest opts@UnitTestOptions{} _ vm (ConcreteTest testName, []) = liftIO $ runOne opts vm testName emptyAbi
 runTest opts@UnitTestOptions{..} _ vm (ConcreteTest testName, types) = liftIO $ case replay of
   Nothing ->
@@ -588,7 +588,7 @@ getTargetContracts UnitTestOptions{..} = do
           in return $ fmap (\(AbiAddress a) -> a) (Vector.toList targets)
         _ -> error "internal error: unexpected failure code"
 
-exploreRun :: UnitTestOptions -> VM -> ABIMethod -> [ExploreTx] -> IO (Text, Either SMTCex Text, VM)
+exploreRun :: UnitTestOptions -> VM -> ABIMethod -> [ExploreTx] -> IO (Text, Either Text Text, VM)
 exploreRun opts@UnitTestOptions{..} initialVm testName replayTxs = do
   (targets, _) <- runStateT (EVM.Stepper.interpret oracle (getTargetContracts opts)) initialVm
   let depth = fromMaybe 20 maxDepth
@@ -617,7 +617,7 @@ execTest opts@UnitTestOptions{..} vm testName args =
     vm
 
 -- | Define the thread spawner for normal test cases
-runOne :: UnitTestOptions -> VM -> ABIMethod -> AbiValue -> IO (Text, Either SMTCex Text, VM)
+runOne :: UnitTestOptions -> VM -> ABIMethod -> AbiValue -> IO (Text, Either Text Text, VM)
 runOne opts@UnitTestOptions{..} vm testName args = do
   let argInfo = pack (if args == emptyAbi then "" else " with arguments: " <> show args)
   (bailed, vm') <- execTest opts vm testName args
@@ -651,7 +651,7 @@ runOne opts@UnitTestOptions{..} vm testName args = do
           )
 
 -- | Define the thread spawner for property based tests
-fuzzRun :: UnitTestOptions -> VM -> Text -> [AbiType] -> IO (Text, Either SMTCex Text, VM)
+fuzzRun :: UnitTestOptions -> VM -> Text -> [AbiType] -> IO (Text, Either Text Text, VM)
 fuzzRun opts@UnitTestOptions{..} vm testName types = do
   let args = Args{ replay          = Nothing
                  , maxSuccess      = fuzzRuns
@@ -690,7 +690,7 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
               )
 
 -- | Define the thread spawner for symbolic tests
-symRun :: UnitTestOptions -> SolverGroup -> VM -> Text -> [AbiType] -> IO (Text, Either SMTCex Text, VM)
+symRun :: UnitTestOptions -> SolverGroup -> VM -> Text -> [AbiType] -> IO (Text, Either Text Text, VM)
 symRun opts@UnitTestOptions{..} solvers vm testName types = do
     let (cd, cdProps) = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName
@@ -720,48 +720,46 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
       return ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "", vm)
     else do
       let x = mapMaybe extractCex results
-      let y = head $ symFailure opts testName x -- TODO this is WRONG, only returns FIRST Cex
+      let y = symFailure opts testName x -- TODO this is WRONG, only returns FIRST Cex
       return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y, vm)
 
-symFailure :: UnitTestOptions -> Text -> [(Expr End, SMTCex)] -> [SMTCex]
+symFailure :: UnitTestOptions -> Text -> [(Expr End, SMTCex)] -> Text
 symFailure UnitTestOptions {..} testName failures' =
-    map snd failures'
---mconcat
---  [ "Failure: "
---  , testName
---  , "\n\n"
---  -- , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
---  ]
---  where
---    showRes = \case
---                     Return _ _ -> if "proveFail" `isPrefixOf` testName
---                                    then "Successful execution"
---                                    else "Failed: DSTest Assertion Violation"
---                     res ->
---                       --let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
---                       let ?context = DappContext { _contextInfo = dapp, _contextEnv = mempty }
---                       in prettyvmresult res
---    mkMsg (leaf, cexs) = pack $ unlines
---      ["Counterexample:"
---      ,""
---      ,"  result:   " <> showRes leaf
---      ,"  calldata: " <> Text.unpack (Text.unlines cexs)
---      , case verbose of
---          --Just _ -> unlines
---            --[ ""
---            --, unpack $ indentLines 2 (showTraceTree dapp vm)
---            --]
---          _ -> ""
---      ]
+  mconcat
+    [ "Failure: "
+    , testName
+    , "\n\n"
+    -- , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
+    ]
+    where
+      showRes = \case
+                       Return _ _ -> if "proveFail" `isPrefixOf` testName
+                                      then "Successful execution"
+                                      else "Failed: DSTest Assertion Violation"
+                       res ->
+                         --let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
+                         let ?context = DappContext { _contextInfo = dapp, _contextEnv = mempty }
+                         in prettyvmresult res
+      mkMsg (leaf, cexs) = pack $ unlines
+        ["Counterexample:"
+        ,""
+        ,"  result:   " <> showRes leaf
+        ,"  calldata: " <> Text.unpack (Text.unlines cexs)
+        , case verbose of
+            --Just _ -> unlines
+              --[ ""
+              --, unpack $ indentLines 2 (showTraceTree dapp vm)
+              --]
+            _ -> ""
+        ]
 
-prettyCalldata :: (?context :: DappContext) => Expr Buf -> Text -> [AbiType]-> IO Text
-prettyCalldata = undefined
---prettyCalldata buf sig types = do
-  --cdlen' <- num <$> SBV.getValue cdlen
-  --cd <- case buf of
-    --ConcreteBuf cd -> return $ BS.take cdlen' cd
-    --cd -> mapM (SBV.getValue . fromSized) (take cdlen' cd) <&> BS.pack
-  --pure $ (head (Text.splitOn "(" sig)) <> showCall types (ConcreteBuffer cd)
+-- prettyCalldata :: (?context :: DappContext) => Expr Buf -> Text -> [AbiType]-> IO Text
+-- prettyCalldata buf sig types = do
+--   cdlen' <- num <$> SBV.getValue cdlen
+--   cd <- case buf of
+--     ConcreteBuf cd -> return $ BS.take cdlen' cd
+--     cd -> mapM (SBV.getValue . fromSized) (take cdlen' cd) <&> BS.pack
+--   pure $ (head (Text.splitOn "(" sig)) <> showCall types (ConcreteBuffer cd)
 
 execSymTest :: UnitTestOptions -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper (Expr End)
 execSymTest opts@UnitTestOptions{ .. } method cd = do
@@ -801,19 +799,19 @@ passOutput vm UnitTestOptions { .. } testName =
     else ""
 
 -- TODO
-failOutput :: VM -> UnitTestOptions -> Text -> SMTCex
-failOutput vm UnitTestOptions { .. } testName =  undefined
-  -- let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
-  -- in mconcat
-  -- [ "Failure: "
-  -- , fromMaybe "" (stripSuffix "()" testName)
-  -- , "\n"
-  -- , case verbose of
-  --     Just _ -> indentLines 2 (showTraceTree dapp vm)
-  --     _ -> ""
-  -- , indentLines 2 (formatTestLogs (view dappEventMap dapp) (view logs vm))
-  -- , "\n"
-  -- ]
+failOutput :: VM -> UnitTestOptions -> Text -> Text
+failOutput vm UnitTestOptions { .. } testName =
+  let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
+  in mconcat
+  [ "Failure: "
+  , fromMaybe "" (stripSuffix "()" testName)
+  , "\n"
+  , case verbose of
+      Just _ -> indentLines 2 (showTraceTree dapp vm)
+      _ -> ""
+  , indentLines 2 (formatTestLogs (view dappEventMap dapp) (view logs vm))
+  , "\n"
+  ]
 
 formatTestLogs :: (?context :: DappContext) => Map W256 Event -> Expr Logs -> Text
 formatTestLogs = undefined
