@@ -754,8 +754,7 @@ tests = testGroup "hevm"
             [i|
             contract A {
               function f(uint x, uint y, uint w, uint z) public pure {
-                if (keccak256(abi.encodePacked(x,y)) == keccak256(abi.encodePacked(w,z)))
-                    assert(x==w && y == z);
+                assert (keccak256(abi.encodePacked(x,y)) != keccak256(abi.encodePacked(w,z)));
               }
             }
             |]
