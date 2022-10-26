@@ -74,4 +74,4 @@ createAddress a n = num $ keccak' $ rlpList [rlpAddrFull a, rlpWord256 n]
 
 create2Address :: Addr -> W256 -> ByteString -> Addr
 create2Address a s b = num $ keccak' $ mconcat
-  [BS.singleton 0xff, word160Bytes a, word256Bytes $ num s, word256Bytes $ keccak' b]
+  [BS.singleton 0xff, word160Bytes a, word256Bytes s, word256Bytes $ keccak' b]

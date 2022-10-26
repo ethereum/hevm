@@ -8,17 +8,17 @@ module EVM.Expr where
 
 import Prelude hiding (LT, GT)
 import Data.Bits
+import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
 import Data.Word
 import Data.Maybe
 import Data.List
-
-import Debug.Trace
 
 import Control.Lens (lens)
 
 import EVM.Types
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
+import qualified Data.Vector as V
 
 
 -- ** Stack Ops ** ---------------------------------------------------------------------------------
@@ -54,20 +54,20 @@ mul :: Expr EWord -> Expr EWord -> Expr EWord
 mul = op2 Mul (*)
 
 div :: Expr EWord -> Expr EWord -> Expr EWord
-div = op2 Div Prelude.div
+div = op2 Div (\x y -> if y == 0 then 0 else Prelude.div x y)
 
 sdiv :: Expr EWord -> Expr EWord -> Expr EWord
-sdiv = op2 SDiv (\x y -> let sx, sy :: Integer
+sdiv = op2 SDiv (\x y -> let sx, sy :: Int256
                              sx = fromIntegral x
                              sy = fromIntegral y
-                         in fromIntegral (sx `quot` sy))
+                         in if y == 0 then 0 else fromIntegral (sx `quot` sy))
 
 mod :: Expr EWord -> Expr EWord -> Expr EWord
 mod = op2 Mod (\x y -> if y == 0 then 0 else x `Prelude.mod` y)
 
 smod :: Expr EWord -> Expr EWord -> Expr EWord
 smod = op2 SMod (\x y ->
-  let sx, sy :: Integer
+  let sx, sy :: Int256
       sx = fromIntegral x
       sy = fromIntegral y
   in if y == 0
@@ -113,14 +113,14 @@ geq = op2 GEq (\x y -> if x >= y then 1 else 0)
 
 slt :: Expr EWord -> Expr EWord -> Expr EWord
 slt = op2 SLT (\x y ->
-  let sx, sy :: Integer
+  let sx, sy :: Int256
       sx = fromIntegral x
       sy = fromIntegral y
   in if sx < sy then 1 else 0)
 
 sgt :: Expr EWord -> Expr EWord -> Expr EWord
 sgt = op2 SLT (\x y ->
-  let sx, sy :: Integer
+  let sx, sy :: Int256
       sx = fromIntegral x
       sy = fromIntegral y
   in if sx > sy then 1 else 0)
@@ -146,14 +146,16 @@ not :: Expr EWord -> Expr EWord
 not = op1 Not complement
 
 shl :: Expr EWord -> Expr EWord -> Expr EWord
-shl = op2 SHL (\x y -> shiftL x (fromIntegral y))
+shl = op2 SHL (\x y -> if x > 256 then 0 else shiftL y (fromIntegral x))
 
 shr :: Expr EWord -> Expr EWord -> Expr EWord
-shr = op2 SHR (\x y -> shiftR x (fromIntegral y))
+shr = op2 SHR (\x y -> if x > 256 then 0 else shiftR y (fromIntegral x))
 
 sar :: Expr EWord -> Expr EWord -> Expr EWord
-sar = shr -- TODO: almost certainly wrong
-
+sar = op2 SAR (\x y ->
+  let msb = testBit y 255
+      shifted = if x > 256 then 0 else shiftR y (fromIntegral x)
+  in if msb then setBit shifted 255 else shifted)
 
 -- ** Bufs ** --------------------------------------------------------------------------------------
 
@@ -164,14 +166,18 @@ sar = shr -- TODO: almost certainly wrong
 -- an abstract expresion if nescessary. Note that a Buf is an infinite
 -- structure, so reads outside of the bounds of a ConcreteBuf return 0. This is
 -- inline with the semantics of calldata and memory, but not of returndata.
-readByte :: Expr EWord -> Expr Buf -> Expr Byte
-readByte _ EmptyBuf = LitByte 0x0
 
 -- fuly concrete reads
+readByte :: Expr EWord -> Expr Buf -> Expr Byte
 readByte (Lit x) (ConcreteBuf b)
-  = if num x < BS.length b
-    then LitByte (BS.index b (num x))
+  = if x <= num (maxBound :: Int) && i < BS.length b
+    then LitByte (BS.index b i)
     else LitByte 0x0
+  where
+    i :: Int
+    i = case x of
+          (W256 (Word256 _ (Word128 _ x'))) -> num x'
+
 readByte i@(Lit x) (WriteByte (Lit idx) val src)
   = if x == idx
     then val
@@ -233,25 +239,32 @@ readWord idx buf = ReadWord idx buf
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf -> Expr Buf
 
 -- copies from empty bufs
-copySlice _ _ _ EmptyBuf EmptyBuf = EmptyBuf
-copySlice _ _ _ EmptyBuf (ConcreteBuf dst) = ConcreteBuf dst
+copySlice _ _ (Lit 0) (ConcreteBuf "") dst = dst
+copySlice _ _ (Lit size) (ConcreteBuf "") (ConcreteBuf "") =
+  ConcreteBuf $ BS.replicate (num size) 0
+copySlice srcOffset dstOffset (Lit size) (ConcreteBuf "") dst =
+  copySlice srcOffset dstOffset (Lit size) (ConcreteBuf $ BS.replicate (num size) 0) dst -- TODO: ugly!
 
 -- fully concrete copies
-copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) EmptyBuf = let
+copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) (ConcreteBuf "")
+  | srcOffset > num (BS.length src) = ConcreteBuf $ BS.replicate (num size) 0
+  | otherwise = let
     hd = BS.replicate (num dstOffset) 0
     sl = padRight (num size) $ BS.take (num size) (BS.drop (num srcOffset) src)
   in ConcreteBuf $ hd <> sl
-copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) (ConcreteBuf dst) = let
-    hd = padRight (num dstOffset) $ BS.take (num dstOffset) dst
-    sl = padRight (num size) $ BS.take (num size) (BS.drop (num srcOffset) src)
-    tl = BS.drop (num dstOffset + num size) dst
-  in ConcreteBuf $ hd <> sl <> tl
+copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) (ConcreteBuf dst)
+  = let hd = padRight (num dstOffset) $ BS.take (num dstOffset) dst
+        sl = if srcOffset > num (BS.length src)
+          then BS.replicate (num size) 0
+          else padRight (num size) $ BS.take (num size) (BS.drop (num srcOffset) src)
+        tl = BS.drop (num dstOffset + num size) dst
+    in ConcreteBuf $ hd <> sl <> tl
 
 -- concrete indicies & abstract src (may produce a concrete result if we are
 -- copying from a concrete region of src)
 copySlice s@(Lit srcOffset) d@(Lit dstOffset) sz@(Lit size) src ds@(ConcreteBuf dst) = let
     hd = padRight (num dstOffset) $ BS.take (num dstOffset) dst
-    sl = [readByte (Lit i) src | i <- [srcOffset .. srcOffset + size]]
+    sl = [readByte (Lit i) src | i <- [srcOffset .. srcOffset + (size - 1)]]
   in if Prelude.and . (fmap isLitByte) $ sl
      then ConcreteBuf $ hd <> (BS.pack . (mapMaybe unlitByte) $ sl)
      else CopySlice s d sz src ds
@@ -261,7 +274,7 @@ copySlice srcOffset dstOffset size src dst = CopySlice srcOffset dstOffset size 
 
 
 writeByte :: Expr EWord -> Expr Byte -> Expr Buf -> Expr Buf
-writeByte (Lit offset) (LitByte val) EmptyBuf
+writeByte (Lit offset) (LitByte val) (ConcreteBuf "")
   = ConcreteBuf $ BS.replicate (num offset) 0 <> BS.singleton val
 writeByte (Lit offset) (LitByte byte) (ConcreteBuf src)
   = ConcreteBuf $ (padRight (num offset) $ BS.take (num offset) src)
@@ -271,7 +284,7 @@ writeByte offset byte src = WriteByte offset byte src
 
 
 writeWord :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
-writeWord (Lit offset) (Lit val) EmptyBuf
+writeWord (Lit offset) (Lit val) (ConcreteBuf "")
   = ConcreteBuf $ BS.replicate (num offset) 0 <> word256Bytes val
 writeWord (Lit offset) (Lit val) (ConcreteBuf src)
   = ConcreteBuf $ (padRight (num offset) $ BS.take (num offset) src)
@@ -290,7 +303,6 @@ bufLength buf = case go 0 buf of
                   Nothing -> BufLength buf
   where
     go :: W256 -> Expr Buf -> Maybe (Expr EWord)
-    go l EmptyBuf = Just . Lit $ l
     go l (ConcreteBuf b) = Just . Lit $ max (num . BS.length $ b) l
     go l (WriteWord (Lit idx) _ b) = go (max l (idx + 31)) b
     go l (WriteByte (Lit idx) _ b) = go (max l idx) b
@@ -305,7 +317,6 @@ minLength = go 0
   where
     go :: W256 -> Expr Buf -> Maybe Int
     -- base cases
-    go l EmptyBuf = Just . num $ l
     go _ (AbstractBuf _) = Nothing
     go l (ConcreteBuf b) = Just . num $ max (num . BS.length $ b) l
 
@@ -338,30 +349,28 @@ take n = slice (Lit 0) (Lit n)
 drop :: W256 -> Expr Buf -> Expr Buf
 drop n buf = slice (Lit n) (sub (bufLength buf) (Lit n)) buf
 
-
 slice :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
-slice offset size src = copySlice offset (Lit 0) size src EmptyBuf
+slice offset size src = copySlice offset (Lit 0) size src mempty
 
 
-toList :: Expr Buf -> Maybe [Expr Byte]
-toList EmptyBuf = Just []
+toList :: Expr Buf -> Maybe (V.Vector (Expr Byte))
 toList (AbstractBuf _) = Nothing
-toList (ConcreteBuf bs) = Just . (fmap LitByte) $ BS.unpack bs
+toList (ConcreteBuf bs) = Just $ V.fromList $ LitByte <$> BS.unpack bs
 toList buf = case bufLength buf of
-  Lit l -> Just $ go l
+  Lit l -> Just $ V.fromList $ go l
   _ -> Nothing
   where
     go 0 = [readByte (Lit 0) buf]
     go i = readByte (Lit i) buf : go (i - 1)
 
 
-fromList :: [Expr Byte] -> Expr Buf
+fromList :: V.Vector (Expr Byte) -> Expr Buf
 fromList bs = case Prelude.and (fmap isLitByte bs) of
-  True -> ConcreteBuf . BS.pack . mapMaybe unlitByte $ bs
+  True -> ConcreteBuf . BS.pack . V.toList . V.mapMaybe unlitByte $ bs
   -- we want the resulting buffer to be a concrete base with any symbolic
   -- writes stacked on top, so we write all concrete bytes in a first pass and
   -- then write any symbolic bytes afterwards
-  False -> applySyms . applyConcrete $ bs
+  False -> applySyms . applyConcrete . V.toList $ bs
     where
       applyConcrete :: [Expr Byte] -> (Expr Buf, [(W256, Expr Byte)])
       applyConcrete bytes = let
@@ -369,16 +378,17 @@ fromList bs = case Prelude.and (fmap isLitByte bs) of
           go (buf, syms) b = case b of
                        (idx, LitByte b') -> (writeByte (Lit idx) (LitByte b') buf, syms)
                        _ -> (buf, b : syms)
-        in foldl' go (EmptyBuf, []) (zip [0..] bytes)
+        in foldl' go (mempty, []) (zip [0..] bytes)
 
       applySyms :: (Expr Buf, [(W256, Expr Byte)]) -> Expr Buf
       applySyms (buf, syms) = foldl' (\acc (idx, b) -> writeByte (Lit idx) b acc) buf syms
 
 instance Semigroup (Expr Buf) where
-  a <> b = copySlice (Lit 0) (bufLength a) (bufLength b) a b
+  (ConcreteBuf a) <> (ConcreteBuf b) = ConcreteBuf $ a <> b
+  a <> b = copySlice (Lit 0) (bufLength a) (bufLength b) b a
 
 instance Monoid (Expr Buf) where
-  mempty = EmptyBuf
+  mempty = ConcreteBuf ""
 
 -- | Removes any irrelevant writes when reading from a buffer
 simplifyReads :: Expr a -> Expr a
@@ -391,7 +401,6 @@ simplifyReads = \case
 -- TODO: are the bounds here correct? think there might be some off by one mistakes...
 stripWrites :: W256 -> W256 -> Expr Buf -> Expr Buf
 stripWrites bottom top = \case
-  EmptyBuf -> EmptyBuf
   AbstractBuf s -> AbstractBuf s
   ConcreteBuf b -> ConcreteBuf $ BS.take (num top) b
   WriteByte (Lit idx) v prev
@@ -480,7 +489,9 @@ isLitByte _ = False
 
 -- | Returns the byte at idx from the given word.
 indexWord :: Expr EWord -> Expr EWord -> Expr Byte
-indexWord (Lit idx) (Lit w) = LitByte . fromIntegral $ shiftR w (248 - num idx * 8)
+indexWord (Lit idx) (Lit w)
+  | idx <= 31 = LitByte . fromIntegral $ shiftR w (248 - num idx * 8)
+  | otherwise = LitByte 0 -- TODO: is this correct?
 indexWord (Lit idx) (JoinBytes zero        one        two       three
                                four        five       six       seven
                                eight       nine       ten       eleven
@@ -521,7 +532,7 @@ indexWord (Lit idx) (JoinBytes zero        one        two       three
   | idx == 29 = twentynine
   | idx == 30 = thirty
   | idx == 31 = thirtyone
-  | otherwise = LitByte 0
+  | otherwise = error $ "Internal error: idx must be <= 31 (actual: " <> (show . num $ idx) <> ")"
 indexWord idx w = IndexWord idx w
 
 

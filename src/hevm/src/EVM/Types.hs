@@ -42,6 +42,7 @@ import qualified Text.Read
 
 -- Some stuff for "generic programming", needed to create Word512
 import Data.Data
+import qualified Data.Vector as V
 
 -- We need a 512-bit word for doing ADDMOD and MULMOD with full precision.
 mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
@@ -69,8 +70,7 @@ newtype W256 = W256 Word256
   Memory, calldata, and returndata are all represented as a Buf. Semantically
   speaking a Buf is a byte array with of size 2^256.
 
-  Bufs have three base constructors:
-    - EmptyBuf:       all elements are zero
+  Bufs have two base constructors:
     - AbstractBuf:    all elements are fully abstract values
     - ConcreteBuf bs: all elements past (length bs) are zero
 
@@ -325,7 +325,6 @@ data Expr (a :: EType) where
 
   -- buffers
 
-  EmptyBuf       :: Expr Buf
   ConcreteBuf    :: ByteString -> Expr Buf
   AbstractBuf    :: Text -> Expr Buf
 
@@ -632,7 +631,6 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- buffers
 
-      e@(EmptyBuf) -> f e
       e@(ConcreteBuf _) -> f e
       e@(AbstractBuf _) -> f e
       e@(ReadWord a b) -> f e <> (go a) <> (go b)
@@ -842,7 +840,6 @@ mapExpr f expr = case (f expr) of
 
   -- buffers
 
-  EmptyBuf -> EmptyBuf
   ConcreteBuf a -> ConcreteBuf a
   AbstractBuf a -> AbstractBuf a
   ReadWord a b -> ReadWord (mapExpr f (f a)) (mapExpr f (f b))
@@ -1019,8 +1016,8 @@ padRight' n xs = xs <> replicate (n - length xs) '0'
                 --else mappend xs (replicate (n - m) 0)
   --where m = length xs
 
-padLeft' :: Int -> [Expr Byte] -> [Expr Byte]
-padLeft' n xs = replicate (n - length xs) (LitByte 0) <> xs
+padLeft' :: Int -> V.Vector (Expr Byte) -> V.Vector (Expr Byte)
+padLeft' n xs = V.replicate (n - length xs) (LitByte 0) <> xs
 
 word256 :: ByteString -> Word256
 word256 xs = case Cereal.runGet m (padLeft 32 xs) of
@@ -1119,11 +1116,3 @@ regexMatches regexSource =
     regex = Regex.makeRegexOpts compOpts execOpts (Text.unpack regexSource)
   in
     Regex.matchTest regex . Seq.fromList . Text.unpack
-
--- | A total variant of (!!)
-(!?) :: Foldable f => f a -> Int -> Maybe a
-xs !? n
-  | n < 0     = Nothing
-  | otherwise = foldr (\x r k -> case k of
-                                   0 -> Just x
-                                   _ -> r (k-1)) (const Nothing) xs n
