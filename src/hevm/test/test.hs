@@ -933,7 +933,8 @@ tests = testGroup "hevm"
         runSMTWith z3 $ query $ do
           Cex _ <- equivalenceCheck aPrgm bPrgm Nothing Nothing Nothing
           return ()
--}
+          -}
+
     ]
   ]
   where
