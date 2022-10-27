@@ -691,13 +691,20 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
 -- | Define the thread spawner for symbolic tests
 symRun :: UnitTestOptions -> SolverGroup -> VM -> Text -> [AbiType] -> IO (Text, Either Text Text, VM)
 symRun opts@UnitTestOptions{..} solvers vm testName types = do
-    let (cd, cdProps) = symCalldata testName types [] (AbstractBuf "txdata")
+    let cd = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName
         testContract = view (state . contract) vm
 
-        -- define postcondition depending on `shouldFail`
-        failed store = (readStorage' (litAddr testContract) (Lit 1) store .== Lit 1)
-                   .|| (readStorage' (litAddr cheatCode) (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) store  .== Lit 1)
+
+    putStrLn $ "testContract: " <> show testContract
+    putStrLn $ "cheatCode: " <> show cheatCode
+
+    -- define postcondition depending on `shouldFail`
+    -- We directly encode the failure conditions from failed() in ds-test since this is easier to encode than a call into failed()
+    -- we need to read from slot 0 in the test contract and mask it with 0x10 to get the value of _failed
+    -- we don't need to do this when reading the failed from the cheatcode address since we don't do any packing there
+    let failed store = (And (readStorage' (litAddr testContract) (Lit 0) store) (Lit 2) .== Lit 2)
+                   .|| (readStorage' (litAddr cheatCode) (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) store .== Lit 1)
         postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
                                   Return _ store -> failed store
@@ -706,9 +713,11 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
                                    Return _ store -> PNeg (failed store)
                                    _ -> PBool False
 
-        -- add calldata to vm
-        vm' = vm & set (state . calldata) cd
-                 & over (constraints) (<> cdProps)
+    (_, vm') <- runStateT
+      (EVM.Stepper.interpret oracle (Stepper.evm $ do
+          popTrace
+          makeTxCall testParams cd
+        )) vm
 
     -- check postconditions against vm
     results <- verify solvers vm' Nothing Nothing Nothing (Just postcondition)

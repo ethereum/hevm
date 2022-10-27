@@ -8,15 +8,19 @@ contract SolidityTest is DSTest {
         token = new ERC20("TOKEN", "TKN", 18);
     }
 
+    function prove_trivial() public {
+        assert(false);
+    }
+
     function prove_add(uint x, uint y) public {
         unchecked {
             assertTrue(x + y >= x);
         }
     }
 
-    function proveFail_shouldFail(address usr) public {
-        usr.call("");
-    }
+    //function proveFail_shouldFail(address usr) public {
+        //usr.call("");
+    //}
 
     function prove_smtTimeout(uint x, uint y, uint z) public {
         if ((x * y / z) * (x / y) / (x * y) == (x * x * x * y * z / x * z * y)) {
@@ -39,7 +43,7 @@ contract SolidityTest is DSTest {
     }
 
     function prove_mul(uint136 x, uint128 y) public {
-        mul(x,y);
+        x * y;
     }
 
     function prove_distributivity(uint120 x, uint120 y, uint120 z) public {

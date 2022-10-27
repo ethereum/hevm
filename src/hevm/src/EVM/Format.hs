@@ -371,20 +371,18 @@ contractPathPart :: Text -> Text
 contractPathPart x = Text.split (== ':') x !! 0
 
 prettyvmresult :: (?context :: DappContext) => Expr End -> String
-prettyvmresult = undefined
-  {-
---prettyvmresult (EVM.VMFailure (EVM.Revert ""))  = "Revert"
-prettyvmresult (EVM.VMFailure (EVM.Revert msg)) = "Revert" ++ (unpack $ showError msg)
-prettyvmresult (EVM.VMFailure (EVM.UnrecognizedOpcode 254)) = "Assertion violation"
-prettyvmresult (EVM.VMFailure err) = "Failed: " <> show err
-prettyvmresult (EVM.VMSuccess (ConcreteBuf msg)) =
+prettyvmresult (EVM.Types.Revert (ConcreteBuf "")) = "Revert"
+prettyvmresult (EVM.Types.Revert msg) = "Revert: " ++ (unpack $ showError msg)
+prettyvmresult (EVM.Types.Invalid) = "Invalid Opcode"
+prettyvmresult (EVM.Types.Return (ConcreteBuf msg) _) =
   if BS.null msg
   then "Stop"
   else "Return: " <> show (ByteStringS msg)
-prettyvmresult _ = error "TODO: sym prettyVmResult"
---prettyvmresult (EVM.VMSuccess (SymbolicBuffer msg)) =
-  --"Return: " <> show (length msg) <> " symbolic bytes"
-  -}
+prettyvmresult (EVM.Types.Return _ _) =
+  "Return: <symbolic>"
+prettyvmresult (EVM.Types.IllegalOverflow) = "Illegal Overflow"
+prettyvmresult (EVM.Types.SelfDestruct) = "Self Destruct"
+prettyvmresult e = error "Internal Error: Invalid Result: " <> show e
 
 currentSolc :: DappInfo -> VM -> Maybe SolcContract
 currentSolc dapp vm = undefined

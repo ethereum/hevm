@@ -528,6 +528,7 @@ evalProp = \case
                    (PBool False, PBool False) -> PBool False
                    (PBool _, PBool _) -> PBool True
                    _ -> o
+  o -> o
 
 
 -- | Symbolically execute the VM and check all endstates against the postcondition, if available.
