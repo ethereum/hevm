@@ -326,7 +326,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x21] c (Just ("fun(uint256)", [AbiUIntType 256])) []
+        [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s [0x21] c (Just ("fun(uint256)", [AbiUIntType 256])) []
+        assertBool "Enum is only defined for 0 and 1" $ (getArgInteger ctr "arg1") > 1
         putStrLn "expected counterexample found"
      ,
      -- TODO 0x22 is missing: "0x22: If you access a storage byte array that is incorrectly encoded."
