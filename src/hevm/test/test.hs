@@ -312,7 +312,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x12] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+        [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s [0x12] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+        assertEqual "Division by 0 needs b=0" (getArgInteger ctr "arg2") 0
         putStrLn "expected counterexample found"
      ,
      testCase "enum-conversion-fail" $ do
