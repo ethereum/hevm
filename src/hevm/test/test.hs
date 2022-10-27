@@ -13,6 +13,7 @@ import qualified Data.Text as Text
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BS (fromStrict)
 import qualified Data.ByteString.Base16 as Hex
+import Data.Bits ((.&.))
 import Data.Maybe
 import Data.Map (lookup)
 import Data.List (elemIndex)
@@ -671,7 +672,8 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          assertBool "last byte must be non-zero" $ ((Data.Bits..&.) (getArgInteger ctr "arg1") 0xff) > 0
           putStrLn $ "Expected counterexample found"
         ,
         -- We zero out everything but the 2nd LSB byte. However, byte(31,x) takes the 2nd LSB byte
@@ -688,7 +690,8 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          assertBool "second to last byte must be non-zero" $ ((Data.Bits..&.) (getArgInteger ctr "arg1") 0xff00) > 0
           putStrLn $ "Expected counterexample found"
         ,
         -- Reverse of thest above
