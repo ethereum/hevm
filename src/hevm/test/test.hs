@@ -797,22 +797,14 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256,uint256,uint256)", replicate 4 (AbiUIntType 256))) []
+          [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256,uint256,uint256)", replicate 4 (AbiUIntType 256))) []
+          let x = getArgInteger ctr "arg1"
+          let y = getArgInteger ctr "arg2"
+          let w = getArgInteger ctr "arg3"
+          let z = getArgInteger ctr "arg4"
+          assertEqual "x==y for hash collision" x y
+          assertEqual "w==z for hash collision" w z
           putStrLn "expected counterexample found"
-          -- TODO check that x == w and y == z in cex
-          --   case view (state . calldata . _1) vm of
-          --     SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
-          --     ConcreteBuffer _ -> error "unexpected"
-
-          -- let [AbiUInt 256 x,
-          --      AbiUInt 256 y,
-          --      AbiUInt 256 w,
-          --      AbiUInt 256 z] = decodeAbiValues [AbiUIntType 256,
-          --                                        AbiUIntType 256,
-          --                                        AbiUIntType 256,
-          --                                        AbiUIntType 256] bs
-          -- assertEqual "x == w" x w
-          -- assertEqual "y == z" y z -
         ,
         expectFail $ testCase "calldata beyond calldatasize is 0 (z3)" $ do
           Just c <- solcRuntime "A"
