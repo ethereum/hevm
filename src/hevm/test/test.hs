@@ -491,10 +491,41 @@ tests = testGroup "hevm"
             [Qed res] <- withSolvers Z3 4 $ \s -> checkAssert s defaultPanicCodes c (Just ("hello(address)", [AbiAddressType])) []
             putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-
+        testCase "catch-storage-collisions-noproblem" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint x, uint y) public {
+                 if (x != y) {
+                   assembly {
+                     let newx := sub(sload(x), 1)
+                     let newy := add(sload(y), 1)
+                     sstore(x,newx)
+                     sstore(y,newy)
+                   }
+                 }
+              }
+            }
+            |]
+          let pre vm = (Lit 0) .== view (state . callvalue) vm
+              post prestate poststate =
+                let [x,y] = getStaticAbiArgs 2 prestate
+                    this = Expr.litAddr $ view (state . codeContract) prestate
+                    prestore =  view (env . storage) prestate
+                    prex = Expr.readStorage' this x prestore
+                    prey = Expr.readStorage' this y prestore
+                in case poststate of
+                     Return _ poststore -> let
+                           postx = Expr.readStorage' this x poststore
+                           posty = Expr.readStorage' this y poststore
+                       in Expr.add prex prey .== Expr.add postx posty
+                     _ -> PBool True
+          [Qed _] <- withSolvers Z3 1 $ \s -> verifyContract s c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] SymbolicS (Just pre) (Just post)
+          putStrLn "Correct, this can never fail"
+        ,
         -- Inspired by these `msg.sender == to` token bugs
         -- which break linearity of totalSupply.
-        testCase "catch storage collisions" $ do
+        testCase "catch-storage-collisions" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -521,15 +552,13 @@ tests = testGroup "hevm"
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
-          [Cex _] <- withSolvers Z3 1 $ \s -> verifyContract s c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] SymbolicS (Just pre) (Just post)
+          [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> verifyContract s c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] SymbolicS (Just pre) (Just post)
+          let x = getArgInteger ctr "arg1"
+          let y = getArgInteger ctr "arg2"
+          putStrLn $ "y:" <> show y
+          putStrLn $ "x:" <> show x
+          assertEqual "Catch storage collisions" x y
           putStrLn "expected counterexample found"
-        -- TODO: check that the cex has the case where x == y once we have proper cex parsing
-        --case view (state . calldata . _1) vm of
-          --SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
-          --ConcreteBuffer _ -> error "unexpected"
-
-        --let [AbiUInt 256 x, AbiUInt 256 y] = decodeAbiValues [AbiUIntType 256, AbiUIntType 256] bs
-        --assertEqual "Catch storage collisions" x y
         ,
         testCase "Simple Assert" $ do
           Just c <- solcRuntime "C"
