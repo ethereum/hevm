@@ -525,7 +525,7 @@ tests = testGroup "hevm"
         ,
         -- Inspired by these `msg.sender == to` token bugs
         -- which break linearity of totalSupply.
-        testCase "catch-storage-collisions" $ do
+        testCase "catch-storage-collisions-good" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
