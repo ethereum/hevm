@@ -618,9 +618,10 @@ tests = testGroup "hevm"
              }
             |]
           [Cex (_, a), Cex (_, b)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
+          let x = getArgInteger a "arg1"
+          let y = getArgInteger b "arg1"
+          assertBool "At least one has to be 0, to go through the first assert" (x == 0 || y == 0)
           putStrLn "expected 2 counterexamples found."
-          print $ show $ getArgInteger a "arg1"
-          print $ show $ getArgInteger b "arg1"
         ,
         testCase "assert-fail-twoargs" $ do
           Just c <- solcRuntime "AssertFailTwoParams"
