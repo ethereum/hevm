@@ -1,5 +1,7 @@
 {-# Language DataKinds #-}
 {-# Language GADTs #-}
+{-# Language PolyKinds #-}
+{-# Language ScopedTypeVariables #-}
 {-# Language TypeApplications #-}
 {-# Language QuasiQuotes #-}
 
@@ -21,11 +23,14 @@ import Control.Concurrent (forkIO, killThread)
 import Data.Char (isSpace)
 import Data.Containers.ListUtils (nubOrd)
 import Control.Monad.State.Strict
+import Language.SMT2.Parser (getValueRes, parseFileMsg)
+import Data.Either
+import Data.Maybe
 
 import qualified Data.ByteString as BS
 import qualified Data.List as List
-import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.List.NonEmpty as NE
+import Data.List.NonEmpty (NonEmpty, NonEmpty((:|)))
 import Data.String.Here
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -35,16 +40,50 @@ import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_i
 
 import EVM.Types
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
+import qualified Language.SMT2.Syntax as Language.SMT2.Parser
+import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
 
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
+-- variable names in SMT that we want to get values for
+data CexVars = CexVars
+  { calldataV :: [Text]
+  , storageV :: Text
+  , blockContextV :: [Text]
+  , txContextV :: [Text]
+  }
+  deriving (Eq, Show)
 
+instance Semigroup CexVars where
+  (CexVars a b c d) <> (CexVars a2 b2 c2 d2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2)
 
-newtype SMT2 = SMT2 [Text]
-  deriving (Eq, Show, Semigroup, Monoid)
+instance Monoid CexVars where
+    mempty = CexVars
+      { calldataV = mempty
+      , storageV = mempty
+      , blockContextV = mempty
+      , txContextV = mempty
+      }
+
+data SMTCex = SMTCex
+  { calldata :: Map Text Language.SMT2.Parser.SpecConstant
+  , storage :: Text
+  , blockContext :: Map Text Text
+  , txContext :: Map Text Text
+  }
+  deriving (Eq, Show)
+
+data SMT2 = SMT2 [Text] CexVars
+  deriving (Eq, Show)
+
+instance Semigroup SMT2 where
+  (SMT2 a b) <> (SMT2 a2 b2) = SMT2 (a <> a2) (b <> b2)
+
+instance Monoid SMT2 where
+  mempty = SMT2 mempty mempty
 
 formatSMT2 :: SMT2 -> Text
-formatSMT2 (SMT2 ls) = T.unlines ls
+formatSMT2 (SMT2 ls _) = T.unlines ls
 
 -- | Reads all intermediate variables from the builder state and produces SMT declaring them as constants
 declareIntermediates :: State BuilderState SMT2
@@ -56,33 +95,9 @@ declareIntermediates = do
     pure $ "(define-const buf" <> (T.pack . show $ n) <> " Buf " <> enc <> ")"
   declSs <- forM ss $ \(_, (n, enc)) -> do
     pure $ "(define-const store" <> (T.pack . show $ n) <> " Storage " <> enc <> ")"
-  pure $ SMT2 $ ["; buffers"] <> declBs <> ["", "; stores"] <> declSs
+  pure $ SMT2 (["; intermediate buffers"] <> declBs <> ["", "; intermediate stores"] <> declSs) mempty
   where
     sortPred (_, (a, _)) (_, (b, _)) = compare a b
-
-assertWord :: Expr EWord -> SMT2
-assertWord e = flip evalState initState $ do
-  enc <- exprToSMT e
-  intermediates <- declareIntermediates
-  pure $ prelude
-      <> (declareVars $ referencedVars e)
-      <> SMT2 [""]
-      <> (declareFrameContext $ referencedFrameContext e)
-      <> intermediates
-      <> SMT2 [""]
-      <> SMT2 ["(assert (= " <> enc `sp` one <> "))"]
-
-assertWords :: [Expr EWord] -> SMT2
-assertWords es = flip evalState initState $ do
-  encs <- mapM exprToSMT es
-  intermediates <- declareIntermediates
-  pure $ prelude
-       <> (declareVars . nubOrd $ foldl (<>) [] (fmap (referencedVars) es))
-       <> SMT2 [""]
-       <> (declareFrameContext . nubOrd $ foldl (<>) [] (fmap (referencedFrameContext) es))
-       <> intermediates
-       <> SMT2 [""]
-       <> (SMT2 $ fmap (\e -> "(assert (= " <> e `sp` one <> "))") encs)
 
 assertProps :: [Prop] -> SMT2
 assertProps ps = flip evalState initState $ do
@@ -90,16 +105,16 @@ assertProps ps = flip evalState initState $ do
   intermediates <- declareIntermediates
   pure $ prelude
        <> (declareBufs . nubOrd $ foldl (<>) [] (fmap (referencedBufs') ps))
-       <> SMT2 [""]
+       <> SMT2 [""] mempty
        <> (declareVars . nubOrd $ foldl (<>) [] (fmap (referencedVars') ps))
-       <> SMT2 [""]
+       <> SMT2 [""] mempty
        <> (declareFrameContext . nubOrd $ foldl (<>) [] (fmap (referencedFrameContext') ps))
        <> intermediates
-       <> SMT2 [""]
-       <> (SMT2 $ fmap (\p -> "(assert " <> p <> ")") encs)
+       <> SMT2 [""] mempty
+       <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
 
 prelude :: SMT2
-prelude = SMT2 . fmap (T.drop 2) . T.lines $ [i|
+prelude =  (flip SMT2) mempty $ fmap (T.drop 2) . T.lines $ [i|
   ; logic
   ; TODO: this creates an error when used with z3?
   ;(set-logic QF_AUFBV)
@@ -248,7 +263,7 @@ prelude = SMT2 . fmap (T.drop 2) . T.lines $ [i|
   |]
 
 declareBufs :: [Text] -> SMT2
-declareBufs names = SMT2 $ ["; buffers"] <> fmap declare names
+declareBufs names = SMT2 (["; buffers"] <> fmap declare names) mempty
   where
     declare n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
 
@@ -296,10 +311,17 @@ referencedFrameContext' = \case
   PNeg a -> referencedFrameContext' a
   PBool _ -> []
 
+-- Given a list of 256b VM variable names, create an SMT2 object with the variables declared
 declareVars :: [Text] -> SMT2
-declareVars names = SMT2 $ ["; variables"] <> fmap declare names
+declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
+    cexvars = CexVars
+      { calldataV = names
+      , storageV = mempty
+      , blockContextV = mempty
+      , txContextV = mempty
+      }
 
 referencedVars :: Expr a -> [Text]
 referencedVars expr = nubOrd (foldExpr go [] expr)
@@ -310,7 +332,7 @@ referencedVars expr = nubOrd (foldExpr go [] expr)
       _ -> []
 
 declareFrameContext :: [Text] -> SMT2
-declareFrameContext names = SMT2 $ ["; frame context"] <> fmap declare names
+declareFrameContext names = SMT2 (["; frame context"] <> fmap declare names) mempty
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
 
@@ -600,13 +622,12 @@ newtype SolverGroup = SolverGroup (Chan Task)
 -- | A script to be executed, a list of models to be extracted in the case of a sat result, and a channel where the result should be written
 data Task = Task
   { script :: SMT2
-  , models :: [Text]
   , resultChan :: Chan CheckSatResult
   }
 
 -- | The result of a call to (check-sat)
 data CheckSatResult
-  = Sat [Text]
+  = Sat SMTCex
   | Unsat
   | Unknown
   | Error Text
@@ -624,22 +645,22 @@ isUnsat :: CheckSatResult -> Bool
 isUnsat Unsat = True
 isUnsat _ = False
 
-checkSat' :: SolverGroup -> (SMT2, [Text]) -> IO (CheckSatResult)
-checkSat' a b = do
-  snd . head <$> checkSat a [b]
+checkSat' :: SolverGroup -> SMT2 -> IO (CheckSatResult)
+checkSat' solvers smt = do
+  snd . head <$> checkSat solvers [smt]
 
-checkSat :: SolverGroup -> [(SMT2, [Text])] -> IO [(SMT2, CheckSatResult)]
+checkSat :: SolverGroup -> [SMT2] -> IO [(SMT2, CheckSatResult)]
 checkSat (SolverGroup taskQueue) scripts = do
   -- prepare tasks
-  tasks <- forM scripts $ \(s, ms) -> do
+  tasks <- forM scripts $ \s -> do
     res <- newChan
-    pure $ Task s ms res
+    pure $ Task s res
 
   -- send tasks to solver group
   forM_ tasks (writeChan taskQueue)
 
   -- collect results
-  forM tasks $ \(Task s _ r) -> do
+  forM tasks $ \(Task s r) -> do
     res <- readChan r
     pure (s, res)
 
@@ -669,9 +690,9 @@ withSolvers solver count cont = do
       _ <- forkIO $ runTask task inst avail
       orchestrate queue avail
 
-    runTask (Task s@(SMT2 cmds) ms r) inst availableInstances = do
+    runTask (Task s@(SMT2 cmds cexvars) r) inst availableInstances = do
       -- reset solver and send all lines of provided script
-      out <- sendScript inst (SMT2 $ "(reset)" : cmds)
+      out <- sendScript inst (SMT2 ("(reset)" : cmds) cexvars)
       case out of
         -- if we got an error then return it
         Left e -> writeChan r (Error e)
@@ -680,9 +701,29 @@ withSolvers solver count cont = do
           sat <- sendLine inst "(check-sat)"
           res <- case sat of
             "sat" -> do
-              models <- forM ms $ \m -> do
-                getValue inst m
-              pure $ Sat models
+              -- get values for all cexvars' calldataV-s
+              calldatamodels <- foldM (\a n -> do
+                      val <- getValue inst n
+                      tmp <- pure $ parseFileMsg Language.SMT2.Parser.getValueRes val
+                      idConst <- case tmp of
+                        Right (Language.SMT2.Parser.ResSpecific (valParsed :| [])) -> pure valParsed
+                        _ -> undefined
+                      theConst <- case idConst of
+                       (Language.SMT2.Parser.TermQualIdentifier (
+                         Language.SMT2.Parser.Unqualified (Language.SMT2.Parser.IdSymbol symbol)),
+                         Language.SMT2.Parser.TermSpecConstant ext2) -> if symbol == n
+                                                                           then pure ext2
+                                                                           else undefined
+                       _ -> undefined
+                      pure $ Map.insert n theConst a
+                  )
+                  mempty (calldataV cexvars)
+              pure $ Sat $ SMTCex
+                { calldata = calldatamodels
+                , storage = mempty
+                , blockContext = mempty
+                , txContext = mempty
+                }
             "unsat" -> pure Unsat
             "timeout" -> pure Unknown
             "unknown" -> pure Unknown
@@ -692,6 +733,17 @@ withSolvers solver count cont = do
       -- put the instance back in the list of available instances
       writeChan availableInstances inst
 
+hexChar :: Char -> Int
+hexChar ch = Data.Maybe.fromMaybe (error $ "illegal char " ++ [ch]) $
+    List.elemIndex ch "0123456789abcdef"
+
+parseHex :: String -> Integer
+parseHex hex = List.foldl' f (0 ::Integer) hex where
+    f n c = (16 :: Integer)*n + toInteger (hexChar c)
+
+getIntegerFromSCHex :: SpecConstant -> Integer
+getIntegerFromSCHex (SCHexadecimal a) = parseHex (T.unpack a)
+getIntegerFromSCHex _ = undefined
 
 -- | Arguments used when spawing a solver instance
 solverArgs :: Solver -> [Text]
@@ -722,7 +774,7 @@ stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just
 
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
 sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
-sendScript solver (SMT2 cmds) = do
+sendScript solver (SMT2 cmds _) = do
   sendLine' solver (T.unlines cmds)
   pure $ Right()
 

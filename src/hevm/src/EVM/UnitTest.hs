@@ -435,7 +435,7 @@ runUnitTestContract
         Just (VMFailure _) -> liftIO $ do
           Text.putStrLn "\x1b[31m[BAIL]\x1b[0m setUp() "
           tick "\n"
-          tick $ failOutput vm1 opts "setUp()"
+          tick $ (Data.Text.pack $ show $ failOutput vm1 opts "setUp()")
           pure [(False, vm1)]
         Just (VMSuccess _) -> do
           let
@@ -458,7 +458,7 @@ runUnitTestContract
           liftIO $ do
             tick "\n"
             tick (Text.unlines (filter (not . Text.null) running))
-            tick (Text.unlines (filter (not . Text.null) bailing))
+            tick (Data.Text.pack . show $ bailing)
 
           pure [(isRight r, vm) | (r, vm) <- details]
 
@@ -708,7 +708,7 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
                                    _ -> PBool False
 
         -- add calldata to vm
-        vm' = vm & set (state . calldata) cd
+        vm' = vm & set (state . EVM.calldata) cd
                  & over (constraints) (<> cdProps)
 
     -- check postconditions against vm
@@ -716,48 +716,50 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
 
     -- display results
     if all isQed results
-    then
+    then do
       return ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "", vm)
-    else
-      return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left $ symFailure opts testName (mapMaybe extractCex results), vm)
+    else do
+      let x = mapMaybe extractCex results
+      let y = symFailure opts testName x -- TODO this is WRONG, only returns FIRST Cex
+      return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y, vm)
 
-symFailure :: UnitTestOptions -> Text -> [(Expr End, [Text])] -> Text
-symFailure UnitTestOptions {..} testName failures' = mconcat
-  [ "Failure: "
-  , testName
-  , "\n\n"
-  , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
-  ]
-  where
-    showRes = \case
-                     Return _ _ -> if "proveFail" `isPrefixOf` testName
-                                    then "Successful execution"
-                                    else "Failed: DSTest Assertion Violation"
-                     res ->
-                       --let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
-                       let ?context = DappContext { _contextInfo = dapp, _contextEnv = mempty }
-                       in prettyvmresult res
-    mkMsg (leaf, cexs) = pack $ unlines
-      ["Counterexample:"
-      ,""
-      ,"  result:   " <> showRes leaf
-      ,"  calldata: " <> Text.unpack (Text.unlines cexs)
-      , case verbose of
-          --Just _ -> unlines
-            --[ ""
-            --, unpack $ indentLines 2 (showTraceTree dapp vm)
-            --]
-          _ -> ""
-      ]
+symFailure :: UnitTestOptions -> Text -> [(Expr End, SMTCex)] -> Text
+symFailure UnitTestOptions {..} testName failures' =
+  mconcat
+    [ "Failure: "
+    , testName
+    , "\n\n"
+    -- , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
+    ]
+    where
+      showRes = \case
+                       Return _ _ -> if "proveFail" `isPrefixOf` testName
+                                      then "Successful execution"
+                                      else "Failed: DSTest Assertion Violation"
+                       res ->
+                         --let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
+                         let ?context = DappContext { _contextInfo = dapp, _contextEnv = mempty }
+                         in prettyvmresult res
+      mkMsg (leaf, cexs) = pack $ unlines
+        ["Counterexample:"
+        ,""
+        ,"  result:   " <> showRes leaf
+        ,"  calldata: " <> Text.unpack (Text.unlines cexs)
+        , case verbose of
+            --Just _ -> unlines
+              --[ ""
+              --, unpack $ indentLines 2 (showTraceTree dapp vm)
+              --]
+            _ -> ""
+        ]
 
-prettyCalldata :: (?context :: DappContext) => Expr Buf -> Text -> [AbiType]-> IO Text
-prettyCalldata = undefined
---prettyCalldata buf sig types = do
-  --cdlen' <- num <$> SBV.getValue cdlen
-  --cd <- case buf of
-    --ConcreteBuf cd -> return $ BS.take cdlen' cd
-    --cd -> mapM (SBV.getValue . fromSized) (take cdlen' cd) <&> BS.pack
-  --pure $ (head (Text.splitOn "(" sig)) <> showCall types (ConcreteBuffer cd)
+-- prettyCalldata :: (?context :: DappContext) => Expr Buf -> Text -> [AbiType]-> IO Text
+-- prettyCalldata buf sig types = do
+--   cdlen' <- num <$> SBV.getValue cdlen
+--   cd <- case buf of
+--     ConcreteBuf cd -> return $ BS.take cdlen' cd
+--     cd -> mapM (SBV.getValue . fromSized) (take cdlen' cd) <&> BS.pack
+--   pure $ (head (Text.splitOn "(" sig)) <> showCall types (ConcreteBuffer cd)
 
 execSymTest :: UnitTestOptions -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper (Expr End)
 execSymTest opts@UnitTestOptions{ .. } method cd = do
@@ -796,6 +798,7 @@ passOutput vm UnitTestOptions { .. } testName =
       ]
     else ""
 
+-- TODO
 failOutput :: VM -> UnitTestOptions -> Text -> Text
 failOutput vm UnitTestOptions { .. } testName =
   let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
@@ -898,7 +901,7 @@ makeTxCall TestVMParams{..} (cd, cdProps) = do
   resetState
   assign (tx . isCreate) False
   loadContract testAddress
-  assign (state . calldata) cd
+  assign (state . EVM.calldata) cd
   constraints %= (<> cdProps)
   assign (state . caller) (litAddr testCaller)
   assign (state . gas) testGasCall

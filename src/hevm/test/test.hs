@@ -4,7 +4,7 @@
 
 module Main where
 
-import Data.Text (Text)
+import Data.Text (Text, pack)
 import Data.ByteString (ByteString)
 
 import Prelude hiding (fail)
@@ -13,12 +13,16 @@ import qualified Data.Text as Text
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BS (fromStrict)
 import qualified Data.ByteString.Base16 as Hex
+import Data.Bits ((.&.))
 import Data.Maybe
+import Data.Map (lookup)
+import Data.List (elemIndex)
 import Test.Tasty
 import Test.Tasty.QuickCheck
 import Test.Tasty.HUnit
 import Test.Tasty.Runners
 import Test.Tasty.ExpectedFailure
+import Language.SMT2.Parser
 
 import Control.Monad.State.Strict (execState, runState)
 import Control.Lens hiding (List, pre, (.>))
@@ -26,6 +30,7 @@ import Control.Lens hiding (List, pre, (.>))
 import qualified Data.Vector as Vector
 import Data.String.Here
 import qualified Data.Map.Strict as Map
+import Data.Map (Map)
 
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
@@ -40,9 +45,19 @@ import EVM.Precompiled
 import EVM.RLP
 import EVM.Solidity
 import EVM.Types
-import EVM.SMT
+import EVM.SMT hiding (storage, calldata)
 import qualified Data.ByteString.Base16 as BS16
 import qualified EVM.Expr as Expr
+import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
+import EVM.ABI (AbiType(AbiUIntType))
+
+getArgInteger :: EVM.SMT.SMTCex -> String -> Integer
+getArgInteger a name = getIntegerFromSCHex $ getScHexa a
+  where
+    getScHexa :: EVM.SMT.SMTCex -> Language.SMT2.Syntax.SpecConstant
+    getScHexa tmp = fromJust . Data.Map.lookup (Data.Text.pack name) $ smtcex tmp
+    smtcex :: EVM.SMT.SMTCex -> Map Text Language.SMT2.Syntax.SpecConstant
+    smtcex (EVM.SMT.SMTCex x _ _ _) = x
 
 
 main :: IO ()
@@ -269,8 +284,9 @@ tests = testGroup "hevm"
              }
             }
            |]
-       [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) []
-       putStrLn "expected counterexample found"
+       [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) []
+       assertEqual "Must be 0" 0 $ getArgInteger ctr "arg1"
+       putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getArgInteger ctr "arg1")
      ,
      testCase "safeAdd-fail" $ do
         Just c <- solcRuntime "MyContract"
@@ -281,7 +297,10 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x11] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+        [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s [0x11] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+        let x = getArgInteger ctr "arg1"
+        let y = getArgInteger ctr "arg2"
+        assertBool "Overflow must occur" (x+y > 2^256)
         putStrLn "expected counterexample found"
      ,
      testCase "div-by-zero-fail" $ do
@@ -293,7 +312,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x12] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+        [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s [0x12] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+        assertEqual "Division by 0 needs b=0" (getArgInteger ctr "arg2") 0
         putStrLn "expected counterexample found"
      ,
      testCase "enum-conversion-fail" $ do
@@ -306,7 +326,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x21] c (Just ("fun(uint256)", [AbiUIntType 256])) []
+        [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s [0x21] c (Just ("fun(uint256)", [AbiUIntType 256])) []
+        assertBool "Enum is only defined for 0 and 1" $ (getArgInteger ctr "arg1") > 1
         putStrLn "expected counterexample found"
      ,
      -- TODO 0x22 is missing: "0x22: If you access a storage byte array that is incorrectly encoded."
@@ -343,7 +364,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) []
+        [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) []
+        assertBool "Access must be beyond element 2" $ (getArgInteger ctr "arg1") > 1
         putStrLn "expected counterexample found"
       ,
       -- TODO the system currently does not allow for symbolic array size allocation
@@ -476,10 +498,41 @@ tests = testGroup "hevm"
             [Qed res] <- withSolvers Z3 4 $ \s -> checkAssert s defaultPanicCodes c (Just ("hello(address)", [AbiAddressType])) []
             putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-
+        testCase "catch-storage-collisions-noproblem" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint x, uint y) public {
+                 if (x != y) {
+                   assembly {
+                     let newx := sub(sload(x), 1)
+                     let newy := add(sload(y), 1)
+                     sstore(x,newx)
+                     sstore(y,newy)
+                   }
+                 }
+              }
+            }
+            |]
+          let pre vm = (Lit 0) .== view (state . callvalue) vm
+              post prestate poststate =
+                let [x,y] = getStaticAbiArgs 2 prestate
+                    this = Expr.litAddr $ view (state . codeContract) prestate
+                    prestore =  view (env . storage) prestate
+                    prex = Expr.readStorage' this x prestore
+                    prey = Expr.readStorage' this y prestore
+                in case poststate of
+                     Return _ poststore -> let
+                           postx = Expr.readStorage' this x poststore
+                           posty = Expr.readStorage' this y poststore
+                       in Expr.add prex prey .== Expr.add postx posty
+                     _ -> PBool True
+          [Qed _] <- withSolvers Z3 1 $ \s -> verifyContract s c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] SymbolicS (Just pre) (Just post)
+          putStrLn "Correct, this can never fail"
+        ,
         -- Inspired by these `msg.sender == to` token bugs
         -- which break linearity of totalSupply.
-        testCase "catch storage collisions" $ do
+        testCase "catch-storage-collisions-good" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -506,15 +559,13 @@ tests = testGroup "hevm"
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
-          [Cex _] <- withSolvers Z3 1 $ \s -> verifyContract s c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] SymbolicS (Just pre) (Just post)
+          [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> verifyContract s c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] SymbolicS (Just pre) (Just post)
+          let x = getArgInteger ctr "arg1"
+          let y = getArgInteger ctr "arg2"
+          putStrLn $ "y:" <> show y
+          putStrLn $ "x:" <> show x
+          assertEqual "Catch storage collisions" x y
           putStrLn "expected counterexample found"
-        -- TODO: check that the cex has the case where x == y once we have proper cex parsing
-        --case view (state . calldata . _1) vm of
-          --SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
-          --ConcreteBuffer _ -> error "unexpected"
-
-        --let [AbiUInt 256 x, AbiUInt 256 y] = decodeAbiValues [AbiUIntType 256, AbiUIntType 256] bs
-        --assertEqual "Catch storage collisions" x y
         ,
         testCase "Simple Assert" $ do
           Just c <- solcRuntime "C"
@@ -528,6 +579,19 @@ tests = testGroup "hevm"
           [Cex (l, _)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo()", [])) []
           assertEqual "incorrect revert msg" l (EVM.Types.Revert (ConcreteBuf $ panicMsg 0x01))
         ,
+        testCase "simple-assert-2" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 x) external pure {
+                assert(x != 10);
+              }
+             }
+            |]
+          [(Cex (_, ctr))] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          assertEqual "Must be 10" 10 $ getArgInteger ctr "arg1"
+          putStrLn "Got 10 Cex, as expected"
+        ,
         testCase "assert-fail-equal" $ do
           Just c <- solcRuntime "AssertFailEqual"
             [i|
@@ -538,8 +602,10 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex _, Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
-          putStrLn "expected 2 counterexamples found"
+          [Cex (_, a), Cex (_, b)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
+          let ints = map (flip getArgInteger "arg1") [a,b]
+          assertBool "0 must be one of the Cex-es" $ isJust $ elemIndex 0 ints
+          putStrLn "expected 2 counterexamples found, one Cex is the 0 value"
         ,
         testCase "assert-fail-notequal" $ do
           Just c <- solcRuntime "AssertFailNotEqual"
@@ -551,8 +617,11 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex _, Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
-          putStrLn "expected 2 counterexamples found"
+          [Cex (_, a), Cex (_, b)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) []
+          let x = getArgInteger a "arg1"
+          let y = getArgInteger b "arg1"
+          assertBool "At least one has to be 0, to go through the first assert" (x == 0 || y == 0)
+          putStrLn "expected 2 counterexamples found."
         ,
         testCase "assert-fail-twoargs" $ do
           Just c <- solcRuntime "AssertFailTwoParams"
@@ -566,6 +635,19 @@ tests = testGroup "hevm"
             |]
           [Cex _, Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
           putStrLn "expected 2 counterexamples found"
+        ,
+        testCase "assert-2nd-arg" $ do
+          Just c <- solcRuntime "AssertFailTwoParams"
+            [i|
+            contract AssertFailTwoParams {
+              function fun(uint256 deposit_count1, uint256 deposit_count2) external pure {
+                assert(deposit_count2 != 666);
+              }
+             }
+            |]
+          [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+          assertEqual "Must be 666" 666 $ getArgInteger ctr "arg2"
+          putStrLn "Found arg2 Ctx to be 666"
         ,
         -- LSB is zeroed out, byte(31,x) takes LSB, so y==0 always holds
         testCase "check-lsb-msb1" $ do
@@ -597,7 +679,8 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          assertBool "last byte must be non-zero" $ ((Data.Bits..&.) (getArgInteger ctr "arg1") 0xff) > 0
           putStrLn $ "Expected counterexample found"
         ,
         -- We zero out everything but the 2nd LSB byte. However, byte(31,x) takes the 2nd LSB byte
@@ -614,7 +697,8 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
+          assertBool "second to last byte must be non-zero" $ ((Data.Bits..&.) (getArgInteger ctr "arg1") 0xff00) > 0
           putStrLn $ "Expected counterexample found"
         ,
         -- Reverse of thest above
@@ -657,8 +741,7 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        -- TODO: this is supposed to return a Cex but instead returns a Qed
-        testCase "Deposit contract loop (error version)" $ do
+        testCase "Deposit-contract-loop-error-version" $ do
           Just c <- solcRuntime "Deposit"
             [i|
             contract Deposit {
@@ -677,15 +760,9 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
-          putStrLn "expected counterexample found"
-          -- TODO: check that the cex is 255
-          --   case view (state . calldata . _1) vm of
-          --     SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
-          --     ConcreteBuffer _ -> error "unexpected"
-
-          -- let [deposit] = decodeAbiValues [AbiUIntType 8] bs
-          -- assertEqual "overflowing uint8" deposit (AbiUInt 8 255)
+          [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) []
+          assertEqual "Must be 255" 255 $ getArgInteger ctr "arg1"
+          putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getArgInteger ctr "arg1")
         ,
         testCase "explore function dispatch" $ do
           Just c <- solcRuntime "A"
@@ -720,22 +797,14 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256,uint256,uint256)", replicate 4 (AbiUIntType 256))) []
+          [Cex (_, ctr)] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256,uint256,uint256)", replicate 4 (AbiUIntType 256))) []
+          let x = getArgInteger ctr "arg1"
+          let y = getArgInteger ctr "arg2"
+          let w = getArgInteger ctr "arg3"
+          let z = getArgInteger ctr "arg4"
+          assertEqual "x==y for hash collision" x y
+          assertEqual "w==z for hash collision" w z
           putStrLn "expected counterexample found"
-          -- TODO check that x == w and y == z in cex
-          --   case view (state . calldata . _1) vm of
-          --     SymbolicBuffer bs -> BS.pack <$> mapM (getValue.fromSized) bs
-          --     ConcreteBuffer _ -> error "unexpected"
-
-          -- let [AbiUInt 256 x,
-          --      AbiUInt 256 y,
-          --      AbiUInt 256 w,
-          --      AbiUInt 256 z] = decodeAbiValues [AbiUIntType 256,
-          --                                        AbiUIntType 256,
-          --                                        AbiUIntType 256,
-          --                                        AbiUIntType 256] bs
-          -- assertEqual "x == w" x w
-          -- assertEqual "y == z" y z -
         ,
         expectFail $ testCase "calldata beyond calldatasize is 0 (z3)" $ do
           Just c <- solcRuntime "A"
@@ -754,7 +823,7 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c Nothing []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        testCase "keccak soundness" $ do
+        ignoreTest $ testCase "keccak soundness" $ do
         --- using ignore to suppress huge output
           Just c <- solcRuntime "C"
             [i|
