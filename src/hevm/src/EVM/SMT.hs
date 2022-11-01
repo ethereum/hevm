@@ -26,6 +26,7 @@ import Control.Monad.State.Strict
 import Language.SMT2.Parser (getValueRes, parseFileMsg)
 import Data.Either
 import Data.Maybe
+import Numeric (readHex)
 
 import qualified Data.ByteString as BS
 import qualified Data.List as List
@@ -67,9 +68,9 @@ instance Monoid CexVars where
 
 data SMTCex = SMTCex
   { calldata :: Map Text Language.SMT2.Parser.SpecConstant
-  , storage :: Text
-  , blockContext :: Map Text Text
-  , txContext :: Map Text Text
+  , storage :: SpecConstant
+  , blockContext :: SpecConstant
+  , txContext :: SpecConstant
   }
   deriving (Eq, Show)
 
@@ -720,9 +721,6 @@ withSolvers solver count cont = do
                   mempty (calldataV cexvars)
               pure $ Sat $ SMTCex
                 { calldata = calldatamodels
-                , storage = mempty
-                , blockContext = mempty
-                , txContext = mempty
                 }
             "unsat" -> pure Unsat
             "timeout" -> pure Unknown
@@ -733,16 +731,8 @@ withSolvers solver count cont = do
       -- put the instance back in the list of available instances
       writeChan availableInstances inst
 
-hexChar :: Char -> Int
-hexChar ch = Data.Maybe.fromMaybe (error $ "illegal char " ++ [ch]) $
-    List.elemIndex ch "0123456789abcdef"
-
-parseHex :: String -> Integer
-parseHex hex = List.foldl' f (0 ::Integer) hex where
-    f n c = (16 :: Integer)*n + toInteger (hexChar c)
-
 getIntegerFromSCHex :: SpecConstant -> Integer
-getIntegerFromSCHex (SCHexadecimal a) = parseHex (T.unpack a)
+getIntegerFromSCHex (SCHexadecimal a) = fst (head(Numeric.readHex (T.unpack a))) ::Integer
 getIntegerFromSCHex _ = undefined
 
 -- | Arguments used when spawing a solver instance
