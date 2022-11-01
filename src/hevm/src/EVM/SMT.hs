@@ -413,7 +413,8 @@ exprToSMT = \case
   Xor a b -> exprToSMT $ And (Or a b) (Not (And a b))
   Not a -> op1 "bvnot" a
   SHL a b -> op2 "bvshl" a b
-  SHR a b -> op2 "bvlshr" b a -- TODO: is lshr the same as shr?
+  SHR a b -> op2 "bvlshr" b a
+  SAR a b -> op2 "bvashr" b a
   EqByte a b -> do
     cond <- op2 "=" a b
     pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
