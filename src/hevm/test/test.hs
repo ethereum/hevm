@@ -404,6 +404,88 @@ tests = testGroup "hevm"
 
   , testGroup "Symbolic execution"
       [
+     testCase "require-test" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(int256 a) external pure {
+              require(a <= 0);
+              assert (a <= 0);
+              }
+             }
+            |]
+        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256)", [AbiIntType 256])) []
+        putStrLn "Require works as expected"
+     ,
+     -- TODO look at tests here for SAR: https://github.com/dapphub/dapptools/blob/01ef8ea418c3fe49089a44d56013d8fcc34a1ec2/src/dapp-tests/pass/constantinople.sol#L250
+     testCase "opcode-sar-neg" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(int256 shift_by, int256 val) external pure returns (int256 out) {
+              require(shift_by >= 0);
+              require(val <= 0);
+              assembly {
+                out := sar(shift_by,val)
+              }
+              assert (out <= 0);
+              }
+             }
+            |]
+        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) []
+        putStrLn "SAR works as expected"
+     ,
+     testCase "opcode-sar-pos" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(int256 shift_by, int256 val) external pure returns (int256 out) {
+              require(shift_by >= 0);
+              require(val >= 0);
+              assembly {
+                out := sar(shift_by,val)
+              }
+              assert (out >= 0);
+              }
+             }
+            |]
+        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) []
+        putStrLn "SAR works as expected"
+     ,
+     testCase "opcode-sar-fixedval-pos" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(int256 shift_by, int256 val) external pure returns (int256 out) {
+              require(shift_by == 1);
+              require(val == 64);
+              assembly {
+                out := sar(shift_by,val)
+              }
+              assert (out == 32);
+              }
+             }
+            |]
+        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) []
+        putStrLn "SAR works as expected"
+     ,
+     testCase "opcode-sar-fixedval-neg" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(int256 shift_by, int256 val) external pure returns (int256 out) {
+              require(shift_by == 1);
+              require(val == -64);
+              assembly {
+                out := sar(shift_by,val)
+              }
+              assert (out == -32);
+              }
+             }
+            |]
+        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) []
+        putStrLn "SAR works as expected"
+      ,
       -- Somewhat tautological since we are asserting the precondition
       -- on the same form as the actual "requires" clause.
       testCase "SafeAdd success case" $ do
