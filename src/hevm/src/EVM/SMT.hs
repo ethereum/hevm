@@ -731,10 +731,6 @@ withSolvers solver count cont = do
       -- put the instance back in the list of available instances
       writeChan availableInstances inst
 
-hexChar :: Char -> Int
-hexChar ch = Data.Maybe.fromMaybe (error $ "illegal char " ++ [ch]) $
-    List.elemIndex ch "0123456789abcdef"
-
 getIntegerFromSCHex :: SpecConstant -> Integer
 getIntegerFromSCHex (SCHexadecimal a) = fst (head(Numeric.readHex (T.unpack a))) ::Integer
 getIntegerFromSCHex _ = undefined
