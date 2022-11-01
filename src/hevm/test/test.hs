@@ -485,7 +485,7 @@ tests = testGroup "hevm"
             |]
         [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) []
         putStrLn "SAR works as expected"
-
+      ,
       -- Somewhat tautological since we are asserting the precondition
       -- on the same form as the actual "requires" clause.
       testCase "SafeAdd success case" $ do
