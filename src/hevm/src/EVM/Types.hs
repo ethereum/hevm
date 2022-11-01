@@ -115,6 +115,10 @@ data EType
   | End
   deriving (Typeable)
 
+-- Variables refering to a global environment
+newtype GVar (a :: EType) = Id Int
+  deriving (Show, Eq, Ord)
+
 -- add type level list of constraints
 data Expr (a :: EType) where
 
@@ -122,6 +126,7 @@ data Expr (a :: EType) where
 
   Lit            :: W256 -> Expr EWord
   Var            :: Text -> Expr EWord
+  GVar           :: GVar a -> Expr a
 
   -- bytes
 
@@ -447,6 +452,7 @@ foldExpr f acc expr = acc <> (go expr)
       e@(Lit _) -> f e
       e@(LitByte _) -> f e
       e@(Var _) -> f e
+      e@(GVar _) -> f e
 
       -- bytes
 
@@ -657,6 +663,7 @@ mapExpr f expr = case (f expr) of
   Lit a -> Lit a
   LitByte a -> LitByte a
   Var a -> Var a
+  GVar a -> GVar a
 
   -- bytes
 
