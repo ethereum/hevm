@@ -408,17 +408,17 @@ tests = testGroup "hevm"
         runDappTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Prove-Tests-Pass" $ do
         let testFile = "test/contracts/pass/dsProvePass.sol"
-        runDappTest testFile ".*" >>= assertEqual "test result" True
+        --runDappTest testFile "prove_trivial" >>= assertEqual "test result" True
+        runDappTest testFile "prove_balance" >>= assertEqual "test result" True
     , testCase "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
         runDappTest testFile "prove_trivial" >>= assertEqual "test result" False
         runDappTest testFile "prove_add" >>= assertEqual "test result" False
-        --runDappTest testFile "proveFail_shouldFail" >>= assertEqual "test result" False
         --runDappTest testFile "prove_smtTimeout" >>= assertEqual "test result" False
         runDappTest testFile "prove_multi" >>= assertEqual "test result" False
         runDappTest testFile "prove_mul" >>= assertEqual "test result" False
         --runDappTest testFile "prove_distributivity" >>= assertEqual "test result" False
-        --runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
+        runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
     , testCase "Invariant-Tests-Pass" $ do
         let testFile = "test/contracts/pass/invariants.sol"
         runDappTest testFile ".*" >>= assertEqual "test result" True

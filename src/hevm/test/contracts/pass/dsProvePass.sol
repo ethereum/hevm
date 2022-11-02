@@ -15,6 +15,15 @@ contract SolidityTest is DSTest {
         token = new ERC20("Token", "TKN", 18);
     }
 
+    function prove_trivial() public {
+        assertTrue(true);
+    }
+
+    function prove_easy(uint v) public {
+        if (v != 100) return;
+        assertEq(v, 100);
+    }
+
     function prove_add(uint x, uint y) public {
         unchecked {
             if (x + y < x) return; // no overflow
@@ -34,10 +43,10 @@ contract SolidityTest is DSTest {
         assertEq(supply, actual);
     }
 
-    function prove_constructorArgs(address b) public {
-        ConstructorArg c = new ConstructorArg(b);
-        assertEq(b, c.a());
-    }
+    //function prove_constructorArgs(address b) public {
+        //ConstructorArg c = new ConstructorArg(b);
+        //assertEq(b, c.a());
+    //}
 
     function proveFail_revertSmoke() public {
         require(false);
@@ -71,11 +80,11 @@ contract SolidityTest is DSTest {
         assertEq(supply - amt, token.totalSupply());
     }
 
-    function prove_loop(uint n) public {
-        uint counter = 0;
-        for (uint i = 0; i < n; i++) {
-            counter++;
-        }
-        assertTrue(counter < 100);
-    }
+    //function prove_loop(uint n) public {
+        //uint counter = 0;
+        //for (uint i = 0; i < n; i++) {
+            //counter++;
+        //}
+        //assertTrue(counter < 100);
+    //}
 }
