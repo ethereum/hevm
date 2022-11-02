@@ -98,8 +98,12 @@ symCalldata sig typesignature concreteArgs base =
                              AbiBool w -> St [] . Lit $ if w then 1 else 0
                              _ -> error "TODO"
       calldatas = zipWith3 mkArg typesignature args [1..]
-      (cdBuf, props) = combineFragments calldatas (writeSelector base sig)
-  in (cdBuf, (Expr.bufLength cdBuf .>= cdLen calldatas) : props)
+      (cdBuf, props) = combineFragments calldatas base
+      withSelector = writeSelector cdBuf sig
+      sizeConstraints
+        = (Expr.bufLength withSelector .>= cdLen calldatas)
+        .&& (Expr.bufLength withSelector .< (Lit (2 ^ (64 :: Integer))))
+  in (withSelector, sizeConstraints : props)
 
 cdLen :: [CalldataFragment] -> Expr EWord
 cdLen = go (Lit 4)
