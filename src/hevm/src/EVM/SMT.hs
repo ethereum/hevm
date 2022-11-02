@@ -375,8 +375,12 @@ exprToSMT = \case
   GT a b -> do
     cond <- op2 "bvugt" a b
     pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
-  LEq a b -> exprToSMT $ Not (LT b a)
-  GEq a b -> exprToSMT $ Not (LT a b)
+  LEq a b -> do
+    cond <- op2 "bvule" a b
+    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
+  GEq a b -> do
+    cond <- op2 "bvuge" a b
+    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
   Eq a b -> do
     cond <- op2 "=" a b
     pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
@@ -545,8 +549,8 @@ propToSMT = \case
   PEq a b -> op2 "=" a b
   PLT a b -> op2 "bvult" a b
   PGT a b -> op2 "bvugt" a b
-  PLEq a b -> propToSMT $ PNeg (PGT a b)
-  PGEq a b -> propToSMT $ PNeg (PLT a b)
+  PLEq a b -> op2 "bvule" a b
+  PGEq a b -> op2 "bvuge" a b
   PNeg a -> do
       enc <- propToSMT a
       pure $ "(not " <> enc <> ")"
@@ -560,10 +564,12 @@ propToSMT = \case
       pure $ "(or " <> aenc <> " " <> benc <> ")"
   PBool b -> pure $ if b then "true" else "false"
   where
-    op2 op a b = do
-      aenc <- exprToSMT a
-      benc <- exprToSMT b
-      pure $ "(" <> op <> " " <> aenc <> " " <> benc <> ")"
+    op2 op l r = do
+      lenc <- exprToSMT l
+      renc <- exprToSMT r
+      pure $ "(" <> op `sp` lenc `sp` renc <> ")"
+
+
 
 
 -- ** Execution ** -------------------------------------------------------------------------------
