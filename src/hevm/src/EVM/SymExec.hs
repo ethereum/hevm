@@ -28,6 +28,7 @@ import Data.List (foldl')
 import Data.ByteString (ByteString)
 import qualified Control.Monad.State.Class as State
 import qualified Data.ByteString.Base16 as BS16
+import qualified Data.ByteString as BS
 import Data.Bifunctor (first, second)
 import Data.Text (Text)
 import qualified Data.Text as T
