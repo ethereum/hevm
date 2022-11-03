@@ -91,12 +91,12 @@ eliminate' e = mapExprM go e
             let ss' = Map.insert e next ss
             put $ s{stores=(next + 1, ss')}
             pure $ GVar (Id next)
-
+      e -> pure e
 
 eliminate :: Expr a -> Prog a
 eliminate e =
   let (e', st) = runState (eliminate' e) initState in
-  Prog { code = e
+  Prog { code = e'
        , bufEnv = invertKeyVal $ snd (bufs st)
        , storeEnv = invertKeyVal $ snd (stores st)
        , facts = []
