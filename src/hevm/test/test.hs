@@ -494,12 +494,14 @@ tests = testGroup "hevm"
               require(size <= 32);
               require(size >= 1);
               require(val < (1 <<(size*8)));
-              require(val >= (1 <<(size*8-1))); // negative
+              require(val & (1 <<(size*8-1)) != 0); // MSbit set, i.e. negative
               uint256 out;
               assembly {
                 out := signextend(size, val)
               }
-              assert (out > val);
+              if (size == 32) assert(out == val);
+              else assert(out > val);
+              assert(out & (1<<255) != 0); // MSbit set, i.e. negative
               }
             }
             |]
@@ -514,7 +516,7 @@ tests = testGroup "hevm"
               require(size <= 32);
               require(size >= 1);
               require(val < (1 <<(size*8)));
-              require(val < (1 <<(size*8-1))); // positive
+              require(val & (1 <<(size*8-1)) == 0); // MSbit not set, i.e. positive
               uint256 out;
               assembly {
                 out := signextend(size, val)
