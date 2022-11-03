@@ -498,7 +498,7 @@ tests = testGroup "hevm"
               }
               assert (c == 0);
               }
-             }
+            }
             |]
         [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
         putStrLn "XOR works as expected"
@@ -514,7 +514,7 @@ tests = testGroup "hevm"
               }
               assert (c == (~(a & b)) & (a | b));
               }
-             }
+            }
             |]
         [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
         putStrLn "XOR works as expected"
