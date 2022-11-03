@@ -493,7 +493,6 @@ tests = testGroup "hevm"
               function fun(uint256 shift_by, uint256 val) external pure {
               require(val < (1<<16));
               require(shift_by < 16);
-              require(shift_by >= 0);
               uint256 out;
               assembly {
                 out := shl(shift_by,val)
