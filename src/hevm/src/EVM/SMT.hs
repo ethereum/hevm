@@ -165,6 +165,45 @@ prelude =  (flip SMT2) mempty $ fmap (T.drop 2) . T.lines $ [i|
   (define-fun indexWord1 ((w Word)) Byte ((_ extract 247 240) w))
   (define-fun indexWord0 ((w Word)) Byte ((_ extract 255 248) w))
 
+  ; symbolic word indexing
+  ; a bitshift based version might be more performant here...
+  (define-fun indexWord ((idx Word) (w Word)) Byte
+    (ite (bvuge idx (_ bv32 256)) (_ bv0 8)
+    (ite (= idx (_ bv31 256)) (indexWord31 w)
+    (ite (= idx (_ bv30 256)) (indexWord30 w)
+    (ite (= idx (_ bv29 256)) (indexWord29 w)
+    (ite (= idx (_ bv28 256)) (indexWord28 w)
+    (ite (= idx (_ bv27 256)) (indexWord27 w)
+    (ite (= idx (_ bv26 256)) (indexWord26 w)
+    (ite (= idx (_ bv25 256)) (indexWord25 w)
+    (ite (= idx (_ bv24 256)) (indexWord24 w)
+    (ite (= idx (_ bv23 256)) (indexWord23 w)
+    (ite (= idx (_ bv22 256)) (indexWord22 w)
+    (ite (= idx (_ bv21 256)) (indexWord21 w)
+    (ite (= idx (_ bv20 256)) (indexWord20 w)
+    (ite (= idx (_ bv19 256)) (indexWord19 w)
+    (ite (= idx (_ bv18 256)) (indexWord18 w)
+    (ite (= idx (_ bv17 256)) (indexWord17 w)
+    (ite (= idx (_ bv16 256)) (indexWord16 w)
+    (ite (= idx (_ bv15 256)) (indexWord15 w)
+    (ite (= idx (_ bv14 256)) (indexWord14 w)
+    (ite (= idx (_ bv13 256)) (indexWord13 w)
+    (ite (= idx (_ bv12 256)) (indexWord12 w)
+    (ite (= idx (_ bv11 256)) (indexWord11 w)
+    (ite (= idx (_ bv10 256)) (indexWord10 w)
+    (ite (= idx (_ bv9 256)) (indexWord9 w)
+    (ite (= idx (_ bv8 256)) (indexWord8 w)
+    (ite (= idx (_ bv7 256)) (indexWord7 w)
+    (ite (= idx (_ bv6 256)) (indexWord6 w)
+    (ite (= idx (_ bv5 256)) (indexWord5 w)
+    (ite (= idx (_ bv4 256)) (indexWord4 w)
+    (ite (= idx (_ bv3 256)) (indexWord3 w)
+    (ite (= idx (_ bv2 256)) (indexWord2 w)
+    (ite (= idx (_ bv1 256)) (indexWord1 w)
+    (indexWord0 w)
+    ))))))))))))))))))))))))))))))))
+  )
+
   ; buffers
   (declare-fun bufLength (Buf) Word)
   (define-const emptyBuf Buf ((as const Buf) #b00000000))
@@ -448,8 +487,8 @@ exprToSMT = \case
              then do
               enc <- exprToSMT w
               pure $ "(indexWord" <> T.pack (show (num n :: Integer)) <> " " <> enc <> ")"
-             else error $ "indexWord: unsupported index: " <> show n
-    n -> error $ "indexWord: unsupported index: " <> show n
+             else exprToSMT (LitByte 0)
+    _ -> op2 "indexWord" idx w
   ReadByte idx src -> op2 "select" src idx
 
   ConcreteBuf "" -> pure "emptyBuf"
