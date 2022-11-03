@@ -410,7 +410,7 @@ exprToSMT = \case
     pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
   And a b -> op2 "bvand" a b
   Or a b -> op2 "bvor" a b
-  Xor a b -> exprToSMT $ And (Or a b) (Not (And a b))
+  Xor a b -> op2 "bvxor" a b
   Not a -> op1 "bvnot" a
   SHL a b -> op2 "bvshl" b a
   SHR a b -> op2 "bvlshr" b a
