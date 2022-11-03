@@ -486,6 +486,39 @@ tests = testGroup "hevm"
         [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) []
         putStrLn "SAR works as expected"
       ,
+     testCase "opcode-xor-cancel" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 a, uint256 b) external pure {
+              require(a == b);
+              uint256 c;
+              assembly {
+                c := xor(a,b)
+              }
+              assert (c == 0);
+              }
+             }
+            |]
+        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+        putStrLn "XOR works as expected"
+      ,
+      testCase "opcode-xor-reimplement" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 a, uint256 b) external pure {
+              uint256 c;
+              assembly {
+                c := xor(a,b)
+              }
+              assert (c == (~(a & b)) & (a | b));
+              }
+             }
+            |]
+        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+        putStrLn "XOR works as expected"
+      ,
       -- Somewhat tautological since we are asserting the precondition
       -- on the same form as the actual "requires" clause.
       testCase "SafeAdd success case" $ do
