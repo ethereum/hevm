@@ -486,6 +486,82 @@ tests = testGroup "hevm"
         [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) []
         putStrLn "SAR works as expected"
      ,
+     testCase "opcode-signextend-neg" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 val, uint8 size) external pure {
+              require(size <= 32);
+              require(size >= 1);
+              require(val < (1 <<(size*8)));
+              require(val >= (1 <<(size*8-1))); // negative
+              uint256 out;
+              assembly {
+                out := signextend(size, val)
+              }
+              assert (out > val);
+              }
+            }
+            |]
+        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint8)", [AbiUIntType 256, AbiUIntType 8])) []
+        putStrLn "signextend works as expected"
+      ,
+     testCase "opcode-signextend-pos-nochop" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 val, uint8 size) external pure {
+              require(size <= 32);
+              require(size >= 1);
+              require(val < (1 <<(size*8)));
+              require(val < (1 <<(size*8-1))); // positive
+              uint256 out;
+              assembly {
+                out := signextend(size, val)
+              }
+              assert (out == val);
+              }
+            }
+            |]
+        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint8)", [AbiUIntType 256, AbiUIntType 8])) []
+        putStrLn "signextend works as expected"
+      ,
+      testCase "opcode-signextend-pos-chopped" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 val, uint8 size) external pure {
+              require(size == 1);
+              require(val == 514);
+              uint256 out;
+              assembly {
+                out := signextend(size, val)
+              }
+              assert (out == 2);
+              }
+            }
+            |]
+        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint8)", [AbiUIntType 256, AbiUIntType 8])) []
+        putStrLn "signextend works as expected"
+      ,
+      -- when size is too large, value is unchanged
+      testCase "opcode-signextend-pos-size-toolarge" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 val, uint8 size) external pure {
+              require(size >= 32);
+              uint256 out;
+              assembly {
+                out := signextend(size, val)
+              }
+              assert (out == val);
+              }
+            }
+            |]
+        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint8)", [AbiUIntType 256, AbiUIntType 8])) []
+        putStrLn "signextend works as expected"
+     ,
      testCase "opcode-shl" $ do
         Just c <- solcRuntime "MyContract"
             [i|
