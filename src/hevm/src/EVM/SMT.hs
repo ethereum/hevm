@@ -38,6 +38,7 @@ import qualified Data.Text as T
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
 
 import EVM.Types
+import EVM.Traversals
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
 import qualified Language.SMT2.Syntax as Language.SMT2.Parser
 import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
