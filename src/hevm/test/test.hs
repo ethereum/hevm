@@ -485,7 +485,25 @@ tests = testGroup "hevm"
             |]
         [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) []
         putStrLn "SAR works as expected"
-      ,
+     ,
+     testCase "opcode-shl" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 shift_by, uint256 val) external pure {
+              require(val < (1<<16));
+              require(shift_by < 16);
+              require(shift_by >= 0);
+              uint256 out;
+              assembly {
+                out := shl(shift_by,val)
+              }
+              assert (out >= val);
+              }
+             }
+            |]
+        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+        putStrLn "SAR works as expected"      ,
       -- Somewhat tautological since we are asserting the precondition
       -- on the same form as the actual "requires" clause.
       testCase "SafeAdd success case" $ do
