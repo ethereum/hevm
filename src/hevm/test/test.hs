@@ -917,6 +917,40 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c Nothing []
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
+        testCase "check-asm-byte-in-bounds" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 idx, uint256 val) external pure {
+                uint256 actual;
+                uint256 expected;
+                require(idx < 32);
+                assembly {
+                  actual := byte(idx,val)
+                  expected := shr(248, shl(mul(idx, 8), val))
+                }
+                assert(actual == expected);
+              }
+            }
+            |]
+          [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c Nothing []
+          putStrLn "in bounds byte reads return the expected value"
+        ,
+        testCase "check-asm-byte-oob" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 x, uint256 y) external pure {
+                uint256 z;
+                require(x >= 32);
+                assembly { z := byte(x,y) }
+                assert(z == 0);
+              }
+            }
+            |]
+          [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c Nothing []
+          putStrLn "oob byte reads always return 0"
+        ,
         expectFail $ testCase "injectivity of keccak (32 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
