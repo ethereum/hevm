@@ -412,7 +412,7 @@ exprToSMT = \case
   Or a b -> op2 "bvor" a b
   Xor a b -> op2 "bvxor" a b
   Not a -> op1 "bvnot" a
-  SHL a b -> op2 "bvshl" a b
+  SHL a b -> op2 "bvshl" b a
   SHR a b -> op2 "bvlshr" b a
   SAR a b -> op2 "bvashr" b a
   EqByte a b -> do
