@@ -1,4 +1,4 @@
-cabal-version: 2.2
+cabal-version: 3.0
 name:
   hevm
 version:
@@ -80,7 +80,7 @@ library
     EVM.Solidity,
     EVM.Stepper,
     EVM.StorageLayout,
-    EVM.SymExec
+    EVM.SymExec,
     EVM.Transaction,
     EVM.TTY,
     EVM.TTYCenteredList,
