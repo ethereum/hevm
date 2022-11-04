@@ -18,6 +18,7 @@ import qualified Control.Monad.Operational as Operational
 import Control.Monad.State.Strict hiding (state)
 import EVM.Types
 import EVM.Traversals
+import EVM.CSE
 import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
 import Data.DoubleWord (Word256)
@@ -435,7 +436,7 @@ reachableQueries = go []
           (go (PEq (Lit 1) c : pcs) t)
           (go (PEq (Lit 0) c : pcs) f)
         pure (tres <> fres)
-      _ -> pure [assertProps pcs]
+      _ -> pure [assertProps pcs mempty mempty]
 
 -- | Strips unreachable branches from a given expr
 -- Returns a list of executed SMT queries alongside the reduced expression for debugging purposes
@@ -470,7 +471,7 @@ reachable2 solvers e = do
               (Nothing, Nothing) -> Nothing
         pure (fst tres <> fst fres, subexpr)
       leaf -> do
-        let query = assertProps pcs
+        let query = assertProps pcs mempty mempty
         res <- checkSat' solvers query
         case res of
           Sat _ -> pure ([query], Just leaf)
@@ -493,8 +494,8 @@ reachable solvers = go []
     go pcs = \case
       ITE c t f -> do
         let
-          tquery = assertProps (PEq c (Lit 1) : pcs)
-          fquery = assertProps (PEq c (Lit 0) : pcs)
+          tquery = assertProps (PEq c (Lit 1) : pcs) mempty mempty
+          fquery = assertProps (PEq c (Lit 0) : pcs) mempty mempty
         tres <- (checkSat' solvers tquery)
         fres <- (checkSat' solvers fquery)
         print (tres, fres)
@@ -567,6 +568,7 @@ verify solvers preState maxIter askSmtIters rpcinfo maybepost = do
   putStrLn "Exploring contract"
   expr <- simplify <$> evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) preState
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
+  let Prog{code=expr, bufEnv=bufEnv, storeEnv=storeEnv,facts=_} = eliminate expr
   let leaves = flattenExpr expr
   case maybepost of
     Nothing -> pure [Qed expr]
@@ -578,7 +580,7 @@ verify solvers preState maxIter askSmtIters rpcinfo maybepost = do
             PBool True -> False
             _ -> True
         assumes = view constraints preState
-        withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> pcs), leaf)) canViolate
+        withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> pcs) bufEnv storeEnv, leaf)) canViolate
       -- Dispatch the remaining branches to the solver to check for violations
       putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violations"
       --putStrLn $ T.unpack . formatSMT2 . fst $ withQueries !! 0

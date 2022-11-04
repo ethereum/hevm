@@ -39,6 +39,7 @@ import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_i
 
 import EVM.Types
 import EVM.Traversals
+import EVM.CSE
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
 import qualified Language.SMT2.Syntax as Language.SMT2.Parser
 import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
@@ -86,30 +87,28 @@ formatSMT2 :: SMT2 -> Text
 formatSMT2 (SMT2 ls _) = T.unlines ls
 
 -- | Reads all intermediate variables from the builder state and produces SMT declaring them as constants
--- declareIntermediates :: State BuilderState SMT2
--- declareIntermediates = do
---   s <- get
---   let bs = List.sortBy sortPred . Map.toList . snd $ bufs s
---       ss = List.sortBy sortPred . Map.toList . snd $ stores s
---   declBs <- forM bs $ \(_, (n, enc)) -> do
---     pure $ "(define-const buf" <> (T.pack . show $ n) <> " Buf " <> enc <> ")"
---   declSs <- forM ss $ \(_, (n, enc)) -> do
---     pure $ "(define-const store" <> (T.pack . show $ n) <> " Storage " <> enc <> ")"
---   pure $ SMT2 (["; intermediate buffers"] <> declBs <> ["", "; intermediate stores"] <> declSs) mempty
---   where
---     sortPred (_, (a, _)) (_, (b, _)) = compare a b
+declareIntermediates :: BufEnv -> StoreEnv -> SMT2
+declareIntermediates bufs stores =
+  let declBs = Map.foldrWithKey (\n expr rest -> encodeBuf n expr:rest) [] bufs
+      declSs = Map.foldrWithKey (\n expr rest -> encodeBuf n expr:rest) [] stores in
+  SMT2 (["; intermediate buffers"] <> declBs <> ["", "; intermediate stores"] <> declSs) mempty
+  where
+    encodeBuf n expr =
+       "(define-const buf" <> (T.pack . show $ n) <> " Buf " <> exprToSMT expr <> ")"
+    encodeStore n expr =
+       "(define-const store" <> (T.pack . show $ n) <> " Storage " <> exprToSMT expr <> ")"
 
-assertProps :: [Prop] -> SMT2
-assertProps ps =
-  let encs = map propToSMT ps in
-  -- intermediates <- declareIntermediates
+assertProps :: [Prop] -> BufEnv -> StoreEnv -> SMT2
+assertProps ps bufs stores =
+  let encs = map propToSMT ps
+      intermediates = declareIntermediates bufs stores in
   prelude
   <> (declareBufs . nubOrd $ foldl (<>) [] (fmap (referencedBufs') ps))
   <> SMT2 [""] mempty
   <> (declareVars . nubOrd $ foldl (<>) [] (fmap (referencedVars') ps))
   <> SMT2 [""] mempty
   <> (declareFrameContext . nubOrd $ foldl (<>) [] (fmap (referencedFrameContext') ps))
-  -- <> intermediates
+  <> intermediates
   <> SMT2 [""] mempty
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
 
