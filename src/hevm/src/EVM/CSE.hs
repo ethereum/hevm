@@ -45,15 +45,6 @@ eliminate' e = mapExprM go e
     go :: Expr a -> State BuilderState (Expr a)
     go = \case
       -- buffers
-      e@(ConcreteBuf bs) -> do
-        s <- get
-        let (next, bs) = bufs s
-        case Map.lookup e bs of
-          Just v -> pure $ GVar (Id v)
-          Nothing -> do
-            let bs' = Map.insert e next bs
-            put $ s{bufs=(next + 1, bs')}
-            pure $ GVar (Id next)
       e@(WriteWord i v b) -> do
         s <- get
         let (next, bs) = bufs s
