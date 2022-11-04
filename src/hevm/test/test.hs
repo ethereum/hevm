@@ -474,12 +474,12 @@ tests = testGroup "hevm"
             [i|
             contract MyContract {
               function fun(int256 shift_by, int256 val) external pure returns (int256 out) {
-              require(shift_by == 1);
-              require(val == -64);
-              assembly {
-                out := sar(shift_by,val)
-              }
-              assert (out == -32);
+                require(shift_by == 1);
+                require(val == -64);
+                assembly {
+                  out := sar(shift_by,val)
+                }
+                assert (out == -32);
               }
              }
             |]
@@ -491,17 +491,17 @@ tests = testGroup "hevm"
             [i|
             contract MyContract {
               function fun(uint256 val, uint8 size) external pure {
-              require(size <= 32);
-              require(size >= 1);
-              require(val < (1 <<(size*8)));
-              require(val & (1 <<(size*8-1)) != 0); // MSbit set, i.e. negative
-              uint256 out;
-              assembly {
-                out := signextend(size, val)
-              }
-              if (size == 32) assert(out == val);
-              else assert(out > val);
-              assert(out & (1<<255) != 0); // MSbit set, i.e. negative
+                require(size <= 32);
+                require(size >= 1);
+                require(val < (1 <<(size*8)));
+                require(val & (1 <<(size*8-1)) != 0); // MSbit set, i.e. negative
+                uint256 out;
+                assembly {
+                  out := signextend(size, val)
+                }
+                if (size == 32) assert(out == val);
+                else assert(out > val);
+                assert(out & (1<<255) != 0); // MSbit set, i.e. negative
               }
             }
             |]
@@ -513,15 +513,15 @@ tests = testGroup "hevm"
             [i|
             contract MyContract {
               function fun(uint256 val, uint8 size) external pure {
-              require(size <= 32);
-              require(size >= 1);
-              require(val < (1 <<(size*8)));
-              require(val & (1 <<(size*8-1)) == 0); // MSbit not set, i.e. positive
-              uint256 out;
-              assembly {
-                out := signextend(size, val)
-              }
-              assert (out == val);
+                require(size <= 32);
+                require(size >= 1);
+                require(val < (1 <<(size*8)));
+                require(val & (1 <<(size*8-1)) == 0); // MSbit not set, i.e. positive
+                uint256 out;
+                assembly {
+                  out := signextend(size, val)
+                }
+                assert (out == val);
               }
             }
             |]
@@ -533,13 +533,13 @@ tests = testGroup "hevm"
             [i|
             contract MyContract {
               function fun(uint256 val, uint8 size) external pure {
-              require(size == 1);
-              require(val == 514);
-              uint256 out;
-              assembly {
-                out := signextend(size, val)
-              }
-              assert (out == 2);
+                require(size == 1);
+                require(val == 514);
+                uint256 out;
+                assembly {
+                  out := signextend(size, val)
+                }
+                assert (out == 2);
               }
             }
             |]
@@ -552,12 +552,12 @@ tests = testGroup "hevm"
             [i|
             contract MyContract {
               function fun(uint256 val, uint8 size) external pure {
-              require(size >= 32);
-              uint256 out;
-              assembly {
-                out := signextend(size, val)
-              }
-              assert (out == val);
+                require(size >= 32);
+                uint256 out;
+                assembly {
+                  out := signextend(size, val)
+                }
+                assert (out == val);
               }
             }
             |]
