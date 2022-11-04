@@ -26,10 +26,13 @@ data BuilderState = BuilderState
   }
   deriving (Show)
 
+type BufEnv = Map (GVar Buf) (Expr Buf)
+type StoreEnv = Map (GVar Storage) (Expr Storage)
+
 data Prog a = Prog
   { code       :: Expr a
-  , bufEnv     :: Map (GVar Buf) (Expr Buf)
-  , storeEnv   :: Map (GVar Storage) (Expr Storage)
+  , bufEnv     :: BufEnv
+  , storeEnv   :: StoreEnv
   , facts      :: [Prop]
   }
 
