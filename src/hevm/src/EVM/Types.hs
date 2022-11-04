@@ -126,7 +126,7 @@ data Expr (a :: EType) where
 
   Lit            :: W256 -> Expr EWord
   Var            :: Text -> Expr EWord
-  GVar           :: GVar a -> Expr a
+  GVar           :: GVar a -> Text -> Expr a
 
   -- bytes
 

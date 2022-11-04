@@ -12,6 +12,8 @@ import Prelude hiding (Word, LT, GT)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Control.Monad.State
+import Data.Text (Text)
+import qualified Data.Text as T
 
 import EVM.Types
 import EVM.Traversals
@@ -49,40 +51,42 @@ eliminate' e = mapExprM go e
         s <- get
         let (next, bs) = bufs s
         case Map.lookup e bs of
-          Just v -> pure $ GVar (Id v)
+          Just v -> pure $ GVar (Id v) (makeName "buf" v)
           Nothing -> do
             let bs' = Map.insert e next bs
             put $ s{bufs=(next + 1, bs')}
-            pure $ GVar (Id next)
+            pure $ GVar (Id next) (makeName "buf" next)
       e@(WriteByte i v b) -> do
         s <- get
         let (next, bs) = bufs s
         case Map.lookup e bs of
-          Just v -> pure $ GVar (Id v)
+          Just v -> pure $ GVar (Id v) (makeName "buf" v)
           Nothing -> do
             let bs' = Map.insert e next bs
             put $ s{bufs=(next + 1, bs')}
-            pure $ GVar (Id next)
+            pure $ GVar (Id next) (makeName "buf" next)
       e@(CopySlice srcOff dstOff s src dst) -> do
         s <- get
         let (next, bs) = bufs s
         case Map.lookup e bs of
-          Just v -> pure $ GVar (Id v)
+          Just v -> pure $ GVar (Id v) (makeName "buf" v)
           Nothing -> do
             let bs' = Map.insert e next bs
             put $ s{bufs=(next + 1, bs')}
-            pure $ GVar (Id next)
+            pure $ GVar (Id next) (makeName "buf" next)
       -- storage
       e@(SStore addr i v s) -> do
         s <- get
         let (next, ss) = stores s
         case Map.lookup e ss of
-          Just v -> pure $ GVar (Id v)
+          Just v -> pure $ GVar (Id v) (makeName "store" v)
           Nothing -> do
             let ss' = Map.insert e next ss
             put $ s{stores=(next + 1, ss')}
-            pure $ GVar (Id next)
+            pure $ GVar (Id next ) (makeName "store" next)
       e -> pure e
+
+    makeName s n = s <> (T.pack . show $ n)
 
 eliminate :: Expr a -> Prog a
 eliminate e =

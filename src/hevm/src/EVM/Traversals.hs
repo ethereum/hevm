@@ -59,7 +59,7 @@ foldExpr f acc expr = acc <> (go expr)
       e@(Lit _) -> f e
       e@(LitByte _) -> f e
       e@(Var _) -> f e
-      e@(GVar _) -> f e
+      e@(GVar _ _) -> f e
 
       -- bytes
 
@@ -270,7 +270,7 @@ mapExpr f expr = case (f expr) of
   Lit a -> Lit a
   LitByte a -> LitByte a
   Var a -> Var a
-  GVar a -> GVar a
+  GVar s a -> GVar s a
 
   -- bytes
 
@@ -466,7 +466,7 @@ mapExprM f expr = case expr of
   Lit a -> f (Lit a)
   LitByte a -> f (LitByte a)
   Var a -> f (Var a)
-  GVar a -> f (GVar a)
+  GVar s a -> f (GVar s a)
 
   -- bytes
 
@@ -822,5 +822,5 @@ mapExprM f expr = case expr of
     
   BufLength a -> do
     a' <- mapExprM f a
-    f (BufLength a)
+    f (BufLength a')
     
