@@ -18,7 +18,7 @@ import EVM.Dapp (dappUnitTests, unitTestMethods, dappSolcByName, dappSolcByHash,
 import EVM.Dapp (dappAstSrcMap)
 import EVM.Debug
 import EVM.Format (showWordExact, showWordExplanation)
-import EVM.Format (contractNamePart, contractPathPart, showTraceTree)
+import EVM.Format (contractNamePart, contractPathPart, showTraceTree, prettyIfConcreteWord)
 import EVM.Hexdump (prettyHex)
 import EVM.Op
 import EVM.Solidity hiding (storageLayout)
@@ -880,7 +880,7 @@ drawStackPane ui =
       (\_ (i, w) ->
          vBox
            [ withHighlight True (str ("#" ++ show i ++ " "))
-               <+> str (show w)
+               <+> txt (prettyIfConcreteWord w)
            , dim (txt ("   " <> case unlit w of
                        Nothing -> ""
                        Just u -> showWordExplanation u $ dapp (view uiTestOpts ui)))
