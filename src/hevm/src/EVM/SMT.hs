@@ -90,7 +90,7 @@ formatSMT2 (SMT2 ls _) = T.unlines ls
 declareIntermediates :: BufEnv -> StoreEnv -> SMT2
 declareIntermediates bufs stores =
   let declBs = Map.foldrWithKey (\n expr rest -> encodeBuf n expr:rest) [] bufs
-      declSs = Map.foldrWithKey (\n expr rest -> encodeBuf n expr:rest) [] stores in
+      declSs = Map.foldrWithKey (\n expr rest -> encodeStore n expr:rest) [] stores in
   SMT2 (["; intermediate buffers"] <> declBs <> ["", "; intermediate stores"] <> declSs) mempty
   where
     encodeBuf (Id n) expr =
@@ -103,14 +103,23 @@ assertProps ps bufs stores =
   let encs = map propToSMT ps
       intermediates = declareIntermediates bufs stores in
   prelude
-  <> (declareBufs . nubOrd $ foldl (<>) [] (fmap (referencedBufs') ps))
+  <> (declareBufs . nubOrd $ foldl (<>) [] allBufs)
   <> SMT2 [""] mempty
-  <> (declareVars . nubOrd $ foldl (<>) [] (fmap (referencedVars') ps))
+  <> (declareVars . nubOrd $ foldl (<>) [] allVars)
   <> SMT2 [""] mempty
-  <> (declareFrameContext . nubOrd $ foldl (<>) [] (fmap (referencedFrameContext') ps))
+  <> (declareFrameContext . nubOrd $ foldl (<>) [] frameCtx)
   <> intermediates
   <> SMT2 [""] mempty
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
+
+  where
+    allBufs = fmap referencedBufs' ps <> fmap referencedBufs bufVals <> fmap referencedBufs storeVals
+    allVars = fmap referencedVars' ps <> fmap referencedVars bufVals <> fmap referencedVars storeVals
+    frameCtx = fmap referencedFrameContext' ps <> fmap referencedFrameContext bufVals <> fmap referencedVars storeVals
+
+    bufVals = Map.elems bufs
+    storeVals = Map.elems stores
+
 
 prelude :: SMT2
 prelude =  (flip SMT2) mempty $ fmap (T.drop 2) . T.lines $ [i|
