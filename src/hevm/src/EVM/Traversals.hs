@@ -473,11 +473,11 @@ mapExprM f expr = case expr of
   IndexWord a b -> do
     a' <- mapExprM f a
     b' <- mapExprM f b
-    f (IndexWord a' b')    
+    f (IndexWord a' b')
   EqByte a b -> do
     a' <- mapExprM f a
     b' <- mapExprM f b
-    f (EqByte a' b')    
+    f (EqByte a' b')
 
   JoinBytes zero one two three four five six seven eight nine
     ten eleven twelve thirteen fourteen fifteen sixteen seventeen
@@ -596,7 +596,7 @@ mapExprM f expr = case expr of
 
   -- booleans
 
-  LT a b -> do 
+  LT a b -> do
     a' <- mapExprM f a
     b' <- mapExprM f b
     f (LT a' b')
@@ -657,7 +657,7 @@ mapExprM f expr = case expr of
     a' <- mapExprM f a
     b' <- mapExprM f b
     f (SAR a' b')
-    
+
 
   -- Hashes
 
@@ -732,7 +732,7 @@ mapExprM f expr = case expr of
     g' <- mapExprM f g
     h' <- mapExprM f h
     f (Create2 a' b' c' d' e' g' h')
-    
+
   -- Calls
 
   Call a b c d e g h i j -> do
@@ -819,8 +819,43 @@ mapExprM f expr = case expr of
     d' <- mapExprM f d
     e' <- mapExprM f e
     f (CopySlice a' b' c' d' e')
-    
+
   BufLength a -> do
     a' <- mapExprM f a
     f (BufLength a')
-    
+
+
+mapPropM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Prop -> m Prop
+mapPropM f = \case
+  PBool b -> pure $ PBool b
+  PEq a b -> do
+    a' <- mapExprM f a
+    b' <- mapExprM f b
+    pure $ PEq a' b'
+  PLT a b -> do
+    a' <- mapExprM f a
+    b' <- mapExprM f b
+    pure $ PLT a' b'
+  PGT a b -> do
+    a' <- mapExprM f a
+    b' <- mapExprM f b
+    pure $ PGT a' b'
+  PLEq a b -> do
+    a' <- mapExprM f a
+    b' <- mapExprM f b
+    pure $ PLEq a' b'
+  PGEq a b -> do
+    a' <- mapExprM f a
+    b' <- mapExprM f b
+    pure $ PGEq a' b'
+  PNeg a -> do
+    a' <- mapPropM f a
+    pure $ PNeg a'
+  PAnd a b -> do
+    a' <- mapPropM f a
+    b' <- mapPropM f b
+    pure $ PAnd a' b'
+  POr a b -> do
+    a' <- mapPropM f a
+    b' <- mapPropM f b
+    pure $ POr a' b'
