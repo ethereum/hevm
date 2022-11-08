@@ -169,6 +169,7 @@ library
     here                              >= 1.2.13 && < 1.3,
     tuple                             >= 0.3.0.2 && < 0.4,
     smt2-parser                       >= 0.1.0.1,
+    word-wrap                         >= 0.5 && < 0.6,
     parsec
   hs-source-dirs:
     src
