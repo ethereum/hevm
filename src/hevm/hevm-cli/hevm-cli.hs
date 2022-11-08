@@ -26,6 +26,7 @@ import EVM.ABI
 import qualified EVM.Expr as Expr
 import EVM.SMT
 import qualified EVM.TTY as TTY
+import EVM.SMT hiding (calldata)
 import EVM.Solidity
 import EVM.Expr (litAddr)
 import EVM.Types hiding (word)
@@ -451,7 +452,15 @@ assert cmd = do
       rpcinfo = (,) block' <$> rpc cmd
   preState <- symvmFromCommand cmd
   let errCodes = fromMaybe defaultPanicCodes (assertions cmd)
-  withSolvers EVM.SMT.Z3 4 $ \solvers -> do
+  if debug cmd then do
+    srcInfo <- getSrcInfo cmd
+    withSolvers EVM.SMT.Z3 4 $ \solvers -> do
+      void $ TTY.runFromVM
+        (maxIterations cmd)
+        srcInfo
+        (EVM.Fetch.oracle solvers rpcinfo)
+        preState
+  else withSolvers EVM.SMT.Z3 4 $ \solvers -> do
     res <- verify solvers preState (maxIterations cmd) (askSmtIterations cmd) rpcinfo (Just $ checkAssertions errCodes)
     case res of
       [Qed _] -> putStrLn "QED: No reachable property violations discovered"
@@ -748,7 +757,7 @@ vmFromCommand cmd = do
         value'   = word value 0
         caller'  = addr caller 0
         origin'  = addr origin 0
-        calldata' = ConcreteBuf $ bytes calldata ""
+        calldata' = ConcreteBuf $ bytes Main.calldata ""
         mkCode bs = if create cmd
                     then EVM.InitCode bs mempty
                     else EVM.RuntimeCode (fromJust $ Expr.toList (ConcreteBuf bs))
@@ -801,7 +810,7 @@ symvmFromCommand cmd = do
     caller' = Caller 0
     ts = maybe Timestamp Lit (timestamp cmd)
     callvalue' = maybe (CallValue 0) Lit (value cmd)
-  calldata' <- case (calldata cmd, sig cmd) of
+  calldata' <- case (Main.calldata cmd, sig cmd) of
     -- fully abstract calldata
     (Nothing, Nothing) -> pure $ AbstractBuf "txdata"
     -- fully concrete calldata

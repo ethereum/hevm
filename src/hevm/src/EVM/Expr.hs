@@ -443,7 +443,7 @@ readStorage addr loc store@(ConcreteStore s) = case (addr, loc) of
 readStorage addr' loc s@AbstractStore = Just $ SLoad addr' loc s
 readStorage addr' loc s@(SStore addr slot val prev) = case (addr, slot, addr', loc) of
   (Lit _, Lit _, Lit _, Lit _) -> if loc == slot && addr == addr' then Just val else readStorage addr' loc prev
-  _ -> Just $ SLoad addr' addr' s
+  _ -> Just $ SLoad addr' loc s
 
 readStorage' :: Expr EWord -> Expr EWord -> Expr Storage -> Expr EWord
 readStorage' addr loc store = case readStorage addr loc store of
@@ -531,7 +531,7 @@ indexWord (Lit idx) (JoinBytes zero        one        two       three
   | idx == 29 = twentynine
   | idx == 30 = thirty
   | idx == 31 = thirtyone
-  | otherwise = error $ "Internal error: idx must be <= 31 (actual: " <> (show . num $ idx) <> ")"
+  | otherwise = LitByte 0
 indexWord idx w = IndexWord idx w
 
 

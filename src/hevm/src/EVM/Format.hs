@@ -1,6 +1,7 @@
 {-# Language DataKinds #-}
 {-# Language ImplicitParams #-}
 {-# Language TemplateHaskell #-}
+
 module EVM.Format
   ( formatExpr
   , contractNamePart
@@ -16,6 +17,7 @@ module EVM.Format
   , showValue
   , textValues
   , showAbiValue
+  , prettyIfConcreteWord
   ) where
 
 import Prelude hiding (Word)
@@ -24,7 +26,7 @@ import EVM.Dapp (DappInfo (..), dappSolcByHash, dappAbiMap, showTraceLocation, d
 import EVM.Dapp (DappContext (..), contextInfo, contextEnv)
 import EVM (VM, VMResult(..), cheatCode, traceForest, traceData, Error (..), result)
 import EVM (Trace, TraceData (..), Query (..), FrameContext (..))
-import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..), hexByteString, foldExpr, mapExpr)
+import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..), hexByteString, foldExpr, mapExpr, word256Bytes)
 import EVM.Types (Addr, ByteStringS(..))
 import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..))
 import EVM.ABI (Indexed (NotIndexed), getAbiSeq)
@@ -51,6 +53,7 @@ import Data.Vector (Vector)
 import Data.Word (Word32)
 import Data.Char (isSpace)
 import Data.List (foldl')
+import Numeric (showHex)
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as BS16
@@ -95,6 +98,11 @@ humanizeInteger =
   . Text.reverse
   . Text.pack
   . show
+
+prettyIfConcreteWord :: Expr EWord -> Text
+prettyIfConcreteWord = \case
+  Lit w -> T.pack $ "0x" <> showHex w ""
+  w -> T.pack $ show w
 
 showAbiValue :: (?context :: DappContext) => AbiValue -> Text
 showAbiValue (AbiBytes _ bs) =
