@@ -8,6 +8,7 @@ import EVM.FeeSchedule
 import EVM.Precompiled (execute)
 import EVM.RLP
 import EVM.Types
+import EVM.Expr (litAddr)
 
 import Control.Lens
 
@@ -216,9 +217,15 @@ initTx vm = let
          then Map.insert toAddr (toContract & balance .~ oldBalance)
          else touchAccount toAddr)
       $ preState
-    resetStore s = if creation then Map.insert (num toAddr) mempty s else s
+
+    resetConcreteStore s = if creation then Map.insert (num toAddr) mempty s else s
+
+    resetStore (ConcreteStore s) = ConcreteStore (resetConcreteStore s)
+    resetStore (SStore a@(Lit _) k v s) = if creation && a == (litAddr toAddr) then resetStore s else (SStore a k v (resetStore s))
+    resetStore (SStore {}) = error "cannot reset storage if it contains symbolic addresses"
+    resetStore s = s
     in
       vm & EVM.env . EVM.contracts .~ initState
          & EVM.tx . EVM.txReversion .~ preState
-         & EVM.env . EVM.storage %~ (\(ConcreteStore s) -> ConcreteStore $ resetStore s)
-         & EVM.env . EVM.origStorage %~ resetStore
+         & EVM.env . EVM.storage %~ resetStore
+         & EVM.env . EVM.origStorage %~ resetConcreteStore
