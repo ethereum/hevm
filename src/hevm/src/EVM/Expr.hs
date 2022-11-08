@@ -305,7 +305,7 @@ bufLength buf = case go 0 buf of
     go l (ConcreteBuf b) = Just . Lit $ max (num . BS.length $ b) l
     go l (WriteWord (Lit idx) _ b) = go (max l (idx + 31)) b
     go l (WriteByte (Lit idx) _ b) = go (max l idx) b
-    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size - 1) l) dst
+    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size) l) dst
     go _ _ = Nothing
 
 -- | Returns the smallest possible size of a given buffer.
