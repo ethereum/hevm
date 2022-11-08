@@ -93,9 +93,9 @@ declareIntermediates bufs stores =
       declSs = Map.foldrWithKey (\n expr rest -> encodeBuf n expr:rest) [] stores in
   SMT2 (["; intermediate buffers"] <> declBs <> ["", "; intermediate stores"] <> declSs) mempty
   where
-    encodeBuf n expr =
+    encodeBuf (Id n) expr =
        "(define-const buf" <> (T.pack . show $ n) <> " Buf " <> exprToSMT expr <> ")"
-    encodeStore n expr =
+    encodeStore (Id n) expr =
        "(define-const store" <> (T.pack . show $ n) <> " Storage " <> exprToSMT expr <> ")"
 
 assertProps :: [Prop] -> BufEnv -> StoreEnv -> SMT2
@@ -427,6 +427,7 @@ exprToSMT :: Expr a -> Text
 exprToSMT = \case
   Lit w -> "(_ bv" <> (T.pack $ show (num w :: Integer)) <> " 256)"
   Var s -> s
+  GVar _ s -> s
   JoinBytes
     z o two three four five six seven
     eight nine ten eleven twelve thirteen fourteen fifteen
