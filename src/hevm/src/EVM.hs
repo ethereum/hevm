@@ -2708,7 +2708,7 @@ readOp x _  | x >= 0x90 && x <= 0x9f = OpSwap (x - 0x90 + 1)
 readOp x _  | x >= 0xa0 && x <= 0xa4 = OpLog (x - 0xa0)
 readOp x xs | x >= 0x60 && x <= 0x7f =
   let n = num $ x - 0x60 + 1
-  in OpPush (readBytes n (Lit . num $ x) (Expr.fromList $ V.fromList xs))
+  in OpPush (readBytes n (Lit 0) (Expr.fromList $ V.fromList xs))
 readOp x _ = case x of
   0x00 -> OpStop
   0x01 -> OpAdd
