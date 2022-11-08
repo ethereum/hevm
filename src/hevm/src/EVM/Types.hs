@@ -335,8 +335,8 @@ data Expr (a :: EType) where
                  -> Expr Buf           -- prev
                  -> Expr Buf
 
-  CopySlice      :: Expr EWord         -- dst offset
-                 -> Expr EWord         -- src offset
+  CopySlice      :: Expr EWord         -- src offset
+                 -> Expr EWord         -- dst offset
                  -> Expr EWord         -- size
                  -> Expr Buf           -- src
                  -> Expr Buf           -- dst
