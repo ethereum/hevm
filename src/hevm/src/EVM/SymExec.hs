@@ -568,8 +568,8 @@ verify solvers preState maxIter askSmtIters rpcinfo maybepost = do
   putStrLn "Exploring contract"
   expr <- simplify <$> evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) preState
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
-  let Prog{code=expr, bufEnv=bufEnv, storeEnv=storeEnv,facts=_} = eliminate expr
-  let leaves = flattenExpr expr
+  let Prog{code=expr', bufEnv=bufEnv, storeEnv=storeEnv,facts=_} = eliminate expr
+  let leaves = flattenExpr expr'
   case maybepost of
     Nothing -> pure [Qed expr]
     Just post -> do
