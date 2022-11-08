@@ -568,8 +568,7 @@ verify solvers preState maxIter askSmtIters rpcinfo maybepost = do
   putStrLn "Exploring contract"
   expr <- simplify <$> evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) preState
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
-  let Prog{code=expr', bufEnv=bufEnv, storeEnv=storeEnv,facts=_} = eliminate expr
-  let leaves = flattenExpr expr'
+  let leaves = flattenExpr expr
   case maybepost of
     Nothing -> pure [Qed expr]
     Just post -> do
@@ -579,8 +578,12 @@ verify solvers preState maxIter askSmtIters rpcinfo maybepost = do
           \(_, leaf) -> case evalProp (post preState leaf) of
             PBool True -> False
             _ -> True
+        -- Add extra assertions to preconditions
         assumes = view constraints preState
-        withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> pcs) bufEnv storeEnv, leaf)) canViolate
+        canViolateExt = fmap (\(pcs, leaf) -> (PNeg (post preState leaf) : assumes <> pcs, leaf)) canViolate
+        -- Common subexpression elimination
+        (canViolateElim, bufEnv, storeEnv) = eliminateFlat canViolateExt
+        withQueries = fmap (\(pcs, leaf) -> (assertProps pcs bufEnv storeEnv, leaf)) canViolateElim
       -- Dispatch the remaining branches to the solver to check for violations
       putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violations"
       --putStrLn $ T.unpack . formatSMT2 . fst $ withQueries !! 0
