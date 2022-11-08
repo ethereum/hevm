@@ -695,10 +695,6 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
         shouldFail = "proveFail" `isPrefixOf` testName
         testContract = view (state . contract) vm
 
-
-    putStrLn $ "testContract: " <> show testContract
-    putStrLn $ "cheatCode: " <> show cheatCode
-
     -- define postcondition depending on `shouldFail`
     -- We directly encode the failure conditions from failed() in ds-test since this is easier to encode than a call into failed()
     -- we need to read from slot 0 in the test contract and mask it with 0x10 to get the value of _failed
