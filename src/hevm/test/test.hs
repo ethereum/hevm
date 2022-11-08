@@ -428,8 +428,7 @@ tests = testGroup "hevm"
         runDappTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Prove-Tests-Pass" $ do
         let testFile = "test/contracts/pass/dsProvePass.sol"
-        --runDappTest testFile "prove_trivial" >>= assertEqual "test result" True
-        runDappTest testFile "prove_balance" >>= assertEqual "test result" True
+        runDappTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
         runDappTest testFile "prove_trivial" >>= assertEqual "test result" False
