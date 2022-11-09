@@ -872,7 +872,7 @@ currentSrcMap dapp vm = do
 drawStackPane :: UiVmState -> UiWidget
 drawStackPane ui =
   let
-    gasText = showWordExact (view (uiVm . state . gas) ui)
+    gasText = showWordExact (num $ view (uiVm . state . gas) ui)
     labelText = txt ("Gas available: " <> gasText <> "; stack:")
     stackList = list StackPane (Vec.fromList $ zip [(1 :: Int)..] (view (uiVm . state . stack) ui)) 2
   in hBorderWithLabel labelText <=>

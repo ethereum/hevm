@@ -58,6 +58,7 @@ import Crypto.Hash (Digest, SHA256, RIPEMD160, digestFromByteString)
 import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
 import Crypto.PubKey.ECC.Types (getCurveByName, CurveName(..), Point(..))
 import Crypto.PubKey.ECC.Generate (generateQ)
+import Data.DoubleWord (Word256(Word256), Word128 (Word128))
 
 -- * Data types
 
@@ -69,7 +70,7 @@ data Error
   | StackUnderrun
   | BadJumpDestination
   | Revert (Expr Buf)
-  | OutOfGas W256 W256
+  | OutOfGas Word64 Word64
   | BadCheatCode (Maybe Word32)
   | StackLimitExceeded
   | IllegalOverflow
@@ -107,7 +108,7 @@ data VM = VM
   , _logs           :: Expr Logs
   , _traces         :: Zipper.TreePos Zipper.Empty Trace
   , _cache          :: Cache
-  , _burned         :: W256
+  , _burned         :: Word64
   , _iterations     :: Map CodeLocation Int
   , _constraints    :: [Prop]
   , _allowFFI       :: Bool
@@ -199,17 +200,17 @@ data VMOpts = VMOpts
   , vmoptAddress :: Addr
   , vmoptCaller :: Expr EWord
   , vmoptOrigin :: Addr
-  , vmoptGas :: W256
-  , vmoptGaslimit :: W256
+  , vmoptGas :: Word64
+  , vmoptGaslimit :: Word64
   , vmoptNumber :: W256
   , vmoptTimestamp :: Expr EWord
   , vmoptCoinbase :: Addr
   , vmoptDifficulty :: W256
   , vmoptMaxCodeSize :: W256
-  , vmoptBlockGaslimit :: W256
+  , vmoptBlockGaslimit :: Word64
   , vmoptGasprice :: W256
   , vmoptBaseFee :: W256
-  , vmoptSchedule :: FeeSchedule Integer
+  , vmoptSchedule :: FeeSchedule Word64
   , vmoptChainId :: W256
   , vmoptCreate :: Bool
   , vmoptTxAccessList :: Map Addr [W256]
@@ -252,11 +253,11 @@ data FrameState = FrameState
   , _pc           :: Int
   , _stack        :: [Expr EWord]
   , _memory       :: Expr Buf
-  , _memorySize   :: Int
+  , _memorySize   :: Word64
   , _calldata     :: Expr Buf
   , _callvalue    :: Expr EWord
   , _caller       :: Expr EWord
-  , _gas          :: W256
+  , _gas          :: Word64
   , _returndata   :: Expr Buf
   , _static       :: Bool
   }
@@ -265,7 +266,7 @@ data FrameState = FrameState
 -- | The state that spans a whole transaction
 data TxState = TxState
   { _gasprice            :: W256
-  , _txgaslimit          :: W256
+  , _txgaslimit          :: Word64
   , _txPriorityFee       :: W256
   , _origin              :: Addr
   , _toAddr              :: Addr
@@ -282,7 +283,7 @@ data SubState = SubState
   , _touchedAccounts :: [Addr]
   , _accessedAddresses :: Set Addr
   , _accessedStorageKeys :: Set (Addr, W256)
-  , _refunds         :: [(Addr, Integer)]
+  , _refunds         :: [(Addr, Word64)]
   -- in principle we should include logs here, but do not for now
   }
   deriving (Show)
@@ -380,10 +381,10 @@ data Block = Block
   , _timestamp   :: Expr EWord
   , _number      :: W256
   , _difficulty  :: W256
-  , _gaslimit    :: W256
+  , _gaslimit    :: Word64
   , _baseFee     :: W256
   , _maxCodeSize :: W256
-  , _schedule    :: FeeSchedule Integer
+  , _schedule    :: FeeSchedule Word64
   } deriving Show
 
 blankState :: FrameState
@@ -575,7 +576,7 @@ exec1 = do
     case bufLength (the state calldata) of
       (Lit calldatasize) -> do
           copyBytesToMemory (the state calldata) (Lit calldatasize) (Lit 0) (Lit 0)
-          executePrecompile self (num $ the state gas) 0 calldatasize 0 0 []
+          executePrecompile self (the state gas) 0 calldatasize 0 0 []
           vmx <- get
           case view (state.stack) vmx of
             (x:_) -> case x of
@@ -759,7 +760,7 @@ exec1 = do
                 fetchAccount (num x) $ \c -> do
                   next
                   assign (state . stack) xs
-                  push (view balance c)
+                  push (num $ view balance c)
             [] ->
               underrun
 
@@ -794,7 +795,7 @@ exec1 = do
               forceConcrete2 (xTo', xSize') "CALLDATACOPY" $
                 \(xTo, xSize) ->
                   burn (g_verylow + g_copy * ceilDiv (num xSize) 32) $
-                    accessUnboundedMemoryRange fees xTo xSize $ do
+                    accessMemoryRange fees xTo xSize $ do
                       next
                       assign (state . stack) xs
                       copyBytesToMemory (the state calldata) xSize' xFrom xTo'
@@ -811,11 +812,16 @@ exec1 = do
             (memOffset' : codeOffset : n' : xs) ->
               forceConcrete2 (memOffset', n') "CODECOPY" $
                 \(memOffset,n) -> do
-                  burn (g_verylow + g_copy * ceilDiv (num n) 32) $
-                    accessUnboundedMemoryRange fees memOffset n $ do
-                      next
-                      assign (state . stack) xs
-                      copyBytesToMemory (toBuf $ the state code) n' codeOffset memOffset'
+                  case toWord64 n of
+                    Nothing -> vmError IllegalOverflow
+                    Just n'' ->
+                      if n'' <= ( (maxBound :: Word64) - g_verylow ) `div` g_copy * 32 then
+                        burn (g_verylow + g_copy * ceilDiv (num n) 32) $
+                          accessMemoryRange fees memOffset n $ do
+                            next
+                            assign (state . stack) xs
+                            copyBytesToMemory (toBuf $ the state code) n' codeOffset memOffset'
+                      else vmError IllegalOverflow
             _ -> underrun
 
         -- op: GASPRICE
@@ -857,7 +863,7 @@ exec1 = do
                   acc <- accessAccountForGas (num extAccount)
                   let cost = if acc then g_warm_storage_read else g_cold_account_access
                   burn (cost + g_copy * ceilDiv (num codeSize) 32) $
-                    accessUnboundedMemoryRange fees memOffset codeSize $
+                    accessMemoryRange fees memOffset codeSize $
                       fetchAccount (num extAccount) $ \c -> do
                         next
                         assign (state . stack) xs
@@ -875,7 +881,7 @@ exec1 = do
             (xTo' : xFrom : xSize' :xs) -> forceConcrete2 (xTo', xSize') "RETURNDATACOPY" $
               \(xTo, xSize) ->
                 burn (g_verylow + g_copy * ceilDiv (num xSize) 32) $
-                  accessUnboundedMemoryRange fees xTo xSize $ do
+                  accessMemoryRange fees xTo xSize $ do
                     next
                     assign (state . stack) xs
 
@@ -939,7 +945,7 @@ exec1 = do
         -- op: GASLIMIT
         0x45 ->
           limitStack 1 . burn g_base $
-            next >> push (the block gaslimit)
+            next >> push (num $ the block gaslimit)
 
         -- op: CHAINID
         0x46 ->
@@ -1097,7 +1103,7 @@ exec1 = do
         -- op: GAS
         0x5a ->
           limitStack 1 . burn g_base $
-            next >> push (the state gas - num g_base)
+            next >> push (num (the state gas - g_base))
 
         -- op: JUMPDEST
         0x5b -> burn g_jumpdest next
@@ -1151,7 +1157,7 @@ exec1 = do
              ) -> forceConcrete6 (xGas', xValue', xInOffset', xInSize', xOutOffset', xOutSize') "CALL" $
               \(xGas, xValue, xInOffset, xInSize, xOutOffset, xOutSize) ->
                 (if xValue > 0 then notStatic else id) $
-                  delegateCall this xGas xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
+                  delegateCall this (num xGas) xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
                     zoom state $ do
                       assign callvalue (Lit xValue)
                       assign caller (litAddr self)
@@ -1175,7 +1181,7 @@ exec1 = do
               : xs
               ) -> forceConcrete6 (xGas', xValue', xInOffset', xInSize', xOutOffset', xOutSize') "CALLCODE" $
                 \(xGas, xValue, xInOffset, xInSize, xOutOffset, xOutSize) ->
-                  delegateCall this xGas xTo (litAddr self) xValue xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
+                  delegateCall this (num xGas) xTo (litAddr self) xValue xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
                     zoom state $ do
                       assign callvalue (Lit xValue)
                       assign caller (litAddr self)
@@ -1230,7 +1236,7 @@ exec1 = do
              :xOutSize'
              :xs) -> forceConcrete5 (xGas', xInOffset', xInSize', xOutOffset', xOutSize') "DELEGATECALL" $
               \(xGas, xInOffset, xInSize, xOutOffset, xOutSize) ->
-                delegateCall this xGas xTo (litAddr self) 0 xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
+                delegateCall this (num xGas) xTo (litAddr self) 0 xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
                   touchAccount self
             _ -> underrun
 
@@ -1252,7 +1258,7 @@ exec1 = do
                         newAddr  = create2Address self xSalt initCode
                         (cost, gas') = costOfCreate fees availableGas xSize
                       _ <- accessAccountForGas newAddr
-                      burn (cost - gas') $ create self this (num gas') xValue xs newAddr (ConcreteBuf initCode)
+                      burn (cost - gas') $ create self this gas' xValue xs newAddr (ConcreteBuf initCode)
             _ -> underrun
 
         -- op: STATICCALL
@@ -1266,7 +1272,7 @@ exec1 = do
              :xOutSize'
              :xs) -> forceConcrete5 (xGas', xInOffset', xInSize', xOutOffset', xOutSize') "STATICCALL" $
               \(xGas, xInOffset, xInSize, xOutOffset, xOutSize) -> do
-                delegateCall this xGas xTo xTo 0 xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
+                delegateCall this (num xGas) xTo xTo 0 xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
                   zoom state $ do
                     assign callvalue (Lit 0)
                     assign caller (litAddr self)
@@ -1288,7 +1294,7 @@ exec1 = do
                   funds = view balance this
                   recipientExists = accountExists xTo vm
                   c_new = if not recipientExists && funds /= 0
-                          then num g_selfdestruct_newaccount
+                          then g_selfdestruct_newaccount
                           else 0
               burn (g_selfdestruct + c_new + cost) $ do
                    selfdestruct self
@@ -1322,9 +1328,9 @@ transfer xFrom xTo xValue =
 -- | Checks a *CALL for failure; OOG, too many callframes, memory access etc.
 callChecks
   :: (?op :: Word8)
-  => Contract -> W256 -> Addr -> Addr -> W256 -> W256 -> W256 -> W256 -> W256 -> [Expr EWord]
+  => Contract -> Word64 -> Addr -> Addr -> W256 -> W256 -> W256 -> W256 -> W256 -> [Expr EWord]
    -- continuation with gas available for call
-  -> (Integer -> EVM ())
+  -> (Word64 -> EVM ())
   -> EVM ()
 callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize xs continue = do
   vm <- get
@@ -1335,7 +1341,7 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
       let recipientExists = accountExists xContext vm
       (cost, gas') <- costOfCall fees recipientExists xValue availableGas xGas xTo
       burn (cost - gas') $ do
-        if xValue > view balance this
+        if xValue > num (view balance this)
         then do
           assign (state . stack) (Lit 0 : xs)
           assign (state . returndata) mempty
@@ -1352,7 +1358,7 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
 precompiledContract
   :: (?op :: Word8)
   => Contract
-  -> W256
+  -> Word64
   -> Addr
   -> Addr
   -> W256
@@ -1382,7 +1388,7 @@ precompiledContract this xGas precompileAddr recipient xValue inOffset inSize ou
 executePrecompile
   :: (?op :: Word8)
   => Addr
-  -> Integer -> W256 -> W256 -> W256 -> W256 -> [Expr EWord]
+  -> Word64 -> W256 -> W256 -> W256 -> W256 -> [Expr EWord]
   -> EVM ()
 executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = do
   vm <- get
@@ -1758,9 +1764,9 @@ finalize = do
   let
     gasUsed      = gasLimit - gasRemaining
     cappedRefund = min (quot gasUsed 5) (num sumRefunds)
-    originPay    = (gasRemaining + cappedRefund) * gasPrice
+    originPay    = (num $ gasRemaining + cappedRefund) * gasPrice
 
-    minerPay     = priorityFee * gasUsed
+    minerPay     = priorityFee * (num gasUsed)
 
   modifying (env . contracts)
      (Map.adjust (over balance (+ originPay)) txOrigin)
@@ -1822,20 +1828,16 @@ notStatic continue = do
 -- | Burn gas, failing if insufficient gas is available
 -- We use the `Integer` type to avoid overflows in intermediate
 -- calculations and throw if the value won't fit into a uint64
-burn :: Integer -> EVM () -> EVM ()
-burn n' continue =
-  if n' > (2 :: Integer) ^ (64 :: Integer) - 1
-  then vmError IllegalOverflow
-  else do
-    let n = num n'
-    available <- use (state . gas)
-    if n <= available
-      then do
-        state . gas -= n
-        burned += n
-        continue
-      else
-        vmError (OutOfGas available n)
+burn :: Word64 -> EVM () -> EVM ()
+burn n continue = do
+  available <- use (state . gas)
+  if n <= available
+    then do
+      state . gas -= n
+      burned += n
+      continue
+    else
+      vmError (OutOfGas available n)
 
 --forceConcreteAddr :: SAddr -> (Addr -> EVM ()) -> EVM ()
 --forceConcreteAddr n continue = case maybeLitAddr n of
@@ -1891,12 +1893,12 @@ forceConcreteBuf b msg _ = do
     vmError $ UnexpectedSymbolicArg (view (state . pc) vm) msg [b]
 
 -- * Substate manipulation
-refund :: Integer -> EVM ()
+refund :: Word64 -> EVM ()
 refund n = do
   self <- use (state . contract)
   pushTo (tx . substate . refunds) (self, n)
 
-unRefund :: Integer -> EVM ()
+unRefund :: Word64 -> EVM ()
 unRefund n = do
   self <- use (state . contract)
   refs <- use (tx . substate . refunds)
@@ -2082,7 +2084,7 @@ ethsign sk digest = go 420
 -- note that the continuation is ignored in the precompile case
 delegateCall
   :: (?op :: Word8)
-  => Contract -> W256 -> Expr EWord -> Expr EWord -> W256 -> W256 -> W256 -> W256 -> W256
+  => Contract -> Word64 -> Expr EWord -> Expr EWord -> W256 -> W256 -> W256 -> W256 -> W256
   -> [Expr EWord]
   -> (Addr -> EVM ())
   -> EVM ()
@@ -2156,7 +2158,7 @@ collision c' = case c' of
 
 create :: (?op :: Word8)
   => Addr -> Contract
-  -> W256 -> W256 -> [Expr EWord] -> Addr -> Expr Buf -> EVM ()
+  -> Word64 -> W256 -> [Expr EWord] -> Addr -> Expr Buf -> EVM ()
 create self this xGas' xValue xs newAddr initCode = do
   vm0 <- get
   let xGas = num xGas'
@@ -2429,34 +2431,37 @@ finishFrame how = do
 -- * Memory helpers
 
 accessUnboundedMemoryRange
-  :: FeeSchedule Integer
-  -> W256
-  -> W256
+  :: FeeSchedule Word64
+  -> Word64
+  -> Word64
   -> EVM ()
   -> EVM ()
 accessUnboundedMemoryRange _ _ 0 continue = continue
 accessUnboundedMemoryRange fees f l continue = do
   m0 <- num <$> use (state . memorySize)
   do
-    let m1 = 32 * ceilDiv (max m0 (num f + num l)) 32
+    let m1 = 32 * ceilDiv (max m0 (f + l)) 32
     burn (memoryCost fees m1 - memoryCost fees m0) $ do
-      assign (state . memorySize) (num m1)
+      assign (state . memorySize) m1
       continue
 
 accessMemoryRange
-  :: FeeSchedule Integer
+  :: FeeSchedule Word64
   -> W256
   -> W256
   -> EVM ()
   -> EVM ()
 accessMemoryRange _ _ 0 continue = continue
 accessMemoryRange fees f l continue =
-  if f + l < l
-    then vmError IllegalOverflow
-    else accessUnboundedMemoryRange fees f l continue
+  case (,) <$> toWord64 f <*> toWord64 l of
+    Nothing -> vmError IllegalOverflow
+    Just (f64, l64) ->
+      if f64 + l64 < l64
+        then vmError IllegalOverflow
+        else accessUnboundedMemoryRange fees f64 l64 continue
 
 accessMemoryWord
-  :: FeeSchedule Integer -> W256 -> EVM () -> EVM ()
+  :: FeeSchedule Word64 -> W256 -> EVM () -> EVM ()
 accessMemoryWord fees x = accessMemoryRange fees x 32
 
 copyBytesToMemory
@@ -2533,7 +2538,7 @@ traceTopLog (Log addr bytes topics _) = do
 -- * Stack manipulation
 
 push :: W256 -> EVM ()
-push = pushSym . Lit . num
+push = pushSym . Lit
 
 pushSym :: Expr EWord -> EVM ()
 pushSym x = state . stack %= (x :)
@@ -2541,7 +2546,7 @@ pushSym x = state . stack %= (x :)
 
 stackOp1
   :: (?op :: Word8)
-  => ((Expr EWord) -> Integer)
+  => ((Expr EWord) -> Word64)
   -> ((Expr EWord) -> (Expr EWord))
   -> EVM ()
 stackOp1 cost f =
@@ -2556,7 +2561,7 @@ stackOp1 cost f =
 
 stackOp2
   :: (?op :: Word8)
-  => (((Expr EWord), (Expr EWord)) -> Integer)
+  => (((Expr EWord), (Expr EWord)) -> Word64)
   -> (((Expr EWord), (Expr EWord)) -> (Expr EWord))
   -> EVM ()
 stackOp2 cost f =
@@ -2570,7 +2575,7 @@ stackOp2 cost f =
 
 stackOp3
   :: (?op :: Word8)
-  => (((Expr EWord), (Expr EWord), (Expr EWord)) -> Integer)
+  => (((Expr EWord), (Expr EWord), (Expr EWord)) -> Word64)
   -> (((Expr EWord), (Expr EWord), (Expr EWord)) -> (Expr EWord))
   -> EVM ()
 stackOp3 cost f =
@@ -2810,47 +2815,51 @@ mkCodeOps (RuntimeCode ops) = RegularVector.fromList . toList $ go' 0 (stripByte
 
 -- Gas cost function for CALL, transliterated from the Yellow Paper.
 costOfCall
-  :: FeeSchedule Integer
-  -> Bool -> W256 -> W256 -> W256 -> Addr
-  -> EVM (Integer, Integer)
-costOfCall (FeeSchedule {..}) recipientExists xValue availableGas' xGas' target = do
+  :: FeeSchedule Word64
+  -> Bool -> W256 -> Word64 -> Word64 -> Addr
+  -> EVM (Word64, Word64)
+costOfCall (FeeSchedule {..}) recipientExists xValue availableGas xGas target = do
   acc <- accessAccountForGas target
   let call_base_gas = if acc then g_warm_storage_read else g_cold_account_access
-      availableGas = num availableGas'
-      xGas = num xGas'
       c_new = if not recipientExists && xValue /= 0
-            then num g_newaccount
+            then g_newaccount
             else 0
       c_xfer = if xValue /= 0  then num g_callvalue else 0
-      c_extra = num call_base_gas + c_xfer + c_new
+      c_extra = call_base_gas + c_xfer + c_new
       c_gascap =  if availableGas >= c_extra
                   then min xGas (allButOne64th (availableGas - c_extra))
                   else xGas
-      c_callgas = if xValue /= 0  then c_gascap + num g_callstipend else c_gascap
+      c_callgas = if xValue /= 0 then c_gascap + g_callstipend else c_gascap
   return (c_gascap + c_extra, c_callgas)
 
 -- Gas cost of create, including hash cost if needed
 costOfCreate
-  :: FeeSchedule Integer
-  -> W256 -> W256 -> (Integer, Integer)
-costOfCreate (FeeSchedule {..}) availableGas' hashSize =
+  :: FeeSchedule Word64
+  -> Word64 -> W256 -> (Word64, Word64)
+costOfCreate (FeeSchedule {..}) availableGas hashSize =
   (createCost + initGas, initGas)
   where
-    availableGas = num availableGas'
     createCost = g_create + hashCost
     hashCost   = g_sha3word * ceilDiv (num hashSize) 32
     initGas    = allButOne64th (availableGas - createCost)
 
-concreteModexpGasFee :: ByteString -> Integer
-concreteModexpGasFee input = max 200 ((multiplicationComplexity * iterCount) `div` 3)
+concreteModexpGasFee :: ByteString -> Word64
+concreteModexpGasFee input =
+  if lenb < num (maxBound :: Word32) &&
+     (lene < num (maxBound :: Word32) || (lenb == 0 && lenm == 0)) &&
+     lenm < num (maxBound :: Word64)
+  then
+    max 200 ((multiplicationComplexity * iterCount) `div` 3)
+  else
+    maxBound -- TODO: this is not 100% correct, return Nothing on overflow
   where (lenb, lene, lenm) = parseModexpLength input
         ez = isZero (96 + lenb) lene input
         e' = word $ LS.toStrict $
           lazySlice (96 + lenb) (min 32 lene) input
-        nwords :: Integer
+        nwords :: Word64
         nwords = ceilDiv (num $ max lenb lenm) 8
         multiplicationComplexity = nwords * nwords
-        iterCount' :: Integer
+        iterCount' :: Word64
         iterCount' | lene <= 32 && ez = 0
                    | lene <= 32 = num (log2 e')
                    | e' == 0 = 8 * (num lene - 32)
@@ -2858,11 +2867,11 @@ concreteModexpGasFee input = max 200 ((multiplicationComplexity * iterCount) `di
         iterCount = max iterCount' 1
 
 -- Gas cost of precompiles
-costOfPrecompile :: FeeSchedule Integer -> Addr -> Expr Buf -> Integer
+costOfPrecompile :: FeeSchedule Word64 -> Addr -> Expr Buf -> Word64
 costOfPrecompile (FeeSchedule {..}) precompileAddr input =
   let errorDynamicSize = error "precompile input cannot have a dynamic size"
       inputLen = case input of
-                   ConcreteBuf bs -> BS.length bs
+                   ConcreteBuf bs -> fromIntegral $ BS.length bs
                    AbstractBuf _ -> errorDynamicSize
                    buf -> case bufLength buf of
                             Lit l -> num l -- TODO: overflow
@@ -2885,7 +2894,7 @@ costOfPrecompile (FeeSchedule {..}) precompileAddr input =
     -- ECMUL
     0x7 -> g_ecmul
     -- ECPAIRING
-    0x8 -> num $ (inputLen `div` 192) * (num g_pairing_point) + (num g_pairing_base)
+    0x8 -> (inputLen `div` 192) * g_pairing_point + g_pairing_base
     -- BLAKE2
     0x9 -> case input of
              ConcreteBuf i -> g_fround * (num $ asInteger $ lazySlice 0 4 i)
@@ -2893,7 +2902,7 @@ costOfPrecompile (FeeSchedule {..}) precompileAddr input =
     _ -> error ("unimplemented precompiled contract " ++ show precompileAddr)
 
 -- Gas cost of memory expansion
-memoryCost :: FeeSchedule Integer -> Integer -> Integer
+memoryCost :: FeeSchedule Word64 -> Word64 -> Word64
 memoryCost FeeSchedule{..} byteCount =
   let
     wordCount = ceilDiv byteCount 32
@@ -2941,6 +2950,11 @@ codeloc = do
       loc = view (state . pc) vm
   pure (self, loc)
 
+toWord64 :: W256 -> Maybe Word64
+toWord64 n =
+  if n <= num (maxBound :: Word64)
+    then let (W256 (Word256 _ (Word128 _ n'))) = n in Just n'
+    else Nothing
 
 -- * Emacs setup
 

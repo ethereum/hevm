@@ -45,7 +45,7 @@ import Data.Foldable      (toList)
 import Data.Map           (Map)
 import Data.Maybe         (fromMaybe, catMaybes, fromJust, isJust, fromMaybe, mapMaybe, isNothing)
 import Data.Text          (isPrefixOf, stripSuffix, intercalate, Text, pack, unpack)
-import Data.Word          (Word8, Word32)
+import Data.Word          (Word8, Word32, Word64)
 import Data.Text.Encoding (encodeUtf8)
 import System.Environment (lookupEnv)
 import System.IO          (hFlush, stdout)
@@ -91,25 +91,25 @@ data TestVMParams = TestVMParams
   { testAddress       :: Addr
   , testCaller        :: Addr
   , testOrigin        :: Addr
-  , testGasCreate     :: W256
-  , testGasCall       :: W256
+  , testGasCreate     :: Word64
+  , testGasCall       :: Word64
   , testBaseFee       :: W256
   , testPriorityFee   :: W256
   , testBalanceCreate :: W256
   , testCoinbase      :: Addr
   , testNumber        :: W256
   , testTimestamp     :: W256
-  , testGaslimit      :: W256
+  , testGaslimit      :: Word64
   , testGasprice      :: W256
   , testMaxCodeSize   :: W256
   , testDifficulty    :: W256
   , testChainId       :: W256
   }
 
-defaultGasForCreating :: W256
+defaultGasForCreating :: Word64
 defaultGasForCreating = 0xffffffffffff
 
-defaultGasForInvoking :: W256
+defaultGasForInvoking :: Word64
 defaultGasForInvoking = 0xffffffffffff
 
 defaultBalanceForTestContract :: W256
@@ -907,7 +907,7 @@ makeTxCall TestVMParams{..} (cd, cdProps) = do
   assign (state . gas) testGasCall
   origin' <- fromMaybe (initialContract (RuntimeCode mempty)) <$> use (env . contracts . at testOrigin)
   let originBal = view balance origin'
-  when (originBal < testGasprice * testGasCall) $ error "insufficient balance for gas cost"
+  when (originBal < testGasprice * (num testGasCall)) $ error "insufficient balance for gas cost"
   vm <- get
   put $ initTx vm
 
