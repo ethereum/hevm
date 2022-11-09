@@ -28,12 +28,6 @@ data BuilderState = BuilderState
 type BufEnv = Map (GVar Buf) (Expr Buf)
 type StoreEnv = Map (GVar Storage) (Expr Storage)
 
-data Prog a = Prog
-  { code       :: Expr a
-  , bufEnv     :: BufEnv
-  , storeEnv   :: StoreEnv
-  }
-
 initState :: BuilderState
 initState = BuilderState
   { bufs = (0, Map.empty)
@@ -89,13 +83,10 @@ go = \case
 eliminateExpr' :: Expr a -> State BuilderState (Expr a)
 eliminateExpr' e = mapExprM go e
 
-eliminateExpr :: Expr a -> Prog a
+eliminateExpr :: Expr a -> (Expr a, BufEnv, StoreEnv)
 eliminateExpr e =
   let (e', st) = runState (eliminateExpr' e) initState in
-  Prog { code = e'
-       , bufEnv = invertKeyVal $ snd (bufs st)
-       , storeEnv = invertKeyVal $ snd (stores st)
-       }
+  (e', invertKeyVal (snd (bufs st)), invertKeyVal (snd (stores st)))
   where
     invertKeyVal =  Map.fromList . map (\(x, y) -> (Id y, x)) . Map.toList
 
@@ -111,7 +102,7 @@ eliminateFlat' leaves = flip mapM leaves $ (\(p, e) -> do
 
 eliminateFlat :: [([Prop], Expr End)] -> ([([Prop], Expr End)], BufEnv, StoreEnv)
 eliminateFlat leaves =
-    let (leaves', st) = runState (eliminateFlat' leaves) initState in
-    (leaves',  invertKeyVal (snd (bufs st)),  invertKeyVal (snd (stores st)))
+  let (leaves', st) = runState (eliminateFlat' leaves) initState in
+  (leaves',  invertKeyVal (snd (bufs st)),  invertKeyVal (snd (stores st)))
   where
     invertKeyVal =  Map.fromList . map (\(x, y) -> (Id y, x)) . Map.toList
