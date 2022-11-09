@@ -115,7 +115,7 @@ assertProps ps bufs stores =
   where
     allBufs = fmap referencedBufs' ps <> fmap referencedBufs bufVals <> fmap referencedBufs storeVals
     allVars = fmap referencedVars' ps <> fmap referencedVars bufVals <> fmap referencedVars storeVals
-    frameCtx = fmap referencedFrameContext' ps <> fmap referencedFrameContext bufVals <> fmap referencedVars storeVals
+    frameCtx = fmap referencedFrameContext' ps <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
 
     bufVals = Map.elems bufs
     storeVals = Map.elems stores
