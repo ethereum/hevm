@@ -490,16 +490,16 @@ tests = testGroup "hevm"
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
-              function fun(uint256 val, uint8 size) external pure {
-                require(size <= 31);
-                require(size >= 0);
-                require(val < (1 <<(size*8)));
-                require(val & (1 <<(size*8-1)) != 0); // MSbit set, i.e. negative
+              function fun(uint256 val, uint8 b) external pure {
+                require(b <= 31);
+                require(b >= 0);
+                require(val < (1 <<(b*8)));
+                require(val & (1 <<(b*8-1)) != 0); // MSbit set, i.e. negative
                 uint256 out;
                 assembly {
-                  out := signextend(size, val)
+                  out := signextend(b, val)
                 }
-                if (size == 31) assert(out == val);
+                if (b == 31) assert(out == val);
                 else assert(out > val);
                 assert(out & (1<<254) != 0); // MSbit set, i.e. negative
               }
@@ -512,12 +512,12 @@ tests = testGroup "hevm"
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
-              function fun(uint256 val, uint8 size) external pure {
-                require(val < (1 <<(size*8)));
-                require(val & (1 <<(size*8-1)) == 0); // MSbit not set, i.e. positive
+              function fun(uint256 val, uint8 b) external pure {
+                require(val < (1 <<(b*8)));
+                require(val & (1 <<(b*8-1)) == 0); // MSbit not set, i.e. positive
                 uint256 out;
                 assembly {
-                  out := signextend(size, val)
+                  out := signextend(b, val)
                 }
                 assert (out == val);
               }
@@ -530,12 +530,12 @@ tests = testGroup "hevm"
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
-              function fun(uint256 val, uint8 size) external pure {
-                require(size == 0); // 1-byte
+              function fun(uint256 val, uint8 b) external pure {
+                require(b == 0); // 1-byte
                 require(val == 514); // but we set higher bits
                 uint256 out;
                 assembly {
-                  out := signextend(size, val)
+                  out := signextend(b, val)
                 }
                 assert (out == 2); // chopped
               }
@@ -544,16 +544,16 @@ tests = testGroup "hevm"
         [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint8)", [AbiUIntType 256, AbiUIntType 8])) []
         putStrLn "signextend works as expected"
       ,
-      -- when size is too large, value is unchanged
-      testCase "opcode-signextend-pos-size-toolarge" $ do
+      -- when b is too large, value is unchanged
+      testCase "opcode-signextend-pos-b-toolarge" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
-              function fun(uint256 val, uint8 size) external pure {
-                require(size >= 31);
+              function fun(uint256 val, uint8 b) external pure {
+                require(b >= 31);
                 uint256 out;
                 assembly {
-                  out := signextend(size, val)
+                  out := signextend(b, val)
                 }
                 assert (out == val);
               }
