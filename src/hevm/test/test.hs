@@ -491,21 +491,21 @@ tests = testGroup "hevm"
             [i|
             contract MyContract {
               function fun(uint256 val, uint8 size) external pure {
-                require(size <= 32);
-                require(size >= 1);
+                require(size <= 31);
+                require(size >= 0);
                 require(val < (1 <<(size*8)));
                 require(val & (1 <<(size*8-1)) != 0); // MSbit set, i.e. negative
                 uint256 out;
                 assembly {
                   out := signextend(size, val)
                 }
-                if (size == 32) assert(out == val);
+                if (size == 31) assert(out == val);
                 else assert(out > val);
-                assert(out & (1<<255) != 0); // MSbit set, i.e. negative
+                assert(out & (1<<254) != 0); // MSbit set, i.e. negative
               }
             }
             |]
-        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint8)", [AbiUIntType 256, AbiUIntType 8])) []
+        [Qed _]  <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) []
         putStrLn "signextend works as expected"
       ,
      testCase "opcode-signextend-pos-nochop" $ do
@@ -513,8 +513,6 @@ tests = testGroup "hevm"
             [i|
             contract MyContract {
               function fun(uint256 val, uint8 size) external pure {
-                require(size <= 32);
-                require(size >= 1);
                 require(val < (1 <<(size*8)));
                 require(val & (1 <<(size*8-1)) == 0); // MSbit not set, i.e. positive
                 uint256 out;
@@ -533,13 +531,13 @@ tests = testGroup "hevm"
             [i|
             contract MyContract {
               function fun(uint256 val, uint8 size) external pure {
-                require(size == 1);
-                require(val == 514);
+                require(size == 0); // 1-byte
+                require(val == 514); // but we set higher bits
                 uint256 out;
                 assembly {
                   out := signextend(size, val)
                 }
-                assert (out == 2);
+                assert (out == 2); // chopped
               }
             }
             |]
@@ -552,7 +550,7 @@ tests = testGroup "hevm"
             [i|
             contract MyContract {
               function fun(uint256 val, uint8 size) external pure {
-                require(size >= 32);
+                require(size >= 31);
                 uint256 out;
                 assembly {
                   out := signextend(size, val)
