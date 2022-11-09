@@ -91,6 +91,7 @@ eliminateExpr e =
     invertKeyVal =  Map.fromList . map (\(x, y) -> (Id y, x)) . Map.toList
 
 
+-- | Common subexpression elimination pass for Prop
 eliminateProp' :: Prop -> State BuilderState Prop
 eliminateProp' prop = mapPropM go prop
 
@@ -100,6 +101,7 @@ eliminateFlat' leaves = flip mapM leaves $ (\(p, e) -> do
                                                e' <- eliminateExpr' e
                                                pure $ (p', e'))
 
+-- | Common subexpression elimination pass for flattened Expr programs
 eliminateFlat :: [([Prop], Expr End)] -> ([([Prop], Expr End)], BufEnv, StoreEnv)
 eliminateFlat leaves =
   let (leaves', st) = runState (eliminateFlat' leaves) initState in

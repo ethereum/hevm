@@ -578,8 +578,8 @@ verify solvers preState maxIter askSmtIters rpcinfo maybepost = do
           \(_, leaf) -> case evalProp (post preState leaf) of
             PBool True -> False
             _ -> True
-        -- Add extra assertions to preconditions
         assumes = view constraints preState
+        -- Add precondition and postcondition assertions to each branch
         canViolateExt = fmap (\(pcs, leaf) -> (PNeg (post preState leaf) : assumes <> pcs, leaf)) canViolate
         -- Common subexpression elimination
         (canViolateElim, bufEnv, storeEnv) = eliminateFlat canViolateExt
