@@ -255,7 +255,7 @@ prelude =  (flip SMT2) mempty $ fmap (T.drop 2) . T.lines $ [i|
   (declare-const basefee Word)
 
   ; macros
-  (define-fun signext ( (sz (_ BitVec 256)) (val (_ BitVec 256))) (_ BitVec 256)
+  (define-fun signext ( (sz Word) (val Word)) Word
     (ite (= sz (_ bv0  256)) ((_ sign_extend 248) ((_ extract 7    0) val))
     (ite (= sz (_ bv1  256)) ((_ sign_extend 240) ((_ extract 15   0) val))
     (ite (= sz (_ bv2  256)) ((_ sign_extend 232) ((_ extract 23   0) val))
