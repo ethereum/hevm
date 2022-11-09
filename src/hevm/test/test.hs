@@ -1057,7 +1057,7 @@ tests = testGroup "hevm"
           [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
           putStrLn "expected counterexample found"
         ,
-        expectFail $ testCase "multiple contracts" $ do
+        testCase "multiple-contracts" $ do
           let code' =
                 [i|
                   contract C {

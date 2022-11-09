@@ -123,6 +123,8 @@ prelude =  (flip SMT2) mempty $ fmap (T.drop 2) . T.lines $ [i|
   (define-sort Byte () (_ BitVec 8))
   (define-sort Word () (_ BitVec 256))
   (define-sort Buf () (Array Word Byte))
+
+  ; address -> slot -> value
   (define-sort Storage () (Array Word (Array Word Word)))
 
   ; hash functions
