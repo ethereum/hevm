@@ -94,7 +94,7 @@ library
     EVM.Stepper,
     EVM.StorageLayout,
     EVM.SymExec,
-    EVM.Traversals
+    EVM.Traversals,
     EVM.CSE,
     EVM.Transaction,
     EVM.TTY,
