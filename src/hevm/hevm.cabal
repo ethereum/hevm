@@ -25,7 +25,10 @@ build-type:
 data-files:
   run-blockchain-tests
   run-consensus-tests
+extra-source-files:
+  CHANGELOG.md
   test/contracts/lib/ds-test.sol
+  test/contracts/lib/erc20.sol
   test/contracts/pass/trivial.sol
   test/contracts/pass/abstract.sol
   test/contracts/pass/cheatCodes.sol
@@ -37,8 +40,6 @@ data-files:
   test/contracts/fail/cheatCodes.sol
   test/contracts/fail/dsProveFail.sol
   test/contracts/fail/invariantFail.sol
-extra-source-files:
-  CHANGELOG.md
 
 common shared
   default-extensions:
