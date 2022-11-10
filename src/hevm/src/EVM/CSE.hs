@@ -5,7 +5,7 @@
     Description: Common subexpression elimination for Expr ast
 -}
 
-module EVM.CSE where
+module EVM.CSE (BufEnv, StoreEnv, eliminateExpr, eliminateFlat) where
 
 import Prelude hiding (Word, LT, GT)
 
