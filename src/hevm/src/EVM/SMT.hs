@@ -293,6 +293,39 @@ prelude =  (flip SMT2) mempty $ fmap (T.drop 2) . T.lines $ [i|
   (declare-const chainid Word)
   (declare-const basefee Word)
 
+  ; macros
+  (define-fun signext ( (b Word) (val Word)) Word
+    (ite (= b (_ bv0  256)) ((_ sign_extend 248) ((_ extract 7    0) val))
+    (ite (= b (_ bv1  256)) ((_ sign_extend 240) ((_ extract 15   0) val))
+    (ite (= b (_ bv2  256)) ((_ sign_extend 232) ((_ extract 23   0) val))
+    (ite (= b (_ bv3  256)) ((_ sign_extend 224) ((_ extract 31   0) val))
+    (ite (= b (_ bv4  256)) ((_ sign_extend 216) ((_ extract 39   0) val))
+    (ite (= b (_ bv5  256)) ((_ sign_extend 208) ((_ extract 47   0) val))
+    (ite (= b (_ bv6  256)) ((_ sign_extend 200) ((_ extract 55   0) val))
+    (ite (= b (_ bv7  256)) ((_ sign_extend 192) ((_ extract 63   0) val))
+    (ite (= b (_ bv8  256)) ((_ sign_extend 184) ((_ extract 71   0) val))
+    (ite (= b (_ bv9  256)) ((_ sign_extend 176) ((_ extract 79   0) val))
+    (ite (= b (_ bv10 256)) ((_ sign_extend 168) ((_ extract 87   0) val))
+    (ite (= b (_ bv11 256)) ((_ sign_extend 160) ((_ extract 95   0) val))
+    (ite (= b (_ bv12 256)) ((_ sign_extend 152) ((_ extract 103  0) val))
+    (ite (= b (_ bv13 256)) ((_ sign_extend 144) ((_ extract 111  0) val))
+    (ite (= b (_ bv14 256)) ((_ sign_extend 136) ((_ extract 119  0) val))
+    (ite (= b (_ bv15 256)) ((_ sign_extend 128) ((_ extract 127  0) val))
+    (ite (= b (_ bv16 256)) ((_ sign_extend 120) ((_ extract 135  0) val))
+    (ite (= b (_ bv17 256)) ((_ sign_extend 112) ((_ extract 143  0) val))
+    (ite (= b (_ bv18 256)) ((_ sign_extend 104) ((_ extract 151  0) val))
+    (ite (= b (_ bv19 256)) ((_ sign_extend 96 ) ((_ extract 159  0) val))
+    (ite (= b (_ bv20 256)) ((_ sign_extend 88 ) ((_ extract 167  0) val))
+    (ite (= b (_ bv21 256)) ((_ sign_extend 80 ) ((_ extract 175  0) val))
+    (ite (= b (_ bv22 256)) ((_ sign_extend 72 ) ((_ extract 183  0) val))
+    (ite (= b (_ bv23 256)) ((_ sign_extend 64 ) ((_ extract 191  0) val))
+    (ite (= b (_ bv24 256)) ((_ sign_extend 56 ) ((_ extract 199  0) val))
+    (ite (= b (_ bv25 256)) ((_ sign_extend 48 ) ((_ extract 207  0) val))
+    (ite (= b (_ bv26 256)) ((_ sign_extend 40 ) ((_ extract 215  0) val))
+    (ite (= b (_ bv27 256)) ((_ sign_extend 32 ) ((_ extract 223  0) val))
+    (ite (= b (_ bv28 256)) ((_ sign_extend 24 ) ((_ extract 231  0) val))
+    (ite (= b (_ bv29 256)) ((_ sign_extend 16 ) ((_ extract 239  0) val))
+    (ite (= b (_ bv30 256)) ((_ sign_extend 8  ) ((_ extract 247  0) val)) val))))))))))))))))))))))))))))))))
   ; storage
   (declare-const abstractStore Storage)
   (define-const emptyStore Storage ((as const Storage) ((as const (Array (_ BitVec 256) (_ BitVec 256))) #x0000000000000000000000000000000000000000000000000000000000000000)))
@@ -454,6 +487,7 @@ exprToSMT = \case
   SHL a b -> op2 "bvshl" b a
   SHR a b -> op2 "bvlshr" b a
   SAR a b -> op2 "bvashr" b a
+  SEx a b -> op2 "signext" a b
   EqByte a b -> do
     cond <- op2 "=" a b
     pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
