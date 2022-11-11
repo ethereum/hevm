@@ -31,23 +31,6 @@ foldProp f acc p = acc <> (go p)
 
 -- | Recursively folds a given function over a given expression
 -- Recursion schemes do this & a lot more, but defining them over GADT's isn't worth the hassle
-foldProp :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Prop -> b
-foldProp f acc p = acc <> (go p)
-  where
-    go :: Prop -> b
-    go = \case
-      PBool _ -> mempty
-      PEq a b -> (foldExpr f mempty a) <> (foldExpr f mempty b)
-      PLT a b -> foldExpr f mempty a <> foldExpr f mempty b
-      PGT a b -> foldExpr f mempty a <> foldExpr f mempty b
-      PGEq a b -> foldExpr f mempty a <> foldExpr f mempty b
-      PLEq a b -> foldExpr f mempty a <> foldExpr f mempty b
-      PNeg a -> go a
-      PAnd a b -> go a <> go b
-      POr a b -> go a <> go b
-
--- | Recursively folds a given function over a given expression
--- Recursion schemes do this & a lot more, but defining them over GADT's isn't worth the hassle
 foldExpr :: forall b c . Monoid b => (forall a . Expr a -> b) -> b -> Expr c -> b
 foldExpr f acc expr = acc <> (go expr)
   where
@@ -705,13 +688,11 @@ mapExprM f expr = case expr of
 
   -- logs
 
-  EmptyLog -> f EmptyLog
-  Log a b c d -> do
+  LogEntry a b c -> do
     a' <- mapExprM f a
     b' <- mapExprM f b
     c' <- mapM (mapExprM f) c
-    d' <- mapExprM f d
-    f (Log a' b' c' d')
+    f (LogEntry a' b' c')
 
   -- Contract Creation
 
@@ -720,7 +701,7 @@ mapExprM f expr = case expr of
     b' <- mapExprM f b
     c' <- mapExprM f c
     d' <- mapExprM f d
-    e' <- mapExprM f e
+    e' <- mapM (mapExprM f) e
     g' <- mapExprM f g
     f (Create a' b' c' d' e' g')
   Create2 a b c d e g h -> do
@@ -729,7 +710,7 @@ mapExprM f expr = case expr of
     c' <- mapExprM f c
     d' <- mapExprM f d
     e' <- mapExprM f e
-    g' <- mapExprM f g
+    g' <- mapM (mapExprM f) g
     h' <- mapExprM f h
     f (Create2 a' b' c' d' e' g' h')
 
@@ -743,7 +724,7 @@ mapExprM f expr = case expr of
     e' <- mapExprM f e
     g' <- mapExprM f g
     h' <- mapExprM f h
-    i' <- mapExprM f i
+    i' <- mapM (mapExprM f) i
     j' <- mapExprM f j
     f (Call a' b' c' d' e' g' h' i' j')
   CallCode a b c d e g h i j -> do
@@ -754,7 +735,7 @@ mapExprM f expr = case expr of
     e' <- mapExprM f e
     g' <- mapExprM f g
     h' <- mapExprM f h
-    i' <- mapExprM f i
+    i' <- mapM (mapExprM f) i
     j' <- mapExprM f j
     f (CallCode a' b' c' d' e' g' h' i' j')
   DelegeateCall a b c d e g h i j -> do
@@ -765,7 +746,7 @@ mapExprM f expr = case expr of
     e' <- mapExprM f e
     g' <- mapExprM f g
     h' <- mapExprM f h
-    i' <- mapExprM f i
+    i' <- mapM (mapExprM f) i
     j' <- mapExprM f j
     f (DelegeateCall a' b' c' d' e' g' h' i' j')
 
