@@ -467,6 +467,30 @@ tests = testGroup "hevm"
         [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256)", [AbiIntType 256])) []
         putStrLn "Require works as expected"
      ,
+        -- CopySlice check
+        -- checks 9e734b9da90e3e0765128b1f20ce1371f3a66085 (bufLength + copySlice was off by 1)
+        -- checks 9af114613075a2cd350633940475f8b6699064de (readByte + CopySlice had src/dest mixed up)
+        testCase "copyslice-check" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function checkval(uint8 a) public {
+                bytes memory data = new bytes(5);
+                for(uint i = 0; i < 5; i++) data[i] = bytes1(a);
+                bytes memory ret = new bytes(data.length);
+                assembly {
+                    let len := mload(data)
+                    if iszero(call(0xff, 0x04, 0, add(data, 0x20), len, add(ret,0x20), len)) {
+                        invalid()
+                    }
+                }
+                for(uint i = 0; i < 5; i++) assert(ret[i] == data[i]);
+              }
+            }
+            |]
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("checkval(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+     ,
      -- TODO look at tests here for SAR: https://github.com/dapphub/dapptools/blob/01ef8ea418c3fe49089a44d56013d8fcc34a1ec2/src/dapp-tests/pass/constantinople.sol#L250
      testCase "opcode-sar-neg" $ do
         Just c <- solcRuntime "MyContract"
