@@ -320,7 +320,7 @@ verifyContract solvers theCode signature' concreteArgs storagemodel maybepre may
 verifyContract' :: SolverGroup -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO [VerifyResult]
 verifyContract' solvers theCode signature' concreteArgs opts storagemodel maybepre maybepost = do
   let preState = abstractVM signature' concreteArgs theCode maybepre storagemodel
-  verify solvers preState opts Nothing maybepost
+  verify solvers opts preState Nothing maybepost
 
 pruneDeadPaths :: [VM] -> [VM]
 pruneDeadPaths =
@@ -585,8 +585,8 @@ if' True x = x
 if' False x = pure ()
 
 -- | Symbolically execute the VM and check all endstates against the postcondition, if available.
-verify :: SolverGroup -> VM -> VeriOpts -> Maybe (Fetch.BlockNumber, Text) -> Maybe Postcondition -> IO [VerifyResult]
-verify solvers preState opts rpcinfo maybepost = do
+verify :: SolverGroup -> VeriOpts -> VM -> Maybe (Fetch.BlockNumber, Text) -> Maybe Postcondition -> IO [VerifyResult]
+verify solvers opts preState rpcinfo maybepost = do
   putStrLn "Exploring contract"
   exprInter <- evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) preState
   expr <- if (simp opts) then (pure $ simplify exprInter) else pure exprInter

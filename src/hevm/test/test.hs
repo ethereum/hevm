@@ -491,7 +491,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert' s defaultPanicCodes c (Just ("checkval(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] VeriOpts {simp = False, debug = True, maxIter = Nothing, askSmtIters = Nothing}
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert' s defaultPanicCodes c (Just ("checkval(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] VeriOpts {simp = False, debug = False, maxIter = Nothing, askSmtIters = Nothing}
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
      -- TODO look at tests here for SAR: https://github.com/dapphub/dapptools/blob/01ef8ea418c3fe49089a44d56013d8fcc34a1ec2/src/dapp-tests/pass/constantinople.sol#L250
@@ -1188,7 +1188,7 @@ tests = testGroup "hevm"
                   -- NOTE: this used to as follows, but there is no _storage field in Contract record
                   -- (Map.insert aAddr (initialContract (RuntimeCode $ ConcreteBuffer a) &
                   --                     set EVM.storage (EVM.Symbolic [] store)))
-            verify s vm defaultVeriOpts Nothing (Just $ checkAssertions defaultPanicCodes)
+            verify s defaultVeriOpts vm Nothing (Just $ checkAssertions defaultPanicCodes)
           putStrLn "found counterexample:"
         ,
         expectFail $ testCase "calling unique contracts (read from storage)" $ do
@@ -1228,7 +1228,7 @@ tests = testGroup "hevm"
         ignoreTest $ testCase "safemath distributivity (yul)" $ do
           let yulsafeDistributivity = hex "6355a79a6260003560e01c14156016576015601f565b5b60006000fd60a1565b603d602d604435600435607c565b6039602435600435607c565b605d565b6052604b604435602435605d565b600435607c565b141515605a57fe5b5b565b6000828201821115151560705760006000fd5b82820190505b92915050565b6000818384048302146000841417151560955760006000fd5b82820290505b92915050565b"
           let vm =  abstractVM (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] yulsafeDistributivity Nothing SymbolicS
-          [Qed _] <-  withSolvers Z3 1 $ \s -> verify s vm defaultVeriOpts Nothing (Just $ checkAssertions defaultPanicCodes)
+          [Qed _] <-  withSolvers Z3 1 $ \s -> verify s defaultVeriOpts vm Nothing (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
         ,
         testCase "safemath distributivity (sol)" $ do
