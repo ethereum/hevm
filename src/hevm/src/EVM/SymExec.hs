@@ -45,6 +45,17 @@ isQed :: ProofResult a b c -> Bool
 isQed (Qed _) = True
 isQed _ = False
 
+data VeriOpts = VeriOpts
+  { simp :: Bool
+  , debug :: Bool
+  , maxIter :: Maybe Integer
+  , askSmtIters :: Maybe Integer
+  }
+  deriving (Eq, Show)
+
+defaultVeriOpts :: VeriOpts
+defaultVeriOpts = VeriOpts { simp = True, debug = False, maxIter = Nothing, askSmtIters = Nothing }
+
 extractCex :: VerifyResult -> Maybe (Expr End, SMTCex)
 extractCex (Cex c) = Just c
 extractCex _ = Nothing
@@ -261,7 +272,10 @@ type Precondition = VM -> Prop
 type Postcondition = VM -> Expr End -> Prop
 
 checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> IO [VerifyResult]
-checkAssert solvers errs c signature' concreteArgs = verifyContract solvers c signature' concreteArgs SymbolicS Nothing (Just $ checkAssertions errs)
+checkAssert a b c d e  = checkAssert' a b c d e defaultVeriOpts
+
+checkAssert' :: SolverGroup -> [Word256] -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> IO [VerifyResult]
+checkAssert' solvers errs c signature' concreteArgs opts = verifyContract' solvers c signature' concreteArgs opts SymbolicS Nothing (Just $ checkAssertions errs)
 
 {- |Checks if an assertion violation has been encountered
 
@@ -300,9 +314,13 @@ panicMsg :: Word256 -> ByteString
 panicMsg err = (selector "Panic(uint256)") <> (encodeAbiValue $ AbiUInt 256 err)
 
 verifyContract :: SolverGroup -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO [VerifyResult]
-verifyContract solvers theCode signature' concreteArgs storagemodel maybepre maybepost = do
+verifyContract solvers theCode signature' concreteArgs storagemodel maybepre maybepost =
+  verifyContract' solvers theCode signature' concreteArgs defaultVeriOpts storagemodel maybepre maybepost
+
+verifyContract' :: SolverGroup -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO [VerifyResult]
+verifyContract' solvers theCode signature' concreteArgs opts storagemodel maybepre maybepost = do
   let preState = abstractVM signature' concreteArgs theCode maybepre storagemodel
-  verify solvers preState Nothing Nothing Nothing maybepost
+  verify solvers preState opts Nothing maybepost
 
 pruneDeadPaths :: [VM] -> [VM]
 pruneDeadPaths =
@@ -562,20 +580,20 @@ evalProp = \case
                    _ -> o
   o -> o
 
+if' :: Bool -> IO () -> IO ()
+if' True x = x
+if' False x = pure ()
 
 -- | Symbolically execute the VM and check all endstates against the postcondition, if available.
-verify :: SolverGroup -> VM -> Maybe Integer -> Maybe Integer -> Maybe (Fetch.BlockNumber, Text) -> Maybe Postcondition -> IO [VerifyResult]
-verify solvers preState maxIter askSmtIters rpcinfo maybepost = do
+verify :: SolverGroup -> VM -> VeriOpts -> Maybe (Fetch.BlockNumber, Text) -> Maybe Postcondition -> IO [VerifyResult]
+verify solvers preState opts rpcinfo maybepost = do
   putStrLn "Exploring contract"
-  expr <- simplify <$> evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) preState
-  putStrLn " --- expr BEGIN --- "
-  putStrLn $ formatExpr expr
-  putStrLn "--- expr END --- "
-  putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
+  exprInter <- evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) preState
+  expr <- if (simp opts) then (pure $ simplify exprInter) else pure exprInter
+  if' (debug opts) $ putStrLn $ " --- expr BEGIN --- " <> (formatExpr expr) <> "--- expr END --- "
+  if' (debug opts) $ putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
   let leaves = flattenExpr expr
-  putStrLn " --- leaves BEGIN --- "
-  print leaves
-  putStrLn "--- leaves END --- "
+  if' (debug opts) $ putStrLn $ " --- leaves BEGIN --- " <> (show leaves) <> "--- leaves END --- "
   case maybepost of
     Nothing -> pure [Qed expr]
     Just post -> do
@@ -588,19 +606,13 @@ verify solvers preState maxIter askSmtIters rpcinfo maybepost = do
         assumes = view constraints preState
         withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> pcs), leaf)) canViolate
       -- Dispatch the remaining branches to the solver to check for violations
-      putStrLn "--- canViolate BEGIN"
-      print canViolate
-      putStrLn "--- canViolate END"
-      putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violations"
-      --putStrLn $ T.unpack . formatSMT2 . fst $ withQueries !! 0
+      if' (debug opts) $ putStrLn $ "--- canViolate BEGIN" <> (show canViolate) <> "--- canViolate END"
+      -- if' (debug opts) $ putStrLn $ T.unpack . formatSMT2 . fst $ withQueries !! 0
+      if' (debug opts) $ putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violations"
       results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
-        putStrLn "--- query BEGIN ---"
-        print query
-        putStrLn "--- query END ---"
+        if' (debug opts) $ putStrLn $ "--- query BEGIN ---" <> (show query) <> "--- query END ---"
         res <- checkSat' solvers query
-        putStrLn "--- res BEGIN ---"
-        print res
-        putStrLn "--- res END ---"
+        if' (debug opts) $ putStrLn $ "--- res BEGIN ---" <> (show res) <> "--- res END ---"
         pure (res, leaf)
       let cexs = filter (\(res, _) -> not . isUnsat $ res) results
       pure $ if null cexs then [Qed expr] else fmap toVRes cexs

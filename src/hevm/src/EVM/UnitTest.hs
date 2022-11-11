@@ -15,7 +15,7 @@ import EVM.Exec
 import EVM.Expr (litAddr, readStorage')
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.RLP
@@ -716,7 +716,7 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
         )) vm
 
     -- check postconditions against vm
-    results <- verify solvers vm' Nothing Nothing Nothing (Just postcondition)
+    results <- verify solvers vm' defaultVeriOpts Nothing (Just postcondition)
 
     -- display results
     if all isQed results
