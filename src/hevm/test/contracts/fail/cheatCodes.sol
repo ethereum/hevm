@@ -1,6 +1,3 @@
-pragma solidity ^0.6.7;
-pragma experimental ABIEncoderV2;
-
 import "ds-test/test.sol";
 
 interface Hevm {

@@ -6,10 +6,14 @@ module Main where
 
 import Data.Text (Text, pack)
 import Data.ByteString (ByteString)
+import System.Directory
+import System.IO.Temp
+import System.Process (readProcess)
+import GHC.IO.Handle (hClose)
+import Control.Monad
 
 import Prelude hiding (fail)
 
-import qualified Data.Text as Text
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BS (fromStrict)
 import qualified Data.ByteString.Base16 as Hex
@@ -37,28 +41,27 @@ import Data.Binary.Get (runGetOrFail)
 
 import EVM hiding (Query)
 import EVM.SymExec
+import EVM.UnitTest (dappTest, UnitTestOptions, getParametersFromEnvironmentVariables)
 import EVM.ABI
 import EVM.Format
 import EVM.Exec
+import EVM.Dapp
 import qualified EVM.Patricia as Patricia
 import EVM.Precompiled
 import EVM.RLP
 import EVM.Solidity
 import EVM.Types
 import EVM.SMT hiding (storage, calldata)
+import qualified EVM.TTY as TTY
 import qualified Data.ByteString.Base16 as BS16
 import qualified EVM.Expr as Expr
+import qualified EVM.Fetch as Fetch
+import qualified EVM.UnitTest
+import qualified Paths_hevm as Paths
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
 import EVM.ABI (AbiType(AbiUIntType))
-
-getArgInteger :: EVM.SMT.SMTCex -> String -> Integer
-getArgInteger a name = getIntegerFromSCHex $ getScHexa a
-  where
-    getScHexa :: EVM.SMT.SMTCex -> Language.SMT2.Syntax.SpecConstant
-    getScHexa tmp = fromJust . Data.Map.lookup (Data.Text.pack name) $ smtcex tmp
-    smtcex :: EVM.SMT.SMTCex -> Map Text Language.SMT2.Syntax.SpecConstant
-    smtcex (EVM.SMT.SMTCex x _ _ _) = x
-
 
 main :: IO ()
 main = defaultMain tests
@@ -410,6 +413,45 @@ tests = testGroup "hevm"
         putStrLn "expected counterexample found"
  ]
 
+  , testGroup "Dapp Tests"
+    [ testCase "Trivial-Pass" $ do
+        let testFile = "test/contracts/pass/trivial.sol"
+        runDappTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "Trivial-Fail" $ do
+        let testFile = "test/contracts/fail/trivial.sol"
+        runDappTest testFile "testFalse" >>= assertEqual "test result" False
+    , testCase "Abstract" $ do
+        let testFile = "test/contracts/pass/abstract.sol"
+        runDappTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "Constantinople" $ do
+        let testFile = "test/contracts/pass/constantinople.sol"
+        runDappTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "Prove-Tests-Pass" $ do
+        let testFile = "test/contracts/pass/dsProvePass.sol"
+        runDappTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "Prove-Tests-Fail" $ do
+        let testFile = "test/contracts/fail/dsProveFail.sol"
+        runDappTest testFile "prove_trivial" >>= assertEqual "test result" False
+        runDappTest testFile "prove_add" >>= assertEqual "test result" False
+        --runDappTest testFile "prove_smtTimeout" >>= assertEqual "test result" False
+        runDappTest testFile "prove_multi" >>= assertEqual "test result" False
+        runDappTest testFile "prove_mul" >>= assertEqual "test result" False
+        --runDappTest testFile "prove_distributivity" >>= assertEqual "test result" False
+        --runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
+    , testCase "Invariant-Tests-Pass" $ do
+        let testFile = "test/contracts/pass/invariants.sol"
+        runDappTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "Invariant-Tests-Fail" $ do
+        let testFile = "test/contracts/fail/invariantFail.sol"
+        runDappTest testFile "invariantFirst" >>= assertEqual "test result" False
+        runDappTest testFile "invariantCount" >>= assertEqual "test result" False
+    , testCase "Cheat-Codes-Pass" $ do
+        let testFile = "test/contracts/pass/cheatCodes.sol"
+        runDappTest testFile ".*" >>= assertEqual "test result" True
+    , expectFail $ testCase "Cheat-Codes-Fail" $ do
+        let testFile = "test/contracts/fail/cheatCodes.sol"
+        runDappTest testFile "testBadFFI" >>= assertEqual "test result" False
+    ]
   , testGroup "Symbolic execution"
       [
      testCase "require-test" $ do
@@ -1091,7 +1133,7 @@ tests = testGroup "hevm"
           [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) []
           putStrLn "expected counterexample found"
         ,
-        expectFail $ testCase "multiple contracts" $ do
+        testCase "multiple-contracts" $ do
           let code' =
                 [i|
                   contract C {
@@ -1276,13 +1318,13 @@ runStatements
   -> IO (Maybe ByteString)
 runStatements stmts args t = do
   let params =
-        Text.intercalate ", "
+        T.intercalate ", "
           (map (\(x, c) -> abiTypeSolidity (abiValueType x)
                              <> " " <> defaultDataLocation (abiValueType x)
-                             <> " " <> Text.pack [c])
+                             <> " " <> T.pack [c])
             (zip args "abcdefg"))
       s =
-        "foo(" <> Text.intercalate ","
+        "foo(" <> T.intercalate ","
                     (map (abiTypeSolidity . abiValueType) args) <> ")"
 
   runFunction [i|
@@ -1330,10 +1372,18 @@ data Invocation
   = SolidityCall Text [AbiValue]
   deriving Show
 
+getArgInteger :: EVM.SMT.SMTCex -> String -> Integer
+getArgInteger a name = getIntegerFromSCHex $ getScHexa a
+  where
+    getScHexa :: EVM.SMT.SMTCex -> Language.SMT2.Syntax.SpecConstant
+    getScHexa tmp = fromJust . Data.Map.lookup (Data.Text.pack name) $ smtcex tmp
+    smtcex :: EVM.SMT.SMTCex -> Map Text Language.SMT2.Syntax.SpecConstant
+    smtcex (EVM.SMT.SMTCex x _ _ _) = x
+
 assertSolidityComputation :: Invocation -> AbiValue -> IO ()
 assertSolidityComputation (SolidityCall s args) x =
   do y <- runStatements s args (abiValueType x)
-     assertEqual (Text.unpack s)
+     assertEqual (T.unpack s)
        (fmap Bytes (Just (encodeAbiValue x)))
        (fmap Bytes y)
 
@@ -1345,3 +1395,115 @@ bothM f (a, a') = do
 
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
+
+runDappTest :: FilePath -> Text -> IO Bool
+runDappTest testFile match = do
+  root <- Paths.getDataDir
+  (json, _) <- compileWithDSTest testFile
+  --TIO.writeFile "output.json" json
+  withCurrentDirectory root $ do
+    withSystemTempFile "output.json" $ \file handle -> do
+      hClose handle
+      TIO.writeFile file json
+      withSolvers Z3 1 $ \solvers -> do
+        opts <- testOpts solvers root json match
+        dappTest opts solvers file Nothing
+
+debugDappTest :: FilePath -> IO ()
+debugDappTest testFile = do
+  root <- Paths.getDataDir
+  (json, _) <- compileWithDSTest testFile
+  --TIO.writeFile "output.json" json
+  withCurrentDirectory root $ do
+    withSystemTempFile "output.json" $ \file handle -> do
+      hClose handle
+      TIO.writeFile file json
+      withSolvers Z3 1 $ \solvers -> do
+        opts <- testOpts solvers root json ".*"
+        TTY.main opts root file
+
+
+testOpts :: SolverGroup -> FilePath -> Text -> Text -> IO UnitTestOptions
+testOpts solvers root solcJson match = do
+  srcInfo <- case readJSON solcJson of
+               Nothing -> error "Could not read solc json"
+               Just (contractMap, asts, sources) -> do
+                 sourceCache <- makeSourceCache sources asts
+                 pure $ dappInfo root contractMap sourceCache
+
+  params <- getParametersFromEnvironmentVariables Nothing
+
+  pure EVM.UnitTest.UnitTestOptions
+    { EVM.UnitTest.oracle = Fetch.oracle solvers Nothing
+    , EVM.UnitTest.maxIter = Nothing
+    , EVM.UnitTest.askSmtIters = Nothing
+    , EVM.UnitTest.smtTimeout = Nothing
+    , EVM.UnitTest.solver = Nothing
+    , EVM.UnitTest.covMatch = Nothing
+    , EVM.UnitTest.verbose = Nothing
+    , EVM.UnitTest.match = match
+    , EVM.UnitTest.maxDepth = Nothing
+    , EVM.UnitTest.fuzzRuns = 100
+    , EVM.UnitTest.replay = Nothing
+    , EVM.UnitTest.vmModifier = id
+    , EVM.UnitTest.testParams = params
+    , EVM.UnitTest.dapp = srcInfo
+    , EVM.UnitTest.ffiAllowed = True
+    }
+
+compileWithDSTest :: FilePath -> IO (Text, Text)
+compileWithDSTest src =
+  withSystemTempFile "input.json" $ \file handle -> do
+    hClose handle
+    dsTest <- readFile =<< Paths.getDataFileName "test/contracts/lib/test.sol"
+    erc20 <- readFile =<< Paths.getDataFileName "test/contracts/lib/erc20.sol"
+    testFilePath <- Paths.getDataFileName src
+    testFile <- readFile testFilePath
+    TIO.writeFile file
+      [i|
+      {
+        "language": "Solidity",
+        "sources": {
+          "ds-test/test.sol": {
+            "content": ${dsTest}
+          },
+          "lib/erc20.sol": {
+            "content": ${erc20}
+          },
+          "test.sol": {
+            "content": ${testFile}
+          }
+        },
+        "settings": {
+          "metadata": {
+            "useLiteralContent": true
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "metadata",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "abi",
+                "storageLayout",
+                "evm.bytecode.sourceMap",
+                "evm.bytecode.linkReferences",
+                "evm.bytecode.generatedSources",
+                "evm.deployedBytecode.sourceMap",
+                "evm.deployedBytecode.linkReferences",
+                "evm.deployedBytecode.generatedSources"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      }
+      |]
+    x <- T.pack <$>
+      readProcess
+        "solc"
+        ["--allow-paths", file, "--standard-json", file]
+        ""
+    return (x, T.pack testFilePath)

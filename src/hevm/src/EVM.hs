@@ -104,7 +104,7 @@ data VM = VM
   , _env            :: Env
   , _block          :: Block
   , _tx             :: TxState
-  , _logs           :: Expr Logs
+  , _logs           :: [Expr Log]
   , _traces         :: Zipper.TreePos Zipper.Empty Trace
   , _cache          :: Cache
   , _burned         :: W256
@@ -483,7 +483,7 @@ makeVm o =
     , _txReversion = Map.fromList
       [(vmoptAddress o, vmoptContract o)]
     }
-  , _logs = EmptyLog
+  , _logs = []
   , _traces = Zipper.fromForest []
   , _block = Block
     { _coinbase = vmoptCoinbase o
@@ -658,7 +658,7 @@ exec1 = do
                 forceConcrete2 (xOffset', xSize') "LOG" $ \(xOffset, xSize) -> do
                     let (topics, xs') = splitAt n xs
                         bytes         = readMemory xOffset' xSize' vm
-                        logs'         = Log (litAddr self) bytes topics (view logs vm)
+                        logs'         = (LogEntry (litAddr self) bytes topics) : (view logs vm)
                     burn (g_log + g_logdata * (num xSize) + num n * g_logtopic) $
                       accessMemoryRange fees xOffset xSize $ do
                         traceTopLog logs'
@@ -2037,7 +2037,16 @@ cheatActions =
                 Nothing -> vmError (BadCheatCode sig)
                 Just digest' -> do
                   let s = ethsign priv digest'
-                      v = if even (sign_s s) then 27 else 28
+                      -- calculating the V value is pretty annoying if you
+                      -- don't have access to the full X/Y coords of the
+                      -- signature (which we don't get back from cryptonite).
+                      -- Luckily since we use a fixed nonce (to avoid the
+                      -- overhead of bringing randomness into the core EVM
+                      -- semantics), it would appear that every signature we
+                      -- produce has v == 28. Definitely a hack, and also bad
+                      -- for code that somehow depends on the value of v, but
+                      -- that seems acceptable for now.
+                      v = 28
                       encoded = encodeAbiValue $
                         AbiTuple (RegularVector.fromList
                           [ AbiUInt 8 v
@@ -2061,7 +2070,7 @@ cheatActions =
                     -- See yellow paper #286
                     let
                       pub = BS.concat [ encodeInt x, encodeInt y ]
-                      addr = Lit . num . word256 . BS.drop 12 . BS.take 32 . keccakBytes $ pub
+                      addr = Lit . W256 . word256 . BS.drop 12 . BS.take 32 . keccakBytes $ pub
                     assign (state . returndata . word256At (Lit 0)) addr
                     assign (state . memory . word256At outOffset) addr
           _ -> vmError (BadCheatCode sig)
@@ -2070,7 +2079,9 @@ cheatActions =
   where
     action s f = (abiKeccak s, f (Just $ abiKeccak s))
 
--- | Hack deterministic signing, totally insecure...
+-- | We don't wanna introduce the machinery needed to sign with a random nonce,
+-- so we just use the same nonce every time (420). This is obviusly very
+-- insecure, but fine for testing purposes.
 ethsign :: PrivateKey -> Digest Crypto.Keccak_256 -> Signature
 ethsign sk digest = go 420
   where
@@ -2523,9 +2534,9 @@ zipperRootForest z =
 traceForest :: VM -> Forest Trace
 traceForest = view (traces . to zipperRootForest)
 
-traceTopLog :: (MonadState VM m) => Expr Logs -> m ()
-traceTopLog EmptyLog = noop
-traceTopLog (Log addr bytes topics _) = do
+traceTopLog :: (MonadState VM m) => [Expr Log] -> m ()
+traceTopLog [] = noop
+traceTopLog ((LogEntry addr bytes topics) : _) = do
   trace <- withTraceLocation (EventTrace addr bytes topics)
   modifying traces $
     \t -> Zipper.nextSpace (Zipper.insert (Node trace []) t)

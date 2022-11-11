@@ -1,5 +1,3 @@
-pragma solidity ^0.6.7;
-
 import {DSTest} from "ds-test/test.sol";
 
 // should not be run (no code)

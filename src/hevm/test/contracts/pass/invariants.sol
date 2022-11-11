@@ -1,11 +1,8 @@
-pragma solidity ^0.6.7;
-
 import "ds-test/test.sol";
-import "ds-token/token.sol";
-import "ds-math/math.sol";
+import "lib/erc20.sol";
 
 contract InvariantTest is DSTest {
-    DSToken token;
+    ERC20 token;
     User user;
     address[] targetContracts_;
 
@@ -14,24 +11,23 @@ contract InvariantTest is DSTest {
     }
 
     function setUp() public {
-        token = new DSToken("TKN");
-        token.mint(100 ether);
+        token = new ERC20("TOKEN", "TKN", 18);
         user = new User(token);
-        token.transfer(address(user), 100 ether);
+        token.mint(address(user), type(uint).max);
         targetContracts_.push(address(user));
     }
 
     function invariantTestThisBal() public {
-        assertLe(token.balanceOf(address(user)), 100 ether);
+        assertLe(token.balanceOf(address(user)), type(uint).max);
     }
     function invariantTotSupply() public {
-        assertEq(token.totalSupply(), 100 ether);
+        assertEq(token.totalSupply(), type(uint).max);
     }
 }
 
 contract User {
-  DSToken token;
-  constructor(DSToken token_) public {
+  ERC20 token;
+  constructor(ERC20 token_) public {
     token = token_;
   }
 

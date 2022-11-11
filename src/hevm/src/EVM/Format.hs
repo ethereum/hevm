@@ -1,7 +1,24 @@
 {-# Language DataKinds #-}
 {-# Language ImplicitParams #-}
 {-# Language TemplateHaskell #-}
-module EVM.Format (formatExpr, contractNamePart, contractPathPart, showTree, showTraceTree, prettyIfConcreteWord, prettyvmresult, showCall, showWordExact, showWordExplanation) where
+
+module EVM.Format
+  ( formatExpr
+  , contractNamePart
+  , contractPathPart
+  , showTree
+  , showTraceTree
+  , prettyvmresult
+  , showCall
+  , showWordExact
+  , showWordExplanation
+  , parenthesise
+  , unindexed
+  , showValue
+  , textValues
+  , showAbiValue
+  , prettyIfConcreteWord
+  ) where
 
 import Prelude hiding (Word)
 import qualified EVM
@@ -90,19 +107,18 @@ prettyIfConcreteWord = \case
 showAbiValue :: (?context :: DappContext) => AbiValue -> Text
 showAbiValue (AbiBytes _ bs) =
   formatBytes bs  -- opportunistically decodes recognisable strings
-showAbiValue (AbiAddress addr) = undefined
-  {-
+showAbiValue (AbiAddress addr) =
   let dappinfo = view contextInfo ?context
       contracts = view contextEnv ?context
       name = case (Map.lookup addr contracts) of
         Nothing -> ""
         Just contract ->
-          let hash = view EVM.codehash contract
-              solcContract = (preview (dappSolcByHash . ix hash . _2) dappinfo)
-          in maybeContractName' solcContract
+          let hash = maybeLitWord $ view EVM.codehash contract
+          in case hash of
+               Just h -> maybeContractName' (preview (dappSolcByHash . ix h . _2) dappinfo)
+               Nothing -> ""
   in
     name <> "@" <> (pack $ show addr)
-  -}
 showAbiValue v = pack $ show v
 
 showAbiValues :: (?context :: DappContext) => Vector AbiValue -> Text
@@ -112,12 +128,11 @@ textAbiValues :: (?context :: DappContext) => Vector AbiValue -> [Text]
 textAbiValues vs = toList (fmap showAbiValue vs)
 
 textValues :: (?context :: DappContext) => [AbiType] -> Expr Buf -> [Text]
-textValues = undefined
---textValues ts (SymbolicBuffer  _) = [pack $ show t | t <- ts]
---textValues ts (ConcreteBuffer bs) =
-  --case runGetOrFail (getAbiSeq (length ts) ts) (fromStrict bs) of
-    --Right (_, _, xs) -> textAbiValues xs
-    --Left (_, _, _)   -> [formatBinary bs]
+textValues ts (ConcreteBuf bs) =
+  case runGetOrFail (getAbiSeq (length ts) ts) (fromStrict bs) of
+    Right (_, _, xs) -> textAbiValues xs
+    Left (_, _, _)   -> [formatBinary bs]
+textValues ts _ = fmap (const "<symbolic>") ts
 
 parenthesise :: [Text] -> Text
 parenthesise ts = "(" <> intercalate ", " ts <> ")"
@@ -129,22 +144,20 @@ showValue :: (?context :: DappContext) => AbiType -> Expr Buf -> Text
 showValue t b = head $ textValues [t] b
 
 showCall :: (?context :: DappContext) => [AbiType] -> Expr Buf -> Text
-showCall = undefined
---showCall ts (SymbolicBuffer bs) = showValues ts $ SymbolicBuffer (drop 4 bs)
---showCall ts (ConcreteBuffer bs) = showValues ts $ ConcreteBuffer (BS.drop 4 bs)
+showCall ts (ConcreteBuf bs) = showValues ts $ ConcreteBuf (BS.drop 4 bs)
+showCall _ _ = "<symbolic>"
 
 showError :: (?context :: DappContext) => Expr Buf -> Text
-showError bs = T.pack $ show bs
-  {-
+showError (ConcreteBuf bs) =
   let dappinfo = view contextInfo ?context
       bs4 = BS.take 4 bs
   in case Map.lookup (word bs4) (view dappErrorMap dappinfo) of
-      Just (SolError errName ts) -> errName <> " " <> showCall ts (ConcreteBuffer bs)
+      Just (SolError errName ts) -> errName <> " " <> showCall ts (ConcreteBuf bs)
       Nothing -> case bs4 of
                   -- Method ID for Error(string)
-                  "\b\195y\160" -> showCall [AbiStringType] (ConcreteBuffer bs)
+                  "\b\195y\160" -> showCall [AbiStringType] (ConcreteBuf bs)
                   _             -> formatBinary bs
-                -}
+showError b = T.pack $ show b
 
 -- the conditions under which bytes will be decoded and rendered as a string
 isPrintable :: ByteString -> Bool
@@ -366,20 +379,18 @@ contractPathPart :: Text -> Text
 contractPathPart x = Text.split (== ':') x !! 0
 
 prettyvmresult :: (?context :: DappContext) => Expr End -> String
-prettyvmresult = undefined
-  {-
---prettyvmresult (EVM.VMFailure (EVM.Revert ""))  = "Revert"
-prettyvmresult (EVM.VMFailure (EVM.Revert msg)) = "Revert" ++ (unpack $ showError msg)
-prettyvmresult (EVM.VMFailure (EVM.UnrecognizedOpcode 254)) = "Assertion violation"
-prettyvmresult (EVM.VMFailure err) = "Failed: " <> show err
-prettyvmresult (EVM.VMSuccess (ConcreteBuf msg)) =
+prettyvmresult (EVM.Types.Revert (ConcreteBuf "")) = "Revert"
+prettyvmresult (EVM.Types.Revert msg) = "Revert: " ++ (unpack $ showError msg)
+prettyvmresult (EVM.Types.Invalid) = "Invalid Opcode"
+prettyvmresult (EVM.Types.Return (ConcreteBuf msg) _) =
   if BS.null msg
   then "Stop"
   else "Return: " <> show (ByteStringS msg)
-prettyvmresult _ = error "TODO: sym prettyVmResult"
---prettyvmresult (EVM.VMSuccess (SymbolicBuffer msg)) =
-  --"Return: " <> show (length msg) <> " symbolic bytes"
-  -}
+prettyvmresult (EVM.Types.Return _ _) =
+  "Return: <symbolic>"
+prettyvmresult (EVM.Types.IllegalOverflow) = "Illegal Overflow"
+prettyvmresult (EVM.Types.SelfDestruct) = "Self Destruct"
+prettyvmresult e = error "Internal Error: Invalid Result: " <> show e
 
 currentSolc :: DappInfo -> VM -> Maybe SolcContract
 currentSolc dapp vm = undefined

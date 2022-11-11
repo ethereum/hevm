@@ -153,9 +153,8 @@ shr = op2 SHR (\x y -> if x > 256 then 0 else shiftR y (fromIntegral x))
 
 sar :: Expr EWord -> Expr EWord -> Expr EWord
 sar = op2 SAR (\x y ->
-  let msb = testBit y 255
-      shifted = if x > 256 then 0 else shiftR y (fromIntegral x)
-  in if msb then setBit shifted 255 else shifted)
+  let asSigned = (fromIntegral y) :: Int256
+  in fromIntegral $ shiftR asSigned (fromIntegral x))
 
 -- ** Bufs ** --------------------------------------------------------------------------------------
 
@@ -188,17 +187,17 @@ readByte i@(Lit x) (WriteWord (Lit idx) val src)
            (Lit _) -> indexWord (Lit $ x - idx) val
            _ -> IndexWord (Lit $ x - idx) val
     else readByte i src
-readByte i@(Lit x) (CopySlice (Lit dstOffset) (Lit srcOffset) (Lit size) src dst)
+readByte i@(Lit x) (CopySlice (Lit srcOffset) (Lit dstOffset) (Lit size) src dst)
   = if dstOffset <= num x && num x < (dstOffset + size)
     then readByte (Lit $ num x - (dstOffset - srcOffset)) src
     else readByte i dst
 
 -- reads from partially symbolic copySlice exprs
-readByte i@(Lit x) buf@(CopySlice (Lit dstOffset) _ (Lit size) _ dst)
+readByte i@(Lit x) buf@(CopySlice _ (Lit dstOffset) (Lit size) _ dst)
   = if num x < dstOffset || dstOffset + size < num x
     then readByte i dst
     else ReadByte (Lit x) buf
-readByte i@(Lit x) buf@(CopySlice (Lit dstOffset) _ _ _ dst)
+readByte i@(Lit x) buf@(CopySlice _ (Lit dstOffset) _ _ dst)
   = if num x < dstOffset
     then readByte i dst
     else ReadByte (Lit x) buf
@@ -306,7 +305,7 @@ bufLength buf = case go 0 buf of
     go l (ConcreteBuf b) = Just . Lit $ max (num . BS.length $ b) l
     go l (WriteWord (Lit idx) _ b) = go (max l (idx + 31)) b
     go l (WriteByte (Lit idx) _ b) = go (max l idx) b
-    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size - 1) l) dst
+    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size) l) dst
     go _ _ = Nothing
 
 -- | Returns the smallest possible size of a given buffer.

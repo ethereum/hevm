@@ -16,7 +16,6 @@ import Data.String.Here
 import qualified Data.Text as T
 
 import EVM
---import EVM.SMT (withSolvers, Solver(..), formatSMT2, exprToSMT, initState)
 import EVM.SMT
 import EVM.Types
 import EVM.Expr (numBranches)
@@ -26,8 +25,7 @@ import EVM.UnitTest
 import EVM.Format (formatExpr)
 import EVM.Dapp (dappInfo)
 import GHC.Conc
-import qualified Data.ByteString.Lazy  as Lazy
-import qualified Data.ByteString.Base16 as BS16
+import System.Exit (exitFailure)
 import qualified EVM.Fetch as Fetch
 import qualified EVM.FeeSchedule as FeeSchedule
 import qualified Data.Vector as V
@@ -39,7 +37,8 @@ runDappTest root =
     let testFile = root <> "/out/dapp.sol.json"
     withSolvers Z3 cores $ \solvers -> do
       opts <- testOpts solvers root testFile
-      dappTest opts solvers testFile Nothing
+      res <- dappTest opts solvers testFile Nothing
+      unless res exitFailure
 
 testOpts :: SolverGroup -> FilePath -> FilePath -> IO UnitTestOptions
 testOpts solvers root testFile = do

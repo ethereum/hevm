@@ -49,10 +49,6 @@ mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
   [''Typeable, ''Data, ''Generic]
 
 
---data Buffer
---  = ConcreteBuffer ByteString
---  | SymbolicBuffer [SWord 8]
-
 newtype W256 = W256 Word256
   deriving
     ( Num, Integral, Real, Ord, Generic
@@ -94,10 +90,6 @@ newtype W256 = W256 Word256
   with a Buf, writes can be sequenced on top of concrete, empty and fully
   abstract starting states.
 
-  Logs are also represented as a sequence of writes, but unlike Buf and Storage
-  expressions, Log writes are always sequenced on an empty starting point, and
-  overwriting is not allowed.
-
   One important principle is that of local context: e.g. each term representing
   a write to a Buf / Storage / Logs will always contain a copy of the state
   that is being added to, this ensures that all context relevant to a given
@@ -117,7 +109,7 @@ newtype W256 = W256 Word256
 data EType
   = Buf
   | Storage
-  | Logs
+  | Log
   | EWord
   | Byte
   | End
@@ -244,13 +236,10 @@ data Expr (a :: EType) where
 
   -- logs
 
-  EmptyLog       :: Expr Logs
-
-  Log            :: Expr EWord         -- address
+  LogEntry       :: Expr EWord         -- address
                  -> Expr Buf           -- data
                  -> [Expr EWord]       -- topics
-                 -> Expr Logs          -- old logs
-                 -> Expr Logs          -- new logs
+                 -> Expr Log
 
   -- Contract Creation
 
@@ -258,7 +247,7 @@ data Expr (a :: EType) where
                  -> Expr EWord         -- offset
                  -> Expr EWord         -- size
                  -> Expr Buf           -- memory
-                 -> Expr Logs          -- logs
+                 -> [Expr Log]          -- logs
                  -> Expr Storage       -- storage
                  -> Expr EWord         -- address
 
@@ -267,7 +256,7 @@ data Expr (a :: EType) where
                  -> Expr EWord         -- size
                  -> Expr EWord         -- salt
                  -> Expr Buf           -- memory
-                 -> Expr Logs          -- logs
+                 -> [Expr Log]          -- logs
                  -> Expr Storage       -- storage
                  -> Expr EWord         -- address
 
@@ -280,7 +269,7 @@ data Expr (a :: EType) where
                  -> Expr EWord         -- args size
                  -> Expr EWord         -- ret offset
                  -> Expr EWord         -- ret size
-                 -> Expr Logs          -- logs
+                 -> [Expr Log]          -- logs
                  -> Expr Storage       -- storage
                  -> Expr EWord         -- success
 
@@ -291,7 +280,7 @@ data Expr (a :: EType) where
                  -> Expr EWord         -- args size
                  -> Expr EWord         -- ret offset
                  -> Expr EWord         -- ret size
-                 -> Expr Logs          -- logs
+                 -> [Expr Log]         -- logs
                  -> Expr Storage       -- storage
                  -> Expr EWord         -- success
 
@@ -302,7 +291,7 @@ data Expr (a :: EType) where
                  -> Expr EWord         -- args size
                  -> Expr EWord         -- ret offset
                  -> Expr EWord         -- ret size
-                 -> Expr Logs          -- logs
+                 -> [Expr Log]         -- logs
                  -> Expr Storage       -- storage
                  -> Expr EWord         -- success
 
@@ -346,8 +335,8 @@ data Expr (a :: EType) where
                  -> Expr Buf           -- prev
                  -> Expr Buf
 
-  CopySlice      :: Expr EWord         -- dst offset
-                 -> Expr EWord         -- src offset
+  CopySlice      :: Expr EWord         -- src offset
+                 -> Expr EWord         -- dst offset
                  -> Expr EWord         -- size
                  -> Expr Buf           -- src
                  -> Expr Buf           -- dst
@@ -560,8 +549,7 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- logs
 
-      e@(EmptyLog) -> f e
-      e@(Log a b c d) -> f e <> (go a) <> (go b) <> (foldl (<>) mempty (fmap f c)) <> (go d)
+      e@(LogEntry a b c) -> f e <> (go a) <> (go b) <> (foldl (<>) mempty (fmap f c))
 
       -- Contract Creation
 
@@ -571,7 +559,7 @@ foldExpr f acc expr = acc <> (go expr)
         <> (go b)
         <> (go c)
         <> (go d)
-        <> (go g)
+        <> (foldl (<>) mempty (fmap go g))
         <> (go h)
       e@(Create2 a b c d g h i)
         -> f e
@@ -580,7 +568,7 @@ foldExpr f acc expr = acc <> (go expr)
         <> (go c)
         <> (go d)
         <> (go g)
-        <> (go h)
+        <> (foldl (<>) mempty (fmap go h))
         <> (go i)
 
       -- Calls
@@ -594,7 +582,7 @@ foldExpr f acc expr = acc <> (go expr)
         <> (go g)
         <> (go h)
         <> (go i)
-        <> (go j)
+        <> (foldl (<>) mempty (fmap go j))
         <> (go k)
 
       e@(CallCode a b c d g h i j k)
@@ -606,7 +594,7 @@ foldExpr f acc expr = acc <> (go expr)
         <> (go g)
         <> (go h)
         <> (go i)
-        <> (go j)
+        <> (foldl (<>) mempty (fmap go j))
         <> (go k)
 
       e@(DelegeateCall a b c d g h i j k)
@@ -618,7 +606,7 @@ foldExpr f acc expr = acc <> (go expr)
         <> (go g)
         <> (go h)
         <> (go i)
-        <> (go j)
+        <> (foldl (<>) mempty (fmap go j))
         <> (go k)
 
       -- storage
@@ -771,8 +759,7 @@ mapExpr f expr = case (f expr) of
 
   -- logs
 
-  EmptyLog -> EmptyLog
-  Log a b c d -> Log (mapExpr f (f a)) (mapExpr f (f b)) (fmap (mapExpr f . f) c) (mapExpr f (f d))
+  LogEntry a b c -> LogEntry (mapExpr f (f a)) (mapExpr f (f b)) (fmap (mapExpr f . f) c)
 
   -- Contract Creation
 
@@ -782,7 +769,7 @@ mapExpr f expr = case (f expr) of
          (mapExpr f (f b))
          (mapExpr f (f c))
          (mapExpr f (f d))
-         (mapExpr f (f e))
+         (fmap (mapExpr f . f) e)
          (mapExpr f (f g))
   Create2 a b c d e g h
     -> Create2
@@ -791,7 +778,7 @@ mapExpr f expr = case (f expr) of
          (mapExpr f (f c))
          (mapExpr f (f d))
          (mapExpr f (f e))
-         (mapExpr f (f g))
+         (fmap (mapExpr f . f) g)
          (mapExpr f (f h))
 
   -- Calls
@@ -805,7 +792,7 @@ mapExpr f expr = case (f expr) of
          (mapExpr f (f e))
          (mapExpr f (f g))
          (mapExpr f (f h))
-         (mapExpr f (f i))
+         (fmap (mapExpr f . f) i)
          (mapExpr f (f j))
   CallCode a b c d e g h i j
     -> CallCode
@@ -816,7 +803,7 @@ mapExpr f expr = case (f expr) of
         (mapExpr f (f e))
         (mapExpr f (f g))
         (mapExpr f (f h))
-        (mapExpr f (f i))
+        (fmap (mapExpr f . f) i)
         (mapExpr f (f j))
   DelegeateCall a b c d e g h i j
     -> DelegeateCall
@@ -827,7 +814,7 @@ mapExpr f expr = case (f expr) of
         (mapExpr f (f e))
         (mapExpr f (f g))
         (mapExpr f (f h))
-        (mapExpr f (f i))
+        (fmap (mapExpr f . f) i)
         (mapExpr f (f j))
 
   -- storage

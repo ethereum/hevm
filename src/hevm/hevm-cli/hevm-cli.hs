@@ -326,7 +326,9 @@ main = do
           testFile <- findJsonFile (jsonFile cmd)
           testOpts <- unitTestOptions cmd solvers testFile
           case (coverage cmd, optsMode cmd) of
-            (False, Run) -> dappTest testOpts solvers testFile (cache cmd)
+            (False, Run) -> do
+              res <- dappTest testOpts solvers testFile (cache cmd)
+              unless res exitFailure
             (False, Debug) -> liftIO $ TTY.main testOpts root testFile
             (False, JsonTrace) -> error "json traces not implemented for dappTest"
             --(True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) testFile
