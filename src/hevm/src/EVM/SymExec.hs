@@ -379,11 +379,10 @@ simplify e = if (mapExpr go e == e)
       | a == b = Lit 1
       | otherwise = o
 
-    -- redundant ITE
-    go o@(ITE c a b)
-      | c == Lit 1 = a
-      | c == Lit 0 = b
-      | otherwise = o
+    -- redundant ITEs
+    go (ITE (Lit x) a b)
+      | x == 0 = b
+      | otherwise = a
 
     -- redundant add / sub
     go o@(Sub (Add a b) c)
