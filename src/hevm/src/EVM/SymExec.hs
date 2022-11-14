@@ -427,18 +427,14 @@ simplify e = if (mapExpr go e == e)
       | otherwise = o
 
     -- Non-bitwise AND & OR -- no need to preserve bitwise equivalence.
-    go (ITE (And a (Lit x)) t f)
-      | x == 0 = f
-      | otherwise = ITE a t f
     go (ITE (And (Lit x) a) t f)
       | x == 0 = f
       | otherwise = ITE a t f
+    go (ITE (And a b@(Lit _)) t f) = ITE (And b a) t f
     go (ITE (Or (Lit x) a) t f)
       | x == 0 = ITE a t f
       | otherwise = t
-    go (ITE (Or a (Lit x)) t f)
-      | x == 0 = ITE a t f
-      | otherwise = t
+    go (ITE (Or a b@(Lit _)) t f) = ITE (Or b a) t f
 
     -- we write at least 32, so if x <= 32, it's FALSE
     go o@(EVM.Types.LT (BufLength (WriteWord {})) (Lit x))
