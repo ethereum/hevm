@@ -369,6 +369,10 @@ simplify e = if (mapExpr go e == e)
     go (EVM.Types.GEq a b) = EVM.Types.LEq b a
     go (EVM.Types.LEq a b) = EVM.Types.Not (EVM.Types.GT a b)
 
+    -- Make the LIT term to be first in comparison
+    -- Note that with the stuff above, this will rewrite *every* comparison in terms of LT, with Lit first.
+    go (EVM.Types.LT a b@(Lit _)) = EVM.Types.GT b a
+
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
       | a == b = Lit 1
@@ -377,7 +381,7 @@ simplify e = if (mapExpr go e == e)
       | a == b = Lit 1
       | otherwise = o
 
-    -- redundant ITEs
+    -- redundant ITE
     go (ITE (Lit x) a b)
       | x == 0 = b
       | otherwise = a
@@ -444,6 +448,9 @@ simplify e = if (mapExpr go e == e)
     go o@(EVM.Types.LT (Lit x) (BufLength (WriteWord {})))
       | x < 32 = Lit 1
       | otherwise = o
+
+    -- Double NOT is a no-op, since it's a bitwise inversion
+    go (EVM.Types.Not (EVM.Types.Not a)) = a
 
     go a = a
 
