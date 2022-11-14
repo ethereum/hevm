@@ -271,11 +271,9 @@ maxIterationsReached vm (Just maxIter) =
 type Precondition = VM -> Prop
 type Postcondition = VM -> Expr End -> Prop
 
-checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> IO [VerifyResult]
-checkAssert a b c d e  = checkAssert' a b c d e defaultVeriOpts
 
-checkAssert' :: SolverGroup -> [Word256] -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> IO [VerifyResult]
-checkAssert' solvers errs c signature' concreteArgs opts = verifyContract' solvers c signature' concreteArgs opts SymbolicS Nothing (Just $ checkAssertions errs)
+checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> IO [VerifyResult]
+checkAssert solvers errs c signature' concreteArgs opts = verifyContract' solvers c signature' concreteArgs opts SymbolicS Nothing (Just $ checkAssertions errs)
 
 {- |Checks if an assertion violation has been encountered
 
