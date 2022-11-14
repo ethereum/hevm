@@ -38,7 +38,7 @@ initState = BuilderState
 go :: Expr a -> State BuilderState (Expr a)
 go = \case
   -- buffers
-  e@(WriteWord i v b) -> do
+  e@(WriteWord {}) -> do
     s <- get
     let (next, bs) = bufs s
     case Map.lookup e bs of
@@ -47,7 +47,7 @@ go = \case
         let bs' = Map.insert e next bs
         put $ s{bufs=(next + 1, bs')}
         pure $ GVar (Id next) (makeName "buf" next)
-  e@(WriteByte i v b) -> do
+  e@(WriteByte {}) -> do
     s <- get
     let (next, bs) = bufs s
     case Map.lookup e bs of
@@ -56,7 +56,7 @@ go = \case
         let bs' = Map.insert e next bs
         put $ s{bufs=(next + 1, bs')}
         pure $ GVar (Id next) (makeName "buf" next)
-  e@(CopySlice srcOff dstOff s src dst) -> do
+  e@(CopySlice {}) -> do
     s <- get
     let (next, bs) = bufs s
     case Map.lookup e bs of
@@ -66,7 +66,7 @@ go = \case
         put $ s{bufs=(next + 1, bs')}
         pure $ GVar (Id next) (makeName "buf" next)
   -- storage
-  e@(SStore addr i v s) -> do
+  e@(SStore {}) -> do
     s <- get
     let (next, ss) = stores s
     case Map.lookup e ss of
@@ -105,3 +105,4 @@ eliminateProps :: [Prop] -> ([Prop], BufEnv, StoreEnv)
 eliminateProps props =
   let (props', st) = runState (eliminateProps' props) initState in
   (props',  invertKeyVal (snd (bufs st)),  invertKeyVal (snd (stores st)))
+
