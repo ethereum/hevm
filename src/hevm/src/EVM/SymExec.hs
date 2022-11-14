@@ -575,21 +575,17 @@ evalProp = \case
                    _ -> o
   o -> o
 
-if' :: Bool -> IO () -> IO ()
-if' True x = x
-if' False x = pure ()
-
 -- | Symbolically execute the VM and check all endstates against the postcondition, if available.
 verify :: SolverGroup -> VeriOpts -> VM -> Maybe (Fetch.BlockNumber, Text) -> Maybe Postcondition -> IO [VerifyResult]
 verify solvers opts preState rpcinfo maybepost = do
   putStrLn "Exploring contract"
   exprInter <- evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) preState
-  if' (debug opts) $ putStrLn $ " --- expr pre-simplify BEGIN ---\n" <> (formatExpr exprInter) <> "--- expr pre-simplify END ---\n"
+  when (debug opts) $ putStrLn $ " --- expr pre-simplify BEGIN ---\n" <> (formatExpr exprInter) <> "--- expr pre-simplify END ---\n"
   expr <- if (simp opts) then (pure $ simplify exprInter) else pure exprInter
-  if' (debug opts) $ putStrLn $ " --- expr BEGIN ---\n" <> (formatExpr expr) <> "\n--- expr END ---\n"
-  if' (debug opts) $ putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
+  when (debug opts) $ putStrLn $ " --- expr BEGIN ---\n" <> (formatExpr expr) <> "\n--- expr END ---\n"
+  when (debug opts) $ putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
   let leaves = flattenExpr expr
-  if' (debug opts) $ putStrLn $ " --- leaves BEGIN ---\n" <> (show leaves) <> "\n--- leaves END ---\n"
+  when (debug opts) $ putStrLn $ " --- leaves BEGIN ---\n" <> (show leaves) <> "\n--- leaves END ---\n"
   case maybepost of
     Nothing -> pure [Qed expr]
     Just post -> do
@@ -602,13 +598,13 @@ verify solvers opts preState rpcinfo maybepost = do
         assumes = view constraints preState
         withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> pcs), leaf)) canViolate
       -- Dispatch the remaining branches to the solver to check for violations
-      if' (debug opts) $ putStrLn $ "--- canViolate BEGIN\n" <> (show canViolate) <> "\n--- canViolate END ---\n"
-      -- if' (debug opts) $ putStrLn $ T.unpack . formatSMT2 . fst $ withQueries !! 0
-      if' (debug opts) $ putStrLn $ "Checking for reachability of " <> show (length withQueries) <> "\n potential property violations"
+      when (debug opts) $ putStrLn $ "--- canViolate BEGIN\n" <> (show canViolate) <> "\n--- canViolate END ---\n"
+      -- when (debug opts) $ putStrLn $ T.unpack . formatSMT2 . fst $ withQueries !! 0
+      when (debug opts) $ putStrLn $ "Checking for reachability of " <> show (length withQueries) <> "\n potential property violations"
       results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
-        if' (debug opts) $ putStrLn $ "--- query BEGIN ---\n" <> (show query) <> "\n--- query END ---\n"
+        when (debug opts) $ putStrLn $ "--- query BEGIN ---\n" <> (show query) <> "\n--- query END ---\n"
         res <- checkSat' solvers query
-        if' (debug opts) $ putStrLn $ "--- res BEGIN ---\n" <> (show res) <> "\n--- res END ---\n"
+        when (debug opts) $ putStrLn $ "--- res BEGIN ---\n" <> (show res) <> "\n--- res END ---\n"
         pure (res, leaf)
       let cexs = filter (\(res, _) -> not . isUnsat $ res) results
       pure $ if null cexs then [Qed expr] else fmap toVRes cexs
