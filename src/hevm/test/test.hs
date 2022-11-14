@@ -1005,6 +1005,39 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
+        -- Bitwise OR operation test
+        testCase "opcode-bitwise-or-full-1s" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 x) external pure {
+                uint256 y;
+                uint256 z = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
+                assembly { y := or(x, z) }
+                assert(y == 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff);
+              }
+            }
+            |]
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          putStrLn "When OR-ing with full 1's we should get back full 1's"
+        ,
+        -- Bitwise OR operation test
+        testCase "opcode-bitwise-or-byte-of-1s" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 x) external pure {
+                uint256 y;
+                uint256 z = 0x000000000000000000000000000000000000000000000000000000000000ff00;
+                assembly { y := or(x, z) }
+                assert((y & 0x000000000000000000000000000000000000000000000000000000000000ff00) ==
+                  0x000000000000000000000000000000000000000000000000000000000000ff00);
+              }
+            }
+            |]
+          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          putStrLn "When OR-ing with a byte of 1's, we should get 1's back there"
+        ,
         testCase "Deposit contract loop (z3)" $ do
           Just c <- solcRuntime "Deposit"
             [i|
