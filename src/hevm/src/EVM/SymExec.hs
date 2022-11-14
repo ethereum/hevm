@@ -366,10 +366,8 @@ simplify e = if (mapExpr go e == e)
       | a < b = Lit 1
       | otherwise = Lit 0
     go (EVM.Types.GT a b) = EVM.Types.LT b a
-    go (EVM.Types.LEq (Lit a) (Lit b))
-      | a <= b = Lit 1
-      | otherwise = Lit 0
     go (EVM.Types.GEq a b) = EVM.Types.LEq b a
+    go (EVM.Types.LEq a b) = EVM.Types.Not (EVM.Types.GT a b)
 
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
@@ -414,12 +412,26 @@ simplify e = if (mapExpr go e == e)
       | a == b = (And b c)
       | otherwise = o
 
+    -- go (And (Lit x) b)
+    --   | x == 0 = Lit 0
+    --   | otherwise = b
+    -- go (And a (Lit x))
+    --   | x == 0 = Lit 0
+    --   | otherwise = a
+
+    go (Or (Lit x) b)
+      | x == 0 = b
+      | otherwise = Lit 1
+    go (Or a (Lit x))
+      | x == 0 = a
+      | otherwise = Lit 1
+
     -- we write at least 32, so if x <= 32, it's FALSE
     go o@(EVM.Types.LT (BufLength (WriteWord {})) (Lit x))
       | x <= 32 = Lit 0
       | otherwise = o
     -- we write at least 32, so if x < 32, it's TRUE
-    go o@(EVM.Types.GT (BufLength (WriteWord {})) (Lit x))
+    go o@(EVM.Types.LT (Lit x) (BufLength (WriteWord {})))
       | x < 32 = Lit 1
       | otherwise = o
 
