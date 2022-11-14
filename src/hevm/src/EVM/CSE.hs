@@ -95,19 +95,6 @@ eliminateExpr e =
 eliminateProp' :: Prop -> State BuilderState Prop
 eliminateProp' prop = mapPropM go prop
 
-eliminateFlat' :: [([Prop], Expr End)] -> State BuilderState [([Prop], Expr End)]
-eliminateFlat' leaves = flip mapM leaves $ (\(p, e) -> do
-                                               p' <- mapM eliminateProp' p
-                                               e' <- eliminateExpr' e
-                                               pure $ (p', e'))
-
--- | Common subexpression elimination pass for flattened Expr programs
-eliminateFlat :: [([Prop], Expr End)] -> ([([Prop], Expr End)], BufEnv, StoreEnv)
-eliminateFlat leaves =
-  let (leaves', st) = runState (eliminateFlat' leaves) initState in
-  (leaves',  invertKeyVal (snd (bufs st)),  invertKeyVal (snd (stores st)))
-
-
 -- | Common subexpression elimination pass for list of Prop
 eliminateProps' :: [Prop] -> State BuilderState [Prop]
 eliminateProps' props = mapM eliminateProp' props
