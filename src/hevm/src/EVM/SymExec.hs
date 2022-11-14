@@ -489,9 +489,6 @@ reachable2 solvers e = do
       leaf -> do
         let query = assertProps pcs
         res <- checkSat' solvers query
-        putStrLn "--- res BEGIN ---"
-        print res
-        putStrLn "--- res END ---"
         case res of
           Sat _ -> pure ([query], Just leaf)
           Unsat -> pure ([query], Nothing)
