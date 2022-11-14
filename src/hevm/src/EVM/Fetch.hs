@@ -230,13 +230,13 @@ type Fetcher = EVM.Query -> IO (EVM ())
 -- will be pruned anyway.
 checkBranch :: SolverGroup -> Prop -> Prop -> IO EVM.BranchCondition
 checkBranch solvers branchcondition pathconditions = do
-  checkSat' solvers (assertProps [(branchcondition .&& pathconditions)] mempty mempty) >>= \case
+  checkSat' solvers (assertProps [(branchcondition .&& pathconditions)]) >>= \case
      -- the condition is unsatisfiable
      Unsat -> -- if pathconditions are consistent then the condition must be false
             return $ EVM.Case False
      -- Sat means its possible for condition to hold
      Sat _ -> -- is its negation also possible?
-            checkSat' solvers (assertProps [(pathconditions .&& (PNeg branchcondition))] mempty mempty) >>= \case
+            checkSat' solvers (assertProps [(pathconditions .&& (PNeg branchcondition))]) >>= \case
                -- No. The condition must hold
                Unsat -> return $ EVM.Case True
                -- Yes. Both branches possible

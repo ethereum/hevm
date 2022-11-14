@@ -5,7 +5,7 @@
     Description: Common subexpression elimination for Expr ast
 -}
 
-module EVM.CSE (BufEnv, StoreEnv, eliminateExpr, eliminateFlat) where
+module EVM.CSE (BufEnv, StoreEnv, eliminateExpr, eliminateProps) where
 
 import Prelude hiding (Word, LT, GT)
 
@@ -106,5 +106,20 @@ eliminateFlat :: [([Prop], Expr End)] -> ([([Prop], Expr End)], BufEnv, StoreEnv
 eliminateFlat leaves =
   let (leaves', st) = runState (eliminateFlat' leaves) initState in
   (leaves',  invertKeyVal (snd (bufs st)),  invertKeyVal (snd (stores st)))
+  where
+    invertKeyVal =  Map.fromList . map (\(x, y) -> (Id y, x)) . Map.toList
+
+
+
+-- | Common subexpression elimination pass for list of Prop
+eliminateProps' :: [Prop] -> State BuilderState [Prop]
+eliminateProps' props = mapM eliminateProp' props
+
+
+-- | Common subexpression elimination pass for list of Prop
+eliminateProps :: [Prop] -> ([Prop], BufEnv, StoreEnv)
+eliminateProps props =
+  let (props', st) = runState (eliminateProps' props) initState in
+  (props',  invertKeyVal (snd (bufs st)),  invertKeyVal (snd (stores st)))
   where
     invertKeyVal =  Map.fromList . map (\(x, y) -> (Id y, x)) . Map.toList

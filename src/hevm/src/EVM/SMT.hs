@@ -98,9 +98,9 @@ declareIntermediates bufs stores =
     encodeStore (Id n) expr =
        "(define-const store" <> (T.pack . show $ n) <> " Storage " <> exprToSMT expr <> ")"
 
-assertProps :: [Prop] -> BufEnv -> StoreEnv -> SMT2
-assertProps ps bufs stores =
-  let encs = map propToSMT ps
+assertProps :: [Prop] -> SMT2
+assertProps ps =
+  let encs = map propToSMT ps_elim
       intermediates = declareIntermediates bufs stores in
   prelude
   <> (declareBufs . nubOrd $ foldl (<>) [] allBufs)
@@ -113,9 +113,11 @@ assertProps ps bufs stores =
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
 
   where
-    allBufs = fmap referencedBufs' ps <> fmap referencedBufs bufVals <> fmap referencedBufs storeVals
-    allVars = fmap referencedVars' ps <> fmap referencedVars bufVals <> fmap referencedVars storeVals
-    frameCtx = fmap referencedFrameContext' ps <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
+    (ps_elim, bufs, stores) = eliminateProps ps
+
+    allBufs = fmap referencedBufs' ps_elim <> fmap referencedBufs bufVals <> fmap referencedBufs storeVals
+    allVars = fmap referencedVars' ps_elim <> fmap referencedVars bufVals <> fmap referencedVars storeVals
+    frameCtx = fmap referencedFrameContext' ps_elim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
 
     bufVals = Map.elems bufs
     storeVals = Map.elems stores
