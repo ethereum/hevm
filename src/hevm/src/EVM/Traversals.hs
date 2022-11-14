@@ -753,8 +753,7 @@ mapExprM f expr = case expr of
   -- storage
 
   EmptyStore -> f EmptyStore
-  ConcreteStore a -> do
-    f (ConcreteStore a)
+  ConcreteStore a -> f (ConcreteStore a)
   AbstractStore -> f AbstractStore
   SLoad a b c -> do
     a' <- mapExprM f a
