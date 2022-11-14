@@ -412,19 +412,19 @@ simplify e = if (mapExpr go e == e)
       | a == b = (And b c)
       | otherwise = o
 
-    -- go (And (Lit x) b)
-    --   | x == 0 = Lit 0
-    --   | otherwise = b
-    -- go (And a (Lit x))
-    --   | x == 0 = Lit 0
-    --   | otherwise = a
+    go o@(And (Lit x) _)
+      | x == 0 = Lit 0
+      | otherwise = o
+    go o@(And _ (Lit x))
+      | x == 0 = Lit 0
+      | otherwise = o
 
-    go (Or (Lit x) b)
+    go o@(Or (Lit x) b)
       | x == 0 = b
-      | otherwise = Lit 1
-    go (Or a (Lit x))
+      | otherwise = o
+    go o@(Or a (Lit x))
       | x == 0 = a
-      | otherwise = Lit 1
+      | otherwise = o
 
     -- we write at least 32, so if x <= 32, it's FALSE
     go o@(EVM.Types.LT (BufLength (WriteWord {})) (Lit x))
