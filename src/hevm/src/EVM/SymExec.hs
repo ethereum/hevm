@@ -368,6 +368,12 @@ simplify e = if (mapExpr go e == e)
     go (EVM.Types.GT (Lit a) (Lit b))
       | a > b = Lit 1
       | otherwise = Lit 0
+    go (EVM.Types.LEq (Lit a) (Lit b))
+      | a <= b = Lit 1
+      | otherwise = Lit 0
+    go (EVM.Types.GEq (Lit a) (Lit b))
+      | a >= b = Lit 1
+      | otherwise = Lit 0
 
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
