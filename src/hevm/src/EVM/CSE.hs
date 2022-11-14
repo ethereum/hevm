@@ -79,6 +79,9 @@ go = \case
   where
     makeName s n = s <> (T.pack . show $ n)
 
+invertKeyVal :: forall a. Map (Expr a) Int -> Map (GVar a) (Expr a)
+invertKeyVal =  Map.fromList . map (\(x, y) -> (Id y, x)) . Map.toList
+
 -- | Common subexpression elimination pass for Expr
 eliminateExpr' :: Expr a -> State BuilderState (Expr a)
 eliminateExpr' e = mapExprM go e
@@ -87,9 +90,6 @@ eliminateExpr :: Expr a -> (Expr a, BufEnv, StoreEnv)
 eliminateExpr e =
   let (e', st) = runState (eliminateExpr' e) initState in
   (e', invertKeyVal (snd (bufs st)), invertKeyVal (snd (stores st)))
-  where
-    invertKeyVal =  Map.fromList . map (\(x, y) -> (Id y, x)) . Map.toList
-
 
 -- | Common subexpression elimination pass for Prop
 eliminateProp' :: Prop -> State BuilderState Prop
@@ -106,9 +106,6 @@ eliminateFlat :: [([Prop], Expr End)] -> ([([Prop], Expr End)], BufEnv, StoreEnv
 eliminateFlat leaves =
   let (leaves', st) = runState (eliminateFlat' leaves) initState in
   (leaves',  invertKeyVal (snd (bufs st)),  invertKeyVal (snd (stores st)))
-  where
-    invertKeyVal =  Map.fromList . map (\(x, y) -> (Id y, x)) . Map.toList
-
 
 
 -- | Common subexpression elimination pass for list of Prop
@@ -121,5 +118,3 @@ eliminateProps :: [Prop] -> ([Prop], BufEnv, StoreEnv)
 eliminateProps props =
   let (props', st) = runState (eliminateProps' props) initState in
   (props',  invertKeyVal (snd (bufs st)),  invertKeyVal (snd (stores st)))
-  where
-    invertKeyVal =  Map.fromList . map (\(x, y) -> (Id y, x)) . Map.toList
