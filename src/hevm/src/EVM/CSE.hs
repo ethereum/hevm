@@ -12,8 +12,6 @@ import Prelude hiding (Word, LT, GT)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Control.Monad.State
-import Data.Text (Text)
-import qualified Data.Text as T
 
 import EVM.Types
 import EVM.Traversals
