@@ -38,6 +38,8 @@ import qualified Data.Text as T
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
 
 import EVM.Types
+import EVM.Traversals
+import EVM.CSE
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
 import qualified Language.SMT2.Syntax as Language.SMT2.Parser
 import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
@@ -85,32 +87,41 @@ formatSMT2 :: SMT2 -> Text
 formatSMT2 (SMT2 ls _) = T.unlines ls
 
 -- | Reads all intermediate variables from the builder state and produces SMT declaring them as constants
-declareIntermediates :: State BuilderState SMT2
-declareIntermediates = do
-  s <- get
-  let bs = List.sortBy sortPred . Map.toList . snd $ bufs s
-      ss = List.sortBy sortPred . Map.toList . snd $ stores s
-  declBs <- forM bs $ \(_, (n, enc)) -> do
-    pure $ "(define-const buf" <> (T.pack . show $ n) <> " Buf " <> enc <> ")"
-  declSs <- forM ss $ \(_, (n, enc)) -> do
-    pure $ "(define-const store" <> (T.pack . show $ n) <> " Storage " <> enc <> ")"
-  pure $ SMT2 (["; intermediate buffers"] <> declBs <> ["", "; intermediate stores"] <> declSs) mempty
+declareIntermediates :: BufEnv -> StoreEnv -> SMT2
+declareIntermediates bufs stores =
+  let declBs = Map.foldrWithKey (\n expr rest -> encodeBuf n expr:rest) [] bufs
+      declSs = Map.foldrWithKey (\n expr rest -> encodeStore n expr:rest) [] stores in
+  SMT2 (["; intermediate buffers"] <> declBs <> ["", "; intermediate stores"] <> declSs) mempty
   where
-    sortPred (_, (a, _)) (_, (b, _)) = compare a b
+    encodeBuf n expr =
+       "(define-const buf" <> (T.pack . show $ n) <> " Buf " <> exprToSMT expr <> ")"
+    encodeStore n expr =
+       "(define-const store" <> (T.pack . show $ n) <> " Storage " <> exprToSMT expr <> ")"
 
 assertProps :: [Prop] -> SMT2
-assertProps ps = flip evalState initState $ do
-  encs <- mapM propToSMT ps
-  intermediates <- declareIntermediates
-  pure $ prelude
-       <> (declareBufs . nubOrd $ foldl (<>) [] (fmap (referencedBufs') ps))
-       <> SMT2 [""] mempty
-       <> (declareVars . nubOrd $ foldl (<>) [] (fmap (referencedVars') ps))
-       <> SMT2 [""] mempty
-       <> (declareFrameContext . nubOrd $ foldl (<>) [] (fmap (referencedFrameContext') ps))
-       <> intermediates
-       <> SMT2 [""] mempty
-       <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
+assertProps ps =
+  let encs = map propToSMT ps_elim
+      intermediates = declareIntermediates bufs stores in
+  prelude
+  <> (declareBufs . nubOrd $ foldl (<>) [] allBufs)
+  <> SMT2 [""] mempty
+  <> (declareVars . nubOrd $ foldl (<>) [] allVars)
+  <> SMT2 [""] mempty
+  <> (declareFrameContext . nubOrd $ foldl (<>) [] frameCtx)
+  <> intermediates
+  <> SMT2 [""] mempty
+  <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
+
+  where
+    (ps_elim, bufs, stores) = eliminateProps ps
+
+    allBufs = fmap referencedBufs' ps_elim <> fmap referencedBufs bufVals <> fmap referencedBufs storeVals
+    allVars = fmap referencedVars' ps_elim <> fmap referencedVars bufVals <> fmap referencedVars storeVals
+    frameCtx = fmap referencedFrameContext' ps_elim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
+
+    bufVals = Map.elems bufs
+    storeVals = Map.elems stores
+
 
 prelude :: SMT2
 prelude =  (flip SMT2) mempty $ fmap (T.drop 2) . T.lines $ [i|
@@ -423,23 +434,12 @@ referencedFrameContext expr = nubOrd (foldExpr go [] expr)
       _ -> []
 
 
--- maps expressions to variable names
-data BuilderState = BuilderState
-  { bufs :: (Int, Map (Expr Buf) (Int, Text))
-  , stores :: (Int, Map (Expr Storage) (Int, Text))
-  }
-  deriving (Show)
-
-initState :: BuilderState
-initState = BuilderState
-  { bufs = (0, Map.empty)
-  , stores = (0, Map.empty)
-  }
-
-exprToSMT :: Expr a -> State BuilderState Text
+exprToSMT :: Expr a -> Text
 exprToSMT = \case
-  Lit w -> pure $ "(_ bv" <> (T.pack $ show (num w :: Integer)) <> " 256)"
-  Var s -> pure s
+  Lit w -> "(_ bv" <> (T.pack $ show (num w :: Integer)) <> " 256)"
+  Var s -> s
+  GVar (BufVar n) -> "buf" <> (T.pack . show $ n)
+  GVar (StoreVar n) -> "store" <> (T.pack . show $ n)
   JoinBytes
     z o two three four five six seven
     eight nine ten eleven twelve thirteen fourteen fifteen
@@ -459,31 +459,31 @@ exprToSMT = \case
   Exp a b -> case b of
                Lit b' -> expandExp a b'
                _ -> error "cannot encode symbolic exponentation into SMT"
-  Min a b -> do
-    aenc <- exprToSMT a
-    benc <- exprToSMT b
-    pure $ "(ite (<= " <> aenc `sp` benc <> ") " <> aenc `sp` benc <> ")"
-  LT a b -> do
-    cond <- op2 "bvult" a b
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
-  SLT a b -> do
-    cond <- op2 "bvslt" a b
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
-  GT a b -> do
-    cond <- op2 "bvugt" a b
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
-  LEq a b -> do
-    cond <- op2 "bvule" a b
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
-  GEq a b -> do
-    cond <- op2 "bvuge" a b
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
-  Eq a b -> do
-    cond <- op2 "=" a b
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
-  IsZero a -> do
-    cond <- op2 "=" a (Lit 0)
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
+  Min a b ->
+    let aenc = exprToSMT a
+        benc = exprToSMT b in
+    "(ite (<= " <> aenc `sp` benc <> ") " <> aenc `sp` benc <> ")"
+  LT a b ->
+    let cond = op2 "bvult" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  SLT a b ->
+    let cond = op2 "bvslt" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  GT a b ->
+    let cond = op2 "bvugt" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  LEq a b ->
+    let cond = op2 "bvule" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  GEq a b ->
+    let cond = op2 "bvuge" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  Eq a b ->
+    let cond = op2 "=" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  IsZero a ->
+    let cond = op2 "=" a (Lit 0) in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
   And a b -> op2 "bvand" a b
   Or a b -> op2 "bvor" a b
   Xor a b -> op2 "bvxor" a b
@@ -492,147 +492,85 @@ exprToSMT = \case
   SHR a b -> op2 "bvlshr" b a
   SAR a b -> op2 "bvashr" b a
   SEx a b -> op2 "signext" a b
-  EqByte a b -> do
-    cond <- op2 "=" a b
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
-  Keccak a -> do
-    enc <- exprToSMT a
-    pure $ "(keccak " <> enc <> ")"
-  SHA256 a -> do
-    enc <- exprToSMT a
-    pure $ "(sha256 " <> enc <> ")"
+  EqByte a b ->
+    let cond = op2 "=" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  Keccak a ->
+    let enc = exprToSMT a in
+    "(keccak " <> enc <> ")"
+  SHA256 a ->
+    let enc = exprToSMT a in
+    "(sha256 " <> enc <> ")"
 
-  CallValue a -> pure $ T.append "callvalue_" (T.pack . show $ a)
-  Caller a -> pure $ T.append "caller_" (T.pack . show $ a)
-  Address a -> pure $ T.append "address_" (T.pack . show $ a)
+  CallValue a -> T.append "callvalue_" (T.pack . show $ a)
+  Caller a -> T.append "caller_" (T.pack . show $ a)
+  Address a -> T.append "address_" (T.pack . show $ a)
 
-  Origin -> pure "origin"
-  BlockHash a -> do
-    enc <- exprToSMT a
-    pure $ "(blockhash " <> enc <> ")"
-  Coinbase -> pure "coinbase"
-  Timestamp -> pure "timestamp"
-  BlockNumber -> pure "blocknumber"
-  Difficulty -> pure "difficulty"
-  GasLimit -> pure "gaslimit"
-  ChainId -> pure "chainid"
-  BaseFee -> pure "basefee"
+  Origin ->  "origin"
+  BlockHash a ->
+    let enc = exprToSMT a in
+    "(blockhash " <> enc <> ")"
+  Coinbase -> "coinbase"
+  Timestamp -> "timestamp"
+  BlockNumber -> "blocknumber"
+  Difficulty -> "difficulty"
+  GasLimit -> "gaslimit"
+  ChainId -> "chainid"
+  BaseFee -> "basefee"
 
   -- TODO: make me binary...
-  LitByte b -> pure $ "(_ bv" <> T.pack (show (num b :: Integer)) <> " 8)"
+  LitByte b -> "(_ bv" <> T.pack (show (num b :: Integer)) <> " 8)"
   IndexWord idx w -> case idx of
     Lit n -> if n >= 0 && n < 32
-             then do
-              enc <- exprToSMT w
-              pure $ "(indexWord" <> T.pack (show (num n :: Integer)) <> " " <> enc <> ")"
+             then
+               let enc = exprToSMT w in
+               "(indexWord" <> T.pack (show (num n :: Integer)) <> " " <> enc <> ")"
              else exprToSMT (LitByte 0)
     _ -> op2 "indexWord" idx w
   ReadByte idx src -> op2 "select" src idx
 
-  ConcreteBuf "" -> pure "emptyBuf"
+  ConcreteBuf "" -> "emptyBuf"
   ConcreteBuf bs -> writeBytes (LitByte <$> BS.unpack bs) mempty
-  AbstractBuf s -> pure s
+  AbstractBuf s -> s
   ReadWord idx prev -> op2 "readWord" idx prev
   BufLength b -> op1 "bufLength" b
-  e@(WriteByte idx val prev) -> do
-    encIdx <- exprToSMT idx
-    encVal <- exprToSMT val
-    s <- get
-    let (count, bs) = bufs s
-    case Map.lookup e bs of
-      Just (n, _) -> pure . T.pack $ "buf" <> show n
-      Nothing -> case Map.lookup prev bs of
-        Just (prevName, _) -> do
-          let newBs = Map.insert e (count, "(store " <> (T.pack $ "buf" <> show prevName) `sp` encIdx `sp` encVal <> ")") bs
-          put $ s{bufs=(count + 1, newBs)}
-          pure . T.pack $ "buf" <> show count
-        Nothing -> do
-          prevName <- exprToSMT prev
-          s' <- get
-          let (count', bs') = bufs s'
-          let
-            newBs = Map.insert e (count', "(store " <> prevName `sp` encIdx `sp` encVal <> ")") bs'
-          put $ s{bufs=(count' + 1, newBs)}
-          pure . T.pack $ "buf" <> show count'
-  e@(WriteWord idx val prev) -> do
-    encIdx <- exprToSMT idx
-    encVal <- exprToSMT val
-    s <- get
-    let (count, bs) = bufs s
-    case Map.lookup e bs of
-      Just (n, _) -> pure . T.pack $ "buf" <> show n
-      Nothing -> case Map.lookup prev bs of
-        Just (prevName, _) -> do
-          let
-            newBs = Map.insert e (count, "(writeWord " <> encIdx `sp` encVal `sp` (T.pack $ "buf" <> show prevName) <> ")") bs
-          put $ s{bufs=(count + 1, newBs)}
-          pure . T.pack $ "buf" <> show count
-        Nothing -> do
-          prevName <- exprToSMT prev
-          s' <- get
-          let (count', bs') = bufs s'
-          let
-            newBs = Map.insert e (count', "(writeWord " <> encIdx `sp` encVal `sp` prevName <> ")") bs'
-          put $ s{bufs=(count' + 1, newBs)}
-          pure . T.pack $ "buf" <> show count'
-  e@(CopySlice srcIdx dstIdx size src dst) -> do
-    s <- get
-    let (_, bs) = bufs s
-    case Map.lookup e bs of
-      Just (n, _) -> pure . T.pack $ "buf" <> show n
-      Nothing -> do
-        srcName <- case Map.lookup src bs of
-                     Just (_, n') -> pure n'
-                     Nothing -> exprToSMT src
-        s' <- get
-        let (_, bs') = bufs s'
-        dstName <- case Map.lookup dst bs' of
-                     Just (_, n') -> pure n'
-                     Nothing -> exprToSMT dst
-        s'' <- get
-        enc <- copySlice srcIdx dstIdx size srcName dstName
-        let (count, bs'') = bufs s''
-        put $ s{bufs=(count + 1, Map.insert e (count, enc) bs'')}
-        pure . T.pack $ "buf" <> show count
-  EmptyStore -> pure "emptyStore"
+  e@(WriteByte idx val prev) ->
+    let encIdx = exprToSMT idx
+        encVal = exprToSMT val
+        encPrev = exprToSMT prev in
+    "(store " <> encPrev `sp` encIdx `sp` encVal <> ")"
+  e@(WriteWord idx val prev) ->
+    let encIdx = exprToSMT idx
+        encVal = exprToSMT val
+        encPrev = exprToSMT prev in
+    "(writeWord " <> encIdx `sp` encVal `sp` encPrev <> ")"
+  e@(CopySlice srcIdx dstIdx size src dst) ->
+    copySlice srcIdx dstIdx size (exprToSMT src) (exprToSMT dst)
+  EmptyStore -> "emptyStore"
   ConcreteStore s -> error "TODO: concretestore"
-  AbstractStore -> pure "abstractStore"
-  e@(SStore addr idx val prev) -> do
-    s <- get
-    let (_, ss) = stores s
-    case Map.lookup e ss of
-      Just (n, _) -> pure . T.pack $ "store" <> show n
-      Nothing -> do
-        prevName <- case Map.lookup prev ss of
-                      Just (_, n) -> pure n
-                      Nothing -> exprToSMT prev
-        eAddr <- exprToSMT addr
-        eIdx <- exprToSMT idx
-        eVal <- exprToSMT val
-        s' <- get
-        let (count, ss') = stores s'
-        put $ s'{
-          stores=(
-            count + 1,
-            Map.insert e (count, "(sstore" `sp` eAddr `sp` eIdx `sp` eVal `sp` prevName <> ")") ss'
-          )}
-        pure . T.pack $ "store" <> show count
+  AbstractStore -> "abstractStore"
+  e@(SStore addr idx val prev) ->
+    let encAddr = exprToSMT addr
+        encIdx = exprToSMT idx
+        encVal = exprToSMT val
+        encPrev = exprToSMT prev in
+    "(sstore" `sp` encAddr `sp` encIdx `sp` encVal `sp` encPrev <> ")"
   SLoad addr idx store -> op3 "sload" addr idx store
 
   a -> error $ "TODO: implement: " <> show a
   where
-    op1 op a = do
-      enc <- exprToSMT a
-      pure $ "(" <> op `sp` enc <> ")"
-    op2 op a b = do
-      aenc <- exprToSMT a
-      benc <- exprToSMT b
-      pure $ "(" <> op `sp` aenc `sp` benc <> ")"
-    op3 op a b c = do
-      aenc <- exprToSMT a
-      benc <- exprToSMT b
-      cenc <- exprToSMT c
-      pure $ "(" <> op `sp` aenc `sp` benc `sp` cenc <> ")"
+    op1 op a =
+      let enc =  exprToSMT a in
+      "(" <> op `sp` enc <> ")"
+    op2 op a b =
+      let aenc = exprToSMT a
+          benc = exprToSMT b in
+      "(" <> op `sp` aenc `sp` benc <> ")"
+    op3 op a b c =
+      let aenc = exprToSMT a
+          benc = exprToSMT b
+          cenc = exprToSMT c in
+      "(" <> op `sp` aenc `sp` benc `sp` cenc <> ")"
 
 sp :: Text -> Text -> Text
 a `sp` b = a <> " " <> b
@@ -643,32 +581,30 @@ zero = "(_ bv0 256)"
 one :: Text
 one = "(_ bv1 256)"
 
-propToSMT :: Prop -> State BuilderState Text
+propToSMT :: Prop -> Text
 propToSMT = \case
   PEq a b -> op2 "=" a b
   PLT a b -> op2 "bvult" a b
   PGT a b -> op2 "bvugt" a b
   PLEq a b -> op2 "bvule" a b
   PGEq a b -> op2 "bvuge" a b
-  PNeg a -> do
-      enc <- propToSMT a
-      pure $ "(not " <> enc <> ")"
-  PAnd a b -> do
-      aenc <- propToSMT a
-      benc <- propToSMT b
-      pure $ "(and " <> aenc <> " " <> benc <> ")"
-  POr a b -> do
-      aenc <- propToSMT a
-      benc <- propToSMT b
-      pure $ "(or " <> aenc <> " " <> benc <> ")"
-  PBool b -> pure $ if b then "true" else "false"
+  PNeg a ->
+    let enc = propToSMT a in
+    "(not " <> enc <> ")"
+  PAnd a b ->
+    let aenc = propToSMT a
+        benc = propToSMT b in
+    "(and " <> aenc <> " " <> benc <> ")"
+  POr a b ->
+    let aenc = propToSMT a
+        benc = propToSMT b in
+    "(or " <> aenc <> " " <> benc <> ")"
+  PBool b -> if b then "true" else "false"
   where
-    op2 op l r = do
-      lenc <- exprToSMT l
-      renc <- exprToSMT r
-      pure $ "(" <> op `sp` lenc `sp` renc <> ")"
-
-
+    op2 op a b =
+      let aenc = exprToSMT a
+          benc = exprToSMT b in
+      "(" <> op <> " " <> aenc <> " " <> benc <> ")"
 
 
 -- ** Execution ** -------------------------------------------------------------------------------
@@ -904,41 +840,41 @@ readSExpr h = go 0 0 []
 
 
 -- | Stores a region of src into dst
-copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Text -> Text -> State BuilderState Text
+copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Text -> Text -> Text
 copySlice srcOffset dstOffset size@(Lit _) src dst
-  | size == (Lit 0) = pure dst
-  | otherwise = do
+  | size == (Lit 0) = dst
+  | otherwise =
     let size' = (sub size (Lit 1))
-    encDstOff <- exprToSMT (add dstOffset size')
-    encSrcOff <- exprToSMT (add srcOffset size')
-    child <- copySlice srcOffset dstOffset size' src dst
-    pure $ "(store " <> child `sp` encDstOff `sp` "(select " <> src `sp` encSrcOff <> "))"
+        encDstOff = exprToSMT (add dstOffset size')
+        encSrcOff = exprToSMT (add srcOffset size')
+        child = copySlice srcOffset dstOffset size' src dst in
+    "(store " <> child `sp` encDstOff `sp` "(select " <> src `sp` encSrcOff <> "))"
 copySlice _ _ _ _ _ = error "TODO: implement copySlice with a symbolically sized region"
 
 -- | Unrolls an exponentiation into a series of multiplications
-expandExp :: Expr EWord -> W256 -> State BuilderState Text
+expandExp :: Expr EWord -> W256 -> Text
 expandExp base expnt
   | expnt == 1 = exprToSMT base
-  | otherwise = do
-    b <- exprToSMT base
-    n <- expandExp base (expnt - 1)
-    pure $ "(* " <> b `sp` n <> ")"
+  | otherwise =
+    let b = exprToSMT base
+        n = expandExp base (expnt - 1) in
+    "(* " <> b `sp` n <> ")"
 
 -- | Concatenates a list of bytes into a larger bitvector
-concatBytes :: NonEmpty (Expr Byte) -> State BuilderState Text
-concatBytes bytes = foldM wrap "" $ NE.reverse bytes
+concatBytes :: NonEmpty (Expr Byte) -> Text
+concatBytes bytes = foldl wrap "" $ NE.reverse bytes
   where
-    wrap inner byte = do
-      byteSMT <- exprToSMT byte
-      pure $ "(concat " <> byteSMT `sp` inner <> ")"
+    wrap inner byte =
+      let byteSMT = exprToSMT byte in
+      "(concat " <> byteSMT `sp` inner <> ")"
 
 -- | Concatenates a list of bytes into a larger bitvector
-writeBytes :: [Expr Byte] -> Expr Buf -> State BuilderState Text
-writeBytes bytes buf = do
-  bufSMT <- exprToSMT buf
-  foldM wrap bufSMT $ reverse (zip [0..] bytes)
+writeBytes :: [Expr Byte] -> Expr Buf -> Text
+writeBytes bytes buf =
+  let bufSMT = exprToSMT buf in
+  foldl wrap bufSMT $ reverse (zip [0..] bytes)
   where
-    wrap inner (idx, byte) = do
-      byteSMT <- exprToSMT byte
-      idxSMT <- exprToSMT $ Lit idx
-      pure $ "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")"
+    wrap inner (idx, byte) =
+      let byteSMT = exprToSMT byte
+          idxSMT = exprToSMT $ Lit idx in
+      "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")"

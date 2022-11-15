@@ -26,7 +26,7 @@ import EVM.Dapp (DappInfo (..), dappSolcByHash, dappAbiMap, showTraceLocation, d
 import EVM.Dapp (DappContext (..), contextInfo, contextEnv)
 import EVM (VM, VMResult(..), cheatCode, traceForest, traceData, Error (..), result)
 import EVM (Trace, TraceData (..), Query (..), FrameContext (..))
-import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..), hexByteString, foldExpr, mapExpr, word256Bytes)
+import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..), hexByteString, word256Bytes)
 import EVM.Types (Addr, ByteStringS(..))
 import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..))
 import EVM.ABI (Indexed (NotIndexed), getAbiSeq)
