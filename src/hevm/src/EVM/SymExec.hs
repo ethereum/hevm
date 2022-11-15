@@ -382,10 +382,6 @@ simplify e = if (mapExpr go e == e)
     go (EVM.Types.GEq a b) = EVM.Types.LEq b a
     go (EVM.Types.LEq a b) = EVM.Types.Not (EVM.Types.GT a b)
 
-    -- Make the LIT term to be first in comparison
-    -- Note that with the stuff above, this will rewrite *every* comparison in terms of LT, with Lit first.
-    go (EVM.Types.LT a b@(Lit _)) = EVM.Types.GT b a
-
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
       | a == b = Lit 1
