@@ -447,9 +447,14 @@ readStorage addr loc store@(ConcreteStore s) = case (addr, loc) of
     pure $ Lit val
   _ -> Just $ SLoad addr loc store
 readStorage addr' loc s@AbstractStore = Just $ SLoad addr' loc s
-readStorage addr' loc s@(SStore addr slot val prev) = case (addr, slot, addr', loc) of
-  (Lit _, Lit _, Lit _, Lit _) -> if loc == slot && addr == addr' then Just val else readStorage addr' loc prev
+readStorage addr' loc s@(SStore addr slot val prev) = case addr of
+  Lit _ -> if addr == addr'
+           then case slot of
+                  Lit _ -> if slot == loc then (Just val) else readStorage addr' loc prev
+                  _ -> Just $ SLoad addr' loc s
+           else readStorage addr' loc prev
   _ -> Just $ SLoad addr' loc s
+readStorage _ _ (GVar _) = error "Can't read from a GVar"
 
 readStorage' :: Expr EWord -> Expr EWord -> Expr Storage -> Expr EWord
 readStorage' addr loc store = case readStorage addr loc store of
