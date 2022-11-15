@@ -468,31 +468,71 @@ tests = testGroup "hevm"
         [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256)", [AbiIntType 256])) [] defaultVeriOpts
         putStrLn "Require works as expected"
      ,
-        -- CopySlice check
-        -- uses identity precompiled contract (0x4) to copy memory
-        -- checks 9af114613075a2cd350633940475f8b6699064de (readByte + CopySlice had src/dest mixed up)
-        -- without 9af114613 it dies with: `Exception: UnexpectedSymbolicArg 296 "MSTORE index"`
-        --       TODO: check  9e734b9da90e3e0765128b1f20ce1371f3a66085 (bufLength + copySlice was off by 1)
-        testCase "copyslice-check" $ do
-          Just c <- solcRuntime "C"
-            [i|
-            contract C {
-              function checkval(uint8 a) public {
-                bytes memory data = new bytes(5);
-                for(uint i = 0; i < 5; i++) data[i] = bytes1(a);
-                bytes memory ret = new bytes(data.length);
-                assembly {
-                    let len := mload(data)
-                    if iszero(call(0xff, 0x04, 0, add(data, 0x20), len, add(ret,0x20), len)) {
-                        invalid()
-                    }
+     testCase "ITE-with-bitwise-AND" $ do
+        --- using ignore to suppress huge output
+       Just c <- solcRuntime "C"
+         [i|
+         contract C {
+           function f(uint256 x) public pure {
+             require(x > 0);
+             uint256 a = (x & 8);
+             bool w;
+             // assembly is needed here, because solidity doesn't allow uint->bool conversion
+             assembly {
+                 w:=a
+             }
+             if (!w) assert(false); //we should get a CEX: when x has a 0 at bit 3
+           }
+         }
+         |]
+       -- should find a counterexample
+       [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+       putStrLn "expected counterexample found"
+     ,
+     testCase "ITE-with-bitwise-OR" $ do
+        --- using ignore to suppress huge output
+       Just c <- solcRuntime "C"
+         [i|
+         contract C {
+           function f(uint256 x) public pure {
+             uint256 a = (x | 8);
+             bool w;
+             // assembly is needed here, because solidity doesn't allow uint->bool conversion
+             assembly {
+                 w:=a
+             }
+             assert(w); // due to bitwise OR with positive value, this must always be true
+           }
+         }
+         |]
+       [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+       putStrLn "this should always be true, due to bitwise OR with positive value"
+    ,
+    -- CopySlice check
+    -- uses identity precompiled contract (0x4) to copy memory
+    -- checks 9af114613075a2cd350633940475f8b6699064de (readByte + CopySlice had src/dest mixed up)
+    -- without 9af114613 it dies with: `Exception: UnexpectedSymbolicArg 296 "MSTORE index"`
+    --       TODO: check  9e734b9da90e3e0765128b1f20ce1371f3a66085 (bufLength + copySlice was off by 1)
+    testCase "copyslice-check" $ do
+      Just c <- solcRuntime "C"
+        [i|
+        contract C {
+          function checkval(uint8 a) public {
+            bytes memory data = new bytes(5);
+            for(uint i = 0; i < 5; i++) data[i] = bytes1(a);
+            bytes memory ret = new bytes(data.length);
+            assembly {
+                let len := mload(data)
+                if iszero(call(0xff, 0x04, 0, add(data, 0x20), len, add(ret,0x20), len)) {
+                    invalid()
                 }
-                for(uint i = 0; i < 5; i++) assert(ret[i] == data[i]);
-              }
             }
-            |]
-          [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("checkval(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] VeriOpts {simp = False, debug = False, maxIter = Nothing, askSmtIters = Nothing}
-          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+            for(uint i = 0; i < 5; i++) assert(ret[i] == data[i]);
+          }
+        }
+        |]
+      [Qed res] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("checkval(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] VeriOpts {simp = False, debug = False, maxIter = Nothing, askSmtIters = Nothing}
+      putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
      -- TODO look at tests here for SAR: https://github.com/dapphub/dapptools/blob/01ef8ea418c3fe49089a44d56013d8fcc34a1ec2/src/dapp-tests/pass/constantinople.sol#L250
      testCase "opcode-sar-neg" $ do

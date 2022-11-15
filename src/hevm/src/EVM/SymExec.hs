@@ -378,9 +378,9 @@ simplify e = if (mapExpr go e == e)
     go (EVM.Types.LT (Lit a) (Lit b))
       | a < b = Lit 1
       | otherwise = Lit 0
-    go (EVM.Types.GT (Lit a) (Lit b))
-      | a > b = Lit 1
-      | otherwise = Lit 0
+    go (EVM.Types.GT a b) = EVM.Types.LT b a
+    go (EVM.Types.GEq a b) = EVM.Types.LEq b a
+    go (EVM.Types.LEq a b) = EVM.Types.Not (EVM.Types.GT a b)
 
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
@@ -391,10 +391,9 @@ simplify e = if (mapExpr go e == e)
       | otherwise = o
 
     -- redundant ITE
-    go o@(ITE c a b)
-      | c == Lit 1 = a
-      | c == Lit 0 = b
-      | otherwise = o
+    go (ITE (Lit x) a b)
+      | x == 0 = b
+      | otherwise = a
 
     -- redundant add / sub
     go o@(Sub (Add a b) c)
@@ -426,14 +425,38 @@ simplify e = if (mapExpr go e == e)
       | a == b = (And b c)
       | otherwise = o
 
+    -- Bitwise AND & OR. These MUST preserve bitwise equivalence
+    go o@(And (Lit x) _)
+      | x == 0 = Lit 0
+      | otherwise = o
+    go o@(And _ (Lit x))
+      | x == 0 = Lit 0
+      | otherwise = o
+    go o@(Or (Lit x) b)
+      | x == 0 = b
+      | otherwise = o
+    go o@(Or a (Lit x))
+      | x == 0 = a
+      | otherwise = o
+
+    -- If x is ever non zero the Or will always evaluate to some non zero value and the false branch will be unreachable
+    -- NOTE: with AND this does not work, because and(0x8, 0x4) = 0
+    go (ITE (Or (Lit x) a) t f)
+      | x == 0 = ITE a t f
+      | otherwise = t
+    go (ITE (Or a b@(Lit _)) t f) = ITE (Or b a) t f
+
     -- we write at least 32, so if x <= 32, it's FALSE
     go o@(EVM.Types.LT (BufLength (WriteWord {})) (Lit x))
       | x <= 32 = Lit 0
       | otherwise = o
     -- we write at least 32, so if x < 32, it's TRUE
-    go o@(EVM.Types.GT (BufLength (WriteWord {})) (Lit x))
+    go o@(EVM.Types.LT (Lit x) (BufLength (WriteWord {})))
       | x < 32 = Lit 1
       | otherwise = o
+
+    -- Double NOT is a no-op, since it's a bitwise inversion
+    go (EVM.Types.Not (EVM.Types.Not a)) = a
 
     go a = a
 
