@@ -430,11 +430,8 @@ simplify e = if (mapExpr go e == e)
       | x == 0 = a
       | otherwise = o
 
-    -- Non-bitwise AND & OR -- no need to preserve bitwise equivalence.
-    go (ITE (And (Lit x) a) t f)
-      | x == 0 = f
-      | otherwise = ITE a t f
-    go (ITE (And a b@(Lit _)) t f) = ITE (And b a) t f
+    -- Non-bitwise OR -- no need to preserve bitwise equivalence.
+    -- NOTE: with AND this does not work, because and(0x8, 0x4) = 0
     go (ITE (Or (Lit x) a) t f)
       | x == 0 = ITE a t f
       | otherwise = t

@@ -467,6 +467,46 @@ tests = testGroup "hevm"
         [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256)", [AbiIntType 256])) []
         putStrLn "Require works as expected"
      ,
+     testCase "ITE-with-bitwise-AND" $ do
+        --- using ignore to suppress huge output
+       Just c <- solcRuntime "C"
+         [i|
+         contract C {
+           function f(uint256 x) public pure {
+             require(x > 0);
+             uint256 a = (x & 8);
+             bool w;
+             // assembly is needed here, because solidity doesn't allow uint->bool conversion
+             assembly {
+                 w:=a
+             }
+             if (!w) assert(false); //we should get a CEX: when x has a 0 at bit 3 (i.e. value 8)
+           }
+         }
+         |]
+       -- should find a counterexample
+       [Cex _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) []
+       putStrLn "expected counterexample found"
+     ,
+     testCase "ITE-with-bitwise-OR" $ do
+        --- using ignore to suppress huge output
+       Just c <- solcRuntime "C"
+         [i|
+         contract C {
+           function f(uint256 x) public pure {
+             uint256 a = (x | 8);
+             bool w;
+             assembly {
+                 w:=a
+             }
+             assert(w);
+           }
+         }
+         |]
+       -- should find a counterexample
+       [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) []
+       putStrLn "this should always be true, due to bitwise OR with positive value"
+     ,
      -- TODO look at tests here for SAR: https://github.com/dapphub/dapptools/blob/01ef8ea418c3fe49089a44d56013d8fcc34a1ec2/src/dapp-tests/pass/constantinople.sol#L250
      testCase "opcode-sar-neg" $ do
         Just c <- solcRuntime "MyContract"
