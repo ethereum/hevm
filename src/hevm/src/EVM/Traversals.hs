@@ -43,7 +43,7 @@ foldExpr f acc expr = acc <> (go expr)
       e@(Lit _) -> f e
       e@(LitByte _) -> f e
       e@(Var _) -> f e
-      e@(GVar _ _) -> f e
+      e@(GVar _) -> f e
 
       -- bytes
 
@@ -258,7 +258,7 @@ mapExprM f expr = case expr of
   Lit a -> f (Lit a)
   LitByte a -> f (LitByte a)
   Var a -> f (Var a)
-  GVar s a -> f (GVar s a)
+  GVar s -> f (GVar s)
 
   -- bytes
 

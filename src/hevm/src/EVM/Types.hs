@@ -116,8 +116,14 @@ data EType
   deriving (Typeable)
 
 -- Variables refering to a global environment
-newtype GVar (a :: EType) = Id Int
-  deriving (Show, Eq, Ord)
+data GVar (a :: EType) where
+  BufVar :: Int -> GVar Buf
+  StoreVar :: Int -> GVar Storage
+
+deriving instance Show (GVar a)
+deriving instance Eq (GVar a)
+deriving instance Ord (GVar a)
+
 
 -- add type level list of constraints
 data Expr (a :: EType) where
@@ -126,7 +132,7 @@ data Expr (a :: EType) where
 
   Lit            :: W256 -> Expr EWord
   Var            :: Text -> Expr EWord
-  GVar           :: GVar a -> Text -> Expr a
+  GVar           :: GVar a -> Expr a
 
   -- bytes
 
