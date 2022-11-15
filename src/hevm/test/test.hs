@@ -504,7 +504,6 @@ tests = testGroup "hevm"
            }
          }
          |]
-       -- should find a counterexample
        [Qed _] <- withSolvers Z3 1 $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) []
        putStrLn "this should always be true, due to bitwise OR with positive value"
      ,
