@@ -32,9 +32,11 @@ import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty (NonEmpty, NonEmpty((:|)))
 import Data.String.Here
 import Data.Map (Map)
+import Data.List (foldl')
 import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Bifunctor (second)
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
 
 import EVM.Types
@@ -550,7 +552,7 @@ exprToSMT = \case
   e@(CopySlice srcIdx dstIdx size src dst) ->
     copySlice srcIdx dstIdx size (exprToSMT src) (exprToSMT dst)
   EmptyStore -> "emptyStore"
-  ConcreteStore s -> error "TODO: concretestore"
+  ConcreteStore s -> encodeConcreteStore s
   AbstractStore -> "abstractStore"
   e@(SStore addr idx val prev) ->
     let encAddr = exprToSMT addr
@@ -881,3 +883,14 @@ writeBytes bytes buf =
       let byteSMT = exprToSMT byte
           idxSMT = exprToSMT $ Lit idx in
       "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")"
+
+encodeConcreteStore :: Map W256 (Map W256 W256) -> Text
+encodeConcreteStore s = foldl' encodeWrite "emptyStore" writes
+  where
+    asList = fmap (second Map.toList) $ Map.toList s
+    writes = concatMap (\(addr, ws) -> fmap (\(k, v) -> (addr, k, v)) ws) asList
+    encodeWrite prev (addr, key, val) = let
+        encAddr = exprToSMT (Lit addr)
+        encKey = exprToSMT (Lit key)
+        encVal = exprToSMT (Lit val)
+      in "(sstore " <> encAddr `sp` encKey `sp` encVal `sp` prev <> ")"
