@@ -243,7 +243,7 @@ instance Options.ParseRecord (Command Options.Wrapped) where
     Options.parseRecordWithModifiers Options.lispCaseModifiers
 
 optsMode :: Command Options.Unwrapped -> Mode
-optsMode x = if debug x then Debug else if jsontrace x then JsonTrace else Run
+optsMode x = if Main.debug x then Debug else if jsontrace x then JsonTrace else Run
 
 applyCache :: (Maybe String, Maybe String) -> IO (EVM.VM -> EVM.VM)
 applyCache (state, cache) =
@@ -452,7 +452,7 @@ assert cmd = do
       rpcinfo = (,) block' <$> rpc cmd
   preState <- symvmFromCommand cmd
   let errCodes = fromMaybe defaultPanicCodes (assertions cmd)
-  if debug cmd then do
+  if Main.debug cmd then do
     srcInfo <- getSrcInfo cmd
     withSolvers EVM.SMT.Z3 4 $ \solvers -> do
       void $ TTY.runFromVM
@@ -461,7 +461,8 @@ assert cmd = do
         (EVM.Fetch.oracle solvers rpcinfo)
         preState
   else withSolvers EVM.SMT.Z3 4 $ \solvers -> do
-    res <- verify solvers preState (maxIterations cmd) (askSmtIterations cmd) rpcinfo (Just $ checkAssertions errCodes)
+    let opts = VeriOpts { simp = False, debug = False, maxIter = (maxIterations cmd), askSmtIters = (askSmtIterations cmd)}
+    res <- verify solvers opts preState rpcinfo (Just $ checkAssertions errCodes)
     case res of
       [Qed _] -> putStrLn "QED: No reachable property violations discovered"
       cexs -> do
