@@ -430,7 +430,7 @@ simplify e = if (mapExpr go e == e)
       | x == 0 = a
       | otherwise = o
 
-    -- Non-bitwise OR -- no need to preserve bitwise equivalence.
+    -- If x is ever non zero the Or will always evaluate to some non zero value and the false branch will be unreachable
     -- NOTE: with AND this does not work, because and(0x8, 0x4) = 0
     go (ITE (Or (Lit x) a) t f)
       | x == 0 = ITE a t f
