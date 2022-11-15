@@ -480,7 +480,7 @@ tests = testGroup "hevm"
              assembly {
                  w:=a
              }
-             if (!w) assert(false); //we should get a CEX: when x has a 0 at bit 3 (i.e. value 8)
+             if (!w) assert(false); //we should get a CEX: when x has a 0 at bit 3
            }
          }
          |]
@@ -496,10 +496,11 @@ tests = testGroup "hevm"
            function f(uint256 x) public pure {
              uint256 a = (x | 8);
              bool w;
+             // assembly is needed here, because solidity doesn't allow uint->bool conversion
              assembly {
                  w:=a
              }
-             assert(w);
+             assert(w); // due to bitwise OR with positive value, this must always be true
            }
          }
          |]
