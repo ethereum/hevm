@@ -89,10 +89,13 @@ formatSMT2 (SMT2 ls _) = T.unlines ls
 -- | Reads all intermediate variables from the builder state and produces SMT declaring them as constants
 declareIntermediates :: BufEnv -> StoreEnv -> SMT2
 declareIntermediates bufs stores =
-  let declBs = Map.foldrWithKey (\n expr rest -> encodeBuf n expr:rest) [] bufs
-      declSs = Map.foldrWithKey (\n expr rest -> encodeStore n expr:rest) [] stores in
-  SMT2 (["; intermediate buffers"] <> declBs <> ["", "; intermediate stores"] <> declSs) mempty
+  let encSs = Map.mapWithKey encodeStore stores
+      encBs = Map.mapWithKey encodeBuf bufs
+      sorted = List.sortBy compareFst $ Map.toList $ encSs <> encBs
+      decls = fmap snd sorted
+  in SMT2 (["; intermediate buffers & stores"] <> decls) mempty
   where
+    compareFst (l, _) (r, _) = compare l r
     encodeBuf n expr =
        "(define-const buf" <> (T.pack . show $ n) <> " Buf " <> exprToSMT expr <> ")"
     encodeStore n expr =
