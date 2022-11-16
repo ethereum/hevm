@@ -369,6 +369,9 @@ simplify e = if (mapExpr go e == e)
       | otherwise = o
     go o@(ReadWord (Lit _) _) = Expr.simplifyReads o
     go o@(ReadByte (Lit _) _) = Expr.simplifyReads o
+    go (WriteWord a b c) = Expr.writeWord a b c
+    go (WriteByte a b c) = Expr.writeByte a b c
+    go (CopySlice a b c d f) = Expr.copySlice a b c d f
 
     -- function selector checks
     go (SHR (Lit 0xe0) (ReadWord (Lit 0x0) (WriteByte (Lit 0x0) (LitByte sel0) (WriteByte (Lit 0x1) (LitByte sel1) (WriteByte (Lit 0x2) (LitByte sel2) (WriteByte (Lit 0x3) (LitByte sel3) _))))))

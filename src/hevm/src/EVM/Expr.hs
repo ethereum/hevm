@@ -392,8 +392,8 @@ instance Monoid (Expr Buf) where
 -- | Removes any irrelevant writes when reading from a buffer
 simplifyReads :: Expr a -> Expr a
 simplifyReads = \case
-  ReadWord (Lit idx) b -> ReadWord (Lit idx) (stripWrites idx (idx + 31) b)
-  ReadByte (Lit idx) b -> ReadByte (Lit idx) (stripWrites idx idx b)
+  ReadWord (Lit idx) b -> readWord (Lit idx) (stripWrites idx (idx + 31) b)
+  ReadByte (Lit idx) b -> readByte (Lit idx) (stripWrites idx idx b)
   a -> a
 
 -- | Strips writes from the buffer that can be statically determined to be out of range
