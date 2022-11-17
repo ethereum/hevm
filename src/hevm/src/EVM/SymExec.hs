@@ -351,6 +351,7 @@ flattenExpr = go []
       Return  buf store -> [(pcs, Return buf store)]
       EVM.Types.IllegalOverflow -> [(pcs, EVM.Types.IllegalOverflow)]
       TmpErr s -> error s
+      GVar _ -> error "cannot flatten an Expr containing a GVar"
 
 -- | Simple recursive match based AST simplification
 -- Note: may not terminate!
@@ -369,10 +370,6 @@ simplify e = if (mapExpr go e == e)
       | otherwise = o
     go o@(ReadWord (Lit _) _) = Expr.simplifyReads o
     go o@(ReadByte (Lit _) _) = Expr.simplifyReads o
-
-    -- function selector checks
-    go (SHR (Lit 0xe0) (ReadWord (Lit 0x0) (WriteByte (Lit 0x0) (LitByte sel0) (WriteByte (Lit 0x1) (LitByte sel1) (WriteByte (Lit 0x2) (LitByte sel2) (WriteByte (Lit 0x3) (LitByte sel3) _))))))
-      = Lit $ word $ padLeft 32 $ BS.singleton sel0 <> BS.singleton sel1 <> BS.singleton sel2 <> BS.singleton sel3
 
     -- concrete LT / GT
     go (EVM.Types.LT (Lit a) (Lit b))
