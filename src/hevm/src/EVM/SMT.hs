@@ -465,7 +465,7 @@ exprToSMT = \case
   Min a b ->
     let aenc = exprToSMT a
         benc = exprToSMT b in
-    "(ite (<= " <> aenc `sp` benc <> ") " <> aenc `sp` benc <> ")"
+    "(ite (bvule " <> aenc `sp` benc <> ") " <> aenc `sp` benc <> ")"
   LT a b ->
     let cond = op2 "bvult" a b in
     "(ite " <> cond `sp` one `sp` zero <> ")"
