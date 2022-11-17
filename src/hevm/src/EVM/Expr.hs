@@ -397,11 +397,11 @@ simplifyReads = \case
   a -> a
 
 -- | Strips writes from the buffer that can be statically determined to be out of range
--- TODO: are the bounds here correct? think there might be some off by one mistakes...
+-- TODO: are the bounds here correct? I think there might be some off by one mistakes...
 stripWrites :: W256 -> W256 -> Expr Buf -> Expr Buf
 stripWrites bottom top = \case
   AbstractBuf s -> AbstractBuf s
-  ConcreteBuf b -> ConcreteBuf $ BS.take (num top) b
+  ConcreteBuf b -> ConcreteBuf $ BS.take (num top+1) b
   WriteByte (Lit idx) v prev
     -> if idx < bottom || idx > top
        then stripWrites bottom top prev
@@ -420,6 +420,7 @@ stripWrites bottom top = \case
   WriteByte i v prev -> WriteByte i v (stripWrites bottom top prev)
   WriteWord i v prev -> WriteWord i v (stripWrites bottom top prev)
   CopySlice srcOff dstOff size src dst -> CopySlice srcOff dstOff size src dst
+  GVar _ ->  error "unexpected GVar in stripWrites"
 
 
 -- ** Storage ** -----------------------------------------------------------------------------------
