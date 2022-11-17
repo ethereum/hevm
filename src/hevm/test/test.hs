@@ -10,23 +10,29 @@ import System.Directory
 import System.IO.Temp
 import System.Process (readProcess)
 import GHC.IO.Handle (hClose)
+import GHC.Natural
 import Control.Monad
 
-import Prelude hiding (fail)
+import Prelude hiding (fail, LT, GT)
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BS (fromStrict)
 import qualified Data.ByteString.Base16 as Hex
 import Data.Bits ((.&.))
 import Data.Maybe
+import Data.Typeable
 import Data.Map (lookup)
 import Data.List (elemIndex)
+import Data.DoubleWord
 import Test.Tasty
 import Test.Tasty.QuickCheck
+import Test.QuickCheck.Instances.Text()
+import Test.QuickCheck.Instances.Natural()
+import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty.HUnit
 import Test.Tasty.Runners
 import Test.Tasty.ExpectedFailure
-import Language.SMT2.Parser
+import Data.Coerce
 
 import Control.Monad.State.Strict (execState, runState)
 import Control.Lens hiding (List, pre, (.>))
@@ -43,9 +49,9 @@ import EVM hiding (Query)
 import EVM.SymExec
 import EVM.UnitTest (dappTest, UnitTestOptions, getParametersFromEnvironmentVariables)
 import EVM.ABI
-import EVM.Format
 import EVM.Exec
 import EVM.Dapp
+import EVM.Format
 import qualified EVM.Patricia as Patricia
 import EVM.Precompiled
 import EVM.RLP
@@ -53,16 +59,13 @@ import EVM.Solidity
 import EVM.Types
 import EVM.SMT hiding (storage, calldata)
 import qualified EVM.TTY as TTY
-import qualified Data.ByteString.Base16 as BS16
 import qualified EVM.Expr as Expr
 import qualified EVM.Fetch as Fetch
 import qualified EVM.UnitTest
 import qualified Paths_hevm as Paths
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
-import EVM.ABI (AbiType(AbiUIntType))
-import EVM.SymExec (VeriOpts(askSmtIters), defaultVeriOpts)
+import Language.SMT2.Syntax (SpecConstant())
 
 main :: IO ()
 main = defaultMain tests
@@ -74,7 +77,22 @@ runSubSet p = defaultMain . applyPattern p $ tests
 
 tests :: TestTree
 tests = testGroup "hevm"
-  [ testGroup "MemoryTests"
+  [ testGroup "StorageTests"
+    [ testProperty "readStorage-equivalance" $ \(store, addr, slot) ->
+        -- we use the SMT solver to compare the result of readStorage, to the unsimplified result
+        ioProperty $ withSolvers Z3 1 $ \solvers -> do
+          let simplified = Expr.readStorage' addr slot store
+              full = SLoad addr slot store
+          res <- checkSat' solvers (assertProps [simplified ./= full])
+          pure $ res == Unsat
+    ]
+  , testGroup "SimplifierTests"
+    [ testProperty "buffer-simplification" $ \(expr :: Expr Buf) -> runSimplifyTest expr
+    , testProperty "store-simplification" $ \(expr :: Expr Storage) -> runSimplifyTest expr
+    , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> runSimplifyTest expr
+    , testProperty "word-simplification" $ \(expr :: Expr EWord) -> runSimplifyTest expr
+    ]
+  , testGroup "MemoryTests"
     [ testCase "read-write-same-byte"  $ assertEqual ""
         (LitByte 0x12)
         (Expr.readByte (Lit 0x20) (WriteByte (Lit 0x20) (LitByte 0x12) mempty))
@@ -1364,6 +1382,17 @@ tests = testGroup "hevm"
     (===>) = assertSolidityComputation
 
 
+runSimplifyTest :: (Typeable a) => Expr a -> Property
+runSimplifyTest expr = ioProperty $ withSolvers Z3 1 $ \solvers -> do
+  let simplified = simplify expr
+  if simplified == expr
+     then pure True
+     else do
+       let smt = assertProps [simplified ./= expr]
+       res <- checkSat' solvers smt
+       pure $ res == Unsat
+
+
 runSimpleVM :: ByteString -> ByteString -> Maybe ByteString
 runSimpleVM x ins = case loadVM x of
                       Nothing -> Nothing
@@ -1467,6 +1496,182 @@ instance Arbitrary RLPData where
          ls <- vectorOf k arbitrary
          return $ RLPData $ List [r | RLPData r <- ls])
    ]
+
+instance Arbitrary Word128 where
+  arbitrary = liftM2 fromHiAndLo arbitrary arbitrary
+
+instance Arbitrary Word256 where
+  arbitrary = liftM2 fromHiAndLo arbitrary arbitrary
+
+instance Arbitrary W256 where
+  arbitrary = fmap W256 arbitrary
+
+instance Arbitrary (Expr Storage) where
+  arbitrary = sized genStorage
+
+instance Arbitrary (Expr EWord) where
+  arbitrary = sized genWord
+
+instance Arbitrary (Expr Byte) where
+  arbitrary = sized genByte
+
+instance Arbitrary (Expr Buf) where
+  arbitrary = sized genBuf
+
+genByte :: Int -> Gen (Expr Byte)
+genByte 0 = fmap LitByte arbitrary
+genByte sz = oneof
+  [ liftM2 IndexWord subWord subWord
+  , liftM2 ReadByte subWord subBuf
+  ]
+  where
+    subWord = genWord (sz `div` 2)
+    subBuf = genBuf (sz `div` 2)
+
+genNat :: Gen Int
+genNat = fmap fromIntegral (arbitrary :: Gen Natural)
+
+genName :: Gen Text
+genName = fmap T.pack $ listOf1 (oneof . (fmap pure) $ ['a'..'z'] <> ['A'..'Z'])
+
+genWord :: Int -> Gen (Expr EWord)
+genWord 0 = frequency
+  [ (1, fmap Lit arbitrary)
+  , (1, oneof
+      [ pure Origin
+      , pure Coinbase
+      , pure Timestamp
+      , pure BlockNumber
+      , pure Difficulty
+      , pure GasLimit
+      , pure ChainId
+      , pure BaseFee
+      , fmap CallValue genNat
+      , fmap Caller genNat
+      , fmap Address genNat
+      --, liftM2 SelfBalance arbitrary arbitrary
+      --, liftM2 Gas arbitrary arbitrary
+      , fmap Lit arbitrary
+      , fmap Var genName
+      ]
+    )
+  ]
+genWord sz = frequency
+ [ (1, fmap Lit arbitrary)
+ , (1, oneof
+    [ liftM2 Add subWord subWord
+    , liftM2 Sub subWord subWord
+    , liftM2 Mul subWord subWord
+    , liftM2 Div subWord subWord
+    , liftM2 SDiv subWord subWord
+    --, liftM2 Mod subWord subWord
+    --, liftM2 SMod subWord subWord
+    --, liftM3 AddMod subWord subWord subWord
+    --, liftM3 MulMod subWord subWord subWord
+    --, liftM2 Exp subWord litWord
+    , liftM2 SEx subWord subWord
+    , liftM2 Min subWord subWord
+    , liftM2 LT subWord subWord
+    , liftM2 GT subWord subWord
+    , liftM2 LEq subWord subWord
+    , liftM2 GEq subWord subWord
+    , liftM2 SLT subWord subWord
+    --, liftM2 SGT subWord subWord
+    , liftM2 Eq subWord subWord
+    , fmap IsZero subWord
+    , liftM2 And subWord subWord
+    , liftM2 Or subWord subWord
+    , liftM2 Xor subWord subWord
+    , fmap Not subWord
+    , liftM2 SHL subWord subWord
+    , liftM2 SHR subWord subWord
+    , liftM2 SAR subWord subWord
+    , fmap BlockHash subWord
+    --, liftM3 Balance arbitrary arbitrary subWord
+    --, fmap CodeSize subWord
+    --, fmap ExtCodeHash subWord
+    , fmap Keccak subBuf
+    , fmap SHA256 subBuf
+    , liftM3 SLoad subWord subWord subStore
+    , liftM2 ReadWord subWord subBuf
+    , fmap BufLength subBuf
+    , do
+      one <- subByte
+      two <- subByte
+      three <- subByte
+      four <- subByte
+      five <- subByte
+      six <- subByte
+      seven <- subByte
+      eight <- subByte
+      nine <- subByte
+      ten <- subByte
+      eleven <- subByte
+      twelve <- subByte
+      thirteen <- subByte
+      fourteen <- subByte
+      fifteen <- subByte
+      sixteen <- subByte
+      seventeen <- subByte
+      eighteen <- subByte
+      nineteen <- subByte
+      twenty <- subByte
+      twentyone <- subByte
+      twentytwo <- subByte
+      twentythree <- subByte
+      twentyfour <- subByte
+      twentyfive <- subByte
+      twentysix <- subByte
+      twentyseven <- subByte
+      twentyeight <- subByte
+      twentynine <- subByte
+      thirty <- subByte
+      thirtyone <- subByte
+      thirtytwo <- subByte
+      pure $ JoinBytes
+        one two three four five six seven eight nine ten
+        eleven twelve thirteen fourteen fifteen sixteen
+        seventeen eighteen nineteen twenty twentyone
+        twentytwo twentythree twentyfour twentyfive
+        twentysix twentyseven twentyeight twentynine
+        thirty thirtyone thirtytwo
+    ])
+  ]
+ where
+   subWord = genWord (sz `div` 2)
+   subBuf = genBuf (sz `div` 2)
+   subStore = genStorage (sz `div` 2)
+   subByte = genByte (sz `div` 2)
+
+genBuf :: Int -> Gen (Expr Buf)
+genBuf 0 = oneof
+  [ fmap AbstractBuf genName
+  , fmap ConcreteBuf arbitrary
+  ]
+genBuf sz = oneof
+  [ liftM3 WriteWord subWord subWord subBuf
+  , liftM3 WriteByte subWord subByte subBuf
+  , liftM5 CopySlice subWord subWord smolLitWord subBuf subBuf
+  ]
+  where
+    -- copySlice gets unrolled in the generated SMT so we can't go too crazy here
+    smolLitWord = do
+      w <- arbitrary
+      pure $ Lit (w `mod` 100)
+    subWord = genWord (sz `div` 2)
+    subByte = genByte (sz `div` 2)
+    subBuf = genBuf (sz `div` 2)
+
+genStorage :: Int -> Gen (Expr Storage)
+genStorage 0 = oneof
+  [ pure AbstractStore
+  , pure EmptyStore
+  , fmap ConcreteStore arbitrary
+  ]
+genStorage sz = liftM4 SStore subWord subWord subWord subStore
+  where
+    subStore = genStorage (sz `div` 2)
+    subWord = genWord (sz `div` 2)
 
 data Invocation
   = SolidityCall Text [AbiValue]

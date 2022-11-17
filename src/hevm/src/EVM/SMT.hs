@@ -651,7 +651,7 @@ data CheckSatResult
   | Unsat
   | Unknown
   | Error Text
-  deriving (Show)
+  deriving (Show, Eq)
 
 isSat :: CheckSatResult -> Bool
 isSat (Sat _) = True

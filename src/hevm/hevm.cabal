@@ -249,6 +249,7 @@ test-suite test
   build-depends:
     HUnit >= 1.6,
     QuickCheck,
+    quickcheck-instances,
     base,
     base16-bytestring,
     binary,
@@ -259,6 +260,7 @@ test-suite test
     hevm,
     lens,
     mtl,
+    data-dword,
     process,
     tasty >= 1.0,
     tasty-hunit >= 0.10,
