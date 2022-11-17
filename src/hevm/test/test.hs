@@ -74,7 +74,26 @@ runSubSet p = defaultMain . applyPattern p $ tests
 
 tests :: TestTree
 tests = testGroup "hevm"
-  [ testGroup "MemoryTests"
+  [ testGroup "StorageTests"
+    [ testCase "read-from-sstore" $ assertEqual ""
+        (Lit 0xab)
+        (Expr.readStorage' (Lit 0x0) (Lit 0x0) (SStore (Lit 0x0) (Lit 0x0) (Lit 0xab) AbstractStore))
+    , testCase "read-from-concrete" $ assertEqual ""
+        (Lit 0xab)
+        (Expr.readStorage' (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])]))
+    , testCase "read-past-abstract-writes-to-different-address" $ assertEqual ""
+        (Lit 0xab)
+        (Expr.readStorage' (Lit 0x0) (Lit 0x0) (SStore (Lit 0x1) (Var "a") (Var "b") (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])])))
+    , testCase "abstract-slots-block-reads-for-same-address" $ assertEqual ""
+        (SLoad (Lit 0x0) (Lit 0x0) (SStore (Lit 0x0) (Var "b") (Var "c") (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])])))
+        (Expr.readStorage' (Lit 0x0) (Lit 0x0)
+          (SStore (Lit 0x1) (Var "1312") (Var "acab") (SStore (Lit 0x0) (Var "b") (Var "c") (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])]))))
+    , testCase "abstract-addrs-block-reads" $ assertEqual ""
+        (SLoad (Lit 0x0) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])])))
+        (Expr.readStorage' (Lit 0x0) (Lit 0x0)
+          (SStore (Lit 0xacab) (Lit 0xdead) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])]))))
+    ]
+  , testGroup "MemoryTests"
     [ testCase "read-write-same-byte"  $ assertEqual ""
         (LitByte 0x12)
         (Expr.readByte (Lit 0x20) (WriteByte (Lit 0x20) (LitByte 0x12) mempty))
