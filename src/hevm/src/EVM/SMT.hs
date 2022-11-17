@@ -68,9 +68,9 @@ instance Monoid CexVars where
 
 data SMTCex = SMTCex
   { calldata :: Map Text Language.SMT2.Parser.SpecConstant
-  , storage :: SpecConstant
-  , blockContext :: SpecConstant
-  , txContext :: SpecConstant
+  , storage :: Text
+  , blockContext :: Text
+  , txContext :: Text
   }
   deriving (Eq, Show)
 
@@ -740,6 +740,9 @@ withSolvers solver count cont = do
                   mempty (calldataV cexvars)
               pure $ Sat $ SMTCex
                 { calldata = calldatamodels
+                , storage = mempty
+                , blockContext = mempty
+                , txContext = mempty
                 }
             "unsat" -> pure Unsat
             "timeout" -> pure Unknown
