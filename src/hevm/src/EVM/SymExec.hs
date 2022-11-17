@@ -377,7 +377,7 @@ simplify e = if (mapExpr go e == e)
       | otherwise = Lit 0
     go (EVM.Types.GT a b) = EVM.Types.LT b a
     go (EVM.Types.GEq a b) = EVM.Types.LEq b a
-    go (EVM.Types.LEq a b) = EVM.Types.Not (EVM.Types.GT a b)
+    go (EVM.Types.LEq a b) = EVM.Types.IsZero (EVM.Types.GT a b)
 
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
