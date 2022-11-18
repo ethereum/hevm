@@ -11,6 +11,7 @@ import System.IO.Temp
 import System.Process (readProcess)
 import GHC.IO.Handle (hClose)
 import Control.Monad
+import Data.Char (ord)
 
 import Prelude hiding (fail)
 
@@ -146,6 +147,15 @@ tests = testGroup "hevm"
         -- same as above, but with offset 2
         (LitByte 0xbb)
         (Expr.indexWord (Lit 2) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
+    , testCase "encodeConcreteStore-overwrite" $
+      let
+        w :: Int -> W256
+        w x = W256 $ EVM.Types.word256 $ BS.pack [fromIntegral x]
+      in
+      assertEqual ""
+        (EVM.SMT.encodeConcreteStore $
+          Map.fromList [(w 1, (Map.fromList [(w 2, w 99), (w 2, w 100)]))])
+        "(sstore (_ bv1 256) (_ bv2 256) (_ bv100 256) emptyStore)"
     , testCase "indexword-oob-sym" $ assertEqual ""
         -- indexWord should return 0 for oob access
         (LitByte 0x0)
