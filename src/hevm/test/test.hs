@@ -1393,6 +1393,7 @@ runSimplifyTest expr = ioProperty $ withSolvers Z3 1 (Just 250) $ \solvers -> do
      else do
        let smt = assertProps [simplified ./= expr]
        res <- checkSat solvers smt
+       print res
        pure $ case res of
          Unsat -> True
          EVM.SMT.Unknown -> True
