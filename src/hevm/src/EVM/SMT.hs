@@ -107,9 +107,10 @@ declareIntermediates bufs stores =
        "(define-const store" <> (T.pack . show $ n) <> " Storage " <> exprToSMT expr <> ")"
 
 keccakAssumptions :: [Prop] -> [Expr Buf] -> [Expr Storage] -> SMT2
-keccakAssumptions ps bufs stores =
-  let asserts = fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakInj ps bufs stores) in
-  SMT2 (["; keccak assumptions"] <> asserts) mempty
+keccakAssumptions ps bufs stores = SMT2 (["; keccak assumptions"] <> injAsserts <> minAsserts) mempty
+  where
+    injAsserts = fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakInj ps bufs stores)
+    minAsserts = fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakMin ps bufs stores)
 
 assertProps :: [Prop] -> SMT2
 assertProps ps =

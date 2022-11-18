@@ -4,7 +4,7 @@
     Description: Expr passes to determine Keccak assumptions
 -}
 
-module EVM.Keccak (keccakInj) where
+module EVM.Keccak (keccakInj, keccakMin) where
 
 import Prelude hiding (Word, LT, GT)
 
@@ -52,6 +52,20 @@ combine lst = combine' lst []
       let xcomb = [ (x, y) | y <- xs] in
       combine' xs (xcomb:acc)
 
+-- | Takes a list of Props, finds all Keccak occurences and generates
+-- assumptions that all keccak invocations never produce an output less than
+-- 50. This is a probabalistic assumption, but it's one that the solidity
+-- compiler relies on (to avoid mapping / dynamic array collisions with
+-- "normal" storage slots), and presenting these results as counterexamples is
+-- not helpful to end users.
+keccakMin :: [Prop] -> [Expr Buf] -> [Expr Storage] -> [Prop]
+keccakMin ps bufs stores =
+  let (_, st) = runState (findKeccakPropsExprs ps bufs stores) initState in
+  fmap minProp (Set.toList (keccaks st))
+  where
+    minProp :: Expr EWord -> Prop
+    minProp k@(Keccak _) = PGT k (Lit 50)
+    minProp _ = error "Internal error: expected keccak expression"
 
 -- | Takes a list of Props, finds all Keccak occurences and generates
 -- Keccak injectivity assumptions for all unique pairs of Keccak calls
