@@ -1,4 +1,5 @@
 {-# Language GADTs #-}
+{-# Language NumericUnderscores #-}
 {-# Language QuasiQuotes #-}
 {-# Language DataKinds #-}
 
@@ -32,7 +33,6 @@ import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty.HUnit
 import Test.Tasty.Runners
 import Test.Tasty.ExpectedFailure
-import Data.Coerce
 
 import Control.Monad.State.Strict (execState, runState)
 import Control.Lens hiding (List, pre, (.>))
@@ -1657,15 +1657,25 @@ genBuf 0 = oneof
   , fmap ConcreteBuf arbitrary
   ]
 genBuf sz = oneof
-  [ liftM3 WriteWord subWord subWord subBuf
-  , liftM3 WriteByte subWord subByte subBuf
-  , liftM5 CopySlice subWord subWord smolLitWord subBuf subBuf
+  [ liftM3 WriteWord (maybeBoundedLit 4_000_000) subWord subBuf
+  , liftM3 WriteByte (maybeBoundedLit 4_000_000) subByte subBuf
+  -- we don't generate copyslice instances where:
+  --   - size is abstract
+  --   - size > 100 (due to unrolling in SMT.hs)
+  --   - literal dstOffsets are > 4,000,000 (due to unrolling in SMT.hs)
+  -- n.b. that 4,000,000 is the theoretical maximum memory size given a 30,000,000 block gas limit
+  , liftM5 CopySlice subWord (maybeBoundedLit 4_000_000) smolLitWord subBuf subBuf
   ]
   where
     -- copySlice gets unrolled in the generated SMT so we can't go too crazy here
     smolLitWord = do
       w <- arbitrary
       pure $ Lit (w `mod` 100)
+    maybeBoundedLit bound = do
+      o <- (arbitrary :: Gen (Expr EWord))
+      pure $ case o of
+            Lit w -> Lit $ w `mod` bound
+            _ -> o
     subWord = genWord (sz `div` 5)
     subByte = genByte (sz `div` 10)
     subBuf = genBuf (sz `div` 10)
