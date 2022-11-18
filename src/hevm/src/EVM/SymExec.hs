@@ -370,6 +370,9 @@ simplify e = if (mapExpr go e == e)
       | otherwise = o
     go o@(ReadWord (Lit _) _) = Expr.simplifyReads o
     go o@(ReadByte (Lit _) _) = Expr.simplifyReads o
+    go (WriteWord a b c) = Expr.writeWord a b c
+    go (WriteByte a b c) = Expr.writeByte a b c
+    go (CopySlice a b c d f) = Expr.copySlice a b c d f
 
     -- concrete LT / GT
     go (EVM.Types.LT (Lit a) (Lit b))
