@@ -44,6 +44,7 @@ import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_i
 import EVM.Types
 import EVM.Traversals
 import EVM.CSE
+import EVM.Keccak
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
 import qualified Language.SMT2.Syntax as Language.SMT2.Parser
 import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
@@ -105,6 +106,10 @@ declareIntermediates bufs stores =
     encodeStore n expr =
        "(define-const store" <> (T.pack . show $ n) <> " Storage " <> exprToSMT expr <> ")"
 
+keccakAssumptions :: [Prop] -> SMT2
+keccakAssumptions ps =
+  SMT2 (["; keccak assumptions"] <> fmap propToSMT (keccakInj ps)) mempty
+
 assertProps :: [Prop] -> SMT2
 assertProps ps =
   let encs = map propToSMT ps_elim
@@ -117,6 +122,7 @@ assertProps ps =
   <> (declareFrameContext . nubOrd $ foldl (<>) [] frameCtx)
   <> intermediates
   <> SMT2 [""] mempty
+  <> keccakAssumptions ps
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
 
   where
