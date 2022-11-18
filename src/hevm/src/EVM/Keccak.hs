@@ -31,14 +31,19 @@ go = \case
     pure e
   e -> pure e
 
-findKeccak :: forall a. Expr a -> State BuilderState (Expr a)
-findKeccak e = mapExprM go e
+findKeccakExpr :: forall a. Expr a -> State BuilderState (Expr a)
+findKeccakExpr e = mapExprM go e
 
 findKeccakProp :: Prop -> State BuilderState Prop
 findKeccakProp p = mapPropM go p
 
-findKeccakProps :: [Prop] -> State BuilderState [Prop]
-findKeccakProps ps = mapM findKeccakProp ps
+findKeccakPropsExprs :: forall a. [Prop] -> [Expr Buf]  -> [Expr Storage]-> State BuilderState ()
+findKeccakPropsExprs ps bufs stores = do
+  mapM findKeccakProp ps;
+  mapM findKeccakExpr bufs;
+  mapM findKeccakExpr stores;
+  pure ()
+
 
 combine :: [a] -> [(a,a)]
 combine lst = combine' lst []
@@ -51,9 +56,9 @@ combine lst = combine' lst []
 
 -- | Takes a list of Props, finds all Keccak occurences and generates
 -- Keccak injectivity assumptions for all unique pairs of Keccak calls
-keccakInj :: [Prop] -> [Prop]
-keccakInj p =
-  let (_, st) = runState (findKeccakProps p) initState in
+keccakInj :: forall a. [Prop] -> [Expr Buf]  -> [Expr Storage] -> [Prop]
+keccakInj ps bufs stores =
+  let (_, st) = runState (findKeccakPropsExprs ps bufs stores) initState in
   fmap injProp $ combine (Set.toList (keccaks st))
   where
     injProp :: (Expr EWord, Expr EWord) -> Prop
