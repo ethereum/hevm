@@ -380,7 +380,7 @@ simplify e = if (mapExpr go e == e)
       | otherwise = Lit 0
     go (EVM.Types.GT a b) = EVM.Types.LT b a
     go (EVM.Types.GEq a b) = EVM.Types.LEq b a
-    go (EVM.Types.LEq a b) = EVM.Types.Not (EVM.Types.GT a b)
+    go (EVM.Types.LEq a b) = EVM.Types.IsZero (EVM.Types.GT a b)
 
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
@@ -506,7 +506,7 @@ reachable2 solvers e = do
         pure (fst tres <> fst fres, subexpr)
       leaf -> do
         let query = assertProps pcs
-        res <- checkSat' solvers query
+        res <- checkSat solvers query
         case res of
           Sat _ -> pure ([query], Just leaf)
           Unsat -> pure ([query], Nothing)
@@ -530,8 +530,8 @@ reachable solvers = go []
         let
           tquery = assertProps (PEq c (Lit 1) : pcs)
           fquery = assertProps (PEq c (Lit 0) : pcs)
-        tres <- (checkSat' solvers tquery)
-        fres <- (checkSat' solvers fquery)
+        tres <- (checkSat solvers tquery)
+        fres <- (checkSat solvers fquery)
         print (tres, fres)
         case (tres, fres) of
           (Error tm, Error fm) -> do
@@ -623,7 +623,7 @@ verify solvers opts preState rpcinfo maybepost = do
       when (debug opts) $ putStrLn $ "Checking for reachability of " <> show (length withQueries) <> "\n potential property violations"
       results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
         when (debug opts) $ putStrLn $ "--- query BEGIN ---\n" <> (show query) <> "\n--- query END ---\n"
-        res <- checkSat' solvers query
+        res <- checkSat solvers query
         when (debug opts) $ putStrLn $ "--- res BEGIN ---\n" <> (show res) <> "\n--- res END ---\n"
         pure (res, leaf)
       let cexs = filter (\(res, _) -> not . isUnsat $ res) results
