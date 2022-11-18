@@ -24,7 +24,9 @@ import Control.Monad.State.Strict
 import Language.SMT2.Parser (getValueRes, parseFileMsg)
 import Data.Either
 import Data.Maybe
+import Data.Word
 import Numeric (readHex)
+import Data.ByteString (ByteString)
 
 import qualified Data.ByteString as BS
 import qualified Data.List as List
@@ -533,7 +535,7 @@ exprToSMT = \case
   ReadByte idx src -> op2 "select" src idx
 
   ConcreteBuf "" -> "emptyBuf"
-  ConcreteBuf bs -> writeBytes (LitByte <$> BS.unpack bs) mempty
+  ConcreteBuf bs -> writeBytes bs mempty
   AbstractBuf s -> s
   ReadWord idx prev -> op2 "readWord" idx prev
   BufLength b -> op1 "bufLength" b
@@ -870,12 +872,16 @@ concatBytes bytes = foldl wrap "" $ NE.reverse bytes
       "(concat " <> byteSMT `sp` inner <> ")"
 
 -- | Concatenates a list of bytes into a larger bitvector
-writeBytes :: [Expr Byte] -> Expr Buf -> Text
-writeBytes bytes buf =
-  let bufSMT = exprToSMT buf in
-  foldl wrap bufSMT $ reverse (zip [0..] bytes)
+writeBytes :: ByteString -> Expr Buf -> Text
+writeBytes bytes buf = snd $ BS.foldl' wrap (0, exprToSMT buf) bytes
   where
-    wrap inner (idx, byte) =
-      let byteSMT = exprToSMT byte
-          idxSMT = exprToSMT $ Lit idx in
-      "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")"
+    -- we don't need to store zeros if the base buffer is empty
+    skipZeros = buf == mempty
+    wrap :: (Int, Text) -> Word8 -> (Int, Text)
+    wrap (idx, inner) byte =
+      if skipZeros && byte == 0
+      then (idx + 1, inner)
+      else let
+          byteSMT = exprToSMT (LitByte byte)
+          idxSMT = exprToSMT . Lit . num $ idx
+        in (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
