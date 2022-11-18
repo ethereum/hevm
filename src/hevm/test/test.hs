@@ -135,6 +135,9 @@ tests = testGroup "hevm"
           (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0)
           (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0)
           (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0) (LitByte 0)))
+    , testCase "stripbytes-concrete-bug" $ assertEqual ""
+        (Expr.simplifyReads (ReadByte (Lit 0) (ConcreteBuf "5")))
+        (ReadByte (Lit 0) (ConcreteBuf "5"))
     ]
   , testGroup "ABI"
     [ testProperty "Put/get inverse" $ \x ->
