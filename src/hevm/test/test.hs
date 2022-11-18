@@ -1529,8 +1529,8 @@ genByte sz = oneof
   , liftM2 ReadByte subWord subBuf
   ]
   where
-    subWord = genWord (sz `div` 2)
-    subBuf = genBuf (sz `div` 2)
+    subWord = genWord (sz `div` 10)
+    subBuf = genBuf (sz `div` 10)
 
 genNat :: Gen Int
 genNat = fmap fromIntegral (arbitrary :: Gen Natural)
@@ -1642,10 +1642,10 @@ genWord sz = frequency
     ])
   ]
  where
-   subWord = genWord (sz `div` 2)
-   subBuf = genBuf (sz `div` 2)
-   subStore = genStorage (sz `div` 2)
-   subByte = genByte (sz `div` 2)
+   subWord = genWord (sz `div` 5)
+   subBuf = genBuf (sz `div` 10)
+   subStore = genStorage (sz `div` 10)
+   subByte = genByte (sz `div` 10)
 
 genBuf :: Int -> Gen (Expr Buf)
 genBuf 0 = oneof
@@ -1662,9 +1662,9 @@ genBuf sz = oneof
     smolLitWord = do
       w <- arbitrary
       pure $ Lit (w `mod` 100)
-    subWord = genWord (sz `div` 2)
-    subByte = genByte (sz `div` 2)
-    subBuf = genBuf (sz `div` 2)
+    subWord = genWord (sz `div` 5)
+    subByte = genByte (sz `div` 10)
+    subBuf = genBuf (sz `div` 10)
 
 genStorage :: Int -> Gen (Expr Storage)
 genStorage 0 = oneof
@@ -1674,8 +1674,8 @@ genStorage 0 = oneof
   ]
 genStorage sz = liftM4 SStore subWord subWord subWord subStore
   where
-    subStore = genStorage (sz `div` 2)
-    subWord = genWord (sz `div` 2)
+    subStore = genStorage (sz `div` 10)
+    subWord = genWord (sz `div` 5)
 
 data Invocation
   = SolidityCall Text [AbiValue]
