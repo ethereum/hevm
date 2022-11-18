@@ -677,10 +677,10 @@ checkSat (SolverGroup taskQueue) script = do
   readChan resChan
 
 
-withSolvers :: Solver -> Natural -> (SolverGroup -> IO a) -> IO a
-withSolvers solver count cont = do
+withSolvers :: Solver -> Natural -> Maybe Natural -> (SolverGroup -> IO a) -> IO a
+withSolvers solver count timeout cont = do
   -- spawn solvers
-  instances <- mapM (const $ spawnSolver solver) [1..count]
+  instances <- mapM (const $ spawnSolver solver timeout) [1..count]
 
   -- spawn orchestration thread
   taskQueue <- newChan
@@ -763,14 +763,17 @@ solverArgs = \case
   Custom _ -> []
 
 -- | Spawns a solver instance, and sets the various global config options that we use for our queries
-spawnSolver :: Solver -> IO SolverInstance
-spawnSolver solver = do
+spawnSolver :: Solver -> Maybe (Natural) -> IO SolverInstance
+spawnSolver solver timeout = do
   let cmd = (proc (show solver) (fmap T.unpack $ solverArgs solver)) { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe }
   (Just stdin, Just stdout, Just stderr, process) <- createProcess cmd
   hSetBuffering stdin (BlockBuffering (Just 1000000))
   let solverInstance = SolverInstance solver stdin stdout stderr process
-  --_ <- sendCommand solverInstance "(set-option :print-success true)"
-  pure solverInstance
+  case timeout of
+    Nothing -> pure solverInstance
+    Just t -> do
+      _ <- sendLine' solverInstance $ "(set-option :timeout " <> T.pack (show t) <> ")"
+      pure solverInstance
 
 -- | Cleanly shutdown a running solver instnace
 stopSolver :: SolverInstance -> IO ()

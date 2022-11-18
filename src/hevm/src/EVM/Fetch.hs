@@ -159,14 +159,14 @@ fetchSlotFrom n url addr slot =
   Session.withAPISession
     (\s -> fetchSlotWithSession n url s addr slot)
 
-http :: Natural -> BlockNumber -> Text -> Fetcher
-http smtjobs n url q =
-  withSolvers Z3 smtjobs $ \s ->
+http :: Natural -> Maybe Natural -> BlockNumber -> Text -> Fetcher
+http smtjobs smttimeout n url q =
+  withSolvers Z3 smtjobs smttimeout $ \s ->
     oracle s (Just (n, url)) q
 
-zero :: Natural -> Fetcher
-zero smtjobs q =
-  withSolvers Z3 smtjobs $ \s ->
+zero :: Natural -> Maybe Natural -> Fetcher
+zero smtjobs smttimeout q =
+  withSolvers Z3 smtjobs smttimeout $ \s ->
     oracle s Nothing q
 
 -- smtsolving + (http or zero)

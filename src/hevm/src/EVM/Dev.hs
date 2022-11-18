@@ -35,7 +35,7 @@ runDappTest root =
   withCurrentDirectory root $ do
     cores <- num <$> getNumProcessors
     let testFile = root <> "/out/dapp.sol.json"
-    withSolvers Z3 cores $ \solvers -> do
+    withSolvers Z3 cores Nothing $ \solvers -> do
       opts <- testOpts solvers root testFile
       res <- dappTest opts solvers testFile Nothing
       unless res exitFailure
@@ -77,7 +77,7 @@ dumpQueries :: FilePath -> IO ()
 dumpQueries root = withCurrentDirectory root $ do
   d <- dai
   putStrLn "building expression"
-  withSolvers Z3 1 $ \s -> do
+  withSolvers Z3 1 Nothing $ \s -> do
     e <- buildExpr s d
     putStrLn "built expression"
     putStrLn "generating queries"
@@ -103,13 +103,13 @@ analyzeDai = do
 daiExpr :: IO (Expr End)
 daiExpr = do
   d <- dai
-  withSolvers Z3 1 $ \s -> buildExpr s d
+  withSolvers Z3 1 Nothing $ \s -> buildExpr s d
 
 analyzeVat :: IO ()
 analyzeVat = do
   putStrLn "starting"
   v <- vat
-  withSolvers Z3 1 $ \s -> do
+  withSolvers Z3 1 Nothing $ \s -> do
     e <- buildExpr s v
     putStrLn $ "done (" <> show (numBranches e) <> " branches)"
     reachable' False v
@@ -134,7 +134,7 @@ analyzeDeposit = do
       }
      }
     |]
-  withSolvers Z3 1 $ \s -> do
+  withSolvers Z3 1 Nothing $ \s -> do
     putStrLn "Exploring Contract"
     e <- simplify <$> buildExpr s c
     putStrLn "Writing AST"
@@ -144,7 +144,7 @@ analyzeDeposit = do
 reachable' :: Bool -> ByteString -> IO ()
 reachable' smtdebug c = do
   putStrLn "Exploring contract"
-  withSolvers Z3 4 $ \s -> do
+  withSolvers Z3 4 Nothing $ \s -> do
     full <- simplify <$> buildExpr s c
     putStrLn $ "Explored contract (" <> (show $ numBranches full) <> " branches)"
     --putStrLn $ formatExpr full
@@ -166,7 +166,7 @@ reachable' smtdebug c = do
 summaryExpr :: IO ()
 summaryExpr = do
   c <- summaryStore
-  withSolvers Z3 1 $ \s -> do
+  withSolvers Z3 1 Nothing $ \s -> do
     e <- buildExpr s c
     putStrLn $ formatExpr e
 
