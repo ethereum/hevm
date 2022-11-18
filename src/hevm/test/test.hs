@@ -80,7 +80,7 @@ tests = testGroup "hevm"
   [ testGroup "StorageTests"
     [ testProperty "readStorage-equivalance" $ \(store, addr, slot) ->
         -- we use the SMT solver to compare the result of readStorage, to the unsimplified result
-        ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
+        ioProperty $ withSolvers Z3 1 (Just 250) $ \solvers -> do
           let simplified = Expr.readStorage' addr slot store
               full = SLoad addr slot store
           res <- checkSat solvers (assertProps [simplified ./= full])
@@ -1386,7 +1386,7 @@ tests = testGroup "hevm"
 
 
 runSimplifyTest :: (Typeable a) => Expr a -> Property
-runSimplifyTest expr = ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
+runSimplifyTest expr = ioProperty $ withSolvers Z3 1 (Just 250) $ \solvers -> do
   let simplified = simplify expr
   if simplified == expr
      then pure True
