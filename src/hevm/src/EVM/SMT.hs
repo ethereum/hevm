@@ -665,24 +665,16 @@ isUnsat :: CheckSatResult -> Bool
 isUnsat Unsat = True
 isUnsat _ = False
 
-checkSat' :: SolverGroup -> SMT2 -> IO (CheckSatResult)
-checkSat' solvers smt = do
-  snd . head <$> checkSat solvers [smt]
+checkSat :: SolverGroup -> SMT2 -> IO CheckSatResult
+checkSat (SolverGroup taskQueue) script = do
+  -- prepare result channel
+  resChan <- newChan
 
-checkSat :: SolverGroup -> [SMT2] -> IO [(SMT2, CheckSatResult)]
-checkSat (SolverGroup taskQueue) scripts = do
-  -- prepare tasks
-  tasks <- forM scripts $ \s -> do
-    res <- newChan
-    pure $ Task s res
+  -- send task to solver group
+  writeChan taskQueue (Task script resChan)
 
-  -- send tasks to solver group
-  forM_ tasks (writeChan taskQueue)
-
-  -- collect results
-  forM tasks $ \(Task s r) -> do
-    res <- readChan r
-    pure (s, res)
+  -- collect result
+  readChan resChan
 
 
 withSolvers :: Solver -> Natural -> (SolverGroup -> IO a) -> IO a

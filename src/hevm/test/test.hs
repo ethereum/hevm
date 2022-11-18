@@ -83,7 +83,7 @@ tests = testGroup "hevm"
         ioProperty $ withSolvers Z3 1 $ \solvers -> do
           let simplified = Expr.readStorage' addr slot store
               full = SLoad addr slot store
-          res <- checkSat' solvers (assertProps [simplified ./= full])
+          res <- checkSat solvers (assertProps [simplified ./= full])
           pure $ res == Unsat
     ]
   , testGroup "SimplifierTests"
@@ -1389,7 +1389,7 @@ runSimplifyTest expr = ioProperty $ withSolvers Z3 1 $ \solvers -> do
      then pure True
      else do
        let smt = assertProps [simplified ./= expr]
-       res <- checkSat' solvers smt
+       res <- checkSat solvers smt
        pure $ res == Unsat
 
 
