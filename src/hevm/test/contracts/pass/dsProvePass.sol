@@ -31,30 +31,30 @@ contract SolidityTest is DSTest {
         }
     }
 
-    //function prove_balance(address usr, uint amt) public {
-        //assertEq(0, token.balanceOf(usr));
-        //token.mint(usr, amt);
-        //assertEq(amt, token.balanceOf(usr));
-    //}
+    function prove_balance(address usr, uint amt) public {
+        assertEq(0, token.balanceOf(usr));
+        token.mint(usr, amt);
+        assertEq(amt, token.balanceOf(usr));
+    }
 
-    //function prove_supply(uint supply) public {
-        //token.mint(address(this), supply);
-        //uint actual = token.totalSupply();
-        //assertEq(supply, actual);
-    //}
+    function prove_supply(uint supply) public {
+        token.mint(address(this), supply);
+        uint actual = token.totalSupply();
+        assertEq(supply, actual);
+    }
 
     //function prove_constructorArgs(address b) public {
         //ConstructorArg c = new ConstructorArg(b);
         //assertEq(b, c.a());
     //}
 
-    //function proveFail_revertSmoke() public {
-        //require(false);
-    //}
+    function proveFail_revertSmoke() public {
+        require(false);
+    }
 
-    //function proveFail_assertSmoke() public {
-        //assertTrue(false);
-    //}
+    function proveFail_assertSmoke() public {
+        assertTrue(false);
+    }
 
     //function prove_transfer(uint supply, address usr, uint amt) public {
         //if (amt > supply) return; // no underflow
@@ -71,14 +71,14 @@ contract SolidityTest is DSTest {
         //assertEq(expected, postbal - prebal);
     //}
 
-    //function prove_burn(uint supply, uint amt) public {
-        //if (amt > supply) return; // no undeflow
+    function prove_burn(uint supply, uint amt) public {
+        if (amt > supply) return; // no undeflow
 
-        //token.mint(address(this), supply);
-        //token.burn(address(this), amt);
+        token.mint(address(this), supply);
+        token.burn(address(this), amt);
 
-        //assertEq(supply - amt, token.totalSupply());
-    //}
+        assertEq(supply - amt, token.totalSupply());
+    }
 
     //function prove_loop(uint n) public {
         //uint counter = 0;
