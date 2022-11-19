@@ -1229,6 +1229,37 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
+        testCase "injectivity of keccak all pairs (32 bytes)" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint x, uint y, uint z) public pure {
+                bytes32 w; bytes32 u; bytes32 v;
+                w = keccak256(abi.encode(x));
+                u = keccak256(abi.encode(y));
+                v = keccak256(abi.encode(z));
+                if (w == u) assert(x==y);
+                if (w == v) assert(x==z);
+                if (u == v) assert(y==z);
+              }
+            }
+            |]
+          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
+        testCase "injectivity of keccak contrapositive (32 bytes)" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint x, uint y) public pure {
+                require (x != y);
+                assert (keccak256(abi.encodePacked(x)) != keccak256(abi.encodePacked(y)));
+              }
+            }
+            |]
+          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
         testCase "injectivity of keccak (64 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
