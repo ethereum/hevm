@@ -96,6 +96,7 @@ library
     EVM.SymExec,
     EVM.Traversals,
     EVM.CSE,
+    EVM.Keccak,
     EVM.Transaction,
     EVM.TTY,
     EVM.TTYCenteredList,
