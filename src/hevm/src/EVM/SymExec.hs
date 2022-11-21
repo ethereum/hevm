@@ -33,6 +33,7 @@ import qualified Data.ByteString as BS
 import Data.Bifunctor (first, second)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import Data.List (find)
 import Data.Maybe (isJust, fromJust)
 import EVM.Format (formatExpr)
@@ -600,9 +601,9 @@ verify :: SolverGroup -> VeriOpts -> VM -> Maybe (Fetch.BlockNumber, Text) -> Ma
 verify solvers opts preState rpcinfo maybepost = do
   putStrLn "Exploring contract"
   exprInter <- evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) preState
-  when (debug opts) $ putStrLn $ " --- expr pre-simplify BEGIN ---\n" <> (formatExpr exprInter) <> "--- expr pre-simplify END ---\n"
+  when (debug opts) $ T.putStrLn $ " --- expr pre-simplify BEGIN ---\n" <> (formatExpr exprInter) <> "--- expr pre-simplify END ---\n"
   expr <- if (simp opts) then (pure $ simplify exprInter) else pure exprInter
-  when (debug opts) $ putStrLn $ " --- expr BEGIN ---\n" <> (formatExpr expr) <> "\n--- expr END ---\n"
+  when (debug opts) $ T.putStrLn $ " --- expr BEGIN ---\n" <> (formatExpr expr) <> "\n--- expr END ---\n"
   when (debug opts) $ putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
   let leaves = flattenExpr expr
   when (debug opts) $ putStrLn $ " --- leaves BEGIN ---\n" <> (show leaves) <> "\n--- leaves END ---\n"
