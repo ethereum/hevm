@@ -313,31 +313,34 @@ bufLength buf = case go 0 buf of
   where
     go :: W256 -> Expr Buf -> Maybe (Expr EWord)
     go l (ConcreteBuf b) = Just . Lit $ max (num . BS.length $ b) l
-    go l (WriteWord (Lit idx) _ b) = go (max l (idx + 31)) b
+    go l (WriteWord (Lit idx) _ b) = go (max l (idx + 32)) b
     go l (WriteByte (Lit idx) _ b) = go (max l idx) b
     go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size) l) dst
     go _ _ = Nothing
 
--- | Returns the smallest possible size of a given buffer.
---
--- All data past this index will be symbolic (i.e. unexecutable).
-minLength :: Expr Buf -> Maybe Int
-minLength = go 0
+-- | If a buffer has a concrete prefix, we return it's length here
+concPrefix :: Expr Buf -> Maybe Integer
+concPrefix (CopySlice (Lit srcOff) (Lit _) (Lit _) src (ConcreteBuf "")) = do
+  sz <- go 0 src
+  pure . num $ (num sz) - srcOff
   where
-    go :: W256 -> Expr Buf -> Maybe Int
+    go :: W256 -> Expr Buf -> Maybe Integer
     -- base cases
     go _ (AbstractBuf _) = Nothing
     go l (ConcreteBuf b) = Just . num $ max (num . BS.length $ b) l
 
     -- writes to a concrete index
-    go l (WriteWord (Lit idx) _ b) = go (max l (idx + 31)) b
-    go l (WriteByte (Lit idx) _ b) = go (max l idx) b
-    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size - 1) l) dst
+    go l (WriteWord (Lit idx) (Lit _) b) = go (max l (idx + 32)) b
+    go l (WriteByte (Lit idx) (LitByte _) b) = go (max l idx) b
+    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size) l) dst
 
     -- writes to an abstract index are ignored
     go l (WriteWord _ _ b) = go l b
     go l (WriteByte _ _ b) = go l b
-    go l (CopySlice _ _ _ _ dst) = go l dst
+    go l (CopySlice _ _ _ _ dst) = error "no nested copyslice sorry :("
+    go _ (GVar _) = error "Internal error: cannot calculate minLength of an open expression"
+concPrefix (ConcreteBuf b) = Just (num . BS.length $ b)
+concPrefix _ = error "oops"
 
 
 word256At

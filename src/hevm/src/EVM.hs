@@ -2204,7 +2204,7 @@ create self this xGas' xValue xs newAddr initCode = do
     -- from memory into a code and data section
     -- TODO: comment explaining whats going on here
     let contract' = do
-          minLength <- Expr.minLength initCode
+          minLength <- Expr.concPrefix initCode
           prefix <- Expr.toList $ Expr.take (num minLength) initCode
           let sym = Expr.drop (num minLength) initCode
           conc <- mapM unlitByte prefix
