@@ -310,15 +310,18 @@ showTrace dapp vm trace =
     ReturnTrace out (CallContext {}) ->
       "← " <> formatSBinary out
     ReturnTrace out (CreationContext {}) ->
-      let l = case out of
-                ConcreteBuf bs -> BS.length bs
-                _ -> error "panik :o"
-      in "← " <> pack (show l) <> " bytes of code"
+      let l = Expr.bufLength out
+      in "← " <> formatExpr l <> " bytes of code"
     EntryTrace t ->
       t
     FrameTrace (CreationContext addr (Lit hash) _ _ ) -> -- FIXME: irrefutable pattern
       "create "
       <> maybeContractName (preview (dappSolcByHash . ix hash . _2) dapp)
+      <> "@" <> pack (show addr)
+      <> pos
+    FrameTrace (CreationContext addr _ _ _ ) ->
+      "create "
+      <> "<unknown contract>"
       <> "@" <> pack (show addr)
       <> pos
     FrameTrace (CallContext target context _ _ hash abi calldata _ _) ->
