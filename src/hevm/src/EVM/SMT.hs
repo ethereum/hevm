@@ -106,12 +106,6 @@ declareIntermediates bufs stores =
     encodeStore n expr =
        "(define-const store" <> (T.pack . show $ n) <> " Storage " <> exprToSMT expr <> ")"
 
-keccakAssumptions :: [Prop] -> [Expr Buf] -> [Expr Storage] -> SMT2
-keccakAssumptions ps bufs stores = SMT2 (["; keccak assumptions"] <> injAsserts <> minAsserts) mempty
-  where
-    injAsserts = fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakInj ps bufs stores)
-    minAsserts = fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakMin ps bufs stores)
-
 assertProps :: [Prop] -> SMT2
 assertProps ps =
   let encs = map propToSMT ps_elim
@@ -124,7 +118,8 @@ assertProps ps =
   <> (declareFrameContext . nubOrd $ foldl (<>) [] frameCtx)
   <> intermediates
   <> SMT2 [""] mempty
-  <> keccakAssumptions ps_elim bufVals storeVals
+  <> keccakAssumes
+  <> SMT2 [""] mempty
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
 
   where
@@ -136,6 +131,10 @@ assertProps ps =
 
     bufVals = Map.elems bufs
     storeVals = Map.elems stores
+
+    keccakAssumes
+      = SMT2 ["; keccak assumptions"] mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions ps_elim bufVals storeVals)) mempty
 
 
 prelude :: SMT2
