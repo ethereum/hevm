@@ -219,7 +219,6 @@ executable hevm
     process,
     quickcheck-text,
     regex-tdfa,
-    sbv,
     temporary,
     text,
     unordered-containers,
