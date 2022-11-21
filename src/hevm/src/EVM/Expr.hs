@@ -281,20 +281,24 @@ copySlice srcOffset dstOffset size src dst = CopySlice srcOffset dstOffset size 
 writeByte :: Expr EWord -> Expr Byte -> Expr Buf -> Expr Buf
 writeByte (Lit offset) (LitByte val) (ConcreteBuf "")
   = ConcreteBuf $ BS.replicate (num offset) 0 <> BS.singleton val
-writeByte (Lit offset) (LitByte byte) (ConcreteBuf src)
-  = ConcreteBuf $ (padRight (num offset) $ BS.take (num offset) src)
-               <> BS.pack [byte]
-               <> BS.drop (num offset + 1) src
+writeByte o@(Lit offset) b@(LitByte byte) buf@(ConcreteBuf src)
+  | offset < num (maxBound :: Int)
+    = ConcreteBuf $ (padRight (num offset) $ BS.take (num offset) src)
+                 <> BS.pack [byte]
+                 <> BS.drop (num offset + 1) src
+  | otherwise = WriteByte o b buf
 writeByte offset byte src = WriteByte offset byte src
 
 
 writeWord :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
 writeWord (Lit offset) (Lit val) (ConcreteBuf "")
   = ConcreteBuf $ BS.replicate (num offset) 0 <> word256Bytes val
-writeWord (Lit offset) (Lit val) (ConcreteBuf src)
-  = ConcreteBuf $ (padRight (num offset) $ BS.take (num offset) src)
-               <> word256Bytes val
-               <> BS.drop ((num offset) + 32) src
+writeWord o@(Lit offset) v@(Lit val) buf@(ConcreteBuf src)
+  | offset + 32 < num (maxBound :: Int)
+    = ConcreteBuf $ (padRight (num offset) $ BS.take (num offset) src)
+                 <> word256Bytes val
+                 <> BS.drop ((num offset) + 32) src
+  | otherwise = WriteWord o v buf
 writeWord offset val src = WriteWord offset val src
 
 

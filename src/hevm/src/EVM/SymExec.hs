@@ -33,6 +33,7 @@ import qualified Data.ByteString as BS
 import Data.Bifunctor (first, second)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import Data.List (find)
 import Data.Maybe (isJust, fromJust)
 import EVM.Format (formatExpr)
@@ -383,7 +384,7 @@ simplify e = if (mapExpr go e == e)
       | otherwise = Lit 0
     go (EVM.Types.GT a b) = EVM.Types.LT b a
     go (EVM.Types.GEq a b) = EVM.Types.LEq b a
-    go (EVM.Types.LEq a b) = EVM.Types.Not (EVM.Types.GT a b)
+    go (EVM.Types.LEq a b) = EVM.Types.IsZero (EVM.Types.GT a b)
 
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
@@ -509,7 +510,7 @@ reachable2 solvers e = do
         pure (fst tres <> fst fres, subexpr)
       leaf -> do
         let query = assertProps pcs
-        res <- checkSat' solvers query
+        res <- checkSat solvers query
         case res of
           Sat _ -> pure ([query], Just leaf)
           Unsat -> pure ([query], Nothing)
@@ -533,8 +534,8 @@ reachable solvers = go []
         let
           tquery = assertProps (PEq c (Lit 1) : pcs)
           fquery = assertProps (PEq c (Lit 0) : pcs)
-        tres <- (checkSat' solvers tquery)
-        fres <- (checkSat' solvers fquery)
+        tres <- (checkSat solvers tquery)
+        fres <- (checkSat solvers fquery)
         print (tres, fres)
         case (tres, fres) of
           (Error tm, Error fm) -> do
@@ -604,20 +605,19 @@ verify solvers opts preState rpcinfo maybepost = do
   putStrLn "Exploring contract"
 
   exprInter <- evalStateT (interpret (Fetch.oracle solvers rpcinfo) Nothing Nothing runExpr) preState
-  when (debug opts) $ writeFile "unsimplified.expr" (formatExpr exprInter)
+  when (debug opts) $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
 
   expr <- if (simp opts) then (pure $ simplify exprInter) else pure exprInter
-  when (debug opts) $ writeFile "simplified.expr" (formatExpr expr)
+  when (debug opts) $ T.writeFile "simplified.expr" (formatExpr expr)
 
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
 
-  let leaves = flattenExpr expr
   case maybepost of
     Nothing -> pure [Qed expr]
     Just post -> do
       let
         -- Filter out any leaves that can be statically shown to be safe
-        canViolate = flip filter leaves $
+        canViolate = flip filter (flattenExpr expr) $
           \(_, leaf) -> case evalProp (post preState leaf) of
             PBool True -> False
             _ -> True
@@ -632,7 +632,7 @@ verify solvers opts preState rpcinfo maybepost = do
 
       -- Dispatch the remaining branches to the solver to check for violations
       results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
-        res <- checkSat' solvers query
+        res <- checkSat solvers query
         pure (res, leaf)
       let cexs = filter (\(res, _) -> not . isUnsat $ res) results
       pure $ if null cexs then [Qed expr] else fmap toVRes cexs

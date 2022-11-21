@@ -49,6 +49,7 @@ import Data.Word          (Word8, Word32)
 import Data.Text.Encoding (encodeUtf8)
 import System.Environment (lookupEnv)
 import System.IO          (hFlush, stdout)
+import GHC.Natural
 
 import qualified Control.Monad.Par.Class as Par
 import qualified Data.ByteString as BS
@@ -74,7 +75,7 @@ data UnitTestOptions = UnitTestOptions
   , maxIter     :: Maybe Integer
   , askSmtIters :: Maybe Integer
   , maxDepth    :: Maybe Int
-  , smtTimeout  :: Maybe Integer
+  , smtTimeout  :: Maybe Natural
   , solver      :: Maybe Text
   , covMatch    :: Maybe Text
   , match       :: Text

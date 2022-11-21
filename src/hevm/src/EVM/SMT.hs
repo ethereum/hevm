@@ -24,7 +24,9 @@ import Control.Monad.State.Strict
 import Language.SMT2.Parser (getValueRes, parseFileMsg)
 import Data.Either
 import Data.Maybe
+import Data.Word
 import Numeric (readHex)
+import Data.ByteString (ByteString)
 
 import qualified Data.ByteString as BS
 import qualified Data.List as List
@@ -42,6 +44,7 @@ import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_i
 import EVM.Types
 import EVM.Traversals
 import EVM.CSE
+import EVM.Keccak
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
 import qualified Language.SMT2.Syntax as Language.SMT2.Parser
 import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
@@ -70,9 +73,9 @@ instance Monoid CexVars where
 
 data SMTCex = SMTCex
   { calldata :: Map Text Language.SMT2.Parser.SpecConstant
-  , storage :: SpecConstant
-  , blockContext :: SpecConstant
-  , txContext :: SpecConstant
+  , storage :: Text
+  , blockContext :: Text
+  , txContext :: Text
   }
   deriving (Eq, Show)
 
@@ -103,6 +106,11 @@ declareIntermediates bufs stores =
     encodeStore n expr =
        "(define-const store" <> (T.pack . show $ n) <> " Storage " <> exprToSMT expr <> ")"
 
+keccakAssumptions :: [Prop] -> [Expr Buf] -> [Expr Storage] -> SMT2
+keccakAssumptions ps bufs stores =
+  let asserts = fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakInj ps bufs stores) in
+  SMT2 (["; keccak assumptions"] <> asserts) mempty
+
 assertProps :: [Prop] -> SMT2
 assertProps ps =
   let encs = map propToSMT ps_elim
@@ -115,6 +123,7 @@ assertProps ps =
   <> (declareFrameContext . nubOrd $ foldl (<>) [] frameCtx)
   <> intermediates
   <> SMT2 [""] mempty
+  <> keccakAssumptions ps_elim bufVals storeVals
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
 
   where
@@ -467,7 +476,7 @@ exprToSMT = \case
   Min a b ->
     let aenc = exprToSMT a
         benc = exprToSMT b in
-    "(ite (<= " <> aenc `sp` benc <> ") " <> aenc `sp` benc <> ")"
+    "(ite (bvule " <> aenc `sp` benc <> ") " <> aenc `sp` benc <> ")"
   LT a b ->
     let cond = op2 "bvult" a b in
     "(ite " <> cond `sp` one `sp` zero <> ")"
@@ -535,7 +544,7 @@ exprToSMT = \case
   ReadByte idx src -> op2 "select" src idx
 
   ConcreteBuf "" -> "emptyBuf"
-  ConcreteBuf bs -> writeBytes (LitByte <$> BS.unpack bs) mempty
+  ConcreteBuf bs -> writeBytes bs mempty
   AbstractBuf s -> s
   ReadWord idx prev -> op2 "readWord" idx prev
   BufLength b -> op1 "bufLength" b
@@ -653,7 +662,7 @@ data CheckSatResult
   | Unsat
   | Unknown
   | Error Text
-  deriving (Show)
+  deriving (Show, Eq)
 
 isSat :: CheckSatResult -> Bool
 isSat (Sat _) = True
@@ -667,30 +676,22 @@ isUnsat :: CheckSatResult -> Bool
 isUnsat Unsat = True
 isUnsat _ = False
 
-checkSat' :: SolverGroup -> SMT2 -> IO (CheckSatResult)
-checkSat' solvers smt = do
-  snd . head <$> checkSat solvers [smt]
+checkSat :: SolverGroup -> SMT2 -> IO CheckSatResult
+checkSat (SolverGroup taskQueue) script = do
+  -- prepare result channel
+  resChan <- newChan
 
-checkSat :: SolverGroup -> [SMT2] -> IO [(SMT2, CheckSatResult)]
-checkSat (SolverGroup taskQueue) scripts = do
-  -- prepare tasks
-  tasks <- forM scripts $ \s -> do
-    res <- newChan
-    pure $ Task s res
+  -- send task to solver group
+  writeChan taskQueue (Task script resChan)
 
-  -- send tasks to solver group
-  forM_ tasks (writeChan taskQueue)
-
-  -- collect results
-  forM tasks $ \(Task s r) -> do
-    res <- readChan r
-    pure (s, res)
+  -- collect result
+  readChan resChan
 
 
-withSolvers :: Solver -> Natural -> (SolverGroup -> IO a) -> IO a
-withSolvers solver count cont = do
+withSolvers :: Solver -> Natural -> Maybe Natural -> (SolverGroup -> IO a) -> IO a
+withSolvers solver count timeout cont = do
   -- spawn solvers
-  instances <- mapM (const $ spawnSolver solver) [1..count]
+  instances <- mapM (const $ spawnSolver solver timeout) [1..count]
 
   -- spawn orchestration thread
   taskQueue <- newChan
@@ -742,6 +743,9 @@ withSolvers solver count cont = do
                   mempty (calldataV cexvars)
               pure $ Sat $ SMTCex
                 { calldata = calldatamodels
+                , storage = mempty
+                , blockContext = mempty
+                , txContext = mempty
                 }
             "unsat" -> pure Unsat
             "timeout" -> pure Unknown
@@ -770,14 +774,17 @@ solverArgs = \case
   Custom _ -> []
 
 -- | Spawns a solver instance, and sets the various global config options that we use for our queries
-spawnSolver :: Solver -> IO SolverInstance
-spawnSolver solver = do
+spawnSolver :: Solver -> Maybe (Natural) -> IO SolverInstance
+spawnSolver solver timeout = do
   let cmd = (proc (show solver) (fmap T.unpack $ solverArgs solver)) { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe }
   (Just stdin, Just stdout, Just stderr, process) <- createProcess cmd
   hSetBuffering stdin (BlockBuffering (Just 1000000))
   let solverInstance = SolverInstance solver stdin stdout stderr process
-  --_ <- sendCommand solverInstance "(set-option :print-success true)"
-  pure solverInstance
+  case timeout of
+    Nothing -> pure solverInstance
+    Just t -> do
+      _ <- sendLine' solverInstance $ "(set-option :timeout " <> T.pack (show t) <> ")"
+      pure solverInstance
 
 -- | Cleanly shutdown a running solver instnace
 stopSolver :: SolverInstance -> IO ()
@@ -874,15 +881,19 @@ concatBytes bytes = foldl wrap "" $ NE.reverse bytes
       "(concat " <> byteSMT `sp` inner <> ")"
 
 -- | Concatenates a list of bytes into a larger bitvector
-writeBytes :: [Expr Byte] -> Expr Buf -> Text
-writeBytes bytes buf =
-  let bufSMT = exprToSMT buf in
-  foldl wrap bufSMT $ reverse (zip [0..] bytes)
+writeBytes :: ByteString -> Expr Buf -> Text
+writeBytes bytes buf = snd $ BS.foldl' wrap (0, exprToSMT buf) bytes
   where
-    wrap inner (idx, byte) =
-      let byteSMT = exprToSMT byte
-          idxSMT = exprToSMT $ Lit idx in
-      "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")"
+    -- we don't need to store zeros if the base buffer is empty
+    skipZeros = buf == mempty
+    wrap :: (Int, Text) -> Word8 -> (Int, Text)
+    wrap (idx, inner) byte =
+      if skipZeros && byte == 0
+      then (idx + 1, inner)
+      else let
+          byteSMT = exprToSMT (LitByte byte)
+          idxSMT = exprToSMT . Lit . num $ idx
+        in (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
 
 encodeConcreteStore :: Map W256 (Map W256 W256) -> Text
 encodeConcreteStore s = foldl' encodeWrite "emptyStore" writes

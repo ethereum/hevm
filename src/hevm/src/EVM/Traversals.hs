@@ -128,7 +128,7 @@ foldExpr f acc expr = acc <> (go expr)
       e@(GasLimit) -> f e
       e@(ChainId) -> f e
       e@(BaseFee) -> f e
-      e@(BlockHash _) -> f e
+      e@(BlockHash a) -> f e <> (go a)
 
       -- frame context
 

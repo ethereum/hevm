@@ -14,6 +14,7 @@ import System.Directory
 
 import Data.String.Here
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 
 import EVM
 import EVM.SMT
@@ -23,6 +24,7 @@ import EVM.SymExec
 import EVM.Solidity
 import EVM.UnitTest
 import EVM.Format (formatExpr)
+import EVM.SymExec (simplify)
 import EVM.Dapp (dappInfo)
 import GHC.Conc
 import System.Exit (exitFailure)
@@ -35,7 +37,7 @@ runDappTest root =
   withCurrentDirectory root $ do
     cores <- num <$> getNumProcessors
     let testFile = root <> "/out/dapp.sol.json"
-    withSolvers Z3 cores $ \solvers -> do
+    withSolvers Z3 cores Nothing $ \solvers -> do
       opts <- testOpts solvers root testFile
       res <- dappTest opts solvers testFile Nothing
       unless res exitFailure
@@ -77,7 +79,7 @@ dumpQueries :: FilePath -> IO ()
 dumpQueries root = withCurrentDirectory root $ do
   d <- dai
   putStrLn "building expression"
-  withSolvers Z3 1 $ \s -> do
+  withSolvers Z3 1 Nothing $ \s -> do
     e <- buildExpr s d
     putStrLn "built expression"
     putStrLn "generating queries"
@@ -103,13 +105,13 @@ analyzeDai = do
 daiExpr :: IO (Expr End)
 daiExpr = do
   d <- dai
-  withSolvers Z3 1 $ \s -> buildExpr s d
+  withSolvers Z3 1 Nothing $ \s -> buildExpr s d
 
 analyzeVat :: IO ()
 analyzeVat = do
   putStrLn "starting"
   v <- vat
-  withSolvers Z3 1 $ \s -> do
+  withSolvers Z3 1 Nothing $ \s -> do
     e <- buildExpr s v
     putStrLn $ "done (" <> show (numBranches e) <> " branches)"
     reachable' False v
@@ -134,26 +136,26 @@ analyzeDeposit = do
       }
      }
     |]
-  withSolvers Z3 1 $ \s -> do
+  withSolvers Z3 1 Nothing $ \s -> do
     putStrLn "Exploring Contract"
     e <- simplify <$> buildExpr s c
     putStrLn "Writing AST"
-    writeFile "full.ast" (formatExpr e)
+    T.writeFile "full.ast" (formatExpr e)
 
 
 reachable' :: Bool -> ByteString -> IO ()
 reachable' smtdebug c = do
   putStrLn "Exploring contract"
-  withSolvers Z3 4 $ \s -> do
+  withSolvers Z3 4 Nothing $ \s -> do
     full <- simplify <$> buildExpr s c
     putStrLn $ "Explored contract (" <> (show $ numBranches full) <> " branches)"
     --putStrLn $ formatExpr full
-    writeFile "full.ast" $ formatExpr full
+    T.writeFile "full.ast" $ formatExpr full
     putStrLn "Dumped to full.ast"
     putStrLn "Checking reachability"
     (qs, less) <- reachable2 s full
     putStrLn $ "Checked reachability (" <> (show $ numBranches less) <> " reachable branches)"
-    writeFile "reachable.ast" $ formatExpr less
+    T.writeFile "reachable.ast" $ formatExpr less
     putStrLn "Dumped to reachable.ast"
     --putStrLn $ formatExpr less
     when smtdebug $ do
@@ -163,12 +165,11 @@ reachable' smtdebug c = do
         putStrLn $ T.unpack $ formatSMT2 q
 
 
-summaryExpr :: IO ()
-summaryExpr = do
-  c <- summaryStore
-  withSolvers Z3 1 $ \s -> do
+showExpr :: ByteString -> IO ()
+showExpr c = do
+  withSolvers Z3 1 Nothing $ \s -> do
     e <- buildExpr s c
-    putStrLn $ formatExpr e
+    T.putStrLn $ formatExpr (simplify e)
 
 summaryStore :: IO ByteString
 summaryStore = do
