@@ -14,6 +14,7 @@ import System.Directory
 
 import Data.String.Here
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 
 import EVM
 import EVM.SMT
@@ -23,6 +24,7 @@ import EVM.SymExec
 import EVM.Solidity
 import EVM.UnitTest
 import EVM.Format (formatExpr)
+import EVM.SymExec (simplify)
 import EVM.Dapp (dappInfo)
 import GHC.Conc
 import System.Exit (exitFailure)
@@ -138,7 +140,7 @@ analyzeDeposit = do
     putStrLn "Exploring Contract"
     e <- simplify <$> buildExpr s c
     putStrLn "Writing AST"
-    writeFile "full.ast" (formatExpr e)
+    T.writeFile "full.ast" (formatExpr e)
 
 
 reachable' :: Bool -> ByteString -> IO ()
@@ -148,12 +150,12 @@ reachable' smtdebug c = do
     full <- simplify <$> buildExpr s c
     putStrLn $ "Explored contract (" <> (show $ numBranches full) <> " branches)"
     --putStrLn $ formatExpr full
-    writeFile "full.ast" $ formatExpr full
+    T.writeFile "full.ast" $ formatExpr full
     putStrLn "Dumped to full.ast"
     putStrLn "Checking reachability"
     (qs, less) <- reachable2 s full
     putStrLn $ "Checked reachability (" <> (show $ numBranches less) <> " reachable branches)"
-    writeFile "reachable.ast" $ formatExpr less
+    T.writeFile "reachable.ast" $ formatExpr less
     putStrLn "Dumped to reachable.ast"
     --putStrLn $ formatExpr less
     when smtdebug $ do
@@ -163,12 +165,11 @@ reachable' smtdebug c = do
         putStrLn $ T.unpack $ formatSMT2 q
 
 
-summaryExpr :: IO ()
-summaryExpr = do
-  c <- summaryStore
+showExpr :: ByteString -> IO ()
+showExpr c = do
   withSolvers Z3 1 Nothing $ \s -> do
     e <- buildExpr s c
-    putStrLn $ formatExpr e
+    T.putStrLn $ formatExpr (simplify e)
 
 summaryStore :: IO ByteString
 summaryStore = do

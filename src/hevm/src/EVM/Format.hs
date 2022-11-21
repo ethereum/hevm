@@ -33,6 +33,7 @@ import EVM.ABI (Indexed (NotIndexed), getAbiSeq)
 import EVM.ABI (parseTypeName, formatString)
 import EVM.Solidity (SolcContract(..), contractName, abiMap)
 import EVM.Solidity (methodOutput, methodSignature, methodName)
+import EVM.Hexdump
 
 import Control.Arrow ((>>>))
 import Control.Lens (view, preview, ix, _2, to, makeLenses, over, each, (^?!))
@@ -402,114 +403,82 @@ currentSolc dapp vm = undefined
 
 -- TODO: display in an 'act' format
 
--- TreeLine describes a singe line of the tree
--- it contains the indentation which is prefixed to it
--- and its content which contains the rest
-data TreeLine = TreeLine {
-  _indent   :: String,
-  _content  :: String
-  }
+indent :: Int -> Text -> Text
+indent n = rstrip . T.unlines . fmap (T.replicate n (T.pack [' ']) <>) . T.lines
 
-makeLenses ''TreeLine
+rstrip :: Text -> Text
+rstrip = T.reverse . T.dropWhile (=='\n') . T.reverse
 
--- SHOW TREE
-
-showTreeIndentSymbol :: Bool      -- ^ isLastChild
-                     -> Bool      -- ^ isTreeHead
-                     -> String
-showTreeIndentSymbol True  True  = "\x2514" -- └
-showTreeIndentSymbol False True  = "\x251c" -- ├
-showTreeIndentSymbol True  False = " "
-showTreeIndentSymbol False False = "\x2502" -- │
-
-flattenTree :: Int -> -- total number of cases
-               Int -> -- case index
-               Tree [String] ->
-               [TreeLine]
--- this case should never happen for our use case, here for generality
-flattenTree _ _ (Node [] _)  = []
-
-flattenTree totalCases i (Node (x:xs) cs) = let
-  isLastCase       = i + 1 == totalCases
-  indenthead       = showTreeIndentSymbol isLastCase True <> " " <> show i <> " "
-  indentchild      = showTreeIndentSymbol isLastCase False <> " "
-  in TreeLine indenthead x
-  : ((TreeLine indentchild <$> xs) ++ over (each . indent) ((<>) indentchild) (flattenForest cs))
-
-flattenForest :: [Tree [String]] -> [TreeLine]
-flattenForest forest = concat $ zipWith (flattenTree (length forest)) [0..] forest
-
-leftpad :: Int -> String -> String
-leftpad n = (<>) $ replicate n ' '
-
-showTree' :: Tree [String] -> String
-showTree' (Node s []) = unlines s
-showTree' (Node _ children) =
-  let
-    treeLines = flattenForest children
-    maxIndent = 2 + maximum (length . _indent <$> treeLines)
-    showTreeLine (TreeLine colIndent colContent) =
-      let indentSize = maxIndent - length colIndent
-      in colIndent <> leftpad indentSize colContent
-  in unlines $ showTreeLine <$> treeLines
-
-
--- RENDER TREE
-
---showStorage :: [(Expr EWord, Expr EWord)] -> [String]
---showStorage = fmap (\(k, v) -> show k <> " => " <> show v)
-
---showLeafInfo :: DappInfo -> BranchInfo -> [String]
---showLeafInfo srcInfo (BranchInfo vm _) = let
-  -- ?context = DappContext { _contextInfo = srcInfo, _contextEnv = vm ^?! EVM.env . EVM.contracts }
-  --in let
-  --self    = view (EVM.state . EVM.contract) vm
-  --updates = case view (EVM.env . EVM.contracts) vm ^?! ix self . EVM.storage of
-    --Symbolic v _ -> v
-    --Concrete x -> [(litWord k,v) | (k, v) <- Map.toList x]
-  --showResult = [prettyvmresult res | Just res <- [view result vm]]
-  --in showResult
-  -- ++ showStorage updates
-  -- ++ [""]
-
---showBranchInfoWithAbi :: DappInfo -> BranchInfo -> [String]
---showBranchInfoWithAbi _ (BranchInfo _ Nothing) = [""]
---showBranchInfoWithAbi srcInfo (BranchInfo vm (Just y)) =
-  --case y of
-    --(IsZero (Eq (Literal x) _)) ->
-      --let
-        --abimap = view abiMap <$> currentSolc srcInfo vm
-        --method = abimap >>= Map.lookup (num x)
-      --in [maybe (show y) (show . view methodSignature) method]
-    --y' -> [show y']
-
---renderTree :: (a -> [String])
-           --- -> (a -> [String])
-           --- -> Tree a
-           --- -> Tree [String]
---renderTree showBranch showLeaf (Node b []) = Node (showBranch b ++ showLeaf b) []
---renderTree showBranch showLeaf (Node b cs) = Node (showBranch b) (renderTree showBranch showLeaf <$> cs)
-
-indent' :: Int -> String -> String
-indent' n = rstrip . unlines . fmap (replicate n ' ' <>) . lines
-
-rstrip :: String -> String
-rstrip = reverse . dropWhile (=='\n') . reverse
-
-formatExpr :: Expr a -> String
+formatExpr :: Expr a -> Text
 formatExpr = go
   where
+    go :: Expr a -> Text
     go = \case
-      ITE c t f -> rstrip . unlines $
+      Lit w -> T.pack $ show w
+      LitByte w -> T.pack $ show w
+
+      ITE c t f -> rstrip . T.unlines $
         [ "(ITE (" <> formatExpr c <> ")"
-        , indent' 2 (formatExpr t)
-        , indent' 2 (formatExpr f)
+        , indent 2 (formatExpr t)
+        , indent 2 (formatExpr f)
         , ")"]
-      EVM.Types.Revert buf -> "(Revert " <> formatExpr buf <> ")"
-      Return buf store -> unlines
-          [ "(Return"
-          , indent' 2 ("Data: " <> formatExpr buf)
-          , indent' 2 ("Store: " <> formatExpr store)
+      EVM.Types.Revert buf -> case buf of
+        ConcreteBuf "" -> "(Revert " <> formatExpr buf <> ")"
+        _ -> T.unlines
+          [ "(Revert"
+          , indent 2 (formatExpr buf)
           , ")"
           ]
-      a -> show a
+      Return buf store -> T.unlines
+        [ "(Return"
+        , indent 2 $ T.unlines
+          [ "Data:"
+          , indent 2 $ formatExpr buf
+          , ""
+          , "Store:"
+          , indent 2 $ formatExpr store
+          ]
+        , ")"
+        ]
+
+      -- Buffers
+
+      CopySlice srcOff dstOff size src dst -> T.unlines
+        [ "(CopySlice"
+        , indent 2 $ T.unlines
+          [ "srcOffset: " <> formatExpr srcOff
+          , "dstOffset: " <> formatExpr dstOff
+          , "size:      " <> formatExpr size
+          , "src:"
+          , indent 2 $ formatExpr src
+          ]
+        , ")"
+        , formatExpr dst
+        ]
+      WriteWord idx val buf -> T.unlines
+        [ "(WriteWord"
+        , indent 2 $ T.unlines
+          [ "idx: " <> formatExpr idx
+          , "val: " <> formatExpr val
+          ]
+        , ")"
+        , formatExpr buf
+        ]
+      WriteByte idx val buf -> T.unlines
+        [ "(WriteByte"
+        , indent 2 $ T.unlines
+          [ "idx: " <> formatExpr idx
+          , "val: " <> formatExpr val
+          ]
+        , ")"
+        , formatExpr buf
+        ]
+      ConcreteBuf bs -> case bs of
+        "" -> "(ConcreteBuf \"\")"
+        _ -> T.unlines
+          [ "(ConcreteBuf"
+          , indent 2 $ T.pack $ prettyHex 64 bs
+          , ")"
+          ]
+
+      a -> T.pack $ show a
