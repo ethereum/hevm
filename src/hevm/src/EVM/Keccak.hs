@@ -4,7 +4,7 @@
     Description: Expr passes to determine Keccak assumptions
 -}
 
-module EVM.Keccak (keccakInj) where
+module EVM.Keccak (keccakAssumptions) where
 
 import Prelude hiding (Word, LT, GT)
 
@@ -52,15 +52,28 @@ combine lst = combine' lst []
       let xcomb = [ (x, y) | y <- xs] in
       combine' xs (xcomb:acc)
 
+minProp :: Expr EWord -> Prop
+minProp k@(Keccak _) = PGT k (Lit 50)
+minProp _ = error "Internal error: expected keccak expression"
 
--- | Takes a list of Props, finds all Keccak occurences and generates
--- Keccak injectivity assumptions for all unique pairs of Keccak calls
-keccakInj :: [Prop] -> [Expr Buf]  -> [Expr Storage] -> [Prop]
-keccakInj ps bufs stores =
-  let (_, st) = runState (findKeccakPropsExprs ps bufs stores) initState in
-  fmap injProp $ combine (Set.toList (keccaks st))
+injProp :: (Expr EWord, Expr EWord) -> Prop
+injProp (k1@(Keccak b1), k2@(Keccak b2)) =
+  POr (PEq b1 b2) (PNeg (PEq k1 k2))
+injProp _ = error "Internal error: expected keccak expression"
+
+-- Takes a list of props, find all keccak occurences and generates two kinds of assumptions:
+--   1. Minimum output value: That the output of the invocation is greater than
+--      50 (needed to avoid spurious counterexamples due to storage collisions
+--      with solidity mappings & value type storage slots)
+--   2. Injectivity: That keccak is an injective function (we avoid quantifiers
+--      here by making this claim for each unique pair of keccak invocations
+--      discovered in the input expressions)
+keccakAssumptions :: [Prop] -> [Expr Buf] -> [Expr Storage] -> [Prop]
+keccakAssumptions ps bufs stores = injectivity <> minValue
   where
-    injProp :: (Expr EWord, Expr EWord) -> Prop
-    injProp (k1@(Keccak b1), k2@(Keccak b2)) =
-      POr (PEq b1 b2) (PNeg (PEq k1 k2))
-    injProp _ = error "Internal error: expected keccak expression"
+    (_, st) = runState (findKeccakPropsExprs ps bufs stores) initState
+
+    injectivity = fmap injProp $ combine (Set.toList (keccaks st))
+    minValue = fmap minProp (Set.toList (keccaks st))
+
+
