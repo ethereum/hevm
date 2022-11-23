@@ -187,6 +187,9 @@ tests = testGroup "hevm"
         -- we use the SMT solver to compare the result of readStorage, to the unsimplified result
         ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
           let
+            -- we truncate concrete indicies in buffers for this test since we
+            -- can't realisitically represent a buffer with max(uint256) bytes
+            -- as a vector in any real hardware.
             truncateIdxs :: Expr Buf -> Expr Buf
             truncateIdxs (WriteByte (Lit idx) v b) = WriteByte (Lit $ idx `mod` 100_000) v b
             truncateIdxs (WriteWord (Lit idx) v b) = WriteWord (Lit $ idx `mod` 100_000) v b
