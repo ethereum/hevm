@@ -2654,12 +2654,8 @@ mkOpIxMap (RuntimeCode ops)
                      then (x' - 0x60 + 1, i + 1, j,     m >> Vector.write v i j)
             -- other data --
                      else (0,             i + 1, j + 1, m >> Vector.write v i j)
-          _ -> error "cannot analyze symbolic code"
+          _ -> error $ "cannot analyze symbolic code:\nx: " <> show x <> " i: " <> show i <> " j: " <> show j
 
-          -- TODO: wtf is going on here, can't parse this at all
-          {- Start of PUSH op. -} (case unlitByte x of
-                                     Just x' -> (x' - 0x60 + 1, i + 1, j, m >> Vector.write v i j)
-                                     Nothing -> error "cannot analyze symbolic code")
         go v (1, !i, !j, !m) _ =
           {- End of PUSH op. -}   (0,            i + 1, j + 1, m >> Vector.write v i j)
         go v (n, !i, !j, !m) _ =
