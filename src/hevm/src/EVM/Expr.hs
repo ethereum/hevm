@@ -616,11 +616,19 @@ isLitByte :: Expr Byte -> Bool
 isLitByte (LitByte _) = True
 isLitByte _ = False
 
+isPower2 :: W256 -> Bool
+isPower2 n = n .&. (n-1) == 0
+
 -- | Returns the byte at idx from the given word.
 indexWord :: Expr EWord -> Expr EWord -> Expr Byte
+indexWord (Lit idx) (And (Lit mask) w)
+  | mask == (2 ^ (256 :: W256)) - 1 = indexWord (Lit idx) w -- we need this case here to avoid overflow below
+  | isPower2 (mask + 1), 2 ^ (idx + 1) <= mask = indexWord (Lit idx) w
+  | isPower2 (mask + 1), 2 ^ (idx + 1) > mask = LitByte 0
+  | otherwise = IndexWord (Lit idx) (And (Lit mask) w)
 indexWord (Lit idx) (Lit w)
   | idx <= 31 = LitByte . fromIntegral $ shiftR w (248 - num idx * 8)
-  | otherwise = LitByte 0 -- TODO: is this correct?
+  | otherwise = LitByte 0
 indexWord (Lit idx) (JoinBytes zero        one        two       three
                                four        five       six       seven
                                eight       nine       ten       eleven
