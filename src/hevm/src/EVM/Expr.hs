@@ -223,6 +223,12 @@ readBytes (Prelude.min 32 -> n) idx buf
 
 -- | Reads the word starting at idx from the given buf
 readWord :: Expr EWord -> Expr Buf -> Expr EWord
+readWord idx (WriteWord idx' val buf)
+  | idx == idx' = val
+  | otherwise = readWord idx buf
+readWord (Lit idx) (CopySlice (Lit srcOff) (Lit dstOff) (Lit size) src dst)
+  | idx >= dstOff && idx < dstOff + size = readWord (Lit $ srcOff + (idx - dstOff)) src
+  | otherwise = readWord (Lit idx) dst
 readWord i@(Lit idx) buf = let
     bytes = [readByte (Lit i') buf | i' <- [idx .. idx + 31]]
   in if Prelude.and . (fmap isLitByte) $ bytes
