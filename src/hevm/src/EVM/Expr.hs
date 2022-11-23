@@ -325,7 +325,7 @@ bufLength buf = case go 0 buf of
     go :: W256 -> Expr Buf -> Maybe (Expr EWord)
     go l (ConcreteBuf b) = Just . Lit $ max (num . BS.length $ b) l
     go l (WriteWord (Lit idx) _ b) = go (max l (idx + 32)) b
-    go l (WriteByte (Lit idx) _ b) = go (max l idx) b
+    go l (WriteByte (Lit idx) _ b) = go (max l (idx + 1)) b
     go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size) l) dst
     go _ _ = Nothing
 
@@ -342,7 +342,7 @@ concPrefix (CopySlice (Lit srcOff) (Lit _) (Lit _) src (ConcreteBuf "")) = do
 
     -- writes to a concrete index
     go l (WriteWord (Lit idx) (Lit _) b) = go (max l (idx + 32)) b
-    go l (WriteByte (Lit idx) (LitByte _) b) = go (max l idx) b
+    go l (WriteByte (Lit idx) (LitByte _) b) = go (max l (idx + 1)) b
     go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size) l) dst
 
     -- writes to an abstract index are ignored
