@@ -273,6 +273,9 @@ copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) (Concrete
         tl = BS.drop (num dstOffset + num size) dst
     in ConcreteBuf $ hd <> sl <> tl
 
+-- copying 32 bytes can be rewritten to a WriteWord on dst (e.g. CODECOPY of args during constructors)
+copySlice srcOffset dstOffset (Lit 32) src dst = WriteWord dstOffset (readWord srcOffset src) dst
+
 -- concrete indicies & abstract src (may produce a concrete result if we are
 -- copying from a concrete region of src)
 copySlice s@(Lit srcOffset) d@(Lit dstOffset) sz@(Lit size) src ds@(ConcreteBuf dst) = let
