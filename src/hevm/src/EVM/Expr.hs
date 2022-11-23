@@ -380,12 +380,10 @@ toList :: Expr Buf -> Maybe (V.Vector (Expr Byte))
 toList (AbstractBuf _) = Nothing
 toList (ConcreteBuf bs) = Just $ V.fromList $ LitByte <$> BS.unpack bs
 toList buf = case bufLength buf of
-  Lit l -> Just $ V.fromList $ go l
+  Lit l -> if l <= num (maxBound :: Int)
+              then Just $ V.generate (num l) (\i -> readByte (Lit $ num i) buf)
+              else error "Internal Error: overflow when converting buffer to list"
   _ -> Nothing
-  where
-    go 0 = [readByte (Lit 0) buf]
-    go i = readByte (Lit i) buf : go (i - 1)
-
 
 fromList :: V.Vector (Expr Byte) -> Expr Buf
 fromList bs = case Prelude.and (fmap isLitByte bs) of
