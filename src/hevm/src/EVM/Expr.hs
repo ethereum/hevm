@@ -388,21 +388,10 @@ toList buf = case bufLength buf of
 fromList :: V.Vector (Expr Byte) -> Expr Buf
 fromList bs = case Prelude.and (fmap isLitByte bs) of
   True -> ConcreteBuf . BS.pack . V.toList . V.mapMaybe unlitByte $ bs
-  -- we want the resulting buffer to be a concrete base with any symbolic
-  -- writes stacked on top, so we write all concrete bytes in a first pass and
-  -- then write any symbolic bytes afterwards
-  False -> applySyms . applyConcrete . V.toList $ bs
-    where
-      applyConcrete :: [Expr Byte] -> (Expr Buf, [(W256, Expr Byte)])
-      applyConcrete bytes = let
-          go :: (Expr Buf, [(W256, Expr Byte)]) -> (W256, Expr Byte) -> (Expr Buf, [(W256, Expr Byte)])
-          go (buf, syms) b = case b of
-                       (idx, LitByte b') -> (writeByte (Lit idx) (LitByte b') buf, syms)
-                       _ -> (buf, b : syms)
-        in foldl' go (mempty, []) (zip [0..] bytes)
-
-      applySyms :: (Expr Buf, [(W256, Expr Byte)]) -> Expr Buf
-      applySyms (buf, syms) = foldl' (\acc (idx, b) -> writeByte (Lit idx) b acc) buf syms
+  False -> V.foldl' (\buf write -> write buf) (ConcreteBuf "") writes
+  where
+    writes :: V.Vector (Expr Buf -> Expr Buf)
+    writes = V.imap (\idx b -> WriteByte (Lit $ num idx) b) bs
 
 instance Semigroup (Expr Buf) where
   (ConcreteBuf a) <> (ConcreteBuf b) = ConcreteBuf $ a <> b
