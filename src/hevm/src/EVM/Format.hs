@@ -444,6 +444,36 @@ formatExpr = go
         , ")"
         ]
 
+      IndexWord idx val -> T.unlines
+        [ "(IndexWord"
+        , indent 2 $ T.unlines
+          [ "idx:"
+          , indent 2 $ formatExpr idx
+          , "val: "
+          , indent 2 $ formatExpr val
+          ]
+        , ")"
+        ]
+      ReadWord idx buf -> T.unlines
+        [ "(ReadWord"
+        , indent 2 $ T.unlines
+          [ "idx:"
+          , indent 2 $ formatExpr idx
+          , "buf: "
+          , indent 2 $ formatExpr buf
+          ]
+        , ")"
+        ]
+
+      And a b -> T.unlines
+        [ "(And"
+        , indent 2 $ T.unlines
+          [ formatExpr a
+          , formatExpr b
+          ]
+        , ")"
+        ]
+
       -- Buffers
 
       CopySlice srcOff dstOff size src dst -> T.unlines
@@ -461,8 +491,10 @@ formatExpr = go
       WriteWord idx val buf -> T.unlines
         [ "(WriteWord"
         , indent 2 $ T.unlines
-          [ "idx: " <> formatExpr idx
-          , "val: " <> formatExpr val
+          [ "idx:"
+          , indent 2 $ formatExpr idx
+          , "val:"
+          , indent 2 $ formatExpr val
           ]
         , ")"
         , formatExpr buf
