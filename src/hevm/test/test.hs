@@ -183,6 +183,32 @@ tests = testGroup "hevm"
     , testCase "stripbytes-concrete-bug" $ assertEqual ""
         (Expr.simplifyReads (ReadByte (Lit 0) (ConcreteBuf "5")))
         (LitByte 53)
+    , testProperty "toList-equivalance" $ \buf ->
+        -- we use the SMT solver to compare the result of readStorage, to the unsimplified result
+        ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
+          let
+            truncateIdxs :: Expr Buf -> Expr Buf
+            truncateIdxs (WriteByte (Lit idx) v b) = WriteByte (Lit $ idx `mod` 100_000) v b
+            truncateIdxs (WriteWord (Lit idx) v b) = WriteWord (Lit $ idx `mod` 100_000) v b
+            truncateIdxs (CopySlice (Lit srcOff) (Lit dstOff) (Lit size) src dst)
+              = CopySlice (Lit $ srcOff `mod` 100_000) (Lit $ dstOff `mod` 100_000) (Lit $ size `mod` 100_000) src dst
+            truncateIdxs b = b
+
+            input = truncateIdxs buf
+          case Expr.toList input of
+            Nothing -> do
+              putStrLn "skip"
+              pure True -- ignore cases where the buf cannot be represented as a list
+            Just asList -> do
+              let asBuf = Expr.fromList asList
+              let smt = assertProps [asBuf ./= input]
+              res <- checkSat solvers smt
+              print res
+              pure $ case res of
+                Unsat -> True
+                EVM.SMT.Unknown -> True
+                Sat _ -> False
+                Error _ -> False
     ]
   , testGroup "ABI"
     [ testProperty "Put/get inverse" $ \x ->
