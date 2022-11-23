@@ -348,10 +348,10 @@ concPrefix (CopySlice (Lit srcOff) (Lit _) (Lit _) src (ConcreteBuf "")) = do
     -- writes to an abstract index are ignored
     go l (WriteWord _ _ b) = go l b
     go l (WriteByte _ _ b) = go l b
-    go l (CopySlice _ _ _ _ dst) = error "no nested copyslice sorry :("
+    go l (CopySlice _ _ _ _ dst) = error "Internal Error: cannot compute a concrete prefix length for nested copySlice expressions"
     go _ (GVar _) = error "Internal error: cannot calculate minLength of an open expression"
 concPrefix (ConcreteBuf b) = Just (num . BS.length $ b)
-concPrefix _ = error "oops"
+concPrefix e = error $ "Internal error: cannot compute a concrete prefix length for: " <> show e
 
 
 word256At
