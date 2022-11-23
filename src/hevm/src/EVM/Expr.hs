@@ -223,18 +223,37 @@ readBytes (Prelude.min 32 -> n) idx buf
 
 -- | Reads the word starting at idx from the given buf
 readWord :: Expr EWord -> Expr Buf -> Expr EWord
-readWord idx (WriteWord idx' val buf)
+readWord idx b@(WriteWord idx' val buf)
+  -- the word we are trying to read exactly matches a WriteWord
   | idx == idx' = val
-  | otherwise = readWord idx buf
-readWord (Lit idx) (CopySlice (Lit srcOff) (Lit dstOff) (Lit size) src dst)
-  | idx >= dstOff && idx < dstOff + size = readWord (Lit $ srcOff + (idx - dstOff)) src
-  | otherwise = readWord (Lit idx) dst
-readWord i@(Lit idx) buf = let
+  | otherwise = case (idx, idx') of
+    (Lit i, Lit i') ->
+      if i >= i' + 32 || i + 32 <= i'
+      -- the region we are trying to read is completely outside of the WriteWord
+      then readWord idx buf
+      -- the region we are trying to read partially overlaps the WriteWord
+      else readWordFromBytes idx b
+    -- we do not have enough information to statically determine whether or not
+    -- the region we want to read overlaps the WriteWord
+    _ -> readWordFromBytes idx b
+readWord (Lit idx) b@(CopySlice (Lit srcOff) (Lit dstOff) (Lit size) src dst)
+  -- the region we are trying to read is enclosed in the sliced region
+  | idx >= dstOff && idx + 32 < dstOff + size = readWord (Lit $ srcOff + (idx - dstOff)) src
+  -- the region we are trying to read is compeletely outside of the sliced reegion
+  | idx >= dstOff + size || idx + 32 <= dstOff = readWord (Lit idx) dst
+  -- the region we are trying to read partially overlaps the sliced region
+  | otherwise = readWordFromBytes (Lit idx) b
+readWord i b = readWordFromBytes i b
+
+-- Attempts to read a concrete word from a buffer by reading 32 individual bytes and joining them together
+-- returns an abstract ReadWord expression if a concrete word cannot be constructed
+readWordFromBytes :: Expr EWord -> Expr Buf -> Expr EWord
+readWordFromBytes i@(Lit idx) buf = let
     bytes = [readByte (Lit i') buf | i' <- [idx .. idx + 31]]
   in if Prelude.and . (fmap isLitByte) $ bytes
      then Lit (bytesToW256 . mapMaybe unlitByte $ bytes)
      else ReadWord i buf
-readWord idx buf = ReadWord idx buf
+readWordFromBytes idx buf = ReadWord idx buf
 
 
 {- | Copies a slice of src into dst.

@@ -102,6 +102,7 @@ tests = testGroup "hevm"
           let simplified = Expr.readStorage' addr slot store
               full = SLoad addr slot store
           res <- checkSat solvers (assertProps [simplified ./= full])
+          print res
           pure $ res == Unsat
     ]
   , testGroup "SimplifierTests"
@@ -151,6 +152,10 @@ tests = testGroup "hevm"
         -- write word and read it at the same offset of 16
         (Lit 0x12)
         (Expr.readWord (Lit 0x20) (WriteWord (Lit 0x20) (Lit 0x12) mempty))
+    , testCase "read-word-copySlice-overlap" $ assertEqual ""
+        -- we should not recurse into a copySlice if the read index + 32 overlaps the sliced region
+        (ReadWord (Lit 40) (CopySlice (Lit 0) (Lit 30) (Lit 12) (WriteWord (Lit 10) (Lit 0x64) (AbstractBuf "hi")) (AbstractBuf "hi")))
+        (Expr.readWord (Lit 40) (CopySlice (Lit 0) (Lit 30) (Lit 12) (WriteWord (Lit 10) (Lit 0x64) (AbstractBuf "hi")) (AbstractBuf "hi")))
     , testCase "indexword-MSB" $ assertEqual ""
         -- 31st is the LSB byte (of 32)
         (LitByte 0x78)
@@ -163,6 +168,15 @@ tests = testGroup "hevm"
         -- same as above, but with offset 2
         (LitByte 0xbb)
         (Expr.indexWord (Lit 2) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
+    , testProperty "readWord-equivalance" $ \(buf, idx) ->
+        -- we use the SMT solver to compare the result of readStorage, to the unsimplified result
+        ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
+          print buf
+          print idx
+          let simplified = Expr.readWord idx buf
+              full = ReadWord idx buf
+          res <- checkSat solvers (assertProps [simplified ./= full])
+          pure $ res == Unsat
     , testCase "encodeConcreteStore-overwrite" $
       let
         w :: Int -> W256
@@ -1476,7 +1490,9 @@ runSimplifyTest :: (Typeable a) => Expr a -> Property
 runSimplifyTest expr = ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
   let simplified = Expr.simplify expr
   if simplified == expr
-     then pure True
+     then do
+       putStrLn "skip"
+       pure True
      else do
        let smt = assertProps [simplified ./= expr]
        res <- checkSat solvers smt
@@ -1631,7 +1647,13 @@ genName = fmap T.pack $ listOf1 (oneof . (fmap pure) $ ['a'..'z'] <> ['A'..'Z'])
 
 genWord :: Int -> Gen (Expr EWord)
 genWord 0 = frequency
-  [ (1, fmap Lit arbitrary)
+  [ (10, do
+      val <- frequency
+       [ (10, fmap (`mod` 100) arbitrary)
+       , (1, arbitrary)
+       ]
+      pure $ Lit val
+    )
   , (1, oneof
       [ pure Origin
       , pure Coinbase
@@ -1652,8 +1674,14 @@ genWord 0 = frequency
     )
   ]
 genWord sz = frequency
- [ (1, fmap Lit arbitrary)
- , (1, oneof
+  [ (10, do
+      val <- frequency
+       [ (10, fmap (`mod` 100) arbitrary)
+       , (1, arbitrary)
+       ]
+      pure $ Lit val
+    )
+  , (1, oneof
     [ liftM2 Add subWord subWord
     , liftM2 Sub subWord subWord
     , liftM2 Mul subWord subWord
