@@ -1445,7 +1445,7 @@ tests = testGroup "hevm"
 
 runSimplifyTest :: (Typeable a) => Expr a -> Property
 runSimplifyTest expr = ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
-  let simplified = simplify expr
+  let simplified = Expr.simplify expr
   if simplified == expr
      then pure True
      else do

@@ -12,7 +12,8 @@ import Brick.Widgets.List
 
 import EVM
 import EVM.ABI (abiTypeSolidity, decodeAbiValue, AbiType(..), emptyAbi)
-import EVM.SymExec (maxIterationsReached, symCalldata, simplify)
+import EVM.SymExec (maxIterationsReached, symCalldata)
+import EVM.Expr (simplify)
 import EVM.Dapp (DappInfo, dappInfo, Test, extractSig, Test(..), srcMap)
 import EVM.Dapp (dappUnitTests, unitTestMethods, dappSolcByName, dappSolcByHash, dappSources)
 import EVM.Dapp (dappAstSrcMap)

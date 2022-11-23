@@ -354,113 +354,6 @@ flattenExpr = go []
       TmpErr s -> error s
       GVar _ -> error "cannot flatten an Expr containing a GVar"
 
--- | Simple recursive match based AST simplification
--- Note: may not terminate!
-simplify :: Expr a -> Expr a
-simplify e = if (mapExpr go e == e)
-               then e
-               else simplify (mapExpr go e)
-  where
-    go :: Expr a -> Expr a
-    -- redundant CopySlice
-    go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
-
-    -- simplify buffers
-    go o@(ReadWord (Lit a) (WriteWord (Lit b) v _))
-      | a == b = v
-      | otherwise = o
-    go o@(ReadWord (Lit _) _) = Expr.simplifyReads o
-    go o@(ReadByte (Lit _) _) = Expr.simplifyReads o
-    go (WriteWord a b c) = Expr.writeWord a b c
-    go (WriteByte a b c) = Expr.writeByte a b c
-    go (CopySlice a b c d f) = Expr.copySlice a b c d f
-
-    -- concrete LT / GT
-    go (EVM.Types.LT (Lit a) (Lit b))
-      | a < b = Lit 1
-      | otherwise = Lit 0
-    go (EVM.Types.GT a b) = EVM.Types.LT b a
-    go (EVM.Types.GEq a b) = EVM.Types.LEq b a
-    go (EVM.Types.LEq a b) = EVM.Types.IsZero (EVM.Types.GT a b)
-
-    -- syntactic Eq reduction
-    go (Eq (Lit a) (Lit b))
-      | a == b = Lit 1
-      | otherwise = Lit 0
-    go o@(Eq a b)
-      | a == b = Lit 1
-      | otherwise = o
-
-    -- redundant ITE
-    go (ITE (Lit x) a b)
-      | x == 0 = b
-      | otherwise = a
-
-    -- redundant add / sub
-    go o@(Sub (Add a b) c)
-      | a == c = b
-      | b == c = a
-      | otherwise = o
-
-    -- add / sub identities
-    go o@(Add a b)
-      | b == (Lit 0) = a
-      | a == (Lit 0) = b
-      | otherwise = o
-    go o@(Sub a b)
-      | a == b = Lit 0
-      | b == (Lit 0) = a
-      | otherwise = o
-
-    -- SHL / SHR by 0
-    go o@(SHL a v)
-      | a == (Lit 0) = v
-      | otherwise = o
-    go o@(SHR a v)
-      | a == (Lit 0) = v
-      | otherwise = o
-
-    -- doubled And
-    go o@(And a (And b c))
-      | a == c = (And a b)
-      | a == b = (And b c)
-      | otherwise = o
-
-    -- Bitwise AND & OR. These MUST preserve bitwise equivalence
-    go o@(And (Lit x) _)
-      | x == 0 = Lit 0
-      | otherwise = o
-    go o@(And _ (Lit x))
-      | x == 0 = Lit 0
-      | otherwise = o
-    go o@(Or (Lit x) b)
-      | x == 0 = b
-      | otherwise = o
-    go o@(Or a (Lit x))
-      | x == 0 = a
-      | otherwise = o
-
-    -- If x is ever non zero the Or will always evaluate to some non zero value and the false branch will be unreachable
-    -- NOTE: with AND this does not work, because and(0x8, 0x4) = 0
-    go (ITE (Or (Lit x) a) t f)
-      | x == 0 = ITE a t f
-      | otherwise = t
-    go (ITE (Or a b@(Lit _)) t f) = ITE (Or b a) t f
-
-    -- we write at least 32, so if x <= 32, it's FALSE
-    go o@(EVM.Types.LT (BufLength (WriteWord {})) (Lit x))
-      | x <= 32 = Lit 0
-      | otherwise = o
-    -- we write at least 32, so if x < 32, it's TRUE
-    go o@(EVM.Types.LT (Lit x) (BufLength (WriteWord {})))
-      | x < 32 = Lit 1
-      | otherwise = o
-
-    -- Double NOT is a no-op, since it's a bitwise inversion
-    go (EVM.Types.Not (EVM.Types.Not a)) = a
-
-    go a = a
-
 reachableQueries :: Expr End -> IO [SMT2]
 reachableQueries = go []
   where
@@ -602,7 +495,7 @@ verify solvers opts preState rpcinfo maybepost = do
   putStrLn "Exploring contract"
   exprInter <- evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) preState
   when (debug opts) $ T.putStrLn $ " --- expr pre-simplify BEGIN ---\n" <> (formatExpr exprInter) <> "--- expr pre-simplify END ---\n"
-  expr <- if (simp opts) then (pure $ simplify exprInter) else pure exprInter
+  expr <- if (simp opts) then (pure $ Expr.simplify exprInter) else pure exprInter
   when (debug opts) $ T.putStrLn $ " --- expr BEGIN ---\n" <> (formatExpr expr) <> "\n--- expr END ---\n"
   when (debug opts) $ putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
   let leaves = flattenExpr expr

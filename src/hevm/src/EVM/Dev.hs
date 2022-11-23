@@ -19,12 +19,11 @@ import qualified Data.Text.IO as T
 import EVM
 import EVM.SMT
 import EVM.Types
-import EVM.Expr (numBranches)
+import EVM.Expr (numBranches, simplify)
 import EVM.SymExec
 import EVM.Solidity
 import EVM.UnitTest
 import EVM.Format (formatExpr)
-import EVM.SymExec (simplify)
 import EVM.Dapp (dappInfo)
 import GHC.Conc
 import System.Exit (exitFailure)
