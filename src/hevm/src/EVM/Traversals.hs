@@ -315,7 +315,10 @@ mapExprM f expr = case expr of
   -- control flow
 
   Invalid -> f Invalid
+  InvalidMemoryAccess -> f InvalidMemoryAccess
+  StackLimitExceeded -> f StackLimitExceeded
   SelfDestruct -> f SelfDestruct
+  BadJumpDestination -> f BadJumpDestination
   IllegalOverflow -> f IllegalOverflow
   Revert a -> do
     a' <- mapExprM f a

@@ -315,7 +315,7 @@ let
         > $file1
 
         file2=$(${mktemp})
-        cat $1                      \
+        ${cat} $1                      \
         | ${sed} '0,/^\/\/ step:/d' \
         | ${sed} -e 's!\/\/!!'      \
         | ${sed} -e '/^$/d'         \
