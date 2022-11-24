@@ -233,7 +233,7 @@ interpret fetcher maxIter askSmtIters =
             Nothing -> do
               a <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue True) >>= k)
               eqs <- use keccakEqs
-              put $ vm{_keccakEqs = eqs}
+              put $ vm & set keccakEqs eqs
               b <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue False) >>= k)
               return $ ITE cond a b
             Just n ->
