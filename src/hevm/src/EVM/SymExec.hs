@@ -58,6 +58,9 @@ data VeriOpts = VeriOpts
 defaultVeriOpts :: VeriOpts
 defaultVeriOpts = VeriOpts { simp = True, debug = False, maxIter = Nothing, askSmtIters = Nothing }
 
+debugVeriOpts :: VeriOpts
+debugVeriOpts = VeriOpts { simp = True, debug = True, maxIter = Nothing, askSmtIters = Nothing }
+
 extractCex :: VerifyResult -> Maybe (Expr End, SMTCex)
 extractCex (Cex c) = Just c
 extractCex _ = Nothing
@@ -493,32 +496,36 @@ evalProp = \case
 verify :: SolverGroup -> VeriOpts -> VM -> Maybe (Fetch.BlockNumber, Text) -> Maybe Postcondition -> IO [VerifyResult]
 verify solvers opts preState rpcinfo maybepost = do
   putStrLn "Exploring contract"
-  exprInter <- evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) preState
-  when (debug opts) $ T.putStrLn $ " --- expr pre-simplify BEGIN ---\n" <> (formatExpr exprInter) <> "--- expr pre-simplify END ---\n"
+
+  exprInter <- evalStateT (interpret (Fetch.oracle solvers rpcinfo) Nothing Nothing runExpr) preState
+  when (debug opts) $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
+
   expr <- if (simp opts) then (pure $ Expr.simplify exprInter) else pure exprInter
-  when (debug opts) $ T.putStrLn $ " --- expr BEGIN ---\n" <> (formatExpr expr) <> "\n--- expr END ---\n"
-  when (debug opts) $ putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
-  let leaves = flattenExpr expr
-  when (debug opts) $ putStrLn $ " --- leaves BEGIN ---\n" <> (show leaves) <> "\n--- leaves END ---\n"
+  when (debug opts) $ T.writeFile "simplified.expr" (formatExpr expr)
+
+  putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
+
   case maybepost of
     Nothing -> pure [Qed expr]
     Just post -> do
       let
         -- Filter out any leaves that can be statically shown to be safe
-        canViolate = flip filter leaves $
+        canViolate = flip filter (flattenExpr expr) $
           \(_, leaf) -> case evalProp (post preState leaf) of
             PBool True -> False
             _ -> True
         assumes = view constraints preState
         withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> pcs), leaf)) canViolate
+      putStrLn $ "Checking for reachability of " <> show (length withQueries) <> "\n potential property violations"
+
+      when (debug opts) $ forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
+        writeFile
+          ("query-" <> show idx <> ".smt2")
+          ("; " <> show leaf <> "\n\n" <> T.unpack (formatSMT2 q) <> "\n\n(check-sat)")
+
       -- Dispatch the remaining branches to the solver to check for violations
-      when (debug opts) $ putStrLn $ "--- canViolate BEGIN\n" <> (show canViolate) <> "\n--- canViolate END ---\n"
-      -- when (debug opts) $ putStrLn $ T.unpack . formatSMT2 . fst $ withQueries !! 0
-      when (debug opts) $ putStrLn $ "Checking for reachability of " <> show (length withQueries) <> "\n potential property violations"
       results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
-        when (debug opts) $ putStrLn $ "--- query BEGIN ---\n" <> (show query) <> "\n--- query END ---\n"
         res <- checkSat solvers query
-        when (debug opts) $ putStrLn $ "--- res BEGIN ---\n" <> (show res) <> "\n--- res END ---\n"
         pure (res, leaf)
       let cexs = filter (\(res, _) -> not . isUnsat $ res) results
       pure $ if null cexs then [Qed expr] else fmap toVRes cexs
