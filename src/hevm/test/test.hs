@@ -58,6 +58,7 @@ import EVM.Precompiled
 import EVM.RLP
 import EVM.Solidity
 import EVM.Types
+import EVM.Traversals
 import EVM.SMT hiding (storage, calldata)
 import qualified EVM.TTY as TTY
 import qualified EVM.Expr as Expr
@@ -198,27 +199,35 @@ tests = testGroup "hevm"
         (Expr.simplifyReads (ReadByte (Lit 0) (ConcreteBuf "5")))
         (LitByte 53)
     , testProperty "toList-equivalance" $ \buf ->
-        -- we use the SMT solver to compare the result of readStorage, to the unsimplified result
         ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
           let
-            -- we truncate concrete indicies in buffers for this test since we
-            -- can't realisitically represent a buffer with max(uint256) bytes
-            -- as a vector in any real hardware.
-            truncateIdxs :: Expr Buf -> Expr Buf
-            truncateIdxs (WriteByte (Lit idx) v b) = WriteByte (Lit $ idx `mod` 100_000) v b
-            truncateIdxs (WriteWord (Lit idx) v b) = WriteWord (Lit $ idx `mod` 100_000) v b
-            truncateIdxs (CopySlice (Lit srcOff) (Lit dstOff) (Lit size) src dst)
-              = CopySlice (Lit $ srcOff `mod` 100_000) (Lit $ dstOff `mod` 100_000) (Lit $ size `mod` 100_000) src dst
-            truncateIdxs b = b
+            -- transforms the input buffer to give it a known length
+            fixLength :: Expr Buf -> Gen (Expr Buf)
+            fixLength = mapExprM go
+              where
+                go :: Expr a -> Gen (Expr a)
+                go = \case
+                  WriteWord _ val b -> liftM3 WriteWord idx (pure val) (pure b)
+                  WriteByte _ val b -> liftM3 WriteByte idx (pure val) (pure b)
+                  CopySlice so _ sz src dst -> liftM5 CopySlice (pure so) idx (pure sz) (pure src) (pure dst)
+                  AbstractBuf _ -> cbuf
+                  e -> pure e
+                cbuf = do
+                  bs <- arbitrary
+                  pure $ ConcreteBuf bs
+                idx = do
+                  w <- arbitrary
+                  -- we use 10_000 as an upper bound for indices to keep tests reasonably fast here
+                  pure $ Lit (w `mod` 100_000)
 
-            input = truncateIdxs buf
+          input <- generate $ fixLength buf
           case Expr.toList input of
             Nothing -> do
               putStrLn "skip"
               pure True -- ignore cases where the buf cannot be represented as a list
             Just asList -> do
               let asBuf = Expr.fromList asList
-              let smt = assertProps [asBuf ./= input]
+              let smt = assertProps [asBuf ./= Expr.simplify input]
               res <- checkSat solvers smt
               print res
               pure $ case res of

@@ -18,9 +18,12 @@ import Control.Lens (lens)
 
 import EVM.Types
 import EVM.Traversals
+import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
+import qualified Data.Vector.Storable as VS
+import Data.Vector.Storable.ByteString
 
 
 -- ** Stack Ops ** ---------------------------------------------------------------------------------
@@ -407,10 +410,20 @@ toList buf = case bufLength buf of
 fromList :: V.Vector (Expr Byte) -> Expr Buf
 fromList bs = case Prelude.and (fmap isLitByte bs) of
   True -> ConcreteBuf . BS.pack . V.toList . V.mapMaybe unlitByte $ bs
-  False -> V.foldl' (\buf write -> write buf) (ConcreteBuf "") writes
-  where
-    writes :: V.Vector (Expr Buf -> Expr Buf)
-    writes = V.imap (\idx b -> WriteByte (Lit $ num idx) b) bs
+  -- we want the resulting buffer to be a concrete base with any symbolic
+  -- writes stacked on top, so we write all concrete bytes in a first pass and
+  -- then write any symbolic bytes afterwards
+  False -> V.ifoldl' applySymWrites (ConcreteBuf concreteBytes) bs
+    where
+      concreteBytes :: ByteString
+      concreteBytes = vectorToByteString $ VS.generate (V.length bs) (\idx ->
+        case bs V.! idx of
+          LitByte b -> b
+          _ -> 0)
+
+      applySymWrites :: Expr Buf -> Int -> Expr Byte -> Expr Buf
+      applySymWrites buf _ (LitByte _) = buf
+      applySymWrites buf idx by = WriteByte (Lit $ num idx) by buf
 
 instance Semigroup (Expr Buf) where
   (ConcreteBuf a) <> (ConcreteBuf b) = ConcreteBuf $ a <> b
