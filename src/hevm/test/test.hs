@@ -1494,7 +1494,7 @@ tests = testGroup "hevm"
           [Cex _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("call_A()", [])) [] defaultVeriOpts
           putStrLn "expected counterexample found"
         ,
-        expectFail $ testCase "keccak concrete and sym agree" $ do
+        testCase "keccak concrete and sym agree" $ do
           Just c <- solcRuntime "C"
             [i|
               contract C {
@@ -1506,6 +1506,18 @@ tests = testGroup "hevm"
               }
             |]
           [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("kecc(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
+        testCase "keccak concrete and sym injectivity" $ do
+          Just c <- solcRuntime "A"
+            [i|
+              contract A {
+                function f(uint x) public pure {
+                  if (x !=3) assert(keccak256(abi.encode(x)) != keccak256(abi.encode(3)));
+                }
+              }
+            |]
+          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         ignoreTest $ testCase "safemath distributivity (yul)" $ do
