@@ -232,7 +232,8 @@ interpret fetcher maxIter askSmtIters =
             -- TODO: parallelise
             Nothing -> do
               a <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue True) >>= k)
-              put vm
+              eqs <- use keccakEqs
+              put $ vm{_keccakEqs = eqs}
               b <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue False) >>= k)
               return $ ITE cond a b
             Just n ->
@@ -495,7 +496,7 @@ verify :: SolverGroup -> VeriOpts -> VM -> Maybe (Fetch.BlockNumber, Text) -> Ma
 verify solvers opts preState rpcinfo maybepost = do
   putStrLn "Exploring contract"
 
-  exprInter <- evalStateT (interpret (Fetch.oracle solvers rpcinfo) Nothing Nothing runExpr) preState
+  (exprInter, vmState) <- runStateT (interpret (Fetch.oracle solvers rpcinfo) Nothing Nothing runExpr) preState
   when (debug opts) $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
 
   expr <- if (simp opts) then (pure $ Expr.simplify exprInter) else pure exprInter
@@ -513,7 +514,8 @@ verify solvers opts preState rpcinfo maybepost = do
             PBool True -> False
             _ -> True
         assumes = view constraints preState
-        withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> pcs), leaf)) canViolate
+        eqs = view keccakEqs vmState
+        withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> eqs <> pcs), leaf)) canViolate
       putStrLn $ "Checking for reachability of " <> show (length withQueries) <> "\n potential property violations"
 
       when (debug opts) $ forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
