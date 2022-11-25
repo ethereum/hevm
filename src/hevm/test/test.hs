@@ -217,7 +217,7 @@ tests = testGroup "hevm"
                   pure $ ConcreteBuf bs
                 idx = do
                   w <- arbitrary
-                  -- we use 10_000 as an upper bound for indices to keep tests reasonably fast here
+                  -- we use 100_000 as an upper bound for indices to keep tests reasonably fast here
                   pure $ Lit (w `mod` 100_000)
 
           input <- generate $ fixLength buf
@@ -227,14 +227,19 @@ tests = testGroup "hevm"
               pure True -- ignore cases where the buf cannot be represented as a list
             Just asList -> do
               let asBuf = Expr.fromList asList
-              let smt = assertProps [asBuf ./= Expr.simplify input]
+              let smt = assertProps [asBuf ./= input]
               res <- checkSat solvers smt
               print res
-              pure $ case res of
-                Unsat -> True
-                EVM.SMT.Unknown -> True
-                Sat _ -> False
-                Error _ -> False
+              case res of
+                Unsat -> pure True
+                EVM.SMT.Unknown -> pure True
+                Sat _ -> do
+                  print input
+                  pure False
+                Error e -> do
+                  print input
+                  TIO.putStrLn $ "Solver Error: " <> e
+                  pure False
     ]
   , testGroup "ABI"
     [ testProperty "Put/get inverse" $ \x ->

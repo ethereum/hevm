@@ -410,9 +410,12 @@ toList buf = case bufLength buf of
 fromList :: V.Vector (Expr Byte) -> Expr Buf
 fromList bs = case Prelude.and (fmap isLitByte bs) of
   True -> ConcreteBuf . BS.pack . V.toList . V.mapMaybe unlitByte $ bs
-  -- we want the resulting buffer to be a concrete base with any symbolic
-  -- writes stacked on top, so we write all concrete bytes in a first pass and
-  -- then write any symbolic bytes afterwards
+  -- we want to minimize the size of the resulting expresion, so we do two passes:
+  --   1. write all concrete bytes to some base buffer
+  --   2. write all symbolic writes on top of this buffer
+  -- this is safe because each write in the input vec is to a single byte at a distinct location
+  -- runs in O(2n) time, and has pretty minimal allocation & copy overhead in
+  -- the concrete part (a single preallocated vec, with no copies)
   False -> V.ifoldl' applySymWrites (ConcreteBuf concreteBytes) bs
     where
       concreteBytes :: ByteString
