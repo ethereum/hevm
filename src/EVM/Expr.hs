@@ -8,7 +8,7 @@
 module EVM.Expr where
 
 import Prelude hiding (LT, GT)
-import Data.Bits
+import Data.Bits hiding (And, Xor)
 import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
 import Data.Int (Int32)
 import Data.Word

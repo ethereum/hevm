@@ -41,7 +41,7 @@ import Control.Monad.State.Strict hiding (state)
 
 import Data.Aeson.Lens
 import Data.ByteString (ByteString)
-import Data.Maybe (isJust, fromJust, fromMaybe)
+import Data.Maybe (isJust, fromJust, fromMaybe, isNothing)
 import Data.Map (Map, insert, lookupLT, singleton, filter)
 import Data.Text (Text, pack)
 import Data.Text.Encoding (decodeUtf8)
@@ -184,7 +184,7 @@ interpret mode =
 
         -- Stepper wants to make a query and wait for the results?
         Stepper.IOAct q -> do
-          zoom uiVm (StateT (runStateT q)) >>= interpret mode . k
+          Brick.zoom uiVm (StateT (runStateT q)) >>= interpret mode . k
 
         -- Stepper wants to modify the VM.
         Stepper.EVM m -> do
@@ -317,13 +317,13 @@ takeStep
      ,?maxIter :: Maybe Integer)
   => UiVmState
   -> StepMode
-  -> EventM n (Next UiState)
+  -> EventM n UiState ()
 takeStep ui mode =
   liftIO nxt >>= \case
-    (Stopped (), ui') ->
-      continue (ViewVm ui')
-    (Continue steps, ui') -> do
-      continue (ViewVm (ui' & set uiStepper steps))
+    (Stopped (), _) ->
+      pure ()
+    (Continue steps, ui') ->
+      put (ViewVm (ui' & set uiStepper steps))
   where
     m = interpret mode (view uiStepper ui)
     nxt = runStateT m ui
@@ -331,128 +331,151 @@ takeStep ui mode =
 backstepUntil
   :: (?fetcher :: Fetcher
      ,?maxIter :: Maybe Integer)
-  => (UiVmState -> Pred VM) -> UiVmState -> EventM n (Next UiState)
-backstepUntil p s =
-  case view uiStep s of
-    0 -> continue (ViewVm s)
-    n -> do
-      s1 <- backstep s
-      let
-        -- find a previous vm that satisfies the predicate
-        snapshots' = Data.Map.filter (p s1 . fst) (view uiSnapshots s1)
-      case lookupLT n snapshots' of
-        -- If no such vm exists, go to the beginning
-        Nothing ->
-          let
-            (step', (vm', stepper')) = fromJust $ lookupLT (n - 1) (view uiSnapshots s)
-            s2 = s1
-              & set uiVm vm'
-              & set (uiVm . cache) (view (uiVm . cache) s1)
-              & set uiStep step'
-              & set uiStepper stepper'
-          in takeStep s2 (Step 0)
-        -- step until the predicate doesn't hold
-        Just (step', (vm', stepper')) ->
-          let
-            s2 = s1
-              & set uiVm vm'
-              & set (uiVm . cache) (view (uiVm . cache) s1)
-              & set uiStep step'
-              & set uiStepper stepper'
-          in takeStep s2 (StepUntil (not . p s1))
+  => (UiVmState -> Pred VM) -> EventM n UiState ()
+backstepUntil p = get >>= \case
+  ViewVm s ->
+    case view uiStep s of
+      0 -> pure ()
+      n -> do
+        s1 <- liftIO $ backstep s
+        let
+          -- find a previous vm that satisfies the predicate
+          snapshots' = Data.Map.filter (p s1 . fst) (view uiSnapshots s1)
+        case lookupLT n snapshots' of
+          -- If no such vm exists, go to the beginning
+          Nothing ->
+            let
+              (step', (vm', stepper')) = fromJust $ lookupLT (n - 1) (view uiSnapshots s)
+              s2 = s1
+                & set uiVm vm'
+                & set (uiVm . cache) (view (uiVm . cache) s1)
+                & set uiStep step'
+                & set uiStepper stepper'
+            in takeStep s2 (Step 0)
+          -- step until the predicate doesn't hold
+          Just (step', (vm', stepper')) ->
+            let
+              s2 = s1
+                & set uiVm vm'
+                & set (uiVm . cache) (view (uiVm . cache) s1)
+                & set uiStep step'
+                & set uiStepper stepper'
+            in takeStep s2 (StepUntil (not . p s1))
+  _ -> pure ()
 
 backstep
   :: (?fetcher :: Fetcher
      ,?maxIter :: Maybe Integer)
-  => UiVmState -> EventM n UiVmState
-backstep s = case view uiStep s of
-  -- We're already at the first step; ignore command.
-  0 -> return s
-  -- To step backwards, we revert to the previous snapshot
-  -- and execute n - 1 `mod` snapshotInterval steps from there.
+  => UiVmState -> IO UiVmState -- EventM n UiState ()
+backstep s =
+  case view uiStep s of
+    -- We're already at the first step; ignore command.
+    0 -> pure s
+    -- To step backwards, we revert to the previous snapshot
+    -- and execute n - 1 `mod` snapshotInterval steps from there.
 
-  -- We keep the current cache so we don't have to redo
-  -- any blocking queries, and also the memory view.
-  n ->
-    let
-      (step, (vm, stepper)) = fromJust $ lookupLT n (view uiSnapshots s)
-      s1 = s
-        & set uiVm vm
-        & set (uiVm . cache) (view (uiVm . cache) s)
-        & set uiStep step
-        & set uiStepper stepper
-      stepsToTake = n - step - 1
+    -- We keep the current cache so we don't have to redo
+    -- any blocking queries, and also the memory view.
+    n ->
+      let
+        (step, (vm, stepper)) = fromJust $ lookupLT n (view uiSnapshots s)
+        s1 = s
+          & set uiVm vm
+          & set (uiVm . cache) (view (uiVm . cache) s)
+          & set uiStep step
+          & set uiStepper stepper
+        stepsToTake = n - step - 1
 
-    in
-      liftIO $ runStateT (interpret (Step stepsToTake) stepper) s1 >>= \case
-        (Continue steps, ui') -> return $ ui' & set uiStepper steps
-        _ -> error "unexpected end"
+      in
+        runStateT (interpret (Step stepsToTake) stepper) s1 >>= \case
+          (Continue steps, ui') -> pure $ ui' & set uiStepper steps
+          _ -> error "unexpected end"
 
 appEvent
   :: (?fetcher::Fetcher, ?maxIter :: Maybe Integer) =>
-  UiState ->
   BrickEvent Name e ->
-  EventM Name (Next UiState)
+  EventM Name UiState ()
 
 -- Contracts: Down - list down
-appEvent (ViewContracts s) (VtyEvent e@(V.EvKey V.KDown [])) = do
-  s' <- handleEventLensed s
-    browserContractList
-    handleListEvent
-    e
-  continue (ViewContracts s')
+appEvent (VtyEvent e@(V.EvKey V.KDown [])) = get >>= \case
+  ViewContracts _s -> do
+    Brick.zoom
+      (_ViewContracts . browserContractList)
+      (handleListEvent e)
+    pure () -- (ViewContracts s')
+  ViewVm s ->
+    if view uiShowMemory s then
+      vScrollBy (viewportScroll TracePane) 1
+    else
+      when (isNothing $ view (uiVm . result) s) $
+        takeStep s (StepUntil (isNewTraceAdded s))
+  _ -> pure ()
 
 -- Contracts: Up - list up
-appEvent (ViewContracts s) (VtyEvent e@(V.EvKey V.KUp [])) = do
-  s' <- handleEventLensed s
-    browserContractList
-    handleListEvent
-    e
-  continue (ViewContracts s')
+-- Page: Up - scroll
+appEvent (VtyEvent e@(V.EvKey V.KUp [])) = get >>= \case
+  ViewContracts _s -> do
+    Brick.zoom
+      (_ViewContracts . browserContractList)
+      (handleListEvent e)
+  ViewVm s ->
+    if view uiShowMemory s then
+      vScrollBy (viewportScroll TracePane) (-1)
+    else
+      backstepUntil isNewTraceAdded
+  _ -> pure ()
 
 -- Vm Overview: Esc - return to test picker or exit
-appEvent st@(ViewVm s) (VtyEvent (V.EvKey V.KEsc [])) =
-  let opts = view uiTestOpts s
-      dapp' = dapp (view uiTestOpts s)
-      tests = concatMap
-                (debuggableTests opts)
-                (view dappUnitTests dapp')
-  in case tests of
-    [] -> halt st
-    ts ->
-      continue . ViewPicker $
-      UiTestPickerState
-        { _testPickerList =
-            list
-              TestPickerPane
-              (Vec.fromList
-              ts)
-              1
-        , _testPickerDapp = dapp'
-        , _testOpts = opts
-        }
+-- Any: Esc - return to Vm Overview or Exit
+appEvent (VtyEvent (V.EvKey V.KEsc [])) = get >>= \case
+  ViewVm s -> do
+    let opts = s ^. uiTestOpts
+        dapp' = dapp opts
+        tests = concatMap (debuggableTests opts) (dapp' ^. dappUnitTests)
+    case tests of
+      [] -> halt
+      ts ->
+        put $ ViewPicker $ UiTestPickerState
+          { _testPickerList = list TestPickerPane (Vec.fromList ts) 1
+          , _testPickerDapp = dapp'
+          , _testOpts = opts
+          }
+  ViewHelp s -> put (ViewVm s)
+  ViewContracts s -> put (ViewVm $ s ^. browserVm)
+  _ -> halt
 
 -- Vm Overview: Enter - open contracts view
-appEvent (ViewVm s) (VtyEvent (V.EvKey V.KEnter [])) =
-  continue . ViewContracts $ UiBrowserState
-    { _browserContractList =
-        list
-          BrowserPane
-          (Vec.fromList (Map.toList (view (uiVm . env . contracts) s)))
-          2
-    , _browserVm = s
-    }
+-- UnitTest Picker: Enter - select from list
+appEvent (VtyEvent (V.EvKey V.KEnter [])) = get >>= \case
+  ViewVm s ->
+    put . ViewContracts $ UiBrowserState
+      { _browserContractList =
+          list
+            BrowserPane
+            (Vec.fromList (Map.toList (view (uiVm . env . contracts) s)))
+            2
+      , _browserVm = s
+      }
+  ViewPicker s ->
+    case listSelectedElement (view testPickerList s) of
+      Nothing -> error "nothing selected"
+      Just (_, x) -> do
+        let initVm  = initialUiVmStateForTest (view testOpts s) x
+        put (ViewVm initVm)
+  _ -> pure ()
 
 -- Vm Overview: m - toggle memory pane
-appEvent (ViewVm s) (VtyEvent (V.EvKey (V.KChar 'm') [])) =
-  continue (ViewVm (over uiShowMemory not s))
+appEvent (VtyEvent (V.EvKey (V.KChar 'm') [])) = get >>= \case
+  ViewVm s -> put (ViewVm $ over uiShowMemory not s)
+  _ -> pure ()
 
 -- Vm Overview: h - open help view
-appEvent (ViewVm s) (VtyEvent (V.EvKey (V.KChar 'h') []))
-  = continue . ViewHelp $ s
+appEvent (VtyEvent (V.EvKey (V.KChar 'h') [])) = get >>= \case
+  ViewVm s -> put (ViewHelp s)
+  _ -> pure ()
 
 -- Vm Overview: spacebar - read input
-appEvent (ViewVm s) (VtyEvent (V.EvKey (V.KChar ' ') [])) =
+appEvent (VtyEvent (V.EvKey (V.KChar ' ') [])) =
   let
     loop = do
       Readline.getInputLine "% " >>= \case
@@ -461,153 +484,126 @@ appEvent (ViewVm s) (VtyEvent (V.EvKey (V.KChar ' ') [])) =
       Readline.getInputLine "% " >>= \case
         Just hey' -> Readline.outputStrLn hey'
         Nothing   -> pure ()
-      return (ViewVm s)
-  in
-    suspendAndResume $
+   in do
+    s <- get
+    suspendAndResume $ do
       Readline.runInputT Readline.defaultSettings loop
+      pure s
 
 -- todo refactor to zipper step forward
 -- Vm Overview: n - step
-appEvent (ViewVm s) (VtyEvent (V.EvKey (V.KChar 'n') [])) =
-  if isJust $ view (uiVm . result) s
-  then continue (ViewVm s)
-  else takeStep s (Step 1)
+appEvent (VtyEvent (V.EvKey (V.KChar 'n') [])) = get >>= \case
+  ViewVm s ->
+    when (isNothing (s ^. uiVm . result)) $
+      takeStep s (Step 1)
+  _ -> pure ()
 
 -- Vm Overview: N - step
-appEvent (ViewVm s) (VtyEvent (V.EvKey (V.KChar 'N') [])) =
-  if isJust $ view (uiVm . result) s
-  then continue (ViewVm s)
-  else takeStep s
-       (StepUntil (isNextSourcePosition s))
+appEvent (VtyEvent (V.EvKey (V.KChar 'N') [])) = get >>= \case
+  ViewVm s ->
+    when (isNothing (s ^. uiVm . result)) $
+      takeStep s (StepUntil (isNextSourcePosition s))
+  _ -> pure ()
 
 -- Vm Overview: C-n - step
-appEvent (ViewVm s) (VtyEvent (V.EvKey (V.KChar 'n') [V.MCtrl])) =
-  if isJust $ view (uiVm . result) s
-  then continue (ViewVm s)
-  else takeStep s
-    (StepUntil (isNextSourcePositionWithoutEntering s))
+appEvent (VtyEvent (V.EvKey (V.KChar 'n') [V.MCtrl])) = get >>= \case
+  ViewVm s ->
+    when (isNothing (s ^. uiVm . result)) $
+      takeStep s (StepUntil (isNextSourcePositionWithoutEntering s))
+  _ -> pure ()
 
 -- Vm Overview: e - step
-appEvent (ViewVm s) (VtyEvent (V.EvKey (V.KChar 'e') [])) =
-  if isJust $ view (uiVm . result) s
-  then continue (ViewVm s)
-  else takeStep s
-    (StepUntil (isExecutionHalted s))
+appEvent (VtyEvent (V.EvKey (V.KChar 'e') [])) = get >>= \case
+  ViewVm s ->
+    when (isNothing (s ^. uiVm . result)) $
+      takeStep s (StepUntil (isExecutionHalted s))
+  _ -> pure ()
 
 -- Vm Overview: a - step
-appEvent (ViewVm s) (VtyEvent (V.EvKey (V.KChar 'a') [])) =
-      -- We keep the current cache so we don't have to redo
-      -- any blocking queries.
-      let
-        (vm, stepper) = fromJust (Map.lookup 0 (view uiSnapshots s))
-        s' = s
-          & set uiVm vm
-          & set (uiVm . cache) (view (uiVm . cache) s)
-          & set uiStep 0
-          & set uiStepper stepper
+appEvent (VtyEvent (V.EvKey (V.KChar 'a') [])) = get >>= \case
+  ViewVm s ->
+    -- We keep the current cache so we don't have to redo
+    -- any blocking queries.
+    let
+      (vm, stepper) = fromJust (Map.lookup 0 (view uiSnapshots s))
+      s' = s
+        & set uiVm vm
+        & set (uiVm . cache) (view (uiVm . cache) s)
+        & set uiStep 0
+        & set uiStepper stepper
 
-      in takeStep s' (Step 0)
+    in takeStep s' (Step 0)
+  _ -> pure ()
 
 -- Vm Overview: p - backstep
-appEvent st@(ViewVm s) (VtyEvent (V.EvKey (V.KChar 'p') [])) =
-  case view uiStep s of
-    0 ->
-      -- We're already at the first step; ignore command.
-      continue st
-    n -> do
-      -- To step backwards, we revert to the previous snapshot
-      -- and execute n - 1 `mod` snapshotInterval steps from there.
+appEvent (VtyEvent (V.EvKey (V.KChar 'p') [])) = get >>= \case
+  ViewVm s ->
+    case view uiStep s of
+      0 ->
+        -- We're already at the first step; ignore command.
+        pure ()
+      n -> do
+        -- To step backwards, we revert to the previous snapshot
+        -- and execute n - 1 `mod` snapshotInterval steps from there.
 
-      -- We keep the current cache so we don't have to redo
-      -- any blocking queries, and also the memory view.
-      let
-        (step, (vm, stepper)) = fromJust $ lookupLT n (view uiSnapshots s)
-        s1 = s
-          & set uiVm vm -- set the vm to the one from the snapshot
-          & set (uiVm . cache) (view (uiVm . cache) s) -- persist the cache
-          & set uiStep step
-          & set uiStepper stepper
-        stepsToTake = n - step - 1
+        -- We keep the current cache so we don't have to redo
+        -- any blocking queries, and also the memory view.
+        let
+          (step, (vm, stepper)) = fromJust $ lookupLT n (view uiSnapshots s)
+          s1 = s
+            & set uiVm vm -- set the vm to the one from the snapshot
+            & set (uiVm . cache) (view (uiVm . cache) s) -- persist the cache
+            & set uiStep step
+            & set uiStepper stepper
+          stepsToTake = n - step - 1
 
-      takeStep s1 (Step stepsToTake)
+        takeStep s1 (Step stepsToTake)
+  _ -> pure ()
 
 -- Vm Overview: P - backstep to previous source
-appEvent (ViewVm s) (VtyEvent (V.EvKey (V.KChar 'P') [])) =
-  backstepUntil isNextSourcePosition s
+appEvent (VtyEvent (V.EvKey (V.KChar 'P') [])) =
+  backstepUntil isNextSourcePosition
 
 -- Vm Overview: c-p - backstep to previous source avoiding CALL and CREATE
-appEvent (ViewVm s) (VtyEvent (V.EvKey (V.KChar 'p') [V.MCtrl])) =
-  backstepUntil isNextSourcePositionWithoutEntering s
+appEvent (VtyEvent (V.EvKey (V.KChar 'p') [V.MCtrl])) =
+  backstepUntil isNextSourcePositionWithoutEntering
 
 -- Vm Overview: 0 - choose no jump
-appEvent (ViewVm s) (VtyEvent (V.EvKey (V.KChar '0') [])) =
-  case view (uiVm . result) s of
-    Just (VMFailure (Choose (PleaseChoosePath _ contin))) ->
-      takeStep (s & set uiStepper (Stepper.evm (contin True) >> (view uiStepper s)))
-        (Step 1)
-    _ -> continue (ViewVm s)
+appEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = get >>= \case
+  ViewVm s ->
+    case view (uiVm . result) s of
+      Just (VMFailure (Choose (PleaseChoosePath _ contin))) ->
+        takeStep (s & set uiStepper (Stepper.evm (contin True) >> (view uiStepper s)))
+          (Step 1)
+      _ -> pure ()
+  _ -> pure ()
 
 -- Vm Overview: 1 - choose jump
-appEvent (ViewVm s) (VtyEvent (V.EvKey (V.KChar '1') [])) =
-  case view (uiVm . result) s of
-    Just (VMFailure (Choose (PleaseChoosePath _ contin))) ->
-      takeStep (s & set uiStepper (Stepper.evm (contin False) >> (view uiStepper s)))
-        (Step 1)
-    _ -> continue (ViewVm s)
-
-
--- Any: Esc - return to Vm Overview or Exit
-appEvent s (VtyEvent (V.EvKey V.KEsc [])) =
-  case s of
-    (ViewHelp x) -> overview x
-    (ViewContracts x) -> overview $ view browserVm x
-    _ -> halt s
-  where
-    overview = continue . ViewVm
-
--- UnitTest Picker: Enter - select from list
-appEvent (ViewPicker s) (VtyEvent (V.EvKey V.KEnter [])) =
-  case listSelectedElement (view testPickerList s) of
-    Nothing -> error "nothing selected"
-    Just (_, x) -> do
-      let initVm  = initialUiVmStateForTest (view testOpts s) x
-      continue . ViewVm $ initVm
-
--- UnitTest Picker: (main) - render list
-appEvent (ViewPicker s) (VtyEvent e) = do
-  s' <- handleEventLensed s
-    testPickerList
-    handleListEvent
-    e
-  continue (ViewPicker s')
-
--- Page: Down - scroll
-appEvent (ViewVm s) (VtyEvent (V.EvKey V.KDown [])) =
-  if view uiShowMemory s then
-    vScrollBy (viewportScroll TracePane) 1 >> continue (ViewVm s)
-  else
-    if isJust $ view (uiVm . result) s
-    then continue (ViewVm s)
-    else takeStep s
-         (StepUntil (isNewTraceAdded s))
-
--- Page: Up - scroll
-appEvent (ViewVm s) (VtyEvent (V.EvKey V.KUp [])) =
-  if view uiShowMemory s then
-    vScrollBy (viewportScroll TracePane) (-1) >> continue (ViewVm s)
-  else
-    backstepUntil isNewTraceAdded s
+appEvent (VtyEvent (V.EvKey (V.KChar '1') [])) = get >>= \case
+  ViewVm s ->
+    case view (uiVm . result) s of
+      Just (VMFailure (Choose (PleaseChoosePath _ contin))) ->
+        takeStep (s & set uiStepper (Stepper.evm (contin False) >> (view uiStepper s)))
+          (Step 1)
+      _ -> pure ()
+  _ -> pure ()
 
 -- Page: C-f - Page down
-appEvent s (VtyEvent (V.EvKey (V.KChar 'f') [V.MCtrl])) =
-  vScrollPage (viewportScroll TracePane) Down >> continue s
+appEvent (VtyEvent (V.EvKey (V.KChar 'f') [V.MCtrl])) =
+  vScrollPage (viewportScroll TracePane) Down
 
 -- Page: C-b - Page up
-appEvent s (VtyEvent (V.EvKey (V.KChar 'b') [V.MCtrl])) =
-  vScrollPage (viewportScroll TracePane) Up >> continue s
+appEvent (VtyEvent (V.EvKey (V.KChar 'b') [V.MCtrl])) =
+  vScrollPage (viewportScroll TracePane) Up
+
+-- UnitTest Picker: (main) - render list
+appEvent (VtyEvent e) = do
+  Brick.zoom
+    (_ViewPicker . testPickerList)
+    (handleListEvent e)
 
 -- Default
-appEvent s _ = continue s
+appEvent _ = pure ()
 
 app :: UnitTestOptions -> App UiState () Name
 app UnitTestOptions{..} =
@@ -617,7 +613,7 @@ app UnitTestOptions{..} =
   { appDraw = drawUi
   , appChooseCursor = neverShowCursor
   , appHandleEvent = appEvent
-  , appStartEvent = return
+  , appStartEvent = pure ()
   , appAttrMap = const (attrMap V.defAttr myTheme)
   }
 
@@ -1051,8 +1047,8 @@ ifTallEnough need w1 w2 =
 opWidget :: (Integral a, Show a) => (a, Op) -> Widget n
 opWidget = txt . pack . opString
 
-selectedAttr :: AttrName; selectedAttr = "selected"
-dimAttr :: AttrName; dimAttr = "dim"
-wordAttr :: AttrName; wordAttr = "word"
-boldAttr :: AttrName; boldAttr = "bold"
-activeAttr :: AttrName; activeAttr = "active"
+selectedAttr :: AttrName; selectedAttr = attrName "selected"
+dimAttr :: AttrName; dimAttr = attrName "dim"
+wordAttr :: AttrName; wordAttr = attrName "word"
+boldAttr :: AttrName; boldAttr = attrName "bold"
+activeAttr :: AttrName; activeAttr = attrName "active"

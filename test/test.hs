@@ -7,7 +7,7 @@ module Main where
 
 import Data.Text (Text)
 import Data.ByteString (ByteString)
-import Data.Bits
+import Data.Bits hiding (And, Xor)
 import System.Directory
 import GHC.Natural
 import Control.Monad
