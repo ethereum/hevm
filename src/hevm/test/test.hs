@@ -174,14 +174,32 @@ tests = testGroup "hevm"
           let simplified = Expr.readWord idx buf
               full = ReadWord idx buf
           res <- checkSat solvers (assertProps [simplified ./= full])
-          pure $ res == Unsat
+          case res of
+            Unsat -> pure True
+            EVM.SMT.Unknown -> pure True
+            Sat _ -> do
+              print full
+              pure False
+            Error e -> do
+              print full
+              TIO.putStrLn $ "Solver Error: " <> e
+              pure False
     , testProperty "copySlice-equivalance" $ \(srcOff, dstOff, src, dst) ->
         ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
           size <- generate (genLit 300)
           let simplified = Expr.copySlice srcOff dstOff size src dst
               full = CopySlice srcOff dstOff size src dst
           res <- checkSat solvers (assertProps [simplified ./= full])
-          pure $ res == Unsat
+          case res of
+            Unsat -> pure True
+            EVM.SMT.Unknown -> pure True
+            Sat _ -> do
+              print full
+              pure False
+            Error e -> do
+              print full
+              TIO.putStrLn $ "Solver Error: " <> e
+              pure False
     , testCase "encodeConcreteStore-overwrite" $
       let
         w :: Int -> W256
