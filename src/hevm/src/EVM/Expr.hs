@@ -157,8 +157,13 @@ shr :: Expr EWord -> Expr EWord -> Expr EWord
 shr = op2
   (\x y -> case (x, y) of
              -- simplify function selector checks
-             (Lit 0xe0, ReadWord (Lit 0) buf)
-               -> joinBytes (replicate 28 (LitByte 0) <> [readByte (Lit 0) buf, readByte (Lit 1) buf, readByte (Lit 2) buf, readByte (Lit 3) buf])
+             (Lit 0xe0, ReadWord (Lit idx) buf)
+               -> joinBytes (
+                    replicate 28 (LitByte 0) <>
+                      [ readByte (Lit idx) buf
+                      , readByte (Lit $ idx + 1) buf
+                      , readByte (Lit $ idx + 2) buf
+                      , readByte (Lit $ idx + 3) buf])
              _ -> SHR x y)
   (\x y -> if x > 256 then 0 else shiftR y (fromIntegral x))
 
