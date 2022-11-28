@@ -20,10 +20,7 @@ import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
 import Control.Concurrent (forkIO, killThread)
 import Data.Char (isSpace)
 import Data.Containers.ListUtils (nubOrd)
-import Control.Monad.State.Strict
 import Language.SMT2.Parser (getValueRes, parseFileMsg)
-import Data.Either
-import Data.Maybe
 import Data.Word
 import Numeric (readHex)
 import Data.ByteString (ByteString)
@@ -548,22 +545,22 @@ exprToSMT = \case
   AbstractBuf s -> s
   ReadWord idx prev -> op2 "readWord" idx prev
   BufLength b -> op1 "bufLength" b
-  e@(WriteByte idx val prev) ->
+  WriteByte idx val prev ->
     let encIdx = exprToSMT idx
         encVal = exprToSMT val
         encPrev = exprToSMT prev in
     "(store " <> encPrev `sp` encIdx `sp` encVal <> ")"
-  e@(WriteWord idx val prev) ->
+  WriteWord idx val prev ->
     let encIdx = exprToSMT idx
         encVal = exprToSMT val
         encPrev = exprToSMT prev in
     "(writeWord " <> encIdx `sp` encVal `sp` encPrev <> ")"
-  e@(CopySlice srcIdx dstIdx size src dst) ->
+  CopySlice srcIdx dstIdx size src dst ->
     copySlice srcIdx dstIdx size (exprToSMT src) (exprToSMT dst)
   EmptyStore -> "emptyStore"
   ConcreteStore s -> encodeConcreteStore s
   AbstractStore -> "abstractStore"
-  e@(SStore addr idx val prev) ->
+  SStore addr idx val prev ->
     let encAddr = exprToSMT addr
         encIdx = exprToSMT idx
         encVal = exprToSMT val
@@ -713,7 +710,7 @@ withSolvers solver count timeout cont = do
       _ <- forkIO $ runTask task inst avail
       orchestrate queue avail
 
-    runTask (Task s@(SMT2 cmds cexvars) r) inst availableInstances = do
+    runTask (Task (SMT2 cmds cexvars) r) inst availableInstances = do
       -- reset solver and send all lines of provided script
       out <- sendScript inst (SMT2 ("(reset)" : cmds) cexvars)
       case out of
@@ -727,7 +724,7 @@ withSolvers solver count timeout cont = do
               -- get values for all cexvars' calldataV-s
               calldatamodels <- foldM (\a n -> do
                       val <- getValue inst n
-                      tmp <- pure $ parseFileMsg Language.SMT2.Parser.getValueRes val
+                      let tmp = parseFileMsg Language.SMT2.Parser.getValueRes val
                       idConst <- case tmp of
                         Right (Language.SMT2.Parser.ResSpecific (valParsed :| [])) -> pure valParsed
                         _ -> undefined
