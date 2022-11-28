@@ -27,9 +27,24 @@ import EVM.Format (formatExpr)
 import EVM.Dapp (dappInfo)
 import GHC.Conc
 import System.Exit (exitFailure)
+import qualified EVM.Expr as Expr
 import qualified EVM.Fetch as Fetch
 import qualified EVM.FeeSchedule as FeeSchedule
 import qualified Data.Vector as V
+
+Just asList = Expr.toList e
+asBuf = T.putStrLn $ formatExpr $ Expr.fromList asList
+
+putExpr = T.putStrLn $ formatExpr $ e
+putSimplExpr = T.putStrLn $ formatExpr $ simplify e
+
+e = CopySlice (Lit 0x58) (Lit 0xac28e) (Lit 0x1e) (CopySlice (Mul (Lit 0x62) (Lit 0x45)) (Lit 0xc3816) (Lit 0x2) (ConcreteBuf "m\166\159\165n1\231\133(\234\rz\RS\170\201\216\225\150\ACK\167\ENQ\NULy\232\DEL\244\ENQ\DC1|\137\209j\172)\171C5Y\182\f4\206\169\STX\SI") (ConcreteBuf "v\SUB>.\"\251f\221\196\138 ")) (CopySlice (Lit 0x5) (Lit 0xcec27) (Lit 0x2b) (ConcreteBuf "=\DC27\173L\NUL\SI\136\SUB\168\179={A\ETX\181\183T\212\211\151\165p\132") (ConcreteBuf "\NAK\DEL\129\SYN6Nx\f\145c\n"))
+
+checkEquiv :: IO ()
+checkEquiv = withSolvers Z3 1 Nothing $ \s -> do
+  let smt = assertProps [e ./= simplify e]
+  res <- checkSat s smt
+  print res
 
 runDappTest :: FilePath -> IO ()
 runDappTest root =
