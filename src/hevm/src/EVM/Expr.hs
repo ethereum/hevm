@@ -303,8 +303,9 @@ copySlice srcOffset dstOffset (Lit 32) src dst = WriteWord dstOffset (readWord s
 copySlice s@(Lit srcOffset) d@(Lit dstOffset) sz@(Lit size) src ds@(ConcreteBuf dst) = let
     hd = padRight (num dstOffset) $ BS.take (num dstOffset) dst
     sl = [readByte (Lit i) src | i <- [srcOffset .. srcOffset + (size - 1)]]
+    tl = BS.drop (num dstOffset + num size) dst
   in if Prelude.and . (fmap isLitByte) $ sl
-     then ConcreteBuf $ hd <> (BS.pack . (mapMaybe unlitByte) $ sl)
+     then ConcreteBuf $ hd <> (BS.pack . (mapMaybe unlitByte) $ sl) <> tl
      else CopySlice s d sz src ds
 
 -- abstract indicies

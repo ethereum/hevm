@@ -170,12 +170,16 @@ tests = testGroup "hevm"
         (LitByte 0xbb)
         (Expr.indexWord (Lit 2) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
     , testProperty "readWord-equivalance" $ \(buf, idx) ->
-        -- we use the SMT solver to compare the result of readStorage, to the unsimplified result
         ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
-          print buf
-          print idx
           let simplified = Expr.readWord idx buf
               full = ReadWord idx buf
+          res <- checkSat solvers (assertProps [simplified ./= full])
+          pure $ res == Unsat
+    , testProperty "copySlice-equivalance" $ \(srcOff, dstOff, src, dst) ->
+        ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
+          size <- generate (genLit 300)
+          let simplified = Expr.copySlice srcOff dstOff size src dst
+              full = CopySlice srcOff dstOff size src dst
           res <- checkSat solvers (assertProps [simplified ./= full])
           pure $ res == Unsat
     , testCase "encodeConcreteStore-overwrite" $
@@ -1652,6 +1656,11 @@ genByte sz = oneof
   where
     subWord = genWord (sz `div` 10)
     subBuf = genBuf (sz `div` 10)
+
+genLit :: W256 -> Gen (Expr EWord)
+genLit bound = do
+  w <- arbitrary
+  pure $ Lit (w `mod` bound)
 
 genNat :: Gen Int
 genNat = fmap fromIntegral (arbitrary :: Gen Natural)
