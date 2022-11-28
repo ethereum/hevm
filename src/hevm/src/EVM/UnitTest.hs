@@ -460,7 +460,7 @@ runUnitTestContract
           liftIO $ do
             tick "\n"
             tick (Text.unlines (filter (not . Text.null) running))
-            tick (Data.Text.pack . show $ bailing)
+            tick (Text.unlines bailing)
 
           pure [(isRight r, vm) | (r, vm) <- details]
 
@@ -734,7 +734,7 @@ symFailure UnitTestOptions {..} testName failures' =
     [ "Failure: "
     , testName
     , "\n\n"
-    -- , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
+    , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
     ]
     where
       showRes = \case
@@ -749,7 +749,7 @@ symFailure UnitTestOptions {..} testName failures' =
         ["Counterexample:"
         ,""
         ,"  result:   " <> showRes leaf
-        ,"  calldata: " <> Text.unpack (Text.unlines cexs)
+        ,"  calldata: " <> (show $ EVM.SMT.calldata cexs)
         , case verbose of
             --Just _ -> unlines
               --[ ""
