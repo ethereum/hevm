@@ -474,6 +474,21 @@ formatExpr = go
         , ")"
         ]
 
+      -- Stores
+      SStore addr slot val prev -> T.unlines
+        [ "(SStore"
+        , indent 2 $ T.unlines
+          [ "addr:"
+          , indent 2 $ formatExpr addr
+          , "slot:"
+          , indent 2 $ formatExpr slot
+          , "val:"
+          , indent 2 $ formatExpr val
+          ]
+        , ")"
+        , formatExpr prev
+        ]
+
       -- Buffers
 
       CopySlice srcOff dstOff size src dst -> T.unlines
