@@ -21,21 +21,18 @@ import EVM.Traversals
 import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
 import Data.DoubleWord (Word256)
-import GHC.Conc (numCapabilities)
 import Control.Concurrent.Async
 import Data.Maybe
 import Data.List (foldl')
 
 import Data.ByteString (ByteString)
 import qualified Control.Monad.State.Class as State
-import qualified Data.ByteString.Base16 as BS16
-import qualified Data.ByteString as BS
-import Data.Bifunctor (first, second)
+import Data.Bifunctor (second)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Data.List (find)
-import Data.Maybe (isJust, fromJust)
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.IO as TL
 import EVM.Format (formatExpr)
 
 data ProofResult a b c = Qed a | Cex b | Timeout c
@@ -539,11 +536,11 @@ reachable solvers = go []
         print (tres, fres)
         case (tres, fres) of
           (Error tm, Error fm) -> do
-            writeFile "tquery.smt2" (T.unpack $ formatSMT2 tquery)
-            writeFile "fquery.smt2" (T.unpack $ formatSMT2 fquery)
+            TL.writeFile "tquery.smt2" (formatSMT2 tquery)
+            TL.writeFile "fquery.smt2" (formatSMT2 fquery)
             error $ "Solver Errors: " <> (T.unpack . T.unlines $ [tm, fm])
           (Error tm, _) -> do
-            putStrLn $ T.unpack $ formatSMT2 tquery
+            TL.putStrLn $ formatSMT2 tquery
             error $ "Solver Error: " <> T.unpack tm
           (_ , Error fm) -> error $ "Solver Error: " <> T.unpack fm
           (EVM.SMT.Unknown, _) -> error "Solver timeout, unable to analyze reachability"
@@ -557,8 +554,8 @@ reachable solvers = go []
             pure ([tquery, fquery] <> tqs <> fqs, ITE c texp fexp)
           (Unsat, Unsat) -> do
             putStrLn $ "pcs: " <> show pcs
-            putStrLn $ "tquery:\n " <> (T.unpack $ formatSMT2 tquery)
-            putStrLn $ "fquery:\n " <> (T.unpack $ formatSMT2 fquery)
+            TL.putStrLn $ "tquery:\n " <> (formatSMT2 tquery)
+            TL.putStrLn $ "fquery:\n " <> (formatSMT2 fquery)
             error "Internal Error: two unsat branches found"
       Invalid -> pure ([], Invalid)
       SelfDestruct -> pure ([], SelfDestruct)
@@ -566,11 +563,12 @@ reachable solvers = go []
       Return msg store -> pure ([], Return msg store)
       EVM.Types.IllegalOverflow -> pure ([], EVM.Types.IllegalOverflow)
       TmpErr e -> error $ "TmpErr: " <> show e
+      GVar _ -> error "Internal Error: unexpected GVar"
 
 -- | Evaluate the provided proposition down to its most concrete result
 evalProp :: Prop -> Prop
 evalProp = \case
-  o@(PBool b) -> o
+  o@(PBool _) -> o
   o@(PNeg p)  -> case p of
               (PBool b) -> PBool (not b)
               _ -> o
@@ -626,9 +624,9 @@ verify solvers opts preState rpcinfo maybepost = do
       putStrLn $ "Checking for reachability of " <> show (length withQueries) <> "\n potential property violations"
 
       when (debug opts) $ forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
-        writeFile
+        TL.writeFile
           ("query-" <> show idx <> ".smt2")
-          ("; " <> show leaf <> "\n\n" <> T.unpack (formatSMT2 q) <> "\n\n(check-sat)")
+          ("; " <> (TL.pack $ show leaf) <> "\n\n" <> formatSMT2 q <> "\n\n(check-sat)")
 
       -- Dispatch the remaining branches to the solver to check for violations
       results <- flip mapConcurrently withQueries $ \(query, leaf) -> do

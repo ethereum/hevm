@@ -15,6 +15,8 @@ import System.Directory
 import Data.String.Here
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.IO as TL
 
 import EVM
 import EVM.SMT
@@ -87,7 +89,7 @@ dumpQueries root = withCurrentDirectory root $ do
     putStrLn $ "generated queries (" <> (show $ Prelude.length qs) <> " total)"
     putStrLn "dumping queries"
     forM_ (zip ([1..] :: [Int]) qs) $ \(idx, q) -> do
-      writeFile ("query_" <> show idx <> ".smt2") (T.unpack $ T.append (formatSMT2 q) "(check-sat)")
+      TL.writeFile ("query_" <> show idx <> ".smt2") (TL.append (formatSMT2 q) "(check-sat)")
     putStrLn "dumped queries"
 
 doTest :: IO ()
@@ -162,7 +164,7 @@ reachable' smtdebug c = do
       putStrLn "\n\nQueries\n\n"
       forM_ qs $ \q -> do
         putStrLn "\n\n-- Query --"
-        putStrLn $ T.unpack $ formatSMT2 q
+        TL.putStrLn $ formatSMT2 q
 
 
 showExpr :: ByteString -> IO ()
