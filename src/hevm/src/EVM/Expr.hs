@@ -612,23 +612,30 @@ simplify e = if (mapExpr go e == e)
               <> (BS.drop (num idx + 32) b)))
       | otherwise = o
     go (WriteWord a b c) = writeWord a b c
+
     go (WriteByte a b c) = writeByte a b c
     go (CopySlice a b c d f) = copySlice a b c d f
 
     go (IndexWord a b) = indexWord a b
 
-    -- concrete LT / GT
+    -- LT
     go (EVM.Types.LT (Lit a) (Lit b))
       | a < b = Lit 1
       | otherwise = Lit 0
+    go (EVM.Types.LT _ (Lit 0)) = Lit 0
+
+    -- normalize all comparisons in terms of LT
     go (EVM.Types.GT a b) = EVM.Types.LT b a
     go (EVM.Types.GEq a b) = EVM.Types.LEq b a
     go (EVM.Types.LEq a b) = EVM.Types.IsZero (EVM.Types.GT a b)
+
+    go (IsZero a) = iszero a
 
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
       | a == b = Lit 1
       | otherwise = Lit 0
+    go (Eq (Lit 0) (Sub a b)) = Eq a b
     go o@(Eq a b)
       | a == b = Lit 1
       | otherwise = o
