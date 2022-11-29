@@ -199,21 +199,29 @@ doInterpret fetcher maxIter askSmtIters vm = undefined
       --f (vm', cs) = Node (BranchInfo (if null cs then vm' else vm) Nothing) cs
     --in f <$> interpret' fetcher maxIter askSmtIters vm
 
+
+data CTerm a = CTerm
+  { term        :: Expr a
+  , assertions  :: [Prop]
+  }
+  deriving Show
+
+
 -- | Interpreter which explores all paths at branching points.
 -- returns an Expr representing the possible executions
 interpret
   :: Fetch.Fetcher
   -> Maybe Integer -- max iterations
   -> Maybe Integer -- ask smt iterations
-  -> Stepper (Expr End)
-  -> StateT VM IO (Expr End)
+  -> Stepper (CTerm End)
+  -> StateT VM IO (CTerm End)
 interpret fetcher maxIter askSmtIters =
   eval . Operational.view
 
   where
     eval
-      :: Operational.ProgramView Stepper.Action (Expr End)
-      -> StateT VM IO (Expr End)
+      :: Operational.ProgramView Stepper.Action (CTerm End)
+      -> StateT VM IO (CTerm End)
 
     eval (Operational.Return x) = pure x
 
@@ -231,11 +239,11 @@ interpret fetcher maxIter askSmtIters =
           case maxIterationsReached vm maxIter of
             -- TODO: parallelise
             Nothing -> do
-              a <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue True) >>= k)
-              eqs <- use keccakEqs
-              put $ vm & set keccakEqs eqs
-              b <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue False) >>= k)
-              return $ ITE cond a b
+              ca <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue True) >>= k)
+              put $ vm
+              cb <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue False) >>= k)
+              return $ CTerm { term = ITE cond (term ca) (term cb)
+                             , assertions = assertions ca <> assertions cb }
             Just n ->
               interpret fetcher maxIter askSmtIters (Stepper.evm (continue (not n)) >>= k)
         Stepper.Wait q -> do
@@ -325,20 +333,27 @@ pruneDeadPaths =
     Just (VMFailure DeadPath) -> False
     _ -> True
 
--- | Stepper that parses the result of Stepper.runFully into an Expr End
-runExpr :: Stepper.Stepper (Expr End)
-runExpr = do
+-- | Stepper that parses the result of Stepper.runFully into an CTerm package
+-- consisting of an Expr End and assertions accumulated during execution
+runCTerm :: Stepper.Stepper (CTerm End)
+runCTerm = do
   vm <- Stepper.runFully
+  let eqs = view keccakEqs vm
   pure $ case view result vm of
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
-    Just (VMSuccess buf) -> Return buf (view (env . EVM.storage) vm)
-    Just (VMFailure e) -> case e of
-      UnrecognizedOpcode _ -> Invalid
-      SelfDestruction -> SelfDestruct
-      EVM.IllegalOverflow -> EVM.Types.IllegalOverflow
-      EVM.Revert buf -> EVM.Types.Revert buf
-      e' -> EVM.Types.TmpErr $ show e'
+    Just (VMSuccess buf) -> CTerm { term = Return buf (view (env . EVM.storage) vm), assertions = eqs }
+    Just (VMFailure e) ->
+      let exp = case e of
+            UnrecognizedOpcode _ -> Invalid
+            SelfDestruction -> SelfDestruct
+            EVM.IllegalOverflow -> EVM.Types.IllegalOverflow
+            EVM.Revert buf -> EVM.Types.Revert buf
+            e' -> EVM.Types.TmpErr $ show e'
+      in CTerm { term = exp, assertions = eqs }
 
+-- | Same as runCTerm but throws away the assertions
+runExpr :: Stepper.Stepper (Expr End)
+runExpr = liftM term runCTerm
 
 -- | Converts a given top level expr into a list of final states and the associated path conditions for each state
 flattenExpr :: Expr End -> [([Prop], Expr End)]
@@ -496,7 +511,7 @@ verify :: SolverGroup -> VeriOpts -> VM -> Maybe (Fetch.BlockNumber, Text) -> Ma
 verify solvers opts preState rpcinfo maybepost = do
   putStrLn "Exploring contract"
 
-  (exprInter, vmState) <- runStateT (interpret (Fetch.oracle solvers rpcinfo) Nothing Nothing runExpr) preState
+  CTerm {term = exprInter, assertions = eqs} <- evalStateT (interpret (Fetch.oracle solvers rpcinfo) Nothing Nothing runCTerm) preState
   when (debug opts) $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
 
   expr <- if (simp opts) then (pure $ Expr.simplify exprInter) else pure exprInter
@@ -514,7 +529,6 @@ verify solvers opts preState rpcinfo maybepost = do
             PBool True -> False
             _ -> True
         assumes = view constraints preState
-        eqs = view keccakEqs vmState
         withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> eqs <> pcs), leaf)) canViolate
       putStrLn $ "Checking for reachability of " <> show (length withQueries) <> "\n potential property violations"
 
