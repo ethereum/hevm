@@ -349,6 +349,19 @@ writeWord o@(Lit offset) v@(Lit val) buf@(ConcreteBuf src)
                  <> word256Bytes val
                  <> BS.drop ((num offset) + 32) src
   | otherwise = WriteWord o v buf
+writeWord idx val b@(WriteWord idx' val' buf)
+  -- if the indices match exactly then we just replace the value in the current write and return
+  | idx == idx' = WriteWord idx val buf
+  | otherwise
+    = case (idx, idx') of
+        (Lit i, Lit i') -> if (i >= i' + 32 || i + 32 < i') && i > i'
+                           -- if we can statically determine that the write at idx doesn't overlap the write at idx', then we push the write down
+                           -- the i > i' condition ensures that this routine does not loop forever
+                           then WriteWord idx' val' (writeWord idx val buf)
+                           -- if we cannot statically determine freedom from overlap, then we just return an abstract term
+                           else WriteWord idx val b
+        -- if we cannot determine statically that the write at idx' is out of bounds for idx, then we return an abstract term
+        _ -> WriteWord idx val b
 writeWord offset val src = WriteWord offset val src
 
 
