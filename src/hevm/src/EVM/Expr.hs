@@ -498,21 +498,28 @@ stripWrites bottom top = \case
 -- always return a symbolic value.
 readStorage :: Expr EWord -> Expr EWord -> Expr Storage -> Maybe (Expr EWord)
 readStorage _ _ EmptyStore = Nothing
-readStorage addr loc store@(ConcreteStore s) = case (addr, loc) of
+readStorage addr slot store@(ConcreteStore s) = case (addr, slot) of
   (Lit a, Lit l) -> do
     ctrct <- Map.lookup a s
     val <- Map.lookup l ctrct
     pure $ Lit val
-  _ -> Just $ SLoad addr loc store
-readStorage addr' loc s@AbstractStore = Just $ SLoad addr' loc s
-readStorage addr' loc s@(SStore addr slot val prev) = case (addr, addr') of
-  (Lit _, Lit _) ->
-    if addr == addr'
-    then case (loc, slot) of
-      (Lit _, Lit _) -> if slot == loc then (Just val) else readStorage addr' loc prev
-      _ -> Just $ SLoad addr' loc s
-    else readStorage addr' loc prev
-  _ -> Just $ SLoad addr' loc s
+  _ -> Just $ SLoad addr slot store
+readStorage addr' slot' s@AbstractStore = Just $ SLoad addr' slot' s
+readStorage addr' slot' s@(SStore addr slot val prev) =
+  if addr == addr'
+  then if slot == slot'
+       -- if address and slot match then we return the val in this write
+       then Just val
+       else case (slot, slot') of
+              -- if the slots don't match and are lits, we can skip this write
+              (Lit _, Lit _) -> readStorage addr' slot' prev
+              -- if the slots don't match syntactically and are abstract then we can't skip this write
+              _ -> Just $ SLoad addr' slot' s
+  else case (addr, addr') of
+    -- if the the addresses don't match and are lits, we can skip this write
+    (Lit _, Lit _) -> readStorage addr' slot' prev
+    -- if the the addresses don't match syntactically and are abstract then we can't skip this write
+    _ -> Just $ SLoad addr' slot' s
 readStorage _ _ (GVar _) = error "Can't read from a GVar"
 
 readStorage' :: Expr EWord -> Expr EWord -> Expr Storage -> Expr EWord
