@@ -552,6 +552,28 @@ writeStorage a@(Lit addr) k@(Lit key) v@(Lit val) store = case store of
       ctrct = Map.findWithDefault Map.empty addr s
     in ConcreteStore (Map.insert addr (Map.insert key val ctrct) s)
   _ -> SStore a k v store
+writeStorage addr key val store@(SStore addr' key' val' prev)
+  | addr == addr'
+     = if key == key'
+       -- if we're overwriting an existing location, then drop the write
+       then SStore addr key val prev
+       else case (addr, addr', key, key') of
+              -- if we can know statically that the new write doesn't overlap with the existing write, then we continue down the write chain
+              -- we impose an ordering relation on the writes that we push down to ensure termination when this routine is called from the simplifier
+              (Lit a, Lit a', Lit k, Lit k') -> if a > a' || (a == a' && k > k')
+                                                then SStore addr' key' val' (writeStorage addr key val prev)
+                                                else SStore addr key val store
+              -- otherwise stack a new write on top of the the existing write chain
+              _ -> SStore addr key val store
+  | otherwise
+     = case (addr, addr') of
+        -- if we can know statically that the new write doesn't overlap with the existing write, then we continue down the write chain
+        -- once again we impose an ordering relation on the pushed down writes to ensure termination
+        (Lit a, Lit a') -> if a > a'
+                           then SStore addr' key' val' (writeStorage addr key val prev)
+                           else SStore addr key val store
+        -- otherwise stack a new write on top of the the existing write chain
+        _ -> SStore addr key val store
 writeStorage addr key val store = SStore addr key val store
 
 
