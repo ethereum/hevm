@@ -591,6 +591,10 @@ simplify e = if (mapExpr go e == e)
     -- redundant CopySlice
     go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
 
+    -- simplify storage
+    go (SLoad addr slot store) = readStorage' addr slot store
+    go (SStore addr slot val store) = writeStorage addr slot val store
+
     -- simplify buffers
     go o@(ReadWord (Lit _) _) = simplifyReads o
     go (ReadWord idx buf) = readWord idx buf
