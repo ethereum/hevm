@@ -544,7 +544,7 @@ formatExpr = go
         "" -> "(ConcreteBuf \"\")"
         _ -> T.unlines
           [ "(ConcreteBuf"
-          , indent 2 $ T.pack $ prettyHex 64 bs
+          , indent 2 $ T.pack $ prettyHex 0 bs
           , ")"
           ]
 
