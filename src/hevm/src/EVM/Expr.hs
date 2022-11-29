@@ -47,16 +47,27 @@ op3 :: (Expr EWord -> Expr EWord -> Expr EWord -> Expr EWord)
 op3 _ concrete (Lit x) (Lit y) (Lit z) = Lit (concrete x y z)
 op3 symbolic _ x y z = symbolic x y z
 
+-- | If a given binary op is commutative, then we always force Lits to the lhs if
+-- only one argument is a Lit. This makes writing pattern matches in the
+-- simplifier easier.
+normArgs :: (Expr EWord -> Expr EWord -> Expr EWord) -> (W256 -> W256 -> W256) -> Expr EWord -> Expr EWord -> Expr EWord
+normArgs symop concop l r = case (l, r) of
+  (Lit _, _) -> doOp l r
+  (_, Lit _) -> doOp r l
+  _ -> doOp l r
+  where
+    doOp = op2 symop concop
+
 -- Integers
 
 add :: Expr EWord -> Expr EWord -> Expr EWord
-add = op2 Add (+)
+add = normArgs Add (+)
 
 sub :: Expr EWord -> Expr EWord -> Expr EWord
 sub = op2 Sub (-)
 
 mul :: Expr EWord -> Expr EWord -> Expr EWord
-mul = op2 Mul (*)
+mul = normArgs Mul (*)
 
 div :: Expr EWord -> Expr EWord -> Expr EWord
 div = op2 Div (\x y -> if y == 0 then 0 else Prelude.div x y)
@@ -131,7 +142,7 @@ sgt = op2 SLT (\x y ->
   in if sx > sy then 1 else 0)
 
 eq :: Expr EWord -> Expr EWord -> Expr EWord
-eq = op2 Eq (\x y -> if x == y then 1 else 0)
+eq = normArgs Eq (\x y -> if x == y then 1 else 0)
 
 iszero :: Expr EWord -> Expr EWord
 iszero = op1 IsZero (\x -> if x == 0 then 1 else 0)
@@ -139,13 +150,13 @@ iszero = op1 IsZero (\x -> if x == 0 then 1 else 0)
 -- Bits
 
 and :: Expr EWord -> Expr EWord -> Expr EWord
-and = op2 And (.&.)
+and = normArgs And (.&.)
 
 or :: Expr EWord -> Expr EWord -> Expr EWord
-or = op2 Or (.|.)
+or = normArgs Or (.|.)
 
 xor :: Expr EWord -> Expr EWord -> Expr EWord
-xor = op2 Xor Data.Bits.xor
+xor = normArgs Xor Data.Bits.xor
 
 not :: Expr EWord -> Expr EWord
 not = op1 Not complement
