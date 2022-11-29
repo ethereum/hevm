@@ -475,6 +475,18 @@ formatExpr = go
         ]
 
       -- Stores
+      SLoad addr slot store -> T.unlines
+        [ "(SLoad"
+        , indent 2 $ T.unlines
+          [ "addr:"
+          , indent 2 $ formatExpr addr
+          , "slot:"
+          , indent 2 $ formatExpr slot
+          , "store:"
+          , indent 2 $ formatExpr store
+          ]
+        , ")"
+        ]
       SStore addr slot val prev -> T.unlines
         [ "(SStore"
         , indent 2 $ T.unlines
@@ -487,6 +499,11 @@ formatExpr = go
           ]
         , ")"
         , formatExpr prev
+        ]
+      ConcreteStore s -> T.unlines
+        [ "(ConcreteStore"
+        , indent 2 $ T.unlines $ fmap (T.pack . show) $ Map.toList $ fmap (T.pack . show . Map.toList) s
+        , ")"
         ]
 
       -- Buffers
