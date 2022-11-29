@@ -600,6 +600,17 @@ simplify e = if (mapExpr go e == e)
     go (ReadWord idx buf) = readWord idx buf
     go o@(ReadByte (Lit _) _) = simplifyReads o
     go (ReadByte idx buf) = readByte idx buf
+
+    -- We can zero out any bytes in a base ConcreteBuf that we know will be overwritten by a later write
+    -- TODO: make this fully general for entire write chains, not just a single write.
+    go o@(WriteWord (Lit idx) val (ConcreteBuf b))
+      | idx <= num (maxBound :: Int)
+        = (writeWord (Lit idx) val (
+            ConcreteBuf $
+              (BS.take (num idx) (padRight (num idx) b))
+              <> (BS.replicate 32 0)
+              <> (BS.drop (num idx + 32) b)))
+      | otherwise = o
     go (WriteWord a b c) = writeWord a b c
     go (WriteByte a b c) = writeByte a b c
     go (CopySlice a b c d f) = copySlice a b c d f
