@@ -240,7 +240,7 @@ interpret fetcher maxIter askSmtIters =
             -- TODO: parallelise
             Nothing -> do
               ca <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue True) >>= k)
-              put $ vm
+              put vm
               cb <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue False) >>= k)
               return $ CTerm { term = ITE cond (term ca) (term cb)
                              , assertions = assertions ca <> assertions cb }
