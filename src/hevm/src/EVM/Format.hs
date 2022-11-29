@@ -548,4 +548,12 @@ formatExpr = go
           , ")"
           ]
 
+
+      -- Hashes
+      Keccak b -> T.unlines
+       [ "(Keccak"
+       , indent 2 $ formatExpr b
+       , ")"
+       ]
+
       a -> T.pack $ show a
