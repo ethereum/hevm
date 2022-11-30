@@ -7,6 +7,7 @@ module Main where
 
 import Data.Text (Text, pack)
 import Data.ByteString (ByteString)
+import Data.Bits
 import System.Directory
 import System.IO.Temp
 import System.Process (readProcess)
@@ -97,20 +98,100 @@ tests = testGroup "hevm"
         (SLoad (Lit 0x0) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])])))
         (Expr.readStorage' (Lit 0x0) (Lit 0x0)
           (SStore (Lit 0xacab) (Lit 0xdead) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])]))))
-    , testProperty "readStorage-equivalance" $ \(store, addr, slot) ->
-        -- we use the SMT solver to compare the result of readStorage, to the unsimplified result
-        ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
-          let simplified = Expr.readStorage' addr slot store
-              full = SLoad addr slot store
-          res <- checkSat solvers (assertProps [simplified ./= full])
-          print res
-          pure $ res == Unsat
     ]
+  -- These tests fuzz the simplifier by generating a random expression,
+  -- applying some simplification rules, and then using the smt encoding to
+  -- check that the simplified version is semantically equivalent to the
+  -- unsimplified one
   , testGroup "SimplifierTests"
-    [ testProperty "buffer-simplification" $ \(expr :: Expr Buf) -> runSimplifyTest expr
-    , testProperty "store-simplification" $ \(expr :: Expr Storage) -> runSimplifyTest expr
-    , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> runSimplifyTest expr
-    , testProperty "word-simplification" $ \(expr :: Expr EWord) -> runSimplifyTest expr
+    [ testProperty "buffer-simplification" $ \(expr :: Expr Buf) -> ioProperty $ do
+        let simplified = Expr.simplify expr
+        checkEquiv expr simplified
+    , testProperty "store-simplification" $ \(expr :: Expr Storage) -> ioProperty $ do
+        let simplified = Expr.simplify expr
+        checkEquiv expr simplified
+    , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> ioProperty $ do
+        let simplified = Expr.simplify expr
+        checkEquiv expr simplified
+    , testProperty "word-simplification" $ \(expr :: Expr EWord) -> ioProperty $ do
+        let simplified = Expr.simplify expr
+        checkEquiv expr simplified
+    , testProperty "readStorage-equivalance" $ \(store, addr, slot) -> ioProperty $ do
+        let simplified = Expr.readStorage' addr slot store
+            full = SLoad addr slot store
+        checkEquiv simplified full
+    , testProperty "writeStorage-equivalance" $ \(store, addr, slot, val) -> ioProperty $ do
+        let simplified = Expr.writeStorage addr slot val store
+            full = SStore addr slot val store
+        checkEquiv simplified full
+    , testProperty "readWord-equivalance" $ \(buf, idx) -> ioProperty $ do
+        let simplified = Expr.readWord idx buf
+            full = ReadWord idx buf
+        checkEquiv simplified full
+    , testProperty "writeWord-equivalance" $ \(buf, idx, val) -> ioProperty $ do
+        let simplified = Expr.writeWord idx buf val
+            full = WriteWord idx buf val
+        checkEquiv simplified full
+    , testProperty "readByte-equivalance" $ \(buf, idx) -> ioProperty $ do
+        let simplified = Expr.readByte idx buf
+            full = ReadByte idx buf
+        checkEquiv simplified full
+    , testProperty "writeByte-equivalance" $ \(buf, idx, val) -> ioProperty $ do
+        let simplified = Expr.writeByte idx buf val
+            full = WriteByte idx buf val
+        checkEquiv simplified full
+    , testProperty "copySlice-equivalance" $ \(srcOff, dstOff, src, dst) -> ioProperty $ do
+        size <- generate (genLit 300)
+        let simplified = Expr.copySlice srcOff dstOff size src dst
+            full = CopySlice srcOff dstOff size src dst
+        checkEquiv simplified full
+    , testProperty "indexWord-equivalence" $ \(src) -> ioProperty $ do
+        idx <- generate (genLit 50)
+        let simplified = Expr.indexWord idx src
+            full = IndexWord idx src
+        checkEquiv simplified full
+    , testProperty "indexWord-mask-equivalence" $ \(src :: Expr EWord) -> ioProperty $ do
+        idx <- generate (genLit 35)
+        mask <- generate $ do
+          pow <- arbitrary :: Gen Int
+          frequency
+           [ (1, pure $ Lit $ (shiftL 1 (pow `mod` 256)) - 1)        -- potentially non byte aligned
+           , (1, pure $ Lit $ (shiftL 1 ((pow * 8) `mod` 256)) - 1)  -- byte aligned
+           ]
+        let
+          input = And mask src
+          simplified = Expr.indexWord idx input
+          full = IndexWord idx input
+        checkEquiv simplified full
+    , testProperty "toList-equivalance" $ \buf -> ioProperty $ do
+        let
+          -- transforms the input buffer to give it a known length
+          fixLength :: Expr Buf -> Gen (Expr Buf)
+          fixLength = mapExprM go
+            where
+              go :: Expr a -> Gen (Expr a)
+              go = \case
+                WriteWord _ val b -> liftM3 WriteWord idx (pure val) (pure b)
+                WriteByte _ val b -> liftM3 WriteByte idx (pure val) (pure b)
+                CopySlice so _ sz src dst -> liftM5 CopySlice (pure so) idx (pure sz) (pure src) (pure dst)
+                AbstractBuf _ -> cbuf
+                e -> pure e
+              cbuf = do
+                bs <- arbitrary
+                pure $ ConcreteBuf bs
+              idx = do
+                w <- arbitrary
+                -- we use 100_000 as an upper bound for indices to keep tests reasonably fast here
+                pure $ Lit (w `mod` 100_000)
+
+        input <- generate $ fixLength buf
+        case Expr.toList input of
+          Nothing -> do
+            putStrLn "skip"
+            pure True -- ignore cases where the buf cannot be represented as a list
+          Just asList -> do
+            let asBuf = Expr.fromList asList
+            checkEquiv asBuf input
     ]
   , testGroup "MemoryTests"
     [ testCase "read-write-same-byte"  $ assertEqual ""
@@ -169,37 +250,6 @@ tests = testGroup "hevm"
         -- same as above, but with offset 2
         (LitByte 0xbb)
         (Expr.indexWord (Lit 2) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
-    , testProperty "readWord-equivalance" $ \(buf, idx) ->
-        ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
-          let simplified = Expr.readWord idx buf
-              full = ReadWord idx buf
-          res <- checkSat solvers (assertProps [simplified ./= full])
-          case res of
-            Unsat -> pure True
-            EVM.SMT.Unknown -> pure True
-            Sat _ -> do
-              print full
-              pure False
-            Error e -> do
-              print full
-              TIO.putStrLn $ "Solver Error: " <> e
-              pure False
-    , testProperty "copySlice-equivalance" $ \(srcOff, dstOff, src, dst) ->
-        ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
-          size <- generate (genLit 300)
-          let simplified = Expr.copySlice srcOff dstOff size src dst
-              full = CopySlice srcOff dstOff size src dst
-          res <- checkSat solvers (assertProps [simplified ./= full])
-          case res of
-            Unsat -> pure True
-            EVM.SMT.Unknown -> pure True
-            Sat _ -> do
-              print full
-              pure False
-            Error e -> do
-              print full
-              TIO.putStrLn $ "Solver Error: " <> e
-              pure False
     , testCase "encodeConcreteStore-overwrite" $
       let
         w :: Int -> W256
@@ -220,48 +270,6 @@ tests = testGroup "hevm"
     , testCase "stripbytes-concrete-bug" $ assertEqual ""
         (Expr.simplifyReads (ReadByte (Lit 0) (ConcreteBuf "5")))
         (LitByte 53)
-    , testProperty "toList-equivalance" $ \buf ->
-        ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
-          let
-            -- transforms the input buffer to give it a known length
-            fixLength :: Expr Buf -> Gen (Expr Buf)
-            fixLength = mapExprM go
-              where
-                go :: Expr a -> Gen (Expr a)
-                go = \case
-                  WriteWord _ val b -> liftM3 WriteWord idx (pure val) (pure b)
-                  WriteByte _ val b -> liftM3 WriteByte idx (pure val) (pure b)
-                  CopySlice so _ sz src dst -> liftM5 CopySlice (pure so) idx (pure sz) (pure src) (pure dst)
-                  AbstractBuf _ -> cbuf
-                  e -> pure e
-                cbuf = do
-                  bs <- arbitrary
-                  pure $ ConcreteBuf bs
-                idx = do
-                  w <- arbitrary
-                  -- we use 100_000 as an upper bound for indices to keep tests reasonably fast here
-                  pure $ Lit (w `mod` 100_000)
-
-          input <- generate $ fixLength buf
-          case Expr.toList input of
-            Nothing -> do
-              putStrLn "skip"
-              pure True -- ignore cases where the buf cannot be represented as a list
-            Just asList -> do
-              let asBuf = Expr.fromList asList
-              let smt = assertProps [asBuf ./= input]
-              res <- checkSat solvers smt
-              print res
-              case res of
-                Unsat -> pure True
-                EVM.SMT.Unknown -> pure True
-                Sat _ -> do
-                  print input
-                  pure False
-                Error e -> do
-                  print input
-                  TIO.putStrLn $ "Solver Error: " <> e
-                  pure False
     ]
   , testGroup "ABI"
     [ testProperty "Put/get inverse" $ \x ->
@@ -1522,15 +1530,14 @@ tests = testGroup "hevm"
     (===>) = assertSolidityComputation
 
 
-runSimplifyTest :: (Typeable a) => Expr a -> Property
-runSimplifyTest expr = ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
-  let simplified = Expr.simplify expr
-  if simplified == expr
+checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO Bool
+checkEquiv l r = withSolvers Z3 1 (Just 100) $ \solvers -> do
+  if l == r
      then do
        putStrLn "skip"
        pure True
      else do
-       let smt = assertProps [simplified ./= expr]
+       let smt = assertProps [l ./= r]
        res <- checkSat solvers smt
        print res
        pure $ case res of
