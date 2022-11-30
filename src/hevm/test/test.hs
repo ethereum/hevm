@@ -136,9 +136,14 @@ tests = testGroup "hevm"
         let simplified = Expr.readByte idx buf
             full = ReadByte idx buf
         checkEquiv simplified full
-    , testProperty "writeByte-equivalance" $ \(buf, idx, val) -> ioProperty $ do
-        let simplified = Expr.writeByte idx buf val
-            full = WriteByte idx buf val
+    -- we currently only simplify concrete writes over concrete buffers so that's what we test here
+    , testProperty "writeByte-equivalance" $ \(LitOnly val, LitOnly buf) -> ioProperty $ do
+        idx <- generate $ frequency
+          [ (10, genLit (fromIntegral (1_000_000 :: Int)))  -- can never overflow an Int
+          , (1, fmap Lit arbitrary)                         -- can overflow an Int
+          ]
+        let simplified = Expr.writeByte idx val buf
+            full = WriteByte idx val buf
         checkEquiv simplified full
     , testProperty "copySlice-equivalance" $ \(srcOff, dstOff, src, dst) -> ioProperty $ do
         size <- generate (genLit 300)
@@ -1671,6 +1676,18 @@ instance Arbitrary (Expr Byte) where
 
 instance Arbitrary (Expr Buf) where
   arbitrary = sized genBuf
+
+newtype LitOnly a = LitOnly a
+  deriving (Show, Eq)
+
+instance Arbitrary (LitOnly (Expr Byte)) where
+  arbitrary = LitOnly . LitByte <$> arbitrary
+
+instance Arbitrary (LitOnly (Expr EWord)) where
+  arbitrary = LitOnly . Lit <$> arbitrary
+
+instance Arbitrary (LitOnly (Expr Buf)) where
+  arbitrary = LitOnly . ConcreteBuf <$> arbitrary
 
 genByte :: Int -> Gen (Expr Byte)
 genByte 0 = fmap LitByte arbitrary

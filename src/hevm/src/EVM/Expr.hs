@@ -330,6 +330,7 @@ copySlice srcOffset dstOffset size src dst = CopySlice srcOffset dstOffset size 
 
 writeByte :: Expr EWord -> Expr Byte -> Expr Buf -> Expr Buf
 writeByte (Lit offset) (LitByte val) (ConcreteBuf "")
+  | offset <= num (maxBound :: Int)
   = ConcreteBuf $ BS.replicate (num offset) 0 <> BS.singleton val
 writeByte o@(Lit offset) b@(LitByte byte) buf@(ConcreteBuf src)
   | offset < num (maxBound :: Int)
