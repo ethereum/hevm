@@ -343,6 +343,7 @@ writeByte offset byte src = WriteByte offset byte src
 
 writeWord :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
 writeWord (Lit offset) (Lit val) (ConcreteBuf "")
+  | offset + 32 < num (maxBound :: Int)
   = ConcreteBuf $ BS.replicate (num offset) 0 <> word256Bytes val
 writeWord o@(Lit offset) v@(Lit val) buf@(ConcreteBuf src)
   | offset + 32 < num (maxBound :: Int)
