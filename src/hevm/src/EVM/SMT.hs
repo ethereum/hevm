@@ -881,7 +881,7 @@ concatBytes bytes = foldl wrap "" $ NE.reverse bytes
 
 -- | Concatenates a list of bytes into a larger bitvector
 writeBytes :: ByteString -> Expr Buf -> Builder
-writeBytes bytes buf = snd $ BS.foldl wrap (0, exprToSMT buf) bytes
+writeBytes bytes buf = snd $ BS.foldl' wrap (0, exprToSMT buf) bytes
   where
     -- we don't need to store zeros if the base buffer is empty
     skipZeros = buf == mempty
