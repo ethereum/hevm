@@ -113,7 +113,8 @@ tests = testGroup "hevm"
     , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> ioProperty $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
-    , testProperty "word-simplification" $ \(expr :: Expr EWord) -> ioProperty $ do
+    , testProperty "word-simplification" $ \(_ :: Int) -> ioProperty $ do
+        expr <- generate . sized $ genWord 0 -- we want a lower frequency of lits for this test
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
     , testProperty "readStorage-equivalance" $ \(store, addr, slot) -> ioProperty $ do
@@ -172,7 +173,7 @@ tests = testGroup "hevm"
         let simplified = Expr.writeByte idx val buf
             full = WriteByte idx val buf
         checkEquiv simplified full
-    , testProperty "copySlice-equivalance" $ \(srcOff, dstOff) -> ioProperty $ do
+    , testProperty "copySlice-equivalance" $ \(srcOff) -> ioProperty $ do
         -- we bias buffers to be concrete more often than not
         let mkBuf = oneof
               [ pure $ ConcreteBuf ""
@@ -182,6 +183,7 @@ tests = testGroup "hevm"
         src <- generate mkBuf
         dst <- generate mkBuf
         size <- generate (genLit 300)
+        dstOff <- generate (maybeBoundedLit 100_000)
         let simplified = Expr.copySlice srcOff dstOff size src dst
             full = CopySlice srcOff dstOff size src dst
         checkEquiv simplified full
@@ -1704,7 +1706,7 @@ instance Arbitrary (Expr Storage) where
   arbitrary = sized genStorage
 
 instance Arbitrary (Expr EWord) where
-  arbitrary = sized genWord
+  arbitrary = sized defaultWord
 
 instance Arbitrary (Expr Byte) where
   arbitrary = sized genByte
@@ -1734,7 +1736,7 @@ genByte sz = oneof
   , liftM2 ReadByte subWord subBuf
   ]
   where
-    subWord = genWord (sz `div` 10)
+    subWord = defaultWord (sz `div` 10)
     subBuf = defaultBuf (sz `div` 10)
 
 genLit :: W256 -> Gen (Expr EWord)
@@ -1762,12 +1764,12 @@ genEnd sz = oneof
  where
    subBuf = defaultBuf (sz `div` 2)
    subStore = genStorage (sz `div` 2)
-   subWord = genWord (sz `div` 2)
+   subWord = defaultWord (sz `div` 2)
    subEnd = genEnd (sz `div` 2)
 
-genWord :: Int -> Gen (Expr EWord)
-genWord 0 = frequency
-  [ (10, do
+genWord :: Int -> Int -> Gen (Expr EWord)
+genWord litFreq 0 = frequency
+  [ (litFreq, do
       val <- frequency
        [ (10, fmap (`mod` 100) arbitrary)
        , (1, arbitrary)
@@ -1793,8 +1795,8 @@ genWord 0 = frequency
       ]
     )
   ]
-genWord sz = frequency
-  [ (10, do
+genWord litFreq sz = frequency
+  [ (litFreq, do
       val <- frequency
        [ (10, fmap (`mod` 100) arbitrary)
        , (1, arbitrary)
@@ -1881,7 +1883,7 @@ genWord sz = frequency
     ])
   ]
  where
-   subWord = genWord (sz `div` 5)
+   subWord = genWord litFreq (sz `div` 5)
    subBuf = defaultBuf (sz `div` 10)
    subStore = genStorage (sz `div` 10)
    subByte = genByte (sz `div` 10)
@@ -1889,32 +1891,37 @@ genWord sz = frequency
 defaultBuf :: Int -> Gen (Expr Buf)
 defaultBuf = genBuf (4_000_000)
 
+defaultWord :: Int -> Gen (Expr EWord)
+defaultWord = genWord 10
+
+maybeBoundedLit :: W256 -> Gen (Expr EWord)
+maybeBoundedLit bound = do
+  o <- (arbitrary :: Gen (Expr EWord))
+  pure $ case o of
+        Lit w -> Lit $ w `mod` bound
+        _ -> o
+
 genBuf :: W256 -> Int -> Gen (Expr Buf)
 genBuf _ 0 = oneof
   [ fmap AbstractBuf genName
   , fmap ConcreteBuf arbitrary
   ]
 genBuf bound sz = oneof
-  [ liftM3 WriteWord (maybeBoundedLit) subWord subBuf
-  , liftM3 WriteByte (maybeBoundedLit) subByte subBuf
+  [ liftM3 WriteWord (maybeBoundedLit bound) subWord subBuf
+  , liftM3 WriteByte (maybeBoundedLit bound) subByte subBuf
   -- we don't generate copyslice instances where:
   --   - size is abstract
   --   - size > 100 (due to unrolling in SMT.hs)
   --   - literal dstOffsets are > 4,000,000 (due to unrolling in SMT.hs)
   -- n.b. that 4,000,000 is the theoretical maximum memory size given a 30,000,000 block gas limit
-  , liftM5 CopySlice subWord (maybeBoundedLit) smolLitWord subBuf subBuf
+  , liftM5 CopySlice subWord (maybeBoundedLit bound) smolLitWord subBuf subBuf
   ]
   where
     -- copySlice gets unrolled in the generated SMT so we can't go too crazy here
     smolLitWord = do
       w <- arbitrary
       pure $ Lit (w `mod` 100)
-    maybeBoundedLit = do
-      o <- (arbitrary :: Gen (Expr EWord))
-      pure $ case o of
-            Lit w -> Lit $ w `mod` bound
-            _ -> o
-    subWord = genWord (sz `div` 5)
+    subWord = defaultWord (sz `div` 5)
     subByte = genByte (sz `div` 10)
     subBuf = genBuf bound (sz `div` 10)
 
@@ -1927,7 +1934,7 @@ genStorage 0 = oneof
 genStorage sz = liftM4 SStore subWord subWord subWord subStore
   where
     subStore = genStorage (sz `div` 10)
-    subWord = genWord (sz `div` 5)
+    subWord = defaultWord (sz `div` 5)
 
 data Invocation
   = SolidityCall Text [AbiValue]
