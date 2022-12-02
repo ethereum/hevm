@@ -20,7 +20,7 @@ import qualified EVM.Stepper
 import qualified EVM.VMTest as VMTest
 
 
-import EVM.SymExec hiding (assertions)
+import EVM.SymExec
 import EVM.Debug
 import EVM.ABI
 import qualified EVM.Expr as Expr
