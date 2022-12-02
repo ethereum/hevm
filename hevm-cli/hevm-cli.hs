@@ -14,10 +14,6 @@ import qualified EVM.FeeSchedule as FeeSchedule
 import qualified EVM.Fetch
 import qualified EVM.Stepper
 
-
-import qualified EVM.VMTest as VMTest
-
-
 import EVM.SymExec
 import EVM.Debug
 import EVM.ABI
@@ -74,6 +70,7 @@ import qualified System.Timeout         as Timeout
 import qualified Paths_hevm      as Paths
 
 import Options.Generic as Options
+import qualified EVM.Transaction
 
 -- This record defines the program's command-line options
 -- automatically via the `optparse-generic` package.
@@ -186,14 +183,6 @@ data Command w
       , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point"
       , askSmtIterations :: w ::: Maybe Integer         <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
       }
-  | BcTest -- Run an Ethereum Blockchain/GeneralState test
-      { file      :: w ::: String    <?> "Path to .json test file"
-      , test      :: w ::: [String]  <?> "Test case filter - only run specified test method(s)"
-      , debug     :: w ::: Bool      <?> "Run interactively"
-      , jsontrace :: w ::: Bool      <?> "Print json trace output at every step"
-      , diff      :: w ::: Bool      <?> "Print expected vs. actual state on failure"
-      , timeout   :: w ::: Maybe Int <?> "Execution timeout (default: 10 sec.)"
-      }
   | Compliance -- Run Ethereum Blockchain compliance report
       { tests   :: w ::: String       <?> "Path to Ethereum Tests directory"
       , group   :: w ::: Maybe String <?> "Report group to run: VM or Blockchain (default: Blockchain)"
@@ -300,8 +289,6 @@ main = do
     Equivalence {} -> equivalence cmd
     Exec {} ->
       launchExec cmd
-    BcTest {} ->
-      launchTest cmd
     DappTest {} ->
       withCurrentDirectory root $ do
         cores <- num <$> getNumProcessors
@@ -681,7 +668,7 @@ vmFromCommand cmd = do
         Just t -> t
         Nothing -> error "unexpected symbolic timestamp when executing vm test"
 
-  return $ VMTest.initTx $ withCache (vm0 baseFee miner ts' blockNum prevRan contract)
+  return $ EVM.Transaction.initTx $ withCache (vm0 baseFee miner ts' blockNum prevRan contract)
     where
         block'   = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
         value'   = word value 0
@@ -778,7 +765,7 @@ symvmFromCommand cmd calldata' = do
     (_, _, Nothing) ->
       error "must provide at least (rpc + address) or code"
 
-  return $ (VMTest.initTx $ withCache $ vm0 baseFee miner ts blockNum prevRan calldata' callvalue' caller' contract')
+  return $ (EVM.Transaction.initTx $ withCache $ vm0 baseFee miner ts blockNum prevRan calldata' callvalue' caller' contract')
     & set (EVM.env . EVM.storage) store
 
   where
@@ -819,53 +806,6 @@ symvmFromCommand cmd calldata' = do
     word f def = fromMaybe def (f cmd)
     addr f def = fromMaybe def (f cmd)
     word64 f def = fromMaybe def (f cmd)
-
-launchTest :: HasCallStack => Command Options.Unwrapped ->  IO ()
-launchTest cmd = do
-  parsed <- VMTest.parseBCSuite <$> LazyByteString.readFile (file cmd)
-  case parsed of
-     Left "No cases to check." -> putStrLn "no-cases ok"
-     Left err -> print err
-     Right allTests ->
-       let testFilter =
-             if null (test cmd)
-             then id
-             else filter (\(x, _) -> elem x (test cmd))
-       in
-         mapM_ (runVMTest (diff cmd) (optsMode cmd) (timeout cmd)) $
-           testFilter (Map.toList allTests)
-
-runVMTest :: HasCallStack => Bool -> Mode -> Maybe Int -> (String, VMTest.Case) -> IO Bool
-runVMTest diffmode mode timelimit (name, x) =
- do
-  let vm0 = VMTest.vmForCase x
-  putStr (name ++ " ")
-  hFlush stdout
-  result <- do
-    action <- async $
-      case mode of
-        Run ->
-          Timeout.timeout (1000000 * (fromMaybe 10 timelimit)) $
-            execStateT (EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) . void $ EVM.Stepper.execFully) vm0
-        Debug ->
-          withSolvers Z3 0 Nothing $ \solvers -> Just <$> TTY.runFromVM solvers Nothing Nothing emptyDapp vm0
-        JsonTrace ->
-          error "JsonTrace: implement me"
-          -- Just <$> execStateT (EVM.UnitTest.interpretWithCoverage EVM.Fetch.zero EVM.Stepper.runFully) vm0
-    waitCatch action
-  case result of
-    Right (Just vm1) -> do
-      ok <- VMTest.checkExpectation diffmode x vm1
-      putStrLn (if ok then "ok" else "")
-      return ok
-    Right Nothing -> do
-      putStrLn "timeout"
-      return False
-    Left e -> do
-      putStrLn $ "error: " ++ if diffmode
-        then show e
-        else (head . lines . show) e
-      return False
 
 parseAbi :: (AsValue s) => s -> (Text, [AbiType])
 parseAbi abijson =

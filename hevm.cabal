@@ -110,7 +110,6 @@ library
     EVM.TTYCenteredList,
     EVM.Types,
     EVM.UnitTest,
-    EVM.VMTest
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -245,18 +244,22 @@ common test-base
     secp256k1
   other-modules:
     Paths_hevm
+    BlockchainTests
   autogen-modules:
     Paths_hevm
   build-depends:
     HUnit >= 1.6,
     QuickCheck,
     quickcheck-instances,
+    aeson,
     base,
     base16-bytestring,
     binary,
     containers,
     directory,
     bytestring,
+    filemanip,
+    filepath,
     here,
     hevm,
     lens,
@@ -274,6 +277,7 @@ common test-base
     time,
     array,
     vector,
+    witherable,
     smt2-parser >= 0.1.0.1
 
 library test-utils

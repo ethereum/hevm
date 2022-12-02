@@ -48,6 +48,7 @@ import EVM hiding (Query, allowFFI)
 import EVM.SymExec
 import EVM.ABI
 import EVM.Exec
+import EVM.Dapp
 import qualified EVM.Patricia as Patricia
 import EVM.Precompiled
 import EVM.RLP
@@ -60,8 +61,15 @@ import qualified Data.Text as T
 import Data.List (isSubsequenceOf)
 import EVM.TestUtils
 
+import qualified BlockchainTests
+
 main :: IO ()
-main = defaultMain tests
+main = do
+  blockchainTests <- BlockchainTests.prepareTests
+  defaultMain $ testGroup "all"
+    [ tests
+    , blockchainTests
+    ]
 
 -- | run a subset of tests in the repl. p is a tasty pattern:
 -- https://github.com/UnkindPartition/tasty/tree/ee6fe7136fbcc6312da51d7f1b396e1a2d16b98a#patterns
