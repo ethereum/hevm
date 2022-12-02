@@ -199,7 +199,6 @@ doInterpret fetcher maxIter askSmtIters vm = undefined
       --f (vm', cs) = Node (BranchInfo (if null cs then vm' else vm) Nothing) cs
     --in f <$> interpret' fetcher maxIter askSmtIters vm
 
-
 -- | Interpreter which explores all paths at branching points.
 -- returns an Expr representing the possible executions
 interpret
@@ -325,20 +324,20 @@ pruneDeadPaths =
     Just (VMFailure DeadPath) -> False
     _ -> True
 
--- | Stepper that parses the result of Stepper.runFully into an into an Expr End
+-- | Stepper that parses the result of Stepper.runFully into an Expr End
 runExpr :: Stepper.Stepper (Expr End)
 runExpr = do
   vm <- Stepper.runFully
-  let eqs = view keccakEqs vm
+  let asserts = view keccakEqs vm
   pure $ case view result vm of
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
-    Just (VMSuccess buf) -> Return eqs buf (view (env . EVM.storage) vm)
+    Just (VMSuccess buf) -> Return asserts buf (view (env . EVM.storage) vm)
     Just (VMFailure e) -> case e of
-      UnrecognizedOpcode _ -> Invalid eqs
-      SelfDestruction -> SelfDestruct eqs
-      EVM.IllegalOverflow -> EVM.Types.IllegalOverflow eqs
-      EVM.Revert buf -> EVM.Types.Revert eqs buf
-      e' -> EVM.Types.TmpErr eqs $ show e'
+      UnrecognizedOpcode _ -> Invalid asserts
+      SelfDestruction -> SelfDestruct asserts
+      EVM.IllegalOverflow -> EVM.Types.IllegalOverflow asserts
+      EVM.Revert buf -> EVM.Types.Revert asserts buf
+      e' -> EVM.Types.TmpErr asserts $ show e'
 
 
 -- | Converts a given top level expr into a list of final states and the associated path conditions for each state
