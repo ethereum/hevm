@@ -69,13 +69,13 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- control flow
 
-      e@Invalid -> f e
-      e@SelfDestruct -> f e
-      e@IllegalOverflow -> f e
-      e@(Revert a) -> f e <> (go a)
-      e@(Return a b) -> f e <> (go a) <> (go b)
+      e@(Invalid a) -> f e <> (foldl (foldProp f) mempty a)
+      e@(SelfDestruct a) -> f e <> (foldl (foldProp f) mempty a)
+      e@(IllegalOverflow a) -> f e <> (foldl (foldProp f) mempty a)
+      e@(Revert a b) -> f e <> (foldl (foldProp f) mempty a) <> (go b)
+      e@(Return a b c) -> f e <> (foldl (foldProp f) mempty a) <> (go b) <> (go c)
       e@(ITE a b c) -> f e <> (go a) <> (go b) <> (go c)
-      e@(TmpErr _) -> f e
+      e@(TmpErr a _) -> f e <> (foldl (foldProp f) mempty a)
 
       -- integers
 
@@ -314,16 +314,24 @@ mapExprM f expr = case expr of
 
   -- control flow
 
-  Invalid -> f Invalid
-  SelfDestruct -> f SelfDestruct
-  IllegalOverflow -> f IllegalOverflow
-  Revert a -> do
-    a' <- mapExprM f a
-    f (Revert a')
-  Return a b -> do
-    a' <- mapExprM f a
+  Invalid a -> do
+    a' <- mapM (mapPropM f) a
+    f (Invalid a')
+  SelfDestruct a -> do
+    a' <- mapM (mapPropM f) a
+    f (SelfDestruct a')
+  IllegalOverflow a -> do
+    a' <- mapM (mapPropM f) a
+    f (IllegalOverflow a')
+  Revert a b -> do
+    a' <- mapM (mapPropM f) a
     b' <- mapExprM f b
-    f (Return a' b')
+    f (Revert a' b')
+  Return a b c -> do
+    a' <- mapM (mapPropM f) a
+    b' <- mapExprM f b
+    c' <- mapExprM f c
+    f (Return a' b' c')
 
   ITE a b c -> do
     a' <- mapExprM f a
@@ -331,7 +339,9 @@ mapExprM f expr = case expr of
     c' <- mapExprM f c
     f (ITE a' b' c')
 
-  TmpErr a -> f (TmpErr a)
+  TmpErr a b -> do
+    a' <- mapM (mapPropM f) a
+    f (TmpErr a b)
 
   -- integers
 
