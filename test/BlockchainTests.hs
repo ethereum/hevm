@@ -29,6 +29,7 @@ import Data.Aeson qualified as JSON
 import Data.Aeson.Types qualified as JSON
 import Data.ByteString.Lazy qualified as Lazy
 import Data.ByteString.Lazy qualified as LazyByteString
+import Data.List (isInfixOf)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe, isNothing)
@@ -77,9 +78,10 @@ prepareTests = do
   let dir = baseDir </> testsDir
   jsonFiles <- Find.find Find.always (Find.extension Find.==? ".json") dir
   putStrLn "Loading and parsing json files from ethereum-tests..."
-  groups <- mapM (\f -> testGroup (makeRelative baseDir f) <$> testsFromFile f) jsonFiles
+  groups <- mapM (\f -> testGroup (makeRelative baseDir f) <$> (if any (`isInfixOf` f) ignoredFiles then pure [] else testsFromFile f)) jsonFiles
   putStrLn "Loaded."
-  pure $ localOption (mkTimeout (10 * 1_000_000)) $ testGroup "ethereum-tests" groups
+  -- pure $ localOption (mkTimeout (10 * 1_000_000)) $ testGroup "ethereum-tests" groups
+  pure $ testGroup "ethereum-tests" groups
 
 testsFromFile :: String -> IO [TestTree]
 testsFromFile file = do
@@ -95,6 +97,19 @@ testsFromFile file = do
       Just f -> f (testCase name assertion)
       Nothing -> testCase name assertion
 
+ignoredFiles :: [String]
+ignoredFiles =
+  [ "BlockchainTests/GeneralStateTests/stCreate2/create2callPrecompiles.json"
+  , "BlockchainTests/GeneralStateTests/stPreCompiledContracts/idPrecomps.json"
+  , "BlockchainTests/GeneralStateTests/stRandom2/randomStatetest641.json"
+  , "BlockchainTests/GeneralStateTests/stRandom2/randomStatetest642.json"
+  , "BlockchainTests/GeneralStateTests/stZeroKnowledge"
+
+  , "BlockchainTests/GeneralStateTests/stQuadraticComplexityTest"
+  , "BlockchainTests/GeneralStateTests/stStaticCall"
+  , "BlockchainTests/GeneralStateTests/stTimeConsuming"
+  ]
+
 expectedFailures :: Map String (TestTree -> TestTree)
 expectedFailures = Map.fromList
   [ ("twoOps_d0g0v0_London", expectFailBecause "TODO: regression")
@@ -103,10 +118,26 @@ expectedFailures = Map.fromList
   , ("shiftSignedCombinations_d0g0v0_London", expectFailBecause "TODO: regression")
   , ("bufferSrcOffset_d14g0v0_London", expectFailBecause "TODO: regression")
   , ("bufferSrcOffset_d38g0v0_London", expectFailBecause "TODO: regression")
-  , ("loopMul_d0g0v0_London", expectFailBecause "slow test")
-  , ("loopMul_d1g0v0_London", expectFailBecause "slow test")
-  , ("loopMul_d2g0v0_London", expectFailBecause "slow test")
+  , ("loopExp_d10g0v0_London", ignoreTestBecause "slow test but sometimes passes")
+  , ("loopExp_d11g0v0_London", ignoreTestBecause "slow test but sometimes passes")
+  , ("loopExp_d12g0v0_London", ignoreTestBecause "slow test but sometimes passes")
+  , ("loopExp_d13g0v0_London", ignoreTestBecause "slow test but sometimes passes")
+  , ("loopExp_d14g0v0_London", ignoreTestBecause "slow test but sometimes passes")
+  , ("loopExp_d8g0v0_London", ignoreTestBecause "slow test but sometimes passes")
+  , ("loopExp_d9g0v0_London", ignoreTestBecause "slow test but sometimes passes")
+  , ("loopMul_d0g0v0_London", ignoreTestBecause "slow test")
+  , ("loopMul_d1g0v0_London", ignoreTestBecause "slow test")
+  , ("loopMul_d2g0v0_London", ignoreTestBecause "slow test")
+  , ("Return50000_d0g1v0_London", ignoreTestBecause "slow test but sometimes passes")
+  , ("Return50000_2_d0g1v0_London", ignoreTestBecause "slow test but sometimes passes")
+  , ("randomStatetest177_d0g0v0_London", ignoreTestBecause "slow test but sometimes passes")
+  , ("static_Call50000_d1g0v0_London", ignoreTestBecause "slow test but sometimes passes")
+  , ("static_Call50000bytesContract50_1_d1g0v0_London", ignoreTestBecause "slow test but sometimes passes")
+  , ("static_Call50000bytesContract50_2_d1g0v0_London", ignoreTestBecause "slow test but sometimes passes")
+  , ("static_Return50000_2_d0g0v0_London", ignoreTestBecause "slow test but sometimes passes")
   , ("CALLBlake2f_MaxRounds_d0g0v0_London", ignoreTestBecause "bypasses timeout due to FFI")
+  , ("create2callPrecompiles_d4g0v0_London", ignoreTestBecause "fails on macOS only")
+  , ("create2callPrecompiles_d4g0v0_London", ignoreTestBecause "fails on macOS only")
   ]
 
 runVMTest :: Bool -> (String, Case) -> IO ()

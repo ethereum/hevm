@@ -62,13 +62,15 @@ import Data.List (isSubsequenceOf)
 import EVM.TestUtils
 
 import qualified BlockchainTests
+import System.Environment (setEnv)
 
 main :: IO ()
 main = do
+  setEnv "TASTY_NUM_THREADS" "1"
   blockchainTests <- BlockchainTests.prepareTests
   defaultMain $ testGroup "all"
-    [ tests
-    , blockchainTests
+    [ blockchainTests
+    , tests
     ]
 
 -- | run a subset of tests in the repl. p is a tasty pattern:
