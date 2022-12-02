@@ -341,7 +341,7 @@ mapExprM f expr = case expr of
 
   TmpErr a b -> do
     a' <- mapM (mapPropM f) a
-    f (TmpErr a b)
+    f (TmpErr a' b)
 
   -- integers
 
