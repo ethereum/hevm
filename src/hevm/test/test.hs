@@ -489,7 +489,8 @@ tests = testGroup "hevm"
         [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x11] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         let x = getArgInteger ctr "arg1"
         let y = getArgInteger ctr "arg2"
-        assertBool "Overflow must occur" (x+y > 2^256)
+
+        assertBool "Overflow must occur" (x+y >= 2 ^ (256 :: Integer))
         putStrLn "expected counterexample found"
      ,
      testCase "div-by-zero-fail" $ do
