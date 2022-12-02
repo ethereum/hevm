@@ -22,9 +22,6 @@ category:
   Ethereum
 build-type:
   Simple
-data-files:
-  run-blockchain-tests
-  run-consensus-tests
 extra-source-files:
   CHANGELOG.md
   test/contracts/lib/test.sol

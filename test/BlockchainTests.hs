@@ -18,6 +18,7 @@ import EVM.SMT (withSolvers, Solver(Z3))
 import EVM.Transaction
 import EVM.TTY qualified as TTY
 import EVM.Types
+import Paths_hevm qualified
 
 import Control.Arrow ((***), (&&&))
 import Control.Lens
@@ -33,7 +34,6 @@ import Data.Map qualified as Map
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Vector qualified as V
 import Data.Word (Word64)
-import System.Directory (getCurrentDirectory)
 import System.FilePath.Find qualified as Find
 import System.FilePath.Posix (makeRelative, (</>))
 import Witherable (Filterable, catMaybes)
@@ -71,7 +71,7 @@ data BlockchainCase = BlockchainCase
 
 prepareTests :: IO TestTree
 prepareTests = do
-  cwd <- getCurrentDirectory
+  cwd <- Paths_hevm.getDataDir
   let baseDir = cwd </> "test/ethereum-tests"
   let testsDir = "BlockchainTests/GeneralStateTests"
   let dir = baseDir </> testsDir
@@ -125,7 +125,7 @@ runVMTest diffmode (_name, x) =
 -- | ghci> debugVMTest "BlockchainTests/GeneralStateTests/VMTests/vmArithmeticTest/twoOps.json" "twoOps_d0g0v0_London"
 debugVMTest :: String -> String -> IO ()
 debugVMTest file test = do
-  cwd <- getCurrentDirectory
+  cwd <- Paths_hevm.getDataDir
   let baseDir = cwd </> "test/ethereum-tests"
   Right allTests <- parseBCSuite <$> LazyByteString.readFile (baseDir </> file)
   let [(_, x)] = filter (\(name, _) -> name == test) $ Map.toList allTests
