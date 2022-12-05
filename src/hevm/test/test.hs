@@ -490,7 +490,8 @@ tests = testGroup "hevm"
         let x = getArgInteger ctr "arg1"
         let y = getArgInteger ctr "arg2"
 
-        assertBool "Overflow must occur" (x+y >= 2 ^ (256 :: Integer))
+        let maxUint = 2 ^ (256 :: Integer) :: Integer
+        assertBool "Overflow must occur" (x+y >= maxUint)
         putStrLn "expected counterexample found"
      ,
      testCase "div-by-zero-fail" $ do
