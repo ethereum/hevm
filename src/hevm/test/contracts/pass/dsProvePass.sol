@@ -43,10 +43,10 @@ contract SolidityTest is DSTest {
         assertEq(supply, actual);
     }
 
-    //function prove_constructorArgs(address b) public {
-        //ConstructorArg c = new ConstructorArg(b);
-        //assertEq(b, c.a());
-    //}
+    function prove_constructorArgs(address b) public {
+        ConstructorArg c = new ConstructorArg(b);
+        assertEq(b, c.a());
+    }
 
     function proveFail_revertSmoke() public {
         require(false);

@@ -310,15 +310,18 @@ showTrace dapp vm trace =
     ReturnTrace out (CallContext {}) ->
       "← " <> formatSBinary out
     ReturnTrace out (CreationContext {}) ->
-      let l = case out of
-                ConcreteBuf bs -> BS.length bs
-                _ -> error "panik :o"
-      in "← " <> pack (show l) <> " bytes of code"
+      let l = Expr.bufLength out
+      in "← " <> formatExpr l <> " bytes of code"
     EntryTrace t ->
       t
     FrameTrace (CreationContext addr (Lit hash) _ _ ) -> -- FIXME: irrefutable pattern
       "create "
       <> maybeContractName (preview (dappSolcByHash . ix hash . _2) dapp)
+      <> "@" <> pack (show addr)
+      <> pos
+    FrameTrace (CreationContext addr _ _ _ ) ->
+      "create "
+      <> "<unknown contract>"
       <> "@" <> pack (show addr)
       <> pos
     FrameTrace (CallContext target context _ _ hash abi calldata _ _) ->
@@ -441,6 +444,68 @@ formatExpr = go
         , ")"
         ]
 
+      IndexWord idx val -> T.unlines
+        [ "(IndexWord"
+        , indent 2 $ T.unlines
+          [ "idx:"
+          , indent 2 $ formatExpr idx
+          , "val: "
+          , indent 2 $ formatExpr val
+          ]
+        , ")"
+        ]
+      ReadWord idx buf -> T.unlines
+        [ "(ReadWord"
+        , indent 2 $ T.unlines
+          [ "idx:"
+          , indent 2 $ formatExpr idx
+          , "buf: "
+          , indent 2 $ formatExpr buf
+          ]
+        , ")"
+        ]
+
+      And a b -> T.unlines
+        [ "(And"
+        , indent 2 $ T.unlines
+          [ formatExpr a
+          , formatExpr b
+          ]
+        , ")"
+        ]
+
+      -- Stores
+      SLoad addr slot store -> T.unlines
+        [ "(SLoad"
+        , indent 2 $ T.unlines
+          [ "addr:"
+          , indent 2 $ formatExpr addr
+          , "slot:"
+          , indent 2 $ formatExpr slot
+          , "store:"
+          , indent 2 $ formatExpr store
+          ]
+        , ")"
+        ]
+      SStore addr slot val prev -> T.unlines
+        [ "(SStore"
+        , indent 2 $ T.unlines
+          [ "addr:"
+          , indent 2 $ formatExpr addr
+          , "slot:"
+          , indent 2 $ formatExpr slot
+          , "val:"
+          , indent 2 $ formatExpr val
+          ]
+        , ")"
+        , formatExpr prev
+        ]
+      ConcreteStore s -> T.unlines
+        [ "(ConcreteStore"
+        , indent 2 $ T.unlines $ fmap (T.pack . show) $ Map.toList $ fmap (T.pack . show . Map.toList) s
+        , ")"
+        ]
+
       -- Buffers
 
       CopySlice srcOff dstOff size src dst -> T.unlines
@@ -458,8 +523,10 @@ formatExpr = go
       WriteWord idx val buf -> T.unlines
         [ "(WriteWord"
         , indent 2 $ T.unlines
-          [ "idx: " <> formatExpr idx
-          , "val: " <> formatExpr val
+          [ "idx:"
+          , indent 2 $ formatExpr idx
+          , "val:"
+          , indent 2 $ formatExpr val
           ]
         , ")"
         , formatExpr buf
@@ -477,8 +544,16 @@ formatExpr = go
         "" -> "(ConcreteBuf \"\")"
         _ -> T.unlines
           [ "(ConcreteBuf"
-          , indent 2 $ T.pack $ prettyHex 64 bs
+          , indent 2 $ T.pack $ prettyHex 0 bs
           , ")"
           ]
+
+
+      -- Hashes
+      Keccak b -> T.unlines
+       [ "(Keccak"
+       , indent 2 $ formatExpr b
+       , ")"
+       ]
 
       a -> T.pack $ show a

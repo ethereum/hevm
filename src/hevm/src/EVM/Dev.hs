@@ -11,6 +11,7 @@ import Data.ByteString hiding (putStrLn, writeFile, zip)
 import Control.Monad.State.Strict hiding (state)
 import Data.Maybe (fromJust)
 import System.Directory
+import Data.Typeable
 
 import Data.String.Here
 import qualified Data.Text as T
@@ -21,18 +22,24 @@ import qualified Data.Text.Lazy.IO as TL
 import EVM
 import EVM.SMT
 import EVM.Types
-import EVM.Expr (numBranches)
+import EVM.Expr (numBranches, simplify)
 import EVM.SymExec
 import EVM.Solidity
 import EVM.UnitTest
 import EVM.Format (formatExpr)
-import EVM.SymExec (simplify)
 import EVM.Dapp (dappInfo)
 import GHC.Conc
 import System.Exit (exitFailure)
+import qualified EVM.Expr as Expr
 import qualified EVM.Fetch as Fetch
 import qualified EVM.FeeSchedule as FeeSchedule
 import qualified Data.Vector as V
+
+checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO ()
+checkEquiv a b = withSolvers Z3 1 Nothing $ \s -> do
+  let smt = assertProps [a ./= b]
+  res <- checkSat s smt
+  print res
 
 runDappTest :: FilePath -> IO ()
 runDappTest root =

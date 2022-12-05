@@ -7,6 +7,7 @@ module Main where
 
 import Data.Text (Text, pack)
 import Data.ByteString (ByteString)
+import Data.Bits
 import System.Directory
 import System.IO.Temp
 import System.Process (readProcess)
@@ -58,6 +59,7 @@ import EVM.Precompiled
 import EVM.RLP
 import EVM.Solidity
 import EVM.Types
+import EVM.Traversals
 import EVM.SMT hiding (storage, calldata)
 import qualified EVM.TTY as TTY
 import qualified EVM.Expr as Expr
@@ -96,19 +98,142 @@ tests = testGroup "hevm"
         (SLoad (Lit 0x0) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])])))
         (Expr.readStorage' (Lit 0x0) (Lit 0x0)
           (SStore (Lit 0xacab) (Lit 0xdead) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])]))))
-    , testProperty "readStorage-equivalance" $ \(store, addr, slot) ->
-        -- we use the SMT solver to compare the result of readStorage, to the unsimplified result
-        ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
-          let simplified = Expr.readStorage' addr slot store
-              full = SLoad addr slot store
-          res <- checkSat solvers (assertProps [simplified ./= full])
-          pure $ res == Unsat
     ]
+  -- These tests fuzz the simplifier by generating a random expression,
+  -- applying some simplification rules, and then using the smt encoding to
+  -- check that the simplified version is semantically equivalent to the
+  -- unsimplified one
   , testGroup "SimplifierTests"
-    [ testProperty "buffer-simplification" $ \(expr :: Expr Buf) -> runSimplifyTest expr
-    , testProperty "store-simplification" $ \(expr :: Expr Storage) -> runSimplifyTest expr
-    , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> runSimplifyTest expr
-    , testProperty "word-simplification" $ \(expr :: Expr EWord) -> runSimplifyTest expr
+    [ testProperty "buffer-simplification" $ \(expr :: Expr Buf) -> ioProperty $ do
+        let simplified = Expr.simplify expr
+        checkEquiv expr simplified
+    , testProperty "store-simplification" $ \(expr :: Expr Storage) -> ioProperty $ do
+        let simplified = Expr.simplify expr
+        checkEquiv expr simplified
+    , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> ioProperty $ do
+        let simplified = Expr.simplify expr
+        checkEquiv expr simplified
+    , testProperty "word-simplification" $ \(_ :: Int) -> ioProperty $ do
+        expr <- generate . sized $ genWord 0 -- we want a lower frequency of lits for this test
+        let simplified = Expr.simplify expr
+        checkEquiv expr simplified
+    , testProperty "readStorage-equivalance" $ \(store, addr, slot) -> ioProperty $ do
+        let simplified = Expr.readStorage' addr slot store
+            full = SLoad addr slot store
+        checkEquiv simplified full
+    , testProperty "writeStorage-equivalance" $ \(addr, slot, val) -> ioProperty $ do
+        let mkStore = oneof
+              [ pure EmptyStore
+              , fmap ConcreteStore arbitrary
+              , do
+                  -- generate some write chains where we know that at least one
+                  -- write matches either the input addr, or both the input
+                  -- addr and slot
+                  let matchAddr = liftM2 (SStore addr) arbitrary arbitrary
+                      matchBoth = fmap (SStore addr slot) arbitrary
+                      addWrites :: Expr Storage -> Int -> Gen (Expr Storage)
+                      addWrites b 0 = pure b
+                      addWrites b n = liftM4 SStore arbitrary arbitrary arbitrary (addWrites b (n - 1))
+                  s <- arbitrary
+                  addMatch <- oneof [ matchAddr, matchBoth ]
+                  let withMatch = addMatch s
+                  newWrites <- oneof [ pure 0, pure 1, fmap (`mod` 5) arbitrary ]
+                  addWrites withMatch newWrites
+              , arbitrary
+              ]
+        store <- generate mkStore
+        let simplified = Expr.writeStorage addr slot val store
+            full = SStore addr slot val store
+        checkEquiv simplified full
+    , testProperty "readWord-equivalance" $ \(buf, idx) -> ioProperty $ do
+        let simplified = Expr.readWord idx buf
+            full = ReadWord idx buf
+        checkEquiv simplified full
+    , testProperty "writeWord-equivalance" $ \(idx, val) -> ioProperty $ do
+        let mkBuf = oneof
+              [ pure $ ConcreteBuf ""       -- empty
+              , fmap ConcreteBuf arbitrary  -- concrete
+              , sized (genBuf 100)          -- overlapping writes
+              , arbitrary                   -- sparse writes
+              ]
+        buf <- generate mkBuf
+        let simplified = Expr.writeWord idx val buf
+            full = WriteWord idx val buf
+        checkEquiv simplified full
+    , testProperty "readByte-equivalance" $ \(buf, idx) -> ioProperty $ do
+        let simplified = Expr.readByte idx buf
+            full = ReadByte idx buf
+        checkEquiv simplified full
+    -- we currently only simplify concrete writes over concrete buffers so that's what we test here
+    , testProperty "writeByte-equivalance" $ \(LitOnly val, LitOnly buf) -> ioProperty $ do
+        idx <- generate $ frequency
+          [ (10, genLit (fromIntegral (1_000_000 :: Int)))  -- can never overflow an Int
+          , (1, fmap Lit arbitrary)                         -- can overflow an Int
+          ]
+        let simplified = Expr.writeByte idx val buf
+            full = WriteByte idx val buf
+        checkEquiv simplified full
+    , testProperty "copySlice-equivalance" $ \(srcOff) -> ioProperty $ do
+        -- we bias buffers to be concrete more often than not
+        let mkBuf = oneof
+              [ pure $ ConcreteBuf ""
+              , fmap ConcreteBuf arbitrary
+              , arbitrary
+              ]
+        src <- generate mkBuf
+        dst <- generate mkBuf
+        size <- generate (genLit 300)
+        dstOff <- generate (maybeBoundedLit 100_000)
+        let simplified = Expr.copySlice srcOff dstOff size src dst
+            full = CopySlice srcOff dstOff size src dst
+        checkEquiv simplified full
+    , testProperty "indexWord-equivalence" $ \(src) -> ioProperty $ do
+        idx <- generate (genLit 50)
+        let simplified = Expr.indexWord idx src
+            full = IndexWord idx src
+        checkEquiv simplified full
+    , testProperty "indexWord-mask-equivalence" $ \(src :: Expr EWord) -> ioProperty $ do
+        idx <- generate (genLit 35)
+        mask <- generate $ do
+          pow <- arbitrary :: Gen Int
+          frequency
+           [ (1, pure $ Lit $ (shiftL 1 (pow `mod` 256)) - 1)        -- potentially non byte aligned
+           , (1, pure $ Lit $ (shiftL 1 ((pow * 8) `mod` 256)) - 1)  -- byte aligned
+           ]
+        let
+          input = And mask src
+          simplified = Expr.indexWord idx input
+          full = IndexWord idx input
+        checkEquiv simplified full
+    , testProperty "toList-equivalance" $ \buf -> ioProperty $ do
+        let
+          -- transforms the input buffer to give it a known length
+          fixLength :: Expr Buf -> Gen (Expr Buf)
+          fixLength = mapExprM go
+            where
+              go :: Expr a -> Gen (Expr a)
+              go = \case
+                WriteWord _ val b -> liftM3 WriteWord idx (pure val) (pure b)
+                WriteByte _ val b -> liftM3 WriteByte idx (pure val) (pure b)
+                CopySlice so _ sz src dst -> liftM5 CopySlice (pure so) idx (pure sz) (pure src) (pure dst)
+                AbstractBuf _ -> cbuf
+                e -> pure e
+              cbuf = do
+                bs <- arbitrary
+                pure $ ConcreteBuf bs
+              idx = do
+                w <- arbitrary
+                -- we use 100_000 as an upper bound for indices to keep tests reasonably fast here
+                pure $ Lit (w `mod` 100_000)
+
+        input <- generate $ fixLength buf
+        case Expr.toList input of
+          Nothing -> do
+            putStrLn "skip"
+            pure True -- ignore cases where the buf cannot be represented as a list
+          Just asList -> do
+            let asBuf = Expr.fromList asList
+            checkEquiv asBuf input
     ]
   , testGroup "MemoryTests"
     [ testCase "read-write-same-byte"  $ assertEqual ""
@@ -151,6 +276,10 @@ tests = testGroup "hevm"
         -- write word and read it at the same offset of 16
         (Lit 0x12)
         (Expr.readWord (Lit 0x20) (WriteWord (Lit 0x20) (Lit 0x12) mempty))
+    , testCase "read-word-copySlice-overlap" $ assertEqual ""
+        -- we should not recurse into a copySlice if the read index + 32 overlaps the sliced region
+        (ReadWord (Lit 40) (CopySlice (Lit 0) (Lit 30) (Lit 12) (WriteWord (Lit 10) (Lit 0x64) (AbstractBuf "hi")) (AbstractBuf "hi")))
+        (Expr.readWord (Lit 40) (CopySlice (Lit 0) (Lit 30) (Lit 12) (WriteWord (Lit 10) (Lit 0x64) (AbstractBuf "hi")) (AbstractBuf "hi")))
     , testCase "indexword-MSB" $ assertEqual ""
         -- 31st is the LSB byte (of 32)
         (LitByte 0x78)
@@ -360,7 +489,9 @@ tests = testGroup "hevm"
         [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x11] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         let x = getArgInteger ctr "arg1"
         let y = getArgInteger ctr "arg2"
-        assertBool "Overflow must occur" (x+y > 2^256)
+
+        let maxUint = 2 ^ (256 :: Integer) :: Integer
+        assertBool "Overflow must occur" (x+y >= maxUint)
         putStrLn "expected counterexample found"
      ,
      testCase "div-by-zero-fail" $ do
@@ -1443,13 +1574,14 @@ tests = testGroup "hevm"
     (===>) = assertSolidityComputation
 
 
-runSimplifyTest :: (Typeable a) => Expr a -> Property
-runSimplifyTest expr = ioProperty $ withSolvers Z3 1 (Just 100) $ \solvers -> do
-  let simplified = simplify expr
-  if simplified == expr
-     then pure True
+checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO Bool
+checkEquiv l r = withSolvers Z3 1 (Just 100) $ \solvers -> do
+  if l == r
+     then do
+       putStrLn "skip"
+       pure True
      else do
-       let smt = assertProps [simplified ./= expr]
+       let smt = assertProps [l ./= r]
        res <- checkSat solvers smt
        print res
        pure $ case res of
@@ -1576,13 +1708,28 @@ instance Arbitrary (Expr Storage) where
   arbitrary = sized genStorage
 
 instance Arbitrary (Expr EWord) where
-  arbitrary = sized genWord
+  arbitrary = sized defaultWord
 
 instance Arbitrary (Expr Byte) where
   arbitrary = sized genByte
 
 instance Arbitrary (Expr Buf) where
-  arbitrary = sized genBuf
+  arbitrary = sized defaultBuf
+
+instance Arbitrary (Expr End) where
+  arbitrary = sized genEnd
+
+newtype LitOnly a = LitOnly a
+  deriving (Show, Eq)
+
+instance Arbitrary (LitOnly (Expr Byte)) where
+  arbitrary = LitOnly . LitByte <$> arbitrary
+
+instance Arbitrary (LitOnly (Expr EWord)) where
+  arbitrary = LitOnly . Lit <$> arbitrary
+
+instance Arbitrary (LitOnly (Expr Buf)) where
+  arbitrary = LitOnly . ConcreteBuf <$> arbitrary
 
 genByte :: Int -> Gen (Expr Byte)
 genByte 0 = fmap LitByte arbitrary
@@ -1591,8 +1738,13 @@ genByte sz = oneof
   , liftM2 ReadByte subWord subBuf
   ]
   where
-    subWord = genWord (sz `div` 10)
-    subBuf = genBuf (sz `div` 10)
+    subWord = defaultWord (sz `div` 10)
+    subBuf = defaultBuf (sz `div` 10)
+
+genLit :: W256 -> Gen (Expr EWord)
+genLit bound = do
+  w <- arbitrary
+  pure $ Lit (w `mod` bound)
 
 genNat :: Gen Int
 genNat = fmap fromIntegral (arbitrary :: Gen Natural)
@@ -1600,9 +1752,32 @@ genNat = fmap fromIntegral (arbitrary :: Gen Natural)
 genName :: Gen Text
 genName = fmap T.pack $ listOf1 (oneof . (fmap pure) $ ['a'..'z'] <> ['A'..'Z'])
 
-genWord :: Int -> Gen (Expr EWord)
-genWord 0 = frequency
-  [ (1, fmap Lit arbitrary)
+genEnd :: Int -> Gen (Expr End)
+genEnd 0 = oneof
+ [ pure Invalid
+ , pure EVM.Types.IllegalOverflow
+ , pure SelfDestruct
+ ]
+genEnd sz = oneof
+ [ fmap EVM.Types.Revert subBuf
+ , liftM2 Return subBuf subStore
+ , liftM3 ITE subWord subEnd subEnd
+ ]
+ where
+   subBuf = defaultBuf (sz `div` 2)
+   subStore = genStorage (sz `div` 2)
+   subWord = defaultWord (sz `div` 2)
+   subEnd = genEnd (sz `div` 2)
+
+genWord :: Int -> Int -> Gen (Expr EWord)
+genWord litFreq 0 = frequency
+  [ (litFreq, do
+      val <- frequency
+       [ (10, fmap (`mod` 100) arbitrary)
+       , (1, arbitrary)
+       ]
+      pure $ Lit val
+    )
   , (1, oneof
       [ pure Origin
       , pure Coinbase
@@ -1622,9 +1797,15 @@ genWord 0 = frequency
       ]
     )
   ]
-genWord sz = frequency
- [ (1, fmap Lit arbitrary)
- , (1, oneof
+genWord litFreq sz = frequency
+  [ (litFreq, do
+      val <- frequency
+       [ (10, fmap (`mod` 100) arbitrary)
+       , (1, arbitrary)
+       ]
+      pure $ Lit val
+    )
+  , (1, oneof
     [ liftM2 Add subWord subWord
     , liftM2 Sub subWord subWord
     , liftM2 Mul subWord subWord
@@ -1704,39 +1885,47 @@ genWord sz = frequency
     ])
   ]
  where
-   subWord = genWord (sz `div` 5)
-   subBuf = genBuf (sz `div` 10)
+   subWord = genWord litFreq (sz `div` 5)
+   subBuf = defaultBuf (sz `div` 10)
    subStore = genStorage (sz `div` 10)
    subByte = genByte (sz `div` 10)
 
-genBuf :: Int -> Gen (Expr Buf)
-genBuf 0 = oneof
+defaultBuf :: Int -> Gen (Expr Buf)
+defaultBuf = genBuf (4_000_000)
+
+defaultWord :: Int -> Gen (Expr EWord)
+defaultWord = genWord 10
+
+maybeBoundedLit :: W256 -> Gen (Expr EWord)
+maybeBoundedLit bound = do
+  o <- (arbitrary :: Gen (Expr EWord))
+  pure $ case o of
+        Lit w -> Lit $ w `mod` bound
+        _ -> o
+
+genBuf :: W256 -> Int -> Gen (Expr Buf)
+genBuf _ 0 = oneof
   [ fmap AbstractBuf genName
   , fmap ConcreteBuf arbitrary
   ]
-genBuf sz = oneof
-  [ liftM3 WriteWord (maybeBoundedLit 4_000_000) subWord subBuf
-  , liftM3 WriteByte (maybeBoundedLit 4_000_000) subByte subBuf
+genBuf bound sz = oneof
+  [ liftM3 WriteWord (maybeBoundedLit bound) subWord subBuf
+  , liftM3 WriteByte (maybeBoundedLit bound) subByte subBuf
   -- we don't generate copyslice instances where:
   --   - size is abstract
   --   - size > 100 (due to unrolling in SMT.hs)
   --   - literal dstOffsets are > 4,000,000 (due to unrolling in SMT.hs)
   -- n.b. that 4,000,000 is the theoretical maximum memory size given a 30,000,000 block gas limit
-  , liftM5 CopySlice subWord (maybeBoundedLit 4_000_000) smolLitWord subBuf subBuf
+  , liftM5 CopySlice subWord (maybeBoundedLit bound) smolLitWord subBuf subBuf
   ]
   where
     -- copySlice gets unrolled in the generated SMT so we can't go too crazy here
     smolLitWord = do
       w <- arbitrary
       pure $ Lit (w `mod` 100)
-    maybeBoundedLit bound = do
-      o <- (arbitrary :: Gen (Expr EWord))
-      pure $ case o of
-            Lit w -> Lit $ w `mod` bound
-            _ -> o
-    subWord = genWord (sz `div` 5)
+    subWord = defaultWord (sz `div` 5)
     subByte = genByte (sz `div` 10)
-    subBuf = genBuf (sz `div` 10)
+    subBuf = genBuf bound (sz `div` 10)
 
 genStorage :: Int -> Gen (Expr Storage)
 genStorage 0 = oneof
@@ -1747,7 +1936,7 @@ genStorage 0 = oneof
 genStorage sz = liftM4 SStore subWord subWord subWord subStore
   where
     subStore = genStorage (sz `div` 10)
-    subWord = genWord (sz `div` 5)
+    subWord = defaultWord (sz `div` 5)
 
 data Invocation
   = SolidityCall Text [AbiValue]

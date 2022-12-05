@@ -12,13 +12,14 @@ import Brick.Widgets.List
 
 import EVM
 import EVM.ABI (abiTypeSolidity, decodeAbiValue, AbiType(..), emptyAbi)
-import EVM.SymExec (maxIterationsReached, symCalldata, simplify)
+import EVM.SymExec (maxIterationsReached, symCalldata)
+import EVM.Expr (simplify)
 import EVM.Dapp (DappInfo, dappInfo, Test, extractSig, Test(..), srcMap)
 import EVM.Dapp (dappUnitTests, unitTestMethods, dappSolcByName, dappSolcByHash, dappSources)
 import EVM.Dapp (dappAstSrcMap)
 import EVM.Debug
 import EVM.Format (showWordExact, showWordExplanation)
-import EVM.Format (contractNamePart, contractPathPart, showTraceTree, prettyIfConcreteWord)
+import EVM.Format (contractNamePart, contractPathPart, showTraceTree, prettyIfConcreteWord, formatExpr)
 import EVM.Hexdump (prettyHex)
 import EVM.Op
 import EVM.Solidity hiding (storageLayout)
@@ -47,6 +48,7 @@ import Data.List (sort, find)
 import Data.Version (showVersion)
 
 import qualified Data.ByteString as BS
+import qualified Data.Text as T
 import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified Data.Vector as Vec
@@ -930,7 +932,7 @@ withHighlight True  = withDefAttr boldAttr
 
 prettyIfConcrete :: Expr Buf -> String
 prettyIfConcrete (ConcreteBuf x) = prettyHex 40 x
-prettyIfConcrete x = show $ simplify x
+prettyIfConcrete x = T.unpack $ formatExpr $ simplify x
 
 drawTracePane :: UiVmState -> UiWidget
 drawTracePane s =
