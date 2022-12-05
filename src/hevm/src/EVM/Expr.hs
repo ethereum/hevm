@@ -356,13 +356,21 @@ writeWord idx val b@(WriteWord idx' val' buf)
   | idx == idx' = WriteWord idx val buf
   | otherwise
     = case (idx, idx') of
-        (Lit i, Lit i') -> if (i >= i' + 32 || i + 32 < i') && i > i'
-                           -- if we can statically determine that the write at idx doesn't overlap the write at idx', then we push the write down
-                           -- the i > i' condition ensures that this routine does not loop forever
+        (Lit i, Lit i') -> if i >= i' + 32
+                           -- if we can statically determine that the write at
+                           -- idx doesn't overlap the write at idx', then we
+                           -- push the write down we only consider writes where
+                           -- i > i' to avoid infinite loops in this routine.
+                           -- This also has the nice side effect of imposing a
+                           -- canonical ordering on write chains, making exact
+                           -- syntactic equalities between abstract terms more
+                           -- likely to occur
                            then WriteWord idx' val' (writeWord idx val buf)
-                           -- if we cannot statically determine freedom from overlap, then we just return an abstract term
+                           -- if we cannot statically determine freedom from
+                           -- overlap, then we just return an abstract term
                            else WriteWord idx val b
-        -- if we cannot determine statically that the write at idx' is out of bounds for idx, then we return an abstract term
+        -- if we cannot determine statically that the write at idx' is out of
+        -- bounds for idx, then we return an abstract term
         _ -> WriteWord idx val b
 writeWord offset val src = WriteWord offset val src
 
