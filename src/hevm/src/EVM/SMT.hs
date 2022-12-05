@@ -21,6 +21,7 @@ import Control.Concurrent (forkIO, killThread)
 import Data.Char (isSpace)
 import Data.Containers.ListUtils (nubOrd)
 import Language.SMT2.Parser (getValueRes, parseFileMsg)
+import Language.SMT2.Syntax (SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..))
 import Data.Word
 import Numeric (readHex)
 import Data.ByteString (ByteString)
@@ -31,7 +32,6 @@ import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty (NonEmpty, NonEmpty((:|)))
 import Data.String.Here
 import Data.Map (Map)
-import Data.List (foldl')
 import qualified Data.Map as Map
 import Data.Text.Lazy (Text)
 import qualified Data.Text as TS
@@ -46,8 +46,6 @@ import EVM.Traversals
 import EVM.CSE
 import EVM.Keccak
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
-import qualified Language.SMT2.Syntax as Language.SMT2.Parser
-import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
 
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
@@ -55,25 +53,28 @@ import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
 data CexVars = CexVars
   { calldataV :: [Text]
   , storageV :: Text
+  , buffersV :: [Text]
   , blockContextV :: [Text]
   , txContextV :: [Text]
   }
   deriving (Eq, Show)
 
 instance Semigroup CexVars where
-  (CexVars a b c d) <> (CexVars a2 b2 c2 d2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2)
+  (CexVars a b c d e) <> (CexVars a2 b2 c2 d2 e2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2) (e <> e2)
 
 instance Monoid CexVars where
     mempty = CexVars
       { calldataV = mempty
       , storageV = mempty
+      , buffersV = mempty
       , blockContextV = mempty
       , txContextV = mempty
       }
 
 data SMTCex = SMTCex
-  { calldata :: Map TS.Text Language.SMT2.Parser.SpecConstant
+  { calldata :: Map TS.Text SpecConstant
   , storage :: TS.Text
+  , buffers :: Map TS.Text ByteString
   , blockContext :: TS.Text
   , txContext :: TS.Text
   }
@@ -361,9 +362,16 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   |]
 
 declareBufs :: [Builder] -> SMT2
-declareBufs names = SMT2 (["; buffers"] <> fmap declare names) mempty
+declareBufs names = SMT2 (["; buffers"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
+    cexvars = CexVars
+      { calldataV = mempty
+      , storageV = mempty
+      , buffersV = (fmap toLazyText names)
+      , blockContextV = mempty
+      , txContextV = mempty
+      }
 
 referencedBufs :: Expr a -> [Builder]
 referencedBufs expr = nubOrd (foldExpr go [] expr)
@@ -417,6 +425,7 @@ declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
     cexvars = CexVars
       { calldataV = (fmap toLazyText names)
       , storageV = mempty
+      , buffersV = mempty
       , blockContextV = mempty
       , txContextV = mempty
       }
@@ -727,22 +736,48 @@ withSolvers solver count timeout cont = do
               -- get values for all cexvars' calldataV-s
               calldatamodels <- foldM (\a n -> do
                       val <- getValue inst n
-                      let tmp = parseFileMsg Language.SMT2.Parser.getValueRes (T.toStrict val)
+                      let tmp = parseFileMsg getValueRes (T.toStrict val)
                       idConst <- case tmp of
-                        Right (Language.SMT2.Parser.ResSpecific (valParsed :| [])) -> pure valParsed
+                        Right (ResSpecific (valParsed :| [])) -> pure valParsed
                         _ -> undefined
                       theConst <- case idConst of
-                       (Language.SMT2.Parser.TermQualIdentifier (
-                         Language.SMT2.Parser.Unqualified (Language.SMT2.Parser.IdSymbol symbol)),
-                         Language.SMT2.Parser.TermSpecConstant ext2) -> if symbol == (T.toStrict n)
-                                                                           then pure ext2
-                                                                           else undefined
-                       _ -> undefined
+                       (TermQualIdentifier (
+                         Unqualified (IdSymbol symbol)),
+                         TermSpecConstant ext2) -> if symbol == (T.toStrict n)
+                                                   then pure ext2
+                                                   else error "Internal Error: cannot parse solver response"
+                       _ -> error "Internal Error: cannot parse solver response"
                       pure $ Map.insert (T.toStrict n) theConst a
                   )
                   mempty (calldataV cexvars)
+              let getBuf :: Map TS.Text ByteString -> Text -> IO (Map TS.Text ByteString)
+                  getBuf acc name = do
+                    val <- getValue inst name
+                    let tmp = parseFileMsg getValueRes (T.toStrict val)
+                    idConst <- case tmp of
+                      Right (ResSpecific (valParsed :| [])) -> pure valParsed
+                      _ -> undefined
+                    theConst <- case idConst of
+                     -- constant buffers where all elements are zero
+                     (TermQualIdentifier (
+                       Unqualified (IdSymbol symbol)),
+                       TermApplication (
+                         Qualified (IdSymbol "const") (
+                           SortParameter (IdSymbol "Array") (
+                             SortSymbol (IdIndexed "BitVec" (IxNumeral "256" :| []))
+                             :| [SortSymbol (IdIndexed "BitVec" (IxNumeral "8" :| []))]
+                           )
+                         )
+                       ) ((TermSpecConstant (SCHexadecimal "00") :| [])))
+                       -> if symbol == (T.toStrict name)
+                          then pure BS.empty
+                          else error "Internal Error: cannot parse solver response"
+                     _ -> error "Internal Error: cannot parse solver response"
+                    pure $ Map.insert (T.toStrict name) theConst acc
+              buffermodels <- foldM getBuf mempty (buffersV cexvars)
               pure $ Sat $ SMTCex
                 { calldata = calldatamodels
+                , buffers = buffermodels
                 , storage = mempty
                 , blockContext = mempty
                 , txContext = mempty
@@ -758,7 +793,10 @@ withSolvers solver count timeout cont = do
 
 getIntegerFromSCHex :: SpecConstant -> Integer
 getIntegerFromSCHex (SCHexadecimal a) = fst (head(Numeric.readHex (T.unpack (T.fromStrict a)))) ::Integer
-getIntegerFromSCHex _ = undefined
+getIntegerFromSCHex sc = error $ "Internal Error: cannot extract Integer from: " <> show sc
+
+specConstantToW256 :: SpecConstant -> W256
+specConstantToW256 sc = fromInteger $ getIntegerFromSCHex sc
 
 -- | Arguments used when spawing a solver instance
 solverArgs :: Solver -> [Text]

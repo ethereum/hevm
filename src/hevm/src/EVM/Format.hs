@@ -2,6 +2,7 @@
 {-# Language ImplicitParams #-}
 {-# Language TemplateHaskell #-}
 
+
 module EVM.Format
   ( formatExpr
   , contractNamePart
@@ -18,9 +19,11 @@ module EVM.Format
   , textValues
   , showAbiValue
   , prettyIfConcreteWord
+  , formatBytes
   ) where
 
 import Prelude hiding (Word)
+
 import qualified EVM
 import EVM.Dapp (DappInfo (..), dappSolcByHash, dappAbiMap, showTraceLocation, dappEventMap, dappErrorMap)
 import EVM.Dapp (DappContext (..), contextInfo, contextEnv)
@@ -157,6 +160,8 @@ showError (ConcreteBuf bs) =
       Nothing -> case bs4 of
                   -- Method ID for Error(string)
                   "\b\195y\160" -> showCall [AbiStringType] (ConcreteBuf bs)
+                  -- Method ID for Panic(uint256)
+                  "NH{q"        -> "Panic" <> showCall [AbiUIntType 256] (ConcreteBuf bs)
                   _             -> formatBinary bs
 showError b = T.pack $ show b
 

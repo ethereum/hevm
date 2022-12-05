@@ -12,15 +12,17 @@ import EVM.SMT
 import EVM.Dapp
 import EVM.Debug (srcMapCodePos)
 import EVM.Exec
-import EVM.Expr (litAddr, readStorage')
+import EVM.Expr (litAddr, readStorage', simplify)
 import EVM.Format
 import EVM.Solidity
 import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr)
 import EVM.Types
+import EVM.Traversals
 import EVM.Transaction (initTx)
 import EVM.RLP
 import qualified EVM.Facts     as Facts
 import qualified EVM.Facts.Git as Git
+import qualified EVM.Expr      as Expr
 import qualified EVM.Fetch
 
 import qualified EVM.FeeSchedule as FeeSchedule
@@ -37,6 +39,7 @@ import Control.Monad.Par.Class (spawn_)
 import Control.Monad.Par.IO (runParIO)
 
 import qualified Data.ByteString.Lazy as BSLazy
+import Language.SMT2.Syntax (SpecConstant(..))
 import Data.Binary.Get    (runGet)
 import Data.ByteString    (ByteString)
 import Data.Decimal       (DecimalRaw(..))
@@ -46,6 +49,7 @@ import Data.Map           (Map)
 import Data.Maybe         (fromMaybe, catMaybes, fromJust, isJust, fromMaybe, mapMaybe, isNothing)
 import Data.Text          (isPrefixOf, stripSuffix, intercalate, Text, pack, unpack)
 import Data.Word          (Word8, Word32)
+import Data.List          (foldl')
 import Data.Text.Encoding (encodeUtf8)
 import System.Environment (lookupEnv)
 import System.IO          (hFlush, stdout)
@@ -725,11 +729,11 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
       return ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "", vm)
     else do
       let x = mapMaybe extractCex results
-      let y = symFailure opts testName x -- TODO this is WRONG, only returns FIRST Cex
+      let y = symFailure opts testName (fst cd) types x
       return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y, vm)
 
-symFailure :: UnitTestOptions -> Text -> [(Expr End, SMTCex)] -> Text
-symFailure UnitTestOptions {..} testName failures' =
+symFailure :: UnitTestOptions -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> Text
+symFailure UnitTestOptions {..} testName cd types failures' =
   mconcat
     [ "Failure: "
     , testName
@@ -737,19 +741,20 @@ symFailure UnitTestOptions {..} testName failures' =
     , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
     ]
     where
+      ctx = DappContext { _contextInfo = dapp, _contextEnv = mempty }
       showRes = \case
                        Return _ _ -> if "proveFail" `isPrefixOf` testName
                                       then "Successful execution"
                                       else "Failed: DSTest Assertion Violation"
                        res ->
                          --let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
-                         let ?context = DappContext { _contextInfo = dapp, _contextEnv = mempty }
-                         in prettyvmresult res
-      mkMsg (leaf, cexs) = pack $ unlines
+                         let ?context = ctx
+                         in Text.pack $ prettyvmresult res
+      mkMsg (leaf, cex) = Text.unlines
         ["Counterexample:"
         ,""
         ,"  result:   " <> showRes leaf
-        ,"  calldata: " <> (show $ EVM.SMT.calldata cexs)
+        ,"  calldata: " <> let ?context = ctx in prettyCalldata cex cd testName types
         , case verbose of
             --Just _ -> unlines
               --[ ""
@@ -757,6 +762,50 @@ symFailure UnitTestOptions {..} testName failures' =
               --]
             _ -> ""
         ]
+
+prettyCalldata :: (?context :: DappContext) => SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
+prettyCalldata cex buf sig types = head (Text.splitOn "(" sig) <> showCalldata cex types buf
+
+showCalldata :: (?context :: DappContext) => SMTCex -> [AbiType] -> Expr Buf -> Text
+showCalldata cex tps buf = "(" <> intercalate "," (fmap showVal vals) <> ")"
+  where
+    argdata = Expr.drop 4 $ simplify $ subModel cex buf
+    vals = case decodeBuf tps argdata of
+             CAbi v -> v
+             _ -> error $ "Internal Error: unable to abi decode function arguments:\n" <> (Text.unpack $ formatExpr argdata)
+
+showVal :: AbiValue -> Text
+showVal (AbiBytes _ bs) = formatBytes bs
+showVal (AbiAddress addr) = Text.pack  . show $ addr
+showVal v = Text.pack . show $ v
+
+
+-- | Takes a buffer and a Cex and replaces all abstract values in the buf with concrete ones from the Cex
+subModel :: SMTCex -> Expr Buf -> Expr Buf
+subModel c buf = subBufs (buffers c) . subVars (EVM.SMT.calldata c) $ buf
+  where
+    subVars model b = Map.foldlWithKey subVar b model
+    subVar :: Expr Buf -> Text -> SpecConstant -> Expr Buf
+    subVar b key val = mapExpr go b
+      where
+        go :: Expr a -> Expr a
+        go = \case
+          Var name -> if name == key
+                      then Lit (specConstantToW256 val)
+                      else Var name
+          e -> e
+    subBufs model b = Map.foldlWithKey subBuf b model
+    subBuf :: Expr Buf -> Text -> ByteString -> Expr Buf
+    subBuf b key val = mapExpr go b
+      where
+        go :: Expr a -> Expr a
+        go = \case
+          AbstractBuf name -> if name == key
+                      then ConcreteBuf val
+                      else AbstractBuf name
+          e -> e
+
+
 
 -- prettyCalldata :: (?context :: DappContext) => Expr Buf -> Text -> [AbiType]-> IO Text
 -- prettyCalldata buf sig types = do

@@ -737,10 +737,15 @@ to512 = fromIntegral
 -- ** Helpers ** -----------------------------------------------------------------------------------
 
 
--- Is the given expr a literal word?
+-- Is the given expr a literal byte?
 isLitByte :: Expr Byte -> Bool
 isLitByte (LitByte _) = True
 isLitByte _ = False
+
+-- Is the given expr a literal word?
+isLitWord :: Expr EWord -> Bool
+isLitWord (Lit _) = True
+isLitWord _ = False
 
 -- | Returns the byte at idx from the given word.
 indexWord :: Expr EWord -> Expr EWord -> Expr Byte

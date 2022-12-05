@@ -616,8 +616,9 @@ tests = testGroup "hevm"
         --runDappTest testFile "prove_smtTimeout" >>= assertEqual "test result" False
         runDappTest testFile "prove_multi" >>= assertEqual "test result" False
         runDappTest testFile "prove_mul" >>= assertEqual "test result" False
+        -- TODO: implement overflow checking optimizations and enable, currently this runs forever
         --runDappTest testFile "prove_distributivity" >>= assertEqual "test result" False
-        --runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
+        runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
     , testCase "Invariant-Tests-Pass" $ do
         let testFile = "test/contracts/pass/invariants.sol"
         runDappTest testFile ".*" >>= assertEqual "test result" True
@@ -1948,7 +1949,7 @@ getArgInteger a name = getIntegerFromSCHex $ getScHexa a
     getScHexa :: EVM.SMT.SMTCex -> Language.SMT2.Syntax.SpecConstant
     getScHexa tmp = fromJust . Data.Map.lookup (Data.Text.pack name) $ smtcex tmp
     smtcex :: EVM.SMT.SMTCex -> Map Text Language.SMT2.Syntax.SpecConstant
-    smtcex (EVM.SMT.SMTCex x _ _ _) = x
+    smtcex (EVM.SMT.SMTCex x _ _ _ _) = x
 
 assertSolidityComputation :: Invocation -> AbiValue -> IO ()
 assertSolidityComputation (SolidityCall s args) x =
