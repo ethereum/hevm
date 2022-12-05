@@ -47,16 +47,27 @@ op3 :: (Expr EWord -> Expr EWord -> Expr EWord -> Expr EWord)
 op3 _ concrete (Lit x) (Lit y) (Lit z) = Lit (concrete x y z)
 op3 symbolic _ x y z = symbolic x y z
 
+-- | If a given binary op is commutative, then we always force Lits to the lhs if
+-- only one argument is a Lit. This makes writing pattern matches in the
+-- simplifier easier.
+normArgs :: (Expr EWord -> Expr EWord -> Expr EWord) -> (W256 -> W256 -> W256) -> Expr EWord -> Expr EWord -> Expr EWord
+normArgs sym conc l r = case (l, r) of
+  (Lit _, _) -> doOp l r
+  (_, Lit _) -> doOp r l
+  _ -> doOp l r
+  where
+    doOp = op2 sym conc
+
 -- Integers
 
 add :: Expr EWord -> Expr EWord -> Expr EWord
-add = op2 Add (+)
+add = normArgs Add (+)
 
 sub :: Expr EWord -> Expr EWord -> Expr EWord
 sub = op2 Sub (-)
 
 mul :: Expr EWord -> Expr EWord -> Expr EWord
-mul = op2 Mul (*)
+mul = normArgs Mul (*)
 
 div :: Expr EWord -> Expr EWord -> Expr EWord
 div = op2 Div (\x y -> if y == 0 then 0 else Prelude.div x y)
@@ -131,7 +142,7 @@ sgt = op2 SLT (\x y ->
   in if sx > sy then 1 else 0)
 
 eq :: Expr EWord -> Expr EWord -> Expr EWord
-eq = op2 Eq (\x y -> if x == y then 1 else 0)
+eq = normArgs Eq (\x y -> if x == y then 1 else 0)
 
 iszero :: Expr EWord -> Expr EWord
 iszero = op1 IsZero (\x -> if x == 0 then 1 else 0)
@@ -139,13 +150,13 @@ iszero = op1 IsZero (\x -> if x == 0 then 1 else 0)
 -- Bits
 
 and :: Expr EWord -> Expr EWord -> Expr EWord
-and = op2 And (.&.)
+and = normArgs And (.&.)
 
 or :: Expr EWord -> Expr EWord -> Expr EWord
-or = op2 Or (.|.)
+or = normArgs Or (.|.)
 
 xor :: Expr EWord -> Expr EWord -> Expr EWord
-xor = op2 Xor Data.Bits.xor
+xor = normArgs Xor Data.Bits.xor
 
 not :: Expr EWord -> Expr EWord
 not = op1 Not complement
@@ -319,6 +330,7 @@ copySlice srcOffset dstOffset size src dst = CopySlice srcOffset dstOffset size 
 
 writeByte :: Expr EWord -> Expr Byte -> Expr Buf -> Expr Buf
 writeByte (Lit offset) (LitByte val) (ConcreteBuf "")
+  | offset <= num (maxBound :: Int)
   = ConcreteBuf $ BS.replicate (num offset) 0 <> BS.singleton val
 writeByte o@(Lit offset) b@(LitByte byte) buf@(ConcreteBuf src)
   | offset < num (maxBound :: Int)
@@ -331,6 +343,7 @@ writeByte offset byte src = WriteByte offset byte src
 
 writeWord :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
 writeWord (Lit offset) (Lit val) (ConcreteBuf "")
+  | offset + 32 < num (maxBound :: Int)
   = ConcreteBuf $ BS.replicate (num offset) 0 <> word256Bytes val
 writeWord o@(Lit offset) v@(Lit val) buf@(ConcreteBuf src)
   | offset + 32 < num (maxBound :: Int)
@@ -338,6 +351,27 @@ writeWord o@(Lit offset) v@(Lit val) buf@(ConcreteBuf src)
                  <> word256Bytes val
                  <> BS.drop ((num offset) + 32) src
   | otherwise = WriteWord o v buf
+writeWord idx val b@(WriteWord idx' val' buf)
+  -- if the indices match exactly then we just replace the value in the current write and return
+  | idx == idx' = WriteWord idx val buf
+  | otherwise
+    = case (idx, idx') of
+        (Lit i, Lit i') -> if i >= i' + 32
+                           -- if we can statically determine that the write at
+                           -- idx doesn't overlap the write at idx', then we
+                           -- push the write down we only consider writes where
+                           -- i > i' to avoid infinite loops in this routine.
+                           -- This also has the nice side effect of imposing a
+                           -- canonical ordering on write chains, making exact
+                           -- syntactic equalities between abstract terms more
+                           -- likely to occur
+                           then WriteWord idx' val' (writeWord idx val buf)
+                           -- if we cannot statically determine freedom from
+                           -- overlap, then we just return an abstract term
+                           else WriteWord idx val b
+        -- if we cannot determine statically that the write at idx' is out of
+        -- bounds for idx, then we return an abstract term
+        _ -> WriteWord idx val b
 writeWord offset val src = WriteWord offset val src
 
 
@@ -487,21 +521,28 @@ stripWrites bottom top = \case
 -- always return a symbolic value.
 readStorage :: Expr EWord -> Expr EWord -> Expr Storage -> Maybe (Expr EWord)
 readStorage _ _ EmptyStore = Nothing
-readStorage addr loc store@(ConcreteStore s) = case (addr, loc) of
+readStorage addr slot store@(ConcreteStore s) = case (addr, slot) of
   (Lit a, Lit l) -> do
     ctrct <- Map.lookup a s
     val <- Map.lookup l ctrct
     pure $ Lit val
-  _ -> Just $ SLoad addr loc store
-readStorage addr' loc s@AbstractStore = Just $ SLoad addr' loc s
-readStorage addr' loc s@(SStore addr slot val prev) = case (addr, addr') of
-  (Lit _, Lit _) ->
-    if addr == addr'
-    then case (loc, slot) of
-      (Lit _, Lit _) -> if slot == loc then (Just val) else readStorage addr' loc prev
-      _ -> Just $ SLoad addr' loc s
-    else readStorage addr' loc prev
-  _ -> Just $ SLoad addr' loc s
+  _ -> Just $ SLoad addr slot store
+readStorage addr' slot' s@AbstractStore = Just $ SLoad addr' slot' s
+readStorage addr' slot' s@(SStore addr slot val prev) =
+  if addr == addr'
+  then if slot == slot'
+       -- if address and slot match then we return the val in this write
+       then Just val
+       else case (slot, slot') of
+              -- if the slots don't match and are lits, we can skip this write
+              (Lit _, Lit _) -> readStorage addr' slot' prev
+              -- if the slots don't match syntactically and are abstract then we can't skip this write
+              _ -> Just $ SLoad addr' slot' s
+  else case (addr, addr') of
+    -- if the the addresses don't match and are lits, we can skip this write
+    (Lit _, Lit _) -> readStorage addr' slot' prev
+    -- if the the addresses don't match syntactically and are abstract then we can't skip this write
+    _ -> Just $ SLoad addr' slot' s
 readStorage _ _ (GVar _) = error "Can't read from a GVar"
 
 readStorage' :: Expr EWord -> Expr EWord -> Expr Storage -> Expr EWord
@@ -521,6 +562,28 @@ writeStorage a@(Lit addr) k@(Lit key) v@(Lit val) store = case store of
       ctrct = Map.findWithDefault Map.empty addr s
     in ConcreteStore (Map.insert addr (Map.insert key val ctrct) s)
   _ -> SStore a k v store
+writeStorage addr key val store@(SStore addr' key' val' prev)
+  | addr == addr'
+     = if key == key'
+       -- if we're overwriting an existing location, then drop the write
+       then SStore addr key val prev
+       else case (addr, addr', key, key') of
+              -- if we can know statically that the new write doesn't overlap with the existing write, then we continue down the write chain
+              -- we impose an ordering relation on the writes that we push down to ensure termination when this routine is called from the simplifier
+              (Lit a, Lit a', Lit k, Lit k') -> if a > a' || (a == a' && k > k')
+                                                then SStore addr' key' val' (writeStorage addr key val prev)
+                                                else SStore addr key val store
+              -- otherwise stack a new write on top of the the existing write chain
+              _ -> SStore addr key val store
+  | otherwise
+     = case (addr, addr') of
+        -- if we can know statically that the new write doesn't overlap with the existing write, then we continue down the write chain
+        -- once again we impose an ordering relation on the pushed down writes to ensure termination
+        (Lit a, Lit a') -> if a > a'
+                           then SStore addr' key' val' (writeStorage addr key val prev)
+                           else SStore addr key val store
+        -- otherwise stack a new write on top of the the existing write chain
+        _ -> SStore addr key val store
 writeStorage addr key val store = SStore addr key val store
 
 
@@ -538,29 +601,51 @@ simplify e = if (mapExpr go e == e)
     -- redundant CopySlice
     go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
 
+    -- simplify storage
+    go (SLoad addr slot store) = readStorage' addr slot store
+    go (SStore addr slot val store) = writeStorage addr slot val store
+
     -- simplify buffers
     go o@(ReadWord (Lit _) _) = simplifyReads o
     go (ReadWord idx buf) = readWord idx buf
     go o@(ReadByte (Lit _) _) = simplifyReads o
     go (ReadByte idx buf) = readByte idx buf
+
+    -- We can zero out any bytes in a base ConcreteBuf that we know will be overwritten by a later write
+    -- TODO: make this fully general for entire write chains, not just a single write.
+    go o@(WriteWord (Lit idx) val (ConcreteBuf b))
+      | idx <= num (maxBound :: Int)
+        = (writeWord (Lit idx) val (
+            ConcreteBuf $
+              (BS.take (num idx) (padRight (num idx) b))
+              <> (BS.replicate 32 0)
+              <> (BS.drop (num idx + 32) b)))
+      | otherwise = o
     go (WriteWord a b c) = writeWord a b c
+
     go (WriteByte a b c) = writeByte a b c
     go (CopySlice a b c d f) = copySlice a b c d f
 
     go (IndexWord a b) = indexWord a b
 
-    -- concrete LT / GT
+    -- LT
     go (EVM.Types.LT (Lit a) (Lit b))
       | a < b = Lit 1
       | otherwise = Lit 0
+    go (EVM.Types.LT _ (Lit 0)) = Lit 0
+
+    -- normalize all comparisons in terms of LT
     go (EVM.Types.GT a b) = EVM.Types.LT b a
     go (EVM.Types.GEq a b) = EVM.Types.LEq b a
     go (EVM.Types.LEq a b) = EVM.Types.IsZero (EVM.Types.GT a b)
+
+    go (IsZero a) = iszero a
 
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
       | a == b = Lit 1
       | otherwise = Lit 0
+    go (Eq (Lit 0) (Sub a b)) = Eq a b
     go o@(Eq a b)
       | a == b = Lit 1
       | otherwise = o
@@ -657,16 +742,59 @@ isLitByte :: Expr Byte -> Bool
 isLitByte (LitByte _) = True
 isLitByte _ = False
 
-isPower2 :: W256 -> Bool
-isPower2 n = n .&. (n-1) == 0
-
 -- | Returns the byte at idx from the given word.
 indexWord :: Expr EWord -> Expr EWord -> Expr Byte
-indexWord (Lit idx) (And (Lit mask) w)
-  | mask == (2 ^ (256 :: W256)) - 1 = indexWord (Lit idx) w -- we need this case here to avoid overflow below
-  | isPower2 (mask + 1), 2 ^ (idx + 1) <= mask = indexWord (Lit idx) w
-  | isPower2 (mask + 1), 2 ^ (idx + 1) > mask = LitByte 0
-  | otherwise = IndexWord (Lit idx) (And (Lit mask) w)
+-- Simplify masked reads:
+--
+--
+--                reads across the mask boundry
+--                return an abstract expression
+--                            │
+--                            │
+--   reads outside of         │             reads over the mask read
+--   the mask return 0        │             from the underlying word
+--          │                 │                       │
+--          │           ┌─────┘                       │
+--          ▼           ▼                             ▼
+--        ┌───┐       ┌─┬─┬─────────────────────────┬───┬──────────────┐
+--        │   │       │ │ │                         │   │              │    mask
+--        │   │       │ └─┼─────────────────────────┼───┼──────────────┘
+--        │   │       │   │                         │   │
+--    ┌───┼───┼───────┼───┼─────────────────────────┼───┼──────────────┐
+--    │   │┼┼┼│       │┼┼┼│                         │┼┼┼│              │    w
+--    └───┴───┴───────┴───┴─────────────────────────┴───┴──────────────┘
+--   MSB                                                              LSB
+--    ────────────────────────────────────────────────────────────────►
+--    0                                                               31
+--
+--                    indexWord 0 reads from the MSB
+--                    indexWord 31 reads from the LSB
+--
+indexWord i@(Lit idx) e@(And (Lit mask) w)
+  -- if the mask is all 1s then read from the undelrying word
+  -- we need this case to avoid overflow
+  | mask == fullWordMask = indexWord (Lit idx) w
+  -- if the index is a read from the masked region then read from the underlying word
+  | idx <= 31
+  , isPower2 (mask + 1)
+  , isByteAligned mask
+  , idx >= unmaskedBytes
+    = indexWord (Lit idx) w
+  -- if the read is outside of the masked region return 0
+  | idx <= 31
+  , isPower2 (mask + 1)
+  , isByteAligned mask
+  , idx < unmaskedBytes
+    = LitByte 0
+  -- if the mask is not a power of 2, or it does not align with a byte boundry return an abstract expression
+  | idx <= 31 = IndexWord i e
+  -- reads outside the range of the source word return 0
+  | otherwise = LitByte 0
+  where
+    isPower2 n = n .&. (n-1) == 0
+    fullWordMask = (2 ^ (256 :: W256)) - 1
+    unmaskedBytes = fromIntegral $ (countLeadingZeros mask) `Prelude.div` 8
+    isByteAligned m = (countLeadingZeros m) `Prelude.mod` 8 == 0
 indexWord (Lit idx) (Lit w)
   | idx <= 31 = LitByte . fromIntegral $ shiftR w (248 - num idx * 8)
   | otherwise = LitByte 0
