@@ -1766,13 +1766,13 @@ genName = fmap T.pack $ listOf1 (oneof . (fmap pure) $ ['a'..'z'] <> ['A'..'Z'])
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
- [ pure Invalid
- , pure EVM.Types.IllegalOverflow
- , pure SelfDestruct
+ [ pure $ Invalid []
+ , pure $ EVM.Types.IllegalOverflow []
+ , pure $ SelfDestruct []
  ]
 genEnd sz = oneof
- [ fmap EVM.Types.Revert subBuf
- , liftM2 Return subBuf subStore
+ [ liftM2 EVM.Types.Revert (return []) subBuf
+ , liftM3 Return (return []) subBuf subStore
  , liftM3 ITE subWord subEnd subEnd
  ]
  where
