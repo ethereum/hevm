@@ -21,7 +21,7 @@ import Control.Concurrent (forkIO, killThread)
 import Data.Char (isSpace)
 import Data.Containers.ListUtils (nubOrd)
 import Language.SMT2.Parser (getValueRes, parseFileMsg)
-import Language.SMT2.Syntax (SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..))
+import Language.SMT2.Syntax (SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
 import Data.Word
 import Numeric (readHex)
 import Data.ByteString (ByteString)
@@ -362,9 +362,10 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   |]
 
 declareBufs :: [Builder] -> SMT2
-declareBufs names = SMT2 (["; buffers"] <> fmap declare names) cexvars
+declareBufs names = SMT2 ("; buffers" : fmap declareBuf names <> ("; buffer lengths" : fmap declareLength names)) cexvars
   where
-    declare n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
+    declareBuf n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
+    declareLength n = "(define-const " <> n <> "_length" <> " (_ BitVec 256) (bufLength " <> n <> "))"
     cexvars = CexVars
       { calldataV = mempty
       , storageV = mempty
@@ -696,6 +697,49 @@ checkSat (SolverGroup taskQueue) script = do
   -- collect result
   readChan resChan
 
+parseBuf :: Int -> Term -> Expr Buf
+parseBuf len = go mempty
+  where
+    go env = \case
+      -- constant arrays
+      (TermApplication (
+        Qualified (IdSymbol "const") (
+          SortParameter (IdSymbol "Array") (
+            SortSymbol (IdIndexed "BitVec" (IxNumeral "256" :| []))
+            :| [SortSymbol (IdIndexed "BitVec" (IxNumeral "8" :| []))]
+          )
+        )) ((TermSpecConstant val :| [])))
+        -> case val of
+             SCHexadecimal "00" -> mempty
+             v -> ConcreteBuf $ BS.replicate len (parseW8 v)
+      -- writing a byte over some array
+      (TermApplication (Unqualified (IdSymbol "store")) (base :| [TermSpecConstant idx, TermSpecConstant val])) -> let
+          pbase = go env base
+          pidx = parseW256 idx
+          pval = parseW8 val
+        in writeByte (Lit pidx) (LitByte pval) pbase
+      -- binding a new name
+      (TermLet ((VarBinding name bound) :| []) term) -> let
+          pbound = go env bound
+        in go (Map.insert name pbound env) term
+      -- looking up a bound name
+      (TermQualIdentifier (Unqualified (IdSymbol name))) -> case Map.lookup name env of
+        Just t -> t
+        Nothing -> error $ "Internal error: could not find " <> (TS.unpack name) <> " in environment mapping"
+      p ->  error $ "Internal Error: cannot parse solver response into a buffer:\n" <> show p
+
+parseW256 :: SpecConstant -> W256
+parseW256 = parseSC
+
+parseInteger :: SpecConstant -> Integer
+parseInteger = parseSC
+
+parseW8 :: SpecConstant -> Word8
+parseW8 = parseSC
+
+parseSC :: (Num a, Eq a) => SpecConstant -> a
+parseSC (SCHexadecimal a) = fst . head . Numeric.readHex . T.unpack . T.fromStrict $ a
+parseSC sc = error $ "Internal Error: cannot parse: " <> show sc
 
 withSolvers :: Solver -> Natural -> Maybe Natural -> (SolverGroup -> IO a) -> IO a
 withSolvers solver count timeout cont = do
@@ -752,28 +796,31 @@ withSolvers solver count timeout cont = do
                   mempty (calldataV cexvars)
               let getBuf :: Map TS.Text ByteString -> Text -> IO (Map TS.Text ByteString)
                   getBuf acc name = do
+                    len <- getValue inst (name <> "_length")
+                    len' <- case parseFileMsg getValueRes (T.toStrict len) of
+                      Right (ResSpecific (valParsed :| [])) -> case valParsed of
+                        (TermQualIdentifier (Unqualified (IdSymbol symbol)), (TermSpecConstant sc))
+                          -> if symbol == (T.toStrict name <> "_length")
+                             then pure $ parseW256 sc
+                             else error "Internal Error: solver did not return model for requested value"
+                        res -> error $ "Internal Error: cannot parse solver response: " <> show res
+                      res -> error $ "Internal Error: cannot parse solver response: " <> show res
+                    let len'' = if len' <= num (maxBound :: Int)
+                                then fromIntegral len'
+                                else error $ "Internal Error: buffer: " <> (T.unpack name) <> " is too large to be represented in a ByteString. Length: " <> show len'
+
                     val <- getValue inst name
-                    let tmp = parseFileMsg getValueRes (T.toStrict val)
-                    idConst <- case tmp of
-                      Right (ResSpecific (valParsed :| [])) -> pure valParsed
-                      _ -> undefined
-                    theConst <- case idConst of
-                     -- constant buffers where all elements are zero
-                     (TermQualIdentifier (
-                       Unqualified (IdSymbol symbol)),
-                       TermApplication (
-                         Qualified (IdSymbol "const") (
-                           SortParameter (IdSymbol "Array") (
-                             SortSymbol (IdIndexed "BitVec" (IxNumeral "256" :| []))
-                             :| [SortSymbol (IdIndexed "BitVec" (IxNumeral "8" :| []))]
-                           )
-                         )
-                       ) ((TermSpecConstant (SCHexadecimal "00") :| [])))
-                       -> if symbol == (T.toStrict name)
-                          then pure BS.empty
-                          else error "Internal Error: cannot parse solver response"
-                     _ -> error "Internal Error: cannot parse solver response"
-                    pure $ Map.insert (T.toStrict name) theConst acc
+                    buf <- case parseFileMsg getValueRes (T.toStrict val) of
+                      Right (ResSpecific (valParsed :| [])) -> case valParsed of
+                        (TermQualIdentifier (Unqualified (IdSymbol symbol)), term) -> if symbol == (T.toStrict name)
+                                                                                      then pure $ parseBuf len'' term
+                                                                                      else error "Internal Error: solver did not return model for requested value"
+                        res -> error $ "Internal Error: cannot parse solver response: " <> show res
+                      res -> error $ "Internal Error: cannot parse solver response: " <> show res
+                    let bs = case simplify buf of
+                               ConcreteBuf b -> b
+                               _ -> error "Internal Error: unable to parse solver response into a concrete buffer"
+                    pure $ Map.insert (T.toStrict name) bs acc
               buffermodels <- foldM getBuf mempty (buffersV cexvars)
               pure $ Sat $ SMTCex
                 { calldata = calldatamodels
@@ -790,13 +837,6 @@ withSolvers solver count timeout cont = do
 
       -- put the instance back in the list of available instances
       writeChan availableInstances inst
-
-getIntegerFromSCHex :: SpecConstant -> Integer
-getIntegerFromSCHex (SCHexadecimal a) = fst (head(Numeric.readHex (T.unpack (T.fromStrict a)))) ::Integer
-getIntegerFromSCHex sc = error $ "Internal Error: cannot extract Integer from: " <> show sc
-
-specConstantToW256 :: SpecConstant -> W256
-specConstantToW256 sc = fromInteger $ getIntegerFromSCHex sc
 
 -- | Arguments used when spawing a solver instance
 solverArgs :: Solver -> [Text]

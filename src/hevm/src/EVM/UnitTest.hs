@@ -15,7 +15,7 @@ import EVM.Exec
 import EVM.Expr (litAddr, readStorage', simplify)
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel)
 import EVM.Types
 import EVM.Traversals
 import EVM.Transaction (initTx)
@@ -721,7 +721,7 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
         )) vm
 
     -- check postconditions against vm
-    results <- verify solvers defaultVeriOpts vm' Nothing (Just postcondition)
+    (_, results) <- verify solvers defaultVeriOpts vm' Nothing (Just postcondition)
 
     -- display results
     if all isQed results
@@ -778,33 +778,6 @@ showVal :: AbiValue -> Text
 showVal (AbiBytes _ bs) = formatBytes bs
 showVal (AbiAddress addr) = Text.pack  . show $ addr
 showVal v = Text.pack . show $ v
-
-
--- | Takes a buffer and a Cex and replaces all abstract values in the buf with concrete ones from the Cex
-subModel :: SMTCex -> Expr Buf -> Expr Buf
-subModel c buf = subBufs (buffers c) . subVars (EVM.SMT.calldata c) $ buf
-  where
-    subVars model b = Map.foldlWithKey subVar b model
-    subVar :: Expr Buf -> Text -> SpecConstant -> Expr Buf
-    subVar b key val = mapExpr go b
-      where
-        go :: Expr a -> Expr a
-        go = \case
-          Var name -> if name == key
-                      then Lit (specConstantToW256 val)
-                      else Var name
-          e -> e
-    subBufs model b = Map.foldlWithKey subBuf b model
-    subBuf :: Expr Buf -> Text -> ByteString -> Expr Buf
-    subBuf b key val = mapExpr go b
-      where
-        go :: Expr a -> Expr a
-        go = \case
-          AbstractBuf name -> if name == key
-                      then ConcreteBuf val
-                      else AbstractBuf name
-          e -> e
-
 
 
 -- prettyCalldata :: (?context :: DappContext) => Expr Buf -> Text -> [AbiType]-> IO Text

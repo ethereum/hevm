@@ -1,6 +1,5 @@
 {-# Language DataKinds #-}
 {-# Language ImplicitParams #-}
-{-# Language TemplateHaskell #-}
 
 
 module EVM.Format
@@ -20,6 +19,7 @@ module EVM.Format
   , showAbiValue
   , prettyIfConcreteWord
   , formatBytes
+  , indent
   ) where
 
 import Prelude hiding (Word)
@@ -34,6 +34,7 @@ import EVM.Types (Addr, ByteStringS(..))
 import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..))
 import EVM.ABI (Indexed (NotIndexed), getAbiSeq)
 import EVM.ABI (parseTypeName, formatString)
+import EVM.SMT
 import EVM.Solidity (SolcContract(..), contractName, abiMap)
 import EVM.Solidity (methodOutput, methodSignature, methodName)
 import EVM.Hexdump

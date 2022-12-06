@@ -398,7 +398,7 @@ initVm bs = vm
       }
     vm = makeVm $ VMOpts
       { EVM.vmoptContract      = c
-      , EVM.vmoptCalldata      = AbstractBuf "txdata"
+      , EVM.vmoptCalldata      = (AbstractBuf "txdata", [])
       , EVM.vmoptValue         = CallValue 0
       , EVM.vmoptAddress       = Addr 0xffffffffffffffff
       , EVM.vmoptCaller        = Lit 0

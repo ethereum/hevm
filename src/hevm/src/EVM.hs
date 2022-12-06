@@ -192,7 +192,7 @@ data StorageBase = Concrete | Symbolic
 -- | A way to specify an initial VM state
 data VMOpts = VMOpts
   { vmoptContract :: Contract
-  , vmoptCalldata :: Expr Buf
+  , vmoptCalldata :: (Expr Buf, [Prop])
   , vmoptStorageBase :: StorageBase
   , vmoptValue :: Expr EWord
   , vmoptPriorityFee :: W256
@@ -503,7 +503,7 @@ makeVm o =
     , _code = view contractcode $ vmoptContract o
     , _contract = vmoptAddress o
     , _codeContract = vmoptAddress o
-    , _calldata = vmoptCalldata o
+    , _calldata = fst $ vmoptCalldata o
     , _callvalue = vmoptValue o
     , _caller = vmoptCaller o
     , _gas = vmoptGas o
@@ -522,7 +522,7 @@ makeVm o =
     }
   , _cache = Cache mempty mempty mempty
   , _burned = 0
-  , _constraints = mempty
+  , _constraints = snd $ vmoptCalldata o
   , _iterations = mempty
   , _allowFFI = vmoptAllowFFI o
   }

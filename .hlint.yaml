@@ -26,4 +26,5 @@
 - ignore: {name: "Redundant <$>"}
 - ignore: {name: "Eta reduce"}
 - ignore: {name: "Use underscore"}
+- ignore: {name: "Functor law"}
 #[ { "ignore": { "within": '**.*' } } ]

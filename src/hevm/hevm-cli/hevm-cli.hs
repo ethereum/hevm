@@ -8,7 +8,6 @@
 module Main where
 
 import EVM (StorageModel(..))
-import EVM.Dev (analyzeDai, dumpQueries, analyzeVat)
 import qualified EVM
 import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
@@ -26,14 +25,13 @@ import EVM.ABI
 import qualified EVM.Expr as Expr
 import EVM.SMT
 import qualified EVM.TTY as TTY
-import EVM.SMT hiding (calldata)
 import EVM.Solidity
 import EVM.Expr (litAddr)
 import EVM.Types hiding (word)
-import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, runUnitTestContract, getParametersFromEnvironmentVariables, testNumber, dappTest)
+import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, getParametersFromEnvironmentVariables, testNumber, dappTest)
 import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
---import EVM.Format (showTraceTree, showTree', renderTree, showBranchInfoWithAbi, showLeafInfo)
 import GHC.Natural
+import EVM.Format (showTraceTree, formatExpr)
 import EVM.RLP (rlpdecode)
 import qualified EVM.Patricia as Patricia
 import Data.Map (Map)
@@ -42,7 +40,6 @@ import qualified EVM.Facts     as Facts
 import qualified EVM.Facts.Git as Git
 import qualified EVM.UnitTest
 
-import GHC.IO.Encoding
 import GHC.Stack
 import GHC.Conc
 import Control.Concurrent.Async   (async, waitCatch)
@@ -51,17 +48,14 @@ import Control.Monad              (void, when, forM_, unless)
 import Control.Monad.State.Strict (execStateT, liftIO)
 import Data.ByteString            (ByteString)
 import Data.List                  (intercalate, isSuffixOf)
-import Data.Tree
 import Data.Text                  (unpack, pack)
 import Data.Text.Encoding         (encodeUtf8)
-import Data.Text.IO               (hPutStr)
 import Data.Maybe                 (fromMaybe, fromJust)
 import Data.Version               (showVersion)
 import Data.DoubleWord            (Word256)
 import System.IO                  (hFlush, stdout, stderr)
 import System.Directory           (withCurrentDirectory, listDirectory)
 import System.Exit                (exitFailure, exitWith, ExitCode(..))
-import System.Environment         (setEnv)
 import System.Process             (callProcess)
 import qualified Data.Aeson        as JSON
 import qualified Data.Aeson.Types  as JSON
@@ -74,7 +68,8 @@ import qualified Data.ByteString        as ByteString
 import qualified Data.ByteString.Char8  as Char8
 import qualified Data.ByteString.Lazy   as LazyByteString
 import qualified Data.Map               as Map
-import qualified Data.Text              as Text
+import qualified Data.Text              as T
+import qualified Data.Text.IO           as T
 import qualified System.Timeout         as Timeout
 
 import qualified Paths_hevm      as Paths
@@ -243,7 +238,10 @@ instance Options.ParseRecord (Command Options.Wrapped) where
     Options.parseRecordWithModifiers Options.lispCaseModifiers
 
 optsMode :: Command Options.Unwrapped -> Mode
-optsMode x = if Main.debug x then Debug else if jsontrace x then JsonTrace else Run
+optsMode x
+  | Main.debug x = Debug
+  | jsontrace x = JsonTrace
+  | otherwise = Run
 
 applyCache :: (Maybe String, Maybe String) -> IO (EVM.VM -> EVM.VM)
 applyCache (state, cache) =
@@ -331,7 +329,7 @@ main = do
               unless res exitFailure
             (False, Debug) -> liftIO $ TTY.main testOpts root testFile
             (False, JsonTrace) -> error "json traces not implemented for dappTest"
-            --(True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) testFile
+            (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) testFile
     Compliance {} ->
       case (group cmd) of
         Just "Blockchain" -> launchScript "/run-blockchain-tests" cmd
@@ -450,7 +448,20 @@ assert :: Command Options.Unwrapped -> IO ()
 assert cmd = do
   let block'  = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
       rpcinfo = (,) block' <$> rpc cmd
-  preState <- symvmFromCommand cmd
+      decipher = hexByteString "bytes" . strip0x
+  calldata' <- case (Main.calldata cmd, sig cmd) of
+    -- fully abstract calldata
+    (Nothing, Nothing) -> pure (AbstractBuf "txdata", [])
+    -- fully concrete calldata
+    (Just c, Nothing) -> pure (ConcreteBuf (decipher c), [])
+    -- calldata according to given abi with possible specializations from the `arg` list
+    (Nothing, Just sig') -> do
+      method' <- functionAbi sig'
+      let typs = snd <$> view methodInputs method'
+      pure $ symCalldata (view methodSignature method') typs (arg cmd) mempty
+    _ -> error "incompatible options: calldata and abi"
+
+  preState <- symvmFromCommand cmd calldata'
   let errCodes = fromMaybe defaultPanicCodes (assertions cmd)
   cores <- num <$> getNumProcessors
   withSolvers EVM.SMT.Z3 cores (smttimeout cmd) $ \solvers -> do
@@ -462,13 +473,18 @@ assert cmd = do
         (EVM.Fetch.oracle solvers rpcinfo)
         preState
     else do
-      let opts = VeriOpts { simp = False, debug = False, maxIter = (maxIterations cmd), askSmtIters = (askSmtIterations cmd)}
-      res <- verify solvers opts preState rpcinfo (Just $ checkAssertions errCodes)
+      let opts = VeriOpts { simp = True, debug = smtdebug cmd, maxIter = maxIterations cmd, askSmtIters = askSmtIterations cmd}
+      (expr, res) <- verify solvers opts preState rpcinfo (Just $ checkAssertions errCodes)
       case res of
         [Qed _] -> putStrLn "QED: No reachable property violations discovered"
         cexs -> do
           putStrLn "Discovered the following counterexamples:"
           putStrLn $ intercalate "\n" $ fmap show cexs
+      when (getModels cmd) $ do
+        T.putStrLn $ formatExpr expr
+        ms <- produceModels solvers expr
+        forM_ ms (showModel (fst calldata'))
+
     {-
   srcInfo <- getSrcInfo cmd
   let block'  = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
@@ -560,7 +576,6 @@ assert cmd = do
                         "Returned: " <> show (ByteStringS (ByteString.pack out))
                         -}
 
-  {-
 dappCoverage :: UnitTestOptions -> Mode -> String -> IO ()
 dappCoverage opts _ solcFile =
   readSolc solcFile >>=
@@ -589,17 +604,16 @@ dappCoverage opts _ solcFile =
         mapM_ f (Map.toList (coverageReport dapp covs))
       Nothing ->
         error ("Failed to read Solidity JSON for `" ++ solcFile ++ "'")
-    -}
 
 shouldPrintCoverage :: Maybe Text -> Text -> Bool
 shouldPrintCoverage (Just covMatch) file = regexMatches covMatch file
 shouldPrintCoverage Nothing file = not (isTestOrLib file)
 
 isTestOrLib :: Text -> Bool
-isTestOrLib file = Text.isSuffixOf ".t.sol" file || areAnyPrefixOf ["src/test/", "src/tests/", "lib/"] file
+isTestOrLib file = T.isSuffixOf ".t.sol" file || areAnyPrefixOf ["src/test/", "src/tests/", "lib/"] file
 
 areAnyPrefixOf :: [Text] -> Text -> Bool
-areAnyPrefixOf prefixes t = any (flip Text.isPrefixOf t) prefixes
+areAnyPrefixOf prefixes t = any (flip T.isPrefixOf t) prefixes
 
 launchExec :: Command Options.Unwrapped -> IO ()
 launchExec cmd = do
@@ -609,7 +623,7 @@ launchExec cmd = do
   case optsMode cmd of
     Run -> do
       vm' <- execStateT (EVM.Stepper.interpret (fetcher smtjobs) . void $ EVM.Stepper.execFully) vm
-      --when (trace cmd) $ hPutStr stderr (showTraceTree dapp vm')
+      when (trace cmd) $ T.hPutStr stderr (showTraceTree dapp vm')
       case view EVM.result vm' of
         Nothing ->
           error "internal error; no EVM result"
@@ -754,12 +768,12 @@ vmFromCommand cmd = do
 
   return $ VMTest.initTx $ withCache (vm0 baseFee miner ts' blockNum diff contract)
     where
-        decipher = hexByteString "bytes" . strip0x
         block'   = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
         value'   = word value 0
         caller'  = addr caller 0
         origin'  = addr origin 0
         calldata' = ConcreteBuf $ bytes Main.calldata ""
+        decipher = hexByteString "bytes" . strip0x
         mkCode bs = if create cmd
                     then EVM.InitCode bs mempty
                     else EVM.RuntimeCode (fromJust $ Expr.toList (ConcreteBuf bs))
@@ -769,7 +783,7 @@ vmFromCommand cmd = do
 
         vm0 baseFee miner ts blockNum diff c = EVM.makeVm $ EVM.VMOpts
           { EVM.vmoptContract      = c
-          , EVM.vmoptCalldata      = calldata'
+          , EVM.vmoptCalldata      = (calldata', [])
           , EVM.vmoptValue         = Lit value'
           , EVM.vmoptAddress       = address'
           , EVM.vmoptCaller        = litAddr caller'
@@ -796,8 +810,8 @@ vmFromCommand cmd = do
         addr f def = fromMaybe def (f cmd)
         bytes f def = maybe def decipher (f cmd)
 
-symvmFromCommand :: Command Options.Unwrapped -> IO (EVM.VM)
-symvmFromCommand cmd = do
+symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (EVM.VM)
+symvmFromCommand cmd calldata' = do
   (miner,blockNum,baseFee,diff) <- case rpc cmd of
     Nothing -> return (0,0,0,0)
     Just url -> EVM.Fetch.fetchBlockFrom block' url >>= \case
@@ -812,18 +826,6 @@ symvmFromCommand cmd = do
     caller' = Caller 0
     ts = maybe Timestamp Lit (timestamp cmd)
     callvalue' = maybe (CallValue 0) Lit (value cmd)
-  calldata' <- case (Main.calldata cmd, sig cmd) of
-    -- fully abstract calldata
-    (Nothing, Nothing) -> pure $ AbstractBuf "txdata"
-    -- fully concrete calldata
-    (Just c, Nothing) -> pure $ ConcreteBuf (decipher c)
-    -- calldata according to given abi with possible specializations from the `arg` list
-    (Nothing, Just sig') -> do
-      method' <- functionAbi sig'
-      let typs = snd <$> view methodInputs method'
-      pure . fst $ symCalldata (view methodSignature method') typs (arg cmd) mempty
-    _ -> error "incompatible options: calldata and abi"
-
   -- TODO: rework this, ConcreteS not needed anymore
   let store = case storageModel cmd of
                 -- InitialS and SymbolicS can read and write to symbolic locations

@@ -11,33 +11,36 @@ import EVM.Exec
 import qualified EVM.Fetch as Fetch
 import EVM.ABI
 import EVM.SMT
+import EVM.Traversals
 import qualified EVM.Expr as Expr
 import EVM.Stepper (Stepper)
 import qualified EVM.Stepper as Stepper
 import qualified Control.Monad.Operational as Operational
 import Control.Monad.State.Strict hiding (state)
 import EVM.Types
-import EVM.Traversals
 import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
 import Data.DoubleWord (Word256)
 import Control.Concurrent.Async
 import Data.Maybe
-import Data.List (foldl')
+import Data.List (foldl', intercalate)
+import Data.Tuple (swap)
 
 import Data.ByteString (ByteString)
 import qualified Control.Monad.State.Class as State
-import Data.Bifunctor (second)
+import Data.Bifunctor (first, second)
 import Data.Text (Text)
+import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
-import EVM.Format (formatExpr)
+import EVM.Format (formatExpr, indent)
+import Language.SMT2.Syntax (SpecConstant(..))
 
 data ProofResult a b c = Qed a | Cex b | Timeout c
   deriving (Show)
-type VerifyResult = ProofResult (Expr End) (Expr End, SMTCex) (Expr End)
+type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End)
 type EquivalenceResult = ProofResult ([VM], [VM]) VM ()
 
 isQed :: ProofResult a b c -> Bool
@@ -157,17 +160,17 @@ abstractVM typesignature concreteArgs contractCode maybepre storagemodel = final
     caller' = Caller 0
     value' = CallValue 0
     code' = RuntimeCode $ fromJust $ Expr.toList (ConcreteBuf contractCode)
-    vm' = loadSymVM code' store caller' value' calldata'
+    vm' = loadSymVM code' store caller' value' calldata' calldataProps
     precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm']
-    finalVm = vm' & set constraints (precond <> calldataProps)
+    finalVm = vm' & over constraints (<> precond)
 
-loadSymVM :: ContractCode -> Expr Storage -> Expr EWord -> Expr EWord -> Expr Buf -> VM
-loadSymVM x initStore addr callvalue' calldata' =
+loadSymVM :: ContractCode -> Expr Storage -> Expr EWord -> Expr EWord -> Expr Buf -> [Prop] -> VM
+loadSymVM x initStore addr callvalue' calldata' calldataProps =
   (makeVm $ VMOpts
     { vmoptContract = initialContract x
-    , vmoptCalldata = calldata'
+    , vmoptCalldata = (calldata', calldataProps)
     , vmoptValue = callvalue'
     , vmoptStorageBase = Symbolic
     , vmoptAddress = createAddress ethrunAddress 1
@@ -192,12 +195,6 @@ loadSymVM x initStore addr callvalue' calldata' =
     }) & set (env . contracts . at (createAddress ethrunAddress 1))
              (Just (initialContract x))
        & set (env . EVM.storage) initStore
-
-doInterpret :: Fetch.Fetcher -> Maybe Integer -> Maybe Integer -> VM -> Expr End
-doInterpret fetcher maxIter askSmtIters vm = undefined
---doInterpret fetcher maxIter askSmtIters vm = let
-      --f (vm', cs) = Node (BranchInfo (if null cs then vm' else vm) Nothing) cs
-    --in f <$> interpret' fetcher maxIter askSmtIters vm
 
 -- | Interpreter which explores all paths at branching points.
 -- returns an Expr representing the possible executions
@@ -274,7 +271,7 @@ type Precondition = VM -> Prop
 type Postcondition = VM -> Expr End -> Prop
 
 
-checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> IO [VerifyResult]
+checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> IO (Expr End, [VerifyResult])
 checkAssert solvers errs c signature' concreteArgs opts = verifyContract solvers c signature' concreteArgs opts SymbolicS Nothing (Just $ checkAssertions errs)
 
 {- |Checks if an assertion violation has been encountered
@@ -313,7 +310,7 @@ allPanicCodes = [ 0x00, 0x01, 0x11, 0x12, 0x21, 0x22, 0x31, 0x32, 0x41, 0x51 ]
 panicMsg :: Word256 -> ByteString
 panicMsg err = (selector "Panic(uint256)") <> (encodeAbiValue $ AbiUInt 256 err)
 
-verifyContract :: SolverGroup -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO [VerifyResult]
+verifyContract :: SolverGroup -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO (Expr End, [VerifyResult])
 verifyContract solvers theCode signature' concreteArgs opts storagemodel maybepre maybepost = do
   let preState = abstractVM signature' concreteArgs theCode maybepre storagemodel
   verify solvers opts preState Nothing maybepost
@@ -491,7 +488,7 @@ evalProp = \case
   o -> o
 
 -- | Symbolically execute the VM and check all endstates against the postcondition, if available.
-verify :: SolverGroup -> VeriOpts -> VM -> Maybe (Fetch.BlockNumber, Text) -> Maybe Postcondition -> IO [VerifyResult]
+verify :: SolverGroup -> VeriOpts -> VM -> Maybe (Fetch.BlockNumber, Text) -> Maybe Postcondition -> IO (Expr End, [VerifyResult])
 verify solvers opts preState rpcinfo maybepost = do
   putStrLn "Exploring contract"
 
@@ -504,7 +501,7 @@ verify solvers opts preState rpcinfo maybepost = do
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
 
   case maybepost of
-    Nothing -> pure [Qed expr]
+    Nothing -> pure (expr, [Qed ()])
     Just post -> do
       let
         -- Filter out any leaves that can be statically shown to be safe
@@ -526,13 +523,13 @@ verify solvers opts preState rpcinfo maybepost = do
         res <- checkSat solvers query
         pure (res, leaf)
       let cexs = filter (\(res, _) -> not . isUnsat $ res) results
-      pure $ if null cexs then [Qed expr] else fmap toVRes cexs
+      pure $ if null cexs then (expr, [Qed ()]) else (expr, fmap toVRes cexs)
   where
     toVRes :: (CheckSatResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
       Sat model -> Cex (leaf, model)
       EVM.SMT.Unknown -> Timeout leaf
-      Unsat -> Qed leaf
+      Unsat -> Qed ()
       Error e -> error $ "Internal Error: solver responded with error: " <> show e
 
 -- | Compares two contract runtimes for trace equivalence by running two VMs and comparing the end states.
@@ -596,6 +593,83 @@ equivalenceCheck bytecodeA bytecodeB maxiter askSmtIters signature' = undefined
 
 both' :: (a -> b) -> (a, a) -> (b, b)
 both' f (x, y) = (f x, f y)
+
+produceModels :: SolverGroup -> Expr End -> IO [(Expr End, CheckSatResult)]
+produceModels solvers expr = do
+  let flattened = flattenExpr expr
+      withQueries = fmap (first assertProps) flattened
+  results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
+    res <- checkSat solvers query
+    pure (res, leaf)
+  pure $ fmap swap $ filter (\(res, _) -> not . isUnsat $ res) results
+
+showModel :: Expr Buf -> (Expr End, CheckSatResult) -> IO ()
+showModel cd (expr, res) = do
+  case res of
+    Unsat -> pure () -- ignore unreachable branches
+    Error e -> error $ "Internal error: smt solver returned an error: " <> show e
+    EVM.SMT.Unknown -> do
+      putStrLn "--- Branch ---"
+      putStrLn ""
+      putStrLn "Unable to produce a model for the following end state:"
+      putStrLn ""
+      T.putStrLn $ indent 2 $ formatExpr expr
+      putStrLn ""
+    Sat cex -> do
+      putStrLn "--- Branch ---"
+      print cex
+      putStrLn ""
+      putStrLn "Inputs:"
+      putStrLn ""
+      T.putStrLn $ indent 2 $ formatCex cd cex
+      putStrLn ""
+      putStrLn "End State:"
+      putStrLn ""
+      T.putStrLn $ indent 2 $ formatExpr expr
+      putStrLn ""
+
+
+formatCex :: Expr Buf -> SMTCex -> Text
+formatCex cd m@(SMTCex _ store _ blockContext txContext) = T.unlines
+  [ "Calldata:"
+  , indent 2 cd'
+  , ""
+  , "Pre Store:"
+  , indent 2 store
+  , ""
+  , "Block Context:"
+  , indent 2 blockContext
+  , ""
+  , "Tx Context:"
+  , indent 2 txContext
+  ]
+  where
+    cd' = formatExpr $ Expr.simplify $ subModel m cd
+
+-- | Takes a buffer and a Cex and replaces all abstract values in the buf with concrete ones from the Cex
+subModel :: SMTCex -> Expr Buf -> Expr Buf
+subModel c buf = subBufs (buffers c) . subVars (EVM.SMT.calldata c) $ buf
+  where
+    subVars model b = Map.foldlWithKey subVar b model
+    subVar :: Expr Buf -> Text -> SpecConstant -> Expr Buf
+    subVar b key val = mapExpr go b
+      where
+        go :: Expr a -> Expr a
+        go = \case
+          Var name -> if name == key
+                      then Lit (parseW256 val)
+                      else Var name
+          e -> e
+    subBufs model b = Map.foldlWithKey subBuf b model
+    subBuf :: Expr Buf -> Text -> ByteString -> Expr Buf
+    subBuf b key val = mapExpr go b
+      where
+        go :: Expr a -> Expr a
+        go = \case
+          AbstractBuf name -> if name == key
+                      then ConcreteBuf val
+                      else AbstractBuf name
+          e -> e
 
 showCounterexample :: VM -> Maybe (Text, [AbiType]) -> ()
 showCounterexample vm maybesig = undefined
