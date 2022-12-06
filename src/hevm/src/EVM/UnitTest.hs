@@ -15,6 +15,7 @@ import EVM.Exec
 import EVM.Expr (litAddr, readStorage')
 import EVM.Format
 import EVM.Solidity
+import qualified EVM.SymExec as SymExec
 import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr)
 import EVM.Types
 import EVM.Transaction (initTx)
@@ -74,6 +75,8 @@ data UnitTestOptions = UnitTestOptions
   , verbose     :: Maybe Int
   , maxIter     :: Maybe Integer
   , askSmtIters :: Maybe Integer
+  , debug       :: Bool
+  , simp        :: Bool
   , maxDepth    :: Maybe Int
   , smtTimeout  :: Maybe Natural
   , solver      :: Maybe Text
@@ -119,6 +122,17 @@ defaultMaxCodeSize :: W256
 defaultMaxCodeSize = 0xffffffff
 
 type ABIMethod = Text
+
+
+-- | Generate VeriOpts from UnitTestOptions
+makeVeriOpts :: UnitTestOptions -> SymExec.VeriOpts
+makeVeriOpts opts =
+   SymExec.VeriOpts
+   { SymExec.simp = simp opts,
+     SymExec.debug = debug opts,
+     SymExec.maxIter = maxIter opts,
+     SymExec.askSmtIters = askSmtIters opts
+   }
 
 -- | Top level CLI endpoint for dapp-test
 dappTest :: UnitTestOptions -> SolverGroup -> String -> Maybe String -> IO Bool
@@ -717,7 +731,7 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
         )) vm
 
     -- check postconditions against vm
-    results <- verify solvers defaultVeriOpts vm' Nothing (Just postcondition)
+    results <- verify solvers (makeVeriOpts opts) vm' Nothing (Just postcondition)
 
     -- display results
     if all isQed results
