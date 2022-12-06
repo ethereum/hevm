@@ -110,6 +110,7 @@ data VM = VM
   , _burned         :: W256
   , _iterations     :: Map CodeLocation Int
   , _constraints    :: [Prop]
+  , _keccakEqs      :: [Prop]
   , _allowFFI       :: Bool
   }
   deriving (Show)
@@ -523,6 +524,7 @@ makeVm o =
   , _cache = Cache mempty mempty mempty
   , _burned = 0
   , _constraints = mempty
+  , _keccakEqs = mempty
   , _iterations = mempty
   , _allowFFI = vmoptAllowFFI o
   }
@@ -739,6 +741,8 @@ exec1 = do
                       (hash, invMap) <- case readMemory xOffset' xSize' vm of
                                           ConcreteBuf bs -> do
                                             let hash' = keccak' bs
+                                            eqs <- use keccakEqs
+                                            assign keccakEqs $ PEq (Lit hash') (Keccak (ConcreteBuf bs)):eqs
                                             pure (Lit hash', Map.singleton hash' bs)
                                           buf -> pure (Keccak buf, mempty)
                       next

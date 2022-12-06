@@ -704,10 +704,10 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
                    .|| (readStorage' (litAddr cheatCode) (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) store .== Lit 1)
         postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
-                                  Return _ store -> failed store
+                                  Return _ _ store -> failed store
                                   _ -> PBool True
           False -> \(_, post) -> case post of
-                                   Return _ store -> PNeg (failed store)
+                                   Return _ _ store -> PNeg (failed store)
                                    _ -> PBool False
 
     (_, vm') <- runStateT
@@ -738,7 +738,7 @@ symFailure UnitTestOptions {..} testName failures' =
     ]
     where
       showRes = \case
-                       Return _ _ -> if "proveFail" `isPrefixOf` testName
+                       Return _ _ _ -> if "proveFail" `isPrefixOf` testName
                                       then "Successful execution"
                                       else "Failed: DSTest Assertion Violation"
                        res ->

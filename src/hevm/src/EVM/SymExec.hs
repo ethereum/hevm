@@ -298,8 +298,8 @@ checkAssert solvers errs c signature' concreteArgs opts = verifyContract solvers
 -}
 checkAssertions :: [Word256] -> Postcondition
 checkAssertions errs _ = \case
-  Revert (ConcreteBuf msg) -> PBool $ msg `notElem` (fmap panicMsg errs)
-  Revert b -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
+  Revert _ (ConcreteBuf msg) -> PBool $ msg `notElem` (fmap panicMsg errs)
+  Revert _ b -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
   _ -> PBool True
 
 -- |By default hevm checks for all assertions except those which result from arithmetic overflow
@@ -328,15 +328,16 @@ pruneDeadPaths =
 runExpr :: Stepper.Stepper (Expr End)
 runExpr = do
   vm <- Stepper.runFully
+  let asserts = view keccakEqs vm
   pure $ case view result vm of
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
-    Just (VMSuccess buf) -> Return buf (view (env . EVM.storage) vm)
+    Just (VMSuccess buf) -> Return asserts buf (view (env . EVM.storage) vm)
     Just (VMFailure e) -> case e of
-      UnrecognizedOpcode _ -> Invalid
-      SelfDestruction -> SelfDestruct
-      EVM.IllegalOverflow -> EVM.Types.IllegalOverflow
-      EVM.Revert buf -> EVM.Types.Revert buf
-      e' -> EVM.Types.TmpErr $ show e'
+      UnrecognizedOpcode _ -> Invalid asserts
+      SelfDestruction -> SelfDestruct asserts
+      EVM.IllegalOverflow -> EVM.Types.IllegalOverflow asserts
+      EVM.Revert buf -> EVM.Types.Revert asserts buf
+      e' -> EVM.Types.TmpErr asserts $ show e'
 
 
 -- | Converts a given top level expr into a list of final states and the associated path conditions for each state
@@ -346,12 +347,12 @@ flattenExpr = go []
     go :: [Prop] -> Expr End -> [([Prop], Expr End)]
     go pcs = \case
       ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
-      Invalid -> [(pcs, Invalid)]
-      SelfDestruct -> [(pcs, SelfDestruct)]
-      Revert buf -> [(pcs, Revert buf)]
-      Return  buf store -> [(pcs, Return buf store)]
-      EVM.Types.IllegalOverflow -> [(pcs, EVM.Types.IllegalOverflow)]
-      TmpErr s -> error s
+      e@(Invalid _)  -> [(pcs, e)]
+      e@(SelfDestruct _) -> [(pcs, e)]
+      e@(Revert _ _) -> [(pcs, e)]
+      e@(Return _ _ _) -> [(pcs, e)]
+      e@(EVM.Types.IllegalOverflow _) -> [(pcs, e)]
+      TmpErr _ s -> error s
       GVar _ -> error "cannot flatten an Expr containing a GVar"
 
 reachableQueries :: Expr End -> IO [SMT2]
@@ -450,12 +451,12 @@ reachable solvers = go []
             TL.putStrLn $ "tquery:\n " <> (formatSMT2 tquery)
             TL.putStrLn $ "fquery:\n " <> (formatSMT2 fquery)
             error "Internal Error: two unsat branches found"
-      Invalid -> pure ([], Invalid)
-      SelfDestruct -> pure ([], SelfDestruct)
-      Revert msg -> pure ([], Revert msg)
-      Return msg store -> pure ([], Return msg store)
-      EVM.Types.IllegalOverflow -> pure ([], EVM.Types.IllegalOverflow)
-      TmpErr e -> error $ "TmpErr: " <> show e
+      Invalid asserts -> pure ([], Invalid asserts)
+      SelfDestruct asserts -> pure ([], SelfDestruct asserts)
+      Revert asserts msg -> pure ([], Revert asserts msg)
+      Return asserts msg store -> pure ([], Return asserts msg store)
+      EVM.Types.IllegalOverflow asserts -> pure ([], EVM.Types.IllegalOverflow asserts)
+      TmpErr _ e -> error $ "TmpErr: " <> show e
       GVar _ -> error "Internal Error: unexpected GVar"
 
 -- | Evaluate the provided proposition down to its most concrete result
@@ -490,6 +491,20 @@ evalProp = \case
                    _ -> o
   o -> o
 
+
+-- | Extract contraints stored in  Expr End nodes
+extractProps :: Expr End -> [Prop]
+extractProps = \case
+  ITE _ _ _ -> []
+  Invalid asserts -> asserts
+  SelfDestruct asserts -> asserts
+  Revert asserts _ -> asserts
+  Return asserts _ _ -> asserts
+  EVM.Types.IllegalOverflow asserts -> asserts
+  TmpErr asserts _ -> asserts
+  GVar _ -> error "cannot extract props from a GVar"
+
+
 -- | Symbolically execute the VM and check all endstates against the postcondition, if available.
 verify :: SolverGroup -> VeriOpts -> VM -> Maybe (Fetch.BlockNumber, Text) -> Maybe Postcondition -> IO [VerifyResult]
 verify solvers opts preState rpcinfo maybepost = do
@@ -513,7 +528,7 @@ verify solvers opts preState rpcinfo maybepost = do
             PBool True -> False
             _ -> True
         assumes = view constraints preState
-        withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> pcs), leaf)) canViolate
+        withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> extractProps leaf <> pcs), leaf)) canViolate
       putStrLn $ "Checking for reachability of " <> show (length withQueries) <> "\n potential property violations"
 
       when (debug opts) $ forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do

@@ -383,17 +383,17 @@ contractPathPart :: Text -> Text
 contractPathPart x = Text.split (== ':') x !! 0
 
 prettyvmresult :: (?context :: DappContext) => Expr End -> String
-prettyvmresult (EVM.Types.Revert (ConcreteBuf "")) = "Revert"
-prettyvmresult (EVM.Types.Revert msg) = "Revert: " ++ (unpack $ showError msg)
-prettyvmresult (EVM.Types.Invalid) = "Invalid Opcode"
-prettyvmresult (EVM.Types.Return (ConcreteBuf msg) _) =
+prettyvmresult (EVM.Types.Revert _ (ConcreteBuf "")) = "Revert"
+prettyvmresult (EVM.Types.Revert _ msg) = "Revert: " ++ (unpack $ showError msg)
+prettyvmresult (EVM.Types.Invalid _) = "Invalid Opcode"
+prettyvmresult (EVM.Types.Return _ (ConcreteBuf msg) _) =
   if BS.null msg
   then "Stop"
   else "Return: " <> show (ByteStringS msg)
-prettyvmresult (EVM.Types.Return _ _) =
+prettyvmresult (EVM.Types.Return _ _ _) =
   "Return: <symbolic>"
-prettyvmresult (EVM.Types.IllegalOverflow) = "Illegal Overflow"
-prettyvmresult (EVM.Types.SelfDestruct) = "Self Destruct"
+prettyvmresult (EVM.Types.IllegalOverflow _) = "Illegal Overflow"
+prettyvmresult (EVM.Types.SelfDestruct _) = "Self Destruct"
 prettyvmresult e = error "Internal Error: Invalid Result: " <> show e
 
 currentSolc :: DappInfo -> VM -> Maybe SolcContract
@@ -425,14 +425,19 @@ formatExpr = go
         , indent 2 (formatExpr t)
         , indent 2 (formatExpr f)
         , ")"]
-      EVM.Types.Revert buf -> case buf of
+      EVM.Types.Revert asserts buf -> case buf of
         ConcreteBuf "" -> "(Revert " <> formatExpr buf <> ")"
         _ -> T.unlines
           [ "(Revert"
-          , indent 2 (formatExpr buf)
+          , indent 2 $ T.unlines
+            [ "Code:"
+            , indent 2 (formatExpr buf)
+            , "Assertions:"
+            , indent 2 $ T.pack $ show asserts
+            ]
           , ")"
           ]
-      Return buf store -> T.unlines
+      Return asserts buf store -> T.unlines
         [ "(Return"
         , indent 2 $ T.unlines
           [ "Data:"
@@ -440,6 +445,8 @@ formatExpr = go
           , ""
           , "Store:"
           , indent 2 $ formatExpr store
+          , "Assertions:"
+          , indent 2 $ T.pack $ show asserts
           ]
         , ")"
         ]
