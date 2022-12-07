@@ -323,6 +323,15 @@ mapExprM f expr = case expr of
   IllegalOverflow a -> do
     a' <- mapM (mapPropM f) a
     f (IllegalOverflow a')
+  InvalidMemoryAccess a -> do
+    a' <- mapM (mapPropM f) a
+    f (InvalidMemoryAccess a')
+  StackLimitExceeded a -> do
+    a' <- mapM (mapPropM f) a
+    f (StackLimitExceeded a')
+  BadJumpDestination a -> do
+    a' <- mapM (mapPropM f) a
+    f (BadJumpDestination a')
   Revert a b -> do
     a' <- mapM (mapPropM f) a
     b' <- mapExprM f b

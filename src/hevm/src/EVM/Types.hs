@@ -152,14 +152,17 @@ data Expr (a :: EType) where
                  -> Expr EWord
   -- control flow
 
-  Invalid         :: [Prop] -> Expr End
-  IllegalOverflow :: [Prop] -> Expr End
-  SelfDestruct    :: [Prop] -> Expr End
-  Revert          :: [Prop] -> Expr Buf -> Expr End
-  Return          :: [Prop] -> Expr Buf -> Expr Storage -> Expr End
-  ITE             :: Expr EWord -> Expr End -> Expr End -> Expr End
-  TmpErr          :: [Prop] -> String -> Expr End
-
+  Invalid             :: [Prop] -> Expr End
+  IllegalOverflow     :: [Prop] -> Expr End
+  SelfDestruct        :: [Prop] -> Expr End
+  StackLimitExceeded  :: [Prop] -> Expr End
+  InvalidMemoryAccess :: [Prop] -> Expr End
+  BadJumpDestination  :: [Prop] -> Expr End
+  Revert              :: [Prop] -> Expr Buf -> Expr End
+  Return              :: [Prop] -> Expr Buf -> Expr Storage -> Expr End
+  ITE                 :: Expr EWord -> Expr End -> Expr End -> Expr End
+  TmpErr              :: [Prop] -> String -> Expr End -- TODO this is a crutch to help us not deal with all EVM failure modes in Expr
+                                                      --      should be removed once EVM failure modes are handled in Expr
   -- integers
 
   Add            :: Expr EWord -> Expr EWord -> Expr EWord
