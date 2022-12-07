@@ -1575,8 +1575,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
-          assertEqual "Must have no difference" [] a
-          return ()
+          assertBool "Must have a difference" (not (null a))
       ,
       testCase "eq-sol-exp-qed" $ do
         -- These yul programs are not equivalent: (try --calldata $(seth --to-uint256 2) for example)
