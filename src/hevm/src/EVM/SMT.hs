@@ -516,7 +516,7 @@ exprToSMT = \case
         aLift = "(concat (_ bv0 256) " <> aExp <> ")"
         bLift = "(concat (_ bv0 256) " <> bExp <> ")"
         cLift = "(concat (_ bv0 256) " <> cExp <> ")"
-    in  "((_ extract 255 0) (ite (= " <> bExp <> " (_ bv0 256)) (_ bv0 512) (bvurem (bvmul " <> aLift `sp` bLift <> ")" <> cLift <> ")))"
+    in  "((_ extract 255 0) (ite (= " <> cExp <> " (_ bv0 256)) (_ bv0 512) (bvurem (bvmul " <> aLift `sp` bLift <> ")" <> cLift <> ")))"
   EqByte a b ->
     let cond = op2 "=" a b in
     "(ite " <> cond `sp` one `sp` zero <> ")"

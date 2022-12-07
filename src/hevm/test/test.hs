@@ -867,6 +867,29 @@ tests = testGroup "hevm"
         [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "XOR works as expected"
       ,
+      testCase "opcode-mulmod-no-overflow" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint16 a, uint16 b, uint16 c) external pure {
+              require(a < 100);
+              require(b < 100);
+              uint16 r1;
+              uint16 r2;
+              uint16 g2;
+              assembly {
+                r1 := mul(a,b)
+                r2 := mod(r1, c)
+                g2 := mulmod (a, b, c)
+              }
+              assert (r2 == g2);
+              }
+             }
+            |]
+        [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint16,uint16,uint16)", [AbiUIntType 16, AbiUIntType 16, AbiUIntType 16])) [] defaultVeriOpts
+        putStrLn $ "Got " <> (show $ getArgInteger ctr "arg1") <> ", " <>  (show $ getArgInteger ctr "arg2") <> ", " <> (show $ getArgInteger ctr "arg3")
+        putStrLn "MULMOD is fine on NON overflow values"
+      ,
       -- Somewhat tautological since we are asserting the precondition
       -- on the same form as the actual "requires" clause.
       testCase "SafeAdd success case" $ do
