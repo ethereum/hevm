@@ -872,23 +872,40 @@ tests = testGroup "hevm"
             [i|
             contract MyContract {
               function fun(uint16 a, uint16 b, uint16 c) external pure {
-              require(a < 100);
-              require(b < 100);
-              uint16 r1;
-              uint16 r2;
-              uint16 g2;
-              assembly {
-                r1 := mul(a,b)
-                r2 := mod(r1, c)
-                g2 := mulmod (a, b, c)
+                require(a < 100);
+                require(b < 100);
+                uint16 r1;
+                uint16 r2;
+                uint16 g2;
+                assembly {
+                  r1 := mul(a,b)
+                  r2 := mod(r1, c)
+                  g2 := mulmod (a, b, c)
+                }
+                assert (r2 == g2);
               }
-              assert (r2 == g2);
-              }
-             }
+            }
             |]
         [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint16,uint16,uint16)", [AbiUIntType 16, AbiUIntType 16, AbiUIntType 16])) [] defaultVeriOpts
         putStrLn $ "Got " <> (show $ getArgInteger ctr "arg1") <> ", " <>  (show $ getArgInteger ctr "arg2") <> ", " <> (show $ getArgInteger ctr "arg3")
         putStrLn "MULMOD is fine on NON overflow values"
+      ,
+      testCase "opcode-div-res-zero-on-div-by-zero" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint16 a) external pure {
+                uint16_t b = 0;
+                uint16_t res;
+                assembly {
+                  r1 := div(a,b)
+                }
+                assert (res == 0);
+              }
+            }
+            |]
+        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint16)", [AbiUIntType 16])) [] defaultVeriOpts
+        putStrLn "DIV by zero is zero"
       ,
       -- Somewhat tautological since we are asserting the precondition
       -- on the same form as the actual "requires" clause.
@@ -1539,26 +1556,26 @@ tests = testGroup "hevm"
         Just aPrgm <- yul ""
           [i|
           {
-              calldatacopy(0, 0, 32)
-              switch mload(0)
-              case 0 { }
-              case 1 { }
-              default { invalid() }
+            calldatacopy(0, 0, 32)
+            switch mload(0)
+            case 0 { }
+            case 1 { }
+            default { invalid() }
           }
           |]
         Just bPrgm <- yul ""
           [i|
           {
-              calldatacopy(0, 0, 32)
-              switch mload(0)
-              case 0 { }
-              case 2 { }
-              default { invalid() }
+            calldatacopy(0, 0, 32)
+            switch mload(0)
+            case 0 { }
+            case 2 { }
+            default { invalid() }
           }
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
-          assertEqual "Must have no difference" a []
+          assertEqual "Must have no difference" [] a
           return ()
       ,
       testCase "eq-sol-exp-qed" $ do
@@ -1585,7 +1602,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
-          assertEqual "Must have no difference" a []
+          assertEqual "Must have no difference" [] a
           return ()
       ,
       testCase "eq-sol-exp-cex" $ do
