@@ -879,10 +879,10 @@ tests = testGroup "hevm"
             [i|
             contract MyContract {
               function fun(uint16 a) external pure {
-                uint16_t b = 0;
-                uint16_t res;
+                uint16 b = 0;
+                uint16 res;
                 assembly {
-                  r1 := div(a,b)
+                  res := div(a,b)
                 }
                 assert (res == 0);
               }
