@@ -1940,6 +1940,7 @@ tests = testGroup "hevm"
                     , "expressionJoiner/reassignment.yul"
                     , "expressionSimplifier/exp_simplifications.yul"
                     , "expressionSimplifier/zero_length_read.yul"
+                    , "expressionSimplifier/side_effects_in_for_condition.yul"
                     , "fullSuite/create_and_mask.yul"
                     , "fullSuite/unusedFunctionParameterPruner_return.yul"
                     , "fullSuite/unusedFunctionParameterPruner_simple.yul"
@@ -2302,7 +2303,7 @@ genWord litFreq sz = frequency
     , liftM2 Mod subWord subWord
     , liftM2 SMod subWord subWord
     -- , liftM3 AddMod subWord subWord subWord
-    , liftM3 MulMod subWord subWord subWord
+    -- , liftM3 MulMod subWord subWord subWord -- it works, but it's VERY SLOW
     --, liftM2 Exp subWord litWord
     , liftM2 SEx subWord subWord
     , liftM2 Min subWord subWord
