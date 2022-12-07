@@ -17,7 +17,6 @@ import Control.Monad
 import Text.RE.TDFA.String
 import Text.RE.Replace
 import Data.Array.IO
-import Control.Monad
 import Data.Time
 
 import Prelude hiding (fail, LT, GT)
