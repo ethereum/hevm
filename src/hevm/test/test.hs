@@ -855,9 +855,10 @@ tests = testGroup "hevm"
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
-              function fun(uint16 a, uint16 b, uint16 c) external pure {
-                require(a < 100);
-                require(b < 100);
+              function fun(uint8 a, uint8 b, uint8 c) external pure {
+                require(a < 4);
+                require(b < 4);
+                require(c < 4);
                 uint16 r1;
                 uint16 r2;
                 uint16 g2;
@@ -870,8 +871,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint16,uint16,uint16)", [AbiUIntType 16, AbiUIntType 16, AbiUIntType 16])) [] defaultVeriOpts
-        putStrLn $ "Got " <> (show $ getArgInteger ctr "arg1") <> ", " <>  (show $ getArgInteger ctr "arg2") <> ", " <> (show $ getArgInteger ctr "arg3")
+        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint8,uint8,uint8)", [AbiUIntType 8, AbiUIntType 8, AbiUIntType 8])) [] defaultVeriOpts
         putStrLn "MULMOD is fine on NON overflow values"
       ,
       testCase "opcode-div-res-zero-on-div-by-zero" $ do
