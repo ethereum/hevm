@@ -15,7 +15,6 @@ import GHC.Natural
 import Control.Monad
 import Text.RE.TDFA.String
 import Text.RE.Replace
-import System.Random
 import Data.Array.IO
 import Control.Monad
 import Data.Time
@@ -74,21 +73,6 @@ import qualified Data.Text.IO as TIO
 import Language.SMT2.Syntax (SpecConstant())
 import Data.List (isSubsequenceOf)
 
--- | Randomly shuffle a list
---   /O(N)/
-shuffle :: [a] -> IO [a]
-shuffle xs = do
-        ar <- newArray n xs
-        forM [1..n] $ \i -> do
-            j <- randomRIO (i,n)
-            vi <- readArray ar i
-            vj <- readArray ar j
-            writeArray ar j vi
-            return vj
-  where
-    n = length xs
-    newArray :: Int -> [a] -> IO (IOArray Int a)
-    newArray n xs =  newListArray (1,n) xs
 main :: IO ()
 main = defaultMain tests
 
@@ -1786,19 +1770,19 @@ tests = testGroup "hevm"
                     , "unusedFunctionParameterPruner/too_many_arguments.yul"
 
                     -- typed yul --
-                    , "expressionSplitter/typed.yul"
-                    , "expressionInliner/simple.yul"
-                    , "expressionInliner/with_args.yul"
-                    , "disambiguator/variables_inside_functions.yul"
-                    , "disambiguator/switch_statement.yul"
-                    , "disambiguator/if_statement.yul"
+                    , "conditionalSimplifier/add_correct_type_wasm.yul"
+                    , "conditionalSimplifier/add_correct_type.yul"
                     , "disambiguator/for_statement.yul"
                     , "disambiguator/funtion_call.yul"
+                    , "disambiguator/if_statement.yul"
                     , "disambiguator/long_names.yul"
-                    , "disambiguator/variables.yul"
+                    , "disambiguator/switch_statement.yul"
                     , "disambiguator/variables_clash.yul"
-                    , "conditionalSimplifier/add_correct_type.yul"
-                    , "conditionalSimplifier/add_correct_type_wasm.yul"
+                    , "disambiguator/variables_inside_functions.yul"
+                    , "disambiguator/variables.yul"
+                    , "expressionInliner/simple.yul"
+                    , "expressionInliner/with_args.yul"
+                    , "expressionSplitter/typed.yul"
                     , "fullInliner/multi_return_typed.yul"
                     , "functionGrouper/empty_block.yul"
                     , "functionGrouper/multi_fun_mixed.yul"
@@ -1812,44 +1796,51 @@ tests = testGroup "hevm"
                     , "mainFunction/multi_fun_mixed.yul"
                     , "mainFunction/nested_fun.yul"
                     , "mainFunction/single_fun.yul"
-                    , "ssaTransform/typed.yul"
                     , "ssaTransform/typed_for.yul"
                     , "ssaTransform/typed_switch.yul"
+                    , "ssaTransform/typed.yul"
                     , "varDeclInitializer/typed.yul"
 
                     -- New: symbolic index on MSTORE/MLOAD/CopySlice/CallDataCopy/ExtCodeCopy/Revert,
                     --      or exponent is symbolic (requires symbolic gas)
                     --      or SHA3 offset symbolic
-                    , "loopInvariantCodeMotion/not_first.yul"
-                    , "unusedStoreEliminator/covering_calldatacopy.yul"
-                    , "structuralSimplifier/switch_inline_no_match.yul"
-                    , "loadResolver/keccak_symbolic_memory.yul"
-                    , "loopInvariantCodeMotion/no_move_storage.yul"
-                    , "loopInvariantCodeMotion/move_memory_function.yul"
-                    , "fullSuite/unusedFunctionParameterPruner_simple.yul"
-                    , "loadResolver/double_mload_with_other_reassignment.yul"
-                    , "loadResolver/double_mload_with_reassignment.yul"
-                    , "unusedFunctionParameterPruner/simple.yul"
-                    , "unusedStoreEliminator/remove_before_revert.yul"
-                    , "expressionJoiner/reassignment.yul"
-                    , "ssaAndBack/single_assign_switch.yul"
-                    , "loadResolver/mload_self.yul"
-                    , "ssaAndBack/single_assign_if.yul"
-                    , "unusedStoreEliminator/unknown_length2.yul"
-                    , "loadResolver/double_mload.yul"
-                    , "fullSuite/unusedFunctionParameterPruner_return.yul"
-                    , "fullSuite/create_and_mask.yul"
-                    , "unusedStoreEliminator/unrelated_relative.yul"
-                    , "loopInvariantCodeMotion/no_move_memory.yul"
-                    , "loopInvariantCodeMotion/move_state_function.yul"
                     , "blockFlattener/basic.yul"
                     , "commonSubexpressionEliminator/case2.yul"
-                    , "loopInvariantCodeMotion/complex_move.yul"
-                    , "fullSuite/unusedFunctionParameterPruner.yul"
                     , "equalStoreEliminator/indirect_inferrence.yul"
-                    , "expressionSimplifier/zero_length_read.yul"
+                    , "expressionJoiner/reassignment.yul"
                     , "expressionSimplifier/exp_simplifications.yul"
+                    , "expressionSimplifier/zero_length_read.yul"
+                    , "fullSuite/create_and_mask.yul"
+                    , "fullSuite/unusedFunctionParameterPruner_return.yul"
+                    , "fullSuite/unusedFunctionParameterPruner_simple.yul"
+                    , "fullSuite/unusedFunctionParameterPruner.yul"
+                    , "loadResolver/double_mload_with_other_reassignment.yul"
+                    , "loadResolver/double_mload_with_reassignment.yul"
+                    , "loadResolver/double_mload.yul"
+                    , "loadResolver/keccak_reuse_basic.yul"
+                    , "loadResolver/keccak_reuse_expr_mstore.yul"
+                    , "loadResolver/keccak_reuse_msize.yul"
+                    , "loadResolver/keccak_reuse_mstore.yul"
+                    , "loadResolver/keccak_reuse_reassigned_branch.yul"
+                    , "loadResolver/keccak_reuse_reassigned_value.yul"
+                    , "loadResolver/keccak_symbolic_memory.yul"
                     , "loadResolver/merge_mload_with_known_distance.yul"
+                    , "loadResolver/mload_self.yul"
+                    , "loadResolver/keccak_reuse_in_expression.yul"
+                    , "loopInvariantCodeMotion/complex_move.yul"
+                    , "loopInvariantCodeMotion/move_memory_function.yul"
+                    , "loopInvariantCodeMotion/move_state_function.yul"
+                    , "loopInvariantCodeMotion/no_move_memory.yul"
+                    , "loopInvariantCodeMotion/no_move_storage.yul"
+                    , "loopInvariantCodeMotion/not_first.yul"
+                    , "ssaAndBack/single_assign_if.yul"
+                    , "ssaAndBack/single_assign_switch.yul"
+                    , "structuralSimplifier/switch_inline_no_match.yul"
+                    , "unusedFunctionParameterPruner/simple.yul"
+                    , "unusedStoreEliminator/covering_calldatacopy.yul"
+                    , "unusedStoreEliminator/remove_before_revert.yul"
+                    , "unusedStoreEliminator/unknown_length2.yul"
+                    , "unusedStoreEliminator/unrelated_relative.yul"
 
                     -- Takes too long, would timeout on most test setups.
                     -- We could probably fix these by "bunching together" queries
@@ -1886,8 +1877,7 @@ tests = testGroup "hevm"
         --
         -- Takes one file which follows the Solidity Yul optimizer unit tests format,
         -- extracts both the nonoptimized and the optimized versions, and checks equivalence.
-        shufFilesFilt <- Main.shuffle filesFiltered
-        forM_ shufFilesFilt (\f-> do
+        forM_ filesFiltered (\f-> do
           origcont <- readFile f
           let
             onlyAfter pattern (a:ax) = if a =~ pattern then (a:ax) else onlyAfter pattern ax
@@ -2129,10 +2119,10 @@ genWord sz = frequency
     , liftM2 Mul subWord subWord
     , liftM2 Div subWord subWord
     , liftM2 SDiv subWord subWord
-    --, liftM2 Mod subWord subWord
-    --, liftM2 SMod subWord subWord
-    --, liftM3 AddMod subWord subWord subWord
-    --, liftM3 MulMod subWord subWord subWord
+    , liftM2 Mod subWord subWord
+    , liftM2 SMod subWord subWord
+    -- , liftM3 AddMod subWord subWord subWord
+    , liftM3 MulMod subWord subWord subWord
     --, liftM2 Exp subWord litWord
     , liftM2 SEx subWord subWord
     , liftM2 Min subWord subWord
