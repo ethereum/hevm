@@ -808,6 +808,12 @@ getBufs inst names = foldM getBuf mempty names
 
     getBuf :: Map (Expr Buf) ByteString -> TS.Text -> IO (Map (Expr Buf) ByteString)
     getBuf acc name = do
+      -- Sometimes the solver gives us back a model for a Buffer that has every
+      -- element set to some concrete value. This is impossible to represent as
+      -- a concrete ByteString in haskell (or in any existing computer hardware :D),
+      -- so we ask the solver to give us back a model for the length of
+      -- this buffer and then use that to produce a shorter counterexample (by
+      -- replicating the constant byte up to the length).
       len <- getLength name
       val <- getValue inst (T.fromStrict name)
       buf <- case parseCommentFreeFileMsg getValueRes (T.toStrict val) of
