@@ -311,14 +311,6 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
 
   ; block context
   (declare-fun blockhash (Word) Word)
-  (declare-const origin Word)
-  (declare-const coinbase Word)
-  (declare-const timestamp Word)
-  (declare-const blocknumber Word)
-  (declare-const difficulty Word)
-  (declare-const gaslimit Word)
-  (declare-const chainid Word)
-  (declare-const basefee Word)
 
   ; macros
   (define-fun signext ( (b Word) (val Word)) Word
