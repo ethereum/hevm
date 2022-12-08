@@ -397,10 +397,6 @@ equivalence cmd = do
                             , maxIter = maxIterations cmd
                             , askSmtIters = askSmtIterations cmd
                           }
-  -- maybeSignature <- case sig cmd of
-  --   Nothing -> return Nothing
-  --   Just sig' -> do method' <- functionAbi sig'
-                    -- return $ Just (view methodSignature method', snd <$> view methodInputs method')
 
   withSolvers Z3 3 Nothing $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts Nothing
