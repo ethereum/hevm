@@ -23,7 +23,7 @@ import qualified EVM.FeeSchedule as FeeSchedule
 import Data.DoubleWord (Word256)
 import Control.Concurrent.Async
 import Data.Maybe
-import Data.List (foldl', intercalate)
+import Data.List (foldl')
 import Data.Tuple (swap)
 
 import Data.ByteString (ByteString)
@@ -37,7 +37,6 @@ import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 import EVM.Format (formatExpr, indent, formatBinary)
-import Language.SMT2.Syntax (SpecConstant(..))
 
 data ProofResult a b c = Qed a | Cex b | Timeout c
   deriving (Show)
@@ -633,8 +632,7 @@ formatCex cd m@(SMTCex _ _ blockContext txContext) = T.unlines $
     prettyBuf :: Expr Buf -> Text
     prettyBuf (ConcreteBuf "") = "Empty"
     prettyBuf (ConcreteBuf bs) = formatBinary bs
-    prettyBuf (AbstractBuf _) = "Any"
-    prettyBuf b = error $ "Internal Error: Unexpected Buffer Format: " <> show b
+    prettyBuf _ = "Any"
 
 -- | Takes a buffer and a Cex and replaces all abstract values in the buf with concrete ones from the Cex
 subModel :: SMTCex -> Expr a -> Expr a
