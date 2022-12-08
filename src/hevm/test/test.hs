@@ -5,7 +5,7 @@
 
 module Main where
 
-import Data.Text (Text, pack)
+import Data.Text (Text)
 import Data.ByteString (ByteString)
 import Data.Bits
 import System.Directory
@@ -22,7 +22,6 @@ import qualified Data.ByteString.Lazy as BS (fromStrict)
 import qualified Data.ByteString.Base16 as Hex
 import Data.Maybe
 import Data.Typeable
-import Data.Map (lookup)
 import Data.List (elemIndex)
 import Data.DoubleWord
 import Test.Tasty
@@ -40,7 +39,6 @@ import Control.Lens hiding (List, pre, (.>))
 import qualified Data.Vector as Vector
 import Data.String.Here
 import qualified Data.Map.Strict as Map
-import Data.Map (Map)
 
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
@@ -57,7 +55,7 @@ import EVM.RLP
 import EVM.Solidity
 import EVM.Types
 import EVM.Traversals
-import EVM.SMT hiding (storage)
+import EVM.SMT hiding (one)
 import qualified EVM.TTY as TTY
 import qualified EVM.Expr as Expr
 import qualified EVM.Fetch as Fetch
@@ -65,7 +63,6 @@ import qualified EVM.UnitTest
 import qualified Paths_hevm as Paths
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Language.SMT2.Syntax (SpecConstant())
 
 main :: IO ()
 main = defaultMain tests
@@ -1184,7 +1181,7 @@ tests = testGroup "hevm"
             |]
           (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           assertBool "last byte must be non-zero" $ ((Data.Bits..&.) (getVar ctr "arg1") 0xff) > 0
-          putStrLn $ "Expected counterexample found"
+          putStrLn "Expected counterexample found"
         ,
         -- We zero out everything but the 2nd LSB byte. However, byte(31,x) takes the 2nd LSB byte
         -- so there is a counterexamle, where 2nd LSB of x is not zero
@@ -1202,7 +1199,7 @@ tests = testGroup "hevm"
             |]
           (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           assertBool "second to last byte must be non-zero" $ ((Data.Bits..&.) (getVar ctr "arg1") 0xff00) > 0
-          putStrLn $ "Expected counterexample found"
+          putStrLn "Expected counterexample found"
         ,
         -- Reverse of thest above
         testCase "check-lsb-msb4 2nd byte rev" $ do
@@ -1515,7 +1512,7 @@ tests = testGroup "hevm"
                 }
               }
             |]
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         ignoreTest $ testCase "safemath distributivity (yul)" $ do
@@ -1769,7 +1766,7 @@ genEnd 0 = oneof
  , pure $ SelfDestruct []
  ]
 genEnd sz = oneof
- [ liftM2 EVM.Types.Revert (return []) subBuf
+ [ fmap (EVM.Types.Revert []) subBuf
  , liftM3 Return (return []) subBuf subStore
  , liftM3 ITE subWord subEnd subEnd
  ]
