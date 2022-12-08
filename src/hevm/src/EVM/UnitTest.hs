@@ -16,7 +16,7 @@ import EVM.Expr (litAddr, readStorage')
 import EVM.Format
 import EVM.Solidity
 import qualified EVM.SymExec as SymExec
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, VeriOpts)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.RLP
@@ -124,7 +124,7 @@ type ABIMethod = Text
 
 
 -- | Generate VeriOpts from UnitTestOptions
-makeVeriOpts :: UnitTestOptions -> SymExec.VeriOpts
+makeVeriOpts :: UnitTestOptions -> VeriOpts
 makeVeriOpts opts =
    defaultVeriOpts { SymExec.debug = debug opts
                    , SymExec.maxIter = maxIter opts
