@@ -1666,7 +1666,6 @@ tests = testGroup "hevm"
   , testGroup "Equivalence checking"
     [
       testCase "eq-yul-simple-cex" $ do
-        -- These yul programs are not equivalent: (try --calldata $(seth --to-uint256 2) for example)
         Just aPrgm <- yul ""
           [i|
           {
@@ -1692,7 +1691,6 @@ tests = testGroup "hevm"
           assertBool "Must have a difference" (not (null a))
       ,
       testCase "eq-sol-exp-qed" $ do
-        -- These yul programs are not equivalent: (try --calldata $(seth --to-uint256 2) for example)
         Just aPrgm <- solcRuntime "C"
             [i|
               contract C {
@@ -2055,8 +2053,6 @@ tests = testGroup "hevm"
               putStrLn $ "Not OK: " <> show f <> " Got: " <> show res
               error "Was NOT equivalent, error"
          )
-    -- TODO run, or see how to run https://github.com/ethereum/hevm/blob/main/nix/hevm-tests/yul-equivalence.nix
-    -- convert from nix to Haskell
     ]
   ]
   where

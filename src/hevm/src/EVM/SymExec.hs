@@ -44,7 +44,7 @@ isQed :: ProofResult a b c -> Bool
 isQed (Qed _) = True
 isQed _ = False
 
-containsA :: ProofResult () () () -> [(a , b, ProofResult () () ())] -> Bool
+containsA :: Eq a => Eq b => Eq c => ProofResult a b c -> [(d , e, ProofResult a b c)] -> Bool
 containsA a lst = isJust $ Data.List.find (\(_, _, c) -> c == a) lst
 
 data VeriOpts = VeriOpts
