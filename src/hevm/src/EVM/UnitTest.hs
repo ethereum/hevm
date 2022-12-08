@@ -17,7 +17,6 @@ import EVM.Format
 import EVM.Solidity
 import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel)
 import EVM.Types
-import EVM.Traversals
 import EVM.Transaction (initTx)
 import EVM.RLP
 import qualified EVM.Facts     as Facts
@@ -39,17 +38,15 @@ import Control.Monad.Par.Class (spawn_)
 import Control.Monad.Par.IO (runParIO)
 
 import qualified Data.ByteString.Lazy as BSLazy
-import Language.SMT2.Syntax (SpecConstant(..))
 import Data.Binary.Get    (runGet)
 import Data.ByteString    (ByteString)
 import Data.Decimal       (DecimalRaw(..))
-import Data.Either        (isRight, lefts)
+import Data.Either        (isRight)
 import Data.Foldable      (toList)
 import Data.Map           (Map)
 import Data.Maybe         (fromMaybe, catMaybes, fromJust, isJust, fromMaybe, mapMaybe, isNothing)
 import Data.Text          (isPrefixOf, stripSuffix, intercalate, Text, pack, unpack)
-import Data.Word          (Word8, Word32)
-import Data.List          (foldl')
+import Data.Word          (Word32)
 import Data.Text.Encoding (encodeUtf8)
 import System.Environment (lookupEnv)
 import System.IO          (hFlush, stdout)
@@ -58,7 +55,6 @@ import GHC.Natural
 import qualified Control.Monad.Par.Class as Par
 import qualified Data.ByteString as BS
 import qualified Data.Map as Map
-import qualified Data.Sequence as Seq
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 
@@ -441,7 +437,7 @@ runUnitTestContract
         Just (VMFailure _) -> liftIO $ do
           Text.putStrLn "\x1b[31m[BAIL]\x1b[0m setUp() "
           tick "\n"
-          tick $ (Data.Text.pack $ show $ failOutput vm1 opts "setUp()")
+          tick (Data.Text.pack $ show $ failOutput vm1 opts "setUp()")
           pure [(False, vm1)]
         Just (VMSuccess _) -> do
           let
@@ -789,7 +785,7 @@ showVal v = Text.pack . show $ v
 --   pure $ (head (Text.splitOn "(" sig)) <> showCall types (ConcreteBuffer cd)
 
 execSymTest :: UnitTestOptions -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper (Expr End)
-execSymTest opts@UnitTestOptions{ .. } method cd = do
+execSymTest UnitTestOptions{ .. } method cd = do
   -- Set up the call to the test method
   Stepper.evm $ do
     makeTxCall testParams cd

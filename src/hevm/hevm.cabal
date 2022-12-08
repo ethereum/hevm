@@ -186,7 +186,7 @@ executable hevm
   main-is:
     hevm-cli.hs
   ghc-options:
-    -Wall -threaded -with-rtsopts=-N -Wno-orphans
+    -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
   other-modules:
     Paths_hevm
   if os(darwin)

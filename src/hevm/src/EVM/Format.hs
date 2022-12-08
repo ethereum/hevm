@@ -19,6 +19,7 @@ module EVM.Format
   , showAbiValue
   , prettyIfConcreteWord
   , formatBytes
+  , formatBinary
   , indent
   ) where
 

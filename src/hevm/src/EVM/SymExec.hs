@@ -30,12 +30,13 @@ import Data.ByteString (ByteString)
 import qualified Control.Monad.State.Class as State
 import Data.Bifunctor (first, second)
 import Data.Text (Text)
+import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
-import EVM.Format (formatExpr, indent)
+import EVM.Format (formatExpr, indent, formatBinary)
 import Language.SMT2.Syntax (SpecConstant(..))
 
 data ProofResult a b c = Qed a | Cex b | Timeout c
@@ -351,18 +352,6 @@ flattenExpr = go []
       TmpErr s -> error s
       GVar _ -> error "cannot flatten an Expr containing a GVar"
 
-reachableQueries :: Expr End -> IO [SMT2]
-reachableQueries = go []
-  where
-    go :: [Prop] -> Expr End -> IO [SMT2]
-    go pcs = \case
-      ITE c t f -> do
-        (tres, fres) <- concurrently
-          (go (PEq (Lit 1) c : pcs) t)
-          (go (PEq (Lit 0) c : pcs) f)
-        pure (tres <> fres)
-      _ -> pure [assertProps pcs]
-
 -- | Strips unreachable branches from a given expr
 -- Returns a list of executed SMT queries alongside the reduced expression for debugging purposes
 -- Note that the reduced expression loses information relative to the original
@@ -372,8 +361,8 @@ reachableQueries = go []
 -- the incremental nature of the task at hand. Introducing support for
 -- incremental queries might let us go even faster here.
 -- TODO: handle errors properly
-reachable2 :: SolverGroup -> Expr End -> IO ([SMT2], Expr End)
-reachable2 solvers e = do
+reachable :: SolverGroup -> Expr End -> IO ([SMT2], Expr End)
+reachable solvers e = do
     res <- go [] e
     pure $ second (fromMaybe (error "Internal Error: no reachable paths found")) res
   where
@@ -403,57 +392,6 @@ reachable2 solvers e = do
           Unsat -> pure ([query], Nothing)
           r -> error $ "Invalid solver result: " <> show r
 
--- | Strips unreachable branches from a given expr
--- Returns a list of executed SMT queries alongside the reduced expression for debugging purposes
--- Note that the reduced expression loses information relative to the original
--- one if jump conditions are removed. This restriction can be removed once
--- Expr supports attaching knowledge to AST nodes.
--- Although this algorithm currently parallelizes nicely, it does not exploit
--- the incremental nature of the task at hand. Introducing support for
--- incremental queries might let us go even faster here.
--- TODO: handle errors properly
-reachable :: SolverGroup -> Expr End -> IO ([SMT2], Expr End)
-reachable solvers = go []
-  where
-    go :: [Prop] -> Expr End -> IO ([SMT2], Expr End)
-    go pcs = \case
-      ITE c t f -> do
-        let
-          tquery = assertProps (PEq c (Lit 1) : pcs)
-          fquery = assertProps (PEq c (Lit 0) : pcs)
-        tres <- (checkSat solvers tquery)
-        fres <- (checkSat solvers fquery)
-        print (tres, fres)
-        case (tres, fres) of
-          (Error tm, Error fm) -> do
-            TL.writeFile "tquery.smt2" (formatSMT2 tquery)
-            TL.writeFile "fquery.smt2" (formatSMT2 fquery)
-            error $ "Solver Errors: " <> (T.unpack . T.unlines $ [tm, fm])
-          (Error tm, _) -> do
-            TL.putStrLn $ formatSMT2 tquery
-            error $ "Solver Error: " <> T.unpack tm
-          (_ , Error fm) -> error $ "Solver Error: " <> T.unpack fm
-          (EVM.SMT.Unknown, _) -> error "Solver timeout, unable to analyze reachability"
-          (_, EVM.SMT.Unknown) -> error "Solver timeout, unable to analyze reachability"
-          (Unsat, Sat _) -> go (PEq c (Lit 0) : pcs) f
-          (Sat _, Unsat) -> go (PEq c (Lit 1) : pcs) t
-          (Sat _, Sat _) -> do
-            ((tqs, texp), (fqs, fexp)) <- concurrently
-              (go (PEq c (Lit 1) : pcs) t)
-              (go (PEq c (Lit 0) : pcs) f)
-            pure ([tquery, fquery] <> tqs <> fqs, ITE c texp fexp)
-          (Unsat, Unsat) -> do
-            putStrLn $ "pcs: " <> show pcs
-            TL.putStrLn $ "tquery:\n " <> (formatSMT2 tquery)
-            TL.putStrLn $ "fquery:\n " <> (formatSMT2 fquery)
-            error "Internal Error: two unsat branches found"
-      Invalid -> pure ([], Invalid)
-      SelfDestruct -> pure ([], SelfDestruct)
-      Revert msg -> pure ([], Revert msg)
-      Return msg store -> pure ([], Return msg store)
-      EVM.Types.IllegalOverflow -> pure ([], EVM.Types.IllegalOverflow)
-      TmpErr e -> error $ "TmpErr: " <> show e
-      GVar _ -> error "Internal Error: unexpected GVar"
 
 -- | Evaluate the provided proposition down to its most concrete result
 evalProp :: Prop -> Prop
@@ -495,6 +433,7 @@ verify solvers opts preState rpcinfo maybepost = do
   exprInter <- evalStateT (interpret (Fetch.oracle solvers rpcinfo) Nothing Nothing runExpr) preState
   when (debug opts) $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
 
+  putStrLn "Simplifying expression"
   expr <- if (simp opts) then (pure $ Expr.simplify exprInter) else pure exprInter
   when (debug opts) $ T.writeFile "simplified.expr" (formatExpr expr)
 
@@ -511,7 +450,7 @@ verify solvers opts preState rpcinfo maybepost = do
             _ -> True
         assumes = view constraints preState
         withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> pcs), leaf)) canViolate
-      putStrLn $ "Checking for reachability of " <> show (length withQueries) <> "\n potential property violations"
+      putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violation(s)"
 
       when (debug opts) $ forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
         TL.writeFile
@@ -617,7 +556,6 @@ showModel cd (expr, res) = do
       putStrLn ""
     Sat cex -> do
       putStrLn "--- Branch ---"
-      print cex
       putStrLn ""
       putStrLn "Inputs:"
       putStrLn ""
@@ -630,69 +568,81 @@ showModel cd (expr, res) = do
 
 
 formatCex :: Expr Buf -> SMTCex -> Text
-formatCex cd m@(SMTCex _ store _ blockContext txContext) = T.unlines
+formatCex cd m@(SMTCex _ _ blockContext txContext) = T.unlines $
   [ "Calldata:"
   , indent 2 cd'
   , ""
-  , "Pre Store:"
-  , indent 2 store
-  , ""
-  , "Block Context:"
-  , indent 2 blockContext
-  , ""
-  , "Tx Context:"
-  , indent 2 txContext
   ]
+  <> txCtx
+  <> blockCtx
   where
-    cd' = formatExpr $ Expr.simplify $ subModel m cd
+    cd' = prettyBuf $ Expr.simplify $ subModel m cd
+
+    txCtx :: [Text]
+    txCtx
+      | Map.null txContext = []
+      | otherwise =
+        [ "Transaction Context:"
+        , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc -> (showTxCtx key <> ": " <> (T.pack $ show val)) : acc) mempty (filterSubCtx txContext)
+        , ""
+        ]
+
+    -- strips the frame arg from frame context vars to make them easier to read
+    showTxCtx :: Expr EWord -> Text
+    showTxCtx (CallValue _) = "CallValue"
+    showTxCtx (Caller _) = "Caller"
+    showTxCtx (Address _) = "Address"
+    showTxCtx x = T.pack $ show x
+
+    -- strips all frame context that doesn't come from the top frame
+    filterSubCtx :: Map (Expr EWord) W256 -> Map (Expr EWord) W256
+    filterSubCtx = Map.filterWithKey go
+      where
+        go :: Expr EWord -> W256 -> Bool
+        go (CallValue x) _ = x == 0
+        go (Caller x) _ = x == 0
+        go (Address x) _ = x == 0
+        go (Balance {}) _ = error "TODO: BALANCE"
+        go (SelfBalance {}) _ = error "TODO: SELFBALANCE"
+        go (Gas {}) _ = error "TODO: Gas"
+        go _ _ = False
+
+    blockCtx :: [Text]
+    blockCtx
+      | Map.null blockContext = []
+      | otherwise =
+        [ "Block Context:"
+        , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc -> (T.pack $ show key <> ": " <> show val) : acc) mempty txContext
+        , ""
+        ]
+
+    prettyBuf :: Expr Buf -> Text
+    prettyBuf (ConcreteBuf "") = "Empty"
+    prettyBuf (ConcreteBuf bs) = formatBinary bs
+    prettyBuf (AbstractBuf _) = "Any"
+    prettyBuf b = error $ "Internal Error: Unexpected Buffer Format: " <> show b
 
 -- | Takes a buffer and a Cex and replaces all abstract values in the buf with concrete ones from the Cex
-subModel :: SMTCex -> Expr Buf -> Expr Buf
-subModel c buf = subBufs (buffers c) . subVars (EVM.SMT.calldata c) $ buf
+subModel :: SMTCex -> Expr a -> Expr a
+subModel c expr = subBufs (buffers c) . subVars (vars c) $ expr
   where
     subVars model b = Map.foldlWithKey subVar b model
-    subVar :: Expr Buf -> Text -> SpecConstant -> Expr Buf
-    subVar b key val = mapExpr go b
+    subVar :: Expr a -> Expr EWord -> W256 -> Expr a
+    subVar b var val = mapExpr go b
       where
         go :: Expr a -> Expr a
         go = \case
-          Var name -> if name == key
-                      then Lit (parseW256 val)
-                      else Var name
+          v@(Var _) -> if v == var
+                      then Lit val
+                      else v
           e -> e
     subBufs model b = Map.foldlWithKey subBuf b model
-    subBuf :: Expr Buf -> Text -> ByteString -> Expr Buf
-    subBuf b key val = mapExpr go b
+    subBuf :: Expr a -> Expr Buf -> ByteString -> Expr a
+    subBuf b var val = mapExpr go b
       where
         go :: Expr a -> Expr a
         go = \case
-          AbstractBuf name -> if name == key
+          a@(AbstractBuf _) -> if a == var
                       then ConcreteBuf val
-                      else AbstractBuf name
+                      else a
           e -> e
-
-showCounterexample :: VM -> Maybe (Text, [AbiType]) -> ()
-showCounterexample vm maybesig = undefined
-  --let (calldata', S _ cdlen) = view (EVM.state . EVM.calldata) vm
-      --S _ cvalue = view (EVM.state . EVM.callvalue) vm
-      --SAddr caller' = view (EVM.state . EVM.caller) vm
-  --cdlen' <- num <$> getValue cdlen
-  --calldatainput <- case calldata' of
-    --SymbolicBuffer cd -> mapM (getValue.fromSized) (take cdlen' cd) >>= return . pack
-    --ConcreteBuffer cd -> return $ BS.take cdlen' cd
-  --callvalue' <- getValue cvalue
-  --caller'' <- num <$> getValue caller'
-  --io $ do
-    --putStrLn "Calldata:"
-    --print $ ByteStringS calldatainput
-
-    ---- pretty print calldata input if signature is available
-    --case maybesig of
-      --Just (name, types) -> putStrLn $ unpack (head (splitOn "(" name)) ++
-        --show (decodeAbiValue (AbiTupleType (fromList types)) $ Lazy.fromStrict (BS.drop 4 calldatainput))
-      --Nothing -> return ()
-
-    --putStrLn "Caller:"
-    --print (Addr caller'')
-    --putStrLn "Callvalue:"
-    --print callvalue'

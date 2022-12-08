@@ -57,7 +57,7 @@ import EVM.RLP
 import EVM.Solidity
 import EVM.Types
 import EVM.Traversals
-import EVM.SMT hiding (storage, calldata)
+import EVM.SMT hiding (storage)
 import qualified EVM.TTY as TTY
 import qualified EVM.Expr as Expr
 import qualified EVM.Fetch as Fetch
@@ -471,8 +471,8 @@ tests = testGroup "hevm"
             }
            |]
        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-       assertEqual "Must be 0" 0 $ getArgInteger ctr "arg1"
-       putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getArgInteger ctr "arg1")
+       assertEqual "Must be 0" 0 $ getVar ctr "arg1"
+       putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getVar ctr "arg1")
      ,
      testCase "safeAdd-fail" $ do
         Just c <- solcRuntime "MyContract"
@@ -484,11 +484,11 @@ tests = testGroup "hevm"
              }
             |]
         (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x11] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-        let x = getArgInteger ctr "arg1"
-        let y = getArgInteger ctr "arg2"
+        let x = getVar ctr "arg1"
+        let y = getVar ctr "arg2"
 
         let maxUint = 2 ^ (256 :: Integer) :: Integer
-        assertBool "Overflow must occur" (x+y >= maxUint)
+        assertBool "Overflow must occur" (toInteger x + toInteger y >= maxUint)
         putStrLn "expected counterexample found"
      ,
      testCase "div-by-zero-fail" $ do
@@ -501,7 +501,7 @@ tests = testGroup "hevm"
              }
             |]
         (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x12] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-        assertEqual "Division by 0 needs b=0" (getArgInteger ctr "arg2") 0
+        assertEqual "Division by 0 needs b=0" (getVar ctr "arg2") 0
         putStrLn "expected counterexample found"
      ,
      testCase "enum-conversion-fail" $ do
@@ -515,7 +515,7 @@ tests = testGroup "hevm"
              }
             |]
         (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x21] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-        assertBool "Enum is only defined for 0 and 1" $ (getArgInteger ctr "arg1") > 1
+        assertBool "Enum is only defined for 0 and 1" $ (getVar ctr "arg1") > 1
         putStrLn "expected counterexample found"
      ,
      -- TODO 0x22 is missing: "0x22: If you access a storage byte array that is incorrectly encoded."
@@ -553,7 +553,7 @@ tests = testGroup "hevm"
              }
             |]
         (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) [] defaultVeriOpts
-        assertBool "Access must be beyond element 2" $ (getArgInteger ctr "arg1") > 1
+        assertBool "Access must be beyond element 2" $ (getVar ctr "arg1") > 1
         putStrLn "expected counterexample found"
       ,
       -- TODO the system currently does not allow for symbolic array size allocation
@@ -1063,8 +1063,8 @@ tests = testGroup "hevm"
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
           (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
-          let x = getArgInteger ctr "arg1"
-          let y = getArgInteger ctr "arg2"
+          let x = getVar ctr "arg1"
+          let y = getVar ctr "arg2"
           putStrLn $ "y:" <> show y
           putStrLn $ "x:" <> show x
           assertEqual "Catch storage collisions" x y
@@ -1092,7 +1092,7 @@ tests = testGroup "hevm"
              }
             |]
           (_, [(Cex (_, ctr))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-          assertEqual "Must be 10" 10 $ getArgInteger ctr "arg1"
+          assertEqual "Must be 10" 10 $ getVar ctr "arg1"
           putStrLn "Got 10 Cex, as expected"
         ,
         testCase "assert-fail-equal" $ do
@@ -1106,7 +1106,7 @@ tests = testGroup "hevm"
              }
             |]
           (_, [Cex (_, a), Cex (_, b)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-          let ints = map (flip getArgInteger "arg1") [a,b]
+          let ints = map (flip getVar "arg1") [a,b]
           assertBool "0 must be one of the Cex-es" $ isJust $ elemIndex 0 ints
           putStrLn "expected 2 counterexamples found, one Cex is the 0 value"
         ,
@@ -1121,8 +1121,8 @@ tests = testGroup "hevm"
              }
             |]
           (_, [Cex (_, a), Cex (_, b)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-          let x = getArgInteger a "arg1"
-          let y = getArgInteger b "arg1"
+          let x = getVar a "arg1"
+          let y = getVar b "arg1"
           assertBool "At least one has to be 0, to go through the first assert" (x == 0 || y == 0)
           putStrLn "expected 2 counterexamples found."
         ,
@@ -1149,7 +1149,7 @@ tests = testGroup "hevm"
              }
             |]
           (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-          assertEqual "Must be 666" 666 $ getArgInteger ctr "arg2"
+          assertEqual "Must be 666" 666 $ getVar ctr "arg2"
           putStrLn "Found arg2 Ctx to be 666"
         ,
         -- LSB is zeroed out, byte(31,x) takes LSB, so y==0 always holds
@@ -1183,7 +1183,7 @@ tests = testGroup "hevm"
             }
             |]
           (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-          assertBool "last byte must be non-zero" $ ((Data.Bits..&.) (getArgInteger ctr "arg1") 0xff) > 0
+          assertBool "last byte must be non-zero" $ ((Data.Bits..&.) (getVar ctr "arg1") 0xff) > 0
           putStrLn $ "Expected counterexample found"
         ,
         -- We zero out everything but the 2nd LSB byte. However, byte(31,x) takes the 2nd LSB byte
@@ -1201,7 +1201,7 @@ tests = testGroup "hevm"
             }
             |]
           (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-          assertBool "second to last byte must be non-zero" $ ((Data.Bits..&.) (getArgInteger ctr "arg1") 0xff00) > 0
+          assertBool "second to last byte must be non-zero" $ ((Data.Bits..&.) (getVar ctr "arg1") 0xff00) > 0
           putStrLn $ "Expected counterexample found"
         ,
         -- Reverse of thest above
@@ -1297,8 +1297,8 @@ tests = testGroup "hevm"
              }
             |]
           (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) [] defaultVeriOpts
-          assertEqual "Must be 255" 255 $ getArgInteger ctr "arg1"
-          putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getArgInteger ctr "arg1")
+          assertEqual "Must be 255" 255 $ getVar ctr "arg1"
+          putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getVar ctr "arg1")
         ,
         testCase "explore function dispatch" $ do
           Just c <- solcRuntime "A"
@@ -1399,10 +1399,10 @@ tests = testGroup "hevm"
             }
             |]
           (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256,uint256,uint256)", replicate 4 (AbiUIntType 256))) [] defaultVeriOpts
-          let x = getArgInteger ctr "arg1"
-          let y = getArgInteger ctr "arg2"
-          let w = getArgInteger ctr "arg3"
-          let z = getArgInteger ctr "arg4"
+          let x = getVar ctr "arg1"
+          let y = getVar ctr "arg2"
+          let w = getVar ctr "arg3"
+          let z = getVar ctr "arg4"
           assertEqual "x==y for hash collision" x y
           assertEqual "w==z for hash collision" w z
           putStrLn "expected counterexample found"
@@ -1940,13 +1940,8 @@ data Invocation
   = SolidityCall Text [AbiValue]
   deriving Show
 
-getArgInteger :: EVM.SMT.SMTCex -> String -> Integer
-getArgInteger a name = parseInteger $ getScHexa a
-  where
-    getScHexa :: EVM.SMT.SMTCex -> Language.SMT2.Syntax.SpecConstant
-    getScHexa tmp = fromJust . Data.Map.lookup (Data.Text.pack name) $ smtcex tmp
-    smtcex :: EVM.SMT.SMTCex -> Map Text Language.SMT2.Syntax.SpecConstant
-    smtcex (EVM.SMT.SMTCex x _ _ _ _) = x
+getVar :: EVM.SMT.SMTCex -> Text -> W256
+getVar cex name = fromJust $ Map.lookup (Var name) (vars cex)
 
 assertSolidityComputation :: Invocation -> AbiValue -> IO ()
 assertSolidityComputation (SolidityCall s args) x =

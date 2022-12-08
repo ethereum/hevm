@@ -6,6 +6,8 @@
 
 module EVM where
 
+import Debug.Trace
+
 import Prelude hiding (log, exponent, GT, LT)
 
 import Data.Text (unpack)
@@ -1580,58 +1582,9 @@ pushToSequence f x = f %= (Seq.|> x)
 getCodeLocation :: VM -> CodeLocation
 getCodeLocation vm = (view (state . contract) vm, view (state . pc) vm)
 
--- | Ask the SMT solver to provide a concrete model for val iff a unique model exists
---makeUnique :: Expr EWord -> (Word -> EVM ()) -> EVM ()
---makeUnique sw@(S w val) cont = case maybeLitWord sw of
-  --Nothing -> do
-    --conditions <- use constraints
-    --assign result . Just . VMFailure . Query $ PleaseMakeUnique val (fst <$> conditions) $ \case
-      --Unique a -> do
-        --assign result Nothing
-        --cont (C w $ fromSizzle a)
-      --InconsistentU -> vmError DeadPath
-      --TimeoutU -> vmError SMTTimeout
-      --Multiple -> vmError $ NotUnique w
-  --Just a -> cont a
-
----- | Construct SMT Query and halt execution until resolved
---askSMT :: CodeLocation -> (SBool, Whiff) -> (Bool -> EVM ()) -> EVM ()
---askSMT codeloc (condition, whiff) continue = do
-  ---- We keep track of how many times we have come across this particular
-  ---- (contract, pc) combination in the `iteration` mapping.
-  --iteration <- use (iterations . at codeloc . non 0)
-
-  ---- If we are backstepping, the result of this query should be cached
-  ---- already. So we first check the cache to see if the result is known
-  --use (cache . path . at (codeloc, iteration)) >>= \case
-     ---- If the query has been done already, select path or select the only available
-     --Just w -> choosePath (Case w)
-     ---- If this is a new query, run the query, cache the result
-     ---- increment the iterations and select appropriate path
-     --Nothing -> do pathconds <- use constraints
-                   --assign result . Just . VMFailure . Query $ PleaseAskSMT
-                     --condition' (fst <$> pathconds) choosePath
-
-   --where condition' = simplifyCondition condition whiff
-
-         --choosePath :: BranchCondition -> EVM ()
-         ---- Only one path is possible
-         --choosePath (Case v) = do assign result Nothing
-                                  --pushTo constraints $ if v then (condition', whiff) else (sNot condition', IsZero whiff)
-                                  --iteration <- use (iterations . at codeloc . non 0)
-                                  --assign (cache . path . at (codeloc, iteration)) (Just v)
-                                  --assign (iterations . at codeloc) (Just (iteration + 1))
-                                  --continue v
-         ---- Both paths are possible; we ask for more input
-         --choosePath Unknown = assign result . Just . VMFailure . Choose . PleaseChoosePath whiff $ choosePath . Case
-         ---- None of the paths are possible; fail this branch
-         --choosePath Inconsistent = vmError DeadPath
-
 branch :: CodeLocation -> Expr EWord -> (Bool -> EVM ()) -> EVM ()
 branch loc cond continue = do
   pathconds <- use constraints
-  loc' <- codeloc
-  iteration <- use (iterations . at loc' . non 0)
   assign result . Just . VMFailure . Query $ PleaseAskSMT cond pathconds choosePath
   where
      choosePath (Case v) = do assign result Nothing

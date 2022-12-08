@@ -84,21 +84,6 @@ testOpts solvers root testFile = do
     , EVM.UnitTest.ffiAllowed = True
     }
 
-dumpQueries :: FilePath -> IO ()
-dumpQueries root = withCurrentDirectory root $ do
-  d <- dai
-  putStrLn "building expression"
-  withSolvers Z3 1 Nothing $ \s -> do
-    e <- buildExpr s d
-    putStrLn "built expression"
-    putStrLn "generating queries"
-    qs <- reachableQueries e
-    putStrLn $ "generated queries (" <> (show $ Prelude.length qs) <> " total)"
-    putStrLn "dumping queries"
-    forM_ (zip ([1..] :: [Int]) qs) $ \(idx, q) -> do
-      TL.writeFile ("query_" <> show idx <> ".smt2") (TL.append (formatSMT2 q) "(check-sat)")
-    putStrLn "dumped queries"
-
 doTest :: IO ()
 doTest = do
   c <- testContract
@@ -162,7 +147,7 @@ reachable' smtdebug c = do
     T.writeFile "full.ast" $ formatExpr full
     putStrLn "Dumped to full.ast"
     putStrLn "Checking reachability"
-    (qs, less) <- reachable2 s full
+    (qs, less) <- reachable s full
     putStrLn $ "Checked reachability (" <> (show $ numBranches less) <> " reachable branches)"
     T.writeFile "reachable.ast" $ formatExpr less
     putStrLn "Dumped to reachable.ast"

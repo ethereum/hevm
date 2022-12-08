@@ -50,7 +50,7 @@ import Data.ByteString            (ByteString)
 import Data.List                  (intercalate, isSuffixOf)
 import Data.Text                  (unpack, pack)
 import Data.Text.Encoding         (encodeUtf8)
-import Data.Maybe                 (fromMaybe, fromJust)
+import Data.Maybe                 (fromMaybe, fromJust, mapMaybe)
 import Data.Version               (showVersion)
 import Data.DoubleWord            (Word256)
 import System.IO                  (hFlush, stdout, stderr)
@@ -115,12 +115,14 @@ data Command w
       , debug         :: w ::: Bool               <?> "Run interactively"
       , getModels     :: w ::: Bool               <?> "Print example testcase for each execution path"
       , showTree      :: w ::: Bool               <?> "Print branches explored in tree view"
+      , showReachableTree :: w ::: Bool           <?> "Print only reachable branches explored in tree view"
       , smttimeout    :: w ::: Maybe Natural      <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
       , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point"
       , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
       , assertions    :: w ::: Maybe [Word256]    <?> "Comma seperated list of solc panic codes to check for (default: everything except arithmetic overflow)"
       , askSmtIterations :: w ::: Maybe Integer   <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
+      , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores"
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: ByteString       <?> "Bytecode of the first program"
@@ -464,7 +466,8 @@ assert cmd = do
   preState <- symvmFromCommand cmd calldata'
   let errCodes = fromMaybe defaultPanicCodes (assertions cmd)
   cores <- num <$> getNumProcessors
-  withSolvers EVM.SMT.Z3 cores (smttimeout cmd) $ \solvers -> do
+  let solverCount = fromMaybe cores (numSolvers cmd)
+  withSolvers EVM.SMT.Z3 solverCount (smttimeout cmd) $ \solvers -> do
     if Main.debug cmd then do
       srcInfo <- getSrcInfo cmd
       void $ TTY.runFromVM
@@ -476,105 +479,48 @@ assert cmd = do
       let opts = VeriOpts { simp = True, debug = smtdebug cmd, maxIter = maxIterations cmd, askSmtIters = askSmtIterations cmd}
       (expr, res) <- verify solvers opts preState rpcinfo (Just $ checkAssertions errCodes)
       case res of
-        [Qed _] -> putStrLn "QED: No reachable property violations discovered"
+        [Qed _] -> putStrLn "\nQED: No reachable property violations discovered\n"
         cexs -> do
-          putStrLn "Discovered the following counterexamples:"
-          putStrLn $ intercalate "\n" $ fmap show cexs
-      when (getModels cmd) $ do
+          let cexOut
+                | null (getCexs cexs) = []
+                | otherwise =
+                   [ ""
+                   , "Discovered the following counterexamples:"
+                   , ""
+                   ] <> fmap (formatCex (fst calldata')) (getCexs cexs)
+              timeoutOut
+                | null (getTimeouts cexs) = []
+                | otherwise =
+                   [ ""
+                   , "Could not determine reachability of the following end states:"
+                   , ""
+                   ] <> fmap (formatExpr) (getTimeouts cexs)
+          T.putStrLn $ T.unlines (cexOut <> timeoutOut)
+      when (showTree cmd) $ do
+        putStrLn "=== Expression ===\n"
         T.putStrLn $ formatExpr expr
+        putStrLn ""
+      when (showReachableTree cmd) $ do
+        reached <- reachable solvers expr
+        putStrLn "=== Reachable Expression ===\n"
+        T.putStrLn (formatExpr . snd $ reached)
+        putStrLn ""
+      when (getModels cmd) $ do
+        putStrLn $ "=== Models for " <> show (Expr.numBranches expr) <> " branches ===\n"
         ms <- produceModels solvers expr
         forM_ ms (showModel (fst calldata'))
 
-    {-
-  srcInfo <- getSrcInfo cmd
-  let block'  = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
-      rpcinfo = (,) block' <$> rpc cmd
-  maybesig <- case sig cmd of
-    Nothing ->
-      return Nothing
-    Just sig' -> do
-      method' <- functionAbi sig'
-      let typ = snd <$> view methodInputs method'
-          name = view methodSignature method'
-      return $ Just (name,typ)
-  if debug cmd then
-    runSMTWithTimeOut (solver cmd) (smttimeout cmd) (smtdebug cmd) $ query $ do
-      let preState = symvmFromCommand cmd
-      smtState <- queryState
-      undefined
-      --io $ void $ EVM.TTY.runFromVM
-        --(maxIterations cmd)
-        --srcInfo
-        --(EVM.Fetch.oracle (Just smtState) rpcinfo True)
-        --preState
+getCexs :: [VerifyResult] -> [SMTCex]
+getCexs = mapMaybe go
+  where
+    go (Cex cex) = Just $ snd cex
+    go _ = Nothing
 
-  else do
-    let preState = symvmFromCommand cmd
-    let errCodes = fromMaybe defaultPanicCodes (assertions cmd)
-    let res = verify preState (maxIterations cmd) (askSmtIterations cmd) rpcinfo (Just $ checkAssertions errCodes)
-    print res
-    -}
-    {-
-    runSMTWithTimeOut (solver cmd) (smttimeout cmd) (smtdebug cmd) $ query $ do
-      preState <- symvmFromCommand cmd
-      let errCodes = fromMaybe defaultPanicCodes (assertions cmd)
-      verify preState (maxIterations cmd) (askSmtIterations cmd) rpcinfo (Just $ checkAssertions errCodes) >>= \case
-        Cex tree -> do
-          io $ putStrLn "Assertion violation found."
-          showCounterexample preState maybesig
-          treeShowing tree
-          io $ exitWith (ExitFailure 1)
-        Timeout tree -> do
-          treeShowing tree
-          io $ exitWith (ExitFailure 1)
-        Qed tree -> do
-          io $ putStrLn $ "Explored: " <> show (length tree)
-                       <> " branches without assertion violations"
-          treeShowing tree
-          let vmErrs = checkForVMErrors $ leaves tree
-          unless (null vmErrs) $ io $ do
-            putStrLn $
-              "However, "
-              <> show (length vmErrs)
-              <> " branch(es) errored while exploring:"
-            print vmErrs
-          -- When `--get-models` is passed, we print example vm info for each path
-          when (getModels cmd) $
-            forM_ (zip [(1:: Integer)..] (leaves tree)) $ \(i, postVM) -> do
-              resetAssertions
-              --constrain (sAnd (fst <$> view EVM.constraints postVM))
-              io $ putStrLn $
-                "-- Branch (" <> show i <> "/" <> show (length tree) <> ") --"
-              checkSat >>= \case
-                DSat _ -> error "assert: unexpected SMT result"
-                Unk -> io $ do putStrLn "Timed out"
-                               print $ view EVM.result postVM
-                Unsat -> io $ do putStrLn "Inconsistent path conditions: dead path"
-                                 print $ view EVM.result postVM
-                Sat -> do
-                  showCounterexample preState maybesig
-                  io $ putStrLn "-- Pathconditions --"
-                  --io $ print $ snd <$> view EVM.constraints postVM
-                  case view EVM.result postVM of
-                    Nothing ->
-                      error "internal error; no EVM result"
-                    Just (EVM.VMFailure (EVM.Revert "")) -> io . putStrLn $
-                      "Reverted"
-                    Just (EVM.VMFailure (EVM.Revert msg)) -> io . putStrLn $
-                      "Reverted: " <> show (ByteStringS msg)
-                    Just (EVM.VMFailure err) -> io . putStrLn $
-                      "Failed: " <> show err
-                    Just (EVM.VMSuccess (ConcreteBuf msg)) ->
-                      if ByteString.null msg
-                      then io $ putStrLn
-                        "Stopped"
-                      else io $ putStrLn $
-                        "Returned: " <> show (ByteStringS msg)
-                    Just (EVM.VMSuccess (msg)) -> do
-                      out <- mapM (getValue.fromSized) msg
-                      io . putStrLn $
-                        "Returned: " <> show (ByteStringS (ByteString.pack out))
-                        -}
+getTimeouts :: [VerifyResult] -> [Expr End]
+getTimeouts = mapMaybe go
+  where
+    go (Timeout leaf) = Just leaf
+    go _ = Nothing
 
 dappCoverage :: UnitTestOptions -> Mode -> String -> IO ()
 dappCoverage opts _ solcFile =
@@ -875,9 +821,9 @@ symvmFromCommand cmd calldata' = do
     address' = if create cmd
           then addr address (createAddress origin' (word nonce 0))
           else addr address 0xacab
-    vm0 baseFee miner ts blockNum diff calldata' callvalue' caller' c = EVM.makeVm $ EVM.VMOpts
+    vm0 baseFee miner ts blockNum diff cd' callvalue' caller' c = EVM.makeVm $ EVM.VMOpts
       { EVM.vmoptContract      = c
-      , EVM.vmoptCalldata      = calldata'
+      , EVM.vmoptCalldata      = cd'
       , EVM.vmoptValue         = callvalue'
       , EVM.vmoptAddress       = address'
       , EVM.vmoptCaller        = caller'
