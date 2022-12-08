@@ -924,7 +924,7 @@ tests = testGroup "hevm"
             post prestate leaf =
               let [x, y] = getStaticAbiArgs 2 prestate
               in case leaf of
-                   Return b _ -> (ReadWord (Lit 0) b) .== (Add x y)
+                   Return _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
                    _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s safeAdd (Just ("add(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
@@ -946,7 +946,7 @@ tests = testGroup "hevm"
             post prestate leaf =
               let [_, y] = getStaticAbiArgs 2 prestate
               in case leaf of
-                   Return b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
+                   Return _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
                    _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
           verifyContract s safeAdd (Just ("add(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
@@ -971,7 +971,7 @@ tests = testGroup "hevm"
                   this = Expr.litAddr $ view (state . codeContract) prestate
                   prex = Expr.readStorage' this (Lit 0) (view (env . storage) prestate)
               in case leaf of
-                Return _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
+                Return _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
                 _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
@@ -1025,7 +1025,7 @@ tests = testGroup "hevm"
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
-                     Return _ poststore -> let
+                     Return _ _ poststore -> let
                            postx = Expr.readStorage' this x poststore
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
@@ -1057,7 +1057,7 @@ tests = testGroup "hevm"
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
-                     Return _ poststore -> let
+                     Return _ _ poststore -> let
                            postx = Expr.readStorage' this x poststore
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
@@ -1080,7 +1080,7 @@ tests = testGroup "hevm"
              }
             |]
           (_, [Cex (l, _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo()", [])) [] defaultVeriOpts
-          assertEqual "incorrect revert msg" l (EVM.Types.Revert (ConcreteBuf $ panicMsg 0x01))
+          assertEqual "incorrect revert msg" l (EVM.Types.Revert [] (ConcreteBuf $ panicMsg 0x01))
         ,
         testCase "simple-assert-2" $ do
           Just c <- solcRuntime "C"
@@ -1492,7 +1492,7 @@ tests = testGroup "hevm"
           (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("call_A()", [])) [] defaultVeriOpts
           putStrLn "expected counterexample found"
         ,
-        expectFail $ testCase "keccak concrete and sym agree" $ do
+        testCase "keccak concrete and sym agree" $ do
           Just c <- solcRuntime "C"
             [i|
               contract C {
@@ -1504,6 +1504,18 @@ tests = testGroup "hevm"
               }
             |]
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("kecc(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
+        testCase "keccak concrete and sym injectivity" $ do
+          Just c <- solcRuntime "A"
+            [i|
+              contract A {
+                function f(uint x) public pure {
+                  if (x !=3) assert(keccak256(abi.encode(x)) != keccak256(abi.encode(3)));
+                }
+              }
+            |]
+          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         ignoreTest $ testCase "safemath distributivity (yul)" $ do
@@ -1752,13 +1764,13 @@ genName = fmap T.pack $ listOf1 (oneof . (fmap pure) $ ['a'..'z'] <> ['A'..'Z'])
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
- [ pure Invalid
- , pure EVM.Types.IllegalOverflow
- , pure SelfDestruct
+ [ pure $ Invalid []
+ , pure $ EVM.Types.IllegalOverflow []
+ , pure $ SelfDestruct []
  ]
 genEnd sz = oneof
- [ fmap EVM.Types.Revert subBuf
- , liftM2 Return subBuf subStore
+ [ liftM2 EVM.Types.Revert (return []) subBuf
+ , liftM3 Return (return []) subBuf subStore
  , liftM3 ITE subWord subEnd subEnd
  ]
  where

@@ -152,13 +152,13 @@ data Expr (a :: EType) where
                  -> Expr EWord
   -- control flow
 
-  Invalid         :: Expr End
-  IllegalOverflow :: Expr End
-  SelfDestruct    :: Expr End
-  Revert          :: Expr Buf     -> Expr End
-  Return          :: Expr Buf     -> Expr Storage -> Expr End
-  ITE             :: Expr EWord   -> Expr End     -> Expr End -> Expr End
-  TmpErr          :: String -> Expr End
+  Invalid         :: [Prop] -> Expr End
+  IllegalOverflow :: [Prop] -> Expr End
+  SelfDestruct    :: [Prop] -> Expr End
+  Revert          :: [Prop] -> Expr Buf -> Expr End
+  Return          :: [Prop] -> Expr Buf -> Expr Storage -> Expr End
+  ITE             :: Expr EWord -> Expr End -> Expr End -> Expr End
+  TmpErr          :: [Prop] -> String -> Expr End
 
   -- integers
 
