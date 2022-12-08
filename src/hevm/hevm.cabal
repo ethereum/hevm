@@ -272,7 +272,6 @@ test-suite test
     regex-tdfa,
     regex,
     time,
-    random,
     array,
     vector,
     smt2-parser >= 0.1.0.1
