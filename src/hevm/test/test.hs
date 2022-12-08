@@ -618,6 +618,10 @@ tests = testGroup "hevm"
         runDappTest testFile "prove_mul" >>= assertEqual "test result" False
         --runDappTest testFile "prove_distributivity" >>= assertEqual "test result" False
         --runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
+    , testCase "Loop-Tests" $ do
+        let testFile = "test/contracts/pass/loops.sol"
+        runDappTestMaxIter testFile "prove_loop" (Just 10) >>= assertEqual "test result" True
+        runDappTestMaxIter testFile "prove_loop" (Just 100) >>= assertEqual "test result" False
     , testCase "Invariant-Tests-Pass" $ do
         let testFile = "test/contracts/pass/invariants.sol"
         runDappTest testFile ".*" >>= assertEqual "test result" True
