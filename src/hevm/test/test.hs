@@ -2302,8 +2302,8 @@ genWord litFreq sz = frequency
     , liftM2 SDiv subWord subWord
     , liftM2 Mod subWord subWord
     , liftM2 SMod subWord subWord
-    -- , liftM3 AddMod subWord subWord subWord
-    -- , liftM3 MulMod subWord subWord subWord -- it works, but it's VERY SLOW
+    --, liftM3 AddMod subWord subWord subWord
+    --, liftM3 MulMod subWord subWord subWord -- it works, but it's VERY SLOW
     --, liftM2 Exp subWord litWord
     , liftM2 SEx subWord subWord
     , liftM2 Min subWord subWord

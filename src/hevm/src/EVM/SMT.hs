@@ -786,7 +786,7 @@ solverArgs solver timeout = case solver of
     [ "--lang=smt"
     , "--no-interactive"
     , "--produce-models"
-    , "--tlimit-per=" <> T.pack (show (1000 * fromMaybe 7200 timeout))
+    , "--tlimit-per=" <> T.pack (show (1000 * fromMaybe 10 timeout))
     ]
   Custom _ -> []
 
