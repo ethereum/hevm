@@ -589,6 +589,13 @@ formatCex cd m@(SMTCex _ _ blockContext txContext) = T.unlines $
   <> txCtx
   <> blockCtx
   where
+    -- we attempt to produce a model for calldata by substituting all variables
+    -- and buffers provided by the model into the original calldata expression.
+    -- If we have a concrete result then we diplay it, otherwise we diplay
+    -- `Any`. This is a little bit of a hack (and maybe unsound?), but we need
+    -- it for branches that do not refer to calldata at all (e.g. the top level
+    -- callvalue check inserted by solidity in contracts that don't have any
+    -- payable functions).
     cd' = prettyBuf $ Expr.simplify $ subModel m cd
 
     txCtx :: [Text]
