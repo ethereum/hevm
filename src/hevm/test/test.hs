@@ -618,6 +618,10 @@ tests = testGroup "hevm"
         runDappTest testFile "prove_mul" >>= assertEqual "test result" False
         --runDappTest testFile "prove_distributivity" >>= assertEqual "test result" False
         --runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
+    , testCase "Loop-Tests" $ do
+        let testFile = "test/contracts/pass/loops.sol"
+        runDappTestMaxIter testFile "prove_loop" (Just 10) >>= assertEqual "test result" True
+        runDappTestMaxIter testFile "prove_loop" (Just 100) >>= assertEqual "test result" False
     , testCase "Invariant-Tests-Pass" $ do
         let testFile = "test/contracts/pass/invariants.sol"
         runDappTest testFile ".*" >>= assertEqual "test result" True
@@ -1978,8 +1982,8 @@ bothM f (a, a') = do
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
 
-runDappTest :: FilePath -> Text -> IO Bool
-runDappTest testFile match = do
+runDappTestMaxIter :: FilePath -> Text -> Maybe Integer -> IO Bool
+runDappTestMaxIter testFile match maxIter = do
   root <- Paths.getDataDir
   (json, _) <- compileWithDSTest testFile
   --TIO.writeFile "output.json" json
@@ -1988,8 +1992,11 @@ runDappTest testFile match = do
       hClose handle
       TIO.writeFile file json
       withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json match
+        opts <- testOpts solvers root json match maxIter
         dappTest opts solvers file Nothing
+
+runDappTest :: FilePath -> Text -> IO Bool
+runDappTest testFile match = runDappTestMaxIter testFile match Nothing
 
 debugDappTest :: FilePath -> IO ()
 debugDappTest testFile = do
@@ -2001,12 +2008,12 @@ debugDappTest testFile = do
       hClose handle
       TIO.writeFile file json
       withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json ".*"
+        opts <- testOpts solvers root json ".*" Nothing
         TTY.main opts root file
 
 
-testOpts :: SolverGroup -> FilePath -> Text -> Text -> IO UnitTestOptions
-testOpts solvers root solcJson match = do
+testOpts :: SolverGroup -> FilePath -> Text -> Text -> Maybe Integer -> IO UnitTestOptions
+testOpts solvers root solcJson match maxIter = do
   srcInfo <- case readJSON solcJson of
                Nothing -> error "Could not read solc json"
                Just (contractMap, asts, sources) -> do
@@ -2017,8 +2024,9 @@ testOpts solvers root solcJson match = do
 
   pure EVM.UnitTest.UnitTestOptions
     { EVM.UnitTest.oracle = Fetch.oracle solvers Nothing
-    , EVM.UnitTest.maxIter = Nothing
+    , EVM.UnitTest.maxIter = maxIter
     , EVM.UnitTest.askSmtIters = Nothing
+    , EVM.UnitTest.smtdebug = False
     , EVM.UnitTest.smtTimeout = Nothing
     , EVM.UnitTest.solver = Nothing
     , EVM.UnitTest.covMatch = Nothing

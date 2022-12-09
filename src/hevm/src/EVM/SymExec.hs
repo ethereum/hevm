@@ -510,7 +510,7 @@ verify :: SolverGroup -> VeriOpts -> VM -> Maybe (Fetch.BlockNumber, Text) -> Ma
 verify solvers opts preState rpcinfo maybepost = do
   putStrLn "Exploring contract"
 
-  exprInter <- evalStateT (interpret (Fetch.oracle solvers rpcinfo) Nothing Nothing runExpr) preState
+  exprInter <- evalStateT (interpret (Fetch.oracle solvers rpcinfo) (maxIter opts) (askSmtIters opts) runExpr) preState
   when (debug opts) $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
 
   expr <- if (simp opts) then (pure $ Expr.simplify exprInter) else pure exprInter
