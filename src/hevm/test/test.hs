@@ -596,41 +596,41 @@ tests = testGroup "hevm"
   , testGroup "Dapp Tests"
     [ testCase "Trivial-Pass" $ do
         let testFile = "test/contracts/pass/trivial.sol"
-        runDappTest testFile ".*" >>= assertEqual "test result" True
+        runDappTest testFile ".*" True >>= assertEqual "test result" True
     , testCase "Trivial-Fail" $ do
         let testFile = "test/contracts/fail/trivial.sol"
-        runDappTest testFile "testFalse" >>= assertEqual "test result" False
+        runDappTest testFile "testFalse" True >>= assertEqual "test result" False
     , testCase "Abstract" $ do
         let testFile = "test/contracts/pass/abstract.sol"
-        runDappTest testFile ".*" >>= assertEqual "test result" True
+        runDappTest testFile ".*" True >>= assertEqual "test result" True
     , testCase "Constantinople" $ do
         let testFile = "test/contracts/pass/constantinople.sol"
-        runDappTest testFile ".*" >>= assertEqual "test result" True
+        runDappTest testFile ".*" True >>= assertEqual "test result" True
     , testCase "Prove-Tests-Pass" $ do
         let testFile = "test/contracts/pass/dsProvePass.sol"
-        runDappTest testFile ".*" >>= assertEqual "test result" True
+        runDappTest testFile ".*" True >>= assertEqual "test result" True
     , testCase "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
-        runDappTest testFile "prove_trivial" >>= assertEqual "test result" False
-        runDappTest testFile "prove_add" >>= assertEqual "test result" False
+        runDappTest testFile "prove_trivial" True >>= assertEqual "test result" False
+        runDappTest testFile "prove_add" True >>= assertEqual "test result" False
         --runDappTest testFile "prove_smtTimeout" >>= assertEqual "test result" False
-        runDappTest testFile "prove_multi" >>= assertEqual "test result" False
-        runDappTest testFile "prove_mul" >>= assertEqual "test result" False
+        runDappTest testFile "prove_multi" True >>= assertEqual "test result" False
+        runDappTest testFile "prove_mul" True >>= assertEqual "test result" False
         --runDappTest testFile "prove_distributivity" >>= assertEqual "test result" False
         --runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
     , testCase "Invariant-Tests-Pass" $ do
         let testFile = "test/contracts/pass/invariants.sol"
-        runDappTest testFile ".*" >>= assertEqual "test result" True
+        runDappTest testFile ".*" True >>= assertEqual "test result" True
     , testCase "Invariant-Tests-Fail" $ do
         let testFile = "test/contracts/fail/invariantFail.sol"
-        runDappTest testFile "invariantFirst" >>= assertEqual "test result" False
-        runDappTest testFile "invariantCount" >>= assertEqual "test result" False
+        runDappTest testFile "invariantFirst" True >>= assertEqual "test result" False
+        runDappTest testFile "invariantCount" True >>= assertEqual "test result" False
     , testCase "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
-        runDappTest testFile ".*" >>= assertEqual "test result" True
-    , expectFail $ testCase "Cheat-Codes-Fail" $ do
+        runDappTest testFile ".*" True >>= assertEqual "test result" True
+    , testCase "Cheat-Codes-Fail" $ do
         let testFile = "test/contracts/fail/cheatCodes.sol"
-        runDappTest testFile "testBadFFI" >>= assertEqual "test result" False
+        runDappTest testFile "testBadFFI" False >>= assertEqual "test result" False
     ]
   , testGroup "Symbolic execution"
       [
@@ -1978,8 +1978,8 @@ bothM f (a, a') = do
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
 
-runDappTest :: FilePath -> Text -> IO Bool
-runDappTest testFile match = do
+runDappTest :: FilePath -> Text -> Bool -> IO Bool
+runDappTest testFile match ffiAllowed = do
   root <- Paths.getDataDir
   (json, _) <- compileWithDSTest testFile
   --TIO.writeFile "output.json" json
@@ -1988,7 +1988,7 @@ runDappTest testFile match = do
       hClose handle
       TIO.writeFile file json
       withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json match
+        opts <- testOpts solvers root json match ffiAllowed
         dappTest opts solvers file Nothing
 
 debugDappTest :: FilePath -> IO ()
@@ -2001,12 +2001,12 @@ debugDappTest testFile = do
       hClose handle
       TIO.writeFile file json
       withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json ".*"
+        opts <- testOpts solvers root json ".*" True
         TTY.main opts root file
 
 
-testOpts :: SolverGroup -> FilePath -> Text -> Text -> IO UnitTestOptions
-testOpts solvers root solcJson match = do
+testOpts :: SolverGroup -> FilePath -> Text -> Text -> Bool -> IO UnitTestOptions
+testOpts solvers root solcJson match allowFFI = do
   srcInfo <- case readJSON solcJson of
                Nothing -> error "Could not read solc json"
                Just (contractMap, asts, sources) -> do
@@ -2022,7 +2022,7 @@ testOpts solvers root solcJson match = do
     , EVM.UnitTest.smtTimeout = Nothing
     , EVM.UnitTest.solver = Nothing
     , EVM.UnitTest.covMatch = Nothing
-    , EVM.UnitTest.verbose = Nothing
+    , EVM.UnitTest.verbose = Just 1
     , EVM.UnitTest.match = match
     , EVM.UnitTest.maxDepth = Nothing
     , EVM.UnitTest.fuzzRuns = 100
@@ -2030,7 +2030,7 @@ testOpts solvers root solcJson match = do
     , EVM.UnitTest.vmModifier = id
     , EVM.UnitTest.testParams = params
     , EVM.UnitTest.dapp = srcInfo
-    , EVM.UnitTest.ffiAllowed = True
+    , EVM.UnitTest.ffiAllowed = allowFFI
     }
 
 compileWithDSTest :: FilePath -> IO (Text, Text)
