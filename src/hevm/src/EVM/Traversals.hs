@@ -70,6 +70,9 @@ foldExpr f acc expr = acc <> (go expr)
       -- control flow
 
       e@(Invalid a) -> f e <> (foldl (foldProp f) mempty a)
+      e@(StackLimitExceeded a) -> f e <> (foldl (foldProp f) mempty a)
+      e@(InvalidMemoryAccess a) -> f e <> (foldl (foldProp f) mempty a)
+      e@(BadJumpDestination a) -> f e <> (foldl (foldProp f) mempty a)
       e@(SelfDestruct a) -> f e <> (foldl (foldProp f) mempty a)
       e@(IllegalOverflow a) -> f e <> (foldl (foldProp f) mempty a)
       e@(Revert a b) -> f e <> (foldl (foldProp f) mempty a) <> (go b)
