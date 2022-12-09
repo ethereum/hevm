@@ -288,7 +288,7 @@ unitTestOptions cmd solvers testFile = do
          Nothing  -> EVM.Fetch.oracle solvers Nothing
     , EVM.UnitTest.maxIter = maxIterations cmd
     , EVM.UnitTest.askSmtIters = askSmtIterations cmd
-    , EVM.UnitTest.debug = smtdebug cmd
+    , EVM.UnitTest.smtdebug = smtdebug cmd
     , EVM.UnitTest.smtTimeout = smttimeout cmd
     , EVM.UnitTest.solver = solver cmd
     , EVM.UnitTest.covMatch = pack <$> covMatch cmd

@@ -75,7 +75,7 @@ data UnitTestOptions = UnitTestOptions
   , verbose     :: Maybe Int
   , maxIter     :: Maybe Integer
   , askSmtIters :: Maybe Integer
-  , debug       :: Bool
+  , smtdebug    :: Bool
   , maxDepth    :: Maybe Int
   , smtTimeout  :: Maybe Natural
   , solver      :: Maybe Text
@@ -126,7 +126,7 @@ type ABIMethod = Text
 -- | Generate VeriOpts from UnitTestOptions
 makeVeriOpts :: UnitTestOptions -> VeriOpts
 makeVeriOpts opts =
-   defaultVeriOpts { SymExec.debug = debug opts
+   defaultVeriOpts { SymExec.debug = smtdebug opts
                    , SymExec.maxIter = maxIter opts
                    , SymExec.askSmtIters = askSmtIters opts
                    }
