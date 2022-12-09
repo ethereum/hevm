@@ -35,7 +35,8 @@ extra-source-files:
   test/contracts/pass/constantinople.sol
   test/contracts/pass/dsProvePass.sol
   test/contracts/pass/invariants.sol
-  test/contracts/pass/libraries.sol
+  test/contracts/pass/libraries.so
+  test/contracts/pass/loops.sol
   test/contracts/fail/trivial.sol
   test/contracts/fail/cheatCodes.sol
   test/contracts/fail/dsProveFail.sol
