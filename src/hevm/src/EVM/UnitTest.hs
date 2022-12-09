@@ -103,6 +103,7 @@ data TestVMParams = TestVMParams
   , testGasprice      :: W256
   , testMaxCodeSize   :: W256
   , testDifficulty    :: W256
+  , testPrevrandao    :: W256
   , testChainId       :: W256
   }
 
@@ -934,6 +935,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
            , vmoptPriorityFee = testPriorityFee
            , vmoptMaxCodeSize = testMaxCodeSize
            , vmoptDifficulty = testDifficulty
+           , vmoptPrevRandao = testPrevrandao
            , vmoptSchedule = FeeSchedule.berlin
            , vmoptChainId = testChainId
            , vmoptCreate = True
@@ -953,15 +955,16 @@ getParametersFromEnvironmentVariables :: Maybe Text -> IO TestVMParams
 getParametersFromEnvironmentVariables rpc = do
   block' <- maybe EVM.Fetch.Latest (EVM.Fetch.BlockNumber . read) <$> (lookupEnv "DAPP_TEST_NUMBER")
 
-  (miner,ts,blockNum,diff,limit,base) <-
+  (miner,ts,blockNum,diff,ran,limit,base) <-
     case rpc of
-      Nothing  -> return (0,Lit 0,0,0,0,0)
+      Nothing  -> return (0,Lit 0,0,0,0,0,0)
       Just url -> EVM.Fetch.fetchBlockFrom block' url >>= \case
         Nothing -> error "Could not fetch block"
         Just EVM.Block{..} -> return (  _coinbase
                                       , _timestamp
                                       , _number
                                       , _difficulty
+                                      , _prevRandao
                                       , _gaslimit
                                       , _baseFee
                                       )
@@ -985,5 +988,6 @@ getParametersFromEnvironmentVariables rpc = do
     <*> getWord "DAPP_TEST_GAS_LIMIT" limit
     <*> getWord "DAPP_TEST_GAS_PRICE" 0
     <*> getWord "DAPP_TEST_MAXCODESIZE" defaultMaxCodeSize
+    <*> getWord "DAPP_TEST_PREVRANDAO" ran
     <*> getWord "DAPP_TEST_DIFFICULTY" diff
     <*> getWord "DAPP_TEST_CHAINID" 99

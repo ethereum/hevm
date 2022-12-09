@@ -6,7 +6,7 @@ module EVM.Fetch where
 import Prelude hiding (Word)
 
 import EVM.ABI
-import EVM.Types    (Addr, W256, hexText, Expr(Lit, LitByte), Expr(..), Prop(..), (.&&), (.==), (./=))
+import EVM.Types    (Addr, W256, hexText, Expr(Lit, LitByte), Expr(..), Prop(..), (.&&), (./=))
 import EVM.SMT
 import EVM          (EVM, Contract, Block, initialContract, nonce, balance, external)
 import qualified EVM.FeeSchedule as FeeSchedule
@@ -109,8 +109,9 @@ parseBlock j = do
   difficulty <- readText <$> j ^? key "difficulty" . _String
   gasLimit   <- readText <$> j ^? key "gasLimit" . _String
   let baseFee = readText <$> j ^? key "baseFeePerGas" . _String
+  let prevRandao = readText <$> j ^? key "prevRandao" . _String
   -- default codesize, default gas limit, default feescedule
-  return $ EVM.Block coinbase timestamp number difficulty gasLimit (fromMaybe 0 baseFee) 0xffffffff FeeSchedule.berlin
+  return $ EVM.Block coinbase timestamp number (fromMaybe 0 prevRandao) difficulty gasLimit (fromMaybe 0 baseFee) 0xffffffff FeeSchedule.berlin
 
 fetchWithSession :: Text -> Session -> Value -> IO (Maybe Value)
 fetchWithSession url sess x = do

@@ -179,6 +179,7 @@ loadSymVM x initStore addr callvalue' calldata' =
     , vmoptBlockGaslimit = 0
     , vmoptGasprice = 0
     , vmoptDifficulty = 0
+    , vmoptPrevRandao = 42069
     , vmoptGas = 0xffffffffffffffff
     , vmoptGaslimit = 0xffffffffffffffff
     , vmoptBaseFee = 0

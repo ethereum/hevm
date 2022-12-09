@@ -290,6 +290,7 @@ fromBlockchainCase' block tx preState postState =
          , vmoptTimestamp     = Lit $ blockTimestamp block
          , vmoptCoinbase      = blockCoinbase block
          , vmoptDifficulty    = blockDifficulty block
+         , vmoptPrevRandao    = 42069
          , vmoptMaxCodeSize   = 24576
          , vmoptBlockGaslimit = blockGasLimit block
          , vmoptGasprice      = effectiveGasPrice
