@@ -10,6 +10,7 @@ module EVM.Expr where
 import Prelude hiding (LT, GT)
 import Data.Bits
 import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
+import Data.Int (Int32)
 import Data.Word
 import Data.Maybe
 import Data.List
@@ -215,17 +216,15 @@ readByte i@(Lit x) (WriteWord (Lit idx) val src)
            _ -> IndexWord (Lit $ x - idx) val
     else readByte i src
 readByte i@(Lit x) (CopySlice (Lit srcOffset) (Lit dstOffset) (Lit size) src dst)
-  = if dstOffset <= num x && num x < (dstOffset + size)
-    then readByte (Lit $ num x - (dstOffset - srcOffset)) src
+  = if dstOffset <= x && x < (dstOffset + size)
+    then readByte (Lit $ x - (dstOffset - srcOffset)) src
     else readByte i dst
-
--- reads from partially symbolic copySlice exprs
 readByte i@(Lit x) buf@(CopySlice _ (Lit dstOffset) (Lit size) _ dst)
-  = if num x < dstOffset || dstOffset + size < num x
+  = if x < dstOffset || x >= dstOffset + size
     then readByte i dst
     else ReadByte (Lit x) buf
 readByte i@(Lit x) buf@(CopySlice _ (Lit dstOffset) _ _ dst)
-  = if num x < dstOffset
+  = if x < dstOffset
     then readByte i dst
     else ReadByte (Lit x) buf
 
@@ -287,42 +286,60 @@ readWordFromBytes idx buf = ReadWord idx buf
    dst: |   hd   |                  |       tl        |
         └--------┴------------------┴-----------------┘
 -}
+
+-- The maximum number of bytes we will expand as part of simplification
+--     this limits the amount of memory we will use while simplifying to ~1 GB / rewrite
+--     note that things can still stack up, e.g. N such rewrites could eventually eat
+--     N*1GB.
+maxBytes :: W256
+maxBytes = num (maxBound :: Int32) `Prelude.div` 4
+
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf -> Expr Buf
 
--- copies from empty bufs
+-- Copies from empty buffers
 copySlice _ _ (Lit 0) (ConcreteBuf "") dst = dst
-copySlice _ _ (Lit size) (ConcreteBuf "") (ConcreteBuf "") =
-  ConcreteBuf $ BS.replicate (num size) 0
-copySlice srcOffset dstOffset (Lit size) (ConcreteBuf "") dst =
-  copySlice srcOffset dstOffset (Lit size) (ConcreteBuf $ BS.replicate (num size) 0) dst -- TODO: ugly!
+copySlice a b c@(Lit size) d@(ConcreteBuf "") e@(ConcreteBuf "")
+  | size < maxBytes = ConcreteBuf $ BS.replicate (num size) 0
+  | otherwise = CopySlice a b c d e
+copySlice srcOffset dstOffset sz@(Lit size) src@(ConcreteBuf "") dst
+  | size < maxBytes = copySlice srcOffset dstOffset (Lit size) (ConcreteBuf $ BS.replicate (num size) 0) dst
+  | otherwise = CopySlice srcOffset dstOffset sz src dst
 
--- fully concrete copies
-copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) (ConcreteBuf "")
-  | srcOffset > num (BS.length src) = ConcreteBuf $ BS.replicate (num size) 0
-  | otherwise = let
+-- Fully concrete copies
+copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e@(ConcreteBuf "")
+  | srcOffset > num (BS.length src), size < maxBytes = ConcreteBuf $ BS.replicate (num size) 0
+  | srcOffset <= num (BS.length src), dstOffset < maxBytes, size < maxBytes = let
     hd = BS.replicate (num dstOffset) 0
     sl = padRight (num size) $ BS.take (num size) (BS.drop (num srcOffset) src)
-  in ConcreteBuf $ hd <> sl
-copySlice (Lit srcOffset) (Lit dstOffset) (Lit size) (ConcreteBuf src) (ConcreteBuf dst)
-  = let hd = padRight (num dstOffset) $ BS.take (num dstOffset) dst
-        sl = if srcOffset > num (BS.length src)
-          then BS.replicate (num size) 0
-          else padRight (num size) $ BS.take (num size) (BS.drop (num srcOffset) src)
-        tl = BS.drop (num dstOffset + num size) dst
-    in ConcreteBuf $ hd <> sl <> tl
+    in ConcreteBuf $ hd <> sl
+  | otherwise = CopySlice a b c d e
+
+copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e@(ConcreteBuf dst)
+  | dstOffset < maxBytes
+  , srcOffset < maxBytes
+  , size < maxBytes =
+      let hd = padRight (num dstOffset) $ BS.take (num dstOffset) dst
+          sl = if srcOffset > num (BS.length src)
+            then BS.replicate (num size) 0
+            else padRight (num size) $ BS.take (num size) (BS.drop (num srcOffset) src)
+          tl = BS.drop (num dstOffset + num size) dst
+      in ConcreteBuf $ hd <> sl <> tl
+  | otherwise = CopySlice a b c d e
 
 -- copying 32 bytes can be rewritten to a WriteWord on dst (e.g. CODECOPY of args during constructors)
 copySlice srcOffset dstOffset (Lit 32) src dst = writeWord dstOffset (readWord srcOffset src) dst
 
 -- concrete indicies & abstract src (may produce a concrete result if we are
 -- copying from a concrete region of src)
-copySlice s@(Lit srcOffset) d@(Lit dstOffset) sz@(Lit size) src ds@(ConcreteBuf dst) = let
+copySlice s@(Lit srcOffset) d@(Lit dstOffset) sz@(Lit size) src ds@(ConcreteBuf dst)
+  | dstOffset < maxBytes, size < maxBytes = let
     hd = padRight (num dstOffset) $ BS.take (num dstOffset) dst
     sl = [readByte (Lit i) src | i <- [srcOffset .. srcOffset + (size - 1)]]
     tl = BS.drop (num dstOffset + num size) dst
-  in if Prelude.and . (fmap isLitByte) $ sl
-     then ConcreteBuf $ hd <> (BS.pack . (mapMaybe unlitByte) $ sl) <> tl
-     else CopySlice s d sz src ds
+    in if Prelude.and . (fmap isLitByte) $ sl
+       then ConcreteBuf $ hd <> (BS.pack . (mapMaybe unlitByte) $ sl) <> tl
+       else CopySlice s d sz src ds
+  | otherwise = CopySlice s d sz src ds
 
 -- abstract indicies
 copySlice srcOffset dstOffset size src dst = CopySlice srcOffset dstOffset size src dst
@@ -330,10 +347,10 @@ copySlice srcOffset dstOffset size src dst = CopySlice srcOffset dstOffset size 
 
 writeByte :: Expr EWord -> Expr Byte -> Expr Buf -> Expr Buf
 writeByte (Lit offset) (LitByte val) (ConcreteBuf "")
-  | offset <= num (maxBound :: Int)
+  | offset < maxBytes
   = ConcreteBuf $ BS.replicate (num offset) 0 <> BS.singleton val
 writeByte o@(Lit offset) b@(LitByte byte) buf@(ConcreteBuf src)
-  | offset < num (maxBound :: Int)
+  | offset < maxBytes
     = ConcreteBuf $ (padRight (num offset) $ BS.take (num offset) src)
                  <> BS.pack [byte]
                  <> BS.drop (num offset + 1) src
@@ -343,10 +360,10 @@ writeByte offset byte src = WriteByte offset byte src
 
 writeWord :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
 writeWord (Lit offset) (Lit val) (ConcreteBuf "")
-  | offset + 32 < num (maxBound :: Int)
+  | offset + 32 < maxBytes
   = ConcreteBuf $ BS.replicate (num offset) 0 <> word256Bytes val
 writeWord o@(Lit offset) v@(Lit val) buf@(ConcreteBuf src)
-  | offset + 32 < num (maxBound :: Int)
+  | offset + 32 < maxBytes
     = ConcreteBuf $ (padRight (num offset) $ BS.take (num offset) src)
                  <> word256Bytes val
                  <> BS.drop ((num offset) + 32) src
@@ -614,7 +631,7 @@ simplify e = if (mapExpr go e == e)
     -- We can zero out any bytes in a base ConcreteBuf that we know will be overwritten by a later write
     -- TODO: make this fully general for entire write chains, not just a single write.
     go o@(WriteWord (Lit idx) val (ConcreteBuf b))
-      | idx <= num (maxBound :: Int)
+      | idx < maxBytes
         = (writeWord (Lit idx) val (
             ConcreteBuf $
               (BS.take (num idx) (padRight (num idx) b))
