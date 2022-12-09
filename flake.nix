@@ -72,6 +72,8 @@
               z3
               cvc5
               solc
+              mdbook
+              yarn
               haskellPackages.cabal-install
               haskellPackages.haskell-language-server
             ];
