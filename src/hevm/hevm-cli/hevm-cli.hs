@@ -453,7 +453,15 @@ assert cmd = do
       decipher = hexByteString "bytes" . strip0x
   calldata' <- case (Main.calldata cmd, sig cmd) of
     -- fully abstract calldata
-    (Nothing, Nothing) -> pure (AbstractBuf "txdata", [])
+    (Nothing, Nothing) -> pure
+      ( AbstractBuf "txdata"
+      -- assert that the length of the calldata is never more than 2^64
+      -- this is way larger than would ever be allowed by the gas limit
+      -- and avoids spurious counterexamples during abi decoding
+      -- TODO: can we encode calldata as an array with a smaller length?
+      , [Expr.bufLength (AbstractBuf "txtdata") .< (Lit (2 ^ (64 :: Integer)))]
+      )
+
     -- fully concrete calldata
     (Just c, Nothing) -> pure (ConcreteBuf (decipher c), [])
     -- calldata according to given abi with possible specializations from the `arg` list
