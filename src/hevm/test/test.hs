@@ -620,8 +620,8 @@ tests = testGroup "hevm"
         --runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
     , testCase "Loop-Tests" $ do
         let testFile = "test/contracts/pass/loops.sol"
-        runDappTestMaxIter testFile "prove_loop" (Just 10) >>= assertEqual "test result" True
-        runDappTestMaxIter testFile "prove_loop" (Just 100) >>= assertEqual "test result" False
+        runDappTestCustom testFile "prove_loop" (Just 10) False >>= assertEqual "test result" True
+        runDappTestCustom testFile "prove_loop" (Just 100) False >>= assertEqual "test result" False
     , testCase "Invariant-Tests-Pass" $ do
         let testFile = "test/contracts/pass/invariants.sol"
         runDappTest testFile ".*" >>= assertEqual "test result" True
@@ -632,9 +632,9 @@ tests = testGroup "hevm"
     , testCase "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
         runDappTest testFile ".*" >>= assertEqual "test result" True
-    , expectFail $ testCase "Cheat-Codes-Fail" $ do
+    , testCase "Cheat-Codes-Fail" $ do
         let testFile = "test/contracts/fail/cheatCodes.sol"
-        runDappTest testFile "testBadFFI" >>= assertEqual "test result" False
+        runDappTestCustom testFile "testBadFFI" Nothing False >>= assertEqual "test result" False
     ]
   , testGroup "Symbolic execution"
       [
@@ -1982,8 +1982,8 @@ bothM f (a, a') = do
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
 
-runDappTestMaxIter :: FilePath -> Text -> Maybe Integer -> IO Bool
-runDappTestMaxIter testFile match maxIter = do
+runDappTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> IO Bool
+runDappTestCustom testFile match maxIter ffiAllowed = do
   root <- Paths.getDataDir
   (json, _) <- compileWithDSTest testFile
   --TIO.writeFile "output.json" json
@@ -1992,11 +1992,11 @@ runDappTestMaxIter testFile match maxIter = do
       hClose handle
       TIO.writeFile file json
       withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json match maxIter
+        opts <- testOpts solvers root json match maxIter ffiAllowed
         dappTest opts solvers file Nothing
 
 runDappTest :: FilePath -> Text -> IO Bool
-runDappTest testFile match = runDappTestMaxIter testFile match Nothing
+runDappTest testFile match = runDappTestCustom testFile match Nothing True
 
 debugDappTest :: FilePath -> IO ()
 debugDappTest testFile = do
@@ -2008,12 +2008,11 @@ debugDappTest testFile = do
       hClose handle
       TIO.writeFile file json
       withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json ".*" Nothing
+        opts <- testOpts solvers root json ".*" Nothing True
         TTY.main opts root file
 
-
-testOpts :: SolverGroup -> FilePath -> Text -> Text -> Maybe Integer -> IO UnitTestOptions
-testOpts solvers root solcJson match maxIter = do
+testOpts :: SolverGroup -> FilePath -> Text -> Text -> Maybe Integer -> Bool -> IO UnitTestOptions
+testOpts solvers root solcJson match maxIter allowFFI= do
   srcInfo <- case readJSON solcJson of
                Nothing -> error "Could not read solc json"
                Just (contractMap, asts, sources) -> do
@@ -2030,7 +2029,7 @@ testOpts solvers root solcJson match maxIter = do
     , EVM.UnitTest.smtTimeout = Nothing
     , EVM.UnitTest.solver = Nothing
     , EVM.UnitTest.covMatch = Nothing
-    , EVM.UnitTest.verbose = Nothing
+    , EVM.UnitTest.verbose = Just 1
     , EVM.UnitTest.match = match
     , EVM.UnitTest.maxDepth = Nothing
     , EVM.UnitTest.fuzzRuns = 100
@@ -2038,7 +2037,7 @@ testOpts solvers root solcJson match maxIter = do
     , EVM.UnitTest.vmModifier = id
     , EVM.UnitTest.testParams = params
     , EVM.UnitTest.dapp = srcInfo
-    , EVM.UnitTest.ffiAllowed = True
+    , EVM.UnitTest.ffiAllowed = allowFFI
     }
 
 compileWithDSTest :: FilePath -> IO (Text, Text)
