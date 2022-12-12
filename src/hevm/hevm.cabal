@@ -109,7 +109,7 @@ library
   autogen-modules:
     Paths_hevm
   ghc-options:
-    -Wall -Wno-deprecations -Wno-unticked-promoted-constructors
+    -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -j
   extra-libraries:
     secp256k1, ff
   if os(linux)
@@ -187,7 +187,7 @@ executable hevm
   main-is:
     hevm-cli.hs
   ghc-options:
-    -Wall -threaded -with-rtsopts=-N
+    -Wall -threaded -with-rtsopts=-N -j
   other-modules:
     Paths_hevm
   if os(darwin)
@@ -231,7 +231,7 @@ executable hevm
 test-suite test
   import: shared
   ghc-options:
-    -Wall -Wno-unticked-promoted-constructors
+    -Wall -Wno-unticked-promoted-constructors -j
   type:
     exitcode-stdio-1.0
   hs-source-dirs:
@@ -270,5 +270,9 @@ test-suite test
     tasty-expected-failure >= 0.12,
     temporary,
     text,
+    regex-tdfa,
+    regex,
+    time,
+    array,
     vector,
     smt2-parser >= 0.1.0.1

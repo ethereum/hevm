@@ -70,6 +70,9 @@ foldExpr f acc expr = acc <> (go expr)
       -- control flow
 
       e@(Invalid a) -> f e <> (foldl (foldProp f) mempty a)
+      e@(StackLimitExceeded a) -> f e <> (foldl (foldProp f) mempty a)
+      e@(InvalidMemoryAccess a) -> f e <> (foldl (foldProp f) mempty a)
+      e@(BadJumpDestination a) -> f e <> (foldl (foldProp f) mempty a)
       e@(SelfDestruct a) -> f e <> (foldl (foldProp f) mempty a)
       e@(IllegalOverflow a) -> f e <> (foldl (foldProp f) mempty a)
       e@(Revert a b) -> f e <> (foldl (foldProp f) mempty a) <> (go b)
@@ -323,6 +326,15 @@ mapExprM f expr = case expr of
   IllegalOverflow a -> do
     a' <- mapM (mapPropM f) a
     f (IllegalOverflow a')
+  InvalidMemoryAccess a -> do
+    a' <- mapM (mapPropM f) a
+    f (InvalidMemoryAccess a')
+  StackLimitExceeded a -> do
+    a' <- mapM (mapPropM f) a
+    f (StackLimitExceeded a')
+  BadJumpDestination a -> do
+    a' <- mapM (mapPropM f) a
+    f (BadJumpDestination a')
   Revert a b -> do
     a' <- mapM (mapPropM f) a
     b' <- mapExprM f b
