@@ -76,7 +76,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="overview.html">overview</a></li><li class="chapter-item expanded affix "><li class="part-title">Reference</li><li class="chapter-item expanded "><a href="symbolic.html"><strong aria-hidden="true">1.</strong> symbolic</a></li><li class="chapter-item expanded "><a href="equivalence.html"><strong aria-hidden="true">2.</strong> equivalence</a></li><li class="chapter-item expanded "><a href="exec.html"><strong aria-hidden="true">3.</strong> exec</a></li><li class="chapter-item expanded "><a href="dapp-test.html"><strong aria-hidden="true">4.</strong> dapp-test</a></li><li class="chapter-item expanded "><a href="flatten.html"><strong aria-hidden="true">5.</strong> flatten</a></li><li class="chapter-item expanded "><a href="rlp.html"><strong aria-hidden="true">6.</strong> rlp</a></li><li class="chapter-item expanded "><a href="abiencode.html"><strong aria-hidden="true">7.</strong> abiencode</a></li><li class="chapter-item expanded "><a href="strip-metadata.html"><strong aria-hidden="true">8.</strong> strip-metadata</a></li><li class="chapter-item expanded affix "><li class="part-title">Tutorials</li><li class="chapter-item expanded "><a href="controlling-the-unit-testing-environment.html"><strong aria-hidden="true">9.</strong> controlling the unit testing environment</a></li><li class="chapter-item expanded "><a href="using-the-visual-debugger.html"><strong aria-hidden="true">10.</strong> using the visual debugger</a></li><li class="chapter-item expanded "><div><strong aria-hidden="true">11.</strong> discovering reachable assertion violations</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">12.</strong> symbolic unit testing</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">13.</strong> equivalence checking</div></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="overview.html">overview</a></li><li class="chapter-item expanded affix "><li class="part-title">Reference</li><li class="chapter-item expanded "><a href="symbolic.html"><strong aria-hidden="true">1.</strong> symbolic</a></li><li class="chapter-item expanded "><a href="equivalence.html"><strong aria-hidden="true">2.</strong> equivalence</a></li><li class="chapter-item expanded "><a href="exec.html"><strong aria-hidden="true">3.</strong> exec</a></li><li class="chapter-item expanded "><a href="dapp-test.html"><strong aria-hidden="true">4.</strong> dapp-test</a></li><li class="chapter-item expanded affix "><li class="part-title">Tutorials</li><li class="chapter-item expanded "><a href="controlling-the-unit-testing-environment.html"><strong aria-hidden="true">5.</strong> controlling the unit testing environment</a></li><li class="chapter-item expanded "><a href="using-the-visual-debugger.html"><strong aria-hidden="true">6.</strong> using the visual debugger</a></li><li class="chapter-item expanded "><div><strong aria-hidden="true">7.</strong> discovering reachable assertion violations</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">8.</strong> symbolic unit testing</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">9.</strong> equivalence checking</div></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -339,67 +339,6 @@ Available options:
                            Number of times we may revisit a particular branching
                            point before we consult the smt solver to check
                            reachability (default: 5)
-</code></pre>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="hevm-flatten"><a class="header" href="#hevm-flatten"><code>hevm flatten</code></a></h1>
-<pre><code>Usage: hevm flatten --source-file STRING [--json-file STRING]
-                    [--dapp-root STRING]
-
-Available options:
-  -h,--help                Show this help text
-  --source-file STRING     Path to solidity source file e.g. src/contract.sol
-  --json-file STRING       Filename or path to dapp build output (default:
-                           out/*.solc.json)
-  --dapp-root STRING       Path to dapp project root directory (default: . )
-</code></pre>
-<p>Flattens multiple solidity source files into one for etherscan verification.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="hevm-rlp"><a class="header" href="#hevm-rlp"><code>hevm rlp</code></a></h1>
-<pre><code>Usage: hevm rlp --decode TEXT
-
-Available options:
-  -h,--help                Show this help text
-  --decode TEXT            RLP encoded hexstring
-</code></pre>
-<p>Decodes an <a href="https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/">rlp</a> encoded hexstring</p>
-<pre><code>$ hevm rlp --decode \
-0xf86b808509502f900082520894423163e58aabec\
-5daa3dd1130b759d24bef0f6ea8711c37937e08000\
-8025a0434f6d9df411bfe4fbd0fcaf68ac2259a3d5\
-eba91cb77797bdf249a22920c44fa06cf49be63274\
-22ffa714bdcd5f627a85696720db855756057536fc\
-5e867a725c
-
-[ 0x
-,0x09502f9000
-,0x5208
-,0x423163e58aabec5daa3dd1130b759d24bef0f6ea
-,0x11c37937e08000
-,0x
-,0x25
-,0x434f6d9df411bfe4fbd0fcaf68ac2259a3d5eba91cb77797bdf249a22920c44f
-,0x6cf49be6327422ffa714bdcd5f627a85696720db855756057536fc5e867a725c
-]
-</code></pre>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="hevm-abiencode"><a class="header" href="#hevm-abiencode"><code>hevm abiencode</code></a></h1>
-<pre><code>Usage: hevm abiencode [--abi STRING] [--arg STRING]...
-
-Available options:
-  -h,--help                Show this help text
-  --abi STRING             Signature of types to decode / encode
-  --arg STRING             Values to encode
-</code></pre>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="hevm-strip-metadata"><a class="header" href="#hevm-strip-metadata"><code>hevm strip-metadata</code></a></h1>
-<pre><code>Usage: hevm strip-metadata [--code TEXT]
-
-Available options:
-  -h,--help                Show this help text
-  --code TEXT              Program bytecode
-</code></pre>
-<p>Strips the solc <a href="https://docs.soliditylang.org/en/v0.8.17/metadata.html?highlight=metadata#encoding-of-the-metadata-hash-in-the-bytecode">metadata
-hash</a> from a given bytecode object.</p>
-<h3 id="example"><a class="header" href="#example">Example</a></h3>
-<pre><code>$ /nix/store/50a4h51lf6pr8dwa47s1nlmlp52vvxbg-hevm/bin/hevm strip-metadata --code 6080604052348015600f57600080fd5b506004361060285760003560e01c8063c298557814602d575b600080fd5b60336047565b604051603e9190605d565b60405180910390f35b60006001905090565b6057816076565b82525050565b6000602082019050607060008301846050565b92915050565b6000811515905091905056fea264697066735822122074bf21fb1f86ca529664a7da6d54b7ce891ea38a94a2c8af063f8472f1a5ace964736f6c63430008060033
-
-0x6080604052348015600f57600080fd5b506004361060285760003560e01c8063c298557814602d575b600080fd5b60336047565b604051603e9190605d565b60405180910390f35b60006001905090565b6057816076565b82525050565b6000602082019050607060008301846050565b92915050565b6000811515905091905056fe
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="controlling-the-unit-testing-environment"><a class="header" href="#controlling-the-unit-testing-environment">controlling the unit testing environment</a></h1>
 <h2 id="cheat-codes"><a class="header" href="#cheat-codes">Cheat codes</a></h2>
