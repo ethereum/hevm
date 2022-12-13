@@ -19,7 +19,7 @@ User facing documentation can be found in the [hevm book]().
 `hevm` can be installed using nix flakes via the following command:
 
 ```
-nix profile install git+https://github.com/ethereum/hevm.git
+nix profile install github:ethereum/hevm
 ```
 
 ## Development

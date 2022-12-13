@@ -11,3 +11,5 @@ Available options:
                            out/*.solc.json)
   --dapp-root STRING       Path to dapp project root directory (default: . )
 ```
+
+Flattens multiple solidity source files into one for etherscan verification.

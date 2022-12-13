@@ -85,8 +85,8 @@ As an example the following Expr encodes a program that branches based on the eq
 
 ```haskell
 (ITE (Eq (Var "a") (Var "b"))
-  (Return EmptyBuf EmptyStore)
-  (Revert EmptyBuf))
+  (Return (ConcreteBuf "") (ConcreteBuf ""))
+  (Revert (ConcreteBuf "")))
 ```
 
 *Buffers*
@@ -94,7 +94,6 @@ As an example the following Expr encodes a program that branches based on the eq
 Memory, calldata, and returndata are all represented as a Buf. Semantically speaking a Buf is a byte array with of size 2^256.
 
 Bufs have three base constructors:
-  - EmptyBuf:       all elements are zero
   - AbstractBuf:    all elements are fully abstract values
   - ConcreteBuf bs: all elements past (length bs) are zero
 
@@ -165,21 +164,21 @@ This decompiles into the following Expr End:
 ```haskell
 (ITE (IsZero (CallValue 0))
   (ITE (LT (BufLength (AbstractBuf "txdata")) (Lit 0x4))
-    (Revert ConcreteBuf "")
+    (Revert (ConcreteBuf ""))
     (ITE (Eq (Lit 0x60fe47b1) (SHR (Lit 0xe0) (ReadWord (Lit 0x0) (AbstractBuf "txdata"))))
       (ITE (IsZero (SLT (Sub (BufLength (AbstractBuf "txdata")) (Lit 0x4)) (Lit 0x20)))
         (ITE (IsZero (GT (ReadWord (Lit 0x4) (AbstractBuf "txdata")) (Sub (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) (ReadWord (Lit 0x4) (AbstractBuf "txdata")))))
           (Return
-            Data: EmptyBuf
+            Data: (ConcreteBuf "")
             Store: SStore (Lit 0xffffffffffffffff) (Lit 0x0) (Add (ReadWord (Lit 0x4) (AbstractBuf "txdata")) (ReadWord (Lit 0x4) (AbstractBuf "txdata"))) AbstractStore
           )
-          (Revert ConcreteBuf "NH{q\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\DC1")
+          (Revert (ConcreteBuf "NH{q\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\DC1"))
         )
-        (Revert ConcreteBuf "")
+        (Revert (ConcreteBuf ""))
       )
-      (Revert ConcreteBuf "")
+      (Revert (ConcreteBuf ""))
     )
   )
-  (Revert ConcreteBuf "")
+  (Revert (ConcreteBuf ""))
 )
 ```
