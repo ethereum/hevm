@@ -23,7 +23,7 @@ import qualified EVM.FeeSchedule as FeeSchedule
 import Data.DoubleWord (Word256)
 import Control.Concurrent.Async
 import Data.Maybe
-import Data.List (foldl', find)
+import Data.List (foldl', find, sortBy)
 import Data.Vector (fromList)
 import Data.Map (lookup)
 import Data.ByteString (ByteString, null, pack)
@@ -35,6 +35,7 @@ import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 import EVM.Format (formatExpr)
+import Data.Set (Set, fromList, isSubsetOf, size)
 
 data ProofResult a b c = Qed a | Cex b | Timeout c
   deriving (Show, Eq)
@@ -570,53 +571,82 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
 
   -- Check each pair of end states for equality:
   let
-      differingEndStates = uncurry distinct <$> [(a,b) | a <- flattenExpr aExprSimp, b <- flattenExpr bExprSimp]
-      distinct :: ([Prop], Expr End) -> ([Prop], Expr End) -> Prop
-      distinct (aProps, aEnd) (bProps, bEnd) =
-        let
-          differingResults = case (aEnd, bEnd) of
-            (Return _ aOut aStore, Return _ bOut bStore) ->
-              if aOut == bOut && aStore == bStore then PBool False
-                                                  else aStore ./= bStore  .|| aOut ./= bOut
-            (Return {}, _) -> PBool True
-            (_, Return {}) -> PBool True
-            (Revert _ a, Revert _ b) -> if a==b then PBool False else a ./= b
-            (Revert _ _, _) -> PBool True
-            (_, Revert _ _) -> PBool True
-            (Invalid _, Invalid _) -> PBool False
-            (Invalid _, _ ) -> PBool True
-            (_, Invalid _) -> PBool True
-            (EVM.Types.StackLimitExceeded _, EVM.Types.StackLimitExceeded _ ) -> PBool False
-            (EVM.Types.StackLimitExceeded _, _) -> PBool True
-            (_, EVM.Types.StackLimitExceeded _) -> PBool True
-            (a, b) -> if a == b then PBool False
-                                else error $ "Unimplemented, see TODO about EVM failures and TmpExpr. Left: " <> show a <> " Right: " <> show b
+    differingEndStates = uncurry distinct <$> [(a,b) | a <- flattenExpr aExprSimp, b <- flattenExpr bExprSimp]
+    distinct :: ([Prop], Expr End) -> ([Prop], Expr End) -> (Prop, Maybe (Set Prop, Set Prop))
+    distinct (aProps, aEnd) (bProps, bEnd) =
+      let
+        differingResults = case (aEnd, bEnd) of
+          (Return _ aOut aStore, Return _ bOut bStore) ->
+            if aOut == bOut && aStore == bStore then PBool False
+                                                else aStore ./= bStore  .|| aOut ./= bOut
+          (Return {}, _) -> PBool True
+          (_, Return {}) -> PBool True
+          (Revert _ a, Revert _ b) -> if a==b then PBool False else a ./= b
+          (Revert _ _, _) -> PBool True
+          (_, Revert _ _) -> PBool True
+          (Invalid _, Invalid _) -> PBool False
+          (Invalid _, _ ) -> PBool True
+          (_, Invalid _) -> PBool True
+          (EVM.Types.StackLimitExceeded _, EVM.Types.StackLimitExceeded _ ) -> PBool False
+          (EVM.Types.StackLimitExceeded _, _) -> PBool True
+          (_, EVM.Types.StackLimitExceeded _) -> PBool True
+          (a, b) -> if a == b then PBool False
+                              else error $ "Unimplemented, see TODO about EVM failures and TmpExpr. Left: " <> show a <> " Right: " <> show b
 
-        -- if the SMT solver can find a common input that satisfies BOTH sets of path conditions
-        -- AND the output differs, then we are in trouble. We do this for _every_ pair of paths, which
-        -- makes this exhaustive
-        in
-        if differingResults == PBool False
-           then PBool False
-           else (foldl PAnd (PBool True) aProps) .&& (foldl PAnd (PBool True) bProps)  .&& differingResults
+      -- if the SMT solver can find a common input that satisfies BOTH sets of path conditions
+      -- AND the output differs, then we are in trouble. We do this for _every_ pair of paths, which
+      -- makes this exhaustive
+      in
+      case differingResults of
+        PBool False -> (PBool False, Nothing)
+        PBool True  -> ((foldl PAnd (PBool True) aProps) .&& (foldl PAnd (PBool True) bProps), Just (Data.Set.fromList aProps, Data.Set.fromList bProps))
+        _ -> ((foldl PAnd (PBool True) aProps) .&& (foldl PAnd (PBool True) bProps) .&& differingResults, Nothing)
   -- If there exists a pair of end states where this is not the case,
   -- the following constraint is satisfiable
 
-  let diffEndStFilt = filter (/= PBool False) differingEndStates
+  let
+    -- sorts the diffEndStFilt by the number of Props, if not Nothing.  Nothing is placed last
+    propSorter :: (Prop, Maybe (Set Prop, Set Prop)) -> (Prop, Maybe (Set Prop, Set Prop)) -> Ordering
+    propSorter (_, _) (_, Nothing) = Prelude.LT -- Nothing ends up last.
+    propSorter (_, Nothing) (_, Just _) = Prelude.GT
+    propSorter (_, Just (x1, y1)) (_, Just (x2, y2)) = if size x1 > size x2 && size y1 > size y2 then Prelude.LT
+                                                                                               else Prelude.GT
+    diffEndStFilt = Data.List.sortBy propSorter $ filter (\(a, _) -> a /= PBool False) differingEndStates
   putStrLn $ "Equivalence checking " <> (show $ length diffEndStFilt) <> " combinations"
-  when (debug opts) $ forM_ (zip diffEndStFilt [1..]) (\(x, i) -> T.writeFile ("prop-checked-" <> show i) (T.pack $ show x))
-  results <- flip mapConcurrently (zip diffEndStFilt [1..]) $ \(prop, i) -> do
-    let assertedProps = assertProps [prop]
-    let filename = "eq-check-" <> show i <> ".smt2"
-    when (debug opts) $ T.writeFile (filename) $ (TL.toStrict $ formatSMT2 assertedProps) <> "\n(check-sat)"
-    res <- case prop of
-      PBool False -> pure Unsat
-      _ -> checkSat solvers assertedProps
-    case res of
-     Sat a -> return (Just a, prop, Cex ())
-     Unsat -> return (Nothing, prop, Qed ())
-     EVM.SMT.Unknown -> return (Nothing, prop, Timeout ())
-     Error txt -> error $ "Error while running solver: `" <> T.unpack txt <> "` SMT file was: `" <> filename <> "`"
+  when (debug opts) $ forM_ (zip diffEndStFilt [(1::Integer)..]) (\(x, i) -> T.writeFile ("prop-checked-" <> show i) (T.pack $ show x))
+  let
+    subsetCheck :: (Set Prop, Set Prop) -> [(Set Prop, Set Prop)] -> Bool
+    subsetCheck a b = foldr (myFunc a) False b
+      where
+        myFunc :: (Set Prop, Set Prop) -> (Set Prop, Set Prop) -> Bool -> Bool
+        myFunc (x1, y1) (x2, y2) val = case val of
+          True -> True
+          False -> isSubsetOf x2 x1 && isSubsetOf y2 y1
+    check :: [(Prop, Maybe (Set Prop, Set Prop))]
+          -> [(Set Prop, Set Prop)]
+          -> IO [(Maybe SMTCex, Prop, ProofResult () () ())]
+          -> IO [(Maybe SMTCex, Prop, ProofResult () () ())]
+    check [] _  ret = ret
+    check ((prop, input):ax) knownUnsat ret = do
+    -- TODO this used to be multi-threaded
+      let assertedProps = assertProps [prop]
+      -- let filename = "eq-check-" <> show i <> ".smt2"
+      -- when (debug opts) $ T.writeFile (filename) $ (TL.toStrict $ formatSMT2 assertedProps) <> "\n(check-sat)"
+      res <- case prop of
+        PBool False -> pure Unsat
+        _ -> case input of
+               Nothing -> checkSat solvers assertedProps
+               Just x -> if subsetCheck x knownUnsat then do
+                                                     putStrLn "useful here"
+                                                     pure Unsat
+                                                     else checkSat solvers assertedProps
+      case res of
+        Sat x -> check ax knownUnsat (fmap ((Just x, prop, Cex ()):)ret)
+        Unsat -> if isNothing input then check ax knownUnsat (fmap ((Nothing, prop, Qed ()):)ret)
+                                    else check ax (fromJust input:knownUnsat) (fmap ((Nothing, prop, Qed ()):)ret)
+        EVM.SMT.Unknown -> check ax knownUnsat (fmap ((Nothing, prop, Timeout ()):)ret)
+        Error txt -> error $ "Error while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
+  results <- check diffEndStFilt [] (pure [])
   return $ filter (\(_, _, res) -> res /= Qed ()) results
 
 both' :: (a -> b) -> (a, a) -> (b, b)
