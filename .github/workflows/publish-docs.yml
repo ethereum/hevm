@@ -18,7 +18,7 @@ jobs:
         run: nix-shell --pure --command "cd doc && mdbook build"
 
       - name: publish docs
-        uses: JamesIves/github-pages-deploy-action@4.4.1
+        uses: JamesIves/github-pages-deploy-action@v4.4.1
         with:
           branch: gh-pages
           folder: doc/book
