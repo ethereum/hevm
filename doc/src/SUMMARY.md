@@ -8,10 +8,6 @@
 - [equivalence](./equivalence.md)
 - [exec](./exec.md)
 - [dapp-test](./dapp-test.md)
-- [flatten](./flatten.md)
-- [rlp](./rlp.md)
-- [abiencode](./abiencode.md)
-- [strip-metadata](./strip-metadata.md)
 
 # Tutorials
 

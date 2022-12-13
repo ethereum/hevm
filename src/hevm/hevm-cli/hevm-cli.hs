@@ -206,25 +206,10 @@ data Command w
       , html    :: w ::: Bool         <?> "Output html report"
       , timeout :: w ::: Maybe Int    <?> "Execution timeout (default: 10 sec.)"
       }
-  | Flatten -- Concat all dependencies for a given source file
-    { sourceFile :: w ::: String       <?> "Path to solidity source file e.g. src/contract.sol"
-    , jsonFile   :: w ::: Maybe String <?> "Filename or path to dapp build output (default: out/*.solc.json)"
-    , dappRoot   :: w ::: Maybe String <?> "Path to dapp project root directory (default: . )"
-    }
-  | Version
-  | Rlp  -- RLP decode a string and print the result
-  { decode :: w ::: ByteString <?> "RLP encoded hexstring"
-  }
-  | Abiencode
-  { abi  :: w ::: Maybe String <?> "Signature of types to decode / encode"
-  , arg  :: w ::: [String]     <?> "Values to encode"
-  }
   | MerkleTest -- Insert a set of key values and check against the given root
-  { file :: w ::: String <?> "Path to .json test file"
-  }
-  | StripMetadata -- Remove metadata from contract bytecode
-  { code        :: w ::: Maybe ByteString       <?> "Program bytecode"
-  }
+      { file :: w ::: String <?> "Path to .json test file"
+      }
+  | Version
 
   deriving (Options.Generic)
 
@@ -316,8 +301,6 @@ main = do
     Equivalence {} -> equivalence cmd
     Exec {} ->
       launchExec cmd
-    Abiencode {} ->
-      print . ByteStringS $ abiencode (abi cmd) (arg cmd)
     BcTest {} ->
       launchTest cmd
     DappTest {} ->
@@ -338,23 +321,7 @@ main = do
         Just "Blockchain" -> launchScript "/run-blockchain-tests" cmd
         Just "VM" -> launchScript "/run-consensus-tests" cmd
         _ -> launchScript "/run-blockchain-tests" cmd
-    Flatten {} ->
-      withCurrentDirectory root $ do
-        theJson <- findJsonFile (jsonFile cmd)
-        readSolc theJson >>=
-          \case
-            Just (contractMap, cache) -> do
-              let dapp = dappInfo "." contractMap cache
-              EVM.Flatten.flatten dapp (pack (sourceFile cmd))
-            Nothing ->
-              error ("Failed to read Solidity JSON for `" ++ theJson ++ "'")
-    Rlp {} ->
-      case rlpdecode $ hexByteString "--decode" $ strip0x $ decode cmd of
-        Nothing -> error "Malformed RLP string"
-        Just c -> print c
     MerkleTest {} -> merkleTest cmd
-    StripMetadata {} -> print .
-      ByteStringS . stripBytecodeMetadata . hexByteString "bytecode" . strip0x $ fromJust $ code cmd
 
 launchScript :: String -> Command Options.Unwrapped -> IO ()
 launchScript script cmd =
