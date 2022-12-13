@@ -12,7 +12,7 @@ project, and was forked to this repo by the formal methods team at the Ethereum 
 
 ## Documentation
 
-User facing documentation can be found in the [hevm book]().
+User facing documentation can be found in the [hevm book](https://hevm.dev/).
 
 ## Installation
 
