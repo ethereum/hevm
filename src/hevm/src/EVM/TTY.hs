@@ -35,7 +35,6 @@ import qualified Control.Monad.Operational as Operational
 import EVM.Fetch (Fetcher)
 
 import Control.Lens hiding (List)
-import Control.Monad.Trans.Reader
 import Control.Monad.State.Strict hiding (state)
 
 import Data.Aeson.Lens
@@ -239,6 +238,7 @@ runFromVM maxIter' dappinfo oracle' vm = do
       , maxIter       = maxIter'
       , askSmtIters   = Nothing
       , smtTimeout    = Nothing
+      , smtdebug      = False
       , solver        = Nothing
       , maxDepth      = Nothing
       , match         = ""
@@ -763,7 +763,7 @@ drawVmBrowser ui =
         dapp' = dapp (view (browserVm . uiTestOpts) ui)
         Just (_, (_, c)) = listSelectedElement (view browserContractList ui)
 --        currentContract  = view (dappSolcByHash . ix ) dapp
-        maybeHash c = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord (view codehash c))
+        maybeHash h = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord (view codehash h))
 
 drawVm :: UiVmState -> [UiWidget]
 drawVm ui =
