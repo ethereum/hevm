@@ -288,6 +288,7 @@ unitTestOptions cmd solvers testFile = do
          Nothing  -> EVM.Fetch.oracle solvers Nothing
     , EVM.UnitTest.maxIter = maxIterations cmd
     , EVM.UnitTest.askSmtIters = askSmtIterations cmd
+    , EVM.UnitTest.smtdebug = smtdebug cmd
     , EVM.UnitTest.smtTimeout = smttimeout cmd
     , EVM.UnitTest.solver = solver cmd
     , EVM.UnitTest.covMatch = pack <$> covMatch cmd
@@ -389,31 +390,26 @@ findJsonFile Nothing = do
         ]
 
 equivalence :: Command Options.Unwrapped -> IO ()
-equivalence cmd = undefined
-  {-
-  do let bytecodeA = hexByteString "--code" . strip0x $ codeA cmd
-         bytecodeB = hexByteString "--code" . strip0x $ codeB cmd
-     maybeSignature <- case sig cmd of
-       Nothing -> return Nothing
-       Just sig' -> do method' <- functionAbi sig'
-                       return $ Just (view methodSignature method', snd <$> view methodInputs method')
+equivalence cmd = do
+  let bytecodeA = hexByteString "--code" . strip0x $ codeA cmd
+      bytecodeB = hexByteString "--code" . strip0x $ codeB cmd
+      veriOpts = VeriOpts { simp = True
+                            , debug = False
+                            , maxIter = maxIterations cmd
+                            , askSmtIters = askSmtIterations cmd
+                          }
 
-     void . runSMTWithTimeOut (solver cmd) (smttimeout cmd) (smtdebug cmd) . query $
-       equivalenceCheck bytecodeA bytecodeB (maxIterations cmd) (askSmtIterations cmd) maybeSignature >>= \case
-         Cex vm -> do
-           io $ putStrLn "Not equal!"
-           io $ putStrLn "Counterexample:"
-           showCounterexample vm maybeSignature
-           io exitFailure
-         Qed (postAs, postBs) -> io $ do
-           putStrLn $ "Explored: " <> show (length postAs)
-                       <> " execution paths of A and: "
-                       <> show (length postBs) <> " paths of B."
-           putStrLn "No discrepancies found."
-         Timeout () -> io $ do
-           hPutStr stderr "Solver timeout!"
-           exitFailure
-      -}
+  withSolvers Z3 3 Nothing $ \s -> do
+    res <- equivalenceCheck s bytecodeA bytecodeB veriOpts Nothing
+    case containsA (Cex()) res of
+      False -> do
+        putStrLn "No discrepancies found"
+        when (containsA (EVM.SymExec.Timeout()) res) $ do
+          putStrLn "But timeout(s) occurred"
+          exitFailure
+      True -> do
+        putStrLn $ "Not equivalent. Counterexample(s):" <> show res
+        exitFailure
 
 checkForVMErrors :: [EVM.VM] -> [String]
 checkForVMErrors [] = []

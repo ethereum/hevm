@@ -15,7 +15,8 @@ import EVM.Exec
 import EVM.Expr (litAddr, readStorage', simplify)
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel)
+import qualified EVM.SymExec as SymExec
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, VeriOpts)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.RLP
@@ -74,6 +75,7 @@ data UnitTestOptions = UnitTestOptions
   , verbose     :: Maybe Int
   , maxIter     :: Maybe Integer
   , askSmtIters :: Maybe Integer
+  , smtdebug    :: Bool
   , maxDepth    :: Maybe Int
   , smtTimeout  :: Maybe Natural
   , solver      :: Maybe Text
@@ -119,6 +121,15 @@ defaultMaxCodeSize :: W256
 defaultMaxCodeSize = 0xffffffff
 
 type ABIMethod = Text
+
+
+-- | Generate VeriOpts from UnitTestOptions
+makeVeriOpts :: UnitTestOptions -> VeriOpts
+makeVeriOpts opts =
+   defaultVeriOpts { SymExec.debug = smtdebug opts
+                   , SymExec.maxIter = maxIter opts
+                   , SymExec.askSmtIters = askSmtIters opts
+                   }
 
 -- | Top level CLI endpoint for dapp-test
 dappTest :: UnitTestOptions -> SolverGroup -> String -> Maybe String -> IO Bool

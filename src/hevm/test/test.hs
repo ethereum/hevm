@@ -14,6 +14,10 @@ import System.Process (readProcess)
 import GHC.IO.Handle (hClose)
 import GHC.Natural
 import Control.Monad
+import Text.RE.TDFA.String
+import Text.RE.Replace
+import Data.Array.IO
+import Data.Time
 
 import Prelude hiding (fail, LT, GT)
 
@@ -34,7 +38,7 @@ import Test.Tasty.Runners
 import Test.Tasty.ExpectedFailure
 
 import Control.Monad.State.Strict (execState, runState)
-import Control.Lens hiding (List, pre, (.>))
+import Control.Lens hiding (List, pre, (.>), re)
 
 import qualified Data.Vector as Vector
 import Data.String.Here
@@ -63,6 +67,8 @@ import qualified EVM.UnitTest
 import qualified Paths_hevm as Paths
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import Language.SMT2.Syntax (SpecConstant())
+import Data.List (isSubsequenceOf)
 
 main :: IO ()
 main = defaultMain tests
@@ -613,6 +619,10 @@ tests = testGroup "hevm"
         -- TODO: implement overflow checking optimizations and enable, currently this runs forever
         --runDappTest testFile "prove_distributivity" >>= assertEqual "test result" False
         runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
+    , testCase "Loop-Tests" $ do
+        let testFile = "test/contracts/pass/loops.sol"
+        runDappTestCustom testFile "prove_loop" (Just 10) False >>= assertEqual "test result" True
+        runDappTestCustom testFile "prove_loop" (Just 100) False >>= assertEqual "test result" False
     , testCase "Invariant-Tests-Pass" $ do
         let testFile = "test/contracts/pass/invariants.sol"
         runDappTest testFile ".*" >>= assertEqual "test result" True
@@ -623,9 +633,9 @@ tests = testGroup "hevm"
     , testCase "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
         runDappTest testFile ".*" >>= assertEqual "test result" True
-    , expectFail $ testCase "Cheat-Codes-Fail" $ do
+    , testCase "Cheat-Codes-Fail" $ do
         let testFile = "test/contracts/fail/cheatCodes.sol"
-        runDappTest testFile "testBadFFI" >>= assertEqual "test result" False
+        runDappTestCustom testFile "testBadFFI" Nothing False >>= assertEqual "test result" False
     ]
   , testGroup "Symbolic execution"
       [
@@ -777,6 +787,74 @@ tests = testGroup "hevm"
         (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
         putStrLn "SAR works as expected"
      ,
+     testCase "opcode-div-zero-1" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 val) external pure {
+                uint out;
+                assembly {
+                  out := div(val, 0)
+                }
+                assert(out == 0);
+
+              }
+            }
+            |]
+        [Qed _]  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        putStrLn "sdiv works as expected"
+      ,
+     testCase "opcode-div-zero-2" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 val) external pure {
+                uint out;
+                assembly {
+                  out := div(0, val)
+                }
+                assert(out == 0);
+
+              }
+            }
+            |]
+        [Qed _]  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        putStrLn "sdiv works as expected"
+     ,
+     testCase "opcode-sdiv-zero-1" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 val) external pure {
+                uint out;
+                assembly {
+                  out := sdiv(val, 0)
+                }
+                assert(out == 0);
+
+              }
+            }
+            |]
+        [Qed _]  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        putStrLn "sdiv works as expected"
+      ,
+     testCase "opcode-sdiv-zero-2" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 val) external pure {
+                uint out;
+                assembly {
+                  out := sdiv(0, val)
+                }
+                assert(out == 0);
+
+              }
+            }
+            |]
+        [Qed _]  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        putStrLn "sdiv works as expected"
+      ,
      testCase "opcode-signextend-neg" $ do
         Just c <- solcRuntime "MyContract"
             [i|
@@ -903,6 +981,46 @@ tests = testGroup "hevm"
             |]
         (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "XOR works as expected"
+      ,
+      testCase "opcode-mulmod-no-overflow" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint8 a, uint8 b, uint8 c) external pure {
+                require(a < 4);
+                require(b < 4);
+                require(c < 4);
+                uint16 r1;
+                uint16 r2;
+                uint16 g2;
+                assembly {
+                  r1 := mul(a,b)
+                  r2 := mod(r1, c)
+                  g2 := mulmod (a, b, c)
+                }
+                assert (r2 == g2);
+              }
+            }
+            |]
+        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint8,uint8,uint8)", [AbiUIntType 8, AbiUIntType 8, AbiUIntType 8])) [] defaultVeriOpts
+        putStrLn "MULMOD is fine on NON overflow values"
+      ,
+      testCase "opcode-div-res-zero-on-div-by-zero" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint16 a) external pure {
+                uint16 b = 0;
+                uint16 res;
+                assembly {
+                  res := div(a,b)
+                }
+                assert (res == 0);
+              }
+            }
+            |]
+        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint16)", [AbiUIntType 16])) [] defaultVeriOpts
+        putStrLn "DIV by zero is zero"
       ,
       -- Somewhat tautological since we are asserting the precondition
       -- on the same form as the actual "requires" clause.
@@ -1545,36 +1663,397 @@ tests = testGroup "hevm"
 
           (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "Proven"
- {- ]
+ ]
   , testGroup "Equivalence checking"
     [
-      testCase "yul optimized" $ do
-        -- These yul programs are not equivalent: (try --calldata $(seth --to-uint256 2) for example)
+      testCase "eq-yul-simple-cex" $ do
         Just aPrgm <- yul ""
           [i|
           {
-              calldatacopy(0, 0, 32)
-              switch mload(0)
-              case 0 { }
-              case 1 { }
-              default { invalid() }
+            calldatacopy(0, 0, 32)
+            switch mload(0)
+            case 0 { }
+            case 1 { }
+            default { invalid() }
           }
           |]
         Just bPrgm <- yul ""
           [i|
           {
-              calldatacopy(0, 0, 32)
-              switch mload(0)
-              case 0 { }
-              case 2 { }
-              default { invalid() }
+            calldatacopy(0, 0, 32)
+            switch mload(0)
+            case 0 { }
+            case 2 { }
+            default { invalid() }
           }
           |]
-        runSMTWith z3 $ query $ do
-          Cex _ <- equivalenceCheck aPrgm bPrgm Nothing Nothing Nothing
+        withSolvers Z3 3 Nothing $ \s -> do
+          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
+          assertBool "Must have a difference" (not (null a))
+      ,
+      testCase "eq-sol-exp-qed" $ do
+        Just aPrgm <- solcRuntime "C"
+            [i|
+              contract C {
+                function a(uint8 x) public returns (uint8 b) {
+                  unchecked {
+                    b = x*2;
+                  }
+                }
+              }
+            |]
+        Just bPrgm <- solcRuntime "C"
+          [i|
+              contract C {
+                function a(uint8 x) public returns (uint8 b) {
+                  unchecked {
+                    b =  x<<1;
+                  }
+                }
+              }
+          |]
+        withSolvers Z3 3 Nothing $ \s -> do
+          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
+          assertEqual "Must have no difference" [] a
           return ()
-          -}
+      ,
+      testCase "eq-sol-exp-cex" $ do
+        -- These yul programs are not equivalent: (try --calldata $(seth --to-uint256 2) for example)
+        Just aPrgm <- solcRuntime "C"
+            [i|
+              contract C {
+                function a(uint8 x) public returns (uint8 b) {
+                  unchecked {
+                    b = x*2+1;
+                  }
+                }
+              }
+            |]
+        Just bPrgm <- solcRuntime "C"
+          [i|
+              contract C {
+                function a(uint8 x) public returns (uint8 b) {
+                  unchecked {
+                    b =  x<<1;
+                  }
+                }
+              }
+          |]
+        withSolvers Z3 3 Nothing $ \s -> do
+          let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 2, askSmtIters = Just 2 }
+          a <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
+          assertEqual "Must be different" (containsA (Cex ()) a) True
+          return ()
+      , testCase "eq-all-yul-optimization-tests" $ do
+        let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 5, askSmtIters = Just 20 }
+            ignoredTests = [
+                      "controlFlowSimplifier/terminating_for_nested.yul"
+                    , "controlFlowSimplifier/terminating_for_nested_reversed.yul"
 
+                    -- unbounded loop --
+                    , "commonSubexpressionEliminator/branches_for.yul"
+                    , "commonSubexpressionEliminator/loop.yul"
+                    , "conditionalSimplifier/clear_after_if_continue.yul"
+                    , "conditionalSimplifier/no_opt_if_break_is_not_last.yul"
+                    , "conditionalUnsimplifier/clear_after_if_continue.yul"
+                    , "conditionalUnsimplifier/no_opt_if_break_is_not_last.yul"
+                    , "expressionSimplifier/inside_for.yul"
+                    , "forLoopConditionIntoBody/cond_types.yul"
+                    , "forLoopConditionIntoBody/simple.yul"
+                    , "fullSimplify/inside_for.yul"
+                    , "fullSuite/devcon_example.yul"
+                    , "fullSuite/loopInvariantCodeMotion.yul"
+                    , "fullSuite/no_move_loop_orig.yul"
+                    , "loadResolver/loop.yul"
+                    , "loopInvariantCodeMotion/multi.yul"
+                    , "loopInvariantCodeMotion/recursive.yul"
+                    , "loopInvariantCodeMotion/simple.yul"
+                    , "redundantAssignEliminator/for_branch.yul"
+                    , "redundantAssignEliminator/for_break.yul"
+                    , "redundantAssignEliminator/for_continue.yul"
+                    , "redundantAssignEliminator/for_decl_inside_break_continue.yul"
+                    , "redundantAssignEliminator/for_deep_noremove.yul"
+                    , "redundantAssignEliminator/for_deep_simple.yul"
+                    , "redundantAssignEliminator/for_multi_break.yul"
+                    , "redundantAssignEliminator/for_nested.yul"
+                    , "redundantAssignEliminator/for_rerun.yul"
+                    , "redundantAssignEliminator/for_stmnts_after_break_continue.yul"
+                    , "rematerialiser/branches_for1.yul"
+                    , "rematerialiser/branches_for2.yul"
+                    , "rematerialiser/for_break.yul"
+                    , "rematerialiser/for_continue.yul"
+                    , "rematerialiser/for_continue_2.yul"
+                    , "rematerialiser/for_continue_with_assignment_in_post.yul"
+                    , "rematerialiser/no_remat_in_loop.yul"
+                    , "ssaTransform/for_reassign_body.yul"
+                    , "ssaTransform/for_reassign_init.yul"
+                    , "ssaTransform/for_reassign_post.yul"
+                    , "ssaTransform/for_simple.yul"
+                    , "loopInvariantCodeMotion/nonMovable.yul"
+                    , "unusedAssignEliminator/for_rerun.yul"
+                    , "unusedAssignEliminator/for_continue_3.yul"
+                    , "unusedAssignEliminator/for_deep_simple.yul"
+                    , "ssaTransform/for_def_in_init.yul"
+                    , "rematerialiser/many_refs_small_cost_loop.yul"
+                    , "loopInvariantCodeMotion/no_move_state_loop.yul"
+                    , "loopInvariantCodeMotion/dependOnVarInLoop.yul"
+                    , "forLoopInitRewriter/empty_pre.yul"
+                    , "loadResolver/keccak_crash.yul"
+                    , "blockFlattener/for_stmt.yul" -- symb input can loop it forever
+                    , "unusedAssignEliminator/for.yul" -- not infinite, just 2**256-3
+                    , "loopInvariantCodeMotion/no_move_state.yul" -- not infinite, but rollaround on a large int
+                    , "loopInvariantCodeMotion/non-ssavar.yul" -- same as above
+                    , "forLoopInitRewriter/complex_pre.yul"
+                    , "rematerialiser/some_refs_small_cost_loop.yul" -- not infinite but 100 long
+                    , "forLoopInitRewriter/simple.yul"
+                    , "loopInvariantCodeMotion/no_move_loop.yul"
+
+                    -- unexpected symbolic arg --
+
+                    -- OpCreate2
+                    , "expressionSimplifier/create2_and_mask.yul"
+
+                    -- OpCreate
+                    , "expressionSimplifier/create_and_mask.yul"
+                    , "expressionSimplifier/large_byte_access.yul"
+
+                    -- OpMload
+                    , "yulOptimizerTests/expressionSplitter/inside_function.yul"
+                    , "fullInliner/double_inline.yul"
+                    , "fullInliner/inside_condition.yul"
+                    , "fullInliner/large_function_multi_use.yul"
+                    , "fullInliner/large_function_single_use.yul"
+                    , "fullInliner/no_inline_into_big_global_context.yul"
+                    , "fullSimplify/invariant.yul"
+                    , "fullSuite/abi_example1.yul"
+                    , "ssaAndBack/for_loop.yul"
+                    , "ssaAndBack/multi_assign_multi_var_if.yul"
+                    , "ssaAndBack/multi_assign_multi_var_switch.yul"
+                    , "ssaAndBack/two_vars.yul"
+                    , "ssaTransform/multi_assign.yul"
+                    , "ssaTransform/multi_decl.yul"
+                    , "expressionSplitter/inside_function.yul"
+                    , "fullSuite/ssaReverseComplex.yul"
+
+                    -- OpMstore
+                    , "commonSubexpressionEliminator/function_scopes.yul"
+                    , "commonSubexpressionEliminator/variable_for_variable.yul"
+                    , "expressionSplitter/trivial.yul"
+                    , "fullInliner/multi_return.yul"
+                    , "fullSimplify/constant_propagation.yul"
+                    , "fullSimplify/identity_rules_complex.yul"
+                    , "fullSuite/medium.yul"
+                    , "loadResolver/memory_with_msize.yul"
+                    , "loadResolver/merge_known_write.yul"
+                    , "loadResolver/merge_known_write_with_distance.yul"
+                    , "loadResolver/merge_unknown_write.yul"
+                    , "loadResolver/reassign_value_expression.yul"
+                    , "loadResolver/second_mstore_with_delta.yul"
+                    , "loadResolver/second_store_with_delta.yul"
+                    , "loadResolver/simple.yul"
+                    , "loadResolver/simple_memory.yul"
+                    , "fullSuite/ssaReverse.yul"
+                    , "rematerialiser/cheap_caller.yul"
+                    , "rematerialiser/non_movable_instruction.yul"
+                    , "ssaAndBack/multi_assign.yul"
+                    , "ssaAndBack/multi_assign_if.yul"
+                    , "ssaAndBack/multi_assign_switch.yul"
+                    , "ssaAndBack/simple.yul"
+                    , "ssaReverser/simple.yul"
+
+                    -- OpMstore8
+                    , "loadResolver/memory_with_different_kinds_of_invalidation.yul"
+
+                    -- OpRevert
+                    , "ssaAndBack/ssaReverse.yul"
+                    , "redundantAssignEliminator/for_continue_3.yul"
+                    , "controlFlowSimplifier/terminating_for_revert.yul"
+
+                    -- invalid test --
+                    -- https://github.com/ethereum/solidity/issues/9500
+                    , "commonSubexpressionEliminator/object_access.yul"
+                    , "expressionSplitter/object_access.yul"
+                    , "fullSuite/stack_compressor_msize.yul"
+                    , "varNameCleaner/function_names.yul"
+
+                    -- stack too deep --
+                    , "fullSuite/abi2.yul"
+                    , "fullSuite/aztec.yul"
+                    , "stackCompressor/inlineInBlock.yul"
+                    , "stackCompressor/inlineInFunction.yul"
+                    , "stackCompressor/unusedPrunerWithMSize.yul"
+                    , "wordSizeTransform/function_call.yul"
+                    , "fullInliner/no_inline_into_big_function.yul"
+                    , "controlFlowSimplifier/switch_only_default.yul"
+                    , "stackLimitEvader" -- all that are in this subdirectory
+
+                    -- wrong number of args --
+                    , "wordSizeTransform/functional_instruction.yul"
+                    , "wordSizeTransform/if.yul"
+                    , "wordSizeTransform/or_bool_renamed.yul"
+                    , "wordSizeTransform/switch_1.yul"
+                    , "wordSizeTransform/switch_2.yul"
+                    , "wordSizeTransform/switch_3.yul"
+                    , "wordSizeTransform/switch_4.yul"
+                    , "wordSizeTransform/switch_5.yul"
+                    , "unusedFunctionParameterPruner/too_many_arguments.yul"
+
+                    -- typed yul --
+                    , "conditionalSimplifier/add_correct_type_wasm.yul"
+                    , "conditionalSimplifier/add_correct_type.yul"
+                    , "disambiguator/for_statement.yul"
+                    , "disambiguator/funtion_call.yul"
+                    , "disambiguator/if_statement.yul"
+                    , "disambiguator/long_names.yul"
+                    , "disambiguator/switch_statement.yul"
+                    , "disambiguator/variables_clash.yul"
+                    , "disambiguator/variables_inside_functions.yul"
+                    , "disambiguator/variables.yul"
+                    , "expressionInliner/simple.yul"
+                    , "expressionInliner/with_args.yul"
+                    , "expressionSplitter/typed.yul"
+                    , "fullInliner/multi_return_typed.yul"
+                    , "functionGrouper/empty_block.yul"
+                    , "functionGrouper/multi_fun_mixed.yul"
+                    , "functionGrouper/nested_fun.yul"
+                    , "functionGrouper/single_fun.yul"
+                    , "functionHoister/empty_block.yul"
+                    , "functionHoister/multi_mixed.yul"
+                    , "functionHoister/nested.yul"
+                    , "functionHoister/single.yul"
+                    , "mainFunction/empty_block.yul"
+                    , "mainFunction/multi_fun_mixed.yul"
+                    , "mainFunction/nested_fun.yul"
+                    , "mainFunction/single_fun.yul"
+                    , "ssaTransform/typed_for.yul"
+                    , "ssaTransform/typed_switch.yul"
+                    , "ssaTransform/typed.yul"
+                    , "varDeclInitializer/typed.yul"
+
+                    -- New: symbolic index on MSTORE/MLOAD/CopySlice/CallDataCopy/ExtCodeCopy/Revert,
+                    --      or exponent is symbolic (requires symbolic gas)
+                    --      or SHA3 offset symbolic
+                    , "blockFlattener/basic.yul"
+                    , "commonSubexpressionEliminator/case2.yul"
+                    , "equalStoreEliminator/indirect_inferrence.yul"
+                    , "expressionJoiner/reassignment.yul"
+                    , "expressionSimplifier/exp_simplifications.yul"
+                    , "expressionSimplifier/zero_length_read.yul"
+                    , "expressionSimplifier/side_effects_in_for_condition.yul"
+                    , "fullSuite/create_and_mask.yul"
+                    , "fullSuite/unusedFunctionParameterPruner_return.yul"
+                    , "fullSuite/unusedFunctionParameterPruner_simple.yul"
+                    , "fullSuite/unusedFunctionParameterPruner.yul"
+                    , "loadResolver/double_mload_with_other_reassignment.yul"
+                    , "loadResolver/double_mload_with_reassignment.yul"
+                    , "loadResolver/double_mload.yul"
+                    , "loadResolver/keccak_reuse_basic.yul"
+                    , "loadResolver/keccak_reuse_expr_mstore.yul"
+                    , "loadResolver/keccak_reuse_msize.yul"
+                    , "loadResolver/keccak_reuse_mstore.yul"
+                    , "loadResolver/keccak_reuse_reassigned_branch.yul"
+                    , "loadResolver/keccak_reuse_reassigned_value.yul"
+                    , "loadResolver/keccak_symbolic_memory.yul"
+                    , "loadResolver/merge_mload_with_known_distance.yul"
+                    , "loadResolver/mload_self.yul"
+                    , "loadResolver/keccak_reuse_in_expression.yul"
+                    , "loopInvariantCodeMotion/complex_move.yul"
+                    , "loopInvariantCodeMotion/move_memory_function.yul"
+                    , "loopInvariantCodeMotion/move_state_function.yul"
+                    , "loopInvariantCodeMotion/no_move_memory.yul"
+                    , "loopInvariantCodeMotion/no_move_storage.yul"
+                    , "loopInvariantCodeMotion/not_first.yul"
+                    , "ssaAndBack/single_assign_if.yul"
+                    , "ssaAndBack/single_assign_switch.yul"
+                    , "structuralSimplifier/switch_inline_no_match.yul"
+                    , "unusedFunctionParameterPruner/simple.yul"
+                    , "unusedStoreEliminator/covering_calldatacopy.yul"
+                    , "unusedStoreEliminator/remove_before_revert.yul"
+                    , "unusedStoreEliminator/unknown_length2.yul"
+                    , "unusedStoreEliminator/unrelated_relative.yul"
+
+                    -- Takes too long, would timeout on most test setups.
+                    -- We could probably fix these by "bunching together" queries
+                    , "fullSuite/clear_after_if_continue.yul"
+                    , "reasoningBasedSimplifier/smod.yul"
+                    , "reasoningBasedSimplifier/mulmod.yul"
+
+                    -- TODO check what's wrong with these!
+                    , "unusedStoreEliminator/create_inside_function.yul"
+                    , "fullSimplify/not_applied_removes_non_constant_and_not_movable.yul" -- create bug?
+                    , "unusedStoreEliminator/create.yul" -- create bug?
+                    , "fullSuite/extcodelength.yul" -- extcodecopy bug?
+                    , "loadResolver/keccak_short.yul" -- keccak bug
+                    , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV I think?
+                    ]
+
+        let dir = "solidity/test/libyul/yulOptimizerTests"
+        dircontents <- System.Directory.listDirectory dir
+        let
+          fullpaths = map ((dir ++ "/") ++) dircontents
+          recursiveList :: [FilePath] -> [FilePath] -> IO [FilePath]
+          recursiveList (a:ax) b =  do
+              isdir <- doesDirectoryExist a
+              case isdir of
+                True  -> do
+                    fs <- System.Directory.listDirectory a
+                    let fs2 = map ((a ++ "/") ++) fs
+                    recursiveList (ax++fs2) b
+                False -> recursiveList ax (a:b)
+          recursiveList [] b = pure b
+        files <- recursiveList fullpaths []
+        --
+        let filesFiltered = filter (\file -> not $ any (\filt -> Data.List.isSubsequenceOf filt file) ignoredTests) files
+        --
+        -- Takes one file which follows the Solidity Yul optimizer unit tests format,
+        -- extracts both the nonoptimized and the optimized versions, and checks equivalence.
+        forM_ filesFiltered (\f-> do
+          origcont <- readFile f
+          let
+            onlyAfter pattern (a:ax) = if a =~ pattern then (a:ax) else onlyAfter pattern ax
+            onlyAfter _ [] = []
+            replaceOnce pat repl inp = go inp [] where
+              go (a:ax) b = if a =~ pat then let a2 = replaceAll repl $ a *=~ pat in b ++ a2:ax
+                                        else go ax (b ++ [a])
+              go [] b = b
+
+            -- takes a yul program and ensures memory is symbolic by prepending
+            -- `calldatacopy(0,0,1024)`. (calldata is symbolic, but memory starts empty).
+            -- This forces the exploration of more branches, and makes the test vectors a
+            -- little more thorough.
+            symbolicMem (a:ax) = if a =~ [re|"^ *object"|] then
+                                      let a2 = replaceAll "a calldatacopy(0,0,1024)" $ a *=~ [re|code {|]
+                                      in (a2:ax)
+                                    else replaceOnce [re|^ *{|] "{\ncalldatacopy(0,0,1024)" $ onlyAfter [re|^ *{|] (a:ax)
+            symbolicMem _ = error "Program too short"
+
+            unfiltered = lines origcont
+            filteredASym = symbolicMem [ x | x <- unfiltered, (not $ x =~ [re|^//|]) && (not $ x =~ [re|^$|]) ]
+            filteredBSym = symbolicMem [ replaceAll "" $ x *=~[re|^//|] | x <- onlyAfter [re|^// step:|] unfiltered, not $ x =~ [re|^$|] ]
+          start <- getCurrentTime
+          putStrLn $ "Checking file: " <> f
+          when (debug myVeriOpts) $ do
+            putStrLn "-------------Original Below-----------------"
+            mapM_ putStrLn unfiltered
+            putStrLn "------------- Filtered A + Symb below-----------------"
+            mapM_ putStrLn filteredASym
+            putStrLn "------------- Filtered B + Symb below-----------------"
+            mapM_ putStrLn filteredBSym
+            putStrLn "------------- END -----------------"
+          Just aPrgm <- yul "" $ Data.Text.pack $ unlines filteredASym
+          Just bPrgm <- yul "" $ Data.Text.pack $ unlines filteredBSym
+          withSolvers CVC5 6 (Just 3) $ \s -> do
+          res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
+          end <- getCurrentTime
+          case containsA (Cex()) res of
+            False -> do
+              print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
+              let timeouts = filter (\(_, _, c) -> c == EVM.SymExec.Timeout()) res
+              unless (null timeouts) $ putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
+            True -> do
+              putStrLn $ "Not OK: " <> show f <> " Got: " <> show res
+              error "Was NOT equivalent, error"
+         )
     ]
   ]
   where
@@ -1818,10 +2297,10 @@ genWord litFreq sz = frequency
     , liftM2 Mul subWord subWord
     , liftM2 Div subWord subWord
     , liftM2 SDiv subWord subWord
-    --, liftM2 Mod subWord subWord
-    --, liftM2 SMod subWord subWord
+    , liftM2 Mod subWord subWord
+    , liftM2 SMod subWord subWord
     --, liftM3 AddMod subWord subWord subWord
-    --, liftM3 MulMod subWord subWord subWord
+    --, liftM3 MulMod subWord subWord subWord -- it works, but it's VERY SLOW
     --, liftM2 Exp subWord litWord
     , liftM2 SEx subWord subWord
     , liftM2 Min subWord subWord
@@ -1968,8 +2447,8 @@ bothM f (a, a') = do
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
 
-runDappTest :: FilePath -> Text -> IO Bool
-runDappTest testFile match = do
+runDappTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> IO Bool
+runDappTestCustom testFile match maxIter ffiAllowed = do
   root <- Paths.getDataDir
   (json, _) <- compileWithDSTest testFile
   --TIO.writeFile "output.json" json
@@ -1978,8 +2457,11 @@ runDappTest testFile match = do
       hClose handle
       TIO.writeFile file json
       withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json match
+        opts <- testOpts solvers root json match maxIter ffiAllowed
         dappTest opts solvers file Nothing
+
+runDappTest :: FilePath -> Text -> IO Bool
+runDappTest testFile match = runDappTestCustom testFile match Nothing True
 
 debugDappTest :: FilePath -> IO ()
 debugDappTest testFile = do
@@ -1991,12 +2473,11 @@ debugDappTest testFile = do
       hClose handle
       TIO.writeFile file json
       withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json ".*"
+        opts <- testOpts solvers root json ".*" Nothing True
         TTY.main opts root file
 
-
-testOpts :: SolverGroup -> FilePath -> Text -> Text -> IO UnitTestOptions
-testOpts solvers root solcJson match = do
+testOpts :: SolverGroup -> FilePath -> Text -> Text -> Maybe Integer -> Bool -> IO UnitTestOptions
+testOpts solvers root solcJson match maxIter allowFFI= do
   srcInfo <- case readJSON solcJson of
                Nothing -> error "Could not read solc json"
                Just (contractMap, asts, sources) -> do
@@ -2007,12 +2488,13 @@ testOpts solvers root solcJson match = do
 
   pure EVM.UnitTest.UnitTestOptions
     { EVM.UnitTest.oracle = Fetch.oracle solvers Nothing
-    , EVM.UnitTest.maxIter = Nothing
+    , EVM.UnitTest.maxIter = maxIter
     , EVM.UnitTest.askSmtIters = Nothing
+    , EVM.UnitTest.smtdebug = False
     , EVM.UnitTest.smtTimeout = Nothing
     , EVM.UnitTest.solver = Nothing
     , EVM.UnitTest.covMatch = Nothing
-    , EVM.UnitTest.verbose = Nothing
+    , EVM.UnitTest.verbose = Just 1
     , EVM.UnitTest.match = match
     , EVM.UnitTest.maxDepth = Nothing
     , EVM.UnitTest.fuzzRuns = 100
@@ -2020,7 +2502,7 @@ testOpts solvers root solcJson match = do
     , EVM.UnitTest.vmModifier = id
     , EVM.UnitTest.testParams = params
     , EVM.UnitTest.dapp = srcInfo
-    , EVM.UnitTest.ffiAllowed = True
+    , EVM.UnitTest.ffiAllowed = allowFFI
     }
 
 compileWithDSTest :: FilePath -> IO (Text, Text)

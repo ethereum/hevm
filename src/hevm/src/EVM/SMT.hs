@@ -25,6 +25,7 @@ import Language.SMT2.Syntax (SpecConstant(..), GeneralRes(..), Term(..), QualIde
 import Data.Word
 import Numeric (readHex)
 import Data.ByteString (ByteString)
+import Data.Maybe (fromMaybe)
 
 import qualified Data.ByteString as BS
 import qualified Data.List as List
@@ -504,8 +505,8 @@ exprToSMT = \case
     eight nine ten eleven twelve thirteen fourteen fifteen
     sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree
     twentyfour twentyfive twentysix twentyseven twentyeight twentynine thirty thirtyone
-    -> concatBytes $ z :|
-        [ o, two, three, four, five, six, seven
+    -> concatBytes [
+        z, o, two, three, four, five, six, seven
         , eight, nine, ten, eleven, twelve, thirteen, fourteen, fifteen
         , sixteen, seventeen, eighteen, nineteen, twenty, twentyone, twentytwo, twentythree
         , twentyfour, twentyfive, twentysix, twentyseven, twentyeight, twentynine, thirty, thirtyone]
@@ -513,8 +514,6 @@ exprToSMT = \case
   Add a b -> op2 "bvadd" a b
   Sub a b -> op2 "bvsub" a b
   Mul a b -> op2 "bvmul" a b
-  Div a b -> op2 "bvudiv" a b
-  SDiv a b -> op2 "bvsdiv" a b
   Exp a b -> case b of
                Lit b' -> expandExp a b'
                _ -> error "cannot encode symbolic exponentation into SMT"
@@ -551,6 +550,19 @@ exprToSMT = \case
   SHR a b -> op2 "bvlshr" b a
   SAR a b -> op2 "bvashr" b a
   SEx a b -> op2 "signext" a b
+  Div a b -> op2CheckZero "bvudiv" a b
+  SDiv a b -> op2CheckZero "bvsdiv" a b
+  Mod a b -> op2CheckZero "bvurem" a b
+  SMod a b -> op2CheckZero "bvsrem" a b
+  -- NOTE: this needs to do the MUL at a higher precision, then MOD, then downcast
+  MulMod a b c ->
+    let aExp = exprToSMT a
+        bExp = exprToSMT b
+        cExp = exprToSMT c
+        aLift = "(concat (_ bv0 256) " <> aExp <> ")"
+        bLift = "(concat (_ bv0 256) " <> bExp <> ")"
+        cLift = "(concat (_ bv0 256) " <> cExp <> ")"
+    in  "((_ extract 255 0) (ite (= " <> cExp <> " (_ bv0 256)) (_ bv0 512) (bvurem (bvmul " <> aLift `sp` bLift <> ")" <> cLift <> ")))"
   EqByte a b ->
     let cond = op2 "=" a b in
     "(ite " <> cond `sp` one `sp` zero <> ")"
@@ -630,6 +642,10 @@ exprToSMT = \case
           benc = exprToSMT b
           cenc = exprToSMT c in
       "(" <> op `sp` aenc `sp` benc `sp` cenc <> ")"
+    op2CheckZero op a b =
+      let aenc = exprToSMT a
+          benc = exprToSMT b in
+      "(ite (= " <> benc <> " (_ bv0 256)) (_ bv0 256) " <>  "(" <> op `sp` aenc `sp` benc <> "))"
 
 sp :: Builder -> Builder -> Builder
 a `sp` b = a <> (fromText " ") <> b
@@ -903,7 +919,7 @@ withSolvers solver count timeout cont = do
       out <- sendScript inst (SMT2 ("(reset)" : cmds) cexvars)
       case out of
         -- if we got an error then return it
-        Left e -> writeChan r (Error (T.toStrict e))
+        Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
         -- otherwise call (check-sat), parse the result, and send it down the result channel
         Right () -> do
           sat <- sendLine inst "(check-sat)"
@@ -929,8 +945,8 @@ withSolvers solver count timeout cont = do
       writeChan availableInstances inst
 
 -- | Arguments used when spawing a solver instance
-solverArgs :: Solver -> [Text]
-solverArgs = \case
+solverArgs :: Solver -> Maybe (Natural) -> [Text]
+solverArgs solver timeout = case solver of
   Bitwuzla -> error "TODO: Bitwuzla args"
   Z3 ->
     [ "-in" ]
@@ -938,21 +954,24 @@ solverArgs = \case
     [ "--lang=smt"
     , "--no-interactive"
     , "--produce-models"
+    , "--tlimit-per=" <> T.pack (show (1000 * fromMaybe 10 timeout))
     ]
   Custom _ -> []
 
 -- | Spawns a solver instance, and sets the various global config options that we use for our queries
 spawnSolver :: Solver -> Maybe (Natural) -> IO SolverInstance
 spawnSolver solver timeout = do
-  let cmd = (proc (show solver) (fmap T.unpack $ solverArgs solver)) { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe }
+  let cmd = (proc (show solver) (fmap T.unpack $ solverArgs solver timeout)) { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe }
   (Just stdin, Just stdout, Just stderr, process) <- createProcess cmd
   hSetBuffering stdin (BlockBuffering (Just 1000000))
   let solverInstance = SolverInstance solver stdin stdout stderr process
   case timeout of
     Nothing -> pure solverInstance
-    Just t -> do
-      _ <- sendLine' solverInstance $ "(set-option :timeout " <> T.pack (show t) <> ")"
-      pure solverInstance
+    Just t -> case solver of
+        CVC5 -> pure solverInstance
+        _ -> do
+          _ <- sendLine' solverInstance $ "(set-option :timeout " <> T.pack (show t) <> ")"
+          pure solverInstance
 
 -- | Cleanly shutdown a running solver instnace
 stopSolver :: SolverInstance -> IO ()
@@ -1037,11 +1056,14 @@ expandExp base expnt
   | otherwise =
     let b = exprToSMT base
         n = expandExp base (expnt - 1) in
-    "(* " <> b `sp` n <> ")"
+    "(bvmul " <> b `sp` n <> ")"
 
 -- | Concatenates a list of bytes into a larger bitvector
-concatBytes :: NonEmpty (Expr Byte) -> Builder
-concatBytes bytes = foldl wrap "" $ NE.reverse bytes
+concatBytes :: [Expr Byte] -> Builder
+concatBytes bytes =
+  let bytesRev = reverse bytes
+      a2 = exprToSMT (head bytesRev) in
+  foldl wrap a2 $ tail bytesRev
   where
     wrap inner byte =
       let byteSMT = exprToSMT byte in

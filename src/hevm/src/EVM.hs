@@ -885,7 +885,7 @@ exec1 = do
                     next
                     assign (state . stack) xs
 
-                    let jump True = vmError InvalidMemoryAccess
+                    let jump True = vmError EVM.InvalidMemoryAccess
                         jump False = copyBytesToMemory (the state returndata) xSize' xFrom xTo'
 
                     case (xFrom, bufLength (the state returndata)) of
@@ -1110,6 +1110,9 @@ exec1 = do
 
         -- op: EXP
         0x0a ->
+          -- NOTE: this can be done symbolically using unrolling like this:
+          --       https://hackage.haskell.org/package/sbv-9.0/docs/src/Data.SBV.Core.Model.html#.%5E
+          --       However, it requires symbolic gas, since the gas depends on the exponent
           case stk of
             (base:exponent':xs) -> forceConcrete exponent' "EXP: symbolic exponent" $ \exponent ->
               let cost = if exponent == 0
@@ -1766,7 +1769,7 @@ limitStack :: Int -> EVM () -> EVM ()
 limitStack n continue = do
   stk <- use (state . stack)
   if length stk + n > 1024
-    then vmError StackLimitExceeded
+    then vmError EVM.StackLimitExceeded
     else continue
 
 notStatic :: EVM () -> EVM ()
@@ -2566,14 +2569,14 @@ checkJump x xs = do
         b <- if x < num (length ops) then ops V.!? num x else Nothing
         unlitByte b
   case op of
-    Nothing -> vmError BadJumpDestination
+    Nothing -> vmError EVM.BadJumpDestination
     Just b ->
       if 0x5b == b && OpJumpdest == snd (theCodeOps RegularVector.! (theOpIxMap Vector.! num x))
          then do
            state . stack .= xs
            state . pc .= num x
          else
-           vmError BadJumpDestination
+           vmError EVM.BadJumpDestination
 
 opSize :: Word8 -> Int
 opSize x | x >= 0x60 && x <= 0x7f = num x - 0x60 + 2
