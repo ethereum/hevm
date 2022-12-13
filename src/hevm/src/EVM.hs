@@ -205,7 +205,6 @@ data VMOpts = VMOpts
   , vmoptNumber :: W256
   , vmoptTimestamp :: Expr EWord
   , vmoptCoinbase :: Addr
-  , vmoptDifficulty :: W256
   , vmoptPrevRandao :: W256
   , vmoptMaxCodeSize :: W256
   , vmoptBlockGaslimit :: W256
@@ -382,7 +381,6 @@ data Block = Block
   , _timestamp   :: Expr EWord
   , _number      :: W256
   , _prevRandao  :: W256
-  , _difficulty  :: W256
   , _gaslimit    :: W256
   , _baseFee     :: W256
   , _maxCodeSize :: W256
@@ -492,7 +490,6 @@ makeVm o =
     { _coinbase = vmoptCoinbase o
     , _timestamp = vmoptTimestamp o
     , _number = vmoptNumber o
-    , _difficulty = vmoptDifficulty o
     , _prevRandao = vmoptPrevRandao o
     , _maxCodeSize = vmoptMaxCodeSize o
     , _gaslimit = vmoptBlockGaslimit o

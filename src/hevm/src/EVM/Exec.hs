@@ -33,7 +33,6 @@ vmForEthrunCreation creationCode =
     , vmoptTimestamp = (Lit 0)
     , vmoptBlockGaslimit = 0
     , vmoptGasprice = 0
-    , vmoptDifficulty = 0
     , vmoptPrevRandao = 42069
     , vmoptGas = 0xffffffffffffffff
     , vmoptGaslimit = 0xffffffffffffffff

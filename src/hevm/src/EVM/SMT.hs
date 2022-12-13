@@ -527,7 +527,7 @@ exprToSMT = \case
   Coinbase -> "coinbase"
   Timestamp -> "timestamp"
   BlockNumber -> "blocknumber"
-  Difficulty -> "difficulty"
+  PrevRandao -> "prevrandao"
   GasLimit -> "gaslimit"
   ChainId -> "chainid"
   BaseFee -> "basefee"

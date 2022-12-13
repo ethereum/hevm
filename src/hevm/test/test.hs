@@ -1795,7 +1795,7 @@ genWord litFreq 0 = frequency
       , pure Coinbase
       , pure Timestamp
       , pure BlockNumber
-      , pure Difficulty
+      , pure PrevRandao
       , pure GasLimit
       , pure ChainId
       , pure BaseFee

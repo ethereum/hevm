@@ -208,7 +208,7 @@ data Expr (a :: EType) where
   Coinbase       :: Expr EWord
   Timestamp      :: Expr EWord
   BlockNumber    :: Expr EWord
-  Difficulty     :: Expr EWord
+  PrevRandao     :: Expr EWord
   GasLimit       :: Expr EWord
   ChainId        :: Expr EWord
   BaseFee        :: Expr EWord

@@ -414,7 +414,6 @@ initVm bs = vm
       , EVM.vmoptBlockGaslimit = 0
       , EVM.vmoptGasprice      = 0
       , EVM.vmoptMaxCodeSize   = 0xffffffff
-      , EVM.vmoptDifficulty    = 0
       , EVM.vmoptPrevRandao    = 420
       , EVM.vmoptSchedule      = FeeSchedule.berlin
       , EVM.vmoptChainId       = 1

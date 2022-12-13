@@ -106,12 +106,17 @@ parseBlock j = do
   coinbase   <- readText <$> j ^? key "miner" . _String
   timestamp  <- Lit . readText <$> j ^? key "timestamp" . _String
   number     <- readText <$> j ^? key "number" . _String
-  difficulty <- readText <$> j ^? key "difficulty" . _String
   gasLimit   <- readText <$> j ^? key "gasLimit" . _String
-  let baseFee = readText <$> j ^? key "baseFeePerGas" . _String
-  let prevRandao = readText <$> j ^? key "prevRandao" . _String
+  let
+   baseFee = readText <$> j ^? key "baseFeePerGas" . _String
+   prevRandao = readText <$> j ^? key "prevRandao" . _String
+   difficulty = readText <$> j ^? key "difficulty" . _String
+   prd = case (prevRandao, difficulty) of
+     (Just p, Nothing) -> p
+     (Nothing, Just d) -> d
+     _ -> error "Internal Error: block contains both difficulty and prevRandao"
   -- default codesize, default gas limit, default feescedule
-  return $ EVM.Block coinbase timestamp number (fromMaybe 0 prevRandao) difficulty gasLimit (fromMaybe 0 baseFee) 0xffffffff FeeSchedule.berlin
+  return $ EVM.Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff FeeSchedule.berlin
 
 fetchWithSession :: Text -> Session -> Value -> IO (Maybe Value)
 fetchWithSession url sess x = do
