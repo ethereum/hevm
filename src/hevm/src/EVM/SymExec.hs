@@ -1,3 +1,4 @@
+{-# Language TupleSections #-}
 {-# Language DataKinds #-}
 
 module EVM.SymExec where
@@ -624,8 +625,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
           False -> isSubsetOf x2 x1 && isSubsetOf y2 y1
     check :: [(Prop, Maybe (Set Prop, Set Prop))]
           -> [(Set Prop, Set Prop)]
-          -> IO [(Maybe SMTCex, Prop, ProofResult () () ())]
-          -> IO [(Maybe SMTCex, Prop, ProofResult () () ())]
+          -> IO [(Maybe SMTCex, Prop, ProofResult () () (), Bool)]
+          -> IO [(Maybe SMTCex, Prop, ProofResult () () (), Bool)]
     check [] _  ret = ret
     check ((prop, input):ax) knownUnsat ret = do
     -- TODO this used to be multi-threaded
@@ -633,21 +634,21 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
       -- let filename = "eq-check-" <> show i <> ".smt2"
       -- when (debug opts) $ T.writeFile (filename) $ (TL.toStrict $ formatSMT2 assertedProps) <> "\n(check-sat)"
       res <- case prop of
-        PBool False -> pure Unsat
+        PBool False -> pure (False, Unsat)
         _ -> case input of
-               Nothing -> checkSat solvers assertedProps
-               Just x -> if subsetCheck x knownUnsat then do
-                                                     putStrLn "useful here"
-                                                     pure Unsat
-                                                     else checkSat solvers assertedProps
+               Nothing -> (fmap ((False),) (checkSat solvers assertedProps))
+               Just x -> if subsetCheck x knownUnsat then pure (True, Unsat)
+                                                     else (fmap ((False),) (checkSat solvers assertedProps))
       case res of
-        Sat x -> check ax knownUnsat (fmap ((Just x, prop, Cex ()):)ret)
-        Unsat -> if isNothing input then check ax knownUnsat (fmap ((Nothing, prop, Qed ()):)ret)
-                                    else check ax (fromJust input:knownUnsat) (fmap ((Nothing, prop, Qed ()):)ret)
-        EVM.SMT.Unknown -> check ax knownUnsat (fmap ((Nothing, prop, Timeout ()):)ret)
-        Error txt -> error $ "Error while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
+        (_, Sat x) -> check ax knownUnsat (fmap ((Just x, prop, Cex (), False):)ret)
+        (quick, Unsat) -> if isNothing input || quick then check ax knownUnsat (fmap ((Nothing, prop, Qed (), quick):)ret)
+                              else check ax (fromJust input:knownUnsat) (fmap ((Nothing, prop, Qed (), False):)ret)
+        (_, EVM.SMT.Unknown) -> check ax knownUnsat (fmap ((Nothing, prop, Timeout (), False):)ret)
+        (_, Error txt) -> error $ "Error while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
   results <- check diffEndStFilt [] (pure [])
-  return $ filter (\(_, _, res) -> res /= Qed ()) results
+  let useful = foldr (\(_, _, _, b) n -> if b then n+1 else n) (0::Integer) results
+  putStrLn $ "Reuse of previous queries was Useful in " <> (show useful) <> " cases"
+  return $ filter (\(_, _, res) -> res /= Qed ()) $ foldr (\(a,b, c, _) r -> (a,b,c):r) [] results
 
 both' :: (a -> b) -> (a, a) -> (b, b)
 both' f (x, y) = (f x, f y)
