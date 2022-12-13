@@ -14,7 +14,6 @@ import System.Directory
 import Data.Typeable
 
 import Data.String.Here
-import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
@@ -30,7 +29,6 @@ import EVM.Format (formatExpr)
 import EVM.Dapp (dappInfo)
 import GHC.Conc
 import System.Exit (exitFailure)
-import qualified EVM.Expr as Expr
 import qualified EVM.Fetch as Fetch
 import qualified EVM.FeeSchedule as FeeSchedule
 import qualified Data.Vector as V
@@ -71,6 +69,7 @@ testOpts solvers root testFile = do
     , EVM.UnitTest.maxIter = Nothing
     , EVM.UnitTest.askSmtIters = Nothing
     , EVM.UnitTest.smtTimeout = Nothing
+    , EVM.UnitTest.smtdebug = False
     , EVM.UnitTest.solver = Nothing
     , EVM.UnitTest.covMatch = Nothing
     , EVM.UnitTest.verbose = Nothing
