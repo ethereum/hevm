@@ -1,0 +1,15 @@
+{
+  "name": "hevm-book",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "parcel build theme/theme.js --no-source-maps && cp dist/theme.js theme/highlight.js"
+  },
+  "devDependencies": {
+    "parcel": "^2.8.1"
+  },
+  "dependencies": {
+    "highlight.js": "^10.7.3",
+    "highlightjs-solidity": "^2.0.5"
+  }
+}
