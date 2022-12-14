@@ -1430,6 +1430,50 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
+        testCase "check-keccak-constant-strings" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              string a;
+              function f(uint x) external {
+                assert(keccak256(abi.encodePacked("mate")) == keccak256(abi.encodePacked("mate")));
+              }
+            }
+            |]
+          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
+        testCase "check-keccak-encode-fixed-struct" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              struct Book {
+                uint a;
+                uint b;
+              }
+              Book book1;
+              Book book2;
+              function f(uint x) external {
+                assert(keccak256(abi.encode(book1)) == keccak256(abi.encode(book2)));
+              }
+            }
+            |]
+          [Cex _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
+          putStrLn "Found Cex"
+        ,
+        testCase "check-keccak-symb-single-string" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              string a;
+              function f(uint x) external {
+                assert(keccak256(abi.encodePacked(a)) == keccak256(abi.encodePacked(a)));
+              }
+            }
+            |]
+          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
         testCase "check-asm-byte-in-bounds" $ do
           Just c <- solcRuntime "C"
             [i|
