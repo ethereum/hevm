@@ -26,12 +26,12 @@ import Data.Typeable
 import Data.List (elemIndex)
 import Data.DoubleWord
 import Test.Tasty
-import Test.Tasty.QuickCheck
+import Test.Tasty.QuickCheck hiding (Failure)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty.HUnit
-import Test.Tasty.Runners
+import Test.Tasty.Runners hiding (Failure)
 import Test.Tasty.ExpectedFailure
 
 import Control.Monad.State.Strict (execState, runState)
@@ -2275,9 +2275,9 @@ genName = fmap (T.pack . ("esc_" <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
- [ pure $ Invalid []
- , pure $ EVM.Types.IllegalOverflow []
- , pure $ SelfDestruct []
+ [ pure $ Failure [] Invalid
+ , pure $ Failure [] EVM.Types.IllegalOverflow
+ , pure $ Failure [] SelfDestruct
  ]
 genEnd sz = oneof
  [ fmap (EVM.Types.Revert []) subBuf

@@ -11,7 +11,7 @@ import Prelude hiding (log, exponent, GT, LT)
 import Data.Text (unpack)
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import EVM.ABI
-import EVM.Types hiding (IllegalOverflow)
+import EVM.Types hiding (IllegalOverflow, Error)
 import EVM.Solidity
 import EVM.Concrete (createAddress, create2Address)
 import EVM.Op
