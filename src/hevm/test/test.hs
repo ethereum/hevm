@@ -16,7 +16,6 @@ import GHC.Natural
 import Control.Monad
 import Text.RE.TDFA.String
 import Text.RE.Replace
-import Data.Array.IO
 import Data.Time
 
 import Prelude hiding (fail, LT, GT)
@@ -47,7 +46,7 @@ import qualified Data.Map.Strict as Map
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
 
-import EVM hiding (Query)
+import EVM hiding (Query, allowFFI)
 import EVM.SymExec
 import EVM.UnitTest (dappTest, UnitTestOptions, getParametersFromEnvironmentVariables)
 import EVM.ABI
@@ -67,7 +66,6 @@ import qualified EVM.UnitTest
 import qualified Paths_hevm as Paths
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Language.SMT2.Syntax (SpecConstant())
 import Data.List (isSubsequenceOf)
 
 main :: IO ()
@@ -801,7 +799,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _]  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
       ,
      testCase "opcode-div-zero-2" $ do
@@ -818,7 +816,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _]  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
      ,
      testCase "opcode-sdiv-zero-1" $ do
@@ -835,7 +833,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _]  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
       ,
      testCase "opcode-sdiv-zero-2" $ do
@@ -852,7 +850,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _]  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
       ,
      testCase "opcode-signextend-neg" $ do
@@ -1002,7 +1000,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint8,uint8,uint8)", [AbiUIntType 8, AbiUIntType 8, AbiUIntType 8])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint8,uint8,uint8)", [AbiUIntType 8, AbiUIntType 8, AbiUIntType 8])) [] defaultVeriOpts
         putStrLn "MULMOD is fine on NON overflow values"
       ,
       testCase "opcode-div-res-zero-on-div-by-zero" $ do
@@ -1019,7 +1017,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint16)", [AbiUIntType 16])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint16)", [AbiUIntType 16])) [] defaultVeriOpts
         putStrLn "DIV by zero is zero"
       ,
       -- Somewhat tautological since we are asserting the precondition
@@ -2040,8 +2038,8 @@ tests = testGroup "hevm"
             putStrLn "------------- Filtered B + Symb below-----------------"
             mapM_ putStrLn filteredBSym
             putStrLn "------------- END -----------------"
-          Just aPrgm <- yul "" $ Data.Text.pack $ unlines filteredASym
-          Just bPrgm <- yul "" $ Data.Text.pack $ unlines filteredBSym
+          Just aPrgm <- yul "" $ T.pack $ unlines filteredASym
+          Just bPrgm <- yul "" $ T.pack $ unlines filteredBSym
           withSolvers CVC5 6 (Just 3) $ \s -> do
           res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
           end <- getCurrentTime

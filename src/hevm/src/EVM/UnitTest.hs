@@ -728,7 +728,7 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
         )) vm
 
     -- check postconditions against vm
-    (_, results) <- verify solvers defaultVeriOpts vm' Nothing (Just postcondition)
+    (_, results) <- verify solvers (makeVeriOpts opts) vm' Nothing (Just postcondition)
 
     -- display results
     if all isQed results
