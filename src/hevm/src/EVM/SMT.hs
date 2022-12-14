@@ -314,7 +314,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   (declare-const coinbase Word)
   (declare-const timestamp Word)
   (declare-const blocknumber Word)
-  (declare-const difficulty Word)
+  (declare-const prevrandao Word)
   (declare-const gaslimit Word)
   (declare-const chainid Word)
   (declare-const basefee Word)

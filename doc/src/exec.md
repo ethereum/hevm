@@ -8,7 +8,7 @@ Usage: hevm exec [--code TEXT] [--calldata TEXT] [--address ADDR]
                  [--value W256] [--nonce W256] [--gas W256]
                  [--number W256] [--timestamp W256] [--gaslimit W256]
                  [--gasprice W256] [--create] [--maxcodesize W256]
-                 [--difficulty W256] [--debug] [--state STRING] [--rpc TEXT]
+                 [--prevrandao W256] [--debug] [--state STRING] [--rpc TEXT]
                  [--block W256] [--json-file STRING]
 ```
 
