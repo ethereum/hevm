@@ -3,7 +3,7 @@
 
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
-    nixpkgs.url = "github:nixos/nixpkgs/haskell-updates";
+    nixpkgs.url = "github:nixos/nixpkgs";
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
@@ -32,7 +32,7 @@
                 "--enable-executable-static"
                 "--extra-lib-dirs=${gmp.override { withStatic = true; }}/lib"
                 "--extra-lib-dirs=${secp256k1-static}/lib"
-                "--extra-lib-dirs=${libff}/lib"
+                "--extra-lib-dirs=${libff.override { enableStatic = true; }}/lib"
                 "--extra-lib-dirs=${ncurses.override { enableStatic = true; }}/lib"
                 "--extra-lib-dirs=${zlib.static}/lib"
                 "--extra-lib-dirs=${libffi.overrideAttrs (_: { dontDisableStatic = true; })}/lib"
@@ -65,18 +65,15 @@
         # --- shell ---
 
         devShell = with pkgs;
-          let
-            # libff is static on Linux, ghci needs dynamic
-            libff-dynamic = pkgs.libff.overrideAttrs (_: {
-              postPatch = ''substituteInPlace libff/CMakeLists.txt --replace "STATIC" "SHARED"'';
-            });
-            libraryPath = "${lib.makeLibraryPath [ libff-dynamic secp256k1 ]}";
+          let libraryPath = "${lib.makeLibraryPath [ libff secp256k1 ]}";
           in haskellPackages.shellFor {
             packages = _: [ hevm ];
             buildInputs = [
               z3
               cvc5
               solc
+              mdbook
+              yarn
               haskellPackages.cabal-install
               haskellPackages.haskell-language-server
             ];

@@ -11,35 +11,45 @@ import Data.ByteString hiding (putStrLn, writeFile, zip)
 import Control.Monad.State.Strict hiding (state)
 import Data.Maybe (fromJust)
 import System.Directory
+import Data.Typeable
 
 import Data.String.Here
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.IO as TL
 
 import EVM
---import EVM.SMT (withSolvers, Solver(..), formatSMT2, exprToSMT, initState)
 import EVM.SMT
 import EVM.Types
-import EVM.Expr (numBranches)
+import EVM.Expr (numBranches, simplify)
 import EVM.SymExec
 import EVM.Solidity
 import EVM.UnitTest
 import EVM.Format (formatExpr)
 import EVM.Dapp (dappInfo)
 import GHC.Conc
-import qualified Data.ByteString.Lazy  as Lazy
-import qualified Data.ByteString.Base16 as BS16
+import System.Exit (exitFailure)
+import qualified EVM.Expr as Expr
 import qualified EVM.Fetch as Fetch
 import qualified EVM.FeeSchedule as FeeSchedule
 import qualified Data.Vector as V
+
+checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO ()
+checkEquiv a b = withSolvers Z3 1 Nothing $ \s -> do
+  let smt = assertProps [a ./= b]
+  res <- checkSat s smt
+  print res
 
 runDappTest :: FilePath -> IO ()
 runDappTest root =
   withCurrentDirectory root $ do
     cores <- num <$> getNumProcessors
     let testFile = root <> "/out/dapp.sol.json"
-    withSolvers Z3 cores $ \solvers -> do
+    withSolvers Z3 cores Nothing $ \solvers -> do
       opts <- testOpts solvers root testFile
-      dappTest opts solvers testFile Nothing
+      res <- dappTest opts solvers testFile Nothing
+      unless res exitFailure
 
 testOpts :: SolverGroup -> FilePath -> FilePath -> IO UnitTestOptions
 testOpts solvers root testFile = do
@@ -78,7 +88,7 @@ dumpQueries :: FilePath -> IO ()
 dumpQueries root = withCurrentDirectory root $ do
   d <- dai
   putStrLn "building expression"
-  withSolvers Z3 1 $ \s -> do
+  withSolvers Z3 1 Nothing $ \s -> do
     e <- buildExpr s d
     putStrLn "built expression"
     putStrLn "generating queries"
@@ -86,7 +96,7 @@ dumpQueries root = withCurrentDirectory root $ do
     putStrLn $ "generated queries (" <> (show $ Prelude.length qs) <> " total)"
     putStrLn "dumping queries"
     forM_ (zip ([1..] :: [Int]) qs) $ \(idx, q) -> do
-      writeFile ("query_" <> show idx <> ".smt2") (T.unpack $ T.append (formatSMT2 q) "(check-sat)")
+      TL.writeFile ("query_" <> show idx <> ".smt2") (TL.append (formatSMT2 q) "(check-sat)")
     putStrLn "dumped queries"
 
 doTest :: IO ()
@@ -104,13 +114,13 @@ analyzeDai = do
 daiExpr :: IO (Expr End)
 daiExpr = do
   d <- dai
-  withSolvers Z3 1 $ \s -> buildExpr s d
+  withSolvers Z3 1 Nothing $ \s -> buildExpr s d
 
 analyzeVat :: IO ()
 analyzeVat = do
   putStrLn "starting"
   v <- vat
-  withSolvers Z3 1 $ \s -> do
+  withSolvers Z3 1 Nothing $ \s -> do
     e <- buildExpr s v
     putStrLn $ "done (" <> show (numBranches e) <> " branches)"
     reachable' False v
@@ -135,41 +145,40 @@ analyzeDeposit = do
       }
      }
     |]
-  withSolvers Z3 1 $ \s -> do
+  withSolvers Z3 1 Nothing $ \s -> do
     putStrLn "Exploring Contract"
     e <- simplify <$> buildExpr s c
     putStrLn "Writing AST"
-    writeFile "full.ast" (formatExpr e)
+    T.writeFile "full.ast" (formatExpr e)
 
 
 reachable' :: Bool -> ByteString -> IO ()
 reachable' smtdebug c = do
   putStrLn "Exploring contract"
-  withSolvers Z3 4 $ \s -> do
+  withSolvers Z3 4 Nothing $ \s -> do
     full <- simplify <$> buildExpr s c
     putStrLn $ "Explored contract (" <> (show $ numBranches full) <> " branches)"
     --putStrLn $ formatExpr full
-    writeFile "full.ast" $ formatExpr full
+    T.writeFile "full.ast" $ formatExpr full
     putStrLn "Dumped to full.ast"
     putStrLn "Checking reachability"
     (qs, less) <- reachable2 s full
     putStrLn $ "Checked reachability (" <> (show $ numBranches less) <> " reachable branches)"
-    writeFile "reachable.ast" $ formatExpr less
+    T.writeFile "reachable.ast" $ formatExpr less
     putStrLn "Dumped to reachable.ast"
     --putStrLn $ formatExpr less
     when smtdebug $ do
       putStrLn "\n\nQueries\n\n"
       forM_ qs $ \q -> do
         putStrLn "\n\n-- Query --"
-        putStrLn $ T.unpack $ formatSMT2 q
+        TL.putStrLn $ formatSMT2 q
 
 
-summaryExpr :: IO ()
-summaryExpr = do
-  c <- summaryStore
-  withSolvers Z3 1 $ \s -> do
+showExpr :: ByteString -> IO ()
+showExpr c = do
+  withSolvers Z3 1 Nothing $ \s -> do
     e <- buildExpr s c
-    putStrLn $ formatExpr e
+    T.putStrLn $ formatExpr (simplify e)
 
 summaryStore :: IO ByteString
 summaryStore = do

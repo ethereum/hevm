@@ -7,10 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-### Added
+### Changed
 
-- Support for solc 0.8.12
-- Support for solc 0.8.13
+The symbolic execution engine has been rewritten. We have removed our dependency on sbv, and now
+symbolic execution decompiles bytecode into a custom IR, and smt queries are constructed based on
+the structure of the term in this IR.
+
+This gives us much deeper control over the encoding, and makes the addition of custom static
+analysis and simplification passes much easier to implement.
+
+The symbolic execution engine is now parallel by default, and will distribute granular SMT queries
+across a pool of solvers, allowing analysis to be scaled out horizontally across many CPUs.
+
+more details can be found in the [architecuture](../../architecture.md) docs.
 
 ## [0.49.0] - 2021-11-12
 

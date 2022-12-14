@@ -105,12 +105,13 @@ data VM = VM
   , _env            :: Env
   , _block          :: Block
   , _tx             :: TxState
-  , _logs           :: Expr Logs
+  , _logs           :: [Expr Log]
   , _traces         :: Zipper.TreePos Zipper.Empty Trace
   , _cache          :: Cache
   , _burned         :: Word64
   , _iterations     :: Map CodeLocation Int
   , _constraints    :: [Prop]
+  , _keccakEqs      :: [Prop]
   , _allowFFI       :: Bool
   }
   deriving (Show)
@@ -484,7 +485,7 @@ makeVm o =
     , _txReversion = Map.fromList
       [(vmoptAddress o, vmoptContract o)]
     }
-  , _logs = EmptyLog
+  , _logs = []
   , _traces = Zipper.fromForest []
   , _block = Block
     { _coinbase = vmoptCoinbase o
@@ -524,6 +525,7 @@ makeVm o =
   , _cache = Cache mempty mempty mempty
   , _burned = 0
   , _constraints = mempty
+  , _keccakEqs = mempty
   , _iterations = mempty
   , _allowFFI = vmoptAllowFFI o
   }
@@ -659,7 +661,7 @@ exec1 = do
                 forceConcrete2 (xOffset', xSize') "LOG" $ \(xOffset, xSize) -> do
                     let (topics, xs') = splitAt n xs
                         bytes         = readMemory xOffset' xSize' vm
-                        logs'         = Log (litAddr self) bytes topics (view logs vm)
+                        logs'         = (LogEntry (litAddr self) bytes topics) : (view logs vm)
                     burn (g_log + g_logdata * (num xSize) + num n * g_logtopic) $
                       accessMemoryRange fees xOffset xSize $ do
                         traceTopLog logs'
@@ -740,6 +742,8 @@ exec1 = do
                       (hash, invMap) <- case readMemory xOffset' xSize' vm of
                                           ConcreteBuf bs -> do
                                             let hash' = keccak' bs
+                                            eqs <- use keccakEqs
+                                            assign keccakEqs $ PEq (Lit hash') (Keccak (ConcreteBuf bs)):eqs
                                             pure (Lit hash', Map.singleton hash' bs)
                                           buf -> pure (Keccak buf, mempty)
                       next
@@ -885,7 +889,7 @@ exec1 = do
                     next
                     assign (state . stack) xs
 
-                    let jump True = vmError InvalidMemoryAccess
+                    let jump True = vmError EVM.InvalidMemoryAccess
                         jump False = copyBytesToMemory (the state returndata) xSize' xFrom xTo'
 
                     case (xFrom, bufLength (the state returndata)) of
@@ -1110,6 +1114,9 @@ exec1 = do
 
         -- op: EXP
         0x0a ->
+          -- NOTE: this can be done symbolically using unrolling like this:
+          --       https://hackage.haskell.org/package/sbv-9.0/docs/src/Data.SBV.Core.Model.html#.%5E
+          --       However, it requires symbolic gas, since the gas depends on the exponent
           case stk of
             (base:exponent':xs) -> forceConcrete exponent' "EXP: symbolic exponent" $ \exponent ->
               let cost = if exponent == 0
@@ -1636,8 +1643,6 @@ getCodeLocation vm = (view (state . contract) vm, view (state . pc) vm)
 branch :: CodeLocation -> Expr EWord -> (Bool -> EVM ()) -> EVM ()
 branch loc cond continue = do
   pathconds <- use constraints
-  loc' <- codeloc
-  iteration <- use (iterations . at loc' . non 0)
   assign result . Just . VMFailure . Query $ PleaseAskSMT cond pathconds choosePath
   where
      choosePath (Case v) = do assign result Nothing
@@ -1815,7 +1820,7 @@ limitStack :: Int -> EVM () -> EVM ()
 limitStack n continue = do
   stk <- use (state . stack)
   if length stk + n > 1024
-    then vmError StackLimitExceeded
+    then vmError EVM.StackLimitExceeded
     else continue
 
 notStatic :: EVM () -> EVM ()
@@ -2037,7 +2042,16 @@ cheatActions =
                 Nothing -> vmError (BadCheatCode sig)
                 Just digest' -> do
                   let s = ethsign priv digest'
-                      v = if even (sign_s s) then 27 else 28
+                      -- calculating the V value is pretty annoying if you
+                      -- don't have access to the full X/Y coords of the
+                      -- signature (which we don't get back from cryptonite).
+                      -- Luckily since we use a fixed nonce (to avoid the
+                      -- overhead of bringing randomness into the core EVM
+                      -- semantics), it would appear that every signature we
+                      -- produce has v == 28. Definitely a hack, and also bad
+                      -- for code that somehow depends on the value of v, but
+                      -- that seems acceptable for now.
+                      v = 28
                       encoded = encodeAbiValue $
                         AbiTuple (RegularVector.fromList
                           [ AbiUInt 8 v
@@ -2061,7 +2075,7 @@ cheatActions =
                     -- See yellow paper #286
                     let
                       pub = BS.concat [ encodeInt x, encodeInt y ]
-                      addr = Lit . num . word256 . BS.drop 12 . BS.take 32 . keccakBytes $ pub
+                      addr = Lit . W256 . word256 . BS.drop 12 . BS.take 32 . keccakBytes $ pub
                     assign (state . returndata . word256At (Lit 0)) addr
                     assign (state . memory . word256At outOffset) addr
           _ -> vmError (BadCheatCode sig)
@@ -2070,7 +2084,9 @@ cheatActions =
   where
     action s f = (abiKeccak s, f (Just $ abiKeccak s))
 
--- | Hack deterministic signing, totally insecure...
+-- | We don't wanna introduce the machinery needed to sign with a random nonce,
+-- so we just use the same nonce every time (420). This is obviusly very
+-- insecure, but fine for testing purposes.
 ethsign :: PrivateKey -> Digest Crypto.Keccak_256 -> Signature
 ethsign sk digest = go 420
   where
@@ -2193,9 +2209,9 @@ create self this xGas' xValue xs newAddr initCode = do
     -- from memory into a code and data section
     -- TODO: comment explaining whats going on here
     let contract' = do
-          minLength <- Expr.minLength initCode
-          prefix <- Expr.toList $ Expr.take (num minLength) initCode
-          let sym = Expr.drop (num minLength) initCode
+          prefixLen <- Expr.concPrefix initCode
+          prefix <- Expr.toList $ Expr.take (num prefixLen) initCode
+          let sym = Expr.drop (num prefixLen) initCode
           conc <- mapM unlitByte prefix
           pure $ InitCode (BS.pack $ V.toList conc) sym
     case contract' of
@@ -2526,9 +2542,9 @@ zipperRootForest z =
 traceForest :: VM -> Forest Trace
 traceForest = view (traces . to zipperRootForest)
 
-traceTopLog :: (MonadState VM m) => Expr Logs -> m ()
-traceTopLog EmptyLog = noop
-traceTopLog (Log addr bytes topics _) = do
+traceTopLog :: (MonadState VM m) => [Expr Log] -> m ()
+traceTopLog [] = noop
+traceTopLog ((LogEntry addr bytes topics) : _) = do
   trace <- withTraceLocation (EventTrace addr bytes topics)
   modifying traces $
     \t -> Zipper.nextSpace (Zipper.insert (Node trace []) t)
@@ -2601,14 +2617,14 @@ checkJump x xs = do
         b <- if x < num (length ops) then ops V.!? num x else Nothing
         unlitByte b
   case op of
-    Nothing -> vmError BadJumpDestination
+    Nothing -> vmError EVM.BadJumpDestination
     Just b ->
       if 0x5b == b && OpJumpdest == snd (theCodeOps RegularVector.! (theOpIxMap Vector.! num x))
          then do
            state . stack .= xs
            state . pc .= num x
          else
-           vmError BadJumpDestination
+           vmError EVM.BadJumpDestination
 
 opSize :: Word8 -> Int
 opSize x | x >= 0x60 && x <= 0x7f = num x - 0x60 + 2
@@ -2646,12 +2662,8 @@ mkOpIxMap (RuntimeCode ops)
                      then (x' - 0x60 + 1, i + 1, j,     m >> Vector.write v i j)
             -- other data --
                      else (0,             i + 1, j + 1, m >> Vector.write v i j)
-          _ -> error "cannot analyze symbolic code"
+          _ -> error $ "cannot analyze symbolic code:\nx: " <> show x <> " i: " <> show i <> " j: " <> show j
 
-          -- TODO: wtf is going on here, can't parse this at all
-          {- Start of PUSH op. -} (case unlitByte x of
-                                     Just x' -> (x' - 0x60 + 1, i + 1, j, m >> Vector.write v i j)
-                                     Nothing -> error "cannot analyze symbolic code")
         go v (1, !i, !j, !m) _ =
           {- End of PUSH op. -}   (0,            i + 1, j + 1, m >> Vector.write v i j)
         go v (n, !i, !j, !m) _ =

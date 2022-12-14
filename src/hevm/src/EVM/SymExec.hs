@@ -17,33 +17,49 @@ import qualified EVM.Stepper as Stepper
 import qualified Control.Monad.Operational as Operational
 import Control.Monad.State.Strict hiding (state)
 import EVM.Types
+import EVM.Traversals
 import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
 import Data.DoubleWord (Word256)
-import GHC.Conc (numCapabilities)
 import Control.Concurrent.Async
 import Data.Maybe
-import Data.List (foldl')
-
-import Data.ByteString (ByteString)
+import Data.List (foldl', find)
+import Data.Vector (fromList)
+import Data.Map (lookup)
+import Data.ByteString (ByteString, null, pack)
 import qualified Control.Monad.State.Class as State
-import qualified Data.ByteString.Base16 as BS16
-import Data.Bifunctor (first, second)
+import Data.Bifunctor (second)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.List (find)
-import Data.Maybe (isJust, fromJust)
-import Debug.Trace
+import qualified Data.Text.IO as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.IO as TL
 import EVM.Format (formatExpr)
 
 data ProofResult a b c = Qed a | Cex b | Timeout c
-  deriving (Show)
+  deriving (Show, Eq)
 type VerifyResult = ProofResult (Expr End) (Expr End, SMTCex) (Expr End)
-type EquivalenceResult = ProofResult ([VM], [VM]) VM ()
 
 isQed :: ProofResult a b c -> Bool
 isQed (Qed _) = True
 isQed _ = False
+
+containsA :: Eq a => Eq b => Eq c => ProofResult a b c -> [(d , e, ProofResult a b c)] -> Bool
+containsA a lst = isJust $ Data.List.find (\(_, _, c) -> c == a) lst
+
+data VeriOpts = VeriOpts
+  { simp :: Bool
+  , debug :: Bool
+  , maxIter :: Maybe Integer
+  , askSmtIters :: Maybe Integer
+  }
+  deriving (Eq, Show)
+
+defaultVeriOpts :: VeriOpts
+defaultVeriOpts = VeriOpts { simp = True, debug = False, maxIter = Nothing, askSmtIters = Nothing }
+
+debugVeriOpts :: VeriOpts
+debugVeriOpts = VeriOpts { simp = True, debug = True, maxIter = Nothing, askSmtIters = Nothing }
 
 extractCex :: VerifyResult -> Maybe (Expr End, SMTCex)
 extractCex (Cex c) = Just c
@@ -99,8 +115,12 @@ symCalldata sig typesignature concreteArgs base =
                              AbiBool w -> St [] . Lit $ if w then 1 else 0
                              _ -> error "TODO"
       calldatas = zipWith3 mkArg typesignature args [1..]
-      (cdBuf, props) = combineFragments calldatas (writeSelector base sig)
-  in (cdBuf, (Expr.bufLength cdBuf .>= cdLen calldatas) : props)
+      (cdBuf, props) = combineFragments calldatas base
+      withSelector = writeSelector cdBuf sig
+      sizeConstraints
+        = (Expr.bufLength withSelector .>= cdLen calldatas)
+        .&& (Expr.bufLength withSelector .< (Lit (2 ^ (64 :: Integer))))
+  in (withSelector, sizeConstraints : props)
 
 cdLen :: [CalldataFragment] -> Expr EWord
 cdLen = go (Lit 4)
@@ -176,13 +196,7 @@ loadSymVM x initStore addr callvalue' calldata' =
              (Just (initialContract x))
        & set (env . EVM.storage) initStore
 
-doInterpret :: Fetch.Fetcher -> Maybe Integer -> Maybe Integer -> VM -> Expr End
-doInterpret fetcher maxIter askSmtIters vm = undefined
---doInterpret fetcher maxIter askSmtIters vm = let
-      --f (vm', cs) = Node (BranchInfo (if null cs then vm' else vm) Nothing) cs
-    --in f <$> interpret' fetcher maxIter askSmtIters vm
-
--- | Interpreter which explores all paths at branching points.
+-- Interpreter which explores all paths at branching points.
 -- returns an Expr representing the possible executions
 interpret
   :: Fetch.Fetcher
@@ -219,6 +233,7 @@ interpret fetcher maxIter askSmtIters =
               b <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue False) >>= k)
               return $ ITE cond a b
             Just n ->
+              -- Let's escape the loop. We give no guarantees at this point
               interpret fetcher maxIter askSmtIters (Stepper.evm (continue (not n)) >>= k)
         Stepper.Wait q -> do
           let performQuery = do
@@ -256,8 +271,9 @@ maxIterationsReached vm (Just maxIter) =
 type Precondition = VM -> Prop
 type Postcondition = VM -> Expr End -> Prop
 
-checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> IO [VerifyResult]
-checkAssert solvers errs c signature' concreteArgs = verifyContract solvers c signature' concreteArgs SymbolicS Nothing (Just $ checkAssertions errs)
+
+checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> IO [VerifyResult]
+checkAssert solvers errs c signature' concreteArgs opts = verifyContract solvers c signature' concreteArgs opts SymbolicS Nothing (Just $ checkAssertions errs)
 
 {- |Checks if an assertion violation has been encountered
 
@@ -280,8 +296,8 @@ checkAssert solvers errs c signature' concreteArgs = verifyContract solvers c si
 -}
 checkAssertions :: [Word256] -> Postcondition
 checkAssertions errs _ = \case
-  Revert (ConcreteBuf msg) -> PBool $ msg `notElem` (fmap panicMsg errs)
-  Revert b -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
+  Revert _ (ConcreteBuf msg) -> PBool $ msg `notElem` (fmap panicMsg errs)
+  Revert _ b -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
   _ -> PBool True
 
 -- |By default hevm checks for all assertions except those which result from arithmetic overflow
@@ -295,10 +311,10 @@ allPanicCodes = [ 0x00, 0x01, 0x11, 0x12, 0x21, 0x22, 0x31, 0x32, 0x41, 0x51 ]
 panicMsg :: Word256 -> ByteString
 panicMsg err = (selector "Panic(uint256)") <> (encodeAbiValue $ AbiUInt 256 err)
 
-verifyContract :: SolverGroup -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO [VerifyResult]
-verifyContract solvers theCode signature' concreteArgs storagemodel maybepre maybepost = do
+verifyContract :: SolverGroup -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO [VerifyResult]
+verifyContract solvers theCode signature' concreteArgs opts storagemodel maybepre maybepost = do
   let preState = abstractVM signature' concreteArgs theCode maybepre storagemodel
-  verify solvers preState Nothing Nothing Nothing maybepost
+  verify solvers opts preState Nothing maybepost
 
 pruneDeadPaths :: [VM] -> [VM]
 pruneDeadPaths =
@@ -310,16 +326,19 @@ pruneDeadPaths =
 runExpr :: Stepper.Stepper (Expr End)
 runExpr = do
   vm <- Stepper.runFully
+  let asserts = view keccakEqs vm
   pure $ case view result vm of
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
-    Just (VMSuccess buf) -> Return buf (view (env . EVM.storage) vm)
+    Just (VMSuccess buf) -> Return asserts buf (view (env . EVM.storage) vm)
     Just (VMFailure e) -> case e of
-      UnrecognizedOpcode _ -> Invalid
-      SelfDestruction -> SelfDestruct
-      EVM.IllegalOverflow -> EVM.Types.IllegalOverflow
-      EVM.Revert buf -> EVM.Types.Revert buf
-      e' -> EVM.Types.TmpErr $ show e'
-
+      UnrecognizedOpcode _ -> Invalid asserts
+      SelfDestruction -> SelfDestruct asserts
+      EVM.StackLimitExceeded -> EVM.Types.StackLimitExceeded asserts
+      EVM.IllegalOverflow -> EVM.Types.IllegalOverflow asserts
+      EVM.Revert buf -> EVM.Types.Revert asserts buf
+      EVM.InvalidMemoryAccess -> EVM.Types.InvalidMemoryAccess asserts
+      EVM.BadJumpDestination -> EVM.Types.BadJumpDestination asserts
+      e' -> EVM.Types.TmpErr asserts $ show e'
 
 -- | Converts a given top level expr into a list of final states and the associated path conditions for each state
 flattenExpr :: Expr End -> [([Prop], Expr End)]
@@ -328,73 +347,16 @@ flattenExpr = go []
     go :: [Prop] -> Expr End -> [([Prop], Expr End)]
     go pcs = \case
       ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
-      Invalid -> [(pcs, Invalid)]
-      SelfDestruct -> [(pcs, SelfDestruct)]
-      Revert buf -> [(pcs, Revert buf)]
-      Return  buf store -> [(pcs, Return buf store)]
-      EVM.Types.IllegalOverflow -> [(pcs, EVM.Types.IllegalOverflow)]
-      TmpErr s -> error s
-
--- | Simple recursive match based AST simplification
--- Note: may not terminate!
-simplify :: Expr a -> Expr a
-simplify e = if (mapExpr go e == e)
-               then e
-               else simplify (mapExpr go e)
-  where
-    go :: Expr a -> Expr a
-    -- redundant CopySlice
-    go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
-
-    -- simplify buffers
-    go o@(ReadWord (Lit _) _) = Expr.simplifyReads o
-    go o@(ReadByte (Lit _) _) = Expr.simplifyReads o
-
-    -- redundant Eq
-    go o@(Eq a b)
-      | a == b = (Lit 1)
-      | otherwise = o
-    -- redundant ITE
-    go o@(ITE c a b)
-      | c == Lit 1 = a
-      | c == Lit 0 = b
---      | a == b = trace ("a: " <> show a <> "\n\nb: " <> show b) a
-      | otherwise = o
-    -- redundant add / sub
-    go o@(Sub (Add a b) c)
-      | a == c = b
-      | b == c = a
-      | otherwise = o
-    go o@(SHL a v)
-      | a == (Lit 0) = v
-      | otherwise = o
-    go o@(SHR a v)
-      | a == (Lit 0) = v
-      | otherwise = o
-    go o@(And a (And b c))
-      | a == c = (And a b)
-      | a == b = (And b c)
-      | otherwise = o
-    go o@(Add a b)
-      | b == (Lit 0) = a
-      | a == (Lit 0) = b
-      | otherwise = o
-    go o@(EVM.Types.LT (Lit a) (Lit b))
-      | (a < b) = Lit 1
-      | otherwise = Lit 0
-    -- we write at least 32, so if x <= 32, it's FALSE
-    go o@(EVM.Types.LT (BufLength (WriteWord {})) (Lit x))
-      | x <= 32 = Lit 0
-      | otherwise = o
-    -- we write at least 32, so if x < 32, it's TRUE
-    go o@(EVM.Types.GT (BufLength (WriteWord {})) (Lit x))
-      | x < 32 = Lit 1
-      | otherwise = o
-    go o@(Sub a b)
-      | a == b = Lit 0
-      | b == (Lit 0) = a
-      | otherwise = o
-    go a = a
+      e@(Invalid _)  -> [(pcs, e)]
+      e@(SelfDestruct _) -> [(pcs, e)]
+      e@(Revert _ _) -> [(pcs, e)]
+      e@(Return _ _ _) -> [(pcs, e)]
+      e@(EVM.Types.IllegalOverflow _) -> [(pcs, e)]
+      e@(EVM.Types.StackLimitExceeded _ ) -> [(pcs, e)]
+      e@(EVM.Types.InvalidMemoryAccess _) -> [(pcs, e)]
+      e@(EVM.Types.BadJumpDestination _) -> [(pcs, e)]
+      TmpErr _ s -> error s
+      GVar _ -> error "cannot flatten an Expr containing a GVar"
 
 reachableQueries :: Expr End -> IO [SMT2]
 reachableQueries = go []
@@ -442,7 +404,7 @@ reachable2 solvers e = do
         pure (fst tres <> fst fres, subexpr)
       leaf -> do
         let query = assertProps pcs
-        res <- checkSat' solvers query
+        res <- checkSat solvers query
         case res of
           Sat _ -> pure ([query], Just leaf)
           Unsat -> pure ([query], Nothing)
@@ -466,16 +428,16 @@ reachable solvers = go []
         let
           tquery = assertProps (PEq c (Lit 1) : pcs)
           fquery = assertProps (PEq c (Lit 0) : pcs)
-        tres <- (checkSat' solvers tquery)
-        fres <- (checkSat' solvers fquery)
+        tres <- (checkSat solvers tquery)
+        fres <- (checkSat solvers fquery)
         print (tres, fres)
         case (tres, fres) of
           (Error tm, Error fm) -> do
-            writeFile "tquery.smt2" (T.unpack $ formatSMT2 tquery)
-            writeFile "fquery.smt2" (T.unpack $ formatSMT2 fquery)
+            TL.writeFile "tquery.smt2" (formatSMT2 tquery)
+            TL.writeFile "fquery.smt2" (formatSMT2 fquery)
             error $ "Solver Errors: " <> (T.unpack . T.unlines $ [tm, fm])
           (Error tm, _) -> do
-            putStrLn $ T.unpack $ formatSMT2 tquery
+            TL.putStrLn $ formatSMT2 tquery
             error $ "Solver Error: " <> T.unpack tm
           (_ , Error fm) -> error $ "Solver Error: " <> T.unpack fm
           (EVM.SMT.Unknown, _) -> error "Solver timeout, unable to analyze reachability"
@@ -489,20 +451,21 @@ reachable solvers = go []
             pure ([tquery, fquery] <> tqs <> fqs, ITE c texp fexp)
           (Unsat, Unsat) -> do
             putStrLn $ "pcs: " <> show pcs
-            putStrLn $ "tquery:\n " <> (T.unpack $ formatSMT2 tquery)
-            putStrLn $ "fquery:\n " <> (T.unpack $ formatSMT2 fquery)
+            TL.putStrLn $ "tquery:\n " <> (formatSMT2 tquery)
+            TL.putStrLn $ "fquery:\n " <> (formatSMT2 fquery)
             error "Internal Error: two unsat branches found"
-      Invalid -> pure ([], Invalid)
-      SelfDestruct -> pure ([], SelfDestruct)
-      Revert msg -> pure ([], Revert msg)
-      Return msg store -> pure ([], Return msg store)
-      EVM.Types.IllegalOverflow -> pure ([], EVM.Types.IllegalOverflow)
-      TmpErr e -> error $ "TmpErr: " <> show e
+      Invalid asserts -> pure ([], Invalid asserts)
+      SelfDestruct asserts -> pure ([], SelfDestruct asserts)
+      Revert asserts msg -> pure ([], Revert asserts msg)
+      Return asserts msg store -> pure ([], Return asserts msg store)
+      EVM.Types.IllegalOverflow asserts -> pure ([], EVM.Types.IllegalOverflow asserts)
+      TmpErr _ e -> error $ "TmpErr: " <> show e
+      GVar _ -> error "Internal Error: unexpected GVar"
 
 -- | Evaluate the provided proposition down to its most concrete result
 evalProp :: Prop -> Prop
 evalProp = \case
-  o@(PBool b) -> o
+  o@(PBool _) -> o
   o@(PNeg p)  -> case p of
               (PBool b) -> PBool (not b)
               _ -> o
@@ -529,34 +492,59 @@ evalProp = \case
                    (PBool False, PBool False) -> PBool False
                    (PBool _, PBool _) -> PBool True
                    _ -> o
+  o -> o
+
+
+-- | Extract contraints stored in  Expr End nodes
+extractProps :: Expr End -> [Prop]
+extractProps = \case
+  ITE _ _ _ -> []
+  Invalid asserts -> asserts
+  SelfDestruct asserts -> asserts
+  Revert asserts _ -> asserts
+  Return asserts _ _ -> asserts
+  EVM.Types.IllegalOverflow asserts -> asserts
+  TmpErr asserts _ -> asserts
+  GVar _ -> error "cannot extract props from a GVar"
 
 
 -- | Symbolically execute the VM and check all endstates against the postcondition, if available.
-verify :: SolverGroup -> VM -> Maybe Integer -> Maybe Integer -> Maybe (Fetch.BlockNumber, Text) -> Maybe Postcondition -> IO [VerifyResult]
-verify solvers preState maxIter askSmtIters rpcinfo maybepost = do
+verify :: SolverGroup -> VeriOpts -> VM -> Maybe (Fetch.BlockNumber, Text) -> Maybe Postcondition -> IO [VerifyResult]
+verify solvers opts preState rpcinfo maybepost = do
   putStrLn "Exploring contract"
-  expr <- simplify <$> evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) preState
+
+  exprInter <- evalStateT (interpret (Fetch.oracle solvers rpcinfo) (maxIter opts) (askSmtIters opts) runExpr) preState
+  when (debug opts) $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
+
+  expr <- if (simp opts) then (pure $ Expr.simplify exprInter) else pure exprInter
+  when (debug opts) $ T.writeFile "simplified.expr" (formatExpr expr)
+
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
-  let leaves = flattenExpr expr
+
   case maybepost of
     Nothing -> pure [Qed expr]
     Just post -> do
       let
         -- Filter out any leaves that can be statically shown to be safe
-        canViolate = flip filter leaves $
+        canViolate = flip filter (flattenExpr expr) $
           \(_, leaf) -> case evalProp (post preState leaf) of
             PBool True -> False
             _ -> True
         assumes = view constraints preState
-        withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> pcs), leaf)) canViolate
+        withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> extractProps leaf <> pcs), leaf)) canViolate
+      putStrLn $ "Checking for reachability of " <> show (length withQueries) <> "\n potential property violations"
+
+      when (debug opts) $ forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
+        TL.writeFile
+          ("query-" <> show idx <> ".smt2")
+          ("; " <> (TL.pack $ show leaf) <> "\n\n" <> formatSMT2 q <> "\n\n(check-sat)")
+
       -- Dispatch the remaining branches to the solver to check for violations
-      putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violations"
-      --putStrLn $ T.unpack . formatSMT2 . fst $ withQueries !! 0
       results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
-        res <- checkSat' solvers query
+        res <- checkSat solvers query
         pure (res, leaf)
       let cexs = filter (\(res, _) -> not . isUnsat $ res) results
-      pure $ if null cexs then [Qed expr] else fmap toVRes cexs
+      pure $ if Prelude.null cexs then [Qed expr] else fmap toVRes cexs
   where
     toVRes :: (CheckSatResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
@@ -566,63 +554,70 @@ verify solvers preState maxIter askSmtIters rpcinfo maybepost = do
       Error e -> error $ "Internal Error: solver responded with error: " <> show e
 
 -- | Compares two contract runtimes for trace equivalence by running two VMs and comparing the end states.
-equivalenceCheck :: ByteString -> ByteString -> Maybe Integer -> Maybe Integer -> Maybe (Text, [AbiType]) -> EquivalenceResult
-equivalenceCheck bytecodeA bytecodeB maxiter askSmtIters signature' = undefined
-  --let
-    --bytecodeA' = if BS.null bytecodeA then BS.pack [0] else bytecodeA
-    --bytecodeB' = if BS.null bytecodeB then BS.pack [0] else bytecodeB
-  --preStateA <- abstractVM signature' [] bytecodeA' SymbolicS
+equivalenceCheck :: SolverGroup -> ByteString -> ByteString -> VeriOpts -> Maybe (Text, [AbiType]) -> IO [(Maybe SMTCex, Prop, ProofResult () () ())]
+equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
+  let
+    bytecodeA' = if Data.ByteString.null bytecodeA then Data.ByteString.pack [0] else bytecodeA
+    bytecodeB' = if Data.ByteString.null bytecodeB then Data.ByteString.pack [0] else bytecodeB
+    preStateA = abstractVM signature' [] bytecodeA' Nothing SymbolicS
+    preStateB = abstractVM signature' [] bytecodeB' Nothing SymbolicS
 
-  --let preself = preStateA ^. state . contract
-      --precaller = preStateA ^. state . caller
-      --callvalue' = preStateA ^. state . callvalue
-      --prestorage = preStateA ^?! env . contracts . ix preself . storage
-      --(calldata', cdlen) = view (state . calldata) preStateA
-      --pathconds = view constraints preStateA
-      --preStateB = loadSymVM (RuntimeCode (ConcreteBuffer bytecodeB')) prestorage SymbolicS precaller callvalue' (calldata', cdlen) & set constraints pathconds
+  aExpr <- evalStateT (interpret (Fetch.oracle solvers Nothing) (maxIter opts) (askSmtIters opts) runExpr) preStateA
+  bExpr <- evalStateT (interpret (Fetch.oracle solvers Nothing) (maxIter opts) (askSmtIters opts) runExpr) preStateB
+  aExprSimp <- if (simp opts) then (pure $ Expr.simplify aExpr) else pure aExpr
+  bExprSimp <- if (simp opts) then (pure $ Expr.simplify bExpr) else pure bExpr
+  when (debug opts) $ putStrLn $ "num of aExprSimp endstates:" <> (show $ length $ flattenExpr aExprSimp) <> "\nnum of bExprSimp endstates:" <> (show $ length $ flattenExpr bExprSimp)
 
-  --smtState <- queryState
-  --push 1
-  --aVMs <- doInterpret (Fetch.oracle (Just smtState) Nothing False) maxiter askSmtIters preStateA
-  --pop 1
-  --push 1
-  --bVMs <- doInterpret (Fetch.oracle (Just smtState) Nothing False) maxiter askSmtIters preStateB
-  --pop 1
-  ---- Check each pair of endstates for equality:
-  --let differingEndStates = uncurry distinct <$> [(a,b) | a <- pruneDeadPaths (leaves aVMs), b <- pruneDeadPaths (leaves bVMs)]
-      --distinct a b =
-        --let (aPath, bPath) = both' (view constraints) (a, b)
-            --(aSelf, bSelf) = both' (view (state . contract)) (a, b)
-            --(aEnv, bEnv) = both' (view (env . contracts)) (a, b)
-            --(aResult, bResult) = both' (view result) (a, b)
-            ----(Symbolic _ aStorage, Symbolic _ bStorage) = (view storage (aEnv ^?! ix aSelf), view storage (bEnv ^?! ix bSelf))
-            --differingResults = case (aResult, bResult) of
+  -- Check each pair of end states for equality:
+  let
+      differingEndStates = uncurry distinct <$> [(a,b) | a <- flattenExpr aExprSimp, b <- flattenExpr bExprSimp]
+      distinct :: ([Prop], Expr End) -> ([Prop], Expr End) -> Prop
+      distinct (aProps, aEnd) (bProps, bEnd) =
+        let
+          differingResults = case (aEnd, bEnd) of
+            (Return _ aOut aStore, Return _ bOut bStore) ->
+              if aOut == bOut && aStore == bStore then PBool False
+                                                  else aStore ./= bStore  .|| aOut ./= bOut
+            (Return {}, _) -> PBool True
+            (_, Return {}) -> PBool True
+            (Revert _ a, Revert _ b) -> if a==b then PBool False else a ./= b
+            (Revert _ _, _) -> PBool True
+            (_, Revert _ _) -> PBool True
+            (Invalid _, Invalid _) -> PBool False
+            (Invalid _, _ ) -> PBool True
+            (_, Invalid _) -> PBool True
+            (EVM.Types.StackLimitExceeded _, EVM.Types.StackLimitExceeded _ ) -> PBool False
+            (EVM.Types.StackLimitExceeded _, _) -> PBool True
+            (_, EVM.Types.StackLimitExceeded _) -> PBool True
+            (a, b) -> if a == b then PBool False
+                                else error $ "Unimplemented, see TODO about EVM failures and TmpExpr. Left: " <> show a <> " Right: " <> show b
 
-              --(Just (VMSuccess aOut), Just (VMSuccess bOut)) ->
-                --aOut ./= bOut .|| aStorage ./= bStorage .|| fromBool (aSelf /= bSelf)
+        -- if the SMT solver can find a common input that satisfies BOTH sets of path conditions
+        -- AND the output differs, then we are in trouble. We do this for _every_ pair of paths, which
+        -- makes this exhaustive
+        in
+        if differingResults == PBool False
+           then PBool False
+           else (foldl PAnd (PBool True) aProps) .&& (foldl PAnd (PBool True) bProps)  .&& differingResults
+  -- If there exists a pair of end states where this is not the case,
+  -- the following constraint is satisfiable
 
-              --(Just (VMFailure UnexpectedSymbolicArg), _) ->
-                --error $ "Unexpected symbolic argument at opcode: " <> maybe "??" show (vmOp a) <> ". Not supported (yet!)"
-
-              --(_, Just (VMFailure UnexpectedSymbolicArg)) ->
-                --error $ "Unexpected symbolic argument at opcode: " <> maybe "??" show (vmOp a) <> ". Not supported (yet!)"
-
-              --(Just (VMFailure _), Just (VMFailure _)) -> sFalse
-
-              --(Just _, Just _) -> sTrue
-
-              --errormsg -> error $ show errormsg
-
-        --in sAnd (fst <$> aPath) .&& sAnd (fst <$> bPath) .&& differingResults
-  ---- If there exists a pair of endstates where this is not the case,
-  ---- the following constraint is satisfiable
-  --constrain $ sOr differingEndStates
-
-  --checkSat >>= \case
-     --Unk -> return $ Timeout ()
-     --Sat -> return $ Cex preStateA
-     --Unsat -> return $ Qed (leaves aVMs, leaves bVMs)
-     --DSat _ -> error "unexpected DSAT"
+  let diffEndStFilt = filter (/= PBool False) differingEndStates
+  putStrLn $ "Equivalence checking " <> (show $ length diffEndStFilt) <> " combinations"
+  when (debug opts) $ forM_ (zip diffEndStFilt [1..]) (\(x, i) -> T.writeFile ("prop-checked-" <> show i) (T.pack $ show x))
+  results <- flip mapConcurrently (zip diffEndStFilt [1..]) $ \(prop, i) -> do
+    let assertedProps = assertProps [prop]
+    let filename = "eq-check-" <> show i <> ".smt2"
+    when (debug opts) $ T.writeFile (filename) $ (TL.toStrict $ formatSMT2 assertedProps) <> "\n(check-sat)"
+    res <- case prop of
+      PBool False -> pure Unsat
+      _ -> checkSat solvers assertedProps
+    case res of
+     Sat a -> return (Just a, prop, Cex ())
+     Unsat -> return (Nothing, prop, Qed ())
+     EVM.SMT.Unknown -> return (Nothing, prop, Timeout ())
+     Error txt -> error $ "Error while running solver: `" <> T.unpack txt <> "` SMT file was: `" <> filename <> "`"
+  return $ filter (\(_, _, res) -> res /= Qed ()) results
 
 both' :: (a -> b) -> (a, a) -> (b, b)
 both' f (x, y) = (f x, f y)

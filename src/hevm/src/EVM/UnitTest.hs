@@ -15,7 +15,8 @@ import EVM.Exec
 import EVM.Expr (litAddr, readStorage')
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec
+import qualified EVM.SymExec as SymExec
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, VeriOpts)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.RLP
@@ -29,7 +30,7 @@ import EVM.Stepper (Stepper, interpret)
 import qualified EVM.Stepper as Stepper
 import qualified Control.Monad.Operational as Operational
 
-import Control.Lens hiding (Indexed, elements, List)
+import Control.Lens hiding (Indexed, elements, List, passing)
 import Control.Monad.State.Strict hiding (state)
 import qualified Control.Monad.State.Strict as State
 
@@ -49,7 +50,7 @@ import Data.Word          (Word8, Word32, Word64)
 import Data.Text.Encoding (encodeUtf8)
 import System.Environment (lookupEnv)
 import System.IO          (hFlush, stdout)
-import System.Exit        (exitFailure)
+import GHC.Natural
 
 import qualified Control.Monad.Par.Class as Par
 import qualified Data.ByteString as BS
@@ -74,8 +75,9 @@ data UnitTestOptions = UnitTestOptions
   , verbose     :: Maybe Int
   , maxIter     :: Maybe Integer
   , askSmtIters :: Maybe Integer
+  , smtdebug    :: Bool
   , maxDepth    :: Maybe Int
-  , smtTimeout  :: Maybe Integer
+  , smtTimeout  :: Maybe Natural
   , solver      :: Maybe Text
   , covMatch    :: Maybe Text
   , match       :: Text
@@ -120,8 +122,17 @@ defaultMaxCodeSize = 0xffffffff
 
 type ABIMethod = Text
 
+
+-- | Generate VeriOpts from UnitTestOptions
+makeVeriOpts :: UnitTestOptions -> VeriOpts
+makeVeriOpts opts =
+   defaultVeriOpts { SymExec.debug = smtdebug opts
+                   , SymExec.maxIter = maxIter opts
+                   , SymExec.askSmtIters = askSmtIters opts
+                   }
+
 -- | Top level CLI endpoint for dapp-test
-dappTest :: UnitTestOptions -> SolverGroup -> String -> Maybe String -> IO ()
+dappTest :: UnitTestOptions -> SolverGroup -> String -> Maybe String -> IO Bool
 dappTest opts solvers solcFile cache = do
   out <- liftIO $ readSolc solcFile
   case out of
@@ -139,7 +150,9 @@ dappTest opts solvers solcFile cache = do
           in
             liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts cache')
 
-      liftIO $ unless (and passing) exitFailure
+      if and passing
+         then return True
+         else return False
     Nothing ->
       error ("Failed to read Solidity JSON for `" ++ solcFile ++ "'")
 
@@ -231,7 +244,7 @@ checkFailures UnitTestOptions { .. } method bailed = do
       Right (ConcreteBuf r) ->
         let AbiBool failed = decodeAbiValue AbiBoolType (BSLazy.fromStrict r)
         in pure (shouldFail == failed)
-      _ -> error "internal error: unexpected failure code"
+      c -> error $ "internal error: unexpected failure code: " <> show c
 
 -- | Randomly generates the calldata arguments and runs the test
 fuzzTest :: UnitTestOptions -> Text -> [AbiType] -> VM -> Property
@@ -458,7 +471,7 @@ runUnitTestContract
           liftIO $ do
             tick "\n"
             tick (Text.unlines (filter (not . Text.null) running))
-            tick (Data.Text.pack . show $ bailing)
+            tick (Text.unlines bailing)
 
           pure [(isRight r, vm) | (r, vm) <- details]
 
@@ -480,9 +493,7 @@ runTest opts@UnitTestOptions{..} _ vm (InvariantTest testName, []) = liftIO $ ca
     then exploreRun opts vm testName (decodeCalls cds)
     else exploreRun opts vm testName []
 runTest _ _ _ (InvariantTest _, types) = error $ "invariant testing with arguments: " <> show types <> " is not implemented (yet!)"
-runTest opts solvers vm (SymbolicTest testName, types) = let
-    solvers' =fromJust (error "Internal Error: missing solver group for symbolic test") solvers
-  in symRun opts solvers' vm testName types
+runTest opts solvers vm (SymbolicTest testName, types) = symRun opts solvers vm testName types
 
 type ExploreTx = (Addr, Addr, ByteString, W256)
 
@@ -692,27 +703,32 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
 -- | Define the thread spawner for symbolic tests
 symRun :: UnitTestOptions -> SolverGroup -> VM -> Text -> [AbiType] -> IO (Text, Either Text Text, VM)
 symRun opts@UnitTestOptions{..} solvers vm testName types = do
-    let (cd, cdProps) = symCalldata testName types [] (AbstractBuf "txdata")
+    let cd = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName
         testContract = view (state . contract) vm
 
-        -- define postcondition depending on `shouldFail`
-        failed store = (readStorage' (litAddr testContract) (Lit 1) store .== Lit 1)
-                   .|| (readStorage' (litAddr cheatCode) (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) store  .== Lit 1)
+    -- define postcondition depending on `shouldFail`
+    -- We directly encode the failure conditions from failed() in ds-test since this is easier to encode than a call into failed()
+    -- we need to read from slot 0 in the test contract and mask it with 0x10 to get the value of _failed
+    -- we don't need to do this when reading the failed from the cheatcode address since we don't do any packing there
+    let failed store = (And (readStorage' (litAddr testContract) (Lit 0) store) (Lit 2) .== Lit 2)
+                   .|| (readStorage' (litAddr cheatCode) (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) store .== Lit 1)
         postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
-                                  Return _ store -> failed store
+                                  Return _ _ store -> failed store
                                   _ -> PBool True
           False -> \(_, post) -> case post of
-                                   Return _ store -> PNeg (failed store)
+                                   Return _ _ store -> PNeg (failed store)
                                    _ -> PBool False
 
-        -- add calldata to vm
-        vm' = vm & set (state . EVM.calldata) cd
-                 & over (constraints) (<> cdProps)
+    (_, vm') <- runStateT
+      (EVM.Stepper.interpret oracle (Stepper.evm $ do
+          popTrace
+          makeTxCall testParams cd
+        )) vm
 
     -- check postconditions against vm
-    results <- verify solvers vm' Nothing Nothing Nothing (Just postcondition)
+    results <- verify solvers (makeVeriOpts opts) vm' Nothing (Just postcondition)
 
     -- display results
     if all isQed results
@@ -729,11 +745,11 @@ symFailure UnitTestOptions {..} testName failures' =
     [ "Failure: "
     , testName
     , "\n\n"
-    -- , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
+    , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
     ]
     where
       showRes = \case
-                       Return _ _ -> if "proveFail" `isPrefixOf` testName
+                       Return _ _ _ -> if "proveFail" `isPrefixOf` testName
                                       then "Successful execution"
                                       else "Failed: DSTest Assertion Violation"
                        res ->
@@ -744,7 +760,7 @@ symFailure UnitTestOptions {..} testName failures' =
         ["Counterexample:"
         ,""
         ,"  result:   " <> showRes leaf
-        ,"  calldata: " <> Text.unpack (Text.unlines cexs)
+        ,"  calldata: " <> (show $ EVM.SMT.calldata cexs)
         , case verbose of
             --Just _ -> unlines
               --[ ""
@@ -813,22 +829,19 @@ failOutput vm UnitTestOptions { .. } testName =
   , "\n"
   ]
 
-formatTestLogs :: (?context :: DappContext) => Map W256 Event -> Expr Logs -> Text
-formatTestLogs = undefined
---formatTestLogs events xs =
-  --case catMaybes (toList (fmap (formatTestLog events) xs)) of
-    --[] -> "\n"
-    --ys -> "\n" <> intercalate "\n" ys <> "\n\n"
+formatTestLogs :: (?context :: DappContext) => Map W256 Event -> [Expr Log] -> Text
+formatTestLogs events xs =
+  case catMaybes (toList (fmap (formatTestLog events) xs)) of
+    [] -> "\n"
+    ys -> "\n" <> intercalate "\n" ys <> "\n\n"
 
 -- Here we catch and render some special logs emitted by ds-test,
 -- with the intent to then present them in a separate view to the
 -- regular trace output.
-formatTestLog :: (?context :: DappContext) => Map W256 Event -> Expr Logs -> Maybe Text
-formatTestLog = undefined
-  {-
-formatTestLog _ (Log _ _ []) = Nothing
-formatTestLog events (Log _ args (topic:_)) =
-  case maybeLitWord topic >>= \t1 -> (Map.lookup (wordValue t1) events) of
+formatTestLog :: (?context :: DappContext) => Map W256 Event -> Expr Log -> Maybe Text
+formatTestLog _ (LogEntry _ _ []) = Nothing
+formatTestLog events (LogEntry _ args (topic:_)) =
+  case maybeLitWord topic >>= \t1 -> (Map.lookup t1 events) of
     Nothing -> Nothing
     Just (Event name _ types) ->
       case (name <> parenthesise (abiTypeSolidity <$> (unindexed types))) of
@@ -883,7 +896,6 @@ formatTestLog events (Log _ args (topic:_)) =
                     Just $ (unquote (showAbiValue key)) <> ": " <> showDecimal dec val
                   _ -> Nothing
               _ -> Just "<symbolic decimal>"
-            -}
 
 
 word32Bytes :: Word32 -> ByteString

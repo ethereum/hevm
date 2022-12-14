@@ -112,6 +112,7 @@ checkExpectation :: HasCallStack => Bool -> Case -> EVM.VM -> IO Bool
 checkExpectation diff x vm = do
   let expectation = testExpectation x
       (okState, b2, b3, b4, b5) = checkExpectedContracts vm expectation
+  putStrLn $ show expectation
   unless okState $ void $ checkStateFail
     diff x vm (okState, b2, b3, b4, b5)
   return okState

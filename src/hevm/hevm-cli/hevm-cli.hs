@@ -33,6 +33,7 @@ import EVM.Types hiding (word)
 import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, runUnitTestContract, getParametersFromEnvironmentVariables, testNumber, dappTest)
 import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
 --import EVM.Format (showTraceTree, showTree', renderTree, showBranchInfoWithAbi, showLeafInfo)
+import GHC.Natural
 import EVM.RLP (rlpdecode)
 import qualified EVM.Patricia as Patricia
 import Data.Map (Map)
@@ -69,7 +70,6 @@ import Data.Aeson.Lens hiding (values)
 import qualified Data.Vector as V
 import qualified Data.ByteString.Lazy  as Lazy
 
-import qualified Data.SBV               as SBV
 import qualified Data.ByteString        as ByteString
 import qualified Data.ByteString.Char8  as Char8
 import qualified Data.ByteString.Lazy   as LazyByteString
@@ -120,7 +120,7 @@ data Command w
       , debug         :: w ::: Bool               <?> "Run interactively"
       , getModels     :: w ::: Bool               <?> "Print example testcase for each execution path"
       , showTree      :: w ::: Bool               <?> "Print branches explored in tree view"
-      , smttimeout    :: w ::: Maybe Integer      <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
+      , smttimeout    :: w ::: Maybe Natural      <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
       , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point"
       , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
@@ -131,7 +131,7 @@ data Command w
       { codeA         :: w ::: ByteString       <?> "Bytecode of the first program"
       , codeB         :: w ::: ByteString       <?> "Bytecode of the second program"
       , sig           :: w ::: Maybe Text       <?> "Signature of types to decode / encode"
-      , smttimeout    :: w ::: Maybe Integer    <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
+      , smttimeout    :: w ::: Maybe Natural    <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
       , maxIterations :: w ::: Maybe Integer    <?> "Number of times we may revisit a particular branching point"
       , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default) or cvc5"
       , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
@@ -186,7 +186,7 @@ data Command w
       , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
       , ffi           :: w ::: Bool                     <?> "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)"
-      , smttimeout    :: w ::: Maybe Integer            <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
+      , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
       , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point"
       , askSmtIterations :: w ::: Maybe Integer         <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
       }
@@ -206,25 +206,10 @@ data Command w
       , html    :: w ::: Bool         <?> "Output html report"
       , timeout :: w ::: Maybe Int    <?> "Execution timeout (default: 10 sec.)"
       }
-  | Flatten -- Concat all dependencies for a given source file
-    { sourceFile :: w ::: String       <?> "Path to solidity source file e.g. src/contract.sol"
-    , jsonFile   :: w ::: Maybe String <?> "Filename or path to dapp build output (default: out/*.solc.json)"
-    , dappRoot   :: w ::: Maybe String <?> "Path to dapp project root directory (default: . )"
-    }
-  | Version
-  | Rlp  -- RLP decode a string and print the result
-  { decode :: w ::: ByteString <?> "RLP encoded hexstring"
-  }
-  | Abiencode
-  { abi  :: w ::: Maybe String <?> "Signature of types to decode / encode"
-  , arg  :: w ::: [String]     <?> "Values to encode"
-  }
   | MerkleTest -- Insert a set of key values and check against the given root
-  { file :: w ::: String <?> "Path to .json test file"
-  }
-  | StripMetadata -- Remove metadata from contract bytecode
-  { code        :: w ::: Maybe ByteString       <?> "Program bytecode"
-  }
+      { file :: w ::: String <?> "Path to .json test file"
+      }
+  | Version
 
   deriving (Options.Generic)
 
@@ -243,7 +228,7 @@ instance Options.ParseRecord (Command Options.Wrapped) where
     Options.parseRecordWithModifiers Options.lispCaseModifiers
 
 optsMode :: Command Options.Unwrapped -> Mode
-optsMode x = if debug x then Debug else if jsontrace x then JsonTrace else Run
+optsMode x = if Main.debug x then Debug else if jsontrace x then JsonTrace else Run
 
 applyCache :: (Maybe String, Maybe String) -> IO (EVM.VM -> EVM.VM)
 applyCache (state, cache) =
@@ -288,6 +273,7 @@ unitTestOptions cmd solvers testFile = do
          Nothing  -> EVM.Fetch.oracle solvers Nothing
     , EVM.UnitTest.maxIter = maxIterations cmd
     , EVM.UnitTest.askSmtIters = askSmtIterations cmd
+    , EVM.UnitTest.smtdebug = smtdebug cmd
     , EVM.UnitTest.smtTimeout = smttimeout cmd
     , EVM.UnitTest.solver = solver cmd
     , EVM.UnitTest.covMatch = pack <$> covMatch cmd
@@ -315,18 +301,18 @@ main = do
     Equivalence {} -> equivalence cmd
     Exec {} ->
       launchExec cmd
-    Abiencode {} ->
-      print . ByteStringS $ abiencode (abi cmd) (arg cmd)
     BcTest {} ->
       launchTest cmd
     DappTest {} ->
       withCurrentDirectory root $ do
         cores <- num <$> getNumProcessors
-        withSolvers Z3 cores $ \solvers -> do
+        withSolvers Z3 cores (smttimeout cmd) $ \solvers -> do
           testFile <- findJsonFile (jsonFile cmd)
           testOpts <- unitTestOptions cmd solvers testFile
           case (coverage cmd, optsMode cmd) of
-            (False, Run) -> dappTest testOpts solvers testFile (cache cmd)
+            (False, Run) -> do
+              res <- dappTest testOpts solvers testFile (cache cmd)
+              unless res exitFailure
             (False, Debug) -> liftIO $ TTY.main testOpts root testFile
             (False, JsonTrace) -> error "json traces not implemented for dappTest"
             --(True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) testFile
@@ -335,23 +321,7 @@ main = do
         Just "Blockchain" -> launchScript "/run-blockchain-tests" cmd
         Just "VM" -> launchScript "/run-consensus-tests" cmd
         _ -> launchScript "/run-blockchain-tests" cmd
-    Flatten {} ->
-      withCurrentDirectory root $ do
-        theJson <- findJsonFile (jsonFile cmd)
-        readSolc theJson >>=
-          \case
-            Just (contractMap, cache) -> do
-              let dapp = dappInfo "." contractMap cache
-              EVM.Flatten.flatten dapp (pack (sourceFile cmd))
-            Nothing ->
-              error ("Failed to read Solidity JSON for `" ++ theJson ++ "'")
-    Rlp {} ->
-      case rlpdecode $ hexByteString "--decode" $ strip0x $ decode cmd of
-        Nothing -> error "Malformed RLP string"
-        Just c -> print c
     MerkleTest {} -> merkleTest cmd
-    StripMetadata {} -> print .
-      ByteStringS . stripBytecodeMetadata . hexByteString "bytecode" . strip0x $ fromJust $ code cmd
 
 launchScript :: String -> Command Options.Unwrapped -> IO ()
 launchScript script cmd =
@@ -387,31 +357,26 @@ findJsonFile Nothing = do
         ]
 
 equivalence :: Command Options.Unwrapped -> IO ()
-equivalence cmd = undefined
-  {-
-  do let bytecodeA = hexByteString "--code" . strip0x $ codeA cmd
-         bytecodeB = hexByteString "--code" . strip0x $ codeB cmd
-     maybeSignature <- case sig cmd of
-       Nothing -> return Nothing
-       Just sig' -> do method' <- functionAbi sig'
-                       return $ Just (view methodSignature method', snd <$> view methodInputs method')
+equivalence cmd = do
+  let bytecodeA = hexByteString "--code" . strip0x $ codeA cmd
+      bytecodeB = hexByteString "--code" . strip0x $ codeB cmd
+      veriOpts = VeriOpts { simp = True
+                            , debug = False
+                            , maxIter = maxIterations cmd
+                            , askSmtIters = askSmtIterations cmd
+                          }
 
-     void . runSMTWithTimeOut (solver cmd) (smttimeout cmd) (smtdebug cmd) . query $
-       equivalenceCheck bytecodeA bytecodeB (maxIterations cmd) (askSmtIterations cmd) maybeSignature >>= \case
-         Cex vm -> do
-           io $ putStrLn "Not equal!"
-           io $ putStrLn "Counterexample:"
-           showCounterexample vm maybeSignature
-           io exitFailure
-         Qed (postAs, postBs) -> io $ do
-           putStrLn $ "Explored: " <> show (length postAs)
-                       <> " execution paths of A and: "
-                       <> show (length postBs) <> " paths of B."
-           putStrLn "No discrepancies found."
-         Timeout () -> io $ do
-           hPutStr stderr "Solver timeout!"
-           exitFailure
-      -}
+  withSolvers Z3 3 Nothing $ \s -> do
+    res <- equivalenceCheck s bytecodeA bytecodeB veriOpts Nothing
+    case containsA (Cex()) res of
+      False -> do
+        putStrLn "No discrepancies found"
+        when (containsA (EVM.SymExec.Timeout()) res) $ do
+          putStrLn "But timeout(s) occurred"
+          exitFailure
+      True -> do
+        putStrLn $ "Not equivalent. Counterexample(s):" <> show res
+        exitFailure
 
 checkForVMErrors :: [EVM.VM] -> [String]
 checkForVMErrors [] = []
@@ -450,21 +415,23 @@ assert cmd = do
       rpcinfo = (,) block' <$> rpc cmd
   preState <- symvmFromCommand cmd
   let errCodes = fromMaybe defaultPanicCodes (assertions cmd)
-  if debug cmd then do
-    srcInfo <- getSrcInfo cmd
-    withSolvers EVM.SMT.Z3 4 $ \solvers -> do
+  cores <- num <$> getNumProcessors
+  withSolvers EVM.SMT.Z3 cores (smttimeout cmd) $ \solvers -> do
+    if Main.debug cmd then do
+      srcInfo <- getSrcInfo cmd
       void $ TTY.runFromVM
         (maxIterations cmd)
         srcInfo
         (EVM.Fetch.oracle solvers rpcinfo)
         preState
-  else withSolvers EVM.SMT.Z3 4 $ \solvers -> do
-    res <- verify solvers preState (maxIterations cmd) (askSmtIterations cmd) rpcinfo (Just $ checkAssertions errCodes)
-    case res of
-      [Qed _] -> putStrLn "QED: No reachable property violations discovered"
-      cexs -> do
-        putStrLn "Discovered the following counterexamples:"
-        putStrLn $ intercalate "\n" $ fmap show cexs
+    else do
+      let opts = VeriOpts { simp = False, debug = False, maxIter = (maxIterations cmd), askSmtIters = (askSmtIterations cmd)}
+      res <- verify solvers opts preState rpcinfo (Just $ checkAssertions errCodes)
+      case res of
+        [Qed _] -> putStrLn "QED: No reachable property violations discovered"
+        cexs -> do
+          putStrLn "Discovered the following counterexamples:"
+          putStrLn $ intercalate "\n" $ fmap show cexs
     {-
   srcInfo <- getSrcInfo cmd
   let block'  = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
@@ -635,7 +602,7 @@ launchExec cmd = do
     Debug -> void $ TTY.runFromVM Nothing dapp (fetcher smtjobs) vm
     --JsonTrace -> void $ execStateT (interpretWithTrace fetcher EVM.Stepper.runFully) vm
     _ -> error "TODO"
-   where fetcher smtjobs = maybe (EVM.Fetch.zero smtjobs) (EVM.Fetch.http smtjobs block') (rpc cmd)
+   where fetcher smtjobs = maybe (EVM.Fetch.zero smtjobs (smttimeout cmd)) (EVM.Fetch.http smtjobs (smttimeout cmd) block') (rpc cmd)
          block' = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
 
 data Testcase = Testcase {
@@ -923,9 +890,9 @@ runVMTest diffmode mode timelimit (name, x) =
       case mode of
         Run ->
           Timeout.timeout (1000000 * (fromMaybe 10 timelimit)) $
-            execStateT (EVM.Stepper.interpret (EVM.Fetch.zero 0) . void $ EVM.Stepper.execFully) vm0
+            execStateT (EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) . void $ EVM.Stepper.execFully) vm0
         Debug ->
-          Just <$> TTY.runFromVM Nothing emptyDapp (EVM.Fetch.zero 0) vm0
+          Just <$> TTY.runFromVM Nothing emptyDapp (EVM.Fetch.zero 0 (Just 0)) vm0
         JsonTrace ->
           error "JsonTrace: implement me"
           -- Just <$> execStateT (EVM.UnitTest.interpretWithCoverage EVM.Fetch.zero EVM.Stepper.runFully) vm0

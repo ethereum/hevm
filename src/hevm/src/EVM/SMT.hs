@@ -13,20 +13,18 @@ module EVM.SMT where
 
 import Prelude hiding (LT, GT)
 
-import Debug.Trace
-
 import GHC.Natural
 import Control.Monad
-import GHC.IO.Handle (Handle, hGetLine, hPutStr, hFlush, hSetBuffering, BufferMode(..))
+import GHC.IO.Handle (Handle, hFlush, hSetBuffering, BufferMode(..))
 import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
 import Control.Concurrent (forkIO, killThread)
 import Data.Char (isSpace)
 import Data.Containers.ListUtils (nubOrd)
-import Control.Monad.State.Strict
 import Language.SMT2.Parser (getValueRes, parseFileMsg)
-import Data.Either
-import Data.Maybe
+import Data.Word
 import Numeric (readHex)
+import Data.ByteString (ByteString)
+import Data.Maybe (fromMaybe)
 
 import qualified Data.ByteString as BS
 import qualified Data.List as List
@@ -34,12 +32,20 @@ import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty (NonEmpty, NonEmpty((:|)))
 import Data.String.Here
 import Data.Map (Map)
+import Data.List (foldl')
 import qualified Data.Map as Map
-import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text.Lazy (Text)
+import qualified Data.Text as TS
+import qualified Data.Text.Lazy as T
+import qualified Data.Text.Lazy.IO as T
+import Data.Text.Lazy.Builder
+import Data.Bifunctor (second)
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
 
 import EVM.Types
+import EVM.Traversals
+import EVM.CSE
+import EVM.Keccak
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
 import qualified Language.SMT2.Syntax as Language.SMT2.Parser
 import Language.SMT2.Syntax (SpecConstant(SCHexadecimal))
@@ -67,14 +73,14 @@ instance Monoid CexVars where
       }
 
 data SMTCex = SMTCex
-  { calldata :: Map Text Language.SMT2.Parser.SpecConstant
-  , storage :: SpecConstant
-  , blockContext :: SpecConstant
-  , txContext :: SpecConstant
+  { calldata :: Map TS.Text Language.SMT2.Parser.SpecConstant
+  , storage :: TS.Text
+  , blockContext :: TS.Text
+  , txContext :: TS.Text
   }
   deriving (Eq, Show)
 
-data SMT2 = SMT2 [Text] CexVars
+data SMT2 = SMT2 [Builder] CexVars
   deriving (Eq, Show)
 
 instance Semigroup SMT2 where
@@ -84,38 +90,56 @@ instance Monoid SMT2 where
   mempty = SMT2 mempty mempty
 
 formatSMT2 :: SMT2 -> Text
-formatSMT2 (SMT2 ls _) = T.unlines ls
+formatSMT2 (SMT2 ls _) = T.unlines (fmap toLazyText ls)
 
 -- | Reads all intermediate variables from the builder state and produces SMT declaring them as constants
-declareIntermediates :: State BuilderState SMT2
-declareIntermediates = do
-  s <- get
-  let bs = List.sortBy sortPred . Map.toList . snd $ bufs s
-      ss = List.sortBy sortPred . Map.toList . snd $ stores s
-  declBs <- forM bs $ \(_, (n, enc)) -> do
-    pure $ "(define-const buf" <> (T.pack . show $ n) <> " Buf " <> enc <> ")"
-  declSs <- forM ss $ \(_, (n, enc)) -> do
-    pure $ "(define-const store" <> (T.pack . show $ n) <> " Storage " <> enc <> ")"
-  pure $ SMT2 (["; intermediate buffers"] <> declBs <> ["", "; intermediate stores"] <> declSs) mempty
+declareIntermediates :: BufEnv -> StoreEnv -> SMT2
+declareIntermediates bufs stores =
+  let encSs = Map.mapWithKey encodeStore stores
+      encBs = Map.mapWithKey encodeBuf bufs
+      sorted = List.sortBy compareFst $ Map.toList $ encSs <> encBs
+      decls = fmap snd sorted
+  in SMT2 ([fromText "; intermediate buffers & stores"] <> decls) mempty
   where
-    sortPred (_, (a, _)) (_, (b, _)) = compare a b
+    compareFst (l, _) (r, _) = compare l r
+    encodeBuf n expr =
+       fromLazyText ("(define-const buf" <> (T.pack . show $ n) <> " Buf ") <> exprToSMT expr <> ")"
+    encodeStore n expr =
+       fromLazyText ("(define-const store" <> (T.pack . show $ n) <> " Storage ") <> exprToSMT expr <> ")"
 
 assertProps :: [Prop] -> SMT2
-assertProps ps = flip evalState initState $ do
-  encs <- mapM propToSMT ps
-  intermediates <- declareIntermediates
-  pure $ prelude
-       <> (declareBufs . nubOrd $ foldl (<>) [] (fmap (referencedBufs') ps))
-       <> SMT2 [""] mempty
-       <> (declareVars . nubOrd $ foldl (<>) [] (fmap (referencedVars') ps))
-       <> SMT2 [""] mempty
-       <> (declareFrameContext . nubOrd $ foldl (<>) [] (fmap (referencedFrameContext') ps))
-       <> intermediates
-       <> SMT2 [""] mempty
-       <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
+assertProps ps =
+  let encs = map propToSMT ps_elim
+      intermediates = declareIntermediates bufs stores in
+  prelude
+  <> (declareBufs . nubOrd $ foldl (<>) [] allBufs)
+  <> SMT2 [""] mempty
+  <> (declareVars . nubOrd $ foldl (<>) [] allVars)
+  <> SMT2 [""] mempty
+  <> (declareFrameContext . nubOrd $ foldl (<>) [] frameCtx)
+  <> intermediates
+  <> SMT2 [""] mempty
+  <> keccakAssumes
+  <> SMT2 [""] mempty
+  <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
+
+  where
+    (ps_elim, bufs, stores) = eliminateProps ps
+
+    allBufs = fmap referencedBufs' ps_elim <> fmap referencedBufs bufVals <> fmap referencedBufs storeVals
+    allVars = fmap referencedVars' ps_elim <> fmap referencedVars bufVals <> fmap referencedVars storeVals
+    frameCtx = fmap referencedFrameContext' ps_elim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
+
+    bufVals = Map.elems bufs
+    storeVals = Map.elems stores
+
+    keccakAssumes
+      = SMT2 ["; keccak assumptions"] mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions ps_elim bufVals storeVals)) mempty
+
 
 prelude :: SMT2
-prelude =  (flip SMT2) mempty $ fmap (T.drop 2) . T.lines $ [i|
+prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   ; logic
   ; TODO: this creates an error when used with z3?
   ;(set-logic QF_AUFBV)
@@ -125,6 +149,8 @@ prelude =  (flip SMT2) mempty $ fmap (T.drop 2) . T.lines $ [i|
   (define-sort Byte () (_ BitVec 8))
   (define-sort Word () (_ BitVec 256))
   (define-sort Buf () (Array Word Byte))
+
+  ; address -> slot -> value
   (define-sort Storage () (Array Word (Array Word Word)))
 
   ; hash functions
@@ -293,6 +319,39 @@ prelude =  (flip SMT2) mempty $ fmap (T.drop 2) . T.lines $ [i|
   (declare-const chainid Word)
   (declare-const basefee Word)
 
+  ; macros
+  (define-fun signext ( (b Word) (val Word)) Word
+    (ite (= b (_ bv0  256)) ((_ sign_extend 248) ((_ extract 7    0) val))
+    (ite (= b (_ bv1  256)) ((_ sign_extend 240) ((_ extract 15   0) val))
+    (ite (= b (_ bv2  256)) ((_ sign_extend 232) ((_ extract 23   0) val))
+    (ite (= b (_ bv3  256)) ((_ sign_extend 224) ((_ extract 31   0) val))
+    (ite (= b (_ bv4  256)) ((_ sign_extend 216) ((_ extract 39   0) val))
+    (ite (= b (_ bv5  256)) ((_ sign_extend 208) ((_ extract 47   0) val))
+    (ite (= b (_ bv6  256)) ((_ sign_extend 200) ((_ extract 55   0) val))
+    (ite (= b (_ bv7  256)) ((_ sign_extend 192) ((_ extract 63   0) val))
+    (ite (= b (_ bv8  256)) ((_ sign_extend 184) ((_ extract 71   0) val))
+    (ite (= b (_ bv9  256)) ((_ sign_extend 176) ((_ extract 79   0) val))
+    (ite (= b (_ bv10 256)) ((_ sign_extend 168) ((_ extract 87   0) val))
+    (ite (= b (_ bv11 256)) ((_ sign_extend 160) ((_ extract 95   0) val))
+    (ite (= b (_ bv12 256)) ((_ sign_extend 152) ((_ extract 103  0) val))
+    (ite (= b (_ bv13 256)) ((_ sign_extend 144) ((_ extract 111  0) val))
+    (ite (= b (_ bv14 256)) ((_ sign_extend 136) ((_ extract 119  0) val))
+    (ite (= b (_ bv15 256)) ((_ sign_extend 128) ((_ extract 127  0) val))
+    (ite (= b (_ bv16 256)) ((_ sign_extend 120) ((_ extract 135  0) val))
+    (ite (= b (_ bv17 256)) ((_ sign_extend 112) ((_ extract 143  0) val))
+    (ite (= b (_ bv18 256)) ((_ sign_extend 104) ((_ extract 151  0) val))
+    (ite (= b (_ bv19 256)) ((_ sign_extend 96 ) ((_ extract 159  0) val))
+    (ite (= b (_ bv20 256)) ((_ sign_extend 88 ) ((_ extract 167  0) val))
+    (ite (= b (_ bv21 256)) ((_ sign_extend 80 ) ((_ extract 175  0) val))
+    (ite (= b (_ bv22 256)) ((_ sign_extend 72 ) ((_ extract 183  0) val))
+    (ite (= b (_ bv23 256)) ((_ sign_extend 64 ) ((_ extract 191  0) val))
+    (ite (= b (_ bv24 256)) ((_ sign_extend 56 ) ((_ extract 199  0) val))
+    (ite (= b (_ bv25 256)) ((_ sign_extend 48 ) ((_ extract 207  0) val))
+    (ite (= b (_ bv26 256)) ((_ sign_extend 40 ) ((_ extract 215  0) val))
+    (ite (= b (_ bv27 256)) ((_ sign_extend 32 ) ((_ extract 223  0) val))
+    (ite (= b (_ bv28 256)) ((_ sign_extend 24 ) ((_ extract 231  0) val))
+    (ite (= b (_ bv29 256)) ((_ sign_extend 16 ) ((_ extract 239  0) val))
+    (ite (= b (_ bv30 256)) ((_ sign_extend 8  ) ((_ extract 247  0) val)) val))))))))))))))))))))))))))))))))
   ; storage
   (declare-const abstractStore Storage)
   (define-const emptyStore Storage ((as const Storage) ((as const (Array (_ BitVec 256) (_ BitVec 256))) #x0000000000000000000000000000000000000000000000000000000000000000)))
@@ -302,20 +361,20 @@ prelude =  (flip SMT2) mempty $ fmap (T.drop 2) . T.lines $ [i|
   (define-fun sload ((addr Word) (key Word) (storage Storage)) Word (select (select storage addr) key))
   |]
 
-declareBufs :: [Text] -> SMT2
+declareBufs :: [Builder] -> SMT2
 declareBufs names = SMT2 (["; buffers"] <> fmap declare names) mempty
   where
     declare n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
 
-referencedBufs :: Expr a -> [Text]
+referencedBufs :: Expr a -> [Builder]
 referencedBufs expr = nubOrd (foldExpr go [] expr)
   where
-    go :: Expr a -> [Text]
+    go :: Expr a -> [Builder]
     go = \case
-      AbstractBuf s -> [s]
+      AbstractBuf s -> [fromText s]
       _ -> []
 
-referencedBufs' :: Prop -> [Text]
+referencedBufs' :: Prop -> [Builder]
 referencedBufs' = \case
   PEq a b -> nubOrd $ referencedBufs a <> referencedBufs b
   PLT a b -> nubOrd $ referencedBufs a <> referencedBufs b
@@ -327,7 +386,7 @@ referencedBufs' = \case
   PNeg a -> referencedBufs' a
   PBool _ -> []
 
-referencedVars' :: Prop -> [Text]
+referencedVars' :: Prop -> [Builder]
 referencedVars' = \case
   PEq a b -> nubOrd $ referencedVars a <> referencedVars b
   PLT a b -> nubOrd $ referencedVars a <> referencedVars b
@@ -339,7 +398,7 @@ referencedVars' = \case
   PNeg a -> referencedVars' a
   PBool _ -> []
 
-referencedFrameContext' :: Prop -> [Text]
+referencedFrameContext' :: Prop -> [Builder]
 referencedFrameContext' = \case
   PEq a b -> nubOrd $ referencedFrameContext a <> referencedFrameContext b
   PLT a b -> nubOrd $ referencedFrameContext a <> referencedFrameContext b
@@ -352,68 +411,57 @@ referencedFrameContext' = \case
   PBool _ -> []
 
 -- Given a list of 256b VM variable names, create an SMT2 object with the variables declared
-declareVars :: [Text] -> SMT2
+declareVars :: [Builder] -> SMT2
 declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
     cexvars = CexVars
-      { calldataV = names
+      { calldataV = (fmap toLazyText names)
       , storageV = mempty
       , blockContextV = mempty
       , txContextV = mempty
       }
 
-referencedVars :: Expr a -> [Text]
+referencedVars :: Expr a -> [Builder]
 referencedVars expr = nubOrd (foldExpr go [] expr)
   where
-    go :: Expr a -> [Text]
+    go :: Expr a -> [Builder]
     go = \case
-      Var s -> [s]
+      Var s -> [fromText s]
       _ -> []
 
-declareFrameContext :: [Text] -> SMT2
+declareFrameContext :: [Builder] -> SMT2
 declareFrameContext names = SMT2 (["; frame context"] <> fmap declare names) mempty
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
 
-referencedFrameContext :: Expr a -> [Text]
+referencedFrameContext :: Expr a -> [Builder]
 referencedFrameContext expr = nubOrd (foldExpr go [] expr)
   where
-    go :: Expr a -> [Text]
+    go :: Expr a -> [Builder]
     go = \case
-      CallValue a -> [T.append "callvalue_" (T.pack . show $ a)]
-      Caller a -> [T.append "caller_" (T.pack . show $ a)]
-      Address a -> [T.append "address_" (T.pack . show $ a)]
+      CallValue a -> [fromLazyText $ T.append "callvalue_" (T.pack . show $ a)]
+      Caller a -> [fromLazyText $ T.append "caller_" (T.pack . show $ a)]
+      Address a -> [fromLazyText $ T.append "address_" (T.pack . show $ a)]
       Balance {} -> error "TODO: BALANCE"
       SelfBalance {} -> error "TODO: SELFBALANCE"
       Gas {} -> error "TODO: GAS"
       _ -> []
 
 
--- maps expressions to variable names
-data BuilderState = BuilderState
-  { bufs :: (Int, Map (Expr Buf) (Int, Text))
-  , stores :: (Int, Map (Expr Storage) (Int, Text))
-  }
-  deriving (Show)
-
-initState :: BuilderState
-initState = BuilderState
-  { bufs = (0, Map.empty)
-  , stores = (0, Map.empty)
-  }
-
-exprToSMT :: Expr a -> State BuilderState Text
+exprToSMT :: Expr a -> Builder
 exprToSMT = \case
-  Lit w -> pure $ "(_ bv" <> (T.pack $ show (num w :: Integer)) <> " 256)"
-  Var s -> pure s
+  Lit w -> fromLazyText $ "(_ bv" <> (T.pack $ show (num w :: Integer)) <> " 256)"
+  Var s -> fromText s
+  GVar (BufVar n) -> fromLazyText $ "buf" <> (T.pack . show $ n)
+  GVar (StoreVar n) -> fromLazyText $ "store" <> (T.pack . show $ n)
   JoinBytes
     z o two three four five six seven
     eight nine ten eleven twelve thirteen fourteen fifteen
     sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree
     twentyfour twentyfive twentysix twentyseven twentyeight twentynine thirty thirtyone
-    -> concatBytes $ z :|
-        [ o, two, three, four, five, six, seven
+    -> concatBytes [
+        z, o, two, three, four, five, six, seven
         , eight, nine, ten, eleven, twelve, thirteen, fourteen, fifteen
         , sixteen, seventeen, eighteen, nineteen, twenty, twentyone, twentytwo, twentythree
         , twentyfour, twentyfive, twentysix, twentyseven, twentyeight, twentynine, thirty, thirtyone]
@@ -421,32 +469,34 @@ exprToSMT = \case
   Add a b -> op2 "bvadd" a b
   Sub a b -> op2 "bvsub" a b
   Mul a b -> op2 "bvmul" a b
-  Div a b -> op2 "bvudiv" a b
-  SDiv a b -> op2 "bvsdiv" a b
   Exp a b -> case b of
                Lit b' -> expandExp a b'
                _ -> error "cannot encode symbolic exponentation into SMT"
-  Min a b -> do
-    aenc <- exprToSMT a
-    benc <- exprToSMT b
-    pure $ "(ite (<= " <> aenc `sp` benc <> ") " <> aenc `sp` benc <> ")"
-  LT a b -> do
-    cond <- op2 "bvult" a b
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
-  SLT a b -> do
-    cond <- op2 "bvslt" a b
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
-  GT a b -> do
-    cond <- op2 "bvugt" a b
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
-  LEq a b -> exprToSMT $ Not (LT b a)
-  GEq a b -> exprToSMT $ Not (LT a b)
-  Eq a b -> do
-    cond <- op2 "=" a b
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
-  IsZero a -> do
-    cond <- op2 "=" a (Lit 0)
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
+  Min a b ->
+    let aenc = exprToSMT a
+        benc = exprToSMT b in
+    "(ite (bvule " <> aenc `sp` benc <> ") " <> aenc `sp` benc <> ")"
+  LT a b ->
+    let cond = op2 "bvult" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  SLT a b ->
+    let cond = op2 "bvslt" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  GT a b ->
+    let cond = op2 "bvugt" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  LEq a b ->
+    let cond = op2 "bvule" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  GEq a b ->
+    let cond = op2 "bvuge" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  Eq a b ->
+    let cond = op2 "=" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  IsZero a ->
+    let cond = op2 "=" a (Lit 0) in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
   And a b -> op2 "bvand" a b
   Or a b -> op2 "bvor" a b
   Xor a b -> op2 "bvxor" a b
@@ -454,181 +504,137 @@ exprToSMT = \case
   SHL a b -> op2 "bvshl" b a
   SHR a b -> op2 "bvlshr" b a
   SAR a b -> op2 "bvashr" b a
-  EqByte a b -> do
-    cond <- op2 "=" a b
-    pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
-  Keccak a -> do
-    enc <- exprToSMT a
-    pure $ "(keccak " <> enc <> ")"
-  SHA256 a -> do
-    enc <- exprToSMT a
-    pure $ "(sha256 " <> enc <> ")"
+  SEx a b -> op2 "signext" a b
+  Div a b -> op2CheckZero "bvudiv" a b
+  SDiv a b -> op2CheckZero "bvsdiv" a b
+  Mod a b -> op2CheckZero "bvurem" a b
+  SMod a b -> op2CheckZero "bvsrem" a b
+  -- NOTE: this needs to do the MUL at a higher precision, then MOD, then downcast
+  MulMod a b c ->
+    let aExp = exprToSMT a
+        bExp = exprToSMT b
+        cExp = exprToSMT c
+        aLift = "(concat (_ bv0 256) " <> aExp <> ")"
+        bLift = "(concat (_ bv0 256) " <> bExp <> ")"
+        cLift = "(concat (_ bv0 256) " <> cExp <> ")"
+    in  "((_ extract 255 0) (ite (= " <> cExp <> " (_ bv0 256)) (_ bv0 512) (bvurem (bvmul " <> aLift `sp` bLift <> ")" <> cLift <> ")))"
+  EqByte a b ->
+    let cond = op2 "=" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
+  Keccak a ->
+    let enc = exprToSMT a in
+    "(keccak " <> enc <> ")"
+  SHA256 a ->
+    let enc = exprToSMT a in
+    "(sha256 " <> enc <> ")"
 
-  CallValue a -> pure $ T.append "callvalue_" (T.pack . show $ a)
-  Caller a -> pure $ T.append "caller_" (T.pack . show $ a)
-  Address a -> pure $ T.append "address_" (T.pack . show $ a)
+  CallValue a -> fromLazyText $ T.append "callvalue_" (T.pack . show $ a)
+  Caller a -> fromLazyText $ T.append "caller_" (T.pack . show $ a)
+  Address a -> fromLazyText $ T.append "address_" (T.pack . show $ a)
 
-  Origin -> pure "origin"
-  BlockHash a -> do
-    enc <- exprToSMT a
-    pure $ "(blockhash " <> enc <> ")"
-  Coinbase -> pure "coinbase"
-  Timestamp -> pure "timestamp"
-  BlockNumber -> pure "blocknumber"
-  Difficulty -> pure "difficulty"
-  GasLimit -> pure "gaslimit"
-  ChainId -> pure "chainid"
-  BaseFee -> pure "basefee"
+  Origin ->  "origin"
+  BlockHash a ->
+    let enc = exprToSMT a in
+    "(blockhash " <> enc <> ")"
+  Coinbase -> "coinbase"
+  Timestamp -> "timestamp"
+  BlockNumber -> "blocknumber"
+  Difficulty -> "difficulty"
+  GasLimit -> "gaslimit"
+  ChainId -> "chainid"
+  BaseFee -> "basefee"
 
   -- TODO: make me binary...
-  LitByte b -> pure $ "(_ bv" <> T.pack (show (num b :: Integer)) <> " 8)"
+  LitByte b -> fromLazyText $ "(_ bv" <> T.pack (show (num b :: Integer)) <> " 8)"
   IndexWord idx w -> case idx of
     Lit n -> if n >= 0 && n < 32
-             then do
-              enc <- exprToSMT w
-              pure $ "(indexWord" <> T.pack (show (num n :: Integer)) <> " " <> enc <> ")"
+             then
+               let enc = exprToSMT w in
+               fromLazyText ("(indexWord" <> T.pack (show (num n :: Integer))) `sp` enc <> ")"
              else exprToSMT (LitByte 0)
     _ -> op2 "indexWord" idx w
   ReadByte idx src -> op2 "select" src idx
 
-  ConcreteBuf "" -> pure "emptyBuf"
-  ConcreteBuf bs -> writeBytes (LitByte <$> BS.unpack bs) mempty
-  AbstractBuf s -> pure s
+  ConcreteBuf "" -> "emptyBuf"
+  ConcreteBuf bs -> writeBytes bs mempty
+  AbstractBuf s -> fromText s
   ReadWord idx prev -> op2 "readWord" idx prev
   BufLength b -> op1 "bufLength" b
-  e@(WriteByte idx val prev) -> do
-    encIdx <- exprToSMT idx
-    encVal <- exprToSMT val
-    s <- get
-    let (count, bs) = bufs s
-    case Map.lookup e bs of
-      Just (n, _) -> pure . T.pack $ "buf" <> show n
-      Nothing -> case Map.lookup prev bs of
-        Just (prevName, _) -> do
-          let newBs = Map.insert e (count, "(store " <> (T.pack $ "buf" <> show prevName) `sp` encIdx `sp` encVal <> ")") bs
-          put $ s{bufs=(count + 1, newBs)}
-          pure . T.pack $ "buf" <> show count
-        Nothing -> do
-          prevName <- exprToSMT prev
-          s' <- get
-          let (count', bs') = bufs s'
-          let
-            newBs = Map.insert e (count', "(store " <> prevName `sp` encIdx `sp` encVal <> ")") bs'
-          put $ s{bufs=(count' + 1, newBs)}
-          pure . T.pack $ "buf" <> show count'
-  e@(WriteWord idx val prev) -> do
-    encIdx <- exprToSMT idx
-    encVal <- exprToSMT val
-    s <- get
-    let (count, bs) = bufs s
-    case Map.lookup e bs of
-      Just (n, _) -> pure . T.pack $ "buf" <> show n
-      Nothing -> case Map.lookup prev bs of
-        Just (prevName, _) -> do
-          let
-            newBs = Map.insert e (count, "(writeWord " <> encIdx `sp` encVal `sp` (T.pack $ "buf" <> show prevName) <> ")") bs
-          put $ s{bufs=(count + 1, newBs)}
-          pure . T.pack $ "buf" <> show count
-        Nothing -> do
-          prevName <- exprToSMT prev
-          s' <- get
-          let (count', bs') = bufs s'
-          let
-            newBs = Map.insert e (count', "(writeWord " <> encIdx `sp` encVal `sp` prevName <> ")") bs'
-          put $ s{bufs=(count' + 1, newBs)}
-          pure . T.pack $ "buf" <> show count'
-  e@(CopySlice srcIdx dstIdx size src dst) -> do
-    s <- get
-    let (_, bs) = bufs s
-    case Map.lookup e bs of
-      Just (n, _) -> pure . T.pack $ "buf" <> show n
-      Nothing -> do
-        srcName <- case Map.lookup src bs of
-                     Just (_, n') -> pure n'
-                     Nothing -> exprToSMT src
-        s' <- get
-        let (_, bs') = bufs s'
-        dstName <- case Map.lookup dst bs' of
-                     Just (_, n') -> pure n'
-                     Nothing -> exprToSMT dst
-        s'' <- get
-        enc <- copySlice srcIdx dstIdx size srcName dstName
-        let (count, bs'') = bufs s''
-        put $ s{bufs=(count + 1, Map.insert e (count, enc) bs'')}
-        pure . T.pack $ "buf" <> show count
-  EmptyStore -> pure "emptyStore"
-  ConcreteStore s -> error "TODO: concretestore"
-  AbstractStore -> pure "abstractStore"
-  e@(SStore addr idx val prev) -> do
-    s <- get
-    let (_, ss) = stores s
-    case Map.lookup e ss of
-      Just (n, _) -> pure . T.pack $ "store" <> show n
-      Nothing -> do
-        prevName <- case Map.lookup prev ss of
-                      Just (_, n) -> pure n
-                      Nothing -> exprToSMT prev
-        eAddr <- exprToSMT addr
-        eIdx <- exprToSMT idx
-        eVal <- exprToSMT val
-        s' <- get
-        let (count, ss') = stores s'
-        put $ s'{
-          stores=(
-            count + 1,
-            Map.insert e (count, "(sstore" `sp` eAddr `sp` eIdx `sp` eVal `sp` prevName <> ")") ss'
-          )}
-        pure . T.pack $ "store" <> show count
+  WriteByte idx val prev ->
+    let encIdx = exprToSMT idx
+        encVal = exprToSMT val
+        encPrev = exprToSMT prev in
+    "(store " <> encPrev `sp` encIdx `sp` encVal <> ")"
+  WriteWord idx val prev ->
+    let encIdx = exprToSMT idx
+        encVal = exprToSMT val
+        encPrev = exprToSMT prev in
+    "(writeWord " <> encIdx `sp` encVal `sp` encPrev <> ")"
+  CopySlice srcIdx dstIdx size src dst ->
+    copySlice srcIdx dstIdx size (exprToSMT src) (exprToSMT dst)
+  EmptyStore -> "emptyStore"
+  ConcreteStore s -> encodeConcreteStore s
+  AbstractStore -> "abstractStore"
+  SStore addr idx val prev ->
+    let encAddr = exprToSMT addr
+        encIdx = exprToSMT idx
+        encVal = exprToSMT val
+        encPrev = exprToSMT prev in
+    "(sstore" `sp` encAddr `sp` encIdx `sp` encVal `sp` encPrev <> ")"
   SLoad addr idx store -> op3 "sload" addr idx store
 
   a -> error $ "TODO: implement: " <> show a
   where
-    op1 op a = do
-      enc <- exprToSMT a
-      pure $ "(" <> op `sp` enc <> ")"
-    op2 op a b = do
-      aenc <- exprToSMT a
-      benc <- exprToSMT b
-      pure $ "(" <> op `sp` aenc `sp` benc <> ")"
-    op3 op a b c = do
-      aenc <- exprToSMT a
-      benc <- exprToSMT b
-      cenc <- exprToSMT c
-      pure $ "(" <> op `sp` aenc `sp` benc `sp` cenc <> ")"
+    op1 op a =
+      let enc =  exprToSMT a in
+      "(" <> op `sp` enc <> ")"
+    op2 op a b =
+      let aenc = exprToSMT a
+          benc = exprToSMT b in
+      "(" <> op `sp` aenc `sp` benc <> ")"
+    op3 op a b c =
+      let aenc = exprToSMT a
+          benc = exprToSMT b
+          cenc = exprToSMT c in
+      "(" <> op `sp` aenc `sp` benc `sp` cenc <> ")"
+    op2CheckZero op a b =
+      let aenc = exprToSMT a
+          benc = exprToSMT b in
+      "(ite (= " <> benc <> " (_ bv0 256)) (_ bv0 256) " <>  "(" <> op `sp` aenc `sp` benc <> "))"
 
-sp :: Text -> Text -> Text
-a `sp` b = a <> " " <> b
+sp :: Builder -> Builder -> Builder
+a `sp` b = a <> (fromText " ") <> b
 
-zero :: Text
+zero :: Builder
 zero = "(_ bv0 256)"
 
-one :: Text
+one :: Builder
 one = "(_ bv1 256)"
 
-propToSMT :: Prop -> State BuilderState Text
+propToSMT :: Prop -> Builder
 propToSMT = \case
   PEq a b -> op2 "=" a b
   PLT a b -> op2 "bvult" a b
   PGT a b -> op2 "bvugt" a b
-  PLEq a b -> propToSMT $ PNeg (PGT a b)
-  PGEq a b -> propToSMT $ PNeg (PLT a b)
-  PNeg a -> do
-      enc <- propToSMT a
-      pure $ "(not " <> enc <> ")"
-  PAnd a b -> do
-      aenc <- propToSMT a
-      benc <- propToSMT b
-      pure $ "(and " <> aenc <> " " <> benc <> ")"
-  POr a b -> do
-      aenc <- propToSMT a
-      benc <- propToSMT b
-      pure $ "(or " <> aenc <> " " <> benc <> ")"
-  PBool b -> pure $ if b then "true" else "false"
+  PLEq a b -> op2 "bvule" a b
+  PGEq a b -> op2 "bvuge" a b
+  PNeg a ->
+    let enc = propToSMT a in
+    "(not " <> enc <> ")"
+  PAnd a b ->
+    let aenc = propToSMT a
+        benc = propToSMT b in
+    "(and " <> aenc <> " " <> benc <> ")"
+  POr a b ->
+    let aenc = propToSMT a
+        benc = propToSMT b in
+    "(or " <> aenc <> " " <> benc <> ")"
+  PBool b -> if b then "true" else "false"
   where
-    op2 op a b = do
-      aenc <- exprToSMT a
-      benc <- exprToSMT b
-      pure $ "(" <> op <> " " <> aenc <> " " <> benc <> ")"
+    op2 op a b =
+      let aenc = exprToSMT a
+          benc = exprToSMT b in
+      "(" <> op <> " " <> aenc <> " " <> benc <> ")"
 
 
 -- ** Execution ** -------------------------------------------------------------------------------
@@ -671,8 +677,8 @@ data CheckSatResult
   = Sat SMTCex
   | Unsat
   | Unknown
-  | Error Text
-  deriving (Show)
+  | Error TS.Text
+  deriving (Show, Eq)
 
 isSat :: CheckSatResult -> Bool
 isSat (Sat _) = True
@@ -686,30 +692,22 @@ isUnsat :: CheckSatResult -> Bool
 isUnsat Unsat = True
 isUnsat _ = False
 
-checkSat' :: SolverGroup -> SMT2 -> IO (CheckSatResult)
-checkSat' solvers smt = do
-  snd . head <$> checkSat solvers [smt]
+checkSat :: SolverGroup -> SMT2 -> IO CheckSatResult
+checkSat (SolverGroup taskQueue) script = do
+  -- prepare result channel
+  resChan <- newChan
 
-checkSat :: SolverGroup -> [SMT2] -> IO [(SMT2, CheckSatResult)]
-checkSat (SolverGroup taskQueue) scripts = do
-  -- prepare tasks
-  tasks <- forM scripts $ \s -> do
-    res <- newChan
-    pure $ Task s res
+  -- send task to solver group
+  writeChan taskQueue (Task script resChan)
 
-  -- send tasks to solver group
-  forM_ tasks (writeChan taskQueue)
-
-  -- collect results
-  forM tasks $ \(Task s r) -> do
-    res <- readChan r
-    pure (s, res)
+  -- collect result
+  readChan resChan
 
 
-withSolvers :: Solver -> Natural -> (SolverGroup -> IO a) -> IO a
-withSolvers solver count cont = do
+withSolvers :: Solver -> Natural -> Maybe Natural -> (SolverGroup -> IO a) -> IO a
+withSolvers solver count timeout cont = do
   -- spawn solvers
-  instances <- mapM (const $ spawnSolver solver) [1..count]
+  instances <- mapM (const $ spawnSolver solver timeout) [1..count]
 
   -- spawn orchestration thread
   taskQueue <- newChan
@@ -731,12 +729,12 @@ withSolvers solver count cont = do
       _ <- forkIO $ runTask task inst avail
       orchestrate queue avail
 
-    runTask (Task s@(SMT2 cmds cexvars) r) inst availableInstances = do
+    runTask (Task (SMT2 cmds cexvars) r) inst availableInstances = do
       -- reset solver and send all lines of provided script
       out <- sendScript inst (SMT2 ("(reset)" : cmds) cexvars)
       case out of
         -- if we got an error then return it
-        Left e -> writeChan r (Error e)
+        Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
         -- otherwise call (check-sat), parse the result, and send it down the result channel
         Right () -> do
           sat <- sendLine inst "(check-sat)"
@@ -745,39 +743,42 @@ withSolvers solver count cont = do
               -- get values for all cexvars' calldataV-s
               calldatamodels <- foldM (\a n -> do
                       val <- getValue inst n
-                      tmp <- pure $ parseFileMsg Language.SMT2.Parser.getValueRes val
+                      let tmp = parseFileMsg Language.SMT2.Parser.getValueRes (T.toStrict val)
                       idConst <- case tmp of
                         Right (Language.SMT2.Parser.ResSpecific (valParsed :| [])) -> pure valParsed
                         _ -> undefined
                       theConst <- case idConst of
                        (Language.SMT2.Parser.TermQualIdentifier (
                          Language.SMT2.Parser.Unqualified (Language.SMT2.Parser.IdSymbol symbol)),
-                         Language.SMT2.Parser.TermSpecConstant ext2) -> if symbol == n
+                         Language.SMT2.Parser.TermSpecConstant ext2) -> if symbol == (T.toStrict n)
                                                                            then pure ext2
                                                                            else undefined
                        _ -> undefined
-                      pure $ Map.insert n theConst a
+                      pure $ Map.insert (T.toStrict n) theConst a
                   )
                   mempty (calldataV cexvars)
               pure $ Sat $ SMTCex
                 { calldata = calldatamodels
+                , storage = mempty
+                , blockContext = mempty
+                , txContext = mempty
                 }
             "unsat" -> pure Unsat
             "timeout" -> pure Unknown
             "unknown" -> pure Unknown
-            _ -> pure . Error $ "Unable to parse solver output: " <> sat
+            _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
           writeChan r res
 
       -- put the instance back in the list of available instances
       writeChan availableInstances inst
 
 getIntegerFromSCHex :: SpecConstant -> Integer
-getIntegerFromSCHex (SCHexadecimal a) = fst (head(Numeric.readHex (T.unpack a))) ::Integer
+getIntegerFromSCHex (SCHexadecimal a) = fst (head(Numeric.readHex (T.unpack (T.fromStrict a)))) ::Integer
 getIntegerFromSCHex _ = undefined
 
 -- | Arguments used when spawing a solver instance
-solverArgs :: Solver -> [Text]
-solverArgs = \case
+solverArgs :: Solver -> Maybe (Natural) -> [Text]
+solverArgs solver timeout = case solver of
   Bitwuzla -> error "TODO: Bitwuzla args"
   Z3 ->
     [ "-in" ]
@@ -785,18 +786,24 @@ solverArgs = \case
     [ "--lang=smt"
     , "--no-interactive"
     , "--produce-models"
+    , "--tlimit-per=" <> T.pack (show (1000 * fromMaybe 10 timeout))
     ]
   Custom _ -> []
 
 -- | Spawns a solver instance, and sets the various global config options that we use for our queries
-spawnSolver :: Solver -> IO SolverInstance
-spawnSolver solver = do
-  let cmd = (proc (show solver) (fmap T.unpack $ solverArgs solver)) { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe }
+spawnSolver :: Solver -> Maybe (Natural) -> IO SolverInstance
+spawnSolver solver timeout = do
+  let cmd = (proc (show solver) (fmap T.unpack $ solverArgs solver timeout)) { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe }
   (Just stdin, Just stdout, Just stderr, process) <- createProcess cmd
   hSetBuffering stdin (BlockBuffering (Just 1000000))
   let solverInstance = SolverInstance solver stdin stdout stderr process
-  --_ <- sendCommand solverInstance "(set-option :print-success true)"
-  pure solverInstance
+  case timeout of
+    Nothing -> pure solverInstance
+    Just t -> case solver of
+        CVC5 -> pure solverInstance
+        _ -> do
+          _ <- sendLine' solverInstance $ "(set-option :timeout " <> T.pack (show t) <> ")"
+          pure solverInstance
 
 -- | Cleanly shutdown a running solver instnace
 stopSolver :: SolverInstance -> IO ()
@@ -805,7 +812,7 @@ stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
 sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
 sendScript solver (SMT2 cmds _) = do
-  sendLine' solver (T.unlines cmds)
+  sendLine' solver (T.unlines $ fmap toLazyText cmds)
   pure $ Right()
 
 -- | Sends a single command to the solver, returns the first available line from the output buffer
@@ -821,39 +828,38 @@ sendCommand inst cmd = do
 -- | Sends a string to the solver and appends a newline, returns the first available line from the output buffer
 sendLine :: SolverInstance -> Text -> IO Text
 sendLine (SolverInstance _ stdin stdout _ _) cmd = do
-  hPutStr stdin (T.unpack $ T.append cmd "\n")
+  T.hPutStr stdin (T.append cmd "\n")
   hFlush stdin
-  T.pack <$> hGetLine stdout
+  T.hGetLine stdout
 
 -- | Sends a string to the solver and appends a newline, doesn't return stdout
 sendLine' :: SolverInstance -> Text -> IO ()
 sendLine' (SolverInstance _ stdin _ _ _) cmd = do
-  hPutStr stdin (T.unpack $ T.append cmd "\n")
+  T.hPutStr stdin (T.append cmd "\n")
   hFlush stdin
 
 -- | Returns a string representation of the model for the requested variable
 getValue :: SolverInstance -> Text -> IO Text
 getValue (SolverInstance _ stdin stdout _ _) var = do
-  hPutStr stdin (T.unpack $ T.append (T.append "(get-value (" var) "))\n")
+  T.hPutStr stdin (T.append (T.append "(get-value (" var) "))\n")
   hFlush stdin
-  T.pack <$> fmap (unlines . reverse) (readSExpr stdout)
+  fmap (T.unlines . reverse) (readSExpr stdout)
 
 -- | Reads lines from h until we have a balanced sexpr
-readSExpr :: Handle -> IO [String]
+readSExpr :: Handle -> IO [Text]
 readSExpr h = go 0 0 []
   where
-    go :: Int -> Int -> [String] -> IO [String]
     go 0 0 _ = do
-      line <- hGetLine h
-      let ls = length $ filter (== '(') line
-          rs = length $ filter (== ')') line
+      line <- T.hGetLine h
+      let ls = T.length $ T.filter (== '(') line
+          rs = T.length $ T.filter (== ')') line
       if ls == rs
          then pure [line]
          else go ls rs [line]
     go ls rs prev = do
-      line <- hGetLine h
-      let ls' = length $ filter (== '(') line
-          rs' = length $ filter (== ')') line
+      line <- T.hGetLine h
+      let ls' = T.length $ T.filter (== '(') line
+          rs' = T.length $ T.filter (== ')') line
       if (ls + ls') == (rs + rs')
          then pure $ line : prev
          else go (ls + ls') (rs + rs') (line : prev)
@@ -864,41 +870,59 @@ readSExpr h = go 0 0 []
 
 
 -- | Stores a region of src into dst
-copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Text -> Text -> State BuilderState Text
+copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Builder -> Builder -> Builder
 copySlice srcOffset dstOffset size@(Lit _) src dst
-  | size == (Lit 0) = pure dst
-  | otherwise = do
+  | size == (Lit 0) = dst
+  | otherwise =
     let size' = (sub size (Lit 1))
-    encDstOff <- exprToSMT (add dstOffset size')
-    encSrcOff <- exprToSMT (add srcOffset size')
-    child <- copySlice srcOffset dstOffset size' src dst
-    pure $ "(store " <> child `sp` encDstOff `sp` "(select " <> src `sp` encSrcOff <> "))"
+        encDstOff = exprToSMT (add dstOffset size')
+        encSrcOff = exprToSMT (add srcOffset size')
+        child = copySlice srcOffset dstOffset size' src dst in
+    "(store " <> child `sp` encDstOff `sp` "(select " <> src `sp` encSrcOff <> "))"
 copySlice _ _ _ _ _ = error "TODO: implement copySlice with a symbolically sized region"
 
 -- | Unrolls an exponentiation into a series of multiplications
-expandExp :: Expr EWord -> W256 -> State BuilderState Text
+expandExp :: Expr EWord -> W256 -> Builder
 expandExp base expnt
   | expnt == 1 = exprToSMT base
-  | otherwise = do
-    b <- exprToSMT base
-    n <- expandExp base (expnt - 1)
-    pure $ "(* " <> b `sp` n <> ")"
+  | otherwise =
+    let b = exprToSMT base
+        n = expandExp base (expnt - 1) in
+    "(bvmul " <> b `sp` n <> ")"
 
 -- | Concatenates a list of bytes into a larger bitvector
-concatBytes :: NonEmpty (Expr Byte) -> State BuilderState Text
-concatBytes bytes = foldM wrap "" $ NE.reverse bytes
+concatBytes :: [Expr Byte] -> Builder
+concatBytes bytes =
+  let bytesRev = reverse bytes
+      a2 = exprToSMT (head bytesRev) in
+  foldl wrap a2 $ tail bytesRev
   where
-    wrap inner byte = do
-      byteSMT <- exprToSMT byte
-      pure $ "(concat " <> byteSMT `sp` inner <> ")"
+    wrap inner byte =
+      let byteSMT = exprToSMT byte in
+      "(concat " <> byteSMT `sp` inner <> ")"
 
 -- | Concatenates a list of bytes into a larger bitvector
-writeBytes :: [Expr Byte] -> Expr Buf -> State BuilderState Text
-writeBytes bytes buf = do
-  bufSMT <- exprToSMT buf
-  foldM wrap bufSMT $ reverse (zip [0..] bytes)
+writeBytes :: ByteString -> Expr Buf -> Builder
+writeBytes bytes buf = snd $ BS.foldl' wrap (0, exprToSMT buf) bytes
   where
-    wrap inner (idx, byte) = do
-      byteSMT <- exprToSMT byte
-      idxSMT <- exprToSMT $ Lit idx
-      pure $ "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")"
+    -- we don't need to store zeros if the base buffer is empty
+    skipZeros = buf == mempty
+    wrap :: (Int, Builder) -> Word8 -> (Int, Builder)
+    wrap (idx, inner) byte =
+      if skipZeros && byte == 0
+      then (idx + 1, inner)
+      else let
+          byteSMT = exprToSMT (LitByte byte)
+          idxSMT = exprToSMT . Lit . num $ idx
+        in (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
+
+encodeConcreteStore :: Map W256 (Map W256 W256) -> Builder
+encodeConcreteStore s = foldl encodeWrite "emptyStore" writes
+  where
+    asList = fmap (second Map.toList) $ Map.toList s
+    writes = concatMap (\(addr, ws) -> fmap (\(k, v) -> (addr, k, v)) ws) asList
+    encodeWrite prev (addr, key, val) = let
+        encAddr = exprToSMT (Lit addr)
+        encKey = exprToSMT (Lit key)
+        encVal = exprToSMT (Lit val)
+      in "(sstore " <> encAddr `sp` encKey `sp` encVal `sp` prev <> ")"

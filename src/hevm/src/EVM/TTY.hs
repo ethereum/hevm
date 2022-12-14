@@ -13,18 +13,20 @@ import Brick.Widgets.List
 import EVM
 import EVM.ABI (abiTypeSolidity, decodeAbiValue, AbiType(..), emptyAbi)
 import EVM.SymExec (maxIterationsReached, symCalldata)
+import EVM.Expr (simplify)
 import EVM.Dapp (DappInfo, dappInfo, Test, extractSig, Test(..), srcMap)
 import EVM.Dapp (dappUnitTests, unitTestMethods, dappSolcByName, dappSolcByHash, dappSources)
 import EVM.Dapp (dappAstSrcMap)
 import EVM.Debug
 import EVM.Format (showWordExact, showWordExplanation)
-import EVM.Format (contractNamePart, contractPathPart, showTraceTree, prettyIfConcreteWord)
+import EVM.Format (contractNamePart, contractPathPart, showTraceTree, prettyIfConcreteWord, formatExpr)
 import EVM.Hexdump (prettyHex)
 import EVM.Op
 import EVM.Solidity hiding (storageLayout)
 import EVM.Types hiding (padRight)
 import EVM.UnitTest
 import EVM.StorageLayout
+import Text.Wrap
 
 import EVM.Stepper (Stepper)
 import qualified EVM.Stepper as Stepper
@@ -46,6 +48,7 @@ import Data.List (sort, find)
 import Data.Version (showVersion)
 
 import qualified Data.ByteString as BS
+import qualified Data.Text as T
 import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified Data.Vector as Vec
@@ -874,13 +877,13 @@ drawStackPane ui =
   let
     gasText = showWordExact (num $ view (uiVm . state . gas) ui)
     labelText = txt ("Gas available: " <> gasText <> "; stack:")
-    stackList = list StackPane (Vec.fromList $ zip [(1 :: Int)..] (view (uiVm . state . stack) ui)) 2
+    stackList = list StackPane (Vec.fromList $ zip [(1 :: Int)..] (fmap simplify $ view (uiVm . state . stack) ui)) 2
   in hBorderWithLabel labelText <=>
     renderList
       (\_ (i, w) ->
          vBox
            [ withHighlight True (str ("#" ++ show i ++ " "))
-               <+> txt (prettyIfConcreteWord w)
+               <+> ourWrap (Text.unpack $ prettyIfConcreteWord w)
            , dim (txt ("   " <> case unlit w of
                        Nothing -> ""
                        Just u -> showWordExplanation u $ dapp (view uiTestOpts ui)))
@@ -929,7 +932,7 @@ withHighlight True  = withDefAttr boldAttr
 
 prettyIfConcrete :: Expr Buf -> String
 prettyIfConcrete (ConcreteBuf x) = prettyHex 40 x
-prettyIfConcrete x = show x
+prettyIfConcrete x = T.unpack $ formatExpr $ simplify x
 
 drawTracePane :: UiVmState -> UiWidget
 drawTracePane s =
@@ -945,26 +948,35 @@ drawTracePane s =
           1
 
   in case view uiShowMemory s of
-    True ->
-      hBorderWithLabel (txt "Calldata")
-      <=> str (prettyIfConcrete (view (state . calldata) vm))
-      <=> hBorderWithLabel (txt "Returndata")
-      <=> str (prettyIfConcrete (view (state . returndata) vm))
-      <=> hBorderWithLabel (txt "Output")
-      <=> str (maybe "" show (view result vm))
-      <=> hBorderWithLabel (txt "Cache")
-      <=> str (show (view (cache . path) vm))
-      <=> hBorderWithLabel (txt "Path Conditions")
-      <=> (str $ show $ view constraints vm)
-      <=> hBorderWithLabel (txt "Memory")
-      <=> viewport TracePane Vertical
-            (str (prettyIfConcrete (view (state . memory) vm)))
+    True -> viewport TracePane Vertical $
+        hBorderWithLabel (txt "Calldata")
+        <=> ourWrap (prettyIfConcrete (view (state . calldata) vm))
+        <=> hBorderWithLabel (txt "Returndata")
+        <=> ourWrap (prettyIfConcrete (view (state . returndata) vm))
+        <=> hBorderWithLabel (txt "Output")
+        <=> ourWrap (maybe "" show (view result vm))
+        <=> hBorderWithLabel (txt "Cache")
+        <=> ourWrap (show (view (cache . path) vm))
+        <=> hBorderWithLabel (txt "Path Conditions")
+        <=> (ourWrap $ show $ view constraints vm)
+        <=> hBorderWithLabel (txt "Memory")
+        <=> (ourWrap (prettyIfConcrete (view (state . memory) vm)))
     False ->
       hBorderWithLabel (txt "Trace")
       <=> renderList
             (\_ x -> txt x)
             False
             (listMoveTo (length traceList) traceList)
+
+ourWrap :: String -> Widget n
+ourWrap = strWrapWith settings
+  where
+    settings = WrapSettings
+      { preserveIndentation = True
+      , breakLongWords = True
+      , fillStrategy = NoFill
+      , fillScope = FillAfterFirst
+      }
 
 solidityList :: VM -> DappInfo -> List Name (Int, ByteString)
 solidityList vm dapp' =

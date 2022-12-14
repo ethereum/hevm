@@ -1,7 +1,24 @@
 {-# Language DataKinds #-}
 {-# Language ImplicitParams #-}
 {-# Language TemplateHaskell #-}
-module EVM.Format (formatExpr, contractNamePart, contractPathPart, showTree, showTraceTree, prettyIfConcreteWord, prettyvmresult, showCall, showWordExact, showWordExplanation) where
+
+module EVM.Format
+  ( formatExpr
+  , contractNamePart
+  , contractPathPart
+  , showTree
+  , showTraceTree
+  , prettyvmresult
+  , showCall
+  , showWordExact
+  , showWordExplanation
+  , parenthesise
+  , unindexed
+  , showValue
+  , textValues
+  , showAbiValue
+  , prettyIfConcreteWord
+  ) where
 
 import Prelude hiding (Word)
 import qualified EVM
@@ -9,13 +26,14 @@ import EVM.Dapp (DappInfo (..), dappSolcByHash, dappAbiMap, showTraceLocation, d
 import EVM.Dapp (DappContext (..), contextInfo, contextEnv)
 import EVM (VM, VMResult(..), cheatCode, traceForest, traceData, Error (..), result)
 import EVM (Trace, TraceData (..), Query (..), FrameContext (..))
-import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..), hexByteString, foldExpr, mapExpr, word256Bytes)
+import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..), hexByteString, word256Bytes)
 import EVM.Types (Addr, ByteStringS(..))
 import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..))
 import EVM.ABI (Indexed (NotIndexed), getAbiSeq)
 import EVM.ABI (parseTypeName, formatString)
 import EVM.Solidity (SolcContract(..), contractName, abiMap)
 import EVM.Solidity (methodOutput, methodSignature, methodName)
+import EVM.Hexdump
 
 import Control.Arrow ((>>>))
 import Control.Lens (view, preview, ix, _2, to, makeLenses, over, each, (^?!))
@@ -90,19 +108,18 @@ prettyIfConcreteWord = \case
 showAbiValue :: (?context :: DappContext) => AbiValue -> Text
 showAbiValue (AbiBytes _ bs) =
   formatBytes bs  -- opportunistically decodes recognisable strings
-showAbiValue (AbiAddress addr) = undefined
-  {-
+showAbiValue (AbiAddress addr) =
   let dappinfo = view contextInfo ?context
       contracts = view contextEnv ?context
       name = case (Map.lookup addr contracts) of
         Nothing -> ""
         Just contract ->
-          let hash = view EVM.codehash contract
-              solcContract = (preview (dappSolcByHash . ix hash . _2) dappinfo)
-          in maybeContractName' solcContract
+          let hash = maybeLitWord $ view EVM.codehash contract
+          in case hash of
+               Just h -> maybeContractName' (preview (dappSolcByHash . ix h . _2) dappinfo)
+               Nothing -> ""
   in
     name <> "@" <> (pack $ show addr)
-  -}
 showAbiValue v = pack $ show v
 
 showAbiValues :: (?context :: DappContext) => Vector AbiValue -> Text
@@ -112,12 +129,11 @@ textAbiValues :: (?context :: DappContext) => Vector AbiValue -> [Text]
 textAbiValues vs = toList (fmap showAbiValue vs)
 
 textValues :: (?context :: DappContext) => [AbiType] -> Expr Buf -> [Text]
-textValues = undefined
---textValues ts (SymbolicBuffer  _) = [pack $ show t | t <- ts]
---textValues ts (ConcreteBuffer bs) =
-  --case runGetOrFail (getAbiSeq (length ts) ts) (fromStrict bs) of
-    --Right (_, _, xs) -> textAbiValues xs
-    --Left (_, _, _)   -> [formatBinary bs]
+textValues ts (ConcreteBuf bs) =
+  case runGetOrFail (getAbiSeq (length ts) ts) (fromStrict bs) of
+    Right (_, _, xs) -> textAbiValues xs
+    Left (_, _, _)   -> [formatBinary bs]
+textValues ts _ = fmap (const "<symbolic>") ts
 
 parenthesise :: [Text] -> Text
 parenthesise ts = "(" <> intercalate ", " ts <> ")"
@@ -129,22 +145,20 @@ showValue :: (?context :: DappContext) => AbiType -> Expr Buf -> Text
 showValue t b = head $ textValues [t] b
 
 showCall :: (?context :: DappContext) => [AbiType] -> Expr Buf -> Text
-showCall = undefined
---showCall ts (SymbolicBuffer bs) = showValues ts $ SymbolicBuffer (drop 4 bs)
---showCall ts (ConcreteBuffer bs) = showValues ts $ ConcreteBuffer (BS.drop 4 bs)
+showCall ts (ConcreteBuf bs) = showValues ts $ ConcreteBuf (BS.drop 4 bs)
+showCall _ _ = "<symbolic>"
 
 showError :: (?context :: DappContext) => Expr Buf -> Text
-showError bs = T.pack $ show bs
-  {-
+showError (ConcreteBuf bs) =
   let dappinfo = view contextInfo ?context
       bs4 = BS.take 4 bs
   in case Map.lookup (word bs4) (view dappErrorMap dappinfo) of
-      Just (SolError errName ts) -> errName <> " " <> showCall ts (ConcreteBuffer bs)
+      Just (SolError errName ts) -> errName <> " " <> showCall ts (ConcreteBuf bs)
       Nothing -> case bs4 of
                   -- Method ID for Error(string)
-                  "\b\195y\160" -> showCall [AbiStringType] (ConcreteBuffer bs)
+                  "\b\195y\160" -> showCall [AbiStringType] (ConcreteBuf bs)
                   _             -> formatBinary bs
-                -}
+showError b = T.pack $ show b
 
 -- the conditions under which bytes will be decoded and rendered as a string
 isPrintable :: ByteString -> Bool
@@ -296,15 +310,18 @@ showTrace dapp vm trace =
     ReturnTrace out (CallContext {}) ->
       "← " <> formatSBinary out
     ReturnTrace out (CreationContext {}) ->
-      let l = case out of
-                ConcreteBuf bs -> BS.length bs
-                _ -> error "panik :o"
-      in "← " <> pack (show l) <> " bytes of code"
+      let l = Expr.bufLength out
+      in "← " <> formatExpr l <> " bytes of code"
     EntryTrace t ->
       t
     FrameTrace (CreationContext addr (Lit hash) _ _ ) -> -- FIXME: irrefutable pattern
       "create "
       <> maybeContractName (preview (dappSolcByHash . ix hash . _2) dapp)
+      <> "@" <> pack (show addr)
+      <> pos
+    FrameTrace (CreationContext addr _ _ _ ) ->
+      "create "
+      <> "<unknown contract>"
       <> "@" <> pack (show addr)
       <> pos
     FrameTrace (CallContext target context _ _ hash abi calldata _ _) ->
@@ -366,20 +383,18 @@ contractPathPart :: Text -> Text
 contractPathPart x = Text.split (== ':') x !! 0
 
 prettyvmresult :: (?context :: DappContext) => Expr End -> String
-prettyvmresult = undefined
-  {-
---prettyvmresult (EVM.VMFailure (EVM.Revert ""))  = "Revert"
-prettyvmresult (EVM.VMFailure (EVM.Revert msg)) = "Revert" ++ (unpack $ showError msg)
-prettyvmresult (EVM.VMFailure (EVM.UnrecognizedOpcode 254)) = "Assertion violation"
-prettyvmresult (EVM.VMFailure err) = "Failed: " <> show err
-prettyvmresult (EVM.VMSuccess (ConcreteBuf msg)) =
+prettyvmresult (EVM.Types.Revert _ (ConcreteBuf "")) = "Revert"
+prettyvmresult (EVM.Types.Revert _ msg) = "Revert: " ++ (unpack $ showError msg)
+prettyvmresult (EVM.Types.Invalid _) = "Invalid Opcode"
+prettyvmresult (EVM.Types.Return _ (ConcreteBuf msg) _) =
   if BS.null msg
   then "Stop"
   else "Return: " <> show (ByteStringS msg)
-prettyvmresult _ = error "TODO: sym prettyVmResult"
---prettyvmresult (EVM.VMSuccess (SymbolicBuffer msg)) =
-  --"Return: " <> show (length msg) <> " symbolic bytes"
-  -}
+prettyvmresult (EVM.Types.Return _ _ _) =
+  "Return: <symbolic>"
+prettyvmresult (EVM.Types.IllegalOverflow _) = "Illegal Overflow"
+prettyvmresult (EVM.Types.SelfDestruct _) = "Self Destruct"
+prettyvmresult e = error "Internal Error: Invalid Result: " <> show e
 
 currentSolc :: DappInfo -> VM -> Maybe SolcContract
 currentSolc dapp vm = undefined
@@ -391,114 +406,161 @@ currentSolc dapp vm = undefined
 
 -- TODO: display in an 'act' format
 
--- TreeLine describes a singe line of the tree
--- it contains the indentation which is prefixed to it
--- and its content which contains the rest
-data TreeLine = TreeLine {
-  _indent   :: String,
-  _content  :: String
-  }
+indent :: Int -> Text -> Text
+indent n = rstrip . T.unlines . fmap (T.replicate n (T.pack [' ']) <>) . T.lines
 
-makeLenses ''TreeLine
+rstrip :: Text -> Text
+rstrip = T.reverse . T.dropWhile (=='\n') . T.reverse
 
--- SHOW TREE
-
-showTreeIndentSymbol :: Bool      -- ^ isLastChild
-                     -> Bool      -- ^ isTreeHead
-                     -> String
-showTreeIndentSymbol True  True  = "\x2514" -- └
-showTreeIndentSymbol False True  = "\x251c" -- ├
-showTreeIndentSymbol True  False = " "
-showTreeIndentSymbol False False = "\x2502" -- │
-
-flattenTree :: Int -> -- total number of cases
-               Int -> -- case index
-               Tree [String] ->
-               [TreeLine]
--- this case should never happen for our use case, here for generality
-flattenTree _ _ (Node [] _)  = []
-
-flattenTree totalCases i (Node (x:xs) cs) = let
-  isLastCase       = i + 1 == totalCases
-  indenthead       = showTreeIndentSymbol isLastCase True <> " " <> show i <> " "
-  indentchild      = showTreeIndentSymbol isLastCase False <> " "
-  in TreeLine indenthead x
-  : ((TreeLine indentchild <$> xs) ++ over (each . indent) ((<>) indentchild) (flattenForest cs))
-
-flattenForest :: [Tree [String]] -> [TreeLine]
-flattenForest forest = concat $ zipWith (flattenTree (length forest)) [0..] forest
-
-leftpad :: Int -> String -> String
-leftpad n = (<>) $ replicate n ' '
-
-showTree' :: Tree [String] -> String
-showTree' (Node s []) = unlines s
-showTree' (Node _ children) =
-  let
-    treeLines = flattenForest children
-    maxIndent = 2 + maximum (length . _indent <$> treeLines)
-    showTreeLine (TreeLine colIndent colContent) =
-      let indentSize = maxIndent - length colIndent
-      in colIndent <> leftpad indentSize colContent
-  in unlines $ showTreeLine <$> treeLines
-
-
--- RENDER TREE
-
---showStorage :: [(Expr EWord, Expr EWord)] -> [String]
---showStorage = fmap (\(k, v) -> show k <> " => " <> show v)
-
---showLeafInfo :: DappInfo -> BranchInfo -> [String]
---showLeafInfo srcInfo (BranchInfo vm _) = let
-  -- ?context = DappContext { _contextInfo = srcInfo, _contextEnv = vm ^?! EVM.env . EVM.contracts }
-  --in let
-  --self    = view (EVM.state . EVM.contract) vm
-  --updates = case view (EVM.env . EVM.contracts) vm ^?! ix self . EVM.storage of
-    --Symbolic v _ -> v
-    --Concrete x -> [(litWord k,v) | (k, v) <- Map.toList x]
-  --showResult = [prettyvmresult res | Just res <- [view result vm]]
-  --in showResult
-  -- ++ showStorage updates
-  -- ++ [""]
-
---showBranchInfoWithAbi :: DappInfo -> BranchInfo -> [String]
---showBranchInfoWithAbi _ (BranchInfo _ Nothing) = [""]
---showBranchInfoWithAbi srcInfo (BranchInfo vm (Just y)) =
-  --case y of
-    --(IsZero (Eq (Literal x) _)) ->
-      --let
-        --abimap = view abiMap <$> currentSolc srcInfo vm
-        --method = abimap >>= Map.lookup (num x)
-      --in [maybe (show y) (show . view methodSignature) method]
-    --y' -> [show y']
-
---renderTree :: (a -> [String])
-           --- -> (a -> [String])
-           --- -> Tree a
-           --- -> Tree [String]
---renderTree showBranch showLeaf (Node b []) = Node (showBranch b ++ showLeaf b) []
---renderTree showBranch showLeaf (Node b cs) = Node (showBranch b) (renderTree showBranch showLeaf <$> cs)
-
-indent' :: Int -> String -> String
-indent' n = rstrip . unlines . fmap (replicate n ' ' <>) . lines
-
-rstrip :: String -> String
-rstrip = reverse . dropWhile (=='\n') . reverse
-
-formatExpr :: Expr a -> String
+formatExpr :: Expr a -> Text
 formatExpr = go
   where
+    go :: Expr a -> Text
     go = \case
-      ITE c t f -> rstrip . unlines $
+      Lit w -> T.pack $ show w
+      LitByte w -> T.pack $ show w
+
+      ITE c t f -> rstrip . T.unlines $
         [ "(ITE (" <> formatExpr c <> ")"
-        , indent' 2 (formatExpr t)
-        , indent' 2 (formatExpr f)
+        , indent 2 (formatExpr t)
+        , indent 2 (formatExpr f)
         , ")"]
-      EVM.Types.Revert buf -> "(Revert " <> formatExpr buf <> ")"
-      Return buf store -> unlines
-          [ "(Return"
-          , indent' 2 ("Data: " <> formatExpr buf)
-          , indent' 2 ("Store: " <> formatExpr store)
+      EVM.Types.Revert asserts buf -> case buf of
+        ConcreteBuf "" -> "(Revert " <> formatExpr buf <> ")"
+        _ -> T.unlines
+          [ "(Revert"
+          , indent 2 $ T.unlines
+            [ "Code:"
+            , indent 2 (formatExpr buf)
+            , "Assertions:"
+            , indent 2 $ T.pack $ show asserts
+            ]
           , ")"
           ]
-      a -> show a
+      Return asserts buf store -> T.unlines
+        [ "(Return"
+        , indent 2 $ T.unlines
+          [ "Data:"
+          , indent 2 $ formatExpr buf
+          , ""
+          , "Store:"
+          , indent 2 $ formatExpr store
+          , "Assertions:"
+          , indent 2 $ T.pack $ show asserts
+          ]
+        , ")"
+        ]
+
+      IndexWord idx val -> T.unlines
+        [ "(IndexWord"
+        , indent 2 $ T.unlines
+          [ "idx:"
+          , indent 2 $ formatExpr idx
+          , "val: "
+          , indent 2 $ formatExpr val
+          ]
+        , ")"
+        ]
+      ReadWord idx buf -> T.unlines
+        [ "(ReadWord"
+        , indent 2 $ T.unlines
+          [ "idx:"
+          , indent 2 $ formatExpr idx
+          , "buf: "
+          , indent 2 $ formatExpr buf
+          ]
+        , ")"
+        ]
+
+      And a b -> T.unlines
+        [ "(And"
+        , indent 2 $ T.unlines
+          [ formatExpr a
+          , formatExpr b
+          ]
+        , ")"
+        ]
+
+      -- Stores
+      SLoad addr slot store -> T.unlines
+        [ "(SLoad"
+        , indent 2 $ T.unlines
+          [ "addr:"
+          , indent 2 $ formatExpr addr
+          , "slot:"
+          , indent 2 $ formatExpr slot
+          , "store:"
+          , indent 2 $ formatExpr store
+          ]
+        , ")"
+        ]
+      SStore addr slot val prev -> T.unlines
+        [ "(SStore"
+        , indent 2 $ T.unlines
+          [ "addr:"
+          , indent 2 $ formatExpr addr
+          , "slot:"
+          , indent 2 $ formatExpr slot
+          , "val:"
+          , indent 2 $ formatExpr val
+          ]
+        , ")"
+        , formatExpr prev
+        ]
+      ConcreteStore s -> T.unlines
+        [ "(ConcreteStore"
+        , indent 2 $ T.unlines $ fmap (T.pack . show) $ Map.toList $ fmap (T.pack . show . Map.toList) s
+        , ")"
+        ]
+
+      -- Buffers
+
+      CopySlice srcOff dstOff size src dst -> T.unlines
+        [ "(CopySlice"
+        , indent 2 $ T.unlines
+          [ "srcOffset: " <> formatExpr srcOff
+          , "dstOffset: " <> formatExpr dstOff
+          , "size:      " <> formatExpr size
+          , "src:"
+          , indent 2 $ formatExpr src
+          ]
+        , ")"
+        , formatExpr dst
+        ]
+      WriteWord idx val buf -> T.unlines
+        [ "(WriteWord"
+        , indent 2 $ T.unlines
+          [ "idx:"
+          , indent 2 $ formatExpr idx
+          , "val:"
+          , indent 2 $ formatExpr val
+          ]
+        , ")"
+        , formatExpr buf
+        ]
+      WriteByte idx val buf -> T.unlines
+        [ "(WriteByte"
+        , indent 2 $ T.unlines
+          [ "idx: " <> formatExpr idx
+          , "val: " <> formatExpr val
+          ]
+        , ")"
+        , formatExpr buf
+        ]
+      ConcreteBuf bs -> case bs of
+        "" -> "(ConcreteBuf \"\")"
+        _ -> T.unlines
+          [ "(ConcreteBuf"
+          , indent 2 $ T.pack $ prettyHex 0 bs
+          , ")"
+          ]
+
+
+      -- Hashes
+      Keccak b -> T.unlines
+       [ "(Keccak"
+       , indent 2 $ formatExpr b
+       , ")"
+       ]
+
+      a -> T.pack $ show a
