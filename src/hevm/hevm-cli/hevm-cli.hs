@@ -203,25 +203,10 @@ data Command w
       , html    :: w ::: Bool         <?> "Output html report"
       , timeout :: w ::: Maybe Int    <?> "Execution timeout (default: 10 sec.)"
       }
-  | Flatten -- Concat all dependencies for a given source file
-    { sourceFile :: w ::: String       <?> "Path to solidity source file e.g. src/contract.sol"
-    , jsonFile   :: w ::: Maybe String <?> "Filename or path to dapp build output (default: out/*.solc.json)"
-    , dappRoot   :: w ::: Maybe String <?> "Path to dapp project root directory (default: . )"
-    }
-  | Version
-  | Rlp  -- RLP decode a string and print the result
-  { decode :: w ::: ByteString <?> "RLP encoded hexstring"
-  }
-  | Abiencode
-  { abi  :: w ::: Maybe String <?> "Signature of types to decode / encode"
-  , arg  :: w ::: [String]     <?> "Values to encode"
-  }
   | MerkleTest -- Insert a set of key values and check against the given root
-  { file :: w ::: String <?> "Path to .json test file"
-  }
-  | StripMetadata -- Remove metadata from contract bytecode
-  { code        :: w ::: Maybe ByteString       <?> "Program bytecode"
-  }
+      { file :: w ::: String <?> "Path to .json test file"
+      }
+  | Version
 
   deriving (Options.Generic)
 
@@ -316,8 +301,6 @@ main = do
     Equivalence {} -> equivalence cmd
     Exec {} ->
       launchExec cmd
-    Abiencode {} ->
-      print . ByteStringS $ abiencode (abi cmd) (arg cmd)
     BcTest {} ->
       launchTest cmd
     DappTest {} ->
@@ -338,23 +321,7 @@ main = do
         Just "Blockchain" -> launchScript "/run-blockchain-tests" cmd
         Just "VM" -> launchScript "/run-consensus-tests" cmd
         _ -> launchScript "/run-blockchain-tests" cmd
-    Flatten {} ->
-      withCurrentDirectory root $ do
-        theJson <- findJsonFile (jsonFile cmd)
-        readSolc theJson >>=
-          \case
-            Just (contractMap, cache) -> do
-              let dapp = dappInfo "." contractMap cache
-              EVM.Flatten.flatten dapp (pack (sourceFile cmd))
-            Nothing ->
-              error ("Failed to read Solidity JSON for `" ++ theJson ++ "'")
-    Rlp {} ->
-      case rlpdecode $ hexByteString "--decode" $ strip0x $ decode cmd of
-        Nothing -> error "Malformed RLP string"
-        Just c -> print c
     MerkleTest {} -> merkleTest cmd
-    StripMetadata {} -> print .
-      ByteStringS . stripBytecodeMetadata . hexByteString "bytecode" . strip0x $ fromJust $ code cmd
 
 launchScript :: String -> Command Options.Unwrapped -> IO ()
 launchScript script cmd =
@@ -738,15 +705,15 @@ vmFromCommand cmd = do
           , EVM.vmoptAddress       = address'
           , EVM.vmoptCaller        = litAddr caller'
           , EVM.vmoptOrigin        = origin'
-          , EVM.vmoptGas           = word gas 0
+          , EVM.vmoptGas           = 0
           , EVM.vmoptBaseFee       = baseFee
-          , EVM.vmoptPriorityFee   = word priorityFee 0
-          , EVM.vmoptGaslimit      = word gas 0
+          , EVM.vmoptPriorityFee   = 0
+          , EVM.vmoptGaslimit      = 0
           , EVM.vmoptCoinbase      = addr coinbase miner
           , EVM.vmoptNumber        = word number blockNum
           , EVM.vmoptTimestamp     = Lit $ word timestamp ts
-          , EVM.vmoptBlockGaslimit = word gaslimit 0
-          , EVM.vmoptGasprice      = word gasprice 0
+          , EVM.vmoptBlockGaslimit = 0
+          , EVM.vmoptGasprice      = 0
           , EVM.vmoptMaxCodeSize   = word maxcodesize 0xffffffff
           , EVM.vmoptDifficulty    = word difficulty diff
           , EVM.vmoptSchedule      = FeeSchedule.berlin
@@ -832,15 +799,15 @@ symvmFromCommand cmd calldata' = do
       , EVM.vmoptAddress       = address'
       , EVM.vmoptCaller        = caller'
       , EVM.vmoptOrigin        = origin'
-      , EVM.vmoptGas           = word gas 0xffffffffffffffff
-      , EVM.vmoptGaslimit      = word gas 0xffffffffffffffff
+      , EVM.vmoptGas           = 0xffffffffffffffff
+      , EVM.vmoptGaslimit      = 0xffffffffffffffff
       , EVM.vmoptBaseFee       = baseFee
       , EVM.vmoptPriorityFee   = word priorityFee 0
       , EVM.vmoptCoinbase      = addr coinbase miner
       , EVM.vmoptNumber        = word number blockNum
       , EVM.vmoptTimestamp     = ts
-      , EVM.vmoptBlockGaslimit = word gaslimit 0
-      , EVM.vmoptGasprice      = word gasprice 0
+      , EVM.vmoptBlockGaslimit = 0
+      , EVM.vmoptGasprice      = 0
       , EVM.vmoptMaxCodeSize   = word maxcodesize 0xffffffff
       , EVM.vmoptDifficulty    = word difficulty diff
       , EVM.vmoptSchedule      = FeeSchedule.berlin
