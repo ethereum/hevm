@@ -466,6 +466,9 @@ tests = testGroup "hevm"
                               (r, mempty), (s, mempty), (t, mempty)]
        === (Just $ Patricia.Literal Patricia.Empty)
     ]
+ , testGroup "Remote State Tests"
+   [
+   ]
  , testGroup "Panic code tests via symbolic execution"
   [
      testCase "assert-fail" $ do
@@ -1587,7 +1590,7 @@ tests = testGroup "hevm"
                   -- NOTE: this used to as follows, but there is no _storage field in Contract record
                   -- (Map.insert aAddr (initialContract (RuntimeCode $ ConcreteBuffer a) &
                   --                     set EVM.storage (EVM.Symbolic [] store)))
-            verify s defaultVeriOpts vm Nothing (Just $ checkAssertions defaultPanicCodes)
+            verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLn "found counterexample:"
         ,
         expectFail $ testCase "calling unique contracts (read from storage)" $ do
@@ -1639,7 +1642,7 @@ tests = testGroup "hevm"
         ignoreTest $ testCase "safemath distributivity (yul)" $ do
           let yulsafeDistributivity = hex "6355a79a6260003560e01c14156016576015601f565b5b60006000fd60a1565b603d602d604435600435607c565b6039602435600435607c565b605d565b6052604b604435602435605d565b600435607c565b141515605a57fe5b5b565b6000828201821115151560705760006000fd5b82820190505b92915050565b6000818384048302146000841417151560955760006000fd5b82820290505b92915050565b"
           let vm =  abstractVM (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] yulsafeDistributivity Nothing SymbolicS
-          [Qed _] <-  withSolvers Z3 1 Nothing $ \s -> verify s defaultVeriOpts vm Nothing (Just $ checkAssertions defaultPanicCodes)
+          [Qed _] <-  withSolvers Z3 1 Nothing $ \s -> verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
         ,
         testCase "safemath distributivity (sol)" $ do
@@ -1743,12 +1746,12 @@ tests = testGroup "hevm"
               }
           |]
         withSolvers Z3 3 Nothing $ \s -> do
-          let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 2, askSmtIters = Just 2 }
+          let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 2, askSmtIters = Just 2, rpcInfo = Nothing}
           a <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
           assertEqual "Must be different" (containsA (Cex ()) a) True
           return ()
       , testCase "eq-all-yul-optimization-tests" $ do
-        let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 5, askSmtIters = Just 20 }
+        let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 5, askSmtIters = Just 20, rpcInfo = Nothing }
             ignoredTests = [
                       "controlFlowSimplifier/terminating_for_nested.yul"
                     , "controlFlowSimplifier/terminating_for_nested_reversed.yul"
@@ -2466,7 +2469,7 @@ runDappTestCustom testFile match maxIter ffiAllowed = do
       TIO.writeFile file json
       withSolvers Z3 1 Nothing $ \solvers -> do
         opts <- testOpts solvers root json match maxIter ffiAllowed
-        dappTest opts solvers file Nothing
+        dappTest opts file Nothing
 
 runDappTest :: FilePath -> Text -> IO Bool
 runDappTest testFile match = runDappTestCustom testFile match Nothing True
@@ -2485,7 +2488,7 @@ debugDappTest testFile = do
         TTY.main opts root file
 
 testOpts :: SolverGroup -> FilePath -> Text -> Text -> Maybe Integer -> Bool -> IO UnitTestOptions
-testOpts solvers root solcJson match maxIter allowFFI= do
+testOpts solvers root solcJson match maxIter allowFFI = do
   srcInfo <- case readJSON solcJson of
                Nothing -> error "Could not read solc json"
                Just (contractMap, asts, sources) -> do
@@ -2495,7 +2498,8 @@ testOpts solvers root solcJson match maxIter allowFFI= do
   params <- getParametersFromEnvironmentVariables Nothing
 
   pure EVM.UnitTest.UnitTestOptions
-    { EVM.UnitTest.oracle = Fetch.oracle solvers Nothing
+    { EVM.UnitTest.solvers = solvers
+    , EVM.UnitTest.rpcInfo = Nothing
     , EVM.UnitTest.maxIter = maxIter
     , EVM.UnitTest.askSmtIters = Nothing
     , EVM.UnitTest.smtdebug = False

@@ -21,6 +21,7 @@ import EVM.Debug
 import EVM.Format (showWordExact, showWordExplanation)
 import EVM.Format (contractNamePart, contractPathPart, showTraceTree, prettyIfConcreteWord, formatExpr)
 import EVM.Hexdump (prettyHex)
+import EVM.SMT (SolverGroup)
 import EVM.Op
 import EVM.Solidity hiding (storageLayout)
 import EVM.Types hiding (padRight)
@@ -30,6 +31,7 @@ import Text.Wrap
 
 import EVM.Stepper (Stepper)
 import qualified EVM.Stepper as Stepper
+import qualified EVM.Fetch as Fetch
 import qualified Control.Monad.Operational as Operational
 
 import EVM.Fetch (Fetcher)
@@ -229,13 +231,15 @@ mkVty = do
   V.setMode (V.outputIface vty) V.BracketedPaste True
   return vty
 
-runFromVM :: Maybe Integer -> DappInfo -> (Query -> IO (EVM ())) -> VM -> IO VM
-runFromVM maxIter' dappinfo oracle' vm = do
+runFromVM :: SolverGroup -> Fetch.RpcInfo -> Maybe Integer -> DappInfo -> VM -> IO VM
+runFromVM solvers rpcInfo maxIter' dappinfo vm = do
 
   let
     opts = UnitTestOptions
-      { oracle        = oracle'
+      { solvers       = solvers
+      , rpcInfo       = rpcInfo
       , verbose       = Nothing
+      , smtdebug      = False
       , maxIter       = maxIter'
       , askSmtIters   = Nothing
       , smtTimeout    = Nothing
@@ -607,9 +611,9 @@ appEvent s (VtyEvent (V.EvKey (V.KChar 'b') [V.MCtrl])) =
 appEvent s _ = continue s
 
 app :: UnitTestOptions -> App UiState () Name
-app opts =
-  let ?fetcher = oracle opts
-      ?maxIter = maxIter opts
+app UnitTestOptions{..} =
+  let ?fetcher = Fetch.oracle solvers rpcInfo
+      ?maxIter = maxIter
   in App
   { appDraw = drawUi
   , appChooseCursor = neverShowCursor

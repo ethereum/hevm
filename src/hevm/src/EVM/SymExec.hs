@@ -52,14 +52,24 @@ data VeriOpts = VeriOpts
   , debug :: Bool
   , maxIter :: Maybe Integer
   , askSmtIters :: Maybe Integer
+  , rpcInfo :: Fetch.RpcInfo
   }
   deriving (Eq, Show)
 
 defaultVeriOpts :: VeriOpts
-defaultVeriOpts = VeriOpts { simp = True, debug = False, maxIter = Nothing, askSmtIters = Nothing }
+defaultVeriOpts = VeriOpts
+  { simp = True
+  , debug = False
+  , maxIter = Nothing
+  , askSmtIters = Nothing
+  , rpcInfo = Nothing
+  }
+
+rpcVeriOpts :: (Fetch.BlockNumber, Text) -> VeriOpts
+rpcVeriOpts info = defaultVeriOpts { rpcInfo = Just info }
 
 debugVeriOpts :: VeriOpts
-debugVeriOpts = VeriOpts { simp = True, debug = True, maxIter = Nothing, askSmtIters = Nothing }
+debugVeriOpts = defaultVeriOpts { debug = True }
 
 extractCex :: VerifyResult -> Maybe (Expr End, SMTCex)
 extractCex (Cex c) = Just c
@@ -314,7 +324,7 @@ panicMsg err = (selector "Panic(uint256)") <> (encodeAbiValue $ AbiUInt 256 err)
 verifyContract :: SolverGroup -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO [VerifyResult]
 verifyContract solvers theCode signature' concreteArgs opts storagemodel maybepre maybepost = do
   let preState = abstractVM signature' concreteArgs theCode maybepre storagemodel
-  verify solvers opts preState Nothing maybepost
+  verify solvers opts preState maybepost
 
 pruneDeadPaths :: [VM] -> [VM]
 pruneDeadPaths =
@@ -509,11 +519,11 @@ extractProps = \case
 
 
 -- | Symbolically execute the VM and check all endstates against the postcondition, if available.
-verify :: SolverGroup -> VeriOpts -> VM -> Maybe (Fetch.BlockNumber, Text) -> Maybe Postcondition -> IO [VerifyResult]
-verify solvers opts preState rpcinfo maybepost = do
+verify :: SolverGroup -> VeriOpts -> VM -> Maybe Postcondition -> IO [VerifyResult]
+verify solvers opts preState maybepost = do
   putStrLn "Exploring contract"
 
-  exprInter <- evalStateT (interpret (Fetch.oracle solvers rpcinfo) (maxIter opts) (askSmtIters opts) runExpr) preState
+  exprInter <- evalStateT (interpret (Fetch.oracle solvers (rpcInfo opts)) (maxIter opts) (askSmtIters opts) runExpr) preState
   when (debug opts) $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
 
   expr <- if (simp opts) then (pure $ Expr.simplify exprInter) else pure exprInter

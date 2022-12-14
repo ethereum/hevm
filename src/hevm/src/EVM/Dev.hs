@@ -48,7 +48,7 @@ runDappTest root =
     let testFile = root <> "/out/dapp.sol.json"
     withSolvers Z3 cores Nothing $ \solvers -> do
       opts <- testOpts solvers root testFile
-      res <- dappTest opts solvers testFile Nothing
+      res <- dappTest opts testFile Nothing
       unless res exitFailure
 
 testOpts :: SolverGroup -> FilePath -> FilePath -> IO UnitTestOptions
@@ -67,8 +67,10 @@ testOpts solvers root testFile = do
        else Fetch.BlockNumber testn
 
   pure EVM.UnitTest.UnitTestOptions
-    { EVM.UnitTest.oracle = Fetch.oracle solvers Nothing
+    { EVM.UnitTest.solvers = solvers
+    , EVM.UnitTest.rpcInfo = Nothing
     , EVM.UnitTest.maxIter = Nothing
+    , EVM.UnitTest.smtdebug = False
     , EVM.UnitTest.askSmtIters = Nothing
     , EVM.UnitTest.smtTimeout = Nothing
     , EVM.UnitTest.solver = Nothing
