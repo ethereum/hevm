@@ -1826,8 +1826,6 @@ notStatic continue = do
     else continue
 
 -- | Burn gas, failing if insufficient gas is available
--- We use the `Integer` type to avoid overflows in intermediate
--- calculations and throw if the value won't fit into a uint64
 burn :: Word64 -> EVM () -> EVM ()
 burn n continue = do
   available <- use (state . gas)
