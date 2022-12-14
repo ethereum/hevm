@@ -109,11 +109,16 @@ parseBlock j = do
   gasLimit   <- readText <$> j ^? key "gasLimit" . _String
   let
    baseFee = readText <$> j ^? key "baseFeePerGas" . _String
+   -- It seems unclear as to whether this field should still be called mixHash or renamed to prevRandao
+   -- According to https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4399.md it should be renamed
+   -- but alchemy is still returning mixHash
+   mixhash = readText <$> j ^? key "mixHash" . _String
    prevRandao = readText <$> j ^? key "prevRandao" . _String
    difficulty = readText <$> j ^? key "difficulty" . _String
-   prd = case (prevRandao, difficulty) of
-     (Just p, Nothing) -> p
-     (Nothing, Just d) -> d
+   prd = case (prevRandao, mixhash, difficulty) of
+     (Just p, _, _) -> p
+     (Nothing, Just mh, Just 0x0) -> mh
+     (Nothing, Just _, Just d) -> d
      _ -> error "Internal Error: block contains both difficulty and prevRandao"
   -- default codesize, default gas limit, default feescedule
   return $ EVM.Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff FeeSchedule.berlin

@@ -82,6 +82,9 @@ main = defaultMain tests
 runSubSet :: String -> IO ()
 runSubSet p = defaultMain . applyPattern p $ tests
 
+testRpc :: Text
+testRpc = "https://eth-mainnet.alchemyapi.io/v2/vpeKFsEF6PHifHzdtcwXSDbhV3ym5Ro4"
+
 tests :: TestTree
 tests = testGroup "hevm"
   [ testGroup "StorageTests"
@@ -102,6 +105,34 @@ tests = testGroup "hevm"
         (SLoad (Lit 0x0) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])])))
         (Expr.readStorage' (Lit 0x0) (Lit 0x0)
           (SStore (Lit 0xacab) (Lit 0xdead) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])]))))
+    ]
+  , testGroup "Block Parsing Tests"
+    [ testCase "pre-merge-block" $ do
+        (cb, numb, basefee, prevRan) <- Fetch.fetchBlockFrom (Fetch.BlockNumber 15537392) testRpc >>= \case
+                      Nothing -> error "Could not fetch block"
+                      Just EVM.Block{..} -> return (_coinbase
+                                                   , _number
+                                                   , _baseFee
+                                                   , _prevRandao
+                                                   )
+
+        assertEqual "coinbase" (Addr 0xea674fdde714fd979de3edf0f56aa9716b898ec8) cb
+        assertEqual "number" 15537392 numb
+        assertEqual "basefee" 38572377838 basefee
+        assertEqual "prevRan" 11049842297455506 prevRan
+    , testCase "post-merge-block" $ do
+        (cb, numb, basefee, prevRan) <- Fetch.fetchBlockFrom (Fetch.BlockNumber 16184420) testRpc >>= \case
+                      Nothing -> error "Could not fetch block"
+                      Just EVM.Block{..} -> return (_coinbase
+                                                   , _number
+                                                   , _baseFee
+                                                   , _prevRandao
+                                                   )
+
+        assertEqual "coinbase" (Addr 0x690b9a9e9aa1c9db991c7721a92d351db4fac990) cb
+        assertEqual "number" 16184420 numb
+        assertEqual "basefee" 22163046690 basefee
+        assertEqual "prevRan" 0x2267531ab030ed32fd5f2ef51f81427332d0becbd74fe7f4cd5684ddf4b287e0 prevRan
     ]
   -- These tests fuzz the simplifier by generating a random expression,
   -- applying some simplification rules, and then using the smt encoding to
