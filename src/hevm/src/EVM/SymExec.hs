@@ -366,6 +366,7 @@ flattenExpr = go []
       e@(Return _ _ _) -> [(pcs, e)]
       Failure _ (TmpErr s) -> error s
       e@(Failure _ _) -> [(pcs, e)]
+
       GVar _ -> error "cannot flatten an Expr containing a GVar"
 
 -- | Strips unreachable branches from a given expr
