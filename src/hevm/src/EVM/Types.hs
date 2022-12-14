@@ -20,7 +20,7 @@ import Data.ByteString.Base16 as BS16
 import Data.ByteString.Builder (byteStringHex, toLazyByteString)
 import Data.ByteString.Lazy (toStrict)
 import qualified Data.ByteString.Char8  as Char8
-import Data.Word (Word8, Word32)
+import Data.Word (Word8, Word32, Word64)
 import Data.Bits (Bits, FiniteBits, shiftR, shift, shiftL, (.&.), (.|.))
 import Data.DoubleWord
 import Data.DoubleWord.TH
@@ -556,6 +556,10 @@ readNull x = fromMaybe x . Text.Read.readMaybe
 
 wordField :: JSON.Object -> Key -> JSON.Parser W256
 wordField x f = ((readNull 0) . Text.unpack)
+                  <$> (x .: f)
+
+word64Field :: JSON.Object -> Key -> JSON.Parser Word64
+word64Field x f = ((readNull 0) . Text.unpack)
                   <$> (x .: f)
 
 addrField :: JSON.Object -> Key -> JSON.Parser Addr
