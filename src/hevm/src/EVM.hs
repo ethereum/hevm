@@ -6,8 +6,6 @@
 
 module EVM where
 
-import Debug.Trace
-
 import Prelude hiding (log, exponent, GT, LT)
 
 import Data.Text (unpack)

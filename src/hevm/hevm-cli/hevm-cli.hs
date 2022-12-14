@@ -122,7 +122,7 @@ data Command w
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
       , assertions    :: w ::: Maybe [Word256]    <?> "Comma seperated list of solc panic codes to check for (default: everything except arithmetic overflow)"
       , askSmtIterations :: w ::: Maybe Integer   <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
-      , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores"
+      , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores)"
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: ByteString       <?> "Bytecode of the first program"
