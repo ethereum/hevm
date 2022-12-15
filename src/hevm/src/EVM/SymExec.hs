@@ -687,4 +687,3 @@ subModel c expr = subBufs (buffers c) . subVars (vars c) . subVars (blockContext
                       then ConcreteBuf val
                       else a
           e -> e
-

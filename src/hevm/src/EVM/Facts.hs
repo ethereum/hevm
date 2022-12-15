@@ -34,7 +34,7 @@ module EVM.Facts
 
 import EVM          (VM, Contract, Cache)
 import EVM          (balance, nonce, storage, bytecode, env, contracts, contract, state, cache, fetchedStorage, fetchedContracts)
-import EVM.Types    (Addr, W256, Expr(..), EType(..), num)
+import EVM.Types    (Addr, W256, Expr(..), num)
 import EVM.Expr     (writeStorage, litAddr)
 
 import qualified EVM
@@ -44,7 +44,6 @@ import Prelude hiding (Word)
 import Control.Lens    (view, set, at, ix, (&), over, assign)
 import Control.Monad.State.Strict (execState, when)
 import Data.ByteString (ByteString)
-import Data.Monoid     ((<>))
 import Data.Ord        (comparing)
 import Data.Set        (Set)
 import Data.Map        (Map)

@@ -35,7 +35,6 @@ import EVM.Types (Addr, ByteStringS(..))
 import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..))
 import EVM.ABI (Indexed (NotIndexed), getAbiSeq)
 import EVM.ABI (parseTypeName, formatString)
-import EVM.SMT
 import EVM.Solidity (SolcContract(..), contractName, abiMap)
 import EVM.Solidity (methodOutput, methodSignature, methodName)
 import EVM.Hexdump
@@ -123,9 +122,6 @@ showAbiValue (AbiAddress addr) =
     name <> "@" <> (pack $ show addr)
 showAbiValue v = pack $ show v
 
-showAbiValues :: (?context :: DappContext) => Vector AbiValue -> Text
-showAbiValues vs = parenthesise (textAbiValues vs)
-
 textAbiValues :: (?context :: DappContext) => Vector AbiValue -> [Text]
 textAbiValues vs = toList (fmap showAbiValue vs)
 
@@ -179,19 +175,9 @@ formatBytes b =
     then formatBString s
     else formatBinary b
 
-formatSBytes :: Expr Buf -> Text
-formatSBytes = undefined
---formatSBytes (SymbolicBuffer b) = "<" <> pack (show (length b)) <> " symbolic bytes>"
---formatSBytes (ConcreteBuffer b) = formatBytes b
-
 -- a string that came from bytes, displayed with special quotes
 formatBString :: ByteString -> Text
 formatBString b = mconcat [ "«",  Text.dropAround (=='"') (pack $ formatString b), "»" ]
-
-formatSString :: Expr Buf -> Text
-formatSString = undefined
---formatSString (SymbolicBuffer bs) = "<" <> pack (show (length bs)) <> " symbolic bytes (string)>"
---formatSString (ConcreteBuffer bs) = pack $ formatString bs
 
 formatBinary :: ByteString -> Text
 formatBinary =
@@ -398,16 +384,6 @@ prettyvmresult (EVM.Types.Return _ _ _) =
 prettyvmresult (EVM.Types.IllegalOverflow _) = "Illegal Overflow"
 prettyvmresult (EVM.Types.SelfDestruct _) = "Self Destruct"
 prettyvmresult e = error "Internal Error: Invalid Result: " <> show e
-
-currentSolc :: DappInfo -> VM -> Maybe SolcContract
-currentSolc _ _ = undefined
-  --let
-    --this = vm ^?! EVM.env . EVM.contracts . ix (view (EVM.state . EVM.contract) vm)
-    --h = view EVM.codehash this
-  --in
-    --preview (dappSolcByHash . ix h . _2) dapp
-
--- TODO: display in an 'act' format
 
 indent :: Int -> Text -> Text
 indent n = rstrip . T.unlines . fmap (T.replicate n (T.pack [' ']) <>) . T.lines
