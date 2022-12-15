@@ -1449,6 +1449,36 @@ tests = testGroup "hevm"
           [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn "in bounds byte reads return the expected value"
         ,
+        testCase "check-div-mod-sdiv-smod-by-zero-constant-prop" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 e) external pure {
+                uint x = 0;
+                uint y = 55;
+                uint z;
+                assembly { z := div(y,x) }
+                assert(z == 0);
+                assembly { z := div(x,y) }
+                assert(z == 0);
+                assembly { z := sdiv(y,x) }
+                assert(z == 0);
+                assembly { z := sdiv(x,y) }
+                assert(z == 0);
+                assembly { z := mod(y,x) }
+                assert(z == 0);
+                assembly { z := mod(x,y) }
+                assert(z == 0);
+                assembly { z := smod(y,x) }
+                assert(z == 0);
+                assembly { z := smod(x,y) }
+                assert(z == 0);
+              }
+            }
+            |]
+          [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          putStrLn "div/mod/sdiv/smod by zero works as expected during constant propagation"
+        ,
         testCase "check-asm-byte-oob" $ do
           Just c <- solcRuntime "C"
             [i|
