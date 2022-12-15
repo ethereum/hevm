@@ -111,7 +111,7 @@ library
   autogen-modules:
     Paths_hevm
   ghc-options:
-    -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -j
+    -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans -j
   extra-libraries:
     secp256k1, ff
   if os(linux)
@@ -189,7 +189,7 @@ executable hevm
   main-is:
     hevm-cli.hs
   ghc-options:
-    -Wall -threaded -with-rtsopts=-N -j
+    -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans -j
   other-modules:
     Paths_hevm
   if os(darwin)
@@ -233,7 +233,7 @@ executable hevm
 common test-common
   import: shared
   ghc-options:
-    -Wall -Wno-unticked-promoted-constructors -j
+    -Wall -Wno-unticked-promoted-constructors -Wno-orphans -j
   hs-source-dirs:
     test
   extra-libraries:
