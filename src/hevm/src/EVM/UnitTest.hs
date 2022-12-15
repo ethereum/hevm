@@ -12,16 +12,17 @@ import EVM.SMT
 import EVM.Dapp
 import EVM.Debug (srcMapCodePos)
 import EVM.Exec
-import EVM.Expr (litAddr, readStorage')
+import EVM.Expr (litAddr, readStorage', simplify)
 import EVM.Format
 import EVM.Solidity
 import qualified EVM.SymExec as SymExec
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, VeriOpts)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, VeriOpts)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.RLP
 import qualified EVM.Facts     as Facts
 import qualified EVM.Facts.Git as Git
+import qualified EVM.Expr      as Expr
 import qualified EVM.Fetch
 
 import qualified EVM.FeeSchedule as FeeSchedule
@@ -41,12 +42,12 @@ import qualified Data.ByteString.Lazy as BSLazy
 import Data.Binary.Get    (runGet)
 import Data.ByteString    (ByteString)
 import Data.Decimal       (DecimalRaw(..))
-import Data.Either        (isRight, lefts)
+import Data.Either        (isRight)
 import Data.Foldable      (toList)
 import Data.Map           (Map)
 import Data.Maybe         (fromMaybe, catMaybes, fromJust, isJust, fromMaybe, mapMaybe, isNothing)
 import Data.Text          (isPrefixOf, stripSuffix, intercalate, Text, pack, unpack)
-import Data.Word          (Word8, Word32, Word64)
+import Data.Word          (Word32, Word64)
 import Data.Text.Encoding (encodeUtf8)
 import System.Environment (lookupEnv)
 import System.IO          (hFlush, stdout)
@@ -55,7 +56,6 @@ import GHC.Natural
 import qualified Control.Monad.Par.Class as Par
 import qualified Data.ByteString as BS
 import qualified Data.Map as Map
-import qualified Data.Sequence as Seq
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 
@@ -448,7 +448,7 @@ runUnitTestContract
         Just (VMFailure _) -> liftIO $ do
           Text.putStrLn "\x1b[31m[BAIL]\x1b[0m setUp() "
           tick "\n"
-          tick $ (Data.Text.pack $ show $ failOutput vm1 opts "setUp()")
+          tick (Data.Text.pack $ show $ failOutput vm1 opts "setUp()")
           pure [(False, vm1)]
         Just (VMSuccess _) -> do
           let
@@ -728,7 +728,7 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
         )) vm
 
     -- check postconditions against vm
-    results <- verify solvers (makeVeriOpts opts) vm' Nothing (Just postcondition)
+    (_, results) <- verify solvers (makeVeriOpts opts) vm' Nothing (Just postcondition)
 
     -- display results
     if all isQed results
@@ -736,11 +736,11 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
       return ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "", vm)
     else do
       let x = mapMaybe extractCex results
-      let y = symFailure opts testName x -- TODO this is WRONG, only returns FIRST Cex
+      let y = symFailure opts testName (fst cd) types x
       return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y, vm)
 
-symFailure :: UnitTestOptions -> Text -> [(Expr End, SMTCex)] -> Text
-symFailure UnitTestOptions {..} testName failures' =
+symFailure :: UnitTestOptions -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> Text
+symFailure UnitTestOptions {..} testName cd types failures' =
   mconcat
     [ "Failure: "
     , testName
@@ -748,19 +748,20 @@ symFailure UnitTestOptions {..} testName failures' =
     , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
     ]
     where
+      ctx = DappContext { _contextInfo = dapp, _contextEnv = mempty }
       showRes = \case
                        Return _ _ _ -> if "proveFail" `isPrefixOf` testName
                                       then "Successful execution"
                                       else "Failed: DSTest Assertion Violation"
                        res ->
                          --let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
-                         let ?context = DappContext { _contextInfo = dapp, _contextEnv = mempty }
-                         in prettyvmresult res
-      mkMsg (leaf, cexs) = pack $ unlines
+                         let ?context = ctx
+                         in Text.pack $ prettyvmresult res
+      mkMsg (leaf, cex) = Text.unlines
         ["Counterexample:"
         ,""
         ,"  result:   " <> showRes leaf
-        ,"  calldata: " <> (show $ EVM.SMT.calldata cexs)
+        ,"  calldata: " <> let ?context = ctx in prettyCalldata cex cd testName types
         , case verbose of
             --Just _ -> unlines
               --[ ""
@@ -768,6 +769,23 @@ symFailure UnitTestOptions {..} testName failures' =
               --]
             _ -> ""
         ]
+
+prettyCalldata :: (?context :: DappContext) => SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
+prettyCalldata cex buf sig types = head (Text.splitOn "(" sig) <> showCalldata cex types buf
+
+showCalldata :: (?context :: DappContext) => SMTCex -> [AbiType] -> Expr Buf -> Text
+showCalldata cex tps buf = "(" <> intercalate "," (fmap showVal vals) <> ")"
+  where
+    argdata = Expr.drop 4 $ simplify $ subModel cex buf
+    vals = case decodeBuf tps argdata of
+             CAbi v -> v
+             _ -> error $ "Internal Error: unable to abi decode function arguments:\n" <> (Text.unpack $ formatExpr argdata)
+
+showVal :: AbiValue -> Text
+showVal (AbiBytes _ bs) = formatBytes bs
+showVal (AbiAddress addr) = Text.pack  . show $ addr
+showVal v = Text.pack . show $ v
+
 
 -- prettyCalldata :: (?context :: DappContext) => Expr Buf -> Text -> [AbiType]-> IO Text
 -- prettyCalldata buf sig types = do
@@ -778,7 +796,7 @@ symFailure UnitTestOptions {..} testName failures' =
 --   pure $ (head (Text.splitOn "(" sig)) <> showCall types (ConcreteBuffer cd)
 
 execSymTest :: UnitTestOptions -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper (Expr End)
-execSymTest opts@UnitTestOptions{ .. } method cd = do
+execSymTest UnitTestOptions{ .. } method cd = do
   -- Set up the call to the test method
   Stepper.evm $ do
     makeTxCall testParams cd
