@@ -1502,6 +1502,32 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
+        testCase "check-keccak-string-constant-differing" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint x) external {
+                assert(keccak256(abi.encodePacked("one")) == keccak256(abi.encodePacked("two")));
+              }
+            }
+            |]
+          [Cex _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
+          putStrLn $ "successfully found Cex"
+        ,
+        testCase "check-keccak-string-constant-differing2" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint x) external {
+                string memory a = "one";
+                string memory b = "two";
+                assert(keccak256(abi.encodePacked(a)) == keccak256(abi.encodePacked(b)));
+              }
+            }
+            |]
+          [Cex _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
+          putStrLn $ "successfully found Cex"
+        ,
         testCase "check-asm-byte-in-bounds" $ do
           Just c <- solcRuntime "C"
             [i|
