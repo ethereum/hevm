@@ -691,15 +691,11 @@ vmFromCommand cmd = do
         Just contract' ->
           -- if both code and url is given,
           -- fetch the contract and overwrite the code
-          undefined
-            {-
           return $
-            EVM.initialContract  (codeType $ hexByteString "--code" $ strip0x c)
-              & set EVM.storage  (view EVM.storage  contract')
+            EVM.initialContract  (mkCode $ hexByteString "--code" $ strip0x c)
               & set EVM.balance  (view EVM.balance  contract')
               & set EVM.nonce    (view EVM.nonce    contract')
               & set EVM.external (view EVM.external contract')
-            -}
 
     (Just url, Just addr', Nothing) ->
       EVM.Fetch.fetchContractFrom block' url addr' >>= \case
