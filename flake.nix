@@ -25,6 +25,7 @@
             inherit secp256k1;
           })
           [
+            (haskell.lib.compose.overrideCabal (old : { testTarget = "test"; }))
             (haskell.lib.compose.addTestToolDepends [ solc z3 cvc5 ])
             (haskell.lib.compose.appendConfigureFlags (
               [ "--ghc-option=-O2" ]

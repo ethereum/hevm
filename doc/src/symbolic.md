@@ -6,7 +6,7 @@ Usage: hevm symbolic [--code TEXT] [--calldata TEXT] [--address ADDR]
                      [--value W256] [--nonce W256] [--gas W256] [--number W256]
                      [--timestamp W256] [--basefee W256] [--priority-fee W256]
                      [--gaslimit W256] [--gasprice W256] [--create]
-                     [--maxcodesize W256] [--difficulty W256] [--chainid W256]
+                     [--maxcodesize W256] [--prevrandao W256] [--chainid W256]
                      [--rpc TEXT] [--block W256] [--state STRING]
                      [--cache STRING] [--json-file STRING] [--dapp-root STRING]
                      [--storage-model STORAGEMODEL] [--sig TEXT]
@@ -34,7 +34,7 @@ Available options:
   --gasprice W256          Tx: gas price
   --create                 Tx: creation
   --maxcodesize W256       Block: max code size
-  --difficulty W256        Block: difficulty
+  --prevrandao W256        Block: prevrandao
   --chainid W256           Env: chainId
   --rpc TEXT               Fetch state from a remote node
   --block W256             Block state is be fetched from

@@ -127,7 +127,7 @@ foldExpr f acc expr = acc <> (go expr)
       e@(Coinbase) -> f e
       e@(Timestamp) -> f e
       e@(BlockNumber) -> f e
-      e@(Difficulty) -> f e
+      e@(PrevRandao) -> f e
       e@(GasLimit) -> f e
       e@(ChainId) -> f e
       e@(BaseFee) -> f e
@@ -489,7 +489,7 @@ mapExprM f expr = case expr of
   Coinbase -> f Coinbase
   Timestamp -> f Timestamp
   BlockNumber -> f BlockNumber
-  Difficulty -> f Difficulty
+  PrevRandao -> f PrevRandao
   GasLimit -> f GasLimit
   ChainId -> f ChainId
   BaseFee -> f BaseFee

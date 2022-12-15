@@ -206,7 +206,7 @@ data VMOpts = VMOpts
   , vmoptNumber :: W256
   , vmoptTimestamp :: Expr EWord
   , vmoptCoinbase :: Addr
-  , vmoptDifficulty :: W256
+  , vmoptPrevRandao :: W256
   , vmoptMaxCodeSize :: W256
   , vmoptBlockGaslimit :: Word64
   , vmoptGasprice :: W256
@@ -381,7 +381,7 @@ data Block = Block
   { _coinbase    :: Addr
   , _timestamp   :: Expr EWord
   , _number      :: W256
-  , _difficulty  :: W256
+  , _prevRandao  :: W256
   , _gaslimit    :: Word64
   , _baseFee     :: W256
   , _maxCodeSize :: W256
@@ -491,7 +491,7 @@ makeVm o =
     { _coinbase = vmoptCoinbase o
     , _timestamp = vmoptTimestamp o
     , _number = vmoptNumber o
-    , _difficulty = vmoptDifficulty o
+    , _prevRandao = vmoptPrevRandao o
     , _maxCodeSize = vmoptMaxCodeSize o
     , _gaslimit = vmoptBlockGaslimit o
     , _baseFee = vmoptBaseFee o
@@ -941,10 +941,10 @@ exec1 = do
           limitStack 1 . burn g_base $
             next >> push (the block number)
 
-        -- op: DIFFICULTY
-        0x44 ->
+        -- op: PREVRANDAO
+        0x44 -> do
           limitStack 1 . burn g_base $
-            next >> push (the block difficulty)
+            next >> push (the block prevRandao)
 
         -- op: GASLIMIT
         0x45 ->
@@ -2725,7 +2725,7 @@ readOp x _ = case x of
   0x41 -> OpCoinbase
   0x42 -> OpTimestamp
   0x43 -> OpNumber
-  0x44 -> OpDifficulty
+  0x44 -> OpPrevRandao
   0x45 -> OpGaslimit
   0x46 -> OpChainid
   0x47 -> OpSelfbalance

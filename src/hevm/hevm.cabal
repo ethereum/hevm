@@ -43,6 +43,8 @@ extra-source-files:
   test/contracts/fail/invariantFail.sol
 
 common shared
+  default-language:
+    Haskell2010
   default-extensions:
     LambdaCase
     OverloadedStrings
@@ -228,16 +230,12 @@ executable hevm
     vector,
     vty
 
-test-suite test
+common test-common
   import: shared
   ghc-options:
     -Wall -Wno-unticked-promoted-constructors -Wno-orphans -j
-  type:
-    exitcode-stdio-1.0
   hs-source-dirs:
     test
-  main-is:
-    test.hs
   extra-libraries:
     secp256k1
   if os(darwin)
@@ -276,3 +274,21 @@ test-suite test
     array,
     vector,
     smt2-parser >= 0.1.0.1
+
+test-suite test
+  import:
+    test-common
+  type:
+    exitcode-stdio-1.0
+  main-is:
+    test.hs
+
+-- these tests require network access so we split them into a seperate test
+-- suite to make it easy to skip them when running nix-build
+test-suite rpc-tests
+  import:
+    test-common
+  type:
+    exitcode-stdio-1.0
+  main-is:
+    rpc.hs

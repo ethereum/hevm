@@ -58,7 +58,7 @@ data Op
   | OpCoinbase
   | OpTimestamp
   | OpNumber
-  | OpDifficulty
+  | OpPrevRandao
   | OpGaslimit
   | OpChainid
   | OpSelfbalance
@@ -141,7 +141,7 @@ opString (i, o) = let showPc x | x < 0x10 = '0' : showHex x ""
   OpCoinbase -> "COINBASE"
   OpTimestamp -> "TIMESTAMP"
   OpNumber -> "NUMBER"
-  OpDifficulty -> "DIFFICULTY"
+  OpPrevRandao -> "PREVRANDAO"
   OpGaslimit -> "GASLIMIT"
   OpChainid -> "CHAINID"
   OpSelfbalance -> "SELFBALANCE"

@@ -2071,17 +2071,17 @@ tests = testGroup "hevm"
           Just aPrgm <- yul "" $ T.pack $ unlines filteredASym
           Just bPrgm <- yul "" $ T.pack $ unlines filteredBSym
           withSolvers CVC5 6 (Just 3) $ \s -> do
-          res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
-          end <- getCurrentTime
-          case containsA (Cex()) res of
-            False -> do
-              print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
-              let timeouts = filter (\(_, _, c) -> c == EVM.SymExec.Timeout()) res
-              unless (null timeouts) $ putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
-            True -> do
-              putStrLn $ "Not OK: " <> show f <> " Got: " <> show res
-              error "Was NOT equivalent, error"
-         )
+            res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
+            end <- getCurrentTime
+            case containsA (Cex()) res of
+              False -> do
+                print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
+                let timeouts = filter (\(_, _, c) -> c == EVM.SymExec.Timeout()) res
+                unless (null timeouts) $ putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
+              True -> do
+                putStrLn $ "Not OK: " <> show f <> " Got: " <> show res
+                error "Was NOT equivalent, error"
+           )
     ]
   ]
   where
@@ -2297,7 +2297,7 @@ genWord litFreq 0 = frequency
       , pure Coinbase
       , pure Timestamp
       , pure BlockNumber
-      , pure Difficulty
+      , pure PrevRandao
       , pure GasLimit
       , pure ChainId
       , pure BaseFee

@@ -6,7 +6,7 @@ module EVM.Fetch where
 import Prelude hiding (Word)
 
 import EVM.ABI
-import EVM.Types    (Addr, W256, hexText, Expr(Lit, LitByte), Expr(..), Prop(..), (.&&), (.==), (./=))
+import EVM.Types    (Addr, W256, hexText, Expr(Lit, LitByte), Expr(..), Prop(..), (.&&), (./=))
 import EVM.SMT
 import EVM          (EVM, Contract, Block, initialContract, nonce, balance, external)
 import qualified EVM.FeeSchedule as FeeSchedule
@@ -42,6 +42,7 @@ data RpcQuery a where
   QueryChainId ::                 RpcQuery W256
 
 data BlockNumber = Latest | BlockNumber W256
+  deriving (Show, Eq)
 
 deriving instance Show (RpcQuery a)
 
@@ -106,11 +107,22 @@ parseBlock j = do
   coinbase   <- readText <$> j ^? key "miner" . _String
   timestamp  <- Lit . readText <$> j ^? key "timestamp" . _String
   number     <- readText <$> j ^? key "number" . _String
-  difficulty <- readText <$> j ^? key "difficulty" . _String
   gasLimit   <- readText <$> j ^? key "gasLimit" . _String
-  let baseFee = readText <$> j ^? key "baseFeePerGas" . _String
+  let
+   baseFee = readText <$> j ^? key "baseFeePerGas" . _String
+   -- It seems unclear as to whether this field should still be called mixHash or renamed to prevRandao
+   -- According to https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4399.md it should be renamed
+   -- but alchemy is still returning mixHash
+   mixhash = readText <$> j ^? key "mixHash" . _String
+   prevRandao = readText <$> j ^? key "prevRandao" . _String
+   difficulty = readText <$> j ^? key "difficulty" . _String
+   prd = case (prevRandao, mixhash, difficulty) of
+     (Just p, _, _) -> p
+     (Nothing, Just mh, Just 0x0) -> mh
+     (Nothing, Just _, Just d) -> d
+     _ -> error "Internal Error: block contains both difficulty and prevRandao"
   -- default codesize, default gas limit, default feescedule
-  return $ EVM.Block coinbase timestamp number difficulty gasLimit (fromMaybe 0 baseFee) 0xffffffff FeeSchedule.berlin
+  return $ EVM.Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff FeeSchedule.berlin
 
 fetchWithSession :: Text -> Session -> Value -> IO (Maybe Value)
 fetchWithSession url sess x = do

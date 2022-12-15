@@ -487,7 +487,7 @@ referencedBlockContext expr = nubOrd (foldExpr go [] expr)
       Coinbase -> ["coinbase"]
       Timestamp -> ["timestamp"]
       BlockNumber -> ["blocknumber"]
-      Difficulty -> ["difficulty"]
+      PrevRandao -> ["prevrandao"]
       GasLimit -> ["gaslimit"]
       ChainId -> ["chainid"]
       BaseFee -> ["basefee"]
@@ -584,7 +584,7 @@ exprToSMT = \case
   Coinbase -> "coinbase"
   Timestamp -> "timestamp"
   BlockNumber -> "blocknumber"
-  Difficulty -> "difficulty"
+  PrevRandao -> "prevrandao"
   GasLimit -> "gaslimit"
   ChainId -> "chainid"
   BaseFee -> "basefee"
@@ -768,7 +768,7 @@ parseBlockCtx "origin" = Origin
 parseBlockCtx "coinbase" = Coinbase
 parseBlockCtx "timestamp" = Timestamp
 parseBlockCtx "blocknumber" = BlockNumber
-parseBlockCtx "difficulty" = Difficulty
+parseBlockCtx "prevrandao" = PrevRandao
 parseBlockCtx "gaslimit" = GasLimit
 parseBlockCtx "chainid" = ChainId
 parseBlockCtx "basefee" = BaseFee
