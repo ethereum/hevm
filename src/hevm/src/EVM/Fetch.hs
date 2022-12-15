@@ -42,6 +42,7 @@ data RpcQuery a where
   QueryChainId ::                 RpcQuery W256
 
 data BlockNumber = Latest | BlockNumber W256
+  deriving (Show, Eq)
 
 deriving instance Show (RpcQuery a)
 

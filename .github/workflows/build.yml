@@ -26,3 +26,5 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - name: build hevm
         run: nix-build
+      - name: run rpc tests
+        run: nix-shell --pure --command "cd src/hevm && cabal run rpc-tests"
