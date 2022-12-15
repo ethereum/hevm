@@ -713,8 +713,8 @@ tests = testGroup "hevm"
           }
         }
         |]
-      (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("checkval(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] VeriOpts {simp = False, debug = False, maxIter = Nothing, askSmtIters = Nothing}
-      putStrLn "this should always be true, due to bitwise OR with positive value"
+      (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("checkval(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] VeriOpts {simp = False, debug = False, maxIter = Nothing, askSmtIters = Nothing}
+      putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
      -- TODO look at tests here for SAR: https://github.com/dapphub/dapptools/blob/01ef8ea418c3fe49089a44d56013d8fcc34a1ec2/src/dapp-tests/pass/constantinople.sol#L250
      testCase "opcode-sar-neg" $ do

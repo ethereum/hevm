@@ -452,21 +452,21 @@ assert cmd = do
       case res of
         [Qed _] -> putStrLn "\nQED: No reachable property violations discovered\n"
         cexs -> do
-          let cexOut
+          let counterexamples
                 | null (getCexs cexs) = []
                 | otherwise =
                    [ ""
                    , "Discovered the following counterexamples:"
                    , ""
                    ] <> fmap (formatCex (fst calldata')) (getCexs cexs)
-              timeoutOut
+              unknowns
                 | null (getTimeouts cexs) = []
                 | otherwise =
                    [ ""
                    , "Could not determine reachability of the following end states:"
                    , ""
                    ] <> fmap (formatExpr) (getTimeouts cexs)
-          T.putStrLn $ T.unlines (cexOut <> timeoutOut)
+          T.putStrLn $ T.unlines (counterexamples <> unknowns)
       when (showTree cmd) $ do
         putStrLn "=== Expression ===\n"
         T.putStrLn $ formatExpr expr
