@@ -165,7 +165,7 @@ tests = testGroup "hevm"
             full = WriteWord idx val buf
         checkEquiv simplified full
     , testProperty "arith-simplification" $ \(_ :: Int) -> ioProperty $ do
-        expr <- generate . sized $ genWord2 15
+        expr <- generate . sized $ genWordArith 15
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
     , testProperty "readByte-equivalance" $ \(buf, idx) -> ioProperty $ do
@@ -2383,15 +2383,15 @@ genWord litFreq sz = frequency
    subStore = genStorage (sz `div` 10)
    subByte = genByte (sz `div` 10)
 
-genWord2 :: Int -> Int -> Gen (Expr EWord)
-genWord2 litFreq 0 = frequency
+genWordArith :: Int -> Int -> Gen (Expr EWord)
+genWordArith litFreq 0 = frequency
   [ (litFreq, do
       val <- arbitrary
       pure $ Lit val
     )
   , (1, oneof [ fmap Lit arbitrary ])
   ]
-genWord2 litFreq sz = frequency
+genWordArith litFreq sz = frequency
   [ (litFreq, do
       val <- arbitrary
       pure $ Lit val
@@ -2427,7 +2427,7 @@ genWord2 litFreq sz = frequency
     ])
   ]
  where
-   subWord = genWord2 (litFreq `div` 2) (sz `div` 2)
+   subWord = genWordArith (litFreq `div` 2) (sz `div` 2)
 
 defaultBuf :: Int -> Gen (Expr Buf)
 defaultBuf = genBuf (4_000_000)
