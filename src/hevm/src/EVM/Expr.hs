@@ -672,6 +672,26 @@ simplify e = if (mapExpr go e == e)
       | x == 0 = b
       | otherwise = a
 
+    -- div/sdiv/mod/smod by zero
+    go (Div _ (Lit 0)) = Lit 0
+    go (Mod _ (Lit 0)) = Lit 0
+    go (SDiv _ (Lit 0)) = Lit 0
+    go (SMod _ (Lit 0)) = Lit 0
+
+    -- simple div/mod
+    go (Div (Lit a) (Lit b)) = Lit (a `Prelude.div` b)
+    go (Mod (Lit a) (Lit b)) = Lit (a `Prelude.mod` b)
+
+    -- double add/sub. Notice that everything is done mod 2**256, so these are correct
+    go (Sub (Sub orig (Lit x)) (Lit y)) = Sub orig (Lit (x+y))
+    go (Sub (Add orig (Lit x)) (Lit y)) = Sub orig (Lit (y-x))
+    go (Add (Add orig (Lit x)) (Lit y)) = Add orig (Lit (x+y))
+    go (Add (Sub orig (Lit x)) (Lit y)) = Add orig (Lit (y-x))
+
+    -- Simple add/sub
+    go (Add (Lit a) (Lit b)) = Lit (a+b)
+    go (Sub (Lit a) (Lit b)) = Lit (a-b)
+
     -- redundant add / sub
     go o@(Sub (Add a b) c)
       | a == c = b
