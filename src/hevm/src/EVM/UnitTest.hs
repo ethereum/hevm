@@ -5,7 +5,7 @@ module EVM.UnitTest where
 
 import Prelude hiding (Word)
 
-import EVM hiding (Unknown)
+import EVM hiding (Unknown, path)
 import EVM.ABI
 import EVM.Concrete
 import EVM.SMT
@@ -133,22 +133,22 @@ makeVeriOpts opts =
 
 -- | Top level CLI endpoint for dapp-test
 dappTest :: UnitTestOptions -> SolverGroup -> String -> Maybe String -> IO Bool
-dappTest opts solvers solcFile cache = do
+dappTest opts solvers solcFile cache' = do
   out <- liftIO $ readSolc solcFile
   case out of
     Just (contractMap, _) -> do
       let unitTests = findUnitTests (EVM.UnitTest.match opts) $ Map.elems contractMap
       results <- concatMapM (runUnitTestContract opts solvers contractMap) unitTests
       let (passing, vms) = unzip results
-      case cache of
+      case cache' of
         Nothing ->
           pure ()
         Just path ->
           -- merge all of the post-vm caches and save into the state
           let
-            cache' = mconcat [view EVM.cache vm | vm <- vms]
+            evmcache = mconcat [view EVM.cache vm | vm <- vms]
           in
-            liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts cache')
+            liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts evmcache)
 
       if and passing
          then return True
@@ -858,6 +858,7 @@ formatTestLogs events xs =
 -- regular trace output.
 formatTestLog :: (?context :: DappContext) => Map W256 Event -> Expr Log -> Maybe Text
 formatTestLog _ (LogEntry _ _ []) = Nothing
+formatTestLog _ (GVar _) = error "unexpected global variable"
 formatTestLog events (LogEntry _ args (topic:_)) =
   case maybeLitWord topic >>= \t1 -> (Map.lookup t1 events) of
     Nothing -> Nothing

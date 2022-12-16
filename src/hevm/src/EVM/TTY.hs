@@ -758,12 +758,11 @@ drawVmBrowser ui =
               ]
       ]
   ]
-  where storageDisplay (ConcreteStore s) = pack ( show ( Map.toList s))
-        storageDisplay (v) = pack $ show v
-        dapp' = dapp (view (browserVm . uiTestOpts) ui)
-        Just (_, (_, c)) = listSelectedElement (view browserContractList ui)
+  where
+    dapp' = dapp (view (browserVm . uiTestOpts) ui)
+    Just (_, (_, c)) = listSelectedElement (view browserContractList ui)
 --        currentContract  = view (dappSolcByHash . ix ) dapp
-        maybeHash h = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord (view codehash h))
+    maybeHash ch = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord (view codehash ch))
 
 drawVm :: UiVmState -> [UiWidget]
 drawVm ui =

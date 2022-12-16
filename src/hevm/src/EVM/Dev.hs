@@ -15,7 +15,6 @@ import Data.Typeable
 
 import Data.String.Here
 import qualified Data.Text.IO as T
-import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 
 import EVM
@@ -57,13 +56,6 @@ testOpts solvers root testFile = do
       pure $ dappInfo root contractMap sourceCache
 
   params <- getParametersFromEnvironmentVariables Nothing
-
-  let
-    testn = testNumber params
-    block' = if 0 == testn
-       then Fetch.Latest
-       else Fetch.BlockNumber testn
-
   pure EVM.UnitTest.UnitTestOptions
     { EVM.UnitTest.oracle = Fetch.oracle solvers Nothing
     , EVM.UnitTest.maxIter = Nothing

@@ -12,7 +12,6 @@ import qualified EVM
 import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
 import qualified EVM.Fetch
-import qualified EVM.Flatten
 import qualified EVM.Stepper
 
 
@@ -32,7 +31,6 @@ import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContrac
 import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
 import GHC.Natural
 import EVM.Format (showTraceTree, formatExpr)
-import EVM.RLP (rlpdecode)
 import qualified EVM.Patricia as Patricia
 import Data.Map (Map)
 
@@ -649,11 +647,11 @@ vmFromCommand cmd = do
                                    )
 
   contract <- case (rpc cmd, address cmd, code cmd) of
-    (Just url, Just addr', Just c) -> do
+    (Just url, Just addr', Just _) -> do
       EVM.Fetch.fetchContractFrom block' url addr' >>= \case
         Nothing ->
           error $ "contract not found: " <> show address'
-        Just contract' ->
+        Just _ ->
           -- if both code and url is given,
           -- fetch the contract and overwrite the code
           undefined

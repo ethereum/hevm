@@ -1,6 +1,6 @@
 module EVM.Debug where
 
-import EVM          (Contract, storage, nonce, balance, bytecode, codehash)
+import EVM          (Contract, nonce, balance, bytecode, codehash)
 import EVM.Solidity (SrcMap, srcMapFile, srcMapOffset, srcMapLength, SourceCache, sourceFiles)
 import EVM.Types    (Addr)
 import EVM.Expr     (bufLength)
@@ -33,8 +33,6 @@ prettyContract c =
     , (text "codehash", text (show (c ^. codehash)))
     , (text "balance", int (fromIntegral (c ^. balance)))
     , (text "nonce", int (fromIntegral (c ^. nonce)))
-    -- TODO: this thing here
-    --, (text "storage", text (show (c ^. storage)))
     ]
 
 prettyContracts :: Map Addr Contract -> Doc
