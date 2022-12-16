@@ -55,18 +55,22 @@ tests = testGroup "rpc"
   , testGroup "execution with remote state"
     [ testCase "dapp-test" undefined
     , testCase "weth-conc" undefined
-    , testCase "weth-sym" $ do
+    , testCase "weth-sym-remote" $ do
         let
-          blockNum = 16191378
-          calldata' = symCalldata "transfer" [AbiAddressType, AbiUIntType 256] ["0xdead"] (AbstractBuf "txdata")
+          -- call into WETH9 at block 16181378 from 0xf04a... (a large holder)
+          blockNum = 16198552
+          caller' = Lit 0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e
+          weth9 = Addr 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
+          calldata' = symCalldata "transfer(address,uint256)" [AbiAddressType, AbiUIntType 256] ["0xdead"] (AbstractBuf "txdata")
+          callvalue' = Lit 0
+
+          -- we are looking for a revert if the `wad` is greater than the callers balance
           postc _ (EVM.Types.Revert _ _) = PBool False
           postc _ _ = PBool True
-        vm <- vmFromRpc blockNum calldata' (CallValue 0) (Lit 0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e) (Addr 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2)
-        (expr, res) <- withSolvers Z3 1 Nothing $ \solvers ->
-          verify solvers ((rpcVeriOpts (BlockNumber blockNum, testRpc)) {debug = True}) vm (Just postc)
-        print res
-        T.putStrLn $ formatExpr expr
-        assertBool "" False
+        vm <- vmFromRpc blockNum calldata' callvalue' caller' weth9
+        (_, [Cex (_, model)]) <- withSolvers Z3 1 Nothing $ \solvers ->
+          verify solvers (rpcVeriOpts (BlockNumber blockNum, testRpc)) vm (Just postc)
+        assertBool "model should exceed caller balance" (getVar model "arg2" >= 695836005599316055372648)
     ]
   ]
 

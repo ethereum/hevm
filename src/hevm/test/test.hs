@@ -2459,9 +2459,6 @@ data Invocation
   = SolidityCall Text [AbiValue]
   deriving Show
 
-getVar :: EVM.SMT.SMTCex -> Text -> W256
-getVar cex name = fromJust $ Map.lookup (Var name) (vars cex)
-
 assertSolidityComputation :: Invocation -> AbiValue -> IO ()
 assertSolidityComputation (SolidityCall s args) x =
   do y <- runStatements s args (abiValueType x)
