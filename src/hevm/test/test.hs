@@ -2386,14 +2386,14 @@ genWord litFreq sz = frequency
 genWord2 :: Int -> Int -> Gen (Expr EWord)
 genWord2 litFreq 0 = frequency
   [ (litFreq, do
-      val <- frequency [ (1, arbitrary) ]
+      val <- arbitrary
       pure $ Lit val
     )
   , (1, oneof [ fmap Lit arbitrary ])
   ]
 genWord2 litFreq sz = frequency
   [ (litFreq, do
-      val <- frequency [ (1, arbitrary) ]
+      val <- arbitrary
       pure $ Lit val
     )
   , (20, frequency
