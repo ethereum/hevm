@@ -17,6 +17,7 @@ import Control.Monad
 import Text.RE.TDFA.String
 import Text.RE.Replace
 import Data.Time
+import System.Environment
 
 import Prelude hiding (fail, LT, GT)
 
@@ -2015,10 +2016,11 @@ tests = testGroup "hevm"
                     , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV I think?
                     ]
 
-        let dir = "solidity/test/libyul/yulOptimizerTests"
-        dircontents <- System.Directory.listDirectory dir
+        solcRepo <- fromMaybe (error "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
+        let testDir = solcRepo <> "/test/libyul/yulOptimizerTests"
+        dircontents <- System.Directory.listDirectory testDir
         let
-          fullpaths = map ((dir ++ "/") ++) dircontents
+          fullpaths = map ((testDir ++ "/") ++) dircontents
           recursiveList :: [FilePath] -> [FilePath] -> IO [FilePath]
           recursiveList (a:ax) b =  do
               isdir <- doesDirectoryExist a
