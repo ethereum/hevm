@@ -2503,6 +2503,7 @@ traceTopLog ((LogEntry addr bytes topics) : _) = do
   modifying traces $
     \t -> Zipper.nextSpace (Zipper.insert (Node trace []) t)
 traceTopLog ((GVar _) : _) = error "unexpected global variable"
+
 -- * Stack manipulation
 
 push :: W256 -> EVM ()
