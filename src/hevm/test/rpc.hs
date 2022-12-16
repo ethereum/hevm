@@ -7,14 +7,19 @@ import Control.Lens
 import Test.Tasty
 import Test.Tasty.HUnit
 import Data.Text (Text)
-import qualified Data.Text.IO as T
+import Control.Monad.State.Strict (execStateT)
+import Data.Functor
+import Data.Maybe
+import qualified Data.Map as Map
+import qualified Data.Vector as V
 
 import EVM
 import EVM.ABI
 import EVM.SMT
-import EVM.Format
 import EVM.Fetch
 import EVM.SymExec
+import qualified EVM.Stepper as Stepper
+import qualified EVM.Fetch as Fetch
 import EVM.Types hiding (BlockNumber)
 
 main :: IO ()
@@ -54,25 +59,46 @@ tests = testGroup "rpc"
     ]
   , testGroup "execution with remote state"
     [ testCase "dapp-test" undefined
-    , testCase "weth-conc" undefined
-    , testCase "weth-sym-remote" $ do
-        let
-          -- call into WETH9 at block 16181378 from 0xf04a... (a large holder)
-          blockNum = 16198552
-          caller' = Lit 0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e
-          weth9 = Addr 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
-          calldata' = symCalldata "transfer(address,uint256)" [AbiAddressType, AbiUIntType 256] ["0xdead"] (AbstractBuf "txdata")
-          callvalue' = Lit 0
 
-          -- we are looking for a revert if the `wad` is greater than the callers balance
+    -- concretely exec "transfer" on WETH9 using remote rpc
+    , testCase "weth-conc" $ do
+        let
+          blockNum = 16198552
+          wad = 0x999999999999999999
+          calldata' = ConcreteBuf $ abiMethod "transfer(address,uint256)" (AbiTuple (V.fromList [AbiAddress (Addr 0xdead), AbiUInt 256 wad]))
+        vm <- weth9VM blockNum (calldata', [])
+        postVm <- withSolvers Z3 1 Nothing $ \solvers ->
+          execStateT (Stepper.interpret (Fetch.oracle solvers (Just (BlockNumber blockNum, testRpc))) . void $ Stepper.execFully) vm
+        let
+          (ConcreteStore postStore) = view (env . storage) postVm
+          wethStore = fromJust $ Map.lookup 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 postStore
+          receiverBal = fromJust $ Map.lookup (keccak' (word256Bytes 0xdead <> word256Bytes 0x3)) wethStore
+          (Just (VMSuccess msg)) = view result postVm
+        assertEqual "should succeed" msg (ConcreteBuf $ word256Bytes 0x1)
+        assertEqual "should revert" receiverBal (W256 $ 2595433725034301 + wad)
+
+    -- symbolically exec "transfer" on WETH9 using remote rpc
+    , testCase "weth-sym" $ do
+        let
+          blockNum = 16198552
+          calldata' = symCalldata "transfer(address,uint256)" [AbiAddressType, AbiUIntType 256] ["0xdead"] (AbstractBuf "txdata")
           postc _ (EVM.Types.Revert _ _) = PBool False
           postc _ _ = PBool True
-        vm <- vmFromRpc blockNum calldata' callvalue' caller' weth9
+        vm <- weth9VM blockNum calldata'
         (_, [Cex (_, model)]) <- withSolvers Z3 1 Nothing $ \solvers ->
           verify solvers (rpcVeriOpts (BlockNumber blockNum, testRpc)) vm (Just postc)
         assertBool "model should exceed caller balance" (getVar model "arg2" >= 695836005599316055372648)
     ]
   ]
+
+-- call into WETH9 from 0xf04a... (a large holder)
+weth9VM :: W256 -> (Expr Buf, [Prop]) -> IO (EVM.VM)
+weth9VM blockNum calldata' = do
+  let
+    caller' = Lit 0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e
+    weth9 = Addr 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
+    callvalue' = Lit 0
+  vmFromRpc blockNum calldata' callvalue' caller' weth9
 
 vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EWord -> Addr -> IO (EVM.VM)
 vmFromRpc blockNum calldata' callvalue' caller' address' = do
