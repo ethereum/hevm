@@ -627,7 +627,6 @@ simplify e = if (mapExpr go e == e)
     go (ReadWord idx buf) = readWord idx buf
     go o@(ReadByte (Lit _) _) = simplifyReads o
     go (ReadByte idx buf) = readByte idx buf
-    go (Sub (Sub orig (Lit x)) (Lit y)) = Sub orig (Lit (x+y))
 
     -- We can zero out any bytes in a base ConcreteBuf that we know will be overwritten by a later write
     -- TODO: make this fully general for entire write chains, not just a single write.
