@@ -9,9 +9,6 @@ import Data.Text (Text)
 import Data.ByteString (ByteString)
 import Data.Bits
 import System.Directory
-import System.IO.Temp
-import System.Process (readProcess)
-import GHC.IO.Handle (hClose)
 import GHC.Natural
 import Control.Monad
 import Text.RE.TDFA.String
@@ -48,10 +45,8 @@ import Data.Binary.Get (runGetOrFail)
 
 import EVM hiding (Query, allowFFI)
 import EVM.SymExec
-import EVM.UnitTest (dappTest, UnitTestOptions, getParametersFromEnvironmentVariables)
 import EVM.ABI
 import EVM.Exec
-import EVM.Dapp
 import qualified EVM.Patricia as Patricia
 import EVM.Precompiled
 import EVM.RLP
@@ -59,14 +54,10 @@ import EVM.Solidity
 import EVM.Types
 import EVM.Traversals
 import EVM.SMT hiding (one)
-import qualified EVM.TTY as TTY
 import qualified EVM.Expr as Expr
-import qualified EVM.Fetch as Fetch
-import qualified EVM.UnitTest
-import qualified Paths_hevm as Paths
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
 import Data.List (isSubsequenceOf)
+import EVM.TestUtils
 
 main :: IO ()
 main = defaultMain tests
@@ -622,8 +613,8 @@ tests = testGroup "hevm"
         runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
     , testCase "Loop-Tests" $ do
         let testFile = "test/contracts/pass/loops.sol"
-        runDappTestCustom testFile "prove_loop" (Just 10) False >>= assertEqual "test result" True
-        runDappTestCustom testFile "prove_loop" (Just 100) False >>= assertEqual "test result" False
+        runDappTestCustom testFile "prove_loop" (Just 10) False Nothing >>= assertEqual "test result" True
+        runDappTestCustom testFile "prove_loop" (Just 100) False Nothing >>= assertEqual "test result" False
     , testCase "Invariant-Tests-Pass" $ do
         let testFile = "test/contracts/pass/invariants.sol"
         runDappTest testFile ".*" >>= assertEqual "test result" True
@@ -636,7 +627,7 @@ tests = testGroup "hevm"
         runDappTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Cheat-Codes-Fail" $ do
         let testFile = "test/contracts/fail/cheatCodes.sol"
-        runDappTestCustom testFile "testBadFFI" Nothing False >>= assertEqual "test result" False
+        runDappTestCustom testFile "testBadFFI" Nothing False Nothing >>= assertEqual "test result" False
     ]
   , testGroup "Symbolic execution"
       [
@@ -716,7 +707,17 @@ tests = testGroup "hevm"
           }
         }
         |]
-      (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("checkval(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] VeriOpts {simp = False, debug = False, maxIter = Nothing, askSmtIters = Nothing}
+      let
+        opts = VeriOpts
+          { simp = False
+          , debug = False
+          , maxIter = Nothing
+          , askSmtIters = Nothing
+          , rpcInfo = Nothing
+          }
+        calldata' = Just ("checkval(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])
+      (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
+        checkAssert s defaultPanicCodes c calldata' [] opts
       putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
      -- TODO look at tests here for SAR: https://github.com/dapphub/dapptools/blob/01ef8ea418c3fe49089a44d56013d8fcc34a1ec2/src/dapp-tests/pass/constantinople.sol#L250
@@ -2474,119 +2475,3 @@ bothM f (a, a') = do
 
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
-
-runDappTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> IO Bool
-runDappTestCustom testFile match maxIter ffiAllowed = do
-  root <- Paths.getDataDir
-  (json, _) <- compileWithDSTest testFile
-  --TIO.writeFile "output.json" json
-  withCurrentDirectory root $ do
-    withSystemTempFile "output.json" $ \file handle -> do
-      hClose handle
-      TIO.writeFile file json
-      withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json match maxIter ffiAllowed
-        dappTest opts file Nothing
-
-runDappTest :: FilePath -> Text -> IO Bool
-runDappTest testFile match = runDappTestCustom testFile match Nothing True
-
-debugDappTest :: FilePath -> IO ()
-debugDappTest testFile = do
-  root <- Paths.getDataDir
-  (json, _) <- compileWithDSTest testFile
-  --TIO.writeFile "output.json" json
-  withCurrentDirectory root $ do
-    withSystemTempFile "output.json" $ \file handle -> do
-      hClose handle
-      TIO.writeFile file json
-      withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json ".*" Nothing True
-        TTY.main opts root file
-
-testOpts :: SolverGroup -> FilePath -> Text -> Text -> Maybe Integer -> Bool -> IO UnitTestOptions
-testOpts solvers root solcJson match maxIter allowFFI = do
-  srcInfo <- case readJSON solcJson of
-               Nothing -> error "Could not read solc json"
-               Just (contractMap, asts, sources) -> do
-                 sourceCache <- makeSourceCache sources asts
-                 pure $ dappInfo root contractMap sourceCache
-
-  params <- getParametersFromEnvironmentVariables Nothing
-
-  pure EVM.UnitTest.UnitTestOptions
-    { EVM.UnitTest.solvers = solvers
-    , EVM.UnitTest.rpcInfo = Nothing
-    , EVM.UnitTest.maxIter = maxIter
-    , EVM.UnitTest.askSmtIters = Nothing
-    , EVM.UnitTest.smtdebug = False
-    , EVM.UnitTest.smtTimeout = Nothing
-    , EVM.UnitTest.solver = Nothing
-    , EVM.UnitTest.covMatch = Nothing
-    , EVM.UnitTest.verbose = Just 1
-    , EVM.UnitTest.match = match
-    , EVM.UnitTest.maxDepth = Nothing
-    , EVM.UnitTest.fuzzRuns = 100
-    , EVM.UnitTest.replay = Nothing
-    , EVM.UnitTest.vmModifier = id
-    , EVM.UnitTest.testParams = params
-    , EVM.UnitTest.dapp = srcInfo
-    , EVM.UnitTest.ffiAllowed = allowFFI
-    }
-
-compileWithDSTest :: FilePath -> IO (Text, Text)
-compileWithDSTest src =
-  withSystemTempFile "input.json" $ \file handle -> do
-    hClose handle
-    dsTest <- readFile =<< Paths.getDataFileName "test/contracts/lib/test.sol"
-    erc20 <- readFile =<< Paths.getDataFileName "test/contracts/lib/erc20.sol"
-    testFilePath <- Paths.getDataFileName src
-    testFile <- readFile testFilePath
-    TIO.writeFile file
-      [i|
-      {
-        "language": "Solidity",
-        "sources": {
-          "ds-test/test.sol": {
-            "content": ${dsTest}
-          },
-          "lib/erc20.sol": {
-            "content": ${erc20}
-          },
-          "test.sol": {
-            "content": ${testFile}
-          }
-        },
-        "settings": {
-          "metadata": {
-            "useLiteralContent": true
-          },
-          "outputSelection": {
-            "*": {
-              "*": [
-                "metadata",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "abi",
-                "storageLayout",
-                "evm.bytecode.sourceMap",
-                "evm.bytecode.linkReferences",
-                "evm.bytecode.generatedSources",
-                "evm.deployedBytecode.sourceMap",
-                "evm.deployedBytecode.linkReferences",
-                "evm.deployedBytecode.generatedSources"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      }
-      |]
-    x <- T.pack <$>
-      readProcess
-        "solc"
-        ["--allow-paths", file, "--standard-json", file]
-        ""
-    return (x, T.pack testFilePath)

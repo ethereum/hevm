@@ -18,6 +18,7 @@ import EVM.ABI
 import EVM.SMT
 import EVM.Fetch
 import EVM.SymExec
+import EVM.TestUtils
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 import EVM.Types hiding (BlockNumber)
@@ -58,7 +59,11 @@ tests = testGroup "rpc"
         assertEqual "prevRan" 0x2267531ab030ed32fd5f2ef51f81427332d0becbd74fe7f4cd5684ddf4b287e0 prevRan
     ]
   , testGroup "execution with remote state"
-    [ testCase "dapp-test" undefined
+    [ testCase "dapp-test" $ do
+        let
+          testFile = "test/contracts/pass/rpc.sol"
+          rpcInfo = Just (BlockNumber 16198552, testRpc)
+        runDappTestCustom testFile ".*" Nothing False rpcInfo >>= assertEqual "test result" True
 
     -- concretely exec "transfer" on WETH9 using remote rpc
     , testCase "weth-conc" $ do
