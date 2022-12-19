@@ -65,6 +65,7 @@ tests = testGroup "rpc"
         runDappTestCustom testFile ".*" Nothing False testRpcInfo >>= assertEqual "test result" True
 
     -- concretely exec "transfer" on WETH9 using remote rpc
+    -- https://etherscan.io/token/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2#code
     , testCase "weth-conc" $ do
         let
           blockNum = 16198552
@@ -82,6 +83,7 @@ tests = testGroup "rpc"
         assertEqual "should revert" receiverBal (W256 $ 2595433725034301 + wad)
 
     -- symbolically exec "transfer" on WETH9 using remote rpc
+    -- https://etherscan.io/token/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2#code
     , testCase "weth-sym" $ do
         let
           blockNum = 16198552
