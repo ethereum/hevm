@@ -31,6 +31,7 @@ import qualified Data.ByteString as BS
 import qualified Data.List as List
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.String.Here
+import Data.Maybe
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Text.Lazy (Text)
@@ -76,6 +77,9 @@ data SMTCex = SMTCex
   , txContext :: Map (Expr EWord) W256
   }
   deriving (Eq, Show)
+
+getVar :: EVM.SMT.SMTCex -> TS.Text -> W256
+getVar cex name = fromJust $ Map.lookup (Var name) (vars cex)
 
 data SMT2 = SMT2 [Builder] CexVars
   deriving (Eq, Show)

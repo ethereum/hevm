@@ -37,6 +37,7 @@ extra-source-files:
   test/contracts/pass/invariants.sol
   test/contracts/pass/libraries.so
   test/contracts/pass/loops.sol
+  test/contracts/pass/rpc.sol
   test/contracts/fail/trivial.sol
   test/contracts/fail/cheatCodes.sol
   test/contracts/fail/dsProveFail.sol
@@ -230,7 +231,7 @@ executable hevm
     vector,
     vty
 
-common test-common
+common test-base
   import: shared
   ghc-options:
     -Wall -Wno-unticked-promoted-constructors -Wno-orphans -j
@@ -238,10 +239,6 @@ common test-common
     test
   extra-libraries:
     secp256k1
-  if os(darwin)
-     extra-libraries: c++
-  else
-     extra-libraries: stdc++
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -274,6 +271,24 @@ common test-common
     array,
     vector,
     smt2-parser >= 0.1.0.1
+
+library test-utils
+  import:
+    test-base
+  exposed-modules:
+    EVM.TestUtils
+
+common test-common
+  import:
+    test-base
+  build-depends:
+    test-utils
+  if os(darwin)
+     extra-libraries: c++
+  else
+     extra-libraries: stdc++
+
+--- Test Suites ---
 
 test-suite test
   import:

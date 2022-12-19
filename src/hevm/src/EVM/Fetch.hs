@@ -46,6 +46,8 @@ data BlockNumber = Latest | BlockNumber W256
 
 deriving instance Show (RpcQuery a)
 
+type RpcInfo = Maybe (BlockNumber, Text)
+
 rpc :: String -> [Value] -> Value
 rpc method args = object
   [ "jsonrpc" .= ("2.0" :: String)
@@ -182,7 +184,7 @@ zero smtjobs smttimeout q =
     oracle s Nothing q
 
 -- smtsolving + (http or zero)
-oracle :: SolverGroup -> Maybe (BlockNumber, Text) -> Fetcher
+oracle :: SolverGroup -> RpcInfo -> Fetcher
 oracle solvers info q = do
   case q of
     EVM.PleaseDoFFI vals continue -> case vals of

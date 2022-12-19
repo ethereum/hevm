@@ -265,10 +265,10 @@ unitTestOptions cmd solvers testFile = do
        else EVM.Fetch.BlockNumber testn
 
   pure EVM.UnitTest.UnitTestOptions
-    { EVM.UnitTest.oracle =
-        case rpc cmd of
-         Just url -> EVM.Fetch.oracle solvers (Just (block', url))
-         Nothing  -> EVM.Fetch.oracle solvers Nothing
+    { EVM.UnitTest.solvers = solvers
+    , EVM.UnitTest.rpcInfo = case rpc cmd of
+         Just url -> Just (block', url)
+         Nothing  -> Nothing
     , EVM.UnitTest.maxIter = maxIterations cmd
     , EVM.UnitTest.askSmtIters = askSmtIterations cmd
     , EVM.UnitTest.smtDebug = smtdebug cmd
@@ -309,7 +309,7 @@ main = do
           testOpts <- unitTestOptions cmd solvers testFile
           case (coverage cmd, optsMode cmd) of
             (False, Run) -> do
-              res <- dappTest testOpts solvers testFile (cache cmd)
+              res <- dappTest testOpts testFile (cache cmd)
               unless res exitFailure
             (False, Debug) -> liftIO $ TTY.main testOpts root testFile
             (False, JsonTrace) -> error "json traces not implemented for dappTest"
@@ -359,9 +359,10 @@ equivalence cmd = do
   let bytecodeA = hexByteString "--code" . strip0x $ codeA cmd
       bytecodeB = hexByteString "--code" . strip0x $ codeB cmd
       veriOpts = VeriOpts { simp = True
-                            , debug = False
-                            , maxIter = maxIterations cmd
-                            , askSmtIters = askSmtIterations cmd
+                          , debug = False
+                          , maxIter = maxIterations cmd
+                          , askSmtIters = askSmtIterations cmd
+                          , rpcInfo = Nothing
                           }
 
   withSolvers Z3 3 Nothing $ \s -> do
@@ -440,13 +441,14 @@ assert cmd = do
     if Main.debug cmd then do
       srcInfo <- getSrcInfo cmd
       void $ TTY.runFromVM
+        solvers
+        rpcinfo
         (maxIterations cmd)
         srcInfo
-        (EVM.Fetch.oracle solvers rpcinfo)
         preState
     else do
-      let opts = VeriOpts { simp = True, debug = smtdebug cmd, maxIter = maxIterations cmd, askSmtIters = askSmtIterations cmd}
-      (expr, res) <- verify solvers opts preState rpcinfo (Just $ checkAssertions errCodes)
+      let opts = VeriOpts { simp = True, debug = smtdebug cmd, maxIter = maxIterations cmd, askSmtIters = askSmtIterations cmd, rpcInfo = rpcinfo}
+      (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
       case res of
         [Qed _] -> putStrLn "\nQED: No reachable property violations discovered\n"
         cexs -> do
@@ -535,41 +537,42 @@ launchExec cmd = do
   dapp <- getSrcInfo cmd
   vm <- vmFromCommand cmd
   smtjobs <- fromIntegral <$> getNumProcessors
-  case optsMode cmd of
-    Run -> do
-      vm' <- execStateT (EVM.Stepper.interpret (fetcher smtjobs) . void $ EVM.Stepper.execFully) vm
-      when (trace cmd) $ T.hPutStr stderr (showTraceTree dapp vm')
-      case view EVM.result vm' of
-        Nothing ->
-          error "internal error; no EVM result"
-        Just (EVM.VMFailure (EVM.Revert msg)) -> do
-          let res = case msg of
-                      ConcreteBuf bs -> bs
-                      _ -> "<symbolic>"
-          print $ ByteStringS res
-          exitWith (ExitFailure 2)
-        Just (EVM.VMFailure err) -> do
-          print err
-          exitWith (ExitFailure 2)
-        Just (EVM.VMSuccess buf) -> do
-          let msg = case buf of
-                ConcreteBuf msg' -> msg'
-                _ -> "<symbolic>"
-          print $ ByteStringS msg
-          case state cmd of
-            Nothing -> pure ()
-            Just path ->
-              Git.saveFacts (Git.RepoAt path) (Facts.vmFacts vm')
-          case cache cmd of
-            Nothing -> pure ()
-            Just path ->
-              Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts (view EVM.cache vm'))
+  withSolvers Z3 smtjobs (smttimeout cmd) $ \solvers -> do
+    case optsMode cmd of
+      Run -> do
+        vm' <- execStateT (EVM.Stepper.interpret (EVM.Fetch.oracle solvers rpcinfo) . void $ EVM.Stepper.execFully) vm
+        when (trace cmd) $ T.hPutStr stderr (showTraceTree dapp vm')
+        case view EVM.result vm' of
+          Nothing ->
+            error "internal error; no EVM result"
+          Just (EVM.VMFailure (EVM.Revert msg)) -> do
+            let res = case msg of
+                        ConcreteBuf bs -> bs
+                        _ -> "<symbolic>"
+            print $ ByteStringS res
+            exitWith (ExitFailure 2)
+          Just (EVM.VMFailure err) -> do
+            print err
+            exitWith (ExitFailure 2)
+          Just (EVM.VMSuccess buf) -> do
+            let msg = case buf of
+                  ConcreteBuf msg' -> msg'
+                  _ -> "<symbolic>"
+            print $ ByteStringS msg
+            case state cmd of
+              Nothing -> pure ()
+              Just path ->
+                Git.saveFacts (Git.RepoAt path) (Facts.vmFacts vm')
+            case cache cmd of
+              Nothing -> pure ()
+              Just path ->
+                Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts (view EVM.cache vm'))
 
-    Debug -> void $ TTY.runFromVM Nothing dapp (fetcher smtjobs) vm
-    --JsonTrace -> void $ execStateT (interpretWithTrace fetcher EVM.Stepper.runFully) vm
-    _ -> error "TODO"
-   where fetcher smtjobs = maybe (EVM.Fetch.zero smtjobs (smttimeout cmd)) (EVM.Fetch.http smtjobs (smttimeout cmd) block') (rpc cmd)
-         block' = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
+      Debug -> void $ TTY.runFromVM solvers rpcinfo Nothing dapp vm
+      --JsonTrace -> void $ execStateT (interpretWithTrace fetcher EVM.Stepper.runFully) vm
+      _ -> error "TODO"
+     where block' = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
+           rpcinfo = (,) block' <$> rpc cmd
 
 data Testcase = Testcase {
   _entries :: [(Text, Maybe Text)],
@@ -647,22 +650,18 @@ vmFromCommand cmd = do
                                    )
 
   contract <- case (rpc cmd, address cmd, code cmd) of
-    (Just url, Just addr', Just _) -> do
+    (Just url, Just addr', Just c) -> do
       EVM.Fetch.fetchContractFrom block' url addr' >>= \case
         Nothing ->
           error $ "contract not found: " <> show address'
-        Just _ ->
+        Just contract' ->
           -- if both code and url is given,
           -- fetch the contract and overwrite the code
-          undefined
-            {-
           return $
-            EVM.initialContract  (codeType $ hexByteString "--code" $ strip0x c)
-              & set EVM.storage  (view EVM.storage  contract')
+            EVM.initialContract  (mkCode $ hexByteString "--code" $ strip0x c)
               & set EVM.balance  (view EVM.balance  contract')
               & set EVM.nonce    (view EVM.nonce    contract')
               & set EVM.external (view EVM.external contract')
-            -}
 
     (Just url, Just addr', Nothing) ->
       EVM.Fetch.fetchContractFrom block' url addr' >>= \case
@@ -728,7 +727,6 @@ vmFromCommand cmd = do
 symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (EVM.VM)
 symvmFromCommand cmd calldata' = do
   (miner,blockNum,baseFee,prevRan) <- case rpc cmd of
-
     Nothing -> return (0,0,0,0)
     Just url -> EVM.Fetch.fetchBlockFrom block' url >>= \case
       Nothing -> error "Could not fetch block"
@@ -791,7 +789,6 @@ symvmFromCommand cmd calldata' = do
     address' = if create cmd
           then addr address (createAddress origin' (word nonce 0))
           else addr address 0xacab
-
     vm0 baseFee miner ts blockNum prevRan cd' callvalue' caller' c = EVM.makeVm $ EVM.VMOpts
       { EVM.vmoptContract      = c
       , EVM.vmoptCalldata      = cd'
@@ -848,7 +845,7 @@ runVMTest diffmode mode timelimit (name, x) =
           Timeout.timeout (1000000 * (fromMaybe 10 timelimit)) $
             execStateT (EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) . void $ EVM.Stepper.execFully) vm0
         Debug ->
-          Just <$> TTY.runFromVM Nothing emptyDapp (EVM.Fetch.zero 0 (Just 0)) vm0
+          withSolvers Z3 0 Nothing $ \solvers -> Just <$> TTY.runFromVM solvers Nothing Nothing emptyDapp vm0
         JsonTrace ->
           error "JsonTrace: implement me"
           -- Just <$> execStateT (EVM.UnitTest.interpretWithCoverage EVM.Fetch.zero EVM.Stepper.runFully) vm0

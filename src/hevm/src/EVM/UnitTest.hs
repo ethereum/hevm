@@ -22,8 +22,8 @@ import EVM.Transaction (initTx)
 import EVM.RLP
 import qualified EVM.Facts     as Facts
 import qualified EVM.Facts.Git as Git
+import qualified EVM.Fetch     as Fetch
 import qualified EVM.Expr      as Expr
-import qualified EVM.Fetch
 
 import qualified EVM.FeeSchedule as FeeSchedule
 
@@ -71,7 +71,8 @@ import qualified Data.Vector as Vector
 import Test.QuickCheck hiding (verbose)
 
 data UnitTestOptions = UnitTestOptions
-  { oracle      :: EVM.Query -> IO (EVM ())
+  { rpcInfo     :: Fetch.RpcInfo
+  , solvers     :: SolverGroup
   , verbose     :: Maybe Int
   , maxIter     :: Maybe Integer
   , askSmtIters :: Maybe Integer
@@ -129,16 +130,17 @@ makeVeriOpts opts =
    defaultVeriOpts { SymExec.debug = smtDebug opts
                    , SymExec.maxIter = maxIter opts
                    , SymExec.askSmtIters = askSmtIters opts
+                   , SymExec.rpcInfo = rpcInfo opts
                    }
 
 -- | Top level CLI endpoint for dapp-test
-dappTest :: UnitTestOptions -> SolverGroup -> String -> Maybe String -> IO Bool
-dappTest opts solvers solcFile cache' = do
+dappTest :: UnitTestOptions -> String -> Maybe String -> IO Bool
+dappTest opts solcFile cache' = do
   out <- liftIO $ readSolc solcFile
   case out of
     Just (contractMap, _) -> do
       let unitTests = findUnitTests (EVM.UnitTest.match opts) $ Map.elems contractMap
-      results <- concatMapM (runUnitTestContract opts solvers contractMap) unitTests
+      results <- concatMapM (runUnitTestContract opts contractMap) unitTests
       let (passing, vms) = unzip results
       case cache' of
         Nothing ->
@@ -248,9 +250,9 @@ checkFailures UnitTestOptions { .. } method bailed = do
 
 -- | Randomly generates the calldata arguments and runs the test
 fuzzTest :: UnitTestOptions -> Text -> [AbiType] -> VM -> Property
-fuzzTest opts sig types vm = forAllShow (genAbiValue (AbiTupleType $ Vector.fromList types)) (show . ByteStringS . encodeAbiValue)
+fuzzTest opts@UnitTestOptions{..} sig types vm = forAllShow (genAbiValue (AbiTupleType $ Vector.fromList types)) (show . ByteStringS . encodeAbiValue)
   $ \args -> ioProperty $
-    fst <$> runStateT (EVM.Stepper.interpret (oracle opts) (runUnitTest opts sig args)) vm
+    fst <$> runStateT (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (runUnitTest opts sig args)) vm
 
 tick :: Text -> IO ()
 tick x = Text.putStr x >> hFlush stdout
@@ -303,7 +305,7 @@ interpretWithCoverage
   :: UnitTestOptions
   -> Stepper a
   -> StateT CoverageState IO a
-interpretWithCoverage opts =
+interpretWithCoverage opts@UnitTestOptions{..} =
   eval . Operational.view
 
   where
@@ -321,7 +323,7 @@ interpretWithCoverage opts =
         Stepper.Run ->
           runWithCoverage >>= interpretWithCoverage opts . k
         Stepper.Wait q ->
-          do m <- liftIO (oracle opts q)
+          do m <- liftIO ((Fetch.oracle solvers rpcInfo) q)
              zoom _1 (State.state (runState m)) >> interpretWithCoverage opts (k ())
         Stepper.Ask _ ->
           error "cannot make choice in this interpreter"
@@ -417,12 +419,11 @@ coverageForUnitTestContract
 
 runUnitTestContract
   :: UnitTestOptions
-  -> SolverGroup
   -> Map Text SolcContract
   -> (Text, [(Test, [AbiType])])
   -> IO [(Bool, VM)]
 runUnitTestContract
-  opts@(UnitTestOptions {..}) solvers contractMap (name, testSigs) = do
+  opts@(UnitTestOptions {..}) contractMap (name, testSigs) = do
 
   -- Print a header
   liftIO $ putStrLn $ "Running " ++ show (length testSigs) ++ " tests for "
@@ -439,7 +440,7 @@ runUnitTestContract
       let vm0 = initialUnitTestVm opts theContract
       vm1 <-
         liftIO $ execStateT
-          (EVM.Stepper.interpret oracle
+          (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo)
             (Stepper.enter name >> initializeUnitTest opts theContract))
           vm0
 
@@ -456,7 +457,7 @@ runUnitTestContract
             runCache :: ([(Either Text Text, VM)], VM) -> (Test, [AbiType])
                         -> IO ([(Either Text Text, VM)], VM)
             runCache (results, vm) (test, types) = do
-              (t, r, vm') <- runTest opts solvers vm (test, types)
+              (t, r, vm') <- runTest opts vm (test, types)
               liftIO $ Text.putStrLn t
               let vmCached = vm & set cache (view cache vm')
               pure (((r, vm'): results), vmCached)
@@ -476,9 +477,9 @@ runUnitTestContract
           pure [(isRight r, vm) | (r, vm) <- details]
 
 
-runTest :: UnitTestOptions -> SolverGroup -> VM -> (Test, [AbiType]) -> IO (Text, Either Text Text, VM)
-runTest opts@UnitTestOptions{} _ vm (ConcreteTest testName, []) = liftIO $ runOne opts vm testName emptyAbi
-runTest opts@UnitTestOptions{..} _ vm (ConcreteTest testName, types) = liftIO $ case replay of
+runTest :: UnitTestOptions -> VM -> (Test, [AbiType]) -> IO (Text, Either Text Text, VM)
+runTest opts@UnitTestOptions{} vm (ConcreteTest testName, []) = liftIO $ runOne opts vm testName emptyAbi
+runTest opts@UnitTestOptions{..} vm (ConcreteTest testName, types) = liftIO $ case replay of
   Nothing ->
     fuzzRun opts vm testName types
   Just (sig, callData) ->
@@ -486,14 +487,14 @@ runTest opts@UnitTestOptions{..} _ vm (ConcreteTest testName, types) = liftIO $ 
     then runOne opts vm testName $
       decodeAbiValue (AbiTupleType (Vector.fromList types)) callData
     else fuzzRun opts vm testName types
-runTest opts@UnitTestOptions{..} _ vm (InvariantTest testName, []) = liftIO $ case replay of
+runTest opts@UnitTestOptions{..} vm (InvariantTest testName, []) = liftIO $ case replay of
   Nothing -> exploreRun opts vm testName []
   Just (sig, cds) ->
     if sig == testName
     then exploreRun opts vm testName (decodeCalls cds)
     else exploreRun opts vm testName []
-runTest _ _ _ (InvariantTest _, types) = error $ "invariant testing with arguments: " <> show types <> " is not implemented (yet!)"
-runTest opts solvers vm (SymbolicTest testName, types) = symRun opts solvers vm testName types
+runTest _ _ (InvariantTest _, types) = error $ "invariant testing with arguments: " <> show types <> " is not implemented (yet!)"
+runTest opts vm (SymbolicTest testName, types) = symRun opts vm testName types
 
 type ExploreTx = (Addr, Addr, ByteString, W256)
 
@@ -601,6 +602,7 @@ getTargetContracts UnitTestOptions{..} = do
 
 exploreRun :: UnitTestOptions -> VM -> ABIMethod -> [ExploreTx] -> IO (Text, Either Text Text, VM)
 exploreRun opts@UnitTestOptions{..} initialVm testName replayTxs = do
+  let oracle = Fetch.oracle solvers rpcInfo
   (targets, _) <- runStateT (EVM.Stepper.interpret oracle (getTargetContracts opts)) initialVm
   let depth = fromMaybe 20 maxDepth
   ((x, counterex), vm') <-
@@ -624,7 +626,7 @@ exploreRun opts@UnitTestOptions{..} initialVm testName replayTxs = do
 execTest :: UnitTestOptions -> VM -> ABIMethod -> AbiValue -> IO (Bool, VM)
 execTest opts@UnitTestOptions{..} vm testName args =
   runStateT
-    (EVM.Stepper.interpret oracle (execTestStepper opts testName args))
+    (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (execTestStepper opts testName args))
     vm
 
 -- | Define the thread spawner for normal test cases
@@ -634,7 +636,7 @@ runOne opts@UnitTestOptions{..} vm testName args = do
   (bailed, vm') <- execTest opts vm testName args
   (success, vm'') <-
     runStateT
-      (EVM.Stepper.interpret oracle (checkFailures opts testName bailed)) vm'
+      (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (checkFailures opts testName bailed)) vm'
   if success
   then
      let gasSpent = num (testGasCall testParams) - view (state . gas) vm'
@@ -685,7 +687,7 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
           ppOutput = pack $ show abiValue
       in do
         -- Run the failing test again to get a proper trace
-        vm' <- execStateT (EVM.Stepper.interpret oracle (runUnitTest opts testName abiValue)) vm
+        vm' <- execStateT (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (runUnitTest opts testName abiValue)) vm
         pure ("\x1b[31m[FAIL]\x1b[0m "
                <> testName <> ". Counterexample: " <> ppOutput
                <> "\nRun:\n dapp test --replay '(\"" <> testName <> "\",\""
@@ -701,8 +703,8 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
               )
 
 -- | Define the thread spawner for symbolic tests
-symRun :: UnitTestOptions -> SolverGroup -> VM -> Text -> [AbiType] -> IO (Text, Either Text Text, VM)
-symRun opts@UnitTestOptions{..} solvers vm testName types = do
+symRun :: UnitTestOptions -> VM -> Text -> [AbiType] -> IO (Text, Either Text Text, VM)
+symRun opts@UnitTestOptions{..} vm testName types = do
     let cd = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName
         testContract = view (state . contract) vm
@@ -722,13 +724,13 @@ symRun opts@UnitTestOptions{..} solvers vm testName types = do
                                    _ -> PBool False
 
     (_, vm') <- runStateT
-      (EVM.Stepper.interpret oracle (Stepper.evm $ do
+      (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (Stepper.evm $ do
           popTrace
           makeTxCall testParams cd
         )) vm
 
     -- check postconditions against vm
-    (_, results) <- verify solvers (makeVeriOpts opts) vm' Nothing (Just postcondition)
+    (_, results) <- verify solvers (makeVeriOpts opts) vm' (Just postcondition)
 
     -- display results
     if all isQed results
@@ -981,12 +983,12 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
 
 getParametersFromEnvironmentVariables :: Maybe Text -> IO TestVMParams
 getParametersFromEnvironmentVariables rpc = do
-  block' <- maybe EVM.Fetch.Latest (EVM.Fetch.BlockNumber . read) <$> (lookupEnv "DAPP_TEST_NUMBER")
+  block' <- maybe Fetch.Latest (Fetch.BlockNumber . read) <$> (lookupEnv "DAPP_TEST_NUMBER")
 
   (miner,ts,blockNum,ran,limit,base) <-
     case rpc of
       Nothing  -> return (0,Lit 0,0,0,0,0)
-      Just url -> EVM.Fetch.fetchBlockFrom block' url >>= \case
+      Just url -> Fetch.fetchBlockFrom block' url >>= \case
         Nothing -> error "Could not fetch block"
         Just EVM.Block{..} -> return (  _coinbase
                                       , _timestamp
