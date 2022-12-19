@@ -689,9 +689,9 @@ simplify e = if (mapExpr go e == e)
     -- (a+(c-b))
     -- In other words, subtraction is just adding a much larger number.
     --    So 3-1 mod 6 = 3+(6-1) mod 6 = 3+5 mod 6 = 5+3 mod 6 = 2
-    go (Sub (Sub orig (Lit x)) (Lit y)) = Sub orig (Lit (x+y))
+    go (Sub (Sub orig (Lit x)) (Lit y)) = Sub orig (Lit (y+x))
     go (Sub (Add orig (Lit x)) (Lit y)) = Sub orig (Lit (y-x))
-    go (Add (Add orig (Lit x)) (Lit y)) = Add orig (Lit (x+y))
+    go (Add (Add orig (Lit x)) (Lit y)) = Add orig (Lit (y+x))
     go (Add (Sub orig (Lit x)) (Lit y)) = Add orig (Lit (y-x))
 
     -- redundant add / sub
