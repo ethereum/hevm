@@ -29,8 +29,7 @@ import Data.Maybe (fromMaybe)
 
 import qualified Data.ByteString as BS
 import qualified Data.List as List
-import qualified Data.List.NonEmpty as NE
-import Data.List.NonEmpty (NonEmpty, NonEmpty((:|)))
+import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.String.Here
 import Data.Maybe
 import Data.Map (Map)

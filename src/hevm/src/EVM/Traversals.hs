@@ -8,9 +8,6 @@ module EVM.Traversals where
 
 import Prelude hiding (Word, LT, GT)
 
-import Data.Map (Map)
-import qualified Data.Map as Map
-import Control.Monad.State
 import Control.Monad.Identity
 
 import EVM.Types

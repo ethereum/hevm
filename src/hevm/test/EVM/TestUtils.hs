@@ -23,7 +23,7 @@ runDappTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO 
 runDappTestCustom testFile match maxIter ffiAllowed rpcinfo = do
   root <- Paths.getDataDir
   (json, _) <- compileWithDSTest testFile
-  T.writeFile "output.json" json
+  --T.writeFile "output.json" json
   withCurrentDirectory root $ do
     withSystemTempFile "output.json" $ \file handle -> do
       hClose handle
@@ -63,7 +63,7 @@ testOpts solvers root solcJson match maxIter allowFFI rpcinfo = do
     , rpcInfo = rpcinfo
     , maxIter = maxIter
     , askSmtIters = Nothing
-    , smtdebug = False
+    , smtDebug = False
     , smtTimeout = Nothing
     , solver = Nothing
     , covMatch = Nothing

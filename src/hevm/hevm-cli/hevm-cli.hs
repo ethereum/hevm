@@ -12,7 +12,6 @@ import qualified EVM
 import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
 import qualified EVM.Fetch
-import qualified EVM.Flatten
 import qualified EVM.Stepper
 
 
@@ -32,7 +31,6 @@ import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContrac
 import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
 import GHC.Natural
 import EVM.Format (showTraceTree, formatExpr)
-import EVM.RLP (rlpdecode)
 import qualified EVM.Patricia as Patricia
 import Data.Map (Map)
 
@@ -273,7 +271,7 @@ unitTestOptions cmd solvers testFile = do
          Nothing  -> Nothing
     , EVM.UnitTest.maxIter = maxIterations cmd
     , EVM.UnitTest.askSmtIters = askSmtIterations cmd
-    , EVM.UnitTest.smtdebug = smtdebug cmd
+    , EVM.UnitTest.smtDebug = smtdebug cmd
     , EVM.UnitTest.smtTimeout = smttimeout cmd
     , EVM.UnitTest.solver = solver cmd
     , EVM.UnitTest.covMatch = pack <$> covMatch cmd
