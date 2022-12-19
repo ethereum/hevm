@@ -106,8 +106,9 @@ prettyIfConcreteWord = \case
   w -> T.pack $ show w
 
 showAbiValue :: (?context :: DappContext) => AbiValue -> Text
-showAbiValue (AbiBytes _ bs) =
-  formatBytes bs  -- opportunistically decodes recognisable strings
+showAbiValue (AbiString bs) = formatBytes bs
+showAbiValue (AbiBytesDynamic bs) = formatBytes bs
+showAbiValue (AbiBytes _ bs) = formatBinary bs
 showAbiValue (AbiAddress addr) =
   let dappinfo = view contextInfo ?context
       contracts = view contextEnv ?context
