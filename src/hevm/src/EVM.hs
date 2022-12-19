@@ -431,12 +431,12 @@ instance Semigroup Cache where
     }
 
 unifyCachedStorage :: Map W256 W256 -> Map W256 W256 -> Map W256 W256
-unifyCachedStorage a b = undefined
+unifyCachedStorage _ _ = undefined
 
 -- only intended for use in Cache merges, where we expect
 -- everything to be Concrete
 unifyCachedContract :: Contract -> Contract -> Contract
-unifyCachedContract a b = undefined
+unifyCachedContract _ _ = undefined
   {-
 unifyCachedContract a b = a & set storage merged
   where merged = case (view storage a, view storage b) of
@@ -2192,6 +2192,7 @@ create self this xGas' xValue xs newAddr initCode = do
               AbstractStore -> AbstractStore
               EmptyStore -> EmptyStore
               SStore {} -> error "trying to reset symbolic storage with writes in create"
+              GVar _  -> error "unexpected global variable"
 
         modifying (env . storage) resetStorage
         modifying (env . origStorage) (Map.delete (num newAddr))
@@ -2501,6 +2502,7 @@ traceTopLog ((LogEntry addr bytes topics) : _) = do
   trace <- withTraceLocation (EventTrace addr bytes topics)
   modifying traces $
     \t -> Zipper.nextSpace (Zipper.insert (Node trace []) t)
+traceTopLog ((GVar _) : _) = error "unexpected global variable"
 
 -- * Stack manipulation
 

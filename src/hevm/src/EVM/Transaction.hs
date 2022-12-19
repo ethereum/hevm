@@ -15,7 +15,7 @@ import Control.Lens
 import Data.Aeson (FromJSON (..))
 import Data.ByteString (ByteString)
 import Data.Map (Map)
-import Data.Maybe (fromMaybe, isNothing, isJust)
+import Data.Maybe (fromMaybe, isNothing)
 
 import qualified Data.Aeson        as JSON
 import qualified Data.Aeson.Types  as JSON

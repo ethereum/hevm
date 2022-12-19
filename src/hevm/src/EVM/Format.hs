@@ -28,20 +28,19 @@ import Prelude hiding (Word)
 import qualified EVM
 import EVM.Dapp (DappInfo (..), dappSolcByHash, dappAbiMap, showTraceLocation, dappEventMap, dappErrorMap)
 import EVM.Dapp (DappContext (..), contextInfo, contextEnv)
-import EVM (VM, VMResult(..), cheatCode, traceForest, traceData, Error (..), result)
+import EVM (VM, cheatCode, traceForest, traceData, Error (..))
 import EVM (Trace, TraceData (..), Query (..), FrameContext (..))
-import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..), hexByteString, word256Bytes)
+import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..))
 import EVM.Types (Addr, ByteStringS(..))
 import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..))
 import EVM.ABI (Indexed (NotIndexed), getAbiSeq)
 import EVM.ABI (parseTypeName, formatString)
-import EVM.SMT
 import EVM.Solidity (SolcContract(..), contractName, abiMap)
 import EVM.Solidity (methodOutput, methodSignature, methodName)
 import EVM.Hexdump
 
 import Control.Arrow ((>>>))
-import Control.Lens (view, preview, ix, _2, to, makeLenses, over, each, (^?!))
+import Control.Lens (view, preview, ix, _2, to, (^?!))
 import Data.Binary.Get (runGetOrFail)
 import Data.Bits       (shiftR)
 import Data.ByteString (ByteString)
@@ -53,16 +52,12 @@ import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text, pack, unpack, intercalate)
 import Data.Text (dropEnd, splitOn)
 import Data.Text.Encoding (decodeUtf8, decodeUtf8')
-import Data.Tree (Tree (Node))
 import Data.Tree.View (showTree)
 import Data.Vector (Vector)
 import Data.Word (Word32)
-import Data.Char (isSpace)
-import Data.List (foldl')
 import Numeric (showHex)
 
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Base16 as BS16
 import qualified Data.Char as Char
 import qualified Data.Map as Map
 import qualified Data.Text as Text
@@ -127,9 +122,6 @@ showAbiValue (AbiAddress addr) =
     name <> "@" <> (pack $ show addr)
 showAbiValue v = pack $ show v
 
-showAbiValues :: (?context :: DappContext) => Vector AbiValue -> Text
-showAbiValues vs = parenthesise (textAbiValues vs)
-
 textAbiValues :: (?context :: DappContext) => Vector AbiValue -> [Text]
 textAbiValues vs = toList (fmap showAbiValue vs)
 
@@ -183,19 +175,9 @@ formatBytes b =
     then formatBString s
     else formatBinary b
 
-formatSBytes :: Expr Buf -> Text
-formatSBytes = undefined
---formatSBytes (SymbolicBuffer b) = "<" <> pack (show (length b)) <> " symbolic bytes>"
---formatSBytes (ConcreteBuffer b) = formatBytes b
-
 -- a string that came from bytes, displayed with special quotes
 formatBString :: ByteString -> Text
 formatBString b = mconcat [ "«",  Text.dropAround (=='"') (pack $ formatString b), "»" ]
-
-formatSString :: Expr Buf -> Text
-formatSString = undefined
---formatSString (SymbolicBuffer bs) = "<" <> pack (show (length bs)) <> " symbolic bytes (string)>"
---formatSString (ConcreteBuffer bs) = pack $ formatString bs
 
 formatBinary :: ByteString -> Text
 formatBinary =
@@ -289,8 +271,8 @@ showTrace dapp vm trace =
           "fetch contract " <> pack (show addr) <> pos
         PleaseFetchSlot addr slot _ ->
           "fetch storage slot " <> pack (show slot) <> " from " <> pack (show addr) <> pos
-        --PleaseAskSMT {} ->
-          --"ask smt" <> pos
+        PleaseAskSMT {} ->
+          "ask smt" <> pos
         --PleaseMakeUnique {} ->
           --"make unique value" <> pos
         PleaseDoFFI cmd _ ->
@@ -402,16 +384,6 @@ prettyvmresult (EVM.Types.Return _ _ _) =
 prettyvmresult (EVM.Types.IllegalOverflow _) = "Illegal Overflow"
 prettyvmresult (EVM.Types.SelfDestruct _) = "Self Destruct"
 prettyvmresult e = error "Internal Error: Invalid Result: " <> show e
-
-currentSolc :: DappInfo -> VM -> Maybe SolcContract
-currentSolc dapp vm = undefined
-  --let
-    --this = vm ^?! EVM.env . EVM.contracts . ix (view (EVM.state . EVM.contract) vm)
-    --h = view EVM.codehash this
-  --in
-    --preview (dappSolcByHash . ix h . _2) dapp
-
--- TODO: display in an 'act' format
 
 indent :: Int -> Text -> Text
 indent n = rstrip . T.unlines . fmap (T.replicate n (T.pack [' ']) <>) . T.lines
