@@ -22,6 +22,8 @@ jobs:
         with:
           # https://discourse.nixos.org/t/understanding-binutils-darwin-wrapper-nix-support-bad-substitution/11475/2
           nix_path: nixpkgs=channel:nixos-unstable
+      - name: run cabal check
+        run: nix-shell --pure --command "cd src/hevm && cabal check"
       - name: build hevm
         run: nix-build
       - name: run rpc tests
