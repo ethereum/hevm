@@ -59,11 +59,10 @@ tests = testGroup "rpc"
         assertEqual "prevRan" 0x2267531ab030ed32fd5f2ef51f81427332d0becbd74fe7f4cd5684ddf4b287e0 prevRan
     ]
   , testGroup "execution with remote state"
+    -- execute against remote state from a ds-test harness
     [ testCase "dapp-test" $ do
-        let
-          testFile = "test/contracts/pass/rpc.sol"
-          rpcInfo = Just (BlockNumber 16198552, testRpc)
-        runDappTestCustom testFile ".*" Nothing False rpcInfo >>= assertEqual "test result" True
+        let testFile = "test/contracts/pass/rpc.sol"
+        runDappTestCustom testFile ".*" Nothing False testRpcInfo >>= assertEqual "test result" True
 
     -- concretely exec "transfer" on WETH9 using remote rpc
     , testCase "weth-conc" $ do
@@ -143,3 +142,6 @@ vmFromRpc blockNum calldata' callvalue' caller' address' = do
 
 testRpc :: Text
 testRpc = "https://eth-mainnet.alchemyapi.io/v2/vpeKFsEF6PHifHzdtcwXSDbhV3ym5Ro4"
+
+testRpcInfo :: RpcInfo
+testRpcInfo = Just (BlockNumber 16198552, testRpc)
