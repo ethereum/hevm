@@ -16,7 +16,9 @@ User facing documentation can be found in the [hevm book](https://hevm.dev/).
 
 ## Installation
 
-`hevm` can be installed using nix flakes via the following command:
+Static binaries for x86 linux are available for each [release](https://github.com/ethereum/hevm/releases).
+
+Alternatively `hevm` can be installed using nix flakes via the following command:
 
 ```
 nix profile install github:ethereum/hevm
