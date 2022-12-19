@@ -1474,34 +1474,6 @@ tests = testGroup "hevm"
           [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        testCase "check-keccak-symb-single-string-storage-enc-unpacked" $ do
-          Just c <- solcRuntime "A"
-            [i|
-            contract A {
-              string a;
-              function f(uint x) external {
-                assert(keccak256(abi.encode(a)) == keccak256(abi.encode(a)));
-              }
-            }
-            |]
-          -- putStrLn $ "contract code:" <> (show c)
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
-          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        ,
-        testCase "check-keccak-symb-single-string-storage-enc-packed" $ do
-          Just c <- solcRuntime "A"
-            [i|
-            contract A {
-              string a;
-              function f(uint x) external {
-                assert(keccak256(abi.encodePacked(a)) == keccak256(abi.encodePacked(a)));
-              }
-            }
-            |]
-          -- putStrLn $ "contract code:" <> (show c)
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
-          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        ,
         testCase "check-keccak-string-constant-differing" $ do
           Just c <- solcRuntime "A"
             [i|
