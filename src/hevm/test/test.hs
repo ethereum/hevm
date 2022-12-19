@@ -1436,7 +1436,7 @@ tests = testGroup "hevm"
             contract A {
               string a;
               function f(uint x) external {
-                assert(keccak256(abi.encodePacked("mate")) == keccak256(abi.encodePacked("mate")));
+                assert(keccak256(abi.encodePacked("one")) == keccak256(abi.encodePacked("two")));
               }
             }
             |]
@@ -1447,14 +1447,14 @@ tests = testGroup "hevm"
           Just c <- solcRuntime "A"
             [i|
             contract A {
-              struct Book {
+              struct MyStruct {
                 uint a;
                 uint b;
               }
-              Book book1;
-              Book book2;
+              MyStruct ex1;
+              MyStruct ex2;
               function f(uint x) external {
-                assert(keccak256(abi.encode(book1)) == keccak256(abi.encode(book2)));
+                assert(keccak256(abi.encode(ex1)) == keccak256(abi.encode(ex2)));
               }
             }
             |]
@@ -1484,7 +1484,7 @@ tests = testGroup "hevm"
             }
             |]
           [Cex _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
-          putStrLn $ "successfully found Cex"
+          putStrLn "successfully found Cex"
         ,
         testCase "check-keccak-string-constant-differing2" $ do
           Just c <- solcRuntime "A"
@@ -1498,7 +1498,7 @@ tests = testGroup "hevm"
             }
             |]
           [Cex _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
-          putStrLn $ "successfully found Cex"
+          putStrLn "successfully found Cex"
         ,
         testCase "check-asm-byte-in-bounds" $ do
           Just c <- solcRuntime "C"
