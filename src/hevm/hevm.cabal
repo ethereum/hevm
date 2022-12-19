@@ -239,10 +239,6 @@ common test-base
     test
   extra-libraries:
     secp256k1
-  if os(darwin)
-     extra-libraries: c++
-  else
-     extra-libraries: stdc++
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -287,6 +283,10 @@ common test-common
     test-base
   build-depends:
     test-utils
+  if os(darwin)
+     extra-libraries: c++
+  else
+     extra-libraries: stdc++
 
 --- Test Suites ---
 
