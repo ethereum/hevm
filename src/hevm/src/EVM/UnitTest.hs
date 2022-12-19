@@ -130,6 +130,7 @@ makeVeriOpts opts =
    defaultVeriOpts { SymExec.debug = smtdebug opts
                    , SymExec.maxIter = maxIter opts
                    , SymExec.askSmtIters = askSmtIters opts
+                   , SymExec.rpcInfo = rpcInfo opts
                    }
 
 -- | Top level CLI endpoint for dapp-test
