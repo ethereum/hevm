@@ -21,7 +21,7 @@
         secp256k1-static = pkgs.secp256k1.overrideAttrs (attrs: {
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         });
-        hevm = (with pkgs; lib.pipe (
+        hevmUnwrapped = (with pkgs; lib.pipe (
           haskellPackages.callCabal2nix "hevm" ./src/hevm {
             # Haskell libs with the same names as C libs...
             # Depend on the C libs, not the Haskell libs.
@@ -52,11 +52,11 @@
           });
         hevmWrapped = with pkgs; symlinkJoin {
           name = "hevm";
-          paths = [ hevm ];
+          paths = [ hevmUnwrapped ];
           buildInputs = [ makeWrapper ];
           postBuild = ''
             wrapProgram $out/bin/hevm \
-              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc ])}"
+              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3 cvc5 ])}"
           '';
         };
       in rec {
@@ -64,6 +64,7 @@
         # --- packages ----
 
         packages.hevm = hevmWrapped;
+        packages.hevmUnwrapped = hevmUnwrapped;
         packages.default = hevmWrapped;
 
         # --- apps ----
@@ -76,7 +77,7 @@
         devShell = with pkgs;
           let libraryPath = "${lib.makeLibraryPath [ libff secp256k1 ]}";
           in haskellPackages.shellFor {
-            packages = _: [ hevm ];
+            packages = _: [ hevmUnwrapped ];
             buildInputs = [
               z3
               cvc5
