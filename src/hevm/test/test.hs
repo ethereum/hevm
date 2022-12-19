@@ -2385,17 +2385,11 @@ genWord litFreq sz = frequency
 
 genWordArith :: Int -> Int -> Gen (Expr EWord)
 genWordArith litFreq 0 = frequency
-  [ (litFreq, do
-      val <- arbitrary
-      pure $ Lit val
-    )
+  [ (litFreq, fmap Lit arbitrary)
   , (1, oneof [ fmap Lit arbitrary ])
   ]
 genWordArith litFreq sz = frequency
-  [ (litFreq, do
-      val <- arbitrary
-      pure $ Lit val
-    )
+  [ (litFreq, fmap Lit arbitrary)
   , (20, frequency
     [ (20, liftM2 Add  subWord subWord)
     , (20, liftM2 Sub  subWord subWord)
