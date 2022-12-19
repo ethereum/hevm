@@ -35,5 +35,5 @@ jobs:
           hackageToken: ${{ secrets.HACKAGE_AUTH_TOKEN }}
           packagesPath: ${{ runner.temp }}/packages/sdist
           docsPath: ${{ runner.temp }}/docs
-          publish: true
+          publish: false
 
