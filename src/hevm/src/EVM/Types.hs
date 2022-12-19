@@ -115,6 +115,7 @@ data EType
   | End
   deriving (Typeable)
 
+-- EVM errors
 data Error
   = Invalid
   | IllegalOverflow
