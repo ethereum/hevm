@@ -50,7 +50,25 @@
       "inputs": {
         "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "solidity": "solidity"
+      }
+    },
+    "solidity": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1670421565,
+        "narHash": "sha256-VCZDKQHnMsXu+ucsT5BLPYQoZ2FYjpyGbDVoDYjr1W8=",
+        "owner": "ethereum",
+        "repo": "solidity",
+        "rev": "1c8745c54a239d20b6fb0f79a8bd2628d779b27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ethereum",
+        "repo": "solidity",
+        "rev": "1c8745c54a239d20b6fb0f79a8bd2628d779b27e",
+        "type": "github"
       }
     }
   },
