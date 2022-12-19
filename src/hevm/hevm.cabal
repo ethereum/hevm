@@ -27,7 +27,7 @@ data-files:
   run-consensus-tests
 extra-source-files:
   CHANGELOG.md
-  test/contracts/lib/ds-test.sol
+  test/contracts/lib/test.sol
   test/contracts/lib/erc20.sol
   test/contracts/pass/trivial.sol
   test/contracts/pass/abstract.sol
@@ -35,7 +35,7 @@ extra-source-files:
   test/contracts/pass/constantinople.sol
   test/contracts/pass/dsProvePass.sol
   test/contracts/pass/invariants.sol
-  test/contracts/pass/libraries.so
+  test/contracts/pass/libraries.sol
   test/contracts/pass/loops.sol
   test/contracts/pass/rpc.sol
   test/contracts/fail/trivial.sol
@@ -179,7 +179,7 @@ library
     smt2-parser                       >= 0.1.0.1,
     word-wrap                         >= 0.5 && < 0.6,
     spool                             >= 0.1 && < 0.2,
-    parsec
+    parsec                            >= 3.1.14.0 && < 3.1.15
   hs-source-dirs:
     src
 

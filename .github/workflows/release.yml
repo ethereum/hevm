@@ -1,0 +1,37 @@
+name: "Release"
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  linuxRelease:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: cachix/install-nix-action@v18
+        with:
+          extra_nix_config: |
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - name: build hevm
+        run: |
+          nix build .#hevmUnwrapped --out-link hevmLinux
+          cp ./hevmLinux/bin/hevm ./hevm-x86_64-linux
+      - name: upload linux binary
+        uses: softprops/action-gh-release@v0.1.15
+        with:
+          files: |
+            ./hevm-x86_64-linux
+      - name: prepare hackage artifacts
+        run: |
+          nix-shell --command "cd src/hevm && cabal sdist --builddir=${{ runner.temp }}/packages"
+          nix-shell --command "cd src/hevm && cabal haddock --builddir=${{ runner.temp }}/docs --haddock-for-hackage --haddock-option=--hyperlinked-source"
+      - name: publish to hackage
+        uses: haskell-actions/hackage-publish@v1
+        with:
+          hackageToken: ${{ secrets.HACKAGE_AUTH_TOKEN }}
+          packagesPath: ${{ runner.temp }}/packages/sdist
+          docsPath: ${{ runner.temp }}/docs
+          publish: true
+
