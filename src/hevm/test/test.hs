@@ -2239,6 +2239,7 @@ genNat :: Gen Int
 genNat = fmap fromIntegral (arbitrary :: Gen Natural)
 
 genName :: Gen Text
+-- In order not to generate SMT reserved words, we prepend with "esc_"
 genName = fmap (T.pack . ("esc_" <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z'] <> ['A'..'Z'])
 
 genEnd :: Int -> Gen (Expr End)
