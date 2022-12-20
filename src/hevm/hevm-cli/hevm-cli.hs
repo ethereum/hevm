@@ -33,6 +33,7 @@ import GHC.Natural
 import EVM.Format (showTraceTree, formatExpr)
 import qualified EVM.Patricia as Patricia
 import Data.Map (Map)
+import Data.Word (Word64)
 
 import qualified EVM.Facts     as Facts
 import qualified EVM.Facts.Git as Git
@@ -87,12 +88,12 @@ data Command w
       , coinbase      :: w ::: Maybe Addr       <?> "Block: coinbase"
       , value         :: w ::: Maybe W256       <?> "Tx: Eth amount"
       , nonce         :: w ::: Maybe W256       <?> "Nonce of origin"
-      , gas           :: w ::: Maybe W256       <?> "Tx: gas amount"
+      , gas           :: w ::: Maybe Word64     <?> "Tx: gas amount"
       , number        :: w ::: Maybe W256       <?> "Block: number"
       , timestamp     :: w ::: Maybe W256       <?> "Block: timestamp"
       , basefee       :: w ::: Maybe W256       <?> "Block: base fee"
       , priorityFee   :: w ::: Maybe W256       <?> "Tx: priority fee"
-      , gaslimit      :: w ::: Maybe W256       <?> "Tx: gas limit"
+      , gaslimit      :: w ::: Maybe Word64     <?> "Tx: gas limit"
       , gasprice      :: w ::: Maybe W256       <?> "Tx: gas price"
       , create        :: w ::: Bool             <?> "Tx: creation"
       , maxcodesize   :: w ::: Maybe W256       <?> "Block: max code size"
@@ -142,12 +143,12 @@ data Command w
       , coinbase    :: w ::: Maybe Addr       <?> "Block: coinbase"
       , value       :: w ::: Maybe W256       <?> "Tx: Eth amount"
       , nonce       :: w ::: Maybe W256       <?> "Nonce of origin"
-      , gas         :: w ::: Maybe W256       <?> "Tx: gas amount"
+      , gas         :: w ::: Maybe Word64     <?> "Tx: gas amount"
       , number      :: w ::: Maybe W256       <?> "Block: number"
       , timestamp   :: w ::: Maybe W256       <?> "Block: timestamp"
       , basefee     :: w ::: Maybe W256       <?> "Block: base fee"
       , priorityFee :: w ::: Maybe W256       <?> "Tx: priority fee"
-      , gaslimit    :: w ::: Maybe W256       <?> "Tx: gas limit"
+      , gaslimit    :: w ::: Maybe Word64     <?> "Tx: gas limit"
       , gasprice    :: w ::: Maybe W256       <?> "Tx: gas price"
       , create      :: w ::: Bool             <?> "Tx: creation"
       , maxcodesize :: w ::: Maybe W256       <?> "Block: max code size"
@@ -702,15 +703,15 @@ vmFromCommand cmd = do
           , EVM.vmoptAddress       = address'
           , EVM.vmoptCaller        = litAddr caller'
           , EVM.vmoptOrigin        = origin'
-          , EVM.vmoptGas           = 0
+          , EVM.vmoptGas           = word64 gas 0xffffffffffffffff
           , EVM.vmoptBaseFee       = baseFee
-          , EVM.vmoptPriorityFee   = 0
-          , EVM.vmoptGaslimit      = 0
+          , EVM.vmoptPriorityFee   = word priorityFee 0
+          , EVM.vmoptGaslimit      = word64 gaslimit 0xffffffffffffffff
           , EVM.vmoptCoinbase      = addr coinbase miner
           , EVM.vmoptNumber        = word number blockNum
           , EVM.vmoptTimestamp     = Lit $ word timestamp ts
-          , EVM.vmoptBlockGaslimit = 0
-          , EVM.vmoptGasprice      = 0
+          , EVM.vmoptBlockGaslimit = word64 gaslimit 0xffffffffffffffff
+          , EVM.vmoptGasprice      = word gasprice 0
           , EVM.vmoptMaxCodeSize   = word maxcodesize 0xffffffff
           , EVM.vmoptPrevRandao    = word prevRandao prevRan
           , EVM.vmoptSchedule      = FeeSchedule.berlin
@@ -721,6 +722,7 @@ vmFromCommand cmd = do
           , EVM.vmoptAllowFFI      = False
           }
         word f def = fromMaybe def (f cmd)
+        word64 f def = fromMaybe def (f cmd)
         addr f def = fromMaybe def (f cmd)
         bytes f def = maybe def decipher (f cmd)
 
@@ -796,15 +798,15 @@ symvmFromCommand cmd calldata' = do
       , EVM.vmoptAddress       = address'
       , EVM.vmoptCaller        = caller'
       , EVM.vmoptOrigin        = origin'
-      , EVM.vmoptGas           = 0xffffffffffffffff
-      , EVM.vmoptGaslimit      = 0xffffffffffffffff
+      , EVM.vmoptGas           = word64 gas 0xffffffffffffffff
+      , EVM.vmoptGaslimit      = word64 gaslimit 0xffffffffffffffff
       , EVM.vmoptBaseFee       = baseFee
       , EVM.vmoptPriorityFee   = word priorityFee 0
       , EVM.vmoptCoinbase      = addr coinbase miner
       , EVM.vmoptNumber        = word number blockNum
       , EVM.vmoptTimestamp     = ts
-      , EVM.vmoptBlockGaslimit = 0
-      , EVM.vmoptGasprice      = 0
+      , EVM.vmoptBlockGaslimit = word64 gaslimit 0xffffffffffffffff
+      , EVM.vmoptGasprice      = word gasprice 0
       , EVM.vmoptMaxCodeSize   = word maxcodesize 0xffffffff
       , EVM.vmoptPrevRandao    = word prevRandao prevRan
       , EVM.vmoptSchedule      = FeeSchedule.berlin
@@ -816,6 +818,7 @@ symvmFromCommand cmd calldata' = do
       }
     word f def = fromMaybe def (f cmd)
     addr f def = fromMaybe def (f cmd)
+    word64 f def = fromMaybe def (f cmd)
 
 launchTest :: HasCallStack => Command Options.Unwrapped ->  IO ()
 launchTest cmd = do
