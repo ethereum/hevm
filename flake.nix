@@ -1,5 +1,5 @@
 {
-  description = "HEVM";
+  description = "hevm";
 
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
@@ -22,7 +22,7 @@
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         });
         hevmUnwrapped = (with pkgs; lib.pipe (
-          haskellPackages.callCabal2nix "hevm" ./src/hevm {
+          haskellPackages.callCabal2nix "hevm" ./. {
             # Haskell libs with the same names as C libs...
             # Depend on the C libs, not the Haskell libs.
             # These are system deps, not Cabal deps.
