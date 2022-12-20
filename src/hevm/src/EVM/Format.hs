@@ -68,20 +68,17 @@ data Signedness = Signed | Unsigned
   deriving (Show)
 
 showDec :: Signedness -> W256 -> Text
-showDec signed (W256 w) =
-  let
+showDec signed (W256 w)
+  | i == num cheatCode = "<hevm cheat address>"
+  | (i :: Integer) == 2 ^ (256 :: Integer) - 1 = "MAX_UINT256"
+  | otherwise = Text.pack (show (i :: Integer))
+  where
     i = case signed of
           Signed   -> num (signedWord w)
           Unsigned -> num w
-  in
-    if i == num cheatCode
-    then "<hevm cheat address>"
-    else if (i :: Integer) == 2 ^ (256 :: Integer) - 1
-    then "MAX_UINT256"
-    else Text.pack (show (i :: Integer))
 
 showWordExact :: W256 -> Text
-showWordExact w = humanizeInteger w
+showWordExact w = humanizeInteger (toInteger w)
 
 showWordExplanation :: W256 -> DappInfo -> Text
 showWordExplanation w _ | w > 0xffffffff = showDec Unsigned w
