@@ -39,6 +39,7 @@ import EVM.Format (formatExpr)
 import Data.Set (Set, fromList, isSubsetOf, size)
 import Control.Concurrent.STM (atomically, TVar, readTVarIO, readTVar, newTVarIO, writeTVar)
 import Control.Concurrent.Spawn
+import GHC.Conc (getNumProcessors)
 
 data ProofResult a b c = Qed a | Cex b | Timeout c
   deriving (Show, Eq)
@@ -654,12 +655,14 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
     -- run them in a random order. We ordered them correctly, though so that'd be bad
     doAll :: [(Prop, Maybe (Set Prop, Set Prop))]
              -> TVar [(Set Prop, Set Prop)]
+             -> Int
              -> IO [(Maybe SMTCex, Prop, ProofResult () () (), Bool)]
-    doAll input sh = do
-       wrap <- pool 6 -- TODO fix from 6 to number of cores
+    doAll input sh numproc = do
+       wrap <- pool numproc
        parMapIO (wrap . (check sh)) input
   sharedKnownUnsat <- newTVarIO []
-  results <- doAll diffEndStFilt sharedKnownUnsat
+  procs <- getNumProcessors
+  results <- doAll diffEndStFilt sharedKnownUnsat procs
   let useful = foldr (\(_, _, _, b) n -> if b then n+1 else n) (0::Integer) results
   putStrLn $ "Reuse of previous queries was Useful in " <> (show useful) <> " cases"
   return $ filter (\(_, _, res) -> res /= Qed ()) $ foldr (\(a,b, c, _) r -> (a,b,c):r) [] results
