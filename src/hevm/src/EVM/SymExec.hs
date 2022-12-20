@@ -649,13 +649,18 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
         (_, EVM.SMT.Unknown) -> pure (Nothing, flatProp, Timeout (), False)
         (_, Error txt) -> error $ "Error while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
 
-    -- doAll :: [(Prop, Maybe (Set Prop, Set Prop))] -> IO [(Maybe SMTCex, Prop, ProofResult () () (), Bool)]
-    -- doAll input sh = do
-    --    wrap <- pool 6
-    --    parMapIO (wrap . (check sh)) input
-  shared <- newTVarIO []
-  results <- (flip mapConcurrently) diffEndStFilt $ \x -> check shared x
-  -- results <- (flip mapConcurrently) diffEndStFilt $ \x -> check shared x
+    -- Allows us to run it in parallel. Note that this (seems to) run it
+    -- from left-to-right, and with a max of K threads. This is in contrast to
+    -- mapConcurrently which would spawn as many threads as there are jobs, and
+    -- run them in a random order. We ordered them correctly, though so that'd be bad
+    doAll :: [(Prop, Maybe (Set Prop, Set Prop))]
+             -> TVar [(Set Prop, Set Prop)]
+             -> IO [(Maybe SMTCex, Prop, ProofResult () () (), Bool)]
+    doAll input sh = do
+       wrap <- pool 6 -- TODO fix from 6 to number of cores
+       parMapIO (wrap . (check sh)) input
+  sharedKnownUnsat <- newTVarIO []
+  results <- doAll diffEndStFilt sharedKnownUnsat
   let useful = foldr (\(_, _, _, b) n -> if b then n+1 else n) (0::Integer) results
   putStrLn $ "Reuse of previous queries was Useful in " <> (show useful) <> " cases"
   return $ filter (\(_, _, res) -> res /= Qed ()) $ foldr (\(a,b, c, _) r -> (a,b,c):r) [] results
