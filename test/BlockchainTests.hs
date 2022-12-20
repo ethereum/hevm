@@ -108,11 +108,8 @@ ignoredFiles =
   , "BlockchainTests/GeneralStateTests/stPreCompiledContracts/idPrecomps.json"
   , "BlockchainTests/GeneralStateTests/stRandom2/randomStatetest641.json"
   , "BlockchainTests/GeneralStateTests/stRandom2/randomStatetest642.json"
-  , "BlockchainTests/GeneralStateTests/stZeroKnowledge"
-
+  , "BlockchainTests/GeneralStateTests/stZeroKnowledge" -- fails on macOS CI
   , "BlockchainTests/GeneralStateTests/stQuadraticComplexityTest"
-  , "BlockchainTests/GeneralStateTests/stStaticCall"
-  , "BlockchainTests/GeneralStateTests/stTimeConsuming"
   ]
 
 expectedFailures :: Map String (TestTree -> TestTree)
