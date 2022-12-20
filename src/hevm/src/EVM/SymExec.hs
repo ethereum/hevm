@@ -602,48 +602,49 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
         PBool False -> (PBool False, Nothing)
         PBool True  -> ((foldl PAnd (PBool True) aProps) .&& (foldl PAnd (PBool True) bProps), Just (Data.Set.fromList aProps, Data.Set.fromList bProps))
         _ -> ((foldl PAnd (PBool True) aProps) .&& (foldl PAnd (PBool True) bProps) .&& differingResults, Nothing)
-  -- If there exists a pair of end states where this is not the case,
-  -- the following constraint is satisfiable
 
   let
-    -- sorts the diffEndStFilt by the number of Props, if not Nothing.  Nothing is placed last
+    -- sorts the differingEndStates by the number of Props. Fewer props is at the beginning.
     propSorter :: (Prop, Maybe (Set Prop, Set Prop)) -> (Prop, Maybe (Set Prop, Set Prop)) -> Ordering
     propSorter (_, _) (_, Nothing) = Prelude.LT -- Nothing ends up last.
     propSorter (_, Nothing) (_, Just _) = Prelude.GT
     propSorter (_, Just (x1, y1)) (_, Just (x2, y2)) = if size x1 > size x2 && size y1 > size y2 then Prelude.LT
-                                                                                               else Prelude.GT
+                                                                                                 else Prelude.GT
     diffEndStFilt = Data.List.sortBy propSorter $ filter (\(a, _) -> a /= PBool False) differingEndStates
   putStrLn $ "Equivalence checking " <> (show $ length diffEndStFilt) <> " combinations"
   when (debug opts) $ forM_ (zip diffEndStFilt [(1::Integer)..]) (\(x, i) -> T.writeFile ("prop-checked-" <> show i) (T.pack $ show x))
   let
-    subsetCheck :: (Set Prop, Set Prop) -> [(Set Prop, Set Prop)] -> Bool
-    subsetCheck a b = foldr (myFunc a) False b
+    subsetAny :: (Set Prop, Set Prop) -> [(Set Prop, Set Prop)] -> Bool
+    subsetAny a b = foldr (subset a) False b
       where
-        myFunc :: (Set Prop, Set Prop) -> (Set Prop, Set Prop) -> Bool -> Bool
-        myFunc (x1, y1) (x2, y2) val = case val of
+        subset :: (Set Prop, Set Prop) -> (Set Prop, Set Prop) -> Bool -> Bool
+        subset (x1, y1) (x2, y2) val = case val of
           True -> True
           False -> isSubsetOf x2 x1 && isSubsetOf y2 y1
-    check :: [(Prop, Maybe (Set Prop, Set Prop))]
-          -> [(Set Prop, Set Prop)]
+
+    -- recursively checks all, but skips the ones that have been proven UNSAT
+    --   by previous UNSAT results that contain a subset of propositions
+    check :: [(Prop, Maybe (Set Prop, Set Prop))] -- things to be checked
+          -> [(Set Prop, Set Prop)]               -- list of (set of props) that are known to be UNSAT
           -> IO [(Maybe SMTCex, Prop, ProofResult () () (), Bool)]
           -> IO [(Maybe SMTCex, Prop, ProofResult () () (), Bool)]
     check [] _  ret = ret
-    check ((prop, input):ax) knownUnsat ret = do
-    -- TODO this used to be multi-threaded
-      let assertedProps = assertProps [prop]
+    check ((flatProp, inputProps):ax) knownUnsat ret = do
+      let assertedProps = assertProps [flatProp]
       -- let filename = "eq-check-" <> show i <> ".smt2"
       -- when (debug opts) $ T.writeFile (filename) $ (TL.toStrict $ formatSMT2 assertedProps) <> "\n(check-sat)"
-      res <- case prop of
+      res <- case flatProp of
         PBool False -> pure (False, Unsat)
-        _ -> case input of
+        _ -> case inputProps of
                Nothing -> (fmap ((False),) (checkSat solvers assertedProps))
-               Just x -> if subsetCheck x knownUnsat then pure (True, Unsat)
-                                                     else (fmap ((False),) (checkSat solvers assertedProps))
+               Just x -> if subsetAny x knownUnsat then pure (True, Unsat)
+                                                   else (fmap ((False),) (checkSat solvers assertedProps))
       case res of
-        (_, Sat x) -> check ax knownUnsat (fmap ((Just x, prop, Cex (), False):)ret)
-        (quick, Unsat) -> if isNothing input || quick then check ax knownUnsat (fmap ((Nothing, prop, Qed (), quick):)ret)
-                              else check ax (fromJust input:knownUnsat) (fmap ((Nothing, prop, Qed (), False):)ret)
-        (_, EVM.SMT.Unknown) -> check ax knownUnsat (fmap ((Nothing, prop, Timeout (), False):)ret)
+        (_, Sat x) -> check ax knownUnsat (fmap ((Just x, flatProp, Cex (), False):)ret)
+        (quick, Unsat) -> case isNothing inputProps || quick of
+                            True  -> check ax knownUnsat (fmap ((Nothing, flatProp, Qed (), quick):)ret)
+                            False -> check ax (fromJust inputProps:knownUnsat) (fmap ((Nothing, flatProp, Qed (), False):)ret)
+        (_, EVM.SMT.Unknown) -> check ax knownUnsat (fmap ((Nothing, flatProp, Timeout (), False):)ret)
         (_, Error txt) -> error $ "Error while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
   results <- check diffEndStFilt [] (pure [])
   let useful = foldr (\(_, _, _, b) n -> if b then n+1 else n) (0::Integer) results
