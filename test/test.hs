@@ -61,17 +61,10 @@ import qualified Data.Text as T
 import Data.List (isSubsequenceOf)
 import EVM.TestUtils
 
-import qualified BlockchainTests
 import System.Environment (setEnv)
 
 main :: IO ()
-main = do
-  setEnv "TASTY_NUM_THREADS" "1"
-  blockchainTests <- BlockchainTests.prepareTests
-  defaultMain $ testGroup "all"
-    [ blockchainTests
-    , tests
-    ]
+main = defaultMain tests
 
 -- | run a subset of tests in the repl. p is a tasty pattern:
 -- https://github.com/UnkindPartition/tasty/tree/ee6fe7136fbcc6312da51d7f1b396e1a2d16b98a#patterns

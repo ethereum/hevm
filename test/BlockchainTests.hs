@@ -2,7 +2,7 @@
 {-# Language NumericUnderscores #-}
 {-# Language TupleSections #-}
 
-module BlockchainTests where
+module Main where
 
 import Prelude hiding (Word)
 
@@ -69,6 +69,11 @@ data BlockchainCase = BlockchainCase
   , blockchainPost    :: Map Addr (EVM.Contract, Storage)
   , blockchainNetwork :: String
   } deriving Show
+
+main :: IO ()
+main = do
+  tests <- prepareTests
+  defaultMain tests
 
 prepareTests :: IO TestTree
 prepareTests = do

@@ -241,7 +241,6 @@ common test-base
     secp256k1
   other-modules:
     Paths_hevm
-    BlockchainTests
   autogen-modules:
     Paths_hevm
   build-depends:
@@ -312,3 +311,11 @@ test-suite rpc-tests
     exitcode-stdio-1.0
   main-is:
     rpc.hs
+
+test-suite ethereum-tests
+  import:
+    test-common
+  type:
+    exitcode-stdio-1.0
+  main-is:
+    BlockchainTests.hs
