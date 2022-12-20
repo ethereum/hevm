@@ -537,8 +537,8 @@ launchExec :: Command Options.Unwrapped -> IO ()
 launchExec cmd = do
   dapp <- getSrcInfo cmd
   vm <- vmFromCommand cmd
-  smtjobs <- fromIntegral <$> getNumProcessors
-  withSolvers Z3 smtjobs (smttimeout cmd) $ \solvers -> do
+  -- TODO: we shouldn't need solvers to execute this code
+  withSolvers Z3 0 Nothing $ \solvers -> do
     case optsMode cmd of
       Run -> do
         vm' <- execStateT (EVM.Stepper.interpret (EVM.Fetch.oracle solvers rpcinfo) . void $ EVM.Stepper.execFully) vm
