@@ -31,7 +31,7 @@ import EVM.Dapp (DappContext (..), contextInfo, contextEnv)
 import EVM (VM, cheatCode, traceForest, traceData, Error (..))
 import EVM (Trace, TraceData (..), Query (..), FrameContext (..))
 import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..))
-import EVM.Types (Addr, ByteStringS(..))
+import EVM.Types (Addr, ByteStringS(..), Error(..))
 import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..))
 import EVM.ABI (Indexed (NotIndexed), getAbiSeq)
 import EVM.ABI (parseTypeName, formatString)
@@ -369,18 +369,27 @@ contractNamePart x = Text.split (== ':') x !! 1
 contractPathPart :: Text -> Text
 contractPathPart x = Text.split (== ':') x !! 0
 
+prettyError :: EVM.Types.Error -> String
+prettyError= \case
+  Invalid -> "Invalid Opcode"
+  EVM.Types.IllegalOverflow -> "Illegal Overflow"
+  SelfDestruct -> "Self Destruct"
+  EVM.Types.StackLimitExceeded -> "Stack limit exceeded"
+  EVM.Types.InvalidMemoryAccess -> "Invalid memory access"
+  EVM.Types.BadJumpDestination -> "Bad jump destination"
+  TmpErr err -> "Temp error: " <> err
+
+
 prettyvmresult :: (?context :: DappContext) => Expr End -> String
 prettyvmresult (EVM.Types.Revert _ (ConcreteBuf "")) = "Revert"
 prettyvmresult (EVM.Types.Revert _ msg) = "Revert: " ++ (unpack $ showError msg)
-prettyvmresult (EVM.Types.Invalid _) = "Invalid Opcode"
 prettyvmresult (EVM.Types.Return _ (ConcreteBuf msg) _) =
   if BS.null msg
   then "Stop"
   else "Return: " <> show (ByteStringS msg)
 prettyvmresult (EVM.Types.Return _ _ _) =
   "Return: <symbolic>"
-prettyvmresult (EVM.Types.IllegalOverflow _) = "Illegal Overflow"
-prettyvmresult (EVM.Types.SelfDestruct _) = "Self Destruct"
+prettyvmresult (Failure _ err) = prettyError err
 prettyvmresult e = error "Internal Error: Invalid Result: " <> show e
 
 indent :: Int -> Text -> Text

@@ -17,7 +17,7 @@ import EVM.Format
 import EVM.Solidity
 import qualified EVM.SymExec as SymExec
 import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, VeriOpts)
-import EVM.Types
+import EVM.Types hiding (Failure)
 import EVM.Transaction (initTx)
 import EVM.RLP
 import qualified EVM.Facts     as Facts

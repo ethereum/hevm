@@ -346,14 +346,14 @@ runExpr = do
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
     Just (VMSuccess buf) -> Return asserts buf (view (env . EVM.storage) vm)
     Just (VMFailure e) -> case e of
-      UnrecognizedOpcode _ -> Invalid asserts
-      SelfDestruction -> SelfDestruct asserts
-      EVM.StackLimitExceeded -> EVM.Types.StackLimitExceeded asserts
-      EVM.IllegalOverflow -> EVM.Types.IllegalOverflow asserts
+      UnrecognizedOpcode _ -> Failure asserts Invalid
+      SelfDestruction -> Failure asserts SelfDestruct
+      EVM.StackLimitExceeded -> Failure asserts EVM.Types.StackLimitExceeded
+      EVM.IllegalOverflow -> Failure asserts EVM.Types.IllegalOverflow
       EVM.Revert buf -> EVM.Types.Revert asserts buf
-      EVM.InvalidMemoryAccess -> EVM.Types.InvalidMemoryAccess asserts
-      EVM.BadJumpDestination -> EVM.Types.BadJumpDestination asserts
-      e' -> EVM.Types.TmpErr asserts $ show e'
+      EVM.InvalidMemoryAccess -> Failure asserts EVM.Types.InvalidMemoryAccess
+      EVM.BadJumpDestination -> Failure asserts EVM.Types.BadJumpDestination
+      e' -> Failure asserts $ EVM.Types.TmpErr (show e')
 
 -- | Converts a given top level expr into a list of final states and the associated path conditions for each state
 flattenExpr :: Expr End -> [([Prop], Expr End)]
@@ -362,15 +362,10 @@ flattenExpr = go []
     go :: [Prop] -> Expr End -> [([Prop], Expr End)]
     go pcs = \case
       ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
-      e@(Invalid _)  -> [(pcs, e)]
-      e@(SelfDestruct _) -> [(pcs, e)]
       e@(Revert _ _) -> [(pcs, e)]
       e@(Return _ _ _) -> [(pcs, e)]
-      e@(EVM.Types.IllegalOverflow _) -> [(pcs, e)]
-      e@(EVM.Types.StackLimitExceeded _ ) -> [(pcs, e)]
-      e@(EVM.Types.InvalidMemoryAccess _) -> [(pcs, e)]
-      e@(EVM.Types.BadJumpDestination _) -> [(pcs, e)]
-      TmpErr _ s -> error s
+      Failure _ (TmpErr s) -> error s
+      e@(Failure _ _) -> [(pcs, e)]
       GVar _ -> error "cannot flatten an Expr containing a GVar"
 
 -- | Strips unreachable branches from a given expr
@@ -413,6 +408,7 @@ reachable solvers e = do
           Unsat -> pure ([query], Nothing)
           r -> error $ "Invalid solver result: " <> show r
 
+
 -- | Evaluate the provided proposition down to its most concrete result
 evalProp :: Prop -> Prop
 evalProp = \case
@@ -450,15 +446,9 @@ evalProp = \case
 extractProps :: Expr End -> [Prop]
 extractProps = \case
   ITE _ _ _ -> []
-  Invalid asserts -> asserts
-  SelfDestruct asserts -> asserts
   Revert asserts _ -> asserts
   Return asserts _ _ -> asserts
-  EVM.Types.IllegalOverflow asserts -> asserts
-  EVM.Types.StackLimitExceeded asserts -> asserts
-  EVM.Types.InvalidMemoryAccess asserts -> asserts
-  EVM.Types.BadJumpDestination asserts -> asserts
-  TmpErr asserts _ -> asserts
+  Failure asserts _ -> asserts
   GVar _ -> error "cannot extract props from a GVar"
 
 
@@ -538,14 +528,11 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
             (Revert _ a, Revert _ b) -> if a==b then PBool False else a ./= b
             (Revert _ _, _) -> PBool True
             (_, Revert _ _) -> PBool True
-            (Invalid _, Invalid _) -> PBool False
-            (Invalid _, _ ) -> PBool True
-            (_, Invalid _) -> PBool True
-            (EVM.Types.StackLimitExceeded _, EVM.Types.StackLimitExceeded _ ) -> PBool False
-            (EVM.Types.StackLimitExceeded _, _) -> PBool True
-            (_, EVM.Types.StackLimitExceeded _) -> PBool True
-            (a, b) -> if a == b then PBool False
-                                else error $ "Unimplemented, see TODO about EVM failures and TmpExpr. Left: " <> show a <> " Right: " <> show b
+            (Failure _ (TmpErr s), _) -> error $ "Unhandled error: " <> s
+            (_, Failure _ (TmpErr s)) -> error $ "Unhandled error: " <> s
+            (Failure _ erra, Failure _ errb) -> if erra==errb then PBool False else PBool True
+            (ITE _ _ _, _ ) -> error "Expressions must be flattened"
+            (_, ITE _ _ _) -> error "Expressions must be flattened"
 
         -- if the SMT solver can find a common input that satisfies BOTH sets of path conditions
         -- AND the output differs, then we are in trouble. We do this for _every_ pair of paths, which
