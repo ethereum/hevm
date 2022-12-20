@@ -26,7 +26,7 @@ data-files:
   run-blockchain-tests
   run-consensus-tests
 extra-source-files:
-  CHANGwELOG.md
+  CHANGELOG.md
   test/contracts/lib/ds-test.sol
   test/contracts/lib/erc20.sol
   test/contracts/pass/trivial.sol
