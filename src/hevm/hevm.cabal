@@ -26,7 +26,7 @@ data-files:
   run-blockchain-tests
   run-consensus-tests
 extra-source-files:
-  CHANGELOG.md
+  CHANGwELOG.md
   test/contracts/lib/ds-test.sol
   test/contracts/lib/erc20.sol
   test/contracts/pass/trivial.sol
@@ -176,7 +176,9 @@ library
     smt2-parser                       >= 0.1.0.1,
     word-wrap                         >= 0.5 && < 0.6,
     spool                             >= 0.1 && < 0.2,
-    parsec
+    parsec,
+    stm,
+    spawn
   hs-source-dirs:
     src
 
@@ -226,7 +228,9 @@ executable hevm
     text,
     unordered-containers,
     vector,
-    vty
+    vty,
+    stm,
+    spawn
 
 test-suite test
   import: shared
@@ -275,4 +279,6 @@ test-suite test
     time,
     array,
     vector,
-    smt2-parser >= 0.1.0.1
+    smt2-parser >= 0.1.0.1,
+    stm,
+    spawn

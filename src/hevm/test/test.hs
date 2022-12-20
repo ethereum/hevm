@@ -2007,6 +2007,7 @@ tests = testGroup "hevm"
         files <- recursiveList fullpaths []
         --
         let filesFiltered = filter (\file -> not $ any (\filt -> Data.List.isSubsequenceOf filt file) ignoredTests) files
+        let filesFiltered = ["solidity/test/libyul/yulOptimizerTests/fullSuite/clear_after_if_continue.yul"]
         --
         -- Takes one file which follows the Solidity Yul optimizer unit tests format,
         -- extracts both the nonoptimized and the optimized versions, and checks equivalence.

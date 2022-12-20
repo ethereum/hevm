@@ -37,6 +37,9 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 import EVM.Format (formatExpr)
 import Data.Set (Set, fromList, isSubsetOf, size)
+-- import Control.Concurrent
+import Control.Concurrent.STM (atomically, TVar, readTVarIO, readTVar, newTVarIO, writeTVar)
+import Control.Concurrent.Spawn
 
 data ProofResult a b c = Qed a | Cex b | Timeout c
   deriving (Show, Eq)
@@ -606,8 +609,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
   let
     -- sorts the differingEndStates by the number of Props. Fewer props is at the beginning.
     propSorter :: (Prop, Maybe (Set Prop, Set Prop)) -> (Prop, Maybe (Set Prop, Set Prop)) -> Ordering
-    propSorter (_, _) (_, Nothing) = Prelude.LT -- Nothing ends up last.
-    propSorter (_, Nothing) (_, Just _) = Prelude.GT
+    propSorter (_, _) (_, Nothing) = Prelude.LT      -- Nothing ends up last.
+    propSorter (_, Nothing) (_, Just _) = Prelude.GT -- Nothing ends up last.
     propSorter (_, Just (x1, y1)) (_, Just (x2, y2)) = if size x1 > size x2 && size y1 > size y2 then Prelude.LT
                                                                                                  else Prelude.GT
     diffEndStFilt = Data.List.sortBy propSorter $ filter (\(a, _) -> a /= PBool False) differingEndStates
@@ -622,31 +625,37 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
           True -> True
           False -> isSubsetOf x2 x1 && isSubsetOf y2 y1
 
-    -- recursively checks all, but skips the ones that have been proven UNSAT
-    --   by previous UNSAT results that contain a subset of propositions
-    check :: [(Prop, Maybe (Set Prop, Set Prop))] -- things to be checked
-          -> [(Set Prop, Set Prop)]               -- list of (set of props) that are known to be UNSAT
-          -> IO [(Maybe SMTCex, Prop, ProofResult () () (), Bool)]
-          -> IO [(Maybe SMTCex, Prop, ProofResult () () (), Bool)]
-    check [] _  ret = ret
-    check ((flatProp, inputProps):ax) knownUnsat ret = do
+    check :: TVar [(Set Prop, Set Prop)]           -- list of (set of props) that are known to be UNSAT
+          -> (Prop, Maybe (Set Prop, Set Prop))    -- things to be checked
+          -> IO (Maybe SMTCex, Prop, ProofResult () () (), Bool) -- Last element of tuple is to indicate known UNSAT
+    check knownUnsat (flatProp, inputProps)  = do
       let assertedProps = assertProps [flatProp]
-      -- let filename = "eq-check-" <> show i <> ".smt2"
-      -- when (debug opts) $ T.writeFile (filename) $ (TL.toStrict $ formatSMT2 assertedProps) <> "\n(check-sat)"
+          atomRead = readTVarIO
       res <- case flatProp of
         PBool False -> pure (False, Unsat)
         _ -> case inputProps of
                Nothing -> (fmap ((False),) (checkSat solvers assertedProps))
-               Just x -> if subsetAny x knownUnsat then pure (True, Unsat)
-                                                   else (fmap ((False),) (checkSat solvers assertedProps))
+               Just x -> do
+                 ku <- atomRead knownUnsat
+                 if subsetAny x ku then pure (True, Unsat)
+                                   else (fmap ((False),) (checkSat solvers assertedProps))
       case res of
-        (_, Sat x) -> check ax knownUnsat (fmap ((Just x, flatProp, Cex (), False):)ret)
+        (_, Sat x) -> pure (Just x, flatProp, Cex (), False)
         (quick, Unsat) -> case isNothing inputProps || quick of
-                            True  -> check ax knownUnsat (fmap ((Nothing, flatProp, Qed (), quick):)ret)
-                            False -> check ax (fromJust inputProps:knownUnsat) (fmap ((Nothing, flatProp, Qed (), False):)ret)
-        (_, EVM.SMT.Unknown) -> check ax knownUnsat (fmap ((Nothing, flatProp, Timeout (), False):)ret)
+                            True  -> pure (Nothing, flatProp, Qed (), quick)
+                            False -> do
+                              atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . ((++)[fromJust inputProps])
+                              pure (Nothing, flatProp, Qed (), False)
+        (_, EVM.SMT.Unknown) -> pure (Nothing, flatProp, Timeout (), False)
         (_, Error txt) -> error $ "Error while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
-  results <- check diffEndStFilt [] (pure [])
+
+    -- doAll :: [(Prop, Maybe (Set Prop, Set Prop))] -> IO [(Maybe SMTCex, Prop, ProofResult () () (), Bool)]
+    -- doAll input sh = do
+    --    wrap <- pool 6
+    --    parMapIO (wrap . (check sh)) input
+  shared <- newTVarIO []
+  results <- (flip mapConcurrently) diffEndStFilt $ \x -> check shared x
+  -- results <- (flip mapConcurrently) diffEndStFilt $ \x -> check shared x
   let useful = foldr (\(_, _, _, b) n -> if b then n+1 else n) (0::Integer) results
   putStrLn $ "Reuse of previous queries was Useful in " <> (show useful) <> " cases"
   return $ filter (\(_, _, res) -> res /= Qed ()) $ foldr (\(a,b, c, _) r -> (a,b,c):r) [] results
