@@ -37,7 +37,6 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 import EVM.Format (formatExpr)
 import Data.Set (Set, fromList, isSubsetOf, size)
--- import Control.Concurrent
 import Control.Concurrent.STM (atomically, TVar, readTVarIO, readTVar, newTVarIO, writeTVar)
 import Control.Concurrent.Spawn
 
