@@ -73,6 +73,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Language.SMT2.Syntax (SpecConstant())
 import Data.List (isSubsequenceOf)
+import GHC.Conc (getNumProcessors)
 
 main :: IO ()
 main = defaultMain tests
@@ -2046,7 +2047,8 @@ tests = testGroup "hevm"
             putStrLn "------------- END -----------------"
           Just aPrgm <- yul "" $ Data.Text.pack $ unlines filteredASym
           Just bPrgm <- yul "" $ Data.Text.pack $ unlines filteredBSym
-          withSolvers CVC5 6 (Just 3) $ \s -> do
+          procs <- getNumProcessors
+          withSolvers CVC5 (naturalFromInteger $ toInteger procs) (Just 3) $ \s -> do
           res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
           end <- getCurrentTime
           case containsA (Cex()) res of
