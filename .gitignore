@@ -1,6 +1,12 @@
+# nix
 result
 result-*
-dist-newstyle/
+
+# direnv
 .direnv/
-tag
-tags
+
+# cabal
+dist/
+dist-newstyle/
+.configured
+cabal.project.local*

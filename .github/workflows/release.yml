@@ -27,8 +27,8 @@ jobs:
             ./hevm-x86_64-linux
       - name: prepare hackage artifacts
         run: |
-          nix-shell --command "cd src/hevm && cabal sdist --builddir=${{ runner.temp }}/packages"
-          nix-shell --command "cd src/hevm && cabal haddock --builddir=${{ runner.temp }}/docs --haddock-for-hackage --haddock-option=--hyperlinked-source"
+          nix-shell --command "cabal sdist --builddir=${{ runner.temp }}/packages"
+          nix-shell --command "cabal haddock --builddir=${{ runner.temp }}/docs --haddock-for-hackage --haddock-option=--hyperlinked-source"
       - name: publish to hackage
         uses: haskell-actions/hackage-publish@v1
         with:
