@@ -288,9 +288,11 @@ common test-common
   build-depends:
     test-utils
   if os(darwin)
-     extra-libraries: c++
+    extra-libraries: c++
+    -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
+    ld-options: -Wl,-keep_dwarf_unwind
   else
-     extra-libraries: stdc++
+    extra-libraries: stdc++
 
 --- Test Suites ---
 

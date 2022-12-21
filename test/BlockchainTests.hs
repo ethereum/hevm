@@ -85,7 +85,6 @@ prepareTests = do
   putStrLn "Loading and parsing json files from ethereum-tests..."
   groups <- mapM (\f -> testGroup (makeRelative baseDir f) <$> (if any (`isInfixOf` f) ignoredFiles then pure [] else testsFromFile f)) jsonFiles
   putStrLn "Loaded."
-  -- pure $ localOption (mkTimeout (10 * 1_000_000)) $ testGroup "ethereum-tests" groups
   pure $ testGroup "ethereum-tests" groups
 
 testsFromFile :: String -> IO [TestTree]
@@ -103,14 +102,7 @@ testsFromFile file = do
       Nothing -> testCase name assertion
 
 ignoredFiles :: [String]
-ignoredFiles =
-  [ "BlockchainTests/GeneralStateTests/stCreate2/create2callPrecompiles.json"
-  , "BlockchainTests/GeneralStateTests/stPreCompiledContracts/idPrecomps.json"
-  , "BlockchainTests/GeneralStateTests/stRandom2/randomStatetest641.json"
-  , "BlockchainTests/GeneralStateTests/stRandom2/randomStatetest642.json"
-  , "BlockchainTests/GeneralStateTests/stZeroKnowledge" -- fails on macOS CI
-  , "BlockchainTests/GeneralStateTests/stQuadraticComplexityTest"
-  ]
+ignoredFiles = [ ]
 
 expectedFailures :: Map String (TestTree -> TestTree)
 expectedFailures = Map.fromList
@@ -130,16 +122,7 @@ expectedFailures = Map.fromList
   , ("loopMul_d0g0v0_London", ignoreTestBecause "slow test")
   , ("loopMul_d1g0v0_London", ignoreTestBecause "slow test")
   , ("loopMul_d2g0v0_London", ignoreTestBecause "slow test")
-  , ("Return50000_d0g1v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("Return50000_2_d0g1v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("randomStatetest177_d0g0v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("static_Call50000_d1g0v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("static_Call50000bytesContract50_1_d1g0v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("static_Call50000bytesContract50_2_d1g0v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("static_Return50000_2_d0g0v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("CALLBlake2f_MaxRounds_d0g0v0_London", ignoreTestBecause "bypasses timeout due to FFI")
-  , ("create2callPrecompiles_d4g0v0_London", ignoreTestBecause "fails on macOS only")
-  , ("create2callPrecompiles_d4g0v0_London", ignoreTestBecause "fails on macOS only")
+  , ("CALLBlake2f_MaxRounds_d0g0v0_London", ignoreTestBecause "very slow, bypasses timeout due to FFI")
   ]
 
 runVMTest :: Bool -> (String, Case) -> IO ()
