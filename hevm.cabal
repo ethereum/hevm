@@ -43,6 +43,10 @@ extra-source-files:
   test/contracts/fail/dsProveFail.sol
   test/contracts/fail/invariantFail.sol
 
+source-repository head
+  type:     git
+  location: https://github.com/ethereum/hevm.git
+
 common shared
   default-language:
     Haskell2010
