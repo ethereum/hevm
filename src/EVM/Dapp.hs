@@ -68,7 +68,7 @@ dappInfo root solcByName sources =
   let
     solcs = Map.elems solcByName
     astIds = astIdMap $ snd <$> toList (view sourceAsts sources)
-    immutables = filter ((/=) mempty . _immutableReferences) solcs
+    immutables = filter ((/=) mempty . (view immutableReferences)) solcs
 
   in DappInfo
     { _dappRoot = root

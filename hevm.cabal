@@ -40,11 +40,18 @@ extra-source-files:
   test/contracts/fail/dsProveFail.sol
   test/contracts/fail/invariantFail.sol
 
+flag ci
+  description: Sets flags for compilation in CI
+  default:     False
+  manual:      True
+
 source-repository head
   type:     git
   location: https://github.com/ethereum/hevm.git
 
 common shared
+  if flag(ci)
+    ghc-options: -Werror
   default-language:
     Haskell2010
   default-extensions:
@@ -287,6 +294,8 @@ common test-common
     test-base
   build-depends:
     test-utils
+  other-modules:
+    EVM.TestUtils
   if os(darwin)
     extra-libraries: c++
     -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829

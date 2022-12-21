@@ -47,6 +47,7 @@ module EVM.Solidity
   , sourceFiles
   , sourceLines
   , sourceAsts
+  , immutableReferences
   , stripBytecodeMetadata
   , stripBytecodeMetadataSym
   , signature
