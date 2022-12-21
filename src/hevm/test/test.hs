@@ -1693,7 +1693,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
-          assertBool "Must have a difference" (not (null a))
+          assertBool "Must have a difference" (any isCex a)
       ,
       testCase "eq-sol-exp-qed" $ do
         Just aPrgm <- solcRuntime "C"
@@ -1718,7 +1718,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
-          assertEqual "Must have no difference" [] a
+          assertEqual "Must have no difference" [Qed ()] a
           return ()
       ,
       testCase "eq-sol-exp-cex" $ do
@@ -1746,7 +1746,7 @@ tests = testGroup "hevm"
         withSolvers Z3 3 Nothing $ \s -> do
           let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 2, askSmtIters = Just 2 }
           a <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
-          assertEqual "Must be different" (containsA (Cex ()) a) True
+          assertEqual "Must be different" (containsCex a) True
           return ()
       , testCase "eq-all-yul-optimization-tests" $ do
         let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 5, askSmtIters = Just 20 }
@@ -2048,18 +2048,20 @@ tests = testGroup "hevm"
           Just aPrgm <- yul "" $ Data.Text.pack $ unlines filteredASym
           Just bPrgm <- yul "" $ Data.Text.pack $ unlines filteredBSym
           procs <- getNumProcessors
-          withSolvers CVC5 (naturalFromInteger $ toInteger procs) (Just 3) $ \s -> do
-          res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
-          end <- getCurrentTime
-          case containsA (Cex()) res of
-            False -> do
-              print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
-              let timeouts = filter (\(_, _, c) -> c == EVM.SymExec.Timeout()) res
-              unless (null timeouts) $ putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
-            True -> do
-              putStrLn $ "Not OK: " <> show f <> " Got: " <> show res
-              error "Was NOT equivalent, error"
-         )
+          withSolvers CVC5 (num procs) (Just 100) $ \s -> do
+            res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
+            end <- getCurrentTime
+            case any isCex res of
+              False -> do
+                print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
+                let timeouts = filter isTimeout res
+                unless (null timeouts) $ do
+                  putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
+                  error "Encountered timeouts, error"
+              True -> do
+                putStrLn $ "Not OK: " <> show f <> " Got: " <> show res
+                error "Was NOT equivalent, error"
+           )
     ]
   ]
   where

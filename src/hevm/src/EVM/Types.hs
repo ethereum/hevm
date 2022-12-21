@@ -14,7 +14,7 @@ import Crypto.Hash hiding (SHA256)
 import Data.Map (Map)
 import Data.Bifunctor (first)
 import Data.Char
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, foldl')
 import Data.ByteString (ByteString)
 import Data.ByteString.Base16 as BS16
 import Data.ByteString.Builder (byteStringHex, toLazyByteString)
@@ -402,6 +402,12 @@ infix 4 .==, ./=
 x .== y = PEq x y
 (./=) :: (Typeable a) => Expr a -> Expr a -> Prop
 x ./= y = PNeg (PEq x y)
+
+pand :: [Prop] -> Prop
+pand = foldl' PAnd (PBool True)
+
+por :: [Prop] -> Prop
+por = foldl' POr (PBool False)
 
 instance Eq Prop where
   PBool a == PBool b = a == b

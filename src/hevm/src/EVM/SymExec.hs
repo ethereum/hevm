@@ -6,7 +6,7 @@ module EVM.SymExec where
 import Prelude hiding (Word)
 
 import Control.Lens hiding (pre)
-import EVM hiding (Query, Revert, push)
+import EVM hiding (Query, Revert, push, bytecode, cache)
 import qualified EVM
 import EVM.Exec
 import qualified EVM.Fetch as Fetch
@@ -18,16 +18,14 @@ import qualified EVM.Stepper as Stepper
 import qualified Control.Monad.Operational as Operational
 import Control.Monad.State.Strict hiding (state)
 import EVM.Types
-import EVM.Traversals
 import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
 import Data.DoubleWord (Word256)
 import Control.Concurrent.Async
 import Data.Maybe
 import Data.List (foldl', find, sortBy)
-import Data.Vector (fromList)
-import Data.Map (lookup)
-import Data.ByteString (ByteString, null, pack)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
 import qualified Control.Monad.State.Class as State
 import Data.Bifunctor (second)
 import Data.Text (Text)
@@ -36,7 +34,8 @@ import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 import EVM.Format (formatExpr)
-import Data.Set (Set, fromList, isSubsetOf, size)
+import Data.Set (Set, isSubsetOf, size)
+import qualified Data.Set as Set
 import Control.Concurrent.STM (atomically, TVar, readTVarIO, readTVar, newTVarIO, writeTVar)
 import Control.Concurrent.Spawn
 import GHC.Conc (getNumProcessors)
@@ -44,13 +43,19 @@ import GHC.Conc (getNumProcessors)
 data ProofResult a b c = Qed a | Cex b | Timeout c
   deriving (Show, Eq)
 type VerifyResult = ProofResult (Expr End) (Expr End, SMTCex) (Expr End)
+type EquivResult = ProofResult () (SMTCex) ()
+
+isTimeout :: ProofResult a b c -> Bool
+isTimeout (Timeout _) = True
+isTimeout _ = False
+
+isCex :: ProofResult a b c -> Bool
+isCex (Cex _) = True
+isCex _ = False
 
 isQed :: ProofResult a b c -> Bool
 isQed (Qed _) = True
 isQed _ = False
-
-containsA :: Eq a => Eq b => Eq c => ProofResult a b c -> [(d , e, ProofResult a b c)] -> Bool
-containsA a lst = isJust $ Data.List.find (\(_, _, c) -> c == a) lst
 
 data VeriOpts = VeriOpts
   { simp :: Bool
@@ -269,7 +274,7 @@ maxIterationsReached vm (Just maxIter) =
   let codelocation = getCodeLocation vm
       iters = view (iterations . at codelocation . non 0) vm
   in if num maxIter <= iters
-     then view (cache . path . at (codelocation, iters - 1)) vm
+     then view (EVM.cache . path . at (codelocation, iters - 1)) vm
      else Nothing
 
 
@@ -558,34 +563,112 @@ verify solvers opts preState rpcinfo maybepost = do
       Unsat -> Qed leaf
       Error e -> error $ "Internal Error: solver responded with error: " <> show e
 
+type UnsatCache = TVar [Set Prop]
+
 -- | Compares two contract runtimes for trace equivalence by running two VMs and comparing the end states.
-equivalenceCheck :: SolverGroup -> ByteString -> ByteString -> VeriOpts -> Maybe (Text, [AbiType]) -> IO [(Maybe SMTCex, Prop, ProofResult () () ())]
+--
+-- We do this by asking the solver to find a common input for each pair of endstates that satisfies the path
+-- conditions for both sides and produces a differing output. If we can find such an input, then we have a clear
+-- equivalence break, and since we run this check for every pair of end states, the check is exhaustive.
+equivalenceCheck :: SolverGroup -> ByteString -> ByteString -> VeriOpts -> Maybe (Text, [AbiType]) -> IO [EquivResult]
 equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
-  let
-    bytecodeA' = if Data.ByteString.null bytecodeA then Data.ByteString.pack [0] else bytecodeA
-    bytecodeB' = if Data.ByteString.null bytecodeB then Data.ByteString.pack [0] else bytecodeB
-    preStateA = abstractVM signature' [] bytecodeA' Nothing SymbolicS
-    preStateB = abstractVM signature' [] bytecodeB' Nothing SymbolicS
+  case bytecodeA == bytecodeB of
+    True -> do
+      putStrLn "bytecodeA and bytecodeB are identical"
+      pure [Qed ()]
+    False -> do
+      branchesA <- getBranches bytecodeA
+      branchesB <- getBranches bytecodeB
+      let allPairs = [(a,b) | a <- branchesA, b <- branchesB]
+      putStrLn $ "Found " <> (show $ length allPairs) <> " total pairs of endstates"
 
-  aExpr <- evalStateT (interpret (Fetch.oracle solvers Nothing) (maxIter opts) (askSmtIters opts) runExpr) preStateA
-  bExpr <- evalStateT (interpret (Fetch.oracle solvers Nothing) (maxIter opts) (askSmtIters opts) runExpr) preStateB
-  aExprSimp <- if (simp opts) then (pure $ Expr.simplify aExpr) else pure aExpr
-  bExprSimp <- if (simp opts) then (pure $ Expr.simplify bExpr) else pure bExpr
-  when (debug opts) $ putStrLn $ "num of aExprSimp endstates:" <> (show $ length $ flattenExpr aExprSimp) <> "\nnum of bExprSimp endstates:" <> (show $ length $ flattenExpr bExprSimp)
+      when (debug opts) $ putStrLn
+                        $ "endstates in bytecodeA: " <> (show $ length branchesA)
+                       <> "\nendstates in bytecodeB: " <> (show $ length branchesB)
 
-  -- Check each pair of end states for equality:
-  let
-    differingEndStates = uncurry distinct <$> [(a,b) | a <- flattenExpr aExprSimp, b <- flattenExpr bExprSimp]
-    distinct :: ([Prop], Expr End) -> ([Prop], Expr End) -> (Prop, Maybe (Set Prop, Set Prop))
+      let differingEndStates = sortBySize (mapMaybe (uncurry distinct) allPairs)
+
+      putStrLn $ "Asking the SMT solver for " <> (show $ length differingEndStates) <> " pairs"
+      when (debug opts) $ forM_ (zip differingEndStates [(1::Integer)..]) (\(x, i) ->
+        T.writeFile ("prop-checked-" <> show i) (T.pack $ show x))
+
+      knownUnsat <- newTVarIO []
+      procs <- getNumProcessors
+      results <- checkAll differingEndStates knownUnsat procs
+
+      let useful = foldr (\(_, b) n -> if b then n+1 else n) (0::Integer) results
+      putStrLn $ "Reuse of previous queries was Useful in " <> (show useful) <> " cases"
+      case all isQed . fmap fst $ results of
+        True -> pure [Qed ()]
+        False -> pure $ filter (/= Qed ()) . fmap fst $ results
+  where
+    -- we order the sets by size because this gives us more cache hits when
+    -- running our queries later on (since we rely on a subset check)
+    sortBySize :: [Set a] -> [Set a]
+    sortBySize = sortBy (\a b -> if size a > size b then Prelude.LT else Prelude.GT)
+
+    -- returns True if a is a subset of any of the sets in b
+    subsetAny :: Set Prop -> [Set Prop] -> Bool
+    subsetAny a b = foldr (\bp acc -> acc || isSubsetOf a bp) False b
+
+    -- decompiles the given bytecode into a list of branches
+    getBranches :: ByteString -> IO [([Prop], Expr End)]
+    getBranches bs = do
+      let
+        bytecode = if BS.null bs then BS.pack [0] else bs
+        prestate = abstractVM signature' [] bytecode Nothing SymbolicS
+      expr <- evalStateT (interpret (Fetch.oracle solvers Nothing) (maxIter opts) (askSmtIters opts) runExpr) prestate
+      let simpl = if (simp opts) then (Expr.simplify expr) else expr
+      pure $ flattenExpr simpl
+
+    -- checks for satisfiability of all the props in the provided set. skips
+    -- the solver if we can determine unsatisfiability from the cache already
+    -- the last element of the returned tuple indicates whether the cache was
+    -- used or not
+    check :: UnsatCache -> Set Prop -> IO (EquivResult, Bool)
+    check knownUnsat props = do
+      let smt = assertProps $ Set.toList props
+      ku <- readTVarIO knownUnsat
+      res <- if subsetAny props ku
+             then pure (True, Unsat)
+             else (fmap ((False),) (checkSat solvers smt))
+      case res of
+        (_, Sat x) -> pure (Cex x, False)
+        (quick, Unsat) -> case quick of
+                            True  -> pure (Qed (), quick)
+                            False -> do
+                              -- nb: we might end up with duplicates here due to a
+                              -- potential race, but it doesn't matter for correctness
+                              atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
+                              pure (Qed (), False)
+        (_, EVM.SMT.Unknown) -> pure (Timeout (), False)
+        (_, Error txt) -> error $ "Error while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
+
+    -- Allows us to run it in parallel. Note that this (seems to) run it
+    -- from left-to-right, and with a max of K threads. This is in contrast to
+    -- mapConcurrently which would spawn as many threads as there are jobs, and
+    -- run them in a random order. We ordered them correctly, though so that'd be bad
+    checkAll :: [(Set Prop)] -> UnsatCache -> Int -> IO [(EquivResult, Bool)]
+    checkAll input cache numproc = do
+       wrap <- pool numproc
+       parMapIO (wrap . (check cache)) input
+
+    -- Takes two branches and returns a set of props that will need to be
+    -- satisfied for the two branches to violate the equivalence check. i.e.
+    -- for a given pair of branches, equivalence is violated if there exists an
+    -- input that satisfies the branch conditions from both sides and produces
+    -- a differing result in each branch
+    distinct :: ([Prop], Expr End) -> ([Prop], Expr End) -> Maybe (Set Prop)
     distinct (aProps, aEnd) (bProps, bEnd) =
       let
         differingResults = case (aEnd, bEnd) of
           (Return _ aOut aStore, Return _ bOut bStore) ->
-            if aOut == bOut && aStore == bStore then PBool False
-                                                else aStore ./= bStore  .|| aOut ./= bOut
+            if aOut == bOut && aStore == bStore
+            then PBool False
+            else aStore ./= bStore .|| aOut ./= bOut
           (Return {}, _) -> PBool True
           (_, Return {}) -> PBool True
-          (Revert _ a, Revert _ b) -> if a==b then PBool False else a ./= b
+          (Revert _ a, Revert _ b) -> if a == b then PBool False else a ./= b
           (Revert _ _, _) -> PBool True
           (_, Revert _ _) -> PBool True
           (Invalid _, Invalid _) -> PBool False
@@ -594,78 +677,21 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
           (EVM.Types.StackLimitExceeded _, EVM.Types.StackLimitExceeded _ ) -> PBool False
           (EVM.Types.StackLimitExceeded _, _) -> PBool True
           (_, EVM.Types.StackLimitExceeded _) -> PBool True
-          (a, b) -> if a == b then PBool False
-                              else error $ "Unimplemented, see TODO about EVM failures and TmpExpr. Left: " <> show a <> " Right: " <> show b
-
-      -- if the SMT solver can find a common input that satisfies BOTH sets of path conditions
-      -- AND the output differs, then we are in trouble. We do this for _every_ pair of paths, which
-      -- makes this exhaustive
-      in
-      case differingResults of
-        PBool False -> (PBool False, Nothing)
-        PBool True  -> ((foldl PAnd (PBool True) aProps) .&& (foldl PAnd (PBool True) bProps), Just (Data.Set.fromList aProps, Data.Set.fromList bProps))
-        _ -> ((foldl PAnd (PBool True) aProps) .&& (foldl PAnd (PBool True) bProps) .&& differingResults, Nothing)
-
-  let
-    -- sorts the differingEndStates by the number of Props. Fewer props is at the beginning.
-    propSorter :: (Prop, Maybe (Set Prop, Set Prop)) -> (Prop, Maybe (Set Prop, Set Prop)) -> Ordering
-    propSorter (_, _) (_, Nothing) = Prelude.LT      -- Nothing ends up last.
-    propSorter (_, Nothing) (_, Just _) = Prelude.GT -- Nothing ends up last.
-    propSorter (_, Just (x1, y1)) (_, Just (x2, y2)) = if size x1 > size x2 && size y1 > size y2 then Prelude.LT
-                                                                                                 else Prelude.GT
-    diffEndStFilt = Data.List.sortBy propSorter $ filter (\(a, _) -> a /= PBool False) differingEndStates
-  putStrLn $ "Equivalence checking " <> (show $ length diffEndStFilt) <> " combinations"
-  when (debug opts) $ forM_ (zip diffEndStFilt [(1::Integer)..]) (\(x, i) -> T.writeFile ("prop-checked-" <> show i) (T.pack $ show x))
-  let
-    subsetAny :: (Set Prop, Set Prop) -> [(Set Prop, Set Prop)] -> Bool
-    subsetAny a b = foldr (subset a) False b
-      where
-        subset :: (Set Prop, Set Prop) -> (Set Prop, Set Prop) -> Bool -> Bool
-        subset (x1, y1) (x2, y2) val = case val of
-          True -> True
-          False -> isSubsetOf x2 x1 && isSubsetOf y2 y1
-
-    check :: TVar [(Set Prop, Set Prop)]           -- list of (set of props) that are known to be UNSAT
-          -> (Prop, Maybe (Set Prop, Set Prop))    -- things to be checked
-          -> IO (Maybe SMTCex, Prop, ProofResult () () (), Bool) -- Last element of tuple is to indicate known UNSAT
-    check knownUnsat (flatProp, inputProps)  = do
-      let assertedProps = assertProps [flatProp]
-          atomRead = readTVarIO
-      res <- case flatProp of
-        PBool False -> pure (False, Unsat)
-        _ -> case inputProps of
-               Nothing -> (fmap ((False),) (checkSat solvers assertedProps))
-               Just x -> do
-                 ku <- atomRead knownUnsat
-                 if subsetAny x ku then pure (True, Unsat)
-                                   else (fmap ((False),) (checkSat solvers assertedProps))
-      case res of
-        (_, Sat x) -> pure (Just x, flatProp, Cex (), False)
-        (quick, Unsat) -> case isNothing inputProps || quick of
-                            True  -> pure (Nothing, flatProp, Qed (), quick)
-                            False -> do
-                              atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . ((++)[fromJust inputProps])
-                              pure (Nothing, flatProp, Qed (), False)
-        (_, EVM.SMT.Unknown) -> pure (Nothing, flatProp, Timeout (), False)
-        (_, Error txt) -> error $ "Error while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
-
-    -- Allows us to run it in parallel. Note that this (seems to) run it
-    -- from left-to-right, and with a max of K threads. This is in contrast to
-    -- mapConcurrently which would spawn as many threads as there are jobs, and
-    -- run them in a random order. We ordered them correctly, though so that'd be bad
-    doAll :: [(Prop, Maybe (Set Prop, Set Prop))]
-             -> TVar [(Set Prop, Set Prop)]
-             -> Int
-             -> IO [(Maybe SMTCex, Prop, ProofResult () () (), Bool)]
-    doAll input sh numproc = do
-       wrap <- pool numproc
-       parMapIO (wrap . (check sh)) input
-  sharedKnownUnsat <- newTVarIO []
-  procs <- getNumProcessors
-  results <- doAll diffEndStFilt sharedKnownUnsat procs
-  let useful = foldr (\(_, _, _, b) n -> if b then n+1 else n) (0::Integer) results
-  putStrLn $ "Reuse of previous queries was Useful in " <> (show useful) <> " cases"
-  return $ filter (\(_, _, res) -> res /= Qed ()) $ foldr (\(a,b, c, _) r -> (a,b,c):r) [] results
+          (a, b) -> if a == b
+                    then PBool False
+                    else error $ "Internal Error: Unimplemented. Left: " <> show a <> " Right: " <> show b
+      in case differingResults of
+        -- if the end states are the same, then they can never produce a
+        -- different result under any circumstances
+        PBool False -> Nothing
+        -- if we can statically determine that the end states differ, then we
+        -- ask the solver to find us inputs that satisfy both sets of branch
+        -- conditions
+        PBool True  -> Just . Set.fromList $ aProps <> bProps
+        -- if we cannot statically determine whether or not the end states
+        -- differ, then we ask the solver if the end states can differ if both
+        -- sets of path conditions are satisfiable
+        _ -> Just . Set.fromList $ differingResults : aProps <> bProps
 
 both' :: (a -> b) -> (a, a) -> (b, b)
 both' f (x, y) = (f x, f y)
