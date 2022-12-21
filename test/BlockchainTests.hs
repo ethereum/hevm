@@ -1,5 +1,4 @@
 {-# Language ImportQualifiedPost #-}
-{-# Language NumericUnderscores #-}
 {-# Language TupleSections #-}
 
 module Main where
@@ -18,7 +17,6 @@ import EVM.SMT (withSolvers, Solver(Z3))
 import EVM.Transaction
 import EVM.TTY qualified as TTY
 import EVM.Types
-import Paths_hevm qualified
 
 import Control.Arrow ((***), (&&&))
 import Control.Lens
@@ -35,7 +33,7 @@ import Data.Map qualified as Map
 import Data.Maybe (fromMaybe, isNothing, isJust)
 import Data.Vector qualified as V
 import Data.Word (Word64)
-import System.Environment (lookupEnv)
+import System.Environment (lookupEnv, getEnv)
 import System.FilePath.Find qualified as Find
 import System.FilePath.Posix (makeRelative, (</>))
 import Witherable (Filterable, catMaybes)
@@ -78,15 +76,14 @@ main = do
 
 prepareTests :: IO TestTree
 prepareTests = do
-  cwd <- Paths_hevm.getDataDir
-  let baseDir = cwd </> "test/ethereum-tests"
+  repo <- getEnv "HEVM_ETHEREUM_TESTS_REPO"
   let testsDir = "BlockchainTests/GeneralStateTests"
-  let dir = baseDir </> testsDir
+  let dir = repo </> testsDir
   jsonFiles <- Find.find Find.always (Find.extension Find.==? ".json") dir
   putStrLn "Loading and parsing json files from ethereum-tests..."
   isCI <- isJust <$> lookupEnv "CI"
   let problematicTests = if isCI then commonProblematicTests <> ciProblematicTests else commonProblematicTests
-  groups <- mapM (\f -> testGroup (makeRelative baseDir f) <$> (if any (`isInfixOf` f) ignoredFiles then pure [] else testsFromFile f problematicTests)) jsonFiles
+  groups <- mapM (\f -> testGroup (makeRelative repo f) <$> (if any (`isInfixOf` f) ignoredFiles then pure [] else testsFromFile f problematicTests)) jsonFiles
   putStrLn "Loaded."
   pure $ testGroup "ethereum-tests" groups
 
@@ -151,14 +148,12 @@ runVMTest diffmode (_name, x) =
     Nothing -> pure ()
 
 -- | Example usage:
--- | $ cabal new-repl test
--- | ghci> import BlockchainTests
+-- | $ cabal new-repl ethereum-tests
 -- | ghci> debugVMTest "BlockchainTests/GeneralStateTests/VMTests/vmArithmeticTest/twoOps.json" "twoOps_d0g0v0_London"
 debugVMTest :: String -> String -> IO ()
 debugVMTest file test = do
-  cwd <- Paths_hevm.getDataDir
-  let baseDir = cwd </> "test/ethereum-tests"
-  Right allTests <- parseBCSuite <$> LazyByteString.readFile (baseDir </> file)
+  repo <- getEnv "HEVM_ETHEREUM_TESTS_REPO"
+  Right allTests <- parseBCSuite <$> LazyByteString.readFile (repo </> file)
   let [(_, x)] = filter (\(name, _) -> name == test) $ Map.toList allTests
   let vm0 = vmForCase x
   result <- withSolvers Z3 0 Nothing $ \solvers ->
