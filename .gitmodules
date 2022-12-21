@@ -1,3 +1,3 @@
-[submodule "src/hevm/test/ethereum-tests"]
-	path = src/hevm/test/ethereum-tests
+[submodule "test/ethereum-tests"]
+	path = test/ethereum-tests
 	url = https://github.com/ethereum/tests
