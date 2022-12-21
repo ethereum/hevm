@@ -32,9 +32,10 @@ import Data.ByteString.Lazy qualified as LazyByteString
 import Data.List (isInfixOf)
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (fromMaybe, isNothing, isJust)
 import Data.Vector qualified as V
 import Data.Word (Word64)
+import System.Environment (lookupEnv)
 import System.FilePath.Find qualified as Find
 import System.FilePath.Posix (makeRelative, (</>))
 import Witherable (Filterable, catMaybes)
@@ -83,12 +84,14 @@ prepareTests = do
   let dir = baseDir </> testsDir
   jsonFiles <- Find.find Find.always (Find.extension Find.==? ".json") dir
   putStrLn "Loading and parsing json files from ethereum-tests..."
-  groups <- mapM (\f -> testGroup (makeRelative baseDir f) <$> (if any (`isInfixOf` f) ignoredFiles then pure [] else testsFromFile f)) jsonFiles
+  isCI <- isJust <$> lookupEnv "CI"
+  let problematicTests = if isCI then commonProblematicTests <> ciProblematicTests else commonProblematicTests
+  groups <- mapM (\f -> testGroup (makeRelative baseDir f) <$> (if any (`isInfixOf` f) ignoredFiles then pure [] else testsFromFile f problematicTests)) jsonFiles
   putStrLn "Loaded."
   pure $ testGroup "ethereum-tests" groups
 
-testsFromFile :: String -> IO [TestTree]
-testsFromFile file = do
+testsFromFile :: String -> Map String (TestTree -> TestTree) -> IO [TestTree]
+testsFromFile file problematicTests = do
   parsed <- parseBCSuite <$> LazyByteString.readFile file
   case parsed of
    Left "No cases to check." -> pure [] -- error "no-cases ok"
@@ -97,32 +100,44 @@ testsFromFile file = do
      (\(name, x) -> testCase' name $ runVMTest False (name, x)) <$> Map.toList allTests
   where
   testCase' name assertion =
-    case Map.lookup name expectedFailures of
+    case Map.lookup name problematicTests of
       Just f -> f (testCase name assertion)
       Nothing -> testCase name assertion
 
 ignoredFiles :: [String]
-ignoredFiles = [ ]
+ignoredFiles = []
 
-expectedFailures :: Map String (TestTree -> TestTree)
-expectedFailures = Map.fromList
+commonProblematicTests :: Map String (TestTree -> TestTree)
+commonProblematicTests = Map.fromList
   [ ("twoOps_d0g0v0_London", expectFailBecause "TODO: regression")
   , ("sar_2^256-1_0_d0g0v0_London", expectFailBecause "TODO: regression")
   , ("shiftCombinations_d0g0v0_London", expectFailBecause "TODO: regression")
   , ("shiftSignedCombinations_d0g0v0_London", expectFailBecause "TODO: regression")
   , ("bufferSrcOffset_d14g0v0_London", expectFailBecause "TODO: regression")
   , ("bufferSrcOffset_d38g0v0_London", expectFailBecause "TODO: regression")
-  , ("loopExp_d10g0v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("loopExp_d11g0v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("loopExp_d12g0v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("loopExp_d13g0v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("loopExp_d14g0v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("loopExp_d8g0v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("loopExp_d9g0v0_London", ignoreTestBecause "slow test but sometimes passes")
-  , ("loopMul_d0g0v0_London", ignoreTestBecause "slow test")
-  , ("loopMul_d1g0v0_London", ignoreTestBecause "slow test")
-  , ("loopMul_d2g0v0_London", ignoreTestBecause "slow test")
-  , ("CALLBlake2f_MaxRounds_d0g0v0_London", ignoreTestBecause "very slow, bypasses timeout due to FFI")
+  , ("loopMul_d0g0v0_London", ignoreTestBecause "hevm is too slow")
+  , ("loopMul_d1g0v0_London", ignoreTestBecause "hevm is too slow")
+  , ("loopMul_d2g0v0_London", ignoreTestBecause "hevm is too slow")
+  , ("CALLBlake2f_MaxRounds_d0g0v0_London", ignoreTestBecause "very slow, bypasses timeout due time spent in FFI")
+  ]
+
+ciProblematicTests :: Map String (TestTree -> TestTree)
+ciProblematicTests = Map.fromList
+  [ ("Return50000_d0g1v0_London", ignoreTest)
+  , ("Return50000_2_d0g1v0_London", ignoreTest)
+  , ("randomStatetest177_d0g0v0_London", ignoreTest)
+  , ("static_Call50000_d0g0v0_London", ignoreTest)
+  , ("static_Call50000_d1g0v0_London", ignoreTest)
+  , ("static_Call50000bytesContract50_1_d1g0v0_London", ignoreTest)
+  , ("static_Call50000bytesContract50_2_d1g0v0_London", ignoreTest)
+  , ("static_Return50000_2_d0g0v0_London", ignoreTest)
+  , ("loopExp_d10g0v0_London", ignoreTest)
+  , ("loopExp_d11g0v0_London", ignoreTest)
+  , ("loopExp_d12g0v0_London", ignoreTest)
+  , ("loopExp_d13g0v0_London", ignoreTest)
+  , ("loopExp_d14g0v0_London", ignoreTest)
+  , ("loopExp_d8g0v0_London", ignoreTest)
+  , ("loopExp_d9g0v0_London", ignoreTest)
   ]
 
 runVMTest :: Bool -> (String, Case) -> IO ()
