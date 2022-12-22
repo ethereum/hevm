@@ -48,7 +48,6 @@ import EVM hiding (Query, allowFFI)
 import EVM.SymExec
 import EVM.ABI
 import EVM.Exec
-import EVM.Dapp
 import qualified EVM.Patricia as Patricia
 import EVM.Precompiled
 import EVM.RLP
@@ -60,8 +59,6 @@ import qualified EVM.Expr as Expr
 import qualified Data.Text as T
 import Data.List (isSubsequenceOf)
 import EVM.TestUtils
-
-import System.Environment (setEnv)
 
 main :: IO ()
 main = defaultMain tests

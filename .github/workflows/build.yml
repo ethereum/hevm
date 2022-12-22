@@ -22,11 +22,11 @@ jobs:
         with:
           # https://discourse.nixos.org/t/understanding-binutils-darwin-wrapper-nix-support-bad-substitution/11475/2
           nix_path: nixpkgs=channel:nixos-unstable
-      - name: run ethereum tests
-        run: nix-shell --command "cabal run ethereum-tests"
       - name: run cabal check
         run: nix-shell --pure --command "cabal check --verbose=3"
       - name: build hevm
         run: nix-build
       - name: run rpc tests
         run: nix-shell --pure --command "cabal run rpc-tests"
+      - name: run ethereum tests
+        run: nix-shell --command "cabal run ethereum-tests"

@@ -1,5 +1,5 @@
-{-# Language ImportQualifiedPost #-}
-{-# Language TupleSections #-}
+{-# LANGUAGE ImportQualifiedPost #-}
+{-# LANGUAGE TupleSections #-}
 
 module Main where
 
@@ -238,17 +238,13 @@ checkExpectedContracts vm expected =
      )
   where
   zipWithStorages = Map.mapWithKey (\addr c -> (c, lookupStorage addr))
-  lookupStorage _addr =
+  lookupStorage _ =
     case vm ^. EVM.env . EVM.storage of
-      ConcreteStore _s -> mempty -- clearZeroStorage $ fromMaybe mempty $ Map.lookup (num addr) s
+      ConcreteStore _ -> mempty -- clearZeroStorage $ fromMaybe mempty $ Map.lookup (num addr) s
       EmptyStore -> mempty
       AbstractStore -> mempty -- error "AbstractStore, should this be handled?"
       SStore {} -> mempty -- error "SStore, should this be handled?"
       GVar _ -> error "unexpected global variable"
-
--- TODO: why is this needed?
-clearZeroStorage :: Storage -> Storage
-clearZeroStorage = Map.filter (/= 0)
 
 clearStorage :: (EVM.Contract, Storage) -> (EVM.Contract, Storage)
 clearStorage (c, _) = (c, mempty)
