@@ -1,9 +1,7 @@
 -- Main file of the hevm CLI program
 
-{-# Language CPP #-}
 {-# Language DataKinds #-}
 {-# Language DeriveAnyClass #-}
-{-# Language GADTs #-}
 
 module Main where
 
@@ -16,7 +14,6 @@ import qualified EVM.Stepper
 
 import EVM.SymExec
 import EVM.Debug
-import EVM.ABI
 import qualified EVM.Expr as Expr
 import EVM.SMT
 import qualified EVM.TTY as TTY
@@ -27,37 +24,25 @@ import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContrac
 import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
 import GHC.Natural
 import EVM.Format (showTraceTree, formatExpr)
-import qualified EVM.Patricia as Patricia
-import Data.Map (Map)
 import Data.Word (Word64)
 
 import qualified EVM.Facts     as Facts
 import qualified EVM.Facts.Git as Git
 import qualified EVM.UnitTest
 
-import GHC.Stack
 import GHC.Conc
-import Control.Concurrent.Async   (async, waitCatch)
 import Control.Lens hiding (pre, passing)
 import Control.Monad              (void, when, forM_, unless)
 import Control.Monad.State.Strict (execStateT, liftIO)
 import Data.ByteString            (ByteString)
 import Data.List                  (intercalate, isSuffixOf)
 import Data.Text                  (unpack, pack)
-import Data.Text.Encoding         (encodeUtf8)
 import Data.Maybe                 (fromMaybe, fromJust, mapMaybe)
 import Data.Version               (showVersion)
 import Data.DoubleWord            (Word256)
-import System.IO                  (hFlush, stdout, stderr)
+import System.IO                  (stderr)
 import System.Directory           (withCurrentDirectory, listDirectory)
 import System.Exit                (exitFailure, exitWith, ExitCode(..))
-import System.Process             (callProcess)
-import qualified Data.Aeson        as JSON
-import qualified Data.Aeson.Types  as JSON
-import Data.Aeson (FromJSON (..), (.:))
-import Data.Aeson.Lens hiding (values)
-import qualified Data.Vector as V
-import qualified Data.ByteString.Lazy  as Lazy
 
 import qualified Data.ByteString        as ByteString
 import qualified Data.ByteString.Char8  as Char8
@@ -65,7 +50,6 @@ import qualified Data.ByteString.Lazy   as LazyByteString
 import qualified Data.Map               as Map
 import qualified Data.Text              as T
 import qualified Data.Text.IO           as T
-import qualified System.Timeout         as Timeout
 
 import qualified Paths_hevm      as Paths
 
@@ -183,17 +167,6 @@ data Command w
       , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point"
       , askSmtIterations :: w ::: Maybe Integer         <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
       }
-  | Compliance -- Run Ethereum Blockchain compliance report
-      { tests   :: w ::: String       <?> "Path to Ethereum Tests directory"
-      , group   :: w ::: Maybe String <?> "Report group to run: VM or Blockchain (default: Blockchain)"
-      , match   :: w ::: Maybe String <?> "Test case filter - only run methods matching regex"
-      , skip    :: w ::: Maybe String <?> "Test case filter - skip tests containing string"
-      , html    :: w ::: Bool         <?> "Output html report"
-      , timeout :: w ::: Maybe Int    <?> "Execution timeout (default: 10 sec.)"
-      }
-  | MerkleTest -- Insert a set of key values and check against the given root
-      { file :: w ::: String <?> "Path to .json test file"
-      }
   | Version
 
   deriving (Options.Generic)
@@ -302,25 +275,6 @@ main = do
             (False, Debug) -> liftIO $ TTY.main testOpts root testFile
             (False, JsonTrace) -> error "json traces not implemented for dappTest"
             (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) testFile
-    Compliance {} ->
-      case (group cmd) of
-        Just "Blockchain" -> launchScript "/run-blockchain-tests" cmd
-        Just "VM" -> launchScript "/run-consensus-tests" cmd
-        _ -> launchScript "/run-blockchain-tests" cmd
-    MerkleTest {} -> merkleTest cmd
-
-launchScript :: String -> Command Options.Unwrapped -> IO ()
-launchScript script cmd =
-  withCurrentDirectory (tests cmd) $ do
-    dataDir <- Paths.getDataDir
-    callProcess "bash"
-      [ dataDir ++ script
-      , "."
-      , show (html cmd)
-      , fromMaybe "" (match cmd)
-      , fromMaybe "" (skip cmd)
-      , show $ fromMaybe 10 (timeout cmd)
-      ]
 
 findJsonFile :: Maybe String -> IO String
 findJsonFile (Just s) = pure s
@@ -364,19 +318,6 @@ equivalence cmd = do
       True -> do
         putStrLn $ "Not equivalent. Counterexample(s):" <> show res
         exitFailure
-
-checkForVMErrors :: [EVM.VM] -> [String]
-checkForVMErrors [] = []
-checkForVMErrors (vm:vms) =
-  case view EVM.result vm of
-    Just (EVM.VMFailure (EVM.UnexpectedSymbolicArg pc msg _)) ->
-      ("Unexpected symbolic argument at opcode: "
-      <> show pc
-      <> ". "
-      <> msg
-      ) : checkForVMErrors vms
-    _ ->
-      checkForVMErrors vms
 
 getSrcInfo :: Command Options.Unwrapped -> IO DappInfo
 getSrcInfo cmd =
@@ -561,65 +502,6 @@ launchExec cmd = do
       _ -> error "TODO"
      where block' = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber (block cmd)
            rpcinfo = (,) block' <$> rpc cmd
-
-data Testcase = Testcase {
-  _entries :: [(Text, Maybe Text)],
-  _root :: Text
-} deriving Show
-
-parseTups :: JSON.Value -> JSON.Parser [(Text, Maybe Text)]
-parseTups (JSON.Array arr) = do
-  tupList <- mapM parseJSON (V.toList arr)
-  mapM (\[k, v] -> do
-                  rhs <- parseJSON v
-                  lhs <- parseJSON k
-                  return (lhs, rhs))
-         tupList
-parseTups invalid = JSON.typeMismatch "Malformed array" invalid
-
-
-parseTrieTest :: JSON.Object -> JSON.Parser Testcase
-parseTrieTest p = do
-  kvlist <- p .: "in"
-  entries <- parseTups kvlist
-  root <- p .: "root"
-  return $ Testcase entries root
-
-instance FromJSON Testcase where
-  parseJSON (JSON.Object p) = parseTrieTest p
-  parseJSON invalid = JSON.typeMismatch "Merkle test case" invalid
-
-parseTrieTests :: Lazy.ByteString -> Either String (Map String Testcase)
-parseTrieTests = JSON.eitherDecode'
-
-merkleTest :: Command Options.Unwrapped -> IO ()
-merkleTest cmd = do
-  parsed <- parseTrieTests <$> LazyByteString.readFile (file cmd)
-  case parsed of
-    Left err -> print err
-    Right testcases -> mapM_ runMerkleTest testcases
-
-runMerkleTest :: Testcase -> IO ()
-runMerkleTest (Testcase entries root) =
-  case Patricia.calcRoot entries' of
-    Nothing ->
-      error "Test case failed"
-    Just n ->
-      case n == strip0x (hexText root) of
-        True ->
-          putStrLn "Test case success"
-        False ->
-          error ("Test case failure; expected " <> show root
-                 <> " but got " <> show (ByteStringS n))
-  where entries' = fmap (\(k, v) ->
-                           (tohexOrText k,
-                            tohexOrText (fromMaybe mempty v)))
-                   entries
-
-tohexOrText :: Text -> ByteString
-tohexOrText s = case "0x" `Char8.isPrefixOf` encodeUtf8 s of
-                  True -> hexText s
-                  False -> encodeUtf8 s
 
 -- | Creates a (concrete) VM from command line options
 vmFromCommand :: Command Options.Unwrapped -> IO EVM.VM
@@ -806,18 +688,3 @@ symvmFromCommand cmd calldata' = do
     word f def = fromMaybe def (f cmd)
     addr f def = fromMaybe def (f cmd)
     word64 f def = fromMaybe def (f cmd)
-
-parseAbi :: (AsValue s) => s -> (Text, [AbiType])
-parseAbi abijson =
-  (signature abijson, snd
-    <$> parseMethodInput
-    <$> V.toList
-      (fromMaybe (error "Malformed function abi") (abijson ^? key "inputs" . _Array)))
-
-abiencode :: (AsValue s) => Maybe s -> [String] -> ByteString
-abiencode Nothing _ = error "missing required argument: abi"
-abiencode (Just abijson) args =
-  let (sig', declarations) = parseAbi abijson
-  in if length declarations == length args
-     then abiMethod sig' $ AbiTuple . V.fromList $ zipWith makeAbiValue declarations args
-     else error $ "wrong number of arguments:" <> show (length args) <> ": " <> show args
