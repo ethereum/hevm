@@ -83,6 +83,7 @@ prepareTests = do
   putStrLn "Loading and parsing json files from ethereum-tests..."
   isCI <- isJust <$> lookupEnv "CI"
   let problematicTests = if isCI then commonProblematicTests <> ciProblematicTests else commonProblematicTests
+  let ignoredFiles = if isCI then ciIgnoredFiles else []
   groups <- mapM (\f -> testGroup (makeRelative repo f) <$> (if any (`isInfixOf` f) ignoredFiles then pure [] else testsFromFile f problematicTests)) jsonFiles
   putStrLn "Loaded."
   pure $ testGroup "ethereum-tests" groups
@@ -101,8 +102,13 @@ testsFromFile file problematicTests = do
       Just f -> f (testCase name assertion)
       Nothing -> testCase name assertion
 
-ignoredFiles :: [String]
-ignoredFiles = []
+-- CI has issues with some heaver tests, disable in bulk
+ciIgnoredFiles :: [String]
+ciIgnoredFiles =
+  [ "BlockchainTests/GeneralStateTests/VMTests/vmPerformance"
+  , "BlockchainTests/GeneralStateTests/stQuadraticComplexityTest"
+  , "BlockchainTests/GeneralStateTests/stStaticCall"
+  ]
 
 commonProblematicTests :: Map String (TestTree -> TestTree)
 commonProblematicTests = Map.fromList
