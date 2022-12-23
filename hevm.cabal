@@ -22,9 +22,6 @@ category:
   Ethereum
 build-type:
   Simple
-data-files:
-  run-blockchain-tests
-  run-consensus-tests
 extra-source-files:
   CHANGELOG.md
   test/contracts/lib/test.sol
@@ -110,7 +107,6 @@ library
     EVM.TTYCenteredList,
     EVM.Types,
     EVM.UnitTest,
-    EVM.VMTest
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -251,12 +247,15 @@ common test-base
     HUnit >= 1.6,
     QuickCheck,
     quickcheck-instances,
+    aeson,
     base,
     base16-bytestring,
     binary,
     containers,
     directory,
     bytestring,
+    filemanip,
+    filepath,
     here,
     hevm,
     lens,
@@ -274,6 +273,7 @@ common test-base
     time,
     array,
     vector,
+    witherable,
     smt2-parser >= 0.1.0.1
 
 library test-utils
@@ -288,9 +288,11 @@ common test-common
   build-depends:
     test-utils
   if os(darwin)
-     extra-libraries: c++
+    extra-libraries: c++
+    -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
+    ld-options: -Wl,-keep_dwarf_unwind
   else
-     extra-libraries: stdc++
+    extra-libraries: stdc++
 
 --- Test Suites ---
 
@@ -311,3 +313,11 @@ test-suite rpc-tests
     exitcode-stdio-1.0
   main-is:
     rpc.hs
+
+test-suite ethereum-tests
+  import:
+    test-common
+  type:
+    exitcode-stdio-1.0
+  main-is:
+    BlockchainTests.hs

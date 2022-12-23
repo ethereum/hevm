@@ -12,9 +12,13 @@
       url = "github:ethereum/solidity/1c8745c54a239d20b6fb0f79a8bd2628d779b27e";
       flake = false;
     };
+    ethereum-tests = {
+      url = "github:ethereum/tests/v11.2";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, solidity, ... }:
+  outputs = { self, nixpkgs, flake-utils, solidity, ethereum-tests, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -49,6 +53,7 @@
             haskell.lib.dontHaddock
           ]).overrideAttrs(final: prev: {
             HEVM_SOLIDITY_REPO = solidity;
+            HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
           });
         hevmWrapped = with pkgs; symlinkJoin {
           name = "hevm";
@@ -92,6 +97,7 @@
             # NOTE: hacks for bugged cabal new-repl
             LD_LIBRARY_PATH = libraryPath;
             HEVM_SOLIDITY_REPO = solidity;
+            HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
             shellHook = lib.optionalString stdenv.isDarwin ''
               export DYLD_LIBRARY_PATH="${libraryPath}";
             '';

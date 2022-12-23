@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "ethereum-tests": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1668955227,
+        "narHash": "sha256-t9GV1TUfXr6xwgRvCaf43oGhBLdlYJwNCmaR4rIYV1M=",
+        "owner": "ethereum",
+        "repo": "tests",
+        "rev": "a16217cff68fa587a4a8b8b008e5cf374a6086b5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ethereum",
+        "ref": "v11.2",
+        "repo": "tests",
+        "type": "github"
+      }
+    },
     "flake-compat": {
       "flake": false,
       "locked": {
@@ -48,6 +65,7 @@
     },
     "root": {
       "inputs": {
+        "ethereum-tests": "ethereum-tests",
         "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
