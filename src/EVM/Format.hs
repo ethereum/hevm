@@ -6,8 +6,10 @@ module EVM.Format
   ( formatExpr
   , contractNamePart
   , contractPathPart
+  , showError
   , showTree
   , showTraceTree
+  , showValues
   , prettyvmresult
   , showCall
   , showWordExact
