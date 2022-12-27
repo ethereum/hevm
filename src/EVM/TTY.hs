@@ -366,7 +366,7 @@ backstepUntil p = get >>= \case
 backstep
   :: (?fetcher :: Fetcher
      ,?maxIter :: Maybe Integer)
-  => UiVmState -> IO UiVmState -- EventM n UiState ()
+  => UiVmState -> IO UiVmState
 backstep s =
   case view uiStep s of
     -- We're already at the first step; ignore command.
@@ -402,7 +402,7 @@ appEvent (VtyEvent e@(V.EvKey V.KDown [])) = get >>= \case
     Brick.zoom
       (_ViewContracts . browserContractList)
       (handleListEvent e)
-    pure () -- (ViewContracts s')
+    pure ()
   ViewVm s ->
     if view uiShowMemory s then
       vScrollBy (viewportScroll TracePane) 1
