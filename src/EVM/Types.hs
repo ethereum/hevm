@@ -663,6 +663,18 @@ packNibbles [] = mempty
 packNibbles (n1:n2:ns) = BS.singleton (toByte n1 n2) <> packNibbles ns
 packNibbles _ = error "can't pack odd number of nibbles"
 
+toWord64 :: W256 -> Maybe Word64
+toWord64 n =
+  if n <= num (maxBound :: Word64)
+    then let (W256 (Word256 _ (Word128 _ n'))) = n in Just n'
+    else Nothing
+
+toInt :: W256 -> Maybe Int
+toInt n =
+  if n <= num (maxBound :: Int)
+    then let (W256 (Word256 _ (Word128 _ n'))) = n in Just (fromIntegral n')
+    else Nothing
+
 -- Keccak hashing
 
 keccakBytes :: ByteString -> ByteString

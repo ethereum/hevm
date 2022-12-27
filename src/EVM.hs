@@ -58,7 +58,6 @@ import Crypto.Hash (Digest, SHA256, RIPEMD160, digestFromByteString)
 import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
 import Crypto.PubKey.ECC.Types (getCurveByName, CurveName(..), Point(..))
 import Crypto.PubKey.ECC.Generate (generateQ)
-import Data.DoubleWord (Word256(Word256), Word128 (Word128))
 
 -- * Data types
 
@@ -2948,18 +2947,6 @@ codeloc = do
   let self = view (state . contract) vm
       loc = view (state . pc) vm
   pure (self, loc)
-
-toWord64 :: W256 -> Maybe Word64
-toWord64 n =
-  if n <= num (maxBound :: Word64)
-    then let (W256 (Word256 _ (Word128 _ n'))) = n in Just n'
-    else Nothing
-
-toInt :: W256 -> Maybe Int
-toInt n =
-  if n <= num (maxBound :: Int)
-    then let (W256 (Word256 _ (Word128 _ n'))) = n in Just (fromIntegral n')
-    else Nothing
 
 -- * Emacs setup
 
