@@ -6,7 +6,7 @@ module EVM.Fetch where
 import Prelude hiding (Word)
 
 import EVM.ABI
-import EVM.Types    (Addr, W256, hexText, Expr(Lit, LitByte), Expr(..), Prop(..), (.&&), (./=))
+import EVM.Types    (Addr, W256, hexText, Expr(Lit), Expr(..), Prop(..), (.&&), (./=))
 import EVM.SMT
 import EVM          (EVM, Contract, Block, initialContract, nonce, balance, external)
 import qualified EVM.FeeSchedule as FeeSchedule
@@ -29,7 +29,6 @@ import Network.Wreq.Session (Session)
 import System.Process
 
 import qualified Network.Wreq.Session as Session
-import qualified Data.Vector as V
 import Numeric.Natural (Natural)
 
 -- | Abstract representation of an RPC fetch request

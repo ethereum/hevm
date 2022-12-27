@@ -54,7 +54,6 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import qualified Data.Vector as V
 
 -- We treat everything as ASCII byte strings because
 -- we only use hex digits (and the letter 'x').
