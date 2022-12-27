@@ -523,7 +523,8 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
        vm <- get
        let cs = view (env . contracts) vm
            noCode c = case view contractcode c of
-             RuntimeCode c' -> null c'
+             RuntimeCode (ConcreteRuntimeCode "") -> True
+             RuntimeCode (SymbolicRuntimeCode c') -> null c'
              _ -> False
            mutable m = view methodMutability m `elem` [NonPayable, Payable]
            knownAbis :: Map Addr SolcContract
@@ -938,7 +939,7 @@ makeTxCall TestVMParams{..} (cd, cdProps) = do
   constraints %= (<> cdProps)
   assign (state . caller) (litAddr testCaller)
   assign (state . gas) testGasCall
-  origin' <- fromMaybe (initialContract (RuntimeCode mempty)) <$> use (env . contracts . at testOrigin)
+  origin' <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (env . contracts . at testOrigin)
   let originBal = view balance origin'
   when (originBal < testGasprice * (num testGasCall)) $ error "insufficient balance for gas cost"
   vm <- get
@@ -974,7 +975,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
            , vmoptAllowFFI = ffiAllowed
            }
     creator =
-      initialContract (RuntimeCode mempty)
+      initialContract (RuntimeCode (ConcreteRuntimeCode ""))
         & set nonce 1
         & set balance testBalanceCreate
   in vm

@@ -1613,7 +1613,7 @@ tests = testGroup "hevm"
             let vm = vm0
                   & set (state . callvalue) (Lit 0)
                   & over (env . contracts)
-                       (Map.insert aAddr (initialContract (RuntimeCode (fromJust $ Expr.toList $ ConcreteBuf a))))
+                       (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
                   -- NOTE: this used to as follows, but there is no _storage field in Contract record
                   -- (Map.insert aAddr (initialContract (RuntimeCode $ ConcreteBuffer a) &
                   --                     set EVM.storage (EVM.Symbolic [] store)))
@@ -2124,7 +2124,7 @@ loadVM x =
     case runState exec (vmForEthrunCreation x) of
        (VMSuccess (ConcreteBuf targetCode), vm1) -> do
          let target = view (state . contract) vm1
-             vm2 = execState (replaceCodeOfSelf (RuntimeCode (fromJust $ Expr.toList $ ConcreteBuf targetCode))) vm1
+             vm2 = execState (replaceCodeOfSelf (RuntimeCode (ConcreteRuntimeCode targetCode))) vm1
          return $ snd $ flip runState vm2
                 (do resetState
                     assign (state . gas) 0xffffffffffffffff -- kludge

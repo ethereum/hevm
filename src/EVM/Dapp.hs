@@ -2,7 +2,7 @@
 
 module EVM.Dapp where
 
-import EVM (Trace, traceContract, traceOpIx, ContractCode(..), Contract(..), codehash, contractcode)
+import EVM (Trace, traceContract, traceOpIx, ContractCode(..), Contract(..), codehash, contractcode, RuntimeCode (..))
 import EVM.ABI (Event, AbiType, SolError)
 import EVM.Debug (srcMapCodePos)
 import EVM.Solidity
@@ -176,7 +176,11 @@ findSrc c dapp = do
 lookupCode :: ContractCode -> DappInfo -> Maybe SolcContract
 lookupCode (InitCode c _) a =
   snd <$> preview (dappSolcByHash . ix (keccak' (stripBytecodeMetadata c))) a
-lookupCode (RuntimeCode c) a = let
+lookupCode (RuntimeCode (ConcreteRuntimeCode c)) a =
+  case snd <$> preview (dappSolcByHash . ix (keccak' (stripBytecodeMetadata c))) a of
+    Just x -> return x
+    Nothing -> snd <$> find (compareCode c . fst) (view dappSolcByCode a)
+lookupCode (RuntimeCode (SymbolicRuntimeCode c)) a = let
     code = BS.pack $ mapMaybe unlitByte $ V.toList c
   in case snd <$> preview (dappSolcByHash . ix (keccak' (stripBytecodeMetadata code))) a of
     Just x -> return x

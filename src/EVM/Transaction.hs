@@ -184,7 +184,7 @@ touchAccount :: Addr -> Map Addr EVM.Contract -> Map Addr EVM.Contract
 touchAccount a = Map.insertWith (flip const) a newAccount
 
 newAccount :: EVM.Contract
-newAccount = initialContract $ EVM.RuntimeCode mempty
+newAccount = initialContract $ EVM.RuntimeCode (EVM.ConcreteRuntimeCode "")
 
 -- | Increments origin nonce and pays gas deposit
 setupTx :: Addr -> Addr -> W256 -> Word64 -> Map Addr EVM.Contract -> Map Addr EVM.Contract

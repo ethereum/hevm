@@ -363,7 +363,7 @@ vat = do
 initVm :: ByteString -> VM
 initVm bs = vm
   where
-    contractCode = RuntimeCode $ V.fromList $ LitByte <$> unpack bs
+    contractCode = RuntimeCode (ConcreteRuntimeCode bs)
     c = Contract
       { _contractcode = contractCode
       , _balance      = 0

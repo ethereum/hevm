@@ -143,7 +143,7 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
   theBalance <- MaybeT $ fetch (QueryBalance addr)
 
   return $
-    initialContract (EVM.RuntimeCode (V.fromList $ LitByte <$> BS.unpack theCode))
+    initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode theCode))
       & set nonce    theNonce
       & set balance  theBalance
       & set external True
@@ -203,7 +203,7 @@ oracle solvers info q = do
     -- we generate a new array to the fetched contract here
     EVM.PleaseFetchContract addr continue -> do
       contract <- case info of
-                    Nothing -> return $ Just $ initialContract (EVM.RuntimeCode mempty)
+                    Nothing -> return $ Just $ initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode ""))
                     Just (n, url) -> fetchContractFrom n url addr
       case contract of
         Just x -> return $ continue x
