@@ -1,3 +1,5 @@
+{-# Language TupleSections #-}
+
 module EVM.Flatten (flatten) where
 
 -- This module concatenates all the imported dependencies
@@ -33,12 +35,12 @@ import qualified Data.Graph.Inductive.Query.DFS as Fgl
 import Data.SemVer (SemVerRange, parseSemVerRange)
 import qualified Data.SemVer as SemVer
 
-import Control.Monad (forM)
+import Control.Monad (forM, (>=>))
 import Data.ByteString (ByteString)
 import Data.Foldable (foldl', toList)
 import Data.List (sort, nub, (\\))
 import Data.Map (Map, (!), (!?))
-import Data.Maybe (mapMaybe, isJust, catMaybes, fromMaybe)
+import Data.Maybe (mapMaybe, isJust, fromMaybe)
 import Data.Text (Text, unpack, pack, intercalate)
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 import Text.Read (readMaybe)
@@ -210,7 +212,7 @@ flatten dapp target = do
 
 joinLicenses :: [Value] -> Text
 joinLicenses asts =
-  case nub $ mapMaybe (\ast -> getAttribute "license" ast >>= preview _String) asts of
+  case nub $ mapMaybe (getAttribute "license" >=> preview _String) asts of
     [] -> ""
     x -> "// SPDX-License-Identifier: " <> intercalate " AND " x
 
@@ -248,9 +250,9 @@ maximalPragma asts = (
         ps = filter (nodeIs "PragmaDirective") (universe ast)
 
         components :: [[Value]]
-        components = catMaybes $
-          fmap
-          ((fmap toList) . (\x -> getAttribute "literals" x >>= preview _Array))
+        components = mapMaybe
+          ((fmap toList)
+             . (getAttribute "literals" >=> preview _Array))
           ps
 
     -- Simple way to combine many SemVer ranges.  We don't actually
@@ -400,9 +402,9 @@ prefixContractAst castr cs bso ast = prefixAstNodes
                   + (BS.length $ fst $ BS.breakSubstring name' bs')
                   + (BS.length name')
               in
-                fmap ((,) pos) $ id' v
+                fmap (pos,) $ id' v
             | t `elem` ["UserDefinedTypeName", "Identifier"] =
-              fmap ((,) end) $ refDec v
+              fmap (end,) $ refDec v
             | otherwise =
                 error $ "internal error: not a contract reference: " ++ show t
 
@@ -450,15 +452,16 @@ repeated :: Eq a => [a] -> [a]
 repeated = fmap fst $ foldl' f ([], [])
   where
     f (acc, seen) x =
-      ( if (x `elem` seen) && (not $ x `elem` acc)
+      ( if (x `elem` seen) && (x `notElem` acc)
         then x : acc
         else acc
       , x : seen
       )
 
 indexed :: [(Integer, Text)] -> [(Integer, Text)]
-indexed = fst . foldl' f ([], Map.empty) -- (zip (fmap snd xs) $ replicate (length xs) 0) xs
+indexed = fst . foldl' f ([], (Map.empty :: Map Text Integer))
   where
+    f :: (Show v, Num v, Ord k) => ([(a, Text)], Map k v) -> (a, k) -> ([(a, Text)], Map k v)
     f (acc, seen) (id', n) =
       let
         count = (fromMaybe 0 $ seen !? n) + 1
