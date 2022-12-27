@@ -45,7 +45,7 @@ vmForEthrunCreation creationCode =
     , vmoptTxAccessList = mempty
     , vmoptAllowFFI = False
     }) & set (env . contracts . at ethrunAddress)
-             (Just (initialContract (RuntimeCode mempty)))
+             (Just (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
 
 exec :: MonadState VM m => m VMResult
 exec =

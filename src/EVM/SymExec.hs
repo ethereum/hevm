@@ -173,7 +173,7 @@ abstractVM typesignature concreteArgs contractCode maybepre storagemodel = final
               ConcreteS -> ConcreteStore mempty
     caller' = Caller 0
     value' = CallValue 0
-    code' = RuntimeCode $ fromJust $ Expr.toList (ConcreteBuf contractCode)
+    code' = RuntimeCode (ConcreteRuntimeCode contractCode)
     vm' = loadSymVM code' store caller' value' calldata' calldataProps
     precond = case maybepre of
                 Nothing -> []

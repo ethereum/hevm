@@ -37,7 +37,7 @@ import Control.Monad.State.Strict (execStateT, liftIO)
 import Data.ByteString            (ByteString)
 import Data.List                  (intercalate, isSuffixOf)
 import Data.Text                  (unpack, pack)
-import Data.Maybe                 (fromMaybe, fromJust, mapMaybe)
+import Data.Maybe                 (fromMaybe, mapMaybe)
 import Data.Version               (showVersion)
 import Data.DoubleWord            (Word256)
 import System.IO                  (stderr)
@@ -560,7 +560,7 @@ vmFromCommand cmd = do
         decipher = hexByteString "bytes" . strip0x
         mkCode bs = if create cmd
                     then EVM.InitCode bs mempty
-                    else EVM.RuntimeCode (fromJust $ Expr.toList (ConcreteBuf bs))
+                    else EVM.RuntimeCode (EVM.ConcreteRuntimeCode bs)
         address' = if create cmd
               then addr address (createAddress origin' (word nonce 0))
               else addr address 0xacab
@@ -656,7 +656,7 @@ symvmFromCommand cmd calldata' = do
     origin'  = addr origin 0
     mkCode bs = if create cmd
                    then EVM.InitCode bs mempty
-                   else EVM.RuntimeCode (fromJust . Expr.toList $ ConcreteBuf bs)
+                   else EVM.RuntimeCode (EVM.ConcreteRuntimeCode bs)
     address' = if create cmd
           then addr address (createAddress origin' (word nonce 0))
           else addr address 0xacab

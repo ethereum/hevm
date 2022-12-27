@@ -9,7 +9,7 @@ import EVM qualified
 import EVM (contractcode, storage, origStorage, balance, nonce, initialContract, StorageBase(..))
 import EVM.Concrete qualified as EVM
 import EVM.Dapp (emptyDapp)
-import EVM.Expr (litCode, litAddr)
+import EVM.Expr (litAddr)
 import EVM.FeeSchedule qualified
 import EVM.Fetch qualified
 import EVM.Stepper qualified
@@ -25,13 +25,13 @@ import Control.Monad.State.Strict (execStateT)
 import Data.Aeson ((.:), (.:?), FromJSON (..))
 import Data.Aeson qualified as JSON
 import Data.Aeson.Types qualified as JSON
+import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as Lazy
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.List (isInfixOf)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe, isNothing, isJust)
-import Data.Vector qualified as V
 import Data.Word (Word64)
 import System.Environment (lookupEnv, getEnv)
 import System.FilePath.Find qualified as Find
@@ -217,7 +217,7 @@ checkExpectation diff x vm = do
 -- quotient account state by nullness
 (~=) :: Map Addr (EVM.Contract, Storage) -> Map Addr (EVM.Contract, Storage) -> Bool
 (~=) cs1 cs2 =
-    let nullAccount = EVM.initialContract (EVM.RuntimeCode mempty)
+    let nullAccount = EVM.initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode ""))
         padNewAccounts cs ks = Map.union cs $ Map.fromList [(k, (nullAccount, mempty)) | k <- ks]
         padded_cs1 = padNewAccounts cs1 (Map.keys cs2)
         padded_cs2 = padNewAccounts cs2 (Map.keys cs1)
@@ -262,13 +262,13 @@ clearNonce :: (EVM.Contract, Storage) -> (EVM.Contract, Storage)
 clearNonce (c, s) = (set nonce 0 c, s)
 
 clearCode :: (EVM.Contract, Storage) -> (EVM.Contract, Storage)
-clearCode (c, s) = (set contractcode (EVM.RuntimeCode mempty) c, s)
+clearCode (c, s) = (set contractcode (EVM.RuntimeCode (EVM.ConcreteRuntimeCode "")) c, s)
 
 newtype ContractWithStorage = ContractWithStorage { unContractWithStorage :: (EVM.Contract, Storage) }
 
 instance FromJSON ContractWithStorage where
   parseJSON (JSON.Object v) = do
-    code <- (EVM.RuntimeCode . V.fromList . litCode <$> (hexText <$> v .: "code"))
+    code <- (EVM.RuntimeCode . EVM.ConcreteRuntimeCode <$> (hexText <$> v .: "code"))
     storage' <- v .: "storage"
     balance' <- v .: "balance"
     nonce'   <- v .: "nonce"
@@ -397,7 +397,7 @@ fromBlockchainCase' block tx preState postState =
             toCode = Map.lookup toAddr preState
             theCode = if isCreate
                       then EVM.InitCode (txData tx) mempty
-                      else maybe (EVM.RuntimeCode mempty) (view contractcode . fst) toCode
+                      else maybe (EVM.RuntimeCode (EVM.ConcreteRuntimeCode "")) (view contractcode . fst) toCode
             effectiveGasPrice = effectiveprice tx (blockBaseFee block)
             cd = if isCreate
                  then mempty
@@ -450,7 +450,7 @@ checkTx tx block prestate = do
       toAddr      = fromMaybe (EVM.createAddress origin senderNonce) (txToAddr tx)
       prevCode    = view (accountAt toAddr . contractcode) (Map.map fst prestate)
       prevNonce   = view (accountAt toAddr . nonce) (Map.map fst prestate)
-  if isCreate && ((case prevCode of {EVM.RuntimeCode b -> not (null b); _ -> True}) || (prevNonce /= 0))
+  if isCreate && ((case prevCode of {EVM.RuntimeCode (EVM.ConcreteRuntimeCode b) -> not (BS.null b); _ -> True}) || (prevNonce /= 0))
   then mzero
   else
     return prestate
