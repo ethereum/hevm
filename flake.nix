@@ -38,7 +38,7 @@
             }))
             (haskell.lib.compose.addTestToolDepends [ solc z3 cvc5 ])
             (haskell.lib.compose.appendConfigureFlags (
-              [ "--ghc-option=-O2" ]
+              [ "--ghc-option=-O2" "-fci" ]
               ++ lib.optionals stdenv.isLinux [
                 "--enable-executable-static"
                 "--extra-lib-dirs=${gmp.override { withStatic = true; }}/lib"

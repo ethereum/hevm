@@ -25,7 +25,6 @@ import Language.SMT2.Syntax (SpecConstant(..), GeneralRes(..), Term(..), QualIde
 import Data.Word
 import Numeric (readHex)
 import Data.ByteString (ByteString)
-import Data.Maybe (fromMaybe)
 
 import qualified Data.ByteString as BS
 import qualified Data.List as List
@@ -785,10 +784,10 @@ parseFrameCtx name = case TS.unpack name of
   t -> error $ "Internal Error: cannot parse " <> t <> " into an Expr"
 
 getVars :: (TS.Text -> Expr EWord) -> SolverInstance -> [TS.Text] -> IO (Map (Expr EWord) W256)
-getVars parseFn inst names = Map.mapKeys parseFn <$> foldM getVar mempty names
+getVars parseFn inst names = Map.mapKeys parseFn <$> foldM getOne mempty names
   where
-    getVar :: Map TS.Text W256 -> TS.Text -> IO (Map TS.Text W256)
-    getVar acc name = do
+    getOne :: Map TS.Text W256 -> TS.Text -> IO (Map TS.Text W256)
+    getOne acc name = do
       raw <- getValue inst (T.fromStrict name)
       let
         parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of

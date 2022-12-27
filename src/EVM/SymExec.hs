@@ -528,9 +528,11 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
             (Revert _ a, Revert _ b) -> if a==b then PBool False else a ./= b
             (Revert _ _, _) -> PBool True
             (_, Revert _ _) -> PBool True
+            (Failure _ erra, Failure _ errb) -> if erra==errb then PBool False else PBool True
+            (GVar _, _) -> error "Expressions cannot contain global vars"
+            (_ , GVar _) -> error "Expressions cannot contain global vars"
             (Failure _ (TmpErr s), _) -> error $ "Unhandled error: " <> s
             (_, Failure _ (TmpErr s)) -> error $ "Unhandled error: " <> s
-            (Failure _ erra, Failure _ errb) -> if erra==errb then PBool False else PBool True
             (ITE _ _ _, _ ) -> error "Expressions must be flattened"
             (_, ITE _ _ _) -> error "Expressions must be flattened"
 
