@@ -309,6 +309,9 @@ data ContractCode
   | RuntimeCode RuntimeCode -- ^ "Instance" code, after contract creation
   deriving (Show)
 
+-- | We have two variants here to optimize the fully concrete case.
+-- ConcreteRuntimeCode just wraps a ByteString
+-- SymbolicRuntimeCode is a fixed length vector of potentially symbolic bytes, which lets us handle symbolic pushdata (e.g. from immutable variables in solidity).
 data RuntimeCode
   = ConcreteRuntimeCode ByteString
   | SymbolicRuntimeCode (V.Vector (Expr Byte))
