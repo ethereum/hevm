@@ -167,7 +167,7 @@ library
     smt2-parser                       >= 0.1.0.1,
     word-wrap                         >= 0.5 && < 0.6,
     spool                             >= 0.1 && < 0.2,
-    parsec
+    parsec                            >= 3.1.15 && < 3.2,
   hs-source-dirs:
     src
 
