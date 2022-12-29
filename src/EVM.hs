@@ -2588,12 +2588,9 @@ checkJump x xs = do
   theCodeOps <- use (env . contracts . ix self . codeOps)
   theOpIxMap <- use (env . contracts . ix self . opIxMap)
   let op = case theCode of
-        InitCode ops _ ->
-          if x > BS.length ops then Nothing else Just $ BS.index ops x
-        RuntimeCode (ConcreteRuntimeCode ops) ->
-          if x > BS.length ops then Nothing else Just $ BS.index ops x
-        RuntimeCode (SymbolicRuntimeCode ops) ->
-          ops V.!? x >>= unlitByte
+        InitCode ops _ -> BS.indexMaybe ops x
+        RuntimeCode (ConcreteRuntimeCode ops) -> BS.indexMaybe ops x
+        RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= unlitByte
   case op of
     Nothing -> vmError EVM.BadJumpDestination
     Just b ->
