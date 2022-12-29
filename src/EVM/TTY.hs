@@ -403,12 +403,6 @@ appEvent (VtyEvent e@(V.EvKey V.KDown [])) = get >>= \case
       (_ViewContracts . browserContractList)
       (handleListEvent e)
     pure ()
-  ViewVm s ->
-    if view uiShowMemory s then
-      vScrollBy (viewportScroll TracePane) 1
-    else
-      when (isNothing $ view (uiVm . result) s) $
-        takeStep s (StepUntil (isNewTraceAdded s))
   _ -> pure ()
 
 -- Contracts: Up - list up
@@ -418,11 +412,6 @@ appEvent (VtyEvent e@(V.EvKey V.KUp [])) = get >>= \case
     Brick.zoom
       (_ViewContracts . browserContractList)
       (handleListEvent e)
-  ViewVm s ->
-    if view uiShowMemory s then
-      vScrollBy (viewportScroll TracePane) (-1)
-    else
-      backstepUntil isNewTraceAdded
   _ -> pure ()
 
 -- Vm Overview: Esc - return to test picker or exit
