@@ -31,7 +31,7 @@ import Data.ByteString.Lazy qualified as LazyByteString
 import Data.List (isInfixOf)
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (fromMaybe, isNothing, isJust)
+import Data.Maybe (fromJust, fromMaybe, isNothing, isJust)
 import Data.Word (Word64)
 import System.Environment (lookupEnv, getEnv)
 import System.FilePath.Find qualified as Find
@@ -160,7 +160,9 @@ debugVMTest :: String -> String -> IO ()
 debugVMTest file test = do
   repo <- getEnv "HEVM_ETHEREUM_TESTS_REPO"
   Right allTests <- parseBCSuite <$> LazyByteString.readFile (repo </> file)
-  let [(_, x)] = filter (\(name, _) -> name == test) $ Map.toList allTests
+  let x = case filter (\(name, _) -> name == test) $ Map.toList allTests of
+        [(_, x')] -> x'
+        _ -> error "test not found"
   let vm0 = vmForCase x
   result <- withSolvers Z3 0 Nothing $ \solvers ->
     TTY.runFromVM solvers Nothing Nothing emptyDapp vm0
@@ -410,24 +412,19 @@ priorityFee :: Transaction -> W256 -> W256
 priorityFee tx baseFee = let
     (txPrioMax, txMaxFee) = case txType tx of
                EIP1559Transaction ->
-                 let Just maxPrio = txMaxPriorityFeeGas tx
-                     Just maxFee = txMaxFeePerGas tx
+                 let maxPrio = fromJust $ txMaxPriorityFeeGas tx
+                     maxFee = fromJust $ txMaxFeePerGas tx
                  in (maxPrio, maxFee)
                _ ->
-                 let Just gasPrice = txGasPrice tx
+                 let gasPrice = fromJust $ txGasPrice tx
                  in (gasPrice, gasPrice)
   in min txPrioMax (txMaxFee - baseFee)
 
 maxBaseFee :: Transaction -> W256
 maxBaseFee tx =
   case txType tx of
-     EIP1559Transaction ->
-       let Just maxFee = txMaxFeePerGas tx
-       in maxFee
-     _ ->
-       let Just gasPrice = txGasPrice tx
-       in gasPrice
-
+     EIP1559Transaction -> fromJust $ txMaxFeePerGas tx
+     _ -> fromJust $ txGasPrice tx
 
 validateTx :: Transaction -> Block -> Map Addr (EVM.Contract, Storage) -> Maybe ()
 validateTx tx block cs = do

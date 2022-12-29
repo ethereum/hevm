@@ -19,7 +19,6 @@ import System.Environment
 import Prelude hiding (fail, LT, GT)
 
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BS (fromStrict)
 import qualified Data.ByteString.Base16 as Hex
 import Data.Maybe
 import Data.Typeable
@@ -329,7 +328,9 @@ tests = testGroup "hevm"
           -- traceM ("encoding: " ++ (show y) ++ " : " ++ show (abiValueType y))
           Just encoded <- runStatements [i| x = abi.encode(a);|]
             [y] AbiBytesDynamicType
-          let AbiTuple (Vector.toList -> [solidityEncoded]) = decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded)
+          let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
+                AbiTuple (Vector.toList -> [e]) -> e
+                _ -> error "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [y])
           -- traceM ("encoded (solidity): " ++ show solidityEncoded)
           -- traceM ("encoded (hevm): " ++ show (AbiBytesDynamic hevmEncoded))
@@ -340,7 +341,9 @@ tests = testGroup "hevm"
           -- traceM ("encoding: " ++ (show x') ++ ", " ++ (show y')  ++ " : " ++ show (abiValueType x') ++ ", " ++ show (abiValueType y'))
           Just encoded <- runStatements [i| x = abi.encode(a, b);|]
             [x', y'] AbiBytesDynamicType
-          let AbiTuple (Vector.toList -> [solidityEncoded]) = decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded)
+          let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
+                AbiTuple (Vector.toList -> [e]) -> e
+                _ -> error "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [x',y'])
           -- traceM ("encoded (solidity): " ++ show solidityEncoded)
           -- traceM ("encoded (hevm): " ++ show (AbiBytesDynamic hevmEncoded))
@@ -421,9 +424,9 @@ tests = testGroup "hevm"
                 |]
 
         (json, path') <- solidity' srccode
-        let Just (solc', _, _) = readJSON json
+        let (solc', _, _) = fromJust $ readJSON json
             initCode :: ByteString
-            Just initCode = solc' ^? ix (path' <> ":A") . creationCode
+            initCode = fromJust $ solc' ^? ix (path' <> ":A") . creationCode
         -- add constructor arguments
         assertEqual "constructor args screwed up metadata stripping" (stripBytecodeMetadata (initCode <> encodeAbiValue (AbiUInt 256 1))) (stripBytecodeMetadata initCode)
     ]
@@ -1036,11 +1039,15 @@ tests = testGroup "hevm"
             }
           }
           |]
-        let pre preVM = let [x, y] = getStaticAbiArgs 2 preVM
+        let pre preVM = let (x, y) = case getStaticAbiArgs 2 preVM of
+                                       [x', y'] -> (x', y')
+                                       _ -> error "expected 2 args"
                         in (x .<= Expr.add x y)
                            .&& view (state . callvalue) preVM .== Lit 0
             post prestate leaf =
-              let [x, y] = getStaticAbiArgs 2 prestate
+              let (x, y) = case getStaticAbiArgs 2 prestate of
+                             [x', y'] -> (x', y')
+                             _ -> error "expected 2 args"
               in case leaf of
                    Return _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
                    _ -> PBool True
@@ -1057,12 +1064,16 @@ tests = testGroup "hevm"
             }
           }
           |]
-        let pre preVM = let [x, y] = getStaticAbiArgs  2 preVM
+        let pre preVM = let (x, y) = case getStaticAbiArgs 2 preVM of
+                                       [x', y'] -> (x', y')
+                                       _ -> error "expected 2 args"
                         in (x .<= Expr.add x y)
                            .&& (x .== y)
                            .&& view (state . callvalue) preVM .== Lit 0
             post prestate leaf =
-              let [_, y] = getStaticAbiArgs 2 prestate
+              let (_, y) = case getStaticAbiArgs 2 prestate of
+                             [x', y'] -> (x', y')
+                             _ -> error "expected 2 args"
               in case leaf of
                    Return _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
                    _ -> PBool True
@@ -1085,7 +1096,9 @@ tests = testGroup "hevm"
           |]
         let pre vm = Lit 0 .== view (state . callvalue) vm
             post prestate leaf =
-              let [y] = getStaticAbiArgs 1 prestate
+              let y = case getStaticAbiArgs 1 prestate of
+                        [y'] -> y'
+                        _ -> error "expected 1 arg"
                   this = Expr.litAddr $ view (state . codeContract) prestate
                   prex = Expr.readStorage' this (Lit 0) (view (env . storage) prestate)
               in case leaf of
@@ -1137,7 +1150,9 @@ tests = testGroup "hevm"
             |]
           let pre vm = (Lit 0) .== view (state . callvalue) vm
               post prestate poststate =
-                let [x,y] = getStaticAbiArgs 2 prestate
+                let (x,y) = case getStaticAbiArgs 2 prestate of
+                        [x',y'] -> (x',y')
+                        _ -> error "expected 2 args"
                     this = Expr.litAddr $ view (state . codeContract) prestate
                     prestore =  view (env . storage) prestate
                     prex = Expr.readStorage' this x prestore
@@ -1169,7 +1184,9 @@ tests = testGroup "hevm"
             |]
           let pre vm = (Lit 0) .== view (state . callvalue) vm
               post prestate poststate =
-                let [x,y] = getStaticAbiArgs 2 prestate
+                let (x,y) = case getStaticAbiArgs 2 prestate of
+                        [x',y'] -> (x',y')
+                        _ -> error "expected 2 args"
                     this = Expr.litAddr $ view (state . codeContract) prestate
                     prestore =  view (env . storage) prestate
                     prex = Expr.readStorage' this x prestore
@@ -2188,7 +2205,9 @@ getStaticAbiArgs n vm =
 -- includes shaving off 4 byte function sig
 decodeAbiValues :: [AbiType] -> ByteString -> [AbiValue]
 decodeAbiValues types bs =
-  let AbiTuple xy = decodeAbiValue (AbiTupleType $ Vector.fromList types) (BS.fromStrict (BS.drop 4 bs))
+  let xy = case decodeAbiValue (AbiTupleType $ Vector.fromList types) (BS.fromStrict (BS.drop 4 bs)) of
+        AbiTuple xy' -> xy'
+        _ -> error "AbiTuple expected"
   in Vector.toList xy
 
 newtype Bytes = Bytes ByteString
