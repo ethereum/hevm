@@ -626,9 +626,8 @@ initialUiVmStateForTest opts@UnitTestOptions{..} (theContractName, theTestName) 
     cd = case test of
       SymbolicTest _ -> symCalldata theTestName types [] (AbstractBuf "txdata")
       _ -> (error "unreachable", error "unreachable")
-    Just (test, types) = find (\(test',_) -> extractSig test' == theTestName) $ unitTestMethods testContract
-    Just testContract =
-      view (dappSolcByName . at theContractName) dapp
+    (test, types) = fromJust $ find (\(test',_) -> extractSig test' == theTestName) $ unitTestMethods testContract
+    testContract = fromJust $ view (dappSolcByName . at theContractName) dapp
     vm0 =
       initialUnitTestVm opts testContract
     script = do
@@ -759,7 +758,7 @@ drawVmBrowser ui =
   ]
   where
     dapp' = dapp (view (browserVm . uiTestOpts) ui)
-    Just (_, (_, c)) = listSelectedElement (view browserContractList ui)
+    (_, (_, c)) = fromJust $ listSelectedElement (view browserContractList ui)
 --        currentContract  = view (dappSolcByHash . ix ) dapp
     maybeHash ch = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord (view codehash ch))
 

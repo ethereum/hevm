@@ -7,7 +7,7 @@ Description: Helpers for repl driven hevm hacking
 -}
 module EVM.Dev where
 
-import Data.ByteString hiding (putStrLn, writeFile, zip)
+import Data.ByteString hiding (writeFile, zip)
 import Control.Monad.State.Strict hiding (state)
 import Data.Maybe (fromJust)
 import System.Directory

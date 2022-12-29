@@ -5,6 +5,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DefaultSignatures #-}
 
+{-# OPTIONS_GHC -Wno-error=inline-rule-shadowing #-}
+
 module EVM.Types where
 
 import Prelude hiding  (Word, LT, GT)

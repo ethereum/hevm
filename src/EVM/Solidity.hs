@@ -133,7 +133,9 @@ instance Show SlotType where
 
 instance Read SlotType where
   readsPrec _ ('m':'a':'p':'p':'i':'n':'g':'(':s) =
-    let (lhs:rhs) = Text.splitOn " => " (pack s)
+    let (lhs,rhs) = case Text.splitOn " => " (pack s) of
+          (l:r) -> (l,r)
+          _ -> error "could not parse storage item"
         first = fromJust $ parseTypeName mempty lhs
         target = fromJust $ parseTypeName mempty (Text.replace ")" "" (last rhs))
         rest = fmap (fromJust . (parseTypeName mempty . (Text.replace "mapping(" ""))) (take (length rhs - 1) rhs)
@@ -305,35 +307,35 @@ readSolc fp =
 yul :: Text -> Text -> IO (Maybe ByteString)
 yul contract src = do
   (json, path) <- yul' src
-  let (Just f) = json ^?! key "contracts" ^? key (Key.fromText path)
-      (Just c) = f ^? key (Key.fromText $ if Text.null contract then "object" else contract)
+  let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
+      c = f ^?! key (Key.fromText $ if Text.null contract then "object" else contract)
       bytecode = c ^?! key "evm" ^?! key "bytecode" ^?! key "object" . _String
   pure $ toCode <$> (Just bytecode)
 
 yulRuntime :: Text -> Text -> IO (Maybe ByteString)
 yulRuntime contract src = do
   (json, path) <- yul' src
-  let (Just f) = json ^?! key "contracts" ^? key (Key.fromText path)
-      (Just c) = f ^? key (Key.fromText $ if Text.null contract then "object" else contract)
+  let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
+      c = f ^?! key (Key.fromText $ if Text.null contract then "object" else contract)
       bytecode = c ^?! key "evm" ^?! key "deployedBytecode" ^?! key "object" . _String
   pure $ toCode <$> (Just bytecode)
 
 solidity :: Text -> Text -> IO (Maybe ByteString)
 solidity contract src = do
   (json, path) <- solidity' src
-  let Just (sol, _, _) = readJSON json
+  let (sol, _, _) = fromJust $ readJSON json
   return (sol ^? ix (path <> ":" <> contract) . creationCode)
 
 solcRuntime :: Text -> Text -> IO (Maybe ByteString)
 solcRuntime contract src = do
   (json, path) <- solidity' src
-  let Just (sol, _, _) = readJSON json
+  let (sol, _, _) = fromJust $ readJSON json
   return (sol ^? ix (path <> ":" <> contract) . runtimeCode)
 
 functionAbi :: Text -> IO Method
 functionAbi f = do
   (json, path) <- solidity' ("contract ABI { function " <> f <> " public {}}")
-  let Just (sol, _, _) = readJSON json
+  let (sol, _, _) = fromJust $ readJSON json
   case Map.toList $ sol ^?! ix (path <> ":ABI") . abiMap of
      [(_,b)] -> return b
      _ -> error "hevm internal error: unexpected abi format"
@@ -690,7 +692,7 @@ stripBytecodeMetadataSym b =
     candidates = (flip Data.List.isInfixOf concretes) <$> bzzrs
   in case elemIndex True candidates of
     Nothing -> b
-    Just i -> let Just ind = infixIndex (bzzrs !! i) concretes
+    Just i -> let ind = fromJust $ infixIndex (bzzrs !! i) concretes
               in take ind b
 
 infixIndex :: (Eq a) => [a] -> [a] -> Maybe Int

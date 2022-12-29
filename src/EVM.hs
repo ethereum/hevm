@@ -28,7 +28,7 @@ import Data.ByteString              (ByteString)
 import Data.ByteString.Lazy         (fromStrict)
 import Data.Map.Strict              (Map)
 import Data.Set                     (Set, insert, member, fromList)
-import Data.Maybe                   (fromMaybe)
+import Data.Maybe                   (fromMaybe, fromJust)
 import Data.Sequence                (Seq)
 import Data.Vector.Storable         (Vector)
 import Data.Foldable                (toList)
@@ -2484,9 +2484,7 @@ withTraceLocation
   :: (MonadState VM m) => TraceData -> m Trace
 withTraceLocation x = do
   vm <- get
-  let
-    Just this =
-      currentContract vm
+  let this = fromJust $ currentContract vm
   pure Trace
     { _traceData = x
     , _traceContract = this
