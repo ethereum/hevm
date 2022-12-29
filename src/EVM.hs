@@ -1379,18 +1379,20 @@ precompiledContract this xGas precompileAddr recipient xValue inOffset inSize ou
     self <- use (state . contract)
     stk <- use (state . stack)
     pc' <- use (state . pc)
-    case stk of
-      (x:_) -> case maybeLitWord x of
-        Just 0 ->
-          return ()
-        Just 1 ->
-          fetchAccount recipient $ \_ -> do
-
-          transfer self recipient xValue
-          touchAccount self
-          touchAccount recipient
-        _ -> vmError $ UnexpectedSymbolicArg pc' "symbolic return value from precompile" [x]
-      _ -> underrun
+    result' <- use result
+    case result' of
+      Nothing -> case stk of
+        (x:_) -> case maybeLitWord x of
+          Just 0 ->
+            return ()
+          Just 1 ->
+            fetchAccount recipient $ \_ -> do
+              transfer self recipient xValue
+              touchAccount self
+              touchAccount recipient
+          _ -> vmError $ UnexpectedSymbolicArg pc' "unexpected return value from precompile" [x]
+        _ -> underrun
+      _ -> pure ()
 
 executePrecompile
   :: (?op :: Word8)
@@ -1416,32 +1418,29 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
       case preCompileAddr of
         -- ECRECOVER
         0x1 ->
-         -- TODO: support symbolic variant
-         forceConcreteBuf input "ECRECOVER" $ \input' ->
-          case EVM.Precompiled.execute 0x1 (truncpadlit 128 input') 32 of
-            Nothing -> do
-              -- return no output for invalid signature
-              assign (state . stack) (Lit 1 : xs)
-              assign (state . returndata) mempty
-              next
-            Just output -> do
-              assign (state . stack) (Lit 1 : xs)
-              assign (state . returndata) (ConcreteBuf output)
-              copyBytesToMemory (ConcreteBuf output) (Lit outSize) (Lit 0) (Lit outOffset)
-              next
+          -- TODO: support symbolic variant
+          forceConcreteBuf input "ECRECOVER" $ \input' -> do
+            case EVM.Precompiled.execute 0x1 (truncpadlit 128 input') 32 of
+              Nothing -> do
+                -- return no output for invalid signature
+                assign (state . stack) (Lit 1 : xs)
+                assign (state . returndata) mempty
+                next
+              Just output -> do
+                assign (state . stack) (Lit 1 : xs)
+                assign (state . returndata) (ConcreteBuf output)
+                copyBytesToMemory (ConcreteBuf output) (Lit outSize) (Lit 0) (Lit outOffset)
+                next
 
         -- SHA2-256
-        0x2 ->
+        0x2 -> forceConcreteBuf input "SHA2-256" $ \input' -> do
           let
-            hash = case input of
-                     ConcreteBuf input' -> sha256Buf input'
-                     _ -> WriteWord (Lit 0) (SHA256 input) mempty
+            hash = sha256Buf input'
             sha256Buf x = ConcreteBuf $ BA.convert (Crypto.hash x :: Digest SHA256)
-          in do
-            assign (state . stack) (Lit 1 : xs)
-            assign (state . returndata) hash
-            copyBytesToMemory hash (Lit outSize) (Lit 0) (Lit outOffset)
-            next
+          assign (state . stack) (Lit 1 : xs)
+          assign (state . returndata) hash
+          copyBytesToMemory hash (Lit outSize) (Lit 0) (Lit outOffset)
+          next
 
         -- RIPEMD-160
         0x3 ->
@@ -1794,11 +1793,6 @@ burn n continue = do
       continue
     else
       vmError (OutOfGas available n)
-
---forceConcreteAddr :: SAddr -> (Addr -> EVM ()) -> EVM ()
---forceConcreteAddr n continue = case maybeLitAddr n of
-  --Nothing -> vmError UnexpectedSymbolicArg
-  --Just c -> continue c
 
 forceConcrete :: Expr EWord -> String -> (W256 -> EVM ()) -> EVM ()
 forceConcrete n msg continue = case maybeLitWord n of
