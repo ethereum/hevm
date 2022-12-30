@@ -5,13 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.50.1] - 2022-12-29
 
 ## Fixed
 
 - `hevm exec` no longer fails with `hevm: No match in record selector smttimeout`
 - the `gas`, `gaslimit`, `priorityfee`, and `gasprice` cli options are now respected
 - cleaner formatting for the gas value in the visual debugger
+
+### Changed
+
+- we now build with ghc 9.2.4 by default
+- various perf improvements for concrete execution ([#157](https://github.com/ethereum/hevm/pull/157), [#152](https://github.com/ethereum/hevm/pull/152))
 
 ## [0.50.0] - 2022-12-19
 
