@@ -95,6 +95,7 @@ import System.IO.Temp
 import System.Process
 import Text.Read            (readMaybe)
 
+import qualified Data.Aeson.Key as Key
 import qualified Data.ByteString        as BS
 import qualified Data.ByteString.Base16 as BS16
 import qualified Data.HashMap.Strict    as HMap
@@ -132,7 +133,9 @@ instance Show SlotType where
 
 instance Read SlotType where
   readsPrec _ ('m':'a':'p':'p':'i':'n':'g':'(':s) =
-    let (lhs:rhs) = Text.splitOn " => " (pack s)
+    let (lhs,rhs) = case Text.splitOn " => " (pack s) of
+          (l:r) -> (l,r)
+          _ -> error "could not parse storage item"
         first = fromJust $ parseTypeName mempty lhs
         target = fromJust $ parseTypeName mempty (Text.replace ")" "" (last rhs))
         rest = fmap (fromJust . (parseTypeName mempty . (Text.replace "mapping(" ""))) (take (length rhs - 1) rhs)
@@ -304,35 +307,35 @@ readSolc fp =
 yul :: Text -> Text -> IO (Maybe ByteString)
 yul contract src = do
   (json, path) <- yul' src
-  let (Just f) = json ^?! key "contracts" ^? key path
-      (Just c) = f ^? key (if Text.null contract then "object" else contract)
+  let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
+      c = f ^?! key (Key.fromText $ if Text.null contract then "object" else contract)
       bytecode = c ^?! key "evm" ^?! key "bytecode" ^?! key "object" . _String
   pure $ toCode <$> (Just bytecode)
 
 yulRuntime :: Text -> Text -> IO (Maybe ByteString)
 yulRuntime contract src = do
   (json, path) <- yul' src
-  let (Just f) = json ^?! key "contracts" ^? key path
-      (Just c) = f ^? key (if Text.null contract then "object" else contract)
+  let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
+      c = f ^?! key (Key.fromText $ if Text.null contract then "object" else contract)
       bytecode = c ^?! key "evm" ^?! key "deployedBytecode" ^?! key "object" . _String
   pure $ toCode <$> (Just bytecode)
 
 solidity :: Text -> Text -> IO (Maybe ByteString)
 solidity contract src = do
   (json, path) <- solidity' src
-  let Just (sol, _, _) = readJSON json
+  let (sol, _, _) = fromJust $ readJSON json
   return (sol ^? ix (path <> ":" <> contract) . creationCode)
 
 solcRuntime :: Text -> Text -> IO (Maybe ByteString)
 solcRuntime contract src = do
   (json, path) <- solidity' src
-  let Just (sol, _, _) = readJSON json
+  let (sol, _, _) = fromJust $ readJSON json
   return (sol ^? ix (path <> ":" <> contract) . runtimeCode)
 
 functionAbi :: Text -> IO Method
 functionAbi f = do
   (json, path) <- solidity' ("contract ABI { function " <> f <> " public {}}")
-  let Just (sol, _, _) = readJSON json
+  let (sol, _, _) = fromJust $ readJSON json
   case Map.toList $ sol ^?! ix (path <> ":ABI") . abiMap of
      [(_,b)] -> return b
      _ -> error "hevm internal error: unexpected abi format"
@@ -348,11 +351,11 @@ readJSON json = case json ^? key "sourceList" of
 -- deprecate me soon
 readCombinedJSON :: Text -> Maybe (Map Text SolcContract, Map Text Value, [(Text, Maybe ByteString)])
 readCombinedJSON json = do
-  contracts <- f <$> (json ^? key "contracts" . _Object)
+  contracts <- f . KeyMap.toHashMapText <$> (json ^? key "contracts" . _Object)
   sources <- toList . fmap (view _String) <$> json ^? key "sourceList" . _Array
   return (contracts, Map.fromList (HMap.toList asts), [ (x, Nothing) | x <- sources])
   where
-    asts = fromMaybe (error "JSON lacks abstract syntax trees.") (json ^? key "sources" . _Object)
+    asts = KeyMap.toHashMapText $ fromMaybe (error "JSON lacks abstract syntax trees.") (json ^? key "sources" . _Object)
     f x = Map.fromList . HMap.toList $ HMap.mapWithKey g x
     g s x =
       let
@@ -379,9 +382,9 @@ readCombinedJSON json = do
 
 readStdJSON :: Text -> Maybe (Map Text SolcContract, Map Text Value, [(Text, Maybe ByteString)])
 readStdJSON json = do
-  contracts <- json ^? key "contracts" ._Object
+  contracts <- KeyMap.toHashMapText <$> json ^? key "contracts" ._Object
   -- TODO: support the general case of "urls" and "content" in the standard json
-  sources <- json ^? key "sources" . _Object
+  sources <- KeyMap.toHashMapText <$>  json ^? key "sources" . _Object
   let asts = force "JSON lacks abstract syntax trees." . preview (key "ast") <$> sources
       contractMap = f contracts
       contents src = (src, encodeUtf8 <$> HMap.lookup src (mconcat $ Map.elems $ snd <$> contractMap))
@@ -389,7 +392,7 @@ readStdJSON json = do
   where
     f :: (AsValue s) => HMap.HashMap Text s -> (Map Text (SolcContract, (HMap.HashMap Text Text)))
     f x = Map.fromList . (concatMap g) . HMap.toList $ x
-    g (s, x) = h s <$> HMap.toList (view _Object x)
+    g (s, x) = h s <$> HMap.toList (KeyMap.toHashMapText (view _Object x))
     h :: Text -> (Text, Value) -> (Text, (SolcContract, HMap.HashMap Text Text))
     h s (c, x) =
       let
@@ -400,7 +403,7 @@ readStdJSON json = do
         theCreationCode = toCode $ fromMaybe "" $ creation ^? key "object" . _String
         srcContents :: Maybe (HMap.HashMap Text Text)
         srcContents = do metadata <- x ^? key "metadata" . _String
-                         srcs <- metadata ^? key "sources" . _Object
+                         srcs <- KeyMap.toHashMapText <$> metadata ^? key "sources" . _Object
                          return $ (view (key "content" . _String)) <$> (HMap.filter (isJust . preview (key "content")) srcs)
         abis = force ("abi key not found in " <> show x) $
           toList <$> x ^? key "abi" . _Array
@@ -499,7 +502,7 @@ mkStorageLayout (Just json) = do
     do name <- item ^? key "label" . _String
        offset <- item ^? key "offset" . _Number >>= toBoundedInteger
        slot <- item ^? key "slot" . _String
-       typ <- item ^? key "type" . _String
+       typ <- Key.fromText <$> item ^? key "type" . _String
        slotType <- types ^?! key typ ^? key "label" . _String
        return (name, StorageItem (read $ Text.unpack slotType) offset (read $ Text.unpack slot)))
 
@@ -689,7 +692,7 @@ stripBytecodeMetadataSym b =
     candidates = (flip Data.List.isInfixOf concretes) <$> bzzrs
   in case elemIndex True candidates of
     Nothing -> b
-    Just i -> let Just ind = infixIndex (bzzrs !! i) concretes
+    Just i -> let ind = fromJust $ infixIndex (bzzrs !! i) concretes
               in take ind b
 
 infixIndex :: (Eq a) => [a] -> [a] -> Maybe Int

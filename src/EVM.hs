@@ -28,7 +28,7 @@ import Data.ByteString              (ByteString)
 import Data.ByteString.Lazy         (fromStrict)
 import Data.Map.Strict              (Map)
 import Data.Set                     (Set, insert, member, fromList)
-import Data.Maybe                   (fromMaybe)
+import Data.Maybe                   (fromMaybe, fromJust)
 import Data.Sequence                (Seq)
 import Data.Vector.Storable         (Vector)
 import Data.Foldable                (toList)
@@ -2484,9 +2484,7 @@ withTraceLocation
   :: (MonadState VM m) => TraceData -> m Trace
 withTraceLocation x = do
   vm <- get
-  let
-    Just this =
-      currentContract vm
+  let this = fromJust $ currentContract vm
   pure Trace
     { _traceData = x
     , _traceContract = this
@@ -2590,12 +2588,9 @@ checkJump x xs = do
   theCodeOps <- use (env . contracts . ix self . codeOps)
   theOpIxMap <- use (env . contracts . ix self . opIxMap)
   let op = case theCode of
-        InitCode ops _ ->
-          if x > BS.length ops then Nothing else Just $ BS.index ops x
-        RuntimeCode (ConcreteRuntimeCode ops) ->
-          if x > BS.length ops then Nothing else Just $ BS.index ops x
-        RuntimeCode (SymbolicRuntimeCode ops) ->
-          ops V.!? x >>= unlitByte
+        InitCode ops _ -> BS.indexMaybe ops x
+        RuntimeCode (ConcreteRuntimeCode ops) -> BS.indexMaybe ops x
+        RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= unlitByte
   case op of
     Nothing -> vmError EVM.BadJumpDestination
     Just b ->

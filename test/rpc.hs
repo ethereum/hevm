@@ -75,10 +75,14 @@ tests = testGroup "rpc"
         postVm <- withSolvers Z3 1 Nothing $ \solvers ->
           execStateT (Stepper.interpret (Fetch.oracle solvers (Just (BlockNumber blockNum, testRpc))) . void $ Stepper.execFully) vm
         let
-          (ConcreteStore postStore) = view (env . storage) postVm
+          postStore = case view (env . storage) postVm of
+            ConcreteStore s -> s
+            _ -> error "ConcreteStore expected"
           wethStore = fromJust $ Map.lookup 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 postStore
           receiverBal = fromJust $ Map.lookup (keccak' (word256Bytes 0xdead <> word256Bytes 0x3)) wethStore
-          (Just (VMSuccess msg)) = view result postVm
+          msg = case view result postVm of
+            Just (VMSuccess m) -> m
+            _ -> error "VMSuccess expected"
         assertEqual "should succeed" msg (ConcreteBuf $ word256Bytes 0x1)
         assertEqual "should revert" receiverBal (W256 $ 2595433725034301 + wad)
 

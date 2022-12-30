@@ -244,7 +244,9 @@ checkFailures UnitTestOptions { .. } method bailed = do
     res <- Stepper.execFully
     case res of
       Right (ConcreteBuf r) ->
-        let AbiBool failed = decodeAbiValue AbiBoolType (BSLazy.fromStrict r)
+        let failed = case decodeAbiValue AbiBoolType (BSLazy.fromStrict r) of
+              AbiBool f -> f
+              _ -> error "fix me with better types"
         in pure (shouldFail == failed)
       c -> error $ "internal error: unexpected failure code: " <> show c
 
@@ -501,7 +503,11 @@ type ExploreTx = (Addr, Addr, ByteString, W256)
 decodeCalls :: BSLazy.ByteString -> [ExploreTx]
 decodeCalls b = fromMaybe (error "could not decode replay data") $ do
   List v <- rlpdecode $ BSLazy.toStrict b
-  return $ flip fmap v $ \(List [BS caller', BS target, BS cd, BS ts]) -> (num (word caller'), num (word target), cd, word ts)
+  pure $ unList <$> v
+  where
+    unList (List [BS caller', BS target, BS cd, BS ts]) =
+      (num (word caller'), num (word target), cd, word ts)
+    unList _ = error "fix me with better types"
 
 -- | Runs an invariant test, calls the invariant before execution begins
 initialExplorationStepper :: UnitTestOptions -> ABIMethod -> [ExploreTx] -> [Addr] -> Int -> Stepper (Bool, RLP)
@@ -586,7 +592,7 @@ explorationStepper _ _ _ _ _ _  = error "malformed rlp"
 getTargetContracts :: UnitTestOptions -> Stepper [Addr]
 getTargetContracts UnitTestOptions{..} = do
   vm <- Stepper.evm get
-  let Just contract' = currentContract vm
+  let contract' = fromJust $ currentContract vm
       theAbi = view abiMap $ fromJust $ lookupCode (view contractcode contract') dapp
       setUp  = abiKeccak (encodeUtf8 "targetContracts()")
   case Map.lookup setUp theAbi of
@@ -596,9 +602,16 @@ getTargetContracts UnitTestOptions{..} = do
       res <- Stepper.execFully
       case res of
         Right (ConcreteBuf r) ->
-          let AbiTuple vs = decodeAbiValue (AbiTupleType (Vector.fromList [AbiArrayDynamicType AbiAddressType])) (BSLazy.fromStrict r)
-              [AbiArrayDynamic AbiAddressType targets] = Vector.toList vs
-          in return $ fmap (\(AbiAddress a) -> a) (Vector.toList targets)
+          let vs = case decodeAbiValue (AbiTupleType (Vector.fromList [AbiArrayDynamicType AbiAddressType])) (BSLazy.fromStrict r) of
+                AbiTuple v -> v
+                _ -> error "fix me with better types"
+              targets = case Vector.toList vs of
+                [AbiArrayDynamic AbiAddressType ts] ->
+                  let unAbiAddress (AbiAddress a) = a
+                      unAbiAddress _ = error "fix me with better types"
+                  in unAbiAddress <$> Vector.toList ts
+                _ -> error "fix me with better types"
+          in pure targets
         _ -> error "internal error: unexpected failure code"
 
 exploreRun :: UnitTestOptions -> VM -> ABIMethod -> [ExploreTx] -> IO (Text, Either Text Text, VM)
@@ -904,7 +917,9 @@ formatTestLog events (LogEntry _ args (topic:_)) =
           log_unnamed =
             Just $ showValue (head ts) args
           log_named =
-            let [key, val] = take 2 (textValues ts args)
+            let (key, val) = case take 2 (textValues ts args) of
+                  [k, v] -> (k, v)
+                  _ -> error "shouldn't happen"
             in Just $ unquote key <> ": " <> val
           showDecimal dec val =
             pack $ show $ Decimal (num dec) val

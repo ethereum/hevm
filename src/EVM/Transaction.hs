@@ -15,7 +15,7 @@ import Control.Lens
 import Data.Aeson (FromJSON (..))
 import Data.ByteString (ByteString)
 import Data.Map (Map)
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (fromMaybe, isNothing, fromJust)
 
 import qualified Data.Aeson        as JSON
 import qualified Data.Aeson.Types  as JSON
@@ -78,9 +78,9 @@ signingData chainId tx =
         to'        = case txToAddr tx of
           Just a  -> BS $ word160Bytes a
           Nothing -> BS mempty
-        Just maxFee = txMaxFeePerGas tx
-        Just maxPrio = txMaxPriorityFeeGas tx
-        Just gasPrice = txGasPrice tx
+        maxFee = fromJust $ txMaxFeePerGas tx
+        maxPrio = fromJust $ txMaxPriorityFeeGas tx
+        gasPrice = fromJust $ txGasPrice tx
         accessList = txAccessList tx
         rlpAccessList = EVM.RLP.List $ map (\accessEntry ->
           EVM.RLP.List [BS $ word160Bytes (accessAddress accessEntry),
