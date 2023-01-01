@@ -141,7 +141,6 @@ library
     cryptonite                        >= 0.30 && < 0.31,
     memory                            >= 0.16.0 && < 0.20,
     data-dword                        >= 0.3.1 && < 0.4,
-    fgl                               >= 5.7.0 && < 5.8,
     free                              >= 5.1.3 && < 5.2,
     haskeline                         >= 0.8.0 && < 0.9,
     process                           >= 1.6.5 && < 1.7,
@@ -155,8 +154,6 @@ library
     quickcheck-text                   >= 0.1.2 && < 0.2,
     restless-git                      >= 0.7 && < 0.8,
     rosezipper                        >= 0.2 && < 0.3,
-    s-cargot                          >= 0.1.4 && < 0.2,
-    semver-range                      >= 0.2.7 && < 0.3,
     temporary                         >= 1.3 && < 1.4,
     witherable                        >= 0.3.5 && < 0.5,
     wreq                              >= 0.5.3 && < 0.6,
@@ -167,7 +164,6 @@ library
     smt2-parser                       >= 0.1.0.1,
     word-wrap                         >= 0.5 && < 0.6,
     spool                             >= 0.1 && < 0.2,
-    parsec                            >= 3.1.15 && < 3.2,
   hs-source-dirs:
     src
 
