@@ -177,8 +177,8 @@ library
     word-wrap                         >= 0.5 && < 0.6,
     spool                             >= 0.1 && < 0.2,
     parsec,
-    stm,
-    spawn
+    stm                               >= 2.5.0 && < 2.6.0,
+    spawn                             >= 0.3 && < 0.4
   hs-source-dirs:
     src
 
@@ -280,5 +280,5 @@ test-suite test
     array,
     vector,
     smt2-parser >= 0.1.0.1,
-    stm,
-    spawn
+    stm >= 2.5.0,
+    spawn >= 0.3
