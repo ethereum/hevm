@@ -176,7 +176,7 @@ library
     smt2-parser                       >= 0.1.0.1,
     word-wrap                         >= 0.5 && < 0.6,
     spool                             >= 0.1 && < 0.2,
-    parsec,
+    parsec                            >= 3.1.5 && < 3.2.0,
     stm                               >= 2.5.0 && < 2.6.0,
     spawn                             >= 0.3 && < 0.4
   hs-source-dirs:
