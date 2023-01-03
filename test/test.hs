@@ -1132,7 +1132,7 @@ tests = testGroup "hevm"
               in case leaf of
                 Return _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
                 _ -> PBool True
-        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
+        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts SymbolicS (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         -- tests how whiffValue handles Neg via application of the triple IsZero simplification rule
@@ -1653,7 +1653,7 @@ tests = testGroup "hevm"
               aAddr = Addr 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
           Just c <- solcRuntime "C" code'
           Just a <- solcRuntime "A" code'
-          (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> do
+          (_, [Cex cex]) <- withSolvers Z3 1 Nothing $ \s -> do
             let vm0 = abstractVM (Just ("call_A()", [])) [] c Nothing SymbolicS
             let vm = vm0
                   & set (state . callvalue) (Lit 0)
@@ -1662,8 +1662,9 @@ tests = testGroup "hevm"
                   -- NOTE: this used to as follows, but there is no _storage field in Contract record
                   -- (Map.insert aAddr (initialContract (RuntimeCode $ ConcreteBuffer a) &
                   --                     set EVM.storage (EVM.Symbolic [] store)))
-            verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
-          putStrLn "found counterexample:"
+            verify s debugVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
+          print cex
+          -- putStrLn "found counterexample:"
         ,
         expectFail $ testCase "calling unique contracts (read from storage)" $ do
           Just c <- solcRuntime "C"

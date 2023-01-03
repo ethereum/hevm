@@ -676,7 +676,7 @@ showModel cd (expr, res) = do
 
 
 formatCex :: Expr Buf -> SMTCex -> Text
-formatCex cd m@(SMTCex _ _ blockContext txContext) = T.unlines $
+formatCex cd m@(SMTCex _ _ _ blockContext txContext) = T.unlines $
   [ "Calldata:"
   , indent 2 cd'
   , ""
