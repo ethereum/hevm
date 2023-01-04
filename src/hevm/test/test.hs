@@ -59,6 +59,7 @@ import qualified EVM.Expr as Expr
 import qualified Data.Text as T
 import Data.List (isSubsequenceOf)
 import EVM.TestUtils
+import GHC.Conc (getNumProcessors)
 
 main :: IO ()
 main = defaultMain tests
@@ -1780,11 +1781,11 @@ tests = testGroup "hevm"
       , testCase "eq-all-yul-optimization-tests" $ do
         let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 5, askSmtIters = Just 20, rpcInfo = Nothing }
             ignoredTests = [
-                      -- "controlFlowSimplifier/terminating_for_nested.yul"
+                    -- "controlFlowSimplifier/terminating_for_nested.yul"
                     -- , "controlFlowSimplifier/terminating_for_nested_reversed.yul"
 
                     -- unbounded loop --
-                    [ "commonSubexpressionEliminator/branches_for.yul"
+                    "commonSubexpressionEliminator/branches_for.yul"
                     , "conditionalSimplifier/no_opt_if_break_is_not_last.yul"
                     , "conditionalUnsimplifier/no_opt_if_break_is_not_last.yul"
                     , "expressionSimplifier/inside_for.yul"
@@ -1983,7 +1984,7 @@ tests = testGroup "hevm"
                     , "fullSuite/extcodelength.yul" -- extcodecopy bug?
                     , "loadResolver/keccak_short.yul" -- keccak bug
                     , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV I think?
-                    ]
+                           ]
 
         solcRepo <- fromMaybe (error "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
         let testDir = solcRepo <> "/test/libyul/yulOptimizerTests"
@@ -2038,8 +2039,8 @@ tests = testGroup "hevm"
             putStrLn "------------- Filtered B + Symb below-----------------"
             mapM_ putStrLn filteredBSym
             putStrLn "------------- END -----------------"
-          Just aPrgm <- yul "" $ Data.Text.pack $ unlines filteredASym
-          Just bPrgm <- yul "" $ Data.Text.pack $ unlines filteredBSym
+          Just aPrgm <- yul "" $ T.pack $ unlines filteredASym
+          Just bPrgm <- yul "" $ T.pack $ unlines filteredBSym
           procs <- getNumProcessors
           withSolvers CVC5 (num procs) (Just 100) $ \s -> do
             res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing

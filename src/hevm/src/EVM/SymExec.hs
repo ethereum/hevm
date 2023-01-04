@@ -5,6 +5,7 @@ module EVM.SymExec where
 
 import Prelude hiding (Word)
 
+import Data.Tuple (swap)
 import Control.Lens hiding (pre)
 import EVM hiding (Query, Revert, push, bytecode, cache)
 import qualified EVM
@@ -24,7 +25,7 @@ import qualified EVM.FeeSchedule as FeeSchedule
 import Data.DoubleWord (Word256)
 import Control.Concurrent.Async
 import Data.Maybe
-import Data.List (foldl', find, sortBy)
+import Data.List (foldl', sortBy)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Control.Monad.State.Class as State
@@ -42,10 +43,11 @@ import qualified Data.Set as Set
 import Control.Concurrent.STM (atomically, TVar, readTVarIO, readTVar, newTVarIO, writeTVar)
 import Control.Concurrent.Spawn
 import GHC.Conc (getNumProcessors)
+import EVM.Format (indent, formatBinary)
 
 data ProofResult a b c = Qed a | Cex b | Timeout c
   deriving (Show, Eq)
-type VerifyResult = ProofResult (Expr End) (Expr End, SMTCex) (Expr End)
+type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End)
 type EquivResult = ProofResult () (SMTCex) ()
 
 isTimeout :: ProofResult a b c -> Bool
@@ -615,12 +617,11 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
           (Revert _ a, Revert _ b) -> if a == b then PBool False else a ./= b
           (Revert _ _, _) -> PBool True
           (_, Revert _ _) -> PBool True
-          (Invalid _, Invalid _) -> PBool False
-          (Invalid _, _ ) -> PBool True
-          (_, Invalid _) -> PBool True
-          (EVM.Types.StackLimitExceeded _, EVM.Types.StackLimitExceeded _ ) -> PBool False
-          (EVM.Types.StackLimitExceeded _, _) -> PBool True
-          (_, EVM.Types.StackLimitExceeded _) -> PBool True
+          (Failure _ (TmpErr s), _) -> error $ "Unhandled error: " <> s
+          (_, Failure _ (TmpErr s)) -> error $ "Unhandled error: " <> s
+          (Failure _ erra, Failure _ errb) -> if erra==errb then PBool False else PBool True
+          (ITE _ _ _, _) -> error "Expressions must be flattened"
+          (_, ITE _ _ _) -> error "Expressions must be flattened"
           (a, b) -> if a == b
                     then PBool False
                     else error $ "Internal Error: Unimplemented. Left: " <> show a <> " Right: " <> show b

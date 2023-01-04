@@ -179,7 +179,7 @@ library
     smt2-parser                       >= 0.1.0.1,
     word-wrap                         >= 0.5 && < 0.6,
     spool                             >= 0.1 && < 0.2,
-    parsec                            >= 3.1.14.0 && < 3.1.15
+    parsec                            >= 3.1.14.0 && < 3.1.15,
     stm                               >= 2.5.0 && < 2.6.0,
     spawn                             >= 0.3 && < 0.4
   hs-source-dirs:
@@ -274,12 +274,9 @@ common test-base
     time,
     array,
     vector,
-<<<<<<< HEAD
     smt2-parser >= 0.1.0.1,
     stm >= 2.5.0,
     spawn >= 0.3
-=======
-    smt2-parser >= 0.1.0.1
 
 library test-utils
   import:
@@ -316,4 +313,3 @@ test-suite rpc-tests
     exitcode-stdio-1.0
   main-is:
     rpc.hs
->>>>>>> main

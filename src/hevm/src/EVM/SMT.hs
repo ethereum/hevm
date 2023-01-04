@@ -25,13 +25,12 @@ import Language.SMT2.Syntax (SpecConstant(..), GeneralRes(..), Term(..), QualIde
 import Data.Word
 import Numeric (readHex)
 import Data.ByteString (ByteString)
-import Data.Maybe (fromMaybe)
 
 import qualified Data.ByteString as BS
 import qualified Data.List as List
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.String.Here
-import Data.Maybe
+import Data.Maybe (fromMaybe, fromJust)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Text.Lazy (Text)
