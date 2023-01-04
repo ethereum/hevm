@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - the `gas`, `gaslimit`, `priorityfee`, and `gasprice` cli options are now respected
 - cleaner formatting for the gas value in the visual debugger
 
+## Added
+- Improved equivalence checker that avoids checking similar branches more than once.
+
 ## [0.50.0] - 2022-12-19
 
 ### Changed
