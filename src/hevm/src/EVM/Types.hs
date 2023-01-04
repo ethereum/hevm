@@ -20,7 +20,7 @@ import Data.ByteString.Base16 as BS16
 import Data.ByteString.Builder (byteStringHex, toLazyByteString)
 import Data.ByteString.Lazy (toStrict)
 import qualified Data.ByteString.Char8  as Char8
-import Data.Word (Word8, Word32)
+import Data.Word (Word8, Word32, Word64)
 import Data.Bits (Bits, FiniteBits, shiftR, shift, shiftL, (.&.), (.|.))
 import Data.DoubleWord
 import Data.DoubleWord.TH
@@ -115,6 +115,17 @@ data EType
   | End
   deriving (Typeable)
 
+-- EVM errors
+data Error
+  = Invalid
+  | IllegalOverflow
+  | StackLimitExceeded
+  | InvalidMemoryAccess
+  | BadJumpDestination
+  | SelfDestruct
+  | TmpErr String
+  deriving (Show, Eq, Ord)
+
 -- Variables refering to a global environment
 data GVar (a :: EType) where
   BufVar :: Int -> GVar Buf
@@ -152,17 +163,11 @@ data Expr (a :: EType) where
                  -> Expr EWord
   -- control flow
 
-  Invalid             :: [Prop] -> Expr End
-  IllegalOverflow     :: [Prop] -> Expr End
-  SelfDestruct        :: [Prop] -> Expr End
-  StackLimitExceeded  :: [Prop] -> Expr End
-  InvalidMemoryAccess :: [Prop] -> Expr End
-  BadJumpDestination  :: [Prop] -> Expr End
   Revert              :: [Prop] -> Expr Buf -> Expr End
+  Failure             :: [Prop] -> Error -> Expr End
   Return              :: [Prop] -> Expr Buf -> Expr Storage -> Expr End
   ITE                 :: Expr EWord -> Expr End -> Expr End -> Expr End
-  TmpErr              :: [Prop] -> String -> Expr End -- TODO this is a crutch to help us not deal with all EVM failure modes in Expr
-                                                      --      should be removed once EVM failure modes are handled in Expr
+
   -- integers
 
   Add            :: Expr EWord -> Expr EWord -> Expr EWord
@@ -211,7 +216,7 @@ data Expr (a :: EType) where
   Coinbase       :: Expr EWord
   Timestamp      :: Expr EWord
   BlockNumber    :: Expr EWord
-  Difficulty     :: Expr EWord
+  PrevRandao     :: Expr EWord
   GasLimit       :: Expr EWord
   ChainId        :: Expr EWord
   BaseFee        :: Expr EWord
@@ -562,6 +567,10 @@ readNull x = fromMaybe x . Text.Read.readMaybe
 
 wordField :: JSON.Object -> Key -> JSON.Parser W256
 wordField x f = ((readNull 0) . Text.unpack)
+                  <$> (x .: f)
+
+word64Field :: JSON.Object -> Key -> JSON.Parser Word64
+word64Field x f = ((readNull 0) . Text.unpack)
                   <$> (x .: f)
 
 addrField :: JSON.Object -> Key -> JSON.Parser Addr

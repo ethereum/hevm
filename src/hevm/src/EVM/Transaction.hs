@@ -15,12 +15,13 @@ import Control.Lens
 import Data.Aeson (FromJSON (..))
 import Data.ByteString (ByteString)
 import Data.Map (Map)
-import Data.Maybe (fromMaybe, isNothing, isJust)
+import Data.Maybe (fromMaybe, isNothing)
 
 import qualified Data.Aeson        as JSON
 import qualified Data.Aeson.Types  as JSON
 import qualified Data.ByteString   as BS
 import qualified Data.Map          as Map
+import Data.Word (Word64)
 
 data AccessListEntry = AccessListEntry {
   accessAddress :: Addr,
@@ -34,7 +35,7 @@ data TxType = LegacyTransaction
 
 data Transaction = Transaction {
     txData     :: ByteString,
-    txGasLimit :: W256,
+    txGasLimit :: Word64,
     txGasPrice :: Maybe W256,
     txNonce    :: W256,
     txR        :: W256,
@@ -87,13 +88,13 @@ signingData chainId tx =
           ) accessList
         normalData = rlpList [rlpWord256 (txNonce tx),
                               rlpWord256 gasPrice,
-                              rlpWord256 (txGasLimit tx),
+                              rlpWord256 (num $ txGasLimit tx),
                               to',
                               rlpWord256 (txValue tx),
                               BS (txData tx)]
         eip155Data = rlpList [rlpWord256 (txNonce tx),
                               rlpWord256 gasPrice,
-                              rlpWord256 (txGasLimit tx),
+                              rlpWord256 (num $ txGasLimit tx),
                               to',
                               rlpWord256 (txValue tx),
                               BS (txData tx),
@@ -105,7 +106,7 @@ signingData chainId tx =
           rlpWord256 (txNonce tx),
           rlpWord256 maxPrio,
           rlpWord256 maxFee,
-          rlpWord256 (txGasLimit tx),
+          rlpWord256 (num $ txGasLimit tx),
           to',
           rlpWord256 (txValue tx),
           BS (txData tx),
@@ -115,21 +116,21 @@ signingData chainId tx =
           rlpWord256 (fromIntegral chainId),
           rlpWord256 (txNonce tx),
           rlpWord256 gasPrice,
-          rlpWord256 (txGasLimit tx),
+          rlpWord256 (num $ txGasLimit tx),
           to',
           rlpWord256 (txValue tx),
           BS (txData tx),
           rlpAccessList]
 
-accessListPrice :: FeeSchedule Integer -> [AccessListEntry] -> Integer
+accessListPrice :: FeeSchedule Word64 -> [AccessListEntry] -> Word64
 accessListPrice fs al =
     sum (map
       (\ale ->
         g_access_list_address fs +
-        (g_access_list_storage_key fs * (toInteger . length) (accessStorageKeys ale)))
+        (g_access_list_storage_key fs * (fromIntegral . length) (accessStorageKeys ale)))
         al)
 
-txGasCost :: FeeSchedule Integer -> Transaction -> Integer
+txGasCost :: FeeSchedule Word64 -> Transaction -> Word64
 txGasCost fs tx =
   let calldata     = txData tx
       zeroBytes    = BS.count 0 calldata
@@ -152,7 +153,7 @@ instance FromJSON AccessListEntry where
 instance FromJSON Transaction where
   parseJSON (JSON.Object val) = do
     tdata    <- dataField val "data"
-    gasLimit <- wordField val "gasLimit"
+    gasLimit <- word64Field val "gasLimit"
     gasPrice <- fmap read <$> val JSON..:? "gasPrice"
     maxPrio  <- fmap read <$> val JSON..:? "maxPriorityFeePerGas"
     maxFee   <- fmap read <$> val JSON..:? "maxFeePerGas"
@@ -186,9 +187,9 @@ newAccount :: EVM.Contract
 newAccount = initialContract $ EVM.RuntimeCode mempty
 
 -- | Increments origin nonce and pays gas deposit
-setupTx :: Addr -> Addr -> W256 -> W256 -> Map Addr EVM.Contract -> Map Addr EVM.Contract
+setupTx :: Addr -> Addr -> W256 -> Word64 -> Map Addr EVM.Contract -> Map Addr EVM.Contract
 setupTx origin coinbase gasPrice gasLimit prestate =
-  let gasCost = gasPrice * gasLimit
+  let gasCost = gasPrice * (num gasLimit)
   in (Map.adjust ((over EVM.nonce   (+ 1))
                . (over balance (subtract gasCost))) origin)
     . touchAccount origin

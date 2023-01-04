@@ -58,7 +58,7 @@ module EVM.ABI
   ) where
 
 import EVM.Types
-import EVM.Expr (readWord)
+import EVM.Expr (readWord, isLitWord)
 
 import Control.Monad      (replicateM, replicateM_, forM_, void)
 import Data.Binary.Get    (Get, runGet, runGetOrFail, label, getWord8, getWord32be, skip)
@@ -73,6 +73,7 @@ import Data.Text.Encoding (encodeUtf8, decodeUtf8')
 import Data.Vector        (Vector, toList)
 import Data.Word          (Word32)
 import Data.List          (intercalate)
+import Data.Maybe         (mapMaybe)
 import GHC.Generics
 
 import Test.QuickCheck hiding ((.&.), label)
@@ -539,7 +540,16 @@ decodeBuf tps (ConcreteBuf b)
 decodeBuf tps buf
   = if containsDynamic tps
     then NoVals
-    else SAbi $ decodeStaticArgs 0 (length tps) buf
+    else let
+      vs = decodeStaticArgs 0 (length tps) buf
+      allLit = Prelude.and . (fmap isLitWord) $ vs
+      asBS = mconcat $ fmap word256Bytes (mapMaybe maybeLitWord vs)
+    in if not allLit
+       then SAbi vs
+       else case runGetOrFail (getAbiSeq (length tps) tps) (BSLazy.fromStrict asBS) of
+         Right ("", _, args) -> CAbi (toList args)
+         _ -> NoVals
+
   where
     isDynamic t = abiKind t == Dynamic
     containsDynamic = or . fmap isDynamic

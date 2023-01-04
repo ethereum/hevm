@@ -2,7 +2,7 @@ cabal-version: 3.0
 name:
   hevm
 version:
-  0.49.0
+  0.50.0
 synopsis:
   Ethereum virtual machine evaluator
 description:
@@ -27,7 +27,7 @@ data-files:
   run-consensus-tests
 extra-source-files:
   CHANGELOG.md
-  test/contracts/lib/ds-test.sol
+  test/contracts/lib/test.sol
   test/contracts/lib/erc20.sol
   test/contracts/pass/trivial.sol
   test/contracts/pass/abstract.sol
@@ -35,14 +35,17 @@ extra-source-files:
   test/contracts/pass/constantinople.sol
   test/contracts/pass/dsProvePass.sol
   test/contracts/pass/invariants.sol
-  test/contracts/pass/libraries.so
+  test/contracts/pass/libraries.sol
   test/contracts/pass/loops.sol
+  test/contracts/pass/rpc.sol
   test/contracts/fail/trivial.sol
   test/contracts/fail/cheatCodes.sol
   test/contracts/fail/dsProveFail.sol
   test/contracts/fail/invariantFail.sol
 
 common shared
+  default-language:
+    Haskell2010
   default-extensions:
     LambdaCase
     OverloadedStrings
@@ -109,7 +112,7 @@ library
   autogen-modules:
     Paths_hevm
   ghc-options:
-    -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -j
+    -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
   extra-libraries:
     secp256k1, ff
   if os(linux)
@@ -176,7 +179,7 @@ library
     smt2-parser                       >= 0.1.0.1,
     word-wrap                         >= 0.5 && < 0.6,
     spool                             >= 0.1 && < 0.2,
-    parsec                            >= 3.1.5 && < 3.2.0,
+    parsec                            >= 3.1.14.0 && < 3.1.15
     stm                               >= 2.5.0 && < 2.6.0,
     spawn                             >= 0.3 && < 0.4
   hs-source-dirs:
@@ -189,7 +192,7 @@ executable hevm
   main-is:
     hevm-cli.hs
   ghc-options:
-    -Wall -threaded -with-rtsopts=-N -j
+    -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
   other-modules:
     Paths_hevm
   if os(darwin)
@@ -232,22 +235,14 @@ executable hevm
     stm,
     spawn
 
-test-suite test
+common test-base
   import: shared
   ghc-options:
-    -Wall -Wno-unticked-promoted-constructors -j
-  type:
-    exitcode-stdio-1.0
+    -Wall -Wno-unticked-promoted-constructors -Wno-orphans
   hs-source-dirs:
     test
-  main-is:
-    test.hs
   extra-libraries:
     secp256k1
-  if os(darwin)
-     extra-libraries: c++
-  else
-     extra-libraries: stdc++
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -279,6 +274,46 @@ test-suite test
     time,
     array,
     vector,
+<<<<<<< HEAD
     smt2-parser >= 0.1.0.1,
     stm >= 2.5.0,
     spawn >= 0.3
+=======
+    smt2-parser >= 0.1.0.1
+
+library test-utils
+  import:
+    test-base
+  exposed-modules:
+    EVM.TestUtils
+
+common test-common
+  import:
+    test-base
+  build-depends:
+    test-utils
+  if os(darwin)
+     extra-libraries: c++
+  else
+     extra-libraries: stdc++
+
+--- Test Suites ---
+
+test-suite test
+  import:
+    test-common
+  type:
+    exitcode-stdio-1.0
+  main-is:
+    test.hs
+
+-- these tests require network access so we split them into a seperate test
+-- suite to make it easy to skip them when running nix-build
+test-suite rpc-tests
+  import:
+    test-common
+  type:
+    exitcode-stdio-1.0
+  main-is:
+    rpc.hs
+>>>>>>> main

@@ -14,9 +14,7 @@ import System.Directory
 import Data.Typeable
 
 import Data.String.Here
-import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 
 import EVM
@@ -30,7 +28,6 @@ import EVM.Format (formatExpr)
 import EVM.Dapp (dappInfo)
 import GHC.Conc
 import System.Exit (exitFailure)
-import qualified EVM.Expr as Expr
 import qualified EVM.Fetch as Fetch
 import qualified EVM.FeeSchedule as FeeSchedule
 import qualified Data.Vector as V
@@ -48,7 +45,7 @@ runDappTest root =
     let testFile = root <> "/out/dapp.sol.json"
     withSolvers Z3 cores Nothing $ \solvers -> do
       opts <- testOpts solvers root testFile
-      res <- dappTest opts solvers testFile Nothing
+      res <- dappTest opts testFile Nothing
       unless res exitFailure
 
 testOpts :: SolverGroup -> FilePath -> FilePath -> IO UnitTestOptions
@@ -59,18 +56,13 @@ testOpts solvers root testFile = do
       pure $ dappInfo root contractMap sourceCache
 
   params <- getParametersFromEnvironmentVariables Nothing
-
-  let
-    testn = testNumber params
-    block' = if 0 == testn
-       then Fetch.Latest
-       else Fetch.BlockNumber testn
-
   pure EVM.UnitTest.UnitTestOptions
-    { EVM.UnitTest.oracle = Fetch.oracle solvers Nothing
+    { EVM.UnitTest.solvers = solvers
+    , EVM.UnitTest.rpcInfo = Nothing
     , EVM.UnitTest.maxIter = Nothing
     , EVM.UnitTest.askSmtIters = Nothing
     , EVM.UnitTest.smtTimeout = Nothing
+    , EVM.UnitTest.smtDebug = False
     , EVM.UnitTest.solver = Nothing
     , EVM.UnitTest.covMatch = Nothing
     , EVM.UnitTest.verbose = Nothing
@@ -83,21 +75,6 @@ testOpts solvers root testFile = do
     , EVM.UnitTest.dapp = srcInfo
     , EVM.UnitTest.ffiAllowed = True
     }
-
-dumpQueries :: FilePath -> IO ()
-dumpQueries root = withCurrentDirectory root $ do
-  d <- dai
-  putStrLn "building expression"
-  withSolvers Z3 1 Nothing $ \s -> do
-    e <- buildExpr s d
-    putStrLn "built expression"
-    putStrLn "generating queries"
-    qs <- reachableQueries e
-    putStrLn $ "generated queries (" <> (show $ Prelude.length qs) <> " total)"
-    putStrLn "dumping queries"
-    forM_ (zip ([1..] :: [Int]) qs) $ \(idx, q) -> do
-      TL.writeFile ("query_" <> show idx <> ".smt2") (TL.append (formatSMT2 q) "(check-sat)")
-    putStrLn "dumped queries"
 
 doTest :: IO ()
 doTest = do
@@ -162,7 +139,7 @@ reachable' smtdebug c = do
     T.writeFile "full.ast" $ formatExpr full
     putStrLn "Dumped to full.ast"
     putStrLn "Checking reachability"
-    (qs, less) <- reachable2 s full
+    (qs, less) <- reachable s full
     putStrLn $ "Checked reachability (" <> (show $ numBranches less) <> " reachable branches)"
     T.writeFile "reachable.ast" $ formatExpr less
     putStrLn "Dumped to reachable.ast"
@@ -398,7 +375,7 @@ initVm bs = vm
       }
     vm = makeVm $ VMOpts
       { EVM.vmoptContract      = c
-      , EVM.vmoptCalldata      = AbstractBuf "txdata"
+      , EVM.vmoptCalldata      = (AbstractBuf "txdata", [])
       , EVM.vmoptValue         = CallValue 0
       , EVM.vmoptAddress       = Addr 0xffffffffffffffff
       , EVM.vmoptCaller        = Lit 0
@@ -414,7 +391,7 @@ initVm bs = vm
       , EVM.vmoptBlockGaslimit = 0
       , EVM.vmoptGasprice      = 0
       , EVM.vmoptMaxCodeSize   = 0xffffffff
-      , EVM.vmoptDifficulty    = 0
+      , EVM.vmoptPrevRandao    = 420
       , EVM.vmoptSchedule      = FeeSchedule.berlin
       , EVM.vmoptChainId       = 1
       , EVM.vmoptCreate        = False

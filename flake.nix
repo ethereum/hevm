@@ -8,16 +8,20 @@
       url = "github:edolstra/flake-compat";
       flake = false;
     };
+    solidity = {
+      url = "github:ethereum/solidity/1c8745c54a239d20b6fb0f79a8bd2628d779b27e";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, ... }:
+  outputs = { self, nixpkgs, flake-utils, solidity, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         secp256k1-static = pkgs.secp256k1.overrideAttrs (attrs: {
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         });
-        hevm = with pkgs; lib.pipe (
+        hevmUnwrapped = (with pkgs; lib.pipe (
           haskellPackages.callCabal2nix "hevm" ./src/hevm {
             # Haskell libs with the same names as C libs...
             # Depend on the C libs, not the Haskell libs.
@@ -25,6 +29,9 @@
             inherit secp256k1;
           })
           [
+            (haskell.lib.compose.overrideCabal (old : {
+              testTarget = "test";
+            }))
             (haskell.lib.compose.addTestToolDepends [ solc z3 cvc5 ])
             (haskell.lib.compose.appendConfigureFlags (
               [ "--ghc-option=-O2" ]
@@ -40,14 +47,16 @@
                 "--extra-lib-dirs=${glibc.static}/lib"
               ]))
             haskell.lib.dontHaddock
-          ];
+          ]).overrideAttrs(final: prev: {
+            HEVM_SOLIDITY_REPO = solidity;
+          });
         hevmWrapped = with pkgs; symlinkJoin {
           name = "hevm";
-          paths = [ hevm ];
+          paths = [ hevmUnwrapped ];
           buildInputs = [ makeWrapper ];
           postBuild = ''
             wrapProgram $out/bin/hevm \
-              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc ])}"
+              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3 cvc5 ])}"
           '';
         };
       in rec {
@@ -55,6 +64,7 @@
         # --- packages ----
 
         packages.hevm = hevmWrapped;
+        packages.hevmUnwrapped = hevmUnwrapped;
         packages.default = hevmWrapped;
 
         # --- apps ----
@@ -67,11 +77,13 @@
         devShell = with pkgs;
           let libraryPath = "${lib.makeLibraryPath [ libff secp256k1 ]}";
           in haskellPackages.shellFor {
-            packages = _: [ hevm ];
+            packages = _: [ hevmUnwrapped ];
             buildInputs = [
               z3
               cvc5
               solc
+              mdbook
+              yarn
               haskellPackages.cabal-install
               haskellPackages.haskell-language-server
             ];
@@ -79,6 +91,7 @@
 
             # NOTE: hacks for bugged cabal new-repl
             LD_LIBRARY_PATH = libraryPath;
+            HEVM_SOLIDITY_REPO = solidity;
             shellHook = lib.optionalString stdenv.isDarwin ''
               export DYLD_LIBRARY_PATH="${libraryPath}";
             '';

@@ -21,6 +21,7 @@ import EVM.Debug
 import EVM.Format (showWordExact, showWordExplanation)
 import EVM.Format (contractNamePart, contractPathPart, showTraceTree, prettyIfConcreteWord, formatExpr)
 import EVM.Hexdump (prettyHex)
+import EVM.SMT (SolverGroup)
 import EVM.Op
 import EVM.Solidity hiding (storageLayout)
 import EVM.Types hiding (padRight)
@@ -30,12 +31,12 @@ import Text.Wrap
 
 import EVM.Stepper (Stepper)
 import qualified EVM.Stepper as Stepper
+import qualified EVM.Fetch as Fetch
 import qualified Control.Monad.Operational as Operational
 
 import EVM.Fetch (Fetcher)
 
 import Control.Lens hiding (List)
-import Control.Monad.Trans.Reader
 import Control.Monad.State.Strict hiding (state)
 
 import Data.Aeson.Lens
@@ -229,16 +230,18 @@ mkVty = do
   V.setMode (V.outputIface vty) V.BracketedPaste True
   return vty
 
-runFromVM :: Maybe Integer -> DappInfo -> (Query -> IO (EVM ())) -> VM -> IO VM
-runFromVM maxIter' dappinfo oracle' vm = do
+runFromVM :: SolverGroup -> Fetch.RpcInfo -> Maybe Integer -> DappInfo -> VM -> IO VM
+runFromVM solvers rpcInfo maxIter' dappinfo vm = do
 
   let
     opts = UnitTestOptions
-      { oracle        = oracle'
+      { solvers       = solvers
+      , rpcInfo       = rpcInfo
       , verbose       = Nothing
       , maxIter       = maxIter'
       , askSmtIters   = Nothing
       , smtTimeout    = Nothing
+      , smtDebug      = False
       , solver        = Nothing
       , maxDepth      = Nothing
       , match         = ""
@@ -607,9 +610,9 @@ appEvent s (VtyEvent (V.EvKey (V.KChar 'b') [V.MCtrl])) =
 appEvent s _ = continue s
 
 app :: UnitTestOptions -> App UiState () Name
-app opts =
-  let ?fetcher = oracle opts
-      ?maxIter = maxIter opts
+app UnitTestOptions{..} =
+  let ?fetcher = Fetch.oracle solvers rpcInfo
+      ?maxIter = maxIter
   in App
   { appDraw = drawUi
   , appChooseCursor = neverShowCursor
@@ -758,12 +761,11 @@ drawVmBrowser ui =
               ]
       ]
   ]
-  where storageDisplay (ConcreteStore s) = pack ( show ( Map.toList s))
-        storageDisplay (v) = pack $ show v
-        dapp' = dapp (view (browserVm . uiTestOpts) ui)
-        Just (_, (_, c)) = listSelectedElement (view browserContractList ui)
+  where
+    dapp' = dapp (view (browserVm . uiTestOpts) ui)
+    Just (_, (_, c)) = listSelectedElement (view browserContractList ui)
 --        currentContract  = view (dappSolcByHash . ix ) dapp
-        maybeHash c = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord (view codehash c))
+    maybeHash ch = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord (view codehash ch))
 
 drawVm :: UiVmState -> [UiWidget]
 drawVm ui =
@@ -875,7 +877,7 @@ currentSrcMap dapp vm = do
 drawStackPane :: UiVmState -> UiWidget
 drawStackPane ui =
   let
-    gasText = showWordExact (view (uiVm . state . gas) ui)
+    gasText = showWordExact (num $ view (uiVm . state . gas) ui)
     labelText = txt ("Gas available: " <> gasText <> "; stack:")
     stackList = list StackPane (Vec.fromList $ zip [(1 :: Int)..] (fmap simplify $ view (uiVm . state . stack) ui)) 2
   in hBorderWithLabel labelText <=>

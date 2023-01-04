@@ -40,6 +40,7 @@ import qualified Data.Aeson        as JSON
 import qualified Data.Aeson.Types  as JSON
 import qualified Data.ByteString.Lazy  as Lazy
 import qualified Data.Vector as V
+import Data.Word (Word64)
 
 type Storage = Map W256 W256
 
@@ -48,7 +49,7 @@ data Which = Pre | Post
 data Block = Block
   { blockCoinbase    :: Addr
   , blockDifficulty  :: W256
-  , blockGasLimit    :: W256
+  , blockGasLimit    :: Word64
   , blockBaseFee     :: W256
   , blockNumber      :: W256
   , blockTimestamp   :: W256
@@ -146,21 +147,13 @@ checkExpectedContracts vm expected =
      )
   where
   zipWithStorages = Map.mapWithKey (\addr c -> (c, lookupStorage addr))
-  lookupStorage addr =
+  lookupStorage _ =
     case vm ^. EVM.env . EVM.storage of
-      ConcreteStore s -> mempty -- clearZeroStorage $ fromMaybe mempty $ Map.lookup (num addr) s
+      ConcreteStore _ -> mempty -- clearZeroStorage $ fromMaybe mempty $ Map.lookup (num addr) s
       EmptyStore -> mempty
       AbstractStore -> mempty -- error "AbstractStore, should this be handled?"
       SStore {} -> mempty -- error "SStore, should this be handled?"
-
-{-
-clearOrigStorage :: EVM.Contract -> EVM.Contract
-clearOrigStorage = undefined
--}
-
--- TODO: why is this needed?
-clearZeroStorage :: Storage -> Storage
-clearZeroStorage = Map.filter (/= 0)
+      GVar _ -> error "unexpected global variable"
 
 clearStorage :: (EVM.Contract, Storage) -> (EVM.Contract, Storage)
 clearStorage (c, _) = (c, mempty)
@@ -207,7 +200,7 @@ instance FromJSON Block where
     txs        <- v .: "transactions"
     coinbase   <- addrField v' "coinbase"
     difficulty <- wordField v' "difficulty"
-    gasLimit   <- wordField v' "gasLimit"
+    gasLimit   <- word64Field v' "gasLimit"
     number     <- wordField v' "number"
     baseFee    <- fmap read <$> v' .:? "baseFeePerGas"
     timestamp  <- wordField v' "timestamp"
@@ -277,7 +270,7 @@ fromBlockchainCase' block tx preState postState =
       (Just origin, Just checkState) -> Right $ Case
         (EVM.VMOpts
          { vmoptContract      = EVM.initialContract theCode
-         , vmoptCalldata      = cd
+         , vmoptCalldata      = (cd, [])
          , vmoptValue         = Lit (txValue tx)
          , vmoptAddress       = toAddr
          , vmoptCaller        = litAddr origin
@@ -290,7 +283,7 @@ fromBlockchainCase' block tx preState postState =
          , vmoptNumber        = blockNumber block
          , vmoptTimestamp     = Lit $ blockTimestamp block
          , vmoptCoinbase      = blockCoinbase block
-         , vmoptDifficulty    = blockDifficulty block
+         , vmoptPrevRandao    = blockDifficulty block
          , vmoptMaxCodeSize   = 24576
          , vmoptBlockGaslimit = blockGasLimit block
          , vmoptGasprice      = effectiveGasPrice
@@ -347,7 +340,7 @@ validateTx tx block cs = do
   origin        <- sender 1 tx
   originBalance <- (view balance) <$> view (at origin) cs'
   originNonce   <- (view nonce)   <$> view (at origin) cs'
-  let gasDeposit = (effectiveprice tx (blockBaseFee block)) * (txGasLimit tx)
+  let gasDeposit = (effectiveprice tx (blockBaseFee block)) * (num $ txGasLimit tx)
   if gasDeposit + (txValue tx) <= originBalance
     && txNonce tx == originNonce && blockBaseFee block <= maxBaseFee tx
   then Just ()

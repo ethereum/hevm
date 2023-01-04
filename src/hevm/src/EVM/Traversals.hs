@@ -8,9 +8,6 @@ module EVM.Traversals where
 
 import Prelude hiding (Word, LT, GT)
 
-import Data.Map (Map)
-import qualified Data.Map as Map
-import Control.Monad.State
 import Control.Monad.Identity
 
 import EVM.Types
@@ -69,16 +66,10 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- control flow
 
-      e@(Invalid a) -> f e <> (foldl (foldProp f) mempty a)
-      e@(StackLimitExceeded a) -> f e <> (foldl (foldProp f) mempty a)
-      e@(InvalidMemoryAccess a) -> f e <> (foldl (foldProp f) mempty a)
-      e@(BadJumpDestination a) -> f e <> (foldl (foldProp f) mempty a)
-      e@(SelfDestruct a) -> f e <> (foldl (foldProp f) mempty a)
-      e@(IllegalOverflow a) -> f e <> (foldl (foldProp f) mempty a)
       e@(Revert a b) -> f e <> (foldl (foldProp f) mempty a) <> (go b)
       e@(Return a b c) -> f e <> (foldl (foldProp f) mempty a) <> (go b) <> (go c)
       e@(ITE a b c) -> f e <> (go a) <> (go b) <> (go c)
-      e@(TmpErr a _) -> f e <> (foldl (foldProp f) mempty a)
+      e@(Failure a _) -> f e <> (foldl (foldProp f) mempty a)
 
       -- integers
 
@@ -127,7 +118,7 @@ foldExpr f acc expr = acc <> (go expr)
       e@(Coinbase) -> f e
       e@(Timestamp) -> f e
       e@(BlockNumber) -> f e
-      e@(Difficulty) -> f e
+      e@(PrevRandao) -> f e
       e@(GasLimit) -> f e
       e@(ChainId) -> f e
       e@(BaseFee) -> f e
@@ -317,24 +308,9 @@ mapExprM f expr = case expr of
 
   -- control flow
 
-  Invalid a -> do
+  Failure a b -> do
     a' <- mapM (mapPropM f) a
-    f (Invalid a')
-  SelfDestruct a -> do
-    a' <- mapM (mapPropM f) a
-    f (SelfDestruct a')
-  IllegalOverflow a -> do
-    a' <- mapM (mapPropM f) a
-    f (IllegalOverflow a')
-  InvalidMemoryAccess a -> do
-    a' <- mapM (mapPropM f) a
-    f (InvalidMemoryAccess a')
-  StackLimitExceeded a -> do
-    a' <- mapM (mapPropM f) a
-    f (StackLimitExceeded a')
-  BadJumpDestination a -> do
-    a' <- mapM (mapPropM f) a
-    f (BadJumpDestination a')
+    f (Failure a' b)
   Revert a b -> do
     a' <- mapM (mapPropM f) a
     b' <- mapExprM f b
@@ -350,10 +326,6 @@ mapExprM f expr = case expr of
     b' <- mapExprM f b
     c' <- mapExprM f c
     f (ITE a' b' c')
-
-  TmpErr a b -> do
-    a' <- mapM (mapPropM f) a
-    f (TmpErr a' b)
 
   -- integers
 
@@ -489,7 +461,7 @@ mapExprM f expr = case expr of
   Coinbase -> f Coinbase
   Timestamp -> f Timestamp
   BlockNumber -> f BlockNumber
-  Difficulty -> f Difficulty
+  PrevRandao -> f PrevRandao
   GasLimit -> f GasLimit
   ChainId -> f ChainId
   BaseFee -> f BaseFee

@@ -5,38 +5,33 @@
 
 module Main where
 
-import Data.Text (Text, pack)
+import Data.Text (Text)
 import Data.ByteString (ByteString)
 import Data.Bits
 import System.Directory
-import System.IO.Temp
-import System.Process (readProcess)
-import GHC.IO.Handle (hClose)
 import GHC.Natural
 import Control.Monad
 import Text.RE.TDFA.String
 import Text.RE.Replace
-import Data.Array.IO
 import Data.Time
+import System.Environment
 
 import Prelude hiding (fail, LT, GT)
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BS (fromStrict)
 import qualified Data.ByteString.Base16 as Hex
-import Data.Bits ((.&.))
 import Data.Maybe
 import Data.Typeable
-import Data.Map (lookup)
 import Data.List (elemIndex)
 import Data.DoubleWord
 import Test.Tasty
-import Test.Tasty.QuickCheck
+import Test.Tasty.QuickCheck hiding (Failure)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty.HUnit
-import Test.Tasty.Runners
+import Test.Tasty.Runners hiding (Failure)
 import Test.Tasty.ExpectedFailure
 
 import Control.Monad.State.Strict (execState, runState)
@@ -45,35 +40,25 @@ import Control.Lens hiding (List, pre, (.>), re)
 import qualified Data.Vector as Vector
 import Data.String.Here
 import qualified Data.Map.Strict as Map
-import Data.Map (Map)
 
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
 
-import EVM hiding (Query)
+import EVM hiding (Query, allowFFI)
 import EVM.SymExec
-import EVM.UnitTest (dappTest, UnitTestOptions, getParametersFromEnvironmentVariables)
 import EVM.ABI
 import EVM.Exec
-import EVM.Dapp
-import EVM.Format
 import qualified EVM.Patricia as Patricia
 import EVM.Precompiled
 import EVM.RLP
 import EVM.Solidity
 import EVM.Types
 import EVM.Traversals
-import EVM.SMT hiding (storage, calldata)
-import qualified EVM.TTY as TTY
+import EVM.SMT hiding (one)
 import qualified EVM.Expr as Expr
-import qualified EVM.Fetch as Fetch
-import qualified EVM.UnitTest
-import qualified Paths_hevm as Paths
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
-import Language.SMT2.Syntax (SpecConstant())
 import Data.List (isSubsequenceOf)
-import GHC.Conc (getNumProcessors)
+import EVM.TestUtils
 
 main :: IO ()
 main = defaultMain tests
@@ -467,6 +452,9 @@ tests = testGroup "hevm"
                               (r, mempty), (s, mempty), (t, mempty)]
        === (Just $ Patricia.Literal Patricia.Empty)
     ]
+ , testGroup "Remote State Tests"
+   [
+   ]
  , testGroup "Panic code tests via symbolic execution"
   [
      testCase "assert-fail" $ do
@@ -478,9 +466,9 @@ tests = testGroup "hevm"
              }
             }
            |]
-       [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-       assertEqual "Must be 0" 0 $ getArgInteger ctr "arg1"
-       putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getArgInteger ctr "arg1")
+       (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+       assertEqual "Must be 0" 0 $ getVar ctr "arg1"
+       putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getVar ctr "arg1")
      ,
      testCase "safeAdd-fail" $ do
         Just c <- solcRuntime "MyContract"
@@ -491,12 +479,12 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x11] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-        let x = getArgInteger ctr "arg1"
-        let y = getArgInteger ctr "arg2"
+        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x11] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+        let x = getVar ctr "arg1"
+        let y = getVar ctr "arg2"
 
         let maxUint = 2 ^ (256 :: Integer) :: Integer
-        assertBool "Overflow must occur" (x+y >= maxUint)
+        assertBool "Overflow must occur" (toInteger x + toInteger y >= maxUint)
         putStrLn "expected counterexample found"
      ,
      testCase "div-by-zero-fail" $ do
@@ -508,8 +496,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x12] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-        assertEqual "Division by 0 needs b=0" (getArgInteger ctr "arg2") 0
+        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x12] c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+        assertEqual "Division by 0 needs b=0" (getVar ctr "arg2") 0
         putStrLn "expected counterexample found"
      ,
      testCase "enum-conversion-fail" $ do
@@ -522,8 +510,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x21] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-        assertBool "Enum is only defined for 0 and 1" $ (getArgInteger ctr "arg1") > 1
+        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x21] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        assertBool "Enum is only defined for 0 and 1" $ (getVar ctr "arg1") > 1
         putStrLn "expected counterexample found"
      ,
      -- TODO 0x22 is missing: "0x22: If you access a storage byte array that is incorrectly encoded."
@@ -560,8 +548,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) [] defaultVeriOpts
-        assertBool "Access must be beyond element 2" $ (getArgInteger ctr "arg1") > 1
+        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) [] defaultVeriOpts
+        assertBool "Access must be beyond element 2" $ (getVar ctr "arg1") > 1
         putStrLn "expected counterexample found"
       ,
       -- TODO the system currently does not allow for symbolic array size allocation
@@ -574,7 +562,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Cex _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x41] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x41] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "expected counterexample found"
       ,
       -- TODO the system currently does not allow for symbolic JUMP
@@ -594,7 +582,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Cex _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x51] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x51] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "expected counterexample found"
  ]
 
@@ -621,12 +609,13 @@ tests = testGroup "hevm"
         --runDappTest testFile "prove_smtTimeout" >>= assertEqual "test result" False
         runDappTest testFile "prove_multi" >>= assertEqual "test result" False
         runDappTest testFile "prove_mul" >>= assertEqual "test result" False
+        -- TODO: implement overflow checking optimizations and enable, currently this runs forever
         --runDappTest testFile "prove_distributivity" >>= assertEqual "test result" False
-        --runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
+        runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
     , testCase "Loop-Tests" $ do
         let testFile = "test/contracts/pass/loops.sol"
-        runDappTestCustom testFile "prove_loop" (Just 10) False >>= assertEqual "test result" True
-        runDappTestCustom testFile "prove_loop" (Just 100) False >>= assertEqual "test result" False
+        runDappTestCustom testFile "prove_loop" (Just 10) False Nothing >>= assertEqual "test result" True
+        runDappTestCustom testFile "prove_loop" (Just 100) False Nothing >>= assertEqual "test result" False
     , testCase "Invariant-Tests-Pass" $ do
         let testFile = "test/contracts/pass/invariants.sol"
         runDappTest testFile ".*" >>= assertEqual "test result" True
@@ -639,7 +628,7 @@ tests = testGroup "hevm"
         runDappTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Cheat-Codes-Fail" $ do
         let testFile = "test/contracts/fail/cheatCodes.sol"
-        runDappTestCustom testFile "testBadFFI" Nothing False >>= assertEqual "test result" False
+        runDappTestCustom testFile "testBadFFI" Nothing False Nothing >>= assertEqual "test result" False
     ]
   , testGroup "Symbolic execution"
       [
@@ -653,7 +642,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256)", [AbiIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256)", [AbiIntType 256])) [] defaultVeriOpts
         putStrLn "Require works as expected"
      ,
      testCase "ITE-with-bitwise-AND" $ do
@@ -674,7 +663,7 @@ tests = testGroup "hevm"
          }
          |]
        -- should find a counterexample
-       [Cex _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+       (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
        putStrLn "expected counterexample found"
      ,
      testCase "ITE-with-bitwise-OR" $ do
@@ -693,7 +682,7 @@ tests = testGroup "hevm"
            }
          }
          |]
-       [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+       (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
        putStrLn "this should always be true, due to bitwise OR with positive value"
     ,
     -- CopySlice check
@@ -719,7 +708,17 @@ tests = testGroup "hevm"
           }
         }
         |]
-      [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("checkval(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] VeriOpts {simp = False, debug = False, maxIter = Nothing, askSmtIters = Nothing}
+      let
+        opts = VeriOpts
+          { simp = False
+          , debug = False
+          , maxIter = Nothing
+          , askSmtIters = Nothing
+          , rpcInfo = Nothing
+          }
+        calldata' = Just ("checkval(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])
+      (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
+        checkAssert s defaultPanicCodes c calldata' [] opts
       putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
      -- TODO look at tests here for SAR: https://github.com/dapphub/dapptools/blob/01ef8ea418c3fe49089a44d56013d8fcc34a1ec2/src/dapp-tests/pass/constantinople.sol#L250
@@ -737,7 +736,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
         putStrLn "SAR works as expected"
      ,
      testCase "opcode-sar-pos" $ do
@@ -754,7 +753,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
         putStrLn "SAR works as expected"
      ,
      testCase "opcode-sar-fixedval-pos" $ do
@@ -771,7 +770,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
         putStrLn "SAR works as expected"
      ,
      testCase "opcode-sar-fixedval-neg" $ do
@@ -788,7 +787,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(int256,int256)", [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
         putStrLn "SAR works as expected"
      ,
      testCase "opcode-div-zero-1" $ do
@@ -805,7 +804,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _]  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
       ,
      testCase "opcode-div-zero-2" $ do
@@ -822,7 +821,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _]  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
      ,
      testCase "opcode-sdiv-zero-1" $ do
@@ -839,7 +838,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _]  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
       ,
      testCase "opcode-sdiv-zero-2" $ do
@@ -856,7 +855,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _]  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
       ,
      testCase "opcode-signextend-neg" $ do
@@ -878,7 +877,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _]  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "signextend works as expected"
       ,
      testCase "opcode-signextend-pos-nochop" $ do
@@ -896,7 +895,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint8)", [AbiUIntType 256, AbiUIntType 8])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint8)", [AbiUIntType 256, AbiUIntType 8])) [] defaultVeriOpts
         putStrLn "signextend works as expected"
       ,
       testCase "opcode-signextend-pos-chopped" $ do
@@ -914,7 +913,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint8)", [AbiUIntType 256, AbiUIntType 8])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint8)", [AbiUIntType 256, AbiUIntType 8])) [] defaultVeriOpts
         putStrLn "signextend works as expected"
       ,
       -- when b is too large, value is unchanged
@@ -932,7 +931,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint8)", [AbiUIntType 256, AbiUIntType 8])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint8)", [AbiUIntType 256, AbiUIntType 8])) [] defaultVeriOpts
         putStrLn "signextend works as expected"
      ,
      testCase "opcode-shl" $ do
@@ -950,7 +949,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "SAR works as expected"
      ,
      testCase "opcode-xor-cancel" $ do
@@ -967,7 +966,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "XOR works as expected"
       ,
       testCase "opcode-xor-reimplement" $ do
@@ -983,7 +982,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "XOR works as expected"
       ,
       testCase "opcode-mulmod-no-overflow" $ do
@@ -1006,7 +1005,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint8,uint8,uint8)", [AbiUIntType 8, AbiUIntType 8, AbiUIntType 8])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint8,uint8,uint8)", [AbiUIntType 8, AbiUIntType 8, AbiUIntType 8])) [] defaultVeriOpts
         putStrLn "MULMOD is fine on NON overflow values"
       ,
       testCase "opcode-div-res-zero-on-div-by-zero" $ do
@@ -1023,7 +1022,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint16)", [AbiUIntType 16])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint16)", [AbiUIntType 16])) [] defaultVeriOpts
         putStrLn "DIV by zero is zero"
       ,
       -- Somewhat tautological since we are asserting the precondition
@@ -1045,7 +1044,7 @@ tests = testGroup "hevm"
               in case leaf of
                    Return _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
                    _ -> PBool True
-        [Qed res] <- withSolvers Z3 1 Nothing $ \s -> verifyContract s safeAdd (Just ("add(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
+        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s safeAdd (Just ("add(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
 
@@ -1067,7 +1066,7 @@ tests = testGroup "hevm"
               in case leaf of
                    Return _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
                    _ -> PBool True
-        [Qed res] <- withSolvers Z3 1 Nothing $ \s ->
+        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
           verifyContract s safeAdd (Just ("add(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
       ,
@@ -1092,7 +1091,7 @@ tests = testGroup "hevm"
               in case leaf of
                 Return _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
                 _ -> PBool True
-        [Qed res] <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
+        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         -- tests how whiffValue handles Neg via application of the triple IsZero simplification rule
@@ -1117,7 +1116,7 @@ tests = testGroup "hevm"
                     }
                     |]
             Just c <- yulRuntime "Neg" src
-            [Qed res] <- withSolvers Z3 4 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("hello(address)", [AbiAddressType])) [] defaultVeriOpts
+            (res, [Qed _]) <- withSolvers Z3 4 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("hello(address)", [AbiAddressType])) [] defaultVeriOpts
             putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "catch-storage-collisions-noproblem" $ do
@@ -1149,7 +1148,7 @@ tests = testGroup "hevm"
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
-          [Qed _] <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
+          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
           putStrLn "Correct, this can never fail"
         ,
         -- Inspired by these `msg.sender == to` token bugs
@@ -1181,9 +1180,9 @@ tests = testGroup "hevm"
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
-          [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
-          let x = getArgInteger ctr "arg1"
-          let y = getArgInteger ctr "arg2"
+          (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
+          let x = getVar ctr "arg1"
+          let y = getVar ctr "arg2"
           putStrLn $ "y:" <> show y
           putStrLn $ "x:" <> show x
           assertEqual "Catch storage collisions" x y
@@ -1198,7 +1197,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex (l, _)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo()", [])) [] defaultVeriOpts
+          (_, [Cex (l, _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo()", [])) [] defaultVeriOpts
           assertEqual "incorrect revert msg" l (EVM.Types.Revert [] (ConcreteBuf $ panicMsg 0x01))
         ,
         testCase "simple-assert-2" $ do
@@ -1210,8 +1209,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [(Cex (_, ctr))] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-          assertEqual "Must be 10" 10 $ getArgInteger ctr "arg1"
+          (_, [(Cex (_, ctr))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          assertEqual "Must be 10" 10 $ getVar ctr "arg1"
           putStrLn "Got 10 Cex, as expected"
         ,
         testCase "assert-fail-equal" $ do
@@ -1224,8 +1223,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex (_, a), Cex (_, b)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-          let ints = map (flip getArgInteger "arg1") [a,b]
+          (_, [Cex (_, a), Cex (_, b)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          let ints = map (flip getVar "arg1") [a,b]
           assertBool "0 must be one of the Cex-es" $ isJust $ elemIndex 0 ints
           putStrLn "expected 2 counterexamples found, one Cex is the 0 value"
         ,
@@ -1239,9 +1238,9 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex (_, a), Cex (_, b)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-          let x = getArgInteger a "arg1"
-          let y = getArgInteger b "arg1"
+          (_, [Cex (_, a), Cex (_, b)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          let x = getVar a "arg1"
+          let y = getVar b "arg1"
           assertBool "At least one has to be 0, to go through the first assert" (x == 0 || y == 0)
           putStrLn "expected 2 counterexamples found."
         ,
@@ -1255,7 +1254,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex _, Cex _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Cex _, Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "expected 2 counterexamples found"
         ,
         testCase "assert-2nd-arg" $ do
@@ -1267,8 +1266,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-          assertEqual "Must be 666" 666 $ getArgInteger ctr "arg2"
+          (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          assertEqual "Must be 666" 666 $ getVar ctr "arg2"
           putStrLn "Found arg2 Ctx to be 666"
         ,
         -- LSB is zeroed out, byte(31,x) takes LSB, so y==0 always holds
@@ -1284,7 +1283,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         -- We zero out everything but the LSB byte. However, byte(31,x) takes the LSB byte
@@ -1301,9 +1300,9 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-          assertBool "last byte must be non-zero" $ ((Data.Bits..&.) (getArgInteger ctr "arg1") 0xff) > 0
-          putStrLn $ "Expected counterexample found"
+          (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          assertBool "last byte must be non-zero" $ ((Data.Bits..&.) (getVar ctr "arg1") 0xff) > 0
+          putStrLn "Expected counterexample found"
         ,
         -- We zero out everything but the 2nd LSB byte. However, byte(31,x) takes the 2nd LSB byte
         -- so there is a counterexamle, where 2nd LSB of x is not zero
@@ -1319,9 +1318,9 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-          assertBool "second to last byte must be non-zero" $ ((Data.Bits..&.) (getArgInteger ctr "arg1") 0xff00) > 0
-          putStrLn $ "Expected counterexample found"
+          (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          assertBool "second to last byte must be non-zero" $ ((Data.Bits..&.) (getVar ctr "arg1") 0xff00) > 0
+          putStrLn "Expected counterexample found"
         ,
         -- Reverse of thest above
         testCase "check-lsb-msb4 2nd byte rev" $ do
@@ -1338,7 +1337,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         -- Bitwise OR operation test
@@ -1354,7 +1353,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "When OR-ing with full 1's we should get back full 1's"
         ,
         -- Bitwise OR operation test
@@ -1371,7 +1370,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "When OR-ing with a byte of 1's, we should get 1's back there"
         ,
         testCase "Deposit contract loop (z3)" $ do
@@ -1393,7 +1392,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("deposit(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "Deposit-contract-loop-error-version" $ do
@@ -1415,9 +1414,9 @@ tests = testGroup "hevm"
               }
              }
             |]
-          [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) [] defaultVeriOpts
-          assertEqual "Must be 255" 255 $ getArgInteger ctr "arg1"
-          putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getArgInteger ctr "arg1")
+          (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s allPanicCodes c (Just ("deposit(uint8)", [AbiUIntType 8])) [] defaultVeriOpts
+          assertEqual "Must be 255" 255 $ getVar ctr "arg1"
+          putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getVar ctr "arg1")
         ,
         testCase "explore function dispatch" $ do
           Just c <- solcRuntime "A"
@@ -1428,7 +1427,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "check-asm-byte-in-bounds" $ do
@@ -1447,8 +1446,38 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn "in bounds byte reads return the expected value"
+        ,
+        testCase "check-div-mod-sdiv-smod-by-zero-constant-prop" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function foo(uint256 e) external pure {
+                uint x = 0;
+                uint y = 55;
+                uint z;
+                assembly { z := div(y,x) }
+                assert(z == 0);
+                assembly { z := div(x,y) }
+                assert(z == 0);
+                assembly { z := sdiv(y,x) }
+                assert(z == 0);
+                assembly { z := sdiv(x,y) }
+                assert(z == 0);
+                assembly { z := mod(y,x) }
+                assert(z == 0);
+                assembly { z := mod(x,y) }
+                assert(z == 0);
+                assembly { z := smod(y,x) }
+                assert(z == 0);
+                assembly { z := smod(x,y) }
+                assert(z == 0);
+              }
+            }
+            |]
+          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("foo(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          putStrLn "div/mod/sdiv/smod by zero works as expected during constant propagation"
         ,
         testCase "check-asm-byte-oob" $ do
           Just c <- solcRuntime "C"
@@ -1462,7 +1491,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn "oob byte reads always return 0"
         ,
         testCase "injectivity of keccak (32 bytes)" $ do
@@ -1474,7 +1503,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "injectivity of keccak all pairs (32 bytes)" $ do
@@ -1492,7 +1521,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "injectivity of keccak contrapositive (32 bytes)" $ do
@@ -1505,7 +1534,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "injectivity of keccak (64 bytes)" $ do
@@ -1517,11 +1546,11 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Cex (_, ctr)] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256,uint256,uint256)", replicate 4 (AbiUIntType 256))) [] defaultVeriOpts
-          let x = getArgInteger ctr "arg1"
-          let y = getArgInteger ctr "arg2"
-          let w = getArgInteger ctr "arg3"
-          let z = getArgInteger ctr "arg4"
+          (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256,uint256,uint256)", replicate 4 (AbiUIntType 256))) [] defaultVeriOpts
+          let x = getVar ctr "arg1"
+          let y = getVar ctr "arg2"
+          let w = getVar ctr "arg3"
+          let z = getVar ctr "arg4"
           assertEqual "x==y for hash collision" x y
           assertEqual "w==z for hash collision" w z
           putStrLn "expected counterexample found"
@@ -1540,7 +1569,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         ignoreTest $ testCase "keccak soundness" $ do
@@ -1557,7 +1586,7 @@ tests = testGroup "hevm"
             |]
 
           -- should find a counterexample
-          [Cex _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "expected counterexample found"
         ,
         testCase "multiple-contracts" $ do
@@ -1579,7 +1608,7 @@ tests = testGroup "hevm"
               aAddr = Addr 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
           Just c <- solcRuntime "C" code'
           Just a <- solcRuntime "A" code'
-          [Cex _] <- withSolvers Z3 1 Nothing $ \s -> do
+          (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> do
             let vm0 = abstractVM (Just ("call_A()", [])) [] c Nothing SymbolicS
             let vm = vm0
                   & set (state . callvalue) (Lit 0)
@@ -1588,7 +1617,7 @@ tests = testGroup "hevm"
                   -- NOTE: this used to as follows, but there is no _storage field in Contract record
                   -- (Map.insert aAddr (initialContract (RuntimeCode $ ConcreteBuffer a) &
                   --                     set EVM.storage (EVM.Symbolic [] store)))
-            verify s defaultVeriOpts vm Nothing (Just $ checkAssertions defaultPanicCodes)
+            verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLn "found counterexample:"
         ,
         expectFail $ testCase "calling unique contracts (read from storage)" $ do
@@ -1608,7 +1637,7 @@ tests = testGroup "hevm"
                 uint public x;
               }
             |]
-          [Cex _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("call_A()", [])) [] defaultVeriOpts
+          (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("call_A()", [])) [] defaultVeriOpts
           putStrLn "expected counterexample found"
         ,
         testCase "keccak concrete and sym agree" $ do
@@ -1622,7 +1651,7 @@ tests = testGroup "hevm"
                 }
               }
             |]
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("kecc(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("kecc(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "keccak concrete and sym injectivity" $ do
@@ -1634,13 +1663,13 @@ tests = testGroup "hevm"
                 }
               }
             |]
-          [Qed res] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         ignoreTest $ testCase "safemath distributivity (yul)" $ do
           let yulsafeDistributivity = hex "6355a79a6260003560e01c14156016576015601f565b5b60006000fd60a1565b603d602d604435600435607c565b6039602435600435607c565b605d565b6052604b604435602435605d565b600435607c565b141515605a57fe5b5b565b6000828201821115151560705760006000fd5b82820190505b92915050565b6000818384048302146000841417151560955760006000fd5b82820290505b92915050565b"
           let vm =  abstractVM (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] yulsafeDistributivity Nothing SymbolicS
-          [Qed _] <-  withSolvers Z3 1 Nothing $ \s -> verify s defaultVeriOpts vm Nothing (Just $ checkAssertions defaultPanicCodes)
+          (_, [Qed _]) <-  withSolvers Z3 1 Nothing $ \s -> verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
         ,
         testCase "safemath distributivity (sol)" $ do
@@ -1665,7 +1694,7 @@ tests = testGroup "hevm"
               }
             |]
 
-          [Qed _] <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "Proven"
  ]
   , testGroup "Equivalence checking"
@@ -1744,16 +1773,15 @@ tests = testGroup "hevm"
               }
           |]
         withSolvers Z3 3 Nothing $ \s -> do
-          let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 2, askSmtIters = Just 2 }
+          let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 2, askSmtIters = Just 2, rpcInfo = Nothing}
           a <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
           assertEqual "Must be different" (any isCex a) True
           return ()
       , testCase "eq-all-yul-optimization-tests" $ do
-        let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 5, askSmtIters = Just 20 }
-            ignoredTests =
-                    --[
-                      --"controlFlowSimplifier/terminating_for_nested.yul"
-                    --, "controlFlowSimplifier/terminating_for_nested_reversed.yul"
+        let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 5, askSmtIters = Just 20, rpcInfo = Nothing }
+            ignoredTests = [
+                      -- "controlFlowSimplifier/terminating_for_nested.yul"
+                    -- , "controlFlowSimplifier/terminating_for_nested_reversed.yul"
 
                     -- unbounded loop --
                     [ "commonSubexpressionEliminator/branches_for.yul"
@@ -1957,10 +1985,11 @@ tests = testGroup "hevm"
                     , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV I think?
                     ]
 
-        let dir = "solidity/test/libyul/yulOptimizerTests"
-        dircontents <- System.Directory.listDirectory dir
+        solcRepo <- fromMaybe (error "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
+        let testDir = solcRepo <> "/test/libyul/yulOptimizerTests"
+        dircontents <- System.Directory.listDirectory testDir
         let
-          fullpaths = map ((dir ++ "/") ++) dircontents
+          fullpaths = map ((testDir ++ "/") ++) dircontents
           recursiveList :: [FilePath] -> [FilePath] -> IO [FilePath]
           recursiveList (a:ax) b =  do
               isdir <- doesDirectoryExist a
@@ -2208,16 +2237,17 @@ genNat :: Gen Int
 genNat = fmap fromIntegral (arbitrary :: Gen Natural)
 
 genName :: Gen Text
-genName = fmap T.pack $ listOf1 (oneof . (fmap pure) $ ['a'..'z'] <> ['A'..'Z'])
+-- In order not to generate SMT reserved words, we prepend with "esc_"
+genName = fmap (T.pack . ("esc_" <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z'] <> ['A'..'Z'])
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
- [ pure $ Invalid []
- , pure $ EVM.Types.IllegalOverflow []
- , pure $ SelfDestruct []
+ [ pure $ Failure [] Invalid
+ , pure $ Failure [] EVM.Types.IllegalOverflow
+ , pure $ Failure [] SelfDestruct
  ]
 genEnd sz = oneof
- [ liftM2 EVM.Types.Revert (return []) subBuf
+ [ fmap (EVM.Types.Revert []) subBuf
  , liftM3 Return (return []) subBuf subStore
  , liftM3 ITE subWord subEnd subEnd
  ]
@@ -2241,7 +2271,7 @@ genWord litFreq 0 = frequency
       , pure Coinbase
       , pure Timestamp
       , pure BlockNumber
-      , pure Difficulty
+      , pure PrevRandao
       , pure GasLimit
       , pure ChainId
       , pure BaseFee
@@ -2400,14 +2430,6 @@ data Invocation
   = SolidityCall Text [AbiValue]
   deriving Show
 
-getArgInteger :: EVM.SMT.SMTCex -> String -> Integer
-getArgInteger a name = getIntegerFromSCHex $ getScHexa a
-  where
-    getScHexa :: EVM.SMT.SMTCex -> Language.SMT2.Syntax.SpecConstant
-    getScHexa tmp = fromJust . Data.Map.lookup (Data.Text.pack name) $ smtcex tmp
-    smtcex :: EVM.SMT.SMTCex -> Map Text Language.SMT2.Syntax.SpecConstant
-    smtcex (EVM.SMT.SMTCex x _ _ _) = x
-
 assertSolidityComputation :: Invocation -> AbiValue -> IO ()
 assertSolidityComputation (SolidityCall s args) x =
   do y <- runStatements s args (abiValueType x)
@@ -2423,118 +2445,3 @@ bothM f (a, a') = do
 
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
-
-runDappTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> IO Bool
-runDappTestCustom testFile match maxIter ffiAllowed = do
-  root <- Paths.getDataDir
-  (json, _) <- compileWithDSTest testFile
-  --TIO.writeFile "output.json" json
-  withCurrentDirectory root $ do
-    withSystemTempFile "output.json" $ \file handle -> do
-      hClose handle
-      TIO.writeFile file json
-      withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json match maxIter ffiAllowed
-        dappTest opts solvers file Nothing
-
-runDappTest :: FilePath -> Text -> IO Bool
-runDappTest testFile match = runDappTestCustom testFile match Nothing True
-
-debugDappTest :: FilePath -> IO ()
-debugDappTest testFile = do
-  root <- Paths.getDataDir
-  (json, _) <- compileWithDSTest testFile
-  --TIO.writeFile "output.json" json
-  withCurrentDirectory root $ do
-    withSystemTempFile "output.json" $ \file handle -> do
-      hClose handle
-      TIO.writeFile file json
-      withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json ".*" Nothing True
-        TTY.main opts root file
-
-testOpts :: SolverGroup -> FilePath -> Text -> Text -> Maybe Integer -> Bool -> IO UnitTestOptions
-testOpts solvers root solcJson match maxIter allowFFI= do
-  srcInfo <- case readJSON solcJson of
-               Nothing -> error "Could not read solc json"
-               Just (contractMap, asts, sources) -> do
-                 sourceCache <- makeSourceCache sources asts
-                 pure $ dappInfo root contractMap sourceCache
-
-  params <- getParametersFromEnvironmentVariables Nothing
-
-  pure EVM.UnitTest.UnitTestOptions
-    { EVM.UnitTest.oracle = Fetch.oracle solvers Nothing
-    , EVM.UnitTest.maxIter = maxIter
-    , EVM.UnitTest.askSmtIters = Nothing
-    , EVM.UnitTest.smtdebug = False
-    , EVM.UnitTest.smtTimeout = Nothing
-    , EVM.UnitTest.solver = Nothing
-    , EVM.UnitTest.covMatch = Nothing
-    , EVM.UnitTest.verbose = Just 1
-    , EVM.UnitTest.match = match
-    , EVM.UnitTest.maxDepth = Nothing
-    , EVM.UnitTest.fuzzRuns = 100
-    , EVM.UnitTest.replay = Nothing
-    , EVM.UnitTest.vmModifier = id
-    , EVM.UnitTest.testParams = params
-    , EVM.UnitTest.dapp = srcInfo
-    , EVM.UnitTest.ffiAllowed = allowFFI
-    }
-
-compileWithDSTest :: FilePath -> IO (Text, Text)
-compileWithDSTest src =
-  withSystemTempFile "input.json" $ \file handle -> do
-    hClose handle
-    dsTest <- readFile =<< Paths.getDataFileName "test/contracts/lib/test.sol"
-    erc20 <- readFile =<< Paths.getDataFileName "test/contracts/lib/erc20.sol"
-    testFilePath <- Paths.getDataFileName src
-    testFile <- readFile testFilePath
-    TIO.writeFile file
-      [i|
-      {
-        "language": "Solidity",
-        "sources": {
-          "ds-test/test.sol": {
-            "content": ${dsTest}
-          },
-          "lib/erc20.sol": {
-            "content": ${erc20}
-          },
-          "test.sol": {
-            "content": ${testFile}
-          }
-        },
-        "settings": {
-          "metadata": {
-            "useLiteralContent": true
-          },
-          "outputSelection": {
-            "*": {
-              "*": [
-                "metadata",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "abi",
-                "storageLayout",
-                "evm.bytecode.sourceMap",
-                "evm.bytecode.linkReferences",
-                "evm.bytecode.generatedSources",
-                "evm.deployedBytecode.sourceMap",
-                "evm.deployedBytecode.linkReferences",
-                "evm.deployedBytecode.generatedSources"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      }
-      |]
-    x <- T.pack <$>
-      readProcess
-        "solc"
-        ["--allow-paths", file, "--standard-json", file]
-        ""
-    return (x, T.pack testFilePath)
