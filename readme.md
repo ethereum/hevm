@@ -34,7 +34,7 @@ root to enter a development shell containing all required dev dependencies. If y
 [direnv](https://direnv.net/), then you can run `direnv allow`, and the shell will be automatically
 entered each time you cd in the project repo.
 
-Once in the shell you can `cd src/hevm` and use the usual `cabal` commands to build and test hevm:
+Once in the shell you can use the usual `cabal` commands to build and test hevm:
 
 ```
 $ cabal build          # build the hevm library
