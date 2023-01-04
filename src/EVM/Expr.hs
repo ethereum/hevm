@@ -330,7 +330,6 @@ copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e
             else padRight (num size) $ BS.take (num size) (BS.drop (num srcOffset) src)
           tl = BS.drop (num dstOffset + num size) dst
       in ConcreteBuf $ hd <> sl <> tl
-  | size < maxBytes = ConcreteBuf $ BS.replicate (num size) 0
   | otherwise = CopySlice a b c d e
 
 -- copying 32 bytes can be rewritten to a WriteWord on dst (e.g. CODECOPY of args during constructors)
