@@ -21,7 +21,7 @@ import Control.Concurrent (forkIO, killThread)
 import Data.Char (isSpace)
 import Data.Containers.ListUtils (nubOrd)
 import Language.SMT2.Parser (getValueRes, parseCommentFreeFileMsg)
-import Language.SMT2.Syntax (SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
+import Language.SMT2.Syntax (Symbol, SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
 import Data.Word
 import Numeric (readHex, readBin)
 import Data.ByteString (ByteString)
@@ -29,6 +29,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.List as List
 import Data.List.NonEmpty (NonEmpty((:|)))
+import qualified Data.List.NonEmpty as NonEmpty
 import Data.String.Here
 import Data.Maybe (fromMaybe, fromJust)
 import Data.Map (Map)
@@ -47,6 +48,7 @@ import EVM.CSE
 import EVM.Keccak
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
 
+import Debug.Trace
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
 -- variable names in SMT that we want to get values for
@@ -388,6 +390,7 @@ referencedVarsGo = \case
   Var s -> [fromText s]
   _ -> []
 
+referencedVars :: Expr a -> [Builder]
 referencedVars expr = nubOrd $ foldExpr referencedVarsGo [] expr
 
 referencedVars' :: Prop -> [Builder]
@@ -780,7 +783,53 @@ getVars parseFn inst names = Map.mapKeys parseFn <$> foldM getOne mempty names
       pure $ Map.insert name val acc
 
 getStore :: SolverInstance -> IO Text
-getStore inst = getValue inst "abstractStore"
+getStore inst = do
+  raw <- getValue inst "abstractStore"
+  let parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
+                 Right (ResSpecific (valParsed :| [])) -> valParsed
+                 r -> parseErr r
+      fun = case parsed of
+        (TermQualIdentifier (Unqualified (IdSymbol symbol)), term) ->
+          if symbol == "abstractStore"
+          then parse1DArray Map.empty (\_ -> Nothing) term
+          else error "Internal Error: solver did not return model for requested value"
+        r -> parseErr r
+
+  traceM "--- parsed ---"
+  traceShowM parsed
+  traceM "--- parse end ---"
+  pure raw
+
+
+parse1DArray :: (Map Symbol Term) -> (W256 -> Maybe W256) -> Term -> (W256 -> Maybe W256)
+parse1DArray env f = \case
+  -- let (x t') t
+  TermLet (VarBinding x t' :| []) t -> parse1DArray (Map.insert x t' env) f t
+  TermLet (VarBinding x t' :| lets) t -> parse1DArray (Map.insert x t' env) f (TermLet (NonEmpty.fromList lets) t)
+  -- (as const (Array (_ BitVec 256) (_ BitVec 256))) <constant>
+  TermApplication asconst (TermSpecConstant val :| []) | isAsConst asconst ->
+    \_ -> Just $ parseW256 val
+  -- store arr ind val
+  TermApplication store (TermSpecConstant ind :| [TermSpecConstant val]) | isStore store ->
+    \x -> if x == parseW256 ind then Just (parseW256 val) else f x
+  _ -> error "Internal error: cannot parse array value"
+  where
+
+    isAsConst = \case
+      Qualified (IdSymbol "const") sort -> is1DArray sort
+      _ -> False
+    is1DArray = \case
+      SortParameter (IdSymbol "Array") (sort1 :| [sort2]) ->
+         isBitVec256 sort1 && isBitVec256 sort2
+      _ -> False
+    isBitVec256 = \case
+      SortSymbol (IdIndexed "BitVec" (IxNumeral "256" :| [])) -> True
+      _ -> False
+    isStore = \case
+      Unqualified (IdSymbol "store") -> True
+      _ -> False
+
+
 
 getBufs :: SolverInstance -> [TS.Text] -> IO (Map (Expr Buf) ByteString)
 getBufs inst names = foldM getBuf mempty names
