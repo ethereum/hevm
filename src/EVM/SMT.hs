@@ -803,11 +803,16 @@ getStore inst = do
 
 parse1DArray :: (Map Symbol Term) -> (W256 -> Maybe W256) -> Term -> (W256 -> Maybe W256)
 parse1DArray env f = \case
+  -- variable reference
+  TermQualIdentifier (Unqualified (IdSymbol s)) ->
+    case Map.lookup s env of
+      Just t -> parse1DArray env f t
+      Nothing -> error "Internal error: unknown identifier, cannot parse array"
   -- let (x t') t
   TermLet (VarBinding x t' :| []) t -> parse1DArray (Map.insert x t' env) f t
   TermLet (VarBinding x t' :| lets) t -> parse1DArray (Map.insert x t' env) f (TermLet (NonEmpty.fromList lets) t)
-  -- (as const (Array (_ BitVec 256) (_ BitVec 256))) <constant>
-  TermApplication asconst (TermSpecConstant val :| []) | isAsConst asconst ->
+  -- (as const (Array (_ BitVec 256) (_ BitVec 256))) SpecConstant
+  TermApplication asconst (TermSpecConstant val :| []) | is1DArrConst asconst ->
     \_ -> Just $ parseW256 val
   -- store arr ind val
   TermApplication store (TermSpecConstant ind :| [TermSpecConstant val]) | isStore store ->
@@ -815,7 +820,7 @@ parse1DArray env f = \case
   _ -> error "Internal error: cannot parse array value"
   where
 
-    isAsConst = \case
+    is1DArrConst = \case
       Qualified (IdSymbol "const") sort -> is1DArray sort
       _ -> False
     is1DArray = \case
@@ -829,6 +834,43 @@ parse1DArray env f = \case
       Unqualified (IdSymbol "store") -> True
       _ -> False
 
+
+parse2DArray :: (Map Symbol Term) -> (W256 -> W256 -> Maybe W256) -> Term -> (W256 -> W256 -> Maybe W256)
+parse2DArray env f = \case
+  -- variable reference
+  TermQualIdentifier (Unqualified (IdSymbol s)) ->
+    case Map.lookup s env of
+      Just t -> parse2DArray env f t
+      Nothing -> error "Internal error: unknown identifier, cannot parse array"
+  -- let (x t') t
+  TermLet (VarBinding x t' :| []) t -> parse2DArray (Map.insert x t' env) f t
+  TermLet (VarBinding x t' :| lets) t -> parse2DArray (Map.insert x t' env) f (TermLet (NonEmpty.fromList lets) t)
+  -- (as const (Array (_ BitVec 256) (Array (_ BitVec 256) (_ BitVec 256)))) 1DarrayConstant
+  TermApplication asconst (val :| []) | is2DArrConst asconst ->
+    \x -> parse1DArray env (f x) val
+  -- store arr2D ind arr1D
+  TermApplication store (TermSpecConstant ind :| [val]) | isStore store ->
+    \x -> if x == parseW256 ind then parse1DArray env (f x) val else f x
+  _ -> error "Internal error: cannot parse array value"
+  where
+
+    is2DArrConst = \case
+      Qualified (IdSymbol "const") sort -> is2DArray sort
+      _ -> False
+    is2DArray = \case
+      SortParameter (IdSymbol "Array") (sort1 :| [sort2]) ->
+         isBitVec256 sort1 && is1DArray sort2
+      _ -> False
+    is1DArray = \case
+      SortParameter (IdSymbol "Array") (sort1 :| [sort2]) ->
+         isBitVec256 sort1 && isBitVec256 sort2
+      _ -> False
+    isBitVec256 = \case
+      SortSymbol (IdIndexed "BitVec" (IxNumeral "256" :| [])) -> True
+      _ -> False
+    isStore = \case
+      Unqualified (IdSymbol "store") -> True
+      _ -> False
 
 
 getBufs :: SolverInstance -> [TS.Text] -> IO (Map (Expr Buf) ByteString)
