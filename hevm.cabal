@@ -51,7 +51,7 @@ source-repository head
 
 common shared
   if flag(ci)
-    ghc-options: -Werror
+    ghc-options: -Werror -j
   default-language: GHC2021
   default-extensions:
     LambdaCase
@@ -100,7 +100,7 @@ library
   autogen-modules:
     Paths_hevm
   ghc-options:
-    -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
+    -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans -j
   extra-libraries:
     secp256k1, ff
   if os(linux)
@@ -174,7 +174,7 @@ executable hevm
   main-is:
     hevm-cli.hs
   ghc-options:
-    -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
+    -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans -j
   other-modules:
     Paths_hevm
   if os(darwin)
@@ -218,7 +218,7 @@ executable hevm
 common test-base
   import: shared
   ghc-options:
-    -Wall -Wno-unticked-promoted-constructors -Wno-orphans
+    -Wall -Wno-unticked-promoted-constructors -Wno-orphans -j
   hs-source-dirs:
     test
   extra-libraries:
