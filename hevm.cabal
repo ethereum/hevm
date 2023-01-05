@@ -58,7 +58,7 @@ common shared
   if flag(ci)
     ghc-options: -Werror
   if flag(devel)
-    ghc-options: -j --disable-optimization
+    ghc-options: -j -O0
   default-language: GHC2021
   default-extensions:
     LambdaCase
@@ -107,7 +107,7 @@ library
   autogen-modules:
     Paths_hevm
   if flag(devel)
-    ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans -j --disable-optimization
+    ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans -j -O0
   else
     ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
   extra-libraries:
@@ -183,7 +183,7 @@ executable hevm
   main-is:
     hevm-cli.hs
   if flag(devel)
-    ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans -j --disable-optimization
+    ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans -j -O0
   else
     ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
   other-modules:
@@ -229,7 +229,7 @@ executable hevm
 common test-base
   import: shared
   if flag (devel)
-    ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans -j --disable-optimization
+    ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans -j -O0
   else
     ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans
   hs-source-dirs:

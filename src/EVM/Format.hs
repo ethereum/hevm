@@ -379,6 +379,7 @@ prettyError= \case
   EVM.Types.StackLimitExceeded -> "Stack limit exceeded"
   EVM.Types.InvalidMemoryAccess -> "Invalid memory access"
   EVM.Types.BadJumpDestination -> "Bad jump destination"
+  EVM.Types.StackUnderrun -> "Stack underrun"
   TmpErr err -> "Temp error: " <> err
 
 
