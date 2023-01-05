@@ -112,13 +112,7 @@ ciIgnoredFiles =
 
 commonProblematicTests :: Map String (TestTree -> TestTree)
 commonProblematicTests = Map.fromList
-  [ ("twoOps_d0g0v0_London", expectFailBecause "TODO: regression")
-  , ("sar_2^256-1_0_d0g0v0_London", expectFailBecause "TODO: regression")
-  , ("shiftCombinations_d0g0v0_London", expectFailBecause "TODO: regression")
-  , ("shiftSignedCombinations_d0g0v0_London", expectFailBecause "TODO: regression")
-  , ("bufferSrcOffset_d14g0v0_London", expectFailBecause "TODO: regression")
-  , ("bufferSrcOffset_d38g0v0_London", expectFailBecause "TODO: regression")
-  , ("loopMul_d0g0v0_London", ignoreTestBecause "hevm is too slow")
+  [ ("loopMul_d0g0v0_London", ignoreTestBecause "hevm is too slow")
   , ("loopMul_d1g0v0_London", ignoreTestBecause "hevm is too slow")
   , ("loopMul_d2g0v0_London", ignoreTestBecause "hevm is too slow")
   , ("CALLBlake2f_MaxRounds_d0g0v0_London", ignoreTestBecause "very slow, bypasses timeout due time spent in FFI")
