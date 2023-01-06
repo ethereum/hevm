@@ -40,6 +40,7 @@ import qualified Data.Text.Lazy as T
 import qualified Data.Text.Lazy.IO as T
 import Data.Text.Lazy.Builder
 import Data.Bifunctor (second)
+import Data.Semigroup (Any, Any(..), getAny)
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
 
 import EVM.Types
@@ -55,18 +56,20 @@ import Debug.Trace
 data CexVars = CexVars
   { calldataV :: [Text]
   , buffersV :: [Text]
+  , storeReads :: [(Expr EWord, Expr EWord)] -- a list of relevant store reads
   , blockContextV :: [Text]
   , txContextV :: [Text]
   }
   deriving (Eq, Show)
 
 instance Semigroup CexVars where
-  (CexVars a b c d) <> (CexVars a2 b2 c2 d2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2)
+  (CexVars a b c d e) <> (CexVars a2 b2 c2 d2 e2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2) (e <> e2)
 
 instance Monoid CexVars where
     mempty = CexVars
       { calldataV = mempty
       , buffersV = mempty
+      , storeReads = mempty
       , blockContextV = mempty
       , txContextV = mempty
       }
@@ -74,7 +77,7 @@ instance Monoid CexVars where
 data SMTCex = SMTCex
   { vars :: Map (Expr EWord) W256
   , buffers :: Map (Expr Buf) ByteString
-  , store :: Text
+  , store :: Map W256 (Map W256 W256)
   , blockContext :: Map (Expr EWord) W256
   , txContext :: Map (Expr EWord) W256
   }
@@ -110,6 +113,22 @@ declareIntermediates bufs stores =
     encodeStore n expr =
        fromLazyText ("(define-const store" <> (T.pack . show $ n) <> " Storage ") <> exprToSMT expr <> ")"
 
+isAbstractStorage :: Expr Storage -> Bool
+isAbstractStorage = getAny . foldExpr go (Any False)
+  where
+    go :: Expr a -> Any
+    go AbstractStore = Any True
+    go _ = Any False
+
+findReads :: Prop -> [(Expr EWord, Expr EWord)]
+findReads = foldProp go []
+  where
+    go :: Expr a -> [(Expr EWord, Expr EWord)]
+    go = \case
+      SLoad addr slot storage -> 
+        if isAbstractStorage storage then [(addr, slot)] else []
+      _ -> []
+
 assertProps :: [Prop] -> SMT2
 assertProps ps =
   let encs = map propToSMT ps_elim
@@ -128,6 +147,7 @@ assertProps ps =
   <> keccakAssumes
   <> SMT2 [""] mempty
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
+  <> SMT2 [] mempty{storeReads = storageReads}
 
   where
     (ps_elim, bufs, stores) = eliminateProps ps
@@ -139,6 +159,12 @@ assertProps ps =
 
     bufVals = Map.elems bufs
     storeVals = Map.elems stores
+
+    -- This is an potentially an overapproximation of reads directly
+    -- from the initial abstract store. However, a lof of reads from
+    -- locations that have been written will have already been
+    -- eliminate by simplification.
+    storageReads = nubOrd $ concatMap findReads ps
 
     keccakAssumes
       = SMT2 ["; keccak assumptions"] mempty
@@ -782,44 +808,45 @@ getVars parseFn inst names = Map.mapKeys parseFn <$> foldM getOne mempty names
           r -> parseErr r
       pure $ Map.insert name val acc
 
-getStore :: SolverInstance -> IO Text
-getStore inst = do
+getStore :: SolverInstance -> [(Expr EWord, Expr EWord)] -> IO (Map W256 (Map W256 W256))
+getStore inst reads = do
   raw <- getValue inst "abstractStore"
   let parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
                  Right (ResSpecific (valParsed :| [])) -> valParsed
                  r -> parseErr r
+      -- first interpret SMT term as a function
       fun = case parsed of
-        (TermQualIdentifier (Unqualified (IdSymbol symbol)), term) ->
-          if symbol == "abstractStore"
-          then parse2DArray Map.empty term
-          else error "Internal Error: solver did not return model for requested value"
-        r -> parseErr r
-  
-  traceM "--- parsed ---"
-  traceShowM parsed
-  traceM "--- parse end ---"
-  traceM "--- fun ---"
-  traceShowM (fun 0 0)
-  traceM "--- fun end ---"
-  pure raw
+              (TermQualIdentifier (Unqualified (IdSymbol symbol)), term) ->
+                if symbol == "abstractStore"
+                then interpret2DArray Map.empty term
+                else error "Internal Error: solver did not return model for requested value"
+              r -> parseErr r
+  pure Map.empty
+  -- traceM "--- parsed ---"
+  -- traceShowM parsed
+  -- traceM "--- parse end ---"
+  -- traceM "--- fun ---"
+  -- traceShowM (fun 0 0)
+  -- traceM "--- fun end ---"
+  -- pure raw
 
 
-parse1DArray :: (Map Symbol Term) -> Term -> (W256 -> Maybe W256)
-parse1DArray env = \case
+interpret1DArray :: (Map Symbol Term) -> Term -> (W256 -> Maybe W256)
+interpret1DArray env = \case
   -- variable reference
   TermQualIdentifier (Unqualified (IdSymbol s)) ->
     case Map.lookup s env of
-      Just t -> parse1DArray env t
+      Just t -> interpret1DArray env t
       Nothing -> error "Internal error: unknown identifier, cannot parse array"
   -- let (x t') t
-  TermLet (VarBinding x t' :| []) t -> parse1DArray (Map.insert x t' env) t
-  TermLet (VarBinding x t' :| lets) t -> parse1DArray (Map.insert x t' env) (TermLet (NonEmpty.fromList lets) t)
+  TermLet (VarBinding x t' :| []) t -> interpret1DArray (Map.insert x t' env) t
+  TermLet (VarBinding x t' :| lets) t -> interpret1DArray (Map.insert x t' env) (TermLet (NonEmpty.fromList lets) t)
   -- (as const (Array (_ BitVec 256) (_ BitVec 256))) SpecConstant
   TermApplication asconst (TermSpecConstant val :| []) | is1DArrConst asconst ->
     \_ -> Just $ parseW256 val
   -- store arr ind val
   TermApplication store (arr :| [TermSpecConstant ind, TermSpecConstant val]) | isStore store ->
-    \x -> if x == parseW256 ind then Just (parseW256 val) else parse1DArray env arr x
+    \x -> if x == parseW256 ind then Just (parseW256 val) else interpret1DArray env arr x
   t -> error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
   where
 
@@ -838,22 +865,22 @@ parse1DArray env = \case
       _ -> False
 
 
-parse2DArray :: (Map Symbol Term) -> Term -> (W256 -> W256 -> Maybe W256)
-parse2DArray env = \case
+interpret2DArray :: (Map Symbol Term) -> Term -> (W256 -> W256 -> Maybe W256)
+interpret2DArray env = \case
   -- variable reference
   TermQualIdentifier (Unqualified (IdSymbol s)) ->
     case Map.lookup s env of
-      Just t -> parse2DArray env t
+      Just t -> interpret2DArray env t
       Nothing -> error "Internal error: unknown identifier, cannot parse array"
   -- let (x t') t
-  TermLet (VarBinding x t' :| []) t -> parse2DArray (Map.insert x t' env) t
-  TermLet (VarBinding x t' :| lets) t -> parse2DArray (Map.insert x t' env) (TermLet (NonEmpty.fromList lets) t)
+  TermLet (VarBinding x t' :| []) t -> interpret2DArray (Map.insert x t' env) t
+  TermLet (VarBinding x t' :| lets) t -> interpret2DArray (Map.insert x t' env) (TermLet (NonEmpty.fromList lets) t)
   -- (as const (Array (_ BitVec 256) (Array (_ BitVec 256) (_ BitVec 256)))) 1DarrayConstant
   TermApplication asconst (val :| []) | is2DArrConst asconst ->
-    \_ -> parse1DArray env val
+    \_ -> interpret1DArray env val
   -- store arr2D ind arr1D
   TermApplication store (arr :| [TermSpecConstant ind, val]) | isStore store ->
-    \x -> if x == parseW256 ind then parse1DArray env val else parse2DArray env arr x
+    \x -> if x == parseW256 ind then interpret1DArray env val else interpret2DArray env arr x
   t -> error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
   where
                                                  
@@ -1003,7 +1030,7 @@ withSolvers solver count timeout cont = do
             "sat" -> do
               calldatamodels <- getVars parseVar inst (fmap T.toStrict cexvars.calldataV)
               buffermodels <- getBufs inst (fmap T.toStrict cexvars.buffersV)
-              storagemodels <- getStore inst
+              storagemodels <- getStore inst (storeReads cexvars)
               blockctxmodels <- getVars parseBlockCtx inst (fmap T.toStrict cexvars.blockContextV)
               txctxmodels <- getVars parseFrameCtx inst (fmap T.toStrict cexvars.txContextV)
               pure $ Sat $ SMTCex
