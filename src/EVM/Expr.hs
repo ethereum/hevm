@@ -181,8 +181,12 @@ shr = op2
 
 sar :: Expr EWord -> Expr EWord -> Expr EWord
 sar = op2 SAR (\x y ->
-  let asSigned = (fromIntegral y) :: Int256
-  in fromIntegral $ shiftR asSigned (fromIntegral x))
+  let msb = testBit y 255
+      asSigned = fromIntegral y :: Int256
+  in if x > 256 then
+       if msb then maxBound else 0
+     else
+       fromIntegral $ shiftR asSigned (fromIntegral x))
 
 -- ** Bufs ** --------------------------------------------------------------------------------------
 
