@@ -10,10 +10,17 @@ interface Hevm {
     function sign(uint256,bytes32) external returns (uint8,bytes32,bytes32);
     function addr(uint256) external returns (address);
     function ffi(string[] calldata) external returns (bytes memory);
+    function prank(address) external;
 }
 
 contract HasStorage {
     uint slot0 = 10;
+}
+
+contract Prankster {
+    function prankme() public returns (address) {
+        return msg.sender;
+    }
 }
 
 contract CheatCodes is DSTest {
@@ -85,5 +92,13 @@ contract CheatCodes is DSTest {
 
         (string memory output) = abi.decode(hevm.ffi(inputs), (string));
         assertEq(output, "acab");
+    }
+
+    function test_prank() public {
+        Prankster prankster = new Prankster();
+        assertEq(prankster.prankme(), address(this));
+        hevm.prank(address(0xdeadbeef));
+        assertEq(prankster.prankme(), address(0xdeadbeef));
+        assertEq(prankster.prankme(), address(this));
     }
 }
