@@ -1,15 +1,23 @@
+{-# Language DataKinds #-}
+{-# Language NumericUnderscores #-}
+{-# Language QuasiQuotes #-}
+{-# Language DataKinds #-}
+
 module EVM.Debug where
 
 import EVM          (Contract, nonce, balance, bytecode, codehash)
 import EVM.Solidity (SrcMap, srcMapFile, srcMapOffset, srcMapLength, SourceCache, sourceFiles)
-import EVM.Types    (Addr)
+import EVM.Types    (Addr, Expr, Expr (Lit), Expr(LitByte), EType (Byte))
 import EVM.Expr     (bufLength)
+import EVM.Op
+import Data.Word (Word8)
 
 import Control.Arrow   (second)
 import Control.Lens
 import Data.ByteString (ByteString)
 import Data.Map        (Map)
 import Data.Text       (Text)
+import EVM.SymExec (VeriOpts, defaultVeriOpts, noLoopVeriOpts)
 
 import qualified Data.ByteString       as ByteString
 import qualified Data.Map              as Map
@@ -52,3 +60,13 @@ srcMapCode cache sm =
   fmap f $ cache ^? sourceFiles . ix (srcMapFile sm)
   where
     f (_, v) = ByteString.take (min 80 (srcMapLength sm)) (ByteString.drop (srcMapOffset sm) v)
+
+toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
+toW8fromLitB (LitByte a) = a
+toW8fromLitB _ = error "nope"
+
+data OpContract = OpContract [Op]
+  deriving (Show)
+
+getOpData :: OpContract-> [Op]
+getOpData (OpContract x) = x

@@ -309,15 +309,19 @@ equivalence cmd = do
 
   withSolvers Z3 3 Nothing $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts Nothing
-    case containsA (Cex()) res of
-      False -> do
-        putStrLn "No discrepancies found"
-        when (containsA (EVM.SymExec.Timeout()) res) $ do
-          putStrLn "But timeout(s) occurred"
-          exitFailure
-      True -> do
-        putStrLn $ "Not equivalent. Counterexample(s):" <> show res
+    case res of
+      Left _ -> do
+        print "Error occurred while generating expression, cannot determine equivalence"
         exitFailure
+      Right a -> case (containsA (Cex()) a) of
+        False -> do
+          putStrLn "No discrepancies found"
+          when (containsA (EVM.SymExec.Timeout()) a) $ do
+            putStrLn "But timeout(s) occurred"
+            exitFailure
+        True -> do
+          putStrLn $ "Not equivalent. Counterexample(s):" <> show res
+          exitFailure
 
 getSrcInfo :: Command Options.Unwrapped -> IO DappInfo
 getSrcInfo cmd =
@@ -377,38 +381,43 @@ assert cmd = do
         preState
     else do
       let opts = VeriOpts { simp = True, debug = smtdebug cmd, maxIter = maxIterations cmd, askSmtIters = askSmtIterations cmd, rpcInfo = rpcinfo}
-      (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
-      case res of
-        [Qed _] -> putStrLn "\nQED: No reachable property violations discovered\n"
-        cexs -> do
-          let counterexamples
-                | null (getCexs cexs) = []
-                | otherwise =
-                   [ ""
-                   , "Discovered the following counterexamples:"
-                   , ""
-                   ] <> fmap (formatCex (fst calldata')) (getCexs cexs)
-              unknowns
-                | null (getTimeouts cexs) = []
-                | otherwise =
-                   [ ""
-                   , "Could not determine reachability of the following end states:"
-                   , ""
-                   ] <> fmap (formatExpr) (getTimeouts cexs)
-          T.putStrLn $ T.unlines (counterexamples <> unknowns)
-      when (showTree cmd) $ do
-        putStrLn "=== Expression ===\n"
-        T.putStrLn $ formatExpr expr
-        putStrLn ""
-      when (showReachableTree cmd) $ do
-        reached <- reachable solvers expr
-        putStrLn "=== Reachable Expression ===\n"
-        T.putStrLn (formatExpr . snd $ reached)
-        putStrLn ""
-      when (getModels cmd) $ do
-        putStrLn $ "=== Models for " <> show (Expr.numBranches expr) <> " branches ===\n"
-        ms <- produceModels solvers expr
-        forM_ ms (showModel (fst calldata'))
+      result <- verify solvers opts preState (Just $ checkAssertions errCodes)
+      case result of
+        Left _ -> do
+          putStrLn "Error while trying to generate expression. Cannot determine if asserts are reached"
+          exitFailure
+        Right (expr, res) -> do
+          case res of
+            [Qed _] -> putStrLn "\nQED: No reachable property violations discovered\n"
+            cexs -> do
+              let counterexamples
+                    | null (getCexs cexs) = []
+                    | otherwise =
+                       [ ""
+                       , "Discovered the following counterexamples:"
+                       , ""
+                       ] <> fmap (formatCex (fst calldata')) (getCexs cexs)
+                  unknowns
+                    | null (getTimeouts cexs) = []
+                    | otherwise =
+                       [ ""
+                       , "Could not determine reachability of the following end states:"
+                       , ""
+                       ] <> fmap (formatExpr) (getTimeouts cexs)
+              T.putStrLn $ T.unlines (counterexamples <> unknowns)
+          when (showTree cmd) $ do
+            putStrLn "=== Expression ===\n"
+            T.putStrLn $ formatExpr expr
+            putStrLn ""
+          when (showReachableTree cmd) $ do
+            reached <- reachable solvers expr
+            putStrLn "=== Reachable Expression ===\n"
+            T.putStrLn (formatExpr . snd $ reached)
+            putStrLn ""
+          when (getModels cmd) $ do
+            putStrLn $ "=== Models for " <> show (Expr.numBranches expr) <> " branches ===\n"
+            Right ms <- produceModels solvers expr -- TODO handle LEFT
+            forM_ ms (showModel (fst calldata'))
 
 getCexs :: [VerifyResult] -> [SMTCex]
 getCexs = mapMaybe go

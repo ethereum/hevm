@@ -495,7 +495,7 @@ referencedBlockContext expr = nubOrd (foldExpr go [] expr)
       BaseFee -> ["basefee"]
       _ -> []
 
-
+-- TODO we should have an option to return Error here
 exprToSMT :: Expr a -> Builder
 exprToSMT = \case
   Lit w -> fromLazyText $ "(_ bv" <> (T.pack $ show (num w :: Integer)) <> " 256)"
@@ -1049,7 +1049,8 @@ readSExpr h = go 0 0 []
 
 -- | Stores a region of src into dst
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Builder -> Builder -> Builder
-copySlice srcOffset dstOffset size@(Lit _) src dst
+copySlice srcOffset dstOffset size@(Lit sz) src dst
+  | sz > (1024*16) = error "Too large copySlice size"
   | size == (Lit 0) = dst
   | otherwise =
     let size' = (sub size (Lit 1))
