@@ -297,10 +297,7 @@ type Precondition = VM -> Prop
 type Postcondition = VM -> Expr End -> Prop
 
 
-checkAssert ::
-  SolverGroup -> [Word256] -> ByteString ->
-  Maybe (Text, [AbiType]) -> [String] -> VeriOpts ->
-  IO (Either EVM.Types.Error (Expr End, [VerifyResult]))
+checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> IO (Either EVM.Types.Error (Expr End, [VerifyResult]))
 checkAssert solvers errs c signature' concreteArgs opts = verifyContract solvers c signature' concreteArgs opts SymbolicS Nothing (Just $ checkAssertions errs)
 
 {- |Checks if an assertion violation has been encountered
@@ -339,10 +336,7 @@ allPanicCodes = [ 0x00, 0x01, 0x11, 0x12, 0x21, 0x22, 0x31, 0x32, 0x41, 0x51 ]
 panicMsg :: Word256 -> ByteString
 panicMsg err = (selector "Panic(uint256)") <> (encodeAbiValue $ AbiUInt 256 err)
 
-verifyContract ::
-  SolverGroup ->ByteString -> Maybe (Text, [AbiType]) -> [String] ->
-  VeriOpts -> StorageModel -> Maybe Precondition -> Maybe Postcondition ->
-  IO (Either EVM.Types.Error (Expr End, [VerifyResult]))
+verifyContract :: SolverGroup ->ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO (Either EVM.Types.Error (Expr End, [VerifyResult]))
 verifyContract solvers theCode signature' concreteArgs opts storagemodel maybepre maybepost = do
   let preState = abstractVM signature' concreteArgs theCode maybepre storagemodel
   verify solvers opts preState maybepost
