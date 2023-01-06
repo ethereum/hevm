@@ -125,7 +125,7 @@ findReads = foldProp go []
   where
     go :: Expr a -> [(Expr EWord, Expr EWord)]
     go = \case
-      SLoad addr slot storage -> 
+      SLoad addr slot storage ->
         if isAbstractStorage storage then [(addr, slot)] else []
       _ -> []
 
@@ -392,12 +392,7 @@ declareBufs names = SMT2 ("; buffers" : fmap declareBuf names <> ("; buffer leng
   where
     declareBuf n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
     declareLength n = "(define-const " <> n <> "_length" <> " (_ BitVec 256) (bufLength " <> n <> "))"
-    cexvars = CexVars
-      { calldataV = mempty
-      , buffersV = fmap toLazyText names
-      , blockContextV = mempty
-      , txContextV = mempty
-      }
+    cexvars = mempty{buffersV = fmap toLazyText names}
 
 
 referencedBufsGo :: Expr a -> [Builder]
@@ -461,36 +456,21 @@ declareVars :: [Builder] -> SMT2
 declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = CexVars
-      { calldataV = fmap toLazyText names
-      , buffersV = mempty
-      , blockContextV = mempty
-      , txContextV = mempty
-      }
+    cexvars = mempty{calldataV = fmap toLazyText names}
 
 
 declareFrameContext :: [Builder] -> SMT2
 declareFrameContext names = SMT2 (["; frame context"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = CexVars
-      { calldataV = mempty
-      , buffersV = mempty
-      , blockContextV = mempty
-      , txContextV = fmap toLazyText names
-      }
+    cexvars = mempty{txContextV = fmap toLazyText names}
 
 
 declareBlockContext :: [Builder] -> SMT2
 declareBlockContext names = SMT2 (["; block context"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = CexVars
-      { calldataV = mempty
-      , buffersV = mempty
-      , blockContextV = fmap toLazyText names
-      , txContextV = mempty
-      }
+    cexvars = mempty{blockContextV = fmap toLazyText names}
 
 
 exprToSMT :: Expr a -> Builder
@@ -809,7 +789,7 @@ getVars parseFn inst names = Map.mapKeys parseFn <$> foldM getOne mempty names
       pure $ Map.insert name val acc
 
 getStore :: SolverInstance -> [(Expr EWord, Expr EWord)] -> IO (Map W256 (Map W256 W256))
-getStore inst reads = do
+getStore inst sreads = do
   raw <- getValue inst "abstractStore"
   let parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
                  Right (ResSpecific (valParsed :| [])) -> valParsed
@@ -821,7 +801,33 @@ getStore inst reads = do
                 then interpret2DArray Map.empty term
                 else error "Internal Error: solver did not return model for requested value"
               r -> parseErr r
-  pure Map.empty
+
+  foldM (\m (addr, slot) -> do
+            addr' <- queryValue addr
+            slot' <- queryValue slot
+            pure $ addElem addr' slot' m fun) Map.empty sreads
+
+  where
+
+    addElem :: W256 -> W256 -> Map W256 (Map W256 W256) -> (W256 -> W256 -> W256) -> Map W256 (Map W256 W256)
+    addElem addr slot store fun =
+      case Map.lookup addr store of
+        Just m -> Map.insert addr (Map.insert slot (fun addr slot) m) store
+        Nothing -> Map.insert addr (Map.singleton slot (fun addr slot)) store
+
+
+    queryValue :: Expr EWord -> IO W256
+    queryValue (Lit w) = pure w
+    queryValue w = do
+      let expr = toLazyText $ exprToSMT w
+      raw <- getValue inst expr
+      case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
+        Right (ResSpecific (valParsed :| [])) ->
+          case valParsed of
+            (_, TermSpecConstant sc) -> pure $ parseW256 sc
+            _ -> error "Internal Error: cannot parse model for storage index"
+        r -> parseErr r
+
   -- traceM "--- parsed ---"
   -- traceShowM parsed
   -- traceM "--- parse end ---"
@@ -831,7 +837,7 @@ getStore inst reads = do
   -- pure raw
 
 
-interpret1DArray :: (Map Symbol Term) -> Term -> (W256 -> Maybe W256)
+interpret1DArray :: (Map Symbol Term) -> Term -> (W256 -> W256)
 interpret1DArray env = \case
   -- variable reference
   TermQualIdentifier (Unqualified (IdSymbol s)) ->
@@ -843,10 +849,10 @@ interpret1DArray env = \case
   TermLet (VarBinding x t' :| lets) t -> interpret1DArray (Map.insert x t' env) (TermLet (NonEmpty.fromList lets) t)
   -- (as const (Array (_ BitVec 256) (_ BitVec 256))) SpecConstant
   TermApplication asconst (TermSpecConstant val :| []) | is1DArrConst asconst ->
-    \_ -> Just $ parseW256 val
+    \_ -> parseW256 val
   -- store arr ind val
   TermApplication store (arr :| [TermSpecConstant ind, TermSpecConstant val]) | isStore store ->
-    \x -> if x == parseW256 ind then Just (parseW256 val) else interpret1DArray env arr x
+    \x -> if x == parseW256 ind then parseW256 val else interpret1DArray env arr x
   t -> error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
   where
 
@@ -865,7 +871,7 @@ interpret1DArray env = \case
       _ -> False
 
 
-interpret2DArray :: (Map Symbol Term) -> Term -> (W256 -> W256 -> Maybe W256)
+interpret2DArray :: (Map Symbol Term) -> Term -> (W256 -> W256 -> W256)
 interpret2DArray env = \case
   -- variable reference
   TermQualIdentifier (Unqualified (IdSymbol s)) ->
@@ -883,7 +889,7 @@ interpret2DArray env = \case
     \x -> if x == parseW256 ind then interpret1DArray env val else interpret2DArray env arr x
   t -> error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
   where
-                                                 
+
     is2DArrConst = \case
       Qualified (IdSymbol "const") sort -> is2DArray sort
       _ -> False
