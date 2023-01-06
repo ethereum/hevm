@@ -41,7 +41,6 @@ import Control.Lens hiding (List, pre, (.>), re)
 import qualified Data.Vector as Vector
 import Data.String.Here
 import qualified Data.Map.Strict as Map
-import Data.Vector (Vector)
 
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
@@ -102,21 +101,6 @@ tests = testGroup "hevm"
         (Expr.readStorage' (Lit 0x0) (Lit 0x0)
           (SStore (Lit 0xacab) (Lit 0xdead) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])]))))
     ]
-  -- , testGroup "Remote State Tests"
-  --   [ testCase "check-prevrandao-post-merge-block" $ do
-  --       let ctrct = assemble
-  --                       [ OpPrevRandao
-  --                       , OpPush (Lit 0)
-  --                       , OpMstore
-  --                       , OpPush (Lit 0)
-  --                       , OpPush (Lit 31)
-  --                       , OpReturn
-  --                       ]
-  --       putStrLn ""
-  --       print ctrct
-  --       res <- runCode (Just (Fetch.BlockNumber 16184420, testRpc)) ctrct (ConcreteBuf "")
-  --       assertEqual "" res (Just (ConcreteBuf $ word256Bytes 0x2267531ab030ed32fd5f2ef51f81427332d0becbd74fe7f4cd5684ddf4b287e0))
-  --   ]
   -- These tests fuzz the simplifier by generating a random expression,
   -- applying some simplification rules, and then using the smt encoding to
   -- check that the simplified version is semantically equivalent to the
