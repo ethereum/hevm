@@ -45,6 +45,11 @@ flag ci
   default:     False
   manual:      True
 
+flag devel
+  description: Sets flag for compilation during development
+  default:     False
+  manual:      True
+
 source-repository head
   type:     git
   location: https://github.com/ethereum/hevm.git
@@ -52,6 +57,8 @@ source-repository head
 common shared
   if flag(ci)
     ghc-options: -Werror
+  if flag(devel)
+    ghc-options: -j
   default-language: GHC2021
   default-extensions:
     LambdaCase
@@ -99,8 +106,10 @@ library
     Paths_hevm
   autogen-modules:
     Paths_hevm
-  ghc-options:
-    -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
+  if flag(devel)
+    ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans -j
+  else
+    ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
   extra-libraries:
     secp256k1, ff
   if os(linux)
@@ -173,8 +182,10 @@ executable hevm
     hevm-cli
   main-is:
     hevm-cli.hs
-  ghc-options:
-    -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
+  if flag(devel)
+    ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans -j
+  else
+    ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
   other-modules:
     Paths_hevm
   if os(darwin)
@@ -217,8 +228,10 @@ executable hevm
 
 common test-base
   import: shared
-  ghc-options:
-    -Wall -Wno-unticked-promoted-constructors -Wno-orphans
+  if flag (devel)
+    ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans -j
+  else
+    ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans
   hs-source-dirs:
     test
   extra-libraries:

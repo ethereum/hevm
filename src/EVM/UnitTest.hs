@@ -152,9 +152,7 @@ dappTest opts solcFile cache' = do
           in
             liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts evmcache)
 
-      if and passing
-         then return True
-         else return False
+      return $ and passing
     Nothing ->
       error ("Failed to read Solidity JSON for `" ++ solcFile ++ "'")
 

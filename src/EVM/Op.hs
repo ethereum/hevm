@@ -62,6 +62,7 @@ data Op
   | OpGaslimit
   | OpChainid
   | OpSelfbalance
+  | OpBaseFee
   | OpPop
   | OpMload
   | OpMstore
@@ -145,6 +146,7 @@ opString (i, o) = let showPc x | x < 0x10 = '0' : showHex x ""
   OpGaslimit -> "GASLIMIT"
   OpChainid -> "CHAINID"
   OpSelfbalance -> "SELFBALANCE"
+  OpBaseFee -> "BASEFEE"
   OpPop -> "POP"
   OpMload -> "MLOAD"
   OpMstore -> "MSTORE"

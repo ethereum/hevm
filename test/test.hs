@@ -988,6 +988,29 @@ tests = testGroup "hevm"
         (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "XOR works as expected"
       ,
+      testCase "opcode-addmod-no-overflow" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint8 a, uint8 b, uint8 c) external pure {
+                require(a < 4);
+                require(b < 4);
+                require(c < 4);
+                uint16 r1;
+                uint16 r2;
+                uint16 g2;
+                assembly {
+                  r1 := add(a,b)
+                  r2 := mod(r1, c)
+                  g2 := addmod (a, b, c)
+                }
+                assert (r2 == g2);
+              }
+            }
+            |]
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint8,uint8,uint8)", [AbiUIntType 8, AbiUIntType 8, AbiUIntType 8])) [] defaultVeriOpts
+        putStrLn "ADDMOD is fine on NON overflow values"
+      ,
       testCase "opcode-mulmod-no-overflow" $ do
         Just c <- solcRuntime "MyContract"
             [i|

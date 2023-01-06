@@ -353,6 +353,7 @@ runExpr = do
       EVM.Revert buf -> EVM.Types.Revert asserts buf
       EVM.InvalidMemoryAccess -> Failure asserts EVM.Types.InvalidMemoryAccess
       EVM.BadJumpDestination -> Failure asserts EVM.Types.BadJumpDestination
+      EVM.StackUnderrun -> Failure asserts EVM.Types.StackUnderrun
       e' -> Failure asserts $ EVM.Types.TmpErr (show e')
 
 -- | Converts a given top level expr into a list of final states and the associated path conditions for each state
