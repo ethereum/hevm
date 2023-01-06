@@ -1,13 +1,10 @@
 {-# Language DataKinds #-}
-{-# Language NumericUnderscores #-}
-{-# Language QuasiQuotes #-}
-{-# Language DataKinds #-}
 
 module EVM.Debug where
 
 import EVM          (Contract, nonce, balance, bytecode, codehash)
 import EVM.Solidity (SrcMap, srcMapFile, srcMapOffset, srcMapLength, SourceCache, sourceFiles)
-import EVM.Types    (Addr, Expr, Expr (Lit), Expr(LitByte), EType (Byte))
+import EVM.Types    (Addr, Expr, Expr(LitByte), EType (Byte))
 import EVM.Expr     (bufLength)
 import EVM.Op
 import Data.Word (Word8)
@@ -17,7 +14,6 @@ import Control.Lens
 import Data.ByteString (ByteString)
 import Data.Map        (Map)
 import Data.Text       (Text)
-import EVM.SymExec (VeriOpts, defaultVeriOpts, noLoopVeriOpts)
 
 import qualified Data.ByteString       as ByteString
 import qualified Data.Map              as Map
