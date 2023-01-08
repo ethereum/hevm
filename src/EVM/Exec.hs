@@ -47,16 +47,16 @@ vmForEthrunCreation creationCode =
 
 exec :: State VM VMResult
 exec = do
-  () <- exec1
   vm <- get
-  maybe exec pure (view result vm)
+  case view result vm of
+    Nothing -> exec1 >> exec
+    Just r -> pure r
 
 run :: State VM VM
 run = do
-  () <- exec1
   vm <- get
   case view result vm of
-    Nothing -> run
+    Nothing -> exec1 >> run
     Just _ -> pure vm
 
 execWhile :: (VM -> Bool) -> State VM Int
