@@ -49,7 +49,6 @@ import EVM.CSE
 import EVM.Keccak
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
 
-import Debug.Trace
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
 -- variable names in SMT that we want to get values for
@@ -120,8 +119,12 @@ isAbstractStorage = getAny . foldExpr go (Any False)
     go AbstractStore = Any True
     go _ = Any False
 
-findReads :: Prop -> [(Expr EWord, Expr EWord)]
-findReads = foldProp go []
+-- | This function overapproximates the reads from the abstract
+-- storage. Potentially, it can return a location that has been
+-- overwritten in the abstract store. However, such reads will have
+-- been simplified away, is the source expresion is simplified.
+findStorageReads :: Prop -> [(Expr EWord, Expr EWord)]
+findStorageReads = foldProp go []
   where
     go :: Expr a -> [(Expr EWord, Expr EWord)]
     go = \case
@@ -160,11 +163,7 @@ assertProps ps =
     bufVals = Map.elems bufs
     storeVals = Map.elems stores
 
-    -- This is an potentially an overapproximation of reads directly
-    -- from the initial abstract store. However, a lof of reads from
-    -- locations that have been written will have already been
-    -- eliminate by simplification.
-    storageReads = nubOrd $ concatMap findReads ps
+    storageReads = nubOrd $ concatMap findStorageReads ps
 
     keccakAssumes
       = SMT2 ["; keccak assumptions"] mempty
@@ -802,6 +801,7 @@ getStore inst sreads = do
                 else error "Internal Error: solver did not return model for requested value"
               r -> parseErr r
 
+  -- then create a map by adding only the locations that are read by the program
   foldM (\m (addr, slot) -> do
             addr' <- queryValue addr
             slot' <- queryValue slot
@@ -828,15 +828,38 @@ getStore inst sreads = do
             _ -> error "Internal Error: cannot parse model for storage index"
         r -> parseErr r
 
-  -- traceM "--- parsed ---"
-  -- traceShowM parsed
-  -- traceM "--- parse end ---"
-  -- traceM "--- fun ---"
-  -- traceShowM (fun 0 0)
-  -- traceM "--- fun end ---"
-  -- pure raw
+
+is1DArrConst :: QualIdentifier -> Bool
+is1DArrConst = \case
+  Qualified (IdSymbol "const") sort -> is1DArray sort
+  _ -> False
+
+is1DArray :: Sort -> Bool
+is1DArray = \case
+  SortParameter (IdSymbol "Array") (sort1 :| [sort2]) ->
+    isBitVec256 sort1 && isBitVec256 sort2
+  _ -> False
+
+is2DArrConst :: QualIdentifier -> Bool
+is2DArrConst = \case
+  Qualified (IdSymbol "const") sort -> is2DArray sort
+  _ -> False
+
+is2DArray :: Sort -> Bool
+is2DArray = \case
+  SortParameter (IdSymbol "Array") (sort1 :| [sort2]) ->
+    isBitVec256 sort1 && is1DArray sort2
+  _ -> False
+
+isBitVec256 :: Sort -> Bool
+isBitVec256 t =
+  t == SortSymbol (IdIndexed "BitVec" (IxNumeral "256" :| []))
+
+isStore :: QualIdentifier -> Bool
+isStore t = t == Unqualified (IdSymbol "store")
 
 
+-- | Interpret an 1-dimentional array as a function
 interpret1DArray :: (Map Symbol Term) -> Term -> (W256 -> W256)
 interpret1DArray env = \case
   -- variable reference
@@ -844,33 +867,18 @@ interpret1DArray env = \case
     case Map.lookup s env of
       Just t -> interpret1DArray env t
       Nothing -> error "Internal error: unknown identifier, cannot parse array"
-  -- let (x t') t
+  -- (let (x t') t)
   TermLet (VarBinding x t' :| []) t -> interpret1DArray (Map.insert x t' env) t
   TermLet (VarBinding x t' :| lets) t -> interpret1DArray (Map.insert x t' env) (TermLet (NonEmpty.fromList lets) t)
   -- (as const (Array (_ BitVec 256) (_ BitVec 256))) SpecConstant
   TermApplication asconst (TermSpecConstant val :| []) | is1DArrConst asconst ->
     \_ -> parseW256 val
-  -- store arr ind val
+  -- (store arr ind val)
   TermApplication store (arr :| [TermSpecConstant ind, TermSpecConstant val]) | isStore store ->
     \x -> if x == parseW256 ind then parseW256 val else interpret1DArray env arr x
   t -> error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
-  where
 
-    is1DArrConst = \case
-      Qualified (IdSymbol "const") sort -> is1DArray sort
-      _ -> False
-    is1DArray = \case
-      SortParameter (IdSymbol "Array") (sort1 :| [sort2]) ->
-         isBitVec256 sort1 && isBitVec256 sort2
-      _ -> False
-    isBitVec256 = \case
-      SortSymbol (IdIndexed "BitVec" (IxNumeral "256" :| [])) -> True
-      _ -> False
-    isStore = \case
-      Unqualified (IdSymbol "store") -> True
-      _ -> False
-
-
+-- | Interpret a 2-dimentional array as a function
 interpret2DArray :: (Map Symbol Term) -> Term -> (W256 -> W256 -> W256)
 interpret2DArray env = \case
   -- variable reference
@@ -878,35 +886,16 @@ interpret2DArray env = \case
     case Map.lookup s env of
       Just t -> interpret2DArray env t
       Nothing -> error "Internal error: unknown identifier, cannot parse array"
-  -- let (x t') t
+  -- (let (x t') t)
   TermLet (VarBinding x t' :| []) t -> interpret2DArray (Map.insert x t' env) t
   TermLet (VarBinding x t' :| lets) t -> interpret2DArray (Map.insert x t' env) (TermLet (NonEmpty.fromList lets) t)
   -- (as const (Array (_ BitVec 256) (Array (_ BitVec 256) (_ BitVec 256)))) 1DarrayConstant
   TermApplication asconst (val :| []) | is2DArrConst asconst ->
     \_ -> interpret1DArray env val
-  -- store arr2D ind arr1D
+  -- (store arr2D ind arr1D)
   TermApplication store (arr :| [TermSpecConstant ind, val]) | isStore store ->
     \x -> if x == parseW256 ind then interpret1DArray env val else interpret2DArray env arr x
   t -> error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
-  where
-
-    is2DArrConst = \case
-      Qualified (IdSymbol "const") sort -> is2DArray sort
-      _ -> False
-    is2DArray = \case
-      SortParameter (IdSymbol "Array") (sort1 :| [sort2]) ->
-         isBitVec256 sort1 && is1DArray sort2
-      _ -> False
-    is1DArray = \case
-      SortParameter (IdSymbol "Array") (sort1 :| [sort2]) ->
-         isBitVec256 sort1 && isBitVec256 sort2
-      _ -> False
-    isBitVec256 = \case
-      SortSymbol (IdIndexed "BitVec" (IxNumeral "256" :| [])) -> True
-      _ -> False
-    isStore = \case
-      Unqualified (IdSymbol "store") -> True
-      _ -> False
 
 
 getBufs :: SolverInstance -> [TS.Text] -> IO (Map (Expr Buf) ByteString)
