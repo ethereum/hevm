@@ -518,25 +518,23 @@ verify solvers opts preState maybepost = do
         -- Dispatch the remaining branches to the solver to check for violations
         results <- dispatch withQueries
         putStrLn $ "results in verify: " <> show results
-        let cexs = filter  findCexs results
+        let nonQeds = filter findNonQeds results
         -- TODO improve this, it doesn't care about Error-s
-        pure $ if Prelude.null cexs then Right (expr, [Qed ()]) else Right (expr, fmap toVRes cexs)
+        pure $ if Prelude.null nonQeds then Right (expr, [Qed ()]) else Right (expr, fmap toVRes nonQeds)
       else do
-        putStrLn "Left in verify"
-        if tooLargeCopy expr then pure $ Left (EVM.Types.TmpErr "Too Large Copy")
-                             else pure $ Left (EVM.Types.TmpErr "Whatever")
+        pure $ Left (EVM.Types.TmpErr "Too large copy")
   where
-    findCexs :: Either EVM.Types.Error (CheckSatResult, Expr 'End) -> Bool
-    findCexs = \case
+    findNonQeds :: Either EVM.Types.Error (CheckSatResult, Expr 'End) -> Bool
+    findNonQeds = \case
       Right (res, _) -> not . isUnsat $ res
-      _ -> False
+      _ -> True
 
     dispatch :: [Either EVM.Types.Error (SMT2, Expr 'End)] -> IO [Either EVM.Types.Error (CheckSatResult, Expr 'End)]
     dispatch queries = flip mapConcurrently queries $ \case
       Right (query, leaf) -> do
         res <- checkSat solvers query
         pure $ Right (res, leaf)
-      -- TODO Left
+      Left e              -> pure $ Left e
     toVRes :: Either EVM.Types.Error (CheckSatResult, Expr End) -> VerifyResult
     toVRes = \case
       Left _ -> error "what should we do here?? Individual errors returned?"

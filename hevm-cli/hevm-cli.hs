@@ -310,8 +310,8 @@ equivalence cmd = do
   withSolvers Z3 3 Nothing $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts Nothing
     case res of
-      Left _ -> do
-        print "Error occurred while generating expression, cannot determine equivalence"
+      Left err -> do
+        putStrLn $ "Error occurred while generating internal expression" <> (show err) <> "cannot determine equivalence"
         exitFailure
       Right a -> case (containsA (Cex()) a) of
         False -> do
