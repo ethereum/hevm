@@ -232,9 +232,9 @@ interpret fetcher maxIter askSmtIters =
     eval (action Operational.:>>= k) =
       case action of
         Stepper.Exec ->
-          exec >>= interpret fetcher maxIter askSmtIters . k
+          (State.state . runState) exec >>= interpret fetcher maxIter askSmtIters . k
         Stepper.Run ->
-          run >>= interpret fetcher maxIter askSmtIters . k
+          (State.state . runState) run >>= interpret fetcher maxIter askSmtIters . k
         Stepper.IOAct q ->
           mapStateT liftIO q >>= interpret fetcher maxIter askSmtIters . k
         Stepper.Ask (EVM.PleaseChoosePath cond continue) -> do
