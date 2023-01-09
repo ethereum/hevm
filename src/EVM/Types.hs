@@ -118,7 +118,7 @@ data EType
   deriving (Typeable)
 
 -- Failure states of the Expr AST
-data Error
+data ExprError
   = InvalidOpcode
   | IllegalOverflow
   | StackLimitExceeded
@@ -167,7 +167,7 @@ data Expr (a :: EType) where
   -- control flow
 
   Revert              :: [Prop] -> Expr Buf -> Expr End
-  Failure             :: [Prop] -> Error -> Expr End
+  Failure             :: [Prop] -> ExprError -> Expr End
   Return              :: [Prop] -> Expr Buf -> Expr Storage -> Expr End
   ITE                 :: Expr EWord -> Expr End -> Expr End -> Expr End
 

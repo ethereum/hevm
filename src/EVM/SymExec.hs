@@ -287,7 +287,7 @@ type Precondition = VM -> Prop
 type Postcondition = VM -> Expr End -> Prop
 
 
-checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> IO (Either EVM.Types.Error (Expr End, [VerifyResult]))
+checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> IO (Either ExprError (Expr End, [VerifyResult]))
 checkAssert solvers errs c signature' concreteArgs opts = verifyContract solvers c signature' concreteArgs opts SymbolicS Nothing (Just $ checkAssertions errs)
 
 {- |Checks if an assertion violation has been encountered
@@ -326,7 +326,7 @@ allPanicCodes = [ 0x00, 0x01, 0x11, 0x12, 0x21, 0x22, 0x31, 0x32, 0x41, 0x51 ]
 panicMsg :: Word256 -> ByteString
 panicMsg err = (selector "Panic(uint256)") <> (encodeAbiValue $ AbiUInt 256 err)
 
-verifyContract :: SolverGroup ->ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO (Either EVM.Types.Error (Expr End, [VerifyResult]))
+verifyContract :: SolverGroup ->ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO (Either ExprError (Expr End, [VerifyResult]))
 verifyContract solvers theCode signature' concreteArgs opts storagemodel maybepre maybepost = do
   let preState = abstractVM signature' concreteArgs theCode maybepre storagemodel
   verify solvers opts preState maybepost
@@ -357,10 +357,10 @@ runExpr = do
       e' -> Failure asserts $ EVM.Types.TmpErr (show e')
 
 -- | Converts a given top level expr into a list of final states and the associated path conditions for each state
-flattenExpr :: Expr End -> [Either EVM.Types.Error([Prop], Expr End)]
+flattenExpr :: Expr End -> [Either ExprError([Prop], Expr End)]
 flattenExpr = go []
   where
-    go :: [Prop] -> Expr End ->  [Either EVM.Types.Error([Prop], Expr End)]
+    go :: [Prop] -> Expr End ->  [Either ExprError([Prop], Expr End)]
     go pcs = \case
       ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
       e@(Revert _ _) -> [Right (pcs, e)]
@@ -469,7 +469,7 @@ getLeft  (Left a) = a
 getLeft  _ = undefined
 
 -- | Symbolically execute the VM and check all endstates against the postcondition, if available.
-verify :: SolverGroup -> VeriOpts -> VM -> Maybe Postcondition -> IO (Either EVM.Types.Error (Expr End, [VerifyResult]))
+verify :: SolverGroup -> VeriOpts -> VM -> Maybe Postcondition -> IO (Either ExprError (Expr End, [VerifyResult]))
 verify solvers opts preState maybepost = do
   putStrLn "Exploring contract"
 
@@ -512,18 +512,18 @@ verify solvers opts preState maybepost = do
       else do
         pure $ Left (EVM.Types.TmpErr "Too large copy")
   where
-    findNonQeds :: Either EVM.Types.Error (CheckSatResult, Expr 'End) -> Bool
+    findNonQeds :: Either ExprError (CheckSatResult, Expr 'End) -> Bool
     findNonQeds = \case
       Right (res, _) -> not . isUnsat $ res
       _ -> True
 
-    dispatch :: [Either EVM.Types.Error (SMT2, Expr 'End)] -> IO [Either EVM.Types.Error (CheckSatResult, Expr 'End)]
+    dispatch :: [Either ExprError (SMT2, Expr 'End)] -> IO [Either ExprError (CheckSatResult, Expr 'End)]
     dispatch queries = flip mapConcurrently queries $ \case
       Right (query, leaf) -> do
         res <- checkSat solvers query
         pure $ Right (res, leaf)
       Left e              -> pure $ Left e
-    toVRes :: Either EVM.Types.Error (CheckSatResult, Expr End) -> VerifyResult
+    toVRes :: Either ExprError (CheckSatResult, Expr End) -> VerifyResult
     toVRes = \case
       Left _ -> error "what should we do here?? Individual errors returned?"
       Right (res, leaf) -> case res of
@@ -533,7 +533,7 @@ verify solvers opts preState maybepost = do
         EVM.SMT.Error e -> SMTError leaf ("SMT Solver Error, solver responded with: " <> show e)
 
 -- | Compares two contract runtimes for trace equivalence by running two VMs and comparing the end states.
-equivalenceCheck :: SolverGroup -> ByteString -> ByteString -> VeriOpts -> Maybe (Text, [AbiType]) -> IO (Either EVM.Types.Error [(Maybe SMTCex, Prop, ProofResult () () ())])
+equivalenceCheck :: SolverGroup -> ByteString -> ByteString -> VeriOpts -> Maybe (Text, [AbiType]) -> IO (Either ExprError [(Maybe SMTCex, Prop, ProofResult () () ())])
 equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
   let
     bytecodeA' = if Data.ByteString.null bytecodeA then Data.ByteString.pack [0] else bytecodeA
@@ -606,7 +606,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
 both' :: (a -> b) -> (a, a) -> (b, b)
 both' f (x, y) = (f x, f y)
 
-produceModels :: SolverGroup -> Expr End -> IO (Either EVM.Types.Error [(Expr End, CheckSatResult)])
+produceModels :: SolverGroup -> Expr End -> IO (Either ExprError [(Expr End, CheckSatResult)])
 produceModels solvers expr = do
   let flattened = flattenExpr expr
       withQueries = fmap (first (assertProps)) $ fmap getRight flattened

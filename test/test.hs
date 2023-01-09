@@ -107,14 +107,13 @@ tests = testGroup "hevm"
   -- unsimplified one
   , testGroup "contractQuickCheck"
     [ testProperty "random-contract-with-symbolic-call" $ \(expr :: OpContract) -> ioProperty $ do
-      let noLoopVeriOpts :: VeriOpts
-        noLoopVeriOpts = VeriOpts
-          { simp = True
-          , debug = False
-          , maxIter = Just 0
-          , askSmtIters = Just 0
-          , rpcInfo = Nothing
-          }
+        let noLoopVeriOpts = VeriOpts {
+            simp = True
+            , debug = False
+            , maxIter = Just 0
+            , askSmtIters = Just 0
+            , rpcInfo = Nothing
+            }
         expr2 <- fixContractJumps expr
         putStrLn $ "Contract: " <> (show expr2)
         let lits = assemble . getOpData $ expr2

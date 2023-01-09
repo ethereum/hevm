@@ -33,7 +33,7 @@ import EVM.Dapp (DappContext (..), contextInfo, contextEnv)
 import EVM (VM, cheatCode, traceForest, traceData, EVMError (..))
 import EVM (Trace, TraceData (..), Query (..), FrameContext (..))
 import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..))
-import EVM.Types (Addr, ByteStringS(..), Error(..))
+import EVM.Types (Addr, ByteStringS(..), ExprError(..))
 import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..))
 import EVM.ABI (Indexed (NotIndexed), getAbiSeq)
 import EVM.ABI (parseTypeName, formatString)
@@ -371,7 +371,7 @@ contractNamePart x = Text.split (== ':') x !! 1
 contractPathPart :: Text -> Text
 contractPathPart x = Text.split (== ':') x !! 0
 
-prettyError :: EVM.Types.Error -> String
+prettyError :: ExprError -> String
 prettyError= \case
   InvalidOpcode -> "Invalid Opcode"
   EVM.Types.IllegalOverflow -> "Illegal Overflow"
