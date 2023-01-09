@@ -38,7 +38,6 @@ import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 import EVM.Format (formatExpr, indent, formatBinary)
-import Data.Either (isLeft, isRight)
 
 data ProofResult a b c = Qed a | Cex b | Timeout c
   deriving (Show, Eq)
