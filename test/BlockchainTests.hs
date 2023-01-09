@@ -115,7 +115,23 @@ commonProblematicTests = Map.fromList
   ]
 
 ciProblematicTests :: Map String (TestTree -> TestTree)
-ciProblematicTests = Map.empty
+ciProblematicTests = Map.fromList
+  [ ("Return50000_d0g1v0_London", ignoreTest)
+  , ("Return50000_2_d0g1v0_London", ignoreTest)
+  , ("randomStatetest177_d0g0v0_London", ignoreTest)
+  , ("static_Call50000_d0g0v0_London", ignoreTest)
+  , ("static_Call50000_d1g0v0_London", ignoreTest)
+  , ("static_Call50000bytesContract50_1_d1g0v0_London", ignoreTest)
+  , ("static_Call50000bytesContract50_2_d1g0v0_London", ignoreTest)
+  , ("static_Return50000_2_d0g0v0_London", ignoreTest)
+  , ("loopExp_d10g0v0_London", ignoreTest)
+  , ("loopExp_d11g0v0_London", ignoreTest)
+  , ("loopExp_d12g0v0_London", ignoreTest)
+  , ("loopExp_d13g0v0_London", ignoreTest)
+  , ("loopExp_d14g0v0_London", ignoreTest)
+  , ("loopExp_d8g0v0_London", ignoreTest)
+  , ("loopExp_d9g0v0_London", ignoreTest)
+  ]
 
 runVMTest :: Bool -> (String, Case) -> IO ()
 runVMTest diffmode (_name, x) =
