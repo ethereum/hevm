@@ -375,12 +375,12 @@ prettyError :: ExprError -> String
 prettyError= \case
   EVM.Types.InvalidOpcode -> "Invalid Opcode"
   EVM.Types.IllegalOverflow -> "Illegal Overflow"
-  SelfDestruct -> "Self Destruct"
+  EVM.Types.SelfDestruct -> "Self Destruct"
   EVM.Types.StackLimitExceeded -> "Stack limit exceeded"
   EVM.Types.InvalidMemoryAccess -> "Invalid memory access"
   EVM.Types.BadJumpDestination -> "Bad jump destination"
   EVM.Types.StackUnderrun -> "Stack underrun"
-  WrappedEVMError err -> "Temp error: " <> err
+  EVM.Types.WrappedEVMError err -> "Wrapped EVM Error: " <> err
 
 
 prettyvmresult :: (?context :: DappContext) => Expr End -> String
