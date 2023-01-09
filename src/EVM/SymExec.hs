@@ -39,7 +39,7 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 import EVM.Format (formatExpr, indent, formatBinary)
 
-data ProofResult a b c = Qed a | Cex b | Timeout c
+data ProofResult a b c = Qed a | Cex b | SMTTimeout c | SMTError c String
   deriving (Show, Eq)
 type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End)
 type EquivalenceResult = ProofResult ([VM], [VM]) VM ()
@@ -355,8 +355,8 @@ runExpr = do
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
     Just (VMSuccess buf) -> Return asserts buf (view (env . EVM.storage) vm)
     Just (VMFailure e) -> case e of
-      UnrecognizedOpcode _ -> Failure asserts Invalid
-      SelfDestruction -> Failure asserts SelfDestruct
+      UnrecognizedOpcode _ -> Failure asserts EVM.Types.InvalidOpcode
+      SelfDestruction -> Failure asserts EVM.Types.SelfDestruct
       EVM.StackLimitExceeded -> Failure asserts EVM.Types.StackLimitExceeded
       EVM.IllegalOverflow -> Failure asserts EVM.Types.IllegalOverflow
       EVM.Revert buf -> EVM.Types.Revert asserts buf
@@ -516,9 +516,7 @@ verify solvers opts preState maybepost = do
           (idx, Left _) -> TL.writeFile ("query-" <> show idx <> ".smt2") "INVALID QUERY"
         -- Dispatch the remaining branches to the solver to check for violations
         results <- dispatch withQueries
-        putStrLn $ "results in verify: " <> show results
         let nonQeds = filter findNonQeds results
-        -- TODO improve this, it doesn't care about Error-s
         pure $ if Prelude.null nonQeds then Right (expr, [Qed ()]) else Right (expr, fmap toVRes nonQeds)
       else do
         pure $ Left (EVM.Types.TmpErr "Too large copy")
@@ -539,9 +537,9 @@ verify solvers opts preState maybepost = do
       Left _ -> error "what should we do here?? Individual errors returned?"
       Right (res, leaf) -> case res of
         Sat model -> Cex (leaf, model)
-        EVM.SMT.Unknown -> Timeout leaf
+        EVM.SMT.Unknown -> SMTTimeout (leaf)
         Unsat -> Qed ()
-        EVM.SMT.Error e -> error $ "Internal Error: solver responded with error: " <> show e
+        EVM.SMT.Error e -> SMTError leaf ("SMT Solver Error, solver responded with: " <> show e)
 
 -- | Compares two contract runtimes for trace equivalence by running two VMs and comparing the end states.
 equivalenceCheck :: SolverGroup -> ByteString -> ByteString -> VeriOpts -> Maybe (Text, [AbiType]) -> IO (Either EVM.Types.Error [(Maybe SMTCex, Prop, ProofResult () () ())])
@@ -610,7 +608,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
       case res of
        Sat a -> return (Just a, prop, Cex ())
        Unsat -> return (Nothing, prop, Qed ())
-       EVM.SMT.Unknown -> return (Nothing, prop, Timeout ())
+       EVM.SMT.Unknown -> return (Nothing, prop, SMTTimeout ())
        EVM.SMT.Error txt -> error $ "Error while running solver: `" <> T.unpack txt <> "` SMT file was: `" <> filename <> "`"
     return $ Right $ filter (\(_, _, res) -> res /= Qed ()) results
 

@@ -2148,7 +2148,7 @@ tests = testGroup "hevm"
             case containsA (Cex()) res of
               False -> do
                 print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
-                let timeouts = filter (\(_, _, c) -> c == EVM.SymExec.Timeout()) res
+                let timeouts = filter (\(_, _, c) -> c == SMTTimeout()) res
                 unless (null timeouts) $ putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
               True -> do
                 putStrLn $ "Not OK: " <> show f <> " Got: " <> show res
@@ -2391,9 +2391,9 @@ genName = fmap (T.pack . ("esc_" <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
- [ pure $ Failure [] Invalid
+ [ pure $ Failure [] EVM.Types.InvalidOpcode
  , pure $ Failure [] EVM.Types.IllegalOverflow
- , pure $ Failure [] SelfDestruct
+ , pure $ Failure [] EVM.Types.SelfDestruct
  ]
 genEnd sz = oneof
  [ fmap (EVM.Types.Revert []) subBuf

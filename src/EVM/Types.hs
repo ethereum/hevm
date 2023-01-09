@@ -117,9 +117,9 @@ data EType
   | End
   deriving (Typeable)
 
--- EVM errors
+-- Failure states of the Expr AST
 data Error
-  = Invalid
+  = InvalidOpcode
   | IllegalOverflow
   | StackLimitExceeded
   | InvalidMemoryAccess

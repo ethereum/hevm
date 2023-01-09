@@ -30,7 +30,7 @@ import Prelude hiding (Word)
 import qualified EVM
 import EVM.Dapp (DappInfo (..), dappSolcByHash, dappAbiMap, showTraceLocation, dappEventMap, dappErrorMap)
 import EVM.Dapp (DappContext (..), contextInfo, contextEnv)
-import EVM (VM, cheatCode, traceForest, traceData, Error (..))
+import EVM (VM, cheatCode, traceForest, traceData, EVMError (..))
 import EVM (Trace, TraceData (..), Query (..), FrameContext (..))
 import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..))
 import EVM.Types (Addr, ByteStringS(..), Error(..))
@@ -373,7 +373,7 @@ contractPathPart x = Text.split (== ':') x !! 0
 
 prettyError :: EVM.Types.Error -> String
 prettyError= \case
-  Invalid -> "Invalid Opcode"
+  InvalidOpcode -> "Invalid Opcode"
   EVM.Types.IllegalOverflow -> "Illegal Overflow"
   SelfDestruct -> "Self Destruct"
   EVM.Types.StackLimitExceeded -> "Stack limit exceeded"
