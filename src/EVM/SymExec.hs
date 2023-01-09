@@ -346,15 +346,16 @@ runExpr = do
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
     Just (VMSuccess buf) -> Return asserts buf (view (env . EVM.storage) vm)
     Just (VMFailure e) -> case e of
-      UnrecognizedOpcode _ -> Failure asserts EVM.Types.InvalidOpcode
-      SelfDestruction -> Failure asserts EVM.Types.SelfDestruct
+      EVM.InvalidOpcode _ -> Failure asserts EVM.Types.InvalidOpcode
+      EVM.SelfDestruct -> Failure asserts EVM.Types.SelfDestruct
       EVM.StackLimitExceeded -> Failure asserts EVM.Types.StackLimitExceeded
       EVM.IllegalOverflow -> Failure asserts EVM.Types.IllegalOverflow
       EVM.Revert buf -> EVM.Types.Revert asserts buf
       EVM.InvalidMemoryAccess -> Failure asserts EVM.Types.InvalidMemoryAccess
       EVM.BadJumpDestination -> Failure asserts EVM.Types.BadJumpDestination
       EVM.StackUnderrun -> Failure asserts EVM.Types.StackUnderrun
-      e' -> Failure asserts $ EVM.Types.TmpErr (show e')
+      -- Many other types of EVMError-s are allowed, all captured below as Failure + ExprError's WrappedEVMError
+      e' -> Failure asserts $ EVM.Types.WrappedEVMError (show e')
 
 -- | Converts a given top level expr into a list of final states and the associated path conditions for each state
 flattenExpr :: Expr End -> [Either ExprError([Prop], Expr End)]
@@ -365,7 +366,7 @@ flattenExpr = go []
       ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
       e@(Revert _ _) -> [Right (pcs, e)]
       e@(Return _ _ _) -> [Right (pcs, e)]
-      Failure _ o@(TmpErr _) ->  [Left o]
+      Failure _ o@(WrappedEVMError _) ->  [Left o]
       e@(Failure _ _) -> [Right (pcs, e)]
       GVar _ -> error "cannot flatten an Expr containing a GVar"
 
@@ -510,7 +511,7 @@ verify solvers opts preState maybepost = do
         let nonQeds = filter findNonQeds results
         pure $ if Prelude.null nonQeds then Right (expr, [Qed ()]) else Right (expr, fmap toVRes nonQeds)
       else do
-        pure $ Left (EVM.Types.TmpErr "Too large copy")
+        pure $ Left (EVM.Types.WrappedEVMError "Too large copy")
   where
     findNonQeds :: Either ExprError (CheckSatResult, Expr 'End) -> Bool
     findNonQeds = \case
@@ -567,8 +568,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
             (Failure _ erra, Failure _ errb) -> if erra==errb then PBool False else PBool True
             (GVar _, _) -> error "Expressions cannot contain global vars"
             (_ , GVar _) -> error "Expressions cannot contain global vars"
-            (Failure _ (TmpErr s), _) -> error $ "Unhandled error: " <> s
-            (_, Failure _ (TmpErr s)) -> error $ "Unhandled error: " <> s
+            (Failure _ (WrappedEVMError s), _) -> error $ "Unhandled error: " <> s
+            (_, Failure _ (WrappedEVMError s)) -> error $ "Unhandled error: " <> s
             (ITE _ _ _, _ ) -> error "Expressions must be flattened"
             (_, ITE _ _ _) -> error "Expressions must be flattened"
 

@@ -126,7 +126,7 @@ data ExprError
   | BadJumpDestination
   | StackUnderrun
   | SelfDestruct
-  | TmpErr String
+  | WrappedEVMError String
   deriving (Show, Eq, Ord)
 
 -- Variables refering to a global environment

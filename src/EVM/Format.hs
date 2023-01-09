@@ -373,14 +373,14 @@ contractPathPart x = Text.split (== ':') x !! 0
 
 prettyError :: ExprError -> String
 prettyError= \case
-  InvalidOpcode -> "Invalid Opcode"
+  EVM.Types.InvalidOpcode -> "Invalid Opcode"
   EVM.Types.IllegalOverflow -> "Illegal Overflow"
   SelfDestruct -> "Self Destruct"
   EVM.Types.StackLimitExceeded -> "Stack limit exceeded"
   EVM.Types.InvalidMemoryAccess -> "Invalid memory access"
   EVM.Types.BadJumpDestination -> "Bad jump destination"
   EVM.Types.StackUnderrun -> "Stack underrun"
-  TmpErr err -> "Temp error: " <> err
+  WrappedEVMError err -> "Temp error: " <> err
 
 
 prettyvmresult :: (?context :: DappContext) => Expr End -> String

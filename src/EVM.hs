@@ -64,8 +64,8 @@ import Crypto.PubKey.ECC.Generate (generateQ)
 -- | EVM failure modes
 data EVMError
   = BalanceTooLow W256 W256
-  | UnrecognizedOpcode Word8
-  | SelfDestruction
+  | InvalidOpcode Word8
+  | SelfDestruct
   | StackUnderrun
   | BadJumpDestination
   | Revert (Expr Buf)
@@ -1334,7 +1334,7 @@ exec1 = do
             _ -> underrun
 
         xxx ->
-          vmError (UnrecognizedOpcode xxx)
+          vmError (EVM.InvalidOpcode xxx)
 
 transfer :: Addr -> Addr -> W256 -> EVM ()
 transfer xFrom xTo xValue =

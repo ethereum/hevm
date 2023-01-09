@@ -316,8 +316,11 @@ equivalence cmd = do
       Right a -> case (containsA (Cex()) a) of
         False -> do
           putStrLn "No discrepancies found"
-          when (containsA (EVM.SymExec.Timeout()) a) $ do
+          when (containsA (SMTTimeout()) a) $ do
             putStrLn "But timeout(s) occurred"
+            exitFailure
+          when (containsA (SMTError {}) a) $ do
+            putStrLn "But SMT error(s) occurred"
             exitFailure
         True -> do
           putStrLn $ "Not equivalent. Counterexample(s):" <> show res
@@ -428,7 +431,7 @@ getCexs = mapMaybe go
 getTimeouts :: [VerifyResult] -> [Expr End]
 getTimeouts = mapMaybe go
   where
-    go (Timeout leaf) = Just leaf
+    go (SMTTimeout leaf) = Just leaf
     go _ = Nothing
 
 dappCoverage :: UnitTestOptions -> Mode -> String -> IO ()
