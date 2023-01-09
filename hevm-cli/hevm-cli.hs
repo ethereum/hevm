@@ -319,6 +319,7 @@ equivalence cmd = do
           when (containsA (SMTTimeout ()) a) $ do
             putStrLn "But timeout(s) occurred"
             exitFailure
+          -- TODO wrong. String may not be empty!!
           when (containsA (SMTError () "") a) $ do
             putStrLn "But SMT error(s) occurred"
             exitFailure
