@@ -347,13 +347,13 @@ runExpr = do
     Just (VMSuccess buf) -> Return asserts buf (view (env . EVM.storage) vm)
     Just (VMFailure e) -> case e of
       EVM.InvalidOpcode _ -> Failure asserts EVM.Types.InvalidOpcode
-      EVM.SelfDestruct -> Failure asserts EVM.Types.SelfDestruct
-      EVM.StackLimitExceeded -> Failure asserts EVM.Types.StackLimitExceeded
       EVM.IllegalOverflow -> Failure asserts EVM.Types.IllegalOverflow
-      EVM.Revert buf -> EVM.Types.Revert asserts buf
+      EVM.StackLimitExceeded -> Failure asserts EVM.Types.StackLimitExceeded
       EVM.InvalidMemoryAccess -> Failure asserts EVM.Types.InvalidMemoryAccess
       EVM.BadJumpDestination -> Failure asserts EVM.Types.BadJumpDestination
       EVM.StackUnderrun -> Failure asserts EVM.Types.StackUnderrun
+      EVM.SelfDestruct -> Failure asserts EVM.Types.SelfDestruct
+      EVM.Revert buf -> EVM.Types.Revert asserts buf
       -- Many other types of EVMError-s are allowed, all captured below as Failure + ExprError's WrappedEVMError
       e' -> Failure asserts $ EVM.Types.WrappedEVMError (show e')
 
