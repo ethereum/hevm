@@ -53,6 +53,7 @@ import EVM.RLP
 import EVM.Solidity
 import EVM.Types
 import EVM.Traversals
+import EVM.Concrete (createAddress)
 import EVM.SMT hiding (one)
 import qualified EVM.Expr as Expr
 import qualified Data.Text as T
@@ -1653,18 +1654,26 @@ tests = testGroup "hevm"
               aAddr = Addr 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
           Just c <- solcRuntime "C" code'
           Just a <- solcRuntime "A" code'
-          (_, [Cex cex]) <- withSolvers Z3 1 Nothing $ \s -> do
+          (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> do
             let vm0 = abstractVM (Just ("call_A()", [])) [] c Nothing SymbolicS
             let vm = vm0
                   & set (state . callvalue) (Lit 0)
                   & over (env . contracts)
                        (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
-                  -- NOTE: this used to as follows, but there is no _storage field in Contract record
-                  -- (Map.insert aAddr (initialContract (RuntimeCode $ ConcreteBuffer a) &
-                  --                     set EVM.storage (EVM.Symbolic [] store)))
             verify s debugVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
-          print cex
-          -- putStrLn "found counterexample:"
+
+          let storeCex = store cex
+              addrC = W256 $ num $ createAddress ethrunAddress 1
+              addrA = W256 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
+              testCex = Map.size storeCex == 2 &&
+                        case (Map.lookup addrC storeCex, Map.lookup addrA storeCex) of
+                          (Just sC, Just sA) -> Map.size sC == 1 && Map.size sA == 1 &&
+                            case (Map.lookup 0 sC, Map.lookup 0 sA) of
+                              (Just x, Just y) -> x /= y
+                              _ -> False
+                          _ -> False
+          assertBool "Did not find expected storage cex" testCex
+          putStrLn "expected counterexample found"
         ,
         expectFail $ testCase "calling unique contracts (read from storage)" $ do
           Just c <- solcRuntime "C"
@@ -1742,6 +1751,55 @@ tests = testGroup "hevm"
 
           (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "Proven"
+        ,
+        testCase "storage-cex-1" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              uint x;
+              uint y;
+              function fun(uint256 a) external{
+                assert (x == y);
+              }
+            }
+            |]
+          (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) [] debugVeriOpts
+          let storeCex = store cex
+              addr =  W256 $ num $ createAddress ethrunAddress 1
+              testCex = Map.size storeCex == 1 &&
+                        case Map.lookup addr storeCex of
+                          Just s -> Map.size s == 2 &&
+                                    case (Map.lookup 0 s, Map.lookup 1 s) of
+                                      (Just x, Just y) -> x /= y
+                                      _ -> False
+                          _ -> False
+          assertBool "Did not find expected storage cex" testCex
+          putStrLn "Expected counterexample found"
+        ,
+        testCase "storage-cex-2" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              uint[10] arr1;
+              uint[10] arr2;
+              function fun(uint256 a) external{
+                assert (arr1[0] < arr2[a]);
+              }
+            }
+            |]
+          (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) [] debugVeriOpts
+          let storeCex = store cex
+          let addr = W256 $ num $ createAddress ethrunAddress 1
+          let a = getVar cex "arg1"
+          let testCex = Map.size storeCex == 1 &&
+                        case Map.lookup addr storeCex of
+                          Just s -> Map.size s == 2 &&
+                                    case (Map.lookup 0 s, Map.lookup (10 + a) s) of
+                                      (Just x, Just y) -> x >= y
+                                      _ -> False
+                          _ -> False
+          assertBool "Did not find expected storage cex" testCex
+          putStrLn "Expected counterexample found"
  ]
   , testGroup "Equivalence checking"
     [
