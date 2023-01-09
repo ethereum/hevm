@@ -313,13 +313,13 @@ equivalence cmd = do
       Left err -> do
         putStrLn $ "Error occurred while generating internal expression" <> (show err) <> "cannot determine equivalence"
         exitFailure
-      Right a -> case (containsA (Cex()) a) of
+      Right a -> case (containsA (Cex ()) a) of
         False -> do
           putStrLn "No discrepancies found"
-          when (containsA (SMTTimeout()) a) $ do
+          when (containsA (SMTTimeout ()) a) $ do
             putStrLn "But timeout(s) occurred"
             exitFailure
-          when (containsA (SMTError {}) a) $ do
+          when (containsA (SMTError () "") a) $ do
             putStrLn "But SMT error(s) occurred"
             exitFailure
         True -> do

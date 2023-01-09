@@ -23,10 +23,9 @@ import qualified EVM.FeeSchedule as FeeSchedule
 import Data.DoubleWord (Word256)
 import Control.Concurrent.Async
 import Data.Maybe
-import Data.List (foldl')
+import Data.List (foldl', find)
 import Data.Tuple (swap)
 import Data.ByteString (ByteString)
-import Data.List (find)
 import Data.ByteString (null, pack)
 import qualified Control.Monad.State.Class as State
 import Data.Bifunctor (first, second)
@@ -50,6 +49,26 @@ isQed _ = False
 
 containsA :: Eq a => Eq b => Eq c => ProofResult a b c -> [(d , e, ProofResult a b c)] -> Bool
 containsA a lst = isJust $ Data.List.find (\(_, _, c) -> c == a) lst
+
+getCexes :: Eq a => Eq b => Eq c => [(d , e, ProofResult a b c)] -> [(d , e, ProofResult a b c)]
+getCexes lst = filter cexCheck lst
+  where
+    cexCheck (_, _, c) = case c of
+                         Cex {} -> True
+                         _ -> False
+
+getSMTTimeouts :: Eq a => Eq b => Eq c => [(d , e, ProofResult a b c)] -> [(d , e, ProofResult a b c)]
+getSMTTimeouts lst = filter timeoutCheck lst
+  where
+    timeoutCheck (_, _, c) = case c of
+                         SMTTimeout {} -> True
+                         _ -> False
+getSMTErrors :: Eq a => Eq b => Eq c => [(d , e, ProofResult a b c)] -> [(d , e, ProofResult a b c)]
+getSMTErrors lst = filter timeoutCheck lst
+  where
+    timeoutCheck (_, _, c) = case c of
+                         SMTError {} -> True
+                         _ -> False
 
 data VeriOpts = VeriOpts
   { simp :: Bool

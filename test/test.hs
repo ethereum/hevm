@@ -43,7 +43,7 @@ import Data.String.Here
 import qualified Data.Map.Strict as Map
 
 import Data.Binary.Put (runPut)
-import Data.Binary.Get (runGetOrFail)
+import Data.Binary.Get (runGetOrFail, isEmpty)
 
 import EVM hiding (Query, allowFFI)
 import EVM.SymExec
@@ -2152,11 +2152,14 @@ tests = testGroup "hevm"
           withSolvers CVC5 6 (Just 3) $ \s -> do
             Right res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
             end <- getCurrentTime
-            case containsA (Cex()) res of
+            let cexs = getCexes res
+                timeouts = getSMTTimeouts res
+                smtErrors = getSMTErrors res
+            case (null cexs) of
               False -> do
                 print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
-                let timeouts = filter (\(_, _, c) -> c == SMTTimeout()) res
                 unless (null timeouts) $ putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
+                unless (null smtErrors) $ putStrLn $ "But " <> (show $ length timeouts) <> " SMT error(s) occurred"
               True -> do
                 putStrLn $ "Not OK: " <> show f <> " Got: " <> show res
                 error "Was NOT equivalent, error"
