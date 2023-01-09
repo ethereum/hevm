@@ -582,10 +582,6 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
            else (foldl PAnd (PBool True) aProps) .&& (foldl PAnd (PBool True) bProps)  .&& differingResults
   -- If there exists a pair of end states where this is not the case,
   -- the following constraint is satisfiable
-
-  -- if isLeft flattenedA || isLeft flattenedB then do
-    -- pure $ Left $ getLeft flattenedA -- TODO fix to be better, it's only checking flattenedA
-  -- else do
   do
     let diffEndStFilt = filter (/= PBool False) differingEndStates
     putStrLn $ "Equivalence checking " <> (show $ length diffEndStFilt) <> " combinations"
