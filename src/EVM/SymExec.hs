@@ -60,15 +60,6 @@ data VeriOpts = VeriOpts
   }
   deriving (Eq, Show)
 
-noLoopVeriOpts :: VeriOpts
-noLoopVeriOpts = VeriOpts
-  { simp = True
-  , debug = False
-  , maxIter = Just 0
-  , askSmtIters = Just 0
-  , rpcInfo = Nothing
-  }
-
 defaultVeriOpts :: VeriOpts
 defaultVeriOpts = VeriOpts
   { simp = True
