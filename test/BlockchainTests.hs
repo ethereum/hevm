@@ -104,11 +104,7 @@ testsFromFile file problematicTests = do
 
 -- CI has issues with some heaver tests, disable in bulk
 ciIgnoredFiles :: [String]
-ciIgnoredFiles =
-  [ "BlockchainTests/GeneralStateTests/VMTests/vmPerformance"
-  , "BlockchainTests/GeneralStateTests/stQuadraticComplexityTest"
-  , "BlockchainTests/GeneralStateTests/stStaticCall"
-  ]
+ciIgnoredFiles = []
 
 commonProblematicTests :: Map String (TestTree -> TestTree)
 commonProblematicTests = Map.fromList
