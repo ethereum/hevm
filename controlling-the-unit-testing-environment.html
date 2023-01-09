@@ -176,6 +176,10 @@ Derives an ethereum address from the private key <code>sk</code>. Note that <cod
 Executes the arguments as a command in the system shell and returns stdout. Expects abi encoded values to be returned from the shell or an error will be thrown. Note that this
 cheatcode means test authors can execute arbitrary code on user machines as part of a call to <code>dapp test</code>, for this reason all calls to <code>ffi</code> will fail unless the <code>--ffi</code> flag is passed.</p>
 </li>
+<li>
+<p><code>function prank(address sender) public</code>
+Sets <code>msg.sender</code> to the specified <code>sender</code> for the next call.</p>
+</li>
 </ul>
 <h2 id="environment-variables"><a class="header" href="#environment-variables">Environment Variables</a></h2>
 <p>These environment variables can be used to control block parameters:</p>
