@@ -43,7 +43,7 @@ import Data.String.Here
 import qualified Data.Map.Strict as Map
 
 import Data.Binary.Put (runPut)
-import Data.Binary.Get (runGetOrFail, isEmpty)
+import Data.Binary.Get (runGetOrFail)
 
 import EVM hiding (Query, allowFFI)
 import EVM.SymExec
