@@ -29,6 +29,9 @@ These can be accessed by calling into a contract (typically called `Hevm`) at ad
   Executes the arguments as a command in the system shell and returns stdout. Expects abi encoded values to be returned from the shell or an error will be thrown. Note that this
   cheatcode means test authors can execute arbitrary code on user machines as part of a call to `dapp test`, for this reason all calls to `ffi` will fail unless the `--ffi` flag is passed.
 
+- `function prank(address sender) public`
+  Sets `msg.sender` to the specified `sender` for the next call.
+
 ## Environment Variables
 
 These environment variables can be used to control block parameters:

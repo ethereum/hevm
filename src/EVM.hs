@@ -111,6 +111,7 @@ data VM = VM
   , _constraints    :: [Prop]
   , _keccakEqs      :: [Prop]
   , _allowFFI       :: Bool
+  , _overrideCaller :: Maybe (Expr EWord)
   }
   deriving (Show)
 
@@ -535,6 +536,7 @@ makeVm o =
   , _keccakEqs = mempty
   , _iterations = mempty
   , _allowFFI = vmoptAllowFFI o
+  , _overrideCaller = Nothing
   }
 
 -- | Initialize empty contract with given code
@@ -1177,8 +1179,9 @@ exec1 = do
                   delegateCall this (num xGas) xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
                     zoom state $ do
                       assign callvalue (Lit xValue)
-                      assign caller (litAddr self)
+                      assign caller $ fromMaybe (litAddr self) (vm ^. overrideCaller)
                       assign contract callee
+                    assign overrideCaller Nothing
                     transfer self callee xValue
                     touchAccount self
                     touchAccount callee
@@ -1201,7 +1204,8 @@ exec1 = do
                   delegateCall this (num xGas) xTo (litAddr self) xValue xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
                     zoom state $ do
                       assign callvalue (Lit xValue)
-                      assign caller (litAddr self)
+                      assign caller $ fromMaybe (litAddr self) (vm ^. overrideCaller)
+                    assign overrideCaller Nothing
                     touchAccount self
             _ ->
               underrun
@@ -1292,9 +1296,10 @@ exec1 = do
                 delegateCall this (num xGas) xTo xTo 0 xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
                   zoom state $ do
                     assign callvalue (Lit 0)
-                    assign caller (litAddr self)
+                    assign caller $ fromMaybe (litAddr self) (vm ^. overrideCaller)
                     assign contract callee
                     assign static True
+                  assign overrideCaller Nothing
                   touchAccount self
                   touchAccount callee
             _ ->
@@ -2049,6 +2054,11 @@ cheatActions =
                       addr = Lit . W256 . word256 . BS.drop 12 . BS.take 32 . keccakBytes $ pub
                     assign (state . returndata . word256At (Lit 0)) addr
                     assign (state . memory . word256At outOffset) addr
+          _ -> vmError (BadCheatCode sig),
+
+      action "prank(address)" $
+        \sig _ _ input -> case decodeStaticArgs 0 1 input of
+          [addr]  -> assign overrideCaller (Just addr)
           _ -> vmError (BadCheatCode sig)
 
     ]
@@ -2480,8 +2490,7 @@ readMemory offset size vm = copySlice offset (Lit 0) size (view (state . memory)
 
 -- * Tracing
 
-withTraceLocation
-  :: (MonadState VM m) => TraceData -> m Trace
+withTraceLocation :: TraceData -> EVM Trace
 withTraceLocation x = do
   vm <- get
   let this = fromJust $ currentContract vm
@@ -2519,7 +2528,7 @@ zipperRootForest z =
 traceForest :: VM -> Forest Trace
 traceForest = view (traces . to zipperRootForest)
 
-traceTopLog :: (MonadState VM m) => [Expr Log] -> m ()
+traceTopLog :: [Expr Log] -> EVM ()
 traceTopLog [] = noop
 traceTopLog ((LogEntry addr bytes topics) : _) = do
   trace <- withTraceLocation (EventTrace addr bytes topics)

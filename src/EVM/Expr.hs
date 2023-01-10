@@ -678,6 +678,28 @@ simplify e = if (mapExpr go e == e)
       | x == 0 = b
       | otherwise = a
 
+    -- simple div/mod/add/sub
+    go (Div o1@(Lit _)  o2@(Lit _)) = EVM.Expr.div  o1 o2
+    go (SDiv o1@(Lit _) o2@(Lit _)) = EVM.Expr.sdiv o1 o2
+    go (Mod o1@(Lit _)  o2@(Lit _)) = EVM.Expr.mod  o1 o2
+    go (SMod o1@(Lit _) o2@(Lit _)) = EVM.Expr.smod o1 o2
+    go (Add o1@(Lit _)  o2@(Lit _)) = EVM.Expr.add  o1 o2
+    go (Sub o1@(Lit _)  o2@(Lit _)) = EVM.Expr.sub  o1 o2
+
+    -- double add/sub.
+    -- Notice that everything is done mod 2**256. So for example:
+    -- (a-b)+c observes the same arithmetic equalities as we are used to
+    --         in infinite integers. In fact, it can be re-written as:
+    -- (a+(W256Max-b)+c), which is the same as:
+    -- (a+c+(W256Max-b)), which is the same as:
+    -- (a+(c-b))
+    -- In other words, subtraction is just adding a much larger number.
+    --    So 3-1 mod 6 = 3+(6-1) mod 6 = 3+5 mod 6 = 5+3 mod 6 = 2
+    go (Sub (Sub orig (Lit x)) (Lit y)) = Sub orig (Lit (y+x))
+    go (Sub (Add orig (Lit x)) (Lit y)) = Sub orig (Lit (y-x))
+    go (Add (Add orig (Lit x)) (Lit y)) = Add orig (Lit (y+x))
+    go (Add (Sub orig (Lit x)) (Lit y)) = Add orig (Lit (y-x))
+
     -- redundant add / sub
     go o@(Sub (Add a b) c)
       | a == c = b
