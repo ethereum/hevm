@@ -2,7 +2,7 @@ cabal-version: 3.0
 name:
   hevm
 version:
-  0.50.1
+  0.50.2
 synopsis:
   Ethereum virtual machine evaluator
 description:
@@ -45,6 +45,11 @@ flag ci
   default:     False
   manual:      True
 
+flag devel
+  description: Sets flag for compilation during development
+  default:     False
+  manual:      True
+
 source-repository head
   type:     git
   location: https://github.com/ethereum/hevm.git
@@ -52,6 +57,8 @@ source-repository head
 common shared
   if flag(ci)
     ghc-options: -Werror
+  if flag(devel)
+    ghc-options: -j
   default-language: GHC2021
   default-extensions:
     LambdaCase
@@ -99,8 +106,10 @@ library
     Paths_hevm
   autogen-modules:
     Paths_hevm
-  ghc-options:
-    -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
+  if flag(devel)
+    ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans -j
+  else
+    ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
   extra-libraries:
     secp256k1, ff
   if os(linux)
@@ -164,7 +173,6 @@ library
     smt2-parser                       >= 0.1.0.1,
     word-wrap                         >= 0.5 && < 0.6,
     spool                             >= 0.1 && < 0.2,
-    parsec                            >= 3.1.14.0 && < 3.2,
     stm                               >= 2.5.0 && < 2.6.0,
     spawn                             >= 0.3 && < 0.4
   hs-source-dirs:
@@ -176,8 +184,10 @@ executable hevm
     hevm-cli
   main-is:
     hevm-cli.hs
-  ghc-options:
-    -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
+  if flag(devel)
+    ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans -j
+  else
+    ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
   other-modules:
     Paths_hevm
   if os(darwin)
@@ -222,8 +232,10 @@ executable hevm
 
 common test-base
   import: shared
-  ghc-options:
-    -Wall -Wno-unticked-promoted-constructors -Wno-orphans
+  if flag (devel)
+    ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans -j
+  else
+    ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans
   hs-source-dirs:
     test
   extra-libraries:
@@ -262,7 +274,6 @@ common test-base
     time,
     array,
     vector,
-    smt2-parser >= 0.1.0.1,
     stm >= 2.5.0,
     spawn >= 0.3,
     witherable,
