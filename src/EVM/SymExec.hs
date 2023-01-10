@@ -50,25 +50,15 @@ isQed _ = False
 containsA :: Eq a => Eq b => Eq c => ProofResult a b c -> [(d , e, ProofResult a b c)] -> Bool
 containsA a lst = isJust $ Data.List.find (\(_, _, c) -> c == a) lst
 
-getCexes :: Eq a => Eq b => Eq c => [(d , e, ProofResult a b c)] -> [(d , e, ProofResult a b c)]
-getCexes lst = filter cexCheck lst
+sameCnstr :: ProofResult a b c -> (d , e, ProofResult a b c) -> Bool
+sameCnstr a e = (\(_, _, c) -> checkCnstr c a) e
   where
-    cexCheck (_, _, c) = case c of
-                         Cex {} -> True
-                         _ -> False
-
-getSMTTimeouts :: Eq a => Eq b => Eq c => [(d , e, ProofResult a b c)] -> [(d , e, ProofResult a b c)]
-getSMTTimeouts lst = filter timeoutCheck lst
-  where
-    timeoutCheck (_, _, c) = case c of
-                         SMTTimeout {} -> True
-                         _ -> False
-getSMTErrors :: Eq a => Eq b => Eq c => [(d , e, ProofResult a b c)] -> [(d , e, ProofResult a b c)]
-getSMTErrors lst = filter timeoutCheck lst
-  where
-    timeoutCheck (_, _, c) = case c of
-                         SMTError {} -> True
-                         _ -> False
+    checkCnstr x y = case (x, y) of
+      (Qed _, Qed _) -> True
+      (Cex _, Cex _) -> True
+      (SMTTimeout _, SMTTimeout _) -> True
+      (SMTError {}, SMTError {}) -> True
+      _ -> False
 
 data VeriOpts = VeriOpts
   { simp :: Bool

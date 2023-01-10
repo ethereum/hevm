@@ -2152,9 +2152,9 @@ tests = testGroup "hevm"
           withSolvers CVC5 6 (Just 3) $ \s -> do
             Right res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
             end <- getCurrentTime
-            let cexs = getCexes res
-                timeouts = getSMTTimeouts res
-                smtErrors = getSMTErrors res
+            let cexs = filter (sameCnstr (Cex())) res
+                timeouts = filter (sameCnstr (SMTTimeout ())) res
+                smtErrors = filter (sameCnstr (SMTError () "")) res
             case (null cexs) of
               False -> do
                 print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
