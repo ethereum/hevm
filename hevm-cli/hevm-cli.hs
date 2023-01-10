@@ -35,7 +35,7 @@ import Control.Lens hiding (pre, passing)
 import Control.Monad              (void, when, forM_, unless)
 import Control.Monad.State.Strict (execStateT, liftIO)
 import Data.ByteString            (ByteString)
-import Data.List                  (intercalate, isSuffixOf)
+import Data.List                  (intercalate, isSuffixOf, find)
 import Data.Text                  (unpack, pack)
 import Data.Maybe                 (fromMaybe, mapMaybe)
 import Data.Version               (showVersion)
@@ -316,11 +316,10 @@ equivalence cmd = do
       Right a -> case (containsA (Cex ()) a) of
         False -> do
           putStrLn "No discrepancies found"
-          when (containsA (SMTTimeout ()) a) $ do
+          when (isJust $ Data.List.find (sameCnstr (SMTTimeout ()))) $ do
             putStrLn "But timeout(s) occurred"
             exitFailure
-          -- TODO wrong. String may not be empty!!
-          when (containsA (SMTError () "") a) $ do
+          when (isJust $ Data.List.find (sameCnstr (SMTError () ""))) $ do
             putStrLn "But SMT error(s) occurred"
             exitFailure
         True -> do
