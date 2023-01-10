@@ -37,7 +37,7 @@ import Control.Monad.State.Strict (execStateT, liftIO)
 import Data.ByteString            (ByteString)
 import Data.List                  (intercalate, isSuffixOf, find)
 import Data.Text                  (unpack, pack)
-import Data.Maybe                 (fromMaybe, mapMaybe)
+import Data.Maybe                 (fromMaybe, mapMaybe, isJust)
 import Data.Version               (showVersion)
 import Data.DoubleWord            (Word256)
 import System.IO                  (stderr)
@@ -313,13 +313,13 @@ equivalence cmd = do
       Left err -> do
         putStrLn $ "Error occurred while generating internal expression" <> (show err) <> "cannot determine equivalence"
         exitFailure
-      Right a -> case (containsA (Cex ()) a) of
+      Right a -> case (isJust $ Data.List.find (sameCnstr (Cex ())) a) of
         False -> do
           putStrLn "No discrepancies found"
-          when (isJust $ Data.List.find (sameCnstr (SMTTimeout ()))) $ do
+          when (isJust $ Data.List.find (sameCnstr (SMTTimeout ())) a) $ do
             putStrLn "But timeout(s) occurred"
             exitFailure
-          when (isJust $ Data.List.find (sameCnstr (SMTError () ""))) $ do
+          when (isJust $ Data.List.find (sameCnstr (SMTError () "")) a) $ do
             putStrLn "But SMT error(s) occurred"
             exitFailure
         True -> do
