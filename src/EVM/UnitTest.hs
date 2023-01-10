@@ -344,7 +344,7 @@ coverageReport dapp cov =
     allPositions :: Set (Text, Int)
     allPositions =
       ( Set.fromList
-      . mapMaybe (srcMapCodePos sources)
+      . mapMaybe (EVM.Debug.srcMapCodePos sources)
       . toList
       $ mconcat
         ( view dappSolcByName dapp
@@ -354,7 +354,7 @@ coverageReport dapp cov =
       )
 
     srcMapCov :: MultiSet (Text, Int)
-    srcMapCov = MultiSet.mapMaybe (srcMapCodePos sources) cov
+    srcMapCov = MultiSet.mapMaybe (EVM.Debug.srcMapCodePos sources) cov
 
     linesByName :: Map Text (Vector ByteString)
     linesByName =
@@ -742,16 +742,19 @@ symRun opts@UnitTestOptions{..} vm testName types = do
         )) vm
 
     -- check postconditions against vm
-    (_, results) <- verify solvers (makeVeriOpts opts) vm' (Just postcondition)
+    checked <- verify solvers (makeVeriOpts opts) vm' (Just postcondition)
+    -- (_, results) <- verify solvers (makeVeriOpts opts) vm' (Just postcondition)
 
     -- display results
-    if all isQed results
-    then do
-      return ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "", vm)
-    else do
-      let x = mapMaybe extractCex results
-      let y = symFailure opts testName (fst cd) types x
-      return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y, vm)
+    if isRight checked then do
+       let (_, results) = SymExec.getRight checked
+       if all isQed results then do
+         return ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "", vm)
+       else do
+        let x = mapMaybe extractCex results
+        let y = symFailure opts testName (fst cd) types x
+        return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y, vm)
+    else return ("\x1b[31m[FAIL]\x1b[0m  OTHER ERROR " <> testName, Left "whatever", vm)
 
 symFailure :: UnitTestOptions -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> Text
 symFailure UnitTestOptions {..} testName cd types failures' =

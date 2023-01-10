@@ -401,7 +401,7 @@ writeWord offset val src = WriteWord offset val src
 -- | Returns the length of a given buffer
 --
 -- If there are any writes to abstract locations, or CopySlices with an
--- abstract size or dstOffset, an abstract expresion will be returned.
+-- abstract size or dstOffset, an abstract expression will be returned.
 bufLength :: Expr Buf -> Expr EWord
 bufLength buf = case go 0 buf of
                   Just len -> len
@@ -414,7 +414,7 @@ bufLength buf = case go 0 buf of
     go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size) l) dst
     go _ _ = Nothing
 
--- | If a buffer has a concrete prefix, we return it's length here
+-- | If a buffer has a concrete prefix, we return its length here
 concPrefix :: Expr Buf -> Maybe Integer
 concPrefix (CopySlice (Lit srcOff) (Lit _) (Lit _) src (ConcreteBuf "")) = do
   sz <- go 0 src
@@ -473,7 +473,7 @@ toList buf = case bufLength buf of
 fromList :: V.Vector (Expr Byte) -> Expr Buf
 fromList bs = case Prelude.and (fmap isLitByte bs) of
   True -> ConcreteBuf . BS.pack . V.toList . V.mapMaybe unlitByte $ bs
-  -- we want to minimize the size of the resulting expresion, so we do two passes:
+  -- we want to minimize the size of the resulting expression, so we do two passes:
   --   1. write all concrete bytes to some base buffer
   --   2. write all symbolic writes on top of this buffer
   -- this is safe because each write in the input vec is to a single byte at a distinct location

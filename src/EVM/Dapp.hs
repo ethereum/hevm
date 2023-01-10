@@ -4,7 +4,6 @@ module EVM.Dapp where
 
 import EVM (Trace, traceContract, traceOpIx, ContractCode(..), Contract(..), codehash, contractcode, RuntimeCode (..))
 import EVM.ABI (Event, AbiType, SolError)
-import EVM.Debug (srcMapCodePos)
 import EVM.Solidity
 import EVM.Types (W256, abiKeccak, keccak', Addr, regexMatches, unlit, unlitByte)
 
@@ -20,7 +19,7 @@ import Data.Maybe (isJust, fromJust, mapMaybe)
 import Data.Word (Word32)
 import EVM.Concrete
 
-import Control.Arrow ((>>>))
+import Control.Arrow ((>>>), second)
 import Control.Lens
 
 import Data.List (find)
@@ -202,3 +201,9 @@ showTraceLocation dapp trace =
         Nothing -> Left "<source not found>"
         Just (fileName, lineIx) ->
           Right (fileName <> ":" <> pack (show lineIx))
+
+srcMapCodePos :: SourceCache -> SrcMap -> Maybe (Text, Int)
+srcMapCodePos cache sm =
+  fmap (second f) $ cache ^? sourceFiles . ix (srcMapFile sm)
+  where
+    f v = BS.count 0xa (BS.take (srcMapOffset sm - 1) v) + 1
