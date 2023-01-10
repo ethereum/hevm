@@ -664,7 +664,7 @@ formatCex cd m@(SMTCex _ _ _ blockContext txContext) = T.unlines $
 
 -- | Takes a buffer and a Cex and replaces all abstract values in the buf with concrete ones from the Cex
 subModel :: SMTCex -> Expr a -> Expr a
-subModel c expr = subBufs (buffers c) . subVars (vars c) . subVars (blockContext c) . subVars (txContext c) $ expr
+subModel c expr = subBufs (buffers c) . subVars (vars c) . subStore (store c) . subVars (blockContext c) . subVars (txContext c) $ expr
   where
     subVars model b = Map.foldlWithKey subVar b model
     subVar :: Expr a -> Expr EWord -> W256 -> Expr a
@@ -686,4 +686,12 @@ subModel c expr = subBufs (buffers c) . subVars (vars c) . subVars (blockContext
           a@(AbstractBuf _) -> if a == var
                       then ConcreteBuf val
                       else a
+          e -> e
+
+    subStore :: Map W256 (Map W256 W256) -> Expr a -> Expr a
+    subStore m b = mapExpr go b
+      where
+        go :: Expr a -> Expr a
+        go = \case
+          AbstractStore -> ConcreteStore m
           e -> e
