@@ -30,7 +30,7 @@ import qualified Data.ByteString as BS
 import qualified Data.List as List
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.String.Here
-import Data.Maybe
+import Data.Maybe (fromMaybe, fromJust)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Text.Lazy (Text)

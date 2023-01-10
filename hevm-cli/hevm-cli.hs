@@ -309,10 +309,10 @@ equivalence cmd = do
 
   withSolvers Z3 3 Nothing $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts Nothing
-    case containsA (Cex()) res of
+    case not (any isCex res) of
       False -> do
         putStrLn "No discrepancies found"
-        when (containsA (EVM.SymExec.Timeout()) res) $ do
+        when (any isTimeout res) $ do
           putStrLn "But timeout(s) occurred"
           exitFailure
       True -> do

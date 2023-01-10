@@ -58,6 +58,7 @@ import qualified EVM.Expr as Expr
 import qualified Data.Text as T
 import Data.List (isSubsequenceOf)
 import EVM.TestUtils
+import GHC.Conc (getNumProcessors)
 
 main :: IO ()
 main = defaultMain tests
@@ -1762,7 +1763,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
-          assertBool "Must have a difference" (not (null a))
+          assertBool "Must have a difference" (any isCex a)
       ,
       testCase "eq-sol-exp-qed" $ do
         Just aPrgm <- solcRuntime "C"
@@ -1787,7 +1788,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
-          assertEqual "Must have no difference" [] a
+          assertEqual "Must have no difference" [Qed ()] a
           return ()
       ,
       testCase "eq-sol-exp-cex" $ do
@@ -1815,70 +1816,31 @@ tests = testGroup "hevm"
         withSolvers Z3 3 Nothing $ \s -> do
           let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 2, askSmtIters = Just 2, rpcInfo = Nothing}
           a <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
-          assertEqual "Must be different" (containsA (Cex ()) a) True
+          assertEqual "Must be different" (any isCex a) True
           return ()
       , testCase "eq-all-yul-optimization-tests" $ do
         let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 5, askSmtIters = Just 20, rpcInfo = Nothing }
             ignoredTests = [
-                      "controlFlowSimplifier/terminating_for_nested.yul"
-                    , "controlFlowSimplifier/terminating_for_nested_reversed.yul"
-
                     -- unbounded loop --
-                    , "commonSubexpressionEliminator/branches_for.yul"
-                    , "commonSubexpressionEliminator/loop.yul"
-                    , "conditionalSimplifier/clear_after_if_continue.yul"
+                    "commonSubexpressionEliminator/branches_for.yul"
                     , "conditionalSimplifier/no_opt_if_break_is_not_last.yul"
-                    , "conditionalUnsimplifier/clear_after_if_continue.yul"
                     , "conditionalUnsimplifier/no_opt_if_break_is_not_last.yul"
                     , "expressionSimplifier/inside_for.yul"
                     , "forLoopConditionIntoBody/cond_types.yul"
                     , "forLoopConditionIntoBody/simple.yul"
                     , "fullSimplify/inside_for.yul"
-                    , "fullSuite/devcon_example.yul"
-                    , "fullSuite/loopInvariantCodeMotion.yul"
                     , "fullSuite/no_move_loop_orig.yul"
-                    , "loadResolver/loop.yul"
                     , "loopInvariantCodeMotion/multi.yul"
-                    , "loopInvariantCodeMotion/recursive.yul"
-                    , "loopInvariantCodeMotion/simple.yul"
-                    , "redundantAssignEliminator/for_branch.yul"
-                    , "redundantAssignEliminator/for_break.yul"
-                    , "redundantAssignEliminator/for_continue.yul"
-                    , "redundantAssignEliminator/for_decl_inside_break_continue.yul"
-                    , "redundantAssignEliminator/for_deep_noremove.yul"
                     , "redundantAssignEliminator/for_deep_simple.yul"
-                    , "redundantAssignEliminator/for_multi_break.yul"
-                    , "redundantAssignEliminator/for_nested.yul"
-                    , "redundantAssignEliminator/for_rerun.yul"
-                    , "redundantAssignEliminator/for_stmnts_after_break_continue.yul"
-                    , "rematerialiser/branches_for1.yul"
-                    , "rematerialiser/branches_for2.yul"
-                    , "rematerialiser/for_break.yul"
-                    , "rematerialiser/for_continue.yul"
-                    , "rematerialiser/for_continue_2.yul"
-                    , "rematerialiser/for_continue_with_assignment_in_post.yul"
-                    , "rematerialiser/no_remat_in_loop.yul"
-                    , "ssaTransform/for_reassign_body.yul"
-                    , "ssaTransform/for_reassign_init.yul"
-                    , "ssaTransform/for_reassign_post.yul"
-                    , "ssaTransform/for_simple.yul"
-                    , "loopInvariantCodeMotion/nonMovable.yul"
-                    , "unusedAssignEliminator/for_rerun.yul"
-                    , "unusedAssignEliminator/for_continue_3.yul"
+                    , "unusedAssignEliminator/for_deep_noremove.yul"
                     , "unusedAssignEliminator/for_deep_simple.yul"
                     , "ssaTransform/for_def_in_init.yul"
-                    , "rematerialiser/many_refs_small_cost_loop.yul"
+                    , "loopInvariantCodeMotion/simple_state.yul"
+                    , "loopInvariantCodeMotion/simple.yul"
+                    , "loopInvariantCodeMotion/recursive.yul"
+                    , "loopInvariantCodeMotion/no_move_staticall_returndatasize.yul"
                     , "loopInvariantCodeMotion/no_move_state_loop.yul"
-                    , "loopInvariantCodeMotion/dependOnVarInLoop.yul"
-                    , "forLoopInitRewriter/empty_pre.yul"
-                    , "loadResolver/keccak_crash.yul"
-                    , "blockFlattener/for_stmt.yul" -- symb input can loop it forever
-                    , "unusedAssignEliminator/for.yul" -- not infinite, just 2**256-3
                     , "loopInvariantCodeMotion/no_move_state.yul" -- not infinite, but rollaround on a large int
-                    , "loopInvariantCodeMotion/non-ssavar.yul" -- same as above
-                    , "forLoopInitRewriter/complex_pre.yul"
-                    , "rematerialiser/some_refs_small_cost_loop.yul" -- not infinite but 100 long
-                    , "forLoopInitRewriter/simple.yul"
                     , "loopInvariantCodeMotion/no_move_loop.yul"
 
                     -- unexpected symbolic arg --
@@ -1928,11 +1890,15 @@ tests = testGroup "hevm"
                     , "fullSuite/ssaReverse.yul"
                     , "rematerialiser/cheap_caller.yul"
                     , "rematerialiser/non_movable_instruction.yul"
+                    , "rematerialiser/for_break.yul"
+                    , "rematerialiser/for_continue.yul"
+                    , "rematerialiser/for_continue_2.yul"
                     , "ssaAndBack/multi_assign.yul"
                     , "ssaAndBack/multi_assign_if.yul"
                     , "ssaAndBack/multi_assign_switch.yul"
                     , "ssaAndBack/simple.yul"
                     , "ssaReverser/simple.yul"
+                    , "loopInvariantCodeMotion/simple_storage.yul"
 
                     -- OpMstore8
                     , "loadResolver/memory_with_different_kinds_of_invalidation.yul"
@@ -1947,7 +1913,6 @@ tests = testGroup "hevm"
                     , "commonSubexpressionEliminator/object_access.yul"
                     , "expressionSplitter/object_access.yul"
                     , "fullSuite/stack_compressor_msize.yul"
-                    , "varNameCleaner/function_names.yul"
 
                     -- stack too deep --
                     , "fullSuite/abi2.yul"
@@ -2047,8 +2012,6 @@ tests = testGroup "hevm"
 
                     -- Takes too long, would timeout on most test setups.
                     -- We could probably fix these by "bunching together" queries
-                    , "fullSuite/clear_after_if_continue.yul"
-                    , "reasoningBasedSimplifier/smod.yul"
                     , "reasoningBasedSimplifier/mulmod.yul"
 
                     -- TODO check what's wrong with these!
@@ -2076,9 +2039,8 @@ tests = testGroup "hevm"
                 False -> recursiveList ax (a:b)
           recursiveList [] b = pure b
         files <- recursiveList fullpaths []
-        --
         let filesFiltered = filter (\file -> not $ any (\filt -> Data.List.isSubsequenceOf filt file) ignoredTests) files
-        --
+
         -- Takes one file which follows the Solidity Yul optimizer unit tests format,
         -- extracts both the nonoptimized and the optimized versions, and checks equivalence.
         forM_ filesFiltered (\f-> do
@@ -2116,14 +2078,17 @@ tests = testGroup "hevm"
             putStrLn "------------- END -----------------"
           Just aPrgm <- yul "" $ T.pack $ unlines filteredASym
           Just bPrgm <- yul "" $ T.pack $ unlines filteredBSym
-          withSolvers CVC5 6 (Just 3) $ \s -> do
+          procs <- getNumProcessors
+          withSolvers CVC5 (num procs) (Just 100) $ \s -> do
             res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
             end <- getCurrentTime
-            case containsA (Cex()) res of
+            case any isCex res of
               False -> do
                 print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
-                let timeouts = filter (\(_, _, c) -> c == EVM.SymExec.Timeout()) res
-                unless (null timeouts) $ putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
+                let timeouts = filter isTimeout res
+                unless (null timeouts) $ do
+                  putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
+                  error "Encountered timeouts, error"
               True -> do
                 putStrLn $ "Not OK: " <> show f <> " Got: " <> show res
                 error "Was NOT equivalent, error"

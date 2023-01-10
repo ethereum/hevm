@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - New cheatcode `prank(address)` that sets `msg.sender` to the specified address for the next call.
+- Improved equivalence checker that avoids checking similar branches more than once.
 
 ## [0.50.2] - 2023-01-06
 
@@ -25,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `hevm exec` no longer fails with `hevm: No match in record selector smttimeout`
 - the `gas`, `gaslimit`, `priorityfee`, and `gasprice` cli options are now respected
 - cleaner formatting for the gas value in the visual debugger
+
 
 ### Changed
 
