@@ -1,0 +1,324 @@
+cabal-version: 3.0
+name:
+  hevm
+version:
+  0.50.2
+synopsis:
+  Ethereum virtual machine evaluator
+description:
+  Hevm implements the Ethereum virtual machine semantics.
+  .
+  It can be used as a library, and it also comes with an executable
+  that can run unit test suites, optionally with a visual TTY debugger.
+homepage:
+  https://github.com/dapphub/dapptools
+license:
+  AGPL-3.0-only
+author:
+  Mikael Brockman, Martin Lundfall, dxo
+maintainer:
+  mikael@brockman.se, martin.lundfall@gmail.com, git@d-xo.org
+category:
+  Ethereum
+build-type:
+  Simple
+extra-source-files:
+  CHANGELOG.md
+  test/contracts/lib/test.sol
+  test/contracts/lib/erc20.sol
+  test/contracts/pass/trivial.sol
+  test/contracts/pass/abstract.sol
+  test/contracts/pass/cheatCodes.sol
+  test/contracts/pass/constantinople.sol
+  test/contracts/pass/dsProvePass.sol
+  test/contracts/pass/invariants.sol
+  test/contracts/pass/libraries.sol
+  test/contracts/pass/loops.sol
+  test/contracts/pass/rpc.sol
+  test/contracts/fail/trivial.sol
+  test/contracts/fail/cheatCodes.sol
+  test/contracts/fail/dsProveFail.sol
+  test/contracts/fail/invariantFail.sol
+
+flag ci
+  description: Sets flags for compilation in CI
+  default:     False
+  manual:      True
+
+flag devel
+  description: Sets flag for compilation during development
+  default:     False
+  manual:      True
+
+source-repository head
+  type:     git
+  location: https://github.com/ethereum/hevm.git
+
+common shared
+  if flag(ci)
+    ghc-options: -Werror
+  if flag(devel)
+    ghc-options: -j
+  default-language: GHC2021
+  default-extensions:
+    LambdaCase
+    OverloadedStrings
+    RecordWildCards
+    TypeFamilies
+    ViewPatterns
+
+library
+  import: shared
+  exposed-modules:
+    EVM,
+    EVM.ABI,
+    EVM.Concrete,
+    EVM.Dapp,
+    EVM.Debug,
+    EVM.Demand,
+    EVM.Dev,
+    EVM.Expr,
+    EVM.SMT,
+    EVM.Exec,
+    EVM.Facts,
+    EVM.Facts.Git,
+    EVM.Format,
+    EVM.Fetch,
+    EVM.FeeSchedule,
+    EVM.Hexdump,
+    EVM.Op,
+    EVM.Patricia,
+    EVM.Precompiled,
+    EVM.RLP,
+    EVM.Solidity,
+    EVM.Stepper,
+    EVM.StorageLayout,
+    EVM.SymExec,
+    EVM.Traversals,
+    EVM.CSE,
+    EVM.Keccak,
+    EVM.Transaction,
+    EVM.TTY,
+    EVM.TTYCenteredList,
+    EVM.Types,
+    EVM.UnitTest,
+  other-modules:
+    Paths_hevm
+  autogen-modules:
+    Paths_hevm
+  if flag(devel)
+    ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans -j
+  else
+    ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
+  extra-libraries:
+    secp256k1, ff
+  if os(linux)
+     extra-libraries: stdc++
+  c-sources:
+    ethjet/tinykeccak.c, ethjet/ethjet.c
+  cxx-sources:
+    ethjet/ethjet-ff.cc, ethjet/blake2.cc
+  cxx-options:
+    -std=c++0x
+  install-includes:
+    ethjet/tinykeccak.h, ethjet/ethjet.h, ethjet/ethjet-ff.h, ethjet/blake2.h
+  build-depends:
+    QuickCheck                        >= 2.13.2 && < 2.15,
+    Decimal                           >= 0.5.1 && < 0.6,
+    containers                        >= 0.6.0 && < 0.7,
+    deepseq                           >= 1.4.4 && < 1.5,
+    time                              >= 1.11.1.1 && < 1.12,
+    transformers                      >= 0.5.6 && < 0.6,
+    tree-view                         >= 0.5 && < 0.6,
+    abstract-par                      >= 0.3.3 && < 0.4,
+    aeson                             >= 2.0.0 && < 2.1,
+    bytestring                        >= 0.11.3.1 && < 0.12,
+    scientific                        >= 0.3.6 && < 0.4,
+    binary                            >= 0.8.6 && < 0.9,
+    text                              >= 1.2.3 && < 1.3,
+    unordered-containers              >= 0.2.10 && < 0.3,
+    vector                            >= 0.12.1 && < 0.13,
+    ansi-wl-pprint                    >= 0.6.9 && < 0.7,
+    base16-bytestring                 >= 1.0.0 && < 2.0,
+    brick                             >= 1.4 && < 1.5,
+    megaparsec                        >= 9.0.0 && < 10.0,
+    mtl                               >= 2.2.2 && < 2.3,
+    directory                         >= 1.3.3 && < 1.4,
+    filepath                          >= 1.4.2 && < 1.5,
+    vty                               >= 5.37 && < 5.38,
+    cereal                            >= 0.5.8 && < 0.6,
+    cryptonite                        >= 0.30 && < 0.31,
+    memory                            >= 0.16.0 && < 0.20,
+    data-dword                        >= 0.3.1 && < 0.4,
+    free                              >= 5.1.3 && < 5.2,
+    haskeline                         >= 0.8.0 && < 0.9,
+    process                           >= 1.6.5 && < 1.7,
+    lens                              >= 5.1.1 && < 5.2,
+    lens-aeson                        >= 1.2.2 && < 1.3,
+    monad-par                         >= 0.3.5 && < 0.4,
+    async                             >= 2.2.4 && < 2.3,
+    multiset                          >= 0.3.4 && < 0.4,
+    operational                       >= 0.2.3 && < 0.3,
+    optparse-generic                  >= 1.3.1 && < 1.5,
+    quickcheck-text                   >= 0.1.2 && < 0.2,
+    restless-git                      >= 0.7 && < 0.8,
+    rosezipper                        >= 0.2 && < 0.3,
+    temporary                         >= 1.3 && < 1.4,
+    witherable                        >= 0.3.5 && < 0.5,
+    wreq                              >= 0.5.3 && < 0.6,
+    regex-tdfa                        >= 1.2.3 && < 1.4,
+    base                              >= 4.9 && < 5,
+    here                              >= 1.2.13 && < 1.3,
+    tuple                             >= 0.3.0.2 && < 0.4,
+    smt2-parser                       >= 0.1.0.1,
+    word-wrap                         >= 0.5 && < 0.6,
+    spool                             >= 0.1 && < 0.2,
+  hs-source-dirs:
+    src
+
+executable hevm
+  import: shared
+  hs-source-dirs:
+    hevm-cli
+  main-is:
+    hevm-cli.hs
+  if flag(devel)
+    ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans -j
+  else
+    ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
+  other-modules:
+    Paths_hevm
+  if os(darwin)
+    extra-libraries: c++
+    ld-options: -Wl,-keep_dwarf_unwind
+  else
+    extra-libraries: stdc++
+  build-depends:
+    QuickCheck,
+    aeson,
+    ansi-wl-pprint,
+    async,
+    base,
+    base16-bytestring,
+    binary,
+    brick,
+    bytestring,
+    containers,
+    cryptonite,
+    data-dword,
+    deepseq,
+    directory,
+    filepath,
+    free,
+    hevm,
+    lens,
+    lens-aeson,
+    memory,
+    mtl,
+    optparse-generic,
+    operational,
+    process,
+    quickcheck-text,
+    regex-tdfa,
+    temporary,
+    text,
+    unordered-containers,
+    vector,
+    vty
+
+common test-base
+  import: shared
+  type:
+    exitcode-stdio-1.0
+  if flag (devel)
+    ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans -j
+  else
+    ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans
+  hs-source-dirs:
+    test
+  extra-libraries:
+    secp256k1
+  other-modules:
+    Paths_hevm
+  autogen-modules:
+    Paths_hevm
+  build-depends:
+    HUnit >= 1.6,
+    QuickCheck,
+    quickcheck-instances,
+    aeson,
+    base,
+    base16-bytestring,
+    binary,
+    containers,
+    directory,
+    bytestring,
+    filemanip,
+    filepath,
+    here,
+    hevm,
+    lens,
+    mtl,
+    data-dword,
+    process,
+    tasty >= 1.0,
+    tasty-hunit >= 0.10,
+    tasty-quickcheck >= 0.9,
+    tasty-expected-failure >= 0.12,
+    temporary,
+    text,
+    regex-tdfa,
+    regex,
+    time,
+    array,
+    vector,
+    witherable,
+    smt2-parser >= 0.1.0.1
+
+library test-utils
+  import:
+    test-base
+  exposed-modules:
+    EVM.TestUtils
+
+common test-common
+  import:
+    test-base
+  build-depends:
+    test-utils
+  other-modules:
+    EVM.TestUtils
+  if os(darwin)
+    extra-libraries: c++
+    -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
+    ld-options: -Wl,-keep_dwarf_unwind
+  else
+    extra-libraries: stdc++
+
+--- Test Suites ---
+
+test-suite test
+  import:
+    test-common
+  type:
+    exitcode-stdio-1.0
+  main-is:
+    test.hs
+
+-- these tests require network access so we split them into a seperate test
+-- suite to make it easy to skip them when running nix-build
+test-suite rpc-tests
+  import:
+    test-common
+  type:
+    exitcode-stdio-1.0
+  main-is:
+    rpc.hs
+
+test-suite ethereum-tests
+  import:
+    test-common
+  type:
+    exitcode-stdio-1.0
+  main-is:
+    BlockchainTests.hs

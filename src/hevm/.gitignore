@@ -1,7 +1,0 @@
-dist/
-dist-newstyle/
-.configured
-cabal.project.local*
-.stack-work/
-tests/
-tags

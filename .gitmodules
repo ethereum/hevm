@@ -1,3 +1,0 @@
-[submodule "src/hevm/solidity"]
-	path = src/hevm/solidity
-	url = https://github.com/ethereum/solidity

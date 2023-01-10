@@ -16,7 +16,9 @@ User facing documentation can be found in the [hevm book](https://hevm.dev/).
 
 ## Installation
 
-`hevm` can be installed using nix flakes via the following command:
+Static binaries for x86 linux are available for each [release](https://github.com/ethereum/hevm/releases).
+
+Alternatively `hevm` can be installed using nix flakes via the following command:
 
 ```
 nix profile install github:ethereum/hevm
@@ -32,7 +34,7 @@ root to enter a development shell containing all required dev dependencies. If y
 [direnv](https://direnv.net/), then you can run `direnv allow`, and the shell will be automatically
 entered each time you cd in the project repo.
 
-Once in the shell you can `cd src/hevm` and use the usual `cabal` commands to build and test hevm:
+Once in the shell you can use the usual `cabal` commands to build and test hevm:
 
 ```
 $ cabal build          # build the hevm library
