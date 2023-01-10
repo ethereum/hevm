@@ -829,73 +829,52 @@ getStore inst sreads = do
         r -> parseErr r
 
 
-is1DArrConst :: QualIdentifier -> Bool
-is1DArrConst = \case
-  Qualified (IdSymbol "const") sort -> is1DArray sort
-  _ -> False
 
-is1DArray :: Sort -> Bool
-is1DArray = \case
-  SortParameter (IdSymbol "Array") (sort1 :| [sort2]) ->
-    isBitVec256 sort1 && isBitVec256 sort2
-  _ -> False
+-- | Interpret an N-dimentional array as a value of type a.
+-- Parameterized by an interpretation function for array values.
+interpretNDArray :: (Map Symbol Term -> Term -> a) -> (Map Symbol Term) -> Term -> (W256 -> a)
+interpretNDArray interp env = \case
+  -- variable reference
+  TermQualIdentifier (Unqualified (IdSymbol s)) ->
+    case Map.lookup s env of
+      Just t -> interpretNDArray interp env t
+      Nothing -> error "Internal error: unknown identifier, cannot parse array"
+  -- (let (x t') t)
+  TermLet (VarBinding x t' :| []) t -> interpretNDArray interp (Map.insert x t' env) t
+  TermLet (VarBinding x t' :| lets) t -> interpretNDArray interp (Map.insert x t' env) (TermLet (NonEmpty.fromList lets) t)
+  -- (as const (Array (_ BitVec 256) (_ BitVec 256))) SpecConstant
+  TermApplication asconst (val :| []) | isArrConst asconst ->
+    \_ -> interp env val
+  -- (store arr ind val)
+  TermApplication store (arr :| [TermSpecConstant ind, val]) | isStore store ->
+    \x -> if x == parseW256 ind then interp env val else interpretNDArray interp env arr x
+  t -> error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
 
-is2DArrConst :: QualIdentifier -> Bool
-is2DArrConst = \case
-  Qualified (IdSymbol "const") sort -> is2DArray sort
-  _ -> False
+  where
+    isArrConst :: QualIdentifier -> Bool
+    isArrConst = \case
+      Qualified (IdSymbol "const") (SortParameter (IdSymbol "Array") _) -> True
+      _ -> False
 
-is2DArray :: Sort -> Bool
-is2DArray = \case
-  SortParameter (IdSymbol "Array") (sort1 :| [sort2]) ->
-    isBitVec256 sort1 && is1DArray sort2
-  _ -> False
-
-isBitVec256 :: Sort -> Bool
-isBitVec256 t =
-  t == SortSymbol (IdIndexed "BitVec" (IxNumeral "256" :| []))
-
-isStore :: QualIdentifier -> Bool
-isStore t = t == Unqualified (IdSymbol "store")
+    isStore :: QualIdentifier -> Bool
+    isStore t = t == Unqualified (IdSymbol "store")
 
 
 -- | Interpret an 1-dimentional array as a function
 interpret1DArray :: (Map Symbol Term) -> Term -> (W256 -> W256)
-interpret1DArray env = \case
-  -- variable reference
-  TermQualIdentifier (Unqualified (IdSymbol s)) ->
-    case Map.lookup s env of
-      Just t -> interpret1DArray env t
-      Nothing -> error "Internal error: unknown identifier, cannot parse array"
-  -- (let (x t') t)
-  TermLet (VarBinding x t' :| []) t -> interpret1DArray (Map.insert x t' env) t
-  TermLet (VarBinding x t' :| lets) t -> interpret1DArray (Map.insert x t' env) (TermLet (NonEmpty.fromList lets) t)
-  -- (as const (Array (_ BitVec 256) (_ BitVec 256))) SpecConstant
-  TermApplication asconst (TermSpecConstant val :| []) | is1DArrConst asconst ->
-    \_ -> parseW256 val
-  -- (store arr ind val)
-  TermApplication store (arr :| [TermSpecConstant ind, TermSpecConstant val]) | isStore store ->
-    \x -> if x == parseW256 ind then parseW256 val else interpret1DArray env arr x
-  t -> error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
+interpret1DArray = interpretNDArray interpretW256
+  where
+    interpretW256 :: (Map Symbol Term) -> Term -> W256
+    interpretW256 _ (TermSpecConstant val) = parseW256 val
+    interpretW256 env (TermQualIdentifier (Unqualified (IdSymbol s))) =
+      case Map.lookup s env of
+        Just t -> interpretW256 env t
+        Nothing -> error "Internal error: unknown identifier, cannot parse array"
+    interpretW256 _ t = error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
 
--- | Interpret a 2-dimentional array as a function
+-- | Interpret an 2-dimentional array as a function
 interpret2DArray :: (Map Symbol Term) -> Term -> (W256 -> W256 -> W256)
-interpret2DArray env = \case
-  -- variable reference
-  TermQualIdentifier (Unqualified (IdSymbol s)) ->
-    case Map.lookup s env of
-      Just t -> interpret2DArray env t
-      Nothing -> error "Internal error: unknown identifier, cannot parse array"
-  -- (let (x t') t)
-  TermLet (VarBinding x t' :| []) t -> interpret2DArray (Map.insert x t' env) t
-  TermLet (VarBinding x t' :| lets) t -> interpret2DArray (Map.insert x t' env) (TermLet (NonEmpty.fromList lets) t)
-  -- (as const (Array (_ BitVec 256) (Array (_ BitVec 256) (_ BitVec 256)))) 1DarrayConstant
-  TermApplication asconst (val :| []) | is2DArrConst asconst ->
-    \_ -> interpret1DArray env val
-  -- (store arr2D ind arr1D)
-  TermApplication store (arr :| [TermSpecConstant ind, val]) | isStore store ->
-    \x -> if x == parseW256 ind then interpret1DArray env val else interpret2DArray env arr x
-  t -> error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
+interpret2DArray = interpretNDArray interpret1DArray
 
 
 getBufs :: SolverInstance -> [TS.Text] -> IO (Map (Expr Buf) ByteString)
