@@ -150,6 +150,10 @@ tests = testGroup "hevm"
         let simplified = Expr.writeWord idx val buf
             full = WriteWord idx val buf
         checkEquiv simplified full
+    , testProperty "arith-simplification" $ \(_ :: Int) -> ioProperty $ do
+        expr <- generate . sized $ genWordArith 15
+        let simplified = Expr.simplify expr
+        checkEquiv expr simplified
     , testProperty "readByte-equivalance" $ \(buf, idx) -> ioProperty $ do
         let simplified = Expr.readByte idx buf
             full = ReadByte idx buf
@@ -2417,6 +2421,46 @@ genWord litFreq sz = frequency
    subBuf = defaultBuf (sz `div` 10)
    subStore = genStorage (sz `div` 10)
    subByte = genByte (sz `div` 10)
+
+genWordArith :: Int -> Int -> Gen (Expr EWord)
+genWordArith litFreq 0 = frequency
+  [ (litFreq, fmap Lit arbitrary)
+  , (1, oneof [ fmap Lit arbitrary ])
+  ]
+genWordArith litFreq sz = frequency
+  [ (litFreq, fmap Lit arbitrary)
+  , (20, frequency
+    [ (20, liftM2 Add  subWord subWord)
+    , (20, liftM2 Sub  subWord subWord)
+    , (20, liftM2 Mul  subWord subWord)
+    , (20, liftM2 SEx  subWord subWord)
+    , (20, liftM2 Xor  subWord subWord)
+    -- these reduce variability
+    , (3 , liftM2 Min  subWord subWord)
+    , (3 , liftM2 Div  subWord subWord)
+    , (3 , liftM2 SDiv subWord subWord)
+    , (3 , liftM2 Mod  subWord subWord)
+    , (3 , liftM2 SMod subWord subWord)
+    , (3 , liftM2 SHL  subWord subWord)
+    , (3 , liftM2 SHR  subWord subWord)
+    , (3 , liftM2 SAR  subWord subWord)
+    , (3 , liftM2 Or   subWord subWord)
+    -- comparisons, reducing variability greatly
+    , (1 , liftM2 LEq  subWord subWord)
+    , (1 , liftM2 GEq  subWord subWord)
+    , (1 , liftM2 SLT  subWord subWord)
+    --(1, , liftM2 SGT subWord subWord
+    , (1 , liftM2 Eq   subWord subWord)
+    , (1 , liftM2 And  subWord subWord)
+    , (1 , fmap IsZero subWord        )
+    -- Expensive below
+    --(1,  liftM3 AddMod subWord subWord subWord
+    --(1,  liftM3 MulMod subWord subWord subWord
+    --(1,  liftM2 Exp subWord litWord
+    ])
+  ]
+ where
+   subWord = genWordArith (litFreq `div` 2) (sz `div` 2)
 
 defaultBuf :: Int -> Gen (Expr Buf)
 defaultBuf = genBuf (4_000_000)
