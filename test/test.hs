@@ -1821,9 +1821,6 @@ tests = testGroup "hevm"
       , testCase "eq-all-yul-optimization-tests" $ do
         let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 5, askSmtIters = Just 20, rpcInfo = Nothing }
             ignoredTests = [
-                    -- "controlFlowSimplifier/terminating_for_nested.yul"
-                    -- , "controlFlowSimplifier/terminating_for_nested_reversed.yul"
-
                     -- unbounded loop --
                     "commonSubexpressionEliminator/branches_for.yul"
                     , "conditionalSimplifier/no_opt_if_break_is_not_last.yul"
