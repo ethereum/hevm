@@ -2,5 +2,6 @@ result
 result-*
 dist-newstyle/
 .direnv/
-tag
 tags
+.configured
+cabal.project.local*
