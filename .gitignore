@@ -4,7 +4,6 @@ result-*
 
 # direnv
 .direnv/
-tags
 
 # cabal
 dist/

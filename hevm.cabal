@@ -228,8 +228,6 @@ executable hevm
 
 common test-base
   import: shared
-  type:
-    exitcode-stdio-1.0
   if flag (devel)
     ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans -j
   else
