@@ -1133,7 +1133,7 @@ tests = testGroup "hevm"
               in case leaf of
                 Return _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
                 _ -> PBool True
-        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts SymbolicS (Just pre) (Just post)
+        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         -- tests how whiffValue handles Neg via application of the triple IsZero simplification rule
