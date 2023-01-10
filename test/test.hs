@@ -2021,7 +2021,7 @@ tests = testGroup "hevm"
                     , "fullSuite/extcodelength.yul" -- extcodecopy bug?
                     , "loadResolver/keccak_short.yul" -- keccak bug
                     , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV I think?
-                           ]
+                    ]
 
         solcRepo <- fromMaybe (error "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
         let testDir = solcRepo <> "/test/libyul/yulOptimizerTests"
