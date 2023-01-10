@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - New cheatcode `prank(address)` that sets `msg.sender` to the specified address for the next call.
+- Construction of storage counterexamples based on the model returned by the SMT solver.
 
 ## [0.50.2] - 2023-01-06
 
