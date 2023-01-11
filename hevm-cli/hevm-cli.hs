@@ -310,15 +310,16 @@ equivalence cmd = do
 
   withSolvers Z3 3 Nothing $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts Nothing
-    when (all ((== True) . (qedOrTimeout)) res) $ putStrLn "all OK"
-    mapM_ proc res
+    when (all ((== True) . (qedOrTimeout)) res) $ putStrLn "All OK"
+    mapM_ checkIssues res
+    unless (all ((== True) . (qedOrTimeout)) res) exitFailure
       where
         qedOrTimeout :: Either ExprError EquivResult -> Bool
         qedOrTimeout (Right (Qed _)) = True
         qedOrTimeout (Right (SMTTimeout _)) = True
         qedOrTimeout _ = False
-        proc :: Either ExprError EquivResult -> IO ()
-        proc r = case r of
+        checkIssues :: Either ExprError EquivResult -> IO ()
+        checkIssues r = case r of
                 Left err -> do
                    putStrLn $ "Error occurred while generating internal expression" <> (show err) <> " -- cannot determine equivalence"
                 Right val -> case val of

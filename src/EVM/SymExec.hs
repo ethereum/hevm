@@ -56,26 +56,12 @@ isCex :: ProofResult a b c -> Bool
 isCex (Cex _) = True
 isCex _ = False
 
-isCex2 :: EquivResult -> Bool
-isCex2 (Cex _) = True
-isCex2 _ = False
-
 isQed :: ProofResult a b c -> Bool
 isQed (Qed _) = True
 isQed _ = False
 
-sameCnstr :: ProofResult a b c -> (d , e, ProofResult a b c) -> Bool
-sameCnstr a e = (\(_, _, c) -> checkCnstr c a) e
-  where
-    checkCnstr x y = case (x, y) of
-      (Qed _, Qed _) -> True
-      (Cex _, Cex _) -> True
-      (SMTTimeout _, SMTTimeout _) -> True
-      (SMTError {}, SMTError {}) -> True
-      _ -> False
-
-sameCnstr2 :: ProofResult a b c -> ProofResult a b c -> Bool
-sameCnstr2 a e = checkCnstr a e
+sameCnstr :: ProofResult a b c -> ProofResult a b c -> Bool
+sameCnstr a e = checkCnstr a e
   where
     checkCnstr x y = case (x, y) of
       (Qed _, Qed _) -> True

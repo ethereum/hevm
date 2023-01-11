@@ -2120,9 +2120,9 @@ tests = testGroup "hevm"
             res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
             end <- getCurrentTime
             let rightRes = map getRight (filter isRight res)
-                timeouts = filter (sameCnstr2 (SMTTimeout ())) rightRes
-                smtErrors = filter (sameCnstr2 (SMTError () "")) rightRes
-                cexs = filter (sameCnstr2 (Cex {})) rightRes
+                timeouts = filter (sameCnstr (SMTTimeout ())) rightRes
+                smtErrors = filter (sameCnstr (SMTError () "")) rightRes
+                cexs = filter (sameCnstr (Cex {})) rightRes
                 exprErrors = filter isLeft res
             case (null exprErrors) of
               True -> case (null cexs) of
