@@ -25,13 +25,10 @@ import qualified EVM.FeeSchedule as FeeSchedule
 import Data.DoubleWord (Word256)
 import Control.Concurrent.Async
 import Data.Maybe
-import Data.List (foldl', find)
-import Data.Tuple (swap)
+import Data.List (foldl')
 import Data.Either (isLeft, isRight)
 import Data.ByteString (ByteString)
-import Data.ByteString (null, pack)
-import Data.List (foldl', sortBy)
-import Data.ByteString (ByteString)
+import Data.List (sortBy)
 import qualified Data.ByteString as BS
 import qualified Control.Monad.State.Class as State
 import Data.Bifunctor (first, second)
@@ -59,12 +56,26 @@ isCex :: ProofResult a b c -> Bool
 isCex (Cex _) = True
 isCex _ = False
 
+isCex2 :: EquivResult -> Bool
+isCex2 (Cex _) = True
+isCex2 _ = False
+
 isQed :: ProofResult a b c -> Bool
 isQed (Qed _) = True
 isQed _ = False
 
 sameCnstr :: ProofResult a b c -> (d , e, ProofResult a b c) -> Bool
 sameCnstr a e = (\(_, _, c) -> checkCnstr c a) e
+  where
+    checkCnstr x y = case (x, y) of
+      (Qed _, Qed _) -> True
+      (Cex _, Cex _) -> True
+      (SMTTimeout _, SMTTimeout _) -> True
+      (SMTError {}, SMTError {}) -> True
+      _ -> False
+
+sameCnstr2 :: ProofResult a b c -> ProofResult a b c -> Bool
+sameCnstr2 a e = checkCnstr a e
   where
     checkCnstr x y = case (x, y) of
       (Qed _, Qed _) -> True
@@ -562,12 +573,12 @@ type UnsatCache = TVar [Set Prop]
 -- We do this by asking the solver to find a common input for each pair of endstates that satisfies the path
 -- conditions for both sides and produces a differing output. If we can find such an input, then we have a clear
 -- equivalence break, and since we run this check for every pair of end states, the check is exhaustive.
-equivalenceCheck :: SolverGroup -> ByteString -> ByteString -> VeriOpts -> Maybe (Text, [AbiType]) -> IO [EquivResult]
+equivalenceCheck :: SolverGroup -> ByteString -> ByteString -> VeriOpts -> Maybe (Text, [AbiType]) -> IO [Either ExprError EquivResult]
 equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
   case bytecodeA == bytecodeB of
     True -> do
       putStrLn "bytecodeA and bytecodeB are identical"
-      pure [Qed ()]
+      pure [Right (Qed ())]
     False -> do
       branchesA <- getBranches bytecodeA
       branchesB <- getBranches bytecodeB
@@ -590,9 +601,12 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
       let useful = foldr countUseful (0::Integer) results
       putStrLn $ "Reuse of previous queries was Useful in " <> (show useful) <> " cases"
       case (all ((==True) . isRight) results) && (all isQed . fmap (fst . getRight) $ results) of
-        True -> pure [Qed ()]
-        False -> pure $ filter (/= Qed ()) . fmap (fst .getRight) $ results ++ filter isLeft results
+        True -> pure [Right (Qed ())]
+        False -> pure $ filter (/= Right (Qed ())) (map eitherFst results)
   where
+    eitherFst :: Either ExprError (EquivResult, Bool) -> Either ExprError EquivResult
+    eitherFst (Right (a, _)) = Right a
+    eitherFst (Left a) = Left a
     countUseful :: Either ExprError (EquivResult, Bool) -> Integer -> Integer
     countUseful (Left _) n = n
     countUseful (Right (_, b)) n = if b then n+1 else n
@@ -673,8 +687,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
           (Revert _ a, Revert _ b) -> if a == b then PBool False else a ./= b
           (Revert _ _, _) -> PBool True
           (_, Revert _ _) -> PBool True
-          (Failure _ (WrappedEVMError s), _) -> error $ "Unhandled error: " <> s
-          (_, Failure _ (WrappedEVMError s)) -> error $ "Unhandled error: " <> s
+          (Failure _ (WrappedEVMError s), _) -> error $ "Unhandled error: " <> s -- TODO what to do here
+          (_, Failure _ (WrappedEVMError s)) -> error $ "Unhandled error: " <> s -- TODO what to do here
           (Failure _ erra, Failure _ errb) -> if erra==errb then PBool False else PBool True
           (ITE _ _ _, _) -> error "Expressions must be flattened"
           (_, ITE _ _ _) -> error "Expressions must be flattened"

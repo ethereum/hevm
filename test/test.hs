@@ -65,7 +65,7 @@ import qualified Data.Text as T
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 import Data.List (isSubsequenceOf)
-import Data.Either (isLeft)
+import Data.Either (isLeft, isRight)
 import EVM.TestUtils
 import GHC.Conc (getNumProcessors)
 
@@ -1800,7 +1800,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
-          assertBool "Must have a difference" (any isCex a)
+          assertBool "Must have a difference" (any (isCex.getRight) a)
       ,
       testCase "eq-sol-exp-qed" $ do
         Just aPrgm <- solcRuntime "C"
@@ -1824,8 +1824,8 @@ tests = testGroup "hevm"
               }
           |]
         withSolvers Z3 3 Nothing $ \s -> do
-          Right a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
-          assertEqual "Must have no difference" [Qed ()] a
+          [Right a] <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
+          assertEqual "Must have no difference" (Qed ()) a
           return ()
       ,
       testCase "eq-sol-exp-cex" $ do
@@ -1852,8 +1852,8 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 2, askSmtIters = Just 2, rpcInfo = Nothing}
-          Right a <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
-          assertEqual "Must be different" (any isCex a) True
+          [Right a] <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
+          assertEqual "Must be different" (sameCnstr2 (Cex {}) a) True
           return ()
       , testCase "eq-all-yul-optimization-tests" $ do
         let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 5, askSmtIters = Just 20, rpcInfo = Nothing }
@@ -2118,19 +2118,24 @@ tests = testGroup "hevm"
           procs <- getNumProcessors
           withSolvers CVC5 (num procs) (Just 100) $ \s -> do
             res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
-            Right res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
             end <- getCurrentTime
-            let cexs = filter (sameCnstr (Cex())) res
-                timeouts = filter (sameCnstr (SMTTimeout ())) res
-                smtErrors = filter (sameCnstr (SMTError () "")) res
-            case (null cexs) of
+            let rightRes = map getRight (filter isRight res)
+                timeouts = filter (sameCnstr2 (SMTTimeout ())) rightRes
+                smtErrors = filter (sameCnstr2 (SMTError () "")) rightRes
+                cexs = filter (sameCnstr2 (Cex {})) rightRes
+                exprErrors = filter isLeft res
+            case (null exprErrors) of
+              True -> case (null cexs) of
+                True -> do
+                  print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
+                  unless (null timeouts) $ putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
+                  unless (null smtErrors) $ putStrLn $ "But " <> (show $ length timeouts) <> " SMT error(s) occurred"
+                False -> do
+                  putStrLn $ "Not OK file: " <> show f <> " Got counterexamples: " <> show cexs
+                  error "Error: Was NOT equivalent"
               False -> do
-                print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
-                unless (null timeouts) $ putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
-                unless (null smtErrors) $ putStrLn $ "But " <> (show $ length timeouts) <> " SMT error(s) occurred"
-              True -> do
-                putStrLn $ "Not OK: " <> show f <> " Got: " <> show res
-                error "Was NOT equivalent, error"
+                  putStrLn $ "Had trouble with the expression(s): " <> show exprErrors
+                  error "Error: Was not possible to determine if equivalent"
            )
     ]
   ]

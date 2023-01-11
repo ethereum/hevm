@@ -55,6 +55,7 @@ import qualified Paths_hevm      as Paths
 
 import Options.Generic as Options
 import qualified EVM.Transaction
+import Data.Aeson (Value(Bool))
 
 -- This record defines the program's command-line options
 -- automatically via the `optparse-generic` package.
@@ -309,22 +310,25 @@ equivalence cmd = do
 
   withSolvers Z3 3 Nothing $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts Nothing
-    case res of
-      Left err -> do
-        putStrLn $ "Error occurred while generating internal expression" <> (show err) <> "cannot determine equivalence"
-        exitFailure
-      Right a -> case (isJust $ Data.List.find (sameCnstr (Cex ())) a) of
-        False -> do
-          putStrLn "No discrepancies found"
-          when (isJust $ Data.List.find (sameCnstr (SMTTimeout ())) a) $ do
-            putStrLn "But timeout(s) occurred"
-            exitFailure
-          when (isJust $ Data.List.find (sameCnstr (SMTError () "")) a) $ do
-            putStrLn "But SMT error(s) occurred"
-            exitFailure
-        True -> do
-          putStrLn $ "Not equivalent. Counterexample(s):" <> show res
-          exitFailure
+    when (all ((== True) . (qedOrTimeout)) res) $ putStrLn "all OK"
+    mapM_ proc res
+      where
+        qedOrTimeout :: Either ExprError EquivResult -> Bool
+        qedOrTimeout (Right (Qed _)) = True
+        qedOrTimeout (Right (SMTTimeout _)) = True
+        qedOrTimeout _ = False
+        proc :: Either ExprError EquivResult -> IO ()
+        proc r = case r of
+                Left err -> do
+                   putStrLn $ "Error occurred while generating internal expression" <> (show err) <> " -- cannot determine equivalence"
+                Right val -> case val of
+                  Qed _ -> undefined
+                  Cex c -> do
+                      putStrLn $ "Not equivalent. Counterexample(s):" <> show c
+                  SMTTimeout _ -> do
+                      putStrLn "Timeout(s) occurred"
+                  SMTError _ b -> do
+                      putStrLn $ "SMT error(s) occurred:" <> show b
 
 getSrcInfo :: Command Options.Unwrapped -> IO DappInfo
 getSrcInfo cmd =
