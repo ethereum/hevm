@@ -122,7 +122,7 @@ isAbstractStorage = getAny . foldExpr go (Any False)
 -- | This function overapproximates the reads from the abstract
 -- storage. Potentially, it can return a location that has been
 -- overwritten in the abstract store. However, such reads will have
--- been simplified away, is the source expresion is simplified.
+-- been simplified away, if the source expression is simplified.
 findStorageReads :: Prop -> [(Expr EWord, Expr EWord)]
 findStorageReads = foldProp go []
   where
@@ -830,7 +830,7 @@ getStore inst sreads = do
 
 
 
--- | Interpret an N-dimentional array as a value of type a.
+-- | Interpret an N-dimensional array as a value of type a.
 -- Parameterized by an interpretation function for array values.
 interpretNDArray :: (Map Symbol Term -> Term -> a) -> (Map Symbol Term) -> Term -> (W256 -> a)
 interpretNDArray interp env = \case
@@ -860,7 +860,7 @@ interpretNDArray interp env = \case
     isStore t = t == Unqualified (IdSymbol "store")
 
 
--- | Interpret an 1-dimentional array as a function
+-- | Interpret an 1-dimensional array as a function
 interpret1DArray :: (Map Symbol Term) -> Term -> (W256 -> W256)
 interpret1DArray = interpretNDArray interpretW256
   where
@@ -872,7 +872,7 @@ interpret1DArray = interpretNDArray interpretW256
         Nothing -> error "Internal error: unknown identifier, cannot parse array"
     interpretW256 _ t = error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
 
--- | Interpret an 2-dimentional array as a function
+-- | Interpret an 2-dimensional array as a function
 interpret2DArray :: (Map Symbol Term) -> Term -> (W256 -> W256 -> W256)
 interpret2DArray = interpretNDArray interpret1DArray
 
