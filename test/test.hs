@@ -2013,18 +2013,16 @@ tests = testGroup "hevm"
                     , "unusedStoreEliminator/remove_before_revert.yul"
                     , "unusedStoreEliminator/unknown_length2.yul"
                     , "unusedStoreEliminator/unrelated_relative.yul"
+                    , "fullSuite/extcodelength.yul"
+                    , "unusedStoreEliminator/create_inside_function.yul"-- "trying to reset symbolic storage with writes in create"
 
                     -- Takes too long, would timeout on most test setups.
                     -- We could probably fix these by "bunching together" queries
                     , "reasoningBasedSimplifier/mulmod.yul"
 
                     -- TODO check what's wrong with these!
-                    , "unusedStoreEliminator/create_inside_function.yul"
-                    , "fullSimplify/not_applied_removes_non_constant_and_not_movable.yul" -- create bug?
-                    , "unusedStoreEliminator/create.yul" -- create bug?
-                    , "fullSuite/extcodelength.yul" -- extcodecopy bug?
-                    , "loadResolver/keccak_short.yul" -- keccak bug
-                    , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV I think?
+                    , "loadResolver/keccak_short.yul" -- ACTUAL bug -- keccak
+                    , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV
                     ]
 
         solcRepo <- fromMaybe (error "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
