@@ -1660,7 +1660,7 @@ tests = testGroup "hevm"
                   & set (state . callvalue) (Lit 0)
                   & over (env . contracts)
                        (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
-            verify s debugVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
+            verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
 
           let storeCex = store cex
               addrC = W256 $ num $ createAddress ethrunAddress 1
@@ -1763,7 +1763,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) [] debugVeriOpts
+          (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           let storeCex = store cex
               addr =  W256 $ num $ createAddress ethrunAddress 1
               testCex = Map.size storeCex == 1 &&
@@ -1787,7 +1787,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) [] debugVeriOpts
+          (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           let storeCex = store cex
           let addr = W256 $ num $ createAddress ethrunAddress 1
           let a = getVar cex "arg1"
