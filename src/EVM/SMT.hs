@@ -23,7 +23,7 @@ import Data.Containers.ListUtils (nubOrd)
 import Language.SMT2.Parser (getValueRes, parseCommentFreeFileMsg)
 import Language.SMT2.Syntax (SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
 import Data.Word
-import Numeric (readHex)
+import Numeric (readHex, readBin)
 import Data.ByteString (ByteString)
 
 import qualified Data.ByteString as BS
@@ -897,6 +897,7 @@ getBufs inst names = foldM getBuf mempty names
 
 parseSC :: (Num a, Eq a) => SpecConstant -> a
 parseSC (SCHexadecimal a) = fst . head . Numeric.readHex . T.unpack . T.fromStrict $ a
+parseSC (SCBinary a) = fst . head . Numeric.readBin . T.unpack . T.fromStrict $ a
 parseSC sc = error $ "Internal Error: cannot parse: " <> show sc
 
 withSolvers :: Solver -> Natural -> Maybe Natural -> (SolverGroup -> IO a) -> IO a
