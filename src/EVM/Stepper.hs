@@ -99,7 +99,7 @@ execFully =
 runFully :: Stepper EVM.VM
 runFully = do
   vm <- run
-  case EVM._result vm of
+  case vm._result of
     Nothing -> error "should not occur"
     Just (VMFailure (Query q)) ->
       wait q >> runFully

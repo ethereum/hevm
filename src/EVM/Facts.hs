@@ -214,7 +214,7 @@ factToFile fact = case fact of
   where
     mk :: AsASCII a => [ASCII] -> ASCII -> a -> File
     mk prefix base a =
-      File (Path (dump (addr fact) : prefix) base)
+      File (Path (dump fact.addr : prefix) base)
            (Data $ dump a)
 
 -- This lets us easier pattern match on serialized things.

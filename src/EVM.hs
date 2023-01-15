@@ -471,72 +471,72 @@ currentContract vm =
 
 makeVm :: VMOpts -> VM
 makeVm o =
-  let txaccessList = vmoptTxAccessList o
-      txorigin = vmoptOrigin o
-      txtoAddr = vmoptAddress o
+  let txaccessList = o.vmoptTxAccessList
+      txorigin = o.vmoptOrigin
+      txtoAddr = o.vmoptAddress
       initialAccessedAddrs = fromList $ [txorigin, txtoAddr] ++ [1..9] ++ (Map.keys txaccessList)
       initialAccessedStorageKeys = fromList $ foldMap (uncurry (map . (,))) (Map.toList txaccessList)
-      touched = if vmoptCreate o then [txorigin] else [txorigin, txtoAddr]
+      touched = if o.vmoptCreate then [txorigin] else [txorigin, txtoAddr]
   in
   VM
   { _result = Nothing
   , _frames = mempty
   , _tx = TxState
-    { _gasprice = vmoptGasprice o
-    , _txgaslimit = vmoptGaslimit o
-    , _txPriorityFee = vmoptPriorityFee o
+    { _gasprice = o.vmoptGasprice
+    , _txgaslimit = o.vmoptGaslimit
+    , _txPriorityFee = o.vmoptPriorityFee
     , _origin = txorigin
     , _toAddr = txtoAddr
-    , _value = vmoptValue o
+    , _value = o.vmoptValue
     , _substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty
     --, _accessList = txaccessList
-    , _isCreate = vmoptCreate o
+    , _isCreate = o.vmoptCreate
     , _txReversion = Map.fromList
-      [(vmoptAddress o, vmoptContract o)]
+      [(o.vmoptAddress , o.vmoptContract )]
     }
   , _logs = []
   , _traces = Zipper.fromForest []
   , _block = Block
-    { _coinbase = vmoptCoinbase o
-    , _timestamp = vmoptTimestamp o
-    , _number = vmoptNumber o
-    , _prevRandao = vmoptPrevRandao o
-    , _maxCodeSize = vmoptMaxCodeSize o
-    , _gaslimit = vmoptBlockGaslimit o
-    , _baseFee = vmoptBaseFee o
-    , _schedule = vmoptSchedule o
+    { _coinbase = o.vmoptCoinbase
+    , _timestamp = o.vmoptTimestamp
+    , _number = o.vmoptNumber
+    , _prevRandao = o.vmoptPrevRandao
+    , _maxCodeSize = o.vmoptMaxCodeSize
+    , _gaslimit = o.vmoptBlockGaslimit
+    , _baseFee = o.vmoptBaseFee
+    , _schedule = o.vmoptSchedule
     }
   , _state = FrameState
     { _pc = 0
     , _stack = mempty
     , _memory = mempty
     , _memorySize = 0
-    , _code = view contractcode $ vmoptContract o
-    , _contract = vmoptAddress o
-    , _codeContract = vmoptAddress o
-    , _calldata = fst $ vmoptCalldata o
-    , _callvalue = vmoptValue o
-    , _caller = vmoptCaller o
-    , _gas = vmoptGas o
+    , _code = o.vmoptContract._contractcode
+    , _contract = o.vmoptAddress
+    , _codeContract = o.vmoptAddress
+    , _calldata = fst o.vmoptCalldata
+    , _callvalue = o.vmoptValue
+    , _caller = o.vmoptCaller
+    , _gas = o.vmoptGas
     , _returndata = mempty
     , _static = False
     }
   , _env = Env
     { _sha3Crack = mempty
-    , _chainId = vmoptChainId o
-    , _storage = if vmoptStorageBase o == Concrete then EmptyStore else AbstractStore
+    , _chainId = o.vmoptChainId
+    , _storage = if o.vmoptStorageBase == Concrete then EmptyStore else AbstractStore
     , _origStorage = mempty
     , _contracts = Map.fromList
-      [(vmoptAddress o, vmoptContract o)]
+      [(o.vmoptAddress, o.vmoptContract )]
     --, _keccakUsed = mempty
     --, _storageModel = vmoptStorageModel o
     }
   , _cache = Cache mempty mempty mempty
   , _burned = 0
-  , _constraints = snd $ vmoptCalldata o
+  , _constraints = snd o.vmoptCalldata
   , _keccakEqs = mempty
   , _iterations = mempty
-  , _allowFFI = vmoptAllowFFI o
+  , _allowFFI = o.vmoptAllowFFI
   , _overrideCaller = Nothing
   }
 
@@ -590,7 +590,7 @@ exec1 = do
           copyBytesToMemory (the state calldata) (Lit calldatasize) (Lit 0) (Lit 0)
           executePrecompile self (the state gas) 0 calldatasize 0 0 []
           vmx <- get
-          case view (state.stack) vmx of
+          case view (state . stack) vmx of
             (x:_) -> case x of
               Lit (num -> x' :: Integer) -> case x' of
                 0 -> do
@@ -1737,7 +1737,7 @@ finalize = do
   txOrigin     <- use (tx . origin)
   sumRefunds   <- (sum . (snd <$>)) <$> (use (tx . substate . refunds))
   miner        <- use (block . coinbase)
-  blockReward  <- num . r_block <$> (use (block . schedule))
+  blockReward  <- num . (.r_block) <$> (use (block . schedule))
   gasPrice     <- use (tx . gasprice)
   priorityFee  <- use (tx . txPriorityFee)
   gasLimit     <- use (tx . txgaslimit)

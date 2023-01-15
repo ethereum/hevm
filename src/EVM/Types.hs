@@ -646,7 +646,7 @@ word256Bytes :: W256 -> ByteString
 word256Bytes x = BS.pack [byteAt x (31 - i) | i <- [0..31]]
 
 word160Bytes :: Addr -> ByteString
-word160Bytes x = BS.pack [byteAt (addressWord160 x) (19 - i) | i <- [0..19]]
+word160Bytes x = BS.pack [byteAt x.addressWord160 (19 - i) | i <- [0..19]]
 
 newtype Nibble = Nibble Word8
   deriving ( Num, Integral, Real, Ord, Enum, Eq, Bounded, Generic)

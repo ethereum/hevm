@@ -127,10 +127,10 @@ type ABIMethod = Text
 -- | Generate VeriOpts from UnitTestOptions
 makeVeriOpts :: UnitTestOptions -> VeriOpts
 makeVeriOpts opts =
-   defaultVeriOpts { SymExec.debug = smtDebug opts
-                   , SymExec.maxIter = maxIter opts
-                   , SymExec.askSmtIters = askSmtIters opts
-                   , SymExec.rpcInfo = rpcInfo opts
+   defaultVeriOpts { SymExec.debug = opts.smtDebug
+                   , SymExec.maxIter = opts.maxIter
+                   , SymExec.askSmtIters = opts.askSmtIters
+                   , SymExec.rpcInfo = opts.rpcInfo
                    }
 
 -- | Top level CLI endpoint for dapp-test
@@ -139,7 +139,7 @@ dappTest opts solcFile cache' = do
   out <- liftIO $ readSolc solcFile
   case out of
     Just (contractMap, _) -> do
-      let unitTests = findUnitTests (EVM.UnitTest.match opts) $ Map.elems contractMap
+      let unitTests = findUnitTests opts.match $ Map.elems contractMap
       results <- concatMapM (runUnitTestContract opts contractMap) unitTests
       let (passing, vms) = unzip results
       case cache' of
@@ -162,7 +162,7 @@ dappTest opts solcFile cache' = do
 initializeUnitTest :: UnitTestOptions -> SolcContract -> Stepper ()
 initializeUnitTest UnitTestOptions { .. } theContract = do
 
-  let addr = testAddress testParams
+  let addr = testParams.testAddress
 
   Stepper.evm $ do
     -- Maybe modify the initial VM, e.g. to load library code
@@ -175,7 +175,7 @@ initializeUnitTest UnitTestOptions { .. } theContract = do
 
   Stepper.evm $ do
     -- Give a balance to the test target
-    env . contracts . ix addr . balance += testBalanceCreate testParams
+    env . contracts . ix addr . balance += testParams.testBalanceCreate
 
     -- call setUp(), if it exists, to initialize the test contract
     let theAbi = view abiMap theContract
@@ -219,7 +219,7 @@ exploreStep UnitTestOptions{..} bs = do
     let (Method _ inputs sig _ _) = fromMaybe (error "unknown abi call") $ Map.lookup (num $ word $ BS.take 4 bs) (view dappAbiMap dapp)
         types = snd <$> inputs
     let ?context = DappContext dapp cs
-    this <- fromMaybe (error "unknown target") <$> (use (env . contracts . at (testAddress testParams)))
+    this <- fromMaybe (error "unknown target") <$> (use (env . contracts . at testParams.testAddress))
     let name = maybe "" (contractNamePart . view contractName) $ lookupCode (view contractcode this) dapp
     pushTrace (EntryTrace (name <> "." <> sig <> "(" <> intercalate "," ((pack . show) <$> types) <> ")" <> showCall types (ConcreteBuf bs)))
   -- Try running the test method
@@ -651,7 +651,7 @@ runOne opts@UnitTestOptions{..} vm testName args = do
       (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (checkFailures opts testName bailed)) vm'
   if success
   then
-     let gasSpent = num (testGasCall testParams) - view (state . gas) vm'
+     let gasSpent = num testParams.testGasCall - view (state . gas) vm'
          gasText = pack $ show (fromIntegral gasSpent :: Integer)
      in
         pure

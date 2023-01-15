@@ -40,43 +40,43 @@ go = \case
   -- buffers
   e@(WriteWord {}) -> do
     s <- get
-    case Map.lookup e (bufs s) of
+    case Map.lookup e s.bufs of
       Just v -> pure $ GVar (BufVar v)
       Nothing -> do
         let
-          next = count s
-          bs' = Map.insert e next (bufs s)
+          next = s.count
+          bs' = Map.insert e next s.bufs
         put $ s{bufs=bs', count=next+1}
         pure $ GVar (BufVar next)
   e@(WriteByte {}) -> do
     s <- get
-    case Map.lookup e (bufs s) of
+    case Map.lookup e s.bufs of
       Just v -> pure $ GVar (BufVar v)
       Nothing -> do
         let
-          next = count s
-          bs' = Map.insert e next (bufs s)
+          next = s.count
+          bs' = Map.insert e next s.bufs
         put $ s{bufs=bs', count=next+1}
         pure $ GVar (BufVar next)
   e@(CopySlice {}) -> do
     s <- get
-    case Map.lookup e (bufs s) of
+    case Map.lookup e s.bufs of
       Just v -> pure $ GVar (BufVar v)
       Nothing -> do
         let
-          next = count s
-          bs' = Map.insert e next (bufs s)
+          next = s.count
+          bs' = Map.insert e next s.bufs
         put $ s{count=next+1, bufs=bs'}
         pure $ GVar (BufVar next)
   -- storage
   e@(SStore {}) -> do
     s <- get
-    case Map.lookup e (stores s) of
+    case Map.lookup e s.stores of
       Just v -> pure $ GVar (StoreVar v)
       Nothing -> do
         let
-          next = count s
-          ss' = Map.insert e next (stores s)
+          next = s.count
+          ss' = Map.insert e next s.stores
         put $ s{count=next+1, stores=ss'}
         pure $ GVar (StoreVar next)
   e -> pure e
@@ -91,7 +91,7 @@ eliminateExpr' e = mapExprM go e
 eliminateExpr :: Expr a -> (Expr a, BufEnv, StoreEnv)
 eliminateExpr e =
   let (e', st) = runState (eliminateExpr' e) initState in
-  (e', invertKeyVal (bufs st), invertKeyVal (stores st))
+  (e', invertKeyVal st.bufs, invertKeyVal st.stores)
 
 -- | Common subexpression elimination pass for Prop
 eliminateProp' :: Prop -> State BuilderState Prop
@@ -106,4 +106,4 @@ eliminateProps' props = mapM eliminateProp' props
 eliminateProps :: [Prop] -> ([Prop], BufEnv, StoreEnv)
 eliminateProps props =
   let (props', st) = runState (eliminateProps' props) initState in
-  (props',  invertKeyVal (bufs st),  invertKeyVal (stores st))
+  (props',  invertKeyVal st.bufs,  invertKeyVal st.stores)
