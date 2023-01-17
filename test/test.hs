@@ -1764,10 +1764,9 @@ tests = testGroup "hevm"
             }
             |]
           (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-          let storeCex = cex.store
-              addr =  W256 $ num $ createAddress ethrunAddress 1
-              testCex = Map.size storeCex == 1 &&
-                        case Map.lookup addr storeCex of
+          let addr =  W256 $ num $ createAddress ethrunAddress 1
+              testCex = Map.size cex.store == 1 &&
+                        case Map.lookup addr cex.store of
                           Just s -> Map.size s == 2 &&
                                     case (Map.lookup 0 s, Map.lookup 1 s) of
                                       (Just x, Just y) -> x /= y
@@ -1788,11 +1787,10 @@ tests = testGroup "hevm"
             }
             |]
           (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-          let storeCex = cex.store
           let addr = W256 $ num $ createAddress ethrunAddress 1
-          let a = getVar cex "arg1"
-          let testCex = Map.size storeCex == 1 &&
-                        case Map.lookup addr storeCex of
+              a = getVar cex "arg1"
+              testCex = Map.size cex.store == 1 &&
+                        case Map.lookup addr cex.store of
                           Just s -> Map.size s == 2 &&
                                     case (Map.lookup 0 s, Map.lookup (10 + a) s) of
                                       (Just x, Just y) -> x >= y
@@ -1808,13 +1806,14 @@ tests = testGroup "hevm"
               uint x;
               uint y;
               function fun(uint256 a) external{
-                assert (x == y);
+                assert (x != y);
               }
             }
             |]
-          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts ConcreteS Nothing (Just $ checkAssertions [0x01])
-          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-
+          (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts ConcreteS Nothing (Just $ checkAssertions [0x01])
+          let testCex = Map.null cex.store
+          assertBool "Did not find expected storage cex" testCex
+          putStrLn "Expected counterexample found"
  ]
   , testGroup "Equivalence checking"
     [
