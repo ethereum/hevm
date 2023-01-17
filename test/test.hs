@@ -1800,6 +1800,21 @@ tests = testGroup "hevm"
                           _ -> False
           assertBool "Did not find expected storage cex" testCex
           putStrLn "Expected counterexample found"
+        ,
+        testCase "storage-cex-concrete" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              uint x;
+              uint y;
+              function fun(uint256 a) external{
+                assert (x == y);
+              }
+            }
+            |]
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts ConcreteS Nothing (Just $ checkAssertions [0x01])
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+
  ]
   , testGroup "Equivalence checking"
     [
