@@ -120,9 +120,11 @@ isAbstractStorage = getAny . foldExpr go (Any False)
     go _ = Any False
 
 -- | This function overapproximates the reads from the abstract
--- storage. Potentially, it can return a location that has been
--- overwritten in the abstract store. However, such reads will have
--- been simplified away, if the source expression is simplified.
+-- storage. Potentially, it can return locations that do not read a
+-- slot directly from the abstract store but from subsequent writes on
+-- the store (e.g, SLoad addr idx (SStore addr idx val AbstractStore)).
+-- However, we expect that most of such reads will have been
+-- simplified away.
 findStorageReads :: Prop -> [(Expr EWord, Expr EWord)]
 findStorageReads = foldProp go []
   where
