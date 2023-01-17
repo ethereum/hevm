@@ -84,7 +84,7 @@ dappInfo root solcByName sources =
            (f creationCodehash Creation)
       -- contracts with immutable locations can't be id by hash
     , _dappSolcByCode =
-      [(Code (_runtimeCode x) (concat $ elems $ _immutableReferences x), x) | x <- immutables]
+      [(Code x._runtimeCode (concat $ elems x._immutableReferences), x) | x <- immutables]
       -- Sum up the ABI maps from all the contracts.
     , _dappAbiMap   = mconcat (map (view abiMap) solcs)
     , _dappEventMap = mconcat (map (view eventMap) solcs)

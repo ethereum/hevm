@@ -2070,7 +2070,7 @@ tests = testGroup "hevm"
             filteredBSym = symbolicMem [ replaceAll "" $ x *=~[re|^//|] | x <- onlyAfter [re|^// step:|] unfiltered, not $ x =~ [re|^$|] ]
           start <- getCurrentTime
           putStrLn $ "Checking file: " <> f
-          when (debug myVeriOpts) $ do
+          when myVeriOpts.debug $ do
             putStrLn "-------------Original Below-----------------"
             mapM_ putStrLn unfiltered
             putStrLn "------------- Filtered A + Symb below-----------------"
@@ -2122,7 +2122,7 @@ runSimpleVM :: ByteString -> ByteString -> Maybe ByteString
 runSimpleVM x ins = case loadVM x of
                       Nothing -> Nothing
                       Just vm -> let calldata' = (ConcreteBuf ins)
-                       in case runState (assign (state.calldata) calldata' >> exec) vm of
+                       in case runState (assign (state . calldata) calldata' >> exec) vm of
                             (VMSuccess (ConcreteBuf bs), _) -> Just bs
                             _ -> Nothing
 
