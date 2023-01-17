@@ -1004,7 +1004,7 @@ withSolvers solver count timeout cont = do
             "sat" -> do
               calldatamodels <- getVars parseVar inst (fmap T.toStrict cexvars.calldataV)
               buffermodels <- getBufs inst (fmap T.toStrict cexvars.buffersV)
-              storagemodels <- getStore inst (storeReads cexvars)
+              storagemodels <- getStore inst cexvars.storeReads
               blockctxmodels <- getVars parseBlockCtx inst (fmap T.toStrict cexvars.blockContextV)
               txctxmodels <- getVars parseFrameCtx inst (fmap T.toStrict cexvars.txContextV)
               pure $ Sat $ SMTCex
