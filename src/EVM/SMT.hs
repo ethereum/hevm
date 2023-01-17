@@ -130,8 +130,7 @@ findStorageReads = foldProp go []
   where
     go :: Expr a -> [(Expr EWord, Expr EWord)]
     go = \case
-      SLoad addr slot storage ->
-        if isAbstractStorage storage then [(addr, slot)] else []
+      SLoad addr slot storage -> [(addr, slot) | isAbstractStorage storage]
       _ -> []
 
 assertProps :: [Prop] -> SMT2
