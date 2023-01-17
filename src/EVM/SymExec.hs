@@ -676,11 +676,12 @@ showModel cd (expr, res) = do
 
 
 formatCex :: Expr Buf -> SMTCex -> Text
-formatCex cd m@(SMTCex _ _ _ blockContext txContext) = T.unlines $
+formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
   [ "Calldata:"
   , indent 2 cd'
   , ""
   ]
+  <> storeCex
   <> txCtx
   <> blockCtx
   where
@@ -692,6 +693,15 @@ formatCex cd m@(SMTCex _ _ _ blockContext txContext) = T.unlines $
     -- callvalue check inserted by solidity in contracts that don't have any
     -- payable functions).
     cd' = prettyBuf $ Expr.simplify $ subModel m cd
+
+    storeCex :: [Text]
+    storeCex
+      | Map.null store = []
+      | otherwise =
+          [ "Storage:"
+          , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc -> ("Addr " <> (T.pack $ show key) <> ": " <> (T.pack $ show (Map.toList val))) : acc) mempty store
+          , ""
+          ]
 
     txCtx :: [Text]
     txCtx
