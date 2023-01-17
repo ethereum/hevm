@@ -78,7 +78,7 @@ data SMTCex = SMTCex
   deriving (Eq, Show)
 
 getVar :: EVM.SMT.SMTCex -> TS.Text -> W256
-getVar cex name = fromJust $ Map.lookup (Var name) cex.vars
+getVar cex name = fromJust $ Map.lookup (Var name) (vars cex)
 
 data SMT2 = SMT2 [Builder] CexVars
   deriving (Eq, Show)
@@ -936,10 +936,10 @@ withSolvers solver count timeout cont = do
           sat <- sendLine inst "(check-sat)"
           res <- case sat of
             "sat" -> do
-              calldatamodels <- getVars parseVar inst (fmap T.toStrict cexvars.calldataV)
-              buffermodels <- getBufs inst (fmap T.toStrict cexvars.buffersV)
-              blockctxmodels <- getVars parseBlockCtx inst (fmap T.toStrict cexvars.blockContextV)
-              txctxmodels <- getVars parseFrameCtx inst (fmap T.toStrict cexvars.txContextV)
+              calldatamodels <- getVars parseVar inst (fmap T.toStrict $ calldataV cexvars)
+              buffermodels <- getBufs inst (fmap T.toStrict $ buffersV cexvars)
+              blockctxmodels <- getVars parseBlockCtx inst (fmap T.toStrict $ blockContextV cexvars)
+              txctxmodels <- getVars parseFrameCtx inst (fmap T.toStrict $ txContextV cexvars)
               pure $ Sat $ SMTCex
                 { vars = calldatamodels
                 , buffers = buffermodels

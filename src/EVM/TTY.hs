@@ -1,7 +1,6 @@
 {-# Language TemplateHaskell #-}
 {-# Language ImplicitParams #-}
 {-# Language DataKinds #-}
-
 module EVM.TTY where
 
 import Prelude hiding (lookup, Word)
@@ -420,7 +419,7 @@ appEvent (VtyEvent e@(V.EvKey V.KUp [])) = get >>= \case
 appEvent (VtyEvent (V.EvKey V.KEsc [])) = get >>= \case
   ViewVm s -> do
     let opts = s ^. uiTestOpts
-        dapp' = opts.dapp
+        dapp' = dapp opts
         tests = concatMap (debuggableTests opts) (dapp' ^. dappUnitTests)
     case tests of
       [] -> halt
@@ -747,7 +746,7 @@ drawVmBrowser ui =
       ]
   ]
   where
-    dapp' = ui._browserVm._uiTestOpts.dapp
+    dapp' = dapp (view (browserVm . uiTestOpts) ui)
     (_, (_, c)) = fromJust $ listSelectedElement (view browserContractList ui)
 --        currentContract  = view (dappSolcByHash . ix ) dapp
     maybeHash ch = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord (view codehash ch))
@@ -821,7 +820,7 @@ isNewTraceAdded ui vm =
 isNextSourcePosition
   :: UiVmState -> Pred VM
 isNextSourcePosition ui vm =
-  let dapp' = (view uiTestOpts ui).dapp
+  let dapp' = dapp (view uiTestOpts ui)
       initialPosition = currentSrcMap dapp' (view uiVm ui)
   in currentSrcMap dapp' vm /= initialPosition
 
@@ -829,7 +828,7 @@ isNextSourcePositionWithoutEntering
   :: UiVmState -> Pred VM
 isNextSourcePositionWithoutEntering ui vm =
   let
-    dapp'           = ui._uiTestOpts.dapp
+    dapp'           = dapp (view uiTestOpts ui)
     vm0             = view uiVm ui
     initialPosition = currentSrcMap dapp' vm0
     initialHeight   = length (view frames vm0)
@@ -873,7 +872,7 @@ drawStackPane ui =
                <+> ourWrap (Text.unpack $ prettyIfConcreteWord w)
            , dim (txt ("   " <> case unlit w of
                        Nothing -> ""
-                       Just u -> showWordExplanation u ui._uiTestOpts.dapp))
+                       Just u -> showWordExplanation u $ dapp (view uiTestOpts ui)))
            ])
       False
       stackList
@@ -924,7 +923,7 @@ prettyIfConcrete x = T.unpack $ formatExpr $ simplify x
 drawTracePane :: UiVmState -> UiWidget
 drawTracePane s =
   let vm = view uiVm s
-      dapp' = s._uiTestOpts.dapp
+      dapp' = dapp (view uiTestOpts s)
       traceList =
         list
           TracePane
@@ -973,24 +972,24 @@ solidityList vm dapp' =
         Just x ->
           view (dappSources
             . sourceLines
-            . ix x.srcMapFile
+            . ix (srcMapFile x)
             . to (Vec.imap (,)))
           dapp')
     1
 
 drawSolidityPane :: UiVmState -> UiWidget
 drawSolidityPane ui =
-  let dapp' = ui._uiTestOpts.dapp
+  let dapp' = dapp (view uiTestOpts ui)
       dappSrcs = view dappSources dapp'
       vm = view uiVm ui
   in case currentSrcMap dapp' vm of
     Nothing -> padBottom Max (hBorderWithLabel (txt "<no source map>"))
     Just sm ->
           let
-            rows = dappSrcs._sourceLines !! sm.srcMapFile
-            subrange = lineSubrange rows (sm.srcMapOffset, sm.srcMapLength )
+            rows = (_sourceLines dappSrcs) !! srcMapFile sm
+            subrange = lineSubrange rows (srcMapOffset sm, srcMapLength sm)
             fileName :: Maybe Text
-            fileName = preview (dappSources . sourceFiles . ix sm.srcMapFile . _1) dapp'
+            fileName = preview (dappSources . sourceFiles . ix (srcMapFile sm) . _1) dapp'
             lineNo :: Maybe Int
             lineNo = maybe Nothing (\a -> Just (a - 1))
               (snd <$>

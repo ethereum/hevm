@@ -43,12 +43,12 @@ prettyContracts x =
 
 srcMapCodePos :: SourceCache -> SrcMap -> Maybe (Text, Int)
 srcMapCodePos cache sm =
-  fmap (second f) $ cache ^? sourceFiles . ix sm.srcMapFile
+  fmap (second f) $ cache ^? sourceFiles . ix (srcMapFile sm)
   where
-    f v = ByteString.count 0xa (ByteString.take (sm.srcMapOffset - 1) v) + 1
+    f v = ByteString.count 0xa (ByteString.take (srcMapOffset sm - 1) v) + 1
 
 srcMapCode :: SourceCache -> SrcMap -> Maybe ByteString
 srcMapCode cache sm =
-  fmap f $ cache ^? sourceFiles . ix sm.srcMapFile
+  fmap f $ cache ^? sourceFiles . ix (srcMapFile sm)
   where
-    f (_, v) = ByteString.take (min 80 sm.srcMapLength) (ByteString.drop sm.srcMapOffset v)
+    f (_, v) = ByteString.take (min 80 (srcMapLength sm)) (ByteString.drop (srcMapOffset sm) v)

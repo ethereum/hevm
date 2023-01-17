@@ -52,94 +52,94 @@ data Transaction = Transaction {
 -- | utility function for getting a more useful representation of accesslistentries
 -- duplicates only matter for gas computation
 txAccessMap :: Transaction -> Map Addr [W256]
-txAccessMap tx = ((Map.fromListWith (++)) . makeTups) tx.txAccessList
-  where makeTups = map (\ale -> (ale.accessAddress , ale.accessStorageKeys ))
+txAccessMap tx = ((Map.fromListWith (++)) . makeTups) $ txAccessList tx
+  where makeTups = map (\ale -> (accessAddress ale, accessStorageKeys ale))
 
 ecrec :: W256 -> W256 -> W256 -> W256 -> Maybe Addr
 ecrec v r s e = num . word <$> EVM.Precompiled.execute 1 input 32
   where input = BS.concat (word256Bytes <$> [e, v, r, s])
 
 sender :: Int -> Transaction -> Maybe Addr
-sender chainId tx = ecrec v' tx.txR  tx.txS hash
+sender chainId tx = ecrec v' (txR tx) (txS tx) hash
   where hash = keccak' (signingData chainId tx)
-        v    = tx.txV
+        v    = txV tx
         v'   = if v == 27 || v == 28 then v
                else 27 + v
 
 signingData :: Int -> Transaction -> ByteString
 signingData chainId tx =
-  case tx.txType of
+  case txType tx of
     LegacyTransaction -> if v == (chainId * 2 + 35) || v == (chainId * 2 + 36)
       then eip155Data
       else normalData
     AccessListTransaction -> eip2930Data
     EIP1559Transaction -> eip1559Data
-  where v          = fromIntegral tx.txV
-        to'        = case tx.txToAddr of
+  where v          = fromIntegral (txV tx)
+        to'        = case txToAddr tx of
           Just a  -> BS $ word160Bytes a
           Nothing -> BS mempty
-        maxFee = fromJust tx.txMaxFeePerGas
-        maxPrio = fromJust tx.txMaxPriorityFeeGas
-        gasPrice = fromJust tx.txGasPrice
-        accessList = tx.txAccessList
+        maxFee = fromJust $ txMaxFeePerGas tx
+        maxPrio = fromJust $ txMaxPriorityFeeGas tx
+        gasPrice = fromJust $ txGasPrice tx
+        accessList = txAccessList tx
         rlpAccessList = EVM.RLP.List $ map (\accessEntry ->
-          EVM.RLP.List [BS $ word160Bytes accessEntry.accessAddress,
-                        EVM.RLP.List $ map rlpWordFull accessEntry.accessStorageKeys]
+          EVM.RLP.List [BS $ word160Bytes (accessAddress accessEntry),
+                        EVM.RLP.List $ map rlpWordFull $ accessStorageKeys accessEntry]
           ) accessList
-        normalData = rlpList [rlpWord256 tx.txNonce,
+        normalData = rlpList [rlpWord256 (txNonce tx),
                               rlpWord256 gasPrice,
-                              rlpWord256 (num tx.txGasLimit),
+                              rlpWord256 (num $ txGasLimit tx),
                               to',
-                              rlpWord256 tx.txValue,
-                              BS tx.txData]
-        eip155Data = rlpList [rlpWord256 tx.txNonce,
+                              rlpWord256 (txValue tx),
+                              BS (txData tx)]
+        eip155Data = rlpList [rlpWord256 (txNonce tx),
                               rlpWord256 gasPrice,
-                              rlpWord256 (num tx.txGasLimit),
+                              rlpWord256 (num $ txGasLimit tx),
                               to',
-                              rlpWord256 tx.txValue,
-                              BS tx.txData,
+                              rlpWord256 (txValue tx),
+                              BS (txData tx),
                               rlpWord256 (fromIntegral chainId),
                               rlpWord256 0x0,
                               rlpWord256 0x0]
         eip1559Data = cons 0x02 $ rlpList [
           rlpWord256 (fromIntegral chainId),
-          rlpWord256 tx.txNonce,
+          rlpWord256 (txNonce tx),
           rlpWord256 maxPrio,
           rlpWord256 maxFee,
-          rlpWord256 (num tx.txGasLimit),
+          rlpWord256 (num $ txGasLimit tx),
           to',
-          rlpWord256 tx.txValue,
-          BS tx.txData,
+          rlpWord256 (txValue tx),
+          BS (txData tx),
           rlpAccessList]
 
         eip2930Data = cons 0x01 $ rlpList [
           rlpWord256 (fromIntegral chainId),
-          rlpWord256 tx.txNonce,
+          rlpWord256 (txNonce tx),
           rlpWord256 gasPrice,
-          rlpWord256 (num tx.txGasLimit),
+          rlpWord256 (num $ txGasLimit tx),
           to',
-          rlpWord256 tx.txValue,
-          BS tx.txData,
+          rlpWord256 (txValue tx),
+          BS (txData tx),
           rlpAccessList]
 
 accessListPrice :: FeeSchedule Word64 -> [AccessListEntry] -> Word64
 accessListPrice fs al =
     sum (map
       (\ale ->
-        fs.g_access_list_address  +
-        (fs.g_access_list_storage_key  * (fromIntegral . length) ale.accessStorageKeys))
+        g_access_list_address fs +
+        (g_access_list_storage_key fs * (fromIntegral . length) (accessStorageKeys ale)))
         al)
 
 txGasCost :: FeeSchedule Word64 -> Transaction -> Word64
 txGasCost fs tx =
-  let calldata     = tx.txData
+  let calldata     = txData tx
       zeroBytes    = BS.count 0 calldata
       nonZeroBytes = BS.length calldata - zeroBytes
-      baseCost     = fs.g_transaction
-        + (if isNothing tx.txToAddr then fs.g_txcreate else 0)
-        + (accessListPrice fs tx.txAccessList )
-      zeroCost     = fs.g_txdatazero
-      nonZeroCost  = fs.g_txdatanonzero
+      baseCost     = g_transaction fs
+        + (if isNothing (txToAddr tx) then g_txcreate fs else 0)
+        + (accessListPrice fs $ txAccessList tx)
+      zeroCost     = g_txdatazero fs
+      nonZeroCost  = g_txdatanonzero fs
   in baseCost + zeroCost * (fromIntegral zeroBytes) + nonZeroCost * (fromIntegral nonZeroBytes)
 
 instance FromJSON AccessListEntry where

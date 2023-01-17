@@ -61,10 +61,7 @@ common shared
     ghc-options: -j
   default-language: GHC2021
   default-extensions:
-    DuplicateRecordFields
     LambdaCase
-    NoFieldSelectors
-    OverloadedRecordDot
     OverloadedStrings
     RecordWildCards
     TypeFamilies

@@ -382,7 +382,7 @@ readCombinedJSON json = do
 
 readStdJSON :: Text -> Maybe (Map Text SolcContract, Map Text Value, [(Text, Maybe ByteString)])
 readStdJSON json = do
-  contracts <- KeyMap.toHashMapText <$> json ^? key "contracts" . _Object
+  contracts <- KeyMap.toHashMapText <$> json ^? key "contracts" ._Object
   -- TODO: support the general case of "urls" and "content" in the standard json
   sources <- KeyMap.toHashMapText <$>  json ^? key "sources" . _Object
   let asts = force "JSON lacks abstract syntax trees." . preview (key "ast") <$> sources

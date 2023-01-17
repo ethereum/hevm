@@ -469,12 +469,12 @@ verify :: SolverGroup -> VeriOpts -> VM -> Maybe Postcondition -> IO (Expr End, 
 verify solvers opts preState maybepost = do
   putStrLn "Exploring contract"
 
-  exprInter <- evalStateT (interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters runExpr) preState
-  when opts.debug $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
+  exprInter <- evalStateT (interpret (Fetch.oracle solvers (rpcInfo opts)) (maxIter opts) (askSmtIters opts) runExpr) preState
+  when (debug opts) $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
 
   putStrLn "Simplifying expression"
-  expr <- if opts.simp then (pure $ Expr.simplify exprInter) else pure exprInter
-  when opts.debug $ T.writeFile "simplified.expr" (formatExpr expr)
+  expr <- if (simp opts) then (pure $ Expr.simplify exprInter) else pure exprInter
+  when (debug opts) $ T.writeFile "simplified.expr" (formatExpr expr)
 
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
 
@@ -491,7 +491,7 @@ verify solvers opts preState maybepost = do
         withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> extractProps leaf <> pcs), leaf)) canViolate
       putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violation(s)"
 
-      when opts.debug $ forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
+      when (debug opts) $ forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
         TL.writeFile
           ("query-" <> show idx <> ".smt2")
           ("; " <> (TL.pack $ show leaf) <> "\n\n" <> formatSMT2 q <> "\n\n(check-sat)")
@@ -529,13 +529,13 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
       let allPairs = [(a,b) | a <- branchesA, b <- branchesB]
       putStrLn $ "Found " <> (show $ length allPairs) <> " total pairs of endstates"
 
-      when opts.debug $ putStrLn
+      when (debug opts) $ putStrLn
                         $ "endstates in bytecodeA: " <> (show $ length branchesA)
                        <> "\nendstates in bytecodeB: " <> (show $ length branchesB)
 
       let differingEndStates = sortBySize (mapMaybe (uncurry distinct) allPairs)
       putStrLn $ "Asking the SMT solver for " <> (show $ length differingEndStates) <> " pairs"
-      when opts.debug $ forM_ (zip differingEndStates [(1::Integer)..]) (\(x, i) ->
+      when (debug opts) $ forM_ (zip differingEndStates [(1::Integer)..]) (\(x, i) ->
         T.writeFile ("prop-checked-" <> show i) (T.pack $ show x))
 
       knownUnsat <- newTVarIO []
@@ -563,8 +563,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
       let
         bytecode = if BS.null bs then BS.pack [0] else bs
         prestate = abstractVM signature' [] bytecode Nothing SymbolicS
-      expr <- evalStateT (interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters runExpr) prestate
-      let simpl = if opts.simp then (Expr.simplify expr) else expr
+      expr <- evalStateT (interpret (Fetch.oracle solvers Nothing) (maxIter opts) (askSmtIters opts) runExpr) prestate
+      let simpl = if (simp opts) then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl
 
     -- checks for satisfiability of all the props in the provided set. skips
@@ -738,7 +738,7 @@ formatCex cd m@(SMTCex _ _ blockContext txContext) = T.unlines $
 
 -- | Takes a buffer and a Cex and replaces all abstract values in the buf with concrete ones from the Cex
 subModel :: SMTCex -> Expr a -> Expr a
-subModel c expr = subBufs c.buffers . subVars c.vars . subVars c.blockContext . subVars c.txContext $ expr
+subModel c expr = subBufs (buffers c) . subVars (vars c) . subVars (blockContext c) . subVars (txContext c) $ expr
   where
     subVars model b = Map.foldlWithKey subVar b model
     subVar :: Expr a -> Expr EWord -> W256 -> Expr a
