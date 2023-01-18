@@ -21,7 +21,7 @@ import Control.Concurrent (forkIO, killThread)
 import Data.Char (isSpace)
 import Data.Containers.ListUtils (nubOrd)
 import Language.SMT2.Parser (getValueRes, parseCommentFreeFileMsg)
-import Language.SMT2.Syntax (SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
+import Language.SMT2.Syntax (Symbol, SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
 import Data.Word
 import Numeric (readHex, readBin)
 import Data.ByteString (ByteString)
@@ -29,6 +29,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.List as List
 import Data.List.NonEmpty (NonEmpty((:|)))
+import qualified Data.List.NonEmpty as NonEmpty
 import Data.String.Here
 import Data.Maybe (fromMaybe, fromJust)
 import Data.Map (Map)
@@ -39,6 +40,7 @@ import qualified Data.Text.Lazy as T
 import qualified Data.Text.Lazy.IO as T
 import Data.Text.Lazy.Builder
 import Data.Bifunctor (second)
+import Data.Semigroup (Any, Any(..), getAny)
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
 
 import EVM.Types
@@ -53,18 +55,20 @@ import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
 data CexVars = CexVars
   { calldataV :: [Text]
   , buffersV :: [Text]
+  , storeReads :: [(Expr EWord, Expr EWord)] -- a list of relevant store reads
   , blockContextV :: [Text]
   , txContextV :: [Text]
   }
   deriving (Eq, Show)
 
 instance Semigroup CexVars where
-  (CexVars a b c d) <> (CexVars a2 b2 c2 d2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2)
+  (CexVars a b c d e) <> (CexVars a2 b2 c2 d2 e2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2) (e <> e2)
 
 instance Monoid CexVars where
     mempty = CexVars
       { calldataV = mempty
       , buffersV = mempty
+      , storeReads = mempty
       , blockContextV = mempty
       , txContextV = mempty
       }
@@ -72,6 +76,7 @@ instance Monoid CexVars where
 data SMTCex = SMTCex
   { vars :: Map (Expr EWord) W256
   , buffers :: Map (Expr Buf) ByteString
+  , store :: Map W256 (Map W256 W256)
   , blockContext :: Map (Expr EWord) W256
   , txContext :: Map (Expr EWord) W256
   }
@@ -107,6 +112,27 @@ declareIntermediates bufs stores =
     encodeStore n expr =
        fromLazyText ("(define-const store" <> (T.pack . show $ n) <> " Storage ") <> exprToSMT expr <> ")"
 
+isAbstractStorage :: Expr Storage -> Bool
+isAbstractStorage = getAny . foldExpr go (Any False)
+  where
+    go :: Expr a -> Any
+    go AbstractStore = Any True
+    go _ = Any False
+
+-- | This function overapproximates the reads from the abstract
+-- storage. Potentially, it can return locations that do not read a
+-- slot directly from the abstract store but from subsequent writes on
+-- the store (e.g, SLoad addr idx (SStore addr idx val AbstractStore)).
+-- However, we expect that most of such reads will have been
+-- simplified away.
+findStorageReads :: Prop -> [(Expr EWord, Expr EWord)]
+findStorageReads = foldProp go []
+  where
+    go :: Expr a -> [(Expr EWord, Expr EWord)]
+    go = \case
+      SLoad addr slot storage -> [(addr, slot) | isAbstractStorage storage]
+      _ -> []
+
 assertProps :: [Prop] -> SMT2
 assertProps ps =
   let encs = map propToSMT ps_elim
@@ -125,6 +151,7 @@ assertProps ps =
   <> keccakAssumes
   <> SMT2 [""] mempty
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
+  <> SMT2 [] mempty{storeReads = storageReads}
 
   where
     (ps_elim, bufs, stores) = eliminateProps ps
@@ -136,6 +163,8 @@ assertProps ps =
 
     bufVals = Map.elems bufs
     storeVals = Map.elems stores
+
+    storageReads = nubOrd $ concatMap findStorageReads ps
 
     keccakAssumes
       = SMT2 ["; keccak assumptions"] mempty
@@ -348,6 +377,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
     (ite (= b (_ bv28 256)) ((_ sign_extend 24 ) ((_ extract 231  0) val))
     (ite (= b (_ bv29 256)) ((_ sign_extend 16 ) ((_ extract 239  0) val))
     (ite (= b (_ bv30 256)) ((_ sign_extend 8  ) ((_ extract 247  0) val)) val))))))))))))))))))))))))))))))))
+
   ; storage
   (declare-const abstractStore Storage)
   (define-const emptyStore Storage ((as const Storage) ((as const (Array (_ BitVec 256) (_ BitVec 256))) #x0000000000000000000000000000000000000000000000000000000000000000)))
@@ -362,138 +392,85 @@ declareBufs names = SMT2 ("; buffers" : fmap declareBuf names <> ("; buffer leng
   where
     declareBuf n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
     declareLength n = "(define-const " <> n <> "_length" <> " (_ BitVec 256) (bufLength " <> n <> "))"
-    cexvars = CexVars
-      { calldataV = mempty
-      , buffersV = (fmap toLazyText names)
-      , blockContextV = mempty
-      , txContextV = mempty
-      }
+    cexvars = mempty{buffersV = fmap toLazyText names}
+
+
+referencedBufsGo :: Expr a -> [Builder]
+referencedBufsGo = \case
+  AbstractBuf s -> [fromText s]
+  _ -> []
 
 referencedBufs :: Expr a -> [Builder]
-referencedBufs expr = nubOrd (foldExpr go [] expr)
-  where
-    go :: Expr a -> [Builder]
-    go = \case
-      AbstractBuf s -> [fromText s]
-      _ -> []
+referencedBufs expr = nubOrd $ foldExpr referencedBufsGo [] expr
 
 referencedBufs' :: Prop -> [Builder]
-referencedBufs' = \case
-  PEq a b -> nubOrd $ referencedBufs a <> referencedBufs b
-  PLT a b -> nubOrd $ referencedBufs a <> referencedBufs b
-  PGT a b -> nubOrd $ referencedBufs a <> referencedBufs b
-  PLEq a b -> nubOrd $ referencedBufs a <> referencedBufs b
-  PGEq a b -> nubOrd $ referencedBufs a <> referencedBufs b
-  PAnd a b -> nubOrd $ referencedBufs' a <> referencedBufs' b
-  POr a b -> nubOrd $ referencedBufs' a <> referencedBufs' b
-  PNeg a -> referencedBufs' a
-  PBool _ -> []
+referencedBufs' prop = nubOrd $ foldProp referencedBufsGo [] prop
+
+referencedVarsGo :: Expr a -> [Builder]
+referencedVarsGo = \case
+  Var s -> [fromText s]
+  _ -> []
+
+referencedVars :: Expr a -> [Builder]
+referencedVars expr = nubOrd $ foldExpr referencedVarsGo [] expr
 
 referencedVars' :: Prop -> [Builder]
-referencedVars' = \case
-  PEq a b -> nubOrd $ referencedVars a <> referencedVars b
-  PLT a b -> nubOrd $ referencedVars a <> referencedVars b
-  PGT a b -> nubOrd $ referencedVars a <> referencedVars b
-  PLEq a b -> nubOrd $ referencedVars a <> referencedVars b
-  PGEq a b -> nubOrd $ referencedVars a <> referencedVars b
-  PAnd a b -> nubOrd $ referencedVars' a <> referencedVars' b
-  POr a b -> nubOrd $ referencedVars' a <> referencedVars' b
-  PNeg a -> referencedVars' a
-  PBool _ -> []
+referencedVars' prop = nubOrd $ foldProp referencedVarsGo [] prop
+
+referencedFrameContextGo :: Expr a -> [Builder]
+referencedFrameContextGo = \case
+  CallValue a -> [fromLazyText $ T.append "callvalue_" (T.pack . show $ a)]
+  Caller a -> [fromLazyText $ T.append "caller_" (T.pack . show $ a)]
+  Address a -> [fromLazyText $ T.append "address_" (T.pack . show $ a)]
+  Balance {} -> error "TODO: BALANCE"
+  SelfBalance {} -> error "TODO: SELFBALANCE"
+  Gas {} -> error "TODO: GAS"
+  _ -> []
+
+referencedFrameContext :: Expr a -> [Builder]
+referencedFrameContext expr = nubOrd $ foldExpr referencedFrameContextGo [] expr
 
 referencedFrameContext' :: Prop -> [Builder]
-referencedFrameContext' = \case
-  PEq a b -> nubOrd $ referencedFrameContext a <> referencedFrameContext b
-  PLT a b -> nubOrd $ referencedFrameContext a <> referencedFrameContext b
-  PGT a b -> nubOrd $ referencedFrameContext a <> referencedFrameContext b
-  PLEq a b -> nubOrd $ referencedFrameContext a <> referencedFrameContext b
-  PGEq a b -> nubOrd $ referencedFrameContext a <> referencedFrameContext b
-  PAnd a b -> nubOrd $ referencedFrameContext' a <> referencedFrameContext' b
-  POr a b -> nubOrd $ referencedFrameContext' a <> referencedFrameContext' b
-  PNeg a -> referencedFrameContext' a
-  PBool _ -> []
+referencedFrameContext' prop = nubOrd $ foldProp referencedFrameContextGo [] prop
+
+referencedBlockContextGo :: Expr a -> [Builder]
+referencedBlockContextGo = \case
+  Origin -> ["origin"]
+  Coinbase -> ["coinbase"]
+  Timestamp -> ["timestamp"]
+  BlockNumber -> ["blocknumber"]
+  PrevRandao -> ["prevrandao"]
+  GasLimit -> ["gaslimit"]
+  ChainId -> ["chainid"]
+  BaseFee -> ["basefee"]
+  _ -> []
+
+referencedBlockContext :: Expr a -> [Builder]
+referencedBlockContext expr = nubOrd $ foldExpr referencedBlockContextGo [] expr
 
 referencedBlockContext' :: Prop -> [Builder]
-referencedBlockContext' = \case
-  PEq a b -> nubOrd $ referencedBlockContext a <> referencedBlockContext b
-  PLT a b -> nubOrd $ referencedBlockContext a <> referencedBlockContext b
-  PGT a b -> nubOrd $ referencedBlockContext a <> referencedBlockContext b
-  PLEq a b -> nubOrd $ referencedBlockContext a <> referencedBlockContext b
-  PGEq a b -> nubOrd $ referencedBlockContext a <> referencedBlockContext b
-  PAnd a b -> nubOrd $ referencedBlockContext' a <> referencedBlockContext' b
-  POr a b -> nubOrd $ referencedBlockContext' a <> referencedBlockContext' b
-  PNeg a -> referencedBlockContext' a
-  PBool _ -> []
+referencedBlockContext' prop = nubOrd $ foldProp referencedBlockContextGo [] prop
 
 -- Given a list of 256b VM variable names, create an SMT2 object with the variables declared
 declareVars :: [Builder] -> SMT2
 declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = CexVars
-      { calldataV = fmap toLazyText names
-      , buffersV = mempty
-      , blockContextV = mempty
-      , txContextV = mempty
-      }
+    cexvars = mempty{calldataV = fmap toLazyText names}
 
-referencedVars :: Expr a -> [Builder]
-referencedVars expr = nubOrd (foldExpr go [] expr)
-  where
-    go :: Expr a -> [Builder]
-    go = \case
-      Var s -> [fromText s]
-      _ -> []
 
 declareFrameContext :: [Builder] -> SMT2
 declareFrameContext names = SMT2 (["; frame context"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = CexVars
-      { calldataV = mempty
-      , buffersV = mempty
-      , blockContextV = mempty
-      , txContextV = fmap toLazyText names
-      }
+    cexvars = mempty{txContextV = fmap toLazyText names}
 
-referencedFrameContext :: Expr a -> [Builder]
-referencedFrameContext expr = nubOrd (foldExpr go [] expr)
-  where
-    go :: Expr a -> [Builder]
-    go = \case
-      CallValue a -> [fromLazyText $ T.append "callvalue_" (T.pack . show $ a)]
-      Caller a -> [fromLazyText $ T.append "caller_" (T.pack . show $ a)]
-      Address a -> [fromLazyText $ T.append "address_" (T.pack . show $ a)]
-      Balance {} -> error "TODO: BALANCE"
-      SelfBalance {} -> error "TODO: SELFBALANCE"
-      Gas {} -> error "TODO: GAS"
-      _ -> []
 
 declareBlockContext :: [Builder] -> SMT2
 declareBlockContext names = SMT2 (["; block context"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = CexVars
-      { calldataV = mempty
-      , buffersV = mempty
-      , blockContextV = fmap toLazyText names
-      , txContextV = mempty
-      }
-
-referencedBlockContext :: Expr a -> [Builder]
-referencedBlockContext expr = nubOrd (foldExpr go [] expr)
-  where
-    go :: Expr a -> [Builder]
-    go = \case
-      Origin -> ["origin"]
-      Coinbase -> ["coinbase"]
-      Timestamp -> ["timestamp"]
-      BlockNumber -> ["blocknumber"]
-      PrevRandao -> ["prevrandao"]
-      GasLimit -> ["gaslimit"]
-      ChainId -> ["chainid"]
-      BaseFee -> ["basefee"]
-      _ -> []
+    cexvars = mempty{blockContextV = fmap toLazyText names}
 
 
 exprToSMT :: Expr a -> Builder
@@ -811,6 +788,96 @@ getVars parseFn inst names = Map.mapKeys parseFn <$> foldM getOne mempty names
           r -> parseErr r
       pure $ Map.insert name val acc
 
+getStore :: SolverInstance -> [(Expr EWord, Expr EWord)] -> IO (Map W256 (Map W256 W256))
+getStore inst sreads = do
+  raw <- getValue inst "abstractStore"
+  let parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
+                 Right (ResSpecific (valParsed :| [])) -> valParsed
+                 r -> parseErr r
+      -- first interpret SMT term as a function
+      fun = case parsed of
+              (TermQualIdentifier (Unqualified (IdSymbol symbol)), term) ->
+                if symbol == "abstractStore"
+                then interpret2DArray Map.empty term
+                else error "Internal Error: solver did not return model for requested value"
+              r -> parseErr r
+
+  -- then create a map by adding only the locations that are read by the program
+  foldM (\m (addr, slot) -> do
+            addr' <- queryValue addr
+            slot' <- queryValue slot
+            pure $ addElem addr' slot' m fun) Map.empty sreads
+
+  where
+
+    addElem :: W256 -> W256 -> Map W256 (Map W256 W256) -> (W256 -> W256 -> W256) -> Map W256 (Map W256 W256)
+    addElem addr slot store fun =
+      case Map.lookup addr store of
+        Just m -> Map.insert addr (Map.insert slot (fun addr slot) m) store
+        Nothing -> Map.insert addr (Map.singleton slot (fun addr slot)) store
+
+
+    queryValue :: Expr EWord -> IO W256
+    queryValue (Lit w) = pure w
+    queryValue w = do
+      let expr = toLazyText $ exprToSMT w
+      raw <- getValue inst expr
+      case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
+        Right (ResSpecific (valParsed :| [])) ->
+          case valParsed of
+            (_, TermSpecConstant sc) -> pure $ parseW256 sc
+            _ -> error "Internal Error: cannot parse model for storage index"
+        r -> parseErr r
+
+
+
+-- | Interpret an N-dimensional array as a value of type a.
+-- Parameterized by an interpretation function for array values.
+interpretNDArray :: (Map Symbol Term -> Term -> a) -> (Map Symbol Term) -> Term -> (W256 -> a)
+interpretNDArray interp env = \case
+  -- variable reference
+  TermQualIdentifier (Unqualified (IdSymbol s)) ->
+    case Map.lookup s env of
+      Just t -> interpretNDArray interp env t
+      Nothing -> error "Internal error: unknown identifier, cannot parse array"
+  -- (let (x t') t)
+  TermLet (VarBinding x t' :| []) t -> interpretNDArray interp (Map.insert x t' env) t
+  TermLet (VarBinding x t' :| lets) t -> interpretNDArray interp (Map.insert x t' env) (TermLet (NonEmpty.fromList lets) t)
+  -- (as const (Array (_ BitVec 256) (_ BitVec 256))) SpecConstant
+  TermApplication asconst (val :| []) | isArrConst asconst ->
+    \_ -> interp env val
+  -- (store arr ind val)
+  TermApplication store (arr :| [TermSpecConstant ind, val]) | isStore store ->
+    \x -> if x == parseW256 ind then interp env val else interpretNDArray interp env arr x
+  t -> error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
+
+  where
+    isArrConst :: QualIdentifier -> Bool
+    isArrConst = \case
+      Qualified (IdSymbol "const") (SortParameter (IdSymbol "Array") _) -> True
+      _ -> False
+
+    isStore :: QualIdentifier -> Bool
+    isStore t = t == Unqualified (IdSymbol "store")
+
+
+-- | Interpret an 1-dimensional array as a function
+interpret1DArray :: (Map Symbol Term) -> Term -> (W256 -> W256)
+interpret1DArray = interpretNDArray interpretW256
+  where
+    interpretW256 :: (Map Symbol Term) -> Term -> W256
+    interpretW256 _ (TermSpecConstant val) = parseW256 val
+    interpretW256 env (TermQualIdentifier (Unqualified (IdSymbol s))) =
+      case Map.lookup s env of
+        Just t -> interpretW256 env t
+        Nothing -> error "Internal error: unknown identifier, cannot parse array"
+    interpretW256 _ t = error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
+
+-- | Interpret an 2-dimensional array as a function
+interpret2DArray :: (Map Symbol Term) -> Term -> (W256 -> W256 -> W256)
+interpret2DArray = interpretNDArray interpret1DArray
+
+
 getBufs :: SolverInstance -> [TS.Text] -> IO (Map (Expr Buf) ByteString)
 getBufs inst names = foldM getBuf mempty names
   where
@@ -938,11 +1005,13 @@ withSolvers solver count timeout cont = do
             "sat" -> do
               calldatamodels <- getVars parseVar inst (fmap T.toStrict cexvars.calldataV)
               buffermodels <- getBufs inst (fmap T.toStrict cexvars.buffersV)
+              storagemodels <- getStore inst cexvars.storeReads
               blockctxmodels <- getVars parseBlockCtx inst (fmap T.toStrict cexvars.blockContextV)
               txctxmodels <- getVars parseFrameCtx inst (fmap T.toStrict cexvars.txContextV)
               pure $ Sat $ SMTCex
                 { vars = calldatamodels
                 , buffers = buffermodels
+                , store = storagemodels
                 , blockContext = blockctxmodels
                 , txContext = txctxmodels
                 }
