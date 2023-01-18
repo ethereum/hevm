@@ -654,7 +654,6 @@ tests = testGroup "hevm"
         putStrLn "Require works as expected"
      ,
      testCase "ITE-with-bitwise-AND" $ do
-        --- using ignore to suppress huge output
        Just c <- solcRuntime "C"
          [i|
          contract C {
@@ -675,7 +674,6 @@ tests = testGroup "hevm"
        putStrLn "expected counterexample found"
      ,
      testCase "ITE-with-bitwise-OR" $ do
-        --- using ignore to suppress huge output
        Just c <- solcRuntime "C"
          [i|
          contract C {
@@ -1617,8 +1615,7 @@ tests = testGroup "hevm"
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        ignoreTest $ testCase "keccak soundness" $ do
-        --- using ignore to suppress huge output
+        testCase "keccak soundness" $ do
           Just c <- solcRuntime "C"
             [i|
               contract C {
@@ -1659,9 +1656,6 @@ tests = testGroup "hevm"
                   & set (state . callvalue) (Lit 0)
                   & over (env . contracts)
                        (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
-                  -- NOTE: this used to as follows, but there is no _storage field in Contract record
-                  -- (Map.insert aAddr (initialContract (RuntimeCode $ ConcreteBuffer a) &
-                  --                     set EVM.storage (EVM.Symbolic [] store)))
             verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLn "found counterexample:"
         ,
