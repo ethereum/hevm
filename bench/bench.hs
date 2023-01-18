@@ -1,11 +1,10 @@
-{-# Language QuasiQuotes #-}
-
 module Main where
 
 import GHC.Natural
 
 import qualified Paths_hevm as Paths
 
+import Test.Tasty (localOption)
 import Test.Tasty.Bench
 import Data.Functor
 import Data.String.Here
@@ -37,7 +36,7 @@ findPanics solver count iters c = do
 -- counts to benchmark, allowing us to construct benchmarks that compare the
 -- performance impact of increasing solver parallelisation
 mkbench :: IO ByteString -> String -> Maybe Integer -> [Natural] -> Benchmark
-mkbench c name iters counts  = env c (bgroup name . bmarks)
+mkbench c name iters counts = localOption WallTime $ env c (bgroup name . bmarks)
   where
     bmarks c' = concat $ [
        [ bench ("cvc5-" <> show i) $ nfIO $ findPanics CVC5 i iters c'

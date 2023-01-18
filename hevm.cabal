@@ -355,6 +355,7 @@ benchmark bench
   build-depends:
     base,
     tasty-bench,
+    tasty,
     bytestring,
     text,
     hevm,
