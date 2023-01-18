@@ -27,7 +27,7 @@ go :: forall a. Expr a -> State BuilderState (Expr a)
 go = \case
   e@(Keccak _) -> do
     s <- get
-    put $ s{keccaks=Set.insert e (keccaks s)}
+    put $ s{keccaks=Set.insert e s.keccaks}
     pure e
   e -> pure e
 
@@ -73,7 +73,7 @@ keccakAssumptions ps bufs stores = injectivity <> minValue
   where
     (_, st) = runState (findKeccakPropsExprs ps bufs stores) initState
 
-    injectivity = fmap injProp $ combine (Set.toList (keccaks st))
-    minValue = fmap minProp (Set.toList (keccaks st))
+    injectivity = fmap injProp $ combine (Set.toList st.keccaks)
+    minValue = fmap minProp (Set.toList st.keccaks)
 
 

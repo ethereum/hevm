@@ -5,6 +5,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DefaultSignatures #-}
 
+{-# OPTIONS_GHC -Wno-error=inline-rule-shadowing #-}
+
 module EVM.Types where
 
 import Prelude hiding  (Word, LT, GT)
@@ -14,7 +16,7 @@ import Crypto.Hash hiding (SHA256)
 import Data.Map (Map)
 import Data.Bifunctor (first)
 import Data.Char
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, foldl')
 import Data.ByteString (ByteString)
 import Data.ByteString.Base16 as BS16
 import Data.ByteString.Builder (byteStringHex, toLazyByteString)
@@ -122,6 +124,7 @@ data Error
   | StackLimitExceeded
   | InvalidMemoryAccess
   | BadJumpDestination
+  | StackUnderrun
   | SelfDestruct
   | TmpErr String
   deriving (Show, Eq, Ord)
@@ -408,6 +411,12 @@ x .== y = PEq x y
 (./=) :: (Typeable a) => Expr a -> Expr a -> Prop
 x ./= y = PNeg (PEq x y)
 
+pand :: [Prop] -> Prop
+pand = foldl' PAnd (PBool True)
+
+por :: [Prop] -> Prop
+por = foldl' POr (PBool False)
+
 instance Eq Prop where
   PBool a == PBool b = a == b
   PEq (a :: Expr x) (b :: Expr x) == PEq (c :: Expr y) (d :: Expr y)
@@ -637,7 +646,7 @@ word256Bytes :: W256 -> ByteString
 word256Bytes x = BS.pack [byteAt x (31 - i) | i <- [0..31]]
 
 word160Bytes :: Addr -> ByteString
-word160Bytes x = BS.pack [byteAt (addressWord160 x) (19 - i) | i <- [0..19]]
+word160Bytes x = BS.pack [byteAt x.addressWord160 (19 - i) | i <- [0..19]]
 
 newtype Nibble = Nibble Word8
   deriving ( Num, Integral, Real, Ord, Enum, Eq, Bounded, Generic)
@@ -662,6 +671,18 @@ packNibbles :: [Nibble] -> ByteString
 packNibbles [] = mempty
 packNibbles (n1:n2:ns) = BS.singleton (toByte n1 n2) <> packNibbles ns
 packNibbles _ = error "can't pack odd number of nibbles"
+
+toWord64 :: W256 -> Maybe Word64
+toWord64 n =
+  if n <= num (maxBound :: Word64)
+    then let (W256 (Word256 _ (Word128 _ n'))) = n in Just n'
+    else Nothing
+
+toInt :: W256 -> Maybe Int
+toInt n =
+  if n <= num (maxBound :: Int)
+    then let (W256 (Word256 _ (Word128 _ n'))) = n in Just (fromIntegral n')
+    else Nothing
 
 -- Keccak hashing
 

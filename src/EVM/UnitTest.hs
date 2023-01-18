@@ -127,10 +127,10 @@ type ABIMethod = Text
 -- | Generate VeriOpts from UnitTestOptions
 makeVeriOpts :: UnitTestOptions -> VeriOpts
 makeVeriOpts opts =
-   defaultVeriOpts { SymExec.debug = smtDebug opts
-                   , SymExec.maxIter = maxIter opts
-                   , SymExec.askSmtIters = askSmtIters opts
-                   , SymExec.rpcInfo = rpcInfo opts
+   defaultVeriOpts { SymExec.debug = opts.smtDebug
+                   , SymExec.maxIter = opts.maxIter
+                   , SymExec.askSmtIters = opts.askSmtIters
+                   , SymExec.rpcInfo = opts.rpcInfo
                    }
 
 -- | Top level CLI endpoint for dapp-test
@@ -139,7 +139,7 @@ dappTest opts solcFile cache' = do
   out <- liftIO $ readSolc solcFile
   case out of
     Just (contractMap, _) -> do
-      let unitTests = findUnitTests (EVM.UnitTest.match opts) $ Map.elems contractMap
+      let unitTests = findUnitTests opts.match $ Map.elems contractMap
       results <- concatMapM (runUnitTestContract opts contractMap) unitTests
       let (passing, vms) = unzip results
       case cache' of
@@ -152,9 +152,7 @@ dappTest opts solcFile cache' = do
           in
             liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts evmcache)
 
-      if and passing
-         then return True
-         else return False
+      return $ and passing
     Nothing ->
       error ("Failed to read Solidity JSON for `" ++ solcFile ++ "'")
 
@@ -164,7 +162,7 @@ dappTest opts solcFile cache' = do
 initializeUnitTest :: UnitTestOptions -> SolcContract -> Stepper ()
 initializeUnitTest UnitTestOptions { .. } theContract = do
 
-  let addr = testAddress testParams
+  let addr = testParams.testAddress
 
   Stepper.evm $ do
     -- Maybe modify the initial VM, e.g. to load library code
@@ -177,7 +175,7 @@ initializeUnitTest UnitTestOptions { .. } theContract = do
 
   Stepper.evm $ do
     -- Give a balance to the test target
-    env . contracts . ix addr . balance += testBalanceCreate testParams
+    env . contracts . ix addr . balance += testParams.testBalanceCreate
 
     -- call setUp(), if it exists, to initialize the test contract
     let theAbi = view abiMap theContract
@@ -221,7 +219,7 @@ exploreStep UnitTestOptions{..} bs = do
     let (Method _ inputs sig _ _) = fromMaybe (error "unknown abi call") $ Map.lookup (num $ word $ BS.take 4 bs) (view dappAbiMap dapp)
         types = snd <$> inputs
     let ?context = DappContext dapp cs
-    this <- fromMaybe (error "unknown target") <$> (use (env . contracts . at (testAddress testParams)))
+    this <- fromMaybe (error "unknown target") <$> (use (env . contracts . at testParams.testAddress))
     let name = maybe "" (contractNamePart . view contractName) $ lookupCode (view contractcode this) dapp
     pushTrace (EntryTrace (name <> "." <> sig <> "(" <> intercalate "," ((pack . show) <$> types) <> ")" <> showCall types (ConcreteBuf bs)))
   -- Try running the test method
@@ -244,7 +242,9 @@ checkFailures UnitTestOptions { .. } method bailed = do
     res <- Stepper.execFully
     case res of
       Right (ConcreteBuf r) ->
-        let AbiBool failed = decodeAbiValue AbiBoolType (BSLazy.fromStrict r)
+        let failed = case decodeAbiValue AbiBoolType (BSLazy.fromStrict r) of
+              AbiBool f -> f
+              _ -> error "fix me with better types"
         in pure (shouldFail == failed)
       c -> error $ "internal error: unexpected failure code: " <> show c
 
@@ -501,7 +501,11 @@ type ExploreTx = (Addr, Addr, ByteString, W256)
 decodeCalls :: BSLazy.ByteString -> [ExploreTx]
 decodeCalls b = fromMaybe (error "could not decode replay data") $ do
   List v <- rlpdecode $ BSLazy.toStrict b
-  return $ flip fmap v $ \(List [BS caller', BS target, BS cd, BS ts]) -> (num (word caller'), num (word target), cd, word ts)
+  pure $ unList <$> v
+  where
+    unList (List [BS caller', BS target, BS cd, BS ts]) =
+      (num (word caller'), num (word target), cd, word ts)
+    unList _ = error "fix me with better types"
 
 -- | Runs an invariant test, calls the invariant before execution begins
 initialExplorationStepper :: UnitTestOptions -> ABIMethod -> [ExploreTx] -> [Addr] -> Int -> Stepper (Bool, RLP)
@@ -523,7 +527,8 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
        vm <- get
        let cs = view (env . contracts) vm
            noCode c = case view contractcode c of
-             RuntimeCode c' -> null c'
+             RuntimeCode (ConcreteRuntimeCode "") -> True
+             RuntimeCode (SymbolicRuntimeCode c') -> null c'
              _ -> False
            mutable m = view methodMutability m `elem` [NonPayable, Payable]
            knownAbis :: Map Addr SolcContract
@@ -585,7 +590,7 @@ explorationStepper _ _ _ _ _ _  = error "malformed rlp"
 getTargetContracts :: UnitTestOptions -> Stepper [Addr]
 getTargetContracts UnitTestOptions{..} = do
   vm <- Stepper.evm get
-  let Just contract' = currentContract vm
+  let contract' = fromJust $ currentContract vm
       theAbi = view abiMap $ fromJust $ lookupCode (view contractcode contract') dapp
       setUp  = abiKeccak (encodeUtf8 "targetContracts()")
   case Map.lookup setUp theAbi of
@@ -595,9 +600,16 @@ getTargetContracts UnitTestOptions{..} = do
       res <- Stepper.execFully
       case res of
         Right (ConcreteBuf r) ->
-          let AbiTuple vs = decodeAbiValue (AbiTupleType (Vector.fromList [AbiArrayDynamicType AbiAddressType])) (BSLazy.fromStrict r)
-              [AbiArrayDynamic AbiAddressType targets] = Vector.toList vs
-          in return $ fmap (\(AbiAddress a) -> a) (Vector.toList targets)
+          let vs = case decodeAbiValue (AbiTupleType (Vector.fromList [AbiArrayDynamicType AbiAddressType])) (BSLazy.fromStrict r) of
+                AbiTuple v -> v
+                _ -> error "fix me with better types"
+              targets = case Vector.toList vs of
+                [AbiArrayDynamic AbiAddressType ts] ->
+                  let unAbiAddress (AbiAddress a) = a
+                      unAbiAddress _ = error "fix me with better types"
+                  in unAbiAddress <$> Vector.toList ts
+                _ -> error "fix me with better types"
+          in pure targets
         _ -> error "internal error: unexpected failure code"
 
 exploreRun :: UnitTestOptions -> VM -> ABIMethod -> [ExploreTx] -> IO (Text, Either Text Text, VM)
@@ -639,7 +651,7 @@ runOne opts@UnitTestOptions{..} vm testName args = do
       (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (checkFailures opts testName bailed)) vm'
   if success
   then
-     let gasSpent = num (testGasCall testParams) - view (state . gas) vm'
+     let gasSpent = num testParams.testGasCall - view (state . gas) vm'
          gasText = pack $ show (fromIntegral gasSpent :: Integer)
      in
         pure
@@ -903,7 +915,9 @@ formatTestLog events (LogEntry _ args (topic:_)) =
           log_unnamed =
             Just $ showValue (head ts) args
           log_named =
-            let [key, val] = take 2 (textValues ts args)
+            let (key, val) = case take 2 (textValues ts args) of
+                  [k, v] -> (k, v)
+                  _ -> error "shouldn't happen"
             in Just $ unquote key <> ": " <> val
           showDecimal dec val =
             pack $ show $ Decimal (num dec) val
@@ -938,7 +952,7 @@ makeTxCall TestVMParams{..} (cd, cdProps) = do
   constraints %= (<> cdProps)
   assign (state . caller) (litAddr testCaller)
   assign (state . gas) testGasCall
-  origin' <- fromMaybe (initialContract (RuntimeCode mempty)) <$> use (env . contracts . at testOrigin)
+  origin' <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (env . contracts . at testOrigin)
   let originBal = view balance origin'
   when (originBal < testGasprice * (num testGasCall)) $ error "insufficient balance for gas cost"
   vm <- get
@@ -974,7 +988,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
            , vmoptAllowFFI = ffiAllowed
            }
     creator =
-      initialContract (RuntimeCode mempty)
+      initialContract (RuntimeCode (ConcreteRuntimeCode ""))
         & set nonce 1
         & set balance testBalanceCreate
   in vm

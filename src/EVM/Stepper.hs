@@ -99,7 +99,7 @@ execFully =
 runFully :: Stepper EVM.VM
 runFully = do
   vm <- run
-  case EVM._result vm of
+  case vm._result of
     Nothing -> error "should not occur"
     Just (VMFailure (Query q)) ->
       wait q >> runFully
@@ -133,9 +133,9 @@ interpret fetcher =
     eval (action :>>= k) =
       case action of
         Exec ->
-          EVM.Exec.exec >>= interpret fetcher . k
+          (State.state . runState) EVM.Exec.exec >>= interpret fetcher . k
         Run ->
-          EVM.Exec.run >>= interpret fetcher . k
+          (State.state . runState) EVM.Exec.run >>= interpret fetcher . k
         Wait q ->
           do m <- liftIO (fetcher q)
              State.state (runState m) >> interpret fetcher (k ())

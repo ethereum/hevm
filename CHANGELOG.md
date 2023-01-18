@@ -7,11 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## Fixed
+### Added
+
+- New cheatcode `prank(address)` that sets `msg.sender` to the specified address for the next call.
+- Improved equivalence checker that avoids checking similar branches more than once.
+- Improved simplification for arithmetic expressions
+
+## [0.50.2] - 2023-01-06
+
+### Fixed
+
+- Arithmetic overflow in concrete `SAR` edge case ([#163](https://github.com/ethereum/hevm/pull/163))
+- Unexpected abstract term application during fully concrete execution ([#163](https://github.com/ethereum/hevm/pull/163))
+
+## [0.50.1] - 2022-12-29
+
+### Fixed
 
 - `hevm exec` no longer fails with `hevm: No match in record selector smttimeout`
 - the `gas`, `gaslimit`, `priorityfee`, and `gasprice` cli options are now respected
 - cleaner formatting for the gas value in the visual debugger
+
+### Changed
+
+- we now build with ghc 9.2.4 by default
+- various perf improvements for concrete execution ([#157](https://github.com/ethereum/hevm/pull/157), [#152](https://github.com/ethereum/hevm/pull/152))
 
 ## [0.50.0] - 2022-12-19
 

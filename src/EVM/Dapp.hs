@@ -2,7 +2,7 @@
 
 module EVM.Dapp where
 
-import EVM (Trace, traceContract, traceOpIx, ContractCode(..), Contract(..), codehash, contractcode)
+import EVM (Trace, traceContract, traceOpIx, ContractCode(..), Contract(..), codehash, contractcode, RuntimeCode (..))
 import EVM.ABI (Event, AbiType, SolError)
 import EVM.Debug (srcMapCodePos)
 import EVM.Solidity
@@ -68,7 +68,7 @@ dappInfo root solcByName sources =
   let
     solcs = Map.elems solcByName
     astIds = astIdMap $ snd <$> toList (view sourceAsts sources)
-    immutables = filter ((/=) mempty . _immutableReferences) solcs
+    immutables = filter ((/=) mempty . (view immutableReferences)) solcs
 
   in DappInfo
     { _dappRoot = root
@@ -84,7 +84,7 @@ dappInfo root solcByName sources =
            (f creationCodehash Creation)
       -- contracts with immutable locations can't be id by hash
     , _dappSolcByCode =
-      [(Code (_runtimeCode x) (concat $ elems $ _immutableReferences x), x) | x <- immutables]
+      [(Code x._runtimeCode (concat $ elems x._immutableReferences), x) | x <- immutables]
       -- Sum up the ABI maps from all the contracts.
     , _dappAbiMap   = mconcat (map (view abiMap) solcs)
     , _dappEventMap = mconcat (map (view eventMap) solcs)
@@ -176,7 +176,11 @@ findSrc c dapp = do
 lookupCode :: ContractCode -> DappInfo -> Maybe SolcContract
 lookupCode (InitCode c _) a =
   snd <$> preview (dappSolcByHash . ix (keccak' (stripBytecodeMetadata c))) a
-lookupCode (RuntimeCode c) a = let
+lookupCode (RuntimeCode (ConcreteRuntimeCode c)) a =
+  case snd <$> preview (dappSolcByHash . ix (keccak' (stripBytecodeMetadata c))) a of
+    Just x -> return x
+    Nothing -> snd <$> find (compareCode c . fst) (view dappSolcByCode a)
+lookupCode (RuntimeCode (SymbolicRuntimeCode c)) a = let
     code = BS.pack $ mapMaybe unlitByte $ V.toList c
   in case snd <$> preview (dappSolcByHash . ix (keccak' (stripBytecodeMetadata code))) a of
     Just x -> return x

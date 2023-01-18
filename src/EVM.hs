@@ -15,7 +15,7 @@ import EVM.Types hiding (IllegalOverflow, Error)
 import EVM.Solidity
 import EVM.Concrete (createAddress, create2Address)
 import EVM.Op
-import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord, writeByte, bufLength, indexWord, litAddr, readBytes, word256At, copySlice, isLitByte)
+import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord, writeByte, bufLength, indexWord, litAddr, readBytes, word256At, copySlice)
 import EVM.FeeSchedule (FeeSchedule (..))
 import Options.Generic as Options
 import qualified EVM.Precompiled
@@ -28,7 +28,7 @@ import Data.ByteString              (ByteString)
 import Data.ByteString.Lazy         (fromStrict)
 import Data.Map.Strict              (Map)
 import Data.Set                     (Set, insert, member, fromList)
-import Data.Maybe                   (fromMaybe)
+import Data.Maybe                   (fromMaybe, fromJust)
 import Data.Sequence                (Seq)
 import Data.Vector.Storable         (Vector)
 import Data.Foldable                (toList)
@@ -58,7 +58,6 @@ import Crypto.Hash (Digest, SHA256, RIPEMD160, digestFromByteString)
 import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
 import Crypto.PubKey.ECC.Types (getCurveByName, CurveName(..), Point(..))
 import Crypto.PubKey.ECC.Generate (generateQ)
-import Data.DoubleWord (Word256(Word256), Word128 (Word128))
 
 -- * Data types
 
@@ -113,6 +112,7 @@ data VM = VM
   , _constraints    :: [Prop]
   , _keccakEqs      :: [Prop]
   , _allowFFI       :: Bool
+  , _overrideCaller :: Maybe (Expr EWord)
   }
   deriving (Show)
 
@@ -305,9 +305,17 @@ data SubState = SubState
   hopefully we do not have to deal with dynamic immutable before we get a real data section...
 -}
 data ContractCode
-  = InitCode ByteString (Expr Buf)     -- ^ "Constructor" code, during contract creation
-  | RuntimeCode (V.Vector (Expr Byte)) -- ^ "Instance" code, after contract creation
+  = InitCode ByteString (Expr Buf) -- ^ "Constructor" code, during contract creation
+  | RuntimeCode RuntimeCode -- ^ "Instance" code, after contract creation
   deriving (Show)
+
+-- | We have two variants here to optimize the fully concrete case.
+-- ConcreteRuntimeCode just wraps a ByteString
+-- SymbolicRuntimeCode is a fixed length vector of potentially symbolic bytes, which lets us handle symbolic pushdata (e.g. from immutable variables in solidity).
+data RuntimeCode
+  = ConcreteRuntimeCode ByteString
+  | SymbolicRuntimeCode (V.Vector (Expr Byte))
+  deriving (Show, Eq, Ord)
 
 -- runtime err when used for symbolic code
 instance Eq ContractCode where
@@ -392,7 +400,7 @@ blankState :: FrameState
 blankState = FrameState
   { _contract     = 0
   , _codeContract = 0
-  , _code         = RuntimeCode mempty
+  , _code         = RuntimeCode (ConcreteRuntimeCode "")
   , _pc           = 0
   , _stack        = mempty
   , _memory       = mempty
@@ -421,7 +429,8 @@ makeLenses ''VM
 bytecode :: Getter Contract (Expr Buf)
 bytecode = contractcode . to f
   where f (InitCode _ _) = mempty
-        f (RuntimeCode ops) = Expr.fromList ops
+        f (RuntimeCode (ConcreteRuntimeCode bs)) = ConcreteBuf bs
+        f (RuntimeCode (SymbolicRuntimeCode ops)) = Expr.fromList ops
 
 instance Semigroup Cache where
   a <> b = Cache
@@ -462,72 +471,73 @@ currentContract vm =
 
 makeVm :: VMOpts -> VM
 makeVm o =
-  let txaccessList = vmoptTxAccessList o
-      txorigin = vmoptOrigin o
-      txtoAddr = vmoptAddress o
+  let txaccessList = o.vmoptTxAccessList
+      txorigin = o.vmoptOrigin
+      txtoAddr = o.vmoptAddress
       initialAccessedAddrs = fromList $ [txorigin, txtoAddr] ++ [1..9] ++ (Map.keys txaccessList)
       initialAccessedStorageKeys = fromList $ foldMap (uncurry (map . (,))) (Map.toList txaccessList)
-      touched = if vmoptCreate o then [txorigin] else [txorigin, txtoAddr]
+      touched = if o.vmoptCreate then [txorigin] else [txorigin, txtoAddr]
   in
   VM
   { _result = Nothing
   , _frames = mempty
   , _tx = TxState
-    { _gasprice = vmoptGasprice o
-    , _txgaslimit = vmoptGaslimit o
-    , _txPriorityFee = vmoptPriorityFee o
+    { _gasprice = o.vmoptGasprice
+    , _txgaslimit = o.vmoptGaslimit
+    , _txPriorityFee = o.vmoptPriorityFee
     , _origin = txorigin
     , _toAddr = txtoAddr
-    , _value = vmoptValue o
+    , _value = o.vmoptValue
     , _substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty
     --, _accessList = txaccessList
-    , _isCreate = vmoptCreate o
+    , _isCreate = o.vmoptCreate
     , _txReversion = Map.fromList
-      [(vmoptAddress o, vmoptContract o)]
+      [(o.vmoptAddress , o.vmoptContract )]
     }
   , _logs = []
   , _traces = Zipper.fromForest []
   , _block = Block
-    { _coinbase = vmoptCoinbase o
-    , _timestamp = vmoptTimestamp o
-    , _number = vmoptNumber o
-    , _prevRandao = vmoptPrevRandao o
-    , _maxCodeSize = vmoptMaxCodeSize o
-    , _gaslimit = vmoptBlockGaslimit o
-    , _baseFee = vmoptBaseFee o
-    , _schedule = vmoptSchedule o
+    { _coinbase = o.vmoptCoinbase
+    , _timestamp = o.vmoptTimestamp
+    , _number = o.vmoptNumber
+    , _prevRandao = o.vmoptPrevRandao
+    , _maxCodeSize = o.vmoptMaxCodeSize
+    , _gaslimit = o.vmoptBlockGaslimit
+    , _baseFee = o.vmoptBaseFee
+    , _schedule = o.vmoptSchedule
     }
   , _state = FrameState
     { _pc = 0
     , _stack = mempty
     , _memory = mempty
     , _memorySize = 0
-    , _code = view contractcode $ vmoptContract o
-    , _contract = vmoptAddress o
-    , _codeContract = vmoptAddress o
-    , _calldata = fst $ vmoptCalldata o
-    , _callvalue = vmoptValue o
-    , _caller = vmoptCaller o
-    , _gas = vmoptGas o
+    , _code = o.vmoptContract._contractcode
+    , _contract = o.vmoptAddress
+    , _codeContract = o.vmoptAddress
+    , _calldata = fst o.vmoptCalldata
+    , _callvalue = o.vmoptValue
+    , _caller = o.vmoptCaller
+    , _gas = o.vmoptGas
     , _returndata = mempty
     , _static = False
     }
   , _env = Env
     { _sha3Crack = mempty
-    , _chainId = vmoptChainId o
-    , _storage = if vmoptStorageBase o == Concrete then EmptyStore else AbstractStore
+    , _chainId = o.vmoptChainId
+    , _storage = if o.vmoptStorageBase == Concrete then EmptyStore else AbstractStore
     , _origStorage = mempty
     , _contracts = Map.fromList
-      [(vmoptAddress o, vmoptContract o)]
+      [(o.vmoptAddress, o.vmoptContract )]
     --, _keccakUsed = mempty
     --, _storageModel = vmoptStorageModel o
     }
   , _cache = Cache mempty mempty mempty
   , _burned = 0
-  , _constraints = snd $ vmoptCalldata o
+  , _constraints = snd o.vmoptCalldata
   , _keccakEqs = mempty
   , _iterations = mempty
-  , _allowFFI = vmoptAllowFFI o
+  , _allowFFI = o.vmoptAllowFFI
+  , _overrideCaller = Nothing
   }
 
 -- | Initialize empty contract with given code
@@ -580,7 +590,7 @@ exec1 = do
           copyBytesToMemory (the state calldata) (Lit calldatasize) (Lit 0) (Lit 0)
           executePrecompile self (the state gas) 0 calldatasize 0 0 []
           vmx <- get
-          case view (state.stack) vmx of
+          case view (state . stack) vmx of
             (x:_) -> case x of
               Lit (num -> x' :: Integer) -> case x' of
                 0 -> do
@@ -603,7 +613,8 @@ exec1 = do
     else do
       let ?op = case (the state code) of
                   InitCode conc _ -> BS.index conc (the state pc)
-                  RuntimeCode ops ->
+                  RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs (the state pc)
+                  RuntimeCode (SymbolicRuntimeCode ops) ->
                     fromMaybe (error "could not analyze symbolic code") $
                       unlitByte $ ops V.! the state pc
 
@@ -614,13 +625,10 @@ exec1 = do
           let !n = num x - 0x60 + 1
               !xs = case the state code of
                 InitCode conc _ -> Lit $ word $ padRight n $ BS.take n (BS.drop (1 + the state pc) conc)
-                RuntimeCode ops ->
+                RuntimeCode (ConcreteRuntimeCode bs) -> Lit $ word $ BS.take n $ BS.drop (1 + the state pc) bs
+                RuntimeCode (SymbolicRuntimeCode ops) ->
                   let bytes = V.take n $ V.drop (1 + the state pc) ops
-                  in if all isLitByte bytes then -- optimize concrete path
-                       let litBytes = V.toList $ V.catMaybes $ unlitByte <$> bytes
-                           padded = BS.replicate (32 - length litBytes) 0 <> BS.pack litBytes
-                       in Lit $ word padded
-                     else readWord (Lit 0) $ Expr.fromList $ padLeft' 32 bytes
+                  in readWord (Lit 0) $ Expr.fromList $ padLeft' 32 bytes
           limitStack 1 $
             burn g_verylow $ do
               next
@@ -851,6 +859,7 @@ exec1 = do
               _ -> do
                 assign (state . stack) xs
                 pushSym (CodeSize x')
+                next
             [] ->
               underrun
 
@@ -1075,7 +1084,9 @@ exec1 = do
           case stk of
             (x:xs) ->
               burn g_mid $ forceConcrete x "JUMP: symbolic jumpdest" $ \x' ->
-                checkJump x' xs
+                case toInt x' of
+                  Nothing -> vmError EVM.BadJumpDestination
+                  Just i -> checkJump i xs
             _ -> underrun
 
         -- op: JUMPI
@@ -1085,7 +1096,9 @@ exec1 = do
                 burn g_high $
                   let jump :: Bool -> EVM ()
                       jump False = assign (state . stack) xs >> next
-                      jump _    = checkJump x' xs
+                      jump _    = case toInt x' of
+                        Nothing -> vmError EVM.BadJumpDestination
+                        Just i -> checkJump i xs
                   in case maybeLitWord y of
                       Just y' -> jump (0 /= y')
                       -- if the jump condition is symbolic, we explore both sides
@@ -1167,8 +1180,9 @@ exec1 = do
                   delegateCall this (num xGas) xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
                     zoom state $ do
                       assign callvalue (Lit xValue)
-                      assign caller (litAddr self)
+                      assign caller $ fromMaybe (litAddr self) (vm ^. overrideCaller)
                       assign contract callee
+                    assign overrideCaller Nothing
                     transfer self callee xValue
                     touchAccount self
                     touchAccount callee
@@ -1191,7 +1205,8 @@ exec1 = do
                   delegateCall this (num xGas) xTo (litAddr self) xValue xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
                     zoom state $ do
                       assign callvalue (Lit xValue)
-                      assign caller (litAddr self)
+                      assign caller $ fromMaybe (litAddr self) (vm ^. overrideCaller)
+                    assign overrideCaller Nothing
                     touchAccount self
             _ ->
               underrun
@@ -1282,9 +1297,10 @@ exec1 = do
                 delegateCall this (num xGas) xTo xTo 0 xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
                   zoom state $ do
                     assign callvalue (Lit 0)
-                    assign caller (litAddr self)
+                    assign caller $ fromMaybe (litAddr self) (vm ^. overrideCaller)
                     assign contract callee
                     assign static True
+                  assign overrideCaller Nothing
                   touchAccount self
                   touchAccount callee
             _ ->
@@ -1673,7 +1689,8 @@ accountExists addr vm =
 accountEmpty :: Contract -> Bool
 accountEmpty c =
   case view contractcode c of
-    RuntimeCode b -> null b
+    RuntimeCode (ConcreteRuntimeCode "") -> True
+    RuntimeCode (SymbolicRuntimeCode b) -> null b
     _ -> False
   && (view nonce c == 0)
   && (view balance c == 0)
@@ -1702,17 +1719,24 @@ finalize = do
       creation <- use (tx . isCreate)
       createe  <- use (state . contract)
       createeExists <- (Map.member createe) <$> use (env . contracts)
-      case Expr.toList output of
-        Nothing -> vmError $ UnexpectedSymbolicArg pc' "runtime code cannot have an abstract lentgh" [output]
-        Just ops ->
-          when (creation && createeExists) $ replaceCode createe (RuntimeCode ops)
+      let onContractCode contractCode =
+            when (creation && createeExists) $ replaceCode createe contractCode
+      case output of
+        ConcreteBuf bs ->
+          onContractCode $ RuntimeCode (ConcreteRuntimeCode bs)
+        _ ->
+          case Expr.toList output of
+            Nothing ->
+              vmError $ UnexpectedSymbolicArg pc' "runtime code cannot have an abstract lentgh" [output]
+            Just ops ->
+              onContractCode $ RuntimeCode (SymbolicRuntimeCode ops)
 
   -- compute and pay the refund to the caller and the
   -- corresponding payment to the miner
   txOrigin     <- use (tx . origin)
   sumRefunds   <- (sum . (snd <$>)) <$> (use (tx . substate . refunds))
   miner        <- use (block . coinbase)
-  blockReward  <- num . r_block <$> (use (block . schedule))
+  blockReward  <- num . (.r_block) <$> (use (block . schedule))
   gasPrice     <- use (tx . gasprice)
   priorityFee  <- use (tx . txPriorityFee)
   gasLimit     <- use (tx . txgaslimit)
@@ -1734,7 +1758,7 @@ finalize = do
   -- pay out the block reward, recreating the miner if necessary
   preuse (env . contracts . ix miner) >>= \case
     Nothing -> modifying (env . contracts)
-      (Map.insert miner (initialContract (EVM.RuntimeCode mempty)))
+      (Map.insert miner (initialContract (EVM.RuntimeCode (ConcreteRuntimeCode ""))))
     Just _  -> noop
   modifying (env . contracts)
     (Map.adjust (over balance (+ blockReward)) miner)
@@ -2025,6 +2049,11 @@ cheatActions =
                       addr = Lit . W256 . word256 . BS.drop 12 . BS.take 32 . keccakBytes $ pub
                     assign (state . returndata . word256At (Lit 0)) addr
                     assign (state . memory . word256At outOffset) addr
+          _ -> vmError (BadCheatCode sig),
+
+      action "prank(address)" $
+        \sig _ _ input -> case decodeStaticArgs 0 1 input of
+          [addr]  -> assign overrideCaller (Just addr)
           _ -> vmError (BadCheatCode sig)
 
     ]
@@ -2113,7 +2142,8 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
 collision :: Maybe Contract -> Bool
 collision c' = case c' of
   Just c -> (view nonce c /= 0) || case view contractcode c of
-    RuntimeCode b -> not $ null b
+    RuntimeCode (ConcreteRuntimeCode "") -> False
+    RuntimeCode (SymbolicRuntimeCode b) -> not $ null b
     _ -> True
   Nothing -> False
 
@@ -2245,7 +2275,7 @@ vmError :: Error -> EVM ()
 vmError e = finishFrame (FrameErrored e)
 
 underrun :: EVM ()
-underrun = vmError StackUnderrun
+underrun = vmError EVM.StackUnderrun
 
 -- | A stack frame can be popped in three ways.
 data FrameResult
@@ -2362,17 +2392,23 @@ finishFrame how = do
           case how of
             -- Case 4: Returning during a creation?
             FrameReturned output -> do
-                case Expr.toList output of
-                  Nothing -> vmError $
-                    UnexpectedSymbolicArg
-                      (view (state . pc) oldVm)
-                      "runtime code cannot have an abstract length"
-                      [output]
-                  Just newCode -> do
-                    replaceCode createe (RuntimeCode newCode)
+              let onContractCode contractCode = do
+                    replaceCode createe contractCode
                     assign (state . returndata) mempty
                     reclaimRemainingGasAllowance
                     push (num createe)
+              case output of
+                ConcreteBuf bs ->
+                  onContractCode $ RuntimeCode (ConcreteRuntimeCode bs)
+                _ ->
+                  case Expr.toList output of
+                    Nothing -> vmError $
+                      UnexpectedSymbolicArg
+                        (view (state . pc) oldVm)
+                        "runtime code cannot have an abstract length"
+                        [output]
+                    Just newCode -> do
+                      onContractCode $ RuntimeCode (SymbolicRuntimeCode newCode)
 
             -- Case 5: Reverting during a creation?
             FrameReverted output -> do
@@ -2449,13 +2485,10 @@ readMemory offset size vm = copySlice offset (Lit 0) size (view (state . memory)
 
 -- * Tracing
 
-withTraceLocation
-  :: (MonadState VM m) => TraceData -> m Trace
+withTraceLocation :: TraceData -> EVM Trace
 withTraceLocation x = do
   vm <- get
-  let
-    Just this =
-      currentContract vm
+  let this = fromJust $ currentContract vm
   pure Trace
     { _traceData = x
     , _traceContract = this
@@ -2490,7 +2523,7 @@ zipperRootForest z =
 traceForest :: VM -> Forest Trace
 traceForest = view (traces . to zipperRootForest)
 
-traceTopLog :: (MonadState VM m) => [Expr Log] -> m ()
+traceTopLog :: [Expr Log] -> EVM ()
 traceTopLog [] = noop
 traceTopLog ((LogEntry addr bytes topics) : _) = do
   trace <- withTraceLocation (EventTrace addr bytes topics)
@@ -2552,19 +2585,16 @@ stackOp3 cost f =
 
 -- * Bytecode data functions
 
-checkJump :: (Integral n) => n -> [Expr EWord] -> EVM ()
+checkJump :: Int -> [Expr EWord] -> EVM ()
 checkJump x xs = do
   theCode <- use (state . code)
   self <- use (state . codeContract)
   theCodeOps <- use (env . contracts . ix self . codeOps)
   theOpIxMap <- use (env . contracts . ix self . opIxMap)
-  let ops = case theCode of
-        InitCode ops' _ -> V.fromList $ LitByte <$> BS.unpack ops'
-        RuntimeCode ops' -> ops'
-      op = do
-        -- TODO: not a big fan of how bounds are checked, change this
-        b <- if x < num (length ops) then ops V.!? num x else Nothing
-        unlitByte b
+  let op = case theCode of
+        InitCode ops _ -> BS.indexMaybe ops x
+        RuntimeCode (ConcreteRuntimeCode ops) -> BS.indexMaybe ops x
+        RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= unlitByte
   case op of
     Nothing -> vmError EVM.BadJumpDestination
     Just b ->
@@ -2600,7 +2630,10 @@ mkOpIxMap (InitCode conc _)
         go v (n, !i, !j, !m) _ =
           {- PUSH data. -}        (n - 1,        i + 1, j,     m >> Vector.write v i j)
 
-mkOpIxMap (RuntimeCode ops)
+mkOpIxMap (RuntimeCode (ConcreteRuntimeCode ops)) =
+  mkOpIxMap (InitCode ops mempty) -- a bit hacky
+
+mkOpIxMap (RuntimeCode (SymbolicRuntimeCode ops))
   = Vector.create $ Vector.new (length ops) >>= \v ->
       let (_, _, _, m) = foldl (go v) (0, 0, 0, return ()) (stripBytecodeMetadataSym $ V.toList ops)
       in m >> return v
@@ -2626,7 +2659,9 @@ vmOp vm =
       (op, pushdata) = case code' of
         InitCode xs' _ ->
           (BS.index xs' i, fmap LitByte $ BS.unpack $ BS.drop i xs')
-        RuntimeCode xs' ->
+        RuntimeCode (ConcreteRuntimeCode xs') ->
+          (BS.index xs' i, fmap LitByte $ BS.unpack $ BS.drop i xs')
+        RuntimeCode (SymbolicRuntimeCode xs') ->
           ( fromMaybe (error "unexpected symbolic code") . unlitByte $ xs' V.! i , V.toList $ V.drop i xs')
   in if (opslen code' < i)
      then Nothing
@@ -2750,25 +2785,24 @@ readOp x _ = case x of
 
 -- Maps operation indicies into a pair of (bytecode index, operation)
 mkCodeOps :: ContractCode -> RegularVector.Vector (Int, Op)
-mkCodeOps (InitCode bytes _) = RegularVector.fromList . toList $ go 0 bytes
+mkCodeOps contractCode =
+  let l = case contractCode of
+            InitCode bytes _ ->
+              LitByte <$> (BS.unpack bytes)
+            RuntimeCode (ConcreteRuntimeCode ops) ->
+              LitByte <$> (BS.unpack $ stripBytecodeMetadata ops)
+            RuntimeCode (SymbolicRuntimeCode ops) ->
+              stripBytecodeMetadataSym $ V.toList ops
+  in RegularVector.fromList . toList $ go 0 l
   where
     go !i !xs =
-      case BS.uncons xs of
-        Nothing ->
-          mempty
-        Just (x, xs') ->
-          let j = opSize x
-          in (i, readOp x (fmap LitByte $ BS.unpack xs')) Seq.<| go (i + j) (BS.drop j xs)
-mkCodeOps (RuntimeCode ops) = RegularVector.fromList . toList $ go' 0 (stripBytecodeMetadataSym $ V.toList ops)
-  where
-    go' !i !xs =
       case uncons xs of
         Nothing ->
           mempty
         Just (x, xs') ->
           let x' = fromMaybe (error "unexpected symbolic code argument") $ unlitByte x
               j = opSize x'
-          in (i, readOp x' xs') Seq.<| go' (i + j) (drop j xs)
+          in (i, readOp x' xs') Seq.<| go (i + j) (drop j xs)
 
 -- * Gas cost calculation helpers
 
@@ -2883,23 +2917,27 @@ log2 x = finiteBitSize x - 1 - countLeadingZeros x
 
 hashcode :: ContractCode -> Expr EWord
 hashcode (InitCode ops args) = keccak $ (ConcreteBuf ops) <> args
-hashcode (RuntimeCode ops) = keccak . Expr.fromList $ ops
+hashcode (RuntimeCode (ConcreteRuntimeCode ops)) = keccak (ConcreteBuf ops)
+hashcode (RuntimeCode (SymbolicRuntimeCode ops)) = keccak . Expr.fromList $ ops
 
 -- | The length of the code ignoring any constructor args.
 -- This represents the region that can contain executable opcodes
 opslen :: ContractCode -> Int
 opslen (InitCode ops _) = BS.length ops
-opslen (RuntimeCode ops) = length ops
+opslen (RuntimeCode (ConcreteRuntimeCode ops)) = BS.length ops
+opslen (RuntimeCode (SymbolicRuntimeCode ops)) = length ops
 
 -- | The length of the code including any constructor args.
 -- This can return an abstract value
 codelen :: ContractCode -> Expr EWord
 codelen c@(InitCode {}) = bufLength $ toBuf c
-codelen (RuntimeCode ops) = Lit . num $ length ops
+codelen (RuntimeCode (ConcreteRuntimeCode ops)) = Lit . num $ BS.length ops
+codelen (RuntimeCode (SymbolicRuntimeCode ops)) = Lit . num $ length ops
 
 toBuf :: ContractCode -> Expr Buf
 toBuf (InitCode ops args) = ConcreteBuf ops <> args
-toBuf (RuntimeCode ops) = Expr.fromList ops
+toBuf (RuntimeCode (ConcreteRuntimeCode ops)) = ConcreteBuf ops
+toBuf (RuntimeCode (SymbolicRuntimeCode ops)) = Expr.fromList ops
 
 
 codeloc :: EVM CodeLocation
@@ -2908,12 +2946,6 @@ codeloc = do
   let self = view (state . contract) vm
       loc = view (state . pc) vm
   pure (self, loc)
-
-toWord64 :: W256 -> Maybe Word64
-toWord64 n =
-  if n <= num (maxBound :: Word64)
-    then let (W256 (Word256 _ (Word128 _ n'))) = n in Just n'
-    else Nothing
 
 -- * Emacs setup
 

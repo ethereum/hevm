@@ -6,8 +6,10 @@ module EVM.Format
   ( formatExpr
   , contractNamePart
   , contractPathPart
+  , showError
   , showTree
   , showTraceTree
+  , showValues
   , prettyvmresult
   , showCall
   , showWordExact
@@ -48,7 +50,7 @@ import Data.ByteString.Builder (byteStringHex, toLazyByteString)
 import Data.ByteString.Lazy (toStrict, fromStrict)
 import Data.DoubleWord (signedWord)
 import Data.Foldable (toList)
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, fromJust)
 import Data.Text (Text, pack, unpack, intercalate)
 import Data.Text (dropEnd, splitOn)
 import Data.Text.Encoding (decodeUtf8, decodeUtf8')
@@ -315,7 +317,7 @@ showTrace dapp vm trace =
       let calltype = if target == context
                      then "call "
                      else "delegatecall "
-          Lit hash' = hash -- FIXME: irrefutable pattern, handle symbolic
+          hash' = fromJust $ maybeLitWord hash
       in case preview (dappSolcByHash . ix hash' . _2) dapp of
         Nothing ->
           calltype
@@ -377,6 +379,7 @@ prettyError= \case
   EVM.Types.StackLimitExceeded -> "Stack limit exceeded"
   EVM.Types.InvalidMemoryAccess -> "Invalid memory access"
   EVM.Types.BadJumpDestination -> "Bad jump destination"
+  EVM.Types.StackUnderrun -> "Stack underrun"
   TmpErr err -> "Temp error: " <> err
 
 

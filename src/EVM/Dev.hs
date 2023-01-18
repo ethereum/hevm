@@ -7,7 +7,7 @@ Description: Helpers for repl driven hevm hacking
 -}
 module EVM.Dev where
 
-import Data.ByteString hiding (putStrLn, writeFile, zip)
+import Data.ByteString hiding (writeFile, zip)
 import Control.Monad.State.Strict hiding (state)
 import Data.Maybe (fromJust)
 import System.Directory
@@ -30,7 +30,6 @@ import GHC.Conc
 import System.Exit (exitFailure)
 import qualified EVM.Fetch as Fetch
 import qualified EVM.FeeSchedule as FeeSchedule
-import qualified Data.Vector as V
 
 checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO ()
 checkEquiv a b = withSolvers Z3 1 Nothing $ \s -> do
@@ -363,7 +362,7 @@ vat = do
 initVm :: ByteString -> VM
 initVm bs = vm
   where
-    contractCode = RuntimeCode $ V.fromList $ LitByte <$> unpack bs
+    contractCode = RuntimeCode (ConcreteRuntimeCode bs)
     c = Contract
       { _contractcode = contractCode
       , _balance      = 0

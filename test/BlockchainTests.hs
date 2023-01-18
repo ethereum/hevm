@@ -1,46 +1,46 @@
-{-# Language CPP #-}
+{-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE TupleSections #-}
 
-module EVM.VMTest
-  ( Case
-  , BlockchainCase
-
-  , parseBCSuite
-
-  , initTx
-  , setupTx
-  , vmForCase
-  , checkExpectation
-  ) where
+module Main where
 
 import Prelude hiding (Word)
 
-import qualified EVM
+import EVM qualified
 import EVM (contractcode, storage, origStorage, balance, nonce, initialContract, StorageBase(..))
-import EVM.Expr (litCode, litAddr)
-import qualified EVM.Concrete as EVM
-import qualified EVM.FeeSchedule
-
+import EVM.Concrete qualified as EVM
+import EVM.Dapp (emptyDapp)
+import EVM.Expr (litAddr)
+import EVM.FeeSchedule qualified
+import EVM.Fetch qualified
+import EVM.Stepper qualified
+import EVM.SMT (withSolvers, Solver(Z3))
 import EVM.Transaction
+import EVM.TTY qualified as TTY
 import EVM.Types
 
 import Control.Arrow ((***), (&&&))
 import Control.Lens
 import Control.Monad
-
-import GHC.Stack
-
+import Control.Monad.State.Strict (execStateT)
 import Data.Aeson ((.:), (.:?), FromJSON (..))
+import Data.Aeson qualified as JSON
+import Data.Aeson.Types qualified as JSON
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as Lazy
+import Data.ByteString.Lazy qualified as LazyByteString
+import Data.List (isInfixOf)
 import Data.Map (Map)
-import Data.Maybe (fromMaybe, isNothing)
-import Data.Witherable (Filterable, catMaybes)
-
-import qualified Data.Map          as Map
-import qualified Data.Aeson        as JSON
-import qualified Data.Aeson.Types  as JSON
-import qualified Data.ByteString.Lazy  as Lazy
-import qualified Data.Vector as V
+import Data.Map qualified as Map
+import Data.Maybe (fromJust, fromMaybe, isNothing, isJust)
 import Data.Word (Word64)
+import System.Environment (lookupEnv, getEnv)
+import System.FilePath.Find qualified as Find
+import System.FilePath.Posix (makeRelative, (</>))
+import Witherable (Filterable, catMaybes)
+
+import Test.Tasty
+import Test.Tasty.ExpectedFailure
+import Test.Tasty.HUnit
 
 type Storage = Map W256 W256
 
@@ -69,14 +69,103 @@ data BlockchainCase = BlockchainCase
   , blockchainNetwork :: String
   } deriving Show
 
+main :: IO ()
+main = do
+  tests <- prepareTests
+  defaultMain tests
+
+prepareTests :: IO TestTree
+prepareTests = do
+  repo <- getEnv "HEVM_ETHEREUM_TESTS_REPO"
+  let testsDir = "BlockchainTests/GeneralStateTests"
+  let dir = repo </> testsDir
+  jsonFiles <- Find.find Find.always (Find.extension Find.==? ".json") dir
+  putStrLn "Loading and parsing json files from ethereum-tests..."
+  isCI <- isJust <$> lookupEnv "CI"
+  let problematicTests = if isCI then commonProblematicTests <> ciProblematicTests else commonProblematicTests
+  let ignoredFiles = if isCI then ciIgnoredFiles else []
+  groups <- mapM (\f -> testGroup (makeRelative repo f) <$> (if any (`isInfixOf` f) ignoredFiles then pure [] else testsFromFile f problematicTests)) jsonFiles
+  putStrLn "Loaded."
+  pure $ testGroup "ethereum-tests" groups
+
+testsFromFile :: String -> Map String (TestTree -> TestTree) -> IO [TestTree]
+testsFromFile file problematicTests = do
+  parsed <- parseBCSuite <$> LazyByteString.readFile file
+  case parsed of
+   Left "No cases to check." -> pure [] -- error "no-cases ok"
+   Left _err -> pure [] -- error err
+   Right allTests -> pure $
+     (\(name, x) -> testCase' name $ runVMTest False (name, x)) <$> Map.toList allTests
+  where
+  testCase' name assertion =
+    case Map.lookup name problematicTests of
+      Just f -> f (testCase name assertion)
+      Nothing -> testCase name assertion
+
+-- CI has issues with some heaver tests, disable in bulk
+ciIgnoredFiles :: [String]
+ciIgnoredFiles = []
+
+commonProblematicTests :: Map String (TestTree -> TestTree)
+commonProblematicTests = Map.fromList
+  [ ("loopMul_d0g0v0_London", ignoreTestBecause "hevm is too slow")
+  , ("loopMul_d1g0v0_London", ignoreTestBecause "hevm is too slow")
+  , ("loopMul_d2g0v0_London", ignoreTestBecause "hevm is too slow")
+  , ("CALLBlake2f_MaxRounds_d0g0v0_London", ignoreTestBecause "very slow, bypasses timeout due time spent in FFI")
+  ]
+
+ciProblematicTests :: Map String (TestTree -> TestTree)
+ciProblematicTests = Map.fromList
+  [ ("Return50000_d0g1v0_London", ignoreTest)
+  , ("Return50000_2_d0g1v0_London", ignoreTest)
+  , ("randomStatetest177_d0g0v0_London", ignoreTest)
+  , ("static_Call50000_d0g0v0_London", ignoreTest)
+  , ("static_Call50000_d1g0v0_London", ignoreTest)
+  , ("static_Call50000bytesContract50_1_d1g0v0_London", ignoreTest)
+  , ("static_Call50000bytesContract50_2_d1g0v0_London", ignoreTest)
+  , ("static_Return50000_2_d0g0v0_London", ignoreTest)
+  , ("loopExp_d10g0v0_London", ignoreTest)
+  , ("loopExp_d11g0v0_London", ignoreTest)
+  , ("loopExp_d12g0v0_London", ignoreTest)
+  , ("loopExp_d13g0v0_London", ignoreTest)
+  , ("loopExp_d14g0v0_London", ignoreTest)
+  , ("loopExp_d8g0v0_London", ignoreTest)
+  , ("loopExp_d9g0v0_London", ignoreTest)
+  ]
+
+runVMTest :: Bool -> (String, Case) -> IO ()
+runVMTest diffmode (_name, x) =
+ do
+  let vm0 = vmForCase x
+  result <- execStateT (EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) . void $ EVM.Stepper.execFully) vm0
+  maybeReason <- checkExpectation diffmode x result
+  case maybeReason of
+    Just reason -> assertFailure reason
+    Nothing -> pure ()
+
+-- | Example usage:
+-- | $ cabal new-repl ethereum-tests
+-- | ghci> debugVMTest "BlockchainTests/GeneralStateTests/VMTests/vmArithmeticTest/twoOps.json" "twoOps_d0g0v0_London"
+debugVMTest :: String -> String -> IO ()
+debugVMTest file test = do
+  repo <- getEnv "HEVM_ETHEREUM_TESTS_REPO"
+  Right allTests <- parseBCSuite <$> LazyByteString.readFile (repo </> file)
+  let x = case filter (\(name, _) -> name == test) $ Map.toList allTests of
+        [(_, x')] -> x'
+        _ -> error "test not found"
+  let vm0 = vmForCase x
+  result <- withSolvers Z3 0 Nothing $ \solvers ->
+    TTY.runFromVM solvers Nothing Nothing emptyDapp vm0
+  void $ checkExpectation True x result
+
 splitEithers :: (Filterable f) => f (Either a b) -> (f a, f b)
 splitEithers =
   (catMaybes *** catMaybes)
   . (fmap fst &&& fmap snd)
   . (fmap (preview _Left &&& preview _Right))
 
-checkStateFail :: Bool -> Case -> EVM.VM -> (Bool, Bool, Bool, Bool, Bool) -> IO Bool
-checkStateFail diff x vm (okState, okMoney, okNonce, okData, okCode) = do
+checkStateFail :: Bool -> Case -> EVM.VM -> (Bool, Bool, Bool, Bool) -> IO String
+checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
   let
     printContracts :: Map Addr (EVM.Contract, Storage) -> IO ()
     printContracts cs = putStrLn $ Map.foldrWithKey (\k (c, s) acc ->
@@ -87,40 +176,40 @@ checkStateFail diff x vm (okState, okMoney, okNonce, okData, okCode) = do
         ++ "\n") "" cs
 
     reason = map fst (filter (not . snd)
-        [ ("bad-state",       okMoney || okNonce || okData  || okCode || okState)
-        , ("bad-balance", not okMoney || okNonce || okData  || okCode || okState)
-        , ("bad-nonce",   not okNonce || okMoney || okData  || okCode || okState)
-        , ("bad-storage", not okData  || okMoney || okNonce || okCode || okState)
-        , ("bad-code",    not okCode  || okMoney || okNonce || okData || okState)
+        [ ("bad-state",       okMoney || okNonce || okData  || okCode)
+        , ("bad-balance", not okMoney || okNonce || okData  || okCode)
+        , ("bad-nonce",   not okNonce || okMoney || okData  || okCode)
+        , ("bad-storage", not okData  || okMoney || okNonce || okCode)
+        , ("bad-code",    not okCode  || okMoney || okNonce || okData)
         ])
-    check = checkContracts x
-    expected = testExpectation x
+    check = x.checkContracts
+    expected = x.testExpectation
     actual = Map.map (,mempty) $ view (EVM.env . EVM.contracts) vm -- . to (fmap (clearZeroStorage.clearOrigStorage))) vm
     printStorage = show -- TODO: fixme
 
-  putStr (unwords reason)
-  when (diff && (not okState)) $ do
+  when diff $ do
+    putStr (unwords reason)
     putStrLn "\nPre balance/state: "
     printContracts check
     putStrLn "\nExpected balance/state: "
     printContracts expected
     putStrLn "\nActual balance/state: "
     printContracts actual
-  return okState
+  pure (unwords reason)
 
-checkExpectation :: HasCallStack => Bool -> Case -> EVM.VM -> IO Bool
+checkExpectation :: Bool -> Case -> EVM.VM -> IO (Maybe String)
 checkExpectation diff x vm = do
-  let expectation = testExpectation x
+  let expectation = x.testExpectation
       (okState, b2, b3, b4, b5) = checkExpectedContracts vm expectation
-  putStrLn $ show expectation
-  unless okState $ void $ checkStateFail
-    diff x vm (okState, b2, b3, b4, b5)
-  return okState
+  if okState then
+    pure Nothing
+  else
+    Just <$> checkStateFail diff x vm (b2, b3, b4, b5)
 
 -- quotient account state by nullness
 (~=) :: Map Addr (EVM.Contract, Storage) -> Map Addr (EVM.Contract, Storage) -> Bool
 (~=) cs1 cs2 =
-    let nullAccount = EVM.initialContract (EVM.RuntimeCode mempty)
+    let nullAccount = EVM.initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode ""))
         padNewAccounts cs ks = Map.union cs $ Map.fromList [(k, (nullAccount, mempty)) | k <- ks]
         padded_cs1 = padNewAccounts cs1 (Map.keys cs2)
         padded_cs2 = padNewAccounts cs2 (Map.keys cs1)
@@ -135,7 +224,7 @@ checkExpectation diff x vm = do
       (EVM.RuntimeCode a', EVM.RuntimeCode b') -> a' == b'
       _ -> error "unexpected code"
 
-checkExpectedContracts :: HasCallStack => EVM.VM -> Map Addr (EVM.Contract, Storage) -> (Bool, Bool, Bool, Bool, Bool)
+checkExpectedContracts :: EVM.VM -> Map Addr (EVM.Contract, Storage) -> (Bool, Bool, Bool, Bool, Bool)
 checkExpectedContracts vm expected =
   let cs = zipWithStorages $ vm ^. EVM.env . EVM.contracts -- . to (fmap (clearZeroStorage.clearOrigStorage))
       expectedCs = clearStorage <$> expected
@@ -165,15 +254,13 @@ clearNonce :: (EVM.Contract, Storage) -> (EVM.Contract, Storage)
 clearNonce (c, s) = (set nonce 0 c, s)
 
 clearCode :: (EVM.Contract, Storage) -> (EVM.Contract, Storage)
-clearCode (c, s) = (set contractcode (EVM.RuntimeCode mempty) c, s)
+clearCode (c, s) = (set contractcode (EVM.RuntimeCode (EVM.ConcreteRuntimeCode "")) c, s)
 
-
-
-newtype ContractWithStorage = ContractWithStorage { unContractWithStorage :: (EVM.Contract, Storage) }
+newtype ContractWithStorage = ContractWithStorage (EVM.Contract, Storage)
 
 instance FromJSON ContractWithStorage where
   parseJSON (JSON.Object v) = do
-    code <- (EVM.RuntimeCode . V.fromList . litCode <$> (hexText <$> v .: "code"))
+    code <- (EVM.RuntimeCode . EVM.ConcreteRuntimeCode <$> (hexText <$> v .: "code"))
     storage' <- v .: "storage"
     balance' <- v .: "balance"
     nonce'   <- v .: "nonce"
@@ -211,10 +298,11 @@ instance FromJSON Block where
 parseContracts ::
   Which -> JSON.Object -> JSON.Parser (Map Addr (EVM.Contract, Storage))
 parseContracts w v =
-  (Map.map unContractWithStorage) <$> (v .: which >>= parseJSON)
+  (Map.map unwrap) <$> (v .: which >>= parseJSON)
   where which = case w of
           Pre  -> "pre"
           Post -> "postState"
+        unwrap (ContractWithStorage x) = x
 
 parseBCSuite ::
   Lazy.ByteString -> Either String (Map String Case)
@@ -252,7 +340,7 @@ errorFatal _ = False
 fromBlockchainCase :: BlockchainCase -> Either BlockchainError Case
 fromBlockchainCase (BlockchainCase blocks preState postState network) =
   case (blocks, network) of
-    ([block], "London") -> case blockTxs block of
+    ([block], "London") -> case block.blockTxs of
       [tx] -> fromBlockchainCase' block tx preState postState
       []        -> Left NoTxs
       _         -> Left TooManyTxs
@@ -263,7 +351,7 @@ fromBlockchainCase' :: Block -> Transaction
                        -> Map Addr (EVM.Contract, Storage) -> Map Addr (EVM.Contract, Storage)
                        -> Either BlockchainError Case
 fromBlockchainCase' block tx preState postState =
-  let isCreate = isNothing (txToAddr tx) in
+  let isCreate = isNothing tx.txToAddr in
   case (sender 1 tx, checkTx tx block preState) of
       (Nothing, _) -> Left SignatureUnverified
       (_, Nothing) -> Left (if isCreate then FailedCreate else InvalidTx)
@@ -271,21 +359,21 @@ fromBlockchainCase' block tx preState postState =
         (EVM.VMOpts
          { vmoptContract      = EVM.initialContract theCode
          , vmoptCalldata      = (cd, [])
-         , vmoptValue         = Lit (txValue tx)
+         , vmoptValue         = Lit tx.txValue
          , vmoptAddress       = toAddr
          , vmoptCaller        = litAddr origin
          , vmoptStorageBase   = Concrete
          , vmoptOrigin        = origin
-         , vmoptGas           = txGasLimit tx - fromIntegral (txGasCost feeSchedule tx)
-         , vmoptBaseFee       = blockBaseFee block
-         , vmoptPriorityFee   = priorityFee tx (blockBaseFee block)
-         , vmoptGaslimit      = txGasLimit tx
-         , vmoptNumber        = blockNumber block
-         , vmoptTimestamp     = Lit $ blockTimestamp block
-         , vmoptCoinbase      = blockCoinbase block
-         , vmoptPrevRandao    = blockDifficulty block
+         , vmoptGas           = tx.txGasLimit  - fromIntegral (txGasCost feeSchedule tx)
+         , vmoptBaseFee       = block.blockBaseFee
+         , vmoptPriorityFee   = priorityFee tx block.blockBaseFee
+         , vmoptGaslimit      = tx.txGasLimit
+         , vmoptNumber        = block.blockNumber
+         , vmoptTimestamp     = Lit block.blockTimestamp
+         , vmoptCoinbase      = block.blockCoinbase
+         , vmoptPrevRandao    = block.blockDifficulty
          , vmoptMaxCodeSize   = 24576
-         , vmoptBlockGaslimit = blockGasLimit block
+         , vmoptBlockGaslimit = block.blockGasLimit
          , vmoptGasprice      = effectiveGasPrice
          , vmoptSchedule      = feeSchedule
          , vmoptChainId       = 1
@@ -296,43 +384,38 @@ fromBlockchainCase' block tx preState postState =
         checkState
         postState
           where
-            toAddr = fromMaybe (EVM.createAddress origin senderNonce) (txToAddr tx)
+            toAddr = fromMaybe (EVM.createAddress origin senderNonce) tx.txToAddr
             senderNonce = view (accountAt origin . nonce) (Map.map fst preState)
             feeSchedule = EVM.FeeSchedule.berlin
             toCode = Map.lookup toAddr preState
             theCode = if isCreate
-                      then EVM.InitCode (txData tx) mempty
-                      else maybe (EVM.RuntimeCode mempty) (view contractcode) (fst <$> toCode)
-            effectiveGasPrice = effectiveprice tx (blockBaseFee block)
+                      then EVM.InitCode tx.txData mempty
+                      else maybe (EVM.RuntimeCode (EVM.ConcreteRuntimeCode "")) (view contractcode . fst) toCode
+            effectiveGasPrice = effectiveprice tx block.blockBaseFee
             cd = if isCreate
                  then mempty
-                 else ConcreteBuf $ txData tx
+                 else ConcreteBuf tx.txData
 
 effectiveprice :: Transaction -> W256 -> W256
 effectiveprice tx baseFee = priorityFee tx baseFee + baseFee
 
 priorityFee :: Transaction -> W256 -> W256
 priorityFee tx baseFee = let
-    (txPrioMax, txMaxFee) = case txType tx of
+    (txPrioMax, txMaxFee) = case tx.txType of
                EIP1559Transaction ->
-                 let Just maxPrio = txMaxPriorityFeeGas tx
-                     Just maxFee = txMaxFeePerGas tx
+                 let maxPrio = fromJust tx.txMaxPriorityFeeGas
+                     maxFee = fromJust tx.txMaxFeePerGas
                  in (maxPrio, maxFee)
                _ ->
-                 let Just gasPrice = txGasPrice tx
+                 let gasPrice = fromJust tx.txGasPrice
                  in (gasPrice, gasPrice)
   in min txPrioMax (txMaxFee - baseFee)
 
 maxBaseFee :: Transaction -> W256
 maxBaseFee tx =
-  case txType tx of
-     EIP1559Transaction ->
-       let Just maxFee = txMaxFeePerGas tx
-       in maxFee
-     _ ->
-       let Just gasPrice = txGasPrice tx
-       in gasPrice
-
+  case tx.txType of
+     EIP1559Transaction -> fromJust tx.txMaxFeePerGas
+     _ -> fromJust tx.txGasPrice
 
 validateTx :: Transaction -> Block -> Map Addr (EVM.Contract, Storage) -> Maybe ()
 validateTx tx block cs = do
@@ -340,9 +423,9 @@ validateTx tx block cs = do
   origin        <- sender 1 tx
   originBalance <- (view balance) <$> view (at origin) cs'
   originNonce   <- (view nonce)   <$> view (at origin) cs'
-  let gasDeposit = (effectiveprice tx (blockBaseFee block)) * (num $ txGasLimit tx)
-  if gasDeposit + (txValue tx) <= originBalance
-    && txNonce tx == originNonce && blockBaseFee block <= maxBaseFee tx
+  let gasDeposit = (effectiveprice tx block.blockBaseFee) * (num tx.txGasLimit)
+  if gasDeposit + tx.txValue <= originBalance
+    && tx.txNonce == originNonce && block.blockBaseFee <= maxBaseFee tx
   then Just ()
   else Nothing
 
@@ -350,12 +433,12 @@ checkTx :: Transaction -> Block -> Map Addr (EVM.Contract, Storage) -> Maybe (Ma
 checkTx tx block prestate = do
   origin <- sender 1 tx
   validateTx tx block prestate
-  let isCreate   = isNothing (txToAddr tx)
+  let isCreate   = isNothing tx.txToAddr
       senderNonce = view (accountAt origin . nonce) (Map.map fst prestate)
-      toAddr      = fromMaybe (EVM.createAddress origin senderNonce) (txToAddr tx)
+      toAddr      = fromMaybe (EVM.createAddress origin senderNonce) tx.txToAddr
       prevCode    = view (accountAt toAddr . contractcode) (Map.map fst prestate)
       prevNonce   = view (accountAt toAddr . nonce) (Map.map fst prestate)
-  if isCreate && ((case prevCode of {EVM.RuntimeCode b -> not (null b); _ -> True}) || (prevNonce /= 0))
+  if isCreate && ((case prevCode of {EVM.RuntimeCode (EVM.ConcreteRuntimeCode b) -> not (BS.null b); _ -> True}) || (prevNonce /= 0))
   then mzero
   else
     return prestate
@@ -363,10 +446,10 @@ checkTx tx block prestate = do
 vmForCase :: Case -> EVM.VM
 vmForCase x =
   let
-    a = checkContracts x
+    a = x.checkContracts
     cs = Map.map fst a
     st = Map.mapKeys num $ Map.map snd a
-    vm = EVM.makeVm (testVmOpts x)
+    vm = EVM.makeVm x.testVmOpts
       & set (EVM.env . EVM.contracts) cs
       & set (EVM.env . EVM.storage) (ConcreteStore st)
       & set (EVM.env . EVM.origStorage) st

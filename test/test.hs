@@ -7,7 +7,7 @@ module Main where
 
 import Data.Text (Text)
 import Data.ByteString (ByteString)
-import Data.Bits
+import Data.Bits hiding (And, Xor)
 import System.Directory
 import GHC.Natural
 import Control.Monad
@@ -19,7 +19,6 @@ import System.Environment
 import Prelude hiding (fail, LT, GT)
 
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BS (fromStrict)
 import qualified Data.ByteString.Base16 as Hex
 import Data.Maybe
 import Data.Typeable
@@ -59,6 +58,7 @@ import qualified EVM.Expr as Expr
 import qualified Data.Text as T
 import Data.List (isSubsequenceOf)
 import EVM.TestUtils
+import GHC.Conc (getNumProcessors)
 
 main :: IO ()
 main = defaultMain tests
@@ -150,6 +150,10 @@ tests = testGroup "hevm"
         let simplified = Expr.writeWord idx val buf
             full = WriteWord idx val buf
         checkEquiv simplified full
+    , testProperty "arith-simplification" $ \(_ :: Int) -> ioProperty $ do
+        expr <- generate . sized $ genWordArith 15
+        let simplified = Expr.simplify expr
+        checkEquiv expr simplified
     , testProperty "readByte-equivalance" $ \(buf, idx) -> ioProperty $ do
         let simplified = Expr.readByte idx buf
             full = ReadByte idx buf
@@ -329,7 +333,9 @@ tests = testGroup "hevm"
           -- traceM ("encoding: " ++ (show y) ++ " : " ++ show (abiValueType y))
           Just encoded <- runStatements [i| x = abi.encode(a);|]
             [y] AbiBytesDynamicType
-          let AbiTuple (Vector.toList -> [solidityEncoded]) = decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded)
+          let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
+                AbiTuple (Vector.toList -> [e]) -> e
+                _ -> error "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [y])
           -- traceM ("encoded (solidity): " ++ show solidityEncoded)
           -- traceM ("encoded (hevm): " ++ show (AbiBytesDynamic hevmEncoded))
@@ -340,7 +346,9 @@ tests = testGroup "hevm"
           -- traceM ("encoding: " ++ (show x') ++ ", " ++ (show y')  ++ " : " ++ show (abiValueType x') ++ ", " ++ show (abiValueType y'))
           Just encoded <- runStatements [i| x = abi.encode(a, b);|]
             [x', y'] AbiBytesDynamicType
-          let AbiTuple (Vector.toList -> [solidityEncoded]) = decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded)
+          let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
+                AbiTuple (Vector.toList -> [e]) -> e
+                _ -> error "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [x',y'])
           -- traceM ("encoded (solidity): " ++ show solidityEncoded)
           -- traceM ("encoded (hevm): " ++ show (AbiBytesDynamic hevmEncoded))
@@ -421,9 +429,9 @@ tests = testGroup "hevm"
                 |]
 
         (json, path') <- solidity' srccode
-        let Just (solc', _, _) = readJSON json
+        let (solc', _, _) = fromJust $ readJSON json
             initCode :: ByteString
-            Just initCode = solc' ^? ix (path' <> ":A") . creationCode
+            initCode = fromJust $ solc' ^? ix (path' <> ":A") . creationCode
         -- add constructor arguments
         assertEqual "constructor args screwed up metadata stripping" (stripBytecodeMetadata (initCode <> encodeAbiValue (AbiUInt 256 1))) (stripBytecodeMetadata initCode)
     ]
@@ -985,6 +993,29 @@ tests = testGroup "hevm"
         (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "XOR works as expected"
       ,
+      testCase "opcode-addmod-no-overflow" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint8 a, uint8 b, uint8 c) external pure {
+                require(a < 4);
+                require(b < 4);
+                require(c < 4);
+                uint16 r1;
+                uint16 r2;
+                uint16 g2;
+                assembly {
+                  r1 := add(a,b)
+                  r2 := mod(r1, c)
+                  g2 := addmod (a, b, c)
+                }
+                assert (r2 == g2);
+              }
+            }
+            |]
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint8,uint8,uint8)", [AbiUIntType 8, AbiUIntType 8, AbiUIntType 8])) [] defaultVeriOpts
+        putStrLn "ADDMOD is fine on NON overflow values"
+      ,
       testCase "opcode-mulmod-no-overflow" $ do
         Just c <- solcRuntime "MyContract"
             [i|
@@ -1036,11 +1067,15 @@ tests = testGroup "hevm"
             }
           }
           |]
-        let pre preVM = let [x, y] = getStaticAbiArgs 2 preVM
+        let pre preVM = let (x, y) = case getStaticAbiArgs 2 preVM of
+                                       [x', y'] -> (x', y')
+                                       _ -> error "expected 2 args"
                         in (x .<= Expr.add x y)
                            .&& view (state . callvalue) preVM .== Lit 0
             post prestate leaf =
-              let [x, y] = getStaticAbiArgs 2 prestate
+              let (x, y) = case getStaticAbiArgs 2 prestate of
+                             [x', y'] -> (x', y')
+                             _ -> error "expected 2 args"
               in case leaf of
                    Return _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
                    _ -> PBool True
@@ -1057,12 +1092,16 @@ tests = testGroup "hevm"
             }
           }
           |]
-        let pre preVM = let [x, y] = getStaticAbiArgs  2 preVM
+        let pre preVM = let (x, y) = case getStaticAbiArgs 2 preVM of
+                                       [x', y'] -> (x', y')
+                                       _ -> error "expected 2 args"
                         in (x .<= Expr.add x y)
                            .&& (x .== y)
                            .&& view (state . callvalue) preVM .== Lit 0
             post prestate leaf =
-              let [_, y] = getStaticAbiArgs 2 prestate
+              let (_, y) = case getStaticAbiArgs 2 prestate of
+                             [x', y'] -> (x', y')
+                             _ -> error "expected 2 args"
               in case leaf of
                    Return _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
                    _ -> PBool True
@@ -1085,7 +1124,9 @@ tests = testGroup "hevm"
           |]
         let pre vm = Lit 0 .== view (state . callvalue) vm
             post prestate leaf =
-              let [y] = getStaticAbiArgs 1 prestate
+              let y = case getStaticAbiArgs 1 prestate of
+                        [y'] -> y'
+                        _ -> error "expected 1 arg"
                   this = Expr.litAddr $ view (state . codeContract) prestate
                   prex = Expr.readStorage' this (Lit 0) (view (env . storage) prestate)
               in case leaf of
@@ -1137,7 +1178,9 @@ tests = testGroup "hevm"
             |]
           let pre vm = (Lit 0) .== view (state . callvalue) vm
               post prestate poststate =
-                let [x,y] = getStaticAbiArgs 2 prestate
+                let (x,y) = case getStaticAbiArgs 2 prestate of
+                        [x',y'] -> (x',y')
+                        _ -> error "expected 2 args"
                     this = Expr.litAddr $ view (state . codeContract) prestate
                     prestore =  view (env . storage) prestate
                     prex = Expr.readStorage' this x prestore
@@ -1169,7 +1212,9 @@ tests = testGroup "hevm"
             |]
           let pre vm = (Lit 0) .== view (state . callvalue) vm
               post prestate poststate =
-                let [x,y] = getStaticAbiArgs 2 prestate
+                let (x,y) = case getStaticAbiArgs 2 prestate of
+                        [x',y'] -> (x',y')
+                        _ -> error "expected 2 args"
                     this = Expr.litAddr $ view (state . codeContract) prestate
                     prestore =  view (env . storage) prestate
                     prex = Expr.readStorage' this x prestore
@@ -1613,7 +1658,7 @@ tests = testGroup "hevm"
             let vm = vm0
                   & set (state . callvalue) (Lit 0)
                   & over (env . contracts)
-                       (Map.insert aAddr (initialContract (RuntimeCode (fromJust $ Expr.toList $ ConcreteBuf a))))
+                       (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
                   -- NOTE: this used to as follows, but there is no _storage field in Contract record
                   -- (Map.insert aAddr (initialContract (RuntimeCode $ ConcreteBuffer a) &
                   --                     set EVM.storage (EVM.Symbolic [] store)))
@@ -1722,7 +1767,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
-          assertBool "Must have a difference" (not (null a))
+          assertBool "Must have a difference" (any isCex a)
       ,
       testCase "eq-sol-exp-qed" $ do
         Just aPrgm <- solcRuntime "C"
@@ -1747,7 +1792,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts Nothing
-          assertEqual "Must have no difference" [] a
+          assertEqual "Must have no difference" [Qed ()] a
           return ()
       ,
       testCase "eq-sol-exp-cex" $ do
@@ -1775,70 +1820,31 @@ tests = testGroup "hevm"
         withSolvers Z3 3 Nothing $ \s -> do
           let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 2, askSmtIters = Just 2, rpcInfo = Nothing}
           a <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
-          assertEqual "Must be different" (containsA (Cex ()) a) True
+          assertEqual "Must be different" (any isCex a) True
           return ()
       , testCase "eq-all-yul-optimization-tests" $ do
         let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 5, askSmtIters = Just 20, rpcInfo = Nothing }
             ignoredTests = [
-                      "controlFlowSimplifier/terminating_for_nested.yul"
-                    , "controlFlowSimplifier/terminating_for_nested_reversed.yul"
-
                     -- unbounded loop --
-                    , "commonSubexpressionEliminator/branches_for.yul"
-                    , "commonSubexpressionEliminator/loop.yul"
-                    , "conditionalSimplifier/clear_after_if_continue.yul"
+                    "commonSubexpressionEliminator/branches_for.yul"
                     , "conditionalSimplifier/no_opt_if_break_is_not_last.yul"
-                    , "conditionalUnsimplifier/clear_after_if_continue.yul"
                     , "conditionalUnsimplifier/no_opt_if_break_is_not_last.yul"
                     , "expressionSimplifier/inside_for.yul"
                     , "forLoopConditionIntoBody/cond_types.yul"
                     , "forLoopConditionIntoBody/simple.yul"
                     , "fullSimplify/inside_for.yul"
-                    , "fullSuite/devcon_example.yul"
-                    , "fullSuite/loopInvariantCodeMotion.yul"
                     , "fullSuite/no_move_loop_orig.yul"
-                    , "loadResolver/loop.yul"
                     , "loopInvariantCodeMotion/multi.yul"
-                    , "loopInvariantCodeMotion/recursive.yul"
-                    , "loopInvariantCodeMotion/simple.yul"
-                    , "redundantAssignEliminator/for_branch.yul"
-                    , "redundantAssignEliminator/for_break.yul"
-                    , "redundantAssignEliminator/for_continue.yul"
-                    , "redundantAssignEliminator/for_decl_inside_break_continue.yul"
-                    , "redundantAssignEliminator/for_deep_noremove.yul"
                     , "redundantAssignEliminator/for_deep_simple.yul"
-                    , "redundantAssignEliminator/for_multi_break.yul"
-                    , "redundantAssignEliminator/for_nested.yul"
-                    , "redundantAssignEliminator/for_rerun.yul"
-                    , "redundantAssignEliminator/for_stmnts_after_break_continue.yul"
-                    , "rematerialiser/branches_for1.yul"
-                    , "rematerialiser/branches_for2.yul"
-                    , "rematerialiser/for_break.yul"
-                    , "rematerialiser/for_continue.yul"
-                    , "rematerialiser/for_continue_2.yul"
-                    , "rematerialiser/for_continue_with_assignment_in_post.yul"
-                    , "rematerialiser/no_remat_in_loop.yul"
-                    , "ssaTransform/for_reassign_body.yul"
-                    , "ssaTransform/for_reassign_init.yul"
-                    , "ssaTransform/for_reassign_post.yul"
-                    , "ssaTransform/for_simple.yul"
-                    , "loopInvariantCodeMotion/nonMovable.yul"
-                    , "unusedAssignEliminator/for_rerun.yul"
-                    , "unusedAssignEliminator/for_continue_3.yul"
+                    , "unusedAssignEliminator/for_deep_noremove.yul"
                     , "unusedAssignEliminator/for_deep_simple.yul"
                     , "ssaTransform/for_def_in_init.yul"
-                    , "rematerialiser/many_refs_small_cost_loop.yul"
+                    , "loopInvariantCodeMotion/simple_state.yul"
+                    , "loopInvariantCodeMotion/simple.yul"
+                    , "loopInvariantCodeMotion/recursive.yul"
+                    , "loopInvariantCodeMotion/no_move_staticall_returndatasize.yul"
                     , "loopInvariantCodeMotion/no_move_state_loop.yul"
-                    , "loopInvariantCodeMotion/dependOnVarInLoop.yul"
-                    , "forLoopInitRewriter/empty_pre.yul"
-                    , "loadResolver/keccak_crash.yul"
-                    , "blockFlattener/for_stmt.yul" -- symb input can loop it forever
-                    , "unusedAssignEliminator/for.yul" -- not infinite, just 2**256-3
                     , "loopInvariantCodeMotion/no_move_state.yul" -- not infinite, but rollaround on a large int
-                    , "loopInvariantCodeMotion/non-ssavar.yul" -- same as above
-                    , "forLoopInitRewriter/complex_pre.yul"
-                    , "rematerialiser/some_refs_small_cost_loop.yul" -- not infinite but 100 long
-                    , "forLoopInitRewriter/simple.yul"
                     , "loopInvariantCodeMotion/no_move_loop.yul"
 
                     -- unexpected symbolic arg --
@@ -1888,11 +1894,15 @@ tests = testGroup "hevm"
                     , "fullSuite/ssaReverse.yul"
                     , "rematerialiser/cheap_caller.yul"
                     , "rematerialiser/non_movable_instruction.yul"
+                    , "rematerialiser/for_break.yul"
+                    , "rematerialiser/for_continue.yul"
+                    , "rematerialiser/for_continue_2.yul"
                     , "ssaAndBack/multi_assign.yul"
                     , "ssaAndBack/multi_assign_if.yul"
                     , "ssaAndBack/multi_assign_switch.yul"
                     , "ssaAndBack/simple.yul"
                     , "ssaReverser/simple.yul"
+                    , "loopInvariantCodeMotion/simple_storage.yul"
 
                     -- OpMstore8
                     , "loadResolver/memory_with_different_kinds_of_invalidation.yul"
@@ -1907,7 +1917,6 @@ tests = testGroup "hevm"
                     , "commonSubexpressionEliminator/object_access.yul"
                     , "expressionSplitter/object_access.yul"
                     , "fullSuite/stack_compressor_msize.yul"
-                    , "varNameCleaner/function_names.yul"
 
                     -- stack too deep --
                     , "fullSuite/abi2.yul"
@@ -2004,20 +2013,16 @@ tests = testGroup "hevm"
                     , "unusedStoreEliminator/remove_before_revert.yul"
                     , "unusedStoreEliminator/unknown_length2.yul"
                     , "unusedStoreEliminator/unrelated_relative.yul"
+                    , "fullSuite/extcodelength.yul"
+                    , "unusedStoreEliminator/create_inside_function.yul"-- "trying to reset symbolic storage with writes in create"
 
                     -- Takes too long, would timeout on most test setups.
                     -- We could probably fix these by "bunching together" queries
-                    , "fullSuite/clear_after_if_continue.yul"
-                    , "reasoningBasedSimplifier/smod.yul"
                     , "reasoningBasedSimplifier/mulmod.yul"
 
                     -- TODO check what's wrong with these!
-                    , "unusedStoreEliminator/create_inside_function.yul"
-                    , "fullSimplify/not_applied_removes_non_constant_and_not_movable.yul" -- create bug?
-                    , "unusedStoreEliminator/create.yul" -- create bug?
-                    , "fullSuite/extcodelength.yul" -- extcodecopy bug?
-                    , "loadResolver/keccak_short.yul" -- keccak bug
-                    , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV I think?
+                    , "loadResolver/keccak_short.yul" -- ACTUAL bug -- keccak
+                    , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV
                     ]
 
         solcRepo <- fromMaybe (error "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
@@ -2036,9 +2041,8 @@ tests = testGroup "hevm"
                 False -> recursiveList ax (a:b)
           recursiveList [] b = pure b
         files <- recursiveList fullpaths []
-        --
         let filesFiltered = filter (\file -> not $ any (\filt -> Data.List.isSubsequenceOf filt file) ignoredTests) files
-        --
+
         -- Takes one file which follows the Solidity Yul optimizer unit tests format,
         -- extracts both the nonoptimized and the optimized versions, and checks equivalence.
         forM_ filesFiltered (\f-> do
@@ -2066,7 +2070,7 @@ tests = testGroup "hevm"
             filteredBSym = symbolicMem [ replaceAll "" $ x *=~[re|^//|] | x <- onlyAfter [re|^// step:|] unfiltered, not $ x =~ [re|^$|] ]
           start <- getCurrentTime
           putStrLn $ "Checking file: " <> f
-          when (debug myVeriOpts) $ do
+          when myVeriOpts.debug $ do
             putStrLn "-------------Original Below-----------------"
             mapM_ putStrLn unfiltered
             putStrLn "------------- Filtered A + Symb below-----------------"
@@ -2076,14 +2080,17 @@ tests = testGroup "hevm"
             putStrLn "------------- END -----------------"
           Just aPrgm <- yul "" $ T.pack $ unlines filteredASym
           Just bPrgm <- yul "" $ T.pack $ unlines filteredBSym
-          withSolvers CVC5 6 (Just 3) $ \s -> do
+          procs <- getNumProcessors
+          withSolvers CVC5 (num procs) (Just 100) $ \s -> do
             res <- equivalenceCheck s aPrgm bPrgm myVeriOpts Nothing
             end <- getCurrentTime
-            case containsA (Cex()) res of
+            case any isCex res of
               False -> do
                 print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
-                let timeouts = filter (\(_, _, c) -> c == EVM.SymExec.Timeout()) res
-                unless (null timeouts) $ putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
+                let timeouts = filter isTimeout res
+                unless (null timeouts) $ do
+                  putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
+                  error "Encountered timeouts, error"
               True -> do
                 putStrLn $ "Not OK: " <> show f <> " Got: " <> show res
                 error "Was NOT equivalent, error"
@@ -2115,7 +2122,7 @@ runSimpleVM :: ByteString -> ByteString -> Maybe ByteString
 runSimpleVM x ins = case loadVM x of
                       Nothing -> Nothing
                       Just vm -> let calldata' = (ConcreteBuf ins)
-                       in case runState (assign (state.calldata) calldata' >> exec) vm of
+                       in case runState (assign (state . calldata) calldata' >> exec) vm of
                             (VMSuccess (ConcreteBuf bs), _) -> Just bs
                             _ -> Nothing
 
@@ -2124,7 +2131,7 @@ loadVM x =
     case runState exec (vmForEthrunCreation x) of
        (VMSuccess (ConcreteBuf targetCode), vm1) -> do
          let target = view (state . contract) vm1
-             vm2 = execState (replaceCodeOfSelf (RuntimeCode (fromJust $ Expr.toList $ ConcreteBuf targetCode))) vm1
+             vm2 = execState (replaceCodeOfSelf (RuntimeCode (ConcreteRuntimeCode targetCode))) vm1
          return $ snd $ flip runState vm2
                 (do resetState
                     assign (state . gas) 0xffffffffffffffff -- kludge
@@ -2188,7 +2195,9 @@ getStaticAbiArgs n vm =
 -- includes shaving off 4 byte function sig
 decodeAbiValues :: [AbiType] -> ByteString -> [AbiValue]
 decodeAbiValues types bs =
-  let AbiTuple xy = decodeAbiValue (AbiTupleType $ Vector.fromList types) (BS.fromStrict (BS.drop 4 bs))
+  let xy = case decodeAbiValue (AbiTupleType $ Vector.fromList types) (BS.fromStrict (BS.drop 4 bs)) of
+        AbiTuple xy' -> xy'
+        _ -> error "AbiTuple expected"
   in Vector.toList xy
 
 newtype Bytes = Bytes ByteString
@@ -2410,6 +2419,46 @@ genWord litFreq sz = frequency
    subBuf = defaultBuf (sz `div` 10)
    subStore = genStorage (sz `div` 10)
    subByte = genByte (sz `div` 10)
+
+genWordArith :: Int -> Int -> Gen (Expr EWord)
+genWordArith litFreq 0 = frequency
+  [ (litFreq, fmap Lit arbitrary)
+  , (1, oneof [ fmap Lit arbitrary ])
+  ]
+genWordArith litFreq sz = frequency
+  [ (litFreq, fmap Lit arbitrary)
+  , (20, frequency
+    [ (20, liftM2 Add  subWord subWord)
+    , (20, liftM2 Sub  subWord subWord)
+    , (20, liftM2 Mul  subWord subWord)
+    , (20, liftM2 SEx  subWord subWord)
+    , (20, liftM2 Xor  subWord subWord)
+    -- these reduce variability
+    , (3 , liftM2 Min  subWord subWord)
+    , (3 , liftM2 Div  subWord subWord)
+    , (3 , liftM2 SDiv subWord subWord)
+    , (3 , liftM2 Mod  subWord subWord)
+    , (3 , liftM2 SMod subWord subWord)
+    , (3 , liftM2 SHL  subWord subWord)
+    , (3 , liftM2 SHR  subWord subWord)
+    , (3 , liftM2 SAR  subWord subWord)
+    , (3 , liftM2 Or   subWord subWord)
+    -- comparisons, reducing variability greatly
+    , (1 , liftM2 LEq  subWord subWord)
+    , (1 , liftM2 GEq  subWord subWord)
+    , (1 , liftM2 SLT  subWord subWord)
+    --(1, , liftM2 SGT subWord subWord
+    , (1 , liftM2 Eq   subWord subWord)
+    , (1 , liftM2 And  subWord subWord)
+    , (1 , fmap IsZero subWord        )
+    -- Expensive below
+    --(1,  liftM3 AddMod subWord subWord subWord
+    --(1,  liftM3 MulMod subWord subWord subWord
+    --(1,  liftM2 Exp subWord litWord
+    ])
+  ]
+ where
+   subWord = genWordArith (litFreq `div` 2) (sz `div` 2)
 
 defaultBuf :: Int -> Gen (Expr Buf)
 defaultBuf = genBuf (4_000_000)

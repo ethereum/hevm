@@ -6,7 +6,7 @@ module EVM.Fetch where
 import Prelude hiding (Word)
 
 import EVM.ABI
-import EVM.Types    (Addr, W256, hexText, Expr(Lit, LitByte), Expr(..), Prop(..), (.&&), (./=))
+import EVM.Types    (Addr, W256, hexText, Expr(Lit), Expr(..), Prop(..), (.&&), (./=))
 import EVM.SMT
 import EVM          (EVM, Contract, Block, initialContract, nonce, balance, external)
 import qualified EVM.FeeSchedule as FeeSchedule
@@ -29,7 +29,6 @@ import Network.Wreq.Session (Session)
 import System.Process
 
 import qualified Network.Wreq.Session as Session
-import qualified Data.Vector as V
 import Numeric.Natural (Natural)
 
 -- | Abstract representation of an RPC fetch request
@@ -143,7 +142,7 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
   theBalance <- MaybeT $ fetch (QueryBalance addr)
 
   return $
-    initialContract (EVM.RuntimeCode (V.fromList $ LitByte <$> BS.unpack theCode))
+    initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode theCode))
       & set nonce    theNonce
       & set balance  theBalance
       & set external True
@@ -203,7 +202,7 @@ oracle solvers info q = do
     -- we generate a new array to the fetched contract here
     EVM.PleaseFetchContract addr continue -> do
       contract <- case info of
-                    Nothing -> return $ Just $ initialContract (EVM.RuntimeCode mempty)
+                    Nothing -> return $ Just $ initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode ""))
                     Just (n, url) -> fetchContractFrom n url addr
       case contract of
         Just x -> return $ continue x

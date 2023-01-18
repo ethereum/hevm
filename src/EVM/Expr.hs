@@ -8,7 +8,7 @@
 module EVM.Expr where
 
 import Prelude hiding (LT, GT)
-import Data.Bits
+import Data.Bits hiding (And, Xor)
 import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
 import Data.Int (Int32)
 import Data.Word
@@ -181,8 +181,12 @@ shr = op2
 
 sar :: Expr EWord -> Expr EWord -> Expr EWord
 sar = op2 SAR (\x y ->
-  let asSigned = (fromIntegral y) :: Int256
-  in fromIntegral $ shiftR asSigned (fromIntegral x))
+  let msb = testBit y 255
+      asSigned = fromIntegral y :: Int256
+  in if x > 256 then
+       if msb then maxBound else 0
+     else
+       fromIntegral $ shiftR asSigned (fromIntegral x))
 
 -- ** Bufs ** --------------------------------------------------------------------------------------
 
@@ -266,13 +270,16 @@ readWord i b = readWordFromBytes i b
 -- Attempts to read a concrete word from a buffer by reading 32 individual bytes and joining them together
 -- returns an abstract ReadWord expression if a concrete word cannot be constructed
 readWordFromBytes :: Expr EWord -> Expr Buf -> Expr EWord
+readWordFromBytes (Lit idx) (ConcreteBuf bs) =
+  case toInt idx of
+    Nothing -> Lit 0
+    Just i -> Lit $ word $ padRight 32 $ BS.take 32 $ BS.drop i bs
 readWordFromBytes i@(Lit idx) buf = let
     bytes = [readByte (Lit i') buf | i' <- [idx .. idx + 31]]
   in if Prelude.and . (fmap isLitByte) $ bytes
      then Lit (bytesToW256 . mapMaybe unlitByte $ bytes)
      else ReadWord i buf
 readWordFromBytes idx buf = ReadWord idx buf
-
 
 {- | Copies a slice of src into dst.
 
@@ -316,7 +323,6 @@ copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e
 
 copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e@(ConcreteBuf dst)
   | dstOffset < maxBytes
-  , srcOffset < maxBytes
   , size < maxBytes =
       let hd = padRight (num dstOffset) $ BS.take (num dstOffset) dst
           sl = if srcOffset > num (BS.length src)
@@ -671,6 +677,28 @@ simplify e = if (mapExpr go e == e)
     go (ITE (Lit x) a b)
       | x == 0 = b
       | otherwise = a
+
+    -- simple div/mod/add/sub
+    go (Div o1@(Lit _)  o2@(Lit _)) = EVM.Expr.div  o1 o2
+    go (SDiv o1@(Lit _) o2@(Lit _)) = EVM.Expr.sdiv o1 o2
+    go (Mod o1@(Lit _)  o2@(Lit _)) = EVM.Expr.mod  o1 o2
+    go (SMod o1@(Lit _) o2@(Lit _)) = EVM.Expr.smod o1 o2
+    go (Add o1@(Lit _)  o2@(Lit _)) = EVM.Expr.add  o1 o2
+    go (Sub o1@(Lit _)  o2@(Lit _)) = EVM.Expr.sub  o1 o2
+
+    -- double add/sub.
+    -- Notice that everything is done mod 2**256. So for example:
+    -- (a-b)+c observes the same arithmetic equalities as we are used to
+    --         in infinite integers. In fact, it can be re-written as:
+    -- (a+(W256Max-b)+c), which is the same as:
+    -- (a+c+(W256Max-b)), which is the same as:
+    -- (a+(c-b))
+    -- In other words, subtraction is just adding a much larger number.
+    --    So 3-1 mod 6 = 3+(6-1) mod 6 = 3+5 mod 6 = 5+3 mod 6 = 2
+    go (Sub (Sub orig (Lit x)) (Lit y)) = Sub orig (Lit (y+x))
+    go (Sub (Add orig (Lit x)) (Lit y)) = Sub orig (Lit (y-x))
+    go (Add (Add orig (Lit x)) (Lit y)) = Add orig (Lit (y+x))
+    go (Add (Sub orig (Lit x)) (Lit y)) = Add orig (Lit (y-x))
 
     -- redundant add / sub
     go o@(Sub (Add a b) c)

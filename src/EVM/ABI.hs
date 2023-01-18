@@ -384,7 +384,9 @@ pack32 n xs =
       | (x, i) <- zip (map fromIntegral xs) [1..] ]
 
 asUInt :: Integral i => Int -> (i -> a) -> Get a
-asUInt n f = (\(AbiUInt _ x) -> f (fromIntegral x)) <$> getAbi (AbiUIntType n)
+asUInt n f = y <$> getAbi (AbiUIntType n)
+  where y (AbiUInt _ x) = f (fromIntegral x)
+        y _ = error "can't happen"
 
 getWord256 :: Get Word256
 getWord256 = pack32 8 <$> replicateM 8 getWord32be
@@ -405,13 +407,12 @@ getBytesWith256BitPadding i =
 
 genAbiValue :: AbiType -> Gen AbiValue
 genAbiValue = \case
-   AbiUIntType n -> genUInt n
-   AbiIntType n ->
-     do a <- genUInt n
-        let AbiUInt _ x = a
-        pure $ AbiInt n (signedWord (x - 2^(n-1)))
+   AbiUIntType n -> AbiUInt n <$> genUInt n
+   AbiIntType n -> do
+     x <- genUInt n
+     pure $ AbiInt n (signedWord (x - 2^(n-1)))
    AbiAddressType ->
-     (\(AbiUInt _ x) -> AbiAddress (fromIntegral x)) <$> genUInt 20
+     AbiAddress . fromIntegral <$> genUInt 20
    AbiBoolType ->
      elements [AbiBool False, AbiBool True]
    AbiBytesType n ->
@@ -430,7 +431,8 @@ genAbiValue = \case
    AbiTupleType ts ->
      AbiTuple <$> mapM genAbiValue ts
   where
-    genUInt n = AbiUInt n <$> arbitraryIntegralWithMax (2^n-1)
+    genUInt :: Int -> Gen Word256
+    genUInt n = arbitraryIntegralWithMax (2^n-1) :: Gen Word256
 
 instance Arbitrary AbiType where
   arbitrary = oneof

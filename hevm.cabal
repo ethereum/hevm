@@ -2,7 +2,7 @@ cabal-version: 3.0
 name:
   hevm
 version:
-  0.50.0
+  0.50.2
 synopsis:
   Ethereum virtual machine evaluator
 description:
@@ -22,9 +22,6 @@ category:
   Ethereum
 build-type:
   Simple
-data-files:
-  run-blockchain-tests
-  run-consensus-tests
 extra-source-files:
   CHANGELOG.md
   bench/contracts/erc20.sol
@@ -44,36 +41,35 @@ extra-source-files:
   test/contracts/fail/dsProveFail.sol
   test/contracts/fail/invariantFail.sol
 
+flag ci
+  description: Sets flags for compilation in CI
+  default:     False
+  manual:      True
+
+flag devel
+  description: Sets flag for compilation during development
+  default:     False
+  manual:      True
+
 source-repository head
   type:     git
   location: https://github.com/ethereum/hevm.git
 
 common shared
-  default-language:
-    Haskell2010
+  if flag(ci)
+    ghc-options: -Werror
+  if flag(devel)
+    ghc-options: -j
+  default-language: GHC2021
   default-extensions:
+    DuplicateRecordFields
     LambdaCase
+    NoFieldSelectors
+    OverloadedRecordDot
     OverloadedStrings
     RecordWildCards
     TypeFamilies
     ViewPatterns
-    -- GHC2021 default extensions, remove me when GHC is updated to 9.2
-    BangPatterns
-    ConstraintKinds
-    DeriveDataTypeable
-    DeriveFunctor
-    DeriveGeneric
-    DoAndIfThenElse
-    EmptyDataDecls
-    FlexibleContexts
-    FlexibleInstances
-    ForeignFunctionInterface
-    GeneralizedNewtypeDeriving
-    PolyKinds
-    RankNTypes
-    ScopedTypeVariables
-    StandaloneDeriving
-    TypeOperators
 
 library
   import: shared
@@ -90,7 +86,6 @@ library
     EVM.Exec,
     EVM.Facts,
     EVM.Facts.Git,
-    EVM.Flatten,
     EVM.Format,
     EVM.Fetch,
     EVM.FeeSchedule,
@@ -111,13 +106,14 @@ library
     EVM.TTYCenteredList,
     EVM.Types,
     EVM.UnitTest,
-    EVM.VMTest
   other-modules:
     Paths_hevm
   autogen-modules:
     Paths_hevm
-  ghc-options:
-    -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
+  if flag(devel)
+    ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans -j
+  else
+    ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
   extra-libraries:
     secp256k1, ff
   if os(linux)
@@ -135,12 +131,12 @@ library
     Decimal                           >= 0.5.1 && < 0.6,
     containers                        >= 0.6.0 && < 0.7,
     deepseq                           >= 1.4.4 && < 1.5,
-    time                              >= 1.8.0 && < 1.11,
+    time                              >= 1.11.1.1 && < 1.12,
     transformers                      >= 0.5.6 && < 0.6,
     tree-view                         >= 0.5 && < 0.6,
     abstract-par                      >= 0.3.3 && < 0.4,
     aeson                             >= 2.0.0 && < 2.1,
-    bytestring                        >= 0.10.8 && < 0.11,
+    bytestring                        >= 0.11.3.1 && < 0.12,
     scientific                        >= 0.3.6 && < 0.4,
     binary                            >= 0.8.6 && < 0.9,
     text                              >= 1.2.3 && < 1.3,
@@ -148,22 +144,21 @@ library
     vector                            >= 0.12.1 && < 0.13,
     ansi-wl-pprint                    >= 0.6.9 && < 0.7,
     base16-bytestring                 >= 1.0.0 && < 2.0,
-    brick                             >= 0.68 && < 0.69,
+    brick                             >= 1.4 && < 1.5,
     megaparsec                        >= 9.0.0 && < 10.0,
     mtl                               >= 2.2.2 && < 2.3,
     directory                         >= 1.3.3 && < 1.4,
     filepath                          >= 1.4.2 && < 1.5,
-    vty                               >= 5.25.1 && < 5.34,
+    vty                               >= 5.37 && < 5.38,
     cereal                            >= 0.5.8 && < 0.6,
-    cryptonite                        >= 0.27 && <= 0.29,
+    cryptonite                        >= 0.30 && < 0.31,
     memory                            >= 0.16.0 && < 0.20,
     data-dword                        >= 0.3.1 && < 0.4,
-    fgl                               >= 5.7.0 && < 5.8,
     free                              >= 5.1.3 && < 5.2,
     haskeline                         >= 0.8.0 && < 0.9,
     process                           >= 1.6.5 && < 1.7,
-    lens                              >= 5.0.0 && < 5.1,
-    lens-aeson                        >= 1.0.2 && < 1.2,
+    lens                              >= 5.1.1 && < 5.2,
+    lens-aeson                        >= 1.2.2 && < 1.3,
     monad-par                         >= 0.3.5 && < 0.4,
     async                             >= 2.2.4 && < 2.3,
     multiset                          >= 0.3.4 && < 0.4,
@@ -172,8 +167,6 @@ library
     quickcheck-text                   >= 0.1.2 && < 0.2,
     restless-git                      >= 0.7 && < 0.8,
     rosezipper                        >= 0.2 && < 0.3,
-    s-cargot                          >= 0.1.4 && < 0.2,
-    semver-range                      >= 0.2.7 && < 0.3,
     temporary                         >= 1.3 && < 1.4,
     witherable                        >= 0.3.5 && < 0.5,
     wreq                              >= 0.5.3 && < 0.6,
@@ -184,7 +177,8 @@ library
     smt2-parser                       >= 0.1.0.1,
     word-wrap                         >= 0.5 && < 0.6,
     spool                             >= 0.1 && < 0.2,
-    parsec                            >= 3.1.14.0 && < 3.1.15
+    stm                               >= 2.5.0 && < 2.6.0,
+    spawn                             >= 0.3 && < 0.4
   hs-source-dirs:
     src
 
@@ -194,8 +188,10 @@ executable hevm
     hevm-cli
   main-is:
     hevm-cli.hs
-  ghc-options:
-    -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
+  if flag(devel)
+    ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans -j
+  else
+    ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
   other-modules:
     Paths_hevm
   if os(darwin)
@@ -234,14 +230,18 @@ executable hevm
     text,
     unordered-containers,
     vector,
-    vty
+    vty,
+    stm,
+    spawn
 
 --- Test Helpers ---
 
 common test-base
   import: shared
-  ghc-options:
-    -Wall -Wno-unticked-promoted-constructors -Wno-orphans
+  if flag (devel)
+    ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans -j
+  else
+    ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans
   hs-source-dirs:
     test
   extra-libraries:
@@ -254,12 +254,15 @@ common test-base
     HUnit >= 1.6,
     QuickCheck,
     quickcheck-instances,
+    aeson,
     base,
     base16-bytestring,
     binary,
     containers,
     directory,
     bytestring,
+    filemanip,
+    filepath,
     here,
     hevm,
     lens,
@@ -278,6 +281,9 @@ common test-base
     array,
     vector,
     tasty-bench,
+    stm >= 2.5.0,
+    spawn >= 0.3,
+    witherable,
     smt2-parser >= 0.1.0.1
 
 library test-utils
@@ -291,10 +297,14 @@ common test-common
     test-base
   build-depends:
     test-utils
+  other-modules:
+    EVM.TestUtils
   if os(darwin)
-     extra-libraries: c++
+    extra-libraries: c++
+    -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
+    ld-options: -Wl,-keep_dwarf_unwind
   else
-     extra-libraries: stdc++
+    extra-libraries: stdc++
 
 --- Test Suites ---
 
@@ -315,6 +325,14 @@ test-suite rpc-tests
     exitcode-stdio-1.0
   main-is:
     rpc.hs
+
+test-suite ethereum-tests
+  import:
+    test-common
+  type:
+    exitcode-stdio-1.0
+  main-is:
+    BlockchainTests.hs
 
 --- Benchmarks ---
 

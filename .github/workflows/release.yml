@@ -2,7 +2,7 @@ name: "Release"
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'release/[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
   linuxRelease:
@@ -28,12 +28,12 @@ jobs:
       - name: prepare hackage artifacts
         run: |
           nix-shell --command "cabal sdist --builddir=${{ runner.temp }}/packages"
-          nix-shell --command "cabal haddock --builddir=${{ runner.temp }}/docs --haddock-for-hackage --haddock-option=--hyperlinked-source"
+          nix-shell --command "cabal haddock lib:hevm --builddir=${{ runner.temp }}/docs --haddock-for-hackage --haddock-option=--hyperlinked-source"
       - name: publish to hackage
         uses: haskell-actions/hackage-publish@v1
         with:
           hackageToken: ${{ secrets.HACKAGE_AUTH_TOKEN }}
           packagesPath: ${{ runner.temp }}/packages/sdist
           docsPath: ${{ runner.temp }}/docs
-          publish: false
+          publish: true
 

@@ -23,15 +23,14 @@ import Data.Containers.ListUtils (nubOrd)
 import Language.SMT2.Parser (getValueRes, parseCommentFreeFileMsg)
 import Language.SMT2.Syntax (SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
 import Data.Word
-import Numeric (readHex)
+import Numeric (readHex, readBin)
 import Data.ByteString (ByteString)
-import Data.Maybe (fromMaybe)
 
 import qualified Data.ByteString as BS
 import qualified Data.List as List
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.String.Here
-import Data.Maybe
+import Data.Maybe (fromMaybe, fromJust)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Text.Lazy (Text)
@@ -79,7 +78,7 @@ data SMTCex = SMTCex
   deriving (Eq, Show)
 
 getVar :: EVM.SMT.SMTCex -> TS.Text -> W256
-getVar cex name = fromJust $ Map.lookup (Var name) (vars cex)
+getVar cex name = fromJust $ Map.lookup (Var name) cex.vars
 
 data SMT2 = SMT2 [Builder] CexVars
   deriving (Eq, Show)
@@ -566,6 +565,14 @@ exprToSMT = \case
         bLift = "(concat (_ bv0 256) " <> bExp <> ")"
         cLift = "(concat (_ bv0 256) " <> cExp <> ")"
     in  "((_ extract 255 0) (ite (= " <> cExp <> " (_ bv0 256)) (_ bv0 512) (bvurem (bvmul " <> aLift `sp` bLift <> ")" <> cLift <> ")))"
+  AddMod a b c ->
+    let aExp = exprToSMT a
+        bExp = exprToSMT b
+        cExp = exprToSMT c
+        aLift = "(concat (_ bv0 256) " <> aExp <> ")"
+        bLift = "(concat (_ bv0 256) " <> bExp <> ")"
+        cLift = "(concat (_ bv0 256) " <> cExp <> ")"
+    in  "((_ extract 255 0) (ite (= " <> cExp <> " (_ bv0 256)) (_ bv0 512) (bvurem (bvadd " <> aLift `sp` bLift <> ")" <> cLift <> ")))"
   EqByte a b ->
     let cond = op2 "=" a b in
     "(ite " <> cond `sp` one `sp` zero <> ")"
@@ -785,10 +792,10 @@ parseFrameCtx name = case TS.unpack name of
   t -> error $ "Internal Error: cannot parse " <> t <> " into an Expr"
 
 getVars :: (TS.Text -> Expr EWord) -> SolverInstance -> [TS.Text] -> IO (Map (Expr EWord) W256)
-getVars parseFn inst names = Map.mapKeys parseFn <$> foldM getVar mempty names
+getVars parseFn inst names = Map.mapKeys parseFn <$> foldM getOne mempty names
   where
-    getVar :: Map TS.Text W256 -> TS.Text -> IO (Map TS.Text W256)
-    getVar acc name = do
+    getOne :: Map TS.Text W256 -> TS.Text -> IO (Map TS.Text W256)
+    getOne acc name = do
       raw <- getValue inst (T.fromStrict name)
       let
         parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
@@ -890,6 +897,7 @@ getBufs inst names = foldM getBuf mempty names
 
 parseSC :: (Num a, Eq a) => SpecConstant -> a
 parseSC (SCHexadecimal a) = fst . head . Numeric.readHex . T.unpack . T.fromStrict $ a
+parseSC (SCBinary a) = fst . head . Numeric.readBin . T.unpack . T.fromStrict $ a
 parseSC sc = error $ "Internal Error: cannot parse: " <> show sc
 
 withSolvers :: Solver -> Natural -> Maybe Natural -> (SolverGroup -> IO a) -> IO a
@@ -928,10 +936,10 @@ withSolvers solver count timeout cont = do
           sat <- sendLine inst "(check-sat)"
           res <- case sat of
             "sat" -> do
-              calldatamodels <- getVars parseVar inst (fmap T.toStrict $ calldataV cexvars)
-              buffermodels <- getBufs inst (fmap T.toStrict $ buffersV cexvars)
-              blockctxmodels <- getVars parseBlockCtx inst (fmap T.toStrict $ blockContextV cexvars)
-              txctxmodels <- getVars parseFrameCtx inst (fmap T.toStrict $ txContextV cexvars)
+              calldatamodels <- getVars parseVar inst (fmap T.toStrict cexvars.calldataV)
+              buffermodels <- getBufs inst (fmap T.toStrict cexvars.buffersV)
+              blockctxmodels <- getVars parseBlockCtx inst (fmap T.toStrict cexvars.blockContextV)
+              txctxmodels <- getVars parseFrameCtx inst (fmap T.toStrict cexvars.txContextV)
               pure $ Sat $ SMTCex
                 { vars = calldatamodels
                 , buffers = buffermodels
