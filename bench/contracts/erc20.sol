@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-
 contract ERC20 {
   // --- ERC20 Data ---
   string  public constant name     = "TOKEN";
