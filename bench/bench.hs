@@ -47,7 +47,7 @@ mkbench c name iters counts = localOption WallTime $ env c (bgroup name . bmarks
 
 main :: IO ()
 main = defaultMain
-  [ mkbench erc20 "erc20" Nothing [2, 4, 8, 16]
+  [ mkbench erc20 "erc20" Nothing [1, 2, 4, 8, 16]
   , mkbench (pure vat) "vat" Nothing [4]
   , mkbench (pure deposit) "deposit" (Just 32) [4]
   , mkbench (pure uniV2Pair) "uniV2" (Just 10) [4]
