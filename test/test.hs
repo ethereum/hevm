@@ -655,7 +655,6 @@ tests = testGroup "hevm"
         putStrLn "Require works as expected"
      ,
      testCase "ITE-with-bitwise-AND" $ do
-        --- using ignore to suppress huge output
        Just c <- solcRuntime "C"
          [i|
          contract C {
@@ -676,7 +675,6 @@ tests = testGroup "hevm"
        putStrLn "expected counterexample found"
      ,
      testCase "ITE-with-bitwise-OR" $ do
-        --- using ignore to suppress huge output
        Just c <- solcRuntime "C"
          [i|
          contract C {
@@ -1618,8 +1616,7 @@ tests = testGroup "hevm"
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        ignoreTest $ testCase "keccak soundness" $ do
-        --- using ignore to suppress huge output
+        testCase "keccak soundness" $ do
           Just c <- solcRuntime "C"
             [i|
               contract C {
