@@ -350,7 +350,7 @@ assert cmd = do
       -- this is way larger than would ever be allowed by the gas limit
       -- and avoids spurious counterexamples during abi decoding
       -- TODO: can we encode calldata as an array with a smaller length?
-      , [Expr.bufLength (AbstractBuf "txtdata") .< (Lit (2 ^ (64 :: Integer)))]
+      , [Expr.bufLength (AbstractBuf "txdata") .< (Lit (2 ^ (64 :: Integer)))]
       )
 
     -- fully concrete calldata
