@@ -210,7 +210,7 @@ Available options:
                            point
   --solver TEXT            Used SMT solver: z3 (default) or cvc5
   --smtdebug               Print smt queries sent to the solver
-  --assertions [WORD256]   Comma seperated list of solc panic codes to check for
+  --assertions [WORD256]   Comma separated list of solc panic codes to check for
                            (default: everything except arithmetic overflow)
   --ask-smt-iterations INTEGER
                            Number of times we may revisit a particular branching
@@ -225,7 +225,7 @@ the predefined solc assertion codes defined
 <a href="https://docs.soliditylang.org/en/latest/control-structures.html#panic-via-assert-and-error-via-require">here</a>.</p>
 <p>By default hevm ignores assertion violations that result from arithmetic overflow (<code>Panic(0x11)</code>),
 although this behaviour can be customised via the <code>--assertions</code> flag. For example, the following
-will return counterexmaples for arithmetic overflow (<code>0x11</code>) and user defined assertions (<code>0x01</code>):</p>
+will return counterexamples for arithmetic overflow (<code>0x11</code>) and user defined assertions (<code>0x01</code>):</p>
 <pre><code>hevm symbolic --code $CODE --assertions '[0x01, 0x11]'
 </code></pre>
 <p><code>--debug</code> enters an interactive debugger where the user can navigate the full execution space.</p>
@@ -257,7 +257,7 @@ all branches in the program (without querying the smt solver to check if they ar
 Once the full execution tree has been explored, the postcondition is checked against all leaves, and
 the solver is invoked to check reachability for branches where a postcondition violation could
 occur. While our tests have shown this approach to be significantly faster, when applied without
-limits it would always result in infitie exploration of code involving loops, so after some
+limits it would always result in infinite exploration of code involving loops, so after some
 predefined number of iterations (controlled by the <code>--ask-smt-iterations</code> flag), the solver will be
 invoked to check whether a given loop branch is reachable. In cases where the number of loop
 iterations is known in advance, you may be able to speed up execution by setting this flag to an
@@ -401,7 +401,7 @@ Sets <code>msg.sender</code> to the specified <code>sender</code> for the next c
 <tr><td><code>DAPP_TEST_TIMESTAMP</code></td><td><code>0</code></td><td>The block timestamp. Will be set to the timestamp for the block at <code>DAPP_TEST_NUMBER</code> if rpc is enabled</td></tr>
 <tr><td><code>DAPP_TEST_GAS_LIMIT</code></td><td><code>0</code></td><td>The block gas limit to use</td></tr>
 <tr><td><code>DAPP_TEST_GAS_PRICE</code></td><td><code>0</code></td><td>The gas price to use</td></tr>
-<tr><td><code>DAPP_TEST_PREVRANDAO</code></td><td><code>0</code></td><td>The value for PREVRANDAO. Will be set to the value for the the block at <code>DAPP_TEST_NUMBER</code> if rpc is enabled</td></tr>
+<tr><td><code>DAPP_TEST_PREVRANDAO</code></td><td><code>0</code></td><td>The value for PREVRANDAO. Will be set to the value for the block at <code>DAPP_TEST_NUMBER</code> if rpc is enabled</td></tr>
 </tbody></table>
 </div><div style="break-before: page; page-break-before: always;"></div><h1 id="using-the-visual-debugger"><a class="header" href="#using-the-visual-debugger">Using the visual debugger</a></h1>
 <h2 id="key-bindings"><a class="header" href="#key-bindings">Key bindings</a></h2>
