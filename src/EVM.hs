@@ -11,7 +11,7 @@ import Prelude hiding (log, exponent, GT, LT)
 import Data.Text (unpack)
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import EVM.ABI
-import EVM.Types hiding (IllegalOverflow, Error)
+import EVM.Types hiding (IllegalOverflow, ExprError)
 import EVM.Solidity
 import EVM.Concrete (createAddress, create2Address)
 import EVM.Op
@@ -62,10 +62,10 @@ import Crypto.PubKey.ECC.Generate (generateQ)
 -- * Data types
 
 -- | EVM failure modes
-data Error
+data EVMError
   = BalanceTooLow W256 W256
-  | UnrecognizedOpcode Word8
-  | SelfDestruction
+  | InvalidOpcode Word8
+  | SelfDestruct
   | StackUnderrun
   | BadJumpDestination
   | Revert (Expr Buf)
@@ -84,14 +84,13 @@ data Error
   | forall a . UnexpectedSymbolicArg Int String [Expr a]
   | DeadPath
   | NotUnique (Expr EWord)
-  | SMTTimeout
   | FFI [AbiValue]
   | NonceOverflow
-deriving instance Show Error
+deriving instance Show EVMError
 
 -- | The possible result states of a VM
 data VMResult
-  = VMFailure Error -- ^ An operation failed
+  = VMFailure EVMError -- ^ An operation failed
   | VMSuccess (Expr Buf) -- ^ Reached STOP, RETURN, or end-of-code
 
 deriving instance Show VMResult
@@ -127,7 +126,7 @@ data TraceData
   = EventTrace (Expr EWord) (Expr Buf) [Expr EWord]
   | FrameTrace FrameContext
   | QueryTrace Query
-  | ErrorTrace Error
+  | ErrorTrace EVMError
   | EntryTrace Text
   | ReturnTrace (Expr Buf) FrameContext
   deriving (Show)
@@ -1340,7 +1339,7 @@ exec1 = do
             _ -> underrun
 
         xxx ->
-          vmError (UnrecognizedOpcode xxx)
+          vmError (EVM.InvalidOpcode xxx)
 
 transfer :: Addr -> Addr -> W256 -> EVM ()
 transfer xFrom xTo xValue =
@@ -2277,7 +2276,7 @@ resetState = do
 
 -- * VM error implementation
 
-vmError :: Error -> EVM ()
+vmError :: EVMError -> EVM ()
 vmError e = finishFrame (FrameErrored e)
 
 underrun :: EVM ()
@@ -2287,7 +2286,7 @@ underrun = vmError EVM.StackUnderrun
 data FrameResult
   = FrameReturned (Expr Buf) -- ^ STOP, RETURN, or no more code
   | FrameReverted (Expr Buf) -- ^ REVERT
-  | FrameErrored Error -- ^ Any other error
+  | FrameErrored EVMError -- ^ Any other error
   deriving Show
 
 -- | This function defines how to pop the current stack frame in either of

@@ -15,6 +15,7 @@ import Text.RE.TDFA.String
 import Text.RE.Replace
 import Data.Time
 import System.Environment
+import qualified Data.Word
 
 import Prelude hiding (fail, LT, GT)
 
@@ -22,18 +23,19 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Hex
 import Data.Maybe
 import Data.Typeable
-import Data.List (elemIndex)
+import Data.List (elemIndex, sort)
 import Data.DoubleWord
 import Test.Tasty
 import Test.Tasty.QuickCheck hiding (Failure)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()
+import Test.QuickCheck (elements)
 import Test.Tasty.HUnit
 import Test.Tasty.Runners hiding (Failure)
 import Test.Tasty.ExpectedFailure
 
-import Control.Monad.State.Strict (execState, runState)
+import Control.Monad.State.Strict (execState, runState, evalStateT)
 import Control.Lens hiding (List, pre, (.>), re)
 
 import qualified Data.Vector as Vector
@@ -45,6 +47,8 @@ import Data.Binary.Get (runGetOrFail)
 
 import EVM hiding (Query, allowFFI)
 import EVM.SymExec
+import EVM.Assembler
+import EVM.Op
 import EVM.ABI
 import EVM.Exec
 import qualified EVM.Patricia as Patricia
@@ -54,14 +58,23 @@ import EVM.Solidity
 import EVM.Types
 import EVM.Traversals
 import EVM.SMT hiding (one)
+import EVM.Concrete (createAddress)
+import qualified EVM.FeeSchedule as FeeSchedule
 import qualified EVM.Expr as Expr
 import qualified Data.Text as T
+import qualified EVM.Stepper as Stepper
+import qualified EVM.Fetch as Fetch
 import Data.List (isSubsequenceOf)
+import Data.Either (isLeft, isRight)
 import EVM.TestUtils
 import GHC.Conc (getNumProcessors)
 
 main :: IO ()
 main = defaultMain tests
+
+toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
+toW8fromLitB (LitByte a) = a
+toW8fromLitB _ = error "nope"
 
 -- | run a subset of tests in the repl. p is a tasty pattern:
 -- https://github.com/UnkindPartition/tasty/tree/ee6fe7136fbcc6312da51d7f1b396e1a2d16b98a#patterns
@@ -88,6 +101,36 @@ tests = testGroup "hevm"
         (SLoad (Lit 0x0) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])])))
         (Expr.readStorage' (Lit 0x0) (Lit 0x0)
           (SStore (Lit 0xacab) (Lit 0xdead) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])]))))
+    ]
+  -- These fuzz the system via generating contracts via QuickCheck. Crashes can
+  -- be observed, errors, etc. We also run the results via Solidity and observe
+  -- the return value to be the same
+  , testGroup "contract-quickcheck"
+    [ testProperty "random-contract-with-symbolic-call" $ \(expr :: OpContract) -> ioProperty $ do
+        expr2 <- fixContractJumps expr
+        putStrLn $ "Contract: " <> (show expr2)
+        let lits = assemble . getOpData $ expr2
+            w8s = toW8fromLitB <$> lits
+        res <- withSolvers Z3 1 Nothing $ (\s ->
+              checkAssert s defaultPanicCodes (BS.pack $ Vector.toList w8s) Nothing [] debugVeriOpts)
+        if isLeft res then do
+             putStrLn $ "Found issue: " <> (show $ getLeft res)
+          else do
+            putStrLn $ "result: " <> (show res)
+    -- generate contract without SLoad/STore or any external calls. Call with
+    -- value. Observe return value. Run against geth. Compare.
+    , testProperty "random-contract-no-storage-no-extcalls" $ \(expr :: OpContract) -> ioProperty $ do
+        let exprNoExt = removeStorageExtcalls expr
+        expr2 <- fixContractJumps exprNoExt
+        putStrLn $ "Contract: " <> (show expr2)
+        let lits = assemble . getOpData $ expr2
+            w8s = toW8fromLitB <$> lits
+        res <- withSolvers Z3 1 Nothing $ (\s ->
+              checkAssert s defaultPanicCodes (BS.pack $ Vector.toList w8s) Nothing [] debugVeriOpts)
+        if isLeft res then do
+             putStrLn $ "Found issue: " <> (show $ getLeft res)
+          else do
+            putStrLn $ "result: " <> (show res)
     ]
   -- These tests fuzz the simplifier by generating a random expression,
   -- applying some simplification rules, and then using the smt encoding to
@@ -556,12 +599,12 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) [] defaultVeriOpts
+        Right (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) [] defaultVeriOpts
         assertBool "Access must be beyond element 2" $ (getVar ctr "arg1") > 1
         putStrLn "expected counterexample found"
       ,
       -- TODO the system currently does not allow for symbolic array size allocation
-      expectFail $ testCase "alloc-too-much" $ do
+      testCase "alloc-too-much" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
@@ -2119,7 +2162,45 @@ checkEquiv l r = withSolvers Z3 1 (Just 100) $ \solvers -> do
          Sat _ -> False
          Error _ -> False
 
+-- | Takes a runtime code and calls it with the provided calldata
+runCode :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe (Expr Buf))
+runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
+  res <- evalStateT (Stepper.interpret (Fetch.oracle solvers rpcinfo) Stepper.execFully) (vmForRuntimeCode code' calldata')
+  pure $ case res of
+    Left _ -> Nothing
+    Right b -> Just b
 
+vmForRuntimeCode :: ByteString -> Expr Buf -> VM
+vmForRuntimeCode runtimecode calldata' =
+  (makeVm $ VMOpts
+    { vmoptContract = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
+    , vmoptCalldata = mempty
+    , vmoptValue = (Lit 0)
+    , vmoptStorageBase = Concrete
+    , vmoptAddress = createAddress ethrunAddress 1
+    , vmoptCaller = Expr.litAddr ethrunAddress
+    , vmoptOrigin = ethrunAddress
+    , vmoptCoinbase = 0
+    , vmoptNumber = 0
+    , vmoptTimestamp = (Lit 0)
+    , vmoptBlockGaslimit = 0
+    , vmoptGasprice = 0
+    , vmoptPrevRandao = 42069
+    , vmoptGas = 0xffffffffffffffff
+    , vmoptGaslimit = 0xffffffffffffffff
+    , vmoptBaseFee = 0
+    , vmoptPriorityFee = 0
+    , vmoptMaxCodeSize = 0xffffffff
+    , vmoptSchedule = FeeSchedule.berlin
+    , vmoptChainId = 1
+    , vmoptCreate = False
+    , vmoptTxAccessList = mempty
+    , vmoptAllowFFI = False
+    }) & set (env . contracts . at ethrunAddress)
+             (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty))))
+       & set (state . calldata) calldata'
+
+-- | Takes a creation code and some calldata, runs the creation code, and calls the resulting contract with the provided calldata
 runSimpleVM :: ByteString -> ByteString -> Maybe ByteString
 runSimpleVM x ins = case loadVM x of
                       Nothing -> Nothing
@@ -2128,6 +2209,7 @@ runSimpleVM x ins = case loadVM x of
                             (VMSuccess (ConcreteBuf bs), _) -> Just bs
                             _ -> Nothing
 
+-- | Takes a creation code and returns a vm with the result of executing the creation code
 loadVM :: ByteString -> Maybe VM
 loadVM x =
     case runState exec (vmForEthrunCreation x) of
@@ -2250,6 +2332,15 @@ instance Arbitrary (Expr Buf) where
 instance Arbitrary (Expr End) where
   arbitrary = sized genEnd
 
+data OpContract = OpContract [Op]
+  deriving (Show)
+
+getOpData :: OpContract-> [Op]
+getOpData (OpContract x) = x
+
+instance Arbitrary OpContract where
+  arbitrary = fmap OpContract (sized genContract)
+
 newtype LitOnly a = LitOnly a
   deriving (Show, Eq)
 
@@ -2286,9 +2377,9 @@ genName = fmap (T.pack . ("esc_" <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
- [ pure $ Failure [] Invalid
+ [ pure $ Failure [] EVM.Types.InvalidOpcode
  , pure $ Failure [] EVM.Types.IllegalOverflow
- , pure $ Failure [] SelfDestruct
+ , pure $ Failure [] EVM.Types.SelfDestruct
  ]
 genEnd sz = oneof
  [ fmap (EVM.Types.Revert []) subBuf
@@ -2300,6 +2391,198 @@ genEnd sz = oneof
    subStore = genStorage (sz `div` 2)
    subWord = defaultWord (sz `div` 2)
    subEnd = genEnd (sz `div` 2)
+
+genContract :: Int -> Gen [Op]
+genContract n = vectorOf n genOne
+  where
+  genOne :: Gen Op
+  genOne = frequency [
+    -- math ops
+    (200, frequency [
+        (1, pure OpAdd)
+      , (1, pure OpMul)
+      , (1, pure OpSub)
+      , (1, pure OpDiv)
+      , (1, pure OpSdiv)
+      , (1, pure OpMod)
+      , (1, pure OpSmod)
+      , (1, pure OpAddmod)
+      , (1, pure OpMulmod)
+      , (1, pure OpExp)
+      , (1, pure OpSignextend)
+      , (1, pure OpLt)
+      , (1, pure OpGt)
+      , (1, pure OpSlt)
+      , (1, pure OpSgt)
+      , (1, pure OpSha3)
+    ])
+    -- Comparison & binary ops
+    , (20, frequency [
+        (1, pure OpEq)
+      , (1, pure OpIszero)
+      , (1, pure OpAnd)
+      , (1, pure OpOr)
+      , (1, pure OpXor)
+      , (1, pure OpNot)
+      , (1, pure OpByte)
+      , (1, pure OpShl)
+      , (1, pure OpShr)
+      , (1, pure OpSar)
+    ])
+    -- calldata
+    , (10, pure OpCalldatacopy)
+    -- Get some info
+    , (100, frequency [
+        (10, pure OpAddress)
+      , (10, pure OpBalance)
+      , (10, pure OpOrigin)
+      , (10, pure OpCaller)
+      , (10, pure OpCallvalue)
+      , (10, pure OpCalldatasize)
+      , (10, pure OpCodesize)
+      , (10, pure OpGasprice)
+      , (10, pure OpReturndatasize)
+      , (10, pure OpReturndatacopy)
+      , (10, pure OpExtcodehash)
+      , (10, pure OpBlockhash)
+      , (10, pure OpCoinbase)
+      , (10, pure OpTimestamp)
+      , (10, pure OpNumber)
+      , (10, pure OpPrevRandao)
+      , (10, pure OpGaslimit)
+      , (10, pure OpChainid)
+      , (10, pure OpSelfbalance)
+      , (10, pure OpBaseFee)
+      , (10, pure OpPc)
+      , (10, pure OpMsize)
+      , (10, pure OpGas)
+      , (10, pure OpExtcodesize)
+      , (10, pure OpCodecopy)
+      , (10, pure OpExtcodecopy)
+    ])
+    -- memory manip
+    , (10, frequency [
+        (100, pure OpMload)
+      , (1, pure OpMstore)
+      , (1, pure OpMstore8)
+    ])
+    -- storage manip
+    , (1, frequency [
+        (1, pure OpSload)
+      , (4, pure OpSstore)
+    ])
+    -- Jumping around
+    , (70, frequency [
+          (1, pure OpJump)
+        , (10, pure OpJumpi)
+    ])
+    , (400, pure OpJumpdest)
+    -- calling out
+    , (1, frequency [
+        (1, pure OpStaticcall)
+      , (1, pure OpCall)
+      , (1, pure OpCallcode)
+      , (1, pure OpDelegatecall)
+      , (1, pure OpCreate)
+      , (1, pure OpCreate2)
+      , (1, pure OpSelfdestruct)
+    ])
+    -- manipulate stack
+    , (8800, frequency [
+        (1, pure OpPop)
+      , (30, pure OpCalldataload)
+      , (400, do
+          -- x <- arbitrary
+          x <- chooseInt (1, 10)
+          pure $ OpPush (Lit (fromIntegral x)))
+      , (1, do
+          x <- chooseInt (1, 10)
+          pure $ OpDup (fromIntegral x))
+      , (1, do
+          x <- chooseInt (1, 10)
+          pure $ OpSwap (fromIntegral x))
+    ])
+      -- End states
+    , (100, frequency [
+        (1, pure OpStop)
+      , (5, pure OpReturn)
+      , (10, pure OpRevert)
+    ])
+      -- , (1, do
+      --     x <- chooseInt (1, 10)
+      --     pure $ OpLog x)
+    -- , (1, OpUnknown Word8)
+    ]
+randItem :: [a] -> IO a
+randItem = generate . Test.QuickCheck.elements
+
+
+removeStorageExtcalls :: OpContract -> OpContract
+removeStorageExtcalls (OpContract ops) = OpContract (filter (noStorageNoExtcalls) ops)
+  where
+    noStorageNoExtcalls :: Op -> Bool
+    noStorageNoExtcalls o = case o of
+                               -- Storage
+                               OpSload -> False
+                               OpSstore -> False
+                               -- Extrenal info functions
+                               OpExtcodecopy -> False
+                               OpExtcodehash -> False
+                               OpExtcodesize -> False
+                               OpAddress -> False
+                               OpOrigin -> False
+                               OpCaller -> False
+                               OpCoinbase -> False
+                               OpCreate -> False
+                               OpCreate2 -> False
+                               -- External call functions
+                               OpDelegatecall -> False
+                               OpStaticcall -> False
+                               OpCall -> False
+                               OpCallcode -> False
+                               -- Not interesting
+                               OpBalance -> False
+                               OpSelfdestruct -> False
+                               _ -> True
+
+getJumpDests :: [Op] -> [Int]
+getJumpDests ops = go ops 0 []
+    where
+      go :: [Op] -> Int -> [Int] -> [Int]
+      go [] _ dests = dests
+      go (a:ax) pos dests = case a of
+                       OpJumpdest -> go ax (pos+1) (pos:dests)
+                       OpPush _ -> go ax (pos+33) dests
+                       -- We'll fix these up later to add a Push in between, hence they are 34 bytes
+                       OpJump -> go ax (pos+34) dests
+                       OpJumpi -> go ax (pos+34) dests
+                       -- everything else is 1 byte
+                       _ -> go ax (pos+1) dests
+
+fixContractJumps :: OpContract -> IO OpContract
+fixContractJumps (OpContract ops) = do
+  let addedOps = ops++[OpJumpdest]
+      jumpDests = getJumpDests addedOps
+      -- always end on an OpJumpdest so we don't have an issue with a "later" position
+      ops2 = fixup addedOps 0 []
+      -- original set of operations, the set of jumpDests NOW valid, current position, return value
+      fixup :: [Op] -> Int -> [Op] -> IO [Op]
+      fixup [] _ ret = pure ret
+      fixup (a:ax) pos ret = case a of
+        OpJumpi -> do
+          let filtDests = (filter (> pos) jumpDests)
+          putStrLn $ show (sort filtDests)
+          rndPos <- randItem filtDests
+          fixup ax (pos+34) (ret++[(OpPush (Lit (fromInteger (fromIntegral rndPos)))), (OpJumpi)])
+        OpJump -> do
+          let filtDests = (filter (> pos) jumpDests)
+          putStrLn $ show (sort filtDests)
+          rndPos <- randItem filtDests
+          fixup ax (pos+34) (ret++[(OpPush (Lit (fromInteger (fromIntegral rndPos)))), (OpJump)])
+        myop@(OpPush _) -> fixup ax (pos+33) (ret++[myop])
+        myop -> fixup ax (pos+1) (ret++[myop])
+
+  liftM OpContract ops2
 
 genWord :: Int -> Int -> Gen (Expr EWord)
 genWord litFreq 0 = frequency

@@ -33,7 +33,7 @@ import qualified EVM.Exec
 import Data.Text (Text)
 import EVM.Types (Expr, EType(..))
 
-import EVM (EVM, VM, VMResult (VMFailure, VMSuccess), Error (Query, Choose), Query, Choose)
+import EVM (EVM, VM, VMResult (VMFailure, VMSuccess), EVMError (Query, Choose), Query, Choose)
 import qualified EVM
 
 import qualified EVM.Fetch as Fetch
@@ -83,7 +83,7 @@ evmIO :: StateT VM IO a -> Stepper a
 evmIO = singleton . IOAct
 
 -- | Run the VM until final result, resolving all queries
-execFully :: Stepper (Either Error (Expr Buf))
+execFully :: Stepper (Either EVMError (Expr Buf))
 execFully =
   exec >>= \case
     VMFailure (Query q) ->

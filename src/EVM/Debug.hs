@@ -1,9 +1,12 @@
+{-# Language DataKinds #-}
+
 module EVM.Debug where
 
 import EVM          (Contract, nonce, balance, bytecode, codehash)
 import EVM.Solidity (SrcMap, srcMapFile, srcMapOffset, srcMapLength, SourceCache, sourceFiles)
 import EVM.Types    (Addr)
 import EVM.Expr     (bufLength)
+import EVM.Op
 
 import Control.Arrow   (second)
 import Control.Lens
@@ -52,3 +55,9 @@ srcMapCode cache sm =
   fmap f $ cache ^? sourceFiles . ix (srcMapFile sm)
   where
     f (_, v) = ByteString.take (min 80 (srcMapLength sm)) (ByteString.drop (srcMapOffset sm) v)
+
+data OpContract = OpContract [Op]
+  deriving (Show)
+
+getOpData :: OpContract-> [Op]
+getOpData (OpContract x) = x

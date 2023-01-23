@@ -45,14 +45,10 @@ import Control.Concurrent.Spawn
 import GHC.Conc (getNumProcessors)
 import EVM.Format (indent, formatBinary)
 
-data ProofResult a b c = Qed a | Cex b | Timeout c
+data ProofResult a b c = Qed a | Cex b | SMTTimeout c | SMTError c String
   deriving (Show, Eq)
 type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End)
 type EquivResult = ProofResult () (SMTCex) ()
-
-isTimeout :: ProofResult a b c -> Bool
-isTimeout (Timeout _) = True
-isTimeout _ = False
 
 isCex :: ProofResult a b c -> Bool
 isCex (Cex _) = True
@@ -61,6 +57,16 @@ isCex _ = False
 isQed :: ProofResult a b c -> Bool
 isQed (Qed _) = True
 isQed _ = False
+
+sameCnstr :: ProofResult a b c -> ProofResult a b c -> Bool
+sameCnstr a e = checkCnstr a e
+  where
+    checkCnstr x y = case (x, y) of
+      (Qed _, Qed _) -> True
+      (Cex _, Cex _) -> True
+      (SMTTimeout _, SMTTimeout _) -> True
+      (SMTError {}, SMTError {}) -> True
+      _ -> False
 
 data VeriOpts = VeriOpts
   { simp :: Bool
@@ -357,15 +363,16 @@ runExpr = do
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
     Just (VMSuccess buf) -> Return asserts buf (view (env . EVM.storage) vm)
     Just (VMFailure e) -> case e of
-      UnrecognizedOpcode _ -> Failure asserts Invalid
-      SelfDestruction -> Failure asserts SelfDestruct
-      EVM.StackLimitExceeded -> Failure asserts EVM.Types.StackLimitExceeded
+      EVM.InvalidOpcode _ -> Failure asserts EVM.Types.InvalidOpcode
       EVM.IllegalOverflow -> Failure asserts EVM.Types.IllegalOverflow
-      EVM.Revert buf -> EVM.Types.Revert asserts buf
+      EVM.StackLimitExceeded -> Failure asserts EVM.Types.StackLimitExceeded
       EVM.InvalidMemoryAccess -> Failure asserts EVM.Types.InvalidMemoryAccess
       EVM.BadJumpDestination -> Failure asserts EVM.Types.BadJumpDestination
       EVM.StackUnderrun -> Failure asserts EVM.Types.StackUnderrun
-      e' -> Failure asserts $ EVM.Types.TmpErr (show e')
+      EVM.SelfDestruct -> Failure asserts EVM.Types.SelfDestruct
+      EVM.Revert buf -> EVM.Types.Revert asserts buf
+      -- Many other types of EVMError-s are allowed, all captured below as Failure + ExprError's WrappedEVMError
+      e' -> Failure asserts $ EVM.Types.WrappedEVMError (show e')
 
 -- | Converts a given top level expr into a list of final states and the associated path conditions for each state
 flattenExpr :: Expr End -> [([Prop], Expr End)]
@@ -376,7 +383,7 @@ flattenExpr = go []
       ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
       e@(Revert _ _) -> [(pcs, e)]
       e@(Return _ _ _) -> [(pcs, e)]
-      Failure _ (TmpErr s) -> error s
+      Failure _ (WrappedEVMError s) -> error s
       e@(Failure _ _) -> [(pcs, e)]
       GVar _ -> error "cannot flatten an Expr containing a GVar"
 

@@ -30,10 +30,10 @@ import Prelude hiding (Word)
 import qualified EVM
 import EVM.Dapp (DappInfo (..), dappSolcByHash, dappAbiMap, showTraceLocation, dappEventMap, dappErrorMap)
 import EVM.Dapp (DappContext (..), contextInfo, contextEnv)
-import EVM (VM, cheatCode, traceForest, traceData, Error (..))
+import EVM (VM, cheatCode, traceForest, traceData, EVMError (..))
 import EVM (Trace, TraceData (..), Query (..), FrameContext (..))
 import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..))
-import EVM.Types (Addr, ByteStringS(..), Error(..))
+import EVM.Types (Addr, ByteStringS(..), ExprError(..))
 import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..))
 import EVM.ABI (Indexed (NotIndexed), getAbiSeq)
 import EVM.ABI (parseTypeName, formatString)
@@ -371,16 +371,16 @@ contractNamePart x = Text.split (== ':') x !! 1
 contractPathPart :: Text -> Text
 contractPathPart x = Text.split (== ':') x !! 0
 
-prettyError :: EVM.Types.Error -> String
+prettyError :: ExprError -> String
 prettyError= \case
-  Invalid -> "Invalid Opcode"
+  EVM.Types.InvalidOpcode -> "Invalid Opcode"
   EVM.Types.IllegalOverflow -> "Illegal Overflow"
-  SelfDestruct -> "Self Destruct"
+  EVM.Types.SelfDestruct -> "Self Destruct"
   EVM.Types.StackLimitExceeded -> "Stack limit exceeded"
   EVM.Types.InvalidMemoryAccess -> "Invalid memory access"
   EVM.Types.BadJumpDestination -> "Bad jump destination"
   EVM.Types.StackUnderrun -> "Stack underrun"
-  TmpErr err -> "Temp error: " <> err
+  EVM.Types.WrappedEVMError err -> "Wrapped EVM Error: " <> err
 
 
 prettyvmresult :: (?context :: DappContext) => Expr End -> String

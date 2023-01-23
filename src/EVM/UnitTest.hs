@@ -123,6 +123,119 @@ defaultMaxCodeSize = 0xffffffff
 
 type ABIMethod = Text
 
+data VMTrace =
+  VMTrace
+  { pc      :: Int
+  , op      :: Int
+  , stack   :: [Word]
+  , memSize :: Int
+  , depth   :: Int
+  , gas     :: Word
+  } deriving (Generic, JSON.ToJSON)
+
+data VMTraceResult =
+  VMTraceResult
+  { output  :: String
+  , gasUsed :: Word
+  } deriving (Generic, JSON.ToJSON)
+
+getOp :: VM -> Word8
+getOp vm =
+  let i  = vm ^. state . EVM.pc
+      code' = vm ^. state . code
+      xs = case code' of
+        ConcreteBuffer xs' -> ConcreteBuffer (BS.drop i xs')
+        SymbolicBuffer xs' -> SymbolicBuffer (drop i xs')
+  in if len xs == 0 then 0
+  else case xs of
+       ConcreteBuffer b -> BS.index b 0
+       SymbolicBuffer b -> fromSized $ fromMaybe (error "unexpected symbolic code") (unliteral (b !! 0))
+
+vmtrace :: VM -> VMTrace
+vmtrace vm =
+  let
+    -- Convenience function to access parts of the current VM state.
+    -- Arcane type signature needed to avoid monomorphism restriction.
+    the :: (b -> VM -> Const a VM) -> ((a -> Const a a) -> b) -> a
+    the f g = view (f . g) vm
+    memsize = the state memorySize
+  in VMTrace { pc = the state EVM.pc
+             , op = num $ getOp vm
+             , gas = the state EVM.gas
+             , memSize = memsize
+             -- increment to match geth format
+             , depth = 1 + length (view frames vm)
+             -- reverse to match geth format
+             , stack = reverse $ forceLit <$> the state EVM.stack
+             }
+
+vmres :: VM -> VMTraceResult
+vmres vm =
+  let
+    gasUsed' = view (tx . txgaslimit) vm - view (state . EVM.gas) vm
+    res = case view result vm of
+      Just (VMSuccess out) -> forceBuffer out
+      Just (VMFailure (Revert out)) -> out
+      _ -> mempty
+  in VMTraceResult
+     -- more oddities to comply with geth
+     { output = drop 2 $ show $ ByteStringS res
+     , gasUsed = gasUsed'
+     }
+
+interpretWithTrace :: EVM.Fetch.Fetcher -> EVM.Stepper.Stepper a -> StateT VM IO a
+interpretWithTrace fetcher =
+  eval . Operational.view
+
+  where
+    eval
+      :: ProgramView EVM.Stepper.Action a
+      -> StateT VM IO a
+
+    eval (Return x) = do
+      vm <- get
+      liftIO $ B.putStrLn $ JSON.encode $ vmres vm
+      pure x
+
+    eval (action :>>= k) = do
+      vm <- get
+      case action of
+        EVM.Stepper.Run -> do
+          -- Have we reached the final result of this action?
+          use result >>= \case
+            Just _ -> do
+              -- Yes, proceed with the next action.
+              interpretWithTrace fetcher (k vm)
+            Nothing -> do
+              liftIO $ B.putStrLn $ JSON.encode $ vmtrace vm
+
+              -- No, keep performing the current action
+              State.state (runState exec1)
+              interpretWithTrace fetcher (EVM.Stepper.run >>= k)
+
+        -- Stepper wants to keep executing?
+        EVM.Stepper.Exec -> do
+          -- Have we reached the final result of this action?
+          use result >>= \case
+            Just r -> do
+              -- Yes, proceed with the next action.
+              interpretWithTrace fetcher (k r)
+            Nothing -> do
+              liftIO $ B.putStrLn $ JSON.encode $ vmtrace vm
+
+              -- No, keep performing the current action
+              State.state (runState exec1)
+              interpretWithTrace fetcher (EVM.Stepper.exec >>= k)
+        EVM.Stepper.Wait q ->
+          do m <- liftIO (fetcher q)
+             State.state (runState m) >> interpretWithTrace fetcher (k ())
+        EVM.Stepper.Ask _ ->
+          error "cannot make choices with this interpretWithTraceer"
+        EVM.Stepper.IOAct m ->
+          m >>= interpretWithTrace fetcher . k
+        EVM.Stepper.EVM m -> do
+          r <- State.state (runState m)
+          interpretWithTrace fetcher (k r)
 
 -- | Generate VeriOpts from UnitTestOptions
 makeVeriOpts :: UnitTestOptions -> VeriOpts
@@ -344,7 +457,7 @@ coverageReport dapp cov =
     allPositions :: Set (Text, Int)
     allPositions =
       ( Set.fromList
-      . mapMaybe (srcMapCodePos sources)
+      . mapMaybe (EVM.Debug.srcMapCodePos sources)
       . toList
       $ mconcat
         ( view dappSolcByName dapp
@@ -354,7 +467,7 @@ coverageReport dapp cov =
       )
 
     srcMapCov :: MultiSet (Text, Int)
-    srcMapCov = MultiSet.mapMaybe (srcMapCodePos sources) cov
+    srcMapCov = MultiSet.mapMaybe (EVM.Debug.srcMapCodePos sources) cov
 
     linesByName :: Map Text (Vector ByteString)
     linesByName =
