@@ -49,4 +49,4 @@ These environment variables can be used to control block parameters:
 | `DAPP_TEST_TIMESTAMP`  | `0`                                          | The block timestamp. Will be set to the timestamp for the block at `DAPP_TEST_NUMBER` if rpc is enabled       |
 | `DAPP_TEST_GAS_LIMIT`  | `0`                                          | The block gas limit to use                                                                                    |
 | `DAPP_TEST_GAS_PRICE`  | `0`                                          | The gas price to use                                                                                          |
-| `DAPP_TEST_PREVRANDAO` | `0`                                          | The value for PREVRANDAO. Will be set to the value for the the block at `DAPP_TEST_NUMBER` if rpc is enabled  |
+| `DAPP_TEST_PREVRANDAO` | `0`                                          | The value for PREVRANDAO. Will be set to the value for the block at `DAPP_TEST_NUMBER` if rpc is enabled  |
