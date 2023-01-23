@@ -768,12 +768,12 @@ parseFrameCtx name = case TS.unpack name of
   ('a':'d':'d':'r':'e':'s':'s':'_':frame) -> Address (read frame)
   t -> error $ "Internal Error: cannot parse " <> t <> " into an Expr"
 
-getVars :: (TS.Text -> Expr EWord) -> SolverInstance -> [TS.Text] -> IO (Map (Expr EWord) W256)
-getVars parseFn inst names = Map.mapKeys parseFn <$> foldM getOne mempty names
+getVars :: (TS.Text -> Expr EWord) -> (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr EWord) W256)
+getVars parseFn getVal names = Map.mapKeys parseFn <$> foldM getOne mempty names
   where
     getOne :: Map TS.Text W256 -> TS.Text -> IO (Map TS.Text W256)
     getOne acc name = do
-      raw <- getValue inst (T.fromStrict name)
+      raw <- getVal (T.fromStrict name)
       let
         parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
           Right (ResSpecific (valParsed :| [])) -> valParsed
@@ -788,9 +788,9 @@ getVars parseFn inst names = Map.mapKeys parseFn <$> foldM getOne mempty names
           r -> parseErr r
       pure $ Map.insert name val acc
 
-getStore :: SolverInstance -> [(Expr EWord, Expr EWord)] -> IO (Map W256 (Map W256 W256))
-getStore inst sreads = do
-  raw <- getValue inst "abstractStore"
+getStore :: (Text -> IO Text) -> [(Expr EWord, Expr EWord)] -> IO (Map W256 (Map W256 W256))
+getStore getVal sreads = do
+  raw <- getVal "abstractStore"
   let parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
                  Right (ResSpecific (valParsed :| [])) -> valParsed
                  r -> parseErr r
@@ -821,7 +821,7 @@ getStore inst sreads = do
     queryValue (Lit w) = pure w
     queryValue w = do
       let expr = toLazyText $ exprToSMT w
-      raw <- getValue inst expr
+      raw <- getVal expr
       case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
         Right (ResSpecific (valParsed :| [])) ->
           case valParsed of
@@ -878,12 +878,12 @@ interpret2DArray :: (Map Symbol Term) -> Term -> (W256 -> W256 -> W256)
 interpret2DArray = interpretNDArray interpret1DArray
 
 
-getBufs :: SolverInstance -> [TS.Text] -> IO (Map (Expr Buf) ByteString)
-getBufs inst names = foldM getBuf mempty names
+getBufs :: (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr Buf) ByteString)
+getBufs getVal names = foldM getBuf mempty names
   where
     getLength :: TS.Text -> IO Int
     getLength name = do
-      val <- getValue inst (T.fromStrict name <> "_length")
+      val <- getVal (T.fromStrict name <> "_length")
       len <- case parseCommentFreeFileMsg getValueRes (T.toStrict val) of
         Right (ResSpecific (parsed :| [])) -> case parsed of
           (TermQualIdentifier (Unqualified (IdSymbol symbol)), (TermSpecConstant sc))
@@ -908,7 +908,7 @@ getBufs inst names = foldM getBuf mempty names
       -- this buffer and then use that to produce a shorter counterexample (by
       -- replicating the constant byte up to the length).
       len <- getLength name
-      val <- getValue inst (T.fromStrict name)
+      val <- getVal (T.fromStrict name)
       buf <- case parseCommentFreeFileMsg getValueRes (T.toStrict val) of
         Right (ResSpecific (valParsed :| [])) -> case valParsed of
           (TermQualIdentifier (Unqualified (IdSymbol symbol)), term)
@@ -1003,11 +1003,11 @@ withSolvers solver count timeout cont = do
           sat <- sendLine inst "(check-sat)"
           res <- case sat of
             "sat" -> do
-              calldatamodels <- getVars parseVar inst (fmap T.toStrict cexvars.calldataV)
-              buffermodels <- getBufs inst (fmap T.toStrict cexvars.buffersV)
-              storagemodels <- getStore inst cexvars.storeReads
-              blockctxmodels <- getVars parseBlockCtx inst (fmap T.toStrict cexvars.blockContextV)
-              txctxmodels <- getVars parseFrameCtx inst (fmap T.toStrict cexvars.txContextV)
+              calldatamodels <- getVars parseVar (getValue inst) (fmap T.toStrict cexvars.calldataV)
+              buffermodels <- getBufs (getValue inst) (fmap T.toStrict cexvars.buffersV)
+              storagemodels <- getStore (getValue inst) cexvars.storeReads
+              blockctxmodels <- getVars parseBlockCtx (getValue inst) (fmap T.toStrict cexvars.blockContextV)
+              txctxmodels <- getVars parseFrameCtx (getValue inst) (fmap T.toStrict cexvars.txContextV)
               pure $ Sat $ SMTCex
                 { vars = calldatamodels
                 , buffers = buffermodels
