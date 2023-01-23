@@ -56,7 +56,7 @@ Available options:
                            point
   --solver TEXT            Used SMT solver: z3 (default) or cvc5
   --smtdebug               Print smt queries sent to the solver
-  --assertions [WORD256]   Comma seperated list of solc panic codes to check for
+  --assertions [WORD256]   Comma separated list of solc panic codes to check for
                            (default: everything except arithmetic overflow)
   --ask-smt-iterations INTEGER
                            Number of times we may revisit a particular branching
@@ -74,7 +74,7 @@ the predefined solc assertion codes defined
 
 By default hevm ignores assertion violations that result from arithmetic overflow (`Panic(0x11)`),
 although this behaviour can be customised via the `--assertions` flag. For example, the following
-will return counterexmaples for arithmetic overflow (`0x11`) and user defined assertions (`0x01`):
+will return counterexamples for arithmetic overflow (`0x11`) and user defined assertions (`0x01`):
 
 ```
 hevm symbolic --code $CODE --assertions '[0x01, 0x11]'
@@ -124,7 +124,7 @@ all branches in the program (without querying the smt solver to check if they ar
 Once the full execution tree has been explored, the postcondition is checked against all leaves, and
 the solver is invoked to check reachability for branches where a postcondition violation could
 occur. While our tests have shown this approach to be significantly faster, when applied without
-limits it would always result in infitie exploration of code involving loops, so after some
+limits it would always result in infinite exploration of code involving loops, so after some
 predefined number of iterations (controlled by the `--ask-smt-iterations` flag), the solver will be
 invoked to check whether a given loop branch is reachable. In cases where the number of loop
 iterations is known in advance, you may be able to speed up execution by setting this flag to an
