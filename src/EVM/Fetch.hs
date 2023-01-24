@@ -8,6 +8,7 @@ import Prelude hiding (Word)
 import EVM.ABI
 import EVM.Types    (Addr, W256, hexText, Expr(Lit), Expr(..), Prop(..), (.&&), (./=))
 import EVM.SMT
+import EVM.Solvers
 import EVM          (EVM, Contract, Block, initialContract, nonce, balance, external)
 import qualified EVM.FeeSchedule as FeeSchedule
 
