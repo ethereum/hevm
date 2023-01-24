@@ -10,12 +10,13 @@ import Data.ByteString (ByteString)
 import Data.Bits hiding (And, Xor)
 import System.Directory
 import GHC.Natural
-import Control.Monad
+-- import Control.Monad
 import Text.RE.TDFA.String
 import Text.RE.Replace
 import Data.Time
 import System.Environment
 import qualified Data.Word
+import GHC.Generics
 
 import Prelude hiding (fail, LT, GT)
 
@@ -34,9 +35,14 @@ import Test.QuickCheck (elements)
 import Test.Tasty.HUnit
 import Test.Tasty.Runners hiding (Failure)
 import Test.Tasty.ExpectedFailure
+-- import GHC.Utils.Json
+import qualified Data.Aeson           as JSON
 
-import Control.Monad.State.Strict (execState, runState, evalStateT)
+-- import qualified Control.Monad.Operational as Operational
+import Control.Monad.Operational (view, ProgramViewT(..), ProgramView)
+import Control.Monad.State.Strict (execState, runState, evalStateT, StateT, liftIO, liftM, liftM2, liftM3, liftM4, liftM5, forM_, when, unless)
 import Control.Lens hiding (List, pre, (.>), re)
+import qualified Control.Monad.State.Class as State
 
 import qualified Data.Vector as Vector
 import Data.String.Here
@@ -65,7 +71,6 @@ import qualified Data.Text as T
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 import Data.List (isSubsequenceOf)
-import Data.Either (isLeft, isRight)
 import EVM.TestUtils
 import GHC.Conc (getNumProcessors)
 
@@ -113,10 +118,7 @@ tests = testGroup "hevm"
             w8s = toW8fromLitB <$> lits
         res <- withSolvers Z3 1 Nothing $ (\s ->
               checkAssert s defaultPanicCodes (BS.pack $ Vector.toList w8s) Nothing [] debugVeriOpts)
-        if isLeft res then do
-             putStrLn $ "Found issue: " <> (show $ getLeft res)
-          else do
-            putStrLn $ "result: " <> (show res)
+        putStrLn $ "result: " <> (show res)
     -- generate contract without SLoad/STore or any external calls. Call with
     -- value. Observe return value. Run against geth. Compare.
     , testProperty "random-contract-no-storage-no-extcalls" $ \(expr :: OpContract) -> ioProperty $ do
@@ -127,10 +129,7 @@ tests = testGroup "hevm"
             w8s = toW8fromLitB <$> lits
         res <- withSolvers Z3 1 Nothing $ (\s ->
               checkAssert s defaultPanicCodes (BS.pack $ Vector.toList w8s) Nothing [] debugVeriOpts)
-        if isLeft res then do
-             putStrLn $ "Found issue: " <> (show $ getLeft res)
-          else do
-            putStrLn $ "result: " <> (show res)
+        putStrLn $ "result: " <> (show res)
     ]
   -- These tests fuzz the simplifier by generating a random expression,
   -- applying some simplification rules, and then using the smt encoding to
@@ -599,7 +598,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        Right (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) [] defaultVeriOpts
+        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) [] defaultVeriOpts
         assertBool "Access must be beyond element 2" $ (getVar ctr "arg1") > 1
         putStrLn "expected counterexample found"
       ,
@@ -1114,13 +1113,13 @@ tests = testGroup "hevm"
                                        [x', y'] -> (x', y')
                                        _ -> error "expected 2 args"
                         in (x .<= Expr.add x y)
-                           .&& view (state . callvalue) preVM .== Lit 0
+                           .&& Control.Lens.view (state . callvalue) preVM .== Lit 0
             post prestate leaf =
               let (x, y) = case getStaticAbiArgs 2 prestate of
                              [x', y'] -> (x', y')
                              _ -> error "expected 2 args"
               in case leaf of
-                   Return _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
+                   EVM.Types.Return _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
                    _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s safeAdd (Just ("add(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
@@ -1140,13 +1139,13 @@ tests = testGroup "hevm"
                                        _ -> error "expected 2 args"
                         in (x .<= Expr.add x y)
                            .&& (x .== y)
-                           .&& view (state . callvalue) preVM .== Lit 0
+                           .&& Control.Lens.view (state . callvalue) preVM .== Lit 0
             post prestate leaf =
               let (_, y) = case getStaticAbiArgs 2 prestate of
                              [x', y'] -> (x', y')
                              _ -> error "expected 2 args"
               in case leaf of
-                   Return _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
+                   EVM.Types.Return _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
                    _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
           verifyContract s safeAdd (Just ("add(uint256,uint256)", [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
@@ -1165,15 +1164,15 @@ tests = testGroup "hevm"
             }
           }
           |]
-        let pre vm = Lit 0 .== view (state . callvalue) vm
+        let pre vm = Lit 0 .== Control.Lens.view (state . callvalue) vm
             post prestate leaf =
               let y = case getStaticAbiArgs 1 prestate of
                         [y'] -> y'
                         _ -> error "expected 1 arg"
-                  this = Expr.litAddr $ view (state . codeContract) prestate
-                  prex = Expr.readStorage' this (Lit 0) (view (env . storage) prestate)
+                  this = Expr.litAddr $ Control.Lens.view (state . codeContract) prestate
+                  prex = Expr.readStorage' this (Lit 0) (Control.Lens.view (env . storage) prestate)
               in case leaf of
-                Return _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
+                EVM.Types.Return _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
                 _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
@@ -1219,17 +1218,17 @@ tests = testGroup "hevm"
               }
             }
             |]
-          let pre vm = (Lit 0) .== view (state . callvalue) vm
+          let pre vm = (Lit 0) .== Control.Lens.view (state . callvalue) vm
               post prestate poststate =
                 let (x,y) = case getStaticAbiArgs 2 prestate of
                         [x',y'] -> (x',y')
                         _ -> error "expected 2 args"
-                    this = Expr.litAddr $ view (state . codeContract) prestate
-                    prestore =  view (env . storage) prestate
+                    this = Expr.litAddr $ Control.Lens.view (state . codeContract) prestate
+                    prestore =  Control.Lens.view (env . storage) prestate
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
-                     Return _ _ poststore -> let
+                     EVM.Types.Return _ _ poststore -> let
                            postx = Expr.readStorage' this x poststore
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
@@ -1253,17 +1252,17 @@ tests = testGroup "hevm"
               }
             }
             |]
-          let pre vm = (Lit 0) .== view (state . callvalue) vm
+          let pre vm = (Lit 0) .== Control.Lens.view (state . callvalue) vm
               post prestate poststate =
                 let (x,y) = case getStaticAbiArgs 2 prestate of
                         [x',y'] -> (x',y')
                         _ -> error "expected 2 args"
-                    this = Expr.litAddr $ view (state . codeContract) prestate
-                    prestore =  view (env . storage) prestate
+                    this = Expr.litAddr $ Control.Lens.view (state . codeContract) prestate
+                    prestore =  Control.Lens.view (env . storage) prestate
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
-                     Return _ _ poststore -> let
+                     EVM.Types.Return _ _ poststore -> let
                            postx = Expr.readStorage' this x poststore
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
@@ -2214,11 +2213,11 @@ loadVM :: ByteString -> Maybe VM
 loadVM x =
     case runState exec (vmForEthrunCreation x) of
        (VMSuccess (ConcreteBuf targetCode), vm1) -> do
-         let target = view (state . contract) vm1
+         let target = Control.Lens.view (state . contract) vm1
              vm2 = execState (replaceCodeOfSelf (RuntimeCode (ConcreteRuntimeCode targetCode))) vm1
          return $ snd $ flip runState vm2
                 (do resetState
-                    assign (state . gas) 0xffffffffffffffff -- kludge
+                    assign (state . EVM.gas) 0xffffffffffffffff -- kludge
                     loadContract target)
        _ -> Nothing
 
@@ -2273,7 +2272,7 @@ runStatements stmts args t = do
 
 getStaticAbiArgs :: Int -> VM -> [Expr EWord]
 getStaticAbiArgs n vm =
-  let cd = view (state . calldata) vm
+  let cd = Control.Lens.view (state . calldata) vm
   in decodeStaticArgs 4 n cd
 
 -- includes shaving off 4 byte function sig
@@ -2383,7 +2382,7 @@ genEnd 0 = oneof
  ]
 genEnd sz = oneof
  [ fmap (EVM.Types.Revert []) subBuf
- , liftM3 Return (return []) subBuf subStore
+ , liftM3 EVM.Types.Return (return []) subBuf subStore
  , liftM3 ITE subWord subEnd subEnd
  ]
  where
@@ -2812,3 +2811,129 @@ bothM f (a, a') = do
 
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
+
+data VMTrace =
+  VMTrace
+  { pc      :: Int
+  , op      :: Int
+  , stack   :: [W256]
+  , memSize :: Data.Word.Word64
+  , depth   :: Int
+  , gas     :: Data.Word.Word64
+  } deriving (Generic)
+instance JSON.ToJSON VMTrace where
+  toEncoding = JSON.genericToEncoding JSON.defaultOptions
+
+data VMTraceResult =
+  VMTraceResult
+  { out  :: String
+  , gasUsed :: Data.Word.Word64
+  } deriving (Generic)
+instance JSON.ToJSON VMTraceResult where
+  toEncoding = JSON.genericToEncoding JSON.defaultOptions
+
+getOp :: VM -> Data.Word.Word8
+getOp vm =
+  let pcpos  = vm ^. state . EVM.pc
+      code' = vm ^. state . code
+      xs = case code' of
+        InitCode _ _ -> error "InitCode instead of RuntimeCode"
+        RuntimeCode (ConcreteRuntimeCode xs') -> BS.drop pcpos xs'
+        RuntimeCode (SymbolicRuntimeCode _) -> error "RuntimeCode is symbolic"
+  in if xs == BS.empty then 0
+                       else BS.head xs
+
+forceLit :: Expr EWord -> W256
+forceLit (Lit x) = x
+forceLit _ = undefined
+
+vmtrace :: VM -> VMTrace
+vmtrace vm =
+  let
+    -- Convenience function to access parts of the current VM state.
+    -- Arcane type signature needed to avoid monomorphism restriction.
+    the :: (b -> VM -> Const a VM) -> ((a -> Const a a) -> b) -> a
+    the f g = Control.Lens.view (f . g) vm
+    memsize = the state memorySize
+  in VMTrace { pc = the state EVM.pc
+             , op = num $ getOp vm
+             , gas = the state EVM.gas
+             , memSize = memsize
+             -- increment to match geth format
+             , depth = 1 + length (Control.Lens.view frames vm)
+             -- reverse to match geth format
+             , stack = reverse $ forceLit <$> the state EVM.stack
+             }
+
+vmres :: VM -> VMTraceResult
+vmres vm =
+  let
+    gasUsed' = Control.Lens.view (tx . txgaslimit) vm - Control.Lens.view (state . EVM.gas) vm
+    res = case Control.Lens.view result vm of
+      Just (VMSuccess (ConcreteBuf b)) -> show b
+      Just (VMSuccess _) -> error "unhandled"
+      Just (VMFailure (EVM.Revert (ConcreteBuf b))) -> show b
+      Just (VMFailure _) -> error "unhandled"
+      _ -> mempty
+  in VMTraceResult
+     -- more oddities to comply with geth
+     { out = drop 2 res
+     , gasUsed = gasUsed'
+     }
+
+interpretWithTrace :: Fetch.Fetcher -> Stepper.Stepper a -> StateT VM IO a
+interpretWithTrace fetcher =
+  eval . Control.Monad.Operational.view
+
+  where
+    eval
+      :: ProgramView Stepper.Action a
+      -> StateT VM IO a
+
+    eval (Control.Monad.Operational.Return x) = do
+      vm <- State.get
+      let j = JSON.encode $ out (vmres vm)
+      liftIO $ putStr (show j)
+      pure x
+
+    eval (action :>>= k) = do
+      vm <- State.get
+      case action of
+        Stepper.Run -> do
+          -- Have we reached the final result of this action?
+          use result >>= \case
+            Just _ -> do
+              -- Yes, proceed with the next action.
+              interpretWithTrace fetcher (k vm)
+            Nothing -> do
+              liftIO $ putStrLn $ show $ JSON.encode $ vmtrace vm
+
+              -- No, keep performing the current action
+              State.state (runState exec1)
+              interpretWithTrace fetcher (Stepper.run >>= k)
+
+        -- Stepper wants to keep executing?
+        Stepper.Exec -> do
+          -- Have we reached the final result of this action?
+          use result >>= \case
+            Just r -> do
+              -- Yes, proceed with the next action.
+              interpretWithTrace fetcher (k r)
+            Nothing -> do
+              liftIO $ putStr $ show $ JSON.encode $ vmtrace vm
+
+              -- No, keep performing the current action
+              State.state (runState exec1)
+              interpretWithTrace fetcher (Stepper.exec >>= k)
+        Stepper.Wait q ->
+          do m <- liftIO (fetcher q)
+             State.state (runState m) >> interpretWithTrace fetcher (k ())
+        Stepper.Ask _ ->
+          error "cannot make choices with this interpretWithTraceer"
+        Stepper.IOAct m ->
+          m >>= interpretWithTrace fetcher . k
+        Stepper.EVM m -> do
+          r <- State.state (runState m)
+          interpretWithTrace fetcher (k r)
+
+

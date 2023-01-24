@@ -58,6 +58,10 @@ isQed :: ProofResult a b c -> Bool
 isQed (Qed _) = True
 isQed _ = False
 
+isTimeout :: ProofResult a b c -> Bool
+isTimeout (SMTTimeout _) = True
+isTimeout _ = False
+
 sameCnstr :: ProofResult a b c -> ProofResult a b c -> Bool
 sameCnstr a e = checkCnstr a e
   where
@@ -513,7 +517,7 @@ verify solvers opts preState maybepost = do
     toVRes :: (CheckSatResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
       Sat model -> Cex (leaf, model)
-      EVM.SMT.Unknown -> Timeout leaf
+      EVM.SMT.Unknown -> SMTTimeout leaf
       Unsat -> Qed ()
       Error e -> error $ "Internal Error: solver responded with error: " <> show e
 
@@ -594,7 +598,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
                               -- potential race, but it doesn't matter for correctness
                               atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
                               pure (Qed (), False)
-        (_, EVM.SMT.Unknown) -> pure (Timeout (), False)
+        (_, EVM.SMT.Unknown) -> pure (SMTTimeout (), False)
         (_, Error txt) -> error $ "Error while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
@@ -624,8 +628,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
           (Revert _ a, Revert _ b) -> if a == b then PBool False else a ./= b
           (Revert _ _, _) -> PBool True
           (_, Revert _ _) -> PBool True
-          (Failure _ (TmpErr s), _) -> error $ "Unhandled error: " <> s
-          (_, Failure _ (TmpErr s)) -> error $ "Unhandled error: " <> s
+          (Failure _ (WrappedEVMError s), _) -> error $ "Unhandled error: " <> s
+          (_, Failure _ (WrappedEVMError s)) -> error $ "Unhandled error: " <> s
           (Failure _ erra, Failure _ errb) -> if erra==errb then PBool False else PBool True
           (ITE _ _ _, _) -> error "Expressions must be flattened"
           (_, ITE _ _ _) -> error "Expressions must be flattened"
