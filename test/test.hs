@@ -2892,8 +2892,7 @@ interpretWithTrace fetcher =
 
     eval (Control.Monad.Operational.Return x) = do
       vm <- State.get
-      let j = JSON.encode $ out (vmres vm)
-      liftIO $ putStr (show j)
+      liftIO $ putStrLn $ show $ JSON.encode $ out (vmres vm)
       pure x
 
     eval (action :>>= k) = do
@@ -2920,7 +2919,7 @@ interpretWithTrace fetcher =
               -- Yes, proceed with the next action.
               interpretWithTrace fetcher (k r)
             Nothing -> do
-              liftIO $ putStr $ show $ JSON.encode $ vmtrace vm
+              liftIO $ putStrLn $ show $ JSON.encode $ vmtrace vm
 
               -- No, keep performing the current action
               State.state (runState exec1)
