@@ -156,7 +156,10 @@ tests = testGroup "hevm"
   -- the return value to be the same
   , testGroup "contract-quickcheck-run"
     [ testProperty "random-contract-concrete-call" $ \(expr :: OpContract) -> ioProperty $ do
-        -- could be used with: `evm --json statetest BenchTest-109.json`
+        -- could be used with:
+        --    evm --json statetest BenchTest-109.json
+        -- could be used with:
+        --    evm transition --input.alloc alloc.json --input.env env.json --input.txs txs.json --state.fork BerlinToLondonAt5
         expr2 <- fixContractJumps expr
         putStrLn $ "Contract for run: " <> (show expr2)
         let lits = assemble . getOpData $ expr2
