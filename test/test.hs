@@ -2,6 +2,7 @@
 {-# Language NumericUnderscores #-}
 {-# Language QuasiQuotes #-}
 {-# Language DataKinds #-}
+{-# Language DuplicateRecordFields #-}
 
 module Main where
 
@@ -9,6 +10,7 @@ import Data.Text (Text)
 import Data.ByteString (ByteString)
 import Data.Bits hiding (And, Xor)
 import System.Directory
+import System.IO
 import GHC.Natural
 -- import Control.Monad
 import Text.RE.TDFA.String
@@ -17,6 +19,8 @@ import Data.Time
 import System.Environment
 import qualified Data.Word
 import GHC.Generics
+import Test.ChasingBottoms
+import Data.Text (pack)
 
 import Prelude hiding (fail, LT, GT)
 
@@ -35,8 +39,7 @@ import Test.QuickCheck (elements)
 import Test.Tasty.HUnit
 import Test.Tasty.Runners hiding (Failure)
 import Test.Tasty.ExpectedFailure
--- import GHC.Utils.Json
-import qualified Data.Aeson           as JSON
+import qualified Data.Aeson as JSON
 
 -- import qualified Control.Monad.Operational as Operational
 import Control.Monad.Operational (view, ProgramViewT(..), ProgramView)
@@ -73,6 +76,7 @@ import qualified EVM.Fetch as Fetch
 import Data.List (isSubsequenceOf)
 import EVM.TestUtils
 import GHC.Conc (getNumProcessors)
+import qualified GHC.IO.Handle as File
 
 main :: IO ()
 main = defaultMain tests
@@ -85,6 +89,46 @@ toW8fromLitB _ = error "nope"
 -- https://github.com/UnkindPartition/tasty/tree/ee6fe7136fbcc6312da51d7f1b396e1a2d16b98a#patterns
 runSubSet :: String -> IO ()
 runSubSet p = defaultMain . applyPattern p $ tests
+
+data EVMToolEnv =
+  EVMToolEnv
+  { currentCoinbase    :: Addr
+  , currentDifficulty  :: W256
+  , currentGasLimit    :: Data.Word.Word64
+  , currentNumber      :: W256
+  , currentTimestamp   :: W256
+  } deriving (Generic)
+instance JSON.ToJSON EVMToolEnv where
+  toJSON =  JSON.genericToJSON JSON.defaultOptions
+
+instance JSON.ToJSON ByteString where
+  toJSON = JSON.String . Data.Text.pack . show
+
+data EVMToolAlloc =
+  EVMToolAlloc
+  { balance :: W256
+  , code :: ByteString
+  , nonce :: W256
+  , storage :: Map.Map W256 ByteString
+  } deriving (Generic)
+instance JSON.ToJSON EVMToolAlloc where
+  toJSON = JSON.genericToJSON JSON.defaultOptions
+
+data EVMToolTx =
+  EVMToolTx
+  { gas :: Data.Word.Word64
+  , gasPrice :: W256
+  , hash :: W256
+  , input :: ByteString
+  , nonce :: W256
+  , r :: W256
+  , s :: W256
+  , to :: Addr
+  , v :: W256
+  , value :: W256
+  } deriving (Generic)
+instance JSON.ToJSON EVMToolTx where
+  toJSON = JSON.genericToJSON JSON.defaultOptions
 
 tests :: TestTree
 tests = testGroup "hevm"
@@ -110,15 +154,53 @@ tests = testGroup "hevm"
   -- These fuzz the system via generating contracts via QuickCheck. Crashes can
   -- be observed, errors, etc. We also run the results via Solidity and observe
   -- the return value to be the same
-  , testGroup "contract-quickcheck"
-    [ testProperty "random-contract-with-symbolic-call" $ \(expr :: OpContract) -> ioProperty $ do
+  , testGroup "contract-quickcheck-run"
+    [ testProperty "random-contract-concrete-call" $ \(expr :: OpContract) -> ioProperty $ do
+        -- could be used with: `evm --json statetest BenchTest-109.json`
+        expr2 <- fixContractJumps expr
+        putStrLn $ "Contract for run: " <> (show expr2)
+        let lits = assemble . getOpData $ expr2
+            w8s = toW8fromLitB <$> lits
+            bitcode = (BS.pack $ Vector.toList w8s)
+            calldat = ConcreteBuf bitcode
+        let envjson = EVMToolEnv{ currentCoinbase    = 0xc94f5374fce5edbc8e2a8697c15331677e6ebf0b
+                                , currentDifficulty  = 0x20000
+                                , currentGasLimit    = 0x750a163df65e8a
+                                , currentNumber      = 1
+                                , currentTimestamp   = 1000
+                                }
+            txjson = EVMToolTx { gas = 0x5208
+                               , gasPrice = 0x2
+                               , hash = 0x0557bacce3375c98d806609b8d5043072f0b6a8bae45ae5a67a00d3a1a18d673
+                               , input = BS.empty
+                               , nonce = 0
+                               , r = 0x9500e8ba27d3c33ca7764e107410f44cbd8c19794bde214d694683a7aa998cdb
+                               , s = 0x7235ae07e4bd6e0206d102b1f8979d6adab280466b6a82d2208ee08951f1f600
+                               , to = 0x8a8eafb1cf62bfbeb1741769dae1a9dd47996192
+                               , v = 0x1b
+                               , value = 0x1
+                               }
+            allocjson = EVMToolAlloc{ balance = 0x5ffd4878be161d74
+                                    , code = bitcode
+                                    , nonce = 0
+                                    , storage = Map.empty
+                                    }
+        JSON.encodeFile "env.json"  envjson
+        JSON.encodeFile "tx.json"  txjson
+        JSON.encodeFile "alloc.json"  allocjson
+        traceFile <- openFile "trace.json" WriteMode
+        res <- runCodeWithTrace Nothing bitcode calldat traceFile
+        hClose traceFile
+        putStrLn $ "result final: " <> (show res)
+    , testProperty "random-contract-with-symbolic-call" $ \(expr :: OpContract) -> ioProperty $ do
         expr2 <- fixContractJumps expr
         putStrLn $ "Contract: " <> (show expr2)
         let lits = assemble . getOpData $ expr2
             w8s = toW8fromLitB <$> lits
-        res <- withSolvers Z3 1 Nothing $ (\s ->
-              checkAssert s defaultPanicCodes (BS.pack $ Vector.toList w8s) Nothing [] debugVeriOpts)
-        putStrLn $ "result: " <> (show res)
+            myfun = do
+              withSolvers Z3 1 Nothing (\s -> checkAssert s defaultPanicCodes (BS.pack $ Vector.toList w8s) Nothing [] debugVeriOpts)
+        res <- isBottomIO myfun
+        putStrLn $ "result final: " <> (show res)
     -- generate contract without SLoad/STore or any external calls. Call with
     -- value. Observe return value. Run against geth. Compare.
     , testProperty "random-contract-no-storage-no-extcalls" $ \(expr :: OpContract) -> ioProperty $ do
@@ -1170,7 +1252,7 @@ tests = testGroup "hevm"
                         [y'] -> y'
                         _ -> error "expected 1 arg"
                   this = Expr.litAddr $ Control.Lens.view (state . codeContract) prestate
-                  prex = Expr.readStorage' this (Lit 0) (Control.Lens.view (env . storage) prestate)
+                  prex = Expr.readStorage' this (Lit 0) (Control.Lens.view (env . EVM.storage) prestate)
               in case leaf of
                 EVM.Types.Return _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
                 _ -> PBool True
@@ -1224,7 +1306,7 @@ tests = testGroup "hevm"
                         [x',y'] -> (x',y')
                         _ -> error "expected 2 args"
                     this = Expr.litAddr $ Control.Lens.view (state . codeContract) prestate
-                    prestore =  Control.Lens.view (env . storage) prestate
+                    prestore =  Control.Lens.view (env . EVM.storage) prestate
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
@@ -1258,7 +1340,7 @@ tests = testGroup "hevm"
                         [x',y'] -> (x',y')
                         _ -> error "expected 2 args"
                     this = Expr.litAddr $ Control.Lens.view (state . codeContract) prestate
-                    prestore =  Control.Lens.view (env . storage) prestate
+                    prestore =  Control.Lens.view (env . EVM.storage) prestate
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
@@ -2169,6 +2251,14 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
     Left _ -> Nothing
     Right b -> Just b
 
+-- | Takes a runtime code and calls it with the provided calldata
+runCodeWithTrace :: Fetch.RpcInfo -> ByteString -> Expr Buf -> File.Handle -> IO (Maybe (Expr Buf))
+runCodeWithTrace rpcinfo code' calldata' jsonfile = withSolvers Z3 0 Nothing $ \solvers -> do
+  res <- evalStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) jsonfile Stepper.execFully) (vmForRuntimeCode code' calldata')
+  pure $ case res of
+    Left _ -> Nothing
+    Right b -> Just b
+
 vmForRuntimeCode :: ByteString -> Expr Buf -> VM
 vmForRuntimeCode runtimecode calldata' =
   (makeVm $ VMOpts
@@ -2835,7 +2925,7 @@ instance JSON.ToJSON VMTraceResult where
 getOp :: VM -> Data.Word.Word8
 getOp vm =
   let pcpos  = vm ^. state . EVM.pc
-      code' = vm ^. state . code
+      code' = vm ^. state . EVM.code
       xs = case code' of
         InitCode _ _ -> error "InitCode instead of RuntimeCode"
         RuntimeCode (ConcreteRuntimeCode xs') -> BS.drop pcpos xs'
@@ -2871,9 +2961,9 @@ vmres vm =
     gasUsed' = Control.Lens.view (tx . txgaslimit) vm - Control.Lens.view (state . EVM.gas) vm
     res = case Control.Lens.view result vm of
       Just (VMSuccess (ConcreteBuf b)) -> show b
-      Just (VMSuccess _) -> error "unhandled"
+      Just (VMSuccess x) -> error $ "unhandled: " <> (show x)
       Just (VMFailure (EVM.Revert (ConcreteBuf b))) -> show b
-      Just (VMFailure _) -> error "unhandled"
+      Just (VMFailure (x)) -> show x -- these are all EVMError
       _ -> mempty
   in VMTraceResult
      -- more oddities to comply with geth
@@ -2881,8 +2971,12 @@ vmres vm =
      , gasUsed = gasUsed'
      }
 
-interpretWithTrace :: Fetch.Fetcher -> Stepper.Stepper a -> StateT VM IO a
-interpretWithTrace fetcher =
+interpretWithTrace
+  :: Fetch.Fetcher
+  -> File.Handle
+  -> Stepper.Stepper a
+  -> StateT VM IO a
+interpretWithTrace fetcher jsonfile =
   eval . Control.Monad.Operational.view
 
   where
@@ -2892,7 +2986,7 @@ interpretWithTrace fetcher =
 
     eval (Control.Monad.Operational.Return x) = do
       vm <- State.get
-      liftIO $ putStrLn $ show $ JSON.encode $ out (vmres vm)
+      liftIO $ BS.hPut jsonfile $ BS.toStrict $ JSON.encode $ out (vmres vm)
       pure x
 
     eval (action :>>= k) = do
@@ -2903,13 +2997,13 @@ interpretWithTrace fetcher =
           use result >>= \case
             Just _ -> do
               -- Yes, proceed with the next action.
-              interpretWithTrace fetcher (k vm)
+              interpretWithTrace fetcher jsonfile (k vm)
             Nothing -> do
-              liftIO $ putStrLn $ show $ JSON.encode $ vmtrace vm
+              liftIO $ BS.hPut jsonfile $ BS.toStrict $ JSON.encode $ vmtrace vm
 
               -- No, keep performing the current action
               State.state (runState exec1)
-              interpretWithTrace fetcher (Stepper.run >>= k)
+              interpretWithTrace fetcher jsonfile (Stepper.run >>= k)
 
         -- Stepper wants to keep executing?
         Stepper.Exec -> do
@@ -2917,22 +3011,22 @@ interpretWithTrace fetcher =
           use result >>= \case
             Just r -> do
               -- Yes, proceed with the next action.
-              interpretWithTrace fetcher (k r)
+              interpretWithTrace fetcher jsonfile (k r)
             Nothing -> do
-              liftIO $ putStrLn $ show $ JSON.encode $ vmtrace vm
+              liftIO $ BS.hPut jsonfile $ BS.toStrict $ JSON.encode $ vmtrace vm
 
               -- No, keep performing the current action
               State.state (runState exec1)
-              interpretWithTrace fetcher (Stepper.exec >>= k)
+              interpretWithTrace fetcher jsonfile (Stepper.exec >>= k)
         Stepper.Wait q ->
           do m <- liftIO (fetcher q)
-             State.state (runState m) >> interpretWithTrace fetcher (k ())
+             State.state (runState m) >> interpretWithTrace fetcher jsonfile (k ())
         Stepper.Ask _ ->
           error "cannot make choices with this interpretWithTraceer"
         Stepper.IOAct m ->
-          m >>= interpretWithTrace fetcher . k
+          m >>= interpretWithTrace fetcher jsonfile . k
         Stepper.EVM m -> do
           r <- State.state (runState m)
-          interpretWithTrace fetcher (k r)
+          interpretWithTrace fetcher jsonfile (k r)
 
 

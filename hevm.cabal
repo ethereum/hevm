@@ -102,7 +102,7 @@ library
     EVM.TTY,
     EVM.TTYCenteredList,
     EVM.Types,
-    EVM.UnitTest,
+    EVM.UnitTest
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -281,7 +281,8 @@ common test-base
     smt2-parser >= 0.1.0.1,
     json >=0.9,
     operational,
-    ghc
+    ghc,
+    ChasingBottoms
 
 library test-utils
   import:

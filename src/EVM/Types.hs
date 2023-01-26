@@ -472,6 +472,8 @@ newtype Addr = Addr { addressWord160 :: Word160 }
     ( Num, Integral, Real, Ord, Enum
     , Eq, Generic, Bits, FiniteBits
     )
+instance JSON.ToJSON Addr where
+  toJSON = JSON.String . Text.pack . show
 
 maybeLitWord :: Expr EWord -> Maybe W256
 maybeLitWord (Lit w) = Just w
@@ -486,6 +488,8 @@ instance Show W256 where
 
 instance JSON.ToJSON W256 where
   toJSON = JSON.String . Text.pack . show
+
+instance JSON.ToJSONKey W256
 
 instance Read Addr where
   readsPrec _ ('0':'x':s) = readHex s
