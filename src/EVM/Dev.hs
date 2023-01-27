@@ -19,6 +19,7 @@ import qualified Data.Text.Lazy.IO as TL
 
 import EVM
 import EVM.SMT
+import EVM.Solvers
 import EVM.Types
 import EVM.Expr (numBranches, simplify)
 import EVM.SymExec

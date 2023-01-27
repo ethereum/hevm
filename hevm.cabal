@@ -82,6 +82,7 @@ library
     EVM.Dev,
     EVM.Expr,
     EVM.SMT,
+    EVM.Solvers,
     EVM.Exec,
     EVM.Facts,
     EVM.Facts.Git,

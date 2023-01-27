@@ -22,7 +22,7 @@ import EVM.Debug
 import EVM.Format (showWordExact, showWordExplanation)
 import EVM.Format (contractNamePart, contractPathPart, showTraceTree, prettyIfConcreteWord, formatExpr)
 import EVM.Hexdump (prettyHex)
-import EVM.SMT (SolverGroup)
+import EVM.Solvers (SolverGroup)
 import EVM.Op
 import EVM.Solidity hiding (storageLayout)
 import EVM.Types hiding (padRight)

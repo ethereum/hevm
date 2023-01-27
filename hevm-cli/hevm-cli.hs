@@ -16,6 +16,7 @@ import EVM.SymExec
 import EVM.Debug
 import qualified EVM.Expr as Expr
 import EVM.SMT
+import EVM.Solvers
 import qualified EVM.TTY as TTY
 import EVM.Solidity
 import EVM.Expr (litAddr)
@@ -366,7 +367,7 @@ assert cmd = do
   let errCodes = fromMaybe defaultPanicCodes cmd.assertions
   cores <- num <$> getNumProcessors
   let solverCount = fromMaybe cores cmd.numSolvers
-  withSolvers EVM.SMT.Z3 solverCount cmd.smttimeout $ \solvers -> do
+  withSolvers EVM.Solvers.Z3 solverCount cmd.smttimeout $ \solvers -> do
     if cmd.debug then do
       srcInfo <- getSrcInfo cmd
       void $ TTY.runFromVM

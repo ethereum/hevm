@@ -13,6 +13,7 @@ import EVM.Exec
 import qualified EVM.Fetch as Fetch
 import EVM.ABI
 import EVM.SMT
+import EVM.Solvers
 import EVM.Traversals
 import qualified EVM.Expr as Expr
 import EVM.Stepper (Stepper)
@@ -506,7 +507,7 @@ verify solvers opts preState maybepost = do
     toVRes :: (CheckSatResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
       Sat model -> Cex (leaf, model)
-      EVM.SMT.Unknown -> Timeout leaf
+      EVM.Solvers.Unknown -> Timeout leaf
       Unsat -> Qed ()
       Error e -> error $ "Internal Error: solver responded with error: " <> show e
 
@@ -587,7 +588,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
                               -- potential race, but it doesn't matter for correctness
                               atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
                               pure (Qed (), False)
-        (_, EVM.SMT.Unknown) -> pure (Timeout (), False)
+        (_, EVM.Solvers.Unknown) -> pure (Timeout (), False)
         (_, Error txt) -> error $ "Error while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
@@ -655,7 +656,7 @@ showModel cd (expr, res) = do
   case res of
     Unsat -> pure () -- ignore unreachable branches
     Error e -> error $ "Internal error: smt solver returned an error: " <> show e
-    EVM.SMT.Unknown -> do
+    EVM.Solvers.Unknown -> do
       putStrLn "--- Branch ---"
       putStrLn ""
       putStrLn "Unable to produce a model for the following end state:"

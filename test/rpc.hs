@@ -16,6 +16,7 @@ import qualified Data.Vector as V
 import EVM
 import EVM.ABI
 import EVM.SMT
+import EVM.Solvers
 import EVM.Fetch
 import EVM.SymExec
 import EVM.TestUtils

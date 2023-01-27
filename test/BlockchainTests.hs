@@ -13,7 +13,7 @@ import EVM.Expr (litAddr)
 import EVM.FeeSchedule qualified
 import EVM.Fetch qualified
 import EVM.Stepper qualified
-import EVM.SMT (withSolvers, Solver(Z3))
+import EVM.Solvers (withSolvers, Solver(Z3))
 import EVM.Transaction
 import EVM.TTY qualified as TTY
 import EVM.Types

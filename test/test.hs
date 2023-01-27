@@ -55,6 +55,7 @@ import EVM.Types
 import EVM.Traversals
 import EVM.Concrete (createAddress)
 import EVM.SMT hiding (one)
+import EVM.Solvers
 import qualified EVM.Expr as Expr
 import qualified Data.Text as T
 import Data.List (isSubsequenceOf)
@@ -2183,7 +2184,7 @@ checkEquiv l r = withSolvers Z3 1 (Just 100) $ \solvers -> do
        print res
        pure $ case res of
          Unsat -> True
-         EVM.SMT.Unknown -> True
+         EVM.Solvers.Unknown -> True
          Sat _ -> False
          Error _ -> False
 

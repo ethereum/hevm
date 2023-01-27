@@ -9,6 +9,7 @@ import EVM hiding (Unknown, path)
 import EVM.ABI
 import EVM.Concrete
 import EVM.SMT
+import EVM.Solvers
 import EVM.Dapp
 import EVM.Debug (srcMapCodePos)
 import EVM.Exec
