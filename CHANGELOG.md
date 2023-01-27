@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- `hevm symbolic` exits with status code `1` if counterexamples or timeouts are found
+
 ### Added
 
 - New cheatcode `prank(address)` that sets `msg.sender` to the specified address for the next call.

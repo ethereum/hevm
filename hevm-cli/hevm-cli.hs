@@ -396,6 +396,7 @@ assert cmd = do
                    , ""
                    ] <> fmap (formatExpr) (getTimeouts cexs)
           T.putStrLn $ T.unlines (counterexamples <> unknowns)
+          exitFailure
       when cmd.showTree $ do
         putStrLn "=== Expression ===\n"
         T.putStrLn $ formatExpr expr
