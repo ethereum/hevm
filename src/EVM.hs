@@ -1649,13 +1649,13 @@ accessStorage addr slot continue = do
         Just x ->
           continue x
         Nothing ->
-          if c._external
-          then
-            -- check if the slot is cached
-            use (cache . fetchedContracts . at addr) >>= \case
-              Nothing -> forceConcrete slot "cannot read symbolic slots via RPC" mkQuery
-              Just _ -> forceConcrete slot "cannot read symbolic slots via rpc" $
-                \s -> maybe (mkQuery s) continue (readStorage (litAddr addr) slot store)
+          if c._external then
+            forceConcrete slot "cannot read symbolic slots via RPC" $ \litSlot -> do
+              -- check if the slot is cached
+              cachedStore <- use (cache . fetchedStorage)
+              case Map.lookup (num addr) cachedStore >>= Map.lookup litSlot of
+                Nothing -> mkQuery litSlot
+                Just val -> continue (Lit val)
           else do
             modifying (env . storage) (writeStorage (litAddr addr) slot (Lit 0))
             continue $ Lit 0
