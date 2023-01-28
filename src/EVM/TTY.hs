@@ -15,9 +15,7 @@ import EVM
 import EVM.ABI (abiTypeSolidity, decodeAbiValue, AbiType(..), emptyAbi)
 import EVM.SymExec (maxIterationsReached, symCalldata)
 import EVM.Expr (simplify)
-import EVM.Dapp (DappInfo, dappInfo, Test, extractSig, Test(..), srcMap)
-import EVM.Dapp (dappUnitTests, unitTestMethods, dappSolcByName, dappSolcByHash, dappSources)
-import EVM.Dapp (dappAstSrcMap)
+import EVM.Dapp (DappInfo(..), dappInfo, Test, extractSig, Test(..), srcMap, unitTestMethods)
 import EVM.Debug
 import EVM.Format (showWordExact, showWordExplanation)
 import EVM.Format (contractNamePart, contractPathPart, showTraceTree, prettyIfConcreteWord, formatExpr)
@@ -223,7 +221,7 @@ keepExecuting mode restart = case mode of
 
 isUnitTestContract :: Text -> DappInfo -> Bool
 isUnitTestContract name dapp =
-  elem name (map fst (view dappUnitTests dapp))
+  elem name (map fst dapp.unitTests)
 
 mkVty :: IO V.Vty
 mkVty = do
@@ -304,7 +302,7 @@ main opts root jsonFilePath =
                   (Vec.fromList
                    (concatMap
                     (debuggableTests opts)
-                    (view dappUnitTests dapp)))
+                    dapp.unitTests))
                   1
             , _testPickerDapp = dapp
             , _testOpts = opts
@@ -421,7 +419,7 @@ appEvent (VtyEvent (V.EvKey V.KEsc [])) = get >>= \case
   ViewVm s -> do
     let opts = s ^. uiTestOpts
         dapp' = opts.dapp
-        tests = concatMap (debuggableTests opts) (dapp' ^. dappUnitTests)
+        tests = concatMap (debuggableTests opts) dapp'.unitTests
     case tests of
       [] -> halt
       ts ->
@@ -617,7 +615,7 @@ initialUiVmStateForTest opts@UnitTestOptions{..} (theContractName, theTestName) 
       SymbolicTest _ -> symCalldata theTestName types [] (AbstractBuf "txdata")
       _ -> (error "unreachable", error "unreachable")
     (test, types) = fromJust $ find (\(test',_) -> extractSig test' == theTestName) $ unitTestMethods testContract
-    testContract = fromJust $ view (dappSolcByName . at theContractName) dapp
+    testContract = fromJust $ Map.lookup theContractName dapp.solcByName
     vm0 =
       initialUnitTestVm opts testContract
     script = do
@@ -709,15 +707,15 @@ drawVmBrowser ui =
             renderList
               (\selected (k, c') ->
                  withHighlight selected . txt . mconcat $
-                   [ fromMaybe "<unknown contract>" . flip preview dapp' $
-                       ( dappSolcByHash . ix (maybeHash c')
+                   [ fromMaybe "<unknown contract>" . flip preview dapp'.solcByHash $
+                       ( ix (maybeHash c')
                        . _2 . contractName )
                    , "\n"
                    , "  ", pack (show k)
                    ])
               True
               (view browserContractList ui)
-      , case flip preview dapp' (dappSolcByHash . ix (maybeHash c) . _2) of
+      , case snd <$> Map.lookup (maybeHash c) dapp'.solcByHash of
           Nothing ->
             hBox
               [ borderWithLabel (txt "Contract information") . padBottom Max . padRight Max $ vBox
@@ -842,7 +840,7 @@ isNextSourcePositionWithoutEntering ui vm =
           moved = Just here /= initialPosition
           deeper = length (view frames vm) > initialHeight
           boring =
-            case srcMapCode (view dappSources dapp') here of
+            case srcMapCode dapp'.sources here of
               Just bs ->
                 BS.isPrefixOf "contract " bs
               Nothing ->
@@ -971,17 +969,16 @@ solidityList vm dapp' =
     (case currentSrcMap dapp' vm of
         Nothing -> mempty
         Just x ->
-          view (dappSources
-            . sourceLines
-            . ix x.srcMapFile
+          view (
+            ix x.srcMapFile
             . to (Vec.imap (,)))
-          dapp')
+          dapp'.sources._sourceLines)
     1
 
 drawSolidityPane :: UiVmState -> UiWidget
 drawSolidityPane ui =
   let dapp' = ui._uiTestOpts.dapp
-      dappSrcs = view dappSources dapp'
+      dappSrcs = dapp'.sources
       vm = view uiVm ui
   in case currentSrcMap dapp' vm of
     Nothing -> padBottom Max (hBorderWithLabel (txt "<no source map>"))
@@ -990,13 +987,10 @@ drawSolidityPane ui =
             rows = dappSrcs._sourceLines !! sm.srcMapFile
             subrange = lineSubrange rows (sm.srcMapOffset, sm.srcMapLength )
             fileName :: Maybe Text
-            fileName = preview (dappSources . sourceFiles . ix sm.srcMapFile . _1) dapp'
+            fileName = preview (sourceFiles . ix sm.srcMapFile . _1) dapp'.sources
             lineNo :: Maybe Int
             lineNo = maybe Nothing (\a -> Just (a - 1))
-              (snd <$>
-                (srcMapCodePos
-                 (view dappSources dapp')
-                 sm))
+              (snd <$> (srcMapCodePos dapp'.sources sm))
           in vBox
             [ hBorderWithLabel $
                 txt (fromMaybe "<unknown>" fileName)
@@ -1004,7 +998,7 @@ drawSolidityPane ui =
 
                   -- Show the AST node type if present
                   <+> txt (" (" <> fromMaybe "?"
-                                    ((view dappAstSrcMap dapp') sm
+                                    (dapp'.astSrcMap sm
                                        >>= preview (key "name" . _String)) <> ")")
             , Centered.renderList
                 (\_ (i, line) ->

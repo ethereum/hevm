@@ -217,7 +217,7 @@ exploreStep UnitTestOptions{..} bs = do
   Stepper.evm $ do
     cs <- use (env . contracts)
     abiCall testParams (Right bs)
-    let (Method _ inputs sig _ _) = fromMaybe (error "unknown abi call") $ Map.lookup (num $ word $ BS.take 4 bs) (view dappAbiMap dapp)
+    let (Method _ inputs sig _ _) = fromMaybe (error "unknown abi call") $ Map.lookup (num $ word $ BS.take 4 bs) dapp.abiMap
         types = snd <$> inputs
     let ?context = DappContext dapp cs
     this <- fromMaybe (error "unknown target") <$> (use (env . contracts . at testParams.testAddress))
@@ -340,7 +340,7 @@ coverageReport
 coverageReport dapp cov =
   let
     sources :: SourceCache
-    sources = view dappSources dapp
+    sources = dapp.sources
 
     allPositions :: Set (Text, Int)
     allPositions =
@@ -348,7 +348,7 @@ coverageReport dapp cov =
       . mapMaybe (srcMapCodePos sources)
       . toList
       $ mconcat
-        ( view dappSolcByName dapp
+        ( dapp.solcByName
         & Map.elems
         & map (\x -> view runtimeSrcmap x <> view creationSrcmap x)
         )
@@ -763,7 +763,7 @@ symFailure UnitTestOptions {..} testName cd types failures' =
     , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
     ]
     where
-      ctx = DappContext { _contextInfo = dapp, _contextEnv = mempty }
+      ctx = DappContext { info = dapp, env = mempty }
       showRes = \case
                        Return _ _ _ -> if "proveFail" `isPrefixOf` testName
                                       then "Successful execution"
@@ -834,7 +834,7 @@ indentLines n s =
 
 passOutput :: VM -> UnitTestOptions -> Text -> Text
 passOutput vm UnitTestOptions { .. } testName =
-  let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts }
+  let ?context = DappContext { info = dapp, env = vm._env._contracts }
   in let v = fromMaybe 0 verbose
   in if (v > 1) then
     mconcat
@@ -842,7 +842,7 @@ passOutput vm UnitTestOptions { .. } testName =
       , fromMaybe "" (stripSuffix "()" testName)
       , "\n"
       , if (v > 2) then indentLines 2 (showTraceTree dapp vm) else ""
-      , indentLines 2 (formatTestLogs (view dappEventMap dapp) (view logs vm))
+      , indentLines 2 (formatTestLogs dapp.eventMap (view logs vm))
       , "\n"
       ]
     else ""
@@ -850,7 +850,7 @@ passOutput vm UnitTestOptions { .. } testName =
 -- TODO
 failOutput :: VM -> UnitTestOptions -> Text -> Text
 failOutput vm UnitTestOptions { .. } testName =
-  let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
+  let ?context = DappContext { info = dapp, env = vm._env._contracts}
   in mconcat
   [ "Failure: "
   , fromMaybe "" (stripSuffix "()" testName)
@@ -858,7 +858,7 @@ failOutput vm UnitTestOptions { .. } testName =
   , case verbose of
       Just _ -> indentLines 2 (showTraceTree dapp vm)
       _ -> ""
-  , indentLines 2 (formatTestLogs (view dappEventMap dapp) (view logs vm))
+  , indentLines 2 (formatTestLogs dapp.eventMap vm._logs)
   , "\n"
   ]
 
