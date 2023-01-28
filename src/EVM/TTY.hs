@@ -707,9 +707,8 @@ drawVmBrowser ui =
             renderList
               (\selected (k, c') ->
                  withHighlight selected . txt . mconcat $
-                   [ fromMaybe "<unknown contract>" . flip preview dapp'.solcByHash $
-                       ( ix (maybeHash c')
-                       . _2 . contractName )
+                   [ fromMaybe "<unknown contract>" $
+                       Map.lookup (maybeHash c') dapp'.solcByHash <&> (.contractName) . snd
                    , "\n"
                    , "  ", pack (show k)
                    ])
@@ -728,14 +727,14 @@ drawVmBrowser ui =
           Just sol ->
             hBox
               [ borderWithLabel (txt "Contract information") . padBottom Max . padRight (Pad 2) $ vBox
-                  [ txt "Name: " <+> txt (contractNamePart (view contractName sol))
-                  , txt "File: " <+> txt (contractPathPart (view contractName sol))
+                  [ txt "Name: " <+> txt (contractNamePart sol.contractName)
+                  , txt "File: " <+> txt (contractPathPart sol.contractName)
                   , txt " "
                   , txt "Constructor inputs:"
-                  , vBox . flip map (view constructorInputs sol) $
+                  , vBox . flip map sol.constructorInputs $
                       \(name, abiType) -> txt ("  " <> name <> ": " <> abiTypeSolidity abiType)
                   , txt "Public methods:"
-                  , vBox . flip map (sort (Map.elems (view abiMap sol))) $
+                  , vBox . flip map (sort (Map.elems sol.abiMap)) $
                       \method -> txt ("  " <> view methodSignature method)
                   --, txt ("Storage:" <> storageDisplay (view storage c)) -- TODO: fix this
                   ]
@@ -972,7 +971,7 @@ solidityList vm dapp' =
           view (
             ix x.srcMapFile
             . to (Vec.imap (,)))
-          dapp'.sources._sourceLines)
+          dapp'.sources.lines)
     1
 
 drawSolidityPane :: UiVmState -> UiWidget
@@ -984,13 +983,12 @@ drawSolidityPane ui =
     Nothing -> padBottom Max (hBorderWithLabel (txt "<no source map>"))
     Just sm ->
           let
-            rows = dappSrcs._sourceLines !! sm.srcMapFile
-            subrange = lineSubrange rows (sm.srcMapOffset, sm.srcMapLength )
+            rows = dappSrcs.lines !! sm.srcMapFile
+            subrange = lineSubrange rows (sm.srcMapOffset, sm.srcMapLength)
             fileName :: Maybe Text
-            fileName = preview (sourceFiles . ix sm.srcMapFile . _1) dapp'.sources
+            fileName = preview (ix sm.srcMapFile . _1) dapp'.sources.files
             lineNo :: Maybe Int
-            lineNo = maybe Nothing (\a -> Just (a - 1))
-              (snd <$> (srcMapCodePos dapp'.sources sm))
+            lineNo = ((\a -> Just (a - 1)) . snd) =<< srcMapCodePos dapp'.sources sm
           in vBox
             [ hBorderWithLabel $
                 txt (fromMaybe "<unknown>" fileName)

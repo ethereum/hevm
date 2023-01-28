@@ -26,28 +26,12 @@ module EVM.Solidity
   , methodInputs
   , methodOutput
   , methodMutability
-  , abiMap
-  , eventMap
-  , errorMap
-  , storageLayout
-  , contractName
-  , constructorInputs
-  , creationCode
   , functionAbi
   , makeSrcMaps
   , readSolc
   , readJSON
   , readStdJSON
   , readCombinedJSON
-  , runtimeCode
-  , runtimeCodehash
-  , creationCodehash
-  , runtimeSrcmap
-  , creationSrcmap
-  , sourceFiles
-  , sourceLines
-  , sourceAsts
-  , immutableReferences
   , stripBytecodeMetadata
   , stripBytecodeMetadataSym
   , signature
@@ -66,44 +50,43 @@ import EVM.ABI
 import EVM.Types
 
 import Control.Applicative
+import Control.Lens hiding (Indexed, (.=))
 import Control.Monad
-import Control.Lens         hiding (Indexed, (.=))
-import qualified Data.String.Here as Here
 import Data.Aeson hiding (json)
 import Data.Aeson.Types
 import Data.Aeson.Lens
-import qualified Data.Aeson.KeyMap as KeyMap
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Scientific
-import Data.ByteString      (ByteString)
+import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
+import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Lazy (toStrict)
-import Data.Char            (isDigit)
+import Data.Char (isDigit)
 import Data.Foldable
-import Data.Map.Strict      (Map)
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
+import Data.HashMap.Strict qualified as HMap
+import Data.List (sort, isPrefixOf, isInfixOf, elemIndex, tails, findIndex)
+import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.Maybe
-import Data.Word            (Word8, Word32)
-import Data.List.NonEmpty   (NonEmpty)
 import Data.Semigroup
-import Data.Sequence        (Seq)
-import Data.Text            (Text, pack, intercalate)
-import Data.Text.Encoding   (encodeUtf8, decodeUtf8)
-import Data.Text.IO         (readFile, writeFile)
-import Data.Vector          (Vector)
-import GHC.Generics         (Generic)
-import Prelude hiding       (readFile, writeFile)
-import System.IO hiding     (readFile, writeFile)
+import Data.Sequence (Seq)
+import Data.String.Here qualified as Here
+import Data.Text (Text, pack, intercalate)
+import Data.Text qualified as Text
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import Data.Text.IO (readFile, writeFile)
+import Data.Vector (Vector)
+import Data.Vector qualified as Vector
+import Data.Word (Word8, Word32)
+import GHC.Generics (Generic)
+import Prelude hiding (readFile, writeFile)
+import System.IO hiding (readFile, writeFile)
 import System.IO.Temp
 import System.Process
-import Text.Read            (readMaybe)
-
-import qualified Data.Aeson.Key as Key
-import qualified Data.ByteString        as BS
-import qualified Data.ByteString.Base16 as BS16
-import qualified Data.HashMap.Strict    as HMap
-import qualified Data.Map.Strict        as Map
-import qualified Data.Text              as Text
-import qualified Data.Vector            as Vector
-import qualified Data.List.NonEmpty     as NonEmpty
-import Data.List (sort, isPrefixOf, isInfixOf, elemIndex, tails, findIndex)
+import Text.Read (readMaybe)
 
 data StorageItem = StorageItem {
   _type   :: SlotType,
@@ -143,19 +126,19 @@ instance Read SlotType where
   readsPrec _ s = [(StorageValue $ fromMaybe (error "could not parse storage item") (parseTypeName mempty (pack s)),"")]
 
 data SolcContract = SolcContract
-  { _runtimeCodehash  :: W256
-  , _creationCodehash :: W256
-  , _runtimeCode      :: ByteString
-  , _creationCode     :: ByteString
-  , _contractName     :: Text
-  , _constructorInputs :: [(Text, AbiType)]
-  , _abiMap           :: Map Word32 Method
-  , _eventMap         :: Map W256 Event
-  , _errorMap         :: Map W256 SolError
-  , _immutableReferences :: Map W256 [Reference]
-  , _storageLayout    :: Maybe (Map Text StorageItem)
-  , _runtimeSrcmap    :: Seq SrcMap
-  , _creationSrcmap   :: Seq SrcMap
+  { runtimeCodehash  :: W256
+  , creationCodehash :: W256
+  , runtimeCode      :: ByteString
+  , creationCode     :: ByteString
+  , contractName     :: Text
+  , constructorInputs :: [(Text, AbiType)]
+  , abiMap           :: Map Word32 Method
+  , eventMap         :: Map W256 Event
+  , errorMap         :: Map W256 SolError
+  , immutableReferences :: Map W256 [Reference]
+  , storageLayout    :: Maybe (Map Text StorageItem)
+  , runtimeSrcmap    :: Seq SrcMap
+  , creationSrcmap   :: Seq SrcMap
   } deriving (Show, Eq, Generic)
 
 data Method = Method
@@ -174,14 +157,14 @@ data Mutability
  deriving (Show, Eq, Ord, Generic)
 
 data SourceCache = SourceCache
-  { _sourceFiles  :: [(Text, ByteString)]
-  , _sourceLines  :: [(Vector ByteString)]
-  , _sourceAsts   :: Map Text Value
+  { files  :: [(Text, ByteString)]
+  , lines  :: [(Vector ByteString)]
+  , asts   :: Map Text Value
   } deriving (Show, Eq, Generic)
 
 data Reference = Reference
-  { _refStart :: Int,
-    _refLength :: Int
+  { start :: Int,
+    length :: Int
   } deriving (Show, Eq)
 
 instance FromJSON Reference where
@@ -220,8 +203,6 @@ data SrcMapParseState
 data CodeType = Creation | Runtime
   deriving (Show, Eq, Ord)
 
-makeLenses ''SolcContract
-makeLenses ''SourceCache
 makeLenses ''Method
 
 -- Obscure but efficient parser for the Solidity sourcemap format.
@@ -278,9 +259,9 @@ makeSourceCache paths asts = do
       f (fp, Nothing) = BS.readFile $ Text.unpack fp
   xs <- mapM f paths
   return $! SourceCache
-    { _sourceFiles = zip (fst <$> paths) xs
-    , _sourceLines = map (Vector.fromList . BS.split 0xa) xs
-    , _sourceAsts  = asts
+    { files = zip (fst <$> paths) xs
+    , lines = map (Vector.fromList . BS.split 0xa) xs
+    , asts  = asts
     }
 
 lineSubrange ::
@@ -324,19 +305,19 @@ solidity :: Text -> Text -> IO (Maybe ByteString)
 solidity contract src = do
   (json, path) <- solidity' src
   let (sol, _, _) = fromJust $ readJSON json
-  return (sol ^? ix (path <> ":" <> contract) . creationCode)
+  pure $ Map.lookup (path <> ":" <> contract) sol <&> (.creationCode)
 
 solcRuntime :: Text -> Text -> IO (Maybe ByteString)
 solcRuntime contract src = do
   (json, path) <- solidity' src
   let (sol, _, _) = fromJust $ readJSON json
-  return (sol ^? ix (path <> ":" <> contract) . runtimeCode)
+  pure $ Map.lookup (path <> ":" <> contract) sol <&> (.runtimeCode)
 
 functionAbi :: Text -> IO Method
 functionAbi f = do
   (json, path) <- solidity' ("contract ABI { function " <> f <> " public {}}")
   let (sol, _, _) = fromJust $ readJSON json
-  case Map.toList $ sol ^?! ix (path <> ":ABI") . abiMap of
+  case Map.toList $ (fromJust (Map.lookup (path <> ":ABI") sol)).abiMap of
      [(_,b)] -> return b
      _ -> error "hevm internal error: unexpected abi format"
 
@@ -365,19 +346,19 @@ readCombinedJSON json = do
                  Just v -> v                                       -- solc >= 0.8
                  Nothing -> (x ^?! key "abi" . _String) ^?! _Array -- solc <  0.8
       in SolcContract {
-        _runtimeCode      = theRuntimeCode,
-        _creationCode     = theCreationCode,
-        _runtimeCodehash  = keccak' (stripBytecodeMetadata theRuntimeCode),
-        _creationCodehash = keccak' (stripBytecodeMetadata theCreationCode),
-        _runtimeSrcmap    = force "internal error: srcmap-runtime" (makeSrcMaps (x ^?! key "srcmap-runtime" . _String)),
-        _creationSrcmap   = force "internal error: srcmap" (makeSrcMaps (x ^?! key "srcmap" . _String)),
-        _contractName = s,
-        _constructorInputs = mkConstructor abis,
-        _abiMap       = mkAbiMap abis,
-        _eventMap     = mkEventMap abis,
-        _errorMap     = mkErrorMap abis,
-        _storageLayout = mkStorageLayout $ x ^? key "storage-layout",
-        _immutableReferences = mempty -- TODO: deprecate combined-json
+        runtimeCode      = theRuntimeCode,
+        creationCode     = theCreationCode,
+        runtimeCodehash  = keccak' (stripBytecodeMetadata theRuntimeCode),
+        creationCodehash = keccak' (stripBytecodeMetadata theCreationCode),
+        runtimeSrcmap    = force "internal error: srcmap-runtime" (makeSrcMaps (x ^?! key "srcmap-runtime" . _String)),
+        creationSrcmap   = force "internal error: srcmap" (makeSrcMaps (x ^?! key "srcmap" . _String)),
+        contractName = s,
+        constructorInputs = mkConstructor abis,
+        abiMap       = mkAbiMap abis,
+        eventMap     = mkEventMap abis,
+        errorMap     = mkErrorMap abis,
+        storageLayout = mkStorageLayout $ x ^? key "storage-layout",
+        immutableReferences = mempty -- TODO: deprecate combined-json
       }
 
 readStdJSON :: Text -> Maybe (Map Text SolcContract, Map Text Value, [(Text, Maybe ByteString)])
@@ -408,19 +389,19 @@ readStdJSON json = do
         abis = force ("abi key not found in " <> show x) $
           toList <$> x ^? key "abi" . _Array
       in (s <> ":" <> c, (SolcContract {
-        _runtimeCode      = theRuntimeCode,
-        _creationCode     = theCreationCode,
-        _runtimeCodehash  = keccak' (stripBytecodeMetadata theRuntimeCode),
-        _creationCodehash = keccak' (stripBytecodeMetadata theCreationCode),
-        _runtimeSrcmap    = force "internal error: srcmap-runtime" (makeSrcMaps (runtime ^?! key "sourceMap" . _String)),
-        _creationSrcmap   = force "internal error: srcmap" (makeSrcMaps (creation ^?! key "sourceMap" . _String)),
-        _contractName = s <> ":" <> c,
-        _constructorInputs = mkConstructor abis,
-        _abiMap        = mkAbiMap abis,
-        _eventMap      = mkEventMap abis,
-        _errorMap      = mkErrorMap abis,
-        _storageLayout = mkStorageLayout $ x ^? key "storageLayout",
-        _immutableReferences = fromMaybe mempty $
+        runtimeCode      = theRuntimeCode,
+        creationCode     = theCreationCode,
+        runtimeCodehash  = keccak' (stripBytecodeMetadata theRuntimeCode),
+        creationCodehash = keccak' (stripBytecodeMetadata theCreationCode),
+        runtimeSrcmap    = force "internal error: srcmap-runtime" (makeSrcMaps (runtime ^?! key "sourceMap" . _String)),
+        creationSrcmap   = force "internal error: srcmap" (makeSrcMaps (creation ^?! key "sourceMap" . _String)),
+        contractName = s <> ":" <> c,
+        constructorInputs = mkConstructor abis,
+        abiMap        = mkAbiMap abis,
+        eventMap      = mkEventMap abis,
+        errorMap      = mkErrorMap abis,
+        storageLayout = mkStorageLayout $ x ^? key "storageLayout",
+        immutableReferences = fromMaybe mempty $
           do x' <- runtime ^? key "immutableReferences"
              case fromJSON x' of
                Success a -> return a
@@ -474,7 +455,7 @@ mkErrorMap abis = Map.fromList $
      ( stripKeccak $ keccak' (encodeUtf8 (signature abi))
      , SolError
        (abi ^?! key "name" . _String)
-       (map (\y -> ( force "internal error: type" (parseTypeName' y)))
+       (map (force "internal error: type" . parseTypeName')
        (toList $ abi ^?! key "inputs" . _Array))
      )
   in f <$> relevant

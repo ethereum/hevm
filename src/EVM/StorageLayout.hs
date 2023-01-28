@@ -29,7 +29,7 @@ findContractDefinition :: DappInfo -> SolcContract -> Maybe Value
 findContractDefinition dapp solc =
   -- The first source mapping in the contract's creation code
   -- corresponds to the source field of the contract definition.
-  case Seq.viewl (view creationSrcmap solc) of
+  case Seq.viewl solc.creationSrcmap of
     firstSrcMap Seq.:< _ ->
       dapp.astSrcMap firstSrcMap
     _ ->

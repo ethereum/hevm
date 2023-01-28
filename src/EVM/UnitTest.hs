@@ -179,7 +179,7 @@ initializeUnitTest UnitTestOptions { .. } theContract = do
     env . contracts . ix addr . balance += testParams.testBalanceCreate
 
     -- call setUp(), if it exists, to initialize the test contract
-    let theAbi = view abiMap theContract
+    let theAbi = theContract.abiMap
         setUp  = abiKeccak (encodeUtf8 "setUp()")
 
     when (isJust (Map.lookup setUp theAbi)) $ do
@@ -221,7 +221,7 @@ exploreStep UnitTestOptions{..} bs = do
         types = snd <$> inputs
     let ?context = DappContext dapp cs
     this <- fromMaybe (error "unknown target") <$> (use (env . contracts . at testParams.testAddress))
-    let name = maybe "" (contractNamePart . view contractName) $ lookupCode (view contractcode this) dapp
+    let name = maybe "" (contractNamePart . (.contractName)) $ lookupCode (view contractcode this) dapp
     pushTrace (EntryTrace (name <> "." <> sig <> "(" <> intercalate "," ((pack . show) <$> types) <> ")" <> showCall types (ConcreteBuf bs)))
   -- Try running the test method
   Stepper.execFully >>= \case
@@ -350,7 +350,7 @@ coverageReport dapp cov =
       $ mconcat
         ( dapp.solcByName
         & Map.elems
-        & map (\x -> view runtimeSrcmap x <> view creationSrcmap x)
+        & map (\x -> x.runtimeSrcmap <> x.creationSrcmap)
         )
       )
 
@@ -361,8 +361,8 @@ coverageReport dapp cov =
     linesByName =
       Map.fromList $ zipWith
           (\(name, _) lines' -> (name, lines'))
-          (view sourceFiles sources)
-          (view sourceLines sources)
+          sources.files
+          sources.lines
 
     f :: Text -> Vector ByteString -> Vector (Int, ByteString)
     f name =
@@ -535,11 +535,11 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
            knownAbis :: Map Addr SolcContract
            knownAbis =
              -- exclude contracts without code
-             Map.filter (not . BS.null . view runtimeCode) $
+             Map.filter (not . BS.null . (.runtimeCode)) $
              -- exclude contracts without state changing functions
-             Map.filter (not . null . Map.filter mutable . view abiMap) $
+             Map.filter (not . null . Map.filter mutable . (.abiMap)) $
              -- exclude testing abis
-             Map.filter (isNothing . preview (abiMap . ix unitTestMarkerAbi)) $
+             Map.filter (isNothing . preview (ix unitTestMarkerAbi) . (.abiMap)) $
              -- pick all contracts with known compiler artifacts
              fmap fromJust (Map.filter isJust $ Map.fromList [(addr, lookupCode (view contractcode c) dapp) | (addr, c)  <- Map.toList cs])
            selected = [(addr,
@@ -550,7 +550,7 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
          -- select random contract
          (target, solcInfo) <- generate $ elements (if null targets then Map.toList knownAbis else selected)
          -- choose a random mutable method
-         (_, (Method _ inputs sig _ _)) <- generate (elements $ Map.toList $ Map.filter mutable $ view abiMap solcInfo)
+         (_, (Method _ inputs sig _ _)) <- generate (elements $ Map.toList $ Map.filter mutable solcInfo.abiMap)
          let types = snd <$> inputs
          -- set the caller to a random address with 90% probability, 10% known EOA address
          let knownEOAs = Map.keys $ Map.filter noCode cs
@@ -592,7 +592,7 @@ getTargetContracts :: UnitTestOptions -> Stepper [Addr]
 getTargetContracts UnitTestOptions{..} = do
   vm <- Stepper.evm get
   let contract' = fromJust $ currentContract vm
-      theAbi = view abiMap $ fromJust $ lookupCode (view contractcode contract') dapp
+      theAbi = (fromJust $ lookupCode (view contractcode contract') dapp).abiMap
       setUp  = abiKeccak (encodeUtf8 "targetContracts()")
   case Map.lookup setUp theAbi of
     Nothing -> return []
@@ -964,7 +964,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
   let
     TestVMParams {..} = testParams
     vm = makeVm $ VMOpts
-           { vmoptContract = initialContract (InitCode (view creationCode theContract) mempty)
+           { vmoptContract = initialContract (InitCode theContract.creationCode mempty)
            , vmoptCalldata = mempty
            , vmoptValue = Lit 0
            , vmoptAddress = testAddress

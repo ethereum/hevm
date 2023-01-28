@@ -36,12 +36,12 @@ import EVM.Types (Addr, ByteStringS(..), Error(..))
 import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..))
 import EVM.ABI (Indexed (NotIndexed), getAbiSeq)
 import EVM.ABI (parseTypeName, formatString)
-import EVM.Solidity (SolcContract(..), contractName, abiMap)
+import EVM.Solidity (SolcContract(..))
 import EVM.Solidity (methodOutput, methodSignature, methodName)
 import EVM.Hexdump
 
 import Control.Arrow ((>>>))
-import Control.Lens (view, preview, ix, _2, to)
+import Control.Lens (view, preview, ix, _2)
 import Data.Binary.Get (runGetOrFail)
 import Data.Bits       (shiftR)
 import Data.ByteString (ByteString)
@@ -335,7 +335,7 @@ showTrace dapp vm trace =
         Just solc ->
           calltype
             <> "\x1b[1m"
-            <> view (contractName . to contractNamePart) solc
+            <> contractNamePart solc.contractName
             <> "::"
             <> maybe "[fallback function]"
                  (fromMaybe "[unknown method]" . maybeAbiName solc)
@@ -355,14 +355,14 @@ getAbiTypes abi = map (parseTypeName mempty) types
 
 maybeContractName :: Maybe SolcContract -> Text
 maybeContractName =
-  maybe "<unknown contract>" (view (contractName . to contractNamePart))
+  maybe "<unknown contract>" (contractNamePart . (.contractName))
 
 maybeContractName' :: Maybe SolcContract -> Text
 maybeContractName' =
-  maybe "" (view (contractName . to contractNamePart))
+  maybe "" (contractNamePart . (.contractName))
 
 maybeAbiName :: SolcContract -> W256 -> Maybe Text
-maybeAbiName solc abi = preview (abiMap . ix (fromIntegral abi) . methodSignature) solc
+maybeAbiName solc abi = preview (ix (fromIntegral abi) . methodSignature) solc.abiMap
 
 contractNamePart :: Text -> Text
 contractNamePart x = Text.split (== ':') x !! 1

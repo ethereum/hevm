@@ -58,8 +58,8 @@ dappInfo
 dappInfo root solcByName sources =
   let
     solcs = Map.elems solcByName
-    astIds = astIdMap $ snd <$> Map.toList sources._sourceAsts
-    immutables = filter ((/=) mempty . (._immutableReferences)) solcs
+    astIds = astIdMap $ snd <$> Map.toList sources.asts
+    immutables = filter ((/=) mempty . (.immutableReferences)) solcs
 
   in DappInfo
     { root = root
@@ -71,15 +71,15 @@ dappInfo root solcByName sources =
           f g k = Map.fromList [(g x, (k, x)) | x <- solcs]
         in
           mappend
-           (f (._runtimeCodehash)  Runtime)
-           (f (._creationCodehash) Creation)
+           (f (.runtimeCodehash)  Runtime)
+           (f (.creationCodehash) Creation)
       -- contracts with immutable locations can't be id by hash
     , solcByCode =
-      [(Code x._runtimeCode (concat $ Map.elems x._immutableReferences), x) | x <- immutables]
+      [(Code x.runtimeCode (concat $ Map.elems x.immutableReferences), x) | x <- immutables]
       -- Sum up the ABI maps from all the contracts.
-    , abiMap   = mconcat (map (._abiMap) solcs)
-    , eventMap = mconcat (map (._eventMap) solcs)
-    , errorMap = mconcat (map (._errorMap) solcs)
+    , abiMap   = mconcat (map (.abiMap) solcs)
+    , eventMap = mconcat (map (.eventMap) solcs)
+    , errorMap = mconcat (map (.errorMap) solcs)
 
     , astIdMap  = astIds
     , astSrcMap = astSrcMap astIds
@@ -114,22 +114,22 @@ mkTest sig
 findUnitTests :: Text -> ([SolcContract] -> [(Text, [(Test, [AbiType])])])
 findUnitTests match =
   concatMap $ \c ->
-    case Map.lookup unitTestMarkerAbi c._abiMap of
+    case Map.lookup unitTestMarkerAbi c.abiMap of
       Nothing -> []
       Just _  ->
         let testNames = unitTestMethodsFiltered (regexMatches match) c
-        in [(c._contractName, testNames) | not (BS.null c._runtimeCode) && not (null testNames)]
+        in [(c.contractName, testNames) | not (BS.null c.runtimeCode) && not (null testNames)]
 
 unitTestMethodsFiltered :: (Text -> Bool) -> (SolcContract -> [(Test, [AbiType])])
 unitTestMethodsFiltered matcher c =
   let
-    testName method = c._contractName <> "." <> (extractSig (fst method))
+    testName method = c.contractName <> "." <> (extractSig (fst method))
   in
     filter (matcher . testName) (unitTestMethods c)
 
 unitTestMethods :: SolcContract -> [(Test, [AbiType])]
 unitTestMethods =
-  (._abiMap)
+  (.abiMap)
   >>> Map.elems
   >>> map (\f -> (mkTest f._methodSignature, snd <$> f._methodInputs))
   >>> filter (isJust . fst)
@@ -148,9 +148,9 @@ srcMap dapp contr opIndex = do
   sol <- findSrc contr dapp
   case contr._contractcode of
     (InitCode _ _) ->
-      Seq.lookup opIndex sol._creationSrcmap
+      Seq.lookup opIndex sol.creationSrcmap
     (RuntimeCode _) ->
-      Seq.lookup opIndex sol._runtimeSrcmap
+      Seq.lookup opIndex sol.runtimeSrcmap
 
 findSrc :: Contract -> DappInfo -> Maybe SolcContract
 findSrc c dapp = do
