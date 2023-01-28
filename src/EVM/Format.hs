@@ -277,6 +277,8 @@ showTrace dapp vm trace =
           --"make unique value" <> pos
         PleaseDoFFI cmd _ ->
           "execute ffi " <> pack (show cmd) <> pos
+        PleaseDebugMe _vm _ ->
+          "debug " <> pos
 
     ErrorTrace e ->
       case e of

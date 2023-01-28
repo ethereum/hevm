@@ -139,6 +139,7 @@ data Query where
   PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM ()) -> Query
   PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM ()) -> Query
   PleaseDoFFI         :: [String] -> (ByteString -> EVM ()) -> Query
+  PleaseDebugMe       :: VM -> EVM () -> Query
 
 data Choose where
   PleaseChoosePath    :: Expr EWord -> (Bool -> EVM ()) -> Choose
@@ -161,6 +162,8 @@ instance Show Query where
 --         ++ show constraints ++ ">") ++)
     PleaseDoFFI cmd _ ->
       (("<EVM.Query: do ffi: " ++ (show cmd)) ++)
+    PleaseDebugMe _vm _ ->
+      (("<EVM.Query: debug>") ++)
 
 instance Show Choose where
   showsPrec _ = \case
@@ -1951,7 +1954,7 @@ cheat (inOffset, inSize) (outOffset, outSize) = do
 
 type CheatAction = Expr EWord -> Expr EWord -> Expr Buf -> EVM ()
 
-cheatActions :: Map Word32 CheatAction
+cheatActions :: (?op::Word8) => Map Word32 CheatAction
 cheatActions =
   Map.fromList
     [ action "ffi(string[])" $
@@ -2059,7 +2062,16 @@ cheatActions =
 
       action "prank(address)" $
         \sig _ _ input -> case decodeStaticArgs 0 1 input of
-          [addr]  -> assign overrideCaller (Just addr)
+          [addr] -> assign overrideCaller (Just addr)
+          _ -> vmError (BadCheatCode sig),
+
+      action "debug()" $
+        \sig _ _ input -> case decodeStaticArgs 0 0 input of
+          [] -> do
+            -- current VM state moved past the debug() call
+            debugVM <- gets (execState next)
+            assign result . Just . VMFailure $ Query $
+              PleaseDebugMe debugVM (assign result Nothing)
           _ -> vmError (BadCheatCode sig)
 
     ]

@@ -235,6 +235,9 @@ oracle solvers info q = do
            Nothing ->
              error ("oracle error: " ++ show q)
 
+    EVM.PleaseDebugMe _vm continue ->
+      pure continue
+
 type Fetcher = EVM.Query -> IO (EVM ())
 
 -- | Checks which branches are satisfiable, checking the pathconditions for consistency
