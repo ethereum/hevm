@@ -735,7 +735,7 @@ drawVmBrowser ui =
                       \(name, abiType) -> txt ("  " <> name <> ": " <> abiTypeSolidity abiType)
                   , txt "Public methods:"
                   , vBox . flip map (sort (Map.elems sol.abiMap)) $
-                      \method -> txt ("  " <> view methodSignature method)
+                      \method -> txt ("  " <> method.methodSignature)
                   --, txt ("Storage:" <> storageDisplay (view storage c)) -- TODO: fix this
                   ]
               , borderWithLabel (txt "Storage slots") . padBottom Max . padRight Max $ vBox

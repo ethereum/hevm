@@ -14,61 +14,52 @@ import EVM.Dapp
 import EVM.Debug (srcMapCodePos)
 import EVM.Exec
 import EVM.Expr (litAddr, readStorage', simplify)
+import EVM.Expr qualified as Expr
+import EVM.Facts qualified as Facts
+import EVM.Facts.Git qualified as Git
+import EVM.FeeSchedule qualified as FeeSchedule
+import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import qualified EVM.SymExec as SymExec
+import EVM.SymExec qualified as SymExec
 import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, VeriOpts)
 import EVM.Types hiding (Failure)
 import EVM.Transaction (initTx)
 import EVM.RLP
-import qualified EVM.Facts     as Facts
-import qualified EVM.Facts.Git as Git
-import qualified EVM.Fetch     as Fetch
-import qualified EVM.Expr      as Expr
-
-import qualified EVM.FeeSchedule as FeeSchedule
-
 import EVM.Stepper (Stepper, interpret)
-import qualified EVM.Stepper as Stepper
-import qualified Control.Monad.Operational as Operational
+import EVM.Stepper qualified as Stepper
 
+import Control.Monad.Operational qualified as Operational
 import Control.Lens hiding (Indexed, elements, List, passing)
-import Control.Monad.State.Strict hiding (state)
-import qualified Control.Monad.State.Strict as State
-
 import Control.Monad.Par.Class (spawn_)
+import Control.Monad.Par.Class qualified as Par
 import Control.Monad.Par.IO (runParIO)
-
-import qualified Data.ByteString.Lazy as BSLazy
-import Data.Binary.Get    (runGet)
-import Data.ByteString    (ByteString)
-import Data.Decimal       (DecimalRaw(..))
-import Data.Either        (isRight)
-import Data.Foldable      (toList)
-import Data.Map           (Map)
-import Data.Maybe         (fromMaybe, catMaybes, fromJust, isJust, fromMaybe, mapMaybe, isNothing)
-import Data.Text          (isPrefixOf, stripSuffix, intercalate, Text, pack, unpack)
-import Data.Word          (Word32, Word64)
-import Data.Text.Encoding (encodeUtf8)
-import System.Environment (lookupEnv)
-import System.IO          (hFlush, stdout)
-import GHC.Natural
-
-import qualified Control.Monad.Par.Class as Par
-import qualified Data.ByteString as BS
-import qualified Data.Map as Map
-import qualified Data.Text as Text
-import qualified Data.Text.IO as Text
-
+import Control.Monad.State.Strict hiding (state)
+import Control.Monad.State.Strict qualified as State
+import Data.ByteString.Lazy qualified as BSLazy
+import Data.Binary.Get (runGet)
+import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
+import Data.Decimal (DecimalRaw(..))
+import Data.Either (isRight)
+import Data.Foldable (toList)
+import Data.Map (Map)
+import Data.Map qualified as Map
+import Data.Maybe (fromMaybe, catMaybes, fromJust, isJust, fromMaybe, mapMaybe, isNothing)
 import Data.MultiSet (MultiSet)
-import qualified Data.MultiSet as MultiSet
-
+import Data.MultiSet qualified as MultiSet
 import Data.Set (Set)
-import qualified Data.Set as Set
-
+import Data.Set qualified as Set
+import Data.Text (isPrefixOf, stripSuffix, intercalate, Text, pack, unpack)
+import Data.Text qualified as Text
+import Data.Text.Encoding (encodeUtf8)
+import Data.Text.IO qualified as Text
 import Data.Vector (Vector)
-import qualified Data.Vector as Vector
-
+import Data.Vector qualified as Vector
+import Data.Word (Word32, Word64)
+import GHC.Natural
+import System.Environment (lookupEnv)
+import System.IO (hFlush, stdout)
 import Test.QuickCheck hiding (verbose)
 
 data UnitTestOptions = UnitTestOptions
@@ -531,7 +522,7 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
              RuntimeCode (ConcreteRuntimeCode "") -> True
              RuntimeCode (SymbolicRuntimeCode c') -> null c'
              _ -> False
-           mutable m = view methodMutability m `elem` [NonPayable, Payable]
+           mutable m = m.mutability `elem` [NonPayable, Payable]
            knownAbis :: Map Addr SolcContract
            knownAbis =
              -- exclude contracts without code

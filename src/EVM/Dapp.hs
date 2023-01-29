@@ -131,7 +131,7 @@ unitTestMethods :: SolcContract -> [(Test, [AbiType])]
 unitTestMethods =
   (.abiMap)
   >>> Map.elems
-  >>> map (\f -> (mkTest f._methodSignature, snd <$> f._methodInputs))
+  >>> map (\f -> (mkTest f.methodSignature, snd <$> f.inputs))
   >>> filter (isJust . fst)
   >>> fmap (first fromJust)
 

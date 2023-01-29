@@ -1,7 +1,6 @@
 {-# Language DeriveAnyClass #-}
 {-# Language DataKinds #-}
 {-# Language StrictData #-}
-{-# Language TemplateHaskell #-}
 {-# Language QuasiQuotes #-}
 
 module EVM.Solidity
@@ -21,11 +20,6 @@ module EVM.Solidity
   , SlotType (..)
   , Reference(..)
   , Mutability(..)
-  , methodName
-  , methodSignature
-  , methodInputs
-  , methodOutput
-  , methodMutability
   , functionAbi
   , makeSrcMaps
   , readSolc
@@ -88,10 +82,10 @@ import System.IO.Temp
 import System.Process
 import Text.Read (readMaybe)
 
-data StorageItem = StorageItem {
-  _type   :: SlotType,
-  _offset :: Int,
-  _slot   :: Int
+data StorageItem = StorageItem
+  { slotType :: SlotType
+  , offset :: Int
+  , slot :: Int
   } deriving (Show, Eq)
 
 data SlotType
@@ -142,11 +136,11 @@ data SolcContract = SolcContract
   } deriving (Show, Eq, Generic)
 
 data Method = Method
-  { _methodOutput :: [(Text, AbiType)]
-  , _methodInputs :: [(Text, AbiType)]
-  , _methodName :: Text
-  , _methodSignature :: Text
-  , _methodMutability :: Mutability
+  { output :: [(Text, AbiType)]
+  , inputs :: [(Text, AbiType)]
+  , name :: Text
+  , methodSignature :: Text
+  , mutability :: Mutability
   } deriving (Show, Eq, Ord, Generic)
 
 data Mutability
@@ -202,8 +196,6 @@ data SrcMapParseState
 
 data CodeType = Creation | Runtime
   deriving (Show, Eq, Ord)
-
-makeLenses ''Method
 
 -- Obscure but efficient parser for the Solidity sourcemap format.
 makeSrcMaps :: Text -> Maybe (Seq SrcMap)
@@ -414,13 +406,13 @@ mkAbiMap abis = Map.fromList $
     relevant = filter (\y -> "function" == y ^?! key "type" . _String) abis
     f abi =
       (abiKeccak (encodeUtf8 (signature abi)),
-       Method { _methodName = abi ^?! key "name" . _String
-              , _methodSignature = signature abi
-              , _methodInputs = map parseMethodInput
+       Method { name = abi ^?! key "name" . _String
+              , methodSignature = signature abi
+              , inputs = map parseMethodInput
                  (toList (abi ^?! key "inputs" . _Array))
-              , _methodOutput = map parseMethodInput
+              , output = map parseMethodInput
                  (toList (abi ^?! key "outputs" . _Array))
-              , _methodMutability = parseMutability
+              , mutability = parseMutability
                  (abi ^?! key "stateMutability" . _String)
               })
   in f <$> relevant

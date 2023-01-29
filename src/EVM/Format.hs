@@ -27,43 +27,37 @@ module EVM.Format
 import Prelude hiding (Word)
 
 import EVM qualified
-import EVM.Dapp (DappInfo (..), showTraceLocation)
-import EVM.Dapp (DappContext (..))
-import EVM (VM, cheatCode, traceForest, traceData, Error (..))
-import EVM (Trace, TraceData (..), Query (..), FrameContext (..))
-import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..))
-import EVM.Types (Addr, ByteStringS(..), Error(..))
-import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..))
-import EVM.ABI (Indexed (NotIndexed), getAbiSeq)
-import EVM.ABI (parseTypeName, formatString)
-import EVM.Solidity (SolcContract(..))
-import EVM.Solidity (methodOutput, methodSignature, methodName)
-import EVM.Hexdump
-
+import EVM (VM, cheatCode, traceForest, traceData, Error(..), Trace,
+  TraceData(..), Query(..), FrameContext(..))
+import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError(..),
+  Indexed(NotIndexed), getAbiSeq, parseTypeName, formatString)
+import EVM.Dapp (DappContext(..), DappInfo(..), showTraceLocation)
+import EVM.Expr qualified as Expr
+import EVM.Hexdump (prettyHex)
+import EVM.Solidity (SolcContract(..), Method(..))
+import EVM.Types (maybeLitWord, W256(..), num, word, Expr(..), EType(..), Addr,
+  ByteStringS(..), Error(..))
 import Control.Arrow ((>>>))
 import Control.Lens (view, preview, ix, _2)
 import Data.Binary.Get (runGetOrFail)
-import Data.Bits       (shiftR)
+import Data.Bits (shiftR)
 import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
 import Data.ByteString.Builder (byteStringHex, toLazyByteString)
 import Data.ByteString.Lazy (toStrict, fromStrict)
+import Data.Char qualified as Char
 import Data.DoubleWord (signedWord)
 import Data.Foldable (toList)
+import Data.Functor ((<&>))
+import Data.Map qualified as Map
 import Data.Maybe (catMaybes, fromMaybe, fromJust)
-import Data.Text (Text, pack, unpack, intercalate)
-import Data.Text (dropEnd, splitOn)
+import Data.Text (Text, pack, unpack, intercalate, dropEnd, splitOn)
+import Data.Text qualified as T
 import Data.Text.Encoding (decodeUtf8, decodeUtf8')
 import Data.Tree.View (showTree)
 import Data.Vector (Vector)
 import Data.Word (Word32)
 import Numeric (showHex)
-
-import qualified Data.ByteString as BS
-import qualified Data.Char as Char
-import qualified Data.Map as Map
-import qualified Data.Text as Text
-import qualified EVM.Expr as Expr
-import qualified Data.Text as T
 
 data Signedness = Signed | Unsigned
   deriving (Show)
@@ -72,7 +66,7 @@ showDec :: Signedness -> W256 -> Text
 showDec signed (W256 w)
   | i == num cheatCode = "<hevm cheat address>"
   | (i :: Integer) == 2 ^ (256 :: Integer) - 1 = "MAX_UINT256"
-  | otherwise = Text.pack (show (i :: Integer))
+  | otherwise = T.pack (show (i :: Integer))
   where
     i = case signed of
           Signed   -> num (signedWord w)
@@ -86,16 +80,16 @@ showWordExplanation w _ | w > 0xffffffff = showDec Unsigned w
 showWordExplanation w dapp =
   case Map.lookup (fromIntegral w) dapp.abiMap of
     Nothing -> showDec Unsigned w
-    Just x  -> "keccak(\"" <> view methodSignature x <> "\")"
+    Just x  -> "keccak(\"" <> x.methodSignature <> "\")"
 
 humanizeInteger :: (Num a, Integral a, Show a) => a -> Text
 humanizeInteger =
-  Text.intercalate ","
+  T.intercalate ","
   . reverse
-  . map Text.reverse
-  . Text.chunksOf 3
-  . Text.reverse
-  . Text.pack
+  . map T.reverse
+  . T.chunksOf 3
+  . T.reverse
+  . T.pack
   . show
 
 prettyIfConcreteWord :: Expr EWord -> Text
@@ -164,7 +158,7 @@ isPrintable =
   decodeUtf8' >>>
     either
       (const False)
-      (Text.all (\c-> Char.isPrint c && (not . Char.isControl) c))
+      (T.all (\c-> Char.isPrint c && (not . Char.isControl) c))
 
 formatBytes :: ByteString -> Text
 formatBytes b =
@@ -176,7 +170,7 @@ formatBytes b =
 
 -- a string that came from bytes, displayed with special quotes
 formatBString :: ByteString -> Text
-formatBString b = mconcat [ "«",  Text.dropAround (=='"') (pack $ formatString b), "»" ]
+formatBString b = mconcat [ "«",  T.dropAround (=='"') (pack $ formatString b), "»" ]
 
 formatBinary :: ByteString -> Text
 formatBinary =
@@ -256,7 +250,7 @@ showTrace dapp vm trace =
                       in
                         case Map.lookup sig dapp.abiMap of
                           Just m ->
-                            lognote (view methodSignature m) usr
+                            lognote m.methodSignature usr
                           Nothing ->
                             logn
                     _ ->
@@ -288,7 +282,7 @@ showTrace dapp vm trace =
       "← " <>
         case Map.lookup (fromIntegral abi) fullAbiMap of
           Just m  ->
-            case unzip (view methodOutput m) of
+            case unzip m.output of
               ([], []) ->
                 formatSBinary out
               (_, ts) ->
@@ -325,9 +319,9 @@ showTrace dapp vm trace =
             <> case Map.lookup (fromIntegral (fromMaybe 0x00 abi)) fullAbiMap of
                  Just m  ->
                    "\x1b[1m"
-                   <> view methodName m
+                   <> m.name
                    <> "\x1b[0m"
-                   <> showCall (catMaybes (getAbiTypes (view methodSignature m))) calldata
+                   <> showCall (catMaybes (getAbiTypes m.methodSignature)) calldata
                  Nothing ->
                    formatSBinary calldata
             <> pos
@@ -362,13 +356,13 @@ maybeContractName' =
   maybe "" (contractNamePart . (.contractName))
 
 maybeAbiName :: SolcContract -> W256 -> Maybe Text
-maybeAbiName solc abi = preview (ix (fromIntegral abi) . methodSignature) solc.abiMap
+maybeAbiName solc abi = Map.lookup (fromIntegral abi) solc.abiMap <&> (.methodSignature)
 
 contractNamePart :: Text -> Text
-contractNamePart x = Text.split (== ':') x !! 1
+contractNamePart x = T.split (== ':') x !! 1
 
 contractPathPart :: Text -> Text
-contractPathPart x = Text.split (== ':') x !! 0
+contractPathPart x = T.split (== ':') x !! 0
 
 prettyError :: EVM.Types.Error -> String
 prettyError= \case
