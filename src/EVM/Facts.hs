@@ -33,7 +33,7 @@ module EVM.Facts
   ) where
 
 import EVM          (VM, Contract, Cache)
-import EVM          (balance, nonce, storage, bytecode, env, contracts, contract, state, cache, fetchedStorage, fetchedContracts)
+import EVM          (balance, nonce, storage, bytecode, env, contracts, cache, fetchedStorage, fetchedContracts)
 import EVM.Types    (Addr, W256, Expr(..), num)
 import EVM.Expr     (writeStorage, litAddr)
 
@@ -112,15 +112,15 @@ contractFacts :: Addr -> Contract -> Map W256 (Map W256 W256) -> [Fact]
 contractFacts a x store = case view bytecode x of
   ConcreteBuf b ->
     storageFacts a store ++
-    [ BalanceFact a (view balance x)
-    , NonceFact   a (view nonce x)
+    [ BalanceFact a x._balance
+    , NonceFact   a x._nonce
     , CodeFact    a b
     ]
   _ ->
     -- here simply ignore storing the bytecode
     storageFacts a store ++
-    [ BalanceFact a (view balance x)
-    , NonceFact   a (view nonce x)
+    [ BalanceFact a x._balance
+    , NonceFact   a x._nonce
     ]
 
 
@@ -136,13 +136,13 @@ storageFacts a store = map f (Map.toList (Map.findWithDefault Map.empty (num a) 
 
 cacheFacts :: Cache -> Set Fact
 cacheFacts c = Set.fromList $ do
-  (k, v) <- Map.toList (view EVM.fetchedContracts c)
-  contractFacts k v (view EVM.fetchedStorage c)
+  (k, v) <- Map.toList c._fetchedContracts
+  contractFacts k v c._fetchedStorage
 
 vmFacts :: VM -> Set Fact
 vmFacts vm = Set.fromList $ do
-  (k, v) <- Map.toList (view (env . contracts) vm)
-  case view (env . storage) vm of
+  (k, v) <- Map.toList vm._env._contracts
+  case vm._env._storage of
     EmptyStore -> contractFacts k v Map.empty
     ConcreteStore s -> contractFacts k v s
     _ -> error "cannot serialize an abstract store"
@@ -159,7 +159,7 @@ apply1 vm fact =
   case fact of
     CodeFact    {..} -> flip execState vm $ do
       assign (env . contracts . at addr) (Just (EVM.initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode blob))))
-      when (view (state . contract) vm == addr) $ EVM.loadContract addr
+      when (vm._state._contract == addr) $ EVM.loadContract addr
     StorageFact {..} ->
       vm & over (env . storage) (writeStorage (litAddr addr) (Lit which) (Lit what))
     BalanceFact {..} ->
@@ -172,9 +172,9 @@ apply2 vm fact =
   case fact of
     CodeFact    {..} -> flip execState vm $ do
       assign (cache . fetchedContracts . at addr) (Just (EVM.initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode blob))))
-      when (view (state . contract) vm == addr) $ EVM.loadContract addr
+      when (vm._state._contract == addr) $ EVM.loadContract addr
     StorageFact {..} -> let
-        store = view (cache . fetchedStorage) vm
+        store = vm._cache._fetchedStorage
         ctrct = Map.findWithDefault Map.empty (num addr) store
       in
         vm & set (cache . fetchedStorage) (Map.insert (num addr) (Map.insert which what ctrct) store)

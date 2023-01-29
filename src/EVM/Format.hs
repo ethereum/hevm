@@ -27,7 +27,7 @@ module EVM.Format
 import Prelude hiding (Word)
 
 import EVM qualified
-import EVM (VM, cheatCode, traceForest, traceData, Error(..), Trace,
+import EVM (VM, cheatCode, traceForest, Error(..), Trace,
   TraceData(..), Query(..), FrameContext(..))
 import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError(..),
   Indexed(NotIndexed), getAbiSeq, parseTypeName, formatString)
@@ -38,7 +38,7 @@ import EVM.Solidity (SolcContract(..), Method(..))
 import EVM.Types (maybeLitWord, W256(..), num, word, Expr(..), EType(..), Addr,
   ByteStringS(..), Error(..))
 import Control.Arrow ((>>>))
-import Control.Lens (view, preview, ix, _2)
+import Control.Lens (preview, ix, _2)
 import Data.Binary.Get (runGetOrFail)
 import Data.Bits (shiftR)
 import Data.ByteString (ByteString)
@@ -199,7 +199,7 @@ showTrace dapp vm trace =
         Left x -> " \x1b[1m" <> x <> "\x1b[0m"
         Right x -> " \x1b[1m(" <> x <> ")\x1b[0m"
     fullAbiMap = dapp.abiMap
-  in case view traceData trace of
+  in case trace._traceData of
     EventTrace _ bytes topics ->
       let logn = mconcat
             [ "\x1b[36m"
