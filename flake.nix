@@ -50,6 +50,7 @@
                 "--extra-lib-dirs=${glibc}/lib"
                 "--extra-lib-dirs=${glibc.static}/lib"
               ]))
+            haskell.lib.compose.doBenchmark
             haskell.lib.dontHaddock
           ]).overrideAttrs(final: prev: {
             HEVM_SOLIDITY_REPO = solidity;
