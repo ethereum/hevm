@@ -5,7 +5,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DefaultSignatures #-}
 
-{-# OPTIONS_GHC -Wno-error=inline-rule-shadowing #-}
+{-# OPTIONS_GHC -Wno-inline-rule-shadowing #-}
 
 module EVM.Types where
 
