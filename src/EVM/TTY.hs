@@ -986,7 +986,7 @@ drawSolidityPane ui =
           in vBox
             [ hBorderWithLabel $
                 txt (fromMaybe "<unknown>" fileName)
-                  <+> str (":" ++ show lineNo)
+                  <+> str (":" ++ (maybe "?" show lineNo))
 
                   -- Show the AST node type if present
                   <+> txt (" (" <> fromMaybe "?"

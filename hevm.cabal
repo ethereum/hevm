@@ -24,6 +24,7 @@ build-type:
   Simple
 extra-source-files:
   CHANGELOG.md
+  bench/contracts/erc20.sol
   test/contracts/lib/test.sol
   test/contracts/lib/erc20.sol
   test/contracts/pass/trivial.sol
@@ -234,6 +235,8 @@ executable hevm
     stm,
     spawn
 
+--- Test Helpers ---
+
 common test-base
   import: shared
   if flag (devel)
@@ -278,6 +281,7 @@ common test-base
     time,
     array,
     vector,
+    tasty-bench,
     stm >= 2.5.0,
     spawn >= 0.3,
     witherable,
@@ -330,3 +334,30 @@ test-suite ethereum-tests
     exitcode-stdio-1.0
   main-is:
     BlockchainTests.hs
+
+--- Benchmarks ---
+
+benchmark bench
+  import: shared
+  type:
+    exitcode-stdio-1.0
+  main-is:
+    bench.hs
+  hs-source-dirs:
+    bench
+  if os(darwin)
+     extra-libraries: c++
+  else
+     extra-libraries: stdc++
+  other-modules:
+    Paths_hevm
+  autogen-modules:
+    Paths_hevm
+  build-depends:
+    base,
+    tasty-bench,
+    tasty,
+    bytestring,
+    text,
+    hevm,
+    here
