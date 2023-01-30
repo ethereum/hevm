@@ -14,7 +14,7 @@ import qualified Data.Text as T
 import EVM (StorageModel(..))
 import EVM.SymExec
 import EVM.Solidity
-import EVM.SMT
+import EVM.Solvers
 import EVM.ABI
 import EVM.Dapp
 import EVM.Types
