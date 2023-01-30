@@ -94,38 +94,35 @@ data EVMToolEnv =
   EVMToolEnv
   { currentCoinbase    :: Addr
   , currentDifficulty  :: W256
-  , currentGasLimit    :: Data.Word.Word64
-  , currentNumber      :: W256
-  , currentTimestamp   :: W256
+  , currentGasLimit    :: W64 -- used to be `Data.Word.Word64` but that's not representable
+  , currentNumber      :: W256 -- should be INT instead of 0x...
+  , currentTimestamp   :: W256 -- should be INT instead of 0x...
   } deriving (Generic)
 instance JSON.ToJSON EVMToolEnv where
   toJSON =  JSON.genericToJSON JSON.defaultOptions
-
-instance JSON.ToJSON ByteString where
-  toJSON = JSON.String . Data.Text.pack . show
 
 data EVMToolAlloc =
   EVMToolAlloc
   { balance :: W256
   , code :: ByteString
-  , nonce :: W256
-  , storage :: Map.Map W256 ByteString
+  , nonce :: W64
+  -- , storage :: Map.Map W256 ByteString
   } deriving (Generic)
 instance JSON.ToJSON EVMToolAlloc where
   toJSON = JSON.genericToJSON JSON.defaultOptions
 
 data EVMToolTx =
   EVMToolTx
-  { gas :: Data.Word.Word64
-  , gasPrice :: W256
+  { gas :: W64
+  , gasPrice :: W64
   , hash :: W256
   , input :: ByteString
-  , nonce :: W256
+  , nonce :: W64
   , r :: W256
   , s :: W256
   , to :: Addr
-  , v :: W256
-  , value :: W256
+  , v :: W64
+  , value :: W64
   } deriving (Generic)
 instance JSON.ToJSON EVMToolTx where
   toJSON = JSON.genericToJSON JSON.defaultOptions
@@ -183,14 +180,16 @@ tests = testGroup "hevm"
                                , v = 0x1b
                                , value = 0x1
                                }
-            allocjson = EVMToolAlloc{ balance = 0x5ffd4878be161d74
+            allocjson1 = EVMToolAlloc{ balance = 0x5ffd4878be161d74
                                     , code = bitcode
                                     , nonce = 0
-                                    , storage = Map.empty
+                                    -- , storage = Map.empty
                                     }
+            allocjson :: Map.Map Addr EVMToolAlloc
+            allocjson = Map.fromList ([(0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b, allocjson1)])
         JSON.encodeFile "env.json"  envjson
-        JSON.encodeFile "tx.json"  txjson
-        JSON.encodeFile "alloc.json"  allocjson
+        JSON.encodeFile "txs.json"  [txjson]
+        JSON.encodeFile "alloc.json"  allocjson -- something wrong?
         traceFile <- openFile "trace.json" WriteMode
         res <- runCodeWithTrace Nothing bitcode calldat traceFile
         hClose traceFile

@@ -29,6 +29,7 @@ import Data.DoubleWord.TH
 import Data.Maybe (fromMaybe)
 import Numeric (readHex, showHex)
 import Options.Generic
+import EVM.Hexdump (simpleHexNoGap)
 import Control.Arrow ((>>>))
 
 import qualified Data.ByteArray       as BA
@@ -464,8 +465,8 @@ instance Show ByteStringS where
       fromBinary =
         Text.decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
-instance JSON.ToJSON ByteStringS where
-  toJSON = JSON.String . Text.pack . show
+instance JSON.ToJSON ByteString where
+  toJSON x = JSON.String (Text.pack $ "0x" ++ simpleHexNoGap x)
 
 newtype Addr = Addr { addressWord160 :: Word160 }
   deriving
@@ -487,9 +488,28 @@ instance Show W256 where
   showsPrec _ s = ("0x" ++) . showHex s
 
 instance JSON.ToJSON W256 where
-  toJSON = JSON.String . Text.pack . show
+  toJSON x = JSON.String  $ Text.pack ("0x" ++ pad ++ cutshow)
+    where
+      cutshow = drop 2 $ show x
+      pad = replicate (64 - length (cutshow)) '0'
 
-instance JSON.ToJSONKey W256
+newtype W64 = W64 Data.Word.Word64
+  deriving
+    ( Num, Integral, Real, Ord, Generic
+    , Bits , FiniteBits, Enum, Eq , Bounded
+    )
+
+instance Read W64 where
+  readsPrec _ "0x" = [(0, "")]
+  readsPrec n s = first W64 <$> readsPrec n s
+
+instance Show W64 where
+  showsPrec _ s = ("0x" ++) . showHex s
+
+instance JSON.ToJSON W64 where
+  toJSON x = JSON.String  $ Text.pack ("0x" ++ cutshow)
+    where
+      cutshow = drop 2 $ show x
 
 instance Read Addr where
   readsPrec _ ('0':'x':s) = readHex s
@@ -500,6 +520,14 @@ instance Show Addr where
     let hex = showHex addr next
         str = replicate (40 - length hex) '0' ++ hex
     in "0x" ++ toChecksumAddress str ++ drop 40 str
+
+instance JSON.ToJSONKey Addr where
+  toJSONKey = JSON.toJSONKeyText (addrKey)
+    where
+      addrKey :: Addr -> Text
+      addrKey addr = Text.pack $ replicate (40 - length hex) '0' ++ hex
+        where
+          hex = show addr
 
 -- https://eips.ethereum.org/EIPS/eip-55
 toChecksumAddress :: String -> String
