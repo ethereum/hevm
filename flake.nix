@@ -22,10 +22,12 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        secp256k1-static = pkgs.secp256k1.overrideAttrs (attrs: {
+
+        secp256k1-static = stripDylib (pkgs.secp256k1.overrideAttrs (attrs: {
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
-        });
-        hevmUnwrapped = (with pkgs; lib.pipe (
+        }));
+
+        hevmUnwrapped = (with pkgs.pkgs; lib.pipe (
           haskellPackages.callCabal2nix "hevm" ./. {
             # Haskell libs with the same names as C libs...
             # Depend on the C libs, not the Haskell libs.
@@ -33,29 +35,32 @@
             inherit secp256k1;
           })
           [
-            (haskell.lib.compose.overrideCabal (old : {
-              testTarget = "test";
-            }))
+            (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
             (haskell.lib.compose.addTestToolDepends [ solc z3 cvc5 ])
+            (haskell.lib.compose.appendBuildFlags ["-v3"])
             (haskell.lib.compose.appendConfigureFlags (
-              [ "--ghc-option=-O2" "-fci" ]
+              [ "-fci"
+                "--extra-lib-dirs=${stripDylib (pkgs.gmp.override { withStatic = true; })}/lib"
+                "--extra-lib-dirs=${stripDylib secp256k1-static}/lib"
+                "--extra-lib-dirs=${stripDylib (libff.override { enableStatic = true; })}/lib"
+                "--extra-lib-dirs=${zlib.static}/lib"
+                "--extra-lib-dirs=${stripDylib (libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
+                "--extra-lib-dirs=${stripDylib (ncurses.override { enableStatic = true; })}/lib"
+              ]
               ++ lib.optionals stdenv.isLinux [
                 "--enable-executable-static"
-                "--extra-lib-dirs=${gmp.override { withStatic = true; }}/lib"
-                "--extra-lib-dirs=${secp256k1-static}/lib"
-                "--extra-lib-dirs=${libff.override { enableStatic = true; }}/lib"
-                "--extra-lib-dirs=${ncurses.override { enableStatic = true; }}/lib"
-                "--extra-lib-dirs=${zlib.static}/lib"
-                "--extra-lib-dirs=${libffi.overrideAttrs (_: { dontDisableStatic = true; })}/lib"
+                # TODO: replace this with musl: https://stackoverflow.com/a/57478728
                 "--extra-lib-dirs=${glibc}/lib"
                 "--extra-lib-dirs=${glibc.static}/lib"
               ]))
-            haskell.lib.compose.doBenchmark
             haskell.lib.dontHaddock
           ]).overrideAttrs(final: prev: {
             HEVM_SOLIDITY_REPO = solidity;
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
           });
+
+        # wrapped binary for use on systems with nix available. ensures all
+        # required runtime deps are available and on path
         hevmWrapped = with pkgs; symlinkJoin {
           name = "hevm";
           paths = [ hevmUnwrapped ];
@@ -65,17 +70,59 @@
               --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3 cvc5 ])}"
           '';
         };
+
+        # "static" binary for distribution
+        # on linux this is actually a real fully static binary
+        # on macos this has everything except libcxx, libsystem and libiconv
+        # statically linked. we can be confident that these three will always
+        # be provided in a well known location by macos itself.
+        hevmRedistributable = let
+          grep = "${pkgs.gnugrep}/bin/grep";
+          otool = "${pkgs.darwin.binutils.bintools}/bin/otool";
+          install_name_tool = "${pkgs.darwin.binutils.bintools}/bin/install_name_tool";
+        in if pkgs.stdenv.isLinux
+        then pkgs.haskell.lib.dontCheck hevmWrapped
+        else pkgs.runCommand "stripNixRefs" {} ''
+          mkdir -p $out/bin
+          cp ${pkgs.haskell.lib.dontCheck hevmUnwrapped}/bin/hevm $out/bin/
+
+          # get the list of dynamic libs from otool and tidy the output
+          libs=$(${otool} -L $out/bin/hevm | tail -n +2 | sed 's/^[[:space:]]*//' | cut -d' ' -f1)
+
+          # get the paths for libcxx and libiconv
+          cxx=$(echo "$libs" | ${grep} '^/nix/store/.*-libcxx')
+          iconv=$(echo "$libs" | ${grep} '^/nix/store/.*-libiconv')
+
+          # rewrite /nix/... library paths to point to /usr/lib
+          chmod 777 $out/bin/hevm
+          ${install_name_tool} -change "$cxx" /usr/lib/libstdc++.dylib $out/bin/hevm
+          ${install_name_tool} -change "$iconv" /usr/lib/libiconv.dylib $out/bin/hevm
+          chmod 555 $out/bin/hevm
+        '';
+
+        # if we pass a library folder to ghc via --extra-lib-dirs that contains
+        # only .a files, then ghc will link that library statically instead of
+        # dynamically (even if --enable-executable-static is not passed to cabal).
+        # we use this trick to force static linking of some libraries on macos.
+        stripDylib = drv : pkgs.runCommand "${drv.name}-strip-dylibs" {} ''
+          mkdir -p $out
+          mkdir -p $out/lib
+          cp -r ${drv}/* $out/
+          rm -rf $out/**/*.dylib
+        '';
+
       in rec {
 
         # --- packages ----
 
-        packages.hevm = hevmWrapped;
-        packages.hevmUnwrapped = hevmUnwrapped;
-        packages.default = hevmWrapped;
+        packages.withTests = hevmUnwrapped;
+        packages.hevm = pkgs.haskell.lib.dontCheck hevmWrapped;
+        packages.redistributable = hevmRedistributable;
+        packages.default = packages.hevm;
 
         # --- apps ----
 
-        apps.hevm = flake-utils.lib.mkApp { drv = hevmWrapped; };
+        apps.hevm = flake-utils.lib.mkApp { drv = packages.hevm; };
         apps.default = apps.hevm;
 
         # --- shell ---
