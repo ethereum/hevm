@@ -103,6 +103,51 @@ declareIntermediates bufs stores =
     encodeStore n expr =
        fromLazyText ("(define-const store" <> (T.pack . show $ n) <> " Storage ") <> exprToSMT expr <> ")"
 
+-- | This function overapproximates the reads from the abstract
+-- storage. Potentially, it can return locations that do not read a
+-- slot directly from the abstract store but from subsequent writes on
+-- the store (e.g, SLoad addr idx (SStore addr idx val AbstractStore)).
+-- However, we expect that most of such reads will have been
+-- simplified away.
+findStorageReads :: Prop -> [(Expr EWord, Expr EWord)]
+findStorageReads = foldProp go []
+  where
+    go :: Expr a -> [(Expr EWord, Expr EWord)]
+    go = \case
+      SLoad addr slot storage -> [(addr, slot) | containsNode isAbstractStore storage]
+      _ -> []
+
+    isAbstractStore AbstractStore = True
+    isAbstractStore _ = False
+
+findBufferReads :: TraversableTerm a => [a] -> ([(Expr EWord, Expr Buf)], [(Expr EWord, Expr Buf)])
+findBufferReads = foldl (\acc p -> foldTerm go acc p) mempty
+  where
+    go :: Expr a -> ([(Expr EWord, Expr Buf)], [(Expr EWord, Expr Buf)])
+    go = \case
+      ReadWord idx buf -> ([(idx, buf)], [])
+      ReadByte idx buf -> ([], [(idx, buf)])
+      _ -> mempty
+
+assertReads :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
+assertReads props benv senv =
+  fmap assertReadWord wordReads <> fmap assertReadByte byteReads
+
+  where
+    assertReadWord (idx, buf) = POr (PEq (ReadWord idx buf) (Lit 0)) (PNeg (PGEq idx (bufLength buf)))
+    assertReadByte (idx, buf) = POr (PEq (ReadByte idx buf) (LitByte 0)) (PNeg (PGEq idx (bufLength buf)))
+
+    allReads = findBufferReads props <> findBufferReads (Map.elems benv) <> findBufferReads (Map.elems senv)
+    wordReads = filter keepRead $ nubOrd $ fst allReads
+    byteReads = filter keepRead $ nubOrd $ snd allReads
+
+    -- discard constraints if we can statically determine that read is less than the buffer length
+    keepRead (Lit idx, buf) =
+      case minLength benv buf of
+        Just l | num idx < l -> False
+        _ -> True
+    keepRead _ = True
+
 assertProps :: [Prop] -> SMT2
 assertProps ps =
   let encs = map propToSMT ps_elim
