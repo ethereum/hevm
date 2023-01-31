@@ -1674,9 +1674,8 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, p) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
-          print p
-          -- putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "keccak soundness" $ do
           Just c <- solcRuntime "C"
