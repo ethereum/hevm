@@ -360,7 +360,7 @@ assert cmd = do
     (Nothing, Just sig') -> do
       method' <- functionAbi sig'
       let typs = snd <$> method'.inputs
-      pure $ symCalldata method'.methodSignature typs cmd.arg mempty
+      pure $ symCalldata method'.methodSignature typs cmd.arg (AbstractBuf "txdata")
     _ -> error "incompatible options: calldata and abi"
 
   preState <- symvmFromCommand cmd calldata'
