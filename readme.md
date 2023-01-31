@@ -16,12 +16,37 @@ User facing documentation can be found in the [hevm book](https://hevm.dev/).
 
 ## Installation
 
-Static binaries for x86 linux are available for each [release](https://github.com/ethereum/hevm/releases).
+### Static Binaries
 
-Alternatively `hevm` can be installed using nix flakes via the following command:
+Static binaries for x86 linux and macos are available for each
+[release](https://github.com/ethereum/hevm/releases). These binaries expect to be able to find the
+following programs on `PATH`:
+
+- `git`
+- `solc`
+- `z3`
+- `cvc5`
+
+### nixpkgs
+
+hevm is available in
+[`nixpkgs`](https://search.nixos.org/packages?channel=unstable&show=haskellPackages.hevm&from=0&size=50&sort=relevance&type=packages&query=hevm) (unstable only for now), and can be installed via:
+
+- flakes: `nix profile install nixpkgs#haskellPackages.hevm`
+- legacy: `nix-env -iA haskellPackages.hevm`
+
+### nix flakes
+
+hevm can be installed directly from the `main` branch of this repo via the following command:
 
 ```
 nix profile install github:ethereum/hevm
+```
+
+to install a specific commit you can run:
+
+```
+nix profile install github:ethereum/hevm/<COMMIT_ID>
 ```
 
 ## Development
@@ -40,19 +65,25 @@ Once in the shell you can use the usual `cabal` commands to build and test hevm:
 $ cabal build          # build the hevm library
 $ cabal build exe:hevm # build the cli binary
 $ cabal build test     # build the test binary
+$ cabal build bench    # build the benchmarks
 
 $ cabal repl           # enter a repl for the library
 $ cabal repl exe:hevm  # enter a repl for the cli
 $ cabal repl test      # enter a repl for the tests
+$ cabal repl bench     # enter a repl for the benchmarks
 
 $ cabal run hevm       # run the cli binary
 $ cabal run test       # run the test binary
+$ cabal run bench      # run the benchmarks
 
 # run the cli binary with profiling enabled
 $ cabal run --enable-profiling hevm -- <CLI SUBCOMMAND> +RTS -s -p -RTS
 
 # run the test binary with profiling enabled
 $ cabal run --enable-profiling test -- +RTS -s -p -RTS
+
+# run the benchmarks with profiling enabled
+$ cabal run --enable-profiling bench -- +RTS -s -p -RTS
 ```
 
 A high level overview of the architecture can be found in [architecture.md](./architecture.md).
