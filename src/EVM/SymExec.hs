@@ -177,7 +177,7 @@ abstractVM :: Maybe (Text, [AbiType]) -> [String] -> ByteString -> Maybe Precond
 abstractVM typesignature concreteArgs contractCode maybepre storagemodel = finalVm
   where
     (calldata', calldataProps) = case typesignature of
-                 Nothing -> (AbstractBuf "txdata", [])
+                 Nothing -> (AbstractBuf "txdata", [Expr.bufLength (AbstractBuf "txdata") .< (Lit (2 ^ (64 :: Integer)))])
                  Just (name, typs) -> symCalldata name typs concreteArgs (AbstractBuf "txdata")
     store = case storagemodel of
               SymbolicS -> AbstractStore
