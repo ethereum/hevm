@@ -359,8 +359,8 @@ assert cmd = do
     -- calldata according to given abi with possible specializations from the `arg` list
     (Nothing, Just sig') -> do
       method' <- functionAbi sig'
-      let typs = snd <$> view methodInputs method'
-      pure $ symCalldata (view methodSignature method') typs cmd.arg mempty
+      let typs = snd <$> method'.inputs
+      pure $ symCalldata method'.methodSignature typs cmd.arg mempty
     _ -> error "incompatible options: calldata and abi"
 
   preState <- symvmFromCommand cmd calldata'

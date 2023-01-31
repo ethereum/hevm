@@ -289,9 +289,9 @@ maxIterationsReached :: VM -> Maybe Integer -> Maybe Bool
 maxIterationsReached _ Nothing = Nothing
 maxIterationsReached vm (Just maxIter) =
   let codelocation = getCodeLocation vm
-      iters = view (iterations . at codelocation . non 0) vm
+      iters = view (at codelocation . non 0) vm._iterations
   in if num maxIter <= iters
-     then view (EVM.cache . path . at (codelocation, iters - 1)) vm
+     then Map.lookup (codelocation, iters - 1) vm._cache._path
      else Nothing
 
 
@@ -345,7 +345,7 @@ verifyContract solvers theCode signature' concreteArgs opts storagemodel maybepr
 
 pruneDeadPaths :: [VM] -> [VM]
 pruneDeadPaths =
-  filter $ \vm -> case view result vm of
+  filter $ \vm -> case vm._result of
     Just (VMFailure DeadPath) -> False
     _ -> True
 
@@ -353,10 +353,10 @@ pruneDeadPaths =
 runExpr :: Stepper.Stepper (Expr End)
 runExpr = do
   vm <- Stepper.runFully
-  let asserts = view keccakEqs vm
-  pure $ case view result vm of
+  let asserts = vm._keccakEqs
+  pure $ case vm._result of
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
-    Just (VMSuccess buf) -> Return asserts buf (view (env . EVM.storage) vm)
+    Just (VMSuccess buf) -> Return asserts buf vm._env._storage
     Just (VMFailure e) -> case e of
       UnrecognizedOpcode _ -> Failure asserts Invalid
       SelfDestruction -> Failure asserts SelfDestruct
@@ -488,7 +488,7 @@ verify solvers opts preState maybepost = do
           \(_, leaf) -> case evalProp (post preState leaf) of
             PBool True -> False
             _ -> True
-        assumes = view constraints preState
+        assumes = preState._constraints
         withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> extractProps leaf <> pcs), leaf)) canViolate
       putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violation(s)"
 
