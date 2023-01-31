@@ -25,6 +25,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as VS
 import Data.Vector.Storable.ByteString
+import Data.Semigroup (Any, Any(..), getAny)
 
 
 -- ** Stack Ops ** ---------------------------------------------------------------------------------
@@ -433,10 +434,32 @@ concPrefix (CopySlice (Lit srcOff) (Lit _) (Lit _) src (ConcreteBuf "")) = do
     go l (WriteWord _ _ b) = go l b
     go l (WriteByte _ _ b) = go l b
     go _ (CopySlice _ _ _ _ _) = error "Internal Error: cannot compute a concrete prefix length for nested copySlice expressions"
-    go _ (GVar _) = error "Internal error: cannot calculate minLength of an open expression"
+    go _ (GVar _) = error "Internal error: cannot calculate a concrete prefix of an open expression"
 concPrefix (ConcreteBuf b) = Just (num . BS.length $ b)
 concPrefix e = error $ "Internal error: cannot compute a concrete prefix length for: " <> show e
 
+
+-- | Return the minimum possible length of a buffer. In the case of an
+-- abstract buffer, it is the largest write that is made on a concrete
+-- location. Parameterized by an environment for buffer variables.
+minLength :: Map.Map Int (Expr Buf) -> Expr Buf -> Maybe Integer
+minLength senv = go 0
+  where
+    go :: W256 -> Expr Buf -> Maybe Integer
+    -- base cases
+    go l (AbstractBuf _) = if l == 0 then Nothing else Just $ num l
+    go l (ConcreteBuf b) = Just . num $ max (num . BS.length $ b) l
+    -- writes to a concrete index
+    go l (WriteWord (Lit idx) _ b) = go (max l (idx + 32)) b
+    go l (WriteByte (Lit idx) _ b) = go (max l (idx + 1)) b
+    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size) l) dst
+    -- writes to an abstract index are ignored
+    go l (WriteWord _ _ b) = go l b
+    go l (WriteByte _ _ b) = go l b
+    go l (CopySlice _ _ _ _ b) = go l b
+    go l (GVar (BufVar a)) = do
+      b <- Map.lookup a senv
+      go l b
 
 word256At
   :: Functor f
@@ -935,3 +958,12 @@ numBranches _ = 1
 
 allLit :: [Expr Byte] -> Bool
 allLit = Data.List.and . fmap (isLitByte)
+
+-- | True if the given expression contains any node that satisfies the
+-- input predicate
+containsNode :: (forall a. Expr a -> Bool) -> Expr b -> Bool
+containsNode p = getAny . foldExpr go (Any False)
+  where
+    go :: Expr a -> Any
+    go node | p node  = Any True
+    go _ = Any False
