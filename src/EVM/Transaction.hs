@@ -200,16 +200,16 @@ setupTx origin coinbase gasPrice gasLimit prestate =
 -- and pay receiving address
 initTx :: EVM.VM -> EVM.VM
 initTx vm = let
-    toAddr   = view (EVM.state . EVM.contract) vm
-    origin   = view (EVM.tx . EVM.origin) vm
-    gasPrice = view (EVM.tx . EVM.gasprice) vm
-    gasLimit = view (EVM.tx . EVM.txgaslimit) vm
-    coinbase = view (EVM.block . EVM.coinbase) vm
-    value    = view (EVM.state . EVM.callvalue) vm
-    toContract = initialContract (view (EVM.state . EVM.code) vm)
-    preState = setupTx origin coinbase gasPrice gasLimit $ view (EVM.env . EVM.contracts) vm
+    toAddr   = vm._state._contract
+    origin   = vm._tx._origin
+    gasPrice = vm._tx._gasprice
+    gasLimit = vm._tx._txgaslimit
+    coinbase = vm._block._coinbase
+    value    = vm._state._callvalue
+    toContract = initialContract vm._state._code
+    preState = setupTx origin coinbase gasPrice gasLimit vm._env._contracts
     oldBalance = view (accountAt toAddr . balance) preState
-    creation = view (EVM.tx . EVM.isCreate) vm
+    creation = vm._tx._isCreate
     initState = (case unlit value of
       Just v -> ((Map.adjust (over balance (subtract v))) origin)
               . (Map.adjust (over balance (+ v))) toAddr

@@ -433,7 +433,7 @@ tests = testGroup "hevm"
         (json, path') <- solidity' srccode
         let (solc', _, _) = fromJust $ readJSON json
             initCode :: ByteString
-            initCode = fromJust $ solc' ^? ix (path' <> ":A") . creationCode
+            initCode = (fromJust $ solc' ^? ix (path' <> ":A")).creationCode
         -- add constructor arguments
         assertEqual "constructor args screwed up metadata stripping" (stripBytecodeMetadata (initCode <> encodeAbiValue (AbiUInt 256 1))) (stripBytecodeMetadata initCode)
     ]
