@@ -1623,7 +1623,7 @@ tests = testGroup "hevm"
           assertEqual "w==z for hash collision" w z
           putStrLn "expected counterexample found"
         ,
-        expectFail $ testCase "calldata beyond calldatasize is 0 (z3)" $ do
+        testCase "calldata beyond calldatasize is 0 (symbolic calldata)" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -1639,6 +1639,44 @@ tests = testGroup "hevm"
             |]
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
+        testCase "calldata beyond calldatasize is 0 (concrete dalldata prefix)" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint256 z) public pure {
+                uint y;
+                assembly {
+                  let x := calldatasize()
+                  y := calldataload(x)
+                }
+                assert(y == 0);
+              }
+            }
+            |]
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
+        testCase "calldata symbolic access" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint256 z) public pure {
+                uint x; uint y;
+                assembly {
+                  y := calldatasize()
+                }
+                require(z >= y);
+                assembly {
+                  x := calldataload(z)
+                }
+                assert(x == 0);
+              }
+            }
+            |]
+          (res, p) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
+          print p
+          -- putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "keccak soundness" $ do
           Just c <- solcRuntime "C"
