@@ -105,6 +105,51 @@ declareIntermediates bufs stores =
     encodeStore n expr =
        fromLazyText ("(define-const store" <> (T.pack . show $ n) <> " Storage ") <> exprToSMT expr <> ")"
 
+-- | This function overapproximates the reads from the abstract
+-- storage. Potentially, it can return locations that do not read a
+-- slot directly from the abstract store but from subsequent writes on
+-- the store (e.g, SLoad addr idx (SStore addr idx val AbstractStore)).
+-- However, we expect that most of such reads will have been
+-- simplified away.
+findStorageReads :: Prop -> [(Expr EWord, Expr EWord)]
+findStorageReads = foldProp go []
+  where
+    go :: Expr a -> [(Expr EWord, Expr EWord)]
+    go = \case
+      SLoad addr slot storage -> [(addr, slot) | containsNode isAbstractStore storage]
+      _ -> []
+
+    isAbstractStore AbstractStore = True
+    isAbstractStore _ = False
+
+findBufferReads :: TraversableTerm a => [a] -> ([(Expr EWord, Expr Buf)], [(Expr EWord, Expr Buf)])
+findBufferReads = foldl (\acc p -> foldTerm go acc p) mempty
+  where
+    go :: Expr a -> ([(Expr EWord, Expr Buf)], [(Expr EWord, Expr Buf)])
+    go = \case
+      ReadWord idx buf -> ([(idx, buf)], [])
+      ReadByte idx buf -> ([], [(idx, buf)])
+      _ -> mempty
+
+assertReads :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
+assertReads props benv senv =
+  fmap assertReadWord wordReads <> fmap assertReadByte byteReads
+
+  where
+    assertReadWord (idx, buf) = POr (PEq (ReadWord idx buf) (Lit 0)) (PNeg (PGEq idx (bufLength buf)))
+    assertReadByte (idx, buf) = POr (PEq (ReadByte idx buf) (LitByte 0)) (PNeg (PGEq idx (bufLength buf)))
+
+    allReads = findBufferReads props <> findBufferReads (Map.elems benv) <> findBufferReads (Map.elems senv)
+    wordReads = filter keepRead $ nubOrd $ fst allReads
+    byteReads = filter keepRead $ nubOrd $ snd allReads
+
+    -- discard constraints if we can statically determine that read is less than the buffer length
+    keepRead (Lit idx, buf) =
+      case minLength benv buf of
+        Just l | num idx < l -> False
+        _ -> True
+    keepRead _ = True
+
 assertProps :: [Prop] -> SMT2
 assertProps ps =
   let encs = map propToSMT ps_elim
@@ -121,6 +166,7 @@ assertProps ps =
   <> intermediates
   <> SMT2 [""] mempty
   <> keccakAssumes
+  <> readAssumes
   <> SMT2 [""] mempty
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
   <> SMT2 [] mempty{storeReads = storageReads}
@@ -141,6 +187,10 @@ assertProps ps =
     keccakAssumes
       = SMT2 ["; keccak assumptions"] mempty
       <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions ps_elim bufVals storeVals)) mempty
+
+    readAssumes
+      = SMT2 ["; read assumptions"] mempty
+        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads ps_elim bufs stores)) mempty
 
 
 referencedBufsGo :: Expr a -> [Builder]
@@ -822,6 +872,7 @@ getBufs getVal names = foldM getBuf mempty names
       -- replicating the constant byte up to the length).
       len <- getLength name
       val <- getVal (T.fromStrict name)
+
       buf <- case parseCommentFreeFileMsg getValueRes (T.toStrict val) of
         Right (ResSpecific (valParsed :| [])) -> case valParsed of
           (TermQualIdentifier (Unqualified (IdSymbol symbol)), term)
@@ -832,7 +883,7 @@ getBufs getVal names = foldM getBuf mempty names
         res -> error $ "Internal Error: cannot parse solver response: " <> show res
       let bs = case simplify buf of
                  ConcreteBuf b -> b
-                 _ -> error "Internal Error: unable to parse solver response into a concrete buffer"
+                 p -> error $ "Internal Error: unable to parse solver response into a concrete buffer: " <> show p
       pure $ Map.insert (AbstractBuf name) bs acc
 
     parseBuf :: Int -> Term -> Expr Buf
