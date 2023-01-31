@@ -642,3 +642,18 @@ mapPropM f = \case
     a' <- mapPropM f a
     b' <- mapPropM f b
     pure $ POr a' b'
+
+
+-- | Generic operations over AST terms
+class TraversableTerm a where
+  mapTerm  :: (forall b. Expr b -> Expr b) -> a -> a
+  foldTerm :: forall c. Monoid c => (forall b. Expr b -> c) -> c -> a -> c
+
+
+instance TraversableTerm (Expr a) where
+  mapTerm = mapExpr
+  foldTerm = foldExpr
+
+instance TraversableTerm Prop where
+  mapTerm = mapProp
+  foldTerm = foldProp
