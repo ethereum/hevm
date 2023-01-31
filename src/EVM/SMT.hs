@@ -34,7 +34,6 @@ import qualified Data.Text as TS
 import qualified Data.Text.Lazy as T
 import Data.Text.Lazy.Builder
 import Data.Bifunctor (second)
-import Data.Semigroup (Any, Any(..), getAny)
 
 import EVM.Types
 import EVM.Traversals
@@ -104,51 +103,6 @@ declareIntermediates bufs stores =
        fromLazyText ("(define-const buf" <> (T.pack . show $ n) <> " Buf ") <> exprToSMT expr <> ")"
     encodeStore n expr =
        fromLazyText ("(define-const store" <> (T.pack . show $ n) <> " Storage ") <> exprToSMT expr <> ")"
-
--- | This function overapproximates the reads from the abstract
--- storage. Potentially, it can return locations that do not read a
--- slot directly from the abstract store but from subsequent writes on
--- the store (e.g, SLoad addr idx (SStore addr idx val AbstractStore)).
--- However, we expect that most of such reads will have been
--- simplified away.
-findStorageReads :: Prop -> [(Expr EWord, Expr EWord)]
-findStorageReads = foldProp go []
-  where
-    go :: Expr a -> [(Expr EWord, Expr EWord)]
-    go = \case
-      SLoad addr slot storage -> [(addr, slot) | containsNode isAbstractStore storage]
-      _ -> []
-
-    isAbstractStore AbstractStore = True
-    isAbstractStore _ = False
-
-findBufferReads :: TraversableTerm a => [a] -> ([(Expr EWord, Expr Buf)], [(Expr EWord, Expr Buf)])
-findBufferReads = foldl (\acc p -> foldTerm go acc p) mempty
-  where
-    go :: Expr a -> ([(Expr EWord, Expr Buf)], [(Expr EWord, Expr Buf)])
-    go = \case
-      ReadWord idx buf -> ([(idx, buf)], [])
-      ReadByte idx buf -> ([], [(idx, buf)])
-      _ -> mempty
-
-assertReads :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
-assertReads props benv senv =
-  fmap assertReadWord wordReads <> fmap assertReadByte byteReads
-
-  where
-    assertReadWord (idx, buf) = POr (PEq (ReadWord idx buf) (Lit 0)) (PNeg (PGEq idx (bufLength buf)))
-    assertReadByte (idx, buf) = POr (PEq (ReadByte idx buf) (LitByte 0)) (PNeg (PGEq idx (bufLength buf)))
-
-    allReads = findBufferReads props <> findBufferReads (Map.elems benv) <> findBufferReads (Map.elems senv)
-    wordReads = filter keepRead $ nubOrd $ fst allReads
-    byteReads = filter keepRead $ nubOrd $ snd allReads
-
-    -- discard constraints if we can statically determine that read is less than the buffer length
-    keepRead (Lit idx, buf) =
-      case minLength benv buf of
-        Just l | num idx < l -> False
-        _ -> True
-    keepRead _ = True
 
 assertProps :: [Prop] -> SMT2
 assertProps ps =
@@ -252,14 +206,6 @@ referencedBlockContext expr = nubOrd $ foldExpr referencedBlockContextGo [] expr
 referencedBlockContext' :: Prop -> [Builder]
 referencedBlockContext' prop = nubOrd $ foldProp referencedBlockContextGo [] prop
 
-
-isAbstractStorage :: Expr Storage -> Bool
-isAbstractStorage = getAny . foldExpr go (Any False)
-  where
-    go :: Expr a -> Any
-    go AbstractStore = Any True
-    go _ = Any False
-
 -- | This function overapproximates the reads from the abstract
 -- storage. Potentially, it can return locations that do not read a
 -- slot directly from the abstract store but from subsequent writes on
@@ -271,8 +217,43 @@ findStorageReads = foldProp go []
   where
     go :: Expr a -> [(Expr EWord, Expr EWord)]
     go = \case
-      SLoad addr slot storage -> [(addr, slot) | isAbstractStorage storage]
+      SLoad addr slot storage -> [(addr, slot) | containsNode isAbstractStore storage]
       _ -> []
+
+    isAbstractStore AbstractStore = True
+    isAbstractStore _ = False
+
+
+findBufferReads :: TraversableTerm a => [a] -> ([(Expr EWord, Expr Buf)], [(Expr EWord, Expr Buf)])
+findBufferReads = foldl (\acc p -> foldTerm go acc p) mempty
+  where
+    go :: Expr a -> ([(Expr EWord, Expr Buf)], [(Expr EWord, Expr Buf)])
+    go = \case
+      ReadWord idx buf -> ([(idx, buf)], [])
+      ReadByte idx buf -> ([], [(idx, buf)])
+      _ -> mempty
+
+-- | Asserts that buffer reads beyond the size of the buffer are equal
+-- to zero. Looks for buffer reads in the a list of given predicates
+-- and the buffer and storage environments.
+assertReads :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
+assertReads props benv senv =
+  fmap assertReadWord wordReads <> fmap assertReadByte byteReads
+
+  where
+    assertReadWord (idx, buf) = POr (PEq (ReadWord idx buf) (Lit 0)) (PNeg (PGEq idx (bufLength buf)))
+    assertReadByte (idx, buf) = POr (PEq (ReadByte idx buf) (LitByte 0)) (PNeg (PGEq idx (bufLength buf)))
+
+    allReads = findBufferReads props <> findBufferReads (Map.elems benv) <> findBufferReads (Map.elems senv)
+    wordReads = filter keepRead $ nubOrd $ fst allReads
+    byteReads = filter keepRead $ nubOrd $ snd allReads
+
+    -- discard constraints if we can statically determine that read is less than the buffer length
+    keepRead (Lit idx, buf) =
+      case minLength benv buf of
+        Just l | num idx < l -> False
+        _ -> True
+    keepRead _ = True
 
 
 declareBufs :: [Builder] -> SMT2
