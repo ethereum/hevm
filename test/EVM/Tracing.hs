@@ -464,22 +464,16 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
 
 vmtrace :: VM -> VMTrace
 vmtrace vm =
-  let
-    -- Convenience function to access parts of the current VM state.
-    -- Arcane type signature needed to avoid monomorphism restriction.
-    the :: (b -> VM -> Const a VM) -> ((a -> Const a a) -> b) -> a
-    the f g = Control.Lens.view (f . g) vm
-    memsize = the state memorySize
-  in VMTrace { tracePc = the state EVM.pc
-             , traceOp = num $ getOp vm
-             , traceGas = the state EVM.gas
-             , traceMemSize = memsize
-             -- increment to match geth format
-             , traceDepth = 1 + length (Control.Lens.view frames vm)
-             -- reverse to match geth format
-             , traceStack = reverse $ forceLit <$> the state EVM.stack
-             , traceError = readoutError vm._result
-             }
+  VMTrace { tracePc = vm._state._pc
+          , traceOp = num $ getOp vm
+          , traceGas = vm._state._gas
+          , traceMemSize = vm._state._memorySize
+          -- increment to match geth format
+          , traceDepth = 1 + length vm._frames
+          -- reverse to match geth format
+          , traceStack = reverse $ forceLit <$> vm._state._stack
+          , traceError = readoutError vm._result
+          }
   where
     readoutError :: Maybe VMResult -> Maybe String
     readoutError Nothing = Nothing
@@ -508,11 +502,11 @@ vmtrace vm =
 vmres :: VM -> VMTraceResult
 vmres vm =
   let
-    gasUsed' = Control.Lens.view (tx . txgaslimit) vm - Control.Lens.view (state . EVM.gas) vm
-    res = case Control.Lens.view result vm of
-      Just (VMSuccess (ConcreteBuf b)) -> (ByteStringS b)
-      Just (VMSuccess x) -> error $ "unhandled: " <> (show x)
-      Just (VMFailure (EVM.Revert (ConcreteBuf b))) -> (ByteStringS b)
+    gasUsed' = vm._tx.txgaslimit - vm._state._gas
+    res = case vm._result of
+      Just (VMSuccess (ConcreteBuf b)) -> ByteStringS b
+      Just (VMSuccess x) -> error $ "unhandled: " <> show x
+      Just (VMFailure (EVM.Revert (ConcreteBuf b))) -> ByteStringS b
       Just (VMFailure _) -> ByteStringS mempty
       _ -> ByteStringS mempty
   in VMTraceResult

@@ -249,10 +249,10 @@ setupTx origin coinbase gasPrice gasLimit prestate =
 initTx :: EVM.VM -> EVM.VM
 initTx vm = let
     toAddr   = vm._state._contract
-    origin   = vm._tx._origin
-    gasPrice = vm._tx._gasprice
-    gasLimit = vm._tx._txgaslimit
-    coinbase = vm._block._coinbase
+    origin   = vm._tx.origin
+    gasPrice = vm._tx.gasprice
+    gasLimit = vm._tx.txgaslimit
+    coinbase = vm._block.coinbase
     value    = vm._state._callvalue
     toContract = initialContract vm._state._code
     preState = setupTx origin coinbase gasPrice gasLimit vm._env._contracts

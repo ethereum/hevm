@@ -34,10 +34,10 @@ tests = testGroup "rpc"
         let block' = BlockNumber 15537392
         (cb, numb, basefee, prevRan) <- fetchBlockFrom block' testRpc >>= \case
                       Nothing -> error "Could not fetch block"
-                      Just EVM.Block{..} -> return (_coinbase
+                      Just EVM.Block{..} -> return ( coinbase
                                                    , _number
-                                                   , _baseFee
-                                                   , _prevRandao
+                                                   , baseFee
+                                                   , prevRandao
                                                    )
 
         assertEqual "coinbase" (Addr 0xea674fdde714fd979de3edf0f56aa9716b898ec8) cb
@@ -48,10 +48,10 @@ tests = testGroup "rpc"
         let block' = BlockNumber 16184420
         (cb, numb, basefee, prevRan) <- fetchBlockFrom block' testRpc >>= \case
                       Nothing -> error "Could not fetch block"
-                      Just EVM.Block{..} -> return (_coinbase
+                      Just EVM.Block{..} -> return ( coinbase
                                                    , _number
-                                                   , _baseFee
-                                                   , _prevRandao
+                                                   , baseFee
+                                                   , prevRandao
                                                    )
 
         assertEqual "coinbase" (Addr 0x690b9a9e9aa1c9db991c7721a92d351db4fac990) cb
@@ -130,16 +130,16 @@ vmFromRpc blockNum calldata' callvalue' caller' address' = do
     , EVM.vmoptOrigin        = 0xacab
     , EVM.vmoptGas           = 0xffffffffffffffff
     , EVM.vmoptGaslimit      = 0xffffffffffffffff
-    , EVM.vmoptBaseFee       = view baseFee blk
+    , EVM.vmoptBaseFee       = blk.baseFee
     , EVM.vmoptPriorityFee   = 0
-    , EVM.vmoptCoinbase      = view coinbase blk
+    , EVM.vmoptCoinbase      = blk.coinbase
     , EVM.vmoptNumber        = view number blk
     , EVM.vmoptTimestamp     = view timestamp blk
-    , EVM.vmoptBlockGaslimit = view gaslimit blk
+    , EVM.vmoptBlockGaslimit = blk.gaslimit
     , EVM.vmoptGasprice      = 0
-    , EVM.vmoptMaxCodeSize   = view maxCodeSize blk
-    , EVM.vmoptPrevRandao    = view prevRandao blk
-    , EVM.vmoptSchedule      = view schedule blk
+    , EVM.vmoptMaxCodeSize   = blk.maxCodeSize
+    , EVM.vmoptPrevRandao    = blk.prevRandao
+    , EVM.vmoptSchedule      = blk.schedule
     , EVM.vmoptChainId       = 1
     , EVM.vmoptCreate        = False
     , EVM.vmoptStorageBase   = EVM.Concrete

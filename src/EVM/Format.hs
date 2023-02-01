@@ -198,7 +198,7 @@ showTrace dapp vm trace =
         Left x -> " \x1b[1m" <> x <> "\x1b[0m"
         Right x -> " \x1b[1m(" <> x <> ")\x1b[0m"
     fullAbiMap = dapp.abiMap
-  in case trace._traceData of
+  in case trace.traceData of
     EventTrace _ bytes topics ->
       let logn = mconcat
             [ "\x1b[36m"

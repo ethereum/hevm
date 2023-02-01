@@ -994,12 +994,12 @@ getParametersFromEnvironmentVariables rpc = do
       Nothing  -> return (0,Lit 0,0,0,0,0)
       Just url -> Fetch.fetchBlockFrom block' url >>= \case
         Nothing -> error "Could not fetch block"
-        Just EVM.Block{..} -> return (  _coinbase
+        Just EVM.Block{..} -> return (  coinbase
                                       , _timestamp
                                       , _number
-                                      , _prevRandao
-                                      , _gaslimit
-                                      , _baseFee
+                                      , prevRandao
+                                      , gaslimit
+                                      , baseFee
                                       )
   let
     getWord s def = maybe def read <$> lookupEnv s

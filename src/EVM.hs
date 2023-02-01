@@ -107,15 +107,15 @@ data VM = VM
   , _iterations     :: Map CodeLocation Int
   , _constraints    :: [Prop]
   , _keccakEqs      :: [Prop]
-  , _allowFFI       :: Bool
+  , allowFFI        :: Bool
   , _overrideCaller :: Maybe (Expr EWord)
   }
   deriving (Show)
 
 data Trace = Trace
-  { _traceOpIx     :: Int
-  , _traceContract :: Contract
-  , _traceData     :: TraceData
+  { opIx      :: Int
+  , contract  :: Contract
+  , traceData :: TraceData
   }
   deriving (Show)
 
@@ -216,8 +216,8 @@ data VMOpts = VMOpts
 
 -- | An entry in the VM's "call/create stack"
 data Frame = Frame
-  { _frameContext   :: FrameContext
-  , _frameState     :: FrameState
+  { context :: FrameContext
+  , state   :: FrameState
   }
   deriving (Show)
 
@@ -262,15 +262,15 @@ data FrameState = FrameState
 
 -- | The state that spans a whole transaction
 data TxState = TxState
-  { _gasprice            :: W256
-  , _txgaslimit          :: Word64
-  , _txPriorityFee       :: W256
-  , _origin              :: Addr
-  , _toAddr              :: Addr
-  , _value               :: Expr EWord
-  , _substate            :: SubState
-  , _isCreate            :: Bool
-  , _txReversion         :: Map Addr Contract
+  { gasprice      :: W256
+  , txgaslimit    :: Word64
+  , txPriorityFee :: W256
+  , origin        :: Addr
+  , toAddr        :: Addr
+  , value         :: Expr EWord
+  , _substate     :: SubState
+  , _isCreate     :: Bool
+  , _txReversion  :: Map Addr Contract
   }
   deriving (Show)
 
@@ -382,16 +382,15 @@ data Env = Env
 
 -- | Data about the block
 data Block = Block
-  { _coinbase    :: Addr
-  , _timestamp   :: Expr EWord
-  , _number      :: W256
-  , _prevRandao  :: W256
-  , _gaslimit    :: Word64
-  , _baseFee     :: W256
-  , _maxCodeSize :: W256
-  , _schedule    :: FeeSchedule Word64
+  { coinbase    :: Addr
+  , _timestamp  :: Expr EWord
+  , _number     :: W256
+  , prevRandao  :: W256
+  , gaslimit    :: Word64
+  , baseFee     :: W256
+  , maxCodeSize :: W256
+  , schedule    :: FeeSchedule Word64
   } deriving (Show, Generic)
-
 
 blankState :: FrameState
 blankState = FrameState
@@ -411,14 +410,12 @@ blankState = FrameState
   }
 
 makeLenses ''FrameState
-makeLenses ''Frame
 makeLenses ''Block
 makeLenses ''TxState
 makeLenses ''SubState
 makeLenses ''Contract
 makeLenses ''Env
 makeLenses ''Cache
-makeLenses ''Trace
 makeLenses ''VM
 
 -- | An "external" view of a contract's bytecode, appropriate for
@@ -479,12 +476,12 @@ makeVm o =
   { _result = Nothing
   , _frames = mempty
   , _tx = TxState
-    { _gasprice = o.vmoptGasprice
-    , _txgaslimit = o.vmoptGaslimit
-    , _txPriorityFee = o.vmoptPriorityFee
-    , _origin = txorigin
-    , _toAddr = txtoAddr
-    , _value = o.vmoptValue
+    { gasprice = o.vmoptGasprice
+    , txgaslimit = o.vmoptGaslimit
+    , txPriorityFee = o.vmoptPriorityFee
+    , origin = txorigin
+    , toAddr = txtoAddr
+    , value = o.vmoptValue
     , _substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty
     --, _accessList = txaccessList
     , _isCreate = o.vmoptCreate
@@ -494,14 +491,14 @@ makeVm o =
   , _logs = []
   , _traces = Zipper.fromForest []
   , _block = Block
-    { _coinbase = o.vmoptCoinbase
+    { coinbase = o.vmoptCoinbase
     , _timestamp = o.vmoptTimestamp
     , _number = o.vmoptNumber
-    , _prevRandao = o.vmoptPrevRandao
-    , _maxCodeSize = o.vmoptMaxCodeSize
-    , _gaslimit = o.vmoptBlockGaslimit
-    , _baseFee = o.vmoptBaseFee
-    , _schedule = o.vmoptSchedule
+    , prevRandao = o.vmoptPrevRandao
+    , maxCodeSize = o.vmoptMaxCodeSize
+    , gaslimit = o.vmoptBlockGaslimit
+    , baseFee = o.vmoptBaseFee
+    , schedule = o.vmoptSchedule
     }
   , _state = FrameState
     { _pc = 0
@@ -533,7 +530,7 @@ makeVm o =
   , _constraints = snd o.vmoptCalldata
   , _keccakEqs = mempty
   , _iterations = mempty
-  , _allowFFI = o.vmoptAllowFFI
+  , allowFFI = o.vmoptAllowFFI
   , _overrideCaller = Nothing
   }
 
@@ -570,7 +567,7 @@ exec1 = do
     self = vm._state._contract
     this = fromMaybe (error "internal error: state contract") (Map.lookup self vm._env._contracts)
 
-    fees@FeeSchedule {..} = vm._block._schedule
+    fees@FeeSchedule {..} = vm._block.schedule
 
     doStop = finishFrame (FrameReturned mempty)
 
@@ -736,7 +733,7 @@ exec1 = do
 
         OpOrigin ->
           limitStack 1 . burn g_base $
-            next >> push (num vm._tx._origin)
+            next >> push (num vm._tx.origin)
 
         OpCaller ->
           limitStack 1 . burn g_base $
@@ -788,7 +785,7 @@ exec1 = do
 
         OpGasprice ->
           limitStack 1 . burn g_base $
-            next >> push vm._tx._gasprice
+            next >> push vm._tx.gasprice
 
         OpExtcodesize ->
           case stk of
@@ -880,7 +877,7 @@ exec1 = do
 
         OpCoinbase ->
           limitStack 1 . burn g_base $
-            next >> push (num vm._block._coinbase)
+            next >> push (num vm._block.coinbase)
 
         OpTimestamp ->
           limitStack 1 . burn g_base $
@@ -892,11 +889,11 @@ exec1 = do
 
         OpPrevRandao -> do
           limitStack 1 . burn g_base $
-            next >> push vm._block._prevRandao
+            next >> push vm._block.prevRandao
 
         OpGaslimit ->
           limitStack 1 . burn g_base $
-            next >> push (num vm._block._gaslimit)
+            next >> push (num vm._block.gaslimit)
 
         OpChainid ->
           limitStack 1 . burn g_base $
@@ -908,7 +905,7 @@ exec1 = do
 
         OpBaseFee ->
           limitStack 1 . burn g_base $
-            next >> push vm._block._baseFee
+            next >> push vm._block.baseFee
 
         OpPop ->
           case stk of
@@ -1137,10 +1134,10 @@ exec1 = do
                   output = readMemory xOffset' xSize' vm
                   codesize = fromMaybe (error "RETURN: cannot return dynamically sized abstract data")
                                . unlit . bufLength $ output
-                  maxsize = vm._block._maxCodeSize
+                  maxsize = vm._block.maxCodeSize
                   creation = case vm._frames of
                     [] -> vm._tx._isCreate
-                    frame:_ -> case frame._frameContext of
+                    frame:_ -> case frame.context of
                        CreationContext {} -> True
                        CallContext {} -> False
                 if creation
@@ -1269,7 +1266,7 @@ callChecks
   -> EVM ()
 callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize xs continue = do
   vm <- get
-  let fees = vm._block._schedule
+  let fees = vm._block.schedule
   accessMemoryRange xInOffset xInSize $
     accessMemoryRange xOutOffset xOutSize $ do
       availableGas <- use (state . gas)
@@ -1330,7 +1327,7 @@ executePrecompile
 executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = do
   vm <- get
   let input = readMemory (Lit inOffset) (Lit inSize) vm
-      fees = vm._block._schedule
+      fees = vm._block.schedule
       cost = costOfPrecompile fees preCompileAddr input
       notImplemented = error $ "precompile at address " <> show preCompileAddr <> " not yet implemented"
       precompileFail = burn (gasCap - cost) $ do
@@ -1645,13 +1642,13 @@ finalize = do
 
   -- compute and pay the refund to the caller and the
   -- corresponding payment to the miner
-  txOrigin     <- use (tx . origin)
+  txOrigin     <- gets (._tx.origin)
   sumRefunds   <- (sum . (snd <$>)) <$> (use (tx . substate . refunds))
-  miner        <- use (block . coinbase)
-  blockReward  <- num . (.r_block) <$> (use (block . schedule))
-  gasPrice     <- use (tx . gasprice)
-  priorityFee  <- use (tx . txPriorityFee)
-  gasLimit     <- use (tx . txgaslimit)
+  miner        <- gets (._block.coinbase)
+  blockReward  <- num <$> gets (._block.schedule.r_block)
+  gasPrice     <- gets (._tx.gasprice)
+  priorityFee  <- gets (._tx.txPriorityFee)
+  gasLimit     <- gets (._tx.txgaslimit)
   gasRemaining <- use (state . gas)
 
   let
@@ -1799,7 +1796,7 @@ selfdestruct = pushTo ((tx . substate) . selfdestructs)
 
 accessAndBurn :: Addr -> EVM () -> EVM ()
 accessAndBurn x cont = do
-  FeeSchedule {..} <- use ( block . schedule )
+  FeeSchedule {..} <- gets (._block.schedule)
   acc <- accessAccountForGas x
   let cost = if acc then g_warm_storage_read else g_cold_account_access
   burn cost cont
@@ -1863,7 +1860,7 @@ cheatActions =
     [ action "ffi(string[])" $
         \sig outOffset outSize input -> do
           vm <- get
-          if vm._allowFFI then
+          if vm.allowFFI then
             case decodeBuf [AbiArrayDynamicType AbiStringType] input of
               CAbi valsArr -> case valsArr of
                 [AbiArrayDynamic AbiStringType strsV] ->
@@ -2004,8 +2001,8 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                   vm1 <- get
 
                   pushTo frames $ Frame
-                    { _frameState = vm1._state { _stack = xs }
-                    , _frameContext = newContext
+                    { state = vm1._state { _stack = xs }
+                    , context = newContext
                     }
 
                   let clearInitCode = \case
@@ -2116,8 +2113,8 @@ create self this xGas' xValue xs newAddr initCode = do
         next
         vm1 <- get
         pushTo frames $ Frame
-          { _frameContext = newContext
-          , _frameState   = vm1._state { _stack = xs }
+          { context = newContext
+          , state   = vm1._state { _stack = xs }
           }
 
         assign state $
@@ -2203,14 +2200,14 @@ finishFrame how = do
           FrameReverted e ->
             ErrorTrace (EVM.Revert e)
           FrameReturned output ->
-            ReturnTrace output nextFrame._frameContext
+            ReturnTrace output nextFrame.context
       -- Pop to the previous level of the debug trace stack.
       popTrace
 
       -- Pop the top frame.
       assign frames remainingFrames
       -- Install the state of the frame to which we shall return.
-      assign state nextFrame._frameState
+      assign state nextFrame.state
 
       -- When entering a call, the gas allowance is counted as burned
       -- in advance; this unburns the remainder and adds it to the
@@ -2222,7 +2219,7 @@ finishFrame how = do
 
       -- Now dispatch on whether we were creating or calling,
       -- and whether we shall return, revert, or error (six cases).
-      case nextFrame._frameContext of
+      case nextFrame.context of
 
         -- Were we calling?
         CallContext _ _ (Lit -> outOffset) (Lit -> outSize) _ _ _ reversion substate' -> do
@@ -2326,7 +2323,7 @@ accessUnboundedMemoryRange
 accessUnboundedMemoryRange _ 0 continue = continue
 accessUnboundedMemoryRange f l continue = do
   m0 <- num <$> use (state . memorySize)
-  fees <- gets (._block._schedule)
+  fees <- gets (._block.schedule)
   do
     let m1 = 32 * ceilDiv (max m0 (f + l)) 32
     burn (memoryCost fees m1 - memoryCost fees m0) $ do
@@ -2379,9 +2376,9 @@ withTraceLocation x = do
   vm <- get
   let this = fromJust $ currentContract vm
   pure Trace
-    { _traceData = x
-    , _traceContract = this
-    , _traceOpIx = fromMaybe 0 $ this._opIxMap Vector.!? vm._state._pc
+    { traceData = x
+    , contract = this
+    , opIx = fromMaybe 0 $ this._opIxMap Vector.!? vm._state._pc
     }
 
 pushTrace :: TraceData -> EVM ()
