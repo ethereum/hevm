@@ -93,13 +93,16 @@ declareIntermediates :: BufEnv -> StoreEnv -> SMT2
 declareIntermediates bufs stores =
   let encSs = Map.mapWithKey encodeStore stores
       encBs = Map.mapWithKey encodeBuf bufs
+      encBsLen = Map.elems $ Map.mapWithKey encodeBufLen bufs
       sorted = List.sortBy compareFst $ Map.toList $ encSs <> encBs
       decls = fmap snd sorted
-  in SMT2 ([fromText "; intermediate buffers & stores"] <> decls) mempty
+  in SMT2 ([fromText "; intermediate buffers & stores"] <> decls <> encBsLen) mempty
   where
     compareFst (l, _) (r, _) = compare l r
     encodeBuf n expr =
        fromLazyText ("(define-const buf" <> (T.pack . show $ n) <> " Buf ") <> exprToSMT expr <> ")"
+    encodeBufLen n expr =
+       fromLazyText ("(define-const buf" <> (T.pack . show $ n) <>"_length" <> " (_ BitVec 256) ") <> exprToSMT (bufLengthEnv bufs expr) <> ")"
     encodeStore n expr =
        fromLazyText ("(define-const store" <> (T.pack . show $ n) <> " Storage ") <> exprToSMT expr <> ")"
 
@@ -259,7 +262,7 @@ declareBufs :: [Builder] -> SMT2
 declareBufs names = SMT2 ("; buffers" : fmap declareBuf names <> ("; buffer lengths" : fmap declareLength names)) cexvars
   where
     declareBuf n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
-    declareLength n = "(define-const " <> n <> "_length" <> " (_ BitVec 256) (bufLength " <> n <> "))"
+    declareLength n = "(declare-const " <> n <> "_length" <> " (_ BitVec 256))"
     cexvars = mempty{buffersV = fmap toLazyText names}
 
 
@@ -304,6 +307,8 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   (declare-fun keccak (Buf) Word)
   (declare-fun sha256 (Buf) Word)
 
+  (define-fun mymax ((a (_ BitVec 256)) (b (_ BitVec 256))) (_ BitVec 256) (ite (bvult a b) b a))
+  
   ; word indexing
   (define-fun indexWord31 ((w Word)) Byte ((_ extract 7 0) w))
   (define-fun indexWord30 ((w Word)) Byte ((_ extract 15 8) w))
@@ -378,7 +383,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   )
 
   ; buffers
-  (declare-fun bufLength (Buf) Word)
+  ; (declare-fun bufLength (Buf) Word)
   (define-const emptyBuf Buf ((as const Buf) #b00000000))
 
   (define-fun readWord ((idx Word) (buf Buf)) Word
@@ -529,6 +534,10 @@ exprToSMT = \case
     let aenc = exprToSMT a
         benc = exprToSMT b in
     "(ite (bvule " <> aenc `sp` benc <> ") " <> aenc `sp` benc <> ")"
+  Max a b ->
+    let aenc = exprToSMT a
+        benc = exprToSMT b in
+    "(mymax " <> aenc `sp` benc <> ")"
   LT a b ->
     let cond = op2 "bvult" a b in
     "(ite " <> cond `sp` one `sp` zero <> ")"
@@ -620,7 +629,9 @@ exprToSMT = \case
   ConcreteBuf bs -> writeBytes bs mempty
   AbstractBuf s -> fromText s
   ReadWord idx prev -> op2 "readWord" idx prev
-  BufLength b -> op1 "bufLength" b
+  BufLength (AbstractBuf b) -> fromText b <> "_length"
+  BufLength (GVar (BufVar n)) -> fromLazyText $ "buf" <> (T.pack . show $ n) <> "_length"
+  BufLength (ConcreteBuf b) -> exprToSMT (bufLength ((ConcreteBuf b)))
   WriteByte idx val prev ->
     let encIdx = exprToSMT idx
         encVal = exprToSMT val

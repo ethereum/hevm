@@ -86,6 +86,7 @@ foldExpr f acc expr = acc <> (go expr)
       e@(Exp a b) -> f e <> (go a) <> (go b)
       e@(SEx a b) -> f e <> (go a) <> (go b)
       e@(Min a b) -> f e <> (go a) <> (go b)
+      e@(Max a b) -> f e <> (go a) <> (go b)
 
       -- booleans
 
@@ -381,6 +382,10 @@ mapExprM f expr = case expr of
     a' <- mapExprM f a
     b' <- mapExprM f b
     f (Min a' b')
+  Max a b -> do
+    a' <- mapExprM f a
+    b' <- mapExprM f b
+    f (Max a' b')
 
   -- booleans
 

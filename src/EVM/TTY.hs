@@ -25,7 +25,7 @@ import EVM.Hexdump (prettyHex)
 import EVM.Solvers (SolverGroup)
 import EVM.Op
 import EVM.Solidity hiding (storageLayout)
-import EVM.Types hiding (padRight)
+import EVM.Types hiding (padRight, Max)
 import EVM.UnitTest
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper

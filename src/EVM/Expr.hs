@@ -403,16 +403,30 @@ writeWord offset val src = WriteWord offset val src
 -- If there are any writes to abstract locations, or CopySlices with an
 -- abstract size or dstOffset, an abstract expresion will be returned.
 bufLength :: Expr Buf -> Expr EWord
-bufLength buf = case go 0 buf of
-                  Just len -> len
-                  Nothing -> BufLength buf
+bufLength = bufLengthEnv mempty
+
+bufLengthEnv :: Map.Map Int (Expr Buf) -> Expr Buf -> Expr EWord
+bufLengthEnv env buf = go (Lit 0) buf
   where
-    go :: W256 -> Expr Buf -> Maybe (Expr EWord)
-    go l (ConcreteBuf b) = Just . Lit $ max (num . BS.length $ b) l
-    go l (WriteWord (Lit idx) _ b) = go (max l (idx + 32)) b
-    go l (WriteByte (Lit idx) _ b) = go (max l (idx + 1)) b
-    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size) l) dst
-    go _ _ = Nothing
+    go :: Expr EWord -> Expr Buf -> Expr EWord
+    go (Lit l) (ConcreteBuf b) = Lit $ max (num . BS.length $ b) l
+    go (Lit l) (WriteWord (Lit idx) _ b) = go (Lit (max l (idx + 32))) b
+    go (Lit l) (WriteByte (Lit idx) _ b) = go (Lit (max l (idx + 1))) b
+    go (Lit l) (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (Lit (max l (dstOffset + size))) dst
+  
+    go l (ConcreteBuf b) = Max l (Lit (num . BS.length $ b))
+    go l (WriteWord (Lit idx) _ b) = go (Max l (Lit (idx + 32))) b
+    go l (WriteByte (Lit idx) _ b) = go (Max l (Lit (idx + 1))) b
+    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (Max l (Lit (dstOffset + size))) dst
+    -- fully abstract cases
+    go l (AbstractBuf b) = Max l (BufLength (AbstractBuf b))
+    go l (WriteWord idx _ b) = go (Max l (Add idx (Lit 32))) b
+    go l (WriteByte idx _ b) = go (Max l (Add idx (Lit 1))) b
+    go l (CopySlice _ dstOffset size _ dst) = go (Max l (Add dstOffset size)) dst
+    go l (GVar (BufVar a)) =
+      case Map.lookup a env of
+        Just b -> go l b
+        Nothing -> error "Internal error: cannot compute length of open expression"
 
 -- | If a buffer has a concrete prefix, we return it's length here
 concPrefix :: Expr Buf -> Maybe Integer
@@ -785,6 +799,9 @@ simplify e = if (mapExpr go e == e)
     -- Double NOT is a no-op, since it's a bitwise inversion
     go (EVM.Types.Not (EVM.Types.Not a)) = a
 
+    go (Max (Lit 0) a) = a
+    go (Max a (Lit 0)) = a
+    
     go a = a
 
 
