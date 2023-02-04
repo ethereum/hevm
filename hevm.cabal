@@ -117,10 +117,10 @@ library
     ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans -j
   else
     ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
-  extra-libraries:
-    secp256k1, ff
   if os(linux) || os(windows)
-     extra-libraries: stdc++
+    extra-libraries: stdc++
+  extra-libraries:
+    secp256k1, ff, gmp
   c-sources:
     ethjet/tinykeccak.c, ethjet/ethjet.c
   cxx-sources:
