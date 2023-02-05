@@ -403,10 +403,10 @@ writeWord offset val src = WriteWord offset val src
 -- If there are any writes to abstract locations, or CopySlices with an
 -- abstract size or dstOffset, an abstract expresion will be returned.
 bufLength :: Expr Buf -> Expr EWord
-bufLength = bufLengthEnv mempty
+bufLength = bufLengthEnv mempty True
 
-bufLengthEnv :: Map.Map Int (Expr Buf) -> Expr Buf -> Expr EWord
-bufLengthEnv env buf = go (Lit 0) buf
+bufLengthEnv :: Map.Map Int (Expr Buf) -> Bool -> Expr Buf -> Expr EWord
+bufLengthEnv env useEnv buf = go (Lit 0) buf
   where
     go :: Expr EWord -> Expr Buf -> Expr EWord
     go (Lit l) (ConcreteBuf b) = Lit $ max (num . BS.length $ b) l
@@ -423,10 +423,11 @@ bufLengthEnv env buf = go (Lit 0) buf
     go l (WriteWord idx _ b) = go (Max l (Add idx (Lit 32))) b
     go l (WriteByte idx _ b) = go (Max l (Add idx (Lit 1))) b
     go l (CopySlice _ dstOffset size _ dst) = go (Max l (Add dstOffset size)) dst
-    go l (GVar (BufVar a)) =
+    go l (GVar (BufVar a)) | useEnv =
       case Map.lookup a env of
         Just b -> go l b
         Nothing -> error "Internal error: cannot compute length of open expression"
+    go l (GVar (BufVar a)) = Max l (BufLength (GVar (BufVar a)))
 
 -- | If a buffer has a concrete prefix, we return it's length here
 concPrefix :: Expr Buf -> Maybe Integer
