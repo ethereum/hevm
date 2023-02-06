@@ -408,26 +408,21 @@ bufLength = bufLengthEnv mempty True
 bufLengthEnv :: Map.Map Int (Expr Buf) -> Bool -> Expr Buf -> Expr EWord
 bufLengthEnv env useEnv buf = go (Lit 0) buf
   where
-    go :: Expr EWord -> Expr Buf -> Expr EWord
-    go (Lit l) (ConcreteBuf b) = Lit $ max (num . BS.length $ b) l
-    go (Lit l) (WriteWord (Lit idx) _ b) = go (Lit (max l (idx + 32))) b
-    go (Lit l) (WriteByte (Lit idx) _ b) = go (Lit (max l (idx + 1))) b
-    go (Lit l) (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (Lit (max l (dstOffset + size))) dst
-  
-    go l (ConcreteBuf b) = Max l (Lit (num . BS.length $ b))
-    go l (WriteWord (Lit idx) _ b) = go (Max l (Lit (idx + 32))) b
-    go l (WriteByte (Lit idx) _ b) = go (Max l (Lit (idx + 1))) b
-    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (Max l (Lit (dstOffset + size))) dst
+    go :: Expr EWord -> Expr Buf -> Expr EWord  
+    go l (ConcreteBuf b) = EVM.Expr.max l (Lit (num . BS.length $ b))
+    go l (WriteWord (Lit idx) _ b) = go (EVM.Expr.max l (Lit (idx + 32))) b
+    go l (WriteByte (Lit idx) _ b) = go (EVM.Expr.max l (Lit (idx + 1))) b
+    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (EVM.Expr.max l (Lit (dstOffset + size))) dst
     -- fully abstract cases
     go l (AbstractBuf b) = Max l (BufLength (AbstractBuf b))
-    go l (WriteWord idx _ b) = go (Max l (Add idx (Lit 32))) b
-    go l (WriteByte idx _ b) = go (Max l (Add idx (Lit 1))) b
-    go l (CopySlice _ dstOffset size _ dst) = go (Max l (Add dstOffset size)) dst
+    go l (WriteWord idx _ b) = go (EVM.Expr.max l (Add idx (Lit 32))) b
+    go l (WriteByte idx _ b) = go (EVM.Expr.max l (Add idx (Lit 1))) b
+    go l (CopySlice _ dstOffset size _ dst) = go (EVM.Expr.max l (Add dstOffset size)) dst
     go l (GVar (BufVar a)) | useEnv =
       case Map.lookup a env of
         Just b -> go l b
         Nothing -> error "Internal error: cannot compute length of open expression"
-    go l (GVar (BufVar a)) = Max l (BufLength (GVar (BufVar a)))
+    go l (GVar (BufVar a)) = EVM.Expr.max l (BufLength (GVar (BufVar a)))
 
 -- | If a buffer has a concrete prefix, we return it's length here
 concPrefix :: Expr Buf -> Maybe Integer
@@ -438,12 +433,12 @@ concPrefix (CopySlice (Lit srcOff) (Lit _) (Lit _) src (ConcreteBuf "")) = do
     go :: W256 -> Expr Buf -> Maybe Integer
     -- base cases
     go _ (AbstractBuf _) = Nothing
-    go l (ConcreteBuf b) = Just . num $ max (num . BS.length $ b) l
+    go l (ConcreteBuf b) = Just . num $ Prelude.max (num . BS.length $ b) l
 
     -- writes to a concrete index
-    go l (WriteWord (Lit idx) (Lit _) b) = go (max l (idx + 32)) b
-    go l (WriteByte (Lit idx) (LitByte _) b) = go (max l (idx + 1)) b
-    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size) l) dst
+    go l (WriteWord (Lit idx) (Lit _) b) = go (Prelude.max l (idx + 32)) b
+    go l (WriteByte (Lit idx) (LitByte _) b) = go (Prelude.max l (idx + 1)) b
+    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (Prelude.max (dstOffset + size) l) dst
 
     -- writes to an abstract index are ignored
     go l (WriteWord _ _ b) = go l b
@@ -463,11 +458,11 @@ minLength bufEnv = go 0
     go :: W256 -> Expr Buf -> Maybe Integer
     -- base cases
     go l (AbstractBuf _) = if l == 0 then Nothing else Just $ num l
-    go l (ConcreteBuf b) = Just . num $ max (num . BS.length $ b) l
+    go l (ConcreteBuf b) = Just . num $ Prelude.max (num . BS.length $ b) l
     -- writes to a concrete index
-    go l (WriteWord (Lit idx) _ b) = go (max l (idx + 32)) b
-    go l (WriteByte (Lit idx) _ b) = go (max l (idx + 1)) b
-    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size) l) dst
+    go l (WriteWord (Lit idx) _ b) = go (Prelude.max l (idx + 32)) b
+    go l (WriteByte (Lit idx) _ b) = go (Prelude.max l (idx + 1)) b
+    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (Prelude.max (dstOffset + size) l) dst
     -- writes to an abstract index are ignored
     go l (WriteWord _ _ b) = go l b
     go l (WriteByte _ _ b) = go l b
@@ -969,6 +964,10 @@ eqByte x y = EqByte x y
 min :: Expr EWord -> Expr EWord -> Expr EWord
 min (Lit x) (Lit y) = if x < y then Lit x else Lit y
 min x y = Min x y
+
+max :: Expr EWord -> Expr EWord -> Expr EWord
+max (Lit x) (Lit y) = if x > y then Lit x else Lit y
+max x y = Min x y
 
 numBranches :: Expr End -> Int
 numBranches (ITE _ t f) = numBranches t + numBranches f

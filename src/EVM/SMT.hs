@@ -124,6 +124,7 @@ assertProps ps =
   <> intermediates
   <> SMT2 [""] mempty
   <> keccakAssumes
+  <> bufferBounds
   <> readAssumes
   <> SMT2 [""] mempty
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
@@ -141,7 +142,7 @@ assertProps ps =
     storeVals = Map.elems stores
 
     storageReads = nubOrd $ concatMap findStorageReads ps
-
+    
     keccakAssumes
       = SMT2 ["; keccak assumptions"] mempty
       <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions ps_elim bufVals storeVals)) mempty
@@ -149,6 +150,10 @@ assertProps ps =
     readAssumes
       = SMT2 ["; read assumptions"] mempty
         <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads ps_elim bufs stores)) mempty
+
+    bufferBounds
+      = SMT2 ["; buffer bounds"] mempty
+        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertMaxLen ps_elim bufs stores)) mempty
 
 
 referencedBufsGo :: Expr a -> [Builder]
@@ -238,7 +243,6 @@ findBufferAccess = foldl (\acc p -> foldTerm go acc p) mempty
       CopySlice srcOff _ size src _  -> [(srcOff, size, src)]
       _ -> mempty
 
-
 -- | Asserts that buffer reads beyond the size of the buffer are equal
 -- to zero. Looks for buffer reads in the a list of given predicates
 -- and the buffer and storage environments.
@@ -257,7 +261,33 @@ assertReads props benv senv = concat $ fmap assertRead allReads
       case minLength benv buf of
         Just l | num (idx + size) <= l -> False
         _ -> True
-    keepRead _ = True
+    keepRead _ = True    
+
+assertMaxLen :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
+assertMaxLen props benv senv = fmap (\(k, v) -> PLEq (BufLength (AbstractBuf k)) v) $ Map.toList bufMap
+  where
+    allReads = nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
+
+    bufMap = foldl addBound mempty allReads
+
+    addBound m (idx, size, buf) =
+      case baseBuf buf of
+        AbstractBuf b -> Map.insertWith EVM.Expr.max b (add idx size) m
+        _ -> m      
+
+    baseBuf :: Expr Buf -> Expr Buf
+    baseBuf (AbstractBuf b) = AbstractBuf b
+    baseBuf (ConcreteBuf b) = ConcreteBuf b
+    baseBuf (GVar (BufVar a)) =
+      case Map.lookup a benv of
+        Just b -> baseBuf b
+        Nothing -> error "Internal error: could not find buffer variable"
+    baseBuf (WriteByte _ _ b) = baseBuf b
+    baseBuf (WriteWord _ _ b) = baseBuf b
+    baseBuf (CopySlice _ _ _ _ dst)= baseBuf dst
+
+
+
 
 
 declareBufs :: [Builder] -> SMT2
