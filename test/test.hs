@@ -3,11 +3,13 @@
 {-# Language QuasiQuotes #-}
 {-# Language DataKinds #-}
 {-# Language DuplicateRecordFields #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module Main where
 
 import Data.Text (Text)
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as BSL
 import Data.Bits hiding (And, Xor)
 import System.Directory
 import System.IO
@@ -20,7 +22,7 @@ import System.Environment
 import qualified Data.Word
 import GHC.Generics
 import Test.ChasingBottoms
-import Data.Text (pack)
+import Data.Char (ord)
 
 import Prelude hiding (fail, LT, GT)
 
@@ -77,6 +79,7 @@ import Data.List (isSubsequenceOf)
 import EVM.TestUtils
 import GHC.Conc (getNumProcessors)
 import qualified GHC.IO.Handle as File
+import System.Process
 
 main :: IO ()
 main = defaultMain tests
@@ -90,41 +93,34 @@ toW8fromLitB _ = error "nope"
 runSubSet :: String -> IO ()
 runSubSet p = defaultMain . applyPattern p $ tests
 
-data EVMToolEnv =
-  EVMToolEnv
-  { currentCoinbase    :: Addr
-  , currentDifficulty  :: W256
-  , currentGasLimit    :: W64 -- used to be `Data.Word.Word64` but that's not representable
-  , currentNumber      :: W256 -- should be INT instead of 0x...
-  , currentTimestamp   :: W256 -- should be INT instead of 0x...
-  } deriving (Generic)
-instance JSON.ToJSON EVMToolEnv where
-  toJSON =  JSON.genericToJSON JSON.defaultOptions
+data GethTrace =
+  GethTrace
+    { pc :: Int
+    , op :: String
+    , gas :: Int
+    , gasCost :: Int
+    , depth :: Int
+    , stack :: [W64]
+    } deriving (Generic, Show)
+instance JSON.FromJSON GethTrace
+
+data GethResult =
+  Result
+  { gas :: W64
+  , failed :: Bool
+  , returnValue :: ByteString
+  , structLogs :: GethTrace
+  } deriving (Generic, Show)
+instance JSON.FromJSON GethResult
+  -- fromJSON = JSON.genericFromJSON JSON.defaultOptions
 
 data EVMToolAlloc =
   EVMToolAlloc
-  { balance :: W256
+  { balance :: W64
   , code :: ByteString
   , nonce :: W64
-  -- , storage :: Map.Map W256 ByteString
   } deriving (Generic)
 instance JSON.ToJSON EVMToolAlloc where
-  toJSON = JSON.genericToJSON JSON.defaultOptions
-
-data EVMToolTx =
-  EVMToolTx
-  { gas :: W64
-  , gasPrice :: W64
-  , hash :: W256
-  , input :: ByteString
-  , nonce :: W64
-  , r :: W256
-  , s :: W256
-  , to :: Addr
-  , v :: W64
-  , value :: W64
-  } deriving (Generic)
-instance JSON.ToJSON EVMToolTx where
   toJSON = JSON.genericToJSON JSON.defaultOptions
 
 tests :: TestTree
@@ -153,47 +149,48 @@ tests = testGroup "hevm"
   -- the return value to be the same
   , testGroup "contract-quickcheck-run"
     [ testProperty "random-contract-concrete-call" $ \(expr :: OpContract) -> ioProperty $ do
-        -- could be used with:
+        -- may later be used with:
         --    evm --json statetest BenchTest-109.json
-        -- could be used with:
-        --    evm transition --input.alloc alloc.json --input.env env.json --input.txs txs.json --state.fork BerlinToLondonAt5
+        -- currently can be used with:
+        --    cd /home/matesoos/development/go-ethereum/cmd/evm/testdata/7
+        --    evm transition --input.alloc alloc.json --input.env env.json --input.txs txs.json --state.fork BerlinToLondonAt5 --output.alloc alloc-out.json
+        --    use documentation: https://docs.ethers.org/v5/api/signer/
+        --        also, see /home/matesoos/development/hevm/mynode/todo.js
+        --    new setup:
+        --    geth --verbosity 0 --dev --exec  'loadScript("my.js")' console
         expr2 <- fixContractJumps expr
         putStrLn $ "Contract for run: " <> (show expr2)
-        let lits = assemble . getOpData $ expr2
+        let lits = assemble $ getOpData expr2
             w8s = toW8fromLitB <$> lits
             bitcode = (BS.pack $ Vector.toList w8s)
-            calldat = ConcreteBuf bitcode
-        let envjson = EVMToolEnv{ currentCoinbase    = 0xc94f5374fce5edbc8e2a8697c15331677e6ebf0b
-                                , currentDifficulty  = 0x20000
-                                , currentGasLimit    = 0x750a163df65e8a
-                                , currentNumber      = 1
-                                , currentTimestamp   = 1000
+            calldat = ConcreteBuf bitcode -- set calldata the code itself, a hack
+        let contr = EVMToolAlloc{ balance = 0x5ffd4878be161d74
+                                , code = bitcode
+                                , nonce = 0xac
                                 }
-            txjson = EVMToolTx { gas = 0x5208
-                               , gasPrice = 0x2
-                               , hash = 0x0557bacce3375c98d806609b8d5043072f0b6a8bae45ae5a67a00d3a1a18d673
-                               , input = BS.empty
-                               , nonce = 0
-                               , r = 0x9500e8ba27d3c33ca7764e107410f44cbd8c19794bde214d694683a7aa998cdb
-                               , s = 0x7235ae07e4bd6e0206d102b1f8979d6adab280466b6a82d2208ee08951f1f600
-                               , to = 0x8a8eafb1cf62bfbeb1741769dae1a9dd47996192
-                               , v = 0x1b
-                               , value = 0x1
-                               }
-            allocjson1 = EVMToolAlloc{ balance = 0x5ffd4878be161d74
-                                    , code = bitcode
-                                    , nonce = 0
-                                    -- , storage = Map.empty
-                                    }
+            wallet = EVMToolAlloc{ balance = 0x5ffd4878be161d74
+                                 , code = BS.empty
+                                 , nonce = 0xac
+                                 }
+            fromAddr :: Addr
+            fromAddr = 0x8a8eafb1cf62bfbeb1741769dae1a9dd47996192
+            toAddr :: Addr
+            toAddr = 0xDa553ab543C976A59c1C261D347F439935c9107D
             allocjson :: Map.Map Addr EVMToolAlloc
-            allocjson = Map.fromList ([(0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b, allocjson1)])
-        JSON.encodeFile "env.json"  envjson
-        JSON.encodeFile "txs.json"  [txjson]
-        JSON.encodeFile "alloc.json"  allocjson -- something wrong?
+            allocjson = Map.fromList ([ (fromAddr, wallet), (toAddr, contr)])
+            tojs = BS.unpack . BS.toStrict . JSON.encode
+            withGas = 0xffff :: W64
+            js = (BS.unpack "gas = ") ++ (BS.unpack . BS.toStrict . JSON.encode $ withGas) ++ (BS.unpack "\nfrom = ") ++ (tojs fromAddr) ++ (BS.unpack "\nto= ") ++ (tojs toAddr) ++ (BS.unpack "\ndata=") ++ (BS.unpack . BS.toStrict . JSON.encode $ bitcode) ++ (BS.unpack "\nalloc=") ++ (BS.unpack . BS.toStrict . JSON.encode $ allocjson) ++ (BS.unpack "\na = debug.traceCall({from: from, to: to, data: data, gas: gas}, 'latest', {stateOverrides : alloc})\nconsole.log(JSON.stringify(a))")
+        BS.writeFile "my.js" $ BS.pack js
         traceFile <- openFile "trace.json" WriteMode
         res <- runCodeWithTrace Nothing bitcode calldat traceFile
         hClose traceFile
+        a <- readProcess "geth" ["--verbosity", "0", "--dev", "--exec", "loadScript(\"my.js\")", "console"] ""
+        let bsjs = (BSL.pack $ map (fromIntegral . Data.Char.ord) a)
+            x = JSON.decode  bsjs :: Maybe GethResult
         putStrLn $ "result final: " <> (show res)
+        putStrLn $ "geth result: " <> (show a)
+
     , testProperty "random-contract-with-symbolic-call" $ \(expr :: OpContract) -> ioProperty $ do
         expr2 <- fixContractJumps expr
         putStrLn $ "Contract: " <> (show expr2)
@@ -1254,7 +1251,7 @@ tests = testGroup "hevm"
                         [y'] -> y'
                         _ -> error "expected 1 arg"
                   this = Expr.litAddr $ Control.Lens.view (state . codeContract) prestate
-                  prex = Expr.readStorage' this (Lit 0) (Control.Lens.view (env . EVM.storage) prestate)
+                  prex = Expr.readStorage' this (Lit 0) (Control.Lens.view (EVM.env . EVM.storage) prestate)
               in case leaf of
                 EVM.Types.Return _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
                 _ -> PBool True
@@ -1308,7 +1305,7 @@ tests = testGroup "hevm"
                         [x',y'] -> (x',y')
                         _ -> error "expected 2 args"
                     this = Expr.litAddr $ Control.Lens.view (state . codeContract) prestate
-                    prestore =  Control.Lens.view (env . EVM.storage) prestate
+                    prestore =  Control.Lens.view (EVM.env . EVM.storage) prestate
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
@@ -1342,7 +1339,7 @@ tests = testGroup "hevm"
                         [x',y'] -> (x',y')
                         _ -> error "expected 2 args"
                     this = Expr.litAddr $ Control.Lens.view (state . codeContract) prestate
-                    prestore =  Control.Lens.view (env . EVM.storage) prestate
+                    prestore =  Control.Lens.view (EVM.env . EVM.storage) prestate
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
@@ -1783,7 +1780,7 @@ tests = testGroup "hevm"
             let vm0 = abstractVM (Just ("call_A()", [])) [] c Nothing SymbolicS
             let vm = vm0
                   & set (state . callvalue) (Lit 0)
-                  & over (env . contracts)
+                  & over (EVM.env . contracts)
                        (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
                   -- NOTE: this used to as follows, but there is no _storage field in Contract record
                   -- (Map.insert aAddr (initialContract (RuntimeCode $ ConcreteBuffer a) &
@@ -2287,7 +2284,7 @@ vmForRuntimeCode runtimecode calldata' =
     , vmoptCreate = False
     , vmoptTxAccessList = mempty
     , vmoptAllowFFI = False
-    }) & set (env . contracts . at ethrunAddress)
+    }) & set (EVM.env . contracts . at ethrunAddress)
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty))))
        & set (state . calldata) calldata'
 

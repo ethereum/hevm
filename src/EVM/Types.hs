@@ -31,6 +31,7 @@ import Numeric (readHex, showHex)
 import Options.Generic
 import EVM.Hexdump (simpleHexNoGap)
 import Control.Arrow ((>>>))
+import Control.Monad
 
 import qualified Data.ByteArray       as BA
 import qualified Data.Aeson           as JSON
@@ -465,6 +466,22 @@ instance Show ByteStringS where
       fromBinary =
         Text.decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
+mydecode :: Text -> Maybe ByteString
+mydecode x = Just (go (Text.unpack x) BS.empty)
+  where
+    go :: String -> ByteString -> ByteString
+    go (a:b:ax) bs =  go ax (BS.snoc bs (toEnum ((ord a) + 8*(ord b))))
+    go [_] _ = error "wrong"
+    go [] bs = bs
+
+textToByteString :: MonadPlus m =>  Text -> m ByteString
+textToByteString x = case mydecode x of
+                       Nothing -> mzero
+                       Just bs -> pure bs
+instance JSON.FromJSON ByteString where
+  parseJSON (JSON.String x) = textToByteString x
+  parseJSON _ = mzero
+
 instance JSON.ToJSON ByteString where
   toJSON x = JSON.String (Text.pack $ "0x" ++ simpleHexNoGap x)
 
@@ -498,6 +515,7 @@ newtype W64 = W64 Data.Word.Word64
     ( Num, Integral, Real, Ord, Generic
     , Bits , FiniteBits, Enum, Eq , Bounded
     )
+instance JSON.FromJSON W64
 
 instance Read W64 where
   readsPrec _ "0x" = [(0, "")]
