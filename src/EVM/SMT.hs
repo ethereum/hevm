@@ -224,34 +224,34 @@ findStorageReads = foldProp go []
     isAbstractStore _ = False
 
 
-findBufferReads :: TraversableTerm a => [a] -> ([(Expr EWord, Expr Buf)], [(Expr EWord, Expr Buf)])
-findBufferReads = foldl (\acc p -> foldTerm go acc p) mempty
+findBufferAccess :: TraversableTerm a => [a] -> [(Expr EWord, Expr EWord, Expr Buf)]
+findBufferAccess = foldl (\acc p -> foldTerm go acc p) mempty
   where
-    go :: Expr a -> ([(Expr EWord, Expr Buf)], [(Expr EWord, Expr Buf)])
+    go :: Expr a -> [(Expr EWord, Expr EWord, Expr Buf)]
     go = \case
-      ReadWord idx buf -> ([(idx, buf)], [])
-      ReadByte idx buf -> ([], [(idx, buf)])
+      ReadWord idx buf -> [(idx, Lit 32, buf)]
+      ReadByte idx buf -> [(idx, Lit 1, buf)]
+      CopySlice srcOff _ size src _  -> [(srcOff, size, src)]
       _ -> mempty
+
 
 -- | Asserts that buffer reads beyond the size of the buffer are equal
 -- to zero. Looks for buffer reads in the a list of given predicates
 -- and the buffer and storage environments.
 assertReads :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
-assertReads props benv senv =
-  fmap assertReadWord wordReads <> fmap assertReadByte byteReads
-
+assertReads props benv senv = concat $ fmap assertRead allReads
   where
-    assertReadWord (idx, buf) = POr (PEq (ReadWord idx buf) (Lit 0)) (PNeg (PGEq idx (bufLength buf)))
-    assertReadByte (idx, buf) = POr (PEq (ReadByte idx buf) (LitByte 0)) (PNeg (PGEq idx (bufLength buf)))
+    assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
+    assertRead (idx, Lit 32, buf) = [POr (PEq (ReadWord idx buf) (Lit 0)) (PNeg (PGEq idx (bufLength buf)))]
+    assertRead (idx, Lit sz, buf) = fmap (\s -> POr (PEq (ReadByte idx buf) (LitByte (num s))) (PNeg (PGEq idx (bufLength buf)))) [0..sz-1]
+    assertRead (_, _, _) = [] -- cannot generate assertions for accesses of symbolic size
 
-    allReads = findBufferReads props <> findBufferReads (Map.elems benv) <> findBufferReads (Map.elems senv)
-    wordReads = filter keepRead $ nubOrd $ fst allReads
-    byteReads = filter keepRead $ nubOrd $ snd allReads
+    allReads = filter keepRead $ nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
 
     -- discard constraints if we can statically determine that read is less than the buffer length
-    keepRead (Lit idx, buf) =
+    keepRead (Lit idx, Lit size, buf) =
       case minLength benv buf of
-        Just l | num idx < l -> False
+        Just l | num (idx + size) <= l -> False
         _ -> True
     keepRead _ = True
 
