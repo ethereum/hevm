@@ -41,7 +41,6 @@ import EVM.CSE
 import EVM.Keccak
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
 
-
 -- ** Encoding ** ----------------------------------------------------------------------------------
 -- variable names in SMT that we want to get values for
 data CexVars = CexVars
@@ -243,7 +242,7 @@ assertReads props benv senv = concat $ fmap assertRead allReads
   where
     assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
     assertRead (idx, Lit 32, buf) = [POr (PEq (ReadWord idx buf) (Lit 0)) (PNeg (PGEq idx (bufLength buf)))]
-    assertRead (idx, Lit sz, buf) = fmap (\s -> POr (PEq (ReadByte idx buf) (LitByte (num s))) (PNeg (PGEq idx (bufLength buf)))) [0..sz-1]
+    assertRead (idx, Lit sz, buf) = fmap (\s -> POr (PEq (ReadByte idx buf) (LitByte (num s))) (PNeg (PGEq idx (bufLength buf)))) [(0::Int)..num sz-1]
     assertRead (_, _, _) = [] -- cannot generate assertions for accesses of symbolic size
 
     allReads = filter keepRead $ nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
