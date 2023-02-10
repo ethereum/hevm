@@ -93,20 +93,18 @@ declareIntermediates :: BufEnv -> StoreEnv -> SMT2
 declareIntermediates bufs stores =
   let encSs = Map.mapWithKey encodeStore stores
       encBs = Map.mapWithKey encodeBuf bufs
-      -- encBsLen = Map.elems $ Map.mapWithKey encodeBufLen bufs
       sorted = List.sortBy compareFst $ Map.toList $ encSs <> encBs
       decls = fmap snd sorted
-  in SMT2 ([fromText "; intermediate buffers & stores"] <> decls -- <> encBsLen
+  in SMT2 ([fromText "; intermediate buffers & stores"] <> decls
           ) mempty
   where
     compareFst (l, _) (r, _) = compare l r
     encodeBuf n expr =
-       fromLazyText ("(define-const buf" <> (T.pack . show $ n) <> " Buf ") <> exprToSMT expr <> ")\n" <>
-       fromLazyText ("(define-const buf" <> (T.pack . show $ n) <>"_length" <> " (_ BitVec 256) ") <> exprToSMT (bufLengthEnv bufs True expr) <> ")"
-    -- encodeBufLen n expr =
-    --    fromLazyText ("(define-const buf" <> (T.pack . show $ n) <>"_length" <> " (_ BitVec 256) ") <> exprToSMT (bufLengthEnv bufs True expr) <> ")"
+      "(define-const buf" <> (fromString . show $ n) <> " Buf " <> exprToSMT expr <> ")\n" <> encodeBufLen n expr
+    encodeBufLen n expr =
+      "(define-const buf" <> (fromString . show $ n) <>"_length" <> " (_ BitVec 256) " <> exprToSMT (bufLengthEnv bufs True expr) <> ")"
     encodeStore n expr =
-       fromLazyText ("(define-const store" <> (T.pack . show $ n) <> " Storage ") <> exprToSMT expr <> ")"
+       "(define-const store" <> (fromString . show $ n) <> " Storage " <> exprToSMT expr <> ")"
 
 assertProps :: [Prop] -> SMT2
 assertProps ps =
