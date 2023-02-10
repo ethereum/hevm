@@ -337,7 +337,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   (declare-fun keccak (Buf) Word)
   (declare-fun sha256 (Buf) Word)
 
-  (define-fun mymax ((a (_ BitVec 256)) (b (_ BitVec 256))) (_ BitVec 256) (ite (bvult a b) b a))
+  (define-fun max ((a (_ BitVec 256)) (b (_ BitVec 256))) (_ BitVec 256) (ite (bvult a b) b a))
 
   ; word indexing
   (define-fun indexWord31 ((w Word)) Byte ((_ extract 7 0) w))
@@ -567,7 +567,7 @@ exprToSMT = \case
   Max a b ->
     let aenc = exprToSMT a
         benc = exprToSMT b in
-    "(mymax " <> aenc `sp` benc <> ")"
+    "(max " <> aenc `sp` benc <> ")"
   LT a b ->
     let cond = op2 "bvult" a b in
     "(ite " <> cond `sp` one `sp` zero <> ")"
