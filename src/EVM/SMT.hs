@@ -263,6 +263,7 @@ assertReads props benv senv = concat $ fmap assertRead allReads
         _ -> True
     keepRead _ = True    
 
+-- | Asserts that the length of an abstract base buffer is at most the maximum location that is read
 assertMaxLen :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
 assertMaxLen props benv senv = fmap (\(k, v) -> PLEq (BufLength (AbstractBuf k)) v) $ Map.toList bufMap
   where
@@ -285,9 +286,6 @@ assertMaxLen props benv senv = fmap (\(k, v) -> PLEq (BufLength (AbstractBuf k))
     baseBuf (WriteByte _ _ b) = baseBuf b
     baseBuf (WriteWord _ _ b) = baseBuf b
     baseBuf (CopySlice _ _ _ _ dst)= baseBuf dst
-
-
-
 
 
 declareBufs :: [Builder] -> SMT2
