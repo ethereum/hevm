@@ -959,12 +959,10 @@ eqByte (LitByte x) (LitByte y) = Lit $ if x == y then 1 else 0
 eqByte x y = EqByte x y
 
 min :: Expr EWord -> Expr EWord -> Expr EWord
-min (Lit x) (Lit y) = if x < y then Lit x else Lit y
-min x y = Min x y
+min x y = op2 Min Prelude.min x y
 
 max :: Expr EWord -> Expr EWord -> Expr EWord
-max (Lit x) (Lit y) = if x > y then Lit x else Lit y
-max x y = Min x y
+max x y = op2 Max Prelude.max x y
 
 numBranches :: Expr End -> Int
 numBranches (ITE _ t f) = numBranches t + numBranches f
