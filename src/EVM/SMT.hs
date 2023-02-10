@@ -142,7 +142,7 @@ assertProps ps =
     storeVals = Map.elems stores
 
     storageReads = nubOrd $ concatMap findStorageReads ps
-    
+
     keccakAssumes
       = SMT2 ["; keccak assumptions"] mempty
       <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions ps_elim bufVals storeVals)) mempty
@@ -261,7 +261,7 @@ assertReads props benv senv = concat $ fmap assertRead allReads
       case minLength benv buf of
         Just l | num (idx + size) <= l -> False
         _ -> True
-    keepRead _ = True    
+    keepRead _ = True
 
 -- | Asserts that the length of an abstract base buffer is at most the maximum location that is read
 assertMaxLen :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
@@ -274,7 +274,7 @@ assertMaxLen props benv senv = fmap (\(k, v) -> PLEq (BufLength (AbstractBuf k))
     addBound m (idx, size, buf) =
       case baseBuf buf of
         AbstractBuf b -> Map.insertWith EVM.Expr.max b (add idx size) m
-        _ -> m      
+        _ -> m
 
     baseBuf :: Expr Buf -> Expr Buf
     baseBuf (AbstractBuf b) = AbstractBuf b
@@ -338,7 +338,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   (declare-fun sha256 (Buf) Word)
 
   (define-fun mymax ((a (_ BitVec 256)) (b (_ BitVec 256))) (_ BitVec 256) (ite (bvult a b) b a))
-  
+
   ; word indexing
   (define-fun indexWord31 ((w Word)) Byte ((_ extract 7 0) w))
   (define-fun indexWord30 ((w Word)) Byte ((_ extract 15 8) w))
