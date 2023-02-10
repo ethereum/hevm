@@ -661,7 +661,7 @@ exprToSMT = \case
   ReadWord idx prev -> op2 "readWord" idx prev
   BufLength (AbstractBuf b) -> fromText b <> "_length"
   BufLength (GVar (BufVar n)) -> fromLazyText $ "buf" <> (T.pack . show $ n) <> "_length"
-  BufLength b -> exprToSMT (bufLengthEnv mempty False b)
+  BufLength b -> exprToSMT (bufLength b)
   WriteByte idx val prev ->
     let encIdx = exprToSMT idx
         encVal = exprToSMT val
