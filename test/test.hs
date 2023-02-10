@@ -575,7 +575,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) [] debugVeriOpts
+        (_, [Cex (_, _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) [] debugVeriOpts
         -- assertBool "Access must be beyond element 2" $ (getVar ctr "arg1") > 1
         putStrLn "expected counterexample found"
       ,
