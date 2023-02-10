@@ -410,14 +410,11 @@ bufLengthEnv env useEnv buf = go (Lit 0) buf
   where
     go :: Expr EWord -> Expr Buf -> Expr EWord  
     go l (ConcreteBuf b) = EVM.Expr.max l (Lit (num . BS.length $ b))
-    go l (WriteWord (Lit idx) _ b) = go (EVM.Expr.max l (Lit (idx + 32))) b
-    go l (WriteByte (Lit idx) _ b) = go (EVM.Expr.max l (Lit (idx + 1))) b
-    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (EVM.Expr.max l (Lit (dstOffset + size))) dst
-    -- fully abstract cases
     go l (AbstractBuf b) = Max l (BufLength (AbstractBuf b))
-    go l (WriteWord idx _ b) = go (EVM.Expr.max l (Add idx (Lit 32))) b
-    go l (WriteByte idx _ b) = go (EVM.Expr.max l (Add idx (Lit 1))) b
-    go l (CopySlice _ dstOffset size _ dst) = go (EVM.Expr.max l (Add dstOffset size)) dst
+    go l (WriteWord idx _ b) = go (EVM.Expr.max l (add idx (Lit 32))) b
+    go l (WriteByte idx _ b) = go (EVM.Expr.max l (add idx (Lit 1))) b
+    go l (CopySlice _ dstOffset size _ dst) = go (EVM.Expr.max l (add dstOffset size)) dst
+
     go l (GVar (BufVar a)) | useEnv =
       case Map.lookup a env of
         Just b -> go l b
