@@ -403,7 +403,7 @@ writeWord offset val src = WriteWord offset val src
 -- If there are any writes to abstract locations, or CopySlices with an
 -- abstract size or dstOffset, an abstract expresion will be returned.
 bufLength :: Expr Buf -> Expr EWord
-bufLength = bufLengthEnv mempty True
+bufLength = bufLengthEnv mempty False
 
 bufLengthEnv :: Map.Map Int (Expr Buf) -> Bool -> Expr Buf -> Expr EWord
 bufLengthEnv env useEnv buf = go (Lit 0) buf
