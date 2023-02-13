@@ -774,3 +774,17 @@ regexMatches regexSource =
     regex = Regex.makeRegexOpts compOpts execOpts (Text.unpack regexSource)
   in
     Regex.matchTest regex . Seq.fromList . Text.unpack
+
+data VMTrace =
+  VMTrace
+  { tracePc      :: Int
+  , traceOp      :: Int
+  , traceStack   :: [W256]
+  , traceMemSize :: Data.Word.Word64
+  , traceDepth   :: Int
+  , traceGas     :: Data.Word.Word64
+  } deriving (Generic, Show)
+instance JSON.ToJSON VMTrace where
+  toEncoding = JSON.genericToEncoding JSON.defaultOptions
+instance JSON.FromJSON VMTrace
+

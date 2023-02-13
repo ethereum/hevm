@@ -1,4 +1,3 @@
-{-# Language GADTs #-}
 {-# Language NumericUnderscores #-}
 {-# Language QuasiQuotes #-}
 {-# Language DataKinds #-}
@@ -45,8 +44,8 @@ import qualified Data.Aeson as JSON
 
 -- import qualified Control.Monad.Operational as Operational
 import Control.Monad.Operational (view, ProgramViewT(..), ProgramView)
-import Control.Monad.State.Strict (execState, runState, evalStateT, StateT, liftIO, liftM, liftM2, liftM3, liftM4, liftM5, forM_, when, unless)
-import Control.Lens hiding (List, pre, (.>), re)
+import Control.Monad.State.Strict (execState, runStateT, runState, evalStateT, StateT, liftIO, liftM, liftM2, liftM3, liftM4, liftM5, forM_, when, unless)
+import Control.Lens hiding (List, pre, (.>), re, op)
 import qualified Control.Monad.State.Class as State
 
 import qualified Data.Vector as Vector
@@ -78,7 +77,6 @@ import qualified EVM.Fetch as Fetch
 import Data.List (isSubsequenceOf)
 import EVM.TestUtils
 import GHC.Conc (getNumProcessors)
-import qualified GHC.IO.Handle as File
 import System.Process
 
 main :: IO ()
@@ -100,7 +98,7 @@ data GethTrace =
     , gas :: Int
     , gasCost :: Int
     , depth :: Int
-    , stack :: [W64]
+    , stack :: [String]
     } deriving (Generic, Show)
 instance JSON.FromJSON GethTrace
 
@@ -109,10 +107,9 @@ data GethResult =
   { gas :: W64
   , failed :: Bool
   , returnValue :: ByteString
-  , structLogs :: GethTrace
+  , structLogs :: [GethTrace]
   } deriving (Generic, Show)
 instance JSON.FromJSON GethResult
-  -- fromJSON = JSON.genericFromJSON JSON.defaultOptions
 
 data EVMToolAlloc =
   EVMToolAlloc
@@ -181,15 +178,37 @@ tests = testGroup "hevm"
             tojs = BS.unpack . BS.toStrict . JSON.encode
             withGas = 0xffff :: W64
             js = (BS.unpack "gas = ") ++ (BS.unpack . BS.toStrict . JSON.encode $ withGas) ++ (BS.unpack "\nfrom = ") ++ (tojs fromAddr) ++ (BS.unpack "\nto= ") ++ (tojs toAddr) ++ (BS.unpack "\ndata=") ++ (BS.unpack . BS.toStrict . JSON.encode $ bitcode) ++ (BS.unpack "\nalloc=") ++ (BS.unpack . BS.toStrict . JSON.encode $ allocjson) ++ (BS.unpack "\na = debug.traceCall({from: from, to: to, data: data, gas: gas}, 'latest', {stateOverrides : alloc})\nconsole.log(JSON.stringify(a))")
+            compareTraces :: [VMTrace] -> Maybe GethResult -> Bool
+            compareTraces _ Nothing = False
+            compareTraces hevmTrace (Just gethResult) =
+              go hevmTrace (structLogs gethResult)
+                where
+                  go :: [VMTrace] -> [GethTrace] -> Bool
+                  go [] [] = True
+                  go (a:ax) (b:bx) = 
+                    let a2 = opString $ traceOp a
+                        b2 = op b
+                    in
+                      if a == b then go ax bx
+                      else False
+                  go _ _ = False
         BS.writeFile "my.js" $ BS.pack js
-        traceFile <- openFile "trace.json" WriteMode
-        res <- runCodeWithTrace Nothing bitcode calldat traceFile
-        hClose traceFile
-        a <- readProcess "geth" ["--verbosity", "0", "--dev", "--exec", "loadScript(\"my.js\")", "console"] ""
-        let bsjs = (BSL.pack $ map (fromIntegral . Data.Char.ord) a)
-            x = JSON.decode  bsjs :: Maybe GethResult
-        putStrLn $ "result final: " <> (show res)
-        putStrLn $ "geth result: " <> (show a)
+        a <- runCodeWithTrace Nothing bitcode calldat
+        if isJust a then do
+          Just (res, hevmTrace) <- runCodeWithTrace Nothing bitcode calldat
+          gethOut <- readProcess "geth" ["--verbosity", "0", "--dev", "--exec", "loadScript(\"my.js\")", "console"] ""
+          let x = (BSL.pack $ map (fromIntegral . Data.Char.ord) gethOut)
+              x2 = BSL.take ((BSL.length x) - 6) x -- remove trailing `\nnull\n`
+              gethRes = JSON.decode x2 :: Maybe GethResult
+
+          putStrLn $ "HEVM result: " <> (show res)
+          putStrLn $ "HEVM trace: " <> (show hevmTrace)
+
+          -- putStrLn $ "geth result raw: " <> (show x)
+          putStrLn $ "geth x2: " <> (show x2)
+          putStrLn $ "geth result: " <> (show gethRes)
+          compareTraces hevmTrace gethRes
+        else putStrLn "not successful"
 
     , testProperty "random-contract-with-symbolic-call" $ \(expr :: OpContract) -> ioProperty $ do
         expr2 <- fixContractJumps expr
@@ -2251,12 +2270,12 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
     Right b -> Just b
 
 -- | Takes a runtime code and calls it with the provided calldata
-runCodeWithTrace :: Fetch.RpcInfo -> ByteString -> Expr Buf -> File.Handle -> IO (Maybe (Expr Buf))
-runCodeWithTrace rpcinfo code' calldata' jsonfile = withSolvers Z3 0 Nothing $ \solvers -> do
-  res <- evalStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) jsonfile Stepper.execFully) (vmForRuntimeCode code' calldata')
+runCodeWithTrace :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe ((Expr Buf, [VMTrace])))
+runCodeWithTrace rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
+  (res, vm) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (vmForRuntimeCode code' calldata')
   pure $ case res of
     Left _ -> Nothing
-    Right b -> Just b
+    Right b -> Just (b, _trace vm)
 
 vmForRuntimeCode :: ByteString -> Expr Buf -> VM
 vmForRuntimeCode runtimecode calldata' =
@@ -2901,17 +2920,6 @@ bothM f (a, a') = do
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
 
-data VMTrace =
-  VMTrace
-  { pc      :: Int
-  , op      :: Int
-  , stack   :: [W256]
-  , memSize :: Data.Word.Word64
-  , depth   :: Int
-  , gas     :: Data.Word.Word64
-  } deriving (Generic)
-instance JSON.ToJSON VMTrace where
-  toEncoding = JSON.genericToEncoding JSON.defaultOptions
 
 data VMTraceResult =
   VMTraceResult
@@ -2944,14 +2952,14 @@ vmtrace vm =
     the :: (b -> VM -> Const a VM) -> ((a -> Const a a) -> b) -> a
     the f g = Control.Lens.view (f . g) vm
     memsize = the state memorySize
-  in VMTrace { pc = the state EVM.pc
-             , op = num $ getOp vm
-             , gas = the state EVM.gas
-             , memSize = memsize
+  in VMTrace { tracePc = the state EVM.pc
+             , traceOp = num $ getOp vm
+             , traceGas = the state EVM.gas
+             , traceMemSize = memsize
              -- increment to match geth format
-             , depth = 1 + length (Control.Lens.view frames vm)
+             , traceDepth = 1 + length (Control.Lens.view frames vm)
              -- reverse to match geth format
-             , stack = reverse $ forceLit <$> the state EVM.stack
+             , traceStack = reverse $ forceLit <$> the state EVM.stack
              }
 
 vmres :: VM -> VMTraceResult
@@ -2972,10 +2980,9 @@ vmres vm =
 
 interpretWithTrace
   :: Fetch.Fetcher
-  -> File.Handle
   -> Stepper.Stepper a
   -> StateT VM IO a
-interpretWithTrace fetcher jsonfile =
+interpretWithTrace fetcher = do
   eval . Control.Monad.Operational.view
 
   where
@@ -2984,8 +2991,9 @@ interpretWithTrace fetcher jsonfile =
       -> StateT VM IO a
 
     eval (Control.Monad.Operational.Return x) = do
-      vm <- State.get
-      liftIO $ BS.hPut jsonfile $ BS.toStrict $ JSON.encode $ out (vmres vm)
+      -- vm <- State.get
+      -- let vm2 = vm { _trace = (_trace vm):(vmres vm) }
+      -- liftIO $ BS.hPut $ BS.toStrict $ JSON.encode $ out (vmres vm)
       pure x
 
     eval (action :>>= k) = do
@@ -2996,13 +3004,15 @@ interpretWithTrace fetcher jsonfile =
           use result >>= \case
             Just _ -> do
               -- Yes, proceed with the next action.
-              interpretWithTrace fetcher jsonfile (k vm)
+              interpretWithTrace fetcher (k vm)
             Nothing -> do
-              liftIO $ BS.hPut jsonfile $ BS.toStrict $ JSON.encode $ vmtrace vm
+              vm2 <- State.get
+              let vm3 = vm2 { _trace = (_trace vm)++[vmtrace vm] }
+              State.put vm3
 
               -- No, keep performing the current action
               State.state (runState exec1)
-              interpretWithTrace fetcher jsonfile (Stepper.run >>= k)
+              interpretWithTrace fetcher (Stepper.run >>= k)
 
         -- Stepper wants to keep executing?
         Stepper.Exec -> do
@@ -3010,22 +3020,24 @@ interpretWithTrace fetcher jsonfile =
           use result >>= \case
             Just r -> do
               -- Yes, proceed with the next action.
-              interpretWithTrace fetcher jsonfile (k r)
+              interpretWithTrace fetcher (k r)
             Nothing -> do
-              liftIO $ BS.hPut jsonfile $ BS.toStrict $ JSON.encode $ vmtrace vm
+              vm2 <- State.get
+              let vm3 = vm2 { _trace = (_trace vm)++[vmtrace vm] }
+              State.put vm3
 
               -- No, keep performing the current action
               State.state (runState exec1)
-              interpretWithTrace fetcher jsonfile (Stepper.exec >>= k)
+              interpretWithTrace fetcher (Stepper.exec >>= k)
         Stepper.Wait q ->
           do m <- liftIO (fetcher q)
-             State.state (runState m) >> interpretWithTrace fetcher jsonfile (k ())
+             State.state (runState m) >> interpretWithTrace fetcher (k ())
         Stepper.Ask _ ->
           error "cannot make choices with this interpretWithTraceer"
         Stepper.IOAct m ->
-          m >>= interpretWithTrace fetcher jsonfile . k
+          m >>= interpretWithTrace fetcher . k
         Stepper.EVM m -> do
           r <- State.state (runState m)
-          interpretWithTrace fetcher jsonfile (k r)
+          interpretWithTrace fetcher (k r)
 
 

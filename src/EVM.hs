@@ -112,6 +112,7 @@ data VM = VM
   , _keccakEqs      :: [Prop]
   , _allowFFI       :: Bool
   , _overrideCaller :: Maybe (Expr EWord)
+  , _trace          :: [VMTrace]
   }
   deriving (Show)
 
@@ -537,6 +538,7 @@ makeVm o =
   , _iterations = mempty
   , _allowFFI = vmoptAllowFFI o
   , _overrideCaller = Nothing
+  , _trace = []
   }
 
 -- | Initialize empty contract with given code
