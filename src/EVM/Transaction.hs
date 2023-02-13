@@ -16,6 +16,7 @@ import Data.Aeson (FromJSON (..))
 import Data.ByteString (ByteString)
 import Data.Map (Map)
 import Data.Maybe (fromMaybe, isNothing, fromJust)
+import GHC.Generics (Generic)
 
 import qualified Data.Aeson        as JSON
 import qualified Data.Aeson.Types  as JSON
@@ -23,15 +24,26 @@ import qualified Data.ByteString   as BS
 import qualified Data.Map          as Map
 import Data.Word (Word64)
 
+import Crypto.Number.ModArithmetic (expFast)
+import qualified Crypto.Hash as Crypto
+import Crypto.Hash (Digest, SHA256, RIPEMD160, digestFromByteString)
+import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
+import Crypto.PubKey.ECC.Types (getCurveByName, CurveName(..), Point(..))
+import Crypto.PubKey.ECC.Generate (generateQ)
+import Data.Memory.Encoding.Base16 (toHexadecimal)
+import Numeric (showHex)
+
 data AccessListEntry = AccessListEntry {
   accessAddress :: Addr,
   accessStorageKeys :: [W256]
-} deriving Show
+} deriving (Show, Generic)
+instance JSON.ToJSON AccessListEntry
 
 data TxType = LegacyTransaction
             | AccessListTransaction
             | EIP1559Transaction
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
+instance JSON.ToJSON TxType
 
 data Transaction = Transaction {
     txData     :: ByteString,
@@ -47,7 +59,38 @@ data Transaction = Transaction {
     txAccessList :: [AccessListEntry],
     txMaxPriorityFeeGas :: Maybe W256,
     txMaxFeePerGas :: Maybe W256
-} deriving Show
+} deriving (Show, Generic)
+instance JSON.ToJSON Transaction where
+  toJSON t = JSON.object [ ("input",             (JSON.toJSON $ txData t))
+                         , ("gas",               (JSON.toJSON $ ("0x" ++ showHex (toInteger $ txGasLimit t) "")))
+                         , ("gasPrice",          (JSON.toJSON $ (show $ fromJust $ txGasPrice t)))
+                         -- , ("txNonce",           (JSON.toJSON $ txNonce   t))
+                         , ("v",                 (JSON.toJSON $ show $ txV       t))
+                         , ("r",                 (JSON.toJSON $ show $ txR       t))
+                         , ("s",                 (JSON.toJSON $ show $ txS       t))
+                         , ("to",                (JSON.toJSON $ txToAddr  t))
+                         , ("nonce",             (JSON.toJSON $ (show $ txV       t)))
+                         , ("value",             (JSON.toJSON $ (show $ txValue   t)))
+                         -- , ("type",              (JSON.toJSON $ txType    t))
+                         , ("accessList",        (JSON.toJSON $ txAccessList t))
+                         , ("maxPriorityFeeGas", (JSON.toJSON $ txMaxPriorityFeeGas t))
+                         -- , ("maxFeePerGas",      (JSON.toJSON $ txMaxFeePerGas t))
+                         ]
+
+exampleTransaction = Transaction { txData     = mempty
+                                 , txGasLimit = 0xffff
+                                 , txGasPrice = Just 0
+                                 , txNonce    = 420
+                                 , txR        = 330
+                                 , txS        = 330
+                                 , txToAddr   = Just 0x0
+                                 , txV        = 0
+                                 , txValue    = 0
+                                 , txType     = EIP1559Transaction
+                                 , txAccessList = []
+                                 , txMaxPriorityFeeGas =  Just 1
+                                 , txMaxFeePerGas = Just 1
+                                 }
 
 -- | utility function for getting a more useful representation of accesslistentries
 -- duplicates only matter for gas computation
@@ -65,6 +108,30 @@ sender chainId tx = ecrec v' (txR tx) (txS tx) hash
         v    = txV tx
         v'   = if v == 27 || v == 28 then v
                else 27 + v
+
+
+sign :: Int -> Integer -> Transaction -> Transaction
+sign chainId sk tx = tx { txR = num $ sign_r sig
+                        , txS = num $ sign_s sig
+                        , txV = 28}
+  where
+    curve = getCurveByName SEC_p256k1
+    priv = PrivateKey curve sk
+    digest = digestFromByteString (word256Bytes $ keccak' $ signingData chainId tx)
+    sig = ethsign priv (fromJust digest)
+
+
+-- | We don't wanna introduce the machinery needed to sign with a random nonce,
+-- so we just use the same nonce every time (420). This is obviusly very
+-- insecure, but fine for testing purposes.
+ethsign :: PrivateKey -> Digest Crypto.Keccak_256 -> Signature
+ethsign sk digest = go 420
+  where
+    go k = case signDigestWith k sk digest of
+       Nothing  -> go (k + 1)
+       Just sig -> sig
+
+
 
 signingData :: Int -> Transaction -> ByteString
 signingData chainId tx =
