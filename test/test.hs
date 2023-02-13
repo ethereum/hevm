@@ -178,24 +178,26 @@ tests = testGroup "hevm"
             tojs = BS.unpack . BS.toStrict . JSON.encode
             withGas = 0xffff :: W64
             js = (BS.unpack "gas = ") ++ (BS.unpack . BS.toStrict . JSON.encode $ withGas) ++ (BS.unpack "\nfrom = ") ++ (tojs fromAddr) ++ (BS.unpack "\nto= ") ++ (tojs toAddr) ++ (BS.unpack "\ndata=") ++ (BS.unpack . BS.toStrict . JSON.encode $ bitcode) ++ (BS.unpack "\nalloc=") ++ (BS.unpack . BS.toStrict . JSON.encode $ allocjson) ++ (BS.unpack "\na = debug.traceCall({from: from, to: to, data: data, gas: gas}, 'latest', {stateOverrides : alloc})\nconsole.log(JSON.stringify(a))")
-            compareTraces :: [VMTrace] -> Maybe GethResult -> Bool
-            compareTraces _ Nothing = False
+            compareTraces :: [VMTrace] -> Maybe GethResult -> IO (Bool)
+            compareTraces _ Nothing = pure False
             compareTraces hevmTrace (Just gethResult) =
               go hevmTrace (structLogs gethResult)
                 where
-                  go :: [VMTrace] -> [GethTrace] -> Bool
-                  go [] [] = True
-                  go (a:ax) (b:bx) = 
-                    let a2 = opString $ traceOp a
-                        b2 = op b
-                    in
-                      if a == b then go ax bx
-                      else False
-                  go _ _ = False
+                  go :: [VMTrace] -> [GethTrace] -> IO (Bool)
+                  go [] [] = pure True
+                  go (a:ax) (b:bx) = do
+                    let aOp = intToOpName $ traceOp a
+                        aStack = traceStack a
+                        bOp = op b
+                        -- bStack = stack b :: [String]
+                    putStrLn $ (show aOp) <> " --- " <> (show bOp)
+                    if aOp == bOp then go ax bx
+                    else pure False
+                  go _ _ = pure False
         BS.writeFile "my.js" $ BS.pack js
         a <- runCodeWithTrace Nothing bitcode calldat
         if isJust a then do
-          Just (res, hevmTrace) <- runCodeWithTrace Nothing bitcode calldat
+          Just (res, hevmTrace, hevmResult) <- runCodeWithTrace Nothing bitcode calldat
           gethOut <- readProcess "geth" ["--verbosity", "0", "--dev", "--exec", "loadScript(\"my.js\")", "console"] ""
           let x = (BSL.pack $ map (fromIntegral . Data.Char.ord) gethOut)
               x2 = BSL.take ((BSL.length x) - 6) x -- remove trailing `\nnull\n`
@@ -205,9 +207,11 @@ tests = testGroup "hevm"
           putStrLn $ "HEVM trace: " <> (show hevmTrace)
 
           -- putStrLn $ "geth result raw: " <> (show x)
-          putStrLn $ "geth x2: " <> (show x2)
+          -- putStrLn $ "geth result semi-raw: " <> (show x2)
           putStrLn $ "geth result: " <> (show gethRes)
-          compareTraces hevmTrace gethRes
+          ok <- compareTraces hevmTrace gethRes
+          putStrLn $ "OK: " <> (show ok)
+          assertEqual "Must match" ok True
         else putStrLn "not successful"
 
     , testProperty "random-contract-with-symbolic-call" $ \(expr :: OpContract) -> ioProperty $ do
@@ -2270,12 +2274,12 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
     Right b -> Just b
 
 -- | Takes a runtime code and calls it with the provided calldata
-runCodeWithTrace :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe ((Expr Buf, [VMTrace])))
+runCodeWithTrace :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe ((Expr Buf, [VMTrace], VMTraceResult)))
 runCodeWithTrace rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
   (res, vm) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (vmForRuntimeCode code' calldata')
   pure $ case res of
     Left _ -> Nothing
-    Right b -> Just (b, _trace vm)
+    Right b -> Just (b, _trace vm, vmres vm)
 
 vmForRuntimeCode :: ByteString -> Expr Buf -> VM
 vmForRuntimeCode runtimecode calldata' =
