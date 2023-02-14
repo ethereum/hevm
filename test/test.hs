@@ -195,8 +195,8 @@ tests = testGroup "hevm"
                         , _prevRandao  =  0x0
                         , _gaslimit    =  0x750a163df65e8a
                         , _baseFee     =  0x0
-                        , _maxCodeSize = undefined
-                        , _schedule    = undefined
+                        , _maxCodeSize =  0x444
+                        , _schedule    =  FeeSchedule.homestead
                         }
 
             txs = [EVM.Transaction.sign 1 sk exampleTransaction]
@@ -219,7 +219,7 @@ tests = testGroup "hevm"
         JSON.encodeFile "env.json" env
         a <- runCodeWithTrace Nothing bitcode calldat
         if isJust a then do
-          Just (res, hevmTrace, hevmResult) <- runCodeWithTrace Nothing bitcode calldat
+          Just (hevmRes, hevmTrace, hevmTraceResult) <- runCodeWithTrace Nothing bitcode calldat
           _ <- readProcess "evm" [ "transition"
                                        ,"--input.alloc" , "alloc.json"
                                        , "--input.env" , "env.json"
@@ -230,11 +230,8 @@ tests = testGroup "hevm"
                                        , "--output.result", "result.json"
                                        ] ""
           evmTrace <- JSON.decodeFileStrict "trace.json" :: IO (Maybe [EVMTrace])
-          putStrLn $ "HEVM result: " <> (show res)
+          putStrLn $ "HEVM result: " <> (show hevmRes)
           putStrLn $ "HEVM trace: " <> (show hevmTrace)
-
-          -- putStrLn $ "geth result raw: " <> (show x)
-          -- putStrLn $ "geth result semi-raw: " <> (show x2)
           putStrLn $ "evm trace: " <> (show evmTrace)
           ok <- compareTraces hevmTrace evmTrace
           putStrLn $ "OK: " <> (show ok)

@@ -22,9 +22,8 @@ import qualified EVM.Precompiled
 import qualified EVM.Expr as Expr
 import qualified EVM.Sign as Sign
 
-import Data.Aeson (FromJSON (..))
 import qualified Data.Aeson        as JSON
-import qualified Data.Aeson.Types  as JSON
+import Numeric (showHex)
 
 import Control.Lens hiding (op, (:<), (|>), (.>))
 import Control.Monad.State.Strict hiding (state)
@@ -403,7 +402,7 @@ data Block = Block
 instance JSON.ToJSON Block where
   toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON $ _coinbase b))
                          , ("currentDifficulty", (JSON.toJSON $ _prevRandao b))
-                         , ("currentGasLimit"  , (JSON.toJSON $ _gaslimit b))
+                         , ("currentGasLimit"  , (JSON.toJSON $ ("0x" ++ showHex (toInteger $ _gaslimit b) "")))
                          , ("currentNumber"    , (JSON.toJSON $ _number b))
                          , ("currentTimestamp" , (JSON.toJSON timestamp))
                          , ("currentBaseFee"   , (JSON.toJSON $ _baseFee b))
