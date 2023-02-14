@@ -20,6 +20,7 @@ import EVM.FeeSchedule (FeeSchedule (..))
 import Options.Generic as Options
 import qualified EVM.Precompiled
 import qualified EVM.Expr as Expr
+import qualified EVM.Sign as Sign
 
 import Control.Lens hiding (op, (:<), (|>), (.>))
 import Control.Monad.State.Strict hiding (state)
@@ -2012,29 +2013,26 @@ cheatActions =
         \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
           [sk, hash] ->
             forceConcrete2 (sk, hash) "cannot sign symbolic data" $ \(sk', hash') -> let
-              curve = getCurveByName SEC_p256k1
-              priv = PrivateKey curve (num sk')
               digest = digestFromByteString (word256Bytes hash')
             in do
               case digest of
                 Nothing -> vmError (BadCheatCode sig)
                 Just digest' -> do
-                  let s = ethsign priv digest'
-                      -- calculating the V value is pretty annoying if you
-                      -- don't have access to the full X/Y coords of the
-                      -- signature (which we don't get back from cryptonite).
-                      -- Luckily since we use a fixed nonce (to avoid the
-                      -- overhead of bringing randomness into the core EVM
-                      -- semantics), it would appear that every signature we
-                      -- produce has v == 28. Definitely a hack, and also bad
-                      -- for code that somehow depends on the value of v, but
-                      -- that seems acceptable for now.
-                      v = 28
+                  -- calculating the V value is pretty annoying if you
+                  -- don't have access to the full X/Y coords of the
+                  -- signature (which we don't get back from cryptonite).
+                  -- Luckily since we use a fixed nonce (to avoid the
+                  -- overhead of bringing randomness into the core EVM
+                  -- semantics), it would appear that every signature we
+                  -- produce has v == 28. Definitely a hack, and also bad
+                  -- for code that somehow depends on the value of v, but
+                  -- that seems acceptable for now.
+                  let (r,s,v) = Sign.sign digest' (toInteger sk')
                       encoded = encodeAbiValue $
                         AbiTuple (RegularVector.fromList
-                          [ AbiUInt 8 v
-                          , AbiBytes 32 (word256Bytes . fromInteger $ sign_r s)
-                          , AbiBytes 32 (word256Bytes . fromInteger $ sign_s s)
+                          [ AbiUInt 8 $ fromInteger $ toInteger v
+                          , AbiBytes 32 (word256Bytes r)
+                          , AbiBytes 32 (word256Bytes s)
                           ])
                   assign (state . returndata) (ConcreteBuf encoded)
                   copyBytesToMemory (ConcreteBuf encoded) (Lit . num . BS.length $ encoded) (Lit 0) outOffset
@@ -2042,20 +2040,14 @@ cheatActions =
 
       action "addr(uint256)" $
         \sig outOffset _ input -> case decodeStaticArgs 0 1 input of
-          [sk] -> forceConcrete sk "cannot derive address for a symbolic key" $ \sk' -> let
-                curve = getCurveByName SEC_p256k1
-                pubPoint = generateQ curve (num sk')
-                encodeInt = encodeAbiValue . AbiUInt 256 . fromInteger
-              in do
-                case pubPoint of
-                  PointO -> do vmError (BadCheatCode sig)
-                  Point x y -> do
-                    -- See yellow paper #286
-                    let
-                      pub = BS.concat [ encodeInt x, encodeInt y ]
-                      addr = Lit . W256 . word256 . BS.drop 12 . BS.take 32 . keccakBytes $ pub
-                    assign (state . returndata . word256At (Lit 0)) addr
-                    assign (state . memory . word256At outOffset) addr
+          [sk] -> forceConcrete sk "cannot derive address for a symbolic key" $ \sk' -> do
+            let a = Sign.deriveAddr $ num sk'
+            case a of
+              Nothing -> vmError (BadCheatCode sig)
+              Just address -> do
+                let expAddr = litAddr address
+                assign (state . returndata . word256At (Lit 0)) expAddr
+                assign (state . memory . word256At outOffset) expAddr
           _ -> vmError (BadCheatCode sig),
 
       action "prank(address)" $

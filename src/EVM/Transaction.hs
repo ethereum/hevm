@@ -9,6 +9,7 @@ import EVM.Precompiled (execute)
 import EVM.RLP
 import EVM.Types
 import EVM.Expr (litAddr)
+import EVM.Sign
 
 import Control.Lens
 
@@ -24,13 +25,7 @@ import qualified Data.ByteString   as BS
 import qualified Data.Map          as Map
 import Data.Word (Word64)
 
-import Crypto.Number.ModArithmetic (expFast)
-import qualified Crypto.Hash as Crypto
-import Crypto.Hash (Digest, SHA256, RIPEMD160, digestFromByteString)
-import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
-import Crypto.PubKey.ECC.Types (getCurveByName, CurveName(..), Point(..))
-import Crypto.PubKey.ECC.Generate (generateQ)
-import Data.Memory.Encoding.Base16 (toHexadecimal)
+import Crypto.Hash (digestFromByteString)
 import Numeric (showHex)
 
 data AccessListEntry = AccessListEntry {
@@ -43,7 +38,10 @@ data TxType = LegacyTransaction
             | AccessListTransaction
             | EIP1559Transaction
   deriving (Show, Eq, Generic)
-instance JSON.ToJSON TxType
+instance JSON.ToJSON TxType where
+  toJSON t = case t of
+               EIP1559Transaction -> "0x2"
+               _ -> error "unimplemented"
 
 data Transaction = Transaction {
     txData     :: ByteString,
@@ -62,28 +60,28 @@ data Transaction = Transaction {
 } deriving (Show, Generic)
 instance JSON.ToJSON Transaction where
   toJSON t = JSON.object [ ("input",             (JSON.toJSON $ txData t))
-                         , ("gas",               (JSON.toJSON $ ("0x" ++ showHex (toInteger $ txGasLimit t) "")))
-                         , ("gasPrice",          (JSON.toJSON $ (show $ fromJust $ txGasPrice t)))
-                         -- , ("txNonce",           (JSON.toJSON $ txNonce   t))
-                         , ("v",                 (JSON.toJSON $ show $ txV       t))
-                         , ("r",                 (JSON.toJSON $ show $ txR       t))
+                         , ("gas",               (JSON.toJSON $ "0x" ++ showHex (toInteger $ txGasLimit t) ""))
+                         , ("gasPrice",          (JSON.toJSON $ show $ fromJust $ txGasPrice t))
+                         , ("v",                 (JSON.toJSON $ show $ (txV t)-27))
+                         , ("r",                 (JSON.toJSON $ show $ txR t))
                          , ("s",                 (JSON.toJSON $ show $ txS       t))
                          , ("to",                (JSON.toJSON $ txToAddr  t))
-                         , ("nonce",             (JSON.toJSON $ (show $ txV       t)))
-                         , ("value",             (JSON.toJSON $ (show $ txValue   t)))
-                         -- , ("type",              (JSON.toJSON $ txType    t))
+                         , ("nonce",             (JSON.toJSON $ show $ txNonce t))
+                         , ("value",             (JSON.toJSON $ show $ txValue t))
+                         , ("type",              (JSON.toJSON $ txType t))
                          , ("accessList",        (JSON.toJSON $ txAccessList t))
-                         , ("maxPriorityFeeGas", (JSON.toJSON $ txMaxPriorityFeeGas t))
-                         -- , ("maxFeePerGas",      (JSON.toJSON $ txMaxFeePerGas t))
+                         , ("maxPriorityFeePerGas", (JSON.toJSON $ show $ fromJust $ txMaxPriorityFeeGas t))
+                         , ("maxFeePerGas",      (JSON.toJSON $ show $ fromJust $ txMaxFeePerGas t))
+                         , ("chainId",           (JSON.toJSON ("0x1" :: String))) -- NOTE: should be part of struct?
                          ]
 
-exampleTransaction = Transaction { txData     = mempty
+exampleTransaction = Transaction { txData     = "abc"
                                  , txGasLimit = 0xffff
                                  , txGasPrice = Just 0
-                                 , txNonce    = 420
+                                 , txNonce    = 0
                                  , txR        = 330
                                  , txS        = 330
-                                 , txToAddr   = Just 0x0
+                                 , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
                                  , txV        = 0
                                  , txValue    = 0
                                  , txType     = EIP1559Transaction
@@ -102,6 +100,7 @@ ecrec :: W256 -> W256 -> W256 -> W256 -> Maybe Addr
 ecrec v r s e = num . word <$> EVM.Precompiled.execute 1 input 32
   where input = BS.concat (word256Bytes <$> [e, v, r, s])
 
+-- Given chainID and Transaction, it recovers the address that sent it
 sender :: Int -> Transaction -> Maybe Addr
 sender chainId tx = ecrec v' (txR tx) (txS tx) hash
   where hash = keccak' (signingData chainId tx)
@@ -109,29 +108,19 @@ sender chainId tx = ecrec v' (txR tx) (txS tx) hash
         v'   = if v == 27 || v == 28 then v
                else 27 + v
 
-
+-- We don't know which of 27 or 28 is correct
+-- So we try 28 and try to recover & check if it's correct
+-- if it isn't correct, we need to use the other one
 sign :: Int -> Integer -> Transaction -> Transaction
-sign chainId sk tx = tx { txR = num $ sign_r sig
-                        , txS = num $ sign_s sig
-                        , txV = 28}
+sign chainId sk tx = if sender chainId signed == EVM.Sign.deriveAddr sk then signed
+                                                                        else signed { txV = 28}
   where
-    curve = getCurveByName SEC_p256k1
-    priv = PrivateKey curve sk
     digest = digestFromByteString (word256Bytes $ keccak' $ signingData chainId tx)
-    sig = ethsign priv (fromJust digest)
-
-
--- | We don't wanna introduce the machinery needed to sign with a random nonce,
--- so we just use the same nonce every time (420). This is obviusly very
--- insecure, but fine for testing purposes.
-ethsign :: PrivateKey -> Digest Crypto.Keccak_256 -> Signature
-ethsign sk digest = go 420
-  where
-    go k = case signDigestWith k sk digest of
-       Nothing  -> go (k + 1)
-       Just sig -> sig
-
-
+    (r, s, v) = EVM.Sign.sign (fromJust digest) sk
+    signed = tx { txR = r
+                , txS = s
+                , txV = v
+                }
 
 signingData :: Int -> Transaction -> ByteString
 signingData chainId tx =
