@@ -78,6 +78,7 @@ import Data.List (isSubsequenceOf)
 import EVM.TestUtils
 import GHC.Conc (getNumProcessors)
 import System.Process
+import qualified EVM.Transaction
 
 main :: IO ()
 main = defaultMain tests
@@ -91,25 +92,24 @@ toW8fromLitB _ = error "nope"
 runSubSet :: String -> IO ()
 runSubSet p = defaultMain . applyPattern p $ tests
 
-data GethTrace =
+data EVMTrace =
   GethTrace
     { pc :: Int
-    , op :: String
-    , gas :: Int
-    , gasCost :: Int
+    , op :: Int
+    , gas :: Integer
+    , memSize :: Integer
     , depth :: Int
     , stack :: [String]
     } deriving (Generic, Show)
-instance JSON.FromJSON GethTrace
+instance JSON.FromJSON EVMTrace
 
-data GethResult =
-  Result
-  { gas :: W64
-  , failed :: Bool
-  , returnValue :: ByteString
-  , structLogs :: [GethTrace]
-  } deriving (Generic, Show)
-instance JSON.FromJSON GethResult
+-- data EVMResult =
+--   Result
+--   { gas :: W64
+--   , failed :: Bool
+--   , returnValue :: ByteString
+--   } deriving (Generic, Show)
+-- instance JSON.FromJSON EVMResult
 
 data EVMToolAlloc =
   EVMToolAlloc
@@ -146,14 +146,12 @@ tests = testGroup "hevm"
   -- the return value to be the same
   , testGroup "contract-quickcheck-run"
     [ testProperty "random-contract-concrete-call" $ \(expr :: OpContract) -> ioProperty $ do
-        -- may later be used with:
-        --    evm --json statetest BenchTest-109.json
-        -- currently can be used with:
-        --    cd /home/matesoos/development/go-ethereum/cmd/evm/testdata/7
-        --    evm transition --input.alloc alloc.json --input.env env.json --input.txs txs.json --state.fork BerlinToLondonAt5 --output.alloc alloc-out.json
+        -- signed = sign 1 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D exampleTransaction
+        -- JSON.encodeFile "txs.json" [signed]
+        -- evm transition --input.alloc alloc.json --input.env env.json --input.txs txs.json --output.alloc alloc-out.json --trace.returndata=true  --trace trace.json --output.result result.json
+        --
+        -- old setup:
         --    use documentation: https://docs.ethers.org/v5/api/signer/
-        --        also, see /home/matesoos/development/hevm/mynode/todo.js
-        --    new setup:
         --    geth --verbosity 0 --dev --exec  'loadScript("my.js")' console
         expr2 <- fixContractJumps expr
         putStrLn $ "Contract for run: " <> (show expr2)
@@ -161,7 +159,7 @@ tests = testGroup "hevm"
             w8s = toW8fromLitB <$> lits
             bitcode = (BS.pack $ Vector.toList w8s)
             calldat = ConcreteBuf bitcode -- set calldata the code itself, a hack
-        let contr = EVMToolAlloc{ balance = 0x5ffd4878be161d74
+            contr = EVMToolAlloc{ balance = 0x5ffd4878be161d74
                                 , code = bitcode
                                 , nonce = 0xac
                                 }
@@ -169,47 +167,76 @@ tests = testGroup "hevm"
                                  , code = BS.empty
                                  , nonce = 0xac
                                  }
+            sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
             fromAddr :: Addr
-            fromAddr = 0x8a8eafb1cf62bfbeb1741769dae1a9dd47996192
+            fromAddr = 0xC5ed5D9b9c957BE2baa01C16310Aa4d1f8bc8e6f
             toAddr :: Addr
-            toAddr = 0xDa553ab543C976A59c1C261D347F439935c9107D
-            allocjson :: Map.Map Addr EVMToolAlloc
-            allocjson = Map.fromList ([ (fromAddr, wallet), (toAddr, contr)])
-            tojs = BS.unpack . BS.toStrict . JSON.encode
-            withGas = 0xffff :: W64
-            js = (BS.unpack "gas = ") ++ (BS.unpack . BS.toStrict . JSON.encode $ withGas) ++ (BS.unpack "\nfrom = ") ++ (tojs fromAddr) ++ (BS.unpack "\nto= ") ++ (tojs toAddr) ++ (BS.unpack "\ndata=") ++ (BS.unpack . BS.toStrict . JSON.encode $ bitcode) ++ (BS.unpack "\nalloc=") ++ (BS.unpack . BS.toStrict . JSON.encode $ allocjson) ++ (BS.unpack "\na = debug.traceCall({from: from, to: to, data: data, gas: gas}, 'latest', {stateOverrides : alloc})\nconsole.log(JSON.stringify(a))")
-            compareTraces :: [VMTrace] -> Maybe GethResult -> IO (Bool)
+            toAddr = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
+            alloc :: Map.Map Addr EVMToolAlloc
+            alloc = Map.fromList ([ (fromAddr, wallet), (toAddr, contr)])
+            exampleTransaction = EVM.Transaction.Transaction
+              { txData     = bitcode
+              , txGasLimit = 0xffff
+              , txGasPrice = Just 0
+              , txNonce    = 0
+              , txR        = 330
+              , txS        = 330
+              , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
+              , txV        = 0
+              , txValue    = 0
+              , txType     = EVM.Transaction.EIP1559Transaction
+              , txAccessList = []
+              , txMaxPriorityFeeGas =  Just 1
+              , txMaxFeePerGas = Just 1
+              }
+            env = Block { _coinbase   =  0xc94f5374fCe5eDBc8e2a8697C15331677E6EBF0B
+                        , _timestamp   =  Lit 0x3e8
+                        , _number      =  0x5
+                        , _prevRandao  =  0x0
+                        , _gaslimit    =  0x750a163df65e8a
+                        , _baseFee     =  0x0
+                        , _maxCodeSize = undefined
+                        , _schedule    = undefined
+                        }
+
+            txs = [EVM.Transaction.sign 1 sk exampleTransaction]
+
+            compareTraces :: [VMTrace] -> Maybe [EVMTrace] -> IO (Bool)
             compareTraces _ Nothing = pure False
-            compareTraces hevmTrace (Just gethResult) =
-              go hevmTrace (structLogs gethResult)
+            compareTraces hevmTrace (Just evmTrace) = go hevmTrace evmTrace
                 where
-                  go :: [VMTrace] -> [GethTrace] -> IO (Bool)
+                  go :: [VMTrace] -> [EVMTrace] -> IO (Bool)
                   go [] [] = pure True
                   go (a:ax) (b:bx) = do
-                    let aOp = intToOpName $ traceOp a
-                        aStack = traceStack a
+                    let aOp = traceOp a
                         bOp = op b
-                        -- bStack = stack b :: [String]
                     putStrLn $ (show aOp) <> " --- " <> (show bOp)
                     if aOp == bOp then go ax bx
                     else pure False
                   go _ _ = pure False
-        BS.writeFile "my.js" $ BS.pack js
+        JSON.encodeFile "txs.json" txs
+        JSON.encodeFile "alloc.json" alloc
+        JSON.encodeFile "env.json" env
         a <- runCodeWithTrace Nothing bitcode calldat
         if isJust a then do
           Just (res, hevmTrace, hevmResult) <- runCodeWithTrace Nothing bitcode calldat
-          gethOut <- readProcess "geth" ["--verbosity", "0", "--dev", "--exec", "loadScript(\"my.js\")", "console"] ""
-          let x = (BSL.pack $ map (fromIntegral . Data.Char.ord) gethOut)
-              x2 = BSL.take ((BSL.length x) - 6) x -- remove trailing `\nnull\n`
-              gethRes = JSON.decode x2 :: Maybe GethResult
-
+          _ <- readProcess "evm" [ "transition"
+                                       ,"--input.alloc" , "alloc.json"
+                                       , "--input.env" , "env.json"
+                                       , "--input.txs" , "txs.json"
+                                       , "--output.alloc" , "alloc-out.json"
+                                       , "--trace.returndata=true"
+                                       , "--trace" , "trace.json"
+                                       , "--output.result", "result.json"
+                                       ] ""
+          evmTrace <- JSON.decodeFileStrict "trace.json" :: IO (Maybe [EVMTrace])
           putStrLn $ "HEVM result: " <> (show res)
           putStrLn $ "HEVM trace: " <> (show hevmTrace)
 
           -- putStrLn $ "geth result raw: " <> (show x)
           -- putStrLn $ "geth result semi-raw: " <> (show x2)
-          putStrLn $ "geth result: " <> (show gethRes)
-          ok <- compareTraces hevmTrace gethRes
+          putStrLn $ "evm trace: " <> (show evmTrace)
+          ok <- compareTraces hevmTrace evmTrace
           putStrLn $ "OK: " <> (show ok)
           assertEqual "Must match" ok True
         else putStrLn "not successful"

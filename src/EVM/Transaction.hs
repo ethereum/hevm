@@ -13,12 +13,12 @@ import EVM.Sign
 
 import Control.Lens
 
-import Data.Aeson (FromJSON (..))
 import Data.ByteString (ByteString)
 import Data.Map (Map)
 import Data.Maybe (fromMaybe, isNothing, fromJust)
 import GHC.Generics (Generic)
 
+import Data.Aeson (FromJSON (..))
 import qualified Data.Aeson        as JSON
 import qualified Data.Aeson.Types  as JSON
 import qualified Data.ByteString   as BS
@@ -75,20 +75,6 @@ instance JSON.ToJSON Transaction where
                          , ("chainId",           (JSON.toJSON ("0x1" :: String))) -- NOTE: should be part of struct?
                          ]
 
-exampleTransaction = Transaction { txData     = "abc"
-                                 , txGasLimit = 0xffff
-                                 , txGasPrice = Just 0
-                                 , txNonce    = 0
-                                 , txR        = 330
-                                 , txS        = 330
-                                 , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
-                                 , txV        = 0
-                                 , txValue    = 0
-                                 , txType     = EIP1559Transaction
-                                 , txAccessList = []
-                                 , txMaxPriorityFeeGas =  Just 1
-                                 , txMaxFeePerGas = Just 1
-                                 }
 
 -- | utility function for getting a more useful representation of accesslistentries
 -- duplicates only matter for gas computation

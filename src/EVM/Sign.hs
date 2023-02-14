@@ -1,13 +1,10 @@
 module EVM.Sign where
 
-import Crypto.Number.ModArithmetic (expFast)
 import qualified Crypto.Hash as Crypto
-import Crypto.Hash (Digest, SHA256, RIPEMD160, digestFromByteString)
+import Crypto.Hash (Digest)
 import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
 import Crypto.PubKey.ECC.Types (getCurveByName, CurveName(..), Point(..))
 import Crypto.PubKey.ECC.Generate (generateQ)
-import Data.Memory.Encoding.Base16 (toHexadecimal)
-import Numeric (showHex)
 
 import EVM.ABI (encodeAbiValue, AbiValue (..))
 import qualified Data.ByteString   as BS

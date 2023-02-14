@@ -22,6 +22,10 @@ import qualified EVM.Precompiled
 import qualified EVM.Expr as Expr
 import qualified EVM.Sign as Sign
 
+import Data.Aeson (FromJSON (..))
+import qualified Data.Aeson        as JSON
+import qualified Data.Aeson.Types  as JSON
+
 import Control.Lens hiding (op, (:<), (|>), (.>))
 import Control.Monad.State.Strict hiding (state)
 
@@ -395,7 +399,21 @@ data Block = Block
   , _baseFee     :: W256
   , _maxCodeSize :: W256
   , _schedule    :: FeeSchedule Word64
-  } deriving Show
+  } deriving (Show, Generic)
+instance JSON.ToJSON Block where
+  toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON $ _coinbase b))
+                         , ("currentDifficulty", (JSON.toJSON $ _prevRandao b))
+                         , ("currentGasLimit"  , (JSON.toJSON $ _gaslimit b))
+                         , ("currentNumber"    , (JSON.toJSON $ _number b))
+                         , ("currentTimestamp" , (JSON.toJSON timestamp))
+                         , ("currentBaseFee"   , (JSON.toJSON $ _baseFee b))
+                         ]
+              where
+                timestamp :: W256
+                timestamp = case (_timestamp b) of
+                              Lit a -> a
+                              _ -> error "Timestamp needs to be a Lit"
+
 
 blankState :: FrameState
 blankState = FrameState
