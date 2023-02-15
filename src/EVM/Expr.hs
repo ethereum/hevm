@@ -443,7 +443,7 @@ concPrefix e = error $ "Internal error: cannot compute a concrete prefix length 
 -- abstract buffer, it is the largest write that is made on a concrete
 -- location. Parameterized by an environment for buffer variables.
 minLength :: Map.Map Int (Expr Buf) -> Expr Buf -> Maybe Integer
-minLength senv = go 0
+minLength bufEnv = go 0
   where
     go :: W256 -> Expr Buf -> Maybe Integer
     -- base cases
@@ -458,7 +458,7 @@ minLength senv = go 0
     go l (WriteByte _ _ b) = go l b
     go l (CopySlice _ _ _ _ b) = go l b
     go l (GVar (BufVar a)) = do
-      b <- Map.lookup a senv
+      b <- Map.lookup a bufEnv
       go l b
 
 word256At
