@@ -43,7 +43,7 @@ import qualified Data.Map.Strict as Map
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
 
-import EVM hiding (Query, allowFFI)
+import EVM
 import EVM.SymExec
 import EVM.ABI
 import EVM.Exec
@@ -90,6 +90,29 @@ tests = testGroup "hevm"
         (SLoad (Lit 0x0) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])])))
         (Expr.readStorage' (Lit 0x0) (Lit 0x0)
           (SStore (Lit 0xacab) (Lit 0xdead) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])]))))
+
+    , testCase "accessStorage uses fetchedStorage" $ do
+        let dummyContract =
+              (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)))
+                { _external = True }
+            vm = vmForEthrunCreation ""
+            -- perform the initial access
+            vm1 = execState (EVM.accessStorage 0 (Lit 0) (pure . pure ())) vm
+            -- it should fetch the contract first
+            vm2 = case vm1._result of
+                    Just (VMFailure (Query (PleaseFetchContract _addr continue))) ->
+                      execState (continue dummyContract) vm1
+                    _ -> error "unexpected result"
+            -- then it should fetch the slow
+            vm3 = case vm2._result of
+                    Just (VMFailure (Query (PleaseFetchSlot _addr _slot continue))) ->
+                      execState (continue 1337) vm2
+                    _ -> error "unexpected result"
+            -- perform the same access as for vm1
+            vm4 = execState (EVM.accessStorage 0 (Lit 0) (pure . pure ())) vm3
+
+        -- there won't be query now as accessStorage uses fetch cache
+        assertBool (show vm4._result) (isNothing vm4._result)
     ]
   -- These tests fuzz the simplifier by generating a random expression,
   -- applying some simplification rules, and then using the smt encoding to
