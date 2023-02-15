@@ -1630,7 +1630,7 @@ tests = testGroup "hevm"
         --       }
         --     }
         --     |]
-        --   p <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
+        --   p <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
         --   print p
         --   -- putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         -- ,
