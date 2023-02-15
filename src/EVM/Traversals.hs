@@ -26,6 +26,7 @@ foldProp f acc p = acc <> (go p)
       PNeg a -> go a
       PAnd a b -> go a <> go b
       POr a b -> go a <> go b
+      PImpl a b -> go a <> go b
 
 -- | Recursively folds a given function over a given expression
 -- Recursion schemes do this & a lot more, but defining them over GADT's isn't worth the hassle
@@ -642,6 +643,10 @@ mapPropM f = \case
     a' <- mapPropM f a
     b' <- mapPropM f b
     pure $ POr a' b'
+  PImpl a b -> do
+    a' <- mapPropM f a
+    b' <- mapPropM f b
+    pure $ PImpl a' b'
 
 
 -- | Generic operations over AST terms

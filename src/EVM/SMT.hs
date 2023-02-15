@@ -241,8 +241,8 @@ assertReads :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
 assertReads props benv senv = concat $ fmap assertRead allReads
   where
     assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
-    assertRead (idx, Lit 32, buf) = [POr (PEq (ReadWord idx buf) (Lit 0)) (PNeg (PGEq idx (bufLength buf)))]
-    assertRead (idx, Lit sz, buf) = fmap (\s -> POr (PEq (ReadByte idx buf) (LitByte (num s))) (PNeg (PGEq idx (bufLength buf)))) [(0::Int)..num sz-1]
+    assertRead (idx, Lit 32, buf) = [PImpl (PGEq idx (bufLength buf)) (PEq (ReadWord idx buf) (Lit 0))]
+    assertRead (idx, Lit sz, buf) = fmap (\s -> PImpl (PGEq idx (bufLength buf)) (PEq (ReadByte idx buf) (LitByte (num s)))) [(0::Int)..num sz-1]
     assertRead (_, _, _) = [] -- cannot generate assertions for accesses of symbolic size
 
     allReads = filter keepRead $ nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
@@ -690,6 +690,10 @@ propToSMT = \case
     let aenc = propToSMT a
         benc = propToSMT b in
     "(or " <> aenc <> " " <> benc <> ")"
+  PImpl a b ->
+    let aenc = propToSMT a
+        benc = propToSMT b in
+    "(=> " <> aenc <> " " <> benc <> ")"
   PBool b -> if b then "true" else "false"
   where
     op2 op a b =
