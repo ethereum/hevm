@@ -1623,23 +1623,6 @@ tests = testGroup "hevm"
           assertEqual "w==z for hash collision" w z
           putStrLn "expected counterexample found"
         ,
-        -- testCase "symbolic calldataload" $ do
-        --   Just c <- solcRuntime "A"
-        --     [i|
-        --     contract A {
-        --       function f(uint256 z) public pure {
-        --         uint y;
-        --         assembly {
-        --           y := calldataload(z)
-        --         }
-        --         assert(y == 3);
-        --       }
-        --     }
-        --     |]
-        --   p <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
-        --   print p
-        --   -- putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        -- ,
         testCase "calldata beyond calldatasize is 0 (symbolic calldata)" $ do
           Just c <- solcRuntime "A"
             [i|
