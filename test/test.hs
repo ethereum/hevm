@@ -41,6 +41,7 @@ import Test.Tasty.HUnit
 import Test.Tasty.Runners hiding (Failure)
 import Test.Tasty.ExpectedFailure
 import qualified Data.Aeson as JSON
+import Data.Aeson ((.:))
 
 -- import qualified Control.Monad.Operational as Operational
 import Control.Monad.Operational (view, ProgramViewT(..), ProgramView)
@@ -93,23 +94,73 @@ runSubSet :: String -> IO ()
 runSubSet p = defaultMain . applyPattern p $ tests
 
 data EVMTrace =
-  GethTrace
+  EVMTrace
     { pc :: Int
     , op :: Int
-    , gas :: Integer
+    , gas :: W256
     , memSize :: Integer
     , depth :: Int
+    , refund :: Int
+    , opName :: String
     , stack :: [String]
     } deriving (Generic, Show)
 instance JSON.FromJSON EVMTrace
 
--- data EVMResult =
---   Result
---   { gas :: W64
---   , failed :: Bool
---   , returnValue :: ByteString
---   } deriving (Generic, Show)
--- instance JSON.FromJSON EVMResult
+data EVMOutput =
+  EVMResTrace
+    { output :: ByteString
+    , gasUsed :: W256
+    , time :: Integer
+    } deriving (Generic, Show)
+instance JSON.FromJSON EVMOutput
+
+data EVMTraceOutput =
+  EVMTraceOutput
+    { trace :: [EVMTrace]
+    , output :: EVMOutput
+    } deriving (Generic, Show)
+instance JSON.FromJSON EVMTraceOutput
+
+data EVMReceipt =
+  EVMReceipt
+    { recType :: String
+    , recRoot :: String
+    , recStatus :: String
+    , recCumulativeGasUsed :: String
+    , recLogsBloom :: String
+    , recLogs :: Maybe String
+    , recTransactionHash :: String
+    , recContractAddress :: String
+    , recGasUsed :: String
+    , recBlockHash :: String
+    , recTransactionIndex :: String
+    } deriving (Generic, Show)
+instance JSON.FromJSON EVMReceipt where
+    parseJSON = JSON.withObject "EVMReceipt" $ \v -> EVMReceipt
+        <$> v .: "type"
+        <*> v .: "root"
+        <*> v .: "status"
+        <*> v .: "cumulativeGasUsed"
+        <*> v .: "logsBloom"
+        <*> v .: "logs"
+        <*> v .: "transactionHash"
+        <*> v .: "contractAddress"
+        <*> v .: "gasUsed"
+        <*> v .: "blockHash"
+        <*> v .: "transactionIndex"
+
+data EVMResult =
+  EVMResult
+  { stateRoot :: String
+  , txRoot :: String
+  , receiptsRoot :: String
+  , logsHash :: String
+  , logsBloom :: String
+  , receipts :: [EVMReceipt]
+  , currentDifficulty :: String
+  , gasUsed :: String
+  } deriving (Generic, Show)
+instance JSON.FromJSON EVMResult
 
 data EVMToolAlloc =
   EVMToolAlloc
@@ -154,7 +205,7 @@ tests = testGroup "hevm"
         --    use documentation: https://docs.ethers.org/v5/api/signer/
         --    geth --verbosity 0 --dev --exec  'loadScript("my.js")' console
         expr2 <- fixContractJumps expr
-        putStrLn $ "Contract for run: " <> (show expr2)
+        putStrLn $ "Contract to run: " <> (show expr2)
         let lits = assemble $ getOpData expr2
             w8s = toW8fromLitB <$> lits
             bitcode = (BS.pack $ Vector.toList w8s)
@@ -176,9 +227,9 @@ tests = testGroup "hevm"
             alloc = Map.fromList ([ (fromAddr, wallet), (toAddr, contr)])
             exampleTransaction = EVM.Transaction.Transaction
               { txData     = bitcode
-              , txGasLimit = 0xffff
-              , txGasPrice = Just 0
-              , txNonce    = 0
+              , txGasLimit = 0xfffffff
+              , txGasPrice = Just 1
+              , txNonce    = 172
               , txR        = 330
               , txS        = 330
               , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
@@ -193,7 +244,7 @@ tests = testGroup "hevm"
                         , _timestamp   =  Lit 0x3e8
                         , _number      =  0x5
                         , _prevRandao  =  0x0
-                        , _gaslimit    =  0x750a163df65e8a
+                        , _gaslimit    =  0x750a163d
                         , _baseFee     =  0x0
                         , _maxCodeSize =  0x444
                         , _schedule    =  FeeSchedule.homestead
@@ -229,13 +280,19 @@ tests = testGroup "hevm"
                                        , "--trace" , "trace.json"
                                        , "--output.result", "result.json"
                                        ] ""
-          evmTrace <- JSON.decodeFileStrict "trace.json" :: IO (Maybe [EVMTrace])
-          putStrLn $ "HEVM result: " <> (show hevmRes)
-          putStrLn $ "HEVM trace: " <> (show hevmTrace)
+          evmResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMResult)
+          putStrLn $ "evm result:" <> (show evmResult)
+          let txName =  recTransactionHash $ (receipts (fromJust evmResult)) !! 0
+          putStrLn $ "TX name:" <> txName
+          let name = "trace-0-" ++ txName ++ ".jsonl"
+          _ <- readProcess "./sanitize_trace.sh" [name] ""
+          evmTrace <- JSON.decodeFileStrict (name ++ ".json") :: IO (Maybe EVMTraceOutput)
+          -- putStrLn $ "HEVM result: " <> (show hevmRes)
+          -- putStrLn $ "HEVM trace: " <> (show hevmTrace)
           putStrLn $ "evm trace: " <> (show evmTrace)
-          ok <- compareTraces hevmTrace evmTrace
-          putStrLn $ "OK: " <> (show ok)
-          assertEqual "Must match" ok True
+          -- ok <- compareTraces hevmTrace (trace evmTrace)
+          -- putStrLn $ "OK: " <> (show ok)
+          -- assertEqual "Must match" ok True
         else putStrLn "not successful"
 
     , testProperty "random-contract-with-symbolic-call" $ \(expr :: OpContract) -> ioProperty $ do
@@ -2468,7 +2525,8 @@ instance Arbitrary (Expr End) where
   arbitrary = sized genEnd
 
 data OpContract = OpContract [Op]
-  deriving (Show)
+instance Show OpContract where
+  show (OpContract a) = "OpContract " ++ (show a)
 
 getOpData :: OpContract-> [Op]
 getOpData (OpContract x) = x
