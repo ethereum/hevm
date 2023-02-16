@@ -27,7 +27,7 @@
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         }));
 
-        hevmUnwrapped = (with pkgs.pkgs; lib.pipe (
+        hevmUnwrapped = (with pkgs; lib.pipe (
           haskellPackages.callCabal2nix "hevm" ./. {
             # Haskell libs with the same names as C libs...
             # Depend on the C libs, not the Haskell libs.
@@ -63,7 +63,7 @@
         # required runtime deps are available and on path
         hevmWrapped = with pkgs; symlinkJoin {
           name = "hevm";
-          paths = [ hevmUnwrapped ];
+          paths = [ (haskell.lib.dontCheck hevmUnwrapped) ];
           buildInputs = [ makeWrapper ];
           postBuild = ''
             wrapProgram $out/bin/hevm \
@@ -116,7 +116,7 @@
         # --- packages ----
 
         packages.withTests = hevmUnwrapped;
-        packages.hevm = pkgs.haskell.lib.dontCheck hevmWrapped;
+        packages.hevm = hevmWrapped;
         packages.redistributable = hevmRedistributable;
         packages.default = packages.hevm;
 
