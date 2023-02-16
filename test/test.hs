@@ -254,7 +254,7 @@ tests = testGroup "hevm"
             --       hence setting it to 0 here, to match
             --       "number" is also NOT used below in HEVM running
             --       hence setting it to 0 here, to match
-            env = Block { _coinbase   =  0x0
+            env = Block { _coinbase   =  0xff
                         , _timestamp   =  Lit 0x3e8
                         , _number      =  0x0
                         , _prevRandao  =  0x0
@@ -298,7 +298,7 @@ tests = testGroup "hevm"
         JSON.encodeFile "env.json" env
         a <- runCodeWithTrace Nothing bitcode calldat
         if isJust a then do
-          Just (hevmRes, hevmTrace, hevmTraceResult) <- runCodeWithTrace Nothing bitcode calldat
+          let (hevmRes, hevmTrace, hevmTraceResult) = fromJust a
           _ <- readProcess "evm" [ "transition"
                                        ,"--input.alloc" , "alloc.json"
                                        , "--input.env" , "env.json"
