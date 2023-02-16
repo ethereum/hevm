@@ -95,7 +95,7 @@
 
           # rewrite /nix/... library paths to point to /usr/lib
           chmod 777 $out/bin/hevm
-          ${install_name_tool} -change "$cxx" /usr/lib/libstdc++.dylib $out/bin/hevm
+          ${install_name_tool} -change "$cxx" /usr/lib/libc++.1.dylib $out/bin/hevm
           ${install_name_tool} -change "$iconv" /usr/lib/libiconv.dylib $out/bin/hevm
           chmod 555 $out/bin/hevm
         '';
