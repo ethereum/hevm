@@ -13,7 +13,7 @@ import GHC.IO.Handle (hClose)
 import System.Process (readProcess)
 
 import EVM.Solidity
-import EVM.SMT
+import EVM.Solvers
 import EVM.Dapp
 import EVM.UnitTest
 import EVM.Fetch (RpcInfo)

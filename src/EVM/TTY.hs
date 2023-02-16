@@ -1,6 +1,7 @@
 {-# Language TemplateHaskell #-}
 {-# Language ImplicitParams #-}
 {-# Language DataKinds #-}
+
 module EVM.TTY where
 
 import Prelude hiding (lookup, Word)
@@ -14,52 +15,44 @@ import EVM
 import EVM.ABI (abiTypeSolidity, decodeAbiValue, AbiType(..), emptyAbi)
 import EVM.SymExec (maxIterationsReached, symCalldata)
 import EVM.Expr (simplify)
-import EVM.Dapp (DappInfo, dappInfo, Test, extractSig, Test(..), srcMap)
-import EVM.Dapp (dappUnitTests, unitTestMethods, dappSolcByName, dappSolcByHash, dappSources)
-import EVM.Dapp (dappAstSrcMap)
+import EVM.Dapp (DappInfo(..), dappInfo, Test, extractSig, Test(..), srcMap, unitTestMethods)
 import EVM.Debug
-import EVM.Format (showWordExact, showWordExplanation)
-import EVM.Format (contractNamePart, contractPathPart, showTraceTree, prettyIfConcreteWord, formatExpr)
+import EVM.Fetch (Fetcher)
+import EVM.Fetch qualified as Fetch
+import EVM.Format (showWordExact, showWordExplanation, contractNamePart,
+  contractPathPart, showTraceTree, prettyIfConcreteWord, formatExpr)
 import EVM.Hexdump (prettyHex)
-import EVM.SMT (SolverGroup)
+import EVM.Solvers (SolverGroup)
 import EVM.Op
 import EVM.Solidity hiding (storageLayout)
 import EVM.Types hiding (padRight)
 import EVM.UnitTest
-import EVM.StorageLayout
-import Text.Wrap
-
 import EVM.Stepper (Stepper)
-import qualified EVM.Stepper as Stepper
-import qualified EVM.Fetch as Fetch
-import qualified Control.Monad.Operational as Operational
-
-import EVM.Fetch (Fetcher)
+import EVM.Stepper qualified as Stepper
+import EVM.StorageLayout
+import EVM.TTYCenteredList qualified as Centered
 
 import Control.Lens hiding (List)
+import Control.Monad.Operational qualified as Operational
 import Control.Monad.State.Strict hiding (state)
-
 import Data.Aeson.Lens
 import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
+import Data.List (sort, find)
 import Data.Maybe (isJust, fromJust, fromMaybe, isNothing)
 import Data.Map (Map, insert, lookupLT, singleton, filter)
+import Data.Map qualified as Map
 import Data.Text (Text, pack)
+import Data.Text qualified as T
+import Data.Text qualified as Text
 import Data.Text.Encoding (decodeUtf8)
-import Data.List (sort, find)
+import Data.Vector qualified as Vec
+import Data.Vector.Storable qualified as SVec
 import Data.Version (showVersion)
-
-import qualified Data.ByteString as BS
-import qualified Data.Text as T
-import qualified Data.Map as Map
-import qualified Data.Text as Text
-import qualified Data.Vector as Vec
-import qualified Data.Vector.Storable as SVec
-import qualified Graphics.Vty as V
-import qualified System.Console.Haskeline as Readline
-
-import qualified EVM.TTYCenteredList as Centered
-
-import qualified Paths_hevm as Paths
+import Graphics.Vty qualified as V
+import System.Console.Haskeline qualified as Readline
+import Paths_hevm qualified as Paths
+import Text.Wrap
 
 data Name
   = AbiPane
@@ -222,7 +215,7 @@ keepExecuting mode restart = case mode of
 
 isUnitTestContract :: Text -> DappInfo -> Bool
 isUnitTestContract name dapp =
-  elem name (map fst (view dappUnitTests dapp))
+  elem name (map fst dapp.unitTests)
 
 mkVty :: IO V.Vty
 mkVty = do
@@ -258,7 +251,7 @@ runFromVM solvers rpcInfo maxIter' dappinfo vm = do
   v <- mkVty
   ui2 <- customMain v mkVty Nothing (app opts) (ViewVm ui0)
   case ui2 of
-    ViewVm ui -> return (view uiVm ui)
+    ViewVm ui -> return ui._uiVm
     _ -> error "internal error: customMain returned prematurely"
 
 
@@ -303,7 +296,7 @@ main opts root jsonFilePath =
                   (Vec.fromList
                    (concatMap
                     (debuggableTests opts)
-                    (view dappUnitTests dapp)))
+                    dapp.unitTests))
                   1
             , _testPickerDapp = dapp
             , _testOpts = opts
@@ -325,7 +318,7 @@ takeStep ui mode =
     (Continue steps, ui') ->
       put (ViewVm (ui' & set uiStepper steps))
   where
-    m = interpret mode (view uiStepper ui)
+    m = interpret mode ui._uiStepper
     nxt = runStateT m ui
 
 backstepUntil
@@ -334,21 +327,21 @@ backstepUntil
   => (UiVmState -> Pred VM) -> EventM n UiState ()
 backstepUntil p = get >>= \case
   ViewVm s ->
-    case view uiStep s of
+    case s._uiStep of
       0 -> pure ()
       n -> do
         s1 <- liftIO $ backstep s
         let
           -- find a previous vm that satisfies the predicate
-          snapshots' = Data.Map.filter (p s1 . fst) (view uiSnapshots s1)
+          snapshots' = Data.Map.filter (p s1 . fst) s1._uiSnapshots
         case lookupLT n snapshots' of
           -- If no such vm exists, go to the beginning
           Nothing ->
             let
-              (step', (vm', stepper')) = fromJust $ lookupLT (n - 1) (view uiSnapshots s)
+              (step', (vm', stepper')) = fromJust $ lookupLT (n - 1) s._uiSnapshots
               s2 = s1
                 & set uiVm vm'
-                & set (uiVm . cache) (view (uiVm . cache) s1)
+                & set (uiVm . cache) s1._uiVm._cache
                 & set uiStep step'
                 & set uiStepper stepper'
             in takeStep s2 (Step 0)
@@ -357,7 +350,7 @@ backstepUntil p = get >>= \case
             let
               s2 = s1
                 & set uiVm vm'
-                & set (uiVm . cache) (view (uiVm . cache) s1)
+                & set (uiVm . cache) s1._uiVm._cache
                 & set uiStep step'
                 & set uiStepper stepper'
             in takeStep s2 (StepUntil (not . p s1))
@@ -368,7 +361,7 @@ backstep
      ,?maxIter :: Maybe Integer)
   => UiVmState -> IO UiVmState
 backstep s =
-  case view uiStep s of
+  case s._uiStep of
     -- We're already at the first step; ignore command.
     0 -> pure s
     -- To step backwards, we revert to the previous snapshot
@@ -378,10 +371,10 @@ backstep s =
     -- any blocking queries, and also the memory view.
     n ->
       let
-        (step, (vm, stepper)) = fromJust $ lookupLT n (view uiSnapshots s)
+        (step, (vm, stepper)) = fromJust $ lookupLT n s._uiSnapshots
         s1 = s
           & set uiVm vm
-          & set (uiVm . cache) (view (uiVm . cache) s)
+          & set (uiVm . cache) s._uiVm._cache
           & set uiStep step
           & set uiStepper stepper
         stepsToTake = n - step - 1
@@ -419,14 +412,14 @@ appEvent (VtyEvent e@(V.EvKey V.KUp [])) = get >>= \case
 appEvent (VtyEvent (V.EvKey V.KEsc [])) = get >>= \case
   ViewVm s -> do
     let opts = s ^. uiTestOpts
-        dapp' = dapp opts
-        tests = concatMap (debuggableTests opts) (dapp' ^. dappUnitTests)
+        dapp = opts.dapp
+        tests = concatMap (debuggableTests opts) dapp.unitTests
     case tests of
       [] -> halt
       ts ->
         put $ ViewPicker $ UiTestPickerState
           { _testPickerList = list TestPickerPane (Vec.fromList ts) 1
-          , _testPickerDapp = dapp'
+          , _testPickerDapp = dapp
           , _testOpts = opts
           }
   ViewHelp s -> put (ViewVm s)
@@ -441,15 +434,15 @@ appEvent (VtyEvent (V.EvKey V.KEnter [])) = get >>= \case
       { _browserContractList =
           list
             BrowserPane
-            (Vec.fromList (Map.toList (view (uiVm . env . contracts) s)))
+            (Vec.fromList (Map.toList s._uiVm._env._contracts))
             2
       , _browserVm = s
       }
   ViewPicker s ->
-    case listSelectedElement (view testPickerList s) of
+    case listSelectedElement s._testPickerList of
       Nothing -> error "nothing selected"
       Just (_, x) -> do
-        let initVm  = initialUiVmStateForTest (view testOpts s) x
+        let initVm  = initialUiVmStateForTest s._testOpts x
         put (ViewVm initVm)
   _ -> pure ()
 
@@ -514,10 +507,10 @@ appEvent (VtyEvent (V.EvKey (V.KChar 'a') [])) = get >>= \case
     -- We keep the current cache so we don't have to redo
     -- any blocking queries.
     let
-      (vm, stepper) = fromJust (Map.lookup 0 (view uiSnapshots s))
+      (vm, stepper) = fromJust (Map.lookup 0 s._uiSnapshots)
       s' = s
         & set uiVm vm
-        & set (uiVm . cache) (view (uiVm . cache) s)
+        & set (uiVm . cache) s._uiVm._cache
         & set uiStep 0
         & set uiStepper stepper
 
@@ -527,7 +520,7 @@ appEvent (VtyEvent (V.EvKey (V.KChar 'a') [])) = get >>= \case
 -- Vm Overview: p - backstep
 appEvent (VtyEvent (V.EvKey (V.KChar 'p') [])) = get >>= \case
   ViewVm s ->
-    case view uiStep s of
+    case s._uiStep of
       0 ->
         -- We're already at the first step; ignore command.
         pure ()
@@ -538,10 +531,10 @@ appEvent (VtyEvent (V.EvKey (V.KChar 'p') [])) = get >>= \case
         -- We keep the current cache so we don't have to redo
         -- any blocking queries, and also the memory view.
         let
-          (step, (vm, stepper)) = fromJust $ lookupLT n (view uiSnapshots s)
+          (step, (vm, stepper)) = fromJust $ lookupLT n s._uiSnapshots
           s1 = s
             & set uiVm vm -- set the vm to the one from the snapshot
-            & set (uiVm . cache) (view (uiVm . cache) s) -- persist the cache
+            & set (uiVm . cache) s._uiVm._cache -- persist the cache
             & set uiStep step
             & set uiStepper stepper
           stepsToTake = n - step - 1
@@ -562,7 +555,7 @@ appEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = get >>= \case
   ViewVm s ->
     case view (uiVm . result) s of
       Just (VMFailure (Choose (PleaseChoosePath _ contin))) ->
-        takeStep (s & set uiStepper (Stepper.evm (contin True) >> (view uiStepper s)))
+        takeStep (s & set uiStepper (Stepper.evm (contin True) >> s._uiStepper))
           (Step 1)
       _ -> pure ()
   _ -> pure ()
@@ -570,9 +563,9 @@ appEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = get >>= \case
 -- Vm Overview: 1 - choose jump
 appEvent (VtyEvent (V.EvKey (V.KChar '1') [])) = get >>= \case
   ViewVm s ->
-    case view (uiVm . result) s of
+    case s._uiVm._result of
       Just (VMFailure (Choose (PleaseChoosePath _ contin))) ->
-        takeStep (s & set uiStepper (Stepper.evm (contin False) >> (view uiStepper s)))
+        takeStep (s & set uiStepper (Stepper.evm (contin False) >> s._uiStepper))
           (Step 1)
       _ -> pure ()
   _ -> pure ()
@@ -616,7 +609,7 @@ initialUiVmStateForTest opts@UnitTestOptions{..} (theContractName, theTestName) 
       SymbolicTest _ -> symCalldata theTestName types [] (AbstractBuf "txdata")
       _ -> (error "unreachable", error "unreachable")
     (test, types) = fromJust $ find (\(test',_) -> extractSig test' == theTestName) $ unitTestMethods testContract
-    testContract = fromJust $ view (dappSolcByName . at theContractName) dapp
+    testContract = fromJust $ Map.lookup theContractName dapp.solcByName
     vm0 =
       initialUnitTestVm opts testContract
     script = do
@@ -697,7 +690,7 @@ drawTestPicker ui =
              withHighlight selected $
                txt " Debug " <+> txt (contractNamePart x) <+> txt "::" <+> txt y)
           True
-          (view testPickerList ui)
+          ui._testPickerList
   ]
 
 drawVmBrowser :: UiBrowserState -> [UiWidget]
@@ -708,48 +701,47 @@ drawVmBrowser ui =
             renderList
               (\selected (k, c') ->
                  withHighlight selected . txt . mconcat $
-                   [ fromMaybe "<unknown contract>" . flip preview dapp' $
-                       ( dappSolcByHash . ix (maybeHash c')
-                       . _2 . contractName )
+                   [ fromMaybe "<unknown contract>" $
+                       Map.lookup (maybeHash c') dapp.solcByHash <&> (.contractName) . snd
                    , "\n"
                    , "  ", pack (show k)
                    ])
               True
-              (view browserContractList ui)
-      , case flip preview dapp' (dappSolcByHash . ix (maybeHash c) . _2) of
+              ui._browserContractList
+      , case snd <$> Map.lookup (maybeHash c) dapp.solcByHash of
           Nothing ->
             hBox
               [ borderWithLabel (txt "Contract information") . padBottom Max . padRight Max $ vBox
-                  [ txt ("Codehash: " <>    pack (show (view codehash c)))
-                  , txt ("Nonce: "    <> showWordExact (view nonce    c))
-                  , txt ("Balance: "  <> showWordExact (view balance  c))
+                  [ txt ("Codehash: " <> pack (show c._codehash))
+                  , txt ("Nonce: "    <> showWordExact c._nonce)
+                  , txt ("Balance: "  <> showWordExact c._balance)
                   --, txt ("Storage: "  <> storageDisplay (view storage c)) -- TODO: fix this
                   ]
                 ]
           Just sol ->
             hBox
               [ borderWithLabel (txt "Contract information") . padBottom Max . padRight (Pad 2) $ vBox
-                  [ txt "Name: " <+> txt (contractNamePart (view contractName sol))
-                  , txt "File: " <+> txt (contractPathPart (view contractName sol))
+                  [ txt "Name: " <+> txt (contractNamePart sol.contractName)
+                  , txt "File: " <+> txt (contractPathPart sol.contractName)
                   , txt " "
                   , txt "Constructor inputs:"
-                  , vBox . flip map (view constructorInputs sol) $
+                  , vBox . flip map sol.constructorInputs $
                       \(name, abiType) -> txt ("  " <> name <> ": " <> abiTypeSolidity abiType)
                   , txt "Public methods:"
-                  , vBox . flip map (sort (Map.elems (view abiMap sol))) $
-                      \method -> txt ("  " <> view methodSignature method)
+                  , vBox . flip map (sort (Map.elems sol.abiMap)) $
+                      \method -> txt ("  " <> method.methodSignature)
                   --, txt ("Storage:" <> storageDisplay (view storage c)) -- TODO: fix this
                   ]
               , borderWithLabel (txt "Storage slots") . padBottom Max . padRight Max $ vBox
-                  (map txt (storageLayout dapp' sol))
+                  (map txt (storageLayout dapp sol))
               ]
       ]
   ]
   where
-    dapp' = dapp (view (browserVm . uiTestOpts) ui)
-    (_, (_, c)) = fromJust $ listSelectedElement (view browserContractList ui)
+    dapp = ui._browserVm._uiTestOpts.dapp
+    (_, (_, c)) = fromJust $ listSelectedElement ui._browserContractList
 --        currentContract  = view (dappSolcByHash . ix ) dapp
-    maybeHash ch = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord (view codehash ch))
+    maybeHash ch = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord ch._codehash)
 
 drawVm :: UiVmState -> [UiWidget]
 drawVm ui =
@@ -813,35 +805,35 @@ isNewTraceAdded
   :: UiVmState -> Pred VM
 isNewTraceAdded ui vm =
   let
-    currentTraceTree = length <$> traceForest (view uiVm ui)
+    currentTraceTree = length <$> traceForest ui._uiVm
     newTraceTree = length <$> traceForest vm
   in currentTraceTree /= newTraceTree
 
 isNextSourcePosition
   :: UiVmState -> Pred VM
 isNextSourcePosition ui vm =
-  let dapp' = dapp (view uiTestOpts ui)
-      initialPosition = currentSrcMap dapp' (view uiVm ui)
-  in currentSrcMap dapp' vm /= initialPosition
+  let dapp = ui._uiTestOpts.dapp
+      initialPosition = currentSrcMap dapp ui._uiVm
+  in currentSrcMap dapp vm /= initialPosition
 
 isNextSourcePositionWithoutEntering
   :: UiVmState -> Pred VM
 isNextSourcePositionWithoutEntering ui vm =
   let
-    dapp'           = dapp (view uiTestOpts ui)
-    vm0             = view uiVm ui
-    initialPosition = currentSrcMap dapp' vm0
-    initialHeight   = length (view frames vm0)
+    dapp            = ui._uiTestOpts.dapp
+    vm0             = ui._uiVm
+    initialPosition = currentSrcMap dapp vm0
+    initialHeight   = length vm0._frames
   in
-    case currentSrcMap dapp' vm of
+    case currentSrcMap dapp vm of
       Nothing ->
         False
       Just here ->
         let
           moved = Just here /= initialPosition
-          deeper = length (view frames vm) > initialHeight
+          deeper = length vm._frames > initialHeight
           boring =
-            case srcMapCode (view dappSources dapp') here of
+            case srcMapCode dapp.sources here of
               Just bs ->
                 BS.isPrefixOf "contract " bs
               Nothing ->
@@ -850,20 +842,20 @@ isNextSourcePositionWithoutEntering ui vm =
            moved && not deeper && not boring
 
 isExecutionHalted :: UiVmState -> Pred VM
-isExecutionHalted _ vm = isJust (view result vm)
+isExecutionHalted _ vm = isJust vm._result
 
 currentSrcMap :: DappInfo -> VM -> Maybe SrcMap
 currentSrcMap dapp vm = do
   this <- currentContract vm
-  i <- (view opIxMap this) SVec.!? (view (state . pc) vm)
+  i <- this._opIxMap SVec.!? vm._state._pc
   srcMap dapp this i
 
 drawStackPane :: UiVmState -> UiWidget
 drawStackPane ui =
   let
-    gasText = showWordExact (num $ view (uiVm . state . gas) ui)
+    gasText = showWordExact (num ui._uiVm._state._gas)
     labelText = txt ("Gas available: " <> gasText <> "; stack:")
-    stackList = list StackPane (Vec.fromList $ zip [(1 :: Int)..] (fmap simplify $ view (uiVm . state . stack) ui)) 2
+    stackList = list StackPane (Vec.fromList $ zip [(1 :: Int)..] (simplify <$> ui._uiVm._state._stack)) 2
   in hBorderWithLabel labelText <=>
     renderList
       (\_ (i, w) ->
@@ -872,14 +864,14 @@ drawStackPane ui =
                <+> ourWrap (Text.unpack $ prettyIfConcreteWord w)
            , dim (txt ("   " <> case unlit w of
                        Nothing -> ""
-                       Just u -> showWordExplanation u $ dapp (view uiTestOpts ui)))
+                       Just u -> showWordExplanation u ui._uiTestOpts.dapp))
            ])
       False
       stackList
 
 message :: VM -> String
 message vm =
-  case view result vm of
+  case vm._result of
     Just (VMSuccess (ConcreteBuf msg)) ->
       "VMSuccess: " <> (show $ ByteStringS msg)
     Just (VMSuccess (msg)) ->
@@ -889,13 +881,13 @@ message vm =
     Just (VMFailure err) ->
       "VMFailure: " <> show err
     Nothing ->
-      "Executing EVM code in " <> show (view (state . contract) vm)
+      "Executing EVM code in " <> show vm._state._contract
 
 
 drawBytecodePane :: UiVmState -> UiWidget
 drawBytecodePane ui =
   let
-    vm = view uiVm ui
+    vm = ui._uiVm
     move = maybe id listMoveTo $ vmOpIx vm
   in
     hBorderWithLabel (str $ message vm) <=>
@@ -905,7 +897,7 @@ drawBytecodePane ui =
                     else withDefAttr boldAttr (opWidget x))
       False
       (move $ list BytecodePane
-        (maybe mempty (view codeOps) (currentContract vm))
+        (maybe mempty (._codeOps) (currentContract vm))
         1)
 
 
@@ -922,31 +914,31 @@ prettyIfConcrete x = T.unpack $ formatExpr $ simplify x
 
 drawTracePane :: UiVmState -> UiWidget
 drawTracePane s =
-  let vm = view uiVm s
-      dapp' = dapp (view uiTestOpts s)
+  let vm = s._uiVm
+      dapp = s._uiTestOpts.dapp
       traceList =
         list
           TracePane
           (Vec.fromList
             . Text.lines
-            . showTraceTree dapp'
+            . showTraceTree dapp
             $ vm)
           1
 
-  in case view uiShowMemory s of
+  in case s._uiShowMemory of
     True -> viewport TracePane Vertical $
         hBorderWithLabel (txt "Calldata")
-        <=> ourWrap (prettyIfConcrete (view (state . calldata) vm))
+        <=> ourWrap (prettyIfConcrete vm._state._calldata)
         <=> hBorderWithLabel (txt "Returndata")
-        <=> ourWrap (prettyIfConcrete (view (state . returndata) vm))
+        <=> ourWrap (prettyIfConcrete vm._state._returndata)
         <=> hBorderWithLabel (txt "Output")
-        <=> ourWrap (maybe "" show (view result vm))
+        <=> ourWrap (maybe "" show vm._result)
         <=> hBorderWithLabel (txt "Cache")
-        <=> ourWrap (show (view (cache . path) vm))
+        <=> ourWrap (show vm._cache._path)
         <=> hBorderWithLabel (txt "Path Conditions")
-        <=> (ourWrap $ show $ view constraints vm)
+        <=> (ourWrap $ show $ vm._constraints)
         <=> hBorderWithLabel (txt "Memory")
-        <=> (ourWrap (prettyIfConcrete (view (state . memory) vm)))
+        <=> (ourWrap (prettyIfConcrete vm._state._memory))
     False ->
       hBorderWithLabel (txt "Trace")
       <=> renderList
@@ -965,45 +957,40 @@ ourWrap = strWrapWith settings
       }
 
 solidityList :: VM -> DappInfo -> List Name (Int, ByteString)
-solidityList vm dapp' =
+solidityList vm dapp =
   list SolidityPane
-    (case currentSrcMap dapp' vm of
+    (case currentSrcMap dapp vm of
         Nothing -> mempty
         Just x ->
-          view (dappSources
-            . sourceLines
-            . ix (srcMapFile x)
+          view (
+            ix x.srcMapFile
             . to (Vec.imap (,)))
-          dapp')
+          dapp.sources.lines)
     1
 
 drawSolidityPane :: UiVmState -> UiWidget
 drawSolidityPane ui =
-  let dapp' = dapp (view uiTestOpts ui)
-      dappSrcs = view dappSources dapp'
-      vm = view uiVm ui
-  in case currentSrcMap dapp' vm of
+  let dapp = ui._uiTestOpts.dapp
+      dappSrcs = dapp.sources
+      vm = ui._uiVm
+  in case currentSrcMap dapp vm of
     Nothing -> padBottom Max (hBorderWithLabel (txt "<no source map>"))
     Just sm ->
           let
-            rows = (_sourceLines dappSrcs) !! srcMapFile sm
-            subrange = lineSubrange rows (srcMapOffset sm, srcMapLength sm)
+            rows = dappSrcs.lines !! sm.srcMapFile
+            subrange = lineSubrange rows (sm.srcMapOffset, sm.srcMapLength)
             fileName :: Maybe Text
-            fileName = preview (dappSources . sourceFiles . ix (srcMapFile sm) . _1) dapp'
+            fileName = preview (ix sm.srcMapFile . _1) dapp.sources.files
             lineNo :: Maybe Int
-            lineNo = maybe Nothing (\a -> Just (a - 1))
-              (snd <$>
-                (srcMapCodePos
-                 (view dappSources dapp')
-                 sm))
+            lineNo = ((\a -> Just (a - 1)) . snd) =<< srcMapCodePos dapp.sources sm
           in vBox
             [ hBorderWithLabel $
                 txt (fromMaybe "<unknown>" fileName)
-                  <+> str (":" ++ show lineNo)
+                  <+> str (":" ++ (maybe "?" show lineNo))
 
                   -- Show the AST node type if present
                   <+> txt (" (" <> fromMaybe "?"
-                                    ((view dappAstSrcMap dapp') sm
+                                    (dapp.astSrcMap sm
                                        >>= preview (key "name" . _String)) <> ")")
             , Centered.renderList
                 (\_ (i, line) ->
@@ -1021,7 +1008,7 @@ drawSolidityPane ui =
                                   ])
                 False
                 ((maybe id listMoveTo lineNo)
-                  (solidityList vm dapp'))
+                  (solidityList vm dapp))
             ]
 
 ifTallEnough :: Int -> Widget n -> Widget n -> Widget n

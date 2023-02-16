@@ -24,6 +24,7 @@ build-type:
   Simple
 extra-source-files:
   CHANGELOG.md
+  bench/contracts/erc20.sol
   test/contracts/lib/test.sol
   test/contracts/lib/erc20.sol
   test/contracts/pass/trivial.sol
@@ -61,7 +62,10 @@ common shared
     ghc-options: -j
   default-language: GHC2021
   default-extensions:
+    DuplicateRecordFields
     LambdaCase
+    NoFieldSelectors
+    OverloadedRecordDot
     OverloadedStrings
     RecordWildCards
     TypeFamilies
@@ -80,6 +84,7 @@ library
     EVM.Dev,
     EVM.Expr,
     EVM.SMT,
+    EVM.Solvers,
     EVM.Exec,
     EVM.Facts,
     EVM.Facts.Git,
@@ -232,6 +237,8 @@ executable hevm
     stm,
     spawn
 
+--- Test Helpers ---
+
 common test-base
   import: shared
   if flag (devel)
@@ -276,6 +283,7 @@ common test-base
     time,
     array,
     vector,
+    tasty-bench,
     stm >= 2.5.0,
     spawn >= 0.3,
     witherable,
@@ -332,3 +340,30 @@ test-suite ethereum-tests
     exitcode-stdio-1.0
   main-is:
     BlockchainTests.hs
+
+--- Benchmarks ---
+
+benchmark bench
+  import: shared
+  type:
+    exitcode-stdio-1.0
+  main-is:
+    bench.hs
+  hs-source-dirs:
+    bench
+  if os(darwin)
+     extra-libraries: c++
+  else
+     extra-libraries: stdc++
+  other-modules:
+    Paths_hevm
+  autogen-modules:
+    Paths_hevm
+  build-depends:
+    base,
+    tasty-bench,
+    tasty,
+    bytestring,
+    text,
+    hevm,
+    here

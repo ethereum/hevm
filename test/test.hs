@@ -66,9 +66,11 @@ import EVM.RLP
 import EVM.Solidity
 import EVM.Types
 import EVM.Traversals
+import EVM.Concrete (createAddress)
 import EVM.SMT hiding (one)
 import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
+import EVM.Solvers
 import qualified EVM.Expr as Expr
 import qualified Data.Text as T
 import qualified EVM.Stepper as Stepper
@@ -201,6 +203,29 @@ tests = testGroup "hevm"
         (SLoad (Lit 0x0) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])])))
         (Expr.readStorage' (Lit 0x0) (Lit 0x0)
           (SStore (Lit 0xacab) (Lit 0xdead) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])]))))
+
+    , testCase "accessStorage uses fetchedStorage" $ do
+        let dummyContract =
+              (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)))
+                { _external = True }
+            vm = vmForEthrunCreation ""
+            -- perform the initial access
+            vm1 = execState (EVM.accessStorage 0 (Lit 0) (pure . pure ())) vm
+            -- it should fetch the contract first
+            vm2 = case vm1._result of
+                    Just (VMFailure (Query (PleaseFetchContract _addr continue))) ->
+                      execState (continue dummyContract) vm1
+                    _ -> error "unexpected result"
+            -- then it should fetch the slow
+            vm3 = case vm2._result of
+                    Just (VMFailure (Query (PleaseFetchSlot _addr _slot continue))) ->
+                      execState (continue 1337) vm2
+                    _ -> error "unexpected result"
+            -- perform the same access as for vm1
+            vm4 = execState (EVM.accessStorage 0 (Lit 0) (pure . pure ())) vm3
+
+        -- there won't be query now as accessStorage uses fetch cache
+        assertBool (show vm4._result) (isNothing vm4._result)
     ]
   -- These fuzz the system via generating contracts via QuickCheck. Crashes can
   -- be observed, errors, etc. We also run the results via Solidity and observe
@@ -686,7 +711,7 @@ tests = testGroup "hevm"
         (json, path') <- solidity' srccode
         let (solc', _, _) = fromJust $ readJSON json
             initCode :: ByteString
-            initCode = fromJust $ solc' ^? ix (path' <> ":A") . creationCode
+            initCode = (fromJust $ solc' ^? ix (path' <> ":A")).creationCode
         -- add constructor arguments
         assertEqual "constructor args screwed up metadata stripping" (stripBytecodeMetadata (initCode <> encodeAbiValue (AbiUInt 256 1))) (stripBytecodeMetadata initCode)
     ]
@@ -909,7 +934,6 @@ tests = testGroup "hevm"
         putStrLn "Require works as expected"
      ,
      testCase "ITE-with-bitwise-AND" $ do
-        --- using ignore to suppress huge output
        Just c <- solcRuntime "C"
          [i|
          contract C {
@@ -930,7 +954,6 @@ tests = testGroup "hevm"
        putStrLn "expected counterexample found"
      ,
      testCase "ITE-with-bitwise-OR" $ do
-        --- using ignore to suppress huge output
        Just c <- solcRuntime "C"
          [i|
          contract C {
@@ -1872,8 +1895,7 @@ tests = testGroup "hevm"
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        ignoreTest $ testCase "keccak soundness" $ do
-        --- using ignore to suppress huge output
+        testCase "keccak soundness" $ do
           Just c <- solcRuntime "C"
             [i|
               contract C {
@@ -1908,17 +1930,26 @@ tests = testGroup "hevm"
               aAddr = Addr 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
           Just c <- solcRuntime "C" code'
           Just a <- solcRuntime "A" code'
-          (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> do
+          (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> do
             let vm0 = abstractVM (Just ("call_A()", [])) [] c Nothing SymbolicS
             let vm = vm0
                   & set (state . callvalue) (Lit 0)
                   & over (EVM.env . contracts)
                        (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
-                  -- NOTE: this used to as follows, but there is no _storage field in Contract record
-                  -- (Map.insert aAddr (initialContract (RuntimeCode $ ConcreteBuffer a) &
-                  --                     set EVM.storage (EVM.Symbolic [] store)))
             verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
-          putStrLn "found counterexample:"
+
+          let storeCex = cex.store
+              addrC = W256 $ num $ createAddress ethrunAddress 1
+              addrA = W256 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
+              testCex = Map.size storeCex == 2 &&
+                        case (Map.lookup addrC storeCex, Map.lookup addrA storeCex) of
+                          (Just sC, Just sA) -> Map.size sC == 1 && Map.size sA == 1 &&
+                            case (Map.lookup 0 sC, Map.lookup 0 sA) of
+                              (Just x, Just y) -> x /= y
+                              _ -> False
+                          _ -> False
+          assertBool "Did not find expected storage cex" testCex
+          putStrLn "expected counterexample found"
         ,
         expectFail $ testCase "calling unique contracts (read from storage)" $ do
           Just c <- solcRuntime "C"
@@ -1996,6 +2027,69 @@ tests = testGroup "hevm"
 
           (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("distributivity(uint256,uint256,uint256)", [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "Proven"
+        ,
+        testCase "storage-cex-1" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              uint x;
+              uint y;
+              function fun(uint256 a) external{
+                assert (x == y);
+              }
+            }
+            |]
+          (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          let addr =  W256 $ num $ createAddress ethrunAddress 1
+              testCex = Map.size cex.store == 1 &&
+                        case Map.lookup addr cex.store of
+                          Just s -> Map.size s == 2 &&
+                                    case (Map.lookup 0 s, Map.lookup 1 s) of
+                                      (Just x, Just y) -> x /= y
+                                      _ -> False
+                          _ -> False
+          assertBool "Did not find expected storage cex" testCex
+          putStrLn "Expected counterexample found"
+        ,
+        testCase "storage-cex-2" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              uint[10] arr1;
+              uint[10] arr2;
+              function fun(uint256 a) external{
+                assert (arr1[0] < arr2[a]);
+              }
+            }
+            |]
+          (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          let addr = W256 $ num $ createAddress ethrunAddress 1
+              a = getVar cex "arg1"
+              testCex = Map.size cex.store == 1 &&
+                        case Map.lookup addr cex.store of
+                          Just s -> Map.size s == 2 &&
+                                    case (Map.lookup 0 s, Map.lookup (10 + a) s) of
+                                      (Just x, Just y) -> x >= y
+                                      _ -> False
+                          _ -> False
+          assertBool "Did not find expected storage cex" testCex
+          putStrLn "Expected counterexample found"
+        ,
+        testCase "storage-cex-concrete" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              uint x;
+              uint y;
+              function fun(uint256 a) external{
+                assert (x != y);
+              }
+            }
+            |]
+          (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts ConcreteS Nothing (Just $ checkAssertions [0x01])
+          let testCex = Map.null cex.store
+          assertBool "Did not find expected storage cex" testCex
+          putStrLn "Expected counterexample found"
  ]
   , testGroup "Equivalence checking"
     [
@@ -2268,18 +2362,16 @@ tests = testGroup "hevm"
                     , "unusedStoreEliminator/remove_before_revert.yul"
                     , "unusedStoreEliminator/unknown_length2.yul"
                     , "unusedStoreEliminator/unrelated_relative.yul"
+                    , "fullSuite/extcodelength.yul"
+                    , "unusedStoreEliminator/create_inside_function.yul"-- "trying to reset symbolic storage with writes in create"
 
                     -- Takes too long, would timeout on most test setups.
                     -- We could probably fix these by "bunching together" queries
                     , "reasoningBasedSimplifier/mulmod.yul"
 
                     -- TODO check what's wrong with these!
-                    , "unusedStoreEliminator/create_inside_function.yul"
-                    , "fullSimplify/not_applied_removes_non_constant_and_not_movable.yul" -- create bug?
-                    , "unusedStoreEliminator/create.yul" -- create bug?
-                    , "fullSuite/extcodelength.yul" -- extcodecopy bug?
-                    , "loadResolver/keccak_short.yul" -- keccak bug
-                    , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV I think?
+                    , "loadResolver/keccak_short.yul" -- ACTUAL bug -- keccak
+                    , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV
                     ]
 
         solcRepo <- fromMaybe (error "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
@@ -2327,7 +2419,7 @@ tests = testGroup "hevm"
             filteredBSym = symbolicMem [ replaceAll "" $ x *=~[re|^//|] | x <- onlyAfter [re|^// step:|] unfiltered, not $ x =~ [re|^$|] ]
           start <- getCurrentTime
           putStrLn $ "Checking file: " <> f
-          when (debug myVeriOpts) $ do
+          when myVeriOpts.debug $ do
             putStrLn "-------------Original Below-----------------"
             mapM_ putStrLn unfiltered
             putStrLn "------------- Filtered A + Symb below-----------------"
@@ -2370,7 +2462,7 @@ checkEquiv l r = withSolvers Z3 1 (Just 100) $ \solvers -> do
        print res
        pure $ case res of
          Unsat -> True
-         EVM.SMT.Unknown -> True
+         EVM.Solvers.Unknown -> True
          Sat _ -> False
          Error _ -> False
 
@@ -2425,7 +2517,7 @@ runSimpleVM :: ByteString -> ByteString -> Maybe ByteString
 runSimpleVM x ins = case loadVM x of
                       Nothing -> Nothing
                       Just vm -> let calldata' = (ConcreteBuf ins)
-                       in case runState (assign (state.calldata) calldata' >> exec) vm of
+                       in case runState (assign (state . calldata) calldata' >> exec) vm of
                             (VMSuccess (ConcreteBuf bs), _) -> Just bs
                             _ -> Nothing
 
