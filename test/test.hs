@@ -8,7 +8,6 @@ module Main where
 
 import Data.Text (Text)
 import Data.ByteString (ByteString)
-import qualified Data.ByteString.Lazy as BSL
 import Data.Bits hiding (And, Xor)
 import System.Directory
 import System.IO
@@ -21,7 +20,6 @@ import System.Environment
 import qualified Data.Word
 import GHC.Generics
 import Test.ChasingBottoms
-import Data.Char (ord)
 
 import Prelude hiding (fail, LT, GT)
 
@@ -56,7 +54,7 @@ import qualified Data.Map.Strict as Map
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
 
-import EVM hiding (Query, allowFFI)
+import EVM hiding (Query, allowFFI, trace)
 import EVM.SymExec
 import EVM.Assembler
 import EVM.Op
@@ -95,20 +93,29 @@ runSubSet p = defaultMain . applyPattern p $ tests
 
 data EVMTrace =
   EVMTrace
-    { pc :: Int
-    , op :: Int
-    , gas :: W256
-    , memSize :: Integer
-    , depth :: Int
-    , refund :: Int
-    , opName :: String
-    , stack :: [String]
+    { evmPc :: Int
+    , evmOp :: Int
+    , evmGas :: W256
+    , evmMemSize :: Integer
+    , evmDepth :: Int
+    , evmRefund :: Int
+    , evmOpName :: String
+    , evmStack :: [W256]
     } deriving (Generic, Show)
-instance JSON.FromJSON EVMTrace
+instance JSON.FromJSON EVMTrace where
+  parseJSON = JSON.withObject "EVMTrace" $ \v -> EVMTrace
+    <$> v .: "pc"
+    <*> v .: "op"
+    <*> v .: "gas"
+    <*> v .: "memSize"
+    <*> v .: "depth"
+    <*> v .: "refund"
+    <*> v .: "opName"
+    <*> v .: "stack"
 
 data EVMOutput =
   EVMResTrace
-    { output :: ByteString
+    { output :: String -- NOTE: it's missing the 0x so can't be parsed at ByteString
     , gasUsed :: W256
     , time :: Integer
     } deriving (Generic, Show)
@@ -116,10 +123,13 @@ instance JSON.FromJSON EVMOutput
 
 data EVMTraceOutput =
   EVMTraceOutput
-    { trace :: [EVMTrace]
-    , output :: EVMOutput
+    { toTrace :: [EVMTrace]
+    , toOutput :: EVMOutput
     } deriving (Generic, Show)
-instance JSON.FromJSON EVMTraceOutput
+instance JSON.FromJSON EVMTraceOutput where
+    parseJSON = JSON.withObject "EVMTraceOutput" $ \v -> EVMTraceOutput
+        <$> v .: "trace"
+        <*> v .: "output"
 
 data EVMReceipt =
   EVMReceipt
@@ -240,31 +250,47 @@ tests = testGroup "hevm"
               , txMaxPriorityFeeGas =  Just 1
               , txMaxFeePerGas = Just 1
               }
-            env = Block { _coinbase   =  0xc94f5374fCe5eDBc8e2a8697C15331677E6EBF0B
+            -- TODO: coinbase is NOT used below in HEVM running
+            --       hence setting it to 0 here, to match
+            env = Block { _coinbase   =  0x0
                         , _timestamp   =  Lit 0x3e8
                         , _number      =  0x5
                         , _prevRandao  =  0x0
                         , _gaslimit    =  0x750a163d
                         , _baseFee     =  0x0
-                        , _maxCodeSize =  0x444
+                        , _maxCodeSize =  0xfffff
                         , _schedule    =  FeeSchedule.homestead
                         }
 
             txs = [EVM.Transaction.sign 1 sk exampleTransaction]
 
-            compareTraces :: [VMTrace] -> Maybe [EVMTrace] -> IO (Bool)
-            compareTraces _ Nothing = pure False
-            compareTraces hevmTrace (Just evmTrace) = go hevmTrace evmTrace
-                where
-                  go :: [VMTrace] -> [EVMTrace] -> IO (Bool)
-                  go [] [] = pure True
-                  go (a:ax) (b:bx) = do
-                    let aOp = traceOp a
-                        bOp = op b
-                    putStrLn $ (show aOp) <> " --- " <> (show bOp)
-                    if aOp == bOp then go ax bx
-                    else pure False
-                  go _ _ = pure False
+            compareTraces :: [VMTrace] -> [EVMTrace] -> IO (Bool)
+            compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
+              where
+                go :: [VMTrace] -> [EVMTrace] -> IO (Bool)
+                go [] [] = pure True
+                go (a:ax) (b:bx) = do
+                  let aOp = traceOp a
+                      bOp = evmOp b
+                      aPc = tracePc a
+                      bPc = evmPc b
+                      aStack = traceStack a
+                      bStack = evmStack b
+                  putStrLn $ (intToOpName aOp) <> " pc: " <> (show aPc) <> " --- " <> (intToOpName bOp) <> " pc: " <> (show bPc)
+                  if aStack /= bStack then do
+                                      putStrLn $ "stacks don't match:"
+                                      putStrLn $ "HEVM's stack   : " <> (show aStack)
+                                      putStrLn $ "evmtool's stack: " <> (show bStack)
+                                      else
+                                      putStrLn $ "Stacks match   : " <> (show aStack)
+                  if aOp == bOp && aStack == bStack && aPc == bPc then go ax bx
+                  else pure False
+                go a@(_:_) [] = do
+                  putStrLn $ "HEVM's trace is longer by:" <> (show a)
+                  pure False
+                go [] a@(_:_) = do
+                  putStrLn $ "evmtool's trace is longer by:" <> (show a)
+                  pure False
         JSON.encodeFile "txs.json" txs
         JSON.encodeFile "alloc.json" alloc
         JSON.encodeFile "env.json" env
@@ -283,16 +309,18 @@ tests = testGroup "hevm"
           evmResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMResult)
           putStrLn $ "evm result:" <> (show evmResult)
           let txName =  recTransactionHash $ (receipts (fromJust evmResult)) !! 0
-          putStrLn $ "TX name:" <> txName
+          putStrLn $ "TX name: " <> txName
           let name = "trace-0-" ++ txName ++ ".jsonl"
           _ <- readProcess "./sanitize_trace.sh" [name] ""
-          evmTrace <- JSON.decodeFileStrict (name ++ ".json") :: IO (Maybe EVMTraceOutput)
-          -- putStrLn $ "HEVM result: " <> (show hevmRes)
+          (Just evmTraceOutput) <- JSON.decodeFileStrict (name ++ ".json") :: IO (Maybe EVMTraceOutput)
           -- putStrLn $ "HEVM trace: " <> (show hevmTrace)
-          putStrLn $ "evm trace: " <> (show evmTrace)
-          -- ok <- compareTraces hevmTrace (trace evmTrace)
-          -- putStrLn $ "OK: " <> (show ok)
-          -- assertEqual "Must match" ok True
+          -- putStrLn $ "evm trace: " <> (show evmTraceOutput)
+          ok <- compareTraces hevmTrace (toTrace evmTraceOutput)
+          putStrLn $ "Trace compare OK: " <> (show ok)
+          assertEqual "Must match" ok True
+
+          putStrLn $ "HEVM result: " <> (show hevmRes)
+          putStrLn $ "evm result: " <> (show (toOutput evmTraceOutput))
         else putStrLn "not successful"
 
     , testProperty "random-contract-with-symbolic-call" $ \(expr :: OpContract) -> ioProperty $ do
