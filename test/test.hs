@@ -220,9 +220,9 @@ tests = testGroup "hevm"
             w8s = toW8fromLitB <$> lits
             bitcode = (BS.pack $ Vector.toList w8s)
             calldat = ConcreteBuf bitcode -- set calldata the code itself, a hack
-            contr = EVMToolAlloc{ balance = 0x5ffd4878be161d74
+            contr = EVMToolAlloc{ balance = 0xa493d65e20984bc
                                 , code = bitcode
-                                , nonce = 0xac
+                                , nonce = 0x48
                                 }
             wallet = EVMToolAlloc{ balance = 0x5ffd4878be161d74
                                  , code = BS.empty
@@ -250,11 +250,13 @@ tests = testGroup "hevm"
               , txMaxPriorityFeeGas =  Just 1
               , txMaxFeePerGas = Just 1
               }
-            -- TODO: coinbase is NOT used below in HEVM running
+            -- TODO: "coinbase" is NOT used below in HEVM running
+            --       hence setting it to 0 here, to match
+            --       "number" is also NOT used below in HEVM running
             --       hence setting it to 0 here, to match
             env = Block { _coinbase   =  0x0
                         , _timestamp   =  Lit 0x3e8
-                        , _number      =  0x5
+                        , _number      =  0x0
                         , _prevRandao  =  0x0
                         , _gaslimit    =  0x750a163d
                         , _baseFee     =  0x0
@@ -313,8 +315,6 @@ tests = testGroup "hevm"
           let name = "trace-0-" ++ txName ++ ".jsonl"
           _ <- readProcess "./sanitize_trace.sh" [name] ""
           (Just evmTraceOutput) <- JSON.decodeFileStrict (name ++ ".json") :: IO (Maybe EVMTraceOutput)
-          -- putStrLn $ "HEVM trace: " <> (show hevmTrace)
-          -- putStrLn $ "evm trace: " <> (show evmTraceOutput)
           ok <- compareTraces hevmTrace (toTrace evmTraceOutput)
           putStrLn $ "Trace compare OK: " <> (show ok)
           assertEqual "Must match" ok True
