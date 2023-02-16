@@ -176,12 +176,18 @@ instance JSON.FromJSON EVMResult
 
 data EVMToolAlloc =
   EVMToolAlloc
-  { balance :: W64
+  { balance :: W64 -- should be W256, but it's parsed wrongly by default
   , code :: ByteString
   , nonce :: W64
   } deriving (Generic)
 instance JSON.ToJSON EVMToolAlloc where
   toJSON = JSON.genericToJSON JSON.defaultOptions
+
+emptyEVMToolAlloc :: EVMToolAlloc
+emptyEVMToolAlloc = EVMToolAlloc { balance = 0
+                                 , code = mempty
+                                 , nonce = 0
+                                 }
 
 tests :: TestTree
 tests = testGroup "hevm"
@@ -255,12 +261,12 @@ tests = testGroup "hevm"
                                  }
             sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
             fromAddr :: Addr
-            fromAddr = 0xC5ed5D9b9c957BE2baa01C16310Aa4d1f8bc8e6f
+            fromAddr = 0xC5ed5D9b9c957BE2baa01C16310Aa4d1f8bc8e6f -- corresponds to sk above
             toAddr :: Addr
             toAddr = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
             alloc :: Map.Map Addr EVMToolAlloc
             alloc = Map.fromList ([ (fromAddr, wallet), (toAddr, contr)])
-            exampleTransaction = EVM.Transaction.Transaction
+            tx = EVM.Transaction.Transaction
               { txData     = bitcode
               , txGasLimit = 0xfffffff
               , txGasPrice = Just 1
@@ -269,7 +275,7 @@ tests = testGroup "hevm"
               , txS        = 330
               , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
               , txV        = 0
-              , txValue    = 0
+              , txValue    = 0x863
               , txType     = EVM.Transaction.EIP1559Transaction
               , txAccessList = []
               , txMaxPriorityFeeGas =  Just 1
@@ -289,7 +295,7 @@ tests = testGroup "hevm"
                         , _schedule    =  FeeSchedule.homestead
                         }
 
-            txs = [EVM.Transaction.sign 1 sk exampleTransaction]
+            txs = [EVM.Transaction.sign 1 sk tx]
 
             compareTraces :: [VMTrace] -> [EVMTrace] -> IO (Bool)
             compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
@@ -321,7 +327,7 @@ tests = testGroup "hevm"
         JSON.encodeFile "txs.json" txs
         JSON.encodeFile "alloc.json" alloc
         JSON.encodeFile "env.json" env
-        a <- runCodeWithTrace Nothing env bitcode calldat
+        a <- runCodeWithTrace Nothing env contr tx (fromAddr, toAddr) bitcode calldat
         if isJust a then do
           let (hevmRes, hevmTrace, hevmTraceResult) = fromJust a
           _ <- readProcess "evm" [ "transition"
@@ -2469,41 +2475,42 @@ checkEquiv l r = withSolvers Z3 1 (Just 100) $ \solvers -> do
 -- | Takes a runtime code and calls it with the provided calldata
 runCode :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe (Expr Buf))
 runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
-  let origVM = vmForRuntimeCode code' calldata' emptyBlock
+  let origVM = vmForRuntimeCode code' calldata' emptyBlock emptyEVMToolAlloc EVM.Transaction.emptyTransaction (ethrunAddress, createAddress ethrunAddress 1)
   res <- evalStateT (Stepper.interpret (Fetch.oracle solvers rpcinfo) Stepper.execFully) origVM
   pure $ case res of
     Left _ -> Nothing
     Right b -> Just b
 
 -- | Takes a runtime code and calls it with the provided calldata
-runCodeWithTrace :: Fetch.RpcInfo -> Block -> ByteString -> Expr Buf -> IO (Maybe ((Expr Buf, [VMTrace], VMTraceResult)))
-runCodeWithTrace rpcinfo block code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
-  let origVM = vmForRuntimeCode code' calldata' block
+-- TODO: take code & calldata out from EVMToolAlloc and EVM.Transaction
+runCodeWithTrace :: Fetch.RpcInfo -> Block -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> ByteString -> Expr Buf -> IO (Maybe ((Expr Buf, [VMTrace], VMTraceResult)))
+runCodeWithTrace rpcinfo block alloc tx (fromAddr, toAddr) code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
+  let origVM = vmForRuntimeCode code' calldata' block alloc tx (fromAddr, toAddr)
   (res, vm) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) origVM
   pure $ case res of
     Left _ -> Nothing
     Right b -> Just (b, vm._trace, vmres vm)
 
-vmForRuntimeCode :: ByteString -> Expr Buf -> Block -> VM
-vmForRuntimeCode runtimecode calldata' block =
+vmForRuntimeCode :: ByteString -> Expr Buf -> Block -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> VM
+vmForRuntimeCode runtimecode calldata' block alloc tx (fromAddr, toAddr) =
   (makeVm $ VMOpts
     { vmoptContract = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
     , vmoptCalldata = mempty
-    , vmoptValue = (Lit 0)
+    , vmoptValue = Lit tx.txValue
     , vmoptStorageBase = Concrete
-    , vmoptAddress = createAddress ethrunAddress 1
-    , vmoptCaller = Expr.litAddr ethrunAddress
-    , vmoptOrigin = ethrunAddress
+    , vmoptAddress =  toAddr
+    , vmoptCaller = Expr.litAddr fromAddr
+    , vmoptOrigin = fromAddr
     , vmoptCoinbase = block._coinbase
     , vmoptNumber = block._number
     , vmoptTimestamp = block._timestamp
-    , vmoptBlockGaslimit = 0
-    , vmoptGasprice = 0
+    , vmoptGasprice = fromJust tx.txGasPrice
+    , vmoptGas = tx.txGasLimit - fromIntegral (EVM.Transaction.txGasCost FeeSchedule.homestead tx)
+    , vmoptGaslimit = tx.txGasLimit
+    , vmoptBlockGaslimit = block._gasLimit
     , vmoptPrevRandao = block._prevRandao
-    , vmoptGas = 0xffffffffffffffff
-    , vmoptGaslimit = block._gasLimit
     , vmoptBaseFee = block._baseFee
-    , vmoptPriorityFee = 0
+    , vmoptPriorityFee = fromJust tx.txMaxPriorityFeeGas
     , vmoptMaxCodeSize = block._maxCodeSize
     , vmoptSchedule = block._schedule
     , vmoptChainId = 1

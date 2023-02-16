@@ -1001,7 +1001,7 @@ getParametersFromEnvironmentVariables rpc = do
                                       , _timestamp
                                       , _number
                                       , _prevRandao
-                                      , _gaslimit
+                                      , _gasLimit
                                       , _baseFee
                                       )
   let

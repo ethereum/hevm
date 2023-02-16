@@ -75,6 +75,21 @@ instance JSON.ToJSON Transaction where
                          , ("chainId",           (JSON.toJSON ("0x1" :: String))) -- NOTE: should be part of struct?
                          ]
 
+emptyTransaction :: Transaction
+emptyTransaction = Transaction { txData = mempty
+                               , txGasLimit = 0
+                               , txGasPrice = Nothing
+                               , txNonce = 0
+                               , txR = 0
+                               , txS = 0
+                               , txToAddr = Nothing
+                               , txV = 0
+                               , txValue = 0
+                               , txType = EIP1559Transaction
+                               , txAccessList = []
+                               , txMaxPriorityFeeGas = Nothing
+                               , txMaxFeePerGas = Nothing
+                               }
 
 -- | utility function for getting a more useful representation of accesslistentries
 -- duplicates only matter for gas computation
