@@ -599,7 +599,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
                               -- potential race, but it doesn't matter for correctness
                               atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
                               pure (Qed (), False)
-        (_, EVM.Solvers.Unknown) -> pure (Timeout (), False)
+        (_, EVM.Solvers.Unknown) -> pure (SMTTimeout (), False)
         (_, Error txt) -> error $ "Error while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
 
     -- Allows us to run it in parallel. Note that this (seems to) run it

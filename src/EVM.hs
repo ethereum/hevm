@@ -15,18 +15,14 @@ import EVM.Concrete (createAddress, create2Address)
 import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord,
   writeByte, bufLength, indexWord, litAddr, readBytes, word256At, copySlice)
 import EVM.Expr qualified as Expr
-import EVM.FeeSchedule (FeeSchedule (..))
+import EVM.FeeSchedule (FeeSchedule (..), berlin)
 import Options.Generic as Options
 import qualified EVM.Precompiled
-import qualified EVM.Expr as Expr
 import qualified EVM.Sign as Sign
 
 import qualified Data.Aeson        as JSON
 import Numeric (showHex)
 import EVM.Op
-import EVM.Precompiled qualified
-import EVM.Solidity
-import EVM.Types hiding (IllegalOverflow, Error)
 
 import Control.Lens hiding (op, (:<), (|>), (.>))
 import Control.Monad.State.Strict hiding (state)
@@ -56,7 +52,6 @@ import Data.Vector.Storable (Vector)
 import Data.Vector.Storable qualified as Vector
 import Data.Vector.Storable.Mutable qualified as Vector
 import Data.Word (Word8, Word32, Word64)
-import Options.Generic as Options
 
 import Crypto.Hash (Digest, SHA256, RIPEMD160, digestFromByteString)
 import Crypto.Hash qualified as Crypto
@@ -396,7 +391,7 @@ data Block = Block
   , _timestamp   :: Expr EWord
   , _number      :: W256
   , _prevRandao  :: W256
-  , _gaslimit    :: Word64
+  , _gasLimit    :: Word64
   , _baseFee     :: W256
   , _maxCodeSize :: W256
   , _schedule    :: FeeSchedule Word64
@@ -404,7 +399,7 @@ data Block = Block
 instance JSON.ToJSON Block where
   toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON $ b._coinbase))
                          , ("currentDifficulty", (JSON.toJSON $ b._prevRandao))
-                         , ("currentGasLimit"  , (JSON.toJSON $ ("0x" ++ showHex (toInteger $ b._gaslimit) "")))
+                         , ("currentGasLimit"  , (JSON.toJSON $ ("0x" ++ showHex (toInteger $ b._gasLimit) "")))
                          , ("currentNumber"    , (JSON.toJSON $ b._number))
                          , ("currentTimestamp" , (JSON.toJSON timestamp))
                          , ("currentBaseFee"   , (JSON.toJSON $ b._baseFee))
@@ -415,6 +410,15 @@ instance JSON.ToJSON Block where
                               Lit a -> a
                               _ -> error "Timestamp needs to be a Lit"
 
+emptyBlock = Block { _coinbase = 0
+                   , _timestamp = Lit 0
+                   , _number     = 0
+                   , _prevRandao = 42069
+                   , _gasLimit   = 0xffffffffffffffff
+                   , _baseFee    = 0
+                   , _maxCodeSize= 0xffffffff
+                   , _schedule   = EVM.FeeSchedule.berlin
+                   }
 
 blankState :: FrameState
 blankState = FrameState
@@ -522,7 +526,7 @@ makeVm o =
     , _number = o.vmoptNumber
     , _prevRandao = o.vmoptPrevRandao
     , _maxCodeSize = o.vmoptMaxCodeSize
-    , _gaslimit = o.vmoptBlockGaslimit
+    , _gasLimit = o.vmoptBlockGaslimit
     , _baseFee = o.vmoptBaseFee
     , _schedule = o.vmoptSchedule
     }
@@ -974,7 +978,7 @@ exec1 = do
         -- op: GASLIMIT
         0x45 ->
           limitStack 1 . burn g_base $
-            next >> push (num vm._block._gaslimit)
+            next >> push (num vm._block._gasLimit)
 
         -- op: CHAINID
         0x46 ->

@@ -54,7 +54,7 @@ import qualified Data.Map.Strict as Map
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
 
-import EVM hiding (Query, allowFFI, trace)
+import EVM hiding (allowFFI, trace)
 import EVM.SymExec
 import EVM.Assembler
 import EVM.Op
@@ -283,7 +283,7 @@ tests = testGroup "hevm"
                         , _timestamp   =  Lit 0x3e8
                         , _number      =  0x0
                         , _prevRandao  =  0x0
-                        , _gaslimit    =  0x750a163d
+                        , _gasLimit    =  0x750a163d
                         , _baseFee     =  0x0
                         , _maxCodeSize =  0xfffff
                         , _schedule    =  FeeSchedule.homestead
@@ -297,12 +297,12 @@ tests = testGroup "hevm"
                 go :: [VMTrace] -> [EVMTrace] -> IO (Bool)
                 go [] [] = pure True
                 go (a:ax) (b:bx) = do
-                  let aOp = traceOp a
-                      bOp = evmOp b
-                      aPc = tracePc a
-                      bPc = evmPc b
-                      aStack = traceStack a
-                      bStack = evmStack b
+                  let aOp = a.traceOp
+                      bOp = b.evmOp
+                      aPc = a.tracePc
+                      bPc = b.evmPc
+                      aStack = a.traceStack
+                      bStack = b.evmStack
                   putStrLn $ (intToOpName aOp) <> " pc: " <> (show aPc) <> " --- " <> (intToOpName bOp) <> " pc: " <> (show bPc)
                   if aStack /= bStack then do
                                       putStrLn $ "stacks don't match:"
@@ -321,7 +321,7 @@ tests = testGroup "hevm"
         JSON.encodeFile "txs.json" txs
         JSON.encodeFile "alloc.json" alloc
         JSON.encodeFile "env.json" env
-        a <- runCodeWithTrace Nothing bitcode calldat
+        a <- runCodeWithTrace Nothing env bitcode calldat
         if isJust a then do
           let (hevmRes, hevmTrace, hevmTraceResult) = fromJust a
           _ <- readProcess "evm" [ "transition"
@@ -335,17 +335,17 @@ tests = testGroup "hevm"
                                        ] ""
           evmResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMResult)
           putStrLn $ "evm result:" <> (show evmResult)
-          let txName =  recTransactionHash $ (receipts (fromJust evmResult)) !! 0
+          let txName =  (((fromJust evmResult).receipts) !! 0).recTransactionHash
           putStrLn $ "TX name: " <> txName
           let name = "trace-0-" ++ txName ++ ".jsonl"
           _ <- readProcess "./sanitize_trace.sh" [name] ""
           (Just evmTraceOutput) <- JSON.decodeFileStrict (name ++ ".json") :: IO (Maybe EVMTraceOutput)
-          ok <- compareTraces hevmTrace (toTrace evmTraceOutput)
+          ok <- compareTraces hevmTrace (evmTraceOutput.toTrace)
           putStrLn $ "Trace compare OK: " <> (show ok)
           assertEqual "Must match" ok True
 
           putStrLn $ "HEVM result: " <> (show hevmRes)
-          putStrLn $ "evm result: " <> (show (toOutput evmTraceOutput))
+          putStrLn $ "evm result: " <> (show (evmTraceOutput.toOutput))
         else putStrLn "not successful"
 
     , testProperty "random-contract-with-symbolic-call" $ \(expr :: OpContract) -> ioProperty $ do
@@ -2469,21 +2469,23 @@ checkEquiv l r = withSolvers Z3 1 (Just 100) $ \solvers -> do
 -- | Takes a runtime code and calls it with the provided calldata
 runCode :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe (Expr Buf))
 runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
-  res <- evalStateT (Stepper.interpret (Fetch.oracle solvers rpcinfo) Stepper.execFully) (vmForRuntimeCode code' calldata')
+  let origVM = vmForRuntimeCode code' calldata' emptyBlock
+  res <- evalStateT (Stepper.interpret (Fetch.oracle solvers rpcinfo) Stepper.execFully) origVM
   pure $ case res of
     Left _ -> Nothing
     Right b -> Just b
 
 -- | Takes a runtime code and calls it with the provided calldata
-runCodeWithTrace :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe ((Expr Buf, [VMTrace], VMTraceResult)))
-runCodeWithTrace rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
-  (res, vm) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (vmForRuntimeCode code' calldata')
+runCodeWithTrace :: Fetch.RpcInfo -> Block -> ByteString -> Expr Buf -> IO (Maybe ((Expr Buf, [VMTrace], VMTraceResult)))
+runCodeWithTrace rpcinfo block code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
+  let origVM = vmForRuntimeCode code' calldata' block
+  (res, vm) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) origVM
   pure $ case res of
     Left _ -> Nothing
-    Right b -> Just (b, _trace vm, vmres vm)
+    Right b -> Just (b, vm._trace, vmres vm)
 
-vmForRuntimeCode :: ByteString -> Expr Buf -> VM
-vmForRuntimeCode runtimecode calldata' =
+vmForRuntimeCode :: ByteString -> Expr Buf -> Block -> VM
+vmForRuntimeCode runtimecode calldata' block =
   (makeVm $ VMOpts
     { vmoptContract = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
     , vmoptCalldata = mempty
@@ -2492,18 +2494,18 @@ vmForRuntimeCode runtimecode calldata' =
     , vmoptAddress = createAddress ethrunAddress 1
     , vmoptCaller = Expr.litAddr ethrunAddress
     , vmoptOrigin = ethrunAddress
-    , vmoptCoinbase = 0
-    , vmoptNumber = 0
-    , vmoptTimestamp = (Lit 0)
+    , vmoptCoinbase = block._coinbase
+    , vmoptNumber = block._number
+    , vmoptTimestamp = block._timestamp
     , vmoptBlockGaslimit = 0
     , vmoptGasprice = 0
-    , vmoptPrevRandao = 42069
+    , vmoptPrevRandao = block._prevRandao
     , vmoptGas = 0xffffffffffffffff
-    , vmoptGaslimit = 0xffffffffffffffff
-    , vmoptBaseFee = 0
+    , vmoptGaslimit = block._gasLimit
+    , vmoptBaseFee = block._baseFee
     , vmoptPriorityFee = 0
-    , vmoptMaxCodeSize = 0xffffffff
-    , vmoptSchedule = FeeSchedule.berlin
+    , vmoptMaxCodeSize = block._maxCodeSize
+    , vmoptSchedule = block._schedule
     , vmoptChainId = 1
     , vmoptCreate = False
     , vmoptTxAccessList = mempty
@@ -3213,7 +3215,7 @@ interpretWithTrace fetcher = do
               interpretWithTrace fetcher (k vm)
             Nothing -> do
               vm2 <- State.get
-              let vm3 = vm2 { _trace = (_trace vm)++[vmtrace vm] }
+              let vm3 = vm2 { _trace = (vm._trace)++[vmtrace vm] }
               State.put vm3
 
               -- No, keep performing the current action
@@ -3229,7 +3231,7 @@ interpretWithTrace fetcher = do
               interpretWithTrace fetcher (k r)
             Nothing -> do
               vm2 <- State.get
-              let vm3 = vm2 { _trace = (_trace vm)++[vmtrace vm] }
+              let vm3 = vm2 { _trace = (vm._trace)++[vmtrace vm] }
               State.put vm3
 
               -- No, keep performing the current action
