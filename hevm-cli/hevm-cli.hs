@@ -421,7 +421,7 @@ getCexs = mapMaybe go
 getTimeouts :: [VerifyResult] -> [Expr End]
 getTimeouts = mapMaybe go
   where
-    go (Timeout leaf) = Just leaf
+    go (SMTTimeout leaf) = Just leaf
     go _ = Nothing
 
 dappCoverage :: UnitTestOptions -> Mode -> String -> IO ()

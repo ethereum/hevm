@@ -42,7 +42,7 @@ import Data.Aeson ((.:))
 import Data.ByteString.Char8 qualified as Char8
 
 import Control.Monad.Operational (view, ProgramViewT(..), ProgramView)
-import Control.Monad.State.Strict (execState, runStateT, runState, evalStateT, StateT, liftIO, liftM, liftM2, liftM3, liftM4, liftM5, forM_, when, unless)
+import Control.Monad.State.Strict (execState, runStateT, runState, evalStateT, StateT, liftIO, liftM2, liftM3, liftM4, liftM5, forM_, when, unless)
 import Control.Lens hiding (List, pre, (.>), re, op)
 import qualified Control.Monad.State.Class as State
 
@@ -162,13 +162,13 @@ instance JSON.ToJSON EVMToolEnv where
                          , ("currentDifficulty", (JSON.toJSON $ b._prevRandao))
                          , ("currentGasLimit"  , (JSON.toJSON ("0x" ++ showHex (toInteger $ b._gasLimit) "")))
                          , ("currentNumber"    , (JSON.toJSON $ b._number))
-                         , ("currentTimestamp" , (JSON.toJSON timestamp))
+                         , ("currentTimestamp" , (JSON.toJSON tstamp))
                          , ("currentBaseFee"   , (JSON.toJSON $ b._baseFee))
                          , ("blockHashes"      , (JSON.toJSON $ b._blockHashes))
                          ]
               where
-                timestamp :: W256
-                timestamp = case (b._timestamp) of
+                tstamp :: W256
+                tstamp = case (b._timestamp) of
                               Lit a -> a
                               _ -> error "Timestamp needs to be a Lit"
 emptyEvmToolEnv :: EVMToolEnv
@@ -183,8 +183,8 @@ emptyEvmToolEnv = EVMToolEnv { _coinbase = 0
                              , _blockHashes = mempty
                              }
 
-data EVMReceipt =
-  EVMReceipt
+data EVMToolReceipt =
+  EVMToolReceipt
     { recType :: String
     , recRoot :: String
     , recStatus :: String
@@ -197,8 +197,8 @@ data EVMReceipt =
     , recBlockHash :: String
     , recTransactionIndex :: String
     } deriving (Generic, Show)
-instance JSON.FromJSON EVMReceipt where
-    parseJSON = JSON.withObject "EVMReceipt" $ \v -> EVMReceipt
+instance JSON.FromJSON EVMToolReceipt where
+    parseJSON = JSON.withObject "EVMReceipt" $ \v -> EVMToolReceipt
         <$> v .: "type"
         <*> v .: "root"
         <*> v .: "status"
@@ -218,7 +218,7 @@ data EVMToolResult =
   , receiptsRoot :: String
   , logsHash :: String
   , logsBloom :: String
-  , receipts :: [EVMReceipt]
+  , receipts :: [EVMToolReceipt]
   , currentDifficulty :: String
   , gasUsed :: String
   } deriving (Generic, Show)
@@ -290,19 +290,21 @@ tests = testGroup "hevm"
   -- be observed, errors, etc. We also run the results via Solidity and observe
   -- the return value to be the same
   , testGroup "contract-quickcheck-run"
-    [ testProperty "random-contract-concrete-call" $ \(expr :: OpContract) -> ioProperty $ do
-        expr2 <- fixContractJumps expr
-        -- let exprNoExt = removeStorageExtcalls expr2
-        putStrLn $ "Contract to run: " <> (show expr2)
-        let lits = assemble $ getOpData expr2
+    [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract) -> ioProperty $ do
+        -- let expr2 = OpContract [OpPush (Lit 0xa),OpCalldataload,OpPush (Lit 0x6),OpPush (Lit 0x9),OpPush (Lit 0x9),OpPush (Lit 0x8),OpPush (Lit 0x1),OpPush (Lit 0x7),OpPush (Lit 0xa),OpPush (Lit 0x9),OpCallcode,OpPush (Lit 0x8),OpJumpdest,OpPush (Lit 0x3),OpPush (Lit 0xa),OpPush (Lit 0x4),OpPush (Lit 0x1),OpPush (Lit 0x1),OpPush (Lit 0x4),OpPush (Lit 0x9),OpCalldataload,OpPush (Lit 0x8),OpPush (Lit 0x2),OpPush (Lit 0x7),OpPush (Lit 0xa),OpPush (Lit 0x1),OpCalldataload,OpPush (Lit 0x8),OpSwap 6,OpPush (Lit 0x6),OpPush (Lit 0x4),OpPush (Lit 0x6),OpPush (Lit 0x5),OpPush (Lit 0x5),OpPush (Lit 0x8),OpPush (Lit 0x8),OpCalldataload,OpPush (Lit 0x4),OpPush (Lit 0x3),OpPush (Lit 0x3),OpJumpdest,OpPush (Lit 0x2),OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0xa),OpPush (Lit 0x8),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0xa),OpPush (Lit 0x5),OpPush (Lit 0x9),OpPush (Lit 0x6),OpPush (Lit 0x6),OpPush (Lit 0x9),OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0x2),OpPush (Lit 0x3),OpPush (Lit 0x4),OpPush (Lit 0x6),OpPush (Lit 0x7),OpPush (Lit 0x8),OpPush (Lit 0x995),OpJumpi,OpAdd,OpPush (Lit 0x9),OpPush (Lit 0x3),OpPush (Lit 0x8),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0x6),OpPush (Lit 0x2),OpPush (Lit 0x8),OpPush (Lit 0x9),OpPush (Lit 0x4),OpPush (Lit 0x7),OpPush (Lit 0x3),OpPush (Lit 0x7),OpPush (Lit 0x6),OpPush (Lit 0x4),OpPush (Lit 0x9),OpDup 1,OpPush (Lit 0x5),OpPush (Lit 0x1),OpPush (Lit 0x1),OpJumpdest,OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0x9),OpPush (Lit 0x7),OpJumpdest]
+        -- NOTE: By removing external calls and storage calls, we fuzz a LOT less
+        --       It should work also when we have those inside. Removing for now.
+        contrFixed <- fixContractJumps $ removeStorageExtcalls contr
+        putStrLn $ "Contract to run: " <> (show contrFixed)
+        let lits = assemble $ getOpData contrFixed
             w8s = toW8fromLitB <$> lits
             bitcode = (BS.pack $ Vector.toList w8s)
             calldat = ConcreteBuf bitcode -- set calldata the code itself, a hack
-            contr = EVMToolAlloc{ balance = 0xa493d65e20984bc
+            contrAlloc = EVMToolAlloc{ balance = 0xa493d65e20984bc
                                 , code = bitcode
                                 , nonce = 0x48
                                 }
-            wallet = EVMToolAlloc{ balance = 0x5ffd4878be161d74
+            walletAlloc = EVMToolAlloc{ balance = 0x5ffd4878be161d74
                                  , code = BS.empty
                                  , nonce = 0xac
                                  }
@@ -312,7 +314,7 @@ tests = testGroup "hevm"
             toAddr :: Addr
             toAddr = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
             alloc :: Map.Map Addr EVMToolAlloc
-            alloc = Map.fromList ([ (fromAddr, wallet), (toAddr, contr)])
+            alloc = Map.fromList ([ (fromAddr, walletAlloc), (toAddr, contrAlloc)])
             tx = EVM.Transaction.Transaction
               { txData     = bitcode  -- set calldata the code itself, a hack
               , txGasLimit = 0xfffffff
@@ -328,7 +330,7 @@ tests = testGroup "hevm"
               , txMaxPriorityFeeGas =  Just 1
               , txMaxFeePerGas = Just 1
               }
-            env = EVMToolEnv { _coinbase   =  0xff
+            evmToolEnv = EVMToolEnv { _coinbase   =  0xff
                              , _timestamp   =  Lit 0x3e8
                              , _number      =  0x0
                              , _prevRandao  =  0x0
@@ -379,10 +381,10 @@ tests = testGroup "hevm"
                   pure False
         JSON.encodeFile "txs.json" txs
         JSON.encodeFile "alloc.json" alloc
-        JSON.encodeFile "env.json" env
-        a <- runCodeWithTrace Nothing env contr tx (fromAddr, toAddr) bitcode calldat
+        JSON.encodeFile "env.json" evmToolEnv
+        a <- runCodeWithTrace Nothing evmToolEnv contrAlloc tx (fromAddr, toAddr) bitcode calldat
         if isJust a then do
-          let (hevmRes, hevmTrace, hevmTraceResult) = fromJust a
+          let (_, hevmTrace, hevmTraceResult) = fromJust a
           _ <- readProcess "evm" [ "transition"
                                        ,"--input.alloc" , "alloc.json"
                                        , "--input.env" , "env.json"
@@ -2923,26 +2925,27 @@ getJumpDests ops = go ops 0 []
 
 fixContractJumps :: OpContract -> IO OpContract
 fixContractJumps (OpContract ops) = do
-  let addedOps = ops++[OpJumpdest]
-      jumpDests = getJumpDests addedOps
-      -- always end on an OpJumpdest so we don't have an issue with a "later" position
-      ops2 = fixup addedOps 0 []
-      -- original set of operations, the set of jumpDests NOW valid, current position, return value
-      fixup :: [Op] -> Int -> [Op] -> IO [Op]
-      fixup [] _ ret = pure ret
-      fixup (a:ax) pos ret = case a of
-        OpJumpi -> do
-          let filtDests = (filter (> pos) jumpDests)
-          rndPos <- randItem filtDests
-          fixup ax (pos+34) (ret++[(OpPush (Lit (fromInteger (fromIntegral rndPos)))), (OpJumpi)])
-        OpJump -> do
-          let filtDests = (filter (> pos) jumpDests)
-          rndPos <- randItem filtDests
-          fixup ax (pos+34) (ret++[(OpPush (Lit (fromInteger (fromIntegral rndPos)))), (OpJump)])
-        myop@(OpPush _) -> fixup ax (pos+33) (ret++[myop])
-        myop -> fixup ax (pos+1) (ret++[myop])
+  let
+    addedOps = ops++[OpJumpdest]
+    jumpDests = getJumpDests addedOps
+    -- always end on an OpJumpdest so we don't have an issue with a "later" position
+    ops2 = fixup addedOps 0 []
+    -- original set of operations, the set of jumpDests NOW valid, current position, return value
+    fixup :: [Op] -> Int -> [Op] -> IO [Op]
+    fixup [] _ ret = pure ret
+    fixup (a:ax) pos ret = case a of
+      OpJumpi -> do
+        let filtDests = (filter (> pos) jumpDests)
+        rndPos <- randItem filtDests
+        fixup ax (pos+34) (ret++[(OpPush (Lit (fromInteger (fromIntegral rndPos)))), (OpJumpi)])
+      OpJump -> do
+        let filtDests = (filter (> pos) jumpDests)
+        rndPos <- randItem filtDests
+        fixup ax (pos+34) (ret++[(OpPush (Lit (fromInteger (fromIntegral rndPos)))), (OpJump)])
+      myop@(OpPush _) -> fixup ax (pos+33) (ret++[myop])
+      myop -> fixup ax (pos+1) (ret++[myop])
+  fmap OpContract ops2
 
-  liftM OpContract ops2
 
 genWord :: Int -> Int -> Gen (Expr EWord)
 genWord litFreq 0 = frequency
@@ -3226,8 +3229,7 @@ vmres vm =
       Just (VMFailure _) -> mempty -- these are all EVMError
       _ -> mempty
   in VMTraceResult
-     -- more oddities to comply with geth
-     { out = BS.drop 2 res
+     { out = res
      , gasUsed = gasUsed'
      }
 

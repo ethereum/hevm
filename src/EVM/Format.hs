@@ -29,7 +29,7 @@ import Prelude hiding (Word)
 import qualified EVM
 import EVM.Dapp (DappInfo (..))
 import EVM.Dapp (DappContext (..))
-import EVM (VM, cheatCode, traceForest, traceData, EVMError (..))
+import EVM (VM, cheatCode, traceForest, EVMError (..))
 import EVM (Trace, TraceData (..), Query (..), FrameContext (..))
 import EVM.Types (maybeLitWord, W256 (..), num, word, Expr(..), EType(..))
 import EVM.Types (Addr, ByteStringS(..), ExprError(..))
@@ -39,17 +39,9 @@ import EVM.ABI (parseTypeName, formatString)
 import EVM.Solidity (SolcContract(..), contractName, abiMap)
 import EVM.Hexdump
 
-import EVM qualified
-import EVM (VM, cheatCode, traceForest, Trace,
-  TraceData(..), Query(..), FrameContext(..))
-import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError(..),
-  Indexed(NotIndexed), getAbiSeq, parseTypeName, formatString)
-import EVM.Dapp (DappContext(..), DappInfo(..), showTraceLocation)
+import EVM.Dapp (showTraceLocation)
 import EVM.Expr qualified as Expr
-import EVM.Hexdump (prettyHex)
-import EVM.Solidity (SolcContract(..), Method(..))
-import EVM.Types (maybeLitWord, W256(..), num, word, Expr(..), EType(..), Addr,
-  ByteStringS(..))
+import EVM.Solidity (Method(..))
 import Control.Arrow ((>>>))
 import Control.Lens (preview, ix, _2)
 import Data.Binary.Get (runGetOrFail)
