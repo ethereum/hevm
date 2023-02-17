@@ -12,7 +12,6 @@ import Data.Bits hiding (And, Xor)
 import System.Directory
 import System.IO
 import GHC.Natural
--- import Control.Monad
 import Text.RE.TDFA.String
 import Text.RE.Replace
 import Data.Time
@@ -20,6 +19,7 @@ import System.Environment
 import qualified Data.Word
 import GHC.Generics
 import Test.ChasingBottoms
+import Numeric (showHex)
 
 import Prelude hiding (fail, LT, GT)
 
@@ -27,7 +27,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Hex
 import Data.Maybe
 import Data.Typeable
-import Data.List (elemIndex, sort)
+import Data.List (elemIndex)
 import Data.DoubleWord
 import Test.Tasty
 import Test.Tasty.QuickCheck hiding (Failure)
@@ -40,6 +40,7 @@ import Test.Tasty.Runners hiding (Failure)
 import Test.Tasty.ExpectedFailure
 import qualified Data.Aeson as JSON
 import Data.Aeson ((.:))
+import Data.ByteString.Char8 qualified as Char8
 
 -- import qualified Control.Monad.Operational as Operational
 import Control.Monad.Operational (view, ProgramViewT(..), ProgramView)
@@ -68,7 +69,6 @@ import EVM.Types
 import EVM.Traversals
 import EVM.Concrete (createAddress)
 import EVM.SMT hiding (one)
-import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
 import EVM.Solvers
 import qualified EVM.Expr as Expr
@@ -93,8 +93,8 @@ toW8fromLitB _ = error "nope"
 runSubSet :: String -> IO ()
 runSubSet p = defaultMain . applyPattern p $ tests
 
-data EVMTrace =
-  EVMTrace
+data EVMToolTrace =
+  EVMToolTrace
     { evmPc :: Int
     , evmOp :: Int
     , evmGas :: W256
@@ -104,8 +104,8 @@ data EVMTrace =
     , evmOpName :: String
     , evmStack :: [W256]
     } deriving (Generic, Show)
-instance JSON.FromJSON EVMTrace where
-  parseJSON = JSON.withObject "EVMTrace" $ \v -> EVMTrace
+instance JSON.FromJSON EVMToolTrace where
+  parseJSON = JSON.withObject "EVMToolTrace" $ \v -> EVMToolTrace
     <$> v .: "pc"
     <*> v .: "op"
     <*> v .: "gas"
@@ -115,23 +115,69 @@ instance JSON.FromJSON EVMTrace where
     <*> v .: "opName"
     <*> v .: "stack"
 
-data EVMOutput =
+genBlockHash:: Int -> Expr 'EWord
+genBlockHash x = (num x :: Integer) & show & Char8.pack & EVM.Types.keccak' & Lit
+litToW256 :: Expr 'EWord -> W256
+litToW256 x = case x of
+                (Lit a) -> a
+                _ -> error "Can only deal with Lit"
+blockHashesDefault :: Map.Map Int W256
+blockHashesDefault = Map.fromList [(x, litToW256 $ genBlockHash x) | x<- [1..256]]
+
+data EVMToolOutput =
   EVMResTrace
     { output :: String -- NOTE: it's missing the 0x so can't be parsed at ByteString
     , gasUsed :: W256
     , time :: Integer
     } deriving (Generic, Show)
-instance JSON.FromJSON EVMOutput
+instance JSON.FromJSON EVMToolOutput
 
-data EVMTraceOutput =
-  EVMTraceOutput
-    { toTrace :: [EVMTrace]
-    , toOutput :: EVMOutput
+data EVMToolTraceOutput =
+  EVMToolTraceOutput
+    { toTrace :: [EVMToolTrace]
+    , toOutput :: EVMToolOutput
     } deriving (Generic, Show)
-instance JSON.FromJSON EVMTraceOutput where
-    parseJSON = JSON.withObject "EVMTraceOutput" $ \v -> EVMTraceOutput
+instance JSON.FromJSON EVMToolTraceOutput where
+    parseJSON = JSON.withObject "EVMToolTraceOutput" $ \v -> EVMToolTraceOutput
         <$> v .: "trace"
         <*> v .: "output"
+
+data EVMToolEnv = EVMToolEnv
+  { _coinbase    :: Addr
+  , _timestamp   :: Expr EWord
+  , _number      :: W256
+  , _prevRandao  :: W256
+  , _gasLimit    :: Data.Word.Word64
+  , _baseFee     :: W256
+  , _maxCodeSize :: W256
+  , _schedule    :: FeeSchedule.FeeSchedule Data.Word.Word64
+  , _blockHashes :: Map.Map Int W256
+  } deriving (Show, Generic)
+instance JSON.ToJSON EVMToolEnv where
+  toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON $ b._coinbase))
+                         , ("currentDifficulty", (JSON.toJSON $ b._prevRandao))
+                         , ("currentGasLimit"  , (JSON.toJSON ("0x" ++ showHex (toInteger $ b._gasLimit) "")))
+                         , ("currentNumber"    , (JSON.toJSON $ b._number))
+                         , ("currentTimestamp" , (JSON.toJSON timestamp))
+                         , ("currentBaseFee"   , (JSON.toJSON $ b._baseFee))
+                         , ("blockHashes"      , (JSON.toJSON $ b._blockHashes))
+                         ]
+              where
+                timestamp :: W256
+                timestamp = case (b._timestamp) of
+                              Lit a -> a
+                              _ -> error "Timestamp needs to be a Lit"
+emptyEvmToolEnv :: EVMToolEnv
+emptyEvmToolEnv = EVMToolEnv { _coinbase = 0
+                             , _timestamp = Lit 0
+                             , _number     = 0
+                             , _prevRandao = 42069
+                             , _gasLimit   = 0xffffffffffffffff
+                             , _baseFee    = 0
+                             , _maxCodeSize= 0xffffffff
+                             , _schedule   = FeeSchedule.berlin
+                             , _blockHashes = mempty
+                             }
 
 data EVMReceipt =
   EVMReceipt
@@ -161,8 +207,8 @@ instance JSON.FromJSON EVMReceipt where
         <*> v .: "blockHash"
         <*> v .: "transactionIndex"
 
-data EVMResult =
-  EVMResult
+data EVMToolResult =
+  EVMToolResult
   { stateRoot :: String
   , txRoot :: String
   , receiptsRoot :: String
@@ -172,16 +218,19 @@ data EVMResult =
   , currentDifficulty :: String
   , gasUsed :: String
   } deriving (Generic, Show)
-instance JSON.FromJSON EVMResult
+instance JSON.FromJSON EVMToolResult
 
 data EVMToolAlloc =
   EVMToolAlloc
-  { balance :: W64 -- should be W256, but it's parsed wrongly by default
+  { balance :: W256 -- this is wrongly written by default, hence the non-default ToJSON
   , code :: ByteString
   , nonce :: W64
   } deriving (Generic)
 instance JSON.ToJSON EVMToolAlloc where
-  toJSON = JSON.genericToJSON JSON.defaultOptions
+  toJSON b = JSON.object [ ("balance" ,  (JSON.toJSON $ show b.balance))
+                         , ("code", (JSON.toJSON $ b.code))
+                         , ("nonce"  , (JSON.toJSON $ b.nonce))
+                         ]
 
 emptyEVMToolAlloc :: EVMToolAlloc
 emptyEVMToolAlloc = EVMToolAlloc { balance = 0
@@ -238,14 +287,8 @@ tests = testGroup "hevm"
   -- the return value to be the same
   , testGroup "contract-quickcheck-run"
     [ testProperty "random-contract-concrete-call" $ \(expr :: OpContract) -> ioProperty $ do
-        -- signed = sign 1 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D exampleTransaction
-        -- JSON.encodeFile "txs.json" [signed]
-        -- evm transition --input.alloc alloc.json --input.env env.json --input.txs txs.json --output.alloc alloc-out.json --trace.returndata=true  --trace trace.json --output.result result.json
-        --
-        -- old setup:
-        --    use documentation: https://docs.ethers.org/v5/api/signer/
-        --    geth --verbosity 0 --dev --exec  'loadScript("my.js")' console
         expr2 <- fixContractJumps expr
+        -- let exprNoExt = removeStorageExtcalls expr2
         putStrLn $ "Contract to run: " <> (show expr2)
         let lits = assemble $ getOpData expr2
             w8s = toW8fromLitB <$> lits
@@ -267,40 +310,35 @@ tests = testGroup "hevm"
             alloc :: Map.Map Addr EVMToolAlloc
             alloc = Map.fromList ([ (fromAddr, wallet), (toAddr, contr)])
             tx = EVM.Transaction.Transaction
-              { txData     = bitcode
+              { txData     = bitcode  -- set calldata the code itself, a hack
               , txGasLimit = 0xfffffff
               , txGasPrice = Just 1
               , txNonce    = 172
-              , txR        = 330
-              , txS        = 330
               , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
-              , txV        = 0
-              , txValue    = 0x863
+              , txR        = 0 -- will be fixed when we sign
+              , txS        = 0 -- will be fixed when we sign
+              , txV        = 0 -- will be fixed when we sign
+              , txValue    = 0 -- setting this > 0 fails because HEVM doesn't handle value sent in toplevel transaction
               , txType     = EVM.Transaction.EIP1559Transaction
               , txAccessList = []
               , txMaxPriorityFeeGas =  Just 1
               , txMaxFeePerGas = Just 1
               }
-            -- TODO: "coinbase" is NOT used below in HEVM running
-            --       hence setting it to 0 here, to match
-            --       "number" is also NOT used below in HEVM running
-            --       hence setting it to 0 here, to match
-            env = Block { _coinbase   =  0xff
-                        , _timestamp   =  Lit 0x3e8
-                        , _number      =  0x0
-                        , _prevRandao  =  0x0
-                        , _gasLimit    =  0x750a163d
-                        , _baseFee     =  0x0
-                        , _maxCodeSize =  0xfffff
-                        , _schedule    =  FeeSchedule.homestead
-                        }
-
-            txs = [EVM.Transaction.sign 1 sk tx]
-
-            compareTraces :: [VMTrace] -> [EVMTrace] -> IO (Bool)
+            env = EVMToolEnv { _coinbase   =  0xff
+                             , _timestamp   =  Lit 0x3e8
+                             , _number      =  0x0
+                             , _prevRandao  =  0x0
+                             , _gasLimit    =  0x750a163d
+                             , _baseFee     =  0x0
+                             , _maxCodeSize =  0xfffff
+                             , _schedule    =  FeeSchedule.berlin
+                             , _blockHashes =  blockHashesDefault
+                             }
+            txs = [EVM.Transaction.sign 1 sk tx] -- "1" because of chainId
+            compareTraces :: [VMTrace] -> [EVMToolTrace] -> IO (Bool)
             compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
               where
-                go :: [VMTrace] -> [EVMTrace] -> IO (Bool)
+                go :: [VMTrace] -> [EVMToolTrace] -> IO (Bool)
                 go [] [] = pure True
                 go (a:ax) (b:bx) = do
                   let aOp = a.traceOp
@@ -309,20 +347,31 @@ tests = testGroup "hevm"
                       bPc = b.evmPc
                       aStack = a.traceStack
                       bStack = b.evmStack
-                  putStrLn $ (intToOpName aOp) <> " pc: " <> (show aPc) <> " --- " <> (intToOpName bOp) <> " pc: " <> (show bPc)
+                      aGas = fromIntegral a.traceGas
+                      bGas = b.evmGas
+                  if aGas /= bGas then do
+                                      putStrLn "GAS doesn't match:"
+                                      putStrLn $ "HEVM's gas   : " <> (show aGas)
+                                      putStrLn $ "evmtool's gas: " <> (show bGas)
+                                      else
+                                      putStrLn $ "Gas match   : " <> (show aGas)
+                  if aOp == bOp && aPc == bPc then
+                                      putStrLn $ (intToOpName aOp) <> " pc: " <> (show aPc)
+                                      else
+                                      putStrLn $ "HEVM: " <> (intToOpName aOp) <> " (pc " <> (show aPc) <> ") --- evmtool " <> (intToOpName bOp) <> " (pc " <> (show bPc) <> ")"
                   if aStack /= bStack then do
-                                      putStrLn $ "stacks don't match:"
+                                      putStrLn "stacks don't match:"
                                       putStrLn $ "HEVM's stack   : " <> (show aStack)
                                       putStrLn $ "evmtool's stack: " <> (show bStack)
                                       else
                                       putStrLn $ "Stacks match   : " <> (show aStack)
-                  if aOp == bOp && aStack == bStack && aPc == bPc then go ax bx
+                  if aOp == bOp && aStack == bStack && aPc == bPc && aGas == bGas then go ax bx
                   else pure False
                 go a@(_:_) [] = do
-                  putStrLn $ "HEVM's trace is longer by:" <> (show a)
+                  putStrLn $ "Stacks don't match. HEVM's trace is longer by:" <> (show a)
                   pure False
                 go [] a@(_:_) = do
-                  putStrLn $ "evmtool's trace is longer by:" <> (show a)
+                  putStrLn $ "Stacks don't match. evmtool's trace is longer by:" <> (show a)
                   pure False
         JSON.encodeFile "txs.json" txs
         JSON.encodeFile "alloc.json" alloc
@@ -339,42 +388,20 @@ tests = testGroup "hevm"
                                        , "--trace" , "trace.json"
                                        , "--output.result", "result.json"
                                        ] ""
-          evmResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMResult)
-          putStrLn $ "evm result:" <> (show evmResult)
-          let txName =  (((fromJust evmResult).receipts) !! 0).recTransactionHash
+          evmToolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
+          -- putStrLn $ "evm result:" <> (show evmResult)
+          let txName =  (((fromJust evmToolResult).receipts) !! 0).recTransactionHash
           putStrLn $ "TX name: " <> txName
           let name = "trace-0-" ++ txName ++ ".jsonl"
           _ <- readProcess "./sanitize_trace.sh" [name] ""
-          (Just evmTraceOutput) <- JSON.decodeFileStrict (name ++ ".json") :: IO (Maybe EVMTraceOutput)
+          (Just evmTraceOutput) <- JSON.decodeFileStrict (name ++ ".json") :: IO (Maybe EVMToolTraceOutput)
           ok <- compareTraces hevmTrace (evmTraceOutput.toTrace)
-          putStrLn $ "Trace compare OK: " <> (show ok)
-          assertEqual "Must match" ok True
+          putStrLn $ "Traces, gas, and result match: " <> (show ok)
+          assertEqual "Traces, gas, and result must match" ok True
 
           putStrLn $ "HEVM result: " <> (show hevmRes)
           putStrLn $ "evm result: " <> (show (evmTraceOutput.toOutput))
         else putStrLn "not successful"
-
-    , testProperty "random-contract-with-symbolic-call" $ \(expr :: OpContract) -> ioProperty $ do
-        expr2 <- fixContractJumps expr
-        putStrLn $ "Contract: " <> (show expr2)
-        let lits = assemble . getOpData $ expr2
-            w8s = toW8fromLitB <$> lits
-            myfun = do
-              withSolvers Z3 1 Nothing (\s -> checkAssert s defaultPanicCodes (BS.pack $ Vector.toList w8s) Nothing [] debugVeriOpts)
-        res <- isBottomIO myfun
-        putStrLn $ "result final: " <> (show res)
-    -- generate contract without SLoad/STore or any external calls. Call with
-    -- value. Observe return value. Run against geth. Compare.
-    , testProperty "random-contract-no-storage-no-extcalls" $ \(expr :: OpContract) -> ioProperty $ do
-        let exprNoExt = removeStorageExtcalls expr
-        expr2 <- fixContractJumps exprNoExt
-        putStrLn $ "Contract: " <> (show expr2)
-        let lits = assemble . getOpData $ expr2
-            w8s = toW8fromLitB <$> lits
-        res <- withSolvers Z3 1 Nothing $ (\s ->
-              checkAssert s defaultPanicCodes (BS.pack $ Vector.toList w8s) Nothing [] debugVeriOpts)
-        putStrLn $ "result: " <> (show res)
-    ]
   -- These tests fuzz the simplifier by generating a random expression,
   -- applying some simplification rules, and then using the smt encoding to
   -- check that the simplified version is semantically equivalent to the
@@ -2475,7 +2502,7 @@ checkEquiv l r = withSolvers Z3 1 (Just 100) $ \solvers -> do
 -- | Takes a runtime code and calls it with the provided calldata
 runCode :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe (Expr Buf))
 runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
-  let origVM = vmForRuntimeCode code' calldata' emptyBlock emptyEVMToolAlloc EVM.Transaction.emptyTransaction (ethrunAddress, createAddress ethrunAddress 1)
+  let origVM = vmForRuntimeCode code' calldata' emptyEvmToolEnv emptyEVMToolAlloc EVM.Transaction.emptyTransaction (ethrunAddress, createAddress ethrunAddress 1)
   res <- evalStateT (Stepper.interpret (Fetch.oracle solvers rpcinfo) Stepper.execFully) origVM
   pure $ case res of
     Left _ -> Nothing
@@ -2483,36 +2510,39 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
 
 -- | Takes a runtime code and calls it with the provided calldata
 -- TODO: take code & calldata out from EVMToolAlloc and EVM.Transaction
-runCodeWithTrace :: Fetch.RpcInfo -> Block -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> ByteString -> Expr Buf -> IO (Maybe ((Expr Buf, [VMTrace], VMTraceResult)))
-runCodeWithTrace rpcinfo block alloc tx (fromAddr, toAddr) code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
-  let origVM = vmForRuntimeCode code' calldata' block alloc tx (fromAddr, toAddr)
+runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> ByteString -> Expr Buf -> IO (Maybe ((Expr Buf, [VMTrace], VMTraceResult)))
+runCodeWithTrace rpcinfo evmToolEnv alloc tx (fromAddr, toAddr) code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
+  let origVM = vmForRuntimeCode code' calldata' evmToolEnv alloc tx (fromAddr, toAddr)
   (res, vm) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) origVM
   pure $ case res of
     Left _ -> Nothing
     Right b -> Just (b, vm._trace, vmres vm)
 
-vmForRuntimeCode :: ByteString -> Expr Buf -> Block -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> VM
-vmForRuntimeCode runtimecode calldata' block alloc tx (fromAddr, toAddr) =
+vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> VM
+vmForRuntimeCode runtimecode calldata' evmToolEnv alloc tx (fromAddr, toAddr) =
+  let contr = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
+      contrWithBal = contr { _balance = alloc.balance }
+  in
   (makeVm $ VMOpts
-    { vmoptContract = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
+    { vmoptContract = contrWithBal
     , vmoptCalldata = mempty
     , vmoptValue = Lit tx.txValue
     , vmoptStorageBase = Concrete
     , vmoptAddress =  toAddr
     , vmoptCaller = Expr.litAddr fromAddr
     , vmoptOrigin = fromAddr
-    , vmoptCoinbase = block._coinbase
-    , vmoptNumber = block._number
-    , vmoptTimestamp = block._timestamp
+    , vmoptCoinbase = evmToolEnv._coinbase
+    , vmoptNumber = evmToolEnv._number
+    , vmoptTimestamp = evmToolEnv._timestamp
     , vmoptGasprice = fromJust tx.txGasPrice
-    , vmoptGas = tx.txGasLimit - fromIntegral (EVM.Transaction.txGasCost FeeSchedule.homestead tx)
+    , vmoptGas = tx.txGasLimit - fromIntegral (EVM.Transaction.txGasCost evmToolEnv._schedule tx)
     , vmoptGaslimit = tx.txGasLimit
-    , vmoptBlockGaslimit = block._gasLimit
-    , vmoptPrevRandao = block._prevRandao
-    , vmoptBaseFee = block._baseFee
+    , vmoptBlockGaslimit = evmToolEnv._gasLimit
+    , vmoptPrevRandao = evmToolEnv._prevRandao
+    , vmoptBaseFee = evmToolEnv._baseFee
     , vmoptPriorityFee = fromJust tx.txMaxPriorityFeeGas
-    , vmoptMaxCodeSize = block._maxCodeSize
-    , vmoptSchedule = block._schedule
+    , vmoptMaxCodeSize = evmToolEnv._maxCodeSize
+    , vmoptSchedule = evmToolEnv._schedule
     , vmoptChainId = 1
     , vmoptCreate = False
     , vmoptTxAccessList = mempty
@@ -2893,12 +2923,10 @@ fixContractJumps (OpContract ops) = do
       fixup (a:ax) pos ret = case a of
         OpJumpi -> do
           let filtDests = (filter (> pos) jumpDests)
-          putStrLn $ show (sort filtDests)
           rndPos <- randItem filtDests
           fixup ax (pos+34) (ret++[(OpPush (Lit (fromInteger (fromIntegral rndPos)))), (OpJumpi)])
         OpJump -> do
           let filtDests = (filter (> pos) jumpDests)
-          putStrLn $ show (sort filtDests)
           rndPos <- randItem filtDests
           fixup ax (pos+34) (ret++[(OpPush (Lit (fromInteger (fromIntegral rndPos)))), (OpJump)])
         myop@(OpPush _) -> fixup ax (pos+33) (ret++[myop])

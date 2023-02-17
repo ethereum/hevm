@@ -57,8 +57,6 @@ import Crypto.Hash (Digest, SHA256, RIPEMD160, digestFromByteString)
 import Crypto.Hash qualified as Crypto
 import Crypto.Number.ModArithmetic (expFast)
 import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
-import Crypto.PubKey.ECC.Generate (generateQ)
-import Crypto.PubKey.ECC.Types (getCurveByName, CurveName(..), Point(..))
 
 -- * Data types
 
@@ -396,29 +394,7 @@ data Block = Block
   , _maxCodeSize :: W256
   , _schedule    :: FeeSchedule Word64
   } deriving (Show, Generic)
-instance JSON.ToJSON Block where
-  toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON $ b._coinbase))
-                         , ("currentDifficulty", (JSON.toJSON $ b._prevRandao))
-                         , ("currentGasLimit"  , (JSON.toJSON $ ("0x" ++ showHex (toInteger $ b._gasLimit) "")))
-                         , ("currentNumber"    , (JSON.toJSON $ b._number))
-                         , ("currentTimestamp" , (JSON.toJSON timestamp))
-                         , ("currentBaseFee"   , (JSON.toJSON $ b._baseFee))
-                         ]
-              where
-                timestamp :: W256
-                timestamp = case (b._timestamp) of
-                              Lit a -> a
-                              _ -> error "Timestamp needs to be a Lit"
 
-emptyBlock = Block { _coinbase = 0
-                   , _timestamp = Lit 0
-                   , _number     = 0
-                   , _prevRandao = 42069
-                   , _gasLimit   = 0xffffffffffffffff
-                   , _baseFee    = 0
-                   , _maxCodeSize= 0xffffffff
-                   , _schedule   = EVM.FeeSchedule.berlin
-                   }
 
 blankState :: FrameState
 blankState = FrameState
