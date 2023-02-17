@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The `--solvers` cli option is now respected (previously we always used Z3)
+- The `equivalence` command now fails with the correct status code when counterexamples are found
 
 ## [0.50.3] - 2023-02-17
 

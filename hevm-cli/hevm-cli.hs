@@ -312,14 +312,14 @@ equivalence cmd = do
   solver <- getSolver cmd
   withSolvers solver 3 Nothing $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts Nothing
-    case not (any isCex res) of
+    case any isCex res of
       False -> do
         putStrLn "No discrepancies found"
         when (any isTimeout res) $ do
           putStrLn "But timeout(s) occurred"
           exitFailure
       True -> do
-        putStrLn $ "Not equivalent. Counterexample(s):" <> show res
+        putStrLn $ "Not equivalent. Counterexample(s):" <> show (filter (not . isQed) res)
         exitFailure
 
 getSolver :: Command Options.Unwrapped -> IO Solver
