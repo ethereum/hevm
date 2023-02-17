@@ -102,9 +102,9 @@ instance AsASCII W256 where
   load = readMaybe . Char8.unpack
 
 instance AsASCII ByteString where
-  dump x = BS16.encode x <> "\n"
+  dump x = BS16.encodeBase16' x <> "\n"
   load x =
-    case BS16.decode . mconcat . BS.split 10 $ x of
+    case BS16.decodeBase16 . mconcat . BS.split 10 $ x of
       Right y -> Just y
       _       -> Nothing
 

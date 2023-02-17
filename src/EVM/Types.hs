@@ -466,20 +466,10 @@ instance Show ByteStringS where
       fromBinary =
         Text.decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
-mydecode :: Text -> Maybe ByteString
-mydecode x = Just (go (Text.unpack x) BS.empty)
-  where
-    go :: String -> ByteString -> ByteString
-    go (a:b:ax) bs =  go ax (BS.snoc bs (toEnum ((ord a) + 8*(ord b))))
-    go [_] _ = error "wrong"
-    go [] bs = bs
-
-textToByteString :: MonadPlus m =>  Text -> m ByteString
-textToByteString x = case mydecode x of
-                       Nothing -> mzero
-                       Just bs -> pure bs
 instance JSON.FromJSON ByteString where
-  parseJSON (JSON.String x) = textToByteString x
+  parseJSON (JSON.String x) = case BS16.decodeBase16' x of
+                                Left _ -> mzero
+                                Right bs -> pure bs
   parseJSON _ = mzero
 
 instance JSON.ToJSON ByteString where
@@ -602,13 +592,13 @@ instance ParseRecord Addr where
 
 hexByteString :: String -> ByteString -> ByteString
 hexByteString msg bs =
-  case BS16.decode bs of
+  case BS16.decodeBase16 bs of
     Right x -> x
     _ -> error ("invalid hex bytestring for " ++ msg)
 
 hexText :: Text -> ByteString
 hexText t =
-  case BS16.decode (Text.encodeUtf8 (Text.drop 2 t)) of
+  case BS16.decodeBase16 (Text.encodeUtf8 (Text.drop 2 t)) of
     Right x -> x
     _ -> error ("invalid hex bytestring " ++ show t)
 

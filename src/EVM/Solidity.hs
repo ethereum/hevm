@@ -518,11 +518,11 @@ containsLinkerHole :: Text -> Bool
 containsLinkerHole = regexMatches "__\\$[a-z0-9]{34}\\$__"
 
 toCode :: Text -> ByteString
-toCode t = case BS16.decode (encodeUtf8 t) of
+toCode t = case BS16.decodeBase16 (encodeUtf8 t) of
   Right d -> d
   Left e -> if containsLinkerHole t
             then error "unlinked libraries detected in bytecode"
-            else error e
+            else error $ Text.unpack e
 
 solidity' :: Text -> IO (Text, Text)
 solidity' src = withSystemTempFile "hevm.sol" $ \path handle -> do

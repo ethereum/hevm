@@ -23,7 +23,7 @@ import Numeric (showHex)
 import Prelude hiding (fail, LT, GT)
 
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Base16 as Hex
+import qualified Data.ByteString.Base16 as BS16
 import Data.Maybe
 import Data.Typeable
 import Data.List (elemIndex)
@@ -71,6 +71,7 @@ import qualified EVM.FeeSchedule as FeeSchedule
 import EVM.Solvers
 import qualified EVM.Expr as Expr
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 import Data.List (isSubsequenceOf)
@@ -78,6 +79,7 @@ import EVM.TestUtils
 import GHC.Conc (getNumProcessors)
 import System.Process
 import qualified EVM.Transaction
+import EVM.Format (formatBinary)
 
 main :: IO ()
 main = defaultMain tests
@@ -123,12 +125,16 @@ blockHashesDefault :: Map.Map Int W256
 blockHashesDefault = Map.fromList [(x, litToW256 $ genBlockHash x) | x<- [1..256]]
 
 data EVMToolOutput =
-  EVMResTrace
-    { output :: String -- NOTE: it's missing the 0x so can't be parsed at ByteString
+  EVMToolOutput
+    { output :: ByteString -- NOTE: it's missing the 0x so can't be parsed at ByteString
     , gasUsed :: W256
     , time :: Integer
     } deriving (Generic, Show)
-instance JSON.FromJSON EVMToolOutput
+instance JSON.FromJSON EVMToolOutput where
+    parseJSON = JSON.withObject "EVToolOutput" $ \v -> EVMToolOutput
+        <$> v .: "output"
+        <*> v .: "gasUsed"
+        <*> v .: "time"
 
 data EVMToolTraceOutput =
   EVMToolTraceOutput
@@ -399,8 +405,8 @@ tests = testGroup "hevm"
           if resultOK then
             putStrLn $ "HEVM & evmtool's outputs match: " <> (show evmtoolTraceOutput.toOutput.output)
           else do
-            putStrLn $ "HEVM result: " <> (show hevmTraceResult.out)
-            putStrLn $ "evm result: " <> (show (evmtoolTraceOutput.toOutput.output))
+            T.putStrLn $ "HEVM result: " <> (formatBinary hevmTraceResult.out)
+            T.putStrLn $ "evm result : " <> (formatBinary evmtoolTraceOutput.toOutput.output)
           assertEqual "HEVM & evmtool's outputs must match" resultOK True
         else putStrLn "not successful"
     ]
@@ -2577,9 +2583,9 @@ loadVM x =
 
 hex :: ByteString -> ByteString
 hex s =
-  case Hex.decode s of
+  case BS16.decodeBase16 s of
     Right x -> x
-    Left e -> error e
+    Left e -> error $ T.unpack e
 
 singleContract :: Text -> Text -> IO (Maybe ByteString)
 singleContract x s =
@@ -3168,7 +3174,7 @@ applyPattern p = localOption (TestPattern (parseExpr p))
 
 data VMTraceResult =
   VMTraceResult
-  { out  :: String
+  { out  :: ByteString
   , gasUsed :: Data.Word.Word64
   } deriving (Generic)
 instance JSON.ToJSON VMTraceResult where
@@ -3212,14 +3218,14 @@ vmres vm =
   let
     gasUsed' = Control.Lens.view (tx . txgaslimit) vm - Control.Lens.view (state . EVM.gas) vm
     res = case Control.Lens.view result vm of
-      Just (VMSuccess (ConcreteBuf b)) -> show b
+      Just (VMSuccess (ConcreteBuf b)) -> b
       Just (VMSuccess x) -> error $ "unhandled: " <> (show x)
-      Just (VMFailure (EVM.Revert (ConcreteBuf b))) -> show b
-      Just (VMFailure (x)) -> show x -- these are all EVMError
+      Just (VMFailure (EVM.Revert (ConcreteBuf b))) -> b
+      Just (VMFailure _) -> mempty -- these are all EVMError
       _ -> mempty
   in VMTraceResult
      -- more oddities to comply with geth
-     { out = drop 2 res
+     { out = BS.drop 2 res
      , gasUsed = gasUsed'
      }
 
