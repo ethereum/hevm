@@ -171,6 +171,7 @@ instance JSON.ToJSON EVMToolEnv where
                 tstamp = case (b._timestamp) of
                               Lit a -> a
                               _ -> error "Timestamp needs to be a Lit"
+
 emptyEvmToolEnv :: EVMToolEnv
 emptyEvmToolEnv = EVMToolEnv { _coinbase = 0
                              , _timestamp = Lit 0
@@ -3261,9 +3262,7 @@ interpretWithTrace fetcher = do
               -- Yes, proceed with the next action.
               interpretWithTrace fetcher (k vm)
             Nothing -> do
-              vm2 <- State.get
-              let vm3 = vm2 { _trace = (vm._trace)++[vmtrace vm] }
-              State.put vm3
+              State.modify (\a -> a { _trace = (vm._trace)++[vmtrace vm] })
 
               -- No, keep performing the current action
               State.state (runState exec1)
@@ -3277,9 +3276,7 @@ interpretWithTrace fetcher = do
               -- Yes, proceed with the next action.
               interpretWithTrace fetcher (k r)
             Nothing -> do
-              vm2 <- State.get
-              let vm3 = vm2 { _trace = (vm._trace)++[vmtrace vm] }
-              State.put vm3
+              State.modify (\a -> a { _trace = (vm._trace)++[vmtrace vm] })
 
               -- No, keep performing the current action
               State.state (runState exec1)
