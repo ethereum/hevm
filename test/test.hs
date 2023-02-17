@@ -393,7 +393,6 @@ tests = testGroup "hevm"
                                        , "--output.result", "result.json"
                                        ] ""
           evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
-          -- putStrLn $ "evm result:" <> (show evmResult)
           let txName =  (((fromJust evmtoolResult).receipts) !! 0).recTransactionHash
           putStrLn $ "TX name: " <> txName
           let name = "trace-0-" ++ txName ++ ".jsonl"
@@ -405,8 +404,11 @@ tests = testGroup "hevm"
           if resultOK then
             putStrLn $ "HEVM & evmtool's outputs match: " <> (show evmtoolTraceOutput.toOutput.output)
           else do
+            putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
             T.putStrLn $ "HEVM result: " <> (formatBinary hevmTraceResult.out)
             T.putStrLn $ "evm result : " <> (formatBinary evmtoolTraceOutput.toOutput.output)
+            putStrLn $ "HEVM result len: " <> (show (BS.length hevmTraceResult.out))
+            putStrLn $ "evm result  len: " <> (show (BS.length evmtoolTraceOutput.toOutput.output))
           assertEqual "HEVM & evmtool's outputs must match" resultOK True
         else putStrLn "not successful"
     ]
@@ -3176,7 +3178,7 @@ data VMTraceResult =
   VMTraceResult
   { out  :: ByteString
   , gasUsed :: Data.Word.Word64
-  } deriving (Generic)
+  } deriving (Generic, Show)
 instance JSON.ToJSON VMTraceResult where
   toEncoding = JSON.genericToEncoding JSON.defaultOptions
 

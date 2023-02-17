@@ -15,13 +15,10 @@ import EVM.Concrete (createAddress, create2Address)
 import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord,
   writeByte, bufLength, indexWord, litAddr, readBytes, word256At, copySlice)
 import EVM.Expr qualified as Expr
-import EVM.FeeSchedule (FeeSchedule (..), berlin)
+import EVM.FeeSchedule (FeeSchedule (..))
 import Options.Generic as Options
 import qualified EVM.Precompiled
 import qualified EVM.Sign as Sign
-
-import qualified Data.Aeson        as JSON
-import Numeric (showHex)
 import EVM.Op
 
 import Control.Lens hiding (op, (:<), (|>), (.>))
