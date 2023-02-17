@@ -288,9 +288,7 @@ common test-base
     spawn >= 0.3,
     witherable,
     smt2-parser >= 0.1.0.1,
-    json >=0.9,
-    operational,
-    ghc,
+    operational
 
 library test-utils
   import:
