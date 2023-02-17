@@ -41,10 +41,14 @@ import qualified Data.Aeson as JSON
 import Data.Aeson ((.:))
 import Data.ByteString.Char8 qualified as Char8
 
-import Control.Monad.Operational (view, ProgramViewT(..), ProgramView)
-import Control.Monad.State.Strict (execState, runStateT, runState, evalStateT, StateT, liftIO, liftM2, liftM3, liftM4, liftM5, forM_, when, unless)
+import qualified Control.Monad.Operational as Operational (view, ProgramViewT(..), ProgramView)
+
+import Control.Monad.State.Strict hiding (state)
+import Control.Monad.State.Strict qualified as State
+
+-- import Control.Monad.State.Strict (execState, runStateT, runState, evalStateT, StateT, liftIO, liftM2, liftM3, liftM4, liftM5, forM_, when, unless)
 import Control.Lens hiding (List, pre, (.>), re, op)
-import qualified Control.Monad.State.Class as State
+-- import qualified Control.Monad.State.Class as State
 
 import qualified Data.Vector as Vector
 import Data.String.Here
@@ -53,7 +57,7 @@ import qualified Data.Map.Strict as Map
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
 
-import EVM hiding (allowFFI, trace)
+import EVM hiding (allowFFI)
 import EVM.SymExec
 import EVM.Assembler
 import EVM.Op
@@ -80,6 +84,7 @@ import GHC.Conc (getNumProcessors)
 import System.Process
 import qualified EVM.Transaction
 import EVM.Format (formatBinary)
+import EVM.Sign (deriveAddr)
 
 main :: IO ()
 main = defaultMain tests
@@ -117,12 +122,9 @@ instance JSON.FromJSON EVMToolTrace where
 
 genBlockHash:: Int -> Expr 'EWord
 genBlockHash x = (num x :: Integer) & show & Char8.pack & EVM.Types.keccak' & Lit
-litToW256 :: Expr 'EWord -> W256
-litToW256 x = case x of
-                (Lit a) -> a
-                _ -> error "Can only deal with Lit"
+
 blockHashesDefault :: Map.Map Int W256
-blockHashesDefault = Map.fromList [(x, litToW256 $ genBlockHash x) | x<- [1..256]]
+blockHashesDefault = Map.fromList [(x, forceLit $ genBlockHash x) | x<- [1..256]]
 
 data EVMToolOutput =
   EVMToolOutput
@@ -292,10 +294,10 @@ tests = testGroup "hevm"
   -- the return value to be the same
   , testGroup "contract-quickcheck-run"
     [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract) -> ioProperty $ do
-        -- let expr2 = OpContract [OpPush (Lit 0xa),OpCalldataload,OpPush (Lit 0x6),OpPush (Lit 0x9),OpPush (Lit 0x9),OpPush (Lit 0x8),OpPush (Lit 0x1),OpPush (Lit 0x7),OpPush (Lit 0xa),OpPush (Lit 0x9),OpCallcode,OpPush (Lit 0x8),OpJumpdest,OpPush (Lit 0x3),OpPush (Lit 0xa),OpPush (Lit 0x4),OpPush (Lit 0x1),OpPush (Lit 0x1),OpPush (Lit 0x4),OpPush (Lit 0x9),OpCalldataload,OpPush (Lit 0x8),OpPush (Lit 0x2),OpPush (Lit 0x7),OpPush (Lit 0xa),OpPush (Lit 0x1),OpCalldataload,OpPush (Lit 0x8),OpSwap 6,OpPush (Lit 0x6),OpPush (Lit 0x4),OpPush (Lit 0x6),OpPush (Lit 0x5),OpPush (Lit 0x5),OpPush (Lit 0x8),OpPush (Lit 0x8),OpCalldataload,OpPush (Lit 0x4),OpPush (Lit 0x3),OpPush (Lit 0x3),OpJumpdest,OpPush (Lit 0x2),OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0xa),OpPush (Lit 0x8),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0xa),OpPush (Lit 0x5),OpPush (Lit 0x9),OpPush (Lit 0x6),OpPush (Lit 0x6),OpPush (Lit 0x9),OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0x2),OpPush (Lit 0x3),OpPush (Lit 0x4),OpPush (Lit 0x6),OpPush (Lit 0x7),OpPush (Lit 0x8),OpPush (Lit 0x995),OpJumpi,OpAdd,OpPush (Lit 0x9),OpPush (Lit 0x3),OpPush (Lit 0x8),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0x6),OpPush (Lit 0x2),OpPush (Lit 0x8),OpPush (Lit 0x9),OpPush (Lit 0x4),OpPush (Lit 0x7),OpPush (Lit 0x3),OpPush (Lit 0x7),OpPush (Lit 0x6),OpPush (Lit 0x4),OpPush (Lit 0x9),OpDup 1,OpPush (Lit 0x5),OpPush (Lit 0x1),OpPush (Lit 0x1),OpJumpdest,OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0x9),OpPush (Lit 0x7),OpJumpdest]
         -- NOTE: By removing external calls and storage calls, we fuzz a LOT less
         --       It should work also when we have those inside. Removing for now.
         contrFixed <- fixContractJumps $ removeStorageExtcalls contr
+        -- let contrFixed = OpContract [OpPush (Lit 0xa),OpCalldataload,OpPush (Lit 0x6),OpPush (Lit 0x9),OpPush (Lit 0x9),OpPush (Lit 0x8),OpPush (Lit 0x1),OpPush (Lit 0x7),OpPush (Lit 0xa),OpPush (Lit 0x9),OpCallcode,OpPush (Lit 0x8),OpJumpdest,OpPush (Lit 0x3),OpPush (Lit 0xa),OpPush (Lit 0x4),OpPush (Lit 0x1),OpPush (Lit 0x1),OpPush (Lit 0x4),OpPush (Lit 0x9),OpCalldataload,OpPush (Lit 0x8),OpPush (Lit 0x2),OpPush (Lit 0x7),OpPush (Lit 0xa),OpPush (Lit 0x1),OpCalldataload,OpPush (Lit 0x8),OpSwap 6,OpPush (Lit 0x6),OpPush (Lit 0x4),OpPush (Lit 0x6),OpPush (Lit 0x5),OpPush (Lit 0x5),OpPush (Lit 0x8),OpPush (Lit 0x8),OpCalldataload,OpPush (Lit 0x4),OpPush (Lit 0x3),OpPush (Lit 0x3),OpJumpdest,OpPush (Lit 0x2),OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0xa),OpPush (Lit 0x8),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0xa),OpPush (Lit 0x5),OpPush (Lit 0x9),OpPush (Lit 0x6),OpPush (Lit 0x6),OpPush (Lit 0x9),OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0x2),OpPush (Lit 0x3),OpPush (Lit 0x4),OpPush (Lit 0x6),OpPush (Lit 0x7),OpPush (Lit 0x8),OpPush (Lit 0x995),OpJumpi,OpAdd,OpPush (Lit 0x9),OpPush (Lit 0x3),OpPush (Lit 0x8),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0x6),OpPush (Lit 0x2),OpPush (Lit 0x8),OpPush (Lit 0x9),OpPush (Lit 0x4),OpPush (Lit 0x7),OpPush (Lit 0x3),OpPush (Lit 0x7),OpPush (Lit 0x6),OpPush (Lit 0x4),OpPush (Lit 0x9),OpDup 1,OpPush (Lit 0x5),OpPush (Lit 0x1),OpPush (Lit 0x1),OpJumpdest,OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0x9),OpPush (Lit 0x7),OpJumpdest]
         putStrLn $ "Contract to run: " <> (show contrFixed)
         let lits = assemble $ getOpData contrFixed
             w8s = toW8fromLitB <$> lits
@@ -311,7 +313,7 @@ tests = testGroup "hevm"
                                  }
             sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
             fromAddr :: Addr
-            fromAddr = 0xC5ed5D9b9c957BE2baa01C16310Aa4d1f8bc8e6f -- corresponds to sk above
+            fromAddr = fromJust $ deriveAddr sk
             toAddr :: Addr
             toAddr = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
             alloc :: Map.Map Addr EVMToolAlloc
@@ -402,6 +404,8 @@ tests = testGroup "hevm"
           _ <- readProcess "./sanitize_trace.sh" [name] ""
           (Just evmtoolTraceOutput) <- JSON.decodeFileStrict (name ++ ".json") :: IO (Maybe EVMToolTraceOutput)
           traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.toTrace)
+          -- putStrLn $ "HEVM trace   : " <> show hevmTrace
+          -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.toTrace)
           assertEqual "Traces, gas, and result must match" traceOK True
           let resultOK = evmtoolTraceOutput.toOutput.output == hevmTraceResult.out
           if resultOK then
@@ -2526,10 +2530,10 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
 runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> ByteString -> Expr Buf -> IO (Maybe ((Expr Buf, [VMTrace], VMTraceResult)))
 runCodeWithTrace rpcinfo evmToolEnv alloc tx (fromAddr, toAddr) code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
   let origVM = vmForRuntimeCode code' calldata' evmToolEnv alloc tx (fromAddr, toAddr)
-  (res, vm) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) origVM
+  (res, (vm, traces)) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (origVM, [])
   pure $ case res of
     Left _ -> Nothing
-    Right b -> Just (b, vm._trace, vmres vm)
+    Right b -> Just (b, traces, vmres vm)
 
 vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> VM
 vmForRuntimeCode runtimecode calldata' evmToolEnv alloc tx (fromAddr, toAddr) =
@@ -3177,7 +3181,6 @@ bothM f (a, a') = do
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
 
-
 data VMTraceResult =
   VMTraceResult
   { out  :: ByteString
@@ -3234,62 +3237,52 @@ vmres vm =
      , gasUsed = gasUsed'
      }
 
+type TraceState = (VM, [VMTrace])
+
+execWithTrace :: StateT TraceState IO VMResult
+execWithTrace = do
+  _ <- runWithTrace
+  fromJust <$> use (_1 . result)
+
+runWithTrace :: StateT TraceState IO VM
+runWithTrace = do
+  -- This is just like `exec` except for every instruction evaluated,
+  -- we also increment a counter indexed by the current code location.
+  vm0 <- use _1
+  case vm0._result of
+    Nothing -> do
+      State.modify (\(a, b) -> (a, b ++ [vmtrace vm0]))
+      zoom _1 (State.state (runState exec1))
+      runWithTrace
+    Just _ -> pure vm0
+
 interpretWithTrace
   :: Fetch.Fetcher
   -> Stepper.Stepper a
-  -> StateT VM IO a
-interpretWithTrace fetcher = do
-  eval . Control.Monad.Operational.view
+  -> StateT TraceState IO a
+interpretWithTrace fetcher =
+  eval . Operational.view
 
   where
     eval
-      :: ProgramView Stepper.Action a
-      -> StateT VM IO a
+      :: Operational.ProgramView Stepper.Action a
+      -> StateT TraceState IO a
 
-    eval (Control.Monad.Operational.Return x) = do
-      -- vm <- State.get
-      -- let vm2 = vm { _trace = (_trace vm):(vmres vm) }
-      -- liftIO $ BS.hPut $ BS.toStrict $ JSON.encode $ out (vmres vm)
+    eval (Operational.Return x) =
       pure x
 
-    eval (action :>>= k) = do
-      vm <- State.get
+    eval (action Operational.:>>= k) =
       case action of
-        Stepper.Run -> do
-          -- Have we reached the final result of this action?
-          use result >>= \case
-            Just _ -> do
-              -- Yes, proceed with the next action.
-              interpretWithTrace fetcher (k vm)
-            Nothing -> do
-              State.modify (\a -> a { _trace = (vm._trace)++[vmtrace vm] })
-
-              -- No, keep performing the current action
-              State.state (runState exec1)
-              interpretWithTrace fetcher (Stepper.run >>= k)
-
-        -- Stepper wants to keep executing?
-        Stepper.Exec -> do
-          -- Have we reached the final result of this action?
-          use result >>= \case
-            Just r -> do
-              -- Yes, proceed with the next action.
-              interpretWithTrace fetcher (k r)
-            Nothing -> do
-              State.modify (\a -> a { _trace = (vm._trace)++[vmtrace vm] })
-
-              -- No, keep performing the current action
-              State.state (runState exec1)
-              interpretWithTrace fetcher (Stepper.exec >>= k)
+        Stepper.Exec ->
+          execWithTrace >>= interpretWithTrace fetcher . k
+        Stepper.Run ->
+          runWithTrace >>= interpretWithTrace fetcher . k
         Stepper.Wait q ->
           do m <- liftIO (fetcher q)
-             State.state (runState m) >> interpretWithTrace fetcher (k ())
+             zoom _1 (State.state (runState m)) >> interpretWithTrace fetcher (k ())
         Stepper.Ask _ ->
-          error "cannot make choices with this interpretWithTraceer"
-        Stepper.IOAct m ->
-          m >>= interpretWithTrace fetcher . k
-        Stepper.EVM m -> do
-          r <- State.state (runState m)
-          interpretWithTrace fetcher (k r)
-
-
+          error "cannot make choice in this interpreter"
+        Stepper.IOAct q ->
+          zoom _1 (StateT (runStateT q)) >>= interpretWithTrace fetcher . k
+        Stepper.EVM m ->
+          zoom _1 (State.state (runState m)) >>= interpretWithTrace fetcher . k

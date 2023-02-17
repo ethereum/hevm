@@ -97,10 +97,6 @@ txAccessMap :: Transaction -> Map Addr [W256]
 txAccessMap tx = ((Map.fromListWith (++)) . makeTups) tx.txAccessList
   where makeTups = map (\ale -> (ale.accessAddress , ale.accessStorageKeys ))
 
-ecrec :: W256 -> W256 -> W256 -> W256 -> Maybe Addr
-ecrec v r s e = num . word <$> EVM.Precompiled.execute 1 input 32
-  where input = BS.concat (word256Bytes <$> [e, v, r, s])
-
 -- Given chainID and Transaction, it recovers the address that sent it
 sender :: Int -> Transaction -> Maybe Addr
 sender chainId tx = ecrec v' tx.txR  tx.txS hash
@@ -113,15 +109,10 @@ sender chainId tx = ecrec v' tx.txR  tx.txS hash
 -- So we try 28 and try to recover & check if it's correct
 -- if it isn't correct, we need to use the other one
 sign :: Int -> Integer -> Transaction -> Transaction
-sign chainId sk tx = if sender chainId signed == EVM.Sign.deriveAddr sk then signed
-                                                                        else signed { txV = 28}
+sign chainId sk tx = tx { txV = num v, txR = r, txS = s}
   where
-    digest = digestFromByteString (word256Bytes $ keccak' $ signingData chainId tx)
-    (r, s, v) = EVM.Sign.sign (fromJust digest) sk
-    signed = tx { txR = r
-                , txS = s
-                , txV = v
-                }
+    hash = keccak' $ signingData chainId tx
+    (v, r, s) = EVM.Sign.sign hash sk
 
 signingData :: Int -> Transaction -> ByteString
 signingData chainId tx =

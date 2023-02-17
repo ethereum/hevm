@@ -108,7 +108,6 @@ data VM = VM
   , _keccakEqs      :: [Prop]
   , _allowFFI       :: Bool
   , _overrideCaller :: Maybe (Expr EWord)
-  , _trace          :: [VMTrace]
   }
   deriving (Show)
 
@@ -535,7 +534,6 @@ makeVm o =
   , _iterations = mempty
   , _allowFFI = o.vmoptAllowFFI
   , _overrideCaller = Nothing
-  , _trace = []
   }
 
 -- | Initialize empty contract with given code
@@ -1998,29 +1996,16 @@ cheatActions =
         \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
           [sk, hash] ->
             forceConcrete2 (sk, hash) "cannot sign symbolic data" $ \(sk', hash') -> let
-              digest = digestFromByteString (word256Bytes hash')
             in do
-              case digest of
-                Nothing -> vmError (BadCheatCode sig)
-                Just digest' -> do
-                  -- calculating the V value is pretty annoying if you
-                  -- don't have access to the full X/Y coords of the
-                  -- signature (which we don't get back from cryptonite).
-                  -- Luckily since we use a fixed nonce (to avoid the
-                  -- overhead of bringing randomness into the core EVM
-                  -- semantics), it would appear that every signature we
-                  -- produce has v == 28. Definitely a hack, and also bad
-                  -- for code that somehow depends on the value of v, but
-                  -- that seems acceptable for now.
-                  let (r,s,v) = Sign.sign digest' (toInteger sk')
-                      encoded = encodeAbiValue $
-                        AbiTuple (RegularVector.fromList
-                          [ AbiUInt 8 $ fromInteger $ toInteger v
-                          , AbiBytes 32 (word256Bytes r)
-                          , AbiBytes 32 (word256Bytes s)
-                          ])
-                  assign (state . returndata) (ConcreteBuf encoded)
-                  copyBytesToMemory (ConcreteBuf encoded) (Lit . num . BS.length $ encoded) (Lit 0) outOffset
+                let (v,r,s) = Sign.sign hash' (toInteger sk')
+                    encoded = encodeAbiValue $
+                      AbiTuple (RegularVector.fromList
+                        [ AbiUInt 8 $ num v
+                        , AbiBytes 32 (word256Bytes r)
+                        , AbiBytes 32 (word256Bytes s)
+                        ])
+                assign (state . returndata) (ConcreteBuf encoded)
+                copyBytesToMemory (ConcreteBuf encoded) (Lit . num . BS.length $ encoded) (Lit 0) outOffset
           _ -> vmError (BadCheatCode sig),
 
       action "addr(uint256)" $

@@ -115,6 +115,7 @@ defaultMaxCodeSize = 0xffffffff
 
 type ABIMethod = Text
 
+
 -- | Generate VeriOpts from UnitTestOptions
 makeVeriOpts :: UnitTestOptions -> VeriOpts
 makeVeriOpts opts =

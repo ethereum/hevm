@@ -777,4 +777,3 @@ data VMTrace =
 instance JSON.ToJSON VMTrace where
   toEncoding = JSON.genericToEncoding JSON.defaultOptions
 instance JSON.FromJSON VMTrace
-

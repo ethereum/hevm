@@ -1,7 +1,7 @@
 module EVM.Sign where
 
 import qualified Crypto.Hash as Crypto
-import Crypto.Hash (Digest)
+import Data.Maybe (fromMaybe)
 import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
 import Crypto.PubKey.ECC.Types (getCurveByName, CurveName(..), Point(..))
 import Crypto.PubKey.ECC.Generate (generateQ)
@@ -10,6 +10,8 @@ import EVM.ABI (encodeAbiValue, AbiValue (..))
 import qualified Data.ByteString   as BS
 import EVM.Types
 import EVM.Expr (exprToAddr)
+import EVM.Precompiled
+import Data.Word
 
 
 -- Given a secret key, generates the address
@@ -26,27 +28,45 @@ deriveAddr sk = case pubPoint of
           pubPoint = generateQ curve (num sk)
           encodeInt = encodeAbiValue . AbiUInt 256 . fromInteger
 
-
-sign :: (Digest Crypto.Keccak_256) -> Integer -> (W256, W256, W256)
-sign digest sk = (txR, txS, 27)
+sign :: W256 -> Integer -> (Word8, W256, W256)
+sign hash sk = (v, r, s)
   where
+    -- setup curve params
     curve = getCurveByName SEC_p256k1
     priv = PrivateKey curve sk
-    n = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141 :: Integer
-    lowS = if sign_s sig > n `div` 2 then n-(sign_s sig)
-                               else sign_s sig
-    sig = ethsign priv digest
-    txR = num $ sign_r sig
-    txS = num lowS
+    digest = fromMaybe
+      (error $ "Internal Error: could produce a digest from " <> show hash)
+      (Crypto.digestFromByteString (word256Bytes hash))
 
--- | We don't wanna introduce the machinery needed to sign with a random nonce,
--- so we just use the same nonce every time (420). This is obviusly very
+    -- sign message
+    sig = ethsign priv digest
+    r = num $ sign_r sig
+    s = num lowS
+
+    -- this is a little bit sad, but cryptonite doesn't give us back a v value
+    -- so we compute it by guessing one, and then seeing if that gives us the right answer from ecrecover
+    v = if ecrec 28 r s hash == deriveAddr sk
+        then 28
+        else 27
+
+    -- we always use the lower S value to conform with EIP2 (re: ECDSA transaction malleability)
+    -- https://eips.ethereum.org/EIPS/eip-2
+    secpOrder = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141 :: Integer
+    lowS = if sign_s sig > secpOrder `div` 2
+           then secpOrder - sign_s sig
+           else sign_s sig
+
+-- | We don't want to introduce the machinery needed to sign with a random nonce,
+-- so we just use the same nonce every time (420). This is obviously very
 -- insecure, but fine for testing purposes.
-ethsign :: PrivateKey -> Digest Crypto.Keccak_256 -> Signature
+ethsign :: PrivateKey -> Crypto.Digest Crypto.Keccak_256 -> Signature
 ethsign sk digest = go 420
   where
     go k = case signDigestWith k sk digest of
        Nothing  -> go (k + 1)
        Just sig -> sig
 
+ecrec :: W256 -> W256 -> W256 -> W256 -> Maybe Addr
+ecrec v r s e = num . word <$> EVM.Precompiled.execute 1 input 32
+  where input = BS.concat (word256Bytes <$> [e, v, r, s])
 
