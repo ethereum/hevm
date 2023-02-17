@@ -18,7 +18,6 @@ import Data.Time
 import System.Environment
 import qualified Data.Word
 import GHC.Generics
-import Test.ChasingBottoms
 import Numeric (showHex)
 
 import Prelude hiding (fail, LT, GT)
@@ -402,6 +401,7 @@ tests = testGroup "hevm"
           putStrLn $ "HEVM result: " <> (show hevmRes)
           putStrLn $ "evm result: " <> (show (evmTraceOutput.toOutput))
         else putStrLn "not successful"
+    ]
   -- These tests fuzz the simplifier by generating a random expression,
   -- applying some simplification rules, and then using the smt encoding to
   -- check that the simplified version is semantically equivalent to the

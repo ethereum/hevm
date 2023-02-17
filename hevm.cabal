@@ -291,7 +291,6 @@ common test-base
     json >=0.9,
     operational,
     ghc,
-    ChasingBottoms
 
 library test-utils
   import:
