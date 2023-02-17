@@ -41,7 +41,6 @@ import qualified Data.Aeson as JSON
 import Data.Aeson ((.:))
 import Data.ByteString.Char8 qualified as Char8
 
--- import qualified Control.Monad.Operational as Operational
 import Control.Monad.Operational (view, ProgramViewT(..), ProgramView)
 import Control.Monad.State.Strict (execState, runStateT, runState, evalStateT, StateT, liftIO, liftM, liftM2, liftM3, liftM4, liftM5, forM_, when, unless)
 import Control.Lens hiding (List, pre, (.>), re, op)
@@ -387,19 +386,22 @@ tests = testGroup "hevm"
                                        , "--trace" , "trace.json"
                                        , "--output.result", "result.json"
                                        ] ""
-          evmToolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
+          evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
           -- putStrLn $ "evm result:" <> (show evmResult)
-          let txName =  (((fromJust evmToolResult).receipts) !! 0).recTransactionHash
+          let txName =  (((fromJust evmtoolResult).receipts) !! 0).recTransactionHash
           putStrLn $ "TX name: " <> txName
           let name = "trace-0-" ++ txName ++ ".jsonl"
           _ <- readProcess "./sanitize_trace.sh" [name] ""
-          (Just evmTraceOutput) <- JSON.decodeFileStrict (name ++ ".json") :: IO (Maybe EVMToolTraceOutput)
-          ok <- compareTraces hevmTrace (evmTraceOutput.toTrace)
-          putStrLn $ "Traces, gas, and result match: " <> (show ok)
-          assertEqual "Traces, gas, and result must match" ok True
-
-          putStrLn $ "HEVM result: " <> (show hevmRes)
-          putStrLn $ "evm result: " <> (show (evmTraceOutput.toOutput))
+          (Just evmtoolTraceOutput) <- JSON.decodeFileStrict (name ++ ".json") :: IO (Maybe EVMToolTraceOutput)
+          traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.toTrace)
+          assertEqual "Traces, gas, and result must match" traceOK True
+          let resultOK = evmtoolTraceOutput.toOutput.output == hevmTraceResult.out
+          if resultOK then
+            putStrLn $ "HEVM & evmtool's outputs match: " <> (show evmtoolTraceOutput.toOutput.output)
+          else do
+            putStrLn $ "HEVM result: " <> (show hevmTraceResult.out)
+            putStrLn $ "evm result: " <> (show (evmtoolTraceOutput.toOutput.output))
+          assertEqual "HEVM & evmtool's outputs must match" resultOK True
         else putStrLn "not successful"
     ]
   -- These tests fuzz the simplifier by generating a random expression,
