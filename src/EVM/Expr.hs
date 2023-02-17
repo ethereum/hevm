@@ -261,7 +261,7 @@ readWord (Lit idx) b@(CopySlice (Lit srcOff) (Lit dstOff) (Lit size) src dst)
   | idx >= dstOff && idx + 32 <= dstOff + size = readWord (Lit $ srcOff + (idx - dstOff)) src
   -- the region we are trying to read is compeletely outside of the sliced reegion
   -- we check that there is no overflow and that addresses do not wrap around
-  | (idx >= dstOff + size || idx + 32 <= dstOff) && (dstOffset <= dstOffset + size) = readWord (Lit idx) dst
+  | (idx >= dstOff + size || idx + 32 <= dstOff) && (dstOff<= dstOff + size) = readWord (Lit idx) dst
   -- the region we are trying to read partially overlaps the sliced region
   | otherwise = readWordFromBytes (Lit idx) b
 readWord i b = readWordFromBytes i b
