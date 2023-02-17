@@ -81,7 +81,7 @@
           otool = "${pkgs.darwin.binutils.bintools}/bin/otool";
           install_name_tool = "${pkgs.darwin.binutils.bintools}/bin/install_name_tool";
         in if pkgs.stdenv.isLinux
-        then pkgs.haskell.lib.dontCheck hevmWrapped
+        then pkgs.haskell.lib.dontCheck hevmUnwrapped
         else pkgs.runCommand "stripNixRefs" {} ''
           mkdir -p $out/bin
           cp ${pkgs.haskell.lib.dontCheck hevmUnwrapped}/bin/hevm $out/bin/
