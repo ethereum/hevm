@@ -25,6 +25,7 @@ jobs:
           path: ./hevm-x86_64-macos
   linuxRelease:
     name: Create Release
+    needs: macosRelease
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
