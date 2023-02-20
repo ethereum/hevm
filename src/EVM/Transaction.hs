@@ -5,7 +5,6 @@ import Prelude hiding (Word)
 import qualified EVM
 import EVM (balance, initialContract)
 import EVM.FeeSchedule
-import EVM.Precompiled (execute)
 import EVM.RLP
 import EVM.Types
 import EVM.Expr (litAddr)
@@ -25,7 +24,6 @@ import qualified Data.ByteString   as BS
 import qualified Data.Map          as Map
 import Data.Word (Word64)
 
-import Crypto.Hash (digestFromByteString)
 import Numeric (showHex)
 
 data AccessListEntry = AccessListEntry {

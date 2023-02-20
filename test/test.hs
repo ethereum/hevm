@@ -41,6 +41,7 @@ import qualified Data.Aeson as JSON
 import Data.Aeson ((.:))
 import Data.ByteString.Char8 qualified as Char8
 
+import qualified Control.Monad (when)
 import qualified Control.Monad.Operational as Operational (view, ProgramViewT(..), ProgramView)
 import Control.Monad.State.Strict hiding (state)
 import Control.Monad.State.Strict qualified as State
@@ -81,6 +82,7 @@ import System.Process
 import qualified EVM.Transaction
 import EVM.Format (formatBinary)
 import EVM.Sign (deriveAddr)
+import GHC.IO.Exception (ExitCode(ExitSuccess))
 
 main :: IO ()
 main = defaultMain tests
@@ -292,7 +294,8 @@ tests = testGroup "hevm"
     [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract) -> ioProperty $ do
         -- NOTE: By removing external calls and storage calls, we fuzz a LOT less
         --       It should work also when we have those inside. Removing for now.
-        contrFixed <- fixContractJumps $ removeStorageExtcalls contr
+        contrFixed <- fixContractJumps $ removeExtcalls contr
+        -- contrFixed <- fixContractJumps  contr
         -- let contrFixed = OpContract [OpPush (Lit 0xa),OpCalldataload,OpPush (Lit 0x6),OpPush (Lit 0x9),OpPush (Lit 0x9),OpPush (Lit 0x8),OpPush (Lit 0x1),OpPush (Lit 0x7),OpPush (Lit 0xa),OpPush (Lit 0x9),OpCallcode,OpPush (Lit 0x8),OpJumpdest,OpPush (Lit 0x3),OpPush (Lit 0xa),OpPush (Lit 0x4),OpPush (Lit 0x1),OpPush (Lit 0x1),OpPush (Lit 0x4),OpPush (Lit 0x9),OpCalldataload,OpPush (Lit 0x8),OpPush (Lit 0x2),OpPush (Lit 0x7),OpPush (Lit 0xa),OpPush (Lit 0x1),OpCalldataload,OpPush (Lit 0x8),OpSwap 6,OpPush (Lit 0x6),OpPush (Lit 0x4),OpPush (Lit 0x6),OpPush (Lit 0x5),OpPush (Lit 0x5),OpPush (Lit 0x8),OpPush (Lit 0x8),OpCalldataload,OpPush (Lit 0x4),OpPush (Lit 0x3),OpPush (Lit 0x3),OpJumpdest,OpPush (Lit 0x2),OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0xa),OpPush (Lit 0x8),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0xa),OpPush (Lit 0x5),OpPush (Lit 0x9),OpPush (Lit 0x6),OpPush (Lit 0x6),OpPush (Lit 0x9),OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0x2),OpPush (Lit 0x3),OpPush (Lit 0x4),OpPush (Lit 0x6),OpPush (Lit 0x7),OpPush (Lit 0x8),OpPush (Lit 0x995),OpJumpi,OpAdd,OpPush (Lit 0x9),OpPush (Lit 0x3),OpPush (Lit 0x8),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0x6),OpPush (Lit 0x2),OpPush (Lit 0x8),OpPush (Lit 0x9),OpPush (Lit 0x4),OpPush (Lit 0x7),OpPush (Lit 0x3),OpPush (Lit 0x7),OpPush (Lit 0x6),OpPush (Lit 0x4),OpPush (Lit 0x9),OpDup 1,OpPush (Lit 0x5),OpPush (Lit 0x1),OpPush (Lit 0x1),OpJumpdest,OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0x9),OpPush (Lit 0x7),OpJumpdest]
         putStrLn $ "Contract to run: " <> (show contrFixed)
         let lits = assemble $ getOpData contrFixed
@@ -359,17 +362,19 @@ tests = testGroup "hevm"
                                       putStrLn $ "HEVM's gas   : " <> (show aGas)
                                       putStrLn $ "evmtool's gas: " <> (show bGas)
                                       else
-                                      putStrLn $ "Gas match   : " <> (show aGas)
-                  if aOp == bOp && aPc == bPc then
-                                      putStrLn $ (intToOpName aOp) <> " pc: " <> (show aPc)
-                                      else
+                                      -- putStrLn $ "Gas match   : " <> (show aGas)
+                                      return ()
+                  if aOp /= bOp || aPc /= bPc then
                                       putStrLn $ "HEVM: " <> (intToOpName aOp) <> " (pc " <> (show aPc) <> ") --- evmtool " <> (intToOpName bOp) <> " (pc " <> (show bPc) <> ")"
+                                      else
+                                      -- putStrLn $ (intToOpName aOp) <> " pc: " <> (show aPc)
+                                      return ()
                   if aStack /= bStack then do
                                       putStrLn "stacks don't match:"
                                       putStrLn $ "HEVM's stack   : " <> (show aStack)
                                       putStrLn $ "evmtool's stack: " <> (show bStack)
                                       else
-                                      putStrLn $ "Stacks match   : " <> (show aStack)
+                                      return ()
                   if aOp == bOp && aStack == bStack && aPc == bPc && aGas == bGas then go ax bx
                   else pure False
                 go a@(_:_) [] = do
@@ -384,7 +389,7 @@ tests = testGroup "hevm"
         a <- runCodeWithTrace Nothing evmToolEnv contrAlloc txn (fromAddress, toAddress) bitcode calldat
         if isJust a then do
           let (_, hevmTrace, hevmTraceResult) = fromJust a
-          _ <- readProcess "evm" [ "transition"
+          (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
                                        ,"--input.alloc" , "alloc.json"
                                        , "--input.env" , "env.json"
                                        , "--input.txs" , "txs.json"
@@ -393,6 +398,10 @@ tests = testGroup "hevm"
                                        , "--trace" , "trace.json"
                                        , "--output.result", "result.json"
                                        ] ""
+          Control.Monad.when (exitCode /= ExitSuccess) $ do
+                           putStrLn $ "evmtool exited with code " <> show exitCode
+                           putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
+                           putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
           evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
           let txName =  (((fromJust evmtoolResult).receipts) !! 0).recTransactionHash
           putStrLn $ "TX name: " <> txName
@@ -2757,139 +2766,152 @@ genEnd sz = oneof
    subWord = defaultWord (sz `div` 2)
    subEnd = genEnd (sz `div` 2)
 
-genContract :: Int -> Gen [Op]
-genContract n = vectorOf n genOne
+genPush :: Int -> Gen [Op]
+genPush n = vectorOf n onePush
   where
-  genOne :: Gen Op
-  genOne = frequency [
-    -- math ops
-    (200, frequency [
-        (1, pure OpAdd)
-      , (1, pure OpMul)
-      , (1, pure OpSub)
-      , (1, pure OpDiv)
-      , (1, pure OpSdiv)
-      , (1, pure OpMod)
-      , (1, pure OpSmod)
-      , (1, pure OpAddmod)
-      , (1, pure OpMulmod)
-      , (1, pure OpExp)
-      , (1, pure OpSignextend)
-      , (1, pure OpLt)
-      , (1, pure OpGt)
-      , (1, pure OpSlt)
-      , (1, pure OpSgt)
-      , (1, pure OpSha3)
-    ])
-    -- Comparison & binary ops
-    , (20, frequency [
-        (1, pure OpEq)
-      , (1, pure OpIszero)
-      , (1, pure OpAnd)
-      , (1, pure OpOr)
-      , (1, pure OpXor)
-      , (1, pure OpNot)
-      , (1, pure OpByte)
-      , (1, pure OpShl)
-      , (1, pure OpShr)
-      , (1, pure OpSar)
-    ])
-    -- calldata
-    , (10, pure OpCalldatacopy)
-    -- Get some info
-    , (100, frequency [
-        (10, pure OpAddress)
-      , (10, pure OpBalance)
-      , (10, pure OpOrigin)
-      , (10, pure OpCaller)
-      , (10, pure OpCallvalue)
-      , (10, pure OpCalldatasize)
-      , (10, pure OpCodesize)
-      , (10, pure OpGasprice)
-      , (10, pure OpReturndatasize)
-      , (10, pure OpReturndatacopy)
-      , (10, pure OpExtcodehash)
-      , (10, pure OpBlockhash)
-      , (10, pure OpCoinbase)
-      , (10, pure OpTimestamp)
-      , (10, pure OpNumber)
-      , (10, pure OpPrevRandao)
-      , (10, pure OpGaslimit)
-      , (10, pure OpChainid)
-      , (10, pure OpSelfbalance)
-      , (10, pure OpBaseFee)
-      , (10, pure OpPc)
-      , (10, pure OpMsize)
-      , (10, pure OpGas)
-      , (10, pure OpExtcodesize)
-      , (10, pure OpCodecopy)
-      , (10, pure OpExtcodecopy)
-    ])
-    -- memory manip
-    , (10, frequency [
-        (100, pure OpMload)
-      , (1, pure OpMstore)
-      , (1, pure OpMstore8)
-    ])
-    -- storage manip
-    , (1, frequency [
-        (1, pure OpSload)
-      , (4, pure OpSstore)
-    ])
-    -- Jumping around
-    , (70, frequency [
-          (1, pure OpJump)
-        , (10, pure OpJumpi)
-    ])
-    , (400, pure OpJumpdest)
-    -- calling out
-    , (1, frequency [
-        (1, pure OpStaticcall)
-      , (1, pure OpCall)
-      , (1, pure OpCallcode)
-      , (1, pure OpDelegatecall)
-      , (1, pure OpCreate)
-      , (1, pure OpCreate2)
-      , (1, pure OpSelfdestruct)
-    ])
-    -- manipulate stack
-    , (8800, frequency [
-        (1, pure OpPop)
-      , (30, pure OpCalldataload)
-      , (400, do
-          -- x <- arbitrary
-          x <- chooseInt (1, 10)
-          pure $ OpPush (Lit (fromIntegral x)))
-      , (1, do
-          x <- chooseInt (1, 10)
-          pure $ OpDup (fromIntegral x))
-      , (1, do
-          x <- chooseInt (1, 10)
-          pure $ OpSwap (fromIntegral x))
-    ])
-      -- End states
-    , (100, frequency [
-        (1, pure OpStop)
-      , (5, pure OpReturn)
-      , (10, pure OpRevert)
-    ])
-      -- , (1, do
-      --     x <- chooseInt (1, 10)
-      --     pure $ OpLog x)
-    -- , (1, OpUnknown Word8)
-    ]
+    onePush :: Gen Op
+    onePush  = frequency [ (1, do
+      p <- chooseInt (1, 10)
+      pure $ OpPush (Lit (fromIntegral p))) ]
+
+
+genContract :: Int -> Gen [Op]
+genContract n = do
+    y <- chooseInt (3, 6)
+    pushes <- genPush y
+    normalOps <- vectorOf n genOne
+    shouldReturn <- chooseEnum ((False, True))
+    let contr = pushes ++ normalOps
+    if shouldReturn then pure $ contr++[OpReturn]
+                    else pure $ contr
+  where
+    genOne :: Gen Op
+    genOne = frequency [
+      -- math ops
+      (200, frequency [
+          (1, pure OpAdd)
+        , (1, pure OpMul)
+        , (1, pure OpSub)
+        , (1, pure OpDiv)
+        , (1, pure OpSdiv)
+        , (1, pure OpMod)
+        , (1, pure OpSmod)
+        , (1, pure OpAddmod)
+        , (1, pure OpMulmod)
+        , (1, pure OpExp)
+        , (1, pure OpSignextend)
+        , (1, pure OpLt)
+        , (1, pure OpGt)
+        , (1, pure OpSlt)
+        , (1, pure OpSgt)
+        , (1, pure OpSha3)
+      ])
+      -- Comparison & binary ops
+      , (20, frequency [
+          (1, pure OpEq)
+        , (1, pure OpIszero)
+        , (1, pure OpAnd)
+        , (1, pure OpOr)
+        , (1, pure OpXor)
+        , (1, pure OpNot)
+        , (1, pure OpByte)
+        , (1, pure OpShl)
+        , (1, pure OpShr)
+        , (1, pure OpSar)
+      ])
+      -- calldata
+      , (10, pure OpCalldatacopy)
+      -- Get some info
+      , (100, frequency [
+          (10, pure OpAddress)
+        , (10, pure OpBalance)
+        , (10, pure OpOrigin)
+        , (10, pure OpCaller)
+        , (10, pure OpCallvalue)
+        , (10, pure OpCalldatasize)
+        , (10, pure OpCodesize)
+        , (10, pure OpGasprice)
+        , (10, pure OpReturndatasize)
+        , (10, pure OpReturndatacopy)
+        , (10, pure OpExtcodehash)
+        , (10, pure OpBlockhash)
+        , (10, pure OpCoinbase)
+        , (10, pure OpTimestamp)
+        , (10, pure OpNumber)
+        , (10, pure OpPrevRandao)
+        , (10, pure OpGaslimit)
+        , (10, pure OpChainid)
+        , (10, pure OpSelfbalance)
+        , (10, pure OpBaseFee)
+        , (10, pure OpPc)
+        , (10, pure OpMsize)
+        , (10, pure OpGas)
+        , (10, pure OpExtcodesize)
+        , (10, pure OpCodecopy)
+        , (10, pure OpExtcodecopy)
+      ])
+      -- memory manip
+      , (10, frequency [
+          (100, pure OpMload)
+        , (1, pure OpMstore)
+        , (1, pure OpMstore8)
+      ])
+      -- storage manip
+      , (1, frequency [
+          (1, pure OpSload)
+        , (4, pure OpSstore)
+      ])
+      -- Jumping around
+      , (70, frequency [
+            (1, pure OpJump)
+          , (10, pure OpJumpi)
+      ])
+      , (400, pure OpJumpdest)
+      -- calling out
+      , (1, frequency [
+          (1, pure OpStaticcall)
+        , (1, pure OpCall)
+        , (1, pure OpCallcode)
+        , (1, pure OpDelegatecall)
+        , (1, pure OpCreate)
+        , (1, pure OpCreate2)
+        , (1, pure OpSelfdestruct)
+      ])
+      -- manipulate stack
+      , (400, frequency [
+          (1, pure OpPop)
+        , (30, pure OpCalldataload)
+        , (400, do
+            -- x <- arbitrary
+            x <- chooseInt (1, 10)
+            pure $ OpPush (Lit (fromIntegral x)))
+        , (1, do
+            x <- chooseInt (1, 10)
+            pure $ OpDup (fromIntegral x))
+        , (1, do
+            x <- chooseInt (1, 10)
+            pure $ OpSwap (fromIntegral x))
+      ])
+        -- End states
+      , (100, frequency [
+          (1, pure OpStop)
+        , (5, pure OpReturn)
+        , (10, pure OpRevert)
+      ])
+        -- , (1, do
+        --     x <- chooseInt (1, 10)
+        --     pure $ OpLog x)
+      -- , (1, OpUnknown Word8)
+      ]
 randItem :: [a] -> IO a
 randItem = generate . Test.QuickCheck.elements
 
 
-removeStorageExtcalls :: OpContract -> OpContract
-removeStorageExtcalls (OpContract ops) = OpContract (filter (noStorageNoExtcalls) ops)
+removeExtcalls :: OpContract -> OpContract
+removeExtcalls (OpContract ops) = OpContract (filter (noStorageNoExtcalls) ops)
   where
     noStorageNoExtcalls :: Op -> Bool
     noStorageNoExtcalls o = case o of
-                               -- Storage
-                               OpSload -> False
-                               OpSstore -> False
                                -- Extrenal info functions
                                OpExtcodecopy -> False
                                OpExtcodehash -> False

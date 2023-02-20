@@ -29,6 +29,7 @@ import Data.DoubleWord.TH
 import Data.Maybe (fromMaybe)
 import Numeric (readHex, showHex)
 import Options.Generic
+import EVM.Hexdump (paddedShowHex)
 import Control.Arrow ((>>>))
 import Control.Monad
 
@@ -472,7 +473,7 @@ instance JSON.FromJSON ByteString where
   parseJSON _ = mzero
 
 instance JSON.ToJSON ByteString where
-  toJSON x = JSON.String (Text.pack $ "0x" ++ (concatMap (`showHex` "") (BS.unpack x)))
+  toJSON x = JSON.String (Text.pack $ "0x" ++ (concatMap (paddedShowHex 2) . BS.unpack $ x))
 
 newtype Addr = Addr { addressWord160 :: Word160 }
   deriving
