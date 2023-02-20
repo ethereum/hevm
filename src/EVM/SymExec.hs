@@ -51,6 +51,10 @@ data ProofResult a b c = Qed a | Cex b | SMTTimeout c | SMTError c String
 type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End)
 type EquivResult = ProofResult () (SMTCex) ()
 
+isTimeout :: ProofResult a b c -> Bool
+isTimeout (SMTTimeout _) = True
+isTimeout _ = False
+
 isCex :: ProofResult a b c -> Bool
 isCex (Cex _) = True
 isCex _ = False
@@ -58,20 +62,6 @@ isCex _ = False
 isQed :: ProofResult a b c -> Bool
 isQed (Qed _) = True
 isQed _ = False
-
-isTimeout :: ProofResult a b c -> Bool
-isTimeout (SMTTimeout _) = True
-isTimeout _ = False
-
-sameCnstr :: ProofResult a b c -> ProofResult a b c -> Bool
-sameCnstr a e = checkCnstr a e
-  where
-    checkCnstr x y = case (x, y) of
-      (Qed _, Qed _) -> True
-      (Cex _, Cex _) -> True
-      (SMTTimeout _, SMTTimeout _) -> True
-      (SMTError {}, SMTError {}) -> True
-      _ -> False
 
 data VeriOpts = VeriOpts
   { simp :: Bool
