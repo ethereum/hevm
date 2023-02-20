@@ -50,7 +50,7 @@ import Data.Vector.Storable qualified as Vector
 import Data.Vector.Storable.Mutable qualified as Vector
 import Data.Word (Word8, Word32, Word64)
 
-import Crypto.Hash (Digest, SHA256, RIPEMD160, digestFromByteString)
+import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
 import Crypto.Number.ModArithmetic (expFast)
 import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
@@ -1730,11 +1730,11 @@ finalize = do
   blockReward  <- num . (.r_block) <$> (use (block . schedule))
   gasPrice     <- use (tx . gasprice)
   priorityFee  <- use (tx . txPriorityFee)
-  gasLimit     <- use (tx . txgaslimit)
+  gaslimit     <- use (tx . txgaslimit)
   gasRemaining <- use (state . gas)
 
   let
-    gasUsed      = gasLimit - gasRemaining
+    gasUsed      = gaslimit - gasRemaining
     cappedRefund = min (quot gasUsed 5) (num sumRefunds)
     originPay    = (num $ gasRemaining + cappedRefund) * gasPrice
 

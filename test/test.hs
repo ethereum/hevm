@@ -42,13 +42,9 @@ import Data.Aeson ((.:))
 import Data.ByteString.Char8 qualified as Char8
 
 import qualified Control.Monad.Operational as Operational (view, ProgramViewT(..), ProgramView)
-
 import Control.Monad.State.Strict hiding (state)
 import Control.Monad.State.Strict qualified as State
-
--- import Control.Monad.State.Strict (execState, runStateT, runState, evalStateT, StateT, liftIO, liftM2, liftM3, liftM4, liftM5, forM_, when, unless)
 import Control.Lens hiding (List, pre, (.>), re, op)
--- import qualified Control.Monad.State.Class as State
 
 import qualified Data.Vector as Vector
 import Data.String.Here
@@ -312,13 +308,13 @@ tests = testGroup "hevm"
                                  , nonce = 0xac
                                  }
             sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
-            fromAddr :: Addr
-            fromAddr = fromJust $ deriveAddr sk
-            toAddr :: Addr
-            toAddr = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
+            fromAddress :: Addr
+            fromAddress = fromJust $ deriveAddr sk
+            toAddress :: Addr
+            toAddress = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
             alloc :: Map.Map Addr EVMToolAlloc
-            alloc = Map.fromList ([ (fromAddr, walletAlloc), (toAddr, contrAlloc)])
-            tx = EVM.Transaction.Transaction
+            alloc = Map.fromList ([ (fromAddress, walletAlloc), (toAddress, contrAlloc)])
+            txn = EVM.Transaction.Transaction
               { txData     = bitcode  -- set calldata the code itself, a hack
               , txGasLimit = 0xfffffff
               , txGasPrice = Just 1
@@ -343,7 +339,7 @@ tests = testGroup "hevm"
                              , _schedule    =  FeeSchedule.berlin
                              , _blockHashes =  blockHashesDefault
                              }
-            txs = [EVM.Transaction.sign 1 sk tx] -- "1" because of chainId
+            txs = [EVM.Transaction.sign 1 sk txn] -- "1" because of chainId
             compareTraces :: [VMTrace] -> [EVMToolTrace] -> IO (Bool)
             compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
               where
@@ -385,7 +381,7 @@ tests = testGroup "hevm"
         JSON.encodeFile "txs.json" txs
         JSON.encodeFile "alloc.json" alloc
         JSON.encodeFile "env.json" evmToolEnv
-        a <- runCodeWithTrace Nothing evmToolEnv contrAlloc tx (fromAddr, toAddr) bitcode calldat
+        a <- runCodeWithTrace Nothing evmToolEnv contrAlloc txn (fromAddress, toAddress) bitcode calldat
         if isJust a then do
           let (_, hevmTrace, hevmTraceResult) = fromJust a
           _ <- readProcess "evm" [ "transition"
@@ -401,7 +397,7 @@ tests = testGroup "hevm"
           let txName =  (((fromJust evmtoolResult).receipts) !! 0).recTransactionHash
           putStrLn $ "TX name: " <> txName
           let name = "trace-0-" ++ txName ++ ".jsonl"
-          _ <- readProcess "./sanitize_trace.sh" [name] ""
+          _ <- readProcess "./convert_trace_to_json.sh" [name] ""
           (Just evmtoolTraceOutput) <- JSON.decodeFileStrict (name ++ ".json") :: IO (Maybe EVMToolTraceOutput)
           traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.toTrace)
           -- putStrLn $ "HEVM trace   : " <> show hevmTrace
@@ -2528,36 +2524,36 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
 -- | Takes a runtime code and calls it with the provided calldata
 -- TODO: take code & calldata out from EVMToolAlloc and EVM.Transaction
 runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> ByteString -> Expr Buf -> IO (Maybe ((Expr Buf, [VMTrace], VMTraceResult)))
-runCodeWithTrace rpcinfo evmToolEnv alloc tx (fromAddr, toAddr) code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
-  let origVM = vmForRuntimeCode code' calldata' evmToolEnv alloc tx (fromAddr, toAddr)
-  (res, (vm, traces)) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (origVM, [])
+runCodeWithTrace rpcinfo evmToolEnv alloc txn (fromAddr, toAddress) code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
+  let origVM = vmForRuntimeCode code' calldata' evmToolEnv alloc txn (fromAddr, toAddress)
+  (res, (vm, trace)) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (origVM, [])
   pure $ case res of
     Left _ -> Nothing
-    Right b -> Just (b, traces, vmres vm)
+    Right b -> Just (b, trace, vmres vm)
 
 vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> VM
-vmForRuntimeCode runtimecode calldata' evmToolEnv alloc tx (fromAddr, toAddr) =
+vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress) =
   let contr = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
       contrWithBal = contr { _balance = alloc.balance }
   in
   (makeVm $ VMOpts
     { vmoptContract = contrWithBal
     , vmoptCalldata = mempty
-    , vmoptValue = Lit tx.txValue
+    , vmoptValue = Lit txn.txValue
     , vmoptStorageBase = Concrete
-    , vmoptAddress =  toAddr
+    , vmoptAddress =  toAddress
     , vmoptCaller = Expr.litAddr fromAddr
     , vmoptOrigin = fromAddr
     , vmoptCoinbase = evmToolEnv._coinbase
     , vmoptNumber = evmToolEnv._number
     , vmoptTimestamp = evmToolEnv._timestamp
-    , vmoptGasprice = fromJust tx.txGasPrice
-    , vmoptGas = tx.txGasLimit - fromIntegral (EVM.Transaction.txGasCost evmToolEnv._schedule tx)
-    , vmoptGaslimit = tx.txGasLimit
+    , vmoptGasprice = fromJust txn.txGasPrice
+    , vmoptGas = txn.txGasLimit - fromIntegral (EVM.Transaction.txGasCost evmToolEnv._schedule txn)
+    , vmoptGaslimit = txn.txGasLimit
     , vmoptBlockGaslimit = evmToolEnv._gasLimit
     , vmoptPrevRandao = evmToolEnv._prevRandao
     , vmoptBaseFee = evmToolEnv._baseFee
-    , vmoptPriorityFee = fromJust tx.txMaxPriorityFeeGas
+    , vmoptPriorityFee = fromJust txn.txMaxPriorityFeeGas
     , vmoptMaxCodeSize = evmToolEnv._maxCodeSize
     , vmoptSchedule = evmToolEnv._schedule
     , vmoptChainId = 1
