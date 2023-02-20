@@ -292,12 +292,10 @@ tests = testGroup "hevm"
   -- the return value to be the same
   , testGroup "contract-quickcheck-run"
     [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract) -> ioProperty $ do
-        -- NOTE: By removing external calls and storage calls, we fuzz a LOT less
-        --       It should work also when we have those inside. Removing for now.
+        -- NOTE: By removing external calls, we fuzz less
+        --       It should work also when we external calls. Removing for now.
         contrFixed <- fixContractJumps $ removeExtcalls contr
-        -- contrFixed <- fixContractJumps  contr
-        -- let contrFixed = OpContract [OpPush (Lit 0xa),OpCalldataload,OpPush (Lit 0x6),OpPush (Lit 0x9),OpPush (Lit 0x9),OpPush (Lit 0x8),OpPush (Lit 0x1),OpPush (Lit 0x7),OpPush (Lit 0xa),OpPush (Lit 0x9),OpCallcode,OpPush (Lit 0x8),OpJumpdest,OpPush (Lit 0x3),OpPush (Lit 0xa),OpPush (Lit 0x4),OpPush (Lit 0x1),OpPush (Lit 0x1),OpPush (Lit 0x4),OpPush (Lit 0x9),OpCalldataload,OpPush (Lit 0x8),OpPush (Lit 0x2),OpPush (Lit 0x7),OpPush (Lit 0xa),OpPush (Lit 0x1),OpCalldataload,OpPush (Lit 0x8),OpSwap 6,OpPush (Lit 0x6),OpPush (Lit 0x4),OpPush (Lit 0x6),OpPush (Lit 0x5),OpPush (Lit 0x5),OpPush (Lit 0x8),OpPush (Lit 0x8),OpCalldataload,OpPush (Lit 0x4),OpPush (Lit 0x3),OpPush (Lit 0x3),OpJumpdest,OpPush (Lit 0x2),OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0xa),OpPush (Lit 0x8),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0xa),OpPush (Lit 0x5),OpPush (Lit 0x9),OpPush (Lit 0x6),OpPush (Lit 0x6),OpPush (Lit 0x9),OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0x2),OpPush (Lit 0x3),OpPush (Lit 0x4),OpPush (Lit 0x6),OpPush (Lit 0x7),OpPush (Lit 0x8),OpPush (Lit 0x995),OpJumpi,OpAdd,OpPush (Lit 0x9),OpPush (Lit 0x3),OpPush (Lit 0x8),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0x6),OpPush (Lit 0x2),OpPush (Lit 0x8),OpPush (Lit 0x9),OpPush (Lit 0x4),OpPush (Lit 0x7),OpPush (Lit 0x3),OpPush (Lit 0x7),OpPush (Lit 0x6),OpPush (Lit 0x4),OpPush (Lit 0x9),OpDup 1,OpPush (Lit 0x5),OpPush (Lit 0x1),OpPush (Lit 0x1),OpJumpdest,OpPush (Lit 0x7),OpPush (Lit 0x5),OpPush (Lit 0x3),OpPush (Lit 0x9),OpPush (Lit 0x7),OpJumpdest]
-        putStrLn $ "Contract to run: " <> (show contrFixed)
+        -- putStrLn $ "Contract to run: " <> (show contrFixed)
         let lits = assemble $ getOpData contrFixed
             w8s = toW8fromLitB <$> lits
             bitcode = (BS.pack $ Vector.toList w8s)
@@ -369,12 +367,10 @@ tests = testGroup "hevm"
                                       else
                                       -- putStrLn $ (intToOpName aOp) <> " pc: " <> (show aPc)
                                       return ()
-                  if aStack /= bStack then do
+                  Control.Monad.when (aStack /= bStack) $ do
                                       putStrLn "stacks don't match:"
                                       putStrLn $ "HEVM's stack   : " <> (show aStack)
                                       putStrLn $ "evmtool's stack: " <> (show bStack)
-                                      else
-                                      return ()
                   if aOp == bOp && aStack == bStack && aPc == bPc && aGas == bGas then go ax bx
                   else pure False
                 go a@(_:_) [] = do
@@ -404,7 +400,6 @@ tests = testGroup "hevm"
                            putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
           evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
           let txName =  (((fromJust evmtoolResult).receipts) !! 0).recTransactionHash
-          putStrLn $ "TX name: " <> txName
           let name = "trace-0-" ++ txName ++ ".jsonl"
           _ <- readProcess "./convert_trace_to_json.sh" [name] ""
           (Just evmtoolTraceOutput) <- JSON.decodeFileStrict (name ++ ".json") :: IO (Maybe EVMToolTraceOutput)
@@ -416,6 +411,7 @@ tests = testGroup "hevm"
           if resultOK then
             putStrLn $ "HEVM & evmtool's outputs match: " <> (show evmtoolTraceOutput.toOutput.output)
           else do
+            putStrLn $ "Name of trace file: " <> name
             putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
             T.putStrLn $ "HEVM result: " <> (formatBinary hevmTraceResult.out)
             T.putStrLn $ "evm result : " <> (formatBinary evmtoolTraceOutput.toOutput.output)
@@ -2779,11 +2775,11 @@ genContract :: Int -> Gen [Op]
 genContract n = do
     y <- chooseInt (3, 6)
     pushes <- genPush y
-    normalOps <- vectorOf n genOne
-    shouldReturn <- chooseEnum ((False, True))
+    normalOps <- vectorOf (5*n) genOne
+    addReturn <- chooseInt (0, 10)
     let contr = pushes ++ normalOps
-    if shouldReturn then pure $ contr++[OpReturn]
-                    else pure $ contr
+    if addReturn < 10 then pure $ contr++[OpPush (Lit 0x40), OpPush (Lit 0x0), OpReturn]
+                      else pure contr
   where
     genOne :: Gen Op
     genOne = frequency [
@@ -2807,7 +2803,7 @@ genContract n = do
         , (1, pure OpSha3)
       ])
       -- Comparison & binary ops
-      , (20, frequency [
+      , (200, frequency [
           (1, pure OpEq)
         , (1, pure OpIszero)
         , (1, pure OpAnd)
@@ -2851,22 +2847,21 @@ genContract n = do
         , (10, pure OpExtcodecopy)
       ])
       -- memory manip
-      , (10, frequency [
-          (100, pure OpMload)
-        , (1, pure OpMstore)
+      , (400, frequency [
+          (2, pure OpMload)
+        , (10, pure OpMstore)
         , (1, pure OpMstore8)
       ])
       -- storage manip
-      , (1, frequency [
+      , (100, frequency [
           (1, pure OpSload)
-        , (4, pure OpSstore)
+        , (1, pure OpSstore)
       ])
       -- Jumping around
-      , (70, frequency [
+      , (20, frequency [
             (1, pure OpJump)
           , (10, pure OpJumpi)
       ])
-      , (400, pure OpJumpdest)
       -- calling out
       , (1, frequency [
           (1, pure OpStaticcall)
@@ -2878,30 +2873,28 @@ genContract n = do
         , (1, pure OpSelfdestruct)
       ])
       -- manipulate stack
-      , (400, frequency [
+      , (2000, frequency [
           (1, pure OpPop)
         , (30, pure OpCalldataload)
         , (400, do
             -- x <- arbitrary
-            x <- chooseInt (1, 10)
+            large <- chooseInt (0, 100)
+            x <- if large == 0 then chooseBoundedIntegral (0::W256, 2^256-1)
+                     else chooseBoundedIntegral (0, 10)
             pure $ OpPush (Lit (fromIntegral x)))
-        , (1, do
+        , (10, do
             x <- chooseInt (1, 10)
             pure $ OpDup (fromIntegral x))
-        , (1, do
+        , (10, do
             x <- chooseInt (1, 10)
             pure $ OpSwap (fromIntegral x))
       ])
-        -- End states
-      , (100, frequency [
-          (1, pure OpStop)
-        , (5, pure OpReturn)
-        , (10, pure OpRevert)
-      ])
-        -- , (1, do
-        --     x <- chooseInt (1, 10)
-        --     pure $ OpLog x)
-      -- , (1, OpUnknown Word8)
+      -- End states
+      -- , (1, frequency [
+      --    (1, pure OpStop)
+      --  , (10, pure OpReturn)
+      --  , (10, pure OpRevert)
+      -- ])
       ]
 randItem :: [a] -> IO a
 randItem = generate . Test.QuickCheck.elements
