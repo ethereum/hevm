@@ -60,7 +60,7 @@ import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
 -- | EVM failure modes
 data EVMError
   = BalanceTooLow W256 W256
-  | InvalidOpcode Word8
+  | UnrecognizedOpcode Word8
   | SelfDestruct
   | StackUnderrun
   | BadJumpDestination
@@ -1331,7 +1331,7 @@ exec1 = do
             _ -> underrun
 
         xxx ->
-          vmError (EVM.InvalidOpcode xxx)
+          vmError (EVM.UnrecognizedOpcode xxx)
 
 transfer :: Addr -> Addr -> W256 -> EVM ()
 transfer xFrom xTo xValue =

@@ -121,7 +121,7 @@ data EType
 
 -- Failure states of the Expr AST
 data ExprError
-  = InvalidOpcode
+  = UnrecognizedOpcode
   | IllegalOverflow
   | StackLimitExceeded
   | InvalidMemoryAccess

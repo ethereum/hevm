@@ -358,7 +358,7 @@ runExpr = do
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
     Just (VMSuccess buf) -> Return asserts buf vm._env._storage
     Just (VMFailure e) -> case e of
-      EVM.InvalidOpcode _ -> Failure asserts EVM.Types.InvalidOpcode
+      EVM.UnrecognizedOpcode _ -> Failure asserts EVM.Types.UnrecognizedOpcode
       EVM.IllegalOverflow -> Failure asserts EVM.Types.IllegalOverflow
       EVM.StackLimitExceeded -> Failure asserts EVM.Types.StackLimitExceeded
       EVM.InvalidMemoryAccess -> Failure asserts EVM.Types.InvalidMemoryAccess

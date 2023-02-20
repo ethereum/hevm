@@ -371,7 +371,7 @@ contractPathPart x = T.split (== ':') x !! 0
 
 prettyError :: ExprError -> String
 prettyError= \case
-  EVM.Types.InvalidOpcode -> "Invalid Opcode"
+  EVM.Types.UnrecognizedOpcode -> "Unrecognized Opcode"
   EVM.Types.IllegalOverflow -> "Illegal Overflow"
   EVM.Types.SelfDestruct -> "Self Destruct"
   EVM.Types.StackLimitExceeded -> "Stack limit exceeded"

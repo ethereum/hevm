@@ -1,4 +1,4 @@
-{-# Language NumericUnderscores #-}
+{-# LanguageNumericUnderscores #-}
 {-# Language QuasiQuotes #-}
 {-# Language DataKinds #-}
 {-# Language DuplicateRecordFields #-}
@@ -296,10 +296,11 @@ tests = testGroup "hevm"
         --       It should work also when we external calls. Removing for now.
         contrFixed <- fixContractJumps $ removeExtcalls contr
         -- putStrLn $ "Contract to run: " <> (show contrFixed)
+        txDataRaw <- generate $ sized $ \n -> vectorOf n $ chooseInt (0,255)
         let lits = assemble $ getOpData contrFixed
             w8s = toW8fromLitB <$> lits
             bitcode = (BS.pack $ Vector.toList w8s)
-            calldat = ConcreteBuf bitcode -- set calldata the code itself, a hack
+            txData = BS.pack $ map toEnum txDataRaw
             contrAlloc = EVMToolAlloc{ balance = 0xa493d65e20984bc
                                 , code = bitcode
                                 , nonce = 0x48
@@ -316,7 +317,7 @@ tests = testGroup "hevm"
             alloc :: Map.Map Addr EVMToolAlloc
             alloc = Map.fromList ([ (fromAddress, walletAlloc), (toAddress, contrAlloc)])
             txn = EVM.Transaction.Transaction
-              { txData     = bitcode  -- set calldata the code itself, a hack
+              { txData     = txData
               , txGasLimit = 0xfffffff
               , txGasPrice = Just 1
               , txNonce    = 172
@@ -382,7 +383,7 @@ tests = testGroup "hevm"
         JSON.encodeFile "txs.json" txs
         JSON.encodeFile "alloc.json" alloc
         JSON.encodeFile "env.json" evmToolEnv
-        a <- runCodeWithTrace Nothing evmToolEnv contrAlloc txn (fromAddress, toAddress) bitcode calldat
+        a <- runCodeWithTrace Nothing evmToolEnv contrAlloc txn (fromAddress, toAddress) bitcode
         if isJust a then do
           let (_, hevmTrace, hevmTraceResult) = fromJust a
           (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
@@ -2528,10 +2529,11 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
     Right b -> Just b
 
 -- | Takes a runtime code and calls it with the provided calldata
--- TODO: take code & calldata out from EVMToolAlloc and EVM.Transaction
-runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> ByteString -> Expr Buf -> IO (Maybe ((Expr Buf, [VMTrace], VMTraceResult)))
-runCodeWithTrace rpcinfo evmToolEnv alloc txn (fromAddr, toAddress) code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
+--   Uses evmtool's alloc and transaction to set up the VM correctly
+runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> ByteString -> IO (Maybe ((Expr Buf, [VMTrace], VMTraceResult)))
+runCodeWithTrace rpcinfo evmToolEnv alloc txn (fromAddr, toAddress) code' = withSolvers Z3 0 Nothing $ \solvers -> do
   let origVM = vmForRuntimeCode code' calldata' evmToolEnv alloc txn (fromAddr, toAddress)
+      calldata' = ConcreteBuf txn.txData
   (res, (vm, trace)) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (origVM, [])
   pure $ case res of
     Left _ -> Nothing
@@ -2748,7 +2750,7 @@ genName = fmap (T.pack . ("esc_" <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
- [ pure $ Failure [] EVM.Types.InvalidOpcode
+ [ pure $ Failure [] EVM.Types.UnrecognizedOpcode
  , pure $ Failure [] EVM.Types.IllegalOverflow
  , pure $ Failure [] EVM.Types.SelfDestruct
  ]
@@ -2817,7 +2819,7 @@ genContract n = do
         , (1, pure OpSar)
       ])
       -- calldata
-      , (10, pure OpCalldatacopy)
+      , (300, pure OpCalldatacopy)
       -- Get some info
       , (100, frequency [
           (10, pure OpAddress)
@@ -2874,7 +2876,7 @@ genContract n = do
         , (1, pure OpSelfdestruct)
       ])
       -- manipulate stack
-      , (2000, frequency [
+      , (13000, frequency [
           (1, pure OpPop)
         , (30, pure OpCalldataload)
         , (400, do

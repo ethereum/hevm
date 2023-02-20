@@ -28,7 +28,7 @@
 -- OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 --
 
-module EVM.Hexdump (prettyHex, simpleHex, paddedShowHex, simpleHexNoGap) where
+module EVM.Hexdump (prettyHex, simpleHex, paddedShowHex) where
 
 import Data.ByteString                       (ByteString)
 import qualified Data.ByteString       as B  (length, unpack)
@@ -127,6 +127,3 @@ group n
   where
     go [] = Nothing
     go xs = Just (splitAt n xs)
-
-simpleHexNoGap :: ByteString -> String
-simpleHexNoGap = concatMap (paddedShowHex byteWidth) . B.unpack
