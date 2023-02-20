@@ -408,8 +408,9 @@ tests = testGroup "hevm"
           -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.toTrace)
           assertEqual "Traces, gas, and result must match" traceOK True
           let resultOK = evmtoolTraceOutput.toOutput.output == hevmTraceResult.out
-          if resultOK then
+          if resultOK then do
             putStrLn $ "HEVM & evmtool's outputs match: " <> (show evmtoolTraceOutput.toOutput.output)
+            System.Directory.removeFile name
           else do
             putStrLn $ "Name of trace file: " <> name
             putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
