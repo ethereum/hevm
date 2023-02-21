@@ -137,6 +137,7 @@
               solc
               mdbook
               yarn
+              go-ethereum
               haskellPackages.cabal-install
               haskellPackages.haskell-language-server
             ];
