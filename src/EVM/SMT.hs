@@ -411,7 +411,6 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   )
 
   ; buffers
-  ; (declare-fun bufLength (Buf) Word)
   (define-const emptyBuf Buf ((as const Buf) #b00000000))
 
   (define-fun readWord ((idx Word) (buf Buf)) Word
