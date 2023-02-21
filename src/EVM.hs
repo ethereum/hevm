@@ -18,6 +18,7 @@ import EVM.Op
 import EVM.Precompiled qualified
 import EVM.Solidity
 import EVM.Types hiding (IllegalOverflow, Error)
+import EVM.Sign qualified
 
 import Control.Lens hiding (op, (:<), (|>), (.>))
 import Control.Monad.State.Strict hiding (state)
@@ -49,12 +50,10 @@ import Data.Vector.Storable.Mutable qualified as Vector
 import Data.Word (Word8, Word32, Word64)
 import Options.Generic as Options
 
-import Crypto.Hash (Digest, SHA256, RIPEMD160, digestFromByteString)
+import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
 import Crypto.Number.ModArithmetic (expFast)
 import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
-import Crypto.PubKey.ECC.Generate (generateQ)
-import Crypto.PubKey.ECC.Types (getCurveByName, CurveName(..), Point(..))
 
 -- * Data types
 
@@ -391,7 +390,8 @@ data Block = Block
   , _baseFee     :: W256
   , _maxCodeSize :: W256
   , _schedule    :: FeeSchedule Word64
-  } deriving Show
+  } deriving (Show, Generic)
+
 
 blankState :: FrameState
 blankState = FrameState
@@ -1332,7 +1332,7 @@ exec1 = do
             _ -> underrun
 
         xxx ->
-          vmError (UnrecognizedOpcode xxx)
+          vmError (EVM.UnrecognizedOpcode xxx)
 
 transfer :: Addr -> Addr -> W256 -> EVM ()
 transfer xFrom xTo xValue =
@@ -1997,50 +1997,28 @@ cheatActions =
         \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
           [sk, hash] ->
             forceConcrete2 (sk, hash) "cannot sign symbolic data" $ \(sk', hash') -> let
-              curve = getCurveByName SEC_p256k1
-              priv = PrivateKey curve (num sk')
-              digest = digestFromByteString (word256Bytes hash')
             in do
-              case digest of
-                Nothing -> vmError (BadCheatCode sig)
-                Just digest' -> do
-                  let s = ethsign priv digest'
-                      -- calculating the V value is pretty annoying if you
-                      -- don't have access to the full X/Y coords of the
-                      -- signature (which we don't get back from cryptonite).
-                      -- Luckily since we use a fixed nonce (to avoid the
-                      -- overhead of bringing randomness into the core EVM
-                      -- semantics), it would appear that every signature we
-                      -- produce has v == 28. Definitely a hack, and also bad
-                      -- for code that somehow depends on the value of v, but
-                      -- that seems acceptable for now.
-                      v = 28
-                      encoded = encodeAbiValue $
-                        AbiTuple (RegularVector.fromList
-                          [ AbiUInt 8 v
-                          , AbiBytes 32 (word256Bytes . fromInteger $ sign_r s)
-                          , AbiBytes 32 (word256Bytes . fromInteger $ sign_s s)
-                          ])
-                  assign (state . returndata) (ConcreteBuf encoded)
-                  copyBytesToMemory (ConcreteBuf encoded) (Lit . num . BS.length $ encoded) (Lit 0) outOffset
+                let (v,r,s) = EVM.Sign.sign hash' (toInteger sk')
+                    encoded = encodeAbiValue $
+                      AbiTuple (RegularVector.fromList
+                        [ AbiUInt 8 $ num v
+                        , AbiBytes 32 (word256Bytes r)
+                        , AbiBytes 32 (word256Bytes s)
+                        ])
+                assign (state . returndata) (ConcreteBuf encoded)
+                copyBytesToMemory (ConcreteBuf encoded) (Lit . num . BS.length $ encoded) (Lit 0) outOffset
           _ -> vmError (BadCheatCode sig),
 
       action "addr(uint256)" $
         \sig outOffset _ input -> case decodeStaticArgs 0 1 input of
-          [sk] -> forceConcrete sk "cannot derive address for a symbolic key" $ \sk' -> let
-                curve = getCurveByName SEC_p256k1
-                pubPoint = generateQ curve (num sk')
-                encodeInt = encodeAbiValue . AbiUInt 256 . fromInteger
-              in do
-                case pubPoint of
-                  PointO -> do vmError (BadCheatCode sig)
-                  Point x y -> do
-                    -- See yellow paper #286
-                    let
-                      pub = BS.concat [ encodeInt x, encodeInt y ]
-                      addr = Lit . W256 . word256 . BS.drop 12 . BS.take 32 . keccakBytes $ pub
-                    assign (state . returndata . word256At (Lit 0)) addr
-                    assign (state . memory . word256At outOffset) addr
+          [sk] -> forceConcrete sk "cannot derive address for a symbolic key" $ \sk' -> do
+            let a = EVM.Sign.deriveAddr $ num sk'
+            case a of
+              Nothing -> vmError (BadCheatCode sig)
+              Just address -> do
+                let expAddr = litAddr address
+                assign (state . returndata . word256At (Lit 0)) expAddr
+                assign (state . memory . word256At outOffset) expAddr
           _ -> vmError (BadCheatCode sig),
 
       action "prank(address)" $

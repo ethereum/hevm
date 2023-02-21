@@ -76,6 +76,7 @@ library
   exposed-modules:
     EVM,
     EVM.ABI,
+    EVM.Assembler,
     EVM.Concrete,
     EVM.Dapp,
     EVM.Debug,
@@ -107,6 +108,7 @@ library
     EVM.TTYCenteredList,
     EVM.Types,
     EVM.UnitTest,
+    EVM.Sign
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -144,7 +146,7 @@ library
     unordered-containers              >= 0.2.10 && < 0.3,
     vector                            >= 0.12.1 && < 0.13,
     ansi-wl-pprint                    >= 0.6.9 && < 0.7,
-    base16-bytestring                 >= 1.0.0 && < 2.0,
+    base16                            >= 0.3.2.0 && < 0.3.3.0,
     brick                             >= 1.4 && < 1.5,
     megaparsec                        >= 9.0.0 && < 10.0,
     mtl                               >= 2.2.2 && < 2.3,
@@ -206,7 +208,7 @@ executable hevm
     ansi-wl-pprint,
     async,
     base,
-    base16-bytestring,
+    base16,
     binary,
     brick,
     bytestring,
@@ -257,7 +259,7 @@ common test-base
     quickcheck-instances,
     aeson,
     base,
-    base16-bytestring,
+    base16,
     binary,
     containers,
     directory,
@@ -285,7 +287,8 @@ common test-base
     stm >= 2.5.0,
     spawn >= 0.3,
     witherable,
-    smt2-parser >= 0.1.0.1
+    smt2-parser >= 0.1.0.1,
+    operational
 
 library test-utils
   import:

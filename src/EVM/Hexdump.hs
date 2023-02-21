@@ -28,7 +28,7 @@
 -- OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 --
 
-module EVM.Hexdump (prettyHex, simpleHex) where
+module EVM.Hexdump (prettyHex, simpleHex, paddedShowHex) where
 
 import Data.ByteString                       (ByteString)
 import qualified Data.ByteString       as B  (length, unpack)

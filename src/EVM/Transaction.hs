@@ -5,33 +5,39 @@ import Prelude hiding (Word)
 import qualified EVM
 import EVM (balance, initialContract)
 import EVM.FeeSchedule
-import EVM.Precompiled (execute)
 import EVM.RLP
 import EVM.Types
 import EVM.Expr (litAddr)
-
 import Control.Lens
+import EVM.Sign
 
-import Data.Aeson (FromJSON (..))
 import Data.ByteString (ByteString)
 import Data.Map (Map)
 import Data.Maybe (fromMaybe, isNothing, fromJust)
+import GHC.Generics (Generic)
 
+import Data.Aeson (FromJSON (..))
 import qualified Data.Aeson        as JSON
 import qualified Data.Aeson.Types  as JSON
 import qualified Data.ByteString   as BS
 import qualified Data.Map          as Map
 import Data.Word (Word64)
+import Numeric (showHex)
 
 data AccessListEntry = AccessListEntry {
   accessAddress :: Addr,
   accessStorageKeys :: [W256]
-} deriving Show
+} deriving (Show, Generic)
+instance JSON.ToJSON AccessListEntry
 
 data TxType = LegacyTransaction
             | AccessListTransaction
             | EIP1559Transaction
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
+instance JSON.ToJSON TxType where
+  toJSON t = case t of
+               EIP1559Transaction -> "0x2"
+               _ -> error "unimplemented"
 
 data Transaction = Transaction {
     txData     :: ByteString,
@@ -47,7 +53,39 @@ data Transaction = Transaction {
     txAccessList :: [AccessListEntry],
     txMaxPriorityFeeGas :: Maybe W256,
     txMaxFeePerGas :: Maybe W256
-} deriving Show
+} deriving (Show, Generic)
+instance JSON.ToJSON Transaction where
+  toJSON t = JSON.object [ ("input",             (JSON.toJSON $ t.txData))
+                         , ("gas",               (JSON.toJSON $ "0x" ++ showHex (toInteger $ t.txGasLimit) ""))
+                         , ("gasPrice",          (JSON.toJSON $ show $ fromJust $ t.txGasPrice))
+                         , ("v",                 (JSON.toJSON $ show $ (t.txV)-27))
+                         , ("r",                 (JSON.toJSON $ show $ t.txR))
+                         , ("s",                 (JSON.toJSON $ show $ t.txS))
+                         , ("to",                (JSON.toJSON $ t.txToAddr))
+                         , ("nonce",             (JSON.toJSON $ show $ t.txNonce))
+                         , ("value",             (JSON.toJSON $ show $ t.txValue))
+                         , ("type",              (JSON.toJSON $ t.txType))
+                         , ("accessList",        (JSON.toJSON $ t.txAccessList))
+                         , ("maxPriorityFeePerGas", (JSON.toJSON $ show $ fromJust $ t.txMaxPriorityFeeGas))
+                         , ("maxFeePerGas",      (JSON.toJSON $ show $ fromJust $ t.txMaxFeePerGas))
+                         , ("chainId",           (JSON.toJSON ("0x1" :: String))) -- NOTE: should be part of struct?
+                         ]
+
+emptyTransaction :: Transaction
+emptyTransaction = Transaction { txData = mempty
+                               , txGasLimit = 0
+                               , txGasPrice = Nothing
+                               , txNonce = 0
+                               , txR = 0
+                               , txS = 0
+                               , txToAddr = Nothing
+                               , txV = 0
+                               , txValue = 0
+                               , txType = EIP1559Transaction
+                               , txAccessList = []
+                               , txMaxPriorityFeeGas = Nothing
+                               , txMaxFeePerGas = Nothing
+                               }
 
 -- | utility function for getting a more useful representation of accesslistentries
 -- duplicates only matter for gas computation
@@ -55,16 +93,22 @@ txAccessMap :: Transaction -> Map Addr [W256]
 txAccessMap tx = ((Map.fromListWith (++)) . makeTups) tx.txAccessList
   where makeTups = map (\ale -> (ale.accessAddress , ale.accessStorageKeys ))
 
-ecrec :: W256 -> W256 -> W256 -> W256 -> Maybe Addr
-ecrec v r s e = num . word <$> EVM.Precompiled.execute 1 input 32
-  where input = BS.concat (word256Bytes <$> [e, v, r, s])
-
+-- Given chainID and Transaction, it recovers the address that sent it
 sender :: Int -> Transaction -> Maybe Addr
 sender chainId tx = ecrec v' tx.txR  tx.txS hash
   where hash = keccak' (signingData chainId tx)
         v    = tx.txV
         v'   = if v == 27 || v == 28 then v
                else 27 + v
+
+-- We don't know which of 27 or 28 is correct
+-- So we try 28 and try to recover & check if it's correct
+-- if it isn't correct, we need to use the other one
+sign :: Int -> Integer -> Transaction -> Transaction
+sign chainId sk tx = tx { txV = num v, txR = r, txS = s}
+  where
+    hash = keccak' $ signingData chainId tx
+    (v, r, s) = EVM.Sign.sign hash sk
 
 signingData :: Int -> Transaction -> ByteString
 signingData chainId tx =
