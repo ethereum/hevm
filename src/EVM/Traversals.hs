@@ -238,6 +238,7 @@ mapProp f = \case
   PNeg a -> PNeg (mapProp f a)
   PAnd a b -> PAnd (mapProp f a) (mapProp f b)
   POr a b -> POr (mapProp f a) (mapProp f b)
+  PImpl a b -> PImpl (mapProp f a) (mapProp f b)
 
 -- | Recursively applies a given function to every node in a given expr instance
 -- Recursion schemes do this & a lot more, but defining them over GADT's isn't worth the hassle
