@@ -3,6 +3,8 @@ set -eux -o pipefail
 
 ## The following script builds and installs libsecp256k1 to ~/.local/lib
 
+INSTALL_VERSION=0.2.0
+
 if [[ "$(uname -s)" =~ ^MSYS_NT.* ]]; then
     echo "This script is only meant to run on Windows under MSYS2"
     exit 1
@@ -14,11 +16,10 @@ if [ -f "$HOME/.local/lib/libsecp256k1.a" ]; then
 fi
 
 PREFIX="$HOME/.local"
-GIT_REF="21ffe4b22a9683cf24ae0763359e401d1284cc7a"
-curl -LO "https://github.com/bitcoin-core/secp256k1/archive/$GIT_REF.zip"
+curl -LO "https://github.com/bitcoin-core/secp256k1/archive/refs/tags/v$INSTALL_VERSION.zip"
 
-unzip "$GIT_REF.zip" && rm "$GIT_REF.zip"
-cd "secp256k1-$GIT_REF"
+unzip "v$INSTALL_VERSION.zip" && rm "v$INSTALL_VERSION.zip"
+cd "secp256k1-$INSTALL_VERSION"
 
 ./autogen.sh
 # hevm needs reecovery module
