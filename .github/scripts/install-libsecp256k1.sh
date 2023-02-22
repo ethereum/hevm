@@ -3,7 +3,7 @@ set -eux -o pipefail
 
 ## The following script builds and installs libsecp256k1 to ~/.local/lib
 
-INSTALL_VERSION=0.2.0
+INSTALL_VERSION=5dcc6f8dbdb1850570919fc9942d22f728dbc0af
 
 if [[ "$(uname -s)" =~ ^MSYS_NT.* ]]; then
     echo "This script is only meant to run on Windows under MSYS2"
@@ -16,9 +16,9 @@ if [ -f "$HOME/.local/lib/libsecp256k1.a" ]; then
 fi
 
 PREFIX="$HOME/.local"
-curl -LO "https://github.com/bitcoin-core/secp256k1/archive/refs/tags/v$INSTALL_VERSION.zip"
+curl -LO "https://github.com/bitcoin-core/secp256k1/archive/$INSTALL_VERSION.zip"
 
-unzip "v$INSTALL_VERSION.zip" && rm "v$INSTALL_VERSION.zip"
+unzip "$INSTALL_VERSION.zip" && rm "$INSTALL_VERSION.zip"
 cd "secp256k1-$INSTALL_VERSION"
 
 ./autogen.sh

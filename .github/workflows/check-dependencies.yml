@@ -21,15 +21,17 @@ jobs:
       - name: lookup nix versions
         id: nixpkgs
         run: |
-          NIXPKGS_REV=$(cat flake.lock | jq -r '.nodes.nixpkgs.locked.rev')
-          LIBFF_REV=$(nix search "nixpkgs/$NIXPKGS_REV" "^legacyPackages.x86_64-linux.libff$" --json 2>/dev/null | jq '."legacyPackages.x86_64-linux.libff".version' -r)
-          LIBSECP256K1_REV=$(nix search "nixpkgs/$NIXPKGS_REV" "^legacyPackages.x86_64-linux.secp256k1" --json 2>/dev/null | jq '."legacyPackages.x86_64-linux.secp256k1".version' -r)
+          NIXPKGS_REV="$(jq -r '.nodes.nixpkgs.locked.rev' < flake.lock)"
+          VERSIONS="$(nix eval -I "nixpkgs=https://github.com/NixOS/nixpkgs/archive/$NIXPKGS_REV.tar.gz" --impure --json \
+                      --expr 'let pkgs = (import <nixpkgs> {}); in { "secp256k1" = pkgs.secp256k1.src.rev; "ff" = pkgs.libff.src.rev; }')"
+          LIBFF_REV="$(jq .ff -r <<<"$VERSIONS")"
+          LIBSECP256K1_REV="$(jq .secp256k1 -r <<<"$VERSIONS")"
           { echo "nixpkgs=$NIXPKGS_REV"; echo "libff=$LIBFF_REV"; echo "libsecp256k1=$LIBSECP256K1_REV"; } >> "$GITHUB_OUTPUT"
       - name: lookup local versions
         id: local
         run: |
-          LIBFF_REV=$(grep '^INSTALL_VERSION=' .github/scripts/install-libff.sh | cut -f2 -d=)
-          LIBSECP256K1_REV=$(grep '^INSTALL_VERSION=' .github/scripts/install-libsecp256k1.sh | cut -f2 -d=)
+          LIBFF_REV="$(grep '^INSTALL_VERSION=' .github/scripts/install-libff.sh | cut -f2 -d=)"
+          LIBSECP256K1_REV="$(grep '^INSTALL_VERSION=' .github/scripts/install-libsecp256k1.sh | cut -f2 -d=)"
           { echo "libff=$LIBFF_REV"; echo "libsecp256k1=$LIBSECP256K1_REV"; } >> "$GITHUB_OUTPUT"
       - name: compare versions
         run: |
