@@ -1996,17 +1996,16 @@ cheatActions =
       action "sign(uint256,bytes32)" $
         \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
           [sk, hash] ->
-            forceConcrete2 (sk, hash) "cannot sign symbolic data" $ \(sk', hash') -> let
-            in do
-                let (v,r,s) = EVM.Sign.sign hash' (toInteger sk')
-                    encoded = encodeAbiValue $
-                      AbiTuple (RegularVector.fromList
-                        [ AbiUInt 8 $ num v
-                        , AbiBytes 32 (word256Bytes r)
-                        , AbiBytes 32 (word256Bytes s)
-                        ])
-                assign (state . returndata) (ConcreteBuf encoded)
-                copyBytesToMemory (ConcreteBuf encoded) (Lit . num . BS.length $ encoded) (Lit 0) outOffset
+            forceConcrete2 (sk, hash) "cannot sign symbolic data" $ \(sk', hash') -> do
+              let (v,r,s) = EVM.Sign.sign hash' (toInteger sk')
+                  encoded = encodeAbiValue $
+                    AbiTuple (RegularVector.fromList
+                      [ AbiUInt 8 $ num v
+                      , AbiBytes 32 (word256Bytes r)
+                      , AbiBytes 32 (word256Bytes s)
+                      ])
+              assign (state . returndata) (ConcreteBuf encoded)
+              copyBytesToMemory (ConcreteBuf encoded) (Lit . num . BS.length $ encoded) (Lit 0) outOffset
           _ -> vmError (BadCheatCode sig),
 
       action "addr(uint256)" $

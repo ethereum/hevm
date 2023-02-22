@@ -6,7 +6,6 @@ import EVM          (Contract, nonce, balance, bytecode, codehash)
 import EVM.Solidity (SrcMap, srcMapFile, srcMapOffset, srcMapLength, SourceCache(..))
 import EVM.Types    (Addr)
 import EVM.Expr     (bufLength)
-import EVM.Op
 
 import Control.Arrow   (second)
 import Control.Lens
@@ -55,9 +54,3 @@ srcMapCode cache sm =
   fmap f $ cache.files ^? ix sm.srcMapFile
   where
     f (_, v) = ByteString.take (min 80 sm.srcMapLength) (ByteString.drop sm.srcMapOffset v)
-
-data OpContract = OpContract [Op]
-  deriving (Show)
-
-getOpData :: OpContract-> [Op]
-getOpData (OpContract x) = x
