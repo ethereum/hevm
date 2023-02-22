@@ -291,7 +291,7 @@ tests = testGroup "hevm"
         --       It should work also when we external calls. Removing for now.
         contrFixed <- fixContractJumps $ removeExtcalls contr
         -- putStrLn $ "Contract to run: " <> (show contrFixed)
-        txDataRaw <- generate $ sized $ \n -> vectorOf n $ chooseInt (0,255)
+        txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
         let contrLits = assemble $ getOpData contrFixed
             toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
             toW8fromLitB (LitByte a) = a
@@ -383,7 +383,22 @@ tests = testGroup "hevm"
         JSON.encodeFile "env.json" evmToolEnv
         evmRun <- runCodeWithTrace Nothing evmToolEnv contrAlloc txn (fromAddress, toAddress)
         if isJust evmRun then do
-          let (_, hevmTrace, hevmTraceResult) = fromJust evmRun
+          let
+            (expr ,hevmTrace, hevmTraceResult) = fromJust evmRun
+            concretize :: Expr a -> Expr Buf -> Expr a
+            concretize a c = mapExpr go a
+              where
+                go :: Expr a -> Expr a
+                go = \case
+                           AbstractBuf "calldata" -> c
+                           y -> y
+            concretizedExpr = concretize expr (ConcreteBuf txData)
+            simplConcExpr = Expr.simplify concretizedExpr
+            getReturnVal :: Expr End -> Maybe ByteString
+            getReturnVal (Return _ (ConcreteBuf bs) _) = Just bs
+            getReturnVal _ = Nothing
+            simplConcrExprRetval = getReturnVal simplConcExpr
+
           (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
                                        ,"--input.alloc" , "alloc.json"
                                        , "--input.env" , "env.json"
@@ -410,10 +425,19 @@ tests = testGroup "hevm"
           let resultOK = evmtoolTraceOutput.toOutput.output == hevmTraceResult.out
           if resultOK then do
             putStrLn $ "HEVM & evmtool's outputs match: " <> (show evmtoolTraceOutput.toOutput.output)
-            System.Directory.removeFile traceFileName
-            System.Directory.removeFile traceFileNameJSON
-            System.Directory.removeFile "alloc-out.json"
-            System.Directory.removeFile "result.json"
+            if isNothing simplConcrExprRetval || simplConcrExprRetval == (Just hevmTraceResult.out)
+               then do
+                 putStrLn $ "OK, symbolic interpretation + concrete calldata -> Expr.simplify gives the same answer. Note that it was computed as Nothing (i.e. not strong equivalence): " <> (show $ isNothing simplConcrExprRetval)
+                 System.Directory.removeFile traceFileName
+                 System.Directory.removeFile traceFileNameJSON
+                 System.Directory.removeFile "alloc-out.json"
+                 System.Directory.removeFile "result.json"
+               else do
+                 putStrLn $ "concretized expr           : " <> (show concretizedExpr)
+                 putStrLn $ "simplified concretized expr: " <> (show simplConcExpr)
+                 putStrLn $ "return value computed      : " <> (show simplConcrExprRetval)
+                 putStrLn $ "evmtool's return value     : " <> (show hevmTraceResult.out)
+                 assertEqual "Simplified, concretized expression must match evmtool's output." True False
           else do
             putStrLn $ "Name of trace file: " <> traceFileName
             putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
@@ -2535,15 +2559,28 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
 
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
-runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Maybe ((Expr Buf, [VMTrace], VMTraceResult)))
+runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Maybe ((Expr 'End, [VMTrace], VMTraceResult)))
 runCodeWithTrace rpcinfo evmToolEnv alloc txn (fromAddr, toAddress) = withSolvers Z3 0 Nothing $ \solvers -> do
   let origVM = vmForRuntimeCode code' calldata' evmToolEnv alloc txn (fromAddr, toAddress)
       calldata' = ConcreteBuf txn.txData
       code' = alloc.code
+      buildExpr :: SolverGroup -> VM -> IO (Expr End)
+      buildExpr s vm = evalStateT (interpret (Fetch.oracle s Nothing) Nothing Nothing runExpr) vm
+
+      -- Create symbolic VM from concrete VM
+      vmEnv :: Env
+      vmEnv = origVM._env
+      vmEnvSym = vmEnv { _storage = AbstractStore }
+      vmState = origVM._state
+      vmStateSym = vmState {_calldata = AbstractBuf "calldata" }
+      symVM :: VM
+      symVM = origVM { _env = vmEnvSym, _state = vmStateSym }
+
+  expr <- buildExpr solvers symVM
   (res, (vm, trace)) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (origVM, [])
   pure $ case res of
     Left _ -> Nothing
-    Right b -> Just (b, trace, vmres vm)
+    Right _ -> Just (expr, trace, vmres vm)
 
 vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> VM
 vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress) =
@@ -2552,7 +2589,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress
   in
   (makeVm $ VMOpts
     { vmoptContract = contrWithBal
-    , vmoptCalldata = mempty
+    , vmoptCalldata = (calldata', [])
     , vmoptValue = Lit txn.txValue
     , vmoptStorageBase = Concrete
     , vmoptAddress =  toAddress
@@ -2783,7 +2820,7 @@ genContract :: Int -> Gen [Op]
 genContract n = do
     y <- chooseInt (3, 6)
     pushes <- genPush y
-    normalOps <- vectorOf (5*n) genOne
+    normalOps <- vectorOf (5*n+40) genOne
     addReturn <- chooseInt (0, 10)
     let contr = pushes ++ normalOps
     if addReturn < 10 then pure $ contr++[OpPush (Lit 0x40), OpPush (Lit 0x0), OpReturn]
@@ -2824,7 +2861,7 @@ genContract n = do
         , (1, pure OpSar)
       ])
       -- calldata
-      , (300, pure OpCalldatacopy)
+      , (800, pure OpCalldatacopy)
       -- Get some info
       , (100, frequency [
           (10, pure OpAddress)
@@ -2855,9 +2892,9 @@ genContract n = do
         , (10, pure OpExtcodecopy)
       ])
       -- memory manip
-      , (400, frequency [
-          (2, pure OpMload)
-        , (10, pure OpMstore)
+      , (1200, frequency [
+          (50, pure OpMload)
+        , (50, pure OpMstore)
         , (1, pure OpMstore8)
       ])
       -- storage manip
