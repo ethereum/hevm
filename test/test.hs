@@ -217,8 +217,19 @@ data EVMToolResult =
   , receipts :: [EVMToolReceipt]
   , currentDifficulty :: String
   , gasUsed :: String
+  , rejected :: Maybe [EVMRejected]
   } deriving (Generic, Show)
 instance JSON.FromJSON EVMToolResult
+
+data EVMRejected =
+  EVMRejected
+    { index :: Int
+    , err :: String
+    } deriving (Generic, Show)
+instance JSON.FromJSON EVMRejected where
+  parseJSON = JSON.withObject "EVMRejected" $ \v -> EVMRejected
+    <$> v .: "index"
+    <*> v .: "error"
 
 data EVMToolAlloc =
   EVMToolAlloc
@@ -290,10 +301,12 @@ tests = testGroup "hevm"
         -- NOTE: By removing external calls, we fuzz less
         --       It should work also when we external calls. Removing for now.
         contrFixed <- fixContractJumps $ removeExtcalls contr
+        -- let contrFixed = OpContract [OpPush (Lit 0xfffffff), OpPush (Lit 0), OpReturn]
+        -- let contrFixed = OpContract [OpPush (Lit 0xfffffff), OpPush (Lit 0x0), OpPush (Lit 0x0), OpCalldatacopy, OpPush (Lit 0xfffffff), OpPush (Lit 0), OpReturn]
         -- putStrLn $ "Contract to run: " <> (show contrFixed)
         txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
         -- can get gas difference with low gas here
-        gaslimitExec <- generate $ chooseInt (0, 0xffff)
+        gaslimitExec <- generate $ chooseInt (40000, 0xffff)
         let contrLits = assemble $ getOpData contrFixed
             toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
             toW8fromLitB (LitByte a) = a
@@ -380,10 +393,29 @@ tests = testGroup "hevm"
                 go [] b@(_:_) = do
                   putStrLn $ "Stacks don't match. evmtool's trace is longer by:" <> (show b)
                   pure False
+        evmRun <- runCodeWithTrace Nothing evmToolEnv contrAlloc txn (fromAddress, toAddress)
+
+        -- Run concrete semantics
         JSON.encodeFile "txs.json" txs
         JSON.encodeFile "alloc.json" alloc
         JSON.encodeFile "env.json" evmToolEnv
-        evmRun <- runCodeWithTrace Nothing evmToolEnv contrAlloc txn (fromAddress, toAddress)
+        (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
+                                     ,"--input.alloc" , "alloc.json"
+                                     , "--input.env" , "env.json"
+                                     , "--input.txs" , "txs.json"
+                                     , "--output.alloc" , "alloc-out.json"
+                                     , "--trace.returndata=true"
+                                     , "--trace" , "trace.json"
+                                     , "--output.result", "result.json"
+                                     ] ""
+        Control.Monad.when (exitCode /= ExitSuccess) $ do
+                         putStrLn $ "evmtool exited with code " <> show exitCode
+                         putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
+                         putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
+        evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
+        putStrLn $ "evmtool's result is: " <> show evmtoolResult
+        putStrLn $ "HEVM's result is   : " <> show evmRun
+        putStrLn $ "evmtool's stderr is: " <> evmtoolStderr
         case evmRun of
           (Right (expr, hevmTrace, hevmTraceResult)) -> do
             let
@@ -400,27 +432,9 @@ tests = testGroup "hevm"
               getReturnVal (Return _ (ConcreteBuf bs) _) = Just bs
               getReturnVal _ = Nothing
               simplConcrExprRetval = getReturnVal simplConcExpr
-
-            (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
-                                         ,"--input.alloc" , "alloc.json"
-                                         , "--input.env" , "env.json"
-                                         , "--input.txs" , "txs.json"
-                                         , "--output.alloc" , "alloc-out.json"
-                                         , "--trace.returndata=true"
-                                         , "--trace" , "trace.json"
-                                         , "--output.result", "result.json"
-                                         ] ""
-            Control.Monad.when (exitCode /= ExitSuccess) $ do
-                             putStrLn $ "evmtool exited with code " <> show exitCode
-                             putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
-                             putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
-            evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
-            -- putStrLn $ "evmtool's result is: " <> show evmtoolResult
-            -- putStrLn $ "HEVM's result is   : " <> show evmRun
-            -- putStrLn $ "evmtool's stderr is: " <> evmtoolStderr
-            let txName =  (((fromJust evmtoolResult).receipts) !! 0).recTransactionHash
-                traceFileName = "trace-0-" ++ txName ++ ".jsonl"
-                traceFileNameJSON = traceFileName ++ ".json"
+              txName = (((fromJust evmtoolResult).receipts) !! 0).recTransactionHash
+              traceFileName = "trace-0-" ++ txName ++ ".jsonl"
+              traceFileNameJSON = traceFileName ++ ".json"
             _ <- readProcess "./convert_trace_to_json.sh" [traceFileName] ""
             (Just evmtoolTraceOutput) <- JSON.decodeFileStrict traceFileNameJSON :: IO (Maybe EVMToolTraceOutput)
             traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.toTrace)
