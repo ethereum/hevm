@@ -305,9 +305,9 @@ tests = testGroup "hevm"
                                      , nonce = 0x48
                                      }
             walletAlloc = EVMToolAlloc{ balance = 0x5ffd4878be161d74
-                                 , code = BS.empty
-                                 , nonce = 0xac
-                                 }
+                                      , code = BS.empty
+                                      , nonce = 0xac
+                                      }
             sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
             fromAddress :: Addr
             fromAddress = fromJust $ deriveAddr sk
