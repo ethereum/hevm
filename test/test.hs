@@ -2886,7 +2886,8 @@ genContract n = do
         , (1, pure OpSar)
       ])
       -- calldata
-      , (800, pure OpCalldatacopy)
+      , (800, pure OpCalldataload)
+      , (200, pure OpCalldatacopy)
       -- Get some info
       , (100, frequency [
           (10, pure OpAddress)
@@ -2945,7 +2946,6 @@ genContract n = do
       -- manipulate stack
       , (13000, frequency [
           (1, pure OpPop)
-        , (30, pure OpCalldataload)
         , (400, do
             -- x <- arbitrary
             large <- chooseInt (0, 100)
