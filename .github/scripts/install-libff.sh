@@ -10,11 +10,6 @@ if [[ "$(uname -s)" =~ ^MSYS_NT.* ]]; then
     exit 1
 fi
 
-if [ -f "$HOME/.local/lib/libff.a" ]; then
-  echo "libff exists, exiting..."
-  exit 0
-fi
-
 if [ -d libff ]; then
   echo "$(pwd)/libff" already exists! Using it instead of re-cloning the repo.
 else
