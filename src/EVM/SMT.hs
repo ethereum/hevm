@@ -34,14 +34,12 @@ import qualified Data.Text as TS
 import qualified Data.Text.Lazy as T
 import Data.Text.Lazy.Builder
 import Data.Bifunctor (second)
-import Data.Semigroup (Any, Any(..), getAny)
 
 import EVM.Types
 import EVM.Traversals
 import EVM.CSE
 import EVM.Keccak
 import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
-
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
 -- variable names in SMT that we want to get values for
@@ -121,6 +119,7 @@ assertProps ps =
   <> intermediates
   <> SMT2 [""] mempty
   <> keccakAssumes
+  <> readAssumes
   <> SMT2 [""] mempty
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
   <> SMT2 [] mempty{storeReads = storageReads}
@@ -141,6 +140,10 @@ assertProps ps =
     keccakAssumes
       = SMT2 ["; keccak assumptions"] mempty
       <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions ps_elim bufVals storeVals)) mempty
+
+    readAssumes
+      = SMT2 ["; read assumptions"] mempty
+        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads ps_elim bufs stores)) mempty
 
 
 referencedBufsGo :: Expr a -> [Builder]
@@ -202,14 +205,6 @@ referencedBlockContext expr = nubOrd $ foldExpr referencedBlockContextGo [] expr
 referencedBlockContext' :: Prop -> [Builder]
 referencedBlockContext' prop = nubOrd $ foldProp referencedBlockContextGo [] prop
 
-
-isAbstractStorage :: Expr Storage -> Bool
-isAbstractStorage = getAny . foldExpr go (Any False)
-  where
-    go :: Expr a -> Any
-    go AbstractStore = Any True
-    go _ = Any False
-
 -- | This function overapproximates the reads from the abstract
 -- storage. Potentially, it can return locations that do not read a
 -- slot directly from the abstract store but from subsequent writes on
@@ -221,8 +216,43 @@ findStorageReads = foldProp go []
   where
     go :: Expr a -> [(Expr EWord, Expr EWord)]
     go = \case
-      SLoad addr slot storage -> [(addr, slot) | isAbstractStorage storage]
+      SLoad addr slot storage -> [(addr, slot) | containsNode isAbstractStore storage]
       _ -> []
+
+    isAbstractStore AbstractStore = True
+    isAbstractStore _ = False
+
+
+findBufferAccess :: TraversableTerm a => [a] -> [(Expr EWord, Expr EWord, Expr Buf)]
+findBufferAccess = foldl (\acc p -> foldTerm go acc p) mempty
+  where
+    go :: Expr a -> [(Expr EWord, Expr EWord, Expr Buf)]
+    go = \case
+      ReadWord idx buf -> [(idx, Lit 32, buf)]
+      ReadByte idx buf -> [(idx, Lit 1, buf)]
+      CopySlice srcOff _ size src _  -> [(srcOff, size, src)]
+      _ -> mempty
+
+
+-- | Asserts that buffer reads beyond the size of the buffer are equal
+-- to zero. Looks for buffer reads in the a list of given predicates
+-- and the buffer and storage environments.
+assertReads :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
+assertReads props benv senv = concat $ fmap assertRead allReads
+  where
+    assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
+    assertRead (idx, Lit 32, buf) = [PImpl (PGEq idx (bufLength buf)) (PEq (ReadWord idx buf) (Lit 0))]
+    assertRead (idx, Lit sz, buf) = fmap (\s -> PImpl (PGEq idx (bufLength buf)) (PEq (ReadByte idx buf) (LitByte (num s)))) [(0::Int)..num sz-1]
+    assertRead (_, _, _) = error "Cannot generate assertions for accesses of symbolic size"
+
+    allReads = filter keepRead $ nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
+
+    -- discard constraints if we can statically determine that read is less than the buffer length
+    keepRead (Lit idx, Lit size, buf) =
+      case minLength benv buf of
+        Just l | num (idx + size) <= l -> False
+        _ -> True
+    keepRead _ = True
 
 
 declareBufs :: [Builder] -> SMT2
@@ -660,6 +690,10 @@ propToSMT = \case
     let aenc = propToSMT a
         benc = propToSMT b in
     "(or " <> aenc <> " " <> benc <> ")"
+  PImpl a b ->
+    let aenc = propToSMT a
+        benc = propToSMT b in
+    "(=> " <> aenc <> " " <> benc <> ")"
   PBool b -> if b then "true" else "false"
   where
     op2 op a b =
@@ -822,6 +856,7 @@ getBufs getVal names = foldM getBuf mempty names
       -- replicating the constant byte up to the length).
       len <- getLength name
       val <- getVal (T.fromStrict name)
+
       buf <- case parseCommentFreeFileMsg getValueRes (T.toStrict val) of
         Right (ResSpecific (valParsed :| [])) -> case valParsed of
           (TermQualIdentifier (Unqualified (IdSymbol symbol)), term)
@@ -832,7 +867,7 @@ getBufs getVal names = foldM getBuf mempty names
         res -> error $ "Internal Error: cannot parse solver response: " <> show res
       let bs = case simplify buf of
                  ConcreteBuf b -> b
-                 _ -> error "Internal Error: unable to parse solver response into a concrete buffer"
+                 p -> error $ "Internal Error: unable to parse solver response into a concrete buffer: " <> show p
       pure $ Map.insert (AbstractBuf name) bs acc
 
     parseBuf :: Int -> Term -> Expr Buf

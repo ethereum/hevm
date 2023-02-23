@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `hevm symbolic` exits with status code `1` if counterexamples or timeouts are found
+- Calldata reads beyond calldata size are provably equal to zero.
 
 ### Added
 
