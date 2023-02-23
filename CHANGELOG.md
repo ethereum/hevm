@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - The `hevm` library can now be built on Windows systems.
+- Support for function pointers in ABI
 
 ## [0.50.3] - 2023-02-17
 
