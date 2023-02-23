@@ -2,7 +2,7 @@ name: "Check Dependencies"
 on:
   workflow_dispatch:
   schedule:
-    - cron:  '30 5 * * 1' # At 05:30 AM, only on Monday
+    - cron: '30 5 * * 1' # At 05:30 AM, only on Monday
   pull_request:
     paths:
       - '.github/workflows/check-dependencies.yml'
@@ -35,11 +35,11 @@ jobs:
           { echo "libff=$LIBFF_REV"; echo "libsecp256k1=$LIBSECP256K1_REV"; } >> "$GITHUB_OUTPUT"
       - name: compare versions
         run: |
-          if [ "${{ steps.nixpkgs.outputs.libff }}" !=  "${{ steps.local.outputs.libff }}" ]; then
+          if [ "${{ steps.nixpkgs.outputs.libff }}" != "${{ steps.local.outputs.libff }}" ]; then
             echo "libff versions do not match! nix=${{ steps.nixpkgs.outputs.libff }} local=${{ steps.local.outputs.libff }}"
             exit 1
           fi
-          if [ "${{ steps.nixpkgs.outputs.libsecp256k1 }}" !=  "${{ steps.local.outputs.libsecp256k1 }}" ]; then
+          if [ "${{ steps.nixpkgs.outputs.libsecp256k1 }}" != "${{ steps.local.outputs.libsecp256k1 }}" ]; then
             echo "libsecp256k1 versions do not match! nix=${{ steps.nixpkgs.outputs.libsecp256k1 }} local=${{ steps.local.outputs.libsecp256k1 }}"
             exit 1
           fi
