@@ -292,7 +292,8 @@ tests = testGroup "hevm"
         contrFixed <- fixContractJumps $ removeExtcalls contr
         -- putStrLn $ "Contract to run: " <> (show contrFixed)
         txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
-        gaslimitExec <- generate $ chooseInt (0, 0xffffffffff)
+        -- can get gas difference with low gas here
+        gaslimitExec <- generate $ chooseInt (0, 0xffff)
         let contrLits = assemble $ getOpData contrFixed
             toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
             toW8fromLitB (LitByte a) = a
@@ -334,7 +335,7 @@ tests = testGroup "hevm"
                              , _timestamp   =  Lit 0x3e8
                              , _number      =  0x0
                              , _prevRandao  =  0x0
-                             , _gasLimit    =  fromIntegral $ gaslimitExec
+                             , _gasLimit    =  fromIntegral gaslimitExec
                              , _baseFee     =  0x0
                              , _maxCodeSize =  0xfffff
                              , _schedule    =  FeeSchedule.berlin
@@ -383,74 +384,81 @@ tests = testGroup "hevm"
         JSON.encodeFile "alloc.json" alloc
         JSON.encodeFile "env.json" evmToolEnv
         evmRun <- runCodeWithTrace Nothing evmToolEnv contrAlloc txn (fromAddress, toAddress)
-        if isJust evmRun then do
-          let
-            (expr ,hevmTrace, hevmTraceResult) = fromJust evmRun
-            concretize :: Expr a -> Expr Buf -> Expr a
-            concretize a c = mapExpr go a
-              where
-                go :: Expr a -> Expr a
-                go = \case
-                           AbstractBuf "calldata" -> c
-                           y -> y
-            concretizedExpr = concretize expr (ConcreteBuf txData)
-            simplConcExpr = Expr.simplify concretizedExpr
-            getReturnVal :: Expr End -> Maybe ByteString
-            getReturnVal (Return _ (ConcreteBuf bs) _) = Just bs
-            getReturnVal _ = Nothing
-            simplConcrExprRetval = getReturnVal simplConcExpr
+        case evmRun of
+          (Right (expr, hevmTrace, hevmTraceResult)) -> do
+            let
+              concretize :: Expr a -> Expr Buf -> Expr a
+              concretize a c = mapExpr go a
+                where
+                  go :: Expr a -> Expr a
+                  go = \case
+                             AbstractBuf "calldata" -> c
+                             y -> y
+              concretizedExpr = concretize expr (ConcreteBuf txData)
+              simplConcExpr = Expr.simplify concretizedExpr
+              getReturnVal :: Expr End -> Maybe ByteString
+              getReturnVal (Return _ (ConcreteBuf bs) _) = Just bs
+              getReturnVal _ = Nothing
+              simplConcrExprRetval = getReturnVal simplConcExpr
 
-          (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
-                                       ,"--input.alloc" , "alloc.json"
-                                       , "--input.env" , "env.json"
-                                       , "--input.txs" , "txs.json"
-                                       , "--output.alloc" , "alloc-out.json"
-                                       , "--trace.returndata=true"
-                                       , "--trace" , "trace.json"
-                                       , "--output.result", "result.json"
-                                       ] ""
-          Control.Monad.when (exitCode /= ExitSuccess) $ do
-                           putStrLn $ "evmtool exited with code " <> show exitCode
-                           putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
-                           putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
-          evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
-          let txName =  (((fromJust evmtoolResult).receipts) !! 0).recTransactionHash
-              traceFileName = "trace-0-" ++ txName ++ ".jsonl"
-              traceFileNameJSON = traceFileName ++ ".json"
-          _ <- readProcess "./convert_trace_to_json.sh" [traceFileName] ""
-          (Just evmtoolTraceOutput) <- JSON.decodeFileStrict traceFileNameJSON :: IO (Maybe EVMToolTraceOutput)
-          traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.toTrace)
-          -- putStrLn $ "HEVM trace   : " <> show hevmTrace
-          -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.toTrace)
-          assertEqual "Traces, gas, and result must match" traceOK True
-          let resultOK = evmtoolTraceOutput.toOutput.output == hevmTraceResult.out
-          if resultOK then do
-            putStrLn $ "HEVM & evmtool's outputs match: " <> (show evmtoolTraceOutput.toOutput.output)
-            if isNothing simplConcrExprRetval || simplConcrExprRetval == (Just hevmTraceResult.out)
-               then do
-                 putStrLn $ "OK, symbolic interpretation + concrete calldata -> Expr.simplify gives the same answer. Note that it was computed as Nothing (i.e. not strong equivalence): " <> (show $ isNothing simplConcrExprRetval)
-                 System.Directory.removeFile traceFileName
-                 System.Directory.removeFile traceFileNameJSON
-                 System.Directory.removeFile "alloc-out.json"
-                 System.Directory.removeFile "result.json"
-               else do
-                 putStrLn $ "concretized expr           : " <> (show concretizedExpr)
-                 putStrLn $ "simplified concretized expr: " <> (show simplConcExpr)
-                 putStrLn $ "return value computed      : " <> (show simplConcrExprRetval)
-                 putStrLn $ "evmtool's return value     : " <> (show hevmTraceResult.out)
-                 assertEqual "Simplified, concretized expression must match evmtool's output." True False
-          else do
-            putStrLn $ "Name of trace file: " <> traceFileName
-            putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
-            T.putStrLn $ "HEVM result: " <> (formatBinary hevmTraceResult.out)
-            T.putStrLn $ "evm result : " <> (formatBinary evmtoolTraceOutput.toOutput.output)
-            putStrLn $ "HEVM result len: " <> (show (BS.length hevmTraceResult.out))
-            putStrLn $ "evm result  len: " <> (show (BS.length evmtoolTraceOutput.toOutput.output))
-          assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
-        else putStrLn "Contract exec not successful, not comparing traces"
-        System.Directory.removeFile "txs.json"
-        System.Directory.removeFile "alloc.json"
-        System.Directory.removeFile "env.json"
+            (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
+                                         ,"--input.alloc" , "alloc.json"
+                                         , "--input.env" , "env.json"
+                                         , "--input.txs" , "txs.json"
+                                         , "--output.alloc" , "alloc-out.json"
+                                         , "--trace.returndata=true"
+                                         , "--trace" , "trace.json"
+                                         , "--output.result", "result.json"
+                                         ] ""
+            Control.Monad.when (exitCode /= ExitSuccess) $ do
+                             putStrLn $ "evmtool exited with code " <> show exitCode
+                             putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
+                             putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
+            evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
+            -- putStrLn $ "evmtool's result is: " <> show evmtoolResult
+            -- putStrLn $ "HEVM's result is   : " <> show evmRun
+            -- putStrLn $ "evmtool's stderr is: " <> evmtoolStderr
+            let txName =  (((fromJust evmtoolResult).receipts) !! 0).recTransactionHash
+                traceFileName = "trace-0-" ++ txName ++ ".jsonl"
+                traceFileNameJSON = traceFileName ++ ".json"
+            _ <- readProcess "./convert_trace_to_json.sh" [traceFileName] ""
+            (Just evmtoolTraceOutput) <- JSON.decodeFileStrict traceFileNameJSON :: IO (Maybe EVMToolTraceOutput)
+            traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.toTrace)
+            -- putStrLn $ "HEVM trace   : " <> show hevmTrace
+            -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.toTrace)
+            assertEqual "Traces, gas, and result must match" traceOK True
+            let resultOK = evmtoolTraceOutput.toOutput.output == hevmTraceResult.out
+            if resultOK then do
+              putStrLn $ "HEVM & evmtool's outputs match: " <> (show evmtoolTraceOutput.toOutput.output)
+              if isNothing simplConcrExprRetval || simplConcrExprRetval == (Just hevmTraceResult.out)
+                 then do
+                   putStr "OK, symbolic interpretation -> concrete calldata -> Expr.simplify gives the same answer."
+                   if isNothing simplConcrExprRetval then putStrLn ", but it was a Nothing, so not strong equivalence"
+                                                     else putStrLn ""
+                   System.Directory.removeFile traceFileName
+                   System.Directory.removeFile traceFileNameJSON
+                   System.Directory.removeFile "alloc-out.json"
+                   System.Directory.removeFile "result.json"
+                 else do
+                   putStrLn $ "concretized expr           : " <> (show concretizedExpr)
+                   putStrLn $ "simplified concretized expr: " <> (show simplConcExpr)
+                   putStrLn $ "return value computed      : " <> (show simplConcrExprRetval)
+                   putStrLn $ "evmtool's return value     : " <> (show hevmTraceResult.out)
+                   assertEqual "Simplified, concretized expression must match evmtool's output." True False
+            else do
+              putStrLn $ "Name of trace file: " <> traceFileName
+              putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
+              T.putStrLn $ "HEVM result: " <> (formatBinary hevmTraceResult.out)
+              T.putStrLn $ "evm result : " <> (formatBinary evmtoolTraceOutput.toOutput.output)
+              putStrLn $ "HEVM result len: " <> (show (BS.length hevmTraceResult.out))
+              putStrLn $ "evm result  len: " <> (show (BS.length evmtoolTraceOutput.toOutput.output))
+            assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
+          evmerr -> do
+            putStrLn $ "Contract exec not successful: " <> show evmerr
+            putStrLn "-> not comparing traces"
+            System.Directory.removeFile "txs.json"
+            System.Directory.removeFile "alloc.json"
+            System.Directory.removeFile "env.json"
     ]
   -- These tests fuzz the simplifier by generating a random expression,
   -- applying some simplification rules, and then using the smt encoding to
@@ -2558,9 +2566,13 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
     Left _ -> Nothing
     Right b -> Just b
 
+-- Create symbolic VM from concrete VM
+symbolify :: VM -> VM
+symbolify vm = vm { _state = vm._state { _calldata = AbstractBuf "calldata" } }
+
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
-runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Maybe ((Expr 'End, [VMTrace], VMTraceResult)))
+runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Either EVM.Error ((Expr 'End, [VMTrace], VMTraceResult)))
 runCodeWithTrace rpcinfo evmToolEnv alloc txn (fromAddr, toAddress) = withSolvers Z3 0 Nothing $ \solvers -> do
   let origVM = vmForRuntimeCode code' calldata' evmToolEnv alloc txn (fromAddr, toAddress)
       calldata' = ConcreteBuf txn.txData
@@ -2568,20 +2580,11 @@ runCodeWithTrace rpcinfo evmToolEnv alloc txn (fromAddr, toAddress) = withSolver
       buildExpr :: SolverGroup -> VM -> IO (Expr End)
       buildExpr s vm = evalStateT (interpret (Fetch.oracle s Nothing) Nothing Nothing runExpr) vm
 
-      -- Create symbolic VM from concrete VM
-      vmEnv :: Env
-      vmEnv = origVM._env
-      vmEnvSym = vmEnv { _storage = AbstractStore }
-      vmState = origVM._state
-      vmStateSym = vmState {_calldata = AbstractBuf "calldata" }
-      symVM :: VM
-      symVM = origVM { _env = vmEnvSym, _state = vmStateSym }
-
-  expr <- buildExpr solvers symVM
+  expr <- buildExpr solvers $ symbolify origVM
   (res, (vm, trace)) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (origVM, [])
-  pure $ case res of
-    Left _ -> Nothing
-    Right _ -> Just (expr, trace, vmres vm)
+  case res of
+    Left x -> pure $ Left x
+    Right _ -> pure $ Right (expr, trace, vmres vm)
 
 vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> VM
 vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress) =
