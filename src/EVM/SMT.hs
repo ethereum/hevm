@@ -95,8 +95,7 @@ declareIntermediates bufs stores =
       encBs = Map.mapWithKey encodeBuf bufs
       sorted = List.sortBy compareFst $ Map.toList $ encSs <> encBs
       decls = fmap snd sorted
-  in SMT2 ([fromText "; intermediate buffers & stores"] <> decls
-          ) mempty
+  in SMT2 ([fromText "; intermediate buffers & stores"] <> decls) mempty
   where
     compareFst (l, _) (r, _) = compare l r
     encodeBuf n expr =
