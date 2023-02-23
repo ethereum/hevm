@@ -249,6 +249,127 @@ emptyEVMToolAlloc = EVMToolAlloc { balance = 0
                                  , nonce = 0
                                  }
 
+getEVMToolRet :: OpContract -> ByteString -> Int -> IO (Maybe EVMToolResult, (Either EVM.Error (Expr 'End, [VMTrace], VMTraceResult)))
+getEVMToolRet contr txData gaslimitExec = do
+  -- NOTE: By removing external calls, we fuzz less
+  --       It should work also when we external calls. Removing for now.
+  contrFixed <- fixContractJumps $ removeExtcalls contr
+  -- NOTE call below will force the interpreter to run out of memory.
+  --      let's try to fix that
+  -- let contrFixed = OpContract [OpPush (Lit 0xfffffff), OpPush (Lit 0x0), OpPush (Lit 0x0), OpCalldatacopy, OpPush (Lit 0xfffffff), OpPush (Lit 0), OpReturn]
+  -- putStrLn $ "Contract to run: " <> (show contrFixed)
+  let contrLits = assemble $ getOpData contrFixed
+      toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
+      toW8fromLitB (LitByte a) = a
+      toW8fromLitB _ = error "Cannot convert non-litB"
+
+      bitcode = BS.pack . Vector.toList $ toW8fromLitB <$> contrLits
+      contrAlloc = EVMToolAlloc{ balance = 0xa493d65e20984bc
+                               , code = bitcode
+                               , nonce = 0x48
+                               }
+      walletAlloc = EVMToolAlloc{ balance = 0x5ffd4878be161d74
+                                , code = BS.empty
+                                , nonce = 0xac
+                                }
+      sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
+      fromAddress :: Addr
+      fromAddress = fromJust $ deriveAddr sk
+      toAddress :: Addr
+      toAddress = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
+      alloc :: Map.Map Addr EVMToolAlloc
+      alloc = Map.fromList ([ (fromAddress, walletAlloc), (toAddress, contrAlloc)])
+      txn = EVM.Transaction.Transaction
+        { txData     = txData
+        , txGasLimit = fromIntegral gaslimitExec
+        , txGasPrice = Just 1
+        , txNonce    = 172
+        , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
+        , txR        = 0 -- will be fixed when we sign
+        , txS        = 0 -- will be fixed when we sign
+        , txV        = 0 -- will be fixed when we sign
+        , txValue    = 0 -- setting this > 0 fails because HEVM doesn't handle value sent in toplevel transaction
+        , txType     = EVM.Transaction.EIP1559Transaction
+        , txAccessList = []
+        , txMaxPriorityFeeGas =  Just 1
+        , txMaxFeePerGas = Just 1
+        }
+      evmToolEnv = EVMToolEnv { _coinbase   =  0xff
+                       , _timestamp   =  Lit 0x3e8
+                       , _number      =  0x0
+                       , _prevRandao  =  0x0
+                       , _gasLimit    =  fromIntegral gaslimitExec
+                       , _baseFee     =  0x0
+                       , _maxCodeSize =  0xfffff
+                       , _schedule    =  FeeSchedule.berlin
+                       , _blockHashes =  blockHashesDefault
+                       }
+      txs = [EVM.Transaction.sign 1 sk txn] -- "1" because of chainId
+
+  -- Run concrete semantics
+  JSON.encodeFile "txs.json" txs
+  JSON.encodeFile "alloc.json" alloc
+  JSON.encodeFile "env.json" evmToolEnv
+  (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
+                               ,"--input.alloc" , "alloc.json"
+                               , "--input.env" , "env.json"
+                               , "--input.txs" , "txs.json"
+                               , "--output.alloc" , "alloc-out.json"
+                               , "--trace.returndata=true"
+                               , "--trace" , "trace.json"
+                               , "--output.result", "result.json"
+                               ] ""
+  Control.Monad.when (exitCode /= ExitSuccess) $ do
+                   putStrLn $ "evmtool exited with code " <> show exitCode
+                   putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
+                   putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
+  evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
+  hevmRun <- runCodeWithTrace Nothing evmToolEnv contrAlloc txn (fromAddress, toAddress)
+  -- putStrLn $ "evmtool's result is: " <> show evmtoolResult
+  -- putStrLn $ "HEVM's result is   : " <> show hevmRun
+  -- putStrLn $ "evmtool's stderr is: " <> evmtoolStderr
+  return (evmtoolResult, hevmRun)
+
+-- Compares traces of evmtool (from go-ethereum) and HEVM
+compareTraces :: [VMTrace] -> [EVMToolTrace] -> IO (Bool)
+compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
+  where
+    go :: [VMTrace] -> [EVMToolTrace] -> IO (Bool)
+    go [] [] = pure True
+    go (a:ax) (b:bx) = do
+      let aOp = a.traceOp
+          bOp = b.evmOp
+          aPc = a.tracePc
+          bPc = b.evmPc
+          aStack = a.traceStack
+          bStack = b.evmStack
+          aGas = fromIntegral a.traceGas
+          bGas = b.evmGas
+      if aGas /= bGas then do
+                          putStrLn "GAS doesn't match:"
+                          putStrLn $ "HEVM's gas   : " <> (show aGas)
+                          putStrLn $ "evmtool's gas: " <> (show bGas)
+                          else
+                          -- putStrLn $ "Gas match   : " <> (show aGas)
+                          return ()
+      if aOp /= bOp || aPc /= bPc then
+                          putStrLn $ "HEVM: " <> (intToOpName aOp) <> " (pc " <> (show aPc) <> ") --- evmtool " <> (intToOpName bOp) <> " (pc " <> (show bPc) <> ")"
+                          else
+                          -- putStrLn $ (intToOpName aOp) <> " pc: " <> (show aPc)
+                          return ()
+      Control.Monad.when (aStack /= bStack) $ do
+                          putStrLn "stacks don't match:"
+                          putStrLn $ "HEVM's stack   : " <> (show aStack)
+                          putStrLn $ "evmtool's stack: " <> (show bStack)
+      if aOp == bOp && aStack == bStack && aPc == bPc && aGas == bGas then go ax bx
+      else pure False
+    go a@(_:_) [] = do
+      putStrLn $ "Stacks don't match. HEVM's trace is longer by:" <> (show a)
+      pure False
+    go [] b@(_:_) = do
+      putStrLn $ "Stacks don't match. evmtool's trace is longer by:" <> (show b)
+      pure False
+
 tests :: TestTree
 tests = testGroup "hevm"
   [ testGroup "StorageTests"
@@ -298,125 +419,11 @@ tests = testGroup "hevm"
   -- the return value to be the same
   , testGroup "contract-quickcheck-run"
     [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract) -> ioProperty $ do
-        -- NOTE: By removing external calls, we fuzz less
-        --       It should work also when we external calls. Removing for now.
-        contrFixed <- fixContractJumps $ removeExtcalls contr
-        -- let contrFixed = OpContract [OpPush (Lit 0xfffffff), OpPush (Lit 0), OpReturn]
-        -- let contrFixed = OpContract [OpPush (Lit 0xfffffff), OpPush (Lit 0x0), OpPush (Lit 0x0), OpCalldatacopy, OpPush (Lit 0xfffffff), OpPush (Lit 0), OpReturn]
-        -- putStrLn $ "Contract to run: " <> (show contrFixed)
         txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
-        -- can get gas difference with low gas here
         gaslimitExec <- generate $ chooseInt (40000, 0xffff)
-        let contrLits = assemble $ getOpData contrFixed
-            toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
-            toW8fromLitB (LitByte a) = a
-            toW8fromLitB _ = error "Cannot convert non-litB"
-
-            bitcode = BS.pack . Vector.toList $ toW8fromLitB <$> contrLits
-            txData = BS.pack $ toEnum <$> txDataRaw
-            contrAlloc = EVMToolAlloc{ balance = 0xa493d65e20984bc
-                                     , code = bitcode
-                                     , nonce = 0x48
-                                     }
-            walletAlloc = EVMToolAlloc{ balance = 0x5ffd4878be161d74
-                                      , code = BS.empty
-                                      , nonce = 0xac
-                                      }
-            sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
-            fromAddress :: Addr
-            fromAddress = fromJust $ deriveAddr sk
-            toAddress :: Addr
-            toAddress = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
-            alloc :: Map.Map Addr EVMToolAlloc
-            alloc = Map.fromList ([ (fromAddress, walletAlloc), (toAddress, contrAlloc)])
-            txn = EVM.Transaction.Transaction
-              { txData     = txData
-              , txGasLimit = fromIntegral gaslimitExec
-              , txGasPrice = Just 1
-              , txNonce    = 172
-              , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
-              , txR        = 0 -- will be fixed when we sign
-              , txS        = 0 -- will be fixed when we sign
-              , txV        = 0 -- will be fixed when we sign
-              , txValue    = 0 -- setting this > 0 fails because HEVM doesn't handle value sent in toplevel transaction
-              , txType     = EVM.Transaction.EIP1559Transaction
-              , txAccessList = []
-              , txMaxPriorityFeeGas =  Just 1
-              , txMaxFeePerGas = Just 1
-              }
-            evmToolEnv = EVMToolEnv { _coinbase   =  0xff
-                             , _timestamp   =  Lit 0x3e8
-                             , _number      =  0x0
-                             , _prevRandao  =  0x0
-                             , _gasLimit    =  fromIntegral gaslimitExec
-                             , _baseFee     =  0x0
-                             , _maxCodeSize =  0xfffff
-                             , _schedule    =  FeeSchedule.berlin
-                             , _blockHashes =  blockHashesDefault
-                             }
-            txs = [EVM.Transaction.sign 1 sk txn] -- "1" because of chainId
-            compareTraces :: [VMTrace] -> [EVMToolTrace] -> IO (Bool)
-            compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
-              where
-                go :: [VMTrace] -> [EVMToolTrace] -> IO (Bool)
-                go [] [] = pure True
-                go (a:ax) (b:bx) = do
-                  let aOp = a.traceOp
-                      bOp = b.evmOp
-                      aPc = a.tracePc
-                      bPc = b.evmPc
-                      aStack = a.traceStack
-                      bStack = b.evmStack
-                      aGas = fromIntegral a.traceGas
-                      bGas = b.evmGas
-                  if aGas /= bGas then do
-                                      putStrLn "GAS doesn't match:"
-                                      putStrLn $ "HEVM's gas   : " <> (show aGas)
-                                      putStrLn $ "evmtool's gas: " <> (show bGas)
-                                      else
-                                      -- putStrLn $ "Gas match   : " <> (show aGas)
-                                      return ()
-                  if aOp /= bOp || aPc /= bPc then
-                                      putStrLn $ "HEVM: " <> (intToOpName aOp) <> " (pc " <> (show aPc) <> ") --- evmtool " <> (intToOpName bOp) <> " (pc " <> (show bPc) <> ")"
-                                      else
-                                      -- putStrLn $ (intToOpName aOp) <> " pc: " <> (show aPc)
-                                      return ()
-                  Control.Monad.when (aStack /= bStack) $ do
-                                      putStrLn "stacks don't match:"
-                                      putStrLn $ "HEVM's stack   : " <> (show aStack)
-                                      putStrLn $ "evmtool's stack: " <> (show bStack)
-                  if aOp == bOp && aStack == bStack && aPc == bPc && aGas == bGas then go ax bx
-                  else pure False
-                go a@(_:_) [] = do
-                  putStrLn $ "Stacks don't match. HEVM's trace is longer by:" <> (show a)
-                  pure False
-                go [] b@(_:_) = do
-                  putStrLn $ "Stacks don't match. evmtool's trace is longer by:" <> (show b)
-                  pure False
-        evmRun <- runCodeWithTrace Nothing evmToolEnv contrAlloc txn (fromAddress, toAddress)
-
-        -- Run concrete semantics
-        JSON.encodeFile "txs.json" txs
-        JSON.encodeFile "alloc.json" alloc
-        JSON.encodeFile "env.json" evmToolEnv
-        (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
-                                     ,"--input.alloc" , "alloc.json"
-                                     , "--input.env" , "env.json"
-                                     , "--input.txs" , "txs.json"
-                                     , "--output.alloc" , "alloc-out.json"
-                                     , "--trace.returndata=true"
-                                     , "--trace" , "trace.json"
-                                     , "--output.result", "result.json"
-                                     ] ""
-        Control.Monad.when (exitCode /= ExitSuccess) $ do
-                         putStrLn $ "evmtool exited with code " <> show exitCode
-                         putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
-                         putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
-        evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
-        putStrLn $ "evmtool's result is: " <> show evmtoolResult
-        putStrLn $ "HEVM's result is   : " <> show evmRun
-        putStrLn $ "evmtool's stderr is: " <> evmtoolStderr
-        case evmRun of
+        let txData = BS.pack $ toEnum <$> txDataRaw
+        (evmtoolResult, hevmRun) <- getEVMToolRet contr txData gaslimitExec
+        case hevmRun of
           (Right (expr, hevmTrace, hevmTraceResult)) -> do
             let
               concretize :: Expr a -> Expr Buf -> Expr a
@@ -440,7 +447,7 @@ tests = testGroup "hevm"
             traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.toTrace)
             -- putStrLn $ "HEVM trace   : " <> show hevmTrace
             -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.toTrace)
-            assertEqual "Traces, gas, and result must match" traceOK True
+            assertEqual "Traces and gas must match" traceOK True
             let resultOK = evmtoolTraceOutput.toOutput.output == hevmTraceResult.out
             if resultOK then do
               putStrLn $ "HEVM & evmtool's outputs match: " <> (show evmtoolTraceOutput.toOutput.output)
