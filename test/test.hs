@@ -301,9 +301,9 @@ tests = testGroup "hevm"
             bitcode = BS.pack . Vector.toList $ toW8fromLitB <$> contrLits
             txData = BS.pack $ toEnum <$> txDataRaw
             contrAlloc = EVMToolAlloc{ balance = 0xa493d65e20984bc
-                                , code = bitcode
-                                , nonce = 0x48
-                                }
+                                     , code = bitcode
+                                     , nonce = 0x48
+                                     }
             walletAlloc = EVMToolAlloc{ balance = 0x5ffd4878be161d74
                                  , code = BS.empty
                                  , nonce = 0xac
