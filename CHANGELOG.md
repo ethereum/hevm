@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Construction of storage counterexamples based on the model returned by the SMT solver.
 - Static binaries for macos
 
+### Changed
+- SMT encoding of buffer length without using uninterpreted functions.
+
 ## [0.50.2] - 2023-01-06
 
 ### Fixed
