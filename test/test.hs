@@ -292,6 +292,7 @@ tests = testGroup "hevm"
         contrFixed <- fixContractJumps $ removeExtcalls contr
         -- putStrLn $ "Contract to run: " <> (show contrFixed)
         txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
+        gaslimitExec <- generate $ chooseInt (0, 0xffffffffff)
         let contrLits = assemble $ getOpData contrFixed
             toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
             toW8fromLitB (LitByte a) = a
@@ -316,7 +317,7 @@ tests = testGroup "hevm"
             alloc = Map.fromList ([ (fromAddress, walletAlloc), (toAddress, contrAlloc)])
             txn = EVM.Transaction.Transaction
               { txData     = txData
-              , txGasLimit = 0xfffffff
+              , txGasLimit = fromIntegral gaslimitExec
               , txGasPrice = Just 1
               , txNonce    = 172
               , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
@@ -333,7 +334,7 @@ tests = testGroup "hevm"
                              , _timestamp   =  Lit 0x3e8
                              , _number      =  0x0
                              , _prevRandao  =  0x0
-                             , _gasLimit    =  0x750a163d
+                             , _gasLimit    =  fromIntegral $ gaslimitExec
                              , _baseFee     =  0x0
                              , _maxCodeSize =  0xfffff
                              , _schedule    =  FeeSchedule.berlin
