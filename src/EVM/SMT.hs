@@ -243,7 +243,7 @@ assertReads props benv senv = concat $ fmap assertRead allReads
     assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
     assertRead (idx, Lit 32, buf) = [PImpl (PGEq idx (bufLength buf)) (PEq (ReadWord idx buf) (Lit 0))]
     assertRead (idx, Lit sz, buf) = fmap (\s -> PImpl (PGEq idx (bufLength buf)) (PEq (ReadByte idx buf) (LitByte (num s)))) [(0::Int)..num sz-1]
-    assertRead (_, _, _) = [] -- cannot generate assertions for accesses of symbolic size
+    assertRead (_, _, _) = error "Cannot generate assertions for accesses of symbolic size"
 
     allReads = filter keepRead $ nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
 
