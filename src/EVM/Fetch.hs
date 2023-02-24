@@ -27,7 +27,6 @@ import Numeric.Natural (Natural)
 import System.Process
 import Prelude hiding (Word)
 
-
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where
   QueryCode :: Addr -> RpcQuery BS.ByteString
@@ -37,58 +36,47 @@ data RpcQuery a where
   QuerySlot :: Addr -> W256 -> RpcQuery W256
   QueryChainId :: RpcQuery W256
 
-
 data BlockNumber = Latest | BlockNumber W256
   deriving (Show, Eq)
 
-
 deriving instance Show (RpcQuery a)
 
-
 type RpcInfo = Maybe (BlockNumber, Text)
-
 
 rpc :: String -> [Value] -> Value
 rpc method args =
   object
-    [ "jsonrpc" .= ("2.0" :: String)
-    , "id" .= Number 1
-    , "method" .= method
-    , "params" .= args
+    [ "jsonrpc" .= ("2.0" :: String),
+      "id" .= Number 1,
+      "method" .= method,
+      "params" .= args
     ]
-
 
 class ToRPC a where
   toRPC :: a -> Value
 
-
 instance ToRPC Addr where
   toRPC = String . pack . show
-
 
 instance ToRPC W256 where
   toRPC = String . pack . show
 
-
 instance ToRPC Bool where
   toRPC = Bool
-
 
 instance ToRPC BlockNumber where
   toRPC Latest = String "latest"
   toRPC (EVM.Fetch.BlockNumber n) = String . pack $ show n
 
-
 readText :: Read a => Text -> a
 readText = read . unpack
 
-
-fetchQuery
-  :: Show a
-  => BlockNumber
-  -> (Value -> IO (Maybe Value))
-  -> RpcQuery a
-  -> IO (Maybe a)
+fetchQuery ::
+  Show a =>
+  BlockNumber ->
+  (Value -> IO (Maybe Value)) ->
+  RpcQuery a ->
+  IO (Maybe a)
 fetchQuery n f q = do
   x <- case q of
     QueryCode addr -> do
@@ -111,42 +99,37 @@ fetchQuery n f q = do
       return $ readText . view _String <$> m
   return x
 
-
 parseBlock :: (AsValue s, Show s) => s -> Maybe EVM.Block
 parseBlock j = do
   coinbase <- readText <$> j ^? key "miner" . _String
   timestamp <- Lit . readText <$> j ^? key "timestamp" . _String
   number <- readText <$> j ^? key "number" . _String
   gasLimit <- readText <$> j ^? key "gasLimit" . _String
-  let
-    baseFee = readText <$> j ^? key "baseFeePerGas" . _String
-    -- It seems unclear as to whether this field should still be called mixHash or renamed to prevRandao
-    -- According to https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4399.md it should be renamed
-    -- but alchemy is still returning mixHash
-    mixhash = readText <$> j ^? key "mixHash" . _String
-    prevRandao = readText <$> j ^? key "prevRandao" . _String
-    difficulty = readText <$> j ^? key "difficulty" . _String
-    prd = case (prevRandao, mixhash, difficulty) of
-      (Just p, _, _) -> p
-      (Nothing, Just mh, Just 0x0) -> mh
-      (Nothing, Just _, Just d) -> d
-      _ -> error "Internal Error: block contains both difficulty and prevRandao"
+  let baseFee = readText <$> j ^? key "baseFeePerGas" . _String
+      -- It seems unclear as to whether this field should still be called mixHash or renamed to prevRandao
+      -- According to https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4399.md it should be renamed
+      -- but alchemy is still returning mixHash
+      mixhash = readText <$> j ^? key "mixHash" . _String
+      prevRandao = readText <$> j ^? key "prevRandao" . _String
+      difficulty = readText <$> j ^? key "difficulty" . _String
+      prd = case (prevRandao, mixhash, difficulty) of
+        (Just p, _, _) -> p
+        (Nothing, Just mh, Just 0x0) -> mh
+        (Nothing, Just _, Just d) -> d
+        _ -> error "Internal Error: block contains both difficulty and prevRandao"
   -- default codesize, default gas limit, default feescedule
   return $ EVM.Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff FeeSchedule.berlin
-
 
 fetchWithSession :: Text -> Session -> Value -> IO (Maybe Value)
 fetchWithSession url sess x = do
   r <- asValue =<< Session.post sess (unpack url) x
   return (r ^? responseBody . key "result")
 
-
-fetchContractWithSession
-  :: BlockNumber -> Text -> Addr -> Session -> IO (Maybe Contract)
+fetchContractWithSession ::
+  BlockNumber -> Text -> Addr -> Session -> IO (Maybe Contract)
 fetchContractWithSession n url addr sess = runMaybeT $ do
-  let
-    fetch :: Show a => RpcQuery a -> IO (Maybe a)
-    fetch = fetchQuery n (fetchWithSession url sess)
+  let fetch :: Show a => RpcQuery a -> IO (Maybe a)
+      fetch = fetchQuery n (fetchWithSession url sess)
 
   theCode <- MaybeT $ fetch (QueryCode addr)
   theNonce <- MaybeT $ fetch (QueryNonce addr)
@@ -158,48 +141,40 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
       & set balance theBalance
       & set external True
 
-
-fetchSlotWithSession
-  :: BlockNumber -> Text -> Session -> Addr -> W256 -> IO (Maybe W256)
+fetchSlotWithSession ::
+  BlockNumber -> Text -> Session -> Addr -> W256 -> IO (Maybe W256)
 fetchSlotWithSession n url sess addr slot =
   fetchQuery n (fetchWithSession url sess) (QuerySlot addr slot)
 
-
-fetchBlockWithSession
-  :: BlockNumber -> Text -> Session -> IO (Maybe Block)
+fetchBlockWithSession ::
+  BlockNumber -> Text -> Session -> IO (Maybe Block)
 fetchBlockWithSession n url sess =
   fetchQuery n (fetchWithSession url sess) QueryBlock
-
 
 fetchBlockFrom :: BlockNumber -> Text -> IO (Maybe Block)
 fetchBlockFrom n url =
   Session.withAPISession
     (fetchBlockWithSession n url)
 
-
 fetchContractFrom :: BlockNumber -> Text -> Addr -> IO (Maybe Contract)
 fetchContractFrom n url addr =
   Session.withAPISession
     (fetchContractWithSession n url addr)
-
 
 fetchSlotFrom :: BlockNumber -> Text -> Addr -> W256 -> IO (Maybe W256)
 fetchSlotFrom n url addr slot =
   Session.withAPISession
     (\s -> fetchSlotWithSession n url s addr slot)
 
-
 http :: Natural -> Maybe Natural -> BlockNumber -> Text -> Fetcher
 http smtjobs smttimeout n url q =
   withSolvers Z3 smtjobs smttimeout $ \s ->
     oracle s (Just (n, url)) q
 
-
 zero :: Natural -> Maybe Natural -> Fetcher
 zero smtjobs smttimeout q =
   withSolvers Z3 smtjobs smttimeout $ \s ->
     oracle s Nothing q
-
 
 -- smtsolving + (http or zero)
 oracle :: SolverGroup -> RpcInfo -> Fetcher
@@ -251,16 +226,13 @@ oracle solvers info q = do
             Nothing ->
               error ("oracle error: " ++ show q)
 
-
 type Fetcher = EVM.Query -> IO (EVM ())
 
-
-{- | Checks which branches are satisfiable, checking the pathconditions for consistency
- if the third argument is true.
- When in debug mode, we do not want to be able to navigate to dead paths,
- but for normal execution paths with inconsistent pathconditions
- will be pruned anyway.
--}
+-- | Checks which branches are satisfiable, checking the pathconditions for consistency
+-- if the third argument is true.
+-- When in debug mode, we do not want to be able to navigate to dead paths,
+-- but for normal execution paths with inconsistent pathconditions
+-- will be pruned anyway.
 checkBranch :: SolverGroup -> Prop -> Prop -> IO EVM.BranchCondition
 checkBranch solvers branchcondition pathconditions = do
   checkSat solvers (assertProps [(branchcondition .&& pathconditions)]) >>= \case

@@ -21,78 +21,66 @@ import EVM.Debug (srcMapCodePos)
 import EVM.Solidity
 import EVM.Types (Addr, W256, abiKeccak, keccak', regexMatches, unlit, unlitByte)
 
-
 data DappInfo = DappInfo
-  { root :: FilePath
-  , solcByName :: Map Text SolcContract
-  , solcByHash :: Map W256 (CodeType, SolcContract)
-  , solcByCode :: [(Code, SolcContract)] -- for contracts with `immutable` vars.
-  , sources :: SourceCache
-  , unitTests :: [(Text, [(Test, [AbiType])])]
-  , abiMap :: Map Word32 Method
-  , eventMap :: Map W256 Event
-  , errorMap :: Map W256 SolError
-  , astIdMap :: Map Int Value
-  , astSrcMap :: SrcMap -> Maybe Value
+  { root :: FilePath,
+    solcByName :: Map Text SolcContract,
+    solcByHash :: Map W256 (CodeType, SolcContract),
+    solcByCode :: [(Code, SolcContract)], -- for contracts with `immutable` vars.
+    sources :: SourceCache,
+    unitTests :: [(Text, [(Test, [AbiType])])],
+    abiMap :: Map Word32 Method,
+    eventMap :: Map W256 Event,
+    errorMap :: Map W256 SolError,
+    astIdMap :: Map Int Value,
+    astSrcMap :: SrcMap -> Maybe Value
   }
-
 
 -- | bytecode modulo immutables, to identify contracts
 data Code = Code
-  { raw :: ByteString
-  , immutableLocations :: [Reference]
+  { raw :: ByteString,
+    immutableLocations :: [Reference]
   }
   deriving (Show)
 
-
 data DappContext = DappContext
-  { info :: DappInfo
-  , env :: Map Addr Contract
+  { info :: DappInfo,
+    env :: Map Addr Contract
   }
 
-
 data Test = ConcreteTest Text | SymbolicTest Text | InvariantTest Text
-
 
 instance Show Test where
   show t = unpack $ extractSig t
 
-
-dappInfo
-  :: FilePath -> Map Text SolcContract -> SourceCache -> DappInfo
+dappInfo ::
+  FilePath -> Map Text SolcContract -> SourceCache -> DappInfo
 dappInfo root solcByName sources =
-  let
-    solcs = Map.elems solcByName
-    astIds = astIdMap $ snd <$> Map.toList sources.asts
-    immutables = filter ((/=) mempty . (.immutableReferences)) solcs
-   in
-    DappInfo
-      { root = root
-      , unitTests = findAllUnitTests solcs
-      , sources = sources
-      , solcByName = solcByName
-      , solcByHash =
-          let
-            f g k = Map.fromList [(g x, (k, x)) | x <- solcs]
-           in
-            mappend
-              (f (.runtimeCodehash) Runtime)
-              (f (.creationCodehash) Creation)
-      , -- contracts with immutable locations can't be id by hash
-        solcByCode =
-          [(Code x.runtimeCode (concat $ Map.elems x.immutableReferences), x) | x <- immutables]
-      , -- Sum up the ABI maps from all the contracts.
-        abiMap = mconcat (map (.abiMap) solcs)
-      , eventMap = mconcat (map (.eventMap) solcs)
-      , errorMap = mconcat (map (.errorMap) solcs)
-      , astIdMap = astIds
-      , astSrcMap = astSrcMap astIds
-      }
-
+  let solcs = Map.elems solcByName
+      astIds = astIdMap $ snd <$> Map.toList sources.asts
+      immutables = filter ((/=) mempty . (.immutableReferences)) solcs
+   in DappInfo
+        { root = root,
+          unitTests = findAllUnitTests solcs,
+          sources = sources,
+          solcByName = solcByName,
+          solcByHash =
+            let f g k = Map.fromList [(g x, (k, x)) | x <- solcs]
+             in mappend
+                  (f (.runtimeCodehash) Runtime)
+                  (f (.creationCodehash) Creation),
+          -- contracts with immutable locations can't be id by hash
+          solcByCode =
+            [(Code x.runtimeCode (concat $ Map.elems x.immutableReferences), x) | x <- immutables],
+          -- Sum up the ABI maps from all the contracts.
+          abiMap = mconcat (map (.abiMap) solcs),
+          eventMap = mconcat (map (.eventMap) solcs),
+          errorMap = mconcat (map (.errorMap) solcs),
+          astIdMap = astIds,
+          astSrcMap = astSrcMap astIds
+        }
 
 emptyDapp :: DappInfo
 emptyDapp = dappInfo "" mempty (SourceCache mempty mempty mempty)
-
 
 -- Dapp unit tests are detected by searching within abi methods
 -- that begin with "test" or "prove", that are in a contract with
@@ -107,10 +95,8 @@ emptyDapp = dappInfo "" mempty (SourceCache mempty mempty mempty)
 unitTestMarkerAbi :: Word32
 unitTestMarkerAbi = abiKeccak (encodeUtf8 "IS_TEST()")
 
-
 findAllUnitTests :: [SolcContract] -> [(Text, [(Test, [AbiType])])]
 findAllUnitTests = findUnitTests ".*:.*\\.(test|prove|invariant).*"
-
 
 mkTest :: Text -> Maybe Test
 mkTest sig
@@ -118,7 +104,6 @@ mkTest sig
   | "prove" `isPrefixOf` sig = Just (SymbolicTest sig)
   | "invariant" `isPrefixOf` sig = Just (InvariantTest sig)
   | otherwise = Nothing
-
 
 findUnitTests :: Text -> ([SolcContract] -> [(Text, [(Test, [AbiType])])])
 findUnitTests match =
@@ -129,14 +114,10 @@ findUnitTests match =
         let testNames = unitTestMethodsFiltered (regexMatches match) c
          in [(c.contractName, testNames) | not (BS.null c.runtimeCode) && not (null testNames)]
 
-
 unitTestMethodsFiltered :: (Text -> Bool) -> (SolcContract -> [(Test, [AbiType])])
 unitTestMethodsFiltered matcher c =
-  let
-    testName method = c.contractName <> "." <> (extractSig (fst method))
-   in
-    filter (matcher . testName) (unitTestMethods c)
-
+  let testName method = c.contractName <> "." <> (extractSig (fst method))
+   in filter (matcher . testName) (unitTestMethods c)
 
 unitTestMethods :: SolcContract -> [(Test, [AbiType])]
 unitTestMethods =
@@ -146,16 +127,13 @@ unitTestMethods =
     >>> filter (isJust . fst)
     >>> fmap (first fromJust)
 
-
 extractSig :: Test -> Text
 extractSig (ConcreteTest sig) = sig
 extractSig (SymbolicTest sig) = sig
 extractSig (InvariantTest sig) = sig
 
-
 traceSrcMap :: DappInfo -> Trace -> Maybe SrcMap
 traceSrcMap dapp trace = srcMap dapp trace._traceContract trace._traceOpIx
-
 
 srcMap :: DappInfo -> Contract -> Int -> Maybe SrcMap
 srcMap dapp contr opIndex = do
@@ -166,14 +144,12 @@ srcMap dapp contr opIndex = do
     (RuntimeCode _) ->
       Seq.lookup opIndex sol.runtimeSrcmap
 
-
 findSrc :: Contract -> DappInfo -> Maybe SolcContract
 findSrc c dapp = do
   hash <- unlit c._codehash
   case Map.lookup hash dapp.solcByHash of
     Just (_, v) -> Just v
     Nothing -> lookupCode c._contractcode dapp
-
 
 lookupCode :: ContractCode -> DappInfo -> Maybe SolcContract
 lookupCode (InitCode c _) a =
@@ -183,13 +159,10 @@ lookupCode (RuntimeCode (ConcreteRuntimeCode c)) a =
     Just x -> return x
     Nothing -> snd <$> find (compareCode c . fst) a.solcByCode
 lookupCode (RuntimeCode (SymbolicRuntimeCode c)) a =
-  let
-    code = BS.pack $ mapMaybe unlitByte $ V.toList c
-   in
-    case snd <$> Map.lookup (keccak' (stripBytecodeMetadata code)) a.solcByHash of
-      Just x -> return x
-      Nothing -> snd <$> find (compareCode code . fst) a.solcByCode
-
+  let code = BS.pack $ mapMaybe unlitByte $ V.toList c
+   in case snd <$> Map.lookup (keccak' (stripBytecodeMetadata code)) a.solcByHash of
+        Just x -> return x
+        Nothing -> snd <$> find (compareCode code . fst) a.solcByCode
 
 compareCode :: ByteString -> Code -> Bool
 compareCode raw (Code template locs) =
@@ -197,7 +170,6 @@ compareCode raw (Code template locs) =
       insert at' len' bs = writeMemory (BS.replicate len' 0) (fromIntegral len') 0 (fromIntegral at') bs
       refined = foldr (\(start, len) acc -> insert start len acc) raw holes'
    in BS.length raw == BS.length template && template == refined
-
 
 showTraceLocation :: DappInfo -> Trace -> Either Text Text
 showTraceLocation dapp trace =

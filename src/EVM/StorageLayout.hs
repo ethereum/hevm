@@ -16,7 +16,6 @@ import EVM.Dapp (DappInfo (..))
 import EVM.Solidity (SlotType (..), SolcContract, creationSrcmap)
 import Prelude hiding (words)
 
-
 -- A contract has all the slots of its inherited contracts.
 --
 -- The slot order is determined by the inheritance linearization order,
@@ -34,37 +33,33 @@ findContractDefinition dapp solc =
     _ ->
       Nothing
 
-
 storageLayout :: DappInfo -> SolcContract -> [Text]
 storageLayout dapp solc =
-  let
-    root :: Value
-    root =
-      fromMaybe
-        Null
-        (findContractDefinition dapp solc)
-   in
-    case preview
-      ( key "attributes"
-          . key "linearizedBaseContracts"
-          . _Array
-      )
-      root of
-      Nothing ->
-        []
-      Just ((reverse . toList) -> linearizedBaseContracts) ->
-        flip
-          concatMap
-          linearizedBaseContracts
-          ( \case
-              Number i ->
-                fromMaybe (error "malformed AST JSON") $
-                  storageVariablesForContract
-                    =<< Map.lookup (floor i) dapp.astIdMap
-              _ ->
-                error "malformed AST JSON"
-          )
-
+  let root :: Value
+      root =
+        fromMaybe
+          Null
+          (findContractDefinition dapp solc)
+   in case preview
+        ( key "attributes"
+            . key "linearizedBaseContracts"
+            . _Array
+        )
+        root of
+        Nothing ->
+          []
+        Just ((reverse . toList) -> linearizedBaseContracts) ->
+          flip
+            concatMap
+            linearizedBaseContracts
+            ( \case
+                Number i ->
+                  fromMaybe (error "malformed AST JSON") $
+                    storageVariablesForContract
+                      =<< Map.lookup (floor i) dapp.astIdMap
+                _ ->
+                  error "malformed AST JSON"
+            )
 
 storageVariablesForContract :: Value -> Maybe [Text]
 storageVariablesForContract node = do
@@ -79,32 +74,29 @@ storageVariablesForContract node = do
       case preview (key "attributes" . key "name" . _String) x of
         Just variableName ->
           mconcat
-            [ variableName
-            , " ("
-            , name
-            , ")"
-            , "\n"
-            , "  Type: "
-            , pack $ show (slotTypeForDeclaration x)
+            [ variableName,
+              " (",
+              name,
+              ")",
+              "\n",
+              "  Type: ",
+              pack $ show (slotTypeForDeclaration x)
             ]
         Nothing ->
           error "malformed variable declaration"
 
-
 nodeIs :: Text -> Value -> Bool
 nodeIs t x = isSourceNode && hasRightName
- where
-  isSourceNode =
-    isJust (preview (key "src") x)
-  hasRightName =
-    Just t == preview (key "name" . _String) x
-
+  where
+    isSourceNode =
+      isJust (preview (key "src") x)
+    hasRightName =
+      Just t == preview (key "name" . _String) x
 
 isStorageVariableDeclaration :: Value -> Bool
 isStorageVariableDeclaration x =
   nodeIs "VariableDeclaration" x
     && preview (key "attributes" . key "constant" . _Bool) x /= Just True
-
 
 slotTypeForDeclaration :: Value -> SlotType
 slotTypeForDeclaration node =
@@ -113,7 +105,6 @@ slotTypeForDeclaration node =
       grokDeclarationType x
     _ ->
       error "malformed AST"
-
 
 grokDeclarationType :: Value -> SlotType
 grokDeclarationType x =
@@ -129,7 +120,6 @@ grokDeclarationType x =
     _ ->
       error ("malformed AST " ++ show x)
 
-
 grokMappingType :: [Value] -> SlotType
 grokMappingType [s, t] =
   case (grokDeclarationType s, grokDeclarationType t) of
@@ -142,12 +132,11 @@ grokMappingType [s, t] =
 grokMappingType _ =
   error "unexpected AST child count for mapping"
 
-
 grokValueType :: Value -> AbiType
 grokValueType x =
-  case ( preview (key "name" . _String) x
-       , preview (key "children" . _Array) x
-       , preview (key "attributes" . key "type" . _String) x
+  case ( preview (key "name" . _String) x,
+         preview (key "children" . _Array) x,
+         preview (key "attributes" . key "type" . _String) x
        ) of
     (Just "ElementaryTypeName", _, Just typeName) ->
       fromMaybe
@@ -158,8 +147,8 @@ grokValueType x =
     (Just "ArrayTypeName", fmap toList -> Just [t], _) ->
       AbiArrayDynamicType (grokValueType t)
     (Just "ArrayTypeName", fmap toList -> Just [t, n], _) ->
-      case ( preview (key "name" . _String) n
-           , preview (key "attributes" . key "value" . _String) n
+      case ( preview (key "name" . _String) n,
+             preview (key "attributes" . key "value" . _String) n
            ) of
         (Just "Literal", Just ((read . unpack) -> i)) ->
           AbiArrayType i (grokValueType t)

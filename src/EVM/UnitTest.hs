@@ -60,77 +60,68 @@ import System.IO (hFlush, stdout)
 import Test.QuickCheck hiding (verbose)
 import Prelude hiding (Word)
 
-
 data UnitTestOptions = UnitTestOptions
-  { rpcInfo :: Fetch.RpcInfo
-  , solvers :: SolverGroup
-  , verbose :: Maybe Int
-  , maxIter :: Maybe Integer
-  , askSmtIters :: Maybe Integer
-  , smtDebug :: Bool
-  , maxDepth :: Maybe Int
-  , smtTimeout :: Maybe Natural
-  , solver :: Maybe Text
-  , covMatch :: Maybe Text
-  , match :: Text
-  , fuzzRuns :: Int
-  , replay :: Maybe (Text, BSLazy.ByteString)
-  , vmModifier :: VM -> VM
-  , dapp :: DappInfo
-  , testParams :: TestVMParams
-  , ffiAllowed :: Bool
+  { rpcInfo :: Fetch.RpcInfo,
+    solvers :: SolverGroup,
+    verbose :: Maybe Int,
+    maxIter :: Maybe Integer,
+    askSmtIters :: Maybe Integer,
+    smtDebug :: Bool,
+    maxDepth :: Maybe Int,
+    smtTimeout :: Maybe Natural,
+    solver :: Maybe Text,
+    covMatch :: Maybe Text,
+    match :: Text,
+    fuzzRuns :: Int,
+    replay :: Maybe (Text, BSLazy.ByteString),
+    vmModifier :: VM -> VM,
+    dapp :: DappInfo,
+    testParams :: TestVMParams,
+    ffiAllowed :: Bool
   }
-
 
 data TestVMParams = TestVMParams
-  { testAddress :: Addr
-  , testCaller :: Addr
-  , testOrigin :: Addr
-  , testGasCreate :: Word64
-  , testGasCall :: Word64
-  , testBaseFee :: W256
-  , testPriorityFee :: W256
-  , testBalanceCreate :: W256
-  , testCoinbase :: Addr
-  , testNumber :: W256
-  , testTimestamp :: W256
-  , testGaslimit :: Word64
-  , testGasprice :: W256
-  , testMaxCodeSize :: W256
-  , testPrevrandao :: W256
-  , testChainId :: W256
+  { testAddress :: Addr,
+    testCaller :: Addr,
+    testOrigin :: Addr,
+    testGasCreate :: Word64,
+    testGasCall :: Word64,
+    testBaseFee :: W256,
+    testPriorityFee :: W256,
+    testBalanceCreate :: W256,
+    testCoinbase :: Addr,
+    testNumber :: W256,
+    testTimestamp :: W256,
+    testGaslimit :: Word64,
+    testGasprice :: W256,
+    testMaxCodeSize :: W256,
+    testPrevrandao :: W256,
+    testChainId :: W256
   }
-
 
 defaultGasForCreating :: Word64
 defaultGasForCreating = 0xffffffffffff
 
-
 defaultGasForInvoking :: Word64
 defaultGasForInvoking = 0xffffffffffff
-
 
 defaultBalanceForTestContract :: W256
 defaultBalanceForTestContract = 0xffffffffffffffffffffffff
 
-
 defaultMaxCodeSize :: W256
 defaultMaxCodeSize = 0xffffffff
 
-
 type ABIMethod = Text
-
 
 -- | Generate VeriOpts from UnitTestOptions
 makeVeriOpts :: UnitTestOptions -> VeriOpts
 makeVeriOpts opts =
   defaultVeriOpts
-    { SymExec.debug = opts.smtDebug
-    , SymExec.maxIter = opts.maxIter
-    , SymExec.askSmtIters = opts.askSmtIters
-    , SymExec.rpcInfo = opts.rpcInfo
+    { SymExec.debug = opts.smtDebug,
+      SymExec.maxIter = opts.maxIter,
+      SymExec.askSmtIters = opts.askSmtIters,
+      SymExec.rpcInfo = opts.rpcInfo
     }
-
 
 -- | Top level CLI endpoint for dapp-test
 dappTest :: UnitTestOptions -> String -> Maybe String -> IO Bool
@@ -146,21 +137,17 @@ dappTest opts solcFile cache' = do
           pure ()
         Just path ->
           -- merge all of the post-vm caches and save into the state
-          let
-            evmcache = mconcat [vm._cache | vm <- vms]
-           in
-            liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts evmcache)
+          let evmcache = mconcat [vm._cache | vm <- vms]
+           in liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts evmcache)
 
       return $ and passing
     Nothing ->
       error ("Failed to read Solidity JSON for `" ++ solcFile ++ "'")
 
-
-{- | Assuming a constructor is loaded, this stepper will run the constructor
- to create the test contract, give it an initial balance, and run `setUp()'.
--}
+-- | Assuming a constructor is loaded, this stepper will run the constructor
+-- to create the test contract, give it an initial balance, and run `setUp()'.
 initializeUnitTest :: UnitTestOptions -> SolcContract -> Stepper ()
-initializeUnitTest UnitTestOptions{..} theContract = do
+initializeUnitTest UnitTestOptions {..} theContract = do
   let addr = testParams.testAddress
 
   Stepper.evm $ do
@@ -191,18 +178,15 @@ initializeUnitTest UnitTestOptions{..} theContract = do
     Left e -> pushTrace (ErrorTrace e)
     _ -> popTrace
 
-
-{- | Assuming a test contract is loaded and initialized, this stepper
- will run the specified test method and return whether it succeeded.
--}
+-- | Assuming a test contract is loaded and initialized, this stepper
+-- will run the specified test method and return whether it succeeded.
 runUnitTest :: UnitTestOptions -> ABIMethod -> AbiValue -> Stepper Bool
 runUnitTest a method args = do
   x <- execTestStepper a method args
   checkFailures a method x
 
-
 execTestStepper :: UnitTestOptions -> ABIMethod -> AbiValue -> Stepper Bool
-execTestStepper UnitTestOptions{..} methodName' method = do
+execTestStepper UnitTestOptions {..} methodName' method = do
   -- Set up the call to the test method
   Stepper.evm $ do
     abiCall testParams (Left (methodName', method))
@@ -213,9 +197,8 @@ execTestStepper UnitTestOptions{..} methodName' method = do
     Left e -> Stepper.evm (pushTrace (ErrorTrace e) >> popTrace) >> pure True
     _ -> pure False
 
-
 exploreStep :: UnitTestOptions -> ByteString -> Stepper Bool
-exploreStep UnitTestOptions{..} bs = do
+exploreStep UnitTestOptions {..} bs = do
   Stepper.evm $ do
     cs <- use (env . contracts)
     abiCall testParams (Right bs)
@@ -231,9 +214,8 @@ exploreStep UnitTestOptions{..} bs = do
     Left e -> Stepper.evm (pushTrace (ErrorTrace e) >> popTrace) >> pure True
     _ -> pure False
 
-
 checkFailures :: UnitTestOptions -> ABIMethod -> Bool -> Stepper Bool
-checkFailures UnitTestOptions{..} method bailed = do
+checkFailures UnitTestOptions {..} method bailed = do
   -- Decide whether the test is supposed to fail or succeed
   let shouldFail = "testFail" `isPrefixOf` method
   if bailed
@@ -252,41 +234,33 @@ checkFailures UnitTestOptions{..} method bailed = do
            in pure (shouldFail == failed)
         c -> error $ "internal error: unexpected failure code: " <> show c
 
-
 -- | Randomly generates the calldata arguments and runs the test
 fuzzTest :: UnitTestOptions -> Text -> [AbiType] -> VM -> Property
-fuzzTest opts@UnitTestOptions{..} sig types vm = forAllShow (genAbiValue (AbiTupleType $ Vector.fromList types)) (show . ByteStringS . encodeAbiValue) $
+fuzzTest opts@UnitTestOptions {..} sig types vm = forAllShow (genAbiValue (AbiTupleType $ Vector.fromList types)) (show . ByteStringS . encodeAbiValue) $
   \args ->
     ioProperty $
       fst <$> runStateT (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (runUnitTest opts sig args)) vm
 
-
 tick :: Text -> IO ()
 tick x = Text.putStr x >> hFlush stdout
 
-
 -- | This is like an unresolved source mapping.
 data OpLocation = OpLocation
-  { srcContract :: Contract
-  , srcOpIx :: Int
+  { srcContract :: Contract,
+    srcOpIx :: Int
   }
   deriving (Show)
-
 
 instance Eq OpLocation where
   (==) (OpLocation a b) (OpLocation a' b') = b == b' && a._contractcode == a'._contractcode
 
-
 instance Ord OpLocation where
   compare (OpLocation a b) (OpLocation a' b') = compare (a._contractcode, b) (a'._contractcode, b')
-
 
 srcMapForOpLocation :: DappInfo -> OpLocation -> Maybe SrcMap
 srcMapForOpLocation dapp (OpLocation contr opIx) = srcMap dapp contr opIx
 
-
 type CoverageState = (VM, MultiSet OpLocation)
-
 
 currentOpLocation :: VM -> OpLocation
 currentOpLocation vm =
@@ -298,12 +272,10 @@ currentOpLocation vm =
         c
         (fromMaybe (error "internal error: op ix") (vmOpIx vm))
 
-
 execWithCoverage :: StateT CoverageState IO VMResult
 execWithCoverage = do
   _ <- runWithCoverage
   fromJust <$> use (_1 . result)
-
 
 runWithCoverage :: StateT CoverageState IO VM
 runWithCoverage = do
@@ -317,94 +289,87 @@ runWithCoverage = do
       runWithCoverage
     Just _ -> pure vm0
 
-
-interpretWithCoverage
-  :: UnitTestOptions
-  -> Stepper a
-  -> StateT CoverageState IO a
-interpretWithCoverage opts@UnitTestOptions{..} =
+interpretWithCoverage ::
+  UnitTestOptions ->
+  Stepper a ->
+  StateT CoverageState IO a
+interpretWithCoverage opts@UnitTestOptions {..} =
   eval . Operational.view
- where
-  eval
-    :: Operational.ProgramView Stepper.Action a
-    -> StateT CoverageState IO a
+  where
+    eval ::
+      Operational.ProgramView Stepper.Action a ->
+      StateT CoverageState IO a
 
-  eval (Operational.Return x) =
-    pure x
-  eval (action Operational.:>>= k) =
-    case action of
-      Stepper.Exec ->
-        execWithCoverage >>= interpretWithCoverage opts . k
-      Stepper.Run ->
-        runWithCoverage >>= interpretWithCoverage opts . k
-      Stepper.Wait q ->
-        do
-          m <- liftIO ((Fetch.oracle solvers rpcInfo) q)
-          zoom _1 (State.state (runState m)) >> interpretWithCoverage opts (k ())
-      Stepper.Ask _ ->
-        error "cannot make choice in this interpreter"
-      Stepper.IOAct q ->
-        zoom _1 (StateT (runStateT q)) >>= interpretWithCoverage opts . k
-      Stepper.EVM m ->
-        zoom _1 (State.state (runState m)) >>= interpretWithCoverage opts . k
+    eval (Operational.Return x) =
+      pure x
+    eval (action Operational.:>>= k) =
+      case action of
+        Stepper.Exec ->
+          execWithCoverage >>= interpretWithCoverage opts . k
+        Stepper.Run ->
+          runWithCoverage >>= interpretWithCoverage opts . k
+        Stepper.Wait q ->
+          do
+            m <- liftIO ((Fetch.oracle solvers rpcInfo) q)
+            zoom _1 (State.state (runState m)) >> interpretWithCoverage opts (k ())
+        Stepper.Ask _ ->
+          error "cannot make choice in this interpreter"
+        Stepper.IOAct q ->
+          zoom _1 (StateT (runStateT q)) >>= interpretWithCoverage opts . k
+        Stepper.EVM m ->
+          zoom _1 (State.state (runState m)) >>= interpretWithCoverage opts . k
 
-
-coverageReport
-  :: DappInfo
-  -> MultiSet SrcMap
-  -> Map Text (Vector (Int, ByteString))
+coverageReport ::
+  DappInfo ->
+  MultiSet SrcMap ->
+  Map Text (Vector (Int, ByteString))
 coverageReport dapp cov =
-  let
-    sources :: SourceCache
-    sources = dapp.sources
+  let sources :: SourceCache
+      sources = dapp.sources
 
-    allPositions :: Set (Text, Int)
-    allPositions =
-      ( Set.fromList
-          . mapMaybe (srcMapCodePos sources)
-          . toList
-          $ mconcat
-            ( dapp.solcByName
-                & Map.elems
-                & map (\x -> x.runtimeSrcmap <> x.creationSrcmap)
-            )
-      )
-
-    srcMapCov :: MultiSet (Text, Int)
-    srcMapCov = MultiSet.mapMaybe (srcMapCodePos sources) cov
-
-    linesByName :: Map Text (Vector ByteString)
-    linesByName =
-      Map.fromList $
-        zipWith
-          (\(name, _) lines' -> (name, lines'))
-          sources.files
-          sources.lines
-
-    f :: Text -> Vector ByteString -> Vector (Int, ByteString)
-    f name =
-      Vector.imap
-        ( \i bs ->
-            let
-              n =
-                if Set.member (name, i + 1) allPositions
-                  then MultiSet.occur (name, i + 1) srcMapCov
-                  else -1
-             in
-              (n, bs)
+      allPositions :: Set (Text, Int)
+      allPositions =
+        ( Set.fromList
+            . mapMaybe (srcMapCodePos sources)
+            . toList
+            $ mconcat
+              ( dapp.solcByName
+                  & Map.elems
+                  & map (\x -> x.runtimeSrcmap <> x.creationSrcmap)
+              )
         )
-   in
-    Map.mapWithKey f linesByName
 
+      srcMapCov :: MultiSet (Text, Int)
+      srcMapCov = MultiSet.mapMaybe (srcMapCodePos sources) cov
 
+      linesByName :: Map Text (Vector ByteString)
+      linesByName =
+        Map.fromList $
+          zipWith
+            (\(name, _) lines' -> (name, lines'))
+            sources.files
+            sources.lines
+
+      f :: Text -> Vector ByteString -> Vector (Int, ByteString)
+      f name =
+        Vector.imap
+          ( \i bs ->
+              let n =
+                    if Set.member (name, i + 1) allPositions
+                      then MultiSet.occur (name, i + 1) srcMapCov
+                      else -1
+               in (n, bs)
+          )
+   in Map.mapWithKey f linesByName
+
+coverageForUnitTestContract ::
+  UnitTestOptions ->
+  Map Text SolcContract ->
+  SourceCache ->
+  (Text, [(Test, [AbiType])]) ->
+  IO (MultiSet SrcMap)
 coverageForUnitTestContract
-  :: UnitTestOptions
-  -> Map Text SolcContract
-  -> SourceCache
-  -> (Text, [(Test, [AbiType])])
-  -> IO (MultiSet SrcMap)
-coverageForUnitTestContract
-  opts@(UnitTestOptions{..})
+  opts@(UnitTestOptions {..})
   contractMap
   _
   (name, testNames) = do
@@ -425,13 +390,12 @@ coverageForUnitTestContract
             (vm0, mempty)
 
         -- Define the thread spawner for test cases
-        let
-          runOne' (test, _) = spawn_ . liftIO $ do
-            (_, (_, cov)) <-
-              runStateT
-                (interpretWithCoverage opts (runUnitTest opts (extractSig test) emptyAbi))
-                (vm1, mempty)
-            pure cov
+        let runOne' (test, _) = spawn_ . liftIO $ do
+              (_, (_, cov)) <-
+                runStateT
+                  (interpretWithCoverage opts (runUnitTest opts (extractSig test) emptyAbi))
+                  (vm1, mempty)
+              pure cov
         -- Run all the test cases in parallel and gather their coverages
         covs <-
           runParIO (mapM runOne' testNames >>= mapM Par.get)
@@ -441,14 +405,13 @@ coverageForUnitTestContract
 
         pure (MultiSet.mapMaybe (srcMapForOpLocation dapp) cov2)
 
-
+runUnitTestContract ::
+  UnitTestOptions ->
+  Map Text SolcContract ->
+  (Text, [(Test, [AbiType])]) ->
+  IO [(Bool, VM)]
 runUnitTestContract
-  :: UnitTestOptions
-  -> Map Text SolcContract
-  -> (Text, [(Test, [AbiType])])
-  -> IO [(Bool, VM)]
-runUnitTestContract
-  opts@(UnitTestOptions{..})
+  opts@(UnitTestOptions {..})
   contractMap
   (name, testSigs) = do
     -- Print a header
@@ -484,16 +447,15 @@ runUnitTestContract
             tick (Data.Text.pack $ show $ failOutput vm1 opts "setUp()")
             pure [(False, vm1)]
           Just (VMSuccess _) -> do
-            let
-              runCache
-                :: ([(Either Text Text, VM)], VM)
-                -> (Test, [AbiType])
-                -> IO ([(Either Text Text, VM)], VM)
-              runCache (results, vm) (test, types) = do
-                (t, r, vm') <- runTest opts vm (test, types)
-                liftIO $ Text.putStrLn t
-                let vmCached = vm{_cache = vm'._cache}
-                pure (((r, vm') : results), vmCached)
+            let runCache ::
+                  ([(Either Text Text, VM)], VM) ->
+                  (Test, [AbiType]) ->
+                  IO ([(Either Text Text, VM)], VM)
+                runCache (results, vm) (test, types) = do
+                  (t, r, vm') <- runTest opts vm (test, types)
+                  liftIO $ Text.putStrLn t
+                  let vmCached = vm {_cache = vm'._cache}
+                  pure (((r, vm') : results), vmCached)
 
             -- Run all the test cases and print their status updates,
             -- accumulating the vm cache throughout
@@ -509,10 +471,9 @@ runUnitTestContract
 
             pure [(isRight r, vm) | (r, vm) <- details]
 
-
 runTest :: UnitTestOptions -> VM -> (Test, [AbiType]) -> IO (Text, Either Text Text, VM)
-runTest opts@UnitTestOptions{} vm (ConcreteTest testName, []) = liftIO $ runOne opts vm testName emptyAbi
-runTest opts@UnitTestOptions{..} vm (ConcreteTest testName, types) = liftIO $ case replay of
+runTest opts@UnitTestOptions {} vm (ConcreteTest testName, []) = liftIO $ runOne opts vm testName emptyAbi
+runTest opts@UnitTestOptions {..} vm (ConcreteTest testName, types) = liftIO $ case replay of
   Nothing ->
     fuzzRun opts vm testName types
   Just (sig, callData) ->
@@ -521,7 +482,7 @@ runTest opts@UnitTestOptions{..} vm (ConcreteTest testName, types) = liftIO $ ca
         runOne opts vm testName $
           decodeAbiValue (AbiTupleType (Vector.fromList types)) callData
       else fuzzRun opts vm testName types
-runTest opts@UnitTestOptions{..} vm (InvariantTest testName, []) = liftIO $ case replay of
+runTest opts@UnitTestOptions {..} vm (InvariantTest testName, []) = liftIO $ case replay of
   Nothing -> exploreRun opts vm testName []
   Just (sig, cds) ->
     if sig == testName
@@ -530,19 +491,16 @@ runTest opts@UnitTestOptions{..} vm (InvariantTest testName, []) = liftIO $ case
 runTest _ _ (InvariantTest _, types) = error $ "invariant testing with arguments: " <> show types <> " is not implemented (yet!)"
 runTest opts vm (SymbolicTest testName, types) = symRun opts vm testName types
 
-
 type ExploreTx = (Addr, Addr, ByteString, W256)
-
 
 decodeCalls :: BSLazy.ByteString -> [ExploreTx]
 decodeCalls b = fromMaybe (error "could not decode replay data") $ do
   List v <- rlpdecode $ BSLazy.toStrict b
   pure $ unList <$> v
- where
-  unList (List [BS caller', BS target, BS cd, BS ts]) =
-    (num (word caller'), num (word target), cd, word ts)
-  unList _ = error "fix me with better types"
-
+  where
+    unList (List [BS caller', BS target, BS cd, BS ts]) =
+      (num (word caller'), num (word target), cd, word ts)
+    unList _ = error "fix me with better types"
 
 -- | Runs an invariant test, calls the invariant before execution begins
 initialExplorationStepper :: UnitTestOptions -> ABIMethod -> [ExploreTx] -> [Addr] -> Int -> Stepper (Bool, RLP)
@@ -553,10 +511,9 @@ initialExplorationStepper opts'' testName replayData targets i = do
     then explorationStepper opts'' testName replayData targets history i
     else pure (False, history)
 
-
 explorationStepper :: UnitTestOptions -> ABIMethod -> [ExploreTx] -> [Addr] -> RLP -> Int -> Stepper (Bool, RLP)
 explorationStepper _ _ _ _ history 0 = return (True, history)
-explorationStepper opts@UnitTestOptions{..} testName replayData targets (List history) i = do
+explorationStepper opts@UnitTestOptions {..} testName replayData targets (List history) i = do
   (caller', target, cd, timestamp') <-
     case preview (ix (i - 1)) replayData of
       Just v -> return v
@@ -580,15 +537,15 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
                       -- pick all contracts with known compiler artifacts
                       fmap fromJust (Map.filter isJust $ Map.fromList [(addr, lookupCode c._contractcode dapp) | (addr, c) <- Map.toList cs])
               selected =
-                [ ( addr
-                  , fromMaybe (error ("no src found for: " <> show addr)) $
+                [ ( addr,
+                    fromMaybe (error ("no src found for: " <> show addr)) $
                       lookupCode
                         ( fromMaybe (error $ "contract not found: " <> show addr) $
                             Map.lookup addr cs
                         )._contractcode
                         dapp
                   )
-                | addr <- targets
+                  | addr <- targets
                 ]
           -- go to IO and generate a random valid call to any known contract
           liftIO $ do
@@ -605,8 +562,8 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
                 else
                   generate $
                     frequency
-                      [ (90, genAbiValue AbiAddressType)
-                      , (10, AbiAddress <$> elements knownEOAs)
+                      [ (90, genAbiValue AbiAddressType),
+                        (10, AbiAddress <$> elements knownEOAs)
                       ]
             -- make a call with random valid data to the function
             args <- generate $ genAbiValue (AbiTupleType $ Vector.fromList types)
@@ -615,7 +572,7 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
             timepassed <- num <$> generate (arbitrarySizedNatural :: Gen Word32)
             let ts = fromMaybe (error "symbolic timestamp not supported here") $ maybeLitWord vm._block._timestamp
             return (caller', target, cd, num ts + timepassed)
-  let opts' = opts{testParams = testParams{testAddress = target, testCaller = caller', testTimestamp = timestamp'}}
+  let opts' = opts {testParams = testParams {testAddress = target, testCaller = caller', testTimestamp = timestamp'}}
       thisCallRLP = List [BS $ word160Bytes caller', BS $ word160Bytes target, BS cd, BS $ word256Bytes timestamp']
   -- set the timestamp
   Stepper.evm $ assign (block . timestamp) (Lit timestamp')
@@ -623,7 +580,7 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
   bailed <- exploreStep opts' cd
   Stepper.evm popTrace
   let newHistory = if bailed then List history else List (thisCallRLP : history)
-      opts'' = opts{testParams = testParams{testTimestamp = timestamp'}}
+      opts'' = opts {testParams = testParams {testTimestamp = timestamp'}}
       carryOn = explorationStepper opts'' testName replayData targets newHistory (i - 1)
   -- if we didn't revert, run the test function
   if bailed
@@ -635,9 +592,8 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
         else pure (False, List (thisCallRLP : history))
 explorationStepper _ _ _ _ _ _ = error "malformed rlp"
 
-
 getTargetContracts :: UnitTestOptions -> Stepper [Addr]
-getTargetContracts UnitTestOptions{..} = do
+getTargetContracts UnitTestOptions {..} = do
   vm <- Stepper.evm get
   let contract' = fromJust $ currentContract vm
       theAbi = (fromJust $ lookupCode contract'._contractcode dapp).abiMap
@@ -661,9 +617,8 @@ getTargetContracts UnitTestOptions{..} = do
            in pure targets
         _ -> error "internal error: unexpected failure code"
 
-
 exploreRun :: UnitTestOptions -> VM -> ABIMethod -> [ExploreTx] -> IO (Text, Either Text Text, VM)
-exploreRun opts@UnitTestOptions{..} initialVm testName replayTxs = do
+exploreRun opts@UnitTestOptions {..} initialVm testName replayTxs = do
   let oracle = Fetch.oracle solvers rpcInfo
   (targets, _) <- runStateT (EVM.Stepper.interpret oracle (getTargetContracts opts)) initialVm
   let depth = fromMaybe 20 maxDepth
@@ -682,9 +637,9 @@ exploreRun opts@UnitTestOptions{..} initialVm testName replayTxs = do
   if x
     then
       return
-        ( "\x1b[32m[PASS]\x1b[0m " <> testName <> " (runs: " <> (pack $ show fuzzRuns) <> ", depth: " <> pack (show depth) <> ")"
-        , Right (passOutput vm' opts testName)
-        , vm' -- no canonical "post vm"
+        ( "\x1b[32m[PASS]\x1b[0m " <> testName <> " (runs: " <> (pack $ show fuzzRuns) <> ", depth: " <> pack (show depth) <> ")",
+          Right (passOutput vm' opts testName),
+          vm' -- no canonical "post vm"
         )
     else
       let replayText =
@@ -693,17 +648,15 @@ exploreRun opts@UnitTestOptions{..} initialVm testName replayTxs = do
               else " (replayed)"
        in return ("\x1b[31m[FAIL]\x1b[0m " <> testName <> replayText, Left (failOutput vm' opts testName), vm')
 
-
 execTest :: UnitTestOptions -> VM -> ABIMethod -> AbiValue -> IO (Bool, VM)
-execTest opts@UnitTestOptions{..} vm testName args =
+execTest opts@UnitTestOptions {..} vm testName args =
   runStateT
     (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (execTestStepper opts testName args))
     vm
 
-
 -- | Define the thread spawner for normal test cases
 runOne :: UnitTestOptions -> VM -> ABIMethod -> AbiValue -> IO (Text, Either Text Text, VM)
-runOne opts@UnitTestOptions{..} vm testName args = do
+runOne opts@UnitTestOptions {..} vm testName args = do
   let argInfo = pack (if args == emptyAbi then "" else " with arguments: " <> show args)
   (bailed, vm') <- execTest opts vm testName args
   (success, vm'') <-
@@ -720,9 +673,9 @@ runOne opts@UnitTestOptions{..} vm testName args = do
                 <> argInfo
                 <> " (gas: "
                 <> gasText
-                <> ")"
-            , Right (passOutput vm'' opts testName)
-            , vm''
+                <> ")",
+              Right (passOutput vm'' opts testName),
+              vm''
             )
     else
       if bailed
@@ -730,31 +683,30 @@ runOne opts@UnitTestOptions{..} vm testName args = do
           pure
             ( "\x1b[31m[BAIL]\x1b[0m "
                 <> testName
-                <> argInfo
-            , Left (failOutput vm'' opts testName)
-            , vm''
+                <> argInfo,
+              Left (failOutput vm'' opts testName),
+              vm''
             )
         else
           pure
             ( "\x1b[31m[FAIL]\x1b[0m "
                 <> testName
-                <> argInfo
-            , Left (failOutput vm'' opts testName)
-            , vm''
+                <> argInfo,
+              Left (failOutput vm'' opts testName),
+              vm''
             )
-
 
 -- | Define the thread spawner for property based tests
 fuzzRun :: UnitTestOptions -> VM -> Text -> [AbiType] -> IO (Text, Either Text Text, VM)
-fuzzRun opts@UnitTestOptions{..} vm testName types = do
+fuzzRun opts@UnitTestOptions {..} vm testName types = do
   let args =
         Args
-          { replay = Nothing
-          , maxSuccess = fuzzRuns
-          , maxDiscardRatio = 10
-          , maxSize = 100
-          , chatty = isJust verbose
-          , maxShrinks = maxBound
+          { replay = Nothing,
+            maxSuccess = fuzzRuns,
+            maxDiscardRatio = 10,
+            maxSize = 100,
+            chatty = isJust verbose,
+            maxShrinks = maxBound
           }
   quickCheckWithResult args (fuzzTest opts testName types vm) >>= \case
     Success numTests _ _ _ _ _ ->
@@ -763,11 +715,11 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
             <> testName
             <> " (runs: "
             <> (pack $ show numTests)
-            <> ")"
-        , -- this isn't the post vm we actually want, as we
+            <> ")",
+          -- this isn't the post vm we actually want, as we
           -- can't retrieve the correct vm from quickcheck
-          Right (passOutput vm opts testName)
-        , vm
+          Right (passOutput vm opts testName),
+          vm
         )
     Failure _ _ _ _ _ _ _ _ _ _ failCase _ _ ->
       let abiValue = decodeAbiValue (AbiTupleType (Vector.fromList types)) $ BSLazy.fromStrict $ hexText (pack $ concat failCase)
@@ -788,22 +740,21 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
                   <> testName
                   <> "\",\""
                   <> (pack (concat failCase))
-                  <> "\")'\nto debug it."
-              , Left (failOutput vm' opts testName)
-              , vm'
+                  <> "\")'\nto debug it.",
+                Left (failOutput vm' opts testName),
+                vm'
               )
     _ ->
       pure
         ( "\x1b[31m[OOPS]\x1b[0m "
-            <> testName
-        , Left (failOutput vm opts testName)
-        , vm
+            <> testName,
+          Left (failOutput vm opts testName),
+          vm
         )
-
 
 -- | Define the thread spawner for symbolic tests
 symRun :: UnitTestOptions -> VM -> Text -> [AbiType] -> IO (Text, Either Text Text, VM)
-symRun opts@UnitTestOptions{..} vm testName types = do
+symRun opts@UnitTestOptions {..} vm testName types = do
   let cd = symCalldata testName types [] (AbstractBuf "txdata")
       shouldFail = "proveFail" `isPrefixOf` testName
       testContract = vm._state._contract
@@ -846,59 +797,54 @@ symRun opts@UnitTestOptions{..} vm testName types = do
       let y = symFailure opts testName (fst cd) types x
       return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y, vm)
 
-
 symFailure :: UnitTestOptions -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> Text
-symFailure UnitTestOptions{..} testName cd types failures' =
+symFailure UnitTestOptions {..} testName cd types failures' =
   mconcat
-    [ "Failure: "
-    , testName
-    , "\n\n"
-    , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
+    [ "Failure: ",
+      testName,
+      "\n\n",
+      intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
     ]
- where
-  ctx = DappContext{info = dapp, env = mempty}
-  showRes = \case
-    Return _ _ _ ->
-      if "proveFail" `isPrefixOf` testName
-        then "Successful execution"
-        else "Failed: DSTest Assertion Violation"
-    res ->
-      -- let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
-      let ?context = ctx
-       in Text.pack $ prettyvmresult res
-  mkMsg (leaf, cex) =
-    Text.unlines
-      [ "Counterexample:"
-      , ""
-      , "  result:   " <> showRes leaf
-      , "  calldata: " <> let ?context = ctx in prettyCalldata cex cd testName types
-      , case verbose of
-          -- Just _ -> unlines
-          -- [ ""
-          -- , unpack $ indentLines 2 (showTraceTree dapp vm)
-          -- ]
-          _ -> ""
-      ]
-
+  where
+    ctx = DappContext {info = dapp, env = mempty}
+    showRes = \case
+      Return _ _ _ ->
+        if "proveFail" `isPrefixOf` testName
+          then "Successful execution"
+          else "Failed: DSTest Assertion Violation"
+      res ->
+        -- let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
+        let ?context = ctx
+         in Text.pack $ prettyvmresult res
+    mkMsg (leaf, cex) =
+      Text.unlines
+        [ "Counterexample:",
+          "",
+          "  result:   " <> showRes leaf,
+          "  calldata: " <> let ?context = ctx in prettyCalldata cex cd testName types,
+          case verbose of
+            -- Just _ -> unlines
+            -- [ ""
+            -- , unpack $ indentLines 2 (showTraceTree dapp vm)
+            -- ]
+            _ -> ""
+        ]
 
 prettyCalldata :: (?context :: DappContext) => SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
 prettyCalldata cex buf sig types = head (Text.splitOn "(" sig) <> showCalldata cex types buf
 
-
 showCalldata :: (?context :: DappContext) => SMTCex -> [AbiType] -> Expr Buf -> Text
 showCalldata cex tps buf = "(" <> intercalate "," (fmap showVal vals) <> ")"
- where
-  argdata = Expr.drop 4 $ simplify $ subModel cex buf
-  vals = case decodeBuf tps argdata of
-    CAbi v -> v
-    _ -> error $ "Internal Error: unable to abi decode function arguments:\n" <> (Text.unpack $ formatExpr argdata)
-
+  where
+    argdata = Expr.drop 4 $ simplify $ subModel cex buf
+    vals = case decodeBuf tps argdata of
+      CAbi v -> v
+      _ -> error $ "Internal Error: unable to abi decode function arguments:\n" <> (Text.unpack $ formatExpr argdata)
 
 showVal :: AbiValue -> Text
 showVal (AbiBytes _ bs) = formatBytes bs
 showVal (AbiAddress addr) = Text.pack . show $ addr
 showVal v = Text.pack . show $ v
-
 
 -- prettyCalldata :: (?context :: DappContext) => Expr Buf -> Text -> [AbiType]-> IO Text
 -- prettyCalldata buf sig types = do
@@ -909,7 +855,7 @@ showVal v = Text.pack . show $ v
 --   pure $ (head (Text.splitOn "(" sig)) <> showCall types (ConcreteBuffer cd)
 
 execSymTest :: UnitTestOptions -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper (Expr End)
-execSymTest UnitTestOptions{..} method cd = do
+execSymTest UnitTestOptions {..} method cd = do
   -- Set up the call to the test method
   Stepper.evm $ do
     makeTxCall testParams cd
@@ -917,61 +863,55 @@ execSymTest UnitTestOptions{..} method cd = do
   -- Try running the test method
   runExpr
 
-
 checkSymFailures :: UnitTestOptions -> Stepper VM
-checkSymFailures UnitTestOptions{..} = do
+checkSymFailures UnitTestOptions {..} = do
   -- Ask whether any assertions failed
   Stepper.evm $ do
     popTrace
     abiCall testParams (Left ("failed()", emptyAbi))
   Stepper.runFully
 
-
 indentLines :: Int -> Text -> Text
 indentLines n s =
   let p = Text.replicate n " "
    in Text.unlines (map (p <>) (Text.lines s))
 
-
 passOutput :: VM -> UnitTestOptions -> Text -> Text
-passOutput vm UnitTestOptions{..} testName =
-  let ?context = DappContext{info = dapp, env = vm._env._contracts}
+passOutput vm UnitTestOptions {..} testName =
+  let ?context = DappContext {info = dapp, env = vm._env._contracts}
    in let v = fromMaybe 0 verbose
        in if (v > 1)
             then
               mconcat
-                [ "Success: "
-                , fromMaybe "" (stripSuffix "()" testName)
-                , "\n"
-                , if (v > 2) then indentLines 2 (showTraceTree dapp vm) else ""
-                , indentLines 2 (formatTestLogs dapp.eventMap vm._logs)
-                , "\n"
+                [ "Success: ",
+                  fromMaybe "" (stripSuffix "()" testName),
+                  "\n",
+                  if (v > 2) then indentLines 2 (showTraceTree dapp vm) else "",
+                  indentLines 2 (formatTestLogs dapp.eventMap vm._logs),
+                  "\n"
                 ]
             else ""
 
-
 -- TODO
 failOutput :: VM -> UnitTestOptions -> Text -> Text
-failOutput vm UnitTestOptions{..} testName =
-  let ?context = DappContext{info = dapp, env = vm._env._contracts}
+failOutput vm UnitTestOptions {..} testName =
+  let ?context = DappContext {info = dapp, env = vm._env._contracts}
    in mconcat
-        [ "Failure: "
-        , fromMaybe "" (stripSuffix "()" testName)
-        , "\n"
-        , case verbose of
+        [ "Failure: ",
+          fromMaybe "" (stripSuffix "()" testName),
+          "\n",
+          case verbose of
             Just _ -> indentLines 2 (showTraceTree dapp vm)
-            _ -> ""
-        , indentLines 2 (formatTestLogs dapp.eventMap vm._logs)
-        , "\n"
+            _ -> "",
+          indentLines 2 (formatTestLogs dapp.eventMap vm._logs),
+          "\n"
         ]
-
 
 formatTestLogs :: (?context :: DappContext) => Map W256 Event -> [Expr Log] -> Text
 formatTestLogs events xs =
   case catMaybes (toList (fmap (formatTestLog events) xs)) of
     [] -> "\n"
     ys -> "\n" <> intercalate "\n" ys <> "\n\n"
-
 
 -- Here we catch and render some special logs emitted by ds-test,
 -- with the intent to then present them in a separate view to the
@@ -1009,33 +949,31 @@ formatTestLog events (LogEntry _ args (topic : _)) =
         "log_named_int(bytes32, int256)" -> log_named
         "log_named_uint(bytes32, uint256)" -> log_named
         _ -> Nothing
-     where
-      ts = unindexed types
-      unquote = Text.dropAround (\c -> c == '"' || c == '«' || c == '»')
-      log_unnamed =
-        Just $ showValue (head ts) args
-      log_named =
-        let (key, val) = case take 2 (textValues ts args) of
-              [k, v] -> (k, v)
-              _ -> error "shouldn't happen"
-         in Just $ unquote key <> ": " <> val
-      showDecimal dec val =
-        pack $ show $ Decimal (num dec) val
-      log_named_decimal =
-        case args of
-          (ConcreteBuf b) ->
-            case toList $ runGet (getAbiSeq (length ts) ts) (BSLazy.fromStrict b) of
-              [key, (AbiUInt 256 val), (AbiUInt 256 dec)] ->
-                Just $ (unquote (showAbiValue key)) <> ": " <> showDecimal dec val
-              [key, (AbiInt 256 val), (AbiUInt 256 dec)] ->
-                Just $ (unquote (showAbiValue key)) <> ": " <> showDecimal dec val
-              _ -> Nothing
-          _ -> Just "<symbolic decimal>"
-
+      where
+        ts = unindexed types
+        unquote = Text.dropAround (\c -> c == '"' || c == '«' || c == '»')
+        log_unnamed =
+          Just $ showValue (head ts) args
+        log_named =
+          let (key, val) = case take 2 (textValues ts args) of
+                [k, v] -> (k, v)
+                _ -> error "shouldn't happen"
+           in Just $ unquote key <> ": " <> val
+        showDecimal dec val =
+          pack $ show $ Decimal (num dec) val
+        log_named_decimal =
+          case args of
+            (ConcreteBuf b) ->
+              case toList $ runGet (getAbiSeq (length ts) ts) (BSLazy.fromStrict b) of
+                [key, (AbiUInt 256 val), (AbiUInt 256 dec)] ->
+                  Just $ (unquote (showAbiValue key)) <> ": " <> showDecimal dec val
+                [key, (AbiInt 256 val), (AbiUInt 256 dec)] ->
+                  Just $ (unquote (showAbiValue key)) <> ": " <> showDecimal dec val
+                _ -> Nothing
+            _ -> Just "<symbolic decimal>"
 
 word32Bytes :: Word32 -> ByteString
 word32Bytes x = BS.pack [byteAt x (3 - i) | i <- [0 .. 3]]
-
 
 abiCall :: TestVMParams -> Either (Text, AbiValue) ByteString -> EVM ()
 abiCall params args =
@@ -1044,9 +982,8 @@ abiCall params args =
         Right b -> b
    in makeTxCall params (ConcreteBuf cd, [])
 
-
 makeTxCall :: TestVMParams -> (Expr Buf, [Prop]) -> EVM ()
-makeTxCall TestVMParams{..} (cd, cdProps) = do
+makeTxCall TestVMParams {..} (cd, cdProps) = do
   resetState
   assign (tx . isCreate) False
   loadContract testAddress
@@ -1060,46 +997,42 @@ makeTxCall TestVMParams{..} (cd, cdProps) = do
   vm <- get
   put $ initTx vm
 
-
 initialUnitTestVm :: UnitTestOptions -> SolcContract -> VM
-initialUnitTestVm (UnitTestOptions{..}) theContract =
-  let
-    TestVMParams{..} = testParams
-    vm =
-      makeVm $
-        VMOpts
-          { vmoptContract = initialContract (InitCode theContract.creationCode mempty)
-          , vmoptCalldata = mempty
-          , vmoptValue = Lit 0
-          , vmoptAddress = testAddress
-          , vmoptCaller = litAddr testCaller
-          , vmoptOrigin = testOrigin
-          , vmoptGas = testGasCreate
-          , vmoptGaslimit = testGasCreate
-          , vmoptCoinbase = testCoinbase
-          , vmoptNumber = testNumber
-          , vmoptTimestamp = Lit testTimestamp
-          , vmoptBlockGaslimit = testGaslimit
-          , vmoptGasprice = testGasprice
-          , vmoptBaseFee = testBaseFee
-          , vmoptPriorityFee = testPriorityFee
-          , vmoptMaxCodeSize = testMaxCodeSize
-          , vmoptPrevRandao = testPrevrandao
-          , vmoptSchedule = FeeSchedule.berlin
-          , vmoptChainId = testChainId
-          , vmoptCreate = True
-          , vmoptStorageBase = Concrete
-          , vmoptTxAccessList = mempty -- TODO: support unit test access lists???
-          , vmoptAllowFFI = ffiAllowed
-          }
-    creator =
-      initialContract (RuntimeCode (ConcreteRuntimeCode ""))
-        & set nonce 1
-        & set balance testBalanceCreate
-   in
-    vm
-      & set (env . contracts . at ethrunAddress) (Just creator)
-
+initialUnitTestVm (UnitTestOptions {..}) theContract =
+  let TestVMParams {..} = testParams
+      vm =
+        makeVm $
+          VMOpts
+            { vmoptContract = initialContract (InitCode theContract.creationCode mempty),
+              vmoptCalldata = mempty,
+              vmoptValue = Lit 0,
+              vmoptAddress = testAddress,
+              vmoptCaller = litAddr testCaller,
+              vmoptOrigin = testOrigin,
+              vmoptGas = testGasCreate,
+              vmoptGaslimit = testGasCreate,
+              vmoptCoinbase = testCoinbase,
+              vmoptNumber = testNumber,
+              vmoptTimestamp = Lit testTimestamp,
+              vmoptBlockGaslimit = testGaslimit,
+              vmoptGasprice = testGasprice,
+              vmoptBaseFee = testBaseFee,
+              vmoptPriorityFee = testPriorityFee,
+              vmoptMaxCodeSize = testMaxCodeSize,
+              vmoptPrevRandao = testPrevrandao,
+              vmoptSchedule = FeeSchedule.berlin,
+              vmoptChainId = testChainId,
+              vmoptCreate = True,
+              vmoptStorageBase = Concrete,
+              vmoptTxAccessList = mempty, -- TODO: support unit test access lists???
+              vmoptAllowFFI = ffiAllowed
+            }
+      creator =
+        initialContract (RuntimeCode (ConcreteRuntimeCode ""))
+          & set nonce 1
+          & set balance testBalanceCreate
+   in vm
+        & set (env . contracts . at ethrunAddress) (Just creator)
 
 getParametersFromEnvironmentVariables :: Maybe Text -> IO TestVMParams
 getParametersFromEnvironmentVariables rpc = do
@@ -1111,19 +1044,18 @@ getParametersFromEnvironmentVariables rpc = do
       Just url ->
         Fetch.fetchBlockFrom block' url >>= \case
           Nothing -> error "Could not fetch block"
-          Just EVM.Block{..} ->
+          Just EVM.Block {..} ->
             return
-              ( _coinbase
-              , _timestamp
-              , _number
-              , _prevRandao
-              , _gaslimit
-              , _baseFee
+              ( _coinbase,
+                _timestamp,
+                _number,
+                _prevRandao,
+                _gaslimit,
+                _baseFee
               )
-  let
-    getWord s def = maybe def read <$> lookupEnv s
-    getAddr s def = maybe def read <$> lookupEnv s
-    ts' = fromMaybe (error "Internal Error: received unexpected symbolic timestamp via rpc") (maybeLitWord ts)
+  let getWord s def = maybe def read <$> lookupEnv s
+      getAddr s def = maybe def read <$> lookupEnv s
+      ts' = fromMaybe (error "Internal Error: received unexpected symbolic timestamp via rpc") (maybeLitWord ts)
 
   TestVMParams
     <$> getAddr "DAPP_TEST_ADDRESS" (createAddress ethrunAddress 1)

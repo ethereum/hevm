@@ -5,10 +5,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- |
-    Module: EVM.SMT
-    Description: Utilities for building and executing SMT queries from Expr instances
--}
+-- |
+--    Module: EVM.SMT
+--    Description: Utilities for building and executing SMT queries from Expr instances
 module EVM.SMT where
 
 import Control.Monad
@@ -38,65 +37,54 @@ import Language.SMT2.Syntax (GeneralRes (..), Identifier (..), Index (..), QualI
 import Numeric (readBin, readHex)
 import Prelude hiding (GT, LT)
 
-
 -- ** Encoding ** ----------------------------------------------------------------------------------
-
 
 -- variable names in SMT that we want to get values for
 data CexVars = CexVars
-  { calldataV :: [Text]
-  , buffersV :: [Text]
-  , storeReads :: [(Expr EWord, Expr EWord)] -- a list of relevant store reads
-  , blockContextV :: [Text]
-  , txContextV :: [Text]
+  { calldataV :: [Text],
+    buffersV :: [Text],
+    storeReads :: [(Expr EWord, Expr EWord)], -- a list of relevant store reads
+    blockContextV :: [Text],
+    txContextV :: [Text]
   }
   deriving (Eq, Show)
-
 
 instance Semigroup CexVars where
   (CexVars a b c d e) <> (CexVars a2 b2 c2 d2 e2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2) (e <> e2)
 
-
 instance Monoid CexVars where
   mempty =
     CexVars
-      { calldataV = mempty
-      , buffersV = mempty
-      , storeReads = mempty
-      , blockContextV = mempty
-      , txContextV = mempty
+      { calldataV = mempty,
+        buffersV = mempty,
+        storeReads = mempty,
+        blockContextV = mempty,
+        txContextV = mempty
       }
 
-
 data SMTCex = SMTCex
-  { vars :: Map (Expr EWord) W256
-  , buffers :: Map (Expr Buf) ByteString
-  , store :: Map W256 (Map W256 W256)
-  , blockContext :: Map (Expr EWord) W256
-  , txContext :: Map (Expr EWord) W256
+  { vars :: Map (Expr EWord) W256,
+    buffers :: Map (Expr Buf) ByteString,
+    store :: Map W256 (Map W256 W256),
+    blockContext :: Map (Expr EWord) W256,
+    txContext :: Map (Expr EWord) W256
   }
   deriving (Eq, Show)
-
 
 getVar :: EVM.SMT.SMTCex -> TS.Text -> W256
 getVar cex name = fromJust $ Map.lookup (Var name) cex.vars
 
-
 data SMT2 = SMT2 [Builder] CexVars
   deriving (Eq, Show)
-
 
 instance Semigroup SMT2 where
   (SMT2 a b) <> (SMT2 a2 b2) = SMT2 (a <> a2) (b <> b2)
 
-
 instance Monoid SMT2 where
   mempty = SMT2 mempty mempty
 
-
 formatSMT2 :: SMT2 -> Text
 formatSMT2 (SMT2 ls _) = T.unlines (fmap toLazyText ls)
-
 
 -- | Reads all intermediate variables from the builder state and produces SMT declaring them as constants
 declareIntermediates :: BufEnv -> StoreEnv -> SMT2
@@ -106,13 +94,12 @@ declareIntermediates bufs stores =
       sorted = List.sortBy compareFst $ Map.toList $ encSs <> encBs
       decls = fmap snd sorted
    in SMT2 ([fromText "; intermediate buffers & stores"] <> decls) mempty
- where
-  compareFst (l, _) (r, _) = compare l r
-  encodeBuf n expr =
-    fromLazyText ("(define-const buf" <> (T.pack . show $ n) <> " Buf ") <> exprToSMT expr <> ")"
-  encodeStore n expr =
-    fromLazyText ("(define-const store" <> (T.pack . show $ n) <> " Storage ") <> exprToSMT expr <> ")"
-
+  where
+    compareFst (l, _) (r, _) = compare l r
+    encodeBuf n expr =
+      fromLazyText ("(define-const buf" <> (T.pack . show $ n) <> " Buf ") <> exprToSMT expr <> ")"
+    encodeStore n expr =
+      fromLazyText ("(define-const store" <> (T.pack . show $ n) <> " Storage ") <> exprToSMT expr <> ")"
 
 assertProps :: [Prop] -> SMT2
 assertProps ps =
@@ -133,75 +120,65 @@ assertProps ps =
         <> readAssumes
         <> SMT2 [""] mempty
         <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
-        <> SMT2 [] mempty{storeReads = storageReads}
- where
-  (ps_elim, bufs, stores) = eliminateProps ps
+        <> SMT2 [] mempty {storeReads = storageReads}
+  where
+    (ps_elim, bufs, stores) = eliminateProps ps
 
-  allBufs = fmap referencedBufs' ps_elim <> fmap referencedBufs bufVals <> fmap referencedBufs storeVals
-  allVars = fmap referencedVars' ps_elim <> fmap referencedVars bufVals <> fmap referencedVars storeVals
-  frameCtx = fmap referencedFrameContext' ps_elim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
-  blockCtx = fmap referencedBlockContext' ps_elim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
+    allBufs = fmap referencedBufs' ps_elim <> fmap referencedBufs bufVals <> fmap referencedBufs storeVals
+    allVars = fmap referencedVars' ps_elim <> fmap referencedVars bufVals <> fmap referencedVars storeVals
+    frameCtx = fmap referencedFrameContext' ps_elim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
+    blockCtx = fmap referencedBlockContext' ps_elim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
 
-  bufVals = Map.elems bufs
-  storeVals = Map.elems stores
+    bufVals = Map.elems bufs
+    storeVals = Map.elems stores
 
-  storageReads = nubOrd $ concatMap findStorageReads ps
+    storageReads = nubOrd $ concatMap findStorageReads ps
 
-  keccakAssumes =
-    SMT2 ["; keccak assumptions"] mempty
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions ps_elim bufVals storeVals)) mempty
+    keccakAssumes =
+      SMT2 ["; keccak assumptions"] mempty
+        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions ps_elim bufVals storeVals)) mempty
 
-  readAssumes =
-    SMT2 ["; read assumptions"] mempty
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads ps_elim bufs stores)) mempty
-
+    readAssumes =
+      SMT2 ["; read assumptions"] mempty
+        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads ps_elim bufs stores)) mempty
 
 referencedBufsGo :: Expr a -> [Builder]
 referencedBufsGo = \case
   AbstractBuf s -> [fromText s]
   _ -> []
 
-
 referencedBufs :: Expr a -> [Builder]
 referencedBufs expr = nubOrd $ foldExpr referencedBufsGo [] expr
 
-
 referencedBufs' :: Prop -> [Builder]
 referencedBufs' prop = nubOrd $ foldProp referencedBufsGo [] prop
-
 
 referencedVarsGo :: Expr a -> [Builder]
 referencedVarsGo = \case
   Var s -> [fromText s]
   _ -> []
 
-
 referencedVars :: Expr a -> [Builder]
 referencedVars expr = nubOrd $ foldExpr referencedVarsGo [] expr
 
-
 referencedVars' :: Prop -> [Builder]
 referencedVars' prop = nubOrd $ foldProp referencedVarsGo [] prop
-
 
 referencedFrameContextGo :: Expr a -> [Builder]
 referencedFrameContextGo = \case
   CallValue a -> [fromLazyText $ T.append "callvalue_" (T.pack . show $ a)]
   Caller a -> [fromLazyText $ T.append "caller_" (T.pack . show $ a)]
   Address a -> [fromLazyText $ T.append "address_" (T.pack . show $ a)]
-  Balance{} -> error "TODO: BALANCE"
-  SelfBalance{} -> error "TODO: SELFBALANCE"
-  Gas{} -> error "TODO: GAS"
+  Balance {} -> error "TODO: BALANCE"
+  SelfBalance {} -> error "TODO: SELFBALANCE"
+  Gas {} -> error "TODO: GAS"
   _ -> []
-
 
 referencedFrameContext :: Expr a -> [Builder]
 referencedFrameContext expr = nubOrd $ foldExpr referencedFrameContextGo [] expr
 
-
 referencedFrameContext' :: Prop -> [Builder]
 referencedFrameContext' prop = nubOrd $ foldProp referencedFrameContextGo [] prop
-
 
 referencedBlockContextGo :: Expr a -> [Builder]
 referencedBlockContextGo = \case
@@ -215,96 +192,84 @@ referencedBlockContextGo = \case
   BaseFee -> ["basefee"]
   _ -> []
 
-
 referencedBlockContext :: Expr a -> [Builder]
 referencedBlockContext expr = nubOrd $ foldExpr referencedBlockContextGo [] expr
-
 
 referencedBlockContext' :: Prop -> [Builder]
 referencedBlockContext' prop = nubOrd $ foldProp referencedBlockContextGo [] prop
 
-
-{- | This function overapproximates the reads from the abstract
- storage. Potentially, it can return locations that do not read a
- slot directly from the abstract store but from subsequent writes on
- the store (e.g, SLoad addr idx (SStore addr idx val AbstractStore)).
- However, we expect that most of such reads will have been
- simplified away.
--}
+-- | This function overapproximates the reads from the abstract
+-- storage. Potentially, it can return locations that do not read a
+-- slot directly from the abstract store but from subsequent writes on
+-- the store (e.g, SLoad addr idx (SStore addr idx val AbstractStore)).
+-- However, we expect that most of such reads will have been
+-- simplified away.
 findStorageReads :: Prop -> [(Expr EWord, Expr EWord)]
 findStorageReads = foldProp go []
- where
-  go :: Expr a -> [(Expr EWord, Expr EWord)]
-  go = \case
-    SLoad addr slot storage -> [(addr, slot) | containsNode isAbstractStore storage]
-    _ -> []
+  where
+    go :: Expr a -> [(Expr EWord, Expr EWord)]
+    go = \case
+      SLoad addr slot storage -> [(addr, slot) | containsNode isAbstractStore storage]
+      _ -> []
 
-  isAbstractStore AbstractStore = True
-  isAbstractStore _ = False
-
+    isAbstractStore AbstractStore = True
+    isAbstractStore _ = False
 
 findBufferAccess :: TraversableTerm a => [a] -> [(Expr EWord, Expr EWord, Expr Buf)]
 findBufferAccess = foldl (\acc p -> foldTerm go acc p) mempty
- where
-  go :: Expr a -> [(Expr EWord, Expr EWord, Expr Buf)]
-  go = \case
-    ReadWord idx buf -> [(idx, Lit 32, buf)]
-    ReadByte idx buf -> [(idx, Lit 1, buf)]
-    CopySlice srcOff _ size src _ -> [(srcOff, size, src)]
-    _ -> mempty
+  where
+    go :: Expr a -> [(Expr EWord, Expr EWord, Expr Buf)]
+    go = \case
+      ReadWord idx buf -> [(idx, Lit 32, buf)]
+      ReadByte idx buf -> [(idx, Lit 1, buf)]
+      CopySlice srcOff _ size src _ -> [(srcOff, size, src)]
+      _ -> mempty
 
-
-{- | Asserts that buffer reads beyond the size of the buffer are equal
- to zero. Looks for buffer reads in the a list of given predicates
- and the buffer and storage environments.
--}
+-- | Asserts that buffer reads beyond the size of the buffer are equal
+-- to zero. Looks for buffer reads in the a list of given predicates
+-- and the buffer and storage environments.
 assertReads :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
 assertReads props benv senv = concat $ fmap assertRead allReads
- where
-  assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
-  assertRead (idx, Lit 32, buf) = [PImpl (PGEq idx (bufLength buf)) (PEq (ReadWord idx buf) (Lit 0))]
-  assertRead (idx, Lit sz, buf) = fmap (\s -> PImpl (PGEq idx (bufLength buf)) (PEq (ReadByte idx buf) (LitByte (num s)))) [(0 :: Int) .. num sz - 1]
-  assertRead (_, _, _) = error "Cannot generate assertions for accesses of symbolic size"
+  where
+    assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
+    assertRead (idx, Lit 32, buf) = [PImpl (PGEq idx (bufLength buf)) (PEq (ReadWord idx buf) (Lit 0))]
+    assertRead (idx, Lit sz, buf) = fmap (\s -> PImpl (PGEq idx (bufLength buf)) (PEq (ReadByte idx buf) (LitByte (num s)))) [(0 :: Int) .. num sz - 1]
+    assertRead (_, _, _) = error "Cannot generate assertions for accesses of symbolic size"
 
-  allReads = filter keepRead $ nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
+    allReads = filter keepRead $ nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
 
-  -- discard constraints if we can statically determine that read is less than the buffer length
-  keepRead (Lit idx, Lit size, buf) =
-    case minLength benv buf of
-      Just l | num (idx + size) <= l -> False
-      _ -> True
-  keepRead _ = True
-
+    -- discard constraints if we can statically determine that read is less than the buffer length
+    keepRead (Lit idx, Lit size, buf) =
+      case minLength benv buf of
+        Just l | num (idx + size) <= l -> False
+        _ -> True
+    keepRead _ = True
 
 declareBufs :: [Builder] -> SMT2
 declareBufs names = SMT2 ("; buffers" : fmap declareBuf names <> ("; buffer lengths" : fmap declareLength names)) cexvars
- where
-  declareBuf n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
-  declareLength n = "(define-const " <> n <> "_length" <> " (_ BitVec 256) (bufLength " <> n <> "))"
-  cexvars = mempty{buffersV = fmap toLazyText names}
-
+  where
+    declareBuf n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
+    declareLength n = "(define-const " <> n <> "_length" <> " (_ BitVec 256) (bufLength " <> n <> "))"
+    cexvars = mempty {buffersV = fmap toLazyText names}
 
 -- Given a list of 256b VM variable names, create an SMT2 object with the variables declared
 declareVars :: [Builder] -> SMT2
 declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
- where
-  declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-  cexvars = mempty{calldataV = fmap toLazyText names}
-
+  where
+    declare n = "(declare-const " <> n <> " (_ BitVec 256))"
+    cexvars = mempty {calldataV = fmap toLazyText names}
 
 declareFrameContext :: [Builder] -> SMT2
 declareFrameContext names = SMT2 (["; frame context"] <> fmap declare names) cexvars
- where
-  declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-  cexvars = mempty{txContextV = fmap toLazyText names}
-
+  where
+    declare n = "(declare-const " <> n <> " (_ BitVec 256))"
+    cexvars = mempty {txContextV = fmap toLazyText names}
 
 declareBlockContext :: [Builder] -> SMT2
 declareBlockContext names = SMT2 (["; block context"] <> fmap declare names) cexvars
- where
-  declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-  cexvars = mempty{blockContextV = fmap toLazyText names}
-
+  where
+    declare n = "(declare-const " <> n <> " (_ BitVec 256))"
+    cexvars = mempty {blockContextV = fmap toLazyText names}
 
 prelude :: SMT2
 prelude =
@@ -525,7 +490,6 @@ prelude =
   (define-fun sload ((addr Word) (key Word) (storage Storage)) Word (select (select storage addr) key))
   |]
 
-
 exprToSMT :: Expr a -> Builder
 exprToSMT = \case
   Lit w -> fromLazyText $ "(_ bv" <> (T.pack $ show (num w :: Integer)) <> " 256)"
@@ -566,38 +530,38 @@ exprToSMT = \case
     thirty
     thirtyone ->
       concatBytes
-        [ z
-        , o
-        , two
-        , three
-        , four
-        , five
-        , six
-        , seven
-        , eight
-        , nine
-        , ten
-        , eleven
-        , twelve
-        , thirteen
-        , fourteen
-        , fifteen
-        , sixteen
-        , seventeen
-        , eighteen
-        , nineteen
-        , twenty
-        , twentyone
-        , twentytwo
-        , twentythree
-        , twentyfour
-        , twentyfive
-        , twentysix
-        , twentyseven
-        , twentyeight
-        , twentynine
-        , thirty
-        , thirtyone
+        [ z,
+          o,
+          two,
+          three,
+          four,
+          five,
+          six,
+          seven,
+          eight,
+          nine,
+          ten,
+          eleven,
+          twelve,
+          thirteen,
+          fourteen,
+          fifteen,
+          sixteen,
+          seventeen,
+          eighteen,
+          nineteen,
+          twenty,
+          twentyone,
+          twentytwo,
+          twentythree,
+          twentyfour,
+          twentyfive,
+          twentysix,
+          twentyseven,
+          twentyeight,
+          twentynine,
+          thirty,
+          thirtyone
         ]
   Add a b -> op2 "bvadd" a b
   Sub a b -> op2 "bvsub" a b
@@ -721,36 +685,32 @@ exprToSMT = \case
      in "(sstore" `sp` encAddr `sp` encIdx `sp` encVal `sp` encPrev <> ")"
   SLoad addr idx store -> op3 "sload" addr idx store
   a -> error $ "TODO: implement: " <> show a
- where
-  op1 op a =
-    let enc = exprToSMT a
-     in "(" <> op `sp` enc <> ")"
-  op2 op a b =
-    let aenc = exprToSMT a
-        benc = exprToSMT b
-     in "(" <> op `sp` aenc `sp` benc <> ")"
-  op3 op a b c =
-    let aenc = exprToSMT a
-        benc = exprToSMT b
-        cenc = exprToSMT c
-     in "(" <> op `sp` aenc `sp` benc `sp` cenc <> ")"
-  op2CheckZero op a b =
-    let aenc = exprToSMT a
-        benc = exprToSMT b
-     in "(ite (= " <> benc <> " (_ bv0 256)) (_ bv0 256) " <> "(" <> op `sp` aenc `sp` benc <> "))"
-
+  where
+    op1 op a =
+      let enc = exprToSMT a
+       in "(" <> op `sp` enc <> ")"
+    op2 op a b =
+      let aenc = exprToSMT a
+          benc = exprToSMT b
+       in "(" <> op `sp` aenc `sp` benc <> ")"
+    op3 op a b c =
+      let aenc = exprToSMT a
+          benc = exprToSMT b
+          cenc = exprToSMT c
+       in "(" <> op `sp` aenc `sp` benc `sp` cenc <> ")"
+    op2CheckZero op a b =
+      let aenc = exprToSMT a
+          benc = exprToSMT b
+       in "(ite (= " <> benc <> " (_ bv0 256)) (_ bv0 256) " <> "(" <> op `sp` aenc `sp` benc <> "))"
 
 sp :: Builder -> Builder -> Builder
 a `sp` b = a <> (fromText " ") <> b
 
-
 zero :: Builder
 zero = "(_ bv0 256)"
 
-
 one :: Builder
 one = "(_ bv1 256)"
-
 
 propToSMT :: Prop -> Builder
 propToSMT = \case
@@ -775,15 +735,13 @@ propToSMT = \case
         benc = propToSMT b
      in "(=> " <> aenc <> " " <> benc <> ")"
   PBool b -> if b then "true" else "false"
- where
-  op2 op a b =
-    let aenc = exprToSMT a
-        benc = exprToSMT b
-     in "(" <> op <> " " <> aenc <> " " <> benc <> ")"
-
+  where
+    op2 op a b =
+      let aenc = exprToSMT a
+          benc = exprToSMT b
+       in "(" <> op <> " " <> aenc <> " " <> benc <> ")"
 
 -- ** Helpers ** ---------------------------------------------------------------------------------
-
 
 -- | Stores a region of src into dst
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Builder -> Builder -> Builder
@@ -797,7 +755,6 @@ copySlice srcOffset dstOffset size@(Lit _) src dst
        in "(store " <> child `sp` encDstOff `sp` "(select " <> src `sp` encSrcOff <> "))"
 copySlice _ _ _ _ _ = error "TODO: implement copySlice with a symbolically sized region"
 
-
 -- | Unrolls an exponentiation into a series of multiplications
 expandExp :: Expr EWord -> W256 -> Builder
 expandExp base expnt
@@ -807,79 +764,64 @@ expandExp base expnt
           n = expandExp base (expnt - 1)
        in "(bvmul " <> b `sp` n <> ")"
 
-
 -- | Concatenates a list of bytes into a larger bitvector
 concatBytes :: [Expr Byte] -> Builder
 concatBytes bytes =
   let bytesRev = reverse bytes
       a2 = exprToSMT (head bytesRev)
    in foldl wrap a2 $ tail bytesRev
- where
-  wrap inner byte =
-    let byteSMT = exprToSMT byte
-     in "(concat " <> byteSMT `sp` inner <> ")"
-
+  where
+    wrap inner byte =
+      let byteSMT = exprToSMT byte
+       in "(concat " <> byteSMT `sp` inner <> ")"
 
 -- | Concatenates a list of bytes into a larger bitvector
 writeBytes :: ByteString -> Expr Buf -> Builder
 writeBytes bytes buf = snd $ BS.foldl' wrap (0, exprToSMT buf) bytes
- where
-  -- we don't need to store zeros if the base buffer is empty
-  skipZeros = buf == mempty
-  wrap :: (Int, Builder) -> Word8 -> (Int, Builder)
-  wrap (idx, inner) byte =
-    if skipZeros && byte == 0
-      then (idx + 1, inner)
-      else
-        let
-          byteSMT = exprToSMT (LitByte byte)
-          idxSMT = exprToSMT . Lit . num $ idx
-         in
-          (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
-
+  where
+    -- we don't need to store zeros if the base buffer is empty
+    skipZeros = buf == mempty
+    wrap :: (Int, Builder) -> Word8 -> (Int, Builder)
+    wrap (idx, inner) byte =
+      if skipZeros && byte == 0
+        then (idx + 1, inner)
+        else
+          let byteSMT = exprToSMT (LitByte byte)
+              idxSMT = exprToSMT . Lit . num $ idx
+           in (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
 
 encodeConcreteStore :: Map W256 (Map W256 W256) -> Builder
 encodeConcreteStore s = foldl encodeWrite "emptyStore" writes
- where
-  asList = fmap (second Map.toList) $ Map.toList s
-  writes = concatMap (\(addr, ws) -> fmap (\(k, v) -> (addr, k, v)) ws) asList
-  encodeWrite prev (addr, key, val) =
-    let
-      encAddr = exprToSMT (Lit addr)
-      encKey = exprToSMT (Lit key)
-      encVal = exprToSMT (Lit val)
-     in
-      "(sstore " <> encAddr `sp` encKey `sp` encVal `sp` prev <> ")"
-
+  where
+    asList = fmap (second Map.toList) $ Map.toList s
+    writes = concatMap (\(addr, ws) -> fmap (\(k, v) -> (addr, k, v)) ws) asList
+    encodeWrite prev (addr, key, val) =
+      let encAddr = exprToSMT (Lit addr)
+          encKey = exprToSMT (Lit key)
+          encVal = exprToSMT (Lit val)
+       in "(sstore " <> encAddr `sp` encKey `sp` encVal `sp` prev <> ")"
 
 -- ** Cex parsing ** --------------------------------------------------------------------------------
-
 
 parseW256 :: SpecConstant -> W256
 parseW256 = parseSC
 
-
 parseInteger :: SpecConstant -> Integer
 parseInteger = parseSC
 
-
 parseW8 :: SpecConstant -> Word8
 parseW8 = parseSC
-
 
 parseSC :: (Num a, Eq a) => SpecConstant -> a
 parseSC (SCHexadecimal a) = fst . head . Numeric.readHex . T.unpack . T.fromStrict $ a
 parseSC (SCBinary a) = fst . head . Numeric.readBin . T.unpack . T.fromStrict $ a
 parseSC sc = error $ "Internal Error: cannot parse: " <> show sc
 
-
 parseErr :: (Show a) => a -> b
 parseErr res = error $ "Internal Error: cannot parse solver response: " <> show res
 
-
 parseVar :: TS.Text -> Expr EWord
 parseVar = Var
-
 
 parseBlockCtx :: TS.Text -> Expr EWord
 parseBlockCtx "origin" = Origin
@@ -892,7 +834,6 @@ parseBlockCtx "chainid" = ChainId
 parseBlockCtx "basefee" = BaseFee
 parseBlockCtx t = error $ "Internal Error: cannot parse " <> (TS.unpack t) <> " into an Expr"
 
-
 parseFrameCtx :: TS.Text -> Expr EWord
 parseFrameCtx name = case TS.unpack name of
   ('c' : 'a' : 'l' : 'l' : 'v' : 'a' : 'l' : 'u' : 'e' : '_' : frame) -> CallValue (read frame)
@@ -900,124 +841,116 @@ parseFrameCtx name = case TS.unpack name of
   ('a' : 'd' : 'd' : 'r' : 'e' : 's' : 's' : '_' : frame) -> Address (read frame)
   t -> error $ "Internal Error: cannot parse " <> t <> " into an Expr"
 
-
 getVars :: (TS.Text -> Expr EWord) -> (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr EWord) W256)
 getVars parseFn getVal names = Map.mapKeys parseFn <$> foldM getOne mempty names
- where
-  getOne :: Map TS.Text W256 -> TS.Text -> IO (Map TS.Text W256)
-  getOne acc name = do
-    raw <- getVal (T.fromStrict name)
-    let
-      parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
-        Right (ResSpecific (valParsed :| [])) -> valParsed
-        r -> parseErr r
-      val = case parsed of
-        ( TermQualIdentifier
-            (Unqualified (IdSymbol symbol))
-          , TermSpecConstant sc
-          ) ->
-            if symbol == name
-              then parseW256 sc
-              else error "Internal Error: solver did not return model for requested value"
-        r -> parseErr r
-    pure $ Map.insert name val acc
-
+  where
+    getOne :: Map TS.Text W256 -> TS.Text -> IO (Map TS.Text W256)
+    getOne acc name = do
+      raw <- getVal (T.fromStrict name)
+      let parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
+            Right (ResSpecific (valParsed :| [])) -> valParsed
+            r -> parseErr r
+          val = case parsed of
+            ( TermQualIdentifier
+                (Unqualified (IdSymbol symbol)),
+              TermSpecConstant sc
+              ) ->
+                if symbol == name
+                  then parseW256 sc
+                  else error "Internal Error: solver did not return model for requested value"
+            r -> parseErr r
+      pure $ Map.insert name val acc
 
 getBufs :: (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr Buf) ByteString)
 getBufs getVal names = foldM getBuf mempty names
- where
-  getLength :: TS.Text -> IO Int
-  getLength name = do
-    val <- getVal (T.fromStrict name <> "_length")
-    len <- case parseCommentFreeFileMsg getValueRes (T.toStrict val) of
-      Right (ResSpecific (parsed :| [])) -> case parsed of
-        (TermQualIdentifier (Unqualified (IdSymbol symbol)), (TermSpecConstant sc)) ->
-          if symbol == (name <> "_length")
-            then pure $ parseW256 sc
-            else error "Internal Error: solver did not return model for requested value"
+  where
+    getLength :: TS.Text -> IO Int
+    getLength name = do
+      val <- getVal (T.fromStrict name <> "_length")
+      len <- case parseCommentFreeFileMsg getValueRes (T.toStrict val) of
+        Right (ResSpecific (parsed :| [])) -> case parsed of
+          (TermQualIdentifier (Unqualified (IdSymbol symbol)), (TermSpecConstant sc)) ->
+            if symbol == (name <> "_length")
+              then pure $ parseW256 sc
+              else error "Internal Error: solver did not return model for requested value"
+          res -> parseErr res
         res -> parseErr res
-      res -> parseErr res
-    pure $
-      if len <= num (maxBound :: Int)
-        then fromIntegral len
-        else
-          error $
-            "Internal Error: buffer: "
-              <> (TS.unpack name)
-              <> " is too large to be represented in a ByteString. Length: "
-              <> show len
+      pure $
+        if len <= num (maxBound :: Int)
+          then fromIntegral len
+          else
+            error $
+              "Internal Error: buffer: "
+                <> (TS.unpack name)
+                <> " is too large to be represented in a ByteString. Length: "
+                <> show len
 
-  getBuf :: Map (Expr Buf) ByteString -> TS.Text -> IO (Map (Expr Buf) ByteString)
-  getBuf acc name = do
-    -- Sometimes the solver gives us back a model for a Buffer that has every
-    -- element set to some concrete value. This is impossible to represent as
-    -- a concrete ByteString in haskell (or in any existing computer hardware :D),
-    -- so we ask the solver to give us back a model for the length of
-    -- this buffer and then use that to produce a shorter counterexample (by
-    -- replicating the constant byte up to the length).
-    len <- getLength name
-    val <- getVal (T.fromStrict name)
+    getBuf :: Map (Expr Buf) ByteString -> TS.Text -> IO (Map (Expr Buf) ByteString)
+    getBuf acc name = do
+      -- Sometimes the solver gives us back a model for a Buffer that has every
+      -- element set to some concrete value. This is impossible to represent as
+      -- a concrete ByteString in haskell (or in any existing computer hardware :D),
+      -- so we ask the solver to give us back a model for the length of
+      -- this buffer and then use that to produce a shorter counterexample (by
+      -- replicating the constant byte up to the length).
+      len <- getLength name
+      val <- getVal (T.fromStrict name)
 
-    buf <- case parseCommentFreeFileMsg getValueRes (T.toStrict val) of
-      Right (ResSpecific (valParsed :| [])) -> case valParsed of
-        (TermQualIdentifier (Unqualified (IdSymbol symbol)), term) ->
-          if symbol == name
-            then pure $ parseBuf len term
-            else error "Internal Error: solver did not return model for requested value"
+      buf <- case parseCommentFreeFileMsg getValueRes (T.toStrict val) of
+        Right (ResSpecific (valParsed :| [])) -> case valParsed of
+          (TermQualIdentifier (Unqualified (IdSymbol symbol)), term) ->
+            if symbol == name
+              then pure $ parseBuf len term
+              else error "Internal Error: solver did not return model for requested value"
+          res -> error $ "Internal Error: cannot parse solver response: " <> show res
         res -> error $ "Internal Error: cannot parse solver response: " <> show res
-      res -> error $ "Internal Error: cannot parse solver response: " <> show res
-    let bs = case simplify buf of
-          ConcreteBuf b -> b
-          p -> error $ "Internal Error: unable to parse solver response into a concrete buffer: " <> show p
-    pure $ Map.insert (AbstractBuf name) bs acc
+      let bs = case simplify buf of
+            ConcreteBuf b -> b
+            p -> error $ "Internal Error: unable to parse solver response into a concrete buffer: " <> show p
+      pure $ Map.insert (AbstractBuf name) bs acc
 
-  parseBuf :: Int -> Term -> Expr Buf
-  parseBuf len = go mempty
-   where
-    go env = \case
-      -- constant arrays
-      ( TermApplication
-          ( Qualified
-              (IdSymbol "const")
-              ( SortParameter
-                  (IdSymbol "Array")
-                  ( SortSymbol (IdIndexed "BitVec" (IxNumeral "256" :| []))
-                      :| [SortSymbol (IdIndexed "BitVec" (IxNumeral "8" :| []))]
+    parseBuf :: Int -> Term -> Expr Buf
+    parseBuf len = go mempty
+      where
+        go env = \case
+          -- constant arrays
+          ( TermApplication
+              ( Qualified
+                  (IdSymbol "const")
+                  ( SortParameter
+                      (IdSymbol "Array")
+                      ( SortSymbol (IdIndexed "BitVec" (IxNumeral "256" :| []))
+                          :| [SortSymbol (IdIndexed "BitVec" (IxNumeral "8" :| []))]
+                        )
                     )
                 )
-            )
-          ((TermSpecConstant val :| []))
-        ) ->
-          case val of
-            SCHexadecimal "00" -> mempty
-            v -> ConcreteBuf $ BS.replicate len (parseW8 v)
-      -- writing a byte over some array
-      ( TermApplication
-          (Unqualified (IdSymbol "store"))
-          (base :| [TermSpecConstant idx, TermSpecConstant val])
-        ) ->
-          let
-            pbase = go env base
-            pidx = parseW256 idx
-            pval = parseW8 val
-           in
-            writeByte (Lit pidx) (LitByte pval) pbase
-      -- binding a new name
-      (TermLet ((VarBinding name bound) :| []) term) ->
-        let
-          pbound = go env bound
-         in
-          go (Map.insert name pbound env) term
-      -- looking up a bound name
-      (TermQualIdentifier (Unqualified (IdSymbol name))) -> case Map.lookup name env of
-        Just t -> t
-        Nothing ->
-          error $
-            "Internal error: could not find "
-              <> (TS.unpack name)
-              <> " in environment mapping"
-      p -> parseErr p
-
+              ((TermSpecConstant val :| []))
+            ) ->
+              case val of
+                SCHexadecimal "00" -> mempty
+                v -> ConcreteBuf $ BS.replicate len (parseW8 v)
+          -- writing a byte over some array
+          ( TermApplication
+              (Unqualified (IdSymbol "store"))
+              (base :| [TermSpecConstant idx, TermSpecConstant val])
+            ) ->
+              let pbase = go env base
+                  pidx = parseW256 idx
+                  pval = parseW8 val
+               in writeByte (Lit pidx) (LitByte pval) pbase
+          -- binding a new name
+          (TermLet ((VarBinding name bound) :| []) term) ->
+            let pbound = go env bound
+             in go (Map.insert name pbound env) term
+          -- looking up a bound name
+          (TermQualIdentifier (Unqualified (IdSymbol name))) -> case Map.lookup name env of
+            Just t -> t
+            Nothing ->
+              error $
+                "Internal error: could not find "
+                  <> (TS.unpack name)
+                  <> " in environment mapping"
+          p -> parseErr p
 
 getStore :: (Text -> IO Text) -> [(Expr EWord, Expr EWord)] -> IO (Map W256 (Map W256 W256))
 getStore getVal sreads = do
@@ -1042,29 +975,27 @@ getStore getVal sreads = do
     )
     Map.empty
     sreads
- where
-  addElem :: W256 -> W256 -> Map W256 (Map W256 W256) -> (W256 -> W256 -> W256) -> Map W256 (Map W256 W256)
-  addElem addr slot store fun =
-    case Map.lookup addr store of
-      Just m -> Map.insert addr (Map.insert slot (fun addr slot) m) store
-      Nothing -> Map.insert addr (Map.singleton slot (fun addr slot)) store
+  where
+    addElem :: W256 -> W256 -> Map W256 (Map W256 W256) -> (W256 -> W256 -> W256) -> Map W256 (Map W256 W256)
+    addElem addr slot store fun =
+      case Map.lookup addr store of
+        Just m -> Map.insert addr (Map.insert slot (fun addr slot) m) store
+        Nothing -> Map.insert addr (Map.singleton slot (fun addr slot)) store
 
-  queryValue :: Expr EWord -> IO W256
-  queryValue (Lit w) = pure w
-  queryValue w = do
-    let expr = toLazyText $ exprToSMT w
-    raw <- getVal expr
-    case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
-      Right (ResSpecific (valParsed :| [])) ->
-        case valParsed of
-          (_, TermSpecConstant sc) -> pure $ parseW256 sc
-          _ -> error "Internal Error: cannot parse model for storage index"
-      r -> parseErr r
+    queryValue :: Expr EWord -> IO W256
+    queryValue (Lit w) = pure w
+    queryValue w = do
+      let expr = toLazyText $ exprToSMT w
+      raw <- getVal expr
+      case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
+        Right (ResSpecific (valParsed :| [])) ->
+          case valParsed of
+            (_, TermSpecConstant sc) -> pure $ parseW256 sc
+            _ -> error "Internal Error: cannot parse model for storage index"
+        r -> parseErr r
 
-
-{- | Interpret an N-dimensional array as a value of type a.
- Parameterized by an interpretation function for array values.
--}
+-- | Interpret an N-dimensional array as a value of type a.
+-- Parameterized by an interpretation function for array values.
 interpretNDArray :: (Map Symbol Term -> Term -> a) -> (Map Symbol Term) -> Term -> (W256 -> a)
 interpretNDArray interp env = \case
   -- variable reference
@@ -1082,28 +1013,26 @@ interpretNDArray interp env = \case
   TermApplication store (arr :| [TermSpecConstant ind, val]) | isStore store ->
     \x -> if x == parseW256 ind then interp env val else interpretNDArray interp env arr x
   t -> error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
- where
-  isArrConst :: QualIdentifier -> Bool
-  isArrConst = \case
-    Qualified (IdSymbol "const") (SortParameter (IdSymbol "Array") _) -> True
-    _ -> False
+  where
+    isArrConst :: QualIdentifier -> Bool
+    isArrConst = \case
+      Qualified (IdSymbol "const") (SortParameter (IdSymbol "Array") _) -> True
+      _ -> False
 
-  isStore :: QualIdentifier -> Bool
-  isStore t = t == Unqualified (IdSymbol "store")
-
+    isStore :: QualIdentifier -> Bool
+    isStore t = t == Unqualified (IdSymbol "store")
 
 -- | Interpret an 1-dimensional array as a function
 interpret1DArray :: (Map Symbol Term) -> Term -> (W256 -> W256)
 interpret1DArray = interpretNDArray interpretW256
- where
-  interpretW256 :: (Map Symbol Term) -> Term -> W256
-  interpretW256 _ (TermSpecConstant val) = parseW256 val
-  interpretW256 env (TermQualIdentifier (Unqualified (IdSymbol s))) =
-    case Map.lookup s env of
-      Just t -> interpretW256 env t
-      Nothing -> error "Internal error: unknown identifier, cannot parse array"
-  interpretW256 _ t = error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
-
+  where
+    interpretW256 :: (Map Symbol Term) -> Term -> W256
+    interpretW256 _ (TermSpecConstant val) = parseW256 val
+    interpretW256 env (TermQualIdentifier (Unqualified (IdSymbol s))) =
+      case Map.lookup s env of
+        Just t -> interpretW256 env t
+        Nothing -> error "Internal error: unknown identifier, cannot parse array"
+    interpretW256 _ t = error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
 
 -- | Interpret an 2-dimensional array as a function
 interpret2DArray :: (Map Symbol Term) -> Term -> (W256 -> W256 -> W256)

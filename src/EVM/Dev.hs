@@ -1,10 +1,9 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE QuasiQuotes #-}
 
-{- |
-Module: EVM.Dev
-Description: Helpers for repl driven hevm hacking
--}
+-- |
+-- Module: EVM.Dev
+-- Description: Helpers for repl driven hevm hacking
 module EVM.Dev where
 
 import Control.Monad.State.Strict hiding (state)
@@ -30,13 +29,11 @@ import GHC.Conc
 import System.Directory
 import System.Exit (exitFailure)
 
-
 checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO ()
 checkEquiv a b = withSolvers Z3 1 Nothing $ \s -> do
   let smt = assertProps [a ./= b]
   res <- checkSat s smt
   print res
-
 
 runDappTest :: FilePath -> IO ()
 runDappTest root =
@@ -47,7 +44,6 @@ runDappTest root =
       opts <- testOpts solvers root testFile
       res <- dappTest opts testFile Nothing
       unless res exitFailure
-
 
 testOpts :: SolverGroup -> FilePath -> FilePath -> IO UnitTestOptions
 testOpts solvers root testFile = do
@@ -60,31 +56,29 @@ testOpts solvers root testFile = do
   params <- getParametersFromEnvironmentVariables Nothing
   pure
     EVM.UnitTest.UnitTestOptions
-      { EVM.UnitTest.solvers = solvers
-      , EVM.UnitTest.rpcInfo = Nothing
-      , EVM.UnitTest.maxIter = Nothing
-      , EVM.UnitTest.askSmtIters = Nothing
-      , EVM.UnitTest.smtTimeout = Nothing
-      , EVM.UnitTest.smtDebug = False
-      , EVM.UnitTest.solver = Nothing
-      , EVM.UnitTest.covMatch = Nothing
-      , EVM.UnitTest.verbose = Nothing
-      , EVM.UnitTest.match = ".*"
-      , EVM.UnitTest.maxDepth = Nothing
-      , EVM.UnitTest.fuzzRuns = 100
-      , EVM.UnitTest.replay = Nothing
-      , EVM.UnitTest.vmModifier = id
-      , EVM.UnitTest.testParams = params
-      , EVM.UnitTest.dapp = srcInfo
-      , EVM.UnitTest.ffiAllowed = True
+      { EVM.UnitTest.solvers = solvers,
+        EVM.UnitTest.rpcInfo = Nothing,
+        EVM.UnitTest.maxIter = Nothing,
+        EVM.UnitTest.askSmtIters = Nothing,
+        EVM.UnitTest.smtTimeout = Nothing,
+        EVM.UnitTest.smtDebug = False,
+        EVM.UnitTest.solver = Nothing,
+        EVM.UnitTest.covMatch = Nothing,
+        EVM.UnitTest.verbose = Nothing,
+        EVM.UnitTest.match = ".*",
+        EVM.UnitTest.maxDepth = Nothing,
+        EVM.UnitTest.fuzzRuns = 100,
+        EVM.UnitTest.replay = Nothing,
+        EVM.UnitTest.vmModifier = id,
+        EVM.UnitTest.testParams = params,
+        EVM.UnitTest.dapp = srcInfo,
+        EVM.UnitTest.ffiAllowed = True
       }
-
 
 doTest :: IO ()
 doTest = do
   c <- testContract
   reachable' False c
-
 
 -- e <- simplify <$> buildExpr c
 -- Prelude.putStrLn (formatExpr e)
@@ -94,12 +88,10 @@ analyzeDai = do
   d <- dai
   reachable' False d
 
-
 daiExpr :: IO (Expr End)
 daiExpr = do
   d <- dai
   withSolvers Z3 1 Nothing $ \s -> buildExpr s d
-
 
 analyzeVat :: IO ()
 analyzeVat = do
@@ -109,7 +101,6 @@ analyzeVat = do
     e <- buildExpr s v
     putStrLn $ "done (" <> show (numBranches e) <> " branches)"
     reachable' False v
-
 
 analyzeDeposit :: IO ()
 analyzeDeposit = do
@@ -139,7 +130,6 @@ analyzeDeposit = do
     putStrLn "Writing AST"
     T.writeFile "full.ast" (formatExpr e)
 
-
 reachable' :: Bool -> ByteString -> IO ()
 reachable' smtdebug c = do
   putStrLn "Exploring contract"
@@ -161,13 +151,11 @@ reachable' smtdebug c = do
         putStrLn "\n\n-- Query --"
         TL.putStrLn $ formatSMT2 q
 
-
 showExpr :: ByteString -> IO ()
 showExpr c = do
   withSolvers Z3 1 Nothing $ \s -> do
     e <- buildExpr s c
     T.putStrLn $ formatExpr (simplify e)
-
 
 summaryStore :: IO ByteString
 summaryStore = do
@@ -185,7 +173,6 @@ summaryStore = do
         |]
   fmap fromJust (solcRuntime "A" src)
 
-
 safeAdd :: IO ByteString
 safeAdd = do
   let src =
@@ -197,7 +184,6 @@ safeAdd = do
           }
         |]
   fmap fromJust (solcRuntime "SafeAdd" src)
-
 
 testContract :: IO ByteString
 testContract = do
@@ -211,7 +197,6 @@ testContract = do
           }
           |]
   fmap fromJust (solcRuntime "C" src)
-
 
 vat :: IO ByteString
 vat = do
@@ -373,54 +358,51 @@ vat = do
           |]
   fmap fromJust (solcRuntime "Vat" src)
 
-
 initVm :: ByteString -> VM
 initVm bs = vm
- where
-  contractCode = RuntimeCode (ConcreteRuntimeCode bs)
-  c =
-    Contract
-      { _contractcode = contractCode
-      , _balance = 0
-      , _nonce = 0
-      , _codehash = keccak (ConcreteBuf bs)
-      , _opIxMap = mkOpIxMap contractCode
-      , _codeOps = mkCodeOps contractCode
-      , _external = False
-      }
-  vm =
-    makeVm $
-      VMOpts
-        { EVM.vmoptContract = c
-        , EVM.vmoptCalldata = (AbstractBuf "txdata", [])
-        , EVM.vmoptValue = CallValue 0
-        , EVM.vmoptAddress = Addr 0xffffffffffffffff
-        , EVM.vmoptCaller = Lit 0
-        , EVM.vmoptOrigin = Addr 0xffffffffffffffff
-        , EVM.vmoptGas = 0xffffffffffffffff
-        , EVM.vmoptGaslimit = 0xffffffffffffffff
-        , EVM.vmoptStorageBase = Symbolic
-        , EVM.vmoptBaseFee = 0
-        , EVM.vmoptPriorityFee = 0
-        , EVM.vmoptCoinbase = 0
-        , EVM.vmoptNumber = 0
-        , EVM.vmoptTimestamp = Var "timestamp"
-        , EVM.vmoptBlockGaslimit = 0
-        , EVM.vmoptGasprice = 0
-        , EVM.vmoptMaxCodeSize = 0xffffffff
-        , EVM.vmoptPrevRandao = 420
-        , EVM.vmoptSchedule = FeeSchedule.berlin
-        , EVM.vmoptChainId = 1
-        , EVM.vmoptCreate = False
-        , EVM.vmoptTxAccessList = mempty
-        , EVM.vmoptAllowFFI = False
+  where
+    contractCode = RuntimeCode (ConcreteRuntimeCode bs)
+    c =
+      Contract
+        { _contractcode = contractCode,
+          _balance = 0,
+          _nonce = 0,
+          _codehash = keccak (ConcreteBuf bs),
+          _opIxMap = mkOpIxMap contractCode,
+          _codeOps = mkCodeOps contractCode,
+          _external = False
         }
-
+    vm =
+      makeVm $
+        VMOpts
+          { EVM.vmoptContract = c,
+            EVM.vmoptCalldata = (AbstractBuf "txdata", []),
+            EVM.vmoptValue = CallValue 0,
+            EVM.vmoptAddress = Addr 0xffffffffffffffff,
+            EVM.vmoptCaller = Lit 0,
+            EVM.vmoptOrigin = Addr 0xffffffffffffffff,
+            EVM.vmoptGas = 0xffffffffffffffff,
+            EVM.vmoptGaslimit = 0xffffffffffffffff,
+            EVM.vmoptStorageBase = Symbolic,
+            EVM.vmoptBaseFee = 0,
+            EVM.vmoptPriorityFee = 0,
+            EVM.vmoptCoinbase = 0,
+            EVM.vmoptNumber = 0,
+            EVM.vmoptTimestamp = Var "timestamp",
+            EVM.vmoptBlockGaslimit = 0,
+            EVM.vmoptGasprice = 0,
+            EVM.vmoptMaxCodeSize = 0xffffffff,
+            EVM.vmoptPrevRandao = 420,
+            EVM.vmoptSchedule = FeeSchedule.berlin,
+            EVM.vmoptChainId = 1,
+            EVM.vmoptCreate = False,
+            EVM.vmoptTxAccessList = mempty,
+            EVM.vmoptAllowFFI = False
+          }
 
 -- | Builds the Expr for the given evm bytecode object
 buildExpr :: SolverGroup -> ByteString -> IO (Expr End)
 buildExpr solvers bs = evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) (initVm bs)
-
 
 dai :: IO ByteString
 dai = do

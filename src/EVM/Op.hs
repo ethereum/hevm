@@ -1,14 +1,14 @@
 {-# LANGUAGE DataKinds #-}
 
-module EVM.Op (
-  Op (..),
-  opString,
-) where
+module EVM.Op
+  ( Op (..),
+    opString,
+  )
+where
 
 import Data.Word (Word8)
 import EVM.Types
 import Numeric (showHex)
-
 
 data Op
   = OpStop
@@ -90,7 +90,6 @@ data Op
   | OpPush (Expr EWord)
   | OpUnknown Word8
   deriving (Show, Eq)
-
 
 opString :: (Integral a, Show a) => (a, Op) -> String
 opString (i, o) =

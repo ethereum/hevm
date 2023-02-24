@@ -7,29 +7,24 @@ import Foreign.ForeignPtr
 import Foreign.Ptr
 import System.IO.Unsafe
 
-
 -- | Opaque representation of the C library's context struct.
 data EthjetContext
-
 
 foreign import ccall "ethjet_init"
   ethjet_init :: IO (Ptr EthjetContext)
 
-
 foreign import ccall "&ethjet_free"
   ethjet_free :: FunPtr (Ptr EthjetContext -> IO ())
 
-
 foreign import ccall "ethjet"
-  ethjet
-    :: Ptr EthjetContext -- initialized context
-    -> CInt -- operation
-    -> Ptr CChar
-    -> CInt -- input
-    -> Ptr CChar
-    -> CInt -- output
-    -> IO CInt -- 1 if good
-
+  ethjet ::
+    Ptr EthjetContext -> -- initialized context
+    CInt -> -- operation
+    Ptr CChar ->
+    CInt -> -- input
+    Ptr CChar ->
+    CInt -> -- output
+    IO CInt -- 1 if good
 
 -- Lazy evaluation ensures this context is only initialized once,
 -- and `unsafePerformIO` in such situations is a common pattern.
@@ -41,17 +36,16 @@ globalContext =
   unsafePerformIO $
     ethjet_init >>= newForeignPtr ethjet_free
 
-
 -- | Run a given precompiled contract using the C library.
-execute
-  :: Int
-  -- ^ The number of the precompiled contract
-  -> ByteString
-  -- ^ The input buffer
-  -> Int
-  -- ^ The desired output size
-  -> Maybe ByteString
-  -- ^ Hopefully, the output buffer
+execute ::
+  -- | The number of the precompiled contract
+  Int ->
+  -- | The input buffer
+  ByteString ->
+  -- | The desired output size
+  Int ->
+  -- | Hopefully, the output buffer
+  Maybe ByteString
 execute contract input outputSize =
   -- This code looks messy because of the pointer handling,
   -- but it's actually simple.

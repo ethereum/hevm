@@ -12,60 +12,50 @@ import Data.Sequence qualified as Seq
 import EVM.RLP
 import EVM.Types
 
-
 data KV k v a
   = Put k v a
   | Get k (v -> a)
   deriving (Functor)
 
-
 newtype DB k v a = DB (Free (KV k v) a)
   deriving (Functor, Applicative, Monad)
-
 
 insertDB :: k -> v -> DB k v ()
 insertDB k v = DB $ liftF $ Put k v ()
 
-
 lookupDB :: k -> DB k v v
 lookupDB k = DB $ liftF $ Get k id
 
-
 -- Collapses a series of puts and gets down to the monad of your choice
-runDB
-  :: Monad m
-  => (k -> v -> m ())
-  -- ^ The 'put' function for our desired monad
-  -> (k -> m v)
-  -- ^ The 'get' function for the same monad
-  -> DB k v a
-  -- ^ The puts and gets to execute
-  -> m a
+runDB ::
+  Monad m =>
+  -- | The 'put' function for our desired monad
+  (k -> v -> m ()) ->
+  -- | The 'get' function for the same monad
+  (k -> m v) ->
+  -- | The puts and gets to execute
+  DB k v a ->
+  m a
 runDB putt gett (DB ops) = go ops
- where
-  go (Pure a) = return a
-  go (Free (Put k v next)) = putt k v >> go next
-  go (Free (Get k handler)) = gett k >>= go . handler
-
+  where
+    go (Pure a) = return a
+    go (Free (Put k v next)) = putt k v >> go next
+    go (Free (Get k handler)) = gett k >>= go . handler
 
 type Path = [Nibble]
-
 
 data Ref = Hash ByteString | Literal Node
   deriving (Eq)
 
-
 instance Show Ref where
   show (Hash d) = show (ByteStringS d)
   show (Literal n) = show n
-
 
 data Node
   = Empty
   | Shortcut Path (Either Ref ByteString)
   | Full (Seq Ref) ByteString
   deriving (Show, Eq)
-
 
 -- the function HP from Appendix C of yellow paper
 encodePath :: Path -> Bool -> ByteString
@@ -74,14 +64,12 @@ encodePath p isTerminal
       packNibbles $ Nibble flag : Nibble 0 : p
   | otherwise =
       packNibbles $ Nibble (flag + 1) : p
- where
-  flag = if isTerminal then 2 else 0
-
+  where
+    flag = if isTerminal then 2 else 0
 
 rlpRef :: Ref -> RLP
 rlpRef (Hash d) = BS d
 rlpRef (Literal n) = rlpNode n
-
 
 rlpNode :: Node -> RLP
 rlpNode Empty = BS mempty
@@ -89,13 +77,10 @@ rlpNode (Shortcut path (Right val)) = List [BS $ encodePath path True, BS val]
 rlpNode (Shortcut path (Left ref)) = List [BS $ encodePath path False, rlpRef ref]
 rlpNode (Full refs val) = List $ toList (fmap rlpRef refs) <> [BS val]
 
-
 type NodeDB = DB ByteString Node
-
 
 instance Show (NodeDB Node) where
   show = show
-
 
 putNode :: Node -> NodeDB Ref
 putNode node =
@@ -107,15 +92,12 @@ putNode node =
           insertDB digest node
           return $ Hash digest
 
-
 getNode :: Ref -> NodeDB Node
 getNode (Hash d) = lookupDB d
 getNode (Literal n) = return n
 
-
 lookupPath :: Ref -> Path -> NodeDB ByteString
 lookupPath root path = getNode root >>= getVal path
-
 
 getVal :: Path -> Node -> NodeDB ByteString
 getVal _ Empty = return BS.empty
@@ -127,21 +109,17 @@ getVal path (Shortcut nodePath ref) =
 getVal [] (Full _ val) = return val
 getVal (p : ps) (Full refs _) = lookupPath (refs `Seq.index` (num p)) ps
 
-
 emptyRef :: Ref
 emptyRef = Literal Empty
 
-
 emptyRefs :: Seq Ref
 emptyRefs = Seq.replicate 16 emptyRef
-
 
 addPrefix :: Path -> Node -> NodeDB Node
 addPrefix _ Empty = return Empty
 addPrefix [] node = return node
 addPrefix path (Shortcut p v) = return $ Shortcut (path <> p) v
 addPrefix path n = Shortcut path . Left <$> putNode n
-
 
 insertRef :: Ref -> Path -> ByteString -> NodeDB Ref
 insertRef ref p val = do
@@ -151,7 +129,6 @@ insertRef ref p val = do
       then delete root p
       else update root p val
   putNode newNode
-
 
 update :: Node -> Path -> ByteString -> NodeDB Node
 update Empty p new = return $ Shortcut p (Right new)
@@ -184,7 +161,6 @@ update (Shortcut cut (Left ref)) ps new = do
   newRef <- insertRef ref ps new
   return $ Shortcut cut (Left newRef)
 
-
 delete :: Node -> Path -> NodeDB Node
 delete Empty _ = return Empty
 delete (Shortcut [] (Right _)) [] = return Empty
@@ -212,44 +188,37 @@ delete (Full refs val) (p : ps) = do
     ([(n, ref)], True) -> getNode ref >>= addPrefix [Nibble n]
     _ -> return $ Full newRefs val
 
-
 insert :: Ref -> ByteString -> ByteString -> NodeDB Ref
 insert ref key = insertRef ref (unpackNibbles key)
-
 
 lookupIn :: Ref -> ByteString -> NodeDB ByteString
 lookupIn ref bs = lookupPath ref $ unpackNibbles bs
 
-
 type Trie = StateT Ref NodeDB
-
 
 runTrie :: DB ByteString ByteString a -> Trie a
 runTrie = runDB putDB getDB
- where
-  putDB key val = do
-    ref <- get
-    newRef <- lift $ insert ref key val
-    put newRef
-  getDB key = do
-    ref <- get
-    lift $ lookupIn ref key
-
+  where
+    putDB key val = do
+      ref <- get
+      newRef <- lift $ insert ref key val
+      put newRef
+    getDB key = do
+      ref <- get
+      lift $ lookupIn ref key
 
 type MapDB k v a = StateT (Map.Map k v) Maybe a
 
-
 runMapDB :: Ord k => DB k v a -> MapDB k v a
 runMapDB = runDB putDB getDB
- where
-  getDB key = do
-    mmap <- get
-    lift $ Map.lookup key mmap
-  putDB key value = do
-    mmap <- get
-    let newMap = Map.insert key value mmap
-    put newMap
-
+  where
+    getDB key = do
+      mmap <- get
+      lift $ Map.lookup key mmap
+    putDB key value = do
+      mmap <- get
+      let newMap = Map.insert key value mmap
+      put newMap
 
 insertValues :: [(ByteString, ByteString)] -> Maybe Ref
 insertValues inputs =
@@ -258,7 +227,6 @@ insertValues inputs =
       result = snd <$> evalStateT mapDB Map.empty
       insertPair (key, value) = insertDB key value
    in result
-
 
 calcRoot :: [(ByteString, ByteString)] -> Maybe ByteString
 calcRoot vs = case insertValues vs of

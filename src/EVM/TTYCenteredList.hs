@@ -9,24 +9,21 @@ import Control.Lens
 import Data.Maybe (fromMaybe)
 import Data.Vector qualified as V
 
-
-{- | Turn a list state value into a widget given an item drawing
- function.
--}
-renderList
-  :: (Ord n, Show n)
-  => (Bool -> e -> Widget n)
-  -- ^ Rendering function, True for the selected element
-  -> Bool
-  -- ^ Whether the list has focus
-  -> List n e
-  -- ^ The List to be rendered
-  -> Widget n
-  -- ^ rendered widget
+-- | Turn a list state value into a widget given an item drawing
+-- function.
+renderList ::
+  (Ord n, Show n) =>
+  -- | Rendering function, True for the selected element
+  (Bool -> e -> Widget n) ->
+  -- | Whether the list has focus
+  Bool ->
+  -- | The List to be rendered
+  List n e ->
+  -- | rendered widget
+  Widget n
 renderList drawElem foc l =
   withDefAttr listAttr $
     drawListElements foc l drawElem
-
 
 drawListElements :: (Ord n, Show n) => Bool -> List n e -> (Bool -> e -> Widget n) -> Widget n
 drawListElements foc l drawElem =

@@ -1,21 +1,22 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 
-module EVM.Stepper (
-  Action (..),
-  Stepper,
-  exec,
-  execFully,
-  run,
-  runFully,
-  wait,
-  ask,
-  evm,
-  evmIO,
-  entering,
-  enter,
-  interpret,
-) where
+module EVM.Stepper
+  ( Action (..),
+    Stepper,
+    exec,
+    execFully,
+    run,
+    runFully,
+    wait,
+    ask,
+    evm,
+    evmIO,
+    entering,
+    enter,
+    interpret,
+  )
+where
 
 -- This module is an abstract definition of EVM steppers.
 -- Steppers can be run as TTY debuggers or as CLI test runners.
@@ -34,7 +35,6 @@ import EVM.Fetch qualified as Fetch
 import EVM.Types (EType (..), Expr)
 import Prelude hiding (fail)
 
-
 -- | The instruction type of the operational monad
 data Action a where
   -- | Keep executing until an intermediate result is reached
@@ -50,36 +50,28 @@ data Action a where
   -- | Perform an IO action
   IOAct :: StateT VM IO a -> Action a -- they should all just be this?
 
-
 -- | Type alias for an operational monad of @Action@
 type Stepper a = Program Action a
-
 
 -- Singleton actions
 
 exec :: Stepper VMResult
 exec = singleton Exec
 
-
 run :: Stepper VM
 run = singleton Run
-
 
 wait :: Query -> Stepper ()
 wait = singleton . Wait
 
-
 ask :: Choose -> Stepper ()
 ask = singleton . Ask
-
 
 evm :: EVM a -> Stepper a
 evm = singleton . EVM
 
-
 evmIO :: StateT VM IO a -> Stepper a
 evmIO = singleton . IOAct
-
 
 -- | Run the VM until final result, resolving all queries
 execFully :: Stepper (Either Error (Expr Buf))
@@ -94,7 +86,6 @@ execFully =
     VMSuccess x ->
       pure (Right x)
 
-
 -- | Run the VM until its final state
 runFully :: Stepper EVM.VM
 runFully = do
@@ -108,7 +99,6 @@ runFully = do
     Just _ ->
       pure vm
 
-
 entering :: Text -> Stepper a -> Stepper a
 entering t stepper = do
   evm (EVM.pushTrace (EVM.EntryTrace t))
@@ -116,35 +106,33 @@ entering t stepper = do
   evm EVM.popTrace
   pure x
 
-
 enter :: Text -> Stepper ()
 enter t = evm (EVM.pushTrace (EVM.EntryTrace t))
-
 
 interpret :: Fetch.Fetcher -> Stepper a -> StateT VM IO a
 interpret fetcher =
   eval . view
- where
-  eval
-    :: ProgramView Action a
-    -> StateT VM IO a
+  where
+    eval ::
+      ProgramView Action a ->
+      StateT VM IO a
 
-  eval (Return x) =
-    pure x
-  eval (action :>>= k) =
-    case action of
-      Exec ->
-        (State.state . runState) EVM.Exec.exec >>= interpret fetcher . k
-      Run ->
-        (State.state . runState) EVM.Exec.run >>= interpret fetcher . k
-      Wait q ->
-        do
-          m <- liftIO (fetcher q)
-          State.state (runState m) >> interpret fetcher (k ())
-      Ask _ ->
-        error "cannot make choices with this interpreter"
-      IOAct m ->
-        do m >>= interpret fetcher . k
-      EVM m -> do
-        r <- State.state (runState m)
-        interpret fetcher (k r)
+    eval (Return x) =
+      pure x
+    eval (action :>>= k) =
+      case action of
+        Exec ->
+          (State.state . runState) EVM.Exec.exec >>= interpret fetcher . k
+        Run ->
+          (State.state . runState) EVM.Exec.run >>= interpret fetcher . k
+        Wait q ->
+          do
+            m <- liftIO (fetcher q)
+            State.state (runState m) >> interpret fetcher (k ())
+        Ask _ ->
+          error "cannot make choices with this interpreter"
+        IOAct m ->
+          do m >>= interpret fetcher . k
+        EVM m -> do
+          r <- State.state (runState m)
+          interpret fetcher (k r)

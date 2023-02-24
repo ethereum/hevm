@@ -18,7 +18,6 @@ import System.Directory
 import System.IO.Temp
 import System.Process (readProcess)
 
-
 runDappTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO Bool
 runDappTestCustom testFile match maxIter ffiAllowed rpcinfo = do
   root <- Paths.getDataDir
@@ -32,10 +31,8 @@ runDappTestCustom testFile match maxIter ffiAllowed rpcinfo = do
         opts <- testOpts solvers root json match maxIter ffiAllowed rpcinfo
         dappTest opts file Nothing
 
-
 runDappTest :: FilePath -> Text -> IO Bool
 runDappTest testFile match = runDappTestCustom testFile match Nothing True Nothing
-
 
 debugDappTest :: FilePath -> RpcInfo -> IO ()
 debugDappTest testFile rpcinfo = do
@@ -50,7 +47,6 @@ debugDappTest testFile rpcinfo = do
         opts <- testOpts solvers root json ".*" Nothing True rpcinfo
         TTY.main opts root file
 
-
 testOpts :: SolverGroup -> FilePath -> Text -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO UnitTestOptions
 testOpts solvers root solcJson match maxIter allowFFI rpcinfo = do
   srcInfo <- case readJSON solcJson of
@@ -63,25 +59,24 @@ testOpts solvers root solcJson match maxIter allowFFI rpcinfo = do
 
   pure
     UnitTestOptions
-      { solvers = solvers
-      , rpcInfo = rpcinfo
-      , maxIter = maxIter
-      , askSmtIters = Nothing
-      , smtDebug = False
-      , smtTimeout = Nothing
-      , solver = Nothing
-      , covMatch = Nothing
-      , verbose = Just 1
-      , match = match
-      , maxDepth = Nothing
-      , fuzzRuns = 100
-      , replay = Nothing
-      , vmModifier = id
-      , testParams = params
-      , dapp = srcInfo
-      , ffiAllowed = allowFFI
+      { solvers = solvers,
+        rpcInfo = rpcinfo,
+        maxIter = maxIter,
+        askSmtIters = Nothing,
+        smtDebug = False,
+        smtTimeout = Nothing,
+        solver = Nothing,
+        covMatch = Nothing,
+        verbose = Just 1,
+        match = match,
+        maxDepth = Nothing,
+        fuzzRuns = 100,
+        replay = Nothing,
+        vmModifier = id,
+        testParams = params,
+        dapp = srcInfo,
+        ffiAllowed = allowFFI
       }
-
 
 compileWithDSTest :: FilePath -> IO (Text, Text)
 compileWithDSTest src =
