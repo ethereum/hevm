@@ -38,8 +38,10 @@ data TxType = LegacyTransaction
 
 instance JSON.ToJSON TxType where
   toJSON t = case t of
-               EIP1559Transaction -> "0x2"
-               _ -> error "unimplemented"
+               EIP1559Transaction    -> "0x2" -- EIP1559
+               LegacyTransaction     -> "0x1" -- EIP2718
+               AccessListTransaction -> "0x1" -- EIP2930
+
 
 data Transaction = Transaction {
     txData     :: ByteString,
