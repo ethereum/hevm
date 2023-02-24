@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Added
-- New concrete fuzzing setup based on `evmtool` in `go-ethereum` and a new tracing executor, based on old dapptools trace executor. This also adds a simplistic random contract generation, and improves the signing infrastructure
+- A new differential fuzzing test harness that compares the concrete semantics, as well as parts of the symbolic semantics against the geth evm implementation
 
 ## [0.50.3] - 2023-02-17
 
