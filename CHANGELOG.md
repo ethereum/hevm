@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `--solvers` cli option is now respected (previously we always used Z3)
 - The `equivalence` command now fails with the correct status code when counterexamples are found
 
+### Changed
+
+- The `equivalence` command now pretty prints discovered counterexamples
+
 ### Added
 
 - The `hevm` library can now be built on Windows systems.
