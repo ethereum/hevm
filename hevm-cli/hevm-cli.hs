@@ -266,7 +266,8 @@ main = do
     DappTest {} ->
       withCurrentDirectory root $ do
         cores <- num <$> getNumProcessors
-        withSolvers Z3 cores cmd.smttimeout $ \solvers -> do
+        solver <- getSolver cmd
+        withSolvers solver cores cmd.smttimeout $ \solvers -> do
           testFile <- findJsonFile cmd.jsonFile
           testOpts <- unitTestOptions cmd solvers testFile
           case (cmd.coverage, optsMode cmd) of
@@ -308,17 +309,28 @@ equivalence cmd = do
                           , rpcInfo = Nothing
                           }
 
-  withSolvers Z3 3 Nothing $ \s -> do
+  solver <- getSolver cmd
+  withSolvers solver 3 Nothing $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts Nothing
-    case not (any isCex res) of
+    case any isCex res of
       False -> do
         putStrLn "No discrepancies found"
         when (any isTimeout res) $ do
           putStrLn "But timeout(s) occurred"
           exitFailure
       True -> do
-        putStrLn $ "Not equivalent. Counterexample(s):" <> show res
+        putStrLn $ "Not equivalent. Counterexample(s):" <> show (filter (not . isQed) res)
         exitFailure
+
+getSolver :: Command Options.Unwrapped -> IO Solver
+getSolver cmd = case cmd.solver of
+                  Nothing -> pure Z3
+                  Just s -> case T.unpack s of
+                              "z3" -> pure Z3
+                              "cvc5" -> pure CVC5
+                              input -> do
+                                putStrLn $ "unrecognised solver: " <> input
+                                exitFailure
 
 getSrcInfo :: Command Options.Unwrapped -> IO DappInfo
 getSrcInfo cmd =
@@ -367,7 +379,8 @@ assert cmd = do
   let errCodes = fromMaybe defaultPanicCodes cmd.assertions
   cores <- num <$> getNumProcessors
   let solverCount = fromMaybe cores cmd.numSolvers
-  withSolvers EVM.Solvers.Z3 solverCount cmd.smttimeout $ \solvers -> do
+  solver <- getSolver cmd
+  withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
     if cmd.debug then do
       srcInfo <- getSrcInfo cmd
       void $ TTY.runFromVM
