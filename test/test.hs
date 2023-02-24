@@ -355,28 +355,22 @@ tests = testGroup "hevm"
 
     , testProperty "abi encoding vs. solidity" $ withMaxSuccess 20 $ forAll (arbitrary >>= genAbiValue) $
       \y -> ioProperty $ do
-          -- traceM ("encoding: " ++ (show y) ++ " : " ++ show (abiValueType y))
           Just encoded <- runStatements [i| x = abi.encode(a);|]
             [y] AbiBytesDynamicType
           let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
                 AbiTuple (Vector.toList -> [e]) -> e
                 _ -> error "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [y])
-          -- traceM ("encoded (solidity): " ++ show solidityEncoded)
-          -- traceM ("encoded (hevm): " ++ show (AbiBytesDynamic hevmEncoded))
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
 
     , testProperty "abi encoding vs. solidity (2 args)" $ withMaxSuccess 20 $ forAll (arbitrary >>= bothM genAbiValue) $
       \(x', y') -> ioProperty $ do
-          -- traceM ("encoding: " ++ (show x') ++ ", " ++ (show y')  ++ " : " ++ show (abiValueType x') ++ ", " ++ show (abiValueType y'))
           Just encoded <- runStatements [i| x = abi.encode(a, b);|]
             [x', y'] AbiBytesDynamicType
           let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
                 AbiTuple (Vector.toList -> [e]) -> e
                 _ -> error "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [x',y'])
-          -- traceM ("encoded (solidity): " ++ show solidityEncoded)
-          -- traceM ("encoded (hevm): " ++ show (AbiBytesDynamic hevmEncoded))
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
     ]
 
