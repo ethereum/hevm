@@ -39,6 +39,7 @@ import Test.Tasty.ExpectedFailure
 import qualified Data.Aeson as JSON
 import Data.Aeson ((.:))
 import Data.ByteString.Char8 qualified as Char8
+import EVM.Hexdump (paddedShowHex)
 
 import qualified Control.Monad (when)
 import qualified Control.Monad.Operational as Operational (view, ProgramViewT(..), ProgramView)
@@ -370,6 +371,32 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
       putStrLn $ "Stacks don't match. evmtool's trace is longer by:" <> (show b)
       pure False
 
+getTraceFileName :: EVMToolResult -> String
+getTraceFileName evmtoolResult = traceFileName
+  where
+    txName = ((evmtoolResult.receipts) !! 0).recTransactionHash
+    traceFileName = "trace-0-" ++ txName ++ ".jsonl"
+
+getTraceOutput :: Maybe EVMToolResult -> IO (Maybe EVMToolTraceOutput)
+getTraceOutput evmtoolResult =
+  case evmtoolResult of
+    Nothing -> pure Nothing
+    Just res -> do
+      let traceFileName = getTraceFileName res
+      (exitcode, _, _) <- readProcessWithExitCode "./convert_trace_to_json.sh" [getTraceFileName res] ""
+      case exitcode of
+        ExitSuccess -> JSON.decodeFileStrict (traceFileName ++ ".json") :: IO (Maybe EVMToolTraceOutput)
+        _ -> pure Nothing
+
+deleteTraceOutputFiles :: Maybe EVMToolResult -> IO ()
+deleteTraceOutputFiles evmtoolResult =
+  case evmtoolResult of
+    Nothing -> return ()
+    Just res -> do
+      let traceFileName = getTraceFileName res
+      System.Directory.removeFile traceFileName
+      System.Directory.removeFile (traceFileName ++ ".json")
+
 tests :: TestTree
 tests = testGroup "hevm"
   [ testGroup "StorageTests"
@@ -439,11 +466,7 @@ tests = testGroup "hevm"
               getReturnVal (Return _ (ConcreteBuf bs) _) = Just bs
               getReturnVal _ = Nothing
               simplConcrExprRetval = getReturnVal simplConcExpr
-              txName = (((fromJust evmtoolResult).receipts) !! 0).recTransactionHash
-              traceFileName = "trace-0-" ++ txName ++ ".jsonl"
-              traceFileNameJSON = traceFileName ++ ".json"
-            _ <- readProcess "./convert_trace_to_json.sh" [traceFileName] ""
-            (Just evmtoolTraceOutput) <- JSON.decodeFileStrict traceFileNameJSON :: IO (Maybe EVMToolTraceOutput)
+            (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
             traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.toTrace)
             -- putStrLn $ "HEVM trace   : " <> show hevmTrace
             -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.toTrace)
@@ -456,8 +479,7 @@ tests = testGroup "hevm"
                    putStr "OK, symbolic interpretation -> concrete calldata -> Expr.simplify gives the same answer."
                    if isNothing simplConcrExprRetval then putStrLn ", but it was a Nothing, so not strong equivalence"
                                                      else putStrLn ""
-                   System.Directory.removeFile traceFileName
-                   System.Directory.removeFile traceFileNameJSON
+                   deleteTraceOutputFiles evmtoolResult
                    System.Directory.removeFile "alloc-out.json"
                    System.Directory.removeFile "result.json"
                  else do
@@ -467,7 +489,7 @@ tests = testGroup "hevm"
                    putStrLn $ "evmtool's return value     : " <> (show hevmTraceResult.out)
                    assertEqual "Simplified, concretized expression must match evmtool's output." True False
             else do
-              putStrLn $ "Name of trace file: " <> traceFileName
+              putStrLn $ "Name of trace file: " <> (getTraceFileName $ fromJust evmtoolResult)
               putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
               T.putStrLn $ "HEVM result: " <> (formatBinary hevmTraceResult.out)
               T.putStrLn $ "evm result : " <> (formatBinary evmtoolTraceOutput.toOutput.output)

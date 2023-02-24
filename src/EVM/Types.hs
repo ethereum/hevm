@@ -775,3 +775,6 @@ data VMTrace =
 instance JSON.ToJSON VMTrace where
   toEncoding = JSON.genericToEncoding JSON.defaultOptions
 instance JSON.FromJSON VMTrace
+
+bsToHex :: ByteString -> String
+bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)

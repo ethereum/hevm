@@ -1,3 +1,16 @@
+{-|
+Module      : Assembler for EVM opcodes used in the HEVM symbolic checker
+Description :
+Copyright   : (c) d-xo, msoos, 2023
+License     : GPL-3
+Maintainers : see https://github.com/ethereum/hevm
+Stability   : experimental
+Portability : Architecture-independent
+
+Here is a longer description of this module, containing some
+commentary with @some markup@.
+-}
+
 {-# LANGUAGE DataKinds #-}
 
 module EVM.Assembler where
