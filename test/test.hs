@@ -453,7 +453,48 @@ tests = testGroup "hevm"
   -- be observed, errors, etc. We also run the results via Solidity and observe
   -- the return value to be the same
   , testGroup "contract-quickcheck-run"
-    [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract) -> ioProperty $ do
+    [ testProperty "SMT-vs-concrete-call-check" $ \(contr :: OpContract) -> ioProperty $ do
+        txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
+        let txData = BS.pack $ toEnum <$> txDataRaw
+            gaslimitExec = 0xfffffff -- make it huge, don't fuzz SMT's gas
+        (evmtoolResult, _) <- getEVMToolRet contr txData gaslimitExec
+        let topContractPre = T.pack [i|
+              contract C {
+                function test(bytes memory calldata) external {
+                  // bytes memory calldata = hex"<CALLDATA>"
+                  bytes memory code = hex"<CODE>";
+                  // deploy contract
+                  address addr;
+                  assembly { addr := create(0, add(code, 32), mload(code)) }
+
+                  // call contract
+                  (bool suc, bytes memory res) = addr.call(calldata);
+                  bytes memory expected_output = hex"<OUTPUT>";
+                  assert(suc);
+                  assert(keccak256(res) == keccak256(expected_output));
+                }
+              }
+              |]
+            opsToHex :: Vector.Vector (Expr 'Byte) -> String
+            opsToHex bytes = concatMap opToHex (Vector.toList bytes)
+              where
+                opToHex :: Expr 'Byte -> String
+                opToHex a = case a of
+                              (LitByte b) -> paddedShowHex 2 b
+                              _ -> error "Contract should be made of Lits"
+
+            contrLits = assemble $ getOpData contr
+
+        (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
+        let topContract = T.replace "<CODE>" (T.pack $ opsToHex contrLits) $ T.replace "<OUTPUT>" (T.pack $ bsToHex $ evmtoolTraceOutput.toOutput.output) topContractPre
+        -- T.replace "<CALLDATA>" (T.pack $ bsToHex txData) topContractPre
+        putStrLn $ "Contract is: " <> T.unpack topContract
+        Just c <- solcRuntime "C" topContract
+        a <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x1] c (Just ("test(bytes)", [AbstractBuf])) [] defaultVeriOpts
+        print $ length a
+        print $ show a
+        putStrLn "Whatever"
+    , testProperty "random-contract-concrete-call" $ \(contr :: OpContract) -> ioProperty $ do
         txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
         gaslimitExec <- generate $ chooseInt (40000, 0xffff)
         let txData = BS.pack $ toEnum <$> txDataRaw
