@@ -103,6 +103,7 @@ data EVMToolTrace =
     , evmOpName :: String
     , evmStack :: [W256]
     } deriving (Generic, Show)
+
 instance JSON.FromJSON EVMToolTrace where
   parseJSON = JSON.withObject "EVMToolTrace" $ \v -> EVMToolTrace
     <$> v .: "pc"
@@ -126,6 +127,7 @@ data EVMToolOutput =
     , gasUsed :: W256
     , time :: Integer
     } deriving (Generic, Show)
+
 instance JSON.FromJSON EVMToolOutput where
     parseJSON = JSON.withObject "EVToolOutput" $ \v -> EVMToolOutput
         <$> v .: "output"
@@ -137,6 +139,7 @@ data EVMToolTraceOutput =
     { toTrace :: [EVMToolTrace]
     , toOutput :: EVMToolOutput
     } deriving (Generic, Show)
+
 instance JSON.FromJSON EVMToolTraceOutput where
     parseJSON = JSON.withObject "EVMToolTraceOutput" $ \v -> EVMToolTraceOutput
         <$> v .: "trace"
@@ -153,6 +156,7 @@ data EVMToolEnv = EVMToolEnv
   , _schedule    :: FeeSchedule.FeeSchedule Data.Word.Word64
   , _blockHashes :: Map.Map Int W256
   } deriving (Show, Generic)
+
 instance JSON.ToJSON EVMToolEnv where
   toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON $ b._coinbase))
                          , ("currentDifficulty", (JSON.toJSON $ b._prevRandao))
@@ -194,6 +198,7 @@ data EVMToolReceipt =
     , recBlockHash :: String
     , recTransactionIndex :: String
     } deriving (Generic, Show)
+
 instance JSON.FromJSON EVMToolReceipt where
     parseJSON = JSON.withObject "EVMReceipt" $ \v -> EVMToolReceipt
         <$> v .: "type"
@@ -220,6 +225,7 @@ data EVMToolResult =
   , gasUsed :: String
   , rejected :: Maybe [EVMRejected]
   } deriving (Generic, Show)
+
 instance JSON.FromJSON EVMToolResult
 
 data EVMRejected =
@@ -227,6 +233,7 @@ data EVMRejected =
     { index :: Int
     , err :: String
     } deriving (Generic, Show)
+
 instance JSON.FromJSON EVMRejected where
   parseJSON = JSON.withObject "EVMRejected" $ \v -> EVMRejected
     <$> v .: "index"
@@ -238,6 +245,7 @@ data EVMToolAlloc =
   , code :: ByteString
   , nonce :: W64
   } deriving (Generic)
+
 instance JSON.ToJSON EVMToolAlloc where
   toJSON b = JSON.object [ ("balance" ,  (JSON.toJSON $ show b.balance))
                          , ("code", (JSON.toJSON $ b.code))
@@ -3289,6 +3297,7 @@ data VMTraceResult =
   { out  :: ByteString
   , gasUsed :: Data.Word.Word64
   } deriving (Generic, Show)
+
 instance JSON.ToJSON VMTraceResult where
   toEncoding = JSON.genericToEncoding JSON.defaultOptions
 

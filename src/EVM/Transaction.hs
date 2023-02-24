@@ -28,12 +28,14 @@ data AccessListEntry = AccessListEntry {
   accessAddress :: Addr,
   accessStorageKeys :: [W256]
 } deriving (Show, Generic)
+
 instance JSON.ToJSON AccessListEntry
 
 data TxType = LegacyTransaction
             | AccessListTransaction
             | EIP1559Transaction
   deriving (Show, Eq, Generic)
+
 instance JSON.ToJSON TxType where
   toJSON t = case t of
                EIP1559Transaction -> "0x2"
@@ -54,6 +56,7 @@ data Transaction = Transaction {
     txMaxPriorityFeeGas :: Maybe W256,
     txMaxFeePerGas :: Maybe W256
 } deriving (Show, Generic)
+
 instance JSON.ToJSON Transaction where
   toJSON t = JSON.object [ ("input",             (JSON.toJSON $ t.txData))
                          , ("gas",               (JSON.toJSON $ "0x" ++ showHex (toInteger $ t.txGasLimit) ""))
