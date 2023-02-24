@@ -1,14 +1,14 @@
 {-# LANGUAGE DataKinds #-}
 
-module EVM.Op
-  ( Op (..)
-  , opString
-  ) where
-
-import EVM.Types
+module EVM.Op (
+  Op (..),
+  opString,
+) where
 
 import Data.Word (Word8)
+import EVM.Types
 import Numeric (showHex)
+
 
 data Op
   = OpStop
@@ -91,89 +91,92 @@ data Op
   | OpUnknown Word8
   deriving (Show, Eq)
 
+
 opString :: (Integral a, Show a) => (a, Op) -> String
-opString (i, o) = let showPc x | x < 0x10 = '0' : showHex x ""
-                               | otherwise = showHex x ""
-                  in showPc i <> " " ++ case o of
-  OpStop -> "STOP"
-  OpAdd -> "ADD"
-  OpMul -> "MUL"
-  OpSub -> "SUB"
-  OpDiv -> "DIV"
-  OpSdiv -> "SDIV"
-  OpMod -> "MOD"
-  OpSmod -> "SMOD"
-  OpAddmod -> "ADDMOD"
-  OpMulmod -> "MULMOD"
-  OpExp -> "EXP"
-  OpSignextend -> "SIGNEXTEND"
-  OpLt -> "LT"
-  OpGt -> "GT"
-  OpSlt -> "SLT"
-  OpSgt -> "SGT"
-  OpEq -> "EQ"
-  OpIszero -> "ISZERO"
-  OpAnd -> "AND"
-  OpOr -> "OR"
-  OpXor -> "XOR"
-  OpNot -> "NOT"
-  OpByte -> "BYTE"
-  OpShl -> "SHL"
-  OpShr -> "SHR"
-  OpSar -> "SAR"
-  OpSha3 -> "SHA3"
-  OpAddress -> "ADDRESS"
-  OpBalance -> "BALANCE"
-  OpOrigin -> "ORIGIN"
-  OpCaller -> "CALLER"
-  OpCallvalue -> "CALLVALUE"
-  OpCalldataload -> "CALLDATALOAD"
-  OpCalldatasize -> "CALLDATASIZE"
-  OpCalldatacopy -> "CALLDATACOPY"
-  OpCodesize -> "CODESIZE"
-  OpCodecopy -> "CODECOPY"
-  OpGasprice -> "GASPRICE"
-  OpExtcodesize -> "EXTCODESIZE"
-  OpExtcodecopy -> "EXTCODECOPY"
-  OpReturndatasize -> "RETURNDATASIZE"
-  OpReturndatacopy -> "RETURNDATACOPY"
-  OpExtcodehash -> "EXTCODEHASH"
-  OpBlockhash -> "BLOCKHASH"
-  OpCoinbase -> "COINBASE"
-  OpTimestamp -> "TIMESTAMP"
-  OpNumber -> "NUMBER"
-  OpPrevRandao -> "PREVRANDAO"
-  OpGaslimit -> "GASLIMIT"
-  OpChainid -> "CHAINID"
-  OpSelfbalance -> "SELFBALANCE"
-  OpBaseFee -> "BASEFEE"
-  OpPop -> "POP"
-  OpMload -> "MLOAD"
-  OpMstore -> "MSTORE"
-  OpMstore8 -> "MSTORE8"
-  OpSload -> "SLOAD"
-  OpSstore -> "SSTORE"
-  OpJump -> "JUMP"
-  OpJumpi -> "JUMPI"
-  OpPc -> "PC"
-  OpMsize -> "MSIZE"
-  OpGas -> "GAS"
-  OpJumpdest -> "JUMPDEST"
-  OpCreate -> "CREATE"
-  OpCall -> "CALL"
-  OpStaticcall -> "STATICCALL"
-  OpCallcode -> "CALLCODE"
-  OpReturn -> "RETURN"
-  OpDelegatecall -> "DELEGATECALL"
-  OpCreate2 -> "CREATE2"
-  OpSelfdestruct -> "SELFDESTRUCT"
-  OpDup x -> "DUP" ++ show x
-  OpSwap x -> "SWAP" ++ show x
-  OpLog x -> "LOG" ++ show x
-  OpPush x -> case x of
-    Lit x' -> "PUSH 0x" ++ (showHex x' "")
-    _ -> "PUSH " ++ show x
-  OpRevert -> "REVERT"
-  OpUnknown x -> case x of
-    254 -> "INVALID"
-    _ -> "UNKNOWN " ++ (showHex x "")
+opString (i, o) =
+  let showPc x
+        | x < 0x10 = '0' : showHex x ""
+        | otherwise = showHex x ""
+   in showPc i <> " " ++ case o of
+        OpStop -> "STOP"
+        OpAdd -> "ADD"
+        OpMul -> "MUL"
+        OpSub -> "SUB"
+        OpDiv -> "DIV"
+        OpSdiv -> "SDIV"
+        OpMod -> "MOD"
+        OpSmod -> "SMOD"
+        OpAddmod -> "ADDMOD"
+        OpMulmod -> "MULMOD"
+        OpExp -> "EXP"
+        OpSignextend -> "SIGNEXTEND"
+        OpLt -> "LT"
+        OpGt -> "GT"
+        OpSlt -> "SLT"
+        OpSgt -> "SGT"
+        OpEq -> "EQ"
+        OpIszero -> "ISZERO"
+        OpAnd -> "AND"
+        OpOr -> "OR"
+        OpXor -> "XOR"
+        OpNot -> "NOT"
+        OpByte -> "BYTE"
+        OpShl -> "SHL"
+        OpShr -> "SHR"
+        OpSar -> "SAR"
+        OpSha3 -> "SHA3"
+        OpAddress -> "ADDRESS"
+        OpBalance -> "BALANCE"
+        OpOrigin -> "ORIGIN"
+        OpCaller -> "CALLER"
+        OpCallvalue -> "CALLVALUE"
+        OpCalldataload -> "CALLDATALOAD"
+        OpCalldatasize -> "CALLDATASIZE"
+        OpCalldatacopy -> "CALLDATACOPY"
+        OpCodesize -> "CODESIZE"
+        OpCodecopy -> "CODECOPY"
+        OpGasprice -> "GASPRICE"
+        OpExtcodesize -> "EXTCODESIZE"
+        OpExtcodecopy -> "EXTCODECOPY"
+        OpReturndatasize -> "RETURNDATASIZE"
+        OpReturndatacopy -> "RETURNDATACOPY"
+        OpExtcodehash -> "EXTCODEHASH"
+        OpBlockhash -> "BLOCKHASH"
+        OpCoinbase -> "COINBASE"
+        OpTimestamp -> "TIMESTAMP"
+        OpNumber -> "NUMBER"
+        OpPrevRandao -> "PREVRANDAO"
+        OpGaslimit -> "GASLIMIT"
+        OpChainid -> "CHAINID"
+        OpSelfbalance -> "SELFBALANCE"
+        OpBaseFee -> "BASEFEE"
+        OpPop -> "POP"
+        OpMload -> "MLOAD"
+        OpMstore -> "MSTORE"
+        OpMstore8 -> "MSTORE8"
+        OpSload -> "SLOAD"
+        OpSstore -> "SSTORE"
+        OpJump -> "JUMP"
+        OpJumpi -> "JUMPI"
+        OpPc -> "PC"
+        OpMsize -> "MSIZE"
+        OpGas -> "GAS"
+        OpJumpdest -> "JUMPDEST"
+        OpCreate -> "CREATE"
+        OpCall -> "CALL"
+        OpStaticcall -> "STATICCALL"
+        OpCallcode -> "CALLCODE"
+        OpReturn -> "RETURN"
+        OpDelegatecall -> "DELEGATECALL"
+        OpCreate2 -> "CREATE2"
+        OpSelfdestruct -> "SELFDESTRUCT"
+        OpDup x -> "DUP" ++ show x
+        OpSwap x -> "SWAP" ++ show x
+        OpLog x -> "LOG" ++ show x
+        OpPush x -> case x of
+          Lit x' -> "PUSH 0x" ++ (showHex x' "")
+          _ -> "PUSH " ++ show x
+        OpRevert -> "REVERT"
+        OpUnknown x -> case x of
+          254 -> "INVALID"
+          _ -> "UNKNOWN " ++ (showHex x "")

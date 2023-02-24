@@ -1,5 +1,5 @@
-{-# Language DataKinds #-}
-{-# Language QuasiQuotes #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 {- |
 Module: EVM.Dev
@@ -7,36 +7,36 @@ Description: Helpers for repl driven hevm hacking
 -}
 module EVM.Dev where
 
-import Data.ByteString hiding (writeFile, zip)
 import Control.Monad.State.Strict hiding (state)
+import Data.ByteString hiding (writeFile, zip)
 import Data.Maybe (fromJust)
-import System.Directory
-import Data.Typeable
-
 import Data.String.Here
-import qualified Data.Text.IO as T
-import qualified Data.Text.Lazy.IO as TL
-
+import Data.Text.IO qualified as T
+import Data.Text.Lazy.IO qualified as TL
+import Data.Typeable
 import EVM
-import EVM.SMT
-import EVM.Solvers
-import EVM.Types
-import EVM.Expr (numBranches, simplify)
-import EVM.SymExec
-import EVM.Solidity
-import EVM.UnitTest
-import EVM.Format (formatExpr)
 import EVM.Dapp (dappInfo)
+import EVM.Expr (numBranches, simplify)
+import EVM.FeeSchedule qualified as FeeSchedule
+import EVM.Fetch qualified as Fetch
+import EVM.Format (formatExpr)
+import EVM.SMT
+import EVM.Solidity
+import EVM.Solvers
+import EVM.SymExec
+import EVM.Types
+import EVM.UnitTest
 import GHC.Conc
+import System.Directory
 import System.Exit (exitFailure)
-import qualified EVM.Fetch as Fetch
-import qualified EVM.FeeSchedule as FeeSchedule
+
 
 checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO ()
 checkEquiv a b = withSolvers Z3 1 Nothing $ \s -> do
   let smt = assertProps [a ./= b]
   res <- checkSat s smt
   print res
+
 
 runDappTest :: FilePath -> IO ()
 runDappTest root =
@@ -48,50 +48,58 @@ runDappTest root =
       res <- dappTest opts testFile Nothing
       unless res exitFailure
 
+
 testOpts :: SolverGroup -> FilePath -> FilePath -> IO UnitTestOptions
 testOpts solvers root testFile = do
-  srcInfo <- readSolc testFile >>= \case
-    Nothing -> error "Could not read .sol.json file"
-    Just (contractMap, sourceCache) ->
-      pure $ dappInfo root contractMap sourceCache
+  srcInfo <-
+    readSolc testFile >>= \case
+      Nothing -> error "Could not read .sol.json file"
+      Just (contractMap, sourceCache) ->
+        pure $ dappInfo root contractMap sourceCache
 
   params <- getParametersFromEnvironmentVariables Nothing
-  pure EVM.UnitTest.UnitTestOptions
-    { EVM.UnitTest.solvers = solvers
-    , EVM.UnitTest.rpcInfo = Nothing
-    , EVM.UnitTest.maxIter = Nothing
-    , EVM.UnitTest.askSmtIters = Nothing
-    , EVM.UnitTest.smtTimeout = Nothing
-    , EVM.UnitTest.smtDebug = False
-    , EVM.UnitTest.solver = Nothing
-    , EVM.UnitTest.covMatch = Nothing
-    , EVM.UnitTest.verbose = Nothing
-    , EVM.UnitTest.match = ".*"
-    , EVM.UnitTest.maxDepth = Nothing
-    , EVM.UnitTest.fuzzRuns = 100
-    , EVM.UnitTest.replay = Nothing
-    , EVM.UnitTest.vmModifier = id
-    , EVM.UnitTest.testParams = params
-    , EVM.UnitTest.dapp = srcInfo
-    , EVM.UnitTest.ffiAllowed = True
-    }
+  pure
+    EVM.UnitTest.UnitTestOptions
+      { EVM.UnitTest.solvers = solvers
+      , EVM.UnitTest.rpcInfo = Nothing
+      , EVM.UnitTest.maxIter = Nothing
+      , EVM.UnitTest.askSmtIters = Nothing
+      , EVM.UnitTest.smtTimeout = Nothing
+      , EVM.UnitTest.smtDebug = False
+      , EVM.UnitTest.solver = Nothing
+      , EVM.UnitTest.covMatch = Nothing
+      , EVM.UnitTest.verbose = Nothing
+      , EVM.UnitTest.match = ".*"
+      , EVM.UnitTest.maxDepth = Nothing
+      , EVM.UnitTest.fuzzRuns = 100
+      , EVM.UnitTest.replay = Nothing
+      , EVM.UnitTest.vmModifier = id
+      , EVM.UnitTest.testParams = params
+      , EVM.UnitTest.dapp = srcInfo
+      , EVM.UnitTest.ffiAllowed = True
+      }
+
 
 doTest :: IO ()
 doTest = do
   c <- testContract
   reachable' False c
-  --e <- simplify <$> buildExpr c
-  --Prelude.putStrLn (formatExpr e)
+
+
+-- e <- simplify <$> buildExpr c
+-- Prelude.putStrLn (formatExpr e)
 
 analyzeDai :: IO ()
 analyzeDai = do
   d <- dai
   reachable' False d
 
+
 daiExpr :: IO (Expr End)
 daiExpr = do
   d <- dai
   withSolvers Z3 1 Nothing $ \s -> buildExpr s d
+
 
 analyzeVat :: IO ()
 analyzeVat = do
@@ -102,10 +110,13 @@ analyzeVat = do
     putStrLn $ "done (" <> show (numBranches e) <> " branches)"
     reachable' False v
 
+
 analyzeDeposit :: IO ()
 analyzeDeposit = do
-  Just c <- solcRuntime "Deposit"
-    [i|
+  Just c <-
+    solcRuntime
+      "Deposit"
+      [i|
     contract Deposit {
       function deposit(uint256 deposit_count) external pure {
         require(deposit_count < 2**32 - 1);
@@ -135,7 +146,7 @@ reachable' smtdebug c = do
   withSolvers Z3 4 Nothing $ \s -> do
     full <- simplify <$> buildExpr s c
     putStrLn $ "Explored contract (" <> (show $ numBranches full) <> " branches)"
-    --putStrLn $ formatExpr full
+    -- putStrLn $ formatExpr full
     T.writeFile "full.ast" $ formatExpr full
     putStrLn "Dumped to full.ast"
     putStrLn "Checking reachability"
@@ -143,7 +154,7 @@ reachable' smtdebug c = do
     putStrLn $ "Checked reachability (" <> (show $ numBranches less) <> " reachable branches)"
     T.writeFile "reachable.ast" $ formatExpr less
     putStrLn "Dumped to reachable.ast"
-    --putStrLn $ formatExpr less
+    -- putStrLn $ formatExpr less
     when smtdebug $ do
       putStrLn "\n\nQueries\n\n"
       forM_ qs $ \q -> do
@@ -156,6 +167,7 @@ showExpr c = do
   withSolvers Z3 1 Nothing $ \s -> do
     e <- buildExpr s c
     T.putStrLn $ formatExpr (simplify e)
+
 
 summaryStore :: IO ByteString
 summaryStore = do
@@ -173,6 +185,7 @@ summaryStore = do
         |]
   fmap fromJust (solcRuntime "A" src)
 
+
 safeAdd :: IO ByteString
 safeAdd = do
   let src =
@@ -184,7 +197,6 @@ safeAdd = do
           }
         |]
   fmap fromJust (solcRuntime "SafeAdd" src)
-
 
 
 testContract :: IO ByteString
@@ -199,6 +211,7 @@ testContract = do
           }
           |]
   fmap fromJust (solcRuntime "C" src)
+
 
 vat :: IO ByteString
 vat = do
@@ -360,49 +373,54 @@ vat = do
           |]
   fmap fromJust (solcRuntime "Vat" src)
 
+
 initVm :: ByteString -> VM
 initVm bs = vm
-  where
-    contractCode = RuntimeCode (ConcreteRuntimeCode bs)
-    c = Contract
+ where
+  contractCode = RuntimeCode (ConcreteRuntimeCode bs)
+  c =
+    Contract
       { _contractcode = contractCode
-      , _balance      = 0
-      , _nonce        = 0
-      , _codehash     = keccak (ConcreteBuf bs)
-      , _opIxMap      = mkOpIxMap contractCode
-      , _codeOps      = mkCodeOps contractCode
-      , _external     = False
+      , _balance = 0
+      , _nonce = 0
+      , _codehash = keccak (ConcreteBuf bs)
+      , _opIxMap = mkOpIxMap contractCode
+      , _codeOps = mkCodeOps contractCode
+      , _external = False
       }
-    vm = makeVm $ VMOpts
-      { EVM.vmoptContract      = c
-      , EVM.vmoptCalldata      = (AbstractBuf "txdata", [])
-      , EVM.vmoptValue         = CallValue 0
-      , EVM.vmoptAddress       = Addr 0xffffffffffffffff
-      , EVM.vmoptCaller        = Lit 0
-      , EVM.vmoptOrigin        = Addr 0xffffffffffffffff
-      , EVM.vmoptGas           = 0xffffffffffffffff
-      , EVM.vmoptGaslimit      = 0xffffffffffffffff
-      , EVM.vmoptStorageBase   = Symbolic
-      , EVM.vmoptBaseFee       = 0
-      , EVM.vmoptPriorityFee   = 0
-      , EVM.vmoptCoinbase      = 0
-      , EVM.vmoptNumber        = 0
-      , EVM.vmoptTimestamp     = Var "timestamp"
-      , EVM.vmoptBlockGaslimit = 0
-      , EVM.vmoptGasprice      = 0
-      , EVM.vmoptMaxCodeSize   = 0xffffffff
-      , EVM.vmoptPrevRandao    = 420
-      , EVM.vmoptSchedule      = FeeSchedule.berlin
-      , EVM.vmoptChainId       = 1
-      , EVM.vmoptCreate        = False
-      , EVM.vmoptTxAccessList  = mempty
-      , EVM.vmoptAllowFFI      = False
-      }
+  vm =
+    makeVm $
+      VMOpts
+        { EVM.vmoptContract = c
+        , EVM.vmoptCalldata = (AbstractBuf "txdata", [])
+        , EVM.vmoptValue = CallValue 0
+        , EVM.vmoptAddress = Addr 0xffffffffffffffff
+        , EVM.vmoptCaller = Lit 0
+        , EVM.vmoptOrigin = Addr 0xffffffffffffffff
+        , EVM.vmoptGas = 0xffffffffffffffff
+        , EVM.vmoptGaslimit = 0xffffffffffffffff
+        , EVM.vmoptStorageBase = Symbolic
+        , EVM.vmoptBaseFee = 0
+        , EVM.vmoptPriorityFee = 0
+        , EVM.vmoptCoinbase = 0
+        , EVM.vmoptNumber = 0
+        , EVM.vmoptTimestamp = Var "timestamp"
+        , EVM.vmoptBlockGaslimit = 0
+        , EVM.vmoptGasprice = 0
+        , EVM.vmoptMaxCodeSize = 0xffffffff
+        , EVM.vmoptPrevRandao = 420
+        , EVM.vmoptSchedule = FeeSchedule.berlin
+        , EVM.vmoptChainId = 1
+        , EVM.vmoptCreate = False
+        , EVM.vmoptTxAccessList = mempty
+        , EVM.vmoptAllowFFI = False
+        }
 
 
 -- | Builds the Expr for the given evm bytecode object
 buildExpr :: SolverGroup -> ByteString -> IO (Expr End)
 buildExpr solvers bs = evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) (initVm bs)
+
 
 dai :: IO ByteString
 dai = do

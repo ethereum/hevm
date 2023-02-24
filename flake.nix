@@ -137,6 +137,7 @@
               solc
               mdbook
               yarn
+              haskellPackages.fourmolu
               haskellPackages.cabal-install
               haskellPackages.haskell-language-server
             ];

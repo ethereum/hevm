@@ -1,29 +1,29 @@
-{-# Language QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module EVM.TestUtils where
 
-import Data.Text
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Paths_hevm as Paths
 import Data.String.Here
-import System.Directory
-import System.IO.Temp
-import GHC.IO.Handle (hClose)
-import System.Process (readProcess)
-
+import Data.Text
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
+import EVM.Dapp
+import EVM.Fetch (RpcInfo)
 import EVM.Solidity
 import EVM.Solvers
-import EVM.Dapp
+import EVM.TTY qualified as TTY
 import EVM.UnitTest
-import EVM.Fetch (RpcInfo)
-import qualified EVM.TTY as TTY
+import GHC.IO.Handle (hClose)
+import Paths_hevm qualified as Paths
+import System.Directory
+import System.IO.Temp
+import System.Process (readProcess)
+
 
 runDappTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO Bool
 runDappTestCustom testFile match maxIter ffiAllowed rpcinfo = do
   root <- Paths.getDataDir
   (json, _) <- compileWithDSTest testFile
-  --T.writeFile "output.json" json
+  -- T.writeFile "output.json" json
   withCurrentDirectory root $ do
     withSystemTempFile "output.json" $ \file handle -> do
       hClose handle
@@ -32,14 +32,16 @@ runDappTestCustom testFile match maxIter ffiAllowed rpcinfo = do
         opts <- testOpts solvers root json match maxIter ffiAllowed rpcinfo
         dappTest opts file Nothing
 
+
 runDappTest :: FilePath -> Text -> IO Bool
 runDappTest testFile match = runDappTestCustom testFile match Nothing True Nothing
+
 
 debugDappTest :: FilePath -> RpcInfo -> IO ()
 debugDappTest testFile rpcinfo = do
   root <- Paths.getDataDir
   (json, _) <- compileWithDSTest testFile
-  --TIO.writeFile "output.json" json
+  -- TIO.writeFile "output.json" json
   withCurrentDirectory root $ do
     withSystemTempFile "output.json" $ \file handle -> do
       hClose handle
@@ -48,35 +50,38 @@ debugDappTest testFile rpcinfo = do
         opts <- testOpts solvers root json ".*" Nothing True rpcinfo
         TTY.main opts root file
 
+
 testOpts :: SolverGroup -> FilePath -> Text -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO UnitTestOptions
 testOpts solvers root solcJson match maxIter allowFFI rpcinfo = do
   srcInfo <- case readJSON solcJson of
-               Nothing -> error "Could not read solc json"
-               Just (contractMap, asts, sources) -> do
-                 sourceCache <- makeSourceCache sources asts
-                 pure $ dappInfo root contractMap sourceCache
+    Nothing -> error "Could not read solc json"
+    Just (contractMap, asts, sources) -> do
+      sourceCache <- makeSourceCache sources asts
+      pure $ dappInfo root contractMap sourceCache
 
   params <- getParametersFromEnvironmentVariables Nothing
 
-  pure UnitTestOptions
-    { solvers = solvers
-    , rpcInfo = rpcinfo
-    , maxIter = maxIter
-    , askSmtIters = Nothing
-    , smtDebug = False
-    , smtTimeout = Nothing
-    , solver = Nothing
-    , covMatch = Nothing
-    , verbose = Just 1
-    , match = match
-    , maxDepth = Nothing
-    , fuzzRuns = 100
-    , replay = Nothing
-    , vmModifier = id
-    , testParams = params
-    , dapp = srcInfo
-    , ffiAllowed = allowFFI
-    }
+  pure
+    UnitTestOptions
+      { solvers = solvers
+      , rpcInfo = rpcinfo
+      , maxIter = maxIter
+      , askSmtIters = Nothing
+      , smtDebug = False
+      , smtTimeout = Nothing
+      , solver = Nothing
+      , covMatch = Nothing
+      , verbose = Just 1
+      , match = match
+      , maxDepth = Nothing
+      , fuzzRuns = 100
+      , replay = Nothing
+      , vmModifier = id
+      , testParams = params
+      , dapp = srcInfo
+      , ffiAllowed = allowFFI
+      }
+
 
 compileWithDSTest :: FilePath -> IO (Text, Text)
 compileWithDSTest src =
@@ -86,7 +91,8 @@ compileWithDSTest src =
     erc20 <- readFile =<< Paths.getDataFileName "test/contracts/lib/erc20.sol"
     testFilePath <- Paths.getDataFileName src
     testFile <- readFile testFilePath
-    T.writeFile file
+    T.writeFile
+      file
       [i|
       {
         "language": "Solidity",
@@ -128,9 +134,10 @@ compileWithDSTest src =
         }
       }
       |]
-    x <- T.pack <$>
-      readProcess
-        "solc"
-        ["--allow-paths", file, "--standard-json", file]
-        ""
+    x <-
+      T.pack
+        <$> readProcess
+          "solc"
+          ["--allow-paths", file, "--standard-json", file]
+          ""
     return (x, T.pack testFilePath)
