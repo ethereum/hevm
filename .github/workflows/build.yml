@@ -31,3 +31,46 @@ jobs:
         run: nix-shell --pure --command "cabal run rpc-tests"
       - name: run ethereum tests
         run: nix-shell --command "cabal run ethereum-tests"
+  build-windows:
+    name: build (windows-latest)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          path-type: inherit
+          update: true
+          install: >-
+            base-devel
+            gmp-devel
+            openssl-devel
+            git
+            unzip
+          pacboy: >-
+            cmake:p
+            ninja:p
+            gcc:p
+            autotools:p
+            gmp:p
+            openssl:p
+      - uses: haskell/actions/setup@v2
+        id: cabal
+        with:
+          ghc-version: '9.2'
+      - name: run cabal check
+        run: cabal check --verbose=3
+      - name: build and install dependencies
+        run: |
+          echo "::group::Installing libsecp256k1"
+          ./.github/scripts/install-libsecp256k1.sh
+          echo "::endgroup::"
+          echo "::group::Installing libff"
+          ./.github/scripts/install-libff.sh
+          echo "::endgroup::"
+      - name: build hevm library
+        run: |
+          cabal build --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib"

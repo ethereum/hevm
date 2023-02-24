@@ -1,0 +1,45 @@
+name: "Check Dependencies"
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 5 * * 1' # At 05:30 AM, only on Monday
+  pull_request:
+    paths:
+      - '.github/workflows/check-dependencies.yml'
+      - '.github/scripts/**'
+      - 'flake.*'
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: cachix/install-nix-action@v19
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - name: lookup nix versions
+        id: nixpkgs
+        run: |
+          NIXPKGS_REV="$(jq -r '.nodes.nixpkgs.locked.rev' < flake.lock)"
+          VERSIONS="$(nix eval -I "nixpkgs=https://github.com/NixOS/nixpkgs/archive/$NIXPKGS_REV.tar.gz" --impure --json \
+                      --expr 'let pkgs = (import <nixpkgs> {}); in { "secp256k1" = pkgs.secp256k1.src.rev; "ff" = pkgs.libff.src.rev; }')"
+          LIBFF_REV="$(jq .ff -r <<<"$VERSIONS")"
+          LIBSECP256K1_REV="$(jq .secp256k1 -r <<<"$VERSIONS")"
+          { echo "nixpkgs=$NIXPKGS_REV"; echo "libff=$LIBFF_REV"; echo "libsecp256k1=$LIBSECP256K1_REV"; } >> "$GITHUB_OUTPUT"
+      - name: lookup local versions
+        id: local
+        run: |
+          LIBFF_REV="$(grep '^INSTALL_VERSION=' .github/scripts/install-libff.sh | cut -f2 -d=)"
+          LIBSECP256K1_REV="$(grep '^INSTALL_VERSION=' .github/scripts/install-libsecp256k1.sh | cut -f2 -d=)"
+          { echo "libff=$LIBFF_REV"; echo "libsecp256k1=$LIBSECP256K1_REV"; } >> "$GITHUB_OUTPUT"
+      - name: compare versions
+        run: |
+          if [ "${{ steps.nixpkgs.outputs.libff }}" != "${{ steps.local.outputs.libff }}" ]; then
+            echo "libff versions do not match! nix=${{ steps.nixpkgs.outputs.libff }} local=${{ steps.local.outputs.libff }}"
+            exit 1
+          fi
+          if [ "${{ steps.nixpkgs.outputs.libsecp256k1 }}" != "${{ steps.local.outputs.libsecp256k1 }}" ]; then
+            echo "libsecp256k1 versions do not match! nix=${{ steps.nixpkgs.outputs.libsecp256k1 }} local=${{ steps.local.outputs.libsecp256k1 }}"
+            exit 1
+          fi
