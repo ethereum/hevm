@@ -1,3 +1,13 @@
+{-|
+Module      : Helper functions to sign a transaction and derive address from
+Description :        for the EVM given a secret key
+Copyright   : (c) d-xo, msoos, 2023
+License     : GPL-3
+Maintainers : see https://github.com/ethereum/hevm
+Stability   : experimental
+Portability : Requires a sec256k1 library, which is architecture-dependent
+-}
+
 module EVM.Sign where
 
 import qualified Crypto.Hash as Crypto
