@@ -106,9 +106,6 @@ sender chainId tx = ecrec v' tx.txR  tx.txS hash
         v'   = if v == 27 || v == 28 then v
                else 27 + v
 
--- We don't know which of 27 or 28 is correct
--- So we try 28 and try to recover & check if it's correct
--- if it isn't correct, we need to use the other one
 sign :: Int -> Integer -> Transaction -> Transaction
 sign chainId sk tx = tx { txV = num v, txR = r, txS = s}
   where
