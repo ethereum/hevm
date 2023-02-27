@@ -37,7 +37,7 @@ import Test.Tasty.HUnit
 import Test.Tasty.Runners hiding (Failure)
 import Test.Tasty.ExpectedFailure
 import qualified Data.Aeson as JSON
-import Data.Aeson ((.:))
+import Data.Aeson ((.:), (.:?))
 import Data.ByteString.Char8 qualified as Char8
 
 import qualified Control.Monad (when)
@@ -101,6 +101,7 @@ data EVMToolTrace =
     , evmRefund :: Int
     , evmOpName :: String
     , evmStack :: [W256]
+    , evmError :: Maybe String
     } deriving (Generic, Show)
 
 instance JSON.FromJSON EVMToolTrace where
@@ -113,6 +114,7 @@ instance JSON.FromJSON EVMToolTrace where
     <*> v .: "refund"
     <*> v .: "opName"
     <*> v .: "stack"
+    <*> v .:? "error"
 
 genBlockHash:: Int -> Expr 'EWord
 genBlockHash x = (num x :: Integer) & show & Char8.pack & EVM.Types.keccak' & Lit
@@ -257,7 +259,7 @@ emptyEVMToolAlloc = EVMToolAlloc { balance = 0
                                  , nonce = 0
                                  }
 
-getEVMToolRet :: OpContract -> ByteString -> Int -> IO (Maybe EVMToolResult, (Either EVM.Error (Expr 'End, [VMTrace], VMTraceResult)))
+getEVMToolRet :: OpContract -> ByteString -> Int -> IO (Maybe EVMToolResult, (Either (EVM.Error, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult)))
 getEVMToolRet contr txData gaslimitExec = do
   -- NOTE: By removing external calls, we fuzz less
   --       It should work also when we external calls. Removing for now.
@@ -374,6 +376,13 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
     go a@(_:_) [] = do
       putStrLn $ "Stacks don't match. HEVM's trace is longer by:" <> (show a)
       pure False
+    go [] [a] = do
+      -- evmtool produces ONE more trace element of the error
+      -- hevm on the other hand stops and doens't produce one more
+      if isJust a.evmError then pure True
+                           else do
+                             putStrLn $ "Traces don't match. HEVM's trace is longer by:" <> (show a)
+                             pure False
     go [] b@(_:_) = do
       putStrLn $ "Stacks don't match. evmtool's trace is longer by:" <> (show b)
       pure False
@@ -457,6 +466,7 @@ tests = testGroup "hevm"
         gaslimitExec <- generate $ chooseInt (40000, 0xffff)
         let txData = BS.pack $ toEnum <$> txDataRaw
         (evmtoolResult, hevmRun) <- getEVMToolRet contr txData gaslimitExec
+        (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
         case hevmRun of
           (Right (expr, hevmTrace, hevmTraceResult)) -> do
             let
@@ -473,7 +483,6 @@ tests = testGroup "hevm"
               getReturnVal (Return _ (ConcreteBuf bs) _) = Just bs
               getReturnVal _ = Nothing
               simplConcrExprRetval = getReturnVal simplConcExpr
-            (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
             traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.toTrace)
             -- putStrLn $ "HEVM trace   : " <> show hevmTrace
             -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.toTrace)
@@ -503,9 +512,12 @@ tests = testGroup "hevm"
               putStrLn $ "HEVM result len: " <> (show (BS.length hevmTraceResult.out))
               putStrLn $ "evm result  len: " <> (show (BS.length evmtoolTraceOutput.toOutput.output))
             assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
-          evmerr -> do
-            putStrLn $ "Contract exec not successful: " <> show evmerr
-            putStrLn "-> not comparing traces"
+          Left (evmerr, hevmTrace) -> do
+            putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
+            -- putStrLn $ "evmtool result was: " <> show (fromJust evmtoolResult)
+            -- putStrLn $ "output by evmtool is: '" <> bsToHex evmtoolTraceOutput.toOutput.output <> "'"
+            traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.toTrace)
+            assertEqual "Traces and gas must match" traceOK True
             System.Directory.removeFile "txs.json"
             System.Directory.removeFile "alloc.json"
             System.Directory.removeFile "env.json"
@@ -2622,7 +2634,7 @@ symbolify vm = vm { _state = vm._state { _calldata = AbstractBuf "calldata" } }
 
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
-runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Either EVM.Error ((Expr 'End, [VMTrace], VMTraceResult)))
+runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Either (EVM.Error, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
 runCodeWithTrace rpcinfo evmToolEnv alloc txn (fromAddr, toAddress) = withSolvers Z3 0 Nothing $ \solvers -> do
   let origVM = vmForRuntimeCode code' calldata' evmToolEnv alloc txn (fromAddr, toAddress)
       calldata' = ConcreteBuf txn.txData
@@ -2633,7 +2645,7 @@ runCodeWithTrace rpcinfo evmToolEnv alloc txn (fromAddr, toAddress) = withSolver
   expr <- buildExpr solvers $ symbolify origVM
   (res, (vm, trace)) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (origVM, [])
   case res of
-    Left x -> pure $ Left x
+    Left x -> pure $ Left (x, trace)
     Right _ -> pure $ Right (expr, trace, vmres vm)
 
 vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> VM
