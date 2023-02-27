@@ -575,7 +575,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) [] debugVeriOpts
+        (_, [Cex (_, _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) [] defaultVeriOpts
         -- assertBool "Access must be beyond element 2" $ (getVar ctr "arg1") > 1
         putStrLn "expected counterexample found"
       ,
@@ -1631,7 +1631,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] debugVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "calldata beyond calldatasize is 0 (concrete dalldata prefix)" $ do
@@ -1648,7 +1648,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] debugVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "calldata symbolic access" $ do
