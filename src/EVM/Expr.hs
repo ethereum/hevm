@@ -258,7 +258,7 @@ readWord idx b@(WriteWord idx' val buf)
     _ -> readWordFromBytes idx b
 readWord (Lit idx) b@(CopySlice (Lit srcOff) (Lit dstOff) (Lit size) src dst)
   -- the region we are trying to read is enclosed in the sliced region
-  | (idx - dstOff) + 32 <= size = readWord (Lit $ srcOff + (idx - dstOff)) src
+  | (idx - dstOff) <= size && 32 <= size - (idx - dstOff) = readWord (Lit $ srcOff + (idx - dstOff)) src
   -- the region we are trying to read is compeletely outside of the sliced region
   | (idx - dstOff) >= size && (idx - dstOff) <= (maxBound :: W256) - 31 = readWord (Lit idx) dst
   -- the region we are trying to read partially overlaps the sliced region
