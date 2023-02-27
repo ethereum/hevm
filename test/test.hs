@@ -18,6 +18,7 @@ import System.Environment
 import qualified Data.Word
 import GHC.Generics
 import Numeric (showHex)
+import qualified Paths_hevm as Paths
 
 import Prelude hiding (fail, LT, GT)
 
@@ -399,7 +400,8 @@ getTraceOutput evmtoolResult =
     Nothing -> pure Nothing
     Just res -> do
       let traceFileName = getTraceFileName res
-      (exitcode, _, _) <- readProcessWithExitCode "./convert_trace_to_json.sh" [getTraceFileName res] ""
+      convertPath <- Paths.getDataFileName "test/scripts/convert_trace_to_json.sh"
+      (exitcode, _, _) <- readProcessWithExitCode (convertPath) [getTraceFileName res] ""
       case exitcode of
         ExitSuccess -> JSON.decodeFileStrict (traceFileName ++ ".json") :: IO (Maybe EVMToolTraceOutput)
         _ -> pure Nothing

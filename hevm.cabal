@@ -40,6 +40,7 @@ extra-source-files:
   test/contracts/fail/cheatCodes.sol
   test/contracts/fail/dsProveFail.sol
   test/contracts/fail/invariantFail.sol
+  test/scripts/convert_trace_to_json.sh
 
 flag ci
   description: Sets flags for compilation in CI
