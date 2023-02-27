@@ -39,7 +39,6 @@ import Test.Tasty.ExpectedFailure
 import qualified Data.Aeson as JSON
 import Data.Aeson ((.:))
 import Data.ByteString.Char8 qualified as Char8
-import EVM.Hexdump (paddedShowHex)
 
 import qualified Control.Monad (when)
 import qualified Control.Monad.Operational as Operational (view, ProgramViewT(..), ProgramView)
@@ -481,7 +480,7 @@ tests = testGroup "hevm"
             assertEqual "Traces and gas must match" traceOK True
             let resultOK = evmtoolTraceOutput.toOutput.output == hevmTraceResult.out
             if resultOK then do
-              putStrLn $ "HEVM & evmtool's outputs match: " <> (show evmtoolTraceOutput.toOutput.output)
+              putStrLn $ "HEVM & evmtool's outputs match: " <> (bsToHex evmtoolTraceOutput.toOutput.output)
               if isNothing simplConcrExprRetval || simplConcrExprRetval == (Just hevmTraceResult.out)
                  then do
                    putStr "OK, symbolic interpretation -> concrete calldata -> Expr.simplify gives the same answer."
