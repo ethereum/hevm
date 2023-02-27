@@ -261,10 +261,10 @@ emptyEVMToolAlloc = EVMToolAlloc { balance = 0
 
 getEVMToolRet :: OpContract -> ByteString -> Int -> IO (Maybe EVMToolResult, (Either (EVM.Error, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult)))
 getEVMToolRet contr txData gaslimitExec = do
-  -- NOTE: By removing external calls, we fuzz less
+  -- TODO: By removing external calls, we fuzz less
   --       It should work also when we external calls. Removing for now.
   contrFixed <- fixContractJumps $ removeExtcalls contr
-  -- NOTE call below will force the interpreter to run out of memory.
+  -- TODO call below will force the interpreter to run out of memory.
   --      let's try to fix that
   -- let contrFixed = OpContract [OpPush (Lit 0xfffffff), OpPush (Lit 0x0), OpPush (Lit 0x0), OpCalldatacopy, OpPush (Lit 0xfffffff), OpPush (Lit 0), OpReturn]
   -- putStrLn $ "Contract to run: " <> (show contrFixed)
@@ -365,7 +365,7 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
       if aOp /= bOp || aPc /= bPc then
                           putStrLn $ "HEVM: " <> (intToOpName aOp) <> " (pc " <> (show aPc) <> ") --- evmtool " <> (intToOpName bOp) <> " (pc " <> (show bPc) <> ")"
                           else
-                          -- putStrLn $ (intToOpName aOp) <> " pc: " <> (show aPc)
+                          -- putStrLn $ "trace element match. " <> (intToOpName aOp) <> " pc: " <> (show aPc)
                           return ()
       Control.Monad.when (aStack /= bStack) $ do
                           putStrLn "stacks don't match:"
@@ -374,7 +374,7 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
       if aOp == bOp && aStack == bStack && aPc == bPc && aGas == bGas then go ax bx
       else pure False
     go a@(_:_) [] = do
-      putStrLn $ "Stacks don't match. HEVM's trace is longer by:" <> (show a)
+      putStrLn $ "Traces don't match. HEVM's trace is longer by:" <> (show a)
       pure False
     go [] [a] = do
       -- evmtool produces ONE more trace element of the error
@@ -384,7 +384,7 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
                              putStrLn $ "Traces don't match. HEVM's trace is longer by:" <> (show a)
                              pure False
     go [] b@(_:_) = do
-      putStrLn $ "Stacks don't match. evmtool's trace is longer by:" <> (show b)
+      putStrLn $ "Traces don't match. evmtool's trace is longer by:" <> (show b)
       pure False
 
 getTraceFileName :: EVMToolResult -> String
