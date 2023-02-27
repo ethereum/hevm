@@ -114,6 +114,12 @@ tests = testGroup "hevm"
         -- there won't be query now as accessStorage uses fetch cache
         assertBool (show vm4._result) (isNothing vm4._result)
     ]
+  -- , testGroup "SimplifierUnitTests"
+  --   [ testCase "copySlice-overflow" $ do
+  --       let e = 
+  --   , testCase "writeWord-overflow" $ do
+        
+  --   ]
   -- These tests fuzz the simplifier by generating a random expression,
   -- applying some simplification rules, and then using the smt encoding to
   -- check that the simplified version is semantically equivalent to the

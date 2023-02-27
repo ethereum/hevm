@@ -545,7 +545,7 @@ stripWrites off size = \case
   CopySlice (Lit srcOff) (Lit dstOff) (Lit size') src dst
     -> if dstOff - off >= size && dstOff - off <= (maxBound :: W256) - size' - 1
        then stripWrites off size dst
-       else CopySlice (Lit srcOff) (Lit dstOff) (Lit size)
+       else CopySlice (Lit srcOff) (Lit dstOff) (Lit size')
                       (stripWrites srcOff size' src)
                       (stripWrites off size dst)
   WriteByte i v prev -> WriteByte i v (stripWrites off size prev)
