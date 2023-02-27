@@ -215,19 +215,18 @@ readByte i@(Lit x) (WriteByte (Lit idx) val src)
     then val
     else readByte i src
 readByte i@(Lit x) (WriteWord (Lit idx) val src)
-  = if idx <= x && x <= idx + 31
+  = if x - idx < 32
     then case val of
            (Lit _) -> indexWord (Lit $ x - idx) val
            _ -> IndexWord (Lit $ x - idx) val
     else readByte i src
 readByte i@(Lit x) (CopySlice (Lit srcOffset) (Lit dstOffset) (Lit size) src dst)
-  = if dstOffset <= x && x < (dstOffset + size)
+  = if x - dstOffset < size
     then readByte (Lit $ x - (dstOffset - srcOffset)) src
     else readByte i dst
 readByte i@(Lit x) buf@(CopySlice _ (Lit dstOffset) (Lit size) _ dst)
-  -- the byte we are trying to read is compeletely outside of the sliced reegion
-  -- we check that there is no overflow and that addresses do not wrap around
-  = if (x < dstOffset || x >= dstOffset + size) && (dstOffset <= dstOffset + size)
+  -- the byte we are trying to read is compeletely outside of the sliced region
+  = if x - dstOffset >= size
     then readByte i dst
     else ReadByte (Lit x) buf
 
@@ -249,7 +248,7 @@ readWord idx b@(WriteWord idx' val buf)
   | idx == idx' = val
   | otherwise = case (idx, idx') of
     (Lit i, Lit i') ->
-      if i >= i' + 32 || i + 32 <= i'
+      if i' - i >= 32 && i' - i <= (maxBound :: W256) - 31
       -- the region we are trying to read is completely outside of the WriteWord
       then readWord idx buf
       -- the region we are trying to read partially overlaps the WriteWord
@@ -259,10 +258,9 @@ readWord idx b@(WriteWord idx' val buf)
     _ -> readWordFromBytes idx b
 readWord (Lit idx) b@(CopySlice (Lit srcOff) (Lit dstOff) (Lit size) src dst)
   -- the region we are trying to read is enclosed in the sliced region
-  | idx >= dstOff && idx + 32 <= dstOff + size = readWord (Lit $ srcOff + (idx - dstOff)) src
-  -- the region we are trying to read is compeletely outside of the sliced reegion
-  -- we check that there is no overflow and that addresses do not wrap around
-  | (idx >= dstOff + size || idx + 32 <= dstOff) && (dstOff<= dstOff + size) = readWord (Lit idx) dst
+  | (idx - dstOff) + 32 <= size = readWord (Lit $ srcOff + (idx - dstOff)) src
+  -- the region we are trying to read is compeletely outside of the sliced region
+  | (idx - dstOff) >= size && (idx - dstOff) <= (maxBound :: W256) - 31 = readWord (Lit idx) dst
   -- the region we are trying to read partially overlaps the sliced region
   | otherwise = readWordFromBytes (Lit idx) b
 readWord i b = readWordFromBytes i b
@@ -523,34 +521,36 @@ instance Monoid (Expr Buf) where
 -- | Removes any irrelevant writes when reading from a buffer
 simplifyReads :: Expr a -> Expr a
 simplifyReads = \case
-  ReadWord (Lit idx) b -> readWord (Lit idx) (stripWrites idx (idx + 31) b)
-  ReadByte (Lit idx) b -> readByte (Lit idx) (stripWrites idx idx b)
+  ReadWord (Lit idx) b -> readWord (Lit idx) (stripWrites idx 32 b)
+  ReadByte (Lit idx) b -> readByte (Lit idx) (stripWrites idx 1 b)
   a -> a
 
 -- | Strips writes from the buffer that can be statically determined to be out of range
 -- TODO: are the bounds here correct? I think there might be some off by one mistakes...
 stripWrites :: W256 -> W256 -> Expr Buf -> Expr Buf
-stripWrites bottom top = \case
+stripWrites off size = \case
   AbstractBuf s -> AbstractBuf s
-  ConcreteBuf b -> ConcreteBuf $ BS.take (num top+1) b
+  ConcreteBuf b -> ConcreteBuf $ if off <= off + size
+                                 then BS.take (num $ off+size) b
+                                 else b
   WriteByte (Lit idx) v prev
-    -> if idx < bottom || idx > top
-       then stripWrites bottom top prev
-       else WriteByte (Lit idx) v (stripWrites bottom top prev)
+    -> if idx - off >= size
+       then stripWrites off size prev
+       else WriteByte (Lit idx) v (stripWrites off size prev)
   -- TODO: handle partial overlaps
   WriteWord (Lit idx) v prev
-    -> if idx + 31 < bottom || idx > top
-       then stripWrites bottom top prev
-       else WriteWord (Lit idx) v (stripWrites bottom top prev)
-  CopySlice (Lit srcOff) (Lit dstOff) (Lit size) src dst
-    -> if dstOff + size < bottom || dstOff > top
-       then stripWrites bottom top dst
+    -> if idx - off >= size && idx - off <= (maxBound :: W256) - 31
+       then stripWrites off size prev
+       else WriteWord (Lit idx) v (stripWrites off size prev)
+  CopySlice (Lit srcOff) (Lit dstOff) (Lit size') src dst
+    -> if dstOff - off >= size && dstOff - off <= (maxBound :: W256) - size' - 1
+       then stripWrites off size dst
        else CopySlice (Lit srcOff) (Lit dstOff) (Lit size)
-                      (stripWrites srcOff (srcOff + size) src)
-                      (stripWrites bottom top dst)
-  WriteByte i v prev -> WriteByte i v (stripWrites bottom top prev)
-  WriteWord i v prev -> WriteWord i v (stripWrites bottom top prev)
-  CopySlice srcOff dstOff size src dst -> CopySlice srcOff dstOff size src dst
+                      (stripWrites srcOff size' src)
+                      (stripWrites off size dst)
+  WriteByte i v prev -> WriteByte i v (stripWrites off size prev)
+  WriteWord i v prev -> WriteWord i v (stripWrites off size prev)
+  CopySlice srcOff dstOff size' src dst -> CopySlice srcOff dstOff size' src dst
   GVar _ ->  error "unexpected GVar in stripWrites"
 
 
