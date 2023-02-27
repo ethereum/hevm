@@ -495,9 +495,6 @@ tests = testGroup "hevm"
                    putStr "OK, symbolic interpretation -> concrete calldata -> Expr.simplify gives the same answer."
                    if isNothing simplConcrExprRetval then putStrLn ", but it was a Nothing, so not strong equivalence"
                                                      else putStrLn ""
-                   deleteTraceOutputFiles evmtoolResult
-                   System.Directory.removeFile "alloc-out.json"
-                   System.Directory.removeFile "result.json"
                  else do
                    putStrLn $ "concretized expr           : " <> (show concretizedExpr)
                    putStrLn $ "simplified concretized expr: " <> (show simplConcExpr)
@@ -518,9 +515,12 @@ tests = testGroup "hevm"
             -- putStrLn $ "output by evmtool is: '" <> bsToHex evmtoolTraceOutput.toOutput.output <> "'"
             traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.toTrace)
             assertEqual "Traces and gas must match" traceOK True
-            System.Directory.removeFile "txs.json"
-            System.Directory.removeFile "alloc.json"
-            System.Directory.removeFile "env.json"
+        System.Directory.removeFile "txs.json"
+        System.Directory.removeFile "alloc-out.json"
+        System.Directory.removeFile "alloc.json"
+        System.Directory.removeFile "result.json"
+        System.Directory.removeFile "env.json"
+        deleteTraceOutputFiles evmtoolResult
     ]
   -- These tests fuzz the simplifier by generating a random expression,
   -- applying some simplification rules, and then using the smt encoding to
