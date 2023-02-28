@@ -793,7 +793,7 @@ simplify e = if (mapExpr go e == e)
     go (EVM.Types.Not (EVM.Types.Not a)) = a
 
     go (Max (Lit 0) a) = a
-    go (Min (Lit 0) a) = Lit 0
+    go (Min (Lit 0) _) = Lit 0
     
     go a = a
 
