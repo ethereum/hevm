@@ -771,6 +771,7 @@ data VMTrace =
   , traceMemSize :: Data.Word.Word64
   , traceDepth   :: Int
   , traceGas     :: Data.Word.Word64
+  , traceError   :: Maybe String
   } deriving (Generic, Show)
 instance JSON.ToJSON VMTrace where
   toEncoding = JSON.genericToEncoding JSON.defaultOptions

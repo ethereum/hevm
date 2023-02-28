@@ -3345,7 +3345,33 @@ vmtrace vm =
              , traceDepth = 1 + length (Control.Lens.view frames vm)
              -- reverse to match geth format
              , traceStack = reverse $ forceLit <$> the state EVM.stack
+             , traceError = readoutError vm._result
              }
+  where
+    readoutError :: Maybe VMResult -> Maybe String
+    readoutError Nothing = Nothing
+    readoutError (Just (VMSuccess _)) = Nothing
+    readoutError (Just (VMFailure e)) = case e of
+      -- NOTE: values copied from go-ethereum errors.go file
+      OutOfGas {}             -> Just "out of gas"
+      -- "contract creation code storage out of gas" not handled
+      CallDepthLimitReached   -> Just "max call depth exceeded"
+      BalanceTooLow {}        -> Just "insufficient balance for transfer"
+      -- "contract address collision" not handled
+      EVM.Revert {}           -> Just "execution reverted"
+      -- "max initcode size exceeded" not handled
+      MaxCodeSizeExceeded {}  -> Just "max code size exceeded"
+      EVM.BadJumpDestination  -> Just "invalid jump destination"
+      StateChangeWhileStatic  -> Just "write protection"
+      ReturnDataOutOfBounds   -> Just "return data out of bounds"
+      -- "gas uint64 overflow" not handled
+      UnrecognizedOpcode opcode  -> Just $ "invalid opcode: " <> (show opcode)
+      -- "nonce uint64 overflow" not handled
+      EVM.StackUnderrun       -> Just "stack underflow"
+      EVM.StackLimitExceeded  -> Just "stack limit reached"
+      EVM.InvalidMemoryAccess -> Just "write protection"
+      -- HEVM specific
+      err -> Just $ "EVM error: " <> show err
 
 vmres :: VM -> VMTraceResult
 vmres vm =

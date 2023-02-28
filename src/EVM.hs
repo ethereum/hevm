@@ -82,6 +82,7 @@ data Error
   | NotUnique (Expr EWord)
   | SMTTimeout
   | FFI [AbiValue]
+  | ReturnDataOutOfBounds
   | NonceOverflow
 deriving instance Show Error
 
@@ -890,7 +891,7 @@ exec1 = do
                     next
                     assign (state . stack) xs
 
-                    let jump True = vmError EVM.InvalidMemoryAccess
+                    let jump True = vmError EVM.ReturnDataOutOfBounds
                         jump False = copyBytesToMemory vm._state._returndata xSize' xFrom xTo'
 
                     case (xFrom, bufLength vm._state._returndata) of
