@@ -315,7 +315,7 @@ equivalence cmd = do
       False -> do
         putStrLn "No discrepancies found"
         when (any isTimeout res) $ do
-          putStrLn "But timeout(s) occurred:"
+          putStrLn "But timeout(s) occurred"
           exitFailure
       True -> do
         let cexs = mapMaybe getCex res
