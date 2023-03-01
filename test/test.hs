@@ -3372,13 +3372,12 @@ vmtrace vm =
       StateChangeWhileStatic  -> Just "write protection"
       ReturnDataOutOfBounds   -> Just "return data out of bounds"
       EVM.IllegalOverflow     -> Just "gas uint64 overflow"
-      UnrecognizedOpcode opcode  -> Just $ "invalid opcode: " <> (show opcode)
+      UnrecognizedOpcode op   -> Just $ "invalid opcode: " <> show op
       EVM.NonceOverflow       -> Just "nonce uint64 overflow"
       EVM.StackUnderrun       -> Just "stack underflow"
       EVM.StackLimitExceeded  -> Just "stack limit reached"
       EVM.InvalidMemoryAccess -> Just "write protection"
-      -- HEVM specific
-      err -> Just $ "EVM error: " <> show err
+      err                     -> Just $ "HEVM error: " <> show err
 
 vmres :: VM -> VMTraceResult
 vmres vm =
