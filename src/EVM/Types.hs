@@ -185,6 +185,7 @@ data Expr (a :: EType) where
   Exp            :: Expr EWord -> Expr EWord -> Expr EWord
   SEx            :: Expr EWord -> Expr EWord -> Expr EWord
   Min            :: Expr EWord -> Expr EWord -> Expr EWord
+  Max            :: Expr EWord -> Expr EWord -> Expr EWord
 
   -- booleans
 

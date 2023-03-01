@@ -99,9 +99,11 @@ declareIntermediates bufs stores =
   where
     compareFst (l, _) (r, _) = compare l r
     encodeBuf n expr =
-       fromLazyText ("(define-const buf" <> (T.pack . show $ n) <> " Buf ") <> exprToSMT expr <> ")"
+      "(define-const buf" <> (fromString . show $ n) <> " Buf " <> exprToSMT expr <> ")\n" <> encodeBufLen n expr
+    encodeBufLen n expr =
+      "(define-const buf" <> (fromString . show $ n) <>"_length" <> " (_ BitVec 256) " <> exprToSMT (bufLengthEnv bufs True expr) <> ")"
     encodeStore n expr =
-       fromLazyText ("(define-const store" <> (T.pack . show $ n) <> " Storage ") <> exprToSMT expr <> ")"
+       "(define-const store" <> (fromString . show $ n) <> " Storage " <> exprToSMT expr <> ")"
 
 assertProps :: [Prop] -> SMT2
 assertProps ps =
@@ -119,6 +121,7 @@ assertProps ps =
   <> intermediates
   <> SMT2 [""] mempty
   <> keccakAssumes
+  <> bufferBounds
   <> readAssumes
   <> SMT2 [""] mempty
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
@@ -144,6 +147,10 @@ assertProps ps =
     readAssumes
       = SMT2 ["; read assumptions"] mempty
         <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads ps_elim bufs stores)) mempty
+
+    bufferBounds
+      = SMT2 ["; buffer bounds"] mempty
+        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertMaxLen ps_elim bufs stores)) mempty
 
 
 referencedBufsGo :: Expr a -> [Builder]
@@ -233,7 +240,6 @@ findBufferAccess = foldl (\acc p -> foldTerm go acc p) mempty
       CopySlice srcOff _ size src _  -> [(srcOff, size, src)]
       _ -> mempty
 
-
 -- | Asserts that buffer reads beyond the size of the buffer are equal
 -- to zero. Looks for buffer reads in the a list of given predicates
 -- and the buffer and storage environments.
@@ -254,12 +260,36 @@ assertReads props benv senv = concat $ fmap assertRead allReads
         _ -> True
     keepRead _ = True
 
+-- | Asserts that the length of an abstract base buffer is at most the maximum location that is read
+assertMaxLen :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
+assertMaxLen props benv senv = fmap (\(k, v) -> PLEq (BufLength (AbstractBuf k)) v) $ Map.toList bufMap
+  where
+    allReads = nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
+
+    bufMap = foldl addBound mempty allReads
+
+    addBound m (idx, size, buf) =
+      case baseBuf buf of
+        AbstractBuf b -> Map.insertWith EVM.Expr.max b (add idx size) m
+        _ -> m
+
+    baseBuf :: Expr Buf -> Expr Buf
+    baseBuf (AbstractBuf b) = AbstractBuf b
+    baseBuf (ConcreteBuf b) = ConcreteBuf b
+    baseBuf (GVar (BufVar a)) =
+      case Map.lookup a benv of
+        Just b -> baseBuf b
+        Nothing -> error "Internal error: could not find buffer variable"
+    baseBuf (WriteByte _ _ b) = baseBuf b
+    baseBuf (WriteWord _ _ b) = baseBuf b
+    baseBuf (CopySlice _ _ _ _ dst)= baseBuf dst
+
 
 declareBufs :: [Builder] -> SMT2
 declareBufs names = SMT2 ("; buffers" : fmap declareBuf names <> ("; buffer lengths" : fmap declareLength names)) cexvars
   where
     declareBuf n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
-    declareLength n = "(define-const " <> n <> "_length" <> " (_ BitVec 256) (bufLength " <> n <> "))"
+    declareLength n = "(declare-const " <> n <> "_length" <> " (_ BitVec 256))"
     cexvars = mempty{buffersV = fmap toLazyText names}
 
 
@@ -303,6 +333,8 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   ; hash functions
   (declare-fun keccak (Buf) Word)
   (declare-fun sha256 (Buf) Word)
+
+  (define-fun max ((a (_ BitVec 256)) (b (_ BitVec 256))) (_ BitVec 256) (ite (bvult a b) b a))
 
   ; word indexing
   (define-fun indexWord31 ((w Word)) Byte ((_ extract 7 0) w))
@@ -378,7 +410,6 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   )
 
   ; buffers
-  (declare-fun bufLength (Buf) Word)
   (define-const emptyBuf Buf ((as const Buf) #b00000000))
 
   (define-fun readWord ((idx Word) (buf Buf)) Word
@@ -529,6 +560,10 @@ exprToSMT = \case
     let aenc = exprToSMT a
         benc = exprToSMT b in
     "(ite (bvule " <> aenc `sp` benc <> ") " <> aenc `sp` benc <> ")"
+  Max a b ->
+    let aenc = exprToSMT a
+        benc = exprToSMT b in
+    "(max " <> aenc `sp` benc <> ")"
   LT a b ->
     let cond = op2 "bvult" a b in
     "(ite " <> cond `sp` one `sp` zero <> ")"
@@ -620,7 +655,9 @@ exprToSMT = \case
   ConcreteBuf bs -> writeBytes bs mempty
   AbstractBuf s -> fromText s
   ReadWord idx prev -> op2 "readWord" idx prev
-  BufLength b -> op1 "bufLength" b
+  BufLength (AbstractBuf b) -> fromText b <> "_length"
+  BufLength (GVar (BufVar n)) -> fromLazyText $ "buf" <> (T.pack . show $ n) <> "_length"
+  BufLength b -> exprToSMT (bufLength b)
   WriteByte idx val prev ->
     let encIdx = exprToSMT idx
         encVal = exprToSMT val
