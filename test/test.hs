@@ -368,21 +368,28 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
                           else
                           -- putStrLn $ "trace element match. " <> (intToOpName aOp) <> " pc: " <> (show aPc)
                           return ()
+
+      Control.Monad.when (isJust b.evmError) $ do
+                           putStrLn $ "Error by evmtool: " <> (show b.evmError)
+                           putStrLn $ "Error by HEVM   : " <> (show a.traceError)
+
       Control.Monad.when (aStack /= bStack) $ do
                           putStrLn "stacks don't match:"
                           putStrLn $ "HEVM's stack   : " <> (show aStack)
                           putStrLn $ "evmtool's stack: " <> (show bStack)
       if aOp == bOp && aStack == bStack && aPc == bPc && aGas == bGas then go ax bx
       else pure False
+
+
     go a@(_:_) [] = do
       putStrLn $ "Traces don't match. HEVM's trace is longer by:" <> (show a)
       pure False
-    go [] [a] = do
+    go [] [b] = do
       -- evmtool produces ONE more trace element of the error
       -- hevm on the other hand stops and doens't produce one more
-      if isJust a.evmError then pure True
+      if isJust b.evmError then pure True
                            else do
-                             putStrLn $ "Traces don't match. HEVM's trace is longer by:" <> (show a)
+                             putStrLn $ "Traces don't match. HEVM's trace is longer by:" <> (show b)
                              pure False
     go [] b@(_:_) = do
       putStrLn $ "Traces don't match. evmtool's trace is longer by:" <> (show b)
