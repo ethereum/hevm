@@ -3361,19 +3361,19 @@ vmtrace vm =
     readoutError (Just (VMFailure e)) = case e of
       -- NOTE: values copied from go-ethereum errors.go file
       OutOfGas {}             -> Just "out of gas"
-      -- "contract creation code storage out of gas" not handled
+      -- TODO "contract creation code storage out of gas" not handled
       CallDepthLimitReached   -> Just "max call depth exceeded"
       BalanceTooLow {}        -> Just "insufficient balance for transfer"
-      -- "contract address collision" not handled
+      -- TODO "contract address collision" not handled
       EVM.Revert {}           -> Just "execution reverted"
-      -- "max initcode size exceeded" not handled
+      -- TODO "max initcode size exceeded" not handled
       MaxCodeSizeExceeded {}  -> Just "max code size exceeded"
       EVM.BadJumpDestination  -> Just "invalid jump destination"
       StateChangeWhileStatic  -> Just "write protection"
       ReturnDataOutOfBounds   -> Just "return data out of bounds"
-      -- "gas uint64 overflow" not handled
+      EVM.IllegalOverflow     -> Just "gas uint64 overflow"
       UnrecognizedOpcode opcode  -> Just $ "invalid opcode: " <> (show opcode)
-      -- "nonce uint64 overflow" not handled
+      EVM.NonceOverflow       -> Just "nonce uint64 overflow"
       EVM.StackUnderrun       -> Just "stack underflow"
       EVM.StackLimitExceeded  -> Just "stack limit reached"
       EVM.InvalidMemoryAccess -> Just "write protection"
