@@ -26,7 +26,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as BS16
 import Data.Maybe
 import Data.Typeable
-import Data.List (elemIndex)
+import Data.List qualified (elemIndex, length)
 import Data.DoubleWord
 import Test.Tasty
 import Test.Tasty.QuickCheck hiding (Failure)
@@ -1710,7 +1710,7 @@ tests = testGroup "hevm"
             |]
           (_, [Cex (_, a), Cex (_, b)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("fun(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           let ints = map (flip getVar "arg1") [a,b]
-          assertBool "0 must be one of the Cex-es" $ isJust $ elemIndex 0 ints
+          assertBool "0 must be one of the Cex-es" $ isJust $ Data.List.elemIndex 0 ints
           putStrLn "expected 2 counterexamples found, one Cex is the 0 value"
         ,
         testCase "assert-fail-notequal" $ do
@@ -3412,7 +3412,14 @@ runWithTrace = do
       State.modify (\(a, b) -> (a, b ++ [vmtrace vm0]))
       zoom _1 (State.state (runState exec1))
       runWithTrace
-    Just _ -> pure vm0
+    Just (VMSuccess _) -> pure vm0
+    Just (VMFailure _) -> do
+      -- Update error text for last trace element
+      (a, b) <- State.get
+      let updatedElem = (last b) {traceError = (vmtrace vm0).traceError}
+          updatedTraces = take ((Data.List.length b)-1) b ++ [updatedElem]
+      State.put (a, updatedTraces)
+      pure vm0
 
 interpretWithTrace
   :: Fetch.Fetcher
