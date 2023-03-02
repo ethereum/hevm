@@ -408,7 +408,7 @@ getTraceOutput evmtoolResult =
     Just res -> do
       let traceFileName = getTraceFileName res
       convertPath <- Paths.getDataFileName "test/scripts/convert_trace_to_json.sh"
-      (exitcode, _, _) <- readProcessWithExitCode (convertPath) [getTraceFileName res] ""
+      (exitcode, _, _) <- readProcessWithExitCode "bash" [convertPath, getTraceFileName res] ""
       case exitcode of
         ExitSuccess -> JSON.decodeFileStrict (traceFileName ++ ".json") :: IO (Maybe EVMToolTraceOutput)
         _ -> pure Nothing
