@@ -264,6 +264,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
       , txAccessList = []
       , txMaxPriorityFeeGas =  Just 1
       , txMaxFeePerGas = Just 1
+      , txChainId = 1
       }
     evmEnv = EVMToolEnv { _coinbase   =  0xff
                      , _timestamp   =  Lit 0x3e8
@@ -290,7 +291,7 @@ getHEVMRet contr txData gaslimitExec = do
 getEVMToolRet :: OpContract -> ByteString -> Int -> IO (Maybe EVMToolResult)
 getEVMToolRet contr txData gaslimitExec = do
   let (txn, evmEnv, contrAlloc, fromAddress, toAddress, sk) = evmSetup contr txData gaslimitExec
-      txs = [EVM.Transaction.sign 1 sk txn] -- "1" because of chainId
+      txs = [EVM.Transaction.sign sk txn]
       walletAlloc = EVMToolAlloc{ balance = 0x5ffd4878be161d74
                                 , code = BS.empty
                                 , nonce = 0xac
@@ -442,7 +443,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress
     , vmoptPriorityFee = fromJust txn.txMaxPriorityFeeGas
     , vmoptMaxCodeSize = evmToolEnv._maxCodeSize
     , vmoptSchedule = evmToolEnv._schedule
-    , vmoptChainId = 1
+    , vmoptChainId = fromIntegral txn.txChainId
     , vmoptCreate = False
     , vmoptTxAccessList = mempty
     , vmoptAllowFFI = False
