@@ -132,42 +132,42 @@ instance JSON.FromJSON EVMToolTraceOutput where
         <*> v .: "output"
 
 data EVMToolEnv = EVMToolEnv
-  { _coinbase    :: Addr
-  , _timestamp   :: Expr EWord
-  , _number      :: W256
-  , _prevRandao  :: W256
-  , _gasLimit    :: Data.Word.Word64
-  , _baseFee     :: W256
-  , _maxCodeSize :: W256
-  , _schedule    :: FeeSchedule.FeeSchedule Data.Word.Word64
-  , _blockHashes :: Map.Map Int W256
+  { coinbase    :: Addr
+  , timestamp   :: Expr EWord
+  , number      :: W256
+  , prevRandao  :: W256
+  , gasLimit    :: Data.Word.Word64
+  , baseFee     :: W256
+  , maxCodeSize :: W256
+  , schedule    :: FeeSchedule.FeeSchedule Data.Word.Word64
+  , blockHashes :: Map.Map Int W256
   } deriving (Show, Generic)
 
 instance JSON.ToJSON EVMToolEnv where
-  toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON $ b._coinbase))
-                         , ("currentDifficulty", (JSON.toJSON $ b._prevRandao))
-                         , ("currentGasLimit"  , (JSON.toJSON ("0x" ++ showHex (toInteger $ b._gasLimit) "")))
-                         , ("currentNumber"    , (JSON.toJSON $ b._number))
+  toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON $ b.coinbase))
+                         , ("currentDifficulty", (JSON.toJSON $ b.prevRandao))
+                         , ("currentGasLimit"  , (JSON.toJSON ("0x" ++ showHex (toInteger $ b.gasLimit) "")))
+                         , ("currentNumber"    , (JSON.toJSON $ b.number))
                          , ("currentTimestamp" , (JSON.toJSON tstamp))
-                         , ("currentBaseFee"   , (JSON.toJSON $ b._baseFee))
-                         , ("blockHashes"      , (JSON.toJSON $ b._blockHashes))
+                         , ("currentBaseFee"   , (JSON.toJSON $ b.baseFee))
+                         , ("blockHashes"      , (JSON.toJSON $ b.blockHashes))
                          ]
               where
                 tstamp :: W256
-                tstamp = case (b._timestamp) of
+                tstamp = case (b.timestamp) of
                               Lit a -> a
                               _ -> error "Timestamp needs to be a Lit"
 
 emptyEvmToolEnv :: EVMToolEnv
-emptyEvmToolEnv = EVMToolEnv { _coinbase = 0
-                             , _timestamp = Lit 0
-                             , _number     = 0
-                             , _prevRandao = 42069
-                             , _gasLimit   = 0xffffffffffffffff
-                             , _baseFee    = 0
-                             , _maxCodeSize= 0xffffffff
-                             , _schedule   = FeeSchedule.berlin
-                             , _blockHashes = mempty
+emptyEvmToolEnv = EVMToolEnv { coinbase = 0
+                             , timestamp = Lit 0
+                             , number     = 0
+                             , prevRandao = 42069
+                             , gasLimit   = 0xffffffffffffffff
+                             , baseFee    = 0
+                             , maxCodeSize= 0xffffffff
+                             , schedule   = FeeSchedule.berlin
+                             , blockHashes = mempty
                              }
 
 data EVMToolReceipt =
@@ -276,16 +276,16 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
       , txMaxFeePerGas = Just 1
       , txChainId = 1
       }
-    evmEnv = EVMToolEnv { _coinbase   =  0xff
-                     , _timestamp   =  Lit 0x3e8
-                     , _number      =  0x0
-                     , _prevRandao  =  0x0
-                     , _gasLimit    =  fromIntegral gaslimitExec
-                     , _baseFee     =  0x0
-                     , _maxCodeSize =  0xfffff
-                     , _schedule    =  FeeSchedule.berlin
-                     , _blockHashes =  blockHashesDefault
-                     }
+    evmEnv = EVMToolEnv { coinbase   =  0xff
+                        , timestamp   =  Lit 0x3e8
+                        , number      =  0x0
+                        , prevRandao  =  0x0
+                        , gasLimit    =  fromIntegral gaslimitExec
+                        , baseFee     =  0x0
+                        , maxCodeSize =  0xfffff
+                        , schedule    =  FeeSchedule.berlin
+                        , blockHashes =  blockHashesDefault
+                        }
     sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
     fromAddress :: Addr
     fromAddress = fromJust $ deriveAddr sk
@@ -441,19 +441,19 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress
     , vmoptAddress =  toAddress
     , vmoptCaller = Expr.litAddr fromAddr
     , vmoptOrigin = fromAddr
-    , vmoptCoinbase = evmToolEnv._coinbase
-    , vmoptNumber = evmToolEnv._number
-    , vmoptTimestamp = evmToolEnv._timestamp
+    , vmoptCoinbase = evmToolEnv.coinbase
+    , vmoptNumber = evmToolEnv.number
+    , vmoptTimestamp = evmToolEnv.timestamp
     , vmoptGasprice = fromJust txn.txGasPrice
-    , vmoptGas = txn.txGasLimit - fromIntegral (EVM.Transaction.txGasCost evmToolEnv._schedule txn)
+    , vmoptGas = txn.txGasLimit - fromIntegral (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
     , vmoptGaslimit = txn.txGasLimit
-    , vmoptBlockGaslimit = evmToolEnv._gasLimit
-    , vmoptPrevRandao = evmToolEnv._prevRandao
-    , vmoptBaseFee = evmToolEnv._baseFee
+    , vmoptBlockGaslimit = evmToolEnv.gasLimit
+    , vmoptPrevRandao = evmToolEnv.prevRandao
+    , vmoptBaseFee = evmToolEnv.baseFee
     , vmoptPriorityFee = fromJust txn.txMaxPriorityFeeGas
-    , vmoptMaxCodeSize = evmToolEnv._maxCodeSize
-    , vmoptSchedule = evmToolEnv._schedule
-    , vmoptChainId = fromIntegral txn.txChainId
+    , vmoptMaxCodeSize = evmToolEnv.maxCodeSize
+    , vmoptSchedule = evmToolEnv.schedule
+    , vmoptChainId = txn.txChainId
     , vmoptCreate = False
     , vmoptTxAccessList = mempty
     , vmoptAllowFFI = False
