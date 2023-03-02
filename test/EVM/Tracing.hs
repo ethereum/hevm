@@ -233,108 +233,73 @@ emptyEVMToolAlloc = EVMToolAlloc { balance = 0
                                  , code = mempty
                                  , nonce = 0
                                  }
+-- Sets up common parts such as TX, origin contract, and environment that can
+-- later be used to create & execute either an evmtool (from go-ethereum) or an
+-- HEVM transaction. Some elements here are hard-coded such as the secret key,
+-- which are currently not being fuzzed.
+evmSetup :: OpContract -> ByteString -> Int -> (EVM.Transaction.Transaction, EVMToolEnv, EVMToolAlloc, Addr, Addr, Integer)
+evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAddress, sk)
+  where
+    contrLits = assemble $ getOpData contr
+    toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
+    toW8fromLitB (LitByte a) = a
+    toW8fromLitB _ = error "Cannot convert non-litB"
+
+    bitcode = BS.pack . Vector.toList $ toW8fromLitB <$> contrLits
+    contrAlloc = EVMToolAlloc{ balance = 0xa493d65e20984bc
+                             , code = bitcode
+                             , nonce = 0x48
+                             }
+    txn = EVM.Transaction.Transaction
+      { txData     = txData
+      , txGasLimit = fromIntegral gaslimitExec
+      , txGasPrice = Just 1
+      , txNonce    = 172
+      , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
+      , txR        = 0 -- will be fixed when we sign
+      , txS        = 0 -- will be fixed when we sign
+      , txV        = 0 -- will be fixed when we sign
+      , txValue    = 0 -- setting this > 0 fails because HEVM doesn't handle value sent in toplevel transaction
+      , txType     = EVM.Transaction.EIP1559Transaction
+      , txAccessList = []
+      , txMaxPriorityFeeGas =  Just 1
+      , txMaxFeePerGas = Just 1
+      }
+    evmEnv = EVMToolEnv { _coinbase   =  0xff
+                     , _timestamp   =  Lit 0x3e8
+                     , _number      =  0x0
+                     , _prevRandao  =  0x0
+                     , _gasLimit    =  fromIntegral gaslimitExec
+                     , _baseFee     =  0x0
+                     , _maxCodeSize =  0xfffff
+                     , _schedule    =  FeeSchedule.berlin
+                     , _blockHashes =  blockHashesDefault
+                     }
+    sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
+    fromAddress :: Addr
+    fromAddress = fromJust $ deriveAddr sk
+    toAddress :: Addr
+    toAddress = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
 
 getHEVMRet :: OpContract -> ByteString -> Int -> IO (Either (EVM.Error, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult))
 getHEVMRet contr txData gaslimitExec = do
-  let contrLits = assemble $ getOpData contr
-      toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
-      toW8fromLitB (LitByte a) = a
-      toW8fromLitB _ = error "Cannot convert non-litB"
-
-      bitcode = BS.pack . Vector.toList $ toW8fromLitB <$> contrLits
-      contrAlloc = EVMToolAlloc{ balance = 0xa493d65e20984bc
-                               , code = bitcode
-                               , nonce = 0x48
-                               }
-      sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
-      fromAddress :: Addr
-      fromAddress = fromJust $ deriveAddr sk
-      toAddress :: Addr
-      toAddress = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
-      txn = EVM.Transaction.Transaction
-        { txData     = txData
-        , txGasLimit = fromIntegral gaslimitExec
-        , txGasPrice = Just 1
-        , txNonce    = 172
-        , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
-        , txR        = 0 -- will be fixed when we sign
-        , txS        = 0 -- will be fixed when we sign
-        , txV        = 0 -- will be fixed when we sign
-        , txValue    = 0 -- setting this > 0 fails because HEVM doesn't handle value sent in toplevel transaction
-        , txType     = EVM.Transaction.EIP1559Transaction
-        , txAccessList = []
-        , txMaxPriorityFeeGas =  Just 1
-        , txMaxFeePerGas = Just 1
-        }
-      evmToolEnv = EVMToolEnv { _coinbase   =  0xff
-                       , _timestamp   =  Lit 0x3e8
-                       , _number      =  0x0
-                       , _prevRandao  =  0x0
-                       , _gasLimit    =  fromIntegral gaslimitExec
-                       , _baseFee     =  0x0
-                       , _maxCodeSize =  0xfffff
-                       , _schedule    =  FeeSchedule.berlin
-                       , _blockHashes =  blockHashesDefault
-                       }
-  hevmRun <- runCodeWithTrace Nothing evmToolEnv contrAlloc txn (fromAddress, toAddress)
+  let (txn, evmEnv, contrAlloc, fromAddress, toAddress, _) = evmSetup contr txData gaslimitExec
+  hevmRun <- runCodeWithTrace Nothing evmEnv contrAlloc txn (fromAddress, toAddress)
   return hevmRun
 
 getEVMToolRet :: OpContract -> ByteString -> Int -> IO (Maybe EVMToolResult)
 getEVMToolRet contr txData gaslimitExec = do
-  -- TODO: By removing external calls, we fuzz less
-  --       It should work also when we external calls. Removing for now.
-  let contrLits = assemble $ getOpData contr
-      toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
-      toW8fromLitB (LitByte a) = a
-      toW8fromLitB _ = error "Cannot convert non-litB"
-
-      bitcode = BS.pack . Vector.toList $ toW8fromLitB <$> contrLits
-      contrAlloc = EVMToolAlloc{ balance = 0xa493d65e20984bc
-                               , code = bitcode
-                               , nonce = 0x48
-                               }
+  let (txn, evmEnv, contrAlloc, fromAddress, toAddress, sk) = evmSetup contr txData gaslimitExec
+      txs = [EVM.Transaction.sign 1 sk txn] -- "1" because of chainId
       walletAlloc = EVMToolAlloc{ balance = 0x5ffd4878be161d74
                                 , code = BS.empty
                                 , nonce = 0xac
                                 }
-      sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
-      fromAddress :: Addr
-      fromAddress = fromJust $ deriveAddr sk
-      toAddress :: Addr
-      toAddress = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
       alloc :: Map.Map Addr EVMToolAlloc
       alloc = Map.fromList ([ (fromAddress, walletAlloc), (toAddress, contrAlloc)])
-      txn = EVM.Transaction.Transaction
-        { txData     = txData
-        , txGasLimit = fromIntegral gaslimitExec
-        , txGasPrice = Just 1
-        , txNonce    = 172
-        , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
-        , txR        = 0 -- will be fixed when we sign
-        , txS        = 0 -- will be fixed when we sign
-        , txV        = 0 -- will be fixed when we sign
-        , txValue    = 0 -- setting this > 0 fails because HEVM doesn't handle value sent in toplevel transaction
-        , txType     = EVM.Transaction.EIP1559Transaction
-        , txAccessList = []
-        , txMaxPriorityFeeGas =  Just 1
-        , txMaxFeePerGas = Just 1
-        }
-      evmToolEnv = EVMToolEnv { _coinbase   =  0xff
-                       , _timestamp   =  Lit 0x3e8
-                       , _number      =  0x0
-                       , _prevRandao  =  0x0
-                       , _gasLimit    =  fromIntegral gaslimitExec
-                       , _baseFee     =  0x0
-                       , _maxCodeSize =  0xfffff
-                       , _schedule    =  FeeSchedule.berlin
-                       , _blockHashes =  blockHashesDefault
-                       }
-      txs = [EVM.Transaction.sign 1 sk txn] -- "1" because of chainId
-
-  -- Run concrete semantics
   JSON.encodeFile "txs.json" txs
   JSON.encodeFile "alloc.json" alloc
-  JSON.encodeFile "env.json" evmToolEnv
+  JSON.encodeFile "env.json" evmEnv
   (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
                                ,"--input.alloc" , "alloc.json"
                                , "--input.env" , "env.json"
@@ -432,9 +397,6 @@ deleteTraceOutputFiles evmtoolResult =
       System.Directory.removeFile traceFileName
       System.Directory.removeFile (traceFileName ++ ".json")
 
-
-
-
 -- Create symbolic VM from concrete VM
 symbolify :: VM -> VM
 symbolify vm = vm { _state = vm._state { _calldata = AbstractBuf "calldata" } }
@@ -442,8 +404,8 @@ symbolify vm = vm { _state = vm._state { _calldata = AbstractBuf "calldata" } }
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
 runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Either (EVM.Error, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
-runCodeWithTrace rpcinfo evmToolEnv alloc txn (fromAddr, toAddress) = withSolvers Z3 0 Nothing $ \solvers -> do
-  let origVM = vmForRuntimeCode code' calldata' evmToolEnv alloc txn (fromAddr, toAddress)
+runCodeWithTrace rpcinfo evmEnv alloc txn (fromAddr, toAddress) = withSolvers Z3 0 Nothing $ \solvers -> do
+  let origVM = vmForRuntimeCode code' calldata' evmEnv alloc txn (fromAddr, toAddress)
       calldata' = ConcreteBuf txn.txData
       code' = alloc.code
       buildExpr :: SolverGroup -> VM -> IO (Expr End)
@@ -519,7 +481,7 @@ vmtrace vm =
     readoutError Nothing = Nothing
     readoutError (Just (VMSuccess _)) = Nothing
     readoutError (Just (VMFailure e)) = case e of
-      -- NOTE: values copied from go-ethereum errors.go file
+      -- NOTE: error text made to closely match go-ethereum's errors.go file
       OutOfGas {}             -> Just "out of gas"
       -- TODO "contract creation code storage out of gas" not handled
       CallDepthLimitReached   -> Just "max call depth exceeded"
@@ -816,6 +778,24 @@ genContract n = do
       --  , (10, pure OpRevert)
       -- ])
 
+forceLit :: Expr EWord -> W256
+forceLit (Lit x) = x
+forceLit _ = undefined
+
+randItem :: [a] -> IO a
+randItem = generate . Test.QuickCheck.elements
+
+getOp :: VM -> Data.Word.Word8
+getOp vm =
+  let pcpos  = vm ^. state . EVM.pc
+      code' = vm ^. state . EVM.code
+      xs = case code' of
+        InitCode _ _ -> error "InitCode instead of RuntimeCode"
+        RuntimeCode (ConcreteRuntimeCode xs') -> BS.drop pcpos xs'
+        RuntimeCode (SymbolicRuntimeCode _) -> error "RuntimeCode is symbolic"
+  in if xs == BS.empty then 0
+                       else BS.head xs
+
 tests :: TestTree
 tests = testGroup "contract-quickcheck-run"
     [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract) -> ioProperty $ do
@@ -884,20 +864,3 @@ tests = testGroup "contract-quickcheck-run"
         deleteTraceOutputFiles evmtoolResult
     ]
 
-forceLit :: Expr EWord -> W256
-forceLit (Lit x) = x
-forceLit _ = undefined
-
-randItem :: [a] -> IO a
-randItem = generate . Test.QuickCheck.elements
-
-getOp :: VM -> Data.Word.Word8
-getOp vm =
-  let pcpos  = vm ^. state . EVM.pc
-      code' = vm ^. state . EVM.code
-      xs = case code' of
-        InitCode _ _ -> error "InitCode instead of RuntimeCode"
-        RuntimeCode (ConcreteRuntimeCode xs') -> BS.drop pcpos xs'
-        RuntimeCode (SymbolicRuntimeCode _) -> error "RuntimeCode is symbolic"
-  in if xs == BS.empty then 0
-                       else BS.head xs
