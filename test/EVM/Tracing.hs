@@ -234,17 +234,56 @@ emptyEVMToolAlloc = EVMToolAlloc { balance = 0
                                  , nonce = 0
                                  }
 
--- TODO We should separate it into two
-getEVMToolRet :: OpContract -> ByteString -> Int -> IO (Maybe EVMToolResult, (Either (EVM.Error, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult)))
+getHEVMRet :: OpContract -> ByteString -> Int -> IO (Either (EVM.Error, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult))
+getHEVMRet contr txData gaslimitExec = do
+  let contrLits = assemble $ getOpData contr
+      toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
+      toW8fromLitB (LitByte a) = a
+      toW8fromLitB _ = error "Cannot convert non-litB"
+
+      bitcode = BS.pack . Vector.toList $ toW8fromLitB <$> contrLits
+      contrAlloc = EVMToolAlloc{ balance = 0xa493d65e20984bc
+                               , code = bitcode
+                               , nonce = 0x48
+                               }
+      sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
+      fromAddress :: Addr
+      fromAddress = fromJust $ deriveAddr sk
+      toAddress :: Addr
+      toAddress = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
+      txn = EVM.Transaction.Transaction
+        { txData     = txData
+        , txGasLimit = fromIntegral gaslimitExec
+        , txGasPrice = Just 1
+        , txNonce    = 172
+        , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
+        , txR        = 0 -- will be fixed when we sign
+        , txS        = 0 -- will be fixed when we sign
+        , txV        = 0 -- will be fixed when we sign
+        , txValue    = 0 -- setting this > 0 fails because HEVM doesn't handle value sent in toplevel transaction
+        , txType     = EVM.Transaction.EIP1559Transaction
+        , txAccessList = []
+        , txMaxPriorityFeeGas =  Just 1
+        , txMaxFeePerGas = Just 1
+        }
+      evmToolEnv = EVMToolEnv { _coinbase   =  0xff
+                       , _timestamp   =  Lit 0x3e8
+                       , _number      =  0x0
+                       , _prevRandao  =  0x0
+                       , _gasLimit    =  fromIntegral gaslimitExec
+                       , _baseFee     =  0x0
+                       , _maxCodeSize =  0xfffff
+                       , _schedule    =  FeeSchedule.berlin
+                       , _blockHashes =  blockHashesDefault
+                       }
+  hevmRun <- runCodeWithTrace Nothing evmToolEnv contrAlloc txn (fromAddress, toAddress)
+  return hevmRun
+
+getEVMToolRet :: OpContract -> ByteString -> Int -> IO (Maybe EVMToolResult)
 getEVMToolRet contr txData gaslimitExec = do
   -- TODO: By removing external calls, we fuzz less
   --       It should work also when we external calls. Removing for now.
-  contrFixed <- fixContractJumps $ removeExtcalls contr
-  -- TODO call below will force the interpreter to run out of memory.
-  --      let's try to fix that
-  -- let contrFixed = OpContract [OpPush (Lit 0xfffffff), OpPush (Lit 0x0), OpPush (Lit 0x0), OpCalldatacopy, OpPush (Lit 0xfffffff), OpPush (Lit 0), OpReturn]
-  -- putStrLn $ "Contract to run: " <> (show contrFixed)
-  let contrLits = assemble $ getOpData contrFixed
+  let contrLits = assemble $ getOpData contr
       toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
       toW8fromLitB (LitByte a) = a
       toW8fromLitB _ = error "Cannot convert non-litB"
@@ -310,11 +349,7 @@ getEVMToolRet contr txData gaslimitExec = do
                    putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
                    putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
   evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
-  hevmRun <- runCodeWithTrace Nothing evmToolEnv contrAlloc txn (fromAddress, toAddress)
-  -- putStrLn $ "evmtool's result is: " <> show evmtoolResult
-  -- putStrLn $ "HEVM's result is   : " <> show hevmRun
-  -- putStrLn $ "evmtool's stderr is: " <> evmtoolStderr
-  return (evmtoolResult, hevmRun)
+  return evmtoolResult
 
 -- Compares traces of evmtool (from go-ethereum) and HEVM
 compareTraces :: [VMTrace] -> [EVMToolTrace] -> IO (Bool)
@@ -787,7 +822,11 @@ tests = testGroup "contract-quickcheck-run"
         txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
         gaslimitExec <- generate $ chooseInt (40000, 0xffff)
         let txData = BS.pack $ toEnum <$> txDataRaw
-        (evmtoolResult, hevmRun) <- getEVMToolRet contr txData gaslimitExec
+        -- TODO: By removing external calls, we fuzz less
+        --       It should work also when we external calls. Removing for now.
+        contrFixed <- fixContractJumps $ removeExtcalls contr
+        evmtoolResult <- getEVMToolRet contrFixed txData gaslimitExec
+        hevmRun <- getHEVMRet contrFixed txData gaslimitExec
         (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
         case hevmRun of
           (Right (expr, hevmTrace, hevmTraceResult)) -> do
