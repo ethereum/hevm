@@ -57,7 +57,7 @@ data Transaction = Transaction {
     txAccessList :: [AccessListEntry],
     txMaxPriorityFeeGas :: Maybe W256,
     txMaxFeePerGas :: Maybe W256,
-    txChainId  :: Int
+    txChainId  :: W256
 } deriving (Show, Generic)
 
 instance JSON.ToJSON Transaction where
@@ -74,7 +74,7 @@ instance JSON.ToJSON Transaction where
                          , ("accessList",        (JSON.toJSON $ t.txAccessList))
                          , ("maxPriorityFeePerGas", (JSON.toJSON $ show $ fromJust $ t.txMaxPriorityFeeGas))
                          , ("maxFeePerGas",      (JSON.toJSON $ show $ fromJust $ t.txMaxFeePerGas))
-                         , ("chainId",           (JSON.toJSON $ t.txChainId))
+                         , ("chainId",           (JSON.toJSON $ show t.txChainId))
                          ]
 
 emptyTransaction :: Transaction
@@ -146,11 +146,11 @@ signingData tx =
                               to',
                               rlpWord256 tx.txValue,
                               BS tx.txData,
-                              rlpWord256 (fromIntegral tx.txChainId),
+                              rlpWord256 tx.txChainId,
                               rlpWord256 0x0,
                               rlpWord256 0x0]
         eip1559Data = cons 0x02 $ rlpList [
-          rlpWord256 (fromIntegral tx.txChainId),
+          rlpWord256 tx.txChainId,
           rlpWord256 tx.txNonce,
           rlpWord256 maxPrio,
           rlpWord256 maxFee,
@@ -161,7 +161,7 @@ signingData tx =
           rlpAccessList]
 
         eip2930Data = cons 0x01 $ rlpList [
-          rlpWord256 (fromIntegral tx.txChainId),
+          rlpWord256 tx.txChainId,
           rlpWord256 tx.txNonce,
           rlpWord256 gasPrice,
           rlpWord256 (num tx.txGasLimit),
