@@ -101,11 +101,11 @@ instance JSON.FromJSON EVMToolTrace where
     <*> v .: "stack"
     <*> v .:? "error"
 
-genBlockHash:: Int -> Expr 'EWord
-genBlockHash x = (num x :: Integer) & show & Char8.pack & EVM.Types.keccak' & Lit
+mkBlockHash:: Int -> Expr 'EWord
+mkBlockHash x = (num x :: Integer) & show & Char8.pack & EVM.Types.keccak' & Lit
 
 blockHashesDefault :: Map.Map Int W256
-blockHashesDefault = Map.fromList [(x, forceLit $ genBlockHash x) | x<- [1..256]]
+blockHashesDefault = Map.fromList [(x, forceLit $ mkBlockHash x) | x<- [1..256]]
 
 data EVMToolOutput =
   EVMToolOutput
