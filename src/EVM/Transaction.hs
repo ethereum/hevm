@@ -60,7 +60,7 @@ data Transaction = Transaction {
 } deriving (Show, Generic)
 
 instance JSON.ToJSON Transaction where
-  toJSON t = JSON.object [ ("input",             (JSON.toJSON $ t.txData))
+  toJSON t = JSON.object [ ("input",             (JSON.toJSON (ByteStringS t.txData)))
                          , ("gas",               (JSON.toJSON $ "0x" ++ showHex (toInteger $ t.txGasLimit) ""))
                          , ("gasPrice",          (JSON.toJSON $ show $ fromJust $ t.txGasPrice))
                          , ("v",                 (JSON.toJSON $ show $ (t.txV)-27))

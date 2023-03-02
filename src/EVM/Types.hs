@@ -458,7 +458,7 @@ unlitByte :: Expr Byte -> Maybe Word8
 unlitByte (LitByte x) = Just x
 unlitByte _ = Nothing
 
-newtype ByteStringS = ByteStringS ByteString deriving (Eq)
+newtype ByteStringS = ByteStringS ByteString deriving (Eq, Generic)
 
 instance Show ByteStringS where
   show (ByteStringS x) = ("0x" ++) . Text.unpack . fromBinary $ x
@@ -466,14 +466,14 @@ instance Show ByteStringS where
       fromBinary =
         Text.decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
-instance JSON.FromJSON ByteString where
+instance JSON.FromJSON ByteStringS where
   parseJSON (JSON.String x) = case BS16.decodeBase16' x of
                                 Left _ -> mzero
-                                Right bs -> pure bs
+                                Right bs -> pure (ByteStringS bs)
   parseJSON _ = mzero
 
-instance JSON.ToJSON ByteString where
-  toJSON x = JSON.String (Text.pack $ "0x" ++ (concatMap (paddedShowHex 2) . BS.unpack $ x))
+instance JSON.ToJSON ByteStringS where
+  toJSON (ByteStringS x) = JSON.String (Text.pack $ "0x" ++ (concatMap (paddedShowHex 2) . BS.unpack $ x))
 
 newtype Addr = Addr { addressWord160 :: Word160 }
   deriving
@@ -779,3 +779,6 @@ instance JSON.FromJSON VMTrace
 
 bsToHex :: ByteString -> String
 bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
+
+bssToBs :: ByteStringS -> ByteString
+bssToBs (ByteStringS bs) = bs

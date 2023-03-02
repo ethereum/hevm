@@ -125,7 +125,7 @@ blockHashesDefault = Map.fromList [(x, forceLit $ genBlockHash x) | x<- [1..256]
 
 data EVMToolOutput =
   EVMToolOutput
-    { output :: ByteString -- NOTE: it's missing the 0x so can't be parsed at ByteString
+    { output :: ByteStringS
     , gasUsed :: W256
     , time :: Integer
     } deriving (Generic, Show)
@@ -243,15 +243,15 @@ instance JSON.FromJSON EVMRejected where
 
 data EVMToolAlloc =
   EVMToolAlloc
-  { balance :: W256 -- this is wrongly written by default, hence the non-default ToJSON
+  { balance :: W256
   , code :: ByteString
   , nonce :: W64
   } deriving (Generic)
 
 instance JSON.ToJSON EVMToolAlloc where
-  toJSON b = JSON.object [ ("balance" ,  (JSON.toJSON $ show b.balance))
-                         , ("code", (JSON.toJSON $ b.code))
-                         , ("nonce"  , (JSON.toJSON $ b.nonce))
+  toJSON b = JSON.object [ ("balance" , (JSON.toJSON $ show b.balance))
+                         , ("code", (JSON.toJSON $ (ByteStringS b.code)))
+                         , ("nonce", (JSON.toJSON $ b.nonce))
                          ]
 
 emptyEVMToolAlloc :: EVMToolAlloc
@@ -498,8 +498,8 @@ tests = testGroup "hevm"
             assertEqual "Traces and gas must match" traceOK True
             let resultOK = evmtoolTraceOutput.toOutput.output == hevmTraceResult.out
             if resultOK then do
-              putStrLn $ "HEVM & evmtool's outputs match: " <> (bsToHex evmtoolTraceOutput.toOutput.output)
-              if isNothing simplConcrExprRetval || simplConcrExprRetval == (Just hevmTraceResult.out)
+              putStrLn $ "HEVM & evmtool's outputs match: " <> (bsToHex $ bssToBs evmtoolTraceOutput.toOutput.output)
+              if isNothing simplConcrExprRetval || (fromJust simplConcrExprRetval) == (bssToBs hevmTraceResult.out)
                  then do
                    putStr "OK, symbolic interpretation -> concrete calldata -> Expr.simplify gives the same answer."
                    if isNothing simplConcrExprRetval then putStrLn ", but it was a Nothing, so not strong equivalence"
@@ -513,10 +513,10 @@ tests = testGroup "hevm"
             else do
               putStrLn $ "Name of trace file: " <> (getTraceFileName $ fromJust evmtoolResult)
               putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
-              T.putStrLn $ "HEVM result: " <> (formatBinary hevmTraceResult.out)
-              T.putStrLn $ "evm result : " <> (formatBinary evmtoolTraceOutput.toOutput.output)
-              putStrLn $ "HEVM result len: " <> (show (BS.length hevmTraceResult.out))
-              putStrLn $ "evm result  len: " <> (show (BS.length evmtoolTraceOutput.toOutput.output))
+              T.putStrLn $ "HEVM result: " <> (formatBinary $ bssToBs hevmTraceResult.out)
+              T.putStrLn $ "evm result : " <> (formatBinary $ bssToBs evmtoolTraceOutput.toOutput.output)
+              putStrLn $ "HEVM result len: " <> (show (BS.length $ bssToBs hevmTraceResult.out))
+              putStrLn $ "evm result  len: " <> (show (BS.length $ bssToBs evmtoolTraceOutput.toOutput.output))
             assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
           Left (evmerr, hevmTrace) -> do
             putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
@@ -3314,7 +3314,7 @@ applyPattern p = localOption (TestPattern (parseExpr p))
 
 data VMTraceResult =
   VMTraceResult
-  { out  :: ByteString
+  { out  :: ByteStringS
   , gasUsed :: Data.Word.Word64
   } deriving (Generic, Show)
 
@@ -3384,11 +3384,11 @@ vmres vm =
   let
     gasUsed' = Control.Lens.view (tx . txgaslimit) vm - Control.Lens.view (state . EVM.gas) vm
     res = case Control.Lens.view result vm of
-      Just (VMSuccess (ConcreteBuf b)) -> b
+      Just (VMSuccess (ConcreteBuf b)) -> (ByteStringS b)
       Just (VMSuccess x) -> error $ "unhandled: " <> (show x)
-      Just (VMFailure (EVM.Revert (ConcreteBuf b))) -> b
-      Just (VMFailure _) -> mempty -- these are all EVMError
-      _ -> mempty
+      Just (VMFailure (EVM.Revert (ConcreteBuf b))) -> (ByteStringS b)
+      Just (VMFailure _) -> ByteStringS mempty
+      _ -> ByteStringS mempty
   in VMTraceResult
      { out = res
      , gasUsed = gasUsed'
