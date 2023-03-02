@@ -32,6 +32,7 @@ import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty.HUnit
 import Test.Tasty.Runners hiding (Failure)
 import Test.Tasty.ExpectedFailure
+import EVM.Tracing qualified
 
 import Control.Monad.State.Strict hiding (state)
 import Control.Lens hiding (List, pre, (.>), re, op)
@@ -72,7 +73,9 @@ runSubSet p = defaultMain . applyPattern p $ tests
 
 tests :: TestTree
 tests = testGroup "hevm"
-  [ testGroup "StorageTests"
+  [
+  EVM.Tracing.tests
+  , testGroup "StorageTests"
     [ testCase "read-from-sstore" $ assertEqual ""
         (Lit 0xab)
         (Expr.readStorage' (Lit 0x0) (Lit 0x0) (SStore (Lit 0x0) (Lit 0x0) (Lit 0xab) AbstractStore))
