@@ -1,3 +1,13 @@
+{-|
+Module      : Tracing
+Description : Tests to fuzz concrete tracing, and symbolic execution
+
+Functions here are used to generate traces for the concrete
+execution of HEVM and check that against evmtool from go-ehereum. Re-using some
+of this code, we also generate a symbolic expression then evaluate it
+concretely through Expr.simplify, then check that against evmtool's output.
+-}
+
 {-# Language DataKinds #-}
 {-# Language DuplicateRecordFields #-}
 {-# LANGUAGE DeriveGeneric #-}
