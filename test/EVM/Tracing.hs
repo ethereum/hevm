@@ -234,7 +234,7 @@ data EVMToolAlloc =
 
 instance JSON.ToJSON EVMToolAlloc where
   toJSON b = JSON.object [ ("balance" , (JSON.toJSON $ show b.balance))
-                         , ("code", (JSON.toJSON $ (ByteStringS b.code)))
+                         , ("code", (JSON.toJSON $ ByteStringS b.code))
                          , ("nonce", (JSON.toJSON $ b.nonce))
                          ]
 
