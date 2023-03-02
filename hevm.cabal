@@ -109,7 +109,7 @@ library
     EVM.TTYCenteredList,
     EVM.Types,
     EVM.UnitTest,
-    EVM.Sign
+    EVM.Sign,
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -296,6 +296,7 @@ library test-utils
     test-base
   exposed-modules:
     EVM.TestUtils
+    EVM.Tracing
 
 common test-common
   import:
@@ -304,6 +305,7 @@ common test-common
     test-utils
   other-modules:
     EVM.TestUtils
+    EVM.Tracing
   if os(darwin)
     extra-libraries: c++
     -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
