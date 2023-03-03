@@ -1098,7 +1098,7 @@ tests = testGroup "hevm"
                                        _ -> error "expected 2 args"
                         in (x .<= Expr.add x y)
                         -- TODO check if it's needed
-                           .&& Control.Lens.view (state . callvalue) preVM .== Lit 0
+                           .&& view (state . callvalue) preVM .== Lit 0
             post prestate leaf =
               let (x, y) = case getStaticAbiArgs 2 prestate of
                              [x', y'] -> (x', y')
