@@ -78,15 +78,15 @@ instance JSON.ToJSON VMTraceResult where
 
 data EVMToolTrace =
   EVMToolTrace
-    { evmPc :: Int
-    , evmOp :: Int
-    , evmGas :: W256
-    , evmMemSize :: Integer
-    , evmDepth :: Int
-    , evmRefund :: Int
-    , evmOpName :: String
-    , evmStack :: [W256]
-    , evmError :: Maybe String
+    { pc :: Int
+    , op :: Int
+    , gas :: W256
+    , memSize :: Integer
+    , depth :: Int
+    , refund :: Int
+    , opName :: String
+    , stack :: [W256]
+    , error :: Maybe String
     } deriving (Generic, Show)
 
 instance JSON.FromJSON EVMToolTrace where
@@ -114,22 +114,15 @@ data EVMToolOutput =
     , time :: Integer
     } deriving (Generic, Show)
 
-instance JSON.FromJSON EVMToolOutput where
-    parseJSON = JSON.withObject "EVToolOutput" $ \v -> EVMToolOutput
-        <$> v .: "output"
-        <*> v .: "gasUsed"
-        <*> v .: "time"
+instance JSON.FromJSON EVMToolOutput
 
 data EVMToolTraceOutput =
   EVMToolTraceOutput
-    { toTrace :: [EVMToolTrace]
-    , toOutput :: EVMToolOutput
+    { trace :: [EVMToolTrace]
+    , output :: EVMToolOutput
     } deriving (Generic, Show)
 
-instance JSON.FromJSON EVMToolTraceOutput where
-    parseJSON = JSON.withObject "EVMToolTraceOutput" $ \v -> EVMToolTraceOutput
-        <$> v .: "trace"
-        <*> v .: "output"
+instance JSON.FromJSON EVMToolTraceOutput
 
 data EVMToolEnv = EVMToolEnv
   { coinbase    :: Addr
@@ -172,17 +165,17 @@ emptyEvmToolEnv = EVMToolEnv { coinbase = 0
 
 data EVMToolReceipt =
   EVMToolReceipt
-    { recType :: String
-    , recRoot :: String
-    , recStatus :: String
-    , recCumulativeGasUsed :: String
-    , recLogsBloom :: String
-    , recLogs :: Maybe String
-    , recTransactionHash :: String
-    , recContractAddress :: String
-    , recGasUsed :: String
-    , recBlockHash :: String
-    , recTransactionIndex :: String
+    { _type :: String
+    , root :: String
+    , status :: String
+    , cumulativeGasUsed :: String
+    , logsBloom :: String
+    , logs :: Maybe String
+    , transactionHash :: String
+    , contractAddress :: String
+    , gasUsed :: String
+    , blockHash :: String
+    , transactionIndex :: String
     } deriving (Generic, Show)
 
 instance JSON.FromJSON EVMToolReceipt where
@@ -335,13 +328,13 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
     go [] [] = pure True
     go (a:ax) (b:bx) = do
       let aOp = a.traceOp
-          bOp = b.evmOp
+          bOp = b.op
           aPc = a.tracePc
-          bPc = b.evmPc
+          bPc = b.pc
           aStack = a.traceStack
-          bStack = b.evmStack
+          bStack = b.stack
           aGas = fromIntegral a.traceGas
-          bGas = b.evmGas
+          bGas = b.gas
       if aGas /= bGas then do
                           putStrLn "GAS doesn't match:"
                           putStrLn $ "HEVM's gas   : " <> (show aGas)
@@ -355,8 +348,8 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
                           -- putStrLn $ "trace element match. " <> (intToOpName aOp) <> " pc: " <> (show aPc)
                           return ()
 
-      Control.Monad.when (isJust b.evmError) $ do
-                           putStrLn $ "Error by evmtool: " <> (show b.evmError)
+      Control.Monad.when (isJust b.error) $ do
+                           putStrLn $ "Error by evmtool: " <> (show b.error)
                            putStrLn $ "Error by HEVM   : " <> (show a.traceError)
 
       Control.Monad.when (aStack /= bStack) $ do
@@ -373,7 +366,7 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
     go [] [b] = do
       -- evmtool produces ONE more trace element of the error
       -- hevm on the other hand stops and doens't produce one more
-      if isJust b.evmError then pure True
+      if isJust b.error then pure True
                            else do
                              putStrLn $ "Traces don't match. HEVM's trace is longer by:" <> (show b)
                              pure False
@@ -384,7 +377,7 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
 getTraceFileName :: EVMToolResult -> String
 getTraceFileName evmtoolResult = traceFileName
   where
-    txName = ((evmtoolResult.receipts) !! 0).recTransactionHash
+    txName = ((evmtoolResult.receipts) !! 0).transactionHash
     traceFileName = "trace-0-" ++ txName ++ ".jsonl"
 
 getTraceOutput :: Maybe EVMToolResult -> IO (Maybe EVMToolTraceOutput)
@@ -835,13 +828,13 @@ tests = testGroup "contract-quickcheck-run"
               getReturnVal (Return _ (ConcreteBuf bs) _) = Just bs
               getReturnVal _ = Nothing
               simplConcrExprRetval = getReturnVal simplConcExpr
-            traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.toTrace)
+            traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
             -- putStrLn $ "HEVM trace   : " <> show hevmTrace
             -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.toTrace)
             assertEqual "Traces and gas must match" traceOK True
-            let resultOK = evmtoolTraceOutput.toOutput.output == hevmTraceResult.out
+            let resultOK = evmtoolTraceOutput.output.output == hevmTraceResult.out
             if resultOK then do
-              putStrLn $ "HEVM & evmtool's outputs match: " <> (bsToHex $ bssToBs evmtoolTraceOutput.toOutput.output)
+              putStrLn $ "HEVM & evmtool's outputs match: " <> (bsToHex $ bssToBs evmtoolTraceOutput.output.output)
               if isNothing simplConcrExprRetval || (fromJust simplConcrExprRetval) == (bssToBs hevmTraceResult.out)
                  then do
                    putStr "OK, symbolic interpretation -> concrete calldata -> Expr.simplify gives the same answer."
@@ -857,15 +850,15 @@ tests = testGroup "contract-quickcheck-run"
               putStrLn $ "Name of trace file: " <> (getTraceFileName $ fromJust evmtoolResult)
               putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
               T.putStrLn $ "HEVM result: " <> (formatBinary $ bssToBs hevmTraceResult.out)
-              T.putStrLn $ "evm result : " <> (formatBinary $ bssToBs evmtoolTraceOutput.toOutput.output)
+              T.putStrLn $ "evm result : " <> (formatBinary $ bssToBs evmtoolTraceOutput.output.output)
               putStrLn $ "HEVM result len: " <> (show (BS.length $ bssToBs hevmTraceResult.out))
-              putStrLn $ "evm result  len: " <> (show (BS.length $ bssToBs evmtoolTraceOutput.toOutput.output))
+              putStrLn $ "evm result  len: " <> (show (BS.length $ bssToBs evmtoolTraceOutput.output.output))
             assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
           Left (evmerr, hevmTrace) -> do
             putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
             -- putStrLn $ "evmtool result was: " <> show (fromJust evmtoolResult)
             -- putStrLn $ "output by evmtool is: '" <> bsToHex evmtoolTraceOutput.toOutput.output <> "'"
-            traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.toTrace)
+            traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
             assertEqual "Traces and gas must match" traceOK True
         System.Directory.removeFile "txs.json"
         System.Directory.removeFile "alloc-out.json"
