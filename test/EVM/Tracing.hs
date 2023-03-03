@@ -653,15 +653,15 @@ genPush :: Int -> Gen [Op]
 genPush n = vectorOf n onePush
   where
     onePush :: Gen Op
-    onePush  = frequency [ (1, do
+    onePush  = do
       p <- chooseInt (1, 10)
-      pure $ OpPush (Lit (fromIntegral p))) ]
+      pure $ OpPush (Lit (fromIntegral p))
 
 genContract :: Int -> Gen [Op]
 genContract n = do
     y <- chooseInt (3, 6)
     pushes <- genPush y
-    normalOps <- vectorOf (5*n+40) genOne
+    normalOps <- vectorOf (3*n+40) genOne
     addReturn <- chooseInt (0, 10)
     let contr = pushes ++ normalOps
     if addReturn < 10 then pure $ contr++[OpPush (Lit 0x40), OpPush (Lit 0x0), OpReturn]
@@ -766,7 +766,7 @@ genContract n = do
             -- x <- arbitrary
             large <- chooseInt (0, 100)
             x <- if large == 0 then chooseBoundedIntegral (0::W256, (2::W256)^(256::W256)-1)
-                     else chooseBoundedIntegral (0, 10)
+                               else chooseBoundedIntegral (0, 10)
             pure $ OpPush (Lit (fromIntegral x)))
         , (10, do
             x <- chooseInt (1, 10)
@@ -834,7 +834,7 @@ tests = testGroup "contract-quickcheck-run"
             assertEqual "Traces and gas must match" traceOK True
             let resultOK = evmtoolTraceOutput.output.output == hevmTraceResult.out
             if resultOK then do
-              putStrLn $ "HEVM & evmtool's outputs match: " <> (bsToHex $ bssToBs evmtoolTraceOutput.output.output)
+              putStrLn $ "HEVM & evmtool's outputs match: '" <> (bsToHex $ bssToBs evmtoolTraceOutput.output.output) <> "'"
               if isNothing simplConcrExprRetval || (fromJust simplConcrExprRetval) == (bssToBs hevmTraceResult.out)
                  then do
                    putStr "OK, symbolic interpretation -> concrete calldata -> Expr.simplify gives the same answer."
