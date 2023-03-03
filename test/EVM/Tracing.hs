@@ -800,6 +800,32 @@ getOp vm =
   in if xs == BS.empty then 0
                        else BS.head xs
 
+getConcretizedOutput :: Expr End -> ByteString -> Maybe ByteString
+getConcretizedOutput expr txData = simplConcrExprRetval
+  where
+    concretize :: Expr a -> Expr Buf -> Expr a
+    concretize a c = mapExpr go a
+      where
+        go :: Expr a -> Expr a
+        go = \case
+                   AbstractBuf "calldata" -> c
+                   y -> y
+    concretizedExpr = concretize expr (ConcreteBuf txData)
+    simplConcExpr = Expr.simplify concretizedExpr
+    getReturnVal :: Expr End -> Maybe ByteString
+    getReturnVal (Return _ (ConcreteBuf bs) _) = Just bs
+    getReturnVal _ = Nothing
+    simplConcrExprRetval = getReturnVal simplConcExpr
+
+cleanupEvmtoolFiles :: Maybe EVMToolResult -> IO ()
+cleanupEvmtoolFiles evmtoolResult = do
+  System.Directory.removeFile "txs.json"
+  System.Directory.removeFile "alloc-out.json"
+  System.Directory.removeFile "alloc.json"
+  System.Directory.removeFile "result.json"
+  System.Directory.removeFile "env.json"
+  deleteTraceOutputFiles evmtoolResult
+
 tests :: TestTree
 tests = testGroup "contract-quickcheck-run"
     [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract) -> ioProperty $ do
@@ -814,37 +840,18 @@ tests = testGroup "contract-quickcheck-run"
         (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
         case hevmRun of
           (Right (expr, hevmTrace, hevmTraceResult)) -> do
-            let
-              concretize :: Expr a -> Expr Buf -> Expr a
-              concretize a c = mapExpr go a
-                where
-                  go :: Expr a -> Expr a
-                  go = \case
-                             AbstractBuf "calldata" -> c
-                             y -> y
-              concretizedExpr = concretize expr (ConcreteBuf txData)
-              simplConcExpr = Expr.simplify concretizedExpr
-              getReturnVal :: Expr End -> Maybe ByteString
-              getReturnVal (Return _ (ConcreteBuf bs) _) = Just bs
-              getReturnVal _ = Nothing
-              simplConcrExprRetval = getReturnVal simplConcExpr
+            let sRet =  getConcretizedOutput expr txData
             traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
-            -- putStrLn $ "HEVM trace   : " <> show hevmTrace
-            -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.toTrace)
             assertEqual "Traces and gas must match" traceOK True
             let resultOK = evmtoolTraceOutput.output.output == hevmTraceResult.out
             if resultOK then do
               putStrLn $ "HEVM & evmtool's outputs match: '" <> (bsToHex $ bssToBs evmtoolTraceOutput.output.output) <> "'"
-              if isNothing simplConcrExprRetval || (fromJust simplConcrExprRetval) == (bssToBs hevmTraceResult.out)
+              if isNothing sRet || (fromJust sRet) == (bssToBs hevmTraceResult.out)
                  then do
                    putStr "OK, symbolic interpretation -> concrete calldata -> Expr.simplify gives the same answer."
-                   if isNothing simplConcrExprRetval then putStrLn ", but it was a Nothing, so not strong equivalence"
+                   if isNothing sRet then putStrLn ", but it was a Nothing, so not strong equivalence"
                                                      else putStrLn ""
                  else do
-                   putStrLn $ "concretized expr           : " <> (show concretizedExpr)
-                   putStrLn $ "simplified concretized expr: " <> (show simplConcExpr)
-                   putStrLn $ "return value computed      : " <> (show simplConcrExprRetval)
-                   putStrLn $ "evmtool's return value     : " <> (show hevmTraceResult.out)
                    assertEqual "Simplified, concretized expression must match evmtool's output." True False
             else do
               putStrLn $ "Name of trace file: " <> (getTraceFileName $ fromJust evmtoolResult)
@@ -856,15 +863,28 @@ tests = testGroup "contract-quickcheck-run"
             assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
           Left (evmerr, hevmTrace) -> do
             putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
-            -- putStrLn $ "evmtool result was: " <> show (fromJust evmtoolResult)
-            -- putStrLn $ "output by evmtool is: '" <> bsToHex evmtoolTraceOutput.toOutput.output <> "'"
             traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
             assertEqual "Traces and gas must match" traceOK True
-        System.Directory.removeFile "txs.json"
-        System.Directory.removeFile "alloc-out.json"
-        System.Directory.removeFile "alloc.json"
-        System.Directory.removeFile "result.json"
-        System.Directory.removeFile "env.json"
-        deleteTraceOutputFiles evmtoolResult
+        cleanupEvmtoolFiles evmtoolResult
+
+      , testProperty "random-contract-SMT" $ \(contr :: OpContract) -> ioProperty $ do
+        txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
+        gaslimitExec <- generate $ chooseInt (40000, 0xffff)
+        let txData = BS.pack $ toEnum <$> txDataRaw
+        contrFixed <- fixContractJumps $ removeExtcalls contr
+        evmtoolResult <- getEVMToolRet contrFixed txData gaslimitExec
+        hevmRun <- getHEVMRet contrFixed txData gaslimitExec
+        (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
+        case hevmRun of
+          (Right (expr, hevmTrace, hevmTraceResult)) -> do
+            let sRet =  getConcretizedOutput expr txData
+            assertEqual "Concretized expr must be equal " (isNothing sRet || (fromJust sRet) == (bssToBs hevmTraceResult.out)) True
+            traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
+            assertEqual "Traces and gas must match" traceOK True
+            let resultOK = evmtoolTraceOutput.output.output == hevmTraceResult.out
+            assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
+          Left (evmerr, _) -> do
+            putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
+        cleanupEvmtoolFiles evmtoolResult
     ]
 
