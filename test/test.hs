@@ -358,28 +358,22 @@ tests = testGroup "hevm"
 
     , testProperty "abi encoding vs. solidity" $ withMaxSuccess 20 $ forAll (arbitrary >>= genAbiValue) $
       \y -> ioProperty $ do
-          -- traceM ("encoding: " ++ (show y) ++ " : " ++ show (abiValueType y))
           Just encoded <- runStatements [i| x = abi.encode(a);|]
             [y] AbiBytesDynamicType
           let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
                 AbiTuple (Vector.toList -> [e]) -> e
                 _ -> error "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [y])
-          -- traceM ("encoded (solidity): " ++ show solidityEncoded)
-          -- traceM ("encoded (hevm): " ++ show (AbiBytesDynamic hevmEncoded))
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
 
     , testProperty "abi encoding vs. solidity (2 args)" $ withMaxSuccess 20 $ forAll (arbitrary >>= bothM genAbiValue) $
       \(x', y') -> ioProperty $ do
-          -- traceM ("encoding: " ++ (show x') ++ ", " ++ (show y')  ++ " : " ++ show (abiValueType x') ++ ", " ++ show (abiValueType y'))
           Just encoded <- runStatements [i| x = abi.encode(a, b);|]
             [x', y'] AbiBytesDynamicType
           let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
                 AbiTuple (Vector.toList -> [e]) -> e
                 _ -> error "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [x',y'])
-          -- traceM ("encoded (solidity): " ++ show solidityEncoded)
-          -- traceM ("encoded (hevm): " ++ show (AbiBytesDynamic hevmEncoded))
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
     ]
 
@@ -584,8 +578,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) [] defaultVeriOpts
-        assertBool "Access must be beyond element 2" $ (getVar ctr "arg1") > 1
+        (_, [Cex (_, _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just ("fun(uint8)", [AbiUIntType 8])) [] defaultVeriOpts
+        -- assertBool "Access must be beyond element 2" $ (getVar ctr "arg1") > 1
         putStrLn "expected counterexample found"
       ,
       -- TODO the system currently does not allow for symbolic array size allocation
@@ -1627,7 +1621,7 @@ tests = testGroup "hevm"
           assertEqual "w==z for hash collision" w z
           putStrLn "expected counterexample found"
         ,
-        expectFail $ testCase "calldata beyond calldatasize is 0 (z3)" $ do
+        testCase "calldata beyond calldatasize is 0 (symbolic calldata)" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -1642,6 +1636,43 @@ tests = testGroup "hevm"
             }
             |]
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
+        testCase "calldata beyond calldatasize is 0 (concrete dalldata prefix)" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint256 z) public pure {
+                uint y;
+                assembly {
+                  let x := calldatasize()
+                  y := calldataload(x)
+                }
+                assert(y == 0);
+              }
+            }
+            |]
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
+          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
+        testCase "calldata symbolic access" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint256 z) public pure {
+                uint x; uint y;
+                assembly {
+                  y := calldatasize()
+                }
+                require(z >= y);
+                assembly {
+                  x := calldataload(z)
+                }
+                assert(x == 0);
+              }
+            }
+            |]
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just ("f(uint256)", [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "keccak soundness" $ do

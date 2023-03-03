@@ -26,6 +26,7 @@ foldProp f acc p = acc <> (go p)
       PNeg a -> go a
       PAnd a b -> go a <> go b
       POr a b -> go a <> go b
+      PImpl a b -> go a <> go b
 
 -- | Recursively folds a given function over a given expression
 -- Recursion schemes do this & a lot more, but defining them over GADT's isn't worth the hassle
@@ -85,6 +86,7 @@ foldExpr f acc expr = acc <> (go expr)
       e@(Exp a b) -> f e <> (go a) <> (go b)
       e@(SEx a b) -> f e <> (go a) <> (go b)
       e@(Min a b) -> f e <> (go a) <> (go b)
+      e@(Max a b) -> f e <> (go a) <> (go b)
 
       -- booleans
 
@@ -237,6 +239,7 @@ mapProp f = \case
   PNeg a -> PNeg (mapProp f a)
   PAnd a b -> PAnd (mapProp f a) (mapProp f b)
   POr a b -> POr (mapProp f a) (mapProp f b)
+  PImpl a b -> PImpl (mapProp f a) (mapProp f b)
 
 -- | Recursively applies a given function to every node in a given expr instance
 -- Recursion schemes do this & a lot more, but defining them over GADT's isn't worth the hassle
@@ -379,6 +382,10 @@ mapExprM f expr = case expr of
     a' <- mapExprM f a
     b' <- mapExprM f b
     f (Min a' b')
+  Max a b -> do
+    a' <- mapExprM f a
+    b' <- mapExprM f b
+    f (Max a' b')
 
   -- booleans
 
@@ -642,3 +649,22 @@ mapPropM f = \case
     a' <- mapPropM f a
     b' <- mapPropM f b
     pure $ POr a' b'
+  PImpl a b -> do
+    a' <- mapPropM f a
+    b' <- mapPropM f b
+    pure $ PImpl a' b'
+
+
+-- | Generic operations over AST terms
+class TraversableTerm a where
+  mapTerm  :: (forall b. Expr b -> Expr b) -> a -> a
+  foldTerm :: forall c. Monoid c => (forall b. Expr b -> c) -> c -> a -> c
+
+
+instance TraversableTerm (Expr a) where
+  mapTerm = mapExpr
+  foldTerm = foldExpr
+
+instance TraversableTerm Prop where
+  mapTerm = mapProp
+  foldTerm = foldProp

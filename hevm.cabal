@@ -105,11 +105,13 @@ library
     EVM.CSE,
     EVM.Keccak,
     EVM.Transaction,
-    EVM.TTY,
-    EVM.TTYCenteredList,
     EVM.Types,
     EVM.UnitTest,
     EVM.Sign,
+  if !os(windows)
+    exposed-modules:
+      EVM.TTY,
+      EVM.TTYCenteredList
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -118,10 +120,10 @@ library
     ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans -j
   else
     ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
+  if os(linux) || os(windows)
+    extra-libraries: stdc++
   extra-libraries:
-    secp256k1, ff
-  if os(linux)
-     extra-libraries: stdc++
+    secp256k1, ff, gmp
   c-sources:
     ethjet/tinykeccak.c, ethjet/ethjet.c
   cxx-sources:
@@ -153,7 +155,6 @@ library
     mtl                               >= 2.2.2 && < 2.3,
     directory                         >= 1.3.3 && < 1.4,
     filepath                          >= 1.4.2 && < 1.5,
-    vty                               >= 5.37 && < 5.38,
     cereal                            >= 0.5.8 && < 0.6,
     cryptonite                        >= 0.30 && < 0.31,
     memory                            >= 0.16.0 && < 0.20,
@@ -183,6 +184,10 @@ library
     spool                             >= 0.1 && < 0.2,
     stm                               >= 2.5.0 && < 2.6.0,
     spawn                             >= 0.3 && < 0.4
+  if !os(windows)
+    build-depends:
+      brick                           >= 1.4 && < 1.5,
+      vty                             >= 5.37 && < 5.38
   hs-source-dirs:
     src
 
@@ -237,6 +242,8 @@ executable hevm
     vty,
     stm,
     spawn
+  if os(windows)
+    buildable: False
 
 --- Test Helpers ---
 
@@ -297,6 +304,8 @@ library test-utils
   exposed-modules:
     EVM.TestUtils
     EVM.Tracing
+  if os(windows)
+    buildable: False
 
 common test-common
   import:
@@ -306,6 +315,8 @@ common test-common
   other-modules:
     EVM.TestUtils
     EVM.Tracing
+  if os(windows)
+    buildable: False
   if os(darwin)
     extra-libraries: c++
     -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829

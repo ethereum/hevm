@@ -187,6 +187,7 @@ data Expr (a :: EType) where
   Exp            :: Expr EWord -> Expr EWord -> Expr EWord
   SEx            :: Expr EWord -> Expr EWord -> Expr EWord
   Min            :: Expr EWord -> Expr EWord -> Expr EWord
+  Max            :: Expr EWord -> Expr EWord -> Expr EWord
 
   -- booleans
 
@@ -386,6 +387,7 @@ data Prop where
   PNeg :: Prop -> Prop
   PAnd :: Prop -> Prop -> Prop
   POr :: Prop -> Prop -> Prop
+  PImpl :: Prop -> Prop -> Prop
   PBool :: Bool -> Prop
 deriving instance (Show Prop)
 
@@ -432,6 +434,7 @@ instance Eq Prop where
   PNeg a == PNeg b = a == b
   PAnd a b == PAnd c d = a == c && b == d
   POr a b == POr c d = a == c && b == d
+  PImpl a b == PImpl c d = a == c && b == d
   _ == _ = False
 
 instance Ord Prop where
@@ -447,6 +450,7 @@ instance Ord Prop where
   PNeg a <= PNeg b = a <= b
   PAnd a b <= PAnd c d = a <= c && b <= d
   POr a b <= POr c d = a <= c && b <= d
+  PImpl a b <= PImpl c d = a <= c && b <= d
   _ <= _ = False
 
 

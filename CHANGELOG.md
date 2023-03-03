@@ -5,14 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Added
+## unreleased
+
+### Fixed
+
+- The `--solvers` cli option is now respected (previously we always used Z3)
+- The `equivalence` command now fails with the correct status code when counterexamples are found
+
+### Changed
+
+- The `equivalence` command now pretty prints discovered counterexamples
+
+### Added
 - A new differential fuzzing test harness that compares the concrete semantics, as well as parts of the symbolic semantics against the geth evm implementation
+- The `hevm` library can now be built on Windows systems.
 
 ## [0.50.3] - 2023-02-17
 
 ### Fixed
 
 - `hevm symbolic` exits with status code `1` if counterexamples or timeouts are found
+- Calldata reads beyond calldata size are provably equal to zero.
 
 ### Added
 
@@ -21,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved simplification for arithmetic expressions
 - Construction of storage counterexamples based on the model returned by the SMT solver.
 - Static binaries for macos
+
+### Changed
+- SMT encoding of buffer length without using uninterpreted functions.
 
 ## [0.50.2] - 2023-01-06
 

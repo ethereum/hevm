@@ -15,7 +15,6 @@ import qualified EVM.Stepper
 import EVM.SymExec
 import EVM.Debug
 import qualified EVM.Expr as Expr
-import EVM.SMT
 import EVM.Solvers
 import qualified EVM.TTY as TTY
 import EVM.Solidity
@@ -36,7 +35,7 @@ import Control.Lens hiding (pre, passing)
 import Control.Monad              (void, when, forM_, unless)
 import Control.Monad.State.Strict (execStateT, liftIO)
 import Data.ByteString            (ByteString)
-import Data.List                  (intercalate, isSuffixOf)
+import Data.List                  (intercalate, isSuffixOf, intersperse)
 import Data.Text                  (unpack, pack)
 import Data.Maybe                 (fromMaybe, mapMaybe)
 import Data.Version               (showVersion)
@@ -266,7 +265,8 @@ main = do
     DappTest {} ->
       withCurrentDirectory root $ do
         cores <- num <$> getNumProcessors
-        withSolvers Z3 cores cmd.smttimeout $ \solvers -> do
+        solver <- getSolver cmd
+        withSolvers solver cores cmd.smttimeout $ \solvers -> do
           testFile <- findJsonFile cmd.jsonFile
           testOpts <- unitTestOptions cmd solvers testFile
           case (cmd.coverage, optsMode cmd) of
@@ -308,17 +308,32 @@ equivalence cmd = do
                           , rpcInfo = Nothing
                           }
 
-  withSolvers Z3 3 Nothing $ \s -> do
+  solver <- getSolver cmd
+  withSolvers solver 3 Nothing $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts Nothing
-    case not (any isCex res) of
+    case any isCex res of
       False -> do
         putStrLn "No discrepancies found"
         when (any isTimeout res) $ do
           putStrLn "But timeout(s) occurred"
           exitFailure
       True -> do
-        putStrLn $ "Not equivalent. Counterexample(s):" <> show res
+        let cexs = mapMaybe getCex res
+        T.putStrLn . T.unlines $
+          [ "Not equivalent. The following inputs result in differing behaviours:"
+          , "" , "-----", ""
+          ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap (formatCex (AbstractBuf "txdata")) cexs)
         exitFailure
+
+getSolver :: Command Options.Unwrapped -> IO Solver
+getSolver cmd = case cmd.solver of
+                  Nothing -> pure Z3
+                  Just s -> case T.unpack s of
+                              "z3" -> pure Z3
+                              "cvc5" -> pure CVC5
+                              input -> do
+                                putStrLn $ "unrecognised solver: " <> input
+                                exitFailure
 
 getSrcInfo :: Command Options.Unwrapped -> IO DappInfo
 getSrcInfo cmd =
@@ -367,7 +382,8 @@ assert cmd = do
   let errCodes = fromMaybe defaultPanicCodes cmd.assertions
   cores <- num <$> getNumProcessors
   let solverCount = fromMaybe cores cmd.numSolvers
-  withSolvers EVM.Solvers.Z3 solverCount cmd.smttimeout $ \solvers -> do
+  solver <- getSolver cmd
+  withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
     if cmd.debug then do
       srcInfo <- getSrcInfo cmd
       void $ TTY.runFromVM
@@ -381,21 +397,23 @@ assert cmd = do
       (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
       case res of
         [Qed _] -> putStrLn "\nQED: No reachable property violations discovered\n"
-        cexs -> do
-          let counterexamples
-                | null (getCexs cexs) = []
+        _ -> do
+          let cexs = snd <$> mapMaybe getCex res
+              timeouts = mapMaybe getTimeout res
+              counterexamples
+                | null cexs = []
                 | otherwise =
                    [ ""
                    , "Discovered the following counterexamples:"
                    , ""
-                   ] <> fmap (formatCex (fst calldata')) (getCexs cexs)
+                   ] <> fmap (formatCex (fst calldata')) cexs
               unknowns
-                | null (getTimeouts cexs) = []
+                | null timeouts = []
                 | otherwise =
                    [ ""
                    , "Could not determine reachability of the following end states:"
                    , ""
-                   ] <> fmap (formatExpr) (getTimeouts cexs)
+                   ] <> fmap (formatExpr) timeouts
           T.putStrLn $ T.unlines (counterexamples <> unknowns)
           exitFailure
       when cmd.showTree $ do
@@ -412,17 +430,13 @@ assert cmd = do
         ms <- produceModels solvers expr
         forM_ ms (showModel (fst calldata'))
 
-getCexs :: [VerifyResult] -> [SMTCex]
-getCexs = mapMaybe go
-  where
-    go (Cex cex) = Just $ snd cex
-    go _ = Nothing
+getCex :: ProofResult a b c -> Maybe b
+getCex (Cex c) = Just c
+getCex _ = Nothing
 
-getTimeouts :: [VerifyResult] -> [Expr End]
-getTimeouts = mapMaybe go
-  where
-    go (Timeout leaf) = Just leaf
-    go _ = Nothing
+getTimeout :: ProofResult a b c -> Maybe c
+getTimeout (Timeout c) = Just c
+getTimeout _ = Nothing
 
 dappCoverage :: UnitTestOptions -> Mode -> String -> IO ()
 dappCoverage opts _ solcFile =

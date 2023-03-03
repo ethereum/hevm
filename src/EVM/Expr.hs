@@ -25,6 +25,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as VS
 import Data.Vector.Storable.ByteString
+import Data.Semigroup (Any, Any(..), getAny)
 
 
 -- ** Stack Ops ** ---------------------------------------------------------------------------------
@@ -402,16 +403,23 @@ writeWord offset val src = WriteWord offset val src
 -- If there are any writes to abstract locations, or CopySlices with an
 -- abstract size or dstOffset, an abstract expresion will be returned.
 bufLength :: Expr Buf -> Expr EWord
-bufLength buf = case go 0 buf of
-                  Just len -> len
-                  Nothing -> BufLength buf
+bufLength = bufLengthEnv mempty False
+
+bufLengthEnv :: Map.Map Int (Expr Buf) -> Bool -> Expr Buf -> Expr EWord
+bufLengthEnv env useEnv buf = go (Lit 0) buf
   where
-    go :: W256 -> Expr Buf -> Maybe (Expr EWord)
-    go l (ConcreteBuf b) = Just . Lit $ max (num . BS.length $ b) l
-    go l (WriteWord (Lit idx) _ b) = go (max l (idx + 32)) b
-    go l (WriteByte (Lit idx) _ b) = go (max l (idx + 1)) b
-    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size) l) dst
-    go _ _ = Nothing
+    go :: Expr EWord -> Expr Buf -> Expr EWord  
+    go l (ConcreteBuf b) = EVM.Expr.max l (Lit (num . BS.length $ b))
+    go l (AbstractBuf b) = Max l (BufLength (AbstractBuf b))
+    go l (WriteWord idx _ b) = go (EVM.Expr.max l (add idx (Lit 32))) b
+    go l (WriteByte idx _ b) = go (EVM.Expr.max l (add idx (Lit 1))) b
+    go l (CopySlice _ dstOffset size _ dst) = go (EVM.Expr.max l (add dstOffset size)) dst
+
+    go l (GVar (BufVar a)) | useEnv =
+      case Map.lookup a env of
+        Just b -> go l b
+        Nothing -> error "Internal error: cannot compute length of open expression"
+    go l (GVar (BufVar a)) = EVM.Expr.max l (BufLength (GVar (BufVar a)))
 
 -- | If a buffer has a concrete prefix, we return it's length here
 concPrefix :: Expr Buf -> Maybe Integer
@@ -422,21 +430,43 @@ concPrefix (CopySlice (Lit srcOff) (Lit _) (Lit _) src (ConcreteBuf "")) = do
     go :: W256 -> Expr Buf -> Maybe Integer
     -- base cases
     go _ (AbstractBuf _) = Nothing
-    go l (ConcreteBuf b) = Just . num $ max (num . BS.length $ b) l
+    go l (ConcreteBuf b) = Just . num $ Prelude.max (num . BS.length $ b) l
 
     -- writes to a concrete index
-    go l (WriteWord (Lit idx) (Lit _) b) = go (max l (idx + 32)) b
-    go l (WriteByte (Lit idx) (LitByte _) b) = go (max l (idx + 1)) b
-    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (max (dstOffset + size) l) dst
+    go l (WriteWord (Lit idx) (Lit _) b) = go (Prelude.max l (idx + 32)) b
+    go l (WriteByte (Lit idx) (LitByte _) b) = go (Prelude.max l (idx + 1)) b
+    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (Prelude.max (dstOffset + size) l) dst
 
     -- writes to an abstract index are ignored
     go l (WriteWord _ _ b) = go l b
     go l (WriteByte _ _ b) = go l b
     go _ (CopySlice _ _ _ _ _) = error "Internal Error: cannot compute a concrete prefix length for nested copySlice expressions"
-    go _ (GVar _) = error "Internal error: cannot calculate minLength of an open expression"
+    go _ (GVar _) = error "Internal error: cannot calculate a concrete prefix of an open expression"
 concPrefix (ConcreteBuf b) = Just (num . BS.length $ b)
 concPrefix e = error $ "Internal error: cannot compute a concrete prefix length for: " <> show e
 
+
+-- | Return the minimum possible length of a buffer. In the case of an
+-- abstract buffer, it is the largest write that is made on a concrete
+-- location. Parameterized by an environment for buffer variables.
+minLength :: Map.Map Int (Expr Buf) -> Expr Buf -> Maybe Integer
+minLength bufEnv = go 0
+  where
+    go :: W256 -> Expr Buf -> Maybe Integer
+    -- base cases
+    go l (AbstractBuf _) = if l == 0 then Nothing else Just $ num l
+    go l (ConcreteBuf b) = Just . num $ Prelude.max (num . BS.length $ b) l
+    -- writes to a concrete index
+    go l (WriteWord (Lit idx) _ b) = go (Prelude.max l (idx + 32)) b
+    go l (WriteByte (Lit idx) _ b) = go (Prelude.max l (idx + 1)) b
+    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (Prelude.max (dstOffset + size) l) dst
+    -- writes to an abstract index are ignored
+    go l (WriteWord _ _ b) = go l b
+    go l (WriteByte _ _ b) = go l b
+    go l (CopySlice _ _ _ _ b) = go l b
+    go l (GVar (BufVar a)) = do
+      b <- Map.lookup a bufEnv
+      go l b
 
 word256At
   :: Functor f
@@ -762,6 +792,9 @@ simplify e = if (mapExpr go e == e)
     -- Double NOT is a no-op, since it's a bitwise inversion
     go (EVM.Types.Not (EVM.Types.Not a)) = a
 
+    go (Max (Lit 0) a) = a
+    go (Min (Lit 0) _) = Lit 0
+    
     go a = a
 
 
@@ -930,8 +963,10 @@ eqByte (LitByte x) (LitByte y) = Lit $ if x == y then 1 else 0
 eqByte x y = EqByte x y
 
 min :: Expr EWord -> Expr EWord -> Expr EWord
-min (Lit x) (Lit y) = if x < y then Lit x else Lit y
-min x y = Min x y
+min x y = normArgs Min Prelude.min x y
+
+max :: Expr EWord -> Expr EWord -> Expr EWord
+max x y = normArgs Max Prelude.max x y
 
 numBranches :: Expr End -> Int
 numBranches (ITE _ t f) = numBranches t + numBranches f
@@ -939,3 +974,12 @@ numBranches _ = 1
 
 allLit :: [Expr Byte] -> Bool
 allLit = Data.List.and . fmap (isLitByte)
+
+-- | True if the given expression contains any node that satisfies the
+-- input predicate
+containsNode :: (forall a. Expr a -> Bool) -> Expr b -> Bool
+containsNode p = getAny . foldExpr go (Any False)
+  where
+    go :: Expr a -> Any
+    go node | p node  = Any True
+    go _ = Any False
