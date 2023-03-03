@@ -37,6 +37,10 @@ import Test.Tasty.HUnit
 import qualified Data.Aeson as JSON
 import Data.Aeson ((.:), (.:?))
 import Data.ByteString.Char8 qualified as Char8
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.IO as TL
+import Data.DoubleWord (Word256)
+import Data.Foldable (foldl')
 
 import qualified Control.Monad (when)
 import qualified Control.Monad.Operational as Operational (view, ProgramViewT(..), ProgramView)
@@ -54,6 +58,7 @@ import EVM.Op
 import EVM.Exec
 import EVM.Types
 import EVM.Traversals
+import EVM.SMT
 import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
 import EVM.Solvers
@@ -285,7 +290,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
     toAddress :: Addr
     toAddress = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
 
-getHEVMRet :: OpContract -> ByteString -> Int -> IO (Either (EVM.Error, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult))
+getHEVMRet :: OpContract -> ByteString -> Int -> IO (Either (EVM.Error, [VMTrace]) (Expr 'End, [VMTrace], VM))
 getHEVMRet contr txData gaslimitExec = do
   let (txn, evmEnv, contrAlloc, fromAddress, toAddress, _) = evmSetup contr txData gaslimitExec
   hevmRun <- runCodeWithTrace Nothing evmEnv contrAlloc txn (fromAddress, toAddress)
@@ -407,7 +412,7 @@ symbolify vm = vm { _state = vm._state { _calldata = AbstractBuf "calldata" } }
 
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
-runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Either (EVM.Error, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
+runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Either (EVM.Error, [VMTrace]) ((Expr 'End, [VMTrace], VM)))
 runCodeWithTrace rpcinfo evmEnv alloc txn (fromAddr, toAddress) = withSolvers Z3 0 Nothing $ \solvers -> do
   let origVM = vmForRuntimeCode code' calldata' evmEnv alloc txn (fromAddr, toAddress)
       calldata' = ConcreteBuf txn.txData
@@ -419,7 +424,7 @@ runCodeWithTrace rpcinfo evmEnv alloc txn (fromAddr, toAddress) = withSolvers Z3
   (res, (vm, trace)) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (origVM, [])
   case res of
     Left x -> pure $ Left (x, trace)
-    Right _ -> pure $ Right (expr, trace, vmres vm)
+    Right _ -> pure $ Right (expr, trace, vm)
 
 vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> VM
 vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress) =
@@ -839,14 +844,14 @@ tests = testGroup "contract-quickcheck-run"
         hevmRun <- getHEVMRet contrFixed txData gaslimitExec
         (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
         case hevmRun of
-          (Right (expr, hevmTrace, hevmTraceResult)) -> do
+          (Right (expr, hevmTrace, hevmVM)) -> do
             let sRet =  getConcretizedOutput expr txData
             traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
             assertEqual "Traces and gas must match" traceOK True
-            let resultOK = evmtoolTraceOutput.output.output == hevmTraceResult.out
+            let resultOK = evmtoolTraceOutput.output.output == (vmres hevmVM).out
             if resultOK then do
               putStrLn $ "HEVM & evmtool's outputs match: '" <> (bsToHex $ bssToBs evmtoolTraceOutput.output.output) <> "'"
-              if isNothing sRet || (fromJust sRet) == (bssToBs hevmTraceResult.out)
+              if isNothing sRet || (fromJust sRet) == (bssToBs (vmres hevmVM).out)
                  then do
                    putStr "OK, symbolic interpretation -> concrete calldata -> Expr.simplify gives the same answer."
                    if isNothing sRet then putStrLn ", but it was a Nothing, so not strong equivalence"
@@ -855,10 +860,10 @@ tests = testGroup "contract-quickcheck-run"
                    assertEqual "Simplified, concretized expression must match evmtool's output." True False
             else do
               putStrLn $ "Name of trace file: " <> (getTraceFileName $ fromJust evmtoolResult)
-              putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
-              T.putStrLn $ "HEVM result: " <> (formatBinary $ bssToBs hevmTraceResult.out)
+              putStrLn $ "HEVM result  :" <> (show (vmres hevmVM).out)
+              T.putStrLn $ "HEVM result: " <> (formatBinary $ bssToBs (vmres hevmVM).out)
               T.putStrLn $ "evm result : " <> (formatBinary $ bssToBs evmtoolTraceOutput.output.output)
-              putStrLn $ "HEVM result len: " <> (show (BS.length $ bssToBs hevmTraceResult.out))
+              putStrLn $ "HEVM result len: " <> (show (BS.length $ bssToBs (vmres hevmVM).out))
               putStrLn $ "evm result  len: " <> (show (BS.length $ bssToBs evmtoolTraceOutput.output.output))
             assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
           Left (evmerr, hevmTrace) -> do
@@ -868,23 +873,69 @@ tests = testGroup "contract-quickcheck-run"
         cleanupEvmtoolFiles evmtoolResult
 
       , testProperty "random-contract-SMT" $ \(contr :: OpContract) -> ioProperty $ do
+        let contr2 = OpContract [ OpPush (Lit 0x1), OpPush (Lit 0x1), OpPush (Lit 0x40)
+                                 ,OpCalldatacopy
+                                 -- ,OpPush (Lit 0x5)
+                                 -- ,OpCalldatacopy
+                                 ,OpPush (Lit 0x40) ,OpPush (Lit 0x0)
+                                 ,OpReturn]
+        putStrLn $ "contr: " <> (show contr2)
         txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
         gaslimitExec <- generate $ chooseInt (40000, 0xffff)
         let txData = BS.pack $ toEnum <$> txDataRaw
-        contrFixed <- fixContractJumps $ removeExtcalls contr
+        contrFixed <- fixContractJumps $ removeExtcalls contr2
         evmtoolResult <- getEVMToolRet contrFixed txData gaslimitExec
         hevmRun <- getHEVMRet contrFixed txData gaslimitExec
         (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
         case hevmRun of
-          (Right (expr, hevmTrace, hevmTraceResult)) -> do
+          (Right (expr, hevmTrace, hevmVM)) -> do
             let sRet =  getConcretizedOutput expr txData
-            assertEqual "Concretized expr must be equal " (isNothing sRet || (fromJust sRet) == (bssToBs hevmTraceResult.out)) True
-            traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
-            assertEqual "Traces and gas must match" traceOK True
-            let resultOK = evmtoolTraceOutput.output.output == hevmTraceResult.out
-            assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
-          Left (evmerr, _) -> do
-            putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
+            assertEqual "Concretized expr must be equal " (isNothing sRet || (fromJust sRet) == (bssToBs (vmres hevmVM).out)) True
+            if isJust sRet then do
+                traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
+                assertEqual "Traces and gas must match" traceOK True
+                let resultOK = evmtoolTraceOutput.output.output == (vmres hevmVM).out
+                assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
+                putStrLn $ "sRet is: " <> (bsToHex $ fromJust sRet)
+                runExprOnSMT expr txData (fromJust sRet) hevmVM (mycheckAssertions [])
+              else putStrLn "Nothing returned, skipping"
+          Left (evmerr, _) -> putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
         cleanupEvmtoolFiles evmtoolResult
     ]
 
+mycheckAssertions :: [Word256] -> Postcondition
+mycheckAssertions errs _ = \case
+  EVM.Types.Revert _ (ConcreteBuf msg) -> PBool $ msg `notElem` (fmap panicMsg errs)
+  EVM.Types.Revert _ b -> Data.Foldable.foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
+  _ -> PBool True
+
+runExprOnSMT :: Expr 'End -> ByteString -> ByteString -> VM -> Postcondition -> IO ()
+runExprOnSMT expr txData output preState post = do
+  let
+    numb = Expr.numBranches expr
+    flattened = flattenExpr expr
+    -- Filter out any leaves that can be statically shown to be safe
+    canViolate = flip filter (flattenExpr expr) $
+      \(_, leaf) -> case evalProp (post preState leaf) of
+        PBool True -> False
+        _ -> True
+    assumes = [] -- these are [Prop] prestate constraints
+    withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> extractProps leaf <> pcs), leaf)) canViolate
+  putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violation(s)"
+
+  forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
+    let fname = ("query-" <> show idx <> ".smt2")
+    TL.writeFile fname
+      ("; " <> (TL.pack $ show leaf) <> "\n\n" <> formatSMT2 q <> "\n\n(check-sat)")
+    putStrLn $ "Wrote file: " <> fname
+
+  putStrLn $ "num:" <> show numb
+  putStrLn $ "flattened: " <> show flattened
+  putStrLn $ "expr: " <> show expr
+
+  -- -- Dispatch the remaining branches to the solver to check for violations
+  -- results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
+  --   res <- checkSat solvers query
+  --   pure (res, leaf)
+  -- let cexs = filter (\(res, _) -> not . isUnsat $ res) results
+  -- pure $ if Prelude.null cexs then (expr, [Qed ()]) else (expr, fmap toVRes cexs)
