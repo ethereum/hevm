@@ -303,7 +303,6 @@ library test-utils
     test-base
   exposed-modules:
     EVM.TestUtils
-    EVM.Tracing
   if os(windows)
     buildable: False
 
