@@ -28,7 +28,7 @@ runDappTestCustom testFile match maxIter ffiAllowed rpcinfo = do
     withSystemTempFile "output.json" $ \file handle -> do
       hClose handle
       T.writeFile file json
-      bo@(Just (BuildOutput contracts _)) <- readSolc file
+      bo@(Just (BuildOutput contracts _)) <- readSolc DappTools file
       withSolvers Z3 1 Nothing $ \solvers -> do
         opts <- testOpts solvers root bo match maxIter ffiAllowed rpcinfo
         unitTest opts contracts Nothing
@@ -45,7 +45,7 @@ debugDappTest testFile rpcinfo = do
     withSystemTempFile "output.json" $ \file handle -> do
       hClose handle
       T.writeFile file json
-      buildOutput <- readSolc file
+      buildOutput <- readSolc DappTools file
       withSolvers Z3 1 Nothing $ \solvers -> do
         opts <- testOpts solvers root buildOutput ".*" Nothing True rpcinfo
         TTY.main opts root buildOutput

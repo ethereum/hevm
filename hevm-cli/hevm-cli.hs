@@ -32,16 +32,16 @@ import qualified EVM.UnitTest
 
 import GHC.Conc
 import Control.Lens hiding (pre, passing)
-import Control.Monad              (void, when, forM_, unless, liftM2)
+import Control.Monad              (void, when, forM_, unless)
 import Control.Monad.State.Strict (execStateT, liftIO)
 import Data.ByteString            (ByteString)
-import Data.List                  (intercalate, isSuffixOf, intersperse)
+import Data.List                  (intersperse)
 import Data.Text                  (unpack, pack)
 import Data.Maybe                 (fromMaybe, mapMaybe)
 import Data.Version               (showVersion)
 import Data.DoubleWord            (Word256)
 import System.IO                  (stderr)
-import System.Directory           (withCurrentDirectory, listDirectory, getCurrentDirectory)
+import System.Directory           (withCurrentDirectory, getCurrentDirectory)
 import System.Exit                (exitFailure, exitWith, ExitCode(..))
 
 import qualified Data.ByteString        as ByteString
@@ -265,40 +265,22 @@ main = do
         cores <- num <$> getNumProcessors
         solver <- getSolver cmd
         withSolvers solver cores cmd.smttimeout $ \solvers -> do
-          -- TODO: which functions here actually require a BuildOutput, and which can take it as a Maybe?
-          buildOutput <- liftM2 fromMaybe
-            ((putStrLn $ "unable to read build output from: " <> show root) >> exitFailure)
-            (readBuildOutput root (getProjectType cmd))
-          testOpts <- unitTestOptions cmd solvers (Just buildOutput)
-          case (cmd.coverage, optsMode cmd) of
-            (False, Run) -> do
-              res <- unitTest testOpts buildOutput.contracts cmd.cache
-              unless res exitFailure
-            (False, Debug) -> liftIO $ TTY.main testOpts root (Just buildOutput)
-            (False, JsonTrace) -> error "json traces not implemented for dappTest"
-            (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) buildOutput
+          buildOut <- readBuildOutput (root <> "/out/") (getProjectType cmd)
+          case buildOut of
+            Nothing -> do
+              putStrLn $ "unable to read build output from: " <> show (root <> "/out/")
+              exitFailure
+            Just out -> do
+              -- TODO: which functions here actually require a BuildOutput, and which can take it as a Maybe?
+              testOpts <- unitTestOptions cmd solvers (Just out)
+              case (cmd.coverage, optsMode cmd) of
+                (False, Run) -> do
+                  res <- unitTest testOpts out.contracts cmd.cache
+                  unless res exitFailure
+                (False, Debug) -> liftIO $ TTY.main testOpts root (Just out)
+                (False, JsonTrace) -> error "json traces not implemented for dappTest"
+                (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) out
 
-
-
-findJsonFile :: Maybe String -> IO String
-findJsonFile (Just s) = pure s
-findJsonFile Nothing = do
-  outFiles <- listDirectory "out"
-  case filter (isSuffixOf ".sol.json") outFiles of
-    [x] -> pure ("out/" ++ x)
-    [] ->
-      error $ concat
-        [ "No `*.sol.json' file found in `./out'.\n"
-        , "Maybe you need to run `dapp build'.\n"
-        , "You can specify a file with `--json-file'."
-        ]
-    xs ->
-      error $ concat
-        [ "Multiple `*.sol.json' files found in `./out'.\n"
-        , "Specify one using `--json-file'.\n"
-        , "Files found: "
-        , intercalate ", " xs
-        ]
 
 equivalence :: Command Options.Unwrapped -> IO ()
 equivalence cmd = do
@@ -341,7 +323,7 @@ getSolver cmd = case cmd.solver of
 getSrcInfo :: Command Options.Unwrapped -> IO DappInfo
 getSrcInfo cmd = do
   root <- getRoot cmd
-  buildOutput <- readBuildOutput root (getProjectType cmd)
+  buildOutput <- readBuildOutput (root <> "/out/") (getProjectType cmd)
   case buildOutput of
     Nothing -> pure emptyDapp
     Just o -> pure $ dappInfo root o
