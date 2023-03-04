@@ -476,8 +476,7 @@ tests = testGroup "hevm"
                 |]
 
         (json, path') <- solidity' srccode
-        let (solc', _, _) = fromJust $ readJSON json
-            initCode :: ByteString
+        let (Contracts solc', _, _) = fromJust $ readJSON json
             initCode = (solc' ^?! ix (path' <> ":A")).creationCode
         -- add constructor arguments
         assertEqual "constructor args screwed up metadata stripping" (stripBytecodeMetadata (initCode <> encodeAbiValue (AbiUInt 256 1))) (stripBytecodeMetadata initCode)
@@ -2220,7 +2219,7 @@ tests = testGroup "hevm"
                 False -> recursiveList ax (a:b)
           recursiveList [] b = pure b
         files <- recursiveList fullpaths []
-        let filesFiltered = filter (\file -> not $ any (\filt -> Data.List.isSubsequenceOf filt file) ignoredTests) files
+        let filesFiltered = filter (\file -> not $ any (`isSubsequenceOf` file) ignoredTests) files
 
         -- Takes one file which follows the Solidity Yul optimizer unit tests format,
         -- extracts both the nonoptimized and the optimized versions, and checks equivalence.

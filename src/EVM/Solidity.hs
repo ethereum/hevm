@@ -11,6 +11,9 @@ module EVM.Solidity
   , yulRuntime
   , JumpType (..)
   , SolcContract (..)
+  , Contracts (..)
+  , ProjectType (..)
+  , BuildOutput (..)
   , StorageItem (..)
   , SourceCache (..)
   , SrcMap (..)
@@ -19,6 +22,7 @@ module EVM.Solidity
   , SlotType (..)
   , Reference(..)
   , Mutability(..)
+  , readBuildOutput
   , functionAbi
   , makeSrcMaps
   , readSolc
@@ -67,19 +71,20 @@ import Data.Maybe
 import Data.Semigroup
 import Data.Sequence (Seq)
 import Data.String.Here qualified as Here
-import Data.Text (Text, pack, intercalate)
+import Data.Text (pack, intercalate)
 import Data.Text qualified as Text
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 import Data.Text.IO (readFile, writeFile)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Word (Word8, Word32)
-import GHC.Generics (Generic)
+import Options.Generic
 import Prelude hiding (readFile, writeFile)
 import System.IO hiding (readFile, writeFile)
 import System.IO.Temp
 import System.Process
 import Text.Read (readMaybe)
+
 
 data StorageItem = StorageItem
   { slotType :: SlotType
@@ -148,6 +153,27 @@ data Mutability
   | NonPayable -- ^ function does not accept Ether - the default
   | Payable    -- ^ function accepts Ether
  deriving (Show, Eq, Ord, Generic)
+
+newtype Contracts = Contracts (Map Text SolcContract)
+
+instance Semigroup Contracts where
+  (Contracts a) <> (Contracts b) = Contracts (a <> b)
+instance Monoid Contracts where
+  mempty = Contracts mempty
+
+data BuildOutput = BuildOutput
+  { contracts :: Contracts
+  , sources   :: SourceCache
+  }
+
+instance Semigroup BuildOutput where
+  (BuildOutput a b) <> (BuildOutput c d) = BuildOutput (a <> c) (b <> d)
+instance Monoid BuildOutput where
+  mempty = BuildOutput mempty mempty
+
+-- | The various project types understood by hevm
+data ProjectType = DappTools | Foundry
+  deriving (Eq, Show, Read, ParseField)
 
 data SourceCache = SourceCache
   { files  :: [(Text, ByteString)]
@@ -244,6 +270,11 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
 
     go c (xs, state, p)                      = (xs, error ("srcmap: y u " ++ show c ++ " in state" ++ show state ++ "?!?"), p)
 
+-- | Reads all solc ouput json files found under the provided filepath and returns them merged into a BuildOutput
+readBuildOutput :: FilePath -> ProjectType -> IO (Maybe BuildOutput)
+readBuildOutput outDir DappTools = undefined
+readBuildOutput outDir Foundry = undefined
+
 makeSourceCache :: [(Text, Maybe ByteString)] -> Map Text Value -> IO SourceCache
 makeSourceCache paths asts = do
   let f (_,  Just content) = return content
@@ -267,14 +298,14 @@ lineSubrange xs (s1, n1) i =
     then Nothing
     else Just (s1 - s2, min (s2 + n2 - s1) n1)
 
-readSolc :: FilePath -> IO (Maybe (Map Text SolcContract, SourceCache))
+readSolc :: FilePath -> IO (Maybe BuildOutput)
 readSolc fp =
   (readJSON <$> readFile fp) >>=
     \case
       Nothing -> return Nothing
       Just (contracts, asts, sources) -> do
         sourceCache <- makeSourceCache sources asts
-        return (Just (contracts, sourceCache))
+        return (Just (BuildOutput contracts sourceCache))
 
 yul :: Text -> Text -> IO (Maybe ByteString)
 yul contract src = do
@@ -295,19 +326,19 @@ yulRuntime contract src = do
 solidity :: Text -> Text -> IO (Maybe ByteString)
 solidity contract src = do
   (json, path) <- solidity' src
-  let (sol, _, _) = fromJust $ readJSON json
+  let (Contracts sol, _, _) = fromJust $ readJSON json
   pure $ Map.lookup (path <> ":" <> contract) sol <&> (.creationCode)
 
 solcRuntime :: Text -> Text -> IO (Maybe ByteString)
 solcRuntime contract src = do
   (json, path) <- solidity' src
-  let (sol, _, _) = fromJust $ readJSON json
+  let (Contracts sol, _, _) = fromJust $ readJSON json
   pure $ Map.lookup (path <> ":" <> contract) sol <&> (.runtimeCode)
 
 functionAbi :: Text -> IO Method
 functionAbi f = do
   (json, path) <- solidity' ("contract ABI { function " <> f <> " public {}}")
-  let (sol, _, _) = fromJust $ readJSON json
+  let (Contracts sol, _, _) = fromJust $ readJSON json
   case Map.toList $ (fromJust (Map.lookup (path <> ":ABI") sol)).abiMap of
      [(_,b)] -> return b
      _ -> error "hevm internal error: unexpected abi format"
@@ -315,17 +346,17 @@ functionAbi f = do
 force :: String -> Maybe a -> a
 force s = fromMaybe (error s)
 
-readJSON :: Text -> Maybe (Map Text SolcContract, Map Text Value, [(Text, Maybe ByteString)])
+readJSON :: Text -> Maybe (Contracts, Map Text Value, [(Text, Maybe ByteString)])
 readJSON json = case json ^? key "sourceList" of
   Nothing -> readStdJSON json
   _ -> readCombinedJSON json
 
 -- deprecate me soon
-readCombinedJSON :: Text -> Maybe (Map Text SolcContract, Map Text Value, [(Text, Maybe ByteString)])
+readCombinedJSON :: Text -> Maybe (Contracts, Map Text Value, [(Text, Maybe ByteString)])
 readCombinedJSON json = do
   contracts <- f . KeyMap.toHashMapText <$> (json ^? key "contracts" . _Object)
   sources <- toList . fmap (view _String) <$> json ^? key "sourceList" . _Array
-  return (contracts, Map.fromList (HMap.toList asts), [ (x, Nothing) | x <- sources])
+  return (Contracts contracts, Map.fromList (HMap.toList asts), [ (x, Nothing) | x <- sources])
   where
     asts = KeyMap.toHashMapText $ fromMaybe (error "JSON lacks abstract syntax trees.") (json ^? key "sources" . _Object)
     f x = Map.fromList . HMap.toList $ HMap.mapWithKey g x
@@ -352,7 +383,7 @@ readCombinedJSON json = do
         immutableReferences = mempty -- TODO: deprecate combined-json
       }
 
-readStdJSON :: Text -> Maybe (Map Text SolcContract, Map Text Value, [(Text, Maybe ByteString)])
+readStdJSON :: Text -> Maybe (Contracts, Map Text Value, [(Text, Maybe ByteString)])
 readStdJSON json = do
   contracts <- KeyMap.toHashMapText <$> json ^? key "contracts" . _Object
   -- TODO: support the general case of "urls" and "content" in the standard json
@@ -360,7 +391,7 @@ readStdJSON json = do
   let asts = force "JSON lacks abstract syntax trees." . preview (key "ast") <$> sources
       contractMap = f contracts
       contents src = (src, encodeUtf8 <$> HMap.lookup src (mconcat $ Map.elems $ snd <$> contractMap))
-  return (fst <$> contractMap, Map.fromList (HMap.toList asts), contents <$> (sort $ HMap.keys sources))
+  return (Contracts $ fst <$> contractMap, Map.fromList (HMap.toList asts), contents <$> (sort $ HMap.keys sources))
   where
     f :: (AsValue s) => HMap.HashMap Text s -> (Map Text (SolcContract, (HMap.HashMap Text Text)))
     f x = Map.fromList . (concatMap g) . HMap.toList $ x

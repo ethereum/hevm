@@ -32,7 +32,7 @@ import qualified EVM.UnitTest
 
 import GHC.Conc
 import Control.Lens hiding (pre, passing)
-import Control.Monad              (void, when, forM_, unless)
+import Control.Monad              (void, when, forM_, unless, liftM2)
 import Control.Monad.State.Strict (execStateT, liftIO)
 import Data.ByteString            (ByteString)
 import Data.List                  (intercalate, isSuffixOf, intersperse)
@@ -41,7 +41,7 @@ import Data.Maybe                 (fromMaybe, mapMaybe)
 import Data.Version               (showVersion)
 import Data.DoubleWord            (Word256)
 import System.IO                  (stderr)
-import System.Directory           (withCurrentDirectory, listDirectory)
+import System.Directory           (withCurrentDirectory, listDirectory, getCurrentDirectory)
 import System.Exit                (exitFailure, exitWith, ExitCode(..))
 
 import qualified Data.ByteString        as ByteString
@@ -87,8 +87,8 @@ data Command w
       , cache         :: w ::: Maybe String     <?> "Path to rpc cache repository"
 
   -- symbolic execution opts
-      , jsonFile      :: w ::: Maybe String       <?> "Filename or path to dapp build output (default: out/*.solc.json)"
-      , dappRoot      :: w ::: Maybe String       <?> "Path to dapp project root directory (default: . )"
+      , root          :: w ::: Maybe String       <?> "Path to  project root directory (default: . )"
+      , projectType   :: w ::: Maybe ProjectType  <?> "Is this a Foundry or DappTools project (default: Foundry)"
       , storageModel  :: w ::: Maybe StorageModel <?> "Select storage model: ConcreteS, SymbolicS (default) or InitialS"
       , sig           :: w ::: Maybe Text         <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]           <?> "Values to encode"
@@ -118,38 +118,38 @@ data Command w
       , askSmtIterations :: w ::: Maybe Integer <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
       }
   | Exec -- Execute a given program with specified env & calldata
-      { code        :: w ::: Maybe ByteString <?> "Program bytecode"
-      , calldata    :: w ::: Maybe ByteString <?> "Tx: calldata"
-      , address     :: w ::: Maybe Addr       <?> "Tx: address"
-      , caller      :: w ::: Maybe Addr       <?> "Tx: caller"
-      , origin      :: w ::: Maybe Addr       <?> "Tx: origin"
-      , coinbase    :: w ::: Maybe Addr       <?> "Block: coinbase"
-      , value       :: w ::: Maybe W256       <?> "Tx: Eth amount"
-      , nonce       :: w ::: Maybe W256       <?> "Nonce of origin"
-      , gas         :: w ::: Maybe Word64     <?> "Tx: gas amount"
-      , number      :: w ::: Maybe W256       <?> "Block: number"
-      , timestamp   :: w ::: Maybe W256       <?> "Block: timestamp"
-      , basefee     :: w ::: Maybe W256       <?> "Block: base fee"
-      , priorityFee :: w ::: Maybe W256       <?> "Tx: priority fee"
-      , gaslimit    :: w ::: Maybe Word64     <?> "Tx: gas limit"
-      , gasprice    :: w ::: Maybe W256       <?> "Tx: gas price"
-      , create      :: w ::: Bool             <?> "Tx: creation"
-      , maxcodesize :: w ::: Maybe W256       <?> "Block: max code size"
-      , prevRandao  :: w ::: Maybe W256       <?> "Block: prevRandao"
-      , chainid     :: w ::: Maybe W256       <?> "Env: chainId"
-      , debug       :: w ::: Bool             <?> "Run interactively"
-      , jsontrace   :: w ::: Bool             <?> "Print json trace output at every step"
-      , trace       :: w ::: Bool             <?> "Dump trace"
-      , state       :: w ::: Maybe String     <?> "Path to state repository"
-      , cache       :: w ::: Maybe String     <?> "Path to rpc cache repository"
-      , rpc         :: w ::: Maybe URL        <?> "Fetch state from a remote node"
-      , block       :: w ::: Maybe W256       <?> "Block state is be fetched from"
-      , jsonFile    :: w ::: Maybe String     <?> "Filename or path to dapp build output (default: out/*.solc.json)"
-      , dappRoot    :: w ::: Maybe String     <?> "Path to dapp project root directory (default: . )"
+      { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
+      , calldata    :: w ::: Maybe ByteString  <?> "Tx: calldata"
+      , address     :: w ::: Maybe Addr        <?> "Tx: address"
+      , caller      :: w ::: Maybe Addr        <?> "Tx: caller"
+      , origin      :: w ::: Maybe Addr        <?> "Tx: origin"
+      , coinbase    :: w ::: Maybe Addr        <?> "Block: coinbase"
+      , value       :: w ::: Maybe W256        <?> "Tx: Eth amount"
+      , nonce       :: w ::: Maybe W256        <?> "Nonce of origin"
+      , gas         :: w ::: Maybe Word64      <?> "Tx: gas amount"
+      , number      :: w ::: Maybe W256        <?> "Block: number"
+      , timestamp   :: w ::: Maybe W256        <?> "Block: timestamp"
+      , basefee     :: w ::: Maybe W256        <?> "Block: base fee"
+      , priorityFee :: w ::: Maybe W256        <?> "Tx: priority fee"
+      , gaslimit    :: w ::: Maybe Word64      <?> "Tx: gas limit"
+      , gasprice    :: w ::: Maybe W256        <?> "Tx: gas price"
+      , create      :: w ::: Bool              <?> "Tx: creation"
+      , maxcodesize :: w ::: Maybe W256        <?> "Block: max code size"
+      , prevRandao  :: w ::: Maybe W256        <?> "Block: prevRandao"
+      , chainid     :: w ::: Maybe W256        <?> "Env: chainId"
+      , debug       :: w ::: Bool              <?> "Run interactively"
+      , jsontrace   :: w ::: Bool              <?> "Print json trace output at every step"
+      , trace       :: w ::: Bool              <?> "Dump trace"
+      , state       :: w ::: Maybe String      <?> "Path to state repository"
+      , cache       :: w ::: Maybe String      <?> "Path to rpc cache repository"
+      , rpc         :: w ::: Maybe URL         <?> "Fetch state from a remote node"
+      , block       :: w ::: Maybe W256        <?> "Block state is be fetched from"
+      , root        :: w ::: Maybe String      <?> "Path to  project root directory (default: . )"
+      , projectType :: w ::: Maybe ProjectType <?> "Is this a Foundry or DappTools project (default: Foundry)"
       }
   | Test -- Run DSTest unit tests
-      { jsonFile      :: w ::: Maybe String             <?> "Filename or path to dapp build output (default: out/*.solc.json)"
-      , dappRoot      :: w ::: Maybe String             <?> "Path to dapp project root directory (default: . )"
+      { root        :: w ::: Maybe String               <?> "Path to  project root directory (default: . )"
+      , projectType   :: w ::: Maybe ProjectType        <?> "Is this a Foundry or DappTools project (default: Foundry)"
       , debug         :: w ::: Bool                     <?> "Run interactively"
       , jsontrace     :: w ::: Bool                     <?> "Print json trace output at every step"
       , fuzzRuns      :: w ::: Maybe Int                <?> "Number of times to run fuzz tests"
@@ -211,13 +211,10 @@ applyCache (state, cache) =
       stateFacts <- Git.loadFacts (Git.RepoAt statePath)
       pure $ (applyState stateFacts) . (applyCache' cacheFacts)
 
-unitTestOptions :: Command Options.Unwrapped -> SolverGroup -> String -> IO UnitTestOptions
-unitTestOptions cmd solvers testFile = do
-  let root = fromMaybe "." cmd.dappRoot
-  srcInfo <- readSolc testFile >>= \case
-    Nothing -> error "Could not read .sol.json file"
-    Just (contractMap, sourceCache) ->
-      pure $ dappInfo root contractMap sourceCache
+unitTestOptions :: Command Options.Unwrapped -> SolverGroup -> Maybe BuildOutput -> IO UnitTestOptions
+unitTestOptions cmd solvers buildOutput = do
+  root <- getRoot cmd
+  let srcInfo = maybe emptyDapp (dappInfo root) buildOutput
 
   vmModifier <- applyCache (cmd.state, cmd.cache)
 
@@ -256,8 +253,7 @@ unitTestOptions cmd solvers testFile = do
 main :: IO ()
 main = do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
-  let
-    root = fromMaybe "." cmd.dappRoot
+  root <- getRoot cmd
   case cmd of
     Version {} -> putStrLn (showVersion Paths.version)
     Symbolic {} -> withCurrentDirectory root $ assert cmd
@@ -269,15 +265,20 @@ main = do
         cores <- num <$> getNumProcessors
         solver <- getSolver cmd
         withSolvers solver cores cmd.smttimeout $ \solvers -> do
-          testFile <- findJsonFile cmd.jsonFile
-          testOpts <- unitTestOptions cmd solvers testFile
+          -- TODO: which functions here actually require a BuildOutput, and which can take it as a Maybe?
+          buildOutput <- liftM2 fromMaybe
+            ((putStrLn $ "unable to read build output from: " <> show root) >> exitFailure)
+            (readBuildOutput root (getProjectType cmd))
+          testOpts <- unitTestOptions cmd solvers (Just buildOutput)
           case (cmd.coverage, optsMode cmd) of
             (False, Run) -> do
-              res <- unitTest testOpts testFile cmd.cache
+              res <- unitTest testOpts buildOutput.contracts cmd.cache
               unless res exitFailure
-            (False, Debug) -> liftIO $ TTY.main testOpts root testFile
+            (False, Debug) -> liftIO $ TTY.main testOpts root (Just buildOutput)
             (False, JsonTrace) -> error "json traces not implemented for dappTest"
-            (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) testFile
+            (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) buildOutput
+
+
 
 findJsonFile :: Maybe String -> IO String
 findJsonFile (Just s) = pure s
@@ -338,16 +339,18 @@ getSolver cmd = case cmd.solver of
                                 exitFailure
 
 getSrcInfo :: Command Options.Unwrapped -> IO DappInfo
-getSrcInfo cmd =
-  let root = fromMaybe "." cmd.dappRoot
-  in case cmd.jsonFile of
-    Nothing ->
-      pure emptyDapp
-    Just json -> readSolc json >>= \case
-      Nothing ->
-        pure emptyDapp
-      Just (contractMap, sourceCache) ->
-        pure $ dappInfo root contractMap sourceCache
+getSrcInfo cmd = do
+  root <- getRoot cmd
+  buildOutput <- readBuildOutput root (getProjectType cmd)
+  case buildOutput of
+    Nothing -> pure emptyDapp
+    Just o -> pure $ dappInfo root o
+
+getProjectType :: Command Options.Unwrapped -> ProjectType
+getProjectType cmd = fromMaybe Foundry cmd.projectType
+
+getRoot :: Command Options.Unwrapped -> IO FilePath
+getRoot cmd = maybe getCurrentDirectory pure (cmd.root)
 
 
 -- | Builds a buffer representing calldata based on the given cli arguments
@@ -433,34 +436,29 @@ getTimeout :: ProofResult a b c -> Maybe c
 getTimeout (Timeout c) = Just c
 getTimeout _ = Nothing
 
-dappCoverage :: UnitTestOptions -> Mode -> String -> IO ()
-dappCoverage opts _ solcFile =
-  readSolc solcFile >>=
-    \case
-      Just (contractMap, sourceCache) -> do
-        let unitTests = findUnitTests opts.match $ Map.elems contractMap
-        covs <- mconcat <$> mapM
-          (coverageForUnitTestContract opts contractMap sourceCache) unitTests
-        let
-          dapp = dappInfo "." contractMap sourceCache
-          f (k, vs) = do
-            when (shouldPrintCoverage opts.covMatch k) $ do
-              putStr ("\x1b[0m" ++ "————— hevm coverage for ") -- Prefixed with color reset
-              putStrLn (unpack k ++ " —————")
-              putStrLn ""
-              forM_ vs $ \(n, bs) -> do
-                case ByteString.find (\x -> x /= 0x9 && x /= 0x20 && x /= 0x7d) bs of
-                  Nothing -> putStr "\x1b[38;5;240m" -- Gray (Coverage status isn't relevant)
-                  Just _ ->
-                    case n of
-                      -1 -> putStr "\x1b[38;5;240m" -- Gray (Coverage status isn't relevant)
-                      0  -> putStr "\x1b[31m" -- Red (Uncovered)
-                      _  -> putStr "\x1b[32m" -- Green (Covered)
-                Char8.putStrLn bs
-              putStrLn ""
-        mapM_ f (Map.toList (coverageReport dapp covs))
-      Nothing ->
-        error ("Failed to read Solidity JSON for `" ++ solcFile ++ "'")
+dappCoverage :: UnitTestOptions -> Mode -> BuildOutput -> IO ()
+dappCoverage opts _ bo@(BuildOutput (Contracts cs) cache) = do
+  let unitTests = findUnitTests opts.match $ Map.elems cs
+  covs <- mconcat <$> mapM
+    (coverageForUnitTestContract opts cs cache) unitTests
+  let
+    dapp = dappInfo "." bo
+    f (k, vs) = do
+      when (shouldPrintCoverage opts.covMatch k) $ do
+        putStr ("\x1b[0m" ++ "————— hevm coverage for ") -- Prefixed with color reset
+        putStrLn (unpack k ++ " —————")
+        putStrLn ""
+        forM_ vs $ \(n, bs) -> do
+          case ByteString.find (\x -> x /= 0x9 && x /= 0x20 && x /= 0x7d) bs of
+            Nothing -> putStr "\x1b[38;5;240m" -- Gray (Coverage status isn't relevant)
+            Just _ ->
+              case n of
+                -1 -> putStr "\x1b[38;5;240m" -- Gray (Coverage status isn't relevant)
+                0  -> putStr "\x1b[31m" -- Red (Uncovered)
+                _  -> putStr "\x1b[32m" -- Green (Covered)
+          Char8.putStrLn bs
+        putStrLn ""
+  mapM_ f (Map.toList (coverageReport dapp covs))
 
 shouldPrintCoverage :: Maybe Text -> Text -> Bool
 shouldPrintCoverage (Just covMatch) file = regexMatches covMatch file

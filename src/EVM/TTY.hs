@@ -15,7 +15,7 @@ import EVM
 import EVM.ABI (abiTypeSolidity, decodeAbiValue, AbiType(..), emptyAbi)
 import EVM.SymExec (maxIterationsReached, symCalldata)
 import EVM.Expr (simplify)
-import EVM.Dapp (DappInfo(..), dappInfo, Test, extractSig, Test(..), srcMap, unitTestMethods)
+import EVM.Dapp (DappInfo(..), emptyDapp, dappInfo, Test, extractSig, Test(..), srcMap, unitTestMethods)
 import EVM.Debug
 import EVM.Fetch (Fetcher)
 import EVM.Fetch qualified as Fetch
@@ -280,30 +280,25 @@ isFuzzTest (ConcreteTest _, []) = False
 isFuzzTest (ConcreteTest _, _) = True
 isFuzzTest (InvariantTest _, _) = True
 
-main :: UnitTestOptions -> FilePath -> FilePath -> IO ()
-main opts root jsonFilePath =
-  readSolc jsonFilePath >>=
-    \case
-      Nothing ->
-        error "Failed to read Solidity JSON"
-      Just (contractMap, sourceCache) -> do
-        let
-          dapp = dappInfo root contractMap sourceCache
-          ui = ViewPicker $ UiTestPickerState
-            { _testPickerList =
-                list
-                  TestPickerPane
-                  (Vec.fromList
-                   (concatMap
-                    (debuggableTests opts)
-                    dapp.unitTests))
-                  1
-            , _testPickerDapp = dapp
-            , _testOpts = opts
-            }
-        v <- mkVty
-        _ <- customMain v mkVty Nothing (app opts) (ui :: UiState)
-        return ()
+main :: UnitTestOptions -> FilePath -> Maybe BuildOutput -> IO ()
+main opts root buildOutput = do
+  let
+    dapp = maybe emptyDapp (dappInfo root) buildOutput
+    ui = ViewPicker $ UiTestPickerState
+      { _testPickerList =
+          list
+            TestPickerPane
+            (Vec.fromList
+             (concatMap
+              (debuggableTests opts)
+              dapp.unitTests))
+            1
+      , _testPickerDapp = dapp
+      , _testOpts = opts
+      }
+  v <- mkVty
+  _ <- customMain v mkVty Nothing (app opts) (ui :: UiState)
+  return ()
 
 takeStep
   :: (?fetcher :: Fetcher

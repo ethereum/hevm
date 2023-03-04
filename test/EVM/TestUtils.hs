@@ -28,9 +28,10 @@ runDappTestCustom testFile match maxIter ffiAllowed rpcinfo = do
     withSystemTempFile "output.json" $ \file handle -> do
       hClose handle
       T.writeFile file json
+      bo@(Just (BuildOutput contracts _)) <- readSolc file
       withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json match maxIter ffiAllowed rpcinfo
-        dappTest opts file Nothing
+        opts <- testOpts solvers root bo match maxIter ffiAllowed rpcinfo
+        unitTest opts contracts Nothing
 
 runDappTest :: FilePath -> Text -> IO Bool
 runDappTest testFile match = runDappTestCustom testFile match Nothing True Nothing
@@ -44,17 +45,14 @@ debugDappTest testFile rpcinfo = do
     withSystemTempFile "output.json" $ \file handle -> do
       hClose handle
       T.writeFile file json
+      buildOutput <- readSolc file
       withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json ".*" Nothing True rpcinfo
-        TTY.main opts root file
+        opts <- testOpts solvers root buildOutput ".*" Nothing True rpcinfo
+        TTY.main opts root buildOutput
 
-testOpts :: SolverGroup -> FilePath -> Text -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO UnitTestOptions
-testOpts solvers root solcJson match maxIter allowFFI rpcinfo = do
-  srcInfo <- case readJSON solcJson of
-               Nothing -> error "Could not read solc json"
-               Just (contractMap, asts, sources) -> do
-                 sourceCache <- makeSourceCache sources asts
-                 pure $ dappInfo root contractMap sourceCache
+testOpts :: SolverGroup -> FilePath -> Maybe BuildOutput -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO UnitTestOptions
+testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
+  let srcInfo = maybe emptyDapp (dappInfo root) buildOutput
 
   params <- getParametersFromEnvironmentVariables Nothing
 

@@ -126,27 +126,22 @@ makeVeriOpts opts =
                    }
 
 -- | Top level CLI endpoint for hevm test
-unitTest :: UnitTestOptions -> String -> Maybe String -> IO Bool
-unitTest opts solcFile cache' = do
-  out <- liftIO $ readSolc solcFile
-  case out of
-    Just (contractMap, _) -> do
-      let unitTests = findUnitTests opts.match $ Map.elems contractMap
-      results <- concatMapM (runUnitTestContract opts contractMap) unitTests
-      let (passing, vms) = unzip results
-      case cache' of
-        Nothing ->
-          pure ()
-        Just path ->
-          -- merge all of the post-vm caches and save into the state
-          let
-            evmcache = mconcat [vm._cache | vm <- vms]
-          in
-            liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts evmcache)
-
-      return $ and passing
+unitTest :: UnitTestOptions -> Contracts -> Maybe String -> IO Bool
+unitTest opts (Contracts cs) cache' = do
+  let unitTests = findUnitTests opts.match $ Map.elems cs
+  results <- concatMapM (runUnitTestContract opts cs) unitTests
+  let (passing, vms) = unzip results
+  case cache' of
     Nothing ->
-      error ("Failed to read Solidity JSON for `" ++ solcFile ++ "'")
+      pure ()
+    Just path ->
+      -- merge all of the post-vm caches and save into the state
+      let
+        evmcache = mconcat [vm._cache | vm <- vms]
+      in
+        liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts evmcache)
+
+  return $ and passing
 
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
