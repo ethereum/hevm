@@ -45,7 +45,7 @@ runDappTest root =
     let testFile = root <> "/out/dapp.sol.json"
     withSolvers Z3 cores Nothing $ \solvers -> do
       opts <- testOpts solvers root testFile
-      res <- dappTest opts testFile Nothing
+      res <- unitTest opts testFile Nothing
       unless res exitFailure
 
 testOpts :: SolverGroup -> FilePath -> FilePath -> IO UnitTestOptions

@@ -20,7 +20,7 @@ import qualified EVM.TTY as TTY
 import EVM.Solidity
 import EVM.Expr (litAddr)
 import EVM.Types hiding (word)
-import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, getParametersFromEnvironmentVariables, testNumber, dappTest)
+import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, getParametersFromEnvironmentVariables, testNumber, unitTest)
 import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
 import GHC.Natural
 import EVM.Format (showTraceTree, formatExpr)
@@ -147,7 +147,7 @@ data Command w
       , jsonFile    :: w ::: Maybe String     <?> "Filename or path to dapp build output (default: out/*.solc.json)"
       , dappRoot    :: w ::: Maybe String     <?> "Path to dapp project root directory (default: . )"
       }
-  | DappTest -- Run DSTest unit tests
+  | Test -- Run DSTest unit tests
       { jsonFile      :: w ::: Maybe String             <?> "Filename or path to dapp build output (default: out/*.solc.json)"
       , dappRoot      :: w ::: Maybe String             <?> "Path to dapp project root directory (default: . )"
       , debug         :: w ::: Bool                     <?> "Run interactively"
@@ -264,7 +264,7 @@ main = do
     Equivalence {} -> equivalence cmd
     Exec {} ->
       launchExec cmd
-    DappTest {} ->
+    Test {} ->
       withCurrentDirectory root $ do
         cores <- num <$> getNumProcessors
         solver <- getSolver cmd
@@ -273,7 +273,7 @@ main = do
           testOpts <- unitTestOptions cmd solvers testFile
           case (cmd.coverage, optsMode cmd) of
             (False, Run) -> do
-              res <- dappTest testOpts testFile cmd.cache
+              res <- unitTest testOpts testFile cmd.cache
               unless res exitFailure
             (False, Debug) -> liftIO $ TTY.main testOpts root testFile
             (False, JsonTrace) -> error "json traces not implemented for dappTest"

@@ -125,9 +125,9 @@ makeVeriOpts opts =
                    , SymExec.rpcInfo = opts.rpcInfo
                    }
 
--- | Top level CLI endpoint for dapp-test
-dappTest :: UnitTestOptions -> String -> Maybe String -> IO Bool
-dappTest opts solcFile cache' = do
+-- | Top level CLI endpoint for hevm test
+unitTest :: UnitTestOptions -> String -> Maybe String -> IO Bool
+unitTest opts solcFile cache' = do
   out <- liftIO $ readSolc solcFile
   case out of
     Just (contractMap, _) -> do
