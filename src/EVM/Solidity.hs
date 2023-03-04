@@ -157,10 +157,27 @@ data Mutability
 newtype Contracts = Contracts (Map Text SolcContract)
   deriving (Show, Eq)
 
+-- TODO: why can't the compiler figure this out with newtypederiving??
 instance Semigroup Contracts where
   (Contracts a) <> (Contracts b) = Contracts (a <> b)
 instance Monoid Contracts where
   mempty = Contracts mempty
+
+newtype Asts = Asts (Map Text Value)
+  deriving (Show, Eq)
+
+instance Semigroup Asts where
+  (Asts a) <> (Asts b) = Asts (a <> b)
+instance Monoid Asts where
+  mempty = Asts mempty
+
+newtype Sources = Sources [(Text, Maybe ByteString)]
+  deriving (Show, Eq)
+
+instance Semigroup Sources where
+  (Sources a) <> (Sources b) = Sources (a <> b)
+instance Monoid Sources where
+  mempty = Sources mempty
 
 data BuildOutput = BuildOutput
   { contracts :: Contracts
@@ -299,13 +316,13 @@ findJsonFiles root = getDirectoryFiles root ["**/*.json"]
 filterMetadata :: [FilePath] -> [FilePath]
 filterMetadata = filter (not . isSuffixOf ".metadata.json")
 
-makeSourceCache :: [(Text, Maybe ByteString)] -> Map Text Value -> IO SourceCache
-makeSourceCache paths asts = do
+makeSourceCache :: Sources -> Asts -> IO SourceCache
+makeSourceCache (Sources sources) (Asts asts) = do
   let f (_,  Just content) = return content
       f (fp, Nothing) = BS.readFile $ Text.unpack fp
-  xs <- mapM f paths
+  xs <- mapM f sources
   return $! SourceCache
-    { files = zip (fst <$> paths) xs
+    { files = zip (fst <$> sources) xs
     , lines = map (Vector.fromList . BS.split 0xa) xs
     , asts  = asts
     }
@@ -370,16 +387,16 @@ functionAbi f = do
 force :: String -> Maybe a -> a
 force s = fromMaybe (error s)
 
-readJSON :: ProjectType -> Text -> Maybe (Contracts, Map Text Value, [(Text, Maybe ByteString)])
+readJSON :: ProjectType -> Text -> Maybe (Contracts, Asts, Sources)
 readJSON DappTools json = readStdJSON json
 readJSON Foundry json = readFoundryJSON json
 
 -- | Reads the foundry output for a single contract
-readFoundryJSON :: Text -> Maybe (Contracts, Map Text Value, [(Text, Maybe ByteString)])
+readFoundryJSON :: Text -> Maybe (Contracts, Asts, Sources)
 readFoundryJSON = undefined
 
 -- | Reads a standard solc output json into (TODO: what exactly?)
-readStdJSON :: Text -> Maybe (Contracts, Map Text Value, [(Text, Maybe ByteString)])
+readStdJSON :: Text -> Maybe (Contracts, Asts, Sources)
 readStdJSON json = do
   contracts <- KeyMap.toHashMapText <$> json ^? key "contracts" . _Object
   -- TODO: support the general case of "urls" and "content" in the standard json
@@ -387,7 +404,10 @@ readStdJSON json = do
   let asts = force "JSON lacks abstract syntax trees." . preview (key "ast") <$> sources
       contractMap = f contracts
       contents src = (src, encodeUtf8 <$> HMap.lookup src (mconcat $ Map.elems $ snd <$> contractMap))
-  return (Contracts $ fst <$> contractMap, Map.fromList (HMap.toList asts), contents <$> (sort $ HMap.keys sources))
+  return ( Contracts $ fst <$> contractMap
+         , Asts      $ Map.fromList (HMap.toList asts)
+         , Sources   $ contents <$> (sort $ HMap.keys sources)
+         )
   where
     f :: (AsValue s) => HMap.HashMap Text s -> (Map Text (SolcContract, (HMap.HashMap Text Text)))
     f x = Map.fromList . (concatMap g) . HMap.toList $ x
