@@ -135,6 +135,7 @@ data Error
 data GVar (a :: EType) where
   BufVar :: Int -> GVar Buf
   StoreVar :: Int -> GVar Storage
+  Calldata :: GVar Buf
 
 deriving instance Show (GVar a)
 deriving instance Eq (GVar a)

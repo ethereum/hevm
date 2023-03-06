@@ -39,8 +39,6 @@ import Data.Aeson ((.:), (.:?))
 import Data.ByteString.Char8 qualified as Char8
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
-import Data.DoubleWord (Word256)
-import Data.Foldable (foldl')
 
 import qualified Control.Monad (when)
 import qualified Control.Monad.Operational as Operational (view, ProgramViewT(..), ProgramView)
@@ -873,11 +871,9 @@ tests = testGroup "contract-quickcheck-run"
         cleanupEvmtoolFiles evmtoolResult
 
       , testProperty "random-contract-SMT" $ \(contr :: OpContract) -> ioProperty $ do
-        let contr2 = OpContract [ OpPush (Lit 0x1), OpPush (Lit 0x1), OpPush (Lit 0x40)
+        let contr2 = OpContract [ OpPush (Lit 0x10), OpPush (Lit 0x0), OpPush (Lit 0x0)
                                  ,OpCalldatacopy
-                                 -- ,OpPush (Lit 0x5)
-                                 -- ,OpCalldatacopy
-                                 ,OpPush (Lit 0x40) ,OpPush (Lit 0x0)
+                                 ,OpPush (Lit 0x6) ,OpPush (Lit 0x0)
                                  ,OpReturn]
         putStrLn $ "contr: " <> (show contr2)
         txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
@@ -897,30 +893,29 @@ tests = testGroup "contract-quickcheck-run"
                 let resultOK = evmtoolTraceOutput.output.output == (vmres hevmVM).out
                 assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
                 putStrLn $ "sRet is: " <> (bsToHex $ fromJust sRet)
-                runExprOnSMT expr txData (fromJust sRet) hevmVM (mycheckAssertions [])
+                putStrLn $ "sRet size is: " <> (show $ BS.length $ fromJust sRet)
+                runExprOnSMT expr txData (fromJust sRet) hevmVM (mycheckAssertions $ fromJust sRet)
               else putStrLn "Nothing returned, skipping"
           Left (evmerr, _) -> putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
         cleanupEvmtoolFiles evmtoolResult
     ]
 
-mycheckAssertions :: [Word256] -> Postcondition
-mycheckAssertions errs _ = \case
-  EVM.Types.Revert _ (ConcreteBuf msg) -> PBool $ msg `notElem` (fmap panicMsg errs)
-  EVM.Types.Revert _ b -> Data.Foldable.foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
-  _ -> PBool True
+mycheckAssertions :: ByteString -> Postcondition
+mycheckAssertions retData _ exprEnd = case exprEnd of
+  -- TODO also check storage
+  EVM.Types.Return _ buf _ -> PNeg (PEq buf (ConcreteBuf retData))
+  EVM.Types.Revert {} -> error "whatever"
+  _ -> PBool False -- anything else is wrong, right? (e.g. Failure.. but what about ITE?)
 
 runExprOnSMT :: Expr 'End -> ByteString -> ByteString -> VM -> Postcondition -> IO ()
 runExprOnSMT expr txData output preState post = do
   let
     numb = Expr.numBranches expr
     flattened = flattenExpr expr
-    -- Filter out any leaves that can be statically shown to be safe
-    canViolate = flip filter (flattenExpr expr) $
-      \(_, leaf) -> case evalProp (post preState leaf) of
-        PBool True -> False
-        _ -> True
-    assumes = [] -- these are [Prop] prestate constraints
-    withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> extractProps leaf <> pcs), leaf)) canViolate
+    precond :: [Prop]
+    precond = [PEq (ConcreteBuf txData) (GVar Calldata)]
+    withQueries ::[(SMT2, Expr 'End)]
+    withQueries = fmap (\(pcs, leaf) -> (assertProps ((post preState leaf) : precond <> extractProps leaf <> pcs), leaf)) flattened
   putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violation(s)"
 
   forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
@@ -928,10 +923,14 @@ runExprOnSMT expr txData output preState post = do
     TL.writeFile fname
       ("; " <> (TL.pack $ show leaf) <> "\n\n" <> formatSMT2 q <> "\n\n(check-sat)")
     putStrLn $ "Wrote file: " <> fname
+    res <- withSolvers Z3 1 Nothing $ \s ->checkSat s q
+    putStrLn $ "res is: " <> (show res)
+    assertEqual "must be UNSAT" res Unsat
 
   putStrLn $ "num:" <> show numb
   putStrLn $ "flattened: " <> show flattened
   putStrLn $ "expr: " <> show expr
+  putStrLn $ "OK, worked out"
 
   -- -- Dispatch the remaining branches to the solver to check for violations
   -- results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
