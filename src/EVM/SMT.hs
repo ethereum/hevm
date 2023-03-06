@@ -537,7 +537,6 @@ exprToSMT :: Expr a -> Builder
 exprToSMT = \case
   Lit w -> fromLazyText $ "(_ bv" <> (T.pack $ show (num w :: Integer)) <> " 256)"
   Var s -> fromText s
-  GVar (Calldata) -> fromLazyText $ "calldata"
   GVar (BufVar n) -> fromLazyText $ "buf" <> (T.pack . show $ n)
   GVar (StoreVar n) -> fromLazyText $ "store" <> (T.pack . show $ n)
   JoinBytes

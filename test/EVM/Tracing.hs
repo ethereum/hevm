@@ -871,12 +871,13 @@ tests = testGroup "contract-quickcheck-run"
         cleanupEvmtoolFiles evmtoolResult
 
       , testProperty "random-contract-SMT" $ \(contr :: OpContract) -> ioProperty $ do
-        let contr2 = OpContract [ OpPush (Lit 0x10), OpPush (Lit 0x0), OpPush (Lit 0x0)
-                                 ,OpCalldatacopy
-                                 ,OpPush (Lit 0x6) ,OpPush (Lit 0x0)
-                                 ,OpReturn]
+        let contr2 = contr
+        -- let contr2 = OpContract [ OpPush (Lit 0x10), OpPush (Lit 0x0), OpPush (Lit 0x0)
+        --                          ,OpCalldatacopy
+        --                          ,OpPush (Lit 0x6) ,OpPush (Lit 0x0)
+        --                          ,OpReturn]
         putStrLn $ "contr: " <> (show contr2)
-        txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
+        txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+15) $ chooseInt (0,255)
         gaslimitExec <- generate $ chooseInt (40000, 0xffff)
         let txData = BS.pack $ toEnum <$> txDataRaw
         contrFixed <- fixContractJumps $ removeExtcalls contr2
@@ -913,10 +914,10 @@ runExprOnSMT expr txData output preState post = do
     numb = Expr.numBranches expr
     flattened = flattenExpr expr
     precond :: [Prop]
-    precond = [PEq (ConcreteBuf txData) (GVar Calldata)]
+    precond = [PEq (ConcreteBuf txData) (AbstractBuf "calldata")]
     withQueries ::[(SMT2, Expr 'End)]
     withQueries = fmap (\(pcs, leaf) -> (assertProps ((post preState leaf) : precond <> extractProps leaf <> pcs), leaf)) flattened
-  putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violation(s)"
+  putStrLn $ "Checking if output can be other than sRet for " <> show (length withQueries) <> " queries"
 
   forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
     let fname = ("query-" <> show idx <> ".smt2")
