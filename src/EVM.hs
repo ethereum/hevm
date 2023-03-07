@@ -675,60 +675,60 @@ exec1 = do
         0x00 -> doStop
 
         -- op: ADD
-        0x01 -> stackOp2 (const g_verylow) (uncurry Expr.add)
+        0x01 -> stackOp2 g_verylow (uncurry Expr.add)
         -- op: MUL
-        0x02 -> stackOp2 (const g_low) (uncurry Expr.mul)
+        0x02 -> stackOp2 g_low (uncurry Expr.mul)
         -- op: SUB
-        0x03 -> stackOp2 (const g_verylow) (uncurry Expr.sub)
+        0x03 -> stackOp2 g_verylow (uncurry Expr.sub)
 
         -- op: DIV
-        0x04 -> stackOp2 (const g_low) (uncurry Expr.div)
+        0x04 -> stackOp2 g_low (uncurry Expr.div)
 
         -- op: SDIV
-        0x05 -> stackOp2 (const g_low) (uncurry Expr.sdiv)
+        0x05 -> stackOp2 g_low (uncurry Expr.sdiv)
 
         -- op: MOD
-        0x06 -> stackOp2 (const g_low) (uncurry Expr.mod)
+        0x06 -> stackOp2 g_low (uncurry Expr.mod)
 
         -- op: SMOD
-        0x07 -> stackOp2 (const g_low) (uncurry Expr.smod)
+        0x07 -> stackOp2 g_low (uncurry Expr.smod)
         -- op: ADDMOD
-        0x08 -> stackOp3 (const g_mid) (uncurryN Expr.addmod)
+        0x08 -> stackOp3 g_mid (uncurryN Expr.addmod)
         -- op: MULMOD
-        0x09 -> stackOp3 (const g_mid) (uncurryN Expr.mulmod)
+        0x09 -> stackOp3 g_mid (uncurryN Expr.mulmod)
 
         -- op: LT
-        0x10 -> stackOp2 (const g_verylow) (uncurry Expr.lt)
+        0x10 -> stackOp2 g_verylow (uncurry Expr.lt)
         -- op: GT
-        0x11 -> stackOp2 (const g_verylow) (uncurry Expr.gt)
+        0x11 -> stackOp2 g_verylow (uncurry Expr.gt)
         -- op: SLT
-        0x12 -> stackOp2 (const g_verylow) (uncurry Expr.slt)
+        0x12 -> stackOp2 g_verylow (uncurry Expr.slt)
         -- op: SGT
-        0x13 -> stackOp2 (const g_verylow) (uncurry Expr.sgt)
+        0x13 -> stackOp2 g_verylow (uncurry Expr.sgt)
 
         -- op: EQ
-        0x14 -> stackOp2 (const g_verylow) (uncurry Expr.eq)
+        0x14 -> stackOp2 g_verylow (uncurry Expr.eq)
         -- op: ISZERO
-        0x15 -> stackOp1 (const g_verylow) Expr.iszero
+        0x15 -> stackOp1 g_verylow Expr.iszero
 
         -- op: AND
-        0x16 -> stackOp2 (const g_verylow) (uncurry Expr.and)
+        0x16 -> stackOp2 g_verylow (uncurry Expr.and)
         -- op: OR
-        0x17 -> stackOp2 (const g_verylow) (uncurry Expr.or)
+        0x17 -> stackOp2 g_verylow (uncurry Expr.or)
         -- op: XOR
-        0x18 -> stackOp2 (const g_verylow) (uncurry Expr.xor)
+        0x18 -> stackOp2 g_verylow (uncurry Expr.xor)
         -- op: NOT
-        0x19 -> stackOp1 (const g_verylow) Expr.not
+        0x19 -> stackOp1 g_verylow Expr.not
 
         -- op: BYTE
-        0x1a -> stackOp2 (const g_verylow) (\(i, w) -> Expr.padByte $ Expr.indexWord i w)
+        0x1a -> stackOp2 g_verylow (\(i, w) -> Expr.padByte $ Expr.indexWord i w)
 
         -- op: SHL
-        0x1b -> stackOp2 (const g_verylow) (uncurry Expr.shl)
+        0x1b -> stackOp2 g_verylow (uncurry Expr.shl)
         -- op: SHR
-        0x1c -> stackOp2 (const g_verylow) (uncurry Expr.shr)
+        0x1c -> stackOp2 g_verylow (uncurry Expr.shr)
         -- op: SAR
-        0x1d -> stackOp2 (const g_verylow) (uncurry Expr.sar)
+        0x1d -> stackOp2 g_verylow (uncurry Expr.sar)
 
         -- op: SHA3
         -- more accurately refered to as KECCAK
@@ -784,7 +784,7 @@ exec1 = do
             next >> pushSym vm._state._callvalue
 
         -- op: CALLDATALOAD
-        0x35 -> stackOp1 (const g_verylow) $
+        0x35 -> stackOp1 g_verylow $
           \ind -> Expr.readWord ind vm._state._calldata
 
         -- op: CALLDATASIZE
@@ -921,7 +921,7 @@ exec1 = do
         0x40 -> do
           -- We adopt the fake block hash scheme of the VMTests,
           -- so that blockhash(i) is the hash of i as decimal ASCII.
-          stackOp1 (const g_blockhash) $ \case
+          stackOp1 g_blockhash $ \case
             (Lit i) -> if i + 256 < vm._block._number || i >= vm._block._number
                        then Lit 0
                        else (num i :: Integer) & show & Char8.pack & keccak' & Lit
@@ -1133,7 +1133,7 @@ exec1 = do
             _ -> underrun
 
         -- op: SIGNEXTEND
-        0x0b -> stackOp2 (const g_low) (uncurry Expr.sex)
+        0x0b -> stackOp2 g_low (uncurry Expr.sex)
 
         -- op: CREATE
         0xf0 ->
@@ -2512,13 +2512,13 @@ pushSym x = state . stack %= (x :)
 
 stackOp1
   :: (?op :: Word8)
-  => ((Expr EWord) -> Word64)
+  => Word64
   -> ((Expr EWord) -> (Expr EWord))
   -> EVM ()
 stackOp1 cost f =
   use (state . stack) >>= \case
     (x:xs) ->
-      burn (cost x) $ do
+      burn cost $ do
         next
         let !y = f x
         state . stack .= y : xs
@@ -2527,13 +2527,13 @@ stackOp1 cost f =
 
 stackOp2
   :: (?op :: Word8)
-  => (((Expr EWord), (Expr EWord)) -> Word64)
+  => Word64
   -> (((Expr EWord), (Expr EWord)) -> (Expr EWord))
   -> EVM ()
 stackOp2 cost f =
   use (state . stack) >>= \case
     (x:y:xs) ->
-      burn (cost (x, y)) $ do
+      burn cost $ do
         next
         state . stack .= f (x, y) : xs
     _ ->
@@ -2541,13 +2541,13 @@ stackOp2 cost f =
 
 stackOp3
   :: (?op :: Word8)
-  => (((Expr EWord), (Expr EWord), (Expr EWord)) -> Word64)
+  => Word64
   -> (((Expr EWord), (Expr EWord), (Expr EWord)) -> (Expr EWord))
   -> EVM ()
 stackOp3 cost f =
   use (state . stack) >>= \case
     (x:y:z:xs) ->
-      burn (cost (x, y, z)) $ do
+      burn cost $ do
       next
       state . stack .= f (x, y, z) : xs
     _ ->
