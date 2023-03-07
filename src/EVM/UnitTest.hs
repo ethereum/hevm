@@ -926,10 +926,6 @@ formatTestLog events (LogEntry _ args (topic:_)) =
                   _ -> Nothing
               _ -> Just "<symbolic decimal>"
 
-
-word32Bytes :: Word32 -> ByteString
-word32Bytes x = BS.pack [byteAt x (3 - i) | i <- [0..3]]
-
 abiCall :: TestVMParams -> Either (Text, AbiValue) ByteString -> EVM ()
 abiCall params args =
   let cd = case args of

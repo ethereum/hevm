@@ -11,40 +11,39 @@ module EVM.Types where
 
 import Prelude hiding  (Word, LT, GT)
 
-import Data.Aeson
+import Control.Arrow ((>>>))
 import Crypto.Hash hiding (SHA256)
-import Data.Map (Map)
+import Data.Aeson
+import Data.Aeson qualified as JSON
+import Data.Aeson.Types qualified as JSON
 import Data.Bifunctor (first)
+import Data.Bits (Bits, FiniteBits, shiftR, shift, shiftL, (.&.), (.|.))
+import Data.ByteArray qualified as BA
 import Data.Char
 import Data.List (isPrefixOf, foldl')
 import Data.ByteString (ByteString)
-import Data.ByteString.Base16 as BS16
+import Data.ByteString qualified as BS
+import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Builder (byteStringHex, toLazyByteString)
+import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy (toStrict)
-import qualified Data.ByteString.Char8  as Char8
 import Data.Word (Word8, Word32, Word64)
-import Data.Bits (Bits, FiniteBits, shiftR, shift, shiftL, (.&.), (.|.))
 import Data.DoubleWord
 import Data.DoubleWord.TH
+import Data.Map (Map)
 import Data.Maybe (fromMaybe)
+import Data.Sequence qualified as Seq
+import Data.Serialize qualified as Cereal
+import Data.Text qualified as Text
+import Data.Text.Encoding qualified as Text
+import Data.Vector qualified as V
 import Numeric (readHex, showHex)
 import Options.Generic
-import Control.Arrow ((>>>))
-
-import qualified Data.ByteArray       as BA
-import qualified Data.Aeson           as JSON
-import qualified Data.Aeson.Types     as JSON
-import qualified Data.ByteString      as BS
-import qualified Data.Serialize.Get   as Cereal
-import qualified Data.Text            as Text
-import qualified Data.Text.Encoding   as Text
-import qualified Data.Sequence        as Seq
-import qualified Text.Regex.TDFA      as Regex
-import qualified Text.Read
+import Text.Regex.TDFA qualified as Regex
+import Text.Read qualified
 
 -- Some stuff for "generic programming", needed to create Word512
 import Data.Data
-import qualified Data.Vector as V
 
 -- We need a 512-bit word for doing ADDMOD and MULMOD with full precision.
 mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
@@ -166,10 +165,10 @@ data Expr (a :: EType) where
                  -> Expr EWord
   -- control flow
 
-  Revert              :: [Prop] -> Expr Buf -> Expr End
-  Failure             :: [Prop] -> Error -> Expr End
-  Return              :: [Prop] -> Expr Buf -> Expr Storage -> Expr End
-  ITE                 :: Expr EWord -> Expr End -> Expr End -> Expr End
+  Revert         :: [Prop] -> Expr Buf -> Expr End
+  Failure        :: [Prop] -> Error -> Expr End
+  Return         :: [Prop] -> Expr Buf -> Expr Storage -> Expr End
+  ITE            :: Expr EWord -> Expr End -> Expr End -> Expr End
 
   -- integers
 
@@ -601,9 +600,6 @@ num = fromIntegral
 padLeft :: Int -> ByteString -> ByteString
 padLeft n xs = BS.replicate (n - BS.length xs) 0 <> xs
 
-padLeftStr :: Int -> String -> String
-padLeftStr n xs = replicate (n - length xs) '0' <> xs
-
 padRight :: Int -> ByteString -> ByteString
 padRight n xs = xs <> BS.replicate (n - BS.length xs) 0
 
@@ -620,6 +616,9 @@ padLeft' :: Int -> V.Vector (Expr Byte) -> V.Vector (Expr Byte)
 padLeft' n xs = V.replicate (n - length xs) (LitByte 0) <> xs
 
 word256 :: ByteString -> Word256
+word256 xs | BS.length xs == 1 =
+  -- optimize one byte pushes
+  Word256 (Word128 0 0) (Word128 0 (fromIntegral $ BS.head xs))
 word256 xs = case Cereal.runGet m (padLeft 32 xs) of
                Left _ -> error "internal error"
                Right x -> x
@@ -628,13 +627,10 @@ word256 xs = case Cereal.runGet m (padLeft 32 xs) of
            b <- Cereal.getWord64be
            c <- Cereal.getWord64be
            d <- Cereal.getWord64be
-           return $ fromHiAndLo (fromHiAndLo a b) (fromHiAndLo c d)
+           pure $ Word256 (Word128 a b) (Word128 c d)
 
 word :: ByteString -> W256
 word = W256 . word256
-
-byteAt :: (Bits a, Bits b, Integral a, Num b) => a -> Int -> b
-byteAt x j = num (x `shiftR` (j * 8)) .&. 0xff
 
 fromBE :: (Integral a) => ByteString -> a
 fromBE xs = if xs == mempty then 0
@@ -647,10 +643,12 @@ asBE x = asBE (x `div` 256)
   <> BS.pack [num $ x `mod` 256]
 
 word256Bytes :: W256 -> ByteString
-word256Bytes x = BS.pack [byteAt x (31 - i) | i <- [0..31]]
+word256Bytes (W256 (Word256 (Word128 a b) (Word128 c d))) =
+  Cereal.encode a <> Cereal.encode b <> Cereal.encode c <> Cereal.encode d
 
 word160Bytes :: Addr -> ByteString
-word160Bytes x = BS.pack [byteAt x.addressWord160 (19 - i) | i <- [0..19]]
+word160Bytes (Addr (Word160 a (Word128 b c))) =
+  Cereal.encode a <> Cereal.encode b <> Cereal.encode c
 
 newtype Nibble = Nibble Word8
   deriving ( Num, Integral, Real, Ord, Enum, Eq, Bounded, Generic)
