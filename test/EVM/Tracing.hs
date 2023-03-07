@@ -871,16 +871,11 @@ tests = testGroup "contract-quickcheck-run"
         cleanupEvmtoolFiles evmtoolResult
 
       , testProperty "random-contract-SMT" $ \(contr :: OpContract) -> ioProperty $ do
-        let contr2 = contr
-        -- let contr2 = OpContract [ OpPush (Lit 0x10), OpPush (Lit 0x0), OpPush (Lit 0x0)
-        --                          ,OpCalldatacopy
-        --                          ,OpPush (Lit 0x6) ,OpPush (Lit 0x0)
-        --                          ,OpReturn]
-        putStrLn $ "contr: " <> (show contr2)
         txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+15) $ chooseInt (0,255)
         gaslimitExec <- generate $ chooseInt (40000, 0xffff)
         let txData = BS.pack $ toEnum <$> txDataRaw
-        contrFixed <- fixContractJumps $ removeExtcalls contr2
+        -- TODO enable external calls for more extensive fuzzing
+        contrFixed <- fixContractJumps $ removeExtcalls contr
         evmtoolResult <- getEVMToolRet contrFixed txData gaslimitExec
         hevmRun <- getHEVMRet contrFixed txData gaslimitExec
         (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
@@ -921,7 +916,6 @@ runExprOnSMT expr txData preState post = do
       ("; " <> (TL.pack $ show leaf) <> "\n\n" <> formatSMT2 q <> "\n\n(check-sat)")
     putStrLn $ "Wrote file: " <> fname
     res <- withSolvers Z3 1 Nothing $ \s ->checkSat s q
-    putStrLn $ "res is: " <> (show res)
-    assertEqual "must be UNSAT" res Unsat
+    assertEqual "Result must be UNSAT, i.e. output from SMT & concrete execution must match" res Unsat
 
   putStrLn "OK, SMT agrees with the output"
