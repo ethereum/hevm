@@ -663,7 +663,7 @@ exec1 = do
                         bytes         = readMemory xOffset' xSize' vm
                         logs'         = (LogEntry (litAddr self) bytes topics) : vm._logs
                     burn (g_log + g_logdata * (num xSize) + num n * g_logtopic) $
-                      accessMemoryRange fees xOffset xSize $ do
+                      accessMemoryRange xOffset xSize $ do
                         traceTopLog logs'
                         next
                         assign (state . stack) xs'
@@ -738,7 +738,7 @@ exec1 = do
               forceConcrete xOffset' "sha3 offset must be concrete" $
                 \xOffset -> forceConcrete xSize' "sha3 size must be concrete" $ \xSize ->
                   burn (g_sha3 + g_sha3word * ceilDiv (num xSize) 32) $
-                    accessMemoryRange fees xOffset xSize $ do
+                    accessMemoryRange xOffset xSize $ do
                       (hash, invMap) <- case readMemory xOffset' xSize' vm of
                                           ConcreteBuf bs -> do
                                             let hash' = keccak' bs
@@ -799,7 +799,7 @@ exec1 = do
               forceConcrete2 (xTo', xSize') "CALLDATACOPY" $
                 \(xTo, xSize) ->
                   burn (g_verylow + g_copy * ceilDiv (num xSize) 32) $
-                    accessMemoryRange fees xTo xSize $ do
+                    accessMemoryRange xTo xSize $ do
                       next
                       assign (state . stack) xs
                       copyBytesToMemory vm._state._calldata xSize' xFrom xTo'
@@ -821,7 +821,7 @@ exec1 = do
                     Just n'' ->
                       if n'' <= ( (maxBound :: Word64) - g_verylow ) `div` g_copy * 32 then
                         burn (g_verylow + g_copy * ceilDiv (num n) 32) $
-                          accessMemoryRange fees memOffset n $ do
+                          accessMemoryRange memOffset n $ do
                             next
                             assign (state . stack) xs
                             copyBytesToMemory (toBuf vm._state._code) n' codeOffset memOffset'
@@ -868,7 +868,7 @@ exec1 = do
                   acc <- accessAccountForGas (num extAccount)
                   let cost = if acc then g_warm_storage_read else g_cold_account_access
                   burn (cost + g_copy * ceilDiv (num codeSize) 32) $
-                    accessMemoryRange fees memOffset codeSize $
+                    accessMemoryRange memOffset codeSize $
                       fetchAccount (num extAccount) $ \c -> do
                         next
                         assign (state . stack) xs
@@ -886,7 +886,7 @@ exec1 = do
             (xTo' : xFrom : xSize' :xs) -> forceConcrete2 (xTo', xSize') "RETURNDATACOPY" $
               \(xTo, xSize) ->
                 burn (g_verylow + g_copy * ceilDiv (num xSize) 32) $
-                  accessMemoryRange fees xTo xSize $ do
+                  accessMemoryRange xTo xSize $ do
                     next
                     assign (state . stack) xs
 
@@ -978,7 +978,7 @@ exec1 = do
           case stk of
             (x':xs) -> forceConcrete x' "MLOAD" $ \x ->
               burn g_verylow $
-                accessMemoryWord fees x $ do
+                accessMemoryWord x $ do
                   next
                   assign (state . stack) (readWord (Lit x) mem : xs)
             _ -> underrun
@@ -988,7 +988,7 @@ exec1 = do
           case stk of
             (x':y:xs) -> forceConcrete x' "MSTORE index" $ \x ->
               burn g_verylow $
-                accessMemoryWord fees x $ do
+                accessMemoryWord x $ do
                   next
                   assign (state . memory) (writeWord (Lit x) y mem)
                   assign (state . stack) xs
@@ -999,7 +999,7 @@ exec1 = do
           case stk of
             (x':y:xs) -> forceConcrete x' "MSTORE8" $ \x ->
               burn g_verylow $
-                accessMemoryRange fees x 1 $ do
+                accessMemoryRange x 1 $ do
                   let yByte = indexWord (Lit 31) y
                   next
                   modifying (state . memory) (writeByte (Lit x) yByte)
@@ -1141,7 +1141,7 @@ exec1 = do
           case stk of
             (xValue' : xOffset' : xSize' : xs) -> forceConcrete3 (xValue', xOffset', xSize') "CREATE" $
               \(xValue, xOffset, xSize) -> do
-                accessMemoryRange fees xOffset xSize $ do
+                accessMemoryRange xOffset xSize $ do
                   availableGas <- use (state . gas)
                   let
                     newAddr = createAddress self this._nonce
@@ -1207,7 +1207,7 @@ exec1 = do
         0xf3 ->
           case stk of
             (xOffset' : xSize' :_) -> forceConcrete2 (xOffset', xSize') "RETURN" $ \(xOffset, xSize) ->
-              accessMemoryRange fees xOffset xSize $ do
+              accessMemoryRange xOffset xSize $ do
                 let
                   output = readMemory xOffset' xSize' vm
                   codesize = fromMaybe (error "RETURN: cannot return dynamically sized abstract data")
@@ -1263,7 +1263,7 @@ exec1 = do
              :xSalt'
              :xs) -> forceConcrete4 (xValue', xOffset', xSize', xSalt') "CREATE2" $
               \(xValue, xOffset, xSize, xSalt) ->
-                accessMemoryRange fees xOffset xSize $ do
+                accessMemoryRange xOffset xSize $ do
                   availableGas <- use (state . gas)
 
                   forceConcreteBuf (readMemory xOffset' xSize' vm) "CREATE2" $
@@ -1326,7 +1326,7 @@ exec1 = do
         0xfd ->
           case stk of
             (xOffset':xSize':_) -> forceConcrete2 (xOffset', xSize') "REVERT" $ \(xOffset, xSize) ->
-              accessMemoryRange fees xOffset xSize $ do
+              accessMemoryRange xOffset xSize $ do
                 let output = readMemory xOffset' xSize' vm
                 finishFrame (FrameReverted output)
             _ -> underrun
@@ -1350,8 +1350,8 @@ callChecks
 callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize xs continue = do
   vm <- get
   let fees = vm._block._schedule
-  accessMemoryRange fees xInOffset xInSize $
-    accessMemoryRange fees xOutOffset xOutSize $ do
+  accessMemoryRange xInOffset xInSize $
+    accessMemoryRange xOutOffset xOutSize $ do
       availableGas <- use (state . gas)
       let recipientExists = accountExists xContext vm
       (cost, gas') <- costOfCall fees recipientExists xValue availableGas xGas xTo
@@ -2399,14 +2399,14 @@ finishFrame how = do
 -- * Memory helpers
 
 accessUnboundedMemoryRange
-  :: FeeSchedule Word64
-  -> Word64
+  :: Word64
   -> Word64
   -> EVM ()
   -> EVM ()
-accessUnboundedMemoryRange _ _ 0 continue = continue
-accessUnboundedMemoryRange fees f l continue = do
+accessUnboundedMemoryRange _ 0 continue = continue
+accessUnboundedMemoryRange f l continue = do
   m0 <- num <$> use (state . memorySize)
+  fees <- gets (._block._schedule)
   do
     let m1 = 32 * ceilDiv (max m0 (f + l)) 32
     burn (memoryCost fees m1 - memoryCost fees m0) $ do
@@ -2414,23 +2414,22 @@ accessUnboundedMemoryRange fees f l continue = do
       continue
 
 accessMemoryRange
-  :: FeeSchedule Word64
-  -> W256
+  :: W256
   -> W256
   -> EVM ()
   -> EVM ()
-accessMemoryRange _ _ 0 continue = continue
-accessMemoryRange fees f l continue =
+accessMemoryRange _ 0 continue = continue
+accessMemoryRange f l continue =
   case (,) <$> toWord64 f <*> toWord64 l of
     Nothing -> vmError IllegalOverflow
     Just (f64, l64) ->
       if f64 + l64 < l64
         then vmError IllegalOverflow
-        else accessUnboundedMemoryRange fees f64 l64 continue
+        else accessUnboundedMemoryRange f64 l64 continue
 
 accessMemoryWord
-  :: FeeSchedule Word64 -> W256 -> EVM () -> EVM ()
-accessMemoryWord fees x = accessMemoryRange fees x 32
+  :: W256 -> EVM () -> EVM ()
+accessMemoryWord x = accessMemoryRange x 32
 
 copyBytesToMemory
   :: Expr Buf -> Expr EWord -> Expr EWord -> Expr EWord -> EVM ()
