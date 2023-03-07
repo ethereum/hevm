@@ -893,31 +893,27 @@ tests = testGroup "contract-quickcheck-run"
                 assertEqual "Traces and gas must match" traceOK True
                 let resultOK = evmtoolTraceOutput.output.output == (vmres hevmVM).out
                 assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
-                putStrLn $ "sRet is: " <> (bsToHex $ fromJust sRet)
-                putStrLn $ "sRet size is: " <> (show $ BS.length $ fromJust sRet)
-                runExprOnSMT expr txData (fromJust sRet) hevmVM (mycheckAssertions $ fromJust sRet)
+                runExprOnSMT expr txData hevmVM (checkRetData $ fromJust sRet)
               else putStrLn "Nothing returned, skipping"
           Left (evmerr, _) -> putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
         cleanupEvmtoolFiles evmtoolResult
     ]
 
-mycheckAssertions :: ByteString -> Postcondition
-mycheckAssertions retData _ exprEnd = case exprEnd of
-  -- TODO also check storage
+-- TODO also check storage
+checkRetData:: ByteString -> Postcondition
+checkRetData retData _ exprEnd = case exprEnd of
   EVM.Types.Return _ buf _ -> PNeg (PEq buf (ConcreteBuf retData))
-  EVM.Types.Revert {} -> error "whatever"
-  _ -> PBool False -- anything else is wrong, right? (e.g. Failure.. but what about ITE?)
+  _ -> PBool True -- fail on everything else
 
-runExprOnSMT :: Expr 'End -> ByteString -> ByteString -> VM -> Postcondition -> IO ()
-runExprOnSMT expr txData output preState post = do
+runExprOnSMT :: Expr 'End -> ByteString -> VM -> Postcondition -> IO ()
+runExprOnSMT expr txData preState post = do
   let
-    numb = Expr.numBranches expr
     flattened = flattenExpr expr
     precond :: [Prop]
     precond = [PEq (ConcreteBuf txData) (AbstractBuf "calldata")]
     withQueries ::[(SMT2, Expr 'End)]
     withQueries = fmap (\(pcs, leaf) -> (assertProps ((post preState leaf) : precond <> extractProps leaf <> pcs), leaf)) flattened
-  putStrLn $ "Checking if output can be other than sRet for " <> show (length withQueries) <> " queries"
+  putStrLn $ "Checking if output can be other than expected"
 
   forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
     let fname = ("query-" <> show idx <> ".smt2")
@@ -928,14 +924,4 @@ runExprOnSMT expr txData output preState post = do
     putStrLn $ "res is: " <> (show res)
     assertEqual "must be UNSAT" res Unsat
 
-  putStrLn $ "num:" <> show numb
-  putStrLn $ "flattened: " <> show flattened
-  putStrLn $ "expr: " <> show expr
-  putStrLn $ "OK, worked out"
-
-  -- -- Dispatch the remaining branches to the solver to check for violations
-  -- results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
-  --   res <- checkSat solvers query
-  --   pure (res, leaf)
-  -- let cexs = filter (\(res, _) -> not . isUnsat $ res) results
-  -- pure $ if Prelude.null cexs then (expr, [Qed ()]) else (expr, fmap toVRes cexs)
+  putStrLn "OK, SMT agrees with the output"
