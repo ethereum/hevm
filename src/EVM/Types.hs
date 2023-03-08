@@ -144,13 +144,13 @@ data Expr (a :: EType) where
 
   -- identifiers
 
-  Lit            :: W256 -> Expr EWord
+  Lit            :: {-# UNPACK #-} !W256 -> Expr EWord
   Var            :: Text -> Expr EWord
   GVar           :: GVar a -> Expr a
 
   -- bytes
 
-  LitByte        :: Word8      -> Expr Byte
+  LitByte        :: {-# UNPACK #-} !Word8 -> Expr Byte
   IndexWord      :: Expr EWord -> Expr EWord -> Expr Byte
   EqByte         :: Expr Byte  -> Expr Byte  -> Expr EWord
 
