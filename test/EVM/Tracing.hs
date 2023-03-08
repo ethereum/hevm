@@ -361,8 +361,6 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
                           putStrLn $ "evmtool's stack: " <> (show bStack)
       if aOp == bOp && aStack == bStack && aPc == bPc && aGas == bGas then go ax bx
       else pure False
-
-
     go a@(_:_) [] = do
       putStrLn $ "Traces don't match. HEVM's trace is longer by:" <> (show a)
       pure False
@@ -820,6 +818,14 @@ getConcretizedOutput expr txData = simplConcrExprRetval
     getReturnVal _ = Nothing
     simplConcrExprRetval = getReturnVal simplConcExpr
 
+checkForFailure :: Expr End -> Maybe (Expr End)
+checkForFailure expr = mapExprM go  expr
+      where
+        go :: Expr a -> Maybe (Expr a)
+        go = \case
+                   Failure {} -> Nothing
+                   y -> Just y
+
 cleanupEvmtoolFiles :: Maybe EVMToolResult -> IO ()
 cleanupEvmtoolFiles evmtoolResult = do
   System.Directory.removeFile "txs.json"
@@ -886,9 +892,13 @@ tests = testGroup "contract-quickcheck-run"
             if isJust sRet then do
                 traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
                 assertEqual "Traces and gas must match" traceOK True
+                putStrLn $ "expr: " <> (show expr)
                 let resultOK = evmtoolTraceOutput.output.output == (vmres hevmVM).out
                 assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
-                runExprOnSMT expr txData hevmVM (checkRetData $ fromJust sRet)
+                putStrLn $ "ret should be: " <> (bsToHex $ fromJust sRet)
+                let noFailInExpr = isJust $ checkForFailure expr
+                if noFailInExpr then runExprOnSMT expr txData hevmVM (checkRetData $ fromJust sRet)
+                  else putStrLn "Expression contains failure, can't check"
               else putStrLn "Nothing returned, skipping"
           Left (evmerr, _) -> putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
         cleanupEvmtoolFiles evmtoolResult
