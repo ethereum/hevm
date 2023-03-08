@@ -1,7 +1,6 @@
 {-# Language ImplicitParams #-}
 {-# Language DataKinds #-}
 {-# Language GADTs #-}
-{-# Language StrictData #-}
 {-# Language TemplateHaskell #-}
 
 module EVM where
@@ -104,7 +103,7 @@ data VM = VM
   , _logs           :: [Expr Log]
   , _traces         :: Zipper.TreePos Zipper.Empty Trace
   , _cache          :: Cache
-  , _burned         :: Word64
+  , _burned         :: {-# UNPACK #-} !Word64
   , _iterations     :: Map CodeLocation Int
   , _constraints    :: [Prop]
   , _keccakEqs      :: [Prop]
@@ -248,14 +247,14 @@ data FrameState = FrameState
   { _contract     :: Addr
   , _codeContract :: Addr
   , _code         :: ContractCode
-  , _pc           :: Int
+  , _pc           :: {-# UNPACK #-} !Int
   , _stack        :: [Expr EWord]
   , _memory       :: Expr Buf
   , _memorySize   :: Word64
   , _calldata     :: Expr Buf
   , _callvalue    :: Expr EWord
   , _caller       :: Expr EWord
-  , _gas          :: Word64
+  , _gas          :: {-# UNPACK #-} !Word64
   , _returndata   :: Expr Buf
   , _static       :: Bool
   }
