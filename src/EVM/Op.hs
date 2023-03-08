@@ -1,17 +1,24 @@
 {-# LANGUAGE DataKinds #-}
 
 module EVM.Op
-  ( Op (..)
+  ( Op
+  , GenericOp (..)
   , opString
   , intToOpName
+  , getOp
+  , readOp
   ) where
 
+import EVM.Expr qualified as Expr
 import EVM.Types
 
+import Data.Vector qualified as V
 import Data.Word (Word8)
 import Numeric (showHex)
 
-data Op
+type Op = GenericOp (Expr EWord)
+
+data GenericOp a
   = OpStop
   | OpAdd
   | OpMul
@@ -88,9 +95,9 @@ data Op
   | OpDup !Word8
   | OpSwap !Word8
   | OpLog !Word8
-  | OpPush (Expr EWord)
+  | OpPush a
   | OpUnknown Word8
-  deriving (Show, Eq)
+  deriving (Show, Eq, Functor)
 
 intToOpName:: Int -> String
 intToOpName a =
@@ -333,3 +340,88 @@ opString (i, o) = let showPc x | x < 0x10 = '0' : showHex x ""
   OpUnknown x -> case x of
     254 -> "INVALID"
     _ -> "UNKNOWN " ++ (showHex x "")
+
+readOp :: Word8 -> [Expr Byte] -> Op
+readOp x xs =
+  (\n -> Expr.readBytes (fromIntegral n) (Lit 0) (Expr.fromList $ V.fromList xs)) <$> getOp x
+
+getOp :: Word8 -> GenericOp Word8
+getOp x | x >= 0x80 && x <= 0x8f = OpDup (x - 0x80 + 1)
+getOp x | x >= 0x90 && x <= 0x9f = OpSwap (x - 0x90 + 1)
+getOp x | x >= 0xa0 && x <= 0xa4 = OpLog (x - 0xa0)
+getOp x | x >= 0x60 && x <= 0x7f = OpPush (x - 0x60 + 1)
+getOp x = case x of
+  0x00 -> OpStop
+  0x01 -> OpAdd
+  0x02 -> OpMul
+  0x03 -> OpSub
+  0x04 -> OpDiv
+  0x05 -> OpSdiv
+  0x06 -> OpMod
+  0x07 -> OpSmod
+  0x08 -> OpAddmod
+  0x09 -> OpMulmod
+  0x0a -> OpExp
+  0x0b -> OpSignextend
+  0x10 -> OpLt
+  0x11 -> OpGt
+  0x12 -> OpSlt
+  0x13 -> OpSgt
+  0x14 -> OpEq
+  0x15 -> OpIszero
+  0x16 -> OpAnd
+  0x17 -> OpOr
+  0x18 -> OpXor
+  0x19 -> OpNot
+  0x1a -> OpByte
+  0x1b -> OpShl
+  0x1c -> OpShr
+  0x1d -> OpSar
+  0x20 -> OpSha3
+  0x30 -> OpAddress
+  0x31 -> OpBalance
+  0x32 -> OpOrigin
+  0x33 -> OpCaller
+  0x34 -> OpCallvalue
+  0x35 -> OpCalldataload
+  0x36 -> OpCalldatasize
+  0x37 -> OpCalldatacopy
+  0x38 -> OpCodesize
+  0x39 -> OpCodecopy
+  0x3a -> OpGasprice
+  0x3b -> OpExtcodesize
+  0x3c -> OpExtcodecopy
+  0x3d -> OpReturndatasize
+  0x3e -> OpReturndatacopy
+  0x3f -> OpExtcodehash
+  0x40 -> OpBlockhash
+  0x41 -> OpCoinbase
+  0x42 -> OpTimestamp
+  0x43 -> OpNumber
+  0x44 -> OpPrevRandao
+  0x45 -> OpGaslimit
+  0x46 -> OpChainid
+  0x47 -> OpSelfbalance
+  0x48 -> OpBaseFee
+  0x50 -> OpPop
+  0x51 -> OpMload
+  0x52 -> OpMstore
+  0x53 -> OpMstore8
+  0x54 -> OpSload
+  0x55 -> OpSstore
+  0x56 -> OpJump
+  0x57 -> OpJumpi
+  0x58 -> OpPc
+  0x59 -> OpMsize
+  0x5a -> OpGas
+  0x5b -> OpJumpdest
+  0xf0 -> OpCreate
+  0xf1 -> OpCall
+  0xf2 -> OpCallcode
+  0xf3 -> OpReturn
+  0xf4 -> OpDelegatecall
+  0xf5 -> OpCreate2
+  0xfd -> OpRevert
+  0xfa -> OpStaticcall
+  0xff -> OpSelfdestruct
+  _    -> OpUnknown x

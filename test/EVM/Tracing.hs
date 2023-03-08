@@ -50,7 +50,7 @@ import qualified Data.Map.Strict as Map
 import EVM hiding (allowFFI)
 import EVM.SymExec
 import EVM.Assembler
-import EVM.Op
+import EVM.Op hiding (getOp)
 import EVM.Exec
 import EVM.Types
 import EVM.Traversals

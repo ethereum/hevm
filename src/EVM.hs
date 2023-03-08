@@ -610,11 +610,10 @@ exec1 = do
                     fromMaybe (error "could not analyze symbolic code") $
                       unlitByte $ ops V.! vm._state._pc
 
-      case ?op of
+      case getOp(?op) of
 
-        -- op: PUSH
-        x | x >= 0x60 && x <= 0x7f -> do
-          let !n = num x - 0x60 + 1
+        OpPush n' -> do
+          let n = fromIntegral n'
               !xs = case vm._state._code of
                 InitCode conc _ -> Lit $ word $ padRight n $ BS.take n (BS.drop (1 + vm._state._pc) conc)
                 RuntimeCode (ConcreteRuntimeCode bs) -> Lit $ word $ BS.take n $ BS.drop (1 + vm._state._pc) bs
@@ -626,10 +625,8 @@ exec1 = do
               next
               pushSym xs
 
-        -- op: DUP
-        x | x >= 0x80 && x <= 0x8f -> do
-          let !i = x - 0x80 + 1
-          case preview (ix (num i - 1)) stk of
+        OpDup i ->
+          case preview (ix (fromIntegral i - 1)) stk of
             Nothing -> underrun
             Just y ->
               limitStack 1 $
@@ -637,29 +634,25 @@ exec1 = do
                   next
                   pushSym y
 
-        -- op: SWAP
-        x | x >= 0x90 && x <= 0x9f -> do
-          let i = num (x - 0x90 + 1)
-          if length stk < i + 1
+        OpSwap i ->
+          if length stk < (fromIntegral i) + 1
             then underrun
             else
               burn g_verylow $ do
                 next
                 zoom (state . stack) $ do
-                  assign (ix 0) (stk ^?! ix i)
-                  assign (ix i) (stk ^?! ix 0)
+                  assign (ix 0) (stk ^?! ix (fromIntegral i))
+                  assign (ix (fromIntegral i)) (stk ^?! ix 0)
 
-        -- op: LOG
-        x | x >= 0xa0 && x <= 0xa4 ->
+        OpLog n ->
           notStatic $
-          let n = (num x - 0xa0) in
           case stk of
             (xOffset':xSize':xs) ->
-              if length xs < n
+              if length xs < (fromIntegral n)
               then underrun
               else
                 forceConcrete2 (xOffset', xSize') "LOG" $ \(xOffset, xSize) -> do
-                    let (topics, xs') = splitAt n xs
+                    let (topics, xs') = splitAt (fromIntegral n) xs
                         bytes         = readMemory xOffset' xSize' vm
                         logs'         = (LogEntry (litAddr self) bytes topics) : vm._logs
                     burn (g_log + g_logdata * (num xSize) + num n * g_logtopic) $
@@ -671,68 +664,43 @@ exec1 = do
             _ ->
               underrun
 
-        -- op: STOP
-        0x00 -> doStop
+        OpStop -> doStop
 
-        -- op: ADD
-        0x01 -> stackOp2 g_verylow (uncurry Expr.add)
-        -- op: MUL
-        0x02 -> stackOp2 g_low (uncurry Expr.mul)
-        -- op: SUB
-        0x03 -> stackOp2 g_verylow (uncurry Expr.sub)
+        OpAdd -> stackOp2 g_verylow (uncurry Expr.add)
+        OpMul -> stackOp2 g_low (uncurry Expr.mul)
+        OpSub -> stackOp2 g_verylow (uncurry Expr.sub)
 
-        -- op: DIV
-        0x04 -> stackOp2 g_low (uncurry Expr.div)
+        OpDiv -> stackOp2 g_low (uncurry Expr.div)
 
-        -- op: SDIV
-        0x05 -> stackOp2 g_low (uncurry Expr.sdiv)
+        OpSdiv -> stackOp2 g_low (uncurry Expr.sdiv)
 
-        -- op: MOD
-        0x06 -> stackOp2 g_low (uncurry Expr.mod)
+        OpMod-> stackOp2 g_low (uncurry Expr.mod)
 
-        -- op: SMOD
-        0x07 -> stackOp2 g_low (uncurry Expr.smod)
-        -- op: ADDMOD
-        0x08 -> stackOp3 g_mid (uncurryN Expr.addmod)
-        -- op: MULMOD
-        0x09 -> stackOp3 g_mid (uncurryN Expr.mulmod)
+        OpSmod -> stackOp2 g_low (uncurry Expr.smod)
+        OpAddmod -> stackOp3 g_mid (uncurryN Expr.addmod)
+        OpMulmod -> stackOp3 g_mid (uncurryN Expr.mulmod)
 
-        -- op: LT
-        0x10 -> stackOp2 g_verylow (uncurry Expr.lt)
-        -- op: GT
-        0x11 -> stackOp2 g_verylow (uncurry Expr.gt)
-        -- op: SLT
-        0x12 -> stackOp2 g_verylow (uncurry Expr.slt)
-        -- op: SGT
-        0x13 -> stackOp2 g_verylow (uncurry Expr.sgt)
+        OpLt -> stackOp2 g_verylow (uncurry Expr.lt)
+        OpGt -> stackOp2 g_verylow (uncurry Expr.gt)
+        OpSlt -> stackOp2 g_verylow (uncurry Expr.slt)
+        OpSgt -> stackOp2 g_verylow (uncurry Expr.sgt)
 
-        -- op: EQ
-        0x14 -> stackOp2 g_verylow (uncurry Expr.eq)
-        -- op: ISZERO
-        0x15 -> stackOp1 g_verylow Expr.iszero
+        OpEq -> stackOp2 g_verylow (uncurry Expr.eq)
+        OpIszero -> stackOp1 g_verylow Expr.iszero
 
-        -- op: AND
-        0x16 -> stackOp2 g_verylow (uncurry Expr.and)
-        -- op: OR
-        0x17 -> stackOp2 g_verylow (uncurry Expr.or)
-        -- op: XOR
-        0x18 -> stackOp2 g_verylow (uncurry Expr.xor)
-        -- op: NOT
-        0x19 -> stackOp1 g_verylow Expr.not
+        OpAnd -> stackOp2 g_verylow (uncurry Expr.and)
+        OpOr -> stackOp2 g_verylow (uncurry Expr.or)
+        OpXor -> stackOp2 g_verylow (uncurry Expr.xor)
+        OpNot -> stackOp1 g_verylow Expr.not
 
-        -- op: BYTE
-        0x1a -> stackOp2 g_verylow (\(i, w) -> Expr.padByte $ Expr.indexWord i w)
+        OpByte -> stackOp2 g_verylow (\(i, w) -> Expr.padByte $ Expr.indexWord i w)
 
-        -- op: SHL
-        0x1b -> stackOp2 g_verylow (uncurry Expr.shl)
-        -- op: SHR
-        0x1c -> stackOp2 g_verylow (uncurry Expr.shr)
-        -- op: SAR
-        0x1d -> stackOp2 g_verylow (uncurry Expr.sar)
+        OpShl -> stackOp2 g_verylow (uncurry Expr.shl)
+        OpShr -> stackOp2 g_verylow (uncurry Expr.shr)
+        OpSar -> stackOp2 g_verylow (uncurry Expr.sar)
 
-        -- op: SHA3
         -- more accurately refered to as KECCAK
-        0x20 ->
+        OpSha3 ->
           case stk of
             (xOffset' : xSize' : xs) ->
               forceConcrete xOffset' "sha3 offset must be concrete" $
@@ -751,13 +719,11 @@ exec1 = do
                       (env . sha3Crack) <>= invMap
             _ -> underrun
 
-        -- op: ADDRESS
-        0x30 ->
+        OpAddress ->
           limitStack 1 $
             burn g_base (next >> push (num self))
 
-        -- op: BALANCE
-        0x31 ->
+        OpBalance ->
           case stk of
             (x':xs) -> forceConcrete x' "BALANCE" $ \x ->
               accessAndBurn (num x) $
@@ -768,32 +734,26 @@ exec1 = do
             [] ->
               underrun
 
-        -- op: ORIGIN
-        0x32 ->
+        OpOrigin ->
           limitStack 1 . burn g_base $
             next >> push (num vm._tx._origin)
 
-        -- op: CALLER
-        0x33 ->
+        OpCaller ->
           limitStack 1 . burn g_base $
             next >> pushSym vm._state._caller
 
-        -- op: CALLVALUE
-        0x34 ->
+        OpCallvalue ->
           limitStack 1 . burn g_base $
             next >> pushSym vm._state._callvalue
 
-        -- op: CALLDATALOAD
-        0x35 -> stackOp1 g_verylow $
+        OpCalldataload -> stackOp1 g_verylow $
           \ind -> Expr.readWord ind vm._state._calldata
 
-        -- op: CALLDATASIZE
-        0x36 ->
+        OpCalldatasize ->
           limitStack 1 . burn g_base $
             next >> pushSym (bufLength vm._state._calldata)
 
-        -- op: CALLDATACOPY
-        0x37 ->
+        OpCalldatacopy ->
           case stk of
             (xTo' : xFrom : xSize' : xs) ->
               forceConcrete2 (xTo', xSize') "CALLDATACOPY" $
@@ -805,13 +765,11 @@ exec1 = do
                       copyBytesToMemory vm._state._calldata xSize' xFrom xTo'
             _ -> underrun
 
-        -- op: CODESIZE
-        0x38 ->
+        OpCodesize ->
           limitStack 1 . burn g_base $
             next >> pushSym (codelen vm._state._code)
 
-        -- op: CODECOPY
-        0x39 ->
+        OpCodecopy ->
           case stk of
             (memOffset' : codeOffset : n' : xs) ->
               forceConcrete2 (memOffset', n') "CODECOPY" $
@@ -828,13 +786,11 @@ exec1 = do
                       else vmError IllegalOverflow
             _ -> underrun
 
-        -- op: GASPRICE
-        0x3a ->
+        OpGasprice ->
           limitStack 1 . burn g_base $
             next >> push vm._tx._gasprice
 
-        -- op: EXTCODESIZE
-        0x3b ->
+        OpExtcodesize ->
           case stk of
             (x':xs) -> case x' of
               (Lit x) -> if x == num cheatCode
@@ -855,8 +811,7 @@ exec1 = do
             [] ->
               underrun
 
-        -- op: EXTCODECOPY
-        0x3c ->
+        OpExtcodecopy ->
           case stk of
             ( extAccount'
               : memOffset'
@@ -875,13 +830,11 @@ exec1 = do
                         copyBytesToMemory (view bytecode c) codeSize' codeOffset memOffset'
             _ -> underrun
 
-        -- op: RETURNDATASIZE
-        0x3d ->
+        OpReturndatasize ->
           limitStack 1 . burn g_base $
             next >> pushSym (bufLength vm._state._returndata)
 
-        -- op: RETURNDATACOPY
-        0x3e ->
+        OpReturndatacopy ->
           case stk of
             (xTo' : xFrom : xSize' :xs) -> forceConcrete2 (xTo', xSize') "RETURNDATACOPY" $
               \(xTo, xSize) ->
@@ -903,8 +856,7 @@ exec1 = do
                         branch loc (Expr.or oob overflow) jump
             _ -> underrun
 
-        -- op: EXTCODEHASH
-        0x3f ->
+        OpExtcodehash ->
           case stk of
             (x':xs) -> forceConcrete x' "EXTCODEHASH" $ \x ->
               accessAndBurn (num x) $ do
@@ -917,8 +869,7 @@ exec1 = do
             [] ->
               underrun
 
-        -- op: BLOCKHASH
-        0x40 -> do
+        OpBlockhash -> do
           -- We adopt the fake block hash scheme of the VMTests,
           -- so that blockhash(i) is the hash of i as decimal ASCII.
           stackOp1 g_blockhash $ \case
@@ -927,54 +878,44 @@ exec1 = do
                        else (num i :: Integer) & show & Char8.pack & keccak' & Lit
             i -> BlockHash i
 
-        -- op: COINBASE
-        0x41 ->
+        OpCoinbase ->
           limitStack 1 . burn g_base $
             next >> push (num vm._block._coinbase)
 
-        -- op: TIMESTAMP
-        0x42 ->
+        OpTimestamp ->
           limitStack 1 . burn g_base $
             next >> pushSym vm._block._timestamp
 
-        -- op: NUMBER
-        0x43 ->
+        OpNumber ->
           limitStack 1 . burn g_base $
             next >> push vm._block._number
 
-        -- op: PREVRANDAO
-        0x44 -> do
+        OpPrevRandao -> do
           limitStack 1 . burn g_base $
             next >> push vm._block._prevRandao
 
-        -- op: GASLIMIT
-        0x45 ->
+        OpGaslimit ->
           limitStack 1 . burn g_base $
             next >> push (num vm._block._gaslimit)
 
-        -- op: CHAINID
-        0x46 ->
+        OpChainid ->
           limitStack 1 . burn g_base $
             next >> push vm._env._chainId
 
-        -- op: SELFBALANCE
-        0x47 ->
+        OpSelfbalance ->
           limitStack 1 . burn g_low $
             next >> push this._balance
 
-        -- op: BASEFEE
-        0x48 ->
+        OpBaseFee ->
           limitStack 1 . burn g_base $
             next >> push vm._block._baseFee
 
-        -- op: POP
-        0x50 ->
+        OpPop ->
           case stk of
             (_:xs) -> burn g_base (next >> assign (state . stack) xs)
             _      -> underrun
 
-        -- op: MLOAD
-        0x51 ->
+        OpMload ->
           case stk of
             (x':xs) -> forceConcrete x' "MLOAD" $ \x ->
               burn g_verylow $
@@ -983,8 +924,7 @@ exec1 = do
                   assign (state . stack) (readWord (Lit x) mem : xs)
             _ -> underrun
 
-        -- op: MSTORE
-        0x52 ->
+        OpMstore ->
           case stk of
             (x':y:xs) -> forceConcrete x' "MSTORE index" $ \x ->
               burn g_verylow $
@@ -994,8 +934,7 @@ exec1 = do
                   assign (state . stack) xs
             _ -> underrun
 
-        -- op: MSTORE8
-        0x53 ->
+        OpMstore8 ->
           case stk of
             (x':y:xs) -> forceConcrete x' "MSTORE8" $ \x ->
               burn g_verylow $
@@ -1006,8 +945,7 @@ exec1 = do
                   assign (state . stack) xs
             _ -> underrun
 
-        -- op: SLOAD
-        0x54 ->
+        OpSload ->
           case stk of
             (x:xs) -> do
               acc <- accessStorageForGas self x
@@ -1018,8 +956,7 @@ exec1 = do
                   assign (state . stack) (y:xs)
             _ -> underrun
 
-        -- op: SSTORE
-        0x55 ->
+        OpSstore ->
           notStatic $
           case stk of
             (x:new:xs) ->
@@ -1071,8 +1008,7 @@ exec1 = do
                          _ -> noop
             _ -> underrun
 
-        -- op: JUMP
-        0x56 ->
+        OpJump ->
           case stk of
             (x:xs) ->
               burn g_mid $ forceConcrete x "JUMP: symbolic jumpdest" $ \x' ->
@@ -1081,8 +1017,7 @@ exec1 = do
                   Just i -> checkJump i xs
             _ -> underrun
 
-        -- op: JUMPI
-        0x57 -> do
+        OpJumpi -> do
           case stk of
             (x:y:xs) -> forceConcrete x "JUMPI: symbolic jumpdest" $ \x' ->
                 burn g_high $
@@ -1099,26 +1034,21 @@ exec1 = do
                         branch loc y jump
             _ -> underrun
 
-        -- op: PC
-        0x58 ->
+        OpPc ->
           limitStack 1 . burn g_base $
             next >> push (num vm._state._pc)
 
-        -- op: MSIZE
-        0x59 ->
+        OpMsize ->
           limitStack 1 . burn g_base $
             next >> push (num vm._state._memorySize)
 
-        -- op: GAS
-        0x5a ->
+        OpGas ->
           limitStack 1 . burn g_base $
             next >> push (num (vm._state._gas - g_base))
 
-        -- op: JUMPDEST
-        0x5b -> burn g_jumpdest next
+        OpJumpdest -> burn g_jumpdest next
 
-        -- op: EXP
-        0x0a ->
+        OpExp ->
           -- NOTE: this can be done symbolically using unrolling like this:
           --       https://hackage.haskell.org/package/sbv-9.0/docs/src/Data.SBV.Core.Model.html#.%5E
           --       However, it requires symbolic gas, since the gas depends on the exponent
@@ -1132,11 +1062,9 @@ exec1 = do
                 state . stack .= Expr.exp base exponent' : xs
             _ -> underrun
 
-        -- op: SIGNEXTEND
-        0x0b -> stackOp2 g_low (uncurry Expr.sex)
+        OpSignextend -> stackOp2 g_low (uncurry Expr.sex)
 
-        -- op: CREATE
-        0xf0 ->
+        OpCreate ->
           notStatic $
           case stk of
             (xValue' : xOffset' : xSize' : xs) -> forceConcrete3 (xValue', xOffset', xSize') "CREATE" $
@@ -1155,8 +1083,7 @@ exec1 = do
                     create self this (num gas') xValue xs newAddr initCode
             _ -> underrun
 
-        -- op: CALL
-        0xf1 ->
+        OpCall ->
           case stk of
             ( xGas'
               : xTo
@@ -1181,8 +1108,7 @@ exec1 = do
             _ ->
               underrun
 
-        -- op: CALLCODE
-        0xf2 ->
+        OpCallcode ->
           case stk of
             ( xGas'
               : xTo
@@ -1203,8 +1129,7 @@ exec1 = do
             _ ->
               underrun
 
-        -- op: RETURN
-        0xf3 ->
+        OpReturn ->
           case stk of
             (xOffset' : xSize' :_) -> forceConcrete2 (xOffset', xSize') "RETURN" $ \(xOffset, xSize) ->
               accessMemoryRange xOffset xSize $ do
@@ -1239,8 +1164,7 @@ exec1 = do
                    finishFrame (FrameReturned output)
             _ -> underrun
 
-        -- op: DELEGATECALL
-        0xf4 ->
+        OpDelegatecall ->
           case stk of
             (xGas'
              :xTo
@@ -1254,8 +1178,7 @@ exec1 = do
                   touchAccount self
             _ -> underrun
 
-        -- op: CREATE2
-        0xf5 -> notStatic $
+        OpCreate2 -> notStatic $
           case stk of
             (xValue'
              :xOffset'
@@ -1275,8 +1198,7 @@ exec1 = do
                       burn (cost - gas') $ create self this gas' xValue xs newAddr (ConcreteBuf initCode)
             _ -> underrun
 
-        -- op: STATICCALL
-        0xfa ->
+        OpStaticcall ->
           case stk of
             (xGas'
              :xTo
@@ -1298,8 +1220,7 @@ exec1 = do
             _ ->
               underrun
 
-        -- op: SELFDESTRUCT
-        0xff ->
+        OpSelfdestruct ->
           notStatic $
           case stk of
             [] -> underrun
@@ -1322,8 +1243,7 @@ exec1 = do
                           doStop
                    else doStop
 
-        -- op: REVERT
-        0xfd ->
+        OpRevert ->
           case stk of
             (xOffset':xSize':_) -> forceConcrete2 (xOffset', xSize') "REVERT" $ \(xOffset, xSize) ->
               accessMemoryRange xOffset xSize $ do
@@ -1331,8 +1251,8 @@ exec1 = do
                 finishFrame (FrameReverted output)
             _ -> underrun
 
-        xxx ->
-          vmError (EVM.UnrecognizedOpcode xxx)
+        OpUnknown xxx ->
+          vmError (UnrecognizedOpcode xxx)
 
 transfer :: Addr -> Addr -> W256 -> EVM ()
 transfer xFrom xTo xValue =
@@ -2668,89 +2588,6 @@ opParams vm =
       if length (vm ^. state . stack) >= length xs
       then Map.fromList (zip xs (vm ^. state . stack))
       else mempty
-
--- | Reads
-readOp :: Word8 -> [Expr Byte] -> Op
-readOp x _  | x >= 0x80 && x <= 0x8f = OpDup (x - 0x80 + 1)
-readOp x _  | x >= 0x90 && x <= 0x9f = OpSwap (x - 0x90 + 1)
-readOp x _  | x >= 0xa0 && x <= 0xa4 = OpLog (x - 0xa0)
-readOp x xs | x >= 0x60 && x <= 0x7f =
-  let n = num $ x - 0x60 + 1
-  in OpPush (readBytes n (Lit 0) (Expr.fromList $ V.fromList xs))
-readOp x _ = case x of
-  0x00 -> OpStop
-  0x01 -> OpAdd
-  0x02 -> OpMul
-  0x03 -> OpSub
-  0x04 -> OpDiv
-  0x05 -> OpSdiv
-  0x06 -> OpMod
-  0x07 -> OpSmod
-  0x08 -> OpAddmod
-  0x09 -> OpMulmod
-  0x0a -> OpExp
-  0x0b -> OpSignextend
-  0x10 -> OpLt
-  0x11 -> OpGt
-  0x12 -> OpSlt
-  0x13 -> OpSgt
-  0x14 -> OpEq
-  0x15 -> OpIszero
-  0x16 -> OpAnd
-  0x17 -> OpOr
-  0x18 -> OpXor
-  0x19 -> OpNot
-  0x1a -> OpByte
-  0x1b -> OpShl
-  0x1c -> OpShr
-  0x1d -> OpSar
-  0x20 -> OpSha3
-  0x30 -> OpAddress
-  0x31 -> OpBalance
-  0x32 -> OpOrigin
-  0x33 -> OpCaller
-  0x34 -> OpCallvalue
-  0x35 -> OpCalldataload
-  0x36 -> OpCalldatasize
-  0x37 -> OpCalldatacopy
-  0x38 -> OpCodesize
-  0x39 -> OpCodecopy
-  0x3a -> OpGasprice
-  0x3b -> OpExtcodesize
-  0x3c -> OpExtcodecopy
-  0x3d -> OpReturndatasize
-  0x3e -> OpReturndatacopy
-  0x3f -> OpExtcodehash
-  0x40 -> OpBlockhash
-  0x41 -> OpCoinbase
-  0x42 -> OpTimestamp
-  0x43 -> OpNumber
-  0x44 -> OpPrevRandao
-  0x45 -> OpGaslimit
-  0x46 -> OpChainid
-  0x47 -> OpSelfbalance
-  0x50 -> OpPop
-  0x51 -> OpMload
-  0x52 -> OpMstore
-  0x53 -> OpMstore8
-  0x54 -> OpSload
-  0x55 -> OpSstore
-  0x56 -> OpJump
-  0x57 -> OpJumpi
-  0x58 -> OpPc
-  0x59 -> OpMsize
-  0x5a -> OpGas
-  0x5b -> OpJumpdest
-  0xf0 -> OpCreate
-  0xf1 -> OpCall
-  0xf2 -> OpCallcode
-  0xf3 -> OpReturn
-  0xf4 -> OpDelegatecall
-  0xf5 -> OpCreate2
-  0xfd -> OpRevert
-  0xfa -> OpStaticcall
-  0xff -> OpSelfdestruct
-  _    -> OpUnknown x
 
 -- Maps operation indicies into a pair of (bytecode index, operation)
 mkCodeOps :: ContractCode -> RegularVector.Vector (Int, Op)
