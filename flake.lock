@@ -50,16 +50,32 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1676994812,
-        "narHash": "sha256-JXBIqJzzza1D30Dz6e5WBsVe6gWh9gMnifBjL5k70I0=",
+        "lastModified": 1678398115,
+        "narHash": "sha256-/VuHUfD8jW9Zb2C0TTG4Qs+7dz+l2J5vGDx5XnziqKo=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "3a558d658f59ac4ed95edeae20409fc936bbcf47",
+        "rev": "5373c2c8443dafaf434fec4dccef93c950cee15c",
         "type": "github"
       },
       "original": {
         "owner": "nixos",
         "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs-solc": {
+      "locked": {
+        "lastModified": 1672059513,
+        "narHash": "sha256-4R7lESB3biVNyE6rXkjw3mhowzg4zTQgZElM4/dRUv8=",
+        "owner": "nixos",
+        "repo": "nixpkgs",
+        "rev": "1b71def42b74811323de2df52f180b795ec506fc",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nixos",
+        "repo": "nixpkgs",
+        "rev": "1b71def42b74811323de2df52f180b795ec506fc",
         "type": "github"
       }
     },
@@ -69,6 +85,7 @@
         "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
+        "nixpkgs-solc": "nixpkgs-solc",
         "solidity": "solidity"
       }
     },
