@@ -5,33 +5,43 @@ import Prelude hiding (Word)
 import qualified EVM
 import EVM (balance, initialContract)
 import EVM.FeeSchedule
-import EVM.Precompiled (execute)
 import EVM.RLP
 import EVM.Types
 import EVM.Expr (litAddr)
-
 import Control.Lens
+import EVM.Sign
 
-import Data.Aeson (FromJSON (..))
 import Data.ByteString (ByteString)
 import Data.Map (Map)
 import Data.Maybe (fromMaybe, isNothing, fromJust)
+import GHC.Generics (Generic)
 
+import Data.Aeson (FromJSON (..))
 import qualified Data.Aeson        as JSON
 import qualified Data.Aeson.Types  as JSON
 import qualified Data.ByteString   as BS
 import qualified Data.Map          as Map
 import Data.Word (Word64)
+import Numeric (showHex)
 
 data AccessListEntry = AccessListEntry {
   accessAddress :: Addr,
   accessStorageKeys :: [W256]
-} deriving Show
+} deriving (Show, Generic)
+
+instance JSON.ToJSON AccessListEntry
 
 data TxType = LegacyTransaction
             | AccessListTransaction
             | EIP1559Transaction
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
+
+instance JSON.ToJSON TxType where
+  toJSON t = case t of
+               EIP1559Transaction    -> "0x2" -- EIP1559
+               LegacyTransaction     -> "0x1" -- EIP2718
+               AccessListTransaction -> "0x1" -- EIP2930
+
 
 data Transaction = Transaction {
     txData     :: ByteString,
@@ -46,8 +56,43 @@ data Transaction = Transaction {
     txType     :: TxType,
     txAccessList :: [AccessListEntry],
     txMaxPriorityFeeGas :: Maybe W256,
-    txMaxFeePerGas :: Maybe W256
-} deriving Show
+    txMaxFeePerGas :: Maybe W256,
+    txChainId  :: W256
+} deriving (Show, Generic)
+
+instance JSON.ToJSON Transaction where
+  toJSON t = JSON.object [ ("input",             (JSON.toJSON (ByteStringS t.txData)))
+                         , ("gas",               (JSON.toJSON $ "0x" ++ showHex (toInteger $ t.txGasLimit) ""))
+                         , ("gasPrice",          (JSON.toJSON $ show $ fromJust $ t.txGasPrice))
+                         , ("v",                 (JSON.toJSON $ show $ (t.txV)-27))
+                         , ("r",                 (JSON.toJSON $ show $ t.txR))
+                         , ("s",                 (JSON.toJSON $ show $ t.txS))
+                         , ("to",                (JSON.toJSON $ t.txToAddr))
+                         , ("nonce",             (JSON.toJSON $ show $ t.txNonce))
+                         , ("value",             (JSON.toJSON $ show $ t.txValue))
+                         , ("type",              (JSON.toJSON $ t.txType))
+                         , ("accessList",        (JSON.toJSON $ t.txAccessList))
+                         , ("maxPriorityFeePerGas", (JSON.toJSON $ show $ fromJust $ t.txMaxPriorityFeeGas))
+                         , ("maxFeePerGas",      (JSON.toJSON $ show $ fromJust $ t.txMaxFeePerGas))
+                         , ("chainId",           (JSON.toJSON $ show t.txChainId))
+                         ]
+
+emptyTransaction :: Transaction
+emptyTransaction = Transaction { txData = mempty
+                               , txGasLimit = 0
+                               , txGasPrice = Nothing
+                               , txNonce = 0
+                               , txR = 0
+                               , txS = 0
+                               , txToAddr = Nothing
+                               , txV = 0
+                               , txValue = 0
+                               , txType = EIP1559Transaction
+                               , txAccessList = []
+                               , txMaxPriorityFeeGas = Nothing
+                               , txMaxFeePerGas = Nothing
+                               , txChainId = 1
+                               }
 
 -- | utility function for getting a more useful representation of accesslistentries
 -- duplicates only matter for gas computation
@@ -55,21 +100,24 @@ txAccessMap :: Transaction -> Map Addr [W256]
 txAccessMap tx = ((Map.fromListWith (++)) . makeTups) tx.txAccessList
   where makeTups = map (\ale -> (ale.accessAddress , ale.accessStorageKeys ))
 
-ecrec :: W256 -> W256 -> W256 -> W256 -> Maybe Addr
-ecrec v r s e = num . word <$> EVM.Precompiled.execute 1 input 32
-  where input = BS.concat (word256Bytes <$> [e, v, r, s])
-
-sender :: Int -> Transaction -> Maybe Addr
-sender chainId tx = ecrec v' tx.txR  tx.txS hash
-  where hash = keccak' (signingData chainId tx)
+-- Given Transaction, it recovers the address that sent it
+sender :: Transaction -> Maybe Addr
+sender tx = ecrec v' tx.txR  tx.txS hash
+  where hash = keccak' (signingData tx)
         v    = tx.txV
         v'   = if v == 27 || v == 28 then v
                else 27 + v
 
-signingData :: Int -> Transaction -> ByteString
-signingData chainId tx =
+sign :: Integer -> Transaction -> Transaction
+sign sk tx = tx { txV = num v, txR = r, txS = s}
+  where
+    hash = keccak' $ signingData tx
+    (v, r, s) = EVM.Sign.sign hash sk
+
+signingData :: Transaction -> ByteString
+signingData tx =
   case tx.txType of
-    LegacyTransaction -> if v == (chainId * 2 + 35) || v == (chainId * 2 + 36)
+    LegacyTransaction -> if v == (tx.txChainId * 2 + 35) || v == (tx.txChainId * 2 + 36)
       then eip155Data
       else normalData
     AccessListTransaction -> eip2930Data
@@ -98,11 +146,11 @@ signingData chainId tx =
                               to',
                               rlpWord256 tx.txValue,
                               BS tx.txData,
-                              rlpWord256 (fromIntegral chainId),
+                              rlpWord256 tx.txChainId,
                               rlpWord256 0x0,
                               rlpWord256 0x0]
         eip1559Data = cons 0x02 $ rlpList [
-          rlpWord256 (fromIntegral chainId),
+          rlpWord256 tx.txChainId,
           rlpWord256 tx.txNonce,
           rlpWord256 maxPrio,
           rlpWord256 maxFee,
@@ -113,7 +161,7 @@ signingData chainId tx =
           rlpAccessList]
 
         eip2930Data = cons 0x01 $ rlpList [
-          rlpWord256 (fromIntegral chainId),
+          rlpWord256 tx.txChainId,
           rlpWord256 tx.txNonce,
           rlpWord256 gasPrice,
           rlpWord256 (num tx.txGasLimit),
@@ -165,15 +213,15 @@ instance FromJSON Transaction where
     value    <- wordField val "value"
     txType   <- fmap (read :: String -> Int) <$> (val JSON..:? "type")
     case txType of
-      Just 0x00 -> return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value LegacyTransaction [] Nothing Nothing
+      Just 0x00 -> return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value LegacyTransaction [] Nothing Nothing 1
       Just 0x01 -> do
         accessListEntries <- (val JSON..: "accessList") >>= parseJSONList
-        return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value AccessListTransaction accessListEntries Nothing Nothing
+        return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value AccessListTransaction accessListEntries Nothing Nothing 1
       Just 0x02 -> do
         accessListEntries <- (val JSON..: "accessList") >>= parseJSONList
-        return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value EIP1559Transaction accessListEntries maxPrio maxFee
+        return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value EIP1559Transaction accessListEntries maxPrio maxFee 1
       Just _ -> fail "unrecognized custom transaction type"
-      Nothing -> return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value LegacyTransaction [] Nothing Nothing
+      Nothing -> return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value LegacyTransaction [] Nothing Nothing 1
   parseJSON invalid =
     JSON.typeMismatch "Transaction" invalid
 

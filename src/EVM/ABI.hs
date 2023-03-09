@@ -546,7 +546,7 @@ bytesP :: ReadP ByteStringS
 bytesP = do
   _ <- string "0x"
   hex <- munch isHexDigit
-  case BS16.decode (encodeUtf8 (Text.pack hex)) of
+  case BS16.decodeBase16 (encodeUtf8 (Text.pack hex)) of
     Right d -> pure $ ByteStringS d
     Left _ -> pfail
 

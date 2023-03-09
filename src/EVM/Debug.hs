@@ -1,3 +1,5 @@
+{-# Language DataKinds #-}
+
 module EVM.Debug where
 
 import EVM          (Contract, nonce, balance, bytecode, codehash)

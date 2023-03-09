@@ -27,16 +27,16 @@ module EVM.Format
 import Prelude hiding (Word)
 
 import EVM qualified
-import EVM (VM, cheatCode, traceForest, Error(..), Trace,
-  TraceData(..), Query(..), FrameContext(..))
-import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError(..),
-  Indexed(NotIndexed), getAbiSeq, parseTypeName, formatString)
+import EVM (VM, cheatCode, traceForest, Error (..), Trace, TraceData(..), Query(..), FrameContext(..))
+import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..),
+  Indexed (NotIndexed), getAbiSeq, parseTypeName, formatString)
 import EVM.Dapp (DappContext(..), DappInfo(..), showTraceLocation)
 import EVM.Expr qualified as Expr
 import EVM.Hexdump (prettyHex)
-import EVM.Solidity (SolcContract(..), Method(..))
-import EVM.Types (maybeLitWord, W256(..), num, word, Expr(..), EType(..), Addr,
+import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
+import EVM.Types (maybeLitWord, W256(..),num, word, Expr(..), EType(..), Addr,
   ByteStringS(..), Error(..))
+
 import Control.Arrow ((>>>))
 import Control.Lens (preview, ix, _2)
 import Data.Binary.Get (runGetOrFail)
@@ -366,14 +366,14 @@ contractPathPart x = T.split (== ':') x !! 0
 
 prettyError :: EVM.Types.Error -> String
 prettyError= \case
-  Invalid -> "Invalid Opcode"
+  EVM.Types.Invalid -> "Invalid Opcode"
   EVM.Types.IllegalOverflow -> "Illegal Overflow"
-  SelfDestruct -> "Self Destruct"
+  EVM.Types.SelfDestruct -> "Self Destruct"
   EVM.Types.StackLimitExceeded -> "Stack limit exceeded"
   EVM.Types.InvalidMemoryAccess -> "Invalid memory access"
   EVM.Types.BadJumpDestination -> "Bad jump destination"
   EVM.Types.StackUnderrun -> "Stack underrun"
-  TmpErr err -> "Temp error: " <> err
+  EVM.Types.TmpErr err -> "Temp error: " <> err
 
 
 prettyvmresult :: (?context :: DappContext) => Expr End -> String

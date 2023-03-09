@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `equivalence` command now pretty prints discovered counterexamples
 
 ### Added
-
+- A new differential fuzzing test harness that compares the concrete semantics, as well as parts of the symbolic semantics against the geth evm implementation
 - The `hevm` library can now be built on Windows systems.
 - Support for function pointers in ABI
 

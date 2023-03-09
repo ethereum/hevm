@@ -352,7 +352,7 @@ fromBlockchainCase' :: Block -> Transaction
                        -> Either BlockchainError Case
 fromBlockchainCase' block tx preState postState =
   let isCreate = isNothing tx.txToAddr in
-  case (sender 1 tx, checkTx tx block preState) of
+  case (sender tx, checkTx tx block preState) of
       (Nothing, _) -> Left SignatureUnverified
       (_, Nothing) -> Left (if isCreate then FailedCreate else InvalidTx)
       (Just origin, Just checkState) -> Right $ Case
@@ -420,7 +420,7 @@ maxBaseFee tx =
 validateTx :: Transaction -> Block -> Map Addr (EVM.Contract, Storage) -> Maybe ()
 validateTx tx block cs = do
   let cs' = Map.map fst cs
-  origin        <- sender 1 tx
+  origin        <- sender tx
   originBalance <- (view balance) <$> view (at origin) cs'
   originNonce   <- (view nonce)   <$> view (at origin) cs'
   let gasDeposit = (effectiveprice tx block.blockBaseFee) * (num tx.txGasLimit)
@@ -431,7 +431,7 @@ validateTx tx block cs = do
 
 checkTx :: Transaction -> Block -> Map Addr (EVM.Contract, Storage) -> Maybe (Map Addr (EVM.Contract, Storage))
 checkTx tx block prestate = do
-  origin <- sender 1 tx
+  origin <- sender tx
   validateTx tx block prestate
   let isCreate   = isNothing tx.txToAddr
       senderNonce = view (accountAt origin . nonce) (Map.map fst prestate)

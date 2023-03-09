@@ -804,6 +804,10 @@ simplify e = if (mapExpr go e == e)
 litAddr :: Addr -> Expr EWord
 litAddr = Lit . num
 
+exprToAddr :: Expr EWord -> Maybe Addr
+exprToAddr (Lit x) = Just (num x)
+exprToAddr _ = Nothing
+
 litCode :: BS.ByteString -> [Expr Byte]
 litCode bs = fmap LitByte (BS.unpack bs)
 

@@ -36,7 +36,7 @@
           })
           [
             (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
-            (haskell.lib.compose.addTestToolDepends [ solc z3 cvc5 ])
+            (haskell.lib.compose.addTestToolDepends [ solc z3 cvc5 go-ethereum ])
             (haskell.lib.compose.appendBuildFlags ["-v3"])
             (haskell.lib.compose.appendConfigureFlags (
               [ "-fci"
@@ -137,6 +137,7 @@
               solc
               mdbook
               yarn
+              go-ethereum
               haskellPackages.cabal-install
               haskellPackages.haskell-language-server
             ];

@@ -39,8 +39,11 @@ import Data.Text.Encoding qualified as Text
 import Data.Vector qualified as V
 import Numeric (readHex, showHex)
 import Options.Generic
-import Text.Regex.TDFA qualified as Regex
-import Text.Read qualified
+import EVM.Hexdump (paddedShowHex)
+import Control.Monad
+
+import qualified Text.Regex.TDFA      as Regex
+import qualified Text.Read
 
 -- Some stuff for "generic programming", needed to create Word512
 import Data.Data
@@ -459,7 +462,7 @@ unlitByte :: Expr Byte -> Maybe Word8
 unlitByte (LitByte x) = Just x
 unlitByte _ = Nothing
 
-newtype ByteStringS = ByteStringS ByteString deriving (Eq)
+newtype ByteStringS = ByteStringS ByteString deriving (Eq, Generic)
 
 instance Show ByteStringS where
   show (ByteStringS x) = ("0x" ++) . Text.unpack . fromBinary $ x
@@ -467,14 +470,22 @@ instance Show ByteStringS where
       fromBinary =
         Text.decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
+instance JSON.FromJSON ByteStringS where
+  parseJSON (JSON.String x) = case BS16.decodeBase16' x of
+                                Left _ -> mzero
+                                Right bs -> pure (ByteStringS bs)
+  parseJSON _ = mzero
+
 instance JSON.ToJSON ByteStringS where
-  toJSON = JSON.String . Text.pack . show
+  toJSON (ByteStringS x) = JSON.String (Text.pack $ "0x" ++ (concatMap (paddedShowHex 2) . BS.unpack $ x))
 
 newtype Addr = Addr { addressWord160 :: Word160 }
   deriving
     ( Num, Integral, Real, Ord, Enum
     , Eq, Generic, Bits, FiniteBits
     )
+instance JSON.ToJSON Addr where
+  toJSON = JSON.String . Text.pack . show
 
 maybeLitWord :: Expr EWord -> Maybe W256
 maybeLitWord (Lit w) = Just w
@@ -488,7 +499,27 @@ instance Show W256 where
   showsPrec _ s = ("0x" ++) . showHex s
 
 instance JSON.ToJSON W256 where
-  toJSON = JSON.String . Text.pack . show
+  toJSON x = JSON.String  $ Text.pack ("0x" ++ pad ++ cutshow)
+    where
+      cutshow = drop 2 $ show x
+      pad = replicate (64 - length (cutshow)) '0'
+
+newtype W64 = W64 Data.Word.Word64
+  deriving
+    ( Num, Integral, Real, Ord, Generic
+    , Bits , FiniteBits, Enum, Eq , Bounded
+    )
+instance JSON.FromJSON W64
+
+instance Read W64 where
+  readsPrec _ "0x" = [(0, "")]
+  readsPrec n s = first W64 <$> readsPrec n s
+
+instance Show W64 where
+  showsPrec _ s = ("0x" ++) . showHex s
+
+instance JSON.ToJSON W64 where
+  toJSON x = JSON.String  $ Text.pack $ show x
 
 instance Read Addr where
   readsPrec _ ('0':'x':s) = readHex s
@@ -499,6 +530,14 @@ instance Show Addr where
     let hex = showHex addr next
         str = replicate (40 - length hex) '0' ++ hex
     in "0x" ++ toChecksumAddress str ++ drop 40 str
+
+instance JSON.ToJSONKey Addr where
+  toJSONKey = JSON.toJSONKeyText (addrKey)
+    where
+      addrKey :: Addr -> Text
+      addrKey addr = Text.pack $ replicate (40 - length hex) '0' ++ hex
+        where
+          hex = show addr
 
 -- https://eips.ethereum.org/EIPS/eip-55
 toChecksumAddress :: String -> String
@@ -555,13 +594,13 @@ instance ParseRecord Addr where
 
 hexByteString :: String -> ByteString -> ByteString
 hexByteString msg bs =
-  case BS16.decode bs of
+  case BS16.decodeBase16 bs of
     Right x -> x
     _ -> error ("invalid hex bytestring for " ++ msg)
 
 hexText :: Text -> ByteString
 hexText t =
-  case BS16.decode (Text.encodeUtf8 (Text.drop 2 t)) of
+  case BS16.decodeBase16 (Text.encodeUtf8 (Text.drop 2 t)) of
     Right x -> x
     _ -> error ("invalid hex bytestring " ++ show t)
 
@@ -726,3 +765,23 @@ regexMatches regexSource =
     regex = Regex.makeRegexOpts compOpts execOpts (Text.unpack regexSource)
   in
     Regex.matchTest regex . Seq.fromList . Text.unpack
+
+data VMTrace =
+  VMTrace
+  { tracePc      :: Int
+  , traceOp      :: Int
+  , traceStack   :: [W256]
+  , traceMemSize :: Data.Word.Word64
+  , traceDepth   :: Int
+  , traceGas     :: Data.Word.Word64
+  , traceError   :: Maybe String
+  } deriving (Generic, Show)
+instance JSON.ToJSON VMTrace where
+  toEncoding = JSON.genericToEncoding JSON.defaultOptions
+instance JSON.FromJSON VMTrace
+
+bsToHex :: ByteString -> String
+bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
+
+bssToBs :: ByteStringS -> ByteString
+bssToBs (ByteStringS bs) = bs
