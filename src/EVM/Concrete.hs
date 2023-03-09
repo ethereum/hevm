@@ -1,5 +1,3 @@
-{-# Language StrictData #-}
-
 module EVM.Concrete where
 
 import Prelude hiding (Word)

@@ -1,6 +1,5 @@
 {-# Language DeriveAnyClass #-}
 {-# Language DataKinds #-}
-{-# Language StrictData #-}
 {-# Language QuasiQuotes #-}
 
 module EVM.Solidity
@@ -178,11 +177,11 @@ data JumpType = JumpInto | JumpFrom | JumpRegular
   deriving (Show, Eq, Ord, Generic)
 
 data SrcMap = SM {
-  srcMapOffset :: {-# UNPACK #-} Int,
-  srcMapLength :: {-# UNPACK #-} Int,
-  srcMapFile   :: {-# UNPACK #-} Int,
+  srcMapOffset :: {-# UNPACK #-} !Int,
+  srcMapLength :: {-# UNPACK #-} !Int,
+  srcMapFile   :: {-# UNPACK #-} !Int,
   srcMapJump   :: JumpType,
-  srcMapModifierDepth :: {-# UNPACK #-} Int
+  srcMapModifierDepth :: {-# UNPACK #-} !Int
 } deriving (Show, Eq, Ord, Generic)
 
 data SrcMapParseState

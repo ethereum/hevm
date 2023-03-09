@@ -101,6 +101,7 @@ data AbiValue
   | AbiArrayDynamic AbiType (Vector AbiValue)
   | AbiArray        Int AbiType (Vector AbiValue)
   | AbiTuple        (Vector AbiValue)
+  | AbiFunction     BS.ByteString
   deriving (Read, Eq, Ord, Generic)
 
 -- | Pretty-print some 'AbiValue'.
@@ -118,6 +119,7 @@ instance Show AbiValue where
     "[" ++ intercalate ", " (show <$> Vector.toList v) ++ "]"
   show (AbiTuple v) =
     "(" ++ intercalate ", " (show <$> Vector.toList v) ++ ")"
+  show (AbiFunction b)       = show (ByteStringS b)
 
 formatString :: ByteString -> String
 formatString bs =
@@ -136,6 +138,7 @@ data AbiType
   | AbiArrayDynamicType AbiType
   | AbiArrayType        Int AbiType
   | AbiTupleType        (Vector AbiType)
+  | AbiFunctionType
   deriving (Read, Eq, Ord, Generic)
 
 instance Show AbiType where
@@ -174,6 +177,7 @@ abiValueType = \case
   AbiArrayDynamic t _ -> AbiArrayDynamicType t
   AbiArray n t _      -> AbiArrayType n t
   AbiTuple v          -> AbiTupleType (abiValueType <$> v)
+  AbiFunction _       -> AbiFunctionType
 
 abiTypeSolidity :: AbiType -> Text
 abiTypeSolidity = \case
@@ -187,6 +191,7 @@ abiTypeSolidity = \case
   AbiArrayDynamicType t -> abiTypeSolidity t <> "[]"
   AbiArrayType n t      -> abiTypeSolidity t <> "[" <> pack (show n) <> "]"
   AbiTupleType ts       -> "(" <> (Text.intercalate "," . Vector.toList $ abiTypeSolidity <$> ts) <> ")"
+  AbiFunctionType       -> "function"
 
 getAbi :: AbiType -> Get AbiValue
 getAbi t = label (Text.unpack (abiTypeSolidity t)) $
@@ -224,6 +229,9 @@ getAbi t = label (Text.unpack (abiTypeSolidity t)) $
     AbiTupleType ts ->
       AbiTuple <$> getAbiSeq (Vector.length ts) (Vector.toList ts)
 
+    AbiFunctionType ->
+      AbiFunction <$> getBytesWith256BitPadding (24 :: Int)
+
 putAbi :: AbiValue -> Put
 putAbi = \case
   AbiUInt _ x ->
@@ -255,6 +263,9 @@ putAbi = \case
 
   AbiTuple v ->
     putAbiSeq v
+
+  AbiFunction b -> do
+    putAbi (AbiBytes 24 b)
 
 -- | Decode a sequence type (e.g. tuple / array). Will fail for non sequence types
 getAbiSeq :: Int -> [AbiType] -> Get (Vector AbiValue)
@@ -308,6 +319,7 @@ abiHeadSize x =
         AbiBool _    -> 32
         AbiTuple v   -> sum (abiHeadSize <$> v)
         AbiArray _ _ xs -> sum (abiHeadSize <$> xs)
+        AbiFunction _ -> 32
         _ -> error "impossible"
 
 putAbiSeq :: Vector AbiValue -> Put
@@ -370,6 +382,7 @@ basicType v =
 
     , P.string "bytes" $> AbiBytesDynamicType
     , P.string "tuple" $> AbiTupleType v
+    , P.string "function" $> AbiFunctionType
     ]
 
   where
@@ -430,6 +443,9 @@ genAbiValue = \case
        replicateM n (scale (`div` 2) (genAbiValue t))
    AbiTupleType ts ->
      AbiTuple <$> mapM genAbiValue ts
+   AbiFunctionType ->
+     do xs <- replicateM 24 arbitrary
+        pure (AbiFunction (BS.pack xs))
   where
     genUInt :: Int -> Gen Word256
     genUInt n = arbitraryIntegralWithMax (2^n-1) :: Gen Word256
@@ -471,6 +487,7 @@ instance Arbitrary AbiValue where
     AbiBool b -> AbiBool <$> shrink b
     AbiAddress a -> [AbiAddress 0xacab, AbiAddress 0xdeadbeef, AbiAddress 0xbabeface]
       <> (AbiAddress <$> shrinkIntegral a)
+    AbiFunction b -> shrink $ AbiBytes 24 b
 
 
 -- Bool synonym with custom read instance
@@ -516,6 +533,8 @@ parseAbiValue (AbiArrayType n typ) =
   AbiArray n typ <$> do a <- listP (parseAbiValue typ)
                         return $ Vector.fromList a
 parseAbiValue (AbiTupleType _) = error "tuple types not supported"
+parseAbiValue AbiFunctionType = AbiFunction <$> do ByteStringS bytes <- bytesP
+                                                   return bytes
 
 listP :: ReadP a -> ReadP [a]
 listP parser = between (char '[') (char ']') ((do skipSpaces
