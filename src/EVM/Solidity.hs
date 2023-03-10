@@ -415,7 +415,7 @@ readFoundryJSON json = do
         , errorMap            = mkErrorMap abi
         , runtimeSrcmap       = runtimeSrcMap
         , creationSrcmap      = creationSrcMap
-        , constructorInputs   = mempty -- TODO: where does this come from?
+        , constructorInputs   = mkConstructor abi
         , storageLayout       = mempty -- TODO: foundry doesn't expose this?
         , immutableReferences = mempty -- TODO: foundry doesn't expose this?
         }
