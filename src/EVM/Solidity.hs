@@ -384,11 +384,11 @@ readJSON Foundry json = readFoundryJSON json
 readFoundryJSON :: Text -> Maybe (Contracts, Asts, Sources)
 readFoundryJSON json = do
   runtime <- json ^? key "deployedBytecode"
-  runtimeCode <- toCode . T.pack . strip0x' . T.unpack <$> runtime ^? key "object" . _String
+  runtimeCode <- toCode . strip0x'' <$> runtime ^? key "object" . _String
   runtimeSrcMap <- makeSrcMaps =<< runtime ^? key "sourceMap" . _String
 
   creation <- json ^? key "bytecode"
-  creationCode <- toCode . T.pack . strip0x' . T.unpack <$> creation ^? key "object" . _String
+  creationCode <- toCode . strip0x'' <$> creation ^? key "object" . _String
   creationSrcMap <- makeSrcMaps =<< creation ^? key "sourceMap" . _String
 
   ast <- json ^? key "ast"

@@ -34,14 +34,14 @@ import Data.Map (Map)
 import Data.Maybe (fromMaybe)
 import Data.Sequence qualified as Seq
 import Data.Serialize qualified as Cereal
-import Data.Text qualified as Text
-import Data.Text.Encoding qualified as Text
 import Data.Vector qualified as V
 import Numeric (readHex, showHex)
 import Options.Generic
 import EVM.Hexdump (paddedShowHex)
 import Control.Monad
 
+import qualified Data.Text            as T
+import qualified Data.Text.Encoding   as T
 import qualified Text.Regex.TDFA      as Regex
 import qualified Text.Read
 
@@ -465,10 +465,10 @@ unlitByte _ = Nothing
 newtype ByteStringS = ByteStringS ByteString deriving (Eq, Generic)
 
 instance Show ByteStringS where
-  show (ByteStringS x) = ("0x" ++) . Text.unpack . fromBinary $ x
+  show (ByteStringS x) = ("0x" ++) . T.unpack . fromBinary $ x
     where
       fromBinary =
-        Text.decodeUtf8 . toStrict . toLazyByteString . byteStringHex
+        T.decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
 instance JSON.FromJSON ByteStringS where
   parseJSON (JSON.String x) = case BS16.decodeBase16' x of
@@ -477,7 +477,7 @@ instance JSON.FromJSON ByteStringS where
   parseJSON _ = mzero
 
 instance JSON.ToJSON ByteStringS where
-  toJSON (ByteStringS x) = JSON.String (Text.pack $ "0x" ++ (concatMap (paddedShowHex 2) . BS.unpack $ x))
+  toJSON (ByteStringS x) = JSON.String (T.pack $ "0x" ++ (concatMap (paddedShowHex 2) . BS.unpack $ x))
 
 newtype Addr = Addr { addressWord160 :: Word160 }
   deriving
@@ -485,7 +485,7 @@ newtype Addr = Addr { addressWord160 :: Word160 }
     , Eq, Generic, Bits, FiniteBits
     )
 instance JSON.ToJSON Addr where
-  toJSON = JSON.String . Text.pack . show
+  toJSON = JSON.String . T.pack . show
 
 maybeLitWord :: Expr EWord -> Maybe W256
 maybeLitWord (Lit w) = Just w
@@ -499,7 +499,7 @@ instance Show W256 where
   showsPrec _ s = ("0x" ++) . showHex s
 
 instance JSON.ToJSON W256 where
-  toJSON x = JSON.String  $ Text.pack ("0x" ++ pad ++ cutshow)
+  toJSON x = JSON.String  $ T.pack ("0x" ++ pad ++ cutshow)
     where
       cutshow = drop 2 $ show x
       pad = replicate (64 - length (cutshow)) '0'
@@ -519,7 +519,7 @@ instance Show W64 where
   showsPrec _ s = ("0x" ++) . showHex s
 
 instance JSON.ToJSON W64 where
-  toJSON x = JSON.String  $ Text.pack $ show x
+  toJSON = JSON.String . T.pack . show
 
 instance Read Addr where
   readsPrec _ ('0':'x':s) = readHex s
@@ -535,7 +535,7 @@ instance JSON.ToJSONKey Addr where
   toJSONKey = JSON.toJSONKeyText (addrKey)
     where
       addrKey :: Addr -> Text
-      addrKey addr = Text.pack $ replicate (40 - length hex) '0' ++ hex
+      addrKey addr = T.pack $ replicate (40 - length hex) '0' ++ hex
         where
           hex = show addr
 
@@ -552,16 +552,19 @@ strip0x bs = if "0x" `Char8.isPrefixOf` bs then Char8.drop 2 bs else bs
 strip0x' :: String -> String
 strip0x' s = if "0x" `isPrefixOf` s then drop 2 s else s
 
+strip0x'' :: Text -> Text
+strip0x'' s = if "0x" `T.isPrefixOf` s then T.drop 2 s else s
+
 instance FromJSON W256 where
   parseJSON v = do
-    s <- Text.unpack <$> parseJSON v
+    s <- T.unpack <$> parseJSON v
     case reads s of
       [(x, "")]  -> return x
       _          -> fail $ "invalid hex word (" ++ s ++ ")"
 
 instance FromJSON Addr where
   parseJSON v = do
-    s <- Text.unpack <$> parseJSON v
+    s <- T.unpack <$> parseJSON v
     case reads s of
       [(x, "")] -> return x
       _         -> fail $ "invalid address (" ++ s ++ ")"
@@ -570,15 +573,15 @@ instance FromJSON Addr where
 
 instance FromJSONKey W256 where
   fromJSONKey = FromJSONKeyTextParser $ \s ->
-    case reads (Text.unpack s) of
+    case reads (T.unpack s) of
       [(x, "")]  -> return x
-      _          -> fail $ "invalid word (" ++ Text.unpack s ++ ")"
+      _          -> fail $ "invalid word (" ++ T.unpack s ++ ")"
 
 instance FromJSONKey Addr where
   fromJSONKey = FromJSONKeyTextParser $ \s ->
-    case reads (Text.unpack s) of
+    case reads (T.unpack s) of
       [(x, "")] -> return x
-      _         -> fail $ "invalid word (" ++ Text.unpack s ++ ")"
+      _         -> fail $ "invalid word (" ++ T.unpack s ++ ")"
 
 #endif
 
@@ -600,7 +603,7 @@ hexByteString msg bs =
 
 hexText :: Text -> ByteString
 hexText t =
-  case BS16.decodeBase16 (Text.encodeUtf8 (Text.drop 2 t)) of
+  case BS16.decodeBase16 (T.encodeUtf8 (T.drop 2 t)) of
     Right x -> x
     _ -> error ("invalid hex bytestring " ++ show t)
 
@@ -611,18 +614,18 @@ readNull :: Read a => a -> String -> a
 readNull x = fromMaybe x . Text.Read.readMaybe
 
 wordField :: JSON.Object -> Key -> JSON.Parser W256
-wordField x f = ((readNull 0) . Text.unpack)
+wordField x f = ((readNull 0) . T.unpack)
                   <$> (x .: f)
 
 word64Field :: JSON.Object -> Key -> JSON.Parser Word64
-word64Field x f = ((readNull 0) . Text.unpack)
+word64Field x f = ((readNull 0) . T.unpack)
                   <$> (x .: f)
 
 addrField :: JSON.Object -> Key -> JSON.Parser Addr
-addrField x f = (read . Text.unpack) <$> (x .: f)
+addrField x f = (read . T.unpack) <$> (x .: f)
 
 addrFieldMaybe :: JSON.Object -> Key -> JSON.Parser (Maybe Addr)
-addrFieldMaybe x f = (Text.Read.readMaybe . Text.unpack) <$> (x .: f)
+addrFieldMaybe x f = (Text.Read.readMaybe . T.unpack) <$> (x .: f)
 
 dataField :: JSON.Object -> Key -> JSON.Parser ByteString
 dataField x f = hexText <$> (x .: f)
@@ -762,9 +765,9 @@ regexMatches regexSource =
       Regex.defaultCompOpt { Regex.lastStarGreedy = True }
     execOpts =
       Regex.defaultExecOpt { Regex.captureGroups = False }
-    regex = Regex.makeRegexOpts compOpts execOpts (Text.unpack regexSource)
+    regex = Regex.makeRegexOpts compOpts execOpts (T.unpack regexSource)
   in
-    Regex.matchTest regex . Seq.fromList . Text.unpack
+    Regex.matchTest regex . Seq.fromList . T.unpack
 
 data VMTrace =
   VMTrace
