@@ -877,9 +877,29 @@ tests = testGroup "contract-quickcheck-run"
         cleanupEvmtoolFiles evmtoolResult
 
       , testProperty "random-contract-SMT" $ \(contr :: OpContract) -> ioProperty $ do
-        txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+15) $ chooseInt (0,255)
+        -- The test below checks very simple calldata copy as a return value
+        -- let test1 = OpContract [ OpPush (Lit 0x10), OpPush (Lit 0x0), OpPush (Lit 0x0)
+        --                          ,OpCalldatacopy
+        --                          ,OpPush (Lit 0x6) ,OpPush (Lit 0x0)
+        --                          ,OpReturn]
+        --
+        -- NOTE: The test below checks whether ITE works correctly
+        -- let test2 = OpContract [OpPush (Lit 164) -- load PC jump dest to stack
+        --                         , OpPush (Lit 0)
+        --                         , OpCalldataload -- load calldata byte to stack
+        --                         , OpJumpi
+        --                         , OpPush (Lit 0x10), OpPush (Lit 0x20), OpPush (Lit 0x0)
+        --                         , OpCalldatacopy
+        --                         , OpJumpdest
+        --                         , OpPush (Lit 0x6) ,OpPush (Lit 0x0)
+        --                         , OpReturn]
+        putStrLn "---------"
+        putStrLn $ "contract: " <> (show contr)
+        -- txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+15) $ chooseInt (0,1)
         gaslimitExec <- generate $ chooseInt (40000, 0xffff)
-        let txData = BS.pack $ toEnum <$> txDataRaw
+        -- let txData = BS.pack $ toEnum <$> txDataRaw
+        let txData = BS.pack $ replicate 32 0  ++ [32..200]
+        putStrLn $ "txData: " <> (bsToHex txData)
         -- TODO enable external calls for more extensive fuzzing
         contrFixed <- fixContractJumps $ removeExtcalls contr
         evmtoolResult <- getEVMToolRet contrFixed txData gaslimitExec
@@ -895,7 +915,7 @@ tests = testGroup "contract-quickcheck-run"
                 putStrLn $ "expr: " <> (show expr)
                 let resultOK = evmtoolTraceOutput.output.output == (vmres hevmVM).out
                 assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
-                putStrLn $ "ret should be: " <> (bsToHex $ fromJust sRet)
+                putStrLn $ "ret should be: '" <> (bsToHex $ fromJust sRet) <> "'"
                 let noFailInExpr = isJust $ checkForFailure expr
                 if noFailInExpr then runExprOnSMT expr txData hevmVM (checkRetData $ fromJust sRet)
                   else putStrLn "Expression contains failure, can't check"
@@ -908,7 +928,7 @@ tests = testGroup "contract-quickcheck-run"
 checkRetData:: ByteString -> Postcondition
 checkRetData retData _ exprEnd = case exprEnd of
   EVM.Types.Return _ buf _ -> PNeg (PEq buf (ConcreteBuf retData))
-  _ -> PBool True -- fail on everything else
+  _ -> PBool True
 
 runExprOnSMT :: Expr 'End -> ByteString -> VM -> Postcondition -> IO ()
 runExprOnSMT expr txData preState post = do
@@ -918,9 +938,22 @@ runExprOnSMT expr txData preState post = do
     precond = [PEq (ConcreteBuf txData) (AbstractBuf "calldata")]
     withQueries ::[(SMT2, Expr 'End)]
     withQueries = fmap (\(pcs, leaf) -> (assertProps ((post preState leaf) : precond <> extractProps leaf <> pcs), leaf)) flattened
-  putStrLn $ "Checking if output can be other than expected"
+  putStrLn "Checking if output can be other than expected"
+  putStrLn $ "Flattened: " <> (show flattened)
 
+  -- When the preconditions for the branch don't hold, the SMT will be UNSAT. ->
+  --              Check this with the above 'test2'. There, the calldata is set
+  --              to a specific value and then it's tested to be a
+  --              different value. This leads to UNSAT
+  -- When the preconditions hold, then the SMT will also be UNSAT ->
+  --              In these cases, the precondition is OK, however, we assert
+  --              through checkRetData that the return value is something
+  --              other than it should be.
+  -- Hence, if we ever get SAT, we know that either we hit an ITE branch
+  --              that we should not have hit, or the right ITE branch
+  --              trying to return something other than what we expect
   forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
+    putStrLn $ "Doing " <> (show idx)
     let fname = ("query-" <> show idx <> ".smt2")
     TL.writeFile fname
       ("; " <> (TL.pack $ show leaf) <> "\n\n" <> formatSMT2 q <> "\n\n(check-sat)")
@@ -928,4 +961,4 @@ runExprOnSMT expr txData preState post = do
     res <- withSolvers Z3 1 Nothing $ \s ->checkSat s q
     assertEqual "Result must be UNSAT, i.e. output from SMT & concrete execution must match" res Unsat
 
-  putStrLn "OK, SMT agrees with the output"
+  putStrLn "OK, SMT agrees with the output from evmtool & HEVM concrete & HEVM semi-symbolic"
