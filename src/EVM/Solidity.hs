@@ -1,4 +1,6 @@
 {-# Language DeriveAnyClass #-}
+{-# Language DerivingStrategies #-}
+{-# Language GeneralisedNewtypeDeriving #-}
 {-# Language DataKinds #-}
 {-# Language QuasiQuotes #-}
 
@@ -71,7 +73,7 @@ import Data.Semigroup
 import Data.Sequence (Seq)
 import Data.String.Here qualified as Here
 import Data.Text (pack, intercalate)
-import Data.Text qualified as Text
+import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 import Data.Text.IO (readFile, writeFile)
 import Data.Vector (Vector)
@@ -114,12 +116,12 @@ instance Show SlotType where
 
 instance Read SlotType where
   readsPrec _ ('m':'a':'p':'p':'i':'n':'g':'(':s) =
-    let (lhs,rhs) = case Text.splitOn " => " (pack s) of
+    let (lhs,rhs) = case T.splitOn " => " (pack s) of
           (l:r) -> (l,r)
           _ -> error "could not parse storage item"
         first = fromJust $ parseTypeName mempty lhs
-        target = fromJust $ parseTypeName mempty (Text.replace ")" "" (last rhs))
-        rest = fmap (fromJust . (parseTypeName mempty . (Text.replace "mapping(" ""))) (take (length rhs - 1) rhs)
+        target = fromJust $ parseTypeName mempty (T.replace ")" "" (last rhs))
+        rest = fmap (fromJust . (parseTypeName mempty . (T.replace "mapping(" ""))) (take (length rhs - 1) rhs)
     in [(StorageMapping (first NonEmpty.:| rest) target, "")]
   readsPrec _ s = [(StorageValue $ fromMaybe (error "could not parse storage item") (parseTypeName mempty (pack s)),"")]
 
@@ -154,30 +156,17 @@ data Mutability
   | Payable    -- ^ function accepts Ether
  deriving (Show, Eq, Ord, Generic)
 
+-- | A mapping from on disk location (TODO: is this true?) to a SolcContract object
 newtype Contracts = Contracts (Map Text SolcContract)
-  deriving (Show, Eq)
+  deriving newtype (Show, Eq, Semigroup, Monoid)
 
--- TODO: why can't the compiler figure this out with newtypederiving??
-instance Semigroup Contracts where
-  (Contracts a) <> (Contracts b) = Contracts (a <> b)
-instance Monoid Contracts where
-  mempty = Contracts mempty
-
+-- | A mapping from on disk location to (TODO: what exactly?)
 newtype Asts = Asts (Map Text Value)
-  deriving (Show, Eq)
+  deriving newtype (Show, Eq, Semigroup, Monoid)
 
-instance Semigroup Asts where
-  (Asts a) <> (Asts b) = Asts (a <> b)
-instance Monoid Asts where
-  mempty = Asts mempty
-
+-- | A mapping from (TODO: what to what??)
 newtype Sources = Sources [(Text, Maybe ByteString)]
-  deriving (Show, Eq)
-
-instance Semigroup Sources where
-  (Sources a) <> (Sources b) = Sources (a <> b)
-instance Monoid Sources where
-  mempty = Sources mempty
+  deriving newtype (Show, Eq, Semigroup, Monoid)
 
 data BuildOutput = BuildOutput
   { contracts :: Contracts
@@ -213,7 +202,7 @@ instance FromJSON Reference where
     typeMismatch "Transaction" invalid
 
 instance Semigroup SourceCache where
-  _ <> _ = error "lol"
+  SourceCache a b c <> SourceCache d e f = SourceCache (a <> d) (b <> e) (c <> f)
 
 instance Monoid SourceCache where
   mempty = SourceCache mempty mempty mempty
@@ -244,7 +233,7 @@ data CodeType = Creation | Runtime
 -- Obscure but efficient parser for the Solidity sourcemap format.
 makeSrcMaps :: Text -> Maybe (Seq SrcMap)
 makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
-             . Text.foldl' (flip go) (mempty, F1 [] 1, SM 0 0 0 JumpRegular 0)
+             . T.foldl' (flip go) (mempty, F1 [] 1, SM 0 0 0 JumpRegular 0)
   where
     done (xs, s, p) = let (xs', _, _) = go ';' (xs, s, p) in xs'
     readR = read . reverse
@@ -319,7 +308,7 @@ filterMetadata = filter (not . isSuffixOf ".metadata.json")
 makeSourceCache :: Sources -> Asts -> IO SourceCache
 makeSourceCache (Sources sources) (Asts asts) = do
   let f (_,  Just content) = return content
-      f (fp, Nothing) = BS.readFile $ Text.unpack fp
+      f (fp, Nothing) = BS.readFile $ T.unpack fp
   xs <- mapM f sources
   return $! SourceCache
     { files = zip (fst <$> sources) xs
@@ -352,7 +341,7 @@ yul :: Text -> Text -> IO (Maybe ByteString)
 yul contract src = do
   (json, path) <- yul' src
   let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
-      c = f ^?! key (Key.fromText $ if Text.null contract then "object" else contract)
+      c = f ^?! key (Key.fromText $ if T.null contract then "object" else contract)
       bytecode = c ^?! key "evm" ^?! key "bytecode" ^?! key "object" . _String
   pure $ toCode <$> (Just bytecode)
 
@@ -360,7 +349,7 @@ yulRuntime :: Text -> Text -> IO (Maybe ByteString)
 yulRuntime contract src = do
   (json, path) <- yul' src
   let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
-      c = f ^?! key (Key.fromText $ if Text.null contract then "object" else contract)
+      c = f ^?! key (Key.fromText $ if T.null contract then "object" else contract)
       bytecode = c ^?! key "evm" ^?! key "deployedBytecode" ^?! key "object" . _String
   pure $ toCode <$> (Just bytecode)
 
@@ -391,11 +380,51 @@ readJSON :: ProjectType -> Text -> Maybe (Contracts, Asts, Sources)
 readJSON DappTools json = readStdJSON json
 readJSON Foundry json = readFoundryJSON json
 
--- | Reads the foundry output for a single contract
+-- | Reads a foundry json output
 readFoundryJSON :: Text -> Maybe (Contracts, Asts, Sources)
-readFoundryJSON = undefined
+readFoundryJSON json = do
+  runtime <- json ^? key "deployedBytecode"
+  runtimeCode <- toCode . T.pack . strip0x' . T.unpack <$> runtime ^? key "object" . _String
+  runtimeSrcMap <- makeSrcMaps =<< runtime ^? key "sourceMap" . _String
 
--- | Reads a standard solc output json into (TODO: what exactly?)
+  creation <- json ^? key "bytecode"
+  creationCode <- toCode . T.pack . strip0x' . T.unpack <$> creation ^? key "object" . _String
+  creationSrcMap <- makeSrcMaps =<< creation ^? key "sourceMap" . _String
+
+  ast <- json ^? key "ast"
+  astParsed <- KeyMap.toHashMapText <$> json ^? key "ast" . _Object
+
+  -- Foundry stores the contract name as the json file name (which we don't
+  -- have here since we are dealing only with the actual file contents), so we
+  -- do a little hack here and pull the contract name out of the
+  -- "exportedSymbols" field of the ast.
+  path <- ast ^? key "absolutePath" . _String
+  exportedSymbols <- KeyMap.toHashMapText <$> ast ^? key "exportedSymbols" . _Object
+  let name = HMap.keys exportedSymbols !! 0
+
+  abi <- toList <$> json ^? key "abi" . _Array
+
+  let contract = SolcContract
+        { runtimeCodehash     = keccak' (stripBytecodeMetadata runtimeCode)
+        , creationCodehash    = keccak' (stripBytecodeMetadata creationCode)
+        , runtimeCode         = runtimeCode
+        , creationCode        = creationCode
+        , contractName        = name
+        , abiMap              = mkAbiMap abi
+        , eventMap            = mkEventMap abi
+        , errorMap            = mkErrorMap abi
+        , runtimeSrcmap       = runtimeSrcMap
+        , creationSrcmap      = creationSrcMap
+        , constructorInputs   = mempty -- TODO: where does this come from?
+        , storageLayout       = mempty -- TODO: foundry doesn't expose this?
+        , immutableReferences = mempty -- TODO: foundry doesn't expose this?
+        }
+  return ( Contracts $ Map.singleton path contract
+         , Asts      $ Map.fromList (HMap.toList astParsed)
+         , Sources   $ mempty
+         )
+
+-- | Parses the standard json output from solc
 readStdJSON :: Text -> Maybe (Contracts, Asts, Sources)
 readStdJSON json = do
   contracts <- KeyMap.toHashMapText <$> json ^? key "contracts" . _Object
@@ -523,7 +552,7 @@ mkStorageLayout (Just json) = do
        slot <- item ^? key "slot" . _String
        typ <- Key.fromText <$> item ^? key "type" . _String
        slotType <- types ^?! key typ ^? key "label" . _String
-       return (name, StorageItem (read $ Text.unpack slotType) offset (read $ Text.unpack slot)))
+       return (name, StorageItem (read $ T.unpack slotType) offset (read $ T.unpack slot)))
 
 signature :: AsValue s => s -> Text
 signature abi =
@@ -640,7 +669,7 @@ solc lang src =
   withSystemTempFile "hevm.sol" $ \path handle -> do
     hClose handle
     writeFile path (stdjson lang src)
-    Text.pack <$> readProcess
+    T.pack <$> readProcess
       "solc"
       ["--standard-json", path]
       ""
@@ -755,7 +784,7 @@ astSrcMap astIds =
       . mapMaybe
         (\v -> do
           src <- preview (key "src" . _String) v
-          [i, n, f] <- mapM (readMaybe . Text.unpack) (Text.split (== ':') src)
+          [i, n, f] <- mapM (readMaybe . T.unpack) (T.split (== ':') src)
           return ((i, n, f), v)
         )
       . Map.elems
