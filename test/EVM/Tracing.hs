@@ -895,11 +895,9 @@ tests = testGroup "contract-quickcheck-run"
         --                         , OpPush (Lit 0x6) ,OpPush (Lit 0x0)
         --                         , OpReturn]
         putStrLn "---------"
-        putStrLn $ "contract: " <> (show contr)
-        txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+15) $ chooseInt (0,1)
+        txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+15) $ chooseInt (0,255)
         let txData = BS.pack $ toEnum <$> txDataRaw
         gaslimitExec <- generate $ chooseInt (40000, 0xffff)
-        putStrLn $ "txData: " <> (bsToHex txData)
         -- TODO enable external calls for more extensive fuzzing
         contrFixed <- fixContractJumps $ removeExtcalls contr
         evmtoolResult <- getEVMToolRet contrFixed txData gaslimitExec
