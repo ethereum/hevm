@@ -884,6 +884,7 @@ tests = testGroup "contract-quickcheck-run"
         --                          ,OpReturn]
         --
         -- NOTE: The test below checks whether ITE works correctly
+        -- MUST SET: let txData = BS.pack $ replicate 32 0  ++ [32..200]
         -- let test2 = OpContract [OpPush (Lit 164) -- load PC jump dest to stack
         --                         , OpPush (Lit 0)
         --                         , OpCalldataload -- load calldata byte to stack
@@ -895,10 +896,9 @@ tests = testGroup "contract-quickcheck-run"
         --                         , OpReturn]
         putStrLn "---------"
         putStrLn $ "contract: " <> (show contr)
-        -- txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+15) $ chooseInt (0,1)
+        txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+15) $ chooseInt (0,1)
+        let txData = BS.pack $ toEnum <$> txDataRaw
         gaslimitExec <- generate $ chooseInt (40000, 0xffff)
-        -- let txData = BS.pack $ toEnum <$> txDataRaw
-        let txData = BS.pack $ replicate 32 0  ++ [32..200]
         putStrLn $ "txData: " <> (bsToHex txData)
         -- TODO enable external calls for more extensive fuzzing
         contrFixed <- fixContractJumps $ removeExtcalls contr
