@@ -59,7 +59,7 @@ main = defaultMain
 
 debugContract :: ByteString -> IO ()
 debugContract c = withSolvers CVC5 4 Nothing $ \solvers -> do
-  let prestate = abstractVM Nothing [] c Nothing SymbolicS
+  let prestate = abstractVM (mkCalldata Nothing []) c Nothing SymbolicS
   void $ TTY.runFromVM solvers Nothing Nothing emptyDapp prestate
 
 
