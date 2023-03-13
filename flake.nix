@@ -128,7 +128,7 @@
         # --- shell ---
 
         devShell = with pkgs;
-          let libraryPath = "${lib.makeLibraryPath [ libff secp256k1 ]}";
+          let libraryPath = "${lib.makeLibraryPath [ libff secp256k1 gmp ]}";
           in haskellPackages.shellFor {
             packages = _: [ hevmUnwrapped ];
             buildInputs = [
