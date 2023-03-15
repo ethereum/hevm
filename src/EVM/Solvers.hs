@@ -2,8 +2,6 @@
 {-# Language GADTs #-}
 {-# Language PolyKinds #-}
 {-# Language ScopedTypeVariables #-}
-{-# Language TypeApplications #-}
-{-# Language QuasiQuotes #-}
 
 {- |
     Module: EVM.Solvers
@@ -18,10 +16,13 @@ import Control.Monad
 import GHC.IO.Handle (Handle, hFlush, hSetBuffering, BufferMode(..))
 import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
 import Control.Concurrent (forkIO, killThread)
+import Control.Monad.State.Strict
 import Data.Char (isSpace)
 
 import Data.Maybe (fromMaybe)
 import Data.Text.Lazy (Text)
+import Data.Map (Map)
+import qualified Data.Map as Map
 import qualified Data.Text as TS
 import qualified Data.Text.Lazy as T
 import qualified Data.Text.Lazy.IO as T
@@ -29,6 +30,7 @@ import Data.Text.Lazy.Builder
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
 
 import EVM.SMT
+import EVM.Types
 
 -- | Supported solvers
 data Solver
@@ -128,19 +130,7 @@ withSolvers solver count timeout cont = do
         Right () -> do
           sat <- sendLine inst "(check-sat)"
           res <- case sat of
-            "sat" -> do
-              calldatamodels <- getVars parseVar (getValue inst) (fmap T.toStrict cexvars.calldataV)
-              buffermodels <- getBufs (getValue inst) (fmap T.toStrict cexvars.buffersV)
-              storagemodels <- getStore (getValue inst) cexvars.storeReads
-              blockctxmodels <- getVars parseBlockCtx (getValue inst) (fmap T.toStrict cexvars.blockContextV)
-              txctxmodels <- getVars parseFrameCtx (getValue inst) (fmap T.toStrict cexvars.txContextV)
-              pure $ Sat $ SMTCex
-                { vars = calldatamodels
-                , buffers = buffermodels
-                , store = storagemodels
-                , blockContext = blockctxmodels
-                , txContext = txctxmodels
-                }
+            "sat" -> Sat <$> getModel inst cexvars
             "unsat" -> pure Unsat
             "timeout" -> pure Unknown
             "unknown" -> pure Unknown
@@ -149,6 +139,85 @@ withSolvers solver count timeout cont = do
 
       -- put the instance back in the list of available instances
       writeChan availableInstances inst
+
+getModel :: SolverInstance -> CexVars -> IO SMTCex
+getModel inst cexvars = do
+  -- get an initial version of the model from the solver
+  initialModel <- getRaw
+  -- get concrete values for each buffers max read index
+  hints <- capHints <$> queryMaxReads (getValue inst) cexvars.buffersV
+  -- check the sizes of buffer models and shrink if needed
+  if bufsUsable initialModel
+  then do
+    pure (mkConcrete initialModel)
+  else mkConcrete . snd <$> runStateT (shrinkModel hints) initialModel
+  where
+    getRaw :: IO SMTCex
+    getRaw = do
+      vars <- getVars parseVar (getValue inst) (fmap T.toStrict cexvars.calldataV)
+      buffers <- getBufs (getValue inst) (Map.keys cexvars.buffersV)
+      storage <- getStore (getValue inst) cexvars.storeReads
+      blockctx <- getVars parseBlockCtx (getValue inst) (fmap T.toStrict cexvars.blockContextV)
+      txctx <- getVars parseFrameCtx (getValue inst) (fmap T.toStrict cexvars.txContextV)
+      pure $ SMTCex vars buffers storage blockctx txctx
+
+    -- sometimes the solver might give us back a model for the max read index
+    -- that is too high to be a useful cex (e.g. in the case of reads from a
+    -- symbolic index), so we cap the max value of the starting point to be 1024
+    capHints :: Map Text W256 -> Map Text W256
+    capHints = fmap (min 1024)
+
+    -- shrink all the buffers in a model
+    shrinkModel :: Map Text W256 -> StateT SMTCex IO ()
+    shrinkModel hints = do
+      m <- get
+      -- iterate over all the buffers in the model, and shrink each one in turn if needed
+      forM_ (Map.keys m.buffers) $ \case
+        AbstractBuf b -> do
+          let name = T.fromStrict b
+              hint = fromMaybe
+                       (error $ "Internal Error: Could not find hint for buffer: " <> T.unpack name)
+                       (Map.lookup name hints)
+          shrinkBuf name hint
+        _ -> error "oops"
+
+    -- starting with some guess at the max useful size for a buffer, cap
+    -- it's size to that value, and ask the solver to check satisfiability. If
+    -- it's still sat with the new constraint, leave that constraint on the
+    -- stack and return a new model, if it's unsat, double the size of the hint
+    -- and try again.
+    shrinkBuf :: Text -> W256 -> StateT SMTCex IO ()
+    shrinkBuf buf hint = do
+      let encBound = "(_ bv" <> (T.pack $ show (num hint :: Integer)) <> " 256)"
+      sat <- liftIO $ do
+        sendLine' inst "(push)"
+        sendLine' inst $ "(assert (bvule " <> buf <> "_length " <> encBound <> "))"
+        sendLine inst "(check-sat)"
+      case sat of
+        "sat" -> do
+          model <- liftIO getRaw
+          put model
+        "unsat" -> do
+          liftIO $ sendLine' inst "(pop)"
+          shrinkBuf buf (if hint == 0 then hint + 1 else hint * 2)
+        _ -> error "TODO: HANDLE ERRORS"
+
+    -- Collapses the abstract description of a models buffers down to a bytestring
+    mkConcrete :: SMTCex -> SMTCex
+    mkConcrete c = fromMaybe
+      (error $ "Internal Error: counterexample contains buffers that are too large to be represented as a ByteString: " <> show c)
+      (flattenBufs c)
+
+    -- we set a pretty arbitrary upper limit (of 1024) to decide if we need to do some shrinking
+    bufsUsable :: SMTCex -> Bool
+    bufsUsable model = any (go . snd) (Map.toList model.buffers)
+      where
+        go (Flat _) = True
+        go (Comp c) = case c of
+          (Base _ sz) -> sz <= 1024
+          -- TODO: do I need to check the write idx here?
+          (Write _ idx next) -> idx <= 1024 && go (Comp next)
+
 
 -- | Arguments used when spawing a solver instance
 solverArgs :: Solver -> Maybe (Natural) -> [Text]

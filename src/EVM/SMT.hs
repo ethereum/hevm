@@ -39,13 +39,17 @@ import EVM.Types
 import EVM.Traversals
 import EVM.CSE
 import EVM.Keccak
-import EVM.Expr hiding (copySlice, writeWord, op1, op2, op3, drop)
+import EVM.Expr (writeByte, bufLengthEnv, containsNode, bufLength, minLength)
+import qualified EVM.Expr as Expr
+
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
+
+
 -- variable names in SMT that we want to get values for
 data CexVars = CexVars
   { calldataV :: [Text]
-  , buffersV :: [Text]
+  , buffersV :: Map Text (Expr EWord) -- buffers and guesses at their maximum size
   , storeReads :: [(Expr EWord, Expr EWord)] -- a list of relevant store reads
   , blockContextV :: [Text]
   , txContextV :: [Text]
@@ -64,16 +68,55 @@ instance Monoid CexVars where
       , txContextV = mempty
       }
 
+-- | A model for a buffer, either in it's compressed form (for storing parsed
+-- models from a solver), or as a bytestring (for presentation to users)
+data BufModel
+  = Comp CompressedBuf
+  | Flat ByteString
+  deriving (Eq, Show)
+
+-- | This representation lets us store buffers of arbitrary length without
+-- exhausting the available memory, it closely matches the format used by
+-- smt-lib when returning models for arrays
+data CompressedBuf
+  = Base { byte :: Word8, length :: W256}
+  | Write { byte :: Word8, idx :: W256, next :: CompressedBuf }
+  deriving (Eq, Show)
+
+
+-- | a final post shrinking cex, buffers here are all represented as concrete bytestrings
 data SMTCex = SMTCex
   { vars :: Map (Expr EWord) W256
-  , buffers :: Map (Expr Buf) ByteString
+  , buffers :: Map (Expr Buf) BufModel
   , store :: Map W256 (Map W256 W256)
   , blockContext :: Map (Expr EWord) W256
   , txContext :: Map (Expr EWord) W256
   }
   deriving (Eq, Show)
 
-getVar :: EVM.SMT.SMTCex -> TS.Text -> W256
+flattenBufs :: SMTCex -> Maybe SMTCex
+flattenBufs cex = do
+  bs <- mapM collapse cex.buffers
+  pure $ SMTCex
+    { vars = cex.vars
+    , buffers = bs
+    , store = cex.store
+    , blockContext = cex.blockContext
+    , txContext = cex.txContext
+    }
+
+-- | Attemps to collapse a compressed buffer representation down to a flattened one
+collapse :: BufModel -> Maybe BufModel
+collapse model = case toBuf model of
+  Just (ConcreteBuf b) -> Just $ Flat b
+  _ -> Nothing
+  where
+    toBuf (Comp (Base b sz)) | sz <= 120_000_000 = Just . ConcreteBuf $ BS.replicate (num sz) b
+    toBuf (Comp (Write b idx next)) = fmap (writeByte (Lit idx) (LitByte b)) (toBuf $ Comp next)
+    toBuf (Flat b) = Just . ConcreteBuf $ b
+    toBuf _ = Nothing
+
+getVar :: SMTCex -> TS.Text -> W256
 getVar cex name = fromJust $ Map.lookup (Var name) cex.vars
 
 data SMT2 = SMT2 [Builder] CexVars
@@ -110,7 +153,7 @@ assertProps ps =
   let encs = map propToSMT ps_elim
       intermediates = declareIntermediates bufs stores in
   prelude
-  <> (declareBufs . nubOrd $ foldl (<>) [] allBufs)
+  <> (declareBufs ps_elim bufs stores)
   <> SMT2 [""] mempty
   <> (declareVars . nubOrd $ foldl (<>) [] allVars)
   <> SMT2 [""] mempty
@@ -121,7 +164,6 @@ assertProps ps =
   <> intermediates
   <> SMT2 [""] mempty
   <> keccakAssumes
-  <> bufferBounds
   <> readAssumes
   <> SMT2 [""] mempty
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
@@ -130,7 +172,6 @@ assertProps ps =
   where
     (ps_elim, bufs, stores) = eliminateProps ps
 
-    allBufs = fmap referencedBufs' ps_elim <> fmap referencedBufs bufVals <> fmap referencedBufs storeVals
     allVars = fmap referencedVars' ps_elim <> fmap referencedVars bufVals <> fmap referencedVars storeVals
     frameCtx = fmap referencedFrameContext' ps_elim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
     blockCtx = fmap referencedBlockContext' ps_elim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
@@ -148,11 +189,6 @@ assertProps ps =
       = SMT2 ["; read assumptions"] mempty
         <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads ps_elim bufs stores)) mempty
 
-    bufferBounds
-      = SMT2 ["; buffer bounds"] mempty
-        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertMaxLen ps_elim bufs stores)) mempty
-
-
 referencedBufsGo :: Expr a -> [Builder]
 referencedBufsGo = \case
   AbstractBuf s -> [fromText s]
@@ -164,7 +200,6 @@ referencedBufs expr = nubOrd $ foldExpr referencedBufsGo [] expr
 referencedBufs' :: Prop -> [Builder]
 referencedBufs' prop = nubOrd $ foldProp referencedBufsGo [] prop
 
-
 referencedVarsGo :: Expr a -> [Builder]
 referencedVarsGo = \case
   Var s -> [fromText s]
@@ -175,7 +210,6 @@ referencedVars expr = nubOrd $ foldExpr referencedVarsGo [] expr
 
 referencedVars' :: Prop -> [Builder]
 referencedVars' prop = nubOrd $ foldProp referencedVarsGo [] prop
-
 
 referencedFrameContextGo :: Expr a -> [Builder]
 referencedFrameContextGo = \case
@@ -231,7 +265,7 @@ findStorageReads = foldProp go []
 
 
 findBufferAccess :: TraversableTerm a => [a] -> [(Expr EWord, Expr EWord, Expr Buf)]
-findBufferAccess = foldl (\acc p -> foldTerm go acc p) mempty
+findBufferAccess = foldl (foldTerm go) mempty
   where
     go :: Expr a -> [(Expr EWord, Expr EWord, Expr Buf)]
     go = \case
@@ -244,7 +278,7 @@ findBufferAccess = foldl (\acc p -> foldTerm go acc p) mempty
 -- to zero. Looks for buffer reads in the a list of given predicates
 -- and the buffer and storage environments.
 assertReads :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
-assertReads props benv senv = concat $ fmap assertRead allReads
+assertReads props benv senv = concatMap assertRead allReads
   where
     assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
     assertRead (idx, Lit 32, buf) = [PImpl (PGEq idx (bufLength buf)) (PEq (ReadWord idx buf) (Lit 0))]
@@ -260,17 +294,20 @@ assertReads props benv senv = concat $ fmap assertRead allReads
         _ -> True
     keepRead _ = True
 
--- | Asserts that the length of an abstract base buffer is at most the maximum location that is read
-assertMaxLen :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
-assertMaxLen props benv senv = fmap (\(k, v) -> PLEq (BufLength (AbstractBuf k)) v) $ Map.toList bufMap
+-- | Finds the maximum read index for each abstract buffer in the input props
+discoverMaxReads :: [Prop] -> BufEnv -> StoreEnv -> Map Text (Expr EWord)
+discoverMaxReads props benv senv = bufMap
   where
     allReads = nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
+    -- we can have buffers that are not read from but are still mentioned via BufLength in some branch condition
+    -- we assign a default read hint of 4 to start with in these cases (since in most cases we will need at least 4 bytes to produce a counterexample)
+    allBufs = Map.fromList . fmap (, Lit 4) . fmap toLazyText . nubOrd . concat $ fmap referencedBufs' props <> fmap referencedBufs (Map.elems benv) <> fmap referencedBufs (Map.elems senv)
 
-    bufMap = foldl addBound mempty allReads
+    bufMap = Map.unionWith Expr.max (foldl addBound mempty allReads) allBufs
 
     addBound m (idx, size, buf) =
       case baseBuf buf of
-        AbstractBuf b -> Map.insertWith EVM.Expr.max b (add idx size) m
+        AbstractBuf b -> Map.insertWith Expr.max (T.fromStrict b) (Expr.add idx size) m
         _ -> m
 
     baseBuf :: Expr Buf -> Expr Buf
@@ -284,16 +321,16 @@ assertMaxLen props benv senv = fmap (\(k, v) -> PLEq (BufLength (AbstractBuf k))
     baseBuf (WriteWord _ _ b) = baseBuf b
     baseBuf (CopySlice _ _ _ _ dst)= baseBuf dst
 
-
-declareBufs :: [Builder] -> SMT2
-declareBufs names = SMT2 ("; buffers" : fmap declareBuf names <> ("; buffer lengths" : fmap declareLength names)) cexvars
+-- | Returns an SMT2 object with all buffers referenced from the input props declared, and with the appropriate cex extraction metadata attached
+declareBufs :: [Prop] -> BufEnv -> StoreEnv -> SMT2
+declareBufs props bufEnv storeEnv = SMT2 ("; buffers" : fmap declareBuf allBufs <> ("; buffer lengths" : fmap declareLength allBufs)) cexvars
   where
+    cexvars = mempty{buffersV = discoverMaxReads props bufEnv storeEnv}
+    allBufs = fmap fromLazyText $ Map.keys cexvars.buffersV
     declareBuf n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
     declareLength n = "(declare-const " <> n <> "_length" <> " (_ BitVec 256))"
-    cexvars = mempty{buffersV = fmap toLazyText names}
 
-
--- Given a list of 256b VM variable names, create an SMT2 object with the variables declared
+-- Given a list of variable names, create an SMT2 object with the variables declared
 declareVars :: [Builder] -> SMT2
 declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
   where
@@ -640,7 +677,6 @@ exprToSMT = \case
   ChainId -> "chainid"
   BaseFee -> "basefee"
 
-  -- TODO: make me binary...
   LitByte b -> fromLazyText $ "(_ bv" <> T.pack (show (num b :: Integer)) <> " 8)"
   IndexWord idx w -> case idx of
     Lit n -> if n >= 0 && n < 32
@@ -748,9 +784,9 @@ copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Builder -> Builder -> Bui
 copySlice srcOffset dstOffset size@(Lit _) src dst
   | size == (Lit 0) = dst
   | otherwise =
-    let size' = (sub size (Lit 1))
-        encDstOff = exprToSMT (add dstOffset size')
-        encSrcOff = exprToSMT (add srcOffset size')
+    let size' = (Expr.sub size (Lit 1))
+        encDstOff = exprToSMT (Expr.add dstOffset size')
+        encSrcOff = exprToSMT (Expr.add srcOffset size')
         child = copySlice srcOffset dstOffset size' src dst in
     "(store " <> child `sp` encDstOff `sp` "(select " <> src `sp` encSrcOff <> "))"
 copySlice _ _ _ _ _ = error "TODO: implement copySlice with a symbolically sized region"
@@ -803,6 +839,7 @@ encodeConcreteStore s = foldl encodeWrite "emptyStore" writes
 
 
 -- ** Cex parsing ** --------------------------------------------------------------------------------
+
 
 parseW256 :: SpecConstant -> W256
 parseW256 = parseSC
@@ -862,53 +899,44 @@ getVars parseFn getVal names = Map.mapKeys parseFn <$> foldM getOne mempty names
           r -> parseErr r
       pure $ Map.insert name val acc
 
-getBufs :: (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr Buf) ByteString)
-getBufs getVal names = foldM getBuf mempty names
+-- | Queries the solver for models for each of the expressions representing the
+-- max read index for a given buffer
+queryMaxReads :: (Text -> IO Text) -> Map Text (Expr EWord)  -> IO (Map Text W256)
+queryMaxReads getVal maxReads = mapM (queryValue getVal) maxReads
+
+-- | Gets the initial model for each buffer, these will often be much too large for our purposes
+getBufs :: (Text -> IO Text) -> [Text] -> IO (Map (Expr Buf) BufModel)
+getBufs getVal bufs = foldM getBuf mempty bufs
   where
-    getLength :: TS.Text -> IO Int
+    getLength :: Text -> IO W256
     getLength name = do
-      val <- getVal (T.fromStrict name <> "_length")
-      len <- case parseCommentFreeFileMsg getValueRes (T.toStrict val) of
+      val <- getVal (name <> "_length ")
+      pure $ case parseCommentFreeFileMsg getValueRes (T.toStrict val) of
         Right (ResSpecific (parsed :| [])) -> case parsed of
           (TermQualIdentifier (Unqualified (IdSymbol symbol)), (TermSpecConstant sc))
-            -> if symbol == (name <> "_length")
-               then pure $ parseW256 sc
+            -> if symbol == (T.toStrict $ name <> "_length")
+               then parseW256 sc
                else error "Internal Error: solver did not return model for requested value"
           res -> parseErr res
         res -> parseErr res
-      pure $ if len <= num (maxBound :: Int)
-             then fromIntegral len
-             else error $ "Internal Error: buffer: "
-                       <> (TS.unpack name)
-                       <> " is too large to be represented in a ByteString. Length: "
-                       <> show len
 
-    getBuf :: Map (Expr Buf) ByteString -> TS.Text -> IO (Map (Expr Buf) ByteString)
+    getBuf :: Map (Expr Buf) BufModel -> Text -> IO (Map (Expr Buf) BufModel)
     getBuf acc name = do
-      -- Sometimes the solver gives us back a model for a Buffer that has every
-      -- element set to some concrete value. This is impossible to represent as
-      -- a concrete ByteString in haskell (or in any existing computer hardware :D),
-      -- so we ask the solver to give us back a model for the length of
-      -- this buffer and then use that to produce a shorter counterexample (by
-      -- replicating the constant byte up to the length).
       len <- getLength name
-      val <- getVal (T.fromStrict name)
+      val <- getVal name
 
       buf <- case parseCommentFreeFileMsg getValueRes (T.toStrict val) of
         Right (ResSpecific (valParsed :| [])) -> case valParsed of
           (TermQualIdentifier (Unqualified (IdSymbol symbol)), term)
-            -> if symbol == name
+            -> if (T.fromStrict symbol) == name
                then pure $ parseBuf len term
                else error "Internal Error: solver did not return model for requested value"
           res -> error $ "Internal Error: cannot parse solver response: " <> show res
         res -> error $ "Internal Error: cannot parse solver response: " <> show res
-      let bs = case simplify buf of
-                 ConcreteBuf b -> b
-                 p -> error $ "Internal Error: unable to parse solver response into a concrete buffer: " <> show p
-      pure $ Map.insert (AbstractBuf name) bs acc
+      pure $ Map.insert (AbstractBuf $ T.toStrict name) buf acc
 
-    parseBuf :: Int -> Term -> Expr Buf
-    parseBuf len = go mempty
+    parseBuf :: W256 -> Term -> BufModel
+    parseBuf len = Comp . go mempty
       where
         go env = \case
           -- constant arrays
@@ -920,8 +948,8 @@ getBufs getVal names = foldM getBuf mempty names
               )
             )) ((TermSpecConstant val :| [])))
             -> case val of
-                 SCHexadecimal "00" -> mempty
-                 v -> ConcreteBuf $ BS.replicate len (parseW8 v)
+                 SCHexadecimal "00" -> Base 0 0
+                 v -> Base (parseW8 v) len
 
           -- writing a byte over some array
           (TermApplication
@@ -931,7 +959,7 @@ getBufs getVal names = foldM getBuf mempty names
               pbase = go env base
               pidx = parseW256 idx
               pval = parseW8 val
-            in writeByte (Lit pidx) (LitByte pval) pbase
+            in Write pval pidx pbase
 
           -- binding a new name
           (TermLet ((VarBinding name bound) :| []) term) -> let
@@ -962,8 +990,8 @@ getStore getVal sreads = do
 
   -- then create a map by adding only the locations that are read by the program
   foldM (\m (addr, slot) -> do
-            addr' <- queryValue addr
-            slot' <- queryValue slot
+            addr' <- queryValue getVal addr
+            slot' <- queryValue getVal slot
             pure $ addElem addr' slot' m fun) Map.empty sreads
 
   where
@@ -975,17 +1003,17 @@ getStore getVal sreads = do
         Nothing -> Map.insert addr (Map.singleton slot (fun addr slot)) store
 
 
-    queryValue :: Expr EWord -> IO W256
-    queryValue (Lit w) = pure w
-    queryValue w = do
-      let expr = toLazyText $ exprToSMT w
-      raw <- getVal expr
-      case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
-        Right (ResSpecific (valParsed :| [])) ->
-          case valParsed of
-            (_, TermSpecConstant sc) -> pure $ parseW256 sc
-            _ -> error "Internal Error: cannot parse model for storage index"
-        r -> parseErr r
+queryValue :: (Text -> IO Text) -> Expr EWord -> IO W256
+queryValue _ (Lit w) = pure w
+queryValue getVal w = do
+  let expr = toLazyText $ exprToSMT w
+  raw <- getVal expr
+  case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
+    Right (ResSpecific (valParsed :| [])) ->
+      case valParsed of
+        (_, TermSpecConstant sc) -> pure $ parseW256 sc
+        _ -> error "Internal Error: cannot parse model for storage index"
+    r -> parseErr r
 
 
 

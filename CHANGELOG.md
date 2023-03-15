@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The `equivalence` command now pretty prints discovered counterexamples
+- Implemented a shrinking algorithm for counterexamples
 
 ### Added
 - A new differential fuzzing test harness that compares the concrete semantics, as well as parts of the symbolic semantics against the geth evm implementation

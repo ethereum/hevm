@@ -544,6 +544,18 @@ tests = testGroup "hevm"
         assertEqual "Division by 0 needs b=0" (getVar ctr "arg2") 0
         putStrLn "expected counterexample found"
      ,
+      testCase "unused-args-fail" $ do
+         Just c <- solcRuntime "C"
+             [i|
+             contract C {
+               function fun(uint256 a) public pure {
+                 assert(false);
+               }
+             }
+             |]
+         (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x1] c Nothing [] debugVeriOpts
+         putStrLn "expected counterexample found"
+      ,
      testCase "enum-conversion-fail" $ do
         Just c <- solcRuntime "MyContract"
             [i|
