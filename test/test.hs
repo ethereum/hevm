@@ -900,6 +900,19 @@ tests = testGroup "hevm"
         (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
       ,
+     testCase "signed-overflow-checks" $ do
+        Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function fun(uint160 a) external {
+                  int256 j = int256(uint256(a)) + 1;
+                  assert(false);
+              }
+            }
+            |]
+        (_, [Cex _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint160)" [AbiUIntType 160])) [] defaultVeriOpts
+        putStrLn "expected cex discovered"
+      ,
      testCase "opcode-signextend-neg" $ do
         Just c <- solcRuntime "MyContract"
             [i|

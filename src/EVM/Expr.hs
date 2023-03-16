@@ -137,7 +137,7 @@ slt = op2 SLT (\x y ->
   in if sx < sy then 1 else 0)
 
 sgt :: Expr EWord -> Expr EWord -> Expr EWord
-sgt = op2 SLT (\x y ->
+sgt = op2 SGT (\x y ->
   let sx, sy :: Int256
       sx = fromIntegral x
       sy = fromIntegral y
@@ -408,7 +408,7 @@ bufLength = bufLengthEnv mempty False
 bufLengthEnv :: Map.Map Int (Expr Buf) -> Bool -> Expr Buf -> Expr EWord
 bufLengthEnv env useEnv buf = go (Lit 0) buf
   where
-    go :: Expr EWord -> Expr Buf -> Expr EWord  
+    go :: Expr EWord -> Expr Buf -> Expr EWord
     go l (ConcreteBuf b) = EVM.Expr.max l (Lit (num . BS.length $ b))
     go l (AbstractBuf b) = Max l (BufLength (AbstractBuf b))
     go l (WriteWord idx _ b) = go (EVM.Expr.max l (add idx (Lit 32))) b
@@ -794,7 +794,7 @@ simplify e = if (mapExpr go e == e)
 
     go (Max (Lit 0) a) = a
     go (Min (Lit 0) _) = Lit 0
-    
+
     go a = a
 
 
