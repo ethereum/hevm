@@ -108,6 +108,8 @@ data Command w
       { codeA         :: w ::: ByteString       <?> "Bytecode of the first program"
       , codeB         :: w ::: ByteString       <?> "Bytecode of the second program"
       , sig           :: w ::: Maybe Text       <?> "Signature of types to decode / encode"
+      , arg           :: w ::: [String]         <?> "Values to encode"
+      , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
       , smttimeout    :: w ::: Maybe Natural    <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
       , maxIterations :: w ::: Maybe Integer    <?> "Number of times we may revisit a particular branching point"
       , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default) or cvc5"
@@ -307,10 +309,10 @@ equivalence cmd = do
                           , askSmtIters = cmd.askSmtIterations
                           , rpcInfo = Nothing
                           }
-
+  calldata <- buildCalldata cmd
   solver <- getSolver cmd
   withSolvers solver 3 Nothing $ \s -> do
-    res <- equivalenceCheck s bytecodeA bytecodeB veriOpts Nothing
+    res <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata
     case any isCex res of
       False -> do
         putStrLn "No discrepancies found"
@@ -347,37 +349,30 @@ getSrcInfo cmd =
       Just (contractMap, sourceCache) ->
         pure $ dappInfo root contractMap sourceCache
 
--- Although it is tempting to fully abstract calldata and give any hints about
--- the nature of the signature doing so results in significant time spent in
--- consulting z3 about rather trivial matters. But with cvc5 it is quite
--- pleasant!
+
+-- | Builds a buffer representing calldata based on the given cli arguments
+buildCalldata :: Command Options.Unwrapped -> IO (Expr Buf, [Prop])
+buildCalldata cmd = case (cmd.calldata, cmd.sig) of
+  -- fully abstract calldata
+  (Nothing, Nothing) -> pure $ mkCalldata Nothing []
+  -- fully concrete calldata
+  (Just c, Nothing) -> pure (ConcreteBuf (hexByteString "bytes" . strip0x $ c), [])
+  -- calldata according to given abi with possible specializations from the `arg` list
+  (Nothing, Just sig') -> do
+    method' <- functionAbi sig'
+    pure $ mkCalldata (Just (Sig method'.methodSignature (snd <$> method'.inputs))) cmd.arg
+  -- both args provided
+  (_, _) -> do
+    putStrLn "incompatible options provided: --calldata and --sig"
+    exitFailure
+
 
 -- If function signatures are known, they should always be given for best results.
 assert :: Command Options.Unwrapped -> IO ()
 assert cmd = do
   let block'  = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber cmd.block
       rpcinfo = (,) block' <$> cmd.rpc
-      decipher = hexByteString "bytes" . strip0x
-  calldata' <- case (cmd.calldata, cmd.sig) of
-    -- fully abstract calldata
-    (Nothing, Nothing) -> pure
-      ( AbstractBuf "txdata"
-      -- assert that the length of the calldata is never more than 2^64
-      -- this is way larger than would ever be allowed by the gas limit
-      -- and avoids spurious counterexamples during abi decoding
-      -- TODO: can we encode calldata as an array with a smaller length?
-      , [Expr.bufLength (AbstractBuf "txdata") .< (Lit (2 ^ (64 :: Integer)))]
-      )
-
-    -- fully concrete calldata
-    (Just c, Nothing) -> pure (ConcreteBuf (decipher c), [])
-    -- calldata according to given abi with possible specializations from the `arg` list
-    (Nothing, Just sig') -> do
-      method' <- functionAbi sig'
-      let typs = snd <$> method'.inputs
-      pure $ symCalldata method'.methodSignature typs cmd.arg (AbstractBuf "txdata")
-    _ -> error "incompatible options: calldata and abi"
-
+  calldata' <- buildCalldata cmd
   preState <- symvmFromCommand cmd calldata'
   let errCodes = fromMaybe defaultPanicCodes cmd.assertions
   cores <- num <$> getNumProcessors
