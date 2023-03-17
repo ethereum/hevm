@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## unreleased
+## [0.50.4] - 2023-03-17
 
 ### Fixed
 
@@ -17,9 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The `equivalence` command now pretty prints discovered counterexamples
-- Implemented a shrinking algorithm for counterexamples
 
 ### Added
+
+- Implemented a shrinking algorithm for counterexamples
 - A new differential fuzzing test harness that compares the concrete semantics, as well as parts of the symbolic semantics against the geth evm implementation
 - The `hevm` library can now be built on Windows systems.
 - Support for function pointers in ABI
