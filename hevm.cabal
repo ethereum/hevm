@@ -116,10 +116,7 @@ library
     Paths_hevm
   autogen-modules:
     Paths_hevm
-  if flag(devel)
-    ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans -j
-  else
-    ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
+  ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
   if os(linux) || os(windows)
     extra-libraries: stdc++
   extra-libraries:
@@ -196,10 +193,7 @@ executable hevm
     hevm-cli
   main-is:
     hevm-cli.hs
-  if flag(devel)
-    ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans -j
-  else
-    ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
+  ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
   other-modules:
     Paths_hevm
   if os(darwin)
@@ -248,10 +242,7 @@ executable hevm
 
 common test-base
   import: shared
-  if flag (devel)
-    ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans -j
-  else
-    ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans
+  ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans
   hs-source-dirs:
     test
   extra-libraries:
@@ -308,6 +299,8 @@ library test-utils
 common test-common
   import:
     test-base
+  if flag(devel)
+    ghc-options: -threaded -with-rtsopts=-N
   build-depends:
     test-utils
   other-modules:
@@ -321,7 +314,6 @@ common test-common
     ld-options: -Wl,-keep_dwarf_unwind
   else
     extra-libraries: stdc++
-  ghc-options: -threaded -with-rtsopts=-N
 
 --- Test Suites ---
 
