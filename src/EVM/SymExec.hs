@@ -12,7 +12,8 @@ import qualified EVM
 import EVM.Exec
 import qualified EVM.Fetch as Fetch
 import EVM.ABI
-import EVM.SMT
+import EVM.SMT (SMTCex(..), SMT2(..), assertProps, formatSMT2)
+import qualified EVM.SMT as SMT
 import EVM.Solvers
 import EVM.Traversals
 import qualified EVM.Expr as Expr
@@ -761,8 +762,11 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
 
 -- | Takes a buffer and a Cex and replaces all abstract values in the buf with concrete ones from the Cex
 subModel :: SMTCex -> Expr a -> Expr a
-subModel c expr = subBufs c.buffers . subVars c.vars . subStore c.store . subVars c.blockContext . subVars c.txContext $ expr
+subModel c expr = subBufs (fmap forceFlattened c.buffers) . subVars c.vars . subStore c.store . subVars c.blockContext . subVars c.txContext $ expr
   where
+    forceFlattened (SMT.Flat bs) = bs
+    forceFlattened b@(SMT.Comp _) = forceFlattened $ fromMaybe (error $ "Internal Error: cannot flatten buffer: " <> show b) (SMT.collapse b)
+
     subVars model b = Map.foldlWithKey subVar b model
     subVar :: Expr a -> Expr EWord -> W256 -> Expr a
     subVar b var val = mapExpr go b

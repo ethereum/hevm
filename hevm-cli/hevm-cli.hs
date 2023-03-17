@@ -489,16 +489,16 @@ launchExec cmd = do
             let res = case msg of
                         ConcreteBuf bs -> bs
                         _ -> "<symbolic>"
-            print $ ByteStringS res
+            putStrLn $ "Revert: " <> (show $ ByteStringS res)
             exitWith (ExitFailure 2)
           Just (EVM.VMFailure err) -> do
-            print err
+            putStrLn $ "Error: " <> show err
             exitWith (ExitFailure 2)
           Just (EVM.VMSuccess buf) -> do
             let msg = case buf of
                   ConcreteBuf msg' -> msg'
                   _ -> "<symbolic>"
-            print $ ByteStringS msg
+            print $ "Return: " <> (show $ ByteStringS msg)
             case cmd.state of
               Nothing -> pure ()
               Just path ->
