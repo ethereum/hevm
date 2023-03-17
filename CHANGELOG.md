@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `--solvers` cli option is now respected (previously we always used Z3)
 - The `equivalence` command now fails with the correct status code when counterexamples are found
 - The `equivalence` command now respects the given `--sig` argument
+- Correct symbolic execution for the `SGT` opcode
 
 ### Changed
 
