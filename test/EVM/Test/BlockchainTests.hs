@@ -1,6 +1,3 @@
-{-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE TupleSections #-}
-
 module EVM.Test.BlockchainTests where
 
 import Prelude hiding (Word)
@@ -21,7 +18,6 @@ import EVM.Types
 import Control.Arrow ((***), (&&&))
 import Optics.Core
 import Control.Monad
-import Control.Monad.State.Strict (execStateT)
 import Data.Aeson ((.:), (.:?), FromJSON (..))
 import Data.Aeson qualified as JSON
 import Data.Aeson.Types qualified as JSON
@@ -134,16 +130,15 @@ ciProblematicTests = Map.fromList
   ]
 
 runVMTest :: Bool -> (String, Case) -> IO ()
-runVMTest diffmode (_name, x) =
- do
+runVMTest diffmode (_name, x) = do
   let vm0 = vmForCase x
-  result <- execStateT (EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) . void $ EVM.Stepper.execFully) vm0
+  result <- EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) vm0 EVM.Stepper.runFully
   maybeReason <- checkExpectation diffmode x result
   forM_ maybeReason assertFailure
 
 -- | Example usage:
--- | $ cabal new-repl ethereum-tests
--- | ghci> debugVMTest "BlockchainTests/GeneralStateTests/VMTests/vmArithmeticTest/twoOps.json" "twoOps_d0g0v0_London"
+-- $ cabal new-repl ethereum-tests
+-- ghci> debugVMTest "BlockchainTests/GeneralStateTests/VMTests/vmArithmeticTest/twoOps.json" "twoOps_d0g0v0_London"
 debugVMTest :: String -> String -> IO ()
 debugVMTest file test = do
   repo <- getEnv "HEVM_ETHEREUM_TESTS_REPO"

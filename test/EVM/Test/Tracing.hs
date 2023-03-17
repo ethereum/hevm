@@ -415,7 +415,7 @@ runCodeWithTrace rpcinfo evmEnv alloc txn (fromAddr, toAddress) = withSolvers Z3
       calldata' = ConcreteBuf txn.txdata
       code' = alloc.code
       buildExpr :: SolverGroup -> VM -> IO (Expr End)
-      buildExpr s vm = evalStateT (interpret (Fetch.oracle s Nothing) Nothing Nothing runExpr) vm
+      buildExpr s vm = interpret (Fetch.oracle s Nothing) Nothing Nothing vm runExpr
 
   expr <- buildExpr solvers $ symbolify origVM
   (res, (vm, trace)) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (origVM, [])
@@ -459,7 +459,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress
 runCode :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe (Expr Buf))
 runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
   let origVM = vmForRuntimeCode code' calldata' emptyEvmToolEnv emptyEVMToolAlloc EVM.Transaction.emptyTransaction (ethrunAddress, createAddress ethrunAddress 1)
-  res <- evalStateT (Stepper.interpret (Fetch.oracle solvers rpcinfo) Stepper.execFully) origVM
+  res <- Stepper.interpret (Fetch.oracle solvers rpcinfo) origVM Stepper.execFully
   pure $ case res of
     Left _ -> Nothing
     Right b -> Just b

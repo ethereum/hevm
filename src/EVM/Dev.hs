@@ -402,7 +402,7 @@ initVm bs = vm
 
 -- | Builds the Expr for the given evm bytecode object
 buildExpr :: SolverGroup -> ByteString -> IO (Expr End)
-buildExpr solvers bs = evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing Nothing runExpr) (initVm bs)
+buildExpr solvers bs = interpret (Fetch.oracle solvers Nothing) Nothing Nothing (initVm bs) runExpr
 
 dai :: IO ByteString
 dai = do
