@@ -97,13 +97,7 @@ data SMTCex = SMTCex
 flattenBufs :: SMTCex -> Maybe SMTCex
 flattenBufs cex = do
   bs <- mapM collapse cex.buffers
-  pure $ SMTCex
-    { vars = cex.vars
-    , buffers = bs
-    , store = cex.store
-    , blockContext = cex.blockContext
-    , txContext = cex.txContext
-    }
+  pure $ cex { buffers = bs}
 
 -- | Attemps to collapse a compressed buffer representation down to a flattened one
 collapse :: BufModel -> Maybe BufModel
@@ -1012,7 +1006,7 @@ queryValue getVal w = do
     Right (ResSpecific (valParsed :| [])) ->
       case valParsed of
         (_, TermSpecConstant sc) -> pure $ parseW256 sc
-        _ -> error "Internal Error: cannot parse model for storage index"
+        _ -> error $ "Internal Error: cannot parse model for: " <> show w
     r -> parseErr r
 
 

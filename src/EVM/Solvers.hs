@@ -179,7 +179,7 @@ getModel inst cexvars = do
                        (error $ "Internal Error: Could not find hint for buffer: " <> T.unpack name)
                        (Map.lookup name hints)
           shrinkBuf name hint
-        _ -> error "oops"
+        _ -> error "Internal Error: Received model from solver for non AbstractBuf"
 
     -- starting with some guess at the max useful size for a buffer, cap
     -- it's size to that value, and ask the solver to check satisfiability. If
