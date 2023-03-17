@@ -6,7 +6,7 @@ module Main where
 import Prelude hiding (Word)
 
 import EVM qualified
-import EVM (contractcode, storage, origStorage, balance, nonce, initialContract, StorageBase(..))
+import EVM (contractcode, storage, origStorage, balance, nonce, initialContract)
 import EVM.Concrete qualified as EVM
 import EVM.Dapp (emptyDapp)
 import EVM.Expr (litAddr)
@@ -357,29 +357,29 @@ fromBlockchainCase' block tx preState postState =
       (_, Nothing) -> Left (if isCreate then FailedCreate else InvalidTx)
       (Just origin, Just checkState) -> Right $ Case
         (EVM.VMOpts
-         { vmoptContract      = EVM.initialContract theCode
-         , vmoptCalldata      = (cd, [])
-         , vmoptValue         = Lit tx.txValue
-         , vmoptAddress       = toAddr
-         , vmoptCaller        = litAddr origin
-         , vmoptStorageBase   = Concrete
-         , vmoptOrigin        = origin
-         , vmoptGas           = tx.txGasLimit  - fromIntegral (txGasCost feeSchedule tx)
-         , vmoptBaseFee       = block.blockBaseFee
-         , vmoptPriorityFee   = priorityFee tx block.blockBaseFee
-         , vmoptGaslimit      = tx.txGasLimit
-         , vmoptNumber        = block.blockNumber
-         , vmoptTimestamp     = Lit block.blockTimestamp
-         , vmoptCoinbase      = block.blockCoinbase
-         , vmoptPrevRandao    = block.blockDifficulty
-         , vmoptMaxCodeSize   = 24576
-         , vmoptBlockGaslimit = block.blockGasLimit
-         , vmoptGasprice      = effectiveGasPrice
-         , vmoptSchedule      = feeSchedule
-         , vmoptChainId       = 1
-         , vmoptCreate        = isCreate
-         , vmoptTxAccessList  = txAccessMap tx
-         , vmoptAllowFFI      = False
+         { vmoptContract       = EVM.initialContract theCode
+         , vmoptCalldata       = (cd, [])
+         , vmoptValue          = Lit tx.txValue
+         , vmoptAddress        = toAddr
+         , vmoptCaller         = litAddr origin
+         , vmoptInitialStorage = EmptyStore
+         , vmoptOrigin         = origin
+         , vmoptGas            = tx.txGasLimit  - fromIntegral (txGasCost feeSchedule tx)
+         , vmoptBaseFee        = block.blockBaseFee
+         , vmoptPriorityFee    = priorityFee tx block.blockBaseFee
+         , vmoptGaslimit       = tx.txGasLimit
+         , vmoptNumber         = block.blockNumber
+         , vmoptTimestamp      = Lit block.blockTimestamp
+         , vmoptCoinbase       = block.blockCoinbase
+         , vmoptPrevRandao     = block.blockDifficulty
+         , vmoptMaxCodeSize    = 24576
+         , vmoptBlockGaslimit  = block.blockGasLimit
+         , vmoptGasprice       = effectiveGasPrice
+         , vmoptSchedule       = feeSchedule
+         , vmoptChainId        = 1
+         , vmoptCreate         = isCreate
+         , vmoptTxAccessList   = txAccessMap tx
+         , vmoptAllowFFI       = False
          })
         checkState
         postState

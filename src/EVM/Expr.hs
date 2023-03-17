@@ -792,8 +792,14 @@ simplify e = if (mapExpr go e == e)
     -- Double NOT is a no-op, since it's a bitwise inversion
     go (EVM.Types.Not (EVM.Types.Not a)) = a
 
+    -- Some trivial min / max eliminations
     go (Max (Lit 0) a) = a
     go (Min (Lit 0) _) = Lit 0
+
+    -- If a >= b then the value of the `Max` expression can never be < b
+    go o@(LT (Max (Lit a) _) (Lit b))
+      | a >= b = Lit 0
+      | otherwise = o
 
     go a = a
 

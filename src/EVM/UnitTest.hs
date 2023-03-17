@@ -973,7 +973,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
            , vmoptSchedule = FeeSchedule.berlin
            , vmoptChainId = testChainId
            , vmoptCreate = True
-           , vmoptStorageBase = Concrete
+           , vmoptInitialStorage = EmptyStore
            , vmoptTxAccessList = mempty -- TODO: support unit test access lists???
            , vmoptAllowFFI = ffiAllowed
            }

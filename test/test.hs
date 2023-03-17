@@ -1150,7 +1150,7 @@ tests = testGroup "hevm"
               in case leaf of
                    EVM.Types.Return _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
                    _ -> PBool True
-        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s safeAdd (Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
+        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s safeAdd (Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts AbstractStore (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
 
@@ -1177,7 +1177,7 @@ tests = testGroup "hevm"
                    EVM.Types.Return _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
                    _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
-          verifyContract s safeAdd (Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
+          verifyContract s safeAdd (Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts AbstractStore (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
       ,
       testCase "summary storage writes" $ do
@@ -1203,7 +1203,7 @@ tests = testGroup "hevm"
               in case leaf of
                 EVM.Types.Return _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
                 _ -> PBool True
-        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
+        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts AbstractStore (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         -- tests how whiffValue handles Neg via application of the triple IsZero simplification rule
@@ -1262,7 +1262,7 @@ tests = testGroup "hevm"
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
-          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
+          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts AbstractStore (Just pre) (Just post)
           putStrLn "Correct, this can never fail"
         ,
         -- Inspired by these `msg.sender == to` token bugs
@@ -1296,7 +1296,7 @@ tests = testGroup "hevm"
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
-          (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
+          (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts AbstractStore (Just pre) (Just post)
           let x = getVar ctr "arg1"
           let y = getVar ctr "arg2"
           putStrLn $ "y:" <> show y
@@ -1761,7 +1761,7 @@ tests = testGroup "hevm"
           Just c <- solcRuntime "C" code'
           Just a <- solcRuntime "A" code'
           (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> do
-            let vm0 = abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing SymbolicS
+            let vm0 = abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing AbstractStore
             let vm = vm0
                   & set (state . callvalue) (Lit 0)
                   & over (EVM.env . contracts)
@@ -1829,7 +1829,7 @@ tests = testGroup "hevm"
         ,
         ignoreTest $ testCase "safemath distributivity (yul)" $ do
           let yulsafeDistributivity = hex "6355a79a6260003560e01c14156016576015601f565b5b60006000fd60a1565b603d602d604435600435607c565b6039602435600435607c565b605d565b6052604b604435602435605d565b600435607c565b141515605a57fe5b5b565b6000828201821115151560705760006000fd5b82820190505b92915050565b6000818384048302146000841417151560955760006000fd5b82820290505b92915050565b"
-          let vm =  abstractVM (mkCalldata (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []) yulsafeDistributivity Nothing SymbolicS
+          let vm =  abstractVM (mkCalldata (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []) yulsafeDistributivity Nothing AbstractStore
           (_, [Qed _]) <-  withSolvers Z3 1 Nothing $ \s -> verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
         ,
@@ -1916,7 +1916,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts ConcreteS Nothing (Just $ checkAssertions [0x01])
+          (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts EmptyStore Nothing (Just $ checkAssertions [0x01])
           let testCex = Map.null cex.store
           assertBool "Did not find expected storage cex" testCex
           putStrLn "Expected counterexample found"

@@ -19,7 +19,7 @@ import EVM.Solidity
 import EVM.Types hiding (IllegalOverflow, Error)
 import EVM.Sign qualified
 
-import Control.Lens hiding (op, (:<), (|>), (.>))
+import Control.Lens hiding (op, (:<), (|>), (.>), Empty)
 import Control.Monad.State.Strict hiding (state)
 import Data.Bits (FiniteBits, countLeadingZeros, finiteBitSize)
 import Data.ByteArray qualified as BA
@@ -184,14 +184,11 @@ data Cache = Cache
     _path :: Map (CodeLocation, Int) Bool
   } deriving Show
 
-data StorageBase = Concrete | Symbolic
-  deriving (Show, Eq)
-
 -- | A way to specify an initial VM state
 data VMOpts = VMOpts
   { vmoptContract :: Contract
   , vmoptCalldata :: (Expr Buf, [Prop])
-  , vmoptStorageBase :: StorageBase
+  , vmoptInitialStorage :: Expr Storage
   , vmoptValue :: Expr EWord
   , vmoptPriorityFee :: W256
   , vmoptAddress :: Addr
@@ -350,24 +347,6 @@ data Contract = Contract
 
 deriving instance Show Contract
 
--- | When doing symbolic execution, we have three different
--- ways to model the storage of contracts. This determines
--- not only the initial contract storage model but also how
--- RPC or state fetched contracts will be modeled.
-data StorageModel
-  = ConcreteS    -- ^ Uses `Concrete` Storage. Reading / Writing from abstract
-                 -- locations causes a runtime failure. Can be nicely combined with RPC.
-
-  | SymbolicS    -- ^ Uses `Symbolic` Storage. Reading / Writing never reaches RPC,
-                 -- but always done using an SMT array with no default value.
-
-  | InitialS     -- ^ Uses `Symbolic` Storage. Reading / Writing never reaches RPC,
-                 -- but always done using an SMT array with 0 as the default value.
-
-  deriving (Read, Show)
-
-instance ParseField StorageModel
-
 -- | Various environmental data
 data Env = Env
   { _contracts    :: Map Addr Contract
@@ -521,7 +500,7 @@ makeVm o =
   , _env = Env
     { _sha3Crack = mempty
     , _chainId = o.vmoptChainId
-    , _storage = if o.vmoptStorageBase == Concrete then EmptyStore else AbstractStore
+    , _storage = o.vmoptInitialStorage
     , _origStorage = mempty
     , _contracts = Map.fromList
       [(o.vmoptAddress, o.vmoptContract )]
@@ -1577,6 +1556,7 @@ accessStorage addr slot continue = do
                 Nothing -> mkQuery litSlot
                 Just val -> continue (Lit val)
           else do
+            -- TODO: is this actually needed?
             modifying (env . storage) (writeStorage (litAddr addr) slot (Lit 0))
             continue $ Lit 0
     Nothing ->

@@ -5,7 +5,6 @@
 
 module Main where
 
-import EVM (StorageModel(..))
 import qualified EVM
 import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
@@ -25,13 +24,15 @@ import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
 import GHC.Natural
 import EVM.Format (showTraceTree, formatExpr)
 import Data.Word (Word64)
+import Data.Bifunctor (second)
 
+import qualified Data.Map as Map
 import qualified EVM.Facts     as Facts
 import qualified EVM.Facts.Git as Git
 import qualified EVM.UnitTest
 
 import GHC.Conc
-import Control.Lens hiding (pre, passing)
+import Control.Lens hiding (pre, passing, Empty)
 import Control.Monad              (void, when, forM_, unless)
 import Control.Monad.State.Strict (execStateT, liftIO)
 import Data.ByteString            (ByteString)
@@ -47,7 +48,6 @@ import System.Exit                (exitFailure, exitWith, ExitCode(..))
 import qualified Data.ByteString        as ByteString
 import qualified Data.ByteString.Char8  as Char8
 import qualified Data.ByteString.Lazy   as LazyByteString
-import qualified Data.Map               as Map
 import qualified Data.Text              as T
 import qualified Data.Text.IO           as T
 
@@ -89,14 +89,14 @@ data Command w
   -- symbolic execution opts
       , jsonFile      :: w ::: Maybe String       <?> "Filename or path to dapp build output (default: out/*.solc.json)"
       , dappRoot      :: w ::: Maybe String       <?> "Path to dapp project root directory (default: . )"
-      , storageModel  :: w ::: Maybe StorageModel <?> "Select storage model: ConcreteS, SymbolicS (default) or InitialS"
+      , initialStorage :: w ::: Maybe (InitialStorage) <?> "Starting state for storage: Empty, Abstract, Concrete <STORE> (default Abstract)"
       , sig           :: w ::: Maybe Text         <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]           <?> "Values to encode"
       , debug         :: w ::: Bool               <?> "Run interactively"
       , getModels     :: w ::: Bool               <?> "Print example testcase for each execution path"
       , showTree      :: w ::: Bool               <?> "Print branches explored in tree view"
       , showReachableTree :: w ::: Bool           <?> "Print only reachable branches explored in tree view"
-      , smttimeout    :: w ::: Maybe Natural      <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
+      , smttimeout    :: w ::: Maybe Natural      <?> "Timeout given to SMT solver in seconds (default: 300)"
       , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point"
       , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
@@ -110,7 +110,7 @@ data Command w
       , sig           :: w ::: Maybe Text       <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]         <?> "Values to encode"
       , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
-      , smttimeout    :: w ::: Maybe Natural    <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
+      , smttimeout    :: w ::: Maybe Natural    <?> "Timeout given to SMT solver in seconds (default: 300)"
       , maxIterations :: w ::: Maybe Integer    <?> "Number of times we may revisit a particular branching point"
       , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default) or cvc5"
       , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
@@ -165,7 +165,7 @@ data Command w
       , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
       , ffi           :: w ::: Bool                     <?> "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)"
-      , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
+      , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in seconds (default: 300)"
       , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point"
       , askSmtIterations :: w ::: Maybe Integer         <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
       }
@@ -186,6 +186,12 @@ deriving instance Options.ParseField [Word256]
 instance Options.ParseRecord (Command Options.Wrapped) where
   parseRecord =
     Options.parseRecordWithModifiers Options.lispCaseModifiers
+
+data InitialStorage
+  = Empty
+  | Concrete [(W256, [(W256, W256)])]
+  | Abstract
+  deriving (Show, Read, Options.ParseField)
 
 optsMode :: Command Options.Unwrapped -> Mode
 optsMode x
@@ -262,8 +268,7 @@ main = do
     Version {} -> putStrLn (showVersion Paths.version)
     Symbolic {} -> withCurrentDirectory root $ assert cmd
     Equivalence {} -> equivalence cmd
-    Exec {} ->
-      launchExec cmd
+    Exec {} -> launchExec cmd
     DappTest {} ->
       withCurrentDirectory root $ do
         cores <- num <$> getNumProcessors
@@ -577,29 +582,29 @@ vmFromCommand cmd = do
               else addr (.address) 0xacab
 
         vm0 baseFee miner ts blockNum prevRan c = EVM.makeVm $ EVM.VMOpts
-          { vmoptContract      = c
-          , vmoptCalldata      = (calldata', [])
-          , vmoptValue         = Lit value'
-          , vmoptAddress       = address'
-          , vmoptCaller        = litAddr caller'
-          , vmoptOrigin        = origin'
-          , vmoptGas           = word64 (.gas) 0xffffffffffffffff
-          , vmoptBaseFee       = baseFee
-          , vmoptPriorityFee   = word (.priorityFee) 0
-          , vmoptGaslimit      = word64 (.gaslimit) 0xffffffffffffffff
-          , vmoptCoinbase      = addr (.coinbase) miner
-          , vmoptNumber        = word (.number) blockNum
-          , vmoptTimestamp     = Lit $ word (.timestamp) ts
-          , vmoptBlockGaslimit = word64 (.gaslimit) 0xffffffffffffffff
-          , vmoptGasprice      = word (.gasprice) 0
-          , vmoptMaxCodeSize   = word (.maxcodesize) 0xffffffff
-          , vmoptPrevRandao    = word (.prevRandao) prevRan
-          , vmoptSchedule      = FeeSchedule.berlin
-          , vmoptChainId       = word (.chainid) 1
-          , vmoptCreate        = (.create) cmd
-          , vmoptStorageBase   = EVM.Concrete
-          , vmoptTxAccessList  = mempty -- TODO: support me soon
-          , vmoptAllowFFI      = False
+          { vmoptContract       = c
+          , vmoptCalldata       = (calldata', [])
+          , vmoptValue          = Lit value'
+          , vmoptAddress        = address'
+          , vmoptCaller         = litAddr caller'
+          , vmoptOrigin         = origin'
+          , vmoptGas            = word64 (.gas) 0xffffffffffffffff
+          , vmoptBaseFee        = baseFee
+          , vmoptPriorityFee    = word (.priorityFee) 0
+          , vmoptGaslimit       = word64 (.gaslimit) 0xffffffffffffffff
+          , vmoptCoinbase       = addr (.coinbase) miner
+          , vmoptNumber         = word (.number) blockNum
+          , vmoptTimestamp      = Lit $ word (.timestamp) ts
+          , vmoptBlockGaslimit  = word64 (.gaslimit) 0xffffffffffffffff
+          , vmoptGasprice       = word (.gasprice) 0
+          , vmoptMaxCodeSize    = word (.maxcodesize) 0xffffffff
+          , vmoptPrevRandao     = word (.prevRandao) prevRan
+          , vmoptSchedule       = FeeSchedule.berlin
+          , vmoptChainId        = word (.chainid) 1
+          , vmoptCreate         = (.create) cmd
+          , vmoptInitialStorage = EmptyStore
+          , vmoptTxAccessList   = mempty -- TODO: support me soon
+          , vmoptAllowFFI       = False
           }
         word f def = fromMaybe def (f cmd)
         word64 f def = fromMaybe def (f cmd)
@@ -623,16 +628,7 @@ symvmFromCommand cmd calldata' = do
     ts = maybe Timestamp Lit cmd.timestamp
     callvalue' = maybe (CallValue 0) Lit cmd.value
   -- TODO: rework this, ConcreteS not needed anymore
-  let store = case cmd.storageModel of
-                -- InitialS and SymbolicS can read and write to symbolic locations
-                -- ConcreteS cannot (instead values can be fetched from rpc!)
-                -- Initial defaults to 0 for uninitialized storage slots,
-                -- whereas the values of SymbolicS are unconstrained.
-                Just InitialS  -> EmptyStore
-                Just ConcreteS -> ConcreteStore mempty
-                Just SymbolicS -> AbstractStore
-                Nothing -> if cmd.create then EmptyStore else AbstractStore
-
+  let store = maybe AbstractStore parseInitialStorage (cmd.initialStorage)
   withCache <- applyCache (cmd.state, cmd.cache)
 
   contract' <- case (cmd.rpc, cmd.address, cmd.code) of
@@ -672,30 +668,36 @@ symvmFromCommand cmd calldata' = do
           then addr (.address) (createAddress origin' (word (.nonce) 0))
           else addr (.address) 0xacab
     vm0 baseFee miner ts blockNum prevRan cd' callvalue' caller' c = EVM.makeVm $ EVM.VMOpts
-      { vmoptContract      = c
-      , vmoptCalldata      = cd'
-      , vmoptValue         = callvalue'
-      , vmoptAddress       = address'
-      , vmoptCaller        = caller'
-      , vmoptOrigin        = origin'
-      , vmoptGas           = word64 (.gas) 0xffffffffffffffff
-      , vmoptGaslimit      = word64 (.gaslimit) 0xffffffffffffffff
-      , vmoptBaseFee       = baseFee
-      , vmoptPriorityFee   = word (.priorityFee) 0
-      , vmoptCoinbase      = addr (.coinbase) miner
-      , vmoptNumber        = word (.number) blockNum
-      , vmoptTimestamp     = ts
-      , vmoptBlockGaslimit = word64 (.gaslimit) 0xffffffffffffffff
-      , vmoptGasprice      = word (.gasprice) 0
-      , vmoptMaxCodeSize   = word (.maxcodesize) 0xffffffff
-      , vmoptPrevRandao    = word (.prevRandao) prevRan
-      , vmoptSchedule      = FeeSchedule.berlin
-      , vmoptChainId       = word (.chainid) 1
-      , vmoptCreate        = (.create) cmd
-      , vmoptStorageBase   = EVM.Symbolic
-      , vmoptTxAccessList  = mempty
-      , vmoptAllowFFI      = False
+      { vmoptContract       = c
+      , vmoptCalldata       = cd'
+      , vmoptValue          = callvalue'
+      , vmoptAddress        = address'
+      , vmoptCaller         = caller'
+      , vmoptOrigin         = origin'
+      , vmoptGas            = word64 (.gas) 0xffffffffffffffff
+      , vmoptGaslimit       = word64 (.gaslimit) 0xffffffffffffffff
+      , vmoptBaseFee        = baseFee
+      , vmoptPriorityFee    = word (.priorityFee) 0
+      , vmoptCoinbase       = addr (.coinbase) miner
+      , vmoptNumber         = word (.number) blockNum
+      , vmoptTimestamp      = ts
+      , vmoptBlockGaslimit  = word64 (.gaslimit) 0xffffffffffffffff
+      , vmoptGasprice       = word (.gasprice) 0
+      , vmoptMaxCodeSize    = word (.maxcodesize) 0xffffffff
+      , vmoptPrevRandao     = word (.prevRandao) prevRan
+      , vmoptSchedule       = FeeSchedule.berlin
+      , vmoptChainId        = word (.chainid) 1
+      , vmoptCreate         = (.create) cmd
+      , vmoptInitialStorage = maybe AbstractStore parseInitialStorage (cmd.initialStorage)
+      , vmoptTxAccessList   = mempty
+      , vmoptAllowFFI       = False
       }
     word f def = fromMaybe def (f cmd)
     addr f def = fromMaybe def (f cmd)
     word64 f def = fromMaybe def (f cmd)
+
+parseInitialStorage :: InitialStorage -> Expr Storage
+parseInitialStorage = \case
+  Empty -> EmptyStore
+  Concrete s -> ConcreteStore (Map.fromList $ fmap (second Map.fromList) s)
+  Abstract -> AbstractStore

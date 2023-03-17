@@ -7,7 +7,7 @@ import Prelude hiding (Word)
 
 import Data.Tuple (swap)
 import Control.Lens hiding (pre)
-import EVM hiding (Query, Revert, push, bytecode, cache)
+import EVM hiding (Query, Revert, push, bytecode, cache, code)
 import qualified EVM
 import EVM.Exec
 import qualified EVM.Fetch as Fetch
@@ -177,29 +177,25 @@ combineFragments fragments base = go (Lit 4) fragments (base, [])
                              s -> error $ "unsupported cd fragment: " <> show s
 
 
-abstractVM :: (Expr Buf, [Prop]) -> ByteString -> Maybe Precondition -> StorageModel -> VM
-abstractVM (cd, calldataProps) contractCode maybepre storagemodel = finalVm
+abstractVM :: (Expr Buf, [Prop]) -> ByteString -> Maybe Precondition -> Expr Storage -> VM
+abstractVM cd contractCode maybepre store = finalVm
   where
-    store = case storagemodel of
-              SymbolicS -> AbstractStore
-              InitialS -> EmptyStore
-              ConcreteS -> ConcreteStore mempty
     caller' = Caller 0
     value' = CallValue 0
     code' = RuntimeCode (ConcreteRuntimeCode contractCode)
-    vm' = loadSymVM code' store caller' value' cd calldataProps
+    vm' = loadSymVM code' store caller' value' cd
     precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm']
     finalVm = vm' & over constraints (<> precond)
 
-loadSymVM :: ContractCode -> Expr Storage -> Expr EWord -> Expr EWord -> Expr Buf -> [Prop] -> VM
-loadSymVM x initStore addr callvalue' calldata' calldataProps =
+loadSymVM :: ContractCode -> Expr Storage -> Expr EWord -> Expr EWord -> (Expr Buf, [Prop]) -> VM
+loadSymVM x initStore addr callvalue' cd =
   (makeVm $ VMOpts
     { vmoptContract = initialContract x
-    , vmoptCalldata = (calldata', calldataProps)
+    , vmoptCalldata = cd
     , vmoptValue = callvalue'
-    , vmoptStorageBase = Symbolic
+    , vmoptInitialStorage = initStore
     , vmoptAddress = createAddress ethrunAddress 1
     , vmoptCaller = addr
     , vmoptOrigin = ethrunAddress --todo: generalize
@@ -221,7 +217,6 @@ loadSymVM x initStore addr callvalue' calldata' calldataProps =
     , vmoptAllowFFI = False
     }) & set (env . contracts . at (createAddress ethrunAddress 1))
              (Just (initialContract x))
-       & set (env . EVM.storage) initStore
 
 
 -- | Interpreter which explores all paths at branching points.
@@ -301,7 +296,7 @@ type Postcondition = VM -> Expr End -> Prop
 
 
 checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe Sig -> [String] -> VeriOpts -> IO (Expr End, [VerifyResult])
-checkAssert solvers errs c signature' concreteArgs opts = verifyContract solvers c signature' concreteArgs opts SymbolicS Nothing (Just $ checkAssertions errs)
+checkAssert solvers errs c signature' concreteArgs opts = verifyContract solvers c signature' concreteArgs opts AbstractStore Nothing (Just $ checkAssertions errs)
 
 {- |Checks if an assertion violation has been encountered
 
@@ -328,9 +323,9 @@ checkAssertions errs _ = \case
   Revert _ b -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
   _ -> PBool True
 
--- |By default hevm checks for all assertions except those which result from arithmetic overflow
+-- |By default hevm only checks for user defined assertions
 defaultPanicCodes :: [Word256]
-defaultPanicCodes = [ 0x00, 0x01, 0x12, 0x21, 0x22, 0x31, 0x32, 0x41, 0x51 ]
+defaultPanicCodes = [ 0x01 ]
 
 allPanicCodes :: [Word256]
 allPanicCodes = [ 0x00, 0x01, 0x11, 0x12, 0x21, 0x22, 0x31, 0x32, 0x41, 0x51 ]
@@ -351,9 +346,9 @@ mkCalldata Nothing _ =
       )
 mkCalldata (Just (Sig name types)) args = symCalldata name types args (AbstractBuf "txdata")
 
-verifyContract :: SolverGroup -> ByteString -> Maybe Sig -> [String] -> VeriOpts -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO (Expr End, [VerifyResult])
-verifyContract solvers theCode signature concreteArgs opts storagemodel maybepre maybepost = do
-  let preState = abstractVM (mkCalldata signature concreteArgs) theCode maybepre storagemodel
+verifyContract :: SolverGroup -> ByteString -> Maybe Sig -> [String] -> VeriOpts -> Expr Storage -> Maybe Precondition -> Maybe Postcondition -> IO (Expr End, [VerifyResult])
+verifyContract solvers theCode signature' concreteArgs opts initStore maybepre maybepost = do
+  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre initStore
   verify solvers opts preState maybepost
 
 pruneDeadPaths :: [VM] -> [VM]
@@ -576,7 +571,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
     getBranches bs = do
       let
         bytecode = if BS.null bs then BS.pack [0] else bs
-        prestate = abstractVM calldata' bytecode Nothing SymbolicS
+        prestate = abstractVM calldata' bytecode Nothing AbstractStore
       expr <- evalStateT (interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters runExpr) prestate
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl

@@ -122,29 +122,29 @@ vmFromRpc blockNum calldata' callvalue' caller' address' = do
     Just b -> pure b
 
   pure $ EVM.makeVm $ EVM.VMOpts
-    { EVM.vmoptContract      = ctrct
-    , EVM.vmoptCalldata      = calldata'
-    , EVM.vmoptValue         = callvalue'
-    , EVM.vmoptAddress       = address'
-    , EVM.vmoptCaller        = caller'
-    , EVM.vmoptOrigin        = 0xacab
-    , EVM.vmoptGas           = 0xffffffffffffffff
-    , EVM.vmoptGaslimit      = 0xffffffffffffffff
-    , EVM.vmoptBaseFee       = view baseFee blk
-    , EVM.vmoptPriorityFee   = 0
-    , EVM.vmoptCoinbase      = view coinbase blk
-    , EVM.vmoptNumber        = view number blk
-    , EVM.vmoptTimestamp     = view timestamp blk
-    , EVM.vmoptBlockGaslimit = view gaslimit blk
-    , EVM.vmoptGasprice      = 0
-    , EVM.vmoptMaxCodeSize   = view maxCodeSize blk
-    , EVM.vmoptPrevRandao    = view prevRandao blk
-    , EVM.vmoptSchedule      = view schedule blk
-    , EVM.vmoptChainId       = 1
-    , EVM.vmoptCreate        = False
-    , EVM.vmoptStorageBase   = EVM.Concrete
-    , EVM.vmoptTxAccessList  = mempty
-    , EVM.vmoptAllowFFI      = False
+    { EVM.vmoptContract       = ctrct
+    , EVM.vmoptCalldata       = calldata'
+    , EVM.vmoptValue          = callvalue'
+    , EVM.vmoptAddress        = address'
+    , EVM.vmoptCaller         = caller'
+    , EVM.vmoptOrigin         = 0xacab
+    , EVM.vmoptGas            = 0xffffffffffffffff
+    , EVM.vmoptGaslimit       = 0xffffffffffffffff
+    , EVM.vmoptBaseFee        = view baseFee blk
+    , EVM.vmoptPriorityFee    = 0
+    , EVM.vmoptCoinbase       = view coinbase blk
+    , EVM.vmoptNumber         = view number blk
+    , EVM.vmoptTimestamp      = view timestamp blk
+    , EVM.vmoptBlockGaslimit  = view gaslimit blk
+    , EVM.vmoptGasprice       = 0
+    , EVM.vmoptMaxCodeSize    = view maxCodeSize blk
+    , EVM.vmoptPrevRandao     = view prevRandao blk
+    , EVM.vmoptSchedule       = view schedule blk
+    , EVM.vmoptChainId        = 1
+    , EVM.vmoptCreate         = False
+    , EVM.vmoptInitialStorage = EmptyStore
+    , EVM.vmoptTxAccessList   = mempty
+    , EVM.vmoptAllowFFI       = False
     }
 
 testRpc :: Text

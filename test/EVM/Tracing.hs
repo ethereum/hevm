@@ -430,7 +430,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress
     { vmoptContract = contrWithBal
     , vmoptCalldata = (calldata', [])
     , vmoptValue = Lit txn.txValue
-    , vmoptStorageBase = Concrete
+    , vmoptInitialStorage = EmptyStore
     , vmoptAddress =  toAddress
     , vmoptCaller = Expr.litAddr fromAddr
     , vmoptOrigin = fromAddr
