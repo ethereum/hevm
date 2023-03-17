@@ -601,6 +601,9 @@ exprToSMT = \case
   SLT a b ->
     let cond = op2 "bvslt" a b in
     "(ite " <> cond `sp` one `sp` zero <> ")"
+  SGT a b ->
+    let cond = op2 "bvsgt" a b in
+    "(ite " <> cond `sp` one `sp` zero <> ")"
   GT a b ->
     let cond = op2 "bvugt" a b in
     "(ite " <> cond `sp` one `sp` zero <> ")"

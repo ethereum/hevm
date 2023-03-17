@@ -47,6 +47,9 @@ import Control.Concurrent.Spawn
 import GHC.Conc (getNumProcessors)
 import EVM.Format (indent, formatBinary)
 
+-- | A method name, and the (ordered) types of it's arguments
+data Sig = Sig Text [AbiType]
+
 data ProofResult a b c = Qed a | Cex b | Timeout c
   deriving (Show, Eq)
 type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End)
@@ -174,12 +177,9 @@ combineFragments fragments base = go (Lit 4) fragments (base, [])
                              s -> error $ "unsupported cd fragment: " <> show s
 
 
-abstractVM :: Maybe (Text, [AbiType]) -> [String] -> ByteString -> Maybe Precondition -> StorageModel -> VM
-abstractVM typesignature concreteArgs contractCode maybepre storagemodel = finalVm
+abstractVM :: (Expr Buf, [Prop]) -> ByteString -> Maybe Precondition -> StorageModel -> VM
+abstractVM (cd, calldataProps) contractCode maybepre storagemodel = finalVm
   where
-    (calldata', calldataProps) = case typesignature of
-                 Nothing -> (AbstractBuf "txdata", [Expr.bufLength (AbstractBuf "txdata") .< (Lit (2 ^ (64 :: Integer)))])
-                 Just (name, typs) -> symCalldata name typs concreteArgs (AbstractBuf "txdata")
     store = case storagemodel of
               SymbolicS -> AbstractStore
               InitialS -> EmptyStore
@@ -187,7 +187,7 @@ abstractVM typesignature concreteArgs contractCode maybepre storagemodel = final
     caller' = Caller 0
     value' = CallValue 0
     code' = RuntimeCode (ConcreteRuntimeCode contractCode)
-    vm' = loadSymVM code' store caller' value' calldata' calldataProps
+    vm' = loadSymVM code' store caller' value' cd calldataProps
     precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm']
@@ -300,7 +300,7 @@ type Precondition = VM -> Prop
 type Postcondition = VM -> Expr End -> Prop
 
 
-checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> IO (Expr End, [VerifyResult])
+checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe Sig -> [String] -> VeriOpts -> IO (Expr End, [VerifyResult])
 checkAssert solvers errs c signature' concreteArgs opts = verifyContract solvers c signature' concreteArgs opts SymbolicS Nothing (Just $ checkAssertions errs)
 
 {- |Checks if an assertion violation has been encountered
@@ -339,9 +339,21 @@ allPanicCodes = [ 0x00, 0x01, 0x11, 0x12, 0x21, 0x22, 0x31, 0x32, 0x41, 0x51 ]
 panicMsg :: Word256 -> ByteString
 panicMsg err = (selector "Panic(uint256)") <> (encodeAbiValue $ AbiUInt 256 err)
 
-verifyContract :: SolverGroup -> ByteString -> Maybe (Text, [AbiType]) -> [String] -> VeriOpts -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO (Expr End, [VerifyResult])
-verifyContract solvers theCode signature' concreteArgs opts storagemodel maybepre maybepost = do
-  let preState = abstractVM signature' concreteArgs theCode maybepre storagemodel
+-- | Builds a buffer representing calldata from the provided method description and concrete arguments
+mkCalldata :: Maybe Sig -> [String] -> (Expr Buf, [Prop])
+mkCalldata Nothing _ =
+      ( AbstractBuf "txdata"
+      -- assert that the length of the calldata is never more than 2^64
+      -- this is way larger than would ever be allowed by the gas limit
+      -- and avoids spurious counterexamples during abi decoding
+      -- TODO: can we encode calldata as an array with a smaller length?
+      , [Expr.bufLength (AbstractBuf "txdata") .< (Lit (2 ^ (64 :: Integer)))]
+      )
+mkCalldata (Just (Sig name types)) args = symCalldata name types args (AbstractBuf "txdata")
+
+verifyContract :: SolverGroup -> ByteString -> Maybe Sig -> [String] -> VeriOpts -> StorageModel -> Maybe Precondition -> Maybe Postcondition -> IO (Expr End, [VerifyResult])
+verifyContract solvers theCode signature concreteArgs opts storagemodel maybepre maybepost = do
+  let preState = abstractVM (mkCalldata signature concreteArgs) theCode maybepre storagemodel
   verify solvers opts preState maybepost
 
 pruneDeadPaths :: [VM] -> [VM]
@@ -519,8 +531,8 @@ type UnsatCache = TVar [Set Prop]
 -- We do this by asking the solver to find a common input for each pair of endstates that satisfies the path
 -- conditions for both sides and produces a differing output. If we can find such an input, then we have a clear
 -- equivalence break, and since we run this check for every pair of end states, the check is exhaustive.
-equivalenceCheck :: SolverGroup -> ByteString -> ByteString -> VeriOpts -> Maybe (Text, [AbiType]) -> IO [EquivResult]
-equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
+equivalenceCheck :: SolverGroup -> ByteString -> ByteString -> VeriOpts -> (Expr Buf, [Prop]) -> IO [EquivResult]
+equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
   case bytecodeA == bytecodeB of
     True -> do
       putStrLn "bytecodeA and bytecodeB are identical"
@@ -564,7 +576,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts signature' = do
     getBranches bs = do
       let
         bytecode = if BS.null bs then BS.pack [0] else bs
-        prestate = abstractVM signature' [] bytecode Nothing SymbolicS
+        prestate = abstractVM calldata' bytecode Nothing SymbolicS
       expr <- evalStateT (interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters runExpr) prestate
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl

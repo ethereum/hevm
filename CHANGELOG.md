@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The `--solvers` cli option is now respected (previously we always used Z3)
 - The `equivalence` command now fails with the correct status code when counterexamples are found
+- The `equivalence` command now respects the given `--sig` argument
+- Correct symbolic execution for the `SGT` opcode
 
 ### Changed
 
@@ -21,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A new differential fuzzing test harness that compares the concrete semantics, as well as parts of the symbolic semantics against the geth evm implementation
 - The `hevm` library can now be built on Windows systems.
 - Support for function pointers in ABI
+- `equivalence` can now be checked for fully or partially concrete calldata
 
 ## [0.50.3] - 2023-02-17
 

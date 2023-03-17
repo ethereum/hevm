@@ -321,6 +321,7 @@ common test-common
     ld-options: -Wl,-keep_dwarf_unwind
   else
     extra-libraries: stdc++
+  ghc-options: -threaded -with-rtsopts=-N
 
 --- Test Suites ---
 
