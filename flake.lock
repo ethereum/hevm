@@ -20,11 +20,11 @@
     "flake-compat": {
       "flake": false,
       "locked": {
-        "lastModified": 1668681692,
-        "narHash": "sha256-Ht91NGdewz8IQLtWZ9LCeNXMSXHUss+9COoqu6JLmXU=",
+        "lastModified": 1673956053,
+        "narHash": "sha256-4gtG9iQuiKITOjNQQeQIpoIB6b16fm+504Ch3sNKLd8=",
         "owner": "edolstra",
         "repo": "flake-compat",
-        "rev": "009399224d5e398d03b22badca40a37ac85412a1",
+        "rev": "35bb57c0c8d8b62bbfd284272c928ceb64ddbde9",
         "type": "github"
       },
       "original": {
@@ -35,11 +35,11 @@
     },
     "flake-utils": {
       "locked": {
-        "lastModified": 1667395993,
-        "narHash": "sha256-nuEHfE/LcWyuSWnS8t12N1wc105Qtau+/OdUAjtQ0rA=",
+        "lastModified": 1678901627,
+        "narHash": "sha256-U02riOqrKKzwjsxc/400XnElV+UtPUQWpANPlyazjH0=",
         "owner": "numtide",
         "repo": "flake-utils",
-        "rev": "5aed5285a952e0b949eb3ba02c12fa4fcfef535f",
+        "rev": "93a2b84fc4b70d9e089d029deacc3583435c2ed6",
         "type": "github"
       },
       "original": {
@@ -49,6 +49,21 @@
       }
     },
     "nixpkgs": {
+      "locked": {
+        "lastModified": 1679085797,
+        "narHash": "sha256-/VNuZ3gbgUaRkZuXMB4BkKqVCwqhEVrOY60IYtlo2mQ=",
+        "owner": "nixos",
+        "repo": "nixpkgs",
+        "rev": "c333779d748a996a9a305b3d1fcf6b12b51564ed",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nixos",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs-solc": {
       "locked": {
         "lastModified": 1672059513,
         "narHash": "sha256-4R7lESB3biVNyE6rXkjw3mhowzg4zTQgZElM4/dRUv8=",
@@ -60,6 +75,7 @@
       "original": {
         "owner": "nixos",
         "repo": "nixpkgs",
+        "rev": "1b71def42b74811323de2df52f180b795ec506fc",
         "type": "github"
       }
     },
@@ -69,6 +85,7 @@
         "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
+        "nixpkgs-solc": "nixpkgs-solc",
         "solidity": "solidity"
       }
     },

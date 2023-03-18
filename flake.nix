@@ -4,6 +4,8 @@
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs";
+    # nixpkgs with working solc
+    nixpkgs-solc.url = "github:nixos/nixpkgs/1b71def42b74811323de2df52f180b795ec506fc";
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
@@ -18,10 +20,11 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, solidity, ethereum-tests, ... }:
+  outputs = { self, nixpkgs, nixpkgs-solc, flake-utils, solidity, ethereum-tests, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        solc' = nixpkgs-solc.legacyPackages.${system}.solc;
 
         secp256k1-static = stripDylib (pkgs.secp256k1.overrideAttrs (attrs: {
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
@@ -36,7 +39,7 @@
           })
           [
             (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
-            (haskell.lib.compose.addTestToolDepends [ solc z3 cvc5 go-ethereum ])
+            (haskell.lib.compose.addTestToolDepends [ solc' z3 cvc5 go-ethereum ])
             (haskell.lib.compose.appendBuildFlags ["-v3"])
             (haskell.lib.compose.appendConfigureFlags (
               [ "-fci"
@@ -67,7 +70,7 @@
           buildInputs = [ makeWrapper ];
           postBuild = ''
             wrapProgram $out/bin/hevm \
-              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3 cvc5 ])}"
+              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc' z3 cvc5 ])}"
           '';
         };
 
@@ -134,7 +137,7 @@
             buildInputs = [
               z3
               cvc5
-              solc
+              solc'
               mdbook
               yarn
               go-ethereum
