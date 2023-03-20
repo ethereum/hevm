@@ -713,7 +713,7 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
       | Map.null store = []
       | otherwise =
           [ "Storage:"
-          , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc -> ("Addr " <> (T.pack $ show key) <> ": " <> (T.pack $ show (Map.toList val))) : acc) mempty store
+          , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc -> ("Addr " <> (T.pack . show . Addr . num $ key) <> ": " <> (T.pack $ show (Map.toList val))) : acc) mempty store
           , ""
           ]
 
