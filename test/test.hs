@@ -117,6 +117,17 @@ tests = testGroup "hevm"
         -- there won't be query now as accessStorage uses fetch cache
         assertBool (show vm4._result) (isNothing vm4._result)
     ]
+  , testGroup "SimplifierUnitTests"
+    -- common overflow cases that the simplifier was getting wrong
+    [ testCase "writeWord-overflow" $ do
+        let e = ReadByte (Lit 0x0) (WriteWord (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd) (Lit 0x0) (ConcreteBuf "\255\255\255\255"))
+        b <- checkEquiv e (Expr.simplify e)
+        assertBool "Simplifier failed" b
+    , testCase "CopySlice-overflow" $ do
+        let e = ReadWord (Lit 0x0) (CopySlice (Lit 0x0) (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc) (Lit 0x6) (ConcreteBuf "\255\255\255\255\255\255") (ConcreteBuf ""))
+        b <- checkEquiv e (Expr.simplify e)
+        assertBool "Simplifier failed" b
+    ]
   -- These tests fuzz the simplifier by generating a random expression,
   -- applying some simplification rules, and then using the smt encoding to
   -- check that the simplified version is semantically equivalent to the
