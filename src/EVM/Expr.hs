@@ -1,4 +1,6 @@
 {-# Language DataKinds #-}
+{-# Language DerivingStrategies #-}
+{-# Language ScopedTypeVariables #-}
 {-# Language PatternGuards #-}
 
 {-|
@@ -7,7 +9,7 @@
 -}
 module EVM.Expr where
 
-import Prelude hiding (LT, GT)
+import Prelude hiding (LT, GT, min, max, div)
 import Data.Bits hiding (And, Xor)
 import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
 import Data.Int (Int32)
@@ -20,10 +22,12 @@ import Control.Lens (lens)
 import EVM.Types
 import EVM.Traversals
 import Data.ByteString (ByteString)
+import Data.Map.Strict (Map)
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as VS
+import qualified Prelude
 import Data.Vector.Storable.ByteString
 import Data.Semigroup (Any, Any(..), getAny)
 
@@ -798,6 +802,124 @@ simplify e = if (mapExpr go e == e)
     go a = a
 
 
+-- | A closed bound for a given stack item
+data Bound = Bound { lo :: Expr EWord, hi :: Expr EWord }
+  deriving (Show, Eq)
+
+-- | A mapping from expressions to bounds
+newtype Bounds = Bounds (Map (Expr EWord) Bound)
+  deriving newtype (Show, Eq, Semigroup, Monoid)
+
+-- | Simple bounds analysis pass
+bound :: Bounds -> Expr EWord -> Bound
+bound (Bounds bs) = go
+  where
+    go :: Expr EWord -> Bound
+    go = \case
+      -- lits & names
+
+      Lit x -> Bound (Lit x) (Lit x)
+      v@(Var _) -> search v
+
+      -- bitwise
+
+      And x y -> let
+          bx = go x
+          by = go y
+        in Bound (max bx.lo by.lo) (min bx.hi by.hi)
+      Or x y -> let
+          bx = go x
+          by = go y
+        in Bound (min bx.lo by.lo) (max bx.hi by.hi)
+
+      -- arithmetic
+
+      Add x y -> let
+          bx = go x
+          by = go y
+          little = add bx.lo by.lo
+          big = add bx.hi by.hi
+        in Bound (min little big) (max little big)
+      Sub x y -> let
+          bx = go x
+          by = go y
+          little = sub bx.lo by.hi
+          big = sub bx.hi by.lo
+        in Bound (min little big) (max little big)
+      Mul x y -> let
+          bx = go x
+          by = go y
+          little = mul bx.lo by.lo
+          big = mul bx.hi by.hi
+        in Bound (min little big) (max little big)
+      Div x y -> let
+          bx = go x
+          by = go y
+          little = div bx.lo by.hi
+          big = div bx.hi by.lo
+        in Bound (min little big) (max little big)
+      SDiv x y -> let
+          bx = go x
+          by = go y
+          little = sdiv bx.lo by.hi
+          big = sdiv bx.hi by.lo
+        in Bound (min little big) (max little big)
+      -- TODO: is there some smarter lower bound we can infer involving bx.lo?
+      -- we might need to introduce ite into the language of words for that
+      Mod x y -> let
+          bx = go x
+        in Bound (Lit 0) (min bx.hi y)
+
+      -- TODO: is this just going to loop forever?
+      Min x y -> go (min x y)
+      Max x y -> go (max x y)
+
+      -- booleans
+
+      LT {} -> bool
+      GT {} -> bool
+      LEq {} -> bool
+      GEq {} -> bool
+      SLT {} -> bool
+      SGT {} -> bool
+      Eq {} -> bool
+      IsZero {} -> bool
+      EqByte {} -> bool
+
+      -- context
+
+      Origin -> address
+      BlockHash _ -> fullRange
+      Coinbase -> address
+      Timestamp -> fullRange -- TODO: limit this?
+      BlockNumber -> fullRange
+      PrevRandao -> fullRange
+      GasLimit -> fullRange -- TODO: limit this?
+      ChainId ->  fullRange -- TODO: limit this?
+      BaseFee -> fullRange -- TODO: limit this?
+
+      CallValue {} -> fullRange
+      Caller {} -> address
+      Address {} -> address
+      Balance {} -> fullRange
+      SelfBalance {} -> fullRange
+      Gas {} -> fullRange
+
+      CodeSize {} -> fullRange
+      ExtCodeHash {} -> fullRange
+
+      _ -> fullRange
+
+    fullRange = Bound (Lit 0) (Lit (maxBound :: W256))
+    bool = Bound (Lit 0) (Lit 1)
+    address = Bound (Lit 0) (Lit ((2 ^ (160 :: W256)) - 1))
+
+    search :: Expr EWord -> Bound
+    search e =
+      let b = Map.lookup e bs
+      in fromMaybe fullRange b
+
+
 -- ** Conversions ** -------------------------------------------------------------------------------
 
 
@@ -857,7 +979,7 @@ indexWord :: Expr EWord -> Expr EWord -> Expr Byte
 --                    indexWord 31 reads from the LSB
 --
 indexWord i@(Lit idx) e@(And (Lit mask) w)
-  -- if the mask is all 1s then read from the undelrying word
+  -- if the mask is all 1s then read from the underlying word
   -- we need this case to avoid overflow
   | mask == fullWordMask = indexWord (Lit idx) w
   -- if the index is a read from the masked region then read from the underlying word
