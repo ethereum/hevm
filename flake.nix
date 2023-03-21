@@ -36,6 +36,7 @@
         pkgs = nixpkgs.legacyPackages.${system};
         solc' = nixpkgs-solc.legacyPackages.${system}.solc;
         testDeps = with pkgs; [
+          go-ethereum
           solc'
           z3
           cvc5
