@@ -391,6 +391,11 @@ appEvent (VtyEvent e@(V.EvKey V.KDown [])) = get >>= \case
       (_ViewContracts . browserContractList)
       (handleListEvent e)
     pure ()
+  ViewPicker _s -> do
+    Brick.zoom
+      (_ViewPicker . testPickerList)
+      (handleListEvent e)
+    pure()
   _ -> pure ()
 
 -- Contracts: Up - list up
@@ -400,6 +405,11 @@ appEvent (VtyEvent e@(V.EvKey V.KUp [])) = get >>= \case
     Brick.zoom
       (_ViewContracts . browserContractList)
       (handleListEvent e)
+  ViewPicker _s -> do
+    Brick.zoom
+      (_ViewPicker . testPickerList)
+      (handleListEvent e)
+    pure()
   _ -> pure ()
 
 -- Vm Overview: Esc - return to test picker or exit
