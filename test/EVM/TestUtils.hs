@@ -18,10 +18,12 @@ runDappTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> RpcInfo -> Pro
 runDappTestCustom testFile match maxIter ffiAllowed rpcinfo projectType = do
   withSystemTempDirectory "dapp-test" $ \root -> do
     withCurrentDirectory root $ do
-      bo@(Just (BuildOutput contracts _)) <- compile projectType root testFile
-      withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root bo match maxIter ffiAllowed rpcinfo
-        unitTest opts contracts Nothing
+      compile projectType root testFile >>= \case
+        Left e -> error e
+        Right bo@(BuildOutput contracts _) -> do
+          withSolvers Z3 1 Nothing $ \solvers -> do
+            opts <- testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
+            unitTest opts contracts Nothing
 
 runDappTest :: FilePath -> Text -> IO Bool
 runDappTest testFile match = runDappTestCustom testFile match Nothing True Nothing Foundry
@@ -30,10 +32,12 @@ debugDappTest :: FilePath -> RpcInfo -> IO ()
 debugDappTest testFile rpcinfo = do
   withSystemTempDirectory "dapp-test" $ \root -> do
     withCurrentDirectory root $ do
-      buildOutput <- compile DappTools root testFile
-      withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root buildOutput ".*" Nothing True rpcinfo
-        TTY.main opts root buildOutput
+      compile DappTools root testFile >>= \case
+        Left e -> error e
+        Right bo -> do
+          withSolvers Z3 1 Nothing $ \solvers -> do
+            opts <- testOpts solvers root (Just bo) ".*" Nothing True rpcinfo
+            TTY.main opts root (Just bo)
 
 testOpts :: SolverGroup -> FilePath -> Maybe BuildOutput -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO UnitTestOptions
 testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
@@ -66,7 +70,7 @@ tool = \case
   Foundry -> "forge"
   DappTools -> "dapp"
 
-compile :: ProjectType -> FilePath -> FilePath -> IO (Maybe BuildOutput)
+compile :: ProjectType -> FilePath -> FilePath -> IO (Either String BuildOutput)
 compile projType root src = do
   createDirectory (root <> "/src")
   writeFile (root <> "/src/unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
@@ -75,7 +79,7 @@ compile projType root src = do
   withCurrentDirectory root $ do
     r@(res,_,_) <- readProcessWithExitCode (tool projType) ["build"] ""
     case res of
-      ExitFailure _ -> print r >> pure Nothing
+      ExitFailure _ -> pure . Left $ "compilation failed: " <> show r
       ExitSuccess -> readBuildOutput root projType
   where
     initLib :: FilePath -> FilePath -> FilePath -> IO ()
