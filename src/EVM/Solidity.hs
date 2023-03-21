@@ -158,16 +158,16 @@ data Mutability
   | Payable    -- ^ function accepts Ether
  deriving (Show, Eq, Ord, Generic)
 
--- | A mapping from on disk location (TODO: is this true?) to a SolcContract object
+-- | A mapping from contract identifiers (filepath:name) to a SolcContract object
 newtype Contracts = Contracts (Map Text SolcContract)
   deriving newtype (Show, Eq, Semigroup, Monoid)
 
--- | A mapping from on disk location to (TODO: what exactly?)
+-- | A mapping from contract identifiers (filepath:name) to their ast json
 newtype Asts = Asts (Map Text Value)
   deriving newtype (Show, Eq, Semigroup, Monoid)
 
--- | A mapping from (TODO: what to what??)
-newtype Sources = Sources [(Text, Maybe ByteString)]
+-- | A mapping from source files to (maybe) their contents
+newtype Sources = Sources (Map Text (Maybe ByteString))
   deriving newtype (Show, Eq, Semigroup, Monoid)
 
 data BuildOutput = BuildOutput
@@ -309,9 +309,9 @@ makeSourceCache :: Sources -> Asts -> IO SourceCache
 makeSourceCache (Sources sources) (Asts asts) = do
   let f (_,  Just content) = return content
       f (fp, Nothing) = BS.readFile $ T.unpack fp
-  xs <- mapM f sources
+  xs <- mapM f (Map.toList sources)
   return $! SourceCache
-    { files = zip (fst <$> sources) xs
+    { files = zip (Map.keys sources) xs
     , lines = map (Vector.fromList . BS.split 0xa) xs
     , asts  = asts
     }
@@ -392,7 +392,6 @@ readFoundryJSON contractName json = do
   creationSrcMap <- makeSrcMaps =<< creation ^? key "sourceMap" . _String
 
   ast <- json ^? key "ast"
-  astParsed <- KeyMap.toHashMapText <$> json ^? key "ast" . _Object
   path <- ast ^? key "absolutePath" . _String
 
   abi <- toList <$> json ^? key "abi" . _Array
@@ -413,8 +412,8 @@ readFoundryJSON contractName json = do
         , immutableReferences = mempty -- TODO: foundry doesn't expose this?
         }
   return ( Contracts $ Map.singleton (path <> ":" <> contractName) contract
-         , Asts      $ Map.fromList (HMap.toList astParsed)
-         , Sources   $ mempty
+         , Asts      $ Map.singleton (path <> ":" <> contractName) ast
+         , Sources   $ Map.singleton path Nothing
          )
 
 -- | Parses the standard json output from solc
@@ -428,7 +427,7 @@ readStdJSON json = do
       contents src = (src, encodeUtf8 <$> HMap.lookup src (mconcat $ Map.elems $ snd <$> contractMap))
   return ( Contracts $ fst <$> contractMap
          , Asts      $ Map.fromList (HMap.toList asts)
-         , Sources   $ contents <$> (sort $ HMap.keys sources)
+         , Sources   $ Map.fromList $ contents <$> (sort $ HMap.keys sources)
          )
   where
     f :: (AsValue s) => HMap.HashMap Text s -> (Map Text (SolcContract, (HMap.HashMap Text Text)))
