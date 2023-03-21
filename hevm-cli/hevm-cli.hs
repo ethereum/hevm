@@ -265,7 +265,7 @@ main = do
         cores <- num <$> getNumProcessors
         solver <- getSolver cmd
         withSolvers solver cores cmd.smttimeout $ \solvers -> do
-          buildOut <- readBuildOutput (root <> "/out/") (getProjectType cmd)
+          buildOut <- readBuildOutput root (getProjectType cmd)
           case buildOut of
             Nothing -> do
               putStrLn $ "unable to read build output from: " <> show (root <> "/out/")
@@ -323,10 +323,11 @@ getSolver cmd = case cmd.solver of
 getSrcInfo :: Command Options.Unwrapped -> IO DappInfo
 getSrcInfo cmd = do
   root <- getRoot cmd
-  buildOutput <- readBuildOutput (root <> "/out/") (getProjectType cmd)
-  case buildOutput of
-    Nothing -> pure emptyDapp
-    Just o -> pure $ dappInfo root o
+  withCurrentDirectory root $ do
+    buildOutput <- readBuildOutput root (getProjectType cmd)
+    case buildOutput of
+      Nothing -> pure emptyDapp
+      Just o -> pure $ dappInfo root o
 
 getProjectType :: Command Options.Unwrapped -> ProjectType
 getProjectType cmd = fromMaybe Foundry cmd.projectType

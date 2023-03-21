@@ -82,6 +82,7 @@ import Data.Word (Word8, Word32)
 import Options.Generic
 import Prelude hiding (readFile, writeFile)
 import System.FilePattern.Directory
+import System.Directory
 import System.IO hiding (readFile, writeFile)
 import System.IO.Temp
 import System.Process
@@ -281,21 +282,23 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
 -- | Reads all solc ouput json files found under the provided filepath and returns them merged into a BuildOutput
 readBuildOutput :: FilePath -> ProjectType -> IO (Maybe BuildOutput)
 readBuildOutput root DappTools = do
-  jsons <- findJsonFiles root
-  case jsons of
-    [x] -> readSolc DappTools (root <> x)
-    _ -> pure Nothing
+  withCurrentDirectory root $ do
+    jsons <- findJsonFiles (root <> "/out/")
+    case jsons of
+      [x] -> readSolc DappTools (root <> "/out/" <> x)
+      _ -> pure Nothing
 readBuildOutput root Foundry = do
-  jsons <- findJsonFiles root
-  case (filterMetadata jsons) of
-    [] -> pure Nothing
-    js -> do
-      print $ (fmap ((<>) root)) js
-      outputs <- mapM (readSolc Foundry) ((fmap ((<>) root)) js)
-      -- TODO: this can probably be cleaner (smth like [Maybe a] -> Maybe [a])
-      pure $ case any isNothing outputs of
-        True -> Nothing
-        False -> Just $ mconcat (catMaybes outputs)
+  withCurrentDirectory root $ do
+    jsons <- findJsonFiles root
+    case (filterMetadata jsons) of
+      [] -> pure Nothing
+      js -> do
+        print $ (fmap ((<>) root)) js
+        outputs <- mapM (readSolc Foundry) ((fmap ((<>) root)) js)
+        -- TODO: this can probably be cleaner (smth like [Maybe a] -> Maybe [a])
+        pure $ case any isNothing outputs of
+          True -> Nothing
+          False -> Just $ mconcat (catMaybes outputs)
 
 -- | Finds all json files under the provided filepath, searches recursively
 findJsonFiles :: FilePath -> IO [FilePath]
