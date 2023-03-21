@@ -35,6 +35,14 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         solc' = nixpkgs-solc.legacyPackages.${system}.solc;
+        testDeps = with pkgs; [
+          solc'
+          z3
+          cvc5
+          git
+          foundry.defaultPackage.${system}
+          dapptools.packages.${system}.dapp
+        ];
 
         secp256k1-static = stripDylib (pkgs.secp256k1.overrideAttrs (attrs: {
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
@@ -49,7 +57,7 @@
           })
           [
             (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
-            (haskell.lib.compose.addTestToolDepends [ solc' z3 cvc5 foundry.defaultPackage.${system} dapptools.packages.${system}.dapp ])
+            (haskell.lib.compose.addTestToolDepends testDeps)
             (haskell.lib.compose.appendBuildFlags ["-v3"])
             (haskell.lib.compose.appendConfigureFlags (
               [ "-fci"
@@ -146,17 +154,11 @@
           in haskellPackages.shellFor {
             packages = _: [ hevmUnwrapped ];
             buildInputs = [
-              z3
-              cvc5
-              solc'
               mdbook
               yarn
-              go-ethereum
               haskellPackages.cabal-install
               haskellPackages.haskell-language-server
-              foundry.defaultPackage.${system}
-              dapptools.packages.${system}.dapp
-            ];
+            ] ++ testDeps;
             withHoogle = true;
 
             # NOTE: hacks for bugged cabal new-repl
