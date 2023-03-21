@@ -20,6 +20,7 @@ import EVM.Solvers
 import EVM.Fetch
 import EVM.SymExec
 import EVM.TestUtils
+import EVM.Solidity (ProjectType(..))
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 import EVM.Types hiding (BlockNumber)
@@ -63,7 +64,7 @@ tests = testGroup "rpc"
     -- execute against remote state from a ds-test harness
     [ testCase "dapp-test" $ do
         let testFile = "test/contracts/pass/rpc.sol"
-        runDappTestCustom testFile ".*" Nothing False testRpcInfo >>= assertEqual "test result" True
+        runDappTestCustom testFile ".*" Nothing False testRpcInfo Foundry >>= assertEqual "test result" True
 
     -- concretely exec "transfer" on WETH9 using remote rpc
     -- https://etherscan.io/token/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2#code
