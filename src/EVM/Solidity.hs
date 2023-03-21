@@ -281,21 +281,24 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
     go c (xs, state, p)                      = (xs, error ("srcmap: y u " ++ show c ++ " in state" ++ show state ++ "?!?"), p)
 
 -- | Reads all solc ouput json files found under the provided filepath and returns them merged into a BuildOutput
-readBuildOutput :: FilePath -> ProjectType -> IO (Maybe BuildOutput)
+readBuildOutput :: FilePath -> ProjectType -> IO (Either String BuildOutput)
 readBuildOutput root DappTools = do
   withCurrentDirectory root $ do
-    jsons <- findJsonFiles (root <> "/out/")
+    let outDir = root <> "/out/"
+    jsons <- findJsonFiles outDir
     case jsons of
-      [x] -> readSolc DappTools (root <> "/out/" <> x)
-      _ -> pure Nothing
+      [x] -> readSolc DappTools (outDir <> x)
+      [] -> pure . Left $ "no json files found in: " <> outDir
+      _ -> pure . Left $ "multiple json files found in: " <> outDir
 readBuildOutput root Foundry = do
   withCurrentDirectory root $ do
+    let outDir = root <> "/out/"
     jsons <- findJsonFiles (root <> "/out")
     case (filterMetadata jsons) of
-      [] -> pure Nothing
+      [] -> pure . Left $ "no json files found in: " <> outDir
       js -> do
-        outputs <- sequence <$> mapM (readSolc Foundry) ((fmap ((<>) (root <> "/out/"))) js)
-        pure $ fmap mconcat outputs
+        outputs <- sequence <$> mapM (readSolc Foundry) ((fmap ((<>) (outDir))) js)
+        pure . (fmap mconcat) $ outputs
 
 -- | Finds all json files under the provided filepath, searches recursively
 findJsonFiles :: FilePath -> IO [FilePath]
@@ -328,14 +331,14 @@ lineSubrange xs (s1, n1) i =
     then Nothing
     else Just (s1 - s2, min (s2 + n2 - s1) n1)
 
-readSolc :: ProjectType -> FilePath -> IO (Maybe BuildOutput)
+readSolc :: ProjectType -> FilePath -> IO (Either String BuildOutput)
 readSolc pt fp =
   (readJSON pt (T.pack $ takeBaseName fp) <$> readFile fp) >>=
     \case
-      Nothing -> return Nothing
+      Nothing -> pure . Left $ "unable to parse: " <> fp
       Just (contracts, asts, sources) -> do
         sourceCache <- makeSourceCache sources asts
-        return (Just (BuildOutput contracts sourceCache))
+        return (Right (BuildOutput contracts sourceCache))
 
 yul :: Text -> Text -> IO (Maybe ByteString)
 yul contract src = do

@@ -267,10 +267,10 @@ main = do
         withSolvers solver cores cmd.smttimeout $ \solvers -> do
           buildOut <- readBuildOutput root (getProjectType cmd)
           case buildOut of
-            Nothing -> do
-              putStrLn $ "unable to read build output from: " <> show (root <> "/out/")
+            Left e -> do
+              putStrLn e
               exitFailure
-            Just out -> do
+            Right out -> do
               -- TODO: which functions here actually require a BuildOutput, and which can take it as a Maybe?
               testOpts <- unitTestOptions cmd solvers (Just out)
               case (cmd.coverage, optsMode cmd) of
@@ -326,8 +326,8 @@ getSrcInfo cmd = do
   withCurrentDirectory root $ do
     buildOutput <- readBuildOutput root (getProjectType cmd)
     case buildOutput of
-      Nothing -> pure emptyDapp
-      Just o -> pure $ dappInfo root o
+      Left _ -> pure emptyDapp
+      Right o -> pure $ dappInfo root o
 
 getProjectType :: Command Options.Unwrapped -> ProjectType
 getProjectType cmd = fromMaybe Foundry cmd.projectType
