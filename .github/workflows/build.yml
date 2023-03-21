@@ -36,6 +36,12 @@ jobs:
         run: nix-shell --pure --command "cabal check --verbose=3"
       - name: build hevm
         run: nix build .#withTests -L
+      - name: Upload artifacts
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v3
+        with:
+          name: hevm-x86_64-linux
+          path: result/bin/hevm
       - name: run rpc tests
         run: nix-shell --pure --command "cabal run rpc-tests"
       - name: run ethereum tests
