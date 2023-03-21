@@ -82,6 +82,7 @@ import Data.Word (Word8, Word32)
 import Options.Generic
 import Prelude hiding (readFile, writeFile)
 import System.FilePattern.Directory
+import System.FilePath.Posix
 import System.Directory
 import System.IO hiding (readFile, writeFile)
 import System.IO.Temp
@@ -116,15 +117,15 @@ instance Show SlotType where
    (show t) s
 
 instance Read SlotType where
-  readsPrec _ ('m':'a':'p':'p':'i':'n':'g':'(':s) =
+  readsPrec _ t@('m':'a':'p':'p':'i':'n':'g':'(':s) =
     let (lhs,rhs) = case T.splitOn " => " (pack s) of
           (l:r) -> (l,r)
-          _ -> error "could not parse storage item"
+          _ -> error $ "could not parse storage item: " <> t
         first = fromJust $ parseTypeName mempty lhs
         target = fromJust $ parseTypeName mempty (T.replace ")" "" (last rhs))
         rest = fmap (fromJust . (parseTypeName mempty . (T.replace "mapping(" ""))) (take (length rhs - 1) rhs)
     in [(StorageMapping (first NonEmpty.:| rest) target, "")]
-  readsPrec _ s = [(StorageValue $ fromMaybe (error "could not parse storage item") (parseTypeName mempty (pack s)),"")]
+  readsPrec _ s = [(StorageValue $ fromMaybe (error $ "could not parse storage item: " <> s) (parseTypeName mempty (pack s)),"")]
 
 data SolcContract = SolcContract
   { runtimeCodehash  :: W256
@@ -289,16 +290,12 @@ readBuildOutput root DappTools = do
       _ -> pure Nothing
 readBuildOutput root Foundry = do
   withCurrentDirectory root $ do
-    jsons <- findJsonFiles root
+    jsons <- findJsonFiles (root <> "/out")
     case (filterMetadata jsons) of
       [] -> pure Nothing
       js -> do
-        print $ (fmap ((<>) root)) js
-        outputs <- mapM (readSolc Foundry) ((fmap ((<>) root)) js)
-        -- TODO: this can probably be cleaner (smth like [Maybe a] -> Maybe [a])
-        pure $ case any isNothing outputs of
-          True -> Nothing
-          False -> Just $ mconcat (catMaybes outputs)
+        outputs <- sequence <$> mapM (readSolc Foundry) ((fmap ((<>) (root <> "/out/"))) js)
+        pure $ fmap mconcat outputs
 
 -- | Finds all json files under the provided filepath, searches recursively
 findJsonFiles :: FilePath -> IO [FilePath]
@@ -333,7 +330,7 @@ lineSubrange xs (s1, n1) i =
 
 readSolc :: ProjectType -> FilePath -> IO (Maybe BuildOutput)
 readSolc pt fp =
-  (readJSON pt <$> readFile fp) >>=
+  (readJSON pt (T.pack $ takeBaseName fp) <$> readFile fp) >>=
     \case
       Nothing -> return Nothing
       Just (contracts, asts, sources) -> do
@@ -359,19 +356,19 @@ yulRuntime contract src = do
 solidity :: Text -> Text -> IO (Maybe ByteString)
 solidity contract src = do
   (json, path) <- solidity' src
-  let (Contracts sol, _, _) = fromJust $ readJSON DappTools json
+  let (Contracts sol, _, _) = fromJust $ readStdJSON json
   pure $ Map.lookup (path <> ":" <> contract) sol <&> (.creationCode)
 
 solcRuntime :: Text -> Text -> IO (Maybe ByteString)
 solcRuntime contract src = do
   (json, path) <- solidity' src
-  let (Contracts sol, _, _) = fromJust $ readJSON DappTools json
+  let (Contracts sol, _, _) = fromJust $ readStdJSON json
   pure $ Map.lookup (path <> ":" <> contract) sol <&> (.runtimeCode)
 
 functionAbi :: Text -> IO Method
 functionAbi f = do
   (json, path) <- solidity' ("contract ABI { function " <> f <> " public {}}")
-  let (Contracts sol, _, _) = fromJust $ readJSON DappTools json
+  let (Contracts sol, _, _) = fromJust $ readStdJSON json
   case Map.toList $ (fromJust (Map.lookup (path <> ":ABI") sol)).abiMap of
      [(_,b)] -> return b
      _ -> error "hevm internal error: unexpected abi format"
@@ -379,13 +376,13 @@ functionAbi f = do
 force :: String -> Maybe a -> a
 force s = fromMaybe (error s)
 
-readJSON :: ProjectType -> Text -> Maybe (Contracts, Asts, Sources)
-readJSON DappTools json = readStdJSON json
-readJSON Foundry json = readFoundryJSON json
+readJSON :: ProjectType -> Text -> Text -> Maybe (Contracts, Asts, Sources)
+readJSON DappTools _ json = readStdJSON json
+readJSON Foundry contractName json = readFoundryJSON contractName json
 
 -- | Reads a foundry json output
-readFoundryJSON :: Text -> Maybe (Contracts, Asts, Sources)
-readFoundryJSON json = do
+readFoundryJSON :: Text -> Text -> Maybe (Contracts, Asts, Sources)
+readFoundryJSON contractName json = do
   runtime <- json ^? key "deployedBytecode"
   runtimeCode <- toCode . strip0x'' <$> runtime ^? key "object" . _String
   runtimeSrcMap <- makeSrcMaps =<< runtime ^? key "sourceMap" . _String
@@ -396,14 +393,7 @@ readFoundryJSON json = do
 
   ast <- json ^? key "ast"
   astParsed <- KeyMap.toHashMapText <$> json ^? key "ast" . _Object
-
-  -- Foundry stores the contract name as the json file name (which we don't
-  -- have here since we are dealing only with the actual file contents), so we
-  -- do a little hack here and pull the contract name out of the
-  -- "exportedSymbols" field of the ast.
   path <- ast ^? key "absolutePath" . _String
-  exportedSymbols <- KeyMap.toHashMapText <$> ast ^? key "exportedSymbols" . _Object
-  let name = HMap.keys exportedSymbols !! 0
 
   abi <- toList <$> json ^? key "abi" . _Array
 
@@ -412,7 +402,7 @@ readFoundryJSON json = do
         , creationCodehash    = keccak' (stripBytecodeMetadata creationCode)
         , runtimeCode         = runtimeCode
         , creationCode        = creationCode
-        , contractName        = name
+        , contractName        = path <> ":" <> contractName
         , abiMap              = mkAbiMap abi
         , eventMap            = mkEventMap abi
         , errorMap            = mkErrorMap abi
@@ -422,7 +412,7 @@ readFoundryJSON json = do
         , storageLayout       = mempty -- TODO: foundry doesn't expose this?
         , immutableReferences = mempty -- TODO: foundry doesn't expose this?
         }
-  return ( Contracts $ Map.singleton path contract
+  return ( Contracts $ Map.singleton (path <> ":" <> contractName) contract
          , Asts      $ Map.fromList (HMap.toList astParsed)
          , Sources   $ mempty
          )

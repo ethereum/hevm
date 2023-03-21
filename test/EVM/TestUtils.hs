@@ -1,16 +1,11 @@
-{-# Language QuasiQuotes #-}
-
 module EVM.TestUtils where
 
 import Data.Text
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import qualified Paths_hevm as Paths
-import Data.String.Here
 import System.Directory
 import System.IO.Temp
-import GHC.IO.Handle (hClose)
-import System.Process (readProcess)
+import System.Process
+import System.Exit
 
 import EVM.Solidity
 import EVM.Solvers
@@ -19,33 +14,23 @@ import EVM.UnitTest
 import EVM.Fetch (RpcInfo)
 import qualified EVM.TTY as TTY
 
-runDappTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO Bool
-runDappTestCustom testFile match maxIter ffiAllowed rpcinfo = do
-  root <- Paths.getDataDir
-  (json, _) <- compileWithDSTest testFile
-  --T.writeFile "output.json" json
-  withCurrentDirectory root $ do
-    withSystemTempFile "output.json" $ \file handle -> do
-      hClose handle
-      T.writeFile file json
-      bo@(Just (BuildOutput contracts _)) <- readSolc DappTools file
+runDappTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> IO Bool
+runDappTestCustom testFile match maxIter ffiAllowed rpcinfo projectType = do
+  withSystemTempDirectory "dapp-test" $ \root -> do
+    withCurrentDirectory root $ do
+      bo@(Just (BuildOutput contracts _)) <- compile projectType root testFile
       withSolvers Z3 1 Nothing $ \solvers -> do
         opts <- testOpts solvers root bo match maxIter ffiAllowed rpcinfo
         unitTest opts contracts Nothing
 
 runDappTest :: FilePath -> Text -> IO Bool
-runDappTest testFile match = runDappTestCustom testFile match Nothing True Nothing
+runDappTest testFile match = runDappTestCustom testFile match Nothing True Nothing Foundry
 
 debugDappTest :: FilePath -> RpcInfo -> IO ()
 debugDappTest testFile rpcinfo = do
-  root <- Paths.getDataDir
-  (json, _) <- compileWithDSTest testFile
-  --TIO.writeFile "output.json" json
-  withCurrentDirectory root $ do
-    withSystemTempFile "output.json" $ \file handle -> do
-      hClose handle
-      T.writeFile file json
-      buildOutput <- readSolc DappTools file
+  withSystemTempDirectory "dapp-test" $ \root -> do
+    withCurrentDirectory root $ do
+      buildOutput <- compile DappTools root testFile
       withSolvers Z3 1 Nothing $ \solvers -> do
         opts <- testOpts solvers root buildOutput ".*" Nothing True rpcinfo
         TTY.main opts root buildOutput
@@ -76,59 +61,32 @@ testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
     , ffiAllowed = allowFFI
     }
 
-compileWithDSTest :: FilePath -> IO (Text, Text)
-compileWithDSTest src =
-  withSystemTempFile "input.json" $ \file handle -> do
-    hClose handle
-    dsTest <- readFile =<< Paths.getDataFileName "test/contracts/lib/test.sol"
-    erc20 <- readFile =<< Paths.getDataFileName "test/contracts/lib/erc20.sol"
-    testFilePath <- Paths.getDataFileName src
-    testFile <- readFile testFilePath
-    T.writeFile file
-      [i|
-      {
-        "language": "Solidity",
-        "sources": {
-          "ds-test/test.sol": {
-            "content": ${dsTest}
-          },
-          "lib/erc20.sol": {
-            "content": ${erc20}
-          },
-          "test.sol": {
-            "content": ${testFile}
-          }
-        },
-        "settings": {
-          "metadata": {
-            "useLiteralContent": true
-          },
-          "outputSelection": {
-            "*": {
-              "*": [
-                "metadata",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "abi",
-                "storageLayout",
-                "evm.bytecode.sourceMap",
-                "evm.bytecode.linkReferences",
-                "evm.bytecode.generatedSources",
-                "evm.deployedBytecode.sourceMap",
-                "evm.deployedBytecode.linkReferences",
-                "evm.deployedBytecode.generatedSources"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      }
-      |]
-    x <- T.pack <$>
-      readProcess
-        "solc"
-        ["--allow-paths", file, "--standard-json", file]
-        ""
-    return (x, T.pack testFilePath)
+tool :: ProjectType -> String
+tool = \case
+  Foundry -> "forge"
+  DappTools -> "dapp"
+
+compile :: ProjectType -> FilePath -> FilePath -> IO (Maybe BuildOutput)
+compile projType root src = do
+  createDirectory (root <> "/src")
+  writeFile (root <> "/src/unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
+  initLib (root <> "/lib/ds-test") "test/contracts/lib/test.sol" "test.sol"
+  initLib (root <> "/lib/tokens") "test/contracts/lib/erc20.sol" "erc20.sol"
+  withCurrentDirectory root $ do
+    r@(res,_,_) <- readProcessWithExitCode (tool projType) ["build"] ""
+    case res of
+      ExitFailure _ -> print r >> pure Nothing
+      ExitSuccess -> readBuildOutput root projType
+  where
+    initLib :: FilePath -> FilePath -> FilePath -> IO ()
+    initLib tld srcFile dstFile = do
+      createDirectoryIfMissing True (tld <> "/src")
+      writeFile (tld <> "/src/" <> dstFile) =<< readFile =<< Paths.getDataFileName srcFile
+      withCurrentDirectory tld $ do
+        _ <- readProcessWithExitCode "git" ["init"] ""
+        callProcess "git" ["config", "commit.gpgsign", "false"]
+        callProcess "git" ["config", "user.name", "'hevm'"]
+        callProcess "git" ["config", "user.email", "'hevm@hevm.dev'"]
+        callProcess "git" ["add", "."]
+        _ <- readProcessWithExitCode "git" ["commit", "-am"] ""
+        pure ()

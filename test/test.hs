@@ -476,7 +476,7 @@ tests = testGroup "hevm"
                 |]
 
         (json, path') <- solidity' srccode
-        let (Contracts solc', _, _) = fromJust $ readJSON DappTools json
+        let (Contracts solc', _, _) = fromJust $ readStdJSON json
             initCode = (solc' ^?! ix (path' <> ":A")).creationCode
         -- add constructor arguments
         assertEqual "constructor args screwed up metadata stripping" (stripBytecodeMetadata (initCode <> encodeAbiValue (AbiUInt 256 1))) (stripBytecodeMetadata initCode)
@@ -652,7 +652,7 @@ tests = testGroup "hevm"
         putStrLn "expected counterexample found"
  ]
 
-  , testGroup "Dapp Tests"
+  , testGroup "Dapp-Tests"
     [ testCase "Trivial-Pass" $ do
         let testFile = "test/contracts/pass/trivial.sol"
         runDappTest testFile ".*" >>= assertEqual "test result" True
@@ -680,8 +680,8 @@ tests = testGroup "hevm"
         runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
     , testCase "Loop-Tests" $ do
         let testFile = "test/contracts/pass/loops.sol"
-        runDappTestCustom testFile "prove_loop" (Just 10) False Nothing >>= assertEqual "test result" True
-        runDappTestCustom testFile "prove_loop" (Just 100) False Nothing >>= assertEqual "test result" False
+        runDappTestCustom testFile "prove_loop" (Just 10) False Nothing Foundry >>= assertEqual "test result" True
+        runDappTestCustom testFile "prove_loop" (Just 100) False Nothing Foundry >>= assertEqual "test result" False
     , testCase "Invariant-Tests-Pass" $ do
         let testFile = "test/contracts/pass/invariants.sol"
         runDappTest testFile ".*" >>= assertEqual "test result" True
@@ -694,7 +694,7 @@ tests = testGroup "hevm"
         runDappTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Cheat-Codes-Fail" $ do
         let testFile = "test/contracts/fail/cheatCodes.sol"
-        runDappTestCustom testFile "testBadFFI" Nothing False Nothing >>= assertEqual "test result" False
+        runDappTestCustom testFile "testBadFFI" Nothing False Nothing Foundry >>= assertEqual "test result" False
     ]
   , testGroup "Symbolic execution"
       [
