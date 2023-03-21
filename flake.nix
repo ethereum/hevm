@@ -6,6 +6,7 @@
     nixpkgs.url = "github:nixos/nixpkgs";
     # nixpkgs with working solc
     nixpkgs-solc.url = "github:nixos/nixpkgs/1b71def42b74811323de2df52f180b795ec506fc";
+    foundry.url = "github:shazow/foundry.nix/monthly";
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
@@ -20,7 +21,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, nixpkgs-solc, flake-utils, solidity, ethereum-tests, ... }:
+  outputs = { self, nixpkgs, nixpkgs-solc, flake-utils, solidity, ethereum-tests, foundry, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -39,7 +40,7 @@
           })
           [
             (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
-            (haskell.lib.compose.addTestToolDepends [ solc' z3 cvc5 go-ethereum ])
+            (haskell.lib.compose.addTestToolDepends [ solc' z3 cvc5 foundry.defaultPackage.${system} ])
             (haskell.lib.compose.appendBuildFlags ["-v3"])
             (haskell.lib.compose.appendConfigureFlags (
               [ "-fci"
@@ -143,6 +144,7 @@
               go-ethereum
               haskellPackages.cabal-install
               haskellPackages.haskell-language-server
+              foundry.defaultPackage.${system}
             ];
             withHoogle = true;
 
