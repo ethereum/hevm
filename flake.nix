@@ -26,8 +26,8 @@
   };
 
   nixConfig = {
-    extra-substituters = [ "https://dapp.cachix.org" ];
-    extra-trusted-public-keys = [ "dapp.cachix.org-1:9GJt9Ja8IQwR7YW/aF0QvCa6OmjGmsKoZIist0dG+Rs=" ];
+    extra-substituters = [ "https://hevm.cachix.org" ];
+    extra-trusted-public-keys = [ "hevm.cachix.org-1:E+/ByWW6k/WBGfKDngDILajud9MINCZ56qY2XAQaMo4=" ];
   };
 
   outputs = { self, nixpkgs, nixpkgs-solc, flake-utils, solidity, ethereum-tests, foundry, dapptools, ... }:

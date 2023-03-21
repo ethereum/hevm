@@ -28,6 +28,10 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - uses: cachix/cachix-action@v12
+        with:
+          name: hevm
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
       - name: run cabal check
         run: nix-shell --pure --command "cabal check --verbose=3"
       - name: build hevm
