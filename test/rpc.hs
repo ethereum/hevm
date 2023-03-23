@@ -122,29 +122,29 @@ vmFromRpc blockNum calldata' callvalue' caller' address' = do
     Just b -> pure b
 
   pure $ EVM.makeVm $ EVM.VMOpts
-    { EVM.vmoptContract      = ctrct
-    , EVM.vmoptCalldata      = calldata'
-    , EVM.vmoptValue         = callvalue'
-    , EVM.vmoptAddress       = address'
-    , EVM.vmoptCaller        = caller'
-    , EVM.vmoptOrigin        = 0xacab
-    , EVM.vmoptGas           = 0xffffffffffffffff
-    , EVM.vmoptGaslimit      = 0xffffffffffffffff
-    , EVM.vmoptBaseFee       = view baseFee blk
-    , EVM.vmoptPriorityFee   = 0
-    , EVM.vmoptCoinbase      = view coinbase blk
-    , EVM.vmoptNumber        = view number blk
-    , EVM.vmoptTimestamp     = view timestamp blk
-    , EVM.vmoptBlockGaslimit = view gaslimit blk
-    , EVM.vmoptGasprice      = 0
-    , EVM.vmoptMaxCodeSize   = view maxCodeSize blk
-    , EVM.vmoptPrevRandao    = view prevRandao blk
-    , EVM.vmoptSchedule      = view schedule blk
-    , EVM.vmoptChainId       = 1
-    , EVM.vmoptCreate        = False
-    , EVM.vmoptStorageBase   = EVM.Concrete
-    , EVM.vmoptTxAccessList  = mempty
-    , EVM.vmoptAllowFFI      = False
+    { EVM.contract      = ctrct
+    , EVM.calldata      = calldata'
+    , EVM.value         = callvalue'
+    , EVM.address       = address'
+    , EVM.caller        = caller'
+    , EVM.origin        = 0xacab
+    , EVM.gas           = 0xffffffffffffffff
+    , EVM.gaslimit      = 0xffffffffffffffff
+    , EVM.baseFee       = view baseFee blk
+    , EVM.priorityFee   = 0
+    , EVM.coinbase      = view coinbase blk
+    , EVM.number        = view number blk
+    , EVM.timestamp     = view timestamp blk
+    , EVM.blockGaslimit = view gaslimit blk
+    , EVM.gasprice      = 0
+    , EVM.maxCodeSize   = view maxCodeSize blk
+    , EVM.prevRandao    = view prevRandao blk
+    , EVM.schedule      = view schedule blk
+    , EVM.chainId       = 1
+    , EVM.create        = False
+    , EVM.storageBase   = EVM.Concrete
+    , EVM.txAccessList  = mempty
+    , EVM.allowFFI      = False
     }
 
 testRpc :: Text

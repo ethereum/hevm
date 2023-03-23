@@ -47,26 +47,26 @@ type Storage = Map W256 W256
 data Which = Pre | Post
 
 data Block = Block
-  { blockCoinbase    :: Addr
-  , blockDifficulty  :: W256
-  , blockGasLimit    :: Word64
-  , blockBaseFee     :: W256
-  , blockNumber      :: W256
-  , blockTimestamp   :: W256
-  , blockTxs         :: [Transaction]
+  { coinbase    :: Addr
+  , difficulty  :: W256
+  , gasLimit    :: Word64
+  , baseFee     :: W256
+  , number      :: W256
+  , timestamp   :: W256
+  , txs         :: [Transaction]
   } deriving Show
 
 data Case = Case
-  { testVmOpts      :: EVM.VMOpts
+  { vmOpts      :: EVM.VMOpts
   , checkContracts  :: Map Addr (EVM.Contract, Storage)
   , testExpectation :: Map Addr (EVM.Contract, Storage)
   } deriving Show
 
 data BlockchainCase = BlockchainCase
-  { blockchainBlocks  :: [Block]
-  , blockchainPre     :: Map Addr (EVM.Contract, Storage)
-  , blockchainPost    :: Map Addr (EVM.Contract, Storage)
-  , blockchainNetwork :: String
+  { blocks  :: [Block]
+  , pre     :: Map Addr (EVM.Contract, Storage)
+  , post    :: Map Addr (EVM.Contract, Storage)
+  , network :: String
   } deriving Show
 
 main :: IO ()
@@ -139,9 +139,7 @@ runVMTest diffmode (_name, x) =
   let vm0 = vmForCase x
   result <- execStateT (EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) . void $ EVM.Stepper.execFully) vm0
   maybeReason <- checkExpectation diffmode x result
-  case maybeReason of
-    Just reason -> assertFailure reason
-    Nothing -> pure ()
+  forM_ maybeReason assertFailure
 
 -- | Example usage:
 -- | $ cabal new-repl ethereum-tests
@@ -340,7 +338,7 @@ errorFatal _ = False
 fromBlockchainCase :: BlockchainCase -> Either BlockchainError Case
 fromBlockchainCase (BlockchainCase blocks preState postState network) =
   case (blocks, network) of
-    ([block], "London") -> case block.blockTxs of
+    ([block], "London") -> case block.txs of
       [tx] -> fromBlockchainCase' block tx preState postState
       []        -> Left NoTxs
       _         -> Left TooManyTxs
@@ -357,29 +355,29 @@ fromBlockchainCase' block tx preState postState =
       (_, Nothing) -> Left (if isCreate then FailedCreate else InvalidTx)
       (Just origin, Just checkState) -> Right $ Case
         (EVM.VMOpts
-         { vmoptContract      = EVM.initialContract theCode
-         , vmoptCalldata      = (cd, [])
-         , vmoptValue         = Lit tx.txValue
-         , vmoptAddress       = toAddr
-         , vmoptCaller        = litAddr origin
-         , vmoptStorageBase   = Concrete
-         , vmoptOrigin        = origin
-         , vmoptGas           = tx.txGasLimit  - fromIntegral (txGasCost feeSchedule tx)
-         , vmoptBaseFee       = block.blockBaseFee
-         , vmoptPriorityFee   = priorityFee tx block.blockBaseFee
-         , vmoptGaslimit      = tx.txGasLimit
-         , vmoptNumber        = block.blockNumber
-         , vmoptTimestamp     = Lit block.blockTimestamp
-         , vmoptCoinbase      = block.blockCoinbase
-         , vmoptPrevRandao    = block.blockDifficulty
-         , vmoptMaxCodeSize   = 24576
-         , vmoptBlockGaslimit = block.blockGasLimit
-         , vmoptGasprice      = effectiveGasPrice
-         , vmoptSchedule      = feeSchedule
-         , vmoptChainId       = 1
-         , vmoptCreate        = isCreate
-         , vmoptTxAccessList  = txAccessMap tx
-         , vmoptAllowFFI      = False
+         { contract      = EVM.initialContract theCode
+         , calldata      = (cd, [])
+         , value         = Lit tx.txValue
+         , address       = toAddr
+         , caller        = litAddr origin
+         , storageBase   = Concrete
+         , origin        = origin
+         , gas           = tx.txGasLimit  - fromIntegral (txGasCost feeSchedule tx)
+         , baseFee       = block.baseFee
+         , priorityFee   = priorityFee tx block.baseFee
+         , gaslimit      = tx.txGasLimit
+         , number        = block.number
+         , timestamp     = Lit block.timestamp
+         , coinbase      = block.coinbase
+         , prevRandao    = block.difficulty
+         , maxCodeSize   = 24576
+         , blockGaslimit = block.gasLimit
+         , gasprice      = effectiveGasPrice
+         , schedule      = feeSchedule
+         , chainId       = 1
+         , create        = isCreate
+         , txAccessList  = txAccessMap tx
+         , allowFFI      = False
          })
         checkState
         postState
@@ -391,7 +389,7 @@ fromBlockchainCase' block tx preState postState =
             theCode = if isCreate
                       then EVM.InitCode tx.txData mempty
                       else maybe (EVM.RuntimeCode (EVM.ConcreteRuntimeCode "")) (view contractcode . fst) toCode
-            effectiveGasPrice = effectiveprice tx block.blockBaseFee
+            effectiveGasPrice = effectiveprice tx block.baseFee
             cd = if isCreate
                  then mempty
                  else ConcreteBuf tx.txData
@@ -423,9 +421,9 @@ validateTx tx block cs = do
   origin        <- sender tx
   originBalance <- (view balance) <$> view (at origin) cs'
   originNonce   <- (view nonce)   <$> view (at origin) cs'
-  let gasDeposit = (effectiveprice tx block.blockBaseFee) * (num tx.txGasLimit)
+  let gasDeposit = (effectiveprice tx block.baseFee) * (num tx.txGasLimit)
   if gasDeposit + tx.txValue <= originBalance
-    && tx.txNonce == originNonce && block.blockBaseFee <= maxBaseFee tx
+    && tx.txNonce == originNonce && block.baseFee <= maxBaseFee tx
   then Just ()
   else Nothing
 
@@ -449,7 +447,7 @@ vmForCase x =
     a = x.checkContracts
     cs = Map.map fst a
     st = Map.mapKeys num $ Map.map snd a
-    vm = EVM.makeVm x.testVmOpts
+    vm = EVM.makeVm x.vmOpts
       & set (EVM.env . EVM.contracts) cs
       & set (EVM.env . EVM.storage) (ConcreteStore st)
       & set (EVM.env . EVM.origStorage) st

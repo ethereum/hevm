@@ -47,7 +47,7 @@ import Control.Lens hiding (List, pre, (.>), re, op)
 import qualified Data.Vector as Vector
 import qualified Data.Map.Strict as Map
 
-import EVM hiding (allowFFI)
+import EVM
 import EVM.SymExec
 import EVM.Assembler
 import EVM.Op hiding (getOp)
@@ -427,29 +427,29 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress
       contrWithBal = contr { _balance = alloc.balance }
   in
   (makeVm $ VMOpts
-    { vmoptContract = contrWithBal
-    , vmoptCalldata = (calldata', [])
-    , vmoptValue = Lit txn.txValue
-    , vmoptStorageBase = Concrete
-    , vmoptAddress =  toAddress
-    , vmoptCaller = Expr.litAddr fromAddr
-    , vmoptOrigin = fromAddr
-    , vmoptCoinbase = evmToolEnv.coinbase
-    , vmoptNumber = evmToolEnv.number
-    , vmoptTimestamp = evmToolEnv.timestamp
-    , vmoptGasprice = fromJust txn.txGasPrice
-    , vmoptGas = txn.txGasLimit - fromIntegral (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
-    , vmoptGaslimit = txn.txGasLimit
-    , vmoptBlockGaslimit = evmToolEnv.gasLimit
-    , vmoptPrevRandao = evmToolEnv.prevRandao
-    , vmoptBaseFee = evmToolEnv.baseFee
-    , vmoptPriorityFee = fromJust txn.txMaxPriorityFeeGas
-    , vmoptMaxCodeSize = evmToolEnv.maxCodeSize
-    , vmoptSchedule = evmToolEnv.schedule
-    , vmoptChainId = txn.txChainId
-    , vmoptCreate = False
-    , vmoptTxAccessList = mempty
-    , vmoptAllowFFI = False
+    { contract = contrWithBal
+    , calldata = (calldata', [])
+    , value = Lit txn.txValue
+    , storageBase = Concrete
+    , address =  toAddress
+    , caller = Expr.litAddr fromAddr
+    , origin = fromAddr
+    , coinbase = evmToolEnv.coinbase
+    , number = evmToolEnv.number
+    , timestamp = evmToolEnv.timestamp
+    , gasprice = fromJust txn.txGasPrice
+    , gas = txn.txGasLimit - fromIntegral (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
+    , gaslimit = txn.txGasLimit
+    , blockGaslimit = evmToolEnv.gasLimit
+    , prevRandao = evmToolEnv.prevRandao
+    , baseFee = evmToolEnv.baseFee
+    , priorityFee = fromJust txn.txMaxPriorityFeeGas
+    , maxCodeSize = evmToolEnv.maxCodeSize
+    , schedule = evmToolEnv.schedule
+    , chainId = txn.txChainId
+    , create = False
+    , txAccessList = mempty
+    , allowFFI = False
     }) & set (EVM.env . contracts . at ethrunAddress)
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty))))
        & set (state . calldata) calldata'

@@ -19,29 +19,29 @@ ethrunAddress = Addr 0x00a329c0648769a73afac7f9381e08fb43dbea72
 vmForEthrunCreation :: ByteString -> VM
 vmForEthrunCreation creationCode =
   (makeVm $ VMOpts
-    { vmoptContract = initialContract (InitCode creationCode mempty)
-    , vmoptCalldata = mempty
-    , vmoptValue = (Lit 0)
-    , vmoptStorageBase = Concrete
-    , vmoptAddress = createAddress ethrunAddress 1
-    , vmoptCaller = litAddr ethrunAddress
-    , vmoptOrigin = ethrunAddress
-    , vmoptCoinbase = 0
-    , vmoptNumber = 0
-    , vmoptTimestamp = (Lit 0)
-    , vmoptBlockGaslimit = 0
-    , vmoptGasprice = 0
-    , vmoptPrevRandao = 42069
-    , vmoptGas = 0xffffffffffffffff
-    , vmoptGaslimit = 0xffffffffffffffff
-    , vmoptBaseFee = 0
-    , vmoptPriorityFee = 0
-    , vmoptMaxCodeSize = 0xffffffff
-    , vmoptSchedule = FeeSchedule.berlin
-    , vmoptChainId = 1
-    , vmoptCreate = False
-    , vmoptTxAccessList = mempty
-    , vmoptAllowFFI = False
+    { contract = initialContract (InitCode creationCode mempty)
+    , calldata = mempty
+    , value = (Lit 0)
+    , storageBase = Concrete
+    , address = createAddress ethrunAddress 1
+    , caller = litAddr ethrunAddress
+    , origin = ethrunAddress
+    , coinbase = 0
+    , number = 0
+    , timestamp = (Lit 0)
+    , blockGaslimit = 0
+    , gasprice = 0
+    , prevRandao = 42069
+    , gas = 0xffffffffffffffff
+    , gaslimit = 0xffffffffffffffff
+    , baseFee = 0
+    , priorityFee = 0
+    , maxCodeSize = 0xffffffff
+    , schedule = FeeSchedule.berlin
+    , chainId = 1
+    , create = False
+    , txAccessList = mempty
+    , allowFFI = False
     }) & set (env . contracts . at ethrunAddress)
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
 

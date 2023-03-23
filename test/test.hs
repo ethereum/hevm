@@ -44,7 +44,7 @@ import qualified Data.Map.Strict as Map
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
 
-import EVM hiding (allowFFI)
+import EVM
 import EVM.SymExec
 import EVM.ABI
 import EVM.Exec

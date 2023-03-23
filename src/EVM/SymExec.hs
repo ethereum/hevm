@@ -196,29 +196,29 @@ abstractVM (cd, calldataProps) contractCode maybepre storagemodel = finalVm
 loadSymVM :: ContractCode -> Expr Storage -> Expr EWord -> Expr EWord -> Expr Buf -> [Prop] -> VM
 loadSymVM x initStore addr callvalue' calldata' calldataProps =
   (makeVm $ VMOpts
-    { vmoptContract = initialContract x
-    , vmoptCalldata = (calldata', calldataProps)
-    , vmoptValue = callvalue'
-    , vmoptStorageBase = Symbolic
-    , vmoptAddress = createAddress ethrunAddress 1
-    , vmoptCaller = addr
-    , vmoptOrigin = ethrunAddress --todo: generalize
-    , vmoptCoinbase = 0
-    , vmoptNumber = 0
-    , vmoptTimestamp = (Lit 0)
-    , vmoptBlockGaslimit = 0
-    , vmoptGasprice = 0
-    , vmoptPrevRandao = 42069
-    , vmoptGas = 0xffffffffffffffff
-    , vmoptGaslimit = 0xffffffffffffffff
-    , vmoptBaseFee = 0
-    , vmoptPriorityFee = 0
-    , vmoptMaxCodeSize = 0xffffffff
-    , vmoptSchedule = FeeSchedule.berlin
-    , vmoptChainId = 1
-    , vmoptCreate = False
-    , vmoptTxAccessList = mempty
-    , vmoptAllowFFI = False
+    { contract = initialContract x
+    , calldata = (calldata', calldataProps)
+    , value = callvalue'
+    , storageBase = Symbolic
+    , address = createAddress ethrunAddress 1
+    , caller = addr
+    , origin = ethrunAddress --todo: generalize
+    , coinbase = 0
+    , number = 0
+    , timestamp = (Lit 0)
+    , blockGaslimit = 0
+    , gasprice = 0
+    , prevRandao = 42069
+    , gas = 0xffffffffffffffff
+    , gaslimit = 0xffffffffffffffff
+    , baseFee = 0
+    , priorityFee = 0
+    , maxCodeSize = 0xffffffff
+    , schedule = FeeSchedule.berlin
+    , chainId = 1
+    , create = False
+    , txAccessList = mempty
+    , allowFFI = False
     }) & set (env . contracts . at (createAddress ethrunAddress 1))
              (Just (initialContract x))
        & set (env . EVM.storage) initStore

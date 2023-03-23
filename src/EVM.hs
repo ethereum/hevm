@@ -189,29 +189,29 @@ data StorageBase = Concrete | Symbolic
 
 -- | A way to specify an initial VM state
 data VMOpts = VMOpts
-  { vmoptContract :: Contract
-  , vmoptCalldata :: (Expr Buf, [Prop])
-  , vmoptStorageBase :: StorageBase
-  , vmoptValue :: Expr EWord
-  , vmoptPriorityFee :: W256
-  , vmoptAddress :: Addr
-  , vmoptCaller :: Expr EWord
-  , vmoptOrigin :: Addr
-  , vmoptGas :: Word64
-  , vmoptGaslimit :: Word64
-  , vmoptNumber :: W256
-  , vmoptTimestamp :: Expr EWord
-  , vmoptCoinbase :: Addr
-  , vmoptPrevRandao :: W256
-  , vmoptMaxCodeSize :: W256
-  , vmoptBlockGaslimit :: Word64
-  , vmoptGasprice :: W256
-  , vmoptBaseFee :: W256
-  , vmoptSchedule :: FeeSchedule Word64
-  , vmoptChainId :: W256
-  , vmoptCreate :: Bool
-  , vmoptTxAccessList :: Map Addr [W256]
-  , vmoptAllowFFI :: Bool
+  { contract :: Contract
+  , calldata :: (Expr Buf, [Prop])
+  , storageBase :: StorageBase
+  , value :: Expr EWord
+  , priorityFee :: W256
+  , address :: Addr
+  , caller :: Expr EWord
+  , origin :: Addr
+  , gas :: Word64
+  , gaslimit :: Word64
+  , number :: W256
+  , timestamp :: Expr EWord
+  , coinbase :: Addr
+  , prevRandao :: W256
+  , maxCodeSize :: W256
+  , blockGaslimit :: Word64
+  , gasprice :: W256
+  , baseFee :: W256
+  , schedule :: FeeSchedule Word64
+  , chainId :: W256
+  , create :: Bool
+  , txAccessList :: Map Addr [W256]
+  , allowFFI :: Bool
   } deriving Show
 
 -- | An entry in the VM's "call/create stack"
@@ -468,72 +468,71 @@ currentContract vm =
 
 makeVm :: VMOpts -> VM
 makeVm o =
-  let txaccessList = o.vmoptTxAccessList
-      txorigin = o.vmoptOrigin
-      txtoAddr = o.vmoptAddress
+  let txaccessList = o.txAccessList
+      txorigin = o.origin
+      txtoAddr = o.address
       initialAccessedAddrs = fromList $ [txorigin, txtoAddr] ++ [1..9] ++ (Map.keys txaccessList)
       initialAccessedStorageKeys = fromList $ foldMap (uncurry (map . (,))) (Map.toList txaccessList)
-      touched = if o.vmoptCreate then [txorigin] else [txorigin, txtoAddr]
+      touched = if o.create then [txorigin] else [txorigin, txtoAddr]
   in
   VM
   { _result = Nothing
   , _frames = mempty
   , _tx = TxState
-    { _gasprice = o.vmoptGasprice
-    , _txgaslimit = o.vmoptGaslimit
-    , _txPriorityFee = o.vmoptPriorityFee
+    { _gasprice = o.gasprice
+    , _txgaslimit = o.gaslimit
+    , _txPriorityFee = o.priorityFee
     , _origin = txorigin
     , _toAddr = txtoAddr
-    , _value = o.vmoptValue
+    , _value = o.value
     , _substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty
     --, _accessList = txaccessList
-    , _isCreate = o.vmoptCreate
+    , _isCreate = o.create
     , _txReversion = Map.fromList
-      [(o.vmoptAddress , o.vmoptContract )]
+      [(o.address , o.contract )]
     }
   , _logs = []
   , _traces = Zipper.fromForest []
   , _block = Block
-    { _coinbase = o.vmoptCoinbase
-    , _timestamp = o.vmoptTimestamp
-    , _number = o.vmoptNumber
-    , _prevRandao = o.vmoptPrevRandao
-    , _maxCodeSize = o.vmoptMaxCodeSize
-    , _gaslimit = o.vmoptBlockGaslimit
-    , _baseFee = o.vmoptBaseFee
-    , _schedule = o.vmoptSchedule
+    { _coinbase = o.coinbase
+    , _timestamp = o.timestamp
+    , _number = o.number
+    , _prevRandao = o.prevRandao
+    , _maxCodeSize = o.maxCodeSize
+    , _gaslimit = o.gaslimit
+    , _baseFee = o.baseFee
+    , _schedule = o.schedule
     }
   , _state = FrameState
     { _pc = 0
     , _stack = mempty
     , _memory = mempty
     , _memorySize = 0
-    , _code = o.vmoptContract._contractcode
-    , _contract = o.vmoptAddress
-    , _codeContract = o.vmoptAddress
-    , _calldata = fst o.vmoptCalldata
-    , _callvalue = o.vmoptValue
-    , _caller = o.vmoptCaller
-    , _gas = o.vmoptGas
+    , _code = o.contract._contractcode
+    , _contract = o.address
+    , _codeContract = o.address
+    , _calldata = fst o.calldata
+    , _callvalue = o.value
+    , _caller = o.caller
+    , _gas = o.gas
     , _returndata = mempty
     , _static = False
     }
   , _env = Env
     { _sha3Crack = mempty
-    , _chainId = o.vmoptChainId
-    , _storage = if o.vmoptStorageBase == Concrete then EmptyStore else AbstractStore
+    , _chainId = o.chainId
+    , _storage = if o.storageBase == Concrete then EmptyStore else AbstractStore
     , _origStorage = mempty
     , _contracts = Map.fromList
-      [(o.vmoptAddress, o.vmoptContract )]
+      [(o.address, o.contract )]
     --, _keccakUsed = mempty
-    --, _storageModel = vmoptStorageModel o
     }
   , _cache = Cache mempty mempty mempty
   , _burned = 0
-  , _constraints = snd o.vmoptCalldata
+  , _constraints = snd o.calldata
   , _keccakEqs = mempty
   , _iterations = mempty
-  , _allowFFI = o.vmoptAllowFFI
+  , _allowFFI = o.allowFFI
   , _overrideCaller = Nothing
   }
 
