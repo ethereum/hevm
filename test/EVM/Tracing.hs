@@ -254,20 +254,20 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
                              , nonce = 0x48
                              }
     txn = EVM.Transaction.Transaction
-      { txData     = txData
-      , txGasLimit = fromIntegral gaslimitExec
-      , txGasPrice = Just 1
-      , txNonce    = 172
-      , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
-      , txR        = 0 -- will be fixed when we sign
-      , txS        = 0 -- will be fixed when we sign
-      , txV        = 0 -- will be fixed when we sign
-      , txValue    = 0 -- setting this > 0 fails because HEVM doesn't handle value sent in toplevel transaction
-      , txType     = EVM.Transaction.EIP1559Transaction
-      , txAccessList = []
-      , txMaxPriorityFeeGas =  Just 1
-      , txMaxFeePerGas = Just 1
-      , txChainId = 1
+      { txdata     = txData
+      , gasLimit = fromIntegral gaslimitExec
+      , gasPrice = Just 1
+      , nonce    = 172
+      , toAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
+      , r        = 0 -- will be fixed when we sign
+      , s        = 0 -- will be fixed when we sign
+      , v        = 0 -- will be fixed when we sign
+      , value    = 0 -- setting this > 0 fails because HEVM doesn't handle value sent in toplevel transaction
+      , txtype     = EVM.Transaction.EIP1559Transaction
+      , accessList = []
+      , maxPriorityFeeGas =  Just 1
+      , maxFeePerGas = Just 1
+      , chainId = 1
       }
     evmEnv = EVMToolEnv { coinbase   =  0xff
                         , timestamp   =  Lit 0x3e8
@@ -410,7 +410,7 @@ symbolify vm = vm { _state = vm._state { _calldata = AbstractBuf "calldata" } }
 runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Either (EVM.Error, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
 runCodeWithTrace rpcinfo evmEnv alloc txn (fromAddr, toAddress) = withSolvers Z3 0 Nothing $ \solvers -> do
   let origVM = vmForRuntimeCode code' calldata' evmEnv alloc txn (fromAddr, toAddress)
-      calldata' = ConcreteBuf txn.txData
+      calldata' = ConcreteBuf txn.txdata
       code' = alloc.code
       buildExpr :: SolverGroup -> VM -> IO (Expr End)
       buildExpr s vm = evalStateT (interpret (Fetch.oracle s Nothing) Nothing Nothing runExpr) vm
@@ -429,7 +429,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress
   (makeVm $ VMOpts
     { contract = contrWithBal
     , calldata = (calldata', [])
-    , value = Lit txn.txValue
+    , value = Lit txn.value
     , storageBase = Concrete
     , address =  toAddress
     , caller = Expr.litAddr fromAddr
@@ -437,16 +437,16 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress
     , coinbase = evmToolEnv.coinbase
     , number = evmToolEnv.number
     , timestamp = evmToolEnv.timestamp
-    , gasprice = fromJust txn.txGasPrice
-    , gas = txn.txGasLimit - fromIntegral (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
-    , gaslimit = txn.txGasLimit
+    , gasprice = fromJust txn.gasPrice
+    , gas = txn.gasLimit - fromIntegral (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
+    , gaslimit = txn.gasLimit
     , blockGaslimit = evmToolEnv.gasLimit
     , prevRandao = evmToolEnv.prevRandao
     , baseFee = evmToolEnv.baseFee
-    , priorityFee = fromJust txn.txMaxPriorityFeeGas
+    , priorityFee = fromJust txn.maxPriorityFeeGas
     , maxCodeSize = evmToolEnv.maxCodeSize
     , schedule = evmToolEnv.schedule
-    , chainId = txn.txChainId
+    , chainId = txn.chainId
     , create = False
     , txAccessList = mempty
     , allowFFI = False

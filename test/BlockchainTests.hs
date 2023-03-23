@@ -349,7 +349,7 @@ fromBlockchainCase' :: Block -> Transaction
                        -> Map Addr (EVM.Contract, Storage) -> Map Addr (EVM.Contract, Storage)
                        -> Either BlockchainError Case
 fromBlockchainCase' block tx preState postState =
-  let isCreate = isNothing tx.txToAddr in
+  let isCreate = isNothing tx.toAddr in
   case (sender tx, checkTx tx block preState) of
       (Nothing, _) -> Left SignatureUnverified
       (_, Nothing) -> Left (if isCreate then FailedCreate else InvalidTx)
@@ -357,15 +357,15 @@ fromBlockchainCase' block tx preState postState =
         (EVM.VMOpts
          { contract      = EVM.initialContract theCode
          , calldata      = (cd, [])
-         , value         = Lit tx.txValue
+         , value         = Lit tx.value
          , address       = toAddr
          , caller        = litAddr origin
          , storageBase   = Concrete
          , origin        = origin
-         , gas           = tx.txGasLimit  - fromIntegral (txGasCost feeSchedule tx)
+         , gas           = tx.gasLimit  - fromIntegral (txGasCost feeSchedule tx)
          , baseFee       = block.baseFee
          , priorityFee   = priorityFee tx block.baseFee
-         , gaslimit      = tx.txGasLimit
+         , gaslimit      = tx.gasLimit
          , number        = block.number
          , timestamp     = Lit block.timestamp
          , coinbase      = block.coinbase
@@ -382,38 +382,38 @@ fromBlockchainCase' block tx preState postState =
         checkState
         postState
           where
-            toAddr = fromMaybe (EVM.createAddress origin senderNonce) tx.txToAddr
+            toAddr = fromMaybe (EVM.createAddress origin senderNonce) tx.toAddr
             senderNonce = view (accountAt origin . nonce) (Map.map fst preState)
             feeSchedule = EVM.FeeSchedule.berlin
             toCode = Map.lookup toAddr preState
             theCode = if isCreate
-                      then EVM.InitCode tx.txData mempty
+                      then EVM.InitCode tx.txdata mempty
                       else maybe (EVM.RuntimeCode (EVM.ConcreteRuntimeCode "")) (view contractcode . fst) toCode
             effectiveGasPrice = effectiveprice tx block.baseFee
             cd = if isCreate
                  then mempty
-                 else ConcreteBuf tx.txData
+                 else ConcreteBuf tx.txdata
 
 effectiveprice :: Transaction -> W256 -> W256
 effectiveprice tx baseFee = priorityFee tx baseFee + baseFee
 
 priorityFee :: Transaction -> W256 -> W256
 priorityFee tx baseFee = let
-    (txPrioMax, txMaxFee) = case tx.txType of
+    (txPrioMax, txMaxFee) = case tx.txtype of
                EIP1559Transaction ->
-                 let maxPrio = fromJust tx.txMaxPriorityFeeGas
-                     maxFee = fromJust tx.txMaxFeePerGas
+                 let maxPrio = fromJust tx.maxPriorityFeeGas
+                     maxFee = fromJust tx.maxFeePerGas
                  in (maxPrio, maxFee)
                _ ->
-                 let gasPrice = fromJust tx.txGasPrice
+                 let gasPrice = fromJust tx.gasPrice
                  in (gasPrice, gasPrice)
   in min txPrioMax (txMaxFee - baseFee)
 
 maxBaseFee :: Transaction -> W256
 maxBaseFee tx =
-  case tx.txType of
-     EIP1559Transaction -> fromJust tx.txMaxFeePerGas
-     _ -> fromJust tx.txGasPrice
+  case tx.txtype of
+     EIP1559Transaction -> fromJust tx.maxFeePerGas
+     _ -> fromJust tx.gasPrice
 
 validateTx :: Transaction -> Block -> Map Addr (EVM.Contract, Storage) -> Maybe ()
 validateTx tx block cs = do
@@ -421,9 +421,9 @@ validateTx tx block cs = do
   origin        <- sender tx
   originBalance <- (view balance) <$> view (at origin) cs'
   originNonce   <- (view nonce)   <$> view (at origin) cs'
-  let gasDeposit = (effectiveprice tx block.baseFee) * (num tx.txGasLimit)
-  if gasDeposit + tx.txValue <= originBalance
-    && tx.txNonce == originNonce && block.baseFee <= maxBaseFee tx
+  let gasDeposit = (effectiveprice tx block.baseFee) * (num tx.gasLimit)
+  if gasDeposit + tx.value <= originBalance
+    && tx.nonce == originNonce && block.baseFee <= maxBaseFee tx
   then Just ()
   else Nothing
 
@@ -431,9 +431,9 @@ checkTx :: Transaction -> Block -> Map Addr (EVM.Contract, Storage) -> Maybe (Ma
 checkTx tx block prestate = do
   origin <- sender tx
   validateTx tx block prestate
-  let isCreate   = isNothing tx.txToAddr
+  let isCreate   = isNothing tx.toAddr
       senderNonce = view (accountAt origin . nonce) (Map.map fst prestate)
-      toAddr      = fromMaybe (EVM.createAddress origin senderNonce) tx.txToAddr
+      toAddr      = fromMaybe (EVM.createAddress origin senderNonce) tx.toAddr
       prevCode    = view (accountAt toAddr . contractcode) (Map.map fst prestate)
       prevNonce   = view (accountAt toAddr . nonce) (Map.map fst prestate)
   if isCreate && ((case prevCode of {EVM.RuntimeCode (EVM.ConcreteRuntimeCode b) -> not (BS.null b); _ -> True}) || (prevNonce /= 0))
