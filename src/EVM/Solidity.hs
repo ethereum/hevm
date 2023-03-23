@@ -177,11 +177,11 @@ data JumpType = JumpInto | JumpFrom | JumpRegular
   deriving (Show, Eq, Ord, Generic)
 
 data SrcMap = SM {
-  srcMapOffset :: {-# UNPACK #-} !Int,
-  srcMapLength :: {-# UNPACK #-} !Int,
-  srcMapFile   :: {-# UNPACK #-} !Int,
-  srcMapJump   :: JumpType,
-  srcMapModifierDepth :: {-# UNPACK #-} !Int
+  offset        :: {-# UNPACK #-} !Int,
+  length        :: {-# UNPACK #-} !Int,
+  file          :: {-# UNPACK #-} !Int,
+  jump          :: JumpType,
+  modifierDepth :: {-# UNPACK #-} !Int
 } deriving (Show, Eq, Ord, Generic)
 
 data SrcMapParseState

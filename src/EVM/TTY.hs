@@ -963,7 +963,7 @@ solidityList vm dapp =
         Nothing -> mempty
         Just x ->
           view (
-            ix x.srcMapFile
+            ix x.file
             . to (Vec.imap (,)))
           dapp.sources.lines)
     1
@@ -977,10 +977,10 @@ drawSolidityPane ui =
     Nothing -> padBottom Max (hBorderWithLabel (txt "<no source map>"))
     Just sm ->
           let
-            rows = dappSrcs.lines !! sm.srcMapFile
-            subrange = lineSubrange rows (sm.srcMapOffset, sm.srcMapLength)
+            rows = dappSrcs.lines !! sm.file
+            subrange = lineSubrange rows (sm.offset, sm.length)
             fileName :: Maybe Text
-            fileName = preview (ix sm.srcMapFile . _1) dapp.sources.files
+            fileName = preview (ix sm.file . _1) dapp.sources.files
             lineNo :: Maybe Int
             lineNo = ((\a -> Just (a - 1)) . snd) =<< srcMapCodePos dapp.sources sm
           in vBox
