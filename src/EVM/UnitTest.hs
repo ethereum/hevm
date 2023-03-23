@@ -83,22 +83,22 @@ data UnitTestOptions = UnitTestOptions
   }
 
 data TestVMParams = TestVMParams
-  { testAddress       :: Addr
-  , testCaller        :: Addr
-  , testOrigin        :: Addr
-  , testGasCreate     :: Word64
-  , testGasCall       :: Word64
-  , testBaseFee       :: W256
-  , testPriorityFee   :: W256
-  , testBalanceCreate :: W256
-  , testCoinbase      :: Addr
-  , testNumber        :: W256
-  , testTimestamp     :: W256
-  , testGaslimit      :: Word64
-  , testGasprice      :: W256
-  , testMaxCodeSize   :: W256
-  , testPrevrandao    :: W256
-  , testChainId       :: W256
+  { address       :: Addr
+  , caller        :: Addr
+  , origin        :: Addr
+  , gasCreate     :: Word64
+  , gasCall       :: Word64
+  , baseFee       :: W256
+  , priorityFee   :: W256
+  , balanceCreate :: W256
+  , coinbase      :: Addr
+  , number        :: W256
+  , timestamp     :: W256
+  , gaslimit      :: Word64
+  , gasprice      :: W256
+  , maxCodeSize   :: W256
+  , prevrandao    :: W256
+  , chainId       :: W256
   }
 
 defaultGasForCreating :: Word64
@@ -154,7 +154,7 @@ dappTest opts solcFile cache' = do
 initializeUnitTest :: UnitTestOptions -> SolcContract -> Stepper ()
 initializeUnitTest UnitTestOptions { .. } theContract = do
 
-  let addr = testParams.testAddress
+  let addr = testParams.address
 
   Stepper.evm $ do
     -- Maybe modify the initial VM, e.g. to load library code
@@ -167,7 +167,7 @@ initializeUnitTest UnitTestOptions { .. } theContract = do
 
   Stepper.evm $ do
     -- Give a balance to the test target
-    env . contracts . ix addr . balance += testParams.testBalanceCreate
+    env . contracts . ix addr . balance += testParams.balanceCreate
 
     -- call setUp(), if it exists, to initialize the test contract
     let theAbi = theContract.abiMap
@@ -211,7 +211,7 @@ exploreStep UnitTestOptions{..} bs = do
     let (Method _ inputs sig _ _) = fromMaybe (error "unknown abi call") $ Map.lookup (num $ word $ BS.take 4 bs) dapp.abiMap
         types = snd <$> inputs
     let ?context = DappContext dapp cs
-    this <- fromMaybe (error "unknown target") <$> (use (env . contracts . at testParams.testAddress))
+    this <- fromMaybe (error "unknown target") <$> (use (env . contracts . at testParams.address))
     let name = maybe "" (contractNamePart . (.contractName)) $ lookupCode this._contractcode dapp
     pushTrace (EntryTrace (name <> "." <> sig <> "(" <> intercalate "," ((pack . show) <$> types) <> ")" <> showCall types (ConcreteBuf bs)))
   -- Try running the test method
@@ -561,7 +561,7 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
          timepassed <- num <$> generate (arbitrarySizedNatural :: Gen Word32)
          let ts = fromMaybe (error "symbolic timestamp not supported here") $ maybeLitWord vm._block._timestamp
          return (caller', target, cd, num ts + timepassed)
- let opts' = opts { testParams = testParams {testAddress = target, testCaller = caller', testTimestamp = timestamp'}}
+ let opts' = opts { testParams = testParams {address = target, caller = caller', timestamp = timestamp'}}
      thisCallRLP = List [BS $ word160Bytes caller', BS $ word160Bytes target, BS cd, BS $ word256Bytes timestamp']
  -- set the timestamp
  Stepper.evm $ assign (block . timestamp) (Lit timestamp')
@@ -569,7 +569,7 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
  bailed <- exploreStep opts' cd
  Stepper.evm popTrace
  let newHistory = if bailed then List history else List (thisCallRLP:history)
-     opts'' = opts {testParams = testParams {testTimestamp = timestamp'}}
+     opts'' = opts {testParams = testParams {timestamp = timestamp'}}
      carryOn = explorationStepper opts'' testName replayData targets newHistory (i - 1)
  -- if we didn't revert, run the test function
  if bailed
@@ -645,7 +645,7 @@ runOne opts@UnitTestOptions{..} vm testName args = do
       (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (checkFailures opts testName bailed)) vm'
   if success
   then
-     let gasSpent = num testParams.testGasCall - vm'._state._gas
+     let gasSpent = num testParams.gasCall - vm'._state._gas
          gasText = pack $ show (fromIntegral gasSpent :: Integer)
      in
         pure
@@ -934,44 +934,43 @@ abiCall params args =
   in makeTxCall params (ConcreteBuf cd, [])
 
 makeTxCall :: TestVMParams -> (Expr Buf, [Prop]) -> EVM ()
-makeTxCall TestVMParams{..} (cd, cdProps) = do
+makeTxCall params (cd, cdProps) = do
   resetState
   assign (tx . isCreate) False
-  loadContract testAddress
+  loadContract params.address
   assign (state . EVM.calldata) cd
   constraints %= (<> cdProps)
-  assign (state . caller) (litAddr testCaller)
-  assign (state . gas) testGasCall
-  origin' <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (env . contracts . at testOrigin)
+  assign (state . caller) (litAddr params.caller)
+  assign (state . gas) params.gasCall
+  origin' <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (env . contracts . at params.origin)
   let originBal = origin'._balance
-  when (originBal < testGasprice * (num testGasCall)) $ error "insufficient balance for gas cost"
+  when (originBal < params.gasprice * (num params.gasCall)) $ error "insufficient balance for gas cost"
   vm <- get
   put $ initTx vm
 
 initialUnitTestVm :: UnitTestOptions -> SolcContract -> VM
 initialUnitTestVm (UnitTestOptions {..}) theContract =
   let
-    TestVMParams {..} = testParams
     vm = makeVm $ VMOpts
            { contract = initialContract (InitCode theContract.creationCode mempty)
            , calldata = mempty
            , value = Lit 0
-           , address = testAddress
-           , caller = litAddr testCaller
-           , origin = testOrigin
-           , gas = testGasCreate
-           , gaslimit = testGasCreate
-           , coinbase = testCoinbase
-           , number = testNumber
-           , timestamp = Lit testTimestamp
-           , blockGaslimit = testGaslimit
-           , gasprice = testGasprice
-           , baseFee = testBaseFee
-           , priorityFee = testPriorityFee
-           , maxCodeSize = testMaxCodeSize
-           , prevRandao = testPrevrandao
+           , address = testParams.address
+           , caller = litAddr testParams.caller
+           , origin = testParams.origin
+           , gas = testParams.gasCreate
+           , gaslimit = testParams.gasCreate
+           , coinbase = testParams.coinbase
+           , number = testParams.number
+           , timestamp = Lit testParams.timestamp
+           , blockGaslimit = testParams.gaslimit
+           , gasprice = testParams.gasprice
+           , baseFee = testParams.baseFee
+           , priorityFee = testParams.priorityFee
+           , maxCodeSize = testParams.maxCodeSize
+           , prevRandao = testParams.prevrandao
            , schedule = FeeSchedule.berlin
-           , chainId = testChainId
+           , chainId = testParams.chainId
            , create = True
            , storageBase = Concrete
            , txAccessList = mempty -- TODO: support unit test access lists???
@@ -980,7 +979,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
     creator =
       initialContract (RuntimeCode (ConcreteRuntimeCode ""))
         & set nonce 1
-        & set balance testBalanceCreate
+        & set balance testParams.balanceCreate
   in vm
     & set (env . contracts . at ethrunAddress) (Just creator)
 

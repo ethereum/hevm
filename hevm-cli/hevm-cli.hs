@@ -20,7 +20,7 @@ import qualified EVM.TTY as TTY
 import EVM.Solidity
 import EVM.Expr (litAddr)
 import EVM.Types hiding (word)
-import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, getParametersFromEnvironmentVariables, testNumber, dappTest)
+import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, getParametersFromEnvironmentVariables, dappTest)
 import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
 import GHC.Natural
 import EVM.Format (showTraceTree, formatExpr)
@@ -224,7 +224,7 @@ unitTestOptions cmd solvers testFile = do
   params <- getParametersFromEnvironmentVariables cmd.rpc
 
   let
-    testn = params.testNumber
+    testn = params.number
     block' = if 0 == testn
        then EVM.Fetch.Latest
        else EVM.Fetch.BlockNumber testn
