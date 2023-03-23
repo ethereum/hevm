@@ -48,11 +48,11 @@ instance Show Solver where
 
 -- | A running solver instance
 data SolverInstance = SolverInstance
-  { _type :: Solver
-  , _stdin :: Handle
-  , _stdout :: Handle
-  , _stderr :: Handle
-  , _process :: ProcessHandle
+  { solvertype :: Solver
+  , stdin      :: Handle
+  , stdout     :: Handle
+  , stderr     :: Handle
+  , process    :: ProcessHandle
   }
 
 -- | A channel representing a group of solvers
