@@ -113,9 +113,9 @@ data VM = VM
   deriving (Show)
 
 data Trace = Trace
-  { _traceOpIx     :: Int
-  , _traceContract :: Contract
-  , _traceData     :: TraceData
+  { opIx      :: Int
+  , contract  :: Contract
+  , tracedata :: TraceData
   }
   deriving (Show)
 
@@ -418,7 +418,6 @@ makeLenses ''SubState
 makeLenses ''Contract
 makeLenses ''Env
 makeLenses ''Cache
-makeLenses ''Trace
 makeLenses ''VM
 
 -- | An "external" view of a contract's bytecode, appropriate for
@@ -2378,9 +2377,9 @@ withTraceLocation x = do
   vm <- get
   let this = fromJust $ currentContract vm
   pure Trace
-    { _traceData = x
-    , _traceContract = this
-    , _traceOpIx = fromMaybe 0 $ this._opIxMap Vector.!? vm._state._pc
+    { tracedata = x
+    , contract = this
+    , opIx = fromMaybe 0 $ this._opIxMap Vector.!? vm._state._pc
     }
 
 pushTrace :: TraceData -> EVM ()

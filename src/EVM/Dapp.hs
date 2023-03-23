@@ -141,7 +141,7 @@ extractSig (SymbolicTest sig) = sig
 extractSig (InvariantTest sig) = sig
 
 traceSrcMap :: DappInfo -> Trace -> Maybe SrcMap
-traceSrcMap dapp trace = srcMap dapp trace._traceContract trace._traceOpIx
+traceSrcMap dapp trace = srcMap dapp trace.contract trace.opIx
 
 srcMap :: DappInfo -> Contract -> Int -> Maybe SrcMap
 srcMap dapp contr opIndex = do
