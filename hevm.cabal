@@ -291,7 +291,9 @@ library test-utils
   import:
     test-base
   exposed-modules:
-    EVM.TestUtils
+    EVM.Test.Utils
+    EVM.Test.Tracing
+    EVM.Test.BlockchainTests
   if os(windows)
     buildable: False
 
@@ -303,8 +305,9 @@ common test-common
   build-depends:
     test-utils
   other-modules:
-    EVM.TestUtils
-    EVM.Tracing
+    EVM.Test.Utils
+    EVM.Test.Tracing
+    EVM.Test.BlockchainTests
   if os(windows)
     buildable: False
   if os(darwin)
@@ -367,4 +370,9 @@ benchmark bench
     bytestring,
     text,
     hevm,
-    here
+    here,
+    test-utils,
+    filemanip,
+    filepath,
+    containers,
+    mtl

@@ -32,7 +32,7 @@ import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty.HUnit
 import Test.Tasty.Runners hiding (Failure)
 import Test.Tasty.ExpectedFailure
-import EVM.Tracing qualified
+import EVM.Test.Tracing qualified as Tracing
 
 import Control.Monad.State.Strict hiding (state)
 import Control.Lens hiding (List, pre, (.>), re, op)
@@ -60,7 +60,7 @@ import EVM.Solvers
 import qualified EVM.Expr as Expr
 import qualified Data.Text as T
 import Data.List (isSubsequenceOf)
-import EVM.TestUtils
+import EVM.Test.Utils
 import GHC.Conc (getNumProcessors)
 
 main :: IO ()
@@ -73,8 +73,7 @@ runSubSet p = defaultMain . applyPattern p $ tests
 
 tests :: TestTree
 tests = testGroup "hevm"
-  [
-  EVM.Tracing.tests
+  [ Tracing.tests
   , testGroup "StorageTests"
     [ testCase "read-from-sstore" $ assertEqual ""
         (Lit 0xab)

@@ -12,7 +12,7 @@ concretely through Expr.simplify, then check that against evmtool's output.
 {-# Language DuplicateRecordFields #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module EVM.Tracing where
+module EVM.Test.Tracing where
 
 import Data.ByteString (ByteString)
 import System.Directory

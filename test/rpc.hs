@@ -19,7 +19,7 @@ import EVM.SMT
 import EVM.Solvers
 import EVM.Fetch
 import EVM.SymExec
-import EVM.TestUtils
+import EVM.Test.Utils
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 import EVM.Types hiding (BlockNumber)
