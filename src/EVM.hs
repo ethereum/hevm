@@ -65,7 +65,7 @@ data Error
   | BadJumpDestination
   | Revert (Expr Buf)
   | OutOfGas Word64 Word64
-  | BadCheatCode (Maybe Word32)
+  | BadCheatCode Word32
   | StackLimitExceeded
   | IllegalOverflow
   | Query Query
@@ -1849,7 +1849,7 @@ cheat (inOffset, inSize) (outOffset, outSize) = do
     Just (fromIntegral -> abi') ->
       case Map.lookup abi' cheatActions of
         Nothing ->
-          vmError (BadCheatCode (Just abi'))
+          vmError (BadCheatCode abi')
         Just action -> do
             action (Lit outOffset) (Lit outSize) input
             next
@@ -1947,7 +1947,7 @@ cheatActions =
 
     ]
   where
-    action s f = (abiKeccak s, f (Just $ abiKeccak s))
+    action s f = (abiKeccak s, f (abiKeccak s))
 
 -- | We don't wanna introduce the machinery needed to sign with a random nonce,
 -- so we just use the same nonce every time (420). This is obviusly very
