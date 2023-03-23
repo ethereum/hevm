@@ -25,8 +25,8 @@ import Data.Word (Word64)
 import Numeric (showHex)
 
 data AccessListEntry = AccessListEntry {
-  accessAddress :: Addr,
-  accessStorageKeys :: [W256]
+  address :: Addr,
+  storageKeys :: [W256]
 } deriving (Show, Generic)
 
 instance JSON.ToJSON AccessListEntry
@@ -98,7 +98,7 @@ emptyTransaction = Transaction { txData = mempty
 -- duplicates only matter for gas computation
 txAccessMap :: Transaction -> Map Addr [W256]
 txAccessMap tx = ((Map.fromListWith (++)) . makeTups) tx.txAccessList
-  where makeTups = map (\ale -> (ale.accessAddress , ale.accessStorageKeys ))
+  where makeTups = map (\ale -> (ale.address , ale.storageKeys ))
 
 -- Given Transaction, it recovers the address that sent it
 sender :: Transaction -> Maybe Addr
@@ -131,8 +131,8 @@ signingData tx =
         gasPrice = fromJust tx.txGasPrice
         accessList = tx.txAccessList
         rlpAccessList = EVM.RLP.List $ map (\accessEntry ->
-          EVM.RLP.List [BS $ word160Bytes accessEntry.accessAddress,
-                        EVM.RLP.List $ map rlpWordFull accessEntry.accessStorageKeys]
+          EVM.RLP.List [BS $ word160Bytes accessEntry.address,
+                        EVM.RLP.List $ map rlpWordFull accessEntry.storageKeys]
           ) accessList
         normalData = rlpList [rlpWord256 tx.txNonce,
                               rlpWord256 gasPrice,
@@ -175,7 +175,7 @@ accessListPrice fs al =
     sum (map
       (\ale ->
         fs.g_access_list_address  +
-        (fs.g_access_list_storage_key  * (fromIntegral . length) ale.accessStorageKeys))
+        (fs.g_access_list_storage_key  * (fromIntegral . length) ale.storageKeys))
         al)
 
 txGasCost :: FeeSchedule Word64 -> Transaction -> Word64
