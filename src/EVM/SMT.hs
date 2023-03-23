@@ -48,11 +48,11 @@ import qualified EVM.Expr as Expr
 
 -- variable names in SMT that we want to get values for
 data CexVars = CexVars
-  { calldataV :: [Text]
-  , buffersV :: Map Text (Expr EWord) -- buffers and guesses at their maximum size
-  , storeReads :: [(Expr EWord, Expr EWord)] -- a list of relevant store reads
-  , blockContextV :: [Text]
-  , txContextV :: [Text]
+  { calldata     :: [Text]
+  , buffers      :: Map Text (Expr EWord) -- buffers and guesses at their maximum size
+  , storeReads   :: [(Expr EWord, Expr EWord)] -- a list of relevant store reads
+  , blockContext :: [Text]
+  , txContext    :: [Text]
   }
   deriving (Eq, Show)
 
@@ -61,11 +61,11 @@ instance Semigroup CexVars where
 
 instance Monoid CexVars where
     mempty = CexVars
-      { calldataV = mempty
-      , buffersV = mempty
+      { calldata = mempty
+      , buffers = mempty
       , storeReads = mempty
-      , blockContextV = mempty
-      , txContextV = mempty
+      , blockContext = mempty
+      , txContext = mempty
       }
 
 -- | A model for a buffer, either in it's compressed form (for storing parsed
@@ -97,7 +97,7 @@ data SMTCex = SMTCex
 flattenBufs :: SMTCex -> Maybe SMTCex
 flattenBufs cex = do
   bs <- mapM collapse cex.buffers
-  pure $ cex { buffers = bs}
+  pure $ cex { buffers = bs }
 
 -- | Attemps to collapse a compressed buffer representation down to a flattened one
 collapse :: BufModel -> Maybe BufModel
@@ -319,8 +319,8 @@ discoverMaxReads props benv senv = bufMap
 declareBufs :: [Prop] -> BufEnv -> StoreEnv -> SMT2
 declareBufs props bufEnv storeEnv = SMT2 ("; buffers" : fmap declareBuf allBufs <> ("; buffer lengths" : fmap declareLength allBufs)) cexvars
   where
-    cexvars = mempty{buffersV = discoverMaxReads props bufEnv storeEnv}
-    allBufs = fmap fromLazyText $ Map.keys cexvars.buffersV
+    cexvars = (mempty :: CexVars) { buffers = discoverMaxReads props bufEnv storeEnv }
+    allBufs = fmap fromLazyText $ Map.keys cexvars.buffers
     declareBuf n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
     declareLength n = "(declare-const " <> n <> "_length" <> " (_ BitVec 256))"
 
@@ -329,21 +329,21 @@ declareVars :: [Builder] -> SMT2
 declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = mempty{calldataV = fmap toLazyText names}
+    cexvars = mempty{calldata = fmap toLazyText names}
 
 
 declareFrameContext :: [Builder] -> SMT2
 declareFrameContext names = SMT2 (["; frame context"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = mempty{txContextV = fmap toLazyText names}
+    cexvars = (mempty :: CexVars) { txContext = fmap toLazyText names }
 
 
 declareBlockContext :: [Builder] -> SMT2
 declareBlockContext names = SMT2 (["; block context"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = mempty{blockContextV = fmap toLazyText names}
+    cexvars = (mempty :: CexVars) { blockContext = fmap toLazyText names }
 
 
 prelude :: SMT2
