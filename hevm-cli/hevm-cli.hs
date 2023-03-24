@@ -523,12 +523,12 @@ vmFromCommand cmd = do
     Nothing -> return (0,Lit 0,0,0,0)
     Just url -> EVM.Fetch.fetchBlockFrom block' url >>= \case
       Nothing -> error "Could not fetch block"
-      Just EVM.Block{..} -> return ( coinbase
-                                   , _timestamp
-                                   , baseFee
-                                   , _number
-                                   , prevRandao
-                                   )
+      Just EVM.Block{..} -> pure ( coinbase
+                                 , timestamp
+                                 , baseFee
+                                 , number
+                                 , prevRandao
+                                 )
 
   contract <- case (cmd.rpc, cmd.address, cmd.code) of
     (Just url, Just addr', Just c) -> do
@@ -612,11 +612,11 @@ symvmFromCommand cmd calldata' = do
     Nothing -> return (0,0,0,0)
     Just url -> EVM.Fetch.fetchBlockFrom block' url >>= \case
       Nothing -> error "Could not fetch block"
-      Just EVM.Block{..} -> return ( coinbase
-                                   , _number
-                                   , baseFee
-                                   , prevRandao
-                                   )
+      Just EVM.Block{..} -> pure ( coinbase
+                                 , number
+                                 , baseFee
+                                 , prevRandao
+                                 )
 
   let
     caller' = Caller 0

@@ -89,8 +89,7 @@ deriving instance Show Error
 data VMResult
   = VMFailure Error -- ^ An operation failed
   | VMSuccess (Expr Buf) -- ^ Reached STOP, RETURN, or end-of-code
-
-deriving instance Show VMResult
+  deriving Show
 
 -- | The state of a stepwise EVM execution
 data VM = VM
@@ -98,7 +97,7 @@ data VM = VM
   , _state          :: FrameState
   , _frames         :: [Frame]
   , _env            :: Env
-  , _block          :: Block
+  , block           :: Block
   , _tx             :: TxState
   , _logs           :: [Expr Log]
   , _traces         :: Zipper.TreePos Zipper.Empty Trace
@@ -303,7 +302,7 @@ data SubState = SubState
 data ContractCode
   = InitCode ByteString (Expr Buf) -- ^ "Constructor" code, during contract creation
   | RuntimeCode RuntimeCode -- ^ "Instance" code, after contract creation
-  deriving (Show)
+  deriving (Show, Ord)
 
 -- | We have two variants here to optimize the fully concrete case.
 -- ConcreteRuntimeCode just wraps a ByteString
@@ -315,11 +314,9 @@ data RuntimeCode
 
 -- runtime err when used for symbolic code
 instance Eq ContractCode where
-  (InitCode a b) == (InitCode c d) = a == c && b == d
-  (RuntimeCode x) == (RuntimeCode y) = x == y
+  InitCode a b  == InitCode c d  = a == c && b == d
+  RuntimeCode x == RuntimeCode y = x == y
   _ == _ = False
-
-deriving instance Ord ContractCode
 
 -- | A contract can either have concrete or symbolic storage
 -- depending on what type of execution we are doing
@@ -347,8 +344,7 @@ data Contract = Contract
   , _codeOps      :: RegularVector.Vector (Int, Op)
   , _external     :: Bool
   }
-
-deriving instance Show Contract
+  deriving Show
 
 -- | When doing symbolic execution, we have three different
 -- ways to model the storage of contracts. This determines
@@ -383,8 +379,8 @@ data Env = Env
 -- | Data about the block
 data Block = Block
   { coinbase    :: Addr
-  , _timestamp  :: Expr EWord
-  , _number     :: W256
+  , timestamp   :: Expr EWord
+  , number      :: W256
   , prevRandao  :: W256
   , gaslimit    :: Word64
   , baseFee     :: W256
@@ -402,15 +398,14 @@ blankState = FrameState
   , _memory       = mempty
   , _memorySize   = 0
   , _calldata     = mempty
-  , _callvalue    = (Lit 0)
-  , _caller       = (Lit 0)
+  , _callvalue    = Lit 0
+  , _caller       = Lit 0
   , _gas          = 0
   , _returndata   = mempty
   , _static       = False
   }
 
 makeLenses ''FrameState
-makeLenses ''Block
 makeLenses ''TxState
 makeLenses ''SubState
 makeLenses ''Contract
@@ -490,10 +485,10 @@ makeVm o =
     }
   , _logs = []
   , _traces = Zipper.fromForest []
-  , _block = Block
+  , block = Block
     { coinbase = o.vmoptCoinbase
-    , _timestamp = o.vmoptTimestamp
-    , _number = o.vmoptNumber
+    , timestamp = o.vmoptTimestamp
+    , number = o.vmoptNumber
     , prevRandao = o.vmoptPrevRandao
     , maxCodeSize = o.vmoptMaxCodeSize
     , gaslimit = o.vmoptBlockGaslimit
@@ -567,7 +562,7 @@ exec1 = do
     self = vm._state._contract
     this = fromMaybe (error "internal error: state contract") (Map.lookup self vm._env._contracts)
 
-    fees@FeeSchedule {..} = vm._block.schedule
+    fees@FeeSchedule {..} = vm.block.schedule
 
     doStop = finishFrame (FrameReturned mempty)
 
@@ -870,30 +865,30 @@ exec1 = do
           -- We adopt the fake block hash scheme of the VMTests,
           -- so that blockhash(i) is the hash of i as decimal ASCII.
           stackOp1 g_blockhash $ \case
-            (Lit i) -> if i + 256 < vm._block._number || i >= vm._block._number
+            (Lit i) -> if i + 256 < vm.block.number || i >= vm.block.number
                        then Lit 0
                        else (num i :: Integer) & show & Char8.pack & keccak' & Lit
             i -> BlockHash i
 
         OpCoinbase ->
           limitStack 1 . burn g_base $
-            next >> push (num vm._block.coinbase)
+            next >> push (num vm.block.coinbase)
 
         OpTimestamp ->
           limitStack 1 . burn g_base $
-            next >> pushSym vm._block._timestamp
+            next >> pushSym vm.block.timestamp
 
         OpNumber ->
           limitStack 1 . burn g_base $
-            next >> push vm._block._number
+            next >> push vm.block.number
 
         OpPrevRandao -> do
           limitStack 1 . burn g_base $
-            next >> push vm._block.prevRandao
+            next >> push vm.block.prevRandao
 
         OpGaslimit ->
           limitStack 1 . burn g_base $
-            next >> push (num vm._block.gaslimit)
+            next >> push (num vm.block.gaslimit)
 
         OpChainid ->
           limitStack 1 . burn g_base $
@@ -905,7 +900,7 @@ exec1 = do
 
         OpBaseFee ->
           limitStack 1 . burn g_base $
-            next >> push vm._block.baseFee
+            next >> push vm.block.baseFee
 
         OpPop ->
           case stk of
@@ -1134,7 +1129,7 @@ exec1 = do
                   output = readMemory xOffset' xSize' vm
                   codesize = fromMaybe (error "RETURN: cannot return dynamically sized abstract data")
                                . unlit . bufLength $ output
-                  maxsize = vm._block.maxCodeSize
+                  maxsize = vm.block.maxCodeSize
                   creation = case vm._frames of
                     [] -> vm._tx._isCreate
                     frame:_ -> case frame.context of
@@ -1266,7 +1261,7 @@ callChecks
   -> EVM ()
 callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize xs continue = do
   vm <- get
-  let fees = vm._block.schedule
+  let fees = vm.block.schedule
   accessMemoryRange xInOffset xInSize $
     accessMemoryRange xOutOffset xOutSize $ do
       availableGas <- use (state . gas)
@@ -1327,7 +1322,7 @@ executePrecompile
 executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = do
   vm <- get
   let input = readMemory (Lit inOffset) (Lit inSize) vm
-      fees = vm._block.schedule
+      fees = vm.block.schedule
       cost = costOfPrecompile fees preCompileAddr input
       notImplemented = error $ "precompile at address " <> show preCompileAddr <> " not yet implemented"
       precompileFail = burn (gasCap - cost) $ do
@@ -1644,8 +1639,8 @@ finalize = do
   -- corresponding payment to the miner
   txOrigin     <- gets (._tx.origin)
   sumRefunds   <- (sum . (snd <$>)) <$> (use (tx . substate . refunds))
-  miner        <- gets (._block.coinbase)
-  blockReward  <- num <$> gets (._block.schedule.r_block)
+  miner        <- gets (.block.coinbase)
+  blockReward  <- num <$> gets (.block.schedule.r_block)
   gasPrice     <- gets (._tx.gasprice)
   priorityFee  <- gets (._tx.txPriorityFee)
   gasLimit     <- gets (._tx.txgaslimit)
@@ -1796,7 +1791,7 @@ selfdestruct = pushTo ((tx . substate) . selfdestructs)
 
 accessAndBurn :: Addr -> EVM () -> EVM ()
 accessAndBurn x cont = do
-  FeeSchedule {..} <- gets (._block.schedule)
+  FeeSchedule {..} <- gets (.block.schedule)
   acc <- accessAccountForGas x
   let cost = if acc then g_warm_storage_read else g_cold_account_access
   burn cost cont
@@ -1885,12 +1880,13 @@ cheatActions =
 
       action "warp(uint256)" $
         \sig _ _ input -> case decodeStaticArgs 0 1 input of
-          [x]  -> assign (block . timestamp) x
+          [x] -> modify' $ \vm -> vm { block = vm.block { timestamp = x }}
           _ -> vmError (BadCheatCode sig),
 
       action "roll(uint256)" $
         \sig _ _ input -> case decodeStaticArgs 0 1 input of
-          [x] -> forceConcrete x "cannot roll to a symbolic block number" (assign (block . number))
+          [x] -> forceConcrete x "cannot roll to a symbolic block number" $ \x' ->
+            modify' $ \vm -> vm { block = vm.block { number = x' }}
           _ -> vmError (BadCheatCode sig),
 
       action "store(address,bytes32,bytes32)" $
@@ -2323,7 +2319,7 @@ accessUnboundedMemoryRange
 accessUnboundedMemoryRange _ 0 continue = continue
 accessUnboundedMemoryRange f l continue = do
   m0 <- num <$> use (state . memorySize)
-  fees <- gets (._block.schedule)
+  fees <- gets (.block.schedule)
   do
     let m1 = 32 * ceilDiv (max m0 (f + l)) 32
     burn (memoryCost fees m1 - memoryCost fees m0) $ do

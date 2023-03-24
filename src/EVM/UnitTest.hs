@@ -559,12 +559,12 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
          let cd = abiMethod (sig <> "(" <> intercalate "," ((pack . show) <$> types) <> ")") args
          -- increment timestamp with random amount
          timepassed <- num <$> generate (arbitrarySizedNatural :: Gen Word32)
-         let ts = fromMaybe (error "symbolic timestamp not supported here") $ maybeLitWord vm._block._timestamp
+         let ts = fromMaybe (error "symbolic timestamp not supported here") $ maybeLitWord vm.block.timestamp
          return (caller', target, cd, num ts + timepassed)
  let opts' = opts { testParams = testParams {testAddress = target, testCaller = caller', testTimestamp = timestamp'}}
      thisCallRLP = List [BS $ word160Bytes caller', BS $ word160Bytes target, BS cd, BS $ word256Bytes timestamp']
  -- set the timestamp
- Stepper.evm $ assign (block . timestamp) (Lit timestamp')
+ Stepper.evm $ modify' $ \vm -> vm { block = vm.block { timestamp = Lit timestamp' }}
  -- perform the call
  bailed <- exploreStep opts' cd
  Stepper.evm popTrace
@@ -994,13 +994,13 @@ getParametersFromEnvironmentVariables rpc = do
       Nothing  -> return (0,Lit 0,0,0,0,0)
       Just url -> Fetch.fetchBlockFrom block' url >>= \case
         Nothing -> error "Could not fetch block"
-        Just EVM.Block{..} -> return (  coinbase
-                                      , _timestamp
-                                      , _number
-                                      , prevRandao
-                                      , gaslimit
-                                      , baseFee
-                                      )
+        Just EVM.Block{..} -> pure ( coinbase
+                                   , timestamp
+                                   , number
+                                   , prevRandao
+                                   , gaslimit
+                                   , baseFee
+                                   )
   let
     getWord s def = maybe def read <$> lookupEnv s
     getAddr s def = maybe def read <$> lookupEnv s
