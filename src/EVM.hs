@@ -65,7 +65,7 @@ data Error
   | BadJumpDestination
   | Revert (Expr Buf)
   | OutOfGas Word64 Word64
-  | BadCheatCode Word32
+  | BadCheatCode FunctionSelector
   | StackLimitExceeded
   | IllegalOverflow
   | Query Query
@@ -1857,7 +1857,7 @@ cheat (inOffset, inSize) (outOffset, outSize) = do
 
 type CheatAction = Expr EWord -> Expr EWord -> Expr Buf -> EVM ()
 
-cheatActions :: Map Word32 CheatAction
+cheatActions :: Map FunctionSelector CheatAction
 cheatActions =
   Map.fromList
     [ action "ffi(string[])" $

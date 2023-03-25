@@ -343,11 +343,12 @@ decodeAbiValue :: AbiType -> BSLazy.ByteString -> AbiValue
 decodeAbiValue = runGet . getAbi
 
 selector :: Text -> BS.ByteString
-selector s = BSLazy.toStrict . runPut $ putWord32be (abiKeccak (encodeUtf8 s))
+selector s = BSLazy.toStrict . runPut $
+  putWord32be (abiKeccak (encodeUtf8 s)).unFunctionSelector
 
 abiMethod :: Text -> AbiValue -> BS.ByteString
 abiMethod s args = BSLazy.toStrict . runPut $ do
-  putWord32be (abiKeccak (encodeUtf8 s))
+  putWord32be (abiKeccak (encodeUtf8 s)).unFunctionSelector
   putAbi args
 
 parseTypeName :: Vector AbiType -> Text -> Maybe AbiType
