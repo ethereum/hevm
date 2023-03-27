@@ -1606,7 +1606,7 @@ finalize = do
     revertContracts  = use (tx . txReversion) >>= assign (env . contracts)
     revertSubstate   = assign (tx . substate) (SubState mempty mempty mempty mempty mempty)
 
-  use result >>= \case
+  gets (._result) >>= \case
     Nothing ->
       error "Finalising an unfinished tx."
     Just (VMFailure (EVM.Revert _)) -> do
@@ -1631,30 +1631,26 @@ finalize = do
         _ ->
           case Expr.toList output of
             Nothing ->
-              vmError $ UnexpectedSymbolicArg pc' "runtime code cannot have an abstract lentgh" [output]
+              vmError $ UnexpectedSymbolicArg pc' "runtime code cannot have an abstract length" [output]
             Just ops ->
               onContractCode $ RuntimeCode (SymbolicRuntimeCode ops)
 
+  vm <- get
   -- compute and pay the refund to the caller and the
   -- corresponding payment to the miner
-  txOrigin     <- gets (._tx.origin)
-  sumRefunds   <- (sum . (snd <$>)) <$> (use (tx . substate . refunds))
-  miner        <- gets (.block.coinbase)
-  blockReward  <- num <$> gets (.block.schedule.r_block)
-  gasPrice     <- gets (._tx.gasprice)
-  priorityFee  <- gets (._tx.txPriorityFee)
-  gasLimit     <- gets (._tx.txgaslimit)
-  gasRemaining <- use (state . gas)
-
   let
-    gasUsed      = gasLimit - gasRemaining
+    sumRefunds   = sum (snd <$> vm._tx._substate._refunds)
+    blockReward  = num vm.block.schedule.r_block
+    miner        = vm.block.coinbase
+    gasRemaining = vm._state._gas
+    gasUsed      = vm._tx.txgaslimit - gasRemaining
     cappedRefund = min (quot gasUsed 5) (num sumRefunds)
-    originPay    = (num $ gasRemaining + cappedRefund) * gasPrice
+    originPay    = (num $ gasRemaining + cappedRefund) * vm._tx.gasprice
 
-    minerPay     = priorityFee * (num gasUsed)
+    minerPay     = vm._tx.txPriorityFee * (num gasUsed)
 
   modifying (env . contracts)
-     (Map.adjust (over balance (+ originPay)) txOrigin)
+     (Map.adjust (over balance (+ originPay)) vm._tx.origin)
   modifying (env . contracts)
      (Map.adjust (over balance (+ minerPay)) miner)
   touchAccount miner
@@ -2115,12 +2111,13 @@ create self this xGas' xValue xs newAddr initCode = do
 
         assign state $
           blankState
-            & set contract   newAddr
-            & set codeContract newAddr
-            & set code       c
-            & set callvalue  (Lit xValue)
-            & set caller     (litAddr self)
-            & set gas        xGas'
+            { _contract     = newAddr
+            , _codeContract = newAddr
+            , _code         = c
+            , _callvalue    = Lit xValue
+            , _caller       = litAddr self
+            , _gas          = xGas'
+            }
 
 -- | Replace a contract's code, like when CREATE returns
 -- from the constructor code.
