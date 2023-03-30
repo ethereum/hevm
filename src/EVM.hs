@@ -494,7 +494,7 @@ makeVm o =
     , number = o.number
     , prevRandao = o.prevRandao
     , maxCodeSize = o.maxCodeSize
-    , gaslimit = o.gaslimit
+    , gaslimit = o.blockGaslimit
     , baseFee = o.baseFee
     , schedule = o.schedule
     }
