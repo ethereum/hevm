@@ -116,7 +116,7 @@ library
     Paths_hevm
   autogen-modules:
     Paths_hevm
-  ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
+  ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans -Wno-ambiguous-fields
   if os(linux) || os(windows)
     extra-libraries: stdc++
   extra-libraries:
