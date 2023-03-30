@@ -35,7 +35,9 @@ import Test.Tasty.ExpectedFailure
 import EVM.Test.Tracing qualified as Tracing
 
 import Control.Monad.State.Strict hiding (state)
-import Control.Lens hiding (List, pre, (.>), re, op)
+import Optics.Core hiding (pre, re)
+import Optics.State
+import Optics.Operators.Unsafe
 
 import qualified Data.Vector as Vector
 import Data.String.Here
@@ -96,17 +98,17 @@ tests = testGroup "hevm"
     , testCase "accessStorage uses fetchedStorage" $ do
         let dummyContract =
               (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)))
-                { _external = True }
+                { external = True }
             vm = vmForEthrunCreation ""
             -- perform the initial access
             vm1 = execState (EVM.accessStorage 0 (Lit 0) (pure . pure ())) vm
             -- it should fetch the contract first
-            vm2 = case vm1._result of
+            vm2 = case vm1.result of
                     Just (VMFailure (Query (PleaseFetchContract _addr continue))) ->
                       execState (continue dummyContract) vm1
                     _ -> error "unexpected result"
             -- then it should fetch the slow
-            vm3 = case vm2._result of
+            vm3 = case vm2.result of
                     Just (VMFailure (Query (PleaseFetchSlot _addr _slot continue))) ->
                       execState (continue 1337) vm2
                     _ -> error "unexpected result"
@@ -114,7 +116,7 @@ tests = testGroup "hevm"
             vm4 = execState (EVM.accessStorage 0 (Lit 0) (pure . pure ())) vm3
 
         -- there won't be query now as accessStorage uses fetch cache
-        assertBool (show vm4._result) (isNothing vm4._result)
+        assertBool (show vm4.result) (isNothing vm4.result)
     ]
   , testGroup "SimplifierUnitTests"
     -- common overflow cases that the simplifier was getting wrong
@@ -1141,7 +1143,7 @@ tests = testGroup "hevm"
                                        _ -> error "expected 2 args"
                         in (x .<= Expr.add x y)
                         -- TODO check if it's needed
-                           .&& view (state . callvalue) preVM .== Lit 0
+                           .&& preVM.state.callvalue .== Lit 0
             post prestate leaf =
               let (x, y) = case getStaticAbiArgs 2 prestate of
                              [x', y'] -> (x', y')
@@ -1167,7 +1169,7 @@ tests = testGroup "hevm"
                                        _ -> error "expected 2 args"
                         in (x .<= Expr.add x y)
                            .&& (x .== y)
-                           .&& Control.Lens.view (state . callvalue) preVM .== Lit 0
+                           .&& preVM.state.callvalue .== Lit 0
             post prestate leaf =
               let (_, y) = case getStaticAbiArgs 2 prestate of
                              [x', y'] -> (x', y')
@@ -1192,13 +1194,13 @@ tests = testGroup "hevm"
             }
           }
           |]
-        let pre vm = Lit 0 .== Control.Lens.view (state . callvalue) vm
+        let pre vm = Lit 0 .== vm.state.callvalue
             post prestate leaf =
               let y = case getStaticAbiArgs 1 prestate of
                         [y'] -> y'
                         _ -> error "expected 1 arg"
-                  this = Expr.litAddr $ Control.Lens.view (state . codeContract) prestate
-                  prex = Expr.readStorage' this (Lit 0) (Control.Lens.view (EVM.env . EVM.storage) prestate)
+                  this = Expr.litAddr $ prestate.state.codeContract
+                  prex = Expr.readStorage' this (Lit 0) prestate.env.storage
               in case leaf of
                 EVM.Types.Return _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
                 _ -> PBool True
@@ -1246,13 +1248,13 @@ tests = testGroup "hevm"
               }
             }
             |]
-          let pre vm = (Lit 0) .== Control.Lens.view (state . callvalue) vm
+          let pre vm = (Lit 0) .== vm.state.callvalue
               post prestate poststate =
                 let (x,y) = case getStaticAbiArgs 2 prestate of
                         [x',y'] -> (x',y')
                         _ -> error "expected 2 args"
-                    this = Expr.litAddr $ Control.Lens.view (state . codeContract) prestate
-                    prestore =  Control.Lens.view (EVM.env . EVM.storage) prestate
+                    this = Expr.litAddr $ prestate.state.codeContract
+                    prestore = prestate.env.storage
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
@@ -1280,13 +1282,13 @@ tests = testGroup "hevm"
               }
             }
             |]
-          let pre vm = (Lit 0) .== Control.Lens.view (state . callvalue) vm
+          let pre vm = (Lit 0) .== vm.state.callvalue
               post prestate poststate =
                 let (x,y) = case getStaticAbiArgs 2 prestate of
                         [x',y'] -> (x',y')
                         _ -> error "expected 2 args"
-                    this = Expr.litAddr $ Control.Lens.view (state . codeContract) prestate
-                    prestore =  Control.Lens.view (EVM.env . EVM.storage) prestate
+                    this = Expr.litAddr $ prestate.state.codeContract
+                    prestore =  prestate.env.storage
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
@@ -1762,8 +1764,8 @@ tests = testGroup "hevm"
           (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> do
             let vm0 = abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing SymbolicS
             let vm = vm0
-                  & set (state . callvalue) (Lit 0)
-                  & over (EVM.env . contracts)
+                  & set (#state % #callvalue) (Lit 0)
+                  & over (#env % #contracts)
                        (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
             verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
 
@@ -2302,7 +2304,7 @@ runSimpleVM :: ByteString -> ByteString -> Maybe ByteString
 runSimpleVM x ins = case loadVM x of
                       Nothing -> Nothing
                       Just vm -> let calldata' = (ConcreteBuf ins)
-                       in case runState (assign (state . calldata) calldata' >> exec) vm of
+                       in case runState (assign (#state % #calldata) calldata' >> exec) vm of
                             (VMSuccess (ConcreteBuf bs), _) -> Just bs
                             _ -> Nothing
 
@@ -2311,11 +2313,11 @@ loadVM :: ByteString -> Maybe VM
 loadVM x =
     case runState exec (vmForEthrunCreation x) of
        (VMSuccess (ConcreteBuf targetCode), vm1) -> do
-         let target = Control.Lens.view (state . contract) vm1
+         let target = vm1.state.contract
              vm2 = execState (replaceCodeOfSelf (RuntimeCode (ConcreteRuntimeCode targetCode))) vm1
          return $ snd $ flip runState vm2
                 (do resetState
-                    assign (state . EVM.gas) 0xffffffffffffffff -- kludge
+                    assign (#state % #gas) 0xffffffffffffffff -- kludge
                     loadContract target)
        _ -> Nothing
 
@@ -2370,7 +2372,7 @@ runStatements stmts args t = do
 
 getStaticAbiArgs :: Int -> VM -> [Expr EWord]
 getStaticAbiArgs n vm =
-  let cd = Control.Lens.view (state . calldata) vm
+  let cd = vm.state.calldata
   in decodeStaticArgs 4 n cd
 
 -- includes shaving off 4 byte function sig

@@ -68,6 +68,7 @@ common shared
     NoFieldSelectors
     OverloadedRecordDot
     OverloadedStrings
+    OverloadedLabels
     RecordWildCards
     TypeFamilies
     ViewPatterns
@@ -157,8 +158,10 @@ library
     free                              >= 5.1.3 && < 5.2,
     haskeline                         >= 0.8.0 && < 0.9,
     process                           >= 1.6.5 && < 1.7,
-    lens                              >= 5.1.1 && < 5.2,
-    lens-aeson                        >= 1.2.2 && < 1.3,
+    optics-core,
+    optics-extra,
+    optics-th,
+    aeson-optics,
     monad-par                         >= 0.3.5 && < 0.4,
     async                             >= 2.2.4 && < 2.3,
     multiset                          >= 0.3.4 && < 0.4,
@@ -218,8 +221,6 @@ executable hevm
     filepath,
     free,
     hevm,
-    lens,
-    lens-aeson,
     memory,
     mtl,
     optparse-generic,
@@ -233,7 +234,8 @@ executable hevm
     vector,
     vty,
     stm,
-    spawn
+    spawn,
+    optics-core
   if os(windows)
     buildable: False
 
@@ -265,7 +267,6 @@ common test-base
     filepath,
     here,
     hevm,
-    lens,
     mtl,
     data-dword,
     process,
@@ -285,7 +286,9 @@ common test-base
     spawn >= 0.3,
     witherable,
     smt2-parser >= 0.1.0.1,
-    operational
+    operational,
+    optics-core,
+    optics-extra
 
 library test-utils
   import:

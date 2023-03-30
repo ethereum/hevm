@@ -38,7 +38,7 @@ import EVM.Types (maybeLitWord, W256(..),num, word, Expr(..), EType(..), Addr,
   ByteStringS(..), Error(..))
 
 import Control.Arrow ((>>>))
-import Control.Lens (preview, ix, _2)
+import Optics.Core
 import Data.Binary.Get (runGetOrFail)
 import Data.Bits (shiftR)
 import Data.ByteString (ByteString)
@@ -48,7 +48,6 @@ import Data.ByteString.Lazy (toStrict, fromStrict)
 import Data.Char qualified as Char
 import Data.DoubleWord (signedWord)
 import Data.Foldable (toList)
-import Data.Functor ((<&>))
 import Data.Map qualified as Map
 import Data.Maybe (catMaybes, fromMaybe, fromJust)
 import Data.Text (Text, pack, unpack, intercalate, dropEnd, splitOn)
@@ -107,9 +106,9 @@ showAbiValue (AbiAddress addr) =
       name = case Map.lookup addr contracts of
         Nothing -> ""
         Just contract ->
-          let hash = maybeLitWord contract._codehash
+          let hash = maybeLitWord contract.codehash
           in case hash of
-               Just h -> maybeContractName' (preview (ix h . _2) dappinfo.solcByHash)
+               Just h -> maybeContractName' (preview (ix h % _2) dappinfo.solcByHash)
                Nothing -> ""
   in
     name <> "@" <> (pack $ show addr)
@@ -192,7 +191,7 @@ unindexed ts = [t | (_, t, NotIndexed) <- ts]
 
 showTrace :: DappInfo -> VM -> Trace -> Text
 showTrace dapp vm trace =
-  let ?context = DappContext { info = dapp, env = vm._env._contracts }
+  let ?context = DappContext { info = dapp, env = vm.env.contracts }
   in let
     pos =
       case showTraceLocation dapp trace of
@@ -298,7 +297,7 @@ showTrace dapp vm trace =
       t
     FrameTrace (CreationContext addr (Lit hash) _ _ ) -> -- FIXME: irrefutable pattern
       "create "
-      <> maybeContractName (preview (ix hash . _2) dapp.solcByHash)
+      <> maybeContractName (preview (ix hash % _2) dapp.solcByHash)
       <> "@" <> pack (show addr)
       <> pos
     FrameTrace (CreationContext addr _ _ _ ) ->
@@ -311,7 +310,7 @@ showTrace dapp vm trace =
                      then "call "
                      else "delegatecall "
           hash' = fromJust $ maybeLitWord hash
-      in case preview (ix hash' . _2) dapp.solcByHash of
+      in case preview (ix hash' % _2) dapp.solcByHash of
         Nothing ->
           calltype
             <> pack (show target)

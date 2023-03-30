@@ -6,7 +6,8 @@ module EVM.SymExec where
 import Prelude hiding (Word)
 
 import Data.Tuple (swap)
-import Control.Lens hiding (pre)
+import Optics.Core
+import Optics.State
 import EVM hiding (Query, Revert, push, bytecode, cache)
 import qualified EVM
 import EVM.Exec
@@ -191,7 +192,7 @@ abstractVM (cd, calldataProps) contractCode maybepre storagemodel = finalVm
     precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm']
-    finalVm = vm' & over constraints (<> precond)
+    finalVm = vm' & over #constraints (<> precond)
 
 loadSymVM :: ContractCode -> Expr Storage -> Expr EWord -> Expr EWord -> Expr Buf -> [Prop] -> VM
 loadSymVM x initStore addr callvalue' calldata' calldataProps =
@@ -219,9 +220,9 @@ loadSymVM x initStore addr callvalue' calldata' calldataProps =
     , create = False
     , txAccessList = mempty
     , allowFFI = False
-    }) & set (env . contracts . at (createAddress ethrunAddress 1))
+    }) & set (#env % #contracts % at (createAddress ethrunAddress 1))
              (Just (initialContract x))
-       & set (env . EVM.storage) initStore
+       & set (#env % #storage) initStore
 
 
 -- | Interpreter which explores all paths at branching points.
@@ -251,7 +252,7 @@ interpret fetcher maxIter askSmtIters =
         Stepper.IOAct q ->
           mapStateT liftIO q >>= interpret fetcher maxIter askSmtIters . k
         Stepper.Ask (EVM.PleaseChoosePath cond continue) -> do
-          assign result Nothing
+          assign #result Nothing
           vm <- get
           case maxIterationsReached vm maxIter of
             -- TODO: parallelise
@@ -271,7 +272,7 @@ interpret fetcher maxIter askSmtIters =
           case q of
             PleaseAskSMT _ _ continue -> do
               codelocation <- getCodeLocation <$> get
-              iteration <- num . fromMaybe 0 <$> use (iterations . at codelocation)
+              iteration <- num . fromMaybe 0 <$> use (#iterations % at codelocation)
 
               -- if this is the first time we are branching at this point,
               -- explore both branches without consulting SMT.
@@ -290,9 +291,9 @@ maxIterationsReached :: VM -> Maybe Integer -> Maybe Bool
 maxIterationsReached _ Nothing = Nothing
 maxIterationsReached vm (Just maxIter) =
   let codelocation = getCodeLocation vm
-      iters = view (at codelocation . non 0) vm._iterations
+      iters = view (at codelocation % non 0) vm.iterations
   in if num maxIter <= iters
-     then Map.lookup (codelocation, iters - 1) vm._cache._path
+     then Map.lookup (codelocation, iters - 1) vm.cache.path
      else Nothing
 
 
@@ -358,7 +359,7 @@ verifyContract solvers theCode signature concreteArgs opts storagemodel maybepre
 
 pruneDeadPaths :: [VM] -> [VM]
 pruneDeadPaths =
-  filter $ \vm -> case vm._result of
+  filter $ \vm -> case vm.result of
     Just (VMFailure DeadPath) -> False
     _ -> True
 
@@ -366,10 +367,10 @@ pruneDeadPaths =
 runExpr :: Stepper.Stepper (Expr End)
 runExpr = do
   vm <- Stepper.runFully
-  let asserts = vm._keccakEqs
-  pure $ case vm._result of
+  let asserts = vm.keccakEqs
+  pure $ case vm.result of
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
-    Just (VMSuccess buf) -> Return asserts buf vm._env._storage
+    Just (VMSuccess buf) -> Return asserts buf vm.env.storage
     Just (VMFailure e) -> case e of
       UnrecognizedOpcode _ -> Failure asserts Invalid
       SelfDestruction -> Failure asserts SelfDestruct
@@ -501,7 +502,7 @@ verify solvers opts preState maybepost = do
           \leaf -> case evalProp (post preState leaf) of
             PBool True -> False
             _ -> True
-        assumes = preState._constraints
+        assumes = preState.constraints
         withQueries = fmap (\leaf -> (assertProps (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)) canViolate
       putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violation(s)"
 

@@ -146,7 +146,7 @@ traceSrcMap dapp trace = srcMap dapp trace.contract trace.opIx
 srcMap :: DappInfo -> Contract -> Int -> Maybe SrcMap
 srcMap dapp contr opIndex = do
   sol <- findSrc contr dapp
-  case contr._contractcode of
+  case contr.contractcode of
     (InitCode _ _) ->
       Seq.lookup opIndex sol.creationSrcmap
     (RuntimeCode _) ->
@@ -154,10 +154,10 @@ srcMap dapp contr opIndex = do
 
 findSrc :: Contract -> DappInfo -> Maybe SolcContract
 findSrc c dapp = do
-  hash <- unlit c._codehash
+  hash <- unlit c.codehash
   case Map.lookup hash dapp.solcByHash of
     Just (_, v) -> Just v
-    Nothing -> lookupCode c._contractcode dapp
+    Nothing -> lookupCode c.contractcode dapp
 
 
 lookupCode :: ContractCode -> DappInfo -> Maybe SolcContract

@@ -7,7 +7,7 @@ import EVM.Expr (litAddr)
 
 import qualified EVM.FeeSchedule as FeeSchedule
 
-import Control.Lens
+import Optics.Core
 import Control.Monad.Trans.State.Strict (get, State)
 import Data.ByteString (ByteString)
 import Data.Maybe (isNothing)
@@ -42,20 +42,20 @@ vmForEthrunCreation creationCode =
     , create = False
     , txAccessList = mempty
     , allowFFI = False
-    }) & set (env . contracts . at ethrunAddress)
+    }) & set (#env % #contracts % at ethrunAddress)
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
 
 exec :: State VM VMResult
 exec = do
   vm <- get
-  case vm._result of
+  case vm.result of
     Nothing -> exec1 >> exec
     Just r -> pure r
 
 run :: State VM VM
 run = do
   vm <- get
-  case vm._result of
+  case vm.result of
     Nothing -> exec1 >> run
     Just _ -> pure vm
 
@@ -64,7 +64,7 @@ execWhile p = go 0
   where
     go i = do
       vm <- get
-      if p vm && isNothing vm._result
+      if p vm && isNothing vm.result
         then do
           go $! (i + 1)
       else

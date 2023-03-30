@@ -3,15 +3,16 @@ module EVM.Transaction where
 import Prelude hiding (Word)
 
 import qualified EVM
-import EVM (balance, initialContract)
+import EVM (initialContract)
 import EVM.FeeSchedule
 import EVM.RLP
 import EVM.Types
 import EVM.Expr (litAddr)
-import Control.Lens
 import EVM.Sign
 
-import Data.ByteString (ByteString)
+import Optics.Core hiding (cons)
+
+import Data.ByteString (ByteString, cons)
 import Data.Map (Map)
 import Data.Maybe (fromMaybe, isNothing, fromJust)
 import GHC.Generics (Generic)
@@ -226,7 +227,7 @@ instance FromJSON Transaction where
     JSON.typeMismatch "Transaction" invalid
 
 accountAt :: Addr -> Getter (Map Addr EVM.Contract) EVM.Contract
-accountAt a = (at a) . (to $ fromMaybe newAccount)
+accountAt a = (at a) % (to $ fromMaybe newAccount)
 
 touchAccount :: Addr -> Map Addr EVM.Contract -> Map Addr EVM.Contract
 touchAccount a = Map.insertWith (flip const) a newAccount
@@ -238,8 +239,8 @@ newAccount = initialContract $ EVM.RuntimeCode (EVM.ConcreteRuntimeCode "")
 setupTx :: Addr -> Addr -> W256 -> Word64 -> Map Addr EVM.Contract -> Map Addr EVM.Contract
 setupTx origin coinbase gasPrice gasLimit prestate =
   let gasCost = gasPrice * (num gasLimit)
-  in (Map.adjust ((over EVM.nonce   (+ 1))
-               . (over balance (subtract gasCost))) origin)
+  in (Map.adjust ((over #nonce   (+ 1))
+               . (over #balance (subtract gasCost))) origin)
     . touchAccount origin
     . touchAccount coinbase $ prestate
 
@@ -248,22 +249,22 @@ setupTx origin coinbase gasPrice gasLimit prestate =
 -- and pay receiving address
 initTx :: EVM.VM -> EVM.VM
 initTx vm = let
-    toAddr   = vm._state._contract
-    origin   = vm._tx._origin
-    gasPrice = vm._tx._gasprice
-    gasLimit = vm._tx._txgaslimit
-    coinbase = vm._block._coinbase
-    value    = vm._state._callvalue
-    toContract = initialContract vm._state._code
-    preState = setupTx origin coinbase gasPrice gasLimit vm._env._contracts
-    oldBalance = view (accountAt toAddr . balance) preState
-    creation = vm._tx._isCreate
+    toAddr   = vm.state.contract
+    origin   = vm.tx.origin
+    gasPrice = vm.tx.gasprice
+    gasLimit = vm.tx.gaslimit
+    coinbase = vm.block.coinbase
+    value    = vm.state.callvalue
+    toContract = initialContract vm.state.code
+    preState = setupTx origin coinbase gasPrice gasLimit vm.env.contracts
+    oldBalance = view (accountAt toAddr % #balance) preState
+    creation = vm.tx.isCreate
     initState = (case unlit value of
-      Just v -> ((Map.adjust (over balance (subtract v))) origin)
-              . (Map.adjust (over balance (+ v))) toAddr
+      Just v -> ((Map.adjust (over #balance (subtract v))) origin)
+              . (Map.adjust (over #balance (+ v))) toAddr
       Nothing -> id)
       . (if creation
-         then Map.insert toAddr (toContract & balance .~ oldBalance)
+         then Map.insert toAddr (toContract & #balance .~ oldBalance)
          else touchAccount toAddr)
       $ preState
 
@@ -274,7 +275,7 @@ initTx vm = let
     resetStore (SStore {}) = error "cannot reset storage if it contains symbolic addresses"
     resetStore s = s
     in
-      vm & EVM.env . EVM.contracts .~ initState
-         & EVM.tx . EVM.txReversion .~ preState
-         & EVM.env . EVM.storage %~ resetStore
-         & EVM.env . EVM.origStorage %~ resetConcreteStore
+      vm & #env % #contracts .~ initState
+         & #tx % #txReversion .~ preState
+         & #env % #storage %~ resetStore
+         & #env % #origStorage %~ resetConcreteStore

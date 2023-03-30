@@ -3,7 +3,6 @@
 
 module Main where
 
-import Control.Lens
 import Test.Tasty
 import Test.Tasty.HUnit
 import Data.Text (Text)
@@ -31,31 +30,31 @@ tests :: TestTree
 tests = testGroup "rpc"
   [ testGroup "Block Parsing Tests"
     [ testCase "pre-merge-block" $ do
-        let block' = BlockNumber 15537392
-        (cb, numb, basefee, prevRan) <- fetchBlockFrom block' testRpc >>= \case
+        let block = BlockNumber 15537392
+        (cb, numb, basefee, prevRan) <- fetchBlockFrom block testRpc >>= \case
                       Nothing -> error "Could not fetch block"
-                      Just EVM.Block{..} -> return (_coinbase
-                                                   , _number
-                                                   , _baseFee
-                                                   , _prevRandao
+                      Just EVM.Block{..} -> return ( coinbase
+                                                   , number
+                                                   , baseFee
+                                                   , prevRandao
                                                    )
 
         assertEqual "coinbase" (Addr 0xea674fdde714fd979de3edf0f56aa9716b898ec8) cb
-        assertEqual "number" (BlockNumber numb) block'
+        assertEqual "number" (BlockNumber numb) block
         assertEqual "basefee" 38572377838 basefee
         assertEqual "prevRan" 11049842297455506 prevRan
     , testCase "post-merge-block" $ do
-        let block' = BlockNumber 16184420
-        (cb, numb, basefee, prevRan) <- fetchBlockFrom block' testRpc >>= \case
+        let block = BlockNumber 16184420
+        (cb, numb, basefee, prevRan) <- fetchBlockFrom block testRpc >>= \case
                       Nothing -> error "Could not fetch block"
-                      Just EVM.Block{..} -> return (_coinbase
-                                                   , _number
-                                                   , _baseFee
-                                                   , _prevRandao
+                      Just EVM.Block{..} -> return ( coinbase
+                                                   , number
+                                                   , baseFee
+                                                   , prevRandao
                                                    )
 
         assertEqual "coinbase" (Addr 0x690b9a9e9aa1c9db991c7721a92d351db4fac990) cb
-        assertEqual "number" (BlockNumber numb) block'
+        assertEqual "number" (BlockNumber numb) block
         assertEqual "basefee" 22163046690 basefee
         assertEqual "prevRan" 0x2267531ab030ed32fd5f2ef51f81427332d0becbd74fe7f4cd5684ddf4b287e0 prevRan
     ]
@@ -76,12 +75,12 @@ tests = testGroup "rpc"
         postVm <- withSolvers Z3 1 Nothing $ \solvers ->
           execStateT (Stepper.interpret (Fetch.oracle solvers (Just (BlockNumber blockNum, testRpc))) . void $ Stepper.execFully) vm
         let
-          postStore = case view (env . storage) postVm of
+          postStore = case postVm.env.storage of
             ConcreteStore s -> s
             _ -> error "ConcreteStore expected"
           wethStore = fromJust $ Map.lookup 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 postStore
           receiverBal = fromJust $ Map.lookup (keccak' (word256Bytes 0xdead <> word256Bytes 0x3)) wethStore
-          msg = case view result postVm of
+          msg = case postVm.result of
             Just (VMSuccess m) -> m
             _ -> error "VMSuccess expected"
         assertEqual "should succeed" msg (ConcreteBuf $ word256Bytes 0x1)
@@ -130,16 +129,16 @@ vmFromRpc blockNum calldata' callvalue' caller' address' = do
     , EVM.origin        = 0xacab
     , EVM.gas           = 0xffffffffffffffff
     , EVM.gaslimit      = 0xffffffffffffffff
-    , EVM.baseFee       = view baseFee blk
+    , EVM.baseFee       = blk.baseFee
     , EVM.priorityFee   = 0
-    , EVM.coinbase      = view coinbase blk
-    , EVM.number        = view number blk
-    , EVM.timestamp     = view timestamp blk
-    , EVM.blockGaslimit = view gaslimit blk
+    , EVM.coinbase      = blk.coinbase
+    , EVM.number        = blk.number
+    , EVM.timestamp     = blk.timestamp
+    , EVM.blockGaslimit = blk.gaslimit
     , EVM.gasprice      = 0
-    , EVM.maxCodeSize   = view maxCodeSize blk
-    , EVM.prevRandao    = view prevRandao blk
-    , EVM.schedule      = view schedule blk
+    , EVM.maxCodeSize   = blk.maxCodeSize
+    , EVM.prevRandao    = blk.prevRandao
+    , EVM.schedule      = blk.schedule
     , EVM.chainId       = 1
     , EVM.create        = False
     , EVM.storageBase   = EVM.Concrete

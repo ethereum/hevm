@@ -9,15 +9,16 @@ import EVM.ABI
 import EVM.Types    (Addr, W256, hexText, Expr(Lit), Expr(..), Prop(..), (.&&), (./=))
 import EVM.SMT
 import EVM.Solvers
-import EVM          (EVM, Contract, Block, initialContract, nonce, balance, external)
+import EVM          (EVM, Contract, Block, initialContract)
 import qualified EVM.FeeSchedule as FeeSchedule
 
 import qualified EVM
 
-import Control.Lens hiding ((.=))
+import Optics.Core
+
 import Control.Monad.Trans.Maybe
 import Data.Aeson hiding (Error)
-import Data.Aeson.Lens
+import Data.Aeson.Optics
 import qualified Data.ByteString as BS
 import Data.Text (Text, unpack, pack)
 import Data.Maybe (fromMaybe)
@@ -85,39 +86,49 @@ fetchQuery n f q = do
   x <- case q of
     QueryCode addr -> do
         m <- f (rpc "eth_getCode" [toRPC addr, toRPC n])
-        return $ hexText . view _String <$> m
+        pure $ do
+          t <- preview _String <$> m
+          hexText <$> t
     QueryNonce addr -> do
         m <- f (rpc "eth_getTransactionCount" [toRPC addr, toRPC n])
-        return $ readText . view _String <$> m
+        pure $ do
+          t <- preview _String <$> m
+          readText <$> t
     QueryBlock -> do
       m <- f (rpc "eth_getBlockByNumber" [toRPC n, toRPC False])
       return $ m >>= parseBlock
     QueryBalance addr -> do
         m <- f (rpc "eth_getBalance" [toRPC addr, toRPC n])
-        return $ readText . view _String <$> m
+        pure $ do
+          t <- preview _String <$> m
+          readText <$> t
     QuerySlot addr slot -> do
         m <- f (rpc "eth_getStorageAt" [toRPC addr, toRPC slot, toRPC n])
-        return $ readText . view _String <$> m
+        pure $ do
+          t <- preview _String <$> m
+          readText <$> t
     QueryChainId -> do
         m <- f (rpc "eth_chainId" [toRPC n])
-        return $ readText . view _String <$> m
+        pure $ do
+          t <- preview _String <$> m
+          readText <$> t
   return x
 
 
 parseBlock :: (AsValue s, Show s) => s -> Maybe EVM.Block
 parseBlock j = do
-  coinbase   <- readText <$> j ^? key "miner" . _String
-  timestamp  <- Lit . readText <$> j ^? key "timestamp" . _String
-  number     <- readText <$> j ^? key "number" . _String
-  gasLimit   <- readText <$> j ^? key "gasLimit" . _String
+  coinbase   <- readText <$> j ^? key "miner" % _String
+  timestamp  <- Lit . readText <$> j ^? key "timestamp" % _String
+  number     <- readText <$> j ^? key "number" % _String
+  gasLimit   <- readText <$> j ^? key "gasLimit" % _String
   let
-   baseFee = readText <$> j ^? key "baseFeePerGas" . _String
+   baseFee = readText <$> j ^? key "baseFeePerGas" % _String
    -- It seems unclear as to whether this field should still be called mixHash or renamed to prevRandao
    -- According to https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4399.md it should be renamed
    -- but alchemy is still returning mixHash
-   mixhash = readText <$> j ^? key "mixHash" . _String
-   prevRandao = readText <$> j ^? key "prevRandao" . _String
-   difficulty = readText <$> j ^? key "difficulty" . _String
+   mixhash = readText <$> j ^? key "mixHash" % _String
+   prevRandao = readText <$> j ^? key "prevRandao" % _String
+   difficulty = readText <$> j ^? key "difficulty" % _String
    prd = case (prevRandao, mixhash, difficulty) of
      (Just p, _, _) -> p
      (Nothing, Just mh, Just 0x0) -> mh
@@ -129,7 +140,7 @@ parseBlock j = do
 fetchWithSession :: Text -> Session -> Value -> IO (Maybe Value)
 fetchWithSession url sess x = do
   r <- asValue =<< Session.post sess (unpack url) x
-  return (r ^? responseBody . key "result")
+  return (r ^? (lensVL responseBody) % key "result")
 
 fetchContractWithSession
   :: BlockNumber -> Text -> Addr -> Session -> IO (Maybe Contract)
@@ -144,9 +155,9 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
 
   return $
     initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode theCode))
-      & set nonce    theNonce
-      & set balance  theBalance
-      & set external True
+      & set #nonce    theNonce
+      & set #balance  theBalance
+      & set #external True
 
 fetchSlotWithSession
   :: BlockNumber -> Text -> Session -> Addr -> W256 -> IO (Maybe W256)

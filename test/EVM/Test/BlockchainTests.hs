@@ -6,7 +6,7 @@ module EVM.Test.BlockchainTests where
 import Prelude hiding (Word)
 
 import EVM qualified
-import EVM (contractcode, storage, origStorage, balance, nonce, initialContract, StorageBase(..))
+import EVM (initialContract, StorageBase(..))
 import EVM.Concrete qualified as EVM
 import EVM.Dapp (emptyDapp)
 import EVM.Expr (litAddr)
@@ -19,7 +19,7 @@ import EVM.TTY qualified as TTY
 import EVM.Types
 
 import Control.Arrow ((***), (&&&))
-import Control.Lens
+import Optics.Core
 import Control.Monad
 import Control.Monad.State.Strict (execStateT)
 import Data.Aeson ((.:), (.:?), FromJSON (..))
@@ -168,8 +168,8 @@ checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
     printContracts :: Map Addr (EVM.Contract, Storage) -> IO ()
     printContracts cs = putStrLn $ Map.foldrWithKey (\k (c, s) acc ->
       acc ++ show k ++ " : "
-                   ++ (show . toInteger  $ (view nonce c)) ++ " "
-                   ++ (show . toInteger  $ (view balance c)) ++ " "
+                   ++ (show . toInteger  $ (view #nonce c)) ++ " "
+                   ++ (show . toInteger  $ (view #balance c)) ++ " "
                    ++ (printStorage s)
         ++ "\n") "" cs
 
@@ -182,7 +182,7 @@ checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
         ])
     check = x.checkContracts
     expected = x.testExpectation
-    actual = Map.map (,mempty) $ view (EVM.env . EVM.contracts) vm -- . to (fmap (clearZeroStorage.clearOrigStorage))) vm
+    actual = Map.map (,mempty) $ view (#env % #contracts) vm -- . to (fmap (clearZeroStorage.clearOrigStorage))) vm
     printStorage = show -- TODO: fixme
 
   when diff $ do
@@ -215,16 +215,16 @@ checkExpectation diff x vm = do
 
 (===) :: (EVM.Contract, Storage) -> (EVM.Contract, Storage) -> Bool
 (c1, s1) === (c2, s2) =
-  codeEqual && storageEqual && (c1 ^. balance == c2 ^. balance) && (c1 ^. nonce ==  c2 ^. nonce)
+  codeEqual && storageEqual && (c1 ^. #balance == c2 ^. #balance) && (c1 ^. #nonce ==  c2 ^. #nonce)
   where
     storageEqual = s1 == s2
-    codeEqual = case (c1 ^. contractcode, c2 ^. contractcode) of
+    codeEqual = case (c1 ^. #contractcode, c2 ^. #contractcode) of
       (EVM.RuntimeCode a', EVM.RuntimeCode b') -> a' == b'
       _ -> error "unexpected code"
 
 checkExpectedContracts :: EVM.VM -> Map Addr (EVM.Contract, Storage) -> (Bool, Bool, Bool, Bool, Bool)
 checkExpectedContracts vm expected =
-  let cs = zipWithStorages $ vm ^. EVM.env . EVM.contracts -- . to (fmap (clearZeroStorage.clearOrigStorage))
+  let cs = zipWithStorages $ vm ^. #env % #contracts -- . to (fmap (clearZeroStorage.clearOrigStorage))
       expectedCs = clearStorage <$> expected
   in ( (expectedCs ~= cs)
      , (clearBalance <$> expectedCs) ~= (clearBalance <$> cs)
@@ -235,7 +235,7 @@ checkExpectedContracts vm expected =
   where
   zipWithStorages = Map.mapWithKey (\addr c -> (c, lookupStorage addr))
   lookupStorage _ =
-    case vm ^. EVM.env . EVM.storage of
+    case vm ^. #env % #storage of
       ConcreteStore _ -> mempty -- clearZeroStorage $ fromMaybe mempty $ Map.lookup (num addr) s
       EmptyStore -> mempty
       AbstractStore -> mempty -- error "AbstractStore, should this be handled?"
@@ -246,13 +246,13 @@ clearStorage :: (EVM.Contract, Storage) -> (EVM.Contract, Storage)
 clearStorage (c, _) = (c, mempty)
 
 clearBalance :: (EVM.Contract, Storage) -> (EVM.Contract, Storage)
-clearBalance (c, s) = (set balance 0 c, s)
+clearBalance (c, s) = (set #balance 0 c, s)
 
 clearNonce :: (EVM.Contract, Storage) -> (EVM.Contract, Storage)
-clearNonce (c, s) = (set nonce 0 c, s)
+clearNonce (c, s) = (set #nonce 0 c, s)
 
 clearCode :: (EVM.Contract, Storage) -> (EVM.Contract, Storage)
-clearCode (c, s) = (set contractcode (EVM.RuntimeCode (EVM.ConcreteRuntimeCode "")) c, s)
+clearCode (c, s) = (set #contractcode (EVM.RuntimeCode (EVM.ConcreteRuntimeCode "")) c, s)
 
 newtype ContractWithStorage = ContractWithStorage (EVM.Contract, Storage)
 
@@ -263,8 +263,8 @@ instance FromJSON ContractWithStorage where
     balance' <- v .: "balance"
     nonce'   <- v .: "nonce"
     let c = EVM.initialContract code
-              & balance .~ balance'
-              & nonce   .~ nonce'
+              & #balance .~ balance'
+              & #nonce   .~ nonce'
     return $ ContractWithStorage (c, storage')
 
   parseJSON invalid =
@@ -381,12 +381,12 @@ fromBlockchainCase' block tx preState postState =
         postState
           where
             toAddr = fromMaybe (EVM.createAddress origin senderNonce) tx.toAddr
-            senderNonce = view (accountAt origin . nonce) (Map.map fst preState)
+            senderNonce = view (accountAt origin % #nonce) (Map.map fst preState)
             feeSchedule = EVM.FeeSchedule.berlin
             toCode = Map.lookup toAddr preState
             theCode = if isCreate
                       then EVM.InitCode tx.txdata mempty
-                      else maybe (EVM.RuntimeCode (EVM.ConcreteRuntimeCode "")) (view contractcode . fst) toCode
+                      else maybe (EVM.RuntimeCode (EVM.ConcreteRuntimeCode "")) (view #contractcode . fst) toCode
             effectiveGasPrice = effectiveprice tx block.baseFee
             cd = if isCreate
                  then mempty
@@ -417,8 +417,8 @@ validateTx :: Transaction -> Block -> Map Addr (EVM.Contract, Storage) -> Maybe 
 validateTx tx block cs = do
   let cs' = Map.map fst cs
   origin        <- sender tx
-  originBalance <- (view balance) <$> view (at origin) cs'
-  originNonce   <- (view nonce)   <$> view (at origin) cs'
+  originBalance <- (view #balance) <$> view (at origin) cs'
+  originNonce   <- (view #nonce)   <$> view (at origin) cs'
   let gasDeposit = (effectiveprice tx block.baseFee) * (num tx.gasLimit)
   if gasDeposit + tx.value <= originBalance
     && tx.nonce == originNonce && block.baseFee <= maxBaseFee tx
@@ -430,10 +430,10 @@ checkTx tx block prestate = do
   origin <- sender tx
   validateTx tx block prestate
   let isCreate   = isNothing tx.toAddr
-      senderNonce = view (accountAt origin . nonce) (Map.map fst prestate)
+      senderNonce = view (accountAt origin % #nonce) (Map.map fst prestate)
       toAddr      = fromMaybe (EVM.createAddress origin senderNonce) tx.toAddr
-      prevCode    = view (accountAt toAddr . contractcode) (Map.map fst prestate)
-      prevNonce   = view (accountAt toAddr . nonce) (Map.map fst prestate)
+      prevCode    = view (accountAt toAddr % #contractcode) (Map.map fst prestate)
+      prevNonce   = view (accountAt toAddr % #nonce) (Map.map fst prestate)
   if isCreate && ((case prevCode of {EVM.RuntimeCode (EVM.ConcreteRuntimeCode b) -> not (BS.null b); _ -> True}) || (prevNonce /= 0))
   then mzero
   else
@@ -446,8 +446,8 @@ vmForCase x =
     cs = Map.map fst a
     st = Map.mapKeys num $ Map.map snd a
     vm = EVM.makeVm x.vmOpts
-      & set (EVM.env . EVM.contracts) cs
-      & set (EVM.env . EVM.storage) (ConcreteStore st)
-      & set (EVM.env . EVM.origStorage) st
+      & set (#env % #contracts) cs
+      & set (#env % #storage) (ConcreteStore st)
+      & set (#env % #origStorage) st
   in
     initTx vm

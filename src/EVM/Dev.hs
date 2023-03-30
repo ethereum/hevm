@@ -365,13 +365,13 @@ initVm bs = vm
   where
     contractCode = RuntimeCode (ConcreteRuntimeCode bs)
     c = Contract
-      { _contractcode = contractCode
-      , _balance      = 0
-      , _nonce        = 0
-      , _codehash     = keccak (ConcreteBuf bs)
-      , _opIxMap      = mkOpIxMap contractCode
-      , _codeOps      = mkCodeOps contractCode
-      , _external     = False
+      { contractcode = contractCode
+      , balance      = 0
+      , nonce        = 0
+      , codehash     = keccak (ConcreteBuf bs)
+      , opIxMap      = mkOpIxMap contractCode
+      , codeOps      = mkCodeOps contractCode
+      , external     = False
       }
     vm = makeVm $ VMOpts
       { contract      = c
