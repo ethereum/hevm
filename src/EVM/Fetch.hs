@@ -170,19 +170,19 @@ fetchBlockWithSession n url sess =
   fetchQuery n (fetchWithSession url sess) QueryBlock
 
 fetchBlockFrom :: BlockNumber -> Text -> IO (Maybe Block)
-fetchBlockFrom n url =
-  Session.withAPISession
-    (fetchBlockWithSession n url)
+fetchBlockFrom n url = do
+  sess <- Session.newAPISession
+  fetchBlockWithSession n url sess
 
 fetchContractFrom :: BlockNumber -> Text -> Addr -> IO (Maybe Contract)
-fetchContractFrom n url addr =
-  Session.withAPISession
-    (fetchContractWithSession n url addr)
+fetchContractFrom n url addr = do
+  sess <- Session.newAPISession
+  fetchContractWithSession n url addr sess
 
 fetchSlotFrom :: BlockNumber -> Text -> Addr -> W256 -> IO (Maybe W256)
-fetchSlotFrom n url addr slot =
-  Session.withAPISession
-    (\s -> fetchSlotWithSession n url s addr slot)
+fetchSlotFrom n url addr slot = do
+  sess <- Session.newAPISession
+  fetchSlotWithSession n url sess addr slot
 
 http :: Natural -> Maybe Natural -> BlockNumber -> Text -> Fetcher
 http smtjobs smttimeout n url q =
