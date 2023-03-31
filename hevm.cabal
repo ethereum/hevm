@@ -61,6 +61,12 @@ common shared
     ghc-options: -Werror
   if flag(devel)
     ghc-options: -j
+  ghc-options:
+    -Wall
+    -Wno-deprecations
+    -Wno-unticked-promoted-constructors
+    -Wno-orphans
+    -Wno-ambiguous-fields
   default-language: GHC2021
   default-extensions:
     DuplicateRecordFields
@@ -116,7 +122,6 @@ library
     Paths_hevm
   autogen-modules:
     Paths_hevm
-  ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans -Wno-ambiguous-fields
   if os(linux) || os(windows)
     extra-libraries: stdc++
   extra-libraries:
@@ -195,7 +200,7 @@ executable hevm
     hevm-cli
   main-is:
     hevm-cli.hs
-  ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
+  ghc-options: -threaded -with-rtsopts=-N
   other-modules:
     Paths_hevm
   if os(darwin)
@@ -243,7 +248,6 @@ executable hevm
 
 common test-base
   import: shared
-  ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans
   hs-source-dirs:
     test
   extra-libraries:
