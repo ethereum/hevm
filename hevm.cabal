@@ -63,7 +63,6 @@ common shared
     ghc-options: -j
   ghc-options:
     -Wall
-    -Wno-deprecations
     -Wno-unticked-promoted-constructors
     -Wno-orphans
     -Wno-ambiguous-fields
