@@ -391,7 +391,9 @@ assert cmd = do
       let opts = VeriOpts { simp = True, debug = cmd.smtdebug, maxIter = cmd.maxIterations, askSmtIters = cmd.askSmtIterations, rpcInfo = rpcinfo}
       (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
       case res of
-        [Qed _] -> putStrLn "\nQED: No reachable property violations discovered\n"
+        [Qed _] -> do
+          putStrLn "\nQED: No reachable property violations discovered\n"
+          showExtras solvers cmd calldata expr
         _ -> do
           let cexs = snd <$> mapMaybe getCex res
               timeouts = mapMaybe getTimeout res
@@ -410,20 +412,24 @@ assert cmd = do
                    , ""
                    ] <> fmap (formatExpr) timeouts
           T.putStrLn $ T.unlines (counterexamples <> unknowns)
+          showExtras solvers cmd calldata expr
           exitFailure
-      when cmd.showTree $ do
-        putStrLn "=== Expression ===\n"
-        T.putStrLn $ formatExpr expr
-        putStrLn ""
-      when cmd.showReachableTree $ do
-        reached <- reachable solvers expr
-        putStrLn "=== Reachable Expression ===\n"
-        T.putStrLn (formatExpr . snd $ reached)
-        putStrLn ""
-      when cmd.getModels $ do
-        putStrLn $ "=== Models for " <> show (Expr.numBranches expr) <> " branches ===\n"
-        ms <- produceModels solvers expr
-        forM_ ms (showModel (fst calldata))
+
+showExtras :: SolverGroup -> Command Options.Unwrapped -> (Expr Buf, [Prop]) -> Expr End -> IO ()
+showExtras solvers cmd calldata expr = do
+  when cmd.showTree $ do
+    putStrLn "=== Expression ===\n"
+    T.putStrLn $ formatExpr expr
+    putStrLn ""
+  when cmd.showReachableTree $ do
+    reached <- reachable solvers expr
+    putStrLn "=== Reachable Expression ===\n"
+    T.putStrLn (formatExpr . snd $ reached)
+    putStrLn ""
+  when cmd.getModels $ do
+    putStrLn $ "=== Models for " <> show (Expr.numBranches expr) <> " branches ===\n"
+    ms <- produceModels solvers expr
+    forM_ ms (showModel (fst calldata))
 
 getCex :: ProofResult a b c -> Maybe b
 getCex (Cex c) = Just c
