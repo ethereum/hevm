@@ -107,7 +107,7 @@ data VM = VM
   , _constraints    :: [Prop]
   , _keccakEqs      :: [Prop]
   , _allowFFI       :: Bool
-  , _overrideCaller :: Maybe (Expr EWord)
+  , _overrideCaller :: Maybe Addr
   }
   deriving (Show)
 
@@ -1084,12 +1084,13 @@ exec1 = do
               \(xGas, xValue, xInOffset, xInSize, xOutOffset, xOutSize) ->
                 (if xValue > 0 then notStatic else id) $
                   delegateCall this (num xGas) xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
+                    let from' = fromMaybe self (vm ^. overrideCaller)
                     zoom state $ do
                       assign callvalue (Lit xValue)
-                      assign caller $ fromMaybe (litAddr self) (vm ^. overrideCaller)
+                      assign caller (litAddr from')
                       assign contract callee
                     assign overrideCaller Nothing
-                    transfer self callee xValue
+                    transfer from' callee xValue
                     touchAccount self
                     touchAccount callee
             _ ->
@@ -1103,7 +1104,7 @@ exec1 = do
                 delegateCall this (num xGas) xTo (litAddr self) xValue xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
                   zoom state $ do
                     assign callvalue (Lit xValue)
-                    assign caller $ fromMaybe (litAddr self) (vm ^. overrideCaller)
+                    assign caller $ litAddr $ fromMaybe self (vm ^. overrideCaller)
                   assign overrideCaller Nothing
                   touchAccount self
             _ ->
@@ -1178,7 +1179,7 @@ exec1 = do
                 delegateCall this (num xGas) xTo xTo 0 xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
                   zoom state $ do
                     assign callvalue (Lit 0)
-                    assign caller $ fromMaybe (litAddr self) (vm ^. overrideCaller)
+                    assign caller $ litAddr $ fromMaybe self (vm ^. overrideCaller)
                     assign contract callee
                     assign static True
                   assign overrideCaller Nothing
@@ -1903,7 +1904,7 @@ cheatActions =
 
       action "prank(address)" $
         \sig _ _ input -> case decodeStaticArgs 0 1 input of
-          [addr]  -> assign overrideCaller (Just addr)
+          [addr]  -> assign overrideCaller (Expr.exprToAddr $ addr)
           _ -> vmError (BadCheatCode sig)
 
     ]
