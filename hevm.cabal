@@ -60,7 +60,7 @@ common shared
   if flag(ci)
     ghc-options: -Werror
   if flag(devel)
-    ghc-options: -j -O0
+    ghc-options: -j
   default-language: GHC2021
   default-extensions:
     DuplicateRecordFields
@@ -358,6 +358,8 @@ benchmark bench
     bench.hs
   hs-source-dirs:
     bench
+  ghc-options:
+    -O2
   if os(darwin)
      extra-libraries: c++
   else
