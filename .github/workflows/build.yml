@@ -11,14 +11,7 @@ jobs:
   build:
     strategy:
       matrix:
-       os: [ ubuntu-latest, macos-latest ]
-       # we need this to map platform names as used by github to
-       # the attribute names defined in release.nix
-       include:
-         - os: ubuntu-latest
-           os_attr: linux
-         - os: macos-latest
-           os_attr: darwin
+       os: [ [ubuntu-latest], [macos-latest], [self-hosted, macOS, ARM64] ]
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
