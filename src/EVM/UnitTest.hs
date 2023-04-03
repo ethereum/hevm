@@ -322,13 +322,13 @@ interpretWithCoverage opts@UnitTestOptions{..} =
 coverageReport
   :: DappInfo
   -> MultiSet SrcMap
-  -> Map Text (Vector (Int, ByteString))
+  -> Map FilePath (Vector (Int, ByteString))
 coverageReport dapp cov =
   let
     sources :: SourceCache
     sources = dapp.sources
 
-    allPositions :: Set (Text, Int)
+    allPositions :: Set (FilePath, Int)
     allPositions =
       ( Set.fromList
       . mapMaybe (srcMapCodePos sources)
@@ -340,17 +340,17 @@ coverageReport dapp cov =
         )
       )
 
-    srcMapCov :: MultiSet (Text, Int)
+    srcMapCov :: MultiSet (FilePath, Int)
     srcMapCov = MultiSet.mapMaybe (srcMapCodePos sources) cov
 
-    linesByName :: Map Text (Vector ByteString)
+    linesByName :: Map FilePath (Vector ByteString)
     linesByName =
       Map.fromList $ zipWith
           (\(name, _) lines' -> (name, lines'))
-          sources.files
-          sources.lines
+          (Map.elems sources.files)
+          (Map.elems sources.lines)
 
-    f :: Text -> Vector ByteString -> Vector (Int, ByteString)
+    f :: FilePath -> Vector ByteString -> Vector (Int, ByteString)
     f name =
       Vector.imap
         (\i bs ->

@@ -36,7 +36,7 @@ import Control.Monad              (void, when, forM_, unless)
 import Control.Monad.State.Strict (execStateT, liftIO)
 import Data.ByteString            (ByteString)
 import Data.List                  (intersperse)
-import Data.Text                  (unpack, pack)
+import Data.Text                  (pack)
 import Data.Maybe                 (fromMaybe, mapMaybe)
 import Data.Version               (showVersion)
 import Data.DoubleWord            (Word256)
@@ -268,7 +268,7 @@ main = do
           buildOut <- readBuildOutput root (getProjectType cmd)
           case buildOut of
             Left e -> do
-              putStrLn e
+              putStrLn $ "Error: " <> e
               exitFailure
             Right out -> do
               -- TODO: which functions here actually require a BuildOutput, and which can take it as a Maybe?
@@ -427,9 +427,9 @@ dappCoverage opts _ bo@(BuildOutput (Contracts cs) cache) = do
   let
     dapp = dappInfo "." bo
     f (k, vs) = do
-      when (shouldPrintCoverage opts.covMatch k) $ do
+      when (shouldPrintCoverage opts.covMatch (T.pack k)) $ do
         putStr ("\x1b[0m" ++ "————— hevm coverage for ") -- Prefixed with color reset
-        putStrLn (unpack k ++ " —————")
+        putStrLn (k ++ " —————")
         putStrLn ""
         forM_ vs $ \(n, bs) -> do
           case ByteString.find (\x -> x /= 0x9 && x /= 0x20 && x /= 0x7d) bs of

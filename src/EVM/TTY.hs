@@ -40,7 +40,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.List (sort, find)
 import Data.Maybe (isJust, fromJust, fromMaybe, isNothing)
-import Data.Map (Map, insert, lookupLT, singleton, filter)
+import Data.Map (Map, insert, lookupLT, singleton, filter, (!?))
 import Data.Map qualified as Map
 import Data.Text (Text, pack)
 import Data.Text qualified as T
@@ -982,10 +982,13 @@ drawSolidityPane ui =
     Nothing -> padBottom Max (hBorderWithLabel (txt "<no source map>"))
     Just sm ->
           let
-            rows = dappSrcs.lines !! sm.srcMapFile
-            subrange = lineSubrange rows (sm.srcMapOffset, sm.srcMapLength)
+            rows = dappSrcs.lines !? sm.srcMapFile
+            subrange :: Int -> Maybe (Int, Int)
+            subrange i = do
+              rs <- rows
+              lineSubrange rs (sm.srcMapOffset, sm.srcMapLength) i
             fileName :: Maybe Text
-            fileName = preview (ix sm.srcMapFile . _1) dapp.sources.files
+            fileName = T.pack . fst <$> (dapp.sources.files !? sm.srcMapFile)
             lineNo :: Maybe Int
             lineNo = ((\a -> Just (a - 1)) . snd) =<< srcMapCodePos dapp.sources sm
           in vBox

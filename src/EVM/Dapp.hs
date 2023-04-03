@@ -187,4 +187,4 @@ showTraceLocation dapp trace =
       case srcMapCodePos dapp.sources sm of
         Nothing -> Left "<source not found>"
         Just (fileName, lineIx) ->
-          Right (fileName <> ":" <> pack (show lineIx))
+          Right (pack fileName <> ":" <> pack (show lineIx))

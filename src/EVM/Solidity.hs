@@ -25,6 +25,7 @@ module EVM.Solidity
   , Reference(..)
   , Mutability(..)
   , readBuildOutput
+  , getBuildOuts
   , functionAbi
   , makeSrcMaps
   , readSolc
@@ -166,8 +167,15 @@ newtype Contracts = Contracts (Map Text SolcContract)
 newtype Asts = Asts (Map Text Value)
   deriving newtype (Show, Eq, Semigroup, Monoid)
 
+-- | Solidity source files are identified either by their location in the vfs, or by a src map identifier
+data SrcFile = SrcFile
+  { id :: Int
+  , filepath :: FilePath
+  }
+  deriving (Show, Eq, Ord)
+
 -- | A mapping from source files to (maybe) their contents
-newtype Sources = Sources (Map Text (Maybe ByteString))
+newtype Sources = Sources (Map SrcFile (Maybe ByteString))
   deriving newtype (Show, Eq, Semigroup, Monoid)
 
 data BuildOutput = BuildOutput
@@ -186,8 +194,8 @@ data ProjectType = DappTools | Foundry
   deriving (Eq, Show, Read, ParseField)
 
 data SourceCache = SourceCache
-  { files  :: [(Text, ByteString)]
-  , lines  :: [(Vector ByteString)]
+  { files  :: Map Int (FilePath, ByteString)
+  , lines  :: Map Int (Vector ByteString)
   , asts   :: Map Text Value
   } deriving (Show, Eq, Generic)
 
@@ -278,7 +286,7 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
     go ';' (xs, F5 a b c j ds, _)              = let p' = SM a b c j (readR ds) in -- solc >=0.6
                                                  (xs |> p', F1 [] 1, p')
 
-    go c (xs, state, p)                      = (xs, error ("srcmap: y u " ++ show c ++ " in state" ++ show state ++ "?!?"), p)
+    go c (xs, state, p)                        = (xs, error ("srcmap: y u " ++ show c ++ " in state" ++ show state ++ "?!?"), p)
 
 -- | Reads all solc ouput json files found under the provided filepath and returns them merged into a BuildOutput
 readBuildOutput :: FilePath -> ProjectType -> IO (Either String BuildOutput)
@@ -310,12 +318,15 @@ filterMetadata = filter (not . isSuffixOf ".metadata.json")
 
 makeSourceCache :: Sources -> Asts -> IO SourceCache
 makeSourceCache (Sources sources) (Asts asts) = do
-  let f (_,  Just content) = return content
-      f (fp, Nothing) = BS.readFile $ T.unpack fp
-  xs <- mapM f (Map.toList sources)
+  files <- Map.fromList <$> forM (Map.toList sources) (\x@(SrcFile id' fp, _) -> do
+      contents <- case x of
+        (_,  Just content) -> return content
+        (SrcFile _ _, Nothing) -> BS.readFile fp
+      pure (id', (fp, contents))
+    )
   return $! SourceCache
-    { files = zip (Map.keys sources) xs
-    , lines = map (Vector.fromList . BS.split 0xa) xs
+    { files = files
+    , lines = fmap (Vector.fromList . BS.split 0xa . snd) files
     , asts  = asts
     }
 
@@ -399,6 +410,8 @@ readFoundryJSON contractName json = do
 
   abi <- toList <$> json ^? key "abi" . _Array
 
+  id' <- num <$> json ^? key "id" . _Integer
+
   let contract = SolcContract
         { runtimeCodehash     = keccak' (stripBytecodeMetadata runtimeCode)
         , creationCodehash    = keccak' (stripBytecodeMetadata creationCode)
@@ -415,8 +428,8 @@ readFoundryJSON contractName json = do
         , immutableReferences = mempty -- TODO: foundry doesn't expose this?
         }
   return ( Contracts $ Map.singleton (path <> ":" <> contractName) contract
-         , Asts      $ Map.singleton (path <> ":" <> contractName) ast
-         , Sources   $ Map.singleton path Nothing
+         , Asts      $ Map.singleton path ast
+         , Sources   $ Map.singleton (SrcFile id' (T.unpack path)) Nothing
          )
 
 -- | Parses the standard json output from solc
@@ -427,7 +440,8 @@ readStdJSON json = do
   sources <- KeyMap.toHashMapText <$>  json ^? key "sources" . _Object
   let asts = force "JSON lacks abstract syntax trees." . preview (key "ast") <$> sources
       contractMap = f contracts
-      contents src = (src, encodeUtf8 <$> HMap.lookup src (mconcat $ Map.elems $ snd <$> contractMap))
+      getId src = num $ (force "" $ HMap.lookup src sources) ^?! key "id" . _Integer
+      contents src = (SrcFile (getId src) (T.unpack src), encodeUtf8 <$> HMap.lookup src (mconcat $ Map.elems $ snd <$> contractMap))
   return ( Contracts $ fst <$> contractMap
          , Asts      $ Map.fromList (HMap.toList asts)
          , Sources   $ Map.fromList $ contents <$> (sort $ HMap.keys sources)
