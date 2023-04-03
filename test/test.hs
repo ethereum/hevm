@@ -563,7 +563,7 @@ tests = testGroup "hevm"
                }
              }
              |]
-         (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x1] c Nothing [] debugVeriOpts
+         (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x1] c Nothing [] defaultVeriOpts
          putStrLn "expected counterexample found"
       ,
      testCase "enum-conversion-fail" $ do

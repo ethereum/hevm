@@ -43,7 +43,7 @@ runDappTest root =
   withCurrentDirectory root $ do
     cores <- num <$> getNumProcessors
     let testFile = root <> "/out/dapp.sol.json"
-    Right (BuildOutput contracts _) <- readSolc DappTools testFile
+    Right (BuildOutput contracts _) <- readSolc DappTools root testFile
     withSolvers Z3 cores Nothing $ \solvers -> do
       opts <- testOpts solvers root testFile
       res <- unitTest opts contracts Nothing
@@ -51,7 +51,7 @@ runDappTest root =
 
 testOpts :: SolverGroup -> FilePath -> FilePath -> IO UnitTestOptions
 testOpts solvers root testFile = do
-  srcInfo <- readSolc DappTools testFile >>= \case
+  srcInfo <- readSolc DappTools root testFile >>= \case
     Left e -> error e
     Right out ->
       pure $ dappInfo root out

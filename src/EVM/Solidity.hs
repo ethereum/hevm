@@ -83,7 +83,6 @@ import Options.Generic
 import Prelude hiding (readFile, writeFile)
 import System.FilePattern.Directory
 import System.FilePath.Posix
-import System.Directory
 import System.IO hiding (readFile, writeFile)
 import System.IO.Temp
 import System.Process
@@ -290,22 +289,20 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
 -- | Reads all solc ouput json files found under the provided filepath and returns them merged into a BuildOutput
 readBuildOutput :: FilePath -> ProjectType -> IO (Either String BuildOutput)
 readBuildOutput root DappTools = do
-  withCurrentDirectory root $ do
-    let outDir = root <> "/out/"
-    jsons <- findJsonFiles outDir
-    case jsons of
-      [x] -> readSolc DappTools (outDir <> x)
-      [] -> pure . Left $ "no json files found in: " <> outDir
-      _ -> pure . Left $ "multiple json files found in: " <> outDir
+  let outDir = root <> "/out/"
+  jsons <- findJsonFiles outDir
+  case jsons of
+    [x] -> readSolc DappTools root (outDir <> x)
+    [] -> pure . Left $ "no json files found in: " <> outDir
+    _ -> pure . Left $ "multiple json files found in: " <> outDir
 readBuildOutput root Foundry = do
-  withCurrentDirectory root $ do
-    let outDir = root <> "/out/"
-    jsons <- findJsonFiles (root <> "/out")
-    case (filterMetadata jsons) of
-      [] -> pure . Left $ "no json files found in: " <> outDir
-      js -> do
-        outputs <- sequence <$> mapM (readSolc Foundry) ((fmap ((<>) (outDir))) js)
-        pure . (fmap mconcat) $ outputs
+  let outDir = root <> "/out/"
+  jsons <- findJsonFiles (root <> "/out")
+  case (filterMetadata jsons) of
+    [] -> pure . Left $ "no json files found in: " <> outDir
+    js -> do
+      outputs <- sequence <$> mapM (readSolc Foundry root) ((fmap ((<>) (outDir))) js)
+      pure . (fmap mconcat) $ outputs
 
 -- | Finds all json files under the provided filepath, searches recursively
 findJsonFiles :: FilePath -> IO [FilePath]
@@ -315,12 +312,12 @@ findJsonFiles root = getDirectoryFiles root ["**/*.json"]
 filterMetadata :: [FilePath] -> [FilePath]
 filterMetadata = filter (not . isSuffixOf ".metadata.json")
 
-makeSourceCache :: Sources -> Asts -> IO SourceCache
-makeSourceCache (Sources sources) (Asts asts) = do
+makeSourceCache :: FilePath -> Sources -> Asts -> IO SourceCache
+makeSourceCache root (Sources sources) (Asts asts) = do
   files <- Map.fromList <$> forM (Map.toList sources) (\x@(SrcFile id' fp, _) -> do
       contents <- case x of
         (_,  Just content) -> return content
-        (SrcFile _ _, Nothing) -> BS.readFile fp
+        (SrcFile _ _, Nothing) -> BS.readFile (root <> "/" <> fp)
       pure (id', (fp, contents))
     )
   return $! SourceCache
@@ -341,13 +338,13 @@ lineSubrange xs (s1, n1) i =
     then Nothing
     else Just (s1 - s2, min (s2 + n2 - s1) n1)
 
-readSolc :: ProjectType -> FilePath -> IO (Either String BuildOutput)
-readSolc pt fp =
+readSolc :: ProjectType -> FilePath -> FilePath -> IO (Either String BuildOutput)
+readSolc pt root fp =
   (readJSON pt (T.pack $ takeBaseName fp) <$> readFile fp) >>=
     \case
       Nothing -> pure . Left $ "unable to parse: " <> fp
       Just (contracts, asts, sources) -> do
-        sourceCache <- makeSourceCache sources asts
+        sourceCache <- makeSourceCache root sources asts
         return (Right (BuildOutput contracts sourceCache))
 
 yul :: Text -> Text -> IO (Maybe ByteString)
