@@ -16,6 +16,8 @@ foundry repo, and all unit tests will be executed (including prove tests).
 
 `hevm dapp-test` has been replaced with `hevm test --project-type DappTools`.
 
+`hevm test` no longer supports parsing solidity output in the combined json format.
+
 ## [0.50.4] - 2023-03-17
 
 ### Fixed
