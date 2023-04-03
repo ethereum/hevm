@@ -453,6 +453,10 @@ instance Ord Prop where
   PImpl a b <= PImpl c d = a <= c && b <= d
   _ <= _ = False
 
+-- | https://docs.soliditylang.org/en/v0.8.19/abi-spec.html#function-selector
+newtype FunctionSelector = FunctionSelector { unFunctionSelector :: Word32 }
+  deriving (Num, Eq, Ord, Real, Enum, Integral)
+instance Show FunctionSelector where show s = "0x" <> showHex s ""
 
 unlit :: Expr EWord -> Maybe W256
 unlit (Lit x) = Just x
@@ -746,12 +750,13 @@ keccak buf = Keccak buf
 keccak' :: ByteString -> W256
 keccak' = keccakBytes >>> BS.take 32 >>> word
 
-abiKeccak :: ByteString -> Word32
+abiKeccak :: ByteString -> FunctionSelector
 abiKeccak =
   keccakBytes
     >>> BS.take 4
     >>> BS.unpack
     >>> word32
+    >>> FunctionSelector
 
 -- Utils
 

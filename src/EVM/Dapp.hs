@@ -5,7 +5,7 @@ import EVM.ABI (Event, AbiType, SolError)
 import EVM.Concrete
 import EVM.Debug (srcMapCodePos)
 import EVM.Solidity
-import EVM.Types (W256, abiKeccak, keccak', Addr, regexMatches, unlit, unlitByte)
+import EVM.Types (W256, abiKeccak, keccak', Addr, regexMatches, unlit, unlitByte, FunctionSelector)
 
 import Control.Arrow ((>>>))
 import Data.Aeson (Value)
@@ -20,7 +20,6 @@ import Data.Sequence qualified as Seq
 import Data.Text (Text, isPrefixOf, pack, unpack)
 import Data.Text.Encoding (encodeUtf8)
 import Data.Vector qualified as V
-import Data.Word (Word32)
 
 data DappInfo = DappInfo
   { root       :: FilePath
@@ -29,7 +28,7 @@ data DappInfo = DappInfo
   , solcByCode :: [(Code, SolcContract)] -- for contracts with `immutable` vars.
   , sources    :: SourceCache
   , unitTests  :: [(Text, [(Test, [AbiType])])]
-  , abiMap     :: Map Word32 Method
+  , abiMap     :: Map FunctionSelector Method
   , eventMap   :: Map W256 Event
   , errorMap   :: Map W256 SolError
   , astIdMap   :: Map Int Value
@@ -97,7 +96,7 @@ emptyDapp = dappInfo "" mempty
 -- Tests beginning with "test" are interpreted as concrete tests, whereas
 -- tests beginning with "prove" are interpreted as symbolic tests.
 
-unitTestMarkerAbi :: Word32
+unitTestMarkerAbi :: FunctionSelector
 unitTestMarkerAbi = abiKeccak (encodeUtf8 "IS_TEST()")
 
 findAllUnitTests :: [SolcContract] -> [(Text, [(Test, [AbiType])])]

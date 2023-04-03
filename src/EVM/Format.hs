@@ -35,7 +35,7 @@ import EVM.Expr qualified as Expr
 import EVM.Hexdump (prettyHex)
 import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
 import EVM.Types (maybeLitWord, W256(..),num, word, Expr(..), EType(..), Addr,
-  ByteStringS(..), Error(..))
+  ByteStringS(..), Error(..), FunctionSelector)
 
 import Control.Arrow ((>>>))
 import Control.Lens (preview, ix, _2)
@@ -56,7 +56,6 @@ import Data.Text qualified as T
 import Data.Text.Encoding (decodeUtf8, decodeUtf8')
 import Data.Tree.View (showTree)
 import Data.Vector (Vector)
-import Data.Word (Word32)
 import Numeric (showHex)
 
 data Signedness = Signed | Unsigned
@@ -241,7 +240,7 @@ showTrace dapp vm trace =
                       --     bytes             data
                       -- ) anonymous;
                       let
-                        sig = fromIntegral $ shiftR topic 224 :: Word32
+                        sig = fromIntegral $ shiftR topic 224 :: FunctionSelector
                         usr = case maybeLitWord t2 of
                           Just w ->
                             pack $ show (fromIntegral w :: Addr)

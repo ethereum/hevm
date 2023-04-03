@@ -25,7 +25,6 @@ module EVM.Solidity
   , Reference(..)
   , Mutability(..)
   , readBuildOutput
-  , getBuildOuts
   , functionAbi
   , makeSrcMaps
   , readSolc
@@ -79,7 +78,7 @@ import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 import Data.Text.IO (readFile, writeFile)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
-import Data.Word (Word8, Word32)
+import Data.Word (Word8)
 import Options.Generic
 import Prelude hiding (readFile, writeFile)
 import System.FilePattern.Directory
@@ -135,7 +134,7 @@ data SolcContract = SolcContract
   , creationCode     :: ByteString
   , contractName     :: Text
   , constructorInputs :: [(Text, AbiType)]
-  , abiMap           :: Map Word32 Method
+  , abiMap           :: Map FunctionSelector Method
   , eventMap         :: Map W256 Event
   , errorMap         :: Map W256 SolError
   , immutableReferences :: Map W256 [Reference]
@@ -484,7 +483,7 @@ readStdJSON json = do
                _ -> Nothing
       }, fromMaybe mempty srcContents))
 
-mkAbiMap :: [Value] -> Map Word32 Method
+mkAbiMap :: [Value] -> Map FunctionSelector Method
 mkAbiMap abis = Map.fromList $
   let
     relevant = filter (\y -> "function" == y ^?! key "type" . _String) abis
