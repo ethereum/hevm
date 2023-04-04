@@ -2,7 +2,7 @@ module EVM.TTYCenteredList where
 
 -- Hard fork of brick's List that centers the currently highlighted line.
 
-import Control.Lens
+import Optics.Core
 import Data.Maybe (fromMaybe)
 
 import Brick.Types
@@ -31,15 +31,15 @@ drawListElements foc l drawElem =
     Widget Greedy Greedy $ do
         c <- getContext
 
-        let es = V.slice start num (l^.listElementsL)
-            idx = fromMaybe 0 (l^.listSelectedL)
+        let es = V.slice start num (l ^. (lensVL listElementsL))
+            idx = fromMaybe 0 (l ^. (lensVL listSelectedL))
 
             start = max 0 $ idx - (initialNumPerHeight `div` 2)
-            num = min (numPerHeight * 2) (V.length (l^.listElementsL) - start)
+            num = min (numPerHeight * 2) (V.length (l ^. (lensVL listElementsL)) - start)
 
             -- The number of items to show is the available height divided by
             -- the item height...
-            initialNumPerHeight = (c^.availHeightL) `div` (l^.listItemHeightL)
+            initialNumPerHeight = (c ^. (lensVL availHeightL)) `div` (l ^. (lensVL listItemHeightL))
             -- ... but if the available height leaves a remainder of
             -- an item height then we need to ensure that we render an
             -- extra item to show a partial item at the top or bottom to
@@ -49,7 +49,7 @@ drawListElements foc l drawElem =
             -- rendered with only its top 2 or bottom 2 rows visible,
             -- depending on how the viewport state changes.)
             numPerHeight = initialNumPerHeight +
-                           if initialNumPerHeight * (l^.listItemHeightL) == c^.availHeightL
+                           if initialNumPerHeight * (l ^. (lensVL listItemHeightL)) == c ^. (lensVL availHeightL)
                            then 0
                            else 1
 
@@ -66,6 +66,6 @@ drawListElements foc l drawElem =
                                   else id
                 in makeVisible elemWidget
 
-        render $ viewport (l^.listNameL) Vertical $
+        render $ viewport (l ^. (lensVL listNameL)) Vertical $
                  -- translateBy (Location (0, off)) $
                  vBox $ V.toList drawnElements

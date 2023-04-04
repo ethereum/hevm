@@ -61,6 +61,11 @@ common shared
     ghc-options: -Werror
   if flag(devel)
     ghc-options: -j
+  ghc-options:
+    -Wall
+    -Wno-unticked-promoted-constructors
+    -Wno-orphans
+    -Wno-ambiguous-fields
   default-language: GHC2021
   default-extensions:
     DuplicateRecordFields
@@ -68,6 +73,7 @@ common shared
     NoFieldSelectors
     OverloadedRecordDot
     OverloadedStrings
+    OverloadedLabels
     RecordWildCards
     TypeFamilies
     ViewPatterns
@@ -81,7 +87,6 @@ library
     EVM.Concrete,
     EVM.Dapp,
     EVM.Debug,
-    EVM.Demand,
     EVM.Dev,
     EVM.Expr,
     EVM.SMT,
@@ -116,7 +121,6 @@ library
     Paths_hevm
   autogen-modules:
     Paths_hevm
-  ghc-options: -Wall -Wno-deprecations -Wno-unticked-promoted-constructors -Wno-orphans
   if os(linux) || os(windows)
     extra-libraries: stdc++
   extra-libraries:
@@ -158,8 +162,10 @@ library
     free                              >= 5.1.3 && < 5.2,
     haskeline                         >= 0.8.0 && < 0.9,
     process                           >= 1.6.5 && < 1.7,
-    lens                              >= 5.1.1 && < 5.2,
-    lens-aeson                        >= 1.2.2 && < 1.3,
+    optics-core                       >= 0.4.1 && < 0.5,
+    optics-extra                      >= 0.4.2.1 && < 0.5,
+    optics-th                         >= 0.4.1 && < 0.5,
+    aeson-optics                      >= 1.2.0.1 && < 1.3,
     monad-par                         >= 0.3.5 && < 0.4,
     async                             >= 2.2.4 && < 2.3,
     multiset                          >= 0.3.4 && < 0.4,
@@ -193,7 +199,7 @@ executable hevm
     hevm-cli
   main-is:
     hevm-cli.hs
-  ghc-options: -Wall -threaded -with-rtsopts=-N -Wno-unticked-promoted-constructors -Wno-orphans
+  ghc-options: -threaded -with-rtsopts=-N
   other-modules:
     Paths_hevm
   if os(darwin)
@@ -219,8 +225,6 @@ executable hevm
     filepath,
     free,
     hevm,
-    lens,
-    lens-aeson,
     memory,
     mtl,
     optparse-generic,
@@ -234,7 +238,8 @@ executable hevm
     vector,
     vty,
     stm,
-    spawn
+    spawn,
+    optics-core
   if os(windows)
     buildable: False
 
@@ -242,7 +247,6 @@ executable hevm
 
 common test-base
   import: shared
-  ghc-options: -Wall -Wno-unticked-promoted-constructors -Wno-orphans
   hs-source-dirs:
     test
   extra-libraries:
@@ -266,7 +270,6 @@ common test-base
     filepath,
     here,
     hevm,
-    lens,
     mtl,
     data-dword,
     process,
@@ -286,13 +289,17 @@ common test-base
     spawn >= 0.3,
     witherable,
     smt2-parser >= 0.1.0.1,
-    operational
+    operational,
+    optics-core,
+    optics-extra
 
 library test-utils
   import:
     test-base
   exposed-modules:
-    EVM.TestUtils
+    EVM.Test.Utils
+    EVM.Test.Tracing
+    EVM.Test.BlockchainTests
   if os(windows)
     buildable: False
 
@@ -304,8 +311,9 @@ common test-common
   build-depends:
     test-utils
   other-modules:
-    EVM.TestUtils
-    EVM.Tracing
+    EVM.Test.Utils
+    EVM.Test.Tracing
+    EVM.Test.BlockchainTests
   if os(windows)
     buildable: False
   if os(darwin)
@@ -353,6 +361,8 @@ benchmark bench
     bench.hs
   hs-source-dirs:
     bench
+  ghc-options:
+    -O2
   if os(darwin)
      extra-libraries: c++
   else
@@ -368,4 +378,9 @@ benchmark bench
     bytestring,
     text,
     hevm,
-    here
+    here,
+    test-utils,
+    filemanip,
+    filepath,
+    containers,
+    mtl

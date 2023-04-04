@@ -5,9 +5,8 @@ import Prelude hiding (Word)
 import EVM.RLP
 import EVM.Types
 
-import Control.Lens    ((^?), ix)
 import Data.Bits       (Bits (..), shiftR)
-import Data.ByteString (ByteString)
+import Data.ByteString (ByteString, (!?))
 import Data.Maybe      (fromMaybe)
 import Data.Word       (Word8)
 
@@ -18,7 +17,7 @@ wordAt i bs =
   word (padRight 32 (BS.drop i bs))
 
 readByteOrZero :: Int -> ByteString -> Word8
-readByteOrZero i bs = fromMaybe 0 (bs ^? ix i)
+readByteOrZero i bs = fromMaybe 0 (bs !? i)
 
 byteStringSliceWithDefaultZeroes :: Int -> Int -> ByteString -> ByteString
 byteStringSliceWithDefaultZeroes offset size bs =
