@@ -12,6 +12,7 @@ import EVM.Dapp (emptyDapp)
 import EVM.Expr (litAddr)
 import EVM.FeeSchedule qualified
 import EVM.Fetch qualified
+import EVM.Format (hexText)
 import EVM.Stepper qualified
 import EVM.Solvers (withSolvers, Solver(Z3))
 import EVM.Transaction

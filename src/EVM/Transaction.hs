@@ -7,6 +7,7 @@ import EVM (initialContract)
 import EVM.FeeSchedule
 import EVM.RLP
 import EVM.Types
+import EVM.Format (hexText)
 import EVM.Expr (litAddr)
 import EVM.Sign
 
@@ -201,7 +202,7 @@ instance FromJSON AccessListEntry where
 
 instance FromJSON Transaction where
   parseJSON (JSON.Object val) = do
-    tdata    <- dataField val "data"
+    tdata    <- hexText <$> (val JSON..: "data")
     gasLimit <- word64Field val "gasLimit"
     gasPrice <- fmap read <$> val JSON..:? "gasPrice"
     maxPrio  <- fmap read <$> val JSON..:? "maxPriorityFeePerGas"
@@ -259,7 +260,7 @@ initTx vm = let
     preState = setupTx origin coinbase gasPrice gasLimit vm.env.contracts
     oldBalance = view (accountAt toAddr % #balance) preState
     creation = vm.tx.isCreate
-    initState = (case unlit value of
+    initState = (case maybeLitWord value of
       Just v -> ((Map.adjust (over #balance (subtract v))) origin)
               . (Map.adjust (over #balance (+ v))) toAddr
       Nothing -> id)

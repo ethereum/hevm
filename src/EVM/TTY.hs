@@ -865,7 +865,7 @@ drawStackPane ui =
          vBox
            [ withHighlight True (str ("#" ++ show i ++ " "))
                <+> ourWrap (Text.unpack $ prettyIfConcreteWord w)
-           , dim (txt ("   " <> case unlit w of
+           , dim (txt ("   " <> case maybeLitWord w of
                        Nothing -> ""
                        Just u -> showWordExplanation u ui.testOpts.dapp))
            ])

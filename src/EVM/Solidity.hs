@@ -662,7 +662,7 @@ stripBytecodeMetadataSym :: [Expr Byte] -> [Expr Byte]
 stripBytecodeMetadataSym b =
   let
     concretes :: [Maybe Word8]
-    concretes = unlitByte <$> b
+    concretes = maybeLitByte <$> b
     bzzrs :: [[Maybe Word8]]
     bzzrs = fmap (Just) . BS.unpack <$> knownBzzrPrefixes
     candidates = (flip Data.List.isInfixOf concretes) <$> bzzrs

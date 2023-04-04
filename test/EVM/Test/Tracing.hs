@@ -55,6 +55,7 @@ import EVM.Assembler
 import EVM.Op hiding (getOp)
 import EVM.Exec
 import EVM.Types
+import EVM.Format (bsToHex)
 import EVM.Traversals
 import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
@@ -68,6 +69,21 @@ import qualified EVM.Transaction
 import EVM.Format (formatBinary)
 import EVM.Sign (deriveAddr)
 import GHC.IO.Exception (ExitCode(ExitSuccess))
+
+data VMTrace =
+  VMTrace
+  { tracePc      :: Int
+  , traceOp      :: Int
+  , traceStack   :: [W256]
+  , traceMemSize :: Data.Word.Word64
+  , traceDepth   :: Int
+  , traceGas     :: Data.Word.Word64
+  , traceError   :: Maybe String
+  } deriving (Generic, Show)
+
+instance JSON.ToJSON VMTrace where
+  toEncoding = JSON.genericToEncoding JSON.defaultOptions
+instance JSON.FromJSON VMTrace
 
 data VMTraceResult =
   VMTraceResult

@@ -596,7 +596,7 @@ exec1 = do
                   RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs vm.state.pc
                   RuntimeCode (SymbolicRuntimeCode ops) ->
                     fromMaybe (error "could not analyze symbolic code") $
-                      unlitByte $ ops V.! vm.state.pc
+                      maybeLitByte $ ops V.! vm.state.pc
 
       case getOp(?op) of
 
@@ -1109,7 +1109,7 @@ exec1 = do
                 let
                   output = readMemory xOffset' xSize' vm
                   codesize = fromMaybe (error "RETURN: cannot return dynamically sized abstract data")
-                               . unlit . bufLength $ output
+                               . maybeLitWord . bufLength $ output
                   maxsize = vm.block.maxCodeSize
                   creation = case vm.frames of
                     [] -> vm.tx.isCreate
@@ -1932,7 +1932,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                                     , subState  = vm0.tx.substate
                                     , abi =
                                         if xInSize >= 4
-                                        then case unlit $ readBytes 4 (Lit xInOffset) vm0.state.memory
+                                        then case maybeLitWord $ readBytes 4 (Lit xInOffset) vm0.state.memory
                                              of Nothing -> Nothing
                                                 Just abi -> Just $ num abi
                                         else Nothing
@@ -2018,7 +2018,7 @@ create self this xGas' xValue xs newAddr initCode = do
           prefixLen <- Expr.concPrefix initCode
           prefix <- Expr.toList $ Expr.take (num prefixLen) initCode
           let sym = Expr.drop (num prefixLen) initCode
-          conc <- mapM unlitByte prefix
+          conc <- mapM maybeLitByte prefix
           pure $ InitCode (BS.pack $ V.toList conc) sym
     case contract' of
       Nothing ->
@@ -2427,7 +2427,7 @@ checkJump x xs = do
       let op = case theCode of
             InitCode ops _ -> BS.indexMaybe ops x
             RuntimeCode (ConcreteRuntimeCode ops) -> BS.indexMaybe ops x
-            RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= unlitByte
+            RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= maybeLitByte
       case op of
         Nothing -> vmError EVM.BadJumpDestination
         Just b ->
@@ -2438,7 +2438,6 @@ checkJump x xs = do
              else
                vmError EVM.BadJumpDestination
     (_, _) -> error "Internal Error: self not found in current contracts"
-
 
 opSize :: Word8 -> Int
 opSize x | x >= 0x60 && x <= 0x7f = num x - 0x60 + 2
@@ -2473,7 +2472,7 @@ mkOpIxMap (RuntimeCode (SymbolicRuntimeCode ops))
       let (_, _, _, m) = foldl (go v) (0, 0, 0, pure ()) (stripBytecodeMetadataSym $ V.toList ops)
       in m >> pure v
       where
-        go v (0, !i, !j, !m) x = case unlitByte x of
+        go v (0, !i, !j, !m) x = case maybeLitByte x of
           Just x' -> if x' >= 0x60 && x' <= 0x7f
             -- start of PUSH op --
                      then (x' - 0x60 + 1, i + 1, j,     m >> Vector.write v i j)
@@ -2497,7 +2496,7 @@ vmOp vm =
         RuntimeCode (ConcreteRuntimeCode xs') ->
           (BS.index xs' i, fmap LitByte $ BS.unpack $ BS.drop i xs')
         RuntimeCode (SymbolicRuntimeCode xs') ->
-          ( fromMaybe (error "unexpected symbolic code") . unlitByte $ xs' V.! i , V.toList $ V.drop i xs')
+          ( fromMaybe (error "unexpected symbolic code") . maybeLitByte $ xs' V.! i , V.toList $ V.drop i xs')
   in if (opslen code' < i)
      then Nothing
      else Just (readOp op pushdata)
@@ -2524,7 +2523,7 @@ mkCodeOps contractCode =
         Nothing ->
           mempty
         Just (x, xs') ->
-          let x' = fromMaybe (error "unexpected symbolic code argument") $ unlitByte x
+          let x' = fromMaybe (error "unexpected symbolic code argument") $ maybeLitByte x
               j = opSize x'
           in (i, readOp x' xs') Seq.<| go (i + j) (drop j xs)
 

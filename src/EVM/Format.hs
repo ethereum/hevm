@@ -22,6 +22,11 @@ module EVM.Format
   , formatBytes
   , formatBinary
   , indent
+  , strip0x
+  , strip0x'
+  , hexByteString
+  , hexText
+  , bsToHex
   ) where
 
 import Prelude hiding (Word)
@@ -32,7 +37,7 @@ import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..),
   Indexed (NotIndexed), getAbiSeq, parseTypeName, formatString)
 import EVM.Dapp (DappContext(..), DappInfo(..), showTraceLocation)
 import EVM.Expr qualified as Expr
-import EVM.Hexdump (prettyHex)
+import EVM.Hexdump (prettyHex, paddedShowHex)
 import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
 import EVM.Types (maybeLitWord, W256(..),num, word, Expr(..), EType(..), Addr,
   ByteStringS(..), Error(..), FunctionSelector)
@@ -48,14 +53,18 @@ import Data.ByteString.Lazy (toStrict, fromStrict)
 import Data.Char qualified as Char
 import Data.DoubleWord (signedWord)
 import Data.Foldable (toList)
+import Data.List (isPrefixOf)
+import Data.Functor ((<&>))
 import Data.Map qualified as Map
 import Data.Maybe (catMaybes, fromMaybe, fromJust)
 import Data.Text (Text, pack, unpack, intercalate, dropEnd, splitOn)
 import Data.Text qualified as T
-import Data.Text.Encoding (decodeUtf8, decodeUtf8')
+import Data.Text.Encoding qualified as T
 import Data.Tree.View (showTree)
 import Data.Vector (Vector)
 import Numeric (showHex)
+import Data.ByteString.Char8 qualified as Char8
+import Data.ByteString.Base16 qualified as BS16
 
 data Signedness = Signed | Unsigned
   deriving (Show)
@@ -153,7 +162,7 @@ showError b = T.pack $ show b
 -- the conditions under which bytes will be decoded and rendered as a string
 isPrintable :: ByteString -> Bool
 isPrintable =
-  decodeUtf8' >>>
+  T.decodeUtf8' >>>
     either
       (const False)
       (T.all (\c-> Char.isPrint c && (not . Char.isControl) c))
@@ -172,7 +181,7 @@ formatBString b = mconcat [ "«",  T.dropAround (=='"') (pack $ formatString b),
 
 formatBinary :: ByteString -> Text
 formatBinary =
-  (<>) "0x" . decodeUtf8 . toStrict . toLazyByteString . byteStringHex
+  (<>) "0x" . T.decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
 formatSBinary :: Expr Buf -> Text
 formatSBinary (ConcreteBuf bs) = formatBinary bs
@@ -544,3 +553,26 @@ formatExpr = go
        ]
 
       a -> T.pack $ show a
+
+strip0x :: ByteString -> ByteString
+strip0x bs = if "0x" `Char8.isPrefixOf` bs then Char8.drop 2 bs else bs
+
+strip0x' :: String -> String
+strip0x' s = if "0x" `isPrefixOf` s then drop 2 s else s
+
+hexByteString :: String -> ByteString -> ByteString
+hexByteString msg bs =
+  case BS16.decodeBase16 bs of
+    Right x -> x
+    _ -> error ("invalid hex bytestring for " ++ msg)
+
+hexText :: Text -> ByteString
+hexText t =
+  case BS16.decodeBase16 (T.encodeUtf8 (T.drop 2 t)) of
+    Right x -> x
+    _ -> error ("invalid hex bytestring " ++ show t)
+
+bsToHex :: ByteString -> String
+bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
+
+

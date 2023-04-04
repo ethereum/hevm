@@ -20,6 +20,7 @@ import qualified EVM.TTY as TTY
 import EVM.Solidity
 import EVM.Expr (litAddr)
 import EVM.Types hiding (word)
+import EVM.Format (hexByteString, strip0x)
 import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, getParametersFromEnvironmentVariables, dappTest)
 import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
 import GHC.Natural
@@ -563,7 +564,7 @@ vmFromCommand cmd = do
     (_, _, Nothing) ->
       error "must provide at least (rpc + address) or code"
 
-  let ts' = case unlit ts of
+  let ts' = case maybeLitWord ts of
         Just t -> t
         Nothing -> error "unexpected symbolic timestamp when executing vm test"
 

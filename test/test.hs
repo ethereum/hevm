@@ -55,6 +55,7 @@ import EVM.Precompiled
 import EVM.RLP
 import EVM.Solidity
 import EVM.Types
+import EVM.Format (hexText)
 import EVM.Traversals
 import EVM.Concrete (createAddress)
 import EVM.SMT hiding (one)

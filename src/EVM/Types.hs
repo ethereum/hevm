@@ -20,13 +20,14 @@ import Data.Bifunctor (first)
 import Data.Bits (Bits, FiniteBits, shiftR, shift, shiftL, (.&.), (.|.))
 import Data.ByteArray qualified as BA
 import Data.Char
-import Data.List (isPrefixOf, foldl')
+import Data.List (foldl')
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Builder (byteStringHex, toLazyByteString)
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy (toStrict)
+import Data.Data
 import Data.Word (Word8, Word32, Word64)
 import Data.DoubleWord
 import Data.DoubleWord.TH
@@ -36,7 +37,6 @@ import Data.Sequence qualified as Seq
 import Data.Serialize qualified as Cereal
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text
-import Data.Vector qualified as V
 import Numeric (readHex, showHex)
 import Options.Generic
 import EVM.Hexdump (paddedShowHex)
@@ -44,20 +44,18 @@ import Control.Monad
 
 import qualified Text.Regex.TDFA      as Regex
 import qualified Text.Read
+import Data.Vector qualified as V
 
--- Some stuff for "generic programming", needed to create Word512
-import Data.Data
+
+-- Template Haskell --------------------------------------------------------------------------
+
 
 -- We need a 512-bit word for doing ADDMOD and MULMOD with full precision.
 mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
   [''Typeable, ''Data, ''Generic]
 
 
-newtype W256 = W256 Word256
-  deriving
-    ( Num, Integral, Real, Ord, Generic
-    , Bits , FiniteBits, Enum, Eq , Bounded
-    )
+-- Symbolic IR -------------------------------------------------------------------------------------
 
 {- |
   Expr implements an abstract respresentation of an EVM program
@@ -453,19 +451,20 @@ instance Ord Prop where
   PImpl a b <= PImpl c d = a <= c && b <= d
   _ <= _ = False
 
+
+-- Function Selectors ------------------------------------------------------------------------------
+
+
 -- | https://docs.soliditylang.org/en/v0.8.19/abi-spec.html#function-selector
 newtype FunctionSelector = FunctionSelector { unFunctionSelector :: Word32 }
   deriving (Num, Eq, Ord, Real, Enum, Integral)
 instance Show FunctionSelector where show s = "0x" <> showHex s ""
 
-unlit :: Expr EWord -> Maybe W256
-unlit (Lit x) = Just x
-unlit _ = Nothing
 
-unlitByte :: Expr Byte -> Maybe Word8
-unlitByte (LitByte x) = Just x
-unlitByte _ = Nothing
+-- ByteString wrapper ------------------------------------------------------------------------------
 
+
+-- Newtype wrapper for ByteString to allow custom instances
 newtype ByteStringS = ByteStringS ByteString deriving (Eq, Generic)
 
 instance Show ByteStringS where
@@ -483,17 +482,16 @@ instance JSON.FromJSON ByteStringS where
 instance JSON.ToJSON ByteStringS where
   toJSON (ByteStringS x) = JSON.String (Text.pack $ "0x" ++ (concatMap (paddedShowHex 2) . BS.unpack $ x))
 
-newtype Addr = Addr { addressWord160 :: Word160 }
-  deriving
-    ( Num, Integral, Real, Ord, Enum
-    , Eq, Generic, Bits, FiniteBits
-    )
-instance JSON.ToJSON Addr where
-  toJSON = JSON.String . Text.pack . show
 
-maybeLitWord :: Expr EWord -> Maybe W256
-maybeLitWord (Lit w) = Just w
-maybeLitWord _ = Nothing
+-- Word256 wrapper ---------------------------------------------------------------------------------
+
+
+-- Newtype wrapper around Word256 to allow our custom instances
+newtype W256 = W256 Word256
+  deriving
+    ( Num, Integral, Real, Ord, Bits
+    , Generic, FiniteBits, Enum, Eq , Bounded
+    )
 
 instance Read W256 where
   readsPrec _ "0x" = [(0, "")]
@@ -507,6 +505,32 @@ instance JSON.ToJSON W256 where
     where
       cutshow = drop 2 $ show x
       pad = replicate (64 - length (cutshow)) '0'
+
+instance FromJSON W256 where
+  parseJSON v = do
+    s <- Text.unpack <$> parseJSON v
+    case reads s of
+      [(x, "")]  -> return x
+      _          -> fail $ "invalid hex word (" ++ s ++ ")"
+
+instance FromJSONKey W256 where
+  fromJSONKey = FromJSONKeyTextParser $ \s ->
+    case reads (Text.unpack s) of
+      [(x, "")]  -> return x
+      _          -> fail $ "invalid word (" ++ Text.unpack s ++ ")"
+
+wordField :: JSON.Object -> Key -> JSON.Parser W256
+wordField x f = ((readNull 0) . Text.unpack)
+                  <$> (x .: f)
+
+instance ParseField W256
+instance ParseFields W256
+instance ParseRecord W256 where
+  parseRecord = fmap getOnly parseRecord
+
+
+-- Word64 wrapper ----------------------------------------------------------------------------------
+
 
 newtype W64 = W64 Data.Word.Word64
   deriving
@@ -525,6 +549,20 @@ instance Show W64 where
 instance JSON.ToJSON W64 where
   toJSON x = JSON.String  $ Text.pack $ show x
 
+word64Field :: JSON.Object -> Key -> JSON.Parser Word64
+word64Field x f = ((readNull 0) . Text.unpack)
+                  <$> (x .: f)
+
+
+-- Addresses ---------------------------------------------------------------------------------------
+
+
+newtype Addr = Addr { addressWord160 :: Word160 }
+  deriving
+    ( Num, Integral, Real, Ord, Enum
+    , Eq, Generic, Bits, FiniteBits
+    )
+
 instance Read Addr where
   readsPrec _ ('0':'x':s) = readHex s
   readsPrec _ s = readHex s
@@ -535,14 +573,6 @@ instance Show Addr where
         str = replicate (40 - length hex) '0' ++ hex
     in "0x" ++ toChecksumAddress str ++ drop 40 str
 
-instance JSON.ToJSONKey Addr where
-  toJSONKey = JSON.toJSONKeyText (addrKey)
-    where
-      addrKey :: Addr -> Text
-      addrKey addr = Text.pack $ replicate (40 - length hex) '0' ++ hex
-        where
-          hex = show addr
-
 -- https://eips.ethereum.org/EIPS/eip-55
 toChecksumAddress :: String -> String
 toChecksumAddress addr = zipWith transform nibbles addr
@@ -550,18 +580,8 @@ toChecksumAddress addr = zipWith transform nibbles addr
     nibbles = unpackNibbles . BS.take 20 $ keccakBytes (Char8.pack addr)
     transform nibble = if nibble >= 8 then toUpper else id
 
-strip0x :: ByteString -> ByteString
-strip0x bs = if "0x" `Char8.isPrefixOf` bs then Char8.drop 2 bs else bs
-
-strip0x' :: String -> String
-strip0x' s = if "0x" `isPrefixOf` s then drop 2 s else s
-
-instance FromJSON W256 where
-  parseJSON v = do
-    s <- Text.unpack <$> parseJSON v
-    case reads s of
-      [(x, "")]  -> return x
-      _          -> fail $ "invalid hex word (" ++ s ++ ")"
+instance JSON.ToJSON Addr where
+  toJSON = JSON.String . Text.pack . show
 
 instance FromJSON Addr where
   parseJSON v = do
@@ -570,13 +590,13 @@ instance FromJSON Addr where
       [(x, "")] -> return x
       _         -> fail $ "invalid address (" ++ s ++ ")"
 
-#if MIN_VERSION_aeson(1, 0, 0)
-
-instance FromJSONKey W256 where
-  fromJSONKey = FromJSONKeyTextParser $ \s ->
-    case reads (Text.unpack s) of
-      [(x, "")]  -> return x
-      _          -> fail $ "invalid word (" ++ Text.unpack s ++ ")"
+instance JSON.ToJSONKey Addr where
+  toJSONKey = JSON.toJSONKeyText (addrKey)
+    where
+      addrKey :: Addr -> Text
+      addrKey addr = Text.pack $ replicate (40 - length hex) '0' ++ hex
+        where
+          hex = show addr
 
 instance FromJSONKey Addr where
   fromJSONKey = FromJSONKeyTextParser $ \s ->
@@ -584,52 +604,32 @@ instance FromJSONKey Addr where
       [(x, "")] -> return x
       _         -> fail $ "invalid word (" ++ Text.unpack s ++ ")"
 
-#endif
-
-instance ParseField W256
-instance ParseFields W256
-instance ParseRecord W256 where
-  parseRecord = fmap getOnly parseRecord
-
-instance ParseField Addr
-instance ParseFields Addr
-instance ParseRecord Addr where
-  parseRecord = fmap getOnly parseRecord
-
-hexByteString :: String -> ByteString -> ByteString
-hexByteString msg bs =
-  case BS16.decodeBase16 bs of
-    Right x -> x
-    _ -> error ("invalid hex bytestring for " ++ msg)
-
-hexText :: Text -> ByteString
-hexText t =
-  case BS16.decodeBase16 (Text.encodeUtf8 (Text.drop 2 t)) of
-    Right x -> x
-    _ -> error ("invalid hex bytestring " ++ show t)
-
-readN :: Integral a => String -> a
-readN s = fromIntegral (read s :: Integer)
-
-readNull :: Read a => a -> String -> a
-readNull x = fromMaybe x . Text.Read.readMaybe
-
-wordField :: JSON.Object -> Key -> JSON.Parser W256
-wordField x f = ((readNull 0) . Text.unpack)
-                  <$> (x .: f)
-
-word64Field :: JSON.Object -> Key -> JSON.Parser Word64
-word64Field x f = ((readNull 0) . Text.unpack)
-                  <$> (x .: f)
-
 addrField :: JSON.Object -> Key -> JSON.Parser Addr
 addrField x f = (read . Text.unpack) <$> (x .: f)
 
 addrFieldMaybe :: JSON.Object -> Key -> JSON.Parser (Maybe Addr)
 addrFieldMaybe x f = (Text.Read.readMaybe . Text.unpack) <$> (x .: f)
 
-dataField :: JSON.Object -> Key -> JSON.Parser ByteString
-dataField x f = hexText <$> (x .: f)
+instance ParseField Addr
+instance ParseFields Addr
+instance ParseRecord Addr where
+  parseRecord = fmap getOnly parseRecord
+
+
+-- Nibbles -----------------------------------------------------------------------------------------
+
+
+-- | A four bit value
+newtype Nibble = Nibble Word8
+  deriving ( Num, Integral, Real, Ord, Enum, Eq, Bounded, Generic)
+
+instance Show Nibble where
+  show = (:[]) . intToDigit . num
+
+
+
+-- Conversions -------------------------------------------------------------------------------------
+
 
 toWord512 :: W256 -> Word512
 toWord512 (W256 x) = fromHiAndLo 0 x
@@ -637,26 +637,13 @@ toWord512 (W256 x) = fromHiAndLo 0 x
 fromWord512 :: Word512 -> W256
 fromWord512 x = W256 (loWord x)
 
-num :: (Integral a, Num b) => a -> b
-num = fromIntegral
+maybeLitByte :: Expr Byte -> Maybe Word8
+maybeLitByte (LitByte x) = Just x
+maybeLitByte _ = Nothing
 
-padLeft :: Int -> ByteString -> ByteString
-padLeft n xs = BS.replicate (n - BS.length xs) 0 <> xs
-
-padRight :: Int -> ByteString -> ByteString
-padRight n xs = xs <> BS.replicate (n - BS.length xs) 0
-
-padRight' :: Int -> String -> String
-padRight' n xs = xs <> replicate (n - length xs) '0'
-
--- | Right padding  / truncating
---truncpad :: Int -> [SWord 8] -> [SWord 8]
---truncpad n xs = if m > n then take n xs
-                --else mappend xs (replicate (n - m) 0)
-  --where m = length xs
-
-padLeft' :: Int -> V.Vector (Expr Byte) -> V.Vector (Expr Byte)
-padLeft' n xs = V.replicate (n - length xs) (LitByte 0) <> xs
+maybeLitWord :: Expr EWord -> Maybe W256
+maybeLitWord (Lit w) = Just w
+maybeLitWord _ = Nothing
 
 word256 :: ByteString -> Word256
 word256 xs | BS.length xs == 1 =
@@ -693,12 +680,6 @@ word160Bytes :: Addr -> ByteString
 word160Bytes (Addr (Word160 a (Word128 b c))) =
   Cereal.encode a <> Cereal.encode b <> Cereal.encode c
 
-newtype Nibble = Nibble Word8
-  deriving ( Num, Integral, Real, Ord, Enum, Eq, Bounded, Generic)
-
-instance Show Nibble where
-  show = (:[]) . intToDigit . num
-
 -- Get first and second Nibble from byte
 hi, lo :: Word8 -> Nibble
 hi b = Nibble $ b `shiftR` 4
@@ -729,7 +710,16 @@ toInt n =
     then let (W256 (Word256 _ (Word128 _ n'))) = n in Just (fromIntegral n')
     else Nothing
 
--- Keccak hashing
+bssToBs :: ByteStringS -> ByteString
+bssToBs (ByteStringS bs) = bs
+
+-- | This just overflows silently, and is generally a terrible footgun, should be removed
+num :: (Integral a, Num b) => a -> b
+num = fromIntegral
+
+
+-- Keccak hashing ----------------------------------------------------------------------------------
+
 
 keccakBytes :: ByteString -> ByteString
 keccakBytes =
@@ -755,7 +745,9 @@ abiKeccak =
     >>> word32
     >>> FunctionSelector
 
--- Utils
+
+-- Utils -------------------------------------------------------------------------------------------
+
 
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = fmap concat (mapM f xs)
@@ -771,22 +763,17 @@ regexMatches regexSource =
   in
     Regex.matchTest regex . Seq.fromList . Text.unpack
 
-data VMTrace =
-  VMTrace
-  { tracePc      :: Int
-  , traceOp      :: Int
-  , traceStack   :: [W256]
-  , traceMemSize :: Data.Word.Word64
-  , traceDepth   :: Int
-  , traceGas     :: Data.Word.Word64
-  , traceError   :: Maybe String
-  } deriving (Generic, Show)
-instance JSON.ToJSON VMTrace where
-  toEncoding = JSON.genericToEncoding JSON.defaultOptions
-instance JSON.FromJSON VMTrace
+readNull :: Read a => a -> String -> a
+readNull x = fromMaybe x . Text.Read.readMaybe
 
-bsToHex :: ByteString -> String
-bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
+padLeft :: Int -> ByteString -> ByteString
+padLeft n xs = BS.replicate (n - BS.length xs) 0 <> xs
 
-bssToBs :: ByteStringS -> ByteString
-bssToBs (ByteStringS bs) = bs
+padLeft' :: Int -> V.Vector (Expr Byte) -> V.Vector (Expr Byte)
+padLeft' n xs = V.replicate (n - length xs) (LitByte 0) <> xs
+
+padRight :: Int -> ByteString -> ByteString
+padRight n xs = xs <> BS.replicate (n - BS.length xs) 0
+
+padRight' :: Int -> String -> String
+padRight' n xs = xs <> replicate (n - length xs) '0'

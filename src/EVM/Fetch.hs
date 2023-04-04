@@ -6,12 +6,12 @@ module EVM.Fetch where
 import Prelude hiding (Word)
 
 import EVM.ABI
-import EVM.Types    (Addr, W256, hexText, Expr(Lit), Expr(..), Prop(..), (.&&), (./=))
 import EVM.SMT
 import EVM.Solvers
-import EVM          (EVM, Contract, Block, initialContract)
+import EVM.Types  (Addr, W256, Expr(Lit), Expr(..), Prop(..), (.&&), (./=))
+import EVM.Format (hexText)
+import EVM        (EVM, Contract, Block, initialContract)
 import qualified EVM.FeeSchedule as FeeSchedule
-
 import qualified EVM
 
 import Optics.Core
