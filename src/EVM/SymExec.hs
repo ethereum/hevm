@@ -31,7 +31,7 @@ import Data.List (foldl', sortBy)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Control.Monad.State.Class as State
-import Data.Bifunctor (first, second)
+import Data.Bifunctor (second)
 import Data.Text (Text)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -377,17 +377,17 @@ runExpr = do
       e' -> Failure asserts $ EVM.Types.TmpErr (show e')
 
 -- | Converts a given top level expr into a list of final states and the associated path conditions for each state
-flattenExpr :: Expr End -> [([Prop], Expr End)]
+flattenExpr :: Expr End -> [Expr End]
 flattenExpr = go []
   where
-    go :: [Prop] -> Expr End -> [([Prop], Expr End)]
+    go :: [Prop] -> Expr End -> [Expr End]
     go pcs = \case
       ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
-      e@(Revert _ _) -> [(pcs, e)]
-      e@(Return _ _ _) -> [(pcs, e)]
       Failure _ (TmpErr s) -> error s
-      e@(Failure _ _) -> [(pcs, e)]
       GVar _ -> error "cannot flatten an Expr containing a GVar"
+      (Revert ps msg) -> [Revert (ps <> pcs) msg]
+      (Return ps msg store) -> [Return (ps <> pcs) msg store]
+      (Failure ps e) -> [Failure (ps <> pcs) e]
 
 -- | Strips unreachable branches from a given expr
 -- Returns a list of executed SMT queries alongside the reduced expression for debugging purposes
@@ -493,11 +493,11 @@ verify solvers opts preState maybepost = do
       let
         -- Filter out any leaves that can be statically shown to be safe
         canViolate = flip filter (flattenExpr expr) $
-          \(_, leaf) -> case evalProp (post preState leaf) of
+          \leaf -> case evalProp (post preState leaf) of
             PBool True -> False
             _ -> True
         assumes = preState._constraints
-        withQueries = fmap (\(pcs, leaf) -> (assertProps (PNeg (post preState leaf) : assumes <> extractProps leaf <> pcs), leaf)) canViolate
+        withQueries = fmap (\leaf -> (assertProps (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)) canViolate
       putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violation(s)"
 
       when opts.debug $ forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
@@ -567,7 +567,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
     subsetAny a b = foldr (\bp acc -> acc || isSubsetOf a bp) False b
 
     -- decompiles the given bytecode into a list of branches
-    getBranches :: ByteString -> IO [([Prop], Expr End)]
+    getBranches :: ByteString -> IO [Expr End]
     getBranches bs = do
       let
         bytecode = if BS.null bs then BS.pack [0] else bs
@@ -613,8 +613,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
     -- for a given pair of branches, equivalence is violated if there exists an
     -- input that satisfies the branch conditions from both sides and produces
     -- a differing result in each branch
-    distinct :: ([Prop], Expr End) -> ([Prop], Expr End) -> Maybe (Set Prop)
-    distinct (aProps, aEnd) (bProps, bEnd) =
+    distinct :: Expr End -> Expr End -> Maybe (Set Prop)
+    distinct aEnd bEnd =
       let
         differingResults = case (aEnd, bEnd) of
           (Return _ aOut aStore, Return _ bOut bStore) ->
@@ -641,11 +641,11 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
         -- if we can statically determine that the end states differ, then we
         -- ask the solver to find us inputs that satisfy both sets of branch
         -- conditions
-        PBool True  -> Just . Set.fromList $ aProps <> bProps
+        PBool True  -> Just . Set.fromList $ extractProps aEnd <> extractProps bEnd
         -- if we cannot statically determine whether or not the end states
         -- differ, then we ask the solver if the end states can differ if both
         -- sets of path conditions are satisfiable
-        _ -> Just . Set.fromList $ differingResults : aProps <> bProps
+        _ -> Just . Set.fromList $ differingResults : extractProps aEnd <> extractProps bEnd
 
 both' :: (a -> b) -> (a, a) -> (b, b)
 both' f (x, y) = (f x, f y)
@@ -653,7 +653,7 @@ both' f (x, y) = (f x, f y)
 produceModels :: SolverGroup -> Expr End -> IO [(Expr End, CheckSatResult)]
 produceModels solvers expr = do
   let flattened = flattenExpr expr
-      withQueries = fmap (first assertProps) flattened
+      withQueries = fmap (\e -> (assertProps . extractProps $ e, e)) flattened
   results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
     res <- checkSat solvers query
     pure (res, leaf)
@@ -708,7 +708,7 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
       | Map.null store = []
       | otherwise =
           [ "Storage:"
-          , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc -> ("Addr " <> (T.pack $ show key) <> ": " <> (T.pack $ show (Map.toList val))) : acc) mempty store
+          , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc -> ("Addr " <> (T.pack . show . Addr . num $ key) <> ": " <> (T.pack $ show (Map.toList val))) : acc) mempty store
           , ""
           ]
 

@@ -1304,7 +1304,7 @@ tests = testGroup "hevm"
           assertEqual "Catch storage collisions" x y
           putStrLn "expected counterexample found"
         ,
-        testCase "Simple Assert" $ do
+        testCase "simple-assert" $ do
           Just c <- solcRuntime "C"
             [i|
             contract C {
@@ -1313,8 +1313,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (_, [Cex (l, _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo()" [])) [] defaultVeriOpts
-          assertEqual "incorrect revert msg" l (EVM.Types.Revert [] (ConcreteBuf $ panicMsg 0x01))
+          (_, [Cex (EVM.Types.Revert _ msg, _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo()" [])) [] defaultVeriOpts
+          assertEqual "incorrect revert msg" msg (ConcreteBuf $ panicMsg 0x01)
         ,
         testCase "simple-assert-2" $ do
           Just c <- solcRuntime "C"
