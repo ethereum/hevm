@@ -1,4 +1,4 @@
-module EVM.TestUtils where
+module EVM.Test.Utils where
 
 import Data.Text
 import qualified Paths_hevm as Paths

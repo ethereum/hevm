@@ -1,4 +1,5 @@
 {-# Language TemplateHaskell #-}
+{-# Language UndecidableInstances #-}
 {-# Language ImplicitParams #-}
 {-# Language DataKinds #-}
 
@@ -32,10 +33,13 @@ import EVM.Stepper qualified as Stepper
 import EVM.StorageLayout
 import EVM.TTYCenteredList qualified as Centered
 
-import Control.Lens hiding (List)
+import Optics.Core
+import Optics.State
+import Optics.TH
+
 import Control.Monad.Operational qualified as Operational
 import Control.Monad.State.Strict hiding (state)
-import Data.Aeson.Lens
+import Data.Aeson.Optics
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.List (sort, find)
@@ -68,23 +72,23 @@ data Name
 type UiWidget = Widget Name
 
 data UiVmState = UiVmState
-  { _uiVm           :: VM
-  , _uiStep         :: Int
-  , _uiSnapshots    :: Map Int (VM, Stepper ())
-  , _uiStepper      :: Stepper ()
-  , _uiShowMemory   :: Bool
-  , _uiTestOpts     :: UnitTestOptions
+  { vm         :: VM
+  , step       :: Int
+  , snapshots  :: Map Int (VM, Stepper ())
+  , stepper    :: Stepper ()
+  , showMemory :: Bool
+  , testOpts   :: UnitTestOptions
   }
 
 data UiTestPickerState = UiTestPickerState
-  { _testPickerList :: List Name (Text, Text)
-  , _testPickerDapp :: DappInfo
-  , _testOpts       :: UnitTestOptions
+  { tests :: List Name (Text, Text)
+  , dapp  :: DappInfo
+  , opts  :: UnitTestOptions
   }
 
 data UiBrowserState = UiBrowserState
-  { _browserContractList :: List Name (Addr, Contract)
-  , _browserVm :: UiVmState
+  { contracts :: List Name (Addr, Contract)
+  , vm        :: UiVmState
   }
 
 data UiState
@@ -93,9 +97,9 @@ data UiState
   | ViewPicker UiTestPickerState
   | ViewHelp UiVmState
 
-makeLenses ''UiVmState
-makeLenses ''UiTestPickerState
-makeLenses ''UiBrowserState
+makeFieldLabelsNoPrefix ''UiVmState
+makeFieldLabelsNoPrefix ''UiTestPickerState
+makeFieldLabelsNoPrefix ''UiBrowserState
 makePrisms ''UiState
 
 -- caching VM states lets us backstep efficiently
@@ -142,10 +146,10 @@ interpret mode =
 
         Stepper.Run -> do
           -- Have we reached the final result of this action?
-          use (uiVm . result) >>= \case
+          use (#vm % #result) >>= \case
             Just _ -> do
               -- Yes, proceed with the next action.
-              vm <- use uiVm
+              vm <- use #vm
               interpret mode (k vm)
             Nothing -> do
               -- No, keep performing the current action
@@ -154,7 +158,7 @@ interpret mode =
         -- Stepper wants to keep executing?
         Stepper.Exec -> do
           -- Have we reached the final result of this action?
-          use (uiVm . result) >>= \case
+          use (#vm % #result) >>= \case
             Just r ->
               -- Yes, proceed with the next action.
               interpret mode (k r)
@@ -165,7 +169,7 @@ interpret mode =
         -- Stepper is waiting for user input from a query
         Stepper.Ask (PleaseChoosePath _ cont) -> do
           -- ensure we aren't stepping past max iterations
-          vm <- use uiVm
+          vm <- use #vm
           case maxIterationsReached vm ?maxIter of
             Nothing -> pure $ Continue (k ())
             Just n -> interpret mode (Stepper.evm (cont (not n)) >>= k)
@@ -177,13 +181,13 @@ interpret mode =
 
         -- Stepper wants to make a query and wait for the results?
         Stepper.IOAct q -> do
-          Brick.zoom uiVm (StateT (runStateT q)) >>= interpret mode . k
+          Brick.zoom (toLensVL #vm) (StateT (runStateT q)) >>= interpret mode . k
 
         -- Stepper wants to modify the VM.
         Stepper.EVM m -> do
-          vm <- use uiVm
+          vm <- use #vm
           let (r, vm1) = runState m vm
-          assign uiVm vm1
+          assign #vm vm1
           interpret mode (Stepper.exec >> (k r))
 
 keepExecuting :: (?fetcher :: Fetcher
@@ -204,7 +208,7 @@ keepExecuting mode restart = case mode of
     interpret (Step (i - 1)) restart
 
   StepUntil p -> do
-    vm <- use uiVm
+    vm <- use #vm
     if p vm
       then
         interpret (Step 0) restart
@@ -251,19 +255,19 @@ runFromVM solvers rpcInfo maxIter' dappinfo vm = do
   v <- mkVty
   ui2 <- customMain v mkVty Nothing (app opts) (ViewVm ui0)
   case ui2 of
-    ViewVm ui -> return ui._uiVm
+    ViewVm ui -> return ui.vm
     _ -> error "internal error: customMain returned prematurely"
 
 
 initUiVmState :: VM -> UnitTestOptions -> Stepper () -> UiVmState
 initUiVmState vm0 opts script =
   UiVmState
-    { _uiVm           = vm0
-    , _uiStepper      = script
-    , _uiStep         = 0
-    , _uiSnapshots    = singleton 0 (vm0, script)
-    , _uiShowMemory   = False
-    , _uiTestOpts     = opts
+    { vm           = vm0
+    , stepper      = script
+    , step         = 0
+    , snapshots    = singleton 0 (vm0, script)
+    , showMemory   = False
+    , testOpts     = opts
     }
 
 
@@ -285,7 +289,7 @@ main opts root buildOutput = do
   let
     dapp = maybe emptyDapp (dappInfo root) buildOutput
     ui = ViewPicker $ UiTestPickerState
-      { _testPickerList =
+      { tests =
           list
             TestPickerPane
             (Vec.fromList
@@ -293,8 +297,8 @@ main opts root buildOutput = do
               (debuggableTests opts)
               dapp.unitTests))
             1
-      , _testPickerDapp = dapp
-      , _testOpts = opts
+      , dapp = dapp
+      , opts = opts
       }
   v <- mkVty
   _ <- customMain v mkVty Nothing (app opts) (ui :: UiState)
@@ -311,9 +315,9 @@ takeStep ui mode =
     (Stopped (), _) ->
       pure ()
     (Continue steps, ui') ->
-      put (ViewVm (ui' & set uiStepper steps))
+      put (ViewVm (ui' & set #stepper steps))
   where
-    m = interpret mode ui._uiStepper
+    m = interpret mode ui.stepper
     nxt = runStateT m ui
 
 backstepUntil
@@ -322,32 +326,32 @@ backstepUntil
   => (UiVmState -> Pred VM) -> EventM n UiState ()
 backstepUntil p = get >>= \case
   ViewVm s ->
-    case s._uiStep of
+    case s.step of
       0 -> pure ()
       n -> do
         s1 <- liftIO $ backstep s
         let
           -- find a previous vm that satisfies the predicate
-          snapshots' = Data.Map.filter (p s1 . fst) s1._uiSnapshots
+          snapshots' = Data.Map.filter (p s1 . fst) s1.snapshots
         case lookupLT n snapshots' of
           -- If no such vm exists, go to the beginning
           Nothing ->
             let
-              (step', (vm', stepper')) = fromJust $ lookupLT (n - 1) s._uiSnapshots
+              (step', (vm', stepper')) = fromJust $ lookupLT (n - 1) s.snapshots
               s2 = s1
-                & set uiVm vm'
-                & set (uiVm . cache) s1._uiVm._cache
-                & set uiStep step'
-                & set uiStepper stepper'
+                & set #vm vm'
+                & set (#vm % #cache) s1.vm.cache
+                & set #step step'
+                & set #stepper stepper'
             in takeStep s2 (Step 0)
           -- step until the predicate doesn't hold
           Just (step', (vm', stepper')) ->
             let
               s2 = s1
-                & set uiVm vm'
-                & set (uiVm . cache) s1._uiVm._cache
-                & set uiStep step'
-                & set uiStepper stepper'
+                & set #vm vm'
+                & set (#vm % #cache) s1.vm.cache
+                & set #step step'
+                & set #stepper stepper'
             in takeStep s2 (StepUntil (not . p s1))
   _ -> pure ()
 
@@ -356,7 +360,7 @@ backstep
      ,?maxIter :: Maybe Integer)
   => UiVmState -> IO UiVmState
 backstep s =
-  case s._uiStep of
+  case s.step of
     -- We're already at the first step; ignore command.
     0 -> pure s
     -- To step backwards, we revert to the previous snapshot
@@ -366,17 +370,17 @@ backstep s =
     -- any blocking queries, and also the memory view.
     n ->
       let
-        (step, (vm, stepper)) = fromJust $ lookupLT n s._uiSnapshots
+        (step, (vm, stepper)) = fromJust $ lookupLT n s.snapshots
         s1 = s
-          & set uiVm vm
-          & set (uiVm . cache) s._uiVm._cache
-          & set uiStep step
-          & set uiStepper stepper
+          & set #vm vm
+          & set (#vm % #cache) s.vm.cache
+          & set #step step
+          & set #stepper stepper
         stepsToTake = n - step - 1
 
       in
         runStateT (interpret (Step stepsToTake) stepper) s1 >>= \case
-          (Continue steps, ui') -> pure $ ui' & set uiStepper steps
+          (Continue steps, ui') -> pure $ ui' & set #stepper steps
           _ -> error "unexpected end"
 
 appEvent
@@ -388,12 +392,12 @@ appEvent
 appEvent (VtyEvent e@(V.EvKey V.KDown [])) = get >>= \case
   ViewContracts _s -> do
     Brick.zoom
-      (_ViewContracts . browserContractList)
+      (traverseOf $ _ViewContracts % #contracts)
       (handleListEvent e)
     pure ()
   ViewPicker _s -> do
     Brick.zoom
-      (_ViewPicker . testPickerList)
+      (traverseOf $ _ViewPicker % #tests)
       (handleListEvent e)
     pure()
   _ -> pure ()
@@ -403,11 +407,11 @@ appEvent (VtyEvent e@(V.EvKey V.KDown [])) = get >>= \case
 appEvent (VtyEvent e@(V.EvKey V.KUp [])) = get >>= \case
   ViewContracts _s -> do
     Brick.zoom
-      (_ViewContracts . browserContractList)
+      (traverseOf $ _ViewContracts % #contracts)
       (handleListEvent e)
   ViewPicker _s -> do
     Brick.zoom
-      (_ViewPicker . testPickerList)
+      (traverseOf $ _ViewPicker % #tests)
       (handleListEvent e)
     pure()
   _ -> pure ()
@@ -416,19 +420,19 @@ appEvent (VtyEvent e@(V.EvKey V.KUp [])) = get >>= \case
 -- Any: Esc - return to Vm Overview or Exit
 appEvent (VtyEvent (V.EvKey V.KEsc [])) = get >>= \case
   ViewVm s -> do
-    let opts = s ^. uiTestOpts
+    let opts = s ^. #testOpts
         dapp = opts.dapp
         tests = concatMap (debuggableTests opts) dapp.unitTests
     case tests of
       [] -> halt
       ts ->
         put $ ViewPicker $ UiTestPickerState
-          { _testPickerList = list TestPickerPane (Vec.fromList ts) 1
-          , _testPickerDapp = dapp
-          , _testOpts = opts
+          { tests = list TestPickerPane (Vec.fromList ts) 1
+          , dapp  = dapp
+          , opts  = opts
           }
   ViewHelp s -> put (ViewVm s)
-  ViewContracts s -> put (ViewVm $ s ^. browserVm)
+  ViewContracts s -> put (ViewVm $ s ^. #vm)
   _ -> halt
 
 -- Vm Overview: Enter - open contracts view
@@ -436,24 +440,24 @@ appEvent (VtyEvent (V.EvKey V.KEsc [])) = get >>= \case
 appEvent (VtyEvent (V.EvKey V.KEnter [])) = get >>= \case
   ViewVm s ->
     put . ViewContracts $ UiBrowserState
-      { _browserContractList =
+      { contracts =
           list
             BrowserPane
-            (Vec.fromList (Map.toList s._uiVm._env._contracts))
+            (Vec.fromList (Map.toList s.vm.env.contracts))
             2
-      , _browserVm = s
+      , vm = s
       }
   ViewPicker s ->
-    case listSelectedElement s._testPickerList of
+    case listSelectedElement s.tests of
       Nothing -> error "nothing selected"
       Just (_, x) -> do
-        let initVm  = initialUiVmStateForTest s._testOpts x
+        let initVm  = initialUiVmStateForTest s.opts x
         put (ViewVm initVm)
   _ -> pure ()
 
 -- Vm Overview: m - toggle memory pane
 appEvent (VtyEvent (V.EvKey (V.KChar 'm') [])) = get >>= \case
-  ViewVm s -> put (ViewVm $ over uiShowMemory not s)
+  ViewVm s -> put (ViewVm $ over #showMemory not s)
   _ -> pure ()
 
 -- Vm Overview: h - open help view
@@ -481,28 +485,28 @@ appEvent (VtyEvent (V.EvKey (V.KChar ' ') [])) =
 -- Vm Overview: n - step
 appEvent (VtyEvent (V.EvKey (V.KChar 'n') [])) = get >>= \case
   ViewVm s ->
-    when (isNothing (s ^. uiVm . result)) $
+    when (isNothing (s ^. #vm % #result)) $
       takeStep s (Step 1)
   _ -> pure ()
 
 -- Vm Overview: N - step
 appEvent (VtyEvent (V.EvKey (V.KChar 'N') [])) = get >>= \case
   ViewVm s ->
-    when (isNothing (s ^. uiVm . result)) $
+    when (isNothing (s ^. #vm % #result)) $
       takeStep s (StepUntil (isNextSourcePosition s))
   _ -> pure ()
 
 -- Vm Overview: C-n - step
 appEvent (VtyEvent (V.EvKey (V.KChar 'n') [V.MCtrl])) = get >>= \case
   ViewVm s ->
-    when (isNothing (s ^. uiVm . result)) $
+    when (isNothing (s ^. #vm % #result)) $
       takeStep s (StepUntil (isNextSourcePositionWithoutEntering s))
   _ -> pure ()
 
 -- Vm Overview: e - step
 appEvent (VtyEvent (V.EvKey (V.KChar 'e') [])) = get >>= \case
   ViewVm s ->
-    when (isNothing (s ^. uiVm . result)) $
+    when (isNothing (s ^. #vm % #result)) $
       takeStep s (StepUntil (isExecutionHalted s))
   _ -> pure ()
 
@@ -512,12 +516,12 @@ appEvent (VtyEvent (V.EvKey (V.KChar 'a') [])) = get >>= \case
     -- We keep the current cache so we don't have to redo
     -- any blocking queries.
     let
-      (vm, stepper) = fromJust (Map.lookup 0 s._uiSnapshots)
+      (vm, stepper) = fromJust (Map.lookup 0 s.snapshots)
       s' = s
-        & set uiVm vm
-        & set (uiVm . cache) s._uiVm._cache
-        & set uiStep 0
-        & set uiStepper stepper
+        & set #vm vm
+        & set (#vm % #cache) s.vm.cache
+        & set #step 0
+        & set #stepper stepper
 
     in takeStep s' (Step 0)
   _ -> pure ()
@@ -525,7 +529,7 @@ appEvent (VtyEvent (V.EvKey (V.KChar 'a') [])) = get >>= \case
 -- Vm Overview: p - backstep
 appEvent (VtyEvent (V.EvKey (V.KChar 'p') [])) = get >>= \case
   ViewVm s ->
-    case s._uiStep of
+    case s.step of
       0 ->
         -- We're already at the first step; ignore command.
         pure ()
@@ -536,12 +540,12 @@ appEvent (VtyEvent (V.EvKey (V.KChar 'p') [])) = get >>= \case
         -- We keep the current cache so we don't have to redo
         -- any blocking queries, and also the memory view.
         let
-          (step, (vm, stepper)) = fromJust $ lookupLT n s._uiSnapshots
+          (step, (vm, stepper)) = fromJust $ lookupLT n s.snapshots
           s1 = s
-            & set uiVm vm -- set the vm to the one from the snapshot
-            & set (uiVm . cache) s._uiVm._cache -- persist the cache
-            & set uiStep step
-            & set uiStepper stepper
+            & set #vm vm -- set the vm to the one from the snapshot
+            & set (#vm % #cache) s.vm.cache -- persist the cache
+            & set #step step
+            & set #stepper stepper
           stepsToTake = n - step - 1
 
         takeStep s1 (Step stepsToTake)
@@ -558,9 +562,9 @@ appEvent (VtyEvent (V.EvKey (V.KChar 'p') [V.MCtrl])) =
 -- Vm Overview: 0 - choose no jump
 appEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = get >>= \case
   ViewVm s ->
-    case view (uiVm . result) s of
+    case view (#vm % #result) s of
       Just (VMFailure (Choose (PleaseChoosePath _ contin))) ->
-        takeStep (s & set uiStepper (Stepper.evm (contin True) >> s._uiStepper))
+        takeStep (s & set #stepper (Stepper.evm (contin True) >> s.stepper))
           (Step 1)
       _ -> pure ()
   _ -> pure ()
@@ -568,9 +572,9 @@ appEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = get >>= \case
 -- Vm Overview: 1 - choose jump
 appEvent (VtyEvent (V.EvKey (V.KChar '1') [])) = get >>= \case
   ViewVm s ->
-    case s._uiVm._result of
+    case s.vm.result of
       Just (VMFailure (Choose (PleaseChoosePath _ contin))) ->
-        takeStep (s & set uiStepper (Stepper.evm (contin False) >> s._uiStepper))
+        takeStep (s & set #stepper (Stepper.evm (contin False) >> s.stepper))
           (Step 1)
       _ -> pure ()
   _ -> pure ()
@@ -585,8 +589,7 @@ appEvent (VtyEvent (V.EvKey (V.KChar 'b') [V.MCtrl])) =
 
 -- UnitTest Picker: (main) - render list
 appEvent (VtyEvent e) = do
-  Brick.zoom
-    (_ViewPicker . testPickerList)
+  Brick.zoom (traverseOf (_ViewPicker % #tests))
     (handleListEvent e)
 
 -- Default
@@ -695,7 +698,7 @@ drawTestPicker ui =
              withHighlight selected $
                txt " Debug " <+> txt (contractNamePart x) <+> txt "::" <+> txt y)
           True
-          ui._testPickerList
+          ui.tests
   ]
 
 drawVmBrowser :: UiBrowserState -> [UiWidget]
@@ -712,14 +715,14 @@ drawVmBrowser ui =
                    , "  ", pack (show k)
                    ])
               True
-              ui._browserContractList
+              ui.contracts
       , case snd <$> Map.lookup (maybeHash c) dapp.solcByHash of
           Nothing ->
             hBox
               [ borderWithLabel (txt "Contract information") . padBottom Max . padRight Max $ vBox
-                  [ txt ("Codehash: " <> pack (show c._codehash))
-                  , txt ("Nonce: "    <> showWordExact c._nonce)
-                  , txt ("Balance: "  <> showWordExact c._balance)
+                  [ txt ("Codehash: " <> pack (show c.codehash))
+                  , txt ("Nonce: "    <> showWordExact c.nonce)
+                  , txt ("Balance: "  <> showWordExact c.balance)
                   --, txt ("Storage: "  <> storageDisplay (view storage c)) -- TODO: fix this
                   ]
                 ]
@@ -743,10 +746,10 @@ drawVmBrowser ui =
       ]
   ]
   where
-    dapp = ui._browserVm._uiTestOpts.dapp
-    (_, (_, c)) = fromJust $ listSelectedElement ui._browserContractList
+    dapp = ui.vm.testOpts.dapp
+    (_, (_, c)) = fromJust $ listSelectedElement ui.contracts
 --        currentContract  = view (dappSolcByHash . ix ) dapp
-    maybeHash ch = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord ch._codehash)
+    maybeHash ch = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord ch.codehash)
 
 drawVm :: UiVmState -> [UiWidget]
 drawVm ui =
@@ -799,36 +802,36 @@ drawHelpBar = hBorder <=> hCenter help
 
 stepOneOpcode :: Stepper a -> StateT UiVmState IO ()
 stepOneOpcode restart = do
-  n <- use uiStep
+  n <- use #step
   when (n > 0 && n `mod` snapshotInterval == 0) $ do
-    vm <- use uiVm
-    modifying uiSnapshots (insert n (vm, void restart))
-  modifying uiVm (execState exec1)
-  modifying uiStep (+ 1)
+    vm <- use #vm
+    modifying #snapshots (insert n (vm, void restart))
+  modifying #vm (execState exec1)
+  modifying #step (+ 1)
 
 isNewTraceAdded
   :: UiVmState -> Pred VM
 isNewTraceAdded ui vm =
   let
-    currentTraceTree = length <$> traceForest ui._uiVm
+    currentTraceTree = length <$> traceForest ui.vm
     newTraceTree = length <$> traceForest vm
   in currentTraceTree /= newTraceTree
 
 isNextSourcePosition
   :: UiVmState -> Pred VM
 isNextSourcePosition ui vm =
-  let dapp = ui._uiTestOpts.dapp
-      initialPosition = currentSrcMap dapp ui._uiVm
+  let dapp = ui.testOpts.dapp
+      initialPosition = currentSrcMap dapp ui.vm
   in currentSrcMap dapp vm /= initialPosition
 
 isNextSourcePositionWithoutEntering
   :: UiVmState -> Pred VM
 isNextSourcePositionWithoutEntering ui vm =
   let
-    dapp            = ui._uiTestOpts.dapp
-    vm0             = ui._uiVm
+    dapp            = ui.testOpts.dapp
+    vm0             = ui.vm
     initialPosition = currentSrcMap dapp vm0
-    initialHeight   = length vm0._frames
+    initialHeight   = length vm0.frames
   in
     case currentSrcMap dapp vm of
       Nothing ->
@@ -836,7 +839,7 @@ isNextSourcePositionWithoutEntering ui vm =
       Just here ->
         let
           moved = Just here /= initialPosition
-          deeper = length vm._frames > initialHeight
+          deeper = length vm.frames > initialHeight
           boring =
             case srcMapCode dapp.sources here of
               Just bs ->
@@ -847,20 +850,20 @@ isNextSourcePositionWithoutEntering ui vm =
            moved && not deeper && not boring
 
 isExecutionHalted :: UiVmState -> Pred VM
-isExecutionHalted _ vm = isJust vm._result
+isExecutionHalted _ vm = isJust vm.result
 
 currentSrcMap :: DappInfo -> VM -> Maybe SrcMap
 currentSrcMap dapp vm = do
   this <- currentContract vm
-  i <- this._opIxMap SVec.!? vm._state._pc
+  i <- this.opIxMap SVec.!? vm.state.pc
   srcMap dapp this i
 
 drawStackPane :: UiVmState -> UiWidget
 drawStackPane ui =
   let
-    gasText = showWordExact (num ui._uiVm._state._gas)
+    gasText = showWordExact (num ui.vm.state.gas)
     labelText = txt ("Gas available: " <> gasText <> "; stack:")
-    stackList = list StackPane (Vec.fromList $ zip [(1 :: Int)..] (simplify <$> ui._uiVm._state._stack)) 2
+    stackList = list StackPane (Vec.fromList $ zip [(1 :: Int)..] (simplify <$> ui.vm.state.stack)) 2
   in hBorderWithLabel labelText <=>
     renderList
       (\_ (i, w) ->
@@ -869,14 +872,14 @@ drawStackPane ui =
                <+> ourWrap (Text.unpack $ prettyIfConcreteWord w)
            , dim (txt ("   " <> case unlit w of
                        Nothing -> ""
-                       Just u -> showWordExplanation u ui._uiTestOpts.dapp))
+                       Just u -> showWordExplanation u ui.testOpts.dapp))
            ])
       False
       stackList
 
 message :: VM -> String
 message vm =
-  case vm._result of
+  case vm.result of
     Just (VMSuccess (ConcreteBuf msg)) ->
       "VMSuccess: " <> (show $ ByteStringS msg)
     Just (VMSuccess (msg)) ->
@@ -886,13 +889,13 @@ message vm =
     Just (VMFailure err) ->
       "VMFailure: " <> show err
     Nothing ->
-      "Executing EVM code in " <> show vm._state._contract
+      "Executing EVM code in " <> show vm.state.contract
 
 
 drawBytecodePane :: UiVmState -> UiWidget
 drawBytecodePane ui =
   let
-    vm = ui._uiVm
+    vm = ui.vm
     move = maybe id listMoveTo $ vmOpIx vm
   in
     hBorderWithLabel (str $ message vm) <=>
@@ -902,7 +905,7 @@ drawBytecodePane ui =
                     else withDefAttr boldAttr (opWidget x))
       False
       (move $ list BytecodePane
-        (maybe mempty (._codeOps) (currentContract vm))
+        (maybe mempty (.codeOps) (currentContract vm))
         1)
 
 
@@ -919,8 +922,8 @@ prettyIfConcrete x = T.unpack $ formatExpr $ simplify x
 
 drawTracePane :: UiVmState -> UiWidget
 drawTracePane s =
-  let vm = s._uiVm
-      dapp = s._uiTestOpts.dapp
+  let vm = s.vm
+      dapp = s.testOpts.dapp
       traceList =
         list
           TracePane
@@ -930,20 +933,20 @@ drawTracePane s =
             $ vm)
           1
 
-  in case s._uiShowMemory of
+  in case s.showMemory of
     True -> viewport TracePane Vertical $
         hBorderWithLabel (txt "Calldata")
-        <=> ourWrap (prettyIfConcrete vm._state._calldata)
+        <=> ourWrap (prettyIfConcrete vm.state.calldata)
         <=> hBorderWithLabel (txt "Returndata")
-        <=> ourWrap (prettyIfConcrete vm._state._returndata)
+        <=> ourWrap (prettyIfConcrete vm.state.returndata)
         <=> hBorderWithLabel (txt "Output")
-        <=> ourWrap (maybe "" show vm._result)
+        <=> ourWrap (maybe "" show vm.result)
         <=> hBorderWithLabel (txt "Cache")
-        <=> ourWrap (show vm._cache._path)
+        <=> ourWrap (show vm.cache.path)
         <=> hBorderWithLabel (txt "Path Conditions")
-        <=> (ourWrap $ show $ vm._constraints)
+        <=> (ourWrap $ show $ vm.constraints)
         <=> hBorderWithLabel (txt "Memory")
-        <=> (ourWrap (prettyIfConcrete vm._state._memory))
+        <=> (ourWrap (prettyIfConcrete vm.state.memory))
     False ->
       hBorderWithLabel (txt "Trace")
       <=> renderList
@@ -967,28 +970,30 @@ solidityList vm dapp =
     (case currentSrcMap dapp vm of
         Nothing -> mempty
         Just x ->
-          view (
-            ix x.srcMapFile
-            . to (Vec.imap (,)))
-          dapp.sources.lines)
+          fromMaybe
+            (error "Internal Error: unable to find line for source map")
+            (preview (
+              ix x.file
+              % to (Vec.imap (,)))
+            dapp.sources.lines))
     1
 
 drawSolidityPane :: UiVmState -> UiWidget
 drawSolidityPane ui =
-  let dapp = ui._uiTestOpts.dapp
+  let dapp = ui.testOpts.dapp
       dappSrcs = dapp.sources
-      vm = ui._uiVm
+      vm = ui.vm
   in case currentSrcMap dapp vm of
     Nothing -> padBottom Max (hBorderWithLabel (txt "<no source map>"))
     Just sm ->
           let
-            rows = dappSrcs.lines !? sm.srcMapFile
+            rows = dappSrcs.lines !? sm.file
             subrange :: Int -> Maybe (Int, Int)
             subrange i = do
               rs <- rows
-              lineSubrange rs (sm.srcMapOffset, sm.srcMapLength) i
+              lineSubrange rs (sm.offset, sm.length) i
             fileName :: Maybe Text
-            fileName = T.pack . fst <$> (dapp.sources.files !? sm.srcMapFile)
+            fileName = T.pack . fst <$> (dapp.sources.files !? sm.file)
             lineNo :: Maybe Int
             lineNo = ((\a -> Just (a - 1)) . snd) =<< srcMapCodePos dapp.sources sm
           in vBox
@@ -999,7 +1004,7 @@ drawSolidityPane ui =
                   -- Show the AST node type if present
                   <+> txt (" (" <> fromMaybe "?"
                                     (dapp.astSrcMap sm
-                                       >>= preview (key "name" . _String)) <> ")")
+                                       >>= preview (key "name" % _String)) <> ")")
             , Centered.renderList
                 (\_ (i, line) ->
                    let s = case decodeUtf8 line of "" -> " "; y -> y
@@ -1023,7 +1028,7 @@ ifTallEnough :: Int -> Widget n -> Widget n -> Widget n
 ifTallEnough need w1 w2 =
   Widget Greedy Greedy $ do
     c <- getContext
-    if view availHeightL c > need
+    if view (lensVL availHeightL) c > need
       then render w1
       else render w2
 

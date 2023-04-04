@@ -10,7 +10,7 @@ module EVM.Facts.Git
 
 import EVM.Facts (Fact (..), File (..), Path (..), Data (..), fileToFact, factToFile)
 
-import Control.Lens
+import Optics.Core
 import Data.Set   (Set)
 import Data.Maybe (catMaybes)
 
@@ -45,5 +45,5 @@ prune = Set.fromList . catMaybes . Set.toList
 loadFacts :: RepoAt -> IO (Set Fact)
 loadFacts (RepoAt src) =
   fmap
-    (prune . Set.map (fileToFact . view (from fileRepr)))
+    (prune . Set.map (fileToFact . review fileRepr))
     (Git.load src)

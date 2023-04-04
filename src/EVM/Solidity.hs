@@ -47,12 +47,14 @@ module EVM.Solidity
 import EVM.ABI
 import EVM.Types
 
+import Optics.Core
+import Optics.Operators.Unsafe
+
 import Control.Applicative
-import Control.Lens hiding (Indexed, (.=))
 import Control.Monad
 import Data.Aeson hiding (json)
 import Data.Aeson.Types
-import Data.Aeson.Lens
+import Data.Aeson.Optics
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Scientific
@@ -219,11 +221,11 @@ data JumpType = JumpInto | JumpFrom | JumpRegular
   deriving (Show, Eq, Ord, Generic)
 
 data SrcMap = SM {
-  srcMapOffset :: {-# UNPACK #-} !Int,
-  srcMapLength :: {-# UNPACK #-} !Int,
-  srcMapFile   :: {-# UNPACK #-} !Int,
-  srcMapJump   :: JumpType,
-  srcMapModifierDepth :: {-# UNPACK #-} !Int
+  offset        :: {-# UNPACK #-} !Int,
+  length        :: {-# UNPACK #-} !Int,
+  file          :: {-# UNPACK #-} !Int,
+  jump          :: JumpType,
+  modifierDepth :: {-# UNPACK #-} !Int
 } deriving (Show, Eq, Ord, Generic)
 
 data SrcMapParseState
@@ -352,7 +354,7 @@ yul contract src = do
   (json, path) <- yul' src
   let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
       c = f ^?! key (Key.fromText $ if T.null contract then "object" else contract)
-      bytecode = c ^?! key "evm" ^?! key "bytecode" ^?! key "object" . _String
+      bytecode = c ^?! key "evm" ^?! key "bytecode" ^?! key "object" % _String
   pure $ toCode <$> (Just bytecode)
 
 yulRuntime :: Text -> Text -> IO (Maybe ByteString)
@@ -360,7 +362,7 @@ yulRuntime contract src = do
   (json, path) <- yul' src
   let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
       c = f ^?! key (Key.fromText $ if T.null contract then "object" else contract)
-      bytecode = c ^?! key "evm" ^?! key "deployedBytecode" ^?! key "object" . _String
+      bytecode = c ^?! key "evm" ^?! key "deployedBytecode" ^?! key "object" % _String
   pure $ toCode <$> (Just bytecode)
 
 solidity :: Text -> Text -> IO (Maybe ByteString)
@@ -394,19 +396,19 @@ readJSON Foundry contractName json = readFoundryJSON contractName json
 readFoundryJSON :: Text -> Text -> Maybe (Contracts, Asts, Sources)
 readFoundryJSON contractName json = do
   runtime <- json ^? key "deployedBytecode"
-  runtimeCode <- toCode . strip0x'' <$> runtime ^? key "object" . _String
-  runtimeSrcMap <- makeSrcMaps =<< runtime ^? key "sourceMap" . _String
+  runtimeCode <- toCode . strip0x'' <$> runtime ^? key "object" % _String
+  runtimeSrcMap <- makeSrcMaps =<< runtime ^? key "sourceMap" % _String
 
   creation <- json ^? key "bytecode"
-  creationCode <- toCode . strip0x'' <$> creation ^? key "object" . _String
-  creationSrcMap <- makeSrcMaps =<< creation ^? key "sourceMap" . _String
+  creationCode <- toCode . strip0x'' <$> creation ^? key "object" % _String
+  creationSrcMap <- makeSrcMaps =<< creation ^? key "sourceMap" % _String
 
   ast <- json ^? key "ast"
-  path <- ast ^? key "absolutePath" . _String
+  path <- ast ^? key "absolutePath" % _String
 
-  abi <- toList <$> json ^? key "abi" . _Array
+  abi <- toList <$> json ^? key "abi" % _Array
 
-  id' <- num <$> json ^? key "id" . _Integer
+  id' <- num <$> json ^? key "id" % _Integer
 
   let contract = SolcContract
         { runtimeCodehash     = keccak' (stripBytecodeMetadata runtimeCode)
@@ -431,12 +433,12 @@ readFoundryJSON contractName json = do
 -- | Parses the standard json output from solc
 readStdJSON :: Text -> Maybe (Contracts, Asts, Sources)
 readStdJSON json = do
-  contracts <- KeyMap.toHashMapText <$> json ^? key "contracts" . _Object
+  contracts <- KeyMap.toHashMapText <$> json ^? key "contracts" % _Object
   -- TODO: support the general case of "urls" and "content" in the standard json
-  sources <- KeyMap.toHashMapText <$>  json ^? key "sources" . _Object
+  sources <- KeyMap.toHashMapText <$>  json ^? key "sources" % _Object
   let asts = force "JSON lacks abstract syntax trees." . preview (key "ast") <$> sources
       contractMap = f contracts
-      getId src = num $ (force "" $ HMap.lookup src sources) ^?! key "id" . _Integer
+      getId src = num $ (force "" $ HMap.lookup src sources) ^?! key "id" % _Integer
       contents src = (SrcFile (getId src) (T.unpack src), encodeUtf8 <$> HMap.lookup src (mconcat $ Map.elems $ snd <$> contractMap))
   return ( Contracts $ fst <$> contractMap
          , Asts      $ Map.fromList (HMap.toList asts)
@@ -445,28 +447,30 @@ readStdJSON json = do
   where
     f :: (AsValue s) => HMap.HashMap Text s -> (Map Text (SolcContract, (HMap.HashMap Text Text)))
     f x = Map.fromList . (concatMap g) . HMap.toList $ x
-    g (s, x) = h s <$> HMap.toList (KeyMap.toHashMapText (view _Object x))
+    g (s, x) = h s <$> HMap.toList (KeyMap.toHashMapText (fromMaybe (error "Could not parse json object") (preview _Object x)))
     h :: Text -> (Text, Value) -> (Text, (SolcContract, HMap.HashMap Text Text))
     h s (c, x) =
       let
         evmstuff = x ^?! key "evm"
         runtime = evmstuff ^?! key "deployedBytecode"
         creation =  evmstuff ^?! key "bytecode"
-        theRuntimeCode = toCode $ fromMaybe "" $ runtime ^? key "object" . _String
-        theCreationCode = toCode $ fromMaybe "" $ creation ^? key "object" . _String
+        theRuntimeCode = toCode $ fromMaybe "" $ runtime ^? key "object" % _String
+        theCreationCode = toCode $ fromMaybe "" $ creation ^? key "object" % _String
         srcContents :: Maybe (HMap.HashMap Text Text)
-        srcContents = do metadata <- x ^? key "metadata" . _String
-                         srcs <- KeyMap.toHashMapText <$> metadata ^? key "sources" . _Object
-                         return $ (view (key "content" . _String)) <$> (HMap.filter (isJust . preview (key "content")) srcs)
+        srcContents = do metadata <- x ^? key "metadata" % _String
+                         srcs <- KeyMap.toHashMapText <$> metadata ^? key "sources" % _Object
+                         return $ fmap
+                           (fromMaybe (error "Internal Error: could not parse contents field into a string") . preview (key "content" % _String))
+                           (HMap.filter (isJust . preview (key "content")) srcs)
         abis = force ("abi key not found in " <> show x) $
-          toList <$> x ^? key "abi" . _Array
+          toList <$> x ^? key "abi" % _Array
       in (s <> ":" <> c, (SolcContract {
         runtimeCode      = theRuntimeCode,
         creationCode     = theCreationCode,
         runtimeCodehash  = keccak' (stripBytecodeMetadata theRuntimeCode),
         creationCodehash = keccak' (stripBytecodeMetadata theCreationCode),
-        runtimeSrcmap    = force "internal error: srcmap-runtime" (makeSrcMaps (runtime ^?! key "sourceMap" . _String)),
-        creationSrcmap   = force "internal error: srcmap" (makeSrcMaps (creation ^?! key "sourceMap" . _String)),
+        runtimeSrcmap    = force "internal error: srcmap-runtime" (makeSrcMaps (runtime ^?! key "sourceMap" % _String)),
+        creationSrcmap   = force "internal error: srcmap" (makeSrcMaps (creation ^?! key "sourceMap" % _String)),
         contractName = s <> ":" <> c,
         constructorInputs = mkConstructor abis,
         abiMap        = mkAbiMap abis,
@@ -483,52 +487,52 @@ readStdJSON json = do
 mkAbiMap :: [Value] -> Map FunctionSelector Method
 mkAbiMap abis = Map.fromList $
   let
-    relevant = filter (\y -> "function" == y ^?! key "type" . _String) abis
+    relevant = filter (\y -> "function" == y ^?! key "type" % _String) abis
     f abi =
       (abiKeccak (encodeUtf8 (signature abi)),
-       Method { name = abi ^?! key "name" . _String
+       Method { name = abi ^?! key "name" % _String
               , methodSignature = signature abi
               , inputs = map parseMethodInput
-                 (toList (abi ^?! key "inputs" . _Array))
+                 (toList (abi ^?! key "inputs" % _Array))
               , output = map parseMethodInput
-                 (toList (abi ^?! key "outputs" . _Array))
+                 (toList (abi ^?! key "outputs" % _Array))
               , mutability = parseMutability
-                 (abi ^?! key "stateMutability" . _String)
+                 (abi ^?! key "stateMutability" % _String)
               })
   in f <$> relevant
 
 mkEventMap :: [Value] -> Map W256 Event
 mkEventMap abis = Map.fromList $
   let
-    relevant = filter (\y -> "event" == y ^?! key "type" . _String) abis
+    relevant = filter (\y -> "event" == y ^?! key "type" % _String) abis
     f abi =
      ( keccak' (encodeUtf8 (signature abi))
      , Event
-       (abi ^?! key "name" . _String)
-       (case abi ^?! key "anonymous" . _Bool of
+       (abi ^?! key "name" % _String)
+       (case abi ^?! key "anonymous" % _Bool of
          True -> Anonymous
          False -> NotAnonymous)
        (map (\y ->
-        ( y ^?! key "name" . _String
+        ( y ^?! key "name" % _String
         , force "internal error: type" (parseTypeName' y)
-        , if y ^?! key "indexed" . _Bool
+        , if y ^?! key "indexed" % _Bool
           then Indexed
           else NotIndexed
         ))
-       (toList $ abi ^?! key "inputs" . _Array))
+       (toList $ abi ^?! key "inputs" % _Array))
      )
   in f <$> relevant
 
 mkErrorMap :: [Value] -> Map W256 SolError
 mkErrorMap abis = Map.fromList $
   let
-    relevant = filter (\y -> "error" == y ^?! key "type" . _String) abis
+    relevant = filter (\y -> "error" == y ^?! key "type" % _String) abis
     f abi =
      ( stripKeccak $ keccak' (encodeUtf8 (signature abi))
      , SolError
-       (abi ^?! key "name" . _String)
+       (abi ^?! key "name" % _String)
        (map (force "internal error: type" . parseTypeName')
-       (toList $ abi ^?! key "inputs" . _Array))
+       (toList $ abi ^?! key "inputs" % _Array))
      )
   in f <$> relevant
   where
@@ -539,24 +543,24 @@ mkConstructor :: [Value] -> [(Text, AbiType)]
 mkConstructor abis =
   let
     isConstructor y =
-      "constructor" == y ^?! key "type" . _String
+      "constructor" == y ^?! key "type" % _String
   in
     case filter isConstructor abis of
-      [abi] -> map parseMethodInput (toList (abi ^?! key "inputs" . _Array))
+      [abi] -> map parseMethodInput (toList (abi ^?! key "inputs" % _Array))
       [] -> [] -- default constructor has zero inputs
       _  -> error "strange: contract has multiple constructors"
 
 mkStorageLayout :: Maybe Value -> Maybe (Map Text StorageItem)
 mkStorageLayout Nothing = Nothing
 mkStorageLayout (Just json) = do
-  items <- json ^? key "storage" . _Array
+  items <- json ^? key "storage" % _Array
   types <- json ^? key "types"
   fmap Map.fromList (forM (Vector.toList items) $ \item ->
-    do name <- item ^? key "label" . _String
-       offset <- item ^? key "offset" . _Number >>= toBoundedInteger
-       slot <- item ^? key "slot" . _String
-       typ <- Key.fromText <$> item ^? key "type" . _String
-       slotType <- types ^?! key typ ^? key "label" . _String
+    do name <- item ^? key "label" % _String
+       offset <- item ^? key "offset" % _Number >>= toBoundedInteger
+       slot <- item ^? key "slot" % _String
+       typ <- Key.fromText <$> item ^? key "type" % _String
+       slotType <- types ^?! key typ ^? key "label" % _String
        return (name, StorageItem (read $ T.unpack slotType) offset (read $ T.unpack slot)))
 
 signature :: AsValue s => s -> Text
@@ -565,10 +569,10 @@ signature abi =
     "fallback" -> "<fallback>"
     _ ->
       fold [
-        fromMaybe "<constructor>" (abi ^? key "name" . _String), "(",
+        fromMaybe "<constructor>" (abi ^? key "name" % _String), "(",
         intercalate ","
-          (map (\x -> x ^?! key "type" . _String)
-            (toList $ abi ^?! key "inputs" . _Array)),
+          (map (\x -> x ^?! key "type" % _String)
+            (toList $ abi ^?! key "inputs" % _Array)),
         ")"
       ]
 
@@ -576,8 +580,8 @@ signature abi =
 parseTypeName' :: AsValue s => s -> Maybe AbiType
 parseTypeName' x =
   parseTypeName
-    (fromMaybe mempty $ x ^? key "components" . _Array . to parseComponents)
-    (x ^?! key "type" . _String)
+    (fromMaybe mempty $ x ^? key "components" % _Array % to parseComponents)
+    (x ^?! key "type" % _String)
   where parseComponents = fmap $ snd . parseMethodInput
 
 parseMutability :: Text -> Mutability
@@ -590,7 +594,7 @@ parseMutability _ = error "unknown function mutability"
 -- This actually can also parse a method output! :O
 parseMethodInput :: AsValue s => s -> (Text, AbiType)
 parseMethodInput x =
-  ( x ^?! key "name" . _String
+  ( x ^?! key "name" % _String
   , force "internal error: method type" (parseTypeName' x)
   )
 
@@ -788,7 +792,7 @@ astSrcMap astIds =
        Map.fromList
       . mapMaybe
         (\v -> do
-          src <- preview (key "src" . _String) v
+          src <- preview (key "src" % _String) v
           [i, n, f] <- mapM (readMaybe . T.unpack) (T.split (== ':') src)
           return ((i, n, f), v)
         )

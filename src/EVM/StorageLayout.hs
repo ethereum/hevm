@@ -6,9 +6,9 @@ import EVM.Dapp (DappInfo(..))
 import EVM.Solidity (SolcContract, creationSrcmap, SlotType(..))
 import EVM.ABI (AbiType (..), parseTypeName)
 
-import Control.Lens
+import Optics.Core
 import Data.Aeson (Value (..))
-import Data.Aeson.Lens
+import Data.Aeson.Optics
 import Data.Foldable (toList)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map qualified as Map
@@ -44,8 +44,8 @@ storageLayout dapp solc =
         (findContractDefinition dapp solc)
   in
     case preview ( key "attributes"
-                 . key "linearizedBaseContracts"
-                 . _Array
+                 % key "linearizedBaseContracts"
+                 % _Array
                  ) root of
       Nothing ->
         []
@@ -60,15 +60,15 @@ storageLayout dapp solc =
 
 storageVariablesForContract :: Value -> Maybe [Text]
 storageVariablesForContract node = do
-  name <- preview (ix "attributes" . key "name" . _String) node
+  name <- preview (ix "attributes" % key "name" % _String) node
   vars <-
     fmap
       (filter isStorageVariableDeclaration . toList)
-      (preview (ix "children" . _Array) node)
+      (preview (ix "children" % _Array) node)
 
   pure . flip map vars $
     \x ->
-      case preview (key "attributes" . key "name" . _String) x of
+      case preview (key "attributes" % key "name" % _String) x of
         Just variableName ->
           mconcat
             [ variableName
@@ -85,16 +85,16 @@ nodeIs t x = isSourceNode && hasRightName
     isSourceNode =
       isJust (preview (key "src") x)
     hasRightName =
-      Just t == preview (key "name" . _String) x
+      Just t == preview (key "name" % _String) x
 
 isStorageVariableDeclaration :: Value -> Bool
 isStorageVariableDeclaration x =
   nodeIs "VariableDeclaration" x
-    && preview (key "attributes" . key "constant" . _Bool) x /= Just True
+    && preview (key "attributes" % key "constant" % _Bool) x /= Just True
 
 slotTypeForDeclaration :: Value -> SlotType
 slotTypeForDeclaration node =
-  case toList <$> preview (key "children" . _Array) node of
+  case toList <$> preview (key "children" % _Array) node of
     Just (x:_) ->
       grokDeclarationType x
     _ ->
@@ -102,9 +102,9 @@ slotTypeForDeclaration node =
 
 grokDeclarationType :: Value -> SlotType
 grokDeclarationType x =
-  case preview (key "name" . _String) x of
+  case preview (key "name" % _String) x of
     Just "Mapping" ->
-      case preview (key "children" . _Array) x of
+      case preview (key "children" % _Array) x of
         Just (toList -> xs) ->
           grokMappingType xs
         _ ->
@@ -128,9 +128,9 @@ grokMappingType _ =
 
 grokValueType :: Value -> AbiType
 grokValueType x =
-  case ( preview (key "name" . _String) x
-       , preview (key "children" . _Array) x
-       , preview (key "attributes" . key "type" . _String) x
+  case ( preview (key "name" % _String) x
+       , preview (key "children" % _Array) x
+       , preview (key "attributes" % key "type" % _String) x
        ) of
     (Just "ElementaryTypeName", _, Just typeName) ->
       fromMaybe (error ("ungrokked value type: " ++ show typeName))
@@ -140,8 +140,8 @@ grokValueType x =
     (Just "ArrayTypeName", fmap toList -> Just [t], _)->
       AbiArrayDynamicType (grokValueType t)
     (Just "ArrayTypeName", fmap toList -> Just [t, n], _)->
-      case ( preview (key "name" . _String) n
-           , preview (key "attributes" . key "value" . _String) n
+      case ( preview (key "name" % _String) n
+           , preview (key "attributes" % key "value" % _String) n
            ) of
         (Just "Literal", Just ((read . unpack) -> i)) ->
           AbiArrayType i (grokValueType t)
