@@ -253,14 +253,16 @@ unitTestOptions cmd solvers buildOutput = do
 main :: IO ()
 main = do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
-  root <- getRoot cmd
   case cmd of
     Version {} -> putStrLn (showVersion Paths.version)
-    Symbolic {} -> withCurrentDirectory root $ assert cmd
+    Symbolic {} -> do
+      root <- getRoot cmd
+      withCurrentDirectory root $ assert cmd
     Equivalence {} -> equivalence cmd
     Exec {} ->
       launchExec cmd
-    Test {} ->
+    Test {} -> do
+      root <- getRoot cmd
       withCurrentDirectory root $ do
         cores <- num <$> getNumProcessors
         solver <- getSolver cmd
