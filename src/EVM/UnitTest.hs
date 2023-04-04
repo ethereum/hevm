@@ -846,7 +846,7 @@ passOutput vm UnitTestOptions { .. } testName =
 -- TODO
 failOutput :: VM -> UnitTestOptions -> Text -> Text
 failOutput vm UnitTestOptions { .. } testName =
-  let ?context = DappContext { info = dapp, env = vm.env.contracts}
+  let ?context = DappContext { info = dapp, env = vm.env.contracts }
   in mconcat
   [ "Failure: "
   , fromMaybe "" (stripSuffix "()" testName)

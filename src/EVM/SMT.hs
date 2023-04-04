@@ -97,7 +97,7 @@ data SMTCex = SMTCex
 flattenBufs :: SMTCex -> Maybe SMTCex
 flattenBufs cex = do
   bs <- mapM collapse cex.buffers
-  pure $ cex { buffers = bs }
+  pure $ cex{ buffers = bs }
 
 -- | Attemps to collapse a compressed buffer representation down to a flattened one
 collapse :: BufModel -> Maybe BufModel
@@ -161,7 +161,7 @@ assertProps ps =
   <> readAssumes
   <> SMT2 [""] mempty
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
-  <> SMT2 [] mempty{storeReads = storageReads}
+  <> SMT2 [] mempty{ storeReads = storageReads }
 
   where
     (ps_elim, bufs, stores) = eliminateProps ps
@@ -319,7 +319,7 @@ discoverMaxReads props benv senv = bufMap
 declareBufs :: [Prop] -> BufEnv -> StoreEnv -> SMT2
 declareBufs props bufEnv storeEnv = SMT2 ("; buffers" : fmap declareBuf allBufs <> ("; buffer lengths" : fmap declareLength allBufs)) cexvars
   where
-    cexvars = (mempty :: CexVars) { buffers = discoverMaxReads props bufEnv storeEnv }
+    cexvars = (mempty :: CexVars){ buffers = discoverMaxReads props bufEnv storeEnv }
     allBufs = fmap fromLazyText $ Map.keys cexvars.buffers
     declareBuf n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
     declareLength n = "(declare-const " <> n <> "_length" <> " (_ BitVec 256))"
@@ -329,21 +329,21 @@ declareVars :: [Builder] -> SMT2
 declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = mempty{calldata = fmap toLazyText names}
+    cexvars = mempty{ calldata = fmap toLazyText names }
 
 
 declareFrameContext :: [Builder] -> SMT2
 declareFrameContext names = SMT2 (["; frame context"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = (mempty :: CexVars) { txContext = fmap toLazyText names }
+    cexvars = (mempty :: CexVars){ txContext = fmap toLazyText names }
 
 
 declareBlockContext :: [Builder] -> SMT2
 declareBlockContext names = SMT2 (["; block context"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = (mempty :: CexVars) { blockContext = fmap toLazyText names }
+    cexvars = (mempty :: CexVars){ blockContext = fmap toLazyText names }
 
 
 prelude :: SMT2

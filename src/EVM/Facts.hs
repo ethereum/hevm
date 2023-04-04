@@ -172,7 +172,7 @@ apply1 vm fact =
 apply2 :: VM -> Fact -> VM
 apply2 vm fact =
   case fact of
-    CodeFact    {..}-> flip execState vm $ do
+    CodeFact    {..} -> flip execState vm $ do
       assign (#cache % #fetchedContracts % at addr) (Just (EVM.initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode blob))))
       when (vm.state.contract == addr) $ EVM.loadContract addr
     StorageFact {..} -> let
