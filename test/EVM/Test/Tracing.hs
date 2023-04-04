@@ -12,7 +12,7 @@ concretely through Expr.simplify, then check that against evmtool's output.
 {-# Language DuplicateRecordFields #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module EVM.Tracing where
+module EVM.Test.Tracing where
 
 import Data.ByteString (ByteString)
 import System.Directory
@@ -42,12 +42,14 @@ import qualified Control.Monad (when)
 import qualified Control.Monad.Operational as Operational (view, ProgramViewT(..), ProgramView)
 import Control.Monad.State.Strict hiding (state)
 import Control.Monad.State.Strict qualified as State
-import Control.Lens hiding (List, pre, (.>), re, op)
+import Optics.Core hiding (pre)
+import Optics.State
+import Optics.Zoom
 
 import qualified Data.Vector as Vector
 import qualified Data.Map.Strict as Map
 
-import EVM hiding (allowFFI)
+import EVM
 import EVM.SymExec
 import EVM.Assembler
 import EVM.Op hiding (getOp)
@@ -254,20 +256,20 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
                              , nonce = 0x48
                              }
     txn = EVM.Transaction.Transaction
-      { txData     = txData
-      , txGasLimit = fromIntegral gaslimitExec
-      , txGasPrice = Just 1
-      , txNonce    = 172
-      , txToAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
-      , txR        = 0 -- will be fixed when we sign
-      , txS        = 0 -- will be fixed when we sign
-      , txV        = 0 -- will be fixed when we sign
-      , txValue    = 0 -- setting this > 0 fails because HEVM doesn't handle value sent in toplevel transaction
-      , txType     = EVM.Transaction.EIP1559Transaction
-      , txAccessList = []
-      , txMaxPriorityFeeGas =  Just 1
-      , txMaxFeePerGas = Just 1
-      , txChainId = 1
+      { txdata     = txData
+      , gasLimit = fromIntegral gaslimitExec
+      , gasPrice = Just 1
+      , nonce    = 172
+      , toAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
+      , r        = 0 -- will be fixed when we sign
+      , s        = 0 -- will be fixed when we sign
+      , v        = 0 -- will be fixed when we sign
+      , value    = 0 -- setting this > 0 fails because HEVM doesn't handle value sent in toplevel transaction
+      , txtype     = EVM.Transaction.EIP1559Transaction
+      , accessList = []
+      , maxPriorityFeeGas =  Just 1
+      , maxFeePerGas = Just 1
+      , chainId = 1
       }
     evmEnv = EVMToolEnv { coinbase   =  0xff
                         , timestamp   =  Lit 0x3e8
@@ -403,14 +405,14 @@ deleteTraceOutputFiles evmtoolResult =
 
 -- Create symbolic VM from concrete VM
 symbolify :: VM -> VM
-symbolify vm = vm { _state = vm._state { _calldata = AbstractBuf "calldata" } }
+symbolify vm = vm { state = vm.state { calldata = AbstractBuf "calldata" } }
 
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
 runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Either (EVM.Error, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
 runCodeWithTrace rpcinfo evmEnv alloc txn (fromAddr, toAddress) = withSolvers Z3 0 Nothing $ \solvers -> do
   let origVM = vmForRuntimeCode code' calldata' evmEnv alloc txn (fromAddr, toAddress)
-      calldata' = ConcreteBuf txn.txData
+      calldata' = ConcreteBuf txn.txdata
       code' = alloc.code
       buildExpr :: SolverGroup -> VM -> IO (Expr End)
       buildExpr s vm = evalStateT (interpret (Fetch.oracle s Nothing) Nothing Nothing runExpr) vm
@@ -424,35 +426,35 @@ runCodeWithTrace rpcinfo evmEnv alloc txn (fromAddr, toAddress) = withSolvers Z3
 vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> VM
 vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress) =
   let contr = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
-      contrWithBal = contr { _balance = alloc.balance }
+      contrWithBal = (contr :: Contract) { balance = alloc.balance }
   in
   (makeVm $ VMOpts
-    { vmoptContract = contrWithBal
-    , vmoptCalldata = (calldata', [])
-    , vmoptValue = Lit txn.txValue
-    , vmoptInitialStorage = EmptyStore
-    , vmoptAddress =  toAddress
-    , vmoptCaller = Expr.litAddr fromAddr
-    , vmoptOrigin = fromAddr
-    , vmoptCoinbase = evmToolEnv.coinbase
-    , vmoptNumber = evmToolEnv.number
-    , vmoptTimestamp = evmToolEnv.timestamp
-    , vmoptGasprice = fromJust txn.txGasPrice
-    , vmoptGas = txn.txGasLimit - fromIntegral (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
-    , vmoptGaslimit = txn.txGasLimit
-    , vmoptBlockGaslimit = evmToolEnv.gasLimit
-    , vmoptPrevRandao = evmToolEnv.prevRandao
-    , vmoptBaseFee = evmToolEnv.baseFee
-    , vmoptPriorityFee = fromJust txn.txMaxPriorityFeeGas
-    , vmoptMaxCodeSize = evmToolEnv.maxCodeSize
-    , vmoptSchedule = evmToolEnv.schedule
-    , vmoptChainId = txn.txChainId
-    , vmoptCreate = False
-    , vmoptTxAccessList = mempty
-    , vmoptAllowFFI = False
-    }) & set (EVM.env . contracts . at ethrunAddress)
+    { contract = contrWithBal
+    , calldata = (calldata', [])
+    , value = Lit txn.value
+    , initialStorage = EmptyStore
+    , address =  toAddress
+    , caller = Expr.litAddr fromAddr
+    , origin = fromAddr
+    , coinbase = evmToolEnv.coinbase
+    , number = evmToolEnv.number
+    , timestamp = evmToolEnv.timestamp
+    , gasprice = fromJust txn.gasPrice
+    , gas = txn.gasLimit - fromIntegral (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
+    , gaslimit = txn.gasLimit
+    , blockGaslimit = evmToolEnv.gasLimit
+    , prevRandao = evmToolEnv.prevRandao
+    , baseFee = evmToolEnv.baseFee
+    , priorityFee = fromJust txn.maxPriorityFeeGas
+    , maxCodeSize = evmToolEnv.maxCodeSize
+    , schedule = evmToolEnv.schedule
+    , chainId = txn.chainId
+    , create = False
+    , txAccessList = mempty
+    , allowFFI = False
+    }) & set (#env % #contracts % at ethrunAddress)
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty))))
-       & set (state . calldata) calldata'
+       & set (#state % #calldata) calldata'
 
 runCode :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe (Expr Buf))
 runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
@@ -465,20 +467,16 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
 vmtrace :: VM -> VMTrace
 vmtrace vm =
   let
-    -- Convenience function to access parts of the current VM state.
-    -- Arcane type signature needed to avoid monomorphism restriction.
-    the :: (b -> VM -> Const a VM) -> ((a -> Const a a) -> b) -> a
-    the f g = Control.Lens.view (f . g) vm
-    memsize = the state memorySize
-  in VMTrace { tracePc = the state EVM.pc
+    memsize = vm.state.memorySize
+  in VMTrace { tracePc = vm.state.pc
              , traceOp = num $ getOp vm
-             , traceGas = the state EVM.gas
+             , traceGas = vm.state.gas
              , traceMemSize = memsize
              -- increment to match geth format
-             , traceDepth = 1 + length (Control.Lens.view frames vm)
+             , traceDepth = 1 + length (vm.frames)
              -- reverse to match geth format
-             , traceStack = reverse $ forceLit <$> the state EVM.stack
-             , traceError = readoutError vm._result
+             , traceStack = reverse $ forceLit <$> vm.state.stack
+             , traceError = readoutError vm.result
              }
   where
     readoutError :: Maybe VMResult -> Maybe String
@@ -508,8 +506,8 @@ vmtrace vm =
 vmres :: VM -> VMTraceResult
 vmres vm =
   let
-    gasUsed' = Control.Lens.view (tx . txgaslimit) vm - Control.Lens.view (state . EVM.gas) vm
-    res = case Control.Lens.view result vm of
+    gasUsed' = vm.tx.gaslimit - vm.state.gas
+    res = case vm.result of
       Just (VMSuccess (ConcreteBuf b)) -> (ByteStringS b)
       Just (VMSuccess x) -> error $ "unhandled: " <> (show x)
       Just (VMFailure (EVM.Revert (ConcreteBuf b))) -> (ByteStringS b)
@@ -525,14 +523,14 @@ type TraceState = (VM, [VMTrace])
 execWithTrace :: StateT TraceState IO VMResult
 execWithTrace = do
   _ <- runWithTrace
-  fromJust <$> use (_1 . result)
+  fromJust <$> use (_1 % #result)
 
 runWithTrace :: StateT TraceState IO VM
 runWithTrace = do
   -- This is just like `exec` except for every instruction evaluated,
   -- we also increment a counter indexed by the current code location.
   vm0 <- use _1
-  case vm0._result of
+  case vm0.result of
     Nothing -> do
       State.modify (\(a, b) -> (a, b ++ [vmtrace vm0]))
       zoom _1 (State.state (runState exec1))
@@ -791,8 +789,8 @@ randItem = generate . Test.QuickCheck.elements
 
 getOp :: VM -> Data.Word.Word8
 getOp vm =
-  let pcpos  = vm ^. state . EVM.pc
-      code' = vm ^. state . EVM.code
+  let pcpos  = vm ^. #state % #pc
+      code' = vm ^. #state % #code
       xs = case code' of
         InitCode _ _ -> error "InitCode instead of RuntimeCode"
         RuntimeCode (ConcreteRuntimeCode xs') -> BS.drop pcpos xs'

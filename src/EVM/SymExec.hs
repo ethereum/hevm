@@ -6,7 +6,8 @@ module EVM.SymExec where
 import Prelude hiding (Word)
 
 import Data.Tuple (swap)
-import Control.Lens hiding (pre)
+import Optics.Core
+import Optics.State
 import EVM hiding (Query, Revert, push, bytecode, cache, code)
 import qualified EVM
 import EVM.Exec
@@ -187,37 +188,36 @@ abstractVM cd contractCode maybepre store = finalVm
     precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm']
-    finalVm = vm' & over constraints (<> precond)
+    finalVm = vm' & over #constraints (<> precond)
 
 loadSymVM :: ContractCode -> Expr Storage -> Expr EWord -> Expr EWord -> (Expr Buf, [Prop]) -> VM
 loadSymVM x initStore addr callvalue' cd =
   (makeVm $ VMOpts
-    { vmoptContract = initialContract x
-    , vmoptCalldata = cd
-    , vmoptValue = callvalue'
-    , vmoptInitialStorage = initStore
-    , vmoptAddress = createAddress ethrunAddress 1
-    , vmoptCaller = addr
-    , vmoptOrigin = ethrunAddress --todo: generalize
-    , vmoptCoinbase = 0
-    , vmoptNumber = 0
-    , vmoptTimestamp = (Lit 0)
-    , vmoptBlockGaslimit = 0
-    , vmoptGasprice = 0
-    , vmoptPrevRandao = 42069
-    , vmoptGas = 0xffffffffffffffff
-    , vmoptGaslimit = 0xffffffffffffffff
-    , vmoptBaseFee = 0
-    , vmoptPriorityFee = 0
-    , vmoptMaxCodeSize = 0xffffffff
-    , vmoptSchedule = FeeSchedule.berlin
-    , vmoptChainId = 1
-    , vmoptCreate = False
-    , vmoptTxAccessList = mempty
-    , vmoptAllowFFI = False
-    }) & set (env . contracts . at (createAddress ethrunAddress 1))
+    { contract = initialContract x
+    , calldata = cd
+    , value = callvalue'
+    , initialStorage = initStore
+    , address = createAddress ethrunAddress 1
+    , caller = addr
+    , origin = ethrunAddress --todo: generalize
+    , coinbase = 0
+    , number = 0
+    , timestamp = (Lit 0)
+    , blockGaslimit = 0
+    , gasprice = 0
+    , prevRandao = 42069
+    , gas = 0xffffffffffffffff
+    , gaslimit = 0xffffffffffffffff
+    , baseFee = 0
+    , priorityFee = 0
+    , maxCodeSize = 0xffffffff
+    , schedule = FeeSchedule.berlin
+    , chainId = 1
+    , create = False
+    , txAccessList = mempty
+    , allowFFI = False
+    }) & set (#env % #contracts % at (createAddress ethrunAddress 1))
              (Just (initialContract x))
-
 
 -- | Interpreter which explores all paths at branching points.
 -- returns an Expr representing the possible executions
@@ -246,7 +246,7 @@ interpret fetcher maxIter askSmtIters =
         Stepper.IOAct q ->
           mapStateT liftIO q >>= interpret fetcher maxIter askSmtIters . k
         Stepper.Ask (EVM.PleaseChoosePath cond continue) -> do
-          assign result Nothing
+          assign #result Nothing
           vm <- get
           case maxIterationsReached vm maxIter of
             -- TODO: parallelise
@@ -266,7 +266,7 @@ interpret fetcher maxIter askSmtIters =
           case q of
             PleaseAskSMT _ _ continue -> do
               codelocation <- getCodeLocation <$> get
-              iteration <- num . fromMaybe 0 <$> use (iterations . at codelocation)
+              iteration <- num . fromMaybe 0 <$> use (#iterations % at codelocation)
 
               -- if this is the first time we are branching at this point,
               -- explore both branches without consulting SMT.
@@ -285,9 +285,9 @@ maxIterationsReached :: VM -> Maybe Integer -> Maybe Bool
 maxIterationsReached _ Nothing = Nothing
 maxIterationsReached vm (Just maxIter) =
   let codelocation = getCodeLocation vm
-      iters = view (at codelocation . non 0) vm._iterations
+      iters = view (at codelocation % non 0) vm.iterations
   in if num maxIter <= iters
-     then Map.lookup (codelocation, iters - 1) vm._cache._path
+     then Map.lookup (codelocation, iters - 1) vm.cache.path
      else Nothing
 
 
@@ -353,7 +353,7 @@ verifyContract solvers theCode signature' concreteArgs opts initStore maybepre m
 
 pruneDeadPaths :: [VM] -> [VM]
 pruneDeadPaths =
-  filter $ \vm -> case vm._result of
+  filter $ \vm -> case vm.result of
     Just (VMFailure DeadPath) -> False
     _ -> True
 
@@ -361,10 +361,10 @@ pruneDeadPaths =
 runExpr :: Stepper.Stepper (Expr End)
 runExpr = do
   vm <- Stepper.runFully
-  let asserts = vm._keccakEqs
-  pure $ case vm._result of
+  let asserts = vm.keccakEqs
+  pure $ case vm.result of
     Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
-    Just (VMSuccess buf) -> Return asserts buf vm._env._storage
+    Just (VMSuccess buf) -> Return asserts buf vm.env.storage
     Just (VMFailure e) -> case e of
       UnrecognizedOpcode _ -> Failure asserts Invalid
       SelfDestruction -> Failure asserts SelfDestruct
@@ -496,7 +496,7 @@ verify solvers opts preState maybepost = do
           \leaf -> case evalProp (post preState leaf) of
             PBool True -> False
             _ -> True
-        assumes = preState._constraints
+        assumes = preState.constraints
         withQueries = fmap (\leaf -> (assertProps (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)) canViolate
       putStrLn $ "Checking for reachability of " <> show (length withQueries) <> " potential property violation(s)"
 
