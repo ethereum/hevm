@@ -6,5 +6,7 @@ cradle:
       component: "bench"
     - path: "./hevm-cli"
       component: "exe:hevm"
-    - path: "./test"
+    - path: "./test/test.hs"
       component: "test:test"
+    - path: "./test/"
+      component: "lib:test-utils"

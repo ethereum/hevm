@@ -48,11 +48,11 @@ instance Show Solver where
 
 -- | A running solver instance
 data SolverInstance = SolverInstance
-  { _type :: Solver
-  , _stdin :: Handle
-  , _stdout :: Handle
-  , _stderr :: Handle
-  , _process :: ProcessHandle
+  { solvertype :: Solver
+  , stdin      :: Handle
+  , stdout     :: Handle
+  , stderr     :: Handle
+  , process    :: ProcessHandle
   }
 
 -- | A channel representing a group of solvers
@@ -145,7 +145,7 @@ getModel inst cexvars = do
   -- get an initial version of the model from the solver
   initialModel <- getRaw
   -- get concrete values for each buffers max read index
-  hints <- capHints <$> queryMaxReads (getValue inst) cexvars.buffersV
+  hints <- capHints <$> queryMaxReads (getValue inst) cexvars.buffers
   -- check the sizes of buffer models and shrink if needed
   if bufsUsable initialModel
   then do
@@ -154,11 +154,11 @@ getModel inst cexvars = do
   where
     getRaw :: IO SMTCex
     getRaw = do
-      vars <- getVars parseVar (getValue inst) (fmap T.toStrict cexvars.calldataV)
-      buffers <- getBufs (getValue inst) (Map.keys cexvars.buffersV)
+      vars <- getVars parseVar (getValue inst) (fmap T.toStrict cexvars.calldata)
+      buffers <- getBufs (getValue inst) (Map.keys cexvars.buffers)
       storage <- getStore (getValue inst) cexvars.storeReads
-      blockctx <- getVars parseBlockCtx (getValue inst) (fmap T.toStrict cexvars.blockContextV)
-      txctx <- getVars parseFrameCtx (getValue inst) (fmap T.toStrict cexvars.txContextV)
+      blockctx <- getVars parseBlockCtx (getValue inst) (fmap T.toStrict cexvars.blockContext)
+      txctx <- getVars parseFrameCtx (getValue inst) (fmap T.toStrict cexvars.txContext)
       pure $ SMTCex vars buffers storage blockctx txctx
 
     -- sometimes the solver might give us back a model for the max read index

@@ -1,6 +1,6 @@
 {-# Language QuasiQuotes #-}
 
-module EVM.TestUtils where
+module EVM.Test.Utils where
 
 import Data.Text
 import qualified Data.Text as T

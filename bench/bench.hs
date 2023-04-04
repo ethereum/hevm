@@ -1,15 +1,23 @@
 module Main where
 
 import GHC.Natural
+import Control.Monad
+import Data.Maybe
+import System.Environment (lookupEnv, getEnv)
 
 import qualified Paths_hevm as Paths
 
-import Test.Tasty (localOption)
+import Test.Tasty (localOption, withResource)
 import Test.Tasty.Bench
 import Data.Functor
 import Data.String.Here
 import Data.ByteString (ByteString)
+import System.FilePath.Posix
+import Control.Monad.State.Strict
+import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
+import qualified System.FilePath.Find as Find
+import qualified Data.ByteString.Lazy as LazyByteString
 
 import EVM (StorageModel(..))
 import EVM.SymExec
@@ -19,6 +27,75 @@ import EVM.ABI
 import EVM.Dapp
 import EVM.Types
 import qualified EVM.TTY as TTY
+import qualified EVM.Stepper as Stepper
+import qualified EVM.Fetch as Fetch
+
+import EVM.Test.BlockchainTests qualified as BCTests
+
+main :: IO ()
+main = defaultMain
+  [ mkbench erc20 "erc20" Nothing [1]
+  , mkbench (pure vat) "vat" Nothing [4]
+  , mkbench (pure deposit) "deposit" (Just 32) [4]
+  , mkbench (pure uniV2Pair) "uniV2" (Just 10) [4]
+  , withResource bcjsons (pure . const ()) blockchainTests
+  ]
+
+
+--- General State Tests ----------------------------------------------------------------------------
+
+
+-- | loads and parses all blockchain test files
+-- We pull this out into a separate stage to ensure that we only benchmark the
+-- actual time spent executing tests, and not the IO & parsing overhead
+bcjsons :: IO (Map.Map FilePath (Map.Map String BCTests.Case))
+bcjsons = do
+  repo <- getEnv "HEVM_ETHEREUM_TESTS_REPO"
+  let testsDir = "BlockchainTests/GeneralStateTests"
+      dir = repo </> testsDir
+  jsons <- Find.find Find.always (Find.extension Find.==? ".json") dir
+  Map.fromList <$> mapM parseSuite jsons
+  where
+    parseSuite path = do
+      contents <- LazyByteString.readFile path
+      case BCTests.parseBCSuite contents of
+        Left e -> pure (path, mempty)
+        Right tests -> pure (path, tests)
+
+-- | executes all provided bc tests in sequence and accumulates a boolean value representing their success.
+-- the accumulated value ensures that we actually have to execute all the tests as a part of this benchmark
+blockchainTests :: IO (Map.Map FilePath (Map.Map String BCTests.Case)) -> Benchmark
+blockchainTests ts = bench "blockchain-tests" $ nfIO $ do
+  tests <- ts
+  putStrLn "\n    executing tests:"
+  let cases = concat . Map.elems . (fmap Map.toList) $ tests
+      ignored = Map.keys BCTests.commonProblematicTests
+  foldM (\acc (n, c) ->
+      if n `elem` ignored
+      then pure True
+      else do
+        res <- runBCTest c
+        putStrLn $ "      " <> n
+        pure $ acc && res
+    ) True cases
+
+-- | executes a single test case and returns a boolean value representing its success
+runBCTest :: BCTests.Case -> IO Bool
+runBCTest x =
+ do
+  let vm0 = BCTests.vmForCase x
+  result <- execStateT (Stepper.interpret (Fetch.zero 0 (Just 0)) . void $ Stepper.execFully) vm0
+  maybeReason <- BCTests.checkExpectation False x result
+  pure $ isNothing maybeReason
+
+
+--- Helpers ----------------------------------------------------------------------------------------
+
+
+debugContract :: ByteString -> IO ()
+debugContract c = withSolvers CVC5 4 Nothing $ \solvers -> do
+  let prestate = abstractVM (mkCalldata Nothing []) c Nothing SymbolicS
+  void $ TTY.runFromVM solvers Nothing Nothing emptyDapp prestate
 
 findPanics :: Solver -> Natural -> Maybe Integer -> ByteString -> IO ()
 findPanics solver count iters c = do
@@ -44,23 +121,6 @@ mkbench c name iters counts = localOption WallTime $ env c (bgroup name . bmarks
        ]
        | i <- counts
      ]
-
-main :: IO ()
-main = defaultMain
-  [ mkbench erc20 "erc20" Nothing [1]
-  , mkbench (pure vat) "vat" Nothing [4]
-  , mkbench (pure deposit) "deposit" (Just 32) [4]
-  , mkbench (pure uniV2Pair) "uniV2" (Just 10) [4]
-  ]
-
-
---- Helpers ----------------------------------------------------------------------------------------
-
-
-debugContract :: ByteString -> IO ()
-debugContract c = withSolvers CVC5 4 Nothing $ \solvers -> do
-  let prestate = abstractVM (mkCalldata Nothing []) c Nothing SymbolicS
-  void $ TTY.runFromVM solvers Nothing Nothing emptyDapp prestate
 
 
 --- Bytecodes --------------------------------------------------------------------------------------

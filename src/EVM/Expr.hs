@@ -15,7 +15,7 @@ import Data.Word
 import Data.Maybe
 import Data.List
 
-import Control.Lens (lens)
+import Optics.Core
 
 import EVM.Types
 import EVM.Traversals
@@ -466,14 +466,10 @@ minLength bufEnv = go 0
       b <- Map.lookup a bufEnv
       go l b
 
-word256At
-  :: Functor f
-  => Expr EWord -> (Expr EWord -> f (Expr EWord))
-  -> Expr Buf -> f (Expr Buf)
+word256At :: Expr EWord -> Lens (Expr Buf) (Expr Buf) (Expr EWord) (Expr EWord)
 word256At i = lens getter setter where
   getter = readWord i
   setter m x = writeWord i x m
-
 
 -- | Returns the first n bytes of buf
 take :: W256 -> Expr Buf -> Expr Buf
