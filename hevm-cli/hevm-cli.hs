@@ -5,9 +5,8 @@
 
 module Main where
 
-import EVM (StorageModel(..))
-import qualified EVM
 import EVM.Concrete (createAddress)
+import EVM (initialContract, makeVm)
 import qualified EVM.FeeSchedule as FeeSchedule
 import qualified EVM.Fetch
 import qualified EVM.Stepper
@@ -19,7 +18,8 @@ import EVM.Solvers
 import qualified EVM.TTY as TTY
 import EVM.Solidity
 import EVM.Expr (litAddr)
-import EVM.Types hiding (word)
+import EVM.Types hiding (word, StorageBase(..))
+import qualified EVM.Types as Types
 import EVM.Format (hexByteString, strip0x)
 import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, getParametersFromEnvironmentVariables, dappTest)
 import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
@@ -194,7 +194,7 @@ optsMode x
   | x.jsontrace = JsonTrace
   | otherwise = Run
 
-applyCache :: (Maybe String, Maybe String) -> IO (EVM.VM -> EVM.VM)
+applyCache :: (Maybe String, Maybe String) -> IO (VM -> VM)
 applyCache (state, cache) =
   let applyState = flip Facts.apply
       applyCache' = flip Facts.applyCache
@@ -490,18 +490,19 @@ launchExec cmd = do
         vm' <- execStateT (EVM.Stepper.interpret (EVM.Fetch.oracle solvers rpcinfo) . void $ EVM.Stepper.execFully) vm
         when cmd.trace $ T.hPutStr stderr (showTraceTree dapp vm')
         case vm'.result of
-          Nothing ->
-            error "internal error; no EVM result"
-          Just (EVM.VMFailure (EVM.Revert msg)) -> do
+          Just (VMFailure (Revert msg)) -> do
             let res = case msg of
                         ConcreteBuf bs -> bs
                         _ -> "<symbolic>"
             putStrLn $ "Revert: " <> (show $ ByteStringS res)
             exitWith (ExitFailure 2)
-          Just (EVM.VMFailure err) -> do
+          Just (VMFailure err) -> do
             putStrLn $ "Error: " <> show err
             exitWith (ExitFailure 2)
-          Just (EVM.VMSuccess buf) -> do
+          Just (Unfinished p) -> do
+            putStrLn $ "Could not continue execution: " <> show p
+            exitWith (ExitFailure 2)
+          Just (VMSuccess buf) -> do
             let msg = case buf of
                   ConcreteBuf msg' -> msg'
                   _ -> "<symbolic>"
@@ -514,6 +515,8 @@ launchExec cmd = do
               Nothing -> pure ()
               Just path ->
                 Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts vm'.cache)
+          _ ->
+            error "Internal error: no EVM result"
 
       Debug -> void $ TTY.runFromVM solvers rpcinfo Nothing dapp vm
       --JsonTrace -> void $ execStateT (interpretWithTrace fetcher EVM.Stepper.runFully) vm
@@ -522,7 +525,7 @@ launchExec cmd = do
            rpcinfo = (,) block <$> cmd.rpc
 
 -- | Creates a (concrete) VM from command line options
-vmFromCommand :: Command Options.Unwrapped -> IO EVM.VM
+vmFromCommand :: Command Options.Unwrapped -> IO VM
 vmFromCommand cmd = do
   withCache <- applyCache (cmd.state, cmd.cache)
 
@@ -530,7 +533,7 @@ vmFromCommand cmd = do
     Nothing -> return (0,Lit 0,0,0,0)
     Just url -> EVM.Fetch.fetchBlockFrom block url >>= \case
       Nothing -> error "Could not fetch block"
-      Just EVM.Block{..} -> return ( coinbase
+      Just Block{..} -> return ( coinbase
                                    , timestamp
                                    , baseFee
                                    , number
@@ -546,7 +549,7 @@ vmFromCommand cmd = do
           -- if both code and url is given,
           -- fetch the contract and overwrite the code
           return $
-            EVM.initialContract  (mkCode $ hexByteString "--code" $ strip0x c)
+            initialContract  (mkCode $ hexByteString "--code" $ strip0x c)
               & set #balance  (contract.balance)
               & set #nonce    (contract.nonce)
               & set #external (contract.external)
@@ -559,7 +562,7 @@ vmFromCommand cmd = do
 
     (_, _, Just c)  ->
       return $
-        EVM.initialContract (mkCode $ hexByteString "--code" $ strip0x c)
+        initialContract (mkCode $ hexByteString "--code" $ strip0x c)
 
     (_, _, Nothing) ->
       error "must provide at least (rpc + address) or code"
@@ -577,13 +580,13 @@ vmFromCommand cmd = do
         calldata = ConcreteBuf $ bytes (.calldata) ""
         decipher = hexByteString "bytes" . strip0x
         mkCode bs = if cmd.create
-                    then EVM.InitCode bs mempty
-                    else EVM.RuntimeCode (EVM.ConcreteRuntimeCode bs)
+                    then InitCode bs mempty
+                    else RuntimeCode (ConcreteRuntimeCode bs)
         address = if cmd.create
               then addr (.address) (createAddress origin (word (.nonce) 0))
               else addr (.address) 0xacab
 
-        vm0 baseFee miner ts blockNum prevRan c = EVM.makeVm $ EVM.VMOpts
+        vm0 baseFee miner ts blockNum prevRan c = makeVm $ VMOpts
           { contract      = c
           , calldata      = (calldata, [])
           , value         = Lit value
@@ -604,7 +607,7 @@ vmFromCommand cmd = do
           , schedule      = FeeSchedule.berlin
           , chainId       = word (.chainid) 1
           , create        = (.create) cmd
-          , storageBase   = EVM.Concrete
+          , storageBase   = Types.Concrete
           , txAccessList  = mempty -- TODO: support me soon
           , allowFFI      = False
           }
@@ -613,13 +616,13 @@ vmFromCommand cmd = do
         addr f def = fromMaybe def (f cmd)
         bytes f def = maybe def decipher (f cmd)
 
-symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (EVM.VM)
+symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM)
 symvmFromCommand cmd calldata = do
   (miner,blockNum,baseFee,prevRan) <- case cmd.rpc of
     Nothing -> return (0,0,0,0)
     Just url -> EVM.Fetch.fetchBlockFrom block url >>= \case
       Nothing -> error "Could not fetch block"
-      Just EVM.Block{..} -> return ( coinbase
+      Just Block{..} -> return ( coinbase
                                    , number
                                    , baseFee
                                    , prevRandao
@@ -653,7 +656,7 @@ symvmFromCommand cmd calldata = do
               Nothing -> contract'
               -- if both code and url is given,
               -- fetch the contract and overwrite the code
-              Just c -> EVM.initialContract (mkCode $ decipher c)
+              Just c -> initialContract (mkCode $ decipher c)
                         -- TODO: fix this
                         -- & set EVM.origStorage (view EVM.origStorage contract')
                         & set #balance     (contract'.balance)
@@ -661,7 +664,7 @@ symvmFromCommand cmd calldata = do
                         & set #external    (contract'.external)
 
     (_, _, Just c)  ->
-      return (EVM.initialContract . mkCode $ decipher c)
+      return (initialContract . mkCode $ decipher c)
     (_, _, Nothing) ->
       error "must provide at least (rpc + address) or code"
 
@@ -673,12 +676,12 @@ symvmFromCommand cmd calldata = do
     block   = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber cmd.block
     origin  = addr (.origin) 0
     mkCode bs = if cmd.create
-                   then EVM.InitCode bs mempty
-                   else EVM.RuntimeCode (EVM.ConcreteRuntimeCode bs)
+                   then InitCode bs mempty
+                   else RuntimeCode (ConcreteRuntimeCode bs)
     address = if cmd.create
           then addr (.address) (createAddress origin (word (.nonce) 0))
           else addr (.address) 0xacab
-    vm0 baseFee miner ts blockNum prevRan cd callvalue caller c = EVM.makeVm $ EVM.VMOpts
+    vm0 baseFee miner ts blockNum prevRan cd callvalue caller c = makeVm $ VMOpts
       { contract      = c
       , calldata      = cd
       , value         = callvalue
@@ -699,7 +702,7 @@ symvmFromCommand cmd calldata = do
       , schedule      = FeeSchedule.berlin
       , chainId       = word (.chainid) 1
       , create        = (.create) cmd
-      , storageBase   = EVM.Symbolic
+      , storageBase   = Types.Symbolic
       , txAccessList  = mempty
       , allowFFI      = False
       }

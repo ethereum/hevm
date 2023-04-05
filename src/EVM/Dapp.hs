@@ -1,11 +1,9 @@
 module EVM.Dapp where
 
-import EVM (Trace(..), ContractCode(..), Contract(..), RuntimeCode (..))
-import EVM.ABI (Event, AbiType, SolError)
 import EVM.Concrete
 import EVM.Debug (srcMapCodePos)
 import EVM.Solidity
-import EVM.Types (W256, abiKeccak, keccak', Addr, regexMatches, maybeLitByte, maybeLitWord, FunctionSelector)
+import EVM.Types
 
 import Control.Arrow ((>>>))
 import Data.Aeson (Value)

@@ -31,16 +31,13 @@ module EVM.Format
 
 import Prelude hiding (Word)
 
-import EVM qualified
-import EVM (VM, cheatCode, traceForest, Error (..), Trace, TraceData(..), Query(..), FrameContext(..))
-import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..),
-  Indexed (NotIndexed), getAbiSeq, parseTypeName, formatString)
+import EVM.Types
+import EVM (cheatCode, traceForest)
+import EVM.ABI (getAbiSeq, parseTypeName)
 import EVM.Dapp (DappContext(..), DappInfo(..), showTraceLocation)
 import EVM.Expr qualified as Expr
 import EVM.Hexdump (prettyHex, paddedShowHex)
 import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
-import EVM.Types (maybeLitWord, W256(..),num, word, Expr(..), EType(..), Addr,
-  ByteStringS(..), Error(..), FunctionSelector)
 
 import Control.Arrow ((>>>))
 import Optics.Core
@@ -54,7 +51,6 @@ import Data.Char qualified as Char
 import Data.DoubleWord (signedWord)
 import Data.Foldable (toList)
 import Data.List (isPrefixOf)
-import Data.Functor ((<&>))
 import Data.Map qualified as Map
 import Data.Maybe (catMaybes, fromMaybe, fromJust)
 import Data.Text (Text, pack, unpack, intercalate, dropEnd, splitOn)
@@ -280,7 +276,7 @@ showTrace dapp vm trace =
 
     ErrorTrace e ->
       case e of
-        EVM.Revert out ->
+        Revert out ->
           "\x1b[91merror\x1b[0m " <> "Revert " <> showError out <> pos
         _ ->
           "\x1b[91merror\x1b[0m " <> pack (show e) <> pos
@@ -371,26 +367,35 @@ contractNamePart x = T.split (== ':') x !! 1
 contractPathPart :: Text -> Text
 contractPathPart x = T.split (== ':') x !! 0
 
-prettyError :: EVM.Types.Error -> String
-prettyError= \case
-  EVM.Types.Invalid -> "Invalid Opcode"
-  EVM.Types.IllegalOverflow -> "Illegal Overflow"
-  EVM.Types.SelfDestruct -> "Self Destruct"
-  EVM.Types.StackLimitExceeded -> "Stack limit exceeded"
-  EVM.Types.InvalidMemoryAccess -> "Invalid memory access"
-  EVM.Types.BadJumpDestination -> "Bad jump destination"
-  EVM.Types.StackUnderrun -> "Stack underrun"
-  EVM.Types.TmpErr err -> "Temp error: " <> err
+prettyError :: EvmError -> String
+prettyError = \case
+  IllegalOverflow -> "Illegal overflow"
+  SelfDestruction -> "Self destruct"
+  StackLimitExceeded -> "Stack limit exceeded"
+  InvalidMemoryAccess -> "Invalid memory access"
+  BadJumpDestination -> "Bad jump destination"
+  StackUnderrun -> "Stack underrun"
+  BalanceTooLow a b -> "Balance too low. value: " <> show a <> " balance: " <> show b
+  UnrecognizedOpcode a -> "Unrecognized opcode: " <> show a
+  Revert (ConcreteBuf msg) -> "Revert: " <> (T.unpack $ formatBinary msg)
+  Revert _ -> "Revert: <symbolic>"
+  OutOfGas a b -> "Out of gas: have: " <> show a <> " need: " <> show b
+  StateChangeWhileStatic -> "State change while static"
+  CallDepthLimitReached -> "Call depth limit reached"
+  MaxCodeSizeExceeded a b -> "Max code size exceeded: max: " <> show a <> " actual: " <> show b
+  InvalidFormat -> "Invalid Format"
+  PrecompileFailure -> "Precompile failure"
+  ReturnDataOutOfBounds -> "Return data out of bounds"
+  NonceOverflow -> "Nonce overflow"
+  BadCheatCode a -> "Bad cheat code: sig: " <> show a
 
-
-prettyvmresult :: (?context :: DappContext) => Expr End -> String
-prettyvmresult (EVM.Types.Revert _ (ConcreteBuf "")) = "Revert"
-prettyvmresult (EVM.Types.Revert _ msg) = "Revert: " ++ (unpack $ showError msg)
-prettyvmresult (EVM.Types.Return _ (ConcreteBuf msg) _) =
+prettyvmresult :: Expr End -> String
+prettyvmresult (Failure _ (Revert (ConcreteBuf ""))) = "Revert"
+prettyvmresult (Success _ (ConcreteBuf msg) _) =
   if BS.null msg
   then "Stop"
   else "Return: " <> show (ByteStringS msg)
-prettyvmresult (EVM.Types.Return _ _ _) =
+prettyvmresult (Success _ _ _) =
   "Return: <symbolic>"
 prettyvmresult (Failure _ err) = prettyError err
 prettyvmresult e = error "Internal Error: Invalid Result: " <> show e
@@ -414,19 +419,7 @@ formatExpr = go
         , indent 2 (formatExpr t)
         , indent 2 (formatExpr f)
         , ")"]
-      EVM.Types.Revert asserts buf -> case buf of
-        ConcreteBuf "" -> "(Revert " <> formatExpr buf <> ")"
-        _ -> T.unlines
-          [ "(Revert"
-          , indent 2 $ T.unlines
-            [ "Code:"
-            , indent 2 (formatExpr buf)
-            , "Assertions:"
-            , indent 2 $ T.pack $ show asserts
-            ]
-          , ")"
-          ]
-      Return asserts buf store -> T.unlines
+      Success asserts buf store -> T.unlines
         [ "(Return"
         , indent 2 $ T.unlines
           [ "Data:"

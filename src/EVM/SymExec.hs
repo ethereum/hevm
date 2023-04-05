@@ -8,8 +8,7 @@ import Prelude hiding (Word)
 import Data.Tuple (swap)
 import Optics.Core
 import Optics.State
-import EVM hiding (Query, Revert, push, bytecode, cache)
-import qualified EVM
+import EVM hiding (push, bytecode, query, wrap)
 import EVM.Exec
 import qualified EVM.Fetch as Fetch
 import EVM.ABI
@@ -251,7 +250,7 @@ interpret fetcher maxIter askSmtIters =
           (State.state . runState) run >>= interpret fetcher maxIter askSmtIters . k
         Stepper.IOAct q ->
           mapStateT liftIO q >>= interpret fetcher maxIter askSmtIters . k
-        Stepper.Ask (EVM.PleaseChoosePath cond continue) -> do
+        Stepper.Ask (PleaseChoosePath cond continue) -> do
           assign #result Nothing
           vm <- get
           case maxIterationsReached vm maxIter of
@@ -279,7 +278,7 @@ interpret fetcher maxIter askSmtIters =
               -- Exploring too many branches is a lot cheaper than
               -- consulting our SMT solver.
               if iteration < (fromMaybe 5 askSmtIters)
-              then interpret fetcher maxIter askSmtIters (Stepper.evm (continue EVM.Unknown) >>= k)
+              then interpret fetcher maxIter askSmtIters (Stepper.evm (continue EVM.Types.Unknown) >>= k)
               else performQuery
 
             _ -> performQuery
@@ -325,8 +324,8 @@ checkAssert solvers errs c signature' concreteArgs opts = verifyContract solvers
 -}
 checkAssertions :: [Word256] -> Postcondition
 checkAssertions errs _ = \case
-  Revert _ (ConcreteBuf msg) -> PBool $ msg `notElem` (fmap panicMsg errs)
-  Revert _ b -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
+  Failure _ (Revert (ConcreteBuf msg)) -> PBool $ msg `notElem` (fmap panicMsg errs)
+  Failure _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
   _ -> PBool True
 
 -- |By default hevm checks for all assertions except those which result from arithmetic overflow
@@ -357,30 +356,16 @@ verifyContract solvers theCode signature concreteArgs opts storagemodel maybepre
   let preState = abstractVM (mkCalldata signature concreteArgs) theCode maybepre storagemodel
   verify solvers opts preState maybepost
 
-pruneDeadPaths :: [VM] -> [VM]
-pruneDeadPaths =
-  filter $ \vm -> case vm.result of
-    Just (VMFailure DeadPath) -> False
-    _ -> True
-
 -- | Stepper that parses the result of Stepper.runFully into an Expr End
 runExpr :: Stepper.Stepper (Expr End)
 runExpr = do
   vm <- Stepper.runFully
   let asserts = vm.keccakEqs
   pure $ case vm.result of
-    Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
-    Just (VMSuccess buf) -> Return asserts buf vm.env.storage
-    Just (VMFailure e) -> case e of
-      UnrecognizedOpcode _ -> Failure asserts Invalid
-      SelfDestruction -> Failure asserts SelfDestruct
-      EVM.StackLimitExceeded -> Failure asserts EVM.Types.StackLimitExceeded
-      EVM.IllegalOverflow -> Failure asserts EVM.Types.IllegalOverflow
-      EVM.Revert buf -> EVM.Types.Revert asserts buf
-      EVM.InvalidMemoryAccess -> Failure asserts EVM.Types.InvalidMemoryAccess
-      EVM.BadJumpDestination -> Failure asserts EVM.Types.BadJumpDestination
-      EVM.StackUnderrun -> Failure asserts EVM.Types.StackUnderrun
-      e' -> Failure asserts $ EVM.Types.TmpErr (show e')
+    Just (VMSuccess buf) -> Success asserts buf vm.env.storage
+    Just (VMFailure e) -> Failure asserts e
+    Just (Unfinished p) -> Partial asserts p
+    _ -> error "Internal Error: vm in intermediate state after call to runFully"
 
 -- | Converts a given top level expr into a list of final states and the associated path conditions for each state
 flattenExpr :: Expr End -> [Expr End]
@@ -389,11 +374,10 @@ flattenExpr = go []
     go :: [Prop] -> Expr End -> [Expr End]
     go pcs = \case
       ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
-      Failure _ (TmpErr s) -> error s
       GVar _ -> error "cannot flatten an Expr containing a GVar"
-      (Revert ps msg) -> [Revert (ps <> pcs) msg]
-      (Return ps msg store) -> [Return (ps <> pcs) msg store]
-      (Failure ps e) -> [Failure (ps <> pcs) e]
+      Success ps msg store -> [Success (ps <> pcs) msg store]
+      Failure ps e -> [Failure (ps <> pcs) e]
+      Partial ps p -> [Partial (ps <> pcs) p]
 
 -- | Strips unreachable branches from a given expr
 -- Returns a list of executed SMT queries alongside the reduced expression for debugging purposes
@@ -473,9 +457,9 @@ evalProp = \case
 extractProps :: Expr End -> [Prop]
 extractProps = \case
   ITE _ _ _ -> []
-  Revert asserts _ -> asserts
-  Return asserts _ _ -> asserts
+  Success asserts _ _ -> asserts
   Failure asserts _ -> asserts
+  Partial asserts _ -> asserts
   GVar _ -> error "cannot extract props from a GVar"
 
 
@@ -623,18 +607,16 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
     distinct aEnd bEnd =
       let
         differingResults = case (aEnd, bEnd) of
-          (Return _ aOut aStore, Return _ bOut bStore) ->
+          (Success _ aOut aStore, Success _ bOut bStore) ->
             if aOut == bOut && aStore == bStore
             then PBool False
             else aStore ./= bStore .|| aOut ./= bOut
-          (Return {}, _) -> PBool True
-          (_, Return {}) -> PBool True
-          (Revert _ a, Revert _ b) -> if a == b then PBool False else a ./= b
-          (Revert _ _, _) -> PBool True
-          (_, Revert _ _) -> PBool True
-          (Failure _ (TmpErr s), _) -> error $ "Unhandled error: " <> s
-          (_, Failure _ (TmpErr s)) -> error $ "Unhandled error: " <> s
-          (Failure _ erra, Failure _ errb) -> if erra==errb then PBool False else PBool True
+          (Success {}, _) -> PBool True
+          (_, Success {}) -> PBool True
+          (Failure _ (Revert a), Failure _ (Revert b)) -> if a == b then PBool False else a ./= b
+          (Failure _ a, Failure _ b) -> if a == b then PBool False else PBool True
+          (Failure _ _, _) -> PBool True
+          (_, Failure _ _) -> PBool True
           (ITE _ _ _, _) -> error "Expressions must be flattened"
           (_, ITE _ _ _) -> error "Expressions must be flattened"
           (a, b) -> if a == b

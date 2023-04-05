@@ -30,7 +30,7 @@ import Data.Text.Lazy.Builder
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
 
 import EVM.SMT
-import EVM.Types
+import EVM.Types hiding (Unknown)
 
 -- | Supported solvers
 data Solver

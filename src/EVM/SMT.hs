@@ -329,7 +329,7 @@ declareVars :: [Builder] -> SMT2
 declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = mempty{ calldata = fmap toLazyText names }
+    cexvars = (mempty :: CexVars){ calldata = fmap toLazyText names }
 
 
 declareFrameContext :: [Builder] -> SMT2

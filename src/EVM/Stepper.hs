@@ -31,9 +31,8 @@ import Control.Monad.State.Strict (runState, liftIO, StateT)
 import qualified Control.Monad.State.Class as State
 import qualified EVM.Exec
 import Data.Text (Text)
-import EVM.Types (Expr, EType(..))
+import EVM.Types
 
-import EVM (EVM, VM, VMResult (VMFailure, VMSuccess), Error (Query, Choose), Query, Choose)
 import qualified EVM
 
 import qualified EVM.Fetch as Fetch
@@ -83,40 +82,42 @@ evmIO :: StateT VM IO a -> Stepper a
 evmIO = singleton . IOAct
 
 -- | Run the VM until final result, resolving all queries
-execFully :: Stepper (Either Error (Expr Buf))
+execFully :: Stepper (Either EvmError (Expr Buf))
 execFully =
   exec >>= \case
-    VMFailure (Query q) ->
+    HandleEffect (Query q) ->
       wait q >> execFully
-    VMFailure (Choose q) ->
+    HandleEffect (Choose q) ->
       ask q >> execFully
     VMFailure x ->
       pure (Left x)
     VMSuccess x ->
       pure (Right x)
+    Unfinished x
+      -> error $ "Internal Error: partial execution encountered during concrete execution: " <> show x
 
 -- | Run the VM until its final state
-runFully :: Stepper EVM.VM
+runFully :: Stepper VM
 runFully = do
   vm <- run
   case vm.result of
     Nothing -> error "should not occur"
-    Just (VMFailure (Query q)) ->
+    Just (HandleEffect (Query q)) ->
       wait q >> runFully
-    Just (VMFailure (Choose q)) ->
+    Just (HandleEffect (Choose q)) ->
       ask q >> runFully
     Just _ ->
       pure vm
 
 entering :: Text -> Stepper a -> Stepper a
 entering t stepper = do
-  evm (EVM.pushTrace (EVM.EntryTrace t))
+  evm (EVM.pushTrace (EntryTrace t))
   x <- stepper
   evm EVM.popTrace
   pure x
 
 enter :: Text -> Stepper ()
-enter t = evm (EVM.pushTrace (EVM.EntryTrace t))
+enter t = evm (EVM.pushTrace (EntryTrace t))
 
 interpret :: Fetch.Fetcher -> Stepper a -> StateT VM IO a
 interpret fetcher =

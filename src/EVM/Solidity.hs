@@ -40,7 +40,7 @@ module EVM.Solidity
 ) where
 
 import EVM.ABI
-import EVM.Types
+import EVM.Types hiding (Success)
 
 import Optics.Core
 import Optics.Operators.Unsafe

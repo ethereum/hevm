@@ -13,7 +13,7 @@ import Brick.Widgets.Center
 import Brick.Widgets.List
 
 import EVM
-import EVM.ABI (abiTypeSolidity, decodeAbiValue, AbiType(..), emptyAbi)
+import EVM.ABI (decodeAbiValue, emptyAbi)
 import EVM.SymExec (maxIterationsReached, symCalldata)
 import EVM.Expr (simplify)
 import EVM.Dapp (DappInfo(..), dappInfo, Test, extractSig, Test(..), srcMap, unitTestMethods)
@@ -558,7 +558,7 @@ appEvent (VtyEvent (V.EvKey (V.KChar 'p') [V.MCtrl])) =
 appEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = get >>= \case
   ViewVm s ->
     case view (#vm % #result) s of
-      Just (VMFailure (Choose (PleaseChoosePath _ contin))) ->
+      Just (HandleEffect (Choose (PleaseChoosePath _ contin))) ->
         takeStep (s & set #stepper (Stepper.evm (contin True) >> s.stepper))
           (Step 1)
       _ -> pure ()
@@ -568,7 +568,7 @@ appEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = get >>= \case
 appEvent (VtyEvent (V.EvKey (V.KChar '1') [])) = get >>= \case
   ViewVm s ->
     case s.vm.result of
-      Just (VMFailure (Choose (PleaseChoosePath _ contin))) ->
+      Just (HandleEffect (Choose (PleaseChoosePath _ contin))) ->
         takeStep (s & set #stepper (Stepper.evm (contin False) >> s.stepper))
           (Step 1)
       _ -> pure ()
@@ -879,10 +879,14 @@ message vm =
       "VMSuccess: " <> (show $ ByteStringS msg)
     Just (VMSuccess (msg)) ->
       "VMSuccess: <symbolicbuffer> " <> (show msg)
-    Just (VMFailure (EVM.Revert msg)) ->
+    Just (VMFailure (Revert msg)) ->
       "VMFailure: " <> (show msg)
     Just (VMFailure err) ->
       "VMFailure: " <> show err
+    Just (Unfinished p) ->
+      "Could not continue execution: " <> show p
+    Just (HandleEffect e) ->
+      "Handling side effect: " <> show e
     Nothing ->
       "Executing EVM code in " <> show vm.state.contract
 

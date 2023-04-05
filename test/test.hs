@@ -25,12 +25,12 @@ import Data.Typeable
 import Data.List qualified (elemIndex)
 import Data.DoubleWord
 import Test.Tasty
-import Test.Tasty.QuickCheck hiding (Failure)
+import Test.Tasty.QuickCheck hiding (Failure, Success)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty.HUnit
-import Test.Tasty.Runners hiding (Failure)
+import Test.Tasty.Runners hiding (Failure, Success)
 import Test.Tasty.ExpectedFailure
 import EVM.Test.Tracing qualified as Tracing
 
@@ -46,7 +46,7 @@ import qualified Data.Map.Strict as Map
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
 
-import EVM
+import EVM hiding (choose)
 import EVM.SymExec
 import EVM.ABI
 import EVM.Exec
@@ -105,12 +105,12 @@ tests = testGroup "hevm"
             vm1 = execState (EVM.accessStorage 0 (Lit 0) (pure . pure ())) vm
             -- it should fetch the contract first
             vm2 = case vm1.result of
-                    Just (VMFailure (Query (PleaseFetchContract _addr continue))) ->
+                    Just (HandleEffect (Query (PleaseFetchContract _addr continue))) ->
                       execState (continue dummyContract) vm1
                     _ -> error "unexpected result"
             -- then it should fetch the slow
             vm3 = case vm2.result of
-                    Just (VMFailure (Query (PleaseFetchSlot _addr _slot continue))) ->
+                    Just (HandleEffect (Query (PleaseFetchSlot _addr _slot continue))) ->
                       execState (continue 1337) vm2
                     _ -> error "unexpected result"
             -- perform the same access as for vm1
@@ -1150,7 +1150,7 @@ tests = testGroup "hevm"
                              [x', y'] -> (x', y')
                              _ -> error "expected 2 args"
               in case leaf of
-                   EVM.Types.Return _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
+                   Success _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
                    _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s safeAdd (Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
@@ -1176,7 +1176,7 @@ tests = testGroup "hevm"
                              [x', y'] -> (x', y')
                              _ -> error "expected 2 args"
               in case leaf of
-                   EVM.Types.Return _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
+                   Success _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
                    _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
           verifyContract s safeAdd (Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
@@ -1203,7 +1203,7 @@ tests = testGroup "hevm"
                   this = Expr.litAddr $ prestate.state.codeContract
                   prex = Expr.readStorage' this (Lit 0) prestate.env.storage
               in case leaf of
-                EVM.Types.Return _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
+                Success _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
                 _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts SymbolicS (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
@@ -1259,7 +1259,7 @@ tests = testGroup "hevm"
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
-                     EVM.Types.Return _ _ poststore -> let
+                     Success _ _ poststore -> let
                            postx = Expr.readStorage' this x poststore
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
@@ -1293,7 +1293,7 @@ tests = testGroup "hevm"
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
-                     EVM.Types.Return _ _ poststore -> let
+                     Success _ _ poststore -> let
                            postx = Expr.readStorage' this x poststore
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
@@ -1315,7 +1315,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (_, [Cex (EVM.Types.Revert _ msg, _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo()" [])) [] defaultVeriOpts
+          (_, [Cex (Failure _ (Revert msg), _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo()" [])) [] defaultVeriOpts
           assertEqual "incorrect revert msg" msg (ConcreteBuf $ panicMsg 0x01)
         ,
         testCase "simple-assert-2" $ do
@@ -2468,13 +2468,13 @@ genName = fmap (T.pack . ("esc_" <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
- [ pure $ Failure [] EVM.Types.Invalid
- , pure $ Failure [] EVM.Types.IllegalOverflow
- , pure $ Failure [] EVM.Types.SelfDestruct
+ [ fmap (Failure [] . UnrecognizedOpcode) arbitrary
+ , pure $ Failure [] IllegalOverflow
+ , pure $ Failure [] SelfDestruction
  ]
 genEnd sz = oneof
- [ fmap (EVM.Types.Revert []) subBuf
- , liftM3 EVM.Types.Return (return []) subBuf subStore
+ [ fmap (Failure [] . Revert) subBuf
+ , liftM3 Success (return []) subBuf subStore
  , liftM3 ITE subWord subEnd subEnd
  ]
  where

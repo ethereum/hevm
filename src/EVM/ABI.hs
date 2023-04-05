@@ -66,15 +66,13 @@ import Data.Binary.Put    (Put, runPut, putWord8, putWord32be)
 import Data.Bits          (shiftL, shiftR, (.&.))
 import Data.ByteString    (ByteString)
 import Data.Char          (isHexDigit)
-import Data.DoubleWord    (Word256, Int256, signedWord)
+import Data.DoubleWord    (Word256, signedWord)
 import Data.Functor       (($>))
-import Data.Text          (Text, pack, unpack)
-import Data.Text.Encoding (encodeUtf8, decodeUtf8')
+import Data.Text          (Text)
+import Data.Text.Encoding (encodeUtf8)
 import Data.Vector        (Vector, toList)
 import Data.Word          (Word32)
-import Data.List          (intercalate)
 import Data.Maybe         (mapMaybe)
-import GHC.Generics
 
 import Test.QuickCheck hiding ((.&.), label)
 import Text.ParserCombinators.ReadP
@@ -89,72 +87,6 @@ import qualified Data.Vector            as Vector
 
 import qualified Text.Megaparsec      as P
 import qualified Text.Megaparsec.Char as P
-
-data AbiValue
-  = AbiUInt         Int Word256
-  | AbiInt          Int Int256
-  | AbiAddress      Addr
-  | AbiBool         Bool
-  | AbiBytes        Int BS.ByteString
-  | AbiBytesDynamic BS.ByteString
-  | AbiString       BS.ByteString
-  | AbiArrayDynamic AbiType (Vector AbiValue)
-  | AbiArray        Int AbiType (Vector AbiValue)
-  | AbiTuple        (Vector AbiValue)
-  | AbiFunction     BS.ByteString
-  deriving (Read, Eq, Ord, Generic)
-
--- | Pretty-print some 'AbiValue'.
-instance Show AbiValue where
-  show (AbiUInt _ n)         = show n
-  show (AbiInt  _ n)         = show n
-  show (AbiAddress n)        = show n
-  show (AbiBool b)           = if b then "true" else "false"
-  show (AbiBytes      _ b)   = show (ByteStringS b)
-  show (AbiBytesDynamic b)   = show (ByteStringS b)
-  show (AbiString       s)   = formatString s
-  show (AbiArrayDynamic _ v) =
-    "[" ++ intercalate ", " (show <$> Vector.toList v) ++ "]"
-  show (AbiArray      _ _ v) =
-    "[" ++ intercalate ", " (show <$> Vector.toList v) ++ "]"
-  show (AbiTuple v) =
-    "(" ++ intercalate ", " (show <$> Vector.toList v) ++ ")"
-  show (AbiFunction b)       = show (ByteStringS b)
-
-formatString :: ByteString -> String
-formatString bs =
-  case decodeUtf8' (fst (BS.spanEnd (== 0) bs)) of
-    Right s -> "\"" <> unpack s <> "\""
-    Left _ -> "❮utf8 decode failed❯: " <> (show $ ByteStringS bs)
-
-data AbiType
-  = AbiUIntType         Int
-  | AbiIntType          Int
-  | AbiAddressType
-  | AbiBoolType
-  | AbiBytesType        Int
-  | AbiBytesDynamicType
-  | AbiStringType
-  | AbiArrayDynamicType AbiType
-  | AbiArrayType        Int AbiType
-  | AbiTupleType        (Vector AbiType)
-  | AbiFunctionType
-  deriving (Read, Eq, Ord, Generic)
-
-instance Show AbiType where
-  show = Text.unpack . abiTypeSolidity
-
-data AbiKind = Dynamic | Static
-  deriving (Show, Read, Eq, Ord, Generic)
-
-data Anonymity = Anonymous | NotAnonymous
-  deriving (Show, Ord, Eq, Generic)
-data Indexed   = Indexed   | NotIndexed
-  deriving (Show, Ord, Eq, Generic)
-data Event     = Event Text Anonymity [(Text, AbiType, Indexed)]
-  deriving (Show, Ord, Eq, Generic)
-data SolError  = SolError Text [AbiType]
-  deriving (Show, Ord, Eq, Generic)
 
 abiKind :: AbiType -> AbiKind
 abiKind = \case
@@ -178,20 +110,6 @@ abiValueType = \case
   AbiArray n t _      -> AbiArrayType n t
   AbiTuple v          -> AbiTupleType (abiValueType <$> v)
   AbiFunction _       -> AbiFunctionType
-
-abiTypeSolidity :: AbiType -> Text
-abiTypeSolidity = \case
-  AbiUIntType n         -> "uint" <> pack (show n)
-  AbiIntType n          -> "int" <> pack (show n)
-  AbiAddressType        -> "address"
-  AbiBoolType           -> "bool"
-  AbiBytesType n        -> "bytes" <> pack (show n)
-  AbiBytesDynamicType   -> "bytes"
-  AbiStringType         -> "string"
-  AbiArrayDynamicType t -> abiTypeSolidity t <> "[]"
-  AbiArrayType n t      -> abiTypeSolidity t <> "[" <> pack (show n) <> "]"
-  AbiTupleType ts       -> "(" <> (Text.intercalate "," . Vector.toList $ abiTypeSolidity <$> ts) <> ")"
-  AbiFunctionType       -> "function"
 
 getAbi :: AbiType -> Get AbiValue
 getAbi t = label (Text.unpack (abiTypeSolidity t)) $

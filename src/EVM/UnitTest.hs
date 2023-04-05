@@ -5,7 +5,7 @@ module EVM.UnitTest where
 
 import Prelude hiding (Word)
 
-import EVM hiding (Unknown, path)
+import EVM
 import EVM.ABI
 import EVM.Concrete
 import EVM.SMT
@@ -63,7 +63,8 @@ import Data.Word (Word32, Word64)
 import GHC.Natural
 import System.Environment (lookupEnv)
 import System.IO (hFlush, stdout)
-import Test.QuickCheck hiding (verbose)
+import Test.QuickCheck hiding (verbose, Success)
+import qualified Test.QuickCheck as QC
 
 data UnitTestOptions = UnitTestOptions
   { rpcInfo     :: Fetch.RpcInfo
@@ -440,7 +441,6 @@ runUnitTestContract
           vm0
 
       case vm1.result of
-        Nothing -> error "internal error: setUp() did not end with a result"
         Just (VMFailure _) -> liftIO $ do
           Text.putStrLn "\x1b[31m[BAIL]\x1b[0m setUp() "
           tick "\n"
@@ -470,6 +470,7 @@ runUnitTestContract
             tick (Text.unlines bailing)
 
           pure [(isRight r, vm) | (r, vm) <- details]
+        _ -> error "internal error: setUp() did not end with a result"
 
 
 runTest :: UnitTestOptions -> VM -> (Test, [AbiType]) -> IO (Text, Either Text Text, VM)
@@ -683,7 +684,7 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
                  , maxShrinks      = maxBound
                  }
   quickCheckWithResult args (fuzzTest opts testName types vm) >>= \case
-    Success numTests _ _ _ _ _ ->
+    QC.Success numTests _ _ _ _ _ ->
       pure ("\x1b[32m[PASS]\x1b[0m "
              <> testName <> " (runs: " <> (pack $ show numTests) <> ")"
              -- this isn't the post vm we actually want, as we
@@ -726,10 +727,10 @@ symRun opts@UnitTestOptions{..} vm testName types = do
                    .|| (readStorage' (litAddr cheatCode) (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) store .== Lit 1)
         postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
-                                  Return _ _ store -> failed store
+                                  Success _ _ store -> failed store
                                   _ -> PBool True
           False -> \(_, post) -> case post of
-                                   Return _ _ store -> PNeg (failed store)
+                                   Success _ _ store -> PNeg (failed store)
                                    _ -> PBool False
 
     (_, vm') <- runStateT
@@ -761,7 +762,7 @@ symFailure UnitTestOptions {..} testName cd types failures' =
     where
       ctx = DappContext { info = dapp, env = mempty }
       showRes = \case
-                       Return _ _ _ -> if "proveFail" `isPrefixOf` testName
+                       Success _ _ _ -> if "proveFail" `isPrefixOf` testName
                                       then "Successful execution"
                                       else "Failed: DSTest Assertion Violation"
                        res ->
@@ -996,7 +997,7 @@ getParametersFromEnvironmentVariables rpc = do
       Nothing  -> return (0,Lit 0,0,0,0,0)
       Just url -> Fetch.fetchBlockFrom block' url >>= \case
         Nothing -> error "Could not fetch block"
-        Just EVM.Block{..} -> return (  coinbase
+        Just Block{..} -> return (  coinbase
                                       , timestamp
                                       , number
                                       , prevRandao

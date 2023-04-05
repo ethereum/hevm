@@ -8,11 +8,10 @@ import Prelude hiding (Word)
 import EVM.ABI
 import EVM.SMT
 import EVM.Solvers
-import EVM.Types  (Addr, W256, Expr(Lit), Expr(..), Prop(..), (.&&), (./=))
+import EVM.Types
 import EVM.Format (hexText)
-import EVM        (EVM, Contract, Block, initialContract)
+import EVM        (initialContract)
 import qualified EVM.FeeSchedule as FeeSchedule
-import qualified EVM
 
 import Optics.Core
 
@@ -115,7 +114,7 @@ fetchQuery n f q = do
   return x
 
 
-parseBlock :: (AsValue s, Show s) => s -> Maybe EVM.Block
+parseBlock :: (AsValue s, Show s) => s -> Maybe Block
 parseBlock j = do
   coinbase   <- readText <$> j ^? key "miner" % _String
   timestamp  <- Lit . readText <$> j ^? key "timestamp" % _String
@@ -135,7 +134,7 @@ parseBlock j = do
      (Nothing, Just _, Just d) -> d
      _ -> error "Internal Error: block contains both difficulty and prevRandao"
   -- default codesize, default gas limit, default feescedule
-  return $ EVM.Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff FeeSchedule.berlin
+  return $ Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff FeeSchedule.berlin
 
 fetchWithSession :: Text -> Session -> Value -> IO (Maybe Value)
 fetchWithSession url sess x = do
@@ -154,7 +153,7 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
   theBalance <- MaybeT $ fetch (QueryBalance addr)
 
   return $
-    initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode theCode))
+    initialContract (RuntimeCode (ConcreteRuntimeCode theCode))
       & set #nonce    theNonce
       & set #balance  theBalance
       & set #external True
@@ -198,46 +197,29 @@ zero smtjobs smttimeout q =
 oracle :: SolverGroup -> RpcInfo -> Fetcher
 oracle solvers info q = do
   case q of
-    EVM.PleaseDoFFI vals continue -> case vals of
+    PleaseDoFFI vals continue -> case vals of
        cmd : args -> do
           (_, stdout', _) <- readProcessWithExitCode cmd args ""
           pure . continue . encodeAbiValue $
             AbiTuple (RegularVector.fromList [ AbiBytesDynamic . hexText . pack $ stdout'])
        _ -> error (show vals)
 
-    EVM.PleaseAskSMT branchcondition pathconditions continue -> do
+    PleaseAskSMT branchcondition pathconditions continue -> do
          let pathconds = foldl' PAnd (PBool True) pathconditions
          -- Is is possible to satisfy the condition?
          continue <$> checkBranch solvers (branchcondition ./= (Lit 0)) pathconds
 
     -- if we are using a symbolic storage model,
     -- we generate a new array to the fetched contract here
-    EVM.PleaseFetchContract addr continue -> do
+    PleaseFetchContract addr continue -> do
       contract <- case info of
-                    Nothing -> return $ Just $ initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode ""))
+                    Nothing -> return $ Just $ initialContract (RuntimeCode (ConcreteRuntimeCode ""))
                     Just (n, url) -> fetchContractFrom n url addr
       case contract of
         Just x -> return $ continue x
         Nothing -> error ("oracle error: " ++ show q)
 
-    --EVM.PleaseMakeUnique val pathconditions continue ->
-          --case smtstate of
-            --Nothing -> return $ continue Multiple
-            --Just state -> flip runReaderT state $ SBV.runQueryT $ do
-              --constrain $ sAnd $ pathconditions <> [val .== val] -- dummy proposition just to make sure `val` is defined when we do `getValue` later.
-              --checkSat >>= \case
-                --Sat -> do
-                  --val' <- getValue val
-                  --s    <- checksat (val ./= literal val')
-                  --case s of
-                    --Unsat -> pure $ continue $ Unique val'
-                    --_ -> pure $ continue Multiple
-                --Unsat -> pure $ continue InconsistentU
-                --Unk -> pure $ continue TimeoutU
-                --DSat _ -> error "unexpected DSAT"
-
-
-    EVM.PleaseFetchSlot addr slot continue ->
+    PleaseFetchSlot addr slot continue ->
       case info of
         Nothing -> return (continue 0)
         Just (n, url) ->
@@ -246,29 +228,29 @@ oracle solvers info q = do
            Nothing ->
              error ("oracle error: " ++ show q)
 
-type Fetcher = EVM.Query -> IO (EVM ())
+type Fetcher = Query -> IO (EVM ())
 
 -- | Checks which branches are satisfiable, checking the pathconditions for consistency
 -- if the third argument is true.
 -- When in debug mode, we do not want to be able to navigate to dead paths,
 -- but for normal execution paths with inconsistent pathconditions
 -- will be pruned anyway.
-checkBranch :: SolverGroup -> Prop -> Prop -> IO EVM.BranchCondition
+checkBranch :: SolverGroup -> Prop -> Prop -> IO BranchCondition
 checkBranch solvers branchcondition pathconditions = do
   checkSat solvers (assertProps [(branchcondition .&& pathconditions)]) >>= \case
      -- the condition is unsatisfiable
      Unsat -> -- if pathconditions are consistent then the condition must be false
-            return $ EVM.Case False
+            return $ Case False
      -- Sat means its possible for condition to hold
      Sat _ -> -- is its negation also possible?
             checkSat solvers (assertProps [(pathconditions .&& (PNeg branchcondition))]) >>= \case
                -- No. The condition must hold
-               Unsat -> return $ EVM.Case True
+               Unsat -> return $ Case True
                -- Yes. Both branches possible
-               Sat _ -> return EVM.Unknown
+               Sat _ -> return EVM.Types.Unknown
                -- Explore both branches in case of timeout
-               Unknown -> return EVM.Unknown
+               EVM.Solvers.Unknown -> return EVM.Types.Unknown
                Error e -> error $ "Internal Error: SMT Solver returned with an error: " <> T.unpack e
      -- If the query times out, we simply explore both paths
-     Unknown -> return EVM.Unknown
+     EVM.Solvers.Unknown -> return EVM.Types.Unknown
      Error e -> error $ "Internal Error: SMT Solver returned with an error: " <> T.unpack e
