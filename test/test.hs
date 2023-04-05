@@ -621,8 +621,8 @@ tests = testGroup "hevm"
         -- assertBool "Access must be beyond element 2" $ (getVar ctr "arg1") > 1
         putStrLn "expected counterexample found"
       ,
-      -- TODO the system currently does not allow for symbolic array size allocation
-      expectFail $ testCase "alloc-too-much" $ do
+      -- Note: we catch the assertion here, even though we are only able to explore partially
+      testCase "alloc-too-much" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
@@ -631,7 +631,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x41] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s ->
+          checkAssert s [0x41] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "expected counterexample found"
       ,
       -- TODO the system currently does not allow for symbolic JUMP

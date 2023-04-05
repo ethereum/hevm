@@ -39,7 +39,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
-import EVM.Format (formatExpr)
+import EVM.Format (formatExpr, formatPartial)
 import Data.Set (Set, isSubsetOf, size)
 import qualified Data.Set as Set
 import Control.Concurrent.STM (atomically, TVar, readTVarIO, readTVar, newTVarIO, writeTVar)
@@ -374,10 +374,10 @@ flattenExpr = go []
     go :: [Prop] -> Expr End -> [Expr End]
     go pcs = \case
       ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
-      GVar _ -> error "cannot flatten an Expr containing a GVar"
       Success ps msg store -> [Success (ps <> pcs) msg store]
       Failure ps e -> [Failure (ps <> pcs) e]
       Partial ps p -> [Partial (ps <> pcs) p]
+      GVar _ -> error "cannot flatten an Expr containing a GVar"
 
 -- | Strips unreachable branches from a given expr
 -- Returns a list of executed SMT queries alongside the reduced expression for debugging purposes
@@ -462,6 +462,17 @@ extractProps = \case
   Partial asserts _ -> asserts
   GVar _ -> error "cannot extract props from a GVar"
 
+isPartial :: Expr a -> Bool
+isPartial (Partial _ _) = True
+isPartial _ = False
+
+getPartials :: [Expr End] -> [PartialExec]
+getPartials = mapMaybe go
+  where
+    go :: Expr End -> Maybe PartialExec
+    go = \case
+      Partial _ p -> Just p
+      _ -> Nothing
 
 -- | Symbolically execute the VM and check all endstates against the postcondition, if available.
 verify :: SolverGroup -> VeriOpts -> VM -> Maybe Postcondition -> IO (Expr End, [VerifyResult])
@@ -477,12 +488,21 @@ verify solvers opts preState maybepost = do
 
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
 
+  let flattened = flattenExpr expr
+  when (any isPartial flattened) $ do
+    T.putStrLn ""
+    T.putStrLn "WARNING: hevm was only able to partially explore the given contract due to the followig issues:"
+    T.putStrLn ""
+    T.putStrLn . T.unlines . fmap formatPartial . getPartials $ flattened
+    T.putStrLn "The results below hold only for the subset of the contract that could be explored, and DO NOT hold for the full contract"
+    T.putStrLn ""
+
   case maybepost of
     Nothing -> pure (expr, [Qed ()])
     Just post -> do
       let
         -- Filter out any leaves that can be statically shown to be safe
-        canViolate = flip filter (flattenExpr expr) $
+        canViolate = flip filter flattened $
           \leaf -> case evalProp (post preState leaf) of
             PBool True -> False
             _ -> True

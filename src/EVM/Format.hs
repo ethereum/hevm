@@ -3,6 +3,8 @@
 
 module EVM.Format
   ( formatExpr
+  , formatSomeExpr
+  , formatPartial
   , contractNamePart
   , contractPathPart
   , showError
@@ -406,6 +408,31 @@ indent n = rstrip . T.unlines . fmap (T.replicate n (T.pack [' ']) <>) . T.lines
 rstrip :: Text -> Text
 rstrip = T.reverse . T.dropWhile (=='\n') . T.reverse
 
+formatError :: EvmError -> Text
+formatError = \case
+  Revert buf -> T.unlines
+    [ "(Revert"
+    , indent 2 $ formatExpr buf
+    , ")"
+    ]
+  e -> T.pack $ show e
+
+formatPartial :: PartialExec -> Text
+formatPartial = \case
+  (UnexpectedSymbolicArg pc msg args) -> T.unlines
+    [ "Unexpected Symbolic Arguments to Opcode"
+    , indent 2 $ T.unlines $
+      [ "msg: " <> T.pack (show msg)
+      , "program counter: " <> T.pack (show pc)
+      , "arguments: "
+      , indent 2 $ T.unlines . fmap formatSomeExpr $ args
+      ]
+    ]
+  MaxIterationsReached -> "Max Iterations Reached"
+
+formatSomeExpr :: SomeExpr -> Text
+formatSomeExpr (SomeExpr e) = formatExpr e
+
 formatExpr :: Expr a -> Text
 formatExpr = go
   where
@@ -427,6 +454,16 @@ formatExpr = go
           , ""
           , "Store:"
           , indent 2 $ formatExpr store
+          , "Assertions:"
+          , indent 2 $ T.pack $ show asserts
+          ]
+        , ")"
+        ]
+      Failure asserts err -> T.unlines
+        [ "(Failure"
+        , indent 2 $ T.unlines
+          [ "Error:"
+          , indent 2 $ formatError err
           , "Assertions:"
           , indent 2 $ T.pack $ show asserts
           ]
