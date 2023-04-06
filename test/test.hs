@@ -764,7 +764,7 @@ tests = testGroup "hevm"
             -- we dont' ask the solver about the loop condition until we're
             -- already in an inconsistent path (i == 5, j <= 3, i < j), so we
             -- will continue looping here until we hit max iterations
-            opts = defaultVeriOpts{ maxIter = Just 10, askSmtIters = Just 5 }
+            opts = defaultVeriOpts{ maxIter = Just 10, askSmtIters = 5 }
         (e, [Qed _]) <- withSolvers Z3 1 Nothing $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBool "The expression is not partial" $ Expr.containsNode isPartial e
@@ -781,7 +781,7 @@ tests = testGroup "hevm"
             }
             |]
         let sig = Just $ Sig "fun(uint256)" [AbiUIntType 256]
-            opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = Just 1 }
+            opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 1 }
         (e, [Qed _]) <- withSolvers Z3 1 Nothing $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBool "The expression is partial" $ not (Expr.containsNode isPartial e)
@@ -2082,7 +2082,7 @@ tests = testGroup "hevm"
           assertEqual "Must be different" (any isCex a) True
           return ()
       , testCase "eq-all-yul-optimization-tests" $ do
-        let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = Just 20 }
+        let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20 }
             ignoredTests = [
                     -- unbounded loop --
                     "commonSubexpressionEliminator/branches_for.yul"

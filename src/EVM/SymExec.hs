@@ -77,7 +77,7 @@ data VeriOpts = VeriOpts
   { simp :: Bool
   , debug :: Bool
   , maxIter :: Maybe Integer
-  , askSmtIters :: Maybe Integer
+  , askSmtIters :: Integer
   , loopHeuristic :: LoopHeuristic
   , rpcInfo :: Fetch.RpcInfo
   }
@@ -88,7 +88,7 @@ defaultVeriOpts = VeriOpts
   { simp = True
   , debug = False
   , maxIter = Nothing
-  , askSmtIters = Nothing
+  , askSmtIters = 1
   , loopHeuristic = StackBased
   , rpcInfo = Nothing
   }
@@ -237,7 +237,7 @@ loadSymVM x initStore addr callvalue' calldata' calldataProps =
 interpret
   :: Fetch.Fetcher
   -> Maybe Integer -- max iterations
-  -> Maybe Integer -- ask smt iterations
+  -> Integer -- ask smt iterations
   -> LoopHeuristic
   -> Stepper (Expr End)
   -> StateT VM IO (Expr End)
@@ -302,7 +302,7 @@ interpret fetcher maxIter askSmtIters heuristic =
                       codelocation <- getCodeLocation <$> get
                       (count, _) <- fromMaybe (0, []) <$> use (#iterations % at codelocation)
 
-                      if num count < (fromMaybe 5 askSmtIters)
+                      if num count < askSmtIters
                       then interpret fetcher maxIter askSmtIters heuristic (Stepper.evm (continue EVM.Types.Unknown) >>= k)
                       else performQuery
 

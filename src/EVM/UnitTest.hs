@@ -21,8 +21,7 @@ import EVM.FeeSchedule qualified as FeeSchedule
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec qualified as SymExec
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, VeriOpts)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, VeriOpts(..))
 import EVM.Types hiding (Failure)
 import EVM.Transaction (initTx)
 import EVM.RLP
@@ -71,7 +70,7 @@ data UnitTestOptions = UnitTestOptions
   , solvers     :: SolverGroup
   , verbose     :: Maybe Int
   , maxIter     :: Maybe Integer
-  , askSmtIters :: Maybe Integer
+  , askSmtIters :: Integer
   , smtDebug    :: Bool
   , maxDepth    :: Maybe Int
   , smtTimeout  :: Maybe Natural
@@ -123,10 +122,10 @@ type ABIMethod = Text
 -- | Generate VeriOpts from UnitTestOptions
 makeVeriOpts :: UnitTestOptions -> VeriOpts
 makeVeriOpts opts =
-   defaultVeriOpts { SymExec.debug = opts.smtDebug
-                   , SymExec.maxIter = opts.maxIter
-                   , SymExec.askSmtIters = opts.askSmtIters
-                   , SymExec.rpcInfo = opts.rpcInfo
+   defaultVeriOpts { debug = opts.smtDebug
+                   , maxIter = opts.maxIter
+                   , askSmtIters = opts.askSmtIters
+                   , rpcInfo = opts.rpcInfo
                    }
 
 -- | Top level CLI endpoint for dapp-test
