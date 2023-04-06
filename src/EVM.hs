@@ -653,12 +653,10 @@ exec1 = do
                       jump _    = case toInt x' of
                         Nothing -> vmError BadJumpDestination
                         Just i -> checkJump i xs
-                  in case maybeLitWord y of
-                    Just y' -> jump (0 /= y')
-                    -- if the jump condition is symbolic, we explore both sides
-                    Nothing -> do
-                      loc <- codeloc
-                      branch loc y jump
+                  in do
+                    loc <- codeloc
+                    iteration <- use (#iterations % at loc)
+                    branch loc y jump
             _ -> underrun
 
         OpPc ->
@@ -1126,9 +1124,10 @@ branch loc cond continue = do
     choosePath (Case v) = do
       assign #result Nothing
       pushTo #constraints $ if v then (cond ./= Lit 0) else (cond .== Lit 0)
-      iteration <- use (#iterations % at loc % non 0)
+      (iteration, _) <- use (#iterations % at loc % non (0,[]))
+      stack <- use (#state % #stack)
       assign (#cache % #path % at (loc, iteration)) (Just v)
-      assign (#iterations % at loc) (Just (iteration + 1))
+      assign (#iterations % at loc) (Just (iteration + 1, stack))
       continue v
     -- Both paths are possible; we ask for more input
     choosePath Unknown =
@@ -2068,26 +2067,27 @@ use' f = do
 
 checkJump :: Int -> [Expr EWord] -> EVM ()
 checkJump x xs = do
-  theCode <- use (#state % #code)
-  self <- use (#state % #codeContract)
-  codeOps <- preuse (#env % #contracts % ix self % #codeOps)
-  opIxMap <- preuse (#env % #contracts % ix self % #opIxMap)
-  case (codeOps, opIxMap) of
-    (Just co, Just opMap) -> do
-      let op = case theCode of
-            InitCode ops _ -> BS.indexMaybe ops x
-            RuntimeCode (ConcreteRuntimeCode ops) -> BS.indexMaybe ops x
-            RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= maybeLitByte
-      case op of
-        Nothing -> vmError BadJumpDestination
-        Just b ->
-          if 0x5b == b && OpJumpdest == snd (co V.! (opMap SV.! num x))
-             then do
-               #state % #stack .= xs
-               #state % #pc .= num x
-             else
-               vmError BadJumpDestination
-    (_, _) -> error "Internal Error: self not found in current contracts"
+  vm <- get
+  case isValidJumpDest vm x of
+    True -> do
+      #state % #stack .= xs
+      #state % #pc .= num x
+    False -> vmError BadJumpDestination
+
+isValidJumpDest :: VM -> Int -> Bool
+isValidJumpDest vm x = let
+    code = vm.state.code
+    self = vm.state.codeContract
+    contract = fromMaybe
+      (error "Internal Error: self not found in current contracts")
+      (Map.lookup self vm.env.contracts)
+    op = case code of
+      InitCode ops _ -> BS.indexMaybe ops x
+      RuntimeCode (ConcreteRuntimeCode ops) -> BS.indexMaybe ops x
+      RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= maybeLitByte
+  in case op of
+       Nothing -> False
+       Just b -> 0x5b == b && OpJumpdest == snd (contract.codeOps V.! (contract.opIxMap SV.! num x))
 
 opSize :: Word8 -> Int
 opSize x | x >= 0x60 && x <= 0x7f = num x - 0x60 + 2

@@ -253,52 +253,81 @@ interpret fetcher maxIter askSmtIters =
         Stepper.Ask (PleaseChoosePath cond continue) -> do
           assign #result Nothing
           vm <- get
-          case maxIterationsReached vm maxIter of
+          case (maxIterationsReached vm maxIter, isLoopHead vm) of
+            (Just n, True) -> do
+              -- continue execution down the opposite branch than the one that
+              -- got us to this point and return a partial leaf for the other side
+              a <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue (not n)) >>= k)
+              pure $ ITE cond a (Partial vm.keccakEqs (MaxIterationsReached vm.state.pc vm.state.contract))
             -- TODO: parallelise
-            Nothing -> do
+            _ -> do
               a <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue True) >>= k)
               put vm
               b <- interpret fetcher maxIter askSmtIters (Stepper.evm (continue False) >>= k)
-              return $ ITE cond a b
-            Just n ->
-              -- Let's escape the loop. We give no guarantees at this point
-              interpret fetcher maxIter askSmtIters (Stepper.evm (continue (not n)) >>= k)
+              pure $ ITE cond a b
         Stepper.Wait q -> do
           let performQuery = do
                 m <- liftIO (fetcher q)
                 interpret fetcher maxIter askSmtIters (Stepper.evm m >>= k)
 
           case q of
-            PleaseAskSMT _ _ continue -> do
-              codelocation <- getCodeLocation <$> get
-              iteration <- num . fromMaybe 0 <$> use (#iterations % at codelocation)
+            PleaseAskSMT cond _ continue -> do
+              assign #result Nothing
+              vm <- get
+              case cond of
+                -- if we have a concrete branch condition and we've hit max
+                -- iterations, then bail and return an `Partial` leaf here
+                Lit c -> case (maxIterationsReached vm maxIter, isLoopHead vm) of
+                  (Just _, True) -> pure $ Partial vm.keccakEqs $ MaxIterationsReached vm.state.pc vm.state.contract
+                  _ -> interpret fetcher maxIter askSmtIters (Stepper.evm (continue (Case (c > 0))) >>= k)
 
-              -- if this is the first time we are branching at this point,
-              -- explore both branches without consulting SMT.
-              -- Exploring too many branches is a lot cheaper than
-              -- consulting our SMT solver.
-              if iteration < (fromMaybe 5 askSmtIters)
-              then interpret fetcher maxIter askSmtIters (Stepper.evm (continue EVM.Types.Unknown) >>= k)
-              else performQuery
+                -- if we have a symbolic branch condition, then check
+                -- askSmtIters and dispatch to the solver if it's been reached
+                -- we'll check maxSmtIters when the vm dispatches a
+                -- PleaseChoosePath effect in the continuation
+                _ -> do
+                  codelocation <- getCodeLocation <$> get
+                  (count, _) <- fromMaybe (0, []) <$> use (#iterations % at codelocation)
+
+                  if num count < (fromMaybe 5 askSmtIters)
+                  then interpret fetcher maxIter askSmtIters (Stepper.evm (continue EVM.Types.Unknown) >>= k)
+                  else performQuery
 
             _ -> performQuery
 
         Stepper.EVM m ->
           State.state (runState m) >>= interpret fetcher maxIter askSmtIters . k
 
+
 maxIterationsReached :: VM -> Maybe Integer -> Maybe Bool
 maxIterationsReached _ Nothing = Nothing
 maxIterationsReached vm (Just maxIter) =
   let codelocation = getCodeLocation vm
-      iters = view (at codelocation % non 0) vm.iterations
+      (iters, _) = view (at codelocation % non (0, [])) vm.iterations
   in if num maxIter <= iters
      then Map.lookup (codelocation, iters - 1) vm.cache.path
      else Nothing
 
+{- | Loop head detection heuristic
+
+ The main thing we wish to differentiate between, are actual loop heads, and branch points inside of internal functions that are called multiple times.
+
+ One way to do this is to observe that for internal functions, the compiler must always store a stack item representing the location that it must jump back to. If we compare the stack at the time of the previous visit, and the time of the current visit, and notice that this location has changed, then we can guess that the location is a jump point within an internal function instead of a loop (where such locations should be constant between iterations).
+
+ This heuristic is not perfect, and can certainly be tricked, but should generally be good enough for most compiler generated and non pathological user generated loops.
+ -}
+isLoopHead :: VM -> Bool
+isLoopHead vm = let
+    loc = getCodeLocation vm
+    (_, oldStack) = fromMaybe
+      (error "Internal Error: code location has not been previously visited")
+      (Map.lookup loc vm.iterations)
+    isValid (Lit wrd) = wrd <= num (maxBound :: Int) && isValidJumpDest vm (num wrd)
+    isValid _ = False
+  in filter isValid oldStack == filter isValid vm.state.stack
 
 type Precondition = VM -> Prop
 type Postcondition = VM -> Expr End -> Prop
-
 
 checkAssert :: SolverGroup -> [Word256] -> ByteString -> Maybe Sig -> [String] -> VeriOpts -> IO (Expr End, [VerifyResult])
 checkAssert solvers errs c signature' concreteArgs opts = verifyContract solvers c signature' concreteArgs opts SymbolicS Nothing (Just $ checkAssertions errs)
@@ -493,9 +522,7 @@ verify solvers opts preState maybepost = do
     T.putStrLn ""
     T.putStrLn "WARNING: hevm was only able to partially explore the given contract due to the followig issues:"
     T.putStrLn ""
-    T.putStrLn . T.unlines . fmap formatPartial . getPartials $ flattened
-    T.putStrLn "The results below hold only for the subset of the contract that could be explored, and DO NOT hold for the full contract"
-    T.putStrLn ""
+    T.putStrLn . T.unlines . fmap (indent 2 . ("- " <>)) . fmap formatPartial . getPartials $ flattened
 
   case maybepost of
     Nothing -> pure (expr, [Qed ()])

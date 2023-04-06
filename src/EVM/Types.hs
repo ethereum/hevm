@@ -509,10 +509,10 @@ data EvmError
   | BadCheatCode FunctionSelector
   deriving (Show, Eq, Ord)
 
--- | TODO: docs
+-- | Sometimes we can only partially execute a given program
 data PartialExec
   = UnexpectedSymbolicArg  { pc :: Int, msg  :: String, args  :: [SomeExpr] }
-  | MaxIterationsReached
+  | MaxIterationsReached  { pc :: Int, addr :: Addr }
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
@@ -581,7 +581,7 @@ data VM = VM
   , traces         :: Zipper.TreePos Zipper.Empty Trace
   , cache          :: Cache
   , burned         :: {-# UNPACK #-} !Word64
-  , iterations     :: Map CodeLocation Int
+  , iterations     :: Map CodeLocation (Int, [Expr EWord]) -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
   , keccakEqs      :: [Prop]
   , allowFFI       :: Bool
@@ -728,9 +728,9 @@ type CodeLocation = (Addr, Int)
 -- | The cache is data that can be persisted for efficiency:
 -- any expensive query that is constant at least within a block.
 data Cache = Cache
-  { fetchedContracts :: Map Addr Contract,
-    fetchedStorage :: Map W256 (Map W256 W256),
-    path :: Map (CodeLocation, Int) Bool
+  { fetchedContracts :: Map Addr Contract
+  , fetchedStorage :: Map W256 (Map W256 W256)
+  , path :: Map (CodeLocation, Int) Bool
   } deriving (Show, Generic)
 
 instance Semigroup Cache where
@@ -741,9 +741,9 @@ instance Semigroup Cache where
     }
 
 instance Monoid Cache where
-  mempty = Cache { fetchedContracts = mempty,
-                   fetchedStorage = mempty,
-                   path = mempty
+  mempty = Cache { fetchedContracts = mempty
+                 , fetchedStorage = mempty
+                 , path = mempty
                  }
 
 unifyCachedStorage :: Map W256 W256 -> Map W256 W256 -> Map W256 W256

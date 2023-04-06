@@ -421,14 +421,14 @@ formatPartial :: PartialExec -> Text
 formatPartial = \case
   (UnexpectedSymbolicArg pc msg args) -> T.unlines
     [ "Unexpected Symbolic Arguments to Opcode"
-    , indent 2 $ T.unlines $
+    , indent 2 $ T.unlines
       [ "msg: " <> T.pack (show msg)
       , "program counter: " <> T.pack (show pc)
       , "arguments: "
       , indent 2 $ T.unlines . fmap formatSomeExpr $ args
       ]
     ]
-  MaxIterationsReached -> "Max Iterations Reached"
+  MaxIterationsReached pc addr -> T.pack $ "Max Iterations Reached in contract: " <> show addr <> " pc: " <> show pc
 
 formatSomeExpr :: SomeExpr -> Text
 formatSomeExpr (SomeExpr e) = formatExpr e

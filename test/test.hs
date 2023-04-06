@@ -700,6 +700,65 @@ tests = testGroup "hevm"
         let testFile = "test/contracts/fail/cheatCodes.sol"
         runDappTestCustom testFile "testBadFFI" Nothing False Nothing >>= assertEqual "test result" False
     ]
+  , testGroup "Max-Iterations"
+    [ testCase "concrete-loops-reached" $ do
+        Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function fun() external payable returns (uint) {
+                uint count = 0;
+                for (uint i = 0; i < 5; i++) count++;
+                return count;
+              }
+            }
+            |]
+        (e, [Qed _]) <- withSolvers Z3 1 Nothing $
+          \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun()" [])) [] (defaultVeriOpts{ maxIter = Just 1 })
+        assertBool "The expression is not partial" $ isPartial e
+    , testCase "concrete-loops-not-reached" $ do
+        Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function fun() external payable returns (uint) {
+                uint count = 0;
+                for (uint i = 0; i < 5; i++) count++;
+                return count;
+              }
+            }
+            |]
+        (e, [Qed _]) <- withSolvers Z3 1 Nothing $
+          \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun()" [])) [] (defaultVeriOpts{ maxIter = Just 6 })
+        assertBool "The expression is partial" $ not $ isPartial e
+    , testCase "symbolic-loops-reached" $ do
+        Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function fun(uint j) external payable returns (uint) {
+                uint count = 0;
+                for (uint i = 0; i < j; i++) count++;
+                return count;
+              }
+            }
+            |]
+        (e, [Qed _]) <- withSolvers Z3 1 Nothing $
+          \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] (defaultVeriOpts{ maxIter = Just 5 })
+        assertBool "The expression is not partial" $ Expr.containsNode isPartial e
+    , testCase "symbolic-loops-not-reached" $ do
+        Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function fun(uint j) external payable returns (uint) {
+                require(j <= 3);
+                uint count = 0;
+                for (uint i = 0; i < j; i++) count++;
+                return count;
+              }
+            }
+            |]
+        (e, [Qed _]) <- withSolvers Z3 1 Nothing $
+          \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] (defaultVeriOpts{ maxIter = Just 5, askSmtIters = Just 3 })
+        assertBool "The expression is not partial" $ Expr.containsNode isPartial e
+    ]
   , testGroup "Symbolic execution"
       [
      testCase "require-test" $ do
