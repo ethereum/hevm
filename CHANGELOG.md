@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+## Added
+
+- A new stack based loop detection heuristic
+- Analysis of partial execution traces is now supported
+
+## Changed
+
+- The default value for `--ask-smt-iterations` has been changed to 1
+- The SMT solver is never queried for branch conditions that do not occur in a loop (as determined by the loop detection heuristic)
+
+## Fixed
+
+- `--max-iterations` is respected in cases where path conditions have become inconsistent
+- `--max-iterations` is now respected for loops with a concrete branch condition
+
 ## [0.50.4] - 2023-03-17
 
 ### Fixed
