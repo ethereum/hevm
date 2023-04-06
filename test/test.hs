@@ -712,8 +712,10 @@ tests = testGroup "hevm"
               }
             }
             |]
+        let sig = Just $ Sig "fun()" []
+            opts = defaultVeriOpts{ maxIter = Just 3 }
         (e, [Qed _]) <- withSolvers Z3 1 Nothing $
-          \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun()" [])) [] (defaultVeriOpts{ maxIter = Just 1 })
+          \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBool "The expression is not partial" $ isPartial e
     , testCase "concrete-loops-not-reached" $ do
         Just c <- solcRuntime "C"
@@ -726,8 +728,11 @@ tests = testGroup "hevm"
               }
             }
             |]
+
+        let sig = Just $ Sig "fun()" []
+            opts = defaultVeriOpts{ maxIter = Just 6 }
         (e, [Qed _]) <- withSolvers Z3 1 Nothing $
-          \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun()" [])) [] (defaultVeriOpts{ maxIter = Just 6 })
+          \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBool "The expression is partial" $ not $ isPartial e
     , testCase "symbolic-loops-reached" $ do
         Just c <- solcRuntime "C"
@@ -743,6 +748,26 @@ tests = testGroup "hevm"
         (e, [Qed _]) <- withSolvers Z3 1 Nothing $
           \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] (defaultVeriOpts{ maxIter = Just 5 })
         assertBool "The expression is not partial" $ Expr.containsNode isPartial e
+    , testCase "inconsistent-paths" $ do
+        Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              function fun(uint j) external payable returns (uint) {
+                require(j <= 3);
+                uint count = 0;
+                for (uint i = 0; i < j; i++) count++;
+                return count;
+              }
+            }
+            |]
+        let sig = Just $ Sig "fun(uint256)" [AbiUIntType 256]
+            -- we dont' ask the solver about the loop condition until we're
+            -- already in an inconsistent path (i == 5, j <= 3, i < j), so we
+            -- will continue looping here until we hit max iterations
+            opts = defaultVeriOpts{ maxIter = Just 10, askSmtIters = Just 5 }
+        (e, [Qed _]) <- withSolvers Z3 1 Nothing $
+          \s -> checkAssert s defaultPanicCodes c sig [] opts
+        assertBool "The expression is not partial" $ Expr.containsNode isPartial e
     , testCase "symbolic-loops-not-reached" $ do
         Just c <- solcRuntime "C"
             [i|
@@ -755,9 +780,11 @@ tests = testGroup "hevm"
               }
             }
             |]
+        let sig = Just $ Sig "fun(uint256)" [AbiUIntType 256]
+            opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = Just 1 }
         (e, [Qed _]) <- withSolvers Z3 1 Nothing $
-          \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] (defaultVeriOpts{ maxIter = Just 5, askSmtIters = Just 3 })
-        assertBool "The expression is not partial" $ Expr.containsNode isPartial e
+          \s -> checkAssert s defaultPanicCodes c sig [] opts
+        assertBool "The expression is partial" $ not (Expr.containsNode isPartial e)
     ]
   , testGroup "Symbolic execution"
       [
@@ -835,17 +862,9 @@ tests = testGroup "hevm"
           }
         }
         |]
-      let
-        opts = VeriOpts
-          { simp = False
-          , debug = False
-          , maxIter = Nothing
-          , askSmtIters = Nothing
-          , rpcInfo = Nothing
-          }
-        calldata' = Just (Sig "checkval(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
+      let sig = Just (Sig "checkval(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
       (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
-        checkAssert s defaultPanicCodes c calldata' [] opts
+        checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
       putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
      -- TODO look at tests here for SAR: https://github.com/dapphub/dapptools/blob/01ef8ea418c3fe49089a44d56013d8fcc34a1ec2/src/dapp-tests/pass/constantinople.sol#L250
@@ -2059,12 +2078,11 @@ tests = testGroup "hevm"
               }
           |]
         withSolvers Z3 3 Nothing $ \s -> do
-          let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 2, askSmtIters = Just 2, rpcInfo = Nothing}
-          a <- equivalenceCheck s aPrgm bPrgm myVeriOpts (mkCalldata Nothing [])
+          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqual "Must be different" (any isCex a) True
           return ()
       , testCase "eq-all-yul-optimization-tests" $ do
-        let myVeriOpts = VeriOpts{ simp = True, debug = False, maxIter = Just 5, askSmtIters = Just 20, rpcInfo = Nothing }
+        let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = Just 20 }
             ignoredTests = [
                     -- unbounded loop --
                     "commonSubexpressionEliminator/branches_for.yul"
@@ -2282,7 +2300,7 @@ tests = testGroup "hevm"
                 False -> recursiveList ax (a:b)
           recursiveList [] b = pure b
         files <- recursiveList fullpaths []
-        let filesFiltered = filter (\file -> not $ any (\filt -> Data.List.isSubsequenceOf filt file) ignoredTests) files
+        let filesFiltered = filter (\file -> not $ any (`isSubsequenceOf` file) ignoredTests) files
 
         -- Takes one file which follows the Solidity Yul optimizer unit tests format,
         -- extracts both the nonoptimized and the optimized versions, and checks equivalence.
@@ -2311,7 +2329,7 @@ tests = testGroup "hevm"
             filteredBSym = symbolicMem [ replaceAll "" $ x *=~[re|^//|] | x <- onlyAfter [re|^// step:|] unfiltered, not $ x =~ [re|^$|] ]
           start <- getCurrentTime
           putStrLn $ "Checking file: " <> f
-          when myVeriOpts.debug $ do
+          when opts.debug $ do
             putStrLn "-------------Original Below-----------------"
             mapM_ putStrLn unfiltered
             putStrLn "------------- Filtered A + Symb below-----------------"
@@ -2323,7 +2341,7 @@ tests = testGroup "hevm"
           Just bPrgm <- yul "" $ T.pack $ unlines filteredBSym
           procs <- getNumProcessors
           withSolvers CVC5 (num procs) (Just 100) $ \s -> do
-            res <- equivalenceCheck s aPrgm bPrgm myVeriOpts (mkCalldata Nothing [])
+            res <- equivalenceCheck s aPrgm bPrgm opts (mkCalldata Nothing [])
             end <- getCurrentTime
             case any isCex res of
               False -> do

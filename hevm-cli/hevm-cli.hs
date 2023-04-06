@@ -104,6 +104,7 @@ data Command w
       , assertions    :: w ::: Maybe [Word256]    <?> "Comma seperated list of solc panic codes to check for (default: everything except arithmetic overflow)"
       , askSmtIterations :: w ::: Maybe Integer   <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
       , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores)"
+      , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: ByteString       <?> "Bytecode of the first program"
@@ -117,6 +118,7 @@ data Command w
       , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
       , smtdebug      :: w ::: Bool             <?> "Print smt queries sent to the solver"
       , askSmtIterations :: w ::: Maybe Integer <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
+      , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString <?> "Program bytecode"
@@ -168,6 +170,7 @@ data Command w
       , ffi           :: w ::: Bool                     <?> "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)"
       , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in milliseconds (default: 60000)"
       , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point"
+      , loopDetectionHeuristic :: w ::: LoopHeuristic   <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , askSmtIterations :: w ::: Maybe Integer         <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
       }
   | Version
@@ -308,6 +311,7 @@ equivalence cmd = do
                           , debug = False
                           , maxIter = cmd.maxIterations
                           , askSmtIters = cmd.askSmtIterations
+                          , loopHeuristic = cmd.loopDetectionHeuristic
                           , rpcInfo = Nothing
                           }
   calldata <- buildCalldata cmd
@@ -389,7 +393,14 @@ assert cmd = do
         srcInfo
         preState
     else do
-      let opts = VeriOpts { simp = True, debug = cmd.smtdebug, maxIter = cmd.maxIterations, askSmtIters = cmd.askSmtIterations, rpcInfo = rpcinfo}
+      let opts = VeriOpts {
+        simp = True,
+        debug = cmd.smtdebug,
+        maxIter = cmd.maxIterations,
+        askSmtIters = cmd.askSmtIterations,
+        loopHeuristic = cmd.loopDetectionHeuristic,
+        rpcInfo = rpcinfo
+      }
       (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
       case res of
         [Qed _] -> do

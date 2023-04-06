@@ -655,7 +655,6 @@ exec1 = do
                         Just i -> checkJump i xs
                   in do
                     loc <- codeloc
-                    iteration <- use (#iterations % at loc)
                     branch loc y jump
             _ -> underrun
 
