@@ -278,10 +278,10 @@ interpret fetcher maxIter askSmtIters heuristic =
               case cond of
                 -- is the condition concrete?
                 Lit c ->
-                  -- have we breached max iterations, are we inside a loop?
+                  -- have we reached max iterations, are we inside a loop?
                   case (maxIterationsReached vm maxIter, isLoopHead heuristic vm) of
                     -- Yes. return a partial leaf
-                    (Just _, True) ->
+                    (Just _, Just True) ->
                       pure $ Partial vm.keccakEqs $ MaxIterationsReached vm.state.pc vm.state.contract
                     -- No. keep executing
                     _ ->
@@ -289,22 +289,21 @@ interpret fetcher maxIter askSmtIters heuristic =
 
                 -- the condition is symbolic
                 _ ->
-                  -- have we breached max iterations, are we inside a loop?
-                  case (maxIterationsReached vm maxIter, isLoopHead heuristic vm) of
-                    -- Yes.
-                    -- continue execution down the opposite branch than the one that
-                    -- got us to this point and return a partial leaf for the other side
-                    (Just n, True) -> do
+                  -- are in we a loop, have we hit maxIters, have we hit askSmtIters?
+                  case (isLoopHead heuristic vm, askSmtItersReached vm askSmtIters, maxIterationsReached vm maxIter) of
+                    -- we're in a loop and maxIters has been reached
+                    (Just True, _, Just n) -> do
+                      -- continue execution down the opposite branch than the one that
+                      -- got us to this point and return a partial leaf for the other side
                       a <- interpret fetcher maxIter askSmtIters heuristic (Stepper.evm (continue (Case $ not n)) >>= k)
                       pure $ ITE cond a (Partial vm.keccakEqs (MaxIterationsReached vm.state.pc vm.state.contract))
-                    -- No. check askSmtIters and either consult the solver or branch as required
-                    _ -> do
-                      codelocation <- getCodeLocation <$> get
-                      (count, _) <- fromMaybe (0, []) <$> use (#iterations % at codelocation)
-
-                      if num count < askSmtIters
-                      then interpret fetcher maxIter askSmtIters heuristic (Stepper.evm (continue EVM.Types.Unknown) >>= k)
-                      else performQuery
+                    -- we're in a loop and askSmtIters has been reached
+                    (Just True, True, _) ->
+                      -- ask the smt solver about the loop condition
+                      performQuery
+                    -- otherwise just try both branches and don't ask the solver
+                    _ ->
+                      interpret fetcher maxIter askSmtIters heuristic (Stepper.evm (continue EVM.Types.Unknown) >>= k)
 
             _ -> performQuery
 
@@ -321,6 +320,12 @@ maxIterationsReached vm (Just maxIter) =
      then Map.lookup (codelocation, iters - 1) vm.cache.path
      else Nothing
 
+askSmtItersReached :: VM -> Integer -> Bool
+askSmtItersReached vm askSmtIters = let
+    codelocation = getCodeLocation vm
+    (iters, _) = view (at codelocation % non (0, [])) vm.iterations
+  in askSmtIters <= num iters
+
 {- | Loop head detection heuristic
 
  The main thing we wish to differentiate between, are actual loop heads, and branch points inside of internal functions that are called multiple times.
@@ -329,16 +334,16 @@ maxIterationsReached vm (Just maxIter) =
 
  This heuristic is not perfect, and can certainly be tricked, but should generally be good enough for most compiler generated and non pathological user generated loops.
  -}
-isLoopHead :: LoopHeuristic -> VM -> Bool
-isLoopHead Naive _ = True
+isLoopHead :: LoopHeuristic -> VM -> Maybe Bool
+isLoopHead Naive _ = Just True
 isLoopHead StackBased vm = let
     loc = getCodeLocation vm
-    (_, oldStack) = fromMaybe
-      (error "Internal Error: code location has not been previously visited")
-      (Map.lookup loc vm.iterations)
+    oldIters = Map.lookup loc vm.iterations
     isValid (Lit wrd) = wrd <= num (maxBound :: Int) && isValidJumpDest vm (num wrd)
     isValid _ = False
-  in filter isValid oldStack == filter isValid vm.state.stack
+  in case oldIters of
+       Just (_, oldStack) -> Just $ filter isValid oldStack == filter isValid vm.state.stack
+       Nothing -> Nothing
 
 type Precondition = VM -> Prop
 type Postcondition = VM -> Expr End -> Prop

@@ -791,6 +791,18 @@ simplify e = if (mapExpr go e == e)
     go (Max (Lit 0) a) = a
     go (Min (Lit 0) _) = Lit 0
 
+    go o@(LT (Max (Lit a) _) (Lit b))
+      | a >= b = Lit 0
+      | otherwise = o
+    go o@(SLT (Sub (Max (Lit a) _) (Lit b)) (Lit c))
+      = let sa, sb, sc :: Int256
+            sa = fromIntegral a
+            sb = fromIntegral b
+            sc = fromIntegral c
+        in if sa >= sb && sa - sb >= sc
+           then Lit 0
+           else o
+
     go a = a
 
 

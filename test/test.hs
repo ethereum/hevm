@@ -700,7 +700,7 @@ tests = testGroup "hevm"
         let testFile = "test/contracts/fail/cheatCodes.sol"
         runDappTestCustom testFile "testBadFFI" Nothing False Nothing >>= assertEqual "test result" False
     ]
-  , testGroup "Max-Iterations"
+  , testGroup "max-iterations"
     [ testCase "concrete-loops-reached" $ do
         Just c <- solcRuntime "C"
             [i|
@@ -781,6 +781,8 @@ tests = testGroup "hevm"
             }
             |]
         let sig = Just $ Sig "fun(uint256)" [AbiUIntType 256]
+            -- askSmtIters is low enough here to avoid the inconsistent path
+            -- conditions, so we never hit maxIters
             opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 1 }
         (e, [Qed _]) <- withSolvers Z3 1 Nothing $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
