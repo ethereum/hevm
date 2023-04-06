@@ -580,9 +580,12 @@ interpretWithTrace fetcher =
           execWithTrace >>= interpretWithTrace fetcher . k
         Stepper.Run ->
           runWithTrace >>= interpretWithTrace fetcher . k
-        Stepper.Wait q ->
-          do m <- liftIO (fetcher q)
-             zoom _1 (State.state (runState m)) >> interpretWithTrace fetcher (k ())
+        Stepper.Wait q -> case q of
+          PleaseAskSMT (Lit x) _ continue ->
+            interpretWithTrace fetcher (Stepper.evm (continue (Case (x > 0))) >>= k)
+          _ -> do
+            m <- liftIO (fetcher q)
+            zoom _1 (State.state (runState m)) >> interpretWithTrace fetcher (k ())
         Stepper.Ask _ ->
           error "cannot make choice in this interpreter"
         Stepper.IOAct q ->
