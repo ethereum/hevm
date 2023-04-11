@@ -160,17 +160,18 @@ analysis of evm bytecode. It can:</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="hevm-symbolic"><a class="header" href="#hevm-symbolic"><code>hevm symbolic</code></a></h1>
 <pre><code class="language-sh">Usage: hevm symbolic [--code TEXT] [--calldata TEXT] [--address ADDR]
                      [--caller ADDR] [--origin ADDR] [--coinbase ADDR]
-                     [--value W256] [--nonce W256] [--gas W256] [--number W256]
-                     [--timestamp W256] [--basefee W256] [--priority-fee W256]
-                     [--gaslimit W256] [--gasprice W256] [--create]
-                     [--maxcodesize W256] [--prevrandao W256] [--chainid W256]
-                     [--rpc TEXT] [--block W256] [--state STRING]
-                     [--cache STRING] [--json-file STRING] [--dapp-root STRING]
-                     [--storage-model STORAGEMODEL] [--sig TEXT]
-                     [--arg STRING]... [--debug] [--get-models] [--show-tree]
+                     [--value W256] [--nonce W256] [--gas WORD64]
+                     [--number W256] [--timestamp W256] [--basefee W256]
+                     [--priority-fee W256] [--gaslimit WORD64] [--gasprice W256]
+                     [--create] [--maxcodesize W256] [--prev-randao W256]
+                     [--chainid W256] [--rpc TEXT] [--block W256]
+                     [--state STRING] [--cache STRING] [--json-file STRING]
+                     [--dapp-root STRING] [--initial-storage INITIALSTORAGE]
+                     [--sig TEXT] [--arg STRING]... [--debug] [--get-models]
+                     [--show-tree] [--show-reachable-tree]
                      [--smttimeout NATURAL] [--max-iterations INTEGER]
                      [--solver TEXT] [--smtdebug] [--assertions [WORD256]]
-                     [--ask-smt-iterations INTEGER]
+                     [--ask-smt-iterations INTEGER] [--num-solvers NATURAL]
 
 Available options:
   -h,--help                Show this help text
@@ -182,43 +183,42 @@ Available options:
   --coinbase ADDR          Block: coinbase
   --value W256             Tx: Eth amount
   --nonce W256             Nonce of origin
-  --gas W256               Tx: gas amount
+  --gas WORD64             Tx: gas amount
   --number W256            Block: number
   --timestamp W256         Block: timestamp
   --basefee W256           Block: base fee
   --priority-fee W256      Tx: priority fee
-  --gaslimit W256          Tx: gas limit
+  --gaslimit WORD64        Tx: gas limit
   --gasprice W256          Tx: gas price
   --create                 Tx: creation
   --maxcodesize W256       Block: max code size
-  --prevrandao W256        Block: prevrandao
+  --prev-randao W256       Block: prevRandao
   --chainid W256           Env: chainId
   --rpc TEXT               Fetch state from a remote node
   --block W256             Block state is be fetched from
   --state STRING           Path to state repository
   --cache STRING           Path to rpc cache repository
-  --json-file STRING       Filename or path to dapp build output (default: out/*.solc.json)
+  --json-file STRING       Filename or path to dapp build output (default:
+                           out/*.solc.json)
   --dapp-root STRING       Path to dapp project root directory (default: . )
-  --storage-model STORAGEMODEL
-                           Select storage model: ConcreteS, SymbolicS (default)
-                           or InitialS
+  --initial-storage INITIALSTORAGE
+                           Starting state for storage: Empty, Abstract, Concrete &lt;STORE&gt; (default Abstract)
   --sig TEXT               Signature of types to decode / encode
   --arg STRING             Values to encode
   --debug                  Run interactively
   --get-models             Print example testcase for each execution path
   --show-tree              Print branches explored in tree view
-  --smttimeout NATURAL     Timeout given to SMT solver in milliseconds (default:
-                           60000)
-  --max-iterations INTEGER Number of times we may revisit a particular branching
-                           point
+  --show-reachable-tree    Print only reachable branches explored in tree view
+  --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
+  --max-iterations INTEGER Number of times we may revisit a particular branching point
   --solver TEXT            Used SMT solver: z3 (default) or cvc5
   --smtdebug               Print smt queries sent to the solver
-  --assertions [WORD256]   Comma separated list of solc panic codes to check for
-                           (default: everything except arithmetic overflow)
+  --assertions [WORD256]   Comma seperated list of solc panic codes to check for (default: user defined assertions)
   --ask-smt-iterations INTEGER
                            Number of times we may revisit a particular branching
                            point before we consult the smt solver to check
                            reachability (default: 5)
+  --num-solvers NATURAL    Number of solver instances to use (default: number of cpu cores)
 </code></pre>
 <p>Run a symbolic execution against the given parameters, searching for assertion violations.</p>
 <p>Counterexamples will be returned for any reachable assertion violations. Where an assertion
@@ -249,12 +249,16 @@ If <code>--sig</code> is given, calldata is assumed to be of the form suggested 
 This can be useful for automatic test case generation.</p>
 <p>The default timeout for SMT queries is no timeout. If your program is taking longer than a couple of minutes to run,
 you can experiment with configuring the timeout to somewhere around 10s by doing <code>--smttimeout 10000</code></p>
-<p>Storage can take one of three forms, defaulting to <code>SymbolicS</code> unless <code>--create</code> is provided, in which case it defaults to <code>InitialS</code>:</p>
+<p>Storage can be initialized in three ways:</p>
 <ul>
-<li><code>SymbolicS</code>: The default value of SLOAD is a symbolic value without further constraints. SLOAD and SSTORE can operate on symbolic locations.</li>
-<li><code>InitialS</code>: The default value of SLOAD is zero. SLOAD and SSTORE can operate on symbolic locations.</li>
-<li><code>ConcreteS</code>: Storage defaults to zero or fetched from an rpc node if <code>--rpc</code> is provided. SLOAD or SSTOREs on symbolic locations will result in a runtime error.</li>
+<li><code>Empty</code>: all storage slots for all contracts are initialized to zero</li>
+<li><code>Abstract</code>: all storage slots are initialized as unconstrained abstract values</li>
+<li><code>Concrete &lt;STORE&gt;</code>: all storage slots except those mentioned in the <STORE> spec are initialized to zero</li>
 </ul>
+<p>When specifying a starting concrete store, the initial state can be passed to cli as a list of tuples. For example:</p>
+<pre><code>hevm symbolic --code &lt;CODE&gt; --initial-storage &quot;Concrete [(0x0, [(0x1, 0x100)])]&quot;
+</code></pre>
+<p>Would execute with a starting storage state, where address 0x0 has storage slot 0x1 set to 0x100.</p>
 <p><code>hevm</code> uses an eager approach for symbolic execution, meaning that it will first attempt to explore
 all branches in the program (without querying the smt solver to check if they are reachable or not).
 Once the full execution tree has been explored, the postcondition is checked against all leaves, and
@@ -267,19 +271,32 @@ iterations is known in advance, you may be able to speed up execution by setting
 appropriate value.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="hevm-equivalence"><a class="header" href="#hevm-equivalence"><code>hevm equivalence</code></a></h1>
 <pre><code class="language-sh">Usage: hevm equivalence --code-a TEXT --code-b TEXT [--sig TEXT]
+                        [--arg STRING]... [--calldata TEXT]
+                        [--smttimeout NATURAL] [--max-iterations INTEGER]
+                        [--solver TEXT] [--smtoutput] [--smtdebug]
+                        [--ask-smt-iterations INTEGER]
+
+Available options:
+  -h,--help                Show this help text
+  --code-a TEXT            Bytecode of the first program
+  --code-b TEXT            Bytecode of the second program
+  --sig TEXT               Signature of types to decode / encode
+  --arg STRING             Values to encode
+  --calldata TEXT          Tx: calldata
+  --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
+  --max-iterations INTEGER Number of times we may revisit a particular branching
+                           point
+  --solver TEXT            Used SMT solver: z3 (default) or cvc5
+  --smtoutput              Print verbose smt output
+  --smtdebug               Print smt queries sent to the solver
+  --ask-smt-iterations INTEGER
+                           Number of times we may revisit a particular branching
+                           point before we consult the smt solver to check
+                           reachability (default: 5)
 </code></pre>
 <p>Symbolically execute both the code given in <code>--code-a</code> and <code>--code-b</code> and try to prove equivalence between their outputs and storages.</p>
 <p>If <code>--sig</code> is given, calldata is assumed to take the form of the function given.
 If left out, calldata is a fully abstract buffer of at most 256 bytes.</p>
-<h3 id="hevm-dapp-test"><a class="header" href="#hevm-dapp-test"><code>hevm dapp-test</code></a></h3>
-<pre><code>Usage: hevm dapp-test [--json-file STRING] [--dapp-root STRING] [--debug]
-                      [--fuzz-runs INT] [--replay (TEXT,BYTESTRING)] [--depth INT]
-                      [--rpc TEXT] [--verbose INT] [--coverage] [--state STRING]
-                      [--match STRING] [--smttimeout INT] [--max-iterations INT]
-                      [--solver STRING] [--cache STRING] [--cov-match STRING]
-</code></pre>
-<p>Run any ds-test testing functions. Run under the hood whenever <code>dapp test</code> or <code>dapp debug</code> is called. Testing functions prefixed with <code>test</code> will be executed concretely. If concrete test functions have been given arguments, they will be randomly instantiated and run <code>--fuzz-runs</code> number of times. If testing functions are prefixed with <code>prove</code> they will be symbolically executed. In <code>--debug</code> mode, property based tests will not be available unless given specific arguments using <code>--replay</code>.</p>
-<p>The <code>smttimeout</code>, <code>max-iterations</code> and <code>solver</code> options have the same semantics as in <code>hevm symbolic</code></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="hevm-exec"><a class="header" href="#hevm-exec"><code>hevm exec</code></a></h1>
 <p>Run an EVM computation using specified parameters, using an interactive debugger when <code>--debug</code> flag is given.</p>
 <pre><code class="language-sh">Usage: hevm exec [--code TEXT] [--calldata TEXT] [--address ADDR]
@@ -308,7 +325,7 @@ cd mystate &amp;&amp; git init &amp;&amp; git commit --allow-empty -m &quot;init
 hevm exec --code 0x600160015500 --state mystate --gas 0xffffff
 cd mystate &amp;&amp; git show HEAD
 </code></pre>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="hevm-dapp-test-1"><a class="header" href="#hevm-dapp-test-1"><code>hevm dapp-test</code></a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="hevm-dapp-test"><a class="header" href="#hevm-dapp-test"><code>hevm dapp-test</code></a></h1>
 <pre><code>Usage: hevm dapp-test [--json-file STRING] [--dapp-root STRING] [--debug]
                       [--jsontrace] [--fuzz-runs INT] [--depth INT]
                       [--replay (TEXT,BYTESTRING)] [--rpc TEXT] [--verbose INT]
@@ -341,8 +358,7 @@ Available options:
   --ffi                    Allow the usage of the hevm.ffi() cheatcode (WARNING:
                            this allows test authors to execute arbitrary code on
                            your machine)
-  --smttimeout INTEGER     Timeout given to SMT solver in milliseconds (default:
-                           60000)
+  --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
   --max-iterations INTEGER Number of times we may revisit a particular branching
                            point
   --ask-smt-iterations INTEGER
@@ -350,6 +366,8 @@ Available options:
                            point before we consult the smt solver to check
                            reachability (default: 5)
 </code></pre>
+<p>Run any ds-test testing functions. Run under the hood whenever <code>dapp test</code> or <code>dapp debug</code> is called. Testing functions prefixed with <code>test</code> will be executed concretely. If concrete test functions have been given arguments, they will be randomly instantiated and run <code>--fuzz-runs</code> number of times. If testing functions are prefixed with <code>prove</code> they will be symbolically executed. In <code>--debug</code> mode, property based tests will not be available unless given specific arguments using <code>--replay</code>.</p>
+<p>The <code>smttimeout</code>, <code>max-iterations</code> and <code>solver</code> options have the same semantics as in <code>hevm symbolic</code></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="controlling-the-unit-testing-environment"><a class="header" href="#controlling-the-unit-testing-environment">controlling the unit testing environment</a></h1>
 <h2 id="cheat-codes"><a class="header" href="#cheat-codes">Cheat codes</a></h2>
 <p>Since Hevm is an EVM implementation mainly dedicated to testing and exploration, it features a set of <code>cheat codes</code> which can manipulate the environment in which the execution is run.</p>

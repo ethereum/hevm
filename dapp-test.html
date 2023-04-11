@@ -177,8 +177,7 @@ Available options:
   --ffi                    Allow the usage of the hevm.ffi() cheatcode (WARNING:
                            this allows test authors to execute arbitrary code on
                            your machine)
-  --smttimeout INTEGER     Timeout given to SMT solver in milliseconds (default:
-                           60000)
+  --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
   --max-iterations INTEGER Number of times we may revisit a particular branching
                            point
   --ask-smt-iterations INTEGER
@@ -186,6 +185,8 @@ Available options:
                            point before we consult the smt solver to check
                            reachability (default: 5)
 </code></pre>
+<p>Run any ds-test testing functions. Run under the hood whenever <code>dapp test</code> or <code>dapp debug</code> is called. Testing functions prefixed with <code>test</code> will be executed concretely. If concrete test functions have been given arguments, they will be randomly instantiated and run <code>--fuzz-runs</code> number of times. If testing functions are prefixed with <code>prove</code> they will be symbolically executed. In <code>--debug</code> mode, property based tests will not be available unless given specific arguments using <code>--replay</code>.</p>
+<p>The <code>smttimeout</code>, <code>max-iterations</code> and <code>solver</code> options have the same semantics as in <code>hevm symbolic</code></p>
 
                     </main>
 

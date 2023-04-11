@@ -146,19 +146,32 @@
                     <main>
                         <h1 id="hevm-equivalence"><a class="header" href="#hevm-equivalence"><code>hevm equivalence</code></a></h1>
 <pre><code class="language-sh">Usage: hevm equivalence --code-a TEXT --code-b TEXT [--sig TEXT]
+                        [--arg STRING]... [--calldata TEXT]
+                        [--smttimeout NATURAL] [--max-iterations INTEGER]
+                        [--solver TEXT] [--smtoutput] [--smtdebug]
+                        [--ask-smt-iterations INTEGER]
+
+Available options:
+  -h,--help                Show this help text
+  --code-a TEXT            Bytecode of the first program
+  --code-b TEXT            Bytecode of the second program
+  --sig TEXT               Signature of types to decode / encode
+  --arg STRING             Values to encode
+  --calldata TEXT          Tx: calldata
+  --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
+  --max-iterations INTEGER Number of times we may revisit a particular branching
+                           point
+  --solver TEXT            Used SMT solver: z3 (default) or cvc5
+  --smtoutput              Print verbose smt output
+  --smtdebug               Print smt queries sent to the solver
+  --ask-smt-iterations INTEGER
+                           Number of times we may revisit a particular branching
+                           point before we consult the smt solver to check
+                           reachability (default: 5)
 </code></pre>
 <p>Symbolically execute both the code given in <code>--code-a</code> and <code>--code-b</code> and try to prove equivalence between their outputs and storages.</p>
 <p>If <code>--sig</code> is given, calldata is assumed to take the form of the function given.
 If left out, calldata is a fully abstract buffer of at most 256 bytes.</p>
-<h3 id="hevm-dapp-test"><a class="header" href="#hevm-dapp-test"><code>hevm dapp-test</code></a></h3>
-<pre><code>Usage: hevm dapp-test [--json-file STRING] [--dapp-root STRING] [--debug]
-                      [--fuzz-runs INT] [--replay (TEXT,BYTESTRING)] [--depth INT]
-                      [--rpc TEXT] [--verbose INT] [--coverage] [--state STRING]
-                      [--match STRING] [--smttimeout INT] [--max-iterations INT]
-                      [--solver STRING] [--cache STRING] [--cov-match STRING]
-</code></pre>
-<p>Run any ds-test testing functions. Run under the hood whenever <code>dapp test</code> or <code>dapp debug</code> is called. Testing functions prefixed with <code>test</code> will be executed concretely. If concrete test functions have been given arguments, they will be randomly instantiated and run <code>--fuzz-runs</code> number of times. If testing functions are prefixed with <code>prove</code> they will be symbolically executed. In <code>--debug</code> mode, property based tests will not be available unless given specific arguments using <code>--replay</code>.</p>
-<p>The <code>smttimeout</code>, <code>max-iterations</code> and <code>solver</code> options have the same semantics as in <code>hevm symbolic</code></p>
 
                     </main>
 
