@@ -23,6 +23,10 @@ contract Prankster {
     }
 }
 
+contract Payable {
+    function hi() public payable {}
+}
+
 contract CheatCodes is DSTest {
     address store = address(new HasStorage());
     Hevm hevm = Hevm(HEVM_ADDRESS);
@@ -100,5 +104,22 @@ contract CheatCodes is DSTest {
         hevm.prank(address(0xdeadbeef));
         assertEq(prankster.prankme(), address(0xdeadbeef));
         assertEq(prankster.prankme(), address(this));
+    }
+
+    function test_prank_val() public {
+        address from = address(0x1312);
+        uint amt = 10;
+
+        Payable target = new Payable();
+        from.call{value: amt}("");
+
+        uint preBal = from.balance;
+
+        hevm.prank(from);
+        target.hi{value : amt}();
+
+        uint postBal = from.balance;
+
+        assertEq(preBal - postBal, amt);
     }
 }

@@ -18,6 +18,10 @@ foundry repo, and all unit tests will be executed (including prove tests).
 
 `hevm test` no longer supports parsing solidity output in the combined json format.
 
+### Fixed
+
+- The `prank` cheatcode now transfers value from the correct address
+
 ## [0.50.4] - 2023-03-17
 
 ### Fixed
