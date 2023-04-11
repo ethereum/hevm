@@ -63,7 +63,7 @@ tests = testGroup "rpc"
     -- execute against remote state from a ds-test harness
     [ testCase "dapp-test" $ do
         let testFile = "test/contracts/pass/rpc.sol"
-        runDappTestCustom testFile ".*" Nothing False testRpcInfo Foundry >>= assertEqual "test result" True
+        runSolidityTestCustom testFile ".*" Nothing False testRpcInfo Foundry >>= assertEqual "test result" True
 
     -- concretely exec "transfer" on WETH9 using remote rpc
     -- https://etherscan.io/token/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2#code
