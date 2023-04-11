@@ -1,11 +1,17 @@
+{-# Language QuasiQuotes #-}
+
 module EVM.Test.Utils where
 
+import Data.String.Here
 import Data.Text
+import GHC.IO.Handle (hClose)
 import qualified Paths_hevm as Paths
 import System.Directory
 import System.IO.Temp
 import System.Process
 import System.Exit
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
 
 import EVM.Solidity
 import EVM.Solvers
@@ -14,8 +20,8 @@ import EVM.UnitTest
 import EVM.Fetch (RpcInfo)
 import qualified EVM.TTY as TTY
 
-runDappTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> IO Bool
-runDappTestCustom testFile match maxIter ffiAllowed rpcinfo projectType = do
+runSolidityTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> IO Bool
+runSolidityTestCustom testFile match maxIter ffiAllowed rpcinfo projectType = do
   withSystemTempDirectory "dapp-test" $ \root -> do
     compile projectType root testFile >>= \case
       Left e -> error e
@@ -24,11 +30,11 @@ runDappTestCustom testFile match maxIter ffiAllowed rpcinfo projectType = do
           opts <- testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
           unitTest opts contracts Nothing
 
-runDappTest :: FilePath -> Text -> IO Bool
-runDappTest testFile match = runDappTestCustom testFile match Nothing True Nothing Foundry
+runSolidityTest :: FilePath -> Text -> IO Bool
+runSolidityTest testFile match = runSolidityTestCustom testFile match Nothing True Nothing Foundry
 
-debugDappTest :: FilePath -> RpcInfo -> IO ()
-debugDappTest testFile rpcinfo = do
+debugSolidityTest :: FilePath -> RpcInfo -> IO ()
+debugSolidityTest testFile rpcinfo = do
   withSystemTempDirectory "dapp-test" $ \root -> do
     compile DappTools root testFile >>= \case
       Left e -> error e
@@ -63,21 +69,21 @@ testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
     , ffiAllowed = allowFFI
     }
 
-tool :: ProjectType -> String
-tool = \case
-  Foundry -> "forge"
-  DappTools -> "dapp"
-
 compile :: ProjectType -> FilePath -> FilePath -> IO (Either String BuildOutput)
-compile projType root src = do
+compile DappTools root src = do
+  json <- compileWithDSTest src
+  createDirectory (root <> "/out")
+  T.writeFile (root <> "/out/dapp.sol.json") json
+  readBuildOutput root DappTools
+compile Foundry root src = do
   createDirectory (root <> "/src")
   writeFile (root <> "/src/unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
   initLib (root <> "/lib/ds-test") "test/contracts/lib/test.sol" "test.sol"
   initLib (root <> "/lib/tokens") "test/contracts/lib/erc20.sol" "erc20.sol"
-  r@(res,_,_) <- readProcessWithExitCode (tool projType) ["build", "--root", root] ""
+  r@(res,_,_) <- readProcessWithExitCode "forge" ["build", "--root", root] ""
   case res of
     ExitFailure _ -> pure . Left $ "compilation failed: " <> show r
-    ExitSuccess -> readBuildOutput root projType
+    ExitSuccess -> readBuildOutput root Foundry
   where
     initLib :: FilePath -> FilePath -> FilePath -> IO ()
     initLib tld srcFile dstFile = do
@@ -89,3 +95,62 @@ compile projType root src = do
       callProcess "git" ["--git-dir", tld <> "/.git", "--work-tree", tld, "add", tld]
       _ <- readProcessWithExitCode "git" ["--git-dir", tld <> "/.git", "--work-tree", tld, "--no-gpg-sign", "commit", "-m"] ""
       pure ()
+
+-- We don't want to depend on dapptools here, so we cheat and just call solc with the same options that dapp itself uses
+compileWithDSTest :: FilePath -> IO Text
+compileWithDSTest src =
+  withSystemTempFile "input.json" $ \file handle -> do
+    hClose handle
+    dsTest <- readFile =<< Paths.getDataFileName "test/contracts/lib/test.sol"
+    erc20 <- readFile =<< Paths.getDataFileName "test/contracts/lib/erc20.sol"
+    testFilePath <- Paths.getDataFileName src
+    testFile <- readFile testFilePath
+    T.writeFile file
+      [i|
+      {
+        "language": "Solidity",
+        "sources": {
+          "ds-test/test.sol": {
+            "content": ${dsTest}
+          },
+          "tokens/erc20.sol": {
+            "content": ${erc20}
+          },
+          "unit-tests.sol": {
+            "content": ${testFile}
+          }
+        },
+        "settings": {
+          "metadata": {
+            "useLiteralContent": true
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "metadata",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "abi",
+                "storageLayout",
+                "evm.bytecode.sourceMap",
+                "evm.bytecode.linkReferences",
+                "evm.bytecode.generatedSources",
+                "evm.deployedBytecode.sourceMap",
+                "evm.deployedBytecode.linkReferences",
+                "evm.deployedBytecode.generatedSources"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      }
+      |]
+    x <- T.pack <$>
+      readProcess
+        "solc"
+        ["--allow-paths", file, "--standard-json", file]
+        ""
+    return x
+

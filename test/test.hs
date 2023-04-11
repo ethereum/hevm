@@ -656,46 +656,60 @@ tests = testGroup "hevm"
   , testGroup "Dapp-Tests"
     [ testCase "Trivial-Pass" $ do
         let testFile = "test/contracts/pass/trivial.sol"
-        runDappTest testFile ".*" >>= assertEqual "test result" True
+        runSolidityTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "DappTools" $ do
+        -- quick smokecheck to make sure that we can parse dapptools style build outputs
+        let cases =
+              [ ("test/contracts/pass/trivial.sol", ".*", True)
+              , ("test/contracts/pass/invariants.sol", "invariantTestThisBal", True)
+              , ("test/contracts/pass/dsProvePass.sol", "proveEasy", True)
+              , ("test/contracts/fail/trivial.sol", ".*", False)
+              , ("test/contracts/fail/invariantFail.sol", "invariantCount", False)
+              , ("test/contracts/fail/dsProveFail.sol", "prove_add", False)
+              ]
+        results <- forM cases $ \(testFile, match, expected) -> do
+          actual <- runSolidityTestCustom testFile match Nothing False Nothing DappTools
+          pure (actual == expected)
+        assertBool "test result" (and results)
     , testCase "Trivial-Fail" $ do
         let testFile = "test/contracts/fail/trivial.sol"
-        runDappTest testFile "testFalse" >>= assertEqual "test result" False
+        runSolidityTest testFile "testFalse" >>= assertEqual "test result" False
     , testCase "Abstract" $ do
         let testFile = "test/contracts/pass/abstract.sol"
-        runDappTest testFile ".*" >>= assertEqual "test result" True
+        runSolidityTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Constantinople" $ do
         let testFile = "test/contracts/pass/constantinople.sol"
-        runDappTest testFile ".*" >>= assertEqual "test result" True
+        runSolidityTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Prove-Tests-Pass" $ do
         let testFile = "test/contracts/pass/dsProvePass.sol"
-        runDappTest testFile ".*" >>= assertEqual "test result" True
+        runSolidityTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
-        runDappTest testFile "prove_trivial" >>= assertEqual "test result" False
-        runDappTest testFile "prove_add" >>= assertEqual "test result" False
-        --runDappTest testFile "prove_smtTimeout" >>= assertEqual "test result" False
-        runDappTest testFile "prove_multi" >>= assertEqual "test result" False
-        runDappTest testFile "prove_mul" >>= assertEqual "test result" False
+        runSolidityTest testFile "prove_trivial" >>= assertEqual "test result" False
+        runSolidityTest testFile "prove_add" >>= assertEqual "test result" False
+        --runSolidityTest testFile "prove_smtTimeout" >>= assertEqual "test result" False
+        runSolidityTest testFile "prove_multi" >>= assertEqual "test result" False
+        runSolidityTest testFile "prove_mul" >>= assertEqual "test result" False
         -- TODO: implement overflow checking optimizations and enable, currently this runs forever
-        --runDappTest testFile "prove_distributivity" >>= assertEqual "test result" False
-        runDappTest testFile "prove_transfer" >>= assertEqual "test result" False
+        --runSolidityTest testFile "prove_distributivity" >>= assertEqual "test result" False
+        runSolidityTest testFile "prove_transfer" >>= assertEqual "test result" False
     , testCase "Loop-Tests" $ do
         let testFile = "test/contracts/pass/loops.sol"
-        runDappTestCustom testFile "prove_loop" (Just 10) False Nothing Foundry >>= assertEqual "test result" True
-        runDappTestCustom testFile "prove_loop" (Just 100) False Nothing Foundry >>= assertEqual "test result" False
+        runSolidityTestCustom testFile "prove_loop" (Just 10) False Nothing Foundry >>= assertEqual "test result" True
+        runSolidityTestCustom testFile "prove_loop" (Just 100) False Nothing Foundry >>= assertEqual "test result" False
     , testCase "Invariant-Tests-Pass" $ do
         let testFile = "test/contracts/pass/invariants.sol"
-        runDappTest testFile ".*" >>= assertEqual "test result" True
+        runSolidityTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Invariant-Tests-Fail" $ do
         let testFile = "test/contracts/fail/invariantFail.sol"
-        runDappTest testFile "invariantFirst" >>= assertEqual "test result" False
-        runDappTest testFile "invariantCount" >>= assertEqual "test result" False
+        runSolidityTest testFile "invariantFirst" >>= assertEqual "test result" False
+        runSolidityTest testFile "invariantCount" >>= assertEqual "test result" False
     , testCase "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
-        runDappTest testFile ".*" >>= assertEqual "test result" True
+        runSolidityTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Cheat-Codes-Fail" $ do
         let testFile = "test/contracts/fail/cheatCodes.sol"
-        runDappTestCustom testFile "testBadFFI" Nothing False Nothing Foundry >>= assertEqual "test result" False
+        runSolidityTestCustom testFile "testBadFFI" Nothing False Nothing Foundry >>= assertEqual "test result" False
     ]
   , testGroup "Symbolic execution"
       [

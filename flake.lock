@@ -1,23 +1,5 @@
 {
   "nodes": {
-    "dapptools": {
-      "inputs": {
-        "nixpkgs": "nixpkgs"
-      },
-      "locked": {
-        "lastModified": 1677862177,
-        "narHash": "sha256-rcHo6MFUkrY/p8fZUWFvEPoOv2p1ov1FLXYQYTb5mzg=",
-        "owner": "dapphub",
-        "repo": "dapptools",
-        "rev": "f932a37f70b2bd33d24f4d412d7e4f2cec53d1e3",
-        "type": "github"
-      },
-      "original": {
-        "owner": "dapphub",
-        "repo": "dapptools",
-        "type": "github"
-      }
-    },
     "ethereum-tests": {
       "flake": false,
       "locked": {
@@ -84,7 +66,7 @@
     "foundry": {
       "inputs": {
         "flake-utils": "flake-utils_2",
-        "nixpkgs": "nixpkgs_2"
+        "nixpkgs": "nixpkgs"
       },
       "locked": {
         "lastModified": 1677921223,
@@ -103,18 +85,16 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1622820998,
-        "narHash": "sha256-1wobInAwYtngN9M4ZqdcIOXWvoyvPt2vDI9TcOvQyKA=",
+        "lastModified": 1666753130,
+        "narHash": "sha256-Wff1dGPFSneXJLI2c0kkdWTgxnQ416KE6X4KnFkgPYQ=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "aa576357673d609e618d87db43210e49d4bb1789",
+        "rev": "f540aeda6f677354f1e7144ab04352f61aaa0118",
         "type": "github"
       },
       "original": {
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "aa576357673d609e618d87db43210e49d4bb1789",
-        "type": "github"
+        "id": "nixpkgs",
+        "type": "indirect"
       }
     },
     "nixpkgs-solc": {
@@ -135,20 +115,6 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1666753130,
-        "narHash": "sha256-Wff1dGPFSneXJLI2c0kkdWTgxnQ416KE6X4KnFkgPYQ=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "f540aeda6f677354f1e7144ab04352f61aaa0118",
-        "type": "github"
-      },
-      "original": {
-        "id": "nixpkgs",
-        "type": "indirect"
-      }
-    },
-    "nixpkgs_3": {
-      "locked": {
         "lastModified": 1679402239,
         "narHash": "sha256-xJLprGQf4v0cKNtWaI2tMvn+tuYir3yNAFd41CWNgAw=",
         "owner": "nixos",
@@ -164,12 +130,11 @@
     },
     "root": {
       "inputs": {
-        "dapptools": "dapptools",
         "ethereum-tests": "ethereum-tests",
         "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
         "foundry": "foundry",
-        "nixpkgs": "nixpkgs_3",
+        "nixpkgs": "nixpkgs_2",
         "nixpkgs-solc": "nixpkgs-solc",
         "solidity": "solidity"
       }
