@@ -121,29 +121,29 @@ vmFromRpc blockNum calldata' callvalue' caller' address' = do
     Just b -> pure b
 
   pure $ EVM.makeVm $ EVM.VMOpts
-    { EVM.contract      = ctrct
-    , EVM.calldata      = calldata'
-    , EVM.value         = callvalue'
-    , EVM.address       = address'
-    , EVM.caller        = caller'
-    , EVM.origin        = 0xacab
-    , EVM.gas           = 0xffffffffffffffff
-    , EVM.gaslimit      = 0xffffffffffffffff
-    , EVM.baseFee       = blk.baseFee
-    , EVM.priorityFee   = 0
-    , EVM.coinbase      = blk.coinbase
-    , EVM.number        = blk.number
-    , EVM.timestamp     = blk.timestamp
-    , EVM.blockGaslimit = blk.gaslimit
-    , EVM.gasprice      = 0
-    , EVM.maxCodeSize   = blk.maxCodeSize
-    , EVM.prevRandao    = blk.prevRandao
-    , EVM.schedule      = blk.schedule
-    , EVM.chainId       = 1
-    , EVM.create        = False
-    , EVM.storageBase   = EVM.Concrete
-    , EVM.txAccessList  = mempty
-    , EVM.allowFFI      = False
+    { EVM.contract       = ctrct
+    , EVM.calldata       = calldata'
+    , EVM.value          = callvalue'
+    , EVM.address        = address'
+    , EVM.caller         = caller'
+    , EVM.origin         = 0xacab
+    , EVM.gas            = 0xffffffffffffffff
+    , EVM.gaslimit       = 0xffffffffffffffff
+    , EVM.baseFee        = blk.baseFee
+    , EVM.priorityFee    = 0
+    , EVM.coinbase       = blk.coinbase
+    , EVM.number         = blk.number
+    , EVM.timestamp      = blk.timestamp
+    , EVM.blockGaslimit  = blk.gaslimit
+    , EVM.gasprice       = 0
+    , EVM.maxCodeSize    = blk.maxCodeSize
+    , EVM.prevRandao     = blk.prevRandao
+    , EVM.schedule       = blk.schedule
+    , EVM.chainId        = 1
+    , EVM.create         = False
+    , EVM.initialStorage = EmptyStore
+    , EVM.txAccessList   = mempty
+    , EVM.allowFFI       = False
     }
 
 testRpc :: Text

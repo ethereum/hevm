@@ -55,8 +55,8 @@ mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
 
 newtype W256 = W256 Word256
   deriving
-    ( Num, Integral, Real, Ord, Generic
-    , Bits , FiniteBits, Enum, Eq , Bounded
+    ( Num, Integral, Real, Ord, Bits
+    , Generic, FiniteBits, Enum, Eq , Bounded
     )
 
 {- |
@@ -141,7 +141,6 @@ deriving instance Eq (GVar a)
 deriving instance Ord (GVar a)
 
 
--- add type level list of constraints
 data Expr (a :: EType) where
 
   -- identifiers

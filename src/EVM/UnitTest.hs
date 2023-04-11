@@ -975,7 +975,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
            , schedule = FeeSchedule.berlin
            , chainId = testParams.chainId
            , create = True
-           , storageBase = Concrete
+           , initialStorage = EmptyStore
            , txAccessList = mempty -- TODO: support unit test access lists???
            , allowFFI = ffiAllowed
            }

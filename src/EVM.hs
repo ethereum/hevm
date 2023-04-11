@@ -191,14 +191,11 @@ data Cache = Cache
     path :: Map (CodeLocation, Int) Bool
   } deriving (Show, Generic)
 
-data StorageBase = Concrete | Symbolic
-  deriving (Show, Eq)
-
 -- | A way to specify an initial VM state
 data VMOpts = VMOpts
   { contract :: Contract
   , calldata :: (Expr Buf, [Prop])
-  , storageBase :: StorageBase
+  , initialStorage :: Expr Storage
   , value :: Expr EWord
   , priorityFee :: W256
   , address :: Addr
@@ -338,24 +335,6 @@ data Contract = Contract
   , external     :: Bool
   }
   deriving (Show)
-
--- | When doing symbolic execution, we have three different
--- ways to model the storage of contracts. This determines
--- not only the initial contract storage model but also how
--- RPC or state fetched contracts will be modeled.
-data StorageModel
-  = ConcreteS    -- ^ Uses `Concrete` Storage. Reading / Writing from abstract
-                 -- locations causes a runtime failure. Can be nicely combined with RPC.
-
-  | SymbolicS    -- ^ Uses `Symbolic` Storage. Reading / Writing never reaches RPC,
-                 -- but always done using an SMT array with no default value.
-
-  | InitialS     -- ^ Uses `Symbolic` Storage. Reading / Writing never reaches RPC,
-                 -- but always done using an SMT array with 0 as the default value.
-
-  deriving (Read, Show)
-
-instance ParseField StorageModel
 
 -- | Various environmental data
 data Env = Env
@@ -511,7 +490,7 @@ makeVm o =
   , env = Env
     { sha3Crack = mempty
     , chainId = o.chainId
-    , storage = if o.storageBase == Concrete then EmptyStore else AbstractStore
+    , storage = o.initialStorage
     , origStorage = mempty
     , contracts = Map.fromList
       [(o.address, o.contract )]
@@ -1532,6 +1511,7 @@ accessStorage addr slot continue = do
                 Nothing -> mkQuery litSlot
                 Just val -> continue (Lit val)
           else do
+            -- TODO: is this actually needed?
             modifying (#env % #storage) (writeStorage (litAddr addr) slot (Lit 0))
             continue $ Lit 0
     Nothing ->

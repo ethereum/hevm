@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## unreleased
+## Unreleased
+
+## Changed
+
+- The `--storage-model` parameter has been replaced with `--initial-storage`
+- The `--smttimeout` argument now expects a value in seconds not milliseconds
+- The default smt timeout has been set to 5 minutes
+- `hevm symbolic` now searches only for user defined assertions by default
 
 ### Fixed
 
@@ -29,8 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Implemented a shrinking algorithm for counterexamples
 - A new differential fuzzing test harness that compares the concrete semantics, as well as parts of the symbolic semantics against the geth evm implementation
 - The `hevm` library can now be built on Windows systems.
-- Support for function pointers in ABI
 - `equivalence` can now be checked for fully or partially concrete calldata
+- Support for function pointers in ABI
 
 ## [0.50.3] - 2023-02-17
 

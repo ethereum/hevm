@@ -6,7 +6,7 @@ module EVM.Test.BlockchainTests where
 import Prelude hiding (Word)
 
 import EVM qualified
-import EVM (initialContract, StorageBase(..))
+import EVM (initialContract)
 import EVM.Concrete qualified as EVM
 import EVM.Dapp (emptyDapp)
 import EVM.Expr (litAddr)
@@ -353,29 +353,29 @@ fromBlockchainCase' block tx preState postState =
       (_, Nothing) -> Left (if isCreate then FailedCreate else InvalidTx)
       (Just origin, Just checkState) -> Right $ Case
         (EVM.VMOpts
-         { contract      = EVM.initialContract theCode
-         , calldata      = (cd, [])
-         , value         = Lit tx.value
-         , address       = toAddr
-         , caller        = litAddr origin
-         , storageBase   = Concrete
-         , origin        = origin
-         , gas           = tx.gasLimit  - fromIntegral (txGasCost feeSchedule tx)
-         , baseFee       = block.baseFee
-         , priorityFee   = priorityFee tx block.baseFee
-         , gaslimit      = tx.gasLimit
-         , number        = block.number
-         , timestamp     = Lit block.timestamp
-         , coinbase      = block.coinbase
-         , prevRandao    = block.difficulty
-         , maxCodeSize   = 24576
-         , blockGaslimit = block.gasLimit
-         , gasprice      = effectiveGasPrice
-         , schedule      = feeSchedule
-         , chainId       = 1
-         , create        = isCreate
-         , txAccessList  = txAccessMap tx
-         , allowFFI      = False
+         { contract       = EVM.initialContract theCode
+         , calldata       = (cd, [])
+         , value          = Lit tx.value
+         , address        = toAddr
+         , caller         = litAddr origin
+         , initialStorage = EmptyStore
+         , origin         = origin
+         , gas            = tx.gasLimit  - fromIntegral (txGasCost feeSchedule tx)
+         , baseFee        = block.baseFee
+         , priorityFee    = priorityFee tx block.baseFee
+         , gaslimit       = tx.gasLimit
+         , number         = block.number
+         , timestamp      = Lit block.timestamp
+         , coinbase       = block.coinbase
+         , prevRandao     = block.difficulty
+         , maxCodeSize    = 24576
+         , blockGaslimit  = block.gasLimit
+         , gasprice       = effectiveGasPrice
+         , schedule       = feeSchedule
+         , chainId        = 1
+         , create         = isCreate
+         , txAccessList   = txAccessMap tx
+         , allowFFI       = False
          })
         checkState
         postState
