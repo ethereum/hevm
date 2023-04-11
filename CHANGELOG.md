@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The default smt timeout has been set to 5 minutes
 - `hevm symbolic` now searches only for user defined assertions by default
 
+### Fixed
+
+- The `prank` cheatcode now transfers value from the correct address
+
 ## [0.50.4] - 2023-03-17
 
 ### Fixed
