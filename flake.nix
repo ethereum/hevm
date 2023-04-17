@@ -4,8 +4,6 @@
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs";
-    # nixpkgs with working solc
-    nixpkgs-solc.url = "github:nixos/nixpkgs/1b71def42b74811323de2df52f180b795ec506fc";
     foundry.url = "github:shazow/foundry.nix/monthly";
     flake-compat = {
       url = "github:edolstra/flake-compat";
@@ -21,14 +19,13 @@
     };
   };
 
-  outputs = { self, nixpkgs, nixpkgs-solc, flake-utils, solidity, ethereum-tests, foundry, ... }:
+  outputs = { self, nixpkgs, flake-utils, solidity, ethereum-tests, foundry, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        solc' = nixpkgs-solc.legacyPackages.${system}.solc;
         testDeps = with pkgs; [
           go-ethereum
-          solc'
+          solc
           z3
           cvc5
           git
@@ -70,7 +67,7 @@
           ]).overrideAttrs(final: prev: {
             HEVM_SOLIDITY_REPO = solidity;
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
-            DAPP_SOLC = "${solc'}/bin/solc";
+            DAPP_SOLC = "${pkgs.solc}/bin/solc";
           });
 
         # wrapped binary for use on systems with nix available. ensures all
@@ -81,7 +78,7 @@
           buildInputs = [ makeWrapper ];
           postBuild = ''
             wrapProgram $out/bin/hevm \
-              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc' z3 cvc5 ])}"
+              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3 cvc5 ])}"
           '';
         };
 
@@ -157,7 +154,7 @@
             # NOTE: hacks for bugged cabal new-repl
             LD_LIBRARY_PATH = libraryPath;
             HEVM_SOLIDITY_REPO = solidity;
-            DAPP_SOLC = "${solc'}/bin/solc";
+            DAPP_SOLC = "${pkgs.solc}/bin/solc";
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
             shellHook = lib.optionalString stdenv.isDarwin ''
               export DYLD_LIBRARY_PATH="${libraryPath}";
