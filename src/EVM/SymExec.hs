@@ -260,13 +260,12 @@ interpret fetcher maxIter askSmtIters vm =
         interpret fetcher maxIter askSmtIters vm' (k r)
       Stepper.Ask (EVM.PleaseChoosePath cond continue) ->
         case maxIterationsReached vm maxIter of
-          -- TODO: parallelise
           Nothing -> do
-            let (ra, vma) = runState (continue True) vm { result = Nothing }
-            a <- interpret fetcher maxIter askSmtIters vma (k ra)
-
-            let (rb, vmb) = runState (continue False) vm { result = Nothing }
-            b <- interpret fetcher maxIter askSmtIters vmb (k rb)
+            (a, b) <- concurrently
+              (let (ra, vma) = runState (continue True) vm { result = Nothing }
+               in interpret fetcher maxIter askSmtIters vma (k ra))
+              (let (rb, vmb) = runState (continue False) vm { result = Nothing }
+               in interpret fetcher maxIter askSmtIters vmb (k rb))
 
             pure $ ITE cond a b
           Just n -> do
