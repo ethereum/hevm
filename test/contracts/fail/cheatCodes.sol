@@ -8,6 +8,11 @@ interface Hevm {
     function sign(uint256,bytes32) external returns (uint8,bytes32,bytes32);
     function addr(uint256) external returns (address);
     function ffi(string[] calldata) external returns (bytes memory);
+    function prank(address) external;
+}
+
+contract Payable {
+    function hi() public payable {}
 }
 
 contract TestFailCheatCodes is DSTest {
@@ -20,5 +25,15 @@ contract TestFailCheatCodes is DSTest {
 
         // should revert if --ffi hasn't been passed to hevm...
         hevm.ffi(inputs);
+    }
+
+    function test_prank_underflow() public {
+        address from = address(0x1312);
+        uint amt = 10;
+
+        Payable target = new Payable();
+
+        hevm.prank(from);
+        target.hi{value : amt}();
     }
 }

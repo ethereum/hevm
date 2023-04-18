@@ -18,6 +18,10 @@ foundry repo, and all unit tests will be executed (including prove tests).
 
 `hevm test` no longer supports parsing solidity output in the combined json format.
 
+## Fixed
+
+- Fixed a bug where underflow was possible when transfering eth
+
 ## [0.50.5] - 2023-03-18
 
 ## Changed
