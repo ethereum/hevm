@@ -247,7 +247,7 @@ checkFailures UnitTestOptions { .. } method bailed = do
 fuzzTest :: UnitTestOptions -> Text -> [AbiType] -> VM -> Property
 fuzzTest opts@UnitTestOptions{..} sig types vm = forAllShow (genAbiValue (AbiTupleType $ Vector.fromList types)) (show . ByteStringS . encodeAbiValue)
   $ \args -> ioProperty $
-    fst <$> runStateT (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (runUnitTest opts sig args)) vm
+    EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm (runUnitTest opts sig args)
 
 tick :: Text -> IO ()
 tick x = Text.putStr x >> hFlush stdout
@@ -433,11 +433,10 @@ runUnitTestContract
     Just theContract -> do
       -- Construct the initial VM and begin the contract's constructor
       let vm0 = initialUnitTestVm opts theContract
-      vm1 <-
-        liftIO $ execStateT
-          (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo)
-            (Stepper.enter name >> initializeUnitTest opts theContract))
-          vm0
+      vm1 <- liftIO $ EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm0 $ do
+        Stepper.enter name
+        initializeUnitTest opts theContract
+        Stepper.evm get
 
       case vm1.result of
         Nothing -> error "internal error: setUp() did not end with a result"
@@ -612,18 +611,21 @@ getTargetContracts UnitTestOptions{..} = do
 exploreRun :: UnitTestOptions -> VM -> ABIMethod -> [ExploreTx] -> IO (Text, Either Text Text, VM)
 exploreRun opts@UnitTestOptions{..} initialVm testName replayTxs = do
   let oracle = Fetch.oracle solvers rpcInfo
-  (targets, _) <- runStateT (EVM.Stepper.interpret oracle (getTargetContracts opts)) initialVm
+  targets <- EVM.Stepper.interpret oracle initialVm (getTargetContracts opts)
   let depth = fromMaybe 20 maxDepth
   ((x, counterex), vm') <-
-    if null replayTxs
-    then
-    foldM (\a@((success, _), _) _ ->
-                       if success
-                       then runStateT (EVM.Stepper.interpret oracle (initialExplorationStepper opts testName [] targets depth)) initialVm
-                       else pure a)
-                       ((True, (List [])), initialVm)  -- no canonical "post vm"
-                       [0..fuzzRuns]
-    else runStateT (EVM.Stepper.interpret oracle (initialExplorationStepper opts testName replayTxs targets (length replayTxs))) initialVm
+    if null replayTxs then
+      foldM (\a@((success, _),_) _ ->
+               if success then
+                 EVM.Stepper.interpret oracle initialVm $
+                   (,) <$> initialExplorationStepper opts testName [] targets depth
+                       <*> Stepper.evm get
+               else pure a)
+            ((True, (List [])), initialVm)  -- no canonical "post vm"
+            [0..fuzzRuns]
+    else EVM.Stepper.interpret oracle initialVm $
+      (,) <$> initialExplorationStepper opts testName replayTxs targets (length replayTxs)
+          <*> Stepper.evm get
   if x
   then return ("\x1b[32m[PASS]\x1b[0m " <> testName <>  " (runs: " <> (pack $ show fuzzRuns) <>", depth: " <> pack (show depth) <> ")",
                Right (passOutput vm' opts testName), vm') -- no canonical "post vm"
@@ -634,18 +636,18 @@ exploreRun opts@UnitTestOptions{..} initialVm testName replayTxs = do
 
 execTest :: UnitTestOptions -> VM -> ABIMethod -> AbiValue -> IO (Bool, VM)
 execTest opts@UnitTestOptions{..} vm testName args =
-  runStateT
-    (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (execTestStepper opts testName args))
-    vm
+  EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $ do
+    (,) <$> execTestStepper opts testName args
+        <*> Stepper.evm get
 
 -- | Define the thread spawner for normal test cases
 runOne :: UnitTestOptions -> VM -> ABIMethod -> AbiValue -> IO (Text, Either Text Text, VM)
 runOne opts@UnitTestOptions{..} vm testName args = do
   let argInfo = pack (if args == emptyAbi then "" else " with arguments: " <> show args)
   (bailed, vm') <- execTest opts vm testName args
-  (success, vm'') <-
-    runStateT
-      (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (checkFailures opts testName bailed)) vm'
+  (success, vm'') <- EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm' $ do
+    (,) <$> (checkFailures opts testName bailed)
+        <*> Stepper.evm get
   if success
   then
      let gasSpent = num testParams.gasCall - vm'.state.gas
@@ -696,7 +698,8 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
           ppOutput = pack $ show abiValue
       in do
         -- Run the failing test again to get a proper trace
-        vm' <- execStateT (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (runUnitTest opts testName abiValue)) vm
+        vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
+          runUnitTest opts testName abiValue >> Stepper.evm get
         pure ("\x1b[31m[FAIL]\x1b[0m "
                <> testName <> ". Counterexample: " <> ppOutput
                <> "\nRun:\n dapp test --replay '(\"" <> testName <> "\",\""
@@ -732,11 +735,11 @@ symRun opts@UnitTestOptions{..} vm testName types = do
                                    Return _ _ store -> PNeg (failed store)
                                    _ -> PBool False
 
-    (_, vm') <- runStateT
-      (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (Stepper.evm $ do
-          popTrace
-          makeTxCall testParams cd
-        )) vm
+    vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
+      Stepper.evm $ do
+        popTrace
+        makeTxCall testParams cd
+        get
 
     -- check postconditions against vm
     (_, results) <- verify solvers (makeVeriOpts opts) vm' (Just postcondition)

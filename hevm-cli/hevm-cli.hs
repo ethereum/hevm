@@ -34,7 +34,7 @@ import qualified EVM.UnitTest
 import GHC.Conc
 import Optics.Core hiding (pre, Empty)
 import Control.Monad              (void, when, forM_, unless)
-import Control.Monad.State.Strict (execStateT, liftIO)
+import Control.Monad.State.Strict (liftIO)
 import Data.ByteString            (ByteString)
 import Data.List                  (intercalate, isSuffixOf, intersperse)
 import Data.Text                  (unpack, pack)
@@ -491,7 +491,7 @@ launchExec cmd = do
   withSolvers Z3 0 Nothing $ \solvers -> do
     case optsMode cmd of
       Run -> do
-        vm' <- execStateT (EVM.Stepper.interpret (EVM.Fetch.oracle solvers rpcinfo) . void $ EVM.Stepper.execFully) vm
+        vm' <- EVM.Stepper.interpret (EVM.Fetch.oracle solvers rpcinfo) vm EVM.Stepper.runFully
         when cmd.trace $ T.hPutStr stderr (showTraceTree dapp vm')
         case vm'.result of
           Nothing ->
