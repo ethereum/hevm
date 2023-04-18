@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The `prank` cheatcode now transfers value from the correct address
+- Fixed an off-by-one error in `EVM.Debug.srcMapCodePos`
 
 ## [0.50.4] - 2023-03-17
 
