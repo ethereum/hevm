@@ -184,6 +184,11 @@ fetchSlotFrom n url addr slot = do
   sess <- Session.newAPISession
   fetchSlotWithSession n url sess addr slot
 
+fetchChainIdFrom :: Text -> IO (Maybe W256)
+fetchChainIdFrom url = do
+  sess <- Session.newAPISession
+  fetchQuery Latest (fetchWithSession url sess) QueryChainId
+
 http :: Natural -> Maybe Natural -> BlockNumber -> Text -> Fetcher
 http smtjobs smttimeout n url q =
   withSolvers Z3 smtjobs smttimeout $ \s ->
