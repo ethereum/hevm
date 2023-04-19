@@ -50,7 +50,6 @@ exec = do
   vm <- get
   case vm.result of
     Nothing -> exec1 >> exec
-    Just (HandleEffect (Query (PleaseAskSMT (Lit c) _ cont))) -> cont (Case (c > 0)) >> exec
     Just r -> pure r
 
 run :: State VM VM
@@ -58,7 +57,6 @@ run = do
   vm <- get
   case vm.result of
     Nothing -> exec1 >> run
-    Just (HandleEffect (Query (PleaseAskSMT (Lit c) _ cont))) -> cont (Case (c > 0)) >> run
     Just _ -> pure vm
 
 execWhile :: (VM -> Bool) -> State VM Int
