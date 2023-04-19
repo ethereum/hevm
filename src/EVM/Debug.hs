@@ -11,7 +11,6 @@ import Control.Arrow   (second)
 import Optics.Core
 import Data.ByteString (ByteString)
 import Data.Map        (Map)
-import Data.Text       (Text)
 
 import qualified Data.ByteString       as ByteString
 import qualified Data.Map              as Map
@@ -43,11 +42,11 @@ prettyContracts x =
     (map (\(a, b) -> (text (show a), prettyContract b))
      (Map.toList x))
 
-srcMapCodePos :: SourceCache -> SrcMap -> Maybe (Text, Int)
+srcMapCodePos :: SourceCache -> SrcMap -> Maybe (FilePath, Int)
 srcMapCodePos cache sm =
   fmap (second f) $ cache.files ^? ix sm.file
   where
-    f v = ByteString.count 0xa (ByteString.take (sm.offset - 1) v) + 1
+    f v = ByteString.count 0xa (ByteString.take sm.offset v) + 1
 
 srcMapCode :: SourceCache -> SrcMap -> Maybe ByteString
 srcMapCode cache sm =

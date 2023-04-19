@@ -1,26 +1,24 @@
-{-# Language GADTs #-}
 {-# Language DataKinds #-}
 
 module Main where
 
 import Test.Tasty
 import Test.Tasty.HUnit
-import Data.Text (Text)
-import Control.Monad.State.Strict (execStateT)
-import Data.Functor
+
 import Data.Maybe
-import qualified Data.Map as Map
-import qualified Data.Vector as V
+import Data.Map qualified as Map
+import Data.Text (Text)
+import Data.Vector qualified as V
 
 import EVM (makeVm)
 import EVM.ABI
+import EVM.Fetch
 import EVM.SMT
 import EVM.Solvers
-import EVM.Fetch
+import EVM.Stepper qualified as Stepper
 import EVM.SymExec
 import EVM.Test.Utils
-import qualified EVM.Stepper as Stepper
-import qualified EVM.Fetch as Fetch
+import EVM.Solidity (ProjectType(..))
 import EVM.Types hiding (BlockNumber)
 
 main :: IO ()
@@ -62,7 +60,7 @@ tests = testGroup "rpc"
     -- execute against remote state from a ds-test harness
     [ testCase "dapp-test" $ do
         let testFile = "test/contracts/pass/rpc.sol"
-        runDappTestCustom testFile ".*" Nothing False testRpcInfo >>= assertEqual "test result" True
+        runSolidityTestCustom testFile ".*" Nothing False testRpcInfo Foundry >>= assertEqual "test result" True
 
     -- concretely exec "transfer" on WETH9 using remote rpc
     -- https://etherscan.io/token/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2#code
@@ -73,7 +71,7 @@ tests = testGroup "rpc"
           calldata' = ConcreteBuf $ abiMethod "transfer(address,uint256)" (AbiTuple (V.fromList [AbiAddress (Addr 0xdead), AbiUInt 256 wad]))
         vm <- weth9VM blockNum (calldata', [])
         postVm <- withSolvers Z3 1 Nothing $ \solvers ->
-          execStateT (Stepper.interpret (Fetch.oracle solvers (Just (BlockNumber blockNum, testRpc))) . void $ Stepper.execFully) vm
+          Stepper.interpret (oracle solvers (Just (BlockNumber blockNum, testRpc))) vm Stepper.runFully
         let
           postStore = case postVm.env.storage of
             ConcreteStore s -> s
@@ -141,7 +139,7 @@ vmFromRpc blockNum calldata' callvalue' caller' address' = do
     , schedule      = blk.schedule
     , chainId       = 1
     , create        = False
-    , storageBase   = Concrete
+    , initialStorage = EmptyStore
     , txAccessList  = mempty
     , allowFFI      = False
     }

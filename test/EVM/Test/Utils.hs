@@ -2,15 +2,16 @@
 
 module EVM.Test.Utils where
 
-import Data.Text
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Paths_hevm as Paths
 import Data.String.Here
+import Data.Text
+import GHC.IO.Handle (hClose)
+import qualified Paths_hevm as Paths
 import System.Directory
 import System.IO.Temp
-import GHC.IO.Handle (hClose)
-import System.Process (readProcess)
+import System.Process
+import System.Exit
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
 
 import EVM.Solidity
 import EVM.Solvers
@@ -19,42 +20,32 @@ import EVM.UnitTest
 import EVM.Fetch (RpcInfo)
 import qualified EVM.TTY as TTY
 
-runDappTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO Bool
-runDappTestCustom testFile match maxIter ffiAllowed rpcinfo = do
-  root <- Paths.getDataDir
-  (json, _) <- compileWithDSTest testFile
-  --T.writeFile "output.json" json
-  withCurrentDirectory root $ do
-    withSystemTempFile "output.json" $ \file handle -> do
-      hClose handle
-      T.writeFile file json
-      withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json match maxIter ffiAllowed rpcinfo
-        dappTest opts file Nothing
+runSolidityTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> IO Bool
+runSolidityTestCustom testFile match maxIter ffiAllowed rpcinfo projectType = do
+  withSystemTempDirectory "dapp-test" $ \root -> do
+    compile projectType root testFile >>= \case
+      Left e -> error e
+      Right bo@(BuildOutput contracts _) -> do
+        withSolvers Z3 1 Nothing $ \solvers -> do
+          opts <- testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
+          unitTest opts contracts Nothing
 
-runDappTest :: FilePath -> Text -> IO Bool
-runDappTest testFile match = runDappTestCustom testFile match Nothing True Nothing
+runSolidityTest :: FilePath -> Text -> IO Bool
+runSolidityTest testFile match = runSolidityTestCustom testFile match Nothing True Nothing Foundry
 
-debugDappTest :: FilePath -> RpcInfo -> IO ()
-debugDappTest testFile rpcinfo = do
-  root <- Paths.getDataDir
-  (json, _) <- compileWithDSTest testFile
-  --TIO.writeFile "output.json" json
-  withCurrentDirectory root $ do
-    withSystemTempFile "output.json" $ \file handle -> do
-      hClose handle
-      T.writeFile file json
-      withSolvers Z3 1 Nothing $ \solvers -> do
-        opts <- testOpts solvers root json ".*" Nothing True rpcinfo
-        TTY.main opts root file
+debugSolidityTest :: FilePath -> RpcInfo -> IO ()
+debugSolidityTest testFile rpcinfo = do
+  withSystemTempDirectory "dapp-test" $ \root -> do
+    compile DappTools root testFile >>= \case
+      Left e -> error e
+      Right bo -> do
+        withSolvers Z3 1 Nothing $ \solvers -> do
+          opts <- testOpts solvers root (Just bo) ".*" Nothing True rpcinfo
+          TTY.main opts root (Just bo)
 
-testOpts :: SolverGroup -> FilePath -> Text -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO UnitTestOptions
-testOpts solvers root solcJson match maxIter allowFFI rpcinfo = do
-  srcInfo <- case readJSON solcJson of
-               Nothing -> error "Could not read solc json"
-               Just (contractMap, asts, sources) -> do
-                 sourceCache <- makeSourceCache sources asts
-                 pure $ dappInfo root contractMap sourceCache
+testOpts :: SolverGroup -> FilePath -> Maybe BuildOutput -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO UnitTestOptions
+testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
+  let srcInfo = maybe emptyDapp (dappInfo root) buildOutput
 
   params <- getParametersFromEnvironmentVariables Nothing
 
@@ -78,7 +69,35 @@ testOpts solvers root solcJson match maxIter allowFFI rpcinfo = do
     , ffiAllowed = allowFFI
     }
 
-compileWithDSTest :: FilePath -> IO (Text, Text)
+compile :: ProjectType -> FilePath -> FilePath -> IO (Either String BuildOutput)
+compile DappTools root src = do
+  json <- compileWithDSTest src
+  createDirectory (root <> "/out")
+  T.writeFile (root <> "/out/dapp.sol.json") json
+  readBuildOutput root DappTools
+compile Foundry root src = do
+  createDirectory (root <> "/src")
+  writeFile (root <> "/src/unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
+  initLib (root <> "/lib/ds-test") "test/contracts/lib/test.sol" "test.sol"
+  initLib (root <> "/lib/tokens") "test/contracts/lib/erc20.sol" "erc20.sol"
+  r@(res,_,_) <- readProcessWithExitCode "forge" ["build", "--root", root] ""
+  case res of
+    ExitFailure _ -> pure . Left $ "compilation failed: " <> show r
+    ExitSuccess -> readBuildOutput root Foundry
+  where
+    initLib :: FilePath -> FilePath -> FilePath -> IO ()
+    initLib tld srcFile dstFile = do
+      createDirectoryIfMissing True (tld <> "/src")
+      writeFile (tld <> "/src/" <> dstFile) =<< readFile =<< Paths.getDataFileName srcFile
+      _ <- readProcessWithExitCode "git" ["init", tld] ""
+      callProcess "git" ["config", "--file", tld <> "/.git/config", "user.name", "'hevm'"]
+      callProcess "git" ["config", "--file", tld <> "/.git/config", "user.email", "'hevm@hevm.dev'"]
+      callProcess "git" ["--git-dir", tld <> "/.git", "--work-tree", tld, "add", tld]
+      _ <- readProcessWithExitCode "git" ["--git-dir", tld <> "/.git", "--work-tree", tld, "--no-gpg-sign", "commit", "-m"] ""
+      pure ()
+
+-- We don't want to depend on dapptools here, so we cheat and just call solc with the same options that dapp itself uses
+compileWithDSTest :: FilePath -> IO Text
 compileWithDSTest src =
   withSystemTempFile "input.json" $ \file handle -> do
     hClose handle
@@ -94,10 +113,10 @@ compileWithDSTest src =
           "ds-test/test.sol": {
             "content": ${dsTest}
           },
-          "lib/erc20.sol": {
+          "tokens/erc20.sol": {
             "content": ${erc20}
           },
-          "test.sol": {
+          "unit-tests.sol": {
             "content": ${testFile}
           }
         },
@@ -133,4 +152,5 @@ compileWithDSTest src =
         "solc"
         ["--allow-paths", file, "--standard-json", file]
         ""
-    return (x, T.pack testFilePath)
+    return x
+

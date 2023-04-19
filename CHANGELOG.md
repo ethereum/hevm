@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Changed
 
+- `hevm` can now execute unit tests in foundry projects. Just run `hevm test` from the root of a foundry repo, and all unit tests will be executed (including prove tests).
+- `hevm dapp-test` has been replaced with `hevm test --project-type DappTools`.
+- `hevm test` no longer supports parsing solidity output in the combined json format.
 - The default value for `--ask-smt-iterations` has been changed to 1
 - The SMT solver is never queried for branch conditions that do not occur in a loop (as determined by the loop detection heuristic)
 
@@ -21,6 +24,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `--max-iterations` is respected in cases where path conditions have become inconsistent
 - `--max-iterations` is now respected for loops with a concrete branch condition
+
+## [0.50.5] - 2023-03-18
+
+## Changed
+
+- The `--storage-model` parameter has been replaced with `--initial-storage`
+- The `--smttimeout` argument now expects a value in seconds not milliseconds
+- The default smt timeout has been set to 5 minutes
+- `hevm symbolic` now searches only for user defined assertions by default
+
+### Fixed
+
+- The `prank` cheatcode now transfers value from the correct address
+- Fixed an off-by-one error in `EVM.Debug.srcMapCodePos`
 
 ## [0.50.4] - 2023-03-17
 
@@ -40,8 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Implemented a shrinking algorithm for counterexamples
 - A new differential fuzzing test harness that compares the concrete semantics, as well as parts of the symbolic semantics against the geth evm implementation
 - The `hevm` library can now be built on Windows systems.
-- Support for function pointers in ABI
 - `equivalence` can now be checked for fully or partially concrete calldata
+- Support for function pointers in ABI
 
 ## [0.50.3] - 2023-02-17
 

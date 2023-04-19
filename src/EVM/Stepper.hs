@@ -1,4 +1,3 @@
-{-# Language GADTs #-}
 {-# Language DataKinds #-}
 
 module EVM.Stepper
@@ -24,27 +23,24 @@ where
 -- The implementation uses the operational monad pattern
 -- as the framework for monadic interpretation.
 
-import Prelude hiding (fail)
-
-import Control.Monad.Operational (Program, singleton, view, ProgramViewT(..), ProgramView)
-import Control.Monad.State.Strict (runState, liftIO, StateT)
-import qualified Control.Monad.State.Class as State
-import qualified EVM.Exec
+import Control.Monad.Operational (Program, ProgramViewT(..), ProgramView, singleton, view)
+import Control.Monad.State.Strict (StateT, execState, runState, runStateT)
 import Data.Text (Text)
 import EVM.Types
 
 import qualified EVM
 
 import qualified EVM.Fetch as Fetch
+import EVM.Exec qualified
 
 -- | The instruction type of the operational monad
 data Action a where
 
   -- | Keep executing until an intermediate result is reached
-  Exec ::           Action VMResult
+  Exec :: Action VMResult
 
   -- | Keep executing until an intermediate state is reached
-  Run ::             Action VM
+  Run :: Action VM
 
   -- | Wait for a query to be resolved
   Wait :: Query -> Action ()
@@ -119,33 +115,31 @@ entering t stepper = do
 enter :: Text -> Stepper ()
 enter t = evm (EVM.pushTrace (EntryTrace t))
 
-interpret :: Fetch.Fetcher -> Stepper a -> StateT VM IO a
-interpret fetcher =
-  eval . view
-
+interpret :: Fetch.Fetcher -> VM -> Stepper a -> IO a
+interpret fetcher vm = eval . view
   where
-    eval
-      :: ProgramView Action a
-      -> StateT VM IO a
-
-    eval (Return x) =
-      pure x
-
+    eval :: ProgramView Action a -> IO a
+    eval (Return x) = pure x
     eval (action :>>= k) =
       case action of
         Exec ->
-          (State.state . runState) EVM.Exec.exec >>= interpret fetcher . k
+          let (r, vm') = runState EVM.Exec.exec vm
+          in interpret fetcher vm' (k r)
         Run ->
-          (State.state . runState) EVM.Exec.run >>= interpret fetcher . k
+          let vm' = execState EVM.Exec.run vm
+          in interpret fetcher vm' (k vm')
         Wait (PleaseAskSMT (Lit c) _ continue) ->
-          interpret fetcher (evm (continue (Case (c > 0))) >>= k)
-        Wait q ->
-          do m <- liftIO (fetcher q)
-             State.state (runState m) >> interpret fetcher (k ())
+          let (r, vm') = runState (continue (Case (c > 0))) vm
+          in interpret fetcher vm' (k r)
+        Wait q -> do
+          m <- fetcher q
+          let vm' = execState m vm
+          interpret fetcher vm' (k ())
         Ask _ ->
           error "cannot make choices with this interpreter"
-        IOAct m ->
-          do m >>= interpret fetcher . k
-        EVM m -> do
-          r <- State.state (runState m)
-          interpret fetcher (k r)
+        IOAct m -> do
+          (r, vm') <- runStateT m vm
+          interpret fetcher vm' (k r)
+        EVM m ->
+          let (r, vm') = runState m vm
+          in interpret fetcher vm' (k r)

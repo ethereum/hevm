@@ -6,6 +6,7 @@
     nixpkgs.url = "github:nixos/nixpkgs";
     # nixpkgs with working solc
     nixpkgs-solc.url = "github:nixos/nixpkgs/1b71def42b74811323de2df52f180b795ec506fc";
+    foundry.url = "github:shazow/foundry.nix/monthly";
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
@@ -20,11 +21,19 @@
     };
   };
 
-  outputs = { self, nixpkgs, nixpkgs-solc, flake-utils, solidity, ethereum-tests, ... }:
+  outputs = { self, nixpkgs, nixpkgs-solc, flake-utils, solidity, ethereum-tests, foundry, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         solc' = nixpkgs-solc.legacyPackages.${system}.solc;
+        testDeps = with pkgs; [
+          go-ethereum
+          solc'
+          z3
+          cvc5
+          git
+          foundry.defaultPackage.${system}
+        ];
 
         secp256k1-static = stripDylib (pkgs.secp256k1.overrideAttrs (attrs: {
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
@@ -39,7 +48,8 @@
           })
           [
             (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
-            (haskell.lib.compose.addTestToolDepends [ solc' z3 cvc5 go-ethereum ])
+            (haskell.lib.compose.addTestToolDepends testDeps)
+            (haskell.lib.compose.appendBuildFlags ["-v3"])
             (haskell.lib.compose.appendConfigureFlags (
               [ "-fci"
                 "-O2"
@@ -60,6 +70,7 @@
           ]).overrideAttrs(final: prev: {
             HEVM_SOLIDITY_REPO = solidity;
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
+            DAPP_SOLC = "${solc'}/bin/solc";
           });
 
         # wrapped binary for use on systems with nix available. ensures all
@@ -135,20 +146,17 @@
           in haskellPackages.shellFor {
             packages = _: [ hevmUnwrapped ];
             buildInputs = [
-              z3
-              cvc5
-              solc'
               mdbook
               yarn
-              go-ethereum
               haskellPackages.cabal-install
               haskellPackages.haskell-language-server
-            ];
+            ] ++ testDeps;
             withHoogle = true;
 
             # NOTE: hacks for bugged cabal new-repl
             LD_LIBRARY_PATH = libraryPath;
             HEVM_SOLIDITY_REPO = solidity;
+            DAPP_SOLC = "${solc'}/bin/solc";
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
             shellHook = lib.optionalString stdenv.isDarwin ''
               export DYLD_LIBRARY_PATH="${libraryPath}";

@@ -43,17 +43,18 @@ runDappTest root =
   withCurrentDirectory root $ do
     cores <- num <$> getNumProcessors
     let testFile = root <> "/out/dapp.sol.json"
+    Right (BuildOutput contracts _) <- readSolc DappTools root testFile
     withSolvers Z3 cores Nothing $ \solvers -> do
       opts <- testOpts solvers root testFile
-      res <- dappTest opts testFile Nothing
+      res <- unitTest opts contracts Nothing
       unless res exitFailure
 
 testOpts :: SolverGroup -> FilePath -> FilePath -> IO UnitTestOptions
 testOpts solvers root testFile = do
-  srcInfo <- readSolc testFile >>= \case
-    Nothing -> error "Could not read .sol.json file"
-    Just (contractMap, sourceCache) ->
-      pure $ dappInfo root contractMap sourceCache
+  srcInfo <- readSolc DappTools root testFile >>= \case
+    Left e -> error e
+    Right out ->
+      pure $ dappInfo root out
 
   params <- getParametersFromEnvironmentVariables Nothing
   pure EVM.UnitTest.UnitTestOptions
@@ -374,35 +375,35 @@ initVm bs = vm
       , external     = False
       }
     vm = makeVm $ VMOpts
-      { contract      = c
-      , calldata      = (AbstractBuf "txdata", [])
-      , value         = CallValue 0
-      , address       = Addr 0xffffffffffffffff
-      , caller        = Lit 0
-      , origin        = Addr 0xffffffffffffffff
-      , gas           = 0xffffffffffffffff
-      , gaslimit      = 0xffffffffffffffff
-      , storageBase   = Symbolic
-      , baseFee       = 0
-      , priorityFee   = 0
-      , coinbase      = 0
-      , number        = 0
-      , timestamp     = Var "timestamp"
-      , blockGaslimit = 0
-      , gasprice      = 0
-      , maxCodeSize   = 0xffffffff
-      , prevRandao    = 420
-      , schedule      = FeeSchedule.berlin
-      , chainId       = 1
-      , create        = False
-      , txAccessList  = mempty
-      , allowFFI      = False
+      { contract       = c
+      , calldata       = (AbstractBuf "txdata", [])
+      , value          = CallValue 0
+      , address        = Addr 0xffffffffffffffff
+      , caller         = Lit 0
+      , origin         = Addr 0xffffffffffffffff
+      , gas            = 0xffffffffffffffff
+      , gaslimit       = 0xffffffffffffffff
+      , initialStorage = AbstractStore
+      , baseFee        = 0
+      , priorityFee    = 0
+      , coinbase       = 0
+      , number         = 0
+      , timestamp      = Var "timestamp"
+      , blockGaslimit  = 0
+      , gasprice       = 0
+      , maxCodeSize    = 0xffffffff
+      , prevRandao     = 420
+      , schedule       = FeeSchedule.berlin
+      , chainId        = 1
+      , create         = False
+      , txAccessList   = mempty
+      , allowFFI       = False
       }
 
 
 -- | Builds the Expr for the given evm bytecode object
 buildExpr :: SolverGroup -> ByteString -> IO (Expr End)
-buildExpr solvers bs = evalStateT (interpret (Fetch.oracle solvers Nothing) Nothing 1 Naive runExpr) (initVm bs)
+buildExpr solvers bs = interpret (Fetch.oracle solvers Nothing) Nothing 1 Naive (initVm bs) runExpr
 
 dai :: IO ByteString
 dai = do

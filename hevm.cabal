@@ -2,7 +2,7 @@ cabal-version: 3.0
 name:
   hevm
 version:
-  0.50.4
+  0.50.5
 synopsis:
   Ethereum virtual machine evaluator
 description:
@@ -186,6 +186,7 @@ library
     spool                             >= 0.1 && < 0.2,
     stm                               >= 2.5.0 && < 2.6.0,
     spawn                             >= 0.3 && < 0.4,
+    filepattern                       >= 0.1.2 && < 0.2
   if !os(windows)
     build-depends:
       brick                           >= 1.4 && < 1.5,

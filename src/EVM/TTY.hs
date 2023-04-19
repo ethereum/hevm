@@ -16,7 +16,7 @@ import EVM
 import EVM.ABI (decodeAbiValue, emptyAbi)
 import EVM.SymExec (maxIterationsReached, symCalldata)
 import EVM.Expr (simplify)
-import EVM.Dapp (DappInfo(..), dappInfo, Test, extractSig, Test(..), srcMap, unitTestMethods)
+import EVM.Dapp (DappInfo(..), emptyDapp, dappInfo, Test, extractSig, Test(..), srcMap, unitTestMethods)
 import EVM.Debug
 import EVM.Fetch (Fetcher)
 import EVM.Fetch qualified as Fetch
@@ -44,7 +44,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.List (sort, find)
 import Data.Maybe (isJust, fromJust, fromMaybe, isNothing)
-import Data.Map (Map, insert, lookupLT, singleton, filter)
+import Data.Map (Map, insert, lookupLT, singleton, filter, (!?))
 import Data.Map qualified as Map
 import Data.Text (Text, pack)
 import Data.Text qualified as T
@@ -286,30 +286,25 @@ isFuzzTest (ConcreteTest _, []) = False
 isFuzzTest (ConcreteTest _, _) = True
 isFuzzTest (InvariantTest _, _) = True
 
-main :: UnitTestOptions -> FilePath -> FilePath -> IO ()
-main opts root jsonFilePath =
-  readSolc jsonFilePath >>=
-    \case
-      Nothing ->
-        error "Failed to read Solidity JSON"
-      Just (contractMap, sourceCache) -> do
-        let
-          dapp = dappInfo root contractMap sourceCache
-          ui = ViewPicker $ UiTestPickerState
-            { tests =
-                list
-                  TestPickerPane
-                  (Vec.fromList
-                   (concatMap
-                    (debuggableTests opts)
-                    dapp.unitTests))
-                  1
-            , dapp = dapp
-            , opts = opts
-            }
-        v <- mkVty
-        _ <- customMain v mkVty Nothing (app opts) (ui :: UiState)
-        return ()
+main :: UnitTestOptions -> FilePath -> Maybe BuildOutput -> IO ()
+main opts root buildOutput = do
+  let
+    dapp = maybe emptyDapp (dappInfo root) buildOutput
+    ui = ViewPicker $ UiTestPickerState
+      { tests =
+          list
+            TestPickerPane
+            (Vec.fromList
+             (concatMap
+              (debuggableTests opts)
+              dapp.unitTests))
+            1
+      , dapp = dapp
+      , opts = opts
+      }
+  v <- mkVty
+  _ <- customMain v mkVty Nothing (app opts) (ui :: UiState)
+  return ()
 
 takeStep
   :: (?fetcher :: Fetcher
@@ -402,6 +397,11 @@ appEvent (VtyEvent e@(V.EvKey V.KDown [])) = get >>= \case
       (traverseOf $ _ViewContracts % #contracts)
       (handleListEvent e)
     pure ()
+  ViewPicker _s -> do
+    Brick.zoom
+      (traverseOf $ _ViewPicker % #tests)
+      (handleListEvent e)
+    pure()
   _ -> pure ()
 
 -- Contracts: Up - list up
@@ -411,6 +411,11 @@ appEvent (VtyEvent e@(V.EvKey V.KUp [])) = get >>= \case
     Brick.zoom
       (traverseOf $ _ViewContracts % #contracts)
       (handleListEvent e)
+  ViewPicker _s -> do
+    Brick.zoom
+      (traverseOf $ _ViewPicker % #tests)
+      (handleListEvent e)
+    pure()
   _ -> pure ()
 
 -- Vm Overview: Esc - return to test picker or exit
@@ -988,10 +993,13 @@ drawSolidityPane ui =
     Nothing -> padBottom Max (hBorderWithLabel (txt "<no source map>"))
     Just sm ->
           let
-            rows = dappSrcs.lines !! sm.file
-            subrange = lineSubrange rows (sm.offset, sm.length)
+            rows = dappSrcs.lines !? sm.file
+            subrange :: Int -> Maybe (Int, Int)
+            subrange i = do
+              rs <- rows
+              lineSubrange rs (sm.offset, sm.length) i
             fileName :: Maybe Text
-            fileName = preview (ix sm.file % _1) dapp.sources.files
+            fileName = T.pack . fst <$> (dapp.sources.files !? sm.file)
             lineNo :: Maybe Int
             lineNo = ((\a -> Just (a - 1)) . snd) =<< srcMapCodePos dapp.sources sm
           in vBox

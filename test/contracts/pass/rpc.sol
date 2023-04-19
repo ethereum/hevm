@@ -1,5 +1,5 @@
 import {DSTest} from "ds-test/test.sol";
-import {ERC20} from "lib/erc20.sol";
+import {ERC20} from "tokens/erc20.sol";
 
 contract C is DSTest {
     // BAL: https://etherscan.io/address/0xba100000625a3754423978a60c9317c58a424e3D#code

@@ -585,15 +585,12 @@ data VM = VM
   , constraints    :: [Prop]
   , keccakEqs      :: [Prop]
   , allowFFI       :: Bool
-  , overrideCaller :: Maybe (Expr EWord)
+  , overrideCaller :: Maybe Addr
   }
   deriving (Show, Generic)
 
 -- | Alias for the type of e.g. @exec1@.
 type EVM a = State VM a
-
-data StorageBase = Concrete | Symbolic
-  deriving (Show, Eq)
 
 -- | An entry in the VM's "call/create stack"
 data Frame = Frame
@@ -828,7 +825,7 @@ data TraceData
 data VMOpts = VMOpts
   { contract :: Contract
   , calldata :: (Expr Buf, [Prop])
-  , storageBase :: StorageBase
+  , initialStorage :: Expr Storage
   , value :: Expr EWord
   , priorityFee :: W256
   , address :: Addr
