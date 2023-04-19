@@ -175,6 +175,8 @@ interpret mode =
             Just n -> interpret mode (Stepper.evm (cont (not n)) >>= k)
 
         -- Stepper wants to make a query and wait for the results?
+        Stepper.Wait (PleaseAskSMT (Lit c) _ continue) ->
+          interpret mode (Stepper.evm (continue (Case (c > 0))) >>= k)
         Stepper.Wait q -> do
           do m <- liftIO (?fetcher q)
              interpret mode (Stepper.evm m >>= k)

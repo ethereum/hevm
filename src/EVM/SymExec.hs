@@ -28,6 +28,7 @@ import qualified EVM.FeeSchedule as FeeSchedule
 import Data.DoubleWord (Word256)
 import Control.Concurrent.Async
 import Data.Maybe
+import Data.Containers.ListUtils
 import Data.List (foldl', sortBy)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
@@ -539,7 +540,7 @@ verify solvers opts preState maybepost = do
   let flattened = flattenExpr expr
   when (any isPartial flattened) $ do
     T.putStrLn ""
-    T.putStrLn "WARNING: hevm was only able to partially explore the given contract due to the followig issues:"
+    T.putStrLn "WARNING: hevm was only able to partially explore the given contract due to the following issues:"
     T.putStrLn ""
     T.putStrLn . T.unlines . fmap (indent 2 . ("- " <>)) . fmap formatPartial . getPartials $ flattened
 
@@ -591,6 +592,13 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
     False -> do
       branchesA <- getBranches bytecodeA
       branchesB <- getBranches bytecodeB
+
+      when (any isPartial branchesA || any isPartial branchesB) $ do
+        putStrLn ""
+        putStrLn "WARNING: hevm was only able to partially explore the given contract due to the following issues:"
+        putStrLn ""
+        T.putStrLn . T.unlines . fmap (indent 2 . ("- " <>)) . fmap formatPartial . nubOrd $ ((getPartials branchesA) <> (getPartials branchesB))
+
       let allPairs = [(a,b) | a <- branchesA, b <- branchesB]
       putStrLn $ "Found " <> (show $ length allPairs) <> " total pairs of endstates"
 
@@ -677,17 +685,16 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
             if aOut == bOut && aStore == bStore
             then PBool False
             else aStore ./= bStore .|| aOut ./= bOut
-          (Success {}, _) -> PBool True
-          (_, Success {}) -> PBool True
           (Failure _ (Revert a), Failure _ (Revert b)) -> if a == b then PBool False else a ./= b
           (Failure _ a, Failure _ b) -> if a == b then PBool False else PBool True
-          (Failure _ _, _) -> PBool True
-          (_, Failure _ _) -> PBool True
+          -- partial end states can't be compared to actual end states, so we always ignore them
+          (Partial {}, _) -> PBool False
+          (_, Partial {}) -> PBool False
           (ITE _ _ _, _) -> error "Expressions must be flattened"
           (_, ITE _ _ _) -> error "Expressions must be flattened"
           (a, b) -> if a == b
                     then PBool False
-                    else error $ "Internal Error: Unimplemented. Left: " <> show a <> " Right: " <> show b
+                    else PBool True
       in case differingResults of
         -- if the end states are the same, then they can never produce a
         -- different result under any circumstances

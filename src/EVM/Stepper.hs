@@ -137,6 +137,8 @@ interpret fetcher =
           (State.state . runState) EVM.Exec.exec >>= interpret fetcher . k
         Run ->
           (State.state . runState) EVM.Exec.run >>= interpret fetcher . k
+        Wait (PleaseAskSMT (Lit c) _ continue) ->
+          interpret fetcher (evm (continue (Case (c > 0))) >>= k)
         Wait q ->
           do m <- liftIO (fetcher q)
              State.state (runState m) >> interpret fetcher (k ())

@@ -55,7 +55,7 @@ import EVM.Precompiled
 import EVM.RLP
 import EVM.Solidity
 import EVM.Types
-import EVM.Format (hexText)
+import EVM.Format (hexText, bsToHex)
 import EVM.Traversals
 import EVM.Concrete (createAddress)
 import EVM.SMT hiding (one)
@@ -354,7 +354,7 @@ tests = testGroup "hevm"
           Right ("", _, x') -> x' == x
           _ -> False
     ]
-  , testGroup "Solidity expressions"
+  , testGroup "Solidity-Expressions"
     [ testCase "Trivial" $
         SolidityCall "x = 3;" []
           ===> AbiUInt 256 3
@@ -2084,10 +2084,10 @@ tests = testGroup "hevm"
           assertEqual "Must be different" (any isCex a) True
           return ()
       , testCase "eq-all-yul-optimization-tests" $ do
-        let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20 }
-            ignoredTests = [
+        let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }
+            ignoredTests =
                     -- unbounded loop --
-                    "commonSubexpressionEliminator/branches_for.yul"
+                    [ "commonSubexpressionEliminator/branches_for.yul"
                     , "conditionalSimplifier/no_opt_if_break_is_not_last.yul"
                     , "conditionalUnsimplifier/no_opt_if_break_is_not_last.yul"
                     , "expressionSimplifier/inside_for.yul"

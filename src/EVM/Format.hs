@@ -400,7 +400,8 @@ prettyvmresult (Success _ (ConcreteBuf msg) _) =
 prettyvmresult (Success _ _ _) =
   "Return: <symbolic>"
 prettyvmresult (Failure _ err) = prettyError err
-prettyvmresult e = error "Internal Error: Invalid Result: " <> show e
+prettyvmresult (Partial _ p) = T.unpack $ formatPartial p
+prettyvmresult r = error $ "Internal Error: Invalid result: " <> show r
 
 indent :: Int -> Text -> Text
 indent n = rstrip . T.unlines . fmap (T.replicate n (T.pack [' ']) <>) . T.lines

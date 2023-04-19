@@ -883,4 +883,3 @@ tests = testGroup "contract-quickcheck-run"
         System.Directory.removeFile "env.json"
         deleteTraceOutputFiles evmtoolResult
     ]
-

@@ -22,7 +22,7 @@ import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
 import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, VeriOpts(..))
-import EVM.Types hiding (Failure)
+import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.RLP
 import EVM.Stepper (Stepper, interpret)
@@ -62,7 +62,7 @@ import Data.Word (Word32, Word64)
 import GHC.Natural
 import System.Environment (lookupEnv)
 import System.IO (hFlush, stdout)
-import Test.QuickCheck hiding (verbose, Success)
+import Test.QuickCheck hiding (verbose, Success, Failure)
 import qualified Test.QuickCheck as QC
 
 data UnitTestOptions = UnitTestOptions
@@ -317,6 +317,8 @@ interpretWithCoverage opts@UnitTestOptions{..} =
           execWithCoverage >>= interpretWithCoverage opts . k
         Stepper.Run ->
           runWithCoverage >>= interpretWithCoverage opts . k
+        Stepper.Wait (PleaseAskSMT (Lit c) _ continue) ->
+          interpretWithCoverage opts (Stepper.evm (continue (Case (c > 0))) >>= k)
         Stepper.Wait q ->
           do m <- liftIO ((Fetch.oracle solvers rpcInfo) q)
              zoom _1 (State.state (runState m)) >> interpretWithCoverage opts (k ())
@@ -691,7 +693,7 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
            , Right (passOutput vm opts testName)
            , vm
            )
-    Failure _ _ _ _ _ _ _ _ _ _ failCase _ _ ->
+    QC.Failure _ _ _ _ _ _ _ _ _ _ failCase _ _ ->
       let abiValue = decodeAbiValue (AbiTupleType (Vector.fromList types)) $ BSLazy.fromStrict $ hexText (pack $ concat failCase)
           ppOutput = pack $ show abiValue
       in do
@@ -730,7 +732,9 @@ symRun opts@UnitTestOptions{..} vm testName types = do
                                   _ -> PBool True
           False -> \(_, post) -> case post of
                                    Success _ _ store -> PNeg (failed store)
-                                   _ -> PBool False
+                                   Failure _ _ -> PBool False
+                                   Partial _ _ -> PBool True
+                                   _ -> error "Internal Error: Invalid leaf node"
 
     (_, vm') <- runStateT
       (EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) (Stepper.evm $ do
