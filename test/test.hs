@@ -55,12 +55,14 @@ import EVM.Precompiled
 import EVM.RLP
 import EVM.Solidity
 import EVM.Types
-import EVM.Format (hexText, bsToHex)
+import EVM.Format (hexText)
 import EVM.Traversals
 import EVM.Concrete (createAddress)
 import EVM.SMT hiding (one)
 import EVM.Solvers
 import qualified EVM.Expr as Expr
+import qualified EVM.Stepper as Stepper
+import qualified EVM.Fetch as Fetch
 import qualified Data.Text as T
 import Data.List (isSubsequenceOf)
 import EVM.Test.Utils
@@ -2381,26 +2383,33 @@ checkEquiv l r = withSolvers Z3 1 (Just 100) $ \solvers -> do
 -- | Takes a runtime code and calls it with the provided calldata
 
 -- | Takes a creation code and some calldata, runs the creation code, and calls the resulting contract with the provided calldata
-runSimpleVM :: ByteString -> ByteString -> Maybe ByteString
-runSimpleVM x ins = case loadVM x of
-                      Nothing -> Nothing
-                      Just vm -> let calldata' = (ConcreteBuf ins)
-                       in case runState (assign (#state % #calldata) calldata' >> exec) vm of
-                            (VMSuccess (ConcreteBuf bs), _) -> Just bs
-                            _ -> Nothing
+runSimpleVM :: ByteString -> ByteString -> IO (Maybe ByteString)
+runSimpleVM x ins = do
+  loadVM x >>= \case
+    Nothing -> pure Nothing
+    Just vm -> do
+     let calldata = (ConcreteBuf ins)
+         vm' = set (#state % #calldata) calldata vm
+     (res, _) <- runStateT (Stepper.interpret (Fetch.zero 0 Nothing) Stepper.execFully) vm'
+     case res of
+       (Right (ConcreteBuf bs)) -> pure $ Just bs
+       s -> error $ show s
 
 -- | Takes a creation code and returns a vm with the result of executing the creation code
-loadVM :: ByteString -> Maybe VM
-loadVM x =
-    case runState exec (vmForEthrunCreation x) of
-       (VMSuccess (ConcreteBuf targetCode), vm1) -> do
+loadVM :: ByteString -> IO (Maybe VM)
+loadVM x = do
+  runStateT (Stepper.interpret (Fetch.zero 0 Nothing) Stepper.execFully) (vmForEthrunCreation x) >>= \case
+       (Right (ConcreteBuf targetCode), vm1) -> do
          let target = vm1.state.contract
-             vm2 = execState (replaceCodeOfSelf (RuntimeCode (ConcreteRuntimeCode targetCode))) vm1
-         return $ snd $ flip runState vm2
-                (do resetState
-                    assign (#state % #gas) 0xffffffffffffffff -- kludge
-                    loadContract target)
-       _ -> Nothing
+         vm2 <- execStateT (Stepper.interpret (Fetch.zero 0 Nothing) (setupContract targetCode)) vm1
+         Just <$> execStateT (Stepper.interpret (Fetch.zero 0 Nothing) (prepVm target)) vm2
+       _ -> pure Nothing
+  where
+    setupContract targetCode = Stepper.evm $ replaceCodeOfSelf (RuntimeCode $ ConcreteRuntimeCode targetCode)
+    prepVm target = Stepper.evm $ do
+      resetState
+      assign (#state % #gas) 0xffffffffffffffff -- kludge
+      loadContract target
 
 hex :: ByteString -> ByteString
 hex s =
@@ -2429,7 +2438,7 @@ defaultDataLocation t =
 runFunction :: Text -> ByteString -> IO (Maybe ByteString)
 runFunction c input = do
   Just x <- singleContract "X" c
-  return $ runSimpleVM x input
+  runSimpleVM x input
 
 runStatements
   :: Text -> [AbiValue] -> AbiType
