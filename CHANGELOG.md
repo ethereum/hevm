@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+#### Foundry Support
+
+`hevm` can now execute unit tests in foundry projects. Just run `hevm test` from the root of a
+foundry repo, and all unit tests will be executed (including prove tests).
+
+`hevm dapp-test` has been replaced with `hevm test --project-type DappTools`.
+
+`hevm test` no longer supports parsing solidity output in the combined json format.
+
 ## [0.50.5] - 2023-03-18
 
 ## Changed

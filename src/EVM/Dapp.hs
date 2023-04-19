@@ -52,11 +52,10 @@ data Test = ConcreteTest Text | SymbolicTest Text | InvariantTest Text
 instance Show Test where
   show t = unpack $ extractSig t
 
-dappInfo
-  :: FilePath -> Map Text SolcContract -> SourceCache -> DappInfo
-dappInfo root solcByName sources =
+dappInfo :: FilePath -> BuildOutput -> DappInfo
+dappInfo root (BuildOutput (Contracts cs) sources) =
   let
-    solcs = Map.elems solcByName
+    solcs = Map.elems cs
     astIds = astIdMap $ snd <$> Map.toList sources.asts
     immutables = filter ((/=) mempty . (.immutableReferences)) solcs
 
@@ -64,7 +63,7 @@ dappInfo root solcByName sources =
     { root = root
     , unitTests = findAllUnitTests solcs
     , sources = sources
-    , solcByName = solcByName
+    , solcByName = cs
     , solcByHash =
         let
           f g k = Map.fromList [(g x, (k, x)) | x <- solcs]
@@ -85,7 +84,7 @@ dappInfo root solcByName sources =
     }
 
 emptyDapp :: DappInfo
-emptyDapp = dappInfo "" mempty (SourceCache mempty mempty mempty)
+emptyDapp = dappInfo "" mempty
 
 -- Dapp unit tests are detected by searching within abi methods
 -- that begin with "test" or "prove", that are in a contract with
@@ -187,4 +186,4 @@ showTraceLocation dapp trace =
       case srcMapCodePos dapp.sources sm of
         Nothing -> Left "<source not found>"
         Just (fileName, lineIx) ->
-          Right (fileName <> ":" <> pack (show lineIx))
+          Right (pack fileName <> ":" <> pack (show lineIx))

@@ -1,5 +1,5 @@
 import "ds-test/test.sol";
-import "lib/erc20.sol";
+import "tokens/erc20.sol";
 
 contract ConstructorArg {
     address immutable public a;

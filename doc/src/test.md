@@ -1,19 +1,20 @@
 # `hevm dapp-test`
 
 ```
-Usage: hevm dapp-test [--json-file STRING] [--dapp-root STRING] [--debug]
-                      [--jsontrace] [--fuzz-runs INT] [--depth INT]
-                      [--replay (TEXT,BYTESTRING)] [--rpc TEXT] [--verbose INT]
-                      [--coverage] [--state STRING] [--cache STRING]
-                      [--match STRING] [--cov-match STRING] [--solver TEXT]
-                      [--smtdebug] [--ffi] [--smttimeout INTEGER]
-                      [--max-iterations INTEGER] [--ask-smt-iterations INTEGER]
+Usage: hevm test [--root STRING] [--project-type PROJECTTYPE] [--debug]
+                 [--jsontrace] [--fuzz-runs INT] [--depth INT]
+                 [--replay (TEXT,BYTESTRING)] [--rpc TEXT] [--verbose INT]
+                 [--coverage] [--state STRING] [--cache STRING] [--match STRING]
+                 [--cov-match STRING] [--solver TEXT] [--smtdebug] [--ffi]
+                 [--smttimeout NATURAL] [--max-iterations INTEGER]
+                 [--ask-smt-iterations INTEGER]
 
 Available options:
   -h,--help                Show this help text
-  --json-file STRING       Filename or path to dapp build output (default:
-                           out/*.solc.json)
-  --dapp-root STRING       Path to dapp project root directory (default: . )
+  --root STRING            Path to project root directory (default: . )
+  --project-type PROJECTTYPE
+                           Is this a Foundry or DappTools project (default:
+                           Foundry)
   --debug                  Run interactively
   --jsontrace              Print json trace output at every step
   --fuzz-runs INT          Number of times to run fuzz tests
@@ -28,7 +29,7 @@ Available options:
   --match STRING           Test case filter - only run methods matching regex
   --cov-match STRING       Coverage filter - only print coverage for files
                            matching regex
-  --solver TEXT            Used SMT solver: z3 (default) or cvc4
+  --solver TEXT            Used SMT solver: z3 (default) or cvc5
   --smtdebug               Print smt queries sent to the solver
   --ffi                    Allow the usage of the hevm.ffi() cheatcode (WARNING:
                            this allows test authors to execute arbitrary code on
@@ -42,6 +43,15 @@ Available options:
                            reachability (default: 5)
 ```
 
-Run any ds-test testing functions. Run under the hood whenever `dapp test` or `dapp debug` is called. Testing functions prefixed with `test` will be executed concretely. If concrete test functions have been given arguments, they will be randomly instantiated and run `--fuzz-runs` number of times. If testing functions are prefixed with `prove` they will be symbolically executed. In `--debug` mode, property based tests will not be available unless given specific arguments using `--replay`.
+`hevm test` will execute all solidity unit tests that make use of the `DSTest` assertion library
+(a.k.a "foundry tests). It supports both foundry based (the default) and dapptools based projects.
 
-The `smttimeout`, `max-iterations` and `solver` options have the same semantics as in `hevm symbolic`
+It has support for:
+
+- unit tests (`test` prefix, no arguments)
+- fuzz tests (`test` prefix, with function arguments)
+- invariant tests (`invariant` prefix, with function arguments)
+- symbolic tests (`prove` prefix, with function arguments)
+
+A more detailed introduction to symbolic unit tests with `hevm` can be found [here](https://fv.ethereum.org/2020/12/11/symbolic-execution-with-ds-test/).
+An overview of using ds-test for solidity testing can be found in the [foundry book](https://book.getfoundry.sh/forge/tests).

@@ -17,7 +17,7 @@ import Data.String.Here
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy.IO as TL
 
-import EVM
+import EVM hiding (contracts)
 import EVM.SMT
 import EVM.Solvers
 import EVM.Types
@@ -43,17 +43,18 @@ runDappTest root =
   withCurrentDirectory root $ do
     cores <- num <$> getNumProcessors
     let testFile = root <> "/out/dapp.sol.json"
+    Right (BuildOutput contracts _) <- readSolc DappTools root testFile
     withSolvers Z3 cores Nothing $ \solvers -> do
       opts <- testOpts solvers root testFile
-      res <- dappTest opts testFile Nothing
+      res <- unitTest opts contracts Nothing
       unless res exitFailure
 
 testOpts :: SolverGroup -> FilePath -> FilePath -> IO UnitTestOptions
 testOpts solvers root testFile = do
-  srcInfo <- readSolc testFile >>= \case
-    Nothing -> error "Could not read .sol.json file"
-    Just (contractMap, sourceCache) ->
-      pure $ dappInfo root contractMap sourceCache
+  srcInfo <- readSolc DappTools root testFile >>= \case
+    Left e -> error e
+    Right out ->
+      pure $ dappInfo root out
 
   params <- getParametersFromEnvironmentVariables Nothing
   pure EVM.UnitTest.UnitTestOptions

@@ -185,7 +185,8 @@ library
     word-wrap                         >= 0.5 && < 0.6,
     spool                             >= 0.1 && < 0.2,
     stm                               >= 2.5.0 && < 2.6.0,
-    spawn                             >= 0.3 && < 0.4
+    spawn                             >= 0.3 && < 0.4,
+    filepattern                       >= 0.1.2 && < 0.2
   if !os(windows)
     build-depends:
       brick                           >= 1.4 && < 1.5,

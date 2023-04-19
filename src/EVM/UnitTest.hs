@@ -128,28 +128,23 @@ makeVeriOpts opts =
                    , SymExec.rpcInfo = opts.rpcInfo
                    }
 
--- | Top level CLI endpoint for dapp-test
-dappTest :: UnitTestOptions -> String -> Maybe String -> IO Bool
-dappTest opts solcFile cache' = do
-  out <- liftIO $ readSolc solcFile
-  case out of
-    Just (contractMap, _) -> do
-      let unitTests = findUnitTests opts.match $ Map.elems contractMap
-      results <- concatMapM (runUnitTestContract opts contractMap) unitTests
-      let (passing, vms) = unzip results
-      case cache' of
-        Nothing ->
-          pure ()
-        Just path ->
-          -- merge all of the post-vm caches and save into the state
-          let
-            evmcache = mconcat [vm.cache | vm <- vms]
-          in
-            liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts evmcache)
-
-      return $ and passing
+-- | Top level CLI endpoint for hevm test
+unitTest :: UnitTestOptions -> Contracts -> Maybe String -> IO Bool
+unitTest opts (Contracts cs) cache' = do
+  let unitTests = findUnitTests opts.match $ Map.elems cs
+  results <- concatMapM (runUnitTestContract opts cs) unitTests
+  let (passing, vms) = unzip results
+  case cache' of
     Nothing ->
-      error ("Failed to read Solidity JSON for `" ++ solcFile ++ "'")
+      pure ()
+    Just path ->
+      -- merge all of the post-vm caches and save into the state
+      let
+        evmcache = mconcat [vm.cache | vm <- vms]
+      in
+        liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts evmcache)
+
+  return $ and passing
 
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
@@ -330,13 +325,13 @@ interpretWithCoverage opts@UnitTestOptions{..} =
 coverageReport
   :: DappInfo
   -> MultiSet SrcMap
-  -> Map Text (Vector (Int, ByteString))
+  -> Map FilePath (Vector (Int, ByteString))
 coverageReport dapp cov =
   let
     sources :: SourceCache
     sources = dapp.sources
 
-    allPositions :: Set (Text, Int)
+    allPositions :: Set (FilePath, Int)
     allPositions =
       ( Set.fromList
       . mapMaybe (srcMapCodePos sources)
@@ -348,17 +343,17 @@ coverageReport dapp cov =
         )
       )
 
-    srcMapCov :: MultiSet (Text, Int)
+    srcMapCov :: MultiSet (FilePath, Int)
     srcMapCov = MultiSet.mapMaybe (srcMapCodePos sources) cov
 
-    linesByName :: Map Text (Vector ByteString)
+    linesByName :: Map FilePath (Vector ByteString)
     linesByName =
       Map.fromList $ zipWith
           (\(name, _) lines' -> (name, lines'))
-          sources.files
-          sources.lines
+          (Map.elems sources.files)
+          (Map.elems sources.lines)
 
-    f :: Text -> Vector ByteString -> Vector (Int, ByteString)
+    f :: FilePath -> Vector ByteString -> Vector (Int, ByteString)
     f name =
       Vector.imap
         (\i bs ->
