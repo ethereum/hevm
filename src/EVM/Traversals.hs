@@ -45,6 +45,9 @@ foldTrace f acc t = acc <> (go t)
       CreationContext _ b _ _ -> foldExpr f mempty b
       CallContext _ _ _ _ e _ g (_, h) _ -> foldExpr f mempty e <> foldExpr f mempty g <> foldExpr f mempty h
 
+foldTraces :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Traces -> b
+foldTraces f acc (Traces a _) = acc <> foldl (foldl (foldTrace f)) mempty a
+
 
 
 -- | Recursively folds a given function over a given expression
@@ -86,9 +89,9 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- control flow
 
-      e@(Success a b c d) -> f e <> (foldl (foldProp f) mempty a) <> (foldl (foldl (foldTrace f)) mempty b) <> (go c) <> (go d)
-      e@(Failure a b _) -> f e <> (foldl (foldProp f) mempty a) <> (foldl (foldl (foldTrace f)) mempty b)
-      e@(Partial a b _) -> f e <> (foldl (foldProp f) mempty a) <> (foldl (foldl (foldTrace f)) mempty b)
+      e@(Success a b c d) -> f e <> (foldl (foldProp f) mempty a) <> foldTraces f mempty b <> (go c) <> (go d)
+      e@(Failure a b _) -> f e <> (foldl (foldProp f) mempty a) <> foldTraces f mempty b
+      e@(Partial a b _) -> f e <> (foldl (foldProp f) mempty a) <> foldTraces f mempty b
       e@(ITE a b c) -> f e <> (go a) <> (go b) <> (go c)
 
       -- integers
@@ -348,15 +351,15 @@ mapExprM f expr = case expr of
 
   Failure a b c -> do
     a' <- mapM (mapPropM f) a
-    b' <- mapM (mapM (mapTraceM f)) b
+    b' <- mapTracesM f b
     f (Failure a' b' c)
   Partial a b c -> do
     a' <- mapM (mapPropM f) a
-    b' <- mapM (mapM (mapTraceM f)) b
+    b' <- mapTracesM f b
     f (Partial a' b' c)
   Success a b c d -> do
     a' <- mapM (mapPropM f) a
-    b' <- mapM (mapM (mapTraceM f)) b
+    b' <- mapTracesM f b
     c' <- mapExprM f c
     d' <- mapExprM f d
     f (Success a' b' c' d')
@@ -690,6 +693,11 @@ mapPropM f = \case
     a' <- mapPropM f a
     b' <- mapPropM f b
     pure $ PImpl a' b'
+
+mapTracesM :: forall m . Monad m => (forall a . Expr a -> m (Expr a)) -> Traces -> m Traces
+mapTracesM f (Traces a b) = do
+  a' <- mapM (mapM (mapTraceM f)) a
+  pure $ Traces a' b
 
 mapTraceM :: forall m . Monad m => (forall a . Expr a -> m (Expr a)) -> Trace -> m Trace
 mapTraceM f (Trace x y z) = do

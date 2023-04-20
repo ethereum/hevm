@@ -291,7 +291,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                 case (maxIterationsReached vm maxIter, isLoopHead heuristic vm) of
                   -- Yes. return a partial leaf
                   (Just _, Just True) ->
-                    pure $ Partial vm.keccakEqs (Zipper.toForest vm.traces) $ MaxIterationsReached vm.state.pc vm.state.contract
+                    pure $ Partial vm.keccakEqs (Traces (Zipper.toForest vm.traces) vm.env.contracts) $ MaxIterationsReached vm.state.pc vm.state.contract
                   -- No. keep executing
                   _ ->
                     let (r, vm') = runState (continue (Case (c > 0))) vm
@@ -307,7 +307,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                     -- got us to this point and return a partial leaf for the other side
                     let (r, vm') = runState (continue (Case $ not n)) vm
                     a <- interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-                    pure $ ITE cond a (Partial vm.keccakEqs (Zipper.toForest vm.traces) (MaxIterationsReached vm.state.pc vm.state.contract))
+                    pure $ ITE cond a (Partial vm.keccakEqs (Traces (Zipper.toForest vm.traces) vm.env.contracts) (MaxIterationsReached vm.state.pc vm.state.contract))
                   -- we're in a loop and askSmtIters has been reached
                   (Just True, True, _) ->
                     -- ask the smt solver about the loop condition
@@ -441,9 +441,9 @@ runExpr = do
   vm <- Stepper.runFully
   let asserts = vm.keccakEqs <> vm.constraints
   pure $ case vm.result of
-    Just (VMSuccess buf) -> Success asserts (Zipper.toForest vm.traces) buf vm.env.storage
-    Just (VMFailure e) -> Failure asserts (Zipper.toForest vm.traces) e
-    Just (Unfinished p) -> Partial asserts (Zipper.toForest vm.traces) p
+    Just (VMSuccess buf) -> Success asserts (Traces (Zipper.toForest vm.traces) vm.env.contracts) buf vm.env.storage
+    Just (VMFailure e) -> Failure asserts (Traces (Zipper.toForest vm.traces) vm.env.contracts) e
+    Just (Unfinished p) -> Partial asserts (Traces (Zipper.toForest vm.traces) vm.env.contracts) p
     _ -> error "Internal Error: vm in intermediate state after call to runFully"
 
 -- | Converts a given top level expr into a list of final states and the

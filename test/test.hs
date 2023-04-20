@@ -2572,13 +2572,13 @@ genName = fmap (T.pack . ("esc_" <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
- [ fmap (Failure [] mempty . UnrecognizedOpcode) arbitrary
- , pure $ Failure [] mempty IllegalOverflow
- , pure $ Failure [] mempty SelfDestruction
+ [ fmap (Failure mempty mempty . UnrecognizedOpcode) arbitrary
+ , pure $ Failure mempty mempty IllegalOverflow
+ , pure $ Failure mempty mempty SelfDestruction
  ]
 genEnd sz = oneof
- [ fmap (Failure [] mempty . Revert) subBuf
- , liftM4 Success (return []) (return []) subBuf subStore
+ [ fmap (Failure mempty mempty . Revert) subBuf
+ , liftM4 Success (return mempty) (return mempty) subBuf subStore
  , liftM3 ITE subWord subEnd subEnd
  ]
  where
