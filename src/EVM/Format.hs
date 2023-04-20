@@ -263,19 +263,6 @@ showTrace dapp vm trace =
             Nothing ->
               logn
 
-    QueryTrace q ->
-      case q of
-        PleaseFetchContract addr _ ->
-          "fetch contract " <> pack (show addr) <> pos
-        PleaseFetchSlot addr slot _ ->
-          "fetch storage slot " <> pack (show slot) <> " from " <> pack (show addr) <> pos
-        PleaseAskSMT {} ->
-          "ask smt" <> pos
-        --PleaseMakeUnique {} ->
-          --"make unique value" <> pos
-        PleaseDoFFI cmd _ ->
-          "execute ffi " <> pack (show cmd) <> pos
-
     ErrorTrace e ->
       case e of
         Revert out ->
