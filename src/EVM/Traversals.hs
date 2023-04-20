@@ -86,9 +86,9 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- control flow
 
-      e@(Success a b c d) -> f e <> (foldl (foldProp f) mempty a) <> (foldl (foldTrace f) mempty b) <> (go c) <> (go d)
-      e@(Failure a b _) -> f e <> (foldl (foldProp f) mempty a) <> (foldl (foldTrace f) mempty b)
-      e@(Partial a b _) -> f e <> (foldl (foldProp f) mempty a) <> (foldl (foldTrace f) mempty b)
+      e@(Success a b c d) -> f e <> (foldl (foldProp f) mempty a) <> (foldl (foldl (foldTrace f)) mempty b) <> (go c) <> (go d)
+      e@(Failure a b _) -> f e <> (foldl (foldProp f) mempty a) <> (foldl (foldl (foldTrace f)) mempty b)
+      e@(Partial a b _) -> f e <> (foldl (foldProp f) mempty a) <> (foldl (foldl (foldTrace f)) mempty b)
       e@(ITE a b c) -> f e <> (go a) <> (go b) <> (go c)
 
       -- integers
@@ -348,15 +348,15 @@ mapExprM f expr = case expr of
 
   Failure a b c -> do
     a' <- mapM (mapPropM f) a
-    b' <- mapM (mapTraceM f) b
+    b' <- mapM (mapM (mapTraceM f)) b
     f (Failure a' b' c)
   Partial a b c -> do
     a' <- mapM (mapPropM f) a
-    b' <- mapM (mapTraceM f) b
+    b' <- mapM (mapM (mapTraceM f)) b
     f (Partial a' b' c)
   Success a b c d -> do
     a' <- mapM (mapPropM f) a
-    b' <- mapM (mapTraceM f) b
+    b' <- mapM (mapM (mapTraceM f)) b
     c' <- mapExprM f c
     d' <- mapExprM f d
     f (Success a' b' c' d')

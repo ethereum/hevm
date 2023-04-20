@@ -41,6 +41,7 @@ import Data.Sequence qualified as Seq
 import Data.Serialize qualified as Cereal
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
+import Data.Tree
 import Data.Vector qualified as V
 import Data.Vector.Storable qualified as SV
 import Numeric (readHex, showHex)
@@ -160,9 +161,9 @@ data Expr (a :: EType) where
 
   -- control flow
 
-  Partial        :: [Prop] -> [Trace] -> PartialExec -> Expr End
-  Failure        :: [Prop] -> [Trace] -> EvmError -> Expr End
-  Success        :: [Prop] -> [Trace] -> Expr Buf -> Expr Storage -> Expr End
+  Partial        :: [Prop] -> Forest Trace -> PartialExec -> Expr End
+  Failure        :: [Prop] -> Forest Trace -> EvmError -> Expr End
+  Success        :: [Prop] -> Forest Trace -> Expr Buf -> Expr Storage -> Expr End
   ITE            :: Expr EWord -> Expr End -> Expr End -> Expr End
 
   -- integers
