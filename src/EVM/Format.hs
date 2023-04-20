@@ -382,15 +382,15 @@ prettyError = \case
   BadCheatCode a -> "Bad cheat code: sig: " <> show a
 
 prettyvmresult :: Expr End -> String
-prettyvmresult (Failure _ (Revert (ConcreteBuf ""))) = "Revert"
-prettyvmresult (Success _ (ConcreteBuf msg) _) =
+prettyvmresult (Failure _ _ (Revert (ConcreteBuf ""))) = "Revert"
+prettyvmresult (Success _ _ (ConcreteBuf msg) _) =
   if BS.null msg
   then "Stop"
   else "Return: " <> show (ByteStringS msg)
-prettyvmresult (Success _ _ _) =
+prettyvmresult (Success _ _ _ _) =
   "Return: <symbolic>"
-prettyvmresult (Failure _ err) = prettyError err
-prettyvmresult (Partial _ p) = T.unpack $ formatPartial p
+prettyvmresult (Failure _ _ err) = prettyError err
+prettyvmresult (Partial _ _ p) = T.unpack $ formatPartial p
 prettyvmresult r = error $ "Internal Error: Invalid result: " <> show r
 
 indent :: Int -> Text -> Text
@@ -437,7 +437,7 @@ formatExpr = go
         , indent 2 (formatExpr t)
         , indent 2 (formatExpr f)
         , ")"]
-      Success asserts buf store -> T.unlines
+      Success asserts _ buf store -> T.unlines
         [ "(Return"
         , indent 2 $ T.unlines
           [ "Data:"
@@ -450,7 +450,7 @@ formatExpr = go
           ]
         , ")"
         ]
-      Failure asserts err -> T.unlines
+      Failure asserts _ err -> T.unlines
         [ "(Failure"
         , indent 2 $ T.unlines
           [ "Error:"

@@ -90,7 +90,7 @@ tests = testGroup "rpc"
         let
           blockNum = 16198552
           calldata' = symCalldata "transfer(address,uint256)" [AbiAddressType, AbiUIntType 256] ["0xdead"] (AbstractBuf "txdata")
-          postc _ (Failure _ (Revert _)) = PBool False
+          postc _ (Failure _ _ (Revert _)) = PBool False
           postc _ _ = PBool True
         vm <- weth9VM blockNum calldata'
         (_, [Cex (_, model)]) <- withSolvers Z3 1 Nothing $ \solvers ->
