@@ -726,12 +726,12 @@ symRun opts@UnitTestOptions{..} vm testName types = do
                    .|| (readStorage' (litAddr cheatCode) (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) store .== Lit 1)
         postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
-                                  Success _ _ store -> failed store
+                                  Success _ _ _ store -> failed store
                                   _ -> PBool True
           False -> \(_, post) -> case post of
-                                   Success _ _ store -> PNeg (failed store)
-                                   Failure _ _ -> PBool False
-                                   Partial _ _ -> PBool True
+                                   Success _ _ _ store -> PNeg (failed store)
+                                   Failure _ _ _ -> PBool False
+                                   Partial _ _ _ -> PBool True
                                    _ -> error "Internal Error: Invalid leaf node"
 
     vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
@@ -763,7 +763,7 @@ symFailure UnitTestOptions {..} testName cd types failures' =
     where
       ctx = DappContext { info = dapp, env = mempty }
       showRes = \case
-                       Success _ _ _ -> if "proveFail" `isPrefixOf` testName
+                       Success _ _ _ _ -> if "proveFail" `isPrefixOf` testName
                                       then "Successful execution"
                                       else "Failed: DSTest Assertion Violation"
                        res ->

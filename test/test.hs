@@ -1246,7 +1246,7 @@ tests = testGroup "hevm"
                              [x', y'] -> (x', y')
                              _ -> error "expected 2 args"
               in case leaf of
-                   Success _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
+                   Success _ _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
                    _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s safeAdd (Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts AbstractStore (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
@@ -1272,7 +1272,7 @@ tests = testGroup "hevm"
                              [x', y'] -> (x', y')
                              _ -> error "expected 2 args"
               in case leaf of
-                   Success _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
+                   Success _ _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
                    _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
           verifyContract s safeAdd (Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts AbstractStore (Just pre) (Just post)
@@ -1299,7 +1299,7 @@ tests = testGroup "hevm"
                   this = Expr.litAddr $ prestate.state.codeContract
                   prex = Expr.readStorage' this (Lit 0) prestate.env.storage
               in case leaf of
-                Success _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
+                Success _ _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
                 _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts AbstractStore (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
@@ -1355,7 +1355,7 @@ tests = testGroup "hevm"
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
-                     Success _ _ poststore -> let
+                     Success _ _ _ poststore -> let
                            postx = Expr.readStorage' this x poststore
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
@@ -1389,7 +1389,7 @@ tests = testGroup "hevm"
                     prex = Expr.readStorage' this x prestore
                     prey = Expr.readStorage' this y prestore
                 in case poststate of
-                     Success _ _ poststore -> let
+                     Success _ _ _ poststore -> let
                            postx = Expr.readStorage' this x poststore
                            posty = Expr.readStorage' this y poststore
                        in Expr.add prex prey .== Expr.add postx posty
@@ -1411,7 +1411,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (_, [Cex (Failure _ (Revert msg), _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo()" [])) [] defaultVeriOpts
+          (_, [Cex (Failure _ _ (Revert msg), _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo()" [])) [] defaultVeriOpts
           assertEqual "incorrect revert msg" msg (ConcreteBuf $ panicMsg 0x01)
         ,
         testCase "simple-assert-2" $ do
@@ -2571,13 +2571,13 @@ genName = fmap (T.pack . ("esc_" <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
- [ fmap (Failure [] . UnrecognizedOpcode) arbitrary
- , pure $ Failure [] IllegalOverflow
- , pure $ Failure [] SelfDestruction
+ [ fmap (Failure [] mempty . UnrecognizedOpcode) arbitrary
+ , pure $ Failure [] mempty IllegalOverflow
+ , pure $ Failure [] mempty SelfDestruction
  ]
 genEnd sz = oneof
- [ fmap (Failure [] . Revert) subBuf
- , liftM3 Success (return []) subBuf subStore
+ [ fmap (Failure [] mempty . Revert) subBuf
+ , liftM4 Success (return []) (return []) subBuf subStore
  , liftM3 ITE subWord subEnd subEnd
  ]
  where
