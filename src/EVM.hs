@@ -1998,6 +1998,20 @@ zipperRootForest z =
 traceForest :: VM -> Forest Trace
 traceForest vm = zipperRootForest vm.traces
 
+traceForest' :: Expr End -> Forest Trace
+traceForest' (Success _ (Traces f _) _ _) = f
+traceForest' (Partial _ (Traces f _) _) = f
+traceForest' (Failure _ (Traces f _) _) = f
+traceForest' (ITE {}) = error "Internal Error: ITE does not contain a trace"
+traceForest' (GVar {}) = error "Internal Error: Unexpected GVar"
+
+traceContext :: Expr End -> Map Addr Contract
+traceContext (Success _ (Traces _ c) _ _) = c
+traceContext (Partial _ (Traces _ c) _) = c
+traceContext (Failure _ (Traces _ c) _) = c
+traceContext (ITE {}) = error "Internal Error: ITE does not contain a trace"
+traceContext (GVar {}) = error "Internal Error: Unexpected GVar"
+
 traceTopLog :: [Expr Log] -> EVM ()
 traceTopLog [] = noop
 traceTopLog ((LogEntry addr bytes topics) : _) = do

@@ -85,7 +85,6 @@ deriving instance Show (GVar a)
 deriving instance Eq (GVar a)
 deriving instance Ord (GVar a)
 
-
 {- |
   Expr implements an abstract respresentation of an EVM program
 
@@ -161,9 +160,9 @@ data Expr (a :: EType) where
 
   -- control flow
 
-  Partial        :: [Prop] -> Forest Trace -> PartialExec -> Expr End
-  Failure        :: [Prop] -> Forest Trace -> EvmError -> Expr End
-  Success        :: [Prop] -> Forest Trace -> Expr Buf -> Expr Storage -> Expr End
+  Partial        :: [Prop] -> Traces -> PartialExec -> Expr End
+  Failure        :: [Prop] -> Traces -> EvmError -> Expr End
+  Success        :: [Prop] -> Traces -> Expr Buf -> Expr Storage -> Expr End
   ITE            :: Expr EWord -> Expr End -> Expr End -> Expr End
 
   -- integers
@@ -816,6 +815,18 @@ data TraceData
   | EntryTrace Text
   | ReturnTrace (Expr Buf) FrameContext
   deriving (Eq, Ord, Show, Generic)
+
+-- | Wrapper type containing vm traces and the context needed to pretty print them properly
+data Traces = Traces
+  { traces :: Forest Trace
+  , contracts :: Map Addr Contract
+  }
+  deriving (Eq, Ord, Show, Generic)
+
+instance Semigroup Traces where
+  (Traces a b) <> (Traces c d) = Traces (a <> c) (b <> d)
+instance Monoid Traces where
+  mempty = Traces mempty mempty
 
 
 -- VM Initialization -------------------------------------------------------------------------------
