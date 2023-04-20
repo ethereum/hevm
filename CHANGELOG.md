@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `hevm` can now execute unit tests in foundry projects. Just run `hevm test` from the root of a foundry repo, and all unit tests will be executed (including prove tests).
 - A new stack based loop detection heuristic
 - Analysis of partial execution traces is now supported
+- execution traces are now shown for failed `prove_` tests
 
 ## Changed
 
