@@ -1062,9 +1062,9 @@ exec1 = do
                       assign #caller (litAddr from')
                       assign #contract callee
                     assign #overrideCaller Nothing
-                    transfer from' callee xValue
-                    touchAccount self
+                    touchAccount from'
                     touchAccount callee
+                    transfer from' callee xValue
             _ ->
               underrun
 
@@ -1195,10 +1195,17 @@ exec1 = do
           vmError (UnrecognizedOpcode xxx)
 
 transfer :: Addr -> Addr -> W256 -> EVM ()
-transfer xFrom xTo xValue =
-  zoom (#env % #contracts) $ do
-    (ix xFrom % #balance) %= (subtract xValue)
-    (ix xTo % #balance) %= (+ xValue)
+transfer _ _ 0 = pure ()
+transfer xFrom xTo xValue = do
+    sb <- preuse $ #env % #contracts % ix xFrom % #balance
+    case sb of
+      Just srcBal ->
+        if xValue > srcBal
+        then vmError $ BalanceTooLow xValue srcBal
+        else do
+          (#env % #contracts % ix xFrom % #balance) %= (subtract xValue)
+          (#env % #contracts % ix xTo % #balance) %= (+ xValue)
+      Nothing -> vmError $ BalanceTooLow xValue 0
 
 -- | Checks a *CALL for failure; OOG, too many callframes, memory access etc.
 callChecks
