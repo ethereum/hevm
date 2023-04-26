@@ -35,7 +35,7 @@ import Prelude hiding (Word)
 
 import EVM.Types
 import EVM (cheatCode, traceForest)
-import EVM.ABI (getAbiSeq, parseTypeName)
+import EVM.ABI (getAbiSeq, parseTypeName, AbiValue(..), AbiType(..), SolError(..), Indexed(..), Event(..))
 import EVM.Dapp (DappContext(..), DappInfo(..), showTraceLocation)
 import EVM.Expr qualified as Expr
 import EVM.Hexdump (prettyHex, paddedShowHex)

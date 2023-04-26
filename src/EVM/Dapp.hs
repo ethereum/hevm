@@ -4,6 +4,7 @@ import EVM.Concrete
 import EVM.Debug (srcMapCodePos)
 import EVM.Solidity
 import EVM.Types
+import EVM.ABI
 
 import Control.Arrow ((>>>))
 import Data.Aeson (Value)

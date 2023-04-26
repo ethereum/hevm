@@ -22,7 +22,7 @@ import Data.Bifunctor (first)
 import Data.Bits (Bits, FiniteBits, shiftR, shift, shiftL, (.&.), (.|.))
 import Data.ByteArray qualified as BA
 import Data.Char
-import Data.List (foldl', intercalate)
+import Data.List (foldl')
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Base16 qualified as BS16
@@ -847,84 +847,6 @@ data VMOpts = VMOpts
   , txAccessList :: Map Addr [W256]
   , allowFFI :: Bool
   } deriving Show
-
-
--- ABI Types ---------------------------------------------------------------------------------------
-
-
-data AbiValue
-  = AbiUInt         Int Word256
-  | AbiInt          Int Int256
-  | AbiAddress      Addr
-  | AbiBool         Bool
-  | AbiBytes        Int BS.ByteString
-  | AbiBytesDynamic BS.ByteString
-  | AbiString       BS.ByteString
-  | AbiArrayDynamic AbiType (V.Vector AbiValue)
-  | AbiArray        Int AbiType (V.Vector AbiValue)
-  | AbiTuple        (V.Vector AbiValue)
-  | AbiFunction     BS.ByteString
-  deriving (Read, Eq, Ord, Generic)
-
--- | Pretty-print some 'AbiValue'.
-instance Show AbiValue where
-  show (AbiUInt _ n)         = show n
-  show (AbiInt  _ n)         = show n
-  show (AbiAddress n)        = show n
-  show (AbiBool b)           = if b then "true" else "false"
-  show (AbiBytes      _ b)   = show (ByteStringS b)
-  show (AbiBytesDynamic b)   = show (ByteStringS b)
-  show (AbiString       s)   = formatString s
-  show (AbiArrayDynamic _ v) =
-    "[" ++ intercalate ", " (show <$> V.toList v) ++ "]"
-  show (AbiArray      _ _ v) =
-    "[" ++ intercalate ", " (show <$> V.toList v) ++ "]"
-  show (AbiTuple v) =
-    "(" ++ intercalate ", " (show <$> V.toList v) ++ ")"
-  show (AbiFunction b)       = show (ByteStringS b)
-
-data AbiType
-  = AbiUIntType         Int
-  | AbiIntType          Int
-  | AbiAddressType
-  | AbiBoolType
-  | AbiBytesType        Int
-  | AbiBytesDynamicType
-  | AbiStringType
-  | AbiArrayDynamicType AbiType
-  | AbiArrayType        Int AbiType
-  | AbiTupleType        (V.Vector AbiType)
-  | AbiFunctionType
-  deriving (Read, Eq, Ord, Generic)
-
-instance Show AbiType where
-  show = T.unpack . abiTypeSolidity
-
-data AbiKind = Dynamic | Static
-  deriving (Show, Read, Eq, Ord, Generic)
-
-data Anonymity = Anonymous | NotAnonymous
-  deriving (Show, Ord, Eq, Generic)
-data Indexed   = Indexed   | NotIndexed
-  deriving (Show, Ord, Eq, Generic)
-data Event     = Event Text Anonymity [(Text, AbiType, Indexed)]
-  deriving (Show, Ord, Eq, Generic)
-data SolError  = SolError Text [AbiType]
-  deriving (Show, Ord, Eq, Generic)
-
-abiTypeSolidity :: AbiType -> Text
-abiTypeSolidity = \case
-  AbiUIntType n         -> "uint" <> T.pack (show n)
-  AbiIntType n          -> "int" <> T.pack (show n)
-  AbiAddressType        -> "address"
-  AbiBoolType           -> "bool"
-  AbiBytesType n        -> "bytes" <> T.pack (show n)
-  AbiBytesDynamicType   -> "bytes"
-  AbiStringType         -> "string"
-  AbiArrayDynamicType t -> abiTypeSolidity t <> "[]"
-  AbiArrayType n t      -> abiTypeSolidity t <> "[" <> T.pack (show n) <> "]"
-  AbiTupleType ts       -> "(" <> (T.intercalate "," . V.toList $ abiTypeSolidity <$> ts) <> ")"
-  AbiFunctionType       -> "function"
 
 
 -- Opcodes -----------------------------------------------------------------------------------------
