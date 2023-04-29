@@ -1,4 +1,5 @@
 {-# Language DataKinds #-}
+{-# Language ScopedTypeVariables #-}
 
 {- |
     Module: EVM.Traversals
@@ -27,6 +28,27 @@ foldProp f acc p = acc <> (go p)
       PAnd a b -> go a <> go b
       POr a b -> go a <> go b
       PImpl a b -> go a <> go b
+
+foldTrace :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Trace -> b
+foldTrace f acc t = acc <> (go t)
+  where
+    go :: Trace -> b
+    go (Trace _ _ d) = case d of
+      EventTrace a b c -> foldExpr f mempty a <> foldExpr f mempty b <> (foldl (foldExpr f) mempty c)
+      FrameTrace a -> go' a
+      ErrorTrace _ -> mempty
+      EntryTrace _ -> mempty
+      ReturnTrace a b -> foldExpr f mempty a <> go' b
+
+    go' :: FrameContext -> b
+    go' = \case
+      CreationContext _ b _ _ -> foldExpr f mempty b
+      CallContext _ _ _ _ e _ g (_, h) _ -> foldExpr f mempty e <> foldExpr f mempty g <> foldExpr f mempty h
+
+foldTraces :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Traces -> b
+foldTraces f acc (Traces a _) = acc <> foldl (foldl (foldTrace f)) mempty a
+
+
 
 -- | Recursively folds a given function over a given expression
 -- Recursion schemes do this & a lot more, but defining them over GADT's isn't worth the hassle
@@ -67,9 +89,9 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- control flow
 
-      e@(Success a b c) -> f e <> (foldl (foldProp f) mempty a) <> (go b) <> (go c)
-      e@(Failure a _) -> f e <> (foldl (foldProp f) mempty a)
-      e@(Partial a _) -> f e <> (foldl (foldProp f) mempty a)
+      e@(Success a b c d) -> f e <> (foldl (foldProp f) mempty a) <> foldTraces f mempty b <> (go c) <> (go d)
+      e@(Failure a b _) -> f e <> (foldl (foldProp f) mempty a) <> foldTraces f mempty b
+      e@(Partial a b _) -> f e <> (foldl (foldProp f) mempty a) <> foldTraces f mempty b
       e@(ITE a b c) -> f e <> (go a) <> (go b) <> (go c)
 
       -- integers
@@ -241,6 +263,22 @@ mapProp f = \case
   POr a b -> POr (mapProp f a) (mapProp f b)
   PImpl a b -> PImpl (mapProp f a) (mapProp f b)
 
+mapTrace :: (forall a . Expr a -> Expr a) -> Trace -> Trace
+mapTrace f (Trace x y z) = Trace x y (go z)
+  where
+    go :: TraceData -> TraceData
+    go = \case
+      EventTrace a b c -> EventTrace (f a) (f b) (fmap (mapExpr f) c)
+      FrameTrace a -> FrameTrace (go' a)
+      ErrorTrace a -> ErrorTrace a
+      EntryTrace a -> EntryTrace a
+      ReturnTrace a b -> ReturnTrace (f a) (go' b)
+
+    go' :: FrameContext -> FrameContext
+    go' = \case
+      CreationContext a b c d -> CreationContext a (f b) c d
+      CallContext a b c d e g h (i,j) k -> CallContext a b c d (f e) g (f h) (i,f j) k
+
 -- | Recursively applies a given function to every node in a given expr instance
 -- Recursion schemes do this & a lot more, but defining them over GADT's isn't worth the hassle
 mapExpr :: (forall a . Expr a -> Expr a) -> Expr b -> Expr b
@@ -311,17 +349,20 @@ mapExprM f expr = case expr of
 
   -- control flow
 
-  Failure a b -> do
+  Failure a b c -> do
     a' <- mapM (mapPropM f) a
-    f (Failure a' b)
-  Partial a b -> do
+    b' <- mapTracesM f b
+    f (Failure a' b' c)
+  Partial a b c -> do
     a' <- mapM (mapPropM f) a
-    f (Partial a' b)
-  Success a b c -> do
+    b' <- mapTracesM f b
+    f (Partial a' b' c)
+  Success a b c d -> do
     a' <- mapM (mapPropM f) a
-    b' <- mapExprM f b
+    b' <- mapTracesM f b
     c' <- mapExprM f c
-    f (Success a' b' c')
+    d' <- mapExprM f d
+    f (Success a' b' c' d')
 
   ITE a b c -> do
     a' <- mapExprM f a
@@ -653,6 +694,42 @@ mapPropM f = \case
     b' <- mapPropM f b
     pure $ PImpl a' b'
 
+mapTracesM :: forall m . Monad m => (forall a . Expr a -> m (Expr a)) -> Traces -> m Traces
+mapTracesM f (Traces a b) = do
+  a' <- mapM (mapM (mapTraceM f)) a
+  pure $ Traces a' b
+
+mapTraceM :: forall m . Monad m => (forall a . Expr a -> m (Expr a)) -> Trace -> m Trace
+mapTraceM f (Trace x y z) = do
+  z' <- go z
+  pure $ Trace x y z'
+  where
+    go :: TraceData -> m TraceData
+    go = \case
+      EventTrace a b c -> do
+        a' <- mapExprM f a
+        b' <- mapExprM f b
+        c' <- mapM (mapExprM f) c
+        pure $ EventTrace a' b' c'
+      FrameTrace a -> do
+        a' <- go' a
+        pure $ FrameTrace a'
+      ReturnTrace a b -> do
+        a' <- mapExprM f a
+        b' <- go' b
+        pure $ ReturnTrace a' b'
+      a -> pure a
+
+    go' :: FrameContext -> m FrameContext
+    go' = \case
+      CreationContext a b c d -> do
+        b' <- mapExprM f b
+        pure $ CreationContext a b' c d
+      CallContext a b c d e g h (i,j) k -> do
+        e' <- mapExprM f e
+        h' <- mapExprM f h
+        j' <- mapExprM f j
+        pure $ CallContext a b c d e' g h' (i,j') k
 
 -- | Generic operations over AST terms
 class TraversableTerm a where

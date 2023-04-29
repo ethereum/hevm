@@ -41,6 +41,7 @@ import Data.Sequence qualified as Seq
 import Data.Serialize qualified as Cereal
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
+import Data.Tree
 import Data.Vector qualified as V
 import Data.Vector.Storable qualified as SV
 import Numeric (readHex, showHex)
@@ -83,7 +84,6 @@ data GVar (a :: EType) where
 deriving instance Show (GVar a)
 deriving instance Eq (GVar a)
 deriving instance Ord (GVar a)
-
 
 {- |
   Expr implements an abstract respresentation of an EVM program
@@ -160,9 +160,9 @@ data Expr (a :: EType) where
 
   -- control flow
 
-  Partial        :: [Prop] -> PartialExec -> Expr End
-  Failure        :: [Prop] -> EvmError -> Expr End
-  Success        :: [Prop] -> Expr Buf -> Expr Storage -> Expr End
+  Partial        :: [Prop] -> Traces -> PartialExec -> Expr End
+  Failure        :: [Prop] -> Traces -> EvmError -> Expr End
+  Success        :: [Prop] -> Traces -> Expr Buf -> Expr Storage -> Expr End
   ITE            :: Expr EWord -> Expr End -> Expr End -> Expr End
 
   -- integers
@@ -618,7 +618,7 @@ data FrameContext
     , callreversion :: (Map Addr Contract, Expr Storage)
     , subState      :: SubState
     }
-  deriving (Show, Generic)
+  deriving (Eq, Ord, Show, Generic)
 
 -- | The "accrued substate" across a transaction
 data SubState = SubState
@@ -629,7 +629,7 @@ data SubState = SubState
   , refunds             :: [(Addr, Word64)]
   -- in principle we should include logs here, but do not for now
   }
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 -- | The "registers" of the VM along with memory and data stack
 data FrameState = FrameState
@@ -713,7 +713,7 @@ data Contract = Contract
   , codeOps      :: V.Vector (Int, Op)
   , external     :: Bool
   }
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 
 -- Bytecode Representations ------------------------------------------------------------------------
@@ -806,16 +806,27 @@ data Trace = Trace
   , contract  :: Contract
   , tracedata :: TraceData
   }
-  deriving (Show, Generic)
+  deriving (Eq, Ord, Show, Generic)
 
 data TraceData
   = EventTrace (Expr EWord) (Expr Buf) [Expr EWord]
   | FrameTrace FrameContext
-  | QueryTrace Query
   | ErrorTrace EvmError
   | EntryTrace Text
   | ReturnTrace (Expr Buf) FrameContext
-  deriving (Show, Generic)
+  deriving (Eq, Ord, Show, Generic)
+
+-- | Wrapper type containing vm traces and the context needed to pretty print them properly
+data Traces = Traces
+  { traces :: Forest Trace
+  , contracts :: Map Addr Contract
+  }
+  deriving (Eq, Ord, Show, Generic)
+
+instance Semigroup Traces where
+  (Traces a b) <> (Traces c d) = Traces (a <> c) (b <> d)
+instance Monoid Traces where
+  mempty = Traces mempty mempty
 
 
 -- VM Initialization -------------------------------------------------------------------------------
@@ -933,7 +944,7 @@ data GenericOp a
   | OpLog !Word8
   | OpPush a
   | OpUnknown Word8
-  deriving (Show, Eq, Functor)
+  deriving (Show, Eq, Ord, Functor)
 
 
 -- Function Selectors ------------------------------------------------------------------------------
