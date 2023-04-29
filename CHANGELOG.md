@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--max-iterations` is respected in cases where path conditions have become inconsistent
 - `--max-iterations` is now respected for loops with a concrete branch condition
 
+## Fixed
+
+- Fixed a bug where underflow was possible when transfering eth
+
 ## [0.50.5] - 2023-03-18
 
 ## Changed
