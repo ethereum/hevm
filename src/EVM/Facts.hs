@@ -32,10 +32,9 @@ module EVM.Facts
   , fileToFact
   ) where
 
-import EVM          (VM, Contract, Cache)
 import EVM          (bytecode)
-import EVM.Types    (Addr, W256, Expr(..), num)
 import EVM.Expr     (writeStorage, litAddr)
+import EVM.Types
 
 import qualified EVM
 
@@ -160,7 +159,7 @@ apply1 :: VM -> Fact -> VM
 apply1 vm fact =
   case fact of
     CodeFact    {..} -> flip execState vm $ do
-      assign (#env % #contracts % at addr) (Just (EVM.initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode blob))))
+      assign (#env % #contracts % at addr) (Just (EVM.initialContract (RuntimeCode (ConcreteRuntimeCode blob))))
       when (vm.state.contract == addr) $ EVM.loadContract addr
     StorageFact {..} ->
       vm & over (#env % #storage) (writeStorage (litAddr addr) (Lit which) (Lit what))
@@ -173,7 +172,7 @@ apply2 :: VM -> Fact -> VM
 apply2 vm fact =
   case fact of
     CodeFact    {..} -> flip execState vm $ do
-      assign (#cache % #fetchedContracts % at addr) (Just (EVM.initialContract (EVM.RuntimeCode (EVM.ConcreteRuntimeCode blob))))
+      assign (#cache % #fetchedContracts % at addr) (Just (EVM.initialContract (RuntimeCode (ConcreteRuntimeCode blob))))
       when (vm.state.contract == addr) $ EVM.loadContract addr
     StorageFact {..} -> let
         store = vm.cache.fetchedStorage

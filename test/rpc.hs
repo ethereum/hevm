@@ -10,7 +10,7 @@ import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Vector qualified as V
 
-import EVM
+import EVM (makeVm)
 import EVM.ABI
 import EVM.Fetch
 import EVM.SMT
@@ -31,7 +31,7 @@ tests = testGroup "rpc"
         let block = BlockNumber 15537392
         (cb, numb, basefee, prevRan) <- fetchBlockFrom block testRpc >>= \case
                       Nothing -> error "Could not fetch block"
-                      Just EVM.Block{..} -> return ( coinbase
+                      Just Block{..} -> return ( coinbase
                                                    , number
                                                    , baseFee
                                                    , prevRandao
@@ -45,7 +45,7 @@ tests = testGroup "rpc"
         let block = BlockNumber 16184420
         (cb, numb, basefee, prevRan) <- fetchBlockFrom block testRpc >>= \case
                       Nothing -> error "Could not fetch block"
-                      Just EVM.Block{..} -> return ( coinbase
+                      Just Block{..} -> return ( coinbase
                                                    , number
                                                    , baseFee
                                                    , prevRandao
@@ -90,7 +90,7 @@ tests = testGroup "rpc"
         let
           blockNum = 16198552
           calldata' = symCalldata "transfer(address,uint256)" [AbiAddressType, AbiUIntType 256] ["0xdead"] (AbstractBuf "txdata")
-          postc _ (EVM.Types.Revert _ _) = PBool False
+          postc _ (Failure _ (Revert _)) = PBool False
           postc _ _ = PBool True
         vm <- weth9VM blockNum calldata'
         (_, [Cex (_, model)]) <- withSolvers Z3 1 Nothing $ \solvers ->
@@ -100,7 +100,7 @@ tests = testGroup "rpc"
   ]
 
 -- call into WETH9 from 0xf04a... (a large holder)
-weth9VM :: W256 -> (Expr Buf, [Prop]) -> IO (EVM.VM)
+weth9VM :: W256 -> (Expr Buf, [Prop]) -> IO VM
 weth9VM blockNum calldata' = do
   let
     caller' = Lit 0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e
@@ -108,7 +108,7 @@ weth9VM blockNum calldata' = do
     callvalue' = Lit 0
   vmFromRpc blockNum calldata' callvalue' caller' weth9
 
-vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EWord -> Addr -> IO (EVM.VM)
+vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EWord -> Addr -> IO VM
 vmFromRpc blockNum calldata' callvalue' caller' address' = do
   ctrct <- fetchContractFrom (BlockNumber blockNum) testRpc address' >>= \case
         Nothing -> error $ "contract not found: " <> show address'
@@ -118,30 +118,30 @@ vmFromRpc blockNum calldata' callvalue' caller' address' = do
     Nothing -> error "could not fetch block"
     Just b -> pure b
 
-  pure $ EVM.makeVm $ EVM.VMOpts
-    { EVM.contract       = ctrct
-    , EVM.calldata       = calldata'
-    , EVM.value          = callvalue'
-    , EVM.address        = address'
-    , EVM.caller         = caller'
-    , EVM.origin         = 0xacab
-    , EVM.gas            = 0xffffffffffffffff
-    , EVM.gaslimit       = 0xffffffffffffffff
-    , EVM.baseFee        = blk.baseFee
-    , EVM.priorityFee    = 0
-    , EVM.coinbase       = blk.coinbase
-    , EVM.number         = blk.number
-    , EVM.timestamp      = blk.timestamp
-    , EVM.blockGaslimit  = blk.gaslimit
-    , EVM.gasprice       = 0
-    , EVM.maxCodeSize    = blk.maxCodeSize
-    , EVM.prevRandao     = blk.prevRandao
-    , EVM.schedule       = blk.schedule
-    , EVM.chainId        = 1
-    , EVM.create         = False
-    , EVM.initialStorage = EmptyStore
-    , EVM.txAccessList   = mempty
-    , EVM.allowFFI       = False
+  pure $ makeVm $ VMOpts
+    { contract      = ctrct
+    , calldata      = calldata'
+    , value         = callvalue'
+    , address       = address'
+    , caller        = caller'
+    , origin        = 0xacab
+    , gas           = 0xffffffffffffffff
+    , gaslimit      = 0xffffffffffffffff
+    , baseFee       = blk.baseFee
+    , priorityFee   = 0
+    , coinbase      = blk.coinbase
+    , number        = blk.number
+    , timestamp     = blk.timestamp
+    , blockGaslimit = blk.gaslimit
+    , gasprice      = 0
+    , maxCodeSize   = blk.maxCodeSize
+    , prevRandao    = blk.prevRandao
+    , schedule      = blk.schedule
+    , chainId       = 1
+    , create        = False
+    , initialStorage = EmptyStore
+    , txAccessList  = mempty
+    , allowFFI      = False
     }
 
 testRpc :: Text

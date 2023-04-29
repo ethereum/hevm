@@ -2,9 +2,9 @@
 
 module EVM.Debug where
 
-import EVM          (Contract, bytecode)
+import EVM          (bytecode)
 import EVM.Solidity (SrcMap(..), SourceCache(..))
-import EVM.Types    (Addr)
+import EVM.Types    (Contract, Addr)
 import EVM.Expr     (bufLength)
 
 import Control.Arrow   (second)

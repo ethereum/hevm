@@ -1,50 +1,60 @@
+{-# Language TupleSections #-}
+{-# Language DeriveAnyClass #-}
 {-# Language DataKinds #-}
 
 module EVM.SymExec where
 
-import Control.Concurrent.Async (concurrently, mapConcurrently)
+import Prelude hiding (Word)
+
+import Data.Tuple (swap)
+import Optics.Core
+import EVM hiding (push, bytecode, query, wrap)
+import EVM.Exec
+import qualified EVM.Fetch as Fetch
+import EVM.ABI
+import EVM.SMT (SMTCex(..), SMT2(..), assertProps, formatSMT2)
+import qualified EVM.SMT as SMT
+import EVM.Solvers
+import EVM.Traversals
+import qualified EVM.Expr as Expr
+import EVM.Stepper (Stepper)
+import qualified EVM.Stepper as Stepper
+import qualified Control.Monad.Operational as Operational
+import Control.Monad.State.Strict hiding (state)
+import EVM.Types
+import EVM.Concrete (createAddress)
+import qualified EVM.FeeSchedule as FeeSchedule
+import Data.DoubleWord (Word256)
+import Control.Concurrent.Async
+import Data.Maybe
+import Data.Containers.ListUtils
+import Data.List (foldl', sortBy)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
+import Data.Bifunctor (second)
+import Data.Map (Map)
+import qualified Data.Map as Map
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.IO as TL
+import EVM.Format (formatExpr, formatPartial)
+import Data.Set (Set, isSubsetOf, size)
+import qualified Data.Set as Set
 import Control.Concurrent.Spawn (parMapIO, pool)
 import Control.Concurrent.STM (atomically, TVar, readTVarIO, readTVar, newTVarIO, writeTVar)
-import Control.Monad.Operational qualified as Operational
-import Control.Monad.State.Strict
-import Data.Bifunctor (second)
-import Data.ByteString (ByteString)
-import Data.ByteString qualified as BS
-import Data.DoubleWord (Word256)
-import Data.List (foldl', sortBy)
-import Data.Map (Map)
-import Data.Map qualified as Map
-import Data.Maybe
-import Data.Set (Set, isSubsetOf, size)
-import Data.Set qualified as Set
-import Data.Text (Text)
-import Data.Text qualified as T
-import Data.Text.IO qualified as T
-import Data.Text.Lazy qualified as TL
-import Data.Text.Lazy.IO qualified as TL
-import Data.Tuple (swap)
 import GHC.Conc (getNumProcessors)
-import Optics.Core
+import EVM.Format (indent, formatBinary)
+import Options.Generic as Options
 
-import EVM hiding (Query, Revert, bytecode)
-import EVM qualified
-import EVM.ABI
-import EVM.Concrete (createAddress)
-import EVM.Exec
-import EVM.Expr qualified as Expr
-import EVM.FeeSchedule qualified as FeeSchedule
-import EVM.Fetch qualified as Fetch
-import EVM.Format (formatExpr, indent, formatBinary)
-import EVM.SMT (SMTCex(..), SMT2(..), assertProps, formatSMT2)
-import EVM.SMT qualified as SMT
-import EVM.Solvers
-import EVM.Stepper (Stepper)
-import EVM.Stepper qualified as Stepper
-import EVM.Traversals
-import EVM.Types
 
 -- | A method name, and the (ordered) types of it's arguments
 data Sig = Sig Text [AbiType]
+
+data LoopHeuristic
+  = Naive
+  | StackBased
+  deriving (Eq, Show, Read, ParseField, ParseFields, ParseRecord, Generic)
 
 data ProofResult a b c = Qed a | Cex b | Timeout c
   deriving (Show, Eq)
@@ -67,7 +77,8 @@ data VeriOpts = VeriOpts
   { simp :: Bool
   , debug :: Bool
   , maxIter :: Maybe Integer
-  , askSmtIters :: Maybe Integer
+  , askSmtIters :: Integer
+  , loopHeuristic :: LoopHeuristic
   , rpcInfo :: Fetch.RpcInfo
   }
   deriving (Eq, Show)
@@ -77,7 +88,8 @@ defaultVeriOpts = VeriOpts
   { simp = True
   , debug = False
   , maxIter = Nothing
-  , askSmtIters = Nothing
+  , askSmtIters = 1
+  , loopHeuristic = StackBased
   , rpcInfo = Nothing
   }
 
@@ -234,11 +246,12 @@ loadSymVM x initStore addr callvalue' cd =
 interpret
   :: Fetch.Fetcher
   -> Maybe Integer -- max iterations
-  -> Maybe Integer -- ask smt iterations
+  -> Integer -- ask smt iterations
+  -> LoopHeuristic
   -> VM
   -> Stepper (Expr End)
   -> IO (Expr End)
-interpret fetcher maxIter askSmtIters vm =
+interpret fetcher maxIter askSmtIters heuristic vm =
   eval . Operational.view
   where
   eval
@@ -251,67 +264,104 @@ interpret fetcher maxIter askSmtIters vm =
     case action of
       Stepper.Exec -> do
         let (r, vm') = runState exec vm
-        interpret fetcher maxIter askSmtIters vm' (k r)
+        interpret fetcher maxIter askSmtIters heuristic vm' (k r)
       Stepper.Run -> do
         let vm' = execState exec vm
-        interpret fetcher maxIter askSmtIters vm' (k vm')
+        interpret fetcher maxIter askSmtIters heuristic vm' (k vm')
       Stepper.IOAct q -> do
         (r, vm') <- runStateT q vm
-        interpret fetcher maxIter askSmtIters vm' (k r)
-      Stepper.Ask (EVM.PleaseChoosePath cond continue) ->
-        case maxIterationsReached vm maxIter of
-          Nothing -> do
-            (a, b) <- concurrently
-              (let (ra, vma) = runState (continue True) vm { result = Nothing }
-               in interpret fetcher maxIter askSmtIters vma (k ra))
-              (let (rb, vmb) = runState (continue False) vm { result = Nothing }
-               in interpret fetcher maxIter askSmtIters vmb (k rb))
+        interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+      Stepper.Ask (PleaseChoosePath cond continue) -> do
+        (a, b) <- concurrently
+          (let (ra, vma) = runState (continue True) vm { result = Nothing }
+           in interpret fetcher maxIter askSmtIters heuristic vma (k ra))
+          (let (rb, vmb) = runState (continue False) vm { result = Nothing }
+           in interpret fetcher maxIter askSmtIters heuristic vmb (k rb))
 
-            pure $ ITE cond a b
-          Just n -> do
-            -- Let's escape the loop. We give no guarantees at this point
-            let (r, vm') = runState (continue (not n)) vm { result = Nothing }
-            interpret fetcher maxIter askSmtIters vm' (k r)
+        pure $ ITE cond a b
       Stepper.Wait q -> do
         let performQuery = do
               m <- liftIO (fetcher q)
               let (r, vm') = runState m vm
-              interpret fetcher maxIter askSmtIters vm' (k r)
+              interpret fetcher maxIter askSmtIters heuristic vm' (k r)
 
         case q of
-          PleaseAskSMT _ _ continue -> do
-            let
-              codelocation = getCodeLocation vm
-              iteration = num . fromMaybe 0 $ Map.lookup codelocation vm.iterations
+          PleaseAskSMT cond _ continue -> do
+            case cond of
+              -- is the condition concrete?
+              Lit c ->
+                -- have we reached max iterations, are we inside a loop?
+                case (maxIterationsReached vm maxIter, isLoopHead heuristic vm) of
+                  -- Yes. return a partial leaf
+                  (Just _, Just True) ->
+                    pure $ Partial vm.keccakEqs $ MaxIterationsReached vm.state.pc vm.state.contract
+                  -- No. keep executing
+                  _ ->
+                    let (r, vm') = runState (continue (Case (c > 0))) vm
+                    in interpret fetcher maxIter askSmtIters heuristic vm' (k r)
 
-            -- if this is the first time we are branching at this point,
-            -- explore both branches without consulting SMT.
-            -- Exploring too many branches is a lot cheaper than
-            -- consulting our SMT solver.
-            if iteration < fromMaybe 5 askSmtIters then do
-              let (r, vm') = runState (continue EVM.Unknown) vm
-              interpret fetcher maxIter askSmtIters vm' (k r)
-            else performQuery
+              -- the condition is symbolic
+              _ ->
+                -- are in we a loop, have we hit maxIters, have we hit askSmtIters?
+                case (isLoopHead heuristic vm, askSmtItersReached vm askSmtIters, maxIterationsReached vm maxIter) of
+                  -- we're in a loop and maxIters has been reached
+                  (Just True, _, Just n) -> do
+                    -- continue execution down the opposite branch than the one that
+                    -- got us to this point and return a partial leaf for the other side
+                    let (r, vm') = runState (continue (Case $ not n)) vm
+                    a <- interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+                    pure $ ITE cond a (Partial vm.keccakEqs (MaxIterationsReached vm.state.pc vm.state.contract))
+                  -- we're in a loop and askSmtIters has been reached
+                  (Just True, True, _) ->
+                    -- ask the smt solver about the loop condition
+                    performQuery
+                  -- otherwise just try both branches and don't ask the solver
+                  _ ->
+                    let (r, vm') = runState (continue EVM.Types.Unknown) vm
+                    in interpret fetcher maxIter askSmtIters heuristic vm' (k r)
 
           _ -> performQuery
 
       Stepper.EVM m -> do
         let (r, vm') = runState m vm
-        interpret fetcher maxIter askSmtIters vm' (k r)
+        interpret fetcher maxIter askSmtIters heuristic vm' (k r)
 
 maxIterationsReached :: VM -> Maybe Integer -> Maybe Bool
 maxIterationsReached _ Nothing = Nothing
 maxIterationsReached vm (Just maxIter) =
   let codelocation = getCodeLocation vm
-      iters = view (at codelocation % non 0) vm.iterations
+      (iters, _) = view (at codelocation % non (0, [])) vm.iterations
   in if num maxIter <= iters
      then Map.lookup (codelocation, iters - 1) vm.cache.path
      else Nothing
 
+askSmtItersReached :: VM -> Integer -> Bool
+askSmtItersReached vm askSmtIters = let
+    codelocation = getCodeLocation vm
+    (iters, _) = view (at codelocation % non (0, [])) vm.iterations
+  in askSmtIters <= num iters
+
+{- | Loop head detection heuristic
+
+ The main thing we wish to differentiate between, are actual loop heads, and branch points inside of internal functions that are called multiple times.
+
+ One way to do this is to observe that for internal functions, the compiler must always store a stack item representing the location that it must jump back to. If we compare the stack at the time of the previous visit, and the time of the current visit, and notice that this location has changed, then we can guess that the location is a jump point within an internal function instead of a loop (where such locations should be constant between iterations).
+
+ This heuristic is not perfect, and can certainly be tricked, but should generally be good enough for most compiler generated and non pathological user generated loops.
+ -}
+isLoopHead :: LoopHeuristic -> VM -> Maybe Bool
+isLoopHead Naive _ = Just True
+isLoopHead StackBased vm = let
+    loc = getCodeLocation vm
+    oldIters = Map.lookup loc vm.iterations
+    isValid (Lit wrd) = wrd <= num (maxBound :: Int) && isValidJumpDest vm (num wrd)
+    isValid _ = False
+  in case oldIters of
+       Just (_, oldStack) -> Just $ filter isValid oldStack == filter isValid vm.state.stack
+       Nothing -> Nothing
 
 type Precondition = VM -> Prop
 type Postcondition = VM -> Expr End -> Prop
-
 
 checkAssert
   :: SolverGroup
@@ -345,8 +395,8 @@ checkAssert solvers errs c signature' concreteArgs opts =
 -}
 checkAssertions :: [Word256] -> Postcondition
 checkAssertions errs _ = \case
-  Revert _ (ConcreteBuf msg) -> PBool $ msg `notElem` (fmap panicMsg errs)
-  Revert _ b -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
+  Failure _ (Revert (ConcreteBuf msg)) -> PBool $ msg `notElem` (fmap panicMsg errs)
+  Failure _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
   _ -> PBool True
 
 -- | By default hevm only checks for user-defined assertions
@@ -388,44 +438,29 @@ verifyContract solvers theCode signature' concreteArgs opts initStore maybepre m
   let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre initStore
   in verify solvers opts preState maybepost
 
-pruneDeadPaths :: [VM] -> [VM]
-pruneDeadPaths =
-  filter $ \vm -> case vm.result of
-    Just (VMFailure DeadPath) -> False
-    _ -> True
-
 -- | Stepper that parses the result of Stepper.runFully into an Expr End
 runExpr :: Stepper.Stepper (Expr End)
 runExpr = do
   vm <- Stepper.runFully
   let asserts = vm.keccakEqs
   pure $ case vm.result of
-    Nothing -> error "Internal Error: vm in intermediate state after call to runFully"
-    Just (VMSuccess buf) -> Return asserts buf vm.env.storage
-    Just (VMFailure e) -> case e of
-      UnrecognizedOpcode _ -> Failure asserts Invalid
-      SelfDestruction -> Failure asserts SelfDestruct
-      EVM.StackLimitExceeded -> Failure asserts EVM.Types.StackLimitExceeded
-      EVM.IllegalOverflow -> Failure asserts EVM.Types.IllegalOverflow
-      EVM.Revert buf -> EVM.Types.Revert asserts buf
-      EVM.InvalidMemoryAccess -> Failure asserts EVM.Types.InvalidMemoryAccess
-      EVM.BadJumpDestination -> Failure asserts EVM.Types.BadJumpDestination
-      EVM.StackUnderrun -> Failure asserts EVM.Types.StackUnderrun
-      e' -> Failure asserts $ EVM.Types.TmpErr (show e')
+    Just (VMSuccess buf) -> Success asserts buf vm.env.storage
+    Just (VMFailure e) -> Failure asserts e
+    Just (Unfinished p) -> Partial asserts p
+    _ -> error "Internal Error: vm in intermediate state after call to runFully"
 
 -- | Converts a given top level expr into a list of final states and the
 -- associated path conditions for each state.
 flattenExpr :: Expr End -> [Expr End]
 flattenExpr = go []
   where
-  go :: [Prop] -> Expr End -> [Expr End]
-  go pcs = \case
-    ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
-    Failure _ (TmpErr s) -> error s
-    GVar _ -> error "cannot flatten an Expr containing a GVar"
-    Revert ps msg -> [Revert (ps <> pcs) msg]
-    Return ps msg store -> [Return (ps <> pcs) msg store]
-    Failure ps e -> [Failure (ps <> pcs) e]
+    go :: [Prop] -> Expr End -> [Expr End]
+    go pcs = \case
+      ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
+      Success ps msg store -> [Success (ps <> pcs) msg store]
+      Failure ps e -> [Failure (ps <> pcs) e]
+      Partial ps p -> [Partial (ps <> pcs) p]
+      GVar _ -> error "cannot flatten an Expr containing a GVar"
 
 -- | Strips unreachable branches from a given expr
 -- Returns a list of executed SMT queries alongside the reduced expression for debugging purposes
@@ -505,11 +540,22 @@ evalProp = \case
 extractProps :: Expr End -> [Prop]
 extractProps = \case
   ITE _ _ _ -> []
-  Revert asserts _ -> asserts
-  Return asserts _ _ -> asserts
+  Success asserts _ _ -> asserts
   Failure asserts _ -> asserts
+  Partial asserts _ -> asserts
   GVar _ -> error "cannot extract props from a GVar"
 
+isPartial :: Expr a -> Bool
+isPartial (Partial _ _) = True
+isPartial _ = False
+
+getPartials :: [Expr End] -> [PartialExec]
+getPartials = mapMaybe go
+  where
+    go :: Expr End -> Maybe PartialExec
+    go = \case
+      Partial _ p -> Just p
+      _ -> Nothing
 
 -- | Symbolically execute the VM and check all endstates against the
 -- postcondition, if available.
@@ -522,7 +568,7 @@ verify
 verify solvers opts preState maybepost = do
   putStrLn "Exploring contract"
 
-  exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters preState runExpr
+  exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
   when opts.debug $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
 
   putStrLn "Simplifying expression"
@@ -531,12 +577,19 @@ verify solvers opts preState maybepost = do
 
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
 
+  let flattened = flattenExpr expr
+  when (any isPartial flattened) $ do
+    T.putStrLn ""
+    T.putStrLn "WARNING: hevm was only able to partially explore the given contract due to the following issues:"
+    T.putStrLn ""
+    T.putStrLn . T.unlines . fmap (indent 2 . ("- " <>)) . fmap formatPartial . getPartials $ flattened
+
   case maybepost of
     Nothing -> pure (expr, [Qed ()])
     Just post -> do
       let
         -- Filter out any leaves that can be statically shown to be safe
-        canViolate = flip filter (flattenExpr expr) $
+        canViolate = flip filter flattened $
           \leaf -> case evalProp (post preState leaf) of
             PBool True -> False
             _ -> True
@@ -587,6 +640,13 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
     False -> do
       branchesA <- getBranches bytecodeA
       branchesB <- getBranches bytecodeB
+
+      when (any isPartial branchesA || any isPartial branchesB) $ do
+        putStrLn ""
+        putStrLn "WARNING: hevm was only able to partially explore the given contract due to the following issues:"
+        putStrLn ""
+        T.putStrLn . T.unlines . fmap (indent 2 . ("- " <>)) . fmap formatPartial . nubOrd $ ((getPartials branchesA) <> (getPartials branchesB))
+
       let allPairs = [(a,b) | a <- branchesA, b <- branchesB]
       putStrLn $ "Found " <> show (length allPairs) <> " total pairs of endstates"
 
@@ -624,7 +684,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
       let
         bytecode = if BS.null bs then BS.pack [0] else bs
         prestate = abstractVM calldata' bytecode Nothing AbstractStore
-      expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters prestate runExpr
+      expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl
 
@@ -670,23 +730,20 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
     distinct aEnd bEnd =
       let
         differingResults = case (aEnd, bEnd) of
-          (Return _ aOut aStore, Return _ bOut bStore) ->
+          (Success _ aOut aStore, Success _ bOut bStore) ->
             if aOut == bOut && aStore == bStore
             then PBool False
             else aStore ./= bStore .|| aOut ./= bOut
-          (Return {}, _) -> PBool True
-          (_, Return {}) -> PBool True
-          (Revert _ a, Revert _ b) -> if a == b then PBool False else a ./= b
-          (Revert _ _, _) -> PBool True
-          (_, Revert _ _) -> PBool True
-          (Failure _ (TmpErr s), _) -> error $ "Unhandled error: " <> s
-          (_, Failure _ (TmpErr s)) -> error $ "Unhandled error: " <> s
-          (Failure _ erra, Failure _ errb) -> if erra==errb then PBool False else PBool True
+          (Failure _ (Revert a), Failure _ (Revert b)) -> if a == b then PBool False else a ./= b
+          (Failure _ a, Failure _ b) -> if a == b then PBool False else PBool True
+          -- partial end states can't be compared to actual end states, so we always ignore them
+          (Partial {}, _) -> PBool False
+          (_, Partial {}) -> PBool False
           (ITE _ _ _, _) -> error "Expressions must be flattened"
           (_, ITE _ _ _) -> error "Expressions must be flattened"
           (a, b) -> if a == b
                     then PBool False
-                    else error $ "Internal Error: Unimplemented. Left: " <> show a <> " Right: " <> show b
+                    else PBool True
       in case differingResults of
         -- if the end states are the same, then they can never produce a
         -- different result under any circumstances

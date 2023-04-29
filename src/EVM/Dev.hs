@@ -17,7 +17,7 @@ import Data.String.Here
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy.IO as TL
 
-import EVM hiding (contracts)
+import EVM
 import EVM.SMT
 import EVM.Solvers
 import EVM.Types
@@ -61,7 +61,7 @@ testOpts solvers root testFile = do
     { EVM.UnitTest.solvers = solvers
     , EVM.UnitTest.rpcInfo = Nothing
     , EVM.UnitTest.maxIter = Nothing
-    , EVM.UnitTest.askSmtIters = Nothing
+    , EVM.UnitTest.askSmtIters = 1
     , EVM.UnitTest.smtTimeout = Nothing
     , EVM.UnitTest.smtDebug = False
     , EVM.UnitTest.solver = Nothing
@@ -403,7 +403,7 @@ initVm bs = vm
 
 -- | Builds the Expr for the given evm bytecode object
 buildExpr :: SolverGroup -> ByteString -> IO (Expr End)
-buildExpr solvers bs = interpret (Fetch.oracle solvers Nothing) Nothing Nothing (initVm bs) runExpr
+buildExpr solvers bs = interpret (Fetch.oracle solvers Nothing) Nothing 1 Naive (initVm bs) runExpr
 
 dai :: IO ByteString
 dai = do

@@ -28,7 +28,7 @@ import qualified Data.ByteString as BS
 import Data.Maybe
 import Data.List qualified (length)
 import Test.Tasty
-import Test.Tasty.QuickCheck hiding (Failure)
+import Test.Tasty.QuickCheck hiding (Failure, Success)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()
@@ -55,6 +55,7 @@ import EVM.Assembler
 import EVM.Op hiding (getOp)
 import EVM.Exec
 import EVM.Types
+import EVM.Format (bsToHex)
 import EVM.Traversals
 import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
@@ -68,6 +69,21 @@ import qualified EVM.Transaction
 import EVM.Format (formatBinary)
 import EVM.Sign (deriveAddr)
 import GHC.IO.Exception (ExitCode(ExitSuccess))
+
+data VMTrace =
+  VMTrace
+  { tracePc      :: Int
+  , traceOp      :: Int
+  , traceStack   :: [W256]
+  , traceMemSize :: Data.Word.Word64
+  , traceDepth   :: Int
+  , traceGas     :: Data.Word.Word64
+  , traceError   :: Maybe String
+  } deriving (Generic, Show)
+
+instance JSON.ToJSON VMTrace where
+  toEncoding = JSON.genericToEncoding JSON.defaultOptions
+instance JSON.FromJSON VMTrace
 
 data VMTraceResult =
   VMTraceResult
@@ -287,7 +303,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
     toAddress :: Addr
     toAddress = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
 
-getHEVMRet :: OpContract -> ByteString -> Int -> IO (Either (EVM.Error, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult))
+getHEVMRet :: OpContract -> ByteString -> Int -> IO (Either (EvmError, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult))
 getHEVMRet contr txData gaslimitExec = do
   let (txn, evmEnv, contrAlloc, fromAddress, toAddress, _) = evmSetup contr txData gaslimitExec
   hevmRun <- runCodeWithTrace Nothing evmEnv contrAlloc txn (fromAddress, toAddress)
@@ -409,13 +425,13 @@ symbolify vm = vm { state = vm.state { calldata = AbstractBuf "calldata" } }
 
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
-runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Either (EVM.Error, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
+runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Either (EvmError, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
 runCodeWithTrace rpcinfo evmEnv alloc txn (fromAddr, toAddress) = withSolvers Z3 0 Nothing $ \solvers -> do
   let origVM = vmForRuntimeCode code' calldata' evmEnv alloc txn (fromAddr, toAddress)
       calldata' = ConcreteBuf txn.txdata
       code' = alloc.code
       buildExpr :: SolverGroup -> VM -> IO (Expr End)
-      buildExpr s vm = interpret (Fetch.oracle s Nothing) Nothing Nothing vm runExpr
+      buildExpr s vm = interpret (Fetch.oracle s Nothing) Nothing 1 Naive vm runExpr
 
   expr <- buildExpr solvers $ symbolify origVM
   (res, (vm, trace)) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (origVM, [])
@@ -480,8 +496,6 @@ vmtrace vm =
              }
   where
     readoutError :: Maybe VMResult -> Maybe String
-    readoutError Nothing = Nothing
-    readoutError (Just (VMSuccess _)) = Nothing
     readoutError (Just (VMFailure e)) = case e of
       -- NOTE: error text made to closely match go-ethereum's errors.go file
       OutOfGas {}             -> Just "out of gas"
@@ -489,19 +503,20 @@ vmtrace vm =
       CallDepthLimitReached   -> Just "max call depth exceeded"
       BalanceTooLow {}        -> Just "insufficient balance for transfer"
       -- TODO "contract address collision" not handled
-      EVM.Revert {}           -> Just "execution reverted"
+      Revert {}           -> Just "execution reverted"
       -- TODO "max initcode size exceeded" not handled
       MaxCodeSizeExceeded {}  -> Just "max code size exceeded"
-      EVM.BadJumpDestination  -> Just "invalid jump destination"
+      BadJumpDestination  -> Just "invalid jump destination"
       StateChangeWhileStatic  -> Just "write protection"
       ReturnDataOutOfBounds   -> Just "return data out of bounds"
-      EVM.IllegalOverflow     -> Just "gas uint64 overflow"
+      IllegalOverflow     -> Just "gas uint64 overflow"
       UnrecognizedOpcode op   -> Just $ "invalid opcode: " <> show op
-      EVM.NonceOverflow       -> Just "nonce uint64 overflow"
-      EVM.StackUnderrun       -> Just "stack underflow"
-      EVM.StackLimitExceeded  -> Just "stack limit reached"
-      EVM.InvalidMemoryAccess -> Just "write protection"
+      NonceOverflow       -> Just "nonce uint64 overflow"
+      StackUnderrun       -> Just "stack underflow"
+      StackLimitExceeded  -> Just "stack limit reached"
+      InvalidMemoryAccess -> Just "write protection"
       err                     -> Just $ "HEVM error: " <> show err
+    readoutError _ = Nothing
 
 vmres :: VM -> VMTraceResult
 vmres vm =
@@ -510,7 +525,7 @@ vmres vm =
     res = case vm.result of
       Just (VMSuccess (ConcreteBuf b)) -> (ByteStringS b)
       Just (VMSuccess x) -> error $ "unhandled: " <> (show x)
-      Just (VMFailure (EVM.Revert (ConcreteBuf b))) -> (ByteStringS b)
+      Just (VMFailure (Revert (ConcreteBuf b))) -> (ByteStringS b)
       Just (VMFailure _) -> ByteStringS mempty
       _ -> ByteStringS mempty
   in VMTraceResult
@@ -535,7 +550,6 @@ runWithTrace = do
       State.modify (\(a, b) -> (a, b ++ [vmtrace vm0]))
       zoom _1 (State.state (runState exec1))
       runWithTrace
-    Just (VMSuccess _) -> pure vm0
     Just (VMFailure _) -> do
       -- Update error text for last trace element
       (a, b) <- State.get
@@ -543,6 +557,7 @@ runWithTrace = do
           updatedTraces = take ((Data.List.length b)-1) b ++ [updatedElem]
       State.put (a, updatedTraces)
       pure vm0
+    Just _ -> pure vm0
 
 interpretWithTrace
   :: Fetch.Fetcher
@@ -565,9 +580,12 @@ interpretWithTrace fetcher =
           execWithTrace >>= interpretWithTrace fetcher . k
         Stepper.Run ->
           runWithTrace >>= interpretWithTrace fetcher . k
-        Stepper.Wait q ->
-          do m <- liftIO (fetcher q)
-             zoom _1 (State.state (runState m)) >> interpretWithTrace fetcher (k ())
+        Stepper.Wait q -> case q of
+          PleaseAskSMT (Lit x) _ continue ->
+            interpretWithTrace fetcher (Stepper.evm (continue (Case (x > 0))) >>= k)
+          _ -> do
+            m <- liftIO (fetcher q)
+            zoom _1 (State.state (runState m)) >> interpretWithTrace fetcher (k ())
         Stepper.Ask _ ->
           error "cannot make choice in this interpreter"
         Stepper.IOAct q ->
@@ -823,7 +841,7 @@ tests = testGroup "contract-quickcheck-run"
               concretizedExpr = concretize expr (ConcreteBuf txData)
               simplConcExpr = Expr.simplify concretizedExpr
               getReturnVal :: Expr End -> Maybe ByteString
-              getReturnVal (Return _ (ConcreteBuf bs) _) = Just bs
+              getReturnVal (Success _ (ConcreteBuf bs) _) = Just bs
               getReturnVal _ = Nothing
               simplConcrExprRetval = getReturnVal simplConcExpr
             traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
@@ -865,4 +883,3 @@ tests = testGroup "contract-quickcheck-run"
         System.Directory.removeFile "env.json"
         deleteTraceOutputFiles evmtoolResult
     ]
-

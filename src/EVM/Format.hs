@@ -3,6 +3,8 @@
 
 module EVM.Format
   ( formatExpr
+  , formatSomeExpr
+  , formatPartial
   , contractNamePart
   , contractPathPart
   , showError
@@ -22,20 +24,22 @@ module EVM.Format
   , formatBytes
   , formatBinary
   , indent
+  , strip0x
+  , strip0x'
+  , hexByteString
+  , hexText
+  , bsToHex
   ) where
 
 import Prelude hiding (Word)
 
-import EVM qualified
-import EVM (VM, cheatCode, traceForest, Error (..), Trace, TraceData(..), Query(..), FrameContext(..))
-import EVM.ABI (AbiValue (..), Event (..), AbiType (..), SolError (..),
-  Indexed (NotIndexed), getAbiSeq, parseTypeName, formatString)
+import EVM.Types
+import EVM (cheatCode, traceForest)
+import EVM.ABI (getAbiSeq, parseTypeName, AbiValue(..), AbiType(..), SolError(..), Indexed(..), Event(..))
 import EVM.Dapp (DappContext(..), DappInfo(..), showTraceLocation)
 import EVM.Expr qualified as Expr
-import EVM.Hexdump (prettyHex)
+import EVM.Hexdump (prettyHex, paddedShowHex)
 import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
-import EVM.Types (maybeLitWord, W256(..),num, word, Expr(..), EType(..), Addr,
-  ByteStringS(..), Error(..), FunctionSelector)
 
 import Control.Arrow ((>>>))
 import Optics.Core
@@ -48,14 +52,17 @@ import Data.ByteString.Lazy (toStrict, fromStrict)
 import Data.Char qualified as Char
 import Data.DoubleWord (signedWord)
 import Data.Foldable (toList)
+import Data.List (isPrefixOf)
 import Data.Map qualified as Map
 import Data.Maybe (catMaybes, fromMaybe, fromJust)
 import Data.Text (Text, pack, unpack, intercalate, dropEnd, splitOn)
 import Data.Text qualified as T
-import Data.Text.Encoding (decodeUtf8, decodeUtf8')
+import Data.Text.Encoding qualified as T
 import Data.Tree.View (showTree)
 import Data.Vector (Vector)
 import Numeric (showHex)
+import Data.ByteString.Char8 qualified as Char8
+import Data.ByteString.Base16 qualified as BS16
 
 data Signedness = Signed | Unsigned
   deriving (Show)
@@ -153,7 +160,7 @@ showError b = T.pack $ show b
 -- the conditions under which bytes will be decoded and rendered as a string
 isPrintable :: ByteString -> Bool
 isPrintable =
-  decodeUtf8' >>>
+  T.decodeUtf8' >>>
     either
       (const False)
       (T.all (\c-> Char.isPrint c && (not . Char.isControl) c))
@@ -172,7 +179,7 @@ formatBString b = mconcat [ "«",  T.dropAround (=='"') (pack $ formatString b),
 
 formatBinary :: ByteString -> Text
 formatBinary =
-  (<>) "0x" . decodeUtf8 . toStrict . toLazyByteString . byteStringHex
+  (<>) "0x" . T.decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
 formatSBinary :: Expr Buf -> Text
 formatSBinary (ConcreteBuf bs) = formatBinary bs
@@ -271,7 +278,7 @@ showTrace dapp vm trace =
 
     ErrorTrace e ->
       case e of
-        EVM.Revert out ->
+        Revert out ->
           "\x1b[91merror\x1b[0m " <> "Revert " <> showError out <> pos
         _ ->
           "\x1b[91merror\x1b[0m " <> pack (show e) <> pos
@@ -362,35 +369,70 @@ contractNamePart x = T.split (== ':') x !! 1
 contractPathPart :: Text -> Text
 contractPathPart x = T.split (== ':') x !! 0
 
-prettyError :: EVM.Types.Error -> String
-prettyError= \case
-  EVM.Types.Invalid -> "Invalid Opcode"
-  EVM.Types.IllegalOverflow -> "Illegal Overflow"
-  EVM.Types.SelfDestruct -> "Self Destruct"
-  EVM.Types.StackLimitExceeded -> "Stack limit exceeded"
-  EVM.Types.InvalidMemoryAccess -> "Invalid memory access"
-  EVM.Types.BadJumpDestination -> "Bad jump destination"
-  EVM.Types.StackUnderrun -> "Stack underrun"
-  EVM.Types.TmpErr err -> "Temp error: " <> err
+prettyError :: EvmError -> String
+prettyError = \case
+  IllegalOverflow -> "Illegal overflow"
+  SelfDestruction -> "Self destruct"
+  StackLimitExceeded -> "Stack limit exceeded"
+  InvalidMemoryAccess -> "Invalid memory access"
+  BadJumpDestination -> "Bad jump destination"
+  StackUnderrun -> "Stack underrun"
+  BalanceTooLow a b -> "Balance too low. value: " <> show a <> " balance: " <> show b
+  UnrecognizedOpcode a -> "Unrecognized opcode: " <> show a
+  Revert (ConcreteBuf msg) -> "Revert: " <> (T.unpack $ formatBinary msg)
+  Revert _ -> "Revert: <symbolic>"
+  OutOfGas a b -> "Out of gas: have: " <> show a <> " need: " <> show b
+  StateChangeWhileStatic -> "State change while static"
+  CallDepthLimitReached -> "Call depth limit reached"
+  MaxCodeSizeExceeded a b -> "Max code size exceeded: max: " <> show a <> " actual: " <> show b
+  InvalidFormat -> "Invalid Format"
+  PrecompileFailure -> "Precompile failure"
+  ReturnDataOutOfBounds -> "Return data out of bounds"
+  NonceOverflow -> "Nonce overflow"
+  BadCheatCode a -> "Bad cheat code: sig: " <> show a
 
-
-prettyvmresult :: (?context :: DappContext) => Expr End -> String
-prettyvmresult (EVM.Types.Revert _ (ConcreteBuf "")) = "Revert"
-prettyvmresult (EVM.Types.Revert _ msg) = "Revert: " ++ (unpack $ showError msg)
-prettyvmresult (EVM.Types.Return _ (ConcreteBuf msg) _) =
+prettyvmresult :: Expr End -> String
+prettyvmresult (Failure _ (Revert (ConcreteBuf ""))) = "Revert"
+prettyvmresult (Success _ (ConcreteBuf msg) _) =
   if BS.null msg
   then "Stop"
   else "Return: " <> show (ByteStringS msg)
-prettyvmresult (EVM.Types.Return _ _ _) =
+prettyvmresult (Success _ _ _) =
   "Return: <symbolic>"
 prettyvmresult (Failure _ err) = prettyError err
-prettyvmresult e = error "Internal Error: Invalid Result: " <> show e
+prettyvmresult (Partial _ p) = T.unpack $ formatPartial p
+prettyvmresult r = error $ "Internal Error: Invalid result: " <> show r
 
 indent :: Int -> Text -> Text
 indent n = rstrip . T.unlines . fmap (T.replicate n (T.pack [' ']) <>) . T.lines
 
 rstrip :: Text -> Text
 rstrip = T.reverse . T.dropWhile (=='\n') . T.reverse
+
+formatError :: EvmError -> Text
+formatError = \case
+  Revert buf -> T.unlines
+    [ "(Revert"
+    , indent 2 $ formatExpr buf
+    , ")"
+    ]
+  e -> T.pack $ show e
+
+formatPartial :: PartialExec -> Text
+formatPartial = \case
+  (UnexpectedSymbolicArg pc msg args) -> T.unlines
+    [ "Unexpected Symbolic Arguments to Opcode"
+    , indent 2 $ T.unlines
+      [ "msg: " <> T.pack (show msg)
+      , "program counter: " <> T.pack (show pc)
+      , "arguments: "
+      , indent 2 $ T.unlines . fmap formatSomeExpr $ args
+      ]
+    ]
+  MaxIterationsReached pc addr -> T.pack $ "Max Iterations Reached in contract: " <> show addr <> " pc: " <> show pc
+
+formatSomeExpr :: SomeExpr -> Text
+formatSomeExpr (SomeExpr e) = formatExpr e
 
 formatExpr :: Expr a -> Text
 formatExpr = go
@@ -405,19 +447,7 @@ formatExpr = go
         , indent 2 (formatExpr t)
         , indent 2 (formatExpr f)
         , ")"]
-      EVM.Types.Revert asserts buf -> case buf of
-        ConcreteBuf "" -> "(Revert " <> formatExpr buf <> ")"
-        _ -> T.unlines
-          [ "(Revert"
-          , indent 2 $ T.unlines
-            [ "Code:"
-            , indent 2 (formatExpr buf)
-            , "Assertions:"
-            , indent 2 $ T.pack $ show asserts
-            ]
-          , ")"
-          ]
-      Return asserts buf store -> T.unlines
+      Success asserts buf store -> T.unlines
         [ "(Return"
         , indent 2 $ T.unlines
           [ "Data:"
@@ -425,6 +455,16 @@ formatExpr = go
           , ""
           , "Store:"
           , indent 2 $ formatExpr store
+          , "Assertions:"
+          , indent 2 $ T.pack $ show asserts
+          ]
+        , ")"
+        ]
+      Failure asserts err -> T.unlines
+        [ "(Failure"
+        , indent 2 $ T.unlines
+          [ "Error:"
+          , indent 2 $ formatError err
           , "Assertions:"
           , indent 2 $ T.pack $ show asserts
           ]
@@ -544,3 +584,26 @@ formatExpr = go
        ]
 
       a -> T.pack $ show a
+
+strip0x :: ByteString -> ByteString
+strip0x bs = if "0x" `Char8.isPrefixOf` bs then Char8.drop 2 bs else bs
+
+strip0x' :: String -> String
+strip0x' s = if "0x" `isPrefixOf` s then drop 2 s else s
+
+hexByteString :: String -> ByteString -> ByteString
+hexByteString msg bs =
+  case BS16.decodeBase16 bs of
+    Right x -> x
+    _ -> error ("invalid hex bytestring for " ++ msg)
+
+hexText :: Text -> ByteString
+hexText t =
+  case BS16.decodeBase16 (T.encodeUtf8 (T.drop 2 t)) of
+    Right x -> x
+    _ -> error ("invalid hex bytestring " ++ show t)
+
+bsToHex :: ByteString -> String
+bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
+
+

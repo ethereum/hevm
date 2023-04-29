@@ -67,10 +67,10 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- control flow
 
-      e@(Revert a b) -> f e <> (foldl (foldProp f) mempty a) <> (go b)
-      e@(Return a b c) -> f e <> (foldl (foldProp f) mempty a) <> (go b) <> (go c)
-      e@(ITE a b c) -> f e <> (go a) <> (go b) <> (go c)
+      e@(Success a b c) -> f e <> (foldl (foldProp f) mempty a) <> (go b) <> (go c)
       e@(Failure a _) -> f e <> (foldl (foldProp f) mempty a)
+      e@(Partial a _) -> f e <> (foldl (foldProp f) mempty a)
+      e@(ITE a b c) -> f e <> (go a) <> (go b) <> (go c)
 
       -- integers
 
@@ -314,15 +314,14 @@ mapExprM f expr = case expr of
   Failure a b -> do
     a' <- mapM (mapPropM f) a
     f (Failure a' b)
-  Revert a b -> do
+  Partial a b -> do
     a' <- mapM (mapPropM f) a
-    b' <- mapExprM f b
-    f (Revert a' b')
-  Return a b c -> do
+    f (Partial a' b)
+  Success a b c -> do
     a' <- mapM (mapPropM f) a
     b' <- mapExprM f b
     c' <- mapExprM f c
-    f (Return a' b' c')
+    f (Success a' b' c')
 
   ITE a b c -> do
     a' <- mapExprM f a

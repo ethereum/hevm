@@ -26,12 +26,12 @@ where
 import Control.Monad.Operational (Program, ProgramViewT(..), ProgramView, singleton, view)
 import Control.Monad.State.Strict (StateT, execState, runState, runStateT)
 import Data.Text (Text)
+import EVM.Types
 
-import EVM (EVM, VM, VMResult (VMFailure, VMSuccess), Error (Query, Choose), Query, Choose)
-import EVM qualified
+import qualified EVM
+
+import qualified EVM.Fetch as Fetch
 import EVM.Exec qualified
-import EVM.Fetch qualified as Fetch
-import EVM.Types (Expr, EType(..))
 
 -- | The instruction type of the operational monad
 data Action a where
@@ -78,63 +78,68 @@ evmIO :: StateT VM IO a -> Stepper a
 evmIO = singleton . IOAct
 
 -- | Run the VM until final result, resolving all queries
-execFully :: Stepper (Either Error (Expr Buf))
+execFully :: Stepper (Either EvmError (Expr Buf))
 execFully =
   exec >>= \case
-    VMFailure (Query q) ->
+    HandleEffect (Query q) ->
       wait q >> execFully
-    VMFailure (Choose q) ->
+    HandleEffect (Choose q) ->
       ask q >> execFully
     VMFailure x ->
       pure (Left x)
     VMSuccess x ->
       pure (Right x)
+    Unfinished x
+      -> error $ "Internal Error: partial execution encountered during concrete execution: " <> show x
 
 -- | Run the VM until its final state
-runFully :: Stepper EVM.VM
+runFully :: Stepper VM
 runFully = do
   vm <- run
   case vm.result of
     Nothing -> error "should not occur"
-    Just (VMFailure (Query q)) ->
+    Just (HandleEffect (Query q)) ->
       wait q >> runFully
-    Just (VMFailure (Choose q)) ->
+    Just (HandleEffect (Choose q)) ->
       ask q >> runFully
     Just _ ->
       pure vm
 
 entering :: Text -> Stepper a -> Stepper a
 entering t stepper = do
-  evm (EVM.pushTrace (EVM.EntryTrace t))
+  evm (EVM.pushTrace (EntryTrace t))
   x <- stepper
   evm EVM.popTrace
   pure x
 
 enter :: Text -> Stepper ()
-enter t = evm (EVM.pushTrace (EVM.EntryTrace t))
+enter t = evm (EVM.pushTrace (EntryTrace t))
 
 interpret :: Fetch.Fetcher -> VM -> Stepper a -> IO a
 interpret fetcher vm = eval . view
   where
-  eval :: ProgramView Action a -> IO a
-  eval (Return x) = pure x
-  eval (action :>>= k) =
-    case action of
-      Exec ->
-        let (r, vm') = runState EVM.Exec.exec vm
-        in interpret fetcher vm' (k r)
-      Run ->
-        let vm' = execState EVM.Exec.run vm
-        in interpret fetcher vm' (k vm')
-      Wait q -> do
-        m <- fetcher q
-        let vm' = execState m vm
-        interpret fetcher vm' (k ())
-      Ask _ ->
-        error "cannot make choices with this interpreter"
-      IOAct m -> do
-        (r, vm') <- runStateT m vm
-        interpret fetcher vm' (k r)
-      EVM m ->
-        let (r, vm') = runState m vm
-        in interpret fetcher vm' (k r)
+    eval :: ProgramView Action a -> IO a
+    eval (Return x) = pure x
+    eval (action :>>= k) =
+      case action of
+        Exec ->
+          let (r, vm') = runState EVM.Exec.exec vm
+          in interpret fetcher vm' (k r)
+        Run ->
+          let vm' = execState EVM.Exec.run vm
+          in interpret fetcher vm' (k vm')
+        Wait (PleaseAskSMT (Lit c) _ continue) ->
+          let (r, vm') = runState (continue (Case (c > 0))) vm
+          in interpret fetcher vm' (k r)
+        Wait q -> do
+          m <- fetcher q
+          let vm' = execState m vm
+          interpret fetcher vm' (k ())
+        Ask _ ->
+          error "cannot make choices with this interpreter"
+        IOAct m -> do
+          (r, vm') <- runStateT m vm
+          interpret fetcher vm' (k r)
+        EVM m ->
+          let (r, vm') = runState m vm
+          in interpret fetcher vm' (k r)

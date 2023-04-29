@@ -1,11 +1,10 @@
 module EVM.Dapp where
 
-import EVM (Trace(..), ContractCode(..), Contract(..), RuntimeCode (..))
-import EVM.ABI (Event, AbiType, SolError)
 import EVM.Concrete
 import EVM.Debug (srcMapCodePos)
 import EVM.Solidity
-import EVM.Types (W256, abiKeccak, keccak', Addr, regexMatches, unlit, unlitByte, FunctionSelector)
+import EVM.Types
+import EVM.ABI
 
 import Control.Arrow ((>>>))
 import Data.Aeson (Value)
@@ -152,7 +151,7 @@ srcMap dapp contr opIndex = do
 
 findSrc :: Contract -> DappInfo -> Maybe SolcContract
 findSrc c dapp = do
-  hash <- unlit c.codehash
+  hash <- maybeLitWord c.codehash
   case Map.lookup hash dapp.solcByHash of
     Just (_, v) -> Just v
     Nothing -> lookupCode c.contractcode dapp
@@ -166,7 +165,7 @@ lookupCode (RuntimeCode (ConcreteRuntimeCode c)) a =
     Just x -> return x
     Nothing -> snd <$> find (compareCode c . fst) a.solcByCode
 lookupCode (RuntimeCode (SymbolicRuntimeCode c)) a = let
-    code = BS.pack $ mapMaybe unlitByte $ V.toList c
+    code = BS.pack $ mapMaybe maybeLitByte $ V.toList c
   in case snd <$> Map.lookup (keccak' (stripBytecodeMetadata code)) a.solcByHash of
     Just x -> return x
     Nothing -> snd <$> find (compareCode code . fst) a.solcByCode

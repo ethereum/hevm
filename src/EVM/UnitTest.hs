@@ -5,7 +5,7 @@ module EVM.UnitTest where
 
 import Prelude hiding (Word)
 
-import EVM hiding (Unknown, path)
+import EVM
 import EVM.ABI
 import EVM.Concrete
 import EVM.SMT
@@ -21,9 +21,8 @@ import EVM.FeeSchedule qualified as FeeSchedule
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec qualified as SymExec
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, VeriOpts)
-import EVM.Types hiding (Failure)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, VeriOpts(..))
+import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.RLP
 import EVM.Stepper (Stepper, interpret)
@@ -63,14 +62,15 @@ import Data.Word (Word32, Word64)
 import GHC.Natural
 import System.Environment (lookupEnv)
 import System.IO (hFlush, stdout)
-import Test.QuickCheck hiding (verbose)
+import Test.QuickCheck hiding (verbose, Success, Failure)
+import qualified Test.QuickCheck as QC
 
 data UnitTestOptions = UnitTestOptions
   { rpcInfo     :: Fetch.RpcInfo
   , solvers     :: SolverGroup
   , verbose     :: Maybe Int
   , maxIter     :: Maybe Integer
-  , askSmtIters :: Maybe Integer
+  , askSmtIters :: Integer
   , smtDebug    :: Bool
   , maxDepth    :: Maybe Int
   , smtTimeout  :: Maybe Natural
@@ -122,10 +122,10 @@ type ABIMethod = Text
 -- | Generate VeriOpts from UnitTestOptions
 makeVeriOpts :: UnitTestOptions -> VeriOpts
 makeVeriOpts opts =
-   defaultVeriOpts { SymExec.debug = opts.smtDebug
-                   , SymExec.maxIter = opts.maxIter
-                   , SymExec.askSmtIters = opts.askSmtIters
-                   , SymExec.rpcInfo = opts.rpcInfo
+   defaultVeriOpts { debug = opts.smtDebug
+                   , maxIter = opts.maxIter
+                   , askSmtIters = opts.askSmtIters
+                   , rpcInfo = opts.rpcInfo
                    }
 
 -- | Top level CLI endpoint for hevm test
@@ -312,6 +312,8 @@ interpretWithCoverage opts@UnitTestOptions{..} =
           execWithCoverage >>= interpretWithCoverage opts . k
         Stepper.Run ->
           runWithCoverage >>= interpretWithCoverage opts . k
+        Stepper.Wait (PleaseAskSMT (Lit c) _ continue) ->
+          interpretWithCoverage opts (Stepper.evm (continue (Case (c > 0))) >>= k)
         Stepper.Wait q ->
           do m <- liftIO ((Fetch.oracle solvers rpcInfo) q)
              zoom _1 (State.state (runState m)) >> interpretWithCoverage opts (k ())
@@ -434,7 +436,6 @@ runUnitTestContract
         Stepper.evm get
 
       case vm1.result of
-        Nothing -> error "internal error: setUp() did not end with a result"
         Just (VMFailure _) -> liftIO $ do
           Text.putStrLn "\x1b[31m[BAIL]\x1b[0m setUp() "
           tick "\n"
@@ -464,6 +465,7 @@ runUnitTestContract
             tick (Text.unlines bailing)
 
           pure [(isRight r, vm) | (r, vm) <- details]
+        _ -> error "internal error: setUp() did not end with a result"
 
 
 runTest :: UnitTestOptions -> VM -> (Test, [AbiType]) -> IO (Text, Either Text Text, VM)
@@ -680,7 +682,7 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
                  , maxShrinks      = maxBound
                  }
   quickCheckWithResult args (fuzzTest opts testName types vm) >>= \case
-    Success numTests _ _ _ _ _ ->
+    QC.Success numTests _ _ _ _ _ ->
       pure ("\x1b[32m[PASS]\x1b[0m "
              <> testName <> " (runs: " <> (pack $ show numTests) <> ")"
              -- this isn't the post vm we actually want, as we
@@ -688,7 +690,7 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
            , Right (passOutput vm opts testName)
            , vm
            )
-    Failure _ _ _ _ _ _ _ _ _ _ failCase _ _ ->
+    QC.Failure _ _ _ _ _ _ _ _ _ _ failCase _ _ ->
       let abiValue = decodeAbiValue (AbiTupleType (Vector.fromList types)) $ BSLazy.fromStrict $ hexText (pack $ concat failCase)
           ppOutput = pack $ show abiValue
       in do
@@ -724,11 +726,13 @@ symRun opts@UnitTestOptions{..} vm testName types = do
                    .|| (readStorage' (litAddr cheatCode) (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) store .== Lit 1)
         postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
-                                  Return _ _ store -> failed store
+                                  Success _ _ store -> failed store
                                   _ -> PBool True
           False -> \(_, post) -> case post of
-                                   Return _ _ store -> PNeg (failed store)
-                                   _ -> PBool False
+                                   Success _ _ store -> PNeg (failed store)
+                                   Failure _ _ -> PBool False
+                                   Partial _ _ -> PBool True
+                                   _ -> error "Internal Error: Invalid leaf node"
 
     vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
       Stepper.evm $ do
@@ -759,7 +763,7 @@ symFailure UnitTestOptions {..} testName cd types failures' =
     where
       ctx = DappContext { info = dapp, env = mempty }
       showRes = \case
-                       Return _ _ _ -> if "proveFail" `isPrefixOf` testName
+                       Success _ _ _ -> if "proveFail" `isPrefixOf` testName
                                       then "Successful execution"
                                       else "Failed: DSTest Assertion Violation"
                        res ->
@@ -994,7 +998,7 @@ getParametersFromEnvironmentVariables rpc = do
       Nothing  -> return (0,Lit 0,0,0,0,0)
       Just url -> Fetch.fetchBlockFrom block' url >>= \case
         Nothing -> error "Could not fetch block"
-        Just EVM.Block{..} -> return (  coinbase
+        Just Block{..} -> return (  coinbase
                                       , timestamp
                                       , number
                                       , prevRandao

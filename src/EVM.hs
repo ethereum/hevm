@@ -1,21 +1,17 @@
 {-# Language ImplicitParams #-}
 {-# Language UndecidableInstances #-}
-{-# Language TemplateHaskell #-}
 {-# Language ScopedTypeVariables #-}
 {-# Language GADTs #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
-{-# LANGUAGE TypeApplications #-}
 
 module EVM where
 
 import Prelude hiding (log, exponent, GT, LT)
 
 import Optics.Core
-import Optics.TH
 import Optics.State
 import Optics.State.Operators
 import Optics.Zoom
@@ -30,7 +26,7 @@ import EVM.FeeSchedule (FeeSchedule (..))
 import EVM.Op
 import EVM.Precompiled qualified
 import EVM.Solidity
-import EVM.Types hiding (IllegalOverflow, Error)
+import EVM.Types
 import EVM.Sign qualified
 
 import Control.Monad.State.Strict hiding (state)
@@ -46,7 +42,7 @@ import Data.List (find)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, fromJust)
-import Data.Set (Set, insert, member, fromList)
+import Data.Set (insert, member, fromList)
 import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
 import Data.Text (unpack)
@@ -54,324 +50,15 @@ import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import Data.Tree
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple.Curry
-import Data.Vector qualified as RegularVector
+import Data.Typeable
 import Data.Vector qualified as V
-import Data.Vector.Storable (Vector)
-import Data.Vector.Storable qualified as Vector
-import Data.Vector.Storable.Mutable qualified as Vector
+import Data.Vector.Storable qualified as SV
+import Data.Vector.Storable.Mutable qualified as SV
 import Data.Word (Word8, Word32, Word64)
-import Options.Generic as Options
 
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
 import Crypto.Number.ModArithmetic (expFast)
-
--- * Data types
-
--- | EVM failure modes
-data Error
-  = BalanceTooLow W256 W256
-  | UnrecognizedOpcode Word8
-  | SelfDestruction
-  | StackUnderrun
-  | BadJumpDestination
-  | Revert (Expr Buf)
-  | OutOfGas Word64 Word64
-  | BadCheatCode FunctionSelector
-  | StackLimitExceeded
-  | IllegalOverflow
-  | Query Query
-  | Choose Choose
-  | StateChangeWhileStatic
-  | InvalidMemoryAccess
-  | CallDepthLimitReached
-  | MaxCodeSizeExceeded W256 W256
-  | InvalidFormat
-  | PrecompileFailure
-  | forall a . UnexpectedSymbolicArg Int String [Expr a]
-  | DeadPath
-  | NotUnique (Expr EWord)
-  | SMTTimeout
-  | FFI [AbiValue]
-  | ReturnDataOutOfBounds
-  | NonceOverflow
-deriving instance Show Error
-
--- | The possible result states of a VM
-data VMResult
-  = VMFailure Error -- ^ An operation failed
-  | VMSuccess (Expr Buf) -- ^ Reached STOP, RETURN, or end-of-code
-
-deriving instance Show VMResult
-
--- | The state of a stepwise EVM execution
-data VM = VM
-  { result         :: Maybe VMResult
-  , state          :: FrameState
-  , frames         :: [Frame]
-  , env            :: Env
-  , block          :: Block
-  , tx             :: TxState
-  , logs           :: [Expr Log]
-  , traces         :: Zipper.TreePos Zipper.Empty Trace
-  , cache          :: Cache
-  , burned         :: {-# UNPACK #-} !Word64
-  , iterations     :: Map CodeLocation Int
-  , constraints    :: [Prop]
-  , keccakEqs      :: [Prop]
-  , allowFFI       :: Bool
-  , overrideCaller :: Maybe Addr
-  }
-  deriving (Show, Generic)
-
-data Trace = Trace
-  { opIx      :: Int
-  , contract  :: Contract
-  , tracedata :: TraceData
-  }
-  deriving (Show, Generic)
-
-data TraceData
-  = EventTrace (Expr EWord) (Expr Buf) [Expr EWord]
-  | FrameTrace FrameContext
-  | QueryTrace Query
-  | ErrorTrace Error
-  | EntryTrace Text
-  | ReturnTrace (Expr Buf) FrameContext
-  deriving (Show, Generic)
-
--- | Queries halt execution until resolved through RPC calls or SMT queries
-data Query where
-  PleaseFetchContract :: Addr -> (Contract -> EVM ()) -> Query
-  PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM ()) -> Query
-  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM ()) -> Query
-  PleaseDoFFI         :: [String] -> (ByteString -> EVM ()) -> Query
-
-data Choose where
-  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM ()) -> Choose
-
-instance Show Query where
-  showsPrec _ = \case
-    PleaseFetchContract addr _ ->
-      (("<EVM.Query: fetch contract " ++ show addr ++ ">") ++)
-    PleaseFetchSlot addr slot _ ->
-      (("<EVM.Query: fetch slot "
-        ++ show slot ++ " for "
-        ++ show addr ++ ">") ++)
-    PleaseAskSMT condition constraints _ ->
-      (("<EVM.Query: ask SMT about "
-        ++ show condition ++ " in context "
-        ++ show constraints ++ ">") ++)
-    PleaseDoFFI cmd _ ->
-      (("<EVM.Query: do ffi: " ++ (show cmd)) ++)
-
-instance Show Choose where
-  showsPrec _ = \case
-    PleaseChoosePath _ _ ->
-      (("<EVM.Choice: waiting for user to select path (0,1)") ++)
-
--- | Alias for the type of e.g. @exec1@.
-type EVM a = State VM a
-
-type CodeLocation = (Addr, Int)
-
--- | The possible return values of a SMT query
-data BranchCondition = Case Bool | Unknown | Inconsistent
-  deriving Show
-
--- | The possible return values of a `is unique` SMT query
-data IsUnique a = Unique a | Multiple | InconsistentU | TimeoutU
-  deriving Show
-
--- | The cache is data that can be persisted for efficiency:
--- any expensive query that is constant at least within a block.
-data Cache = Cache
-  { fetchedContracts :: Map Addr Contract,
-    fetchedStorage :: Map W256 (Map W256 W256),
-    path :: Map (CodeLocation, Int) Bool
-  } deriving (Show, Generic)
-
--- | A way to specify an initial VM state
-data VMOpts = VMOpts
-  { contract :: Contract
-  , calldata :: (Expr Buf, [Prop])
-  , initialStorage :: Expr Storage
-  , value :: Expr EWord
-  , priorityFee :: W256
-  , address :: Addr
-  , caller :: Expr EWord
-  , origin :: Addr
-  , gas :: Word64
-  , gaslimit :: Word64
-  , number :: W256
-  , timestamp :: Expr EWord
-  , coinbase :: Addr
-  , prevRandao :: W256
-  , maxCodeSize :: W256
-  , blockGaslimit :: Word64
-  , gasprice :: W256
-  , baseFee :: W256
-  , schedule :: FeeSchedule Word64
-  , chainId :: W256
-  , create :: Bool
-  , txAccessList :: Map Addr [W256]
-  , allowFFI :: Bool
-  } deriving Show
-
-
--- | An entry in the VM's "call/create stack"
-data Frame = Frame
-  { context :: FrameContext
-  , state   :: FrameState
-  }
-  deriving (Show)
-
--- | Call/create info
-data FrameContext
-  = CreationContext
-    { address         :: Addr
-    , codehash        :: Expr EWord
-    , createreversion :: Map Addr Contract
-    , substate        :: SubState
-    }
-  | CallContext
-    { target        :: Addr
-    , context       :: Addr
-    , offset        :: W256
-    , size          :: W256
-    , codehash      :: Expr EWord
-    , abi           :: Maybe W256
-    , calldata      :: Expr Buf
-    , callreversion :: (Map Addr Contract, Expr Storage)
-    , subState      :: SubState
-    }
-  deriving (Show, Generic)
-
--- | The "registers" of the VM along with memory and data stack
-data FrameState = FrameState
-  { contract     :: Addr
-  , codeContract :: Addr
-  , code         :: ContractCode
-  , pc           :: {-# UNPACK #-} !Int
-  , stack        :: [Expr EWord]
-  , memory       :: Expr Buf
-  , memorySize   :: Word64
-  , calldata     :: Expr Buf
-  , callvalue    :: Expr EWord
-  , caller       :: Expr EWord
-  , gas          :: {-# UNPACK #-} !Word64
-  , returndata   :: Expr Buf
-  , static       :: Bool
-  }
-  deriving (Show, Generic)
-
--- | The state that spans a whole transaction
-data TxState = TxState
-  { gasprice    :: W256
-  , gaslimit    :: Word64
-  , priorityFee :: W256
-  , origin      :: Addr
-  , toAddr      :: Addr
-  , value       :: Expr EWord
-  , substate    :: SubState
-  , isCreate    :: Bool
-  , txReversion :: Map Addr Contract
-  }
-  deriving (Show)
-
--- | The "accrued substate" across a transaction
-data SubState = SubState
-  { selfdestructs       :: [Addr]
-  , touchedAccounts     :: [Addr]
-  , accessedAddresses   :: Set Addr
-  , accessedStorageKeys :: Set (Addr, W256)
-  , refunds             :: [(Addr, Word64)]
-  -- in principle we should include logs here, but do not for now
-  }
-  deriving (Show)
-
-{- |
-  A contract is either in creation (running its "constructor") or
-  post-creation, and code in these two modes is treated differently
-  by instructions like @EXTCODEHASH@, so we distinguish these two
-  code types.
-
-  The definition follows the structure of code output by solc. We need to use
-  some heuristics here to deal with symbolic data regions that may be present
-  in the bytecode since the fully abstract case is impractical:
-
-  - initcode has concrete code, followed by an abstract data "section"
-  - runtimecode has a fixed length, but may contain fixed size symbolic regions (due to immutable)
-
-  hopefully we do not have to deal with dynamic immutable before we get a real data section...
--}
-data ContractCode
-  = InitCode ByteString (Expr Buf) -- ^ "Constructor" code, during contract creation
-  | RuntimeCode RuntimeCode -- ^ "Instance" code, after contract creation
-  deriving (Show, Ord)
-
--- | We have two variants here to optimize the fully concrete case.
--- ConcreteRuntimeCode just wraps a ByteString
--- SymbolicRuntimeCode is a fixed length vector of potentially symbolic bytes, which lets us handle symbolic pushdata (e.g. from immutable variables in solidity).
-data RuntimeCode
-  = ConcreteRuntimeCode ByteString
-  | SymbolicRuntimeCode (V.Vector (Expr Byte))
-  deriving (Show, Eq, Ord)
-
--- runtime err when used for symbolic code
-instance Eq ContractCode where
-  InitCode a b  == InitCode c d  = a == c && b == d
-  RuntimeCode x == RuntimeCode y = x == y
-  _ == _ = False
-
--- | The state of a contract
-data Contract = Contract
-  { contractcode :: ContractCode
-  , balance      :: W256
-  , nonce        :: W256
-  , codehash     :: Expr EWord
-  , opIxMap      :: Vector Int
-  , codeOps      :: RegularVector.Vector (Int, Op)
-  , external     :: Bool
-  }
-  deriving (Show)
-
--- | Various environmental data
-data Env = Env
-  { contracts    :: Map Addr Contract
-  , chainId      :: W256
-  , storage      :: Expr Storage
-  , origStorage  :: Map W256 (Map W256 W256)
-  , sha3Crack    :: Map W256 ByteString
-  }
-  deriving (Show, Generic)
-
-
--- | Data about the block
-data Block = Block
-  { coinbase    :: Addr
-  , timestamp   :: Expr EWord
-  , number      :: W256
-  , prevRandao  :: W256
-  , gaslimit    :: Word64
-  , baseFee     :: W256
-  , maxCodeSize :: W256
-  , schedule    :: FeeSchedule Word64
-  } deriving (Show, Generic)
-
-
-makeFieldLabelsNoPrefix ''VM
-makeFieldLabelsNoPrefix ''FrameState
-makeFieldLabelsNoPrefix ''TxState
-makeFieldLabelsNoPrefix ''SubState
-makeFieldLabelsNoPrefix ''Cache
-makeFieldLabelsNoPrefix ''Trace
-makeFieldLabelsNoPrefix ''VMOpts
-makeFieldLabelsNoPrefix ''Frame
-makeFieldLabelsNoPrefix ''FrameContext
-makeFieldLabelsNoPrefix ''Contract
-makeFieldLabelsNoPrefix ''Env
-makeFieldLabelsNoPrefix ''Block
 
 blankState :: FrameState
 blankState = FrameState
@@ -397,35 +84,6 @@ bytecode = #contractcode % to f
   where f (InitCode _ _) = mempty
         f (RuntimeCode (ConcreteRuntimeCode bs)) = ConcreteBuf bs
         f (RuntimeCode (SymbolicRuntimeCode ops)) = Expr.fromList ops
-
-instance Semigroup Cache where
-  a <> b = Cache
-    { fetchedContracts = Map.unionWith unifyCachedContract a.fetchedContracts b.fetchedContracts
-    , fetchedStorage = Map.unionWith unifyCachedStorage a.fetchedStorage b.fetchedStorage
-    , path = mappend a.path b.path
-    }
-
-unifyCachedStorage :: Map W256 W256 -> Map W256 W256 -> Map W256 W256
-unifyCachedStorage _ _ = undefined
-
--- only intended for use in Cache merges, where we expect
--- everything to be Concrete
-unifyCachedContract :: Contract -> Contract -> Contract
-unifyCachedContract _ _ = undefined
-  {-
-unifyCachedContract a b = a & set storage merged
-  where merged = case (view storage a, view storage b) of
-                   (ConcreteStore sa, ConcreteStore sb) ->
-                     ConcreteStore (mappend sa sb)
-                   _ ->
-                     view storage a
-   -}
-
-instance Monoid Cache where
-  mempty = Cache { fetchedContracts = mempty,
-                   fetchedStorage = mempty,
-                   path = mempty
-                 }
 
 -- * Data accessors
 
@@ -560,11 +218,12 @@ exec1 = do
                   touchAccount self
                   out <- use (#state % #returndata)
                   finishFrame (FrameReturned out)
-              e -> vmError $
-                UnexpectedSymbolicArg vmx.state.pc "precompile returned a symbolic value" [e]
+              e -> partial $
+                     UnexpectedSymbolicArg vmx.state.pc "precompile returned a symbolic value" (wrap [e])
             _ ->
               underrun
-      e -> vmError $ UnexpectedSymbolicArg vm.state.pc "cannot call precompiles with symbolic data" [e]
+      e -> partial $
+             UnexpectedSymbolicArg vm.state.pc "cannot call precompiles with symbolic data" (wrap [e])
 
   else if vm.state.pc >= opslen vm.state.code
     then doStop
@@ -575,7 +234,7 @@ exec1 = do
                   RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs vm.state.pc
                   RuntimeCode (SymbolicRuntimeCode ops) ->
                     fromMaybe (error "could not analyze symbolic code") $
-                      unlitByte $ ops V.! vm.state.pc
+                      maybeLitByte $ ops V.! vm.state.pc
 
       case getOp(?op) of
 
@@ -807,7 +466,7 @@ exec1 = do
                     next
                     assign (#state % #stack) xs
 
-                    let jump True = vmError EVM.ReturnDataOutOfBounds
+                    let jump True = vmError ReturnDataOutOfBounds
                         jump False = copyBytesToMemory vm.state.returndata xSize' xFrom xTo'
 
                     case (xFrom, bufLength vm.state.returndata) of
@@ -979,7 +638,7 @@ exec1 = do
             x:xs ->
               burn g_mid $ forceConcrete x "JUMP: symbolic jumpdest" $ \x' ->
                 case toInt x' of
-                  Nothing -> vmError EVM.BadJumpDestination
+                  Nothing -> vmError BadJumpDestination
                   Just i -> checkJump i xs
             _ -> underrun
 
@@ -990,14 +649,11 @@ exec1 = do
                   let jump :: Bool -> EVM ()
                       jump False = assign (#state % #stack) xs >> next
                       jump _    = case toInt x' of
-                        Nothing -> vmError EVM.BadJumpDestination
+                        Nothing -> vmError BadJumpDestination
                         Just i -> checkJump i xs
-                  in case maybeLitWord y of
-                    Just y' -> jump (0 /= y')
-                    -- if the jump condition is symbolic, we explore both sides
-                    Nothing -> do
-                      loc <- codeloc
-                      branch loc y jump
+                  in do
+                    loc <- codeloc
+                    branch loc y jump
             _ -> underrun
 
         OpPc ->
@@ -1089,7 +745,7 @@ exec1 = do
                 let
                   output = readMemory xOffset' xSize' vm
                   codesize = fromMaybe (error "RETURN: cannot return dynamically sized abstract data")
-                               . unlit . bufLength $ output
+                               . maybeLitWord . bufLength $ output
                   maxsize = vm.block.maxCodeSize
                   creation = case vm.frames of
                     [] -> vm.tx.isCreate
@@ -1192,7 +848,7 @@ exec1 = do
             _ -> underrun
 
         OpUnknown xxx ->
-          vmError (UnrecognizedOpcode xxx)
+          vmError $ UnrecognizedOpcode xxx
 
 transfer :: Addr -> Addr -> W256 -> EVM ()
 transfer _ _ 0 = pure ()
@@ -1227,7 +883,7 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
         then do
           assign (#state % #stack) (Lit 0 : xs)
           assign (#state % #returndata) mempty
-          pushTrace $ ErrorTrace $ BalanceTooLow xValue this.balance
+          pushTrace $ ErrorTrace (BalanceTooLow xValue this.balance)
           next
         else if length vm.frames >= 1024
              then do
@@ -1265,7 +921,7 @@ precompiledContract this xGas precompileAddr recipient xValue inOffset inSize ou
               transfer self recipient xValue
               touchAccount self
               touchAccount recipient
-          _ -> vmError $ UnexpectedSymbolicArg pc' "unexpected return value from precompile" [x]
+          _ -> partial $ UnexpectedSymbolicArg pc' "unexpected return value from precompile" (wrap [x])
         _ -> underrun
       _ -> pure ()
 
@@ -1459,24 +1115,28 @@ pushToSequence f x = f %= (Seq.|> x)
 getCodeLocation :: VM -> CodeLocation
 getCodeLocation vm = (vm.state.contract, vm.state.pc)
 
+query :: Query -> EVM ()
+query = assign #result . Just . HandleEffect . Query
+
+choose :: Choose -> EVM ()
+choose = assign #result . Just . HandleEffect . Choose
+
 branch :: CodeLocation -> Expr EWord -> (Bool -> EVM ()) -> EVM ()
 branch loc cond continue = do
   pathconds <- use #constraints
-  assign #result . Just . VMFailure . Query $ PleaseAskSMT cond pathconds choosePath
+  query $ PleaseAskSMT cond pathconds choosePath
   where
     choosePath (Case v) = do
       assign #result Nothing
       pushTo #constraints $ if v then (cond ./= Lit 0) else (cond .== Lit 0)
-      iteration <- use (#iterations % at loc % non 0)
+      (iteration, _) <- use (#iterations % at loc % non (0,[]))
+      stack <- use (#state % #stack)
       assign (#cache % #path % at (loc, iteration)) (Just v)
-      assign (#iterations % at loc) (Just (iteration + 1))
+      assign (#iterations % at loc) (Just (iteration + 1, stack))
       continue v
     -- Both paths are possible; we ask for more input
     choosePath Unknown =
-      assign #result . Just . VMFailure . Choose . PleaseChoosePath cond $ choosePath . Case
-    -- None of the paths are possible; fail this branch
-    choosePath Inconsistent = vmError DeadPath
-
+      choose . PleaseChoosePath cond $ choosePath . Case
 
 -- | Construct RPC Query and halt execution until resolved
 fetchAccount :: Addr -> (Contract -> EVM ()) -> EVM ()
@@ -1489,7 +1149,7 @@ fetchAccount addr continue =
           assign (#env % #contracts % at addr) (Just c)
           continue c
         Nothing -> do
-          assign (#result) . Just . VMFailure $ Query $
+          assign (#result) . Just . HandleEffect . Query $
             PleaseFetchContract addr
               (\c -> do assign (#cache % #fetchedContracts % at addr) (Just c)
                         assign (#env % #contracts % at addr) (Just c)
@@ -1525,7 +1185,7 @@ accessStorage addr slot continue = do
       fetchAccount addr $ \_ ->
         accessStorage addr slot continue
   where
-      mkQuery s = assign #result . Just . VMFailure . Query $
+      mkQuery s = query $
                     PleaseFetchSlot addr s
                       (\x -> do
                           modifying (#cache % #fetchedStorage % ix (num addr)) (Map.insert s x)
@@ -1557,9 +1217,7 @@ finalize = do
     revertSubstate   = assign (#tx % #substate) (SubState mempty mempty mempty mempty mempty)
 
   use #result >>= \case
-    Nothing ->
-      error "Finalising an unfinished tx."
-    Just (VMFailure (EVM.Revert _)) -> do
+    Just (VMFailure (Revert _)) -> do
       revertContracts
       revertSubstate
     Just (VMFailure _) -> do
@@ -1581,9 +1239,12 @@ finalize = do
         _ ->
           case Expr.toList output of
             Nothing ->
-              vmError $ UnexpectedSymbolicArg pc' "runtime code cannot have an abstract lentgh" [output]
+              partial $
+                UnexpectedSymbolicArg pc' "runtime code cannot have an abstract lentgh" (wrap [output])
             Just ops ->
               onContractCode $ RuntimeCode (SymbolicRuntimeCode ops)
+    _ ->
+      error "Finalising an unfinished tx."
 
   -- compute and pay the refund to the caller and the
   -- corresponding payment to the miner
@@ -1608,7 +1269,7 @@ finalize = do
   -- pay out the block reward, recreating the miner if necessary
   preuse (#env % #contracts % ix block.coinbase) >>= \case
     Nothing -> modifying (#env % #contracts)
-      (Map.insert block.coinbase (initialContract (EVM.RuntimeCode (ConcreteRuntimeCode ""))))
+      (Map.insert block.coinbase (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
     Just _  -> noop
   modifying (#env % #contracts)
     (Map.adjust (over #balance (+ blockReward)) block.coinbase)
@@ -1646,7 +1307,7 @@ limitStack :: Int -> EVM () -> EVM ()
 limitStack n continue = do
   stk <- use (#state % #stack)
   if length stk + n > 1024
-    then vmError EVM.StackLimitExceeded
+    then vmError StackLimitExceeded
     else continue
 
 notStatic :: EVM () -> EVM ()
@@ -1672,7 +1333,7 @@ forceConcrete :: Expr EWord -> String -> (W256 -> EVM ()) -> EVM ()
 forceConcrete n msg continue = case maybeLitWord n of
   Nothing -> do
     vm <- get
-    vmError $ UnexpectedSymbolicArg vm.state.pc msg [n]
+    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n])
   Just c -> continue c
 
 forceConcrete2 :: (Expr EWord, Expr EWord) -> String -> ((W256, W256) -> EVM ()) -> EVM ()
@@ -1680,41 +1341,41 @@ forceConcrete2 (n,m) msg continue = case (maybeLitWord n, maybeLitWord m) of
   (Just c, Just d) -> continue (c, d)
   _ -> do
     vm <- get
-    vmError $ UnexpectedSymbolicArg vm.state.pc msg [n, m]
+    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n, m])
 
 forceConcrete3 :: (Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256) -> EVM ()) -> EVM ()
 forceConcrete3 (k,n,m) msg continue = case (maybeLitWord k, maybeLitWord n, maybeLitWord m) of
   (Just c, Just d, Just f) -> continue (c, d, f)
   _ -> do
     vm <- get
-    vmError $ UnexpectedSymbolicArg vm.state.pc msg [k, n, m]
+    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [k, n, m])
 
 forceConcrete4 :: (Expr EWord, Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256, W256) -> EVM ()) -> EVM ()
 forceConcrete4 (k,l,n,m) msg continue = case (maybeLitWord k, maybeLitWord l, maybeLitWord n, maybeLitWord m) of
   (Just b, Just c, Just d, Just f) -> continue (b, c, d, f)
   _ -> do
     vm <- get
-    vmError $ UnexpectedSymbolicArg vm.state.pc msg [k, l, n, m]
+    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [k, l, n, m])
 
 forceConcrete5 :: (Expr EWord, Expr EWord, Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256, W256, W256) -> EVM ()) -> EVM ()
 forceConcrete5 (k,l,m,n,o) msg continue = case (maybeLitWord k, maybeLitWord l, maybeLitWord m, maybeLitWord n, maybeLitWord o) of
   (Just a, Just b, Just c, Just d, Just e) -> continue (a, b, c, d, e)
   _ -> do
     vm <- get
-    vmError $ UnexpectedSymbolicArg vm.state.pc msg [k, l, m, n, o]
+    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [k, l, m, n, o])
 
 forceConcrete6 :: (Expr EWord, Expr EWord, Expr EWord, Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256, W256, W256, W256) -> EVM ()) -> EVM ()
 forceConcrete6 (k,l,m,n,o,p) msg continue = case (maybeLitWord k, maybeLitWord l, maybeLitWord m, maybeLitWord n, maybeLitWord o, maybeLitWord p) of
   (Just a, Just b, Just c, Just d, Just e, Just f) -> continue (a, b, c, d, e, f)
   _ -> do
     vm <- get
-    vmError $ UnexpectedSymbolicArg vm.state.pc msg [k, l, m, n, o, p]
+    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [k, l, m, n, o, p])
 
 forceConcreteBuf :: Expr Buf -> String -> (ByteString -> EVM ()) -> EVM ()
 forceConcreteBuf (ConcreteBuf b) _ continue = continue b
 forceConcreteBuf b msg _ = do
     vm <- get
-    vmError $ UnexpectedSymbolicArg vm.state.pc msg [b]
+    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [b])
 
 -- * Substate manipulation
 refund :: Word64 -> EVM ()
@@ -1783,7 +1444,7 @@ cheat (inOffset, inSize) (outOffset, outSize) = do
     abi = readBytes 4 (Lit inOffset) mem
     input = readMemory (Lit $ inOffset + 4) (Lit $ inSize - 4) vm
   case maybeLitWord abi of
-    Nothing -> vmError $ UnexpectedSymbolicArg vm.state.pc "symbolic cheatcode selector" [abi]
+    Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc "symbolic cheatcode selector" (wrap [abi])
     Just (fromIntegral -> abi') ->
       case Map.lookup abi' cheatActions of
         Nothing ->
@@ -1816,12 +1477,12 @@ cheatActions =
                       assign (#state % #returndata) encoded
                       copyBytesToMemory encoded outSize (Lit 0) outOffset
                       assign #result Nothing
-                  in assign #result (Just . VMFailure . Query $ (PleaseDoFFI cmd cont))
+                  in query (PleaseDoFFI cmd cont)
                 _ -> vmError (BadCheatCode sig)
               _ -> vmError (BadCheatCode sig)
           else
             let msg = encodeUtf8 "ffi disabled: run again with --ffi if you want to allow tests to call external scripts"
-            in vmError . EVM.Revert . ConcreteBuf $
+            in vmError . Revert . ConcreteBuf $
               abiMethod "Error(string)" (AbiTuple . V.fromList $ [AbiString msg]),
 
       action "warp(uint256)" $
@@ -1857,7 +1518,7 @@ cheatActions =
             forceConcrete2 (sk, hash) "cannot sign symbolic data" $ \(sk', hash') -> do
               let (v,r,s) = EVM.Sign.sign hash' (toInteger sk')
                   encoded = encodeAbiValue $
-                    AbiTuple (RegularVector.fromList
+                    AbiTuple (V.fromList
                       [ AbiUInt 8 $ num v
                       , AbiBytes 32 (word256Bytes r)
                       , AbiBytes 32 (word256Bytes s)
@@ -1920,7 +1581,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                                     , subState  = vm0.tx.substate
                                     , abi =
                                         if xInSize >= 4
-                                        then case unlit $ readBytes 4 (Lit xInOffset) vm0.state.memory
+                                        then case maybeLitWord $ readBytes 4 (Lit xInOffset) vm0.state.memory
                                              of Nothing -> Nothing
                                                 Just abi -> Just $ num abi
                                         else Nothing
@@ -2006,11 +1667,11 @@ create self this xGas' xValue xs newAddr initCode = do
           prefixLen <- Expr.concPrefix initCode
           prefix <- Expr.toList $ Expr.take (num prefixLen) initCode
           let sym = Expr.drop (num prefixLen) initCode
-          conc <- mapM unlitByte prefix
+          conc <- mapM maybeLitByte prefix
           pure $ InitCode (BS.pack $ V.toList conc) sym
     case contract' of
       Nothing ->
-        vmError $ UnexpectedSymbolicArg vm0.state.pc "initcode must have a concrete prefix" []
+        partial $ UnexpectedSymbolicArg vm0.state.pc "initcode must have a concrete prefix" []
       Just c -> do
         let
           newContract = initialContract c
@@ -2088,17 +1749,23 @@ resetState =
 
 -- * VM error implementation
 
-vmError :: Error -> EVM ()
+vmError :: EvmError -> EVM ()
 vmError e = finishFrame (FrameErrored e)
 
+partial :: PartialExec -> EVM ()
+partial e = assign #result (Just (Unfinished e))
+
+wrap :: Typeable a => [Expr a] -> [SomeExpr]
+wrap = fmap SomeExpr
+
 underrun :: EVM ()
-underrun = vmError EVM.StackUnderrun
+underrun = vmError StackUnderrun
 
 -- | A stack frame can be popped in three ways.
 data FrameResult
   = FrameReturned (Expr Buf) -- ^ STOP, RETURN, or no more code
   | FrameReverted (Expr Buf) -- ^ REVERT
-  | FrameErrored Error -- ^ Any other error
+  | FrameErrored EvmError -- ^ Any other error
   deriving Show
 
 -- | This function defines how to pop the current stack frame in either of
@@ -2115,7 +1782,7 @@ finishFrame how = do
     [] -> do
       case how of
           FrameReturned output -> assign #result . Just $ VMSuccess output
-          FrameReverted buffer -> assign #result . Just $ VMFailure (EVM.Revert buffer)
+          FrameReverted buffer -> assign #result . Just $ VMFailure (Revert buffer)
           FrameErrored e       -> assign #result . Just $ VMFailure e
       finalize
 
@@ -2128,7 +1795,7 @@ finishFrame how = do
           FrameErrored e ->
             ErrorTrace e
           FrameReverted e ->
-            ErrorTrace (EVM.Revert e)
+            ErrorTrace (Revert e)
           FrameReturned output ->
             ReturnTrace output nextFrame.context
       -- Pop to the previous level of the debug trace stack.
@@ -2219,11 +1886,11 @@ finishFrame how = do
                   onContractCode $ RuntimeCode (ConcreteRuntimeCode bs)
                 _ ->
                   case Expr.toList output of
-                    Nothing -> vmError $
+                    Nothing -> partial $
                       UnexpectedSymbolicArg
                         oldVm.state.pc
                         "runtime code cannot have an abstract length"
-                        [output]
+                        (wrap [output])
                     Just newCode -> do
                       onContractCode $ RuntimeCode (SymbolicRuntimeCode newCode)
 
@@ -2307,7 +1974,7 @@ withTraceLocation x = do
   pure Trace
     { tracedata = x
     , contract = this
-    , opIx = fromMaybe 0 $ this.opIxMap Vector.!? vm.state.pc
+    , opIx = fromMaybe 0 $ this.opIxMap SV.!? vm.state.pc
     }
 
 pushTrace :: TraceData -> EVM ()
@@ -2406,27 +2073,27 @@ use' f = do
 
 checkJump :: Int -> [Expr EWord] -> EVM ()
 checkJump x xs = do
-  theCode <- use (#state % #code)
-  self <- use (#state % #codeContract)
-  codeOps <- preuse (#env % #contracts % ix self % #codeOps)
-  opIxMap <- preuse (#env % #contracts % ix self % #opIxMap)
-  case (codeOps, opIxMap) of
-    (Just co, Just opMap) -> do
-      let op = case theCode of
-            InitCode ops _ -> BS.indexMaybe ops x
-            RuntimeCode (ConcreteRuntimeCode ops) -> BS.indexMaybe ops x
-            RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= unlitByte
-      case op of
-        Nothing -> vmError EVM.BadJumpDestination
-        Just b ->
-          if 0x5b == b && OpJumpdest == snd (co RegularVector.! (opMap Vector.! num x))
-             then do
-               #state % #stack .= xs
-               #state % #pc .= num x
-             else
-               vmError EVM.BadJumpDestination
-    (_, _) -> error "Internal Error: self not found in current contracts"
+  vm <- get
+  case isValidJumpDest vm x of
+    True -> do
+      #state % #stack .= xs
+      #state % #pc .= num x
+    False -> vmError BadJumpDestination
 
+isValidJumpDest :: VM -> Int -> Bool
+isValidJumpDest vm x = let
+    code = vm.state.code
+    self = vm.state.codeContract
+    contract = fromMaybe
+      (error "Internal Error: self not found in current contracts")
+      (Map.lookup self vm.env.contracts)
+    op = case code of
+      InitCode ops _ -> BS.indexMaybe ops x
+      RuntimeCode (ConcreteRuntimeCode ops) -> BS.indexMaybe ops x
+      RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= maybeLitByte
+  in case op of
+       Nothing -> False
+       Just b -> 0x5b == b && OpJumpdest == snd (contract.codeOps V.! (contract.opIxMap SV.! num x))
 
 opSize :: Word8 -> Int
 opSize x | x >= 0x60 && x <= 0x7f = num x - 0x60 + 2
@@ -2435,9 +2102,9 @@ opSize _                          = 1
 --  i of the resulting vector contains the operation index for
 -- the program counter value i.  This is needed because source map
 -- entries are per operation, not per byte.
-mkOpIxMap :: ContractCode -> Vector Int
+mkOpIxMap :: ContractCode -> SV.Vector Int
 mkOpIxMap (InitCode conc _)
-  = Vector.create $ Vector.new (BS.length conc) >>= \v ->
+  = SV.create $ SV.new (BS.length conc) >>= \v ->
       -- Loop over the byte string accumulating a vector-mutating action.
       -- This is somewhat obfuscated, but should be fast.
       let (_, _, _, m) = BS.foldl' (go v) (0 :: Word8, 0, 0, pure ()) conc
@@ -2445,34 +2112,34 @@ mkOpIxMap (InitCode conc _)
       where
         -- concrete case
         go v (0, !i, !j, !m) x | x >= 0x60 && x <= 0x7f =
-          {- Start of PUSH op. -} (x - 0x60 + 1, i + 1, j,     m >> Vector.write v i j)
+          {- Start of PUSH op. -} (x - 0x60 + 1, i + 1, j,     m >> SV.write v i j)
         go v (1, !i, !j, !m) _ =
-          {- End of PUSH op. -}   (0,            i + 1, j + 1, m >> Vector.write v i j)
+          {- End of PUSH op. -}   (0,            i + 1, j + 1, m >> SV.write v i j)
         go v (0, !i, !j, !m) _ =
-          {- Other op. -}         (0,            i + 1, j + 1, m >> Vector.write v i j)
+          {- Other op. -}         (0,            i + 1, j + 1, m >> SV.write v i j)
         go v (n, !i, !j, !m) _ =
-          {- PUSH data. -}        (n - 1,        i + 1, j,     m >> Vector.write v i j)
+          {- PUSH data. -}        (n - 1,        i + 1, j,     m >> SV.write v i j)
 
 mkOpIxMap (RuntimeCode (ConcreteRuntimeCode ops)) =
   mkOpIxMap (InitCode ops mempty) -- a bit hacky
 
 mkOpIxMap (RuntimeCode (SymbolicRuntimeCode ops))
-  = Vector.create $ Vector.new (length ops) >>= \v ->
+  = SV.create $ SV.new (length ops) >>= \v ->
       let (_, _, _, m) = foldl (go v) (0, 0, 0, pure ()) (stripBytecodeMetadataSym $ V.toList ops)
       in m >> pure v
       where
-        go v (0, !i, !j, !m) x = case unlitByte x of
+        go v (0, !i, !j, !m) x = case maybeLitByte x of
           Just x' -> if x' >= 0x60 && x' <= 0x7f
             -- start of PUSH op --
-                     then (x' - 0x60 + 1, i + 1, j,     m >> Vector.write v i j)
+                     then (x' - 0x60 + 1, i + 1, j,     m >> SV.write v i j)
             -- other data --
-                     else (0,             i + 1, j + 1, m >> Vector.write v i j)
+                     else (0,             i + 1, j + 1, m >> SV.write v i j)
           _ -> error $ "cannot analyze symbolic code:\nx: " <> show x <> " i: " <> show i <> " j: " <> show j
 
         go v (1, !i, !j, !m) _ =
-          {- End of PUSH op. -}   (0,            i + 1, j + 1, m >> Vector.write v i j)
+          {- End of PUSH op. -}   (0,            i + 1, j + 1, m >> SV.write v i j)
         go v (n, !i, !j, !m) _ =
-          {- PUSH data. -}        (n - 1,        i + 1, j,     m >> Vector.write v i j)
+          {- PUSH data. -}        (n - 1,        i + 1, j,     m >> SV.write v i j)
 
 
 vmOp :: VM -> Maybe Op
@@ -2485,7 +2152,7 @@ vmOp vm =
         RuntimeCode (ConcreteRuntimeCode xs') ->
           (BS.index xs' i, fmap LitByte $ BS.unpack $ BS.drop i xs')
         RuntimeCode (SymbolicRuntimeCode xs') ->
-          ( fromMaybe (error "unexpected symbolic code") . unlitByte $ xs' V.! i , V.toList $ V.drop i xs')
+          ( fromMaybe (error "unexpected symbolic code") . maybeLitByte $ xs' V.! i , V.toList $ V.drop i xs')
   in if (opslen code' < i)
      then Nothing
      else Just (readOp op pushdata)
@@ -2493,10 +2160,10 @@ vmOp vm =
 vmOpIx :: VM -> Maybe Int
 vmOpIx vm =
   do self <- currentContract vm
-     self.opIxMap Vector.!? vm.state.pc
+     self.opIxMap SV.!? vm.state.pc
 
 -- Maps operation indicies into a pair of (bytecode index, operation)
-mkCodeOps :: ContractCode -> RegularVector.Vector (Int, Op)
+mkCodeOps :: ContractCode -> V.Vector (Int, Op)
 mkCodeOps contractCode =
   let l = case contractCode of
             InitCode bytes _ ->
@@ -2505,14 +2172,14 @@ mkCodeOps contractCode =
               LitByte <$> (BS.unpack $ stripBytecodeMetadata ops)
             RuntimeCode (SymbolicRuntimeCode ops) ->
               stripBytecodeMetadataSym $ V.toList ops
-  in RegularVector.fromList . toList $ go 0 l
+  in V.fromList . toList $ go 0 l
   where
     go !i !xs =
       case uncons xs of
         Nothing ->
           mempty
         Just (x, xs') ->
-          let x' = fromMaybe (error "unexpected symbolic code argument") $ unlitByte x
+          let x' = fromMaybe (error "unexpected symbolic code argument") $ maybeLitByte x
               j = opSize x'
           in (i, readOp x' xs') Seq.<| go (i + j) (drop j xs)
 

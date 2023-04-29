@@ -45,7 +45,7 @@ module EVM.Solidity
 ) where
 
 import EVM.ABI
-import EVM.Types
+import EVM.Types hiding (Success)
 
 import Optics.Core
 import Optics.Operators.Unsafe
@@ -743,7 +743,7 @@ stripBytecodeMetadataSym :: [Expr Byte] -> [Expr Byte]
 stripBytecodeMetadataSym b =
   let
     concretes :: [Maybe Word8]
-    concretes = unlitByte <$> b
+    concretes = maybeLitByte <$> b
     bzzrs :: [[Maybe Word8]]
     bzzrs = fmap (Just) . BS.unpack <$> knownBzzrPrefixes
     candidates = (flip Data.List.isInfixOf concretes) <$> bzzrs
@@ -798,3 +798,7 @@ astSrcMap astIds =
         )
       . Map.elems
       $ astIds
+
+-- needs to be here not Format due to cyclic module deps
+strip0x'' :: Text -> Text
+strip0x'' s = if "0x" `T.isPrefixOf` s then T.drop 2 s else s

@@ -5,8 +5,8 @@
 
 module Main where
 
-import qualified EVM
 import EVM.Concrete (createAddress)
+import EVM (initialContract, makeVm)
 import qualified EVM.FeeSchedule as FeeSchedule
 import qualified EVM.Fetch
 import qualified EVM.Stepper
@@ -19,6 +19,7 @@ import qualified EVM.TTY as TTY
 import EVM.Solidity
 import EVM.Expr (litAddr)
 import EVM.Types hiding (word)
+import EVM.Format (hexByteString, strip0x)
 import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, getParametersFromEnvironmentVariables, unitTest)
 import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
 import GHC.Natural
@@ -101,8 +102,9 @@ data Command w
       , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
       , assertions    :: w ::: Maybe [Word256]    <?> "Comma seperated list of solc panic codes to check for (default: everything except arithmetic overflow)"
-      , askSmtIterations :: w ::: Maybe Integer   <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
+      , askSmtIterations :: w ::: Integer         <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores)"
+      , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: ByteString       <?> "Bytecode of the first program"
@@ -115,7 +117,8 @@ data Command w
       , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default) or cvc5"
       , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
       , smtdebug      :: w ::: Bool             <?> "Print smt queries sent to the solver"
-      , askSmtIterations :: w ::: Maybe Integer <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
+      , askSmtIterations :: w ::: Integer       <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
+      , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
@@ -167,7 +170,8 @@ data Command w
       , ffi           :: w ::: Bool                     <?> "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)"
       , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in seconds (default: 300)"
       , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point"
-      , askSmtIterations :: w ::: Maybe Integer         <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 5)"
+      , loopDetectionHeuristic :: w ::: LoopHeuristic   <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
+      , askSmtIterations :: w ::: Integer               <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       }
   | Version
 
@@ -199,7 +203,7 @@ optsMode x
   | x.jsontrace = JsonTrace
   | otherwise = Run
 
-applyCache :: (Maybe String, Maybe String) -> IO (EVM.VM -> EVM.VM)
+applyCache :: (Maybe String, Maybe String) -> IO (VM -> VM)
 applyCache (state, cache) =
   let applyState = flip Facts.apply
       applyCache' = flip Facts.applyCache
@@ -298,6 +302,7 @@ equivalence cmd = do
                           , debug = False
                           , maxIter = cmd.maxIterations
                           , askSmtIters = cmd.askSmtIterations
+                          , loopHeuristic = cmd.loopDetectionHeuristic
                           , rpcInfo = Nothing
                           }
   calldata <- buildCalldata cmd
@@ -382,7 +387,14 @@ assert cmd = do
         srcInfo
         preState
     else do
-      let opts = VeriOpts { simp = True, debug = cmd.smtdebug, maxIter = cmd.maxIterations, askSmtIters = cmd.askSmtIterations, rpcInfo = rpcinfo}
+      let opts = VeriOpts {
+        simp = True,
+        debug = cmd.smtdebug,
+        maxIter = cmd.maxIterations,
+        askSmtIters = cmd.askSmtIterations,
+        loopHeuristic = cmd.loopDetectionHeuristic,
+        rpcInfo = rpcinfo
+      }
       (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
       case res of
         [Qed _] -> do
@@ -478,18 +490,19 @@ launchExec cmd = do
         vm' <- EVM.Stepper.interpret (EVM.Fetch.oracle solvers rpcinfo) vm EVM.Stepper.runFully
         when cmd.trace $ T.hPutStr stderr (showTraceTree dapp vm')
         case vm'.result of
-          Nothing ->
-            error "internal error; no EVM result"
-          Just (EVM.VMFailure (EVM.Revert msg)) -> do
+          Just (VMFailure (Revert msg)) -> do
             let res = case msg of
                         ConcreteBuf bs -> bs
                         _ -> "<symbolic>"
             putStrLn $ "Revert: " <> (show $ ByteStringS res)
             exitWith (ExitFailure 2)
-          Just (EVM.VMFailure err) -> do
+          Just (VMFailure err) -> do
             putStrLn $ "Error: " <> show err
             exitWith (ExitFailure 2)
-          Just (EVM.VMSuccess buf) -> do
+          Just (Unfinished p) -> do
+            putStrLn $ "Could not continue execution: " <> show p
+            exitWith (ExitFailure 2)
+          Just (VMSuccess buf) -> do
             let msg = case buf of
                   ConcreteBuf msg' -> msg'
                   _ -> "<symbolic>"
@@ -502,6 +515,8 @@ launchExec cmd = do
               Nothing -> pure ()
               Just path ->
                 Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts vm'.cache)
+          _ ->
+            error "Internal error: no EVM result"
 
       Debug -> void $ TTY.runFromVM solvers rpcinfo Nothing dapp vm
       --JsonTrace -> void $ execStateT (interpretWithTrace fetcher EVM.Stepper.runFully) vm
@@ -510,7 +525,7 @@ launchExec cmd = do
            rpcinfo = (,) block <$> cmd.rpc
 
 -- | Creates a (concrete) VM from command line options
-vmFromCommand :: Command Options.Unwrapped -> IO EVM.VM
+vmFromCommand :: Command Options.Unwrapped -> IO VM
 vmFromCommand cmd = do
   withCache <- applyCache (cmd.state, cmd.cache)
 
@@ -518,7 +533,7 @@ vmFromCommand cmd = do
     Nothing -> return (0,Lit 0,0,0,0)
     Just url -> EVM.Fetch.fetchBlockFrom block url >>= \case
       Nothing -> error "Could not fetch block"
-      Just EVM.Block{..} -> return ( coinbase
+      Just Block{..} -> return ( coinbase
                                    , timestamp
                                    , baseFee
                                    , number
@@ -534,7 +549,7 @@ vmFromCommand cmd = do
           -- if both code and url is given,
           -- fetch the contract and overwrite the code
           return $
-            EVM.initialContract  (mkCode $ hexByteString "--code" $ strip0x c)
+            initialContract  (mkCode $ hexByteString "--code" $ strip0x c)
               & set #balance  (contract.balance)
               & set #nonce    (contract.nonce)
               & set #external (contract.external)
@@ -547,12 +562,12 @@ vmFromCommand cmd = do
 
     (_, _, Just c)  ->
       return $
-        EVM.initialContract (mkCode $ hexByteString "--code" $ strip0x c)
+        initialContract (mkCode $ hexByteString "--code" $ strip0x c)
 
     (_, _, Nothing) ->
       error "must provide at least (rpc + address) or code"
 
-  let ts' = case unlit ts of
+  let ts' = case maybeLitWord ts of
         Just t -> t
         Nothing -> error "unexpected symbolic timestamp when executing vm test"
 
@@ -565,49 +580,49 @@ vmFromCommand cmd = do
         calldata = ConcreteBuf $ bytes (.calldata) ""
         decipher = hexByteString "bytes" . strip0x
         mkCode bs = if cmd.create
-                    then EVM.InitCode bs mempty
-                    else EVM.RuntimeCode (EVM.ConcreteRuntimeCode bs)
+                    then InitCode bs mempty
+                    else RuntimeCode (ConcreteRuntimeCode bs)
         address = if cmd.create
               then addr (.address) (createAddress origin (word (.nonce) 0))
               else addr (.address) 0xacab
 
-        vm0 baseFee miner ts blockNum prevRan c = EVM.makeVm $ EVM.VMOpts
-          { contract       = c
-          , calldata       = (calldata, [])
-          , value          = Lit value
-          , address        = address
-          , caller         = litAddr caller
-          , origin         = origin
-          , gas            = word64 (.gas) 0xffffffffffffffff
-          , baseFee        = baseFee
-          , priorityFee    = word (.priorityFee) 0
-          , gaslimit       = word64 (.gaslimit) 0xffffffffffffffff
-          , coinbase       = addr (.coinbase) miner
-          , number         = word (.number) blockNum
-          , timestamp      = Lit $ word (.timestamp) ts
-          , blockGaslimit  = word64 (.gaslimit) 0xffffffffffffffff
-          , gasprice       = word (.gasprice) 0
-          , maxCodeSize    = word (.maxcodesize) 0xffffffff
-          , prevRandao     = word (.prevRandao) prevRan
-          , schedule       = FeeSchedule.berlin
-          , chainId        = word (.chainid) 1
-          , create         = (.create) cmd
+        vm0 baseFee miner ts blockNum prevRan c = makeVm $ VMOpts
+          { contract      = c
+          , calldata      = (calldata, [])
+          , value         = Lit value
+          , address       = address
+          , caller        = litAddr caller
+          , origin        = origin
+          , gas           = word64 (.gas) 0xffffffffffffffff
+          , baseFee       = baseFee
+          , priorityFee   = word (.priorityFee) 0
+          , gaslimit      = word64 (.gaslimit) 0xffffffffffffffff
+          , coinbase      = addr (.coinbase) miner
+          , number        = word (.number) blockNum
+          , timestamp     = Lit $ word (.timestamp) ts
+          , blockGaslimit = word64 (.gaslimit) 0xffffffffffffffff
+          , gasprice      = word (.gasprice) 0
+          , maxCodeSize   = word (.maxcodesize) 0xffffffff
+          , prevRandao    = word (.prevRandao) prevRan
+          , schedule      = FeeSchedule.berlin
+          , chainId       = word (.chainid) 1
+          , create        = (.create) cmd
           , initialStorage = EmptyStore
-          , txAccessList   = mempty -- TODO: support me soon
-          , allowFFI       = False
+          , txAccessList  = mempty -- TODO: support me soon
+          , allowFFI      = False
           }
         word f def = fromMaybe def (f cmd)
         word64 f def = fromMaybe def (f cmd)
         addr f def = fromMaybe def (f cmd)
         bytes f def = maybe def decipher (f cmd)
 
-symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (EVM.VM)
+symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM)
 symvmFromCommand cmd calldata = do
   (miner,blockNum,baseFee,prevRan) <- case cmd.rpc of
     Nothing -> return (0,0,0,0)
     Just url -> EVM.Fetch.fetchBlockFrom block url >>= \case
       Nothing -> error "Could not fetch block"
-      Just EVM.Block{..} -> return ( coinbase
+      Just Block{..} -> return ( coinbase
                                    , number
                                    , baseFee
                                    , prevRandao
@@ -632,7 +647,7 @@ symvmFromCommand cmd calldata = do
               Nothing -> contract'
               -- if both code and url is given,
               -- fetch the contract and overwrite the code
-              Just c -> EVM.initialContract (mkCode $ decipher c)
+              Just c -> initialContract (mkCode $ decipher c)
                         -- TODO: fix this
                         -- & set EVM.origStorage (view EVM.origStorage contract')
                         & set #balance     (contract'.balance)
@@ -640,7 +655,7 @@ symvmFromCommand cmd calldata = do
                         & set #external    (contract'.external)
 
     (_, _, Just c)  ->
-      return (EVM.initialContract . mkCode $ decipher c)
+      return (initialContract . mkCode $ decipher c)
     (_, _, Nothing) ->
       error "must provide at least (rpc + address) or code"
 
@@ -652,35 +667,35 @@ symvmFromCommand cmd calldata = do
     block   = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber cmd.block
     origin  = addr (.origin) 0
     mkCode bs = if cmd.create
-                   then EVM.InitCode bs mempty
-                   else EVM.RuntimeCode (EVM.ConcreteRuntimeCode bs)
+                   then InitCode bs mempty
+                   else RuntimeCode (ConcreteRuntimeCode bs)
     address = if cmd.create
           then addr (.address) (createAddress origin (word (.nonce) 0))
           else addr (.address) 0xacab
-    vm0 baseFee miner ts blockNum prevRan cd callvalue caller c = EVM.makeVm $ EVM.VMOpts
-      { contract       = c
-      , calldata       = cd
-      , value          = callvalue
-      , address        = address
-      , caller         = caller
-      , origin         = origin
-      , gas            = word64 (.gas) 0xffffffffffffffff
-      , gaslimit       = word64 (.gaslimit) 0xffffffffffffffff
-      , baseFee        = baseFee
-      , priorityFee    = word (.priorityFee) 0
-      , coinbase       = addr (.coinbase) miner
-      , number         = word (.number) blockNum
-      , timestamp      = ts
-      , blockGaslimit  = word64 (.gaslimit) 0xffffffffffffffff
-      , gasprice       = word (.gasprice) 0
-      , maxCodeSize    = word (.maxcodesize) 0xffffffff
-      , prevRandao     = word (.prevRandao) prevRan
-      , schedule       = FeeSchedule.berlin
-      , chainId        = word (.chainid) 1
-      , create         = (.create) cmd
+    vm0 baseFee miner ts blockNum prevRan cd callvalue caller c = makeVm $ VMOpts
+      { contract      = c
+      , calldata      = cd
+      , value         = callvalue
+      , address       = address
+      , caller        = caller
+      , origin        = origin
+      , gas           = word64 (.gas) 0xffffffffffffffff
+      , gaslimit      = word64 (.gaslimit) 0xffffffffffffffff
+      , baseFee       = baseFee
+      , priorityFee   = word (.priorityFee) 0
+      , coinbase      = addr (.coinbase) miner
+      , number        = word (.number) blockNum
+      , timestamp     = ts
+      , blockGaslimit = word64 (.gaslimit) 0xffffffffffffffff
+      , gasprice      = word (.gasprice) 0
+      , maxCodeSize   = word (.maxcodesize) 0xffffffff
+      , prevRandao    = word (.prevRandao) prevRan
+      , schedule      = FeeSchedule.berlin
+      , chainId       = word (.chainid) 1
+      , create        = (.create) cmd
       , initialStorage = maybe AbstractStore parseInitialStorage (cmd.initialStorage)
-      , txAccessList   = mempty
-      , allowFFI       = False
+      , txAccessList  = mempty
+      , allowFFI      = False
       }
     word f def = fromMaybe def (f cmd)
     addr f def = fromMaybe def (f cmd)

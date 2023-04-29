@@ -2,11 +2,11 @@ module EVM.Transaction where
 
 import Prelude hiding (Word)
 
-import qualified EVM
 import EVM (initialContract)
 import EVM.FeeSchedule
 import EVM.RLP
 import EVM.Types
+import EVM.Format (hexText)
 import EVM.Expr (litAddr)
 import EVM.Sign
 
@@ -201,7 +201,7 @@ instance FromJSON AccessListEntry where
 
 instance FromJSON Transaction where
   parseJSON (JSON.Object val) = do
-    tdata    <- dataField val "data"
+    tdata    <- hexText <$> (val JSON..: "data")
     gasLimit <- word64Field val "gasLimit"
     gasPrice <- fmap read <$> val JSON..:? "gasPrice"
     maxPrio  <- fmap read <$> val JSON..:? "maxPriorityFeePerGas"
@@ -226,17 +226,17 @@ instance FromJSON Transaction where
   parseJSON invalid =
     JSON.typeMismatch "Transaction" invalid
 
-accountAt :: Addr -> Getter (Map Addr EVM.Contract) EVM.Contract
+accountAt :: Addr -> Getter (Map Addr Contract) Contract
 accountAt a = (at a) % (to $ fromMaybe newAccount)
 
-touchAccount :: Addr -> Map Addr EVM.Contract -> Map Addr EVM.Contract
+touchAccount :: Addr -> Map Addr Contract -> Map Addr Contract
 touchAccount a = Map.insertWith (flip const) a newAccount
 
-newAccount :: EVM.Contract
-newAccount = initialContract $ EVM.RuntimeCode (EVM.ConcreteRuntimeCode "")
+newAccount :: Contract
+newAccount = initialContract $ RuntimeCode (ConcreteRuntimeCode "")
 
 -- | Increments origin nonce and pays gas deposit
-setupTx :: Addr -> Addr -> W256 -> Word64 -> Map Addr EVM.Contract -> Map Addr EVM.Contract
+setupTx :: Addr -> Addr -> W256 -> Word64 -> Map Addr Contract -> Map Addr Contract
 setupTx origin coinbase gasPrice gasLimit prestate =
   let gasCost = gasPrice * (num gasLimit)
   in (Map.adjust ((over #nonce   (+ 1))
@@ -247,7 +247,7 @@ setupTx origin coinbase gasPrice gasLimit prestate =
 -- | Given a valid tx loaded into the vm state,
 -- subtract gas payment from the origin, increment the nonce
 -- and pay receiving address
-initTx :: EVM.VM -> EVM.VM
+initTx :: VM -> VM
 initTx vm = let
     toAddr   = vm.state.contract
     origin   = vm.tx.origin
@@ -259,7 +259,7 @@ initTx vm = let
     preState = setupTx origin coinbase gasPrice gasLimit vm.env.contracts
     oldBalance = view (accountAt toAddr % #balance) preState
     creation = vm.tx.isCreate
-    initState = (case unlit value of
+    initState = (case maybeLitWord value of
       Just v -> ((Map.adjust (over #balance (subtract v))) origin)
               . (Map.adjust (over #balance (+ v))) toAddr
       Nothing -> id)

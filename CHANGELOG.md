@@ -7,16 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-### Changed
+## Added
 
-#### Foundry Support
+- A new stack based loop detection heuristic
+- Analysis of partial execution traces is now supported
 
-`hevm` can now execute unit tests in foundry projects. Just run `hevm test` from the root of a
-foundry repo, and all unit tests will be executed (including prove tests).
+## Changed
 
-`hevm dapp-test` has been replaced with `hevm test --project-type DappTools`.
+- `hevm` can now execute unit tests in foundry projects. Just run `hevm test` from the root of a foundry repo, and all unit tests will be executed (including prove tests).
+- `hevm dapp-test` has been replaced with `hevm test --project-type DappTools`.
+- `hevm test` no longer supports parsing solidity output in the combined json format.
+- The default value for `--ask-smt-iterations` has been changed to 1
+- The SMT solver is never queried for branch conditions that do not occur in a loop (as determined by the loop detection heuristic)
 
-`hevm test` no longer supports parsing solidity output in the combined json format.
+## Fixed
+
+- `--max-iterations` is respected in cases where path conditions have become inconsistent
+- `--max-iterations` is now respected for loops with a concrete branch condition
 
 ## Fixed
 

@@ -68,11 +68,11 @@ import Data.ByteString    (ByteString)
 import Data.Char          (isHexDigit)
 import Data.DoubleWord    (Word256, Int256, signedWord)
 import Data.Functor       (($>))
-import Data.Text          (Text, pack, unpack)
-import Data.Text.Encoding (encodeUtf8, decodeUtf8')
+import Data.Text          (Text)
+import Data.List          (intercalate)
+import Data.Text.Encoding (encodeUtf8)
 import Data.Vector        (Vector, toList)
 import Data.Word          (Word32)
-import Data.List          (intercalate)
 import Data.Maybe         (mapMaybe)
 import GHC.Generics
 
@@ -89,6 +89,7 @@ import qualified Data.Vector            as Vector
 
 import qualified Text.Megaparsec      as P
 import qualified Text.Megaparsec.Char as P
+
 
 data AbiValue
   = AbiUInt         Int Word256
@@ -121,12 +122,6 @@ instance Show AbiValue where
     "(" ++ intercalate ", " (show <$> Vector.toList v) ++ ")"
   show (AbiFunction b)       = show (ByteStringS b)
 
-formatString :: ByteString -> String
-formatString bs =
-  case decodeUtf8' (fst (BS.spanEnd (== 0) bs)) of
-    Right s -> "\"" <> unpack s <> "\""
-    Left _ -> "❮utf8 decode failed❯: " <> (show $ ByteStringS bs)
-
 data AbiType
   = AbiUIntType         Int
   | AbiIntType          Int
@@ -156,6 +151,20 @@ data Event     = Event Text Anonymity [(Text, AbiType, Indexed)]
 data SolError  = SolError Text [AbiType]
   deriving (Show, Ord, Eq, Generic)
 
+abiTypeSolidity :: AbiType -> Text
+abiTypeSolidity = \case
+  AbiUIntType n         -> "uint" <> Text.pack (show n)
+  AbiIntType n          -> "int" <> Text.pack (show n)
+  AbiAddressType        -> "address"
+  AbiBoolType           -> "bool"
+  AbiBytesType n        -> "bytes" <> Text.pack (show n)
+  AbiBytesDynamicType   -> "bytes"
+  AbiStringType         -> "string"
+  AbiArrayDynamicType t -> abiTypeSolidity t <> "[]"
+  AbiArrayType n t      -> abiTypeSolidity t <> "[" <> Text.pack (show n) <> "]"
+  AbiTupleType ts       -> "(" <> (Text.intercalate "," . Vector.toList $ abiTypeSolidity <$> ts) <> ")"
+  AbiFunctionType       -> "function"
+
 abiKind :: AbiType -> AbiKind
 abiKind = \case
   AbiBytesDynamicType   -> Dynamic
@@ -178,20 +187,6 @@ abiValueType = \case
   AbiArray n t _      -> AbiArrayType n t
   AbiTuple v          -> AbiTupleType (abiValueType <$> v)
   AbiFunction _       -> AbiFunctionType
-
-abiTypeSolidity :: AbiType -> Text
-abiTypeSolidity = \case
-  AbiUIntType n         -> "uint" <> pack (show n)
-  AbiIntType n          -> "int" <> pack (show n)
-  AbiAddressType        -> "address"
-  AbiBoolType           -> "bool"
-  AbiBytesType n        -> "bytes" <> pack (show n)
-  AbiBytesDynamicType   -> "bytes"
-  AbiStringType         -> "string"
-  AbiArrayDynamicType t -> abiTypeSolidity t <> "[]"
-  AbiArrayType n t      -> abiTypeSolidity t <> "[" <> pack (show n) <> "]"
-  AbiTupleType ts       -> "(" <> (Text.intercalate "," . Vector.toList $ abiTypeSolidity <$> ts) <> ")"
-  AbiFunctionType       -> "function"
 
 getAbi :: AbiType -> Get AbiValue
 getAbi t = label (Text.unpack (abiTypeSolidity t)) $

@@ -11,7 +11,7 @@ import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
 import Crypto.PubKey.ECC.Types (getCurveByName, CurveName(..), Point(..))
 import Crypto.PubKey.ECC.Generate (generateQ)
 
-import EVM.ABI (encodeAbiValue, AbiValue (..))
+import EVM.ABI (encodeAbiValue, AbiValue(..))
 import qualified Data.ByteString   as BS
 import EVM.Types
 import EVM.Expr (exprToAddr)

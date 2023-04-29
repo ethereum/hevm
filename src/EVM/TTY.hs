@@ -13,7 +13,7 @@ import Brick.Widgets.Center
 import Brick.Widgets.List
 
 import EVM
-import EVM.ABI (abiTypeSolidity, decodeAbiValue, AbiType(..), emptyAbi)
+import EVM.ABI (decodeAbiValue, emptyAbi, abiTypeSolidity, AbiType(..))
 import EVM.SymExec (maxIterationsReached, symCalldata)
 import EVM.Expr (simplify)
 import EVM.Dapp (DappInfo(..), emptyDapp, dappInfo, Test, extractSig, Test(..), srcMap, unitTestMethods)
@@ -175,6 +175,8 @@ interpret mode =
             Just n -> interpret mode (Stepper.evm (cont (not n)) >>= k)
 
         -- Stepper wants to make a query and wait for the results?
+        Stepper.Wait (PleaseAskSMT (Lit c) _ continue) ->
+          interpret mode (Stepper.evm (continue (Case (c > 0))) >>= k)
         Stepper.Wait q -> do
           do m <- liftIO (?fetcher q)
              interpret mode (Stepper.evm m >>= k)
@@ -236,7 +238,7 @@ runFromVM solvers rpcInfo maxIter' dappinfo vm = do
       , rpcInfo       = rpcInfo
       , verbose       = Nothing
       , maxIter       = maxIter'
-      , askSmtIters   = Nothing
+      , askSmtIters   = 1
       , smtTimeout    = Nothing
       , smtDebug      = False
       , solver        = Nothing
@@ -563,7 +565,7 @@ appEvent (VtyEvent (V.EvKey (V.KChar 'p') [V.MCtrl])) =
 appEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = get >>= \case
   ViewVm s ->
     case view (#vm % #result) s of
-      Just (VMFailure (Choose (PleaseChoosePath _ contin))) ->
+      Just (HandleEffect (Choose (PleaseChoosePath _ contin))) ->
         takeStep (s & set #stepper (Stepper.evm (contin True) >> s.stepper))
           (Step 1)
       _ -> pure ()
@@ -573,7 +575,7 @@ appEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = get >>= \case
 appEvent (VtyEvent (V.EvKey (V.KChar '1') [])) = get >>= \case
   ViewVm s ->
     case s.vm.result of
-      Just (VMFailure (Choose (PleaseChoosePath _ contin))) ->
+      Just (HandleEffect (Choose (PleaseChoosePath _ contin))) ->
         takeStep (s & set #stepper (Stepper.evm (contin False) >> s.stepper))
           (Step 1)
       _ -> pure ()
@@ -870,7 +872,7 @@ drawStackPane ui =
          vBox
            [ withHighlight True (str ("#" ++ show i ++ " "))
                <+> ourWrap (Text.unpack $ prettyIfConcreteWord w)
-           , dim (txt ("   " <> case unlit w of
+           , dim (txt ("   " <> case maybeLitWord w of
                        Nothing -> ""
                        Just u -> showWordExplanation u ui.testOpts.dapp))
            ])
@@ -884,10 +886,14 @@ message vm =
       "VMSuccess: " <> (show $ ByteStringS msg)
     Just (VMSuccess (msg)) ->
       "VMSuccess: <symbolicbuffer> " <> (show msg)
-    Just (VMFailure (EVM.Revert msg)) ->
+    Just (VMFailure (Revert msg)) ->
       "VMFailure: " <> (show msg)
     Just (VMFailure err) ->
       "VMFailure: " <> show err
+    Just (Unfinished p) ->
+      "Could not continue execution: " <> show p
+    Just (HandleEffect e) ->
+      "Handling side effect: " <> show e
     Nothing ->
       "Executing EVM code in " <> show vm.state.contract
 

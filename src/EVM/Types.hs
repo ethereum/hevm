@@ -1,4 +1,5 @@
 {-# Language CPP #-}
+{-# Language UndecidableInstances #-}
 {-# Language TemplateHaskell #-}
 {-# Language TypeApplications #-}
 {-# LANGUAGE GADTs #-}
@@ -12,6 +13,7 @@ module EVM.Types where
 import Prelude hiding  (Word, LT, GT)
 
 import Control.Arrow ((>>>))
+import Control.Monad.State.Strict hiding (state)
 import Crypto.Hash hiding (SHA256)
 import Data.Aeson
 import Data.Aeson qualified as JSON
@@ -20,44 +22,68 @@ import Data.Bifunctor (first)
 import Data.Bits (Bits, FiniteBits, shiftR, shift, shiftL, (.&.), (.|.))
 import Data.ByteArray qualified as BA
 import Data.Char
-import Data.List (isPrefixOf, foldl')
+import Data.List (foldl')
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Builder (byteStringHex, toLazyByteString)
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy (toStrict)
+import Data.Data
 import Data.Word (Word8, Word32, Word64)
 import Data.DoubleWord
 import Data.DoubleWord.TH
 import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
+import Data.Set (Set)
 import Data.Sequence qualified as Seq
 import Data.Serialize qualified as Cereal
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
 import Data.Vector qualified as V
+import Data.Vector.Storable qualified as SV
 import Numeric (readHex, showHex)
 import Options.Generic
+import Optics.TH
 import EVM.Hexdump (paddedShowHex)
-import Control.Monad
+import EVM.FeeSchedule (FeeSchedule (..))
+import Data.Tree.Zipper qualified as Zipper
 
-import qualified Data.Text            as T
-import qualified Data.Text.Encoding   as T
 import qualified Text.Regex.TDFA      as Regex
 import qualified Text.Read
 
--- Some stuff for "generic programming", needed to create Word512
-import Data.Data
+
+-- Template Haskell --------------------------------------------------------------------------
+
 
 -- We need a 512-bit word for doing ADDMOD and MULMOD with full precision.
 mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
   [''Typeable, ''Data, ''Generic]
 
 
-newtype W256 = W256 Word256
-  deriving
-    ( Num, Integral, Real, Ord, Bits
-    , Generic, FiniteBits, Enum, Eq , Bounded
-    )
+-- Symbolic IR -------------------------------------------------------------------------------------
+
+-- phantom type tags for AST construction
+data EType
+  = Buf
+  | Storage
+  | Log
+  | EWord
+  | Byte
+  | End
+  deriving (Typeable)
+
+
+-- Variables refering to a global environment
+data GVar (a :: EType) where
+  BufVar :: Int -> GVar Buf
+  StoreVar :: Int -> GVar Storage
+
+deriving instance Show (GVar a)
+deriving instance Eq (GVar a)
+deriving instance Ord (GVar a)
+
 
 {- |
   Expr implements an abstract respresentation of an EVM program
@@ -108,39 +134,6 @@ newtype W256 = W256 Word256
   type level shenanigans tends to complicate implementation, we skip this for
   now.
 -}
-
--- phantom type tags for AST construction
-data EType
-  = Buf
-  | Storage
-  | Log
-  | EWord
-  | Byte
-  | End
-  deriving (Typeable)
-
--- EVM errors
-data Error
-  = Invalid
-  | IllegalOverflow
-  | StackLimitExceeded
-  | InvalidMemoryAccess
-  | BadJumpDestination
-  | StackUnderrun
-  | SelfDestruct
-  | TmpErr String
-  deriving (Show, Eq, Ord)
-
--- Variables refering to a global environment
-data GVar (a :: EType) where
-  BufVar :: Int -> GVar Buf
-  StoreVar :: Int -> GVar Storage
-
-deriving instance Show (GVar a)
-deriving instance Eq (GVar a)
-deriving instance Ord (GVar a)
-
-
 data Expr (a :: EType) where
 
   -- identifiers
@@ -155,7 +148,6 @@ data Expr (a :: EType) where
   IndexWord      :: Expr EWord -> Expr EWord -> Expr Byte
   EqByte         :: Expr Byte  -> Expr Byte  -> Expr EWord
 
-  -- TODO: rm readWord in favour of this?
   JoinBytes      :: Expr Byte -> Expr Byte -> Expr Byte -> Expr Byte
                  -> Expr Byte -> Expr Byte -> Expr Byte -> Expr Byte
                  -> Expr Byte -> Expr Byte -> Expr Byte -> Expr Byte
@@ -165,11 +157,12 @@ data Expr (a :: EType) where
                  -> Expr Byte -> Expr Byte -> Expr Byte -> Expr Byte
                  -> Expr Byte -> Expr Byte -> Expr Byte -> Expr Byte
                  -> Expr EWord
+
   -- control flow
 
-  Revert         :: [Prop] -> Expr Buf -> Expr End
-  Failure        :: [Prop] -> Error -> Expr End
-  Return         :: [Prop] -> Expr Buf -> Expr Storage -> Expr End
+  Partial        :: [Prop] -> PartialExec -> Expr End
+  Failure        :: [Prop] -> EvmError -> Expr End
+  Success        :: [Prop] -> Expr Buf -> Expr Storage -> Expr End
   ITE            :: Expr EWord -> Expr End -> Expr End -> Expr End
 
   -- integers
@@ -372,6 +365,44 @@ deriving instance Show (Expr a)
 deriving instance Eq (Expr a)
 deriving instance Ord (Expr a)
 
+
+-- Existential Wrapper -----------------------------------------------------------------------------
+
+
+data SomeExpr = forall a . Typeable a => SomeExpr (Expr a)
+
+deriving instance Show SomeExpr
+
+instance Eq SomeExpr where
+  SomeExpr (a :: Expr b) == SomeExpr (c :: Expr d) =
+    case eqT @b @d of
+      Just Refl -> a == c
+      Nothing -> False
+
+instance Ord SomeExpr where
+  compare (SomeExpr (a :: Expr b)) (SomeExpr (c :: Expr d)) =
+    case eqT @b @d of
+      Just Refl -> compare a c
+      Nothing -> compare (toNum a) (toNum c)
+
+toNum :: (Typeable a) => Expr a -> Int
+toNum (_ :: Expr a) =
+  case eqT @a @Buf of
+    Just Refl -> 1
+    Nothing -> case eqT @a @Storage of
+      Just Refl -> 2
+      Nothing -> case eqT @a @Log of
+        Just Refl -> 3
+        Nothing -> case eqT @a @EWord of
+          Just Refl -> 4
+          Nothing -> case eqT @a @Byte of
+            Just Refl -> 5
+            Nothing -> 6
+
+
+-- Propostions -------------------------------------------------------------------------------------
+
+
 -- The language of assertable expressions.
 -- This is useful when generating SMT queries based on Expr instances, since
 -- the translation of Eq and other boolean operators from Expr to SMT is an
@@ -452,19 +483,472 @@ instance Ord Prop where
   PImpl a b <= PImpl c d = a <= c && b <= d
   _ <= _ = False
 
+
+-- Errors ------------------------------------------------------------------------------------------
+
+
+-- | Core EVM Error Types
+data EvmError
+  = BalanceTooLow W256 W256
+  | UnrecognizedOpcode Word8
+  | SelfDestruction
+  | StackUnderrun
+  | BadJumpDestination
+  | Revert (Expr Buf)
+  | OutOfGas Word64 Word64
+  | StackLimitExceeded
+  | IllegalOverflow
+  | StateChangeWhileStatic
+  | InvalidMemoryAccess
+  | CallDepthLimitReached
+  | MaxCodeSizeExceeded W256 W256
+  | InvalidFormat
+  | PrecompileFailure
+  | ReturnDataOutOfBounds
+  | NonceOverflow
+  | BadCheatCode FunctionSelector
+  deriving (Show, Eq, Ord)
+
+-- | Sometimes we can only partially execute a given program
+data PartialExec
+  = UnexpectedSymbolicArg  { pc :: Int, msg  :: String, args  :: [SomeExpr] }
+  | MaxIterationsReached  { pc :: Int, addr :: Addr }
+  deriving (Show, Eq, Ord)
+
+-- | Effect types used by the vm implementation for side effects & control flow
+data Effect
+  = Query Query
+  | Choose Choose
+deriving instance Show Effect
+
+-- | Queries halt execution until resolved through RPC calls or SMT queries
+data Query where
+  PleaseFetchContract :: Addr -> (Contract -> EVM ()) -> Query
+  PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM ()) -> Query
+  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM ()) -> Query
+  PleaseDoFFI         :: [String] -> (ByteString -> EVM ()) -> Query
+
+-- | Execution could proceed down one of two branches
+data Choose where
+  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM ()) -> Choose
+
+-- | The possible return values of a SMT query
+data BranchCondition = Case Bool | Unknown
+  deriving Show
+
+instance Show Query where
+  showsPrec _ = \case
+    PleaseFetchContract addr _ ->
+      (("<EVM.Query: fetch contract " ++ show addr ++ ">") ++)
+    PleaseFetchSlot addr slot _ ->
+      (("<EVM.Query: fetch slot "
+        ++ show slot ++ " for "
+        ++ show addr ++ ">") ++)
+    PleaseAskSMT condition constraints _ ->
+      (("<EVM.Query: ask SMT about "
+        ++ show condition ++ " in context "
+        ++ show constraints ++ ">") ++)
+    PleaseDoFFI cmd _ ->
+      (("<EVM.Query: do ffi: " ++ (show cmd)) ++)
+
+instance Show Choose where
+  showsPrec _ = \case
+    PleaseChoosePath _ _ ->
+      (("<EVM.Choice: waiting for user to select path (0,1)") ++)
+
+-- | The possible result states of a VM
+data VMResult
+  = VMFailure EvmError     -- ^ An operation failed
+  | VMSuccess (Expr Buf)   -- ^ Reached STOP, RETURN, or end-of-code
+  | HandleEffect Effect    -- ^ An effect must be handled for execution to continue
+  | Unfinished PartialExec -- ^ Execution could not continue further
+
+deriving instance Show VMResult
+
+
+-- VM State ----------------------------------------------------------------------------------------
+
+
+-- | The state of a stepwise EVM execution
+data VM = VM
+  { result         :: Maybe VMResult
+  , state          :: FrameState
+  , frames         :: [Frame]
+  , env            :: Env
+  , block          :: Block
+  , tx             :: TxState
+  , logs           :: [Expr Log]
+  , traces         :: Zipper.TreePos Zipper.Empty Trace
+  , cache          :: Cache
+  , burned         :: {-# UNPACK #-} !Word64
+  , iterations     :: Map CodeLocation (Int, [Expr EWord]) -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
+  , constraints    :: [Prop]
+  , keccakEqs      :: [Prop]
+  , allowFFI       :: Bool
+  , overrideCaller :: Maybe Addr
+  }
+  deriving (Show, Generic)
+
+-- | Alias for the type of e.g. @exec1@.
+type EVM a = State VM a
+
+-- | An entry in the VM's "call/create stack"
+data Frame = Frame
+  { context :: FrameContext
+  , state   :: FrameState
+  }
+  deriving (Show)
+
+-- | Call/create info
+data FrameContext
+  = CreationContext
+    { address         :: Addr
+    , codehash        :: Expr EWord
+    , createreversion :: Map Addr Contract
+    , substate        :: SubState
+    }
+  | CallContext
+    { target        :: Addr
+    , context       :: Addr
+    , offset        :: W256
+    , size          :: W256
+    , codehash      :: Expr EWord
+    , abi           :: Maybe W256
+    , calldata      :: Expr Buf
+    , callreversion :: (Map Addr Contract, Expr Storage)
+    , subState      :: SubState
+    }
+  deriving (Show, Generic)
+
+-- | The "accrued substate" across a transaction
+data SubState = SubState
+  { selfdestructs       :: [Addr]
+  , touchedAccounts     :: [Addr]
+  , accessedAddresses   :: Set Addr
+  , accessedStorageKeys :: Set (Addr, W256)
+  , refunds             :: [(Addr, Word64)]
+  -- in principle we should include logs here, but do not for now
+  }
+  deriving (Show)
+
+-- | The "registers" of the VM along with memory and data stack
+data FrameState = FrameState
+  { contract     :: Addr
+  , codeContract :: Addr
+  , code         :: ContractCode
+  , pc           :: {-# UNPACK #-} !Int
+  , stack        :: [Expr EWord]
+  , memory       :: Expr Buf
+  , memorySize   :: Word64
+  , calldata     :: Expr Buf
+  , callvalue    :: Expr EWord
+  , caller       :: Expr EWord
+  , gas          :: {-# UNPACK #-} !Word64
+  , returndata   :: Expr Buf
+  , static       :: Bool
+  }
+  deriving (Show, Generic)
+
+-- | The state that spans a whole transaction
+data TxState = TxState
+  { gasprice    :: W256
+  , gaslimit    :: Word64
+  , priorityFee :: W256
+  , origin      :: Addr
+  , toAddr      :: Addr
+  , value       :: Expr EWord
+  , substate    :: SubState
+  , isCreate    :: Bool
+  , txReversion :: Map Addr Contract
+  }
+  deriving (Show)
+
+-- | When doing symbolic execution, we have three different
+-- ways to model the storage of contracts. This determines
+-- not only the initial contract storage model but also how
+-- RPC or state fetched contracts will be modeled.
+data StorageModel
+  = ConcreteS    -- ^ Uses `Concrete` Storage. Reading / Writing from abstract
+                 -- locations causes a runtime failure. Can be nicely combined with RPC.
+
+  | SymbolicS    -- ^ Uses `Symbolic` Storage. Reading / Writing never reaches RPC,
+                 -- but always done using an SMT array with no default value.
+
+  | InitialS     -- ^ Uses `Symbolic` Storage. Reading / Writing never reaches RPC,
+                 -- but always done using an SMT array with 0 as the default value.
+
+  deriving (Read, Show)
+
+instance ParseField StorageModel
+
+-- | Various environmental data
+data Env = Env
+  { contracts    :: Map Addr Contract
+  , chainId      :: W256
+  , storage      :: Expr Storage
+  , origStorage  :: Map W256 (Map W256 W256)
+  , sha3Crack    :: Map W256 ByteString
+  }
+  deriving (Show, Generic)
+
+-- | Data about the block
+data Block = Block
+  { coinbase    :: Addr
+  , timestamp   :: Expr EWord
+  , number      :: W256
+  , prevRandao  :: W256
+  , gaslimit    :: Word64
+  , baseFee     :: W256
+  , maxCodeSize :: W256
+  , schedule    :: FeeSchedule Word64
+  } deriving (Show, Generic)
+
+-- | The state of a contract
+data Contract = Contract
+  { contractcode :: ContractCode
+  , balance      :: W256
+  , nonce        :: W256
+  , codehash     :: Expr EWord
+  , opIxMap      :: SV.Vector Int
+  , codeOps      :: V.Vector (Int, Op)
+  , external     :: Bool
+  }
+  deriving (Show)
+
+
+-- Bytecode Representations ------------------------------------------------------------------------
+
+
+-- | A unique id for a given pc
+type CodeLocation = (Addr, Int)
+
+-- | The cache is data that can be persisted for efficiency:
+-- any expensive query that is constant at least within a block.
+data Cache = Cache
+  { fetchedContracts :: Map Addr Contract
+  , fetchedStorage :: Map W256 (Map W256 W256)
+  , path :: Map (CodeLocation, Int) Bool
+  } deriving (Show, Generic)
+
+instance Semigroup Cache where
+  a <> b = Cache
+    { fetchedContracts = Map.unionWith unifyCachedContract a.fetchedContracts b.fetchedContracts
+    , fetchedStorage = Map.unionWith unifyCachedStorage a.fetchedStorage b.fetchedStorage
+    , path = mappend a.path b.path
+    }
+
+instance Monoid Cache where
+  mempty = Cache { fetchedContracts = mempty
+                 , fetchedStorage = mempty
+                 , path = mempty
+                 }
+
+unifyCachedStorage :: Map W256 W256 -> Map W256 W256 -> Map W256 W256
+unifyCachedStorage _ _ = undefined
+
+-- only intended for use in Cache merges, where we expect
+-- everything to be Concrete
+unifyCachedContract :: Contract -> Contract -> Contract
+unifyCachedContract _ _ = undefined
+  {-
+unifyCachedContract a b = a & set storage merged
+  where merged = case (view storage a, view storage b) of
+                   (ConcreteStore sa, ConcreteStore sb) ->
+                     ConcreteStore (mappend sa sb)
+                   _ ->
+                     view storage a
+   -}
+
+
+-- Bytecode Representations ------------------------------------------------------------------------
+
+
+{- |
+  A contract is either in creation (running its "constructor") or
+  post-creation, and code in these two modes is treated differently
+  by instructions like @EXTCODEHASH@, so we distinguish these two
+  code types.
+
+  The definition follows the structure of code output by solc. We need to use
+  some heuristics here to deal with symbolic data regions that may be present
+  in the bytecode since the fully abstract case is impractical:
+
+  - initcode has concrete code, followed by an abstract data "section"
+  - runtimecode has a fixed length, but may contain fixed size symbolic regions (due to immutable)
+
+  hopefully we do not have to deal with dynamic immutable before we get a real data section...
+-}
+data ContractCode
+  = InitCode ByteString (Expr Buf) -- ^ "Constructor" code, during contract creation
+  | RuntimeCode RuntimeCode -- ^ "Instance" code, after contract creation
+  deriving (Show, Ord)
+
+-- | We have two variants here to optimize the fully concrete case.
+-- ConcreteRuntimeCode just wraps a ByteString
+-- SymbolicRuntimeCode is a fixed length vector of potentially symbolic bytes, which lets us handle symbolic pushdata (e.g. from immutable variables in solidity).
+data RuntimeCode
+  = ConcreteRuntimeCode ByteString
+  | SymbolicRuntimeCode (V.Vector (Expr Byte))
+  deriving (Show, Eq, Ord)
+
+-- runtime err when used for symbolic code
+instance Eq ContractCode where
+  InitCode a b  == InitCode c d  = a == c && b == d
+  RuntimeCode x == RuntimeCode y = x == y
+  _ == _ = False
+
+
+-- Execution Traces --------------------------------------------------------------------------------
+
+
+data Trace = Trace
+  { opIx      :: Int
+  , contract  :: Contract
+  , tracedata :: TraceData
+  }
+  deriving (Show, Generic)
+
+data TraceData
+  = EventTrace (Expr EWord) (Expr Buf) [Expr EWord]
+  | FrameTrace FrameContext
+  | QueryTrace Query
+  | ErrorTrace EvmError
+  | EntryTrace Text
+  | ReturnTrace (Expr Buf) FrameContext
+  deriving (Show, Generic)
+
+
+-- VM Initialization -------------------------------------------------------------------------------
+
+
+-- | A specification for an initial VM state
+data VMOpts = VMOpts
+  { contract :: Contract
+  , calldata :: (Expr Buf, [Prop])
+  , initialStorage :: Expr Storage
+  , value :: Expr EWord
+  , priorityFee :: W256
+  , address :: Addr
+  , caller :: Expr EWord
+  , origin :: Addr
+  , gas :: Word64
+  , gaslimit :: Word64
+  , number :: W256
+  , timestamp :: Expr EWord
+  , coinbase :: Addr
+  , prevRandao :: W256
+  , maxCodeSize :: W256
+  , blockGaslimit :: Word64
+  , gasprice :: W256
+  , baseFee :: W256
+  , schedule :: FeeSchedule Word64
+  , chainId :: W256
+  , create :: Bool
+  , txAccessList :: Map Addr [W256]
+  , allowFFI :: Bool
+  } deriving Show
+
+
+-- Opcodes -----------------------------------------------------------------------------------------
+
+
+type Op = GenericOp (Expr EWord)
+
+data GenericOp a
+  = OpStop
+  | OpAdd
+  | OpMul
+  | OpSub
+  | OpDiv
+  | OpSdiv
+  | OpMod
+  | OpSmod
+  | OpAddmod
+  | OpMulmod
+  | OpExp
+  | OpSignextend
+  | OpLt
+  | OpGt
+  | OpSlt
+  | OpSgt
+  | OpEq
+  | OpIszero
+  | OpAnd
+  | OpOr
+  | OpXor
+  | OpNot
+  | OpByte
+  | OpShl
+  | OpShr
+  | OpSar
+  | OpSha3
+  | OpAddress
+  | OpBalance
+  | OpOrigin
+  | OpCaller
+  | OpCallvalue
+  | OpCalldataload
+  | OpCalldatasize
+  | OpCalldatacopy
+  | OpCodesize
+  | OpCodecopy
+  | OpGasprice
+  | OpExtcodesize
+  | OpExtcodecopy
+  | OpReturndatasize
+  | OpReturndatacopy
+  | OpExtcodehash
+  | OpBlockhash
+  | OpCoinbase
+  | OpTimestamp
+  | OpNumber
+  | OpPrevRandao
+  | OpGaslimit
+  | OpChainid
+  | OpSelfbalance
+  | OpBaseFee
+  | OpPop
+  | OpMload
+  | OpMstore
+  | OpMstore8
+  | OpSload
+  | OpSstore
+  | OpJump
+  | OpJumpi
+  | OpPc
+  | OpMsize
+  | OpGas
+  | OpJumpdest
+  | OpCreate
+  | OpCall
+  | OpStaticcall
+  | OpCallcode
+  | OpReturn
+  | OpDelegatecall
+  | OpCreate2
+  | OpRevert
+  | OpSelfdestruct
+  | OpDup !Word8
+  | OpSwap !Word8
+  | OpLog !Word8
+  | OpPush a
+  | OpUnknown Word8
+  deriving (Show, Eq, Functor)
+
+
+-- Function Selectors ------------------------------------------------------------------------------
+
+
 -- | https://docs.soliditylang.org/en/v0.8.19/abi-spec.html#function-selector
 newtype FunctionSelector = FunctionSelector { unFunctionSelector :: Word32 }
   deriving (Num, Eq, Ord, Real, Enum, Integral)
 instance Show FunctionSelector where show s = "0x" <> showHex s ""
 
-unlit :: Expr EWord -> Maybe W256
-unlit (Lit x) = Just x
-unlit _ = Nothing
 
-unlitByte :: Expr Byte -> Maybe Word8
-unlitByte (LitByte x) = Just x
-unlitByte _ = Nothing
+-- ByteString wrapper ------------------------------------------------------------------------------
 
+
+-- Newtype wrapper for ByteString to allow custom instances
 newtype ByteStringS = ByteStringS ByteString deriving (Eq, Generic)
 
 instance Show ByteStringS where
@@ -482,17 +966,16 @@ instance JSON.FromJSON ByteStringS where
 instance JSON.ToJSON ByteStringS where
   toJSON (ByteStringS x) = JSON.String (T.pack $ "0x" ++ (concatMap (paddedShowHex 2) . BS.unpack $ x))
 
-newtype Addr = Addr { addressWord160 :: Word160 }
-  deriving
-    ( Num, Integral, Real, Ord, Enum
-    , Eq, Generic, Bits, FiniteBits
-    )
-instance JSON.ToJSON Addr where
-  toJSON = JSON.String . T.pack . show
 
-maybeLitWord :: Expr EWord -> Maybe W256
-maybeLitWord (Lit w) = Just w
-maybeLitWord _ = Nothing
+-- Word256 wrapper ---------------------------------------------------------------------------------
+
+
+-- Newtype wrapper around Word256 to allow custom instances
+newtype W256 = W256 Word256
+  deriving
+    ( Num, Integral, Real, Ord, Bits
+    , Generic, FiniteBits, Enum, Eq , Bounded
+    )
 
 instance Read W256 where
   readsPrec _ "0x" = [(0, "")]
@@ -506,6 +989,32 @@ instance JSON.ToJSON W256 where
     where
       cutshow = drop 2 $ show x
       pad = replicate (64 - length (cutshow)) '0'
+
+instance FromJSON W256 where
+  parseJSON v = do
+    s <- T.unpack <$> parseJSON v
+    case reads s of
+      [(x, "")]  -> return x
+      _          -> fail $ "invalid hex word (" ++ s ++ ")"
+
+instance FromJSONKey W256 where
+  fromJSONKey = FromJSONKeyTextParser $ \s ->
+    case reads (T.unpack s) of
+      [(x, "")]  -> return x
+      _          -> fail $ "invalid word (" ++ T.unpack s ++ ")"
+
+wordField :: JSON.Object -> Key -> JSON.Parser W256
+wordField x f = ((readNull 0) . T.unpack)
+                  <$> (x .: f)
+
+instance ParseField W256
+instance ParseFields W256
+instance ParseRecord W256 where
+  parseRecord = fmap getOnly parseRecord
+
+
+-- Word64 wrapper ----------------------------------------------------------------------------------
+
 
 newtype W64 = W64 Data.Word.Word64
   deriving
@@ -522,7 +1031,21 @@ instance Show W64 where
   showsPrec _ s = ("0x" ++) . showHex s
 
 instance JSON.ToJSON W64 where
-  toJSON = JSON.String . T.pack . show
+  toJSON x = JSON.String  $ T.pack $ show x
+
+word64Field :: JSON.Object -> Key -> JSON.Parser Word64
+word64Field x f = ((readNull 0) . T.unpack)
+                  <$> (x .: f)
+
+
+-- Addresses ---------------------------------------------------------------------------------------
+
+
+newtype Addr = Addr { addressWord160 :: Word160 }
+  deriving
+    ( Num, Integral, Real, Ord, Enum
+    , Eq, Generic, Bits, FiniteBits
+    )
 
 instance Read Addr where
   readsPrec _ ('0':'x':s) = readHex s
@@ -534,14 +1057,6 @@ instance Show Addr where
         str = replicate (40 - length hex) '0' ++ hex
     in "0x" ++ toChecksumAddress str ++ drop 40 str
 
-instance JSON.ToJSONKey Addr where
-  toJSONKey = JSON.toJSONKeyText (addrKey)
-    where
-      addrKey :: Addr -> Text
-      addrKey addr = T.pack $ replicate (40 - length hex) '0' ++ hex
-        where
-          hex = show addr
-
 -- https://eips.ethereum.org/EIPS/eip-55
 toChecksumAddress :: String -> String
 toChecksumAddress addr = zipWith transform nibbles addr
@@ -549,21 +1064,8 @@ toChecksumAddress addr = zipWith transform nibbles addr
     nibbles = unpackNibbles . BS.take 20 $ keccakBytes (Char8.pack addr)
     transform nibble = if nibble >= 8 then toUpper else id
 
-strip0x :: ByteString -> ByteString
-strip0x bs = if "0x" `Char8.isPrefixOf` bs then Char8.drop 2 bs else bs
-
-strip0x' :: String -> String
-strip0x' s = if "0x" `isPrefixOf` s then drop 2 s else s
-
-strip0x'' :: Text -> Text
-strip0x'' s = if "0x" `T.isPrefixOf` s then T.drop 2 s else s
-
-instance FromJSON W256 where
-  parseJSON v = do
-    s <- T.unpack <$> parseJSON v
-    case reads s of
-      [(x, "")]  -> return x
-      _          -> fail $ "invalid hex word (" ++ s ++ ")"
+instance JSON.ToJSON Addr where
+  toJSON = JSON.String . T.pack . show
 
 instance FromJSON Addr where
   parseJSON v = do
@@ -572,13 +1074,13 @@ instance FromJSON Addr where
       [(x, "")] -> return x
       _         -> fail $ "invalid address (" ++ s ++ ")"
 
-#if MIN_VERSION_aeson(1, 0, 0)
-
-instance FromJSONKey W256 where
-  fromJSONKey = FromJSONKeyTextParser $ \s ->
-    case reads (T.unpack s) of
-      [(x, "")]  -> return x
-      _          -> fail $ "invalid word (" ++ T.unpack s ++ ")"
+instance JSON.ToJSONKey Addr where
+  toJSONKey = JSON.toJSONKeyText (addrKey)
+    where
+      addrKey :: Addr -> Text
+      addrKey addr = T.pack $ replicate (40 - length hex) '0' ++ hex
+        where
+          hex = show addr
 
 instance FromJSONKey Addr where
   fromJSONKey = FromJSONKeyTextParser $ \s ->
@@ -586,52 +1088,31 @@ instance FromJSONKey Addr where
       [(x, "")] -> return x
       _         -> fail $ "invalid word (" ++ T.unpack s ++ ")"
 
-#endif
-
-instance ParseField W256
-instance ParseFields W256
-instance ParseRecord W256 where
-  parseRecord = fmap getOnly parseRecord
-
-instance ParseField Addr
-instance ParseFields Addr
-instance ParseRecord Addr where
-  parseRecord = fmap getOnly parseRecord
-
-hexByteString :: String -> ByteString -> ByteString
-hexByteString msg bs =
-  case BS16.decodeBase16 bs of
-    Right x -> x
-    _ -> error ("invalid hex bytestring for " ++ msg)
-
-hexText :: Text -> ByteString
-hexText t =
-  case BS16.decodeBase16 (T.encodeUtf8 (T.drop 2 t)) of
-    Right x -> x
-    _ -> error ("invalid hex bytestring " ++ show t)
-
-readN :: Integral a => String -> a
-readN s = fromIntegral (read s :: Integer)
-
-readNull :: Read a => a -> String -> a
-readNull x = fromMaybe x . Text.Read.readMaybe
-
-wordField :: JSON.Object -> Key -> JSON.Parser W256
-wordField x f = ((readNull 0) . T.unpack)
-                  <$> (x .: f)
-
-word64Field :: JSON.Object -> Key -> JSON.Parser Word64
-word64Field x f = ((readNull 0) . T.unpack)
-                  <$> (x .: f)
-
 addrField :: JSON.Object -> Key -> JSON.Parser Addr
 addrField x f = (read . T.unpack) <$> (x .: f)
 
 addrFieldMaybe :: JSON.Object -> Key -> JSON.Parser (Maybe Addr)
 addrFieldMaybe x f = (Text.Read.readMaybe . T.unpack) <$> (x .: f)
 
-dataField :: JSON.Object -> Key -> JSON.Parser ByteString
-dataField x f = hexText <$> (x .: f)
+instance ParseField Addr
+instance ParseFields Addr
+instance ParseRecord Addr where
+  parseRecord = fmap getOnly parseRecord
+
+
+-- Nibbles -----------------------------------------------------------------------------------------
+
+
+-- | A four bit value
+newtype Nibble = Nibble Word8
+  deriving ( Num, Integral, Real, Ord, Enum, Eq, Bounded, Generic)
+
+instance Show Nibble where
+  show = (:[]) . intToDigit . num
+
+
+-- Conversions -------------------------------------------------------------------------------------
+
 
 toWord512 :: W256 -> Word512
 toWord512 (W256 x) = fromHiAndLo 0 x
@@ -639,26 +1120,13 @@ toWord512 (W256 x) = fromHiAndLo 0 x
 fromWord512 :: Word512 -> W256
 fromWord512 x = W256 (loWord x)
 
-num :: (Integral a, Num b) => a -> b
-num = fromIntegral
+maybeLitByte :: Expr Byte -> Maybe Word8
+maybeLitByte (LitByte x) = Just x
+maybeLitByte _ = Nothing
 
-padLeft :: Int -> ByteString -> ByteString
-padLeft n xs = BS.replicate (n - BS.length xs) 0 <> xs
-
-padRight :: Int -> ByteString -> ByteString
-padRight n xs = xs <> BS.replicate (n - BS.length xs) 0
-
-padRight' :: Int -> String -> String
-padRight' n xs = xs <> replicate (n - length xs) '0'
-
--- | Right padding  / truncating
---truncpad :: Int -> [SWord 8] -> [SWord 8]
---truncpad n xs = if m > n then take n xs
-                --else mappend xs (replicate (n - m) 0)
-  --where m = length xs
-
-padLeft' :: Int -> V.Vector (Expr Byte) -> V.Vector (Expr Byte)
-padLeft' n xs = V.replicate (n - length xs) (LitByte 0) <> xs
+maybeLitWord :: Expr EWord -> Maybe W256
+maybeLitWord (Lit w) = Just w
+maybeLitWord _ = Nothing
 
 word256 :: ByteString -> Word256
 word256 xs | BS.length xs == 1 =
@@ -695,12 +1163,6 @@ word160Bytes :: Addr -> ByteString
 word160Bytes (Addr (Word160 a (Word128 b c))) =
   Cereal.encode a <> Cereal.encode b <> Cereal.encode c
 
-newtype Nibble = Nibble Word8
-  deriving ( Num, Integral, Real, Ord, Enum, Eq, Bounded, Generic)
-
-instance Show Nibble where
-  show = (:[]) . intToDigit . num
-
 -- Get first and second Nibble from byte
 hi, lo :: Word8 -> Nibble
 hi b = Nibble $ b `shiftR` 4
@@ -731,7 +1193,16 @@ toInt n =
     then let (W256 (Word256 _ (Word128 _ n'))) = n in Just (fromIntegral n')
     else Nothing
 
--- Keccak hashing
+bssToBs :: ByteStringS -> ByteString
+bssToBs (ByteStringS bs) = bs
+
+-- | This just overflows silently, and is generally a terrible footgun, should be removed
+num :: (Integral a, Num b) => a -> b
+num = fromIntegral
+
+
+-- Keccak hashing ----------------------------------------------------------------------------------
+
 
 keccakBytes :: ByteString -> ByteString
 keccakBytes =
@@ -757,7 +1228,9 @@ abiKeccak =
     >>> word32
     >>> FunctionSelector
 
--- Utils
+
+-- Utils -------------------------------------------------------------------------------------------
+
 
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = fmap concat (mapM f xs)
@@ -773,22 +1246,40 @@ regexMatches regexSource =
   in
     Regex.matchTest regex . Seq.fromList . T.unpack
 
-data VMTrace =
-  VMTrace
-  { tracePc      :: Int
-  , traceOp      :: Int
-  , traceStack   :: [W256]
-  , traceMemSize :: Data.Word.Word64
-  , traceDepth   :: Int
-  , traceGas     :: Data.Word.Word64
-  , traceError   :: Maybe String
-  } deriving (Generic, Show)
-instance JSON.ToJSON VMTrace where
-  toEncoding = JSON.genericToEncoding JSON.defaultOptions
-instance JSON.FromJSON VMTrace
+readNull :: Read a => a -> String -> a
+readNull x = fromMaybe x . Text.Read.readMaybe
 
-bsToHex :: ByteString -> String
-bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
+padLeft :: Int -> ByteString -> ByteString
+padLeft n xs = BS.replicate (n - BS.length xs) 0 <> xs
 
-bssToBs :: ByteStringS -> ByteString
-bssToBs (ByteStringS bs) = bs
+padLeft' :: Int -> V.Vector (Expr Byte) -> V.Vector (Expr Byte)
+padLeft' n xs = V.replicate (n - length xs) (LitByte 0) <> xs
+
+padRight :: Int -> ByteString -> ByteString
+padRight n xs = xs <> BS.replicate (n - BS.length xs) 0
+
+padRight' :: Int -> String -> String
+padRight' n xs = xs <> replicate (n - length xs) '0'
+
+-- We need this here instead of Format for cyclic import reasons...
+formatString :: ByteString -> String
+formatString bs =
+  case T.decodeUtf8' (fst (BS.spanEnd (== 0) bs)) of
+    Right s -> "\"" <> T.unpack s <> "\""
+    Left _ -> "❮utf8 decode failed❯: " <> (show $ ByteStringS bs)
+
+-- Optics ------------------------------------------------------------------------------------------
+
+
+makeFieldLabelsNoPrefix ''VM
+makeFieldLabelsNoPrefix ''FrameState
+makeFieldLabelsNoPrefix ''TxState
+makeFieldLabelsNoPrefix ''SubState
+makeFieldLabelsNoPrefix ''Cache
+makeFieldLabelsNoPrefix ''Trace
+makeFieldLabelsNoPrefix ''VMOpts
+makeFieldLabelsNoPrefix ''Frame
+makeFieldLabelsNoPrefix ''FrameContext
+makeFieldLabelsNoPrefix ''Contract
+makeFieldLabelsNoPrefix ''Env
+makeFieldLabelsNoPrefix ''Block
