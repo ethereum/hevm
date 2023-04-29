@@ -5,16 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.51.0] - 2023-04-27
 
 ## Added
 
+- `hevm` can now execute unit tests in foundry projects. Just run `hevm test` from the root of a foundry repo, and all unit tests will be executed (including prove tests).
 - A new stack based loop detection heuristic
 - Analysis of partial execution traces is now supported
 
 ## Changed
 
-- `hevm` can now execute unit tests in foundry projects. Just run `hevm test` from the root of a foundry repo, and all unit tests will be executed (including prove tests).
 - `hevm dapp-test` has been replaced with `hevm test --project-type DappTools`.
 - `hevm test` no longer supports parsing solidity output in the combined json format.
 - The default value for `--ask-smt-iterations` has been changed to 1
@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed a bug where underflow was possible when transfering eth
 
-## [0.50.5] - 2023-03-18
+## [0.50.5] - 2023-04-18
 
 ## Changed
 
