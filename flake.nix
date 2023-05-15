@@ -16,7 +16,7 @@
       flake = false;
     };
     ethereum-tests = {
-      url = "github:ethereum/tests/v11.2";
+      url = "github:ethereum/tests/v12";
       flake = false;
     };
   };

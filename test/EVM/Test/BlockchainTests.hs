@@ -91,7 +91,7 @@ testsFromFile file problematicTests = do
    Left "No cases to check." -> pure [] -- error "no-cases ok"
    Left _err -> pure [] -- error err
    Right allTests -> pure $
-     (\(name, x) -> testCase' name $ runVMTest False (name, x)) <$> Map.toList allTests
+     (\(name, x) -> testCase' name $ runVMTest True (name, x)) <$> Map.toList allTests
   where
   testCase' name assertion =
     case Map.lookup name problematicTests of

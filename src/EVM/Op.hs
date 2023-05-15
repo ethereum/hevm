@@ -86,6 +86,7 @@ intToOpName a =
    0x5a -> "GAS"
    0x5b -> "JUMPDEST"
    --
+   0x5f -> "PUSH0"
    0x60 -> "PUSH1"
    0x61 -> "PUSH2"
    0x62 -> "PUSH3"
@@ -332,6 +333,7 @@ getOp x = case x of
   0x59 -> OpMsize
   0x5a -> OpGas
   0x5b -> OpJumpdest
+  0x5f -> OpPush 0
   0xf0 -> OpCreate
   0xf1 -> OpCall
   0xf2 -> OpCallcode
