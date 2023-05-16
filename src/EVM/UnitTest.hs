@@ -449,7 +449,7 @@ runUnitTestContract
             runCache (results, vm) (test, types) = do
               (t, r, vm') <- runTest opts vm (test, types)
               liftIO $ Text.putStrLn t
-              let vmCached = vm { cache = vm'.cache }
+              let vmCached = (vm :: VM) { cache = vm'.cache }
               pure (((r, vm'): results), vmCached)
 
           -- Run all the test cases and print their status updates,

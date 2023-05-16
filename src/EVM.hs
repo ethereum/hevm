@@ -120,16 +120,7 @@ makeVm o =
     }
   , logs = []
   , traces = Zipper.fromForest []
-  , block = Block
-    { coinbase = o.coinbase
-    , timestamp = o.timestamp
-    , number = o.number
-    , prevRandao = o.prevRandao
-    , maxCodeSize = o.maxCodeSize
-    , gaslimit = o.blockGaslimit
-    , baseFee = o.baseFee
-    , schedule = o.schedule
-    }
+  , block = block
   , state = FrameState
     { pc = 0
     , stack = mempty
@@ -145,7 +136,19 @@ makeVm o =
     , returndata = mempty
     , static = False
     }
-  , env = Env
+  , env = env
+  , cache = cache
+  , burned = 0
+  , constraints = snd o.calldata
+  , keccakEqs = mempty
+  , iterations = mempty
+  , allowFFI = o.allowFFI
+  , overrideCaller = Nothing
+  , forks = Seq.singleton (ForkState env block cache "")
+  , currentFork = 0
+  }
+  where
+  env = Env
     { sha3Crack = mempty
     , chainId = o.chainId
     , storage = o.initialStorage
@@ -153,14 +156,17 @@ makeVm o =
     , contracts = Map.fromList
       [(o.address, o.contract )]
     }
-  , cache = Cache mempty mempty mempty
-  , burned = 0
-  , constraints = snd o.calldata
-  , keccakEqs = mempty
-  , iterations = mempty
-  , allowFFI = o.allowFFI
-  , overrideCaller = Nothing
-  }
+  block = Block
+    { coinbase = o.coinbase
+    , timestamp = o.timestamp
+    , number = o.number
+    , prevRandao = o.prevRandao
+    , maxCodeSize = o.maxCodeSize
+    , gaslimit = o.blockGaslimit
+    , baseFee = o.baseFee
+    , schedule = o.schedule
+    }
+  cache = Cache mempty mempty mempty
 
 -- | Initialize empty contract with given code
 initialContract :: ContractCode -> Contract
@@ -1542,8 +1548,57 @@ cheatActions =
       action "prank(address)" $
         \sig _ _ input -> case decodeStaticArgs 0 1 input of
           [addr]  -> assign #overrideCaller (Expr.exprToAddr addr)
-          _ -> vmError (BadCheatCode sig)
+          _ -> vmError (BadCheatCode sig),
 
+      action "createFork(string)" $
+        \sig outOffset _ input -> case decodeBuf [AbiStringType] input of
+          CAbi valsArr -> case valsArr of
+            [AbiString bytes] -> do
+              forkId <- length <$> gets (.forks)
+              let urlOrAlias = Char8.unpack bytes
+              modify' $ \vm -> vm { forks = vm.forks Seq.|> ForkState vm.env vm.block vm.cache urlOrAlias }
+              let encoded = encodeAbiValue $ AbiUInt 256 (fromIntegral forkId)
+              assign (#state % #returndata) (ConcreteBuf encoded)
+              copyBytesToMemory (ConcreteBuf encoded) (Lit . num . BS.length $ encoded) (Lit 0) outOffset
+            _ -> vmError (BadCheatCode sig)
+          _ -> vmError (BadCheatCode sig),
+
+      action "selectFork(uint256)" $
+        \sig _ _ input -> case decodeStaticArgs 0 1 input of
+          [forkId] ->
+            forceConcrete forkId "forkId must be concrete" $ \(fromIntegral -> forkId') -> do
+              saved <- Seq.lookup forkId' <$> gets (.forks)
+              case saved of
+                Just forkState -> do
+                  vm <- get
+                  case (vm.env.storage, forkState.env.storage) of
+                    (ConcreteStore store, ConcreteStore savedStore) -> do
+                      let
+                        -- the current contract is persited across forks
+                        self = vm.state.contract
+                        this = fromMaybe (error "internal error: state contract")
+                                         (Map.lookup self vm.env.contracts)
+                        currStorage = fromMaybe mempty $ Map.lookup (fromIntegral self) store
+                        newStore = ConcreteStore $ Map.insert (fromIntegral self) currStorage savedStore
+                        newContracts = Map.insert self this forkState.env.contracts
+                        newEnv = forkState.env { storage = newStore, contracts = newContracts }
+
+                      when (vm.currentFork /= forkId') $ do
+                        modify' $ \vm' -> vm'
+                          { env = newEnv
+                          , block = forkState.block
+                          , forks = Seq.adjust' (\state -> (state :: ForkState)
+                              { env = vm.env, block = vm.block, cache = vm.cache }
+                            ) vm.currentFork  vm.forks
+                          , currentFork = forkId'
+                          }
+                    _ ->
+                      -- no-op: current storage and/or saved storage is symbolic
+                      -- we don't support this at the moment
+                      pure ()
+                Nothing ->
+                  pure () -- no-op: fork not found
+          _ -> vmError (BadCheatCode sig)
     ]
   where
     action s f = (abiKeccak s, f (abiKeccak s))

@@ -711,6 +711,9 @@ tests = testGroup "hevm"
     , testCase "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "Cheat-Codes-Fork-Pass" $ do
+        let testFile = "test/contracts/pass/cheatCodesFork.sol"
+        runSolidityTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Cheat-Codes-Fail" $ do
         let testFile = "test/contracts/fail/cheatCodes.sol"
         runSolidityTestCustom testFile "testBadFFI" Nothing False Nothing Foundry >>= assertEqual "test result" False
