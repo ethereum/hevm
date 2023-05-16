@@ -66,6 +66,7 @@ import Data.Binary.Put    (Put, runPut, putWord8, putWord32be)
 import Data.Bits          (shiftL, shiftR, (.&.))
 import Data.ByteString    (ByteString)
 import Data.Char          (isHexDigit)
+import Data.Data          (Data)
 import Data.DoubleWord    (Word256, Int256, signedWord)
 import Data.Functor       (($>))
 import Data.Text          (Text)
@@ -134,7 +135,7 @@ data AbiType
   | AbiArrayType        Int AbiType
   | AbiTupleType        (Vector AbiType)
   | AbiFunctionType
-  deriving (Read, Eq, Ord, Generic)
+  deriving (Read, Eq, Ord, Generic, Data)
 
 instance Show AbiType where
   show = Text.unpack . abiTypeSolidity
