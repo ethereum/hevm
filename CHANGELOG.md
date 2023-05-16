@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New concrete fuzzer that can be controlled via `--num-cex-fuzz`
 - Partial support for dynamic jumps when the jump destination can be computed
   given already available information
+- Added three forking cheatcodes: `createFork`, `selectFork`, and `activeFork`
 
 ## Fixed
 

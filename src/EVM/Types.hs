@@ -37,6 +37,7 @@ import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Set (Set)
+import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
 import Data.Serialize qualified as Cereal
 import Data.Text qualified as T
@@ -536,6 +537,7 @@ data EvmError
   | ReturnDataOutOfBounds
   | NonceOverflow
   | BadCheatCode FunctionSelector
+  | NonexistentFork Int
   deriving (Show, Eq, Ord)
 
 -- | Sometimes we can only partially execute a given program
@@ -620,8 +622,18 @@ data VM (t :: VMType) s = VM
   -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
   , config         :: RuntimeConfig
+  , forks          :: Seq ForkState
+  , currentFork    :: Int
   }
   deriving (Generic)
+
+data ForkState = ForkState
+  { env :: Env
+  , block :: Block
+  , cache :: Cache
+  , urlOrAlias :: String
+  }
+  deriving (Show, Generic)
 
 deriving instance Show (VM Symbolic s)
 deriving instance Show (VM Concrete s)
