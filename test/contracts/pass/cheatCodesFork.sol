@@ -22,7 +22,7 @@ contract TestState {
         state = _state;
     }
 }
-/// @dev This contract's state should be persistent across forks, because it's the contract Echidna deploys
+/// @dev This contract's state should be persistent across forks, because it's the contract hevm deploys
 contract ForkTest is DSTest {
     Hevm hevm = Hevm(HEVM_ADDRESS);
     address stateContract;

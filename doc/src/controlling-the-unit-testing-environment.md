@@ -32,6 +32,12 @@ These can be accessed by calling into a contract (typically called `Hevm`) at ad
 - `function prank(address sender) public`
   Sets `msg.sender` to the specified `sender` for the next call.
 
+- `function createFork(string calldata urlOrAlias) external returns (uint256)`
+  Creates a new fork with the given endpoint and the _latest_ block and returns the identifier of the fork.
+
+- `function selectFork(uint256 forkId) external`
+  Takes a fork identifier created by `createFork` and sets the corresponding forked state as active.
+
 ## Environment Variables
 
 These environment variables can be used to control block parameters:
