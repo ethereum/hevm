@@ -931,6 +931,7 @@ data GenericOp a
   | OpDup !Word8
   | OpSwap !Word8
   | OpLog !Word8
+  | OpPush0
   | OpPush a
   | OpUnknown Word8
   deriving (Show, Eq, Functor)

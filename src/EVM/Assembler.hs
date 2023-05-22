@@ -105,5 +105,6 @@ assemble os = V.fromList $ concatMap go os
         then [LitByte (0xA0 + n)]
         else error $ "Internal Error: invalid argument to OpLog: " <> show n
       -- we just always assemble OpPush into PUSH32
+      OpPush0 -> [LitByte 0x5f]
       OpPush wrd -> (LitByte 0x7f) : [Expr.indexWord (Lit i) wrd | i <- [0..31]]
       OpUnknown o -> [LitByte o]

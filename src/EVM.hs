@@ -238,6 +238,10 @@ exec1 = do
 
       case getOp(?op) of
 
+        OpPush0 ->
+          limitStack 1 . burn g_base $
+            next >> push 0
+
         OpPush n' -> do
           let n = fromIntegral n'
               !xs = case vm.state.code of
