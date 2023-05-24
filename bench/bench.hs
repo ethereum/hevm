@@ -3,31 +3,27 @@ module Main where
 import GHC.Natural
 import Control.Monad
 import Data.Maybe
-import System.Environment (lookupEnv, getEnv)
+import System.Environment (getEnv)
 
 import qualified Paths_hevm as Paths
 
 import Test.Tasty (localOption, withResource)
 import Test.Tasty.Bench
-import Data.Functor
-import Data.String.Here
 import Data.ByteString (ByteString)
 import System.FilePath.Posix
-import Control.Monad.State.Strict
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as LazyByteString
 
-import EVM (StorageModel(..))
+import EVM.Format
 import EVM.SymExec
 import EVM.Solidity
 import EVM.Solvers
-import EVM.ABI
 import EVM.Dapp
 import EVM.Types
+import EVM.Exec
 import qualified EVM.TTY as TTY
-import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 
 import EVM.Test.BlockchainTests qualified as BCTests
@@ -59,7 +55,7 @@ bcjsons = do
     parseSuite path = do
       contents <- LazyByteString.readFile path
       case BCTests.parseBCSuite contents of
-        Left e -> pure (path, mempty)
+        Left _ -> pure (path, mempty)
         Right tests -> pure (path, tests)
 
 -- | executes all provided bc tests in sequence and accumulates a boolean value representing their success.
@@ -84,7 +80,7 @@ runBCTest :: BCTests.Case -> IO Bool
 runBCTest x =
  do
   let vm0 = BCTests.vmForCase x
-  result <- execStateT (Stepper.interpret (Fetch.zero 0 (Just 0)) . void $ Stepper.execFully) vm0
+  result <- runWithHandler (Fetch.zero 0 (Just 0)) vm0
   maybeReason <- BCTests.checkExpectation False x result
   pure $ isNothing maybeReason
 
@@ -94,15 +90,15 @@ runBCTest x =
 
 debugContract :: ByteString -> IO ()
 debugContract c = withSolvers CVC5 4 Nothing $ \solvers -> do
-  let prestate = abstractVM (mkCalldata Nothing []) c Nothing SymbolicS
+  let prestate = abstractVM (mkCalldata Nothing []) c Nothing AbstractStore
   void $ TTY.runFromVM solvers Nothing Nothing emptyDapp prestate
 
 findPanics :: Solver -> Natural -> Maybe Integer -> ByteString -> IO ()
 findPanics solver count iters c = do
-  (_, res) <- withSolvers solver count Nothing $ \s -> do
+  _ <- withSolvers solver count Nothing $ \s -> do
     let opts = defaultVeriOpts
           { maxIter = iters
-          , askSmtIters = (+ 1) <$> iters
+          , askSmtIters = (fromMaybe 0 iters) + 1
           }
     checkAssert s allPanicCodes c Nothing [] opts
   putStrLn "done"

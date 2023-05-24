@@ -14,6 +14,7 @@ import Brick.Widgets.List
 
 import EVM
 import EVM.ABI (decodeAbiValue, emptyAbi, abiTypeSolidity, AbiType(..))
+import EVM.Exec
 import EVM.SymExec (maxIterationsReached, symCalldata)
 import EVM.Expr (simplify)
 import EVM.Dapp (DappInfo(..), emptyDapp, dappInfo, Test, extractSig, Test(..), srcMap, unitTestMethods)
@@ -28,8 +29,6 @@ import EVM.Op
 import EVM.Solidity hiding (storageLayout)
 import EVM.Types hiding (padRight, Max)
 import EVM.UnitTest
-import EVM.Stepper (Stepper)
-import EVM.Stepper qualified as Stepper
 import EVM.StorageLayout
 import EVM.TTYCenteredList qualified as Centered
 
@@ -37,7 +36,6 @@ import Optics.Core
 import Optics.State
 import Optics.TH
 
-import Control.Monad.Operational qualified as Operational
 import Control.Monad.State.Strict hiding (state)
 import Data.Aeson.Optics
 import Data.ByteString (ByteString)
@@ -71,11 +69,12 @@ data Name
 
 type UiWidget = Widget Name
 
+type Calls = [(Expr Buf, [Prop])]
+
 data UiVmState = UiVmState
   { vm         :: VM
   , step       :: Int
-  , snapshots  :: Map Int (VM, Stepper ())
-  , stepper    :: Stepper ()
+  , snapshots  :: Map Int VM
   , showMemory :: Bool
   , testOpts   :: UnitTestOptions
   }
@@ -112,112 +111,151 @@ data StepMode
   = Step !Int                  -- ^ Run a specific number of steps
   | StepUntil (Pred VM)        -- ^ Finish when a VM predicate holds
 
--- | Each step command in the terminal should finish immediately
--- with one of these outcomes.
-data Continuation a
-     = Stopped a              -- ^ Program finished
-     | Continue (Stepper a)   -- ^ Took one step; more steps to go
+-- -- -- | This turns a @Stepper@ into a state action usable
+-- -- -- from within the TTY loop, yielding a @StepOutcome@ depending on the @StepMode@.
+-- -- interpretOld
+-- --   :: (?fetcher :: Fetcher
+-- --   ,   ?maxIter :: Maybe Integer)
+-- --   => StepMode
+-- --   -> Stepper a
+-- --   -> StateT UiVmState IO (Continuation a)
+-- -- interpretOld mode =
 
+-- --   -- Like the similar interpreters in @EVM.UnitTest@ and @EVM.VMTest@,
+-- --   -- this one is implemented as an "operational monad interpreter".
 
--- | This turns a @Stepper@ into a state action usable
--- from within the TTY loop, yielding a @StepOutcome@ depending on the @StepMode@.
+-- --   eval . Operational.view
+-- --   where
+-- --     eval
+-- --       :: Operational.ProgramView Stepper.Action a
+-- --       -> StateT UiVmState IO (Continuation a)
+
+-- --     eval (Operational.Return x) =
+-- --       pure (Stopped x)
+
+-- --     eval (action Operational.:>>= k) =
+-- --       case action of
+
+-- --         Stepper.Run -> do
+-- --           -- Have we reached the final result of this action?
+-- --           use (#vm % #result) >>= \case
+-- --             Just _ -> do
+-- --               -- Yes, proceed with the next action.
+-- --               vm <- use #vm
+-- --               interpret mode (k vm)
+-- --             Nothing -> do
+-- --               -- No, keep performing the current action
+-- --               keepExecuting mode (Stepper.run >>= k)
+
+-- --         -- Stepper wants to keep executing?
+-- --         Stepper.Exec -> do
+-- --           -- Have we reached the final result of this action?
+-- --           use (#vm % #result) >>= \case
+-- --             Just r ->
+-- --               -- Yes, proceed with the next action.
+-- --               interpret mode (k r)
+-- --             Nothing -> do
+-- --               -- No, keep performing the current action
+-- --               keepExecuting mode (Stepper.exec >>= k)
+
+-- --         -- Stepper is waiting for user input from a query
+-- --         Stepper.Ask (PleaseChoosePath _ cont) -> do
+-- --           -- ensure we aren't stepping past max iterations
+-- --           vm <- use #vm
+-- --           case maxIterationsReached vm ?maxIter of
+-- --             Nothing -> pure $ Continue (k ())
+-- --             Just n -> interpret mode (Stepper.evm (cont (not n)) >>= k)
+
+-- --         -- Stepper wants to make a query and wait for the results?
+-- --         Stepper.Wait (PleaseAskSMT (Lit c) _ continue) ->
+-- --           interpret mode (Stepper.evm (continue (Case (c > 0))) >>= k)
+-- --         Stepper.Wait q -> do
+-- --           do m <- liftIO (?fetcher q)
+-- --              interpret mode (Stepper.evm m >>= k)
+
+-- --         -- Stepper wants to make a query and wait for the results?
+-- --         Stepper.IOAct q -> do
+-- --           Brick.zoom (toLensVL #vm) (StateT (runStateT q)) >>= interpret mode . k
+
+-- --         -- Stepper wants to modify the VM.
+-- --         Stepper.EVM m -> do
+-- --           vm <- use #vm
+-- --           let (r, vm1) = runState m vm
+-- --           assign #vm vm1
+-- --           interpret mode (Stepper.exec >> (k r))
+
+-- | Yields a @StepOutcome@ depending on the @StepMode@.
 interpret
   :: (?fetcher :: Fetcher
   ,   ?maxIter :: Maybe Integer)
   => StepMode
-  -> Stepper a
-  -> StateT UiVmState IO (Continuation a)
+  -> StateT UiVmState IO ()
 interpret mode =
+  -- Have we reached the final result of this action?
+  use (#vm % #result) >>= \case
+    Just (HandleEffect (Query (PleaseAskSMT (Lit c) _ cont))) -> do
+      liftPure $ modifying #vm (execState $ cont (Case (c > 0)))
+      interpret mode
+    Just (HandleEffect (Query q)) -> do
+      m <- liftIO $ ?fetcher q
+      liftPure $ modifying #vm $ execState m
+      interpret mode
+    --  waiting for user input from a query
+    Just (HandleEffect (Choose (PleaseChoosePath _ cont))) -> do
+      -- ensure we aren't stepping past max iterations
+      vm <- use #vm
+      case maxIterationsReached vm ?maxIter of
+        Nothing -> pure ()
+        Just n -> do
+          liftPure $ modifying #vm (execState $ cont (not n))
+          interpret mode
 
-  -- Like the similar interpreters in @EVM.UnitTest@ and @EVM.VMTest@,
-  -- this one is implemented as an "operational monad interpreter".
+    Just _ ->
+      -- are there more calls to do?
+      pure ()
 
-  eval . Operational.view
-  where
-    eval
-      :: Operational.ProgramView Stepper.Action a
-      -> StateT UiVmState IO (Continuation a)
 
-    eval (Operational.Return x) =
-      pure (Stopped x)
+    Nothing -> do
+      -- No, keep performing the current action
+      case mode of
+       Step 0 -> pure ()
+       Step i -> do
+         stepOneOpcode
+         interpret (Step (i - 1))
+       StepUntil p -> do
+         vm <- use #vm
+         if p vm
+         then pure ()
+         else do
+           stepOneOpcode
+           interpret (StepUntil p)
 
-    eval (action Operational.:>>= k) =
-      case action of
 
-        Stepper.Run -> do
-          -- Have we reached the final result of this action?
-          use (#vm % #result) >>= \case
-            Just _ -> do
-              -- Yes, proceed with the next action.
-              vm <- use #vm
-              interpret mode (k vm)
-            Nothing -> do
-              -- No, keep performing the current action
-              keepExecuting mode (Stepper.run >>= k)
+-- keepExecuting :: (?maxIter :: Maybe Integer)
+--               => StepMode
+--               -> Stepper a
+--               -> StateT UiVmState IO (Continuation a)
+-- keepExecuting mode restart = case mode of
+--   Step 0 -> do
+--     -- We come here when we've continued while stepping,
+--     -- either from a query or from a return;
+--     -- we should pause here and wait for the user.
+--     pure (Continue restart)
 
-        -- Stepper wants to keep executing?
-        Stepper.Exec -> do
-          -- Have we reached the final result of this action?
-          use (#vm % #result) >>= \case
-            Just r ->
-              -- Yes, proceed with the next action.
-              interpret mode (k r)
-            Nothing -> do
-              -- No, keep performing the current action
-              keepExecuting mode (Stepper.exec >>= k)
+--   Step i -> do
+--     -- Run one instruction and recurse
+--     stepOneOpcode restart
+--     interpret (Step (i - 1)) restart
 
-        -- Stepper is waiting for user input from a query
-        Stepper.Ask (PleaseChoosePath _ cont) -> do
-          -- ensure we aren't stepping past max iterations
-          vm <- use #vm
-          case maxIterationsReached vm ?maxIter of
-            Nothing -> pure $ Continue (k ())
-            Just n -> interpret mode (Stepper.evm (cont (not n)) >>= k)
-
-        -- Stepper wants to make a query and wait for the results?
-        Stepper.Wait (PleaseAskSMT (Lit c) _ continue) ->
-          interpret mode (Stepper.evm (continue (Case (c > 0))) >>= k)
-        Stepper.Wait q -> do
-          do m <- liftIO (?fetcher q)
-             interpret mode (Stepper.evm m >>= k)
-
-        -- Stepper wants to make a query and wait for the results?
-        Stepper.IOAct q -> do
-          Brick.zoom (toLensVL #vm) (StateT (runStateT q)) >>= interpret mode . k
-
-        -- Stepper wants to modify the VM.
-        Stepper.EVM m -> do
-          vm <- use #vm
-          let (r, vm1) = runState m vm
-          assign #vm vm1
-          interpret mode (Stepper.exec >> (k r))
-
-keepExecuting :: (?fetcher :: Fetcher
-              ,   ?maxIter :: Maybe Integer)
-              => StepMode
-              -> Stepper a
-              -> StateT UiVmState IO (Continuation a)
-keepExecuting mode restart = case mode of
-  Step 0 -> do
-    -- We come here when we've continued while stepping,
-    -- either from a query or from a return;
-    -- we should pause here and wait for the user.
-    pure (Continue restart)
-
-  Step i -> do
-    -- Run one instruction and recurse
-    stepOneOpcode restart
-    interpret (Step (i - 1)) restart
-
-  StepUntil p -> do
-    vm <- use #vm
-    if p vm
-      then
-        interpret (Step 0) restart
-      else do
-        -- Run one instruction and recurse
-        stepOneOpcode restart
-        interpret (StepUntil p) restart
+--   StepUntil p -> do
+--     vm <- use #vm
+--     if p vm
+--       then
+--         interpret (Step 0) restart
+--       else do
+--         -- Run one instruction and recurse
+--         stepOneOpcode restart
+--         interpret (StepUntil p) restart
 
 isUnitTestContract :: Text -> DappInfo -> Bool
 isUnitTestContract name dapp =
@@ -252,7 +290,7 @@ runFromVM solvers rpcInfo maxIter' dappinfo vm = do
       , ffiAllowed    = False
       , covMatch       = Nothing
       }
-    ui0 = initUiVmState vm opts (void Stepper.execFully)
+    ui0 = initUiVmState vm opts -- (embed $ runWithHandlerT (Fetch.oracle solvers rpcInfo))
 
   v <- mkVty
   ui2 <- customMain v mkVty Nothing (app opts) (ViewVm ui0)
@@ -261,13 +299,12 @@ runFromVM solvers rpcInfo maxIter' dappinfo vm = do
     _ -> error "internal error: customMain returned prematurely"
 
 
-initUiVmState :: VM -> UnitTestOptions -> Stepper () -> UiVmState
-initUiVmState vm0 opts script =
+initUiVmState :: VM -> UnitTestOptions -> UiVmState
+initUiVmState vm0 opts =
   UiVmState
     { vm           = vm0
-    , stepper      = script
     , step         = 0
-    , snapshots    = singleton 0 (vm0, script)
+    , snapshots    = insert 0 vm0 mempty
     , showMemory   = False
     , testOpts     = opts
     }
@@ -312,16 +349,14 @@ takeStep
   => UiVmState
   -> StepMode
   -> EventM n UiState ()
-takeStep ui mode =
-  liftIO nxt >>= \case
-    (Stopped (), _) ->
-      pure ()
-    (Continue steps, ui') ->
-      put (ViewVm (ui' & set #stepper steps))
+takeStep ui mode = do
+  ui' <- liftIO nxt
+  put $ ViewVm ui'
   where
-    m = interpret mode ui.stepper
-    nxt = runStateT m ui
+    m = interpret mode
+    nxt = execStateT m ui
 
+  
 backstepUntil
   :: (?fetcher :: Fetcher
      ,?maxIter :: Maybe Integer)
@@ -334,26 +369,24 @@ backstepUntil p = get >>= \case
         s1 <- liftIO $ backstep s
         let
           -- find a previous vm that satisfies the predicate
-          snapshots' = Data.Map.filter (p s1 . fst) s1.snapshots
+          snapshots' = Data.Map.filter (p s1) s1.snapshots
         case lookupLT n snapshots' of
           -- If no such vm exists, go to the beginning
           Nothing ->
             let
-              (step', (vm', stepper')) = fromJust $ lookupLT (n - 1) s.snapshots
+              (step', vm') = fromJust $ lookupLT (n - 1) s.snapshots
               s2 = s1
                 & set #vm vm'
                 & set (#vm % #cache) s1.vm.cache
                 & set #step step'
-                & set #stepper stepper'
             in takeStep s2 (Step 0)
           -- step until the predicate doesn't hold
-          Just (step', (vm', stepper')) ->
+          Just (step', vm') ->
             let
               s2 = s1
                 & set #vm vm'
                 & set (#vm % #cache) s1.vm.cache
                 & set #step step'
-                & set #stepper stepper'
             in takeStep s2 (StepUntil (not . p s1))
   _ -> pure ()
 
@@ -372,18 +405,15 @@ backstep s =
     -- any blocking queries, and also the memory view.
     n ->
       let
-        (step, (vm, stepper)) = fromJust $ lookupLT n s.snapshots
+        (step', vm) = fromJust $ lookupLT n s.snapshots
         s1 = s
           & set #vm vm
           & set (#vm % #cache) s.vm.cache
-          & set #step step
-          & set #stepper stepper
-        stepsToTake = n - step - 1
+          & set #step step'
+        stepsToTake = n - step' - 1
 
       in
-        runStateT (interpret (Step stepsToTake) stepper) s1 >>= \case
-          (Continue steps, ui') -> pure $ ui' & set #stepper steps
-          _ -> error "unexpected end"
+        execStateT (interpret (Step stepsToTake)) s1
 
 appEvent
   :: (?fetcher::Fetcher, ?maxIter :: Maybe Integer) =>
@@ -518,12 +548,11 @@ appEvent (VtyEvent (V.EvKey (V.KChar 'a') [])) = get >>= \case
     -- We keep the current cache so we don't have to redo
     -- any blocking queries.
     let
-      (vm, stepper) = fromJust (Map.lookup 0 s.snapshots)
+      vm = fromJust (Map.lookup 0 s.snapshots)
       s' = s
         & set #vm vm
         & set (#vm % #cache) s.vm.cache
         & set #step 0
-        & set #stepper stepper
 
     in takeStep s' (Step 0)
   _ -> pure ()
@@ -542,12 +571,11 @@ appEvent (VtyEvent (V.EvKey (V.KChar 'p') [])) = get >>= \case
         -- We keep the current cache so we don't have to redo
         -- any blocking queries, and also the memory view.
         let
-          (step, (vm, stepper)) = fromJust $ lookupLT n s.snapshots
+          (step, vm) = fromJust $ lookupLT n s.snapshots
           s1 = s
             & set #vm vm -- set the vm to the one from the snapshot
             & set (#vm % #cache) s.vm.cache -- persist the cache
             & set #step step
-            & set #stepper stepper
           stepsToTake = n - step - 1
 
         takeStep s1 (Step stepsToTake)
@@ -564,10 +592,11 @@ appEvent (VtyEvent (V.EvKey (V.KChar 'p') [V.MCtrl])) =
 -- Vm Overview: 0 - choose no jump
 appEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = get >>= \case
   ViewVm s ->
-    case view (#vm % #result) s of
-      Just (HandleEffect (Choose (PleaseChoosePath _ contin))) ->
-        takeStep (s & set #stepper (Stepper.evm (contin True) >> s.stepper))
-          (Step 1)
+    case s.vm.result of
+      Just (HandleEffect (Choose (PleaseChoosePath _ contin))) -> do
+        let vm0 = execState (contin True) s.vm
+        takeStep (s & set #vm vm0) (Step 1)
+
       _ -> pure ()
   _ -> pure ()
 
@@ -575,9 +604,11 @@ appEvent (VtyEvent (V.EvKey (V.KChar '0') [])) = get >>= \case
 appEvent (VtyEvent (V.EvKey (V.KChar '1') [])) = get >>= \case
   ViewVm s ->
     case s.vm.result of
-      Just (HandleEffect (Choose (PleaseChoosePath _ contin))) ->
-        takeStep (s & set #stepper (Stepper.evm (contin False) >> s.stepper))
-          (Step 1)
+      Just (HandleEffect (Choose (PleaseChoosePath _ contin))) -> do
+        -- somehow not able to do this with `modifying #vm`...
+        let vm0 = execState (contin False) s.vm
+        takeStep (s & set #vm vm0) (Step 1)
+
       _ -> pure ()
   _ -> pure ()
 
@@ -609,11 +640,15 @@ app UnitTestOptions{..} =
   , appAttrMap = const (attrMap V.defAttr myTheme)
   }
 
+embed :: StateT VM IO a -> StateT UiVmState IO a
+embed a = error "oh no"
+
 initialUiVmStateForTest
   :: UnitTestOptions
   -> (Text, Text)
   -> UiVmState
-initialUiVmStateForTest opts@UnitTestOptions{..} (theContractName, theTestName) = initUiVmState vm0 opts script
+initialUiVmStateForTest opts@UnitTestOptions{..} (theContractName, theTestName) =
+  initUiVmState vm0 opts
   where
     cd = case test of
       SymbolicTest _ -> symCalldata theTestName types [] (AbstractBuf "txdata")
@@ -622,30 +657,29 @@ initialUiVmStateForTest opts@UnitTestOptions{..} (theContractName, theTestName) 
     testContract = fromJust $ Map.lookup theContractName dapp.solcByName
     vm0 =
       initialUnitTestVm opts testContract
-    script = do
-      Stepper.evm . pushTrace . EntryTrace $
-        "test " <> theTestName <> " (" <> theContractName <> ")"
-      initializeUnitTest opts testContract
-      case test of
-        ConcreteTest _ -> do
-          let args = case replay of
-                       Nothing -> emptyAbi
-                       Just (sig, callData) ->
-                         if theTestName == sig
-                         then decodeAbiValue (AbiTupleType (Vec.fromList types)) callData
-                         else emptyAbi
-          void (runUnitTest opts theTestName args)
-        SymbolicTest _ -> do
-          void (execSymTest opts theTestName cd)
-        InvariantTest _ -> do
-          targets <- getTargetContracts opts
-          let randomRun = initialExplorationStepper opts theTestName [] targets (fromMaybe 20 maxDepth)
-          void $ case replay of
-            Nothing -> randomRun
-            Just (sig, cd') ->
-              if theTestName == sig
-              then initialExplorationStepper opts theTestName (decodeCalls cd') targets (length (decodeCalls cd'))
-              else randomRun
+  --   script = embed $ do
+  --     initializeUnitTest opts testContract
+  --     case test of
+  --       ConcreteTest _ -> do
+  --         let args = case replay of
+  --                      Nothing -> emptyAbi
+  --                      Just (sig, callData) ->
+  --                        if theTestName == sig
+  --                        then decodeAbiValue (AbiTupleType (Vec.fromList types)) callData
+  --                        else emptyAbi
+  --         error "todo" --void (runUnitTest opts theTestName args)
+  --       _ -> error "todo"
+        -- SymbolicTest _ -> do
+        --   void (execSymTest opts theTestName cd)
+        -- InvariantTest _ -> do
+        --   targets <- getTargetContracts opts
+        --   let randomRun = initialExplorationStepper opts theTestName [] targets (fromMaybe 20 maxDepth)
+        --   void $ case replay of
+        --     Nothing -> randomRun
+        --     Just (sig, cd') ->
+        --       if theTestName == sig
+        --       then initialExplorationStepper opts theTestName (decodeCalls cd') targets (length (decodeCalls cd'))
+        --       else randomRun
 
 myTheme :: [(AttrName, V.Attr)]
 myTheme =
@@ -802,12 +836,12 @@ drawHelpBar = hBorder <=> hCenter help
       , ("h", "more help")
       ]
 
-stepOneOpcode :: Stepper a -> StateT UiVmState IO ()
-stepOneOpcode restart = do
+stepOneOpcode :: StateT UiVmState IO ()
+stepOneOpcode = do
   n <- use #step
   when (n > 0 && n `mod` snapshotInterval == 0) $ do
     vm <- use #vm
-    modifying #snapshots (insert n (vm, void restart))
+    modifying #snapshots (insert n vm)
   modifying #vm (execState exec1)
   modifying #step (+ 1)
 

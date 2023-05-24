@@ -103,7 +103,6 @@ library
     EVM.Precompiled,
     EVM.RLP,
     EVM.Solidity,
-    EVM.Stepper,
     EVM.StorageLayout,
     EVM.SymExec,
     EVM.Traversals,
@@ -299,7 +298,7 @@ library test-utils
     test-base
   exposed-modules:
     EVM.Test.Utils
-    EVM.Test.Tracing
+--    EVM.Test.Tracing
     EVM.Test.BlockchainTests
   if os(windows)
     buildable: False
@@ -313,7 +312,7 @@ common test-common
     test-utils
   other-modules:
     EVM.Test.Utils
-    EVM.Test.Tracing
+--    EVM.Test.Tracing
     EVM.Test.BlockchainTests
   if os(windows)
     buildable: False

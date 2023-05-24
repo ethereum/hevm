@@ -219,6 +219,8 @@ exec1 = do
                   out <- use (#state % #returndata)
                   finishFrame (FrameReturned out)
               e -> partial $
+
+
                      UnexpectedSymbolicArg vmx.state.pc "precompile returned a symbolic value" (wrap [e])
             _ ->
               underrun

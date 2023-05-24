@@ -9,8 +9,9 @@ import EVM.Concrete (createAddress)
 import EVM (initialContract, makeVm)
 import qualified EVM.FeeSchedule as FeeSchedule
 import qualified EVM.Fetch
-import qualified EVM.Stepper
+--import qualified EVM.Stepper
 
+import EVM.Exec
 import EVM.SymExec
 import EVM.Debug
 import qualified EVM.Expr as Expr
@@ -20,7 +21,8 @@ import EVM.Solidity
 import EVM.Expr (litAddr)
 import EVM.Types hiding (word)
 import EVM.Format (hexByteString, strip0x)
-import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, getParametersFromEnvironmentVariables, unitTest)
+--import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, getParametersFromEnvironmentVariables, unitTest)
+import EVM.UnitTest (UnitTestOptions, getParametersFromEnvironmentVariables, unitTest)
 import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
 import GHC.Natural
 import EVM.Format (showTraceTree, formatExpr)
@@ -151,7 +153,7 @@ data Command w
       , projectType :: w ::: Maybe ProjectType <?> "Is this a Foundry or DappTools project (default: Foundry)"
       }
   | Test -- Run DSTest unit tests
-      { root        :: w ::: Maybe String               <?> "Path to  project root directory (default: . )"
+      { root          :: w ::: Maybe String             <?> "Path to  project root directory (default: . )"
       , projectType   :: w ::: Maybe ProjectType        <?> "Is this a Foundry or DappTools project (default: Foundry)"
       , debug         :: w ::: Bool                     <?> "Run interactively"
       , jsontrace     :: w ::: Bool                     <?> "Print json trace output at every step"
@@ -291,7 +293,7 @@ main = do
                   unless res exitFailure
                 (False, Debug) -> liftIO $ TTY.main testOpts root (Just out)
                 (False, JsonTrace) -> error "json traces not implemented for dappTest"
-                (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) out
+--                (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) out
 
 
 equivalence :: Command Options.Unwrapped -> IO ()
@@ -445,29 +447,29 @@ getTimeout :: ProofResult a b c -> Maybe c
 getTimeout (Timeout c) = Just c
 getTimeout _ = Nothing
 
-dappCoverage :: UnitTestOptions -> Mode -> BuildOutput -> IO ()
-dappCoverage opts _ bo@(BuildOutput (Contracts cs) cache) = do
-  let unitTests = findUnitTests opts.match $ Map.elems cs
-  covs <- mconcat <$> mapM
-    (coverageForUnitTestContract opts cs cache) unitTests
-  let
-    dapp = dappInfo "." bo
-    f (k, vs) = do
-      when (shouldPrintCoverage opts.covMatch (T.pack k)) $ do
-        putStr ("\x1b[0m" ++ "————— hevm coverage for ") -- Prefixed with color reset
-        putStrLn (k ++ " —————")
-        putStrLn ""
-        forM_ vs $ \(n, bs) -> do
-          case ByteString.find (\x -> x /= 0x9 && x /= 0x20 && x /= 0x7d) bs of
-            Nothing -> putStr "\x1b[38;5;240m" -- Gray (Coverage status isn't relevant)
-            Just _ ->
-              case n of
-                -1 -> putStr "\x1b[38;5;240m" -- Gray (Coverage status isn't relevant)
-                0  -> putStr "\x1b[31m" -- Red (Uncovered)
-                _  -> putStr "\x1b[32m" -- Green (Covered)
-          Char8.putStrLn bs
-        putStrLn ""
-  mapM_ f (Map.toList (coverageReport dapp covs))
+-- dappCoverage :: UnitTestOptions -> Mode -> BuildOutput -> IO ()
+-- dappCoverage opts _ bo@(BuildOutput (Contracts cs) cache) = do
+--   let unitTests = findUnitTests opts.match $ Map.elems cs
+--   covs <- mconcat <$> mapM
+--     (coverageForUnitTestContract opts cs cache) unitTests
+--   let
+--     dapp = dappInfo "." bo
+--     f (k, vs) = do
+--       when (shouldPrintCoverage opts.covMatch (T.pack k)) $ do
+--         putStr ("\x1b[0m" ++ "————— hevm coverage for ") -- Prefixed with color reset
+--         putStrLn (k ++ " —————")
+--         putStrLn ""
+--         forM_ vs $ \(n, bs) -> do
+--           case ByteString.find (\x -> x /= 0x9 && x /= 0x20 && x /= 0x7d) bs of
+--             Nothing -> putStr "\x1b[38;5;240m" -- Gray (Coverage status isn't relevant)
+--             Just _ ->
+--               case n of
+--                 -1 -> putStr "\x1b[38;5;240m" -- Gray (Coverage status isn't relevant)
+--                 0  -> putStr "\x1b[31m" -- Red (Uncovered)
+--                 _  -> putStr "\x1b[32m" -- Green (Covered)
+--           Char8.putStrLn bs
+--         putStrLn ""
+--   mapM_ f (Map.toList (coverageReport dapp covs))
 
 shouldPrintCoverage :: Maybe Text -> Text -> Bool
 shouldPrintCoverage (Just covMatch) file = regexMatches covMatch file
@@ -487,7 +489,7 @@ launchExec cmd = do
   withSolvers Z3 0 Nothing $ \solvers -> do
     case optsMode cmd of
       Run -> do
-        vm' <- EVM.Stepper.interpret (EVM.Fetch.oracle solvers rpcinfo) vm EVM.Stepper.runFully
+        vm' <- runWithHandler (EVM.Fetch.oracle solvers rpcinfo) vm
         when cmd.trace $ T.hPutStr stderr (showTraceTree dapp vm')
         case vm'.result of
           Just (VMFailure (Revert msg)) -> do

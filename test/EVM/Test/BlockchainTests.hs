@@ -4,12 +4,12 @@ import Prelude hiding (Word)
 
 import EVM (initialContract, makeVm)
 import EVM.Concrete qualified as EVM
+import EVM.Exec
 import EVM.Dapp (emptyDapp)
 import EVM.Expr (litAddr)
 import EVM.FeeSchedule qualified
 import EVM.Fetch qualified
 import EVM.Format (hexText)
-import EVM.Stepper qualified
 import EVM.Solvers (withSolvers, Solver(Z3))
 import EVM.Transaction
 import EVM.TTY qualified as TTY
@@ -132,7 +132,7 @@ ciProblematicTests = Map.fromList
 runVMTest :: Bool -> (String, Case) -> IO ()
 runVMTest diffmode (_name, x) = do
   let vm0 = vmForCase x
-  result <- EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) vm0 EVM.Stepper.runFully
+  result <- runWithHandler (EVM.Fetch.zero 0 (Just 0)) vm0
   maybeReason <- checkExpectation diffmode x result
   forM_ maybeReason assertFailure
 

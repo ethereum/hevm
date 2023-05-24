@@ -17,9 +17,6 @@ import qualified EVM.SMT as SMT
 import EVM.Solvers
 import EVM.Traversals
 import qualified EVM.Expr as Expr
-import EVM.Stepper (Stepper)
-import qualified EVM.Stepper as Stepper
-import qualified Control.Monad.Operational as Operational
 import Control.Monad.State.Strict hiding (state)
 import EVM.Types
 import EVM.Concrete (createAddress)
@@ -241,6 +238,91 @@ loadSymVM x initStore addr callvalue' cd =
     }) & set (#env % #contracts % at (createAddress ethrunAddress 1))
              (Just (initialContract x))
 
+-- -- | Interpreter which explores all paths at branching points. Returns an
+-- -- 'Expr End' representing the possible executions.
+-- interpretOld
+--   :: Fetch.Fetcher
+--   -> Maybe Integer -- max iterations
+--   -> Integer -- ask smt iterations
+--   -> LoopHeuristic
+--   -> VM
+--   -> Stepper (Expr End)
+--   -> IO (Expr End)
+-- interpretOld fetcher maxIter askSmtIters heuristic vm =
+--   eval . Operational.view
+--   where
+--   eval
+--     :: Operational.ProgramView Stepper.Action (Expr End)
+--     -> IO (Expr End)
+
+--   eval (Operational.Return x) = pure x
+
+--   eval (action Operational.:>>= k) =
+--     case action of
+--       Stepper.Exec -> do
+--         let (r, vm') = runState exec vm
+--         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+--       Stepper.Run -> do
+--         let vm' = execState exec vm
+--         interpret fetcher maxIter askSmtIters heuristic vm' (k vm')
+--       Stepper.IOAct q -> do
+--         (r, vm') <- runStateT q vm
+--         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+--       Stepper.Ask (PleaseChoosePath cond continue) -> do
+--         (a, b) <- concurrently
+--           (let (ra, vma) = runState (continue True) vm { result = Nothing }
+--            in interpret fetcher maxIter askSmtIters heuristic vma (k ra))
+--           (let (rb, vmb) = runState (continue False) vm { result = Nothing }
+--            in interpret fetcher maxIter askSmtIters heuristic vmb (k rb))
+
+--         pure $ ITE cond a b
+--       Stepper.Wait q -> do
+--         let performQuery = do
+--               m <- liftIO (fetcher q)
+--               let (r, vm') = runState m vm
+--               interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+
+--         case q of
+--           PleaseAskSMT cond _ continue -> do
+--             case cond of
+--               -- is the condition concrete?
+--               Lit c ->
+--                 -- have we reached max iterations, are we inside a loop?
+--                 case (maxIterationsReached vm maxIter, isLoopHead heuristic vm) of
+--                   -- Yes. return a partial leaf
+--                   (Just _, Just True) ->
+--                     pure $ Partial vm.keccakEqs $ MaxIterationsReached vm.state.pc vm.state.contract
+--                   -- No. keep executing
+--                   _ ->
+--                     let (r, vm') = runState (continue (Case (c > 0))) vm
+--                     in interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+
+--               -- the condition is symbolic
+--               _ ->
+--                 -- are in we a loop, have we hit maxIters, have we hit askSmtIters?
+--                 case (isLoopHead heuristic vm, askSmtItersReached vm askSmtIters, maxIterationsReached vm maxIter) of
+--                   -- we're in a loop and maxIters has been reached
+--                   (Just True, _, Just n) -> do
+--                     -- continue execution down the opposite branch than the one that
+--                     -- got us to this point and return a partial leaf for the other side
+--                     let (r, vm') = runState (continue (Case $ not n)) vm
+--                     a <- interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+--                     pure $ ITE cond a (Partial vm.keccakEqs (MaxIterationsReached vm.state.pc vm.state.contract))
+--                   -- we're in a loop and askSmtIters has been reached
+--                   (Just True, True, _) ->
+--                     -- ask the smt solver about the loop condition
+--                     performQuery
+--                   -- otherwise just try both branches and don't ask the solver
+--                   _ ->
+--                     let (r, vm') = runState (continue EVM.Types.Unknown) vm
+--                     in interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+
+--           _ -> performQuery
+
+--       Stepper.EVM m -> do
+--         let (r, vm') = runState m vm
+--         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+
 -- | Interpreter which explores all paths at branching points. Returns an
 -- 'Expr End' representing the possible executions.
 interpret
@@ -249,82 +331,64 @@ interpret
   -> Integer -- ask smt iterations
   -> LoopHeuristic
   -> VM
-  -> Stepper (Expr End)
   -> IO (Expr End)
 interpret fetcher maxIter askSmtIters heuristic vm =
-  eval . Operational.view
-  where
-  eval
-    :: Operational.ProgramView Stepper.Action (Expr End)
-    -> IO (Expr End)
-
-  eval (Operational.Return x) = pure x
-
-  eval (action Operational.:>>= k) =
-    case action of
-      Stepper.Exec -> do
-        let (r, vm') = runState exec vm
-        interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-      Stepper.Run -> do
-        let vm' = execState exec vm
-        interpret fetcher maxIter askSmtIters heuristic vm' (k vm')
-      Stepper.IOAct q -> do
-        (r, vm') <- runStateT q vm
-        interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-      Stepper.Ask (PleaseChoosePath cond continue) -> do
-        (a, b) <- concurrently
-          (let (ra, vma) = runState (continue True) vm { result = Nothing }
-           in interpret fetcher maxIter askSmtIters heuristic vma (k ra))
-          (let (rb, vmb) = runState (continue False) vm { result = Nothing }
-           in interpret fetcher maxIter askSmtIters heuristic vmb (k rb))
-
-        pure $ ITE cond a b
-      Stepper.Wait q -> do
+  let (r, vm') = runState exec vm
+      asserts = vm'.keccakEqs
+  in case r of
+    VMFailure e -> pure $ Failure asserts e
+    VMSuccess buf -> pure $ Success asserts buf vm'.env.storage
+    Unfinished p -> pure $ Partial asserts p
+    HandleEffect (Choose (PleaseChoosePath cond continue)) -> do
+      (a, b) <- concurrently
+        (let vma = execState (continue True) vm' { result = Nothing }
+          in interpret fetcher maxIter askSmtIters heuristic vma)
+        (let vmb = execState (continue False) vm' { result = Nothing }
+          in interpret fetcher maxIter askSmtIters heuristic vmb)
+      pure $ ITE cond a b
+    HandleEffect (Query q) ->
         let performQuery = do
               m <- liftIO (fetcher q)
-              let (r, vm') = runState m vm
-              interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+              let vm'' = execState m vm'
+              interpret fetcher maxIter askSmtIters heuristic vm''
 
-        case q of
+        in case q of
           PleaseAskSMT cond _ continue -> do
             case cond of
               -- is the condition concrete?
               Lit c ->
                 -- have we reached max iterations, are we inside a loop?
-                case (maxIterationsReached vm maxIter, isLoopHead heuristic vm) of
+                case (maxIterationsReached vm' maxIter, isLoopHead heuristic vm') of
                   -- Yes. return a partial leaf
                   (Just _, Just True) ->
-                    pure $ Partial vm.keccakEqs $ MaxIterationsReached vm.state.pc vm.state.contract
+                    pure $ Partial vm'.keccakEqs $ MaxIterationsReached vm.state.pc vm.state.contract
                   -- No. keep executing
                   _ ->
-                    let (r, vm') = runState (continue (Case (c > 0))) vm
-                    in interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+                    let vm'' = execState (continue (Case (c > 0))) vm'
+                    in interpret fetcher maxIter askSmtIters heuristic vm''
 
               -- the condition is symbolic
               _ ->
                 -- are in we a loop, have we hit maxIters, have we hit askSmtIters?
-                case (isLoopHead heuristic vm, askSmtItersReached vm askSmtIters, maxIterationsReached vm maxIter) of
+                case (isLoopHead heuristic vm', askSmtItersReached vm' askSmtIters, maxIterationsReached vm' maxIter) of
                   -- we're in a loop and maxIters has been reached
                   (Just True, _, Just n) -> do
                     -- continue execution down the opposite branch than the one that
                     -- got us to this point and return a partial leaf for the other side
-                    let (r, vm') = runState (continue (Case $ not n)) vm
-                    a <- interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-                    pure $ ITE cond a (Partial vm.keccakEqs (MaxIterationsReached vm.state.pc vm.state.contract))
+                    let vm'' = execState (continue (Case $ not n)) vm'
+                    a <- interpret fetcher maxIter askSmtIters heuristic vm''
+                    pure $ ITE cond a (Partial vm''.keccakEqs (MaxIterationsReached vm''.state.pc vm''.state.contract))
                   -- we're in a loop and askSmtIters has been reached
                   (Just True, True, _) ->
                     -- ask the smt solver about the loop condition
                     performQuery
                   -- otherwise just try both branches and don't ask the solver
                   _ ->
-                    let (r, vm') = runState (continue EVM.Types.Unknown) vm
-                    in interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+                    let vm'' = execState (continue EVM.Types.Unknown) vm'
+                    in interpret fetcher maxIter askSmtIters heuristic vm''
 
           _ -> performQuery
 
-      Stepper.EVM m -> do
-        let (r, vm') = runState m vm
-        interpret fetcher maxIter askSmtIters heuristic vm' (k r)
 
 maxIterationsReached :: VM -> Maybe Integer -> Maybe Bool
 maxIterationsReached _ Nothing = Nothing
@@ -438,16 +502,16 @@ verifyContract solvers theCode signature' concreteArgs opts initStore maybepre m
   let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre initStore
   in verify solvers opts preState maybepost
 
--- | Stepper that parses the result of Stepper.runFully into an Expr End
-runExpr :: Stepper.Stepper (Expr End)
-runExpr = do
-  vm <- Stepper.runFully
-  let asserts = vm.keccakEqs
-  pure $ case vm.result of
-    Just (VMSuccess buf) -> Success asserts buf vm.env.storage
-    Just (VMFailure e) -> Failure asserts e
-    Just (Unfinished p) -> Partial asserts p
-    _ -> error "Internal Error: vm in intermediate state after call to runFully"
+-- -- | Stepper that parses the result of Stepper.runFully into an Expr End
+-- runExpr :: Stepper.Stepper (Expr End)
+-- runExpr = do
+--   vm <- Stepper.runFully
+--   let asserts = vm.keccakEqs
+--   pure $ case vm.result of
+--     Just (VMSuccess buf) -> Success asserts buf vm.env.storage
+--     Just (VMFailure e) -> Failure asserts e
+--     Just (Unfinished p) -> Partial asserts p
+--     _ -> error "Internal Error: vm in intermediate state after call to runFully"
 
 -- | Converts a given top level expr into a list of final states and the
 -- associated path conditions for each state.
@@ -568,7 +632,7 @@ verify
 verify solvers opts preState maybepost = do
   putStrLn "Exploring contract"
 
-  exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
+  exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState
   when opts.debug $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
 
   putStrLn "Simplifying expression"
@@ -684,7 +748,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
       let
         bytecode = if BS.null bs then BS.pack [0] else bs
         prestate = abstractVM calldata' bytecode Nothing AbstractStore
-      expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
+      expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl
 
