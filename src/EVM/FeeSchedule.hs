@@ -35,6 +35,7 @@ data FeeSchedule n = FeeSchedule
   , g_logtopic :: n
   , g_sha3 :: n
   , g_sha3word :: n
+  , g_initcodeword :: n
   , g_copy :: n
   , g_blockhash :: n
   , g_extcodehash :: n
@@ -110,6 +111,7 @@ homestead = FeeSchedule
   , g_logtopic = 375
   , g_sha3 = 30
   , g_sha3word = 6
+  , g_initcodeword = 2
   , g_copy = 3
   , g_blockhash = 20
   , g_extcodehash = 400
@@ -173,8 +175,8 @@ istanbul = eip1108 . eip1884 . eip2028 . eip2200 $ metropolis
   -- <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2929.md>
 eip2929 :: EIP n
 eip2929 fees = fees
-  { g_sload = 100 
-  , g_sreset = 5000 - 2100 
+  { g_sload = 100
+  , g_sreset = 5000 - 2100
   , g_call = 2600
   , g_balance = 2600
   , g_extcode = 2600

@@ -104,29 +104,29 @@ ciIgnoredFiles = []
 
 commonProblematicTests :: Map String (TestTree -> TestTree)
 commonProblematicTests = Map.fromList
-  [ ("loopMul_d0g0v0_London", ignoreTestBecause "hevm is too slow")
-  , ("loopMul_d1g0v0_London", ignoreTestBecause "hevm is too slow")
-  , ("loopMul_d2g0v0_London", ignoreTestBecause "hevm is too slow")
-  , ("CALLBlake2f_MaxRounds_d0g0v0_London", ignoreTestBecause "very slow, bypasses timeout due time spent in FFI")
+  [ ("loopMul_d0g0v0_Shanghai", ignoreTestBecause "hevm is too slow")
+  , ("loopMul_d1g0v0_Shanghai", ignoreTestBecause "hevm is too slow")
+  , ("loopMul_d2g0v0_Shanghai", ignoreTestBecause "hevm is too slow")
+  , ("CALLBlake2f_MaxRounds_d0g0v0_Shanghai", ignoreTestBecause "very slow, bypasses timeout due time spent in FFI")
   ]
 
 ciProblematicTests :: Map String (TestTree -> TestTree)
 ciProblematicTests = Map.fromList
-  [ ("Return50000_d0g1v0_London", ignoreTest)
-  , ("Return50000_2_d0g1v0_London", ignoreTest)
-  , ("randomStatetest177_d0g0v0_London", ignoreTest)
-  , ("static_Call50000_d0g0v0_London", ignoreTest)
-  , ("static_Call50000_d1g0v0_London", ignoreTest)
-  , ("static_Call50000bytesContract50_1_d1g0v0_London", ignoreTest)
-  , ("static_Call50000bytesContract50_2_d1g0v0_London", ignoreTest)
-  , ("static_Return50000_2_d0g0v0_London", ignoreTest)
-  , ("loopExp_d10g0v0_London", ignoreTest)
-  , ("loopExp_d11g0v0_London", ignoreTest)
-  , ("loopExp_d12g0v0_London", ignoreTest)
-  , ("loopExp_d13g0v0_London", ignoreTest)
-  , ("loopExp_d14g0v0_London", ignoreTest)
-  , ("loopExp_d8g0v0_London", ignoreTest)
-  , ("loopExp_d9g0v0_London", ignoreTest)
+  [ ("Return50000_d0g1v0_Shanghai", ignoreTest)
+  , ("Return50000_2_d0g1v0_Shanghai", ignoreTest)
+  , ("randomStatetest177_d0g0v0_Shanghai", ignoreTest)
+  , ("static_Call50000_d0g0v0_Shanghai", ignoreTest)
+  , ("static_Call50000_d1g0v0_Shanghai", ignoreTest)
+  , ("static_Call50000bytesContract50_1_d1g0v0_Shanghai", ignoreTest)
+  , ("static_Call50000bytesContract50_2_d1g0v0_Shanghai", ignoreTest)
+  , ("static_Return50000_2_d0g0v0_Shanghai", ignoreTest)
+  , ("loopExp_d10g0v0_Shanghai", ignoreTest)
+  , ("loopExp_d11g0v0_Shanghai", ignoreTest)
+  , ("loopExp_d12g0v0_Shanghai", ignoreTest)
+  , ("loopExp_d13g0v0_Shanghai", ignoreTest)
+  , ("loopExp_d14g0v0_Shanghai", ignoreTest)
+  , ("loopExp_d8g0v0_Shanghai", ignoreTest)
+  , ("loopExp_d9g0v0_Shanghai", ignoreTest)
   ]
 
 runVMTest :: Bool -> (String, Case) -> IO ()
@@ -331,12 +331,15 @@ errorFatal _ = False
 fromBlockchainCase :: BlockchainCase -> Either BlockchainError Case
 fromBlockchainCase (BlockchainCase blocks preState postState network) =
   case (blocks, network) of
-    ([block], "London") -> case block.txs of
+    ([block], "Shanghai") -> case block.txs of
       [tx] -> fromBlockchainCase' block tx preState postState
       []        -> Left NoTxs
       _         -> Left TooManyTxs
     ([_], _) -> Left OldNetwork
     (_, _)   -> Left TooManyBlocks
+
+maxCodeSize :: W256
+maxCodeSize = 24576
 
 fromBlockchainCase' :: Block -> Transaction
                        -> Map Addr (Contract, Storage) -> Map Addr (Contract, Storage)
@@ -363,7 +366,7 @@ fromBlockchainCase' block tx preState postState =
          , timestamp     = Lit block.timestamp
          , coinbase      = block.coinbase
          , prevRandao    = block.difficulty
-         , maxCodeSize   = 24576
+         , maxCodeSize   = maxCodeSize
          , blockGaslimit = block.gasLimit
          , gasprice      = effectiveGasPrice
          , schedule      = feeSchedule
@@ -429,7 +432,13 @@ checkTx tx block prestate = do
       toAddr      = fromMaybe (EVM.createAddress origin senderNonce) tx.toAddr
       prevCode    = view (accountAt toAddr % #contractcode) (Map.map fst prestate)
       prevNonce   = view (accountAt toAddr % #nonce) (Map.map fst prestate)
-  if isCreate && ((case prevCode of {RuntimeCode (ConcreteRuntimeCode b) -> not (BS.null b); _ -> True}) || (prevNonce /= 0))
+
+      nonEmptyAccount = case prevCode of
+                        RuntimeCode (ConcreteRuntimeCode b) -> not (BS.null b)
+                        _ -> True
+      badNonce = prevNonce /= 0
+      initCodeSizeExceeded = BS.length tx.txdata > (num maxCodeSize * 2)
+  if isCreate && (badNonce || nonEmptyAccount || initCodeSizeExceeded)
   then mzero
   else
     return prestate

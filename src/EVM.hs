@@ -98,7 +98,7 @@ makeVm o =
   let txaccessList = o.txAccessList
       txorigin = o.origin
       txtoAddr = o.address
-      initialAccessedAddrs = fromList $ [txorigin, txtoAddr] ++ [1..9] ++ (Map.keys txaccessList)
+      initialAccessedAddrs = fromList $ [txorigin, txtoAddr, o.coinbase] ++ [1..9] ++ (Map.keys txaccessList)
       initialAccessedStorageKeys = fromList $ foldMap (uncurry (map . (,))) (Map.toList txaccessList)
       touched = if o.create then [txorigin] else [txorigin, txtoAddr]
   in
@@ -238,7 +238,7 @@ exec1 = do
 
       case getOp(?op) of
 
-        OpPush 0 -> do
+        OpPush0 -> do
           limitStack 1 $
             burn g_base $ do
               next
@@ -701,14 +701,11 @@ exec1 = do
                   availableGas <- use (#state % #gas)
                   let
                     newAddr = createAddress self this.nonce
-                    (cost, gas') = costOfCreate fees availableGas 0
+                    (cost, gas') = costOfCreate fees availableGas xSize False
                   _ <- accessAccountForGas newAddr
-                  burn (cost - gas') $ do
-                    -- unfortunately we have to apply some (pretty hacky)
-                    -- heuristics here to parse the unstructured buffer read
-                    -- from memory into a code and data section
+                  burn cost $ do
                     let initCode = readMemory xOffset' xSize' vm
-                    create self this (num gas') xValue xs newAddr initCode
+                    create self this xSize (num gas') xValue xs newAddr initCode
             _ -> underrun
 
         OpCall ->
@@ -800,9 +797,10 @@ exec1 = do
                     \initCode -> do
                       let
                         newAddr  = create2Address self xSalt initCode
-                        (cost, gas') = costOfCreate fees availableGas xSize
+                        (cost, gas') = costOfCreate fees availableGas xSize True
                       _ <- accessAccountForGas newAddr
-                      burn (cost - gas') $ create self this gas' xValue xs newAddr (ConcreteBuf initCode)
+                      burn cost $
+                        create self this xSize gas' xValue xs newAddr (ConcreteBuf initCode)
             _ -> underrun
 
         OpStaticcall ->
@@ -1260,7 +1258,6 @@ finalize = do
 
   let
     sumRefunds   = sum (snd <$> tx.substate.refunds)
-    blockReward  = num (block.schedule.r_block)
     gasUsed      = tx.gaslimit - gasRemaining
     cappedRefund = min (quot gasUsed 5) (num sumRefunds)
     originPay    = (num $ gasRemaining + cappedRefund) * tx.gasprice
@@ -1271,14 +1268,6 @@ finalize = do
   modifying (#env % #contracts)
      (Map.adjust (over #balance (+ minerPay)) block.coinbase)
   touchAccount block.coinbase
-
-  -- pay out the block reward, recreating the miner if necessary
-  preuse (#env % #contracts % ix block.coinbase) >>= \case
-    Nothing -> modifying (#env % #contracts)
-      (Map.insert block.coinbase (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
-    Just _  -> noop
-  modifying (#env % #contracts)
-    (Map.adjust (over #balance (+ blockReward)) block.coinbase)
 
   -- perform state trie clearing (EIP 161), of selfdestructs
   -- and touched accounts. addresses are cleared if they have
@@ -1633,8 +1622,8 @@ collision c' = case c' of
 
 create :: (?op :: Word8)
   => Addr -> Contract
-  -> Word64 -> W256 -> [Expr EWord] -> Addr -> Expr Buf -> EVM ()
-create self this xGas' xValue xs newAddr initCode = do
+  -> W256 -> Word64 -> W256 -> [Expr EWord] -> Addr -> Expr Buf -> EVM ()
+create self this xSize xGas' xValue xs newAddr initCode = do
   vm0 <- get
   let xGas = num xGas'
   if this.nonce == num (maxBound :: Word64)
@@ -1649,6 +1638,11 @@ create self this xGas' xValue xs newAddr initCode = do
     assign (#state % #returndata) mempty
     pushTrace $ ErrorTrace $ BalanceTooLow xValue this.balance
     next
+  else if xSize > vm0.block.maxCodeSize * 2
+  then do
+    assign (#state % #stack) (Lit 0 : xs)
+    assign (#state % #returndata) mempty
+    vmError $ MaxInitCodeSizeExceeded (vm0.block.maxCodeSize * 2) xSize
   else if length vm0.frames >= 1024
   then do
     assign (#state % #stack) (Lit 0 : xs)
@@ -1668,7 +1662,6 @@ create self this xGas' xValue xs newAddr initCode = do
     -- unfortunately we have to apply some (pretty hacky)
     -- heuristics here to parse the unstructured buffer read
     -- from memory into a code and data section
-    -- TODO: comment explaining whats going on here
     let contract' = do
           prefixLen <- Expr.concPrefix initCode
           prefix <- Expr.toList $ Expr.take (num prefixLen) initCode
@@ -2213,12 +2206,12 @@ costOfCall (FeeSchedule {..}) recipientExists xValue availableGas xGas target = 
 -- Gas cost of create, including hash cost if needed
 costOfCreate
   :: FeeSchedule Word64
-  -> Word64 -> W256 -> (Word64, Word64)
-costOfCreate (FeeSchedule {..}) availableGas hashSize =
-  (createCost + initGas, initGas)
+  -> Word64 -> W256 -> Bool -> (Word64, Word64)
+costOfCreate (FeeSchedule {..}) availableGas size hashNeeded = (createCost, initGas)
   where
-    createCost = g_create + hashCost
-    hashCost   = g_sha3word * ceilDiv (num hashSize) 32
+    byteCost   = if hashNeeded then g_sha3word + g_initcodeword else g_initcodeword
+    createCost = g_create + codeCost
+    codeCost   = byteCost * (ceilDiv (num size) 32)
     initGas    = allButOne64th (availableGas - createCost)
 
 concreteModexpGasFee :: ByteString -> Word64

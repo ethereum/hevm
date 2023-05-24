@@ -251,6 +251,7 @@ opString (i, o) = let showPc x | x < 0x10 = '0' : showHex x ""
   OpDup x -> "DUP" ++ show x
   OpSwap x -> "SWAP" ++ show x
   OpLog x -> "LOG" ++ show x
+  OpPush0  -> "PUSH0"
   OpPush x -> case x of
     Lit x' -> "PUSH 0x" ++ (showHex x' "")
     _ -> "PUSH " ++ show x
@@ -333,7 +334,7 @@ getOp x = case x of
   0x59 -> OpMsize
   0x5a -> OpGas
   0x5b -> OpJumpdest
-  0x5f -> OpPush 0
+  0x5f -> OpPush0
   0xf0 -> OpCreate
   0xf1 -> OpCall
   0xf2 -> OpCallcode
