@@ -632,7 +632,7 @@ type UnsatCache = TVar [Set Prop]
 equivalenceCheck
   :: SolverGroup -> ByteString -> ByteString -> VeriOpts -> (Expr Buf, [Prop])
   -> IO [EquivResult]
-equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
+equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
   case bytecodeA == bytecodeB of
     True -> do
       putStrLn "bytecodeA and bytecodeB are identical"
@@ -640,7 +640,21 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
     False -> do
       branchesA <- getBranches bytecodeA
       branchesB <- getBranches bytecodeB
+      equivalenceCheck' solvers branchesA branchesB opts
+  where
+    -- decompiles the given bytecode into a list of branches
+    getBranches :: ByteString -> IO [Expr End]
+    getBranches bs = do
+      let
+        bytecode = if BS.null bs then BS.pack [0] else bs
+        prestate = abstractVM calldata bytecode Nothing AbstractStore
+      expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
+      let simpl = if opts.simp then (Expr.simplify expr) else expr
+      pure $ flattenExpr simpl
 
+
+equivalenceCheck' :: SolverGroup -> [Expr End] -> [Expr End] -> VeriOpts -> IO [EquivResult]
+equivalenceCheck' solvers branchesA branchesB opts = do
       when (any isPartial branchesA || any isPartial branchesB) $ do
         putStrLn ""
         putStrLn "WARNING: hevm was only able to partially explore the given contract due to the following issues:"
@@ -677,16 +691,6 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata' = do
     -- returns True if a is a subset of any of the sets in b
     subsetAny :: Set Prop -> [Set Prop] -> Bool
     subsetAny a b = foldr (\bp acc -> acc || isSubsetOf a bp) False b
-
-    -- decompiles the given bytecode into a list of branches
-    getBranches :: ByteString -> IO [Expr End]
-    getBranches bs = do
-      let
-        bytecode = if BS.null bs then BS.pack [0] else bs
-        prestate = abstractVM calldata' bytecode Nothing AbstractStore
-      expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
-      let simpl = if opts.simp then (Expr.simplify expr) else expr
-      pure $ flattenExpr simpl
 
     -- checks for satisfiability of all the props in the provided set. skips
     -- the solver if we can determine unsatisfiability from the cache already
