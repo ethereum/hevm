@@ -45,6 +45,7 @@ data Which = Pre | Post
 data Block = Block
   { coinbase    :: Addr
   , difficulty  :: W256
+  , mixHash     :: W256
   , gasLimit    :: Word64
   , baseFee     :: W256
   , number      :: W256
@@ -284,7 +285,8 @@ instance FromJSON Block where
     number     <- wordField v' "number"
     baseFee    <- fmap read <$> v' .:? "baseFeePerGas"
     timestamp  <- wordField v' "timestamp"
-    return $ Block coinbase difficulty gasLimit (fromMaybe 0 baseFee) number timestamp txs
+    mixHash    <- wordField v' "mixHash"
+    return $ Block coinbase difficulty mixHash gasLimit (fromMaybe 0 baseFee) number timestamp txs
   parseJSON invalid =
     JSON.typeMismatch "Block" invalid
 
@@ -365,7 +367,7 @@ fromBlockchainCase' block tx preState postState =
          , number        = block.number
          , timestamp     = Lit block.timestamp
          , coinbase      = block.coinbase
-         , prevRandao    = block.difficulty
+         , prevRandao    = block.mixHash
          , maxCodeSize   = maxCodeSize
          , blockGaslimit = block.gasLimit
          , gasprice      = effectiveGasPrice
