@@ -43,7 +43,8 @@ import Data.Maybe                 (fromMaybe, mapMaybe)
 import Data.Version               (showVersion)
 import Data.DoubleWord            (Word256)
 import System.IO                  (stderr)
-import System.Directory           (withCurrentDirectory, getCurrentDirectory)
+import System.Directory           (withCurrentDirectory, getCurrentDirectory, doesDirectoryExist)
+import System.FilePath            ((</>))
 import System.Exit                (exitFailure, exitWith, ExitCode(..))
 
 import qualified Data.ByteString        as ByteString
@@ -337,10 +338,14 @@ getSrcInfo :: Command Options.Unwrapped -> IO DappInfo
 getSrcInfo cmd = do
   root <- getRoot cmd
   withCurrentDirectory root $ do
-    buildOutput <- readBuildOutput root (getProjectType cmd)
-    case buildOutput of
-      Left _ -> pure emptyDapp
-      Right o -> pure $ dappInfo root o
+    outExists <- doesDirectoryExist (root </> "out")
+    if outExists
+    then do
+      buildOutput <- readBuildOutput root (getProjectType cmd)
+      case buildOutput of
+        Left _ -> pure emptyDapp
+        Right o -> pure $ dappInfo root o
+    else pure emptyDapp
 
 getProjectType :: Command Options.Unwrapped -> ProjectType
 getProjectType cmd = fromMaybe Foundry cmd.projectType
