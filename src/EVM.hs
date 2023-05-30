@@ -627,9 +627,9 @@ exec1 = do
                                 refund (g_sreset + g_access_list_storage_key)
                             else do
                               when (original /= 0) $
-                                if new' == 0
-                                then refund (g_sreset + g_access_list_storage_key)
-                                else unRefund (g_sreset + g_access_list_storage_key)
+                                if current' == 0
+                                then unRefund (g_sreset + g_access_list_storage_key)
+                                else when (new' == 0) $ refund (g_sreset + g_access_list_storage_key)
                               when (original == new') $
                                 if original == 0
                                 then refund (g_sset - g_sload)
