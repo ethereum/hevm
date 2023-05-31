@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Fixed
 
 - hevm now gracefully handles missing `out` directories
+- Constraints are correctly propogated to the final output expression during symbolic execution
 
 ## [0.51.0] - 2023-04-27
 

@@ -442,7 +442,7 @@ verifyContract solvers theCode signature' concreteArgs opts initStore maybepre m
 runExpr :: Stepper.Stepper (Expr End)
 runExpr = do
   vm <- Stepper.runFully
-  let asserts = vm.keccakEqs
+  let asserts = vm.keccakEqs <> vm.constraints
   pure $ case vm.result of
     Just (VMSuccess buf) -> Success asserts buf vm.env.storage
     Just (VMFailure e) -> Failure asserts e
