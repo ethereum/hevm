@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - hevm now gracefully handles missing `out` directories
 
+## Changed
+
+- HEVM is now fully compliant with the Shanghai hard fork
+
 ## [0.51.0] - 2023-04-27
 
 ## Added

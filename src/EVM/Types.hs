@@ -502,6 +502,7 @@ data EvmError
   | InvalidMemoryAccess
   | CallDepthLimitReached
   | MaxCodeSizeExceeded W256 W256
+  | MaxInitCodeSizeExceeded W256 W256
   | InvalidFormat
   | PrecompileFailure
   | ReturnDataOutOfBounds
@@ -931,6 +932,7 @@ data GenericOp a
   | OpDup !Word8
   | OpSwap !Word8
   | OpLog !Word8
+  | OpPush0
   | OpPush a
   | OpUnknown Word8
   deriving (Show, Eq, Functor)

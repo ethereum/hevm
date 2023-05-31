@@ -2,7 +2,7 @@ module EVM.Transaction where
 
 import Prelude hiding (Word)
 
-import EVM (initialContract)
+import EVM (initialContract, ceilDiv)
 import EVM.FeeSchedule
 import EVM.RLP
 import EVM.Types
@@ -185,10 +185,11 @@ txGasCost fs tx =
       zeroBytes    = BS.count 0 calldata
       nonZeroBytes = BS.length calldata - zeroBytes
       baseCost     = fs.g_transaction
-        + (if isNothing tx.toAddr then fs.g_txcreate else 0)
+        + (if isNothing tx.toAddr then fs.g_txcreate + initcodeCost else 0)
         + (accessListPrice fs tx.accessList )
       zeroCost     = fs.g_txdatazero
       nonZeroCost  = fs.g_txdatanonzero
+      initcodeCost = fs.g_initcodeword * num (ceilDiv (BS.length calldata) 32)
   in baseCost + zeroCost * (fromIntegral zeroBytes) + nonZeroCost * (fromIntegral nonZeroBytes)
 
 instance FromJSON AccessListEntry where

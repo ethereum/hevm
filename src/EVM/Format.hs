@@ -385,6 +385,7 @@ prettyError = \case
   StateChangeWhileStatic -> "State change while static"
   CallDepthLimitReached -> "Call depth limit reached"
   MaxCodeSizeExceeded a b -> "Max code size exceeded: max: " <> show a <> " actual: " <> show b
+  MaxInitCodeSizeExceeded a b -> "Max init code size exceeded: max: " <> show a <> " actual: " <> show b
   InvalidFormat -> "Invalid Format"
   PrecompileFailure -> "Precompile failure"
   ReturnDataOutOfBounds -> "Return data out of bounds"
