@@ -103,9 +103,6 @@ extractCex :: VerifyResult -> Maybe (Expr End, SMTCex)
 extractCex (Cex c) = Just c
 extractCex _ = Nothing
 
-inRange :: Int -> Expr EWord -> Prop
-inRange sz e = PAnd (PGEq e (Lit 0)) (PLEq e (Lit $ 2 ^ sz - 1))
-
 bool :: Expr EWord -> Prop
 bool e = POr (PEq e (Lit 1)) (PEq e (Lit 0))
 
@@ -114,18 +111,18 @@ symAbiArg :: Text -> AbiType -> CalldataFragment
 symAbiArg name = \case
   AbiUIntType n ->
     if n `mod` 8 == 0 && n <= 256
-    then let v = Var name in St [inRange n v] v
+    then let v = Var name in St [Expr.inRange n v] v
     else error "bad type"
   AbiIntType n ->
     if n `mod` 8 == 0 && n <= 256
     -- TODO: is this correct?
-    then let v = Var name in St [inRange n v] v
+    then let v = Var name in St [Expr.inRange n v] v
     else error "bad type"
   AbiBoolType -> let v = Var name in St [bool v] v
-  AbiAddressType -> let v = Var name in St [inRange 160 v] v
+  AbiAddressType -> let v = Var name in St [Expr.inRange 160 v] v
   AbiBytesType n ->
     if n > 0 && n <= 32
-    then let v = Var name in St [inRange (n * 8) v] v
+    then let v = Var name in St [Expr.inRange (n * 8) v] v
     else error "bad type"
   AbiArrayType sz tp ->
     Comp $ fmap (\n -> symAbiArg (name <> n) tp) [T.pack (show n) | n <- [0..sz-1]]
