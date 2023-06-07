@@ -39,7 +39,7 @@ import EVM.Types
 import EVM.Traversals
 import EVM.CSE
 import EVM.Keccak
-import EVM.Expr (writeByte, bufLengthEnv, containsNode, bufLength, minLength)
+import EVM.Expr (writeByte, bufLengthEnv, containsNode, bufLength, minLength, inRange)
 import qualified EVM.Expr as Expr
 
 
@@ -205,39 +205,39 @@ referencedVars expr = nubOrd $ foldExpr referencedVarsGo [] expr
 referencedVars' :: Prop -> [Builder]
 referencedVars' prop = nubOrd $ foldProp referencedVarsGo [] prop
 
-referencedFrameContextGo :: Expr a -> [Builder]
+referencedFrameContextGo :: Expr a -> [(Builder, [Prop])]
 referencedFrameContextGo = \case
-  CallValue a -> [fromLazyText $ T.append "callvalue_" (T.pack . show $ a)]
-  Caller a -> [fromLazyText $ T.append "caller_" (T.pack . show $ a)]
-  Address a -> [fromLazyText $ T.append "address_" (T.pack . show $ a)]
+  CallValue a -> [(fromLazyText $ T.append "callvalue_" (T.pack . show $ a), [])]
+  Caller a -> [(fromLazyText $ T.append "caller_" (T.pack . show $ a), [inRange 160 (Caller a)])]
+  Address a -> [(fromLazyText $ T.append "address_" (T.pack . show $ a), [inRange 160 (Address a)])]
   Balance {} -> error "TODO: BALANCE"
   SelfBalance {} -> error "TODO: SELFBALANCE"
   Gas {} -> error "TODO: GAS"
   _ -> []
 
-referencedFrameContext :: Expr a -> [Builder]
+referencedFrameContext :: Expr a -> [(Builder, [Prop])]
 referencedFrameContext expr = nubOrd $ foldExpr referencedFrameContextGo [] expr
 
-referencedFrameContext' :: Prop -> [Builder]
+referencedFrameContext' :: Prop -> [(Builder, [Prop])]
 referencedFrameContext' prop = nubOrd $ foldProp referencedFrameContextGo [] prop
 
 
-referencedBlockContextGo :: Expr a -> [Builder]
+referencedBlockContextGo :: Expr a -> [(Builder, [Prop])]
 referencedBlockContextGo = \case
-  Origin -> ["origin"]
-  Coinbase -> ["coinbase"]
-  Timestamp -> ["timestamp"]
-  BlockNumber -> ["blocknumber"]
-  PrevRandao -> ["prevrandao"]
-  GasLimit -> ["gaslimit"]
-  ChainId -> ["chainid"]
-  BaseFee -> ["basefee"]
+  Origin -> [("origin", [inRange 160 Origin])]
+  Coinbase -> [("coinbase", [inRange 160 Coinbase])]
+  Timestamp -> [("timestamp", [])]
+  BlockNumber -> [("blocknumber", [])]
+  PrevRandao -> [("prevrandao", [])]
+  GasLimit -> [("gaslimit", [])]
+  ChainId -> [("chainid", [])]
+  BaseFee -> [("basefee", [])]
   _ -> []
 
-referencedBlockContext :: Expr a -> [Builder]
+referencedBlockContext :: Expr a -> [(Builder, [Prop])]
 referencedBlockContext expr = nubOrd $ foldExpr referencedBlockContextGo [] expr
 
-referencedBlockContext' :: Prop -> [Builder]
+referencedBlockContext' :: Prop -> [(Builder, [Prop])]
 referencedBlockContext' prop = nubOrd $ foldProp referencedBlockContextGo [] prop
 
 -- | This function overapproximates the reads from the abstract
@@ -332,18 +332,20 @@ declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
     cexvars = (mempty :: CexVars){ calldata = fmap toLazyText names }
 
 
-declareFrameContext :: [Builder] -> SMT2
-declareFrameContext names = SMT2 (["; frame context"] <> fmap declare names) cexvars
+declareFrameContext :: [(Builder, [Prop])] -> SMT2
+declareFrameContext names = SMT2 (["; frame context"] <> concatMap declare names) cexvars
   where
-    declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = (mempty :: CexVars){ txContext = fmap toLazyText names }
+    declare (n,props) = [ "(declare-const " <> n <> " (_ BitVec 256))" ]
+                        <> fmap (\p -> "(assert " <> propToSMT p <> ")") props
+    cexvars = (mempty :: CexVars){ txContext = fmap (toLazyText . fst) names }
 
 
-declareBlockContext :: [Builder] -> SMT2
-declareBlockContext names = SMT2 (["; block context"] <> fmap declare names) cexvars
+declareBlockContext :: [(Builder, [Prop])] -> SMT2
+declareBlockContext names = SMT2 (["; block context"] <> concatMap declare names) cexvars
   where
-    declare n = "(declare-const " <> n <> " (_ BitVec 256))"
-    cexvars = (mempty :: CexVars){ blockContext = fmap toLazyText names }
+    declare (n, props) = [ "(declare-const " <> n <> " (_ BitVec 256))" ]
+                         <> fmap (\p -> "(assert " <> propToSMT p <> ")") props
+    cexvars = (mempty :: CexVars){ blockContext = fmap (toLazyText . fst) names }
 
 
 prelude :: SMT2
