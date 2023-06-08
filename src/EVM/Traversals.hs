@@ -204,11 +204,16 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- storage
 
-      e@(EmptyStore) -> f e
+      e@(LitAddr _) -> f e
+      e@(WAddr a) -> f e <> go a
+      e@(SAddr _) -> f e
+
+      -- storage
+
       e@(ConcreteStore _) -> f e
       e@(AbstractStore) -> f e
-      e@(SLoad a b c) -> f e <> (go a) <> (go b) <> (go c)
-      e@(SStore a b c d) -> f e <> (go a) <> (go b) <> (go c) <> (go d)
+      e@(SLoad a b) -> f e <> (go a) <> (go b)
+      e@(SStore a b c) -> f e <> (go a) <> (go b) <> (go c)
 
       -- buffers
 
@@ -561,20 +566,17 @@ mapExprM f expr = case expr of
 
   -- storage
 
-  EmptyStore -> f EmptyStore
   ConcreteStore a -> f (ConcreteStore a)
   AbstractStore -> f AbstractStore
-  SLoad a b c -> do
+  SLoad a b -> do
+    a' <- mapExprM f a
+    b' <- mapExprM f b
+    f (SLoad a' b')
+  SStore a b c -> do
     a' <- mapExprM f a
     b' <- mapExprM f b
     c' <- mapExprM f c
-    f (SLoad a' b' c')
-  SStore a b c d -> do
-    a' <- mapExprM f a
-    b' <- mapExprM f b
-    c' <- mapExprM f c
-    d' <- mapExprM f d
-    f (SStore a' b' c' d')
+    f (SStore a' b' c')
 
   -- buffers
 

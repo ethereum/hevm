@@ -64,12 +64,15 @@ mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
 
 -- Symbolic IR -------------------------------------------------------------------------------------
 
+
 -- phantom type tags for AST construction
 data EType
   = Buf
   | Storage
+  | WorldStore
   | Log
   | EWord
+  | EAddr
   | Byte
   | End
   deriving (Typeable)
@@ -162,7 +165,7 @@ data Expr (a :: EType) where
 
   Partial        :: [Prop] -> PartialExec -> Expr End
   Failure        :: [Prop] -> EvmError -> Expr End
-  Success        :: [Prop] -> Expr Buf -> Expr Storage -> Expr End
+  Success        :: [Prop] -> Expr Buf -> Map (Expr EAddr) Contract -> Expr End
   ITE            :: Expr EWord -> Expr End -> Expr End -> Expr End
 
   -- integers
@@ -312,19 +315,26 @@ data Expr (a :: EType) where
                  -> Expr Storage       -- storage
                  -> Expr EWord         -- success
 
+  -- addresses
+
+  -- Symbolic addresses are identified with an int. It is important that
+  -- semantic equality is the same as syntactic equality here. Additionally all
+  -- SAddr's in a given expression should be constrained to differ from any
+  -- LitAddr's
+  SAddr          :: Int -> Expr EAddr
+  LitAddr        :: Addr -> Expr EAddr
+  WAddr          :: Expr EAddr -> Expr EWord
+
   -- storage
 
-  EmptyStore     :: Expr Storage
-  ConcreteStore  :: Map W256 (Map W256 W256) -> Expr Storage
+  ConcreteStore  :: (Map W256 W256) -> Expr Storage
   AbstractStore  :: Expr Storage
 
-  SLoad          :: Expr EWord         -- address
-                 -> Expr EWord         -- index
+  SLoad          :: Expr EWord         -- index
                  -> Expr Storage       -- storage
                  -> Expr EWord         -- result
 
-  SStore         :: Expr EWord         -- address
-                 -> Expr EWord         -- index
+  SStore         :: Expr EWord         -- index
                  -> Expr EWord         -- value
                  -> Expr Storage       -- old storage
                  -> Expr Storage       -- new storae
@@ -513,7 +523,7 @@ data EvmError
 -- | Sometimes we can only partially execute a given program
 data PartialExec
   = UnexpectedSymbolicArg  { pc :: Int, msg  :: String, args  :: [SomeExpr] }
-  | MaxIterationsReached  { pc :: Int, addr :: Addr }
+  | MaxIterationsReached  { pc :: Int, addr :: Expr EAddr }
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
@@ -586,7 +596,7 @@ data VM = VM
   , constraints    :: [Prop]
   , keccakEqs      :: [Prop]
   , allowFFI       :: Bool
-  , overrideCaller :: Maybe Addr
+  , overrideCaller :: Maybe (Expr EAddr)
   }
   deriving (Show, Generic)
 
@@ -603,39 +613,39 @@ data Frame = Frame
 -- | Call/create info
 data FrameContext
   = CreationContext
-    { address         :: Addr
+    { address         :: Expr EAddr
     , codehash        :: Expr EWord
-    , createreversion :: Map Addr Contract
+    , createreversion :: (Map (Expr EAddr) Contract, Map (Expr EAddr) ContractMeta)
     , substate        :: SubState
     }
   | CallContext
-    { target        :: Addr
-    , context       :: Addr
+    { target        :: Expr EAddr
+    , context       :: Expr EAddr
     , offset        :: W256
     , size          :: W256
     , codehash      :: Expr EWord
     , abi           :: Maybe W256
     , calldata      :: Expr Buf
-    , callreversion :: (Map Addr Contract, Expr Storage)
+    , callreversion :: (Map (Expr EAddr) Contract, Map (Expr EAddr) ContractMeta)
     , subState      :: SubState
     }
   deriving (Show, Generic)
 
 -- | The "accrued substate" across a transaction
 data SubState = SubState
-  { selfdestructs       :: [Addr]
-  , touchedAccounts     :: [Addr]
-  , accessedAddresses   :: Set Addr
-  , accessedStorageKeys :: Set (Addr, W256)
-  , refunds             :: [(Addr, Word64)]
+  { selfdestructs       :: [Expr EAddr]
+  , touchedAccounts     :: [Expr EAddr]
+  , accessedAddresses   :: Set (Expr EAddr)
+  , accessedStorageKeys :: Set (Expr EAddr, W256)
+  , refunds             :: [(Expr EAddr, Word64)]
   -- in principle we should include logs here, but do not for now
   }
   deriving (Show)
 
 -- | The "registers" of the VM along with memory and data stack
 data FrameState = FrameState
-  { contract     :: Addr
-  , codeContract :: Addr
+  { contract     :: Expr EAddr
+  , codeContract :: Expr EAddr
   , code         :: ContractCode
   , pc           :: {-# UNPACK #-} !Int
   , stack        :: [Expr EWord]
@@ -655,39 +665,21 @@ data TxState = TxState
   { gasprice    :: W256
   , gaslimit    :: Word64
   , priorityFee :: W256
-  , origin      :: Addr
-  , toAddr      :: Addr
+  , origin      :: Expr EAddr
+  , toAddr      :: Expr EAddr
   , value       :: Expr EWord
   , substate    :: SubState
   , isCreate    :: Bool
-  , txReversion :: Map Addr Contract
+  , txReversion :: Map (Expr EAddr) Contract
   }
   deriving (Show)
 
--- | When doing symbolic execution, we have three different
--- ways to model the storage of contracts. This determines
--- not only the initial contract storage model but also how
--- RPC or state fetched contracts will be modeled.
-data StorageModel
-  = ConcreteS    -- ^ Uses `Concrete` Storage. Reading / Writing from abstract
-                 -- locations causes a runtime failure. Can be nicely combined with RPC.
-
-  | SymbolicS    -- ^ Uses `Symbolic` Storage. Reading / Writing never reaches RPC,
-                 -- but always done using an SMT array with no default value.
-
-  | InitialS     -- ^ Uses `Symbolic` Storage. Reading / Writing never reaches RPC,
-                 -- but always done using an SMT array with 0 as the default value.
-
-  deriving (Read, Show)
-
-instance ParseField StorageModel
-
 -- | Various environmental data
 data Env = Env
-  { contracts    :: Map Addr Contract
+  { contracts    :: Map (Expr EAddr) Contract
+  , contractMeta :: Map (Expr EAddr) ContractMeta
   , chainId      :: W256
-  , storage      :: Expr Storage
-  , origStorage  :: Map W256 (Map W256 W256)
+  , origStorage  :: Map (Expr EAddr) (Map W256 W256)
   , sha3Crack    :: Map W256 ByteString
   }
   deriving (Show, Generic)
@@ -704,17 +696,23 @@ data Block = Block
   , schedule    :: FeeSchedule Word64
   } deriving (Show, Generic)
 
--- | The state of a contract
+-- | Contract state
 data Contract = Contract
   { contractcode :: ContractCode
-  , balance      :: W256
-  , nonce        :: W256
-  , codehash     :: Expr EWord
+  , storage      :: Expr Storage
+  , balance      :: Expr EWord
+  , nonce        :: Expr EWord
+  }
+  deriving (Show, Eq, Ord)
+
+-- | Per contract metadata
+data ContractMeta = ContractMeta
+  { codehash     :: Expr EWord
   , opIxMap      :: SV.Vector Int
   , codeOps      :: V.Vector (Int, Op)
   , external     :: Bool
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 
 -- Bytecode Representations ------------------------------------------------------------------------
@@ -829,14 +827,14 @@ data VMOpts = VMOpts
   , initialStorage :: Expr Storage
   , value :: Expr EWord
   , priorityFee :: W256
-  , address :: Addr
+  , address :: Expr EAddr
   , caller :: Expr EWord
-  , origin :: Addr
+  , origin :: Expr EAddr
   , gas :: Word64
   , gaslimit :: Word64
   , number :: W256
   , timestamp :: Expr EWord
-  , coinbase :: Addr
+  , coinbase :: Expr EAddr
   , prevRandao :: W256
   , maxCodeSize :: W256
   , blockGaslimit :: Word64
