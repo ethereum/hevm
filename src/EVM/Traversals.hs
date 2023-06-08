@@ -1,4 +1,5 @@
 {-# Language DataKinds #-}
+{-# Language ScopedTypeVariables #-}
 
 {- |
     Module: EVM.Traversals
@@ -9,6 +10,8 @@ module EVM.Traversals where
 import Prelude hiding (Word, LT, GT)
 
 import Control.Monad.Identity
+import qualified Data.Map.Strict as Map
+import Data.List (foldl')
 
 import EVM.Types
 
@@ -27,6 +30,20 @@ foldProp f acc p = acc <> (go p)
       PAnd a b -> go a <> go b
       POr a b -> go a <> go b
       PImpl a b -> go a <> go b
+
+foldContract :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Contract -> b
+foldContract f acc (Contract code storage balance nonce)
+  =  acc
+  <> foldCode code
+  <> foldExpr f mempty storage
+  <> foldExpr f mempty balance
+  <> foldExpr f mempty nonce
+  where
+    foldCode :: ContractCode -> b
+    foldCode (RuntimeCode (ConcreteRuntimeCode _)) = mempty
+    foldCode (RuntimeCode (SymbolicRuntimeCode c)) = foldl' (foldExpr f) mempty c
+    foldCode (InitCode _ buf) = foldExpr f mempty buf
+
 
 -- | Recursively folds a given function over a given expression
 -- Recursion schemes do this & a lot more, but defining them over GADT's isn't worth the hassle
@@ -67,9 +84,13 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- control flow
 
-      e@(Success a b c) -> f e <> (foldl (foldProp f) mempty a) <> (go b) <> (go c)
-      e@(Failure a _) -> f e <> (foldl (foldProp f) mempty a)
-      e@(Partial a _) -> f e <> (foldl (foldProp f) mempty a)
+      e@(Success a b c) -> f e
+                        <> foldl' (foldProp f) mempty a
+                        <> go b
+                        <> foldl' (foldExpr f) mempty (fmap fst $ Map.toList c)
+                        <> foldl' (foldContract f) mempty c
+      e@(Failure a _) -> f e <> (foldl' (foldProp f) mempty a)
+      e@(Partial a _) -> f e <> (foldl' (foldProp f) mempty a)
       e@(ITE a b c) -> f e <> (go a) <> (go b) <> (go c)
 
       -- integers
@@ -261,6 +282,12 @@ mapExprM f expr = case expr of
   LitByte a -> f (LitByte a)
   Var a -> f (Var a)
   GVar s -> f (GVar s)
+  --
+  -- addresses
+
+  LitAddr a -> f (LitAddr a)
+  SAddr a -> f (SAddr a)
+  WAddr a -> WAddr <$> f a
 
   -- bytes
 
@@ -325,7 +352,13 @@ mapExprM f expr = case expr of
   Success a b c -> do
     a' <- mapM (mapPropM f) a
     b' <- mapExprM f b
-    c' <- mapExprM f c
+    c' <- do
+      let x = Map.toList c
+      x' <- forM x $ \(k,v) -> do
+        k' <- f k
+        v' <- mapContractM f v
+        pure (k',v')
+      pure $ Map.fromList x'
     f (Success a' b' c')
 
   ITE a b c -> do
@@ -655,6 +688,20 @@ mapPropM f = \case
     b' <- mapPropM f b
     pure $ PImpl a' b'
 
+mapContractM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Contract -> m Contract
+mapContractM f (Contract code storage balance nonce) = do
+  code' <- case code of
+             c@(RuntimeCode (ConcreteRuntimeCode _)) -> pure c
+             RuntimeCode (SymbolicRuntimeCode c) -> do
+               c' <- mapM (mapExprM f) c
+               pure . RuntimeCode $ SymbolicRuntimeCode c'
+             InitCode bs buf -> do
+               buf' <- mapExprM f buf
+               pure $ InitCode bs buf'
+  storage' <- mapExprM f storage
+  balance' <- mapExprM f balance
+  nonce' <- mapExprM f nonce
+  pure $ Contract code' storage' balance' nonce'
 
 -- | Generic operations over AST terms
 class TraversableTerm a where
