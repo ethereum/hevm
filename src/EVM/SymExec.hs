@@ -693,9 +693,13 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     -- the solver if we can determine unsatisfiability from the cache already
     -- the last element of the returned tuple indicates whether the cache was
     -- used or not
-    check :: UnsatCache -> Set Prop -> IO (EquivResult, Bool)
-    check knownUnsat props = do
+    check :: UnsatCache -> (Set Prop) -> Int -> IO (EquivResult, Bool)
+    check knownUnsat props idx = do
       let smt = assertProps $ Set.toList props
+      -- if debug is on, write the query to a file
+      when opts.debug $ TL.writeFile
+        ("query-" <> show idx <> ".smt2") (formatSMT2 smt <> "\n\n(check-sat)")
+
       ku <- readTVarIO knownUnsat
       res <- if subsetAny props ku
              then pure (True, Unsat)
@@ -720,7 +724,8 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     checkAll :: [(Set Prop)] -> UnsatCache -> Int -> IO [(EquivResult, Bool)]
     checkAll input cache numproc = do
        wrap <- pool numproc
-       parMapIO (wrap . (check cache)) input
+       parMapIO (wrap . (uncurry $ check cache)) $ zip input [1..]
+
 
     -- Takes two branches and returns a set of props that will need to be
     -- satisfied for the two branches to violate the equivalence check. i.e.
