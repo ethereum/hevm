@@ -69,7 +69,7 @@ $ cabal build exe:hevm # build the cli binary
 $ cabal build test     # build the test binary
 $ cabal build bench    # build the benchmarks
 
-$ cabal repl           # enter a repl for the library
+$ cabal repl lib:hevm  # enter a repl for the library
 $ cabal repl exe:hevm  # enter a repl for the cli
 $ cabal repl test      # enter a repl for the tests
 $ cabal repl bench     # enter a repl for the benchmarks
