@@ -32,7 +32,7 @@
           z3
           cvc5
           git
-  #       foundry.defaultPackage.${system}
+          foundry.defaultPackage.${system}
         ];
 
         secp256k1-static = stripDylib (pkgs.secp256k1.overrideAttrs (attrs: {
@@ -130,7 +130,7 @@
         # --- packages ----
 
         packages.withTests = hevmUnwrapped;
-	packages.noTests = pkgs.haskell.lib.dontCheck hevmUnwrapped;
+        packages.noTests = pkgs.haskell.lib.dontCheck hevmUnwrapped;
         packages.hevm = hevmWrapped;
         packages.redistributable = hevmRedistributable;
         packages.default = packages.hevm;
