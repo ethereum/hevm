@@ -228,7 +228,7 @@ solverArgs solver timeout = case solver of
     [ "-in" ]
   CVC5 ->
     [ "--lang=smt"
-    , "--no-interactive"
+    -- , "--no-interactive"
     , "--produce-models"
     , "--tlimit-per=" <> mkTimeout timeout
     ]
