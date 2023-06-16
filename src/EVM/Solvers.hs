@@ -306,10 +306,13 @@ readSExpr h = go 0 0 []
          then pure $ line : prev
          else go (ls + ls') (rs + rs') (line : prev)
 
-
--- From a list of lines, take each separate SExpression and put it in its own list
+-- From a list of lines, take each separate SExpression and put it in
+-- its own list, after removing comments.
 splitSExpr :: [Text] -> Text
-splitSExpr ls = T.unlines $ filter (/= "") $ go (T.intercalate " " ls) []
+splitSExpr ls =
+  -- split lines, strip comments, and append everything to a single line
+  let text = T.intercalate " " $ T.takeWhile (/= ';') <$> concatMap T.lines ls in
+  T.unlines $ filter (/= "") $ go text []
   where
     go "" acc = reverse acc
     go text acc =
@@ -324,6 +327,7 @@ getSExpr :: Text -> (Text, Text)
 getSExpr l = go LPar l 0 []
   where
     go _ text 0 prev@(_:_) = (T.intercalate "" (reverse prev), text)
+    go _ _ r _ | r < 0 = error "Internal error: Unbalanced SExpression"
     go _ "" _ _  = error "Internal error: Unbalanced SExpression"
     -- find the next left parenthesis
     go LPar line r prev = -- r is how many right parentheses we are missing
