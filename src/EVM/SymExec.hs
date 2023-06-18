@@ -698,7 +698,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
       let smt = assertProps $ Set.toList props
       -- if debug is on, write the query to a file
       when opts.debug $ TL.writeFile
-        ("query-" <> show idx <> ".smt2") (formatSMT2 smt <> "\n\n(check-sat)")
+        ("equiv-query-" <> show idx <> ".smt2") (formatSMT2 smt <> "\n\n(check-sat)")
 
       ku <- readTVarIO knownUnsat
       res <- if subsetAny props ku
