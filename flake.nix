@@ -130,6 +130,7 @@
         # --- packages ----
 
         packages.withTests = hevmUnwrapped;
+        packages.noTests = pkgs.haskell.lib.dontCheck hevmUnwrapped;
         packages.hevm = hevmWrapped;
         packages.redistributable = hevmRedistributable;
         packages.default = packages.hevm;
