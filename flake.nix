@@ -32,7 +32,7 @@
           z3
           cvc5
           git
-          foundry.defaultPackage.${system}
+          # foundry.defaultPackage.${system}
         ];
 
         secp256k1-static = stripDylib (pkgs.secp256k1.overrideAttrs (attrs: {
