@@ -319,7 +319,9 @@ showTrace dapp vm trace =
       in case preview (ix hash' % _2) dapp.solcByHash of
         Nothing ->
           calltype
-            <> pack (show target)
+            <> case target of
+                 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D -> "HEVM"
+                 _ -> pack (show target)
             <> pack "::"
             <> case Map.lookup (fromIntegral (fromMaybe 0x00 abi)) fullAbiMap of
                  Just m  ->

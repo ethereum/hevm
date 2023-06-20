@@ -1438,6 +1438,7 @@ cheat (inOffset, inSize) (outOffset, outSize) = do
   let
     abi = readBytes 4 (Lit inOffset) mem
     input = readMemory (Lit $ inOffset + 4) (Lit $ inSize - 4) vm
+  pushTrace $ FrameTrace (CallContext cheatCode cheatCode inOffset inSize (Lit 0) (maybeLitWord abi) input (vm.env.contracts, vm.env.storage) vm.tx.substate)
   case maybeLitWord abi of
     Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc "symbolic cheatcode selector" (wrap [abi])
     Just (fromIntegral -> abi') ->
@@ -1446,6 +1447,7 @@ cheat (inOffset, inSize) (outOffset, outSize) = do
           vmError (BadCheatCode abi')
         Just action -> do
             action (Lit outOffset) (Lit outSize) input
+            popTrace
             next
             push 1
 
