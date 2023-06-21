@@ -1,4 +1,5 @@
 {-# Language CPP #-}
+{-# Language NoFieldSelectors #-}
 {-# Language UndecidableInstances #-}
 {-# Language TemplateHaskell #-}
 {-# Language TypeApplications #-}
@@ -73,6 +74,7 @@ data EType
   | Log
   | EWord
   | EAddr
+  | EContract
   | Byte
   | End
   deriving (Typeable)
@@ -165,7 +167,7 @@ data Expr (a :: EType) where
 
   Partial        :: [Prop] -> PartialExec -> Expr End
   Failure        :: [Prop] -> EvmError -> Expr End
-  Success        :: [Prop] -> Expr Buf -> Map (Expr EAddr) Contract -> Expr End
+  Success        :: [Prop] -> Expr Buf -> Map (Expr EAddr) (Expr EContract) -> Expr End
   ITE            :: Expr EWord -> Expr End -> Expr End -> Expr End
 
   -- integers
@@ -315,20 +317,26 @@ data Expr (a :: EType) where
                  -> Expr Storage       -- storage
                  -> Expr EWord         -- success
 
+  -- Contract
+
+  -- A restricted view of a contract that does not include extraneous metadata
+  -- from the full constructor defined in the VM state
+  C :: { code :: ContractCode , storage :: Expr Storage , balance :: Expr EWord , nonce :: Expr EWord } -> Expr EContract
+
   -- addresses
 
   -- Symbolic addresses are identified with an int. It is important that
   -- semantic equality is the same as syntactic equality here. Additionally all
   -- SAddr's in a given expression should be constrained to differ from any
   -- LitAddr's
-  SAddr          :: Int -> Expr EAddr
+  SymAddr        :: Int -> Expr EAddr
   LitAddr        :: Addr -> Expr EAddr
   WAddr          :: Expr EAddr -> Expr EWord
 
   -- storage
 
-  ConcreteStore  :: (Map W256 W256) -> Expr Storage
-  AbstractStore  :: Expr Storage
+  ConcreteStore  :: Expr EAddr -> (Map W256 W256) -> Expr Storage
+  AbstractStore  :: Expr EAddr -> Expr Storage
 
   SLoad          :: Expr EWord         -- index
                  -> Expr Storage       -- storage
@@ -499,7 +507,7 @@ instance Ord Prop where
 
 -- | Core EVM Error Types
 data EvmError
-  = BalanceTooLow W256 W256
+  = BalanceTooLow (Expr EWord) (Expr EWord)
   | UnrecognizedOpcode Word8
   | SelfDestruction
   | StackUnderrun
@@ -615,7 +623,7 @@ data FrameContext
   = CreationContext
     { address         :: Expr EAddr
     , codehash        :: Expr EWord
-    , createreversion :: (Map (Expr EAddr) Contract, Map (Expr EAddr) ContractMeta)
+    , createreversion :: Map (Expr EAddr) Contract
     , substate        :: SubState
     }
   | CallContext
@@ -626,7 +634,7 @@ data FrameContext
     , codehash      :: Expr EWord
     , abi           :: Maybe W256
     , calldata      :: Expr Buf
-    , callreversion :: (Map (Expr EAddr) Contract, Map (Expr EAddr) ContractMeta)
+    , callreversion :: Map (Expr EAddr) Contract
     , subState      :: SubState
     }
   deriving (Show, Generic)
@@ -653,7 +661,7 @@ data FrameState = FrameState
   , memorySize   :: Word64
   , calldata     :: Expr Buf
   , callvalue    :: Expr EWord
-  , caller       :: Expr EWord
+  , caller       :: Expr EAddr
   , gas          :: {-# UNPACK #-} !Word64
   , returndata   :: Expr Buf
   , static       :: Bool
@@ -677,16 +685,15 @@ data TxState = TxState
 -- | Various environmental data
 data Env = Env
   { contracts    :: Map (Expr EAddr) Contract
-  , contractMeta :: Map (Expr EAddr) ContractMeta
   , chainId      :: W256
-  , origStorage  :: Map (Expr EAddr) (Map W256 W256)
   , sha3Crack    :: Map W256 ByteString
+  , symAddresses :: Int
   }
   deriving (Show, Generic)
 
 -- | Data about the block
 data Block = Block
-  { coinbase    :: Addr
+  { coinbase    :: Expr EAddr
   , timestamp   :: Expr EWord
   , number      :: W256
   , prevRandao  :: W256
@@ -698,47 +705,41 @@ data Block = Block
 
 -- | Contract state
 data Contract = Contract
-  { contractcode :: ContractCode
-  , storage      :: Expr Storage
-  , balance      :: Expr EWord
-  , nonce        :: Expr EWord
+  { code        :: ContractCode
+  , storage     :: Expr Storage
+  , origStorage :: Expr Storage
+  , balance     :: Expr EWord
+  , nonce       :: Expr EWord
+  , codehash    :: Expr EWord
+  , opIxMap     :: SV.Vector Int
+  , codeOps     :: V.Vector (Int, Op)
+  , external    :: Bool
   }
   deriving (Show, Eq, Ord)
 
--- | Per contract metadata
-data ContractMeta = ContractMeta
-  { codehash     :: Expr EWord
-  , opIxMap      :: SV.Vector Int
-  , codeOps      :: V.Vector (Int, Op)
-  , external     :: Bool
-  }
-  deriving (Show, Eq)
 
 
 -- Bytecode Representations ------------------------------------------------------------------------
 
 
 -- | A unique id for a given pc
-type CodeLocation = (Addr, Int)
+type CodeLocation = (Expr EAddr, Int)
 
 -- | The cache is data that can be persisted for efficiency:
 -- any expensive query that is constant at least within a block.
 data Cache = Cache
   { fetchedContracts :: Map Addr Contract
-  , fetchedStorage :: Map W256 (Map W256 W256)
   , path :: Map (CodeLocation, Int) Bool
   } deriving (Show, Generic)
 
 instance Semigroup Cache where
   a <> b = Cache
     { fetchedContracts = Map.unionWith unifyCachedContract a.fetchedContracts b.fetchedContracts
-    , fetchedStorage = Map.unionWith unifyCachedStorage a.fetchedStorage b.fetchedStorage
     , path = mappend a.path b.path
     }
 
 instance Monoid Cache where
   mempty = Cache { fetchedContracts = mempty
-                 , fetchedStorage = mempty
                  , path = mempty
                  }
 
@@ -828,7 +829,7 @@ data VMOpts = VMOpts
   , value :: Expr EWord
   , priorityFee :: W256
   , address :: Expr EAddr
-  , caller :: Expr EWord
+  , caller :: Expr EAddr
   , origin :: Expr EAddr
   , gas :: Word64
   , gaslimit :: Word64
@@ -843,7 +844,7 @@ data VMOpts = VMOpts
   , schedule :: FeeSchedule Word64
   , chainId :: W256
   , create :: Bool
-  , txAccessList :: Map Addr [W256]
+  , txAccessList :: Map (Expr EAddr) [W256]
   , allowFFI :: Bool
   } deriving Show
 
@@ -933,7 +934,7 @@ data GenericOp a
   | OpPush0
   | OpPush a
   | OpUnknown Word8
-  deriving (Show, Eq, Functor)
+  deriving (Show, Eq, Ord, Functor)
 
 
 -- Function Selectors ------------------------------------------------------------------------------
@@ -1127,6 +1128,10 @@ maybeLitByte _ = Nothing
 maybeLitWord :: Expr EWord -> Maybe W256
 maybeLitWord (Lit w) = Just w
 maybeLitWord _ = Nothing
+
+maybeLitAddr :: Expr EAddr -> Maybe Addr
+maybeLitAddr (LitAddr a) = Just a
+maybeLitAddr _ = Nothing
 
 word256 :: ByteString -> Word256
 word256 xs | BS.length xs == 1 =

@@ -33,13 +33,13 @@ import Data.Text.Lazy (Text)
 import qualified Data.Text as TS
 import qualified Data.Text.Lazy as T
 import Data.Text.Lazy.Builder
-import Data.Bifunctor (second)
 
 import EVM.Types
 import EVM.Traversals
 import EVM.CSE
 import EVM.Keccak
 import EVM.Expr (writeByte, bufLengthEnv, containsNode, bufLength, minLength, inRange)
+import EVM.Format (strip0x')
 import qualified EVM.Expr as Expr
 
 
@@ -50,7 +50,7 @@ import qualified EVM.Expr as Expr
 data CexVars = CexVars
   { calldata     :: [Text]
   , buffers      :: Map Text (Expr EWord) -- buffers and guesses at their maximum size
-  , storeReads   :: [(Expr EWord, Expr EWord)] -- a list of relevant store reads
+  , storeReads   :: [(Expr EAddr, Expr EWord)] -- a list of relevant store reads
   , blockContext :: [Text]
   , txContext    :: [Text]
   }
@@ -246,15 +246,15 @@ referencedBlockContext' prop = nubOrd $ foldProp referencedBlockContextGo [] pro
 -- the store (e.g, SLoad addr idx (SStore addr idx val AbstractStore)).
 -- However, we expect that most of such reads will have been
 -- simplified away.
-findStorageReads :: Prop -> [(Expr EWord, Expr EWord)]
+findStorageReads :: Prop -> [(Expr EAddr, Expr EWord)]
 findStorageReads = foldProp go []
   where
-    go :: Expr a -> [(Expr EWord, Expr EWord)]
+    go :: Expr a -> [(Expr EAddr, Expr EWord)]
     go = \case
-      SLoad addr slot storage -> [(addr, slot) | containsNode isAbstractStore storage]
+      SLoad slot storage -> [(Expr.getAddr storage, slot) | containsNode isAbstractStore storage]
       _ -> []
 
-    isAbstractStore AbstractStore = True
+    isAbstractStore (AbstractStore _) = True
     isAbstractStore _ = False
 
 
@@ -339,6 +339,10 @@ declareFrameContext names = SMT2 (["; frame context"] <> concatMap declare names
                         <> fmap (\p -> "(assert " <> propToSMT p <> ")") props
     cexvars = (mempty :: CexVars){ txContext = fmap (toLazyText . fst) names }
 
+declareStores :: [Builder] -> SMT2
+declareStores names = SMT2 (["; base stores"] <> fmap declare names) mempty
+  where
+    declare n = "(declare-const " <> n <> " (Storage)"
 
 declareBlockContext :: [(Builder, [Prop])] -> SMT2
 declareBlockContext names = SMT2 (["; block context"] <> concatMap declare names) cexvars
@@ -360,8 +364,8 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   (define-sort Word () (_ BitVec 256))
   (define-sort Buf () (Array Word Byte))
 
-  ; address -> slot -> value
-  (define-sort Storage () (Array Word (Array Word Word)))
+  ; slot -> value
+  (define-sort Storage () (Array Word Word))
 
   ; hash functions
   (declare-fun keccak (Buf) Word)
@@ -705,16 +709,14 @@ exprToSMT = \case
     "(writeWord " <> encIdx `sp` encVal `sp` encPrev <> ")"
   CopySlice srcIdx dstIdx size src dst ->
     copySlice srcIdx dstIdx size (exprToSMT src) (exprToSMT dst)
-  EmptyStore -> "emptyStore"
-  ConcreteStore s -> encodeConcreteStore s
-  AbstractStore -> "abstractStore"
-  SStore addr idx val prev ->
-    let encAddr = exprToSMT addr
-        encIdx = exprToSMT idx
+  ConcreteStore _ s -> encodeConcreteStore s
+  AbstractStore t -> fromText . T.fromStrict $ t
+  SStore idx val prev ->
+    let encIdx = exprToSMT idx
         encVal = exprToSMT val
         encPrev = exprToSMT prev in
-    "(sstore" `sp` encAddr `sp` encIdx `sp` encVal `sp` encPrev <> ")"
-  SLoad addr idx store -> op3 "sload" addr idx store
+    "(sstore" `sp` encIdx `sp` encVal `sp` encPrev <> ")"
+  SLoad idx store -> op2 "sload" idx store
 
   a -> error $ "TODO: implement: " <> show a
   where
@@ -825,16 +827,23 @@ writeBytes bytes buf = snd $ BS.foldl' wrap (0, exprToSMT buf) bytes
           idxSMT = exprToSMT . Lit . num $ idx
         in (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
 
-encodeConcreteStore :: Map W256 (Map W256 W256) -> Builder
-encodeConcreteStore s = foldl encodeWrite "emptyStore" writes
+encodeConcreteStore :: Map W256 W256 -> Builder
+encodeConcreteStore s = foldl encodeWrite "emptyStore" (Map.toList s)
   where
-    asList = fmap (second Map.toList) $ Map.toList s
-    writes = concatMap (\(addr, ws) -> fmap (\(k, v) -> (addr, k, v)) ws) asList
-    encodeWrite prev (addr, key, val) = let
-        encAddr = exprToSMT (Lit addr)
+    encodeWrite prev (key, val) = let
         encKey = exprToSMT (Lit key)
         encVal = exprToSMT (Lit val)
-      in "(sstore " <> encAddr `sp` encKey `sp` encVal `sp` prev <> ")"
+      in "(sstore " <> encKey `sp` encVal `sp` prev <> ")"
+
+storeName :: Expr Storage -> Builder
+storeName = \case
+  AbstractStore a -> mkname a
+  ConcreteStore a _ -> mkname a
+  SStore _ _ p -> storeName p
+  GVar _ -> error "cannot handle GVar"
+  where
+    mkname (LitAddr a) = fromString . strip0x' . show $ a
+    mkname (SymAddr a) = fromString ("baseStore_" <> show a)
 
 
 -- ** Cex parsing ** --------------------------------------------------------------------------------

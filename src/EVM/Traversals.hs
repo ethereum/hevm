@@ -31,8 +31,9 @@ foldProp f acc p = acc <> (go p)
       POr a b -> go a <> go b
       PImpl a b -> go a <> go b
 
-foldContract :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Contract -> b
-foldContract f acc (Contract code storage balance nonce)
+foldContract :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Expr EContract -> b
+foldContract f _ g@(GVar _) = f g
+foldContract f acc (C code storage balance nonce)
   =  acc
   <> foldCode code
   <> foldExpr f mempty storage
@@ -59,6 +60,10 @@ foldExpr f acc expr = acc <> (go expr)
       e@(LitByte _) -> f e
       e@(Var _) -> f e
       e@(GVar _) -> f e
+
+      -- contracts
+
+      e@(C {}) -> foldContract f acc e
 
       -- bytes
 
@@ -227,12 +232,12 @@ foldExpr f acc expr = acc <> (go expr)
 
       e@(LitAddr _) -> f e
       e@(WAddr a) -> f e <> go a
-      e@(SAddr _) -> f e
+      e@(SymAddr _) -> f e
 
       -- storage
 
-      e@(ConcreteStore _) -> f e
-      e@(AbstractStore) -> f e
+      e@(ConcreteStore a _) -> f e <> go a
+      e@(AbstractStore _) -> f e
       e@(SLoad a b) -> f e <> (go a) <> (go b)
       e@(SStore a b c) -> f e <> (go a) <> (go b) <> (go c)
 
@@ -282,11 +287,15 @@ mapExprM f expr = case expr of
   LitByte a -> f (LitByte a)
   Var a -> f (Var a)
   GVar s -> f (GVar s)
-  --
+
+  -- addresses
+
+  c@(C {}) -> mapContractM f c
+
   -- addresses
 
   LitAddr a -> f (LitAddr a)
-  SAddr a -> f (SAddr a)
+  SymAddr a -> f (SymAddr a)
   WAddr a -> WAddr <$> f a
 
   -- bytes
@@ -599,8 +608,10 @@ mapExprM f expr = case expr of
 
   -- storage
 
-  ConcreteStore a -> f (ConcreteStore a)
-  AbstractStore -> f AbstractStore
+  ConcreteStore a b -> do
+    a' <- mapExprM f a
+    f (ConcreteStore a' b)
+  AbstractStore a -> f (AbstractStore a)
   SLoad a b -> do
     a' <- mapExprM f a
     b' <- mapExprM f b
@@ -688,8 +699,9 @@ mapPropM f = \case
     b' <- mapPropM f b
     pure $ PImpl a' b'
 
-mapContractM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Contract -> m Contract
-mapContractM f (Contract code storage balance nonce) = do
+mapContractM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Expr EContract -> m (Expr EContract)
+mapContractM _ g@(GVar _) = pure g
+mapContractM f (C code storage balance nonce) = do
   code' <- case code of
              c@(RuntimeCode (ConcreteRuntimeCode _)) -> pure c
              RuntimeCode (SymbolicRuntimeCode c) -> do
@@ -701,7 +713,7 @@ mapContractM f (Contract code storage balance nonce) = do
   storage' <- mapExprM f storage
   balance' <- mapExprM f balance
   nonce' <- mapExprM f nonce
-  pure $ Contract code' storage' balance' nonce'
+  pure $ C code' storage' balance' nonce'
 
 -- | Generic operations over AST terms
 class TraversableTerm a where

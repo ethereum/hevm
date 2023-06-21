@@ -1,4 +1,5 @@
 {-# Language DataKinds #-}
+{-# Language ScopedTypeVariables #-}
 {-# Language PatternGuards #-}
 
 {-|
@@ -567,72 +568,56 @@ stripWrites off size = \case
 -- no explicit writes to the requested slot. This makes implementing rpc
 -- storage lookups much easier. If the store is backed by an AbstractStore we
 -- always return a symbolic value.
-readStorage :: Expr EWord -> Expr EWord -> Expr Storage -> Maybe (Expr EWord)
-readStorage _ _ EmptyStore = Nothing
-readStorage addr slot store@(ConcreteStore s) = case (addr, slot) of
-  (Lit a, Lit l) -> do
-    ctrct <- Map.lookup a s
-    val <- Map.lookup l ctrct
-    pure $ Lit val
-  _ -> Just $ SLoad addr slot store
-readStorage addr' slot' s@AbstractStore = Just $ SLoad addr' slot' s
-readStorage addr' slot' s@(SStore addr slot val prev) =
-  if addr == addr'
-  then if slot == slot'
+readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
+readStorage slot store@(ConcreteStore _ s) = case slot of
+  Lit l -> Lit <$> Map.lookup l s
+  _ -> Just $ SLoad slot store
+readStorage slot' s@(AbstractStore _) = Just $ SLoad slot' s
+readStorage slot' s@(SStore slot val prev) =
+  if slot == slot'
        -- if address and slot match then we return the val in this write
-       then Just val
-       else case (slot, slot') of
-              -- if the slots don't match and are lits, we can skip this write
-              (Lit _, Lit _) -> readStorage addr' slot' prev
-              -- if the slots don't match syntactically and are abstract then we can't skip this write
-              _ -> Just $ SLoad addr' slot' s
-  else case (addr, addr') of
-    -- if the the addresses don't match and are lits, we can skip this write
-    (Lit _, Lit _) -> readStorage addr' slot' prev
-    -- if the the addresses don't match syntactically and are abstract then we can't skip this write
-    _ -> Just $ SLoad addr' slot' s
-readStorage _ _ (GVar _) = error "Can't read from a GVar"
+  then Just val
+  else case (slot, slot') of
+         -- if the slots don't match and are lits, we can skip this write
+         (Lit _, Lit _) -> readStorage slot' prev
+         -- if the slots don't match syntactically and are abstract then we can't skip this write
+         _ -> Just $ SLoad slot' s
+readStorage _ (GVar _) = error "Can't read from a GVar"
 
-readStorage' :: Expr EWord -> Expr EWord -> Expr Storage -> Expr EWord
-readStorage' addr loc store = case readStorage addr loc store of
-                                Just v -> v
-                                Nothing -> Lit 0
+readStorage' :: Expr EWord -> Expr Storage -> Expr EWord
+readStorage' loc store = case readStorage loc store of
+                           Just v -> v
+                           Nothing -> Lit 0
 
 
 -- | Writes a value to a key in a storage expression.
 --
 -- Concrete writes on top of a concrete or empty store will produce a new
 -- ConcreteStore, otherwise we add a new write to the storage expression.
-writeStorage :: Expr EWord -> Expr EWord -> Expr EWord -> Expr Storage -> Expr Storage
-writeStorage a@(Lit addr) k@(Lit key) v@(Lit val) store = case store of
-  EmptyStore -> ConcreteStore (Map.singleton addr (Map.singleton key val))
-  ConcreteStore s -> let
-      ctrct = Map.findWithDefault Map.empty addr s
-    in ConcreteStore (Map.insert addr (Map.insert key val ctrct) s)
-  _ -> SStore a k v store
-writeStorage addr key val store@(SStore addr' key' val' prev)
-  | addr == addr'
+writeStorage :: Expr EWord -> Expr EWord -> Expr Storage -> Expr Storage
+writeStorage k@(Lit key) v@(Lit val) store = case store of
+  ConcreteStore a s -> ConcreteStore a (Map.insert key val s)
+  _ -> SStore k v store
+writeStorage key val store@(SStore key' val' prev)
      = if key == key'
        -- if we're overwriting an existing location, then drop the write
-       then SStore addr key val prev
-       else case (addr, addr', key, key') of
+       then SStore key val prev
+       else case (key, key') of
               -- if we can know statically that the new write doesn't overlap with the existing write, then we continue down the write chain
               -- we impose an ordering relation on the writes that we push down to ensure termination when this routine is called from the simplifier
-              (Lit a, Lit a', Lit k, Lit k') -> if a > a' || (a == a' && k > k')
-                                                then SStore addr' key' val' (writeStorage addr key val prev)
-                                                else SStore addr key val store
+              (Lit k, Lit k') -> if k > k'
+                                 then SStore key' val' (writeStorage key val prev)
+                                 else SStore key val store
               -- otherwise stack a new write on top of the the existing write chain
-              _ -> SStore addr key val store
-  | otherwise
-     = case (addr, addr') of
-        -- if we can know statically that the new write doesn't overlap with the existing write, then we continue down the write chain
-        -- once again we impose an ordering relation on the pushed down writes to ensure termination
-        (Lit a, Lit a') -> if a > a'
-                           then SStore addr' key' val' (writeStorage addr key val prev)
-                           else SStore addr key val store
-        -- otherwise stack a new write on top of the the existing write chain
-        _ -> SStore addr key val store
-writeStorage addr key val store = SStore addr key val store
+              _ -> SStore key val store
+writeStorage key val store = SStore key val store
+
+
+getAddr :: Expr Storage -> Expr EAddr
+getAddr (SStore _ _ p) = getAddr p
+getAddr (AbstractStore a) = a
+getAddr (ConcreteStore a _) = a
+getAddr (GVar _) = error "cannot determine addr of a GVar"
 
 
 -- ** Whole Expression Simplification ** -----------------------------------------------------------
@@ -650,8 +635,8 @@ simplify e = if (mapExpr go e == e)
     go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
 
     -- simplify storage
-    go (SLoad addr slot store) = readStorage' addr slot store
-    go (SStore addr slot val store) = writeStorage addr slot val store
+    go (SLoad slot store) = readStorage' slot store
+    go (SStore slot val store) = writeStorage slot val store
 
     -- simplify buffers
     go o@(ReadWord (Lit _) _) = simplifyReads o
@@ -817,6 +802,13 @@ litAddr = Lit . num
 exprToAddr :: Expr EWord -> Maybe Addr
 exprToAddr (Lit x) = Just (num x)
 exprToAddr _ = Nothing
+
+-- TODO: make this smarter, probably we will need to use the solver here?
+wordToAddr :: Expr EWord -> Maybe (Expr EAddr)
+wordToAddr (WAddr a) = Just a
+wordToAddr (Lit a) = Just $ LitAddr (num a)
+wordToAddr _ = Nothing
+
 
 litCode :: BS.ByteString -> [Expr Byte]
 litCode bs = fmap LitByte (BS.unpack bs)
