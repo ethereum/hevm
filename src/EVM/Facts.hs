@@ -33,7 +33,7 @@ module EVM.Facts
   ) where
 
 import EVM          (bytecode)
-import EVM.Expr     (writeStorage, litAddr)
+import EVM.Expr     (writeStorage)
 import EVM.Types
 
 import qualified EVM
@@ -43,7 +43,8 @@ import Prelude hiding (Word)
 import Optics.Core
 import Optics.State
 
-import Control.Monad.State.Strict (execState, when)
+import Control.Monad.State.Strict (execState)
+import Control.Monad
 import Data.ByteString (ByteString)
 import Data.Ord        (comparing)
 import Data.Set        (Set)
@@ -109,24 +110,40 @@ instance AsASCII ByteString where
       Right y -> Just y
       _       -> Nothing
 
-contractFacts :: Addr -> Contract -> Map W256 (Map W256 W256) -> [Fact]
-contractFacts a x store = case view bytecode x of
-  ConcreteBuf b ->
-    storageFacts a store ++
-    [ BalanceFact a x.balance
-    , NonceFact   a x.nonce
-    , CodeFact    a b
-    ]
-  _ ->
-    -- here simply ignore storing the bytecode
-    storageFacts a store ++
-    [ BalanceFact a x.balance
-    , NonceFact   a x.nonce
-    ]
+type Err a = Either String a
+
+toLitW :: Expr EWord -> Err W256
+toLitW = \case
+  Lit w -> Right w
+  w -> Left $ "cannot serialize symbolic word: " <> show w
+
+toLitStore :: Expr Storage -> Err (Map W256 W256)
+toLitStore = \case
+  ConcreteStore _ s -> Right s
+  s -> Left $ "cannot serialize symbolic store: " <> show s
+
+toLitAddr :: Expr EAddr -> Err Addr
+toLitAddr = \case
+  LitAddr a -> Right a
+  a -> Left $ "cannot serialize symbolic addr: " <> show a
+
+contractFacts :: Addr -> Contract -> Err [Fact]
+contractFacts a x = case view bytecode x of
+  ConcreteBuf b -> do
+    bal <- toLitW x.balance
+    nonce <- toLitW x.nonce
+    store <- toLitStore x.storage
+    pure $
+      storageFacts a store ++
+      [ BalanceFact a bal
+      , NonceFact   a nonce
+      , CodeFact    a b
+      ]
+  _ -> Left "cannot serialize symbolic bytecode"
 
 
-storageFacts :: Addr -> Map W256 (Map W256 W256) -> [Fact]
-storageFacts a store = map f (Map.toList (Map.findWithDefault Map.empty (num a) store))
+storageFacts :: Addr -> Map W256 W256 -> [Fact]
+storageFacts a store = map f (Map.toList store)
   where
     f :: (W256, W256) -> Fact
     f (k, v) = StorageFact
@@ -135,18 +152,19 @@ storageFacts a store = map f (Map.toList (Map.findWithDefault Map.empty (num a) 
       , which = fromIntegral k
       }
 
-cacheFacts :: Cache -> Set Fact
-cacheFacts c = Set.fromList $ do
-  (k, v) <- Map.toList c.fetchedContracts
-  contractFacts k v c.fetchedStorage
+cacheFacts :: Cache -> Err (Set Fact)
+cacheFacts c = do
+  let cs = Map.toList c.fetched
+  facts <- concatMapM (uncurry contractFacts) cs
+  pure $ Set.fromList facts
 
-vmFacts :: VM -> Set Fact
-vmFacts vm = Set.fromList $ do
-  (k, v) <- Map.toList vm.env.contracts
-  case vm.env.storage of
-    EmptyStore -> contractFacts k v Map.empty
-    ConcreteStore s -> contractFacts k v s
-    _ -> error "cannot serialize an abstract store"
+vmFacts :: VM -> Err (Set Fact)
+vmFacts vm = do
+  let cs = Map.toList vm.env.contracts
+  cs' <- forM cs $ \(k,v) -> do
+    k' <- toLitAddr k
+    pure (k', v)
+  Set.fromList <$> concatMapM (uncurry contractFacts) cs'
 
 -- Somewhat stupidly, this function demands that for each contract,
 -- the code fact for that contract comes before the other facts for
@@ -159,30 +177,29 @@ apply1 :: VM -> Fact -> VM
 apply1 vm fact =
   case fact of
     CodeFact    {..} -> flip execState vm $ do
-      assign (#env % #contracts % at addr) (Just (EVM.initialContract (RuntimeCode (ConcreteRuntimeCode blob))))
-      when (vm.state.contract == addr) $ EVM.loadContract addr
+      let a = LitAddr addr
+      assign (#env % #contracts % at a) (Just (EVM.initialContract (RuntimeCode (ConcreteRuntimeCode blob)) a))
+      when (vm.state.contract == a) $ EVM.loadContract a
     StorageFact {..} ->
-      vm & over (#env % #storage) (writeStorage (litAddr addr) (Lit which) (Lit what))
+      vm & over (#env % #contracts % ix (LitAddr addr) % #storage) (writeStorage (Lit which) (Lit what))
     BalanceFact {..} ->
-      vm & set (#env % #contracts % ix addr % #balance) what
+      vm & set (#env % #contracts % ix (LitAddr addr) % #balance) (Lit what)
     NonceFact   {..} ->
-      vm & set (#env % #contracts % ix addr % #nonce) what
+      vm & set (#env % #contracts % ix (LitAddr addr) % #nonce) (Lit what)
 
 apply2 :: VM -> Fact -> VM
 apply2 vm fact =
   case fact of
     CodeFact    {..} -> flip execState vm $ do
-      assign (#cache % #fetchedContracts % at addr) (Just (EVM.initialContract (RuntimeCode (ConcreteRuntimeCode blob))))
-      when (vm.state.contract == addr) $ EVM.loadContract addr
-    StorageFact {..} -> let
-        store = vm.cache.fetchedStorage
-        ctrct = Map.findWithDefault Map.empty (num addr) store
-      in
-        vm & set (#cache % #fetchedStorage) (Map.insert (num addr) (Map.insert which what ctrct) store)
+      let a = LitAddr addr
+      assign (#cache % #fetched % at addr) (Just (EVM.initialContract (RuntimeCode (ConcreteRuntimeCode blob)) a))
+      when (vm.state.contract == a) $ EVM.loadContract a
+    StorageFact {..} ->
+        vm & over (#cache % #fetched % ix addr % #storage) (writeStorage (Lit which) (Lit what))
     BalanceFact {..} ->
-      vm & set (#cache % #fetchedContracts % ix addr % #balance) what
+      vm & set (#cache % #fetched % ix addr % #balance) (Lit what)
     NonceFact   {..} ->
-      vm & set (#cache % #fetchedContracts % ix addr % #nonce) what
+      vm & set (#cache % #fetched % ix addr % #nonce) (Lit what)
 
 -- Sort facts in the right order for `apply1` to work.
 instance Ord Fact where

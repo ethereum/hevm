@@ -1,9 +1,8 @@
 module EVM.Exec where
 
-import EVM
+import EVM hiding (createAddress)
 import EVM.Concrete (createAddress)
 import EVM.Types
-import EVM.Expr (litAddr)
 
 import qualified EVM.FeeSchedule as FeeSchedule
 
@@ -19,16 +18,16 @@ ethrunAddress = Addr 0x00a329c0648769a73afac7f9381e08fb43dbea72
 vmForEthrunCreation :: ByteString -> VM
 vmForEthrunCreation creationCode =
   (makeVm $ VMOpts
-    { contract = initialContract (InitCode creationCode mempty)
+    { contract = initialContract (InitCode creationCode mempty) (LitAddr ethrunAddress)
     , calldata = mempty
-    , value = (Lit 0)
-    , initialStorage = EmptyStore
+    , value = Lit 0
+    , initialStorage = ConcreteStore (LitAddr ethrunAddress) mempty
     , address = createAddress ethrunAddress 1
-    , caller = litAddr ethrunAddress
-    , origin = ethrunAddress
-    , coinbase = 0
+    , caller = LitAddr ethrunAddress
+    , origin = LitAddr ethrunAddress
+    , coinbase = LitAddr 0
     , number = 0
-    , timestamp = (Lit 0)
+    , timestamp = Lit 0
     , blockGaslimit = 0
     , gasprice = 0
     , prevRandao = 42069
@@ -42,8 +41,8 @@ vmForEthrunCreation creationCode =
     , create = False
     , txAccessList = mempty
     , allowFFI = False
-    }) & set (#env % #contracts % at ethrunAddress)
-             (Just (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
+    }) & set (#env % #contracts % at (LitAddr ethrunAddress))
+             (Just (initialContract (RuntimeCode (ConcreteRuntimeCode "")) (LitAddr ethrunAddress)))
 
 exec :: State VM VMResult
 exec = do

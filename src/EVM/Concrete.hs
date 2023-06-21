@@ -1,8 +1,11 @@
+{-# Language DataKinds #-}
+
 module EVM.Concrete where
 
 import Prelude hiding (Word)
 
 import EVM.Types
+import EVM.RLP
 
 import Data.Bits       (Bits (..), shiftR)
 import Data.ByteString (ByteString, (!?))
@@ -64,3 +67,10 @@ x0 ^ y0 | y0 < 0    = errorWithoutStackTrace "Negative exponent"
           g x y z | not (testBit y 0) = g (x * x) (y `shiftR` 1) z
                   | y == 1      = x * z
                   | otherwise   = g (x * x) ((y - 1) `shiftR` 1) (x * z)
+
+createAddress :: Addr -> W256 -> Expr EAddr
+createAddress a n = LitAddr . num . keccak' . rlpList $ [rlpAddrFull a, rlpWord256 n]
+
+create2Address :: Addr -> W256 -> ByteString -> Expr EAddr
+create2Address a s b = LitAddr $ num $ keccak' $ mconcat
+  [BS.singleton 0xff, word160Bytes a, word256Bytes s, word256Bytes $ keccak' b]

@@ -728,36 +728,29 @@ type CodeLocation = (Expr EAddr, Int)
 -- | The cache is data that can be persisted for efficiency:
 -- any expensive query that is constant at least within a block.
 data Cache = Cache
-  { fetchedContracts :: Map Addr Contract
-  , path :: Map (CodeLocation, Int) Bool
+  { fetched :: Map Addr Contract
+  , path    :: Map (CodeLocation, Int) Bool
   } deriving (Show, Generic)
 
 instance Semigroup Cache where
   a <> b = Cache
-    { fetchedContracts = Map.unionWith unifyCachedContract a.fetchedContracts b.fetchedContracts
+    { fetched = Map.unionWith unifyCachedContract a.fetched b.fetched
     , path = mappend a.path b.path
     }
 
 instance Monoid Cache where
-  mempty = Cache { fetchedContracts = mempty
+  mempty = Cache { fetched = mempty
                  , path = mempty
                  }
-
-unifyCachedStorage :: Map W256 W256 -> Map W256 W256 -> Map W256 W256
-unifyCachedStorage _ _ = undefined
 
 -- only intended for use in Cache merges, where we expect
 -- everything to be Concrete
 unifyCachedContract :: Contract -> Contract -> Contract
-unifyCachedContract _ _ = undefined
-  {-
-unifyCachedContract a b = a & set storage merged
-  where merged = case (view storage a, view storage b) of
-                   (ConcreteStore sa, ConcreteStore sb) ->
-                     ConcreteStore (mappend sa sb)
-                   _ ->
-                     view storage a
-   -}
+unifyCachedContract a b = a { storage = merged }
+  where merged = case (a.storage, b.storage) of
+                   (ConcreteStore a' sa, ConcreteStore _ sb) ->
+                     ConcreteStore a' (mappend sa sb)
+                   _ -> a.storage
 
 
 -- Bytecode Representations ------------------------------------------------------------------------

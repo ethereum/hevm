@@ -29,6 +29,7 @@ import EVM.Precompiled qualified
 import EVM.Solidity
 import EVM.Types
 import EVM.Sign qualified
+import EVM.Concrete qualified as Concrete
 
 import Control.Monad.State.Strict hiding (state)
 import Data.Bits (FiniteBits, countLeadingZeros, finiteBitSize)
@@ -433,15 +434,15 @@ exec1 = do
 
         OpExtcodesize ->
           case stk of
-            x':xs -> case x' of
-              Lit x -> if x == num cheatCode
+            x':xs -> case wordToAddr x' of
+              Just (LitAddr x) -> if x == num cheatCode
                 then do
                   next
                   assign (#state % #stack) xs
                   pushSym (Lit 1)
                 else
-                  accessAndBurn (num x) $
-                    fetchAccount (num x) $ \c -> do
+                  accessAndBurn (LitAddr x) $
+                    fetchAccount (LitAddr x) $ \c -> do
                       next
                       assign (#state % #stack) xs
                       pushSym (bufLength (view bytecode c))
@@ -455,13 +456,13 @@ exec1 = do
         OpExtcodecopy ->
           case stk of
             extAccount':memOffset':codeOffset:codeSize':xs ->
-              forceConcrete3 (extAccount', memOffset', codeSize') "EXTCODECOPY" $
-                \(extAccount, memOffset, codeSize) -> do
-                  acc <- accessAccountForGas (num extAccount)
+              forceConcrete2 (memOffset', codeSize') "EXTCODECOPY" $ \(memOffset, codeSize) -> do
+                forceAddr extAccount' "EXTCODECOPY" $ \extAccount -> do
+                  acc <- accessAccountForGas extAccount
                   let cost = if acc then g_warm_storage_read else g_cold_account_access
                   burn (cost + g_copy * ceilDiv (num codeSize) 32) $
                     accessMemoryRange memOffset codeSize $
-                      fetchAccount (num extAccount) $ \c -> do
+                      fetchAccount extAccount $ \c -> do
                         next
                         assign (#state % #stack) xs
                         copyBytesToMemory (view bytecode c) codeSize' codeOffset memOffset'
@@ -494,11 +495,11 @@ exec1 = do
 
         OpExtcodehash ->
           case stk of
-            x':xs -> forceConcrete x' "EXTCODEHASH" $ \x ->
-              accessAndBurn (num x) $ do
+            x':xs -> forceAddr x' "EXTCODEHASH" $ \x ->
+              accessAndBurn x $ do
                 next
                 assign (#state % #stack) xs
-                fetchAccount (num x) $ \c ->
+                fetchAccount x $ \c ->
                    if accountEmpty c
                      then push (num (0 :: Int))
                      else pushSym $ keccak (view bytecode c)
@@ -516,7 +517,7 @@ exec1 = do
 
         OpCoinbase ->
           limitStack 1 . burn g_base $
-            next >> push (num vm.block.coinbase)
+            next >> pushSym (WAddr vm.block.coinbase)
 
         OpTimestamp ->
           limitStack 1 . burn g_base $
@@ -918,37 +919,38 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
               next
             else continue gas'
 
-  precompiledContract
-    :: (?op :: Word8)
-    => Contract
-    -> Word64
-    -> Addr
-    -> Addr
-    -> W256
-    -> W256 -> W256 -> W256 -> W256
-    -> [Expr EWord]
-    -> EVM ()
-  precompiledContract this xGas precompileAddr recipient xValue inOffset inSize outOffset outSize xs
-    = callChecks this xGas (LitAddr recipient) (LitAddr precompileAddr) xValue inOffset inSize outOffset outSize xs $ \gas' ->
-  do
-    executePrecompile precompileAddr gas' inOffset inSize outOffset outSize xs
-    self <- use (#state % #contract)
-    stk <- use (#state % #stack)
-    pc' <- use (#state % #pc)
-    result' <- use #result
-    case result' of
-      Nothing -> case stk of
-        x:_ -> case maybeLitWord x of
-          Just 0 ->
-            pure ()
-          Just 1 ->
-            fetchAccount (LitAddr recipient) $ \_ -> do
-              transfer self (LitAddr recipient) (Lit xValue)
-              touchAccount self
-              touchAccount (LitAddr recipient)
-          _ -> partial $ UnexpectedSymbolicArg pc' "unexpected return value from precompile" (wrap [x])
-        _ -> underrun
-      _ -> pure ()
+precompiledContract
+  :: (?op :: Word8)
+  => Contract
+  -> Word64
+  -> Addr
+  -> Addr
+  -> W256
+  -> W256 -> W256 -> W256 -> W256
+  -> [Expr EWord]
+  -> EVM ()
+precompiledContract this xGas precompileAddr recipient xValue inOffset inSize outOffset outSize xs
+  = callChecks this xGas (LitAddr recipient) (LitAddr precompileAddr) xValue inOffset inSize outOffset outSize xs $ \gas' ->
+    do
+      executePrecompile precompileAddr gas' inOffset inSize outOffset outSize xs
+      self <- use (#state % #contract)
+      stk <- use (#state % #stack)
+      pc' <- use (#state % #pc)
+      result' <- use #result
+      case result' of
+        Nothing -> case stk of
+          x:_ -> case maybeLitWord x of
+            Just 0 ->
+              pure ()
+            Just 1 ->
+              fetchAccount (LitAddr recipient) $ \_ -> do
+                transfer self (LitAddr recipient) (Lit xValue)
+                touchAccount self
+                touchAccount (LitAddr recipient)
+            _ -> partial $
+                   UnexpectedSymbolicArg pc' "unexpected return value from precompile" (wrap [x])
+          _ -> underrun
+        _ -> pure ()
 
 executePrecompile
   :: (?op :: Word8)
@@ -1171,14 +1173,14 @@ fetchAccount addr' continue =
   use (#env % #contracts % at addr') >>= \case
     Just c -> continue c
     Nothing -> forceConcreteAddr addr' "cannot fetch symbolic storage via rpc" $ \addr -> do
-        use (#cache % #fetchedContracts % at addr) >>= \case
+        use (#cache % #fetched % at addr) >>= \case
           Just c -> do
             assign (#env % #contracts % at addr') (Just c)
             continue c
           Nothing -> do
             assign (#result) . Just . HandleEffect . Query $
               PleaseFetchContract addr
-                (\c -> do assign (#cache % #fetchedContracts % at addr) (Just c)
+                (\c -> do assign (#cache % #fetched % at addr) (Just c)
                           assign (#env % #contracts % at addr') (Just c)
                           assign #result Nothing
                           continue c)
@@ -1200,7 +1202,7 @@ accessStorage addr slot continue = do
             forceConcreteAddr addr "cannot read storage from symbolic addresses via rpc" $ \addr' ->
               forceConcrete slot "cannot read symbolic slots via RPC" $ \slot' -> do
                 -- check if the slot is cached
-                contract <- preuse (#cache % #fetchedContracts % ix addr')
+                contract <- preuse (#cache % #fetched % ix addr')
                 case contract of
                   Nothing -> error "Internal Error: contract marked external not found in cache"
                   Just fetched -> case readStorage (Lit slot') fetched.storage of
@@ -1216,7 +1218,7 @@ accessStorage addr slot continue = do
       mkQuery a s = query $
         PleaseFetchSlot a s
           (\x -> do
-              modifying (#cache % #fetchedContracts % ix a % #storage) (writeStorage (Lit s) (Lit x))
+              modifying (#cache % #fetched % ix a % #storage) (writeStorage (Lit s) (Lit x))
               modifying (#env % #contracts % ix (LitAddr a) % #storage) (writeStorage (Lit s) (Lit x))
               assign #result Nothing
               continue (Lit x))
@@ -1676,13 +1678,7 @@ create :: (?op :: Word8)
 create self this xSize xGas' xValue xs newAddr initCode = do
   vm0 <- get
   let xGas = num xGas'
-  if this.nonce == num (maxBound :: Word64)
-  then do
-    assign (#state % #stack) (Lit 0 : xs)
-    assign (#state % #returndata) mempty
-    pushTrace $ ErrorTrace NonceOverflow
-    next
-  else if xSize > vm0.block.maxCodeSize * 2
+  if xSize > vm0.block.maxCodeSize * 2
   then do
     assign (#state % #stack) (Lit 0 : xs)
     assign (#state % #returndata) mempty
@@ -1700,6 +1696,7 @@ create self this xSize xGas' xValue xs newAddr initCode = do
     modifying (#env % #contracts % ix self % #nonce) (Expr.add (Lit 1))
     next
   else burn xGas $
+    -- do we have enough balance
     branch (Expr.gt (Lit xValue) this.balance) $ \case
       True -> do
         assign (#state % #stack) (Lit 0 : xs)
@@ -1708,65 +1705,72 @@ create self this xSize xGas' xValue xs newAddr initCode = do
         next
         touchAccount self
         touchAccount newAddr
-      False -> do
-        -- unfortunately we have to apply some (pretty hacky)
-        -- heuristics here to parse the unstructured buffer read
-        -- from memory into a code and data section
-        let contract' = do
-              prefixLen <- Expr.concPrefix initCode
-              prefix <- Expr.toList $ Expr.take (num prefixLen) initCode
-              let sym = Expr.drop (num prefixLen) initCode
-              conc <- mapM maybeLitByte prefix
-              pure $ InitCode (BS.pack $ V.toList conc) sym
-        case contract' of
-          Nothing ->
-            partial $ UnexpectedSymbolicArg vm0.state.pc "initcode must have a concrete prefix" []
-          Just c -> do
-            let
-              newContract = initialContract c newAddr
-              newContext  =
-                CreationContext { address   = newAddr
-                                , codehash  = newContract.codehash
-                                , createreversion = vm0.env.contracts
-                                , substate  = vm0.tx.substate
-                                }
+      -- are we overflowing the nonce
+      False -> branch (Expr.eq this.nonce (Lit $ num (maxBound :: Word64))) $ \case
+        True -> do
+          assign (#state % #stack) (Lit 0 : xs)
+          assign (#state % #returndata) mempty
+          pushTrace $ ErrorTrace NonceOverflow
+          next
+        False -> do
+          -- unfortunately we have to apply some (pretty hacky)
+          -- heuristics here to parse the unstructured buffer read
+          -- from memory into a code and data section
+          let contract' = do
+                prefixLen <- Expr.concPrefix initCode
+                prefix <- Expr.toList $ Expr.take (num prefixLen) initCode
+                let sym = Expr.drop (num prefixLen) initCode
+                conc <- mapM maybeLitByte prefix
+                pure $ InitCode (BS.pack $ V.toList conc) sym
+          case contract' of
+            Nothing ->
+              partial $ UnexpectedSymbolicArg vm0.state.pc "initcode must have a concrete prefix" []
+            Just c -> do
+              let
+                newContract = initialContract c newAddr
+                newContext  =
+                  CreationContext { address   = newAddr
+                                  , codehash  = newContract.codehash
+                                  , createreversion = vm0.env.contracts
+                                  , substate  = vm0.tx.substate
+                                  }
 
-            zoom (#env % #contracts) $ do
-              oldAcc <- use (at newAddr)
-              let oldBal = maybe (Lit 0) (.balance) oldAcc
+              zoom (#env % #contracts) $ do
+                oldAcc <- use (at newAddr)
+                let oldBal = maybe (Lit 0) (.balance) oldAcc
 
-              assign (at newAddr) (Just (newContract & #balance .~ oldBal))
-              modifying (ix self % #nonce) (Expr.add (Lit 1))
+                assign (at newAddr) (Just (newContract & #balance .~ oldBal))
+                modifying (ix self % #nonce) (Expr.add (Lit 1))
 
-            let
-              resetStorage :: Expr Storage -> Expr Storage
-              resetStorage = \case
-                  ConcreteStore a _ -> ConcreteStore a mempty
-                  AbstractStore a -> AbstractStore a
-                  SStore _ _ p -> resetStorage p
-                  GVar _  -> error "unexpected global variable"
+              let
+                resetStorage :: Expr Storage -> Expr Storage
+                resetStorage = \case
+                    ConcreteStore a _ -> ConcreteStore a mempty
+                    AbstractStore a -> AbstractStore a
+                    SStore _ _ p -> resetStorage p
+                    GVar _  -> error "unexpected global variable"
 
-            modifying (#env % #contracts % ix newAddr % #storage) resetStorage
-            modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage
+              modifying (#env % #contracts % ix newAddr % #storage) resetStorage
+              modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage
 
-            transfer self newAddr (Lit xValue)
+              transfer self newAddr (Lit xValue)
 
-            pushTrace (FrameTrace newContext)
-            next
-            vm1 <- get
-            pushTo #frames $ Frame
-              { context = newContext
-              , state   = vm1.state { stack = xs }
-              }
+              pushTrace (FrameTrace newContext)
+              next
+              vm1 <- get
+              pushTo #frames $ Frame
+                { context = newContext
+                , state   = vm1.state { stack = xs }
+                }
 
-            assign #state $
-              blankState
-                & set #contract     newAddr
-                & set #codeContract newAddr
-                & set #code         c
-                & set #callvalue    (Lit xValue)
-                & set #caller       self
-                & set #gas          xGas'
+              assign #state $
+                blankState
+                  & set #contract     newAddr
+                  & set #codeContract newAddr
+                  & set #code         c
+                  & set #callvalue    (Lit xValue)
+                  & set #caller       self
+                  & set #gas          xGas'
 
 -- | Replace a contract's code, like when CREATE returns
 -- from the constructor code.
@@ -2355,13 +2359,12 @@ codeloc = do
   pure (vm.state.contract, vm.state.pc)
 
 createAddress :: Expr EAddr -> Expr EWord -> EVM (Expr EAddr)
-createAddress (LitAddr a) (Lit n) = pure . LitAddr . num . keccak' . rlpList $ [rlpAddrFull a, rlpWord256 n]
+createAddress (LitAddr a) (Lit n) = pure $ Concrete.createAddress a n
 createAddress (GVar _) _ = error "Internal Error: unexpected GVar"
 createAddress _ _ = freshSymAddr
 
 create2Address :: Expr EAddr -> W256 -> ByteString -> EVM (Expr EAddr)
-create2Address (LitAddr a) s b = pure $ LitAddr $ num $ keccak' $ mconcat
-  [BS.singleton 0xff, word160Bytes a, word256Bytes s, word256Bytes $ keccak' b]
+create2Address (LitAddr a) s b = pure $ Concrete.create2Address a s b
 create2Address (SymAddr _) _ _ = freshSymAddr
 create2Address (GVar _) _ _ = error "Internal Error: unexpected GVar"
 
