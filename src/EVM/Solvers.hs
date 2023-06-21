@@ -88,10 +88,8 @@ checkSat :: SolverGroup -> SMT2 -> IO CheckSatResult
 checkSat (SolverGroup taskQueue) script = do
   -- prepare result channel
   resChan <- newChan
-
   -- send task to solver group
   writeChan taskQueue (Task script resChan)
-
   -- collect result
   readChan resChan
 
@@ -99,7 +97,6 @@ withSolvers :: Solver -> Natural -> Maybe Natural -> (SolverGroup -> IO a) -> IO
 withSolvers solver count timeout cont = do
   -- spawn solvers
   instances <- mapM (const $ spawnSolver solver timeout) [1..count]
-
   -- spawn orchestration thread
   taskQueue <- newChan
   availableInstances <- newChan
@@ -231,7 +228,6 @@ solverArgs solver timeout = case solver of
     [ "-in" ]
   CVC5 ->
     [ "--lang=smt"
-    , "--no-interactive"
     , "--produce-models"
     , "--tlimit-per=" <> mkTimeout timeout
     ]
@@ -257,7 +253,7 @@ stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
 sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
 sendScript solver (SMT2 cmds _) = do
-  sendLine' solver (T.unlines $ fmap toLazyText cmds)
+  sendLine' solver (splitSExpr $ fmap toLazyText cmds)
   pure $ Right()
 
 -- | Sends a single command to the solver, returns the first available line from the output buffer
@@ -308,3 +304,37 @@ readSExpr h = go 0 0 []
       if (ls + ls') == (rs + rs')
          then pure $ line : prev
          else go (ls + ls') (rs + rs') (line : prev)
+
+-- From a list of lines, take each separate SExpression and put it in
+-- its own list, after removing comments.
+splitSExpr :: [Text] -> Text
+splitSExpr ls =
+  -- split lines, strip comments, and append everything to a single line
+  let text = T.intercalate " " $ T.takeWhile (/= ';') <$> concatMap T.lines ls in
+  T.unlines $ filter (/= "") $ go text []
+  where
+    go "" acc = reverse acc
+    go text acc =
+      let (sexpr, text') = getSExpr text in
+      let (sexpr', rest) = T.breakOnEnd ")" sexpr in
+      go text' ((T.strip rest):(T.strip sexpr'):acc)
+
+data Par = LPar | RPar
+
+-- take the first SExpression and return the rest of the text
+getSExpr :: Text -> (Text, Text)
+getSExpr l = go LPar l 0 []
+  where
+    go _ text 0 prev@(_:_) = (T.intercalate "" (reverse prev), text)
+    go _ _ r _ | r < 0 = error "Internal error: Unbalanced SExpression"
+    go _ "" _ _  = error "Internal error: Unbalanced SExpression"
+    -- find the next left parenthesis
+    go LPar line r prev = -- r is how many right parentheses we are missing
+      let (before, after) = T.breakOn "(" line in
+      let rp = T.length $ T.filter (== ')') before in
+      go RPar after (r - rp) (if before == "" then prev else before : prev)
+    -- find the next right parenthesis
+    go RPar line r prev =
+      let (before, after) = T.breakOn ")" line in
+      let lp = T.length $ T.filter (== '(') before in
+      go LPar after (r + lp) (if before == "" then prev else before : prev)
