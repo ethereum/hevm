@@ -32,8 +32,8 @@ prettyContract c =
   object
     [ (text "codesize", text . show $ (bufLength (c ^. bytecode)))
     , (text "codehash", text (show (c ^. #codehash)))
-    , (text "balance", int (fromIntegral (c ^. #balance)))
-    , (text "nonce", int (fromIntegral (c ^. #nonce)))
+    , (text "balance", text (show (c ^. #balance)))
+    , (text "nonce", text (show (c ^. #nonce)))
     ]
 
 prettyContracts :: Map Addr Contract -> Doc

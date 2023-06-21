@@ -1,3 +1,5 @@
+{-# Language DataKinds #-}
+
 module EVM.Dapp where
 
 import EVM.Concrete
@@ -43,7 +45,7 @@ data Code = Code
 
 data DappContext = DappContext
   { info :: DappInfo
-  , env  :: Map Addr Contract
+  , env  :: Map (Expr EAddr) Contract
   }
 
 data Test = ConcreteTest Text | SymbolicTest Text | InvariantTest Text
@@ -143,7 +145,7 @@ traceSrcMap dapp trace = srcMap dapp trace.contract trace.opIx
 srcMap :: DappInfo -> Contract -> Int -> Maybe SrcMap
 srcMap dapp contr opIndex = do
   sol <- findSrc contr dapp
-  case contr.contractcode of
+  case contr.code of
     (InitCode _ _) ->
       Seq.lookup opIndex sol.creationSrcmap
     (RuntimeCode _) ->
@@ -154,7 +156,7 @@ findSrc c dapp = do
   hash <- maybeLitWord c.codehash
   case Map.lookup hash dapp.solcByHash of
     Just (_, v) -> Just v
-    Nothing -> lookupCode c.contractcode dapp
+    Nothing -> lookupCode c.code dapp
 
 
 lookupCode :: ContractCode -> DappInfo -> Maybe SolcContract

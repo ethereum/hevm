@@ -7,8 +7,8 @@ import EVM.FeeSchedule
 import EVM.RLP
 import EVM.Types
 import EVM.Format (hexText)
-import EVM.Expr (litAddr)
 import EVM.Sign
+import qualified EVM.Expr as Expr
 
 import Optics.Core hiding (cons)
 
@@ -227,21 +227,21 @@ instance FromJSON Transaction where
   parseJSON invalid =
     JSON.typeMismatch "Transaction" invalid
 
-accountAt :: Addr -> Getter (Map Addr Contract) Contract
-accountAt a = (at a) % (to $ fromMaybe newAccount)
+accountAt :: Expr EAddr -> Getter (Map (Expr EAddr) Contract) Contract
+accountAt a = (at a) % (to $ fromMaybe (newAccount a))
 
-touchAccount :: Addr -> Map Addr Contract -> Map Addr Contract
-touchAccount a = Map.insertWith (flip const) a newAccount
+touchAccount :: Expr EAddr -> Map (Expr EAddr) Contract -> Map (Expr EAddr) Contract
+touchAccount a = Map.insertWith (flip const) a (newAccount a)
 
-newAccount :: Contract
-newAccount = initialContract $ RuntimeCode (ConcreteRuntimeCode "")
+newAccount :: Expr EAddr -> Contract
+newAccount = initialContract (RuntimeCode (ConcreteRuntimeCode ""))
 
 -- | Increments origin nonce and pays gas deposit
-setupTx :: Addr -> Addr -> W256 -> Word64 -> Map Addr Contract -> Map Addr Contract
+setupTx :: Expr EAddr -> Expr EAddr -> W256 -> Word64 -> Map (Expr EAddr) Contract -> Map (Expr EAddr) Contract
 setupTx origin coinbase gasPrice gasLimit prestate =
   let gasCost = gasPrice * (num gasLimit)
-  in (Map.adjust ((over #nonce   (+ 1))
-               . (over #balance (subtract gasCost))) origin)
+  in (Map.adjust ((over #nonce   (`Expr.add` (Lit 1)))
+               . (over #balance (`Expr.sub` (Lit gasCost)))) origin)
     . touchAccount origin
     . touchAccount coinbase $ prestate
 
@@ -256,27 +256,17 @@ initTx vm = let
     gasLimit = vm.tx.gaslimit
     coinbase = vm.block.coinbase
     value    = vm.state.callvalue
-    toContract = initialContract vm.state.code
+    toContract = initialContract vm.state.code toAddr
     preState = setupTx origin coinbase gasPrice gasLimit vm.env.contracts
     oldBalance = view (accountAt toAddr % #balance) preState
     creation = vm.tx.isCreate
-    initState = (case maybeLitWord value of
-      Just v -> ((Map.adjust (over #balance (subtract v))) origin)
-              . (Map.adjust (over #balance (+ v))) toAddr
-      Nothing -> id)
+    initState =
+        ((Map.adjust (over #balance (`Expr.sub` value))) origin)
+      . (Map.adjust (over #balance (Expr.add value))) toAddr
       . (if creation
-         then Map.insert toAddr (toContract & #balance .~ oldBalance)
+         then Map.insert toAddr (toContract & (set #balance oldBalance))
          else touchAccount toAddr)
       $ preState
-
-    resetConcreteStore s = if creation then Map.insert (num toAddr) mempty s else s
-
-    resetStore (ConcreteStore s) = ConcreteStore (resetConcreteStore s)
-    resetStore (SStore a@(Lit _) k v s) = if creation && a == (litAddr toAddr) then resetStore s else (SStore a k v (resetStore s))
-    resetStore (SStore {}) = error "cannot reset storage if it contains symbolic addresses"
-    resetStore s = s
     in
       vm & #env % #contracts .~ initState
          & #tx % #txReversion .~ preState
-         & #env % #storage %~ resetStore
-         & #env % #origStorage %~ resetConcreteStore

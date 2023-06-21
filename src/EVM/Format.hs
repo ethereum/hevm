@@ -109,7 +109,7 @@ showAbiValue (AbiBytes _ bs) = formatBinary bs
 showAbiValue (AbiAddress addr) =
   let dappinfo = ?context.info
       contracts = ?context.env
-      name = case Map.lookup addr contracts of
+      name = case Map.lookup (LitAddr addr) contracts of
         Nothing -> ""
         Just contract ->
           let hash = maybeLitWord contract.codehash
@@ -455,7 +455,7 @@ formatExpr = go
           , indent 2 $ formatExpr buf
           , ""
           , "Store:"
-          , indent 2 $ formatExpr store
+          , indent 2 $ T.unlines (fmap (\(a,s) -> (formatExpr a) <> " : " <> (formatExpr s)) (Map.toList store))
           , "Assertions:"
           , indent 2 $ T.pack $ show asserts
           ]
@@ -503,24 +503,20 @@ formatExpr = go
         ]
 
       -- Stores
-      SLoad addr slot store -> T.unlines
+      SLoad slot store -> T.unlines
         [ "(SLoad"
         , indent 2 $ T.unlines
-          [ "addr:"
-          , indent 2 $ formatExpr addr
-          , "slot:"
+          [ "slot:"
           , indent 2 $ formatExpr slot
           , "store:"
           , indent 2 $ formatExpr store
           ]
         , ")"
         ]
-      SStore addr slot val prev -> T.unlines
+      SStore slot val prev -> T.unlines
         [ "(SStore"
         , indent 2 $ T.unlines
-          [ "addr:"
-          , indent 2 $ formatExpr addr
-          , "slot:"
+          [ "slot:"
           , indent 2 $ formatExpr slot
           , "val:"
           , indent 2 $ formatExpr val
@@ -528,9 +524,14 @@ formatExpr = go
         , ")"
         , formatExpr prev
         ]
-      ConcreteStore s -> T.unlines
+      ConcreteStore a s -> T.unlines
         [ "(ConcreteStore"
-        , indent 2 $ T.unlines $ fmap (T.pack . show) $ Map.toList $ fmap (T.pack . show . Map.toList) s
+        , indent 2 $ T.unlines
+          [ "addr:"
+          , indent 2 $ formatExpr a
+          , "vals:"
+          , indent 2 $ T.unlines $ fmap (T.pack . show) $ Map.toList s
+          ]
         , ")"
         ]
 
