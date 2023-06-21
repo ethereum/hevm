@@ -27,8 +27,10 @@ import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.String.Here
 import Data.Maybe (fromJust)
-import Data.Map (Map)
-import qualified Data.Map as Map
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Text.Lazy (Text)
 import qualified Data.Text as TS
 import qualified Data.Text.Lazy as T
@@ -147,6 +149,8 @@ assertProps ps =
   let encs = map propToSMT ps_elim
       intermediates = declareIntermediates bufs stores in
   prelude
+  <> (declareStores storeNames)
+  <> SMT2 [""] mempty
   <> (declareBufs ps_elim bufs stores)
   <> SMT2 [""] mempty
   <> (declareVars . nubOrd $ foldl (<>) [] allVars)
@@ -174,6 +178,7 @@ assertProps ps =
     storeVals = Map.elems stores
 
     storageReads = nubOrd $ concatMap findStorageReads ps
+    storeNames = Set.toList $ Set.unions (fmap referencedStores ps)
 
     keccakAssumes
       = SMT2 ["; keccak assumptions"] mempty
@@ -182,6 +187,14 @@ assertProps ps =
     readAssumes
       = SMT2 ["; read assumptions"] mempty
         <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads ps_elim bufs stores)) mempty
+
+referencedStores :: TraversableTerm a => a -> Set Builder
+referencedStores term = foldTerm go mempty term
+  where
+    go = \case
+      AbstractStore s -> Set.singleton (storeName s)
+      ConcreteStore s _ -> Set.singleton (storeName s)
+      _ -> mempty
 
 referencedBufsGo :: Expr a -> [Builder]
 referencedBufsGo = \case
@@ -574,8 +587,8 @@ exprToSMT :: Expr a -> Builder
 exprToSMT = \case
   Lit w -> fromLazyText $ "(_ bv" <> (T.pack $ show (num w :: Integer)) <> " 256)"
   Var s -> fromText s
-  GVar (BufVar n) -> fromLazyText $ "buf" <> (T.pack . show $ n)
-  GVar (StoreVar n) -> fromLazyText $ "store" <> (T.pack . show $ n)
+  GVar (BufVar n) -> fromString $ "buf" <> (show n)
+  GVar (StoreVar n) -> fromString $ "store" <> (show n)
   JoinBytes
     z o two three four five six seven
     eight nine ten eleven twelve thirteen fourteen fifteen
@@ -709,8 +722,8 @@ exprToSMT = \case
     "(writeWord " <> encIdx `sp` encVal `sp` encPrev <> ")"
   CopySlice srcIdx dstIdx size src dst ->
     copySlice srcIdx dstIdx size (exprToSMT src) (exprToSMT dst)
-  ConcreteStore _ s -> encodeConcreteStore s
-  AbstractStore t -> fromText . T.fromStrict $ t
+  ConcreteStore a s -> encodeConcreteStore a s
+  AbstractStore a -> storeName a
   SStore idx val prev ->
     let encIdx = exprToSMT idx
         encVal = exprToSMT val
@@ -727,11 +740,6 @@ exprToSMT = \case
       let aenc = exprToSMT a
           benc = exprToSMT b in
       "(" <> op `sp` aenc `sp` benc <> ")"
-    op3 op a b c =
-      let aenc = exprToSMT a
-          benc = exprToSMT b
-          cenc = exprToSMT c in
-      "(" <> op `sp` aenc `sp` benc `sp` cenc <> ")"
     op2CheckZero op a b =
       let aenc = exprToSMT a
           benc = exprToSMT b in
@@ -827,23 +835,19 @@ writeBytes bytes buf = snd $ BS.foldl' wrap (0, exprToSMT buf) bytes
           idxSMT = exprToSMT . Lit . num $ idx
         in (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
 
-encodeConcreteStore :: Map W256 W256 -> Builder
-encodeConcreteStore s = foldl encodeWrite "emptyStore" (Map.toList s)
+encodeConcreteStore :: Expr EAddr -> Map W256 W256 -> Builder
+encodeConcreteStore a s = foldl encodeWrite (storeName a) (Map.toList s)
   where
     encodeWrite prev (key, val) = let
         encKey = exprToSMT (Lit key)
         encVal = exprToSMT (Lit val)
       in "(sstore " <> encKey `sp` encVal `sp` prev <> ")"
 
-storeName :: Expr Storage -> Builder
+storeName :: Expr EAddr -> Builder
 storeName = \case
-  AbstractStore a -> mkname a
-  ConcreteStore a _ -> mkname a
-  SStore _ _ p -> storeName p
-  GVar _ -> error "cannot handle GVar"
-  where
-    mkname (LitAddr a) = fromString . strip0x' . show $ a
-    mkname (SymAddr a) = fromString ("baseStore_" <> show a)
+    LitAddr a -> fromString . strip0x' . show $ a
+    SymAddr a -> fromString ("baseStore_" <> show a)
+    GVar _ -> error "Internal Error: unexpected GVar"
 
 
 -- ** Cex parsing ** --------------------------------------------------------------------------------
