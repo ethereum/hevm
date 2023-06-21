@@ -993,3 +993,6 @@ containsNode p = getAny . foldExpr go (Any False)
     go :: Expr a -> Any
     go node | p node  = Any True
     go _ = Any False
+
+inRange :: Int -> Expr EWord -> Prop
+inRange sz e = PAnd (PGEq e (Lit 0)) (PLEq e (Lit $ 2 ^ sz - 1))

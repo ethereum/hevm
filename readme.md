@@ -32,7 +32,7 @@ following programs on `PATH`:
 ### nixpkgs
 
 hevm is available in
-[`nixpkgs`](https://search.nixos.org/packages?channel=unstable&show=haskellPackages.hevm&from=0&size=50&sort=relevance&type=packages&query=hevm) (unstable only for now), and can be installed via:
+[`nixpkgs`](https://search.nixos.org/packages?channel=unstable&show=haskellPackages.hevm&from=0&size=50&sort=relevance&type=packages&query=hevm), and can be installed via:
 
 - flakes: `nix profile install nixpkgs#haskellPackages.hevm`
 - legacy: `nix-env -iA haskellPackages.hevm`
