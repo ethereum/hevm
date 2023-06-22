@@ -22,7 +22,6 @@ import qualified EVM.Stepper as Stepper
 import qualified Control.Monad.Operational as Operational
 import Control.Monad.State.Strict hiding (state)
 import EVM.Types
-import EVM.Concrete (createAddress)
 import qualified EVM.FeeSchedule as FeeSchedule
 import Data.DoubleWord (Word256)
 import Control.Concurrent.Async
@@ -206,19 +205,19 @@ abstractVM cd contractCode maybepre store = finalVm
 loadSymVM
   :: ContractCode
   -> Expr Storage
-  -> Expr EWord
+  -> Expr EAddr
   -> Expr EWord
   -> (Expr Buf, [Prop])
   -> VM
 loadSymVM x initStore addr callvalue' cd =
   (makeVm $ VMOpts
-    { contract = initialContract x
+    { contract = initialContract x addr
     , calldata = cd
     , value = callvalue'
     , initialStorage = initStore
-    , address = createAddress ethrunAddress 1
-    , caller = addr
-    , origin = ethrunAddress --todo: generalize
+    , address = addr
+    , caller = SymAddr 1 -- TODO: how can we explore cases where the caller and tx.origin are the same
+    , origin = SymAddr 0
     , coinbase = 0
     , number = 0
     , timestamp = Lit 0
@@ -235,8 +234,7 @@ loadSymVM x initStore addr callvalue' cd =
     , create = False
     , txAccessList = mempty
     , allowFFI = False
-    }) & set (#env % #contracts % at (createAddress ethrunAddress 1))
-             (Just (initialContract x))
+    })
 
 -- | Interpreter which explores all paths at branching points. Returns an
 -- 'Expr End' representing the possible executions.
@@ -913,9 +911,12 @@ subModel c expr =
           e -> e
 
     subStore :: Map W256 (Map W256 W256) -> Expr a -> Expr a
+    subStore = undefined
+      {-
     subStore m b = mapExpr go b
       where
         go :: Expr a -> Expr a
         go = \case
           AbstractStore -> ConcreteStore m
           e -> e
+          -}

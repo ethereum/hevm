@@ -703,7 +703,7 @@ data Block = Block
   , schedule    :: FeeSchedule Word64
   } deriving (Show, Generic)
 
--- | Contract state
+-- | Full contract state
 data Contract = Contract
   { code        :: ContractCode
   , storage     :: Expr Storage

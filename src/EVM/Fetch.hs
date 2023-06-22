@@ -116,7 +116,7 @@ fetchQuery n f q = do
 
 parseBlock :: (AsValue s, Show s) => s -> Maybe Block
 parseBlock j = do
-  coinbase   <- readText <$> j ^? key "miner" % _String
+  coinbase   <- LitAddr . readText <$> j ^? key "miner" % _String
   timestamp  <- Lit . readText <$> j ^? key "timestamp" % _String
   number     <- readText <$> j ^? key "number" % _String
   gasLimit   <- readText <$> j ^? key "gasLimit" % _String
@@ -148,14 +148,14 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
     fetch :: Show a => RpcQuery a -> IO (Maybe a)
     fetch = fetchQuery n (fetchWithSession url sess)
 
-  theCode    <- MaybeT $ fetch (QueryCode addr)
-  theNonce   <- MaybeT $ fetch (QueryNonce addr)
-  theBalance <- MaybeT $ fetch (QueryBalance addr)
+  code    <- MaybeT $ fetch (QueryCode addr)
+  nonce   <- MaybeT $ fetch (QueryNonce addr)
+  balance <- MaybeT $ fetch (QueryBalance addr)
 
-  return $
-    initialContract (RuntimeCode (ConcreteRuntimeCode theCode))
-      & set #nonce    theNonce
-      & set #balance  theBalance
+  pure $
+    initialContract (RuntimeCode (ConcreteRuntimeCode code)) (LitAddr addr)
+      & set #nonce    (Lit nonce)
+      & set #balance  (Lit balance)
       & set #external True
 
 fetchSlotWithSession
@@ -218,8 +218,8 @@ oracle solvers info q = do
     -- we generate a new array to the fetched contract here
     PleaseFetchContract addr continue -> do
       contract <- case info of
-                    Nothing -> return $ Just $ initialContract (RuntimeCode (ConcreteRuntimeCode ""))
-                    Just (n, url) -> fetchContractFrom n url addr
+        Nothing -> return $ Just $ initialContract (RuntimeCode (ConcreteRuntimeCode "")) (LitAddr addr)
+        Just (n, url) -> fetchContractFrom n url addr
       case contract of
         Just x -> return $ continue x
         Nothing -> error ("oracle error: " ++ show q)
