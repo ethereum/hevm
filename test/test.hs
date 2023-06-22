@@ -715,6 +715,9 @@ tests = testGroup "hevm"
         let testFile = "test/contracts/fail/cheatCodes.sol"
         runSolidityTestCustom testFile "testBadFFI" Nothing False Nothing Foundry >>= assertEqual "test result" False
         runSolidityTestCustom testFile "test_prank_underflow" Nothing False Nothing Foundry >>= assertEqual "test result" False
+    , testCase "Unwind" $ do
+        let testFile = "test/contracts/pass/unwind.sol"
+        runSolidityTest testFile ".*" >>= assertEqual "test result" True
     ]
   , testGroup "max-iterations"
     [ testCase "concrete-loops-reached" $ do
