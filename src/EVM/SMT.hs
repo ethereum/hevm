@@ -48,24 +48,32 @@ import qualified EVM.Expr as Expr
 -- ** Encoding ** ----------------------------------------------------------------------------------
 
 
--- variable names in SMT that we want to get values for
+-- | Data that we need to construct a nice counterexample
 data CexVars = CexVars
-  { calldata     :: [Text]
-  , buffers      :: Map Text (Expr EWord) -- buffers and guesses at their maximum size
-  , storeReads   :: [(Expr EAddr, Expr EWord)] -- a list of relevant store reads
+  { -- | variable names that we need models for to reconstruct calldata
+    calldata     :: [Text]
+    -- | buffer names and guesses at their maximum size
+  , buffers      :: Map Text (Expr EWord)
+    -- | reads from abstract storage
+  , storeReads   :: Map (Expr EAddr) (Set (Expr EWord))
+    -- | the concrete part of the storage prestate
+  , concretePreStore :: Map (Expr EAddr) (Map W256 W256)
+    -- | the names of any block context variables
   , blockContext :: [Text]
+    -- | the names of any tx context variables
   , txContext    :: [Text]
   }
   deriving (Eq, Show)
 
 instance Semigroup CexVars where
-  (CexVars a b c d e) <> (CexVars a2 b2 c2 d2 e2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2) (e <> e2)
+  (CexVars a b c d e f) <> (CexVars a2 b2 c2 d2 e2 f2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2) (e <> e2) (f <> f2)
 
 instance Monoid CexVars where
     mempty = CexVars
       { calldata = mempty
       , buffers = mempty
       , storeReads = mempty
+      , concretePreStore = mempty
       , blockContext = mempty
       , txContext = mempty
       }
@@ -90,7 +98,7 @@ data CompressedBuf
 data SMTCex = SMTCex
   { vars :: Map (Expr EWord) W256
   , buffers :: Map (Expr Buf) BufModel
-  , store :: Map W256 (Map W256 W256)
+  , store :: Map (Expr EAddr) (Map W256 W256)
   , blockContext :: Map (Expr EWord) W256
   , txContext :: Map (Expr EWord) W256
   }
@@ -177,7 +185,7 @@ assertProps ps =
     bufVals = Map.elems bufs
     storeVals = Map.elems stores
 
-    storageReads = nubOrd $ concatMap findStorageReads ps
+    storageReads = Map.unionsWith (<>) $ fmap findStorageReads ps
     storeNames = Set.toList $ Set.unions (fmap referencedStores ps)
 
     keccakAssumes
@@ -259,12 +267,12 @@ referencedBlockContext' prop = nubOrd $ foldProp referencedBlockContextGo [] pro
 -- the store (e.g, SLoad addr idx (SStore addr idx val AbstractStore)).
 -- However, we expect that most of such reads will have been
 -- simplified away.
-findStorageReads :: Prop -> [(Expr EAddr, Expr EWord)]
-findStorageReads = foldProp go []
+findStorageReads :: Prop -> Map (Expr EAddr) (Set (Expr EWord))
+findStorageReads p = Map.fromListWith (<>) $ foldProp go mempty p
   where
-    go :: Expr a -> [(Expr EAddr, Expr EWord)]
+    go :: Expr a -> [(Expr EAddr, Set (Expr EWord))]
     go = \case
-      SLoad slot storage -> [(Expr.getAddr storage, slot) | containsNode isAbstractStore storage]
+      SLoad slot store -> [(Expr.getAddr store, Set.singleton slot) | containsNode isAbstractStore store]
       _ -> []
 
     isAbstractStore (AbstractStore _) = True
@@ -986,7 +994,17 @@ getBufs getVal bufs = foldM getBuf mempty bufs
                             <> " in environment mapping"
           p -> parseErr p
 
-getStore :: (Text -> IO Text) -> [(Expr EWord, Expr EWord)] -> IO (Map W256 (Map W256 W256))
+-- | Takes a Map containing all reads from a store with an abstract base and returns a concretized storage
+getStore
+  :: (Text -> IO Text)
+  -> Map (Expr EAddr) (Set (Expr EWord))
+  -> Map (Expr EAddr) (Map W256 W256)
+  -> IO (Map (Expr EAddr) (Map W256 W256))
+getStore getVal abstractReads concretePreStore = do
+  undefined
+
+  {-
+getStore :: (Text -> IO Text) -> Map (Expr EAddr) (Set (Expr EWord)) -> IO (Map (Expr EAddr) (Map W256 W256))
 getStore getVal sreads = do
   raw <- getVal "abstractStore"
   let parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
@@ -1013,6 +1031,7 @@ getStore getVal sreads = do
       case Map.lookup addr store of
         Just m -> Map.insert addr (Map.insert slot (fun addr slot) m) store
         Nothing -> Map.insert addr (Map.singleton slot (fun addr slot)) store
+    -}
 
 
 queryValue :: (Text -> IO Text) -> Expr EWord -> IO W256

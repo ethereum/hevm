@@ -593,7 +593,7 @@ interpretWithTrace fetcher =
         Stepper.EVM m ->
           zoom _1 (State.state (runState m)) >>= interpretWithTrace fetcher . k
 
-data OpContract = OpContract [Op]
+newtype OpContract = OpContract [Op]
 instance Show OpContract where
   show (OpContract a) = "OpContract " ++ (show a)
 

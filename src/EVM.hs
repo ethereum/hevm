@@ -19,7 +19,6 @@ import Optics.Zoom
 import Optics.Operators.Unsafe
 
 import EVM.ABI
-import EVM.RLP
 import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord,
   writeByte, bufLength, indexWord, litAddr, readBytes, word256At, copySlice, wordToAddr)
 import EVM.Expr qualified as Expr
