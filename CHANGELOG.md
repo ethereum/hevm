@@ -8,11 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ## Fixed
+
 - SMT encoding of Expr now has assertions for the range of environment values that are less than word size (256 bits).
 - Trace now contains the cheat code calls
 
 ## Changed
-- SMT2 scripts are now being reprocessed to put one sexpr per line. Having sepxrs that span across multiple lines trigers a bug in CVC5. 
+
+- SMT2 scripts are now being reprocessed to put one sexpr per line. Having sepxrs that span across multiple lines trigers a bug in CVC5.
+
+## Added
+
+- execution traces are now shown for failed `prove_` tests
 
 ## [0.51.1] - 2023-06-02
 
@@ -32,7 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `hevm` can now execute unit tests in foundry projects. Just run `hevm test` from the root of a foundry repo, and all unit tests will be executed (including prove tests).
 - A new stack based loop detection heuristic
 - Analysis of partial execution traces is now supported
-- execution traces are now shown for failed `prove_` tests
 
 ## Changed
 
