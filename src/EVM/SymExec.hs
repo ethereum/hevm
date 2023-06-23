@@ -193,7 +193,7 @@ abstractVM
   -> VM
 abstractVM cd contractCode maybepre store = finalVm
   where
-    value' = CallValue 0
+    value' = TxValue
     code' = RuntimeCode (ConcreteRuntimeCode contractCode)
     vm' = loadSymVM code' store value' cd
     precond = case maybepre of
@@ -840,9 +840,7 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
 
     -- strips the frame arg from frame context vars to make them easier to read
     showTxCtx :: Expr EWord -> Text
-    showTxCtx (CallValue _) = "CallValue"
-    showTxCtx (Caller _) = "Caller"
-    showTxCtx (Address _) = "Address"
+    -- showTxCtx (CallValue _) = "CallValue"
     showTxCtx x = T.pack $ show x
 
     -- strips all frame context that doesn't come from the top frame
@@ -850,11 +848,8 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
     filterSubCtx = Map.filterWithKey go
       where
         go :: Expr EWord -> W256 -> Bool
-        go (CallValue x) _ = x == 0
-        go (Caller x) _ = x == 0
-        go (Address x) _ = x == 0
+        -- go (CallValue x) _ = x == 0
         go (Balance {}) _ = error "TODO: BALANCE"
-        go (SelfBalance {}) _ = error "TODO: SELFBALANCE"
         go (Gas {}) _ = error "TODO: Gas"
         go _ _ = False
 
@@ -878,7 +873,7 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
 -- concrete ones from the Cex.
 subModel :: SMTCex -> Expr a -> Expr a
 subModel c expr =
-  subBufs (fmap forceFlattened c.buffers) . subVars c.vars . subStore c.store
+  subBufs (fmap forceFlattened c.buffers) . subVars c.vars
   . subVars c.blockContext . subVars c.txContext $ expr
   where
     forceFlattened (SMT.Flat bs) = bs

@@ -228,11 +228,8 @@ referencedVars' prop = nubOrd $ foldProp referencedVarsGo [] prop
 
 referencedFrameContextGo :: Expr a -> [(Builder, [Prop])]
 referencedFrameContextGo = \case
-  CallValue a -> [(fromLazyText $ T.append "callvalue_" (T.pack . show $ a), [])]
-  Caller a -> [(fromLazyText $ T.append "caller_" (T.pack . show $ a), [inRange 160 (Caller a)])]
-  Address a -> [(fromLazyText $ T.append "address_" (T.pack . show $ a), [inRange 160 (Address a)])]
+  -- CallValue a -> [(fromLazyText $ T.append "callvalue_" (T.pack . show $ a), [])]
   Balance {} -> error "TODO: BALANCE"
-  SelfBalance {} -> error "TODO: SELFBALANCE"
   Gas {} -> error "TODO: GAS"
   _ -> []
 
@@ -685,9 +682,7 @@ exprToSMT = \case
     let enc = exprToSMT a in
     "(sha256 " <> enc <> ")"
 
-  CallValue a -> fromLazyText $ T.append "callvalue_" (T.pack . show $ a)
-  Caller a -> fromLazyText $ T.append "caller_" (T.pack . show $ a)
-  Address a -> fromLazyText $ T.append "address_" (T.pack . show $ a)
+  -- CallValue a -> fromLazyText $ T.append "callvalue_" (T.pack . show $ a)
 
   Origin ->  "origin"
   BlockHash a ->
@@ -894,9 +889,7 @@ parseBlockCtx t = error $ "Internal Error: cannot parse " <> (TS.unpack t) <> " 
 
 parseFrameCtx :: TS.Text -> Expr EWord
 parseFrameCtx name = case TS.unpack name of
-  ('c':'a':'l':'l':'v':'a':'l':'u':'e':'_':frame) -> CallValue (read frame)
-  ('c':'a':'l':'l':'e':'r':'_':frame) -> Caller (read frame)
-  ('a':'d':'d':'r':'e':'s':'s':'_':frame) -> Address (read frame)
+  -- ('c':'a':'l':'l':'v':'a':'l':'u':'e':'_':frame) -> CallValue (read frame)
   t -> error $ "Internal Error: cannot parse " <> t <> " into an Expr"
 
 getVars :: (TS.Text -> Expr EWord) -> (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr EWord) W256)

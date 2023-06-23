@@ -153,6 +153,10 @@ foldExpr f acc expr = acc <> (go expr)
       e@(BaseFee) -> f e
       e@(BlockHash a) -> f e <> (go a)
 
+      -- tx context
+
+      e@(TxValue) -> f e
+
       -- frame context
 
       e@(Gas _ _) -> f e
@@ -518,6 +522,10 @@ mapExprM f expr = case expr of
   BlockHash a -> do
     a' <- mapExprM f a
     f (BlockHash a')
+
+  -- tx context
+
+  TxValue -> f TxValue
 
   -- frame context
 

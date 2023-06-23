@@ -37,7 +37,7 @@ data RpcQuery a where
   QueryCode    :: Addr         -> RpcQuery BS.ByteString
   QueryBlock   ::                 RpcQuery Block
   QueryBalance :: Addr         -> RpcQuery W256
-  QueryNonce   :: Addr         -> RpcQuery W256
+  QueryNonce   :: Addr         -> RpcQuery W64
   QuerySlot    :: Addr -> W256 -> RpcQuery W256
   QueryChainId ::                 RpcQuery W256
 
@@ -154,7 +154,7 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
 
   pure $
     initialContract (RuntimeCode (ConcreteRuntimeCode code)) (LitAddr addr)
-      & set #nonce    (Lit nonce)
+      & set #nonce    (Just nonce)
       & set #balance  (Lit balance)
       & set #external True
 

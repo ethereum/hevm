@@ -146,9 +146,10 @@ srcMap :: DappInfo -> Contract -> Int -> Maybe SrcMap
 srcMap dapp contr opIndex = do
   sol <- findSrc contr dapp
   case contr.code of
-    (InitCode _ _) ->
-      Seq.lookup opIndex sol.creationSrcmap
-    (RuntimeCode _) ->
+    UnknownCode _ -> Nothing
+    InitCode _ _ ->
+     Seq.lookup opIndex sol.creationSrcmap
+    RuntimeCode _ ->
       Seq.lookup opIndex sol.runtimeSrcmap
 
 findSrc :: Contract -> DappInfo -> Maybe SolcContract
@@ -160,6 +161,7 @@ findSrc c dapp = do
 
 
 lookupCode :: ContractCode -> DappInfo -> Maybe SolcContract
+lookupCode (UnknownCode _) _ = Nothing
 lookupCode (InitCode c _) a =
   snd <$> Map.lookup (keccak' (stripBytecodeMetadata c)) a.solcByHash
 lookupCode (RuntimeCode (ConcreteRuntimeCode c)) a =
@@ -175,7 +177,7 @@ lookupCode (RuntimeCode (SymbolicRuntimeCode c)) a = let
 compareCode :: ByteString -> Code -> Bool
 compareCode raw (Code template locs) =
   let holes' = sort [(start, len) | (Reference start len) <- locs]
-      insert at' len' bs = writeMemory (BS.replicate len' 0) (fromIntegral len') 0 (fromIntegral at') bs
+      insert loc len' bs = writeMemory (BS.replicate len' 0) (fromIntegral len') 0 (fromIntegral loc) bs
       refined = foldr (\(start, len) acc -> insert start len acc) raw holes'
   in BS.length raw == BS.length template && template == refined
 

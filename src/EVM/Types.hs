@@ -227,6 +227,10 @@ data Expr (a :: EType) where
   ChainId        :: Expr EWord
   BaseFee        :: Expr EWord
 
+  -- tx context
+
+  TxValue        :: Expr EWord
+
   -- frame context
 
   Balance        :: Expr EAddr -> Expr EWord
@@ -240,7 +244,7 @@ data Expr (a :: EType) where
   CodeSize       :: Expr EAddr         -- address
                  -> Expr EWord         -- size
 
-  CodeHash       :: Expr EAddr         -- address
+  CodeHash    :: Expr EAddr         -- address
                  -> Expr EWord         -- size
 
   -- logs

@@ -240,7 +240,7 @@ newAccount = initialContract (RuntimeCode (ConcreteRuntimeCode ""))
 setupTx :: Expr EAddr -> Expr EAddr -> W256 -> Word64 -> Map (Expr EAddr) Contract -> Map (Expr EAddr) Contract
 setupTx origin coinbase gasPrice gasLimit prestate =
   let gasCost = gasPrice * (num gasLimit)
-  in (Map.adjust ((over #nonce   (`Expr.add` (Lit 1)))
+  in (Map.adjust ((over #nonce   (fmap ((+) 1)))
                . (over #balance (`Expr.sub` (Lit gasCost)))) origin)
     . touchAccount origin
     . touchAccount coinbase $ prestate
