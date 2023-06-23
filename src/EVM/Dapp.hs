@@ -3,12 +3,11 @@
 module EVM.Dapp where
 
 import EVM.Concrete
-import EVM.Debug (srcMapCodePos)
 import EVM.Solidity
 import EVM.Types
 import EVM.ABI
 
-import Control.Arrow ((>>>))
+import Control.Arrow ((>>>), second)
 import Data.Aeson (Value)
 import Data.Bifunctor (first)
 import Data.ByteString (ByteString)
@@ -21,6 +20,7 @@ import Data.Sequence qualified as Seq
 import Data.Text (Text, isPrefixOf, pack, unpack)
 import Data.Text.Encoding (encodeUtf8)
 import Data.Vector qualified as V
+import Optics.Core
 
 data DappInfo = DappInfo
   { root       :: FilePath
@@ -188,3 +188,9 @@ showTraceLocation dapp trace =
         Nothing -> Left "<source not found>"
         Just (fileName, lineIx) ->
           Right (pack fileName <> ":" <> pack (show lineIx))
+
+srcMapCodePos :: SourceCache -> SrcMap -> Maybe (FilePath, Int)
+srcMapCodePos cache sm =
+  fmap (second f) $ cache.files ^? ix sm.file
+  where
+    f v = BS.count 0xa (BS.take sm.offset v) + 1

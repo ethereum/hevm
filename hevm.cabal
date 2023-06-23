@@ -87,7 +87,6 @@ library
     EVM.Assembler,
     EVM.Concrete,
     EVM.Dapp,
-    EVM.Debug,
     EVM.Dev,
     EVM.Expr,
     EVM.SMT,
