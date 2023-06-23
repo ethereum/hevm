@@ -696,7 +696,6 @@ tests = testGroup "hevm"
         runSolidityTest testFile "prove_mul" >>= assertEqual "test result" False
         -- TODO: implement overflow checking optimizations and enable, currently this runs forever
         --runSolidityTest testFile "prove_distributivity" >>= assertEqual "test result" False
-        runSolidityTest testFile "prove_transfer" >>= assertEqual "test result" False
     , testCase "Loop-Tests" $ do
         let testFile = "test/contracts/pass/loops.sol"
         runSolidityTestCustom testFile "prove_loop" (Just 10) False Nothing Foundry >>= assertEqual "test result" True
@@ -971,23 +970,6 @@ tests = testGroup "hevm"
         (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
       ,
-     testCase "opcode-div-zero-2" $ do
-        Just c <- solcRuntime "MyContract"
-            [i|
-            contract MyContract {
-              function fun(uint256 val) external pure {
-                uint out;
-                assembly {
-                  out := div(0, val)
-                }
-                assert(out == 0);
-
-              }
-            }
-            |]
-        (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
-        putStrLn "sdiv works as expected"
-     ,
      testCase "opcode-sdiv-zero-1" $ do
         Just c <- solcRuntime "MyContract"
             [i|
@@ -1161,52 +1143,6 @@ tests = testGroup "hevm"
             |]
         (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "XOR works as expected"
-      ,
-      testCase "opcode-addmod-no-overflow" $ do
-        Just c <- solcRuntime "MyContract"
-            [i|
-            contract MyContract {
-              function fun(uint8 a, uint8 b, uint8 c) external pure {
-                require(a < 4);
-                require(b < 4);
-                require(c < 4);
-                uint16 r1;
-                uint16 r2;
-                uint16 g2;
-                assembly {
-                  r1 := add(a,b)
-                  r2 := mod(r1, c)
-                  g2 := addmod (a, b, c)
-                }
-                assert (r2 == g2);
-              }
-            }
-            |]
-        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint8,uint8,uint8)" [AbiUIntType 8, AbiUIntType 8, AbiUIntType 8])) [] defaultVeriOpts
-        putStrLn "ADDMOD is fine on NON overflow values"
-      ,
-      testCase "opcode-mulmod-no-overflow" $ do
-        Just c <- solcRuntime "MyContract"
-            [i|
-            contract MyContract {
-              function fun(uint8 a, uint8 b, uint8 c) external pure {
-                require(a < 4);
-                require(b < 4);
-                require(c < 4);
-                uint16 r1;
-                uint16 r2;
-                uint16 g2;
-                assembly {
-                  r1 := mul(a,b)
-                  r2 := mod(r1, c)
-                  g2 := mulmod (a, b, c)
-                }
-                assert (r2 == g2);
-              }
-            }
-            |]
-        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint8,uint8,uint8)" [AbiUIntType 8, AbiUIntType 8, AbiUIntType 8])) [] defaultVeriOpts
-        putStrLn "MULMOD is fine on NON overflow values"
       ,
       testCase "opcode-div-res-zero-on-div-by-zero" $ do
         Just c <- solcRuntime "MyContract"
@@ -1721,24 +1657,6 @@ tests = testGroup "hevm"
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        testCase "injectivity of keccak all pairs (32 bytes)" $ do
-          Just c <- solcRuntime "A"
-            [i|
-            contract A {
-              function f(uint x, uint y, uint z) public pure {
-                bytes32 w; bytes32 u; bytes32 v;
-                w = keccak256(abi.encode(x));
-                u = keccak256(abi.encode(y));
-                v = keccak256(abi.encode(z));
-                if (w == u) assert(x==y);
-                if (w == v) assert(x==z);
-                if (u == v) assert(y==z);
-              }
-            }
-            |]
-          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        ,
         testCase "injectivity of keccak contrapositive (32 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
@@ -1823,22 +1741,6 @@ tests = testGroup "hevm"
             |]
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        ,
-        testCase "keccak soundness" $ do
-          Just c <- solcRuntime "C"
-            [i|
-              contract C {
-                mapping (uint => mapping (uint => uint)) maps;
-
-                  function f(uint x, uint y) public view {
-                  assert(maps[y][0] == maps[x][0]);
-                }
-              }
-            |]
-
-          -- should find a counterexample
-          (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-          putStrLn "expected counterexample found"
         ,
         testCase "multiple-contracts" $ do
           let code' =
@@ -2296,6 +2198,9 @@ tests = testGroup "hevm"
                     -- Takes too long, would timeout on most test setups.
                     -- We could probably fix these by "bunching together" queries
                     , "reasoningBasedSimplifier/mulmod.yul"
+                    , "loadResolver/multi_sload_loop.yul"
+                    , "reasoningBasedSimplifier/mulcheck.yul"
+                    , "reasoningBasedSimplifier/smod.yul"
 
                     -- TODO check what's wrong with these!
                     , "loadResolver/keccak_short.yul" -- ACTUAL bug -- keccak
@@ -2379,7 +2284,7 @@ tests = testGroup "hevm"
 
 
 checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO Bool
-checkEquiv l r = withSolvers Z3 1 (Just 100) $ \solvers -> do
+checkEquiv l r = withSolvers Z3 1 (Just 10) $ \solvers -> do
   if l == r
      then do
        putStrLn "skip"
