@@ -44,6 +44,7 @@ foldContract f acc (C code storage balance nonce)
     foldCode (RuntimeCode (ConcreteRuntimeCode _)) = mempty
     foldCode (RuntimeCode (SymbolicRuntimeCode c)) = foldl' (foldExpr f) mempty c
     foldCode (InitCode _ buf) = foldExpr f mempty buf
+    foldCode (UnknownCode addr) = foldExpr f mempty addr
 
 
 -- | Recursively folds a given function over a given expression
@@ -154,17 +155,13 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- frame context
 
-      e@(Caller _) -> f e
-      e@(CallValue _) -> f e
-      e@(Address _) -> f e
-      e@(SelfBalance _ _) -> f e
       e@(Gas _ _) -> f e
       e@(Balance {}) -> f e
 
       -- code
 
       e@(CodeSize a) -> f e <> (go a)
-      e@(ExtCodeHash a) -> f e <> (go a)
+      e@(CodeHash a) -> f e <> (go a)
 
       -- logs
 
@@ -524,23 +521,19 @@ mapExprM f expr = case expr of
 
   -- frame context
 
-  Caller a -> f (Caller a)
-  CallValue a -> f (CallValue a)
-  Address a -> f (Address a)
-  SelfBalance a b -> f (SelfBalance a b)
   Gas a b -> f (Gas a b)
-  Balance a b c -> do
-    c' <- mapExprM f c
-    f (Balance a b c')
+  Balance a -> do
+    a' <- mapExprM f a
+    f (Balance a')
 
   -- code
 
   CodeSize a -> do
     a' <- mapExprM f a
     f (CodeSize a')
-  ExtCodeHash a -> do
+  CodeHash a -> do
     a' <- mapExprM f a
-    f (ExtCodeHash a')
+    f (CodeHash a')
 
   -- logs
 
@@ -703,6 +696,7 @@ mapContractM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Expr EContract -
 mapContractM _ g@(GVar _) = pure g
 mapContractM f (C code storage balance nonce) = do
   code' <- case code of
+             UnknownCode a -> fmap UnknownCode (f a)
              c@(RuntimeCode (ConcreteRuntimeCode _)) -> pure c
              RuntimeCode (SymbolicRuntimeCode c) -> do
                c' <- mapM (mapExprM f) c

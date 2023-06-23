@@ -68,8 +68,8 @@ x0 ^ y0 | y0 < 0    = errorWithoutStackTrace "Negative exponent"
                   | y == 1      = x * z
                   | otherwise   = g (x * x) ((y - 1) `shiftR` 1) (x * z)
 
-createAddress :: Addr -> W256 -> Expr EAddr
-createAddress a n = LitAddr . num . keccak' . rlpList $ [rlpAddrFull a, rlpWord256 n]
+createAddress :: Addr -> W64 -> Expr EAddr
+createAddress a n = LitAddr . num . keccak' . rlpList $ [rlpAddrFull a, rlpWord256 (num n)]
 
 create2Address :: Addr -> W256 -> ByteString -> Expr EAddr
 create2Address a s b = LitAddr $ num $ keccak' $ mconcat

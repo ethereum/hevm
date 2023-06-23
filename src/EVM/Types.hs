@@ -143,8 +143,11 @@ data Expr (a :: EType) where
 
   -- identifiers
 
+  -- | Literal words
   Lit            :: {-# UNPACK #-} !W256 -> Expr EWord
+  -- | Variables introduced via calldata
   Var            :: Text -> Expr EWord
+  -- | variables introduced during the CSE pass
   GVar           :: GVar a -> Expr a
 
   -- bytes
@@ -226,23 +229,7 @@ data Expr (a :: EType) where
 
   -- frame context
 
-  CallValue      :: Int                -- frame idx
-                 -> Expr EWord
-
-  Caller         :: Int                -- frame idx
-                 -> Expr EWord
-
-  Address        :: Int                -- frame idx
-                 -> Expr EWord
-
-  Balance        :: Int                -- frame idx
-                 -> Int                -- PC (in case we're checking the current contract)
-                 -> Expr EWord         -- address
-                 -> Expr EWord
-
-  SelfBalance    :: Int                -- frame idx
-                 -> Int                -- PC
-                 -> Expr EWord
+  Balance        :: Expr EAddr -> Expr EWord
 
   Gas            :: Int                -- frame idx
                  -> Int                -- PC
@@ -250,10 +237,10 @@ data Expr (a :: EType) where
 
   -- code
 
-  CodeSize       :: Expr EWord         -- address
+  CodeSize       :: Expr EAddr         -- address
                  -> Expr EWord         -- size
 
-  ExtCodeHash    :: Expr EWord         -- address
+  CodeHash       :: Expr EAddr         -- address
                  -> Expr EWord         -- size
 
   -- logs
@@ -327,8 +314,7 @@ data Expr (a :: EType) where
 
   -- Symbolic addresses are identified with an int. It is important that
   -- semantic equality is the same as syntactic equality here. Additionally all
-  -- SAddr's in a given expression should be constrained to differ from any
-  -- LitAddr's
+  -- SAddr's in a given expression should be constrained to differ from any LitAddr's
   SymAddr        :: Int -> Expr EAddr
   LitAddr        :: Addr -> Expr EAddr
   WAddr          :: Expr EAddr -> Expr EWord
@@ -709,7 +695,7 @@ data Contract = Contract
   , storage     :: Expr Storage
   , origStorage :: Expr Storage
   , balance     :: Expr EWord
-  , nonce       :: Expr EWord
+  , nonce       :: Maybe W64
   , codehash    :: Expr EWord
   , opIxMap     :: SV.Vector Int
   , codeOps     :: V.Vector (Int, Op)
@@ -772,8 +758,9 @@ unifyCachedContract a b = a { storage = merged }
   hopefully we do not have to deal with dynamic immutable before we get a real data section...
 -}
 data ContractCode
-  = InitCode ByteString (Expr Buf) -- ^ "Constructor" code, during contract creation
-  | RuntimeCode RuntimeCode -- ^ "Instance" code, after contract creation
+  = UnknownCode (Expr EAddr)       -- ^ Fully abstract code, keyed on an address to give consistent results for e.g. extcodehash
+  | InitCode ByteString (Expr Buf) -- ^ "Constructor" code, during contract creation
+  | RuntimeCode RuntimeCode        -- ^ "Instance" code, after contract creation
   deriving (Show, Ord)
 
 -- | We have two variants here to optimize the fully concrete case.

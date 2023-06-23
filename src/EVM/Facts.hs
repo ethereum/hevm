@@ -71,7 +71,7 @@ default (ASCII)
 -- It's convenient here, but typically avoided.
 data Fact
   = BalanceFact { addr :: Addr, what :: W256 }
-  | NonceFact   { addr :: Addr, what :: W256 }
+  | NonceFact   { addr :: Addr, val :: W64 }
   | StorageFact { addr :: Addr, what :: W256, which :: W256 }
   | CodeFact    { addr :: Addr, blob :: ByteString }
   deriving (Eq, Show)
@@ -96,6 +96,10 @@ class AsASCII a where
   load :: ASCII -> Maybe a
 
 instance AsASCII Addr where
+  dump = Char8.pack . show
+  load = readMaybe . Char8.unpack
+
+instance AsASCII W64 where
   dump = Char8.pack . show
   load = readMaybe . Char8.unpack
 
@@ -128,18 +132,17 @@ toLitAddr = \case
   a -> Left $ "cannot serialize symbolic addr: " <> show a
 
 contractFacts :: Addr -> Contract -> Err [Fact]
-contractFacts a x = case view bytecode x of
-  ConcreteBuf b -> do
+contractFacts a x = case (view bytecode x, x.nonce) of
+  (Just (ConcreteBuf b), Just n) -> do
     bal <- toLitW x.balance
-    nonce <- toLitW x.nonce
     store <- toLitStore x.storage
     pure $
       storageFacts a store ++
       [ BalanceFact a bal
-      , NonceFact   a nonce
+      , NonceFact   a n
       , CodeFact    a b
       ]
-  _ -> Left "cannot serialize symbolic bytecode"
+  _ -> Left "cannot serialize symbolic contracts"
 
 
 storageFacts :: Addr -> Map W256 W256 -> [Fact]
@@ -185,7 +188,7 @@ apply1 vm fact =
     BalanceFact {..} ->
       vm & set (#env % #contracts % ix (LitAddr addr) % #balance) (Lit what)
     NonceFact   {..} ->
-      vm & set (#env % #contracts % ix (LitAddr addr) % #nonce) (Lit what)
+      vm & set (#env % #contracts % ix (LitAddr addr) % #nonce) (Just val)
 
 apply2 :: VM -> Fact -> VM
 apply2 vm fact =
@@ -199,7 +202,7 @@ apply2 vm fact =
     BalanceFact {..} ->
       vm & set (#cache % #fetched % ix addr % #balance) (Lit what)
     NonceFact   {..} ->
-      vm & set (#cache % #fetched % ix addr % #nonce) (Lit what)
+      vm & set (#cache % #fetched % ix addr % #nonce) (Just val)
 
 -- Sort facts in the right order for `apply1` to work.
 instance Ord Fact where
@@ -227,7 +230,7 @@ factToFile :: Fact -> File
 factToFile fact = case fact of
   StorageFact {..} -> mk ["storage"] (dump which) what
   BalanceFact {..} -> mk []          "balance"    what
-  NonceFact   {..} -> mk []          "nonce"      what
+  NonceFact   {..} -> mk []          "nonce"      val
   CodeFact    {..} -> mk []          "code"       blob
   where
     mk :: AsASCII a => [ASCII] -> ASCII -> a -> File

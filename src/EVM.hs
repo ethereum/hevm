@@ -39,7 +39,7 @@ import Data.ByteString.Lazy (fromStrict)
 import Data.ByteString.Lazy qualified as LS
 import Data.ByteString.Char8 qualified as Char8
 import Data.Foldable (toList)
-import Data.List (find)
+import Data.List (find, foldl')
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, fromJust, isJust)
@@ -80,11 +80,12 @@ blankState = FrameState
 
 -- | An "external" view of a contract's bytecode, appropriate for
 -- e.g. @EXTCODEHASH@.
-bytecode :: Getter Contract (Expr Buf)
+bytecode :: Getter Contract (Maybe (Expr Buf))
 bytecode = #code % to f
-  where f (InitCode _ _) = mempty
-        f (RuntimeCode (ConcreteRuntimeCode bs)) = ConcreteBuf bs
-        f (RuntimeCode (SymbolicRuntimeCode ops)) = Expr.fromList ops
+  where f (InitCode _ _) = Just mempty
+        f (RuntimeCode (ConcreteRuntimeCode bs)) = Just $ ConcreteBuf bs
+        f (RuntimeCode (SymbolicRuntimeCode ops)) = Just $ Expr.fromList ops
+        f (UnknownCode _) = Nothing
 
 -- * Data accessors
 
@@ -93,6 +94,14 @@ currentContract vm =
   Map.lookup vm.state.codeContract vm.env.contracts
 
 -- * Data constructors
+
+-- | Finds the highest index for a symbolic address declared in the VMOpts
+maxSymAddress :: VMOpts -> Int
+maxSymAddress o = foldl' go 0 $ [o.origin, o.caller, o.coinbase, o.address] <> Map.keys o.txAccessList
+  where
+    go :: Int -> Expr EAddr -> Int
+    go acc (SymAddr i) = max acc i
+    go acc _ = acc
 
 makeVm :: VMOpts -> VM
 makeVm o =
@@ -117,7 +126,6 @@ makeVm o =
     , toAddr = txtoAddr
     , value = o.value
     , substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty
-    --, _accessList = txaccessList
     , isCreate = o.create
     , txReversion = Map.fromList
       [(o.address , o.contract )]
@@ -154,7 +162,7 @@ makeVm o =
     , chainId = o.chainId
     , contracts = Map.fromList
       [(o.address, o.contract )]
-    , symAddresses = 0
+    , symAddresses = maxSymAddress o
     }
   , cache = Cache mempty mempty
   , burned = 0
@@ -165,6 +173,20 @@ makeVm o =
   , overrideCaller = Nothing
   }
 
+-- | Initialize a fully abstract contract with the given address
+abstractContract :: Expr EAddr -> Contract
+abstractContract addr = Contract
+  { code        = UnknownCode addr
+  , storage     = AbstractStore addr
+  , origStorage = AbstractStore addr
+  , balance     = Balance addr
+  , nonce       = Nothing
+  , codehash    = hashcode (UnknownCode addr)
+  , opIxMap     = mempty
+  , codeOps     = mempty
+  , external    = False
+  }
+
 -- | Initialize empty contract with given code
 initialContract :: ContractCode -> Expr EAddr -> Contract
 initialContract contractCode addr = Contract
@@ -172,7 +194,7 @@ initialContract contractCode addr = Contract
   , storage     = ConcreteStore addr mempty
   , origStorage = ConcreteStore addr mempty
   , balance     = Lit 0
-  , nonce       = if creation then Lit 1 else Lit 0
+  , nonce       = if creation then Just 1 else Just 0
   , codehash    = hashcode contractCode
   , opIxMap     = mkOpIxMap contractCode
   , codeOps     = mkCodeOps contractCode
@@ -182,6 +204,7 @@ initialContract contractCode addr = Contract
     creation = case contractCode of
       InitCode _ _  -> True
       RuntimeCode _ -> False
+      UnknownCode _ -> False
 
 -- * Opcode dispatch (exec1)
 
@@ -238,6 +261,7 @@ exec1 = do
 
     else do
       let ?op = case vm.state.code of
+                  UnknownCode _ -> error "Internal Error: Cannot execute unknown code"
                   InitCode conc _ -> BS.index conc vm.state.pc
                   RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs vm.state.pc
                   RuntimeCode (SymbolicRuntimeCode ops) ->
@@ -255,6 +279,7 @@ exec1 = do
         OpPush n' -> do
           let n = fromIntegral n'
               !xs = case vm.state.code of
+                UnknownCode _ -> error "Internal Error: Cannot execute unknown code"
                 InitCode conc _ -> Lit $ word $ padRight n $ BS.take n (BS.drop (1 + vm.state.pc) conc)
                 RuntimeCode (ConcreteRuntimeCode bs) -> Lit $ word $ BS.take n $ BS.drop (1 + vm.state.pc) bs
                 RuntimeCode (SymbolicRuntimeCode ops) ->
@@ -423,7 +448,9 @@ exec1 = do
                           accessMemoryRange memOffset n $ do
                             next
                             assign (#state % #stack) xs
-                            copyBytesToMemory (toBuf vm.state.code) n' codeOffset memOffset'
+                            case toBuf vm.state.code of
+                              Just b -> copyBytesToMemory b n' codeOffset memOffset'
+                              Nothing -> error "Internal Error: cannot produce a buffer from UnknownCode"
                       else vmError IllegalOverflow
             _ -> underrun
 
@@ -433,8 +460,8 @@ exec1 = do
 
         OpExtcodesize ->
           case stk of
-            x':xs -> case wordToAddr x' of
-              Just (LitAddr x) -> if x == num cheatCode
+            x':xs -> forceAddr x' "EXTCODESIZE" $ \case
+              (LitAddr x) -> if x == num cheatCode
                 then do
                   next
                   assign (#state % #stack) xs
@@ -444,10 +471,12 @@ exec1 = do
                     fetchAccount (LitAddr x) $ \c -> do
                       next
                       assign (#state % #stack) xs
-                      pushSym (bufLength (view bytecode c))
-              _ -> do
+                      case view bytecode c of
+                        Just b -> pushSym (bufLength b)
+                        Nothing -> pushSym $ CodeSize (LitAddr x)
+              x -> do
                 assign (#state % #stack) xs
-                pushSym (CodeSize x')
+                pushSym (CodeSize x)
                 next
             [] ->
               underrun
@@ -464,7 +493,11 @@ exec1 = do
                       fetchAccount extAccount $ \c -> do
                         next
                         assign (#state % #stack) xs
-                        copyBytesToMemory (view bytecode c) codeSize' codeOffset memOffset'
+                        case view bytecode c of
+                          Just b -> copyBytesToMemory b codeSize' codeOffset memOffset'
+                          Nothing -> do
+                            pc <- use (#state % #pc)
+                            partial $ UnexpectedSymbolicArg pc "Cannot copy from unknown code at" (wrap [extAccount])
             _ -> underrun
 
         OpReturndatasize ->
@@ -501,7 +534,9 @@ exec1 = do
                 fetchAccount x $ \c ->
                    if accountEmpty c
                      then push (num (0 :: Int))
-                     else pushSym $ keccak (view bytecode c)
+                     else case view bytecode c of
+                            Just b -> pushSym $ keccak b
+                            Nothing -> pushSym $ CodeHash x
             [] ->
               underrun
 
@@ -721,16 +756,17 @@ exec1 = do
               \(xGas, xValue, xInOffset, xInSize, xOutOffset, xOutSize) ->
                 (if xValue > 0 then notStatic else id) $
                   forceAddr xTo' "unable to determine a call target" $ \xTo ->
-                    delegateCall this (num xGas) xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
-                      let from' = fromMaybe self vm.overrideCaller
-                      zoom #state $ do
-                        assign #callvalue (Lit xValue)
-                        assign #caller from'
-                        assign #contract callee
-                      assign #overrideCaller Nothing
-                      touchAccount from'
-                      touchAccount callee
-                      transfer from' callee (Lit xValue)
+                    delegateCall this (num xGas) xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
+                      \callee -> do
+                        let from' = fromMaybe self vm.overrideCaller
+                        zoom #state $ do
+                          assign #callvalue (Lit xValue)
+                          assign #caller from'
+                          assign #contract callee
+                        assign #overrideCaller Nothing
+                        touchAccount from'
+                        touchAccount callee
+                        transfer from' callee (Lit xValue)
             _ ->
               underrun
 
@@ -876,16 +912,27 @@ exec1 = do
 
 transfer :: Expr EAddr -> Expr EAddr -> Expr EWord -> EVM ()
 transfer _ _ (Lit 0) = pure ()
-transfer xFrom xTo xValue = do
-    sb <- preuse $ #env % #contracts % ix xFrom % #balance
-    case sb of
-      Just (srcBal :: Expr EWord) ->
-        branch (Expr.gt xValue srcBal) $ \case
-          True -> vmError $ BalanceTooLow xValue srcBal
-          False -> do
-            (#env % #contracts % ix xFrom % #balance) %= (`Expr.sub` xValue)
-            (#env % #contracts % ix xTo % #balance) %= (`Expr.add` xValue)
-      Nothing -> vmError $ BalanceTooLow xValue (Lit 0)
+transfer src dst val = do
+  sb <- preuse $ #env % #contracts % ix src % #balance
+  db <- preuse $ #env % #contracts % ix dst % #balance
+  case (sb, db) of
+    -- both sender and recipient in state
+    (Just srcBal, Just _) ->
+      branch (Expr.gt val srcBal) $ \case
+        True -> vmError $ BalanceTooLow val srcBal
+        False -> do
+          (#env % #contracts % ix src % #balance) %= (`Expr.sub` val)
+          (#env % #contracts % ix dst % #balance) %= (`Expr.add` val)
+    -- sender not in state
+    (Nothing, Just _) -> do
+      let c = abstractContract src
+      (#env % #contracts) %= (Map.insert src c)
+      transfer src dst val
+    -- recipient not in state
+    (_ , Nothing) -> do
+      let c = abstractContract dst
+      (#env % #contracts) %= (Map.insert dst c)
+      transfer src dst val
 
 -- | Checks a *CALL for failure; OOG, too many callframes, memory access etc.
 callChecks
@@ -1236,7 +1283,7 @@ accountEmpty c =
     RuntimeCode (SymbolicRuntimeCode b) -> null b
     _ -> False
   -- TODO: should we branch here?
-  && c.nonce == Lit 0
+  && c.nonce == (Just 0)
   && c.balance == Lit 0
 
 -- * How to finalize a transaction
@@ -1664,8 +1711,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
 -- EIP 684
 collision :: Maybe Contract -> Bool
 collision c' = case c' of
-  -- TODO: should we branch here?
-  Just c -> c.nonce /= Lit 0 || case c.code of
+  Just c -> c.nonce /= Just 0 || case c.code of
     RuntimeCode (ConcreteRuntimeCode "") -> False
     RuntimeCode (SymbolicRuntimeCode b) -> not $ null b
     _ -> True
@@ -1682,6 +1728,12 @@ create self this xSize xGas' xValue xs newAddr initCode = do
     assign (#state % #stack) (Lit 0 : xs)
     assign (#state % #returndata) mempty
     vmError $ MaxInitCodeSizeExceeded (vm0.block.maxCodeSize * 2) xSize
+  else if this.nonce == Just maxBound
+  then do
+    assign (#state % #stack) (Lit 0 : xs)
+    assign (#state % #returndata) mempty
+    pushTrace $ ErrorTrace NonceOverflow
+    next
   else if length vm0.frames >= 1024
   then do
     assign (#state % #stack) (Lit 0 : xs)
@@ -1692,7 +1744,7 @@ create self this xSize xGas' xValue xs newAddr initCode = do
   then burn xGas $ do
     assign (#state % #stack) (Lit 0 : xs)
     assign (#state % #returndata) mempty
-    modifying (#env % #contracts % ix self % #nonce) (Expr.add (Lit 1))
+    modifying (#env % #contracts % ix self % #nonce) (fmap ((+) 1))
     next
   else burn xGas $
     -- do we have enough balance
@@ -1705,71 +1757,65 @@ create self this xSize xGas' xValue xs newAddr initCode = do
         touchAccount self
         touchAccount newAddr
       -- are we overflowing the nonce
-      False -> branch (Expr.eq this.nonce (Lit $ num (maxBound :: Word64))) $ \case
-        True -> do
-          assign (#state % #stack) (Lit 0 : xs)
-          assign (#state % #returndata) mempty
-          pushTrace $ ErrorTrace NonceOverflow
-          next
-        False -> do
-          -- unfortunately we have to apply some (pretty hacky)
-          -- heuristics here to parse the unstructured buffer read
-          -- from memory into a code and data section
-          let contract' = do
-                prefixLen <- Expr.concPrefix initCode
-                prefix <- Expr.toList $ Expr.take (num prefixLen) initCode
-                let sym = Expr.drop (num prefixLen) initCode
-                conc <- mapM maybeLitByte prefix
-                pure $ InitCode (BS.pack $ V.toList conc) sym
-          case contract' of
-            Nothing ->
-              partial $ UnexpectedSymbolicArg vm0.state.pc "initcode must have a concrete prefix" []
-            Just c -> do
-              let
-                newContract = initialContract c newAddr
-                newContext  =
-                  CreationContext { address   = newAddr
-                                  , codehash  = newContract.codehash
-                                  , createreversion = vm0.env.contracts
-                                  , substate  = vm0.tx.substate
-                                  }
+      False -> do
+        -- unfortunately we have to apply some (pretty hacky)
+        -- heuristics here to parse the unstructured buffer read
+        -- from memory into a code and data section
+        let contract' = do
+              prefixLen <- Expr.concPrefix initCode
+              prefix <- Expr.toList $ Expr.take (num prefixLen) initCode
+              let sym = Expr.drop (num prefixLen) initCode
+              conc <- mapM maybeLitByte prefix
+              pure $ InitCode (BS.pack $ V.toList conc) sym
+        case contract' of
+          Nothing ->
+            partial $ UnexpectedSymbolicArg vm0.state.pc "initcode must have a concrete prefix" []
+          Just c -> do
+            let
+              newContract = initialContract c newAddr
+              newContext  =
+                CreationContext { address   = newAddr
+                                , codehash  = newContract.codehash
+                                , createreversion = vm0.env.contracts
+                                , substate  = vm0.tx.substate
+                                }
 
-              zoom (#env % #contracts) $ do
-                oldAcc <- use (at newAddr)
-                let oldBal = maybe (Lit 0) (.balance) oldAcc
+            zoom (#env % #contracts) $ do
+              oldAcc <- use (at newAddr)
+              let oldBal = maybe (Lit 0) (.balance) oldAcc
 
-                assign (at newAddr) (Just (newContract & #balance .~ oldBal))
-                modifying (ix self % #nonce) (Expr.add (Lit 1))
+              assign (at newAddr) (Just (newContract & #balance .~ oldBal))
+              modifying (ix self % #nonce) (fmap ((+) 1))
 
-              let
-                resetStorage :: Expr Storage -> Expr Storage
-                resetStorage = \case
-                    ConcreteStore a _ -> ConcreteStore a mempty
-                    AbstractStore a -> AbstractStore a
-                    SStore _ _ p -> resetStorage p
-                    GVar _  -> error "unexpected global variable"
+            let
+              resetStorage :: Expr Storage -> Expr Storage
+              resetStorage = \case
+                  ConcreteStore a _ -> ConcreteStore a mempty
+                  AbstractStore a -> AbstractStore a
+                  SStore _ _ p -> resetStorage p
+                  GVar _  -> error "unexpected global variable"
 
-              modifying (#env % #contracts % ix newAddr % #storage) resetStorage
-              modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage
+            modifying (#env % #contracts % ix newAddr % #storage) resetStorage
+            modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage
 
-              transfer self newAddr (Lit xValue)
+            transfer self newAddr (Lit xValue)
 
-              pushTrace (FrameTrace newContext)
-              next
-              vm1 <- get
-              pushTo #frames $ Frame
-                { context = newContext
-                , state   = vm1.state { stack = xs }
-                }
+            pushTrace (FrameTrace newContext)
+            next
+            vm1 <- get
+            pushTo #frames $ Frame
+              { context = newContext
+              , state   = vm1.state { stack = xs }
+              }
 
-              assign #state $
-                blankState
-                  & set #contract     newAddr
-                  & set #codeContract newAddr
-                  & set #code         c
-                  & set #callvalue    (Lit xValue)
-                  & set #caller       self
-                  & set #gas          xGas'
+            assign #state $
+              blankState
+                & set #contract     newAddr
+                & set #codeContract newAddr
+                & set #code         c
+                & set #callvalue    (Lit xValue)
+                & set #caller       self
+                & set #gas          xGas'
 
 -- | Replace a contract's code, like when CREATE returns
 -- from the constructor code.
@@ -1786,6 +1832,8 @@ replaceCode target newCode =
               }
         RuntimeCode _ ->
           error ("internal error: can't replace code of deployed contract " <> show target)
+        UnknownCode _ ->
+          error "internal error: can't replace unknown code"
       Nothing ->
         error "internal error: can't replace code of nonexistent contract"
 
@@ -1915,7 +1963,7 @@ finishFrame how = do
             revertSubstate  = assign (#tx % #substate) substate'
 
             -- persist the nonce through the reversion
-            reversion' = (Map.adjust (over #nonce (Expr.add (Lit 1))) creator) reversion
+            reversion' = (Map.adjust (over #nonce (fmap ((+) 1))) creator) reversion
 
           case how of
             -- Case 4: Returning during a creation?
@@ -2132,6 +2180,7 @@ isValidJumpDest vm x = let
       (error "Internal Error: self not found in current contracts")
       (Map.lookup self vm.env.contracts)
     op = case code of
+      UnknownCode _ -> error "Internal Error: cannot analyze jumpdests for unknown code"
       InitCode ops _ -> BS.indexMaybe ops x
       RuntimeCode (ConcreteRuntimeCode ops) -> BS.indexMaybe ops x
       RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= maybeLitByte
@@ -2147,6 +2196,7 @@ opSize _                          = 1
 -- the program counter value i.  This is needed because source map
 -- entries are per operation, not per byte.
 mkOpIxMap :: ContractCode -> SV.Vector Int
+mkOpIxMap (UnknownCode _) = error "Internal Error: cannot build opIxMap for unknown code"
 mkOpIxMap (InitCode conc _)
   = SV.create $ SV.new (BS.length conc) >>= \v ->
       -- Loop over the byte string accumulating a vector-mutating action.
@@ -2191,6 +2241,7 @@ vmOp vm =
   let i  = vm ^. #state % #pc
       code' = vm ^. #state % #code
       (op, pushdata) = case code' of
+        UnknownCode _ -> error "Internal Error: cannot get op from unknown code"
         InitCode xs' _ ->
           (BS.index xs' i, fmap LitByte $ BS.unpack $ BS.drop i xs')
         RuntimeCode (ConcreteRuntimeCode xs') ->
@@ -2210,6 +2261,7 @@ vmOpIx vm =
 mkCodeOps :: ContractCode -> V.Vector (Int, Op)
 mkCodeOps contractCode =
   let l = case contractCode of
+            UnknownCode _ -> error "Internal Error: cannot make codeOps for unknown code"
             InitCode bytes _ ->
               LitByte <$> (BS.unpack bytes)
             RuntimeCode (ConcreteRuntimeCode ops) ->
@@ -2329,6 +2381,7 @@ memoryCost FeeSchedule{..} byteCount =
     linearCost + quadraticCost
 
 hashcode :: ContractCode -> Expr EWord
+hashcode (UnknownCode a) = CodeHash a
 hashcode (InitCode ops args) = keccak $ (ConcreteBuf ops) <> args
 hashcode (RuntimeCode (ConcreteRuntimeCode ops)) = keccak (ConcreteBuf ops)
 hashcode (RuntimeCode (SymbolicRuntimeCode ops)) = keccak . Expr.fromList $ ops
@@ -2336,6 +2389,7 @@ hashcode (RuntimeCode (SymbolicRuntimeCode ops)) = keccak . Expr.fromList $ ops
 -- | The length of the code ignoring any constructor args.
 -- This represents the region that can contain executable opcodes
 opslen :: ContractCode -> Int
+opslen (UnknownCode _) = error "Internal Error: cannot produce concrete opslen for unknown code"
 opslen (InitCode ops _) = BS.length ops
 opslen (RuntimeCode (ConcreteRuntimeCode ops)) = BS.length ops
 opslen (RuntimeCode (SymbolicRuntimeCode ops)) = length ops
@@ -2343,22 +2397,26 @@ opslen (RuntimeCode (SymbolicRuntimeCode ops)) = length ops
 -- | The length of the code including any constructor args.
 -- This can return an abstract value
 codelen :: ContractCode -> Expr EWord
-codelen c@(InitCode {}) = bufLength $ toBuf c
+codelen (UnknownCode a) = CodeSize a
+codelen c@(InitCode {}) = case toBuf c of
+  Just b -> bufLength b
+  Nothing -> error "Internal Error: impossible"
 codelen (RuntimeCode (ConcreteRuntimeCode ops)) = Lit . num $ BS.length ops
 codelen (RuntimeCode (SymbolicRuntimeCode ops)) = Lit . num $ length ops
 
-toBuf :: ContractCode -> Expr Buf
-toBuf (InitCode ops args) = ConcreteBuf ops <> args
-toBuf (RuntimeCode (ConcreteRuntimeCode ops)) = ConcreteBuf ops
-toBuf (RuntimeCode (SymbolicRuntimeCode ops)) = Expr.fromList ops
+toBuf :: ContractCode -> Maybe (Expr Buf)
+toBuf (UnknownCode _) = Nothing
+toBuf (InitCode ops args) = Just $ ConcreteBuf ops <> args
+toBuf (RuntimeCode (ConcreteRuntimeCode ops)) = Just $ ConcreteBuf ops
+toBuf (RuntimeCode (SymbolicRuntimeCode ops)) = Just $ Expr.fromList ops
 
 codeloc :: EVM CodeLocation
 codeloc = do
   vm <- get
   pure (vm.state.contract, vm.state.pc)
 
-createAddress :: Expr EAddr -> Expr EWord -> EVM (Expr EAddr)
-createAddress (LitAddr a) (Lit n) = pure $ Concrete.createAddress a n
+createAddress :: Expr EAddr -> Maybe W64 -> EVM (Expr EAddr)
+createAddress (LitAddr a) (Just n) = pure $ Concrete.createAddress a n
 createAddress (GVar _) _ = error "Internal Error: unexpected GVar"
 createAddress _ _ = freshSymAddr
 

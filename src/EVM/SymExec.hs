@@ -193,10 +193,9 @@ abstractVM
   -> VM
 abstractVM cd contractCode maybepre store = finalVm
   where
-    caller' = Caller 0
     value' = CallValue 0
     code' = RuntimeCode (ConcreteRuntimeCode contractCode)
-    vm' = loadSymVM code' store caller' value' cd
+    vm' = loadSymVM code' store value' cd
     precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm']
@@ -205,17 +204,16 @@ abstractVM cd contractCode maybepre store = finalVm
 loadSymVM
   :: ContractCode
   -> Expr Storage
-  -> Expr EAddr
   -> Expr EWord
   -> (Expr Buf, [Prop])
   -> VM
-loadSymVM x initStore addr callvalue' cd =
+loadSymVM x initStore callvalue' cd =
   (makeVm $ VMOpts
-    { contract = initialContract x addr
+    { contract = initialContract x (SymAddr 2)
     , calldata = cd
     , value = callvalue'
     , initialStorage = initStore
-    , address = addr
+    , address = SymAddr 2
     , caller = SymAddr 1 -- TODO: how can we explore cases where the caller and tx.origin are the same
     , origin = SymAddr 0
     , coinbase = 0
