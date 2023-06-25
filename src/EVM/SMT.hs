@@ -29,6 +29,7 @@ import Data.Text.Lazy.Builder
 import Language.SMT2.Parser (getValueRes, parseCommentFreeFileMsg)
 import Language.SMT2.Syntax (Symbol, SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
 import Numeric (readHex, readBin)
+import Witch (into, unsafeInto)
 
 import EVM.CSE
 import EVM.Expr (writeByte, bufLengthEnv, containsNode, bufLength, minLength, inRange)
@@ -100,7 +101,7 @@ collapse model = case toBuf model of
   Just (ConcreteBuf b) -> Just $ Flat b
   _ -> Nothing
   where
-    toBuf (Comp (Base b sz)) | sz <= 120_000_000 = Just . ConcreteBuf $ BS.replicate (num sz) b
+    toBuf (Comp (Base b sz)) | sz <= 120_000_000 = Just . ConcreteBuf $ BS.replicate (unsafeInto sz) b
     toBuf (Comp (Write b idx next)) = fmap (writeByte (Lit idx) (LitByte b)) (toBuf $ Comp next)
     toBuf (Flat b) = Just . ConcreteBuf $ b
     toBuf _ = Nothing
@@ -271,7 +272,11 @@ assertReads props benv senv = concatMap assertRead allReads
   where
     assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
     assertRead (idx, Lit 32, buf) = [PImpl (PGEq idx (bufLength buf)) (PEq (ReadWord idx buf) (Lit 0))]
-    assertRead (idx, Lit sz, buf) = fmap (\s -> PImpl (PGEq idx (bufLength buf)) (PEq (ReadByte idx buf) (LitByte (num s)))) [(0::Int)..num sz-1]
+    assertRead (idx, Lit sz, buf) =
+      fmap
+        -- TODO: unsafeInto instead fromIntegral here makes symbolic tests fail
+        (PImpl (PGEq idx (bufLength buf)) . PEq (ReadByte idx buf) . LitByte . fromIntegral)
+        [(0::Int)..unsafeInto sz-1]
     assertRead (_, _, _) = internalError "Cannot generate assertions for accesses of symbolic size"
 
     allReads = filter keepRead $ nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
@@ -279,7 +284,7 @@ assertReads props benv senv = concatMap assertRead allReads
     -- discard constraints if we can statically determine that read is less than the buffer length
     keepRead (Lit idx, Lit size, buf) =
       case minLength benv buf of
-        Just l | num (idx + size) <= l -> False
+        Just l | into (idx + size) <= l -> False
         _ -> True
     keepRead _ = True
 
@@ -563,7 +568,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
 
 exprToSMT :: Expr a -> Builder
 exprToSMT = \case
-  Lit w -> fromLazyText $ "(_ bv" <> (T.pack $ show (num w :: Integer)) <> " 256)"
+  Lit w -> fromLazyText $ "(_ bv" <> (T.pack $ show (into w :: Integer)) <> " 256)"
   Var s -> fromText s
   GVar (BufVar n) -> fromLazyText $ "buf" <> (T.pack . show $ n)
   GVar (StoreVar n) -> fromLazyText $ "store" <> (T.pack . show $ n)
@@ -671,12 +676,12 @@ exprToSMT = \case
   ChainId -> "chainid"
   BaseFee -> "basefee"
 
-  LitByte b -> fromLazyText $ "(_ bv" <> T.pack (show (num b :: Integer)) <> " 8)"
+  LitByte b -> fromLazyText $ "(_ bv" <> T.pack (show (into b :: Integer)) <> " 8)"
   IndexWord idx w -> case idx of
     Lit n -> if n >= 0 && n < 32
              then
                let enc = exprToSMT w in
-               fromLazyText ("(indexWord" <> T.pack (show (num n :: Integer))) `sp` enc <> ")"
+               fromLazyText ("(indexWord" <> T.pack (show (into n :: Integer))) `sp` enc <> ")"
              else exprToSMT (LitByte 0)
     _ -> op2 "indexWord" idx w
   ReadByte idx src -> op2 "select" src idx
@@ -817,7 +822,7 @@ writeBytes bytes buf = snd $ BS.foldl' wrap (0, exprToSMT buf) bytes
       then (idx + 1, inner)
       else let
           byteSMT = exprToSMT (LitByte byte)
-          idxSMT = exprToSMT . Lit . num $ idx
+          idxSMT = exprToSMT . Lit . unsafeInto $ idx
         in (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
 
 encodeConcreteStore :: Map W256 (Map W256 W256) -> Builder

@@ -87,6 +87,7 @@ import Test.QuickCheck hiding ((.&.), label)
 import Text.Megaparsec qualified as P
 import Text.Megaparsec.Char qualified as P
 import Text.ParserCombinators.ReadP
+import Witch (unsafeInto, into)
 
 data AbiValue
   = AbiUInt         Int Word256
@@ -216,7 +217,7 @@ getAbi t = label (Text.unpack (abiTypeSolidity t)) $
     AbiArrayDynamicType t' -> do
       AbiUInt _ n <- label "array length" (getAbi (AbiUIntType 256))
       AbiArrayDynamic t' <$>
-        label "array body" (getAbiSeq (fromIntegral n) (repeat t'))
+        label "array body" (getAbiSeq (unsafeInto n) (repeat t'))
 
     AbiTupleType ts ->
       AbiTuple <$> getAbiSeq (Vector.length ts) (Vector.toList ts)
@@ -228,7 +229,7 @@ putAbi :: AbiValue -> Put
 putAbi = \case
   AbiUInt _ x ->
     forM_ (reverse [0 .. 7]) $ \i ->
-      putWord32be (fromIntegral (shiftR x (i * 32) .&. 0xffffffff))
+      putWord32be (unsafeInto (shiftR x (i * 32) .&. 0xffffffff))
 
   AbiInt n x   -> putAbi (AbiUInt n (fromIntegral x))
   AbiAddress x -> putAbi (AbiUInt 160 (fromIntegral x))
@@ -240,7 +241,7 @@ putAbi = \case
 
   AbiBytesDynamic xs -> do
     let n = BS.length xs
-    putAbi (AbiUInt 256 (fromIntegral n))
+    putAbi (AbiUInt 256 (unsafeInto n))
     putAbi (AbiBytes n xs)
 
   AbiString s ->
@@ -325,7 +326,7 @@ putAbiSeq xs =
       case abiKind (abiValueType x) of
         Static -> do putAbi x
                      putHeads offset xs'
-        Dynamic -> do putAbi (AbiUInt 256 (fromIntegral offset))
+        Dynamic -> do putAbi (AbiUInt 256 (unsafeInto offset))
                       putHeads (offset + abiTailSize x) xs'
 
 encodeAbiValue :: AbiValue -> BS.ByteString
@@ -387,7 +388,7 @@ basicType v =
 pack32 :: Int -> [Word32] -> Word256
 pack32 n xs =
   sum [ shiftL x ((n - i) * 32)
-      | (x, i) <- zip (map fromIntegral xs) [1..] ]
+      | (x, i) <- zip (map into xs) [1..] ]
 
 asUInt :: Integral i => Int -> (i -> a) -> Get a
 asUInt n f = y <$> getAbi (AbiUIntType n)
@@ -508,7 +509,7 @@ parseAbiValue :: AbiType -> ReadP AbiValue
 parseAbiValue (AbiUIntType n) = do W256 w <- readS_to_P reads
                                    pure $ AbiUInt n w
 parseAbiValue (AbiIntType n) = do W256 w <- readS_to_P reads
-                                  pure $ AbiInt n (num w)
+                                  pure $ AbiInt n (unsafeInto w)
 parseAbiValue AbiAddressType = AbiAddress <$> readS_to_P reads
 parseAbiValue AbiBoolType = (do W256 w <- readS_to_P reads
                                 pure $ AbiBool (w /= 0))
@@ -570,7 +571,7 @@ decodeBuf tps buf
 
 decodeStaticArgs :: Int -> Int -> Expr Buf -> [Expr EWord]
 decodeStaticArgs offset numArgs b =
-  [readWord (Lit . num $ i) b | i <- [offset,(offset+32) .. (offset + (numArgs-1)*32)]]
+  [readWord (Lit . unsafeInto $ i) b | i <- [offset,(offset+32) .. (offset + (numArgs-1)*32)]]
 
 
 -- A modification of 'arbitrarySizedBoundedIntegral' quickcheck library

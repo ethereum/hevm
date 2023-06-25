@@ -22,6 +22,7 @@ import Data.Text.Lazy qualified as T
 import Data.Text.Lazy.IO qualified as T
 import Data.Text.Lazy.Builder
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
+import Witch (into)
 
 import EVM.SMT
 import EVM.Types (W256, Expr(AbstractBuf), internalError)
@@ -179,7 +180,7 @@ getModel inst cexvars = do
     -- and try again.
     shrinkBuf :: Text -> W256 -> StateT SMTCex IO ()
     shrinkBuf buf hint = do
-      let encBound = "(_ bv" <> (T.pack $ show (fromIntegral hint :: Integer)) <> " 256)"
+      let encBound = "(_ bv" <> (T.pack $ show (into hint :: Integer)) <> " 256)"
       sat <- liftIO $ do
         sendLine' inst "(push)"
         sendLine' inst $ "(assert (bvule " <> buf <> "_length " <> encBound <> "))"

@@ -88,6 +88,7 @@ import System.IO hiding (readFile, writeFile)
 import System.IO.Temp
 import System.Process
 import Text.Read (readMaybe)
+import Witch (unsafeInto)
 
 
 data StorageItem = StorageItem
@@ -415,7 +416,7 @@ readFoundryJSON contractName json = do
 
   abi <- toList <$> json ^? key "abi" % _Array
 
-  id' <- num <$> json ^? key "id" % _Integer
+  id' <- unsafeInto <$> json ^? key "id" % _Integer
 
   let contract = SolcContract
         { runtimeCodehash     = keccak' (stripBytecodeMetadata runtimeCode)
@@ -445,7 +446,7 @@ readStdJSON json = do
   sources <- KeyMap.toHashMapText <$>  json ^? key "sources" % _Object
   let asts = force "JSON lacks abstract syntax trees." . preview (key "ast") <$> sources
       contractMap = f contracts
-      getId src = num $ (force "" $ HMap.lookup src sources) ^?! key "id" % _Integer
+      getId src = unsafeInto $ (force "" $ HMap.lookup src sources) ^?! key "id" % _Integer
       contents src = (SrcFile (getId src) (T.unpack src), encodeUtf8 <$> HMap.lookup src (mconcat $ Map.elems $ snd <$> contractMap))
   pure ( Contracts $ fst <$> contractMap
          , Asts      $ Map.fromList (HMap.toList asts)

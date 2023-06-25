@@ -3,7 +3,7 @@ module EVM.Debug where
 import EVM (bytecode)
 import EVM.Expr (bufLength)
 import EVM.Solidity (SrcMap(..), SourceCache(..))
-import EVM.Types (Contract, Addr)
+import EVM.Types (Contract(..), Addr)
 
 import Control.Arrow (second)
 import Data.ByteString (ByteString)
@@ -12,6 +12,7 @@ import Data.Map (Map)
 import Data.Map qualified as Map
 import Optics.Core
 import Text.PrettyPrint.ANSI.Leijen
+import Witch (unsafeInto)
 
 data Mode = Debug | Run | JsonTrace deriving (Eq, Show)
 
@@ -27,9 +28,9 @@ prettyContract :: Contract -> Doc
 prettyContract c =
   object
     [ (text "codesize", text . show $ (bufLength (c ^. bytecode)))
-    , (text "codehash", text (show (c ^. #codehash)))
-    , (text "balance", int (fromIntegral (c ^. #balance)))
-    , (text "nonce", int (fromIntegral (c ^. #nonce)))
+    , (text "codehash", text (show c.codehash))
+    , (text "balance", int (unsafeInto c.balance))
+    , (text "nonce", int (unsafeInto c.nonce))
     ]
 
 prettyContracts :: Map Addr Contract -> Doc
