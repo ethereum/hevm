@@ -312,7 +312,12 @@ data Expr (a :: EType) where
 
   -- A restricted view of a contract that does not include extraneous metadata
   -- from the full constructor defined in the VM state
-  C :: { code :: ContractCode , storage :: Expr Storage , balance :: Expr EWord , nonce :: Expr EWord } -> Expr EContract
+  C ::
+    { code    :: ContractCode
+    , storage :: Expr Storage
+    , balance :: Expr EWord
+    , nonce   :: Maybe W64
+    } -> Expr EContract
 
   -- addresses
 
@@ -809,7 +814,7 @@ data TraceData
 data VMOpts = VMOpts
   { contract :: Contract
   , calldata :: (Expr Buf, [Prop])
-  , initialStorage :: Expr Storage
+  , initialState :: InitialState
   , value :: Expr EWord
   , priorityFee :: W256
   , address :: Expr EAddr
@@ -831,6 +836,13 @@ data VMOpts = VMOpts
   , txAccessList :: Map (Expr EAddr) [W256]
   , allowFFI :: Bool
   } deriving Show
+
+
+data InitialState
+  = EmptyState
+  | AbstractState
+  | ConcreteState (Map (Expr EAddr) Contract)
+  deriving Show
 
 
 -- Opcodes -----------------------------------------------------------------------------------------

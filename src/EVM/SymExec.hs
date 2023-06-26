@@ -189,13 +189,12 @@ abstractVM
   :: (Expr Buf, [Prop])
   -> ByteString
   -> Maybe Precondition
-  -> Expr Storage
   -> VM
-abstractVM cd contractCode maybepre store = finalVm
+abstractVM cd contractCode maybepre = finalVm
   where
     value' = TxValue
     code' = RuntimeCode (ConcreteRuntimeCode contractCode)
-    vm' = loadSymVM code' store value' cd
+    vm' = loadSymVM code' AbstractState value' cd
     precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm']
@@ -203,20 +202,25 @@ abstractVM cd contractCode maybepre store = finalVm
 
 loadSymVM
   :: ContractCode
-  -> Expr Storage
+  -> InitialState
   -> Expr EWord
   -> (Expr Buf, [Prop])
   -> VM
-loadSymVM x initStore callvalue' cd =
+loadSymVM x initState callvalue' cd = let
+    origin = SymAddr 0
+    caller = SymAddr 1
+    coinbase = SymAddr 2
+    contract = SymAddr 3
+  in
   (makeVm $ VMOpts
-    { contract = initialContract x (SymAddr 2)
+    { contract = initialContract x contract
     , calldata = cd
     , value = callvalue'
-    , initialStorage = initStore
-    , address = SymAddr 2
-    , caller = SymAddr 1 -- TODO: how can we explore cases where the caller and tx.origin are the same
-    , origin = SymAddr 0
-    , coinbase = 0
+    , initialState = initState
+    , address = contract
+    , caller = caller
+    , origin = origin
+    , coinbase = coinbase
     , number = 0
     , timestamp = Lit 0
     , blockGaslimit = 0
@@ -365,7 +369,7 @@ checkAssert
   -> VeriOpts
   -> IO (Expr End, [VerifyResult])
 checkAssert solvers errs c signature' concreteArgs opts =
-  verifyContract solvers c signature' concreteArgs opts AbstractStore Nothing (Just $ checkAssertions errs)
+  verifyContract solvers c signature' concreteArgs opts Nothing (Just $ checkAssertions errs)
 
 {- | Checks if an assertion violation has been encountered
 
@@ -423,12 +427,11 @@ verifyContract
   -> Maybe Sig
   -> [String]
   -> VeriOpts
-  -> Expr Storage
   -> Maybe Precondition
   -> Maybe Postcondition
   -> IO (Expr End, [VerifyResult])
-verifyContract solvers theCode signature' concreteArgs opts initStore maybepre maybepost =
-  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre initStore
+verifyContract solvers theCode signature' concreteArgs opts maybepre maybepost =
+  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre
   in verify solvers opts preState maybepost
 
 -- | Stepper that parses the result of Stepper.runFully into an Expr End
@@ -437,10 +440,13 @@ runExpr = do
   vm <- Stepper.runFully
   let asserts = vm.keccakEqs <> vm.constraints
   pure $ case vm.result of
-    Just (VMSuccess buf) -> Success asserts buf vm.env.storage
+    Just (VMSuccess buf) -> Success asserts buf (fmap toEContract vm.env.contracts)
     Just (VMFailure e) -> Failure asserts e
     Just (Unfinished p) -> Partial asserts p
     _ -> error "Internal Error: vm in intermediate state after call to runFully"
+
+toEContract :: Contract -> Expr EContract
+toEContract c = C c.code c.storage c.balance c.nonce
 
 -- | Converts a given top level expr into a list of final states and the
 -- associated path conditions for each state.
@@ -640,7 +646,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
     getBranches bs = do
       let
         bytecode = if BS.null bs then BS.pack [0] else bs
-        prestate = abstractVM calldata bytecode Nothing AbstractStore
+        prestate = abstractVM calldata bytecode Nothing
       expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl
@@ -735,7 +741,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
           (Success _ aOut aStore, Success _ bOut bStore) ->
             if aOut == bOut && aStore == bStore
             then PBool False
-            else aStore ./= bStore .|| aOut ./= bOut
+            else {- aStore ./= bStore -} error "TODO" .|| aOut ./= bOut
           (Failure _ (Revert a), Failure _ (Revert b)) -> if a == b then PBool False else a ./= b
           (Failure _ a, Failure _ b) -> if a == b then PBool False else PBool True
           -- partial end states can't be compared to actual end states, so we always ignore them
@@ -821,7 +827,7 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
       | otherwise =
           [ "Storage:"
           , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc ->
-              ("Addr " <> (T.pack . show . Addr . num $ key)
+              ("Addr " <> (T.pack . show $ key)
                 <> ": " <> (T.pack $ show (Map.toList val))) : acc
             ) mempty store
           , ""

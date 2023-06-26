@@ -33,12 +33,11 @@ foldProp f acc p = acc <> (go p)
 
 foldContract :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Expr EContract -> b
 foldContract f _ g@(GVar _) = f g
-foldContract f acc (C code storage balance nonce)
+foldContract f acc (C code storage balance _)
   =  acc
   <> foldCode code
   <> foldExpr f mempty storage
   <> foldExpr f mempty balance
-  <> foldExpr f mempty nonce
   where
     foldCode :: ContractCode -> b
     foldCode (RuntimeCode (ConcreteRuntimeCode _)) = mempty
@@ -714,8 +713,7 @@ mapContractM f (C code storage balance nonce) = do
                pure $ InitCode bs buf'
   storage' <- mapExprM f storage
   balance' <- mapExprM f balance
-  nonce' <- mapExprM f nonce
-  pure $ C code' storage' balance' nonce'
+  pure $ C code' storage' balance' nonce
 
 -- | Generic operations over AST terms
 class TraversableTerm a where
