@@ -32,6 +32,7 @@
           z3
           cvc5
           git
+        ] ++ lib.optionals (!stdenv.isDarwin) [
           foundry.defaultPackage.${system}
         ];
 
@@ -39,8 +40,39 @@
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         }));
 
+        patchedHaskellPackages = pkgs.haskell.packages.ghc94.override {
+          overrides = self: super: {
+            # disable tests in optics
+            optics-core = pkgs.haskell.lib.dontCheck (self.callCabal2nix "optics-core" (pkgs.fetchFromGitHub {
+              owner = "well-typed";
+              repo = "optics";
+              rev = "46b03019bd7d9eddb767b19a68b94125eec3b17a";
+              sha256 = "sha256-wzZ/64G7nVAzIFjKNs/jBvv6gQdTIQS4X/OvM5KWfnU=";
+            } + "/optics-core") {});
+            optics = pkgs.haskell.lib.dontCheck (self.callCabal2nix "optics" (pkgs.fetchFromGitHub {
+              owner = "well-typed";
+              repo = "optics";
+              rev = "46b03019bd7d9eddb767b19a68b94125eec3b17a";
+              sha256 = "sha256-wzZ/64G7nVAzIFjKNs/jBvv6gQdTIQS4X/OvM5KWfnU=";
+            } + "/optics") {});
+            indexed-profunctors = pkgs.haskell.lib.dontCheck (self.callCabal2nix "optics" (pkgs.fetchFromGitHub {
+              owner = "well-typed";
+              repo = "optics";
+              rev = "46b03019bd7d9eddb767b19a68b94125eec3b17a";
+              sha256 = "sha256-wzZ/64G7nVAzIFjKNs/jBvv6gQdTIQS4X/OvM5KWfnU=";
+            } + "/indexed-profunctors") {});
+            # use obsidian systems fork of string-qq
+            string-qq = self.callCabal2nix "string-qq" (pkgs.fetchFromGitHub {
+              owner = "obsidiansystems";
+              repo = "string-qq";
+              rev = "82ad6d72b694dc61e9b6b7eb856cb2d3d27e2865";
+              sha256 = "sha256-CNtB8jkNyNBR+ZJbtLoeA6U1ivT3gEs4UVFVHIZe27w=";
+            }) {};
+          };
+        };
+
         hevmUnwrapped = (with pkgs; lib.pipe (
-          haskellPackages.callCabal2nix "hevm" ./. {
+          patchedHaskellPackages.callCabal2nix "hevm" ./. {
             # Haskell libs with the same names as C libs...
             # Depend on the C libs, not the Haskell libs.
             # These are system deps, not Cabal deps.
@@ -67,6 +99,7 @@
                 "--extra-lib-dirs=${glibc.static}/lib"
               ]))
             haskell.lib.dontHaddock
+            haskell.lib.doJailbreak
           ]).overrideAttrs(final: prev: {
             HEVM_SOLIDITY_REPO = solidity;
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
@@ -144,13 +177,14 @@
 
         devShell = with pkgs;
           let libraryPath = "${lib.makeLibraryPath [ libff secp256k1 gmp ]}";
-          in haskellPackages.shellFor {
+          in patchedHaskellPackages.shellFor {
             packages = _: [ hevmUnwrapped ];
             buildInputs = [
               mdbook
               yarn
-              haskellPackages.cabal-install
-              haskellPackages.haskell-language-server
+              go-ethereum
+              patchedHaskellPackages.cabal-install
+              patchedHaskellPackages.haskell-language-server
             ] ++ testDeps;
             withHoogle = true;
 
