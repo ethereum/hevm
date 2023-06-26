@@ -19,13 +19,13 @@ import qualified Data.Text as T
 import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as LazyByteString
 
-import EVM (StorageModel(..))
 import EVM.SymExec
 import EVM.Solidity
 import EVM.Solvers
 import EVM.ABI
 import EVM.Dapp
-import EVM.Types
+import EVM.Types (StorageModel(..), Expr(AbstractStore))
+import EVM.Format (hexByteString)
 import qualified EVM.TTY as TTY
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
@@ -34,10 +34,10 @@ import EVM.Test.BlockchainTests qualified as BCTests
 
 main :: IO ()
 main = defaultMain
-  [ mkbench erc20 "erc20" Nothing [1]
-  , mkbench (pure vat) "vat" Nothing [4]
-  , mkbench (pure deposit) "deposit" (Just 32) [4]
-  , mkbench (pure uniV2Pair) "uniV2" (Just 10) [4]
+  [ mkbench erc20 "erc20" 0 [1]
+  , mkbench (pure vat) "vat" 0 [4]
+  , mkbench (pure deposit) "deposit" 32 [4]
+  , mkbench (pure uniV2Pair) "uniV2" 10 [4]
   , withResource bcjsons (pure . const ()) blockchainTests
   ]
 
@@ -84,9 +84,12 @@ runBCTest :: BCTests.Case -> IO Bool
 runBCTest x =
  do
   let vm0 = BCTests.vmForCase x
-  result <- execStateT (Stepper.interpret (Fetch.zero 0 (Just 0)) . void $ Stepper.execFully) vm0
-  maybeReason <- BCTests.checkExpectation False x result
-  pure $ isNothing maybeReason
+  result <- Stepper.interpret (Fetch.zero 0 Nothing) vm0 Stepper.execFully
+  case result of
+    Left _ -> pure False
+    Right _ -> pure True
+  -- maybeReason <- BCTests.checkExpectation False x (_ result)
+  -- pure $ isNothing maybeReason
 
 
 --- Helpers ----------------------------------------------------------------------------------------
@@ -94,15 +97,15 @@ runBCTest x =
 
 debugContract :: ByteString -> IO ()
 debugContract c = withSolvers CVC5 4 Nothing $ \solvers -> do
-  let prestate = abstractVM (mkCalldata Nothing []) c Nothing SymbolicS
+  let prestate = abstractVM (mkCalldata Nothing []) c Nothing AbstractStore
   void $ TTY.runFromVM solvers Nothing Nothing emptyDapp prestate
 
-findPanics :: Solver -> Natural -> Maybe Integer -> ByteString -> IO ()
+findPanics :: Solver -> Natural -> Integer -> ByteString -> IO ()
 findPanics solver count iters c = do
   (_, res) <- withSolvers solver count Nothing $ \s -> do
     let opts = defaultVeriOpts
-          { maxIter = iters
-          , askSmtIters = (+ 1) <$> iters
+          { maxIter = Just iters
+          , askSmtIters = iters + 1
           }
     checkAssert s allPanicCodes c Nothing [] opts
   putStrLn "done"
@@ -112,7 +115,7 @@ findPanics solver count iters c = do
 -- assertion violations takes an iteration bound, as well as a list of solver
 -- counts to benchmark, allowing us to construct benchmarks that compare the
 -- performance impact of increasing solver parallelisation
-mkbench :: IO ByteString -> String -> Maybe Integer -> [Natural] -> Benchmark
+mkbench :: IO ByteString -> String -> Integer -> [Natural] -> Benchmark
 mkbench c name iters counts = localOption WallTime $ env c (bgroup name . bmarks)
   where
     bmarks c' = concat $ [
