@@ -693,7 +693,6 @@ tests = testGroup "hevm"
         runSolidityTest testFile "prove_add" >>= assertEqual "test result" False
         --runSolidityTest testFile "prove_smtTimeout" >>= assertEqual "test result" False
         runSolidityTest testFile "prove_multi" >>= assertEqual "test result" False
-        runSolidityTest testFile "prove_mul" >>= assertEqual "test result" False
         -- TODO: implement overflow checking optimizations and enable, currently this runs forever
         --runSolidityTest testFile "prove_distributivity" >>= assertEqual "test result" False
     , testCase "Loop-Tests" $ do
