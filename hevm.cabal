@@ -121,8 +121,12 @@ library
     Paths_hevm
   autogen-modules:
     Paths_hevm
-  if os(linux) || os(windows) || os(darwin)
+  if os(linux) || os(windows)
     extra-libraries: stdc++
+  if os(darwin)
+     extra-libraries: c++
+  else
+     extra-libraries: stdc++
   extra-libraries:
     secp256k1, ff, gmp
   c-sources:
