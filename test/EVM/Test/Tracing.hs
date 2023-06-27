@@ -841,7 +841,7 @@ tests = testGroup "contract-quickcheck-run"
               concretizedExpr = concretize expr (ConcreteBuf txData)
               simplConcExpr = Expr.simplify concretizedExpr
               getReturnVal :: Expr End -> Maybe ByteString
-              getReturnVal (Success _ (ConcreteBuf bs) _) = Just bs
+              getReturnVal (Success _ _ (ConcreteBuf bs) _) = Just bs
               getReturnVal _ = Nothing
               simplConcrExprRetval = getReturnVal simplConcExpr
             traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)

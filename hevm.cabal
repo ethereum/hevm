@@ -206,6 +206,7 @@ executable hevm
   if os(darwin)
     extra-libraries: c++
     ld-options: -Wl,-keep_dwarf_unwind
+    ghc-options: -fcompact-unwind
   else
     extra-libraries: stdc++
   build-depends:
@@ -321,6 +322,7 @@ common test-common
     extra-libraries: c++
     -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
     ld-options: -Wl,-keep_dwarf_unwind
+    ghc-options: -fcompact-unwind
   else
     extra-libraries: stdc++
 

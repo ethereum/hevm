@@ -37,6 +37,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
+import Data.Tree.Zipper qualified as Zipper
 import EVM.Format (formatExpr, formatPartial)
 import Data.Set (Set, isSubsetOf, size)
 import qualified Data.Set as Set
@@ -274,7 +275,6 @@ interpret fetcher maxIter askSmtIters heuristic vm =
            in interpret fetcher maxIter askSmtIters heuristic vma (k ra))
           (let (rb, vmb) = runState (continue False) vm { result = Nothing }
            in interpret fetcher maxIter askSmtIters heuristic vmb (k rb))
-
         pure $ ITE cond a b
       Stepper.Wait q -> do
         let performQuery = do
@@ -291,7 +291,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                 case (maxIterationsReached vm maxIter, isLoopHead heuristic vm) of
                   -- Yes. return a partial leaf
                   (Just _, Just True) ->
-                    pure $ Partial vm.keccakEqs $ MaxIterationsReached vm.state.pc vm.state.contract
+                    pure $ Partial vm.keccakEqs (Traces (Zipper.toForest vm.traces) vm.env.contracts) $ MaxIterationsReached vm.state.pc vm.state.contract
                   -- No. keep executing
                   _ ->
                     let (r, vm') = runState (continue (Case (c > 0))) vm
@@ -307,7 +307,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                     -- got us to this point and return a partial leaf for the other side
                     let (r, vm') = runState (continue (Case $ not n)) vm
                     a <- interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-                    pure $ ITE cond a (Partial vm.keccakEqs (MaxIterationsReached vm.state.pc vm.state.contract))
+                    pure $ ITE cond a (Partial vm.keccakEqs (Traces (Zipper.toForest vm.traces) vm.env.contracts) (MaxIterationsReached vm.state.pc vm.state.contract))
                   -- we're in a loop and askSmtIters has been reached
                   (Just True, True, _) ->
                     -- ask the smt solver about the loop condition
@@ -392,8 +392,8 @@ checkAssert solvers errs c signature' concreteArgs opts =
 -}
 checkAssertions :: [Word256] -> Postcondition
 checkAssertions errs _ = \case
-  Failure _ (Revert (ConcreteBuf msg)) -> PBool $ msg `notElem` (fmap panicMsg errs)
-  Failure _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
+  Failure _ _ (Revert (ConcreteBuf msg)) -> PBool $ msg `notElem` (fmap panicMsg errs)
+  Failure _ _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
   _ -> PBool True
 
 -- | By default hevm only checks for user-defined assertions
@@ -439,10 +439,11 @@ runExpr :: Stepper.Stepper (Expr End)
 runExpr = do
   vm <- Stepper.runFully
   let asserts = vm.keccakEqs <> vm.constraints
+      traces = Traces (Zipper.toForest vm.traces)
   pure $ case vm.result of
-    Just (VMSuccess buf) -> Success asserts buf (fmap toEContract vm.env.contracts)
-    Just (VMFailure e) -> Failure asserts e
-    Just (Unfinished p) -> Partial asserts p
+    Just (VMSuccess buf) -> Success asserts traces buf (fmap toEContract vm.env.contracts)
+    Just (VMFailure e) -> Failure asserts traces e
+    Just (Unfinished p) -> Partial asserts traces p
     _ -> error "Internal Error: vm in intermediate state after call to runFully"
 
 toEContract :: Contract -> Expr EContract
@@ -456,9 +457,9 @@ flattenExpr = go []
     go :: [Prop] -> Expr End -> [Expr End]
     go pcs = \case
       ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
-      Success ps msg store -> [Success (ps <> pcs) msg store]
-      Failure ps e -> [Failure (ps <> pcs) e]
-      Partial ps p -> [Partial (ps <> pcs) p]
+      Success ps trace msg store -> [Success (ps <> pcs) trace msg store]
+      Failure ps trace e -> [Failure (ps <> pcs) trace e]
+      Partial ps trace p -> [Partial (ps <> pcs) trace p]
       GVar _ -> error "cannot flatten an Expr containing a GVar"
 
 -- | Strips unreachable branches from a given expr
@@ -539,13 +540,13 @@ evalProp = \case
 extractProps :: Expr End -> [Prop]
 extractProps = \case
   ITE _ _ _ -> []
-  Success asserts _ _ -> asserts
-  Failure asserts _ -> asserts
-  Partial asserts _ -> asserts
+  Success asserts _ _ _ -> asserts
+  Failure asserts _ _ -> asserts
+  Partial asserts _ _ -> asserts
   GVar _ -> error "cannot extract props from a GVar"
 
 isPartial :: Expr a -> Bool
-isPartial (Partial _ _) = True
+isPartial (Partial _ _ _) = True
 isPartial _ = False
 
 getPartials :: [Expr End] -> [PartialExec]
@@ -553,7 +554,7 @@ getPartials = mapMaybe go
   where
     go :: Expr End -> Maybe PartialExec
     go = \case
-      Partial _ p -> Just p
+      Partial _ _ p -> Just p
       _ -> Nothing
 
 -- | Symbolically execute the VM and check all endstates against the
@@ -738,12 +739,12 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     distinct aEnd bEnd =
       let
         differingResults = case (aEnd, bEnd) of
-          (Success _ aOut aStore, Success _ bOut bStore) ->
+          (Success _ _ aOut aStore, Success _ _ bOut bStore) ->
             if aOut == bOut && aStore == bStore
             then PBool False
             else {- aStore ./= bStore -} error "TODO" .|| aOut ./= bOut
-          (Failure _ (Revert a), Failure _ (Revert b)) -> if a == b then PBool False else a ./= b
-          (Failure _ a, Failure _ b) -> if a == b then PBool False else PBool True
+          (Failure _ _ (Revert a), Failure _ _ (Revert b)) -> if a == b then PBool False else a ./= b
+          (Failure _ _ a, Failure _ _ b) -> if a == b then PBool False else PBool True
           -- partial end states can't be compared to actual end states, so we always ignore them
           (Partial {}, _) -> PBool False
           (_, Partial {}) -> PBool False

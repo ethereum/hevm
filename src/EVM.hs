@@ -1532,6 +1532,7 @@ cheat (inOffset, inSize) (outOffset, outSize) = do
   let
     abi = readBytes 4 (Lit inOffset) mem
     input = readMemory (Lit $ inOffset + 4) (Lit $ inSize - 4) vm
+  pushTrace $ FrameTrace (CallContext cheatCode cheatCode inOffset inSize (Lit 0) (maybeLitWord abi) input (vm.env.contracts, vm.env.storage) vm.tx.substate)
   case maybeLitWord abi of
     Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc "symbolic cheatcode selector" (wrap [abi])
     Just (fromIntegral -> abi') ->
@@ -1540,6 +1541,7 @@ cheat (inOffset, inSize) (outOffset, outSize) = do
           vmError (BadCheatCode abi')
         Just action -> do
             action (Lit outOffset) (Lit outSize) input
+            popTrace
             next
             push 1
 
@@ -2096,6 +2098,20 @@ zipperRootForest z =
 
 traceForest :: VM -> Forest Trace
 traceForest vm = zipperRootForest vm.traces
+
+traceForest' :: Expr End -> Forest Trace
+traceForest' (Success _ (Traces f _) _ _) = f
+traceForest' (Partial _ (Traces f _) _) = f
+traceForest' (Failure _ (Traces f _) _) = f
+traceForest' (ITE {}) = error "Internal Error: ITE does not contain a trace"
+traceForest' (GVar {}) = error "Internal Error: Unexpected GVar"
+
+traceContext :: Expr End -> Map Addr Contract
+traceContext (Success _ (Traces _ c) _ _) = c
+traceContext (Partial _ (Traces _ c) _) = c
+traceContext (Failure _ (Traces _ c) _) = c
+traceContext (ITE {}) = error "Internal Error: ITE does not contain a trace"
+traceContext (GVar {}) = error "Internal Error: Unexpected GVar"
 
 traceTopLog :: [Expr Log] -> EVM ()
 traceTopLog [] = noop

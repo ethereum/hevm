@@ -726,17 +726,17 @@ symRun opts@UnitTestOptions{..} vm testName types = do
                    .|| (readStorage' (litAddr cheatCode) (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) store .== Lit 1)
         postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
-                                  Success _ _ store -> failed store
+                                  Success _ _ _ store -> failed store
                                   _ -> PBool True
           False -> \(_, post) -> case post of
-                                   Success _ _ store -> PNeg (failed store)
-                                   Failure _ _ -> PBool False
-                                   Partial _ _ -> PBool True
+                                   Success _ _ _ store -> PNeg (failed store)
+                                   Failure _ _ _ -> PBool False
+                                   Partial _ _ _ -> PBool True
                                    _ -> error "Internal Error: Invalid leaf node"
 
     vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
       Stepper.evm $ do
-        popTrace
+        pushTrace (EntryTrace testName)
         makeTxCall testParams cd
         get
 
@@ -761,25 +761,24 @@ symFailure UnitTestOptions {..} testName cd types failures' =
     , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
     ]
     where
-      ctx = DappContext { info = dapp, env = mempty }
       showRes = \case
-                       Success _ _ _ -> if "proveFail" `isPrefixOf` testName
-                                      then "Successful execution"
-                                      else "Failed: DSTest Assertion Violation"
-                       res ->
-                         --let ?context = DappContext { _contextInfo = dapp, _contextEnv = vm ^?! EVM.env . EVM.contracts}
-                         let ?context = ctx
-                         in Text.pack $ prettyvmresult res
+        Success _ _ _ _ -> if "proveFail" `isPrefixOf` testName
+                       then "Successful execution"
+                       else "Failed: DSTest Assertion Violation"
+        res ->
+          let ?context = DappContext { info = dapp, env = traceContext res}
+          in Text.pack $ prettyvmresult res
       mkMsg (leaf, cex) = Text.unlines
         ["Counterexample:"
         ,""
         ,"  result:   " <> showRes leaf
-        ,"  calldata: " <> let ?context = ctx in prettyCalldata cex cd testName types
+        ,"  calldata: " <> let ?context =  DappContext dapp (traceContext leaf)
+                           in prettyCalldata cex cd testName types
         , case verbose of
-            --Just _ -> unlines
-              --[ ""
-              --, unpack $ indentLines 2 (showTraceTree dapp vm)
-              --]
+            Just _ -> Text.unlines
+              [ ""
+              , indentLines 2 (showTraceTree' dapp leaf)
+              ]
             _ -> ""
         ]
 
@@ -798,15 +797,6 @@ showVal :: AbiValue -> Text
 showVal (AbiBytes _ bs) = formatBytes bs
 showVal (AbiAddress addr) = Text.pack  . show $ addr
 showVal v = Text.pack . show $ v
-
-
--- prettyCalldata :: (?context :: DappContext) => Expr Buf -> Text -> [AbiType]-> IO Text
--- prettyCalldata buf sig types = do
---   cdlen' <- num <$> SBV.getValue cdlen
---   cd <- case buf of
---     ConcreteBuf cd -> return $ BS.take cdlen' cd
---     cd -> mapM (SBV.getValue . fromSized) (take cdlen' cd) <&> BS.pack
---   pure $ (head (Text.splitOn "(" sig)) <> showCall types (ConcreteBuffer cd)
 
 execSymTest :: UnitTestOptions -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper (Expr End)
 execSymTest UnitTestOptions{ .. } method cd = do

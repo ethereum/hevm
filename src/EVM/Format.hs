@@ -10,6 +10,7 @@ module EVM.Format
   , showError
   , showTree
   , showTraceTree
+  , showTraceTree'
   , showValues
   , prettyvmresult
   , showCall
@@ -34,7 +35,7 @@ module EVM.Format
 import Prelude hiding (Word)
 
 import EVM.Types
-import EVM (cheatCode, traceForest)
+import EVM (cheatCode, traceForest, traceForest', traceContext)
 import EVM.ABI (getAbiSeq, parseTypeName, AbiValue(..), AbiType(..), SolError(..), Indexed(..), Event(..))
 import EVM.Dapp (DappContext(..), DappInfo(..), showTraceLocation)
 import EVM.Expr qualified as Expr
@@ -53,6 +54,7 @@ import Data.Char qualified as Char
 import Data.DoubleWord (signedWord)
 import Data.Foldable (toList)
 import Data.List (isPrefixOf)
+import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (catMaybes, fromMaybe, fromJust)
 import Data.Text (Text, pack, unpack, intercalate, dropEnd, splitOn)
@@ -189,15 +191,22 @@ formatSBinary _ = error "formatSBinary: implement me"
 showTraceTree :: DappInfo -> VM -> Text
 showTraceTree dapp vm =
   let forest = traceForest vm
-      traces = fmap (fmap (unpack . showTrace dapp vm)) forest
+      traces = fmap (fmap (unpack . showTrace dapp (vm.env.contracts))) forest
+  in pack $ concatMap showTree traces
+
+showTraceTree' :: DappInfo -> Expr End -> Text
+showTraceTree' _ (ITE {}) = error "Internal Error: ITE does not contain a trace"
+showTraceTree' dapp leaf =
+  let forest = traceForest' leaf
+      traces = fmap (fmap (unpack . showTrace dapp (traceContext leaf))) forest
   in pack $ concatMap showTree traces
 
 unindexed :: [(Text, AbiType, Indexed)] -> [AbiType]
 unindexed ts = [t | (_, t, NotIndexed) <- ts]
 
-showTrace :: DappInfo -> VM -> Trace -> Text
-showTrace dapp vm trace =
-  let ?context = DappContext { info = dapp, env = vm.env.contracts }
+showTrace :: DappInfo -> Map Addr Contract -> Trace -> Text
+showTrace dapp env trace =
+  let ?context = DappContext { info = dapp, env = env }
   in let
     pos =
       case showTraceLocation dapp trace of
@@ -263,19 +272,6 @@ showTrace dapp vm trace =
             Nothing ->
               logn
 
-    QueryTrace q ->
-      case q of
-        PleaseFetchContract addr _ ->
-          "fetch contract " <> pack (show addr) <> pos
-        PleaseFetchSlot addr slot _ ->
-          "fetch storage slot " <> pack (show slot) <> " from " <> pack (show addr) <> pos
-        PleaseAskSMT {} ->
-          "ask smt" <> pos
-        --PleaseMakeUnique {} ->
-          --"make unique value" <> pos
-        PleaseDoFFI cmd _ ->
-          "execute ffi " <> pack (show cmd) <> pos
-
     ErrorTrace e ->
       case e of
         Revert out ->
@@ -319,7 +315,9 @@ showTrace dapp vm trace =
       in case preview (ix hash' % _2) dapp.solcByHash of
         Nothing ->
           calltype
-            <> pack (show target)
+            <> case target of
+                 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D -> "HEVM"
+                 _ -> pack (show target)
             <> pack "::"
             <> case Map.lookup (fromIntegral (fromMaybe 0x00 abi)) fullAbiMap of
                  Just m  ->
@@ -393,15 +391,15 @@ prettyError = \case
   BadCheatCode a -> "Bad cheat code: sig: " <> show a
 
 prettyvmresult :: Expr End -> String
-prettyvmresult (Failure _ (Revert (ConcreteBuf ""))) = "Revert"
-prettyvmresult (Success _ (ConcreteBuf msg) _) =
+prettyvmresult (Failure _ _ (Revert (ConcreteBuf ""))) = "Revert"
+prettyvmresult (Success _ _ (ConcreteBuf msg) _) =
   if BS.null msg
   then "Stop"
   else "Return: " <> show (ByteStringS msg)
-prettyvmresult (Success _ _ _) =
+prettyvmresult (Success _ _ _ _) =
   "Return: <symbolic>"
-prettyvmresult (Failure _ err) = prettyError err
-prettyvmresult (Partial _ p) = T.unpack $ formatPartial p
+prettyvmresult (Failure _ _ err) = prettyError err
+prettyvmresult (Partial _ _ p) = T.unpack $ formatPartial p
 prettyvmresult r = error $ "Internal Error: Invalid result: " <> show r
 
 indent :: Int -> Text -> Text
@@ -448,7 +446,7 @@ formatExpr = go
         , indent 2 (formatExpr t)
         , indent 2 (formatExpr f)
         , ")"]
-      Success asserts buf store -> T.unlines
+      Success asserts _ buf store -> T.unlines
         [ "(Return"
         , indent 2 $ T.unlines
           [ "Data:"
@@ -461,7 +459,7 @@ formatExpr = go
           ]
         , ")"
         ]
-      Failure asserts err -> T.unlines
+      Failure asserts _ err -> T.unlines
         [ "(Failure"
         , indent 2 $ T.unlines
           [ "Error:"
