@@ -1,8 +1,3 @@
-{-# Language DataKinds #-}
-{-# Language GADTs #-}
-{-# Language PolyKinds #-}
-{-# Language ScopedTypeVariables #-}
-
 {- |
     Module: EVM.Solvers
     Description: Solver orchestration
@@ -12,25 +7,24 @@ module EVM.Solvers where
 import Prelude hiding (LT, GT)
 
 import GHC.Natural
-import Control.Monad
 import GHC.IO.Handle (Handle, hFlush, hSetBuffering, BufferMode(..))
 import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
 import Control.Concurrent (forkIO, killThread)
+import Control.Monad
 import Control.Monad.State.Strict
 import Data.Char (isSpace)
-import Data.Maybe (fromMaybe)
-
-import Data.Text.Lazy (Text)
 import Data.Map (Map)
-import qualified Data.Map as Map
-import qualified Data.Text as TS
-import qualified Data.Text.Lazy as T
-import qualified Data.Text.Lazy.IO as T
+import Data.Map qualified as Map
+import Data.Maybe (fromMaybe)
+import Data.Text qualified as TS
+import Data.Text.Lazy (Text)
+import Data.Text.Lazy qualified as T
+import Data.Text.Lazy.IO qualified as T
 import Data.Text.Lazy.Builder
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
 
 import EVM.SMT
-import EVM.Types hiding (Unknown)
+import EVM.Types (W256, Expr(AbstractBuf))
 
 -- | Supported solvers
 data Solver
@@ -185,7 +179,7 @@ getModel inst cexvars = do
     -- and try again.
     shrinkBuf :: Text -> W256 -> StateT SMTCex IO ()
     shrinkBuf buf hint = do
-      let encBound = "(_ bv" <> (T.pack $ show (num hint :: Integer)) <> " 256)"
+      let encBound = "(_ bv" <> (T.pack $ show (fromIntegral hint :: Integer)) <> " 256)"
       sat <- liftIO $ do
         sendLine' inst "(push)"
         sendLine' inst $ "(assert (bvule " <> buf <> "_length " <> encBound <> "))"

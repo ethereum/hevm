@@ -1,3 +1,6 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE StrictData #-}
+
 {-
 
   The ABI encoding is mostly straightforward.
@@ -24,10 +27,6 @@
   Calldata args are encoded as heterogenous sequences sans length prefix.
 
 -}
-
-{-# Language StrictData #-}
-{-# Language DataKinds #-}
-
 module EVM.ABI
   ( AbiValue (..)
   , AbiType (..)
@@ -57,40 +56,37 @@ module EVM.ABI
   , selector
   ) where
 
-import EVM.Types
 import EVM.Expr (readWord, isLitWord)
+import EVM.Types
 
-import Control.Monad      (replicateM, replicateM_, forM_, void)
-import Data.Binary.Get    (Get, runGet, runGetOrFail, label, getWord8, getWord32be, skip)
-import Data.Binary.Put    (Put, runPut, putWord8, putWord32be)
-import Data.Bits          (shiftL, shiftR, (.&.))
-import Data.ByteString    (ByteString)
-import Data.Char          (isHexDigit)
-import Data.Data          (Data)
-import Data.DoubleWord    (Word256, Int256, signedWord)
-import Data.Functor       (($>))
-import Data.Text          (Text)
-import Data.List          (intercalate)
+import Control.Applicative ((<|>))
+import Control.Monad (replicateM, replicateM_, forM_, void)
+import Data.Binary.Get (Get, runGet, runGetOrFail, label, getWord8, getWord32be, skip)
+import Data.Binary.Put (Put, runPut, putWord8, putWord32be)
+import Data.Bits (shiftL, shiftR, (.&.))
+import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
+import Data.ByteString.Base16 qualified as BS16
+import Data.ByteString.Char8 qualified as Char8
+import Data.ByteString.Lazy qualified as BSLazy
+import Data.Char (isHexDigit)
+import Data.Data (Data)
+import Data.DoubleWord (Word256, Int256, signedWord)
+import Data.Functor (($>))
+import Data.List (intercalate)
+import Data.Maybe (mapMaybe)
+import Data.Text (Text)
+import Data.Text qualified as Text
 import Data.Text.Encoding (encodeUtf8)
-import Data.Vector        (Vector, toList)
-import Data.Word          (Word32)
-import Data.Maybe         (mapMaybe)
-import GHC.Generics
+import Data.Vector (Vector, toList)
+import Data.Vector qualified as Vector
+import Data.Word (Word32)
+import GHC.Generics (Generic)
 
 import Test.QuickCheck hiding ((.&.), label)
+import Text.Megaparsec qualified as P
+import Text.Megaparsec.Char qualified as P
 import Text.ParserCombinators.ReadP
-import Control.Applicative
-
-import qualified Data.ByteString        as BS
-import qualified Data.ByteString.Base16 as BS16
-import qualified Data.ByteString.Char8  as Char8
-import qualified Data.ByteString.Lazy   as BSLazy
-import qualified Data.Text              as Text
-import qualified Data.Vector            as Vector
-
-import qualified Text.Megaparsec      as P
-import qualified Text.Megaparsec.Char as P
-
 
 data AbiValue
   = AbiUInt         Int Word256
@@ -510,34 +506,34 @@ makeAbiValue typ str = case readP_to_S (parseAbiValue typ) (padStr str) of
 
 parseAbiValue :: AbiType -> ReadP AbiValue
 parseAbiValue (AbiUIntType n) = do W256 w <- readS_to_P reads
-                                   return $ AbiUInt n w
+                                   pure $ AbiUInt n w
 parseAbiValue (AbiIntType n) = do W256 w <- readS_to_P reads
-                                  return $ AbiInt n (num w)
+                                  pure $ AbiInt n (num w)
 parseAbiValue AbiAddressType = AbiAddress <$> readS_to_P reads
 parseAbiValue AbiBoolType = (do W256 w <- readS_to_P reads
-                                return $ AbiBool (w /= 0))
+                                pure $ AbiBool (w /= 0))
                             <|> (do Boolz b <- readS_to_P reads
-                                    return $ AbiBool b)
+                                    pure $ AbiBool b)
 parseAbiValue (AbiBytesType n) = AbiBytes n <$> do ByteStringS bytes <- bytesP
-                                                   return bytes
+                                                   pure bytes
 parseAbiValue AbiBytesDynamicType = AbiBytesDynamic <$> do ByteStringS bytes <- bytesP
-                                                           return bytes
+                                                           pure bytes
 parseAbiValue AbiStringType = AbiString <$> do Char8.pack <$> readS_to_P reads
 parseAbiValue (AbiArrayDynamicType typ) =
   AbiArrayDynamic typ <$> do a <- listP (parseAbiValue typ)
-                             return $ Vector.fromList a
+                             pure $ Vector.fromList a
 parseAbiValue (AbiArrayType n typ) =
   AbiArray n typ <$> do a <- listP (parseAbiValue typ)
-                        return $ Vector.fromList a
+                        pure $ Vector.fromList a
 parseAbiValue (AbiTupleType _) = error "tuple types not supported"
 parseAbiValue AbiFunctionType = AbiFunction <$> do ByteStringS bytes <- bytesP
-                                                   return bytes
+                                                   pure bytes
 
 listP :: ReadP a -> ReadP [a]
 listP parser = between (char '[') (char ']') ((do skipSpaces
                                                   a <- parser
                                                   skipSpaces
-                                                  return a) `sepBy` (char ','))
+                                                  pure a) `sepBy` (char ','))
 
 bytesP :: ReadP ByteStringS
 bytesP = do
@@ -573,7 +569,8 @@ decodeBuf tps buf
     containsDynamic = or . fmap isDynamic
 
 decodeStaticArgs :: Int -> Int -> Expr Buf -> [Expr EWord]
-decodeStaticArgs offset numArgs b = [readWord (Lit . num $ i) b | i <- [offset,(offset+32) .. (offset + (numArgs-1)*32)]]
+decodeStaticArgs offset numArgs b =
+  [readWord (Lit . num $ i) b | i <- [offset,(offset+32) .. (offset + (numArgs-1)*32)]]
 
 
 -- A modification of 'arbitrarySizedBoundedIntegral' quickcheck library

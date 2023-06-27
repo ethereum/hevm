@@ -1,36 +1,35 @@
-{-# Language DataKinds #-}
-{-# Language QuasiQuotes #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE QuasiQuotes #-}
 
-{- |
+{-|
 Module: EVM.Dev
 Description: Helpers for repl driven hevm hacking
 -}
 module EVM.Dev where
 
-import Data.ByteString hiding (writeFile, zip)
 import Control.Monad.State.Strict hiding (state)
+import Data.ByteString hiding (writeFile, zip)
 import Data.Maybe (fromJust)
-import System.Directory
-import Data.Typeable
-
 import Data.String.Here
-import qualified Data.Text.IO as T
-import qualified Data.Text.Lazy.IO as TL
+import Data.Text.IO qualified as T
+import Data.Text.Lazy.IO qualified as TL
+import Data.Typeable (Typeable)
+import System.Directory (withCurrentDirectory)
+import System.Exit (exitFailure)
 
 import EVM
+import EVM.Dapp (dappInfo)
+import EVM.Expr (numBranches, simplify)
+import EVM.Fetch qualified as Fetch
+import EVM.FeeSchedule qualified as FeeSchedule
+import EVM.Format (formatExpr)
 import EVM.SMT
 import EVM.Solvers
-import EVM.Types
-import EVM.Expr (numBranches, simplify)
-import EVM.SymExec
 import EVM.Solidity
+import EVM.SymExec
+import EVM.Types
 import EVM.UnitTest
-import EVM.Format (formatExpr)
-import EVM.Dapp (dappInfo)
 import GHC.Conc
-import System.Exit (exitFailure)
-import qualified EVM.Fetch as Fetch
-import qualified EVM.FeeSchedule as FeeSchedule
 
 checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO ()
 checkEquiv a b = withSolvers Z3 1 Nothing $ \s -> do

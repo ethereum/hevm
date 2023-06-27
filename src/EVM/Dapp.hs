@@ -1,10 +1,10 @@
 module EVM.Dapp where
 
+import EVM.ABI
 import EVM.Concrete
 import EVM.Debug (srcMapCodePos)
 import EVM.Solidity
 import EVM.Types
-import EVM.ABI
 
 import Control.Arrow ((>>>))
 import Data.Aeson (Value)
@@ -162,12 +162,12 @@ lookupCode (InitCode c _) a =
   snd <$> Map.lookup (keccak' (stripBytecodeMetadata c)) a.solcByHash
 lookupCode (RuntimeCode (ConcreteRuntimeCode c)) a =
   case snd <$> Map.lookup (keccak' (stripBytecodeMetadata c)) a.solcByHash of
-    Just x -> return x
+    Just x -> pure x
     Nothing -> snd <$> find (compareCode c . fst) a.solcByCode
 lookupCode (RuntimeCode (SymbolicRuntimeCode c)) a = let
     code = BS.pack $ mapMaybe maybeLitByte $ V.toList c
   in case snd <$> Map.lookup (keccak' (stripBytecodeMetadata code)) a.solcByHash of
-    Just x -> return x
+    Just x -> pure x
     Nothing -> snd <$> find (compareCode code . fst) a.solcByCode
 
 compareCode :: ByteString -> Code -> Bool

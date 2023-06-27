@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+
 {-|
 Module      : Tracing
 Description : Tests to fuzz concrete tracing, and symbolic execution
@@ -7,77 +9,65 @@ execution of HEVM and check that against evmtool from go-ehereum. Re-using some
 of this code, we also generate a symbolic expression then evaluate it
 concretely through Expr.simplify, then check that against evmtool's output.
 -}
-
-{-# Language DataKinds #-}
-{-# Language DuplicateRecordFields #-}
-{-# LANGUAGE DeriveGeneric #-}
-
 module EVM.Test.Tracing where
 
+import Control.Monad (when)
+import Control.Monad.Operational qualified as Operational
+import Control.Monad.State.Strict (StateT(..), liftIO, runState)
+import Control.Monad.State.Strict qualified as State
+import Data.Aeson ((.:), (.:?))
+import Data.Aeson qualified as JSON
 import Data.ByteString (ByteString)
-import System.Directory
-import System.IO
-import qualified Data.Word
-import GHC.Generics
+import Data.ByteString qualified as BS
+import Data.ByteString.Char8 qualified as Char8
+import Data.Maybe (fromJust, isJust, isNothing)
+import Data.Map.Strict qualified as Map
+import Data.Text.IO qualified as T
+import Data.Vector qualified as Vector
+import Data.Word (Word8, Word64)
+import GHC.Generics (Generic)
+import GHC.IO.Exception (ExitCode(ExitSuccess))
 import Numeric (showHex)
-import qualified Paths_hevm as Paths
-
-import Prelude hiding (fail, LT, GT)
-
-import qualified Data.ByteString as BS
-import Data.Maybe
-import Data.List qualified (length)
-import Test.Tasty
-import Test.Tasty.QuickCheck hiding (Failure, Success)
+import Paths_hevm qualified as Paths
+import System.Directory (removeFile)
+import System.Process (readProcessWithExitCode)
+import Test.QuickCheck (elements)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()
-import Test.QuickCheck (elements)
-import Test.Tasty.HUnit
-import qualified Data.Aeson as JSON
-import Data.Aeson ((.:), (.:?))
-import Data.ByteString.Char8 qualified as Char8
+import Test.Tasty (testGroup, TestTree)
+import Test.Tasty.HUnit (assertEqual)
+import Test.Tasty.QuickCheck hiding (Failure, Success)
 
-import qualified Control.Monad (when)
-import qualified Control.Monad.Operational as Operational (view, ProgramViewT(..), ProgramView)
-import Control.Monad.State.Strict hiding (state)
-import Control.Monad.State.Strict qualified as State
 import Optics.Core hiding (pre)
 import Optics.State
 import Optics.Zoom
 
-import qualified Data.Vector as Vector
-import qualified Data.Map.Strict as Map
-
-import EVM
-import EVM.SymExec
-import EVM.Assembler
-import EVM.Op hiding (getOp)
-import EVM.Exec
-import EVM.Types
-import EVM.Format (bsToHex)
-import EVM.Traversals
+import EVM (makeVm, initialContract, exec1)
+import EVM.Assembler (assemble)
+import EVM.Expr qualified as Expr
+import EVM.Exec (ethrunAddress)
+import EVM.Fetch qualified as Fetch
+import EVM.Format (bsToHex, formatBinary)
 import EVM.Concrete (createAddress)
-import qualified EVM.FeeSchedule as FeeSchedule
-import EVM.Solvers
-import qualified EVM.Expr as Expr
-import qualified Data.Text.IO as T
-import qualified EVM.Stepper as Stepper
-import qualified EVM.Fetch as Fetch
-import System.Process
-import qualified EVM.Transaction
-import EVM.Format (formatBinary)
+import EVM.FeeSchedule qualified as FeeSchedule
+import EVM.Op (intToOpName)
 import EVM.Sign (deriveAddr)
-import GHC.IO.Exception (ExitCode(ExitSuccess))
+import EVM.Solvers
+import EVM.Stepper qualified as Stepper
+import EVM.SymExec
+import EVM.Traversals (mapExpr)
+import EVM.Transaction qualified
+import EVM.Types
 
 data VMTrace =
   VMTrace
   { tracePc      :: Int
   , traceOp      :: Int
   , traceStack   :: [W256]
-  , traceMemSize :: Data.Word.Word64
+  , traceMemSize :: Word64
   , traceDepth   :: Int
-  , traceGas     :: Data.Word.Word64
+  , traceGas     :: Word64
   , traceError   :: Maybe String
   } deriving (Generic, Show)
 
@@ -262,7 +252,7 @@ evmSetup :: OpContract -> ByteString -> Int -> (EVM.Transaction.Transaction, EVM
 evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAddress, sk)
   where
     contrLits = assemble $ getOpData contr
-    toW8fromLitB :: Expr 'Byte -> Data.Word.Word8
+    toW8fromLitB :: Expr 'Byte -> Word8
     toW8fromLitB (LitByte a) = a
     toW8fromLitB _ = error "Cannot convert non-litB"
 
@@ -331,10 +321,10 @@ getEVMToolRet contr txData gaslimitExec = do
                                , "--trace" , "trace.json"
                                , "--output.result", "result.json"
                                ] ""
-  Control.Monad.when (exitCode /= ExitSuccess) $ do
-                   putStrLn $ "evmtool exited with code " <> show exitCode
-                   putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
-                   putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
+  when (exitCode /= ExitSuccess) $ do
+    putStrLn $ "evmtool exited with code " <> show exitCode
+    putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
+    putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
   evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
   return evmtoolResult
 
@@ -366,14 +356,14 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
                           -- putStrLn $ "trace element match. " <> (intToOpName aOp) <> " pc: " <> (show aPc)
                           return ()
 
-      Control.Monad.when (isJust b.error) $ do
-                           putStrLn $ "Error by evmtool: " <> (show b.error)
-                           putStrLn $ "Error by HEVM   : " <> (show a.traceError)
+      when (isJust b.error) $ do
+        putStrLn $ "Error by evmtool: " <> (show b.error)
+        putStrLn $ "Error by HEVM   : " <> (show a.traceError)
 
-      Control.Monad.when (aStack /= bStack) $ do
-                          putStrLn "stacks don't match:"
-                          putStrLn $ "HEVM's stack   : " <> (show aStack)
-                          putStrLn $ "evmtool's stack: " <> (show bStack)
+      when (aStack /= bStack) $ do
+        putStrLn "stacks don't match:"
+        putStrLn $ "HEVM's stack   : " <> (show aStack)
+        putStrLn $ "evmtool's stack: " <> (show bStack)
       if aOp == bOp && aStack == bStack && aPc == bPc && aGas == bGas then go ax bx
       else pure False
 
@@ -554,7 +544,7 @@ runWithTrace = do
       -- Update error text for last trace element
       (a, b) <- State.get
       let updatedElem = (last b) {traceError = (vmtrace vm0).traceError}
-          updatedTraces = take ((Data.List.length b)-1) b ++ [updatedElem]
+          updatedTraces = take (length b - 1) b ++ [updatedElem]
       State.put (a, updatedTraces)
       pure vm0
     Just _ -> pure vm0
@@ -805,7 +795,7 @@ forceLit _ = undefined
 randItem :: [a] -> IO a
 randItem = generate . Test.QuickCheck.elements
 
-getOp :: VM -> Data.Word.Word8
+getOp :: VM -> Word8
 getOp vm =
   let pcpos  = vm ^. #state % #pc
       code' = vm ^. #state % #code
