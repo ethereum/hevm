@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Changed
 - SMT2 scripts are now being reprocessed to put one sexpr per line. Having sepxrs that span across multiple lines trigers a bug in CVC5. 
+- Removing long-running tests so we can finish all unit tests in approx 10 minutes on a current-gen laptop CPU
 
 ## [0.51.1] - 2023-06-02
 
