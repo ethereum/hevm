@@ -847,7 +847,7 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
 
     -- strips the frame arg from frame context vars to make them easier to read
     showTxCtx :: Expr EWord -> Text
-    -- showTxCtx (CallValue _) = "CallValue"
+    showTxCtx (TxValue) = "TxValue"
     showTxCtx x = T.pack $ show x
 
     -- strips all frame context that doesn't come from the top frame
@@ -855,7 +855,7 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
     filterSubCtx = Map.filterWithKey go
       where
         go :: Expr EWord -> W256 -> Bool
-        -- go (CallValue x) _ = x == 0
+        go (TxValue) _ = True
         go (Balance {}) _ = error "TODO: BALANCE"
         go (Gas {}) _ = error "TODO: Gas"
         go _ _ = False

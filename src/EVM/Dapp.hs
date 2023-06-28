@@ -196,3 +196,9 @@ srcMapCodePos cache sm =
   fmap (second f) $ cache.files ^? ix sm.file
   where
     f v = BS.count 0xa (BS.take sm.offset v) + 1
+
+srcMapCode :: SourceCache -> SrcMap -> Maybe ByteString
+srcMapCode cache sm =
+  fmap f $ cache.files ^? ix sm.file
+  where
+    f (_, v) = BS.take (min 80 sm.length) (BS.drop sm.offset v)

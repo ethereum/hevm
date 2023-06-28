@@ -78,7 +78,7 @@ showDec signed (W256 w)
           Signed   -> num (signedWord w)
           Unsigned -> num w
 
-showWordExact :: W256 -> Text
+showWordExact :: Integral i => i -> Text
 showWordExact w = humanizeInteger (toInteger w)
 
 showWordExplanation :: W256 -> DappInfo -> Text

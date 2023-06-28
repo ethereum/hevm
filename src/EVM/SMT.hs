@@ -228,7 +228,7 @@ referencedVars' prop = nubOrd $ foldProp referencedVarsGo [] prop
 
 referencedFrameContextGo :: Expr a -> [(Builder, [Prop])]
 referencedFrameContextGo = \case
-  -- CallValue a -> [(fromLazyText $ T.append "callvalue_" (T.pack . show $ a), [])]
+  TxValue -> [(fromString "txvalue", [])]
   Balance {} -> error "TODO: BALANCE"
   Gas {} -> error "TODO: GAS"
   _ -> []
@@ -682,7 +682,7 @@ exprToSMT = \case
     let enc = exprToSMT a in
     "(sha256 " <> enc <> ")"
 
-  -- CallValue a -> fromLazyText $ T.append "callvalue_" (T.pack . show $ a)
+  TxValue -> fromString "txvalue"
 
   Origin ->  "origin"
   BlockHash a ->
@@ -887,9 +887,9 @@ parseBlockCtx "chainid" = ChainId
 parseBlockCtx "basefee" = BaseFee
 parseBlockCtx t = error $ "Internal Error: cannot parse " <> (TS.unpack t) <> " into an Expr"
 
-parseFrameCtx :: TS.Text -> Expr EWord
-parseFrameCtx name = case TS.unpack name of
-  -- ('c':'a':'l':'l':'v':'a':'l':'u':'e':'_':frame) -> CallValue (read frame)
+parseTxCtx :: TS.Text -> Expr EWord
+parseTxCtx name = case TS.unpack name of
+  "txvalue" -> TxValue
   t -> error $ "Internal Error: cannot parse " <> t <> " into an Expr"
 
 getVars :: (TS.Text -> Expr EWord) -> (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr EWord) W256)
