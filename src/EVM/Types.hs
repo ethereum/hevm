@@ -807,7 +807,7 @@ data TraceData
 -- | Wrapper type containing vm traces and the context needed to pretty print them properly
 data Traces = Traces
   { traces :: Forest Trace
-  , contracts :: Map Addr Contract
+  , contracts :: Map (Expr EAddr) Contract
   }
   deriving (Eq, Ord, Show, Generic)
 

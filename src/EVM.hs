@@ -461,7 +461,7 @@ exec1 = do
         OpExtcodesize ->
           case stk of
             x':xs -> forceAddr x' "EXTCODESIZE" $ \case
-              (LitAddr x) -> if x == num cheatCode
+              a@(LitAddr x) -> if a == cheatCode
                 then do
                   next
                   assign (#state % #stack) xs
@@ -1519,8 +1519,8 @@ accessStorageForGas addr key = do
 -- Call this address using one of the cheatActions below to do
 -- special things, e.g. changing the block timestamp. Beware that
 -- these are necessarily hevm specific.
-cheatCode :: Addr
-cheatCode = num (keccak' "hevm cheat code")
+cheatCode :: Expr EAddr
+cheatCode = LitAddr $ num (keccak' "hevm cheat code")
 
 cheat
   :: (?op :: Word8)
@@ -1532,7 +1532,7 @@ cheat (inOffset, inSize) (outOffset, outSize) = do
   let
     abi = readBytes 4 (Lit inOffset) mem
     input = readMemory (Lit $ inOffset + 4) (Lit $ inSize - 4) vm
-  pushTrace $ FrameTrace (CallContext cheatCode cheatCode inOffset inSize (Lit 0) (maybeLitWord abi) input (vm.env.contracts, vm.env.storage) vm.tx.substate)
+  pushTrace $ FrameTrace (CallContext cheatCode cheatCode inOffset inSize (Lit 0) (maybeLitWord abi) input vm.env.contracts vm.tx.substate)
   case maybeLitWord abi of
     Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc "symbolic cheatcode selector" (wrap [abi])
     Just (fromIntegral -> abi') ->
@@ -1655,7 +1655,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
       = forceConcreteAddr2 (xTo, xContext) "Cannot call precompile with symbolic addresses" $
           \(xTo', xContext') ->
             precompiledContract this gasGiven xTo' xContext' xValue xInOffset xInSize xOutOffset xOutSize xs
-  | isCheatCodeAddr xTo = do
+  | xTo == cheatCode = do
       assign (#state % #stack) xs
       cheat (xInOffset, xInSize) (xOutOffset, xOutSize)
   | otherwise =
@@ -2106,7 +2106,7 @@ traceForest' (Failure _ (Traces f _) _) = f
 traceForest' (ITE {}) = error "Internal Error: ITE does not contain a trace"
 traceForest' (GVar {}) = error "Internal Error: Unexpected GVar"
 
-traceContext :: Expr End -> Map Addr Contract
+traceContext :: Expr End -> Map (Expr EAddr) Contract
 traceContext (Success _ (Traces _ c) _ _) = c
 traceContext (Partial _ (Traces _ c) _) = c
 traceContext (Failure _ (Traces _ c) _) = c
@@ -2450,12 +2450,6 @@ freshSymAddr = do
 isPrecompileAddr :: Expr EAddr -> Bool
 isPrecompileAddr = \case
   LitAddr a -> 0x0 <= a && a <= 0x09
-  SymAddr _ -> False
-  GVar _ -> error "Internal Error: unexpected GVar"
-
-isCheatCodeAddr :: Expr EAddr -> Bool
-isCheatCodeAddr = \case
-  LitAddr a -> a == cheatCode
   SymAddr _ -> False
   GVar _ -> error "Internal Error: unexpected GVar"
 

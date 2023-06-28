@@ -669,8 +669,8 @@ symvmFromCommand cmd calldata = do
 
   where
     decipher = hexByteString "bytes" . strip0x
-    block   = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber cmd.block
-    origin  = addr (.origin) 0
+    block = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber cmd.block
+    origin = addr (.origin) 0
     mkCode bs = if cmd.create
                    then InitCode bs mempty
                    else RuntimeCode (ConcreteRuntimeCode bs)

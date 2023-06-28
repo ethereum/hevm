@@ -35,7 +35,7 @@ module EVM.Format
 import Prelude hiding (Word)
 
 import EVM.Types
-import EVM (cheatCode, traceForest, traceForest', traceContext)
+import EVM (traceForest, traceForest', traceContext)
 import EVM.ABI (getAbiSeq, parseTypeName, AbiValue(..), AbiType(..), SolError(..), Indexed(..), Event(..))
 import EVM.Dapp (DappContext(..), DappInfo(..), showTraceLocation)
 import EVM.Expr qualified as Expr
@@ -71,7 +71,6 @@ data Signedness = Signed | Unsigned
 
 showDec :: Signedness -> W256 -> Text
 showDec signed (W256 w)
-  | i == num cheatCode = "<hevm cheat address>"
   | (i :: Integer) == 2 ^ (256 :: Integer) - 1 = "MAX_UINT256"
   | otherwise = T.pack (show (i :: Integer))
   where
@@ -204,7 +203,7 @@ showTraceTree' dapp leaf =
 unindexed :: [(Text, AbiType, Indexed)] -> [AbiType]
 unindexed ts = [t | (_, t, NotIndexed) <- ts]
 
-showTrace :: DappInfo -> Map Addr Contract -> Trace -> Text
+showTrace :: DappInfo -> Map (Expr EAddr) Contract -> Trace -> Text
 showTrace dapp env trace =
   let ?context = DappContext { info = dapp, env = env }
   in let
@@ -316,7 +315,7 @@ showTrace dapp env trace =
         Nothing ->
           calltype
             <> case target of
-                 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D -> "HEVM"
+                 LitAddr 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D -> "HEVM"
                  _ -> pack (show target)
             <> pack "::"
             <> case Map.lookup (fromIntegral (fromMaybe 0x00 abi)) fullAbiMap of

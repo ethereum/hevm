@@ -439,7 +439,7 @@ runExpr :: Stepper.Stepper (Expr End)
 runExpr = do
   vm <- Stepper.runFully
   let asserts = vm.keccakEqs <> vm.constraints
-      traces = Traces (Zipper.toForest vm.traces)
+      traces = Traces (Zipper.toForest vm.traces) vm.env.contracts
   pure $ case vm.result of
     Just (VMSuccess buf) -> Success asserts traces buf (fmap toEContract vm.env.contracts)
     Just (VMFailure e) -> Failure asserts traces e
