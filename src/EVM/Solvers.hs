@@ -155,7 +155,7 @@ getModel inst cexvars = do
       buffers <- getBufs (getValue inst) (Map.keys cexvars.buffers)
       storage <- getStore (getValue inst) cexvars.storeReads cexvars.concretePreStore
       blockctx <- getVars parseBlockCtx (getValue inst) (fmap T.toStrict cexvars.blockContext)
-      txctx <- getVars parseFrameCtx (getValue inst) (fmap T.toStrict cexvars.txContext)
+      txctx <- getVars parseTxCtx (getValue inst) (fmap T.toStrict cexvars.txContext)
       pure $ SMTCex vars buffers storage blockctx txctx
 
     -- sometimes the solver might give us back a model for the max read index
