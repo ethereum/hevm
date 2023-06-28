@@ -57,7 +57,7 @@ import EVM.Exec
 import EVM.Types
 import EVM.Format (bsToHex)
 import EVM.Traversals
-import EVM.Concrete (createAddress)
+import qualified EVM.Concrete as Concrete
 import qualified EVM.FeeSchedule as FeeSchedule
 import EVM.Solvers
 import qualified EVM.Expr as Expr
@@ -298,15 +298,13 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
                         , blockHashes =  blockHashesDefault
                         }
     sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
-    fromAddress :: Addr
     fromAddress = fromJust $ deriveAddr sk
-    toAddress :: Addr
     toAddress = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
 
 getHEVMRet :: OpContract -> ByteString -> Int -> IO (Either (EvmError, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult))
 getHEVMRet contr txData gaslimitExec = do
   let (txn, evmEnv, contrAlloc, fromAddress, toAddress, _) = evmSetup contr txData gaslimitExec
-  hevmRun <- runCodeWithTrace Nothing evmEnv contrAlloc txn (fromAddress, toAddress)
+  hevmRun <- runCodeWithTrace Nothing evmEnv contrAlloc txn (LitAddr fromAddress) (LitAddr toAddress)
   return hevmRun
 
 getEVMToolRet :: OpContract -> ByteString -> Int -> IO (Maybe EVMToolResult)
@@ -425,9 +423,9 @@ symbolify vm = vm { state = vm.state { calldata = AbstractBuf "calldata" } }
 
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
-runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Either (EvmError, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
-runCodeWithTrace rpcinfo evmEnv alloc txn (fromAddr, toAddress) = withSolvers Z3 0 Nothing $ \solvers -> do
-  let origVM = vmForRuntimeCode code' calldata' evmEnv alloc txn (fromAddr, toAddress)
+runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> IO (Either (EvmError, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
+runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 Nothing $ \solvers -> do
+  let origVM = vmForRuntimeCode code' calldata' evmEnv alloc txn fromAddr toAddress
       calldata' = ConcreteBuf txn.txdata
       code' = alloc.code
       buildExpr :: SolverGroup -> VM -> IO (Expr End)
@@ -439,20 +437,19 @@ runCodeWithTrace rpcinfo evmEnv alloc txn (fromAddr, toAddress) = withSolvers Z3
     Left x -> pure $ Left (x, trace)
     Right _ -> pure $ Right (expr, trace, vmres vm)
 
-vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> VM
-vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress) =
-  let contr = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
-      contrWithBal = (contr :: Contract) { balance = alloc.balance }
-  in
-  (makeVm $ VMOpts
-    { contract = contrWithBal
+vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> VM
+vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
+  let contract = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode)) toAddress
+                 & set #balance (Lit alloc.balance)
+  in (makeVm $ VMOpts
+    { contract = contract
     , calldata = (calldata', [])
     , value = Lit txn.value
-    , initialStorage = EmptyStore
+    , initialState = EmptyState
     , address =  toAddress
-    , caller = Expr.litAddr fromAddr
+    , caller = fromAddr
     , origin = fromAddr
-    , coinbase = evmToolEnv.coinbase
+    , coinbase = LitAddr evmToolEnv.coinbase
     , number = evmToolEnv.number
     , timestamp = evmToolEnv.timestamp
     , gasprice = fromJust txn.gasPrice
@@ -468,13 +465,20 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress
     , create = False
     , txAccessList = mempty
     , allowFFI = False
-    }) & set (#env % #contracts % at ethrunAddress)
-             (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty))))
+    }) & set (#env % #contracts % at (LitAddr ethrunAddress))
+             (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty)) (LitAddr ethrunAddress)))
        & set (#state % #calldata) calldata'
 
 runCode :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe (Expr Buf))
 runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
-  let origVM = vmForRuntimeCode code' calldata' emptyEvmToolEnv emptyEVMToolAlloc EVM.Transaction.emptyTransaction (ethrunAddress, createAddress ethrunAddress 1)
+  let origVM = vmForRuntimeCode
+                 code'
+                 calldata'
+                 emptyEvmToolEnv
+                 emptyEVMToolAlloc
+                 EVM.Transaction.emptyTransaction
+                 (LitAddr ethrunAddress)
+                 (Concrete.createAddress ethrunAddress 1)
   res <- Stepper.interpret (Fetch.oracle solvers rpcinfo) origVM Stepper.execFully
   pure $ case res of
     Left _ -> Nothing
@@ -810,7 +814,8 @@ getOp vm =
   let pcpos  = vm ^. #state % #pc
       code' = vm ^. #state % #code
       xs = case code' of
-        InitCode _ _ -> error "InitCode instead of RuntimeCode"
+        InitCode _ _ -> error "Internal Error: InitCode instead of RuntimeCode"
+        UnknownCode _ -> error "Internal Error: UnknownCode instead of RuntimeCode"
         RuntimeCode (ConcreteRuntimeCode xs') -> BS.drop pcpos xs'
         RuntimeCode (SymbolicRuntimeCode _) -> error "RuntimeCode is symbolic"
   in if xs == BS.empty then 0
