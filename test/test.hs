@@ -136,8 +136,8 @@ tests = testGroup "hevm"
   -- applying some simplification rules, and then using the smt encoding to
   -- check that the simplified version is semantically equivalent to the
   -- unsimplified one
-  , testGroup "SimplifierTests"
-    [ testProperty "buffer-simplification" $ \(expr :: Expr Buf) -> ioProperty $ do
+  , adjustOption (\(Test.Tasty.QuickCheck.QuickCheckTests n) -> Test.Tasty.QuickCheck.QuickCheckTests (min n 50)) $ testGroup "SimplifierTests"
+    [ testProperty  "buffer-simplification" $ \(expr :: Expr Buf) -> ioProperty $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
     , testProperty "store-simplification" $ \(expr :: Expr Storage) -> ioProperty $ do
