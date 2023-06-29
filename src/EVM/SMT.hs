@@ -174,7 +174,7 @@ assertProps ps =
   <> readAssumes
   <> SMT2 [""] mempty
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
-  <> SMT2 [] mempty{ storeReads = storageReads }
+  <> SMT2 [] mempty{ storeReads = storageReads, concretePreStore = concretePreStore }
 
   where
     (ps_elim, bufs, stores) = eliminateProps ps
@@ -189,6 +189,7 @@ assertProps ps =
     storageReads = Map.unionsWith (<>) $ fmap findStorageReads ps
     concreteStores = Set.toList $ Set.unions (fmap referencedConcreteStores ps)
     abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores ps)
+    concretePreStore = Map.unionsWith (<>) $ fmap findConcretePreStore ps
 
     keccakAssumes
       = SMT2 ["; keccak assumptions"] mempty
@@ -283,6 +284,13 @@ findStorageReads p = Map.fromListWith (<>) $ foldProp go mempty p
     isAbstractStore (AbstractStore _) = True
     isAbstractStore _ = False
 
+findConcretePreStore :: Prop -> Map (Expr EAddr) (Map W256 W256)
+findConcretePreStore p = Map.fromListWith (<>) $ foldProp go mempty p
+  where
+    go :: Expr a -> [(Expr EAddr, Map W256 W256)]
+    go = \case
+      ConcreteStore a s -> [(a,s)]
+      _ -> []
 
 findBufferAccess :: TraversableTerm a => [a] -> [(Expr EWord, Expr EWord, Expr Buf)]
 findBufferAccess = foldl (foldTerm go) mempty
@@ -991,7 +999,9 @@ getBufs getVal bufs = foldM getBuf mempty bufs
                             <> " in environment mapping"
           p -> parseErr p
 
--- | Takes a Map containing all reads from a store with an abstract base and returns a concretized storage
+-- | Takes a Map containing all reads from a store with an abstract base, as
+-- well as the conrete part of the storage prestate and returns a fully
+-- concretized storage
 getStore
   :: (Text -> IO Text)
   -> Map (Expr EAddr) (Set (Expr EWord))
@@ -1020,6 +1030,7 @@ getStore getVal abstractReads concretePreStore = do
 
   pure $ Map.union absModel concretePreStore
 
+-- | Ask the solver to give us the concrete value of an arbitrary abstract word
 queryValue :: (Text -> IO Text) -> Expr EWord -> IO W256
 queryValue _ (Lit w) = pure w
 queryValue getVal w = do
@@ -1031,8 +1042,6 @@ queryValue getVal w = do
         (_, TermSpecConstant sc) -> pure $ parseW256 sc
         _ -> error $ "Internal Error: cannot parse model for: " <> show w
     r -> parseErr r
-
-
 
 -- | Interpret an N-dimensional array as a value of type a.
 -- Parameterized by an interpretation function for array values.
