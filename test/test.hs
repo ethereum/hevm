@@ -55,7 +55,7 @@ import EVM.Precompiled
 import EVM.RLP
 import EVM.Solidity
 import EVM.Types
-import EVM.Format (hexText)
+import EVM.Format (hexText, formatExpr)
 import EVM.Traversals
 import qualified EVM.Concrete as Concrete
 import EVM.SMT hiding (one)
@@ -64,6 +64,7 @@ import qualified EVM.Expr as Expr
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy.IO as TL
 import Data.List (isSubsequenceOf)
 import EVM.Test.Utils
@@ -625,8 +626,7 @@ tests = testGroup "hevm"
           checkAssert s [0x41] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "expected counterexample found"
       ,
-      -- TODO the system currently does not allow for symbolic JUMP
-      expectFail $ testCase "call-zero-inited-var-thats-a-function" $ do
+      testCase "call-zero-inited-var-thats-a-function" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
@@ -642,10 +642,12 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x51] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $
+          \s -> checkAssert s [0x51] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+        let a = fromJust $ Map.lookup (Var "arg1") cex.vars
+        assertEqual "unexpected cex value" a 44
         putStrLn "expected counterexample found"
- ]
-
+  ]
   , testGroup "Dapp-Tests"
     [ testCase "Trivial-Pass" $ do
         let testFile = "test/contracts/pass/trivial.sol"

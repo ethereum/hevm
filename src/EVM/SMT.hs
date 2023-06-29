@@ -41,7 +41,6 @@ import EVM.Traversals
 import EVM.CSE
 import EVM.Keccak
 import EVM.Expr (writeByte, bufLengthEnv, containsNode, bufLength, minLength, inRange)
-import EVM.Format (strip0x')
 import qualified EVM.Expr as Expr
 
 
@@ -999,38 +998,27 @@ getStore
   -> Map (Expr EAddr) (Map W256 W256)
   -> IO (Map (Expr EAddr) (Map W256 W256))
 getStore getVal abstractReads concretePreStore = do
-  undefined
+  absModel <- fmap Map.fromList $ forM (Map.toList abstractReads) $ \(addr, slots) -> do
+    let name = toLazyText (storeName addr)
+    raw <- getVal name
+    let parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
+                   Right (ResSpecific (valParsed :| [])) -> valParsed
+                   r -> parseErr r
+        -- first interpret SMT term as a function
+        fun = case parsed of
+                (TermQualIdentifier (Unqualified (IdSymbol symbol)), term) ->
+                  if symbol == (T.toStrict name)
+                  then interpret1DArray Map.empty term
+                  else error "Internal Error: solver did not return model for requested value"
+                r -> parseErr r
 
-  {-
-getStore :: (Text -> IO Text) -> Map (Expr EAddr) (Set (Expr EWord)) -> IO (Map (Expr EAddr) (Map W256 W256))
-getStore getVal sreads = do
-  raw <- getVal "abstractStore"
-  let parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
-                 Right (ResSpecific (valParsed :| [])) -> valParsed
-                 r -> parseErr r
-      -- first interpret SMT term as a function
-      fun = case parsed of
-              (TermQualIdentifier (Unqualified (IdSymbol symbol)), term) ->
-                if symbol == "abstractStore"
-                then interpret2DArray Map.empty term
-                else error "Internal Error: solver did not return model for requested value"
-              r -> parseErr r
+    -- then create a map by adding only the locations that are read by the program
+    store <- foldM (\m slot -> do
+      slot' <- queryValue getVal slot
+      pure $ Map.insert slot' (fun slot') m) Map.empty slots
+    pure (addr, store)
 
-  -- then create a map by adding only the locations that are read by the program
-  foldM (\m (addr, slot) -> do
-            addr' <- queryValue getVal addr
-            slot' <- queryValue getVal slot
-            pure $ addElem addr' slot' m fun) Map.empty sreads
-
-  where
-
-    addElem :: W256 -> W256 -> Map W256 (Map W256 W256) -> (W256 -> W256 -> W256) -> Map W256 (Map W256 W256)
-    addElem addr slot store fun =
-      case Map.lookup addr store of
-        Just m -> Map.insert addr (Map.insert slot (fun addr slot) m) store
-        Nothing -> Map.insert addr (Map.singleton slot (fun addr slot)) store
-    -}
-
+  pure $ Map.union absModel concretePreStore
 
 queryValue :: (Text -> IO Text) -> Expr EWord -> IO W256
 queryValue _ (Lit w) = pure w
@@ -1087,7 +1075,3 @@ interpret1DArray = interpretNDArray interpretW256
         Just t -> interpretW256 env t
         Nothing -> error "Internal error: unknown identifier, cannot parse array"
     interpretW256 _ t = error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
-
--- | Interpret an 2-dimensional array as a function
-interpret2DArray :: (Map Symbol Term) -> Term -> (W256 -> W256 -> W256)
-interpret2DArray = interpretNDArray interpret1DArray
