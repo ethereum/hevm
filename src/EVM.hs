@@ -1839,6 +1839,13 @@ replaceCode target newCode =
       Nothing ->
         error "internal error: can't replace code of nonexistent contract"
 
+
+replaceCodeOfSelf :: ContractCode -> EVM ()
+replaceCodeOfSelf newCode = do
+  vm <- get
+  replaceCode vm.state.contract newCode
+
+
 resetState :: EVM ()
 resetState =
   modify' $ \vm -> vm { result = Nothing
