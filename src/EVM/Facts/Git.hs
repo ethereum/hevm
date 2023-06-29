@@ -12,10 +12,9 @@ import EVM.Facts (Fact (..), File (..), Path (..), Data (..), fileToFact, factTo
 
 import Optics.Core
 import Data.Set   (Set)
+import Data.Set qualified as Set
 import Data.Maybe (catMaybes)
-
-import qualified Data.Set         as Set
-import qualified Restless.Git     as Git
+import Restless.Git qualified as Git
 
 newtype RepoAt = RepoAt String
   deriving (Eq, Ord, Show)

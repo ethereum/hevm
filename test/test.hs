@@ -1,29 +1,31 @@
-{-# Language QuasiQuotes #-}
-{-# Language DataKinds #-}
-{-# Language DuplicateRecordFields #-}
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module Main where
 
-import Data.Text (Text)
-import Data.ByteString (ByteString)
+import Prelude hiding (LT, GT)
+
+import Control.Monad.State.Strict
 import Data.Bits hiding (And, Xor)
-import System.Directory
-import System.IO
-import GHC.Natural
-import Text.RE.TDFA.String
-import Text.RE.Replace
-import Data.Time
-import System.Environment
-
-import Prelude hiding (fail, LT, GT)
-
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Base16 as BS16
-import Data.Maybe
-import Data.Typeable
-import Data.List qualified (elemIndex)
+import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
+import Data.ByteString.Base16 qualified as BS16
+import Data.Binary.Put (runPut)
+import Data.Binary.Get (runGetOrFail)
 import Data.DoubleWord
+import Data.List qualified as List
+import Data.Map.Strict qualified as Map
+import Data.Maybe
+import Data.String.Here
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Time (diffUTCTime, getCurrentTime)
+import Data.Typeable
+import Data.Vector qualified as Vector
+import GHC.Conc (getNumProcessors)
+import Numeric.Natural (Natural)
+import System.Directory
+import System.Environment
 import Test.Tasty
 import Test.Tasty.QuickCheck hiding (Failure, Success)
 import Test.QuickCheck.Instances.Text()
@@ -32,41 +34,32 @@ import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty.HUnit
 import Test.Tasty.Runners hiding (Failure, Success)
 import Test.Tasty.ExpectedFailure
-import EVM.Test.Tracing qualified as Tracing
+import Text.RE.TDFA.String
+import Text.RE.Replace
 
-import Control.Monad.State.Strict hiding (state)
 import Optics.Core hiding (pre, re)
 import Optics.State
 import Optics.Operators.Unsafe
 
-import qualified Data.Vector as Vector
-import Data.String.Here
-import qualified Data.Map.Strict as Map
-
-import Data.Binary.Put (runPut)
-import Data.Binary.Get (runGetOrFail)
-
 import EVM hiding (choose)
-import EVM.SymExec
 import EVM.ABI
+import EVM.Concrete (createAddress)
 import EVM.Exec
-import qualified EVM.Patricia as Patricia
+import EVM.Expr qualified as Expr
+import EVM.Fetch qualified as Fetch
+import EVM.Format (hexText)
+import EVM.Patricia qualified as Patricia
 import EVM.Precompiled
 import EVM.RLP
-import EVM.Solidity
-import EVM.Types
-import EVM.Format (hexText)
-import EVM.Traversals
-import EVM.Concrete (createAddress)
 import EVM.SMT hiding (one)
+import EVM.Solidity
 import EVM.Solvers
-import qualified EVM.Expr as Expr
-import qualified EVM.Stepper as Stepper
-import qualified EVM.Fetch as Fetch
-import qualified Data.Text as T
-import Data.List (isSubsequenceOf)
+import EVM.Stepper qualified as Stepper
+import EVM.SymExec
+import EVM.Test.Tracing qualified as Tracing
 import EVM.Test.Utils
-import GHC.Conc (getNumProcessors)
+import EVM.Traversals
+import EVM.Types
 
 main :: IO ()
 main = defaultMain tests
@@ -1443,7 +1436,7 @@ tests = testGroup "hevm"
             |]
           (_, [Cex (_, a), Cex (_, b)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           let ints = map (flip getVar "arg1") [a,b]
-          assertBool "0 must be one of the Cex-es" $ isJust $ Data.List.elemIndex 0 ints
+          assertBool "0 must be one of the Cex-es" $ isJust $ List.elemIndex 0 ints
           putStrLn "expected 2 counterexamples found, one Cex is the 0 value"
         ,
         testCase "assert-fail-notequal" $ do
@@ -2321,7 +2314,7 @@ tests = testGroup "hevm"
                 False -> recursiveList ax (a:b)
           recursiveList [] b = pure b
         files <- recursiveList fullpaths []
-        let filesFiltered = filter (\file -> not $ any (`isSubsequenceOf` file) ignoredTests) files
+        let filesFiltered = filter (\file -> not $ any (`List.isSubsequenceOf` file) ignoredTests) files
 
         -- Takes one file which follows the Solidity Yul optimizer unit tests format,
         -- extracts both the nonoptimized and the optimized versions, and checks equivalence.

@@ -1,5 +1,4 @@
-{-# Language DataKinds #-}
-{-# Language PatternGuards #-}
+{-# LANGUAGE DataKinds #-}
 
 {-|
    Helper functions for working with Expr instances.
@@ -9,23 +8,23 @@ module EVM.Expr where
 
 import Prelude hiding (LT, GT)
 import Data.Bits hiding (And, Xor)
+import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
 import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
 import Data.Int (Int32)
-import Data.Word
-import Data.Maybe
 import Data.List
+import Data.Map.Strict qualified as Map
+import Data.Maybe (mapMaybe)
+import Data.Semigroup (Any, Any(..), getAny)
+import Data.Vector qualified as V
+import Data.Vector.Storable qualified as VS
+import Data.Vector.Storable.ByteString
+import Data.Word (Word8)
 
 import Optics.Core
 
-import EVM.Types
 import EVM.Traversals
-import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
-import qualified Data.Map.Strict as Map
-import qualified Data.Vector as V
-import qualified Data.Vector.Storable as VS
-import Data.Vector.Storable.ByteString
-import Data.Semigroup (Any, Any(..), getAny)
+import EVM.Types
 
 
 -- ** Stack Ops ** ---------------------------------------------------------------------------------

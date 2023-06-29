@@ -1,10 +1,9 @@
 module EVM.RLP where
 
-import Prelude hiding (drop, head)
 import EVM.Types
-import Data.Bits       (shiftR)
-import Data.ByteString (ByteString, drop, head)
-import qualified Data.ByteString   as BS
+import Data.Bits (shiftR)
+import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
 
 data RLP = BS ByteString | List [RLP] deriving Eq
 
@@ -18,46 +17,49 @@ slice offset size bs = BS.take size $ BS.drop offset bs
 -- helper function returning (the length of the prefix, the length of the content, isList boolean, optimal boolean)
 itemInfo :: ByteString -> (Int, Int, Bool, Bool)
 itemInfo bs | bs == mempty = (0, 0, False, False)
-            | otherwise = case head bs of
+            | otherwise = case BS.head bs of
   x | 0 <= x && x < 128   -> (0, 1, False, True) -- directly encoded byte
-  x | 128 <= x && x < 184 -> (1, num x - 128, False, (BS.length bs /= 2) || (127 < (head $ drop 1 bs))) -- short string
-  x | 184 <= x && x < 192 -> (1 + pre, len, False, (len > 55) && head (drop 1 bs) /= 0) -- long string
+  x | 128 <= x && x < 184 -> (1, num x - 128, False, (BS.length bs /= 2) || (127 < (BS.head $ BS.drop 1 bs))) -- short string
+  x | 184 <= x && x < 192 -> (1 + pre, len, False, (len > 55) && BS.head (BS.drop 1 bs) /= 0) -- long string
     where pre = num $ x - 183
           len = num $ word $ slice 1 pre bs
   x | 192 <= x && x < 248 -> (1, num $ x - 192, True, True) -- short list
-  x                       -> (1 + pre, len, True, (len > 55) && head (drop 1 bs) /= 0) -- long list
+  x                       -> (1 + pre, len, True, (len > 55) && BS.head (BS.drop 1 bs) /= 0) -- long list
     where pre = num $ x - 247
           len = num $ word $ slice 1 pre bs
 
 rlpdecode :: ByteString -> Maybe RLP
-rlpdecode bs | optimal && pre + len == BS.length bs = if isList
-                                                   then do
-                                                      items <- mapM
-                                                        (\(s, e) -> rlpdecode $ slice s e content) $
-                                                        rlplengths content 0 len
-                                                      Just (List items)
-                                                   else Just (BS content)
-             | otherwise = Nothing
+rlpdecode bs =
+  if optimal && pre + len == BS.length bs then
+    if isList then do
+      items <- mapM (\(s, e) -> rlpdecode $ slice s e content) (rlplengths content 0 len)
+      Just (List items)
+    else
+      Just (BS content)
+  else Nothing
   where (pre, len, isList, optimal) = itemInfo bs
-        content = drop pre bs
+        content = BS.drop pre bs
 
 rlplengths :: ByteString -> Int -> Int -> [(Int,Int)]
-rlplengths bs acc top | acc < top = let (pre, len, _, _) = itemInfo bs
-                                    in (acc, pre + len) : rlplengths (drop (pre + len) bs) (acc + pre + len) top
-                      | otherwise = []
+rlplengths bs acc top =
+  if acc < top then
+    let (pre, len, _, _) = itemInfo bs
+    in (acc, pre + len) : rlplengths (BS.drop (pre + len) bs) (acc + pre + len) top
+  else []
 
 rlpencode :: RLP -> ByteString
-rlpencode (BS bs) = if BS.length bs == 1 && head bs < 128 then bs
+rlpencode (BS bs) = if BS.length bs == 1 && BS.head bs < 128 then bs
                     else encodeLen 128 bs
 rlpencode (List items) = encodeLen 192 (mconcat $ map rlpencode items)
 
 encodeLen :: Int -> ByteString -> ByteString
-encodeLen offset bs | BS.length bs <= 55 = prefix (BS.length bs) <> bs
-                    | otherwise = prefix lenLen <> lenBytes <> bs
-          where
-            lenBytes = asBE $ BS.length bs
-            prefix n = BS.singleton $ num $ offset + n
-            lenLen = BS.length lenBytes + 55
+encodeLen offset bs =
+  if BS.length bs <= 55 then prefix (BS.length bs) <> bs
+  else prefix lenLen <> lenBytes <> bs
+  where
+    lenBytes = asBE $ BS.length bs
+    prefix n = BS.singleton $ num $ offset + n
+    lenLen = BS.length lenBytes + 55
 
 rlpList :: [RLP] -> ByteString
 rlpList n = rlpencode $ List n

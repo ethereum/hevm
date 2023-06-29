@@ -1,20 +1,14 @@
-{-# Language CPP #-}
-{-# Language UndecidableInstances #-}
-{-# Language TemplateHaskell #-}
-{-# Language TypeApplications #-}
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 {-# OPTIONS_GHC -Wno-inline-rule-shadowing #-}
 
 module EVM.Types where
 
-import Prelude hiding  (Word, LT, GT)
-
 import Control.Arrow ((>>>))
-import Control.Monad.State.Strict hiding (state)
-import Crypto.Hash hiding (SHA256)
+import Control.Monad.State.Strict (State, mzero)
+import Crypto.Hash (hash, Keccak_256, Digest)
 import Data.Aeson
 import Data.Aeson qualified as JSON
 import Data.Aeson.Types qualified as JSON
@@ -34,14 +28,15 @@ import Data.Word (Word8, Word32, Word64)
 import Data.DoubleWord
 import Data.DoubleWord.TH
 import Data.Map (Map)
-import qualified Data.Map as Map
+import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import Data.Sequence qualified as Seq
 import Data.Serialize qualified as Cereal
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
-import Data.Tree
+import Data.Tree (Forest)
+import Data.Tree.Zipper qualified as Zipper
 import Data.Vector qualified as V
 import Data.Vector.Storable qualified as SV
 import Numeric (readHex, showHex)
@@ -49,10 +44,9 @@ import Options.Generic
 import Optics.TH
 import EVM.Hexdump (paddedShowHex)
 import EVM.FeeSchedule (FeeSchedule (..))
-import Data.Tree.Zipper qualified as Zipper
 
-import qualified Text.Regex.TDFA      as Regex
-import qualified Text.Read
+import Text.Regex.TDFA qualified as Regex
+import Text.Read qualified
 
 
 -- Template Haskell --------------------------------------------------------------------------
@@ -1007,13 +1001,13 @@ instance FromJSON W256 where
   parseJSON v = do
     s <- T.unpack <$> parseJSON v
     case reads s of
-      [(x, "")]  -> return x
+      [(x, "")]  -> pure x
       _          -> fail $ "invalid hex word (" ++ s ++ ")"
 
 instance FromJSONKey W256 where
   fromJSONKey = FromJSONKeyTextParser $ \s ->
     case reads (T.unpack s) of
-      [(x, "")]  -> return x
+      [(x, "")]  -> pure x
       _          -> fail $ "invalid word (" ++ T.unpack s ++ ")"
 
 wordField :: JSON.Object -> Key -> JSON.Parser W256
@@ -1084,7 +1078,7 @@ instance FromJSON Addr where
   parseJSON v = do
     s <- T.unpack <$> parseJSON v
     case reads s of
-      [(x, "")] -> return x
+      [(x, "")] -> pure x
       _         -> fail $ "invalid address (" ++ s ++ ")"
 
 instance JSON.ToJSONKey Addr where
@@ -1098,7 +1092,7 @@ instance JSON.ToJSONKey Addr where
 instance FromJSONKey Addr where
   fromJSONKey = FromJSONKeyTextParser $ \s ->
     case reads (T.unpack s) of
-      [(x, "")] -> return x
+      [(x, "")] -> pure x
       _         -> fail $ "invalid word (" ++ T.unpack s ++ ")"
 
 addrField :: JSON.Object -> Key -> JSON.Parser Addr

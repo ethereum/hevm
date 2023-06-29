@@ -1,5 +1,5 @@
-{-# Language DataKinds #-}
-{-# Language ImplicitParams #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ImplicitParams #-}
 
 module EVM.UnitTest where
 
@@ -144,7 +144,7 @@ unitTest opts (Contracts cs) cache' = do
       in
         liftIO $ Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts evmcache)
 
-  return $ and passing
+  pure $ and passing
 
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
@@ -508,11 +508,11 @@ initialExplorationStepper opts'' testName replayData targets i = do
   else pure (False, history)
 
 explorationStepper :: UnitTestOptions -> ABIMethod -> [ExploreTx] -> [Addr] -> RLP -> Int -> Stepper (Bool, RLP)
-explorationStepper _ _ _ _ history 0  = return (True, history)
+explorationStepper _ _ _ _ history 0  = pure (True, history)
 explorationStepper opts@UnitTestOptions{..} testName replayData targets (List history) i = do
  (caller', target, cd, timestamp') <-
    case preview (ix (i - 1)) replayData of
-     Just v -> return v
+     Just v -> pure v
      Nothing ->
       Stepper.evmIO $ do
        vm <- get
@@ -559,7 +559,7 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
          -- increment timestamp with random amount
          timepassed <- num <$> generate (arbitrarySizedNatural :: Gen Word32)
          let ts = fromMaybe (error "symbolic timestamp not supported here") $ maybeLitWord vm.block.timestamp
-         return (caller', target, cd, num ts + timepassed)
+         pure (caller', target, cd, num ts + timepassed)
  let opts' = opts { testParams = testParams {address = target, caller = caller', timestamp = timestamp'}}
      thisCallRLP = List [BS $ word160Bytes caller', BS $ word160Bytes target, BS cd, BS $ word256Bytes timestamp']
  -- set the timestamp
@@ -587,7 +587,7 @@ getTargetContracts UnitTestOptions{..} = do
       theAbi = (fromJust $ lookupCode contract'.contractcode dapp).abiMap
       setUp  = abiKeccak (encodeUtf8 "targetContracts()")
   case Map.lookup setUp theAbi of
-    Nothing -> return []
+    Nothing -> pure []
     Just _ -> do
       Stepper.evm $ abiCall testParams (Left ("targetContracts()", emptyAbi))
       res <- Stepper.execFully
@@ -624,12 +624,12 @@ exploreRun opts@UnitTestOptions{..} initialVm testName replayTxs = do
       (,) <$> initialExplorationStepper opts testName replayTxs targets (length replayTxs)
           <*> Stepper.evm get
   if x
-  then return ("\x1b[32m[PASS]\x1b[0m " <> testName <>  " (runs: " <> (pack $ show fuzzRuns) <>", depth: " <> pack (show depth) <> ")",
+  then pure ("\x1b[32m[PASS]\x1b[0m " <> testName <>  " (runs: " <> (pack $ show fuzzRuns) <>", depth: " <> pack (show depth) <> ")",
                Right (passOutput vm' opts testName), vm') -- no canonical "post vm"
   else let replayText = if null replayTxs
                         then "\nReplay data: '(" <> pack (show testName) <> "," <> pack (show (show (ByteStringS $ rlpencode counterex))) <> ")'"
                         else " (replayed)"
-       in return ("\x1b[31m[FAIL]\x1b[0m " <> testName <> replayText, Left  (failOutput vm' opts testName), vm')
+       in pure ("\x1b[31m[FAIL]\x1b[0m " <> testName <> replayText, Left  (failOutput vm' opts testName), vm')
 
 execTest :: UnitTestOptions -> VM -> ABIMethod -> AbiValue -> IO (Bool, VM)
 execTest opts@UnitTestOptions{..} vm testName args =
@@ -746,11 +746,11 @@ symRun opts@UnitTestOptions{..} vm testName types = do
     -- display results
     if all isQed results
     then do
-      return ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "", vm)
+      pure ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "", vm)
     else do
       let x = mapMaybe extractCex results
       let y = symFailure opts testName (fst cd) types x
-      return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y, vm)
+      pure ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y, vm)
 
 symFailure :: UnitTestOptions -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> Text
 symFailure UnitTestOptions {..} testName cd types failures' =
@@ -985,16 +985,16 @@ getParametersFromEnvironmentVariables rpc = do
 
   (miner,ts,blockNum,ran,limit,base) <-
     case rpc of
-      Nothing  -> return (0,Lit 0,0,0,0,0)
+      Nothing  -> pure (0,Lit 0,0,0,0,0)
       Just url -> Fetch.fetchBlockFrom block' url >>= \case
         Nothing -> error "Could not fetch block"
-        Just Block{..} -> return (  coinbase
-                                      , timestamp
-                                      , number
-                                      , prevRandao
-                                      , gaslimit
-                                      , baseFee
-                                      )
+        Just Block{..} -> pure ( coinbase
+                               , timestamp
+                               , number
+                               , prevRandao
+                               , gaslimit
+                               , baseFee
+                               )
   let
     getWord s def = maybe def read <$> lookupEnv s
     getAddr s def = maybe def read <$> lookupEnv s

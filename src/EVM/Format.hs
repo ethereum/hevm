@@ -1,5 +1,5 @@
-{-# Language DataKinds #-}
-{-# Language ImplicitParams #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ImplicitParams #-}
 
 module EVM.Format
   ( formatExpr
@@ -31,8 +31,6 @@ module EVM.Format
   , hexText
   , bsToHex
   ) where
-
-import Prelude hiding (Word)
 
 import EVM.Types
 import EVM (cheatCode, traceForest, traceForest', traceContext)

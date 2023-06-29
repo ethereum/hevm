@@ -2,36 +2,35 @@
 Module      : Helper functions to sign a transaction and derive address from
 Description :        for the EVM given a secret key
 -}
-
 module EVM.Sign where
 
-import qualified Crypto.Hash as Crypto
+import Data.ByteString qualified as BS
 import Data.Maybe (fromMaybe)
+import Data.Word
+import Crypto.Hash qualified as Crypto
 import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
 import Crypto.PubKey.ECC.Types (getCurveByName, CurveName(..), Point(..))
 import Crypto.PubKey.ECC.Generate (generateQ)
 
 import EVM.ABI (encodeAbiValue, AbiValue(..))
-import qualified Data.ByteString   as BS
 import EVM.Types
 import EVM.Expr (exprToAddr)
 import EVM.Precompiled
-import Data.Word
-
 
 -- Given a secret key, generates the address
 deriveAddr :: Integer -> Maybe Addr
-deriveAddr sk = case pubPoint of
-           PointO -> Nothing
-           Point x y ->
-             -- See yellow paper #286
-               let pub = BS.concat [ encodeInt x, encodeInt y ]
-                   addr = Lit . W256 . word256 . BS.drop 12 . BS.take 32 . keccakBytes $ pub
-                in exprToAddr addr
-         where
-          curve = getCurveByName SEC_p256k1
-          pubPoint = generateQ curve (num sk)
-          encodeInt = encodeAbiValue . AbiUInt 256 . fromInteger
+deriveAddr sk =
+  case pubPoint of
+    PointO -> Nothing
+    Point x y ->
+      -- See yellow paper #286
+      let pub = BS.concat [ encodeInt x, encodeInt y ]
+          addr = Lit . W256 . word256 . BS.drop 12 . BS.take 32 . keccakBytes $ pub
+      in exprToAddr addr
+  where
+    curve = getCurveByName SEC_p256k1
+    pubPoint = generateQ curve (num sk)
+    encodeInt = encodeAbiValue . AbiUInt 256 . fromInteger
 
 sign :: W256 -> Integer -> (Word8, W256, W256)
 sign hash sk = (v, r, s)
@@ -74,4 +73,3 @@ ethsign sk digest = go 420
 ecrec :: W256 -> W256 -> W256 -> W256 -> Maybe Addr
 ecrec v r s e = num . word <$> EVM.Precompiled.execute 1 input 32
   where input = BS.concat (word256Bytes <$> [e, v, r, s])
-

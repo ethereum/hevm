@@ -1,11 +1,9 @@
-{-# Language TemplateHaskell #-}
-{-# Language UndecidableInstances #-}
-{-# Language ImplicitParams #-}
-{-# Language DataKinds #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module EVM.TTY where
-
-import Prelude hiding (lookup, Word)
 
 import Brick
 import Brick.Widgets.Border
@@ -227,7 +225,7 @@ mkVty :: IO V.Vty
 mkVty = do
   vty <- V.mkVty V.defaultConfig
   V.setMode (V.outputIface vty) V.BracketedPaste True
-  return vty
+  pure vty
 
 runFromVM :: SolverGroup -> Fetch.RpcInfo -> Maybe Integer -> DappInfo -> VM -> IO VM
 runFromVM solvers rpcInfo maxIter' dappinfo vm = do
@@ -257,7 +255,7 @@ runFromVM solvers rpcInfo maxIter' dappinfo vm = do
   v <- mkVty
   ui2 <- customMain v mkVty Nothing (app opts) (ViewVm ui0)
   case ui2 of
-    ViewVm ui -> return ui.vm
+    ViewVm ui -> pure ui.vm
     _ -> error "internal error: customMain returned prematurely"
 
 
@@ -304,7 +302,7 @@ main opts root buildOutput = do
       }
   v <- mkVty
   _ <- customMain v mkVty Nothing (app opts) (ui :: UiState)
-  return ()
+  pure ()
 
 takeStep
   :: (?fetcher :: Fetcher

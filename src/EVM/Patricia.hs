@@ -6,13 +6,12 @@ import EVM.Types
 import Control.Monad.Free
 import Control.Monad.State
 import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
 import Data.Foldable (toList)
 import Data.List (stripPrefix)
+import Data.Map qualified as Map
 import Data.Sequence (Seq)
-
-import qualified Data.ByteString as BS
-import qualified Data.Map as Map
-import qualified Data.Sequence as Seq
+import Data.Sequence qualified as Seq
 
 data KV k v a
   = Put k v a
@@ -36,7 +35,7 @@ runDB :: Monad m
       -> m a
 runDB putt gett (DB ops) = go ops
   where
-    go (Pure a) = return a
+    go (Pure a) = pure a
     go (Free (Put k v next)) = putt k v >> go next
     go (Free (Get k handler)) = gett k >>= go . handler
 
@@ -82,27 +81,27 @@ putNode node =
   let bytes = rlpencode $ rlpNode node
       digest = word256Bytes $ keccak' bytes
   in if BS.length bytes < 32
-    then return $ Literal node
+    then pure $ Literal node
     else do
       insertDB digest node
-      return $ Hash digest
+      pure $ Hash digest
 
 getNode :: Ref -> NodeDB Node
 getNode (Hash d) = lookupDB d
-getNode (Literal n) = return n
+getNode (Literal n) = pure n
 
 lookupPath :: Ref -> Path -> NodeDB ByteString
 lookupPath root path = getNode root >>= getVal path
 
 getVal :: Path -> Node -> NodeDB ByteString
-getVal _ Empty = return BS.empty
+getVal _ Empty = pure BS.empty
 getVal path (Shortcut nodePath ref) =
   case (stripPrefix nodePath path, ref) of
-    (Just [], Right value) -> return value
+    (Just [], Right value) -> pure value
     (Just remaining, Left key) -> lookupPath key remaining
-    _ -> return BS.empty
+    _ -> pure BS.empty
 
-getVal [] (Full _ val) = return val
+getVal [] (Full _ val) = pure val
 getVal (p:ps) (Full refs _) = lookupPath (refs `Seq.index` (num p)) ps
 
 emptyRef :: Ref
@@ -112,9 +111,9 @@ emptyRefs :: Seq Ref
 emptyRefs = Seq.replicate 16 emptyRef
 
 addPrefix :: Path -> Node -> NodeDB Node
-addPrefix _ Empty = return Empty
-addPrefix [] node = return node
-addPrefix path (Shortcut p v) = return $ Shortcut (path <> p) v
+addPrefix _ Empty = pure Empty
+addPrefix [] node = pure node
+addPrefix path (Shortcut p v) = pure $ Shortcut (path <> p) v
 addPrefix path n = Shortcut path . Left <$> putNode n
 
 insertRef :: Ref -> Path -> ByteString -> NodeDB Ref
@@ -125,19 +124,19 @@ insertRef ref p val = do root <- getNode ref
                          putNode newNode
 
 update :: Node -> Path -> ByteString -> NodeDB Node
-update Empty p new  = return $ Shortcut p (Right new)
-update (Full refs _) [] new = return (Full refs new)
+update Empty p new  = pure $ Shortcut p (Right new)
+update (Full refs _) [] new = pure (Full refs new)
 update (Full refs old) (p:ps) new = do
   newRef <- insertRef (refs `Seq.index` (num p)) ps new
-  return $ Full (Seq.update (num p) newRef refs) old
+  pure $ Full (Seq.update (num p) newRef refs) old
 update (Shortcut (o:os) (Right old)) [] new = do
   newRef <- insertRef emptyRef os old
-  return $ Full (Seq.update (num o) newRef emptyRefs) new
+  pure $ Full (Seq.update (num o) newRef emptyRefs) new
 update (Shortcut [] (Right old)) (p:ps) new = do
   newRef <- insertRef emptyRef ps new
-  return $ Full (Seq.update (num p) newRef emptyRefs) old
+  pure $ Full (Seq.update (num p) newRef emptyRefs) old
 update (Shortcut [] (Right _)) [] new =
-  return $ Shortcut [] (Right new)
+  pure $ Shortcut [] (Right new)
 update (Shortcut (o:os) to) (p:ps) new | o == p
   = update (Shortcut os to) ps new >>= addPrefix [o]
                                        | otherwise = do
@@ -146,37 +145,37 @@ update (Shortcut (o:os) to) (p:ps) new | o == p
               (Right val) -> insertRef emptyRef os val
   newRef <- insertRef emptyRef ps new
   let refs = Seq.update (num p) newRef $ Seq.update (num o) oldRef emptyRefs
-  return $ Full refs BS.empty
+  pure $ Full refs BS.empty
 update (Shortcut (o:os) (Left ref)) [] new = do
   newRef <- getNode ref >>= addPrefix os >>= putNode
-  return $ Full (Seq.update (num o) newRef emptyRefs) new
+  pure $ Full (Seq.update (num o) newRef emptyRefs) new
 update (Shortcut cut (Left ref)) ps new = do
   newRef <- insertRef ref ps new
-  return $ Shortcut cut (Left newRef)
+  pure $ Shortcut cut (Left newRef)
 
 delete :: Node -> Path -> NodeDB Node
-delete Empty _ = return Empty
-delete (Shortcut [] (Right _)) [] = return Empty
-delete n@(Shortcut [] (Right _)) _ = return n
+delete Empty _ = pure Empty
+delete (Shortcut [] (Right _)) [] = pure Empty
+delete n@(Shortcut [] (Right _)) _ = pure n
 delete (Shortcut [] (Left ref)) p = do node <- getNode ref
                                        delete node p
-delete n@(Shortcut _ _) [] = return n
+delete n@(Shortcut _ _) [] = pure n
 delete n@(Shortcut (o:os) to) (p:ps) | p == o
   = delete (Shortcut os to) ps >>= addPrefix [o]
                                      | otherwise
-  = return n
+  = pure n
 delete (Full refs _) [] | refs == emptyRefs
-  = return Empty
+  = pure Empty
                         | otherwise
-  = return (Full refs BS.empty)
+  = pure (Full refs BS.empty)
 delete (Full refs val) (p:ps) = do
   newRef <- insertRef (refs `Seq.index` (num p)) ps BS.empty
   let newRefs = Seq.update (num p) newRef refs
       nonEmpties = filter (\(_, ref) -> ref /= emptyRef) $ zip [0..15] $ toList newRefs
   case (nonEmpties, BS.null val) of
-    ([], True)         -> return Empty
-    ([(n, ref)], True)  -> getNode ref >>= addPrefix [Nibble n]
-    _                    -> return $ Full newRefs val
+    ([], True)         -> pure Empty
+    ([(n, ref)], True) -> getNode ref >>= addPrefix [Nibble n]
+    _                  -> pure $ Full newRefs val
 
 insert :: Ref -> ByteString -> ByteString -> NodeDB Ref
 insert ref key = insertRef ref (unpackNibbles key)
