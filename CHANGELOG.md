@@ -8,12 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ## Fixed
+
 - SMT encoding of Expr now has assertions for the range of environment values that are less than word size (256 bits).
 - Trace now contains the cheat code calls
 
 ## Changed
+
 - SMT2 scripts are now being reprocessed to put one sexpr per line. Having sepxrs that span across multiple lines trigers a bug in CVC5. 
 - Removing long-running tests so we can finish all unit tests in approx 10 minutes on a current-gen laptop CPU
+
+## Added
+
+- execution traces are now shown for failed `prove_` tests
 
 ## [0.51.1] - 2023-06-02
 
