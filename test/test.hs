@@ -64,6 +64,7 @@ import qualified EVM.Expr as Expr
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 import qualified Data.Text as T
+import qualified Data.Text.Lazy.IO as TL
 import Data.List (isSubsequenceOf)
 import EVM.Test.Utils
 import GHC.Conc (getNumProcessors)
@@ -323,9 +324,9 @@ tests = testGroup "hevm"
         w x = num x
       in
       assertEqual ""
+        "(store (store baseStore_0x0000000000000000000000000000000000000000 (_ bv1 256) (_ bv2 256)) (_ bv3 256) (_ bv4 256))"
         (EVM.SMT.encodeConcreteStore (LitAddr 0x0) $
           Map.fromList [(w 1, w 2), (w 3, w 4)])
-        "(sstore (_ bv1 256) (_ bv2 256) (_ bv100 256) emptyStore)"
     , testCase "indexword-oob-sym" $ assertEqual ""
         -- indexWord should return 0 for oob access
         (LitByte 0x0)
@@ -2382,13 +2383,14 @@ tests = testGroup "hevm"
 
 
 checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO Bool
-checkEquiv l r = withSolvers Z3 1 (Just 100) $ \solvers -> do
+checkEquiv l r = withSolvers Z3 1 (Just 1) $ \solvers -> do
   if l == r
      then do
        putStrLn "skip"
        pure True
      else do
        let smt = assertProps [l ./= r]
+       TL.writeFile "query.smt2" $ formatSMT2 smt
        res <- checkSat solvers smt
        print res
        pure $ case res of

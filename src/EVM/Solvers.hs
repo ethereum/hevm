@@ -11,6 +11,8 @@ module EVM.Solvers where
 
 import Prelude hiding (LT, GT)
 
+import Debug.Trace
+
 import GHC.Natural
 import Control.Monad
 import GHC.IO.Handle (Handle, hFlush, hSetBuffering, BufferMode(..))

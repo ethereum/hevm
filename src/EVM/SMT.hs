@@ -157,7 +157,9 @@ assertProps ps =
   let encs = map propToSMT ps_elim
       intermediates = declareIntermediates bufs stores in
   prelude
-  <> (declareStores storeNames)
+  <> (declareAbstractStores abstractStores)
+  <> SMT2 [""] mempty
+  <> (declareConcreteStores concreteStores)
   <> SMT2 [""] mempty
   <> (declareBufs ps_elim bufs stores)
   <> SMT2 [""] mempty
@@ -186,7 +188,8 @@ assertProps ps =
     storeVals = Map.elems stores
 
     storageReads = Map.unionsWith (<>) $ fmap findStorageReads ps
-    storeNames = Set.toList $ Set.unions (fmap referencedStores ps)
+    concreteStores = Set.toList $ Set.unions (fmap referencedConcreteStores ps)
+    abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores ps)
 
     keccakAssumes
       = SMT2 ["; keccak assumptions"] mempty
@@ -196,12 +199,18 @@ assertProps ps =
       = SMT2 ["; read assumptions"] mempty
         <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads ps_elim bufs stores)) mempty
 
-referencedStores :: TraversableTerm a => a -> Set Builder
-referencedStores term = foldTerm go mempty term
+referencedConcreteStores :: TraversableTerm a => a -> Set Builder
+referencedConcreteStores term = foldTerm go mempty term
+  where
+    go = \case
+      ConcreteStore s _ -> Set.singleton (storeName s)
+      _ -> mempty
+
+referencedAbstractStores :: TraversableTerm a => a -> Set Builder
+referencedAbstractStores term = foldTerm go mempty term
   where
     go = \case
       AbstractStore s -> Set.singleton (storeName s)
-      ConcreteStore s _ -> Set.singleton (storeName s)
       _ -> mempty
 
 referencedBufsGo :: Expr a -> [Builder]
@@ -357,10 +366,15 @@ declareFrameContext names = SMT2 (["; frame context"] <> concatMap declare names
                         <> fmap (\p -> "(assert " <> propToSMT p <> ")") props
     cexvars = (mempty :: CexVars){ txContext = fmap (toLazyText . fst) names }
 
-declareStores :: [Builder] -> SMT2
-declareStores names = SMT2 (["; base stores"] <> fmap declare names) mempty
+declareAbstractStores :: [Builder] -> SMT2
+declareAbstractStores names = SMT2 (["; concrete base stores"] <> fmap declare names) mempty
   where
-    declare n = "(declare-const " <> n <> " (Storage)"
+    declare n = "(declare-const " <> n <> " (Storage))"
+
+declareConcreteStores :: [Builder] -> SMT2
+declareConcreteStores names = SMT2 (["; abstract base stores"] <> fmap declare names) mempty
+  where
+    declare n = "(define-const " <> n <> " (Storage) ((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000))"
 
 declareBlockContext :: [(Builder, [Prop])] -> SMT2
 declareBlockContext names = SMT2 (["; block context"] <> concatMap declare names) cexvars
@@ -577,16 +591,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
     (ite (= b (_ bv28 256)) ((_ sign_extend 24 ) ((_ extract 231  0) val))
     (ite (= b (_ bv29 256)) ((_ sign_extend 16 ) ((_ extract 239  0) val))
     (ite (= b (_ bv30 256)) ((_ sign_extend 8  ) ((_ extract 247  0) val)) val))))))))))))))))))))))))))))))))
-
-  ; storage
-  (declare-const abstractStore Storage)
-  (define-const emptyStore Storage ((as const Storage) ((as const (Array (_ BitVec 256) (_ BitVec 256))) #x0000000000000000000000000000000000000000000000000000000000000000)))
-
-  (define-fun sstore ((addr Word) (key Word) (val Word) (storage Storage)) Storage (store storage addr (store (select storage addr) key val)))
-
-  (define-fun sload ((addr Word) (key Word) (storage Storage)) Word (select (select storage addr) key))
   |]
-
 
 exprToSMT :: Expr a -> Builder
 exprToSMT = \case
@@ -731,8 +736,8 @@ exprToSMT = \case
     let encIdx = exprToSMT idx
         encVal = exprToSMT val
         encPrev = exprToSMT prev in
-    "(sstore" `sp` encIdx `sp` encVal `sp` encPrev <> ")"
-  SLoad idx store -> op2 "sload" idx store
+    "(store" `sp` encPrev `sp` encIdx `sp` encVal <> ")"
+  SLoad idx store -> op2 "select" store idx
 
   a -> error $ "TODO: implement: " <> show a
   where
@@ -844,11 +849,11 @@ encodeConcreteStore a s = foldl encodeWrite (storeName a) (Map.toList s)
     encodeWrite prev (key, val) = let
         encKey = exprToSMT (Lit key)
         encVal = exprToSMT (Lit val)
-      in "(sstore " <> encKey `sp` encVal `sp` prev <> ")"
+      in "(store " <> prev `sp` encKey `sp` encVal <> ")"
 
 storeName :: Expr EAddr -> Builder
 storeName = \case
-    LitAddr a -> fromString . strip0x' . show $ a
+    LitAddr a -> fromString ("baseStore_" <> show a)
     SymAddr a -> fromString ("baseStore_" <> show a)
     GVar _ -> error "Internal Error: unexpected GVar"
 
