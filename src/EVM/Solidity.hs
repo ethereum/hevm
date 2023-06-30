@@ -189,7 +189,7 @@ instance Monoid BuildOutput where
   mempty = BuildOutput mempty mempty
 
 -- | The various project types understood by hevm
-data ProjectType = DappTools | Foundry
+data ProjectType = DappTools | CombinedJSON | Foundry
   deriving (Eq, Show, Read, ParseField)
 
 data SourceCache = SourceCache
@@ -296,6 +296,13 @@ readBuildOutput root DappTools = do
     [x] -> readSolc DappTools root (outDir <> x)
     [] -> pure . Left $ "no json files found in: " <> outDir
     _ -> pure . Left $ "multiple json files found in: " <> outDir
+readBuildOutput root CombinedJSON = do
+  let outDir = root <> "/out/"
+  jsons <- findJsonFiles outDir
+  case jsons of
+    [x] -> readSolc CombinedJSON root (outDir <> x)
+    [] -> pure . Left $ "no json files found in: " <> outDir
+    _ -> pure . Left $ "multiple json files found in: " <> outDir
 readBuildOutput root Foundry = do
   let outDir = root <> "/out/"
   jsons <- findJsonFiles (root <> "/out")
@@ -389,6 +396,7 @@ force s = fromMaybe (error s)
 
 readJSON :: ProjectType -> Text -> Text -> Maybe (Contracts, Asts, Sources)
 readJSON DappTools _ json = readStdJSON json
+readJSON CombinedJSON _ json = readCombinedJSON json
 readJSON Foundry contractName json = readFoundryJSON contractName json
 
 -- | Reads a foundry json output
@@ -482,6 +490,43 @@ readStdJSON json = do
                Success a -> pure a
                _ -> Nothing
       }, fromMaybe mempty srcContents))
+
+-- deprecate me soon
+readCombinedJSON :: Text -> Maybe (Contracts, Asts, Sources)
+readCombinedJSON json = do
+  contracts <- f . KeyMap.toHashMapText <$> (json ^? key "contracts" % _Object)
+  sources <- toList . fmap (preview _String) <$> json ^? key "sourceList" % _Array
+  pure ( Contracts contracts
+       , Asts (Map.fromList (HMap.toList asts))
+       , Sources $ Map.fromList $
+           (\(path, id') -> (SrcFile id' (T.unpack path), Nothing)) <$>
+             zip (catMaybes sources) [0..]
+       )
+  where
+    asts = KeyMap.toHashMapText $ fromMaybe (error "JSON lacks abstract syntax trees.") (json ^? key "sources" % _Object)
+    f x = Map.fromList . HMap.toList $ HMap.mapWithKey g x
+    g s x =
+      let
+        theRuntimeCode = toCode (x ^?! key "bin-runtime" % _String)
+        theCreationCode = toCode (x ^?! key "bin" % _String)
+        abis = toList $ case (x ^?! key "abi") ^? _Array of
+                 Just v -> v                                       -- solc >= 0.8
+                 Nothing -> (x ^?! key "abi" % _String) ^?! _Array -- solc <  0.8
+      in SolcContract {
+        runtimeCode      = theRuntimeCode,
+        creationCode     = theCreationCode,
+        runtimeCodehash  = keccak' (stripBytecodeMetadata theRuntimeCode),
+        creationCodehash = keccak' (stripBytecodeMetadata theCreationCode),
+        runtimeSrcmap    = force "internal error: srcmap-runtime" (makeSrcMaps (x ^?! key "srcmap-runtime" % _String)),
+        creationSrcmap   = force "internal error: srcmap" (makeSrcMaps (x ^?! key "srcmap" % _String)),
+        contractName = s,
+        constructorInputs = mkConstructor abis,
+        abiMap       = mkAbiMap abis,
+        eventMap     = mkEventMap abis,
+        errorMap     = mkErrorMap abis,
+        storageLayout = mkStorageLayout $ x ^? key "storage-layout",
+        immutableReferences = mempty -- TODO: deprecate combined-json
+      }
 
 mkAbiMap :: [Value] -> Map FunctionSelector Method
 mkAbiMap abis = Map.fromList $

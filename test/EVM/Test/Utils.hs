@@ -75,6 +75,7 @@ compile DappTools root src = do
   createDirectory (root <> "/out")
   T.writeFile (root <> "/out/dapp.sol.json") json
   readBuildOutput root DappTools
+compile CombinedJSON _root _src = error "unsupported"
 compile Foundry root src = do
   createDirectory (root <> "/src")
   writeFile (root <> "/src/unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
