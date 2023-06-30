@@ -406,7 +406,7 @@ exec1 = do
 
         OpAddress ->
           limitStack 1 $
-            burn g_base (next >> pushSym (WAddr self))
+            burn g_base (next >> pushAddr self)
 
         OpBalance ->
           case stk of
@@ -421,11 +421,11 @@ exec1 = do
 
         OpOrigin ->
           limitStack 1 . burn g_base $
-            next >> pushSym (WAddr vm.tx.origin)
+            next >> pushAddr vm.tx.origin
 
         OpCaller ->
           limitStack 1 . burn g_base $
-            next >> pushSym (WAddr vm.state.caller)
+            next >> pushAddr vm.state.caller
 
         OpCallvalue ->
           limitStack 1 . burn g_base $
@@ -570,7 +570,7 @@ exec1 = do
 
         OpCoinbase ->
           limitStack 1 . burn g_base $
-            next >> pushSym (WAddr vm.block.coinbase)
+            next >> pushAddr vm.block.coinbase
 
         OpTimestamp ->
           limitStack 1 . burn g_base $
@@ -2000,7 +2000,7 @@ finishFrame how = do
                     replaceCode createe contractCode
                     assign (#state % #returndata) mempty
                     reclaimRemainingGasAllowance
-                    pushSym (WAddr createe)
+                    pushAddr createe
               case output of
                 ConcreteBuf bs ->
                   onContractCode $ RuntimeCode (ConcreteRuntimeCode bs)
@@ -2154,6 +2154,11 @@ push = pushSym . Lit
 
 pushSym :: Expr EWord -> EVM ()
 pushSym x = #state % #stack %= (x :)
+
+pushAddr :: Expr EAddr -> EVM ()
+pushAddr (LitAddr x) = #state % #stack %= (Lit (num x) :)
+pushAddr x@(SymAddr _) = #state % #stack %= (WAddr x :)
+pushAddr (GVar _) = error "Internal Error: Unexpected GVar"
 
 stackOp1
   :: (?op :: Word8)

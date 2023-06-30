@@ -809,7 +809,6 @@ wordToAddr (WAddr a) = Just a
 wordToAddr (Lit a) = Just $ LitAddr (num a)
 wordToAddr _ = Nothing
 
-
 litCode :: BS.ByteString -> [Expr Byte]
 litCode bs = fmap LitByte (BS.unpack bs)
 
