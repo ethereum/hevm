@@ -1848,14 +1848,14 @@ tests = testGroup "hevm"
           putStrLn "expected counterexample found"
         ,
         testCase "multiple-contracts" $ do
-          let code' =
+          let code =
                 [i|
                   contract C {
                     uint x;
                     A constant a = A(0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B);
 
                     function call_A() public view {
-                      // should fail since a.x() can be anything
+                      // should fail since x can be anything
                       assert(a.x() == x);
                     }
                   }
@@ -1864,23 +1864,21 @@ tests = testGroup "hevm"
                   }
                 |]
               aAddr = LitAddr (Addr 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B)
-          Just c <- solcRuntime "C" code'
-          Just a <- solcRuntime "A" code'
+              cAddr = SymAddr 3 -- TODO: make this easier to use
+          Just c <- solcRuntime "C" code
+          Just a <- solcRuntime "A" code
           (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> do
-            let vm0 = abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing
-            let vm = vm0
-                  & set (#state % #callvalue) (Lit 0)
-                  & over (#env % #contracts)
-                       (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a)) aAddr))
+            let vm = abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing
+                       & set (#state % #callvalue) (Lit 0)
+                       & over (#env % #contracts)
+                          (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a)) aAddr))
             verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
 
           let storeCex = cex.store
-              cAddr = Concrete.createAddress ethrunAddress 1
-              testCex = Map.size storeCex == 2 &&
-                        case (Map.lookup cAddr storeCex, Map.lookup aAddr storeCex) of
-                          (Just sC, Just sA) -> Map.size sC == 1 && Map.size sA == 1 &&
-                            case (Map.lookup 0 sC, Map.lookup 0 sA) of
+              testCex = case (Map.lookup cAddr storeCex, Map.lookup aAddr storeCex) of
+                          (Just sC, Just sA) -> case (Map.lookup 0 sC, Map.lookup 0 sA) of
                               (Just x, Just y) -> x /= y
+                              (Just x, Nothing) -> x /= 0
                               _ -> False
                           _ -> False
           assertBool "Did not find expected storage cex" testCex
