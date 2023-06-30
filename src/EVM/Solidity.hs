@@ -1,8 +1,7 @@
-{-# Language DeriveAnyClass #-}
-{-# Language DerivingStrategies #-}
-{-# Language GeneralisedNewtypeDeriving #-}
-{-# Language DataKinds #-}
-{-# Language QuasiQuotes #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module EVM.Solidity
   ( solidity
@@ -318,11 +317,11 @@ makeSourceCache :: FilePath -> Sources -> Asts -> IO SourceCache
 makeSourceCache root (Sources sources) (Asts asts) = do
   files <- Map.fromList <$> forM (Map.toList sources) (\x@(SrcFile id' fp, _) -> do
       contents <- case x of
-        (_,  Just content) -> return content
+        (_,  Just content) -> pure content
         (SrcFile _ _, Nothing) -> BS.readFile (root <> "/" <> fp)
       pure (id', (fp, contents))
     )
-  return $! SourceCache
+  pure $! SourceCache
     { files = files
     , lines = fmap (Vector.fromList . BS.split 0xa . snd) files
     , asts  = asts
@@ -347,7 +346,7 @@ readSolc pt root fp =
       Nothing -> pure . Left $ "unable to parse: " <> fp
       Just (contracts, asts, sources) -> do
         sourceCache <- makeSourceCache root sources asts
-        return (Right (BuildOutput contracts sourceCache))
+        pure (Right (BuildOutput contracts sourceCache))
 
 yul :: Text -> Text -> IO (Maybe ByteString)
 yul contract src = do
@@ -382,7 +381,7 @@ functionAbi f = do
   (json, path) <- solidity' ("contract ABI { function " <> f <> " public {}}")
   let (Contracts sol, _, _) = fromJust $ readStdJSON json
   case Map.toList $ (fromJust (Map.lookup (path <> ":ABI") sol)).abiMap of
-     [(_,b)] -> return b
+     [(_,b)] -> pure b
      _ -> error "hevm internal error: unexpected abi format"
 
 force :: String -> Maybe a -> a
@@ -425,7 +424,7 @@ readFoundryJSON contractName json = do
         , storageLayout       = mempty -- TODO: foundry doesn't expose this?
         , immutableReferences = mempty -- TODO: foundry doesn't expose this?
         }
-  return ( Contracts $ Map.singleton (path <> ":" <> contractName) contract
+  pure ( Contracts $ Map.singleton (path <> ":" <> contractName) contract
          , Asts      $ Map.singleton path ast
          , Sources   $ Map.singleton (SrcFile id' (T.unpack path)) Nothing
          )
@@ -440,7 +439,7 @@ readStdJSON json = do
       contractMap = f contracts
       getId src = num $ (force "" $ HMap.lookup src sources) ^?! key "id" % _Integer
       contents src = (SrcFile (getId src) (T.unpack src), encodeUtf8 <$> HMap.lookup src (mconcat $ Map.elems $ snd <$> contractMap))
-  return ( Contracts $ fst <$> contractMap
+  pure ( Contracts $ fst <$> contractMap
          , Asts      $ Map.fromList (HMap.toList asts)
          , Sources   $ Map.fromList $ contents <$> (sort $ HMap.keys sources)
          )
@@ -459,7 +458,7 @@ readStdJSON json = do
         srcContents :: Maybe (HMap.HashMap Text Text)
         srcContents = do metadata <- x ^? key "metadata" % _String
                          srcs <- KeyMap.toHashMapText <$> metadata ^? key "sources" % _Object
-                         return $ fmap
+                         pure $ fmap
                            (fromMaybe (error "Internal Error: could not parse contents field into a string") . preview (key "content" % _String))
                            (HMap.filter (isJust . preview (key "content")) srcs)
         abis = force ("abi key not found in " <> show x) $
@@ -480,7 +479,7 @@ readStdJSON json = do
         immutableReferences = fromMaybe mempty $
           do x' <- runtime ^? key "immutableReferences"
              case fromJSON x' of
-               Success a -> return a
+               Success a -> pure a
                _ -> Nothing
       }, fromMaybe mempty srcContents))
 
@@ -561,7 +560,7 @@ mkStorageLayout (Just json) = do
        slot <- item ^? key "slot" % _String
        typ <- Key.fromText <$> item ^? key "type" % _String
        slotType <- types ^?! key typ ^? key "label" % _String
-       return (name, StorageItem (read $ T.unpack slotType) offset (read $ T.unpack slot)))
+       pure (name, StorageItem (read $ T.unpack slotType) offset (read $ T.unpack slot)))
 
 signature :: AsValue s => s -> Text
 signature abi =
@@ -652,7 +651,7 @@ solidity' src = withSystemTempFile "hevm.sol" $ \path handle -> do
       "solc"
       ["--allow-paths", path, "--standard-json", (path <> ".json")]
       ""
-  return (x, pack path)
+  pure (x, pack path)
 
 yul' :: Text -> IO (Text, Text)
 yul' src = withSystemTempFile "hevm.yul" $ \path handle -> do
@@ -671,7 +670,7 @@ yul' src = withSystemTempFile "hevm.yul" $ \path handle -> do
       "solc"
       ["--allow-paths", path, "--standard-json", (path <> ".json")]
       ""
-  return (x, pack path)
+  pure (x, pack path)
 
 solc :: Language -> Text -> IO Text
 solc lang src =
@@ -794,7 +793,7 @@ astSrcMap astIds =
         (\v -> do
           src <- preview (key "src" % _String) v
           [i, n, f] <- mapM (readMaybe . T.unpack) (T.split (== ':') src)
-          return ((i, n, f), v)
+          pure ((i, n, f), v)
         )
       . Map.elems
       $ astIds

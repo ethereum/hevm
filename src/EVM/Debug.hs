@@ -1,20 +1,16 @@
-{-# Language DataKinds #-}
-
 module EVM.Debug where
 
-import EVM          (bytecode)
+import EVM (bytecode)
+import EVM.Expr (bufLength)
 import EVM.Solidity (SrcMap(..), SourceCache(..))
-import EVM.Types    (Contract, Addr)
-import EVM.Expr     (bufLength)
+import EVM.Types (Contract, Addr)
 
-import Control.Arrow   (second)
-import Optics.Core
+import Control.Arrow (second)
 import Data.ByteString (ByteString)
-import Data.Map        (Map)
-
-import qualified Data.ByteString       as ByteString
-import qualified Data.Map              as Map
-
+import Data.ByteString qualified as ByteString
+import Data.Map (Map)
+import Data.Map qualified as Map
+import Optics.Core
 import Text.PrettyPrint.ANSI.Leijen
 
 data Mode = Debug | Run | JsonTrace deriving (Eq, Show)

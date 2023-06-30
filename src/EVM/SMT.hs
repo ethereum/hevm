@@ -1,9 +1,5 @@
-{-# Language DataKinds #-}
-{-# Language GADTs #-}
-{-# Language PolyKinds #-}
-{-# Language ScopedTypeVariables #-}
-{-# Language TypeApplications #-}
-{-# Language QuasiQuotes #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 {- |
     Module: EVM.SMT
@@ -15,32 +11,31 @@ import Prelude hiding (LT, GT)
 
 import Control.Monad
 import Data.Containers.ListUtils (nubOrd)
-import Language.SMT2.Parser (getValueRes, parseCommentFreeFileMsg)
-import Language.SMT2.Syntax (Symbol, SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
-import Data.Word
-import Numeric (readHex, readBin)
 import Data.ByteString (ByteString)
-
-import qualified Data.ByteString as BS
-import qualified Data.List as List
+import Data.Bifunctor (second)
+import Data.ByteString qualified as BS
+import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty((:|)))
-import qualified Data.List.NonEmpty as NonEmpty
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.String.Here
 import Data.Maybe (fromJust)
 import Data.Map (Map)
-import qualified Data.Map as Map
+import Data.Map qualified as Map
+import Data.Word (Word8)
 import Data.Text.Lazy (Text)
-import qualified Data.Text as TS
-import qualified Data.Text.Lazy as T
+import Data.Text qualified as TS
+import Data.Text.Lazy qualified as T
 import Data.Text.Lazy.Builder
-import Data.Bifunctor (second)
+import Language.SMT2.Parser (getValueRes, parseCommentFreeFileMsg)
+import Language.SMT2.Syntax (Symbol, SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
+import Numeric (readHex, readBin)
 
-import EVM.Types
-import EVM.Traversals
 import EVM.CSE
-import EVM.Keccak
 import EVM.Expr (writeByte, bufLengthEnv, containsNode, bufLength, minLength, inRange)
-import qualified EVM.Expr as Expr
+import EVM.Expr qualified as Expr
+import EVM.Keccak (keccakAssumptions)
+import EVM.Traversals
+import EVM.Types
 
 
 -- ** Encoding ** ----------------------------------------------------------------------------------

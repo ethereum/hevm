@@ -1,15 +1,9 @@
-{-# Language ImplicitParams #-}
-{-# Language UndecidableInstances #-}
-{-# Language ScopedTypeVariables #-}
-{-# Language GADTs #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE ImplicitParams #-}
 
 module EVM where
 
-import Prelude hiding (log, exponent, GT, LT)
+import Prelude hiding (exponent)
 
 import Optics.Core
 import Optics.State

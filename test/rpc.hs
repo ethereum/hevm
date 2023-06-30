@@ -1,4 +1,4 @@
-{-# Language DataKinds #-}
+{-# LANGUAGE DataKinds #-}
 
 module Main where
 

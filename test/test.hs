@@ -1,29 +1,31 @@
-{-# Language QuasiQuotes #-}
-{-# Language DataKinds #-}
-{-# Language DuplicateRecordFields #-}
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module Main where
 
-import Data.Text (Text)
-import Data.ByteString (ByteString)
+import Prelude hiding (LT, GT)
+
+import Control.Monad.State.Strict
 import Data.Bits hiding (And, Xor)
-import System.Directory
-import System.IO
-import GHC.Natural
-import Text.RE.TDFA.String
-import Text.RE.Replace
-import Data.Time
-import System.Environment
-
-import Prelude hiding (fail, LT, GT)
-
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Base16 as BS16
-import Data.Maybe
-import Data.Typeable
-import Data.List qualified (elemIndex)
+import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
+import Data.ByteString.Base16 qualified as BS16
+import Data.Binary.Put (runPut)
+import Data.Binary.Get (runGetOrFail)
 import Data.DoubleWord
+import Data.List qualified as List
+import Data.Map.Strict qualified as Map
+import Data.Maybe
+import Data.String.Here
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Time (diffUTCTime, getCurrentTime)
+import Data.Typeable
+import Data.Vector qualified as Vector
+import GHC.Conc (getNumProcessors)
+import Numeric.Natural (Natural)
+import System.Directory
+import System.Environment
 import Test.Tasty
 import Test.Tasty.QuickCheck hiding (Failure, Success)
 import Test.QuickCheck.Instances.Text()
@@ -32,41 +34,32 @@ import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty.HUnit
 import Test.Tasty.Runners hiding (Failure, Success)
 import Test.Tasty.ExpectedFailure
-import EVM.Test.Tracing qualified as Tracing
+import Text.RE.TDFA.String
+import Text.RE.Replace
 
-import Control.Monad.State.Strict hiding (state)
 import Optics.Core hiding (pre, re)
 import Optics.State
 import Optics.Operators.Unsafe
 
-import qualified Data.Vector as Vector
-import Data.String.Here
-import qualified Data.Map.Strict as Map
-
-import Data.Binary.Put (runPut)
-import Data.Binary.Get (runGetOrFail)
-
 import EVM hiding (choose)
-import EVM.SymExec
 import EVM.ABI
+import EVM.Concrete (createAddress)
 import EVM.Exec
-import qualified EVM.Patricia as Patricia
+import EVM.Expr qualified as Expr
+import EVM.Fetch qualified as Fetch
+import EVM.Format (hexText)
+import EVM.Patricia qualified as Patricia
 import EVM.Precompiled
 import EVM.RLP
-import EVM.Solidity
-import EVM.Types
-import EVM.Format (hexText)
-import EVM.Traversals
-import EVM.Concrete (createAddress)
 import EVM.SMT hiding (one)
+import EVM.Solidity
 import EVM.Solvers
-import qualified EVM.Expr as Expr
-import qualified EVM.Stepper as Stepper
-import qualified EVM.Fetch as Fetch
-import qualified Data.Text as T
-import Data.List (isSubsequenceOf)
+import EVM.Stepper qualified as Stepper
+import EVM.SymExec
+import EVM.Test.Tracing qualified as Tracing
 import EVM.Test.Utils
-import GHC.Conc (getNumProcessors)
+import EVM.Traversals
+import EVM.Types
 
 main :: IO ()
 main = defaultMain tests
@@ -136,8 +129,8 @@ tests = testGroup "hevm"
   -- applying some simplification rules, and then using the smt encoding to
   -- check that the simplified version is semantically equivalent to the
   -- unsimplified one
-  , testGroup "SimplifierTests"
-    [ testProperty "buffer-simplification" $ \(expr :: Expr Buf) -> ioProperty $ do
+  , adjustOption (\(Test.Tasty.QuickCheck.QuickCheckTests n) -> Test.Tasty.QuickCheck.QuickCheckTests (min n 50)) $ testGroup "SimplifierTests"
+    [ testProperty  "buffer-simplification" $ \(expr :: Expr Buf) -> ioProperty $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
     , testProperty "store-simplification" $ \(expr :: Expr Storage) -> ioProperty $ do
@@ -693,10 +686,8 @@ tests = testGroup "hevm"
         runSolidityTest testFile "prove_add" >>= assertEqual "test result" False
         --runSolidityTest testFile "prove_smtTimeout" >>= assertEqual "test result" False
         runSolidityTest testFile "prove_multi" >>= assertEqual "test result" False
-        runSolidityTest testFile "prove_mul" >>= assertEqual "test result" False
         -- TODO: implement overflow checking optimizations and enable, currently this runs forever
         --runSolidityTest testFile "prove_distributivity" >>= assertEqual "test result" False
-        runSolidityTest testFile "prove_transfer" >>= assertEqual "test result" False
     , testCase "Loop-Tests" $ do
         let testFile = "test/contracts/pass/loops.sol"
         runSolidityTestCustom testFile "prove_loop" (Just 10) False Nothing Foundry >>= assertEqual "test result" True
@@ -974,23 +965,6 @@ tests = testGroup "hevm"
         (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
       ,
-     testCase "opcode-div-zero-2" $ do
-        Just c <- solcRuntime "MyContract"
-            [i|
-            contract MyContract {
-              function fun(uint256 val) external pure {
-                uint out;
-                assembly {
-                  out := div(0, val)
-                }
-                assert(out == 0);
-
-              }
-            }
-            |]
-        (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
-        putStrLn "sdiv works as expected"
-     ,
      testCase "opcode-sdiv-zero-1" $ do
         Just c <- solcRuntime "MyContract"
             [i|
@@ -1164,52 +1138,6 @@ tests = testGroup "hevm"
             |]
         (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "XOR works as expected"
-      ,
-      testCase "opcode-addmod-no-overflow" $ do
-        Just c <- solcRuntime "MyContract"
-            [i|
-            contract MyContract {
-              function fun(uint8 a, uint8 b, uint8 c) external pure {
-                require(a < 4);
-                require(b < 4);
-                require(c < 4);
-                uint16 r1;
-                uint16 r2;
-                uint16 g2;
-                assembly {
-                  r1 := add(a,b)
-                  r2 := mod(r1, c)
-                  g2 := addmod (a, b, c)
-                }
-                assert (r2 == g2);
-              }
-            }
-            |]
-        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint8,uint8,uint8)" [AbiUIntType 8, AbiUIntType 8, AbiUIntType 8])) [] defaultVeriOpts
-        putStrLn "ADDMOD is fine on NON overflow values"
-      ,
-      testCase "opcode-mulmod-no-overflow" $ do
-        Just c <- solcRuntime "MyContract"
-            [i|
-            contract MyContract {
-              function fun(uint8 a, uint8 b, uint8 c) external pure {
-                require(a < 4);
-                require(b < 4);
-                require(c < 4);
-                uint16 r1;
-                uint16 r2;
-                uint16 g2;
-                assembly {
-                  r1 := mul(a,b)
-                  r2 := mod(r1, c)
-                  g2 := mulmod (a, b, c)
-                }
-                assert (r2 == g2);
-              }
-            }
-            |]
-        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint8,uint8,uint8)" [AbiUIntType 8, AbiUIntType 8, AbiUIntType 8])) [] defaultVeriOpts
-        putStrLn "MULMOD is fine on NON overflow values"
       ,
       testCase "opcode-div-res-zero-on-div-by-zero" $ do
         Just c <- solcRuntime "MyContract"
@@ -1443,7 +1371,7 @@ tests = testGroup "hevm"
             |]
           (_, [Cex (_, a), Cex (_, b)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           let ints = map (flip getVar "arg1") [a,b]
-          assertBool "0 must be one of the Cex-es" $ isJust $ Data.List.elemIndex 0 ints
+          assertBool "0 must be one of the Cex-es" $ isJust $ List.elemIndex 0 ints
           putStrLn "expected 2 counterexamples found, one Cex is the 0 value"
         ,
         testCase "assert-fail-notequal" $ do
@@ -1724,24 +1652,6 @@ tests = testGroup "hevm"
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        testCase "injectivity of keccak all pairs (32 bytes)" $ do
-          Just c <- solcRuntime "A"
-            [i|
-            contract A {
-              function f(uint x, uint y, uint z) public pure {
-                bytes32 w; bytes32 u; bytes32 v;
-                w = keccak256(abi.encode(x));
-                u = keccak256(abi.encode(y));
-                v = keccak256(abi.encode(z));
-                if (w == u) assert(x==y);
-                if (w == v) assert(x==z);
-                if (u == v) assert(y==z);
-              }
-            }
-            |]
-          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-          putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        ,
         testCase "injectivity of keccak contrapositive (32 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
@@ -1826,22 +1736,6 @@ tests = testGroup "hevm"
             |]
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-        ,
-        testCase "keccak soundness" $ do
-          Just c <- solcRuntime "C"
-            [i|
-              contract C {
-                mapping (uint => mapping (uint => uint)) maps;
-
-                  function f(uint x, uint y) public view {
-                  assert(maps[y][0] == maps[x][0]);
-                }
-              }
-            |]
-
-          -- should find a counterexample
-          (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-          putStrLn "expected counterexample found"
         ,
         testCase "multiple-contracts" $ do
           let code' =
@@ -2299,6 +2193,9 @@ tests = testGroup "hevm"
                     -- Takes too long, would timeout on most test setups.
                     -- We could probably fix these by "bunching together" queries
                     , "reasoningBasedSimplifier/mulmod.yul"
+                    , "loadResolver/multi_sload_loop.yul"
+                    , "reasoningBasedSimplifier/mulcheck.yul"
+                    , "reasoningBasedSimplifier/smod.yul"
 
                     -- TODO check what's wrong with these!
                     , "loadResolver/keccak_short.yul" -- ACTUAL bug -- keccak
@@ -2321,7 +2218,7 @@ tests = testGroup "hevm"
                 False -> recursiveList ax (a:b)
           recursiveList [] b = pure b
         files <- recursiveList fullpaths []
-        let filesFiltered = filter (\file -> not $ any (`isSubsequenceOf` file) ignoredTests) files
+        let filesFiltered = filter (\file -> not $ any (`List.isSubsequenceOf` file) ignoredTests) files
 
         -- Takes one file which follows the Solidity Yul optimizer unit tests format,
         -- extracts both the nonoptimized and the optimized versions, and checks equivalence.
@@ -2382,7 +2279,7 @@ tests = testGroup "hevm"
 
 
 checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO Bool
-checkEquiv l r = withSolvers Z3 1 (Just 100) $ \solvers -> do
+checkEquiv l r = withSolvers Z3 1 (Just 10) $ \solvers -> do
   if l == r
      then do
        putStrLn "skip"

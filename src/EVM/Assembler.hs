@@ -1,18 +1,17 @@
+{-# LANGUAGE DataKinds #-}
+
 {-|
 Module      : Assembler
 Description : Assembler for EVM opcodes used in the HEVM symbolic checker
 -}
-
-{-# LANGUAGE DataKinds #-}
-
 module EVM.Assembler where
 
+import EVM.Expr qualified as Expr
 import EVM.Op
 import EVM.Types
-import qualified EVM.Expr as Expr
 
-import qualified Data.Vector as V
 import Data.Vector (Vector)
+import Data.Vector qualified as V
 
 assemble :: [Op] -> Vector (Expr Byte)
 assemble os = V.fromList $ concatMap go os

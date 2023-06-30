@@ -1,7 +1,5 @@
 module EVM.Test.BlockchainTests where
 
-import Prelude hiding (Word)
-
 import EVM (initialContract, makeVm)
 import EVM.Concrete qualified as EVM
 import EVM.Dapp (emptyDapp)

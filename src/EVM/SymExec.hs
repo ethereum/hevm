@@ -1,53 +1,51 @@
-{-# Language TupleSections #-}
-{-# Language DeriveAnyClass #-}
-{-# Language DataKinds #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 module EVM.SymExec where
 
-import Prelude hiding (Word)
-
-import Data.Tuple (swap)
-import Optics.Core
-import EVM hiding (push, bytecode, query, wrap)
-import EVM.Exec
-import qualified EVM.Fetch as Fetch
-import EVM.ABI
-import EVM.SMT (SMTCex(..), SMT2(..), assertProps, formatSMT2)
-import qualified EVM.SMT as SMT
-import EVM.Solvers
-import EVM.Traversals
-import qualified EVM.Expr as Expr
-import EVM.Stepper (Stepper)
-import qualified EVM.Stepper as Stepper
-import qualified Control.Monad.Operational as Operational
-import Control.Monad.State.Strict hiding (state)
-import EVM.Types
-import EVM.Concrete (createAddress)
-import qualified EVM.FeeSchedule as FeeSchedule
-import Data.DoubleWord (Word256)
-import Control.Concurrent.Async
-import Data.Maybe
-import Data.Containers.ListUtils
-import Data.List (foldl', sortBy)
-import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
-import Data.Bifunctor (second)
-import Data.Map (Map)
-import qualified Data.Map as Map
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.IO as TL
-import Data.Tree.Zipper qualified as Zipper
-import EVM.Format (formatExpr, formatPartial)
-import Data.Set (Set, isSubsetOf, size)
-import qualified Data.Set as Set
+import Control.Concurrent.Async (concurrently, mapConcurrently)
 import Control.Concurrent.Spawn (parMapIO, pool)
 import Control.Concurrent.STM (atomically, TVar, readTVarIO, readTVar, newTVarIO, writeTVar)
-import GHC.Conc (getNumProcessors)
+import Control.Monad.Operational qualified as Operational
+import Control.Monad.State.Strict
+import Data.Bifunctor (second)
+import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
+import Data.Containers.ListUtils (nubOrd)
+import Data.DoubleWord (Word256)
+import Data.List (foldl', sortBy)
+import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Map (Map)
+import Data.Map qualified as Map
+import Data.Set (Set, isSubsetOf, size)
+import Data.Set qualified as Set
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
+import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.IO qualified as TL
+import Data.Tree.Zipper qualified as Zipper
+import Data.Tuple (swap)
+import EVM (makeVm, initialContract, getCodeLocation, isValidJumpDest)
+import EVM.Exec
+import EVM.Fetch qualified as Fetch
+import EVM.ABI
+import EVM.Expr qualified as Expr
+import EVM.Format (formatExpr, formatPartial)
+import EVM.SMT (SMTCex(..), SMT2(..), assertProps, formatSMT2)
+import EVM.SMT qualified as SMT
+import EVM.Solvers
+import EVM.Stepper (Stepper)
+import EVM.Stepper qualified as Stepper
+import EVM.Traversals
+import EVM.Types
+import EVM.Concrete (createAddress)
+import EVM.FeeSchedule qualified as FeeSchedule
 import EVM.Format (indent, formatBinary)
-import Options.Generic as Options
-
+import GHC.Conc (getNumProcessors)
+import GHC.Generics (Generic)
+import Optics.Core
+import Options.Generic (ParseField, ParseFields, ParseRecord)
 
 -- | A method name, and the (ordered) types of it's arguments
 data Sig = Sig Text [AbiType]

@@ -1,20 +1,17 @@
 {-# LANGUAGE DataKinds #-}
+
 {- |
     Module: EVM.Keccak
     Description: Expr passes to determine Keccak assumptions
 -}
-
 module EVM.Keccak (keccakAssumptions) where
 
-import Prelude hiding (Word, LT, GT)
-
-import Data.Set (Set)
-import qualified Data.Set as Set
 import Control.Monad.State
+import Data.Set (Set)
+import Data.Set qualified as Set
 
-import EVM.Types
 import EVM.Traversals
-
+import EVM.Types
 
 data BuilderState = BuilderState
   { keccaks :: Set (Expr EWord) }
@@ -75,5 +72,3 @@ keccakAssumptions ps bufs stores = injectivity <> minValue
 
     injectivity = fmap injProp $ combine (Set.toList st.keccaks)
     minValue = fmap minProp (Set.toList st.keccaks)
-
-

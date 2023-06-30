@@ -1,16 +1,13 @@
 module EVM.Concrete where
 
-import Prelude hiding (Word)
-
 import EVM.RLP
 import EVM.Types
 
-import Data.Bits       (Bits (..), shiftR)
+import Data.Bits (Bits(..), shiftR)
 import Data.ByteString (ByteString, (!?))
-import Data.Maybe      (fromMaybe)
-import Data.Word       (Word8)
-
-import qualified Data.ByteString as BS
+import Data.ByteString qualified as BS
+import Data.Maybe (fromMaybe)
+import Data.Word (Word8)
 
 wordAt :: Int -> ByteString -> W256
 wordAt i bs =

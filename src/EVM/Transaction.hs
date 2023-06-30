@@ -1,7 +1,5 @@
 module EVM.Transaction where
 
-import Prelude hiding (Word)
-
 import EVM (initialContract, ceilDiv)
 import EVM.FeeSchedule
 import EVM.RLP
@@ -12,17 +10,16 @@ import EVM.Sign
 
 import Optics.Core hiding (cons)
 
-import Data.ByteString (ByteString, cons)
-import Data.Map (Map)
-import Data.Maybe (fromMaybe, isNothing, fromJust)
-import GHC.Generics (Generic)
-
 import Data.Aeson (FromJSON (..))
-import qualified Data.Aeson        as JSON
-import qualified Data.Aeson.Types  as JSON
-import qualified Data.ByteString   as BS
-import qualified Data.Map          as Map
+import Data.Aeson qualified as JSON
+import Data.Aeson.Types qualified as JSON
+import Data.ByteString (ByteString, cons)
+import Data.ByteString qualified as BS
+import Data.Map (Map)
+import Data.Map qualified as Map
+import Data.Maybe (fromMaybe, isNothing, fromJust)
 import Data.Word (Word64)
+import GHC.Generics (Generic)
 import Numeric (showHex)
 
 data AccessListEntry = AccessListEntry {
@@ -196,7 +193,7 @@ instance FromJSON AccessListEntry where
   parseJSON (JSON.Object val) = do
     accessAddress_ <- addrField val "address"
     accessStorageKeys_ <- (val JSON..: "storageKeys") >>= parseJSONList
-    return $ AccessListEntry accessAddress_ accessStorageKeys_
+    pure $ AccessListEntry accessAddress_ accessStorageKeys_
   parseJSON invalid =
     JSON.typeMismatch "AccessListEntry" invalid
 
@@ -215,15 +212,15 @@ instance FromJSON Transaction where
     value    <- wordField val "value"
     txType   <- fmap (read :: String -> Int) <$> (val JSON..:? "type")
     case txType of
-      Just 0x00 -> return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value LegacyTransaction [] Nothing Nothing 1
+      Just 0x00 -> pure $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value LegacyTransaction [] Nothing Nothing 1
       Just 0x01 -> do
         accessListEntries <- (val JSON..: "accessList") >>= parseJSONList
-        return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value AccessListTransaction accessListEntries Nothing Nothing 1
+        pure $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value AccessListTransaction accessListEntries Nothing Nothing 1
       Just 0x02 -> do
         accessListEntries <- (val JSON..: "accessList") >>= parseJSONList
-        return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value EIP1559Transaction accessListEntries maxPrio maxFee 1
+        pure $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value EIP1559Transaction accessListEntries maxPrio maxFee 1
       Just _ -> fail "unrecognized custom transaction type"
-      Nothing -> return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value LegacyTransaction [] Nothing Nothing 1
+      Nothing -> pure $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value LegacyTransaction [] Nothing Nothing 1
   parseJSON invalid =
     JSON.typeMismatch "Transaction" invalid
 
