@@ -55,8 +55,6 @@ data CexVars = CexVars
   , buffers      :: Map Text (Expr EWord)
     -- | reads from abstract storage
   , storeReads   :: Map (Expr EAddr) (Set (Expr EWord))
-    -- | the concrete part of the storage prestate
-  , concretePreStore :: Map (Expr EAddr) (Map W256 W256)
     -- | the names of any block context variables
   , blockContext :: [Text]
     -- | the names of any tx context variables
@@ -65,14 +63,13 @@ data CexVars = CexVars
   deriving (Eq, Show)
 
 instance Semigroup CexVars where
-  (CexVars a b c d e f) <> (CexVars a2 b2 c2 d2 e2 f2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2) (e <> e2) (f <> f2)
+  (CexVars a b c d e) <> (CexVars a2 b2 c2 d2 e2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2) (e <> e2)
 
 instance Monoid CexVars where
     mempty = CexVars
       { calldata = mempty
       , buffers = mempty
       , storeReads = mempty
-      , concretePreStore = mempty
       , blockContext = mempty
       , txContext = mempty
       }
@@ -174,7 +171,7 @@ assertProps ps =
   <> readAssumes
   <> SMT2 [""] mempty
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
-  <> SMT2 [] mempty{ storeReads = storageReads, concretePreStore = concretePreStore }
+  <> SMT2 [] mempty{ storeReads = storageReads }
 
   where
     (ps_elim, bufs, stores) = eliminateProps ps
@@ -189,7 +186,6 @@ assertProps ps =
     storageReads = Map.unionsWith (<>) $ fmap findStorageReads ps
     concreteStores = Set.toList $ Set.unions (fmap referencedConcreteStores ps)
     abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores ps)
-    concretePreStore = Map.unionsWith (<>) $ fmap findConcretePreStore ps
 
     keccakAssumes
       = SMT2 ["; keccak assumptions"] mempty
@@ -283,14 +279,6 @@ findStorageReads p = Map.fromListWith (<>) $ foldProp go mempty p
 
     isAbstractStore (AbstractStore _) = True
     isAbstractStore _ = False
-
-findConcretePreStore :: Prop -> Map (Expr EAddr) (Map W256 W256)
-findConcretePreStore p = Map.fromListWith (<>) $ foldProp go mempty p
-  where
-    go :: Expr a -> [(Expr EAddr, Map W256 W256)]
-    go = \case
-      ConcreteStore a s -> [(a,s)]
-      _ -> []
 
 findBufferAccess :: TraversableTerm a => [a] -> [(Expr EWord, Expr EWord, Expr Buf)]
 findBufferAccess = foldl (foldTerm go) mempty
@@ -1005,10 +993,9 @@ getBufs getVal bufs = foldM getBuf mempty bufs
 getStore
   :: (Text -> IO Text)
   -> Map (Expr EAddr) (Set (Expr EWord))
-  -> Map (Expr EAddr) (Map W256 W256)
   -> IO (Map (Expr EAddr) (Map W256 W256))
-getStore getVal abstractReads concretePreStore = do
-  absModel <- fmap Map.fromList $ forM (Map.toList abstractReads) $ \(addr, slots) -> do
+getStore getVal abstractReads =
+  fmap Map.fromList $ forM (Map.toList abstractReads) $ \(addr, slots) -> do
     let name = toLazyText (storeName addr)
     raw <- getVal name
     let parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
@@ -1027,8 +1014,6 @@ getStore getVal abstractReads concretePreStore = do
       slot' <- queryValue getVal slot
       pure $ Map.insert slot' (fun slot') m) Map.empty slots
     pure (addr, store)
-
-  pure $ Map.union absModel concretePreStore
 
 -- | Ask the solver to give us the concrete value of an arbitrary abstract word
 queryValue :: (Text -> IO Text) -> Expr EWord -> IO W256

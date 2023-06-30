@@ -11,8 +11,6 @@ module EVM.Solvers where
 
 import Prelude hiding (LT, GT)
 
-import Debug.Trace
-
 import GHC.Natural
 import Control.Monad
 import GHC.IO.Handle (Handle, hFlush, hSetBuffering, BufferMode(..))
@@ -155,7 +153,7 @@ getModel inst cexvars = do
     getRaw = do
       vars <- getVars parseVar (getValue inst) (fmap T.toStrict cexvars.calldata)
       buffers <- getBufs (getValue inst) (Map.keys cexvars.buffers)
-      storage <- getStore (getValue inst) cexvars.storeReads cexvars.concretePreStore
+      storage <- getStore (getValue inst) cexvars.storeReads
       blockctx <- getVars parseBlockCtx (getValue inst) (fmap T.toStrict cexvars.blockContext)
       txctx <- getVars parseTxCtx (getValue inst) (fmap T.toStrict cexvars.txContext)
       pure $ SMTCex vars buffers storage blockctx txctx

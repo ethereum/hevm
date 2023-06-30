@@ -145,7 +145,7 @@ data Expr (a :: EType) where
 
   -- | Literal words
   Lit            :: {-# UNPACK #-} !W256 -> Expr EWord
-  -- | Variables introduced via calldata
+  -- | Variables
   Var            :: Text -> Expr EWord
   -- | variables introduced during the CSE pass
   GVar           :: GVar a -> Expr a
@@ -1138,6 +1138,11 @@ maybeLitWord _ = Nothing
 maybeLitAddr :: Expr EAddr -> Maybe Addr
 maybeLitAddr (LitAddr a) = Just a
 maybeLitAddr _ = Nothing
+
+maybeConcreteStore :: Expr Storage -> Maybe (Map W256 W256)
+maybeConcreteStore (ConcreteStore _ s) = Just s
+maybeConcreteStore _ = Nothing
+
 
 word256 :: ByteString -> Word256
 word256 xs | BS.length xs == 1 =

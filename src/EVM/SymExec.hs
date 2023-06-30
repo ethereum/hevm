@@ -614,10 +614,29 @@ verify solvers opts preState maybepost = do
   where
     toVRes :: (CheckSatResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
-      Sat model -> Cex (leaf, model)
+      Sat model -> Cex (leaf, expandCex preState model)
       EVM.Solvers.Unknown -> Timeout leaf
       Unsat -> Qed ()
       Error e -> error $ "Internal Error: solver responded with error: " <> show e
+
+expandCex :: VM -> SMTCex -> SMTCex
+expandCex prestate c = c { store = Map.union c.store concretePreStore }
+  where
+    concretePreStore = Map.mapMaybe (maybeConcreteStore . (.storage))
+                     . Map.filter (\v -> Expr.containsNode isConcreteStore v.storage)
+                     $ (prestate.env.contracts)
+    isConcreteStore = \case
+      ConcreteStore _ _ -> True
+      _ -> False
+
+findConcretePreStore :: Prop -> Map (Expr EAddr) (Map W256 W256)
+findConcretePreStore p = Map.fromListWith (<>) $ foldProp go mempty p
+  where
+    go :: Expr a -> [(Expr EAddr, Map W256 W256)]
+    go = \case
+      ConcreteStore a s -> [(a,s)]
+      _ -> []
+
 
 type UnsatCache = TVar [Set Prop]
 
