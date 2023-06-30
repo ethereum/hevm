@@ -193,13 +193,13 @@ abstractVM
   -> VM
 abstractVM cd contractCode maybepre = finalVm
   where
-    value' = TxValue
-    code' = RuntimeCode (ConcreteRuntimeCode contractCode)
-    vm' = loadSymVM code' AbstractState value' cd
+    value = TxValue
+    code = RuntimeCode (ConcreteRuntimeCode contractCode)
+    vm = loadSymVM code AbstractState value cd
     precond = case maybepre of
                 Nothing -> []
-                Just p -> [p vm']
-    finalVm = vm' & over #constraints (<> precond)
+                Just p -> [p vm]
+    finalVm = vm & over #constraints (<> precond)
 
 loadSymVM
   :: ContractCode
@@ -207,16 +207,16 @@ loadSymVM
   -> Expr EWord
   -> (Expr Buf, [Prop])
   -> VM
-loadSymVM x initState callvalue' cd = let
+loadSymVM x initState callvalue cd = let
     origin = SymAddr 0
     caller = SymAddr 1
     coinbase = SymAddr 2
     contract = SymAddr 3
   in
   (makeVm $ VMOpts
-    { contract = initialContract x contract
+    { contract = abstractContract x contract
     , calldata = cd
-    , value = callvalue'
+    , value = callvalue
     , initialState = initState
     , address = contract
     , caller = caller

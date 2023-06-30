@@ -173,9 +173,9 @@ makeVm o =
   , overrideCaller = Nothing
   }
 
--- | Initialize a fully abstract contract with the given address
-abstractContract :: Expr EAddr -> Contract
-abstractContract addr = Contract
+-- | Initialize an abstract contract with unknown code
+unknownContract :: Expr EAddr -> Contract
+unknownContract addr = Contract
   { code        = UnknownCode addr
   , storage     = AbstractStore addr
   , origStorage = AbstractStore addr
@@ -187,24 +187,43 @@ abstractContract addr = Contract
   , external    = False
   }
 
+-- | Initialize an abstract contract with known code
+abstractContract :: ContractCode -> Expr EAddr -> Contract
+abstractContract code addr = Contract
+  { code        = code
+  , storage     = AbstractStore addr
+  , origStorage = AbstractStore addr
+  , balance     = Balance addr
+  , nonce       = if isCreation code then Just 1 else Just 0
+  , codehash    = hashcode code
+  , opIxMap     = mkOpIxMap code
+  , codeOps     = mkCodeOps code
+  , external    = False
+  }
+
+-- | Initialize an empty contract without code
+emptyContract :: Expr EAddr -> Contract
+emptyContract addr = initialContract (RuntimeCode (ConcreteRuntimeCode "")) addr
+
 -- | Initialize empty contract with given code
 initialContract :: ContractCode -> Expr EAddr -> Contract
-initialContract contractCode addr = Contract
-  { code        = contractCode
+initialContract code addr = Contract
+  { code        = code
   , storage     = ConcreteStore addr mempty
   , origStorage = ConcreteStore addr mempty
   , balance     = Lit 0
-  , nonce       = if creation then Just 1 else Just 0
-  , codehash    = hashcode contractCode
-  , opIxMap     = mkOpIxMap contractCode
-  , codeOps     = mkCodeOps contractCode
+  , nonce       = if isCreation code then Just 1 else Just 0
+  , codehash    = hashcode code
+  , opIxMap     = mkOpIxMap code
+  , codeOps     = mkCodeOps code
   , external    = False
   }
-  where
-    creation = case contractCode of
-      InitCode _ _  -> True
-      RuntimeCode _ -> False
-      UnknownCode _ -> False
+
+isCreation :: ContractCode -> Bool
+isCreation = \case
+  InitCode _ _  -> True
+  RuntimeCode _ -> False
+  UnknownCode _ -> False
 
 -- * Opcode dispatch (exec1)
 
@@ -925,12 +944,12 @@ transfer src dst val = do
           (#env % #contracts % ix dst % #balance) %= (`Expr.add` val)
     -- sender not in state
     (Nothing, Just _) -> do
-      let c = abstractContract src
+      let c = unknownContract src
       (#env % #contracts) %= (Map.insert src c)
       transfer src dst val
     -- recipient not in state
     (_ , Nothing) -> do
-      let c = abstractContract dst
+      let c = unknownContract dst
       (#env % #contracts) %= (Map.insert dst c)
       transfer src dst val
 
