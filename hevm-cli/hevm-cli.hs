@@ -2,6 +2,7 @@
 
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Main where
 
@@ -38,6 +39,7 @@ import EVM.Debug (Mode(..))
 import EVM.Expr qualified as Expr
 import EVM.Facts qualified as Facts
 import EVM.Facts.Git qualified as Git
+import GitHash
 import EVM.FeeSchedule qualified as FeeSchedule
 import EVM.Fetch qualified
 import EVM.Format (hexByteString, strip0x, showTraceTree, formatExpr)
@@ -257,7 +259,12 @@ main :: IO ()
 main = do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
   case cmd of
-    Version {} -> putStrLn (showVersion Paths.version)
+    Version {} -> putStrLn (showVersion Paths.version <> " " <> gitversion)
+      where gitversion =
+              concat [ "[git rev: ", giBranch gi, "@", giHash gi, dirty, "] " ]
+            dirty | giDirty gi = " (uncommitted files present)"
+                  | otherwise   = ""
+            gi = $$tGitInfoCwd
     Symbolic {} -> do
       root <- getRoot cmd
       withCurrentDirectory root $ assert cmd

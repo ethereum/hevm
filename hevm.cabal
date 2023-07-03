@@ -241,7 +241,8 @@ executable hevm
     vty,
     stm,
     spawn,
-    optics-core
+    optics-core,
+    githash                       >= 0.1.6 && < 0.2
   if os(windows)
     buildable: False
 
