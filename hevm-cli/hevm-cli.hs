@@ -6,6 +6,7 @@
 
 module Main where
 
+import Control.Exception (catch)
 import Control.Monad (void, when, forM_, unless)
 import Control.Monad.State.Strict (liftIO)
 import Data.Bifunctor (second)
@@ -255,13 +256,23 @@ unitTestOptions cmd solvers buildOutput = do
     , ffiAllowed = cmd.ffi
     }
 
+getFullVersion :: IO([Char])
+getFullVersion = catch fullVersion handler
+  where
+    fullVersion :: IO([Char])
+    fullVersion =  pure (showVersion Paths.version <> " " <> gitVersion)
+    gitVersion = concat [ "[git rev: ", giBranch gitInfo, "@", giHash gitInfo, "]" ]
+    gitInfo = $$tGitInfoCwd
+    handler :: GitHashException -> IO([Char])
+    handler _ = return $ showVersion Paths.version <> " [no git revision present]"
+
 main :: IO ()
 main = do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
   case cmd of
-    Version {} -> putStrLn (showVersion Paths.version <> " " <> gitversion)
-      where gitversion = concat [ "[git rev: ", giBranch gi, "@", giHash gi, "]" ]
-            gi = $$tGitInfoCwd
+    Version {} -> do
+      msg <- getFullVersion
+      putStrLn msg
     Symbolic {} -> do
       root <- getRoot cmd
       withCurrentDirectory root $ assert cmd
