@@ -283,7 +283,7 @@ main = do
                   res <- unitTest testOpts out.contracts cmd.cache
                   unless res exitFailure
                 (False, Debug) -> liftIO $ TTY.main testOpts root (Just out)
-                (False, JsonTrace) -> error $ internalError "json traces not implemented for dappTest"
+                (False, JsonTrace) -> internalError "json traces not implemented for dappTest"
                 (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) out
 
 
