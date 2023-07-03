@@ -513,11 +513,11 @@ launchExec cmd = do
               Just path ->
                 Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts vm'.cache)
           _ ->
-            error $ internalError "no EVM result"
+            internalError "no EVM result"
 
       Debug -> void $ TTY.runFromVM solvers rpcinfo Nothing dapp vm
       --JsonTrace -> void $ execStateT (interpretWithTrace fetcher EVM.Stepper.runFully) vm
-      _ -> error $ internalError "TODO"
+      _ -> internalError "TODO"
      where block = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber cmd.block
            rpcinfo = (,) block <$> cmd.rpc
 
@@ -566,7 +566,7 @@ vmFromCommand cmd = do
 
   let ts' = case maybeLitWord ts of
         Just t -> t
-        Nothing -> error $ internalError "unexpected symbolic timestamp when executing vm test"
+        Nothing -> internalError "unexpected symbolic timestamp when executing vm test"
 
   pure $ EVM.Transaction.initTx $ withCache (vm0 baseFee miner ts' blockNum prevRan contract)
     where
