@@ -650,7 +650,7 @@ toCode t = case BS16.decodeBase16 (encodeUtf8 t) of
   Right d -> d
   Left e -> if containsLinkerHole t
             then error "Error: unlinked libraries detected in bytecode"
-            else internalError $ T.unpack e
+            else error $ T.unpack e
 
 solidity' :: Text -> IO (Text, Text)
 solidity' src = withSystemTempFile "hevm.sol" $ \path handle -> do
