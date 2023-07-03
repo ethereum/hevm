@@ -260,8 +260,7 @@ main = do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
   case cmd of
     Version {} -> putStrLn (showVersion Paths.version <> " " <> gitversion)
-      where gitversion =
-              concat [ "[git rev: ", giBranch gi, "@", giHash gi, "]" ]
+      where gitversion = concat [ "[git rev: ", giBranch gi, "@", giHash gi, "]" ]
             gi = $$tGitInfoCwd
     Symbolic {} -> do
       root <- getRoot cmd
