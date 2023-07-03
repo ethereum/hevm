@@ -111,7 +111,7 @@ weth9VM blockNum calldata' = do
 vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EWord -> Addr -> IO VM
 vmFromRpc blockNum calldata' callvalue' caller' address' = do
   ctrct <- fetchContractFrom (BlockNumber blockNum) testRpc address' >>= \case
-        Nothing -> internalError "contract not found: " <> show address'
+        Nothing -> internalError $ "contract not found: " <> show address'
         Just contract' -> return contract'
 
   blk <- fetchBlockFrom (BlockNumber blockNum) testRpc >>= \case
