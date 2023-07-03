@@ -6,6 +6,7 @@
 
 module EVM.Types where
 
+import GHC.Stack (HasCallStack, prettyCallStack, callStack)
 import Control.Arrow ((>>>))
 import Control.Monad.State.Strict (State, mzero)
 import Crypto.Hash (hash, Keccak_256, Digest)
@@ -1238,8 +1239,8 @@ abiKeccak =
 
 -- Utils -------------------------------------------------------------------------------------------
 
-internalError:: [Char] -> a
-internalError m = error $ "Internal error: " ++ m
+internalError:: HasCallStack => [Char] -> a
+internalError m = error $ "Internal error: " ++ m ++ " -- " ++ (prettyCallStack callStack)
 
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = fmap concat (mapM f xs)
