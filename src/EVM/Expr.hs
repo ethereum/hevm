@@ -415,7 +415,7 @@ bufLengthEnv env useEnv buf = go (Lit 0) buf
     go l (GVar (BufVar a)) | useEnv =
       case Map.lookup a env of
         Just b -> go l b
-        Nothing -> error $ internalError "cannot compute length of open expression"
+        Nothing -> internalError "cannot compute length of open expression"
     go l (GVar (BufVar a)) = EVM.Expr.max l (BufLength (GVar (BufVar a)))
 
 -- | If a buffer has a concrete prefix, we return it's length here
@@ -437,10 +437,10 @@ concPrefix (CopySlice (Lit srcOff) (Lit _) (Lit _) src (ConcreteBuf "")) = do
     -- writes to an abstract index are ignored
     go l (WriteWord _ _ b) = go l b
     go l (WriteByte _ _ b) = go l b
-    go _ (CopySlice _ _ _ _ _) = error $ internalError "cannot compute a concrete prefix length for nested copySlice expressions"
-    go _ (GVar _) = error $ internalError "cannot calculate a concrete prefix of an open expression"
+    go _ (CopySlice _ _ _ _ _) = internalError "cannot compute a concrete prefix length for nested copySlice expressions"
+    go _ (GVar _) = internalError "cannot calculate a concrete prefix of an open expression"
 concPrefix (ConcreteBuf b) = Just (num . BS.length $ b)
-concPrefix e = error $ internalError "cannot compute a concrete prefix length for: " <> show e
+concPrefix e = internalError $ "cannot compute a concrete prefix length for: " <> show e
 
 
 -- | Return the minimum possible length of a buffer. In the case of an
@@ -489,7 +489,7 @@ toList (ConcreteBuf bs) = Just $ V.fromList $ LitByte <$> BS.unpack bs
 toList buf = case bufLength buf of
   Lit l -> if l <= num (maxBound :: Int)
               then Just $ V.generate (num l) (\i -> readByte (Lit $ num i) buf)
-              else error $ internalError "overflow when converting buffer to list"
+              else internalError "overflow when converting buffer to list"
   _ -> Nothing
 
 fromList :: V.Vector (Expr Byte) -> Expr Buf
@@ -553,7 +553,7 @@ stripWrites off size = \case
   WriteByte i v prev -> WriteByte i v (stripWrites off size prev)
   WriteWord i v prev -> WriteWord i v (stripWrites off size prev)
   CopySlice srcOff dstOff size' src dst -> CopySlice srcOff dstOff size' src dst
-  GVar _ ->  error $ internalError "unexpected GVar in stripWrites"
+  GVar _ ->  internalError "unexpected GVar in stripWrites"
 
 
 -- ** Storage ** -----------------------------------------------------------------------------------
@@ -590,7 +590,7 @@ readStorage addr' slot' s@(SStore addr slot val prev) =
     (Lit _, Lit _) -> readStorage addr' slot' prev
     -- if the the addresses don't match syntactically and are abstract then we can't skip this write
     _ -> Just $ SLoad addr' slot' s
-readStorage _ _ (GVar _) = error $ internalError "Can't read from a GVar"
+readStorage _ _ (GVar _) = internalError "Can't read from a GVar"
 
 readStorage' :: Expr EWord -> Expr EWord -> Expr Storage -> Expr EWord
 readStorage' addr loc store = case readStorage addr loc store of

@@ -157,7 +157,7 @@ instance JSON.ToJSON EVMToolEnv where
                 tstamp :: W256
                 tstamp = case (b.timestamp) of
                               Lit a -> a
-                              _ -> error $ internalError "Timestamp needs to be a Lit"
+                              _ -> internalError "Timestamp needs to be a Lit"
 
 emptyEvmToolEnv :: EVMToolEnv
 emptyEvmToolEnv = EVMToolEnv { coinbase = 0
@@ -254,7 +254,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
     contrLits = assemble $ getOpData contr
     toW8fromLitB :: Expr 'Byte -> Word8
     toW8fromLitB (LitByte a) = a
-    toW8fromLitB _ = error $ internalError "Cannot convert non-litB"
+    toW8fromLitB _ = internalError "Cannot convert non-litB"
 
     bitcode = BS.pack . Vector.toList $ toW8fromLitB <$> contrLits
     contrAlloc = EVMToolAlloc{ balance = 0xa493d65e20984bc
@@ -514,7 +514,7 @@ vmres vm =
     gasUsed' = vm.tx.gaslimit - vm.state.gas
     res = case vm.result of
       Just (VMSuccess (ConcreteBuf b)) -> (ByteStringS b)
-      Just (VMSuccess x) -> error $ internalError "unhandled: " <> (show x)
+      Just (VMSuccess x) -> internalError "unhandled: " <> (show x)
       Just (VMFailure (Revert (ConcreteBuf b))) -> (ByteStringS b)
       Just (VMFailure _) -> ByteStringS mempty
       _ -> ByteStringS mempty
@@ -577,7 +577,7 @@ interpretWithTrace fetcher =
             m <- liftIO (fetcher q)
             zoom _1 (State.state (runState m)) >> interpretWithTrace fetcher (k ())
         Stepper.Ask _ ->
-          error $ internalError "cannot make choice in this interpreter"
+          internalError "cannot make choice in this interpreter"
         Stepper.IOAct q ->
           zoom _1 (StateT (runStateT q)) >>= interpretWithTrace fetcher . k
         Stepper.EVM m ->
@@ -800,9 +800,9 @@ getOp vm =
   let pcpos  = vm ^. #state % #pc
       code' = vm ^. #state % #code
       xs = case code' of
-        InitCode _ _ -> error $ internalError "InitCode instead of RuntimeCode"
+        InitCode _ _ -> internalError "InitCode instead of RuntimeCode"
         RuntimeCode (ConcreteRuntimeCode xs') -> BS.drop pcpos xs'
-        RuntimeCode (SymbolicRuntimeCode _) -> error $ internalError "RuntimeCode is symbolic"
+        RuntimeCode (SymbolicRuntimeCode _) -> internalError "RuntimeCode is symbolic"
   in if xs == BS.empty then 0
                        else BS.head xs
 

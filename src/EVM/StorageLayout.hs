@@ -53,11 +53,11 @@ storageLayout dapp solc =
       Just ((reverse . toList) -> linearizedBaseContracts) ->
         flip concatMap linearizedBaseContracts
           (\case
-             Number i -> fromMaybe (error $ internalError "malformed AST JSON") $
+             Number i -> fromMaybe (internalError "malformed AST JSON") $
                storageVariablesForContract =<<
                  Map.lookup (floor i) dapp.astIdMap
              _ ->
-               error $ internalError "malformed AST JSON")
+               internalError "malformed AST JSON")
 
 storageVariablesForContract :: Value -> Maybe [Text]
 storageVariablesForContract node = do
@@ -78,7 +78,7 @@ storageVariablesForContract node = do
             , pack $ show (slotTypeForDeclaration x)
             ]
         Nothing ->
-          error $ internalError "malformed variable declaration"
+          internalError "malformed variable declaration"
 
 nodeIs :: Text -> Value -> Bool
 nodeIs t x = isSourceNode && hasRightName
@@ -99,7 +99,7 @@ slotTypeForDeclaration node =
     Just (x:_) ->
       grokDeclarationType x
     _ ->
-      error $ internalError "malformed AST"
+      internalError "malformed AST"
 
 grokDeclarationType :: Value -> SlotType
 grokDeclarationType x =
@@ -109,11 +109,11 @@ grokDeclarationType x =
         Just (toList -> xs) ->
           grokMappingType xs
         _ ->
-          error $ internalError "malformed AST"
+          internalError "malformed AST"
     Just _ ->
       StorageValue (grokValueType x)
     _ ->
-      error $ internalError ("malformed AST " ++ show x)
+      internalError ("malformed AST " ++ show x)
 
 grokMappingType :: [Value] -> SlotType
 grokMappingType [s, t] =
@@ -123,9 +123,9 @@ grokMappingType [s, t] =
     (StorageValue s', StorageValue t') ->
       StorageMapping (pure s') t'
     (StorageMapping _ _, _) ->
-      error $ internalError "unexpected mapping as mapping key"
+      internalError "unexpected mapping as mapping key"
 grokMappingType _ =
-  error $ internalError "unexpected AST child count for mapping"
+  internalError "unexpected AST child count for mapping"
 
 grokValueType :: Value -> AbiType
 grokValueType x =
@@ -134,7 +134,7 @@ grokValueType x =
        , preview (key "attributes" % key "type" % _String) x
        ) of
     (Just "ElementaryTypeName", _, Just typeName) ->
-      fromMaybe (error $ internalError "ungrokked value type: " ++ show typeName)
+      fromMaybe (internalError $ "ungrokked value type: " ++ show typeName)
         (parseTypeName mempty (head (words typeName)))
     (Just "UserDefinedTypeName", _, _) ->
       AbiAddressType
@@ -147,6 +147,6 @@ grokValueType x =
         (Just "Literal", Just ((read . unpack) -> i)) ->
           AbiArrayType i (grokValueType t)
         _ ->
-          error $ internalError "malformed AST"
+          internalError "malformed AST"
     _ ->
-      error $ internalError ("unknown value type " ++ show x)
+      internalError ("unknown value type " ++ show x)

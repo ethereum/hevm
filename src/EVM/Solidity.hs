@@ -120,12 +120,12 @@ instance Read SlotType where
   readsPrec _ t@('m':'a':'p':'p':'i':'n':'g':'(':s) =
     let (lhs,rhs) = case T.splitOn " => " (pack s) of
           (l:r) -> (l,r)
-          _ -> error $ internalError "could not parse storage item: " <> t
+          _ -> internalError $ "could not parse storage item: " <> t
         first = fromJust $ parseTypeName mempty lhs
         target = fromJust $ parseTypeName mempty (T.replace ")" "" (last rhs))
         rest = fmap (fromJust . (parseTypeName mempty . (T.replace "mapping(" ""))) (take (length rhs - 1) rhs)
     in [(StorageMapping (first NonEmpty.:| rest) target, "")]
-  readsPrec _ s = [(StorageValue $ fromMaybe (error $ internalError "could not parse storage item: " <> s) (parseTypeName mempty (pack s)),"")]
+  readsPrec _ s = [(StorageValue $ fromMaybe (internalError $ "could not parse storage item: " <> s) (parseTypeName mempty (pack s)),"")]
 
 data SolcContract = SolcContract
   { runtimeCodehash  :: W256
@@ -285,7 +285,7 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
     go ';' (xs, F5 a b c j ds, _)              = let p' = SM a b c j (readR ds) in -- solc >=0.6
                                                  (xs |> p', F1 [] 1, p')
 
-    go c (xs, state, p)                        = (xs, error $ internalError ("srcmap: y u " ++ show c ++ " in state" ++ show state ++ "?!?"), p)
+    go c (xs, state, p)                        = (xs, internalError ("srcmap: y u " ++ show c ++ " in state" ++ show state ++ "?!?"), p)
 
 -- | Reads all solc ouput json files found under the provided filepath and returns them merged into a BuildOutput
 readBuildOutput :: FilePath -> ProjectType -> IO (Either String BuildOutput)
@@ -389,10 +389,10 @@ functionAbi f = do
   let (Contracts sol, _, _) = fromJust $ readStdJSON json
   case Map.toList $ (fromJust (Map.lookup (path <> ":ABI") sol)).abiMap of
      [(_,b)] -> pure b
-     _ -> error $ internalError "unexpected abi format"
+     _ -> internalError "unexpected abi format"
 
 force :: String -> Maybe a -> a
-force s = fromMaybe (error $ internalError s)
+force s = fromMaybe (internalError s)
 
 readJSON :: ProjectType -> Text -> Text -> Maybe (Contracts, Asts, Sources)
 readJSON DappTools _ json = readStdJSON json
@@ -454,7 +454,7 @@ readStdJSON json = do
   where
     f :: (AsValue s) => HMap.HashMap Text s -> (Map Text (SolcContract, (HMap.HashMap Text Text)))
     f x = Map.fromList . (concatMap g) . HMap.toList $ x
-    g (s, x) = h s <$> HMap.toList (KeyMap.toHashMapText (fromMaybe (error $ internalError "Could not parse json object") (preview _Object x)))
+    g (s, x) = h s <$> HMap.toList (KeyMap.toHashMapText (fromMaybe (internalError "Could not parse json object") (preview _Object x)))
     h :: Text -> (Text, Value) -> (Text, (SolcContract, HMap.HashMap Text Text))
     h s (c, x) =
       let
@@ -467,7 +467,7 @@ readStdJSON json = do
         srcContents = do metadata <- x ^? key "metadata" % _String
                          srcs <- KeyMap.toHashMapText <$> metadata ^? key "sources" % _Object
                          pure $ fmap
-                           (fromMaybe (error $ internalError "could not parse contents field into a string") . preview (key "content" % _String))
+                           (fromMaybe (internalError "could not parse contents field into a string") . preview (key "content" % _String))
                            (HMap.filter (isJust . preview (key "content")) srcs)
         abis = force ("abi key not found in " <> show x) $
           toList <$> x ^? key "abi" % _Array
@@ -592,7 +592,7 @@ mkConstructor abis =
     case filter isConstructor abis of
       [abi] -> map parseMethodInput (toList (abi ^?! key "inputs" % _Array))
       [] -> [] -- default constructor has zero inputs
-      _  -> error $ internalError "strange: contract has multiple constructors"
+      _  -> internalError "strange: contract has multiple constructors"
 
 mkStorageLayout :: Maybe Value -> Maybe (Map Text StorageItem)
 mkStorageLayout Nothing = Nothing
@@ -633,7 +633,7 @@ parseMutability "view" = View
 parseMutability "pure" = Pure
 parseMutability "nonpayable" = NonPayable
 parseMutability "payable" = Payable
-parseMutability _ = error $ internalError "unknown function mutability"
+parseMutability _ = internalError "unknown function mutability"
 
 -- This actually can also parse a method output! :O
 parseMethodInput :: AsValue s => s -> (Text, AbiType)
@@ -650,7 +650,7 @@ toCode t = case BS16.decodeBase16 (encodeUtf8 t) of
   Right d -> d
   Left e -> if containsLinkerHole t
             then error "Error: unlinked libraries detected in bytecode"
-            else error $ internalError $ T.unpack e
+            else internalError $ T.unpack e
 
 solidity' :: Text -> IO (Text, Text)
 solidity' src = withSystemTempFile "hevm.sol" $ \path handle -> do

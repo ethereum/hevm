@@ -51,12 +51,12 @@ combine lst = combine' lst []
 
 minProp :: Expr EWord -> Prop
 minProp k@(Keccak _) = PGT k (Lit 50)
-minProp _ = error $ internalError "expected keccak expression"
+minProp _ = internalError "expected keccak expression"
 
 injProp :: (Expr EWord, Expr EWord) -> Prop
 injProp (k1@(Keccak b1), k2@(Keccak b2)) =
   POr (PEq b1 b2) (PNeg (PEq k1 k2))
-injProp _ = error $ internalError "expected keccak expression"
+injProp _ = internalError "expected keccak expression"
 
 -- Takes a list of props, find all keccak occurences and generates two kinds of assumptions:
 --   1. Minimum output value: That the output of the invocation is greater than

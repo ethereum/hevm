@@ -102,12 +102,12 @@ tests = testGroup "hevm"
             vm2 = case vm1.result of
                     Just (HandleEffect (Query (PleaseFetchContract _addr continue))) ->
                       execState (continue dummyContract) vm1
-                    _ -> error $ internalError "unexpected result"
+                    _ -> internalError "unexpected result"
             -- then it should fetch the slow
             vm3 = case vm2.result of
                     Just (HandleEffect (Query (PleaseFetchSlot _addr _slot continue))) ->
                       execState (continue 1337) vm2
-                    _ -> error $ internalError "unexpected result"
+                    _ -> internalError "unexpected result"
             -- perform the same access as for vm1
             vm4 = execState (EVM.accessStorage 0 (Lit 0) (pure . pure ())) vm3
 
@@ -370,7 +370,7 @@ tests = testGroup "hevm"
             [y] AbiBytesDynamicType
           let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
                 AbiTuple (Vector.toList -> [e]) -> e
-                _ -> error $ internalError "AbiTuple expected"
+                _ -> internalError "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [y])
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
 
@@ -380,7 +380,7 @@ tests = testGroup "hevm"
             [x', y'] AbiBytesDynamicType
           let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
                 AbiTuple (Vector.toList -> [e]) -> e
-                _ -> error $ internalError "AbiTuple expected"
+                _ -> internalError "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [x',y'])
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
 
@@ -394,7 +394,7 @@ tests = testGroup "hevm"
             |] (abiMethod "foo(function)" (AbiTuple (Vector.singleton y)))
           let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
                 AbiTuple (Vector.toList -> [e]) -> e
-                _ -> error $ internalError "AbiTuple expected"
+                _ -> internalError "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [y])
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
     ]
@@ -1169,14 +1169,14 @@ tests = testGroup "hevm"
           |]
         let pre preVM = let (x, y) = case getStaticAbiArgs 2 preVM of
                                        [x', y'] -> (x', y')
-                                       _ -> error $ internalError "expected 2 args"
+                                       _ -> internalError "expected 2 args"
                         in (x .<= Expr.add x y)
                         -- TODO check if it's needed
                            .&& preVM.state.callvalue .== Lit 0
             post prestate leaf =
               let (x, y) = case getStaticAbiArgs 2 prestate of
                              [x', y'] -> (x', y')
-                             _ -> error $ internalError "expected 2 args"
+                             _ -> internalError "expected 2 args"
               in case leaf of
                    Success _ _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
                    _ -> PBool True
@@ -1195,14 +1195,14 @@ tests = testGroup "hevm"
           |]
         let pre preVM = let (x, y) = case getStaticAbiArgs 2 preVM of
                                        [x', y'] -> (x', y')
-                                       _ -> error $ internalError "expected 2 args"
+                                       _ -> internalError "expected 2 args"
                         in (x .<= Expr.add x y)
                            .&& (x .== y)
                            .&& preVM.state.callvalue .== Lit 0
             post prestate leaf =
               let (_, y) = case getStaticAbiArgs 2 prestate of
                              [x', y'] -> (x', y')
-                             _ -> error $ internalError "expected 2 args"
+                             _ -> internalError "expected 2 args"
               in case leaf of
                    Success _ _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
                    _ -> PBool True
@@ -1227,7 +1227,7 @@ tests = testGroup "hevm"
             post prestate leaf =
               let y = case getStaticAbiArgs 1 prestate of
                         [y'] -> y'
-                        _ -> error $ internalError "expected 1 arg"
+                        _ -> internalError "expected 1 arg"
                   this = Expr.litAddr $ prestate.state.codeContract
                   prex = Expr.readStorage' this (Lit 0) prestate.env.storage
               in case leaf of
@@ -1281,7 +1281,7 @@ tests = testGroup "hevm"
               post prestate poststate =
                 let (x,y) = case getStaticAbiArgs 2 prestate of
                         [x',y'] -> (x',y')
-                        _ -> error $ internalError "expected 2 args"
+                        _ -> internalError "expected 2 args"
                     this = Expr.litAddr $ prestate.state.codeContract
                     prestore = prestate.env.storage
                     prex = Expr.readStorage' this x prestore
@@ -1315,7 +1315,7 @@ tests = testGroup "hevm"
               post prestate poststate =
                 let (x,y) = case getStaticAbiArgs 2 prestate of
                         [x',y'] -> (x',y')
-                        _ -> error $ internalError "expected 2 args"
+                        _ -> internalError "expected 2 args"
                     this = Expr.litAddr $ prestate.state.codeContract
                     prestore =  prestate.env.storage
                     prex = Expr.readStorage' this x prestore
@@ -2202,7 +2202,7 @@ tests = testGroup "hevm"
                     , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV
                     ]
 
-        solcRepo <- fromMaybe (error $ internalError "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
+        solcRepo <- fromMaybe (internalError "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
         let testDir = solcRepo <> "/test/libyul/yulOptimizerTests"
         dircontents <- System.Directory.listDirectory testDir
         let
@@ -2240,7 +2240,7 @@ tests = testGroup "hevm"
                                       let a2 = replaceAll "a calldatacopy(0,0,1024)" $ a *=~ [re|code {|]
                                       in (a2:ax)
                                     else replaceOnce [re|^ *{|] "{\ncalldatacopy(0,0,1024)" $ onlyAfter [re|^ *{|] (a:ax)
-            symbolicMem _ = error $ internalError "Program too short"
+            symbolicMem _ = internalError "Program too short"
 
             unfiltered = lines origcont
             filteredASym = symbolicMem [ x | x <- unfiltered, (not $ x =~ [re|^//|]) && (not $ x =~ [re|^$|]) ]
@@ -2267,10 +2267,10 @@ tests = testGroup "hevm"
                 let timeouts = filter isTimeout res
                 unless (null timeouts) $ do
                   putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
-                  error $ internalError "Encountered timeouts"
+                  internalError "Encountered timeouts"
               True -> do
                 putStrLn $ "Not OK: " <> show f <> " Got: " <> show res
-                error $ internalError "Was NOT equivalent"
+                internalError "Was NOT equivalent"
            )
     ]
   ]
@@ -2307,7 +2307,7 @@ runSimpleVM x ins = do
      res <- Stepper.interpret (Fetch.zero 0 Nothing) vm' Stepper.execFully
      case res of
        (Right (ConcreteBuf bs)) -> pure $ Just bs
-       s -> error $ internalError $ show s
+       s -> internalError $ show s
 
 -- | Takes a creation code and returns a vm with the result of executing the creation code
 loadVM :: ByteString -> IO (Maybe VM)
@@ -2330,7 +2330,7 @@ hex :: ByteString -> ByteString
 hex s =
   case BS16.decodeBase16 s of
     Right x -> x
-    Left e -> error $ internalError $ T.unpack e
+    Left e -> internalError $ T.unpack e
 
 singleContract :: Text -> Text -> IO (Maybe ByteString)
 singleContract x s =
@@ -2385,7 +2385,7 @@ decodeAbiValues :: [AbiType] -> ByteString -> [AbiValue]
 decodeAbiValues types bs =
   let xy = case decodeAbiValue (AbiTupleType $ Vector.fromList types) (BS.fromStrict (BS.drop 4 bs)) of
         AbiTuple xy' -> xy'
-        _ -> error $ internalError "AbiTuple expected"
+        _ -> internalError "AbiTuple expected"
   in Vector.toList xy
 
 newtype Bytes = Bytes ByteString
