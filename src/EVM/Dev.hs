@@ -51,7 +51,7 @@ runDappTest root =
 testOpts :: SolverGroup -> FilePath -> FilePath -> IO UnitTestOptions
 testOpts solvers root testFile = do
   srcInfo <- readSolc DappTools root testFile >>= \case
-    Left e -> error e
+    Left e -> error $ internalError e
     Right out ->
       pure $ dappInfo root out
 

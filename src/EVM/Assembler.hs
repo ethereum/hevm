@@ -94,15 +94,15 @@ assemble os = V.fromList $ concatMap go os
       OpDup n ->
         if 1 <= n && n <= 16
         then [LitByte (0x80 + (n - 1))]
-        else error $ "Internal Error: invalid argument to OpDup: " <> show n
+        else error $ internalError "invalid argument to OpDup: " <> show n
       OpSwap n ->
         if 1 <= n && n <= 16
         then [LitByte (0x90 + (n - 1))]
-        else error $ "Internal Error: invalid argument to OpSwap: " <> show n
+        else error $ internalError "invalid argument to OpSwap: " <> show n
       OpLog n ->
         if 0 <= n && n <= 4
         then [LitByte (0xA0 + n)]
-        else error $ "Internal Error: invalid argument to OpLog: " <> show n
+        else error $ internalError "invalid argument to OpLog: " <> show n
       -- we just always assemble OpPush into PUSH32
       OpPush wrd -> (LitByte 0x7f) : [Expr.indexWord (Lit i) wrd | i <- [0..31]]
       OpPush0 -> [LitByte 0x5f]

@@ -296,7 +296,7 @@ abiTailSize x =
         AbiArrayDynamic _ xs -> 32 + sum ((abiHeadSize <$> xs) <> (abiTailSize <$> xs))
         AbiArray _ _ xs -> sum ((abiHeadSize <$> xs) <> (abiTailSize <$> xs))
         AbiTuple v -> sum ((abiHeadSize <$> v) <> (abiTailSize <$> v))
-        _ -> error "impossible"
+        _ -> error $ internalError "impossible"
 
 abiHeadSize :: AbiValue -> Int
 abiHeadSize x =
@@ -312,7 +312,7 @@ abiHeadSize x =
         AbiTuple v   -> sum (abiHeadSize <$> v)
         AbiArray _ _ xs -> sum (abiHeadSize <$> xs)
         AbiFunction _ -> 32
-        _ -> error "impossible"
+        _ -> error $ internalError "impossible"
 
 putAbiSeq :: Vector AbiValue -> Put
 putAbiSeq xs =
@@ -392,7 +392,7 @@ pack32 n xs =
 asUInt :: Integral i => Int -> (i -> a) -> Get a
 asUInt n f = y <$> getAbi (AbiUIntType n)
   where y (AbiUInt _ x) = f (fromIntegral x)
-        y _ = error "can't happen"
+        y _ = error $ internalError "can't happen"
 
 getWord256 :: Get Word256
 getWord256 = pack32 8 <$> replicateM 8 getWord32be
@@ -498,7 +498,7 @@ instance Read Boolz where
 makeAbiValue :: AbiType -> String -> AbiValue
 makeAbiValue typ str = case readP_to_S (parseAbiValue typ) (padStr str) of
   [(val,"")] -> val
-  _ -> error $  "could not parse abi argument: " ++ str ++ " : " ++ show typ
+  _ -> error $ internalError "could not parse abi argument: " ++ str ++ " : " ++ show typ
   where
     padStr = case typ of
       (AbiBytesType n) -> padRight' (2 * n + 2) -- +2 is for the 0x prefix
@@ -525,7 +525,7 @@ parseAbiValue (AbiArrayDynamicType typ) =
 parseAbiValue (AbiArrayType n typ) =
   AbiArray n typ <$> do a <- listP (parseAbiValue typ)
                         pure $ Vector.fromList a
-parseAbiValue (AbiTupleType _) = error "tuple types not supported"
+parseAbiValue (AbiTupleType _) = error $ internalError "tuple types not supported"
 parseAbiValue AbiFunctionType = AbiFunction <$> do ByteStringS bytes <- bytesP
                                                    pure bytes
 

@@ -187,7 +187,7 @@ exec1 = do
     mem  = vm.state.memory
     stk  = vm.state.stack
     self = vm.state.contract
-    this = fromMaybe (error "internal error: state contract") (Map.lookup self vm.env.contracts)
+    this = fromMaybe (error $ internalError "state contract") (Map.lookup self vm.env.contracts)
 
     fees@FeeSchedule {..} = vm.block.schedule
 
@@ -227,7 +227,7 @@ exec1 = do
                   InitCode conc _ -> BS.index conc vm.state.pc
                   RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs vm.state.pc
                   RuntimeCode (SymbolicRuntimeCode ops) ->
-                    fromMaybe (error "could not analyze symbolic code") $
+                    fromMaybe (error $ internalError "could not analyze symbolic code") $
                       maybeLitByte $ ops V.! vm.state.pc
 
       case getOp(?op) of
@@ -741,7 +741,7 @@ exec1 = do
               accessMemoryRange xOffset xSize $ do
                 let
                   output = readMemory xOffset' xSize' vm
-                  codesize = fromMaybe (error "RETURN: cannot return dynamically sized abstract data")
+                  codesize = fromMaybe (error $ internalError "processing opcode RETURN. Cannot return dynamically sized abstract data")
                                . maybeLitWord . bufLength $ output
                   maxsize = vm.block.maxCodeSize
                   creation = case vm.frames of
@@ -933,7 +933,7 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
   let input = readMemory (Lit inOffset) (Lit inSize) vm
       fees = vm.block.schedule
       cost = costOfPrecompile fees preCompileAddr input
-      notImplemented = error $ "precompile at address " <> show preCompileAddr <> " not yet implemented"
+      notImplemented = error $ internalError "precompile at address " <> show preCompileAddr <> " not yet implemented"
       precompileFail = burn (gasCap - cost) $ do
                          assign (#state % #stack) (Lit 0 : xs)
                          pushTrace $ ErrorTrace PrecompileFailure
@@ -1242,7 +1242,7 @@ finalize = do
             Just ops ->
               onContractCode $ RuntimeCode (SymbolicRuntimeCode ops)
     _ ->
-      error "Finalising an unfinished tx."
+      error $ internalError "Finalising an unfinished tx."
 
   -- compute and pay the refund to the caller and the
   -- corresponding payment to the miner
@@ -1286,7 +1286,7 @@ loadContract target =
   preuse (#env % #contracts % ix target % #contractcode) >>=
     \case
       Nothing ->
-        error "Call target doesn't exist"
+        error $ internalError "Call target doesn't exist"
       Just targetCode -> do
         assign (#state % #contract) target
         assign (#state % #code)     targetCode
@@ -1688,8 +1688,8 @@ create self this xSize xGas' xValue xs newAddr initCode = do
               ConcreteStore s -> ConcreteStore (Map.delete (num newAddr) s)
               AbstractStore -> AbstractStore
               EmptyStore -> EmptyStore
-              SStore {} -> error "trying to reset symbolic storage with writes in create"
-              GVar _  -> error "unexpected global variable"
+              SStore {} -> error $ internalError "trying to reset symbolic storage with writes in create"
+              GVar _  -> error $ internalError "unexpected global variable"
 
         modifying (#env % #storage) resetStorage
         modifying (#env % #origStorage) (Map.delete (num newAddr))
@@ -1727,9 +1727,9 @@ replaceCode target newCode =
               , nonce = now.nonce
               }
         RuntimeCode _ ->
-          error ("internal error: can't replace code of deployed contract " <> show target)
+          error $ internalError "can't replace code of deployed contract " <> show target
       Nothing ->
-        error "internal error: can't replace code of nonexistent contract"
+        error $ internalError "can't replace code of nonexistent contract"
 
 replaceCodeOfSelf :: ContractCode -> EVM ()
 replaceCodeOfSelf newCode = do
@@ -1988,7 +1988,7 @@ popTrace :: EVM ()
 popTrace =
   modifying #traces $
     \t -> case Zipper.parent t of
-            Nothing -> error "internal error (trace root)"
+            Nothing -> error $ internalError "internal error (trace root)"
             Just t' -> Zipper.nextSpace t'
 
 zipperRootForest :: Zipper.TreePos Zipper.Empty a -> Forest a
@@ -2020,7 +2020,7 @@ traceTopLog ((LogEntry addr bytes topics) : _) = do
   trace <- withTraceLocation (EventTrace addr bytes topics)
   modifying #traces $
     \t -> Zipper.nextSpace (Zipper.insert (Node trace []) t)
-traceTopLog ((GVar _) : _) = error "unexpected global variable"
+traceTopLog ((GVar _) : _) = error $ internalError "unexpected global variable"
 
 -- * Stack manipulation
 
@@ -2094,7 +2094,7 @@ isValidJumpDest vm x = let
     code = vm.state.code
     self = vm.state.codeContract
     contract = fromMaybe
-      (error "Internal Error: self not found in current contracts")
+      (error $ internalError "self not found in current contracts")
       (Map.lookup self vm.env.contracts)
     op = case code of
       InitCode ops _ -> BS.indexMaybe ops x
@@ -2143,7 +2143,7 @@ mkOpIxMap (RuntimeCode (SymbolicRuntimeCode ops))
                      then (x' - 0x60 + 1, i + 1, j,     m >> SV.write v i j)
             -- other data --
                      else (0,             i + 1, j + 1, m >> SV.write v i j)
-          _ -> error $ "cannot analyze symbolic code:\nx: " <> show x <> " i: " <> show i <> " j: " <> show j
+          _ -> error $ internalError "cannot analyze symbolic code:\nx: " <> show x <> " i: " <> show i <> " j: " <> show j
 
         go v (1, !i, !j, !m) _ =
           {- End of PUSH op. -}   (0,            i + 1, j + 1, m >> SV.write v i j)
@@ -2161,7 +2161,7 @@ vmOp vm =
         RuntimeCode (ConcreteRuntimeCode xs') ->
           (BS.index xs' i, fmap LitByte $ BS.unpack $ BS.drop i xs')
         RuntimeCode (SymbolicRuntimeCode xs') ->
-          ( fromMaybe (error "unexpected symbolic code") . maybeLitByte $ xs' V.! i , V.toList $ V.drop i xs')
+          ( fromMaybe (error $ internalError "unexpected symbolic code") . maybeLitByte $ xs' V.! i , V.toList $ V.drop i xs')
   in if (opslen code' < i)
      then Nothing
      else Just (readOp op pushdata)
@@ -2188,7 +2188,7 @@ mkCodeOps contractCode =
         Nothing ->
           mempty
         Just (x, xs') ->
-          let x' = fromMaybe (error "unexpected symbolic code argument") $ maybeLitByte x
+          let x' = fromMaybe (error $ internalError "unexpected symbolic code argument") $ maybeLitByte x
               j = opSize x'
           in (i, readOp x' xs') Seq.<| go (i + j) (drop j xs)
 
@@ -2251,7 +2251,7 @@ concreteModexpGasFee input =
 -- Gas cost of precompiles
 costOfPrecompile :: FeeSchedule Word64 -> Addr -> Expr Buf -> Word64
 costOfPrecompile (FeeSchedule {..}) precompileAddr input =
-  let errorDynamicSize = error "precompile input cannot have a dynamic size"
+  let errorDynamicSize = error $ internalError "precompile input cannot have a dynamic size"
       inputLen = case input of
                    ConcreteBuf bs -> fromIntegral $ BS.length bs
                    AbstractBuf _ -> errorDynamicSize
@@ -2270,7 +2270,7 @@ costOfPrecompile (FeeSchedule {..}) precompileAddr input =
     -- MODEXP
     0x5 -> case input of
              ConcreteBuf i -> concreteModexpGasFee i
-             _ -> error "Unsupported symbolic modexp gas calc "
+             _ -> error $ internalError "Unsupported symbolic modexp gas calc "
     -- ECADD
     0x6 -> g_ecadd
     -- ECMUL
@@ -2280,8 +2280,8 @@ costOfPrecompile (FeeSchedule {..}) precompileAddr input =
     -- BLAKE2
     0x9 -> case input of
              ConcreteBuf i -> g_fround * (num $ asInteger $ lazySlice 0 4 i)
-             _ -> error "Unsupported symbolic blake2 gas calc"
-    _ -> error ("unimplemented precompiled contract " ++ show precompileAddr)
+             _ -> error $ internalError "Unsupported symbolic blake2 gas calc"
+    _ -> error $ internalError "unimplemented precompiled contract " ++ show precompileAddr
 
 -- Gas cost of memory expansion
 memoryCost :: FeeSchedule Word64 -> Word64 -> Word64
