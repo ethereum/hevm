@@ -1239,7 +1239,7 @@ abiKeccak =
 -- Utils -------------------------------------------------------------------------------------------
 
 internalError:: [Char] -> a
-internalError m = error $ "internalError " ++ m
+internalError m = error $ "Internal error: " ++ m
 
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = fmap concat (mapM f xs)
