@@ -261,9 +261,7 @@ main = do
   case cmd of
     Version {} -> putStrLn (showVersion Paths.version <> " " <> gitversion)
       where gitversion =
-              concat [ "[git rev: ", giBranch gi, "@", giHash gi, dirty, "] " ]
-            dirty | giDirty gi = " (uncommitted files present)"
-                  | otherwise   = ""
+              concat [ "[git rev: ", giBranch gi, "@", giHash gi, "]" ]
             gi = $$tGitInfoCwd
     Symbolic {} -> do
       root <- getRoot cmd
