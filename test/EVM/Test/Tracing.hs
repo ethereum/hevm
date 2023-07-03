@@ -514,7 +514,7 @@ vmres vm =
     gasUsed' = vm.tx.gaslimit - vm.state.gas
     res = case vm.result of
       Just (VMSuccess (ConcreteBuf b)) -> (ByteStringS b)
-      Just (VMSuccess x) -> internalError "unhandled: " <> (show x)
+      Just (VMSuccess x) -> internalError $ "unhandled: " <> (show x)
       Just (VMFailure (Revert (ConcreteBuf b))) -> (ByteStringS b)
       Just (VMFailure _) -> ByteStringS mempty
       _ -> ByteStringS mempty
