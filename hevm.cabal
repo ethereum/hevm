@@ -52,6 +52,11 @@ flag devel
   default:     False
   manual:      True
 
+flag debug
+  description: Sets flags for compilation with extensive debug symbols and eventlog
+  default:     False
+  manual:      True
+
 source-repository head
   type:     git
   location: https://github.com/ethereum/hevm.git
