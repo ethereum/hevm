@@ -61,6 +61,13 @@ common shared
     ghc-options: -Werror
   if flag(devel)
     ghc-options: -j
+  if flag(debug)
+    ghc-options:
+      -j
+      -g3
+      -fdistinct-constructor-tables
+      -finfo-table-map
+      -eventlog
   ghc-options:
     -Wall
     -Wno-unticked-promoted-constructors
@@ -241,7 +248,8 @@ executable hevm
     vty,
     stm,
     spawn,
-    optics-core
+    optics-core,
+    eventlog2html
   if os(windows)
     buildable: False
 
