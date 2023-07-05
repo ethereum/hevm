@@ -443,7 +443,7 @@ runUnitTestContract
         Just (VMFailure _) -> liftIO $ do
           Text.putStrLn "\x1b[31m[BAIL]\x1b[0m setUp() "
           tick "\n"
-          tick (Data.Text.pack $ show $ failOutput vm1 opts "setUp()")
+          tick (failOutput vm1 opts "setUp()")
           pure [(False, vm1)]
         Just (VMSuccess _) -> do
           let
