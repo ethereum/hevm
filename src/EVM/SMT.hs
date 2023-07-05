@@ -234,7 +234,7 @@ referencedVars' prop = nubOrd $ foldProp referencedVarsGo [] prop
 referencedFrameContextGo :: Expr a -> [(Builder, [Prop])]
 referencedFrameContextGo = \case
   TxValue -> [(fromString "txvalue", [])]
-  Balance {} -> error "TODO: BALANCE"
+  v@(Balance a) -> [(fromString "balance_" <> formatEAddr a, [PLT v (Lit $ 2 ^ (96 :: Int))])]
   Gas {} -> error "TODO: GAS"
   _ -> []
 
@@ -683,6 +683,7 @@ exprToSMT = \case
     "(sha256 " <> enc <> ")"
 
   TxValue -> fromString "txvalue"
+  Balance a -> fromString "balance_" <> formatEAddr a
 
   Origin ->  "origin"
   BlockHash a ->
@@ -847,10 +848,13 @@ encodeConcreteStore a s = foldl encodeWrite (storeName a) (Map.toList s)
       in "(store " <> prev `sp` encKey `sp` encVal <> ")"
 
 storeName :: Expr EAddr -> Builder
-storeName = \case
-    LitAddr a -> fromString ("baseStore_" <> show a)
-    SymAddr a -> fromString ("baseStore_" <> show a)
-    GVar _ -> error "Internal Error: unexpected GVar"
+storeName a = fromString ("baseStore_") <> formatEAddr a
+
+formatEAddr :: Expr EAddr -> Builder
+formatEAddr = \case
+  LitAddr a -> fromString (show a)
+  SymAddr a -> fromString (show a)
+  GVar _ -> error "Internal Error: unexpected GVar"
 
 
 -- ** Cex parsing ** --------------------------------------------------------------------------------
