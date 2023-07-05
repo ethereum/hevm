@@ -979,7 +979,7 @@ solidityList vm dapp =
         Nothing -> mempty
         Just x ->
           fromMaybe
-            (error "Internal Error: unable to find line for source map")
+            mempty
             (preview (
               ix x.file
               % to (Vec.imap (,)))
