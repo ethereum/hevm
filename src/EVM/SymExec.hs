@@ -898,9 +898,12 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
 -- | Takes a buffer and a Cex and replaces all abstract values in the buf with
 -- concrete ones from the Cex.
 subModel :: SMTCex -> Expr a -> Expr a
-subModel c expr =
-  subBufs (fmap forceFlattened c.buffers) . subVars c.vars
-  . subVars c.blockContext . subVars c.txContext $ expr
+subModel c
+  = subBufs (fmap forceFlattened c.buffers)
+  . subStores c.store
+  . subVars c.vars
+  . subVars c.blockContext
+  . subVars c.txContext
   where
     forceFlattened (SMT.Flat bs) = bs
     forceFlattened b@(SMT.Comp _) = forceFlattened $
@@ -929,13 +932,14 @@ subModel c expr =
                       else a
           e -> e
 
-    subStore :: Map W256 (Map W256 W256) -> Expr a -> Expr a
-    subStore = undefined
-      {-
-    subStore m b = mapExpr go b
+    subStores model b = Map.foldlWithKey subStore b model
+    subStore :: Expr a -> Expr EAddr -> Map W256 W256 -> Expr a
+    subStore b var val = mapExpr go b
       where
         go :: Expr a -> Expr a
         go = \case
-          AbstractStore -> ConcreteStore m
+          v@(AbstractStore a)
+            -> if a == var
+               then ConcreteStore a val
+               else v
           e -> e
-          -}
