@@ -2025,7 +2025,7 @@ tests = testGroup "hevm"
           assertBool "Did not find expected storage cex" testCex
           putStrLn "Expected counterexample found"
  ]
-  , testGroup "Equivalence checking"
+  , testGroup "equivalence-checking"
     [
       testCase "eq-yul-simple-cex" $ do
         Just aPrgm <- yul ""

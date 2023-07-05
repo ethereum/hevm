@@ -33,6 +33,7 @@ import qualified Data.ByteString as BS
 import Data.Bifunctor (second)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import qualified Data.Map.Merge.Strict as Map
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
@@ -719,8 +720,8 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     check knownUnsat props idx = do
       let smt = assertProps $ Set.toList props
       -- if debug is on, write the query to a file
-      when opts.debug $ TL.writeFile
-        ("equiv-query-" <> show idx <> ".smt2") (formatSMT2 smt <> "\n\n(check-sat)")
+      let filename = "equiv-query-" <> show idx <> ".smt2"
+      when opts.debug $ TL.writeFile filename (formatSMT2 smt <> "\n\n(check-sat)")
 
       ku <- readTVarIO knownUnsat
       res <- if subsetAny props ku
@@ -737,7 +738,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
               atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
               pure (Qed (), False)
         (_, EVM.Solvers.Unknown) -> pure (Timeout (), False)
-        (_, Error txt) -> error $ "Error while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
+        (_, Error txt) -> error $ (T.unpack txt) <> if opts.debug then "\n SMT file was: " <> filename <> "" else ""
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
@@ -756,23 +757,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     -- a differing result in each branch
     distinct :: Expr End -> Expr End -> Maybe (Set Prop)
     distinct aEnd bEnd =
-      let
-        differingResults = case (aEnd, bEnd) of
-          (Success _ _ aOut aStore, Success _ _ bOut bStore) ->
-            if aOut == bOut && aStore == bStore
-            then PBool False
-            else {- aStore ./= bStore -} error "TODO" .|| aOut ./= bOut
-          (Failure _ _ (Revert a), Failure _ _ (Revert b)) -> if a == b then PBool False else a ./= b
-          (Failure _ _ a, Failure _ _ b) -> if a == b then PBool False else PBool True
-          -- partial end states can't be compared to actual end states, so we always ignore them
-          (Partial {}, _) -> PBool False
-          (_, Partial {}) -> PBool False
-          (ITE _ _ _, _) -> error "Expressions must be flattened"
-          (_, ITE _ _ _) -> error "Expressions must be flattened"
-          (a, b) -> if a == b
-                    then PBool False
-                    else PBool True
-      in case differingResults of
+      case resultsDiffer aEnd bEnd of
         -- if the end states are the same, then they can never produce a
         -- different result under any circumstances
         PBool False -> Nothing
@@ -783,7 +768,46 @@ equivalenceCheck' solvers branchesA branchesB opts = do
         -- if we cannot statically determine whether or not the end states
         -- differ, then we ask the solver if the end states can differ if both
         -- sets of path conditions are satisfiable
-        _ -> Just . Set.fromList $ differingResults : extractProps aEnd <> extractProps bEnd
+        _ -> Just . Set.fromList $ resultsDiffer aEnd bEnd : extractProps aEnd <> extractProps bEnd
+
+    resultsDiffer :: Expr End -> Expr End -> Prop
+    resultsDiffer aEnd bEnd = case (aEnd, bEnd) of
+      (Success _ _ aOut aState, Success _ _ bOut bState) ->
+        case (aOut == bOut, aState == bState) of
+          (True, True) -> PBool False
+          (False, True) -> aOut ./= bOut
+          (True, False) -> statesDiffer aState bState
+          (False, False) -> statesDiffer aState bState .|| aOut ./= bOut
+      (Failure _ _ (Revert a), Failure _ _ (Revert b)) -> if a == b then PBool False else a ./= b
+      (Failure _ _ a, Failure _ _ b) -> if a == b then PBool False else PBool True
+      -- partial end states can't be compared to actual end states, so we always ignore them
+      (Partial {}, _) -> PBool False
+      (_, Partial {}) -> PBool False
+      (ITE _ _ _, _) -> error "Expressions must be flattened"
+      (_, ITE _ _ _) -> error "Expressions must be flattened"
+      (a, b) -> if a == b
+                then PBool False
+                else PBool True
+
+    statesDiffer :: Map (Expr EAddr) (Expr EContract) -> Map (Expr EAddr) (Expr EContract) -> Prop
+    statesDiffer aState bState
+      = if Map.keys aState /= Map.keys bState
+        -- TODO: consider possibility of aliased symbolic addresses
+        then PBool True
+        else let
+          merged = (Map.merge Map.dropMissing Map.dropMissing (Map.zipWithMatched (\_ x y -> (x,y))) aState bState)
+        in Map.foldl' (\a (ac, bc) -> a .|| contractsDiffer ac bc) (PBool False) merged
+
+    contractsDiffer :: Expr EContract -> Expr EContract -> Prop
+    contractsDiffer ac bc = let
+        balsDiffer = case (ac.balance, bc.balance) of
+          (Lit ab, Lit bb) -> PBool $ ab /= bb
+          (ab, bb) -> if ab == bb then PBool False else ab ./= bb
+        storesDiffer = case (ac.storage, bc.storage) of
+          (ConcreteStore aa as, ConcreteStore ba bs) -> PBool $ as /= bs && aa /= ba
+          (as, bs) -> if as == bs then PBool False else as ./= bs
+      in balsDiffer .|| storesDiffer
+
 
 both' :: (a -> b) -> (a, a) -> (b, b)
 both' f (x, y) = (f x, f y)

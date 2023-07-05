@@ -229,6 +229,8 @@ solverArgs solver timeout = case solver of
   CVC5 ->
     [ "--lang=smt"
     , "--produce-models"
+    , "--print-success"
+    , "--interactive"
     , "--tlimit-per=" <> mkTimeout timeout
     ]
   Custom _ -> []
@@ -240,10 +242,12 @@ spawnSolver solver timeout = do
   (Just stdin, Just stdout, Just stderr, process) <- createProcess cmd
   hSetBuffering stdin (BlockBuffering (Just 1000000))
   let solverInstance = SolverInstance solver stdin stdout stderr process
+
   case solver of
     CVC5 -> pure solverInstance
     _ -> do
       _ <- sendLine' solverInstance $ "(set-option :timeout " <> mkTimeout timeout <> ")"
+      _ <- sendLine' solverInstance "(set-option :print-success true)"
       pure solverInstance
 
 -- | Cleanly shutdown a running solver instnace
@@ -253,8 +257,15 @@ stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
 sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
 sendScript solver (SMT2 cmds _) = do
-  sendLine' solver (splitSExpr $ fmap toLazyText cmds)
-  pure $ Right()
+  let sexprs = splitSExpr $ fmap toLazyText cmds
+  go sexprs
+  where
+    go [] = pure $ Right ()
+    go (c:cs) = do
+      out <- sendCommand solver c
+      case out of
+        "success" -> go cs
+        e -> pure $ Left $ "Solver returned an error:\n" <> e <> "\nwhile sending the following line: " <> c
 
 -- | Sends a single command to the solver, returns the first available line from the output buffer
 sendCommand :: SolverInstance -> Text -> IO Text
@@ -307,11 +318,11 @@ readSExpr h = go 0 0 []
 
 -- From a list of lines, take each separate SExpression and put it in
 -- its own list, after removing comments.
-splitSExpr :: [Text] -> Text
+splitSExpr :: [Text] -> [Text]
 splitSExpr ls =
   -- split lines, strip comments, and append everything to a single line
   let text = T.intercalate " " $ T.takeWhile (/= ';') <$> concatMap T.lines ls in
-  T.unlines $ filter (/= "") $ go text []
+  filter (/= "") $ go text []
   where
     go "" acc = reverse acc
     go text acc =

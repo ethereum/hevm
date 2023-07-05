@@ -362,14 +362,14 @@ declareFrameContext names = SMT2 (["; frame context"] <> concatMap declare names
     cexvars = (mempty :: CexVars){ txContext = fmap (toLazyText . fst) names }
 
 declareAbstractStores :: [Builder] -> SMT2
-declareAbstractStores names = SMT2 (["; concrete base stores"] <> fmap declare names) mempty
+declareAbstractStores names = SMT2 (["; abstract base stores"] <> fmap declare names) mempty
   where
-    declare n = "(declare-const " <> n <> " (Storage))"
+    declare n = "(declare-const " <> n <> " Storage)"
 
 declareConcreteStores :: [Builder] -> SMT2
-declareConcreteStores names = SMT2 (["; abstract base stores"] <> fmap declare names) mempty
+declareConcreteStores names = SMT2 (["; concrete base stores"] <> fmap declare names) mempty
   where
-    declare n = "(define-const " <> n <> " (Storage) ((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000))"
+    declare n = "(define-const " <> n <> " Storage ((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000))"
 
 declareBlockContext :: [(Builder, [Prop])] -> SMT2
 declareBlockContext names = SMT2 (["; block context"] <> concatMap declare names) cexvars
