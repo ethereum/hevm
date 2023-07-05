@@ -184,7 +184,7 @@ formatBinary =
 formatSBinary :: Expr Buf -> Text
 formatSBinary (ConcreteBuf bs) = formatBinary bs
 formatSBinary (AbstractBuf t) = "<" <> t <> " abstract buf>"
-formatSBinary _ = error "formatSBinary: implement me"
+formatSBinary _ = internalError "formatSBinary: implement me"
 
 showTraceTree :: DappInfo -> VM -> Text
 showTraceTree dapp vm =
@@ -398,7 +398,7 @@ prettyvmresult (Success _ _ _ _) =
   "Return: <symbolic>"
 prettyvmresult (Failure _ _ err) = prettyError err
 prettyvmresult (Partial _ _ p) = T.unpack $ formatPartial p
-prettyvmresult r = error $ "Internal Error: Invalid result: " <> show r
+prettyvmresult r = internalError $ "Invalid result: " <> show r
 
 indent :: Int -> Text -> Text
 indent n = rstrip . T.unlines . fmap (T.replicate n (T.pack [' ']) <>) . T.lines
@@ -592,13 +592,13 @@ hexByteString :: String -> ByteString -> ByteString
 hexByteString msg bs =
   case BS16.decodeBase16 bs of
     Right x -> x
-    _ -> error ("invalid hex bytestring for " ++ msg)
+    _ -> internalError $ "invalid hex bytestring for " ++ msg
 
 hexText :: Text -> ByteString
 hexText t =
   case BS16.decodeBase16 (T.encodeUtf8 (T.drop 2 t)) of
     Right x -> x
-    _ -> error ("invalid hex bytestring " ++ show t)
+    _ -> internalError $ "invalid hex bytestring " ++ show t
 
 bsToHex :: ByteString -> String
 bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)

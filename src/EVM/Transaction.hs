@@ -270,7 +270,7 @@ initTx vm = let
 
     resetStore (ConcreteStore s) = ConcreteStore (resetConcreteStore s)
     resetStore (SStore a@(Lit _) k v s) = if creation && a == (litAddr toAddr) then resetStore s else (SStore a k v (resetStore s))
-    resetStore (SStore {}) = error "cannot reset storage if it contains symbolic addresses"
+    resetStore (SStore {}) = internalError "cannot reset storage if it contains symbolic addresses"
     resetStore s = s
     in
       vm & #env % #contracts .~ initState

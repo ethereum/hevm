@@ -6,6 +6,7 @@
 
 module EVM.Types where
 
+import GHC.Stack (HasCallStack, prettyCallStack, callStack)
 import Control.Arrow ((>>>))
 import Control.Monad.State.Strict (State, mzero)
 import Crypto.Hash (hash, Keccak_256, Digest)
@@ -1140,7 +1141,7 @@ word256 xs | BS.length xs == 1 =
   -- optimize one byte pushes
   Word256 (Word128 0 0) (Word128 0 (fromIntegral $ BS.head xs))
 word256 xs = case Cereal.runGet m (padLeft 32 xs) of
-               Left _ -> error "internal error"
+               Left _ -> internalError "should not happen"
                Right x -> x
   where
     m = do a <- Cereal.getWord64be
@@ -1186,7 +1187,7 @@ unpackNibbles bs = BS.unpack bs >>= unpackByte
 packNibbles :: [Nibble] -> ByteString
 packNibbles [] = mempty
 packNibbles (n1:n2:ns) = BS.singleton (toByte n1 n2) <> packNibbles ns
-packNibbles _ = error "can't pack odd number of nibbles"
+packNibbles _ = internalError "can't pack odd number of nibbles"
 
 toWord64 :: W256 -> Maybe Word64
 toWord64 n =
@@ -1238,6 +1239,8 @@ abiKeccak =
 
 -- Utils -------------------------------------------------------------------------------------------
 
+internalError:: HasCallStack => [Char] -> a
+internalError m = error $ "Internal error: " ++ m ++ " -- " ++ (prettyCallStack callStack)
 
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = fmap concat (mapM f xs)

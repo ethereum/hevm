@@ -144,7 +144,7 @@ debugVMTest file test = do
   Right allTests <- parseBCSuite <$> LazyByteString.readFile (repo </> file)
   let x = case filter (\(name, _) -> name == test) $ Map.toList allTests of
         [(_, x')] -> x'
-        _ -> error "test not found"
+        _ -> internalError "test not found"
   let vm0 = vmForCase x
   result <- withSolvers Z3 0 Nothing $ \solvers ->
     TTY.runFromVM solvers Nothing Nothing emptyDapp vm0
@@ -214,7 +214,7 @@ checkExpectation diff x vm = do
     storageEqual = s1 == s2
     codeEqual = case (c1 ^. #contractcode, c2 ^. #contractcode) of
       (RuntimeCode a', RuntimeCode b') -> a' == b'
-      _ -> error "unexpected code"
+      _ -> internalError "unexpected code"
 
 checkExpectedContracts :: VM -> Map Addr (Contract, Storage) -> (Bool, Bool, Bool, Bool, Bool)
 checkExpectedContracts vm expected =
@@ -234,7 +234,7 @@ checkExpectedContracts vm expected =
       EmptyStore -> mempty
       AbstractStore -> mempty -- error "AbstractStore, should this be handled?"
       SStore {} -> mempty -- error "SStore, should this be handled?"
-      GVar _ -> error "unexpected global variable"
+      GVar _ -> internalError "unexpected global variable"
 
 clearStorage :: (Contract, Storage) -> (Contract, Storage)
 clearStorage (c, _) = (c, mempty)

@@ -39,7 +39,7 @@ sign hash sk = (v, r, s)
     curve = getCurveByName SEC_p256k1
     priv = PrivateKey curve sk
     digest = fromMaybe
-      (error $ "Internal Error: could produce a digest from " <> show hash)
+      (internalError $ "could produce a digest from " <> show hash)
       (Crypto.digestFromByteString (word256Bytes hash))
 
     -- sign message

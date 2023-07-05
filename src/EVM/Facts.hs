@@ -139,7 +139,7 @@ vmFacts vm = Set.fromList $ do
   case vm.env.storage of
     EmptyStore -> contractFacts k v Map.empty
     ConcreteStore s -> contractFacts k v s
-    _ -> error "cannot serialize an abstract store"
+    _ -> internalError "cannot serialize an abstract store"
 
 -- Somewhat stupidly, this function demands that for each contract,
 -- the code fact for that contract comes before the other facts for
