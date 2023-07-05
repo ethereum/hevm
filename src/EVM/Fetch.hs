@@ -10,7 +10,7 @@ import EVM.SMT
 import EVM.Solvers
 import EVM.Types
 import EVM.Format (hexText)
-import EVM        (initialContract)
+import EVM        (emptyContract, initialContract)
 import qualified EVM.FeeSchedule as FeeSchedule
 
 import Optics.Core
@@ -214,11 +214,9 @@ oracle solvers info q = do
          -- Is is possible to satisfy the condition?
          continue <$> checkBranch solvers (branchcondition ./= (Lit 0)) pathconds
 
-    -- if we are using a symbolic storage model,
-    -- we generate a new array to the fetched contract here
     PleaseFetchContract addr continue -> do
       contract <- case info of
-        Nothing -> return $ Just $ initialContract (RuntimeCode (ConcreteRuntimeCode "")) (LitAddr addr)
+        Nothing -> return $ Just $ emptyContract (LitAddr addr)
         Just (n, url) -> fetchContractFrom n url addr
       case contract of
         Just x -> return $ continue x

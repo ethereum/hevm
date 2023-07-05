@@ -728,15 +728,16 @@ symRun :: UnitTestOptions -> VM -> Text -> [AbiType] -> IO (Text, Either Text Te
 symRun opts@UnitTestOptions{..} vm testName types = do
     let cd = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName
-        testContract env = fromMaybe (error "Internal Error: test contract not found in state") (Map.lookup vm.state.contract env)
-        cheatContract env = fromMaybe (error "Internal Error: cheatcode contract not found in state") (Map.lookup cheatCode env)
+        testContract store = fromMaybe (error "Internal Error: test contract not found in state") (Map.lookup vm.state.contract store)
 
     -- define postcondition depending on `shouldFail`
     -- We directly encode the failure conditions from failed() in ds-test since this is easier to encode than a call into failed()
     -- we need to read from slot 0 in the test contract and mask it with 0x10 to get the value of _failed
     -- we don't need to do this when reading the failed from the cheatcode address since we don't do any packing there
-    let failed env = (And (readStorage' (Lit 0) (testContract env).storage) (Lit 2) .== Lit 2)
-                   .|| (readStorage' (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) (cheatContract env).storage .== Lit 1)
+    let failed store = case Map.lookup cheatCode store of
+          Just cheatContract -> (And (readStorage' (Lit 0) (testContract store).storage) (Lit 0x10) .== Lit 0x10)
+                               .|| (readStorage' (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) cheatContract.storage .== Lit 1)
+          Nothing -> And (readStorage' (Lit 0) (testContract store).storage) (Lit 2) .== Lit 2
         postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
                                   Success _ _ _ store -> failed store
@@ -776,8 +777,8 @@ symFailure UnitTestOptions {..} testName cd types failures' =
     where
       showRes = \case
         Success _ _ _ _ -> if "proveFail" `isPrefixOf` testName
-                       then "Successful execution"
-                       else "Failed: DSTest Assertion Violation"
+                           then "Successful execution"
+                           else "Failed: DSTest Assertion Violation"
         res ->
           let ?context = DappContext { info = dapp, env = traceContext res}
           in Text.pack $ prettyvmresult res
@@ -848,7 +849,6 @@ passOutput vm UnitTestOptions { .. } testName =
       ]
     else ""
 
--- TODO
 failOutput :: VM -> UnitTestOptions -> Text -> Text
 failOutput vm UnitTestOptions { .. } testName =
   let ?context = DappContext { info = dapp, env = vm.env.contracts }
@@ -985,7 +985,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
            , allowFFI = ffiAllowed
            }
     creator =
-      initialContract (RuntimeCode (ConcreteRuntimeCode "")) (LitAddr ethrunAddress)
+      emptyContract (LitAddr ethrunAddress)
         & set #nonce (Just 1)
         & set #balance (Lit testParams.balanceCreate)
   in vm

@@ -42,7 +42,7 @@ import Data.Foldable (toList)
 import Data.List (find, foldl')
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe, fromJust, isJust, isNothing)
+import Data.Maybe (fromMaybe, fromJust, isJust)
 import Data.Set (insert, member, fromList)
 import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
@@ -1608,10 +1608,7 @@ cheatActions =
       action "store(address,bytes32,bytes32)" $
         \sig _ _ input -> case decodeStaticArgs 0 3 input of
           [a, slot, new] -> case wordToAddr a of
-            Just a' -> fetchAccount a' $ \_ -> do
-              vm <- get
-              when (isNothing $ Map.lookup a' vm.env.contracts) $ do
-                assign (#env % #contracts % ix a') (emptyContract a') -- TODO: this should be unknown if we're symbolically executing
+            Just a' -> fetchAccount a' $ \_ ->
               modifying (#env % #contracts % ix a' % #storage) (writeStorage slot new)
             Nothing -> vmError (BadCheatCode sig)
           _ -> vmError (BadCheatCode sig),
