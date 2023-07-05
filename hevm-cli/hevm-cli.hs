@@ -2,6 +2,7 @@
 
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Main where
 
@@ -38,6 +39,7 @@ import EVM.Debug (Mode(..))
 import EVM.Expr qualified as Expr
 import EVM.Facts qualified as Facts
 import EVM.Facts.Git qualified as Git
+import GitHash
 import EVM.FeeSchedule qualified as FeeSchedule
 import EVM.Fetch qualified
 import EVM.Format (hexByteString, strip0x, showTraceTree, formatExpr)
@@ -253,11 +255,19 @@ unitTestOptions cmd solvers buildOutput = do
     , ffiAllowed = cmd.ffi
     }
 
+getFullVersion :: [Char]
+getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
+  where
+    gitInfo = $$tGitInfoCwdTry
+    gitVersion = case gitInfo of
+      Right val -> "git rev " <> giBranch val <>  "@" <> giHash val
+      Left _ -> "no git revision present"
+
 main :: IO ()
 main = do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
   case cmd of
-    Version {} -> putStrLn (showVersion Paths.version)
+    Version {} ->putStrLn getFullVersion
     Symbolic {} -> do
       root <- getRoot cmd
       withCurrentDirectory root $ assert cmd
