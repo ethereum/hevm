@@ -1850,6 +1850,7 @@ replaceCode target newCode =
             ((initialContract newCode target) :: Contract)
               { balance = now.balance
               , nonce = now.nonce
+              , storage = now.storage
               }
         RuntimeCode _ ->
           error ("internal error: can't replace code of deployed contract " <> show target)
