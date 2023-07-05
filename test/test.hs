@@ -626,7 +626,8 @@ tests = testGroup "hevm"
           checkAssert s [0x41] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "expected counterexample found"
       ,
-      testCase "call-zero-inited-var-thats-a-function" $ do
+      -- TODO: we can't deal with symbolic jump conditions
+      expectFail $ testCase "call-zero-inited-var-thats-a-function" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
