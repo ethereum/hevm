@@ -253,8 +253,7 @@ executable hevm
     vty,
     stm,
     spawn,
-    optics-core,
-    eventlog2html
+    optics-core
   if os(windows)
     buildable: False
 
