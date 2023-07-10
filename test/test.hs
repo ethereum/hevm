@@ -185,7 +185,6 @@ tests = testGroup "hevm"
         checkEquiv simplified full
     , testProperty "indexWord-equivalence" $ \(src) -> idempotentIOProperty $ do
         idx <- generate (genLit 50)
-        putStrLn $ show idx
         let simplified = Expr.indexWord idx src
             full = IndexWord idx src
         checkEquiv simplified full
