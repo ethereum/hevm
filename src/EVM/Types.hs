@@ -14,7 +14,7 @@ import Data.Aeson
 import Data.Aeson qualified as JSON
 import Data.Aeson.Types qualified as JSON
 import Data.Bifunctor (first)
-import Data.Bits (Bits, FiniteBits, shiftR, shift, shiftL, (.&.), (.|.))
+import Data.Bits (Bits, FiniteBits, shiftR, shift, shiftL, (.&.), (.|.), toIntegralSized)
 import Data.ByteArray qualified as BA
 import Data.Char
 import Data.List (foldl')
@@ -25,6 +25,7 @@ import Data.ByteString.Builder (byteStringHex, toLazyByteString)
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy (toStrict)
 import Data.Data
+import Data.Int (Int64)
 import Data.Word (Word8, Word32, Word64)
 import Data.DoubleWord
 import Data.DoubleWord.TH
@@ -48,6 +49,7 @@ import EVM.FeeSchedule (FeeSchedule (..))
 
 import Text.Regex.TDFA qualified as Regex
 import Text.Read qualified
+import Witch
 
 
 -- Template Haskell --------------------------------------------------------------------------
@@ -57,6 +59,39 @@ import Text.Read qualified
 mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
   [''Typeable, ''Data, ''Generic]
 
+instance From Addr Integer where from = fromIntegral
+instance From Addr W256 where from = fromIntegral
+instance From Int256 Integer where from = fromIntegral
+instance From Nibble Int where from = fromIntegral
+instance From W256 Integer where from = fromIntegral
+instance From Word8 W256 where from = fromIntegral
+instance From Word8 Word256 where from = fromIntegral
+instance From Word32 W256 where from = fromIntegral
+instance From Word32 Word256 where from = fromIntegral
+instance From Word64 W256 where from = fromIntegral
+instance From Word256 Integer where from = fromIntegral
+instance From Word256 W256 where from = fromIntegral
+
+instance TryFrom Int W256 where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom Int Word256 where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom Int256 W256 where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom Integer W256 where tryFrom = maybeTryFrom toIntegralSized
+-- TODO: hevm relies on this behavior
+instance TryFrom W256 Addr where tryFrom = Right . fromIntegral
+instance TryFrom W256 FunctionSelector where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom W256 Int where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom W256 Int64 where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom W256 Int256 where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom W256 Word8 where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom W256 Word32 where tryFrom = maybeTryFrom toIntegralSized
+-- TODO: hevm relies on this behavior
+instance TryFrom W256 Word64 where tryFrom = Right . fromIntegral
+instance TryFrom Word160 Word8 where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom Word256 Int where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom Word256 Int256 where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom Word256 Word8 where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom Word256 Word32 where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom Word512 W256 where tryFrom = maybeTryFrom toIntegralSized
 
 -- Symbolic IR -------------------------------------------------------------------------------------
 
@@ -949,7 +984,7 @@ data GenericOp a
 
 -- | https://docs.soliditylang.org/en/v0.8.19/abi-spec.html#function-selector
 newtype FunctionSelector = FunctionSelector { unFunctionSelector :: Word32 }
-  deriving (Num, Eq, Ord, Real, Enum, Integral)
+  deriving (Bits, Num, Eq, Ord, Real, Enum, Integral)
 instance Show FunctionSelector where show s = "0x" <> showHex s ""
 
 
@@ -1113,10 +1148,10 @@ instance ParseRecord Addr where
 
 -- | A four bit value
 newtype Nibble = Nibble Word8
-  deriving ( Num, Integral, Real, Ord, Enum, Eq, Bounded, Generic)
+  deriving (Num, Integral, Real, Ord, Enum, Eq, Bounded, Generic)
 
 instance Show Nibble where
-  show = (:[]) . intToDigit . num
+  show = (:[]) . intToDigit . fromIntegral
 
 
 -- Conversions -------------------------------------------------------------------------------------
@@ -1156,12 +1191,12 @@ word = W256 . word256
 fromBE :: (Integral a) => ByteString -> a
 fromBE xs = if xs == mempty then 0
   else 256 * fromBE (BS.init xs)
-       + (num $ BS.last xs)
+       + (fromIntegral $ BS.last xs)
 
 asBE :: (Integral a) => a -> ByteString
 asBE 0 = mempty
 asBE x = asBE (x `div` 256)
-  <> BS.pack [num $ x `mod` 256]
+  <> BS.pack [fromIntegral $ x `mod` 256]
 
 word256Bytes :: W256 -> ByteString
 word256Bytes (W256 (Word256 (Word128 a b) (Word128 c d))) =
@@ -1191,22 +1226,18 @@ packNibbles _ = internalError "can't pack odd number of nibbles"
 
 toWord64 :: W256 -> Maybe Word64
 toWord64 n =
-  if n <= num (maxBound :: Word64)
+  if n <= into (maxBound :: Word64)
     then let (W256 (Word256 _ (Word128 _ n'))) = n in Just n'
     else Nothing
 
 toInt :: W256 -> Maybe Int
 toInt n =
-  if n <= num (maxBound :: Int)
+  if n <= unsafeInto (maxBound :: Int)
     then let (W256 (Word256 _ (Word128 _ n'))) = n in Just (fromIntegral n')
     else Nothing
 
 bssToBs :: ByteStringS -> ByteString
 bssToBs (ByteStringS bs) = bs
-
--- | This just overflows silently, and is generally a terrible footgun, should be removed
-num :: (Integral a, Num b) => a -> b
-num = fromIntegral
 
 
 -- Keccak hashing ----------------------------------------------------------------------------------

@@ -21,6 +21,7 @@ import Data.Maybe (fromMaybe, isNothing, fromJust)
 import Data.Word (Word64)
 import GHC.Generics (Generic)
 import Numeric (showHex)
+import Witch (into, unsafeInto)
 
 data AccessListEntry = AccessListEntry {
   address :: Addr,
@@ -107,7 +108,7 @@ sender tx = ecrec v' tx.r  tx.s hash
                else 27 + v
 
 sign :: Integer -> Transaction -> Transaction
-sign sk tx = tx { v = num v, r = r, s = s}
+sign sk tx = tx { v = into v, r = r, s = s}
   where
     hash = keccak' $ signingData tx
     (v, r, s) = EVM.Sign.sign hash sk
@@ -120,7 +121,7 @@ signingData tx =
       else normalData
     AccessListTransaction -> eip2930Data
     EIP1559Transaction -> eip1559Data
-  where v          = fromIntegral tx.v
+  where v          = tx.v
         to'        = case tx.toAddr of
           Just a  -> BS $ word160Bytes a
           Nothing -> BS mempty
@@ -134,13 +135,13 @@ signingData tx =
           ) accessList
         normalData = rlpList [rlpWord256 tx.nonce,
                               rlpWord256 gasPrice,
-                              rlpWord256 (num tx.gasLimit),
+                              rlpWord256 (into tx.gasLimit),
                               to',
                               rlpWord256 tx.value,
                               BS tx.txdata]
         eip155Data = rlpList [rlpWord256 tx.nonce,
                               rlpWord256 gasPrice,
-                              rlpWord256 (num tx.gasLimit),
+                              rlpWord256 (into tx.gasLimit),
                               to',
                               rlpWord256 tx.value,
                               BS tx.txdata,
@@ -152,7 +153,7 @@ signingData tx =
           rlpWord256 tx.nonce,
           rlpWord256 maxPrio,
           rlpWord256 maxFee,
-          rlpWord256 (num tx.gasLimit),
+          rlpWord256 (into tx.gasLimit),
           to',
           rlpWord256 tx.value,
           BS tx.txdata,
@@ -162,7 +163,7 @@ signingData tx =
           rlpWord256 tx.chainId,
           rlpWord256 tx.nonce,
           rlpWord256 gasPrice,
-          rlpWord256 (num tx.gasLimit),
+          rlpWord256 (into tx.gasLimit),
           to',
           rlpWord256 tx.value,
           BS tx.txdata,
@@ -173,7 +174,7 @@ accessListPrice fs al =
     sum (map
       (\ale ->
         fs.g_access_list_address  +
-        (fs.g_access_list_storage_key  * (fromIntegral . length) ale.storageKeys))
+        (fs.g_access_list_storage_key  * (unsafeInto . length) ale.storageKeys))
         al)
 
 txGasCost :: FeeSchedule Word64 -> Transaction -> Word64
@@ -186,8 +187,8 @@ txGasCost fs tx =
         + (accessListPrice fs tx.accessList )
       zeroCost     = fs.g_txdatazero
       nonZeroCost  = fs.g_txdatanonzero
-      initcodeCost = fs.g_initcodeword * num (ceilDiv (BS.length calldata) 32)
-  in baseCost + zeroCost * (fromIntegral zeroBytes) + nonZeroCost * (fromIntegral nonZeroBytes)
+      initcodeCost = fs.g_initcodeword * unsafeInto (ceilDiv (BS.length calldata) 32)
+  in baseCost + zeroCost * (unsafeInto zeroBytes) + nonZeroCost * (unsafeInto nonZeroBytes)
 
 instance FromJSON AccessListEntry where
   parseJSON (JSON.Object val) = do
@@ -236,7 +237,7 @@ newAccount = initialContract $ RuntimeCode (ConcreteRuntimeCode "")
 -- | Increments origin nonce and pays gas deposit
 setupTx :: Addr -> Addr -> W256 -> Word64 -> Map Addr Contract -> Map Addr Contract
 setupTx origin coinbase gasPrice gasLimit prestate =
-  let gasCost = gasPrice * (num gasLimit)
+  let gasCost = gasPrice * (into gasLimit)
   in (Map.adjust ((over #nonce   (+ 1))
                . (over #balance (subtract gasCost))) origin)
     . touchAccount origin
@@ -266,7 +267,7 @@ initTx vm = let
          else touchAccount toAddr)
       $ preState
 
-    resetConcreteStore s = if creation then Map.insert (num toAddr) mempty s else s
+    resetConcreteStore s = if creation then Map.insert (into toAddr) mempty s else s
 
     resetStore (ConcreteStore s) = ConcreteStore (resetConcreteStore s)
     resetStore (SStore a@(Lit _) k v s) = if creation && a == (litAddr toAddr) then resetStore s else (SStore a k v (resetStore s))

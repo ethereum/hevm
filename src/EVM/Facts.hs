@@ -48,6 +48,7 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Ord (comparing)
 import Text.Read (readMaybe)
+import Witch (into)
 
 -- We treat everything as ASCII byte strings because
 -- we only use hex digits (and the letter 'x').
@@ -119,13 +120,13 @@ contractFacts a x store = case view bytecode x of
 
 
 storageFacts :: Addr -> Map W256 (Map W256 W256) -> [Fact]
-storageFacts a store = map f (Map.toList (Map.findWithDefault Map.empty (num a) store))
+storageFacts a store = map f (Map.toList (Map.findWithDefault Map.empty (into a) store))
   where
     f :: (W256, W256) -> Fact
     f (k, v) = StorageFact
       { addr  = a
-      , what  = fromIntegral v
-      , which = fromIntegral k
+      , what  = v
+      , which = k
       }
 
 cacheFacts :: Cache -> Set Fact
@@ -169,9 +170,9 @@ apply2 vm fact =
       when (vm.state.contract == addr) $ EVM.loadContract addr
     StorageFact {..} -> let
         store = vm.cache.fetchedStorage
-        ctrct = Map.findWithDefault Map.empty (num addr) store
+        ctrct = Map.findWithDefault Map.empty (into addr) store
       in
-        vm & set (#cache % #fetchedStorage) (Map.insert (num addr) (Map.insert which what ctrct) store)
+        vm & set (#cache % #fetchedStorage) (Map.insert (into addr) (Map.insert which what ctrct) store)
     BalanceFact {..} ->
       vm & set (#cache % #fetchedContracts % ix addr % #balance) what
     NonceFact   {..} ->

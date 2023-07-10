@@ -25,6 +25,7 @@ import Data.Word (Word64)
 import GHC.Conc (getNumProcessors)
 import Numeric.Natural (Natural)
 import Optics.Core ((&), (%), set)
+import Witch (unsafeInto)
 import Options.Generic as Options
 import Paths_hevm qualified as Paths
 import System.IO (stderr)
@@ -277,7 +278,7 @@ main = do
     Test {} -> do
       root <- getRoot cmd
       withCurrentDirectory root $ do
-        cores <- num <$> getNumProcessors
+        cores <- unsafeInto <$> getNumProcessors
         solver <- getSolver cmd
         withSolvers solver cores cmd.smttimeout $ \solvers -> do
           buildOut <- readBuildOutput root (getProjectType cmd)
@@ -381,7 +382,7 @@ assert cmd = do
   calldata <- buildCalldata cmd
   preState <- symvmFromCommand cmd calldata
   let errCodes = fromMaybe defaultPanicCodes cmd.assertions
-  cores <- num <$> getNumProcessors
+  cores <- unsafeInto <$> getNumProcessors
   let solverCount = fromMaybe cores cmd.numSolvers
   solver <- getSolver cmd
   withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
