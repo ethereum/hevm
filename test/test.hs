@@ -139,10 +139,9 @@ tests = testGroup "hevm"
     , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> ioProperty $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
-    , testProperty "word-simplification" $ \(_ :: Int) -> ioProperty $ do
-        expr <- generate . sized $ genWord 0 -- we want a lower frequency of lits for this test
-        let simplified = Expr.simplify expr
-        checkEquiv expr simplified
+    , testProperty "word-simplification" $ \((WordSimplifyExpr expr) :: WordSimplifyExpr(Expr EWord)) -> ioProperty $ do
+          let simplified = Expr.simplify expr
+          checkEquiv expr simplified
     , testProperty "readStorage-equivalance" $ \(store, addr, slot) -> ioProperty $ do
         let simplified = Expr.readStorage' addr slot store
             full = SLoad addr slot store
@@ -2436,6 +2435,7 @@ instance Arbitrary (Expr Buf) where
 instance Arbitrary (Expr End) where
   arbitrary = sized genEnd
 
+-- LitOnly
 newtype LitOnly a = LitOnly a
   deriving (Show, Eq)
 
@@ -2447,6 +2447,14 @@ instance Arbitrary (LitOnly (Expr EWord)) where
 
 instance Arbitrary (LitOnly (Expr Buf)) where
   arbitrary = LitOnly . ConcreteBuf <$> arbitrary
+
+-- WordSimplifyExpr
+newtype WordSimplifyExpr a = WordSimplifyExpr a
+  deriving (Show, Eq)
+
+instance Arbitrary (WordSimplifyExpr (Expr EWord)) where
+  arbitrary = do
+    fmap WordSimplifyExpr . sized $ genWord 0
 
 genByte :: Int -> Gen (Expr Byte)
 genByte 0 = fmap LitByte arbitrary
