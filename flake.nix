@@ -3,7 +3,7 @@
 
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
-    nixpkgs.url = "github:nixos/nixpkgs";
+    nixpkgs.url = "github:nixos/nixpkgs/haskell-updates";
     foundry.url = "github:shazow/foundry.nix/monthly";
     flake-compat = {
       url = "github:edolstra/flake-compat";
