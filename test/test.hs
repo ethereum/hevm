@@ -155,7 +155,7 @@ tests = testGroup "hevm"
         let simplified = Expr.readWord idx buf
             full = ReadWord idx buf
         checkEquiv simplified full
-    , testProperty "writeWord-equivalance" $ \(idx, val, (GenWriteWordBuf buf):: GenWriteWordBuf (Expr Buf)) -> ioProperty $ do
+    , testProperty "writeWord-equivalance" $ \(idx, val, (GenWriteWordBuf buf) :: GenWriteWordBuf (Expr Buf)) -> ioProperty $ do
         let simplified = Expr.writeWord idx val buf
             full = WriteWord idx val buf
         checkEquiv simplified full
@@ -168,11 +168,7 @@ tests = testGroup "hevm"
             full = ReadByte idx buf
         checkEquiv simplified full
     -- we currently only simplify concrete writes over concrete buffers so that's what we test here
-    , testProperty "writeByte-equivalance" $ \(LitOnly val, LitOnly buf) -> ioProperty $ do
-        idx <- generate $ frequency
-          [ (10, genLit (fromIntegral (1_000_000 :: Int)))  -- can never overflow an Int
-          , (1, fmap Lit arbitrary)                         -- can overflow an Int
-          ]
+    , testProperty "writeByte-equivalance" $ \(LitOnly val, LitOnly buf, GenWriteByteIdx (idx) :: GenWriteByteIdx (Expr EWord)) -> ioProperty $ do
         let simplified = Expr.writeByte idx val buf
             full = WriteByte idx val buf
         checkEquiv simplified full
@@ -2479,6 +2475,17 @@ instance Arbitrary (GenWriteStorageExpr (Expr EWord, Expr EWord, Expr Storage)) 
           ]
     store <- mkStore
     pure $ GenWriteStorageExpr (addr, slot, store)
+
+-- GenWriteByteIdx
+newtype GenWriteByteIdx a = GenWriteByteIdx a
+  deriving (Show, Eq)
+
+instance Arbitrary (GenWriteByteIdx (Expr EWord)) where
+  arbitrary = do
+    -- 1st: can never overflow an Int
+    -- 2nd: can overflow an Int
+    let mkIdx = frequency [ (10, genLit (fromIntegral (1_000_000 :: Int))) , (1, fmap Lit arbitrary) ]
+    fmap GenWriteByteIdx mkIdx
 
 genByte :: Int -> Gen (Expr Byte)
 genByte 0 = fmap LitByte arbitrary
