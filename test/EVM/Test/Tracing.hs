@@ -120,7 +120,6 @@ data EVMToolOutput =
   EVMToolOutput
     { output :: ByteStringS
     , gasUsed :: W256
-    , time :: Integer
     } deriving (Generic, Show)
 
 instance JSON.FromJSON EVMToolOutput
