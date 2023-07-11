@@ -148,7 +148,6 @@ tests = testGroup "hevm"
             full = SLoad addr slot store
         checkEquiv simplified full
     , testProperty "writeStorage-equivalance" $ \(val, GenWriteStorageExpr (addr, slot, store)) -> ioProperty $ do
-        putStrLn $ "e: " <> show store <> " a: " <> show addr <> " s: " <> show slot
         let simplified = Expr.writeStorage addr slot val store
             full = SStore addr slot val store
         checkEquiv simplified full
