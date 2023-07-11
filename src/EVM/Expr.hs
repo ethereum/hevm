@@ -422,6 +422,9 @@ bufLengthEnv env useEnv buf = go (Lit 0) buf
 
 -- | If a buffer has a concrete prefix, we return it's length here
 concPrefix :: Expr Buf -> Maybe Integer
+concPrefix (WriteWord (Lit srcOff) _ (ConcreteBuf ""))
+  | srcOff == 0 = Nothing
+  | otherwise = Just (toInteger srcOff)
 concPrefix (CopySlice (Lit srcOff) (Lit _) (Lit _) src (ConcreteBuf "")) = do
   sz <- go 0 src
   pure . num $ (num sz) - srcOff
