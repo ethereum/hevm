@@ -140,7 +140,7 @@ tests = testGroup "hevm"
     , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> ioProperty $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
-    , testProperty "word-simplification" $ \((GenWordSimplifyExpr expr) :: GenWordSimplifyExpr(Expr EWord)) -> ioProperty $ do
+    , testProperty "word-simplification" $ \(GenWordSimplifyExpr expr) -> ioProperty $ do
           let simplified = Expr.simplify expr
           checkEquiv expr simplified
     , testProperty "readStorage-equivalance" $ \(store, addr, slot) -> ioProperty $ do
