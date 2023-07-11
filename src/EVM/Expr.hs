@@ -19,7 +19,7 @@ import Data.Vector qualified as V
 import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
-import Witch (unsafeInto, into)
+import Witch (unsafeInto, into, tryFrom)
 
 import Optics.Core
 
@@ -532,9 +532,11 @@ simplifyReads = \case
 stripWrites :: W256 -> W256 -> Expr Buf -> Expr Buf
 stripWrites off size = \case
   AbstractBuf s -> AbstractBuf s
-  ConcreteBuf b -> ConcreteBuf $ if off <= off + size
-                                 then BS.take (unsafeInto $ off+size) b
-                                 else b
+  ConcreteBuf b -> ConcreteBuf $ case off <= off + size of
+                                    True -> case tryFrom @W256 (off + size) of
+                                      Right n -> BS.take n b
+                                      Left _ -> b
+                                    False -> b
   WriteByte (Lit idx) v prev
     -> if idx - off >= size
        then stripWrites off size prev
