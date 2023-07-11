@@ -157,6 +157,8 @@ assertProps ps =
   <> SMT2 [""] mempty
   <> (declareConcreteStores concreteStores)
   <> SMT2 [""] mempty
+  <> (declareAddrs addresses)
+  <> SMT2 [""] mempty
   <> (declareBufs ps_elim bufs stores)
   <> SMT2 [""] mempty
   <> (declareVars . nubOrd $ foldl (<>) [] allVars)
@@ -186,6 +188,7 @@ assertProps ps =
     storageReads = Map.unionsWith (<>) $ fmap findStorageReads ps
     concreteStores = Set.toList $ Set.unions (fmap referencedConcreteStores ps)
     abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores ps)
+    addresses = Set.toList $ Set.unions (fmap referencedWAddrs ps)
 
     keccakAssumes
       = SMT2 ["; keccak assumptions"] mempty
@@ -207,6 +210,13 @@ referencedAbstractStores term = foldTerm go mempty term
   where
     go = \case
       AbstractStore s -> Set.singleton (storeName s)
+      _ -> mempty
+
+referencedWAddrs :: TraversableTerm a => a -> Set Builder
+referencedWAddrs term = foldTerm go mempty term
+  where
+    go = \case
+      WAddr(a@(SymAddr _)) -> Set.singleton (formatEAddr a)
       _ -> mempty
 
 referencedBufsGo :: Expr a -> [Builder]
@@ -353,6 +363,12 @@ declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
     cexvars = (mempty :: CexVars){ calldata = fmap toLazyText names }
 
+-- Given a list of variable names, create an SMT2 object with the variables declared
+declareAddrs :: [Builder] -> SMT2
+declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) cexvars
+  where
+    declare n = "(declare-const " <> n <> " Addr)"
+    cexvars = (mempty :: CexVars){ calldata = fmap toLazyText names }
 
 declareFrameContext :: [(Builder, [Prop])] -> SMT2
 declareFrameContext names = SMT2 (["; frame context"] <> concatMap declare names) cexvars
@@ -389,6 +405,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   ; types
   (define-sort Byte () (_ BitVec 8))
   (define-sort Word () (_ BitVec 256))
+  (define-sort Addr () (_ BitVec 160))
   (define-sort Buf () (Array Word Byte))
 
   ; slot -> value
@@ -697,6 +714,8 @@ exprToSMT = \case
   ChainId -> "chainid"
   BaseFee -> "basefee"
 
+  WAddr(a@(SymAddr _)) -> "(concat (_ bv0 96)" `sp` formatEAddr a `sp` ")"
+
   LitByte b -> fromLazyText $ "(_ bv" <> T.pack (show (num b :: Integer)) <> " 8)"
   IndexWord idx w -> case idx of
     Lit n -> if n >= 0 && n < 32
@@ -852,8 +871,8 @@ storeName a = fromString ("baseStore_") <> formatEAddr a
 
 formatEAddr :: Expr EAddr -> Builder
 formatEAddr = \case
-  LitAddr a -> fromString (show a)
-  SymAddr a -> fromString (show a)
+  LitAddr a -> fromString ("litaddr_" <> show a)
+  SymAddr a -> fromString ("symaddr_" <> show a)
   GVar _ -> error "Internal Error: unexpected GVar"
 
 
