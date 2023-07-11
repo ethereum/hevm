@@ -126,6 +126,9 @@ tests = testGroup "hevm"
         b <- checkEquiv e (Expr.simplify e)
         assertBool "Simplifier failed" b
     , testCase "stripWrites-overflow" $ do
+        -- below eventually boils down to
+        -- unsafeInto (0xf0000000000000000000000000000000000000000000000000000000000000+1) :: Int
+        -- which failed before
         let
           a = ReadByte (Lit 0xf0000000000000000000000000000000000000000000000000000000000000) (WriteByte (And (SHA256 (ConcreteBuf "")) (Lit 0x1)) (LitByte 0) (ConcreteBuf ""))
           b = Expr.simplify a
