@@ -291,26 +291,26 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
 -- | Reads all solc ouput json files found under the provided filepath and returns them merged into a BuildOutput
 readBuildOutput :: FilePath -> ProjectType -> IO (Either String BuildOutput)
 readBuildOutput root DappTools = do
-  let outDir = root <> "/out/"
+  let outDir = root </> "out"
   jsons <- findJsonFiles outDir
   case jsons of
-    [x] -> readSolc DappTools root (outDir <> x)
+    [x] -> readSolc DappTools root (outDir </> x)
     [] -> pure . Left $ "no json files found in: " <> outDir
     _ -> pure . Left $ "multiple json files found in: " <> outDir
 readBuildOutput root CombinedJSON = do
-  let outDir = root <> "/out/"
+  let outDir = root </> "out"
   jsons <- findJsonFiles outDir
   case jsons of
-    [x] -> readSolc CombinedJSON root (outDir <> x)
+    [x] -> readSolc CombinedJSON root (outDir </> x)
     [] -> pure . Left $ "no json files found in: " <> outDir
     _ -> pure . Left $ "multiple json files found in: " <> outDir
 readBuildOutput root Foundry = do
-  let outDir = root <> "/out/"
-  jsons <- findJsonFiles (root <> "/out")
+  let outDir = root </> "out"
+  jsons <- findJsonFiles outDir
   case (filterMetadata jsons) of
     [] -> pure . Left $ "no json files found in: " <> outDir
     js -> do
-      outputs <- sequence <$> mapM (readSolc Foundry root) ((fmap ((<>) (outDir))) js)
+      outputs <- sequence <$> mapM (readSolc Foundry root) ((fmap ((</>) (outDir))) js)
       pure . (fmap mconcat) $ outputs
 
 -- | Finds all json files under the provided filepath, searches recursively
@@ -326,7 +326,7 @@ makeSourceCache root (Sources sources) (Asts asts) = do
   files <- Map.fromList <$> forM (Map.toList sources) (\x@(SrcFile id' fp, _) -> do
       contents <- case x of
         (_,  Just content) -> pure content
-        (SrcFile _ _, Nothing) -> BS.readFile (root <> "/" <> fp)
+        (SrcFile _ _, Nothing) -> BS.readFile (root </> fp)
       pure (id', (fp, contents))
     )
   pure $! SourceCache
