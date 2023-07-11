@@ -187,17 +187,17 @@ getModel inst cexvars = do
     shrinkBuf buf hint = do
       let encBound = "(_ bv" <> (T.pack $ show (num hint :: Integer)) <> " 256)"
       sat <- liftIO $ do
-        sendLine' inst "(push)"
-        sendLine' inst $ "(assert (bvule " <> buf <> "_length " <> encBound <> "))"
+        checkCommand inst "(push)"
+        checkCommand inst $ "(assert (bvule " <> buf <> "_length " <> encBound <> "))"
         sendLine inst "(check-sat)"
       case sat of
         "sat" -> do
           model <- liftIO getRaw
           put model
         "unsat" -> do
-          liftIO $ sendLine' inst "(pop)"
+          liftIO $ checkCommand inst "(pop)"
           shrinkBuf buf (if hint == 0 then hint + 1 else hint * 2)
-        _ -> error "TODO: HANDLE ERRORS"
+        e -> error $ "Internal Error: Unexpected solver output: " <> (T.unpack e)
 
     -- Collapses the abstract description of a models buffers down to a bytestring
     mkConcrete :: SMTCex -> SMTCex
@@ -247,7 +247,7 @@ spawnSolver solver timeout = do
     CVC5 -> pure solverInstance
     _ -> do
       _ <- sendLine' solverInstance $ "(set-option :timeout " <> mkTimeout timeout <> ")"
-      _ <- sendLine' solverInstance "(set-option :print-success true)"
+      _ <- sendLine solverInstance "(set-option :print-success true)"
       pure solverInstance
 
 -- | Cleanly shutdown a running solver instnace
@@ -266,6 +266,13 @@ sendScript solver (SMT2 cmds _) = do
       case out of
         "success" -> go cs
         e -> pure $ Left $ "Solver returned an error:\n" <> e <> "\nwhile sending the following line: " <> c
+
+checkCommand :: SolverInstance -> Text -> IO ()
+checkCommand inst cmd = do
+  res <- sendCommand inst cmd
+  case res of
+    "success" -> pure ()
+    _ -> error $ "Internal Error: Unexpected solver output: " <> (T.unpack res)
 
 -- | Sends a single command to the solver, returns the first available line from the output buffer
 sendCommand :: SolverInstance -> Text -> IO Text
