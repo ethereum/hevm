@@ -191,13 +191,15 @@ abstractVM
   -> ByteString
   -> Maybe Precondition
   -> Expr Storage
+  -> Bool
   -> VM
-abstractVM cd contractCode maybepre store = finalVm
+abstractVM cd contractCode maybepre store create = finalVm
   where
     caller = Caller 0
     value = CallValue 0
-    code = RuntimeCode (ConcreteRuntimeCode contractCode)
-    vm' = loadSymVM code store caller value cd
+    code = if create then InitCode contractCode mempty
+           else RuntimeCode (ConcreteRuntimeCode contractCode)
+    vm' = loadSymVM code store caller value cd create
     precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm']
@@ -209,8 +211,9 @@ loadSymVM
   -> Expr EWord
   -> Expr EWord
   -> (Expr Buf, [Prop])
+  -> Bool
   -> VM
-loadSymVM x initStore addr callvalue cd =
+loadSymVM x initStore addr callvalue cd create =
   (makeVm $ VMOpts
     { contract = initialContract x
     , calldata = cd
@@ -232,7 +235,7 @@ loadSymVM x initStore addr callvalue cd =
     , maxCodeSize = 0xffffffff
     , schedule = FeeSchedule.berlin
     , chainId = 1
-    , create = False
+    , create = create
     , txAccessList = mempty
     , allowFFI = False
     }) & set (#env % #contracts % at (createAddress ethrunAddress 1))
@@ -428,7 +431,7 @@ verifyContract
   -> Maybe Postcondition
   -> IO (Expr End, [VerifyResult])
 verifyContract solvers theCode signature' concreteArgs opts initStore maybepre maybepost =
-  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre initStore
+  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre initStore False
   in verify solvers opts preState maybepost
 
 -- | Stepper that parses the result of Stepper.runFully into an Expr End
@@ -636,7 +639,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
     getBranches bs = do
       let
         bytecode = if BS.null bs then BS.pack [0] else bs
-        prestate = abstractVM calldata bytecode Nothing AbstractStore
+        prestate = abstractVM calldata bytecode Nothing AbstractStore False
       expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl
