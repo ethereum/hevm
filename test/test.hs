@@ -156,7 +156,7 @@ tests = testGroup "hevm"
         let simplified = Expr.readWord idx buf
             full = ReadWord idx buf
         checkEquiv simplified full
-    , testProperty "writeWord-equivalance" $ \(idx, val, (GenWriteWordBuf buf) :: GenWriteWordBuf (Expr Buf)) -> ioProperty $ do
+    , testProperty "writeWord-equivalance" $ \(idx, val, GenWriteWordBuf buf) -> ioProperty $ do
         let simplified = Expr.writeWord idx val buf
             full = WriteWord idx val buf
         checkEquiv simplified full
