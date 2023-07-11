@@ -5,6 +5,8 @@ module Main where
 
 import Prelude hiding (LT, GT)
 
+import GHC.TypeLits
+import Data.Proxy
 import Control.Monad.State.Strict
 import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
@@ -23,7 +25,6 @@ import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Typeable
 import Data.Vector qualified as Vector
 import GHC.Conc (getNumProcessors)
-import Numeric.Natural (Natural)
 import System.Directory
 import System.Environment
 import Test.Tasty
@@ -172,20 +173,17 @@ tests = testGroup "hevm"
         let simplified = Expr.writeByte idx val buf
             full = WriteByte idx val buf
         checkEquiv simplified full
-    , testProperty "copySlice-equivalance" $ \(srcOff, GenCopySliceBuf src :: GenCopySliceBuf (Expr Buf), GenCopySliceBuf dst :: GenCopySliceBuf (Expr Buf)) -> ioProperty $ do
+    , testProperty "copySlice-equivalance" $ \(srcOff, GenCopySliceBuf src :: GenCopySliceBuf (Expr Buf), GenCopySliceBuf dst :: GenCopySliceBuf (Expr Buf), LitWord @300 size) -> ioProperty $ do
         -- we bias buffers to be concrete more often than not
-        size <- generate (genLit 300)
         dstOff <- generate (maybeBoundedLit 100_000)
         let simplified = Expr.copySlice srcOff dstOff size src dst
             full = CopySlice srcOff dstOff size src dst
         checkEquiv simplified full
-    , testProperty "indexWord-equivalence" $ \(src) -> idempotentIOProperty $ do
-        idx <- generate (genLit 50)
+    , testProperty "indexWord-equivalence" $ \(src, LitWord @50 idx) -> ioProperty $ do
         let simplified = Expr.indexWord idx src
             full = IndexWord idx src
         checkEquiv simplified full
-    , testProperty "indexWord-mask-equivalence" $ \(src :: Expr EWord) -> ioProperty $ do
-        idx <- generate (genLit 35)
+    , testProperty "indexWord-mask-equivalence" $ \(src :: Expr EWord, LitWord @35 idx) -> ioProperty $ do
         mask <- generate $ do
           pow <- arbitrary :: Gen Int
           frequency
@@ -2401,6 +2399,14 @@ instance Arbitrary (Expr End) where
 -- LitOnly
 newtype LitOnly a = LitOnly a
   deriving (Show, Eq)
+
+newtype LitWord (sz :: Nat) = LitWord (Expr EWord)
+  deriving (Show)
+
+instance (KnownNat sz) => Arbitrary (LitWord sz) where
+  arbitrary = LitWord <$> genLit (fromInteger v)
+    where
+      v = natVal (Proxy @sz)
 
 instance Arbitrary (LitOnly (Expr Byte)) where
   arbitrary = LitOnly . LitByte <$> arbitrary
