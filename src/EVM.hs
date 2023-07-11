@@ -2481,7 +2481,7 @@ freshSymAddr = do
 
 isPrecompileAddr :: Expr EAddr -> Bool
 isPrecompileAddr = \case
-  LitAddr a -> 0x0 <= a && a <= 0x09
+  LitAddr a -> 0x0 < a && a <= 0x09
   SymAddr _ -> False
   GVar _ -> error "Internal Error: unexpected GVar"
 
