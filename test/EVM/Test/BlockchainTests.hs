@@ -35,6 +35,7 @@ import Witherable (Filterable, catMaybes)
 import Test.Tasty
 import Test.Tasty.ExpectedFailure
 import Test.Tasty.HUnit
+import Witch (into, unsafeInto)
 
 type Storage = Map W256 W256
 
@@ -144,7 +145,7 @@ debugVMTest file test = do
   Right allTests <- parseBCSuite <$> LazyByteString.readFile (repo </> file)
   let x = case filter (\(name, _) -> name == test) $ Map.toList allTests of
         [(_, x')] -> x'
-        _ -> error "test not found"
+        _ -> internalError "test not found"
   let vm0 = vmForCase x
   result <- withSolvers Z3 0 Nothing $ \solvers ->
     TTY.runFromVM solvers Nothing Nothing emptyDapp vm0
@@ -214,7 +215,7 @@ checkExpectation diff x vm = do
     storageEqual = s1 == s2
     codeEqual = case (c1 ^. #contractcode, c2 ^. #contractcode) of
       (RuntimeCode a', RuntimeCode b') -> a' == b'
-      _ -> error "unexpected code"
+      _ -> internalError "unexpected code"
 
 checkExpectedContracts :: VM -> Map Addr (Contract, Storage) -> (Bool, Bool, Bool, Bool, Bool)
 checkExpectedContracts vm expected =
@@ -234,7 +235,7 @@ checkExpectedContracts vm expected =
       EmptyStore -> mempty
       AbstractStore -> mempty -- error "AbstractStore, should this be handled?"
       SStore {} -> mempty -- error "SStore, should this be handled?"
-      GVar _ -> error "unexpected global variable"
+      GVar _ -> internalError "unexpected global variable"
 
 clearStorage :: (Contract, Storage) -> (Contract, Storage)
 clearStorage (c, _) = (c, mempty)
@@ -358,7 +359,7 @@ fromBlockchainCase' block tx preState postState =
          , caller        = litAddr origin
          , initialStorage = EmptyStore
          , origin        = origin
-         , gas           = tx.gasLimit  - fromIntegral (txGasCost feeSchedule tx)
+         , gas           = tx.gasLimit - txGasCost feeSchedule tx
          , baseFee       = block.baseFee
          , priorityFee   = priorityFee tx block.baseFee
          , gaslimit      = tx.gasLimit
@@ -417,7 +418,7 @@ validateTx tx block cs = do
   origin        <- sender tx
   originBalance <- (view #balance) <$> view (at origin) cs'
   originNonce   <- (view #nonce)   <$> view (at origin) cs'
-  let gasDeposit = (effectiveprice tx block.baseFee) * (num tx.gasLimit)
+  let gasDeposit = (effectiveprice tx block.baseFee) * (into tx.gasLimit)
   if gasDeposit + tx.value <= originBalance
     && tx.nonce == originNonce && block.baseFee <= maxBaseFee tx
   then Just ()
@@ -437,7 +438,7 @@ checkTx tx block prestate = do
                         RuntimeCode (ConcreteRuntimeCode b) -> not (BS.null b)
                         _ -> True
       badNonce = prevNonce /= 0
-      initCodeSizeExceeded = BS.length tx.txdata > (num maxCodeSize * 2)
+      initCodeSizeExceeded = BS.length tx.txdata > (unsafeInto maxCodeSize * 2)
   if isCreate && (badNonce || nonEmptyAccount || initCodeSizeExceeded)
   then mzero
   else
@@ -448,7 +449,7 @@ vmForCase x =
   let
     a = x.checkContracts
     cs = Map.map fst a
-    st = Map.mapKeys num $ Map.map snd a
+    st = Map.mapKeys into $ Map.map snd a
     vm = makeVm x.vmOpts
       & set (#env % #contracts) cs
       & set (#env % #storage) (ConcreteStore st)

@@ -30,6 +30,7 @@ import EVM.SymExec
 import EVM.Types
 import EVM.UnitTest
 import GHC.Conc
+import Witch (unsafeInto)
 
 checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO ()
 checkEquiv a b = withSolvers Z3 1 Nothing $ \s -> do
@@ -40,7 +41,7 @@ checkEquiv a b = withSolvers Z3 1 Nothing $ \s -> do
 runDappTest :: FilePath -> IO ()
 runDappTest root =
   withCurrentDirectory root $ do
-    cores <- num <$> getNumProcessors
+    cores <- unsafeInto <$> getNumProcessors
     let testFile = root <> "/out/dapp.sol.json"
     Right (BuildOutput contracts _) <- readSolc DappTools root testFile
     withSolvers Z3 cores Nothing $ \solvers -> do
@@ -51,7 +52,7 @@ runDappTest root =
 testOpts :: SolverGroup -> FilePath -> FilePath -> IO UnitTestOptions
 testOpts solvers root testFile = do
   srcInfo <- readSolc DappTools root testFile >>= \case
-    Left e -> error e
+    Left e -> internalError e
     Right out ->
       pure $ dappInfo root out
 

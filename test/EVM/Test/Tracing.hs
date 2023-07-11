@@ -38,6 +38,7 @@ import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty (testGroup, TestTree)
 import Test.Tasty.HUnit (assertEqual)
 import Test.Tasty.QuickCheck hiding (Failure, Success)
+import Witch (into)
 
 import Optics.Core hiding (pre)
 import Optics.State
@@ -110,7 +111,7 @@ instance JSON.FromJSON EVMToolTrace where
     <*> v .:? "error"
 
 mkBlockHash:: Int -> Expr 'EWord
-mkBlockHash x = (num x :: Integer) & show & Char8.pack & EVM.Types.keccak' & Lit
+mkBlockHash x = (into x :: Integer) & show & Char8.pack & EVM.Types.keccak' & Lit
 
 blockHashesDefault :: Map.Map Int W256
 blockHashesDefault = Map.fromList [(x, forceLit $ mkBlockHash x) | x<- [1..256]]
@@ -119,7 +120,6 @@ data EVMToolOutput =
   EVMToolOutput
     { output :: ByteStringS
     , gasUsed :: W256
-    , time :: Integer
     } deriving (Generic, Show)
 
 instance JSON.FromJSON EVMToolOutput
@@ -157,7 +157,7 @@ instance JSON.ToJSON EVMToolEnv where
                 tstamp :: W256
                 tstamp = case (b.timestamp) of
                               Lit a -> a
-                              _ -> error "Timestamp needs to be a Lit"
+                              _ -> internalError "Timestamp needs to be a Lit"
 
 emptyEvmToolEnv :: EVMToolEnv
 emptyEvmToolEnv = EVMToolEnv { coinbase = 0
@@ -254,7 +254,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
     contrLits = assemble $ getOpData contr
     toW8fromLitB :: Expr 'Byte -> Word8
     toW8fromLitB (LitByte a) = a
-    toW8fromLitB _ = error "Cannot convert non-litB"
+    toW8fromLitB _ = internalError "Cannot convert non-litB"
 
     bitcode = BS.pack . Vector.toList $ toW8fromLitB <$> contrLits
     contrAlloc = EVMToolAlloc{ balance = 0xa493d65e20984bc
@@ -475,7 +475,7 @@ vmtrace vm =
   let
     memsize = vm.state.memorySize
   in VMTrace { tracePc = vm.state.pc
-             , traceOp = num $ getOp vm
+             , traceOp = into $ getOp vm
              , traceGas = vm.state.gas
              , traceMemSize = memsize
              -- increment to match geth format
@@ -514,7 +514,7 @@ vmres vm =
     gasUsed' = vm.tx.gaslimit - vm.state.gas
     res = case vm.result of
       Just (VMSuccess (ConcreteBuf b)) -> (ByteStringS b)
-      Just (VMSuccess x) -> error $ "unhandled: " <> (show x)
+      Just (VMSuccess x) -> internalError $ "unhandled: " <> (show x)
       Just (VMFailure (Revert (ConcreteBuf b))) -> (ByteStringS b)
       Just (VMFailure _) -> ByteStringS mempty
       _ -> ByteStringS mempty
@@ -577,7 +577,7 @@ interpretWithTrace fetcher =
             m <- liftIO (fetcher q)
             zoom _1 (State.state (runState m)) >> interpretWithTrace fetcher (k ())
         Stepper.Ask _ ->
-          error "cannot make choice in this interpreter"
+          internalError "cannot make choice in this interpreter"
         Stepper.IOAct q ->
           zoom _1 (StateT (runStateT q)) >>= interpretWithTrace fetcher . k
         Stepper.EVM m ->
@@ -800,9 +800,9 @@ getOp vm =
   let pcpos  = vm ^. #state % #pc
       code' = vm ^. #state % #code
       xs = case code' of
-        InitCode _ _ -> error "InitCode instead of RuntimeCode"
+        InitCode _ _ -> internalError "InitCode instead of RuntimeCode"
         RuntimeCode (ConcreteRuntimeCode xs') -> BS.drop pcpos xs'
-        RuntimeCode (SymbolicRuntimeCode _) -> error "RuntimeCode is symbolic"
+        RuntimeCode (SymbolicRuntimeCode _) -> internalError "RuntimeCode is symbolic"
   in if xs == BS.empty then 0
                        else BS.head xs
 

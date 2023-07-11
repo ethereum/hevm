@@ -15,6 +15,7 @@ import EVM.Types
 import Data.Vector qualified as V
 import Data.Word (Word8)
 import Numeric (showHex)
+import Witch (into)
 
 intToOpName:: Int -> String
 intToOpName a =
@@ -262,7 +263,7 @@ opString (i, o) = let showPc x | x < 0x10 = '0' : showHex x ""
 
 readOp :: Word8 -> [Expr Byte] -> Op
 readOp x xs =
-  (\n -> Expr.readBytes (fromIntegral n) (Lit 0) (Expr.fromList $ V.fromList xs)) <$> getOp x
+  (\n -> Expr.readBytes (into n) (Lit 0) (Expr.fromList $ V.fromList xs)) <$> getOp x
 
 getOp :: Word8 -> GenericOp Word8
 getOp x | x >= 0x80 && x <= 0x8f = OpDup (x - 0x80 + 1)

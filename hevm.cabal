@@ -2,7 +2,7 @@ cabal-version: 3.0
 name:
   hevm
 version:
-  0.51.1
+  0.51.2
 synopsis:
   Ethereum virtual machine evaluator
 description:
@@ -150,17 +150,17 @@ library
     Decimal                           >= 0.5.1 && < 0.6,
     containers                        >= 0.6.0 && < 0.7,
     deepseq                           >= 1.4.4 && < 1.5,
-    time                              >= 1.11.1.1 && < 1.12,
+    time                              >= 1.11 && < 1.14,
     transformers                      >= 0.5.6 && < 0.6,
     tree-view                         >= 0.5 && < 0.6,
     abstract-par                      >= 0.3.3 && < 0.4,
-    aeson                             >= 2.0.0 && < 2.1,
+    aeson                             >= 2.0.0 && < 2.2,
     bytestring                        >= 0.11.3.1 && < 0.12,
     scientific                        >= 0.3.6 && < 0.4,
     binary                            >= 0.8.6 && < 0.9,
-    text                              >= 1.2.3 && < 1.3,
+    text                              >= 1.2.3 && < 2.1,
     unordered-containers              >= 0.2.10 && < 0.3,
-    vector                            >= 0.12.1 && < 0.13,
+    vector                            >= 0.12.1 && < 0.14,
     ansi-wl-pprint                    >= 0.6.9 && < 0.7,
     base16                            >= 0.3.2.0 && < 0.3.3.0,
     megaparsec                        >= 9.0.0 && < 10.0,
@@ -198,11 +198,12 @@ library
     spool                             >= 0.1 && < 0.2,
     stm                               >= 2.5.0 && < 2.6.0,
     spawn                             >= 0.3 && < 0.4,
-    filepattern                       >= 0.1.2 && < 0.2
+    filepattern                       >= 0.1.2 && < 0.2,
+    witch                             >= 1.1 && < 1.3
   if !os(windows)
     build-depends:
-      brick                           >= 1.4 && < 1.5,
-      vty                             >= 5.37 && < 5.38
+      brick                           >= 1.4 && < 2.0,
+      vty                             >= 5.37 && < 5.39
   hs-source-dirs:
     src
 
@@ -253,7 +254,9 @@ executable hevm
     vty,
     stm,
     spawn,
-    optics-core
+    optics-core,
+    githash                       >= 0.1.6 && < 0.2,
+    witch
   if os(windows)
     buildable: False
 
@@ -305,7 +308,8 @@ common test-base
     smt2-parser >= 0.1.0.1,
     operational,
     optics-core,
-    optics-extra
+    optics-extra,
+    witch
 
 library test-utils
   import:

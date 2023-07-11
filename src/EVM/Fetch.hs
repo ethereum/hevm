@@ -125,7 +125,7 @@ parseBlock j = do
      (Just p, _, _) -> p
      (Nothing, Just mh, Just 0x0) -> mh
      (Nothing, Just _, Just d) -> d
-     _ -> error "Internal Error: block contains both difficulty and prevRandao"
+     _ -> internalError "block contains both difficulty and prevRandao"
   -- default codesize, default gas limit, default feescedule
   pure $ Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff FeeSchedule.berlin
 
@@ -200,7 +200,7 @@ oracle solvers info q = do
           (_, stdout', _) <- readProcessWithExitCode cmd args ""
           pure . continue . encodeAbiValue $
             AbiTuple (RegularVector.fromList [ AbiBytesDynamic . hexText . pack $ stdout'])
-       _ -> error (show vals)
+       _ -> internalError (show vals)
 
     PleaseAskSMT branchcondition pathconditions continue -> do
          let pathconds = foldl' PAnd (PBool True) pathconditions
@@ -215,16 +215,16 @@ oracle solvers info q = do
                     Just (n, url) -> fetchContractFrom n url addr
       case contract of
         Just x -> pure $ continue x
-        Nothing -> error ("oracle error: " ++ show q)
+        Nothing -> internalError $ "oracle error: " ++ show q
 
     PleaseFetchSlot addr slot continue ->
       case info of
         Nothing -> pure (continue 0)
         Just (n, url) ->
-         fetchSlotFrom n url addr (fromIntegral slot) >>= \case
+         fetchSlotFrom n url addr slot >>= \case
            Just x  -> pure (continue x)
            Nothing ->
-             error ("oracle error: " ++ show q)
+             internalError $ "oracle error: " ++ show q
 
 type Fetcher = Query -> IO (EVM ())
 
@@ -251,4 +251,4 @@ checkBranch solvers branchcondition pathconditions = do
         Error e -> error $ "Internal Error: SMT Solver pureed with an error: " <> T.unpack e
     -- If the query times out, we simply explore both paths
     EVM.Solvers.Unknown -> pure EVM.Types.Unknown
-    Error e -> error $ "Internal Error: SMT Solver pureed with an error: " <> T.unpack e
+    Error e -> internalError $ "SMT Solver pureed with an error: " <> T.unpack e

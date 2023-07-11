@@ -12,6 +12,7 @@ import Data.List (stripPrefix)
 import Data.Map qualified as Map
 import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
+import Witch (into)
 
 data KV k v a
   = Put k v a
@@ -102,7 +103,7 @@ getVal path (Shortcut nodePath ref) =
     _ -> pure BS.empty
 
 getVal [] (Full _ val) = pure val
-getVal (p:ps) (Full refs _) = lookupPath (refs `Seq.index` (num p)) ps
+getVal (p:ps) (Full refs _) = lookupPath (refs `Seq.index` (into p)) ps
 
 emptyRef :: Ref
 emptyRef = Literal Empty
@@ -127,14 +128,14 @@ update :: Node -> Path -> ByteString -> NodeDB Node
 update Empty p new  = pure $ Shortcut p (Right new)
 update (Full refs _) [] new = pure (Full refs new)
 update (Full refs old) (p:ps) new = do
-  newRef <- insertRef (refs `Seq.index` (num p)) ps new
-  pure $ Full (Seq.update (num p) newRef refs) old
+  newRef <- insertRef (refs `Seq.index` (into p)) ps new
+  pure $ Full (Seq.update (into p) newRef refs) old
 update (Shortcut (o:os) (Right old)) [] new = do
   newRef <- insertRef emptyRef os old
-  pure $ Full (Seq.update (num o) newRef emptyRefs) new
+  pure $ Full (Seq.update (into o) newRef emptyRefs) new
 update (Shortcut [] (Right old)) (p:ps) new = do
   newRef <- insertRef emptyRef ps new
-  pure $ Full (Seq.update (num p) newRef emptyRefs) old
+  pure $ Full (Seq.update (into p) newRef emptyRefs) old
 update (Shortcut [] (Right _)) [] new =
   pure $ Shortcut [] (Right new)
 update (Shortcut (o:os) to) (p:ps) new | o == p
@@ -144,11 +145,11 @@ update (Shortcut (o:os) to) (p:ps) new | o == p
               (Left ref)  -> getNode ref >>= addPrefix os >>= putNode
               (Right val) -> insertRef emptyRef os val
   newRef <- insertRef emptyRef ps new
-  let refs = Seq.update (num p) newRef $ Seq.update (num o) oldRef emptyRefs
+  let refs = Seq.update (into p) newRef $ Seq.update (into o) oldRef emptyRefs
   pure $ Full refs BS.empty
 update (Shortcut (o:os) (Left ref)) [] new = do
   newRef <- getNode ref >>= addPrefix os >>= putNode
-  pure $ Full (Seq.update (num o) newRef emptyRefs) new
+  pure $ Full (Seq.update (into o) newRef emptyRefs) new
 update (Shortcut cut (Left ref)) ps new = do
   newRef <- insertRef ref ps new
   pure $ Shortcut cut (Left newRef)
@@ -169,8 +170,8 @@ delete (Full refs _) [] | refs == emptyRefs
                         | otherwise
   = pure (Full refs BS.empty)
 delete (Full refs val) (p:ps) = do
-  newRef <- insertRef (refs `Seq.index` (num p)) ps BS.empty
-  let newRefs = Seq.update (num p) newRef refs
+  newRef <- insertRef (refs `Seq.index` (into p)) ps BS.empty
+  let newRefs = Seq.update (into p) newRef refs
       nonEmpties = filter (\(_, ref) -> ref /= emptyRef) $ zip [0..15] $ toList newRefs
   case (nonEmpties, BS.null val) of
     ([], True)         -> pure Empty

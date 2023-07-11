@@ -89,14 +89,14 @@ execFully =
     VMSuccess x ->
       pure (Right x)
     Unfinished x
-      -> error $ "Internal Error: partial execution encountered during concrete execution: " <> show x
+      -> internalError $ "partial execution encountered during concrete execution: " <> show x
 
 -- | Run the VM until its final state
 runFully :: Stepper VM
 runFully = do
   vm <- run
   case vm.result of
-    Nothing -> error "should not occur"
+    Nothing -> internalError "should not occur"
     Just (HandleEffect (Query q)) ->
       wait q >> runFully
     Just (HandleEffect (Choose q)) ->
@@ -135,7 +135,7 @@ interpret fetcher vm = eval . view
           let vm' = execState m vm
           interpret fetcher vm' (k ())
         Ask _ ->
-          error "cannot make choices with this interpreter"
+          internalError "cannot make choices with this interpreter"
         IOAct m -> do
           (r, vm') <- runStateT m vm
           interpret fetcher vm' (k r)

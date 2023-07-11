@@ -4,6 +4,7 @@ import EVM.Types
 import Data.Bits (shiftR)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Witch (into, unsafeInto)
 
 data RLP = BS ByteString | List [RLP] deriving Eq
 
@@ -19,14 +20,16 @@ itemInfo :: ByteString -> (Int, Int, Bool, Bool)
 itemInfo bs | bs == mempty = (0, 0, False, False)
             | otherwise = case BS.head bs of
   x | 0 <= x && x < 128   -> (0, 1, False, True) -- directly encoded byte
-  x | 128 <= x && x < 184 -> (1, num x - 128, False, (BS.length bs /= 2) || (127 < (BS.head $ BS.drop 1 bs))) -- short string
+  x | 128 <= x && x < 184 -> (1, into x - 128, False, (BS.length bs /= 2) || (127 < (BS.head $ BS.drop 1 bs))) -- short string
   x | 184 <= x && x < 192 -> (1 + pre, len, False, (len > 55) && BS.head (BS.drop 1 bs) /= 0) -- long string
-    where pre = num $ x - 183
-          len = num $ word $ slice 1 pre bs
-  x | 192 <= x && x < 248 -> (1, num $ x - 192, True, True) -- short list
+    where pre = into $ x - 183
+          -- TODO: unsafeInto fails: cabal run test -- -p 'rlp' --quickcheck-replay=413899
+          len = fromIntegral $ word $ slice 1 pre bs
+  x | 192 <= x && x < 248 -> (1, into $ x - 192, True, True) -- short list
   x                       -> (1 + pre, len, True, (len > 55) && BS.head (BS.drop 1 bs) /= 0) -- long list
-    where pre = num $ x - 247
-          len = num $ word $ slice 1 pre bs
+    where pre = into $ x - 247
+          -- TODO: unsafeInto fails: cabal run test -- -p 'rlp' --quickcheck-replay=146332
+          len = fromIntegral $ word $ slice 1 pre bs
 
 rlpdecode :: ByteString -> Maybe RLP
 rlpdecode bs =
@@ -58,7 +61,7 @@ encodeLen offset bs =
   else prefix lenLen <> lenBytes <> bs
   where
     lenBytes = asBE $ BS.length bs
-    prefix n = BS.singleton $ num $ offset + n
+    prefix n = BS.singleton $ unsafeInto $ offset + n
     lenLen = BS.length lenBytes + 55
 
 rlpList :: [RLP] -> ByteString
@@ -84,7 +87,7 @@ rlpWordFull :: W256 -> RLP
 rlpWordFull = BS . octetsFull 31
 
 rlpAddrFull :: Addr -> RLP
-rlpAddrFull = BS . octetsFull 19 . num
+rlpAddrFull = BS . octetsFull 19 . into
 
 rlpWord160 :: Addr -> RLP
 rlpWord160 0 = BS mempty
