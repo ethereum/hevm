@@ -140,7 +140,7 @@ tests = testGroup "hevm"
     , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> ioProperty $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
-    , testProperty "word-simplification" $ \((GenWordSimplifyExpr expr) :: GenWordSimplifyExpr(Expr EWord)) -> ioProperty $ do
+    , testProperty "word-simplification" $ \(ZeroDepthWord expr) -> ioProperty $ do
           let simplified = Expr.simplify expr
           checkEquiv expr simplified
     , testProperty "readStorage-equivalance" $ \(store, addr, slot) -> ioProperty $ do
@@ -156,7 +156,7 @@ tests = testGroup "hevm"
         let simplified = Expr.readWord idx buf
             full = ReadWord idx buf
         checkEquiv simplified full
-    , testProperty "writeWord-equivalance" $ \(idx, val, GenWriteWordBuf buf) -> ioProperty $ do
+    , testProperty "writeWord-equivalance" $ \(idx, val, WriteWordBuf buf) -> ioProperty $ do
         let simplified = Expr.writeWord idx val buf
             full = WriteWord idx val buf
         checkEquiv simplified full
@@ -169,11 +169,11 @@ tests = testGroup "hevm"
             full = ReadByte idx buf
         checkEquiv simplified full
     -- we currently only simplify concrete writes over concrete buffers so that's what we test here
-    , testProperty "writeByte-equivalance" $ \(LitOnly val, LitOnly buf, GenWriteByteIdx (idx) :: GenWriteByteIdx (Expr EWord)) -> ioProperty $ do
+    , testProperty "writeByte-equivalance" $ \(LitOnly val, LitOnly buf, GenWriteByteIdx idx) -> ioProperty $ do
         let simplified = Expr.writeByte idx val buf
             full = WriteByte idx val buf
         checkEquiv simplified full
-    , testProperty "copySlice-equivalance" $ \(srcOff, GenCopySliceBuf src :: GenCopySliceBuf (Expr Buf), GenCopySliceBuf dst :: GenCopySliceBuf (Expr Buf), LitWord @300 size) -> ioProperty $ do
+    , testProperty "copySlice-equivalance" $ \(srcOff, GenCopySliceBuf src, GenCopySliceBuf dst, LitWord @300 size) -> ioProperty $ do
         -- we bias buffers to be concrete more often than not
         dstOff <- generate (maybeBoundedLit 100_000)
         let simplified = Expr.copySlice srcOff dstOff size src dst
@@ -2417,19 +2417,19 @@ instance Arbitrary (LitOnly (Expr EWord)) where
 instance Arbitrary (LitOnly (Expr Buf)) where
   arbitrary = LitOnly . ConcreteBuf <$> arbitrary
 
--- GenWordSimplifyExpr
-newtype GenWordSimplifyExpr a = GenWordSimplifyExpr a
+-- ZeroDepthWord
+newtype ZeroDepthWord = ZeroDepthWord (Expr EWord)
   deriving (Show, Eq)
 
-instance Arbitrary (GenWordSimplifyExpr (Expr EWord)) where
+instance Arbitrary ZeroDepthWord where
   arbitrary = do
-    fmap GenWordSimplifyExpr . sized $ genWord 0
+    fmap ZeroDepthWord . sized $ genWord 0
 
--- GenWriteWordBuf
-newtype GenWriteWordBuf a = GenWriteWordBuf a
+-- WriteWordBuf
+newtype WriteWordBuf = WriteWordBuf (Expr Buf)
   deriving (Show, Eq)
 
-instance Arbitrary (GenWriteWordBuf (Expr Buf)) where
+instance Arbitrary WriteWordBuf where
   arbitrary = do
     let mkBuf = oneof
           [ pure $ ConcreteBuf ""       -- empty
@@ -2437,13 +2437,13 @@ instance Arbitrary (GenWriteWordBuf (Expr Buf)) where
           , sized (genBuf 100)          -- overlapping writes
           , arbitrary                   -- sparse writes
           ]
-    fmap GenWriteWordBuf mkBuf
+    fmap WriteWordBuf mkBuf
 
 -- GenCopySliceBuf
-newtype GenCopySliceBuf a = GenCopySliceBuf a
+newtype GenCopySliceBuf = GenCopySliceBuf (Expr Buf)
   deriving (Show, Eq)
 
-instance Arbitrary (GenCopySliceBuf (Expr Buf)) where
+instance Arbitrary GenCopySliceBuf where
   arbitrary = do
     let mkBuf = oneof
           [ pure $ ConcreteBuf ""
@@ -2453,10 +2453,10 @@ instance Arbitrary (GenCopySliceBuf (Expr Buf)) where
     fmap GenCopySliceBuf mkBuf
 
 -- GenWriteStorageExpr
-newtype GenWriteStorageExpr a = GenWriteStorageExpr a
+newtype GenWriteStorageExpr = GenWriteStorageExpr (Expr EWord, Expr EWord, Expr Storage)
   deriving (Show, Eq)
 
-instance Arbitrary (GenWriteStorageExpr (Expr EWord, Expr EWord, Expr Storage)) where
+instance Arbitrary GenWriteStorageExpr where
   arbitrary = do
     addr <- arbitrary
     slot <- arbitrary
@@ -2483,10 +2483,10 @@ instance Arbitrary (GenWriteStorageExpr (Expr EWord, Expr EWord, Expr Storage)) 
     pure $ GenWriteStorageExpr (addr, slot, store)
 
 -- GenWriteByteIdx
-newtype GenWriteByteIdx a = GenWriteByteIdx a
+newtype GenWriteByteIdx = GenWriteByteIdx (Expr EWord)
   deriving (Show, Eq)
 
-instance Arbitrary (GenWriteByteIdx (Expr EWord)) where
+instance Arbitrary GenWriteByteIdx where
   arbitrary = do
     -- 1st: can never overflow an Int
     -- 2nd: can overflow an Int
