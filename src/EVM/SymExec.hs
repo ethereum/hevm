@@ -199,7 +199,7 @@ abstractVM cd contractCode maybepre store create = finalVm
     value = CallValue 0
     code = if create then InitCode contractCode mempty
            else RuntimeCode (ConcreteRuntimeCode contractCode)
-    vm' = loadSymVM code store caller value cd create
+    vm' = loadSymVM code store caller value  (if create then mempty else cd)  create
     precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm']
