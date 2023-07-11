@@ -325,7 +325,7 @@ tests = testGroup "hevm"
         w x = num x
       in
       assertEqual ""
-        "(store (store baseStore_0x0000000000000000000000000000000000000000 (_ bv1 256) (_ bv2 256)) (_ bv3 256) (_ bv4 256))"
+        "(store (store baseStore_litaddr_0x0000000000000000000000000000000000000000 (_ bv1 256) (_ bv2 256)) (_ bv3 256) (_ bv4 256))"
         (EVM.SMT.encodeConcreteStore (LitAddr 0x0) $
           Map.fromList [(w 1, w 2), (w 3, w 4)])
     , testCase "indexword-oob-sym" $ assertEqual ""
@@ -1974,7 +1974,7 @@ tests = testGroup "hevm"
             }
             |]
           (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
-          let addr =  Concrete.createAddress ethrunAddress 1
+          let addr = SymAddr(3)
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
                           Just s -> Map.size s == 2 &&
@@ -1997,7 +1997,7 @@ tests = testGroup "hevm"
             }
             |]
           (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
-          let addr = Concrete.createAddress ethrunAddress 1
+          let addr = SymAddr(3)
               a = getVar cex "arg1"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
@@ -2020,8 +2020,17 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts Nothing (Just $ checkAssertions [0x01])
-          let testCex = Map.null cex.store
+          let sig = Just (Sig "fun(uint256)" [AbiUIntType 256])
+          (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $
+            \s -> verifyContract s c sig [] defaultVeriOpts Nothing (Just $ checkAssertions [0x01])
+          let addr = SymAddr(3)
+              testCex = Map.size cex.store == 1 &&
+                        case Map.lookup addr cex.store of
+                          Just s -> Map.size s == 2 &&
+                                    case (Map.lookup 0 s, Map.lookup 1 s) of
+                                      (Just x, Just y) -> x == y
+                                      _ -> False
+                          _ -> False
           assertBool "Did not find expected storage cex" testCex
           putStrLn "Expected counterexample found"
  ]
