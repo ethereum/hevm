@@ -63,19 +63,20 @@ import Data.Vector (Vector)
 import Numeric (showHex)
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Base16 qualified as BS16
+import Witch (into, unsafeInto)
 
 data Signedness = Signed | Unsigned
   deriving (Show)
 
 showDec :: Signedness -> W256 -> Text
 showDec signed (W256 w)
-  | i == num cheatCode = "<hevm cheat address>"
+  | i == into cheatCode = "<hevm cheat address>"
   | (i :: Integer) == 2 ^ (256 :: Integer) - 1 = "MAX_UINT256"
   | otherwise = T.pack (show (i :: Integer))
   where
     i = case signed of
-          Signed   -> num (signedWord w)
-          Unsigned -> num w
+          Signed   -> into (signedWord w)
+          Unsigned -> into w
 
 showWordExact :: W256 -> Text
 showWordExact w = humanizeInteger (toInteger w)
@@ -83,7 +84,7 @@ showWordExact w = humanizeInteger (toInteger w)
 showWordExplanation :: W256 -> DappInfo -> Text
 showWordExplanation w _ | w > 0xffffffff = showDec Unsigned w
 showWordExplanation w dapp =
-  case Map.lookup (fromIntegral w) dapp.abiMap of
+  case Map.lookup (unsafeInto w) dapp.abiMap of
     Nothing -> showDec Unsigned w
     Just x  -> "keccak(\"" <> x.methodSignature <> "\")"
 
@@ -184,7 +185,7 @@ formatBinary =
 formatSBinary :: Expr Buf -> Text
 formatSBinary (ConcreteBuf bs) = formatBinary bs
 formatSBinary (AbstractBuf t) = "<" <> t <> " abstract buf>"
-formatSBinary _ = error "formatSBinary: implement me"
+formatSBinary _ = internalError "formatSBinary: implement me"
 
 showTraceTree :: DappInfo -> VM -> Text
 showTraceTree dapp vm =
@@ -253,10 +254,10 @@ showTrace dapp env trace =
                       --     bytes             data
                       -- ) anonymous;
                       let
-                        sig = fromIntegral $ shiftR topic 224 :: FunctionSelector
+                        sig = unsafeInto $ shiftR topic 224 :: FunctionSelector
                         usr = case maybeLitWord t2 of
                           Just w ->
-                            pack $ show (fromIntegral w :: Addr)
+                            pack $ show (unsafeInto w :: Addr)
                           Nothing  ->
                             "<symbolic>"
                       in
@@ -279,7 +280,7 @@ showTrace dapp env trace =
 
     ReturnTrace out (CallContext _ _ _ _ _ (Just abi) _ _ _) ->
       "← " <>
-        case Map.lookup (fromIntegral abi) fullAbiMap of
+        case Map.lookup (unsafeInto abi) fullAbiMap of
           Just m  ->
             case unzip m.output of
               ([], []) ->
@@ -317,7 +318,7 @@ showTrace dapp env trace =
                  0x7109709ECfa91a80626fF3989D68f67F5b1DD12D -> "HEVM"
                  _ -> pack (show target)
             <> pack "::"
-            <> case Map.lookup (fromIntegral (fromMaybe 0x00 abi)) fullAbiMap of
+            <> case Map.lookup (unsafeInto (fromMaybe 0x00 abi)) fullAbiMap of
                  Just m  ->
                    "\x1b[1m"
                    <> m.name
@@ -357,7 +358,7 @@ maybeContractName' =
   maybe "" (contractNamePart . (.contractName))
 
 maybeAbiName :: SolcContract -> W256 -> Maybe Text
-maybeAbiName solc abi = Map.lookup (fromIntegral abi) solc.abiMap <&> (.methodSignature)
+maybeAbiName solc abi = Map.lookup (unsafeInto abi) solc.abiMap <&> (.methodSignature)
 
 contractNamePart :: Text -> Text
 contractNamePart x = T.split (== ':') x !! 1
@@ -398,7 +399,7 @@ prettyvmresult (Success _ _ _ _) =
   "Return: <symbolic>"
 prettyvmresult (Failure _ _ err) = prettyError err
 prettyvmresult (Partial _ _ p) = T.unpack $ formatPartial p
-prettyvmresult r = error $ "Internal Error: Invalid result: " <> show r
+prettyvmresult r = internalError $ "Invalid result: " <> show r
 
 indent :: Int -> Text -> Text
 indent n = rstrip . T.unlines . fmap (T.replicate n (T.pack [' ']) <>) . T.lines
@@ -592,13 +593,13 @@ hexByteString :: String -> ByteString -> ByteString
 hexByteString msg bs =
   case BS16.decodeBase16 bs of
     Right x -> x
-    _ -> error ("invalid hex bytestring for " ++ msg)
+    _ -> internalError $ "invalid hex bytestring for " ++ msg
 
 hexText :: Text -> ByteString
 hexText t =
   case BS16.decodeBase16 (T.encodeUtf8 (T.drop 2 t)) of
     Right x -> x
-    _ -> error ("invalid hex bytestring " ++ show t)
+    _ -> internalError $ "invalid hex bytestring " ++ show t
 
 bsToHex :: ByteString -> String
 bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)

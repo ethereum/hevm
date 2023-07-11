@@ -46,6 +46,7 @@ import GHC.Conc (getNumProcessors)
 import GHC.Generics (Generic)
 import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
+import Witch (into, unsafeInto)
 
 -- | A method name, and the (ordered) types of it's arguments
 data Sig = Sig Text [AbiType]
@@ -111,21 +112,21 @@ symAbiArg name = \case
   AbiUIntType n ->
     if n `mod` 8 == 0 && n <= 256
     then let v = Var name in St [Expr.inRange n v] v
-    else error "bad type"
+    else internalError "bad type"
   AbiIntType n ->
     if n `mod` 8 == 0 && n <= 256
     -- TODO: is this correct?
     then let v = Var name in St [Expr.inRange n v] v
-    else error "bad type"
+    else internalError "bad type"
   AbiBoolType -> let v = Var name in St [bool v] v
   AbiAddressType -> let v = Var name in St [Expr.inRange 160 v] v
   AbiBytesType n ->
     if n > 0 && n <= 32
     then let v = Var name in St [Expr.inRange (n * 8) v] v
-    else error "bad type"
+    else internalError "bad type"
   AbiArrayType sz tp ->
     Comp $ fmap (\n -> symAbiArg (name <> n) tp) [T.pack (show n) | n <- [0..sz-1]]
-  t -> error $ "TODO: symbolic abi encoding for " <> show t
+  t -> internalError $ "TODO: symbolic abi encoding for " <> show t
 
 data CalldataFragment
   = St [Prop] (Expr EWord)
@@ -145,11 +146,11 @@ symCalldata sig typesignature concreteArgs base =
     mkArg typ "<symbolic>" n = symAbiArg (T.pack $ "arg" <> show n) typ
     mkArg typ arg _ =
       case makeAbiValue typ arg of
-        AbiUInt _ w -> St [] . Lit . num $ w
-        AbiInt _ w -> St [] . Lit . num $ w
-        AbiAddress w -> St [] . Lit . num $ w
+        AbiUInt _ w -> St [] . Lit . into $ w
+        AbiInt _ w -> St [] . Lit . unsafeInto $ w
+        AbiAddress w -> St [] . Lit . into $ w
         AbiBool w -> St [] . Lit $ if w then 1 else 0
-        _ -> error "TODO"
+        _ -> internalError "TODO"
     calldatas = zipWith3 mkArg typesignature args [1..]
     (cdBuf, props) = combineFragments calldatas base
     withSelector = writeSelector cdBuf sig
@@ -165,7 +166,7 @@ cdLen = go (Lit 4)
       [] -> acc
       (hd:tl) -> case hd of
                    St _ _ -> go (Expr.add acc (Lit 32)) tl
-                   _ -> error "unsupported"
+                   _ -> internalError "unsupported"
 
 writeSelector :: Expr Buf -> Text -> Expr Buf
 writeSelector buf sig =
@@ -182,7 +183,7 @@ combineFragments fragments base = go (Lit 4) fragments (base, [])
     go idx (f:rest) (buf, ps) =
       case f of
         St p w -> go (Expr.add idx (Lit 32)) rest (Expr.writeWord idx w buf, p <> ps)
-        s -> error $ "unsupported cd fragment: " <> show s
+        s -> internalError $ "unsupported cd fragment: " <> show s
 
 
 abstractVM
@@ -326,7 +327,7 @@ maxIterationsReached _ Nothing = Nothing
 maxIterationsReached vm (Just maxIter) =
   let codelocation = getCodeLocation vm
       (iters, _) = view (at codelocation % non (0, [])) vm.iterations
-  in if num maxIter <= iters
+  in if unsafeInto maxIter <= iters
      then Map.lookup (codelocation, iters - 1) vm.cache.path
      else Nothing
 
@@ -334,7 +335,7 @@ askSmtItersReached :: VM -> Integer -> Bool
 askSmtItersReached vm askSmtIters = let
     codelocation = getCodeLocation vm
     (iters, _) = view (at codelocation % non (0, [])) vm.iterations
-  in askSmtIters <= num iters
+  in askSmtIters <= into iters
 
 {- | Loop head detection heuristic
 
@@ -349,7 +350,7 @@ isLoopHead Naive _ = Just True
 isLoopHead StackBased vm = let
     loc = getCodeLocation vm
     oldIters = Map.lookup loc vm.iterations
-    isValid (Lit wrd) = wrd <= num (maxBound :: Int) && isValidJumpDest vm (num wrd)
+    isValid (Lit wrd) = wrd <= unsafeInto (maxBound :: Int) && isValidJumpDest vm (unsafeInto wrd)
     isValid _ = False
   in case oldIters of
        Just (_, oldStack) -> Just $ filter isValid oldStack == filter isValid vm.state.stack
@@ -442,7 +443,7 @@ runExpr = do
     Just (VMSuccess buf) -> Success asserts (Traces (Zipper.toForest vm.traces) vm.env.contracts) buf vm.env.storage
     Just (VMFailure e) -> Failure asserts (Traces (Zipper.toForest vm.traces) vm.env.contracts) e
     Just (Unfinished p) -> Partial asserts (Traces (Zipper.toForest vm.traces) vm.env.contracts) p
-    _ -> error "Internal Error: vm in intermediate state after call to runFully"
+    _ -> internalError "vm in intermediate state after call to runFully"
 
 -- | Converts a given top level expr into a list of final states and the
 -- associated path conditions for each state.
@@ -455,7 +456,7 @@ flattenExpr = go []
       Success ps trace msg store -> [Success (ps <> pcs) trace msg store]
       Failure ps trace e -> [Failure (ps <> pcs) trace e]
       Partial ps trace p -> [Partial (ps <> pcs) trace p]
-      GVar _ -> error "cannot flatten an Expr containing a GVar"
+      GVar _ -> internalError "cannot flatten an Expr containing a GVar"
 
 -- | Strips unreachable branches from a given expr
 -- Returns a list of executed SMT queries alongside the reduced expression for debugging purposes
@@ -469,7 +470,7 @@ flattenExpr = go []
 reachable :: SolverGroup -> Expr End -> IO ([SMT2], Expr End)
 reachable solvers e = do
   res <- go [] e
-  pure $ second (fromMaybe (error "Internal Error: no reachable paths found")) res
+  pure $ second (fromMaybe (internalError "no reachable paths found")) res
   where
     {-
        Walk down the tree and collect pcs.
@@ -495,7 +496,7 @@ reachable solvers e = do
         case res of
           Sat _ -> pure ([query], Just leaf)
           Unsat -> pure ([query], Nothing)
-          r -> error $ "Invalid solver result: " <> show r
+          r -> internalError $ "Invalid solver result: " <> show r
 
 
 -- | Evaluate the provided proposition down to its most concrete result
@@ -538,7 +539,7 @@ extractProps = \case
   Success asserts _ _ _ -> asserts
   Failure asserts _ _ -> asserts
   Partial asserts _ _ -> asserts
-  GVar _ -> error "cannot extract props from a GVar"
+  GVar _ -> internalError "cannot extract props from a GVar"
 
 isPartial :: Expr a -> Bool
 isPartial (Partial _ _ _) = True
@@ -612,7 +613,7 @@ verify solvers opts preState maybepost = do
       Sat model -> Cex (leaf, model)
       EVM.Solvers.Unknown -> Timeout leaf
       Unsat -> Qed ()
-      Error e -> error $ "Internal Error: solver responded with error: " <> show e
+      Error e -> internalError $ "solver responded with error: " <> show e
 
 type UnsatCache = TVar [Set Prop]
 
@@ -713,7 +714,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
               atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
               pure (Qed (), False)
         (_, EVM.Solvers.Unknown) -> pure (Timeout (), False)
-        (_, Error txt) -> error $ "Error while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
+        (_, Error txt) -> internalError $ "issue while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
@@ -743,8 +744,8 @@ equivalenceCheck' solvers branchesA branchesB opts = do
           -- partial end states can't be compared to actual end states, so we always ignore them
           (Partial {}, _) -> PBool False
           (_, Partial {}) -> PBool False
-          (ITE _ _ _, _) -> error "Expressions must be flattened"
-          (_, ITE _ _ _) -> error "Expressions must be flattened"
+          (ITE _ _ _, _) -> internalError "Expressions must be flattened"
+          (_, ITE _ _ _) -> internalError "Expressions must be flattened"
           (a, b) -> if a == b
                     then PBool False
                     else PBool True
@@ -777,7 +778,7 @@ showModel :: Expr Buf -> (Expr End, CheckSatResult) -> IO ()
 showModel cd (expr, res) = do
   case res of
     Unsat -> pure () -- ignore unreachable branches
-    Error e -> error $ "Internal error: smt solver returned an error: " <> show e
+    Error e -> internalError $ "smt solver returned an error: " <> show e
     EVM.Solvers.Unknown -> do
       putStrLn "--- Branch ---"
       putStrLn ""
@@ -823,7 +824,7 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
       | otherwise =
           [ "Storage:"
           , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc ->
-              ("Addr " <> (T.pack . show . Addr . num $ key)
+              ("Addr " <> (T.pack $ show (unsafeInto key :: Addr))
                 <> ": " <> (T.pack $ show (Map.toList val))) : acc
             ) mempty store
           , ""
@@ -855,9 +856,9 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
         go (CallValue x) _ = x == 0
         go (Caller x) _ = x == 0
         go (Address x) _ = x == 0
-        go (Balance {}) _ = error "TODO: BALANCE"
-        go (SelfBalance {}) _ = error "TODO: SELFBALANCE"
-        go (Gas {}) _ = error "TODO: Gas"
+        go (Balance {}) _ = internalError "TODO: BALANCE"
+        go (SelfBalance {}) _ = internalError "TODO: SELFBALANCE"
+        go (Gas {}) _ = internalError "TODO: Gas"
         go _ _ = False
 
     blockCtx :: [Text]
@@ -885,7 +886,7 @@ subModel c expr =
   where
     forceFlattened (SMT.Flat bs) = bs
     forceFlattened b@(SMT.Comp _) = forceFlattened $
-      fromMaybe (error $ "Internal Error: cannot flatten buffer: " <> show b)
+      fromMaybe (internalError $ "cannot flatten buffer: " <> show b)
                 (SMT.collapse b)
 
     subVars model b = Map.foldlWithKey subVar b model

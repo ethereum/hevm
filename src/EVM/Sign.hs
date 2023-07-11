@@ -11,6 +11,7 @@ import Crypto.Hash qualified as Crypto
 import Crypto.PubKey.ECC.ECDSA (signDigestWith, PrivateKey(..), Signature(..))
 import Crypto.PubKey.ECC.Types (getCurveByName, CurveName(..), Point(..))
 import Crypto.PubKey.ECC.Generate (generateQ)
+import Witch (unsafeInto)
 
 import EVM.ABI (encodeAbiValue, AbiValue(..))
 import EVM.Types
@@ -29,7 +30,7 @@ deriveAddr sk =
       in exprToAddr addr
   where
     curve = getCurveByName SEC_p256k1
-    pubPoint = generateQ curve (num sk)
+    pubPoint = generateQ curve sk
     encodeInt = encodeAbiValue . AbiUInt 256 . fromInteger
 
 sign :: W256 -> Integer -> (Word8, W256, W256)
@@ -39,13 +40,13 @@ sign hash sk = (v, r, s)
     curve = getCurveByName SEC_p256k1
     priv = PrivateKey curve sk
     digest = fromMaybe
-      (error $ "Internal Error: could produce a digest from " <> show hash)
+      (internalError $ "could produce a digest from " <> show hash)
       (Crypto.digestFromByteString (word256Bytes hash))
 
     -- sign message
     sig = ethsign priv digest
-    r = num $ sign_r sig
-    s = num lowS
+    r = unsafeInto $ sign_r sig
+    s = unsafeInto lowS
 
     -- this is a little bit sad, but cryptonite doesn't give us back a v value
     -- so we compute it by guessing one, and then seeing if that gives us the right answer from ecrecover
@@ -71,5 +72,5 @@ ethsign sk digest = go 420
        Just sig -> sig
 
 ecrec :: W256 -> W256 -> W256 -> W256 -> Maybe Addr
-ecrec v r s e = num . word <$> EVM.Precompiled.execute 1 input 32
+ecrec v r s e = unsafeInto . word <$> EVM.Precompiled.execute 1 input 32
   where input = BS.concat (word256Bytes <$> [e, v, r, s])

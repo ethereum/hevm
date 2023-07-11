@@ -34,12 +34,15 @@
       }
     },
     "flake-utils": {
+      "inputs": {
+        "systems": "systems"
+      },
       "locked": {
-        "lastModified": 1678901627,
-        "narHash": "sha256-U02riOqrKKzwjsxc/400XnElV+UtPUQWpANPlyazjH0=",
+        "lastModified": 1687709756,
+        "narHash": "sha256-Y5wKlQSkgEK2weWdOu4J3riRd+kV/VCgHsqLNTTWQ/0=",
         "owner": "numtide",
         "repo": "flake-utils",
-        "rev": "93a2b84fc4b70d9e089d029deacc3583435c2ed6",
+        "rev": "dbabf0ca0c0c4bce6ea5eaf65af5cb694d2082c7",
         "type": "github"
       },
       "original": {
@@ -69,11 +72,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1677921223,
-        "narHash": "sha256-TsrPW+VfLu19dYm4uuAaM9LLHm30iZiyW1+0mbFgwbk=",
+        "lastModified": 1688462028,
+        "narHash": "sha256-+43L9rwbNC1cO0LrinxjaolmyIH/STpL67uf2s6+6C0=",
         "owner": "shazow",
         "repo": "foundry.nix",
-        "rev": "79df1481c10789570c40749a4c8f8aada16f2eea",
+        "rev": "e8fb5553c880942ac5215fb210ada54841605c62",
         "type": "github"
       },
       "original": {
@@ -97,33 +100,18 @@
         "type": "indirect"
       }
     },
-    "nixpkgs-solc": {
-      "locked": {
-        "lastModified": 1672059513,
-        "narHash": "sha256-4R7lESB3biVNyE6rXkjw3mhowzg4zTQgZElM4/dRUv8=",
-        "owner": "nixos",
-        "repo": "nixpkgs",
-        "rev": "1b71def42b74811323de2df52f180b795ec506fc",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nixos",
-        "repo": "nixpkgs",
-        "rev": "1b71def42b74811323de2df52f180b795ec506fc",
-        "type": "github"
-      }
-    },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1679402239,
-        "narHash": "sha256-xJLprGQf4v0cKNtWaI2tMvn+tuYir3yNAFd41CWNgAw=",
+        "lastModified": 1688961476,
+        "narHash": "sha256-oYcCy27BdAfU5H5DDQ7vWdrhaIgRCZ5XASORrwrQAAg=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "9cc171df4617329f2c776fefe3ee83f1a0ffa046",
+        "rev": "3ba086a64b3997ee82e331abaf3af7049e3fc742",
         "type": "github"
       },
       "original": {
         "owner": "nixos",
+        "ref": "haskell-updates",
         "repo": "nixpkgs",
         "type": "github"
       }
@@ -135,7 +123,6 @@
         "flake-utils": "flake-utils",
         "foundry": "foundry",
         "nixpkgs": "nixpkgs_2",
-        "nixpkgs-solc": "nixpkgs-solc",
         "solidity": "solidity"
       }
     },
@@ -153,6 +140,21 @@
         "owner": "ethereum",
         "repo": "solidity",
         "rev": "1c8745c54a239d20b6fb0f79a8bd2628d779b27e",
+        "type": "github"
+      }
+    },
+    "systems": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
         "type": "github"
       }
     }
