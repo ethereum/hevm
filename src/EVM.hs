@@ -169,8 +169,11 @@ makeVm o =
   , constraints = snd o.calldata
   , keccakEqs = mempty
   , iterations = mempty
-  , allowFFI = o.allowFFI
-  , overrideCaller = Nothing
+  , config = RuntimeConfig
+    { allowFFI = o.allowFFI
+    , overrideCaller = Nothing
+    , baseState = o.baseState
+    }
   }
 
 -- | Initialize an abstract contract with unknown code
@@ -777,12 +780,12 @@ exec1 = do
                   forceAddr xTo' "unable to determine a call target" $ \xTo ->
                     delegateCall this (num xGas) xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
                       \callee -> do
-                        let from' = fromMaybe self vm.overrideCaller
+                        let from' = fromMaybe self vm.config.overrideCaller
                         zoom #state $ do
                           assign #callvalue (Lit xValue)
                           assign #caller from'
                           assign #contract callee
-                        assign #overrideCaller Nothing
+                        assign (#config % #overrideCaller) Nothing
                         touchAccount from'
                         touchAccount callee
                         transfer from' callee (Lit xValue)
@@ -798,8 +801,8 @@ exec1 = do
                   delegateCall this (num xGas) xTo self xValue xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
                     zoom #state $ do
                       assign #callvalue (Lit xValue)
-                      assign #caller $ fromMaybe self vm.overrideCaller
-                    assign #overrideCaller Nothing
+                      assign #caller $ fromMaybe self vm.config.overrideCaller
+                    assign (#config % #overrideCaller) Nothing
                     touchAccount self
             _ ->
               underrun
@@ -885,10 +888,10 @@ exec1 = do
                       \callee -> do
                         zoom #state $ do
                           assign #callvalue (Lit 0)
-                          assign #caller $ fromMaybe self (vm.overrideCaller)
+                          assign #caller $ fromMaybe self (vm.config.overrideCaller)
                           assign #contract callee
                           assign #static True
-                        assign #overrideCaller Nothing
+                        assign (#config % #overrideCaller) Nothing
                         touchAccount self
                         touchAccount callee
             _ ->
@@ -1572,7 +1575,7 @@ cheatActions =
     [ action "ffi(string[])" $
         \sig outOffset outSize input -> do
           vm <- get
-          if vm.allowFFI then
+          if vm.config.allowFFI then
             case decodeBuf [AbiArrayDynamicType AbiStringType] input of
               CAbi valsArr -> case valsArr of
                 [AbiArrayDynamic AbiStringType strsV] ->
@@ -1653,7 +1656,7 @@ cheatActions =
       action "prank(address)" $
         \sig _ _ input -> case decodeStaticArgs 0 1 input of
           [addr]  -> case wordToAddr addr of
-            Just a -> assign #overrideCaller (Just a)
+            Just a -> assign (#config % #overrideCaller) (Just a)
             Nothing -> vmError (BadCheatCode sig)
           _ -> vmError (BadCheatCode sig)
 

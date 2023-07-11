@@ -598,13 +598,26 @@ data VM = VM
   , iterations     :: Map CodeLocation (Int, [Expr EWord]) -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
   , keccakEqs      :: [Prop]
-  , allowFFI       :: Bool
-  , overrideCaller :: Maybe (Expr EAddr)
+  , config         :: RuntimeConfig
   }
   deriving (Show, Generic)
 
 -- | Alias for the type of e.g. @exec1@.
 type EVM a = State VM a
+
+-- | The VM base state (i.e. should new contracts be created with abstract balance / storge?)
+data BaseState
+  = EmptyBase
+  | AbstractBase
+  deriving (Show)
+
+-- | Configuration options that need to be consulted at runtime
+data RuntimeConfig = RuntimeConfig
+  { allowFFI :: Bool
+  , overrideCaller :: Maybe (Expr EAddr)
+  , baseState :: BaseState
+  }
+  deriving (Show)
 
 -- | An entry in the VM's "call/create stack"
 data Frame = Frame
@@ -824,7 +837,7 @@ instance Monoid Traces where
 data VMOpts = VMOpts
   { contract :: Contract
   , calldata :: (Expr Buf, [Prop])
-  , initialState :: InitialState
+  , baseState :: BaseState
   , value :: Expr EWord
   , priorityFee :: W256
   , address :: Expr EAddr
@@ -846,13 +859,6 @@ data VMOpts = VMOpts
   , txAccessList :: Map (Expr EAddr) [W256]
   , allowFFI :: Bool
   } deriving Show
-
-
-data InitialState
-  = EmptyState
-  | AbstractState
-  | ConcreteState (Map (Expr EAddr) Contract)
-  deriving Show
 
 
 -- Opcodes -----------------------------------------------------------------------------------------
@@ -1299,3 +1305,4 @@ makeFieldLabelsNoPrefix ''FrameContext
 makeFieldLabelsNoPrefix ''Contract
 makeFieldLabelsNoPrefix ''Env
 makeFieldLabelsNoPrefix ''Block
+makeFieldLabelsNoPrefix ''RuntimeConfig
