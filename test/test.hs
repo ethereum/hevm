@@ -5,6 +5,8 @@ module Main where
 
 import Prelude hiding (LT, GT)
 
+import GHC.TypeLits
+import Data.Proxy
 import Control.Monad.State.Strict
 import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
@@ -23,7 +25,6 @@ import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Typeable
 import Data.Vector qualified as Vector
 import GHC.Conc (getNumProcessors)
-import Numeric.Natural (Natural)
 import System.Directory
 import System.Environment
 import Test.Tasty
@@ -149,35 +150,14 @@ tests = testGroup "hevm"
     , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> ioProperty $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
-    , testProperty "word-simplification" $ \(_ :: Int) -> ioProperty $ do
-        expr <- generate . sized $ genWord 0 -- we want a lower frequency of lits for this test
-        let simplified = Expr.simplify expr
-        checkEquiv expr simplified
+    , testProperty "word-simplification" $ \(ZeroDepthWord expr) -> ioProperty $ do
+          let simplified = Expr.simplify expr
+          checkEquiv expr simplified
     , testProperty "readStorage-equivalance" $ \(store, addr, slot) -> ioProperty $ do
         let simplified = Expr.readStorage' addr slot store
             full = SLoad addr slot store
         checkEquiv simplified full
-    , testProperty "writeStorage-equivalance" $ \(addr, slot, val) -> ioProperty $ do
-        let mkStore = oneof
-              [ pure EmptyStore
-              , fmap ConcreteStore arbitrary
-              , do
-                  -- generate some write chains where we know that at least one
-                  -- write matches either the input addr, or both the input
-                  -- addr and slot
-                  let matchAddr = liftM2 (SStore addr) arbitrary arbitrary
-                      matchBoth = fmap (SStore addr slot) arbitrary
-                      addWrites :: Expr Storage -> Int -> Gen (Expr Storage)
-                      addWrites b 0 = pure b
-                      addWrites b n = liftM4 SStore arbitrary arbitrary arbitrary (addWrites b (n - 1))
-                  s <- arbitrary
-                  addMatch <- oneof [ matchAddr, matchBoth ]
-                  let withMatch = addMatch s
-                  newWrites <- oneof [ pure 0, pure 1, fmap (`mod` 5) arbitrary ]
-                  addWrites withMatch newWrites
-              , arbitrary
-              ]
-        store <- generate mkStore
+    , testProperty "writeStorage-equivalance" $ \(val, GenWriteStorageExpr (addr, slot, store)) -> ioProperty $ do
         let simplified = Expr.writeStorage addr slot val store
             full = SStore addr slot val store
         checkEquiv simplified full
@@ -185,14 +165,7 @@ tests = testGroup "hevm"
         let simplified = Expr.readWord idx buf
             full = ReadWord idx buf
         checkEquiv simplified full
-    , testProperty "writeWord-equivalance" $ \(idx, val) -> ioProperty $ do
-        let mkBuf = oneof
-              [ pure $ ConcreteBuf ""       -- empty
-              , fmap ConcreteBuf arbitrary  -- concrete
-              , sized (genBuf 100)          -- overlapping writes
-              , arbitrary                   -- sparse writes
-              ]
-        buf <- generate mkBuf
+    , testProperty "writeWord-equivalance" $ \(idx, val, WriteWordBuf buf) -> ioProperty $ do
         let simplified = Expr.writeWord idx val buf
             full = WriteWord idx val buf
         checkEquiv simplified full
@@ -205,35 +178,21 @@ tests = testGroup "hevm"
             full = ReadByte idx buf
         checkEquiv simplified full
     -- we currently only simplify concrete writes over concrete buffers so that's what we test here
-    , testProperty "writeByte-equivalance" $ \(LitOnly val, LitOnly buf) -> ioProperty $ do
-        idx <- generate $ frequency
-          [ (10, genLit (fromIntegral (1_000_000 :: Int)))  -- can never overflow an Int
-          , (1, fmap Lit arbitrary)                         -- can overflow an Int
-          ]
+    , testProperty "writeByte-equivalance" $ \(LitOnly val, LitOnly buf, GenWriteByteIdx idx) -> ioProperty $ do
         let simplified = Expr.writeByte idx val buf
             full = WriteByte idx val buf
         checkEquiv simplified full
-    , testProperty "copySlice-equivalance" $ \(srcOff) -> ioProperty $ do
+    , testProperty "copySlice-equivalance" $ \(srcOff, GenCopySliceBuf src, GenCopySliceBuf dst, LitWord @300 size) -> ioProperty $ do
         -- we bias buffers to be concrete more often than not
-        let mkBuf = oneof
-              [ pure $ ConcreteBuf ""
-              , fmap ConcreteBuf arbitrary
-              , arbitrary
-              ]
-        src <- generate mkBuf
-        dst <- generate mkBuf
-        size <- generate (genLit 300)
         dstOff <- generate (maybeBoundedLit 100_000)
         let simplified = Expr.copySlice srcOff dstOff size src dst
             full = CopySlice srcOff dstOff size src dst
         checkEquiv simplified full
-    , testProperty "indexWord-equivalence" $ \(src) -> ioProperty $ do
-        idx <- generate (genLit 50)
+    , testProperty "indexWord-equivalence" $ \(src, LitWord @50 idx) -> ioProperty $ do
         let simplified = Expr.indexWord idx src
             full = IndexWord idx src
         checkEquiv simplified full
-    , testProperty "indexWord-mask-equivalence" $ \(src :: Expr EWord) -> ioProperty $ do
-        idx <- generate (genLit 35)
+    , testProperty "indexWord-mask-equivalence" $ \(src :: Expr EWord, LitWord @35 idx) -> ioProperty $ do
         mask <- generate $ do
           pow <- arbitrary :: Gen Int
           frequency
@@ -2446,8 +2405,17 @@ instance Arbitrary (Expr Buf) where
 instance Arbitrary (Expr End) where
   arbitrary = sized genEnd
 
+-- LitOnly
 newtype LitOnly a = LitOnly a
   deriving (Show, Eq)
+
+newtype LitWord (sz :: Nat) = LitWord (Expr EWord)
+  deriving (Show)
+
+instance (KnownNat sz) => Arbitrary (LitWord sz) where
+  arbitrary = LitWord <$> genLit (fromInteger v)
+    where
+      v = natVal (Proxy @sz)
 
 instance Arbitrary (LitOnly (Expr Byte)) where
   arbitrary = LitOnly . LitByte <$> arbitrary
@@ -2457,6 +2425,82 @@ instance Arbitrary (LitOnly (Expr EWord)) where
 
 instance Arbitrary (LitOnly (Expr Buf)) where
   arbitrary = LitOnly . ConcreteBuf <$> arbitrary
+
+-- ZeroDepthWord
+newtype ZeroDepthWord = ZeroDepthWord (Expr EWord)
+  deriving (Show, Eq)
+
+instance Arbitrary ZeroDepthWord where
+  arbitrary = do
+    fmap ZeroDepthWord . sized $ genWord 0
+
+-- WriteWordBuf
+newtype WriteWordBuf = WriteWordBuf (Expr Buf)
+  deriving (Show, Eq)
+
+instance Arbitrary WriteWordBuf where
+  arbitrary = do
+    let mkBuf = oneof
+          [ pure $ ConcreteBuf ""       -- empty
+          , fmap ConcreteBuf arbitrary  -- concrete
+          , sized (genBuf 100)          -- overlapping writes
+          , arbitrary                   -- sparse writes
+          ]
+    fmap WriteWordBuf mkBuf
+
+-- GenCopySliceBuf
+newtype GenCopySliceBuf = GenCopySliceBuf (Expr Buf)
+  deriving (Show, Eq)
+
+instance Arbitrary GenCopySliceBuf where
+  arbitrary = do
+    let mkBuf = oneof
+          [ pure $ ConcreteBuf ""
+          , fmap ConcreteBuf arbitrary
+          , arbitrary
+          ]
+    fmap GenCopySliceBuf mkBuf
+
+-- GenWriteStorageExpr
+newtype GenWriteStorageExpr = GenWriteStorageExpr (Expr EWord, Expr EWord, Expr Storage)
+  deriving (Show, Eq)
+
+instance Arbitrary GenWriteStorageExpr where
+  arbitrary = do
+    addr <- arbitrary
+    slot <- arbitrary
+    let mkStore = oneof
+          [ pure EmptyStore
+          , fmap ConcreteStore arbitrary
+          , do
+              -- generate some write chains where we know that at least one
+              -- write matches either the input addr, or both the input
+              -- addr and slot
+              let matchAddr = liftM2 (SStore addr) arbitrary arbitrary
+                  matchBoth = fmap (SStore addr slot) arbitrary
+                  addWrites :: Expr Storage -> Int -> Gen (Expr Storage)
+                  addWrites b 0 = pure b
+                  addWrites b n = liftM4 SStore arbitrary arbitrary arbitrary (addWrites b (n - 1))
+              s <- arbitrary
+              addMatch <- oneof [ matchAddr, matchBoth ]
+              let withMatch = addMatch s
+              newWrites <- oneof [ pure 0, pure 1, fmap (`mod` 5) arbitrary ]
+              addWrites withMatch newWrites
+          , arbitrary
+          ]
+    store <- mkStore
+    pure $ GenWriteStorageExpr (addr, slot, store)
+
+-- GenWriteByteIdx
+newtype GenWriteByteIdx = GenWriteByteIdx (Expr EWord)
+  deriving (Show, Eq)
+
+instance Arbitrary GenWriteByteIdx where
+  arbitrary = do
+    -- 1st: can never overflow an Int
+    -- 2nd: can overflow an Int
+    let mkIdx = frequency [ (10, genLit (fromIntegral (1_000_000 :: Int))) , (1, fmap Lit arbitrary) ]
+    fmap GenWriteByteIdx mkIdx
 
 genByte :: Int -> Gen (Expr Byte)
 genByte 0 = fmap LitByte arbitrary
