@@ -147,6 +147,7 @@
               mdbook
               yarn
               haskellPackages.cabal-install
+              haskellPackages.eventlog2html
               haskellPackages.haskell-language-server
             ] ++ testDeps;
             withHoogle = true;
