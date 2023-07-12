@@ -718,6 +718,7 @@ data Env = Env
   , chainId      :: W256
   , storage      :: Expr Storage
   , origStorage  :: Map W256 (Map W256 W256)
+  , sha3Crack    :: Map W256 ByteString
   }
   deriving (Show, Generic)
 

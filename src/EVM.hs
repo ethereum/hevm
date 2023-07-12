@@ -141,7 +141,8 @@ makeVm o =
     , static = False
     }
   , env = Env
-    { chainId = o.chainId
+    { sha3Crack = mempty
+    , chainId = o.chainId
     , storage = o.initialStorage
     , origStorage = mempty
     , contracts = Map.fromList
@@ -333,16 +334,17 @@ exec1 = do
                 \xOffset -> forceConcrete xSize' "sha3 size must be concrete" $ \xSize ->
                   burn (g_sha3 + g_sha3word * ceilDiv (unsafeInto xSize) 32) $
                     accessMemoryRange xOffset xSize $ do
-                      hash <- case readMemory xOffset' xSize' vm of
+                      (hash, invMap) <- case readMemory xOffset' xSize' vm of
                                           ConcreteBuf bs -> do
                                             let hash' = keccak' bs
                                             eqs <- use #keccakEqs
                                             assign #keccakEqs $
                                               PEq (Lit hash') (Keccak (ConcreteBuf bs)):eqs
-                                            pure $ Lit hash'
-                                          buf -> pure $ Keccak buf
+                                            pure (Lit hash', Map.singleton hash' bs)
+                                          buf -> pure (Keccak buf, mempty)
                       next
                       assign (#state % #stack) (hash : xs)
+                      modifying (#env % #sha3Crack) ((<>) invMap)
             _ -> underrun
 
         OpAddress ->
