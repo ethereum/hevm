@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - SMT encoding of Expr now has assertions for the range of environment values that are less than word size (256 bits).
 - Trace now contains the cheat code calls
+- Removed sha3Crack which has been deprecated for keccakEqs
 - More consistent error messages
 
 ## Changed
