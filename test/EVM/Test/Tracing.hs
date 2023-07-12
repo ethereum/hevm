@@ -38,6 +38,7 @@ import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty (testGroup, TestTree)
 import Test.Tasty.HUnit (assertEqual)
 import Test.Tasty.QuickCheck hiding (Failure, Success)
+import Witch (into)
 
 import Optics.Core hiding (pre)
 import Optics.State
@@ -110,7 +111,7 @@ instance JSON.FromJSON EVMToolTrace where
     <*> v .:? "error"
 
 mkBlockHash:: Int -> Expr 'EWord
-mkBlockHash x = (num x :: Integer) & show & Char8.pack & EVM.Types.keccak' & Lit
+mkBlockHash x = (into x :: Integer) & show & Char8.pack & EVM.Types.keccak' & Lit
 
 blockHashesDefault :: Map.Map Int W256
 blockHashesDefault = Map.fromList [(x, forceLit $ mkBlockHash x) | x<- [1..256]]
@@ -119,7 +120,6 @@ data EVMToolOutput =
   EVMToolOutput
     { output :: ByteStringS
     , gasUsed :: W256
-    , time :: Integer
     } deriving (Generic, Show)
 
 instance JSON.FromJSON EVMToolOutput
@@ -475,7 +475,7 @@ vmtrace vm =
   let
     memsize = vm.state.memorySize
   in VMTrace { tracePc = vm.state.pc
-             , traceOp = num $ getOp vm
+             , traceOp = into $ getOp vm
              , traceGas = vm.state.gas
              , traceMemSize = memsize
              -- increment to match geth format

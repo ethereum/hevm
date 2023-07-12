@@ -19,6 +19,7 @@ import Data.Sequence qualified as Seq
 import Data.Text (Text, isPrefixOf, pack, unpack)
 import Data.Text.Encoding (encodeUtf8)
 import Data.Vector qualified as V
+import Witch (unsafeInto)
 
 data DappInfo = DappInfo
   { root       :: FilePath
@@ -173,7 +174,7 @@ lookupCode (RuntimeCode (SymbolicRuntimeCode c)) a = let
 compareCode :: ByteString -> Code -> Bool
 compareCode raw (Code template locs) =
   let holes' = sort [(start, len) | (Reference start len) <- locs]
-      insert at' len' bs = writeMemory (BS.replicate len' 0) (fromIntegral len') 0 (fromIntegral at') bs
+      insert at' len' bs = writeMemory (BS.replicate len' 0) (unsafeInto len') 0 (unsafeInto at') bs
       refined = foldr (\(start, len) acc -> insert start len acc) raw holes'
   in BS.length raw == BS.length template && template == refined
 

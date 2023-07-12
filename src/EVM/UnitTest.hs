@@ -64,6 +64,7 @@ import System.Environment (lookupEnv)
 import System.IO (hFlush, stdout)
 import Test.QuickCheck hiding (verbose, Success, Failure)
 import qualified Test.QuickCheck as QC
+import Witch (unsafeInto, into)
 
 data UnitTestOptions = UnitTestOptions
   { rpcInfo     :: Fetch.RpcInfo
@@ -206,7 +207,7 @@ exploreStep UnitTestOptions{..} bs = do
   Stepper.evm $ do
     cs <- use (#env % #contracts)
     abiCall testParams (Right bs)
-    let (Method _ inputs sig _ _) = fromMaybe (internalError "unknown abi call") $ Map.lookup (num $ word $ BS.take 4 bs) dapp.abiMap
+    let Method _ inputs sig _ _ = fromMaybe (internalError "unknown abi call") $ Map.lookup (unsafeInto $ word $ BS.take 4 bs) dapp.abiMap
         types = snd <$> inputs
     let ?context = DappContext dapp cs
     this <- fromMaybe (internalError "unknown target") <$> (use (#env % #contracts % at testParams.address))
@@ -495,7 +496,7 @@ decodeCalls b = fromMaybe (internalError "could not decode replay data") $ do
   pure $ unList <$> v
   where
     unList (List [BS caller', BS target, BS cd, BS ts]) =
-      (num (word caller'), num (word target), cd, word ts)
+      (unsafeInto (word caller'), unsafeInto (word target), cd, word ts)
     unList _ = internalError "fix me with better types"
 
 -- | Runs an invariant test, calls the invariant before execution begins
@@ -557,9 +558,9 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
          args <- generate $ genAbiValue (AbiTupleType $ Vector.fromList types)
          let cd = abiMethod (sig <> "(" <> intercalate "," ((pack . show) <$> types) <> ")") args
          -- increment timestamp with random amount
-         timepassed <- num <$> generate (arbitrarySizedNatural :: Gen Word32)
+         timepassed <- into <$> generate (arbitrarySizedNatural :: Gen Word32)
          let ts = fromMaybe (internalError "symbolic timestamp not supported here") $ maybeLitWord vm.block.timestamp
-         pure (caller', target, cd, num ts + timepassed)
+         pure (caller', target, cd, into ts + timepassed)
  let opts' = opts { testParams = testParams {address = target, caller = caller', timestamp = timestamp'}}
      thisCallRLP = List [BS $ word160Bytes caller', BS $ word160Bytes target, BS cd, BS $ word256Bytes timestamp']
  -- set the timestamp
@@ -647,8 +648,8 @@ runOne opts@UnitTestOptions{..} vm testName args = do
         <*> Stepper.evm get
   if success
   then
-     let gasSpent = num testParams.gasCall - vm'.state.gas
-         gasText = pack $ show (fromIntegral gasSpent :: Integer)
+     let gasSpent = testParams.gasCall - vm'.state.gas
+         gasText = pack $ show (into gasSpent :: Integer)
      in
         pure
           ("\x1b[32m[PASS]\x1b[0m "
@@ -909,7 +910,7 @@ formatTestLog events (LogEntry _ args (topic:_)) =
                   _ -> internalError "shouldn't happen"
             in Just $ unquote key <> ": " <> val
           showDecimal dec val =
-            pack $ show $ Decimal (num dec) val
+            pack $ show $ Decimal (unsafeInto dec) val
           log_named_decimal =
             case args of
               (ConcreteBuf b) ->
@@ -939,7 +940,7 @@ makeTxCall params (cd, cdProps) = do
   assign (#state % #gas) params.gasCall
   origin' <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (#env % #contracts % at params.origin)
   let originBal = origin'.balance
-  when (originBal < params.gasprice * (num params.gasCall)) $ internalError "insufficient balance for gas cost"
+  when (originBal < params.gasprice * (into params.gasCall)) $ internalError "insufficient balance for gas cost"
   vm <- get
   put $ initTx vm
 

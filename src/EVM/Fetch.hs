@@ -221,7 +221,7 @@ oracle solvers info q = do
       case info of
         Nothing -> pure (continue 0)
         Just (n, url) ->
-         fetchSlotFrom n url addr (fromIntegral slot) >>= \case
+         fetchSlotFrom n url addr slot >>= \case
            Just x  -> pure (continue x)
            Nothing ->
              internalError $ "oracle error: " ++ show q

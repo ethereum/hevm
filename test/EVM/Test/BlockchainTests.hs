@@ -35,6 +35,7 @@ import Witherable (Filterable, catMaybes)
 import Test.Tasty
 import Test.Tasty.ExpectedFailure
 import Test.Tasty.HUnit
+import Witch (into, unsafeInto)
 
 type Storage = Map W256 W256
 
@@ -358,7 +359,7 @@ fromBlockchainCase' block tx preState postState =
          , caller        = litAddr origin
          , initialStorage = EmptyStore
          , origin        = origin
-         , gas           = tx.gasLimit  - fromIntegral (txGasCost feeSchedule tx)
+         , gas           = tx.gasLimit - txGasCost feeSchedule tx
          , baseFee       = block.baseFee
          , priorityFee   = priorityFee tx block.baseFee
          , gaslimit      = tx.gasLimit
@@ -417,7 +418,7 @@ validateTx tx block cs = do
   origin        <- sender tx
   originBalance <- (view #balance) <$> view (at origin) cs'
   originNonce   <- (view #nonce)   <$> view (at origin) cs'
-  let gasDeposit = (effectiveprice tx block.baseFee) * (num tx.gasLimit)
+  let gasDeposit = (effectiveprice tx block.baseFee) * (into tx.gasLimit)
   if gasDeposit + tx.value <= originBalance
     && tx.nonce == originNonce && block.baseFee <= maxBaseFee tx
   then Just ()
@@ -437,7 +438,7 @@ checkTx tx block prestate = do
                         RuntimeCode (ConcreteRuntimeCode b) -> not (BS.null b)
                         _ -> True
       badNonce = prevNonce /= 0
-      initCodeSizeExceeded = BS.length tx.txdata > (num maxCodeSize * 2)
+      initCodeSizeExceeded = BS.length tx.txdata > (unsafeInto maxCodeSize * 2)
   if isCreate && (badNonce || nonEmptyAccount || initCodeSizeExceeded)
   then mzero
   else
@@ -448,7 +449,7 @@ vmForCase x =
   let
     a = x.checkContracts
     cs = Map.map fst a
-    st = Map.mapKeys num $ Map.map snd a
+    st = Map.mapKeys into $ Map.map snd a
     vm = makeVm x.vmOpts
       & set (#env % #contracts) cs
       & set (#env % #storage) (ConcreteStore st)

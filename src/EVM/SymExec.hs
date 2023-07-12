@@ -46,6 +46,7 @@ import GHC.Conc (getNumProcessors)
 import GHC.Generics (Generic)
 import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
+import Witch (into, unsafeInto)
 
 -- | A method name, and the (ordered) types of it's arguments
 data Sig = Sig Text [AbiType]
@@ -145,9 +146,9 @@ symCalldata sig typesignature concreteArgs base =
     mkArg typ "<symbolic>" n = symAbiArg (T.pack $ "arg" <> show n) typ
     mkArg typ arg _ =
       case makeAbiValue typ arg of
-        AbiUInt _ w -> St [] . Lit . num $ w
-        AbiInt _ w -> St [] . Lit . num $ w
-        AbiAddress w -> St [] . Lit . num $ w
+        AbiUInt _ w -> St [] . Lit . into $ w
+        AbiInt _ w -> St [] . Lit . unsafeInto $ w
+        AbiAddress w -> St [] . Lit . into $ w
         AbiBool w -> St [] . Lit $ if w then 1 else 0
         _ -> internalError "TODO"
     calldatas = zipWith3 mkArg typesignature args [1..]
@@ -326,7 +327,7 @@ maxIterationsReached _ Nothing = Nothing
 maxIterationsReached vm (Just maxIter) =
   let codelocation = getCodeLocation vm
       (iters, _) = view (at codelocation % non (0, [])) vm.iterations
-  in if num maxIter <= iters
+  in if unsafeInto maxIter <= iters
      then Map.lookup (codelocation, iters - 1) vm.cache.path
      else Nothing
 
@@ -334,7 +335,7 @@ askSmtItersReached :: VM -> Integer -> Bool
 askSmtItersReached vm askSmtIters = let
     codelocation = getCodeLocation vm
     (iters, _) = view (at codelocation % non (0, [])) vm.iterations
-  in askSmtIters <= num iters
+  in askSmtIters <= into iters
 
 {- | Loop head detection heuristic
 
@@ -349,7 +350,7 @@ isLoopHead Naive _ = Just True
 isLoopHead StackBased vm = let
     loc = getCodeLocation vm
     oldIters = Map.lookup loc vm.iterations
-    isValid (Lit wrd) = wrd <= num (maxBound :: Int) && isValidJumpDest vm (num wrd)
+    isValid (Lit wrd) = wrd <= unsafeInto (maxBound :: Int) && isValidJumpDest vm (unsafeInto wrd)
     isValid _ = False
   in case oldIters of
        Just (_, oldStack) -> Just $ filter isValid oldStack == filter isValid vm.state.stack
@@ -823,7 +824,7 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
       | otherwise =
           [ "Storage:"
           , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc ->
-              ("Addr " <> (T.pack . show . Addr . num $ key)
+              ("Addr " <> (T.pack $ show (unsafeInto key :: Addr))
                 <> ": " <> (T.pack $ show (Map.toList val))) : acc
             ) mempty store
           , ""

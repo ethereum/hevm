@@ -55,6 +55,7 @@ import Graphics.Vty qualified as V
 import System.Console.Haskeline qualified as Readline
 import Paths_hevm qualified as Paths
 import Text.Wrap
+import Witch (into)
 
 data Name
   = AbiPane
@@ -861,7 +862,7 @@ currentSrcMap dapp vm = do
 drawStackPane :: UiVmState -> UiWidget
 drawStackPane ui =
   let
-    gasText = showWordExact (num ui.vm.state.gas)
+    gasText = showWordExact (into ui.vm.state.gas)
     labelText = txt ("Gas available: " <> gasText <> "; stack:")
     stackList = list StackPane (Vec.fromList $ zip [(1 :: Int)..] (simplify <$> ui.vm.state.stack)) 2
   in hBorderWithLabel labelText <=>

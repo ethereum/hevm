@@ -37,6 +37,7 @@ import Test.Tasty.Runners hiding (Failure, Success)
 import Test.Tasty.ExpectedFailure
 import Text.RE.TDFA.String
 import Text.RE.Replace
+import Witch (into, unsafeInto)
 
 import Optics.Core hiding (pre, re)
 import Optics.State
@@ -125,6 +126,15 @@ tests = testGroup "hevm"
         let e = ReadWord (Lit 0x0) (CopySlice (Lit 0x0) (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc) (Lit 0x6) (ConcreteBuf "\255\255\255\255\255\255") (ConcreteBuf ""))
         b <- checkEquiv e (Expr.simplify e)
         assertBool "Simplifier failed" b
+    , testCase "stripWrites-overflow" $ do
+        -- below eventually boils down to
+        -- unsafeInto (0xf0000000000000000000000000000000000000000000000000000000000000+1) :: Int
+        -- which failed before
+        let
+          a = ReadByte (Lit 0xf0000000000000000000000000000000000000000000000000000000000000) (WriteByte (And (SHA256 (ConcreteBuf "")) (Lit 0x1)) (LitByte 0) (ConcreteBuf ""))
+          b = Expr.simplify a
+        ret <- checkEquiv a b
+        assertBool "must be equivalent" ret
     ]
   -- These tests fuzz the simplifier by generating a random expression,
   -- applying some simplification rules, and then using the smt encoding to
@@ -1724,7 +1734,7 @@ tests = testGroup "hevm"
             verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
 
           let storeCex = cex.store
-              addrC = W256 $ num $ createAddress ethrunAddress 1
+              addrC = into $ createAddress ethrunAddress 1
               addrA = W256 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
               testCex = Map.size storeCex == 2 &&
                         case (Map.lookup addrC storeCex, Map.lookup addrA storeCex) of
@@ -1825,7 +1835,7 @@ tests = testGroup "hevm"
             }
             |]
           (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
-          let addr =  W256 $ num $ createAddress ethrunAddress 1
+          let addr = into $ createAddress ethrunAddress 1
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
                           Just s -> Map.size s == 2 &&
@@ -1848,7 +1858,7 @@ tests = testGroup "hevm"
             }
             |]
           (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
-          let addr = W256 $ num $ createAddress ethrunAddress 1
+          let addr = into $ createAddress ethrunAddress 1
               a = getVar cex "arg1"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
@@ -2217,7 +2227,7 @@ tests = testGroup "hevm"
           Just aPrgm <- yul "" $ T.pack $ unlines filteredASym
           Just bPrgm <- yul "" $ T.pack $ unlines filteredBSym
           procs <- getNumProcessors
-          withSolvers CVC5 (num procs) (Just 100) $ \s -> do
+          withSolvers CVC5 (unsafeInto procs) (Just 100) $ \s -> do
             res <- equivalenceCheck s aPrgm bPrgm opts (mkCalldata Nothing [])
             end <- getCurrentTime
             case any isCex res of
