@@ -22,11 +22,14 @@
   outputs = { self, nixpkgs, flake-utils, solidity, ethereum-tests, foundry, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
+        # use latest z3
+        z3-latest = pkgs.z3_4_12;
+
         pkgs = nixpkgs.legacyPackages.${system};
         testDeps = with pkgs; [
           go-ethereum
           solc
-          z3
+          z3-latest
           cvc5
           git
           foundry.defaultPackage.${system}
@@ -78,7 +81,7 @@
           buildInputs = [ makeWrapper ];
           postBuild = ''
             wrapProgram $out/bin/hevm \
-              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3 cvc5 ])}"
+              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3-latest cvc5 ])}"
           '';
         };
 
