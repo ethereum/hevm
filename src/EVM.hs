@@ -937,6 +937,10 @@ transfer _ _ (Lit 0) = pure ()
 transfer src dst val = do
   sb <- preuse $ #env % #contracts % ix src % #balance
   db <- preuse $ #env % #contracts % ix dst % #balance
+  baseState <- use (#config % #baseState)
+  let mkc = case baseState of
+              AbstractBase -> unknownContract
+              EmptyBase -> emptyContract
   case (sb, db) of
     -- both sender and recipient in state
     (Just srcBal, Just _) ->
@@ -947,13 +951,11 @@ transfer src dst val = do
           (#env % #contracts % ix dst % #balance) %= (`Expr.add` val)
     -- sender not in state
     (Nothing, Just _) -> do
-      let c = unknownContract src
-      (#env % #contracts) %= (Map.insert src c)
+      (#env % #contracts) %= (Map.insert src (mkc src))
       transfer src dst val
     -- recipient not in state
     (_ , Nothing) -> do
-      let c = unknownContract dst
-      (#env % #contracts) %= (Map.insert dst c)
+      (#env % #contracts) %= (Map.insert dst (mkc dst))
       transfer src dst val
 
 -- | Checks a *CALL for failure; OOG, too many callframes, memory access etc.
@@ -1304,8 +1306,8 @@ accountEmpty c =
     RuntimeCode (ConcreteRuntimeCode "") -> True
     RuntimeCode (SymbolicRuntimeCode b) -> null b
     _ -> False
-  -- TODO: should we branch here?
   && c.nonce == (Just 0)
+  -- TODO: handle symbolic balance...
   && c.balance == Lit 0
 
 -- * How to finalize a transaction
