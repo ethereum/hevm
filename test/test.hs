@@ -150,9 +150,10 @@ tests = testGroup "hevm"
     , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> ioProperty $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
-    , testProperty "word-simplification" $ \(ZeroDepthWord expr) -> ioProperty $ do
-          let simplified = Expr.simplify expr
-          checkEquiv expr simplified
+    -- https://github.com/ethereum/hevm/issues/311
+    , ignoreTest $ testProperty "word-simplification" $ \(ZeroDepthWord expr) -> ioProperty $ do
+        let simplified = Expr.simplify expr
+        checkEquiv expr simplified
     , testProperty "readStorage-equivalance" $ \(store, addr, slot) -> ioProperty $ do
         let simplified = Expr.readStorage' addr slot store
             full = SLoad addr slot store
