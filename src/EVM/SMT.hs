@@ -480,7 +480,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   (define-const emptyBuf Buf ((as const Buf) #b00000000))
 
   ; stores
-  (define-const emptyBuf Store ((as const Store) #x0000000000000000000000000000000000000000000000000000000000000000))
+  (define-const emptyStore Store ((as const Store) #x0000000000000000000000000000000000000000000000000000000000000000))
 
   (define-fun readWord ((idx Word) (buf Buf)) Word
     (concat
