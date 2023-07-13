@@ -10,6 +10,7 @@ import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Vector qualified as V
 
+import Optics.Core
 import EVM (makeVm)
 import EVM.ABI
 import EVM.Fetch
@@ -37,7 +38,7 @@ tests = testGroup "rpc"
                                                    , prevRandao
                                                    )
 
-        assertEqual "coinbase" (Addr 0xea674fdde714fd979de3edf0f56aa9716b898ec8) cb
+        assertEqual "coinbase" (LitAddr 0xea674fdde714fd979de3edf0f56aa9716b898ec8) cb
         assertEqual "number" (BlockNumber numb) block
         assertEqual "basefee" 38572377838 basefee
         assertEqual "prevRan" 11049842297455506 prevRan
@@ -51,7 +52,7 @@ tests = testGroup "rpc"
                                                    , prevRandao
                                                    )
 
-        assertEqual "coinbase" (Addr 0x690b9a9e9aa1c9db991c7721a92d351db4fac990) cb
+        assertEqual "coinbase" (LitAddr 0x690b9a9e9aa1c9db991c7721a92d351db4fac990) cb
         assertEqual "number" (BlockNumber numb) block
         assertEqual "basefee" 22163046690 basefee
         assertEqual "prevRan" 0x2267531ab030ed32fd5f2ef51f81427332d0becbd74fe7f4cd5684ddf4b287e0 prevRan
@@ -73,11 +74,11 @@ tests = testGroup "rpc"
         postVm <- withSolvers Z3 1 Nothing $ \solvers ->
           Stepper.interpret (oracle solvers (Just (BlockNumber blockNum, testRpc))) vm Stepper.runFully
         let
-          postStore = case postVm.env.storage of
-            ConcreteStore s -> s
-            _ -> error "ConcreteStore expected"
-          wethStore = fromJust $ Map.lookup 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 postStore
-          receiverBal = fromJust $ Map.lookup (keccak' (word256Bytes 0xdead <> word256Bytes 0x3)) wethStore
+          wethStore = (fromJust $ Map.lookup (LitAddr 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2) postVm.env.contracts).storage
+          wethStore' = case wethStore of
+            ConcreteStore _ s -> s
+            _ -> error "Expecting concrete store"
+          receiverBal = fromJust $ Map.lookup (keccak' (word256Bytes 0xdead <> word256Bytes 0x3)) wethStore'
           msg = case postVm.result of
             Just (VMSuccess m) -> m
             _ -> error "VMSuccess expected"
@@ -103,28 +104,28 @@ tests = testGroup "rpc"
 weth9VM :: W256 -> (Expr Buf, [Prop]) -> IO VM
 weth9VM blockNum calldata' = do
   let
-    caller' = Lit 0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e
+    caller' = LitAddr 0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e
     weth9 = Addr 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
     callvalue' = Lit 0
   vmFromRpc blockNum calldata' callvalue' caller' weth9
 
-vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EWord -> Addr -> IO VM
-vmFromRpc blockNum calldata' callvalue' caller' address' = do
-  ctrct <- fetchContractFrom (BlockNumber blockNum) testRpc address' >>= \case
-        Nothing -> error $ "contract not found: " <> show address'
+vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EAddr -> Addr -> IO VM
+vmFromRpc blockNum calldata callvalue caller address = do
+  ctrct <- fetchContractFrom (BlockNumber blockNum) testRpc address >>= \case
+        Nothing -> error $ "contract not found: " <> show address
         Just contract' -> return contract'
 
   blk <- fetchBlockFrom (BlockNumber blockNum) testRpc >>= \case
     Nothing -> error "could not fetch block"
     Just b -> pure b
 
-  pure $ makeVm $ VMOpts
+  pure $ (makeVm $ VMOpts
     { contract      = ctrct
-    , calldata      = calldata'
-    , value         = callvalue'
-    , address       = address'
-    , caller        = caller'
-    , origin        = 0xacab
+    , calldata      = calldata
+    , value         = callvalue
+    , address       = LitAddr address
+    , caller        = caller
+    , origin        = LitAddr 0xacab
     , gas           = 0xffffffffffffffff
     , gaslimit      = 0xffffffffffffffff
     , baseFee       = blk.baseFee
@@ -139,10 +140,10 @@ vmFromRpc blockNum calldata' callvalue' caller' address' = do
     , schedule      = blk.schedule
     , chainId       = 1
     , create        = False
-    , initialStorage = EmptyStore
+    , baseState     = EmptyBase
     , txAccessList  = mempty
     , allowFFI      = False
-    }
+    }) & set (#cache % #fetched % at address) (Just ctrct)
 
 testRpc :: Text
 testRpc = "https://eth-mainnet.alchemyapi.io/v2/vpeKFsEF6PHifHzdtcwXSDbhV3ym5Ro4"
