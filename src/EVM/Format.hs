@@ -521,12 +521,10 @@ formatExpr = go
         , ")"
         , formatExpr prev
         ]
-      ConcreteStore a s -> T.unlines
+      ConcreteStore s -> T.unlines
         [ "(ConcreteStore"
         , indent 2 $ T.unlines
-          [ "addr:"
-          , indent 2 $ formatExpr a
-          , "vals:"
+          [ "vals:"
           , indent 2 $ T.unlines $ fmap (T.pack . show) $ Map.toList s
           ]
         , ")"

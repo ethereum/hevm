@@ -572,7 +572,7 @@ stripWrites off size = \case
 -- storage lookups much easier. If the store is backed by an AbstractStore we
 -- always return a symbolic value.
 readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
-readStorage slot store@(ConcreteStore _ s) = case slot of
+readStorage slot store@(ConcreteStore s) = case slot of
   Lit l -> Lit <$> Map.lookup l s
   _ -> Just $ SLoad slot store
 readStorage slot' s@(AbstractStore _) = Just $ SLoad slot' s
@@ -599,7 +599,7 @@ readStorage' loc store = case readStorage loc store of
 -- ConcreteStore, otherwise we add a new write to the storage expression.
 writeStorage :: Expr EWord -> Expr EWord -> Expr Storage -> Expr Storage
 writeStorage k@(Lit key) v@(Lit val) store = case store of
-  ConcreteStore a s -> ConcreteStore a (Map.insert key val s)
+  ConcreteStore s -> ConcreteStore (Map.insert key val s)
   _ -> SStore k v store
 writeStorage key val store@(SStore key' val' prev)
      = if key == key'
@@ -616,10 +616,10 @@ writeStorage key val store@(SStore key' val' prev)
 writeStorage key val store = SStore key val store
 
 
-getAddr :: Expr Storage -> Expr EAddr
+getAddr :: Expr Storage -> Maybe (Expr EAddr)
 getAddr (SStore _ _ p) = getAddr p
-getAddr (AbstractStore a) = a
-getAddr (ConcreteStore a _) = a
+getAddr (AbstractStore a) = Just a
+getAddr (ConcreteStore _) = Nothing
 getAddr (GVar _) = error "cannot determine addr of a GVar"
 
 

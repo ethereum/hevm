@@ -153,7 +153,7 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
   balance <- MaybeT $ fetch (QueryBalance addr)
 
   pure $
-    initialContract (RuntimeCode (ConcreteRuntimeCode code)) (LitAddr addr)
+    initialContract (RuntimeCode (ConcreteRuntimeCode code))
       & set #nonce    (Just nonce)
       & set #balance  (Lit balance)
       & set #external True
@@ -216,7 +216,7 @@ oracle solvers info q = do
 
     PleaseFetchContract addr continue -> do
       contract <- case info of
-        Nothing -> return $ Just $ emptyContract (LitAddr addr)
+        Nothing -> return $ Just emptyContract
         Just (n, url) -> fetchContractFrom n url addr
       case contract of
         Just x -> return $ continue x

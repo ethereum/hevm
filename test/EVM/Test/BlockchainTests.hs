@@ -87,7 +87,7 @@ testsFromFile file problematicTests = do
   parsed <- parseBCSuite <$> LazyByteString.readFile file
   case parsed of
    Left "No cases to check." -> pure [] -- error "no-cases ok"
-   Left _err -> pure [] -- error err
+   Left _err -> pure [] -- error _err
    Right allTests -> pure $
      (\(name, x) -> testCase' name $ runVMTest True (name, x)) <$> Map.toList allTests
   where
@@ -175,7 +175,7 @@ checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
         ])
     check = x.checkContracts
     expected = x.testExpectation
-    actual = forceConcreteAddrs vm.env.contracts
+    actual = fmap (clearZeroStorage . clearOrigStorage) $ forceConcreteAddrs vm.env.contracts
 
   when diff $ do
     putStr (unwords reason)
@@ -199,7 +199,7 @@ checkExpectation diff x vm = do
 -- quotient account state by nullness
 (~=) :: Map Addr Contract -> Map Addr Contract -> Bool
 (~=) cs1 cs2 =
-    let nullAccount = EVM.initialContract (RuntimeCode (ConcreteRuntimeCode "")) (LitAddr 0x0)
+    let nullAccount = EVM.initialContract (RuntimeCode (ConcreteRuntimeCode ""))
         padNewAccounts cs ks = Map.union cs $ Map.fromList [(k, nullAccount) | k <- ks]
         padded_cs1 = padNewAccounts cs1 (Map.keys cs2)
         padded_cs2 = padNewAccounts cs2 (Map.keys cs1)
@@ -216,7 +216,7 @@ c1 === c2 =
 
 checkExpectedContracts :: VM -> Map Addr Contract -> (Bool, Bool, Bool, Bool, Bool)
 checkExpectedContracts vm expected =
-  let cs = forceConcreteAddrs vm.env.contracts
+  let cs = fmap (clearZeroStorage . clearOrigStorage) $ forceConcreteAddrs vm.env.contracts
   in ( (expected ~= cs)
      , (clearBalance <$> expected) ~= (clearBalance <$> cs)
      , (clearNonce   <$> expected) ~= (clearNonce   <$> cs)
@@ -224,11 +224,20 @@ checkExpectedContracts vm expected =
      , (clearCode    <$> expected) ~= (clearCode    <$> cs)
      )
 
+clearOrigStorage :: Contract -> Contract
+clearOrigStorage = set #origStorage (ConcreteStore mempty)
+
+clearZeroStorage :: Contract -> Contract
+clearZeroStorage c = case c.storage of
+  ConcreteStore m -> let store = Map.filter (/= 0) m
+                     in set #storage (ConcreteStore store) c
+  _ -> error "Internal Error: unexpected abstract store"
+
 clearStorage :: Contract -> Contract
 clearStorage c = c { storage = clear c.storage }
   where
     clear :: Expr Storage -> Expr Storage
-    clear (ConcreteStore a _) = ConcreteStore a mempty
+    clear (ConcreteStore _) = ConcreteStore mempty
     clear _ = error "Internal Error: unexpected abstract store"
 
 clearBalance :: Contract -> Contract
@@ -246,10 +255,11 @@ instance FromJSON Contract where
     storage <- v .: "storage"
     balance <- v .: "balance"
     nonce   <- v .: "nonce"
-    pure $ EVM.initialContract code (error "TODO")
+    -- using LitAddr 0 here is a hack, but it doesn't matter since we only need to have the address on the base store for symbolic execution...
+    pure $ EVM.initialContract code
              & #balance .~ (Lit balance)
              & #nonce   ?~ nonce
-             & #storage .~ (ConcreteStore (error "TODO") storage)
+             & #storage .~ (ConcreteStore storage)
 
   parseJSON invalid =
     JSON.typeMismatch "Contract" invalid
@@ -339,7 +349,7 @@ fromBlockchainCase' block tx preState postState =
       (_, Nothing) -> Left (if isCreate then FailedCreate else InvalidTx)
       (Just origin, Just checkState) -> Right $ Case
         (VMOpts
-         { contract      = EVM.initialContract theCode toAddr
+         { contract      = EVM.initialContract theCode
          , calldata      = (cd, [])
          , value         = Lit tx.value
          , address       = toAddr

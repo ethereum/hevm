@@ -228,12 +228,12 @@ instance FromJSON Transaction where
     JSON.typeMismatch "Transaction" invalid
 
 accountAt :: Expr EAddr -> Getter (Map (Expr EAddr) Contract) Contract
-accountAt a = (at a) % (to $ fromMaybe (newAccount a))
+accountAt a = (at a) % (to $ fromMaybe newAccount)
 
 touchAccount :: Expr EAddr -> Map (Expr EAddr) Contract -> Map (Expr EAddr) Contract
-touchAccount a = Map.insertWith (flip const) a (newAccount a)
+touchAccount a = Map.insertWith (flip const) a newAccount
 
-newAccount :: Expr EAddr -> Contract
+newAccount :: Contract
 newAccount = initialContract (RuntimeCode (ConcreteRuntimeCode ""))
 
 -- | Increments origin nonce and pays gas deposit
@@ -256,7 +256,7 @@ initTx vm = let
     gasLimit = vm.tx.gaslimit
     coinbase = vm.block.coinbase
     value    = vm.state.callvalue
-    toContract = initialContract vm.state.code toAddr
+    toContract = initialContract vm.state.code
     preState = setupTx origin coinbase gasPrice gasLimit vm.env.contracts
     oldBalance = view (accountAt toAddr % #balance) preState
     creation = vm.tx.isCreate

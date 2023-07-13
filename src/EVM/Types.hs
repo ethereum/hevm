@@ -330,7 +330,7 @@ data Expr (a :: EType) where
 
   -- storage
 
-  ConcreteStore  :: Expr EAddr -> (Map W256 W256) -> Expr Storage
+  ConcreteStore  :: (Map W256 W256) -> Expr Storage
   AbstractStore  :: Expr EAddr -> Expr Storage
 
   SLoad          :: Expr EWord         -- index
@@ -755,8 +755,8 @@ instance Monoid Cache where
 unifyCachedContract :: Contract -> Contract -> Contract
 unifyCachedContract a b = a { storage = merged }
   where merged = case (a.storage, b.storage) of
-                   (ConcreteStore a' sa, ConcreteStore _ sb) ->
-                     ConcreteStore a' (mappend sa sb)
+                   (ConcreteStore sa, ConcreteStore sb) ->
+                     ConcreteStore (mappend sa sb)
                    _ -> a.storage
 
 
@@ -1034,7 +1034,6 @@ newtype W64 = W64 Data.Word.Word64
     ( Num, Integral, Real, Ord, Generic
     , Bits , FiniteBits, Enum, Eq , Bounded
     )
-instance JSON.FromJSON W64
 
 instance Read W64 where
   readsPrec _ "0x" = [(0, "")]
@@ -1045,6 +1044,14 @@ instance Show W64 where
 
 instance JSON.ToJSON W64 where
   toJSON x = JSON.String  $ T.pack $ show x
+
+instance FromJSON W64 where
+  parseJSON v = do
+    s <- T.unpack <$> parseJSON v
+    case reads s of
+      [(x, "")]  -> return x
+      _          -> fail $ "invalid hex word (" ++ s ++ ")"
+
 
 word64Field :: JSON.Object -> Key -> JSON.Parser Word64
 word64Field x f = ((readNull 0) . T.unpack)
@@ -1146,7 +1153,7 @@ maybeLitAddr (LitAddr a) = Just a
 maybeLitAddr _ = Nothing
 
 maybeConcreteStore :: Expr Storage -> Maybe (Map W256 W256)
-maybeConcreteStore (ConcreteStore _ s) = Just s
+maybeConcreteStore (ConcreteStore s) = Just s
 maybeConcreteStore _ = Nothing
 
 

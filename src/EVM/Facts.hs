@@ -123,7 +123,7 @@ toLitW = \case
 
 toLitStore :: Expr Storage -> Err (Map W256 W256)
 toLitStore = \case
-  ConcreteStore _ s -> Right s
+  ConcreteStore s -> Right s
   s -> Left $ "cannot serialize symbolic store: " <> show s
 
 toLitAddr :: Expr EAddr -> Err Addr
@@ -181,7 +181,7 @@ apply1 vm fact =
   case fact of
     CodeFact    {..} -> flip execState vm $ do
       let a = LitAddr addr
-      assign (#env % #contracts % at a) (Just (EVM.initialContract (RuntimeCode (ConcreteRuntimeCode blob)) a))
+      assign (#env % #contracts % at a) (Just (EVM.initialContract (RuntimeCode (ConcreteRuntimeCode blob))))
       when (vm.state.contract == a) $ EVM.loadContract a
     StorageFact {..} ->
       vm & over (#env % #contracts % ix (LitAddr addr) % #storage) (writeStorage (Lit which) (Lit what))
@@ -195,7 +195,7 @@ apply2 vm fact =
   case fact of
     CodeFact    {..} -> flip execState vm $ do
       let a = LitAddr addr
-      assign (#cache % #fetched % at addr) (Just (EVM.initialContract (RuntimeCode (ConcreteRuntimeCode blob)) a))
+      assign (#cache % #fetched % at addr) (Just (EVM.initialContract (RuntimeCode (ConcreteRuntimeCode blob))))
       when (vm.state.contract == a) $ EVM.loadContract a
     StorageFact {..} ->
         vm & over (#cache % #fetched % ix addr % #storage) (writeStorage (Lit which) (Lit what))

@@ -205,15 +205,15 @@ abstractContract code addr = Contract
   }
 
 -- | Initialize an empty contract without code
-emptyContract :: Expr EAddr -> Contract
-emptyContract addr = initialContract (RuntimeCode (ConcreteRuntimeCode "")) addr
+emptyContract :: Contract
+emptyContract = initialContract (RuntimeCode (ConcreteRuntimeCode ""))
 
 -- | Initialize empty contract with given code
-initialContract :: ContractCode -> Expr EAddr -> Contract
-initialContract code addr = Contract
+initialContract :: ContractCode -> Contract
+initialContract code = Contract
   { code        = code
-  , storage     = ConcreteStore addr mempty
-  , origStorage = ConcreteStore addr mempty
+  , storage     = ConcreteStore mempty
+  , origStorage = ConcreteStore mempty
   , balance     = Lit 0
   , nonce       = if isCreation code then Just 1 else Just 0
   , codehash    = hashcode code
@@ -940,7 +940,7 @@ transfer src dst val = do
   baseState <- use (#config % #baseState)
   let mkc = case baseState of
               AbstractBase -> unknownContract
-              EmptyBase -> emptyContract
+              EmptyBase -> const emptyContract
   case (sb, db) of
     -- both sender and recipient in state
     (Just srcBal, Just _) ->
@@ -1798,7 +1798,7 @@ create self this xSize xGas' xValue xs newAddr initCode = do
             partial $ UnexpectedSymbolicArg vm0.state.pc "initcode must have a concrete prefix" []
           Just c -> do
             let
-              newContract = initialContract c newAddr
+              newContract = initialContract c
               newContext  =
                 CreationContext { address   = newAddr
                                 , codehash  = newContract.codehash
@@ -1816,7 +1816,7 @@ create self this xSize xGas' xValue xs newAddr initCode = do
             let
               resetStorage :: Expr Storage -> Expr Storage
               resetStorage = \case
-                  ConcreteStore a _ -> ConcreteStore a mempty
+                  ConcreteStore _ -> ConcreteStore mempty
                   AbstractStore a -> AbstractStore a
                   SStore _ _ p -> resetStorage p
                   GVar _  -> error "unexpected global variable"
@@ -1852,7 +1852,7 @@ replaceCode target newCode =
       Just now -> case now.code of
         InitCode _ _ ->
           put . Just $
-            ((initialContract newCode target) :: Contract)
+            ((initialContract newCode) :: Contract)
               { balance = now.balance
               , nonce = now.nonce
               , storage = now.storage

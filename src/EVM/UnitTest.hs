@@ -950,7 +950,7 @@ makeTxCall params (cd, cdProps) = do
   #constraints %= (<> cdProps)
   assign (#state % #caller) params.caller
   assign (#state % #gas) params.gasCall
-  origin <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode "")) params.origin) <$> use (#env % #contracts % at params.origin)
+  origin <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (#env % #contracts % at params.origin)
   let insufficientBal = maybe False (\b -> b < params.gasprice * (num params.gasCall)) (maybeLitWord origin.balance)
   when insufficientBal $ error "insufficient balance for gas cost"
   vm <- get
@@ -960,7 +960,7 @@ initialUnitTestVm :: UnitTestOptions -> SolcContract -> VM
 initialUnitTestVm (UnitTestOptions {..}) theContract =
   let
     vm = makeVm $ VMOpts
-           { contract = initialContract (InitCode theContract.creationCode mempty) testParams.address
+           { contract = initialContract (InitCode theContract.creationCode mempty)
            , calldata = mempty
            , value = Lit 0
            , address = testParams.address
@@ -984,8 +984,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
            , txAccessList = mempty -- TODO: support unit test access lists???
            , allowFFI = ffiAllowed
            }
-    creator =
-      emptyContract (LitAddr ethrunAddress)
+    creator = emptyContract
         & set #nonce (Just 1)
         & set #balance (Lit testParams.balanceCreate)
   in vm

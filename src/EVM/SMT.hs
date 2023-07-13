@@ -26,7 +26,7 @@ import qualified Data.List as List
 import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.String.Here
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -155,8 +155,6 @@ assertProps ps =
   prelude
   <> (declareAbstractStores abstractStores)
   <> SMT2 [""] mempty
-  <> (declareConcreteStores concreteStores)
-  <> SMT2 [""] mempty
   <> (declareAddrs addresses)
   <> SMT2 [""] mempty
   <> (declareBufs ps_elim bufs stores)
@@ -186,7 +184,6 @@ assertProps ps =
     storeVals = Map.elems stores
 
     storageReads = Map.unionsWith (<>) $ fmap findStorageReads ps
-    concreteStores = Set.toList $ Set.unions (fmap referencedConcreteStores ps)
     abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores ps)
     addresses = Set.toList $ Set.unions (fmap referencedWAddrs ps)
 
@@ -197,13 +194,6 @@ assertProps ps =
     readAssumes
       = SMT2 ["; read assumptions"] mempty
         <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads ps_elim bufs stores)) mempty
-
-referencedConcreteStores :: TraversableTerm a => a -> Set Builder
-referencedConcreteStores term = foldTerm go mempty term
-  where
-    go = \case
-      ConcreteStore s _ -> Set.singleton (storeName s)
-      _ -> mempty
 
 referencedAbstractStores :: TraversableTerm a => a -> Set Builder
 referencedAbstractStores term = foldTerm go mempty term
@@ -284,7 +274,8 @@ findStorageReads p = Map.fromListWith (<>) $ foldProp go mempty p
   where
     go :: Expr a -> [(Expr EAddr, Set (Expr EWord))]
     go = \case
-      SLoad slot store -> [(Expr.getAddr store, Set.singleton slot) | containsNode isAbstractStore store]
+      SLoad slot store ->
+        [((fromMaybe (error $ "Internal Error: could not extract address from: " <> show store) (Expr.getAddr store)), Set.singleton slot) | containsNode isAbstractStore store]
       _ -> []
 
     isAbstractStore (AbstractStore _) = True
@@ -381,11 +372,6 @@ declareAbstractStores :: [Builder] -> SMT2
 declareAbstractStores names = SMT2 (["; abstract base stores"] <> fmap declare names) mempty
   where
     declare n = "(declare-const " <> n <> " Storage)"
-
-declareConcreteStores :: [Builder] -> SMT2
-declareConcreteStores names = SMT2 (["; concrete base stores"] <> fmap declare names) mempty
-  where
-    declare n = "(define-const " <> n <> " Storage ((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000))"
 
 declareBlockContext :: [(Builder, [Prop])] -> SMT2
 declareBlockContext names = SMT2 (["; block context"] <> concatMap declare names) cexvars
@@ -492,6 +478,9 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
 
   ; buffers
   (define-const emptyBuf Buf ((as const Buf) #b00000000))
+
+  ; stores
+  (define-const emptyBuf Store ((as const Store) #x0000000000000000000000000000000000000000000000000000000000000000))
 
   (define-fun readWord ((idx Word) (buf Buf)) Word
     (concat
@@ -745,7 +734,7 @@ exprToSMT = \case
     "(writeWord " <> encIdx `sp` encVal `sp` encPrev <> ")"
   CopySlice srcIdx dstIdx size src dst ->
     copySlice srcIdx dstIdx size (exprToSMT src) (exprToSMT dst)
-  ConcreteStore a s -> encodeConcreteStore a s
+  ConcreteStore s -> encodeConcreteStore s
   AbstractStore a -> storeName a
   SStore idx val prev ->
     let encIdx = exprToSMT idx
@@ -858,8 +847,8 @@ writeBytes bytes buf = snd $ BS.foldl' wrap (0, exprToSMT buf) bytes
           idxSMT = exprToSMT . Lit . num $ idx
         in (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
 
-encodeConcreteStore :: Expr EAddr -> Map W256 W256 -> Builder
-encodeConcreteStore a s = foldl encodeWrite (storeName a) (Map.toList s)
+encodeConcreteStore :: Map W256 W256 -> Builder
+encodeConcreteStore s = foldl encodeWrite "emptyStore" (Map.toList s)
   where
     encodeWrite prev (key, val) = let
         encKey = exprToSMT (Lit key)

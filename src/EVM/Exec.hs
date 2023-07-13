@@ -18,7 +18,7 @@ ethrunAddress = Addr 0x00a329c0648769a73afac7f9381e08fb43dbea72
 vmForEthrunCreation :: ByteString -> VM
 vmForEthrunCreation creationCode =
   (makeVm $ VMOpts
-    { contract = initialContract (InitCode creationCode mempty) (LitAddr ethrunAddress)
+    { contract = initialContract (InitCode creationCode mempty)
     , calldata = mempty
     , value = Lit 0
     , baseState = EmptyBase
@@ -42,7 +42,7 @@ vmForEthrunCreation creationCode =
     , txAccessList = mempty
     , allowFFI = False
     }) & set (#env % #contracts % at (LitAddr ethrunAddress))
-             (Just (initialContract (RuntimeCode (ConcreteRuntimeCode "")) (LitAddr ethrunAddress)))
+             (Just (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
 
 exec :: State VM VMResult
 exec = do

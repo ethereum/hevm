@@ -626,17 +626,8 @@ expandCex prestate c = c { store = Map.union c.store concretePreStore }
                      . Map.filter (\v -> Expr.containsNode isConcreteStore v.storage)
                      $ (prestate.env.contracts)
     isConcreteStore = \case
-      ConcreteStore _ _ -> True
+      ConcreteStore _ -> True
       _ -> False
-
-findConcretePreStore :: Prop -> Map (Expr EAddr) (Map W256 W256)
-findConcretePreStore p = Map.fromListWith (<>) $ foldProp go mempty p
-  where
-    go :: Expr a -> [(Expr EAddr, Map W256 W256)]
-    go = \case
-      ConcreteStore a s -> [(a,s)]
-      _ -> []
-
 
 type UnsatCache = TVar [Set Prop]
 
@@ -803,7 +794,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
           (Lit ab, Lit bb) -> PBool $ ab /= bb
           (ab, bb) -> if ab == bb then PBool False else ab ./= bb
         storesDiffer = case (ac.storage, bc.storage) of
-          (ConcreteStore aa as, ConcreteStore ba bs) -> PBool $ as /= bs && aa /= ba
+          (ConcreteStore as, ConcreteStore bs) -> PBool $ as /= bs
           (as, bs) -> if as == bs then PBool False else as ./= bs
       in balsDiffer .|| storesDiffer
 
@@ -963,6 +954,6 @@ subModel c
         go = \case
           v@(AbstractStore a)
             -> if a == var
-               then ConcreteStore a val
+               then ConcreteStore val
                else v
           e -> e

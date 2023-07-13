@@ -439,7 +439,7 @@ runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 
 
 vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> VM
 vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
-  let contract = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode)) toAddress
+  let contract = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
                  & set #balance (Lit alloc.balance)
   in (makeVm $ VMOpts
     { contract = contract
@@ -466,7 +466,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
     , txAccessList = mempty
     , allowFFI = False
     }) & set (#env % #contracts % at (LitAddr ethrunAddress))
-             (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty)) (LitAddr ethrunAddress)))
+             (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty))))
        & set (#state % #calldata) calldata'
 
 runCode :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe (Expr Buf))
