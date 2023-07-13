@@ -618,7 +618,7 @@ vmFromCommand cmd = do
           , schedule      = FeeSchedule.berlin
           , chainId       = word (.chainid) 1
           , create        = (.create) cmd
-          , initialState  = EmptyState
+          , baseState     = EmptyBase
           , txAccessList  = mempty -- TODO: support me soon
           , allowFFI      = False
           }
