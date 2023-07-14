@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More consistent error messages
 - Automatic tests are now more reproducible
 - Fixed overflow issue in stripWrites
+- CallDataCopy now correctly wraps around in the symbolic interpreter
 
 ## Changed
 
