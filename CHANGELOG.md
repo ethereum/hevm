@@ -8,8 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ## Fixed
+- CallDataCopy now correctly wraps around in the symbolic interpreter
+
+## Changed
+
+## [0.51.3] - 2023-07-14
+
+## Fixed
 
 - Path joining on Windows
+- Fixed overflow issue in stripWrites
+- Automatic tests are now more reproducible
+
+## Changed
+
+- Removed sha3Crack which has been deprecated for keccakEqs
+
+## Added
+
+- Added flag `-f debug` to add debug flags to cabal/GHC
 
 ## [0.51.2] - 2023-07-11
 
@@ -17,17 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - SMT encoding of Expr now has assertions for the range of environment values that are less than word size (256 bits).
 - Trace now contains the cheat code calls
-- Removed sha3Crack which has been deprecated for keccakEqs
 - More consistent error messages
 - Automatic tests are now more reproducible
 - Fixed overflow issue in stripWrites
-- CallDataCopy now correctly wraps around in the symbolic interpreter
 
 ## Changed
 
 - SMT2 scripts are now being reprocessed to put one sexpr per line. Having sepxrs that span across multiple lines trigers a bug in CVC5.
 - Removing long-running tests so we can finish all unit tests in approx 10 minutes on a current-gen laptop CPU
-- Added flag `-f debug` to add debug flags to cabal/GHC
 - Added git revision to `hevm version`
 
 ## Added
