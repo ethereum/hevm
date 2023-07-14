@@ -815,18 +815,18 @@ tests = testGroup "contract-quickcheck-run"
         -- TODO: By removing external calls, we fuzz less
         --       It should work also when we external calls. Removing for now.
         contrFixed <- fixContractJumps $ removeExtcalls contr
-        runFullcheck contrFixed gaslimit txData
+        checkTraceAndOutputs contrFixed gaslimit txData
       , testCase "calldata-wraparound" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xf), OpPush (Lit 0x1),OpMstore] -- offs, value
               , [OpPush (Lit 0x3), OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- destOffs, offs, size
               , [OpPush (Lit 0x10),OpPush (Lit 0x20),OpReturn] -- offset, datasize
               ]
-        runFullcheck contract 40000 (BS.pack [])
+        checkTraceAndOutputs contract 40000 (BS.pack [])
     ]
 
-runFullcheck :: OpContract -> Int -> ByteString -> IO ()
-runFullcheck contract gasLimit txData = do
+checkTraceAndOutputs :: OpContract -> Int -> ByteString -> IO ()
+checkTraceAndOutputs contract gasLimit txData = do
   evmtoolResult <- getEVMToolRet contract txData gasLimit
   hevmRun <- getHEVMRet contract txData gasLimit
   (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
