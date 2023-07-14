@@ -74,10 +74,10 @@ data VMTrace =
   VMTrace
   { tracePc      :: Int
   , traceOp      :: Int
-  , traceStack   :: [W256]
+  , traceGas     :: Data.Word.Word64
   , traceMemSize :: Data.Word.Word64
   , traceDepth   :: Int
-  , traceGas     :: Data.Word.Word64
+  , traceStack   :: [W256]
   , traceError   :: Maybe String
   } deriving (Generic, Show)
 
@@ -105,6 +105,7 @@ data EVMToolTrace =
     , opName :: String
     , stack :: [W256]
     , error :: Maybe String
+    , gasCost :: Maybe W256
     } deriving (Generic, Show)
 
 instance JSON.FromJSON EVMToolTrace where
@@ -118,6 +119,7 @@ instance JSON.FromJSON EVMToolTrace where
     <*> v .: "opName"
     <*> v .: "stack"
     <*> v .:? "error"
+    <*> v .:? "gasCost"
 
 mkBlockHash:: Int -> Expr 'EWord
 mkBlockHash x = (num x :: Integer) & show & Char8.pack & EVM.Types.keccak' & Lit
@@ -129,7 +131,8 @@ data EVMToolOutput =
   EVMToolOutput
     { output :: ByteStringS
     , gasUsed :: W256
-    , time :: Integer
+    , time :: Maybe Integer
+    , error :: Maybe String
     } deriving (Generic, Show)
 
 instance JSON.FromJSON EVMToolOutput

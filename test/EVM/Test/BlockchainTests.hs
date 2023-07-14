@@ -13,10 +13,11 @@ import EVM.Solvers (withSolvers, Solver(Z3))
 import EVM.Transaction
 import EVM.TTY qualified as TTY
 import EVM.Types hiding (Block, Case)
+import EVM.Test.Tracing (interpretWithTrace, VMTrace, compareTraces, EVMToolTraceOutput(..))
 
+import Control.Monad.State.Strict
 import Control.Arrow ((***), (&&&))
 import Optics.Core
-import Control.Monad
 import Data.Aeson ((.:), (.:?), FromJSON (..))
 import Data.Aeson qualified as JSON
 import Data.Aeson.Types qualified as JSON
@@ -147,7 +148,28 @@ debugVMTest file test = do
   let vm0 = vmForCase x
   result <- withSolvers Z3 0 Nothing $ \solvers ->
     TTY.runFromVM solvers Nothing Nothing emptyDapp vm0
-  void $ checkExpectation True x result
+  void $ checkExpectation False x result
+
+traceVMTest :: String -> String -> IO [VMTrace]
+traceVMTest file test = do
+  repo <- getEnv "HEVM_ETHEREUM_TESTS_REPO"
+  Right allTests <- parseBCSuite <$> LazyByteString.readFile (repo </> file)
+  let x = case filter (\(name, _) -> name == test) $ Map.toList allTests of
+        [(_, x')] -> x'
+        _ -> error "test not found"
+  let vm0 = vmForCase x
+  (result, (_, ts)) <- runStateT (interpretWithTrace (EVM.Fetch.zero 0 (Just 0)) EVM.Stepper.runFully) (vm0, [])
+  pure ts
+
+readTrace :: FilePath -> IO (Either String EVMToolTraceOutput)
+readTrace = JSON.eitherDecodeFileStrict
+
+traceVsGeth :: String -> String -> FilePath -> IO ()
+traceVsGeth file test gethTrace = do
+  hevm <- traceVMTest file test
+  EVMToolTraceOutput ts res <- fromJust <$> (JSON.decodeFileStrict gethTrace :: IO (Maybe EVMToolTraceOutput))
+  _ <- compareTraces hevm ts
+  pure ()
 
 splitEithers :: (Filterable f) => f (Either a b) -> (f a, f b)
 splitEithers =
