@@ -388,7 +388,7 @@ exec1 = do
                     accessMemoryRange xTo xSize $ do
                       next
                       assign (#state % #stack) xs
-                      copyBytesToMemory vm.state.calldata xSize' xFrom xTo'
+                      copyCallBytesToMemory vm.state.calldata xSize' xFrom xTo'
             _ -> underrun
 
         OpCodesize ->
