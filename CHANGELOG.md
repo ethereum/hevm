@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Path joining on Windows
 - Fixed overflow issue in stripWrites
 - Automatic tests are now more reproducible
+- CallDataCopy now correctly wraps around in the symbolic interpreter
 
 ## Changed
 
@@ -28,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SMT encoding of Expr now has assertions for the range of environment values that are less than word size (256 bits).
 - Trace now contains the cheat code calls
 - More consistent error messages
+- Automatic tests are now more reproducible
+- Fixed overflow issue in stripWrites
 
 ## Changed
 
