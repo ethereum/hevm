@@ -194,10 +194,10 @@ abstractVM
   -> VM
 abstractVM cd contractCode maybepre store = finalVm
   where
-    caller' = Caller 0
-    value' = CallValue 0
-    code' = RuntimeCode (ConcreteRuntimeCode contractCode)
-    vm' = loadSymVM code' store caller' value' cd
+    caller = Caller 0
+    value = CallValue 0
+    code = RuntimeCode (ConcreteRuntimeCode contractCode)
+    vm' = loadSymVM code store caller value cd
     precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm']
@@ -210,11 +210,11 @@ loadSymVM
   -> Expr EWord
   -> (Expr Buf, [Prop])
   -> VM
-loadSymVM x initStore addr callvalue' cd =
+loadSymVM x initStore addr callvalue cd =
   (makeVm $ VMOpts
     { contract = initialContract x
     , calldata = cd
-    , value = callvalue'
+    , value = callvalue
     , initialStorage = initStore
     , address = createAddress ethrunAddress 1
     , caller = addr
@@ -266,8 +266,8 @@ interpret fetcher maxIter askSmtIters heuristic vm =
         let vm' = execState exec vm
         interpret fetcher maxIter askSmtIters heuristic vm' (k vm')
       Stepper.IOAct q -> do
-        (r, vm') <- runStateT q vm
-        interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+        r <- q
+        interpret fetcher maxIter askSmtIters heuristic vm (k r)
       Stepper.Ask (PleaseChoosePath cond continue) -> do
         (a, b) <- concurrently
           (let (ra, vma) = runState (continue True) vm { result = Nothing }
