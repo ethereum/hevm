@@ -21,6 +21,7 @@ import Data.Maybe
 import Data.String.Here
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Lazy.IO qualified as TL
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Typeable
 import Data.Vector qualified as Vector
@@ -37,7 +38,7 @@ import Test.Tasty.Runners hiding (Failure, Success)
 import Test.Tasty.ExpectedFailure
 import Text.RE.TDFA.String
 import Text.RE.Replace
-import Witch (into, unsafeInto)
+import Witch (unsafeInto)
 
 import Optics.Core hiding (pre, re)
 import Optics.State
@@ -45,7 +46,6 @@ import Optics.Operators.Unsafe
 
 import EVM hiding (choose)
 import EVM.ABI
-import EVM.Concrete (createAddress)
 import EVM.Exec
 import EVM.Expr qualified as Expr
 import EVM.Fetch qualified as Fetch
@@ -53,30 +53,12 @@ import EVM.Format (hexText)
 import EVM.Patricia qualified as Patricia
 import EVM.Precompiled
 import EVM.RLP
-<<<<<<< HEAD
-import EVM.Solidity
-import EVM.Types
-import EVM.Format (hexText, formatExpr)
-import EVM.Traversals
-import qualified EVM.Concrete as Concrete
-=======
->>>>>>> origin/main
 import EVM.SMT hiding (one)
 import EVM.Solidity
 import EVM.Solvers
-<<<<<<< HEAD
-import qualified EVM.Expr as Expr
-import qualified EVM.Stepper as Stepper
-import qualified EVM.Fetch as Fetch
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Data.Text.Lazy.IO as TL
-import Data.List (isSubsequenceOf)
-=======
 import EVM.Stepper qualified as Stepper
 import EVM.SymExec
 import EVM.Test.Tracing qualified as Tracing
->>>>>>> origin/main
 import EVM.Test.Utils
 import EVM.Traversals
 import EVM.Types
@@ -98,13 +80,13 @@ tests = testGroup "hevm"
         (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x0) (Lit 0xab) (AbstractStore (LitAddr 0x0))))
     , testCase "read-from-concrete" $ assertEqual ""
         (Lit 0xab)
-        (Expr.readStorage' (Lit 0x0) (ConcreteStore (LitAddr 0x0) $ Map.fromList [(0x0, 0xab)]))
+        (Expr.readStorage' (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, 0xab)]))
     , testCase "read-past-write" $ assertEqual ""
         (Lit 0xab)
-        (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x1) (Var "b") (ConcreteStore (LitAddr 0x0) $ Map.fromList [(0x0, 0xab)])))
+        (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x1) (Var "b") (ConcreteStore $ Map.fromList [(0x0, 0xab)])))
     , testCase "accessStorage uses fetchedStorage" $ do
         let dummyContract =
-              (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)) (LitAddr 0x0))
+              (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)))
                 { external = True }
             vm = vmForEthrunCreation ""
             -- perform the initial access
@@ -167,32 +149,9 @@ tests = testGroup "hevm"
         let simplified = Expr.readStorage' slot store
             full = SLoad slot store
         checkEquiv simplified full
-<<<<<<< HEAD
-    , testProperty "writeStorage-equivalance" $ \(slot, val) -> ioProperty $ do
-        let mkStore = oneof
-              [ liftM2 ConcreteStore arbitrary arbitrary
-              , do
-                  -- generate some write chains where we know that at least one
-                  -- write matches either the input addr, or both the input
-                  -- addr and slot
-                  let matchSlot = fmap (SStore slot) arbitrary
-                      addWrites :: Expr Storage -> Int -> Gen (Expr Storage)
-                      addWrites b 0 = pure b
-                      addWrites b n = liftM3 SStore arbitrary arbitrary (addWrites b (n - 1))
-                  s <- arbitrary
-                  withMatch <- matchSlot
-                  newWrites <- oneof [ pure 0, pure 1, fmap (`mod` 5) arbitrary ]
-                  addWrites (withMatch s) newWrites
-              , arbitrary
-              ]
-        store <- generate mkStore
+    , testProperty "writeStorage-equivalance" $ \(val, GenWriteStorageExpr (slot, store)) -> ioProperty $ do
         let simplified = Expr.writeStorage slot val store
             full = SStore slot val store
-=======
-    , testProperty "writeStorage-equivalance" $ \(val, GenWriteStorageExpr (addr, slot, store)) -> ioProperty $ do
-        let simplified = Expr.writeStorage addr slot val store
-            full = SStore addr slot val store
->>>>>>> origin/main
         checkEquiv simplified full
     , testProperty "readWord-equivalance" $ \(buf, idx) -> ioProperty $ do
         let simplified = Expr.readWord idx buf
@@ -325,14 +284,10 @@ tests = testGroup "hevm"
         (LitByte 0xbb)
         (Expr.indexWord (Lit 2) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
     , testCase "encodeConcreteStore-overwrite" $
-      let
-        w :: Int -> W256
-        w x = num x
-      in
       assertEqual ""
         "(store (store baseStore_litaddr_0x0000000000000000000000000000000000000000 (_ bv1 256) (_ bv2 256)) (_ bv3 256) (_ bv4 256))"
-        (EVM.SMT.encodeConcreteStore (LitAddr 0x0) $
-          Map.fromList [(w 1, w 2), (w 3, w 4)])
+        (EVM.SMT.encodeConcreteStore $
+          Map.fromList [(W256 1, W256 2), (W256 3, W256 4)])
     , testCase "indexword-oob-sym" $ assertEqual ""
         -- indexWord should return 0 for oob access
         (LitByte 0x0)
@@ -1233,16 +1188,10 @@ tests = testGroup "hevm"
             post prestate leaf =
               let y = case getStaticAbiArgs 1 prestate of
                         [y'] -> y'
-<<<<<<< HEAD
                         _ -> error "expected 1 arg"
                   this = prestate.state.codeContract
                   prestore = (fromJust (Map.lookup this prestate.env.contracts)).storage
                   prex = Expr.readStorage' (Lit 0) prestore
-=======
-                        _ -> internalError "expected 1 arg"
-                  this = Expr.litAddr $ prestate.state.codeContract
-                  prex = Expr.readStorage' this (Lit 0) prestate.env.storage
->>>>>>> origin/main
               in case leaf of
                 Success _ _ _ postState -> let
                     poststore = (fromJust (Map.lookup this postState)).storage
@@ -1298,19 +1247,11 @@ tests = testGroup "hevm"
               post prestate poststate =
                 let (x,y) = case getStaticAbiArgs 2 prestate of
                         [x',y'] -> (x',y')
-<<<<<<< HEAD
                         _ -> error "expected 2 args"
                     this = prestate.state.codeContract
                     prestore = (fromJust (Map.lookup this prestate.env.contracts)).storage
                     prex = Expr.readStorage' x prestore
                     prey = Expr.readStorage' y prestore
-=======
-                        _ -> internalError "expected 2 args"
-                    this = Expr.litAddr $ prestate.state.codeContract
-                    prestore = prestate.env.storage
-                    prex = Expr.readStorage' this x prestore
-                    prey = Expr.readStorage' this y prestore
->>>>>>> origin/main
                 in case poststate of
                      Success _ _ _ postcs -> let
                            poststore = (fromJust (Map.lookup this postcs)).storage
@@ -1343,7 +1284,6 @@ tests = testGroup "hevm"
               post prestate leaf =
                 let (x,y) = case getStaticAbiArgs 2 prestate of
                         [x',y'] -> (x',y')
-<<<<<<< HEAD
                         _ -> error "expected 2 args"
                     this = prestate.state.codeContract
                     prestore = (fromJust (Map.lookup this prestate.env.contracts)).storage
@@ -1354,17 +1294,6 @@ tests = testGroup "hevm"
                            poststore = (fromJust (Map.lookup this poststate)).storage
                            postx = Expr.readStorage' x poststore
                            posty = Expr.readStorage' y poststore
-=======
-                        _ -> internalError "expected 2 args"
-                    this = Expr.litAddr $ prestate.state.codeContract
-                    prestore =  prestate.env.storage
-                    prex = Expr.readStorage' this x prestore
-                    prey = Expr.readStorage' this y prestore
-                in case poststate of
-                     Success _ _ _ poststore -> let
-                           postx = Expr.readStorage' this x poststore
-                           posty = Expr.readStorage' this y poststore
->>>>>>> origin/main
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
               sig = Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
@@ -1804,21 +1733,12 @@ tests = testGroup "hevm"
             let vm = abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing
                        & set (#state % #callvalue) (Lit 0)
                        & over (#env % #contracts)
-                          (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a)) aAddr))
+                          (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
             verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
 
           let storeCex = cex.store
-<<<<<<< HEAD
               testCex = case (Map.lookup cAddr storeCex, Map.lookup aAddr storeCex) of
                           (Just sC, Just sA) -> case (Map.lookup 0 sC, Map.lookup 0 sA) of
-=======
-              addrC = into $ createAddress ethrunAddress 1
-              addrA = W256 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
-              testCex = Map.size storeCex == 2 &&
-                        case (Map.lookup addrC storeCex, Map.lookup addrA storeCex) of
-                          (Just sC, Just sA) -> Map.size sC == 1 && Map.size sA == 1 &&
-                            case (Map.lookup 0 sC, Map.lookup 0 sA) of
->>>>>>> origin/main
                               (Just x, Just y) -> x /= y
                               (Just x, Nothing) -> x /= 0
                               _ -> False
@@ -1915,11 +1835,7 @@ tests = testGroup "hevm"
             }
             |]
           (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
-<<<<<<< HEAD
           let addr = SymAddr(3)
-=======
-          let addr = into $ createAddress ethrunAddress 1
->>>>>>> origin/main
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
                           Just s -> Map.size s == 2 &&
@@ -1942,11 +1858,7 @@ tests = testGroup "hevm"
             }
             |]
           (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
-<<<<<<< HEAD
           let addr = SymAddr(3)
-=======
-          let addr = into $ createAddress ethrunAddress 1
->>>>>>> origin/main
               a = getVar cex "arg1"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
@@ -2345,11 +2257,7 @@ tests = testGroup "hevm"
 
 
 checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO Bool
-<<<<<<< HEAD
 checkEquiv l r = withSolvers Z3 1 (Just 1) $ \solvers -> do
-=======
-checkEquiv l r = withSolvers Z3 1 (Just 10) $ \solvers -> do
->>>>>>> origin/main
   if l == r
      then do
        putStrLn "skip"
@@ -2522,7 +2430,6 @@ instance Arbitrary (Expr Buf) where
 instance Arbitrary (Expr End) where
   arbitrary = sized genEnd
 
-<<<<<<< HEAD
 instance Arbitrary (ContractCode) where
   arbitrary = oneof
     [ fmap UnknownCode arbitrary
@@ -2542,9 +2449,7 @@ instance Arbitrary (Vector.Vector (Expr Byte)) where
 instance Arbitrary (Expr EContract) where
   arbitrary = sized genEContract
 
-=======
 -- LitOnly
->>>>>>> origin/main
 newtype LitOnly a = LitOnly a
   deriving (Show, Eq)
 
@@ -2565,7 +2470,6 @@ instance Arbitrary (LitOnly (Expr EWord)) where
 instance Arbitrary (LitOnly (Expr Buf)) where
   arbitrary = LitOnly . ConcreteBuf <$> arbitrary
 
-<<<<<<< HEAD
 genEContract :: Int -> Gen (Expr EContract)
 genEContract sz = do
   c <- arbitrary
@@ -2573,7 +2477,7 @@ genEContract sz = do
   n <- arbitrary
   s <- genStorage sz
   pure $ C c s b n
-=======
+
 -- ZeroDepthWord
 newtype ZeroDepthWord = ZeroDepthWord (Expr EWord)
   deriving (Show, Eq)
@@ -2610,34 +2514,31 @@ instance Arbitrary GenCopySliceBuf where
     fmap GenCopySliceBuf mkBuf
 
 -- GenWriteStorageExpr
-newtype GenWriteStorageExpr = GenWriteStorageExpr (Expr EWord, Expr EWord, Expr Storage)
+newtype GenWriteStorageExpr = GenWriteStorageExpr (Expr EWord, Expr Storage)
   deriving (Show, Eq)
 
 instance Arbitrary GenWriteStorageExpr where
   arbitrary = do
-    addr <- arbitrary
     slot <- arbitrary
     let mkStore = oneof
-          [ pure EmptyStore
+          [ pure $ ConcreteStore mempty
           , fmap ConcreteStore arbitrary
           , do
               -- generate some write chains where we know that at least one
               -- write matches either the input addr, or both the input
               -- addr and slot
-              let matchAddr = liftM2 (SStore addr) arbitrary arbitrary
-                  matchBoth = fmap (SStore addr slot) arbitrary
-                  addWrites :: Expr Storage -> Int -> Gen (Expr Storage)
+              let addWrites :: Expr Storage -> Int -> Gen (Expr Storage)
                   addWrites b 0 = pure b
-                  addWrites b n = liftM4 SStore arbitrary arbitrary arbitrary (addWrites b (n - 1))
+                  addWrites b n = liftM3 SStore arbitrary arbitrary (addWrites b (n - 1))
               s <- arbitrary
-              addMatch <- oneof [ matchAddr, matchBoth ]
+              addMatch <- fmap (SStore slot) arbitrary
               let withMatch = addMatch s
               newWrites <- oneof [ pure 0, pure 1, fmap (`mod` 5) arbitrary ]
               addWrites withMatch newWrites
           , arbitrary
           ]
     store <- mkStore
-    pure $ GenWriteStorageExpr (addr, slot, store)
+    pure $ GenWriteStorageExpr (slot, store)
 
 -- GenWriteByteIdx
 newtype GenWriteByteIdx = GenWriteByteIdx (Expr EWord)
@@ -2647,9 +2548,8 @@ instance Arbitrary GenWriteByteIdx where
   arbitrary = do
     -- 1st: can never overflow an Int
     -- 2nd: can overflow an Int
-    let mkIdx = frequency [ (10, genLit (fromIntegral (1_000_000 :: Int))) , (1, fmap Lit arbitrary) ]
+    let mkIdx = frequency [ (10, genLit 1_000_000) , (1, fmap Lit arbitrary) ]
     fmap GenWriteByteIdx mkIdx
->>>>>>> origin/main
 
 genByte :: Int -> Gen (Expr Byte)
 genByte 0 = fmap LitByte arbitrary
@@ -2667,7 +2567,7 @@ genLit bound = do
   pure $ Lit (w `mod` bound)
 
 genNat :: Gen Int
-genNat = fmap fromIntegral (arbitrary :: Gen Natural)
+genNat = fmap unsafeInto (arbitrary :: Gen Natural)
 
 genName :: Gen Text
 -- In order not to generate SMT reserved words, we prepend with "esc_"
@@ -2887,7 +2787,7 @@ genBuf bound sz = oneof
 genStorage :: Int -> Gen (Expr Storage)
 genStorage 0 = oneof
   [ fmap AbstractStore arbitrary
-  , liftM2 ConcreteStore arbitrary arbitrary
+  , fmap ConcreteStore arbitrary
   ]
 genStorage sz = liftM3 SStore subWord subWord subStore
   where
