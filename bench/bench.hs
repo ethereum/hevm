@@ -2,6 +2,7 @@ module Main where
 
 import GHC.Natural
 import Control.Monad
+import Control.Monad.ST (stToIO)
 import Data.Maybe
 import System.Environment (getEnv)
 
@@ -77,7 +78,7 @@ blockchainTests ts = bench "blockchain-tests" $ nfIO $ do
 runBCTest :: BCTests.Case -> IO Bool
 runBCTest x =
  do
-  let vm0 = BCTests.vmForCase x
+  vm0 <- BCTests.vmForCase x
   result <- Stepper.interpret (Fetch.zero 0 Nothing) vm0 Stepper.runFully
   maybeReason <- BCTests.checkExpectation False x result
   pure $ isNothing maybeReason
@@ -88,7 +89,7 @@ runBCTest x =
 
 debugContract :: ByteString -> IO ()
 debugContract c = withSolvers CVC5 4 Nothing $ \solvers -> do
-  let prestate = abstractVM (mkCalldata Nothing []) c Nothing False
+  prestate <- stToIO $ abstractVM (mkCalldata Nothing []) c Nothing False
   void $ TTY.runFromVM solvers Nothing Nothing emptyDapp prestate
 
 findPanics :: Solver -> Natural -> Integer -> ByteString -> IO ()

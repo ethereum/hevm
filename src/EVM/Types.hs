@@ -9,7 +9,8 @@ module EVM.Types where
 
 import GHC.Stack (HasCallStack, prettyCallStack, callStack)
 import Control.Arrow ((>>>))
-import Control.Monad.State.Strict (State, mzero)
+import Control.Monad.ST (ST)
+import Control.Monad.State.Strict (StateT, mzero)
 import Crypto.Hash (hash, Keccak_256, Digest)
 import Data.Aeson
 import Data.Aeson qualified as JSON
@@ -43,6 +44,7 @@ import Data.Tree (Forest)
 import Data.Tree.Zipper qualified as Zipper
 import Data.Vector qualified as V
 import Data.Vector.Storable qualified as SV
+import Data.Vector.Unboxed.Mutable (STVector)
 import Numeric (readHex, showHex)
 import Options.Generic
 import Optics.TH
@@ -582,27 +584,27 @@ data PartialExec
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
-data Effect
-  = Query Query
-  | Choose Choose
-deriving instance Show Effect
+data Effect s
+  = Query (Query s)
+  | Choose (Choose s)
+deriving instance Show (Effect s)
 
 -- | Queries halt execution until resolved through RPC calls or SMT queries
-data Query where
-  PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM ()) -> Query
-  PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM ()) -> Query
-  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM ()) -> Query
-  PleaseDoFFI         :: [String] -> (ByteString -> EVM ()) -> Query
+data Query s where
+  PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM s ()) -> Query s
+  PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM s ()) -> Query s
+  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM s ()) -> Query s
+  PleaseDoFFI         :: [String] -> (ByteString -> EVM s ()) -> Query s
 
 -- | Execution could proceed down one of two branches
-data Choose where
-  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM ()) -> Choose
+data Choose s where
+  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM s ()) -> Choose s
 
 -- | The possible return values of a SMT query
 data BranchCondition = Case Bool | Unknown
   deriving Show
 
-instance Show Query where
+instance Show (Query s) where
   showsPrec _ = \case
     PleaseFetchContract addr base _ ->
       (("<EVM.Query: fetch contract " ++ show addr ++ show base ++ ">") ++)
@@ -617,29 +619,29 @@ instance Show Query where
     PleaseDoFFI cmd _ ->
       (("<EVM.Query: do ffi: " ++ (show cmd)) ++)
 
-instance Show Choose where
+instance Show (Choose s) where
   showsPrec _ = \case
     PleaseChoosePath _ _ ->
       (("<EVM.Choice: waiting for user to select path (0,1)") ++)
 
 -- | The possible result states of a VM
-data VMResult
-  = VMFailure EvmError     -- ^ An operation failed
-  | VMSuccess (Expr Buf)   -- ^ Reached STOP, RETURN, or end-of-code
-  | HandleEffect Effect    -- ^ An effect must be handled for execution to continue
-  | Unfinished PartialExec -- ^ Execution could not continue further
+data VMResult s
+  = VMFailure EvmError      -- ^ An operation failed
+  | VMSuccess (Expr Buf)    -- ^ Reached STOP, RETURN, or end-of-code
+  | HandleEffect (Effect s) -- ^ An effect must be handled for execution to continue
+  | Unfinished PartialExec  -- ^ Execution could not continue further
 
-deriving instance Show VMResult
+deriving instance Show (VMResult s)
 
 
 -- VM State ----------------------------------------------------------------------------------------
 
 
 -- | The state of a stepwise EVM execution
-data VM = VM
-  { result         :: Maybe VMResult
-  , state          :: FrameState
-  , frames         :: [Frame]
+data VM s = VM
+  { result         :: Maybe (VMResult s)
+  , state          :: FrameState s
+  , frames         :: [Frame s]
   , env            :: Env
   , block          :: Block
   , tx             :: TxState
@@ -647,7 +649,8 @@ data VM = VM
   , traces         :: Zipper.TreePos Zipper.Empty Trace
   , cache          :: Cache
   , burned         :: {-# UNPACK #-} !Word64
-  , iterations     :: Map CodeLocation (Int, [Expr EWord]) -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
+  , iterations     :: Map CodeLocation (Int, [Expr EWord])
+  -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
   , keccakEqs      :: [Prop]
   , config         :: RuntimeConfig
@@ -655,7 +658,7 @@ data VM = VM
   deriving (Show, Generic)
 
 -- | Alias for the type of e.g. @exec1@.
-type EVM a = State VM a
+type EVM s a = StateT (VM s) (ST s) a
 
 -- | The VM base state (i.e. should new contracts be created with abstract balance / storage?)
 data BaseState
@@ -672,9 +675,9 @@ data RuntimeConfig = RuntimeConfig
   deriving (Show)
 
 -- | An entry in the VM's "call/create stack"
-data Frame = Frame
+data Frame s = Frame
   { context :: FrameContext
-  , state   :: FrameState
+  , state   :: FrameState s
   }
   deriving (Show)
 
@@ -711,13 +714,13 @@ data SubState = SubState
   deriving (Eq, Ord, Show)
 
 -- | The "registers" of the VM along with memory and data stack
-data FrameState = FrameState
+data FrameState s = FrameState
   { contract     :: Expr EAddr
   , codeContract :: Expr EAddr
   , code         :: ContractCode
   , pc           :: {-# UNPACK #-} !Int
   , stack        :: [Expr EWord]
-  , memory       :: Expr Buf
+  , memory       :: Memory s
   , memorySize   :: Word64
   , calldata     :: Expr Buf
   , callvalue    :: Expr EWord
@@ -727,6 +730,16 @@ data FrameState = FrameState
   , static       :: Bool
   }
   deriving (Show, Generic)
+
+data Memory s
+  = ConcreteMemory (MutableMemory s)
+  | SymbolicMemory !(Expr Buf)
+
+instance Show (Memory s) where
+  show (ConcreteMemory _) = "<can't show mutable memory>"
+  show (SymbolicMemory m) = show m
+
+type MutableMemory s = STVector s Word8
 
 -- | The state that spans a whole transaction
 data TxState = TxState

@@ -21,6 +21,7 @@ import EVM.SymExec
 import EVM.Test.Utils
 import EVM.Solidity (ProjectType(..))
 import EVM.Types hiding (BlockNumber)
+import Control.Monad.ST (stToIO, RealWorld)
 
 main :: IO ()
 main = defaultMain tests
@@ -101,7 +102,7 @@ tests = testGroup "rpc"
   ]
 
 -- call into WETH9 from 0xf04a... (a large holder)
-weth9VM :: W256 -> (Expr Buf, [Prop]) -> IO VM
+weth9VM :: W256 -> (Expr Buf, [Prop]) -> IO (VM RealWorld)
 weth9VM blockNum calldata' = do
   let
     caller' = LitAddr 0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e
@@ -109,7 +110,7 @@ weth9VM blockNum calldata' = do
     callvalue' = Lit 0
   vmFromRpc blockNum calldata' callvalue' caller' weth9
 
-vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EAddr -> Addr -> IO VM
+vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EAddr -> Addr -> IO (VM RealWorld)
 vmFromRpc blockNum calldata callvalue caller address = do
   ctrct <- fetchContractFrom (BlockNumber blockNum) testRpc address >>= \case
         Nothing -> internalError $ "contract not found: " <> show address
@@ -119,7 +120,7 @@ vmFromRpc blockNum calldata callvalue caller address = do
     Nothing -> internalError "could not fetch block"
     Just b -> pure b
 
-  pure $ (makeVm $ VMOpts
+  stToIO $ (makeVm $ VMOpts
     { contract      = ctrct
     , calldata      = calldata
     , value         = callvalue
@@ -143,7 +144,7 @@ vmFromRpc blockNum calldata callvalue caller address = do
     , baseState     = EmptyBase
     , txAccessList  = mempty
     , allowFFI      = False
-    }) & set (#cache % #fetched % at address) (Just ctrct)
+    }) <&> set (#cache % #fetched % at address) (Just ctrct)
 
 testRpc :: Text
 testRpc = "https://eth-mainnet.alchemyapi.io/v2/vpeKFsEF6PHifHzdtcwXSDbhV3ym5Ro4"

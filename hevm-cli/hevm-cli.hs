@@ -7,6 +7,7 @@
 module Main where
 
 import Control.Monad (void, when, forM_, unless)
+import Control.Monad.ST (RealWorld, stToIO)
 import Control.Monad.State.Strict (liftIO)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as ByteString
@@ -198,7 +199,7 @@ optsMode x
   | x.jsontrace = JsonTrace
   | otherwise = Run
 
-applyCache :: (Maybe String, Maybe String) -> IO (VM -> VM)
+applyCache :: (Maybe String, Maybe String) -> IO (VM RealWorld -> VM RealWorld)
 applyCache (state, cache) =
   let applyState = flip Facts.apply
       applyCache' = flip Facts.applyCache
@@ -216,7 +217,7 @@ applyCache (state, cache) =
       stateFacts <- Git.loadFacts (Git.RepoAt statePath)
       pure $ (applyState stateFacts) . (applyCache' cacheFacts)
 
-unitTestOptions :: Command Options.Unwrapped -> SolverGroup -> Maybe BuildOutput -> IO UnitTestOptions
+unitTestOptions :: Command Options.Unwrapped -> SolverGroup -> Maybe BuildOutput -> IO (UnitTestOptions RealWorld)
 unitTestOptions cmd solvers buildOutput = do
   root <- getRoot cmd
   let srcInfo = maybe emptyDapp (dappInfo root) buildOutput
@@ -444,7 +445,7 @@ showExtras solvers cmd calldata expr = do
     ms <- produceModels solvers expr
     forM_ ms (showModel (fst calldata))
 
-dappCoverage :: UnitTestOptions -> Mode -> BuildOutput -> IO ()
+dappCoverage :: UnitTestOptions RealWorld -> Mode -> BuildOutput -> IO ()
 dappCoverage opts _ bo@(BuildOutput (Contracts cs) cache) = do
   let unitTests = findUnitTests opts.match $ Map.elems cs
   covs <- mconcat <$> mapM
@@ -532,7 +533,7 @@ launchExec cmd = do
            rpcinfo = (,) block <$> cmd.rpc
 
 -- | Creates a (concrete) VM from command line options
-vmFromCommand :: Command Options.Unwrapped -> IO VM
+vmFromCommand :: Command Options.Unwrapped -> IO (VM RealWorld)
 vmFromCommand cmd = do
   withCache <- applyCache (cmd.state, cmd.cache)
 
@@ -578,7 +579,8 @@ vmFromCommand cmd = do
         Just t -> t
         Nothing -> internalError "unexpected symbolic timestamp when executing vm test"
 
-  pure $ EVM.Transaction.initTx $ withCache (vm0 baseFee miner ts' blockNum prevRan contract)
+  vm <- stToIO $ vm0 baseFee miner ts' blockNum prevRan contract
+  pure $ EVM.Transaction.initTx $ withCache vm
     where
         block   = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber cmd.block
         value   = word (.value) 0
@@ -624,7 +626,7 @@ vmFromCommand cmd = do
         eaddr f def = maybe def LitAddr (f cmd)
         bytes f def = maybe def decipher (f cmd)
 
-symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM)
+symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM RealWorld)
 symvmFromCommand cmd calldata = do
   (miner,blockNum,baseFee,prevRan) <- case cmd.rpc of
     Nothing -> return (LitAddr 0,0,0,0)
@@ -665,7 +667,8 @@ symvmFromCommand cmd calldata = do
     (_, _, Nothing) ->
       error "Error: must provide at least (rpc + address) or code"
 
-  return (EVM.Transaction.initTx $ withCache $ vm0 baseFee miner ts blockNum prevRan calldata callvalue caller contract)
+  vm <- stToIO $ vm0 baseFee miner ts blockNum prevRan calldata callvalue caller contract
+  pure $ EVM.Transaction.initTx (withCache vm)
 
   where
     decipher = hexByteString "bytes" . strip0x

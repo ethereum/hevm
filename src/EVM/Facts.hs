@@ -153,7 +153,7 @@ cacheFacts c = do
   facts <- concatMapM (uncurry contractFacts) cs
   pure $ Set.fromList facts
 
-vmFacts :: VM -> Err (Set Fact)
+vmFacts :: VM s -> Err (Set Fact)
 vmFacts vm = do
   let cs = Map.toList vm.env.contracts
   cs' <- forM cs $ \(k,v) -> do
@@ -168,7 +168,7 @@ vmFacts vm = do
 -- the code hash and so on).
 --
 -- Therefore, we need to make sure to sort the fact set in such a way.
-apply1 :: VM -> Fact -> VM
+apply1 :: VM s -> Fact -> VM s
 apply1 vm fact =
   case fact of
     CodeFact    {..} -> flip execState vm $ do
@@ -182,7 +182,7 @@ apply1 vm fact =
     NonceFact   {..} ->
       vm & set (#env % #contracts % ix (LitAddr addr) % #nonce) (Just val)
 
-apply2 :: VM -> Fact -> VM
+apply2 :: VM s -> Fact -> VM s
 apply2 vm fact =
   case fact of
     CodeFact    {..} -> flip execState vm $ do
@@ -207,13 +207,13 @@ instance Ord Fact where
     f (StorageFact a _ x) = (3, a, x)
 
 -- Applies a set of facts to a VM.
-apply :: VM -> Set Fact -> VM
+apply :: VM s -> Set Fact -> VM s
 apply =
   -- The set's ordering is relevant; see `apply1`.
   foldl apply1
 --
 -- Applies a set of facts to a VM.
-applyCache :: VM -> Set Fact -> VM
+applyCache :: VM s -> Set Fact -> VM s
 applyCache =
   -- The set's ordering is relevant; see `apply1`.
   foldl apply2

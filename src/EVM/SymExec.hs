@@ -7,6 +7,7 @@ import Control.Concurrent.Async (concurrently, mapConcurrently)
 import Control.Concurrent.Spawn (parMapIO, pool)
 import Control.Concurrent.STM (atomically, TVar, readTVarIO, readTVar, newTVarIO, writeTVar)
 import Control.Monad.Operational qualified as Operational
+import Control.Monad.ST (RealWorld, stToIO, ST)
 import Control.Monad.State.Strict
 import Data.Bifunctor (second)
 import Data.ByteString (ByteString)
@@ -189,26 +190,24 @@ combineFragments fragments base = go (Lit 4) fragments (base, [])
 abstractVM
   :: (Expr Buf, [Prop])
   -> ByteString
-  -> Maybe Precondition
+  -> Maybe (Precondition s)
   -> Bool
-  -> VM
-abstractVM cd contractCode maybepre create = finalVm
-  where
-    value = TxValue
-    code = if create then InitCode contractCode mempty
-           else RuntimeCode (ConcreteRuntimeCode contractCode)
-    vm = loadSymVM code value (if create then mempty else cd) create
-    precond = case maybepre of
+  -> ST s (VM s)
+abstractVM cd contractCode maybepre create = do
+  let value = TxValue
+  let code = if create then InitCode contractCode mempty else RuntimeCode (ConcreteRuntimeCode contractCode)
+  vm <- loadSymVM code value (if create then mempty else cd) create
+  let precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm]
-    finalVm = vm & over #constraints (<> precond)
+  pure $ vm & over #constraints (<> precond)
 
 loadSymVM
   :: ContractCode
   -> Expr EWord
   -> (Expr Buf, [Prop])
   -> Bool
-  -> VM
+  -> ST s (VM s)
 loadSymVM x callvalue cd create =
   (makeVm $ VMOpts
     { contract = abstractContract x (SymAddr "entrypoint")
@@ -239,18 +238,18 @@ loadSymVM x callvalue cd create =
 -- | Interpreter which explores all paths at branching points. Returns an
 -- 'Expr End' representing the possible executions.
 interpret
-  :: Fetch.Fetcher
+  :: Fetch.Fetcher RealWorld
   -> Maybe Integer -- max iterations
   -> Integer -- ask smt iterations
   -> LoopHeuristic
-  -> VM
-  -> Stepper (Expr End)
+  -> VM RealWorld
+  -> Stepper RealWorld (Expr End)
   -> IO (Expr End)
 interpret fetcher maxIter askSmtIters heuristic vm =
   eval . Operational.view
   where
   eval
-    :: Operational.ProgramView Stepper.Action (Expr End)
+    :: Operational.ProgramView (Stepper.Action RealWorld) (Expr End)
     -> IO (Expr End)
 
   eval (Operational.Return x) = pure x
@@ -258,22 +257,26 @@ interpret fetcher maxIter askSmtIters heuristic vm =
   eval (action Operational.:>>= k) =
     case action of
       Stepper.Exec -> do
-        let (r, vm') = runState exec vm
+        (r, vm') <- stToIO $ runStateT exec vm
         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
       Stepper.IOAct q -> do
         r <- q
         interpret fetcher maxIter askSmtIters heuristic vm (k r)
       Stepper.Ask (PleaseChoosePath cond continue) -> do
         (a, b) <- concurrently
-          (let (ra, vma) = runState (continue True) vm { result = Nothing }
-           in interpret fetcher maxIter askSmtIters heuristic vma (k ra))
-          (let (rb, vmb) = runState (continue False) vm { result = Nothing }
-           in interpret fetcher maxIter askSmtIters heuristic vmb (k rb))
+          (do
+            (ra, vma) <- stToIO $ runStateT (continue True) vm { result = Nothing }
+            interpret fetcher maxIter askSmtIters heuristic vma (k ra)
+          )
+          (do
+            (rb, vmb) <- stToIO $ runStateT (continue False) vm { result = Nothing }
+            interpret fetcher maxIter askSmtIters heuristic vmb (k rb)
+          )
         pure $ ITE cond a b
       Stepper.Wait q -> do
         let performQuery = do
               m <- liftIO (fetcher q)
-              let (r, vm') = runState m vm
+              (r, vm') <- stToIO $ runStateT m vm
               interpret fetcher maxIter askSmtIters heuristic vm' (k r)
 
         case q of
@@ -287,9 +290,9 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                   (Just _, Just True) ->
                     pure $ Partial vm.keccakEqs (Traces (Zipper.toForest vm.traces) vm.env.contracts) $ MaxIterationsReached vm.state.pc vm.state.contract
                   -- No. keep executing
-                  _ ->
-                    let (r, vm') = runState (continue (Case (c > 0))) vm
-                    in interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+                  _ -> do
+                    (r, vm') <- stToIO $ runStateT (continue (Case (c > 0))) vm
+                    interpret fetcher maxIter askSmtIters heuristic vm' (k r)
 
               -- the condition is symbolic
               _ ->
@@ -299,7 +302,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                   (Just True, _, Just n) -> do
                     -- continue execution down the opposite branch than the one that
                     -- got us to this point and return a partial leaf for the other side
-                    let (r, vm') = runState (continue (Case $ not n)) vm
+                    (r, vm') <- stToIO $ runStateT (continue (Case $ not n)) vm
                     a <- interpret fetcher maxIter askSmtIters heuristic vm' (k r)
                     pure $ ITE cond a (Partial vm.keccakEqs (Traces (Zipper.toForest vm.traces) vm.env.contracts) (MaxIterationsReached vm.state.pc vm.state.contract))
                   -- we're in a loop and askSmtIters has been reached
@@ -307,17 +310,17 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                     -- ask the smt solver about the loop condition
                     performQuery
                   -- otherwise just try both branches and don't ask the solver
-                  _ ->
-                    let (r, vm') = runState (continue EVM.Types.Unknown) vm
-                    in interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+                  _ -> do
+                    (r, vm') <- stToIO $ runStateT (continue EVM.Types.Unknown) vm
+                    interpret fetcher maxIter askSmtIters heuristic vm' (k r)
 
           _ -> performQuery
 
       Stepper.EVM m -> do
-        let (r, vm') = runState m vm
+        (r, vm') <- stToIO $ runStateT m vm
         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
 
-maxIterationsReached :: VM -> Maybe Integer -> Maybe Bool
+maxIterationsReached :: VM s -> Maybe Integer -> Maybe Bool
 maxIterationsReached _ Nothing = Nothing
 maxIterationsReached vm (Just maxIter) =
   let codelocation = getCodeLocation vm
@@ -326,7 +329,7 @@ maxIterationsReached vm (Just maxIter) =
      then Map.lookup (codelocation, iters - 1) vm.cache.path
      else Nothing
 
-askSmtItersReached :: VM -> Integer -> Bool
+askSmtItersReached :: VM s -> Integer -> Bool
 askSmtItersReached vm askSmtIters = let
     codelocation = getCodeLocation vm
     (iters, _) = view (at codelocation % non (0, [])) vm.iterations
@@ -340,7 +343,7 @@ askSmtItersReached vm askSmtIters = let
 
  This heuristic is not perfect, and can certainly be tricked, but should generally be good enough for most compiler generated and non pathological user generated loops.
  -}
-isLoopHead :: LoopHeuristic -> VM -> Maybe Bool
+isLoopHead :: LoopHeuristic -> VM s -> Maybe Bool
 isLoopHead Naive _ = Just True
 isLoopHead StackBased vm = let
     loc = getCodeLocation vm
@@ -351,8 +354,8 @@ isLoopHead StackBased vm = let
        Just (_, oldStack) -> Just $ filter isValid oldStack == filter isValid vm.state.stack
        Nothing -> Nothing
 
-type Precondition = VM -> Prop
-type Postcondition = VM -> Expr End -> Prop
+type Precondition s = VM s -> Prop
+type Postcondition s = VM s -> Expr End -> Prop
 
 checkAssert
   :: SolverGroup
@@ -384,7 +387,7 @@ checkAssert solvers errs c signature' concreteArgs opts =
 
   see: https://docs.soliditylang.org/en/v0.8.6/control-structures.html?highlight=Panic#panic-via-assert-and-error-via-require
 -}
-checkAssertions :: [Word256] -> Postcondition
+checkAssertions :: [Word256] -> Postcondition s
 checkAssertions errs _ = \case
   Failure _ _ (Revert (ConcreteBuf msg)) -> PBool $ msg `notElem` (fmap panicMsg errs)
   Failure _ _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
@@ -421,15 +424,15 @@ verifyContract
   -> Maybe Sig
   -> [String]
   -> VeriOpts
-  -> Maybe Precondition
-  -> Maybe Postcondition
+  -> Maybe (Precondition RealWorld)
+  -> Maybe (Postcondition RealWorld)
   -> IO (Expr End, [VerifyResult])
-verifyContract solvers theCode signature' concreteArgs opts maybepre maybepost =
-  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre False
-  in verify solvers opts preState maybepost
+verifyContract solvers theCode signature' concreteArgs opts maybepre maybepost = do
+  preState <- stToIO $ abstractVM (mkCalldata signature' concreteArgs) theCode maybepre False
+  verify solvers opts preState maybepost
 
 -- | Stepper that parses the result of Stepper.runFully into an Expr End
-runExpr :: Stepper.Stepper (Expr End)
+runExpr :: Stepper.Stepper RealWorld (Expr End)
 runExpr = do
   vm <- Stepper.runFully
   let asserts = vm.keccakEqs <> vm.constraints
@@ -522,8 +525,8 @@ getPartials = mapMaybe go
 verify
   :: SolverGroup
   -> VeriOpts
-  -> VM
-  -> Maybe Postcondition
+  -> VM RealWorld
+  -> Maybe (Postcondition RealWorld)
   -> IO (Expr End, [VerifyResult])
 verify solvers opts preState maybepost = do
   putStrLn "Exploring contract"
@@ -579,7 +582,7 @@ verify solvers opts preState maybepost = do
       Unsat -> Qed ()
       Error e -> internalError $ "solver responded with error: " <> show e
 
-expandCex :: VM -> SMTCex -> SMTCex
+expandCex :: VM s -> SMTCex -> SMTCex
 expandCex prestate c = c { store = Map.union c.store concretePreStore }
   where
     concretePreStore = Map.mapMaybe (maybeConcreteStore . (.storage))
@@ -615,9 +618,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
     -- decompiles the given bytecode into a list of branches
     getBranches :: ByteString -> IO [Expr End]
     getBranches bs = do
-      let
-        bytecode = if BS.null bs then BS.pack [0] else bs
-        prestate = abstractVM calldata bytecode Nothing False
+      let bytecode = if BS.null bs then BS.pack [0] else bs
+      prestate <- stToIO $ abstractVM calldata bytecode Nothing False
       expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl
