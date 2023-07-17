@@ -24,7 +24,7 @@ where
 -- as the framework for monadic interpretation.
 
 import Control.Monad.Operational (Program, ProgramViewT(..), ProgramView, singleton, view)
-import Control.Monad.State.Strict (StateT, execState, runState, runStateT)
+import Control.Monad.State.Strict (execState, runState)
 import Data.Text (Text)
 
 import EVM qualified
@@ -51,7 +51,7 @@ data Action a where
   EVM  :: EVM a -> Action a
 
   -- | Perform an IO action
-  IOAct :: StateT VM IO a -> Action a -- they should all just be this?
+  IOAct :: IO a -> Action a
 
 -- | Type alias for an operational monad of @Action@
 type Stepper a = Program Action a
@@ -73,7 +73,7 @@ ask = singleton . Ask
 evm :: EVM a -> Stepper a
 evm = singleton . EVM
 
-evmIO :: StateT VM IO a -> Stepper a
+evmIO :: IO a -> Stepper a
 evmIO = singleton . IOAct
 
 -- | Run the VM until final result, resolving all queries
@@ -137,8 +137,8 @@ interpret fetcher vm = eval . view
         Ask _ ->
           internalError "cannot make choices with this interpreter"
         IOAct m -> do
-          (r, vm') <- runStateT m vm
-          interpret fetcher vm' (k r)
+          r <- m
+          interpret fetcher vm (k r)
         EVM m ->
           let (r, vm') = runState m vm
           in interpret fetcher vm' (k r)
