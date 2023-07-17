@@ -34,7 +34,7 @@ import Witch (into, unsafeInto)
 import EVM.CSE
 import EVM.Expr (writeByte, bufLengthEnv, containsNode, bufLength, minLength, inRange)
 import EVM.Expr qualified as Expr
-import EVM.Keccak (keccakAssumptions)
+import EVM.Keccak (keccakAssumptions, keccakCompute)
 import EVM.Traversals
 import EVM.Types
 
@@ -174,6 +174,9 @@ assertProps ps =
     keccakAssumes
       = SMT2 ["; keccak assumptions"] mempty
       <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions ps_elim bufVals storeVals)) mempty
+      <> SMT2 ["; keccak computations"] mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute ps_elim bufVals storeVals)) mempty
+      
 
     readAssumes
       = SMT2 ["; read assumptions"] mempty
