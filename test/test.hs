@@ -21,7 +21,6 @@ import Data.Maybe
 import Data.String.Here
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.Lazy.IO qualified as TL
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Typeable
 import Data.Vector qualified as Vector
@@ -285,7 +284,7 @@ tests = testGroup "hevm"
         (Expr.indexWord (Lit 2) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
     , testCase "encodeConcreteStore-overwrite" $
       assertEqual ""
-        "(store (store baseStore_litaddr_0x0000000000000000000000000000000000000000 (_ bv1 256) (_ bv2 256)) (_ bv3 256) (_ bv4 256))"
+        "(store (store emptyStore (_ bv1 256) (_ bv2 256)) (_ bv3 256) (_ bv4 256))"
         (EVM.SMT.encodeConcreteStore $
           Map.fromList [(W256 1, W256 2), (W256 3, W256 4)])
     , testCase "indexword-oob-sym" $ assertEqual ""
@@ -2264,7 +2263,6 @@ checkEquiv l r = withSolvers Z3 1 (Just 1) $ \solvers -> do
        pure True
      else do
        let smt = assertProps [l ./= r]
-       TL.writeFile "query.smt2" $ formatSMT2 smt
        res <- checkSat solvers smt
        print res
        pure $ case res of

@@ -38,7 +38,7 @@ import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty (testGroup, TestTree)
 import Test.Tasty.HUnit (assertEqual)
 import Test.Tasty.QuickCheck hiding (Failure, Success)
-import Witch (into)
+import Witch (into, unsafeInto)
 
 import Optics.Core hiding (pre)
 import Optics.State
@@ -51,7 +51,6 @@ import EVM.Concrete qualified as Concrete
 import EVM.Exec (ethrunAddress)
 import EVM.Fetch qualified as Fetch
 import EVM.Format (bsToHex, formatBinary)
-import EVM.Concrete (createAddress)
 import EVM.FeeSchedule qualified as FeeSchedule
 import EVM.Op (intToOpName)
 import EVM.Sign (deriveAddr)
@@ -152,7 +151,7 @@ data EVMToolEnv = EVMToolEnv
 instance JSON.ToJSON EVMToolEnv where
   toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON $ b.coinbase))
                          , ("currentDifficulty", (JSON.toJSON $ b.prevRandao))
-                         , ("currentGasLimit"  , (JSON.toJSON ("0x" ++ showHex (toInteger $ b.gasLimit) "")))
+                         , ("currentGasLimit"  , (JSON.toJSON ("0x" ++ showHex (into @Integer b.gasLimit) "")))
                          , ("currentNumber"    , (JSON.toJSON $ b.number))
                          , ("currentTimestamp" , (JSON.toJSON tstamp))
                          , ("currentBaseFee"   , (JSON.toJSON $ b.baseFee))
@@ -268,7 +267,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
                              }
     txn = EVM.Transaction.Transaction
       { txdata     = txData
-      , gasLimit = fromIntegral gaslimitExec
+      , gasLimit = unsafeInto gaslimitExec
       , gasPrice = Just 1
       , nonce    = 172
       , toAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
@@ -286,7 +285,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
                         , timestamp   =  Lit 0x3e8
                         , number      =  0x0
                         , prevRandao  =  0x0
-                        , gasLimit    =  fromIntegral gaslimitExec
+                        , gasLimit    =  unsafeInto gaslimitExec
                         , baseFee     =  0x0
                         , maxCodeSize =  0xfffff
                         , schedule    =  FeeSchedule.berlin
@@ -299,8 +298,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
 getHEVMRet :: OpContract -> ByteString -> Int -> IO (Either (EvmError, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult))
 getHEVMRet contr txData gaslimitExec = do
   let (txn, evmEnv, contrAlloc, fromAddress, toAddress, _) = evmSetup contr txData gaslimitExec
-  hevmRun <- runCodeWithTrace Nothing evmEnv contrAlloc txn (LitAddr fromAddress) (LitAddr toAddress)
-  return hevmRun
+  runCodeWithTrace Nothing evmEnv contrAlloc txn (LitAddr fromAddress) (LitAddr toAddress)
 
 getEVMToolRet :: OpContract -> ByteString -> Int -> IO (Maybe EVMToolResult)
 getEVMToolRet contr txData gaslimitExec = do
@@ -328,8 +326,7 @@ getEVMToolRet contr txData gaslimitExec = do
     putStrLn $ "evmtool exited with code " <> show exitCode
     putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
     putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
-  evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
-  return evmtoolResult
+  JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
 
 -- Compares traces of evmtool (from go-ethereum) and HEVM
 compareTraces :: [VMTrace] -> [EVMToolTrace] -> IO (Bool)
@@ -344,20 +341,14 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
           bPc = b.pc
           aStack = a.traceStack
           bStack = b.stack
-          aGas = fromIntegral a.traceGas
+          aGas = into a.traceGas
           bGas = b.gas
-      if aGas /= bGas then do
-                          putStrLn "GAS doesn't match:"
-                          putStrLn $ "HEVM's gas   : " <> (show aGas)
-                          putStrLn $ "evmtool's gas: " <> (show bGas)
-                          else
-                          -- putStrLn $ "Gas match   : " <> (show aGas)
-                          return ()
-      if aOp /= bOp || aPc /= bPc then
-                          putStrLn $ "HEVM: " <> (intToOpName aOp) <> " (pc " <> (show aPc) <> ") --- evmtool " <> (intToOpName bOp) <> " (pc " <> (show bPc) <> ")"
-                          else
-                          -- putStrLn $ "trace element match. " <> (intToOpName aOp) <> " pc: " <> (show aPc)
-                          return ()
+      when (aGas /= bGas) $ do
+        putStrLn "GAS doesn't match:"
+        putStrLn $ "HEVM's gas   : " <> (show aGas)
+        putStrLn $ "evmtool's gas: " <> (show bGas)
+      when (aOp /= bOp || aPc /= bPc) $ do
+        putStrLn $ "HEVM: " <> (intToOpName aOp) <> " (pc " <> (show aPc) <> ") --- evmtool " <> (intToOpName bOp) <> " (pc " <> (show bPc) <> ")"
 
       when (isJust b.error) $ do
         putStrLn $ "Error by evmtool: " <> (show b.error)
@@ -406,7 +397,7 @@ getTraceOutput evmtoolResult =
 deleteTraceOutputFiles :: Maybe EVMToolResult -> IO ()
 deleteTraceOutputFiles evmtoolResult =
   case evmtoolResult of
-    Nothing -> return ()
+    Nothing -> pure ()
     Just res -> do
       let traceFileName = getTraceFileName res
       System.Directory.removeFile traceFileName
@@ -448,7 +439,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
     , number = evmToolEnv.number
     , timestamp = evmToolEnv.timestamp
     , gasprice = fromJust txn.gasPrice
-    , gas = txn.gasLimit - fromIntegral (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
+    , gas = txn.gasLimit - (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
     , gaslimit = txn.gasLimit
     , blockGaslimit = evmToolEnv.gasLimit
     , prevRandao = evmToolEnv.prevRandao
@@ -655,11 +646,11 @@ fixContractJumps (OpContract ops) = do
       OpJumpi -> do
         let filtDests = (filter (> pos) jumpDests)
         rndPos <- randItem filtDests
-        fixup ax (pos+34) (ret++[(OpPush (Lit (fromInteger (fromIntegral rndPos)))), (OpJumpi)])
+        fixup ax (pos+34) (ret++[(OpPush (Lit (unsafeInto rndPos))), (OpJumpi)])
       OpJump -> do
         let filtDests = (filter (> pos) jumpDests)
         rndPos <- randItem filtDests
-        fixup ax (pos+34) (ret++[(OpPush (Lit (fromInteger (fromIntegral rndPos)))), (OpJump)])
+        fixup ax (pos+34) (ret++[(OpPush (Lit (unsafeInto rndPos))), (OpJump)])
       myop@(OpPush _) -> fixup ax (pos+33) (ret++[myop])
       myop -> fixup ax (pos+1) (ret++[myop])
   fmap OpContract ops2
@@ -670,7 +661,7 @@ genPush n = vectorOf n onePush
     onePush :: Gen Op
     onePush  = do
       p <- chooseInt (1, 10)
-      pure $ OpPush (Lit (fromIntegral p))
+      pure $ OpPush (Lit (unsafeInto p))
 
 genContract :: Int -> Gen [Op]
 genContract n = do
@@ -782,13 +773,13 @@ genContract n = do
             large <- chooseInt (0, 100)
             x <- if large == 0 then chooseBoundedIntegral (0::W256, (2::W256)^(256::W256)-1)
                                else chooseBoundedIntegral (0, 10)
-            pure $ OpPush (Lit (fromIntegral x)))
+            pure $ OpPush (Lit x))
         , (10, do
             x <- chooseInt (1, 10)
-            pure $ OpDup (fromIntegral x))
+            pure $ OpDup (unsafeInto x))
         , (10, do
             x <- chooseInt (1, 10)
-            pure $ OpSwap (fromIntegral x))
+            pure $ OpSwap (unsafeInto x))
       ])]
       -- End states
       -- , (1, frequency [
