@@ -14,7 +14,7 @@ project, and was forked to this repo by the formal methods team at the Ethereum 
 
 User facing documentation can be found in the [hevm book](https://hevm.dev/).
 
-We have a public matrix chat room [here](https://matrix.to/#/#hevm:matrix.org).
+We have a public matrix chat room [here](https://matrix.to/#/%23hevm%3Amatrix.org).
 
 ## Installation
 

@@ -1,4 +1,4 @@
-{-# Language DataKinds #-}
+{-# LANGUAGE DataKinds #-}
 
 module EVM.Stepper
   ( Action (..)
@@ -26,12 +26,11 @@ where
 import Control.Monad.Operational (Program, ProgramViewT(..), ProgramView, singleton, view)
 import Control.Monad.State.Strict (StateT, execState, runState, runStateT)
 import Data.Text (Text)
-import EVM.Types
 
-import qualified EVM
-
-import qualified EVM.Fetch as Fetch
+import EVM qualified
 import EVM.Exec qualified
+import EVM.Fetch qualified as Fetch
+import EVM.Types
 
 -- | The instruction type of the operational monad
 data Action a where
@@ -90,14 +89,14 @@ execFully =
     VMSuccess x ->
       pure (Right x)
     Unfinished x
-      -> error $ "Internal Error: partial execution encountered during concrete execution: " <> show x
+      -> internalError $ "partial execution encountered during concrete execution: " <> show x
 
 -- | Run the VM until its final state
 runFully :: Stepper VM
 runFully = do
   vm <- run
   case vm.result of
-    Nothing -> error "should not occur"
+    Nothing -> internalError "should not occur"
     Just (HandleEffect (Query q)) ->
       wait q >> runFully
     Just (HandleEffect (Choose q)) ->
@@ -138,7 +137,7 @@ interpret fetcher vm = eval . view
           let vm' = execState m vm
           interpret fetcher vm' (k ())
         Ask _ ->
-          error "cannot make choices with this interpreter:"
+          internalError "cannot make choices with this interpreter"
         IOAct m -> do
           (r, vm') <- runStateT m vm
           interpret fetcher vm' (k r)

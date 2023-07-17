@@ -1,7 +1,4 @@
-{-# Language PartialTypeSignatures #-}
-{-# Language DataKinds #-}
-{-# Language ExtendedDefaultRules #-}
-{-# Language PatternSynonyms #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 -- Converts between Ethereum contract states and simple trees of
 -- texts.  Dumps and loads such trees as Git repositories (the state
@@ -32,13 +29,9 @@ module EVM.Facts
   , fileToFact
   ) where
 
-import EVM          (bytecode)
+import EVM          (bytecode, initialContract, loadContract)
 import EVM.Expr     (writeStorage)
 import EVM.Types
-
-import qualified EVM
-
-import Prelude hiding (Word)
 
 import Optics.Core
 import Optics.State
@@ -46,16 +39,15 @@ import Optics.State
 import Control.Monad.State.Strict (execState)
 import Control.Monad
 import Data.ByteString (ByteString)
-import Data.Ord        (comparing)
-import Data.Set        (Set)
-import Data.Map        (Map)
-import Text.Read       (readMaybe)
-
-import qualified Data.ByteString.Base16 as BS16
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as Char8
-import qualified Data.Map as Map
-import qualified Data.Set as Set
+import Data.ByteString.Base16 qualified as BS16
+import Data.ByteString qualified as BS
+import Data.ByteString.Char8 qualified as Char8
+import Data.Map (Map)
+import Data.Map qualified as Map
+import Data.Set (Set)
+import Data.Set qualified as Set
+import Data.Ord (comparing)
+import Text.Read (readMaybe)
 
 -- We treat everything as ASCII byte strings because
 -- we only use hex digits (and the letter 'x').
@@ -151,8 +143,8 @@ storageFacts a store = map f (Map.toList store)
     f :: (W256, W256) -> Fact
     f (k, v) = StorageFact
       { addr  = a
-      , what  = fromIntegral v
-      , which = fromIntegral k
+      , what  = v
+      , which = k
       }
 
 cacheFacts :: Cache -> Err (Set Fact)

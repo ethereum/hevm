@@ -1,24 +1,24 @@
-{-# Language QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module EVM.Test.Utils where
 
 import Data.String.Here
-import Data.Text
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import GHC.IO.Handle (hClose)
-import qualified Paths_hevm as Paths
+import Paths_hevm qualified as Paths
 import System.Directory
 import System.IO.Temp
 import System.Process
 import System.Exit
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
 
+import EVM.Dapp (dappInfo, emptyDapp)
+import EVM.Fetch (RpcInfo)
 import EVM.Solidity
 import EVM.Solvers
-import EVM.Dapp
+import EVM.TTY qualified as TTY
 import EVM.UnitTest
-import EVM.Fetch (RpcInfo)
-import qualified EVM.TTY as TTY
 
 runSolidityTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> IO Bool
 runSolidityTestCustom testFile match maxIter ffiAllowed rpcinfo projectType = do
@@ -75,6 +75,7 @@ compile DappTools root src = do
   createDirectory (root <> "/out")
   T.writeFile (root <> "/out/dapp.sol.json") json
   readBuildOutput root DappTools
+compile CombinedJSON _root _src = error "unsupported"
 compile Foundry root src = do
   createDirectory (root <> "/src")
   writeFile (root <> "/src/unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src

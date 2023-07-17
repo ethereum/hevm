@@ -1,11 +1,9 @@
-{-# Language TemplateHaskell #-}
-{-# Language UndecidableInstances #-}
-{-# Language ImplicitParams #-}
-{-# Language DataKinds #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module EVM.TTY where
-
-import Prelude hiding (lookup, Word)
 
 import Brick
 import Brick.Widgets.Border
@@ -226,7 +224,7 @@ mkVty :: IO V.Vty
 mkVty = do
   vty <- V.mkVty V.defaultConfig
   V.setMode (V.outputIface vty) V.BracketedPaste True
-  return vty
+  pure vty
 
 runFromVM :: SolverGroup -> Fetch.RpcInfo -> Maybe Integer -> DappInfo -> VM -> IO VM
 runFromVM solvers rpcInfo maxIter' dappinfo vm = do
@@ -244,9 +242,9 @@ runFromVM solvers rpcInfo maxIter' dappinfo vm = do
       , maxDepth      = Nothing
       , match         = ""
       , fuzzRuns      = 1
-      , replay        = error "irrelevant"
+      , replay        = internalError "irrelevant"
       , vmModifier    = id
-      , testParams    = error "irrelevant"
+      , testParams    = internalError "irrelevant"
       , dapp          = dappinfo
       , ffiAllowed    = False
       , covMatch       = Nothing
@@ -256,8 +254,8 @@ runFromVM solvers rpcInfo maxIter' dappinfo vm = do
   v <- mkVty
   ui2 <- customMain v mkVty Nothing (app opts) (ViewVm ui0)
   case ui2 of
-    ViewVm ui -> return ui.vm
-    _ -> error "internal error: customMain returned prematurely"
+    ViewVm ui -> pure ui.vm
+    _ -> internalError "customMain returned prematurely"
 
 
 initUiVmState :: VM -> UnitTestOptions -> Stepper () -> UiVmState
@@ -303,7 +301,7 @@ main opts root buildOutput = do
       }
   v <- mkVty
   _ <- customMain v mkVty Nothing (app opts) (ui :: UiState)
-  return ()
+  pure ()
 
 takeStep
   :: (?fetcher :: Fetcher
@@ -382,7 +380,7 @@ backstep s =
       in
         runStateT (interpret (Step stepsToTake) stepper) s1 >>= \case
           (Continue steps, ui') -> pure $ ui' & set #stepper steps
-          _ -> error "unexpected end"
+          _ -> internalError "unexpected end"
 
 appEvent
   :: (?fetcher::Fetcher, ?maxIter :: Maybe Integer) =>
@@ -450,7 +448,7 @@ appEvent (VtyEvent (V.EvKey V.KEnter [])) = get >>= \case
       }
   ViewPicker s ->
     case listSelectedElement s.tests of
-      Nothing -> error "nothing selected"
+      Nothing -> internalError "nothing selected"
       Just (_, x) -> do
         let initVm  = initialUiVmStateForTest s.opts x
         put (ViewVm initVm)
@@ -616,7 +614,7 @@ initialUiVmStateForTest opts@UnitTestOptions{..} (theContractName, theTestName) 
   where
     cd = case test of
       SymbolicTest _ -> symCalldata theTestName types [] (AbstractBuf "txdata")
-      _ -> (error "unreachable", error "unreachable")
+      _ -> (internalError "unreachable", error $ internalError "unreachable")
     (test, types) = fromJust $ find (\(test',_) -> extractSig test' == theTestName) $ unitTestMethods testContract
     testContract = fromJust $ Map.lookup theContractName dapp.solcByName
     vm0 =
@@ -753,7 +751,7 @@ drawVmBrowser ui =
     dapp = ui.vm.testOpts.dapp
     (_, (_, c)) = fromJust $ listSelectedElement ui.contracts
 --        currentContract  = view (dappSolcByHash . ix ) dapp
-    maybeHash ch = fromJust (error "Internal error: cannot find concrete codehash for partially symbolic code") (maybeLitWord ch.codehash)
+    maybeHash ch = fromJust (internalError "cannot find concrete codehash for partially symbolic code") (maybeLitWord ch.codehash)
 
 drawVm :: UiVmState -> [UiWidget]
 drawVm ui =
@@ -865,7 +863,7 @@ currentSrcMap dapp vm = do
 drawStackPane :: UiVmState -> UiWidget
 drawStackPane ui =
   let
-    gasText = showWordExact (toInteger ui.vm.state.gas)
+    gasText = showWordExact ui.vm.state.gas
     labelText = txt ("Gas available: " <> gasText <> "; stack:")
     stackList = list StackPane (Vec.fromList $ zip [(1 :: Int)..] (simplify <$> ui.vm.state.stack)) 2
   in hBorderWithLabel labelText <=>
@@ -979,7 +977,7 @@ solidityList vm dapp =
         Nothing -> mempty
         Just x ->
           fromMaybe
-            mempty
+            (internalError "unable to find line for source map")
             (preview (
               ix x.file
               % to (Vec.imap (,)))

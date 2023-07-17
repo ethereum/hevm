@@ -1,7 +1,7 @@
 module EVM.Precompiled (execute) where
 
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
+import Data.ByteString qualified as BS
 
 import Foreign.C
 import Foreign.Ptr

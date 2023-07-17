@@ -1,7 +1,5 @@
 module EVM.Test.BlockchainTests where
 
-import Prelude hiding (Word)
-
 import EVM (initialContract, makeVm)
 import EVM.Concrete qualified as EVM
 import EVM.Dapp (emptyDapp)
@@ -37,6 +35,7 @@ import Witherable (Filterable, catMaybes)
 import Test.Tasty
 import Test.Tasty.ExpectedFailure
 import Test.Tasty.HUnit
+import Witch (into, unsafeInto)
 
 data Which = Pre | Post
 
@@ -144,7 +143,7 @@ debugVMTest file test = do
   Right allTests <- parseBCSuite <$> LazyByteString.readFile (repo </> file)
   let x = case filter (\(name, _) -> name == test) $ Map.toList allTests of
         [(_, x')] -> x'
-        _ -> error "test not found"
+        _ -> internalError "test not found"
   let vm0 = vmForCase x
   result <- withSolvers Z3 0 Nothing $ \solvers ->
     TTY.runFromVM solvers Nothing Nothing emptyDapp vm0
@@ -156,9 +155,9 @@ traceVMTest file test = do
   Right allTests <- parseBCSuite <$> LazyByteString.readFile (repo </> file)
   let x = case filter (\(name, _) -> name == test) $ Map.toList allTests of
         [(_, x')] -> x'
-        _ -> error "test not found"
+        _ -> internalError "test not found"
   let vm0 = vmForCase x
-  (result, (_, ts)) <- runStateT (interpretWithTrace (EVM.Fetch.zero 0 (Just 0)) EVM.Stepper.runFully) (vm0, [])
+  (_, (_, ts)) <- runStateT (interpretWithTrace (EVM.Fetch.zero 0 (Just 0)) EVM.Stepper.runFully) (vm0, [])
   pure ts
 
 readTrace :: FilePath -> IO (Either String EVMToolTraceOutput)
@@ -167,7 +166,7 @@ readTrace = JSON.eitherDecodeFileStrict
 traceVsGeth :: String -> String -> FilePath -> IO ()
 traceVsGeth file test gethTrace = do
   hevm <- traceVMTest file test
-  EVMToolTraceOutput ts res <- fromJust <$> (JSON.decodeFileStrict gethTrace :: IO (Maybe EVMToolTraceOutput))
+  EVMToolTraceOutput ts _ <- fromJust <$> (JSON.decodeFileStrict gethTrace :: IO (Maybe EVMToolTraceOutput))
   _ <- compareTraces hevm ts
   pure ()
 
@@ -183,8 +182,8 @@ checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
     printContracts :: Map Addr Contract -> IO ()
     printContracts cs = putStrLn $ Map.foldrWithKey (\k c acc ->
       acc ++ show k ++ " : "
-                   ++ (show $ toInteger <$> c.nonce) ++ " "
-                   ++ (show $ toInteger <$> (maybeLitWord c.balance)) ++ " "
+                   ++ (show $ c.nonce) ++ " "
+                   ++ (show $ maybeLitWord c.balance) ++ " "
                    ++ (show c.storage)
         ++ "\n") "" cs
 
@@ -234,7 +233,7 @@ c1 === c2 =
     storageEqual = c1.storage == c2.storage
     codeEqual = case (c1 ^. #code, c2 ^. #code) of
       (RuntimeCode a', RuntimeCode b') -> a' == b'
-      _ -> error "unexpected code"
+      _ -> internalError "unexpected code"
 
 checkExpectedContracts :: VM -> Map Addr Contract -> (Bool, Bool, Bool, Bool, Bool)
 checkExpectedContracts vm expected =
@@ -253,14 +252,14 @@ clearZeroStorage :: Contract -> Contract
 clearZeroStorage c = case c.storage of
   ConcreteStore m -> let store = Map.filter (/= 0) m
                      in set #storage (ConcreteStore store) c
-  _ -> error "Internal Error: unexpected abstract store"
+  _ -> internalError "Internal Error: unexpected abstract store"
 
 clearStorage :: Contract -> Contract
 clearStorage c = c { storage = clear c.storage }
   where
     clear :: Expr Storage -> Expr Storage
     clear (ConcreteStore _) = ConcreteStore mempty
-    clear _ = error "Internal Error: unexpected abstract store"
+    clear _ = internalError "Internal Error: unexpected abstract store"
 
 clearBalance :: Contract -> Contract
 clearBalance c = set #balance (Lit 0) c
@@ -306,7 +305,7 @@ instance FromJSON Block where
     baseFee    <- fmap read <$> v' .:? "baseFeePerGas"
     timestamp  <- wordField v' "timestamp"
     mixHash    <- wordField v' "mixHash"
-    return $ Block coinbase difficulty mixHash gasLimit (fromMaybe 0 baseFee) number timestamp txs
+    pure $ Block coinbase difficulty mixHash gasLimit (fromMaybe 0 baseFee) number timestamp txs
   parseJSON invalid =
     JSON.typeMismatch "Block" invalid
 
@@ -378,7 +377,7 @@ fromBlockchainCase' block tx preState postState =
          , caller        = LitAddr origin
          , baseState     = EmptyBase
          , origin        = LitAddr origin
-         , gas           = tx.gasLimit  - fromIntegral (txGasCost feeSchedule tx)
+         , gas           = tx.gasLimit - txGasCost feeSchedule tx
          , baseFee       = block.baseFee
          , priorityFee   = priorityFee tx block.baseFee
          , gaslimit      = tx.gasLimit
@@ -436,9 +435,9 @@ validateTx tx block cs = do
   origin        <- sender tx
   (Lit originBalance) <- (view #balance) <$> view (at origin) cs
   originNonce   <- (view #nonce)   <$> view (at origin) cs
-  let gasDeposit = (effectiveprice tx block.baseFee) * (num tx.gasLimit)
+  let gasDeposit = (effectiveprice tx block.baseFee) * (into tx.gasLimit)
   if gasDeposit + tx.value <= originBalance
-    && (Just $ num tx.nonce) == originNonce && block.baseFee <= maxBaseFee tx
+    && (Just (unsafeInto tx.nonce) == originNonce) && block.baseFee <= maxBaseFee tx
   then Just ()
   else Nothing
 
@@ -457,11 +456,11 @@ checkTx tx block prestate = do
                         RuntimeCode (ConcreteRuntimeCode b) -> not (BS.null b)
                         _ -> True
       badNonce = prevNonce /= Just 0
-      initCodeSizeExceeded = BS.length tx.txdata > (num maxCodeSize * 2)
+      initCodeSizeExceeded = BS.length tx.txdata > (unsafeInto maxCodeSize * 2)
   if isCreate && (badNonce || nonEmptyAccount || initCodeSizeExceeded)
   then mzero
   else
-    return prestate
+    pure prestate
 
 vmForCase :: Case -> VM
 vmForCase x =
@@ -473,6 +472,6 @@ vmForCase x =
 
 forceConcreteAddrs :: Map (Expr EAddr) Contract -> Map Addr Contract
 forceConcreteAddrs cs = Map.mapKeys
-      (fromMaybe (error "Internal Error: unexpected symbolic address") . maybeLitAddr)
+      (fromMaybe (internalError "Internal Error: unexpected symbolic address") . maybeLitAddr)
       cs
 

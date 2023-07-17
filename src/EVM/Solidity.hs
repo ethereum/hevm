@@ -1,8 +1,7 @@
-{-# Language DeriveAnyClass #-}
-{-# Language DerivingStrategies #-}
-{-# Language GeneralisedNewtypeDeriving #-}
-{-# Language DataKinds #-}
-{-# Language QuasiQuotes #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module EVM.Solidity
   ( solidity
@@ -89,6 +88,7 @@ import System.IO hiding (readFile, writeFile)
 import System.IO.Temp
 import System.Process
 import Text.Read (readMaybe)
+import Witch (unsafeInto)
 
 
 data StorageItem = StorageItem
@@ -121,12 +121,12 @@ instance Read SlotType where
   readsPrec _ t@('m':'a':'p':'p':'i':'n':'g':'(':s) =
     let (lhs,rhs) = case T.splitOn " => " (pack s) of
           (l:r) -> (l,r)
-          _ -> error $ "could not parse storage item: " <> t
+          _ -> internalError $ "could not parse storage item: " <> t
         first = fromJust $ parseTypeName mempty lhs
         target = fromJust $ parseTypeName mempty (T.replace ")" "" (last rhs))
         rest = fmap (fromJust . (parseTypeName mempty . (T.replace "mapping(" ""))) (take (length rhs - 1) rhs)
     in [(StorageMapping (first NonEmpty.:| rest) target, "")]
-  readsPrec _ s = [(StorageValue $ fromMaybe (error $ "could not parse storage item: " <> s) (parseTypeName mempty (pack s)),"")]
+  readsPrec _ s = [(StorageValue $ fromMaybe (internalError $ "could not parse storage item: " <> s) (parseTypeName mempty (pack s)),"")]
 
 data SolcContract = SolcContract
   { runtimeCodehash  :: W256
@@ -190,7 +190,7 @@ instance Monoid BuildOutput where
   mempty = BuildOutput mempty mempty
 
 -- | The various project types understood by hevm
-data ProjectType = DappTools | Foundry
+data ProjectType = DappTools | CombinedJSON | Foundry
   deriving (Eq, Show, Read, ParseField)
 
 data SourceCache = SourceCache
@@ -286,24 +286,31 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
     go ';' (xs, F5 a b c j ds, _)              = let p' = SM a b c j (readR ds) in -- solc >=0.6
                                                  (xs |> p', F1 [] 1, p')
 
-    go c (xs, state, p)                        = (xs, error ("srcmap: y u " ++ show c ++ " in state" ++ show state ++ "?!?"), p)
+    go c (xs, state, p)                        = (xs, internalError ("srcmap: y u " ++ show c ++ " in state" ++ show state ++ "?!?"), p)
 
 -- | Reads all solc ouput json files found under the provided filepath and returns them merged into a BuildOutput
 readBuildOutput :: FilePath -> ProjectType -> IO (Either String BuildOutput)
 readBuildOutput root DappTools = do
-  let outDir = root <> "/out/"
+  let outDir = root </> "out"
   jsons <- findJsonFiles outDir
   case jsons of
-    [x] -> readSolc DappTools root (outDir <> x)
+    [x] -> readSolc DappTools root (outDir </> x)
+    [] -> pure . Left $ "no json files found in: " <> outDir
+    _ -> pure . Left $ "multiple json files found in: " <> outDir
+readBuildOutput root CombinedJSON = do
+  let outDir = root </> "out"
+  jsons <- findJsonFiles outDir
+  case jsons of
+    [x] -> readSolc CombinedJSON root (outDir </> x)
     [] -> pure . Left $ "no json files found in: " <> outDir
     _ -> pure . Left $ "multiple json files found in: " <> outDir
 readBuildOutput root Foundry = do
-  let outDir = root <> "/out/"
-  jsons <- findJsonFiles (root <> "/out")
+  let outDir = root </> "out"
+  jsons <- findJsonFiles outDir
   case (filterMetadata jsons) of
     [] -> pure . Left $ "no json files found in: " <> outDir
     js -> do
-      outputs <- sequence <$> mapM (readSolc Foundry root) ((fmap ((<>) (outDir))) js)
+      outputs <- sequence <$> mapM (readSolc Foundry root) ((fmap ((</>) (outDir))) js)
       pure . (fmap mconcat) $ outputs
 
 -- | Finds all json files under the provided filepath, searches recursively
@@ -318,11 +325,11 @@ makeSourceCache :: FilePath -> Sources -> Asts -> IO SourceCache
 makeSourceCache root (Sources sources) (Asts asts) = do
   files <- Map.fromList <$> forM (Map.toList sources) (\x@(SrcFile id' fp, _) -> do
       contents <- case x of
-        (_,  Just content) -> return content
-        (SrcFile _ _, Nothing) -> BS.readFile (root <> "/" <> fp)
+        (_,  Just content) -> pure content
+        (SrcFile _ _, Nothing) -> BS.readFile (root </> fp)
       pure (id', (fp, contents))
     )
-  return $! SourceCache
+  pure $! SourceCache
     { files = files
     , lines = fmap (Vector.fromList . BS.split 0xa . snd) files
     , asts  = asts
@@ -347,7 +354,7 @@ readSolc pt root fp =
       Nothing -> pure . Left $ "unable to parse: " <> fp
       Just (contracts, asts, sources) -> do
         sourceCache <- makeSourceCache root sources asts
-        return (Right (BuildOutput contracts sourceCache))
+        pure (Right (BuildOutput contracts sourceCache))
 
 yul :: Text -> Text -> IO (Maybe ByteString)
 yul contract src = do
@@ -382,14 +389,15 @@ functionAbi f = do
   (json, path) <- solidity' ("contract ABI { function " <> f <> " public {}}")
   let (Contracts sol, _, _) = fromJust $ readStdJSON json
   case Map.toList $ (fromJust (Map.lookup (path <> ":ABI") sol)).abiMap of
-     [(_,b)] -> return b
-     _ -> error "hevm internal error: unexpected abi format"
+     [(_,b)] -> pure b
+     _ -> internalError "unexpected abi format"
 
 force :: String -> Maybe a -> a
-force s = fromMaybe (error s)
+force s = fromMaybe (internalError s)
 
 readJSON :: ProjectType -> Text -> Text -> Maybe (Contracts, Asts, Sources)
 readJSON DappTools _ json = readStdJSON json
+readJSON CombinedJSON _ json = readCombinedJSON json
 readJSON Foundry contractName json = readFoundryJSON contractName json
 
 -- | Reads a foundry json output
@@ -408,7 +416,7 @@ readFoundryJSON contractName json = do
 
   abi <- toList <$> json ^? key "abi" % _Array
 
-  id' <- num <$> json ^? key "id" % _Integer
+  id' <- unsafeInto <$> json ^? key "id" % _Integer
 
   let contract = SolcContract
         { runtimeCodehash     = keccak' (stripBytecodeMetadata runtimeCode)
@@ -425,7 +433,7 @@ readFoundryJSON contractName json = do
         , storageLayout       = mempty -- TODO: foundry doesn't expose this?
         , immutableReferences = mempty -- TODO: foundry doesn't expose this?
         }
-  return ( Contracts $ Map.singleton (path <> ":" <> contractName) contract
+  pure ( Contracts $ Map.singleton (path <> ":" <> contractName) contract
          , Asts      $ Map.singleton path ast
          , Sources   $ Map.singleton (SrcFile id' (T.unpack path)) Nothing
          )
@@ -438,16 +446,16 @@ readStdJSON json = do
   sources <- KeyMap.toHashMapText <$>  json ^? key "sources" % _Object
   let asts = force "JSON lacks abstract syntax trees." . preview (key "ast") <$> sources
       contractMap = f contracts
-      getId src = num $ (force "" $ HMap.lookup src sources) ^?! key "id" % _Integer
+      getId src = unsafeInto $ (force "" $ HMap.lookup src sources) ^?! key "id" % _Integer
       contents src = (SrcFile (getId src) (T.unpack src), encodeUtf8 <$> HMap.lookup src (mconcat $ Map.elems $ snd <$> contractMap))
-  return ( Contracts $ fst <$> contractMap
+  pure ( Contracts $ fst <$> contractMap
          , Asts      $ Map.fromList (HMap.toList asts)
          , Sources   $ Map.fromList $ contents <$> (sort $ HMap.keys sources)
          )
   where
     f :: (AsValue s) => HMap.HashMap Text s -> (Map Text (SolcContract, (HMap.HashMap Text Text)))
     f x = Map.fromList . (concatMap g) . HMap.toList $ x
-    g (s, x) = h s <$> HMap.toList (KeyMap.toHashMapText (fromMaybe (error "Could not parse json object") (preview _Object x)))
+    g (s, x) = h s <$> HMap.toList (KeyMap.toHashMapText (fromMaybe (internalError "Could not parse json object") (preview _Object x)))
     h :: Text -> (Text, Value) -> (Text, (SolcContract, HMap.HashMap Text Text))
     h s (c, x) =
       let
@@ -459,8 +467,8 @@ readStdJSON json = do
         srcContents :: Maybe (HMap.HashMap Text Text)
         srcContents = do metadata <- x ^? key "metadata" % _String
                          srcs <- KeyMap.toHashMapText <$> metadata ^? key "sources" % _Object
-                         return $ fmap
-                           (fromMaybe (error "Internal Error: could not parse contents field into a string") . preview (key "content" % _String))
+                         pure $ fmap
+                           (fromMaybe (internalError "could not parse contents field into a string") . preview (key "content" % _String))
                            (HMap.filter (isJust . preview (key "content")) srcs)
         abis = force ("abi key not found in " <> show x) $
           toList <$> x ^? key "abi" % _Array
@@ -469,8 +477,8 @@ readStdJSON json = do
         creationCode     = theCreationCode,
         runtimeCodehash  = keccak' (stripBytecodeMetadata theRuntimeCode),
         creationCodehash = keccak' (stripBytecodeMetadata theCreationCode),
-        runtimeSrcmap    = force "internal error: srcmap-runtime" (makeSrcMaps (runtime ^?! key "sourceMap" % _String)),
-        creationSrcmap   = force "internal error: srcmap" (makeSrcMaps (creation ^?! key "sourceMap" % _String)),
+        runtimeSrcmap    = force "srcmap-runtime" (makeSrcMaps (runtime ^?! key "sourceMap" % _String)),
+        creationSrcmap   = force "srcmap" (makeSrcMaps (creation ^?! key "sourceMap" % _String)),
         contractName = s <> ":" <> c,
         constructorInputs = mkConstructor abis,
         abiMap        = mkAbiMap abis,
@@ -480,9 +488,46 @@ readStdJSON json = do
         immutableReferences = fromMaybe mempty $
           do x' <- runtime ^? key "immutableReferences"
              case fromJSON x' of
-               Success a -> return a
+               Success a -> pure a
                _ -> Nothing
       }, fromMaybe mempty srcContents))
+
+-- deprecate me soon
+readCombinedJSON :: Text -> Maybe (Contracts, Asts, Sources)
+readCombinedJSON json = do
+  contracts <- f . KeyMap.toHashMapText <$> (json ^? key "contracts" % _Object)
+  sources <- toList . fmap (preview _String) <$> json ^? key "sourceList" % _Array
+  pure ( Contracts contracts
+       , Asts (Map.fromList (HMap.toList asts))
+       , Sources $ Map.fromList $
+           (\(path, id') -> (SrcFile id' (T.unpack path), Nothing)) <$>
+             zip (catMaybes sources) [0..]
+       )
+  where
+    asts = KeyMap.toHashMapText $ fromMaybe (error "JSON lacks abstract syntax trees.") (json ^? key "sources" % _Object)
+    f x = Map.fromList . HMap.toList $ HMap.mapWithKey g x
+    g s x =
+      let
+        theRuntimeCode = toCode (x ^?! key "bin-runtime" % _String)
+        theCreationCode = toCode (x ^?! key "bin" % _String)
+        abis = toList $ case (x ^?! key "abi") ^? _Array of
+                 Just v -> v                                       -- solc >= 0.8
+                 Nothing -> (x ^?! key "abi" % _String) ^?! _Array -- solc <  0.8
+      in SolcContract {
+        runtimeCode      = theRuntimeCode,
+        creationCode     = theCreationCode,
+        runtimeCodehash  = keccak' (stripBytecodeMetadata theRuntimeCode),
+        creationCodehash = keccak' (stripBytecodeMetadata theCreationCode),
+        runtimeSrcmap    = force "internal error: srcmap-runtime" (makeSrcMaps (x ^?! key "srcmap-runtime" % _String)),
+        creationSrcmap   = force "internal error: srcmap" (makeSrcMaps (x ^?! key "srcmap" % _String)),
+        contractName = s,
+        constructorInputs = mkConstructor abis,
+        abiMap       = mkAbiMap abis,
+        eventMap     = mkEventMap abis,
+        errorMap     = mkErrorMap abis,
+        storageLayout = mkStorageLayout $ x ^? key "storage-layout",
+        immutableReferences = mempty -- TODO: deprecate combined-json
+      }
 
 mkAbiMap :: [Value] -> Map FunctionSelector Method
 mkAbiMap abis = Map.fromList $
@@ -514,7 +559,7 @@ mkEventMap abis = Map.fromList $
          False -> NotAnonymous)
        (map (\y ->
         ( y ^?! key "name" % _String
-        , force "internal error: type" (parseTypeName' y)
+        , force "type" (parseTypeName' y)
         , if y ^?! key "indexed" % _Bool
           then Indexed
           else NotIndexed
@@ -548,7 +593,7 @@ mkConstructor abis =
     case filter isConstructor abis of
       [abi] -> map parseMethodInput (toList (abi ^?! key "inputs" % _Array))
       [] -> [] -- default constructor has zero inputs
-      _  -> error "strange: contract has multiple constructors"
+      _  -> internalError "strange: contract has multiple constructors"
 
 mkStorageLayout :: Maybe Value -> Maybe (Map Text StorageItem)
 mkStorageLayout Nothing = Nothing
@@ -561,7 +606,7 @@ mkStorageLayout (Just json) = do
        slot <- item ^? key "slot" % _String
        typ <- Key.fromText <$> item ^? key "type" % _String
        slotType <- types ^?! key typ ^? key "label" % _String
-       return (name, StorageItem (read $ T.unpack slotType) offset (read $ T.unpack slot)))
+       pure (name, StorageItem (read $ T.unpack slotType) offset (read $ T.unpack slot)))
 
 signature :: AsValue s => s -> Text
 signature abi =
@@ -589,13 +634,13 @@ parseMutability "view" = View
 parseMutability "pure" = Pure
 parseMutability "nonpayable" = NonPayable
 parseMutability "payable" = Payable
-parseMutability _ = error "unknown function mutability"
+parseMutability _ = internalError "unknown function mutability"
 
 -- This actually can also parse a method output! :O
 parseMethodInput :: AsValue s => s -> (Text, AbiType)
 parseMethodInput x =
   ( x ^?! key "name" % _String
-  , force "internal error: method type" (parseTypeName' x)
+  , force "method type" (parseTypeName' x)
   )
 
 containsLinkerHole :: Text -> Bool
@@ -605,7 +650,7 @@ toCode :: Text -> ByteString
 toCode t = case BS16.decodeBase16 (encodeUtf8 t) of
   Right d -> d
   Left e -> if containsLinkerHole t
-            then error "unlinked libraries detected in bytecode"
+            then error "Error: unlinked libraries detected in bytecode"
             else error $ T.unpack e
 
 solidity' :: Text -> IO (Text, Text)
@@ -652,7 +697,7 @@ solidity' src = withSystemTempFile "hevm.sol" $ \path handle -> do
       "solc"
       ["--allow-paths", path, "--standard-json", (path <> ".json")]
       ""
-  return (x, pack path)
+  pure (x, pack path)
 
 yul' :: Text -> IO (Text, Text)
 yul' src = withSystemTempFile "hevm.yul" $ \path handle -> do
@@ -671,7 +716,7 @@ yul' src = withSystemTempFile "hevm.yul" $ \path handle -> do
       "solc"
       ["--allow-paths", path, "--standard-json", (path <> ".json")]
       ""
-  return (x, pack path)
+  pure (x, pack path)
 
 solc :: Language -> Text -> IO Text
 solc lang src =
@@ -794,7 +839,7 @@ astSrcMap astIds =
         (\v -> do
           src <- preview (key "src" % _String) v
           [i, n, f] <- mapM (readMaybe . T.unpack) (T.split (== ':') src)
-          return ((i, n, f), v)
+          pure ((i, n, f), v)
         )
       . Map.elems
       $ astIds

@@ -1,36 +1,32 @@
-{-# Language GADTs #-}
-{-# Language DataKinds #-}
+{-# LANGUAGE DataKinds #-}
 
 module EVM.Fetch where
 
-import Prelude hiding (Word)
-
+import EVM (initialContract)
 import EVM.ABI
+import EVM.FeeSchedule qualified as FeeSchedule
+import EVM.Format (hexText)
 import EVM.SMT
 import EVM.Solvers
 import EVM.Types
-import EVM.Format (hexText)
-import EVM        (emptyContract, initialContract)
-import qualified EVM.FeeSchedule as FeeSchedule
+import EVM (emptyContract)
 
 import Optics.Core
 
 import Control.Monad.Trans.Maybe
 import Data.Aeson hiding (Error)
 import Data.Aeson.Optics
-import qualified Data.ByteString as BS
+import Data.ByteString qualified as BS
 import Data.Text (Text, unpack, pack)
 import Data.Maybe (fromMaybe)
 import Data.List (foldl')
-import qualified Data.Text as T
-
-import qualified Data.Vector as RegularVector
+import Data.Text qualified as T
+import Data.Vector qualified as RegularVector
 import Network.Wreq
 import Network.Wreq.Session (Session)
-import System.Process
-
-import qualified Network.Wreq.Session as Session
+import Network.Wreq.Session qualified as Session
 import Numeric.Natural (Natural)
+import System.Process
 
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where
@@ -81,8 +77,8 @@ fetchQuery
   -> (Value -> IO (Maybe Value))
   -> RpcQuery a
   -> IO (Maybe a)
-fetchQuery n f q = do
-  x <- case q of
+fetchQuery n f q =
+  case q of
     QueryCode addr -> do
         m <- f (rpc "eth_getCode" [toRPC addr, toRPC n])
         pure $ do
@@ -95,7 +91,7 @@ fetchQuery n f q = do
           readText <$> t
     QueryBlock -> do
       m <- f (rpc "eth_getBlockByNumber" [toRPC n, toRPC False])
-      return $ m >>= parseBlock
+      pure $ m >>= parseBlock
     QueryBalance addr -> do
         m <- f (rpc "eth_getBalance" [toRPC addr, toRPC n])
         pure $ do
@@ -111,8 +107,6 @@ fetchQuery n f q = do
         pure $ do
           t <- preview _String <$> m
           readText <$> t
-  return x
-
 
 parseBlock :: (AsValue s, Show s) => s -> Maybe Block
 parseBlock j = do
@@ -132,14 +126,14 @@ parseBlock j = do
      (Just p, _, _) -> p
      (Nothing, Just mh, Just 0x0) -> mh
      (Nothing, Just _, Just d) -> d
-     _ -> error "Internal Error: block contains both difficulty and prevRandao"
+     _ -> internalError "block contains both difficulty and prevRandao"
   -- default codesize, default gas limit, default feescedule
-  return $ Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff FeeSchedule.berlin
+  pure $ Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff FeeSchedule.berlin
 
 fetchWithSession :: Text -> Session -> Value -> IO (Maybe Value)
 fetchWithSession url sess x = do
   r <- asValue =<< Session.post sess (unpack url) x
-  return (r ^? (lensVL responseBody) % key "result")
+  pure (r ^? (lensVL responseBody) % key "result")
 
 fetchContractWithSession
   :: BlockNumber -> Text -> Addr -> Session -> IO (Maybe Contract)
@@ -156,7 +150,6 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
     initialContract (RuntimeCode (ConcreteRuntimeCode code))
       & set #nonce    (Just nonce)
       & set #balance  (Lit balance)
-      & set #external True
 
 fetchSlotWithSession
   :: BlockNumber -> Text -> Session -> Addr -> W256 -> IO (Maybe W256)
@@ -207,7 +200,7 @@ oracle solvers info q = do
           (_, stdout', _) <- readProcessWithExitCode cmd args ""
           pure . continue . encodeAbiValue $
             AbiTuple (RegularVector.fromList [ AbiBytesDynamic . hexText . pack $ stdout'])
-       _ -> error (show vals)
+       _ -> internalError (show vals)
 
     PleaseAskSMT branchcondition pathconditions continue -> do
          let pathconds = foldl' PAnd (PBool True) pathconditions
@@ -219,17 +212,17 @@ oracle solvers info q = do
         Nothing -> return $ Just emptyContract
         Just (n, url) -> fetchContractFrom n url addr
       case contract of
-        Just x -> return $ continue x
-        Nothing -> error ("oracle error: " ++ show q)
+        Just x -> pure $ continue x
+        Nothing -> internalError $ "oracle error: " ++ show q
 
     PleaseFetchSlot addr slot continue ->
       case info of
-        Nothing -> return (continue 0)
+        Nothing -> pure (continue 0)
         Just (n, url) ->
-         fetchSlotFrom n url addr (fromIntegral slot) >>= \case
-           Just x  -> return (continue x)
+         fetchSlotFrom n url addr slot >>= \case
+           Just x  -> pure (continue x)
            Nothing ->
-             error ("oracle error: " ++ show q)
+             internalError $ "oracle error: " ++ show q
 
 type Fetcher = Query -> IO (EVM ())
 
@@ -241,19 +234,19 @@ type Fetcher = Query -> IO (EVM ())
 checkBranch :: SolverGroup -> Prop -> Prop -> IO BranchCondition
 checkBranch solvers branchcondition pathconditions = do
   checkSat solvers (assertProps [(branchcondition .&& pathconditions)]) >>= \case
-     -- the condition is unsatisfiable
-     Unsat -> -- if pathconditions are consistent then the condition must be false
-            return $ Case False
-     -- Sat means its possible for condition to hold
-     Sat _ -> -- is its negation also possible?
-            checkSat solvers (assertProps [(pathconditions .&& (PNeg branchcondition))]) >>= \case
-               -- No. The condition must hold
-               Unsat -> return $ Case True
-               -- Yes. Both branches possible
-               Sat _ -> return EVM.Types.Unknown
-               -- Explore both branches in case of timeout
-               EVM.Solvers.Unknown -> return EVM.Types.Unknown
-               Error e -> error $ "Internal Error: SMT Solver returned with an error: " <> T.unpack e
-     -- If the query times out, we simply explore both paths
-     EVM.Solvers.Unknown -> return EVM.Types.Unknown
-     Error e -> error $ "Internal Error: SMT Solver returned with an error: " <> T.unpack e
+    -- the condition is unsatisfiable
+    Unsat -> -- if pathconditions are consistent then the condition must be false
+      pure $ Case False
+    -- Sat means its possible for condition to hold
+    Sat _ -> -- is its negation also possible?
+      checkSat solvers (assertProps [(pathconditions .&& (PNeg branchcondition))]) >>= \case
+        -- No. The condition must hold
+        Unsat -> pure $ Case True
+        -- Yes. Both branches possible
+        Sat _ -> pure EVM.Types.Unknown
+        -- Explore both branches in case of timeout
+        EVM.Solvers.Unknown -> pure EVM.Types.Unknown
+        Error e -> error $ "Internal Error: SMT Solver pureed with an error: " <> T.unpack e
+    -- If the query times out, we simply explore both paths
+    EVM.Solvers.Unknown -> pure EVM.Types.Unknown
+    Error e -> internalError $ "SMT Solver pureed with an error: " <> T.unpack e

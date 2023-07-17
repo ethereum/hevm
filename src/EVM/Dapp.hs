@@ -2,10 +2,10 @@
 
 module EVM.Dapp where
 
+import EVM.ABI
 import EVM.Concrete
 import EVM.Solidity
 import EVM.Types
-import EVM.ABI
 
 import Control.Arrow ((>>>), second)
 import Data.Aeson (Value)
@@ -21,6 +21,7 @@ import Data.Text (Text, isPrefixOf, pack, unpack)
 import Data.Text.Encoding (encodeUtf8)
 import Data.Vector qualified as V
 import Optics.Core
+import Witch (unsafeInto)
 
 data DappInfo = DappInfo
   { root       :: FilePath
@@ -166,18 +167,18 @@ lookupCode (InitCode c _) a =
   snd <$> Map.lookup (keccak' (stripBytecodeMetadata c)) a.solcByHash
 lookupCode (RuntimeCode (ConcreteRuntimeCode c)) a =
   case snd <$> Map.lookup (keccak' (stripBytecodeMetadata c)) a.solcByHash of
-    Just x -> return x
+    Just x -> pure x
     Nothing -> snd <$> find (compareCode c . fst) a.solcByCode
 lookupCode (RuntimeCode (SymbolicRuntimeCode c)) a = let
     code = BS.pack $ mapMaybe maybeLitByte $ V.toList c
   in case snd <$> Map.lookup (keccak' (stripBytecodeMetadata code)) a.solcByHash of
-    Just x -> return x
+    Just x -> pure x
     Nothing -> snd <$> find (compareCode code . fst) a.solcByCode
 
 compareCode :: ByteString -> Code -> Bool
 compareCode raw (Code template locs) =
   let holes' = sort [(start, len) | (Reference start len) <- locs]
-      insert loc len' bs = writeMemory (BS.replicate len' 0) (fromIntegral len') 0 (fromIntegral loc) bs
+      insert loc len' bs = writeMemory (BS.replicate len' 0) (unsafeInto len') 0 (unsafeInto loc) bs
       refined = foldr (\(start, len) acc -> insert start len acc) raw holes'
   in BS.length raw == BS.length template && template == refined
 

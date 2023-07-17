@@ -1,59 +1,55 @@
 -- Main file of the hevm CLI program
 
-{-# Language DataKinds #-}
-{-# Language DeriveAnyClass #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Main where
 
-import EVM.Concrete (createAddress)
-import EVM (initialContract, makeVm)
-import qualified EVM.FeeSchedule as FeeSchedule
-import qualified EVM.Fetch
-import qualified EVM.Stepper
-
-import EVM.SymExec
-import qualified EVM.Expr as Expr
-import EVM.Solvers
-import qualified EVM.TTY as TTY
-import EVM.Solidity
-import EVM.Types hiding (word)
-import EVM.Format (hexByteString, strip0x)
-import EVM.UnitTest (UnitTestOptions, coverageReport, coverageForUnitTestContract, getParametersFromEnvironmentVariables, unitTest)
-import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
-import GHC.Natural
-import EVM.Format (showTraceTree, formatExpr)
-import Data.Word (Word64)
-
-import qualified Data.Map as Map
-import qualified EVM.Facts     as Facts
-import qualified EVM.Facts.Git as Git
-import qualified EVM.UnitTest
-
-import GHC.Conc
-import Optics.Core hiding (pre, Empty)
-import Control.Monad              (void, when, forM_, unless)
+import Control.Monad (void, when, forM_, unless)
 import Control.Monad.State.Strict (liftIO)
-import Data.ByteString            (ByteString)
-import Data.List                  (intersperse)
-import Data.Text                  (pack)
-import Data.Maybe                 (fromMaybe, mapMaybe)
-import Data.Version               (showVersion)
-import Data.DoubleWord            (Word256)
-import System.IO                  (stderr)
-import System.Directory           (withCurrentDirectory, getCurrentDirectory, doesDirectoryExist)
-import System.FilePath            ((</>))
-import System.Exit                (exitFailure, exitWith, ExitCode(..))
-
-import qualified Data.ByteString        as ByteString
-import qualified Data.ByteString.Char8  as Char8
-import qualified Data.ByteString.Lazy   as LazyByteString
-import qualified Data.Text              as T
-import qualified Data.Text.IO           as T
-
-import qualified Paths_hevm      as Paths
-
+import Data.ByteString (ByteString)
+import Data.ByteString qualified as ByteString
+import Data.ByteString.Char8 qualified as Char8
+import Data.ByteString.Lazy qualified as LazyByteString
+import Data.DoubleWord (Word256)
+import Data.List (intersperse)
+import Data.Map qualified as Map
+import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Text (pack)
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
+import Data.Version (showVersion)
+import Data.Word (Word64)
+import GHC.Conc (getNumProcessors)
+import Numeric.Natural (Natural)
+import Optics.Core ((&), set)
+import Witch (unsafeInto)
 import Options.Generic as Options
-import qualified EVM.Transaction
+import Paths_hevm qualified as Paths
+import System.IO (stderr)
+import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirectoryExist)
+import System.FilePath ((</>))
+import System.Exit (exitFailure, exitWith, ExitCode(..))
+
+import EVM (initialContract, makeVm)
+import EVM.Concrete (createAddress)
+import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
+import EVM.Expr qualified as Expr
+import EVM.Facts qualified as Facts
+import EVM.Facts.Git qualified as Git
+import GitHash
+import EVM.FeeSchedule qualified as FeeSchedule
+import EVM.Fetch qualified
+import EVM.Format (hexByteString, strip0x, showTraceTree, formatExpr)
+import EVM.Solidity
+import EVM.Solvers
+import EVM.Stepper qualified
+import EVM.SymExec
+import EVM.Transaction qualified
+import EVM.TTY qualified as TTY
+import EVM.Types hiding (word)
+import EVM.UnitTest
 
 -- This record defines the program's command-line options
 -- automatically via the `optparse-generic` package.
@@ -235,7 +231,7 @@ unitTestOptions cmd solvers buildOutput = do
        then EVM.Fetch.Latest
        else EVM.Fetch.BlockNumber testn
 
-  pure EVM.UnitTest.UnitTestOptions
+  pure UnitTestOptions
     { solvers = solvers
     , rpcInfo = case cmd.rpc of
          Just url -> Just (block', url)
@@ -252,18 +248,26 @@ unitTestOptions cmd solvers buildOutput = do
     , fuzzRuns = fromMaybe 100 cmd.fuzzRuns
     , replay = do
         arg' <- cmd.replay
-        return (fst arg', LazyByteString.fromStrict (hexByteString "--replay" $ strip0x $ snd arg'))
+        pure (fst arg', LazyByteString.fromStrict (hexByteString "--replay" $ strip0x $ snd arg'))
     , vmModifier = vmModifier
     , testParams = params
     , dapp = srcInfo
     , ffiAllowed = cmd.ffi
     }
 
+getFullVersion :: [Char]
+getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
+  where
+    gitInfo = $$tGitInfoCwdTry
+    gitVersion = case gitInfo of
+      Right val -> "git rev " <> giBranch val <>  "@" <> giHash val
+      Left _ -> "no git revision present"
+
 main :: IO ()
 main = do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
   case cmd of
-    Version {} -> putStrLn (showVersion Paths.version)
+    Version {} ->putStrLn getFullVersion
     Symbolic {} -> do
       root <- getRoot cmd
       withCurrentDirectory root $ assert cmd
@@ -273,7 +277,7 @@ main = do
     Test {} -> do
       root <- getRoot cmd
       withCurrentDirectory root $ do
-        cores <- num <$> getNumProcessors
+        cores <- unsafeInto <$> getNumProcessors
         solver <- getSolver cmd
         withSolvers solver cores cmd.smttimeout $ \solvers -> do
           buildOut <- readBuildOutput root (getProjectType cmd)
@@ -289,7 +293,7 @@ main = do
                   res <- unitTest testOpts out.contracts cmd.cache
                   unless res exitFailure
                 (False, Debug) -> liftIO $ TTY.main testOpts root (Just out)
-                (False, JsonTrace) -> error "json traces not implemented for dappTest"
+                (False, JsonTrace) -> internalError "json traces not implemented for dappTest"
                 (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) out
 
 
@@ -377,7 +381,7 @@ assert cmd = do
   calldata <- buildCalldata cmd
   preState <- symvmFromCommand cmd calldata
   let errCodes = fromMaybe defaultPanicCodes cmd.assertions
-  cores <- num <$> getNumProcessors
+  cores <- unsafeInto <$> getNumProcessors
   let solverCount = fromMaybe cores cmd.numSolvers
   solver <- getSolver cmd
   withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
@@ -527,11 +531,11 @@ launchExec cmd = do
                   putStrLn e
                   exitFailure
           _ ->
-            error "Internal error: no EVM result"
+            internalError "no EVM result"
 
       Debug -> void $ TTY.runFromVM solvers rpcinfo Nothing dapp vm
       --JsonTrace -> void $ execStateT (interpretWithTrace fetcher EVM.Stepper.runFully) vm
-      _ -> error "TODO"
+      _ -> internalError "TODO"
      where block = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber cmd.block
            rpcinfo = (,) block <$> cmd.rpc
 
@@ -541,26 +545,26 @@ vmFromCommand cmd = do
   withCache <- applyCache (cmd.state, cmd.cache)
 
   (miner,ts,baseFee,blockNum,prevRan) <- case cmd.rpc of
-    Nothing -> return (LitAddr 0,Lit 0,0,0,0)
+    Nothing -> pure (LitAddr 0,Lit 0,0,0,0)
     Just url -> EVM.Fetch.fetchBlockFrom block url >>= \case
-      Nothing -> error "Could not fetch block"
-      Just Block{..} -> return ( coinbase
-                                   , timestamp
-                                   , baseFee
-                                   , number
-                                   , prevRandao
-                                   )
+      Nothing -> error "Error: Could not fetch block"
+      Just Block{..} -> pure ( coinbase
+                             , timestamp
+                             , baseFee
+                             , number
+                             , prevRandao
+                             )
 
   contract <- case (cmd.rpc, cmd.address, cmd.code) of
     (Just url, Just addr', Just c) -> do
       EVM.Fetch.fetchContractFrom block url addr' >>= \case
         Nothing ->
-          error $ "contract not found: " <> show address
+          error $ "Error: contract not found: " <> show address
         Just contract ->
           -- if both code and url is given,
           -- fetch the contract and overwrite the code
-          return $
-            initialContract  (mkCode $ hexByteString "--code" $ strip0x c) (LitAddr addr')
+          pure $
+            initialContract  (mkCode $ hexByteString "--code" $ strip0x c)
               & set #balance  (contract.balance)
               & set #nonce    (contract.nonce)
               & set #external (contract.external)
@@ -568,21 +572,21 @@ vmFromCommand cmd = do
     (Just url, Just addr', Nothing) ->
       EVM.Fetch.fetchContractFrom block url addr' >>= \case
         Nothing ->
-          error $ "contract not found: " <> show address
-        Just contract -> return contract
+          error $ "Error: contract not found: " <> show address
+        Just contract -> pure contract
 
-    (_, _, Just c) ->
-      return $
-        initialContract (mkCode $ hexByteString "--code" $ strip0x c) address
+    (_, _, Just c)  ->
+      pure $
+        initialContract (mkCode $ hexByteString "--code" $ strip0x c)
 
     (_, _, Nothing) ->
-      error "must provide at least (rpc + address) or code"
+      error "Error: must provide at least (rpc + address) or code"
 
   let ts' = case maybeLitWord ts of
         Just t -> t
-        Nothing -> error "unexpected symbolic timestamp when executing vm test"
+        Nothing -> internalError "unexpected symbolic timestamp when executing vm test"
 
-  return $ EVM.Transaction.initTx $ withCache (vm0 baseFee miner ts' blockNum prevRan contract)
+  pure $ EVM.Transaction.initTx $ withCache (vm0 baseFee miner ts' blockNum prevRan contract)
     where
         block   = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber cmd.block
         value   = word (.value) 0
@@ -633,12 +637,12 @@ symvmFromCommand cmd calldata = do
   (miner,blockNum,baseFee,prevRan) <- case cmd.rpc of
     Nothing -> return (LitAddr 0,0,0,0)
     Just url -> EVM.Fetch.fetchBlockFrom block url >>= \case
-      Nothing -> error "Could not fetch block"
-      Just Block{..} -> return ( coinbase
-                                   , number
-                                   , baseFee
-                                   , prevRandao
-                                   )
+      Nothing -> error "Error: Could not fetch block"
+      Just Block{..} -> pure ( coinbase
+                             , number
+                             , baseFee
+                             , prevRandao
+                             )
 
   let
     caller = SymAddr 0
@@ -651,14 +655,14 @@ symvmFromCommand cmd calldata = do
     (Just url, Just addr', _) ->
       EVM.Fetch.fetchContractFrom block url addr' >>= \case
         Nothing ->
-          error "contract not found."
-        Just contract' -> return contract''
+          error "Error: contract not found."
+        Just contract' -> pure contract''
           where
             contract'' = case cmd.code of
               Nothing -> contract'
               -- if both code and url is given,
               -- fetch the contract and overwrite the code
-              Just c -> initialContract (mkCode $ decipher c) (LitAddr addr')
+              Just c -> initialContract (mkCode $ decipher c)
                         -- TODO: fix this
                         -- & set EVM.origStorage (view EVM.origStorage contract')
                         & set #balance     (contract'.balance)
@@ -666,9 +670,9 @@ symvmFromCommand cmd calldata = do
                         & set #external    (contract'.external)
 
     (_, _, Just c)  ->
-      return (flip initialContract (SymAddr 1) . mkCode $ decipher c)
+      pure (initialContract . mkCode $ decipher c)
     (_, _, Nothing) ->
-      error "must provide at least (rpc + address) or code"
+      error "Error: must provide at least (rpc + address) or code"
 
   return (EVM.Transaction.initTx $ withCache $ vm0 baseFee miner ts blockNum prevRan calldata callvalue caller contract)
 
@@ -703,7 +707,7 @@ symvmFromCommand cmd calldata = do
       , schedule      = FeeSchedule.berlin
       , chainId       = word (.chainid) 1
       , create        = (.create) cmd
-      , initialState  = maybe AbstractState parseInitialStorage (cmd.initialStorage)
+      , baseState     = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
       , txAccessList  = mempty
       , allowFFI      = False
       }
@@ -712,6 +716,6 @@ symvmFromCommand cmd calldata = do
     addr f def = fromMaybe def (f cmd)
     eaddr f def = maybe def LitAddr (f cmd)
 
-parseInitialStorage :: InitialStorage -> InitialState
-parseInitialStorage Empty = EmptyState
-parseInitialStorage Abstract = AbstractState
+parseInitialStorage :: InitialStorage -> BaseState
+parseInitialStorage Empty = EmptyBase
+parseInitialStorage Abstract = AbstractBase

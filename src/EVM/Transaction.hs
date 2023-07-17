@@ -1,7 +1,5 @@
 module EVM.Transaction where
 
-import Prelude hiding (Word)
-
 import EVM (initialContract, ceilDiv)
 import EVM.FeeSchedule
 import EVM.RLP
@@ -12,18 +10,18 @@ import qualified EVM.Expr as Expr
 
 import Optics.Core hiding (cons)
 
-import Data.ByteString (ByteString, cons)
-import Data.Map (Map)
-import Data.Maybe (fromMaybe, isNothing, fromJust)
-import GHC.Generics (Generic)
-
 import Data.Aeson (FromJSON (..))
-import qualified Data.Aeson        as JSON
-import qualified Data.Aeson.Types  as JSON
-import qualified Data.ByteString   as BS
-import qualified Data.Map          as Map
+import Data.Aeson qualified as JSON
+import Data.Aeson.Types qualified as JSON
+import Data.ByteString (ByteString, cons)
+import Data.ByteString qualified as BS
+import Data.Map (Map)
+import Data.Map qualified as Map
+import Data.Maybe (fromMaybe, isNothing, fromJust)
 import Data.Word (Word64)
+import GHC.Generics (Generic)
 import Numeric (showHex)
+import Witch (into, unsafeInto)
 
 data AccessListEntry = AccessListEntry {
   address :: Addr,
@@ -63,7 +61,7 @@ data Transaction = Transaction {
 
 instance JSON.ToJSON Transaction where
   toJSON t = JSON.object [ ("input",             (JSON.toJSON (ByteStringS t.txdata)))
-                         , ("gas",               (JSON.toJSON $ "0x" ++ showHex (toInteger $ t.gasLimit) ""))
+                         , ("gas",               (JSON.toJSON $ "0x" ++ showHex (into @Integer $ t.gasLimit) ""))
                          , ("gasPrice",          (JSON.toJSON $ show $ fromJust $ t.gasPrice))
                          , ("v",                 (JSON.toJSON $ show $ (t.v)-27))
                          , ("r",                 (JSON.toJSON $ show $ t.r))
@@ -110,7 +108,7 @@ sender tx = ecrec v' tx.r  tx.s hash
                else 27 + v
 
 sign :: Integer -> Transaction -> Transaction
-sign sk tx = tx { v = num v, r = r, s = s}
+sign sk tx = tx { v = into v, r = r, s = s}
   where
     hash = keccak' $ signingData tx
     (v, r, s) = EVM.Sign.sign hash sk
@@ -123,7 +121,7 @@ signingData tx =
       else normalData
     AccessListTransaction -> eip2930Data
     EIP1559Transaction -> eip1559Data
-  where v          = fromIntegral tx.v
+  where v          = tx.v
         to'        = case tx.toAddr of
           Just a  -> BS $ word160Bytes a
           Nothing -> BS mempty
@@ -137,13 +135,13 @@ signingData tx =
           ) accessList
         normalData = rlpList [rlpWord256 tx.nonce,
                               rlpWord256 gasPrice,
-                              rlpWord256 (num tx.gasLimit),
+                              rlpWord256 (into tx.gasLimit),
                               to',
                               rlpWord256 tx.value,
                               BS tx.txdata]
         eip155Data = rlpList [rlpWord256 tx.nonce,
                               rlpWord256 gasPrice,
-                              rlpWord256 (num tx.gasLimit),
+                              rlpWord256 (into tx.gasLimit),
                               to',
                               rlpWord256 tx.value,
                               BS tx.txdata,
@@ -155,7 +153,7 @@ signingData tx =
           rlpWord256 tx.nonce,
           rlpWord256 maxPrio,
           rlpWord256 maxFee,
-          rlpWord256 (num tx.gasLimit),
+          rlpWord256 (into tx.gasLimit),
           to',
           rlpWord256 tx.value,
           BS tx.txdata,
@@ -165,7 +163,7 @@ signingData tx =
           rlpWord256 tx.chainId,
           rlpWord256 tx.nonce,
           rlpWord256 gasPrice,
-          rlpWord256 (num tx.gasLimit),
+          rlpWord256 (into tx.gasLimit),
           to',
           rlpWord256 tx.value,
           BS tx.txdata,
@@ -176,7 +174,7 @@ accessListPrice fs al =
     sum (map
       (\ale ->
         fs.g_access_list_address  +
-        (fs.g_access_list_storage_key  * (fromIntegral . length) ale.storageKeys))
+        (fs.g_access_list_storage_key  * (unsafeInto . length) ale.storageKeys))
         al)
 
 txGasCost :: FeeSchedule Word64 -> Transaction -> Word64
@@ -189,14 +187,14 @@ txGasCost fs tx =
         + (accessListPrice fs tx.accessList )
       zeroCost     = fs.g_txdatazero
       nonZeroCost  = fs.g_txdatanonzero
-      initcodeCost = fs.g_initcodeword * num (ceilDiv (BS.length calldata) 32)
-  in baseCost + zeroCost * (fromIntegral zeroBytes) + nonZeroCost * (fromIntegral nonZeroBytes)
+      initcodeCost = fs.g_initcodeword * unsafeInto (ceilDiv (BS.length calldata) 32)
+  in baseCost + zeroCost * (unsafeInto zeroBytes) + nonZeroCost * (unsafeInto nonZeroBytes)
 
 instance FromJSON AccessListEntry where
   parseJSON (JSON.Object val) = do
     accessAddress_ <- addrField val "address"
     accessStorageKeys_ <- (val JSON..: "storageKeys") >>= parseJSONList
-    return $ AccessListEntry accessAddress_ accessStorageKeys_
+    pure $ AccessListEntry accessAddress_ accessStorageKeys_
   parseJSON invalid =
     JSON.typeMismatch "AccessListEntry" invalid
 
@@ -215,15 +213,15 @@ instance FromJSON Transaction where
     value    <- wordField val "value"
     txType   <- fmap (read :: String -> Int) <$> (val JSON..:? "type")
     case txType of
-      Just 0x00 -> return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value LegacyTransaction [] Nothing Nothing 1
+      Just 0x00 -> pure $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value LegacyTransaction [] Nothing Nothing 1
       Just 0x01 -> do
         accessListEntries <- (val JSON..: "accessList") >>= parseJSONList
-        return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value AccessListTransaction accessListEntries Nothing Nothing 1
+        pure $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value AccessListTransaction accessListEntries Nothing Nothing 1
       Just 0x02 -> do
         accessListEntries <- (val JSON..: "accessList") >>= parseJSONList
-        return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value EIP1559Transaction accessListEntries maxPrio maxFee 1
+        pure $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value EIP1559Transaction accessListEntries maxPrio maxFee 1
       Just _ -> fail "unrecognized custom transaction type"
-      Nothing -> return $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value LegacyTransaction [] Nothing Nothing 1
+      Nothing -> pure $ Transaction tdata gasLimit gasPrice nonce r s toAddr v value LegacyTransaction [] Nothing Nothing 1
   parseJSON invalid =
     JSON.typeMismatch "Transaction" invalid
 
@@ -239,7 +237,7 @@ newAccount = initialContract (RuntimeCode (ConcreteRuntimeCode ""))
 -- | Increments origin nonce and pays gas deposit
 setupTx :: Expr EAddr -> Expr EAddr -> W256 -> Word64 -> Map (Expr EAddr) Contract -> Map (Expr EAddr) Contract
 setupTx origin coinbase gasPrice gasLimit prestate =
-  let gasCost = gasPrice * (num gasLimit)
+  let gasCost = gasPrice * (into gasLimit)
   in (Map.adjust ((over #nonce   (fmap ((+) 1)))
                . (over #balance (`Expr.sub` (Lit gasCost)))) origin)
     . touchAccount origin

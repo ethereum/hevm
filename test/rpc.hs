@@ -1,4 +1,4 @@
-{-# Language DataKinds #-}
+{-# LANGUAGE DataKinds #-}
 
 module Main where
 
@@ -31,7 +31,7 @@ tests = testGroup "rpc"
     [ testCase "pre-merge-block" $ do
         let block = BlockNumber 15537392
         (cb, numb, basefee, prevRan) <- fetchBlockFrom block testRpc >>= \case
-                      Nothing -> error "Could not fetch block"
+                      Nothing -> internalError "Could not fetch block"
                       Just Block{..} -> return ( coinbase
                                                    , number
                                                    , baseFee
@@ -45,7 +45,7 @@ tests = testGroup "rpc"
     , testCase "post-merge-block" $ do
         let block = BlockNumber 16184420
         (cb, numb, basefee, prevRan) <- fetchBlockFrom block testRpc >>= \case
-                      Nothing -> error "Could not fetch block"
+                      Nothing -> internalError "Could not fetch block"
                       Just Block{..} -> return ( coinbase
                                                    , number
                                                    , baseFee
@@ -77,11 +77,11 @@ tests = testGroup "rpc"
           wethStore = (fromJust $ Map.lookup (LitAddr 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2) postVm.env.contracts).storage
           wethStore' = case wethStore of
             ConcreteStore _ s -> s
-            _ -> error "Expecting concrete store"
+            _ -> internalError "Expecting concrete store"
           receiverBal = fromJust $ Map.lookup (keccak' (word256Bytes 0xdead <> word256Bytes 0x3)) wethStore'
           msg = case postVm.result of
             Just (VMSuccess m) -> m
-            _ -> error "VMSuccess expected"
+            _ -> internalError "VMSuccess expected"
         assertEqual "should succeed" msg (ConcreteBuf $ word256Bytes 0x1)
         assertEqual "should revert" receiverBal (W256 $ 2595433725034301 + wad)
 
@@ -112,11 +112,11 @@ weth9VM blockNum calldata' = do
 vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EAddr -> Addr -> IO VM
 vmFromRpc blockNum calldata callvalue caller address = do
   ctrct <- fetchContractFrom (BlockNumber blockNum) testRpc address >>= \case
-        Nothing -> error $ "contract not found: " <> show address
+        Nothing -> internalError $ "contract not found: " <> show address
         Just contract' -> return contract'
 
   blk <- fetchBlockFrom (BlockNumber blockNum) testRpc >>= \case
-    Nothing -> error "could not fetch block"
+    Nothing -> internalError "could not fetch block"
     Just b -> pure b
 
   pure $ (makeVm $ VMOpts

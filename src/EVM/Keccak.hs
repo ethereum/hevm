@@ -1,20 +1,17 @@
 {-# LANGUAGE DataKinds #-}
+
 {- |
     Module: EVM.Keccak
     Description: Expr passes to determine Keccak assumptions
 -}
-
 module EVM.Keccak (keccakAssumptions) where
 
-import Prelude hiding (Word, LT, GT)
-
-import Data.Set (Set)
-import qualified Data.Set as Set
 import Control.Monad.State
+import Data.Set (Set)
+import Data.Set qualified as Set
 
-import EVM.Types
 import EVM.Traversals
-
+import EVM.Types
 
 newtype BuilderState = BuilderState
   { keccaks :: Set (Expr EWord) }
@@ -54,12 +51,12 @@ combine lst = combine' lst []
 
 minProp :: Expr EWord -> Prop
 minProp k@(Keccak _) = PGT k (Lit 50)
-minProp _ = error "Internal error: expected keccak expression"
+minProp _ = internalError "expected keccak expression"
 
 injProp :: (Expr EWord, Expr EWord) -> Prop
 injProp (k1@(Keccak b1), k2@(Keccak b2)) =
   POr (PEq b1 b2) (PNeg (PEq k1 k2))
-injProp _ = error "Internal error: expected keccak expression"
+injProp _ = internalError "expected keccak expression"
 
 -- Takes a list of props, find all keccak occurences and generates two kinds of assumptions:
 --   1. Minimum output value: That the output of the invocation is greater than
@@ -75,5 +72,3 @@ keccakAssumptions ps bufs stores = injectivity <> minValue
 
     injectivity = fmap injProp $ combine (Set.toList st.keccaks)
     minValue = fmap minProp (Set.toList st.keccaks)
-
-

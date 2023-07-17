@@ -1,13 +1,10 @@
-{-# Language DataKinds #-}
-{-# Language ScopedTypeVariables #-}
-
 {- |
     Module: EVM.Traversals
     Description: Generic traversal functions for Expr datatypes
 -}
 module EVM.Traversals where
 
-import Prelude hiding (Word, LT, GT)
+import Prelude hiding (LT, GT)
 
 import Control.Monad.Identity
 import qualified Data.Map.Strict as Map

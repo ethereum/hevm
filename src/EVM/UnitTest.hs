@@ -1,5 +1,5 @@
-{-# Language DataKinds #-}
-{-# Language ImplicitParams #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ImplicitParams #-}
 
 module EVM.UnitTest where
 
@@ -64,6 +64,7 @@ import System.Exit (exitFailure)
 import System.IO (hFlush, stdout)
 import Test.QuickCheck hiding (verbose, Success, Failure)
 import qualified Test.QuickCheck as QC
+import Witch (unsafeInto, into)
 
 data UnitTestOptions = UnitTestOptions
   { rpcInfo     :: Fetch.RpcInfo
@@ -148,7 +149,7 @@ unitTest opts (Contracts cs) cache' = do
              putStrLn e
              exitFailure
 
-  return $ and passing
+  pure $ and passing
 
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
@@ -210,10 +211,10 @@ exploreStep UnitTestOptions{..} bs = do
   Stepper.evm $ do
     cs <- use (#env % #contracts)
     abiCall testParams (Right bs)
-    let (Method _ inputs sig _ _) = fromMaybe (error "unknown abi call") $ Map.lookup (num $ word $ BS.take 4 bs) dapp.abiMap
+    let Method _ inputs sig _ _ = fromMaybe (internalError "unknown abi call") $ Map.lookup (unsafeInto $ word $ BS.take 4 bs) dapp.abiMap
         types = snd <$> inputs
     let ?context = DappContext dapp cs
-    this <- fromMaybe (error "unknown target") <$> (use (#env % #contracts % at testParams.address))
+    this <- fromMaybe (internalError "unknown target") <$> (use (#env % #contracts % at testParams.address))
     let name = maybe "" (contractNamePart . (.contractName)) $ lookupCode this.code dapp
     pushTrace (EntryTrace (name <> "." <> sig <> "(" <> intercalate "," ((pack . show) <$> types) <> ")" <> showCall types (ConcreteBuf bs)))
   -- Try running the test method
@@ -238,9 +239,9 @@ checkFailures UnitTestOptions { .. } method bailed = do
       Right (ConcreteBuf r) ->
         let failed = case decodeAbiValue AbiBoolType (BSLazy.fromStrict r) of
               AbiBool f -> f
-              _ -> error "fix me with better types"
+              _ -> internalError "fix me with better types"
         in pure (shouldFail == failed)
-      c -> error $ "internal error: unexpected failure code: " <> show c
+      c -> internalError $ "unexpected failure code: " <> show c
 
 -- | Randomly generates the calldata arguments and runs the test
 fuzzTest :: UnitTestOptions -> Text -> [AbiType] -> VM -> Property
@@ -272,11 +273,11 @@ currentOpLocation :: VM -> OpLocation
 currentOpLocation vm =
   case currentContract vm of
     Nothing ->
-      error "internal error: why no contract?"
+      internalError "why no contract?"
     Just c ->
       OpLocation
         c
-        (fromMaybe (error "internal error: op ix") (vmOpIx vm))
+        (fromMaybe (internalError "op ix") (vmOpIx vm))
 
 execWithCoverage :: StateT CoverageState IO VMResult
 execWithCoverage = do _ <- runWithCoverage
@@ -322,7 +323,7 @@ interpretWithCoverage opts@UnitTestOptions{..} =
           do m <- liftIO ((Fetch.oracle solvers rpcInfo) q)
              zoom _1 (State.state (runState m)) >> interpretWithCoverage opts (k ())
         Stepper.Ask _ ->
-          error "cannot make choice in this interpreter"
+          internalError "cannot make choice in this interpreter"
         Stepper.IOAct q ->
           zoom _1 (StateT (runStateT q)) >>= interpretWithCoverage opts . k
         Stepper.EVM m ->
@@ -385,7 +386,7 @@ coverageForUnitTestContract
   case Map.lookup name contractMap of
     Nothing ->
       -- Fail if there's no such contract
-      error $ "Contract " ++ unpack name ++ " not found"
+      internalError $ "Contract " ++ unpack name ++ " not found"
 
     Just theContract -> do
       -- Construct the initial VM and begin the contract's constructor
@@ -429,7 +430,7 @@ runUnitTestContract
   case Map.lookup name contractMap of
     Nothing ->
       -- Fail if there's no such contract
-      error $ "Contract " ++ unpack name ++ " not found"
+      internalError $ "Contract " ++ unpack name ++ " not found"
 
     Just theContract -> do
       -- Construct the initial VM and begin the contract's constructor
@@ -469,7 +470,7 @@ runUnitTestContract
             tick (Text.unlines bailing)
 
           pure [(isRight r, vm) | (r, vm) <- details]
-        _ -> error "internal error: setUp() did not end with a result"
+        _ -> internalError "setUp() did not end with a result"
 
 
 runTest :: UnitTestOptions -> VM -> (Test, [AbiType]) -> IO (Text, Either Text Text, VM)
@@ -488,19 +489,19 @@ runTest opts@UnitTestOptions{..} vm (InvariantTest testName, []) = liftIO $ case
     if sig == testName
     then exploreRun opts vm testName (decodeCalls cds)
     else exploreRun opts vm testName []
-runTest _ _ (InvariantTest _, types) = error $ "invariant testing with arguments: " <> show types <> " is not implemented (yet!)"
+runTest _ _ (InvariantTest _, types) = internalError $ "invariant testing with arguments: " <> show types <> " is not implemented (yet!)"
 runTest opts vm (SymbolicTest testName, types) = symRun opts vm testName types
 
 type ExploreTx = (Addr, Addr, ByteString, W256)
 
 decodeCalls :: BSLazy.ByteString -> [ExploreTx]
-decodeCalls b = fromMaybe (error "could not decode replay data") $ do
+decodeCalls b = fromMaybe (internalError "could not decode replay data") $ do
   List v <- rlpdecode $ BSLazy.toStrict b
   pure $ unList <$> v
   where
     unList (List [BS caller', BS target, BS cd, BS ts]) =
-      (num (word caller'), num (word target), cd, word ts)
-    unList _ = error "fix me with better types"
+      (unsafeInto (word caller'), unsafeInto (word target), cd, word ts)
+    unList _ = internalError "fix me with better types"
 
 -- | Runs an invariant test, calls the invariant before execution begins
 initialExplorationStepper :: UnitTestOptions -> ABIMethod -> [ExploreTx] -> [Addr] -> Int -> Stepper (Bool, RLP)
@@ -513,11 +514,11 @@ initialExplorationStepper opts'' testName replayData targets i = do
 
 
 explorationStepper :: UnitTestOptions -> ABIMethod -> [ExploreTx] -> [Addr] -> RLP -> Int -> Stepper (Bool, RLP)
-explorationStepper _ _ _ _ history 0  = return (True, history)
+explorationStepper _ _ _ _ history 0  = pure (True, history)
 explorationStepper opts@UnitTestOptions{..} testName replayData targets (List history) i = do
  (caller', target, cd, timestamp') <-
    case preview (ix (i - 1)) replayData of
-     Just v -> return v
+     Just v -> pure v
      Nothing ->
       Stepper.evmIO $ do
        vm <- get
@@ -545,8 +546,8 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
              fmap fromJust (Map.filter isJust $ Map.fromList [(addr, lookupCode c.code dapp) | (addr, c)  <- Map.toList cs])
 
            selected = [(addr,
-                        fromMaybe (error ("no src found for: " <> show addr)) $
-                          lookupCode (fromMaybe (error $ "contract not found: " <> show addr) $
+                        fromMaybe (internalError ("no src found for: " <> show addr)) $
+                          lookupCode (fromMaybe (internalError $ "contract not found: " <> show addr) $
                             Map.lookup addr cs).code dapp)
                        | addr  <- targets]
        -- go to IO and generate a random valid call to any known contract
@@ -569,9 +570,9 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
          args <- generate $ genAbiValue (AbiTupleType $ Vector.fromList types)
          let cd = abiMethod (sig <> "(" <> intercalate "," ((pack . show) <$> types) <> ")") args
          -- increment timestamp with random amount
-         timepassed <- num <$> generate (arbitrarySizedNatural :: Gen Word32)
-         let ts = fromMaybe (error "symbolic timestamp not supported here") $ maybeLitWord vm.block.timestamp
-         return (caller', target, cd, num ts + timepassed)
+         timepassed <- into <$> generate (arbitrarySizedNatural :: Gen Word32)
+         let ts = fromMaybe (internalError "symbolic timestamp not supported here") $ maybeLitWord vm.block.timestamp
+         return (caller', target, cd, ts + timepassed)
  let opts' = opts { testParams = testParams {address = LitAddr target, caller = LitAddr caller', timestamp = timestamp'}}
      thisCallRLP = List [BS $ word160Bytes caller', BS $ word160Bytes target, BS cd, BS $ word256Bytes timestamp']
  -- set the timestamp
@@ -590,7 +591,7 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
       if x
       then carryOn
       else pure (False, List (thisCallRLP:history))
-explorationStepper _ _ _ _ _ _  = error "malformed rlp"
+explorationStepper _ _ _ _ _ _  = internalError "malformed rlp"
 
 getTargetContracts :: UnitTestOptions -> Stepper [Addr]
 getTargetContracts UnitTestOptions{..} = do
@@ -599,7 +600,7 @@ getTargetContracts UnitTestOptions{..} = do
       theAbi = (fromJust $ lookupCode contract'.code dapp).abiMap
       setUp  = abiKeccak (encodeUtf8 "targetContracts()")
   case Map.lookup setUp theAbi of
-    Nothing -> return []
+    Nothing -> pure []
     Just _ -> do
       Stepper.evm $ abiCall testParams (Left ("targetContracts()", emptyAbi))
       res <- Stepper.execFully
@@ -607,15 +608,15 @@ getTargetContracts UnitTestOptions{..} = do
         Right (ConcreteBuf r) ->
           let vs = case decodeAbiValue (AbiTupleType (Vector.fromList [AbiArrayDynamicType AbiAddressType])) (BSLazy.fromStrict r) of
                 AbiTuple v -> v
-                _ -> error "fix me with better types"
+                _ -> internalError "fix me with better types"
               targets = case Vector.toList vs of
                 [AbiArrayDynamic AbiAddressType ts] ->
                   let unAbiAddress (AbiAddress a) = a
-                      unAbiAddress _ = error "fix me with better types"
+                      unAbiAddress _ = internalError "fix me with better types"
                   in unAbiAddress <$> Vector.toList ts
-                _ -> error "fix me with better types"
+                _ -> internalError "fix me with better types"
           in pure targets
-        _ -> error "internal error: unexpected failure code"
+        _ -> internalError "internal error: unexpected failure code"
 
 exploreRun :: UnitTestOptions -> VM -> ABIMethod -> [ExploreTx] -> IO (Text, Either Text Text, VM)
 exploreRun opts@UnitTestOptions{..} initialVm testName replayTxs = do
@@ -636,12 +637,12 @@ exploreRun opts@UnitTestOptions{..} initialVm testName replayTxs = do
       (,) <$> initialExplorationStepper opts testName replayTxs targets (length replayTxs)
           <*> Stepper.evm get
   if x
-  then return ("\x1b[32m[PASS]\x1b[0m " <> testName <>  " (runs: " <> (pack $ show fuzzRuns) <>", depth: " <> pack (show depth) <> ")",
+  then pure ("\x1b[32m[PASS]\x1b[0m " <> testName <>  " (runs: " <> (pack $ show fuzzRuns) <>", depth: " <> pack (show depth) <> ")",
                Right (passOutput vm' opts testName), vm') -- no canonical "post vm"
   else let replayText = if null replayTxs
                         then "\nReplay data: '(" <> pack (show testName) <> "," <> pack (show (show (ByteStringS $ rlpencode counterex))) <> ")'"
                         else " (replayed)"
-       in return ("\x1b[31m[FAIL]\x1b[0m " <> testName <> replayText, Left  (failOutput vm' opts testName), vm')
+       in pure ("\x1b[31m[FAIL]\x1b[0m " <> testName <> replayText, Left  (failOutput vm' opts testName), vm')
 
 execTest :: UnitTestOptions -> VM -> ABIMethod -> AbiValue -> IO (Bool, VM)
 execTest opts@UnitTestOptions{..} vm testName args =
@@ -659,8 +660,8 @@ runOne opts@UnitTestOptions{..} vm testName args = do
         <*> Stepper.evm get
   if success
   then
-     let gasSpent = num testParams.gasCall - vm'.state.gas
-         gasText = pack $ show (fromIntegral gasSpent :: Integer)
+     let gasSpent = testParams.gasCall - vm'.state.gas
+         gasText = pack $ show (into gasSpent :: Integer)
      in
         pure
           ("\x1b[32m[PASS]\x1b[0m "
@@ -746,7 +747,7 @@ symRun opts@UnitTestOptions{..} vm testName types = do
                                    Success _ _ _ store -> PNeg (failed store)
                                    Failure _ _ _ -> PBool False
                                    Partial _ _ _ -> PBool True
-                                   _ -> error "Internal Error: Invalid leaf node"
+                                   _ -> internalError "Invalid leaf node"
 
     vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
       Stepper.evm $ do
@@ -760,11 +761,11 @@ symRun opts@UnitTestOptions{..} vm testName types = do
     -- display results
     if all isQed results
     then do
-      return ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "", vm)
+      pure ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "", vm)
     else do
       let x = mapMaybe extractCex results
       let y = symFailure opts testName (fst cd) types x
-      return ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y, vm)
+      pure ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y, vm)
 
 symFailure :: UnitTestOptions -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> Text
 symFailure UnitTestOptions {..} testName cd types failures' =
@@ -805,7 +806,7 @@ showCalldata cex tps buf = "(" <> intercalate "," (fmap showVal vals) <> ")"
     argdata = Expr.drop 4 $ simplify $ subModel cex buf
     vals = case decodeBuf tps argdata of
              CAbi v -> v
-             _ -> error $ "Internal Error: unable to abi decode function arguments:\n" <> (Text.unpack $ formatExpr argdata)
+             _ -> internalError $ "unable to abi decode function arguments:\n" <> (Text.unpack $ formatExpr argdata)
 
 showVal :: AbiValue -> Text
 showVal (AbiBytes _ bs) = formatBytes bs
@@ -874,7 +875,7 @@ formatTestLogs events xs =
 -- regular trace output.
 formatTestLog :: (?context :: DappContext) => Map W256 Event -> Expr Log -> Maybe Text
 formatTestLog _ (LogEntry _ _ []) = Nothing
-formatTestLog _ (GVar _) = error "unexpected global variable"
+formatTestLog _ (GVar _) = internalError "unexpected global variable"
 formatTestLog events (LogEntry _ args (topic:_)) =
   case maybeLitWord topic >>= \t1 -> (Map.lookup t1 events) of
     Nothing -> Nothing
@@ -919,10 +920,10 @@ formatTestLog events (LogEntry _ args (topic:_)) =
           log_named =
             let (key, val) = case take 2 (textValues ts args) of
                   [k, v] -> (k, v)
-                  _ -> error "shouldn't happen"
+                  _ -> internalError "shouldn't happen"
             in Just $ unquote key <> ": " <> val
           showDecimal dec val =
-            pack $ show $ Decimal (num dec) val
+            pack $ show $ Decimal (unsafeInto dec) val
           log_named_decimal =
             case args of
               (ConcreteBuf b) ->
@@ -951,8 +952,8 @@ makeTxCall params (cd, cdProps) = do
   assign (#state % #caller) params.caller
   assign (#state % #gas) params.gasCall
   origin <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (#env % #contracts % at params.origin)
-  let insufficientBal = maybe False (\b -> b < params.gasprice * (num params.gasCall)) (maybeLitWord origin.balance)
-  when insufficientBal $ error "insufficient balance for gas cost"
+  let insufficientBal = maybe False (\b -> b < params.gasprice * (into params.gasCall)) (maybeLitWord origin.balance)
+  when insufficientBal $ internalError "insufficient balance for gas cost"
   vm <- get
   put $ initTx vm
 
@@ -997,20 +998,20 @@ getParametersFromEnvironmentVariables rpc = do
 
   (miner,ts,blockNum,ran,limit,base) <-
     case rpc of
-      Nothing  -> return (LitAddr 0,Lit 0,0,0,0,0)
+      Nothing  -> pure (LitAddr 0,Lit 0,0,0,0,0)
       Just url -> Fetch.fetchBlockFrom block' url >>= \case
-        Nothing -> error "Could not fetch block"
-        Just Block{..} -> return (  coinbase
-                                      , timestamp
-                                      , number
-                                      , prevRandao
-                                      , gaslimit
-                                      , baseFee
-                                      )
+        Nothing -> internalError "Could not fetch block"
+        Just Block{..} -> pure ( coinbase
+                               , timestamp
+                               , number
+                               , prevRandao
+                               , gaslimit
+                               , baseFee
+                               )
   let
     getWord s def = maybe def read <$> lookupEnv s
     getAddr s def = maybe def (LitAddr . read) <$> lookupEnv s
-    ts' = fromMaybe (error "Internal Error: received unexpected symbolic timestamp via rpc") (maybeLitWord ts)
+    ts' = fromMaybe (internalError "received unexpected symbolic timestamp via rpc") (maybeLitWord ts)
 
   TestVMParams
     <$> getAddr "DAPP_TEST_ADDRESS" (Concrete.createAddress ethrunAddress 1)

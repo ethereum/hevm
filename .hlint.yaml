@@ -1,3 +1,5 @@
+# ignored / annoying rules
+
 - ignore: {name: "Use fewer imports"}
 - ignore: {name: "Use if"}
 - ignore: {name: "Redundant bracket"}
@@ -18,3 +20,17 @@
 - ignore: {name: "Use underscore"}
 - ignore: {name: "Functor law"}
 - ignore: {name: "Use record patterns"}
+
+# custom rules
+
+# we should use witch
+- functions:
+  - {name: fromIntegral, within: [], message: "use into or tryFrom from Data.Witch"}
+  - {name: fromInteger, within: [], message: "use into or tryFrom from Data.Witch"}
+  - {name: toIntegral, within: [], message: "use into or tryFrom from Data.Witch"}
+  - {name: toInteger, within: [], message: "use into or tryFrom from Data.Witch"}
+
+# we should use internalError
+- error: {lhs: error, rhs: internalError}
+# we should use pure
+- error: {lhs: return, rhs: pure}

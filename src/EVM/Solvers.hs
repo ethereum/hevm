@@ -1,8 +1,3 @@
-{-# Language DataKinds #-}
-{-# Language GADTs #-}
-{-# Language PolyKinds #-}
-{-# Language ScopedTypeVariables #-}
-
 {- |
     Module: EVM.Solvers
     Description: Solver orchestration
@@ -12,25 +7,25 @@ module EVM.Solvers where
 import Prelude hiding (LT, GT)
 
 import GHC.Natural
-import Control.Monad
 import GHC.IO.Handle (Handle, hFlush, hSetBuffering, BufferMode(..))
 import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
 import Control.Concurrent (forkIO, killThread)
+import Control.Monad
 import Control.Monad.State.Strict
 import Data.Char (isSpace)
-import Data.Maybe (fromMaybe)
-
-import Data.Text.Lazy (Text)
 import Data.Map (Map)
-import qualified Data.Map as Map
-import qualified Data.Text as TS
-import qualified Data.Text.Lazy as T
-import qualified Data.Text.Lazy.IO as T
+import Data.Map qualified as Map
+import Data.Maybe (fromMaybe)
+import Data.Text qualified as TS
+import Data.Text.Lazy (Text)
+import Data.Text.Lazy qualified as T
+import Data.Text.Lazy.IO qualified as T
 import Data.Text.Lazy.Builder
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
+import Witch (into)
 
 import EVM.SMT
-import EVM.Types hiding (Unknown)
+import EVM.Types (W256, Expr(AbstractBuf), internalError)
 
 -- | Supported solvers
 data Solver
@@ -173,10 +168,10 @@ getModel inst cexvars = do
         AbstractBuf b -> do
           let name = T.fromStrict b
               hint = fromMaybe
-                       (error $ "Internal Error: Could not find hint for buffer: " <> T.unpack name)
+                       (internalError $ "Could not find hint for buffer: " <> T.unpack name)
                        (Map.lookup name hints)
           shrinkBuf name hint
-        _ -> error "Internal Error: Received model from solver for non AbstractBuf"
+        _ -> internalError "Received model from solver for non AbstractBuf"
 
     -- starting with some guess at the max useful size for a buffer, cap
     -- it's size to that value, and ask the solver to check satisfiability. If
@@ -185,7 +180,7 @@ getModel inst cexvars = do
     -- and try again.
     shrinkBuf :: Text -> W256 -> StateT SMTCex IO ()
     shrinkBuf buf hint = do
-      let encBound = "(_ bv" <> (T.pack $ show (num hint :: Integer)) <> " 256)"
+      let encBound = "(_ bv" <> (T.pack $ show (into hint :: Integer)) <> " 256)"
       sat <- liftIO $ do
         checkCommand inst "(push)"
         checkCommand inst $ "(assert (bvule " <> buf <> "_length " <> encBound <> "))"
@@ -197,12 +192,12 @@ getModel inst cexvars = do
         "unsat" -> do
           liftIO $ checkCommand inst "(pop)"
           shrinkBuf buf (if hint == 0 then hint + 1 else hint * 2)
-        e -> error $ "Internal Error: Unexpected solver output: " <> (T.unpack e)
+        e -> internalError $ "Unexpected solver output: " <> (T.unpack e)
 
     -- Collapses the abstract description of a models buffers down to a bytestring
     mkConcrete :: SMTCex -> SMTCex
     mkConcrete c = fromMaybe
-      (error $ "Internal Error: counterexample contains buffers that are too large to be represented as a ByteString: " <> show c)
+      (internalError $ "counterexample contains buffers that are too large to be represented as a ByteString: " <> show c)
       (flattenBufs c)
 
     -- we set a pretty arbitrary upper limit (of 1024) to decide if we need to do some shrinking
@@ -223,7 +218,7 @@ mkTimeout t = T.pack $ show $ (1000 *)$ case t of
 -- | Arguments used when spawing a solver instance
 solverArgs :: Solver -> Maybe Natural -> [Text]
 solverArgs solver timeout = case solver of
-  Bitwuzla -> error "TODO: Bitwuzla args"
+  Bitwuzla -> internalError "TODO: Bitwuzla args"
   Z3 ->
     [ "-in" ]
   CVC5 ->
@@ -344,8 +339,8 @@ getSExpr :: Text -> (Text, Text)
 getSExpr l = go LPar l 0 []
   where
     go _ text 0 prev@(_:_) = (T.intercalate "" (reverse prev), text)
-    go _ _ r _ | r < 0 = error "Internal error: Unbalanced SExpression"
-    go _ "" _ _  = error "Internal error: Unbalanced SExpression"
+    go _ _ r _ | r < 0 = internalError "Unbalanced SExpression"
+    go _ "" _ _  = internalError "Unbalanced SExpression"
     -- find the next left parenthesis
     go LPar line r prev = -- r is how many right parentheses we are missing
       let (before, after) = T.breakOn "(" line in

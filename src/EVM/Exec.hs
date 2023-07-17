@@ -2,15 +2,14 @@ module EVM.Exec where
 
 import EVM hiding (createAddress)
 import EVM.Concrete (createAddress)
+import EVM.FeeSchedule qualified as FeeSchedule
+import EVM.Expr (litAddr)
 import EVM.Types
 
-import qualified EVM.FeeSchedule as FeeSchedule
-
-import Optics.Core
 import Control.Monad.Trans.State.Strict (get, State)
 import Data.ByteString (ByteString)
 import Data.Maybe (isNothing)
-
+import Optics.Core
 
 ethrunAddress :: Addr
 ethrunAddress = Addr 0x00a329c0648769a73afac7f9381e08fb43dbea72

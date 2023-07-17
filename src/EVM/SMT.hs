@@ -1,9 +1,5 @@
-{-# Language DataKinds #-}
-{-# Language GADTs #-}
-{-# Language PolyKinds #-}
-{-# Language ScopedTypeVariables #-}
-{-# Language TypeApplications #-}
-{-# Language QuasiQuotes #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 {- |
     Module: EVM.SMT
@@ -15,33 +11,33 @@ import Prelude hiding (LT, GT)
 
 import Control.Monad
 import Data.Containers.ListUtils (nubOrd)
-import Language.SMT2.Parser (getValueRes, parseCommentFreeFileMsg)
-import Language.SMT2.Syntax (Symbol, SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
-import Data.Word
-import Numeric (readHex, readBin)
 import Data.ByteString (ByteString)
-
-import qualified Data.ByteString as BS
-import qualified Data.List as List
+import Data.ByteString qualified as BS
+import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty((:|)))
-import qualified Data.List.NonEmpty as NonEmpty
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.String.Here
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict qualified as Map
 import Data.Set (Set)
-import qualified Data.Set as Set
+import Data.Set qualified as Set
+import Data.Word (Word8)
 import Data.Text.Lazy (Text)
-import qualified Data.Text as TS
-import qualified Data.Text.Lazy as T
+import Data.Text qualified as TS
+import Data.Text.Lazy qualified as T
 import Data.Text.Lazy.Builder
+import Language.SMT2.Parser (getValueRes, parseCommentFreeFileMsg)
+import Language.SMT2.Syntax (Symbol, SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
+import Numeric (readHex, readBin)
+import Witch (into, unsafeInto)
 
-import EVM.Types
-import EVM.Traversals
 import EVM.CSE
-import EVM.Keccak
 import EVM.Expr (writeByte, bufLengthEnv, containsNode, bufLength, minLength, inRange)
-import qualified EVM.Expr as Expr
+import EVM.Expr qualified as Expr
+import EVM.Keccak (keccakAssumptions)
+import EVM.Traversals
+import EVM.Types
 
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
@@ -111,7 +107,7 @@ collapse model = case toBuf model of
   Just (ConcreteBuf b) -> Just $ Flat b
   _ -> Nothing
   where
-    toBuf (Comp (Base b sz)) | sz <= 120_000_000 = Just . ConcreteBuf $ BS.replicate (num sz) b
+    toBuf (Comp (Base b sz)) | sz <= 120_000_000 = Just . ConcreteBuf $ BS.replicate (unsafeInto sz) b
     toBuf (Comp (Write b idx next)) = fmap (writeByte (Lit idx) (LitByte b)) (toBuf $ Comp next)
     toBuf (Flat b) = Just . ConcreteBuf $ b
     toBuf _ = Nothing
@@ -235,7 +231,7 @@ referencedFrameContextGo :: Expr a -> [(Builder, [Prop])]
 referencedFrameContextGo = \case
   TxValue -> [(fromString "txvalue", [])]
   v@(Balance a) -> [(fromString "balance_" <> formatEAddr a, [PLT v (Lit $ 2 ^ (96 :: Int))])]
-  Gas {} -> error "TODO: GAS"
+  Gas {} -> internalError "TODO: GAS"
   _ -> []
 
 referencedFrameContext :: Expr a -> [(Builder, [Prop])]
@@ -299,15 +295,19 @@ assertReads props benv senv = concatMap assertRead allReads
   where
     assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
     assertRead (idx, Lit 32, buf) = [PImpl (PGEq idx (bufLength buf)) (PEq (ReadWord idx buf) (Lit 0))]
-    assertRead (idx, Lit sz, buf) = fmap (\s -> PImpl (PGEq idx (bufLength buf)) (PEq (ReadByte idx buf) (LitByte (num s)))) [(0::Int)..num sz-1]
-    assertRead (_, _, _) = error "Cannot generate assertions for accesses of symbolic size"
+    assertRead (idx, Lit sz, buf) =
+      fmap
+        -- TODO: unsafeInto instead fromIntegral here makes symbolic tests fail
+        (PImpl (PGEq idx (bufLength buf)) . PEq (ReadByte idx buf) . LitByte . fromIntegral)
+        [(0::Int)..unsafeInto sz-1]
+    assertRead (_, _, _) = internalError "Cannot generate assertions for accesses of symbolic size"
 
     allReads = filter keepRead $ nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
 
     -- discard constraints if we can statically determine that read is less than the buffer length
     keepRead (Lit idx, Lit size, buf) =
       case minLength benv buf of
-        Just l | num (idx + size) <= l -> False
+        Just l | into (idx + size) <= l -> False
         _ -> True
     keepRead _ = True
 
@@ -333,7 +333,7 @@ discoverMaxReads props benv senv = bufMap
     baseBuf (GVar (BufVar a)) =
       case Map.lookup a benv of
         Just b -> baseBuf b
-        Nothing -> error "Internal error: could not find buffer variable"
+        Nothing -> internalError "could not find buffer variable"
     baseBuf (WriteByte _ _ b) = baseBuf b
     baseBuf (WriteWord _ _ b) = baseBuf b
     baseBuf (CopySlice _ _ _ _ dst)= baseBuf dst
@@ -596,7 +596,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
 
 exprToSMT :: Expr a -> Builder
 exprToSMT = \case
-  Lit w -> fromLazyText $ "(_ bv" <> (T.pack $ show (num w :: Integer)) <> " 256)"
+  Lit w -> fromLazyText $ "(_ bv" <> (T.pack $ show (into w :: Integer)) <> " 256)"
   Var s -> fromText s
   GVar (BufVar n) -> fromString $ "buf" <> (show n)
   GVar (StoreVar n) -> fromString $ "store" <> (show n)
@@ -616,7 +616,7 @@ exprToSMT = \case
   Mul a b -> op2 "bvmul" a b
   Exp a b -> case b of
                Lit b' -> expandExp a b'
-               _ -> error "cannot encode symbolic exponentation into SMT"
+               _ -> internalError "cannot encode symbolic exponentation into SMT"
   Min a b ->
     let aenc = exprToSMT a
         benc = exprToSMT b in
@@ -705,12 +705,12 @@ exprToSMT = \case
 
   WAddr(a@(SymAddr _)) -> "(concat (_ bv0 96)" `sp` formatEAddr a `sp` ")"
 
-  LitByte b -> fromLazyText $ "(_ bv" <> T.pack (show (num b :: Integer)) <> " 8)"
+  LitByte b -> fromLazyText $ "(_ bv" <> T.pack (show (into b :: Integer)) <> " 8)"
   IndexWord idx w -> case idx of
     Lit n -> if n >= 0 && n < 32
              then
                let enc = exprToSMT w in
-               fromLazyText ("(indexWord" <> T.pack (show (num n :: Integer))) `sp` enc <> ")"
+               fromLazyText ("(indexWord" <> T.pack (show (into n :: Integer))) `sp` enc <> ")"
              else exprToSMT (LitByte 0)
     _ -> op2 "indexWord" idx w
   ReadByte idx src -> op2 "select" src idx
@@ -743,7 +743,7 @@ exprToSMT = \case
     "(store" `sp` encPrev `sp` encIdx `sp` encVal <> ")"
   SLoad idx store -> op2 "select" store idx
 
-  a -> error $ "TODO: implement: " <> show a
+  a -> internalError $ "TODO: implement: " <> show a
   where
     op1 op a =
       let enc =  exprToSMT a in
@@ -810,7 +810,7 @@ copySlice srcOffset dstOffset size@(Lit _) src dst
         encSrcOff = exprToSMT (Expr.add srcOffset size')
         child = copySlice srcOffset dstOffset size' src dst in
     "(store " <> child `sp` encDstOff `sp` "(select " <> src `sp` encSrcOff <> "))"
-copySlice _ _ _ _ _ = error "TODO: implement copySlice with a symbolically sized region"
+copySlice _ _ _ _ _ = internalError "TODO: implement copySlice with a symbolically sized region"
 
 -- | Unrolls an exponentiation into a series of multiplications
 expandExp :: Expr EWord -> W256 -> Builder
@@ -844,7 +844,7 @@ writeBytes bytes buf = snd $ BS.foldl' wrap (0, exprToSMT buf) bytes
       then (idx + 1, inner)
       else let
           byteSMT = exprToSMT (LitByte byte)
-          idxSMT = exprToSMT . Lit . num $ idx
+          idxSMT = exprToSMT . Lit . unsafeInto $ idx
         in (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
 
 encodeConcreteStore :: Map W256 W256 -> Builder
@@ -880,10 +880,10 @@ parseW8 = parseSC
 parseSC :: (Num a, Eq a) => SpecConstant -> a
 parseSC (SCHexadecimal a) = fst . head . Numeric.readHex . T.unpack . T.fromStrict $ a
 parseSC (SCBinary a) = fst . head . Numeric.readBin . T.unpack . T.fromStrict $ a
-parseSC sc = error $ "Internal Error: cannot parse: " <> show sc
+parseSC sc = internalError $ "cannot parse: " <> show sc
 
 parseErr :: (Show a) => a -> b
-parseErr res = error $ "Internal Error: cannot parse solver response: " <> show res
+parseErr res = internalError $ "cannot parse solver response: " <> show res
 
 parseVar :: TS.Text -> Expr EWord
 parseVar = Var
@@ -897,7 +897,7 @@ parseBlockCtx "prevrandao" = PrevRandao
 parseBlockCtx "gaslimit" = GasLimit
 parseBlockCtx "chainid" = ChainId
 parseBlockCtx "basefee" = BaseFee
-parseBlockCtx t = error $ "Internal Error: cannot parse " <> (TS.unpack t) <> " into an Expr"
+parseBlockCtx t = internalError $ "cannot parse " <> (TS.unpack t) <> " into an Expr"
 
 parseTxCtx :: TS.Text -> Expr EWord
 parseTxCtx name = case TS.unpack name of
@@ -920,7 +920,7 @@ getVars parseFn getVal names = Map.mapKeys parseFn <$> foldM getOne mempty names
             TermSpecConstant sc)
               -> if symbol == name
                  then parseW256 sc
-                 else error "Internal Error: solver did not return model for requested value"
+                 else internalError "solver did not return model for requested value"
           r -> parseErr r
       pure $ Map.insert name val acc
 
@@ -941,7 +941,7 @@ getBufs getVal bufs = foldM getBuf mempty bufs
           (TermQualIdentifier (Unqualified (IdSymbol symbol)), (TermSpecConstant sc))
             -> if symbol == (T.toStrict $ name <> "_length")
                then parseW256 sc
-               else error "Internal Error: solver did not return model for requested value"
+               else internalError "solver did not return model for requested value"
           res -> parseErr res
         res -> parseErr res
 
@@ -955,9 +955,9 @@ getBufs getVal bufs = foldM getBuf mempty bufs
           (TermQualIdentifier (Unqualified (IdSymbol symbol)), term)
             -> if (T.fromStrict symbol) == name
                then pure $ parseBuf len term
-               else error "Internal Error: solver did not return model for requested value"
-          res -> error $ "Internal Error: cannot parse solver response: " <> show res
-        res -> error $ "Internal Error: cannot parse solver response: " <> show res
+               else internalError "solver did not return model for requested value"
+          res -> internalError $ "cannot parse solver response: " <> show res
+        res -> internalError $ "cannot parse solver response: " <> show res
       pure $ Map.insert (AbstractBuf $ T.toStrict name) buf acc
 
     parseBuf :: W256 -> Term -> BufModel
@@ -994,7 +994,7 @@ getBufs getVal bufs = foldM getBuf mempty bufs
           -- looking up a bound name
           (TermQualIdentifier (Unqualified (IdSymbol name))) -> case Map.lookup name env of
             Just t -> t
-            Nothing -> error $ "Internal error: could not find "
+            Nothing -> internalError $ "could not find "
                             <> (TS.unpack name)
                             <> " in environment mapping"
           p -> parseErr p
@@ -1037,7 +1037,7 @@ queryValue getVal w = do
     Right (ResSpecific (valParsed :| [])) ->
       case valParsed of
         (_, TermSpecConstant sc) -> pure $ parseW256 sc
-        _ -> error $ "Internal Error: cannot parse model for: " <> show w
+        _ -> internalError $ "cannot parse model for: " <> show w
     r -> parseErr r
 
 -- | Interpret an N-dimensional array as a value of type a.
@@ -1048,7 +1048,7 @@ interpretNDArray interp env = \case
   TermQualIdentifier (Unqualified (IdSymbol s)) ->
     case Map.lookup s env of
       Just t -> interpretNDArray interp env t
-      Nothing -> error "Internal error: unknown identifier, cannot parse array"
+      Nothing -> internalError "unknown identifier, cannot parse array"
   -- (let (x t') t)
   TermLet (VarBinding x t' :| []) t -> interpretNDArray interp (Map.insert x t' env) t
   TermLet (VarBinding x t' :| lets) t -> interpretNDArray interp (Map.insert x t' env) (TermLet (NonEmpty.fromList lets) t)
@@ -1058,7 +1058,7 @@ interpretNDArray interp env = \case
   -- (store arr ind val)
   TermApplication store (arr :| [TermSpecConstant ind, val]) | isStore store ->
     \x -> if x == parseW256 ind then interp env val else interpretNDArray interp env arr x
-  t -> error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
+  t -> internalError $ "cannot parse array value. Unexpected term: " <> (show t)
 
   where
     isArrConst :: QualIdentifier -> Bool
@@ -1079,5 +1079,5 @@ interpret1DArray = interpretNDArray interpretW256
     interpretW256 env (TermQualIdentifier (Unqualified (IdSymbol s))) =
       case Map.lookup s env of
         Just t -> interpretW256 env t
-        Nothing -> error "Internal error: unknown identifier, cannot parse array"
-    interpretW256 _ t = error $ "Internal error: cannot parse array value. Unexpected term: " <> (show t)
+        Nothing -> internalError "unknown identifier, cannot parse array"
+    interpretW256 _ t = internalError $ "cannot parse array value. Unexpected term: " <> (show t)
