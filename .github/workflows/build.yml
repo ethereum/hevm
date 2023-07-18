@@ -25,8 +25,6 @@ jobs:
       - uses: actions/checkout@v3
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
-      - name: run cabal check
-        run: nix-shell --pure --command "cabal check --verbose=3"
       - name: build hevm
         run: nix build .#withTests -L
       - name: Upload artifacts
@@ -38,6 +36,7 @@ jobs:
         run: nix-shell --pure --command "cabal run rpc-tests"
       - name: run ethereum tests
         run: nix-shell --command "cabal run ethereum-tests"
+
   build-windows:
     name: build (windows-latest)
     runs-on: windows-latest
@@ -68,8 +67,6 @@ jobs:
         id: cabal
         with:
           ghc-version: '9.2.8'
-      - name: run cabal check
-        run: cabal check --verbose=3
       - name: build and install dependencies
         run: |
           echo "::group::Installing libsecp256k1"
@@ -81,3 +78,12 @@ jobs:
       - name: build hevm library
         run: |
           cabal build --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib"
+
+  cabal-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: run cabal check
+        run: nix-shell --pure --command "cabal check --verbose=3"
