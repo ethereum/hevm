@@ -3,8 +3,6 @@
 
 module EVM.UnitTest where
 
-import Prelude hiding (Word)
-
 import EVM
 import EVM.ABI
 import EVM.Concrete qualified as Concrete
@@ -140,8 +138,7 @@ unitTest opts (Contracts cs) cache' = do
       pure ()
     Just path ->
       -- merge all of the post-vm caches and save into the state
-      let
-        evmcache = mconcat [vm.cache | vm <- vms]
+      let evmcache = mconcat [vm.cache | vm <- vms]
       in case Facts.cacheFacts evmcache of
            Right fs -> liftIO $ Git.saveFacts (Git.RepoAt path) fs
            Left e -> do
@@ -150,7 +147,6 @@ unitTest opts (Contracts cs) cache' = do
              exitFailure
 
   pure $ and passing
-
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
 -- to create the test contract, give it an initial balance, and run `setUp()'.
@@ -195,7 +191,7 @@ runUnitTest a method args = do
   checkFailures a method x
 
 execTestStepper :: UnitTestOptions -> ABIMethod -> AbiValue -> Stepper Bool
-execTestStepper UnitTestOptions { .. } methodName' method = do
+execTestStepper UnitTestOptions{..} methodName' method = do
   -- Set up the call to the test method
   Stepper.evm $ do
     abiCall testParams (Left (methodName', method))
@@ -224,7 +220,7 @@ exploreStep UnitTestOptions{..} bs = do
     _ -> pure False
 
 checkFailures :: UnitTestOptions -> ABIMethod -> Bool -> Stepper Bool
-checkFailures UnitTestOptions { .. } method bailed = do
+checkFailures UnitTestOptions{..} method bailed = do
    -- Decide whether the test is supposed to fail or succeed
   let shouldFail = "testFail" `isPrefixOf` method
   if bailed then
@@ -280,8 +276,7 @@ currentOpLocation vm =
         (fromMaybe (internalError "op ix") (vmOpIx vm))
 
 execWithCoverage :: StateT CoverageState IO VMResult
-execWithCoverage = do _ <- runWithCoverage
-                      fromJust <$> use (_1 % #result)
+execWithCoverage = runWithCoverage >> fromJust <$> use (_1 % #result)
 
 runWithCoverage :: StateT CoverageState IO VM
 runWithCoverage = do
@@ -325,7 +320,7 @@ interpretWithCoverage opts@UnitTestOptions{..} =
         Stepper.Ask _ ->
           internalError "cannot make choice in this interpreter"
         Stepper.IOAct q ->
-          zoom _1 (StateT (runStateT q)) >>= interpretWithCoverage opts . k
+          liftIO q >>= interpretWithCoverage opts . k
         Stepper.EVM m ->
           zoom _1 (State.state (runState m)) >>= interpretWithCoverage opts . k
 
@@ -423,8 +418,7 @@ runUnitTestContract
   opts@(UnitTestOptions {..}) contractMap (name, testSigs) = do
 
   -- Print a header
-  liftIO $ putStrLn $ "Running " ++ show (length testSigs) ++ " tests for "
-    ++ unpack name
+  putStrLn $ "Running " ++ show (length testSigs) ++ " tests for " ++ unpack name
 
   -- Look for the wanted contract by name from the Solidity info
   case Map.lookup name contractMap of
@@ -435,7 +429,7 @@ runUnitTestContract
     Just theContract -> do
       -- Construct the initial VM and begin the contract's constructor
       let vm0 = initialUnitTestVm opts theContract
-      vm1 <- liftIO $ EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm0 $ do
+      vm1 <- EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm0 $ do
         Stepper.enter name
         initializeUnitTest opts theContract
         Stepper.evm get
@@ -453,7 +447,7 @@ runUnitTestContract
                         -> IO ([(Either Text Text, VM)], VM)
             runCache (results, vm) (test, types) = do
               (t, r, vm') <- runTest opts vm (test, types)
-              liftIO $ Text.putStrLn t
+              Text.putStrLn t
               let vmCached = vm { cache = vm'.cache }
               pure (((r, vm'): results), vmCached)
 
@@ -462,20 +456,19 @@ runUnitTestContract
           (details, _) <- foldM runCache ([], vm1) testSigs
 
           let running = [x | (Right x, _) <- details]
-          let bailing = [x | (Left  x, _) <- details]
+              bailing = [x | (Left  x, _) <- details]
 
-          liftIO $ do
-            tick "\n"
-            tick (Text.unlines (filter (not . Text.null) running))
-            tick (Text.unlines bailing)
+          tick "\n"
+          tick (Text.unlines (filter (not . Text.null) running))
+          tick (Text.unlines bailing)
 
           pure [(isRight r, vm) | (r, vm) <- details]
         _ -> internalError "setUp() did not end with a result"
 
 
 runTest :: UnitTestOptions -> VM -> (Test, [AbiType]) -> IO (Text, Either Text Text, VM)
-runTest opts@UnitTestOptions{} vm (ConcreteTest testName, []) = liftIO $ runOne opts vm testName emptyAbi
-runTest opts@UnitTestOptions{..} vm (ConcreteTest testName, types) = liftIO $ case replay of
+runTest opts@UnitTestOptions{} vm (ConcreteTest testName, []) = runOne opts vm testName emptyAbi
+runTest opts@UnitTestOptions{..} vm (ConcreteTest testName, types) = case replay of
   Nothing ->
     fuzzRun opts vm testName types
   Just (sig, callData) ->
@@ -483,7 +476,7 @@ runTest opts@UnitTestOptions{..} vm (ConcreteTest testName, types) = liftIO $ ca
     then runOne opts vm testName $
       decodeAbiValue (AbiTupleType (Vector.fromList types)) callData
     else fuzzRun opts vm testName types
-runTest opts@UnitTestOptions{..} vm (InvariantTest testName, []) = liftIO $ case replay of
+runTest opts@UnitTestOptions{..} vm (InvariantTest testName, []) = case replay of
   Nothing -> exploreRun opts vm testName []
   Just (sig, cds) ->
     if sig == testName
@@ -516,42 +509,41 @@ initialExplorationStepper opts'' testName replayData targets i = do
 explorationStepper :: UnitTestOptions -> ABIMethod -> [ExploreTx] -> [Addr] -> RLP -> Int -> Stepper (Bool, RLP)
 explorationStepper _ _ _ _ history 0  = pure (True, history)
 explorationStepper opts@UnitTestOptions{..} testName replayData targets (List history) i = do
- (caller', target, cd, timestamp') <-
-   case preview (ix (i - 1)) replayData of
-     Just v -> pure v
-     Nothing ->
-      Stepper.evmIO $ do
-       vm <- get
-       let cs = Map.mapKeys mkConcrete vm.env.contracts
+  (caller', target, cd, timestamp') <-
+    case preview (ix (i - 1)) replayData of
+      Just v -> pure v
+      Nothing -> do
+       vm <- Stepper.evm get
+       Stepper.evmIO $ do
+         let cs = Map.mapKeys mkConcrete vm.env.contracts
 
-           mkConcrete :: Expr EAddr -> Addr
-           mkConcrete (LitAddr a) = a
-           mkConcrete a = error $ "Internal Error: symbolic address discovered in invariant test: " <> show a
+             mkConcrete :: Expr EAddr -> Addr
+             mkConcrete (LitAddr a) = a
+             mkConcrete a = internalError $ "symbolic address discovered in invariant test: " <> show a
 
-           noCode c = case c.code of
-             RuntimeCode (ConcreteRuntimeCode "") -> True
-             RuntimeCode (SymbolicRuntimeCode c') -> null c'
-             _ -> False
+             noCode c = case c.code of
+               RuntimeCode (ConcreteRuntimeCode "") -> True
+               RuntimeCode (SymbolicRuntimeCode c') -> null c'
+               _ -> False
 
-           mutable m = m.mutability `elem` [NonPayable, Payable]
+             mutable m = m.mutability `elem` [NonPayable, Payable]
 
-           knownAbis =
-             -- exclude contracts without code
-             Map.filter (not . BS.null . (.runtimeCode)) $
-             -- exclude contracts without state changing functions
-             Map.filter (not . null . Map.filter mutable . (.abiMap)) $
-             -- exclude testing abis
-             Map.filter (isNothing . preview (ix unitTestMarkerAbi) . (.abiMap)) $
-             -- pick all contracts with known compiler artifacts
-             fmap fromJust (Map.filter isJust $ Map.fromList [(addr, lookupCode c.code dapp) | (addr, c)  <- Map.toList cs])
+             knownAbis =
+               -- exclude contracts without code
+               Map.filter (not . BS.null . (.runtimeCode)) $
+               -- exclude contracts without state changing functions
+               Map.filter (not . null . Map.filter mutable . (.abiMap)) $
+               -- exclude testing abis
+               Map.filter (isNothing . preview (ix unitTestMarkerAbi) . (.abiMap)) $
+               -- pick all contracts with known compiler artifacts
+               fmap fromJust (Map.filter isJust $ Map.fromList [(addr, lookupCode c.code dapp) | (addr, c)  <- Map.toList cs])
 
-           selected = [(addr,
-                        fromMaybe (internalError ("no src found for: " <> show addr)) $
-                          lookupCode (fromMaybe (internalError $ "contract not found: " <> show addr) $
-                            Map.lookup addr cs).code dapp)
-                       | addr  <- targets]
-       -- go to IO and generate a random valid call to any known contract
-       liftIO $ do
+             selected = [(addr,
+                          fromMaybe (internalError ("no src found for: " <> show addr)) $
+                            lookupCode (fromMaybe (internalError $ "contract not found: " <> show addr) $
+                              Map.lookup addr cs).code dapp)
+                         | addr  <- targets]
+         -- generate a random valid call to any known contract
          -- select random contract
          (target, solcInfo) <- generate $ elements (if null targets then Map.toList knownAbis else selected)
          -- choose a random mutable method
@@ -571,26 +563,39 @@ explorationStepper opts@UnitTestOptions{..} testName replayData targets (List hi
          let cd = abiMethod (sig <> "(" <> intercalate "," ((pack . show) <$> types) <> ")") args
          -- increment timestamp with random amount
          timepassed <- into <$> generate (arbitrarySizedNatural :: Gen Word32)
-         let ts = fromMaybe (internalError "symbolic timestamp not supported here") $ maybeLitWord vm.block.timestamp
-         return (caller', target, cd, ts + timepassed)
- let opts' = opts { testParams = testParams {address = LitAddr target, caller = LitAddr caller', timestamp = timestamp'}}
-     thisCallRLP = List [BS $ word160Bytes caller', BS $ word160Bytes target, BS cd, BS $ word256Bytes timestamp']
- -- set the timestamp
- Stepper.evm $ assign (#block % #timestamp) (Lit timestamp')
- -- perform the call
- bailed <- exploreStep opts' cd
- Stepper.evm popTrace
- let newHistory = if bailed then List history else List (thisCallRLP:history)
-     opts'' = opts {testParams = testParams {timestamp = timestamp'}}
-     carryOn = explorationStepper opts'' testName replayData targets newHistory (i - 1)
- -- if we didn't revert, run the test function
- if bailed
- then carryOn
- else
-   do x <- runUnitTest opts'' testName emptyAbi
-      if x
-      then carryOn
-      else pure (False, List (thisCallRLP:history))
+         let ts = fromMaybe
+                    (internalError "symbolic timestamp not supported here")
+                    (maybeLitWord vm.block.timestamp)
+         pure (caller', target, cd, into ts + timepassed)
+  let opts' = opts
+         { testParams = testParams
+             { address = LitAddr target
+             , caller = LitAddr caller'
+             , timestamp = timestamp'
+             }
+         }
+      thisCallRLP = List
+        [ BS $ word160Bytes caller'
+        , BS $ word160Bytes target, BS cd
+        , BS $ word256Bytes timestamp'
+        ]
+
+  -- set the timestamp
+  Stepper.evm $ assign (#block % #timestamp) (Lit timestamp')
+  -- perform the call
+  bailed <- exploreStep opts' cd
+  Stepper.evm popTrace
+  let newHistory = if bailed then List history else List (thisCallRLP:history)
+      opts'' = opts {testParams = testParams {timestamp = timestamp'}}
+      carryOn = explorationStepper opts'' testName replayData targets newHistory (i - 1)
+  -- if we didn't revert, run the test function
+  if bailed
+  then carryOn
+  else
+    do x <- runUnitTest opts'' testName emptyAbi
+       if x
+       then carryOn
+       else pure (False, List (thisCallRLP:history))
 explorationStepper _ _ _ _ _ _  = internalError "malformed rlp"
 
 getTargetContracts :: UnitTestOptions -> Stepper [Addr]

@@ -179,8 +179,8 @@ interpret mode =
              interpret mode (Stepper.evm m >>= k)
 
         -- Stepper wants to make a query and wait for the results?
-        Stepper.IOAct q -> do
-          Brick.zoom (toLensVL #vm) (StateT (runStateT q)) >>= interpret mode . k
+        Stepper.IOAct q ->
+          liftIO q >>= interpret mode . k
 
         -- Stepper wants to modify the VM.
         Stepper.EVM m -> do

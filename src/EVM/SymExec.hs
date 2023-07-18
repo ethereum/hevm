@@ -266,8 +266,8 @@ interpret fetcher maxIter askSmtIters heuristic vm =
         let vm' = execState exec vm
         interpret fetcher maxIter askSmtIters heuristic vm' (k vm')
       Stepper.IOAct q -> do
-        (r, vm') <- runStateT q vm
-        interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+        r <- q
+        interpret fetcher maxIter askSmtIters heuristic vm (k r)
       Stepper.Ask (PleaseChoosePath cond continue) -> do
         (a, b) <- concurrently
           (let (ra, vma) = runState (continue True) vm { result = Nothing }
@@ -772,8 +772,8 @@ equivalenceCheck' solvers branchesA branchesB opts = do
       -- partial end states can't be compared to actual end states, so we always ignore them
       (Partial {}, _) -> PBool False
       (_, Partial {}) -> PBool False
-      (ITE _ _ _, _) -> error "Expressions must be flattened"
-      (_, ITE _ _ _) -> error "Expressions must be flattened"
+      (ITE _ _ _, _) -> internalError "Expressions must be flattened"
+      (_, ITE _ _ _) -> internalError "Expressions must be flattened"
       (a, b) -> if a == b
                 then PBool False
                 else PBool True
