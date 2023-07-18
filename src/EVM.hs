@@ -649,54 +649,53 @@ exec1 = do
           case stk of
             x:new:xs ->
               accessStorage self x $ \current -> do
-                fetchAccount self $ \account -> do
-                  availableGas <- use (#state % #gas)
+                availableGas <- use (#state % #gas)
 
-                  if availableGas <= g_callstipend then
-                    finishFrame (FrameErrored (OutOfGas availableGas g_callstipend))
-                  else do
-                    let
-                      original =
-                        case readStorage x account.origStorage of
-                          Just (Lit v) -> v
-                          _ -> 0
-                      storage_cost =
-                        case (maybeLitWord current, maybeLitWord new) of
-                          (Just current', Just new') ->
-                             if (current' == new') then g_sload
-                             else if (current' == original) && (original == 0) then g_sset
-                             else if (current' == original) then g_sreset
-                             else g_sload
-
-                          -- if any of the arguments are symbolic,
-                          -- assume worst case scenario
-                          _ -> g_sset
-
-                    acc <- accessStorageForGas self x
-                    let cold_storage_cost = if acc then 0 else g_cold_sload
-                    burn (storage_cost + cold_storage_cost) $ do
-                      next
-                      assign (#state % #stack) xs
-                      modifying (#env % #contracts % ix self % #storage) (writeStorage x new)
-
+                if availableGas <= g_callstipend then
+                  finishFrame (FrameErrored (OutOfGas availableGas g_callstipend))
+                else do
+                  let
+                    original =
+                      case Expr.readStorage' x this.origStorage of
+                        Lit v -> v
+                        _ -> 0
+                    storage_cost =
                       case (maybeLitWord current, maybeLitWord new) of
-                         (Just current', Just new') ->
-                            unless (current' == new') $
-                              if current' == original then
-                                when (original /= 0 && new' == 0) $
-                                  refund (g_sreset + g_access_list_storage_key)
-                              else do
-                                when (original /= 0) $
-                                  if current' == 0
-                                  then unRefund (g_sreset + g_access_list_storage_key)
-                                  else when (new' == 0) $ refund (g_sreset + g_access_list_storage_key)
-                                when (original == new') $
-                                  if original == 0
-                                  then refund (g_sset - g_sload)
-                                  else refund (g_sreset - g_sload)
-                         -- if any of the arguments are symbolic,
-                         -- don't change the refund counter
-                         _ -> noop
+                        (Just current', Just new') ->
+                           if (current' == new') then g_sload
+                           else if (current' == original) && (original == 0) then g_sset
+                           else if (current' == original) then g_sreset
+                           else g_sload
+
+                        -- if any of the arguments are symbolic,
+                        -- assume worst case scenario
+                        _-> g_sset
+
+                  acc <- accessStorageForGas self x
+                  let cold_storage_cost = if acc then 0 else g_cold_sload
+                  burn (storage_cost + cold_storage_cost) $ do
+                    next
+                    assign (#state % #stack) xs
+                    modifying (#env % #contracts % ix self % #storage) (writeStorage x new)
+
+                    case (maybeLitWord current, maybeLitWord new) of
+                       (Just current', Just new') ->
+                          unless (current' == new') $
+                            if current' == original then
+                              when (original /= 0 && new' == 0) $
+                                refund (g_sreset + g_access_list_storage_key)
+                            else do
+                              when (original /= 0) $
+                                if current' == 0
+                                then unRefund (g_sreset + g_access_list_storage_key)
+                                else when (new' == 0) $ refund (g_sreset + g_access_list_storage_key)
+                              when (original == new') $
+                                if original == 0
+                                then refund (g_sset - g_sload)
+                                else refund (g_sreset - g_sload)
+                       -- if any of the arguments are symbolic,
+                       -- don't change the refund counter
+                       _ -> noop
             _ -> underrun
 
         OpJump ->
@@ -913,8 +912,8 @@ exec1 = do
               let cost = if acc then 0 else g_cold_account_access
                   funds = this.balance
                   recipientExists = accountExists xTo vm
-              branch (Expr.not $ Expr.eq funds (Lit 0)) $ \hasFunds -> do
-                let c_new = if not recipientExists && hasFunds
+              branch (Expr.iszero $ Expr.eq funds (Lit 0)) $ \hasFunds -> do
+                let c_new = if (not recipientExists) && hasFunds
                             then g_selfdestruct_newaccount
                             else 0
                 burn (g_selfdestruct + c_new + cost) $ do
@@ -926,7 +925,8 @@ exec1 = do
                          #env % #contracts % ix xTo % #balance %= (Expr.add funds)
                          assign (#env % #contracts % ix self % #balance) (Lit 0)
                          doStop
-                  else doStop
+                  else do
+                    doStop
 
         OpRevert ->
           case stk of
@@ -1271,7 +1271,6 @@ accessStorage addr slot continue = do
   use (#env % #contracts % at addr) >>= \case
     Just c ->
       case readStorage slot c.storage of
-        -- Notice that if storage is symbolic, we always continue straight away
         Just x ->
           continue x
         Nothing ->
@@ -1281,7 +1280,7 @@ accessStorage addr slot continue = do
                 -- check if the slot is cached
                 contract <- preuse (#cache % #fetched % ix addr')
                 case contract of
-                  Nothing -> error "Internal Error: contract marked external not found in cache"
+                  Nothing -> internalError "contract marked external not found in cache"
                   Just fetched -> case readStorage (Lit slot') fetched.storage of
                               Nothing -> mkQuery addr' slot'
                               Just val -> continue val
@@ -1748,9 +1747,8 @@ collision c' = case c' of
 create :: (?op :: Word8)
   => Expr EAddr -> Contract
   -> W256 -> Word64 -> W256 -> [Expr EWord] -> Expr EAddr -> Expr Buf -> EVM ()
-create self this xSize xGas' xValue xs newAddr initCode = do
+create self this xSize xGas xValue xs newAddr initCode = do
   vm0 <- get
-  let xGas = xGas'
   if xSize > vm0.block.maxCodeSize * 2
   then do
     assign (#state % #stack) (Lit 0 : xs)
@@ -1774,9 +1772,8 @@ create self this xSize xGas' xValue xs newAddr initCode = do
     assign (#state % #returndata) mempty
     modifying (#env % #contracts % ix self % #nonce) (fmap ((+) 1))
     next
-  else burn xGas $
-    -- do we have enough balance
-    branch (Expr.gt (Lit xValue) this.balance) $ \case
+  -- do we have enough balance
+  else branch (Expr.gt (Lit xValue) this.balance) $ \case
       True -> do
         assign (#state % #stack) (Lit 0 : xs)
         assign (#state % #returndata) mempty
@@ -1785,7 +1782,7 @@ create self this xSize xGas' xValue xs newAddr initCode = do
         touchAccount self
         touchAccount newAddr
       -- are we overflowing the nonce
-      False -> do
+      False -> burn xGas $ do
         -- unfortunately we have to apply some (pretty hacky)
         -- heuristics here to parse the unstructured buffer read
         -- from memory into a code and data section
@@ -1843,7 +1840,7 @@ create self this xSize xGas' xValue xs newAddr initCode = do
                 & set #code         c
                 & set #callvalue    (Lit xValue)
                 & set #caller       self
-                & set #gas          xGas'
+                & set #gas          xGas
 
 -- | Replace a contract's code, like when CREATE returns
 -- from the constructor code.

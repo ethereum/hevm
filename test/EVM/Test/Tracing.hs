@@ -343,10 +343,13 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
           bStack = b.stack
           aGas = into a.traceGas
           bGas = b.gas
+      putStrLn $ "hevm: " <> intToOpName aOp <> " pc: " <> show aPc <> " gas: " <> show aGas <> " stack: " <> show aStack
+      putStrLn $ "geth: " <> intToOpName bOp <> " pc: " <> show bPc <> " gas: " <> show bGas <> " stack: " <> show bStack
       when (aGas /= bGas) $ do
         putStrLn "GAS doesn't match:"
         putStrLn $ "HEVM's gas   : " <> (show aGas)
         putStrLn $ "evmtool's gas: " <> (show bGas)
+        putStrLn $ "executing opcode: " <> (intToOpName aOp)
       when (aOp /= bOp || aPc /= bPc) $ do
         putStrLn $ "HEVM: " <> (intToOpName aOp) <> " (pc " <> (show aPc) <> ") --- evmtool " <> (intToOpName bOp) <> " (pc " <> (show bPc) <> ")"
 
@@ -800,8 +803,8 @@ getOp vm =
   let pcpos  = vm ^. #state % #pc
       code' = vm ^. #state % #code
       xs = case code' of
-        InitCode _ _ -> internalError "InitCode instead of RuntimeCode"
         UnknownCode _ -> internalError "UnknownCode instead of RuntimeCode"
+        InitCode bs _ -> BS.drop pcpos bs
         RuntimeCode (ConcreteRuntimeCode xs') -> BS.drop pcpos xs'
         RuntimeCode (SymbolicRuntimeCode _) -> internalError "RuntimeCode is symbolic"
   in if xs == BS.empty then 0

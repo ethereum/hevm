@@ -25,10 +25,10 @@
 
 # we should use witch
 - functions:
-  - {name: fromIntegral, within: [], message: "use into or tryFrom from Data.Witch"}
-  - {name: fromInteger, within: [], message: "use into or tryFrom from Data.Witch"}
-  - {name: toIntegral, within: [], message: "use into or tryFrom from Data.Witch"}
-  - {name: toInteger, within: [], message: "use into or tryFrom from Data.Witch"}
+  - {name: fromIntegral, within: [], message: "use into or tryFrom from Witch"}
+  - {name: fromInteger, within: [], message: "use into or tryFrom from Witch"}
+  - {name: toIntegral, within: [], message: "use into or tryFrom from Witch"}
+  - {name: toInteger, within: [], message: "use into or tryFrom from Witch"}
 
 # we should use internalError
 - error: {lhs: error, rhs: internalError}

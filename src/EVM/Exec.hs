@@ -3,7 +3,6 @@ module EVM.Exec where
 import EVM hiding (createAddress)
 import EVM.Concrete (createAddress)
 import EVM.FeeSchedule qualified as FeeSchedule
-import EVM.Expr (litAddr)
 import EVM.Types
 
 import Control.Monad.Trans.State.Strict (get, State)

@@ -176,15 +176,19 @@ splitEithers =
   . (fmap fst &&& fmap snd)
   . (fmap (preview _Left &&& preview _Right))
 
+fromConcrete :: Expr Storage -> Map W256 W256
+fromConcrete (ConcreteStore s) = s
+fromConcrete s = internalError $ "unexpected abstract store: " <> show s
+
 checkStateFail :: Bool -> Case -> VM -> (Bool, Bool, Bool, Bool) -> IO String
 checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
   let
     printContracts :: Map Addr Contract -> IO ()
     printContracts cs = putStrLn $ Map.foldrWithKey (\k c acc ->
       acc ++ show k ++ " : "
-                   ++ (show $ c.nonce) ++ " "
-                   ++ (show $ maybeLitWord c.balance) ++ " "
-                   ++ (show c.storage)
+                   ++ (show $ fromJust $ c.nonce) ++ " "
+                   ++ (show $ fromJust $ maybeLitWord c.balance) ++ " "
+                   ++ (show $ fromConcrete $ c.storage)
         ++ "\n") "" cs
 
     reason = map fst (filter (not . snd)
@@ -276,11 +280,11 @@ instance FromJSON Contract where
     storage <- v .: "storage"
     balance <- v .: "balance"
     nonce   <- v .: "nonce"
-    -- using LitAddr 0 here is a hack, but it doesn't matter since we only need to have the address on the base store for symbolic execution...
     pure $ EVM.initialContract code
              & #balance .~ (Lit balance)
              & #nonce   ?~ nonce
              & #storage .~ (ConcreteStore storage)
+             & #origStorage .~ (ConcreteStore storage)
 
   parseJSON invalid =
     JSON.typeMismatch "Contract" invalid
