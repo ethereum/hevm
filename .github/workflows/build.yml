@@ -67,7 +67,7 @@ jobs:
       - uses: haskell/actions/setup@v2
         id: cabal
         with:
-          ghc-version: '9.4.5'
+          ghc-version: '9.2.8'
       - name: run cabal check
         run: cabal check --verbose=3
       - name: build and install dependencies
