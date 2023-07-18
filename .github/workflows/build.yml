@@ -86,4 +86,4 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: run cabal check
-        run: nix-shell --pure --command "cabal check --verbose=3"
+        run: nix develop -c cabal check --verbose=3
