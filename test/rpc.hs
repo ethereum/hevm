@@ -76,7 +76,7 @@ tests = testGroup "rpc"
         let
           wethStore = (fromJust $ Map.lookup (LitAddr 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2) postVm.env.contracts).storage
           wethStore' = case wethStore of
-            ConcreteStore _ s -> s
+            ConcreteStore s -> s
             _ -> internalError "Expecting concrete store"
           receiverBal = fromJust $ Map.lookup (keccak' (word256Bytes 0xdead <> word256Bytes 0x3)) wethStore'
           msg = case postVm.result of
