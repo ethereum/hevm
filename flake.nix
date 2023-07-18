@@ -32,6 +32,7 @@
           z3-latest
           cvc5
           git
+        ] ++ lib.optional (!pkgs.stdenv.isDarwin) [
           foundry.defaultPackage.${system}
         ];
 
