@@ -34,8 +34,6 @@ jobs:
           path: result/bin/hevm
       - name: run rpc tests
         run: nix-shell --pure --command "cabal run rpc-tests"
-      - name: run ethereum tests
-        run: nix-shell --command "cabal run ethereum-tests"
 
   build-windows:
     name: build (windows-latest)

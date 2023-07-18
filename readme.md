@@ -1,6 +1,5 @@
 # hevm
 
-test
 The `hevm` project is an implementation of the Ethereum virtual machine (EVM) made specifically for
 symbolic execution, unit testing and debugging of smart contracts. The `hevm` command line program
 can symbolically execute smart contracts, run unit tests, interactively debug contracts while

@@ -47,7 +47,7 @@
             inherit secp256k1;
           })
           [
-            (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
+            (haskell.lib.compose.overrideCabal (old: { testTarget = "test ethereum-tests"; }))
             (haskell.lib.compose.addTestToolDepends testDeps)
             (haskell.lib.compose.appendBuildFlags ["-v3"])
             (haskell.lib.compose.appendConfigureFlags (
