@@ -668,30 +668,33 @@ genContract n = do
     y <- chooseInt (3, 6)
     pushes <- genPush y
     normalOps <- vectorOf (3*n+40) genOne
+    large :: Bool <- chooseAny
+    extra <- if large then vectorOf (100) genOne
+                      else pure []
     addReturn <- chooseInt (0, 10)
-    let contr = pushes ++ normalOps
+    let contr = pushes ++ normalOps ++ extra
     if addReturn < 10 then pure $ contr++[OpPush (Lit 0x40), OpPush (Lit 0x0), OpReturn]
                       else pure contr
   where
     genOne :: Gen Op
     genOne = frequency [
       -- math ops
-      (200, frequency [
-          (1, pure OpAdd)
-        , (1, pure OpMul)
+      (20, frequency [
+          (2, pure OpAdd)
+        , (2, pure OpMul)
         , (1, pure OpSub)
-        , (1, pure OpDiv)
+        , (2, pure OpDiv)
         , (1, pure OpSdiv)
-        , (1, pure OpMod)
+        , (2, pure OpMod)
         , (1, pure OpSmod)
         , (1, pure OpAddmod)
-        , (1, pure OpMulmod)
+        , (2, pure OpMulmod)
         , (1, pure OpExp)
         , (1, pure OpSignextend)
-        , (1, pure OpLt)
-        , (1, pure OpGt)
-        , (1, pure OpSlt)
-        , (1, pure OpSgt)
+        , (2, pure OpLt)
+        , (2, pure OpGt)
+        , (2, pure OpSlt)
+        , (2, pure OpSgt)
         , (1, pure OpSha3)
       ])
       -- Comparison & binary ops
@@ -708,8 +711,8 @@ genContract n = do
         , (1, pure OpSar)
       ])
       -- calldata
-      , (800, pure OpCalldataload)
-      , (200, pure OpCalldatacopy)
+      , (200, pure OpCalldataload)
+      , (800, pure OpCalldatacopy)
       -- Get some info
       , (100, frequency [
           (10, pure OpAddress)
@@ -742,8 +745,8 @@ genContract n = do
       -- memory manip
       , (1200, frequency [
           (50, pure OpMload)
-        , (50, pure OpMstore)
-        , (1, pure OpMstore8)
+        , (1, pure OpMstore)
+        , (300, pure OpMstore8)
       ])
       -- storage manip
       , (100, frequency [
@@ -751,7 +754,7 @@ genContract n = do
         , (1, pure OpSstore)
       ])
       -- Jumping around
-      , (20, frequency [
+      , (50, frequency [
             (1, pure OpJump)
           , (10, pure OpJumpi)
       ])
@@ -770,7 +773,7 @@ genContract n = do
           (1, pure OpPop)
         , (400, do
             -- x <- arbitrary
-            large <- chooseInt (0, 100)
+            large <- chooseInt (0, 2000)
             x <- if large == 0 then chooseBoundedIntegral (0::W256, (2::W256)^(256::W256)-1)
                                else chooseBoundedIntegral (0, 10)
             pure $ OpPush (Lit (fromIntegral x)))
@@ -808,21 +811,42 @@ getOp vm =
 
 tests :: TestTree
 tests = testGroup "contract-quickcheck-run"
-    [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract) -> ioProperty $ do
-        txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
-        gaslimit <- generate $ chooseInt (40000, 0xffff)
+    [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract, GasLimitInt gasLimit, TxDataRaw txDataRaw) -> ioProperty $ do
         let txData = BS.pack $ toEnum <$> txDataRaw
         -- TODO: By removing external calls, we fuzz less
         --       It should work also when we external calls. Removing for now.
         contrFixed <- fixContractJumps $ removeExtcalls contr
-        checkTraceAndOutputs contrFixed gaslimit txData
+        checkTraceAndOutputs contrFixed gasLimit txData
       , testCase "calldata-wraparound" $ do
         let contract = OpContract $ concat
-              [ [OpPush (Lit 0xf), OpPush (Lit 0x1),OpMstore] -- offs, value
-              , [OpPush (Lit 0x3), OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- destOffs, offs, size
-              , [OpPush (Lit 0x10),OpPush (Lit 0x20),OpReturn] -- offset, datasize
+              [ [OpPush (Lit 0xff),OpPush (Lit 31),OpMstore8] -- value, offs
+              , [OpPush (Lit 0x3),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- destOffs, offs, size
+              , [OpPush (Lit 0x20),OpPush (Lit 0),OpReturn] -- datasize, offs
               ]
-        checkTraceAndOutputs contract 40000 (BS.pack [])
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5])
+      , testCase "calldata-overwrite-with-0-if-oversized" $ do
+        -- supposed to copy 1...6 and then 0s, overwriting the 0xff with 0
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs
+              , [OpPush (Lit 10),OpPush (Lit 0),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
+              , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- offset, datasize
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
+      , testCase "calldata-overwrite-correct-size" $ do
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- offs, value
+              , [OpPush (Lit 10),OpPush (Lit 0),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
+              , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
+      , testCase "calldata-offset-copy" $ do
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- value, offs
+              , [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs
+              , [OpPush (Lit 10),OpPush (Lit 4),OpPush (Lit 0), OpCalldatacopy] -- sze, offs, destOffs
+              , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
     ]
 
 checkTraceAndOutputs :: OpContract -> Int -> ByteString -> IO ()
@@ -863,8 +887,8 @@ checkTraceAndOutputs contract gasLimit txData = do
              putStrLn $ "concretized expr                 : " <> (show concretizedExpr)
              putStrLn $ "simplified concretized expr      : " <> (show simplConcExpr)
              putStrLn $ "evmtoolTraceOutput.output.output : " <> (show (evmtoolTraceOutput.output.output))
-             putStrLn $ "evmtool's return value           : " <> (show (bssToBs hevmTraceResult.out))
-             putStrLn $ "return value computed            : " <> (show (fromJust simplConcrExprRetval))
+             putStrLn $ "HEVM trace result output         : " <> (byteStringToHex (bssToBs hevmTraceResult.out))
+             putStrLn $ "ret value computed via symb+conc : " <> (byteStringToHex (fromJust simplConcrExprRetval))
              assertEqual "Simplified, concretized expression must match evmtool's output." True False
       else do
         putStrLn $ "Name of trace file: " <> (getTraceFileName $ fromJust evmtoolResult)
@@ -886,3 +910,22 @@ checkTraceAndOutputs contract gasLimit txData = do
   System.Directory.removeFile "result.json"
   System.Directory.removeFile "env.json"
   deleteTraceOutputFiles evmtoolResult
+
+-- GasLimitInt
+newtype GasLimitInt = GasLimitInt (Int)
+  deriving (Show, Eq)
+
+instance Arbitrary GasLimitInt where
+  arbitrary = do
+    let mkLimit = chooseInt (50000, 0xfffff)
+    fmap GasLimitInt mkLimit
+
+-- GenTxDataRaw
+newtype TxDataRaw = TxDataRaw ([Int])
+  deriving (Show, Eq)
+
+instance Arbitrary TxDataRaw where
+  arbitrary = do
+    let
+      txDataRaw = sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
+    fmap TxDataRaw txDataRaw
