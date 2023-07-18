@@ -645,7 +645,7 @@ symvmFromCommand cmd calldata = do
                              )
 
   let
-    caller = SymAddr 0
+    caller = SymAddr "caller"
     ts = maybe Timestamp Lit cmd.timestamp
     callvalue = maybe TxValue Lit cmd.value
   -- TODO: rework this, ConcreteS not needed anymore
@@ -663,8 +663,7 @@ symvmFromCommand cmd calldata = do
               -- if both code and url is given,
               -- fetch the contract and overwrite the code
               Just c -> initialContract (mkCode $ decipher c)
-                        -- TODO: fix this
-                        -- & set EVM.origStorage (view EVM.origStorage contract')
+                        & set #origStorage (contract'.origStorage)
                         & set #balance     (contract'.balance)
                         & set #nonce       (contract'.nonce)
                         & set #external    (contract'.external)

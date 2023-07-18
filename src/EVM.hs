@@ -32,14 +32,14 @@ import Data.ByteString.Lazy (fromStrict)
 import Data.ByteString.Lazy qualified as LS
 import Data.ByteString.Char8 qualified as Char8
 import Data.Foldable (toList)
-import Data.List (find, foldl')
+import Data.List (find)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, fromJust, isJust)
 import Data.Set (insert, member, fromList)
 import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
-import Data.Text (unpack)
+import Data.Text (unpack, pack)
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import Data.Tree
 import Data.Tree.Zipper qualified as Zipper
@@ -88,14 +88,6 @@ currentContract vm =
   Map.lookup vm.state.codeContract vm.env.contracts
 
 -- * Data constructors
-
--- | Finds the highest index for a symbolic address declared in the VMOpts
-maxSymAddress :: VMOpts -> Int
-maxSymAddress o = foldl' go 0 $ [o.origin, o.caller, o.coinbase, o.address] <> Map.keys o.txAccessList
-  where
-    go :: Int -> Expr EAddr -> Int
-    go acc (SymAddr i) = max acc i
-    go acc _ = acc
 
 makeVm :: VMOpts -> VM
 makeVm o =
@@ -155,7 +147,7 @@ makeVm o =
     { chainId = o.chainId
     , contracts = Map.fromList
       [(o.address, o.contract )]
-    , symAddresses = maxSymAddress o
+    , freshAddresses = 0
     }
   , cache = Cache mempty mempty
   , burned = 0
@@ -2480,9 +2472,9 @@ create2Address (GVar _) _ _ = error "Internal Error: unexpected GVar"
 
 freshSymAddr :: EVM (Expr EAddr)
 freshSymAddr = do
-  modifying (#env % #symAddresses) (+ 1)
-  n <- use (#env % #symAddresses)
-  pure $ SymAddr n
+  modifying (#env % #freshAddresses) (+ 1)
+  n <- use (#env % #freshAddresses)
+  pure $ SymAddr ("freshSymAddr" <> (pack $ show n))
 
 isPrecompileAddr :: Expr EAddr -> Bool
 isPrecompileAddr = \case

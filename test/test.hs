@@ -1725,7 +1725,7 @@ tests = testGroup "hevm"
                   }
                 |]
               aAddr = LitAddr (Addr 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B)
-              cAddr = SymAddr 3 -- TODO: make this easier to use
+              cAddr = SymAddr "entrypoint"
           Just c <- solcRuntime "C" code
           Just a <- solcRuntime "A" code
           (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> do
@@ -1834,7 +1834,7 @@ tests = testGroup "hevm"
             }
             |]
           (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
-          let addr = SymAddr(3)
+          let addr = SymAddr "entrypoint"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
                           Just s -> Map.size s == 2 &&
@@ -1857,7 +1857,7 @@ tests = testGroup "hevm"
             }
             |]
           (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
-          let addr = SymAddr(3)
+          let addr = SymAddr "entrypoint"
               a = getVar cex "arg1"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
@@ -1883,7 +1883,7 @@ tests = testGroup "hevm"
           let sig = Just (Sig "fun(uint256)" [AbiUIntType 256])
           (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $
             \s -> verifyContract s c sig [] defaultVeriOpts Nothing (Just $ checkAssertions [0x01])
-          let addr = SymAddr(3)
+          let addr = SymAddr "entrypoint"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
                           Just s -> Map.size s == 2 &&

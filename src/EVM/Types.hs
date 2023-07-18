@@ -105,6 +105,9 @@ instance TryFrom Word256 Word8 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Word256 Word32 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Word512 W256 where tryFrom = maybeTryFrom toIntegralSized
 
+truncateToAddr :: W256 -> Addr
+truncateToAddr = fromIntegral
+
 #endif
 
 
@@ -368,7 +371,7 @@ data Expr (a :: EType) where
   -- Symbolic addresses are identified with an int. It is important that
   -- semantic equality is the same as syntactic equality here. Additionally all
   -- SAddr's in a given expression should be constrained to differ from any LitAddr's
-  SymAddr        :: Int -> Expr EAddr
+  SymAddr        :: Text -> Expr EAddr
   LitAddr        :: Addr -> Expr EAddr
   WAddr          :: Expr EAddr -> Expr EWord
 
@@ -736,9 +739,9 @@ data TxState = TxState
 
 -- | Various environmental data
 data Env = Env
-  { contracts    :: Map (Expr EAddr) Contract
-  , chainId      :: W256
-  , symAddresses :: Int
+  { contracts      :: Map (Expr EAddr) Contract
+  , chainId        :: W256
+  , freshAddresses :: Int
   }
   deriving (Show, Generic)
 

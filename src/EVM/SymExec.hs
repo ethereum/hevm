@@ -206,21 +206,16 @@ loadSymVM
   -> Expr EWord
   -> (Expr Buf, [Prop])
   -> VM
-loadSymVM x callvalue cd = let
-    origin = SymAddr 0
-    caller = SymAddr 1
-    coinbase = SymAddr 2
-    contract = SymAddr 3
-  in
+loadSymVM x callvalue cd =
   (makeVm $ VMOpts
-    { contract = abstractContract x contract
+    { contract = abstractContract x (SymAddr "entrypoint")
     , calldata = cd
     , value = callvalue
     , baseState = AbstractBase
-    , address = contract
-    , caller = caller
-    , origin = origin
-    , coinbase = coinbase
+    , address = SymAddr "entrypoint"
+    , caller = SymAddr "caller"
+    , origin = SymAddr "origin"
+    , coinbase = SymAddr "coinbase"
     , number = 0
     , timestamp = Lit 0
     , blockGaslimit = 0

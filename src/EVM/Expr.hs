@@ -816,9 +816,6 @@ wordToAddr = go . simplify
       Lit a -> Just $ LitAddr (truncateToAddr a)
       _ -> Nothing
 
-truncateToAddr :: W256 -> Addr
-truncateToAddr = fromIntegral
-
 litCode :: BS.ByteString -> [Expr Byte]
 litCode bs = fmap LitByte (BS.unpack bs)
 
