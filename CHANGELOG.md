@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ## Fixed
-- CallDataCopy now correctly wraps around in the symbolic interpreter
+- CopySlice wraparound issue especially during CopyCallBytesToMemory
 
 ## Changed
 
