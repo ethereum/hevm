@@ -400,14 +400,12 @@ exec1 = do
 
         OpBalance ->
           case stk of
-            x:xs -> case Expr.simplify x of
-              WAddr a ->
-                accessAndBurn a $
-                  fetchAccount a $ \c -> do
-                    next
-                    assign (#state % #stack) xs
-                    pushSym c.balance
-              a -> partial $ UnexpectedSymbolicArg vm.state.pc "BALANCE" (wrap [a])
+            x:xs -> forceAddr x "BALANCE" $ \a ->
+              accessAndBurn a $
+                fetchAccount a $ \c -> do
+                  next
+                  assign (#state % #stack) xs
+                  pushSym c.balance
             [] ->
               underrun
 
