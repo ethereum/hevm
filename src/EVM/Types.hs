@@ -826,7 +826,7 @@ data ContractCode
   = UnknownCode (Expr EAddr)       -- ^ Fully abstract code, keyed on an address to give consistent results for e.g. extcodehash
   | InitCode ByteString (Expr Buf) -- ^ "Constructor" code, during contract creation
   | RuntimeCode RuntimeCode        -- ^ "Instance" code, after contract creation
-  deriving (Show, Ord)
+  deriving (Show, Eq, Ord)
 
 -- | We have two variants here to optimize the fully concrete case.
 -- ConcreteRuntimeCode just wraps a ByteString
@@ -835,13 +835,6 @@ data RuntimeCode
   = ConcreteRuntimeCode ByteString
   | SymbolicRuntimeCode (V.Vector (Expr Byte))
   deriving (Show, Eq, Ord)
-
--- runtime err when used for symbolic code
-instance Eq ContractCode where
-  InitCode a b  == InitCode c d  = a == c && b == d
-  RuntimeCode x == RuntimeCode y = x == y
-  _ == _ = False
-
 
 -- Execution Traces --------------------------------------------------------------------------------
 
@@ -1301,8 +1294,9 @@ abiKeccak =
 
 -- Utils -------------------------------------------------------------------------------------------
 
+{- HLINT ignore internalError -}
 internalError:: HasCallStack => [Char] -> a
-internalError m = error $ "Internal error: " ++ m ++ " -- " ++ (prettyCallStack callStack)
+internalError m = error $ "Internal Error: " ++ m ++ " -- " ++ (prettyCallStack callStack)
 
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = fmap concat (mapM f xs)

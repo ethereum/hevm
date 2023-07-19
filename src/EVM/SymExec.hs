@@ -775,7 +775,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
 
     statesDiffer :: Map (Expr EAddr) (Expr EContract) -> Map (Expr EAddr) (Expr EContract) -> Prop
     statesDiffer aState bState
-      = if Map.keys aState /= Map.keys bState
+      = if Set.fromList (Map.keys aState) /= Set.fromList (Map.keys bState)
         -- TODO: consider possibility of aliased symbolic addresses
         then PBool True
         else let

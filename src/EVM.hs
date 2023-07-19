@@ -400,12 +400,14 @@ exec1 = do
 
         OpBalance ->
           case stk of
-            x':xs -> forceAddr x' "BALANCE" $ \x ->
-              accessAndBurn x $
-                fetchAccount x $ \c -> do
-                  next
-                  assign (#state % #stack) xs
-                  pushSym c.balance
+            x:xs -> case Expr.simplify x of
+              WAddr a ->
+                accessAndBurn a $
+                  fetchAccount a $ \c -> do
+                    next
+                    assign (#state % #stack) xs
+                    pushSym c.balance
+              a -> partial $ UnexpectedSymbolicArg vm.state.pc "BALANCE" (wrap [a])
             [] ->
               underrun
 
@@ -1238,21 +1240,27 @@ branch cond continue = do
 
 -- | Construct RPC Query and halt execution until resolved
 fetchAccount :: Expr EAddr -> (Contract -> EVM ()) -> EVM ()
-fetchAccount addr' continue =
-  use (#env % #contracts % at addr') >>= \case
+fetchAccount addr continue =
+  use (#env % #contracts % at addr) >>= \case
     Just c -> continue c
-    Nothing -> forceConcreteAddr addr' "cannot fetch symbolic storage via rpc" $ \addr -> do
-        use (#cache % #fetched % at addr) >>= \case
+    Nothing -> case addr of
+      SymAddr _ -> do
+        let c = unknownContract addr
+        assign (#env % #contracts % at addr) (Just c)
+        continue c
+      LitAddr a -> do
+        use (#cache % #fetched % at a) >>= \case
           Just c -> do
-            assign (#env % #contracts % at addr') (Just c)
+            assign (#env % #contracts % at addr) (Just c)
             continue c
           Nothing -> do
             assign (#result) . Just . HandleEffect . Query $
-              PleaseFetchContract addr
-                (\c -> do assign (#cache % #fetched % at addr) (Just c)
-                          assign (#env % #contracts % at addr') (Just c)
+              PleaseFetchContract a
+                (\c -> do assign (#cache % #fetched % at a) (Just c)
+                          assign (#env % #contracts % at addr) (Just c)
                           assign #result Nothing
                           continue c)
+      GVar _ -> internalError "Unexpected GVar"
 
 accessStorage
   :: Expr EAddr

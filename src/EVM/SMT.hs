@@ -912,9 +912,10 @@ parseBlockCtx "basefee" = BaseFee
 parseBlockCtx t = internalError $ "cannot parse " <> (TS.unpack t) <> " into an Expr"
 
 parseTxCtx :: TS.Text -> Expr EWord
-parseTxCtx name = case TS.unpack name of
-  "txvalue" -> TxValue
-  t -> error $ "Internal Error: cannot parse " <> t <> " into an Expr"
+parseTxCtx name
+  | name == "txvalue" = TxValue
+  | Just a <- TS.stripPrefix "balance_" name = Balance (parseEAddr a)
+  | otherwise = internalError $ "cannot parse " <> (TS.unpack name) <> " into an Expr"
 
 getAddrs :: (TS.Text -> Expr EAddr) -> (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr EAddr) Addr)
 getAddrs parseName getVal names = Map.mapKeys parseName <$> foldM (getOne parseAddr getVal) mempty names

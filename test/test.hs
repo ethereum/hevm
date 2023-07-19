@@ -1944,7 +1944,37 @@ tests = testGroup "hevm"
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqual "Must have no difference" [Qed ()] a
-          return ()
+      ,
+      testCase "eq-unknown-addr" $ do
+        -- These yul programs are not equivalent: (try --calldata $(seth --to-uint256 2) for example)
+        Just aPrgm <- solcRuntime "C"
+            [i|
+              contract C {
+                uint bal;
+                function a(address a, address b) public {
+                  bal = a.balance;
+                }
+              }
+            |]
+        Just bPrgm <- solcRuntime "C"
+          [i|
+              contract C {
+                uint bal;
+                function a(address a, address b) public {
+                  bal = b.balance;
+                }
+              }
+          |]
+        withSolvers Z3 3 Nothing $ \s -> do
+          let cd = mkCalldata (Just (Sig "a(address,address)" [AbiAddressType, AbiAddressType])) []
+          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd
+          -- TODO: We get a cex here, but since we were able to statically
+          -- determine that the states differed by comparing the universe of
+          -- addresses, we don't get back a full cex (i.e. it doesn't contains
+          -- models for the addresses or their balances). Not sure how to deal with this...
+          -- TODO: this doesn't work with fully abstract calldata, since we
+          -- don't have a WAddr when we execute BALANCE
+          assertEqual "Must be different" (any isCex a) True
       ,
       testCase "eq-sol-exp-cex" $ do
         -- These yul programs are not equivalent: (try --calldata $(seth --to-uint256 2) for example)
@@ -1971,7 +2001,6 @@ tests = testGroup "hevm"
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqual "Must be different" (any isCex a) True
-          return ()
       , testCase "eq-all-yul-optimization-tests" $ do
         let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }
             ignoredTests =

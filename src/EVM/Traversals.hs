@@ -362,7 +362,9 @@ mapExprM f expr = case expr of
 
   LitAddr a -> f (LitAddr a)
   SymAddr a -> f (SymAddr a)
-  WAddr a -> WAddr <$> f a
+  WAddr a -> do
+    a' <- mapExprM f a
+    f (WAddr a')
 
   -- bytes
 
