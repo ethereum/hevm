@@ -150,6 +150,7 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
     initialContract (RuntimeCode (ConcreteRuntimeCode code))
       & set #nonce    (Just nonce)
       & set #balance  (Lit balance)
+      & set #external True
 
 fetchSlotWithSession
   :: BlockNumber -> Text -> Session -> Addr -> W256 -> IO (Maybe W256)
