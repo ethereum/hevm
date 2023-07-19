@@ -820,7 +820,14 @@ tests = testGroup "contract-quickcheck-run"
       , testCase "calldata-wraparound" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 31),OpMstore8] -- value, offs
-              , [OpPush (Lit 0x3),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- destOffs, offs, size
+              , [OpPush (Lit 0x3),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- size, offs, destOffs
+              , [OpPush (Lit 0x20),OpPush (Lit 0),OpReturn] -- datasize, offs
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5])
+      , testCase "calldata-wraparound2" $ do
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 0),OpMstore8] -- value, offs
+              , [OpPush (Lit 0x10),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- size, offs, destOffs
               , [OpPush (Lit 0x20),OpPush (Lit 0),OpReturn] -- datasize, offs
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5])
@@ -829,12 +836,12 @@ tests = testGroup "contract-quickcheck-run"
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs
               , [OpPush (Lit 10),OpPush (Lit 0),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
-              , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- offset, datasize
+              , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
       , testCase "calldata-overwrite-correct-size" $ do
         let contract = OpContract $ concat
-              [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- offs, value
+              [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- value, offs
               , [OpPush (Lit 10),OpPush (Lit 0),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
               , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
               ]
@@ -843,7 +850,7 @@ tests = testGroup "contract-quickcheck-run"
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- value, offs
               , [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs
-              , [OpPush (Lit 10),OpPush (Lit 4),OpPush (Lit 0), OpCalldatacopy] -- sze, offs, destOffs
+              , [OpPush (Lit 10),OpPush (Lit 4),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
               , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
