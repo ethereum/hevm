@@ -60,6 +60,7 @@ import EVM.SymExec
 import EVM.Traversals (mapExpr)
 import EVM.Transaction qualified
 import EVM.Types
+import EVM.Hexdump(simpleHex)
 
 data VMTrace =
   VMTrace
@@ -894,8 +895,8 @@ checkTraceAndOutputs contract gasLimit txData = do
              putStrLn $ "concretized expr                 : " <> (show concretizedExpr)
              putStrLn $ "simplified concretized expr      : " <> (show simplConcExpr)
              putStrLn $ "evmtoolTraceOutput.output.output : " <> (show (evmtoolTraceOutput.output.output))
-             putStrLn $ "HEVM trace result output         : " <> (byteStringToHex (bssToBs hevmTraceResult.out))
-             putStrLn $ "ret value computed via symb+conc : " <> (byteStringToHex (fromJust simplConcrExprRetval))
+             putStrLn $ "HEVM trace result output         : " <> (simpleHex (bssToBs hevmTraceResult.out))
+             putStrLn $ "ret value computed via symb+conc : " <> (simpleHex (fromJust simplConcrExprRetval))
              assertEqual "Simplified, concretized expression must match evmtool's output." True False
       else do
         putStrLn $ "Name of trace file: " <> (getTraceFileName $ fromJust evmtoolResult)

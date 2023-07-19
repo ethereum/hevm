@@ -1308,16 +1308,6 @@ formatString bs =
     Right s -> "\"" <> T.unpack s <> "\""
     Left _ -> "❮utf8 decode failed❯: " <> (show $ ByteStringS bs)
 
--- To display ByteStrings as HEX values
-byteStringToHex :: ByteString -> String
-byteStringToHex bs = foldMap (++"") $ "0x" : map toHex (BS.unpack bs)
-
-toHex :: Word8 -> String
-toHex w = case showHex w "" of
-           [w1,w2] -> [w1, w2]
-           [w2]    -> ['0', w2]
-           _       -> "showHex returned []"
-
 -- Optics ------------------------------------------------------------------------------------------
 
 
