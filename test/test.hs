@@ -2410,7 +2410,7 @@ instance Arbitrary Addr where
 instance Arbitrary (Expr EAddr) where
   arbitrary = oneof
     [ fmap LitAddr arbitrary
-    , fmap SymAddr arbitrary
+    , fmap SymAddr genName
     ]
 
 instance Arbitrary (Expr Storage) where
