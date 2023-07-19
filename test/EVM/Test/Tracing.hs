@@ -579,7 +579,7 @@ interpretWithTrace fetcher =
         Stepper.Ask _ ->
           internalError "cannot make choice in this interpreter"
         Stepper.IOAct q ->
-          zoom _1 (StateT (runStateT q)) >>= interpretWithTrace fetcher . k
+          liftIO q >>= interpretWithTrace fetcher . k
         Stepper.EVM m ->
           zoom _1 (State.state (runState m)) >>= interpretWithTrace fetcher . k
 
