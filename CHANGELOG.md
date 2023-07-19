@@ -19,7 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Path joining on Windows
 - Fixed overflow issue in stripWrites
 - Automatic tests are now more reproducible
-- CallDataCopy now correctly wraps around in the symbolic interpreter
 
 ## Changed
 
