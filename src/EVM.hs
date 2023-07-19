@@ -388,7 +388,7 @@ exec1 = do
                     accessMemoryRange xTo xSize $ do
                       next
                       assign (#state % #stack) xs
-                      copyCallBytesToMemory vm.state.calldata xSize' xFrom xTo'
+                      copyBytesToMemory vm.state.calldata xSize' xFrom xTo'
             _ -> underrun
 
         OpCodesize ->
@@ -987,7 +987,7 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
       0x4 -> do
           assign (#state % #stack) (Lit 1 : xs)
           assign (#state % #returndata) input
-          copyCallBytesToMemory input (min (Lit outSize) (Lit inSize)) (Lit 0) (Lit outOffset)
+          copyCallBytesToMemory input (Lit outSize) (Lit 0) (Lit outOffset)
           next
 
       -- MODEXP
@@ -1832,7 +1832,7 @@ finishFrame how = do
             -- Case 1: Returning from a call?
             FrameReturned output -> do
               assign (#state % #returndata) output
-              copyCallBytesToMemory output (Expr.min (bufLength output) outSize) (Lit 0) outOffset
+              copyCallBytesToMemory output outSize (Lit 0) outOffset
               reclaimRemainingGasAllowance
               push 1
 
@@ -1842,7 +1842,7 @@ finishFrame how = do
               revertStorage
               revertSubstate
               assign (#state % #returndata) output
-              copyCallBytesToMemory output (Expr.min (bufLength output) outSize) (Lit 0) outOffset
+              copyCallBytesToMemory output outSize (Lit 0) outOffset
               reclaimRemainingGasAllowance
               push 0
 
@@ -1951,7 +1951,7 @@ copyCallBytesToMemory bs size xOffset yOffset =
   else do
     mem <- use (#state % #memory)
     assign (#state % #memory) $
-      copySlice xOffset yOffset size bs mem
+      copySlice xOffset yOffset (Expr.min size (bufLength bs)) bs mem
 
 readMemory :: Expr EWord -> Expr EWord -> VM -> Expr Buf
 readMemory offset size vm = copySlice offset (Lit 0) size vm.state.memory mempty

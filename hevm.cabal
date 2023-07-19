@@ -65,7 +65,7 @@ common shared
   if flag(ci)
     ghc-options: -Werror
   if flag(devel)
-    ghc-options: -j
+    ghc-options: -j -O0
   if flag(debug)
     ghc-options:
       -j
