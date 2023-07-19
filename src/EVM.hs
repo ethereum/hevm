@@ -1951,7 +1951,7 @@ copyCallBytesToMemory bs size xOffset yOffset =
   else do
     mem <- use (#state % #memory)
     assign (#state % #memory) $
-      copySlice xOffset yOffset size bs mem
+      copySlice xOffset yOffset (Expr.min size (bufLength bs)) bs mem
 
 readMemory :: Expr EWord -> Expr EWord -> VM -> Expr Buf
 readMemory offset size vm = copySlice offset (Lit 0) size vm.state.memory mempty
