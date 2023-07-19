@@ -1945,6 +1945,28 @@ tests = testGroup "hevm"
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqual "Must have no difference" [Qed ()] a
       ,
+      testCase "eq-balance-differs" $ do
+        Just aPrgm <- solcRuntime "C"
+          [i|
+            contract C {
+              function f() public {
+                payable(address(0x0)).transfer(2);
+              }
+            }
+          |]
+        Just bPrgm <- solcRuntime "C"
+          [i|
+            contract C {
+              function f() public {
+                payable(address(0x0)).transfer(1);
+              }
+            }
+          |]
+        withSolvers Z3 3 Nothing $ \s -> do
+          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          assertBool "Must differ" (all isCex a)
+      ,
+      -- TODO: this fails because we don't check equivalence of deployed contracts
       expectFail $ testCase "eq-handles-contract-deployment" $ do
         Just aPrgm <- solcRuntime "B"
           [i|
@@ -1991,7 +2013,6 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
-          -- TODO: this fails because we don't check equivalence of deployed contracts
           assertBool "Must differ" (all isCex a)
       ,
       testCase "eq-unknown-addr" $ do
