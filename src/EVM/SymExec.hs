@@ -27,6 +27,7 @@ import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
+import Data.Vector qualified as V
 import EVM (makeVm, abstractContract, getCodeLocation, isValidJumpDest)
 import EVM.Exec
 import EVM.Fetch qualified as Fetch
@@ -35,6 +36,7 @@ import EVM.Expr qualified as Expr
 import EVM.Format (formatExpr, formatPartial)
 import EVM.SMT (SMTCex(..), SMT2(..), assertProps, formatSMT2)
 import EVM.SMT qualified as SMT
+import EVM.Solidity (stripBytecodeMetadataSym, stripBytecodeMetadata)
 import EVM.Solvers
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
@@ -787,10 +789,12 @@ equivalenceCheck' solvers branchesA branchesB opts = do
         balsDiffer = case (ac.balance, bc.balance) of
           (Lit ab, Lit bb) -> PBool $ ab /= bb
           (ab, bb) -> if ab == bb then PBool False else ab ./= bb
+        -- TODO: is this sound? do we need a more sophisticated nonce representation?
+        noncesDiffer = PBool (ac.nonce /= bc.nonce)
         storesDiffer = case (ac.storage, bc.storage) of
           (ConcreteStore as, ConcreteStore bs) -> PBool $ as /= bs
           (as, bs) -> if as == bs then PBool False else as ./= bs
-      in balsDiffer .|| storesDiffer
+      in balsDiffer .|| storesDiffer .|| noncesDiffer
 
 
 both' :: (a -> b) -> (a, a) -> (b, b)

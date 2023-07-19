@@ -761,40 +761,41 @@ exec1 = do
 
         OpCall ->
           case stk of
-            xGas':xTo':xValue':xInOffset':xInSize':xOutOffset':xOutSize':xs ->
-              forceConcrete6 (xGas', xValue', xInOffset', xInSize', xOutOffset', xOutSize') "CALL" $
-              \(xGas, xValue, xInOffset, xInSize, xOutOffset, xOutSize) ->
-                (if xValue > 0 then notStatic else id) $
-                  forceAddr xTo' "unable to determine a call target" $ \xTo ->
-                    case tryFrom xGas of
-                      Left _ -> vmError IllegalOverflow
-                      Right gas ->
-                        delegateCall this gas xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
-                          \callee -> do
-                            let from' = fromMaybe self vm.config.overrideCaller
-                            zoom #state $ do
-                              assign #callvalue (Lit xValue)
-                              assign #caller from'
-                              assign #contract callee
-                            assign (#config % #overrideCaller) Nothing
-                            touchAccount from'
-                            touchAccount callee
-                            transfer from' callee (Lit xValue)
+            xGas':xTo':xValue:xInOffset':xInSize':xOutOffset':xOutSize':xs ->
+              forceConcrete5 (xGas', xInOffset', xInSize', xOutOffset', xOutSize') "CALL" $
+              \(xGas, xInOffset, xInSize, xOutOffset, xOutSize) ->
+                branch (Expr.gt xValue (Lit 0)) $ \gt0 -> do
+                  (if gt0 then notStatic else id) $
+                    forceAddr xTo' "unable to determine a call target" $ \xTo ->
+                      case tryFrom xGas of
+                        Left _ -> vmError IllegalOverflow
+                        Right gas ->
+                          delegateCall this gas xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
+                            \callee -> do
+                              let from' = fromMaybe self vm.config.overrideCaller
+                              zoom #state $ do
+                                assign #callvalue xValue
+                                assign #caller from'
+                                assign #contract callee
+                              assign (#config % #overrideCaller) Nothing
+                              touchAccount from'
+                              touchAccount callee
+                              transfer from' callee xValue
             _ ->
               underrun
 
         OpCallcode ->
           case stk of
-            xGas':xTo':xValue':xInOffset':xInSize':xOutOffset':xOutSize':xs ->
-              forceConcrete6 (xGas', xValue', xInOffset', xInSize', xOutOffset', xOutSize') "CALLCODE" $
-              \(xGas, xValue, xInOffset, xInSize, xOutOffset, xOutSize) ->
+            xGas':xTo':xValue:xInOffset':xInSize':xOutOffset':xOutSize':xs ->
+              forceConcrete5 (xGas', xInOffset', xInSize', xOutOffset', xOutSize') "CALLCODE" $
+              \(xGas, xInOffset, xInSize, xOutOffset, xOutSize) ->
                 forceAddr xTo' "unable to determine a call target" $ \xTo ->
                   case tryFrom xGas of
                     Left _ -> vmError IllegalOverflow
                     Right gas ->
                       delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
                         zoom #state $ do
-                          assign #callvalue (Lit xValue)
+                          assign #callvalue xValue
                           assign #caller $ fromMaybe self vm.config.overrideCaller
                         assign (#config % #overrideCaller) Nothing
                         touchAccount self
@@ -848,7 +849,7 @@ exec1 = do
                     case tryFrom xGas of
                       Left _ -> vmError IllegalOverflow
                       Right gas ->
-                        delegateCall this gas xTo' self 0 xInOffset xInSize xOutOffset xOutSize xs $
+                        delegateCall this gas xTo' self (Lit 0) xInOffset xInSize xOutOffset xOutSize xs $
                           \_ -> touchAccount self
             _ -> underrun
 
@@ -884,7 +885,7 @@ exec1 = do
                     case tryFrom xGas of
                       Left _ -> vmError IllegalOverflow
                       Right gas ->
-                        delegateCall this gas xTo' xTo' 0 xInOffset xInSize xOutOffset xOutSize xs $
+                        delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs $
                           \callee -> do
                             zoom #state $ do
                               assign #callvalue (Lit 0)
@@ -962,7 +963,7 @@ transfer src dst val = do
 -- | Checks a *CALL for failure; OOG, too many callframes, memory access etc.
 callChecks
   :: (?op :: Word8)
-  => Contract -> Word64 -> Expr EAddr -> Expr EAddr -> W256 -> W256 -> W256 -> W256 -> W256 -> [Expr EWord]
+  => Contract -> Word64 -> Expr EAddr -> Expr EAddr -> Expr EWord -> W256 -> W256 -> W256 -> W256 -> [Expr EWord]
    -- continuation with gas available for call
   -> (Word64 -> EVM ())
   -> EVM ()
@@ -975,11 +976,11 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
       let recipientExists = accountExists xContext vm
       (cost, gas') <- costOfCall fees recipientExists xValue availableGas xGas xTo
       burn (cost - gas') $
-        branch (Expr.gt (Lit xValue) this.balance) $ \case
+        branch (Expr.gt xValue this.balance) $ \case
           True -> do
             assign (#state % #stack) (Lit 0 : xs)
             assign (#state % #returndata) mempty
-            pushTrace $ ErrorTrace (BalanceTooLow (Lit xValue) this.balance)
+            pushTrace $ ErrorTrace (BalanceTooLow xValue this.balance)
             next
           False ->
             if length vm.frames >= 1024
@@ -996,7 +997,7 @@ precompiledContract
   -> Word64
   -> Addr
   -> Addr
-  -> W256
+  -> Expr EWord
   -> W256 -> W256 -> W256 -> W256
   -> [Expr EWord]
   -> EVM ()
@@ -1015,7 +1016,7 @@ precompiledContract this xGas precompileAddr recipient xValue inOffset inSize ou
               pure ()
             Just 1 ->
               fetchAccount (LitAddr recipient) $ \_ -> do
-                transfer self (LitAddr recipient) (Lit xValue)
+                transfer self (LitAddr recipient) xValue
                 touchAccount self
                 touchAccount (LitAddr recipient)
             _ -> partial $
@@ -1676,7 +1677,7 @@ cheatActions =
 -- note that the continuation is ignored in the precompile case
 delegateCall
   :: (?op :: Word8)
-  => Contract -> Word64 -> Expr EAddr -> Expr EAddr -> W256 -> W256 -> W256 -> W256 -> W256
+  => Contract -> Word64 -> Expr EAddr -> Expr EAddr -> Expr EWord -> W256 -> W256 -> W256 -> W256
   -> [Expr EWord]
   -> (Expr EAddr -> EVM ())
   -> EVM ()
@@ -2336,9 +2337,9 @@ mkCodeOps contractCode =
 -- Gas cost function for CALL, transliterated from the Yellow Paper.
 costOfCall
   :: FeeSchedule Word64
-  -> Bool -> W256 -> Word64 -> Word64 -> Expr EAddr
+  -> Bool -> Expr EWord -> Word64 -> Word64 -> Expr EAddr
   -> EVM (Word64, Word64)
-costOfCall (FeeSchedule {..}) recipientExists xValue availableGas xGas target = do
+costOfCall (FeeSchedule {..}) recipientExists (Lit xValue) availableGas xGas target = do
   acc <- accessAccountForGas target
   let call_base_gas = if acc then g_warm_storage_read else g_cold_account_access
       c_new = if not recipientExists && xValue /= 0
@@ -2351,6 +2352,8 @@ costOfCall (FeeSchedule {..}) recipientExists xValue availableGas xGas target = 
                   else xGas
       c_callgas = if xValue /= 0 then c_gascap + g_callstipend else c_gascap
   pure (c_gascap + c_extra, c_callgas)
+-- calls are free if value is symbolic :)
+costOfCall _ _ _ _ _ _ = pure (0,0)
 
 -- Gas cost of create, including hash cost if needed
 costOfCreate

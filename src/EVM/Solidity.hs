@@ -381,8 +381,9 @@ solidity contract src = do
 solcRuntime :: Text -> Text -> IO (Maybe ByteString)
 solcRuntime contract src = do
   (json, path) <- solidity' src
-  let (Contracts sol, _, _) = fromJust $ readStdJSON json
-  pure $ Map.lookup (path <> ":" <> contract) sol <&> (.runtimeCode)
+  case readStdJSON json of
+    Just (Contracts sol, _, _) -> pure $ Map.lookup (path <> ":" <> contract) sol <&> (.runtimeCode)
+    Nothing -> internalError $ "unable to parse solidity output:\n" <> (T.unpack json)
 
 functionAbi :: Text -> IO Method
 functionAbi f = do

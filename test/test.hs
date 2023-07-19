@@ -1922,48 +1922,96 @@ tests = testGroup "hevm"
       ,
       testCase "eq-sol-exp-qed" $ do
         Just aPrgm <- solcRuntime "C"
-            [i|
-              contract C {
-                function a(uint8 x) public returns (uint8 b) {
-                  unchecked {
-                    b = x*2;
-                  }
+          [i|
+            contract C {
+              function a(uint8 x) public returns (uint8 b) {
+                unchecked {
+                  b = x*2;
                 }
               }
-            |]
+            }
+          |]
         Just bPrgm <- solcRuntime "C"
           [i|
-              contract C {
-                function a(uint8 x) public returns (uint8 b) {
-                  unchecked {
-                    b =  x<<1;
-                  }
+            contract C {
+              function a(uint8 x) public returns (uint8 b) {
+                unchecked {
+                  b = x<<1;
                 }
               }
+            }
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqual "Must have no difference" [Qed ()] a
       ,
-      testCase "eq-unknown-addr" $ do
-        -- These yul programs are not equivalent: (try --calldata $(seth --to-uint256 2) for example)
-        Just aPrgm <- solcRuntime "C"
-            [i|
-              contract C {
-                uint bal;
-                function a(address a, address b) public {
-                  bal = a.balance;
-                }
+      expectFail $ testCase "eq-handles-contract-deployment" $ do
+        Just aPrgm <- solcRuntime "B"
+          [i|
+            contract A {
+              address parent;
+              constructor(address p) {
+                parent = p;
               }
-            |]
+              function evil() public {
+                parent.call(abi.encode(B.drain.selector));
+              }
+            }
+
+            contract B {
+              address child;
+              function a() public {
+                child = address(new A(address(this)));
+              }
+              function drain() public {
+                require(msg.sender == child);
+                //payable(address(0x0)).transfer(address(this).balance);
+              }
+            }
+          |]
+        Just bPrgm <- solcRuntime "D"
+          [i|
+            contract C {
+              address parent;
+              constructor(address p) {
+                  parent = p;
+              }
+            }
+
+            contract D {
+              address child;
+              function a() public {
+                child = address(new C(address(this)));
+              }
+              function drain() public {
+                require(msg.sender == child);
+                //payable(address(0x0)).transfer(address(this).balance);
+              }
+            }
+          |]
+        withSolvers Z3 3 Nothing $ \s -> do
+          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          -- TODO: this fails because we don't check equivalence of deployed contracts
+          assertBool "Must differ" (all isCex a)
+      ,
+      testCase "eq-unknown-addr" $ do
+        Just aPrgm <- solcRuntime "C"
+          [i|
+            contract C {
+              uint bal;
+              function a(address a, address b) public {
+                bal = a.balance;
+              }
+            }
+          |]
         Just bPrgm <- solcRuntime "C"
           [i|
-              contract C {
-                uint bal;
-                function a(address a, address b) public {
-                  bal = b.balance;
-                }
+            contract C {
+              uint bal;
+              function a(address a, address b) public {
+                bal = b.balance;
               }
+            }
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           let cd = mkCalldata (Just (Sig "a(address,address)" [AbiAddressType, AbiAddressType])) []
@@ -1977,7 +2025,6 @@ tests = testGroup "hevm"
           assertEqual "Must be different" (any isCex a) True
       ,
       testCase "eq-sol-exp-cex" $ do
-        -- These yul programs are not equivalent: (try --calldata $(seth --to-uint256 2) for example)
         Just aPrgm <- solcRuntime "C"
             [i|
               contract C {
