@@ -34,11 +34,7 @@ jobs:
           path: result/bin/hevm
 
   rpc-tests:
-    strategy:
-      matrix:
-       os: [ ubuntu-latest, macos-latest ]
-      fail-fast: false
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: DeterminateSystems/nix-installer-action@main
