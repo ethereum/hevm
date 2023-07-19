@@ -155,11 +155,12 @@
             ] ++ testDeps;
             withHoogle = true;
 
-            # NOTE: hacks for bugged cabal new-repl
-            LD_LIBRARY_PATH = libraryPath;
             HEVM_SOLIDITY_REPO = solidity;
             DAPP_SOLC = "${pkgs.solc}/bin/solc";
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
+
+            # NOTE: hacks for bugged cabal new-repl
+            LD_LIBRARY_PATH = libraryPath;
             shellHook = lib.optionalString stdenv.isDarwin ''
               export DYLD_LIBRARY_PATH="${libraryPath}";
             '';

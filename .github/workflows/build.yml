@@ -12,8 +12,6 @@ jobs:
     strategy:
       matrix:
        os: [ ubuntu-latest, macos-latest ]
-       # we need this to map platform names as used by github to
-       # the attribute names defined in release.nix
        include:
          - os: ubuntu-latest
            os_attr: x86_64-linux
@@ -32,6 +30,17 @@ jobs:
         with:
           name: hevm-${{ matrix.os_attr }}
           path: result/bin/hevm
+
+  rpc-tests:
+    strategy:
+      matrix:
+       os: [ ubuntu-latest, macos-latest ]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: run rpc tests
         run: nix-shell --pure --command "cabal run rpc-tests"
 
