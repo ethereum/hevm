@@ -36,7 +36,7 @@ import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty (testGroup, TestTree)
-import Test.Tasty.HUnit (assertEqual)
+import Test.Tasty.HUnit (assertEqual, testCase)
 import Test.Tasty.QuickCheck hiding (Failure, Success)
 import Witch (into, unsafeInto)
 
@@ -60,6 +60,7 @@ import EVM.SymExec
 import EVM.Traversals (mapExpr)
 import EVM.Transaction qualified
 import EVM.Types
+import EVM.Hexdump(simpleHex)
 
 data VMTrace =
   VMTrace
@@ -345,6 +346,7 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
           bGas = b.gas
       putStrLn $ "hevm: " <> intToOpName aOp <> " pc: " <> show aPc <> " gas: " <> show aGas <> " stack: " <> show aStack
       putStrLn $ "geth: " <> intToOpName bOp <> " pc: " <> show bPc <> " gas: " <> show bGas <> " stack: " <> show bStack
+
       when (aGas /= bGas) $ do
         putStrLn "GAS doesn't match:"
         putStrLn $ "HEVM's gas   : " <> (show aGas)
@@ -671,30 +673,33 @@ genContract n = do
     y <- chooseInt (3, 6)
     pushes <- genPush y
     normalOps <- vectorOf (3*n+40) genOne
+    large :: Bool <- chooseAny
+    extra <- if large then vectorOf (100) genOne
+                      else pure []
     addReturn <- chooseInt (0, 10)
-    let contr = pushes ++ normalOps
+    let contr = pushes ++ normalOps ++ extra
     if addReturn < 10 then pure $ contr++[OpPush (Lit 0x40), OpPush (Lit 0x0), OpReturn]
                       else pure contr
   where
     genOne :: Gen Op
     genOne = frequency [
       -- math ops
-      (200, frequency [
-          (1, pure OpAdd)
-        , (1, pure OpMul)
+      (20, frequency [
+          (2, pure OpAdd)
+        , (2, pure OpMul)
         , (1, pure OpSub)
-        , (1, pure OpDiv)
+        , (2, pure OpDiv)
         , (1, pure OpSdiv)
-        , (1, pure OpMod)
+        , (2, pure OpMod)
         , (1, pure OpSmod)
         , (1, pure OpAddmod)
-        , (1, pure OpMulmod)
+        , (2, pure OpMulmod)
         , (1, pure OpExp)
         , (1, pure OpSignextend)
-        , (1, pure OpLt)
-        , (1, pure OpGt)
-        , (1, pure OpSlt)
-        , (1, pure OpSgt)
+        , (2, pure OpLt)
+        , (2, pure OpGt)
+        , (2, pure OpSlt)
+        , (2, pure OpSgt)
         , (1, pure OpSha3)
       ])
       -- Comparison & binary ops
@@ -711,8 +716,8 @@ genContract n = do
         , (1, pure OpSar)
       ])
       -- calldata
-      , (800, pure OpCalldataload)
-      , (200, pure OpCalldatacopy)
+      , (200, pure OpCalldataload)
+      , (800, pure OpCalldatacopy)
       -- Get some info
       , (100, frequency [
           (10, pure OpAddress)
@@ -745,8 +750,8 @@ genContract n = do
       -- memory manip
       , (1200, frequency [
           (50, pure OpMload)
-        , (50, pure OpMstore)
-        , (1, pure OpMstore8)
+        , (1, pure OpMstore)
+        , (300, pure OpMstore8)
       ])
       -- storage manip
       , (100, frequency [
@@ -754,7 +759,7 @@ genContract n = do
         , (1, pure OpSstore)
       ])
       -- Jumping around
-      , (20, frequency [
+      , (50, frequency [
             (1, pure OpJump)
           , (10, pure OpJumpi)
       ])
@@ -773,7 +778,7 @@ genContract n = do
           (1, pure OpPop)
         , (400, do
             -- x <- arbitrary
-            large <- chooseInt (0, 100)
+            large <- chooseInt (0, 2000)
             x <- if large == 0 then chooseBoundedIntegral (0::W256, (2::W256)^(256::W256)-1)
                                else chooseBoundedIntegral (0, 10)
             pure $ OpPush (Lit x))
@@ -812,68 +817,128 @@ getOp vm =
 
 tests :: TestTree
 tests = testGroup "contract-quickcheck-run"
-    [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract) -> ioProperty $ do
-        txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
-        gaslimitExec <- generate $ chooseInt (40000, 0xffff)
+    [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract, GasLimitInt gasLimit, TxDataRaw txDataRaw) -> ioProperty $ do
         let txData = BS.pack $ toEnum <$> txDataRaw
         -- TODO: By removing external calls, we fuzz less
         --       It should work also when we external calls. Removing for now.
         contrFixed <- fixContractJumps $ removeExtcalls contr
-        evmtoolResult <- getEVMToolRet contrFixed txData gaslimitExec
-        hevmRun <- getHEVMRet contrFixed txData gaslimitExec
-        (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
-        case hevmRun of
-          (Right (expr, hevmTrace, hevmTraceResult)) -> do
-            let
-              concretize :: Expr a -> Expr Buf -> Expr a
-              concretize a c = mapExpr go a
-                where
-                  go :: Expr a -> Expr a
-                  go = \case
-                             AbstractBuf "calldata" -> c
-                             y -> y
-              concretizedExpr = concretize expr (ConcreteBuf txData)
-              simplConcExpr = Expr.simplify concretizedExpr
-              getReturnVal :: Expr End -> Maybe ByteString
-              getReturnVal (Success _ _ (ConcreteBuf bs) _) = Just bs
-              getReturnVal _ = Nothing
-              simplConcrExprRetval = getReturnVal simplConcExpr
-            traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
-            -- putStrLn $ "HEVM trace   : " <> show hevmTrace
-            -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.toTrace)
-            assertEqual "Traces and gas must match" traceOK True
-            let resultOK = evmtoolTraceOutput.output.output == hevmTraceResult.out
-            if resultOK then do
-              putStrLn $ "HEVM & evmtool's outputs match: '" <> (bsToHex $ bssToBs evmtoolTraceOutput.output.output) <> "'"
-              if isNothing simplConcrExprRetval || (fromJust simplConcrExprRetval) == (bssToBs hevmTraceResult.out)
-                 then do
-                   putStr "OK, symbolic interpretation -> concrete calldata -> Expr.simplify gives the same answer."
-                   if isNothing simplConcrExprRetval then putStrLn ", but it was a Nothing, so not strong equivalence"
-                                                     else putStrLn ""
-                 else do
-                   putStrLn $ "concretized expr           : " <> (show concretizedExpr)
-                   putStrLn $ "simplified concretized expr: " <> (show simplConcExpr)
-                   putStrLn $ "return value computed      : " <> (show simplConcrExprRetval)
-                   putStrLn $ "evmtool's return value     : " <> (show hevmTraceResult.out)
-                   assertEqual "Simplified, concretized expression must match evmtool's output." True False
-            else do
-              putStrLn $ "Name of trace file: " <> (getTraceFileName $ fromJust evmtoolResult)
-              putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
-              T.putStrLn $ "HEVM result: " <> (formatBinary $ bssToBs hevmTraceResult.out)
-              T.putStrLn $ "evm result : " <> (formatBinary $ bssToBs evmtoolTraceOutput.output.output)
-              putStrLn $ "HEVM result len: " <> (show (BS.length $ bssToBs hevmTraceResult.out))
-              putStrLn $ "evm result  len: " <> (show (BS.length $ bssToBs evmtoolTraceOutput.output.output))
-            assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
-          Left (evmerr, hevmTrace) -> do
-            putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
-            -- putStrLn $ "evmtool result was: " <> show (fromJust evmtoolResult)
-            -- putStrLn $ "output by evmtool is: '" <> bsToHex evmtoolTraceOutput.toOutput.output <> "'"
-            traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
-            assertEqual "Traces and gas must match" traceOK True
-        System.Directory.removeFile "txs.json"
-        System.Directory.removeFile "alloc-out.json"
-        System.Directory.removeFile "alloc.json"
-        System.Directory.removeFile "result.json"
-        System.Directory.removeFile "env.json"
-        deleteTraceOutputFiles evmtoolResult
+        checkTraceAndOutputs contrFixed gasLimit txData
+      , testCase "calldata-wraparound" $ do
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 31),OpMstore8] -- value, offs
+              , [OpPush (Lit 0x3),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- size, offs, destOffs
+              , [OpPush (Lit 0x20),OpPush (Lit 0),OpReturn] -- datasize, offs
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5])
+      , testCase "calldata-wraparound2" $ do
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 0),OpMstore8] -- value, offs
+              , [OpPush (Lit 0x10),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- size, offs, destOffs
+              , [OpPush (Lit 0x20),OpPush (Lit 0),OpReturn] -- datasize, offs
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5])
+      , testCase "calldata-overwrite-with-0-if-oversized" $ do
+        -- supposed to copy 1...6 and then 0s, overwriting the 0xff with 0
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs
+              , [OpPush (Lit 10),OpPush (Lit 0),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
+              , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
+      , testCase "calldata-overwrite-correct-size" $ do
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- value, offs
+              , [OpPush (Lit 10),OpPush (Lit 0),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
+              , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
+      , testCase "calldata-offset-copy" $ do
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- value, offs
+              , [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs
+              , [OpPush (Lit 10),OpPush (Lit 4),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
+              , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
     ]
+
+checkTraceAndOutputs :: OpContract -> Int -> ByteString -> IO ()
+checkTraceAndOutputs contract gasLimit txData = do
+  evmtoolResult <- getEVMToolRet contract txData gasLimit
+  hevmRun <- getHEVMRet contract txData gasLimit
+  (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
+  case hevmRun of
+    (Right (expr, hevmTrace, hevmTraceResult)) -> do
+      let
+        concretize :: Expr a -> Expr Buf -> Expr a
+        concretize a c = mapExpr go a
+          where
+            go :: Expr a -> Expr a
+            go = \case
+                       AbstractBuf "calldata" -> c
+                       y -> y
+        concretizedExpr = concretize expr (ConcreteBuf txData)
+        simplConcExpr = Expr.simplify concretizedExpr
+        getReturnVal :: Expr End -> Maybe ByteString
+        getReturnVal (Success _ _ (ConcreteBuf bs) _) = Just bs
+        getReturnVal _ = Nothing
+        simplConcrExprRetval = getReturnVal simplConcExpr
+      traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
+      -- putStrLn $ "HEVM trace   : " <> show hevmTrace
+      -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.trace)
+      assertEqual "Traces and gas must match" traceOK True
+      let resultOK = evmtoolTraceOutput.output.output == hevmTraceResult.out
+      if resultOK then do
+        putStrLn $ "HEVM & evmtool's outputs match: '" <> (bsToHex $ bssToBs evmtoolTraceOutput.output.output) <> "'"
+        if isNothing simplConcrExprRetval || (fromJust simplConcrExprRetval) == (bssToBs hevmTraceResult.out)
+           then do
+             putStr "OK, symbolic interpretation -> concrete calldata -> Expr.simplify gives the same answer."
+             if isNothing simplConcrExprRetval then putStrLn ", but it was a Nothing, so not strong equivalence"
+                                               else putStrLn ""
+           else do
+             putStrLn $ "original expr                    : " <> (show expr)
+             putStrLn $ "concretized expr                 : " <> (show concretizedExpr)
+             putStrLn $ "simplified concretized expr      : " <> (show simplConcExpr)
+             putStrLn $ "evmtoolTraceOutput.output.output : " <> (show (evmtoolTraceOutput.output.output))
+             putStrLn $ "HEVM trace result output         : " <> (simpleHex (bssToBs hevmTraceResult.out))
+             putStrLn $ "ret value computed via symb+conc : " <> (simpleHex (fromJust simplConcrExprRetval))
+             assertEqual "Simplified, concretized expression must match evmtool's output." True False
+      else do
+        putStrLn $ "Name of trace file: " <> (getTraceFileName $ fromJust evmtoolResult)
+        putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
+        T.putStrLn $ "HEVM result: " <> (formatBinary $ bssToBs hevmTraceResult.out)
+        T.putStrLn $ "evm result : " <> (formatBinary $ bssToBs evmtoolTraceOutput.output.output)
+        putStrLn $ "HEVM result len: " <> (show (BS.length $ bssToBs hevmTraceResult.out))
+        putStrLn $ "evm result  len: " <> (show (BS.length $ bssToBs evmtoolTraceOutput.output.output))
+      assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
+    Left (evmerr, hevmTrace) -> do
+      putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
+      -- putStrLn $ "evmtool result was: " <> show (fromJust evmtoolResult)
+      -- putStrLn $ "output by evmtool is: '" <> bsToHex evmtoolTraceOutput.toOutput.output <> "'"
+      traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
+      assertEqual "Traces and gas must match" traceOK True
+  System.Directory.removeFile "txs.json"
+  System.Directory.removeFile "alloc-out.json"
+  System.Directory.removeFile "alloc.json"
+  System.Directory.removeFile "result.json"
+  System.Directory.removeFile "env.json"
+  deleteTraceOutputFiles evmtoolResult
+
+-- GasLimitInt
+newtype GasLimitInt = GasLimitInt (Int)
+  deriving (Show, Eq)
+
+instance Arbitrary GasLimitInt where
+  arbitrary = do
+    let mkLimit = chooseInt (50000, 0xfffff)
+    fmap GasLimitInt mkLimit
+
+-- GenTxDataRaw
+newtype TxDataRaw = TxDataRaw ([Int])
+  deriving (Show, Eq)
+
+instance Arbitrary TxDataRaw where
+  arbitrary = do
+    let
+      txDataRaw = sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
+    fmap TxDataRaw txDataRaw
