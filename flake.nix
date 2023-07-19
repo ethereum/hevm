@@ -129,7 +129,7 @@
 
         # --- packages ----
 
-        packages.withTests = pkgs.haskell.lib.disableLibraryProfiling hevmUnwrapped;
+        packages.ci = with pkgs.haskell.lib; dontHaddock (disableLibraryProfiling hevmUnwrapped);
         packages.noTests = pkgs.haskell.lib.dontCheck hevmUnwrapped;
         packages.hevm = hevmWrapped;
         packages.redistributable = hevmRedistributable;

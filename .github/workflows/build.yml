@@ -24,7 +24,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: build hevm
-        run: nix build .#withTests -L
+        run: nix build .#ci -L
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
@@ -85,7 +85,7 @@ jobs:
           echo "::endgroup::"
       - name: Configure the build
         run: |
-          cabal configure --enable-tests --enable-benchmarks --disable-documentation
+          cabal configure --disable-tests --disable-benchmarks --disable-documentation
           cabal build --dry-run
           # The last step generates dist-newstyle/cache/plan.json for the cache key.
 
