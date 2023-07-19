@@ -118,7 +118,6 @@ truncateToAddr = fromIntegral
 data EType
   = Buf
   | Storage
-  | WorldStore
   | Log
   | EWord
   | EAddr
@@ -126,7 +125,6 @@ data EType
   | Byte
   | End
   deriving (Typeable)
-
 
 -- Variables refering to a global environment
 data GVar (a :: EType) where
@@ -1192,6 +1190,7 @@ maybeLitByte _ = Nothing
 
 maybeLitWord :: Expr EWord -> Maybe W256
 maybeLitWord (Lit w) = Just w
+maybeLitWord (WAddr (LitAddr w)) = Just (into w)
 maybeLitWord _ = Nothing
 
 maybeLitAddr :: Expr EAddr -> Maybe Addr

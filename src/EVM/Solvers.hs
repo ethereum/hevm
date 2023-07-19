@@ -147,11 +147,12 @@ getModel inst cexvars = do
     getRaw :: IO SMTCex
     getRaw = do
       vars <- getVars parseVar (getValue inst) (fmap T.toStrict cexvars.calldata)
+      addrs <- getAddrs parseEAddr (getValue inst) (fmap T.toStrict cexvars.addrs)
       buffers <- getBufs (getValue inst) (Map.keys cexvars.buffers)
       storage <- getStore (getValue inst) cexvars.storeReads
       blockctx <- getVars parseBlockCtx (getValue inst) (fmap T.toStrict cexvars.blockContext)
       txctx <- getVars parseTxCtx (getValue inst) (fmap T.toStrict cexvars.txContext)
-      pure $ SMTCex vars buffers storage blockctx txctx
+      pure $ SMTCex vars addrs buffers storage blockctx txctx
 
     -- sometimes the solver might give us back a model for the max read index
     -- that is too high to be a useful cex (e.g. in the case of reads from a

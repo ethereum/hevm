@@ -47,6 +47,8 @@ import EVM.Types
 data CexVars = CexVars
   { -- | variable names that we need models for to reconstruct calldata
     calldata     :: [Text]
+    -- | symbolic address names
+  , addrs        :: [Text]
     -- | buffer names and guesses at their maximum size
   , buffers      :: Map Text (Expr EWord)
     -- | reads from abstract storage
@@ -59,11 +61,12 @@ data CexVars = CexVars
   deriving (Eq, Show)
 
 instance Semigroup CexVars where
-  (CexVars a b c d e) <> (CexVars a2 b2 c2 d2 e2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2) (e <> e2)
+  (CexVars a b c d e f) <> (CexVars a2 b2 c2 d2 e2 f2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2) (e <> e2) (f <> f2)
 
 instance Monoid CexVars where
     mempty = CexVars
       { calldata = mempty
+      , addrs = mempty
       , buffers = mempty
       , storeReads = mempty
       , blockContext = mempty
@@ -89,6 +92,7 @@ data CompressedBuf
 -- | a final post shrinking cex, buffers here are all represented as concrete bytestrings
 data SMTCex = SMTCex
   { vars :: Map (Expr EWord) W256
+  , addrs :: Map (Expr EAddr) Addr
   , buffers :: Map (Expr Buf) BufModel
   , store :: Map (Expr EAddr) (Map W256 W256)
   , blockContext :: Map (Expr EWord) W256
@@ -359,7 +363,7 @@ declareAddrs :: [Builder] -> SMT2
 declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) cexvars
   where
     declare n = "(declare-const " <> n <> " Addr)"
-    cexvars = (mempty :: CexVars){ calldata = fmap toLazyText names }
+    cexvars = (mempty :: CexVars){ addrs = fmap toLazyText names }
 
 declareFrameContext :: [(Builder, [Prop])] -> SMT2
 declareFrameContext names = SMT2 (["; frame context"] <> concatMap declare names) cexvars
@@ -861,12 +865,14 @@ storeName a = fromString ("baseStore_") <> formatEAddr a
 formatEAddr :: Expr EAddr -> Builder
 formatEAddr = \case
   LitAddr a -> fromString ("litaddr_" <> show a)
-  SymAddr a -> fromString ("symaddr_" <> show a)
-  GVar _ -> error "Internal Error: unexpected GVar"
+  SymAddr a -> fromText ("symaddr_" <> a)
+  GVar _ -> internalError "unexpected GVar"
 
 
 -- ** Cex parsing ** --------------------------------------------------------------------------------
 
+parseAddr :: SpecConstant -> Addr
+parseAddr = parseSC
 
 parseW256 :: SpecConstant -> W256
 parseW256 = parseSC
@@ -888,6 +894,12 @@ parseErr res = internalError $ "cannot parse solver response: " <> show res
 parseVar :: TS.Text -> Expr EWord
 parseVar = Var
 
+parseEAddr :: TS.Text -> Expr EAddr
+parseEAddr name
+  | Just a <- TS.stripPrefix "litaddr_" name = LitAddr (read (TS.unpack a))
+  | Just a <- TS.stripPrefix "symaddr_" name = SymAddr a
+  | otherwise = internalError $ "cannot parse: " <> show name
+
 parseBlockCtx :: TS.Text -> Expr EWord
 parseBlockCtx "origin" = Origin
 parseBlockCtx "coinbase" = Coinbase
@@ -904,25 +916,28 @@ parseTxCtx name = case TS.unpack name of
   "txvalue" -> TxValue
   t -> error $ "Internal Error: cannot parse " <> t <> " into an Expr"
 
+getAddrs :: (TS.Text -> Expr EAddr) -> (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr EAddr) Addr)
+getAddrs parseName getVal names = Map.mapKeys parseName <$> foldM (getOne parseAddr getVal) mempty names
+
 getVars :: (TS.Text -> Expr EWord) -> (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr EWord) W256)
-getVars parseFn getVal names = Map.mapKeys parseFn <$> foldM getOne mempty names
-  where
-    getOne :: Map TS.Text W256 -> TS.Text -> IO (Map TS.Text W256)
-    getOne acc name = do
-      raw <- getVal (T.fromStrict name)
-      let
-        parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
-          Right (ResSpecific (valParsed :| [])) -> valParsed
-          r -> parseErr r
-        val = case parsed of
-          (TermQualIdentifier (
-            Unqualified (IdSymbol symbol)),
-            TermSpecConstant sc)
-              -> if symbol == name
-                 then parseW256 sc
-                 else internalError "solver did not return model for requested value"
-          r -> parseErr r
-      pure $ Map.insert name val acc
+getVars parseName getVal names = Map.mapKeys parseName <$> foldM (getOne parseW256 getVal) mempty names
+
+getOne :: (SpecConstant -> a) -> (Text -> IO Text) -> Map TS.Text a -> TS.Text -> IO (Map TS.Text a)
+getOne parseVal getVal acc name = do
+  raw <- getVal (T.fromStrict name)
+  let
+    parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
+      Right (ResSpecific (valParsed :| [])) -> valParsed
+      r -> parseErr r
+    val = case parsed of
+      (TermQualIdentifier (
+        Unqualified (IdSymbol symbol)),
+        TermSpecConstant sc)
+          -> if symbol == name
+             then parseVal sc
+             else internalError "solver did not return model for requested value"
+      r -> parseErr r
+  pure $ Map.insert name val acc
 
 -- | Queries the solver for models for each of the expressions representing the
 -- max read index for a given buffer

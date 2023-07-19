@@ -119,7 +119,7 @@ symAbiArg name = \case
     then let v = Var name in St [Expr.inRange n v] v
     else internalError "bad type"
   AbiBoolType -> let v = Var name in St [bool v] v
-  AbiAddressType -> let v = Var name in St [Expr.inRange 160 v] v
+  AbiAddressType -> St [] (WAddr (SymAddr name))
   AbiBytesType n ->
     if n > 0 && n <= 32
     then let v = Var name in St [Expr.inRange (n * 8) v] v
@@ -831,7 +831,7 @@ showModel cd (expr, res) = do
 
 
 formatCex :: Expr Buf -> SMTCex -> Text
-formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
+formatCex cd m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
   [ "Calldata:"
   , indent 2 cd'
   , ""
@@ -912,6 +912,7 @@ subModel c
   . subVars c.vars
   . subVars c.blockContext
   . subVars c.txContext
+  . subAddrs c.addrs
   where
     forceFlattened (SMT.Flat bs) = bs
     forceFlattened b@(SMT.Comp _) = forceFlattened $
@@ -926,6 +927,17 @@ subModel c
         go = \case
           v@(Var _) -> if v == var
                       then Lit val
+                      else v
+          e -> e
+
+    subAddrs model b = Map.foldlWithKey subAddr b model
+    subAddr :: Expr a -> Expr EAddr -> Addr -> Expr a
+    subAddr b var val = mapExpr go b
+      where
+        go :: Expr a -> Expr a
+        go = \case
+          v@(SymAddr _) -> if v == var
+                      then LitAddr val
                       else v
           e -> e
 

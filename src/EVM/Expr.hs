@@ -362,6 +362,9 @@ writeByte offset byte src = WriteByte offset byte src
 
 
 writeWord :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
+writeWord o@(Lit offset) (WAddr (LitAddr val)) b@(ConcreteBuf _)
+  | offset + 32 < maxBytes
+  = writeWord o (Lit $ into val) b
 writeWord (Lit offset) (Lit val) (ConcreteBuf "")
   | offset + 32 < maxBytes
   = ConcreteBuf $ BS.replicate (unsafeInto offset) 0 <> word256Bytes val
@@ -691,6 +694,9 @@ simplify e = if (mapExpr go e == e)
       | x == 0 = b
       | otherwise = a
 
+    -- address masking
+    go (And (Lit 0xffffffffffffffffffffffffffffffffffffffff) a@(WAddr _)) = a
+
     -- simple div/mod/add/sub
     go (Div o1@(Lit _)  o2@(Lit _)) = EVM.Expr.div  o1 o2
     go (SDiv o1@(Lit _) o2@(Lit _)) = EVM.Expr.sdiv o1 o2
@@ -834,6 +840,7 @@ isLitByte _ = False
 -- Is the given expr a literal word?
 isLitWord :: Expr EWord -> Bool
 isLitWord (Lit _) = True
+isLitWord (WAddr (LitAddr _)) = True
 isLitWord _ = False
 
 -- | Returns the byte at idx from the given word.

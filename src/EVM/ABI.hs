@@ -557,7 +557,7 @@ decodeBuf tps buf
     then NoVals
     else let
       vs = decodeStaticArgs 0 (length tps) buf
-      allLit = Prelude.and . (fmap isLitWord) $ vs
+      allLit = Prelude.and (fmap isLitWord vs)
       asBS = mconcat $ fmap word256Bytes (mapMaybe maybeLitWord vs)
     in if not allLit
        then SAbi vs
