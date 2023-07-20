@@ -744,8 +744,8 @@ exec1 = do
         OpCreate ->
           notStatic $
           case stk of
-            xValue':xOffset':xSize':xs -> forceConcrete3 (xValue', xOffset', xSize') "CREATE" $
-              \(xValue, xOffset, xSize) -> do
+            xValue:xOffset':xSize':xs -> forceConcrete2 (xOffset', xSize') "CREATE" $
+              \(xOffset, xSize) -> do
                 accessMemoryRange xOffset xSize $ do
                   availableGas <- use (#state % #gas)
                   let
@@ -853,9 +853,9 @@ exec1 = do
 
         OpCreate2 -> notStatic $
           case stk of
-            xValue':xOffset':xSize':xSalt':xs ->
-              forceConcrete4 (xValue', xOffset', xSize', xSalt') "CREATE2" $
-              \(xValue, xOffset, xSize, xSalt) ->
+            xValue:xOffset':xSize':xSalt':xs ->
+              forceConcrete3 (xOffset', xSize', xSalt') "CREATE2" $
+              \(xOffset, xSize, xSalt) ->
                 accessMemoryRange xOffset xSize $ do
                   availableGas <- use (#state % #gas)
 
@@ -1745,7 +1745,7 @@ collision c' = case c' of
 
 create :: (?op :: Word8)
   => Expr EAddr -> Contract
-  -> W256 -> Word64 -> W256 -> [Expr EWord] -> Expr EAddr -> Expr Buf -> EVM ()
+  -> W256 -> Word64 -> Expr EWord -> [Expr EWord] -> Expr EAddr -> Expr Buf -> EVM ()
 create self this xSize xGas xValue xs newAddr initCode = do
   vm0 <- get
   if xSize > vm0.block.maxCodeSize * 2
@@ -1772,11 +1772,11 @@ create self this xSize xGas xValue xs newAddr initCode = do
     modifying (#env % #contracts % ix self % #nonce) (fmap ((+) 1))
     next
   -- do we have enough balance
-  else branch (Expr.gt (Lit xValue) this.balance) $ \case
+  else branch (Expr.gt xValue this.balance) $ \case
       True -> do
         assign (#state % #stack) (Lit 0 : xs)
         assign (#state % #returndata) mempty
-        pushTrace $ ErrorTrace $ BalanceTooLow (Lit xValue) this.balance
+        pushTrace $ ErrorTrace $ BalanceTooLow xValue this.balance
         next
         touchAccount self
         touchAccount newAddr
@@ -1822,7 +1822,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
             modifying (#env % #contracts % ix newAddr % #storage) resetStorage
             modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage
 
-            transfer self newAddr (Lit xValue)
+            transfer self newAddr xValue
 
             pushTrace (FrameTrace newContext)
             next
@@ -1837,7 +1837,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
                 & set #contract     newAddr
                 & set #codeContract newAddr
                 & set #code         c
-                & set #callvalue    (Lit xValue)
+                & set #callvalue    xValue
                 & set #caller       self
                 & set #gas          xGas
 
