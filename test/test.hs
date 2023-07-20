@@ -28,7 +28,7 @@ import GHC.Conc (getNumProcessors)
 import System.Directory
 import System.Environment
 import Test.Tasty
-import Test.Tasty.QuickCheck hiding (Failure, Success)
+import Test.Tasty.QuickCheck hiding (Failure, Success, isSuccess)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()
@@ -458,9 +458,6 @@ tests = testGroup "hevm"
                               (r, mempty), (s, mempty), (t, mempty)]
        === (Just $ Patricia.Literal Patricia.Empty)
     ]
- , testGroup "Remote State Tests"
-   [
-   ]
  , testGroup "Panic code tests via symbolic execution"
   [
      testCase "assert-fail" $ do
@@ -1892,7 +1889,101 @@ tests = testGroup "hevm"
                           _ -> False
           assertBool "Did not find expected storage cex" testCex
           putStrLn "Expected counterexample found"
- ]
+        ,
+        testCase "symbolic-address-create" $ do
+          let src = [i|
+                    contract A {
+                      constructor() payable {}
+                    }
+                    contract C {
+                      function fun(uint256 a) external{
+                        assert(address(this).balance > a);
+                        new A{value:a}();
+                      }
+                    }
+                    |]
+          Just a <- solcRuntime "A" src
+          Just c <- solcRuntime "C" src
+          (expr, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
+            verifyContract s c Nothing [] defaultVeriOpts Nothing Nothing
+          let issuc (Success {}) = True
+              issuc _ = False
+          case filter issuc (flattenExpr expr) of
+            [Success _ _ _ store] -> do
+              let ca = fromJust (Map.lookup (SymAddr "freshSymAddr1") store)
+              let code = case ca.code of
+                    RuntimeCode (ConcreteRuntimeCode c') -> c'
+                    _ -> internalError "expected concrete code"
+              assertEqual "balance mismatch" (Var "arg1") ca.balance
+              assertEqual "code mismatch" (stripBytecodeMetadata a) (stripBytecodeMetadata code)
+              assertEqual "nonce mismatch" (Just 1) ca.nonce
+            _ -> assertBool "too many success nodes!" False
+        ,
+        testCase "symbolic-balance-call" $ do
+          let src = [i|
+                    contract A {
+                      function f() public payable returns (uint) {
+                        return msg.value;
+                      }
+                    }
+                    contract C {
+                      function fun(uint256 x) external {
+                        assert(address(this).balance > x);
+                        A a = new A();
+                        uint res = a.f{value:x}();
+                        assert(res == x);
+                      }
+                    }
+                    |]
+          Just c <- solcRuntime "C" src
+          (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s ->
+            verifyContract s c Nothing [] defaultVeriOpts Nothing (Just $ checkAssertions [0x01])
+          putStrLn "expected cex discovered"
+        ,
+        testCase "addresses-in-context-are-symbolic" $ do
+          Just a <- solcRuntime "A"
+            [i|
+              contract A {
+                function f() external {
+                  assert(msg.sender != address(0x0));
+                }
+              }
+            |]
+          Just b <- solcRuntime "B"
+            [i|
+              contract B {
+                function f() external {
+                  assert(block.coinbase != address(0x1));
+                }
+              }
+            |]
+          Just c <- solcRuntime "C"
+            [i|
+              contract C {
+                function f() external {
+                  assert(tx.origin != address(0x2));
+                }
+              }
+            |]
+          Just d <- solcRuntime "D"
+            [i|
+              contract D {
+                function f() external {
+                  assert(address(this) != address(0x3));
+                }
+              }
+            |]
+          [acex,bcex,ccex,dcex] <- forM [a,b,c,d] $ \con -> do
+            (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s ->
+              verifyContract s con Nothing [] defaultVeriOpts Nothing (Just $ checkAssertions [0x01])
+            assertEqual "wrong number of addresses" 1 (length (Map.keys cex.addrs))
+            pure cex
+
+          assertEqual "wrong model for a" (Addr 0) (fromJust $ Map.lookup (SymAddr "caller") acex.addrs)
+          assertEqual "wrong model for b" (Addr 1) (fromJust $ Map.lookup (SymAddr "coinbase") bcex.addrs)
+          assertEqual "wrong model for c" (Addr 2) (fromJust $ Map.lookup (SymAddr "origin") ccex.addrs)
+          assertEqual "wrong model for d" (Addr 3) (fromJust $ Map.lookup (SymAddr "entrypoint") dcex.addrs)
+  ]
   , testGroup "equivalence-checking"
     [
       testCase "eq-yul-simple-cex" $ do
