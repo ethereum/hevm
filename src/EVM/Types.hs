@@ -514,6 +514,11 @@ instance Ord Prop where
   _ <= _ = False
 
 
+isPBool :: Prop -> Bool
+isPBool (PBool _) = True
+isPBool _ = False
+
+
 -- Errors ------------------------------------------------------------------------------------------
 
 

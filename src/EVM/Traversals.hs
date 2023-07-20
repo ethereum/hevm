@@ -260,6 +260,19 @@ mapProp f = \case
   POr a b -> POr (mapProp f a) (mapProp f b)
   PImpl a b -> PImpl (mapProp f a) (mapProp f b)
 
+mapProp' :: (Prop -> Prop) -> Prop -> Prop
+mapProp' f = \case
+  PBool b -> f $ PBool b
+  PEq a b -> f $ PEq a b
+  PLT a b -> f $ PLT a b
+  PGT a b -> f $ PGT a b
+  PLEq a b -> f $ PLEq a b
+  PGEq a b -> f $ PGEq a b
+  PNeg a -> f $ PNeg (mapProp' f a)
+  PAnd a b -> f $ PAnd (mapProp' f a) (mapProp' f b)
+  POr a b -> f $ POr (mapProp' f a) (mapProp' f b)
+  PImpl a b -> f $ PImpl (mapProp' f a) (mapProp' f b)
+
 mapTrace :: (forall a . Expr a -> Expr a) -> Trace -> Trace
 mapTrace f (Trace x y z) = Trace x y (go z)
   where
