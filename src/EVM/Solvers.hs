@@ -112,21 +112,31 @@ withSolvers solver count timeout cont = do
       _ <- forkIO $ runTask task inst avail
       orchestrate queue avail
 
-    runTask (Task (SMT2 cmds cexvars) r) inst availableInstances = do
+    runTask (Task (SMT2 cmds (AbstData abstData) cexvars) r) inst availableInstances = do
       -- reset solver and send all lines of provided script
-      out <- sendScript inst (SMT2 ("(reset)" : cmds) cexvars)
+      out <- sendScript inst (SMT2 ("(reset)" : cmds) undefined undefined)
       case out of
         -- if we got an error then return it
         Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
         -- otherwise call (check-sat), parse the result, and send it down the result channel
         Right () -> do
           sat <- sendLine inst "(check-sat)"
-          res <- case sat of
-            "sat" -> Sat <$> getModel inst cexvars
-            "unsat" -> pure Unsat
-            "timeout" -> pure Unknown
-            "unknown" -> pure Unknown
-            _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
+          res :: CheckSatResult <- do
+              case sat of
+                "unsat" -> pure Unsat
+                "timeout" -> pure Unknown
+                "unknown" -> pure Unknown
+                "sat" -> do
+                  -- putStrLn "It's SAT, let's run with abstraction defined"
+                  _ <- sendScript inst (SMT2 abstData undefined undefined)
+                  sat2 <- sendLine inst "(check-sat)"
+                  case sat2 of
+                    "unsat" -> pure Unsat
+                    "timeout" -> pure Unknown
+                    "unknown" -> pure Unknown
+                    "sat" -> Sat <$> getModel inst cexvars
+                    _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat2
+                _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
           writeChan r res
 
       -- put the instance back in the list of available instances
@@ -247,7 +257,7 @@ stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just
 
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
 sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
-sendScript solver (SMT2 cmds _) = do
+sendScript solver (SMT2 cmds _ _) = do
   sendLine' solver (splitSExpr $ fmap toLazyText cmds)
   pure $ Right()
 

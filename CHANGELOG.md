@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Changed
 
 - Removed sha3Crack which has been deprecated for keccakEqs
+- Abstraction-refinement for more complicated expressions such as MULMOD
 
 ## Added
 
