@@ -262,9 +262,6 @@ interpret fetcher maxIter askSmtIters heuristic vm =
       Stepper.Exec -> do
         let (r, vm') = runState exec vm
         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-      Stepper.Run -> do
-        let vm' = execState exec vm
-        interpret fetcher maxIter askSmtIters heuristic vm' (k vm')
       Stepper.IOAct q -> do
         r <- q
         interpret fetcher maxIter askSmtIters heuristic vm (k r)

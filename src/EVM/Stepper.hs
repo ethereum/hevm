@@ -11,7 +11,6 @@ module EVM.Stepper
   , ask
   , evm
   , evmIO
-  , entering
   , enter
   , interpret
   )
@@ -24,7 +23,7 @@ where
 -- as the framework for monadic interpretation.
 
 import Control.Monad.Operational (Program, ProgramViewT(..), ProgramView, singleton, view)
-import Control.Monad.State.Strict (execState, runState)
+import Control.Monad.State.Strict (execState, runState, get)
 import Data.Text (Text)
 
 import EVM qualified
@@ -37,9 +36,6 @@ data Action a where
 
   -- | Keep executing until an intermediate result is reached
   Exec :: Action VMResult
-
-  -- | Keep executing until an intermediate state is reached
-  Run :: Action VM
 
   -- | Wait for a query to be resolved
   Wait :: Query -> Action ()
@@ -62,7 +58,7 @@ exec :: Stepper VMResult
 exec = singleton Exec
 
 run :: Stepper VM
-run = singleton Run
+run = exec >> evm get
 
 wait :: Query -> Stepper ()
 wait = singleton . Wait
@@ -104,13 +100,6 @@ runFully = do
     Just _ ->
       pure vm
 
-entering :: Text -> Stepper a -> Stepper a
-entering t stepper = do
-  evm (EVM.pushTrace (EntryTrace t))
-  x <- stepper
-  evm EVM.popTrace
-  pure x
-
 enter :: Text -> Stepper ()
 enter t = evm (EVM.pushTrace (EntryTrace t))
 
@@ -124,9 +113,6 @@ interpret fetcher vm = eval . view
         Exec ->
           let (r, vm') = runState EVM.Exec.exec vm
           in interpret fetcher vm' (k r)
-        Run ->
-          let vm' = execState EVM.Exec.run vm
-          in interpret fetcher vm' (k vm')
         Wait (PleaseAskSMT (Lit c) _ continue) ->
           let (r, vm') = runState (continue (Case (c > 0))) vm
           in interpret fetcher vm' (k r)
