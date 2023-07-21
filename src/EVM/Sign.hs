@@ -31,7 +31,7 @@ deriveAddr sk =
   where
     curve = getCurveByName SEC_p256k1
     pubPoint = generateQ curve sk
-    encodeInt = encodeAbiValue . AbiUInt 256 . fromInteger
+    encodeInt = encodeAbiValue . AbiUInt 256 . unsafeInto
 
 sign :: W256 -> Integer -> (Word8, W256, W256)
 sign hash sk = (v, r, s)
@@ -72,5 +72,5 @@ ethsign sk digest = go 420
        Just sig -> sig
 
 ecrec :: W256 -> W256 -> W256 -> W256 -> Maybe Addr
-ecrec v r s e = unsafeInto . word <$> EVM.Precompiled.execute 1 input 32
+ecrec v r s e = truncateFrom . word <$> EVM.Precompiled.execute 1 input 32
   where input = BS.concat (word256Bytes <$> [e, v, r, s])

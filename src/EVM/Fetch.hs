@@ -248,7 +248,7 @@ checkBranch solvers branchcondition pathconditions = do
         Sat _ -> pure EVM.Types.Unknown
         -- Explore both branches in case of timeout
         EVM.Solvers.Unknown -> pure EVM.Types.Unknown
-        Error e -> error $ "Internal Error: SMT Solver pureed with an error: " <> T.unpack e
+        Error e -> internalError $ "SMT Solver returned an error: " <> T.unpack e
     -- If the query times out, we simply explore both paths
     EVM.Solvers.Unknown -> pure EVM.Types.Unknown
-    Error e -> internalError $ "SMT Solver pureed with an error: " <> T.unpack e
+    Error e -> internalError $ "SMT Solver returned an error: " <> T.unpack e

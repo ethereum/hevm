@@ -61,7 +61,7 @@ data Transaction = Transaction {
 
 instance JSON.ToJSON Transaction where
   toJSON t = JSON.object [ ("input",             (JSON.toJSON (ByteStringS t.txdata)))
-                         , ("gas",               (JSON.toJSON $ "0x" ++ showHex (toInteger $ t.gasLimit) ""))
+                         , ("gas",               (JSON.toJSON $ "0x" ++ showHex (into @Integer t.gasLimit) ""))
                          , ("gasPrice",          (JSON.toJSON $ show $ fromJust $ t.gasPrice))
                          , ("v",                 (JSON.toJSON $ show $ (t.v)-27))
                          , ("r",                 (JSON.toJSON $ show $ t.r))

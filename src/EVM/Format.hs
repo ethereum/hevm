@@ -79,7 +79,7 @@ showDec signed (W256 w)
           Unsigned -> into w
 
 showWordExact :: W256 -> Text
-showWordExact w = humanizeInteger (toInteger w)
+showWordExact w = humanizeInteger (into @Integer w)
 
 showWordExplanation :: W256 -> DappInfo -> Text
 showWordExplanation w _ | w > 0xffffffff = showDec Unsigned w
@@ -194,7 +194,7 @@ showTraceTree dapp vm =
   in pack $ concatMap showTree traces
 
 showTraceTree' :: DappInfo -> Expr End -> Text
-showTraceTree' _ (ITE {}) = error "Internal Error: ITE does not contain a trace"
+showTraceTree' _ (ITE {}) = internalError "ITE does not contain a trace"
 showTraceTree' dapp leaf =
   let forest = traceForest' leaf
       traces = fmap (fmap (unpack . showTrace dapp (traceContext leaf))) forest
@@ -257,7 +257,7 @@ showTrace dapp env trace =
                         sig = unsafeInto $ shiftR topic 224 :: FunctionSelector
                         usr = case maybeLitWord t2 of
                           Just w ->
-                            pack $ show (unsafeInto w :: Addr)
+                            pack $ show (truncateTo @Addr w)
                           Nothing  ->
                             "<symbolic>"
                       in

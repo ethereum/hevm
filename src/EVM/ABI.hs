@@ -71,13 +71,14 @@ import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as BSLazy
 import Data.Char (isHexDigit)
 import Data.Data (Data)
-import Data.DoubleWord (Word256, Int256, signedWord)
+import Data.DoubleWord (Word256, Int256, signedWord, unsignedWord)
 import Data.Functor (($>))
 import Data.List (intercalate)
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding (encodeUtf8)
+import Data.Typeable
 import Data.Vector (Vector, toList)
 import Data.Vector qualified as Vector
 import Data.Word (Word32)
@@ -87,7 +88,7 @@ import Test.QuickCheck hiding ((.&.), label)
 import Text.Megaparsec qualified as P
 import Text.Megaparsec.Char qualified as P
 import Text.ParserCombinators.ReadP
-import Witch (unsafeInto, into)
+import Witch (unsafeInto, into, TryFrom(..), From(..))
 
 data AbiValue
   = AbiUInt         Int Word256
@@ -194,12 +195,18 @@ getAbi t = label (Text.unpack (abiTypeSolidity t)) $
       xs <- replicateM word32Count getWord32be
       pure (AbiUInt n (pack32 word32Count xs))
 
-    AbiIntType n   -> asUInt n (AbiInt n)
-    AbiAddressType -> asUInt 256 AbiAddress
-    AbiBoolType    -> asUInt 256 (AbiBool . (> (0 :: Integer)))
+    AbiIntType n   -> do
+      AbiUInt _ v <- getAbi (AbiUIntType n)
+      pure (AbiInt n (signedWord v))
+    AbiAddressType -> do
+      AbiUInt _ v <- getAbi (AbiUIntType 256)
+      pure (AbiAddress (truncateTo v))
+    AbiBoolType -> do
+      AbiUInt _ v <- getAbi (AbiUIntType 256)
+      pure (AbiBool (into v > (0 :: Integer)))
 
     AbiBytesType n ->
-      AbiBytes n <$> getBytesWith256BitPadding n
+      AbiBytes n <$> getBytesWith256BitPadding (unsafeInto n)
 
     AbiBytesDynamicType ->
       AbiBytesDynamic <$>
@@ -223,7 +230,7 @@ getAbi t = label (Text.unpack (abiTypeSolidity t)) $
       AbiTuple <$> getAbiSeq (Vector.length ts) (Vector.toList ts)
 
     AbiFunctionType ->
-      AbiFunction <$> getBytesWith256BitPadding (24 :: Int)
+      AbiFunction <$> getBytesWith256BitPadding 24
 
 putAbi :: AbiValue -> Put
 putAbi = \case
@@ -231,8 +238,8 @@ putAbi = \case
     forM_ (reverse [0 .. 7]) $ \i ->
       putWord32be (unsafeInto (shiftR x (i * 32) .&. 0xffffffff))
 
-  AbiInt n x   -> putAbi (AbiUInt n (fromIntegral x))
-  AbiAddress x -> putAbi (AbiUInt 160 (fromIntegral x))
+  AbiInt n x   -> putAbi (AbiUInt n (unsignedWord x))
+  AbiAddress x -> putAbi (AbiUInt 160 (into x))
   AbiBool x    -> putAbi (AbiUInt 8 (if x then 1 else 0))
 
   AbiBytes n xs -> do
@@ -251,7 +258,7 @@ putAbi = \case
     putAbiSeq xs
 
   AbiArrayDynamic _ xs -> do
-    putAbi (AbiUInt 256 (fromIntegral (Vector.length xs)))
+    putAbi (AbiUInt 256 (unsafeInto (Vector.length xs)))
     putAbiSeq xs
 
   AbiTuple v ->
@@ -390,10 +397,10 @@ pack32 n xs =
   sum [ shiftL x ((n - i) * 32)
       | (x, i) <- zip (map into xs) [1..] ]
 
-asUInt :: Integral i => Int -> (i -> a) -> Get a
-asUInt n f = y <$> getAbi (AbiUIntType n)
-  where y (AbiUInt _ x) = f (fromIntegral x)
-        y _ = internalError "can't happen"
+-- asUInt :: Integral i => Int -> (i -> a) -> Get a
+-- asUInt n f = y <$> getAbi (AbiUIntType n)
+--   where y (AbiUInt _ x) = f (fromIntegral x)
+--         y _ = internalError "can't happen"
 
 getWord256 :: Get Word256
 getWord256 = pack32 8 <$> replicateM 8 getWord32be
@@ -404,11 +411,11 @@ roundTo32Bytes n = 32 * div (n + 31) 32
 emptyAbi :: AbiValue
 emptyAbi = AbiTuple mempty
 
-getBytesWith256BitPadding :: Integral a => a -> Get ByteString
+getBytesWith256BitPadding :: Word256 -> Get ByteString
 getBytesWith256BitPadding i =
   (BS.pack <$> replicateM n getWord8)
     <* skip ((roundTo32Bytes n) - n)
-  where n = fromIntegral i
+  where n = unsafeInto i
 
 -- QuickCheck instances
 
@@ -419,7 +426,7 @@ genAbiValue = \case
      x <- genUInt n
      pure $ AbiInt n (signedWord (x - 2^(n-1)))
    AbiAddressType ->
-     AbiAddress . fromIntegral <$> genUInt 20
+     AbiAddress . truncateTo <$> genUInt 20
    AbiBoolType ->
      elements [AbiBool False, AbiBool True]
    AbiBytesType n ->
@@ -579,7 +586,7 @@ decodeStaticArgs offset numArgs b =
 -- Essentially a mix between three types of generators:
 -- one that strongly prefers values close to 0, one that prefers values close to max
 -- and one that chooses uniformly.
-arbitraryIntegralWithMax :: (Integral a) => Integer -> Gen a
+arbitraryIntegralWithMax :: (Typeable a, From a Integer, TryFrom Integer a) => Integer -> Gen a
 arbitraryIntegralWithMax maxbound =
   sized $ \s ->
     do let mn = 0 :: Int
@@ -587,6 +594,6 @@ arbitraryIntegralWithMax maxbound =
            bits n | n `quot` 2 == 0 = 0
                   | otherwise = 1 + bits (n `quot` 2)
            k  = 2^(s*(bits mn `max` bits mx `max` 40) `div` 100)
-       smol <- choose (toInteger mn `max` (-k), toInteger mx `min` k)
+       smol <- choose ((into mn) `max` (-k), (into @Integer mx) `min` k)
        mid <- choose (0, maxbound)
-       elements [fromIntegral smol, fromIntegral mid, fromIntegral (maxbound - (fromIntegral smol))]
+       elements [unsafeInto smol, unsafeInto mid, unsafeInto (maxbound - smol)]

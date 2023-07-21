@@ -13,7 +13,7 @@ import Data.Set qualified as Set
 import EVM.Traversals
 import EVM.Types
 
-data BuilderState = BuilderState
+newtype BuilderState = BuilderState
   { keccaks :: Set (Expr EWord) }
   deriving (Show)
 

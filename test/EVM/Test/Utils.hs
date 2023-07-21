@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes #-}
+{- hlint ignore "use internalError" -}
 
 module EVM.Test.Utils where
 
@@ -148,10 +149,9 @@ compileWithDSTest src =
         }
       }
       |]
-    x <- T.pack <$>
+    T.pack <$>
       readProcess
         "solc"
         ["--allow-paths", file, "--standard-json", file]
         ""
-    return x
 

@@ -65,8 +65,8 @@ x0 ^ y0 | y0 < 0    = errorWithoutStackTrace "Negative exponent"
                   | otherwise   = g (x * x) ((y - 1) `shiftR` 1) (x * z)
 
 createAddress :: Addr -> W256 -> Addr
-createAddress a n = unsafeInto $ keccak' $ rlpList [rlpAddrFull a, rlpWord256 n]
+createAddress a n = truncateFrom $ keccak' $ rlpList [rlpAddrFull a, rlpWord256 n]
 
 create2Address :: Addr -> W256 -> ByteString -> Addr
-create2Address a s b = unsafeInto $ keccak' $ mconcat
+create2Address a s b = truncateFrom $ keccak' $ mconcat
   [BS.singleton 0xff, word160Bytes a, word256Bytes s, word256Bytes $ keccak' b]

@@ -11,6 +11,7 @@ import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
+import Data.BinaryWord (signedWord,unsignedWord)
 import Data.List
 import Data.Map.Strict qualified as Map
 import Data.Maybe (mapMaybe)
@@ -19,7 +20,7 @@ import Data.Vector qualified as V
 import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
-import Witch (unsafeInto, into, tryFrom)
+import Witch (unsafeInto, into, tryFrom, tryInto)
 
 import Optics.Core
 
@@ -74,10 +75,11 @@ div :: Expr EWord -> Expr EWord -> Expr EWord
 div = op2 Div (\x y -> if y == 0 then 0 else Prelude.div x y)
 
 sdiv :: Expr EWord -> Expr EWord -> Expr EWord
-sdiv = op2 SDiv (\x y -> let sx, sy :: Int256
-                             sx = fromIntegral x
-                             sy = fromIntegral y
-                         in if y == 0 then 0 else fromIntegral (sx `quot` sy))
+sdiv = op2 SDiv (\x y -> let sx = signedWord x
+                             sy = signedWord y
+                         in if y == 0
+                            then 0
+                            else W256 . unsignedWord $ sx `quot` sy)
 
 mod :: Expr EWord -> Expr EWord -> Expr EWord
 mod = op2 Mod (\x y -> if y == 0 then 0 else x `Prelude.mod` y)
@@ -85,23 +87,23 @@ mod = op2 Mod (\x y -> if y == 0 then 0 else x `Prelude.mod` y)
 smod :: Expr EWord -> Expr EWord -> Expr EWord
 smod = op2 SMod (\x y ->
   let sx, sy :: Int256
-      sx = fromIntegral x
-      sy = fromIntegral y
+      sx = signedWord x
+      sy = signedWord y
   in if y == 0
      then 0
-     else fromIntegral (sx `rem` sy))
+     else W256 . unsignedWord $ sx `rem` sy)
 
 addmod :: Expr EWord -> Expr EWord -> Expr EWord -> Expr EWord
 addmod = op3 AddMod (\x y z ->
   if z == 0
   then 0
-  else fromIntegral $ (to512 x + to512 y) `Prelude.mod` to512 z)
+  else truncateFrom @Word512 $ (into x + into y) `Prelude.mod` into z)
 
 mulmod :: Expr EWord -> Expr EWord -> Expr EWord -> Expr EWord
 mulmod = op3 MulMod (\x y z ->
    if z == 0
    then 0
-   else fromIntegral $ (to512 x * to512 y) `Prelude.mod` to512 z)
+   else truncateFrom @Word512 $ (into x * into y) `Prelude.mod` into z)
 
 exp :: Expr EWord -> Expr EWord -> Expr EWord
 exp = op2 Exp (^)
@@ -130,16 +132,14 @@ geq = op2 GEq (\x y -> if x >= y then 1 else 0)
 
 slt :: Expr EWord -> Expr EWord -> Expr EWord
 slt = op2 SLT (\x y ->
-  let sx, sy :: Int256
-      sx = fromIntegral x
-      sy = fromIntegral y
+  let sx = signedWord x
+      sy = signedWord y
   in if sx < sy then 1 else 0)
 
 sgt :: Expr EWord -> Expr EWord -> Expr EWord
 sgt = op2 SGT (\x y ->
-  let sx, sy :: Int256
-      sx = fromIntegral x
-      sy = fromIntegral y
+  let sx = signedWord x
+      sy = signedWord y
   in if sx > sy then 1 else 0)
 
 eq :: Expr EWord -> Expr EWord -> Expr EWord
@@ -163,7 +163,7 @@ not :: Expr EWord -> Expr EWord
 not = op1 Not complement
 
 shl :: Expr EWord -> Expr EWord -> Expr EWord
-shl = op2 SHL (\x y -> if x > 256 then 0 else shiftL y (fromIntegral x))
+shl = op2 SHL (\x y -> if x > 256 then 0 else shiftL y (unsafeInto x))
 
 shr :: Expr EWord -> Expr EWord -> Expr EWord
 shr = op2
@@ -177,16 +177,16 @@ shr = op2
                       , readByte (Lit $ idx + 2) buf
                       , readByte (Lit $ idx + 3) buf])
              _ -> SHR x y)
-  (\x y -> if x > 256 then 0 else shiftR y (fromIntegral x))
+  (\x y -> if x > 256 then 0 else shiftR y (unsafeInto x))
 
 sar :: Expr EWord -> Expr EWord -> Expr EWord
 sar = op2 SAR (\x y ->
   let msb = testBit y 255
-      asSigned = fromIntegral y :: Int256
+      asSigned = signedWord y
   in if x > 256 then
        if msb then maxBound else 0
      else
-       fromIntegral $ shiftR asSigned (fromIntegral x))
+       W256 . unsignedWord $ shiftR asSigned (unsafeInto x))
 
 -- ** Bufs ** --------------------------------------------------------------------------------------
 
@@ -268,9 +268,9 @@ readWord i b = readWordFromBytes i b
 -- returns an abstract ReadWord expression if a concrete word cannot be constructed
 readWordFromBytes :: Expr EWord -> Expr Buf -> Expr EWord
 readWordFromBytes (Lit idx) (ConcreteBuf bs) =
-  case toInt idx of
-    Nothing -> Lit 0
-    Just i -> Lit $ word $ padRight 32 $ BS.take 32 $ BS.drop i bs
+  case tryInto idx of
+    Left _ -> Lit 0
+    Right i -> Lit $ word $ padRight 32 $ BS.take 32 $ BS.drop i bs
 readWordFromBytes i@(Lit idx) buf = let
     bytes = [readByte (Lit i') buf | i' <- [idx .. idx + 31]]
   in if Prelude.and . (fmap isLitByte) $ bytes
@@ -798,10 +798,9 @@ simplify e = if (mapExpr go e == e)
       | a >= b = Lit 0
       | otherwise = o
     go o@(SLT (Sub (Max (Lit a) _) (Lit b)) (Lit c))
-      = let sa, sb, sc :: Int256
-            sa = fromIntegral a
-            sb = fromIntegral b
-            sc = fromIntegral c
+      = let sa = signedWord a
+            sb = signedWord b
+            sc = signedWord c
         in if sa >= sb && sa - sb >= sc
            then Lit 0
            else o
@@ -816,14 +815,11 @@ litAddr :: Addr -> Expr EWord
 litAddr = Lit . into
 
 exprToAddr :: Expr EWord -> Maybe Addr
-exprToAddr (Lit x) = Just (unsafeInto x)
+exprToAddr (Lit x) = Just (truncateFrom x)
 exprToAddr _ = Nothing
 
 litCode :: BS.ByteString -> [Expr Byte]
 litCode bs = fmap LitByte (BS.unpack bs)
-
-to512 :: W256 -> Word512
-to512 = fromIntegral
 
 
 -- ** Helpers ** -----------------------------------------------------------------------------------
@@ -890,10 +886,10 @@ indexWord i@(Lit idx) e@(And (Lit mask) w)
   where
     isPower2 n = n .&. (n-1) == 0
     fullWordMask = (2 ^ (256 :: W256)) - 1
-    unmaskedBytes = fromIntegral $ (countLeadingZeros mask) `Prelude.div` 8
+    unmaskedBytes = unsafeInto $ (countLeadingZeros mask) `Prelude.div` 8
     isByteAligned m = (countLeadingZeros m) `Prelude.mod` 8 == 0
 indexWord (Lit idx) (Lit w)
-  | idx <= 31 = LitByte . fromIntegral $ shiftR w (248 - unsafeInto idx * 8)
+  | idx <= 31 = LitByte . truncateTo $ shiftR w (248 - unsafeInto idx * 8)
   | otherwise = LitByte 0
 indexWord (Lit idx) (JoinBytes zero        one        two       three
                                four        five       six       seven

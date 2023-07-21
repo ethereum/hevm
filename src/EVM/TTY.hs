@@ -616,7 +616,7 @@ initialUiVmStateForTest opts@UnitTestOptions{..} (theContractName, theTestName) 
   where
     cd = case test of
       SymbolicTest _ -> symCalldata theTestName types [] (AbstractBuf "txdata")
-      _ -> (internalError "unreachable", error $ internalError "unreachable")
+      _ -> (internalError "unreachable", internalError "unreachable")
     (test, types) = fromJust $ find (\(test',_) -> extractSig test' == theTestName) $ unitTestMethods testContract
     testContract = fromJust $ Map.lookup theContractName dapp.solcByName
     vm0 =

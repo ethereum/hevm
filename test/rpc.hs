@@ -31,7 +31,7 @@ tests = testGroup "rpc"
         let block = BlockNumber 15537392
         (cb, numb, basefee, prevRan) <- fetchBlockFrom block testRpc >>= \case
                       Nothing -> internalError "Could not fetch block"
-                      Just Block{..} -> return ( coinbase
+                      Just Block{..} -> pure ( coinbase
                                                    , number
                                                    , baseFee
                                                    , prevRandao
@@ -45,7 +45,7 @@ tests = testGroup "rpc"
         let block = BlockNumber 16184420
         (cb, numb, basefee, prevRan) <- fetchBlockFrom block testRpc >>= \case
                       Nothing -> internalError "Could not fetch block"
-                      Just Block{..} -> return ( coinbase
+                      Just Block{..} -> pure ( coinbase
                                                    , number
                                                    , baseFee
                                                    , prevRandao
@@ -112,7 +112,7 @@ vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EWord -> Addr -> I
 vmFromRpc blockNum calldata' callvalue' caller' address' = do
   ctrct <- fetchContractFrom (BlockNumber blockNum) testRpc address' >>= \case
         Nothing -> internalError $ "contract not found: " <> show address'
-        Just contract' -> return contract'
+        Just contract' -> pure contract'
 
   blk <- fetchBlockFrom (BlockNumber blockNum) testRpc >>= \case
     Nothing -> internalError "could not fetch block"

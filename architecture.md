@@ -182,3 +182,13 @@ This decompiles into the following Expr End:
   (Revert (ConcreteBuf ""))
 )
 ```
+
+# Integer Conversions
+
+We do not make use of the built in integer conversion utilities from base (e.g. fromIntegral) as they silently truncate inputs, which has been the cause of several bugs. Instead when converting between numeric types, you should choose between:
+
+- `from` / `into`: conversions that can never fail (e.g. Word32 -> Word64)
+- `tryFrom` / `tryInto`: conversions that can fail (e.g. Word64 -> Word32)
+- `unsafeFrom` / `unsafeInto`: conversions that you know cannot fail, but are unable to prove to the typesystem that this is the case
+- `truncateFrom` / `truncateTo`: conversions where you need truncation to occur (e.g. address generation)
+- `signedWord` / `unsignedWord`: reinterpritation between signed and unsigned types of the same size (e.g. Int256 -> W256).

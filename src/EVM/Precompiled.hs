@@ -6,6 +6,8 @@ import Data.ByteString qualified as BS
 import Foreign.C
 import Foreign.Ptr
 import Foreign.ForeignPtr
+import EVM.Types()
+import Witch
 
 import System.IO.Unsafe
 
@@ -54,9 +56,9 @@ execute contract input outputSize =
          status <-
            withForeignPtr globalContext $ \contextPtr ->
              -- Finally, we can invoke the C library.
-             ethjet contextPtr (fromIntegral contract)
-               inputPtr (fromIntegral inputSize)
-               outputPtr (fromIntegral outputSize)
+             ethjet contextPtr (into contract)
+               inputPtr (into inputSize)
+               outputPtr (into outputSize)
 
          case status of
            1 -> Just <$> BS.packCStringLen (outputPtr, outputSize)

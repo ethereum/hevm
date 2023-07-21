@@ -49,7 +49,7 @@ import Data.Vector qualified as V
 import Data.Vector.Storable qualified as SV
 import Data.Vector.Storable.Mutable qualified as SV
 import Data.Word (Word8, Word32, Word64)
-import Witch (into, unsafeInto)
+import Witch (into, unsafeInto, tryInto, tryFrom)
 
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
@@ -281,7 +281,7 @@ exec1 = do
                     let (topics, xs') = splitAt (into n) xs
                         bytes         = readMemory xOffset' xSize' vm
                         logs'         = (LogEntry (litAddr self) bytes topics) : vm.logs
-                    burn (g_log + g_logdata * (unsafeInto xSize) + into n * g_logtopic) $
+                    burn (g_log + g_logdata * (truncateTo xSize) + into n * g_logtopic) $
                       accessMemoryRange xOffset xSize $ do
                         traceTopLog logs'
                         next
@@ -331,7 +331,7 @@ exec1 = do
             xOffset':xSize':xs ->
               forceConcrete xOffset' "sha3 offset must be concrete" $
                 \xOffset -> forceConcrete xSize' "sha3 size must be concrete" $ \xSize ->
-                  burn (g_sha3 + g_sha3word * ceilDiv (unsafeInto xSize) 32) $
+                  burn (g_sha3 + g_sha3word * ceilDiv (truncateTo xSize) 32) $
                     accessMemoryRange xOffset xSize $ do
                       hash <- case readMemory xOffset' xSize' vm of
                                           ConcreteBuf bs -> do
@@ -352,8 +352,8 @@ exec1 = do
         OpBalance ->
           case stk of
             x':xs -> forceConcrete x' "BALANCE" $ \x ->
-              accessAndBurn (unsafeInto x) $
-                fetchAccount (unsafeInto x) $ \c -> do
+              accessAndBurn (truncateFrom x) $
+                fetchAccount (truncateFrom x) $ \c -> do
                   next
                   assign (#state % #stack) xs
                   push c.balance
@@ -384,7 +384,7 @@ exec1 = do
             xTo':xFrom:xSize':xs ->
               forceConcrete2 (xTo', xSize') "CALLDATACOPY" $
                 \(xTo, xSize) ->
-                  burn (g_verylow + g_copy * ceilDiv (unsafeInto xSize) 32) $
+                  burn (g_verylow + g_copy * ceilDiv (truncateTo xSize) 32) $
                     accessMemoryRange xTo xSize $ do
                       next
                       assign (#state % #stack) xs
@@ -400,9 +400,9 @@ exec1 = do
             memOffset':codeOffset:n':xs ->
               forceConcrete2 (memOffset', n') "CODECOPY" $
                 \(memOffset,n) -> do
-                  case toWord64 n of
-                    Nothing -> vmError IllegalOverflow
-                    Just n'' ->
+                  case tryInto @Word64 n of
+                    Left _ -> vmError IllegalOverflow
+                    Right n'' ->
                       if n'' <= ( (maxBound :: Word64) - g_verylow ) `div` g_copy * 32 then
                         burn (g_verylow + g_copy * ceilDiv (unsafeInto n) 32) $
                           accessMemoryRange memOffset n $ do
@@ -425,8 +425,8 @@ exec1 = do
                   assign (#state % #stack) xs
                   pushSym (Lit 1)
                 else
-                  accessAndBurn (unsafeInto x) $
-                    fetchAccount (unsafeInto x) $ \c -> do
+                  accessAndBurn (truncateFrom x) $
+                    fetchAccount (truncateFrom x) $ \c -> do
                       next
                       assign (#state % #stack) xs
                       pushSym (bufLength (view bytecode c))
@@ -442,11 +442,11 @@ exec1 = do
             extAccount':memOffset':codeOffset:codeSize':xs ->
               forceConcrete3 (extAccount', memOffset', codeSize') "EXTCODECOPY" $
                 \(extAccount, memOffset, codeSize) -> do
-                  acc <- accessAccountForGas (unsafeInto extAccount)
+                  acc <- accessAccountForGas (truncateTo extAccount)
                   let cost = if acc then g_warm_storage_read else g_cold_account_access
-                  burn (cost + g_copy * ceilDiv (unsafeInto codeSize) 32) $
+                  burn (cost + g_copy * ceilDiv (truncateTo codeSize) 32) $
                     accessMemoryRange memOffset codeSize $
-                      fetchAccount (unsafeInto extAccount) $ \c -> do
+                      fetchAccount (truncateFrom extAccount) $ \c -> do
                         next
                         assign (#state % #stack) xs
                         copyBytesToMemory (view bytecode c) codeSize' codeOffset memOffset'
@@ -460,7 +460,7 @@ exec1 = do
           case stk of
             xTo':xFrom:xSize':xs -> forceConcrete2 (xTo', xSize') "RETURNDATACOPY" $
               \(xTo, xSize) ->
-                burn (g_verylow + g_copy * ceilDiv (unsafeInto xSize) 32) $
+                burn (g_verylow + g_copy * ceilDiv (truncateTo xSize) 32) $
                   accessMemoryRange xTo xSize $ do
                     next
                     assign (#state % #stack) xs
@@ -481,10 +481,10 @@ exec1 = do
         OpExtcodehash ->
           case stk of
             x':xs -> forceConcrete x' "EXTCODEHASH" $ \x ->
-              accessAndBurn (unsafeInto x) $ do
+              accessAndBurn (truncateFrom x) $ do
                 next
                 assign (#state % #stack) xs
-                fetchAccount (unsafeInto x) $ \c ->
+                fetchAccount (truncateFrom x) $ \c ->
                    if accountEmpty c
                      then push 0
                      else pushSym $ keccak (view bytecode c)
@@ -636,9 +636,9 @@ exec1 = do
           case stk of
             x:xs ->
               burn g_mid $ forceConcrete x "JUMP: symbolic jumpdest" $ \x' ->
-                case toInt x' of
-                  Nothing -> vmError BadJumpDestination
-                  Just i -> checkJump i xs
+                case tryFrom x' of
+                  Left _ -> vmError BadJumpDestination
+                  Right i -> checkJump i xs
             _ -> underrun
 
         OpJumpi -> do
@@ -647,9 +647,9 @@ exec1 = do
                 burn g_high $
                   let jump :: Bool -> EVM ()
                       jump False = assign (#state % #stack) xs >> next
-                      jump _    = case toInt x' of
-                        Nothing -> vmError BadJumpDestination
-                        Just i -> checkJump i xs
+                      jump _    = case tryFrom x' of
+                        Left _ -> vmError BadJumpDestination
+                        Right i -> checkJump i xs
                   in do
                     loc <- codeloc
                     branch loc y jump
@@ -707,7 +707,7 @@ exec1 = do
               forceConcrete6 (xGas', xValue', xInOffset', xInSize', xOutOffset', xOutSize') "CALL" $
               \(xGas, xValue, xInOffset, xInSize, xOutOffset, xOutSize) ->
                 (if xValue > 0 then notStatic else id) $
-                  delegateCall this (unsafeInto xGas) xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
+                  delegateCall this (truncateTo xGas) xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
                     let from' = fromMaybe self vm.overrideCaller
                     zoom #state $ do
                       assign #callvalue (Lit xValue)
@@ -725,7 +725,7 @@ exec1 = do
             xGas':xTo:xValue':xInOffset':xInSize':xOutOffset':xOutSize':xs ->
               forceConcrete6 (xGas', xValue', xInOffset', xInSize', xOutOffset', xOutSize') "CALLCODE" $
               \(xGas, xValue, xInOffset, xInSize, xOutOffset, xOutSize) ->
-                delegateCall this (unsafeInto xGas) xTo (litAddr self) xValue xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
+                delegateCall this (truncateTo xGas) xTo (litAddr self) xValue xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
                   zoom #state $ do
                     assign #callvalue (Lit xValue)
                     assign #caller $ litAddr $ fromMaybe self vm.overrideCaller
@@ -738,35 +738,34 @@ exec1 = do
           case stk of
             xOffset':xSize':_ -> forceConcrete2 (xOffset', xSize') "RETURN" $ \(xOffset, xSize) ->
               accessMemoryRange xOffset xSize $ do
-                let
-                  output = readMemory xOffset' xSize' vm
-                  codesize = fromMaybe (internalError "processing opcode RETURN. Cannot return dynamically sized abstract data")
-                               . maybeLitWord . bufLength $ output
-                  maxsize = vm.block.maxCodeSize
-                  creation = case vm.frames of
-                    [] -> vm.tx.isCreate
-                    frame:_ -> case frame.context of
-                       CreationContext {} -> True
-                       CallContext {} -> False
-                if creation
-                then
-                  if codesize > maxsize
+                let output = readMemory xOffset' xSize' vm
+                forceConcrete (bufLength output) "RETURN (Size)" $ \codesize -> do
+                  let
+                    maxsize = vm.block.maxCodeSize
+                    creation = case vm.frames of
+                      [] -> vm.tx.isCreate
+                      frame:_ -> case frame.context of
+                         CreationContext {} -> True
+                         CallContext {} -> False
+                  if creation
                   then
-                    finishFrame (FrameErrored (MaxCodeSizeExceeded maxsize codesize))
-                  else do
-                    let frameReturned = burn (g_codedeposit * unsafeInto codesize) $
-                                          finishFrame (FrameReturned output)
-                        frameErrored = finishFrame $ FrameErrored InvalidFormat
-                    case readByte (Lit 0) output of
-                      LitByte 0xef -> frameErrored
-                      LitByte _ -> frameReturned
-                      y -> do
-                        loc <- codeloc
-                        branch loc (Expr.eqByte y (LitByte 0xef)) $ \case
-                          True -> frameErrored
-                          False -> frameReturned
-                else
-                   finishFrame (FrameReturned output)
+                    if codesize > maxsize
+                    then
+                      finishFrame (FrameErrored (MaxCodeSizeExceeded maxsize codesize))
+                    else do
+                      let frameReturned = burn (g_codedeposit * unsafeInto codesize) $
+                                            finishFrame (FrameReturned output)
+                          frameErrored = finishFrame $ FrameErrored InvalidFormat
+                      case readByte (Lit 0) output of
+                        LitByte 0xef -> frameErrored
+                        LitByte _ -> frameReturned
+                        y -> do
+                          loc <- codeloc
+                          branch loc (Expr.eqByte y (LitByte 0xef)) $ \case
+                            True -> frameErrored
+                            False -> frameReturned
+                  else
+                     finishFrame (FrameReturned output)
             _ -> underrun
 
         OpDelegatecall ->
@@ -774,7 +773,7 @@ exec1 = do
             xGas':xTo:xInOffset':xInSize':xOutOffset':xOutSize':xs ->
               forceConcrete5 (xGas', xInOffset', xInSize', xOutOffset', xOutSize') "DELEGATECALL" $
               \(xGas, xInOffset, xInSize, xOutOffset, xOutSize) ->
-                delegateCall this (unsafeInto xGas) xTo (litAddr self) 0 xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
+                delegateCall this (truncateTo xGas) xTo (litAddr self) 0 xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
                   touchAccount self
             _ -> underrun
 
@@ -801,7 +800,7 @@ exec1 = do
             xGas':xTo:xInOffset':xInSize':xOutOffset':xOutSize':xs ->
               forceConcrete5 (xGas', xInOffset', xInSize', xOutOffset', xOutSize') "STATICCALL" $
               \(xGas, xInOffset, xInSize, xOutOffset, xOutSize) -> do
-                delegateCall this (unsafeInto xGas) xTo xTo 0 xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
+                delegateCall this (truncateTo xGas) xTo xTo 0 xInOffset xInSize xOutOffset xOutSize xs $ \callee -> do
                   zoom #state $ do
                     assign #callvalue (Lit 0)
                     assign #caller $ litAddr $ fromMaybe self (vm.overrideCaller)
@@ -817,7 +816,7 @@ exec1 = do
           notStatic $
           case stk of
             [] -> underrun
-            (xTo':_) -> forceConcrete xTo' "SELFDESTRUCT" $ \(unsafeInto -> xTo) -> do
+            (xTo':_) -> forceConcrete xTo' "SELFDESTRUCT" $ \(truncateFrom -> xTo) -> do
               acc <- accessAccountForGas xTo
               let cost = if acc then 0 else g_cold_account_access
                   funds = this.balance
@@ -1410,7 +1409,7 @@ accessStorageForGas addr key = do
       let accessed = member (addr, litword) accessedStrkeys
       assign (#tx % #substate % #accessedStorageKeys) (insert (addr, litword) accessedStrkeys)
       pure accessed
-    _ -> return False
+    _ -> pure False
 
 -- * Cheat codes
 
@@ -1419,7 +1418,7 @@ accessStorageForGas addr key = do
 -- special things, e.g. changing the block timestamp. Beware that
 -- these are necessarily hevm specific.
 cheatCode :: Addr
-cheatCode = unsafeInto (keccak' "hevm cheat code")
+cheatCode = truncateFrom (keccak' "hevm cheat code")
 
 cheat
   :: (?op :: Word8)
@@ -1488,7 +1487,7 @@ cheatActions =
       action "store(address,bytes32,bytes32)" $
         \sig _ _ input -> case decodeStaticArgs 0 3 input of
           [a, slot, new] ->
-            forceConcrete a "cannot store at a symbolic address" $ \(unsafeInto -> a') ->
+            forceConcrete a "cannot store at a symbolic address" $ \(truncateFrom -> a') ->
               fetchAccount a' $ \_ -> do
                 modifying (#env % #storage) (writeStorage (litAddr a') slot new)
           _ -> vmError (BadCheatCode sig),
@@ -1496,7 +1495,7 @@ cheatActions =
       action "load(address,bytes32)" $
         \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
           [a, slot] ->
-            forceConcrete a "cannot load from a symbolic address" $ \(unsafeInto -> a') ->
+            forceConcrete a "cannot load from a symbolic address" $ \(truncateFrom -> a') ->
               accessStorage a' slot $ \res -> do
                 assign (#state % #returndata % word256At (Lit 0)) res
                 assign (#state % #memory % word256At outOffset) res
@@ -1506,7 +1505,7 @@ cheatActions =
         \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
           [sk, hash] ->
             forceConcrete2 (sk, hash) "cannot sign symbolic data" $ \(sk', hash') -> do
-              let (v,r,s) = EVM.Sign.sign hash' (toInteger sk')
+              let (v,r,s) = EVM.Sign.sign hash' (into sk')
                   encoded = encodeAbiValue $
                     AbiTuple (V.fromList
                       [ AbiUInt 8 $ into v
@@ -1548,7 +1547,7 @@ delegateCall
   -> EVM ()
 delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOutSize xs continue =
   forceConcrete2 (xTo, xContext) "cannot delegateCall with symbolic target or context" $
-    \((unsafeInto -> xTo'), (unsafeInto -> xContext')) ->
+    \((truncateFrom -> xTo'), (truncateFrom -> xContext')) ->
       if xTo' > 0 && xTo' <= 9
       then precompiledContract this gasGiven xTo' xContext' xValue xInOffset xInSize xOutOffset xOutSize xs
       else if xTo' == cheatCode then
@@ -1924,9 +1923,9 @@ accessMemoryRange
   -> EVM ()
 accessMemoryRange _ 0 continue = continue
 accessMemoryRange offs sz continue =
-  case (,) <$> toWord64 offs <*> toWord64 sz of
-    Nothing -> vmError IllegalOverflow
-    Just (offs64, sz64) ->
+  case (,) <$> tryFrom offs <*> tryFrom sz of
+    Left _ -> vmError IllegalOverflow
+    Right (offs64, sz64) ->
       if offs64 + sz64 < sz64
         then vmError IllegalOverflow
         else accessUnboundedMemoryRange offs64 sz64 continue
@@ -2235,13 +2234,13 @@ concreteModexpGasFee input =
     e' = word $ LS.toStrict $
       lazySlice (96 + lenb) (min 32 lene) input
     nwords :: Word64
-    nwords = ceilDiv (unsafeInto $ max lenb lenm) 8
+    nwords = ceilDiv (truncateTo $ max lenb lenm) 8
     multiplicationComplexity = nwords * nwords
     iterCount' :: Word64
     iterCount' | lene <= 32 && ez = 0
                | lene <= 32 = unsafeInto (log2 e')
-               | e' == 0 = 8 * (unsafeInto lene - 32)
-               | otherwise = unsafeInto (log2 e') + 8 * (unsafeInto lene - 32)
+               | e' == 0 = 8 * (truncateTo lene - 32)
+               | otherwise = unsafeInto (log2 e') + 8 * (truncateTo lene - 32)
     iterCount = max iterCount' 1
 
 -- Gas cost of precompiles

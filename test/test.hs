@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE QuasiQuotes #-}
+{- hlint ignore "use internalError" -}
 
 module Main where
 
@@ -104,12 +105,12 @@ tests = testGroup "hevm"
             vm2 = case vm1.result of
                     Just (HandleEffect (Query (PleaseFetchContract _addr continue))) ->
                       execState (continue dummyContract) vm1
-                    _ -> internalError "unexpected result"
+                    _ -> error "unexpected result"
             -- then it should fetch the slow
             vm3 = case vm2.result of
                     Just (HandleEffect (Query (PleaseFetchSlot _addr _slot continue))) ->
                       execState (continue 1337) vm2
-                    _ -> internalError "unexpected result"
+                    _ -> error "unexpected result"
             -- perform the same access as for vm1
             vm4 = execState (EVM.accessStorage 0 (Lit 0) (pure . pure ())) vm3
 
@@ -292,13 +293,9 @@ tests = testGroup "hevm"
         (LitByte 0xbb)
         (Expr.indexWord (Lit 2) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
     , testCase "encodeConcreteStore-overwrite" $
-      let
-        w :: Int -> W256
-        w x = W256 $ EVM.Types.word256 $ BS.pack [fromIntegral x]
-      in
       assertEqual ""
         (EVM.SMT.encodeConcreteStore $
-          Map.fromList [(w 1, (Map.fromList [(w 2, w 99), (w 2, w 100)]))])
+          Map.fromList [(W256 1, (Map.fromList [(W256 2, W256 99), (W256 2, W256 100)]))])
         "(sstore (_ bv1 256) (_ bv2 256) (_ bv100 256) emptyStore)"
     , testCase "indexword-oob-sym" $ assertEqual ""
         -- indexWord should return 0 for oob access
@@ -339,7 +336,7 @@ tests = testGroup "hevm"
             [y] AbiBytesDynamicType
           let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
                 AbiTuple (Vector.toList -> [e]) -> e
-                _ -> internalError "AbiTuple expected"
+                _ -> error "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [y])
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
 
@@ -349,7 +346,7 @@ tests = testGroup "hevm"
             [x', y'] AbiBytesDynamicType
           let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
                 AbiTuple (Vector.toList -> [e]) -> e
-                _ -> internalError "AbiTuple expected"
+                _ -> error "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [x',y'])
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
 
@@ -363,7 +360,7 @@ tests = testGroup "hevm"
             |] (abiMethod "foo(function)" (AbiTuple (Vector.singleton y)))
           let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
                 AbiTuple (Vector.toList -> [e]) -> e
-                _ -> internalError "AbiTuple expected"
+                _ -> error "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [y])
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
     ]
@@ -504,7 +501,7 @@ tests = testGroup "hevm"
         let y = getVar ctr "arg2"
 
         let maxUint = 2 ^ (256 :: Integer) :: Integer
-        assertBool "Overflow must occur" (toInteger x + toInteger y >= maxUint)
+        assertBool "Overflow must occur" (into x + into y >= maxUint)
         putStrLn "expected counterexample found"
      ,
      testCase "div-by-zero-fail" $ do
@@ -1138,14 +1135,14 @@ tests = testGroup "hevm"
           |]
         let pre preVM = let (x, y) = case getStaticAbiArgs 2 preVM of
                                        [x', y'] -> (x', y')
-                                       _ -> internalError "expected 2 args"
+                                       _ -> error "expected 2 args"
                         in (x .<= Expr.add x y)
                         -- TODO check if it's needed
                            .&& preVM.state.callvalue .== Lit 0
             post prestate leaf =
               let (x, y) = case getStaticAbiArgs 2 prestate of
                              [x', y'] -> (x', y')
-                             _ -> internalError "expected 2 args"
+                             _ -> error "expected 2 args"
               in case leaf of
                    Success _ _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
                    _ -> PBool True
@@ -1164,14 +1161,14 @@ tests = testGroup "hevm"
           |]
         let pre preVM = let (x, y) = case getStaticAbiArgs 2 preVM of
                                        [x', y'] -> (x', y')
-                                       _ -> internalError "expected 2 args"
+                                       _ -> error "expected 2 args"
                         in (x .<= Expr.add x y)
                            .&& (x .== y)
                            .&& preVM.state.callvalue .== Lit 0
             post prestate leaf =
               let (_, y) = case getStaticAbiArgs 2 prestate of
                              [x', y'] -> (x', y')
-                             _ -> internalError "expected 2 args"
+                             _ -> error "expected 2 args"
               in case leaf of
                    Success _ _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
                    _ -> PBool True
@@ -1196,7 +1193,7 @@ tests = testGroup "hevm"
             post prestate leaf =
               let y = case getStaticAbiArgs 1 prestate of
                         [y'] -> y'
-                        _ -> internalError "expected 1 arg"
+                        _ -> error "expected 1 arg"
                   this = Expr.litAddr $ prestate.state.codeContract
                   prex = Expr.readStorage' this (Lit 0) prestate.env.storage
               in case leaf of
@@ -1250,7 +1247,7 @@ tests = testGroup "hevm"
               post prestate poststate =
                 let (x,y) = case getStaticAbiArgs 2 prestate of
                         [x',y'] -> (x',y')
-                        _ -> internalError "expected 2 args"
+                        _ -> error "expected 2 args"
                     this = Expr.litAddr $ prestate.state.codeContract
                     prestore = prestate.env.storage
                     prex = Expr.readStorage' this x prestore
@@ -1284,7 +1281,7 @@ tests = testGroup "hevm"
               post prestate poststate =
                 let (x,y) = case getStaticAbiArgs 2 prestate of
                         [x',y'] -> (x',y')
-                        _ -> internalError "expected 2 args"
+                        _ -> error "expected 2 args"
                     this = Expr.litAddr $ prestate.state.codeContract
                     prestore =  prestate.env.storage
                     prex = Expr.readStorage' this x prestore
@@ -1937,7 +1934,6 @@ tests = testGroup "hevm"
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqual "Must have no difference" [Qed ()] a
-          return ()
       ,
       testCase "eq-sol-exp-cex" $ do
         -- These yul programs are not equivalent: (try --calldata $(seth --to-uint256 2) for example)
@@ -1964,7 +1960,6 @@ tests = testGroup "hevm"
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqual "Must be different" (any isCex a) True
-          return ()
       , testCase "eq-all-yul-optimization-tests" $ do
         let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }
             ignoredTests =
@@ -2171,7 +2166,7 @@ tests = testGroup "hevm"
                     , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV
                     ]
 
-        solcRepo <- fromMaybe (internalError "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
+        solcRepo <- fromMaybe (error "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
         let testDir = solcRepo <> "/test/libyul/yulOptimizerTests"
         dircontents <- System.Directory.listDirectory testDir
         let
@@ -2196,10 +2191,11 @@ tests = testGroup "hevm"
           let
             onlyAfter pattern (a:ax) = if a =~ pattern then (a:ax) else onlyAfter pattern ax
             onlyAfter _ [] = []
-            replaceOnce pat repl inp = go inp [] where
-              go (a:ax) b = if a =~ pat then let a2 = replaceAll repl $ a *=~ pat in b ++ a2:ax
-                                        else go ax (b ++ [a])
-              go [] b = b
+            replaceOnce pat repl inp = go inp []
+              where
+                go (a:ax) b = if a =~ pat then let a2 = replaceAll repl $ a *=~ pat in b ++ a2:ax
+                                          else go ax (b ++ [a])
+                go [] b = b
 
             -- takes a yul program and ensures memory is symbolic by prepending
             -- `calldatacopy(0,0,1024)`. (calldata is symbolic, but memory starts empty).
@@ -2209,7 +2205,7 @@ tests = testGroup "hevm"
                                       let a2 = replaceAll "a calldatacopy(0,0,1024)" $ a *=~ [re|code {|]
                                       in (a2:ax)
                                     else replaceOnce [re|^ *{|] "{\ncalldatacopy(0,0,1024)" $ onlyAfter [re|^ *{|] (a:ax)
-            symbolicMem _ = internalError "Program too short"
+            symbolicMem _ = error "Program too short"
 
             unfiltered = lines origcont
             filteredASym = symbolicMem [ x | x <- unfiltered, (not $ x =~ [re|^//|]) && (not $ x =~ [re|^$|]) ]
@@ -2236,10 +2232,10 @@ tests = testGroup "hevm"
                 let timeouts = filter isTimeout res
                 unless (null timeouts) $ do
                   putStrLn $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
-                  internalError "Encountered timeouts"
+                  error "Encountered timeouts"
               True -> do
                 putStrLn $ "Not OK: " <> show f <> " Got: " <> show res
-                internalError "Was NOT equivalent"
+                error "Was NOT equivalent"
            )
     ]
   ]
@@ -2248,7 +2244,7 @@ tests = testGroup "hevm"
 
 
 checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO Bool
-checkEquiv l r = withSolvers Z3 1 (Just 10) $ \solvers -> do
+checkEquiv l r = withSolvers Z3 1 (Just 1) $ \solvers -> do
   if l == r
      then do
        putStrLn "skip"
@@ -2276,7 +2272,7 @@ runSimpleVM x ins = do
      res <- Stepper.interpret (Fetch.zero 0 Nothing) vm' Stepper.execFully
      case res of
        (Right (ConcreteBuf bs)) -> pure $ Just bs
-       s -> internalError $ show s
+       s -> error $ show s
 
 -- | Takes a creation code and returns a vm with the result of executing the creation code
 loadVM :: ByteString -> IO (Maybe VM)
@@ -2299,7 +2295,7 @@ hex :: ByteString -> ByteString
 hex s =
   case BS16.decodeBase16 s of
     Right x -> x
-    Left e -> internalError $ T.unpack e
+    Left e -> error $ T.unpack e
 
 singleContract :: Text -> Text -> IO (Maybe ByteString)
 singleContract x s =
@@ -2354,7 +2350,7 @@ decodeAbiValues :: [AbiType] -> ByteString -> [AbiValue]
 decodeAbiValues types bs =
   let xy = case decodeAbiValue (AbiTupleType $ Vector.fromList types) (BS.fromStrict (BS.drop 4 bs)) of
         AbiTuple xy' -> xy'
-        _ -> internalError "AbiTuple expected"
+        _ -> error "AbiTuple expected"
   in Vector.toList xy
 
 newtype Bytes = Bytes ByteString
@@ -2374,11 +2370,11 @@ instance Arbitrary RLPData where
   arbitrary = frequency
    [(5, do
            Bytes bytes <- arbitrary
-           return $ RLPData $ BS bytes)
+           pure $ RLPData $ BS bytes)
    , (1, do
          k <- choose (0,10)
          ls <- vectorOf k arbitrary
-         return $ RLPData $ List [r | RLPData r <- ls])
+         pure $ RLPData $ List [r | RLPData r <- ls])
    ]
 
 instance Arbitrary Word128 where
@@ -2413,7 +2409,7 @@ newtype LitWord (sz :: Nat) = LitWord (Expr EWord)
   deriving (Show)
 
 instance (KnownNat sz) => Arbitrary (LitWord sz) where
-  arbitrary = LitWord <$> genLit (fromInteger v)
+  arbitrary = LitWord <$> genLit (unsafeInto v)
     where
       v = natVal (Proxy @sz)
 
@@ -2499,7 +2495,7 @@ instance Arbitrary GenWriteByteIdx where
   arbitrary = do
     -- 1st: can never overflow an Int
     -- 2nd: can overflow an Int
-    let mkIdx = frequency [ (10, genLit (fromIntegral (1_000_000 :: Int))) , (1, fmap Lit arbitrary) ]
+    let mkIdx = frequency [ (10, genLit 1_000_000) , (1, fmap Lit arbitrary) ]
     fmap GenWriteByteIdx mkIdx
 
 genByte :: Int -> Gen (Expr Byte)
@@ -2518,7 +2514,7 @@ genLit bound = do
   pure $ Lit (w `mod` bound)
 
 genNat :: Gen Int
-genNat = fmap fromIntegral (arbitrary :: Gen Natural)
+genNat = chooseInt (0, maxBound)
 
 genName :: Gen Text
 -- In order not to generate SMT reserved words, we prepend with "esc_"
@@ -2532,7 +2528,7 @@ genEnd 0 = oneof
  ]
 genEnd sz = oneof
  [ fmap (Failure mempty mempty . Revert) subBuf
- , liftM4 Success (return mempty) (return mempty) subBuf subStore
+ , liftM2 (Success mempty mempty) subBuf subStore
  , liftM3 ITE subWord subEnd subEnd
  ]
  where
@@ -2765,7 +2761,7 @@ bothM :: (Monad m) => (a -> m b) -> (a, a) -> m (b, b)
 bothM f (a, a') = do
   b  <- f a
   b' <- f a'
-  return (b, b')
+  pure (b, b')
 
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))

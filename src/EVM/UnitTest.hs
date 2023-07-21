@@ -487,7 +487,7 @@ decodeCalls b = fromMaybe (internalError "could not decode replay data") $ do
   pure $ unList <$> v
   where
     unList (List [BS caller', BS target, BS cd, BS ts]) =
-      (unsafeInto (word caller'), unsafeInto (word target), cd, word ts)
+      (truncateTo (word caller'), truncateTo (word target), cd, word ts)
     unList _ = internalError "fix me with better types"
 
 -- | Runs an invariant test, calls the invariant before execution begins

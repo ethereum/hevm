@@ -504,7 +504,7 @@ readCombinedJSON json = do
              zip (catMaybes sources) [0..]
        )
   where
-    asts = KeyMap.toHashMapText $ fromMaybe (error "JSON lacks abstract syntax trees.") (json ^? key "sources" % _Object)
+    asts = KeyMap.toHashMapText $ fromMaybe (internalError "JSON lacks abstract syntax trees.") (json ^? key "sources" % _Object)
     f x = Map.fromList . HMap.toList $ HMap.mapWithKey g x
     g s x =
       let
@@ -650,8 +650,8 @@ toCode :: Text -> ByteString
 toCode t = case BS16.decodeBase16 (encodeUtf8 t) of
   Right d -> d
   Left e -> if containsLinkerHole t
-            then error "Error: unlinked libraries detected in bytecode"
-            else error $ T.unpack e
+            then internalError "unlinked libraries detected in bytecode"
+            else internalError $ T.unpack e
 
 solidity' :: Text -> IO (Text, Text)
 solidity' src = withSystemTempFile "hevm.sol" $ \path handle -> do

@@ -1,4 +1,5 @@
 module EVM.Test.BlockchainTests where
+{- hlint ignore "use internalError" -}
 
 import EVM (initialContract, makeVm)
 import EVM.Concrete qualified as EVM
@@ -145,7 +146,7 @@ debugVMTest file test = do
   Right allTests <- parseBCSuite <$> LazyByteString.readFile (repo </> file)
   let x = case filter (\(name, _) -> name == test) $ Map.toList allTests of
         [(_, x')] -> x'
-        _ -> internalError "test not found"
+        _ -> error "test not found"
   let vm0 = vmForCase x
   result <- withSolvers Z3 0 Nothing $ \solvers ->
     TTY.runFromVM solvers Nothing Nothing emptyDapp vm0
@@ -163,8 +164,8 @@ checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
     printContracts :: Map Addr (Contract, Storage) -> IO ()
     printContracts cs = putStrLn $ Map.foldrWithKey (\k (c, s) acc ->
       acc ++ show k ++ " : "
-                   ++ (show . toInteger  $ (view #nonce c)) ++ " "
-                   ++ (show . toInteger  $ (view #balance c)) ++ " "
+                   ++ (show . into @Integer $ (view #nonce c)) ++ " "
+                   ++ (show . into @Integer $ (view #balance c)) ++ " "
                    ++ (printStorage s)
         ++ "\n") "" cs
 
@@ -215,7 +216,7 @@ checkExpectation diff x vm = do
     storageEqual = s1 == s2
     codeEqual = case (c1 ^. #contractcode, c2 ^. #contractcode) of
       (RuntimeCode a', RuntimeCode b') -> a' == b'
-      _ -> internalError "unexpected code"
+      _ -> error "unexpected code"
 
 checkExpectedContracts :: VM -> Map Addr (Contract, Storage) -> (Bool, Bool, Bool, Bool, Bool)
 checkExpectedContracts vm expected =
@@ -235,7 +236,7 @@ checkExpectedContracts vm expected =
       EmptyStore -> mempty
       AbstractStore -> mempty -- error "AbstractStore, should this be handled?"
       SStore {} -> mempty -- error "SStore, should this be handled?"
-      GVar _ -> internalError "unexpected global variable"
+      GVar _ -> error "unexpected global variable"
 
 clearStorage :: (Contract, Storage) -> (Contract, Storage)
 clearStorage (c, _) = (c, mempty)
@@ -260,7 +261,7 @@ instance FromJSON ContractWithStorage where
     let c = EVM.initialContract code
               & #balance .~ balance'
               & #nonce   .~ nonce'
-    return $ ContractWithStorage (c, storage')
+    pure $ ContractWithStorage (c, storage')
 
   parseJSON invalid =
     JSON.typeMismatch "Contract" invalid
@@ -285,7 +286,7 @@ instance FromJSON Block where
     baseFee    <- fmap read <$> v' .:? "baseFeePerGas"
     timestamp  <- wordField v' "timestamp"
     mixHash    <- wordField v' "mixHash"
-    return $ Block coinbase difficulty mixHash gasLimit (fromMaybe 0 baseFee) number timestamp txs
+    pure $ Block coinbase difficulty mixHash gasLimit (fromMaybe 0 baseFee) number timestamp txs
   parseJSON invalid =
     JSON.typeMismatch "Block" invalid
 
@@ -442,7 +443,7 @@ checkTx tx block prestate = do
   if isCreate && (badNonce || nonEmptyAccount || initCodeSizeExceeded)
   then mzero
   else
-    return prestate
+    pure prestate
 
 vmForCase :: Case -> VM
 vmForCase x =

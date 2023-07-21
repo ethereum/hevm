@@ -24,12 +24,12 @@ itemInfo bs | bs == mempty = (0, 0, False, False)
   x | 184 <= x && x < 192 -> (1 + pre, len, False, (len > 55) && BS.head (BS.drop 1 bs) /= 0) -- long string
     where pre = into $ x - 183
           -- TODO: unsafeInto fails: cabal run test -- -p 'rlp' --quickcheck-replay=413899
-          len = fromIntegral $ word $ slice 1 pre bs
+          len = unsafeInto $ word $ slice 1 pre bs
   x | 192 <= x && x < 248 -> (1, into $ x - 192, True, True) -- short list
   x                       -> (1 + pre, len, True, (len > 55) && BS.head (BS.drop 1 bs) /= 0) -- long list
     where pre = into $ x - 247
           -- TODO: unsafeInto fails: cabal run test -- -p 'rlp' --quickcheck-replay=146332
-          len = fromIntegral $ word $ slice 1 pre bs
+          len = unsafeInto $ word $ slice 1 pre bs
 
 rlpdecode :: ByteString -> Maybe RLP
 rlpdecode bs =
@@ -69,15 +69,18 @@ rlpList n = rlpencode $ List n
 
 octets :: W256 -> ByteString
 octets x =
-  BS.pack $ dropWhile (== 0) [fromIntegral (shiftR x (8 * i)) | i <- reverse [0..31]]
+  -- TODO: is this correct? do we really wanna truncate here? tests fail if we don't...
+  BS.pack $ dropWhile (== 0) [truncateTo (shiftR x (8 * i)) | i <- reverse [0..31]]
 
 octetsFull :: Int -> W256 -> ByteString
 octetsFull n x =
-  BS.pack $ [fromIntegral (shiftR x (8 * i)) | i <- reverse [0..n]]
+  -- TODO: is this correct? do we really wanna truncate here? tests fail if we don't...
+  BS.pack $ [truncateTo (shiftR x (8 * i)) | i <- reverse [0..n]]
 
 octets160 :: Addr -> ByteString
 octets160 x =
-  BS.pack $ dropWhile (== 0) [fromIntegral (shiftR x (8 * i)) | i <- reverse [0..19]]
+  -- TODO: is this correct? do we really wanna truncate here? tests fail if we don't...
+  BS.pack $ dropWhile (== 0) [truncateTo (shiftR x (8 * i)) | i <- reverse [0..19]]
 
 rlpWord256 :: W256 -> RLP
 rlpWord256 0 = BS mempty
