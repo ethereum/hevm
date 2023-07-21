@@ -304,8 +304,6 @@ interpretWithCoverage opts@UnitTestOptions{..} =
       case action of
         Stepper.Exec ->
           execWithCoverage >>= interpretWithCoverage opts . k
-        Stepper.Run ->
-          runWithCoverage >>= interpretWithCoverage opts . k
         Stepper.Wait (PleaseAskSMT (Lit c) _ continue) ->
           interpretWithCoverage opts (Stepper.evm (continue (Case (c > 0))) >>= k)
         Stepper.Wait q ->

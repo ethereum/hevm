@@ -569,8 +569,6 @@ interpretWithTrace fetcher =
       case action of
         Stepper.Exec ->
           execWithTrace >>= interpretWithTrace fetcher . k
-        Stepper.Run ->
-          runWithTrace >>= interpretWithTrace fetcher . k
         Stepper.Wait q -> case q of
           PleaseAskSMT (Lit x) _ continue ->
             interpretWithTrace fetcher (Stepper.evm (continue (Case (x > 0))) >>= k)
