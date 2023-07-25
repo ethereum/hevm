@@ -495,39 +495,35 @@ reachable solvers e = do
           Unsat -> pure ([query], Nothing)
           r -> internalError $ "Invalid solver result: " <> show r
 
-
 -- | Evaluate the provided proposition down to its most concrete result
 evalProp :: Prop -> Prop
-evalProp = \case
-  o@(PBool _) -> o
-  o@(PNeg p)  -> case p of
-              (PBool b) -> PBool (not b)
-              _ -> o
-  o@(PEq l r) -> if l == r
-                 then PBool True
-                 else o
-  o@(PLT (Lit l) (Lit r)) -> if l < r
-                             then PBool True
-                             else o
-  o@(PGT (Lit l) (Lit r)) -> if l > r
-                             then PBool True
-                             else o
-  o@(PGEq (Lit l) (Lit r)) -> if l >= r
-                              then PBool True
-                              else o
-  o@(PLEq (Lit l) (Lit r)) -> if l <= r
-                              then PBool True
-                              else o
-  o@(PAnd l r) -> case (evalProp l, evalProp r) of
-                    (PBool True, PBool True) -> PBool True
-                    (PBool _, PBool _) -> PBool False
-                    _ -> o
-  o@(POr l r) -> case (evalProp l, evalProp r) of
-                   (PBool False, PBool False) -> PBool False
-                   (PBool _, PBool _) -> PBool True
-                   _ -> o
-  o -> o
+evalProp prop =
+  let new = mapProp' go prop
+  in if (new == prop) then prop else evalProp new
+  where
+    go :: Prop -> Prop
+    go (PLT (Lit l) (Lit r)) = PBool (l < r)
+    go (PGT (Lit l) (Lit r)) = PBool (l > r)
+    go (PGEq (Lit l) (Lit r)) = PBool (l >= r)
+    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
+    go (PNeg (PBool b)) = PBool (not b)
 
+    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
+    go (PAnd (PBool False) _) = PBool False
+    go (PAnd _ (PBool False)) = PBool False
+
+    go (POr (PBool l) (PBool r)) = PBool (l || r)
+    go (POr (PBool True) _) = PBool True
+    go (POr _ (PBool True)) = PBool True
+
+    go (PImpl (PBool l) (PBool r)) = PBool ((not l) || r)
+    go (PImpl (PBool False) _) = PBool True
+
+    go (PEq (Lit l) (Lit r)) = PBool (l == r)
+    go o@(PEq l r)
+      | l == r = PBool True
+      | otherwise = o
+    go p = p
 
 -- | Extract contraints stored in Expr End nodes
 extractProps :: Expr End -> [Prop]
