@@ -2,6 +2,8 @@ name: "Build"
 on:
   pull_request:
   push:
+    branches:
+      main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -12,40 +14,34 @@ jobs:
     strategy:
       matrix:
        os: [ ubuntu-latest, macos-latest ]
-       # we need this to map platform names as used by github to
-       # the attribute names defined in release.nix
        include:
          - os: ubuntu-latest
-           os_attr: linux
+           os_attr: x86_64-linux
          - os: macos-latest
-           os_attr: darwin
+           os_attr: x86_64-macos
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
-      - uses: cachix/install-nix-action@v22
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable
-          extra_nix_config: |
-            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
-      - uses: cachix/cachix-action@v12
-        with:
-          name: hevm
-          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
-      - name: run cabal check
-        run: nix-shell --pure --command "cabal check --verbose=3"
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: build hevm
-        run: nix build .#withTests -L
+        run: nix build .#ci -L
       - name: Upload artifacts
-        if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v3
         with:
-          name: hevm-x86_64-linux
+          name: hevm-${{ matrix.os_attr }}
           path: result/bin/hevm
+
+  rpc-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: run rpc tests
         run: nix-shell --pure --command "cabal run rpc-tests"
-      - name: run ethereum tests
-        run: nix-shell --command "cabal run ethereum-tests"
+
   build-windows:
     name: build (windows-latest)
     runs-on: windows-latest
@@ -73,12 +69,11 @@ jobs:
             gmp:p
             openssl:p
       - uses: haskell/actions/setup@v2
-        id: cabal
+        id: setup
         with:
-          ghc-version: '9.2'
-      - name: run cabal check
-        run: cabal check --verbose=3
-      - name: build and install dependencies
+          ghc-version: '9.2.8'
+
+      - name: build and install c dependencies
         run: |
           echo "::group::Installing libsecp256k1"
           ./.github/scripts/install-libsecp256k1.sh
@@ -86,6 +81,43 @@ jobs:
           echo "::group::Installing libff"
           ./.github/scripts/install-libff.sh
           echo "::endgroup::"
+      - name: Configure the build
+        run: |
+          cabal configure --disable-tests --disable-benchmarks --disable-documentation
+          cabal build --dry-run
+          # The last step generates dist-newstyle/cache/plan.json for the cache key.
+
+      - name: Restore cached dependencies
+        uses: actions/cache/restore@v3
+        id: cache
+        env:
+          key: ${{ runner.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-cabal-${{ steps.setup.outputs.cabal-version }}
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ env.key }}-plan-${{ hashFiles('**/plan.json') }}
+          restore-keys: ${{ env.key }}-
+
+      - name: Install haskell dependencies
+        run: cabal build all --only-dependencies
+
+      # Cache dependencies already, so that we do not have to rebuild them should the subsequent steps fail.
+      - name: Save cached dependencies
+        uses: actions/cache/save@v3
+        # Caches are immutable, trying to save with the same key would error.
+        if: ${{ steps.cache.outputs.cache-primary-key != steps.cache.outputs.cache-matched-key }}
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
       - name: build hevm library
         run: |
           cabal build --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib"
+
+  cabal-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: run cabal check
+        run: nix develop -c cabal check --verbose=3
