@@ -650,7 +650,7 @@ data VM = VM
 -- | Alias for the type of e.g. @exec1@.
 type EVM a = State VM a
 
--- | The VM base state (i.e. should new contracts be created with abstract balance / storge?)
+-- | The VM base state (i.e. should new contracts be created with abstract balance / storage?)
 data BaseState
   = EmptyBase
   | AbstractBase
