@@ -357,20 +357,20 @@ readSolc pt root fp =
         pure (Right (BuildOutput contracts sourceCache))
 
 yul :: Text -> Text -> IO (Maybe ByteString)
-yul contract src = do
+yul contractName src = do
   (json, path) <- yul' src
   let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
-      c = f ^?! key (Key.fromText $ if T.null contract then "object" else contract)
+      c = f ^?! key (Key.fromText $ if T.null contractName then "object" else contractName)
       bytecode = c ^?! key "evm" ^?! key "bytecode" ^?! key "object" % _String
-  pure $ toCode <$> (Just bytecode)
+  pure $ (toCode contractName) <$> (Just bytecode)
 
 yulRuntime :: Text -> Text -> IO (Maybe ByteString)
-yulRuntime contract src = do
+yulRuntime contractName src = do
   (json, path) <- yul' src
   let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
-      c = f ^?! key (Key.fromText $ if T.null contract then "object" else contract)
+      c = f ^?! key (Key.fromText $ if T.null contractName then "object" else contractName)
       bytecode = c ^?! key "evm" ^?! key "deployedBytecode" ^?! key "object" % _String
-  pure $ toCode <$> (Just bytecode)
+  pure $ (toCode contractName) <$> (Just bytecode)
 
 solidity :: Text -> Text -> IO (Maybe ByteString)
 solidity contract src = do
@@ -404,11 +404,11 @@ readJSON Foundry contractName json = readFoundryJSON contractName json
 readFoundryJSON :: Text -> Text -> Maybe (Contracts, Asts, Sources)
 readFoundryJSON contractName json = do
   runtime <- json ^? key "deployedBytecode"
-  runtimeCode <- toCode . strip0x'' <$> runtime ^? key "object" % _String
+  runtimeCode <- (toCode contractName) . strip0x'' <$> runtime ^? key "object" % _String
   runtimeSrcMap <- makeSrcMaps =<< runtime ^? key "sourceMap" % _String
 
   creation <- json ^? key "bytecode"
-  creationCode <- toCode . strip0x'' <$> creation ^? key "object" % _String
+  creationCode <- (toCode contractName) . strip0x'' <$> creation ^? key "object" % _String
   creationSrcMap <- makeSrcMaps =<< creation ^? key "sourceMap" % _String
 
   ast <- json ^? key "ast"
@@ -460,10 +460,11 @@ readStdJSON json = do
     h s (c, x) =
       let
         evmstuff = x ^?! key "evm"
+        sc = s <> ":" <> c
         runtime = evmstuff ^?! key "deployedBytecode"
         creation =  evmstuff ^?! key "bytecode"
-        theRuntimeCode = toCode $ fromMaybe "" $ runtime ^? key "object" % _String
-        theCreationCode = toCode $ fromMaybe "" $ creation ^? key "object" % _String
+        theRuntimeCode = (toCode sc) $ fromMaybe "" $ runtime ^? key "object" % _String
+        theCreationCode = (toCode sc) $ fromMaybe "" $ creation ^? key "object" % _String
         srcContents :: Maybe (HMap.HashMap Text Text)
         srcContents = do metadata <- x ^? key "metadata" % _String
                          srcs <- KeyMap.toHashMapText <$> metadata ^? key "sources" % _Object
@@ -472,14 +473,14 @@ readStdJSON json = do
                            (HMap.filter (isJust . preview (key "content")) srcs)
         abis = force ("abi key not found in " <> show x) $
           toList <$> x ^? key "abi" % _Array
-      in (s <> ":" <> c, (SolcContract {
+      in (sc, (SolcContract {
         runtimeCode      = theRuntimeCode,
         creationCode     = theCreationCode,
         runtimeCodehash  = keccak' (stripBytecodeMetadata theRuntimeCode),
         creationCodehash = keccak' (stripBytecodeMetadata theCreationCode),
         runtimeSrcmap    = force "srcmap-runtime" (makeSrcMaps (runtime ^?! key "sourceMap" % _String)),
         creationSrcmap   = force "srcmap" (makeSrcMaps (creation ^?! key "sourceMap" % _String)),
-        contractName = s <> ":" <> c,
+        contractName = sc,
         constructorInputs = mkConstructor abis,
         abiMap        = mkAbiMap abis,
         eventMap      = mkEventMap abis,
@@ -508,8 +509,8 @@ readCombinedJSON json = do
     f x = Map.fromList . HMap.toList $ HMap.mapWithKey g x
     g s x =
       let
-        theRuntimeCode = toCode (x ^?! key "bin-runtime" % _String)
-        theCreationCode = toCode (x ^?! key "bin" % _String)
+        theRuntimeCode = (toCode s) (x ^?! key "bin-runtime" % _String)
+        theCreationCode = (toCode s) (x ^?! key "bin" % _String)
         abis = toList $ case (x ^?! key "abi") ^? _Array of
                  Just v -> v                                       -- solc >= 0.8
                  Nothing -> (x ^?! key "abi" % _String) ^?! _Array -- solc <  0.8
@@ -646,12 +647,12 @@ parseMethodInput x =
 containsLinkerHole :: Text -> Bool
 containsLinkerHole = regexMatches "__\\$[a-z0-9]{34}\\$__"
 
-toCode :: Text -> ByteString
-toCode t = case BS16.decodeBase16 (encodeUtf8 t) of
+toCode :: Text -> Text -> ByteString
+toCode contractName t = case BS16.decodeBase16 (encodeUtf8 t) of
   Right d -> d
   Left e -> if containsLinkerHole t
-            then error "Error: unlinked libraries detected in bytecode"
-            else error $ T.unpack e
+            then error $ T.unpack ("Error toCode: unlinked libraries detected in bytecode, in " <> contractName)
+            else error $ T.unpack ("Error toCode:" <> e <> ", in " <> contractName)
 
 solidity' :: Text -> IO (Text, Text)
 solidity' src = withSystemTempFile "hevm.sol" $ \path handle -> do
