@@ -11,7 +11,7 @@ import EVM.Solvers
 import EVM.Dapp
 import EVM.Debug (srcMapCodePos)
 import EVM.Exec
-import EVM.Expr (litAddr, readStorage', simplify)
+import EVM.Expr (litAddr, simplify)
 import EVM.Expr qualified as Expr
 import EVM.Facts qualified as Facts
 import EVM.Facts.Git qualified as Git
@@ -19,7 +19,7 @@ import EVM.FeeSchedule qualified as FeeSchedule
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, VeriOpts(..))
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, VeriOpts(..), checkAssertions)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.RLP
@@ -704,24 +704,24 @@ fuzzRun opts@UnitTestOptions{..} vm testName types = do
 symRun :: UnitTestOptions -> VM -> Text -> [AbiType] -> IO (Text, Either Text Text, VM)
 symRun opts@UnitTestOptions{..} vm testName types = do
     let cd = symCalldata testName types [] (AbstractBuf "txdata")
-        shouldFail = "proveFail" `isPrefixOf` testName
-        testContract = vm.state.contract
+        -- shouldFail = "proveFail" `isPrefixOf` testName
+        -- testContract = vm.state.contract
 
     -- define postcondition depending on `shouldFail`
     -- We directly encode the failure conditions from failed() in ds-test since this is easier to encode than a call into failed()
     -- we need to read from slot 0 in the test contract and mask it with 0x10 to get the value of _failed
     -- we don't need to do this when reading the failed from the cheatcode address since we don't do any packing there
-    let failed store = (And (readStorage' (litAddr testContract) (Lit 0) store) (Lit 2) .== Lit 2)
-                   .|| (readStorage' (litAddr cheatCode) (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) store .== Lit 1)
-        postcondition = curry $ case shouldFail of
-          True -> \(_, post) -> case post of
-                                  Success _ _ _ store -> failed store
-                                  _ -> PBool True
-          False -> \(_, post) -> case post of
-                                   Success _ _ _ store -> PNeg (failed store)
-                                   Failure _ _ _ -> PBool False
-                                   Partial _ _ _ -> PBool True
-                                   _ -> internalError "Invalid leaf node"
+    -- let failed store = (And (readStorage' (litAddr testContract) (Lit 0) store) (Lit 2) .== Lit 2)
+    --                .|| (readStorage' (litAddr cheatCode) (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) store .== Lit 1)
+    --     postcondition = curry $ case shouldFail of
+    --       True -> \(_, post) -> case post of
+    --                               Success _ _ _ store -> failed store
+    --                               _ -> PBool True
+    --       False -> \(_, post) -> case post of
+    --                                Success _ _ _ store -> PNeg (failed store)
+    --                                Failure _ _ _ -> PBool False
+    --                                Partial _ _ _ -> PBool True
+    --                                _ -> internalError "Invalid leaf node"
 
     vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
       Stepper.evm $ do
@@ -730,7 +730,7 @@ symRun opts@UnitTestOptions{..} vm testName types = do
         get
 
     -- check postconditions against vm
-    (_, results) <- verify solvers (makeVeriOpts opts) vm' (Just postcondition)
+    (_, results) <- verify solvers (makeVeriOpts opts) vm' (Just $ checkAssertions [0x01])
 
     -- display results
     if all isQed results
