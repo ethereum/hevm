@@ -280,7 +280,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
 
         case q of
           PleaseAskSMT cond _ continue -> do
-            case cond of
+            case Expr.simplify cond of
               -- is the condition concrete?
               Lit c ->
                 -- have we reached max iterations, are we inside a loop?
