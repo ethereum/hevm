@@ -900,26 +900,30 @@ exec1 = do
           notStatic $
           case stk of
             [] -> underrun
-            (xTo':_) -> forceAddr xTo' "SELFDESTRUCT" $ \xTo -> do
-              acc <- accessAccountForGas xTo
-              let cost = if acc then 0 else g_cold_account_access
-                  funds = this.balance
-                  recipientExists = accountExists xTo vm
-              branch (Expr.iszero $ Expr.eq funds (Lit 0)) $ \hasFunds -> do
-                let c_new = if (not recipientExists) && hasFunds
-                            then g_selfdestruct_newaccount
-                            else 0
-                burn (g_selfdestruct + c_new + cost) $ do
-                  selfdestruct self
-                  touchAccount xTo
+            (xTo':_) -> forceAddr xTo' "SELFDESTRUCT" $ \case
+              xTo@(LitAddr _) -> do
+                acc <- accessAccountForGas xTo
+                let cost = if acc then 0 else g_cold_account_access
+                    funds = this.balance
+                    recipientExists = accountExists xTo vm
+                branch (Expr.iszero $ Expr.eq funds (Lit 0)) $ \hasFunds -> do
+                  let c_new = if (not recipientExists) && hasFunds
+                              then g_selfdestruct_newaccount
+                              else 0
+                  burn (g_selfdestruct + c_new + cost) $ do
+                    selfdestruct self
+                    touchAccount xTo
 
-                  if hasFunds
-                  then fetchAccount xTo $ \_ -> do
-                         #env % #contracts % ix xTo % #balance %= (Expr.add funds)
-                         assign (#env % #contracts % ix self % #balance) (Lit 0)
-                         doStop
-                  else do
-                    doStop
+                    if hasFunds
+                    then fetchAccount xTo $ \_ -> do
+                           #env % #contracts % ix xTo % #balance %= (Expr.add funds)
+                           assign (#env % #contracts % ix self % #balance) (Lit 0)
+                           doStop
+                    else do
+                      doStop
+              a -> do
+                pc <- use (#state % #pc)
+                partial $ UnexpectedSymbolicArg pc "trying to self destruct to a symbolic address" (wrap [a])
 
         OpRevert ->
           case stk of
@@ -951,12 +955,24 @@ transfer src dst val = do
           (#env % #contracts % ix dst % #balance) %= (`Expr.add` val)
     -- sender not in state
     (Nothing, Just _) -> do
-      (#env % #contracts) %= (Map.insert src (mkc src))
-      transfer src dst val
+      case src of
+        LitAddr _ -> do
+          (#env % #contracts) %= (Map.insert src (mkc src))
+          transfer src dst val
+        SymAddr _ -> do
+          pc <- use (#state % #pc)
+          partial $ UnexpectedSymbolicArg pc "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [src])
+        GVar _ -> internalError "Unexpected GVar"
     -- recipient not in state
     (_ , Nothing) -> do
-      (#env % #contracts) %= (Map.insert dst (mkc dst))
-      transfer src dst val
+      case dst of
+        LitAddr _ -> do
+          (#env % #contracts) %= (Map.insert dst (mkc dst))
+          transfer src dst val
+        SymAddr _ -> do
+          pc <- use (#state % #pc)
+          partial $ UnexpectedSymbolicArg pc "Attempting to transfer eth to a symbolic address that is not present in the state" (wrap [dst])
+        GVar _ -> internalError "Unexpected GVar"
 
 -- | Checks a *CALL for failure; OOG, too many callframes, memory access etc.
 callChecks
@@ -1014,9 +1030,9 @@ precompiledContract this xGas precompileAddr recipient xValue inOffset inSize ou
               pure ()
             Just 1 ->
               fetchAccount (LitAddr recipient) $ \_ -> do
-                transfer self (LitAddr recipient) xValue
                 touchAccount self
                 touchAccount (LitAddr recipient)
+                transfer self (LitAddr recipient) xValue
             _ -> partial $
                    UnexpectedSymbolicArg pc' "unexpected return value from precompile" (wrap [x])
           _ -> underrun
@@ -1244,9 +1260,8 @@ fetchAccount addr continue =
     Just c -> continue c
     Nothing -> case addr of
       SymAddr _ -> do
-        let c = unknownContract addr
-        assign (#env % #contracts % at addr) (Just c)
-        continue c
+        pc <- use (#state % #pc)
+        partial $ UnexpectedSymbolicArg pc "trying to fetch a symbolic address that isn't already present in storage" (wrap [addr])
       LitAddr a -> do
         use (#cache % #fetched % at a) >>= \case
           Just c -> do

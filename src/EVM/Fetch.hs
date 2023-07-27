@@ -210,6 +210,7 @@ oracle solvers info q = do
 
     PleaseFetchContract addr continue -> do
       contract <- case info of
+        -- TODO: respect storage base
         Nothing -> return $ Just emptyContract
         Just (n, url) -> fetchContractFrom n url addr
       case contract of
