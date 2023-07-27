@@ -50,7 +50,6 @@ import Data.Vector.Storable qualified as SV
 import Data.Vector.Storable.Mutable qualified as SV
 import Data.Word (Word8, Word32, Word64)
 import Witch (into, unsafeInto)
-import Debug.Trace
 
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
@@ -1127,7 +1126,7 @@ branch loc cond continue = do
     condSimp = Expr.simplify cond
     choosePath (Case v) = do
       assign #result Nothing
-      pushTo #constraints $ if v then (condSimp ./= Lit 0) else (condSimp .== Lit 0)
+      pushTo #constraints $ if v then Expr.evalProp (condSimp ./= Lit 0) else Expr.evalProp (condSimp .== Lit 0)
       (iteration, _) <- use (#iterations % at loc % non (0,[]))
       stack <- use (#state % #stack)
       assign (#cache % #path % at (loc, iteration)) (Just v)

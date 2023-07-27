@@ -47,7 +47,6 @@ import GHC.Generics (Generic)
 import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
 import Witch (into, unsafeInto)
-import Debug.Trace
 
 -- | A method name, and the (ordered) types of it's arguments
 data Sig = Sig Text [AbiType]
@@ -281,7 +280,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
 
         case q of
           PleaseAskSMT cond _ continue -> do
-            case Expr.simplify cond of
+            case cond of
               -- is the condition concrete?
               Lit c ->
                 -- have we reached max iterations, are we inside a loop?
@@ -496,36 +495,6 @@ reachable solvers e = do
           Unsat -> pure ([query], Nothing)
           r -> internalError $ "Invalid solver result: " <> show r
 
--- | Evaluate the provided proposition down to its most concrete result
-evalProp :: Prop -> Prop
-evalProp prop =
-  let new = mapProp' go prop
-  in if (new == prop) then prop else evalProp new
-  where
-    go :: Prop -> Prop
-    go (PLT (Lit l) (Lit r)) = PBool (l < r)
-    go (PGT (Lit l) (Lit r)) = PBool (l > r)
-    go (PGEq (Lit l) (Lit r)) = PBool (l >= r)
-    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
-    go (PNeg (PBool b)) = PBool (not b)
-
-    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
-    go (PAnd (PBool False) _) = PBool False
-    go (PAnd _ (PBool False)) = PBool False
-
-    go (POr (PBool l) (PBool r)) = PBool (l || r)
-    go (POr (PBool True) _) = PBool True
-    go (POr _ (PBool True)) = PBool True
-
-    go (PImpl (PBool l) (PBool r)) = PBool ((not l) || r)
-    go (PImpl (PBool False) _) = PBool True
-
-    go (PEq (Lit l) (Lit r)) = PBool (l == r)
-    go o@(PEq l r)
-      | l == r = PBool True
-      | otherwise = o
-    go p = p
-
 -- | Extract contraints stored in Expr End nodes
 extractProps :: Expr End -> [Prop]
 extractProps = \case
@@ -561,8 +530,8 @@ verify solvers opts preState maybepost = do
   exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
   when opts.debug $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
 
+  putStrLn "Simplifying expression"
   expr <- if opts.simp then (pure $ Expr.simplify exprInter) else pure exprInter
-  putStrLn $ "Simplifying expression. Before simp:" <> (show exprInter) <> " after:" <> (show expr)
   when opts.debug $ T.writeFile "simplified.expr" (formatExpr expr)
 
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
@@ -580,7 +549,7 @@ verify solvers opts preState maybepost = do
       let
         -- Filter out any leaves that can be statically shown to be safe
         canViolate = flip filter flattened $
-          \leaf -> case evalProp (post preState leaf) of
+          \leaf -> case Expr.evalProp (post preState leaf) of
             PBool True -> False
             _ -> True
         assumes = preState.constraints
