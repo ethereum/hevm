@@ -697,7 +697,7 @@ exprToSMT = \case
   SEx a b -> op2 "signext" a b
   Div a b -> op2CheckZero "bvudiv" a b
   SDiv a b -> op2CheckZero "bvsdiv" a b
-  Mod  a b -> op2CheckZero "bvurem" a b
+  Mod a b -> op2CheckZero "bvurem" a b
   SMod a b -> op2CheckZero "bvsrem" a b
   -- NOTE: this needs to do the MUL at a higher precision, then MOD, then downcast
   MulMod a b c ->

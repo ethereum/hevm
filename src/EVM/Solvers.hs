@@ -127,7 +127,6 @@ withSolvers solver count timeout cont = do
                 "timeout" -> pure Unknown
                 "unknown" -> pure Unknown
                 "sat" -> do
-                  -- putStrLn "It's SAT, let's run with abstraction defined"
                   _ <- sendScript inst (SMT2 abstData undefined undefined)
                   sat2 <- sendLine inst "(check-sat)"
                   case sat2 of
