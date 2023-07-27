@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - EVM.Solidity.toCode to include contractName in error string
 
 ## Changed
+- Run expression simplification on branch conditions
 
 ## [0.51.3] - 2023-07-14
 
