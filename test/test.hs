@@ -48,7 +48,7 @@ import EVM.ABI
 import EVM.Exec
 import EVM.Expr qualified as Expr
 import EVM.Fetch qualified as Fetch
-import EVM.Format (hexText, formatExpr)
+import EVM.Format (hexText)
 import EVM.Patricia qualified as Patricia
 import EVM.Precompiled
 import EVM.RLP
@@ -1952,7 +1952,7 @@ tests = testGroup "hevm"
               }
             |]
           res <- reachableUserAsserts c Nothing
-          assertEqual "should not be able to alias" Nothing res
+          assertEqual "should not be able to alias" [] res
         ,
         testCase "addresses-in-args-can-alias-anything" $ do
           let addrs :: [String]
@@ -1968,7 +1968,7 @@ tests = testGroup "hevm"
 
           [self, origin, coinbase, caller] <- forM addrs $ \addr -> do
             Just c <- solcRuntime "C" (checkVs addr)
-            Just [cex] <- reachableUserAsserts c sig
+            [cex] <- reachableUserAsserts c sig
             pure cex.addrs
 
           let check as a = (Map.lookup (SymAddr "arg1") as) @?= (Map.lookup a as)
@@ -1987,7 +1987,7 @@ tests = testGroup "hevm"
               }
             |]
           let sig = Just $ Sig "f(address,address)" [AbiAddressType,AbiAddressType]
-          Just [cex] <- reachableUserAsserts c sig
+          [cex] <- reachableUserAsserts c sig
           let arg1 = fromJust $ Map.lookup (SymAddr "arg1") cex.addrs
               arg2 = fromJust $ Map.lookup (SymAddr "arg1") cex.addrs
           assertEqual "should match" arg1 arg2
@@ -2001,7 +2001,7 @@ tests = testGroup "hevm"
                 }
               }
             |]
-          Just [cex] <- reachableUserAsserts c Nothing
+          [cex] <- reachableUserAsserts c Nothing
           let origin = Map.lookup (SymAddr "origin") cex.addrs
               caller = Map.lookup (SymAddr "caller") cex.addrs
           assertEqual "orgin and caller should match" origin caller
@@ -3143,8 +3143,8 @@ bothM f (a, a') = do
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
 
-reachableUserAsserts :: ByteString -> Maybe Sig -> IO (Maybe [SMTCex])
+reachableUserAsserts :: ByteString -> Maybe Sig -> IO [SMTCex]
 reachableUserAsserts c sig = do
   (_, res) <- withSolvers Z3 1 Nothing $ \s ->
     verifyContract s c sig [] debugVeriOpts Nothing (Just $ checkAssertions [0x01])
-  mapMaybe getCex res
+  pure $ snd <$> mapMaybe getCex res
