@@ -1268,8 +1268,9 @@ fetchAccount addr continue =
             assign (#env % #contracts % at addr) (Just c)
             continue c
           Nothing -> do
+            base <- use (#config % #baseState)
             assign (#result) . Just . HandleEffect . Query $
-              PleaseFetchContract a
+              PleaseFetchContract a base
                 (\c -> do assign (#cache % #fetched % at a) (Just c)
                           assign (#env % #contracts % at addr) (Just c)
                           assign #result Nothing

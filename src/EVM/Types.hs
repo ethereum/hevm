@@ -584,7 +584,7 @@ deriving instance Show Effect
 
 -- | Queries halt execution until resolved through RPC calls or SMT queries
 data Query where
-  PleaseFetchContract :: Addr -> (Contract -> EVM ()) -> Query
+  PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM ()) -> Query
   PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM ()) -> Query
   PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM ()) -> Query
   PleaseDoFFI         :: [String] -> (ByteString -> EVM ()) -> Query
@@ -599,8 +599,8 @@ data BranchCondition = Case Bool | Unknown
 
 instance Show Query where
   showsPrec _ = \case
-    PleaseFetchContract addr _ ->
-      (("<EVM.Query: fetch contract " ++ show addr ++ ">") ++)
+    PleaseFetchContract addr base _ ->
+      (("<EVM.Query: fetch contract " ++ show addr ++ show base ++ ">") ++)
     PleaseFetchSlot addr slot _ ->
       (("<EVM.Query: fetch slot "
         ++ show slot ++ " for "

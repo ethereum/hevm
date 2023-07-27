@@ -2,7 +2,7 @@
 
 module EVM.Fetch where
 
-import EVM (initialContract)
+import EVM (initialContract, unknownContract)
 import EVM.ABI
 import EVM.FeeSchedule qualified as FeeSchedule
 import EVM.Format (hexText)
@@ -208,10 +208,13 @@ oracle solvers info q = do
          -- Is is possible to satisfy the condition?
          continue <$> checkBranch solvers (branchcondition ./= (Lit 0)) pathconds
 
-    PleaseFetchContract addr continue -> do
+    PleaseFetchContract addr base continue -> do
       contract <- case info of
-        -- TODO: respect storage base
-        Nothing -> return $ Just emptyContract
+        Nothing -> let
+          c = case base of
+            AbstractBase -> unknownContract (LitAddr addr)
+            EmptyBase -> emptyContract
+          in pure $ Just c
         Just (n, url) -> fetchContractFrom n url addr
       case contract of
         Just x -> pure $ continue x
