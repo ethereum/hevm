@@ -112,7 +112,7 @@ withSolvers solver count timeout cont = do
       _ <- forkIO $ runTask task inst avail
       orchestrate queue avail
 
-    runTask (Task (SMT2 cmds (RefinementEqs abstData) cexvars) r) inst availableInstances = do
+    runTask (Task (SMT2 cmds (RefinementEqs refineEqs) cexvars) r) inst availableInstances = do
       -- reset solver and send all lines of provided script
       out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty)
       case out of
@@ -127,7 +127,7 @@ withSolvers solver count timeout cont = do
                 "timeout" -> pure Unknown
                 "unknown" -> pure Unknown
                 "sat" -> do
-                  _ <- sendScript inst (SMT2 abstData mempty mempty)
+                  _ <- sendScript inst (SMT2 refineEqs mempty mempty)
                   sat2 <- sendLine inst "(check-sat)"
                   case sat2 of
                     "unsat" -> pure Unsat
