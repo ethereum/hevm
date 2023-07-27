@@ -695,7 +695,7 @@ exprToSMT = \case
   SHR a b -> op2 "bvlshr" b a
   SAR a b -> op2 "bvashr" b a
   SEx a b -> op2 "signext" a b
-  Div  a b -> op2CheckZero "bvudiv" a b
+  Div a b -> op2CheckZero "bvudiv" a b
   SDiv a b -> op2CheckZero "bvsdiv" a b
   Mod  a b -> op2CheckZero "bvurem" a b
   SMod a b -> op2CheckZero "bvsrem" a b
