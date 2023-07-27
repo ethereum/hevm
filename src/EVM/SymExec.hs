@@ -272,10 +272,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
            in interpret fetcher maxIter askSmtIters heuristic vma (k ra))
           (let (rb, vmb) = runState (continue False) vm { result = Nothing }
            in interpret fetcher maxIter askSmtIters heuristic vmb (k rb))
-        pure $ case cond of
-                 Lit 1 -> a
-                 Lit 0 -> b
-                 _ -> ITE cond a b
+        pure $ ITE cond a b
       Stepper.Wait q -> do
         let performQuery = do
               m <- liftIO (fetcher q)
@@ -284,7 +281,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
 
         case q of
           PleaseAskSMT cond _ continue -> do
-            case cond of
+            case Expr.simplify cond of
               -- is the condition concrete?
               Lit c ->
                 -- have we reached max iterations, are we inside a loop?
@@ -565,7 +562,7 @@ verify solvers opts preState maybepost = do
   when opts.debug $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
 
   expr <- if opts.simp then (pure $ Expr.simplify exprInter) else pure exprInter
-  putStrLn "Simplifying expression. Before simp:" <> show exprInter <> " after:" <> show expr
+  putStrLn $ "Simplifying expression. Before simp:" <> (show exprInter) <> " after:" <> (show expr)
   when opts.debug $ T.writeFile "simplified.expr" (formatExpr expr)
 
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
