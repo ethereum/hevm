@@ -1830,6 +1830,19 @@ tests = testGroup "hevm"
           (_, [Qed _]) <- withSolvers Z3 1 (Just 99999999) $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "Proven"
         ,
+        testCase "check-simpl-if-condition" $ do
+          Just c <- solcRuntime "C"
+            [i|
+              contract C {
+                function cond(uint x) public {
+                  if (x==x) assert(false);
+                }
+              }
+            |]
+
+          (_, [Cex _]) <- withSolvers Z3 1 (Just 99999999) $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "cond(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          putStrLn "Counterexample found, without SMT calls"
+        ,
         testCase "storage-cex-1" $ do
           Just c <- solcRuntime "C"
             [i|

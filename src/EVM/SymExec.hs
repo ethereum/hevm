@@ -47,6 +47,7 @@ import GHC.Generics (Generic)
 import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
 import Witch (into, unsafeInto)
+import Debug.Trace
 
 -- | A method name, and the (ordered) types of it's arguments
 data Sig = Sig Text [AbiType]
@@ -271,7 +272,10 @@ interpret fetcher maxIter askSmtIters heuristic vm =
            in interpret fetcher maxIter askSmtIters heuristic vma (k ra))
           (let (rb, vmb) = runState (continue False) vm { result = Nothing }
            in interpret fetcher maxIter askSmtIters heuristic vmb (k rb))
-        pure $ ITE cond a b
+        pure $ case cond of
+                 Lit 1 -> a
+                 Lit 0 -> b
+                 _ -> ITE cond a b
       Stepper.Wait q -> do
         let performQuery = do
               m <- liftIO (fetcher q)
@@ -280,7 +284,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
 
         case q of
           PleaseAskSMT cond _ continue -> do
-            case Expr.simplify cond of
+            case cond of
               -- is the condition concrete?
               Lit c ->
                 -- have we reached max iterations, are we inside a loop?
@@ -560,8 +564,8 @@ verify solvers opts preState maybepost = do
   exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
   when opts.debug $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
 
-  putStrLn "Simplifying expression"
   expr <- if opts.simp then (pure $ Expr.simplify exprInter) else pure exprInter
+  putStrLn "Simplifying expression. Before simp:" <> show exprInter <> " after:" <> show expr
   when opts.debug $ T.writeFile "simplified.expr" (formatExpr expr)
 
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
