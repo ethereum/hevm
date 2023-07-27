@@ -27,7 +27,6 @@ import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
-import Data.Vector qualified as V
 import EVM (makeVm, abstractContract, getCodeLocation, isValidJumpDest)
 import EVM.Exec
 import EVM.Fetch qualified as Fetch
@@ -36,7 +35,6 @@ import EVM.Expr qualified as Expr
 import EVM.Format (formatExpr, formatPartial)
 import EVM.SMT (SMTCex(..), SMT2(..), assertProps, formatSMT2)
 import EVM.SMT qualified as SMT
-import EVM.Solidity (stripBytecodeMetadataSym, stripBytecodeMetadata)
 import EVM.Solvers
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
