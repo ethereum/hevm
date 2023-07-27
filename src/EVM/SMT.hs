@@ -10,6 +10,7 @@ module EVM.SMT where
 import Prelude hiding (LT, GT)
 
 import Control.Monad
+import Control.Monad.State.Strict
 import Data.Containers.ListUtils (nubOrd)
 import Data.ByteString (ByteString)
 import Data.Bifunctor (second)
@@ -138,8 +139,30 @@ declareIntermediates bufs stores =
     encodeStore n expr =
        "(define-const store" <> (fromString . show $ n) <> " Storage " <> exprToSMT expr <> ")"
 
+abstractMemory :: Expr a -> Expr a
+abstractMemory e = evalState (mapExprM go e) 0
+  where
+    go :: Expr a -> State Int (Expr a)
+    go = \case
+      ReadWord {} -> do
+        idx <- get
+        put $ idx + 1
+        pure $ Var ("abstractReadMemory_" <> TS.pack (show idx))
+      e' -> pure e'
+
+abstractStorage :: Expr a -> Expr a
+abstractStorage e = evalState (mapExprM go e) 0
+  where
+    go :: Expr a -> State Int (Expr a)
+    go = \case
+      SLoad {} -> do
+        idx <- get
+        put $ idx + 1
+        pure $ Var ("abstractReadStorage_" <> TS.pack (show idx))
+      e' -> pure e'
+
 assertProps :: [Prop] -> SMT2
-assertProps ps =
+assertProps ps_pre =
   let encs = map propToSMT ps_elim
       intermediates = declareIntermediates bufs stores in
   prelude
@@ -160,6 +183,7 @@ assertProps ps =
   <> SMT2 [] mempty{ storeReads = storageReads }
 
   where
+    ps = fmap (mapProp (id)) ps_pre
     (ps_elim, bufs, stores) = eliminateProps ps
 
     allVars = fmap referencedVars' ps_elim <> fmap referencedVars bufVals <> fmap referencedVars storeVals
