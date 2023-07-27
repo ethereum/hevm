@@ -121,7 +121,7 @@ withSolvers solver count timeout cont = do
         -- otherwise call (check-sat), parse the result, and send it down the result channel
         Right () -> do
           sat <- sendLine inst "(check-sat)"
-          res :: CheckSatResult <- do
+          res <- do
               case sat of
                 "unsat" -> pure Unsat
                 "timeout" -> pure Unknown
