@@ -444,14 +444,6 @@ showExtras solvers cmd calldata expr = do
     ms <- produceModels solvers expr
     forM_ ms (showModel (fst calldata))
 
-getCex :: ProofResult a b c -> Maybe b
-getCex (Cex c) = Just c
-getCex _ = Nothing
-
-getTimeout :: ProofResult a b c -> Maybe c
-getTimeout (Timeout c) = Just c
-getTimeout _ = Nothing
-
 dappCoverage :: UnitTestOptions -> Mode -> BuildOutput -> IO ()
 dappCoverage opts _ bo@(BuildOutput (Contracts cs) cache) = do
   let unitTests = findUnitTests opts.match $ Map.elems cs

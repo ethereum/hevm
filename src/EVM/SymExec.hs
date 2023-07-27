@@ -967,3 +967,11 @@ subModel c
                then ConcreteStore val
                else v
           e -> e
+
+getCex :: ProofResult a b c -> Maybe b
+getCex (Cex c) = Just c
+getCex _ = Nothing
+
+getTimeout :: ProofResult a b c -> Maybe c
+getTimeout (Timeout c) = Just c
+getTimeout _ = Nothing

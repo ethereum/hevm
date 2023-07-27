@@ -16,6 +16,7 @@ import Data.Aeson qualified as JSON
 import Data.Aeson.Types qualified as JSON
 import Data.Bifunctor (first)
 import Data.Bits (Bits, FiniteBits, shiftR, shift, shiftL, (.&.), (.|.), toIntegralSized)
+import Data.Binary qualified as Binary
 import Data.ByteArray qualified as BA
 import Data.Char
 import Data.List (foldl')
@@ -77,6 +78,7 @@ instance From Word8 W256 where from = fromIntegral
 instance From Word8 Word256 where from = fromIntegral
 instance From Word32 W256 where from = fromIntegral
 instance From Word32 Word256 where from = fromIntegral
+instance From Word32 ByteString where from = toStrict . Binary.encode
 instance From Word64 W256 where from = fromIntegral
 instance From W64 W256 where from = fromIntegral
 instance From Word256 Integer where from = fromIntegral
@@ -289,7 +291,7 @@ data Expr (a :: EType) where
   CodeSize       :: Expr EAddr         -- address
                  -> Expr EWord         -- size
 
-  CodeHash    :: Expr EAddr         -- address
+  CodeHash       :: Expr EAddr         -- address
                  -> Expr EWord         -- size
 
   -- logs
