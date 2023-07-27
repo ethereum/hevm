@@ -4,6 +4,7 @@
 module Main where
 
 import Prelude hiding (LT, GT)
+import Debug.Trace
 
 import GHC.TypeLits
 import Data.Proxy
@@ -21,6 +22,7 @@ import Data.Maybe
 import Data.String.Here
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Typeable
 import Data.Vector qualified as Vector
@@ -48,7 +50,7 @@ import EVM.ABI
 import EVM.Exec
 import EVM.Expr qualified as Expr
 import EVM.Fetch qualified as Fetch
-import EVM.Format (hexText)
+import EVM.Format (hexText, formatExpr)
 import EVM.Patricia qualified as Patricia
 import EVM.Precompiled
 import EVM.RLP
@@ -64,6 +66,8 @@ import EVM.Types
 
 main :: IO ()
 main = defaultMain tests
+
+trace' msg x = trace (msg <> ": " <> show x) x
 
 -- | run a subset of tests in the repl. p is a tasty pattern:
 -- https://github.com/UnkindPartition/tasty/tree/ee6fe7136fbcc6312da51d7f1b396e1a2d16b98a#patterns
@@ -751,6 +755,291 @@ tests = testGroup "hevm"
         (e, [Qed _]) <- withSolvers Z3 1 Nothing $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBool "The expression is partial" $ not (Expr.containsNode isPartial e)
+    ]
+  , testGroup "Symbolic Addresses"
+    [ testCase "symbolic-address-create" $ do
+        let src = [i|
+                  contract A {
+                    constructor() payable {}
+                  }
+                  contract C {
+                    function fun(uint256 a) external{
+                      require(address(this).balance > a);
+                      new A{value:a}();
+                    }
+                  }
+                  |]
+        Just a <- solcRuntime "A" src
+        Just c <- solcRuntime "C" src
+        let sig = Sig "fun(uint256)" [AbiUIntType 256]
+        (expr, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
+          verifyContract s c (Just sig) [] defaultVeriOpts Nothing Nothing
+        let isSuc (Success {}) = True
+            isSuc _ = False
+        case filter isSuc (flattenExpr expr) of
+          [Success _ _ _ store] -> do
+            let ca = fromJust (Map.lookup (SymAddr "freshSymAddr1") store)
+            let code = case ca.code of
+                  RuntimeCode (ConcreteRuntimeCode c') -> c'
+                  _ -> internalError "expected concrete code"
+            assertEqual "balance mismatch" (Var "arg1") ca.balance
+            assertEqual "code mismatch" (stripBytecodeMetadata a) (stripBytecodeMetadata code)
+            assertEqual "nonce mismatch" (Just 1) ca.nonce
+          _ -> assertBool "too many success nodes!" False
+    , testCase "symbolic-balance-call" $ do
+        let src = [i|
+                  contract A {
+                    function f() public payable returns (uint) {
+                      return msg.value;
+                    }
+                  }
+                  contract C {
+                    function fun(uint256 x) external {
+                      require(address(this).balance > x);
+                      A a = new A();
+                      uint res = a.f{value:x}();
+                      assert(res == x);
+                    }
+                  }
+                  |]
+        Just c <- solcRuntime "C" src
+        res <- reachableUserAsserts c Nothing
+        assertEqual "unexpected cex" [] res
+    , testCase "deployed-contract-addresses-cannot-alias" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract A {}
+            contract C {
+              function f() external {
+                A a = new A();
+                if (address(a) == address(this)) assert(false);
+              }
+            }
+          |]
+        res <- reachableUserAsserts c Nothing
+        assertEqual "should not be able to alias" [] res
+    , testCase "addresses-in-args-can-alias-anything" $ do
+        let addrs :: [Text]
+            addrs = ["address(this)", "tx.origin", "block.coinbase", "msg.sender"]
+            sig = Just $ Sig "f(address)" [AbiAddressType]
+            checkVs vs = [i|
+                           contract C {
+                             function f(address a) external {
+                               if (${vs} == a) assert(false);
+                             }
+                           }
+                         |]
+
+        [self, origin, coinbase, caller] <- forM addrs $ \addr -> do
+          Just c <- solcRuntime "C" (checkVs addr)
+          [cex] <- reachableUserAsserts c sig
+          pure cex.addrs
+
+        let check as a = (Map.lookup (SymAddr "arg1") as) @?= (Map.lookup a as)
+        check self (SymAddr "entrypoint")
+        check origin (SymAddr "origin")
+        check coinbase (SymAddr "coinbase")
+        check caller (SymAddr "caller")
+    , testCase "addresses-in-args-can-alias-themselves" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract C {
+              function f(address a, address b) external {
+                if (a == b) assert(false);
+              }
+            }
+          |]
+        let sig = Just $ Sig "f(address,address)" [AbiAddressType,AbiAddressType]
+        [cex] <- reachableUserAsserts c sig
+        let arg1 = fromJust $ Map.lookup (SymAddr "arg1") cex.addrs
+            arg2 = fromJust $ Map.lookup (SymAddr "arg1") cex.addrs
+        assertEqual "should match" arg1 arg2
+    , testCase "tx.origin cannot alias deployed contracts" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract A {}
+            contract C {
+              function f() external {
+                address a = address(new A());
+                if (tx.origin == a) assert(false);
+              }
+            }
+          |]
+        cexs <- reachableUserAsserts c Nothing
+        assertEqual "unexpected cex" [] cexs
+    , testCase "tx.origin can alias everything else" $ do
+        let addrs = ["address(this)", "block.coinbase", "msg.sender", "arg"] :: [Text]
+            sig = Just $ Sig "f(address)" [AbiAddressType]
+            checkVs vs = [i|
+                           contract C {
+                             function f(address arg) external {
+                               if (${vs} == tx.origin) assert(false);
+                             }
+                           }
+                         |]
+
+        [self, coinbase, caller, arg] <- forM addrs $ \addr -> do
+          Just c <- solcRuntime "C" (checkVs addr)
+          [cex] <- reachableUserAsserts c sig
+          pure cex.addrs
+
+        let check as a = (Map.lookup (SymAddr "origin") as) @?= (Map.lookup a as)
+        check self (SymAddr "entrypoint")
+        check coinbase (SymAddr "coinbase")
+        check caller (SymAddr "caller")
+        check arg (SymAddr "arg1")
+    , testCase "coinbase can alias anything" $ do
+        let addrs = ["address(this)", "tx.origin", "msg.sender", "a", "arg"] :: [Text]
+            sig = Just $ Sig "f(address)" [AbiAddressType]
+            checkVs vs = [i|
+                           contract A {}
+                           contract C {
+                             function f(address arg) external {
+                               address a = address(new A());
+                               if (${vs} == block.coinbase) assert(false);
+                             }
+                           }
+                         |]
+
+        [self, origin, caller, a, arg] <- forM addrs $ \addr -> do
+          Just c <- solcRuntime "C" (checkVs addr)
+          [cex] <- reachableUserAsserts c sig
+          pure cex.addrs
+
+        let check as a' = (Map.lookup (SymAddr "coinbase") as) @?= (Map.lookup a' as)
+        check self (SymAddr "entrypoint")
+        check origin (SymAddr "origin")
+        check caller (SymAddr "caller")
+        check a (SymAddr "freshSymAddr1")
+        check arg (SymAddr "arg1")
+    , testCase "caller can alias anything" $ do
+        let addrs = ["address(this)", "tx.origin", "block.coinbase", "a", "arg"] :: [Text]
+            sig = Just $ Sig "f(address)" [AbiAddressType]
+            checkVs vs = [i|
+                           contract A {}
+                           contract C {
+                             function f(address arg) external {
+                               address a = address(new A());
+                               if (${vs} == msg.sender) assert(false);
+                             }
+                           }
+                         |]
+
+        [self, origin, coinbase, a, arg] <- forM addrs $ \addr -> do
+          Just c <- solcRuntime "C" (checkVs addr)
+          [cex] <- reachableUserAsserts c sig
+          pure cex.addrs
+
+        let check as a' = (Map.lookup (SymAddr "caller") as) @?= (Map.lookup a' as)
+        check self (SymAddr "entrypoint")
+        check origin (SymAddr "origin")
+        check coinbase (SymAddr "coinbase")
+        check a (SymAddr "freshSymAddr1")
+        check arg (SymAddr "arg1")
+    , testCase "vm.load fails for a potentially aliased address" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            interface Vm {
+              function load(address,bytes32) external;
+            }
+            contract C {
+              function f() external {
+                Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+                vm.load(msg.sender, 0x0);
+              }
+            }
+          |]
+        (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s ->
+          verifyContract s c Nothing [] defaultVeriOpts Nothing (Just $ checkBadCheatCode "load(address,bytes32)")
+        pure ()
+    , testCase "vm.store fails for a potentially aliased address" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            interface Vm {
+                function store(address,bytes32,bytes32) external;
+            }
+            contract C {
+              function f() external {
+                Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+                vm.store(msg.sender, 0x0, 0x0);
+              }
+            }
+          |]
+        (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s ->
+          verifyContract s c Nothing [] defaultVeriOpts Nothing (Just $ checkBadCheatCode "store(address,bytes32,bytes32)")
+        pure ()
+    , testCase "transfering-eth-does-not-dealias" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            // we can't do calls to unknown code yet so we use selfdestruct
+            contract Send {
+              constructor(address payable dst) payable {
+                selfdestruct(dst);
+              }
+            }
+            contract C {
+              function f() external {
+                uint preSender = msg.sender.balance;
+                uint preOrigin = tx.origin.balance;
+
+                new Send{value:10}(payable(msg.sender));
+                new Send{value:5}(payable(tx.origin));
+
+                if (msg.sender == tx.origin) {
+                  assert(preSender == preOrigin
+                      && msg.sender.balance == preOrigin + 15
+                      && tx.origin.balance == preSender + 15);
+                } else {
+                  assert(msg.sender.balance == preSender + 10
+                      && tx.origin.balance == preOrigin + 5);
+                }
+              }
+            }
+          |]
+        [] <- reachableUserAsserts c Nothing
+        pure ()
+    , testCase "addresses-in-context-are-symbolic" $ do
+        Just a <- solcRuntime "A"
+          [i|
+            contract A {
+              function f() external {
+                assert(msg.sender != address(0x0));
+              }
+            }
+          |]
+        Just b <- solcRuntime "B"
+          [i|
+            contract B {
+              function f() external {
+                assert(block.coinbase != address(0x1));
+              }
+            }
+          |]
+        Just c <- solcRuntime "C"
+          [i|
+            contract C {
+              function f() external {
+                assert(tx.origin != address(0x2));
+              }
+            }
+          |]
+        Just d <- solcRuntime "D"
+          [i|
+            contract D {
+              function f() external {
+                assert(address(this) != address(0x3));
+              }
+            }
+          |]
+        [acex,bcex,ccex,dcex] <- forM [a,b,c,d] $ \con -> do
+          [cex] <- reachableUserAsserts con Nothing
+          assertEqual "wrong number of addresses" 1 (length (Map.keys cex.addrs))
+          pure cex
+
+        assertEqual "wrong model for a" (Addr 0) (fromJust $ Map.lookup (SymAddr "caller") acex.addrs)
+        assertEqual "wrong model for b" (Addr 1) (fromJust $ Map.lookup (SymAddr "coinbase") bcex.addrs)
+        assertEqual "wrong model for c" (Addr 2) (fromJust $ Map.lookup (SymAddr "origin") ccex.addrs)
+        assertEqual "wrong model for d" (Addr 3) (fromJust $ Map.lookup (SymAddr "entrypoint") dcex.addrs)
     ]
   , testGroup "Symbolic execution"
       [
@@ -1889,244 +2178,6 @@ tests = testGroup "hevm"
                           _ -> False
           assertBool "Did not find expected storage cex" testCex
           putStrLn "Expected counterexample found"
-        ,
-        testCase "symbolic-address-create" $ do
-          let src = [i|
-                    contract A {
-                      constructor() payable {}
-                    }
-                    contract C {
-                      function fun(uint256 a) external{
-                        assert(address(this).balance > a);
-                        new A{value:a}();
-                      }
-                    }
-                    |]
-          Just a <- solcRuntime "A" src
-          Just c <- solcRuntime "C" src
-          (expr, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
-            verifyContract s c Nothing [] defaultVeriOpts Nothing Nothing
-          let isSuc (Success {}) = True
-              isSuc _ = False
-          case filter isSuc (flattenExpr expr) of
-            [Success _ _ _ store] -> do
-              let ca = fromJust (Map.lookup (SymAddr "freshSymAddr1") store)
-              let code = case ca.code of
-                    RuntimeCode (ConcreteRuntimeCode c') -> c'
-                    _ -> internalError "expected concrete code"
-              assertEqual "balance mismatch" (Var "arg1") ca.balance
-              assertEqual "code mismatch" (stripBytecodeMetadata a) (stripBytecodeMetadata code)
-              assertEqual "nonce mismatch" (Just 1) ca.nonce
-            _ -> assertBool "too many success nodes!" False
-        ,
-        testCase "symbolic-balance-call" $ do
-          let src = [i|
-                    contract A {
-                      function f() public payable returns (uint) {
-                        return msg.value;
-                      }
-                    }
-                    contract C {
-                      function fun(uint256 x) external {
-                        assert(address(this).balance > x);
-                        A a = new A();
-                        uint res = a.f{value:x}();
-                        assert(res == x);
-                      }
-                    }
-                    |]
-          Just c <- solcRuntime "C" src
-          (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s ->
-            verifyContract s c Nothing [] defaultVeriOpts Nothing (Just $ checkAssertions [0x01])
-          putStrLn "expected cex discovered"
-        ,
-        testCase "deployed-contract-addresses-cannot-alias" $ do
-          Just c <- solcRuntime "C"
-            [i|
-              contract A {}
-              contract C {
-                function f() external {
-                  A a = new A();
-                  assert(address(a) == address(this));
-                }
-              }
-            |]
-          res <- reachableUserAsserts c Nothing
-          assertEqual "should not be able to alias" [] res
-        ,
-        testCase "addresses-in-args-can-alias-anything" $ do
-          let addrs :: [String]
-              addrs = ["address(this)", "tx.origin", "block.coinbase", "msg.sender"]
-              sig = Just $ Sig "f(address)" [AbiAddressType]
-              checkVs vs = [i|
-                             contract C {
-                               function f(address a) external {
-                                 if (${vs} == a) assert(false);
-                               }
-                             }
-                           |]
-
-          [self, origin, coinbase, caller] <- forM addrs $ \addr -> do
-            Just c <- solcRuntime "C" (checkVs addr)
-            [cex] <- reachableUserAsserts c sig
-            pure cex.addrs
-
-          let check as a = (Map.lookup (SymAddr "arg1") as) @?= (Map.lookup a as)
-          check self (SymAddr "entrypoint")
-          check origin (SymAddr "origin")
-          check coinbase (SymAddr "coinbase")
-          check caller (SymAddr "caller")
-        ,
-        testCase "addresses-in-args-can-alias-themselves" $ do
-          Just c <- solcRuntime "C"
-            [i|
-              contract C {
-                function f(address a, address b) external {
-                  if (a == b) assert(false);
-                }
-              }
-            |]
-          let sig = Just $ Sig "f(address,address)" [AbiAddressType,AbiAddressType]
-          [cex] <- reachableUserAsserts c sig
-          let arg1 = fromJust $ Map.lookup (SymAddr "arg1") cex.addrs
-              arg2 = fromJust $ Map.lookup (SymAddr "arg1") cex.addrs
-          assertEqual "should match" arg1 arg2
-        ,
-        testCase "addresses-in-context-can-alias" $ do
-          Just c <- solcRuntime "C"
-            [i|
-              contract C {
-                function f() external {
-                  if (tx.origin == msg.sender) assert(false);
-                }
-              }
-            |]
-          [cex] <- reachableUserAsserts c Nothing
-          let origin = Map.lookup (SymAddr "origin") cex.addrs
-              caller = Map.lookup (SymAddr "caller") cex.addrs
-          assertEqual "orgin and caller should match" origin caller
-        ,
-        testCase "vm.store succeeds for a non aliased address" $ do
-          pure ()
-        ,
-        testCase "vm.load fails for a potentially aliased address" $ do
-          Just c <- solcRuntime "C"
-            [i|
-              interface Vm {
-                function load(address,bytes32) external;
-              }
-              contract C {
-                function f() external {
-                  Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
-                  vm.load(msg.sender, 0x0);
-                }
-              }
-            |]
-          let postc _ = \case
-                (Failure _ _ (BadCheatCode s)) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector "store(address,bytes32,bytes32")
-                _ -> PBool True
-          (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s ->
-            verifyContract s c Nothing [] debugVeriOpts Nothing (Just postc)
-          print cex
-          pure ()
-        ,
-        testCase "vm.store fails for a potentially aliased address" $ do
-          Just c <- solcRuntime "C"
-            [i|
-              interface Vm {
-                  function store(address,bytes32,bytes32) external;
-              }
-              contract C {
-                function f() external {
-                  Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
-                  vm.store(msg.sender, 0x0, 0x0);
-                }
-              }
-            |]
-          let postc _ = \case
-                (Failure _ _ (BadCheatCode s)) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector "store(address,bytes32,bytes32")
-                _ -> PBool True
-          (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s ->
-            verifyContract s c Nothing [] debugVeriOpts Nothing (Just postc)
-          print cex
-          pure ()
-        ,
-        testCase "transfering-eth-does-not-dealias" $ do
-          Just c <- solcRuntime "C"
-            [i|
-              contract Send {
-                constructor(address payable dst) payable {
-                  selfdestruct(dst);
-                }
-              }
-              contract C {
-                function f() external {
-                  uint preSender = msg.sender.balance;
-                  uint preOrigin = tx.origin.balance;
-
-                  // send some eth (we can't do calls to unknown
-                  // code yet so we use selfdestruct
-                  new Send{value:10}(payable(msg.sender));
-                  new Send{value:5}(payable(tx.origin));
-
-                  if (msg.sender == tx.origin) {
-                    assert(preSender == preOrigin
-                        && msg.sender.balance == preOrigin + 15
-                        && tx.origin.balance == preSender + 15);
-                  } else {
-                    assert(msg.sender.balance == preSender + 10
-                        && tx.origin.balance == preOrigin + 5);
-                  }
-                }
-              }
-            |]
-          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
-            verifyContract s c Nothing [] debugVeriOpts Nothing (Just $ checkAssertions [0x01])
-          pure ()
-        ,
-        testCase "addresses-in-context-are-symbolic" $ do
-          Just a <- solcRuntime "A"
-            [i|
-              contract A {
-                function f() external {
-                  assert(msg.sender != address(0x0));
-                }
-              }
-            |]
-          Just b <- solcRuntime "B"
-            [i|
-              contract B {
-                function f() external {
-                  assert(block.coinbase != address(0x1));
-                }
-              }
-            |]
-          Just c <- solcRuntime "C"
-            [i|
-              contract C {
-                function f() external {
-                  assert(tx.origin != address(0x2));
-                }
-              }
-            |]
-          Just d <- solcRuntime "D"
-            [i|
-              contract D {
-                function f() external {
-                  assert(address(this) != address(0x3));
-                }
-              }
-            |]
-          [acex,bcex,ccex,dcex] <- forM [a,b,c,d] $ \con -> do
-            (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s ->
-              verifyContract s con Nothing [] defaultVeriOpts Nothing (Just $ checkAssertions [0x01])
-            assertEqual "wrong number of addresses" 1 (length (Map.keys cex.addrs))
-            pure cex
-
-          assertEqual "wrong model for a" (Addr 0) (fromJust $ Map.lookup (SymAddr "caller") acex.addrs)
-          assertEqual "wrong model for b" (Addr 1) (fromJust $ Map.lookup (SymAddr "coinbase") bcex.addrs)
-          assertEqual "wrong model for c" (Addr 2) (fromJust $ Map.lookup (SymAddr "origin") ccex.addrs)
-          assertEqual "wrong model for d" (Addr 3) (fromJust $ Map.lookup (SymAddr "entrypoint") dcex.addrs)
   ]
   , testGroup "equivalence-checking"
     [
@@ -3143,8 +3194,13 @@ bothM f (a, a') = do
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
 
+checkBadCheatCode :: Text -> Postcondition
+checkBadCheatCode sig _ = \case
+  (Failure _ _ (BadCheatCode s)) -> trace' "postc" $ (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
+  _ -> PBool True
+
 reachableUserAsserts :: ByteString -> Maybe Sig -> IO [SMTCex]
 reachableUserAsserts c sig = do
   (_, res) <- withSolvers Z3 1 Nothing $ \s ->
-    verifyContract s c sig [] debugVeriOpts Nothing (Just $ checkAssertions [0x01])
+    verifyContract s c sig [] defaultVeriOpts Nothing (Just $ checkAssertions [0x01])
   pure $ snd <$> mapMaybe getCex res
