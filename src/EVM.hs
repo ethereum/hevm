@@ -1618,19 +1618,19 @@ cheatActions =
       action "store(address,bytes32,bytes32)" $
         \sig _ _ input -> case decodeStaticArgs 0 3 input of
           [a, slot, new] -> case wordToAddr a of
-            Just a' -> fetchAccount a' $ \_ ->
+            Just a'@(LitAddr _) -> fetchAccount a' $ \_ ->
               modifying (#env % #contracts % ix a' % #storage) (writeStorage slot new)
-            Nothing -> vmError (BadCheatCode sig)
+            _ -> vmError (BadCheatCode sig)
           _ -> vmError (BadCheatCode sig),
 
       action "load(address,bytes32)" $
         \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
           [a, slot] -> case wordToAddr a of
-            Just a' ->
+            Just a'@(LitAddr _) -> fetchAccount a' $ \_ ->
               accessStorage a' slot $ \res -> do
                 assign (#state % #returndata % word256At (Lit 0)) res
                 assign (#state % #memory % word256At outOffset) res
-            Nothing -> vmError (BadCheatCode sig)
+            _ -> vmError (BadCheatCode sig)
           _ -> vmError (BadCheatCode sig),
 
       action "sign(uint256,bytes32)" $
