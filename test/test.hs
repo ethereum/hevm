@@ -57,7 +57,7 @@ import EVM.SMT hiding (one)
 import EVM.Solidity
 import EVM.Solvers
 import EVM.Stepper qualified as Stepper
-import EVM.SymExec
+import EVM.SymExec hiding (subStore)
 import EVM.Test.Tracing qualified as Tracing
 import EVM.Test.Utils
 import EVM.Traversals
