@@ -697,6 +697,9 @@ simplify e = if (mapExpr go e == e)
     -- address masking
     go (And (Lit 0xffffffffffffffffffffffffffffffffffffffff) a@(WAddr _)) = a
 
+    -- literal addresses
+    go (WAddr (LitAddr a)) = Lit $ into a
+
     -- simple div/mod/add/sub
     go (Div o1@(Lit _)  o2@(Lit _)) = EVM.Expr.div  o1 o2
     go (SDiv o1@(Lit _) o2@(Lit _)) = EVM.Expr.sdiv o1 o2
