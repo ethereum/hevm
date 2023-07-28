@@ -93,7 +93,7 @@ tests = testGroup "hevm"
             vm1 = execState (EVM.accessStorage (LitAddr 0) (Lit 0) (pure . pure ())) vm
             -- it should fetch the contract first
             vm2 = case vm1.result of
-                    Just (HandleEffect (Query (PleaseFetchContract _addr continue))) ->
+                    Just (HandleEffect (Query (PleaseFetchContract _addr _ continue))) ->
                       execState (continue dummyContract) vm1
                     _ -> internalError "unexpected result"
             -- then it should fetch the slow
