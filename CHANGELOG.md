@@ -14,8 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Changed
 
-- `vm.prank` now works correctly when passed a symbolic address
 - Contract addresses can now be fully symbolic
+- Contract balances can now be fully symbolic
+- Contract code can now be fully abstract. Calls into contracts with unknown code will fail.
+- `Vm.prank` now works correctly when passed a symbolic address
 - The `--initial-storage` flag no longer accepts a concrete prestore (valid values are now `Empty` or `Abstract`)
 
 ## API Changes
@@ -31,6 +33,8 @@ Support for fully symbolic contract addresses required some very extensive chang
 - `Success` nodes in `Expr End` now return a mapping from `Expr EAddr` to `Expr EContract` instead of an `Expr Storage`.
 - Nonces are now modeled as a `Maybe Word64` (where `Nothing` can be read as "symbolic").
 - `Expr Storage` no longer has an `EmptyStore` constructor (use `ConcreteStore mempty` instead)
+- Contract balances are now fully symbolic
+- Contract code can now be unknown. There is a new constructor for `ContractCode` to represent this (`UnknownCode`)
 - `VMOpts` no longer takes an initial store, and instead takes a `baseState`
   which can be either `EmptyBase` or `AbstractBase`. This controls whether
   storage should be inialized as empty or fully abstract. Regardless of this
