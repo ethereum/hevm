@@ -180,7 +180,8 @@ abstractAwayProps ps = runState (mapM abstrAway ps) (AbstState mempty 0)
 assertProps :: [Prop] -> SMT2
 assertProps ps =
   let encs = map propToSMT psAbstrElim
-      intermediates = declareIntermediates (bufs <> bufsAbst) (stores <> storesAbst) in
+      abstSMT = map propToSMT abstProps
+      intermediates = declareIntermediates bufs stores in
   prelude
   <> declareBufs ps bufs stores
   <> SMT2 mempty mempty mempty
@@ -200,21 +201,17 @@ assertProps ps =
   <> SMT2 mempty mempty mempty { storeReads = storageReads }
 
   where
-    (psAbst, abst@(AbstState abstExprToInt _)) = abstractAwayProps ps
-    (psAbstrElim, bufs, stores) = eliminateProps psAbst
+    (psAbst, bufs, stores) = eliminateProps ps
+    (psAbstrElim, abst@(AbstState abstExprToInt _)) = abstractAwayProps psAbst
 
-    -- Abstraction's CSE, vars, bufs, and stores
-    abstExprs = fst <$> Map.toList abstExprToInt
     abstProps = map toProp (Map.toList abstExprToInt)
       where
       toProp :: (Expr EWord, Int) -> Prop
       toProp (e, num) = PEq e (Var (TS.pack ("abst_" ++ (show num))))
-    (abstPropsElimed, bufsAbst, storesAbst) = eliminateProps abstProps
-    abstSMT = map propToSMT abstPropsElimed
 
-    allVars = fmap referencedVars' psAbstrElim <> fmap referencedVars bufVals <> fmap referencedVars storeVals <> [abstrVars abst] <> fmap referencedVars abstExprs
-    frameCtx = fmap referencedFrameContext' psAbstrElim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals <> fmap referencedFrameContext abstExprs
-    blockCtx = fmap referencedBlockContext' psAbstrElim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals <> fmap referencedBlockContext abstExprs
+    allVars = fmap referencedVars' psAbst <> fmap referencedVars bufVals <> fmap referencedVars storeVals <> [abstrVars abst]
+    frameCtx = fmap referencedFrameContext' psAbst <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
+    blockCtx = fmap referencedBlockContext' psAbst <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
 
     abstrVars :: AbstState -> [Builder]
     abstrVars (AbstState b _) = map ((\v->fromString ("abst_" ++ show v)) . snd) (Map.toList b)
