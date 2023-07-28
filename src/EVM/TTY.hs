@@ -143,17 +143,6 @@ interpret mode =
     eval (action Operational.:>>= k) =
       case action of
 
-        Stepper.Run -> do
-          -- Have we reached the final result of this action?
-          use (#vm % #result) >>= \case
-            Just _ -> do
-              -- Yes, proceed with the next action.
-              vm <- use #vm
-              interpret mode (k vm)
-            Nothing -> do
-              -- No, keep performing the current action
-              keepExecuting mode (Stepper.run >>= k)
-
         -- Stepper wants to keep executing?
         Stepper.Exec -> do
           -- Have we reached the final result of this action?

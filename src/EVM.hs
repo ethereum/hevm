@@ -1923,13 +1923,13 @@ accessMemoryRange
   -> EVM ()
   -> EVM ()
 accessMemoryRange _ 0 continue = continue
-accessMemoryRange f l continue =
-  case (,) <$> toWord64 f <*> toWord64 l of
+accessMemoryRange offs sz continue =
+  case (,) <$> toWord64 offs <*> toWord64 sz of
     Nothing -> vmError IllegalOverflow
-    Just (f64, l64) ->
-      if f64 + l64 < l64
+    Just (offs64, sz64) ->
+      if offs64 + sz64 < sz64
         then vmError IllegalOverflow
-        else accessUnboundedMemoryRange f64 l64 continue
+        else accessUnboundedMemoryRange offs64 sz64 continue
 
 accessMemoryWord
   :: W256 -> EVM () -> EVM ()

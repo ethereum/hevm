@@ -35,7 +35,7 @@ import Control.Monad.State
 import EVM.CSE
 import EVM.Expr (writeByte, bufLengthEnv, containsNode, bufLength, minLength, inRange)
 import EVM.Expr qualified as Expr
-import EVM.Keccak (keccakAssumptions)
+import EVM.Keccak (keccakAssumptions, keccakCompute)
 import EVM.Traversals
 import EVM.Types
 
@@ -221,8 +221,10 @@ assertProps ps =
     storageReads = nubOrd $ concatMap findStorageReads ps
 
     keccakAssumes
-      = SMT2 ["; keccak assumptions"] mempty mempty
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psAbstrElim bufVals storeVals)) mempty mempty
+      = SMT2 ["; keccak assumptions"] mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psAbstrElim bufVals storeVals)) mempty
+      <> SMT2 ["; keccak computations"] mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psAbstrElim bufVals storeVals)) mempty
 
     readAssumes
       = SMT2 ["; read assumptions"] mempty mempty

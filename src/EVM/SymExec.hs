@@ -191,13 +191,15 @@ abstractVM
   -> ByteString
   -> Maybe Precondition
   -> Expr Storage
+  -> Bool
   -> VM
-abstractVM cd contractCode maybepre store = finalVm
+abstractVM cd contractCode maybepre store create = finalVm
   where
     caller = Caller 0
     value = CallValue 0
-    code = RuntimeCode (ConcreteRuntimeCode contractCode)
-    vm' = loadSymVM code store caller value cd
+    code = if create then InitCode contractCode mempty
+           else RuntimeCode (ConcreteRuntimeCode contractCode)
+    vm' = loadSymVM code store caller value  (if create then mempty else cd)  create
     precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm']
@@ -209,8 +211,9 @@ loadSymVM
   -> Expr EWord
   -> Expr EWord
   -> (Expr Buf, [Prop])
+  -> Bool
   -> VM
-loadSymVM x initStore addr callvalue cd =
+loadSymVM x initStore addr callvalue cd create =
   (makeVm $ VMOpts
     { contract = initialContract x
     , calldata = cd
@@ -232,7 +235,7 @@ loadSymVM x initStore addr callvalue cd =
     , maxCodeSize = 0xffffffff
     , schedule = FeeSchedule.berlin
     , chainId = 1
-    , create = False
+    , create = create
     , txAccessList = mempty
     , allowFFI = False
     }) & set (#env % #contracts % at (createAddress ethrunAddress 1))
@@ -262,9 +265,6 @@ interpret fetcher maxIter askSmtIters heuristic vm =
       Stepper.Exec -> do
         let (r, vm') = runState exec vm
         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-      Stepper.Run -> do
-        let vm' = execState exec vm
-        interpret fetcher maxIter askSmtIters heuristic vm' (k vm')
       Stepper.IOAct q -> do
         r <- q
         interpret fetcher maxIter askSmtIters heuristic vm (k r)
@@ -431,7 +431,7 @@ verifyContract
   -> Maybe Postcondition
   -> IO (Expr End, [VerifyResult])
 verifyContract solvers theCode signature' concreteArgs opts initStore maybepre maybepost =
-  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre initStore
+  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre initStore False
   in verify solvers opts preState maybepost
 
 -- | Stepper that parses the result of Stepper.runFully into an Expr End
@@ -498,39 +498,35 @@ reachable solvers e = do
           Unsat -> pure ([query], Nothing)
           r -> internalError $ "Invalid solver result: " <> show r
 
-
 -- | Evaluate the provided proposition down to its most concrete result
 evalProp :: Prop -> Prop
-evalProp = \case
-  o@(PBool _) -> o
-  o@(PNeg p)  -> case p of
-              (PBool b) -> PBool (not b)
-              _ -> o
-  o@(PEq l r) -> if l == r
-                 then PBool True
-                 else o
-  o@(PLT (Lit l) (Lit r)) -> if l < r
-                             then PBool True
-                             else o
-  o@(PGT (Lit l) (Lit r)) -> if l > r
-                             then PBool True
-                             else o
-  o@(PGEq (Lit l) (Lit r)) -> if l >= r
-                              then PBool True
-                              else o
-  o@(PLEq (Lit l) (Lit r)) -> if l <= r
-                              then PBool True
-                              else o
-  o@(PAnd l r) -> case (evalProp l, evalProp r) of
-                    (PBool True, PBool True) -> PBool True
-                    (PBool _, PBool _) -> PBool False
-                    _ -> o
-  o@(POr l r) -> case (evalProp l, evalProp r) of
-                   (PBool False, PBool False) -> PBool False
-                   (PBool _, PBool _) -> PBool True
-                   _ -> o
-  o -> o
+evalProp prop =
+  let new = mapProp' go prop
+  in if (new == prop) then prop else evalProp new
+  where
+    go :: Prop -> Prop
+    go (PLT (Lit l) (Lit r)) = PBool (l < r)
+    go (PGT (Lit l) (Lit r)) = PBool (l > r)
+    go (PGEq (Lit l) (Lit r)) = PBool (l >= r)
+    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
+    go (PNeg (PBool b)) = PBool (not b)
 
+    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
+    go (PAnd (PBool False) _) = PBool False
+    go (PAnd _ (PBool False)) = PBool False
+
+    go (POr (PBool l) (PBool r)) = PBool (l || r)
+    go (POr (PBool True) _) = PBool True
+    go (POr _ (PBool True)) = PBool True
+
+    go (PImpl (PBool l) (PBool r)) = PBool ((not l) || r)
+    go (PImpl (PBool False) _) = PBool True
+
+    go (PEq (Lit l) (Lit r)) = PBool (l == r)
+    go o@(PEq l r)
+      | l == r = PBool True
+      | otherwise = o
+    go p = p
 
 -- | Extract contraints stored in Expr End nodes
 extractProps :: Expr End -> [Prop]
@@ -643,7 +639,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
     getBranches bs = do
       let
         bytecode = if BS.null bs then BS.pack [0] else bs
-        prestate = abstractVM calldata bytecode Nothing AbstractStore
+        prestate = abstractVM calldata bytecode Nothing AbstractStore False
       expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl

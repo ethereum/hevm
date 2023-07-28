@@ -335,7 +335,7 @@ copySlice srcOffset dstOffset (Lit 32) src dst = writeWord dstOffset (readWord s
 -- concrete indicies & abstract src (may produce a concrete result if we are
 -- copying from a concrete region of src)
 copySlice s@(Lit srcOffset) d@(Lit dstOffset) sz@(Lit size) src ds@(ConcreteBuf dst)
-  | dstOffset < maxBytes, size < maxBytes = let
+  | dstOffset < maxBytes, size < maxBytes, srcOffset + (size-1) > srcOffset = let
     hd = padRight (unsafeInto dstOffset) $ BS.take (unsafeInto dstOffset) dst
     sl = [readByte (Lit i) src | i <- [srcOffset .. srcOffset + (size - 1)]]
     tl = BS.drop (unsafeInto dstOffset + unsafeInto size) dst

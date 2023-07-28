@@ -44,7 +44,7 @@
             inherit secp256k1;
           })
           [
-            (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
+            (haskell.lib.compose.overrideCabal (old: { testTarget = "test ethereum-tests"; }))
             (haskell.lib.compose.addTestToolDepends testDeps)
             (haskell.lib.compose.appendBuildFlags ["-v3"])
             (haskell.lib.compose.appendConfigureFlags (
@@ -126,7 +126,7 @@
 
         # --- packages ----
 
-        packages.withTests = hevmUnwrapped;
+        packages.ci = with pkgs.haskell.lib; dontHaddock (disableLibraryProfiling hevmUnwrapped);
         packages.noTests = pkgs.haskell.lib.dontCheck hevmUnwrapped;
         packages.hevm = hevmWrapped;
         packages.redistributable = hevmRedistributable;
@@ -152,11 +152,12 @@
             ] ++ testDeps;
             withHoogle = true;
 
-            # NOTE: hacks for bugged cabal new-repl
-            LD_LIBRARY_PATH = libraryPath;
             HEVM_SOLIDITY_REPO = solidity;
             DAPP_SOLC = "${pkgs.solc}/bin/solc";
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
+
+            # NOTE: hacks for bugged cabal new-repl
+            LD_LIBRARY_PATH = libraryPath;
             shellHook = lib.optionalString stdenv.isDarwin ''
               export DYLD_LIBRARY_PATH="${libraryPath}";
             '';
