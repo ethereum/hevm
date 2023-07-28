@@ -2267,6 +2267,12 @@ tests = testGroup "hevm"
       expectFail $ testCase "eq-handles-contract-deployment" $ do
         Just aPrgm <- solcRuntime "B"
           [i|
+            contract Send {
+              constructor(address payable dst) payable {
+                selfdestruct(dst);
+              }
+            }
+
             contract A {
               address parent;
               constructor(address p) {
@@ -2284,12 +2290,18 @@ tests = testGroup "hevm"
               }
               function drain() public {
                 require(msg.sender == child);
-                //payable(address(0x0)).transfer(address(this).balance);
+                new Send{value: address(this).balance}(payable(address(0x0)));
               }
             }
           |]
         Just bPrgm <- solcRuntime "D"
           [i|
+            contract Send {
+              constructor(address payable dst) payable {
+                selfdestruct(dst);
+              }
+            }
+
             contract C {
               address parent;
               constructor(address p) {
@@ -2304,7 +2316,7 @@ tests = testGroup "hevm"
               }
               function drain() public {
                 require(msg.sender == child);
-                //payable(address(0x0)).transfer(address(this).balance);
+                new Send{value: address(this).balance}(payable(address(0x0)));
               }
             }
           |]
