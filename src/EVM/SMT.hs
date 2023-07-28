@@ -177,6 +177,9 @@ abstractAwayProps ps = runState (mapM abstrAway ps) (AbstState mempty 0)
                   put $ s{words=bs', count=next+1}
                   pure $ Var (TS.pack ("abst_" ++ show next))
 
+smt2Line :: Builder -> SMT2
+smt2Line txt = SMT2 [txt] mempty mempty
+
 assertProps :: [Prop] -> SMT2
 assertProps ps =
   let encs = map propToSMT psAbstrElim
@@ -184,18 +187,18 @@ assertProps ps =
       intermediates = declareIntermediates bufs stores in
   prelude
   <> declareBufs ps bufs stores
-  <> SMT2 mempty mempty mempty
+  <> smt2Line ""
   <> (declareVars . nubOrd $ foldl (<>) [] allVars)
-  <> SMT2 mempty mempty mempty
+  <> smt2Line ""
   <> (declareFrameContext . nubOrd $ foldl (<>) [] frameCtx)
-  <> SMT2 mempty mempty mempty
+  <> smt2Line ""
   <> (declareBlockContext . nubOrd $ foldl (<>) [] blockCtx)
-  <> SMT2 mempty mempty mempty
+  <> smt2Line ""
   <> intermediates
-  <> SMT2 mempty mempty mempty
+  <> smt2Line ""
   <> keccakAssumes
   <> readAssumes
-  <> SMT2 mempty mempty mempty
+  <> smt2Line ""
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty mempty
   <> SMT2 mempty (RefinementEqs $ fmap (\p -> "(assert " <> p <> ")") abstSMT) mempty
   <> SMT2 mempty mempty mempty { storeReads = storageReads }
@@ -221,13 +224,13 @@ assertProps ps =
     storageReads = nubOrd $ concatMap findStorageReads ps
 
     keccakAssumes
-      = SMT2 ["; keccak assumptions"] mempty
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psAbstrElim bufVals storeVals)) mempty
-      <> SMT2 ["; keccak computations"] mempty
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psAbstrElim bufVals storeVals)) mempty
+      = smt2Line "; keccak assumptions"
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psAbstrElim bufVals storeVals)) mempty mempty
+      <> smt2Line "; keccak computations"
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psAbstrElim bufVals storeVals)) mempty mempty
 
     readAssumes
-      = SMT2 ["; read assumptions"] mempty mempty
+      = smt2Line "; read assumptions"
         <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads psAbstrElim bufs stores)) mempty mempty
 
 referencedBufsGo :: Expr a -> [Builder]
