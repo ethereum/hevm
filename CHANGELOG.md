@@ -14,10 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Changed
 
+- `vm.prank` now works correctly when passed a symbolic address
 - Contract addresses can now be fully symbolic
 - Contract balances can now be fully symbolic
-- Contract code can now be fully abstract. Calls into contracts with unknown code will fail.
-- `Vm.prank` now works correctly when passed a symbolic address
+- Contract code can now be fully abstract. Calls into contracts with unknown code will fail with `UnexpectedSymbolicArg`.
 - The `--initial-storage` flag no longer accepts a concrete prestore (valid values are now `Empty` or `Abstract`)
 
 ## API Changes
