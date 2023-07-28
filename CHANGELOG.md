@@ -8,9 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ## Fixed
+
 - CopySlice wraparound issue especially during CopyCallBytesToMemory
+- Contracts deployed during symbolic execution are created with an empty storage (instead of abstract in previous versions)
 
 ## Changed
+
+- `vm.prank` now works correctly when passed a symbolic address
+- Contract addresses can now be fully symbolic
+- The `--initial-storage` flag no longer accepts a concrete prestore (valid values are now `Empty` or `Abstract`)
+
+## API Changes
+
+Support for fully symbolic contract addresses required some very extensive changes to our storage model:
+
+- A new type has been added to `Expr` that can represent concrete or symbolic addresses
+- The contracts mapping is now keyed on terms of type `Expr EAddr` (instead of `Addr`)
+- Storage has been moved from a global storage mapping in `vm.env` into a per contract one
+- Terms of type `Expr Storage` now model a per contract store (i.e. W256 -> W256)
+- A new type has been added to `Expr`: `EContract`. It has one constructor that
+  is a simplified view of the full `Contract` typed used in the `VM` storage mapping.
+- `Success` nodes in `Expr End` now return a mapping from `Expr EAddr` to `Expr EContract` instead of an `Expr Storage`.
+- Nonces are now modeled as a `Maybe Word64` (where `Nothing` can be read as "symbolic").
+- `Expr Storage` no longer has an `EmptyStore` constructor (use `ConcreteStore mempty` instead)
+- `VMOpts` no longer takes an initial store, and instead takes a `baseState`
+  which can be either `EmptyBase` or `AbstractBase`. This controls whether
+  storage should be inialized as empty or fully abstract. Regardless of this
+  setting contracts that are deployed at runtime via a call to
+  `CREATE`/`CREATE2` have zero initialized storage.
 
 ## [0.51.3] - 2023-07-14
 

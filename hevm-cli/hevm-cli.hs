@@ -84,7 +84,7 @@ data Command w
   -- symbolic execution opts
       , root          :: w ::: Maybe String       <?> "Path to  project root directory (default: . )"
       , projectType   :: w ::: Maybe ProjectType  <?> "Is this a Foundry or DappTools project (default: Foundry)"
-      , initialStorage :: w ::: Maybe (InitialStorage) <?> "Starting state for storage: Empty, Abstract, Concrete <STORE> (default Abstract)"
+      , initialStorage :: w ::: Maybe (InitialStorage) <?> "Starting state for storage: Empty, Abstract (default Abstract)"
       , sig           :: w ::: Maybe Text         <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]           <?> "Values to encode"
       , debug         :: w ::: Bool               <?> "Run interactively"
@@ -95,7 +95,7 @@ data Command w
       , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point"
       , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
-      , assertions    :: w ::: Maybe [Word256]    <?> "Comma seperated list of solc panic codes to check for (default: everything except arithmetic overflow)"
+      , assertions    :: w ::: Maybe [Word256]    <?> "Comma seperated list of solc panic codes to check for (default: user defined assertion violations only)"
       , askSmtIterations :: w ::: Integer         <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
