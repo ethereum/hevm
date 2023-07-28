@@ -1261,7 +1261,7 @@ fetchAccount addr continue =
     Nothing -> case addr of
       SymAddr _ -> do
         pc <- use (#state % #pc)
-        partial $ UnexpectedSymbolicArg pc "trying to fetch a symbolic address that isn't already present in storage" (wrap [addr])
+        partial $ UnexpectedSymbolicArg pc "trying to access a symbolic address that isn't already present in storage" (wrap [addr])
       LitAddr a -> do
         use (#cache % #fetched % at a) >>= \case
           Just c -> do
@@ -1707,46 +1707,50 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
       callChecks this gasGiven xContext xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
         \xGas -> do
           vm0 <- get
-          fetchAccount xTo $ \target ->
-            burn xGas $ do
-              let newContext = CallContext
-                                { target    = xTo
-                                , context   = xContext
-                                , offset    = xOutOffset
-                                , size      = xOutSize
-                                , codehash  = target.codehash
-                                , callreversion = vm0.env.contracts
-                                , subState  = vm0.tx.substate
-                                , abi =
-                                    if xInSize >= 4
-                                    then maybeLitWord $ readBytes 4 (Lit xInOffset) vm0.state.memory
-                                    else Nothing
-                                , calldata = (readMemory (Lit xInOffset) (Lit xInSize) vm0)
-                                }
-              pushTrace (FrameTrace newContext)
-              next
-              vm1 <- get
+          fetchAccount xTo $ \target -> case target.code of
+              UnknownCode _ -> do
+                pc <- use (#state % #pc)
+                partial $ UnexpectedSymbolicArg pc "call target has unknown code" (wrap [xTo])
+              _ -> do
+                burn xGas $ do
+                  let newContext = CallContext
+                                    { target    = xTo
+                                    , context   = xContext
+                                    , offset    = xOutOffset
+                                    , size      = xOutSize
+                                    , codehash  = target.codehash
+                                    , callreversion = vm0.env.contracts
+                                    , subState  = vm0.tx.substate
+                                    , abi =
+                                        if xInSize >= 4
+                                        then maybeLitWord $ readBytes 4 (Lit xInOffset) vm0.state.memory
+                                        else Nothing
+                                    , calldata = (readMemory (Lit xInOffset) (Lit xInSize) vm0)
+                                    }
+                  pushTrace (FrameTrace newContext)
+                  next
+                  vm1 <- get
 
-              pushTo #frames $ Frame
-                { state = vm1.state { stack = xs }
-                , context = newContext
-                }
+                  pushTo #frames $ Frame
+                    { state = vm1.state { stack = xs }
+                    , context = newContext
+                    }
 
-              let clearInitCode = \case
-                    (InitCode _ _) -> InitCode mempty mempty
-                    a -> a
+                  let clearInitCode = \case
+                        (InitCode _ _) -> InitCode mempty mempty
+                        a -> a
 
-              zoom #state $ do
-                assign #gas xGas
-                assign #pc 0
-                assign #code (clearInitCode target.code)
-                assign #codeContract xTo
-                assign #stack mempty
-                assign #memory mempty
-                assign #memorySize 0
-                assign #returndata mempty
-                assign #calldata (copySlice (Lit xInOffset) (Lit 0) (Lit xInSize) vm0.state.memory mempty)
-              continue xTo
+                  zoom #state $ do
+                    assign #gas xGas
+                    assign #pc 0
+                    assign #code (clearInitCode target.code)
+                    assign #codeContract xTo
+                    assign #stack mempty
+                    assign #memory mempty
+                    assign #memorySize 0
+                    assign #returndata mempty
+                    assign #calldata (copySlice (Lit xInOffset) (Lit 0) (Lit xInSize) vm0.state.memory mempty)
+                  continue xTo
 
 -- -- * Contract creation
 

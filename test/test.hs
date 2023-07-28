@@ -2235,17 +2235,27 @@ tests = testGroup "hevm"
       testCase "eq-balance-differs" $ do
         Just aPrgm <- solcRuntime "C"
           [i|
+            contract Send {
+              constructor(address payable dst) payable {
+                selfdestruct(dst);
+              }
+            }
             contract C {
               function f() public {
-                payable(address(0x0)).transfer(2);
+                new Send{value:2}(payable(address(0x0)));
               }
             }
           |]
         Just bPrgm <- solcRuntime "C"
           [i|
+            contract Send {
+              constructor(address payable dst) payable {
+                selfdestruct(dst);
+              }
+            }
             contract C {
               function f() public {
-                payable(address(0x0)).transfer(1);
+                new Send{value:1}(payable(address(0x0)));
               }
             }
           |]
