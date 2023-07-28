@@ -4,7 +4,7 @@
     Module: EVM.Keccak
     Description: Expr passes to determine Keccak assumptions
 -}
-module EVM.Keccak (keccakAssumptions) where
+module EVM.Keccak (keccakAssumptions, keccakCompute) where
 
 import Control.Monad.State
 import Data.Set (Set)
@@ -12,6 +12,7 @@ import Data.Set qualified as Set
 
 import EVM.Traversals
 import EVM.Types
+import EVM.Expr
 
 newtype BuilderState = BuilderState
   { keccaks :: Set (Expr EWord) }
@@ -72,3 +73,24 @@ keccakAssumptions ps bufs stores = injectivity <> minValue
 
     injectivity = fmap injProp $ combine (Set.toList st.keccaks)
     minValue = fmap minProp (Set.toList st.keccaks)
+
+compute :: forall a. Expr a -> [Prop]
+compute = \case
+  e@(Keccak buf) -> do
+    let b = simplify buf
+    case keccak b of
+      lit@(Lit _) -> [PEq e lit]
+      _ -> []
+  _ -> []
+
+computeKeccakExpr :: forall a. Expr a -> [Prop]
+computeKeccakExpr e = foldExpr compute [] e
+
+computeKeccakProp :: Prop -> [Prop]
+computeKeccakProp p = foldProp compute [] p
+
+keccakCompute :: [Prop] -> [Expr Buf] -> [Expr Storage] -> [Prop]
+keccakCompute ps buf stores = 
+  concatMap computeKeccakProp ps <>
+  concatMap computeKeccakExpr buf <>
+  concatMap computeKeccakExpr stores

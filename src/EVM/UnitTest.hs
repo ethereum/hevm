@@ -18,7 +18,7 @@ import EVM.FeeSchedule qualified as FeeSchedule
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, VeriOpts(..))
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, defaultSymbolicValues, VeriOpts(..))
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.RLP
@@ -310,8 +310,6 @@ interpretWithCoverage opts@UnitTestOptions{..} =
       case action of
         Stepper.Exec ->
           execWithCoverage >>= interpretWithCoverage opts . k
-        Stepper.Run ->
-          runWithCoverage >>= interpretWithCoverage opts . k
         Stepper.Wait (PleaseAskSMT (Lit c) _ continue) ->
           interpretWithCoverage opts (Stepper.evm (continue (Case (c > 0))) >>= k)
         Stepper.Wait q ->
@@ -808,7 +806,7 @@ prettyCalldata cex buf sig types = head (Text.splitOn "(" sig) <> showCalldata c
 showCalldata :: (?context :: DappContext) => SMTCex -> [AbiType] -> Expr Buf -> Text
 showCalldata cex tps buf = "(" <> intercalate "," (fmap showVal vals) <> ")"
   where
-    argdata = Expr.drop 4 $ simplify $ subModel cex buf
+    argdata = Expr.drop 4 . simplify . defaultSymbolicValues $ subModel cex buf
     vals = case decodeBuf tps argdata of
              CAbi v -> v
              _ -> internalError $ "unable to abi decode function arguments:\n" <> (Text.unpack $ formatExpr argdata)

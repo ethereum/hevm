@@ -224,6 +224,13 @@ tests = testGroup "hevm"
           Just asList -> do
             let asBuf = Expr.fromList asList
             checkEquiv asBuf input
+    , testProperty "evalProp-equivalence-lit" $ \(LitProp p) -> ioProperty $ do
+        let simplified = evalProp p
+        assertBool "must evaluate down to a literal bool" (isPBool simplified)
+        checkEquivProp simplified p
+    , testProperty "evalProp-equivalence-sym" $ \(p) -> ioProperty $ do
+        let simplified = evalProp p
+        checkEquivProp simplified p
     ]
   , testGroup "MemoryTests"
     [ testCase "read-write-same-byte"  $ assertEqual ""
@@ -2015,7 +2022,7 @@ tests = testGroup "hevm"
           Just c <- solcRuntime "C" code
           Just a <- solcRuntime "A" code
           (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> do
-            let vm = abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing
+            let vm = abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing False
                        & set (#state % #callvalue) (Lit 0)
                        & over (#env % #contracts)
                           (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
@@ -2079,7 +2086,7 @@ tests = testGroup "hevm"
         ,
         ignoreTest $ testCase "safemath distributivity (yul)" $ do
           let yulsafeDistributivity = hex "6355a79a6260003560e01c14156016576015601f565b5b60006000fd60a1565b603d602d604435600435607c565b6039602435600435607c565b605d565b6052604b604435602435605d565b600435607c565b141515605a57fe5b5b565b6000828201821115151560705760006000fd5b82820190505b92915050565b6000818384048302146000841417151560955760006000fd5b82820290505b92915050565b"
-          let vm =  abstractVM (mkCalldata (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []) yulsafeDistributivity Nothing
+          let vm =  abstractVM (mkCalldata (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []) yulsafeDistributivity Nothing False
           (_, [Qed _]) <-  withSolvers Z3 1 Nothing $ \s -> verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
         ,
@@ -2653,15 +2660,20 @@ tests = testGroup "hevm"
   where
     (===>) = assertSolidityComputation
 
+checkEquivProp :: Prop -> Prop -> IO Bool
+checkEquivProp = checkEquivBase (\l r -> PNeg (PImpl l r .&& PImpl r l))
 
 checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO Bool
-checkEquiv l r = withSolvers Z3 1 (Just 1) $ \solvers -> do
+checkEquiv = checkEquivBase (./=)
+
+checkEquivBase :: Eq a => (a -> a -> Prop) -> a -> a -> IO Bool
+checkEquivBase mkprop l r = withSolvers Z3 1 (Just 1) $ \solvers -> do
   if l == r
      then do
        putStrLn "skip"
        pure True
      else do
-       let smt = assertProps [l ./= r]
+       let smt = assertProps [mkprop l r]
        res <- checkSat solvers smt
        print res
        pure $ case res of
@@ -2947,6 +2959,32 @@ instance Arbitrary GenWriteByteIdx where
     -- 2nd: can overflow an Int
     let mkIdx = frequency [ (10, genLit 1_000_000) , (1, fmap Lit arbitrary) ]
     fmap GenWriteByteIdx mkIdx
+
+newtype LitProp = LitProp Prop
+  deriving (Show, Eq)
+
+instance Arbitrary LitProp where
+  arbitrary = LitProp <$> sized (genProp True)
+
+instance Arbitrary Prop where
+  arbitrary = sized (genProp False)
+
+genProp :: Bool -> Int -> Gen (Prop)
+genProp _ 0 = PBool <$> arbitrary
+genProp onlyLits sz = oneof
+  [ liftM2 PEq subWord subWord
+  , liftM2 PLT subWord subWord
+  , liftM2 PGT subWord subWord
+  , liftM2 PLEq subWord subWord
+  , liftM2 PGEq subWord subWord
+  , fmap PNeg subProp
+  , liftM2 PAnd subProp subProp
+  , liftM2 POr subProp subProp
+  , liftM2 PImpl subProp subProp
+  ]
+  where
+    subWord = if onlyLits then Lit <$> arbitrary else genWord 1 (sz `div` 2)
+    subProp = genProp onlyLits (sz `div` 2)
 
 genByte :: Int -> Gen (Expr Byte)
 genByte 0 = fmap LitByte arbitrary

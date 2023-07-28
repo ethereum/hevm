@@ -190,12 +190,14 @@ abstractVM
   :: (Expr Buf, [Prop])
   -> ByteString
   -> Maybe Precondition
+  -> Bool
   -> VM
-abstractVM cd contractCode maybepre = finalVm
+abstractVM cd contractCode maybepre create = finalVm
   where
     value = TxValue
-    code = RuntimeCode (ConcreteRuntimeCode contractCode)
-    vm = loadSymVM code value cd
+    code = if create then InitCode contractCode mempty
+           else RuntimeCode (ConcreteRuntimeCode contractCode)
+    vm = loadSymVM code value (if create then mempty else cd) create
     precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm]
@@ -205,8 +207,9 @@ loadSymVM
   :: ContractCode
   -> Expr EWord
   -> (Expr Buf, [Prop])
+  -> Bool
   -> VM
-loadSymVM x callvalue cd =
+loadSymVM x callvalue cd create =
   (makeVm $ VMOpts
     { contract = abstractContract x (SymAddr "entrypoint")
     , calldata = cd
@@ -228,7 +231,7 @@ loadSymVM x callvalue cd =
     , maxCodeSize = 0xffffffff
     , schedule = FeeSchedule.berlin
     , chainId = 1
-    , create = False
+    , create = create
     , txAccessList = mempty
     , allowFFI = False
     })
@@ -257,9 +260,6 @@ interpret fetcher maxIter askSmtIters heuristic vm =
       Stepper.Exec -> do
         let (r, vm') = runState exec vm
         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-      Stepper.Run -> do
-        let vm' = execState exec vm
-        interpret fetcher maxIter askSmtIters heuristic vm' (k vm')
       Stepper.IOAct q -> do
         r <- q
         interpret fetcher maxIter askSmtIters heuristic vm (k r)
@@ -425,7 +425,7 @@ verifyContract
   -> Maybe Postcondition
   -> IO (Expr End, [VerifyResult])
 verifyContract solvers theCode signature' concreteArgs opts maybepre maybepost =
-  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre
+  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre False
   in verify solvers opts preState maybepost
 
 -- | Stepper that parses the result of Stepper.runFully into an Expr End
@@ -496,39 +496,35 @@ reachable solvers e = do
           Unsat -> pure ([query], Nothing)
           r -> internalError $ "Invalid solver result: " <> show r
 
-
 -- | Evaluate the provided proposition down to its most concrete result
 evalProp :: Prop -> Prop
-evalProp = \case
-  o@(PBool _) -> o
-  o@(PNeg p)  -> case p of
-              (PBool b) -> PBool (not b)
-              _ -> o
-  o@(PEq l r) -> if l == r
-                 then PBool True
-                 else o
-  o@(PLT (Lit l) (Lit r)) -> if l < r
-                             then PBool True
-                             else o
-  o@(PGT (Lit l) (Lit r)) -> if l > r
-                             then PBool True
-                             else o
-  o@(PGEq (Lit l) (Lit r)) -> if l >= r
-                              then PBool True
-                              else o
-  o@(PLEq (Lit l) (Lit r)) -> if l <= r
-                              then PBool True
-                              else o
-  o@(PAnd l r) -> case (evalProp l, evalProp r) of
-                    (PBool True, PBool True) -> PBool True
-                    (PBool _, PBool _) -> PBool False
-                    _ -> o
-  o@(POr l r) -> case (evalProp l, evalProp r) of
-                   (PBool False, PBool False) -> PBool False
-                   (PBool _, PBool _) -> PBool True
-                   _ -> o
-  o -> o
+evalProp prop =
+  let new = mapProp' go prop
+  in if (new == prop) then prop else evalProp new
+  where
+    go :: Prop -> Prop
+    go (PLT (Lit l) (Lit r)) = PBool (l < r)
+    go (PGT (Lit l) (Lit r)) = PBool (l > r)
+    go (PGEq (Lit l) (Lit r)) = PBool (l >= r)
+    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
+    go (PNeg (PBool b)) = PBool (not b)
 
+    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
+    go (PAnd (PBool False) _) = PBool False
+    go (PAnd _ (PBool False)) = PBool False
+
+    go (POr (PBool l) (PBool r)) = PBool (l || r)
+    go (POr (PBool True) _) = PBool True
+    go (POr _ (PBool True)) = PBool True
+
+    go (PImpl (PBool l) (PBool r)) = PBool ((not l) || r)
+    go (PImpl (PBool False) _) = PBool True
+
+    go (PEq (Lit l) (Lit r)) = PBool (l == r)
+    go o@(PEq l r)
+      | l == r = PBool True
+      | otherwise = o
+    go p = p
 
 -- | Extract contraints stored in Expr End nodes
 extractProps :: Expr End -> [Prop]
@@ -651,7 +647,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
     getBranches bs = do
       let
         bytecode = if BS.null bs then BS.pack [0] else bs
-        prestate = abstractVM calldata bytecode Nothing
+        prestate = abstractVM calldata bytecode Nothing False
       expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl
@@ -849,7 +845,7 @@ formatCex cd m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
     -- it for branches that do not refer to calldata at all (e.g. the top level
     -- callvalue check inserted by solidity in contracts that don't have any
     -- payable functions).
-    cd' = prettyBuf $ Expr.simplify $ subModel m cd
+    cd' = prettyBuf . Expr.simplify . defaultSymbolicValues $ subModel m cd
 
     storeCex :: [Text]
     storeCex
@@ -903,9 +899,36 @@ formatCex cd m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
     prettyBuf :: Expr Buf -> Text
     prettyBuf (ConcreteBuf "") = "Empty"
     prettyBuf (ConcreteBuf bs) = formatBinary bs
-    prettyBuf _ = "Any"
+    prettyBuf b = internalError $ "Unexpected symbolic buffer:\n" <> T.unpack (formatExpr b)
 
--- | Takes a buffer and a Cex and replaces all abstract values in the buf with
+-- | If the expression contains any symbolic values, default them to some
+-- concrete value The intuition here is that if we still have symbolic values
+-- in our calldata expression after substituing in our cex, then they can have
+-- any value and we can safely pick a random value. This is a bit unsatisfying,
+-- we should really be doing smth like: https://github.com/ethereum/hevm/issues/334
+-- but it's probably good enough for now
+defaultSymbolicValues :: Expr a -> Expr a
+defaultSymbolicValues e = subBufs (foldTerm symbufs mempty e)
+                        . subVars (foldTerm symwords mempty e) $ e
+  where
+    symbufs :: Expr a -> Map (Expr Buf) ByteString
+    symbufs = \case
+      a@(AbstractBuf _) -> Map.singleton a ""
+      _ -> mempty
+    symwords :: Expr a -> Map (Expr EWord) W256
+    symwords = \case
+      a@(Var _) -> Map.singleton a 0
+      a@Origin -> Map.singleton a 0
+      a@Coinbase -> Map.singleton a 0
+      a@Timestamp -> Map.singleton a 0
+      a@BlockNumber -> Map.singleton a 0
+      a@PrevRandao -> Map.singleton a 0
+      a@GasLimit -> Map.singleton a 0
+      a@ChainId -> Map.singleton a 0
+      a@BaseFee -> Map.singleton a 0
+      _ -> mempty
+
+-- | Takes an expression and a Cex and replaces all abstract values in the buf with
 -- concrete ones from the Cex.
 subModel :: SMTCex -> Expr a -> Expr a
 subModel c
@@ -921,9 +944,11 @@ subModel c
       fromMaybe (internalError $ "cannot flatten buffer: " <> show b)
                 (SMT.collapse b)
 
-    subVars model b = Map.foldlWithKey subVar b model
+subVars :: Map (Expr EWord) W256 -> Expr a -> Expr a
+subVars model b = Map.foldlWithKey subVar b model
+  where
     subVar :: Expr a -> Expr EWord -> W256 -> Expr a
-    subVar b var val = mapExpr go b
+    subVar a var val = mapExpr go a
       where
         go :: Expr a -> Expr a
         go = \case
@@ -932,9 +957,11 @@ subModel c
                       else v
           e -> e
 
-    subAddrs model b = Map.foldlWithKey subAddr b model
+subAddrs :: Map (Expr EAddr) Addr -> Expr a -> Expr a
+subAddrs model b = Map.foldlWithKey subAddr b model
+  where
     subAddr :: Expr a -> Expr EAddr -> Addr -> Expr a
-    subAddr b var val = mapExpr go b
+    subAddr a var val = mapExpr go a
       where
         go :: Expr a -> Expr a
         go = \case
@@ -943,9 +970,11 @@ subModel c
                       else v
           e -> e
 
-    subBufs model b = Map.foldlWithKey subBuf b model
+subBufs :: Map (Expr Buf) ByteString -> Expr a -> Expr a
+subBufs model b = Map.foldlWithKey subBuf b model
+  where
     subBuf :: Expr a -> Expr Buf -> ByteString -> Expr a
-    subBuf b var val = mapExpr go b
+    subBuf x var val = mapExpr go x
       where
         go :: Expr a -> Expr a
         go = \case
@@ -954,9 +983,11 @@ subModel c
                       else a
           e -> e
 
-    subStores model b = Map.foldlWithKey subStore b model
+subStores :: Map (Expr EAddr) (Map W256 W256) -> Expr a -> Expr a
+subStores model b = Map.foldlWithKey subStore b model
+  where
     subStore :: Expr a -> Expr EAddr -> Map W256 W256 -> Expr a
-    subStore b var val = mapExpr go b
+    subStore x var val = mapExpr go x
       where
         go :: Expr a -> Expr a
         go = \case
