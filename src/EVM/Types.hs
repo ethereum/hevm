@@ -105,6 +105,17 @@ data EType
   | End
   deriving (Typeable)
 
+data SEType (t :: EType) where
+  SBuf :: SEType Buf
+  SSTorage :: SEType Storage
+  SLog :: SEType Log
+  SEWord :: SEType EWord
+  SByte :: SEType Byte
+  SEnd :: SEType End
+
+deriving instance (Show (SEType t))
+deriving instance (Eq (SEType t))
+deriving instance (Ord (SEType t))
 
 -- Variables refering to a global environment
 data GVar (a :: EType) where

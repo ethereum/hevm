@@ -98,6 +98,7 @@ library
     EVM.Op,
     EVM.Patricia,
     EVM.Precompiled,
+    EVM.Props,
     EVM.RLP,
     EVM.Solidity,
     EVM.Stepper,
@@ -184,7 +185,8 @@ library
     stm                               >= 2.5.0 && < 2.6.0,
     spawn                             >= 0.3 && < 0.4,
     filepattern                       >= 0.1.2 && < 0.2,
-    witch                             >= 1.1 && < 1.3
+    witch                             >= 1.1 && < 1.3,
+    sexpresso
   if !os(windows)
     build-depends:
       brick                           >= 1.4 && < 2.0,
