@@ -17,6 +17,8 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import qualified Data.Text.Lazy as L
 import Data.Text.Lazy.Builder
+import Data.Map (Map)
+import Data.Map qualified as Map
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Typeable
@@ -136,7 +138,17 @@ data Assignment where
 deriving instance Eq (LitVal a)
 deriving instance Ord (LitVal a)
 
-data Some (f:: k -> Type) = forall x . Some (f x)
+data Some (f :: k -> Type) = forall x . Typeable x => Some (f x)
+
+instance Eq (Some E.Expr) where
+  (Some (e0 :: E.Expr t0)) == (Some (e1 :: E.Expr t1)) = case eqT @t0 @t1 of
+    Just Refl -> e0 == e1
+    Nothing -> False
+
+instance Ord (Some E.Expr) where
+  (Some (e0 :: E.Expr t0)) <= (Some (e1 :: E.Expr t1)) = case eqT @t0 @t1 of
+    Just Refl -> e0 <= e1
+    Nothing -> False
 
 instance Eq FreeVar where
   (FreeVar (e0 :: E.Expr t0) nm0) == (FreeVar (e1 :: E.Expr t1) nm1)
@@ -162,35 +174,31 @@ instance Ord Assignment where
       Just Refl -> compare (compare e0 e1) (compare nm0 nm1)
       Nothing -> compare (E.toNum e0) (E.toNum e0)
 
-class Ord (FreeRep e) => MkModel e where
-  type FreeRep e
-  type AssignRep e
-  freeVars :: Ord (FreeRep e) => e -> Set (FreeRep e)
-  extractModel :: Set (FreeRep e) -> IO (Set (AssignRep e))
-  declareVar :: FreeRep e -> SMT
+class MkModel (f :: k -> Type) where
+  type LitRep f :: k -> Type
+  freeVars :: f e -> Map Text (Some f)
+  extractModel :: Map Text (Some f) -> IO (Map (Some f) (Some (LitRep f)))
+  declareVar :: Text -> Some f -> SMT
 
-instance MkModel (E.Expr e) where
-  type FreeRep (E.Expr e) = FreeVar e
-  type AssignRep (E.Expr e) = Assignment e
+instance MkModel E.Expr where
+  type LitRep (E.Expr) = LitVal
 
   freeVars = foldExpr go mempty
     where
-      go :: E.Expr a -> Set FreeVar
+      go :: E.Expr a -> Map Text (Some E.Expr)
       go = \case
-        v@(E.Var n) -> Set.singleton (FreeVar v n)
+        v@(E.Var n) -> Map.singleton n (Some v)
         _ -> mempty
 
-  extractModel fvs = do
-      let l = Set.toList fvs
-      assigns <- forM l $ \(FreeVar (e :: E.Expr ty) nm) -> do
+  extractModel (Map.toList -> fvs) = do
+      assigns <- forM fvs $ \(nm, Some e) -> do
         raw <- getValue nm
-        let v = case e of
-                  E.Var _ -> parseWord raw
+        pure $ case e of
+                  E.Var _ -> (Some e, Some $ parseWord raw)
                   _ -> undefined
-        pure $ Assignment e v
-      pure $ Set.fromList assigns
+      pure $ Map.fromList assigns
 
-  declareVar (FreeVar (e :: E.Expr ty) nm)
+  declareVar nm (Some (e :: E.Expr ty))
     | Just Refl <- eqT @ty @E.EWord = declareConst nm Word
     | Just Refl <- eqT @ty @E.Buf = declareConst nm Buf
     | Just Refl <- eqT @ty @E.Byte = declareConst nm Byte
@@ -203,23 +211,19 @@ data CheckSatResult
 class CheckSat e where
   checkSat :: SolverGroup -> Set (Prop e) -> IO CheckSatResult
 
-mkScript :: forall e . (MkModel e, Ord (FreeRep e), ToSMT e) => Set (Prop e) -> Builder
+mkScript :: forall f e . (MkModel f, ToSMT (f e)) => Set (Prop (f e)) -> Builder
 mkScript (Set.toList -> ps) =  mconcat
                             . intersperse (fromText "\n")
                             . fmap serialize $ script
   where
-    frees :: Set (FreeRep e)
+    frees :: Map Text (Some f)
     frees = mconcat $ fmap (foldProp freeVars) ps
 
     decls :: [SMT]
-    decls = fmap declareVar (Set.toList frees)
+    decls = fmap (uncurry declareVar) (Map.toList frees)
 
     script :: [SMT]
     script = decls <> fmap toSMT ps
-
-
-instance (ToSMT e, MkModel e) => CheckSat e where
-  checkSat sg ps = undefined
 
 getValue :: Text -> IO SMT
 getValue = undefined
