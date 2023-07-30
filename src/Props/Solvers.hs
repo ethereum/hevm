@@ -2,6 +2,9 @@
     Module: Props.Solvers
     Description: Solver orchestration
 -}
+
+{-# LANGUAGE UndecidableInstances #-}
+
 module Props.Solvers where
 
 import Prelude hiding (LT, GT)
@@ -13,6 +16,7 @@ import Control.Concurrent (forkIO, killThread)
 import Control.Monad
 import Control.Monad.Except
 import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.SExpresso.SExpr
 import Data.SExpresso.Parse
 import Data.Text qualified as TS
@@ -20,11 +24,10 @@ import Data.Text.Lazy (Text)
 import Data.Text.Lazy qualified as T
 import Data.Text.Lazy.IO qualified as T
 import Data.Text.Lazy.Builder
-import Data.Typeable
 import Data.Void
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
-import Text.Megaparsec (Parsec, parse, some)
-import Text.Megaparsec.Char (letterChar)
+import Text.Megaparsec (Parsec, parse, some, choice, errorBundlePretty)
+import Text.Megaparsec.Char (alphaNumChar, char)
 
 import EVM.Props
 
@@ -55,42 +58,39 @@ data SolverInstance = SolverInstance
 newtype SolverGroup = SolverGroup (Chan Task)
 
 -- | A script to be executed, a list of models to be extracted in the case of a sat result, and a channel where the result should be written
-data Task = Task
-  { script :: Set Prop
-  , resultChan :: Chan CheckSatResult
+data Task = forall f . ModelFns f => Task
+  { script :: Set (Prop f)
+  , resultChan :: Chan (CheckSatResult f)
   }
 
-data Assign where
-  Assign :: forall e . (Show (Assignment e), Eq (Assignment e), Typeable e) => Assignment e -> Assign
-
-deriving instance Show Assign
-instance Eq Assign where
-  Assign (a :: Assignment t0) == Assign (b :: Assignment t1)
-    = case eqT @t0 @t1 of
-        Just Refl -> a == b
-        Nothing -> False
-
 -- | The result of a call to (check-sat)
-data CheckSatResult
-  = Sat (Set Assign)
+data CheckSatResult f
+  = Sat (Set (Assignment f))
   | Unsat
   | Unknown
   | Error TS.Text
-  deriving (Show, Eq)
 
-isSat :: CheckSatResult -> Bool
+instance (Show (Assignment f)) => Show (CheckSatResult f) where
+  show (Sat s) = "Sat " <> show s
+  show Unsat = "Unsat"
+  show Unknown = "Unknown"
+  show (Error t) = "Error: " <> TS.unpack t
+
+deriving instance (Eq (Assignment f)) => Eq (CheckSatResult f)
+
+isSat :: CheckSatResult f -> Bool
 isSat (Sat _) = True
 isSat _ = False
 
-isErr :: CheckSatResult -> Bool
+isErr :: CheckSatResult f -> Bool
 isErr (Error _) = True
 isErr _ = False
 
-isUnsat :: CheckSatResult -> Bool
+isUnsat :: CheckSatResult f -> Bool
 isUnsat Unsat = True
 isUnsat _ = False
 
-checkSat :: SolverGroup -> Set Prop -> IO CheckSatResult
+checkSat :: ModelFns f => SolverGroup -> Set (Prop f) -> IO (CheckSatResult f)
 checkSat (SolverGroup taskQueue) script = do
   -- prepare result channel
   resChan <- newChan
@@ -129,7 +129,7 @@ withSolvers solver count timeout cont = do
       out <- sendScript inst (Script (Sexp [A "reset"] : cmds))
       case out of
         -- if we got an error then return it
-        Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
+        Left e -> writeChan r (Error e)
         -- otherwise call (check-sat), parse the result, and send it down the result channel
         Right () -> do
           sat <- sendLine inst (Sexp [A "check-sat"])
@@ -137,7 +137,7 @@ withSolvers solver count timeout cont = do
             "sat" -> do
               getModel inst ps >>= \case
                 Right m -> pure $ Sat m
-                Left e -> pure . Error . T.toStrict $ e
+                Left e -> pure $ Error e
             "unsat" -> pure Unsat
             "timeout" -> pure Unknown
             "unknown" -> pure Unknown
@@ -147,21 +147,22 @@ withSolvers solver count timeout cont = do
       -- put the instance back in the list of available instances
       writeChan availableInstances inst
 
-getModel :: SolverInstance -> Set Prop -> IO (Either Text (Set Assign))
-getModel inst ps = undefined
+getModel :: ModelFns f => SolverInstance -> Set (Prop f) -> IO (Either TS.Text (Set (Assignment f)))
+getModel inst ps = do
+  assigns <- mapM (extract (getValue inst)) (Set.toList $ free ps)
+  pure $ mapRight Set.fromList $ sequence assigns
 
-getValue :: SolverInstance -> SMT -> IO (Either Text SMT)
+getValue :: SolverInstance -> SMT -> IO (Either TS.Text SMT)
 getValue inst v = do
-  value <- sendLine inst (Sexp [A "get-value", v])
+  value <- sendLine inst (Sexp [A "get-value", Sexp [v]])
   case parse parseSMT "" value of
     Right s -> pure $ Right s
-    Left e -> pure $ Left $ "Unable to parse model for " <> asText v <> ": " <> T.pack (show e)
-
-asText :: SMT -> Text
-asText = toLazyText . serialize
+    Left e -> pure $ Left $ "Unable to parse model for " <> asText v <> ":\n" <> (TS.pack $ errorBundlePretty e)
 
 parseSMT :: Parsec Void Text SMT
-parseSMT = decodeOne $ plainSExprParser (fmap (T.toStrict . T.pack) (some letterChar))
+parseSMT = decodeOne $ plainSExprParser (fmap (T.toStrict . T.pack) atom)
+  where
+    atom = some $ choice [alphaNumChar, char '#', char '_']
 
 -- getModel :: SolverInstance -> CexVars -> IO SMTCex
 -- getModel inst cexvars = do
@@ -270,7 +271,7 @@ spawnSolver solver timeout = do
     CVC5 -> pure solverInstance
     _ -> do
       r <- runExceptT $ do
-        ExceptT $ fmap checkSuccess $ sendLine solverInstance $ Sexp [A "set-option", A ":print-success"]
+        ExceptT $ fmap checkSuccess $ sendLine solverInstance $ Sexp [A "set-option", A ":print-success", A "true"]
         ExceptT $ fmap checkSuccess $ sendLine solverInstance $ Sexp [A "set-option", A ":timeout", A (mkTimeout timeout)]
       case r of
         Right () -> pure solverInstance
@@ -286,14 +287,14 @@ stopSolver :: SolverInstance -> IO ()
 stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just stdin, Just stdout, Just stderr, process)
 
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
-sendScript :: SolverInstance -> Script -> IO (Either Text ())
+sendScript :: SolverInstance -> Script -> IO (Either TS.Text ())
 sendScript solver = \case
   Script [] -> pure $ Right ()
   Script (c:cs) -> do
     r <- sendLine solver c
     case r of
       "success" -> sendScript solver (Script cs)
-      e -> pure $ Left e
+      e -> pure $ Left $ "error: " <> (T.toStrict e) <> ". from: " <> (asText c)
 
 -- | Sends a string to the solver and appends a newline, returns the first available line from the output buffer
 sendLine :: SolverInstance -> SMT -> IO Text
@@ -301,3 +302,7 @@ sendLine (SolverInstance _ stdin stdout _ _) cmd = do
   T.hPutStr stdin (T.append (toLazyText $ serialize cmd) "\n")
   hFlush stdin
   T.hGetLine stdout
+
+mapRight :: (b -> c) -> Either a b -> Either a c
+mapRight f (Right a) = Right (f a)
+mapRight _ (Left l) = Left l

@@ -111,6 +111,7 @@ library
     EVM.Types,
     EVM.UnitTest,
     EVM.Sign,
+    Props.Solvers
   if !os(windows)
     exposed-modules:
       EVM.TTY,
