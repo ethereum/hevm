@@ -853,8 +853,6 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
         go (Caller x) _ = x == 0
         go (Address x) _ = x == 0
         go (Balance {}) _ = internalError "TODO: BALANCE"
-        go (SelfBalance {}) _ = internalError "TODO: SELFBALANCE"
-        go (Gas {}) _ = internalError "TODO: Gas"
         go _ _ = False
 
     blockCtx :: [Text]

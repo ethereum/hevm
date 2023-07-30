@@ -2,7 +2,7 @@ module EVM.Exec where
 
 import EVM
 import EVM.Concrete (createAddress)
-import EVM.FeeSchedule qualified as FeeSchedule
+import EVM.FeeSchedule (feeSchedule)
 import EVM.Expr (litAddr)
 import EVM.Types
 
@@ -35,7 +35,7 @@ vmForEthrunCreation creationCode =
     , baseFee = 0
     , priorityFee = 0
     , maxCodeSize = 0xffffffff
-    , schedule = FeeSchedule.berlin
+    , schedule = feeSchedule
     , chainId = 1
     , create = False
     , txAccessList = mempty

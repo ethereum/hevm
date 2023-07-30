@@ -44,7 +44,6 @@ import Data.Vector.Storable qualified as SV
 import Numeric (readHex, showHex)
 import Options.Generic
 import Optics.TH
-import EVM.Hexdump (paddedShowHex)
 import EVM.FeeSchedule (FeeSchedule (..))
 
 import Text.Regex.TDFA qualified as Regex
@@ -265,14 +264,6 @@ data Expr (a :: EType) where
                  -> Expr EWord         -- address
                  -> Expr EWord
 
-  SelfBalance    :: Int                -- frame idx
-                 -> Int                -- PC
-                 -> Expr EWord
-
-  Gas            :: Int                -- frame idx
-                 -> Int                -- PC
-                 -> Expr EWord
-
   -- code
 
   CodeSize       :: Expr EWord         -- address
@@ -287,60 +278,6 @@ data Expr (a :: EType) where
                  -> Expr Buf           -- data
                  -> [Expr EWord]       -- topics
                  -> Expr Log
-
-  -- Contract Creation
-
-  Create         :: Expr EWord         -- value
-                 -> Expr EWord         -- offset
-                 -> Expr EWord         -- size
-                 -> Expr Buf           -- memory
-                 -> [Expr Log]          -- logs
-                 -> Expr Storage       -- storage
-                 -> Expr EWord         -- address
-
-  Create2        :: Expr EWord         -- value
-                 -> Expr EWord         -- offset
-                 -> Expr EWord         -- size
-                 -> Expr EWord         -- salt
-                 -> Expr Buf           -- memory
-                 -> [Expr Log]          -- logs
-                 -> Expr Storage       -- storage
-                 -> Expr EWord         -- address
-
-  -- Calls
-
-  Call           :: Expr EWord         -- gas
-                 -> Maybe (Expr EWord) -- target
-                 -> Expr EWord         -- value
-                 -> Expr EWord         -- args offset
-                 -> Expr EWord         -- args size
-                 -> Expr EWord         -- ret offset
-                 -> Expr EWord         -- ret size
-                 -> [Expr Log]          -- logs
-                 -> Expr Storage       -- storage
-                 -> Expr EWord         -- success
-
-  CallCode       :: Expr EWord         -- gas
-                 -> Expr EWord         -- address
-                 -> Expr EWord         -- value
-                 -> Expr EWord         -- args offset
-                 -> Expr EWord         -- args size
-                 -> Expr EWord         -- ret offset
-                 -> Expr EWord         -- ret size
-                 -> [Expr Log]         -- logs
-                 -> Expr Storage       -- storage
-                 -> Expr EWord         -- success
-
-  DelegeateCall  :: Expr EWord         -- gas
-                 -> Expr EWord         -- address
-                 -> Expr EWord         -- value
-                 -> Expr EWord         -- args offset
-                 -> Expr EWord         -- args size
-                 -> Expr EWord         -- ret offset
-                 -> Expr EWord         -- ret size
-                 -> [Expr Log]         -- logs
-                 -> Expr Storage       -- storage
-                 -> Expr EWord         -- success
 
   -- storage
 
@@ -1312,6 +1249,15 @@ formatString bs =
   case T.decodeUtf8' (fst (BS.spanEnd (== 0) bs)) of
     Right s -> "\"" <> T.unpack s <> "\""
     Left _ -> "❮utf8 decode failed❯: " <> (show $ ByteStringS bs)
+
+-- |'paddedShowHex' displays a number in hexidecimal and pads the number
+-- with 0 so that it has a minimum length of @w@.
+paddedShowHex :: (Show a, Integral a) => Int -> a -> String
+paddedShowHex w n = pad ++ str
+    where
+     str = showHex n ""
+     pad = replicate (w - length str) '0'
+
 
 -- Optics ------------------------------------------------------------------------------------------
 

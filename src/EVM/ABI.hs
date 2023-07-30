@@ -572,21 +572,3 @@ decodeBuf tps buf
 decodeStaticArgs :: Int -> Int -> Expr Buf -> [Expr EWord]
 decodeStaticArgs offset numArgs b =
   [readWord (Lit . unsafeInto $ i) b | i <- [offset,(offset+32) .. (offset + (numArgs-1)*32)]]
-
-
--- A modification of 'arbitrarySizedBoundedIntegral' quickcheck library
--- which takes the maxbound explicitly rather than relying on a Bounded instance.
--- Essentially a mix between three types of generators:
--- one that strongly prefers values close to 0, one that prefers values close to max
--- and one that chooses uniformly.
-arbitraryIntegralWithMax :: (Integral a) => Integer -> Gen a
-arbitraryIntegralWithMax maxbound =
-  sized $ \s ->
-    do let mn = 0 :: Int
-           mx = maxbound
-           bits n | n `quot` 2 == 0 = 0
-                  | otherwise = 1 + bits (n `quot` 2)
-           k  = 2^(s*(bits mn `max` bits mx `max` 40) `div` 100)
-       smol <- choose (toInteger mn `max` (-k), toInteger mx `min` k)
-       mid <- choose (0, maxbound)
-       elements [fromIntegral smol, fromIntegral mid, fromIntegral (maxbound - (fromIntegral smol))]

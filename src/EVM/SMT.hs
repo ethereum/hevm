@@ -207,8 +207,6 @@ referencedFrameContext expr = nubOrd $ foldTerm go [] expr
       Caller a -> [(fromLazyText $ T.append "caller_" (T.pack . show $ a), [inRange 160 (Caller a)])]
       Address a -> [(fromLazyText $ T.append "address_" (T.pack . show $ a), [inRange 160 (Address a)])]
       Balance {} -> internalError "TODO: BALANCE"
-      SelfBalance {} -> internalError "TODO: SELFBALANCE"
-      Gas {} -> internalError "TODO: GAS"
       _ -> []
 
 referencedBlockContext :: TraversableTerm a => a -> [(Builder, [Prop])]

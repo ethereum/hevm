@@ -37,7 +37,6 @@ import EVM (cheatCode, traceForest, traceForest', traceContext)
 import EVM.ABI (getAbiSeq, parseTypeName, AbiValue(..), AbiType(..), SolError(..), Indexed(..), Event(..))
 import EVM.Dapp (DappContext(..), DappInfo(..), showTraceLocation)
 import EVM.Expr qualified as Expr
-import EVM.Hexdump (prettyHex, paddedShowHex)
 import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
 
 import Control.Arrow ((>>>))
@@ -60,6 +59,7 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Tree.View (showTree)
 import Data.Vector (Vector)
+import Hexdump (prettyHex)
 import Numeric (showHex)
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Base16 qualified as BS16
@@ -569,7 +569,7 @@ formatExpr = go
         "" -> "(ConcreteBuf \"\")"
         _ -> T.unlines
           [ "(ConcreteBuf"
-          , indent 2 $ T.pack $ prettyHex 0 bs
+          , indent 2 $ T.pack $ prettyHex bs
           , ")"
           ]
 
@@ -603,5 +603,3 @@ hexText t =
 
 bsToHex :: ByteString -> String
 bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
-
-
