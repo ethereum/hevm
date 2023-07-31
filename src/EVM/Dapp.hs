@@ -7,15 +7,15 @@ import EVM.Types
 
 import Control.Arrow ((>>>))
 import Data.Aeson (Value)
-import Data.Bifunctor (first, second)
+import Data.Bifunctor (second)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.List (find, sort)
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (isJust, fromJust, mapMaybe)
+import Data.Maybe (mapMaybe)
 import Data.Sequence qualified as Seq
-import Data.Text (Text, isPrefixOf, pack, unpack)
+import Data.Text (Text, isPrefixOf, pack)
 import Data.Text.Encoding (encodeUtf8)
 import Data.Vector qualified as V
 import Optics.Core
@@ -27,7 +27,7 @@ data DappInfo = DappInfo
   , solcByHash :: Map W256 (CodeType, SolcContract)
   , solcByCode :: [(Code, SolcContract)] -- for contracts with `immutable` vars.
   , sources    :: SourceCache
-  , unitTests  :: [(Text, [(Test, [AbiType])])]
+  , unitTests  :: [(Text, [Sig])]
   , abiMap     :: Map FunctionSelector Method
   , eventMap   :: Map W256 Event
   , errorMap   :: Map W256 SolError
@@ -46,11 +46,6 @@ data DappContext = DappContext
   { info :: DappInfo
   , env  :: Map Addr Contract
   }
-
-data Test = ConcreteTest Text | SymbolicTest Text | InvariantTest Text
-
-instance Show Test where
-  show t = unpack $ extractSig t
 
 dappInfo :: FilePath -> BuildOutput -> DappInfo
 dappInfo root (BuildOutput (Contracts cs) sources) =
@@ -87,29 +82,28 @@ emptyDapp :: DappInfo
 emptyDapp = dappInfo "" mempty
 
 -- Dapp unit tests are detected by searching within abi methods
--- that begin with "test" or "prove", that are in a contract with
+-- that begin with "check" or "prove", that are in a contract with
 -- the "IS_TEST()" abi marker, for a given regular expression.
 --
 -- The regex is matched on the full test method name, including path
 -- and contract, i.e. "path/to/file.sol:TestContract.test_name()".
---
--- Tests beginning with "test" are interpreted as concrete tests, whereas
--- tests beginning with "prove" are interpreted as symbolic tests.
 
 unitTestMarkerAbi :: FunctionSelector
 unitTestMarkerAbi = abiKeccak (encodeUtf8 "IS_TEST()")
 
-findAllUnitTests :: [SolcContract] -> [(Text, [(Test, [AbiType])])]
-findAllUnitTests = findUnitTests ".*:.*\\.(test|prove|invariant).*"
+findAllUnitTests :: [SolcContract] -> [(Text, [Sig])]
+findAllUnitTests = findUnitTests ".*:.*\\.(check|prove).*"
 
-mkTest :: Text -> Maybe Test
-mkTest sig
-  | "test" `isPrefixOf` sig = Just (ConcreteTest sig)
-  | "prove" `isPrefixOf` sig = Just (SymbolicTest sig)
-  | "invariant" `isPrefixOf` sig = Just (InvariantTest sig)
+mkSig :: Method -> Maybe Sig
+mkSig method
+  | "prove" `isPrefixOf` testname = Just (Sig testname argtypes)
+  | "check" `isPrefixOf` testname = Just (Sig testname argtypes)
   | otherwise = Nothing
+  where
+    testname = method.methodSignature
+    argtypes = snd <$> method.inputs
 
-findUnitTests :: Text -> ([SolcContract] -> [(Text, [(Test, [AbiType])])])
+findUnitTests :: Text -> ([SolcContract] -> [(Text, [Sig])])
 findUnitTests match =
   concatMap $ \c ->
     case Map.lookup unitTestMarkerAbi c.abiMap of
@@ -118,25 +112,16 @@ findUnitTests match =
         let testNames = unitTestMethodsFiltered (regexMatches match) c
         in [(c.contractName, testNames) | not (BS.null c.runtimeCode) && not (null testNames)]
 
-unitTestMethodsFiltered :: (Text -> Bool) -> (SolcContract -> [(Test, [AbiType])])
+unitTestMethodsFiltered :: (Text -> Bool) -> (SolcContract -> [Sig])
 unitTestMethodsFiltered matcher c =
-  let
-    testName method = c.contractName <> "." <> (extractSig (fst method))
-  in
-    filter (matcher . testName) (unitTestMethods c)
+  let testName (Sig n _) = c.contractName <> "." <> n
+  in filter (matcher . testName) (unitTestMethods c)
 
-unitTestMethods :: SolcContract -> [(Test, [AbiType])]
+unitTestMethods :: SolcContract -> [Sig]
 unitTestMethods =
   (.abiMap)
   >>> Map.elems
-  >>> map (\f -> (mkTest f.methodSignature, snd <$> f.inputs))
-  >>> filter (isJust . fst)
-  >>> fmap (first fromJust)
-
-extractSig :: Test -> Text
-extractSig (ConcreteTest sig) = sig
-extractSig (SymbolicTest sig) = sig
-extractSig (InvariantTest sig) = sig
+  >>> mapMaybe mkSig
 
 traceSrcMap :: DappInfo -> Trace -> Maybe SrcMap
 traceSrcMap dapp trace = srcMap dapp trace.contract trace.opIx

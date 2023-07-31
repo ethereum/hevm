@@ -31,23 +31,28 @@ contract CheatCodes is DSTest {
     address store = address(new HasStorage());
     Hevm hevm = Hevm(HEVM_ADDRESS);
 
-    function test_warp_concrete(uint128 jump) public {
+    function prove_warp_concrete() public {
+        uint jump = 1000;
         uint pre = block.timestamp;
         hevm.warp(block.timestamp + jump);
         assertEq(block.timestamp, pre + jump);
     }
 
     function prove_warp_symbolic(uint128 jump) public {
-        test_warp_concrete(jump);
+        uint pre = block.timestamp;
+        hevm.warp(block.timestamp + jump);
+        assertEq(block.timestamp, pre + jump);
     }
 
-    function test_roll_concrete(uint64 jump) public {
+    function prove_roll_concrete() public {
+        uint jump = 1000;
         uint pre = block.number;
         hevm.roll(block.number + jump);
         assertEq(block.number, pre + jump);
     }
 
-    function test_store_load_concrete(uint x) public {
+    function prove_store_load_concrete() public {
+        uint x = 1000;
         uint ten = uint(hevm.load(store, bytes32(0)));
         assertEq(ten, 10);
 
@@ -57,11 +62,17 @@ contract CheatCodes is DSTest {
     }
 
     function prove_store_load_symbolic(uint x) public {
-        test_store_load_concrete(x);
+        uint ten = uint(hevm.load(store, bytes32(0)));
+        assertEq(ten, 10);
+
+        hevm.store(store, bytes32(0), bytes32(x));
+        uint val = uint(hevm.load(store, bytes32(0)));
+        assertEq(val, x);
     }
 
-    function test_sign_addr_digest(uint sk, bytes32 digest) public {
-        if (sk == 0) return; // invalid key
+    function prove_sign_addr_digest() public {
+        uint sk = 1000000;
+        bytes32 digest = "123456789";
 
         (uint8 v, bytes32 r, bytes32 s) = hevm.sign(sk, digest);
         address expected = hevm.addr(sk);
@@ -70,11 +81,9 @@ contract CheatCodes is DSTest {
         assertEq(actual, expected);
     }
 
-    function test_sign_addr_message(uint sk, bytes memory message) public {
-        test_sign_addr_digest(sk, keccak256(message));
-    }
-
-    function testFail_sign_addr(uint sk, bytes32 digest) public {
+    function proveFail_sign_addr() public {
+        uint sk = 999;
+        bytes32 digest = "abcdef123456";
         uint badKey = sk + 1;
 
         (uint8 v, bytes32 r, bytes32 s) = hevm.sign(badKey, digest);
@@ -84,11 +93,11 @@ contract CheatCodes is DSTest {
         assertEq(actual, expected);
     }
 
-    function testFail_addr_zero_sk() public {
+    function proveFail_addr_zero_sk() public {
         hevm.addr(0);
     }
 
-    function testFFI() public {
+    function proveFFI() public {
         string[] memory inputs = new string[](3);
         inputs[0] = "echo";
         inputs[1] = "-n";
@@ -98,7 +107,7 @@ contract CheatCodes is DSTest {
         assertEq(output, "acab");
     }
 
-    function test_prank() public {
+    function prove_prank() public {
         Prankster prankster = new Prankster();
         assertEq(prankster.prankme(), address(this));
         hevm.prank(address(0xdeadbeef));
@@ -106,7 +115,7 @@ contract CheatCodes is DSTest {
         assertEq(prankster.prankme(), address(this));
     }
 
-    function test_prank_val() public {
+    function prove_prank_val() public {
         address from = address(0x1312);
         uint amt = 10;
 

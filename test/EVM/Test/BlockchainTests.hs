@@ -2,15 +2,12 @@ module EVM.Test.BlockchainTests where
 
 import EVM (initialContract, makeVm)
 import EVM.Concrete qualified as EVM
-import EVM.Dapp (emptyDapp)
 import EVM.Expr (litAddr)
-import EVM.FeeSchedule qualified
+import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified
 import EVM.Format (hexText)
 import EVM.Stepper qualified
-import EVM.Solvers (withSolvers, Solver(Z3))
 import EVM.Transaction
-import EVM.TTY qualified as TTY
 import EVM.Types hiding (Block, Case)
 
 import Control.Arrow ((***), (&&&))
@@ -135,21 +132,6 @@ runVMTest diffmode (_name, x) = do
   result <- EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) vm0 EVM.Stepper.runFully
   maybeReason <- checkExpectation diffmode x result
   forM_ maybeReason assertFailure
-
--- | Example usage:
--- $ cabal new-repl ethereum-tests
--- ghci> debugVMTest "BlockchainTests/GeneralStateTests/VMTests/vmArithmeticTest/twoOps.json" "twoOps_d0g0v0_London"
-debugVMTest :: String -> String -> IO ()
-debugVMTest file test = do
-  repo <- getEnv "HEVM_ETHEREUM_TESTS_REPO"
-  Right allTests <- parseBCSuite <$> LazyByteString.readFile (repo </> file)
-  let x = case filter (\(name, _) -> name == test) $ Map.toList allTests of
-        [(_, x')] -> x'
-        _ -> internalError "test not found"
-  let vm0 = vmForCase x
-  result <- withSolvers Z3 0 Nothing $ \solvers ->
-    TTY.runFromVM solvers Nothing Nothing emptyDapp vm0
-  void $ checkExpectation True x result
 
 splitEithers :: (Filterable f) => f (Either a b) -> (f a, f b)
 splitEithers =
@@ -381,7 +363,6 @@ fromBlockchainCase' block tx preState postState =
           where
             toAddr = fromMaybe (EVM.createAddress origin senderNonce) tx.toAddr
             senderNonce = view (accountAt origin % #nonce) (Map.map fst preState)
-            feeSchedule = EVM.FeeSchedule.berlin
             toCode = Map.lookup toAddr preState
             theCode = if isCreate
                       then InitCode tx.txdata mempty

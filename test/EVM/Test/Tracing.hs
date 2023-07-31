@@ -51,7 +51,7 @@ import EVM.Exec (ethrunAddress)
 import EVM.Fetch qualified as Fetch
 import EVM.Format (bsToHex, formatBinary)
 import EVM.Concrete (createAddress)
-import EVM.FeeSchedule qualified as FeeSchedule
+import EVM.FeeSchedule
 import EVM.Op (intToOpName)
 import EVM.Sign (deriveAddr)
 import EVM.Solvers
@@ -60,7 +60,6 @@ import EVM.SymExec
 import EVM.Traversals (mapExpr)
 import EVM.Transaction qualified
 import EVM.Types
-import EVM.Hexdump(simpleHex)
 
 data VMTrace =
   VMTrace
@@ -141,7 +140,7 @@ data EVMToolEnv = EVMToolEnv
   , gasLimit    :: Data.Word.Word64
   , baseFee     :: W256
   , maxCodeSize :: W256
-  , schedule    :: FeeSchedule.FeeSchedule Data.Word.Word64
+  , schedule    :: FeeSchedule Data.Word.Word64
   , blockHashes :: Map.Map Int W256
   } deriving (Show, Generic)
 
@@ -168,7 +167,7 @@ emptyEvmToolEnv = EVMToolEnv { coinbase = 0
                              , gasLimit   = 0xffffffffffffffff
                              , baseFee    = 0
                              , maxCodeSize= 0xffffffff
-                             , schedule   = FeeSchedule.berlin
+                             , schedule   = feeSchedule
                              , blockHashes = mempty
                              }
 
@@ -285,7 +284,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
                         , gasLimit    =  fromIntegral gaslimitExec
                         , baseFee     =  0x0
                         , maxCodeSize =  0xfffff
-                        , schedule    =  FeeSchedule.berlin
+                        , schedule    =  feeSchedule
                         , blockHashes =  blockHashesDefault
                         }
     sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
@@ -893,8 +892,8 @@ checkTraceAndOutputs contract gasLimit txData = do
              putStrLn $ "concretized expr                 : " <> (show concretizedExpr)
              putStrLn $ "simplified concretized expr      : " <> (show simplConcExpr)
              putStrLn $ "evmtoolTraceOutput.output.output : " <> (show (evmtoolTraceOutput.output.output))
-             putStrLn $ "HEVM trace result output         : " <> (simpleHex (bssToBs hevmTraceResult.out))
-             putStrLn $ "ret value computed via symb+conc : " <> (simpleHex (fromJust simplConcrExprRetval))
+             putStrLn $ "HEVM trace result output         : " <> (bsToHex (bssToBs hevmTraceResult.out))
+             putStrLn $ "ret value computed via symb+conc : " <> (bsToHex (fromJust simplConcrExprRetval))
              assertEqual "Simplified, concretized expression must match evmtool's output." True False
       else do
         putStrLn $ "Name of trace file: " <> (getTraceFileName $ fromJust evmtoolResult)

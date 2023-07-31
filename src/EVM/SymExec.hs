@@ -40,16 +40,13 @@ import EVM.Stepper qualified as Stepper
 import EVM.Traversals
 import EVM.Types
 import EVM.Concrete (createAddress)
-import EVM.FeeSchedule qualified as FeeSchedule
+import EVM.FeeSchedule (feeSchedule)
 import EVM.Format (indent, formatBinary)
 import GHC.Conc (getNumProcessors)
 import GHC.Generics (Generic)
 import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
 import Witch (into, unsafeInto)
-
--- | A method name, and the (ordered) types of it's arguments
-data Sig = Sig Text [AbiType]
 
 data LoopHeuristic
   = Naive
@@ -233,7 +230,7 @@ loadSymVM x initStore addr callvalue cd create =
     , baseFee = 0
     , priorityFee = 0
     , maxCodeSize = 0xffffffff
-    , schedule = FeeSchedule.berlin
+    , schedule = feeSchedule
     , chainId = 1
     , create = create
     , txAccessList = mempty

@@ -5,60 +5,43 @@ module EVM.UnitTest where
 
 import EVM
 import EVM.ABI
-import EVM.Concrete
 import EVM.SMT
 import EVM.Solvers
 import EVM.Dapp
+import EVM.Concrete (createAddress)
 import EVM.Exec
 import EVM.Expr (litAddr, readStorage', simplify)
 import EVM.Expr qualified as Expr
-import EVM.FeeSchedule qualified as FeeSchedule
+import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
 import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, defaultSymbolicValues, VeriOpts(..))
 import EVM.Types
 import EVM.Transaction (initTx)
-import EVM.RLP
 import EVM.Stepper (Stepper, interpret)
 import EVM.Stepper qualified as Stepper
 
-import Control.Monad.Operational qualified as Operational
 import Optics.Core hiding (elements)
 import Optics.State
 import Optics.State.Operators
-import Optics.Zoom
-import Control.Monad.Par.Class (spawn_)
-import Control.Monad.Par.Class qualified as Par
-import Control.Monad.Par.IO (runParIO)
 import Control.Monad.State.Strict hiding (state)
-import Control.Monad.State.Strict qualified as State
 import Data.ByteString.Lazy qualified as BSLazy
 import Data.Binary.Get (runGet)
 import Data.ByteString (ByteString)
-import Data.ByteString qualified as BS
 import Data.Decimal (DecimalRaw(..))
-import Data.Either (isRight)
+import Data.Either (isRight, rights, lefts)
 import Data.Foldable (toList)
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (fromMaybe, catMaybes, fromJust, isJust, fromMaybe, mapMaybe, isNothing)
-import Data.MultiSet (MultiSet)
-import Data.MultiSet qualified as MultiSet
-import Data.Set (Set)
-import Data.Set qualified as Set
+import Data.Maybe
 import Data.Text (isPrefixOf, stripSuffix, intercalate, Text, pack, unpack)
 import Data.Text qualified as Text
 import Data.Text.Encoding (encodeUtf8)
 import Data.Text.IO qualified as Text
-import Data.Vector (Vector)
-import Data.Vector qualified as Vector
-import Data.Word (Word32, Word64)
+import Data.Word (Word64)
 import GHC.Natural
-import System.Environment (lookupEnv)
 import System.IO (hFlush, stdout)
-import Test.QuickCheck hiding (verbose, Success, Failure)
-import qualified Test.QuickCheck as QC
 import Witch (unsafeInto, into)
 
 data UnitTestOptions = UnitTestOptions
@@ -68,14 +51,9 @@ data UnitTestOptions = UnitTestOptions
   , maxIter     :: Maybe Integer
   , askSmtIters :: Integer
   , smtDebug    :: Bool
-  , maxDepth    :: Maybe Int
   , smtTimeout  :: Maybe Natural
   , solver      :: Maybe Text
-  , covMatch    :: Maybe Text
   , match       :: Text
-  , fuzzRuns    :: Int
-  , replay      :: Maybe (Text, BSLazy.ByteString)
-  , vmModifier  :: VM -> VM
   , dapp        :: DappInfo
   , testParams  :: TestVMParams
   , ffiAllowed  :: Bool
@@ -129,8 +107,7 @@ unitTest :: UnitTestOptions -> Contracts -> IO Bool
 unitTest opts (Contracts cs) = do
   let unitTests = findUnitTests opts.match $ Map.elems cs
   results <- concatMapM (runUnitTestContract opts cs) unitTests
-  let (passing, _) = unzip results
-  pure $ and passing
+  pure $ and results
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
 -- to create the test contract, give it an initial balance, and run `setUp()'.
@@ -140,8 +117,6 @@ initializeUnitTest opts theContract = do
   let addr = opts.testParams.address
 
   Stepper.evm $ do
-    -- Maybe modify the initial VM, e.g. to load library code
-    modify opts.vmModifier
     -- Make a trace entry for running the constructor
     pushTrace (EntryTrace "constructor")
 
@@ -170,8 +145,8 @@ initializeUnitTest opts theContract = do
 runUnitTestContract
   :: UnitTestOptions
   -> Map Text SolcContract
-  -> (Text, [(Test, [AbiType])])
-  -> IO [(Bool, VM)]
+  -> (Text, [Sig])
+  -> IO [Bool]
 runUnitTestContract
   opts@(UnitTestOptions {..}) contractMap (name, testSigs) = do
 
@@ -196,39 +171,31 @@ runUnitTestContract
         Just (VMFailure _) -> liftIO $ do
           Text.putStrLn "\x1b[31m[BAIL]\x1b[0m setUp() "
           tick "\n"
-          tick (Data.Text.pack $ show $ failOutput vm1 opts "setUp()")
-          pure [(False, vm1)]
+          tick $ failOutput vm1 opts "setUp()"
+          pure [False]
         Just (VMSuccess _) -> do
           let
 
-            runCache :: ([(Either Text Text, VM)], VM) -> (Test, [AbiType])
-                        -> IO ([(Either Text Text, VM)], VM)
-            runCache (results, vm) (test, types) = do
-              (t, r, vm') <- runTest opts vm (test, types)
-              Text.putStrLn t
-              let vmCached = vm { cache = vm'.cache }
-              pure (((r, vm'): results), vmCached)
+          -- Run all the test cases and print their status
+          details <- forM testSigs $ \s -> do
+            (result, detail) <- symRun opts vm1 s
+            Text.putStrLn result
+            pure detail
 
-          -- Run all the test cases and print their status updates,
-          -- accumulating the vm cache throughout
-
-          {- details :: [(Either Text Text, VM)] -}
-          details <- mapM (runTest opts vm1) testSigs
-
-          let running = [x | (Right x, _) <- details]
-              bailing = [x | (Left  x, _) <- details]
+          let running = rights details
+              bailing = lefts details
 
           tick "\n"
           tick (Text.unlines (filter (not . Text.null) running))
           tick (Text.unlines bailing)
 
-          pure [(isRight r, vm) | (r, vm) <- details]
+          pure $ fmap isRight details
         _ -> internalError "setUp() did not end with a result"
 
 
 -- | Define the thread spawner for symbolic tests
-symRun :: UnitTestOptions -> VM -> Text -> [AbiType] -> IO (Text, Either Text Text, VM)
-symRun opts@UnitTestOptions{..} vm testName types = do
+symRun :: UnitTestOptions -> VM -> Sig -> IO (Text, Either Text Text)
+symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     let cd = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName
         testContract = vm.state.contract
@@ -261,11 +228,11 @@ symRun opts@UnitTestOptions{..} vm testName types = do
     -- display results
     if all isQed results
     then do
-      pure ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "", vm)
+      pure ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "")
     else do
       let x = mapMaybe extractCex results
       let y = symFailure opts testName (fst cd) types x
-      pure ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y, vm)
+      pure ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y)
 
 symFailure :: UnitTestOptions -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> Text
 symFailure UnitTestOptions {..} testName cd types failures' =
@@ -478,7 +445,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
            , priorityFee = testParams.priorityFee
            , maxCodeSize = testParams.maxCodeSize
            , prevRandao = testParams.prevrandao
-           , schedule = FeeSchedule.berlin
+           , schedule = feeSchedule
            , chainId = testParams.chainId
            , create = True
            , initialStorage = EmptyStore
@@ -491,6 +458,40 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
         & set #balance testParams.balanceCreate
   in vm
     & set (#env % #contracts % at ethrunAddress) (Just creator)
+
+paramsFromRpc :: Fetch.RpcInfo -> IO TestVMParams
+paramsFromRpc rpcinfo = do
+  (miner,ts,blockNum,ran,limit,base) <- case rpcinfo of
+    Nothing -> pure (0,Lit 0,0,0,0,0)
+    Just (block, url) -> Fetch.fetchBlockFrom block url >>= \case
+      Nothing -> internalError "Could not fetch block"
+      Just Block{..} -> pure ( coinbase
+                             , timestamp
+                             , number
+                             , prevRandao
+                             , gaslimit
+                             , baseFee
+                             )
+  let ts' = fromMaybe (internalError "received unexpected symbolic timestamp via rpc") (maybeLitWord ts)
+
+  pure $ TestVMParams
+    { address = createAddress ethrunAddress 1
+    , caller = ethrunAddress
+    , origin = ethrunAddress
+    , gasCreate = defaultGasForCreating
+    , gasCall = defaultGasForInvoking
+    , baseFee = base
+    , priorityFee = 0
+    , balanceCreate = defaultBalanceForTestContract
+    , coinbase = miner
+    , number = blockNum
+    , timestamp = ts'
+    , gaslimit = limit
+    , gasprice = 0
+    , maxCodeSize = defaultMaxCodeSize
+    , prevrandao = ran
+    , chainId = 99
+    }
 
 tick :: Text -> IO ()
 tick x = Text.putStr x >> hFlush stdout

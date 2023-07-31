@@ -18,7 +18,7 @@ contract Payable {
 contract TestFailCheatCodes is DSTest {
     Hevm hevm = Hevm(HEVM_ADDRESS);
 
-    function testBadFFI() public {
+    function prove_bad_ffi() public {
         string[] memory inputs = new string[](2);
         inputs[0] = "echo";
         inputs[1] = "acab";
@@ -27,7 +27,7 @@ contract TestFailCheatCodes is DSTest {
         hevm.ffi(inputs);
     }
 
-    function test_prank_underflow() public {
+    function prove_prank_underflow() public {
         address from = address(0x1312);
         uint amt = 10;
 

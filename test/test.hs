@@ -39,7 +39,7 @@ import Text.RE.TDFA.String
 import Text.RE.Replace
 import Witch (into, unsafeInto)
 
-import Optics.Core hiding (pre, re)
+import Optics.Core hiding (pre, re, elements)
 import Optics.State
 import Optics.Operators.Unsafe
 
@@ -50,7 +50,6 @@ import EVM.Exec
 import EVM.Expr qualified as Expr
 import EVM.Fetch qualified as Fetch
 import EVM.Format (hexText)
-import EVM.Patricia qualified as Patricia
 import EVM.Precompiled
 import EVM.RLP
 import EVM.SMT hiding (one)
@@ -457,31 +456,14 @@ tests = testGroup "hevm"
 
   , testGroup "RLP encodings"
     [ testProperty "rlp decode is a retraction (bytes)" $ \(Bytes bs) ->
---      withMaxSuccess 100000 $
       rlpdecode (rlpencode (BS bs)) == Just (BS bs)
     , testProperty "rlp encode is a partial inverse (bytes)" $ \(Bytes bs) ->
---      withMaxSuccess 100000 $
         case rlpdecode bs of
           Just r -> rlpencode r == bs
           Nothing -> True
     ,  testProperty "rlp decode is a retraction (RLP)" $ \(RLPData r) ->
---       withMaxSuccess 100000 $
        rlpdecode (rlpencode r) == Just r
     ]
-  , testGroup "Merkle Patricia Trie"
-    [  testProperty "update followed by delete is id" $ \(Bytes r, Bytes s, Bytes t) ->
-        whenFail
-        (putStrLn ("r:" <> (show (ByteStringS r))) >>
-         putStrLn ("s:" <> (show (ByteStringS s))) >>
-         putStrLn ("t:" <> (show (ByteStringS t)))) $
---       withMaxSuccess 100000 $
-       Patricia.insertValues [(r, BS.pack[1]), (s, BS.pack[2]), (t, BS.pack[3]),
-                              (r, mempty), (s, mempty), (t, mempty)]
-       === (Just $ Patricia.Literal Patricia.Empty)
-    ]
- , testGroup "Remote State Tests"
-   [
-   ]
  , testGroup "Panic code tests via symbolic execution"
   [
      testCase "assert-fail" $ do
@@ -634,10 +616,8 @@ tests = testGroup "hevm"
         -- quick smokecheck to make sure that we can parse dapptools style build outputs
         let cases =
               [ ("test/contracts/pass/trivial.sol", ".*", True)
-              , ("test/contracts/pass/invariants.sol", "invariantTestThisBal", True)
               , ("test/contracts/pass/dsProvePass.sol", "proveEasy", True)
               , ("test/contracts/fail/trivial.sol", ".*", False)
-              , ("test/contracts/fail/invariantFail.sol", "invariantCount", False)
               , ("test/contracts/fail/dsProveFail.sol", "prove_add", False)
               ]
         results <- forM cases $ \(testFile, match, expected) -> do
@@ -646,7 +626,7 @@ tests = testGroup "hevm"
         assertBool "test result" (and results)
     , testCase "Trivial-Fail" $ do
         let testFile = "test/contracts/fail/trivial.sol"
-        runSolidityTest testFile "testFalse" >>= assertEqual "test result" False
+        runSolidityTest testFile "prove_false" >>= assertEqual "test result" False
     , testCase "Abstract" $ do
         let testFile = "test/contracts/pass/abstract.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
@@ -668,20 +648,13 @@ tests = testGroup "hevm"
         let testFile = "test/contracts/pass/loops.sol"
         runSolidityTestCustom testFile "prove_loop" (Just 10) False Nothing Foundry >>= assertEqual "test result" True
         runSolidityTestCustom testFile "prove_loop" (Just 100) False Nothing Foundry >>= assertEqual "test result" False
-    , testCase "Invariant-Tests-Pass" $ do
-        let testFile = "test/contracts/pass/invariants.sol"
-        runSolidityTest testFile ".*" >>= assertEqual "test result" True
-    , testCase "Invariant-Tests-Fail" $ do
-        let testFile = "test/contracts/fail/invariantFail.sol"
-        runSolidityTest testFile "invariantFirst" >>= assertEqual "test result" False
-        runSolidityTest testFile "invariantCount" >>= assertEqual "test result" False
     , testCase "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Cheat-Codes-Fail" $ do
         let testFile = "test/contracts/fail/cheatCodes.sol"
-        runSolidityTestCustom testFile "testBadFFI" Nothing False Nothing Foundry >>= assertEqual "test result" False
-        runSolidityTestCustom testFile "test_prank_underflow" Nothing False Nothing Foundry >>= assertEqual "test result" False
+        runSolidityTestCustom testFile "prove_bad_ffi" Nothing False Nothing Foundry >>= assertEqual "test result" False
+        runSolidityTestCustom testFile "prove_prank_underflow" Nothing False Nothing Foundry >>= assertEqual "test result" False
     , testCase "Unwind" $ do
         let testFile = "test/contracts/pass/unwind.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
