@@ -663,7 +663,6 @@ tests = testGroup "hevm"
         let testFile = "test/contracts/fail/dsProveFail.sol"
         runSolidityTest testFile "prove_trivial" >>= assertEqual "test result" False
         runSolidityTest testFile "prove_trivial_dstest" >>= assertEqual "test result" False
-        runSolidityTest testFile "proveFail_require" >>= assertEqual "test result" False
         runSolidityTest testFile "prove_add" >>= assertEqual "test result" False
         runSolidityTestCustom testFile "prove_smtTimeout" (Just 1) Nothing False Nothing Foundry >>= assertEqual "test result" False
         runSolidityTest testFile "prove_multi" >>= assertEqual "test result" False
