@@ -523,6 +523,8 @@ evalProp prop =
     go (PImpl (PBool False) _) = PBool True
 
     go (PEq (Lit l) (Lit r)) = PBool (l == r)
+    go (PEq (ConcreteBuf l) (ConcreteBuf r)) = PBool (l == r)
+    go (PEq (ConcreteStore l) (ConcreteStore r)) = PBool (l == r)
     go o@(PEq l r)
       | l == r = PBool True
       | otherwise = o
