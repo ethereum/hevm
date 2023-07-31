@@ -19,7 +19,7 @@ import EVM.FeeSchedule qualified as FeeSchedule
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, defaultSymbolicValues, VeriOpts(..))
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, defaultSymbolicValues, panicMsg, VeriOpts(..))
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.RLP
@@ -719,7 +719,10 @@ symRun opts@UnitTestOptions{..} vm testName types = do
                                   _ -> PBool True
           False -> \(_, post) -> case post of
                                    Success _ _ _ store -> PNeg (failed store)
-                                   Failure _ _ _ -> PBool False
+                                   Failure _ _ (Revert msg) -> case msg of
+                                     ConcreteBuf b -> PBool $ b /= panicMsg 0x01
+                                     b -> b ./= ConcreteBuf (panicMsg 0x01)
+                                   Failure _ _ _ -> PBool True
                                    Partial _ _ _ -> PBool True
                                    _ -> internalError "Invalid leaf node"
 
