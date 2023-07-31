@@ -106,6 +106,7 @@ mkTest :: Text -> Maybe Test
 mkTest sig
   | "test" `isPrefixOf` sig = Just (ConcreteTest sig)
   | "prove" `isPrefixOf` sig = Just (SymbolicTest sig)
+  | "check" `isPrefixOf` sig = Just (SymbolicTest sig)
   | "invariant" `isPrefixOf` sig = Just (InvariantTest sig)
   | otherwise = Nothing
 
