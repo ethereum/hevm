@@ -89,7 +89,7 @@ runBCTest x =
 
 debugContract :: ByteString -> IO ()
 debugContract c = withSolvers CVC5 4 Nothing $ \solvers -> do
-  let prestate = abstractVM (mkCalldata Nothing []) c Nothing AbstractStore
+  let prestate = abstractVM (mkCalldata Nothing []) c Nothing AbstractStore False
   void $ TTY.runFromVM solvers Nothing Nothing emptyDapp prestate
 
 findPanics :: Solver -> Natural -> Integer -> ByteString -> IO ()
