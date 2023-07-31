@@ -432,9 +432,6 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
     ))))))))))))))))))))))))))))))))
   )
 
-  ; buffers
-  (define-const emptyBuf Buf ((as const Buf) #b00000000))
-
   (define-fun readWord ((idx Word) (buf Buf)) Word
     (concat
       (select buf idx)
@@ -676,7 +673,7 @@ exprToSMT = \case
     _ -> op2 "indexWord" idx w
   ReadByte idx src -> op2 "select" src idx
 
-  ConcreteBuf "" -> "emptyBuf"
+  ConcreteBuf "" -> "((as const Buf) #b00000000)"
   ConcreteBuf bs -> writeBytes bs mempty
   AbstractBuf s -> fromText s
   ReadWord idx prev -> op2 "readWord" idx prev
