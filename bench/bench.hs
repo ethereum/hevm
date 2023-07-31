@@ -3,17 +3,14 @@ module Main where
 import GHC.Natural
 import Control.Monad
 import Data.Maybe
-import System.Environment (lookupEnv, getEnv)
+import System.Environment (getEnv)
 
 import qualified Paths_hevm as Paths
 
 import Test.Tasty (localOption, withResource)
 import Test.Tasty.Bench
-import Data.Functor
-import Data.String.Here
 import Data.ByteString (ByteString)
 import System.FilePath.Posix
-import Control.Monad.State.Strict
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import qualified System.FilePath.Find as Find
@@ -22,9 +19,8 @@ import qualified Data.ByteString.Lazy as LazyByteString
 import EVM.SymExec
 import EVM.Solidity
 import EVM.Solvers
-import EVM.ABI
 import EVM.Dapp
-import EVM.Types (StorageModel(..), Expr(AbstractStore))
+import EVM.Types (Expr(AbstractStore))
 import EVM.Format (hexByteString)
 import qualified EVM.TTY as TTY
 import qualified EVM.Stepper as Stepper
@@ -59,7 +55,7 @@ bcjsons = do
     parseSuite path = do
       contents <- LazyByteString.readFile path
       case BCTests.parseBCSuite contents of
-        Left e -> pure (path, mempty)
+        Left _ -> pure (path, mempty)
         Right tests -> pure (path, tests)
 
 -- | executes all provided bc tests in sequence and accumulates a boolean value representing their success.
@@ -75,7 +71,6 @@ blockchainTests ts = bench "blockchain-tests" $ nfIO $ do
       then pure True
       else do
         res <- runBCTest c
-        putStrLn $ "      " <> n
         pure $ acc && res
     ) True cases
 
@@ -84,12 +79,9 @@ runBCTest :: BCTests.Case -> IO Bool
 runBCTest x =
  do
   let vm0 = BCTests.vmForCase x
-  result <- Stepper.interpret (Fetch.zero 0 Nothing) vm0 Stepper.execFully
-  case result of
-    Left _ -> pure False
-    Right _ -> pure True
-  -- maybeReason <- BCTests.checkExpectation False x (_ result)
-  -- pure $ isNothing maybeReason
+  result <- Stepper.interpret (Fetch.zero 0 Nothing) vm0 Stepper.runFully
+  maybeReason <- BCTests.checkExpectation False x result
+  pure $ isNothing maybeReason
 
 
 --- Helpers ----------------------------------------------------------------------------------------
@@ -102,7 +94,7 @@ debugContract c = withSolvers CVC5 4 Nothing $ \solvers -> do
 
 findPanics :: Solver -> Natural -> Integer -> ByteString -> IO ()
 findPanics solver count iters c = do
-  (_, res) <- withSolvers solver count Nothing $ \s -> do
+  _ <- withSolvers solver count Nothing $ \s -> do
     let opts = defaultVeriOpts
           { maxIter = Just iters
           , askSmtIters = iters + 1
