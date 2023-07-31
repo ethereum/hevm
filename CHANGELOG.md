@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Changed
 - Run expression simplification on branch conditions
+- 'check' prefix now recognized as a function signature to symbolically execute for Dapps
 
 - `vm.prank` now works correctly when passed a symbolic address
 - Contract addresses can now be fully symbolic

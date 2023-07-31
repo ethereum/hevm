@@ -225,11 +225,11 @@ tests = testGroup "hevm"
             let asBuf = Expr.fromList asList
             checkEquiv asBuf input
     , testProperty "evalProp-equivalence-lit" $ \(LitProp p) -> ioProperty $ do
-        let simplified = evalProp p
+        let simplified = Expr.evalProp p
         assertBool "must evaluate down to a literal bool" (isPBool simplified)
         checkEquivProp simplified p
     , testProperty "evalProp-equivalence-sym" $ \(p) -> ioProperty $ do
-        let simplified = evalProp p
+        let simplified = Expr.evalProp p
         checkEquivProp simplified p
     ]
   , testGroup "MemoryTests"
@@ -642,6 +642,9 @@ tests = testGroup "hevm"
     , testCase "Prove-Tests-Pass" $ do
         let testFile = "test/contracts/pass/dsProvePass.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "prefix-check-for-dapp" $ do
+        let testFile = "test/contracts/fail/check-prefix.sol"
+        runSolidityTest testFile "check_trivial" >>= assertEqual "test result" False
     , testCase "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
         runSolidityTest testFile "prove_trivial" >>= assertEqual "test result" False
