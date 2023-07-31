@@ -15,14 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Better cex reconstruction in cases where branches do not refer to all input variables in calldata
 
 ## Changed
-- Run expression simplification on branch conditions
-- 'check' prefix now recognized as a function signature to symbolically execute for Dapps
 
+### UI
+
+- 'check' prefix now recognized as a function signature to symbolically execute for Dapps
+- symbolic solidity tests no longer consider reverts to be a failure, and check only for the ds-test failed bit or unser defined assertion failures (i.e. `Panic(0x01)`)
 - `vm.prank` now works correctly when passed a symbolic address
+- The `--initial-storage` flag no longer accepts a concrete prestore (valid values are now `Empty` or `Abstract`)
+
+### Internals
+
 - Contract addresses can now be fully symbolic
 - Contract balances can now be fully symbolic
 - Contract code can now be fully abstract. Calls into contracts with unknown code will fail with `UnexpectedSymbolicArg`.
-- The `--initial-storage` flag no longer accepts a concrete prestore (valid values are now `Empty` or `Abstract`)
+- Run expression simplification on branch conditions
 
 ## API Changes
 
