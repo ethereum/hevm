@@ -191,13 +191,15 @@ abstractVM
   -> ByteString
   -> Maybe Precondition
   -> Expr Storage
+  -> Bool
   -> VM
-abstractVM cd contractCode maybepre store = finalVm
+abstractVM cd contractCode maybepre store create = finalVm
   where
     caller = Caller 0
     value = CallValue 0
-    code = RuntimeCode (ConcreteRuntimeCode contractCode)
-    vm' = loadSymVM code store caller value cd
+    code = if create then InitCode contractCode mempty
+           else RuntimeCode (ConcreteRuntimeCode contractCode)
+    vm' = loadSymVM code store caller value  (if create then mempty else cd)  create
     precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm']
@@ -209,8 +211,9 @@ loadSymVM
   -> Expr EWord
   -> Expr EWord
   -> (Expr Buf, [Prop])
+  -> Bool
   -> VM
-loadSymVM x initStore addr callvalue cd =
+loadSymVM x initStore addr callvalue cd create =
   (makeVm $ VMOpts
     { contract = initialContract x
     , calldata = cd
@@ -232,7 +235,7 @@ loadSymVM x initStore addr callvalue cd =
     , maxCodeSize = 0xffffffff
     , schedule = FeeSchedule.berlin
     , chainId = 1
-    , create = False
+    , create = create
     , txAccessList = mempty
     , allowFFI = False
     }) & set (#env % #contracts % at (createAddress ethrunAddress 1))
@@ -428,7 +431,7 @@ verifyContract
   -> Maybe Postcondition
   -> IO (Expr End, [VerifyResult])
 verifyContract solvers theCode signature' concreteArgs opts initStore maybepre maybepost =
-  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre initStore
+  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre initStore False
   in verify solvers opts preState maybepost
 
 -- | Stepper that parses the result of Stepper.runFully into an Expr End
@@ -606,7 +609,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
     getBranches bs = do
       let
         bytecode = if BS.null bs then BS.pack [0] else bs
-        prestate = abstractVM calldata bytecode Nothing AbstractStore
+        prestate = abstractVM calldata bytecode Nothing AbstractStore False
       expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl
@@ -779,7 +782,7 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
     -- it for branches that do not refer to calldata at all (e.g. the top level
     -- callvalue check inserted by solidity in contracts that don't have any
     -- payable functions).
-    cd' = prettyBuf $ Expr.simplify $ subModel m cd
+    cd' = prettyBuf . Expr.simplify . defaultSymbolicValues $ subModel m cd
 
     storeCex :: [Text]
     storeCex
@@ -838,23 +841,55 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
     prettyBuf :: Expr Buf -> Text
     prettyBuf (ConcreteBuf "") = "Empty"
     prettyBuf (ConcreteBuf bs) = formatBinary bs
-    prettyBuf _ = "Any"
+    prettyBuf b = internalError $ "Unexpected symbolic buffer:\n" <> T.unpack (formatExpr b)
 
--- | Takes a buffer and a Cex and replaces all abstract values in the buf with
+-- | If the expression contains any symbolic values, default them to some
+-- concrete value The intuition here is that if we still have symbolic values
+-- in our calldata expression after substituing in our cex, then they can have
+-- any value and we can safely pick a random value. This is a bit unsatisfying,
+-- we should really be doing smth like: https://github.com/ethereum/hevm/issues/334
+-- but it's probably good enough for now
+defaultSymbolicValues :: Expr a -> Expr a
+defaultSymbolicValues e = subBufs (foldTerm symbufs mempty e)
+                        . subVars (foldTerm symwords mempty e) $ e
+  where
+    symbufs :: Expr a -> Map (Expr Buf) ByteString
+    symbufs = \case
+      a@(AbstractBuf _) -> Map.singleton a ""
+      _ -> mempty
+    symwords :: Expr a -> Map (Expr EWord) W256
+    symwords = \case
+      a@(Var _) -> Map.singleton a 0
+      a@Origin -> Map.singleton a 0
+      a@Coinbase -> Map.singleton a 0
+      a@Timestamp -> Map.singleton a 0
+      a@BlockNumber -> Map.singleton a 0
+      a@PrevRandao -> Map.singleton a 0
+      a@GasLimit -> Map.singleton a 0
+      a@ChainId -> Map.singleton a 0
+      a@BaseFee -> Map.singleton a 0
+      _ -> mempty
+
+-- | Takes an expression and a Cex and replaces all abstract values in the buf with
 -- concrete ones from the Cex.
 subModel :: SMTCex -> Expr a -> Expr a
-subModel c expr =
-  subBufs (fmap forceFlattened c.buffers) . subVars c.vars . subStore c.store
-  . subVars c.blockContext . subVars c.txContext $ expr
+subModel c
+  = subBufs (fmap forceFlattened c.buffers)
+  . subStore c.store
+  . subVars c.vars
+  . subVars c.blockContext
+  . subVars c.txContext
   where
     forceFlattened (SMT.Flat bs) = bs
     forceFlattened b@(SMT.Comp _) = forceFlattened $
       fromMaybe (internalError $ "cannot flatten buffer: " <> show b)
                 (SMT.collapse b)
 
-    subVars model b = Map.foldlWithKey subVar b model
+subVars :: Map (Expr EWord) W256 -> Expr a -> Expr a
+subVars model b = Map.foldlWithKey subVar b model
+  where
     subVar :: Expr a -> Expr EWord -> W256 -> Expr a
-    subVar b var val = mapExpr go b
+    subVar a var val = mapExpr go a
       where
         go :: Expr a -> Expr a
         go = \case
@@ -863,9 +898,11 @@ subModel c expr =
                       else v
           e -> e
 
-    subBufs model b = Map.foldlWithKey subBuf b model
+subBufs :: Map (Expr Buf) ByteString -> Expr a -> Expr a
+subBufs model b = Map.foldlWithKey subBuf b model
+  where
     subBuf :: Expr a -> Expr Buf -> ByteString -> Expr a
-    subBuf b var val = mapExpr go b
+    subBuf x var val = mapExpr go x
       where
         go :: Expr a -> Expr a
         go = \case
@@ -874,10 +911,10 @@ subModel c expr =
                       else a
           e -> e
 
-    subStore :: Map W256 (Map W256 W256) -> Expr a -> Expr a
-    subStore m b = mapExpr go b
-      where
-        go :: Expr a -> Expr a
-        go = \case
-          AbstractStore -> ConcreteStore m
-          e -> e
+subStore :: Map W256 (Map W256 W256) -> Expr a -> Expr a
+subStore model b = mapExpr go b
+  where
+    go :: Expr a -> Expr a
+    go = \case
+      AbstractStore -> ConcreteStore model
+      e -> e
