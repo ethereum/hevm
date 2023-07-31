@@ -1126,7 +1126,7 @@ branch loc cond continue = do
     condSimp = Expr.simplify cond
     choosePath (Case v) = do
       assign #result Nothing
-      pushTo #constraints $ if v then (condSimp ./= Lit 0) else (condSimp .== Lit 0)
+      pushTo #constraints $ if v then Expr.evalProp (condSimp ./= Lit 0) else Expr.evalProp (condSimp .== Lit 0)
       (iteration, _) <- use (#iterations % at loc % non (0,[]))
       stack <- use (#state % #stack)
       assign (#cache % #path % at (loc, iteration)) (Just v)

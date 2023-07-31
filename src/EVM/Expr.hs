@@ -760,8 +760,9 @@ simplify e = if (mapExpr go e == e)
     go o@(And (Lit x) _)
       | x == 0 = Lit 0
       | otherwise = o
-    go o@(And _ (Lit x))
+    go o@(And v (Lit x))
       | x == 0 = Lit 0
+      | x == 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff = v
       | otherwise = o
     go o@(Or (Lit x) b)
       | x == 0 = b
@@ -997,3 +998,33 @@ containsNode p = getAny . foldExpr go (Any False)
 
 inRange :: Int -> Expr EWord -> Prop
 inRange sz e = PAnd (PGEq e (Lit 0)) (PLEq e (Lit $ 2 ^ sz - 1))
+
+-- | Evaluate the provided proposition down to its most concrete result
+evalProp :: Prop -> Prop
+evalProp prop =
+  let new = mapProp' go prop
+  in if (new == prop) then prop else evalProp new
+  where
+    go :: Prop -> Prop
+    go (PLT (Lit l) (Lit r)) = PBool (l < r)
+    go (PGT (Lit l) (Lit r)) = PBool (l > r)
+    go (PGEq (Lit l) (Lit r)) = PBool (l >= r)
+    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
+    go (PNeg (PBool b)) = PBool (Prelude.not b)
+
+    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
+    go (PAnd (PBool False) _) = PBool False
+    go (PAnd _ (PBool False)) = PBool False
+
+    go (POr (PBool l) (PBool r)) = PBool (l || r)
+    go (POr (PBool True) _) = PBool True
+    go (POr _ (PBool True)) = PBool True
+
+    go (PImpl (PBool l) (PBool r)) = PBool ((Prelude.not l) || r)
+    go (PImpl (PBool False) _) = PBool True
+
+    go (PEq (Lit l) (Lit r)) = PBool (l == r)
+    go o@(PEq l r)
+      | l == r = PBool True
+      | otherwise = o
+    go p = p

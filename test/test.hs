@@ -234,11 +234,11 @@ tests = testGroup "hevm"
             let asBuf = Expr.fromList asList
             checkEquiv asBuf input
     , testProperty "evalProp-equivalence-lit" $ \(LitProp p) -> ioProperty $ do
-        let simplified = evalProp p
+        let simplified = Expr.evalProp p
         assertBool "must evaluate down to a literal bool" (isPBool simplified)
         checkEquivProp simplified p
     , testProperty "evalProp-equivalence-sym" $ \(p) -> ioProperty $ do
-        let simplified = evalProp p
+        let simplified = Expr.evalProp p
         checkEquivProp simplified p
     ]
   , testGroup "MemoryTests"

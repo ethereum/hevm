@@ -498,38 +498,6 @@ reachable solvers e = do
           Unsat -> pure ([query], Nothing)
           r -> internalError $ "Invalid solver result: " <> show r
 
--- | Evaluate the provided proposition down to its most concrete result
-evalProp :: Prop -> Prop
-evalProp prop =
-  let new = mapProp' go prop
-  in if (new == prop) then prop else evalProp new
-  where
-    go :: Prop -> Prop
-    go (PLT (Lit l) (Lit r)) = PBool (l < r)
-    go (PGT (Lit l) (Lit r)) = PBool (l > r)
-    go (PGEq (Lit l) (Lit r)) = PBool (l >= r)
-    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
-    go (PNeg (PBool b)) = PBool (not b)
-
-    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
-    go (PAnd (PBool False) _) = PBool False
-    go (PAnd _ (PBool False)) = PBool False
-
-    go (POr (PBool l) (PBool r)) = PBool (l || r)
-    go (POr (PBool True) _) = PBool True
-    go (POr _ (PBool True)) = PBool True
-
-    go (PImpl (PBool l) (PBool r)) = PBool ((not l) || r)
-    go (PImpl (PBool False) _) = PBool True
-
-    go (PEq (Lit l) (Lit r)) = PBool (l == r)
-    go (PEq (ConcreteBuf l) (ConcreteBuf r)) = PBool (l == r)
-    go (PEq (ConcreteStore l) (ConcreteStore r)) = PBool (l == r)
-    go o@(PEq l r)
-      | l == r = PBool True
-      | otherwise = o
-    go p = p
-
 -- | Extract contraints stored in Expr End nodes
 extractProps :: Expr End -> [Prop]
 extractProps = \case
@@ -584,7 +552,7 @@ verify solvers opts preState maybepost = do
       let
         -- Filter out any leaves that can be statically shown to be safe
         canViolate = flip filter flattened $
-          \leaf -> case evalProp (post preState leaf) of
+          \leaf -> case Expr.evalProp (post preState leaf) of
             PBool True -> False
             _ -> True
         assumes = preState.constraints
