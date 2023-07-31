@@ -1240,10 +1240,11 @@ branch cond continue = do
   pathconds <- use #constraints
   query $ PleaseAskSMT cond pathconds (choosePath loc)
   where
+    condSimp = Expr.simplify cond
     choosePath :: CodeLocation -> BranchCondition -> EVM ()
     choosePath loc (Case v) = do
       assign #result Nothing
-      pushTo #constraints $ if v then (cond ./= Lit 0) else (cond .== Lit 0)
+      pushTo #constraints $ if v then (condSimp ./= Lit 0) else (condSimp .== Lit 0)
       (iteration, _) <- use (#iterations % at loc % non (0,[]))
       stack <- use (#state % #stack)
       assign (#cache % #path % at (loc, iteration)) (Just v)
@@ -1251,7 +1252,7 @@ branch cond continue = do
       continue v
     -- Both paths are possible; we ask for more input
     choosePath loc Unknown =
-      choose . PleaseChoosePath cond $ choosePath loc . Case
+      choose . PleaseChoosePath condSimp $ choosePath loc . Case
 
 -- | Construct RPC Query and halt execution until resolved
 fetchAccount :: Expr EAddr -> (Contract -> EVM ()) -> EVM ()

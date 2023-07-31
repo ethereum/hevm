@@ -176,9 +176,9 @@ assertProps ps =
   where
     (ps_elim, bufs, stores) = eliminateProps ps
 
-    allVars = fmap referencedVars' ps_elim <> fmap referencedVars bufVals <> fmap referencedVars storeVals
-    frameCtx = fmap referencedFrameContext' ps_elim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
-    blockCtx = fmap referencedBlockContext' ps_elim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
+    allVars = fmap referencedVars ps_elim <> fmap referencedVars bufVals <> fmap referencedVars storeVals
+    frameCtx = fmap referencedFrameContext ps_elim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
+    blockCtx = fmap referencedBlockContext ps_elim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
 
     bufVals = Map.elems bufs
     storeVals = Map.elems stores
@@ -192,7 +192,7 @@ assertProps ps =
       <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions ps_elim bufVals storeVals)) mempty
       <> SMT2 ["; keccak computations"] mempty
       <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute ps_elim bufVals storeVals)) mempty
-      
+
 
     readAssumes
       = SMT2 ["; read assumptions"] mempty
@@ -212,59 +212,46 @@ referencedWAddrs term = foldTerm go mempty term
       WAddr(a@(SymAddr _)) -> Set.singleton (formatEAddr a)
       _ -> mempty
 
-referencedBufsGo :: Expr a -> [Builder]
-referencedBufsGo = \case
-  AbstractBuf s -> [fromText s]
-  _ -> []
+referencedBufs :: TraversableTerm a => a -> [Builder]
+referencedBufs expr = nubOrd $ foldTerm go [] expr
+  where
+    go :: Expr a -> [Builder]
+    go = \case
+      AbstractBuf s -> [fromText s]
+      _ -> []
 
-referencedBufs :: Expr a -> [Builder]
-referencedBufs expr = nubOrd $ foldExpr referencedBufsGo [] expr
+referencedVars :: TraversableTerm a => a -> [Builder]
+referencedVars expr = nubOrd $ foldTerm go [] expr
+  where
+    go :: Expr a -> [Builder]
+    go = \case
+      Var s -> [fromText s]
+      _ -> []
 
-referencedBufs' :: Prop -> [Builder]
-referencedBufs' prop = nubOrd $ foldProp referencedBufsGo [] prop
+referencedFrameContext :: TraversableTerm a => a -> [(Builder, [Prop])]
+referencedFrameContext expr = nubOrd $ foldTerm go [] expr
+  where
+    go :: Expr a -> [(Builder, [Prop])]
+    go = \case
+      TxValue -> [(fromString "txvalue", [])]
+      v@(Balance a) -> [(fromString "balance_" <> formatEAddr a, [PLT v (Lit $ 2 ^ (96 :: Int))])]
+      Gas {} -> internalError "TODO: GAS"
+      _ -> []
 
-referencedVarsGo :: Expr a -> [Builder]
-referencedVarsGo = \case
-  Var s -> [fromText s]
-  _ -> []
-
-referencedVars :: Expr a -> [Builder]
-referencedVars expr = nubOrd $ foldExpr referencedVarsGo [] expr
-
-referencedVars' :: Prop -> [Builder]
-referencedVars' prop = nubOrd $ foldProp referencedVarsGo [] prop
-
-referencedFrameContextGo :: Expr a -> [(Builder, [Prop])]
-referencedFrameContextGo = \case
-  TxValue -> [(fromString "txvalue", [])]
-  v@(Balance a) -> [(fromString "balance_" <> formatEAddr a, [PLT v (Lit $ 2 ^ (96 :: Int))])]
-  Gas {} -> internalError "TODO: GAS"
-  _ -> []
-
-referencedFrameContext :: Expr a -> [(Builder, [Prop])]
-referencedFrameContext expr = nubOrd $ foldExpr referencedFrameContextGo [] expr
-
-referencedFrameContext' :: Prop -> [(Builder, [Prop])]
-referencedFrameContext' prop = nubOrd $ foldProp referencedFrameContextGo [] prop
-
-
-referencedBlockContextGo :: Expr a -> [(Builder, [Prop])]
-referencedBlockContextGo = \case
-  Origin -> [("origin", [inRange 160 Origin])]
-  Coinbase -> [("coinbase", [inRange 160 Coinbase])]
-  Timestamp -> [("timestamp", [])]
-  BlockNumber -> [("blocknumber", [])]
-  PrevRandao -> [("prevrandao", [])]
-  GasLimit -> [("gaslimit", [])]
-  ChainId -> [("chainid", [])]
-  BaseFee -> [("basefee", [])]
-  _ -> []
-
-referencedBlockContext :: Expr a -> [(Builder, [Prop])]
-referencedBlockContext expr = nubOrd $ foldExpr referencedBlockContextGo [] expr
-
-referencedBlockContext' :: Prop -> [(Builder, [Prop])]
-referencedBlockContext' prop = nubOrd $ foldProp referencedBlockContextGo [] prop
+referencedBlockContext :: TraversableTerm a => a -> [(Builder, [Prop])]
+referencedBlockContext expr = nubOrd $ foldTerm go [] expr
+  where
+    go :: Expr a -> [(Builder, [Prop])]
+    go = \case
+      Origin -> [("origin", [inRange 160 Origin])]
+      Coinbase -> [("coinbase", [inRange 160 Coinbase])]
+      Timestamp -> [("timestamp", [])]
+      BlockNumber -> [("blocknumber", [])]
+      PrevRandao -> [("prevrandao", [])]
+      GasLimit -> [("gaslimit", [])]
+      ChainId -> [("chainid", [])]
+      BaseFee -> [("basefee", [])]
+      _ -> []
 
 -- | This function overapproximates the reads from the abstract
 -- storage. Potentially, it can return locations that do not read a
@@ -325,7 +312,7 @@ discoverMaxReads props benv senv = bufMap
     allReads = nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
     -- we can have buffers that are not read from but are still mentioned via BufLength in some branch condition
     -- we assign a default read hint of 4 to start with in these cases (since in most cases we will need at least 4 bytes to produce a counterexample)
-    allBufs = Map.fromList . fmap (, Lit 4) . fmap toLazyText . nubOrd . concat $ fmap referencedBufs' props <> fmap referencedBufs (Map.elems benv) <> fmap referencedBufs (Map.elems senv)
+    allBufs = Map.fromList . fmap (, Lit 4) . fmap toLazyText . nubOrd . concat $ fmap referencedBufs props <> fmap referencedBufs (Map.elems benv) <> fmap referencedBufs (Map.elems senv)
 
     bufMap = Map.unionWith Expr.max (foldl addBound mempty allReads) allBufs
 

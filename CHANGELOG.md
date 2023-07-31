@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Better cex reconstruction in cases where branches do not refer to all input variables in calldata
 
 ## Changed
+- Run expression simplification on branch conditions
 
 - `vm.prank` now works correctly when passed a symbolic address
 - Contract addresses can now be fully symbolic

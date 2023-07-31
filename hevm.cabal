@@ -24,22 +24,7 @@ build-type:
   Simple
 extra-source-files:
   CHANGELOG.md
-  bench/contracts/erc20.sol
-  test/contracts/lib/test.sol
-  test/contracts/lib/erc20.sol
-  test/contracts/pass/trivial.sol
-  test/contracts/pass/abstract.sol
-  test/contracts/pass/cheatCodes.sol
-  test/contracts/pass/constantinople.sol
-  test/contracts/pass/dsProvePass.sol
-  test/contracts/pass/invariants.sol
-  test/contracts/pass/libraries.sol
-  test/contracts/pass/loops.sol
-  test/contracts/pass/rpc.sol
-  test/contracts/fail/trivial.sol
-  test/contracts/fail/cheatCodes.sol
-  test/contracts/fail/dsProveFail.sol
-  test/contracts/fail/invariantFail.sol
+  bench/contracts/*.sol
   test/scripts/convert_trace_to_json.sh
 
 flag ci
