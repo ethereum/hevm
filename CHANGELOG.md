@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Changed
 - Run expression simplification on branch conditions
+- 'check' prefix now recognized as a function signature to symbolically execute for Dapps
 
 ## [0.51.3] - 2023-07-14
 

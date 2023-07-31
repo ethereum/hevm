@@ -656,6 +656,9 @@ tests = testGroup "hevm"
     , testCase "Prove-Tests-Pass" $ do
         let testFile = "test/contracts/pass/dsProvePass.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "prefix-check-for-dapp" $ do
+        let testFile = "test/contracts/fail/check-prefix.sol"
+        runSolidityTest testFile "check_trivial" >>= assertEqual "test result" False
     , testCase "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
         runSolidityTest testFile "prove_trivial" >>= assertEqual "test result" False
