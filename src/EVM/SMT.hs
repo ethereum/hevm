@@ -470,9 +470,6 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
     ))))))))))))))))))))))))))))))))
   )
 
-  ; stores
-  (define-const emptyStore Storage ((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000))
-
   (define-fun readWord ((idx Word) (buf Buf)) Word
     (concat
       (select buf idx)
@@ -839,7 +836,7 @@ writeBytes bytes buf = snd $ BS.foldl' wrap (0, exprToSMT buf) bytes
         in (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
 
 encodeConcreteStore :: Map W256 W256 -> Builder
-encodeConcreteStore s = foldl encodeWrite "emptyStore" (Map.toList s)
+encodeConcreteStore s = foldl encodeWrite "((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000)" (Map.toList s)
   where
     encodeWrite prev (key, val) = let
         encKey = exprToSMT (Lit key)
