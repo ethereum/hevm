@@ -291,7 +291,7 @@ tests = testGroup "hevm"
         (Expr.indexWord (Lit 2) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
     , testCase "encodeConcreteStore-overwrite" $
       assertEqual ""
-        "(store (store emptyStore (_ bv1 256) (_ bv2 256)) (_ bv3 256) (_ bv4 256))"
+        "(store (store ((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000) (_ bv1 256) (_ bv2 256)) (_ bv3 256) (_ bv4 256))"
         (EVM.SMT.encodeConcreteStore $
           Map.fromList [(W256 1, W256 2), (W256 3, W256 4)])
     , testCase "indexword-oob-sym" $ assertEqual ""
