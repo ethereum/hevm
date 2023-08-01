@@ -1121,11 +1121,12 @@ choose = assign #result . Just . HandleEffect . Choose
 branch :: CodeLocation -> Expr EWord -> (Bool -> EVM ()) -> EVM ()
 branch loc cond continue = do
   pathconds <- use #constraints
-  query $ PleaseAskSMT cond pathconds choosePath
+  query $ PleaseAskSMT condSimp pathconds choosePath
   where
+    condSimp = Expr.simplify cond
     choosePath (Case v) = do
       assign #result Nothing
-      pushTo #constraints $ if v then (cond ./= Lit 0) else (cond .== Lit 0)
+      pushTo #constraints $ if v then Expr.evalProp (condSimp ./= Lit 0) else Expr.evalProp (condSimp .== Lit 0)
       (iteration, _) <- use (#iterations % at loc % non (0,[]))
       stack <- use (#state % #stack)
       assign (#cache % #path % at (loc, iteration)) (Just v)
@@ -1133,7 +1134,7 @@ branch loc cond continue = do
       continue v
     -- Both paths are possible; we ask for more input
     choosePath Unknown =
-      choose . PleaseChoosePath cond $ choosePath . Case
+      choose . PleaseChoosePath condSimp $ choosePath . Case
 
 -- | Construct RPC Query and halt execution until resolved
 fetchAccount :: Addr -> (Contract -> EVM ()) -> EVM ()

@@ -498,36 +498,6 @@ reachable solvers e = do
           Unsat -> pure ([query], Nothing)
           r -> internalError $ "Invalid solver result: " <> show r
 
--- | Evaluate the provided proposition down to its most concrete result
-evalProp :: Prop -> Prop
-evalProp prop =
-  let new = mapProp' go prop
-  in if (new == prop) then prop else evalProp new
-  where
-    go :: Prop -> Prop
-    go (PLT (Lit l) (Lit r)) = PBool (l < r)
-    go (PGT (Lit l) (Lit r)) = PBool (l > r)
-    go (PGEq (Lit l) (Lit r)) = PBool (l >= r)
-    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
-    go (PNeg (PBool b)) = PBool (not b)
-
-    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
-    go (PAnd (PBool False) _) = PBool False
-    go (PAnd _ (PBool False)) = PBool False
-
-    go (POr (PBool l) (PBool r)) = PBool (l || r)
-    go (POr (PBool True) _) = PBool True
-    go (POr _ (PBool True)) = PBool True
-
-    go (PImpl (PBool l) (PBool r)) = PBool ((not l) || r)
-    go (PImpl (PBool False) _) = PBool True
-
-    go (PEq (Lit l) (Lit r)) = PBool (l == r)
-    go o@(PEq l r)
-      | l == r = PBool True
-      | otherwise = o
-    go p = p
-
 -- | Extract contraints stored in Expr End nodes
 extractProps :: Expr End -> [Prop]
 extractProps = \case
@@ -582,7 +552,7 @@ verify solvers opts preState maybepost = do
       let
         -- Filter out any leaves that can be statically shown to be safe
         canViolate = flip filter flattened $
-          \leaf -> case evalProp (post preState leaf) of
+          \leaf -> case Expr.evalProp (post preState leaf) of
             PBool True -> False
             _ -> True
         assumes = preState.constraints
@@ -812,7 +782,7 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
     -- it for branches that do not refer to calldata at all (e.g. the top level
     -- callvalue check inserted by solidity in contracts that don't have any
     -- payable functions).
-    cd' = prettyBuf $ Expr.simplify $ subModel m cd
+    cd' = prettyBuf . Expr.simplify . defaultSymbolicValues $ subModel m cd
 
     storeCex :: [Text]
     storeCex
@@ -871,23 +841,55 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
     prettyBuf :: Expr Buf -> Text
     prettyBuf (ConcreteBuf "") = "Empty"
     prettyBuf (ConcreteBuf bs) = formatBinary bs
-    prettyBuf _ = "Any"
+    prettyBuf b = internalError $ "Unexpected symbolic buffer:\n" <> T.unpack (formatExpr b)
 
--- | Takes a buffer and a Cex and replaces all abstract values in the buf with
+-- | If the expression contains any symbolic values, default them to some
+-- concrete value The intuition here is that if we still have symbolic values
+-- in our calldata expression after substituing in our cex, then they can have
+-- any value and we can safely pick a random value. This is a bit unsatisfying,
+-- we should really be doing smth like: https://github.com/ethereum/hevm/issues/334
+-- but it's probably good enough for now
+defaultSymbolicValues :: Expr a -> Expr a
+defaultSymbolicValues e = subBufs (foldTerm symbufs mempty e)
+                        . subVars (foldTerm symwords mempty e) $ e
+  where
+    symbufs :: Expr a -> Map (Expr Buf) ByteString
+    symbufs = \case
+      a@(AbstractBuf _) -> Map.singleton a ""
+      _ -> mempty
+    symwords :: Expr a -> Map (Expr EWord) W256
+    symwords = \case
+      a@(Var _) -> Map.singleton a 0
+      a@Origin -> Map.singleton a 0
+      a@Coinbase -> Map.singleton a 0
+      a@Timestamp -> Map.singleton a 0
+      a@BlockNumber -> Map.singleton a 0
+      a@PrevRandao -> Map.singleton a 0
+      a@GasLimit -> Map.singleton a 0
+      a@ChainId -> Map.singleton a 0
+      a@BaseFee -> Map.singleton a 0
+      _ -> mempty
+
+-- | Takes an expression and a Cex and replaces all abstract values in the buf with
 -- concrete ones from the Cex.
 subModel :: SMTCex -> Expr a -> Expr a
-subModel c expr =
-  subBufs (fmap forceFlattened c.buffers) . subVars c.vars . subStore c.store
-  . subVars c.blockContext . subVars c.txContext $ expr
+subModel c
+  = subBufs (fmap forceFlattened c.buffers)
+  . subStore c.store
+  . subVars c.vars
+  . subVars c.blockContext
+  . subVars c.txContext
   where
     forceFlattened (SMT.Flat bs) = bs
     forceFlattened b@(SMT.Comp _) = forceFlattened $
       fromMaybe (internalError $ "cannot flatten buffer: " <> show b)
                 (SMT.collapse b)
 
-    subVars model b = Map.foldlWithKey subVar b model
+subVars :: Map (Expr EWord) W256 -> Expr a -> Expr a
+subVars model b = Map.foldlWithKey subVar b model
+  where
     subVar :: Expr a -> Expr EWord -> W256 -> Expr a
-    subVar b var val = mapExpr go b
+    subVar a var val = mapExpr go a
       where
         go :: Expr a -> Expr a
         go = \case
@@ -896,9 +898,11 @@ subModel c expr =
                       else v
           e -> e
 
-    subBufs model b = Map.foldlWithKey subBuf b model
+subBufs :: Map (Expr Buf) ByteString -> Expr a -> Expr a
+subBufs model b = Map.foldlWithKey subBuf b model
+  where
     subBuf :: Expr a -> Expr Buf -> ByteString -> Expr a
-    subBuf b var val = mapExpr go b
+    subBuf x var val = mapExpr go x
       where
         go :: Expr a -> Expr a
         go = \case
@@ -907,10 +911,10 @@ subModel c expr =
                       else a
           e -> e
 
-    subStore :: Map W256 (Map W256 W256) -> Expr a -> Expr a
-    subStore m b = mapExpr go b
-      where
-        go :: Expr a -> Expr a
-        go = \case
-          AbstractStore -> ConcreteStore m
-          e -> e
+subStore :: Map W256 (Map W256 W256) -> Expr a -> Expr a
+subStore model b = mapExpr go b
+  where
+    go :: Expr a -> Expr a
+    go = \case
+      AbstractStore -> ConcreteStore model
+      e -> e

@@ -57,7 +57,7 @@ import EVM.SMT hiding (one)
 import EVM.Solidity
 import EVM.Solvers
 import EVM.Stepper qualified as Stepper
-import EVM.SymExec
+import EVM.SymExec hiding (subStore)
 import EVM.Test.Tracing qualified as Tracing
 import EVM.Test.Utils
 import EVM.Traversals
@@ -234,11 +234,11 @@ tests = testGroup "hevm"
             let asBuf = Expr.fromList asList
             checkEquiv asBuf input
     , testProperty "evalProp-equivalence-lit" $ \(LitProp p) -> ioProperty $ do
-        let simplified = evalProp p
+        let simplified = Expr.evalProp p
         assertBool "must evaluate down to a literal bool" (isPBool simplified)
         checkEquivProp simplified p
     , testProperty "evalProp-equivalence-sym" $ \(p) -> ioProperty $ do
-        let simplified = evalProp p
+        let simplified = Expr.evalProp p
         checkEquivProp simplified p
     ]
   , testGroup "MemoryTests"
@@ -641,7 +641,7 @@ tests = testGroup "hevm"
               , ("test/contracts/fail/dsProveFail.sol", "prove_add", False)
               ]
         results <- forM cases $ \(testFile, match, expected) -> do
-          actual <- runSolidityTestCustom testFile match Nothing False Nothing DappTools
+          actual <- runSolidityTestCustom testFile match Nothing Nothing False Nothing DappTools
           pure (actual == expected)
         assertBool "test result" (and results)
     , testCase "Trivial-Fail" $ do
@@ -656,18 +656,22 @@ tests = testGroup "hevm"
     , testCase "Prove-Tests-Pass" $ do
         let testFile = "test/contracts/pass/dsProvePass.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "prefix-check-for-dapp" $ do
+        let testFile = "test/contracts/fail/check-prefix.sol"
+        runSolidityTest testFile "check_trivial" >>= assertEqual "test result" False
     , testCase "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
         runSolidityTest testFile "prove_trivial" >>= assertEqual "test result" False
+        runSolidityTest testFile "prove_trivial_dstest" >>= assertEqual "test result" False
         runSolidityTest testFile "prove_add" >>= assertEqual "test result" False
-        --runSolidityTest testFile "prove_smtTimeout" >>= assertEqual "test result" False
+        runSolidityTestCustom testFile "prove_smtTimeout" (Just 1) Nothing False Nothing Foundry >>= assertEqual "test result" False
         runSolidityTest testFile "prove_multi" >>= assertEqual "test result" False
         -- TODO: implement overflow checking optimizations and enable, currently this runs forever
         --runSolidityTest testFile "prove_distributivity" >>= assertEqual "test result" False
     , testCase "Loop-Tests" $ do
         let testFile = "test/contracts/pass/loops.sol"
-        runSolidityTestCustom testFile "prove_loop" (Just 10) False Nothing Foundry >>= assertEqual "test result" True
-        runSolidityTestCustom testFile "prove_loop" (Just 100) False Nothing Foundry >>= assertEqual "test result" False
+        runSolidityTestCustom testFile "prove_loop" Nothing (Just 10) False Nothing Foundry >>= assertEqual "test result" True
+        runSolidityTestCustom testFile "prove_loop" Nothing (Just 100) False Nothing Foundry >>= assertEqual "test result" False
     , testCase "Invariant-Tests-Pass" $ do
         let testFile = "test/contracts/pass/invariants.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
@@ -680,8 +684,8 @@ tests = testGroup "hevm"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Cheat-Codes-Fail" $ do
         let testFile = "test/contracts/fail/cheatCodes.sol"
-        runSolidityTestCustom testFile "testBadFFI" Nothing False Nothing Foundry >>= assertEqual "test result" False
-        runSolidityTestCustom testFile "test_prank_underflow" Nothing False Nothing Foundry >>= assertEqual "test result" False
+        runSolidityTestCustom testFile "testBadFFI" Nothing Nothing False Nothing Foundry >>= assertEqual "test result" False
+        runSolidityTestCustom testFile "test_prank_underflow" Nothing Nothing False Nothing Foundry >>= assertEqual "test result" False
     , testCase "Unwind" $ do
         let testFile = "test/contracts/pass/unwind.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True

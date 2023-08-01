@@ -212,9 +212,9 @@ assertProps ps =
       toProp :: (Expr EWord, Int) -> Prop
       toProp (e, num) = PEq e (Var (TS.pack ("abst_" ++ (show num))))
 
-    allVars = fmap referencedVars' psAbst <> fmap referencedVars bufVals <> fmap referencedVars storeVals <> [abstrVars abst]
-    frameCtx = fmap referencedFrameContext' psAbst <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
-    blockCtx = fmap referencedBlockContext' psAbst <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
+    allVars = fmap referencedVars psAbst <> fmap referencedVars bufVals <> fmap referencedVars storeVals <> [abstrVars abst]
+    frameCtx = fmap referencedFrameContext psAbst <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
+    blockCtx = fmap referencedBlockContext psAbst <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
 
     abstrVars :: AbstState -> [Builder]
     abstrVars (AbstState b _) = map ((\v->fromString ("abst_" ++ show v)) . snd) (Map.toList b)
@@ -233,62 +233,49 @@ assertProps ps =
       = smt2Line "; read assumptions"
         <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads psAbstrElim bufs stores)) mempty mempty
 
-referencedBufsGo :: Expr a -> [Builder]
-referencedBufsGo = \case
-  AbstractBuf s -> [fromText s]
-  _ -> []
+referencedBufs :: TraversableTerm a => a -> [Builder]
+referencedBufs expr = nubOrd $ foldTerm go [] expr
+  where
+    go :: Expr a -> [Builder]
+    go = \case
+      AbstractBuf s -> [fromText s]
+      _ -> []
 
-referencedBufs :: Expr a -> [Builder]
-referencedBufs expr = nubOrd $ foldExpr referencedBufsGo [] expr
+referencedVars :: TraversableTerm a => a -> [Builder]
+referencedVars expr = nubOrd $ foldTerm go [] expr
+  where
+    go :: Expr a -> [Builder]
+    go = \case
+      Var s -> [fromText s]
+      _ -> []
 
-referencedBufs' :: Prop -> [Builder]
-referencedBufs' prop = nubOrd $ foldProp referencedBufsGo [] prop
+referencedFrameContext :: TraversableTerm a => a -> [(Builder, [Prop])]
+referencedFrameContext expr = nubOrd $ foldTerm go [] expr
+  where
+    go :: Expr a -> [(Builder, [Prop])]
+    go = \case
+      CallValue a -> [(fromLazyText $ T.append "callvalue_" (T.pack . show $ a), [])]
+      Caller a -> [(fromLazyText $ T.append "caller_" (T.pack . show $ a), [inRange 160 (Caller a)])]
+      Address a -> [(fromLazyText $ T.append "address_" (T.pack . show $ a), [inRange 160 (Address a)])]
+      Balance {} -> internalError "TODO: BALANCE"
+      SelfBalance {} -> internalError "TODO: SELFBALANCE"
+      Gas {} -> internalError "TODO: GAS"
+      _ -> []
 
-referencedVarsGo :: Expr a -> [Builder]
-referencedVarsGo = \case
-  Var s -> [fromText s]
-  _ -> []
-
-referencedVars :: Expr a -> [Builder]
-referencedVars expr = nubOrd $ foldExpr referencedVarsGo [] expr
-
-referencedVars' :: Prop -> [Builder]
-referencedVars' prop = nubOrd $ foldProp referencedVarsGo [] prop
-
-referencedFrameContextGo :: Expr a -> [(Builder, [Prop])]
-referencedFrameContextGo = \case
-  CallValue a -> [(fromLazyText $ T.append "callvalue_" (T.pack . show $ a), [])]
-  Caller a -> [(fromLazyText $ T.append "caller_" (T.pack . show $ a), [inRange 160 (Caller a)])]
-  Address a -> [(fromLazyText $ T.append "address_" (T.pack . show $ a), [inRange 160 (Address a)])]
-  Balance {} -> internalError "TODO: BALANCE"
-  SelfBalance {} -> internalError "TODO: SELFBALANCE"
-  Gas {} -> internalError "TODO: GAS"
-  _ -> []
-
-referencedFrameContext :: Expr a -> [(Builder, [Prop])]
-referencedFrameContext expr = nubOrd $ foldExpr referencedFrameContextGo [] expr
-
-referencedFrameContext' :: Prop -> [(Builder, [Prop])]
-referencedFrameContext' prop = nubOrd $ foldProp referencedFrameContextGo [] prop
-
-
-referencedBlockContextGo :: Expr a -> [(Builder, [Prop])]
-referencedBlockContextGo = \case
-  Origin -> [("origin", [inRange 160 Origin])]
-  Coinbase -> [("coinbase", [inRange 160 Coinbase])]
-  Timestamp -> [("timestamp", [])]
-  BlockNumber -> [("blocknumber", [])]
-  PrevRandao -> [("prevrandao", [])]
-  GasLimit -> [("gaslimit", [])]
-  ChainId -> [("chainid", [])]
-  BaseFee -> [("basefee", [])]
-  _ -> []
-
-referencedBlockContext :: Expr a -> [(Builder, [Prop])]
-referencedBlockContext expr = nubOrd $ foldExpr referencedBlockContextGo [] expr
-
-referencedBlockContext' :: Prop -> [(Builder, [Prop])]
-referencedBlockContext' prop = nubOrd $ foldProp referencedBlockContextGo [] prop
+referencedBlockContext :: TraversableTerm a => a -> [(Builder, [Prop])]
+referencedBlockContext expr = nubOrd $ foldTerm go [] expr
+  where
+    go :: Expr a -> [(Builder, [Prop])]
+    go = \case
+      Origin -> [("origin", [inRange 160 Origin])]
+      Coinbase -> [("coinbase", [inRange 160 Coinbase])]
+      Timestamp -> [("timestamp", [])]
+      BlockNumber -> [("blocknumber", [])]
+      PrevRandao -> [("prevrandao", [])]
+      GasLimit -> [("gaslimit", [])]
+      ChainId -> [("chainid", [])]
+      BaseFee -> [("basefee", [])]
+      _ -> []
 
 -- | This function overapproximates the reads from the abstract
 -- storage. Potentially, it can return locations that do not read a
@@ -349,7 +336,7 @@ discoverMaxReads props benv senv = bufMap
     allReads = nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)
     -- we can have buffers that are not read from but are still mentioned via BufLength in some branch condition
     -- we assign a default read hint of 4 to start with in these cases (since in most cases we will need at least 4 bytes to produce a counterexample)
-    allBufs = Map.fromList . fmap (, Lit 4) . fmap toLazyText . nubOrd . concat $ fmap referencedBufs' props <> fmap referencedBufs (Map.elems benv) <> fmap referencedBufs (Map.elems senv)
+    allBufs = Map.fromList . fmap (, Lit 4) . fmap toLazyText . nubOrd . concat $ fmap referencedBufs props <> fmap referencedBufs (Map.elems benv) <> fmap referencedBufs (Map.elems senv)
 
     bufMap = Map.unionWith Expr.max (foldl addBound mempty allReads) allBufs
 
@@ -457,6 +444,7 @@ prelude =  SMT2 src mempty mempty
     (define-fun indexWord1 ((w Word)) Byte ((_ extract 247 240) w))
     (define-fun indexWord0 ((w Word)) Byte ((_ extract 255 248) w))
 
+<<<<<<< HEAD
     ; symbolic word indexing
     ; a bitshift based version might be more performant here...
     (define-fun indexWord ((idx Word) (w Word)) Byte
@@ -494,6 +482,115 @@ prelude =  SMT2 src mempty mempty
       (ite (= idx (_ bv1 256)) (indexWord1 w)
       (indexWord0 w)
       ))))))))))))))))))))))))))))))))
+=======
+  ; word indexing
+  (define-fun indexWord31 ((w Word)) Byte ((_ extract 7 0) w))
+  (define-fun indexWord30 ((w Word)) Byte ((_ extract 15 8) w))
+  (define-fun indexWord29 ((w Word)) Byte ((_ extract 23 16) w))
+  (define-fun indexWord28 ((w Word)) Byte ((_ extract 31 24) w))
+  (define-fun indexWord27 ((w Word)) Byte ((_ extract 39 32) w))
+  (define-fun indexWord26 ((w Word)) Byte ((_ extract 47 40) w))
+  (define-fun indexWord25 ((w Word)) Byte ((_ extract 55 48) w))
+  (define-fun indexWord24 ((w Word)) Byte ((_ extract 63 56) w))
+  (define-fun indexWord23 ((w Word)) Byte ((_ extract 71 64) w))
+  (define-fun indexWord22 ((w Word)) Byte ((_ extract 79 72) w))
+  (define-fun indexWord21 ((w Word)) Byte ((_ extract 87 80) w))
+  (define-fun indexWord20 ((w Word)) Byte ((_ extract 95 88) w))
+  (define-fun indexWord19 ((w Word)) Byte ((_ extract 103 96) w))
+  (define-fun indexWord18 ((w Word)) Byte ((_ extract 111 104) w))
+  (define-fun indexWord17 ((w Word)) Byte ((_ extract 119 112) w))
+  (define-fun indexWord16 ((w Word)) Byte ((_ extract 127 120) w))
+  (define-fun indexWord15 ((w Word)) Byte ((_ extract 135 128) w))
+  (define-fun indexWord14 ((w Word)) Byte ((_ extract 143 136) w))
+  (define-fun indexWord13 ((w Word)) Byte ((_ extract 151 144) w))
+  (define-fun indexWord12 ((w Word)) Byte ((_ extract 159 152) w))
+  (define-fun indexWord11 ((w Word)) Byte ((_ extract 167 160) w))
+  (define-fun indexWord10 ((w Word)) Byte ((_ extract 175 168) w))
+  (define-fun indexWord9 ((w Word)) Byte ((_ extract 183 176) w))
+  (define-fun indexWord8 ((w Word)) Byte ((_ extract 191 184) w))
+  (define-fun indexWord7 ((w Word)) Byte ((_ extract 199 192) w))
+  (define-fun indexWord6 ((w Word)) Byte ((_ extract 207 200) w))
+  (define-fun indexWord5 ((w Word)) Byte ((_ extract 215 208) w))
+  (define-fun indexWord4 ((w Word)) Byte ((_ extract 223 216) w))
+  (define-fun indexWord3 ((w Word)) Byte ((_ extract 231 224) w))
+  (define-fun indexWord2 ((w Word)) Byte ((_ extract 239 232) w))
+  (define-fun indexWord1 ((w Word)) Byte ((_ extract 247 240) w))
+  (define-fun indexWord0 ((w Word)) Byte ((_ extract 255 248) w))
+
+  ; symbolic word indexing
+  ; a bitshift based version might be more performant here...
+  (define-fun indexWord ((idx Word) (w Word)) Byte
+    (ite (bvuge idx (_ bv32 256)) (_ bv0 8)
+    (ite (= idx (_ bv31 256)) (indexWord31 w)
+    (ite (= idx (_ bv30 256)) (indexWord30 w)
+    (ite (= idx (_ bv29 256)) (indexWord29 w)
+    (ite (= idx (_ bv28 256)) (indexWord28 w)
+    (ite (= idx (_ bv27 256)) (indexWord27 w)
+    (ite (= idx (_ bv26 256)) (indexWord26 w)
+    (ite (= idx (_ bv25 256)) (indexWord25 w)
+    (ite (= idx (_ bv24 256)) (indexWord24 w)
+    (ite (= idx (_ bv23 256)) (indexWord23 w)
+    (ite (= idx (_ bv22 256)) (indexWord22 w)
+    (ite (= idx (_ bv21 256)) (indexWord21 w)
+    (ite (= idx (_ bv20 256)) (indexWord20 w)
+    (ite (= idx (_ bv19 256)) (indexWord19 w)
+    (ite (= idx (_ bv18 256)) (indexWord18 w)
+    (ite (= idx (_ bv17 256)) (indexWord17 w)
+    (ite (= idx (_ bv16 256)) (indexWord16 w)
+    (ite (= idx (_ bv15 256)) (indexWord15 w)
+    (ite (= idx (_ bv14 256)) (indexWord14 w)
+    (ite (= idx (_ bv13 256)) (indexWord13 w)
+    (ite (= idx (_ bv12 256)) (indexWord12 w)
+    (ite (= idx (_ bv11 256)) (indexWord11 w)
+    (ite (= idx (_ bv10 256)) (indexWord10 w)
+    (ite (= idx (_ bv9 256)) (indexWord9 w)
+    (ite (= idx (_ bv8 256)) (indexWord8 w)
+    (ite (= idx (_ bv7 256)) (indexWord7 w)
+    (ite (= idx (_ bv6 256)) (indexWord6 w)
+    (ite (= idx (_ bv5 256)) (indexWord5 w)
+    (ite (= idx (_ bv4 256)) (indexWord4 w)
+    (ite (= idx (_ bv3 256)) (indexWord3 w)
+    (ite (= idx (_ bv2 256)) (indexWord2 w)
+    (ite (= idx (_ bv1 256)) (indexWord1 w)
+    (indexWord0 w)
+    ))))))))))))))))))))))))))))))))
+  )
+
+  (define-fun readWord ((idx Word) (buf Buf)) Word
+    (concat
+      (select buf idx)
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000001))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000002))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000003))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000004))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000005))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000006))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000007))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000008))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000009))
+      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000a))
+      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000b))
+      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000c))
+      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000d))
+      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000e))
+      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000f))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000010))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000011))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000012))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000013))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000014))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000015))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000016))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000017))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000018))
+      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000019))
+      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001a))
+      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001b))
+      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001c))
+      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001d))
+      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001e))
+      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001f))
+>>>>>>> main
     )
 
     ; buffers
@@ -739,7 +836,7 @@ exprToSMT = \case
     _ -> op2 "indexWord" idx w
   ReadByte idx src -> op2 "select" src idx
 
-  ConcreteBuf "" -> "emptyBuf"
+  ConcreteBuf "" -> "((as const Buf) #b00000000)"
   ConcreteBuf bs -> writeBytes bs mempty
   AbstractBuf s -> fromText s
   ReadWord idx prev -> op2 "readWord" idx prev

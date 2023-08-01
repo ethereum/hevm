@@ -11,8 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - CopySlice wraparound issue especially during CopyCallBytesToMemory
 - EVM.Solidity.toCode to include contractName in error string
+- Better cex reconstruction in cases where branches do not refer to all input variables in calldata
 
 ## Changed
+- Run expression simplification on branch conditions
+- 'check' prefix now recognized as a function signature to symbolically execute for Dapps
+
+- symbolic solidity tests no longer consider reverts to be a failure, and check only for the ds-test failed bit or unser defined assertion failures (i.e. `Panic(0x01)`)
 
 ## [0.51.3] - 2023-07-14
 
