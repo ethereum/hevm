@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  nix-build:
     strategy:
       matrix:
        os: [ ubuntu-latest, macos-latest ]
@@ -33,13 +33,24 @@ jobs:
           name: hevm-${{ matrix.os_attr }}
           path: result/bin/hevm
 
-  rpc-tests:
-    runs-on: ubuntu-latest
+  extra-tests:
+    strategy:
+      matrix:
+       os: [ ubuntu-latest, macos-latest ]
+       include:
+         - os: ubuntu-latest
+         - os: macos-latest
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
+      # can't be run in nix build due to network usage
       - name: run rpc tests
+        run: nix-shell --pure --command "cabal run rpc-tests"
+      # if we run this in nix build we often get killed due to oom in ci
+      - name: run ethereum tests
         run: nix-shell --pure --command "cabal run rpc-tests"
 
   build-windows:
