@@ -51,7 +51,7 @@ jobs:
         run: nix-shell --pure --command "cabal run rpc-tests"
       # if we run this in nix build we often get killed due to oom in ci
       - name: run ethereum tests
-        run: nix-shell --pure --command "cabal run rpc-tests"
+        run: nix-shell --pure --command "cabal run ethereum-tests"
 
   build-windows:
     name: build (windows-latest)
