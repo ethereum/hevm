@@ -406,11 +406,15 @@ readFoundryJSON :: Text -> Text -> Maybe (Contracts, Asts, Sources)
 readFoundryJSON contractName json = do
   runtime <- json ^? key "deployedBytecode"
   runtimeCode <- (toCode contractName) . strip0x'' <$> runtime ^? key "object" % _String
-  runtimeSrcMap <- makeSrcMaps =<< runtime ^? key "sourceMap" % _String
+  runtimeSrcMap <- case runtimeCode of
+    "" -> makeSrcMaps ""
+    _ -> makeSrcMaps =<< runtime ^? key "sourceMap" % _String
 
   creation <- json ^? key "bytecode"
   creationCode <- (toCode contractName) . strip0x'' <$> creation ^? key "object" % _String
-  creationSrcMap <- makeSrcMaps =<< creation ^? key "sourceMap" % _String
+  creationSrcMap <- case creationCode of
+    "" -> makeSrcMaps ""
+    _ -> makeSrcMaps =<< creation ^? key "sourceMap" % _String
 
   ast <- json ^? key "ast"
   path <- ast ^? key "absolutePath" % _String
