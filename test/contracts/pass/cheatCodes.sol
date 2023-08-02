@@ -106,6 +106,14 @@ contract CheatCodes is DSTest {
         assertEq(prankster.prankme(), address(this));
     }
 
+    function prove_prank(address caller) public {
+        Prankster prankster = new Prankster();
+        assertEq(prankster.prankme(), address(this));
+        hevm.prank(caller);
+        assertEq(prankster.prankme(), caller);
+        assertEq(prankster.prankme(), address(this));
+    }
+
     function test_prank_val() public {
         address from = address(0x1312);
         uint amt = 10;

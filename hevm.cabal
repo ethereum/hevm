@@ -74,6 +74,7 @@ common shared
     RecordWildCards
     TypeFamilies
     ViewPatterns
+    DataKinds
 
 library
   import: shared
@@ -83,8 +84,6 @@ library
     EVM.Assembler,
     EVM.Concrete,
     EVM.Dapp,
-    EVM.Debug,
-    EVM.Dev,
     EVM.Expr,
     EVM.SMT,
     EVM.Solvers,

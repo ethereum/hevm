@@ -116,6 +116,8 @@ interpret fetcher vm = eval . view
         Wait (PleaseAskSMT (Lit c) _ continue) ->
           let (r, vm') = runState (continue (Case (c > 0))) vm
           in interpret fetcher vm' (k r)
+        Wait (PleaseAskSMT c _ _) ->
+          error $ "cannot handle symbolic branch conditions in this interpreter: " <> show c
         Wait q -> do
           m <- fetcher q
           let vm' = execState m vm

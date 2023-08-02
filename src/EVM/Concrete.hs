@@ -1,5 +1,8 @@
+{-# Language DataKinds #-}
+
 module EVM.Concrete where
 
+import Prelude hiding (Word)
 import EVM.RLP
 import EVM.Types
 
@@ -8,7 +11,7 @@ import Data.ByteString (ByteString, (!?))
 import Data.ByteString qualified as BS
 import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
-import Witch (unsafeInto)
+import Witch (unsafeInto, into)
 
 wordAt :: Int -> ByteString -> W256
 wordAt i bs =
@@ -21,9 +24,6 @@ byteStringSliceWithDefaultZeroes :: Int -> Int -> ByteString -> ByteString
 byteStringSliceWithDefaultZeroes offset size bs =
   if size == 0
   then ""
-  -- else if offset > BS.length bs
-  -- then BS.replicate size 0
-  -- todo: this ^^ should work, investigate why it causes more GST fails
   else
     let bs' = BS.take size (BS.drop offset bs)
     in bs' <> BS.replicate (size - BS.length bs') 0
@@ -64,9 +64,9 @@ x0 ^ y0 | y0 < 0    = errorWithoutStackTrace "Negative exponent"
                   | y == 1      = x * z
                   | otherwise   = g (x * x) ((y - 1) `shiftR` 1) (x * z)
 
-createAddress :: Addr -> W256 -> Addr
-createAddress a n = unsafeInto $ keccak' $ rlpList [rlpAddrFull a, rlpWord256 n]
+createAddress :: Addr -> W64 -> Expr EAddr
+createAddress a n = LitAddr . unsafeInto . keccak' . rlpList $ [rlpAddrFull a, rlpWord256 (into n)]
 
-create2Address :: Addr -> W256 -> ByteString -> Addr
-create2Address a s b = unsafeInto $ keccak' $ mconcat
+create2Address :: Addr -> W256 -> ByteString -> Expr EAddr
+create2Address a s b = LitAddr $ unsafeInto $ keccak' $ mconcat
   [BS.singleton 0xff, word160Bytes a, word256Bytes s, word256Bytes $ keccak' b]

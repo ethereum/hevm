@@ -1,9 +1,8 @@
 module EVM.Exec where
 
-import EVM
+import EVM hiding (createAddress)
 import EVM.Concrete (createAddress)
 import EVM.FeeSchedule qualified as FeeSchedule
-import EVM.Expr (litAddr)
 import EVM.Types
 
 import Control.Monad.Trans.State.Strict (get, State)
@@ -19,14 +18,14 @@ vmForEthrunCreation creationCode =
   (makeVm $ VMOpts
     { contract = initialContract (InitCode creationCode mempty)
     , calldata = mempty
-    , value = (Lit 0)
-    , initialStorage = EmptyStore
+    , value = Lit 0
+    , baseState = EmptyBase
     , address = createAddress ethrunAddress 1
-    , caller = litAddr ethrunAddress
-    , origin = ethrunAddress
-    , coinbase = 0
+    , caller = LitAddr ethrunAddress
+    , origin = LitAddr ethrunAddress
+    , coinbase = LitAddr 0
     , number = 0
-    , timestamp = (Lit 0)
+    , timestamp = Lit 0
     , blockGaslimit = 0
     , gasprice = 0
     , prevRandao = 42069
@@ -40,7 +39,7 @@ vmForEthrunCreation creationCode =
     , create = False
     , txAccessList = mempty
     , allowFFI = False
-    }) & set (#env % #contracts % at ethrunAddress)
+    }) & set (#env % #contracts % at (LitAddr ethrunAddress))
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
 
 exec :: State VM VMResult

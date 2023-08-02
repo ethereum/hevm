@@ -5,13 +5,12 @@ module EVM.UnitTest where
 
 import EVM
 import EVM.ABI
-import EVM.Concrete
+import EVM.Concrete qualified as Concrete
 import EVM.SMT
 import EVM.Solvers
 import EVM.Dapp
-import EVM.Debug (srcMapCodePos)
 import EVM.Exec
-import EVM.Expr (litAddr, readStorage', simplify)
+import EVM.Expr (readStorage', simplify)
 import EVM.Expr qualified as Expr
 import EVM.Facts qualified as Facts
 import EVM.Facts.Git qualified as Git
@@ -59,6 +58,7 @@ import Data.Vector qualified as Vector
 import Data.Word (Word32, Word64)
 import GHC.Natural
 import System.Environment (lookupEnv)
+import System.Exit (exitFailure)
 import System.IO (hFlush, stdout)
 import Test.QuickCheck hiding (verbose, Success, Failure)
 import qualified Test.QuickCheck as QC
@@ -85,15 +85,15 @@ data UnitTestOptions = UnitTestOptions
   }
 
 data TestVMParams = TestVMParams
-  { address       :: Addr
-  , caller        :: Addr
-  , origin        :: Addr
+  { address       :: Expr EAddr
+  , caller        :: Expr EAddr
+  , origin        :: Expr EAddr
   , gasCreate     :: Word64
   , gasCall       :: Word64
   , baseFee       :: W256
   , priorityFee   :: W256
   , balanceCreate :: W256
-  , coinbase      :: Addr
+  , coinbase      :: Expr EAddr
   , number        :: W256
   , timestamp     :: W256
   , gaslimit      :: Word64
@@ -139,7 +139,13 @@ unitTest opts (Contracts cs) cache' = do
     Just path ->
       -- merge all of the post-vm caches and save into the state
       let evmcache = mconcat [vm.cache | vm <- vms]
-      in Git.saveFacts (Git.RepoAt path) (Facts.cacheFacts evmcache)
+      in case Facts.cacheFacts evmcache of
+           Right fs -> liftIO $ Git.saveFacts (Git.RepoAt path) fs
+           Left e -> do
+             putStrLn "Error while serializing cache:"
+             putStrLn e
+             exitFailure
+
   pure $ and passing
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
@@ -160,7 +166,7 @@ initializeUnitTest opts theContract = do
 
   Stepper.evm $ do
     -- Give a balance to the test target
-    #env % #contracts % ix addr % #balance %= (+ opts.testParams.balanceCreate)
+    #env % #contracts % ix addr % #balance %= (`Expr.add` (Lit opts.testParams.balanceCreate))
 
     -- call setUp(), if it exists, to initialize the test contract
     let theAbi = theContract.abiMap
@@ -205,7 +211,7 @@ exploreStep UnitTestOptions{..} bs = do
         types = snd <$> inputs
     let ?context = DappContext dapp cs
     this <- fromMaybe (internalError "unknown target") <$> (use (#env % #contracts % at testParams.address))
-    let name = maybe "" (contractNamePart . (.contractName)) $ lookupCode this.contractcode dapp
+    let name = maybe "" (contractNamePart . (.contractName)) $ lookupCode this.code dapp
     pushTrace (EntryTrace (name <> "." <> sig <> "(" <> intercalate "," ((pack . show) <$> types) <> ")" <> showCall types (ConcreteBuf bs)))
   -- Try running the test method
   Stepper.execFully >>= \case
@@ -249,10 +255,10 @@ data OpLocation = OpLocation
   } deriving (Show)
 
 instance Eq OpLocation where
-  (==) (OpLocation a b) (OpLocation a' b') = b == b' && a.contractcode == a'.contractcode
+  (==) (OpLocation a b) (OpLocation a' b') = b == b' && a.code == a'.code
 
 instance Ord OpLocation where
-  compare (OpLocation a b) (OpLocation a' b') = compare (a.contractcode, b) (a'.contractcode, b')
+  compare (OpLocation a b) (OpLocation a' b') = compare (a.code, b) (a'.code, b')
 
 srcMapForOpLocation :: DappInfo -> OpLocation -> Maybe SrcMap
 srcMapForOpLocation dapp (OpLocation contr opIx) = srcMap dapp contr opIx
@@ -430,7 +436,7 @@ runUnitTestContract
         Just (VMFailure _) -> liftIO $ do
           Text.putStrLn "\x1b[31m[BAIL]\x1b[0m setUp() "
           tick "\n"
-          tick (Data.Text.pack $ show $ failOutput vm1 opts "setUp()")
+          tick (failOutput vm1 opts "setUp()")
           pure [(False, vm1)]
         Just (VMSuccess _) -> do
           let
@@ -497,83 +503,104 @@ initialExplorationStepper opts'' testName replayData targets i = do
   then explorationStepper opts'' testName replayData targets history i
   else pure (False, history)
 
+
 explorationStepper :: UnitTestOptions -> ABIMethod -> [ExploreTx] -> [Addr] -> RLP -> Int -> Stepper (Bool, RLP)
 explorationStepper _ _ _ _ history 0  = pure (True, history)
 explorationStepper opts@UnitTestOptions{..} testName replayData targets (List history) i = do
- (caller', target, cd, timestamp') <-
-   case preview (ix (i - 1)) replayData of
-     Just v -> pure v
-     Nothing -> do
-      vm <- Stepper.evm get
-      Stepper.evmIO $ do
-       let cs = vm.env.contracts
-           noCode c = case c.contractcode of
-             RuntimeCode (ConcreteRuntimeCode "") -> True
-             RuntimeCode (SymbolicRuntimeCode c') -> null c'
-             _ -> False
-           mutable m = m.mutability `elem` [NonPayable, Payable]
-           knownAbis :: Map Addr SolcContract
-           knownAbis =
-             -- exclude contracts without code
-             Map.filter (not . BS.null . (.runtimeCode)) $
-             -- exclude contracts without state changing functions
-             Map.filter (not . null . Map.filter mutable . (.abiMap)) $
-             -- exclude testing abis
-             Map.filter (isNothing . preview (ix unitTestMarkerAbi) . (.abiMap)) $
-             -- pick all contracts with known compiler artifacts
-             fmap fromJust (Map.filter isJust $ Map.fromList [(addr, lookupCode c.contractcode dapp) | (addr, c)  <- Map.toList cs])
-           selected = [(addr,
-                        fromMaybe (internalError $ "no src found for: " <> show addr) $
-                          lookupCode (fromMaybe (internalError $ "contract not found: " <> show addr) $
-                            Map.lookup addr cs).contractcode dapp)
-                       | addr  <- targets]
-       -- generate a random valid call to any known contract
-       -- select random contract
-       (target, solcInfo) <- generate $ elements (if null targets then Map.toList knownAbis else selected)
-       -- choose a random mutable method
-       (_, (Method _ inputs sig _ _)) <- generate (elements $ Map.toList $ Map.filter mutable solcInfo.abiMap)
-       let types = snd <$> inputs
-       -- set the caller to a random address with 90% probability, 10% known EOA address
-       let knownEOAs = Map.keys $ Map.filter noCode cs
-       AbiAddress caller' <-
-         if null knownEOAs
-         then generate $ genAbiValue AbiAddressType
-         else generate $ frequency
-           [ (90, genAbiValue AbiAddressType)
-           , (10, AbiAddress <$> elements knownEOAs)
-           ]
-       -- make a call with random valid data to the function
-       args <- generate $ genAbiValue (AbiTupleType $ Vector.fromList types)
-       let cd = abiMethod (sig <> "(" <> intercalate "," ((pack . show) <$> types) <> ")") args
-       -- increment timestamp with random amount
-       timepassed <- into <$> generate (arbitrarySizedNatural :: Gen Word32)
-       let ts = fromMaybe (internalError "symbolic timestamp not supported here") $ maybeLitWord vm.block.timestamp
-       pure (caller', target, cd, into ts + timepassed)
- let opts' = opts { testParams = testParams {address = target, caller = caller', timestamp = timestamp'}}
-     thisCallRLP = List [BS $ word160Bytes caller', BS $ word160Bytes target, BS cd, BS $ word256Bytes timestamp']
- -- set the timestamp
- Stepper.evm $ assign (#block % #timestamp) (Lit timestamp')
- -- perform the call
- bailed <- exploreStep opts' cd
- Stepper.evm popTrace
- let newHistory = if bailed then List history else List (thisCallRLP:history)
-     opts'' = opts {testParams = testParams {timestamp = timestamp'}}
-     carryOn = explorationStepper opts'' testName replayData targets newHistory (i - 1)
- -- if we didn't revert, run the test function
- if bailed
- then carryOn
- else
-   do x <- runUnitTest opts'' testName emptyAbi
-      if x
-      then carryOn
-      else pure (False, List (thisCallRLP:history))
+  (caller', target, cd, timestamp') <-
+    case preview (ix (i - 1)) replayData of
+      Just v -> pure v
+      Nothing -> do
+       vm <- Stepper.evm get
+       Stepper.evmIO $ do
+         let cs = Map.mapKeys mkConcrete vm.env.contracts
+
+             mkConcrete :: Expr EAddr -> Addr
+             mkConcrete (LitAddr a) = a
+             mkConcrete a = internalError $ "symbolic address discovered in invariant test: " <> show a
+
+             noCode c = case c.code of
+               RuntimeCode (ConcreteRuntimeCode "") -> True
+               RuntimeCode (SymbolicRuntimeCode c') -> null c'
+               _ -> False
+
+             mutable m = m.mutability `elem` [NonPayable, Payable]
+
+             knownAbis =
+               -- exclude contracts without code
+               Map.filter (not . BS.null . (.runtimeCode)) $
+               -- exclude contracts without state changing functions
+               Map.filter (not . null . Map.filter mutable . (.abiMap)) $
+               -- exclude testing abis
+               Map.filter (isNothing . preview (ix unitTestMarkerAbi) . (.abiMap)) $
+               -- pick all contracts with known compiler artifacts
+               fmap fromJust (Map.filter isJust $ Map.fromList [(addr, lookupCode c.code dapp) | (addr, c)  <- Map.toList cs])
+
+             selected = [(addr,
+                          fromMaybe (internalError ("no src found for: " <> show addr)) $
+                            lookupCode (fromMaybe (internalError $ "contract not found: " <> show addr) $
+                              Map.lookup addr cs).code dapp)
+                         | addr  <- targets]
+         -- generate a random valid call to any known contract
+         -- select random contract
+         (target, solcInfo) <- generate $ elements (if null targets then Map.toList knownAbis else selected)
+         -- choose a random mutable method
+         (_, (Method _ inputs sig _ _)) <- generate (elements $ Map.toList $ Map.filter mutable solcInfo.abiMap)
+         let types = snd <$> inputs
+         -- set the caller to a random address with 90% probability, 10% known EOA address
+         let knownEOAs = Map.keys $ Map.filter noCode cs
+         AbiAddress caller' <-
+           if null knownEOAs
+           then generate $ genAbiValue AbiAddressType
+           else generate $ frequency
+             [ (90, genAbiValue AbiAddressType)
+             , (10, AbiAddress <$> elements knownEOAs)
+             ]
+         -- make a call with random valid data to the function
+         args <- generate $ genAbiValue (AbiTupleType $ Vector.fromList types)
+         let cd = abiMethod (sig <> "(" <> intercalate "," ((pack . show) <$> types) <> ")") args
+         -- increment timestamp with random amount
+         timepassed <- into <$> generate (arbitrarySizedNatural :: Gen Word32)
+         let ts = fromMaybe
+                    (internalError "symbolic timestamp not supported here")
+                    (maybeLitWord vm.block.timestamp)
+         pure (caller', target, cd, into ts + timepassed)
+  let opts' = opts
+         { testParams = testParams
+             { address = LitAddr target
+             , caller = LitAddr caller'
+             , timestamp = timestamp'
+             }
+         }
+      thisCallRLP = List
+        [ BS $ word160Bytes caller'
+        , BS $ word160Bytes target, BS cd
+        , BS $ word256Bytes timestamp'
+        ]
+
+  -- set the timestamp
+  Stepper.evm $ assign (#block % #timestamp) (Lit timestamp')
+  -- perform the call
+  bailed <- exploreStep opts' cd
+  Stepper.evm popTrace
+  let newHistory = if bailed then List history else List (thisCallRLP:history)
+      opts'' = opts {testParams = testParams {timestamp = timestamp'}}
+      carryOn = explorationStepper opts'' testName replayData targets newHistory (i - 1)
+  -- if we didn't revert, run the test function
+  if bailed
+  then carryOn
+  else
+    do x <- runUnitTest opts'' testName emptyAbi
+       if x
+       then carryOn
+       else pure (False, List (thisCallRLP:history))
 explorationStepper _ _ _ _ _ _  = internalError "malformed rlp"
 
 getTargetContracts :: UnitTestOptions -> Stepper [Addr]
 getTargetContracts UnitTestOptions{..} = do
   vm <- Stepper.evm get
   let contract' = fromJust $ currentContract vm
-      theAbi = (fromJust $ lookupCode contract'.contractcode dapp).abiMap
+      theAbi = (fromJust $ lookupCode contract'.code dapp).abiMap
       setUp  = abiKeccak (encodeUtf8 "targetContracts()")
   case Map.lookup setUp theAbi of
     Nothing -> pure []
@@ -705,14 +732,16 @@ symRun :: UnitTestOptions -> VM -> Text -> [AbiType] -> IO (Text, Either Text Te
 symRun opts@UnitTestOptions{..} vm testName types = do
     let cd = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName
-        testContract = vm.state.contract
+        testContract store = fromMaybe (error "Internal Error: test contract not found in state") (Map.lookup vm.state.contract store)
 
     -- define postcondition depending on `shouldFail`
     -- We directly encode the failure conditions from failed() in ds-test since this is easier to encode than a call into failed()
     -- we need to read from slot 0 in the test contract and mask it with 0x10 to get the value of _failed
     -- we don't need to do this when reading the failed from the cheatcode address since we don't do any packing there
-    let failed store = (And (readStorage' (litAddr testContract) (Lit 0) store) (Lit 2) .== Lit 2)
-                   .|| (readStorage' (litAddr cheatCode) (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) store .== Lit 1)
+    let failed store = case Map.lookup cheatCode store of
+          Just cheatContract -> (And (readStorage' (Lit 0) (testContract store).storage) (Lit 0x10) .== Lit 0x10)
+                               .|| (readStorage' (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) cheatContract.storage .== Lit 1)
+          Nothing -> And (readStorage' (Lit 0) (testContract store).storage) (Lit 2) .== Lit 2
         postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
                                   Success _ _ _ store -> failed store
@@ -755,8 +784,8 @@ symFailure UnitTestOptions {..} testName cd types failures' =
     where
       showRes = \case
         Success _ _ _ _ -> if "proveFail" `isPrefixOf` testName
-                       then "Successful execution"
-                       else "Failed: DSTest Assertion Violation"
+                           then "Successful execution"
+                           else "Failed: DSTest Assertion Violation"
         res ->
           let ?context = DappContext { info = dapp, env = traceContext res}
           in Text.pack $ prettyvmresult res
@@ -827,7 +856,6 @@ passOutput vm UnitTestOptions { .. } testName =
       ]
     else ""
 
--- TODO
 failOutput :: VM -> UnitTestOptions -> Text -> Text
 failOutput vm UnitTestOptions { .. } testName =
   let ?context = DappContext { info = dapp, env = vm.env.contracts }
@@ -927,11 +955,11 @@ makeTxCall params (cd, cdProps) = do
   loadContract params.address
   assign (#state % #calldata) cd
   #constraints %= (<> cdProps)
-  assign (#state % #caller) (litAddr params.caller)
+  assign (#state % #caller) params.caller
   assign (#state % #gas) params.gasCall
-  origin' <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (#env % #contracts % at params.origin)
-  let originBal = origin'.balance
-  when (originBal < params.gasprice * (into params.gasCall)) $ internalError "insufficient balance for gas cost"
+  origin <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (#env % #contracts % at params.origin)
+  let insufficientBal = maybe False (\b -> b < params.gasprice * (into params.gasCall)) (maybeLitWord origin.balance)
+  when insufficientBal $ internalError "insufficient balance for gas cost"
   vm <- get
   put $ initTx vm
 
@@ -943,7 +971,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
            , calldata = mempty
            , value = Lit 0
            , address = testParams.address
-           , caller = litAddr testParams.caller
+           , caller = testParams.caller
            , origin = testParams.origin
            , gas = testParams.gasCreate
            , gaslimit = testParams.gasCreate
@@ -959,16 +987,15 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
            , schedule = FeeSchedule.berlin
            , chainId = testParams.chainId
            , create = True
-           , initialStorage = EmptyStore
+           , baseState = EmptyBase
            , txAccessList = mempty -- TODO: support unit test access lists???
            , allowFFI = ffiAllowed
            }
-    creator =
-      initialContract (RuntimeCode (ConcreteRuntimeCode ""))
-        & set #nonce 1
-        & set #balance testParams.balanceCreate
+    creator = emptyContract
+        & set #nonce (Just 1)
+        & set #balance (Lit testParams.balanceCreate)
   in vm
-    & set (#env % #contracts % at ethrunAddress) (Just creator)
+    & set (#env % #contracts % at (LitAddr ethrunAddress)) (Just creator)
 
 
 getParametersFromEnvironmentVariables :: Maybe Text -> IO TestVMParams
@@ -977,7 +1004,7 @@ getParametersFromEnvironmentVariables rpc = do
 
   (miner,ts,blockNum,ran,limit,base) <-
     case rpc of
-      Nothing  -> pure (0,Lit 0,0,0,0,0)
+      Nothing  -> pure (LitAddr 0,Lit 0,0,0,0,0)
       Just url -> Fetch.fetchBlockFrom block' url >>= \case
         Nothing -> internalError "Could not fetch block"
         Just Block{..} -> pure ( coinbase
@@ -989,13 +1016,13 @@ getParametersFromEnvironmentVariables rpc = do
                                )
   let
     getWord s def = maybe def read <$> lookupEnv s
-    getAddr s def = maybe def read <$> lookupEnv s
+    getAddr s def = maybe def (LitAddr . read) <$> lookupEnv s
     ts' = fromMaybe (internalError "received unexpected symbolic timestamp via rpc") (maybeLitWord ts)
 
   TestVMParams
-    <$> getAddr "DAPP_TEST_ADDRESS" (createAddress ethrunAddress 1)
-    <*> getAddr "DAPP_TEST_CALLER" ethrunAddress
-    <*> getAddr "DAPP_TEST_ORIGIN" ethrunAddress
+    <$> getAddr "DAPP_TEST_ADDRESS" (Concrete.createAddress ethrunAddress 1)
+    <*> getAddr "DAPP_TEST_CALLER" (LitAddr ethrunAddress)
+    <*> getAddr "DAPP_TEST_ORIGIN" (LitAddr ethrunAddress)
     <*> getWord "DAPP_TEST_GAS_CREATE" defaultGasForCreating
     <*> getWord "DAPP_TEST_GAS_CALL" defaultGasForInvoking
     <*> getWord "DAPP_TEST_BASEFEE" base

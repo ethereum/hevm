@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -15,6 +16,7 @@ import Data.Aeson qualified as JSON
 import Data.Aeson.Types qualified as JSON
 import Data.Bifunctor (first)
 import Data.Bits (Bits, FiniteBits, shiftR, shift, shiftL, (.&.), (.|.), toIntegralSized)
+import Data.Binary qualified as Binary
 import Data.ByteArray qualified as BA
 import Data.Char
 import Data.List (foldl')
@@ -59,6 +61,14 @@ import Witch
 mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
   [''Typeable, ''Data, ''Generic]
 
+
+
+-- Conversions -------------------------------------------------------------------------------------
+
+
+-- We ignore hlint to supress the warnings about `fromIntegral` and friends here
+#ifndef __HLINT__
+
 instance From Addr Integer where from = fromIntegral
 instance From Addr W256 where from = fromIntegral
 instance From Int256 Integer where from = fromIntegral
@@ -68,7 +78,9 @@ instance From Word8 W256 where from = fromIntegral
 instance From Word8 Word256 where from = fromIntegral
 instance From Word32 W256 where from = fromIntegral
 instance From Word32 Word256 where from = fromIntegral
+instance From Word32 ByteString where from = toStrict . Binary.encode
 instance From Word64 W256 where from = fromIntegral
+instance From W64 W256 where from = fromIntegral
 instance From Word256 Integer where from = fromIntegral
 instance From Word256 W256 where from = fromIntegral
 
@@ -76,6 +88,7 @@ instance TryFrom Int W256 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Int Word256 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Int256 W256 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Integer W256 where tryFrom = maybeTryFrom toIntegralSized
+instance TryFrom Integer Addr where tryFrom = maybeTryFrom toIntegralSized
 -- TODO: hevm relies on this behavior
 instance TryFrom W256 Addr where tryFrom = Right . fromIntegral
 instance TryFrom W256 FunctionSelector where tryFrom = maybeTryFrom toIntegralSized
@@ -86,6 +99,7 @@ instance TryFrom W256 Word8 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom W256 Word32 where tryFrom = maybeTryFrom toIntegralSized
 -- TODO: hevm relies on this behavior
 instance TryFrom W256 Word64 where tryFrom = Right . fromIntegral
+instance TryFrom W256 W64 where tryFrom = Right . fromIntegral
 instance TryFrom Word160 Word8 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Word256 Int where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Word256 Int256 where tryFrom = maybeTryFrom toIntegralSized
@@ -93,7 +107,14 @@ instance TryFrom Word256 Word8 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Word256 Word32 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Word512 W256 where tryFrom = maybeTryFrom toIntegralSized
 
+truncateToAddr :: W256 -> Addr
+truncateToAddr = fromIntegral
+
+#endif
+
+
 -- Symbolic IR -------------------------------------------------------------------------------------
+
 
 -- phantom type tags for AST construction
 data EType
@@ -101,10 +122,11 @@ data EType
   | Storage
   | Log
   | EWord
+  | EAddr
+  | EContract
   | Byte
   | End
   deriving (Typeable)
-
 
 -- Variables refering to a global environment
 data GVar (a :: EType) where
@@ -168,8 +190,11 @@ data Expr (a :: EType) where
 
   -- identifiers
 
+  -- | Literal words
   Lit            :: {-# UNPACK #-} !W256 -> Expr EWord
+  -- | Variables
   Var            :: Text -> Expr EWord
+  -- | variables introduced during the CSE pass
   GVar           :: GVar a -> Expr a
 
   -- bytes
@@ -192,7 +217,7 @@ data Expr (a :: EType) where
 
   Partial        :: [Prop] -> Traces -> PartialExec -> Expr End
   Failure        :: [Prop] -> Traces -> EvmError -> Expr End
-  Success        :: [Prop] -> Traces -> Expr Buf -> Expr Storage -> Expr End
+  Success        :: [Prop] -> Traces -> Expr Buf -> Map (Expr EAddr) (Expr EContract) -> Expr End
   ITE            :: Expr EWord -> Expr End -> Expr End -> Expr End
 
   -- integers
@@ -249,25 +274,13 @@ data Expr (a :: EType) where
   ChainId        :: Expr EWord
   BaseFee        :: Expr EWord
 
+  -- tx context
+
+  TxValue        :: Expr EWord
+
   -- frame context
 
-  CallValue      :: Int                -- frame idx
-                 -> Expr EWord
-
-  Caller         :: Int                -- frame idx
-                 -> Expr EWord
-
-  Address        :: Int                -- frame idx
-                 -> Expr EWord
-
-  Balance        :: Int                -- frame idx
-                 -> Int                -- PC (in case we're checking the current contract)
-                 -> Expr EWord         -- address
-                 -> Expr EWord
-
-  SelfBalance    :: Int                -- frame idx
-                 -> Int                -- PC
-                 -> Expr EWord
+  Balance        :: Expr EAddr -> Expr EWord
 
   Gas            :: Int                -- frame idx
                  -> Int                -- PC
@@ -275,10 +288,10 @@ data Expr (a :: EType) where
 
   -- code
 
-  CodeSize       :: Expr EWord         -- address
+  CodeSize       :: Expr EAddr         -- address
                  -> Expr EWord         -- size
 
-  ExtCodeHash    :: Expr EWord         -- address
+  CodeHash       :: Expr EAddr         -- address
                  -> Expr EWord         -- size
 
   -- logs
@@ -342,19 +355,36 @@ data Expr (a :: EType) where
                  -> Expr Storage       -- storage
                  -> Expr EWord         -- success
 
+  -- Contract
+
+  -- A restricted view of a contract that does not include extraneous metadata
+  -- from the full constructor defined in the VM state
+  C ::
+    { code    :: ContractCode
+    , storage :: Expr Storage
+    , balance :: Expr EWord
+    , nonce   :: Maybe W64
+    } -> Expr EContract
+
+  -- addresses
+
+  -- Symbolic addresses are identified with an int. It is important that
+  -- semantic equality is the same as syntactic equality here. Additionally all
+  -- SAddr's in a given expression should be constrained to differ from any LitAddr's
+  SymAddr        :: Text -> Expr EAddr
+  LitAddr        :: Addr -> Expr EAddr
+  WAddr          :: Expr EAddr -> Expr EWord
+
   -- storage
 
-  EmptyStore     :: Expr Storage
-  ConcreteStore  :: Map W256 (Map W256 W256) -> Expr Storage
-  AbstractStore  :: Expr Storage
+  ConcreteStore  :: (Map W256 W256) -> Expr Storage
+  AbstractStore  :: Expr EAddr -> Expr Storage
 
-  SLoad          :: Expr EWord         -- address
-                 -> Expr EWord         -- index
+  SLoad          :: Expr EWord         -- index
                  -> Expr Storage       -- storage
                  -> Expr EWord         -- result
 
-  SStore         :: Expr EWord         -- address
-                 -> Expr EWord         -- index
+  SStore         :: Expr EWord         -- index
                  -> Expr EWord         -- value
                  -> Expr Storage       -- old storage
                  -> Expr Storage       -- new storae
@@ -524,7 +554,7 @@ isPBool _ = False
 
 -- | Core EVM Error Types
 data EvmError
-  = BalanceTooLow W256 W256
+  = BalanceTooLow (Expr EWord) (Expr EWord)
   | UnrecognizedOpcode Word8
   | SelfDestruction
   | StackUnderrun
@@ -548,7 +578,7 @@ data EvmError
 -- | Sometimes we can only partially execute a given program
 data PartialExec
   = UnexpectedSymbolicArg  { pc :: Int, msg  :: String, args  :: [SomeExpr] }
-  | MaxIterationsReached  { pc :: Int, addr :: Addr }
+  | MaxIterationsReached  { pc :: Int, addr :: Expr EAddr }
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
@@ -559,7 +589,7 @@ deriving instance Show Effect
 
 -- | Queries halt execution until resolved through RPC calls or SMT queries
 data Query where
-  PleaseFetchContract :: Addr -> (Contract -> EVM ()) -> Query
+  PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM ()) -> Query
   PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM ()) -> Query
   PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM ()) -> Query
   PleaseDoFFI         :: [String] -> (ByteString -> EVM ()) -> Query
@@ -574,8 +604,8 @@ data BranchCondition = Case Bool | Unknown
 
 instance Show Query where
   showsPrec _ = \case
-    PleaseFetchContract addr _ ->
-      (("<EVM.Query: fetch contract " ++ show addr ++ ">") ++)
+    PleaseFetchContract addr base _ ->
+      (("<EVM.Query: fetch contract " ++ show addr ++ show base ++ ">") ++)
     PleaseFetchSlot addr slot _ ->
       (("<EVM.Query: fetch slot "
         ++ show slot ++ " for "
@@ -620,13 +650,26 @@ data VM = VM
   , iterations     :: Map CodeLocation (Int, [Expr EWord]) -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
   , keccakEqs      :: [Prop]
-  , allowFFI       :: Bool
-  , overrideCaller :: Maybe Addr
+  , config         :: RuntimeConfig
   }
   deriving (Show, Generic)
 
 -- | Alias for the type of e.g. @exec1@.
 type EVM a = State VM a
+
+-- | The VM base state (i.e. should new contracts be created with abstract balance / storage?)
+data BaseState
+  = EmptyBase
+  | AbstractBase
+  deriving (Show)
+
+-- | Configuration options that need to be consulted at runtime
+data RuntimeConfig = RuntimeConfig
+  { allowFFI :: Bool
+  , overrideCaller :: Maybe (Expr EAddr)
+  , baseState :: BaseState
+  }
+  deriving (Show)
 
 -- | An entry in the VM's "call/create stack"
 data Frame = Frame
@@ -638,39 +681,39 @@ data Frame = Frame
 -- | Call/create info
 data FrameContext
   = CreationContext
-    { address         :: Addr
+    { address         :: Expr EAddr
     , codehash        :: Expr EWord
-    , createreversion :: Map Addr Contract
+    , createreversion :: Map (Expr EAddr) Contract
     , substate        :: SubState
     }
   | CallContext
-    { target        :: Addr
-    , context       :: Addr
+    { target        :: Expr EAddr
+    , context       :: Expr EAddr
     , offset        :: W256
     , size          :: W256
     , codehash      :: Expr EWord
     , abi           :: Maybe W256
     , calldata      :: Expr Buf
-    , callreversion :: (Map Addr Contract, Expr Storage)
+    , callreversion :: Map (Expr EAddr) Contract
     , subState      :: SubState
     }
   deriving (Eq, Ord, Show, Generic)
 
 -- | The "accrued substate" across a transaction
 data SubState = SubState
-  { selfdestructs       :: [Addr]
-  , touchedAccounts     :: [Addr]
-  , accessedAddresses   :: Set Addr
-  , accessedStorageKeys :: Set (Addr, W256)
-  , refunds             :: [(Addr, Word64)]
+  { selfdestructs       :: [Expr EAddr]
+  , touchedAccounts     :: [Expr EAddr]
+  , accessedAddresses   :: Set (Expr EAddr)
+  , accessedStorageKeys :: Set (Expr EAddr, W256)
+  , refunds             :: [(Expr EAddr, Word64)]
   -- in principle we should include logs here, but do not for now
   }
   deriving (Eq, Ord, Show)
 
 -- | The "registers" of the VM along with memory and data stack
 data FrameState = FrameState
-  { contract     :: Addr
-  , codeContract :: Addr
+  { contract     :: Expr EAddr
+  , codeContract :: Expr EAddr
   , code         :: ContractCode
   , pc           :: {-# UNPACK #-} !Int
   , stack        :: [Expr EWord]
@@ -678,7 +721,7 @@ data FrameState = FrameState
   , memorySize   :: Word64
   , calldata     :: Expr Buf
   , callvalue    :: Expr EWord
-  , caller       :: Expr EWord
+  , caller       :: Expr EAddr
   , gas          :: {-# UNPACK #-} !Word64
   , returndata   :: Expr Buf
   , static       :: Bool
@@ -690,45 +733,26 @@ data TxState = TxState
   { gasprice    :: W256
   , gaslimit    :: Word64
   , priorityFee :: W256
-  , origin      :: Addr
-  , toAddr      :: Addr
+  , origin      :: Expr EAddr
+  , toAddr      :: Expr EAddr
   , value       :: Expr EWord
   , substate    :: SubState
   , isCreate    :: Bool
-  , txReversion :: Map Addr Contract
+  , txReversion :: Map (Expr EAddr) Contract
   }
   deriving (Show)
 
--- | When doing symbolic execution, we have three different
--- ways to model the storage of contracts. This determines
--- not only the initial contract storage model but also how
--- RPC or state fetched contracts will be modeled.
-data StorageModel
-  = ConcreteS    -- ^ Uses `Concrete` Storage. Reading / Writing from abstract
-                 -- locations causes a runtime failure. Can be nicely combined with RPC.
-
-  | SymbolicS    -- ^ Uses `Symbolic` Storage. Reading / Writing never reaches RPC,
-                 -- but always done using an SMT array with no default value.
-
-  | InitialS     -- ^ Uses `Symbolic` Storage. Reading / Writing never reaches RPC,
-                 -- but always done using an SMT array with 0 as the default value.
-
-  deriving (Read, Show)
-
-instance ParseField StorageModel
-
 -- | Various environmental data
 data Env = Env
-  { contracts    :: Map Addr Contract
-  , chainId      :: W256
-  , storage      :: Expr Storage
-  , origStorage  :: Map W256 (Map W256 W256)
+  { contracts      :: Map (Expr EAddr) Contract
+  , chainId        :: W256
+  , freshAddresses :: Int
   }
   deriving (Show, Generic)
 
 -- | Data about the block
 data Block = Block
-  { coinbase    :: Addr
+  { coinbase    :: Expr EAddr
   , timestamp   :: Expr EWord
   , number      :: W256
   , prevRandao  :: W256
@@ -738,61 +762,53 @@ data Block = Block
   , schedule    :: FeeSchedule Word64
   } deriving (Show, Generic)
 
--- | The state of a contract
+-- | Full contract state
 data Contract = Contract
-  { contractcode :: ContractCode
-  , balance      :: W256
-  , nonce        :: W256
-  , codehash     :: Expr EWord
-  , opIxMap      :: SV.Vector Int
-  , codeOps      :: V.Vector (Int, Op)
-  , external     :: Bool
+  { code        :: ContractCode
+  , storage     :: Expr Storage
+  , origStorage :: Expr Storage
+  , balance     :: Expr EWord
+  , nonce       :: Maybe W64
+  , codehash    :: Expr EWord
+  , opIxMap     :: SV.Vector Int
+  , codeOps     :: V.Vector (Int, Op)
+  , external    :: Bool
   }
-  deriving (Eq, Ord, Show)
+  deriving (Show, Eq, Ord)
 
 
 -- Bytecode Representations ------------------------------------------------------------------------
 
 
 -- | A unique id for a given pc
-type CodeLocation = (Addr, Int)
+type CodeLocation = (Expr EAddr, Int)
 
 -- | The cache is data that can be persisted for efficiency:
 -- any expensive query that is constant at least within a block.
 data Cache = Cache
-  { fetchedContracts :: Map Addr Contract
-  , fetchedStorage :: Map W256 (Map W256 W256)
-  , path :: Map (CodeLocation, Int) Bool
+  { fetched :: Map Addr Contract
+  , path    :: Map (CodeLocation, Int) Bool
   } deriving (Show, Generic)
 
 instance Semigroup Cache where
   a <> b = Cache
-    { fetchedContracts = Map.unionWith unifyCachedContract a.fetchedContracts b.fetchedContracts
-    , fetchedStorage = Map.unionWith unifyCachedStorage a.fetchedStorage b.fetchedStorage
+    { fetched = Map.unionWith unifyCachedContract a.fetched b.fetched
     , path = mappend a.path b.path
     }
 
 instance Monoid Cache where
-  mempty = Cache { fetchedContracts = mempty
-                 , fetchedStorage = mempty
+  mempty = Cache { fetched = mempty
                  , path = mempty
                  }
-
-unifyCachedStorage :: Map W256 W256 -> Map W256 W256 -> Map W256 W256
-unifyCachedStorage _ _ = undefined
 
 -- only intended for use in Cache merges, where we expect
 -- everything to be Concrete
 unifyCachedContract :: Contract -> Contract -> Contract
-unifyCachedContract _ _ = undefined
-  {-
-unifyCachedContract a b = a & set storage merged
-  where merged = case (view storage a, view storage b) of
+unifyCachedContract a b = a { storage = merged }
+  where merged = case (a.storage, b.storage) of
                    (ConcreteStore sa, ConcreteStore sb) ->
                      ConcreteStore (mappend sa sb)
-                   _ ->
-                     view storage a
-   -}
+                   _ -> a.storage
 
 
 -- Bytecode Representations ------------------------------------------------------------------------
@@ -814,9 +830,10 @@ unifyCachedContract a b = a & set storage merged
   hopefully we do not have to deal with dynamic immutable before we get a real data section...
 -}
 data ContractCode
-  = InitCode ByteString (Expr Buf) -- ^ "Constructor" code, during contract creation
-  | RuntimeCode RuntimeCode -- ^ "Instance" code, after contract creation
-  deriving (Show, Ord)
+  = UnknownCode (Expr EAddr)       -- ^ Fully abstract code, keyed on an address to give consistent results for e.g. extcodehash
+  | InitCode ByteString (Expr Buf) -- ^ "Constructor" code, during contract creation
+  | RuntimeCode RuntimeCode        -- ^ "Instance" code, after contract creation
+  deriving (Show, Eq, Ord)
 
 -- | We have two variants here to optimize the fully concrete case.
 -- ConcreteRuntimeCode just wraps a ByteString
@@ -825,13 +842,6 @@ data RuntimeCode
   = ConcreteRuntimeCode ByteString
   | SymbolicRuntimeCode (V.Vector (Expr Byte))
   deriving (Show, Eq, Ord)
-
--- runtime err when used for symbolic code
-instance Eq ContractCode where
-  InitCode a b  == InitCode c d  = a == c && b == d
-  RuntimeCode x == RuntimeCode y = x == y
-  _ == _ = False
-
 
 -- Execution Traces --------------------------------------------------------------------------------
 
@@ -854,7 +864,7 @@ data TraceData
 -- | Wrapper type containing vm traces and the context needed to pretty print them properly
 data Traces = Traces
   { traces :: Forest Trace
-  , contracts :: Map Addr Contract
+  , contracts :: Map (Expr EAddr) Contract
   }
   deriving (Eq, Ord, Show, Generic)
 
@@ -871,17 +881,17 @@ instance Monoid Traces where
 data VMOpts = VMOpts
   { contract :: Contract
   , calldata :: (Expr Buf, [Prop])
-  , initialStorage :: Expr Storage
+  , baseState :: BaseState
   , value :: Expr EWord
   , priorityFee :: W256
-  , address :: Addr
-  , caller :: Expr EWord
-  , origin :: Addr
+  , address :: Expr EAddr
+  , caller :: Expr EAddr
+  , origin :: Expr EAddr
   , gas :: Word64
   , gaslimit :: Word64
   , number :: W256
   , timestamp :: Expr EWord
-  , coinbase :: Addr
+  , coinbase :: Expr EAddr
   , prevRandao :: W256
   , maxCodeSize :: W256
   , blockGaslimit :: Word64
@@ -890,7 +900,7 @@ data VMOpts = VMOpts
   , schedule :: FeeSchedule Word64
   , chainId :: W256
   , create :: Bool
-  , txAccessList :: Map Addr [W256]
+  , txAccessList :: Map (Expr EAddr) [W256]
   , allowFFI :: Bool
   } deriving Show
 
@@ -1068,7 +1078,6 @@ newtype W64 = W64 Data.Word.Word64
     ( Num, Integral, Real, Ord, Generic
     , Bits , FiniteBits, Enum, Eq , Bounded
     )
-instance JSON.FromJSON W64
 
 instance Read W64 where
   readsPrec _ "0x" = [(0, "")]
@@ -1079,6 +1088,14 @@ instance Show W64 where
 
 instance JSON.ToJSON W64 where
   toJSON x = JSON.String  $ T.pack $ show x
+
+instance FromJSON W64 where
+  parseJSON v = do
+    s <- T.unpack <$> parseJSON v
+    case reads s of
+      [(x, "")]  -> return x
+      _          -> fail $ "invalid hex word (" ++ s ++ ")"
+
 
 word64Field :: JSON.Object -> Key -> JSON.Parser Word64
 word64Field x f = ((readNull 0) . T.unpack)
@@ -1173,7 +1190,17 @@ maybeLitByte _ = Nothing
 
 maybeLitWord :: Expr EWord -> Maybe W256
 maybeLitWord (Lit w) = Just w
+maybeLitWord (WAddr (LitAddr w)) = Just (into w)
 maybeLitWord _ = Nothing
+
+maybeLitAddr :: Expr EAddr -> Maybe Addr
+maybeLitAddr (LitAddr a) = Just a
+maybeLitAddr _ = Nothing
+
+maybeConcreteStore :: Expr Storage -> Maybe (Map W256 W256)
+maybeConcreteStore (ConcreteStore s) = Just s
+maybeConcreteStore _ = Nothing
+
 
 word256 :: ByteString -> Word256
 word256 xs | BS.length xs == 1 =
@@ -1274,8 +1301,9 @@ abiKeccak =
 
 -- Utils -------------------------------------------------------------------------------------------
 
+{- HLINT ignore internalError -}
 internalError:: HasCallStack => [Char] -> a
-internalError m = error $ "Internal error: " ++ m ++ " -- " ++ (prettyCallStack callStack)
+internalError m = error $ "Internal Error: " ++ m ++ " -- " ++ (prettyCallStack callStack)
 
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = fmap concat (mapM f xs)
@@ -1328,3 +1356,4 @@ makeFieldLabelsNoPrefix ''FrameContext
 makeFieldLabelsNoPrefix ''Contract
 makeFieldLabelsNoPrefix ''Env
 makeFieldLabelsNoPrefix ''Block
+makeFieldLabelsNoPrefix ''RuntimeConfig

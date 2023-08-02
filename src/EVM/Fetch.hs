@@ -2,13 +2,14 @@
 
 module EVM.Fetch where
 
-import EVM (initialContract)
+import EVM (initialContract, unknownContract)
 import EVM.ABI
 import EVM.FeeSchedule qualified as FeeSchedule
 import EVM.Format (hexText)
 import EVM.SMT
 import EVM.Solvers
 import EVM.Types
+import EVM (emptyContract)
 
 import Optics.Core
 
@@ -32,7 +33,7 @@ data RpcQuery a where
   QueryCode    :: Addr         -> RpcQuery BS.ByteString
   QueryBlock   ::                 RpcQuery Block
   QueryBalance :: Addr         -> RpcQuery W256
-  QueryNonce   :: Addr         -> RpcQuery W256
+  QueryNonce   :: Addr         -> RpcQuery W64
   QuerySlot    :: Addr -> W256 -> RpcQuery W256
   QueryChainId ::                 RpcQuery W256
 
@@ -109,7 +110,7 @@ fetchQuery n f q =
 
 parseBlock :: (AsValue s, Show s) => s -> Maybe Block
 parseBlock j = do
-  coinbase   <- readText <$> j ^? key "miner" % _String
+  coinbase   <- LitAddr . readText <$> j ^? key "miner" % _String
   timestamp  <- Lit . readText <$> j ^? key "timestamp" % _String
   number     <- readText <$> j ^? key "number" % _String
   gasLimit   <- readText <$> j ^? key "gasLimit" % _String
@@ -141,14 +142,14 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
     fetch :: Show a => RpcQuery a -> IO (Maybe a)
     fetch = fetchQuery n (fetchWithSession url sess)
 
-  theCode    <- MaybeT $ fetch (QueryCode addr)
-  theNonce   <- MaybeT $ fetch (QueryNonce addr)
-  theBalance <- MaybeT $ fetch (QueryBalance addr)
+  code    <- MaybeT $ fetch (QueryCode addr)
+  nonce   <- MaybeT $ fetch (QueryNonce addr)
+  balance <- MaybeT $ fetch (QueryBalance addr)
 
   pure $
-    initialContract (RuntimeCode (ConcreteRuntimeCode theCode))
-      & set #nonce    theNonce
-      & set #balance  theBalance
+    initialContract (RuntimeCode (ConcreteRuntimeCode code))
+      & set #nonce    (Just nonce)
+      & set #balance  (Lit balance)
       & set #external True
 
 fetchSlotWithSession
@@ -207,12 +208,14 @@ oracle solvers info q = do
          -- Is is possible to satisfy the condition?
          continue <$> checkBranch solvers (branchcondition ./= (Lit 0)) pathconds
 
-    -- if we are using a symbolic storage model,
-    -- we generate a new array to the fetched contract here
-    PleaseFetchContract addr continue -> do
+    PleaseFetchContract addr base continue -> do
       contract <- case info of
-                    Nothing -> pure $ Just $ initialContract (RuntimeCode (ConcreteRuntimeCode ""))
-                    Just (n, url) -> fetchContractFrom n url addr
+        Nothing -> let
+          c = case base of
+            AbstractBase -> unknownContract (LitAddr addr)
+            EmptyBase -> emptyContract
+          in pure $ Just c
+        Just (n, url) -> fetchContractFrom n url addr
       case contract of
         Just x -> pure $ continue x
         Nothing -> internalError $ "oracle error: " ++ show q

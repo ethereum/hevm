@@ -14,8 +14,7 @@ import EVM
 import EVM.ABI (decodeAbiValue, emptyAbi, abiTypeSolidity, AbiType(..))
 import EVM.SymExec (maxIterationsReached, symCalldata)
 import EVM.Expr (simplify)
-import EVM.Dapp (DappInfo(..), emptyDapp, dappInfo, Test, extractSig, Test(..), srcMap, unitTestMethods)
-import EVM.Debug
+import EVM.Dapp (DappInfo(..), emptyDapp, dappInfo, Test, extractSig, Test(..), srcMap, unitTestMethods, srcMapCodePos, srcMapCode)
 import EVM.Fetch (Fetcher)
 import EVM.Fetch qualified as Fetch
 import EVM.Format (showWordExact, showWordExplanation, contractNamePart,
@@ -55,7 +54,6 @@ import Graphics.Vty qualified as V
 import System.Console.Haskeline qualified as Readline
 import Paths_hevm qualified as Paths
 import Text.Wrap
-import Witch (into)
 
 data Name
   = AbiPane
@@ -86,7 +84,7 @@ data UiTestPickerState = UiTestPickerState
   }
 
 data UiBrowserState = UiBrowserState
-  { contracts :: List Name (Addr, Contract)
+  { contracts :: List Name (Expr EAddr, Contract)
   , vm        :: UiVmState
   }
 
@@ -711,8 +709,11 @@ drawVmBrowser ui =
             hBox
               [ borderWithLabel (txt "Contract information") . padBottom Max . padRight Max $ vBox
                   [ txt ("Codehash: " <> pack (show c.codehash))
-                  , txt ("Nonce: "    <> showWordExact c.nonce)
-                  , txt ("Balance: "  <> showWordExact c.balance)
+                  , txt ("Nonce: "    <> maybe "Nothing" showWordExact c.nonce)
+                  , txt ("Balance: "  <> maybe
+                          (T.pack $ show $ c.balance)
+                          showWordExact
+                          (maybeLitWord c.balance))
                   --, txt ("Storage: "  <> storageDisplay (view storage c)) -- TODO: fix this
                   ]
                 ]
@@ -851,7 +852,7 @@ currentSrcMap dapp vm = do
 drawStackPane :: UiVmState -> UiWidget
 drawStackPane ui =
   let
-    gasText = showWordExact (into ui.vm.state.gas)
+    gasText = showWordExact ui.vm.state.gas
     labelText = txt ("Gas available: " <> gasText <> "; stack:")
     stackList = list StackPane (Vec.fromList $ zip [(1 :: Int)..] (simplify <$> ui.vm.state.stack)) 2
   in hBorderWithLabel labelText <=>

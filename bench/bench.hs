@@ -20,7 +20,6 @@ import EVM.SymExec
 import EVM.Solidity
 import EVM.Solvers
 import EVM.Dapp
-import EVM.Types (Expr(AbstractStore))
 import EVM.Format (hexByteString)
 import qualified EVM.TTY as TTY
 import qualified EVM.Stepper as Stepper
@@ -63,7 +62,7 @@ bcjsons = do
 blockchainTests :: IO (Map.Map FilePath (Map.Map String BCTests.Case)) -> Benchmark
 blockchainTests ts = bench "blockchain-tests" $ nfIO $ do
   tests <- ts
-  putStrLn "\n    executing tests:"
+  putStrLn "    executing blockchain tests"
   let cases = concat . Map.elems . (fmap Map.toList) $ tests
       ignored = Map.keys BCTests.commonProblematicTests
   foldM (\acc (n, c) ->
@@ -89,7 +88,7 @@ runBCTest x =
 
 debugContract :: ByteString -> IO ()
 debugContract c = withSolvers CVC5 4 Nothing $ \solvers -> do
-  let prestate = abstractVM (mkCalldata Nothing []) c Nothing AbstractStore False
+  let prestate = abstractVM (mkCalldata Nothing []) c Nothing False
   void $ TTY.runFromVM solvers Nothing Nothing emptyDapp prestate
 
 findPanics :: Solver -> Natural -> Integer -> ByteString -> IO ()

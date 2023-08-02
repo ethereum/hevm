@@ -15,8 +15,9 @@ import Data.Containers.ListUtils (nubOrd)
 import Data.DoubleWord (Word256)
 import Data.List (foldl', sortBy)
 import Data.Maybe (fromMaybe, mapMaybe)
-import Data.Map (Map)
-import Data.Map qualified as Map
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
+import Data.Map.Merge.Strict qualified as Map
 import Data.Set (Set, isSubsetOf, size)
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -26,7 +27,7 @@ import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
-import EVM (makeVm, initialContract, getCodeLocation, isValidJumpDest)
+import EVM (makeVm, abstractContract, getCodeLocation, isValidJumpDest)
 import EVM.Exec
 import EVM.Fetch qualified as Fetch
 import EVM.ABI
@@ -39,7 +40,6 @@ import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 import EVM.Traversals
 import EVM.Types
-import EVM.Concrete (createAddress)
 import EVM.FeeSchedule qualified as FeeSchedule
 import EVM.Format (indent, formatBinary)
 import GHC.Conc (getNumProcessors)
@@ -119,7 +119,7 @@ symAbiArg name = \case
     then let v = Var name in St [Expr.inRange n v] v
     else internalError "bad type"
   AbiBoolType -> let v = Var name in St [bool v] v
-  AbiAddressType -> let v = Var name in St [Expr.inRange 160 v] v
+  AbiAddressType -> St [] (WAddr (SymAddr name))
   AbiBytesType n ->
     if n > 0 && n <= 32
     then let v = Var name in St [Expr.inRange (n * 8) v] v
@@ -190,39 +190,35 @@ abstractVM
   :: (Expr Buf, [Prop])
   -> ByteString
   -> Maybe Precondition
-  -> Expr Storage
   -> Bool
   -> VM
-abstractVM cd contractCode maybepre store create = finalVm
+abstractVM cd contractCode maybepre create = finalVm
   where
-    caller = Caller 0
-    value = CallValue 0
+    value = TxValue
     code = if create then InitCode contractCode mempty
            else RuntimeCode (ConcreteRuntimeCode contractCode)
-    vm' = loadSymVM code store caller value  (if create then mempty else cd)  create
+    vm = loadSymVM code value (if create then mempty else cd) create
     precond = case maybepre of
                 Nothing -> []
-                Just p -> [p vm']
-    finalVm = vm' & over #constraints (<> precond)
+                Just p -> [p vm]
+    finalVm = vm & over #constraints (<> precond)
 
 loadSymVM
   :: ContractCode
-  -> Expr Storage
-  -> Expr EWord
   -> Expr EWord
   -> (Expr Buf, [Prop])
   -> Bool
   -> VM
-loadSymVM x initStore addr callvalue cd create =
+loadSymVM x callvalue cd create =
   (makeVm $ VMOpts
-    { contract = initialContract x
+    { contract = abstractContract x (SymAddr "entrypoint")
     , calldata = cd
     , value = callvalue
-    , initialStorage = initStore
-    , address = createAddress ethrunAddress 1
-    , caller = addr
-    , origin = ethrunAddress --todo: generalize
-    , coinbase = 0
+    , baseState = AbstractBase
+    , address = SymAddr "entrypoint"
+    , caller = SymAddr "caller"
+    , origin = SymAddr "origin"
+    , coinbase = SymAddr "coinbase"
     , number = 0
     , timestamp = Lit 0
     , blockGaslimit = 0
@@ -238,8 +234,7 @@ loadSymVM x initStore addr callvalue cd create =
     , create = create
     , txAccessList = mempty
     , allowFFI = False
-    }) & set (#env % #contracts % at (createAddress ethrunAddress 1))
-             (Just (initialContract x))
+    })
 
 -- | Interpreter which explores all paths at branching points. Returns an
 -- 'Expr End' representing the possible executions.
@@ -368,7 +363,7 @@ checkAssert
   -> VeriOpts
   -> IO (Expr End, [VerifyResult])
 checkAssert solvers errs c signature' concreteArgs opts =
-  verifyContract solvers c signature' concreteArgs opts AbstractStore Nothing (Just $ checkAssertions errs)
+  verifyContract solvers c signature' concreteArgs opts Nothing (Just $ checkAssertions errs)
 
 {- | Checks if an assertion violation has been encountered
 
@@ -426,12 +421,11 @@ verifyContract
   -> Maybe Sig
   -> [String]
   -> VeriOpts
-  -> Expr Storage
   -> Maybe Precondition
   -> Maybe Postcondition
   -> IO (Expr End, [VerifyResult])
-verifyContract solvers theCode signature' concreteArgs opts initStore maybepre maybepost =
-  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre initStore False
+verifyContract solvers theCode signature' concreteArgs opts maybepre maybepost =
+  let preState = abstractVM (mkCalldata signature' concreteArgs) theCode maybepre False
   in verify solvers opts preState maybepost
 
 -- | Stepper that parses the result of Stepper.runFully into an Expr End
@@ -439,11 +433,15 @@ runExpr :: Stepper.Stepper (Expr End)
 runExpr = do
   vm <- Stepper.runFully
   let asserts = vm.keccakEqs <> vm.constraints
+      traces = Traces (Zipper.toForest vm.traces) vm.env.contracts
   pure $ case vm.result of
-    Just (VMSuccess buf) -> Success asserts (Traces (Zipper.toForest vm.traces) vm.env.contracts) buf vm.env.storage
-    Just (VMFailure e) -> Failure asserts (Traces (Zipper.toForest vm.traces) vm.env.contracts) e
-    Just (Unfinished p) -> Partial asserts (Traces (Zipper.toForest vm.traces) vm.env.contracts) p
+    Just (VMSuccess buf) -> Success asserts traces buf (fmap toEContract vm.env.contracts)
+    Just (VMFailure e) -> Failure asserts traces e
+    Just (Unfinished p) -> Partial asserts traces p
     _ -> internalError "vm in intermediate state after call to runFully"
+
+toEContract :: Contract -> Expr EContract
+toEContract c = C c.code c.storage c.balance c.nonce
 
 -- | Converts a given top level expr into a list of final states and the
 -- associated path conditions for each state.
@@ -576,10 +574,20 @@ verify solvers opts preState maybepost = do
   where
     toVRes :: (CheckSatResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
-      Sat model -> Cex (leaf, model)
+      Sat model -> Cex (leaf, expandCex preState model)
       EVM.Solvers.Unknown -> Timeout leaf
       Unsat -> Qed ()
       Error e -> internalError $ "solver responded with error: " <> show e
+
+expandCex :: VM -> SMTCex -> SMTCex
+expandCex prestate c = c { store = Map.union c.store concretePreStore }
+  where
+    concretePreStore = Map.mapMaybe (maybeConcreteStore . (.storage))
+                     . Map.filter (\v -> Expr.containsNode isConcreteStore v.storage)
+                     $ (prestate.env.contracts)
+    isConcreteStore = \case
+      ConcreteStore _ -> True
+      _ -> False
 
 type UnsatCache = TVar [Set Prop]
 
@@ -609,7 +617,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
     getBranches bs = do
       let
         bytecode = if BS.null bs then BS.pack [0] else bs
-        prestate = abstractVM calldata bytecode Nothing AbstractStore False
+        prestate = abstractVM calldata bytecode Nothing False
       expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl
@@ -662,8 +670,8 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     check knownUnsat props idx = do
       let smt = assertProps $ Set.toList props
       -- if debug is on, write the query to a file
-      when opts.debug $ TL.writeFile
-        ("equiv-query-" <> show idx <> ".smt2") (formatSMT2 smt <> "\n\n(check-sat)")
+      let filename = "equiv-query-" <> show idx <> ".smt2"
+      when opts.debug $ TL.writeFile filename (formatSMT2 smt <> "\n\n(check-sat)")
 
       ku <- readTVarIO knownUnsat
       res <- if subsetAny props ku
@@ -680,7 +688,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
               atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
               pure (Qed (), False)
         (_, EVM.Solvers.Unknown) -> pure (Timeout (), False)
-        (_, Error txt) -> internalError $ "issue while running solver: `" <> T.unpack txt -- <> "` SMT file was: `" <> filename <> "`"
+        (_, Error txt) -> internalError $ "solver returned: " <> (T.unpack txt) <> if opts.debug then "\n SMT file was: " <> filename <> "" else ""
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
@@ -699,23 +707,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     -- a differing result in each branch
     distinct :: Expr End -> Expr End -> Maybe (Set Prop)
     distinct aEnd bEnd =
-      let
-        differingResults = case (aEnd, bEnd) of
-          (Success _ _ aOut aStore, Success _ _ bOut bStore) ->
-            if aOut == bOut && aStore == bStore
-            then PBool False
-            else aStore ./= bStore .|| aOut ./= bOut
-          (Failure _ _ (Revert a), Failure _ _ (Revert b)) -> if a == b then PBool False else a ./= b
-          (Failure _ _ a, Failure _ _ b) -> if a == b then PBool False else PBool True
-          -- partial end states can't be compared to actual end states, so we always ignore them
-          (Partial {}, _) -> PBool False
-          (_, Partial {}) -> PBool False
-          (ITE _ _ _, _) -> internalError "Expressions must be flattened"
-          (_, ITE _ _ _) -> internalError "Expressions must be flattened"
-          (a, b) -> if a == b
-                    then PBool False
-                    else PBool True
-      in case differingResults of
+      case resultsDiffer aEnd bEnd of
         -- if the end states are the same, then they can never produce a
         -- different result under any circumstances
         PBool False -> Nothing
@@ -726,7 +718,48 @@ equivalenceCheck' solvers branchesA branchesB opts = do
         -- if we cannot statically determine whether or not the end states
         -- differ, then we ask the solver if the end states can differ if both
         -- sets of path conditions are satisfiable
-        _ -> Just . Set.fromList $ differingResults : extractProps aEnd <> extractProps bEnd
+        _ -> Just . Set.fromList $ resultsDiffer aEnd bEnd : extractProps aEnd <> extractProps bEnd
+
+    resultsDiffer :: Expr End -> Expr End -> Prop
+    resultsDiffer aEnd bEnd = case (aEnd, bEnd) of
+      (Success _ _ aOut aState, Success _ _ bOut bState) ->
+        case (aOut == bOut, aState == bState) of
+          (True, True) -> PBool False
+          (False, True) -> aOut ./= bOut
+          (True, False) -> statesDiffer aState bState
+          (False, False) -> statesDiffer aState bState .|| aOut ./= bOut
+      (Failure _ _ (Revert a), Failure _ _ (Revert b)) -> if a == b then PBool False else a ./= b
+      (Failure _ _ a, Failure _ _ b) -> if a == b then PBool False else PBool True
+      -- partial end states can't be compared to actual end states, so we always ignore them
+      (Partial {}, _) -> PBool False
+      (_, Partial {}) -> PBool False
+      (ITE _ _ _, _) -> internalError "Expressions must be flattened"
+      (_, ITE _ _ _) -> internalError "Expressions must be flattened"
+      (a, b) -> if a == b
+                then PBool False
+                else PBool True
+
+    statesDiffer :: Map (Expr EAddr) (Expr EContract) -> Map (Expr EAddr) (Expr EContract) -> Prop
+    statesDiffer aState bState
+      = if Set.fromList (Map.keys aState) /= Set.fromList (Map.keys bState)
+        -- TODO: consider possibility of aliased symbolic addresses
+        then PBool True
+        else let
+          merged = (Map.merge Map.dropMissing Map.dropMissing (Map.zipWithMatched (\_ x y -> (x,y))) aState bState)
+        in Map.foldl' (\a (ac, bc) -> a .|| contractsDiffer ac bc) (PBool False) merged
+
+    contractsDiffer :: Expr EContract -> Expr EContract -> Prop
+    contractsDiffer ac bc = let
+        balsDiffer = case (ac.balance, bc.balance) of
+          (Lit ab, Lit bb) -> PBool $ ab /= bb
+          (ab, bb) -> if ab == bb then PBool False else ab ./= bb
+        -- TODO: is this sound? do we need a more sophisticated nonce representation?
+        noncesDiffer = PBool (ac.nonce /= bc.nonce)
+        storesDiffer = case (ac.storage, bc.storage) of
+          (ConcreteStore as, ConcreteStore bs) -> PBool $ as /= bs
+          (as, bs) -> if as == bs then PBool False else as ./= bs
+      in balsDiffer .|| storesDiffer .|| noncesDiffer
+
 
 both' :: (a -> b) -> (a, a) -> (b, b)
 both' f (x, y) = (f x, f y)
@@ -766,7 +799,7 @@ showModel cd (expr, res) = do
 
 
 formatCex :: Expr Buf -> SMTCex -> Text
-formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
+formatCex cd m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
   [ "Calldata:"
   , indent 2 cd'
   , ""
@@ -790,7 +823,7 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
       | otherwise =
           [ "Storage:"
           , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc ->
-              ("Addr " <> (T.pack $ show (unsafeInto key :: Addr))
+              ("Addr " <> (T.pack . show $ key)
                 <> ": " <> (T.pack $ show (Map.toList val))) : acc
             ) mempty store
           , ""
@@ -809,9 +842,7 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
 
     -- strips the frame arg from frame context vars to make them easier to read
     showTxCtx :: Expr EWord -> Text
-    showTxCtx (CallValue _) = "CallValue"
-    showTxCtx (Caller _) = "Caller"
-    showTxCtx (Address _) = "Address"
+    showTxCtx (TxValue) = "TxValue"
     showTxCtx x = T.pack $ show x
 
     -- strips all frame context that doesn't come from the top frame
@@ -819,11 +850,8 @@ formatCex cd m@(SMTCex _ _ store blockContext txContext) = T.unlines $
     filterSubCtx = Map.filterWithKey go
       where
         go :: Expr EWord -> W256 -> Bool
-        go (CallValue x) _ = x == 0
-        go (Caller x) _ = x == 0
-        go (Address x) _ = x == 0
+        go (TxValue) _ = True
         go (Balance {}) _ = internalError "TODO: BALANCE"
-        go (SelfBalance {}) _ = internalError "TODO: SELFBALANCE"
         go (Gas {}) _ = internalError "TODO: Gas"
         go _ _ = False
 
@@ -875,10 +903,11 @@ defaultSymbolicValues e = subBufs (foldTerm symbufs mempty e)
 subModel :: SMTCex -> Expr a -> Expr a
 subModel c
   = subBufs (fmap forceFlattened c.buffers)
-  . subStore c.store
+  . subStores c.store
   . subVars c.vars
   . subVars c.blockContext
   . subVars c.txContext
+  . subAddrs c.addrs
   where
     forceFlattened (SMT.Flat bs) = bs
     forceFlattened b@(SMT.Comp _) = forceFlattened $
@@ -898,6 +927,19 @@ subVars model b = Map.foldlWithKey subVar b model
                       else v
           e -> e
 
+subAddrs :: Map (Expr EAddr) Addr -> Expr a -> Expr a
+subAddrs model b = Map.foldlWithKey subAddr b model
+  where
+    subAddr :: Expr a -> Expr EAddr -> Addr -> Expr a
+    subAddr a var val = mapExpr go a
+      where
+        go :: Expr a -> Expr a
+        go = \case
+          v@(SymAddr _) -> if v == var
+                      then LitAddr val
+                      else v
+          e -> e
+
 subBufs :: Map (Expr Buf) ByteString -> Expr a -> Expr a
 subBufs model b = Map.foldlWithKey subBuf b model
   where
@@ -911,10 +953,24 @@ subBufs model b = Map.foldlWithKey subBuf b model
                       else a
           e -> e
 
-subStore :: Map W256 (Map W256 W256) -> Expr a -> Expr a
-subStore model b = mapExpr go b
+subStores :: Map (Expr EAddr) (Map W256 W256) -> Expr a -> Expr a
+subStores model b = Map.foldlWithKey subStore b model
   where
-    go :: Expr a -> Expr a
-    go = \case
-      AbstractStore -> ConcreteStore model
-      e -> e
+    subStore :: Expr a -> Expr EAddr -> Map W256 W256 -> Expr a
+    subStore x var val = mapExpr go x
+      where
+        go :: Expr a -> Expr a
+        go = \case
+          v@(AbstractStore a)
+            -> if a == var
+               then ConcreteStore val
+               else v
+          e -> e
+
+getCex :: ProofResult a b c -> Maybe b
+getCex (Cex c) = Just c
+getCex _ = Nothing
+
+getTimeout :: ProofResult a b c -> Maybe c
+getTimeout (Timeout c) = Just c
+getTimeout _ = Nothing
