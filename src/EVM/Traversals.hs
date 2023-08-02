@@ -7,6 +7,8 @@ module EVM.Traversals where
 import Prelude hiding (LT, GT)
 
 import Control.Monad.Identity
+import qualified Data.Map.Strict as Map
+import Data.List (foldl')
 
 import EVM.Types
 
@@ -26,6 +28,29 @@ foldProp f acc p = acc <> (go p)
       POr a b -> go a <> go b
       PImpl a b -> go a <> go b
 
+foldEContract :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Expr EContract -> b
+foldEContract f _ g@(GVar _) = f g
+foldEContract f acc (C code storage balance _)
+  =  acc
+  <> foldCode f code
+  <> foldExpr f mempty storage
+  <> foldExpr f mempty balance
+
+foldContract :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Contract -> b
+foldContract f acc c
+  =  acc
+  <> foldCode f c.code
+  <> foldExpr f mempty c.storage
+  <> foldExpr f mempty c.origStorage
+  <> foldExpr f mempty c.balance
+
+foldCode :: forall b . Monoid b => (forall a . Expr a -> b) -> ContractCode -> b
+foldCode f = \case
+  RuntimeCode (ConcreteRuntimeCode _) -> mempty
+  RuntimeCode (SymbolicRuntimeCode c) -> foldl' (foldExpr f) mempty c
+  InitCode _ buf -> foldExpr f mempty buf
+  UnknownCode addr -> foldExpr f mempty addr
+
 -- | Recursively folds a given function over a given expression
 -- Recursion schemes do this & a lot more, but defining them over GADT's isn't worth the hassle
 foldExpr :: forall b c . Monoid b => (forall a . Expr a -> b) -> b -> Expr c -> b
@@ -40,6 +65,10 @@ foldExpr f acc expr = acc <> (go expr)
       e@(LitByte _) -> f e
       e@(Var _) -> f e
       e@(GVar _) -> f e
+
+      -- contracts
+
+      e@(C {}) -> foldEContract f acc e
 
       -- bytes
 
@@ -65,7 +94,12 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- control flow
 
-      e@(Success a _ c d) -> f e <> (foldl (foldProp f) mempty a) <> (go c) <> (go d)
+      e@(Success a _ c d) -> f e
+                          <> foldl (foldProp f) mempty a
+                          <> go c
+                          <> foldl' (foldExpr f) mempty (Map.keys d)
+                          <> foldl' (foldEContract f) mempty d
+      e@(Failure a _ (Revert c)) -> f e <> (foldl (foldProp f) mempty a) <> go c
       e@(Failure a _ _) -> f e <> (foldl (foldProp f) mempty a)
       e@(Partial a _ _) -> f e <> (foldl (foldProp f) mempty a)
       e@(ITE a b c) -> f e <> (go a) <> (go b) <> (go c)
@@ -124,17 +158,19 @@ foldExpr f acc expr = acc <> (go expr)
       e@(BaseFee) -> f e
       e@(BlockHash a) -> f e <> (go a)
 
+      -- tx context
+
+      e@(TxValue) -> f e
+
       -- frame context
 
-      e@(Caller _) -> f e
-      e@(CallValue _) -> f e
-      e@(Address _) -> f e
+      e@(Gas _ _) -> f e
       e@(Balance {}) -> f e
 
       -- code
 
       e@(CodeSize a) -> f e <> (go a)
-      e@(ExtCodeHash a) -> f e <> (go a)
+      e@(CodeHash a) -> f e <> (go a)
 
       -- logs
 
@@ -142,11 +178,16 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- storage
 
-      e@(EmptyStore) -> f e
+      e@(LitAddr _) -> f e
+      e@(WAddr a) -> f e <> go a
+      e@(SymAddr _) -> f e
+
+      -- storage
+
       e@(ConcreteStore _) -> f e
-      e@(AbstractStore) -> f e
-      e@(SLoad a b c) -> f e <> (go a) <> (go b) <> (go c)
-      e@(SStore a b c d) -> f e <> (go a) <> (go b) <> (go c) <> (go d)
+      e@(AbstractStore _) -> f e
+      e@(SLoad a b) -> f e <> (go a) <> (go b)
+      e@(SStore a b c) -> f e <> (go a) <> (go b) <> (go c)
 
       -- buffers
 
@@ -204,6 +245,18 @@ mapExprM f expr = case expr of
   LitByte a -> f (LitByte a)
   Var a -> f (Var a)
   GVar s -> f (GVar s)
+
+  -- addresses
+
+  c@(C {}) -> mapEContractM f c
+
+  -- addresses
+
+  LitAddr a -> f (LitAddr a)
+  SymAddr a -> f (SymAddr a)
+  WAddr a -> do
+    a' <- mapExprM f a
+    f (WAddr a')
 
   -- bytes
 
@@ -268,9 +321,14 @@ mapExprM f expr = case expr of
   Success a b c d -> do
     a' <- mapM (mapPropM f) a
     c' <- mapExprM f c
-    d' <- mapExprM f d
+    d' <- do
+      let x = Map.toList d
+      x' <- forM x $ \(k,v) -> do
+        k' <- f k
+        v' <- mapEContractM f v
+        pure (k',v')
+      pure $ Map.fromList x'
     f (Success a' b c' d')
-
   ITE a b c -> do
     a' <- mapExprM f a
     b' <- mapExprM f b
@@ -423,23 +481,25 @@ mapExprM f expr = case expr of
     a' <- mapExprM f a
     f (BlockHash a')
 
+  -- tx context
+
+  TxValue -> f TxValue
+
   -- frame context
 
-  Caller a -> f (Caller a)
-  CallValue a -> f (CallValue a)
-  Address a -> f (Address a)
-  Balance a b c -> do
-    c' <- mapExprM f c
-    f (Balance a b c')
+  Gas a b -> f (Gas a b)
+  Balance a -> do
+    a' <- mapExprM f a
+    f (Balance a')
 
   -- code
 
   CodeSize a -> do
     a' <- mapExprM f a
     f (CodeSize a')
-  ExtCodeHash a -> do
+  CodeHash a -> do
     a' <- mapExprM f a
-    f (ExtCodeHash a')
+    f (CodeHash a')
 
   -- logs
 
@@ -451,20 +511,17 @@ mapExprM f expr = case expr of
 
   -- storage
 
-  EmptyStore -> f EmptyStore
-  ConcreteStore a -> f (ConcreteStore a)
-  AbstractStore -> f AbstractStore
-  SLoad a b c -> do
+  ConcreteStore b -> f (ConcreteStore b)
+  AbstractStore a -> f (AbstractStore a)
+  SLoad a b -> do
+    a' <- mapExprM f a
+    b' <- mapExprM f b
+    f (SLoad a' b')
+  SStore a b c -> do
     a' <- mapExprM f a
     b' <- mapExprM f b
     c' <- mapExprM f c
-    f (SLoad a' b' c')
-  SStore a b c d -> do
-    a' <- mapExprM f a
-    b' <- mapExprM f b
-    c' <- mapExprM f c
-    d' <- mapExprM f d
-    f (SStore a' b' c' d')
+    f (SStore a' b' c')
 
   -- buffers
 
@@ -541,6 +598,34 @@ mapPropM f = \case
     a' <- mapPropM f a
     b' <- mapPropM f b
     pure $ PImpl a' b'
+
+
+mapEContractM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Expr EContract -> m (Expr EContract)
+mapEContractM _ g@(GVar _) = pure g
+mapEContractM f (C code storage balance nonce) = do
+  code' <- mapCodeM f code
+  storage' <- mapExprM f storage
+  balance' <- mapExprM f balance
+  pure $ C code' storage' balance' nonce
+
+mapContractM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Contract -> m (Contract)
+mapContractM f c = do
+  code' <- mapCodeM f c.code
+  storage' <- mapExprM f c.storage
+  origStorage' <- mapExprM f c.origStorage
+  balance' <- mapExprM f c.balance
+  pure $ c { code = code', storage = storage', origStorage = origStorage', balance = balance' }
+
+mapCodeM :: Monad m => (forall a . Expr a -> m (Expr a)) -> ContractCode -> m (ContractCode)
+mapCodeM f = \case
+  UnknownCode a -> fmap UnknownCode (f a)
+  c@(RuntimeCode (ConcreteRuntimeCode _)) -> pure c
+  RuntimeCode (SymbolicRuntimeCode c) -> do
+    c' <- mapM (mapExprM f) c
+    pure . RuntimeCode $ SymbolicRuntimeCode c'
+  InitCode bs buf -> do
+    buf' <- mapExprM f buf
+    pure $ InitCode bs buf'
 
 -- | Generic operations over AST terms
 class TraversableTerm a where

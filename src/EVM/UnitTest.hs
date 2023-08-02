@@ -8,20 +8,20 @@ import EVM.ABI
 import EVM.SMT
 import EVM.Solvers
 import EVM.Dapp
-import EVM.Concrete (createAddress)
 import EVM.Exec
-import EVM.Expr (litAddr, readStorage', simplify)
+import EVM.Expr (readStorage', simplify)
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, defaultSymbolicValues, VeriOpts(..))
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, defaultSymbolicValues, panicMsg, VeriOpts(..))
 import EVM.Types
 import EVM.Transaction (initTx)
-import EVM.Stepper (Stepper, interpret)
+import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 
+import Control.Monad.ST (RealWorld, ST, stToIO)
 import Optics.Core hiding (elements)
 import Optics.State
 import Optics.State.Operators
@@ -44,7 +44,7 @@ import GHC.Natural
 import System.IO (hFlush, stdout)
 import Witch (unsafeInto, into)
 
-data UnitTestOptions = UnitTestOptions
+data UnitTestOptions s = UnitTestOptions
   { rpcInfo     :: Fetch.RpcInfo
   , solvers     :: SolverGroup
   , verbose     :: Maybe Int
@@ -60,15 +60,15 @@ data UnitTestOptions = UnitTestOptions
   }
 
 data TestVMParams = TestVMParams
-  { address       :: Addr
-  , caller        :: Addr
-  , origin        :: Addr
+  { address       :: Expr EAddr
+  , caller        :: Expr EAddr
+  , origin        :: Expr EAddr
   , gasCreate     :: Word64
   , gasCall       :: Word64
   , baseFee       :: W256
   , priorityFee   :: W256
   , balanceCreate :: W256
-  , coinbase      :: Addr
+  , coinbase      :: Expr EAddr
   , number        :: W256
   , timestamp     :: W256
   , gaslimit      :: Word64
@@ -94,7 +94,7 @@ type ABIMethod = Text
 
 
 -- | Generate VeriOpts from UnitTestOptions
-makeVeriOpts :: UnitTestOptions -> VeriOpts
+makeVeriOpts :: UnitTestOptions s -> VeriOpts
 makeVeriOpts opts =
    defaultVeriOpts { debug = opts.smtDebug
                    , maxIter = opts.maxIter
@@ -103,7 +103,7 @@ makeVeriOpts opts =
                    }
 
 -- | Top level CLI endpoint for hevm test
-unitTest :: UnitTestOptions -> Contracts -> IO Bool
+unitTest :: UnitTestOptions RealWorld -> Contracts -> IO Bool
 unitTest opts (Contracts cs) = do
   let unitTests = findUnitTests opts.match $ Map.elems cs
   results <- concatMapM (runUnitTestContract opts cs) unitTests
@@ -111,7 +111,7 @@ unitTest opts (Contracts cs) = do
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
 -- to create the test contract, give it an initial balance, and run `setUp()'.
-initializeUnitTest :: UnitTestOptions -> SolcContract -> Stepper ()
+initializeUnitTest :: UnitTestOptions s -> SolcContract -> Stepper s ()
 initializeUnitTest opts theContract = do
 
   let addr = opts.testParams.address
@@ -125,7 +125,7 @@ initializeUnitTest opts theContract = do
 
   Stepper.evm $ do
     -- Give a balance to the test target
-    #env % #contracts % ix addr % #balance %= (+ opts.testParams.balanceCreate)
+    #env % #contracts % ix addr % #balance %= (`Expr.add` (Lit opts.testParams.balanceCreate))
 
     -- call setUp(), if it exists, to initialize the test contract
     let theAbi = theContract.abiMap
@@ -143,7 +143,7 @@ initializeUnitTest opts theContract = do
     _ -> popTrace
 
 runUnitTestContract
-  :: UnitTestOptions
+  :: UnitTestOptions RealWorld
   -> Map Text SolcContract
   -> (Text, [Sig])
   -> IO [Bool]
@@ -161,8 +161,8 @@ runUnitTestContract
 
     Just theContract -> do
       -- Construct the initial VM and begin the contract's constructor
-      let vm0 = initialUnitTestVm opts theContract
-      vm1 <- EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm0 $ do
+      vm0 <- stToIO $ initialUnitTestVm opts theContract
+      vm1 <- Stepper.interpret (Fetch.oracle solvers rpcInfo) vm0 $ do
         Stepper.enter name
         initializeUnitTest opts theContract
         Stepper.evm get
@@ -194,29 +194,34 @@ runUnitTestContract
 
 
 -- | Define the thread spawner for symbolic tests
-symRun :: UnitTestOptions -> VM -> Sig -> IO (Text, Either Text Text)
+symRun :: UnitTestOptions RealWorld -> VM RealWorld -> Sig -> IO (Text, Either Text Text)
 symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     let cd = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName
-        testContract = vm.state.contract
+        testContract store = fromMaybe (internalError "test contract not found in state") (Map.lookup vm.state.contract store)
 
     -- define postcondition depending on `shouldFail`
     -- We directly encode the failure conditions from failed() in ds-test since this is easier to encode than a call into failed()
     -- we need to read from slot 0 in the test contract and mask it with 0x10 to get the value of _failed
     -- we don't need to do this when reading the failed from the cheatcode address since we don't do any packing there
-    let failed store = (And (readStorage' (litAddr testContract) (Lit 0) store) (Lit 2) .== Lit 2)
-                   .|| (readStorage' (litAddr cheatCode) (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) store .== Lit 1)
+    let failed store = case Map.lookup cheatCode store of
+          Just cheatContract -> (And (readStorage' (Lit 0) (testContract store).storage) (Lit 0x10) .== Lit 0x10)
+                               .|| (readStorage' (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) cheatContract.storage .== Lit 1)
+          Nothing -> And (readStorage' (Lit 0) (testContract store).storage) (Lit 2) .== Lit 2
         postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
                                   Success _ _ _ store -> failed store
                                   _ -> PBool True
           False -> \(_, post) -> case post of
                                    Success _ _ _ store -> PNeg (failed store)
-                                   Failure _ _ _ -> PBool False
+                                   Failure _ _ (Revert msg) -> case msg of
+                                     ConcreteBuf b -> PBool $ b /= panicMsg 0x01
+                                     b -> b ./= ConcreteBuf (panicMsg 0x01)
+                                   Failure _ _ _ -> PBool True
                                    Partial _ _ _ -> PBool True
                                    _ -> internalError "Invalid leaf node"
 
-    vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
+    vm' <- Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
       Stepper.evm $ do
         pushTrace (EntryTrace testName)
         makeTxCall testParams cd
@@ -234,7 +239,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
       let y = symFailure opts testName (fst cd) types x
       pure ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y)
 
-symFailure :: UnitTestOptions -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> Text
+symFailure :: UnitTestOptions RealWorld -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> Text
 symFailure UnitTestOptions {..} testName cd types failures' =
   mconcat
     [ "Failure: "
@@ -245,8 +250,8 @@ symFailure UnitTestOptions {..} testName cd types failures' =
     where
       showRes = \case
         Success _ _ _ _ -> if "proveFail" `isPrefixOf` testName
-                       then "Successful execution"
-                       else "Failed: DSTest Assertion Violation"
+                           then "Successful execution"
+                           else "Failed: DSTest Assertion Violation"
         res ->
           let ?context = DappContext { info = dapp, env = traceContext res}
           in Text.pack $ prettyvmresult res
@@ -280,7 +285,7 @@ showVal (AbiBytes _ bs) = formatBytes bs
 showVal (AbiAddress addr) = Text.pack  . show $ addr
 showVal v = Text.pack . show $ v
 
-execSymTest :: UnitTestOptions -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper (Expr End)
+execSymTest :: UnitTestOptions RealWorld -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper RealWorld (Expr End)
 execSymTest UnitTestOptions{ .. } method cd = do
   -- Set up the call to the test method
   Stepper.evm $ do
@@ -289,7 +294,7 @@ execSymTest UnitTestOptions{ .. } method cd = do
   -- Try running the test method
   runExpr
 
-checkSymFailures :: UnitTestOptions -> Stepper VM
+checkSymFailures :: UnitTestOptions RealWorld -> Stepper RealWorld (VM RealWorld)
 checkSymFailures UnitTestOptions { .. } = do
   -- Ask whether any assertions failed
   Stepper.evm $ do
@@ -302,7 +307,7 @@ indentLines n s =
   let p = Text.replicate n " "
   in Text.unlines (map (p <>) (Text.lines s))
 
-passOutput :: VM -> UnitTestOptions -> Text -> Text
+passOutput :: VM s -> UnitTestOptions s -> Text -> Text
 passOutput vm UnitTestOptions { .. } testName =
   let ?context = DappContext { info = dapp, env = vm.env.contracts }
   in let v = fromMaybe 0 verbose
@@ -317,7 +322,7 @@ passOutput vm UnitTestOptions { .. } testName =
       ]
     else ""
 
-failOutput :: VM -> UnitTestOptions -> Text -> Text
+failOutput :: VM s -> UnitTestOptions s -> Text -> Text
 failOutput vm UnitTestOptions { .. } testName =
   let ?context = DappContext { info = dapp, env = vm.env.contracts }
   in mconcat
@@ -402,37 +407,36 @@ formatTestLog events (LogEntry _ args (topic:_)) =
                   _ -> Nothing
               _ -> Just "<symbolic decimal>"
 
-abiCall :: TestVMParams -> Either (Text, AbiValue) ByteString -> EVM ()
+abiCall :: TestVMParams -> Either (Text, AbiValue) ByteString -> EVM s ()
 abiCall params args =
   let cd = case args of
         Left (sig, args') -> abiMethod sig args'
         Right b -> b
   in makeTxCall params (ConcreteBuf cd, [])
 
-makeTxCall :: TestVMParams -> (Expr Buf, [Prop]) -> EVM ()
+makeTxCall :: TestVMParams -> (Expr Buf, [Prop]) -> EVM s ()
 makeTxCall params (cd, cdProps) = do
   resetState
   assign (#tx % #isCreate) False
-  loadContract params.address
+  execState (loadContract params.address) <$> get >>= put
   assign (#state % #calldata) cd
   #constraints %= (<> cdProps)
-  assign (#state % #caller) (litAddr params.caller)
+  assign (#state % #caller) params.caller
   assign (#state % #gas) params.gasCall
-  origin' <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (#env % #contracts % at params.origin)
-  let originBal = origin'.balance
-  when (originBal < params.gasprice * (into params.gasCall)) $ internalError "insufficient balance for gas cost"
+  origin <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (#env % #contracts % at params.origin)
+  let insufficientBal = maybe False (\b -> b < params.gasprice * (into params.gasCall)) (maybeLitWord origin.balance)
+  when insufficientBal $ internalError "insufficient balance for gas cost"
   vm <- get
   put $ initTx vm
 
-initialUnitTestVm :: UnitTestOptions -> SolcContract -> VM
-initialUnitTestVm (UnitTestOptions {..}) theContract =
-  let
-    vm = makeVm $ VMOpts
+initialUnitTestVm :: UnitTestOptions s -> SolcContract -> ST s (VM s)
+initialUnitTestVm (UnitTestOptions {..}) theContract = do
+  vm <- makeVm $ VMOpts
            { contract = initialContract (InitCode theContract.creationCode mempty)
            , calldata = mempty
            , value = Lit 0
            , address = testParams.address
-           , caller = litAddr testParams.caller
+           , caller = testParams.caller
            , origin = testParams.origin
            , gas = testParams.gasCreate
            , gaslimit = testParams.gasCreate
@@ -448,21 +452,20 @@ initialUnitTestVm (UnitTestOptions {..}) theContract =
            , schedule = feeSchedule
            , chainId = testParams.chainId
            , create = True
-           , initialStorage = EmptyStore
+           , baseState = EmptyBase
            , txAccessList = mempty -- TODO: support unit test access lists???
            , allowFFI = ffiAllowed
            }
-    creator =
-      initialContract (RuntimeCode (ConcreteRuntimeCode ""))
-        & set #nonce 1
-        & set #balance testParams.balanceCreate
-  in vm
-    & set (#env % #contracts % at ethrunAddress) (Just creator)
+  let creator =
+        initialContract (RuntimeCode (ConcreteRuntimeCode ""))
+          & set #nonce (Just 1)
+          & set #balance (Lit testParams.balanceCreate)
+  pure $ vm & set (#env % #contracts % at (LitAddr ethrunAddress)) (Just creator)
 
 paramsFromRpc :: Fetch.RpcInfo -> IO TestVMParams
 paramsFromRpc rpcinfo = do
   (miner,ts,blockNum,ran,limit,base) <- case rpcinfo of
-    Nothing -> pure (0,Lit 0,0,0,0,0)
+    Nothing -> pure (SymAddr "miner", Lit 0, 0, 0, 0, 0)
     Just (block, url) -> Fetch.fetchBlockFrom block url >>= \case
       Nothing -> internalError "Could not fetch block"
       Just Block{..} -> pure ( coinbase
@@ -473,11 +476,12 @@ paramsFromRpc rpcinfo = do
                              , baseFee
                              )
   let ts' = fromMaybe (internalError "received unexpected symbolic timestamp via rpc") (maybeLitWord ts)
-
   pure $ TestVMParams
-    { address = createAddress ethrunAddress 1
-    , caller = ethrunAddress
-    , origin = ethrunAddress
+    -- TODO: make this symbolic! It needs some tweaking to the way that our
+    -- symbolic interpreters work to allow us to symbolically exec constructor initialization
+    { address = LitAddr 0xacab
+    , caller = SymAddr "caller"
+    , origin = SymAddr "origin"
     , gasCreate = defaultGasForCreating
     , gasCall = defaultGasForInvoking
     , baseFee = base

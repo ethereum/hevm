@@ -1,3 +1,5 @@
+{-# Language DataKinds #-}
+
 module EVM.Dapp where
 
 import EVM.ABI
@@ -5,9 +7,8 @@ import EVM.Concrete
 import EVM.Solidity
 import EVM.Types
 
-import Control.Arrow ((>>>))
+import Control.Arrow ((>>>), second)
 import Data.Aeson (Value)
-import Data.Bifunctor (second)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.List (find, sort)
@@ -44,7 +45,7 @@ data Code = Code
 
 data DappContext = DappContext
   { info :: DappInfo
-  , env  :: Map Addr Contract
+  , env  :: Map (Expr EAddr) Contract
   }
 
 dappInfo :: FilePath -> BuildOutput -> DappInfo
@@ -129,10 +130,11 @@ traceSrcMap dapp trace = srcMap dapp trace.contract trace.opIx
 srcMap :: DappInfo -> Contract -> Int -> Maybe SrcMap
 srcMap dapp contr opIndex = do
   sol <- findSrc contr dapp
-  case contr.contractcode of
-    (InitCode _ _) ->
-      Seq.lookup opIndex sol.creationSrcmap
-    (RuntimeCode _) ->
+  case contr.code of
+    UnknownCode _ -> Nothing
+    InitCode _ _ ->
+     Seq.lookup opIndex sol.creationSrcmap
+    RuntimeCode _ ->
       Seq.lookup opIndex sol.runtimeSrcmap
 
 findSrc :: Contract -> DappInfo -> Maybe SolcContract
@@ -140,10 +142,11 @@ findSrc c dapp = do
   hash <- maybeLitWord c.codehash
   case Map.lookup hash dapp.solcByHash of
     Just (_, v) -> Just v
-    Nothing -> lookupCode c.contractcode dapp
+    Nothing -> lookupCode c.code dapp
 
 
 lookupCode :: ContractCode -> DappInfo -> Maybe SolcContract
+lookupCode (UnknownCode _) _ = Nothing
 lookupCode (InitCode c _) a =
   snd <$> Map.lookup (keccak' (stripBytecodeMetadata c)) a.solcByHash
 lookupCode (RuntimeCode (ConcreteRuntimeCode c)) a =
@@ -159,7 +162,7 @@ lookupCode (RuntimeCode (SymbolicRuntimeCode c)) a = let
 compareCode :: ByteString -> Code -> Bool
 compareCode raw (Code template locs) =
   let holes' = sort [(start, len) | (Reference start len) <- locs]
-      insert idx len' bs = writeMemory (BS.replicate len' 0) (unsafeInto len') 0 (unsafeInto idx) bs
+      insert loc len' bs = writeMemory (BS.replicate len' 0) (unsafeInto len') 0 (unsafeInto loc) bs
       refined = foldr (\(start, len) acc -> insert start len acc) raw holes'
   in BS.length raw == BS.length template && template == refined
 
@@ -178,3 +181,9 @@ srcMapCodePos cache sm =
   fmap (second f) $ cache.files ^? ix sm.file
   where
     f v = BS.count 0xa (BS.take sm.offset v) + 1
+
+srcMapCode :: SourceCache -> SrcMap -> Maybe ByteString
+srcMapCode cache sm =
+  fmap f $ cache.files ^? ix sm.file
+  where
+    f (_, v) = BS.take (min 80 sm.length) (BS.drop sm.offset v)

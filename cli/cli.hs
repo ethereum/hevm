@@ -7,19 +7,18 @@
 module Main where
 
 import Control.Monad (when, forM_, unless)
-import Data.Bifunctor (second)
+import Control.Monad.ST (RealWorld, stToIO)
 import Data.ByteString (ByteString)
 import Data.DoubleWord (Word256)
 import Data.List (intersperse)
-import Data.Map qualified as Map
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe, fromJust)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Version (showVersion)
 import Data.Word (Word64)
 import GHC.Conc (getNumProcessors)
 import Numeric.Natural (Natural)
-import Optics.Core ((&), (%), set)
+import Optics.Core ((&), set)
 import Witch (unsafeInto)
 import Options.Generic as Options
 import Paths_hevm qualified as Paths
@@ -28,11 +27,11 @@ import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirector
 import System.FilePath ((</>))
 import System.Exit (exitFailure, exitWith, ExitCode(..))
 
-import EVM (initialContract, makeVm)
-import EVM.Concrete (createAddress)
+import EVM (initialContract, abstractContract, makeVm)
 import EVM.ABI (Sig(..))
 import EVM.Dapp (dappInfo, DappInfo, emptyDapp)
 import EVM.Expr qualified as Expr
+import EVM.Concrete qualified as Concrete
 import GitHash
 import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
@@ -57,7 +56,7 @@ data Command w
       , origin        :: w ::: Maybe Addr       <?> "Tx: origin"
       , coinbase      :: w ::: Maybe Addr       <?> "Block: coinbase"
       , value         :: w ::: Maybe W256       <?> "Tx: Eth amount"
-      , nonce         :: w ::: Maybe W256       <?> "Nonce of origin"
+      , nonce         :: w ::: Maybe Word64     <?> "Nonce of origin"
       , gas           :: w ::: Maybe Word64     <?> "Tx: gas amount"
       , number        :: w ::: Maybe W256       <?> "Block: number"
       , timestamp     :: w ::: Maybe W256       <?> "Block: timestamp"
@@ -76,7 +75,7 @@ data Command w
   -- symbolic execution opts
       , root          :: w ::: Maybe String       <?> "Path to  project root directory (default: . )"
       , projectType   :: w ::: Maybe ProjectType  <?> "Is this a Foundry or DappTools project (default: Foundry)"
-      , initialStorage :: w ::: Maybe (InitialStorage) <?> "Starting state for storage: Empty, Abstract, Concrete <STORE> (default Abstract)"
+      , initialStorage :: w ::: Maybe (InitialStorage) <?> "Starting state for storage: Empty, Abstract (default Abstract)"
       , sig           :: w ::: Maybe Text         <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]           <?> "Values to encode"
       , getModels     :: w ::: Bool               <?> "Print example testcase for each execution path"
@@ -86,7 +85,7 @@ data Command w
       , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point"
       , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
-      , assertions    :: w ::: Maybe [Word256]    <?> "Comma seperated list of solc panic codes to check for (default: everything except arithmetic overflow)"
+      , assertions    :: w ::: Maybe [Word256]    <?> "Comma seperated list of solc panic codes to check for (default: user defined assertion violations only)"
       , askSmtIterations :: w ::: Integer         <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
@@ -113,7 +112,7 @@ data Command w
       , origin      :: w ::: Maybe Addr        <?> "Tx: origin"
       , coinbase    :: w ::: Maybe Addr        <?> "Block: coinbase"
       , value       :: w ::: Maybe W256        <?> "Tx: Eth amount"
-      , nonce       :: w ::: Maybe W256        <?> "Nonce of origin"
+      , nonce       :: w ::: Maybe Word64      <?> "Nonce of origin"
       , gas         :: w ::: Maybe Word64      <?> "Tx: gas amount"
       , number      :: w ::: Maybe W256        <?> "Block: number"
       , timestamp   :: w ::: Maybe W256        <?> "Block: timestamp"
@@ -166,7 +165,6 @@ instance Options.ParseRecord (Command Options.Wrapped) where
 
 data InitialStorage
   = Empty
-  | Concrete [(W256, [(W256, W256)])]
   | Abstract
   deriving (Show, Read, Options.ParseField)
 
@@ -344,14 +342,6 @@ showExtras solvers cmd calldata expr = do
     ms <- produceModels solvers expr
     forM_ ms (showModel (fst calldata))
 
-getCex :: ProofResult a b c -> Maybe b
-getCex (Cex c) = Just c
-getCex _ = Nothing
-
-getTimeout :: ProofResult a b c -> Maybe c
-getTimeout (Timeout c) = Just c
-getTimeout _ = Nothing
-
 isTestOrLib :: Text -> Bool
 isTestOrLib file = T.isSuffixOf ".t.sol" file || areAnyPrefixOf ["src/test/", "src/tests/", "lib/"] file
 
@@ -392,10 +382,10 @@ launchExec cmd = do
         internalError "no EVM result"
 
 -- | Creates a (concrete) VM from command line options
-vmFromCommand :: Command Options.Unwrapped -> IO VM
+vmFromCommand :: Command Options.Unwrapped -> IO (VM RealWorld)
 vmFromCommand cmd = do
   (miner,ts,baseFee,blockNum,prevRan) <- case cmd.rpc of
-    Nothing -> pure (0,Lit 0,0,0,0)
+    Nothing -> pure (LitAddr 0,Lit 0,0,0,0)
     Just url -> Fetch.fetchBlockFrom block url >>= \case
       Nothing -> error "Error: Could not fetch block"
       Just Block{..} -> pure ( coinbase
@@ -436,27 +426,28 @@ vmFromCommand cmd = do
         Just t -> t
         Nothing -> internalError "unexpected symbolic timestamp when executing vm test"
 
-  pure $ EVM.Transaction.initTx (vm0 baseFee miner ts' blockNum prevRan contract)
+  vm <- stToIO $ vm0 baseFee miner ts' blockNum prevRan contract
+  pure $ EVM.Transaction.initTx vm
     where
         block   = maybe Fetch.Latest Fetch.BlockNumber cmd.block
         value   = word (.value) 0
-        caller  = addr (.caller) 0
-        origin  = addr (.origin) 0
+        caller  = addr (.caller) (LitAddr 0)
+        origin  = addr (.origin) (LitAddr 0)
         calldata = ConcreteBuf $ bytes (.calldata) ""
         decipher = hexByteString "bytes" . strip0x
         mkCode bs = if cmd.create
                     then InitCode bs mempty
                     else RuntimeCode (ConcreteRuntimeCode bs)
         address = if cmd.create
-              then addr (.address) (createAddress origin (word (.nonce) 0))
-              else addr (.address) 0xacab
+                  then addr (.address) (Concrete.createAddress (fromJust $ maybeLitAddr origin) (W64 $ word64 (.nonce) 0))
+                  else addr (.address) (LitAddr 0xacab)
 
         vm0 baseFee miner ts blockNum prevRan c = makeVm $ VMOpts
           { contract      = c
           , calldata      = (calldata, [])
           , value         = Lit value
           , address       = address
-          , caller        = Expr.litAddr caller
+          , caller        = caller
           , origin        = origin
           , gas           = word64 (.gas) 0xffffffffffffffff
           , baseFee       = baseFee
@@ -472,19 +463,19 @@ vmFromCommand cmd = do
           , schedule      = feeSchedule
           , chainId       = word (.chainid) 1
           , create        = (.create) cmd
-          , initialStorage = EmptyStore
+          , baseState     = EmptyBase
           , txAccessList  = mempty -- TODO: support me soon
           , allowFFI      = False
           }
         word f def = fromMaybe def (f cmd)
         word64 f def = fromMaybe def (f cmd)
-        addr f def = fromMaybe def (f cmd)
+        addr f def = maybe def LitAddr (f cmd)
         bytes f def = maybe def decipher (f cmd)
 
-symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM)
+symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM RealWorld)
 symvmFromCommand cmd calldata = do
   (miner,blockNum,baseFee,prevRan) <- case cmd.rpc of
-    Nothing -> pure (0,0,0,0)
+    Nothing -> pure (SymAddr "miner",0,0,0)
     Just url -> Fetch.fetchBlockFrom block url >>= \case
       Nothing -> error "Error: Could not fetch block"
       Just Block{..} -> pure ( coinbase
@@ -494,11 +485,9 @@ symvmFromCommand cmd calldata = do
                              )
 
   let
-    caller = Caller 0
+    caller = SymAddr "caller"
     ts = maybe Timestamp Lit cmd.timestamp
-    callvalue = maybe (CallValue 0) Lit cmd.value
-  -- TODO: rework this, ConcreteS not needed anymore
-  let store = maybe AbstractStore parseInitialStorage (cmd.initialStorage)
+    callvalue = maybe TxValue Lit cmd.value
 
   contract <- case (cmd.rpc, cmd.address, cmd.code) of
     (Just url, Just addr', _) ->
@@ -512,30 +501,27 @@ symvmFromCommand cmd calldata = do
               -- if both code and url is given,
               -- fetch the contract and overwrite the code
               Just c -> initialContract (mkCode $ decipher c)
-                        -- TODO: fix this
-                        -- & set EVM.origStorage (view EVM.origStorage contract')
+                        & set #origStorage (contract'.origStorage)
                         & set #balance     (contract'.balance)
                         & set #nonce       (contract'.nonce)
                         & set #external    (contract'.external)
 
     (_, _, Just c)  ->
-      pure (initialContract . mkCode $ decipher c)
+      pure ((`abstractContract` address) . mkCode $ decipher c)
     (_, _, Nothing) ->
       error "Error: must provide at least (rpc + address) or code"
 
-  pure $ (EVM.Transaction.initTx $ vm0 baseFee miner ts blockNum prevRan calldata callvalue caller contract)
-    & set (#env % #storage) store
+  vm <- stToIO $ vm0 baseFee miner ts blockNum prevRan calldata callvalue caller contract
+  pure $ EVM.Transaction.initTx vm
 
   where
     decipher = hexByteString "bytes" . strip0x
-    block   = maybe Fetch.Latest Fetch.BlockNumber cmd.block
-    origin  = addr (.origin) 0
+    block = maybe Fetch.Latest Fetch.BlockNumber cmd.block
+    origin = eaddr (.origin) (SymAddr "origin")
     mkCode bs = if cmd.create
                    then InitCode bs mempty
                    else RuntimeCode (ConcreteRuntimeCode bs)
-    address = if cmd.create
-          then addr (.address) (createAddress origin (word (.nonce) 0))
-          else addr (.address) 0xacab
+    address = eaddr (.address) (SymAddr "entrypoint")
     vm0 baseFee miner ts blockNum prevRan cd callvalue caller c = makeVm $ VMOpts
       { contract      = c
       , calldata      = cd
@@ -547,7 +533,7 @@ symvmFromCommand cmd calldata = do
       , gaslimit      = word64 (.gaslimit) 0xffffffffffffffff
       , baseFee       = baseFee
       , priorityFee   = word (.priorityFee) 0
-      , coinbase      = addr (.coinbase) miner
+      , coinbase      = eaddr (.coinbase) miner
       , number        = word (.number) blockNum
       , timestamp     = ts
       , blockGaslimit = word64 (.gaslimit) 0xffffffffffffffff
@@ -557,15 +543,15 @@ symvmFromCommand cmd calldata = do
       , schedule      = feeSchedule
       , chainId       = word (.chainid) 1
       , create        = (.create) cmd
-      , initialStorage = maybe AbstractStore parseInitialStorage (cmd.initialStorage)
+      , baseState     = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
       , txAccessList  = mempty
       , allowFFI      = False
       }
     word f def = fromMaybe def (f cmd)
-    addr f def = fromMaybe def (f cmd)
     word64 f def = fromMaybe def (f cmd)
+    eaddr f def = maybe def LitAddr (f cmd)
 
-unitTestOptions :: Command Options.Unwrapped -> SolverGroup -> Maybe BuildOutput -> IO UnitTestOptions
+unitTestOptions :: Command Options.Unwrapped -> SolverGroup -> Maybe BuildOutput -> IO (UnitTestOptions RealWorld)
 unitTestOptions cmd solvers buildOutput = do
   root <- getRoot cmd
   let srcInfo = maybe emptyDapp (dappInfo root) buildOutput
@@ -598,9 +584,6 @@ unitTestOptions cmd solvers buildOutput = do
     , dapp = srcInfo
     , ffiAllowed = cmd.ffi
     }
-
-parseInitialStorage :: InitialStorage -> Expr Storage
-parseInitialStorage = \case
-  Empty -> EmptyStore
-  Concrete s -> ConcreteStore (Map.fromList $ fmap (second Map.fromList) s)
-  Abstract -> AbstractStore
+parseInitialStorage :: InitialStorage -> BaseState
+parseInitialStorage Empty = EmptyBase
+parseInitialStorage Abstract = AbstractBase

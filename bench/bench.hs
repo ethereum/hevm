@@ -2,31 +2,26 @@ module Main where
 
 import GHC.Natural
 import Control.Monad
+import Control.Monad.ST (stToIO)
 import Data.Maybe
-import System.Environment (lookupEnv, getEnv)
+import System.Environment (getEnv)
 
 import qualified Paths_hevm as Paths
 
 import Test.Tasty (localOption, withResource)
 import Test.Tasty.Bench
-import Data.Functor
-import Data.String.Here
 import Data.ByteString (ByteString)
 import System.FilePath.Posix
-import Control.Monad.State.Strict
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as LazyByteString
 
-import EVM (StorageModel(..))
 import EVM.SymExec
 import EVM.Solidity
 import EVM.Solvers
-import EVM.ABI
 import EVM.Dapp
-import EVM.Types
-import qualified EVM.TTY as TTY
+import EVM.Format (hexByteString)
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 
@@ -34,10 +29,10 @@ import EVM.Test.BlockchainTests qualified as BCTests
 
 main :: IO ()
 main = defaultMain
-  [ mkbench erc20 "erc20" Nothing [1]
-  , mkbench (pure vat) "vat" Nothing [4]
-  , mkbench (pure deposit) "deposit" (Just 32) [4]
-  , mkbench (pure uniV2Pair) "uniV2" (Just 10) [4]
+  [ mkbench erc20 "erc20" 0 [1]
+  , mkbench (pure vat) "vat" 0 [4]
+  , mkbench (pure deposit) "deposit" 32 [4]
+  , mkbench (pure uniV2Pair) "uniV2" 10 [4]
   , withResource bcjsons (pure . const ()) blockchainTests
   ]
 
@@ -59,7 +54,7 @@ bcjsons = do
     parseSuite path = do
       contents <- LazyByteString.readFile path
       case BCTests.parseBCSuite contents of
-        Left e -> pure (path, mempty)
+        Left _ -> pure (path, mempty)
         Right tests -> pure (path, tests)
 
 -- | executes all provided bc tests in sequence and accumulates a boolean value representing their success.
@@ -67,7 +62,7 @@ bcjsons = do
 blockchainTests :: IO (Map.Map FilePath (Map.Map String BCTests.Case)) -> Benchmark
 blockchainTests ts = bench "blockchain-tests" $ nfIO $ do
   tests <- ts
-  putStrLn "\n    executing tests:"
+  putStrLn "    executing blockchain tests"
   let cases = concat . Map.elems . (fmap Map.toList) $ tests
       ignored = Map.keys BCTests.commonProblematicTests
   foldM (\acc (n, c) ->
@@ -75,7 +70,6 @@ blockchainTests ts = bench "blockchain-tests" $ nfIO $ do
       then pure True
       else do
         res <- runBCTest c
-        putStrLn $ "      " <> n
         pure $ acc && res
     ) True cases
 
@@ -83,8 +77,8 @@ blockchainTests ts = bench "blockchain-tests" $ nfIO $ do
 runBCTest :: BCTests.Case -> IO Bool
 runBCTest x =
  do
-  let vm0 = BCTests.vmForCase x
-  result <- execStateT (Stepper.interpret (Fetch.zero 0 (Just 0)) . void $ Stepper.execFully) vm0
+  vm0 <- BCTests.vmForCase x
+  result <- Stepper.interpret (Fetch.zero 0 Nothing) vm0 Stepper.runFully
   maybeReason <- BCTests.checkExpectation False x result
   pure $ isNothing maybeReason
 
@@ -92,17 +86,12 @@ runBCTest x =
 --- Helpers ----------------------------------------------------------------------------------------
 
 
-debugContract :: ByteString -> IO ()
-debugContract c = withSolvers CVC5 4 Nothing $ \solvers -> do
-  let prestate = abstractVM (mkCalldata Nothing []) c Nothing SymbolicS
-  void $ TTY.runFromVM solvers Nothing Nothing emptyDapp prestate
-
-findPanics :: Solver -> Natural -> Maybe Integer -> ByteString -> IO ()
+findPanics :: Solver -> Natural -> Integer -> ByteString -> IO ()
 findPanics solver count iters c = do
-  (_, res) <- withSolvers solver count Nothing $ \s -> do
+  _ <- withSolvers solver count Nothing $ \s -> do
     let opts = defaultVeriOpts
-          { maxIter = iters
-          , askSmtIters = (+ 1) <$> iters
+          { maxIter = Just iters
+          , askSmtIters = iters + 1
           }
     checkAssert s allPanicCodes c Nothing [] opts
   putStrLn "done"
@@ -112,7 +101,7 @@ findPanics solver count iters c = do
 -- assertion violations takes an iteration bound, as well as a list of solver
 -- counts to benchmark, allowing us to construct benchmarks that compare the
 -- performance impact of increasing solver parallelisation
-mkbench :: IO ByteString -> String -> Maybe Integer -> [Natural] -> Benchmark
+mkbench :: IO ByteString -> String -> Integer -> [Natural] -> Benchmark
 mkbench c name iters counts = localOption WallTime $ env c (bgroup name . bmarks)
   where
     bmarks c' = concat $ [

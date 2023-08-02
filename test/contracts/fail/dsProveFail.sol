@@ -12,15 +12,15 @@ contract SolidityTest is DSTest {
         assert(false);
     }
 
+    function prove_trivial_dstest() public {
+        assertEq(uint(1), uint(2));
+    }
+
     function prove_add(uint x, uint y) public {
         unchecked {
             assertTrue(x + y >= x);
         }
     }
-
-    //function proveFail_shouldFail(address usr) public {
-        //usr.call("");
-    //}
 
     function prove_smtTimeout(uint x, uint y, uint z) public {
         if ((x * y / z) * (x / y) / (x * y) == (x * x * x * y * z / x * z * y)) {
@@ -42,25 +42,8 @@ contract SolidityTest is DSTest {
         }
     }
 
-    function prove_mul(uint136 x, uint128 y) public {
-        x * y;
-    }
-
     function prove_distributivity(uint120 x, uint120 y, uint120 z) public {
         assertEq(x + (y * z), (x + y) * (x + z));
-    }
-
-    function prove_transfer(uint supply, address usr, uint amt) public {
-        token.mint(address(this), supply);
-
-        uint prebal = token.balanceOf(usr);
-        token.transfer(usr, amt);
-        uint postbal = token.balanceOf(usr);
-
-        uint expected = usr == address(this)
-                        ? 0    // self transfer is a noop
-                        : amt; // otherwise `amt` has been transfered to `usr`
-        assertEq(expected, postbal - prebal);
     }
 }
 
