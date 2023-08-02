@@ -5,6 +5,7 @@
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs/haskell-updates";
     foundry.url = "github:shazow/foundry.nix/monthly";
+    bitwuzla-pkgs.url = "github:d-xo/nixpkgs/7674ec8676fb93e527d2991a65fe74be14136844";
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
@@ -23,13 +24,15 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, solidity, ethereum-tests, foundry, cabal-head, ... }:
+  outputs = { self, nixpkgs, flake-utils, solidity, ethereum-tests, foundry, cabal-head, bitwuzla-pkgs, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs { inherit system; config = { allowBroken = true; }; });
+        bitwuzla = (import bitwuzla-pkgs { inherit system; }).bitwuzla;
         testDeps = with pkgs; [
           go-ethereum
           solc
+          bitwuzla
           z3
           cvc5
           git
@@ -121,7 +124,7 @@
           buildInputs = [ makeWrapper ];
           postBuild = ''
             wrapProgram $out/bin/hevm \
-              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3 cvc5 ])}"
+              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc bitwuzla z3 cvc5 ])}"
           '';
         };
 
@@ -192,6 +195,7 @@
               cabal-multi-pkgs.cabal-install
               mdbook
               yarn
+              bitwuzla
               haskellPackages.eventlog2html
               haskellPackages.haskell-language-server
             ] ++ testDeps;

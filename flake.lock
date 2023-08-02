@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "bitwuzla-pkgs": {
+      "locked": {
+        "lastModified": 1690980179,
+        "narHash": "sha256-Tvnm9I3O06WGWd0C87jYcKmjUle02+BHyBf5Hm3QXnY=",
+        "owner": "d-xo",
+        "repo": "nixpkgs",
+        "rev": "7674ec8676fb93e527d2991a65fe74be14136844",
+        "type": "github"
+      },
+      "original": {
+        "owner": "d-xo",
+        "repo": "nixpkgs",
+        "rev": "7674ec8676fb93e527d2991a65fe74be14136844",
+        "type": "github"
+      }
+    },
     "cabal-head": {
       "flake": false,
       "locked": {
@@ -134,6 +150,7 @@
     },
     "root": {
       "inputs": {
+        "bitwuzla-pkgs": "bitwuzla-pkgs",
         "cabal-head": "cabal-head",
         "ethereum-tests": "ethereum-tests",
         "flake-compat": "flake-compat",

@@ -21,7 +21,7 @@ import Data.Text.Lazy (Text)
 import Data.Text.Lazy qualified as T
 import Data.Text.Lazy.IO qualified as T
 import Data.Text.Lazy.Builder
-import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
+import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..), createPipe)
 import Witch (into)
 
 import EVM.SMT
@@ -46,7 +46,6 @@ data SolverInstance = SolverInstance
   { solvertype :: Solver
   , stdin      :: Handle
   , stdout     :: Handle
-  , stderr     :: Handle
   , process    :: ProcessHandle
   }
 
@@ -133,16 +132,15 @@ withSolvers solver count timeout cont = do
       writeChan availableInstances inst
 
 getModel :: SolverInstance -> CexVars -> IO SMTCex
-getModel inst cexvars = do
+getModel inst@(SolverInstance _ _ _ _) cexvars = do
   -- get an initial version of the model from the solver
   initialModel <- getRaw
   -- get concrete values for each buffers max read index
   hints <- capHints <$> queryMaxReads (getValue inst) cexvars.buffers
   -- check the sizes of buffer models and shrink if needed
   if bufsUsable initialModel
-  then do
-    pure (mkConcrete initialModel)
-  else mkConcrete . snd <$> runStateT (shrinkModel hints) initialModel
+  then pure (mkConcrete initialModel)
+  else mkConcrete <$> execStateT (shrinkModel hints) initialModel
   where
     getRaw :: IO SMTCex
     getRaw = do
@@ -183,7 +181,7 @@ getModel inst cexvars = do
     shrinkBuf buf hint = do
       let encBound = "(_ bv" <> (T.pack $ show (into hint :: Integer)) <> " 256)"
       sat <- liftIO $ do
-        checkCommand inst "(push)"
+        checkCommand inst "(push 1)"
         checkCommand inst $ "(assert (bvule " <> buf <> "_length " <> encBound <> "))"
         sendLine inst "(check-sat)"
       case sat of
@@ -191,7 +189,7 @@ getModel inst cexvars = do
           model <- liftIO getRaw
           put model
         "unsat" -> do
-          liftIO $ checkCommand inst "(pop)"
+          liftIO $ checkCommand inst "(pop 1)"
           shrinkBuf buf (if hint == 0 then hint + 1 else hint * 2)
         e -> internalError $ "Unexpected solver output: " <> (T.unpack e)
 
@@ -219,7 +217,11 @@ mkTimeout t = T.pack $ show $ (1000 *)$ case t of
 -- | Arguments used when spawing a solver instance
 solverArgs :: Solver -> Maybe Natural -> [Text]
 solverArgs solver timeout = case solver of
-  Bitwuzla -> internalError "TODO: Bitwuzla args"
+  Bitwuzla ->
+    [ "--produce-models"
+    , "--bv-solver", "prop"
+    , "--sat-solver", "kissat"
+    ]
   Z3 ->
     [ "-in" ]
   CVC5 ->
@@ -234,21 +236,25 @@ solverArgs solver timeout = case solver of
 -- | Spawns a solver instance, and sets the various global config options that we use for our queries
 spawnSolver :: Solver -> Maybe (Natural) -> IO SolverInstance
 spawnSolver solver timeout = do
-  let cmd = (proc (show solver) (fmap T.unpack $ solverArgs solver timeout)) { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe }
-  (Just stdin, Just stdout, Just stderr, process) <- createProcess cmd
+  (readout, writeout) <- createPipe
+  let cmd = (proc (show solver) (fmap T.unpack $ solverArgs solver timeout)) { std_in = CreatePipe, std_out = UseHandle writeout, std_err = UseHandle writeout }
+  (Just stdin, Nothing, Nothing, process) <- createProcess cmd
   hSetBuffering stdin (BlockBuffering (Just 1000000))
-  let solverInstance = SolverInstance solver stdin stdout stderr process
+  let solverInstance = SolverInstance solver stdin readout process
 
   case solver of
-    CVC5 -> pure solverInstance
-    _ -> do
+    Bitwuzla -> do
+      _ <- sendLine solverInstance "(set-option :print-success true)"
+      pure solverInstance
+    Z3 -> do
       _ <- sendLine' solverInstance $ "(set-option :timeout " <> mkTimeout timeout <> ")"
       _ <- sendLine solverInstance "(set-option :print-success true)"
       pure solverInstance
+    _ -> pure solverInstance
 
 -- | Cleanly shutdown a running solver instnace
 stopSolver :: SolverInstance -> IO ()
-stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just stdin, Just stdout, Just stderr, process)
+stopSolver (SolverInstance _ stdin stdout process) = cleanupProcess (Just stdin, Just stdout, Nothing, process)
 
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
 sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
@@ -268,7 +274,7 @@ checkCommand inst cmd = do
   res <- sendCommand inst cmd
   case res of
     "success" -> pure ()
-    _ -> error $ "Internal Error: Unexpected solver output: " <> (T.unpack res)
+    _ -> internalError $ "Internal Error: Unexpected solver output: " <> (T.unpack res)
 
 -- | Sends a single command to the solver, returns the first available line from the output buffer
 sendCommand :: SolverInstance -> Text -> IO Text
@@ -282,20 +288,20 @@ sendCommand inst cmd = do
 
 -- | Sends a string to the solver and appends a newline, returns the first available line from the output buffer
 sendLine :: SolverInstance -> Text -> IO Text
-sendLine (SolverInstance _ stdin stdout _ _) cmd = do
+sendLine (SolverInstance _ stdin stdout _) cmd = do
   T.hPutStr stdin (T.append cmd "\n")
   hFlush stdin
   T.hGetLine stdout
 
 -- | Sends a string to the solver and appends a newline, doesn't return stdout
 sendLine' :: SolverInstance -> Text -> IO ()
-sendLine' (SolverInstance _ stdin _ _ _) cmd = do
+sendLine' (SolverInstance _ stdin _ _) cmd = do
   T.hPutStr stdin (T.append cmd "\n")
   hFlush stdin
 
 -- | Returns a string representation of the model for the requested variable
 getValue :: SolverInstance -> Text -> IO Text
-getValue (SolverInstance _ stdin stdout _ _) var = do
+getValue (SolverInstance _ stdin stdout _) var = do
   T.hPutStr stdin (T.append (T.append "(get-value (" var) "))\n")
   hFlush stdin
   fmap (T.unlines . reverse) (readSExpr stdout)

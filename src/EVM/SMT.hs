@@ -14,6 +14,7 @@ import Data.Containers.ListUtils (nubOrd)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.List qualified as List
+import Data.List (foldl')
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.String.Here
@@ -132,26 +133,27 @@ formatSMT2 :: SMT2 -> Text
 formatSMT2 (SMT2 ls _) = T.unlines (fmap toLazyText ls)
 
 -- | Reads all intermediate variables from the builder state and produces SMT declaring them as constants
-declareIntermediates :: BufEnv -> StoreEnv -> SMT2
-declareIntermediates bufs stores =
+declareIntermediates :: BufEnv -> StoreEnv -> Builder -> Builder
+declareIntermediates bufs stores wrapped =
   let encSs = Map.mapWithKey encodeStore stores
       encBs = Map.mapWithKey encodeBuf bufs
       sorted = List.sortBy compareFst $ Map.toList $ encSs <> encBs
       decls = fmap snd sorted
-  in SMT2 ([fromText "; intermediate buffers & stores"] <> decls) mempty
+  in foldl' (\acc enc -> enc acc) wrapped decls
   where
     compareFst (l, _) (r, _) = compare l r
-    encodeBuf n expr =
-      "(define-const buf" <> (fromString . show $ n) <> " Buf " <> exprToSMT expr <> ")\n" <> encodeBufLen n expr
+
+    encodeBuf :: Int -> Expr Buf -> Builder -> Builder
+    encodeBuf n expr next =
+      "(let \n((buf" <> fromString (show n) <> ") (" <> exprToSMT expr <> ") \n" <> encodeBufLen n expr <> ") (" <> next <> "))"
+    encodeStore :: Int -> Expr Storage -> Builder -> Builder
+    encodeStore n expr next =
+      "(let \n((store" <> fromString (show n) <> ") (" <> exprToSMT expr <> ")) (" <> next <> "))"
     encodeBufLen n expr =
-      "(define-const buf" <> (fromString . show $ n) <>"_length" <> " (_ BitVec 256) " <> exprToSMT (bufLengthEnv bufs True expr) <> ")"
-    encodeStore n expr =
-       "(define-const store" <> (fromString . show $ n) <> " Storage " <> exprToSMT expr <> ")"
+      "((buf" <> (fromString . show $ n) <>"_length) (" <> exprToSMT (bufLengthEnv bufs True expr) <> "))"
 
 assertProps :: [Prop] -> SMT2
 assertProps ps =
-  let encs = map propToSMT ps_elim
-      intermediates = declareIntermediates bufs stores in
   prelude
   <> (declareAbstractStores abstractStores)
   <> SMT2 [""] mempty
@@ -165,38 +167,32 @@ assertProps ps =
   <> SMT2 [""] mempty
   <> (declareBlockContext . nubOrd $ foldl (<>) [] blockCtx)
   <> SMT2 [""] mempty
-  <> intermediates
-  <> SMT2 [""] mempty
-  <> keccakAssumes
-  <> readAssumes
-  <> SMT2 [""] mempty
-  <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
+  <> SMT2 [final] mempty
   <> SMT2 [] mempty{ storeReads = storageReads }
 
   where
+    -- common subexpression elimination
     (ps_elim, bufs, stores) = eliminateProps ps
-
-    allVars = fmap referencedVars ps_elim <> fmap referencedVars bufVals <> fmap referencedVars storeVals
-    frameCtx = fmap referencedFrameContext ps_elim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
-    blockCtx = fmap referencedBlockContext ps_elim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
-
     bufVals = Map.elems bufs
     storeVals = Map.elems stores
 
-    storageReads = Map.unionsWith (<>) $ fmap findStorageReads ps
+    -- gather free variables
+    allVars = fmap referencedVars ps_elim <> fmap referencedVars bufVals <> fmap referencedVars storeVals
+    frameCtx = fmap referencedFrameContext ps_elim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
+    blockCtx = fmap referencedBlockContext ps_elim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
     abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores ps)
     addresses = Set.toList $ Set.unions (fmap referencedWAddrs ps)
 
-    keccakAssumes
-      = SMT2 ["; keccak assumptions"] mempty
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions ps_elim bufVals storeVals)) mempty
-      <> SMT2 ["; keccak computations"] mempty
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute ps_elim bufVals storeVals)) mempty
+    -- context for model extraction
+    storageReads = Map.unionsWith (<>) $ fmap findStorageReads ps
 
-
-    readAssumes
-      = SMT2 ["; read assumptions"] mempty
-        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads ps_elim bufs stores)) mempty
+    -- prepare smt
+    bind_elim = declareIntermediates bufs stores
+    props = keccakAssumptions ps_elim bufVals storeVals
+         <> keccakCompute ps_elim bufVals storeVals
+         <> assertReads ps_elim bufs stores
+         <> ps_elim
+    final = bind_elim ("(assert " <> propToSMT (pand props) <> ")")
 
 referencedAbstractStores :: TraversableTerm a => a -> Set Builder
 referencedAbstractStores term = foldTerm go mempty term
@@ -352,7 +348,7 @@ declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
 declareAddrs :: [Builder] -> SMT2
 declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) cexvars
   where
-    declare n = "(declare-const " <> n <> " Addr)"
+    declare n = "(declare-const " <> n <> " " <> fromLazyText addrT <> ")"
     cexvars = (mempty :: CexVars){ addrs = fmap toLazyText names }
 
 declareFrameContext :: [(Builder, [Prop])] -> SMT2
@@ -365,7 +361,7 @@ declareFrameContext names = SMT2 (["; frame context"] <> concatMap declare names
 declareAbstractStores :: [Builder] -> SMT2
 declareAbstractStores names = SMT2 (["; abstract base stores"] <> fmap declare names) mempty
   where
-    declare n = "(declare-const " <> n <> " Storage)"
+    declare n = "(declare-const " <> n <> " " <> fromLazyText storeT <> ")"
 
 declareBlockContext :: [(Builder, [Prop])] -> SMT2
 declareBlockContext names = SMT2 (["; block context"] <> concatMap declare names) cexvars
@@ -375,65 +371,69 @@ declareBlockContext names = SMT2 (["; block context"] <> concatMap declare names
     cexvars = (mempty :: CexVars){ blockContext = fmap (toLazyText . fst) names }
 
 
+byteT :: Text
+byteT = "(_ BitVec 8)"
+
+wordT :: Text
+wordT = "(_ BitVec 256)"
+
+addrT :: Text
+addrT = "(_ BitVec 160)"
+
+bufT :: Text
+bufT = "(Array " <> wordT <> " " <> byteT <> ")"
+
+storeT :: Text
+storeT = "(Array " <> wordT <> " " <> wordT <> ")"
+
 prelude :: SMT2
 prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   ; logic
-  ; TODO: this creates an error when used with z3?
-  ;(set-logic QF_AUFBV)
-  (set-logic ALL)
-
-  ; types
-  (define-sort Byte () (_ BitVec 8))
-  (define-sort Word () (_ BitVec 256))
-  (define-sort Addr () (_ BitVec 160))
-  (define-sort Buf () (Array Word Byte))
-
-  ; slot -> value
-  (define-sort Storage () (Array Word Word))
+  (set-logic QF_AUFBV)
 
   ; hash functions
-  (declare-fun keccak (Buf) Word)
-  (declare-fun sha256 (Buf) Word)
+  (declare-fun keccak (${bufT}) ${wordT})
+  (declare-fun sha256 (${bufT}) ${wordT})
 
   (define-fun max ((a (_ BitVec 256)) (b (_ BitVec 256))) (_ BitVec 256) (ite (bvult a b) b a))
 
   ; word indexing
-  (define-fun indexWord31 ((w Word)) Byte ((_ extract 7 0) w))
-  (define-fun indexWord30 ((w Word)) Byte ((_ extract 15 8) w))
-  (define-fun indexWord29 ((w Word)) Byte ((_ extract 23 16) w))
-  (define-fun indexWord28 ((w Word)) Byte ((_ extract 31 24) w))
-  (define-fun indexWord27 ((w Word)) Byte ((_ extract 39 32) w))
-  (define-fun indexWord26 ((w Word)) Byte ((_ extract 47 40) w))
-  (define-fun indexWord25 ((w Word)) Byte ((_ extract 55 48) w))
-  (define-fun indexWord24 ((w Word)) Byte ((_ extract 63 56) w))
-  (define-fun indexWord23 ((w Word)) Byte ((_ extract 71 64) w))
-  (define-fun indexWord22 ((w Word)) Byte ((_ extract 79 72) w))
-  (define-fun indexWord21 ((w Word)) Byte ((_ extract 87 80) w))
-  (define-fun indexWord20 ((w Word)) Byte ((_ extract 95 88) w))
-  (define-fun indexWord19 ((w Word)) Byte ((_ extract 103 96) w))
-  (define-fun indexWord18 ((w Word)) Byte ((_ extract 111 104) w))
-  (define-fun indexWord17 ((w Word)) Byte ((_ extract 119 112) w))
-  (define-fun indexWord16 ((w Word)) Byte ((_ extract 127 120) w))
-  (define-fun indexWord15 ((w Word)) Byte ((_ extract 135 128) w))
-  (define-fun indexWord14 ((w Word)) Byte ((_ extract 143 136) w))
-  (define-fun indexWord13 ((w Word)) Byte ((_ extract 151 144) w))
-  (define-fun indexWord12 ((w Word)) Byte ((_ extract 159 152) w))
-  (define-fun indexWord11 ((w Word)) Byte ((_ extract 167 160) w))
-  (define-fun indexWord10 ((w Word)) Byte ((_ extract 175 168) w))
-  (define-fun indexWord9 ((w Word)) Byte ((_ extract 183 176) w))
-  (define-fun indexWord8 ((w Word)) Byte ((_ extract 191 184) w))
-  (define-fun indexWord7 ((w Word)) Byte ((_ extract 199 192) w))
-  (define-fun indexWord6 ((w Word)) Byte ((_ extract 207 200) w))
-  (define-fun indexWord5 ((w Word)) Byte ((_ extract 215 208) w))
-  (define-fun indexWord4 ((w Word)) Byte ((_ extract 223 216) w))
-  (define-fun indexWord3 ((w Word)) Byte ((_ extract 231 224) w))
-  (define-fun indexWord2 ((w Word)) Byte ((_ extract 239 232) w))
-  (define-fun indexWord1 ((w Word)) Byte ((_ extract 247 240) w))
-  (define-fun indexWord0 ((w Word)) Byte ((_ extract 255 248) w))
+  (define-fun indexWord31 ((w ${wordT})) ${byteT} ((_ extract 7 0) w))
+  (define-fun indexWord30 ((w ${wordT})) ${byteT} ((_ extract 15 8) w))
+  (define-fun indexWord29 ((w ${wordT})) ${byteT} ((_ extract 23 16) w))
+  (define-fun indexWord28 ((w ${wordT})) ${byteT} ((_ extract 31 24) w))
+  (define-fun indexWord27 ((w ${wordT})) ${byteT} ((_ extract 39 32) w))
+  (define-fun indexWord26 ((w ${wordT})) ${byteT} ((_ extract 47 40) w))
+  (define-fun indexWord25 ((w ${wordT})) ${byteT} ((_ extract 55 48) w))
+  (define-fun indexWord24 ((w ${wordT})) ${byteT} ((_ extract 63 56) w))
+  (define-fun indexWord23 ((w ${wordT})) ${byteT} ((_ extract 71 64) w))
+  (define-fun indexWord22 ((w ${wordT})) ${byteT} ((_ extract 79 72) w))
+  (define-fun indexWord21 ((w ${wordT})) ${byteT} ((_ extract 87 80) w))
+  (define-fun indexWord20 ((w ${wordT})) ${byteT} ((_ extract 95 88) w))
+  (define-fun indexWord19 ((w ${wordT})) ${byteT} ((_ extract 103 96) w))
+  (define-fun indexWord18 ((w ${wordT})) ${byteT} ((_ extract 111 104) w))
+  (define-fun indexWord17 ((w ${wordT})) ${byteT} ((_ extract 119 112) w))
+  (define-fun indexWord16 ((w ${wordT})) ${byteT} ((_ extract 127 120) w))
+  (define-fun indexWord15 ((w ${wordT})) ${byteT} ((_ extract 135 128) w))
+  (define-fun indexWord14 ((w ${wordT})) ${byteT} ((_ extract 143 136) w))
+  (define-fun indexWord13 ((w ${wordT})) ${byteT} ((_ extract 151 144) w))
+  (define-fun indexWord12 ((w ${wordT})) ${byteT} ((_ extract 159 152) w))
+  (define-fun indexWord11 ((w ${wordT})) ${byteT} ((_ extract 167 160) w))
+  (define-fun indexWord10 ((w ${wordT})) ${byteT} ((_ extract 175 168) w))
+  (define-fun indexWord9 ((w ${wordT})) ${byteT} ((_ extract 183 176) w))
+  (define-fun indexWord8 ((w ${wordT})) ${byteT} ((_ extract 191 184) w))
+  (define-fun indexWord7 ((w ${wordT})) ${byteT} ((_ extract 199 192) w))
+  (define-fun indexWord6 ((w ${wordT})) ${byteT} ((_ extract 207 200) w))
+  (define-fun indexWord5 ((w ${wordT})) ${byteT} ((_ extract 215 208) w))
+  (define-fun indexWord4 ((w ${wordT})) ${byteT} ((_ extract 223 216) w))
+  (define-fun indexWord3 ((w ${wordT})) ${byteT} ((_ extract 231 224) w))
+  (define-fun indexWord2 ((w ${wordT})) ${byteT} ((_ extract 239 232) w))
+  (define-fun indexWord1 ((w ${wordT})) ${byteT} ((_ extract 247 240) w))
+  (define-fun indexWord0 ((w ${wordT})) ${byteT} ((_ extract 255 248) w))
 
   ; symbolic word indexing
   ; a bitshift based version might be more performant here...
-  (define-fun indexWord ((idx Word) (w Word)) Byte
+  (define-fun indexWord ((idx ${wordT}) (w ${wordT})) ${byteT}
     (ite (bvuge idx (_ bv32 256)) (_ bv0 8)
     (ite (= idx (_ bv31 256)) (indexWord31 w)
     (ite (= idx (_ bv30 256)) (indexWord30 w)
@@ -470,7 +470,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
     ))))))))))))))))))))))))))))))))
   )
 
-  (define-fun readWord ((idx Word) (buf Buf)) Word
+  (define-fun readWord ((idx ${wordT}) (buf ${bufT})) ${wordT}
     (concat
       (select buf idx)
       (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000001))
@@ -507,7 +507,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
     )
   )
 
-  (define-fun writeWord ((idx Word) (val Word) (buf Buf)) Buf
+  (define-fun writeWord ((idx ${wordT}) (val ${wordT}) (buf ${bufT})) ${bufT}
       (store (store (store (store (store (store (store (store (store (store (store (store (store (store (store (store (store
       (store (store (store (store (store (store (store (store (store (store (store (store (store (store (store buf
       (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001f) (indexWord31 val))
@@ -545,11 +545,11 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   )
 
   ; block context
-  (declare-fun blockhash (Word) Word)
-  (declare-fun codesize (Addr) Word)
+  (declare-fun blockhash (${wordT}) ${wordT})
+  (declare-fun codesize (${addrT}) ${wordT})
 
   ; macros
-  (define-fun signext ( (b Word) (val Word)) Word
+  (define-fun signext ( (b ${wordT}) (val ${wordT})) ${wordT}
     (ite (= b (_ bv0  256)) ((_ sign_extend 248) ((_ extract 7    0) val))
     (ite (= b (_ bv1  256)) ((_ sign_extend 240) ((_ extract 15   0) val))
     (ite (= b (_ bv2  256)) ((_ sign_extend 232) ((_ extract 23   0) val))
@@ -708,7 +708,7 @@ exprToSMT = \case
     _ -> op2 "indexWord" idx w
   ReadByte idx src -> op2 "select" src idx
 
-  ConcreteBuf "" -> "((as const Buf) #b00000000)"
+  ConcreteBuf "" -> "((as const " <> fromLazyText bufT <> ") #b00000000)"
   ConcreteBuf bs -> writeBytes bs mempty
   AbstractBuf s -> fromText s
   ReadWord idx prev -> op2 "readWord" idx prev
@@ -841,7 +841,7 @@ writeBytes bytes buf = snd $ BS.foldl' wrap (0, exprToSMT buf) bytes
         in (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
 
 encodeConcreteStore :: Map W256 W256 -> Builder
-encodeConcreteStore s = foldl encodeWrite "((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000)" (Map.toList s)
+encodeConcreteStore s = foldl encodeWrite ("((as const " <> (fromLazyText storeT) <> ") #x0000000000000000000000000000000000000000000000000000000000000000)") (Map.toList s)
   where
     encodeWrite prev (key, val) = let
         encKey = exprToSMT (Lit key)
