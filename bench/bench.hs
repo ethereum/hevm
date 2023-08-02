@@ -2,7 +2,6 @@ module Main where
 
 import GHC.Natural
 import Control.Monad
-import Control.Monad.ST (stToIO)
 import Data.Maybe
 import System.Environment (getEnv)
 
@@ -20,9 +19,7 @@ import qualified Data.ByteString.Lazy as LazyByteString
 import EVM.SymExec
 import EVM.Solidity
 import EVM.Solvers
-import EVM.Dapp
 import EVM.Format (hexByteString)
-import qualified EVM.TTY as TTY
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 
@@ -86,11 +83,6 @@ runBCTest x =
 
 --- Helpers ----------------------------------------------------------------------------------------
 
-
-debugContract :: ByteString -> IO ()
-debugContract c = withSolvers CVC5 4 Nothing $ \solvers -> do
-  prestate <- stToIO $ abstractVM (mkCalldata Nothing []) c Nothing False
-  void $ TTY.runFromVM solvers Nothing Nothing emptyDapp prestate
 
 findPanics :: Solver -> Natural -> Integer -> ByteString -> IO ()
 findPanics solver count iters c = do

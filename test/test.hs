@@ -23,6 +23,7 @@ import Data.Maybe
 import Data.String.Here
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Typeable
 import Data.Vector qualified as Vector
@@ -41,7 +42,7 @@ import Text.RE.TDFA.String
 import Text.RE.Replace
 import Witch (unsafeInto, into)
 
-import Optics.Core hiding (pre, re)
+import Optics.Core hiding (pre, re, elements)
 import Optics.State
 import Optics.Operators.Unsafe
 
@@ -50,8 +51,7 @@ import EVM.ABI
 import EVM.Exec
 import EVM.Expr qualified as Expr
 import EVM.Fetch qualified as Fetch
-import EVM.Format (hexText)
-import EVM.Patricia qualified as Patricia
+import EVM.Format (hexText, formatExpr)
 import EVM.Precompiled
 import EVM.RLP
 import EVM.SMT hiding (one)
@@ -445,27 +445,13 @@ tests = testGroup "hevm"
 
   , testGroup "RLP encodings"
     [ testProperty "rlp decode is a retraction (bytes)" $ \(Bytes bs) ->
---      withMaxSuccess 100000 $
       rlpdecode (rlpencode (BS bs)) == Just (BS bs)
     , testProperty "rlp encode is a partial inverse (bytes)" $ \(Bytes bs) ->
---      withMaxSuccess 100000 $
         case rlpdecode bs of
           Just r -> rlpencode r == bs
           Nothing -> True
     ,  testProperty "rlp decode is a retraction (RLP)" $ \(RLPData r) ->
---       withMaxSuccess 100000 $
        rlpdecode (rlpencode r) == Just r
-    ]
-  , testGroup "Merkle Patricia Trie"
-    [  testProperty "update followed by delete is id" $ \(Bytes r, Bytes s, Bytes t) ->
-        whenFail
-        (putStrLn ("r:" <> (show (ByteStringS r))) >>
-         putStrLn ("s:" <> (show (ByteStringS s))) >>
-         putStrLn ("t:" <> (show (ByteStringS t)))) $
---       withMaxSuccess 100000 $
-       Patricia.insertValues [(r, BS.pack[1]), (s, BS.pack[2]), (t, BS.pack[3]),
-                              (r, mempty), (s, mempty), (t, mempty)]
-       === (Just $ Patricia.Literal Patricia.Empty)
     ]
  , testGroup "Panic code tests via symbolic execution"
   [
@@ -590,6 +576,55 @@ tests = testGroup "hevm"
           checkAssert s [0x41] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "expected counterexample found"
       ,
+      testCase "vm.prank underflow" $ do
+        Just c <- solcRuntime "C"
+            [i|
+              interface Vm {
+                function prank(address) external;
+              }
+              contract Payable {
+                  function hi() public payable {}
+              }
+              contract C {
+                function f() external {
+                  Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+
+                  uint amt = 10;
+                  address from = address(0xacab);
+                  require(from.balance < amt);
+
+                  Payable target = new Payable();
+                  vm.prank(from);
+                  target.hi{value : amt}();
+                }
+              }
+            |]
+        r <- allBranchesFail c Nothing
+        assertBool "all branches must fail" (isRight r)
+      ,
+      testCase "call ffi when disabled" $ do
+        Just c <- solcRuntime "C"
+            [i|
+              interface Vm {
+                function ffi(string[] calldata) external;
+              }
+              contract C {
+                function f() external {
+                  Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+
+                  string[] memory inputs = new string[](2);
+                  inputs[0] = "echo";
+                  inputs[1] = "acab";
+
+                  // should fail to explore this branch
+                  vm.ffi(inputs);
+                }
+              }
+            |]
+        Right e <- reachableUserAsserts c Nothing
+        T.putStrLn $ formatExpr e
+        assertBool "The expression is not partial" $ Expr.containsNode isPartial e
+      ,
       -- TODO: we can't deal with symbolic jump conditions
       expectFail $ testCase "call-zero-inited-var-thats-a-function" $ do
         Just c <- solcRuntime "MyContract"
@@ -621,10 +656,8 @@ tests = testGroup "hevm"
         -- quick smokecheck to make sure that we can parse dapptools style build outputs
         let cases =
               [ ("test/contracts/pass/trivial.sol", ".*", True)
-              , ("test/contracts/pass/invariants.sol", "invariantTestThisBal", True)
               , ("test/contracts/pass/dsProvePass.sol", "proveEasy", True)
               , ("test/contracts/fail/trivial.sol", ".*", False)
-              , ("test/contracts/fail/invariantFail.sol", "invariantCount", False)
               , ("test/contracts/fail/dsProveFail.sol", "prove_add", False)
               ]
         results <- forM cases $ \(testFile, match, expected) -> do
@@ -633,7 +666,7 @@ tests = testGroup "hevm"
         assertBool "test result" (and results)
     , testCase "Trivial-Fail" $ do
         let testFile = "test/contracts/fail/trivial.sol"
-        runSolidityTest testFile "testFalse" >>= assertEqual "test result" False
+        runSolidityTest testFile "prove_false" >>= assertEqual "test result" False
     , testCase "Abstract" $ do
         let testFile = "test/contracts/pass/abstract.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
@@ -659,20 +692,9 @@ tests = testGroup "hevm"
         let testFile = "test/contracts/pass/loops.sol"
         runSolidityTestCustom testFile "prove_loop" Nothing (Just 10) False Nothing Foundry >>= assertEqual "test result" True
         runSolidityTestCustom testFile "prove_loop" Nothing (Just 100) False Nothing Foundry >>= assertEqual "test result" False
-    , testCase "Invariant-Tests-Pass" $ do
-        let testFile = "test/contracts/pass/invariants.sol"
-        runSolidityTest testFile ".*" >>= assertEqual "test result" True
-    , testCase "Invariant-Tests-Fail" $ do
-        let testFile = "test/contracts/fail/invariantFail.sol"
-        runSolidityTest testFile "invariantFirst" >>= assertEqual "test result" False
-        runSolidityTest testFile "invariantCount" >>= assertEqual "test result" False
     , testCase "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
-    , testCase "Cheat-Codes-Fail" $ do
-        let testFile = "test/contracts/fail/cheatCodes.sol"
-        runSolidityTestCustom testFile "testBadFFI" Nothing Nothing False Nothing Foundry >>= assertEqual "test result" False
-        runSolidityTestCustom testFile "test_prank_underflow" Nothing Nothing False Nothing Foundry >>= assertEqual "test result" False
     , testCase "Unwind" $ do
         let testFile = "test/contracts/pass/unwind.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
@@ -3260,10 +3282,20 @@ checkBadCheatCode sig _ = \case
   (Failure _ _ (BadCheatCode s)) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
   _ -> PBool True
 
+allBranchesFail :: ByteString -> Maybe Sig -> IO (Either [SMTCex] (Expr End))
+allBranchesFail = checkPost (Just p)
+  where
+    p _ = \case
+      Success _ _ _ _ -> PBool False
+      _ -> PBool True
+
 reachableUserAsserts :: ByteString -> Maybe Sig -> IO (Either [SMTCex] (Expr End))
-reachableUserAsserts c sig = do
+reachableUserAsserts = checkPost (Just $ checkAssertions [0x01])
+
+checkPost :: Maybe (Postcondition RealWorld) -> ByteString -> Maybe Sig -> IO (Either [SMTCex] (Expr End))
+checkPost post c sig = do
   (e, res) <- withSolvers Z3 1 Nothing $ \s ->
-    verifyContract s c sig [] defaultVeriOpts Nothing (Just $ checkAssertions [0x01])
+    verifyContract s c sig [] defaultVeriOpts Nothing post
   let cexs = snd <$> mapMaybe getCex res
   case cexs of
     [] -> pure $ Right e

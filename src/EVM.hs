@@ -41,7 +41,7 @@ import Data.Set (insert, member, fromList)
 import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
 import Data.Text (unpack, pack)
-import Data.Text.Encoding (decodeUtf8, encodeUtf8)
+import Data.Text.Encoding (decodeUtf8)
 import Data.Tree
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple.Curry
@@ -473,24 +473,22 @@ exec1 = do
 
         OpExtcodesize ->
           case stk of
-            x':xs -> forceAddr x' "EXTCODESIZE" $ \case
-              a@(LitAddr x) -> if a == cheatCode
-                then do
-                  next
-                  assign (#state % #stack) xs
-                  pushSym (Lit 1)
-                else
-                  accessAndBurn (LitAddr x) $
-                    fetchAccount (LitAddr x) $ \c -> do
-                      next
-                      assign (#state % #stack) xs
-                      case view bytecode c of
-                        Just b -> pushSym (bufLength b)
-                        Nothing -> pushSym $ CodeSize (LitAddr x)
-              x -> do
-                assign (#state % #stack) xs
-                pushSym (CodeSize x)
-                next
+            x':xs -> forceAddr x' "EXTCODESIZE" $ \x -> do
+              let impl = accessAndBurn x $
+                           fetchAccount x $ \c -> do
+                             next
+                             assign (#state % #stack) xs
+                             case view bytecode c of
+                               Just b -> pushSym (bufLength b)
+                               Nothing -> pushSym $ CodeSize x
+              case x of
+                a@(LitAddr _) -> if a == cheatCode
+                  then do
+                    next
+                    assign (#state % #stack) xs
+                    pushSym (Lit 1)
+                  else impl
+                _ -> impl
             [] ->
               underrun
 
@@ -1643,9 +1641,8 @@ cheatActions =
                 _ -> vmError (BadCheatCode sig)
               _ -> vmError (BadCheatCode sig)
           else
-            let msg = encodeUtf8 "ffi disabled: run again with --ffi if you want to allow tests to call external scripts"
-            in vmError . Revert . ConcreteBuf $
-              abiMethod "Error(string)" (AbiTuple . V.fromList $ [AbiString msg]),
+            let msg = "ffi disabled: run again with --ffi if you want to allow tests to call external scripts"
+            in partial $ UnexpectedSymbolicArg vm.state.pc msg [],
 
       action "warp(uint256)" $
         \sig _ _ input -> case decodeStaticArgs 0 1 input of
@@ -1671,9 +1668,8 @@ cheatActions =
             Just a'@(LitAddr _) -> fetchAccount a' $ \_ ->
               accessStorage a' slot $ \res -> do
                 assign (#state % #returndata % word256At (Lit 0)) res
-                forceConcrete res "FIXME" $ \res' -> do
-                  let buf = ConcreteBuf $ word256Bytes res'
-                  copyBytesToMemory buf (Lit 32) (Lit 0) outOffset
+                let buf = writeWord (Lit 0) res (ConcreteBuf "")
+                copyBytesToMemory buf (Lit 32) (Lit 0) outOffset
             _ -> vmError (BadCheatCode sig)
           _ -> vmError (BadCheatCode sig),
 

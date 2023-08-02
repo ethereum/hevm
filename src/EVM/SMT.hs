@@ -546,6 +546,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
 
   ; block context
   (declare-fun blockhash (Word) Word)
+  (declare-fun codesize (Addr) Word)
 
   ; macros
   (define-fun signext ( (b Word) (val Word)) Word
@@ -683,6 +684,9 @@ exprToSMT = \case
   BlockHash a ->
     let enc = exprToSMT a in
     "(blockhash " <> enc <> ")"
+  CodeSize a ->
+    let enc = exprToSMT a in
+    "(codesize " <> enc <> ")"
   Coinbase -> "coinbase"
   Timestamp -> "timestamp"
   BlockNumber -> "blocknumber"
@@ -691,7 +695,8 @@ exprToSMT = \case
   ChainId -> "chainid"
   BaseFee -> "basefee"
 
-  WAddr(a@(SymAddr _)) -> "(concat (_ bv0 96)" `sp` formatEAddr a `sp` ")"
+  a@(SymAddr _) -> formatEAddr a
+  WAddr(a@(SymAddr _)) -> "(concat (_ bv0 96)" `sp` exprToSMT a `sp` ")"
 
   LitByte b -> fromLazyText $ "(_ bv" <> T.pack (show (into b :: Integer)) <> " 8)"
   IndexWord idx w -> case idx of

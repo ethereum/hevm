@@ -5,8 +5,7 @@ analysis of evm bytecode. It can:
 
 - symbolically execute a smart contract and find reachable assertion violations
 - prove equivalence of two different bytecode objects
-- execute (symbolic and concrete) solidity tests written using [`ds-test`](https://github.com/dapphub/ds-test/) (a.k.a "foundry tests")
-- visually debug arbitrary evm executions (both concrete & symbolic)
+- execute symbolic solidity tests written using [`ds-test`](https://github.com/dapphub/ds-test/) (a.k.a "foundry tests")
 - fetch remote state via rpc
 - automatically create test cases
 

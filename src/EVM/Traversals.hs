@@ -8,7 +8,6 @@ import Prelude hiding (LT, GT)
 
 import Control.Monad.Identity
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
 import Data.List (foldl')
 
 import EVM.Types
@@ -51,46 +50,6 @@ foldCode f = \case
   RuntimeCode (SymbolicRuntimeCode c) -> foldl' (foldExpr f) mempty c
   InitCode _ buf -> foldExpr f mempty buf
   UnknownCode addr -> foldExpr f mempty addr
-
-foldTrace :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Trace -> b
-foldTrace f acc t = acc <> (go t)
-  where
-    go :: Trace -> b
-    go (Trace _ _ d) = case d of
-      EventTrace a b c -> foldExpr f mempty a <> foldExpr f mempty b <> (foldl (foldExpr f) mempty c)
-      FrameTrace a -> foldContext f mempty a
-      ErrorTrace _ -> mempty
-      EntryTrace _ -> mempty
-      ReturnTrace a b -> foldExpr f mempty a <> foldContext f mempty b
-
-foldContext :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> FrameContext -> b
-foldContext f acc = \case
-  CreationContext a b c d -> acc
-                          <> foldExpr f mempty a
-                          <> foldExpr f mempty b
-                          <> foldl' (foldExpr f) mempty (Map.keys c)
-                          <> foldl' (foldContract f) mempty c
-                          <> foldSubState f mempty d
-  CallContext a b _ _ e _ g h i -> acc
-                                <> foldExpr f mempty a
-                                <> foldExpr f mempty b
-                                <> foldExpr f mempty e
-                                <> foldExpr f mempty g
-                                <> foldl' (foldExpr f) mempty (Map.keys h)
-                                <> foldl' (foldContract f) mempty h
-                                <> foldSubState f mempty i
-
-foldSubState :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> SubState -> b
-foldSubState f acc (SubState a b c d e) = acc
-                                       <> foldl' (foldExpr f) mempty a
-                                       <> foldl' (foldExpr f) mempty b
-                                       <> foldl' (foldExpr f) mempty c
-                                       <> foldl' (\r (addr, _) -> r <> foldExpr f mempty addr) mempty d
-                                       <> foldl' (\r (addr, _) -> r <> foldExpr f mempty addr) mempty e
-
-foldTraces :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Traces -> b
-foldTraces f acc (Traces a _) = acc <> foldl (foldl (foldTrace f)) mempty a
-
 
 -- | Recursively folds a given function over a given expression
 -- Recursion schemes do this & a lot more, but defining them over GADT's isn't worth the hassle
@@ -135,14 +94,14 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- control flow
 
-      e@(Success a b c d) -> f e
+      e@(Success a _ c d) -> f e
                           <> foldl (foldProp f) mempty a
-                          <> foldTraces f mempty b
                           <> go c
                           <> foldl' (foldExpr f) mempty (Map.keys d)
                           <> foldl' (foldEContract f) mempty d
-      e@(Failure a b _) -> f e <> (foldl (foldProp f) mempty a) <> foldTraces f mempty b
-      e@(Partial a b _) -> f e <> (foldl (foldProp f) mempty a) <> foldTraces f mempty b
+      e@(Failure a _ (Revert c)) -> f e <> (foldl (foldProp f) mempty a) <> go c
+      e@(Failure a _ _) -> f e <> (foldl (foldProp f) mempty a)
+      e@(Partial a _ _) -> f e <> (foldl (foldProp f) mempty a)
       e@(ITE a b c) -> f e <> (go a) <> (go b) <> (go c)
 
       -- integers
@@ -217,64 +176,6 @@ foldExpr f acc expr = acc <> (go expr)
 
       e@(LogEntry a b c) -> f e <> (go a) <> (go b) <> (foldl (<>) mempty (fmap f c))
 
-      -- Contract Creation
-
-      e@(Create a b c d g h)
-        -> f e
-        <> (go a)
-        <> (go b)
-        <> (go c)
-        <> (go d)
-        <> (foldl (<>) mempty (fmap go g))
-        <> (go h)
-      e@(Create2 a b c d g h i)
-        -> f e
-        <> (go a)
-        <> (go b)
-        <> (go c)
-        <> (go d)
-        <> (go g)
-        <> (foldl (<>) mempty (fmap go h))
-        <> (go i)
-
-      -- Calls
-
-      e@(Call a b c d g h i j k)
-        -> f e
-        <> (go a)
-        <> (maybe mempty (go) b)
-        <> (go c)
-        <> (go d)
-        <> (go g)
-        <> (go h)
-        <> (go i)
-        <> (foldl (<>) mempty (fmap go j))
-        <> (go k)
-
-      e@(CallCode a b c d g h i j k)
-        -> f e
-        <> (go a)
-        <> (go b)
-        <> (go c)
-        <> (go d)
-        <> (go g)
-        <> (go h)
-        <> (go i)
-        <> (foldl (<>) mempty (fmap go j))
-        <> (go k)
-
-      e@(DelegeateCall a b c d g h i j k)
-        -> f e
-        <> (go a)
-        <> (go b)
-        <> (go c)
-        <> (go d)
-        <> (go g)
-        <> (go h)
-        <> (go i)
-        <> (foldl (<>) mempty (fmap go j))
-        <> (go k)
-
       -- storage
 
       e@(LitAddr _) -> f e
@@ -332,30 +233,8 @@ mapProp' f = \case
   POr a b -> f $ POr (mapProp' f a) (mapProp' f b)
   PImpl a b -> f $ PImpl (mapProp' f a) (mapProp' f b)
 
-mapTrace :: (forall a . Expr a -> Expr a) -> Trace -> Trace
-mapTrace f (Trace x y z) = Trace x y (go z)
-  where
-    go :: TraceData -> TraceData
-    go = \case
-      EventTrace a b c -> EventTrace (f a) (f b) (fmap (mapExpr f) c)
-      FrameTrace a -> FrameTrace (go' a)
-      ErrorTrace a -> ErrorTrace a
-      EntryTrace a -> EntryTrace a
-      ReturnTrace a b -> ReturnTrace (f a) (go' b)
-
-    go' :: FrameContext -> FrameContext
-    go' = \case
-      CreationContext a b c d -> CreationContext a (f b) c d
-      CallContext a b c d e g h i j -> CallContext a b c d (f e) g (f h) (Map.mapKeys f . Map.map (mapContract f) $ i) j
-
--- | Recursively applies a given function to every node in a given expr instance
--- Recursion schemes do this & a lot more, but defining them over GADT's isn't worth the hassle
 mapExpr :: (forall a . Expr a -> Expr a) -> Expr b -> Expr b
 mapExpr f expr = runIdentity (mapExprM (Identity . f) expr)
-
-mapContract :: (forall a . Expr a -> Expr a) -> Contract -> Contract
-mapContract f expr = runIdentity (mapContractM (Identity . f) expr)
-
 
 mapExprM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Expr b -> m (Expr b)
 mapExprM f expr = case expr of
@@ -435,15 +314,12 @@ mapExprM f expr = case expr of
 
   Failure a b c -> do
     a' <- mapM (mapPropM f) a
-    b' <- mapTracesM f b
-    f (Failure a' b' c)
+    f (Failure a' b c)
   Partial a b c -> do
     a' <- mapM (mapPropM f) a
-    b' <- mapTracesM f b
-    f (Partial a' b' c)
+    f (Partial a' b c)
   Success a b c d -> do
     a' <- mapM (mapPropM f) a
-    b' <- mapTracesM f b
     c' <- mapExprM f c
     d' <- do
       let x = Map.toList d
@@ -452,7 +328,7 @@ mapExprM f expr = case expr of
         v' <- mapEContractM f v
         pure (k',v')
       pure $ Map.fromList x'
-    f (Success a' b' c' d')
+    f (Success a' b c' d')
   ITE a b c -> do
     a' <- mapExprM f a
     b' <- mapExprM f b
@@ -633,62 +509,6 @@ mapExprM f expr = case expr of
     c' <- mapM (mapExprM f) c
     f (LogEntry a' b' c')
 
-  -- Contract Creation
-
-  Create a b c d e g -> do
-    a' <- mapExprM f a
-    b' <- mapExprM f b
-    c' <- mapExprM f c
-    d' <- mapExprM f d
-    e' <- mapM (mapExprM f) e
-    g' <- mapExprM f g
-    f (Create a' b' c' d' e' g')
-  Create2 a b c d e g h -> do
-    a' <- mapExprM f a
-    b' <- mapExprM f b
-    c' <- mapExprM f c
-    d' <- mapExprM f d
-    e' <- mapExprM f e
-    g' <- mapM (mapExprM f) g
-    h' <- mapExprM f h
-    f (Create2 a' b' c' d' e' g' h')
-
-  -- Calls
-
-  Call a b c d e g h i j -> do
-    a' <- mapExprM f a
-    b' <- mapM (mapExprM f) b
-    c' <- mapExprM f c
-    d' <- mapExprM f d
-    e' <- mapExprM f e
-    g' <- mapExprM f g
-    h' <- mapExprM f h
-    i' <- mapM (mapExprM f) i
-    j' <- mapExprM f j
-    f (Call a' b' c' d' e' g' h' i' j')
-  CallCode a b c d e g h i j -> do
-    a' <- mapExprM f a
-    b' <- mapExprM f b
-    c' <- mapExprM f c
-    d' <- mapExprM f d
-    e' <- mapExprM f e
-    g' <- mapExprM f g
-    h' <- mapExprM f h
-    i' <- mapM (mapExprM f) i
-    j' <- mapExprM f j
-    f (CallCode a' b' c' d' e' g' h' i' j')
-  DelegeateCall a b c d e g h i j -> do
-    a' <- mapExprM f a
-    b' <- mapExprM f b
-    c' <- mapExprM f c
-    d' <- mapExprM f d
-    e' <- mapExprM f e
-    g' <- mapExprM f g
-    h' <- mapExprM f h
-    i' <- mapM (mapExprM f) i
-    j' <- mapExprM f j
-    f (DelegeateCall a' b' c' d' e' g' h' i' j')
-
   -- storage
 
   ConcreteStore b -> f (ConcreteStore b)
@@ -740,7 +560,6 @@ mapExprM f expr = case expr of
     a' <- mapExprM f a
     f (BufLength a')
 
-
 mapPropM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Prop -> m Prop
 mapPropM f = \case
   PBool b -> pure $ PBool b
@@ -780,6 +599,7 @@ mapPropM f = \case
     b' <- mapPropM f b
     pure $ PImpl a' b'
 
+
 mapEContractM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Expr EContract -> m (Expr EContract)
 mapEContractM _ g@(GVar _) = pure g
 mapEContractM f (C code storage balance nonce) = do
@@ -807,79 +627,10 @@ mapCodeM f = \case
     buf' <- mapExprM f buf
     pure $ InitCode bs buf'
 
-mapTracesM :: forall m . Monad m => (forall a . Expr a -> m (Expr a)) -> Traces -> m Traces
-mapTracesM f (Traces a b) = do
-  a' <- mapM (mapM (mapTraceM f)) a
-  pure $ Traces a' b
-
-mapSubStateM :: forall m . Monad m => (forall a . Expr a -> m (Expr a)) -> SubState -> m SubState
-mapSubStateM f s = do
-  selfdestructs <- mapM f s.selfdestructs
-  touchedAccs <- mapM f s.touchedAccounts
-  accessedAddrs <- do
-    let x = Set.toList s.accessedAddresses
-    x' <- mapM f x
-    pure $ Set.fromList x'
-  accessedKeys <- do
-    let x = Set.toList s.accessedStorageKeys
-    x' <- forM x $ \(e,slot) -> do
-      e' <- f e
-      pure (e',slot)
-    pure $ Set.fromList x'
-  refunds <- forM s.refunds $ \(e,v) -> do
-    e' <- f e
-    pure (e',v)
-  pure $ SubState selfdestructs touchedAccs accessedAddrs accessedKeys refunds
-
-mapTraceM :: forall m . Monad m => (forall a . Expr a -> m (Expr a)) -> Trace -> m Trace
-mapTraceM f (Trace x y z) = do
-  z' <- go z
-  pure $ Trace x y z'
-  where
-    go :: TraceData -> m TraceData
-    go = \case
-      EventTrace a b c -> do
-        a' <- mapExprM f a
-        b' <- mapExprM f b
-        c' <- mapM (mapExprM f) c
-        pure $ EventTrace a' b' c'
-      FrameTrace a -> do
-        a' <- go' a
-        pure $ FrameTrace a'
-      ReturnTrace a b -> do
-        a' <- mapExprM f a
-        b' <- go' b
-        pure $ ReturnTrace a' b'
-      a -> pure a
-
-    go' :: FrameContext -> m FrameContext
-    go' = \case
-      CreationContext a b c d -> do
-        a' <- f a
-        b' <- mapExprM f b
-        c' <- forM (Map.toList c) $ \(k,v) -> do
-          k' <- f k
-          v' <- mapContractM f v
-          pure (k', v')
-        d' <- mapSubStateM f d
-        pure $ CreationContext a' b' (Map.fromList c') d'
-      CallContext a b c d e g h i j -> do
-        a' <- mapExprM f a
-        b' <- mapExprM f b
-        e' <- mapExprM f e
-        h' <- mapExprM f h
-        i' <- forM (Map.toList i) $ \(k,v) -> do
-          k' <- f k
-          v' <- mapContractM f v
-          pure (k', v')
-        j' <- mapSubStateM f j
-        pure $ CallContext a' b' c d e' g h' (Map.fromList i') j'
-
 -- | Generic operations over AST terms
 class TraversableTerm a where
   mapTerm  :: (forall b. Expr b -> Expr b) -> a -> a
   foldTerm :: forall c. Monoid c => (forall b. Expr b -> c) -> c -> a -> c
-
 
 instance TraversableTerm (Expr a) where
   mapTerm = mapExpr

@@ -2,14 +2,11 @@ module EVM.Test.BlockchainTests where
 
 import EVM (initialContract, makeVm)
 import EVM.Concrete qualified as EVM
-import EVM.Dapp (emptyDapp)
-import EVM.FeeSchedule qualified
+import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified
 import EVM.Format (hexText)
 import EVM.Stepper qualified
-import EVM.Solvers (withSolvers, Solver(Z3))
 import EVM.Transaction
-import EVM.TTY qualified as TTY
 import EVM.Types hiding (Block, Case)
 import EVM.Test.Tracing (interpretWithTrace, VMTrace, compareTraces, EVMToolTraceOutput(..))
 
@@ -136,21 +133,7 @@ runVMTest diffmode (_name, x) = do
   maybeReason <- checkExpectation diffmode x result
   forM_ maybeReason assertFailure
 
--- | Example usage:
--- $ cabal new-repl ethereum-tests
--- ghci> debugVMTest "BlockchainTests/GeneralStateTests/VMTests/vmArithmeticTest/twoOps.json" "twoOps_d0g0v0_London"
-debugVMTest :: String -> String -> IO ()
-debugVMTest file test = do
-  repo <- getEnv "HEVM_ETHEREUM_TESTS_REPO"
-  Right allTests <- parseBCSuite <$> LazyByteString.readFile (repo </> file)
-  let x = case filter (\(name, _) -> name == test) $ Map.toList allTests of
-        [(_, x')] -> x'
-        _ -> internalError "test not found"
-  vm0 <- vmForCase x
-  result <- withSolvers Z3 0 Nothing $ \solvers ->
-    TTY.runFromVM solvers Nothing Nothing emptyDapp vm0
-  void $ checkExpectation False x result
-
+-- | Run a vm test and output a geth style per opcode trace
 traceVMTest :: String -> String -> IO [VMTrace]
 traceVMTest file test = do
   repo <- getEnv "HEVM_ETHEREUM_TESTS_REPO"
@@ -162,9 +145,12 @@ traceVMTest file test = do
   (_, (_, ts)) <- runStateT (interpretWithTrace (EVM.Fetch.zero 0 (Just 0)) EVM.Stepper.runFully) (vm0, [])
   pure ts
 
+-- | Read a geth trace from disk
 readTrace :: FilePath -> IO (Either String EVMToolTraceOutput)
 readTrace = JSON.eitherDecodeFileStrict
 
+-- | given a path to a test file, a test case from within that file, and a trace from geth from running that test, compare the traces and show where we differ
+-- This would need a few tweaks to geth to make this really usable (i.e. evm statetest show allow running a single test from within the test file).
 traceVsGeth :: String -> String -> FilePath -> IO ()
 traceVsGeth file test gethTrace = do
   hevm <- traceVMTest file test
@@ -405,7 +391,6 @@ fromBlockchainCase' block tx preState postState =
           where
             toAddr = maybe (EVM.createAddress origin (fromJust senderNonce)) LitAddr (tx.toAddr)
             senderNonce = view (accountAt (LitAddr origin) % #nonce) (Map.mapKeys LitAddr preState)
-            feeSchedule = EVM.FeeSchedule.berlin
             toCode = Map.lookup toAddr (Map.mapKeys LitAddr preState)
             theCode = if isCreate
                       then InitCode tx.txdata mempty

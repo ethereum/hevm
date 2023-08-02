@@ -37,6 +37,7 @@ module EVM.ABI
   , SolError (..)
   , Anonymity (..)
   , Indexed (..)
+  , Sig(..)
   , putAbi
   , getAbi
   , getAbiSeq
@@ -82,12 +83,16 @@ import Data.Vector (Vector, toList)
 import Data.Vector qualified as Vector
 import Data.Word (Word32)
 import GHC.Generics (Generic)
-
 import Test.QuickCheck hiding ((.&.), label)
+
 import Text.Megaparsec qualified as P
 import Text.Megaparsec.Char qualified as P
 import Text.ParserCombinators.ReadP
 import Witch (unsafeInto, into)
+
+-- | A method name, and the (ordered) types of it's arguments
+data Sig = Sig Text [AbiType]
+  deriving (Show, Eq)
 
 data AbiValue
   = AbiUInt         Int Word256
@@ -410,80 +415,6 @@ getBytesWith256BitPadding i =
     <* skip ((roundTo32Bytes n) - n)
   where n = fromIntegral i
 
--- QuickCheck instances
-
-genAbiValue :: AbiType -> Gen AbiValue
-genAbiValue = \case
-   AbiUIntType n -> AbiUInt n <$> genUInt n
-   AbiIntType n -> do
-     x <- genUInt n
-     pure $ AbiInt n (signedWord (x - 2^(n-1)))
-   AbiAddressType ->
-     AbiAddress . fromIntegral <$> genUInt 20
-   AbiBoolType ->
-     elements [AbiBool False, AbiBool True]
-   AbiBytesType n ->
-     do xs <- replicateM n arbitrary
-        pure (AbiBytes n (BS.pack xs))
-   AbiBytesDynamicType ->
-     AbiBytesDynamic . BS.pack <$> listOf arbitrary
-   AbiStringType ->
-     AbiString . BS.pack <$> listOf arbitrary
-   AbiArrayDynamicType t ->
-     do xs <- listOf1 (scale (`div` 2) (genAbiValue t))
-        pure (AbiArrayDynamic t (Vector.fromList xs))
-   AbiArrayType n t ->
-     AbiArray n t . Vector.fromList <$>
-       replicateM n (scale (`div` 2) (genAbiValue t))
-   AbiTupleType ts ->
-     AbiTuple <$> mapM genAbiValue ts
-   AbiFunctionType ->
-     do xs <- replicateM 24 arbitrary
-        pure (AbiFunction (BS.pack xs))
-  where
-    genUInt :: Int -> Gen Word256
-    genUInt n = arbitraryIntegralWithMax (2^n-1) :: Gen Word256
-
-instance Arbitrary AbiType where
-  arbitrary = oneof
-    [ (AbiUIntType . (* 8)) <$> choose (1, 32)
-    , (AbiIntType . (* 8)) <$> choose (1, 32)
-    , pure AbiAddressType
-    , pure AbiBoolType
-    , AbiBytesType <$> choose (1,32)
-    , pure AbiBytesDynamicType
-    , pure AbiStringType
-    , AbiArrayDynamicType <$> scale (`div` 2) arbitrary
-    , AbiArrayType
-        <$> (getPositive <$> arbitrary)
-        <*> scale (`div` 2) arbitrary
-    ]
-
-instance Arbitrary AbiValue where
-  arbitrary = arbitrary >>= genAbiValue
-  shrink = \case
-    AbiArrayDynamic t v ->
-      Vector.toList v ++
-        map (AbiArrayDynamic t . Vector.fromList)
-            (shrinkList shrink (Vector.toList v))
-    AbiBytesDynamic b -> AbiBytesDynamic . BS.pack <$> shrinkList shrinkIntegral (BS.unpack b)
-    AbiString b -> AbiString . BS.pack <$> shrinkList shrinkIntegral (BS.unpack b)
-    AbiBytes n a | n <= 32 -> shrink $ AbiUInt (n * 8) (word256 a)
-    --bytesN for N > 32 don't really exist right now anyway..
-    AbiBytes _ _ | otherwise -> []
-    AbiArray _ t v ->
-      Vector.toList v ++
-        map (\x -> AbiArray (length x) t (Vector.fromList x))
-            (shrinkList shrink (Vector.toList v))
-    AbiTuple v -> Vector.toList $ AbiTuple . Vector.fromList . shrink <$> v
-    AbiUInt n a -> AbiUInt n <$> (shrinkIntegral a)
-    AbiInt n a -> AbiInt n <$> (shrinkIntegral a)
-    AbiBool b -> AbiBool <$> shrink b
-    AbiAddress a -> [AbiAddress 0xacab, AbiAddress 0xdeadbeef, AbiAddress 0xbabeface]
-      <> (AbiAddress <$> shrinkIntegral a)
-    AbiFunction b -> shrink $ AbiBytes 24 b
-
-
 -- Bool synonym with custom read instance
 -- to be able to parse lower case 'false' and 'true'
 newtype Boolz = Boolz Bool
@@ -573,6 +504,78 @@ decodeStaticArgs :: Int -> Int -> Expr Buf -> [Expr EWord]
 decodeStaticArgs offset numArgs b =
   [readWord (Lit . unsafeInto $ i) b | i <- [offset,(offset+32) .. (offset + (numArgs-1)*32)]]
 
+-- QuickCheck instances
+
+genAbiValue :: AbiType -> Gen AbiValue
+genAbiValue = \case
+   AbiUIntType n -> AbiUInt n <$> genUInt n
+   AbiIntType n -> do
+     x <- genUInt n
+     pure $ AbiInt n (signedWord (x - 2^(n-1)))
+   AbiAddressType ->
+     AbiAddress . fromIntegral <$> genUInt 20
+   AbiBoolType ->
+     elements [AbiBool False, AbiBool True]
+   AbiBytesType n ->
+     do xs <- replicateM n arbitrary
+        pure (AbiBytes n (BS.pack xs))
+   AbiBytesDynamicType ->
+     AbiBytesDynamic . BS.pack <$> listOf arbitrary
+   AbiStringType ->
+     AbiString . BS.pack <$> listOf arbitrary
+   AbiArrayDynamicType t ->
+     do xs <- listOf1 (scale (`div` 2) (genAbiValue t))
+        pure (AbiArrayDynamic t (Vector.fromList xs))
+   AbiArrayType n t ->
+     AbiArray n t . Vector.fromList <$>
+       replicateM n (scale (`div` 2) (genAbiValue t))
+   AbiTupleType ts ->
+     AbiTuple <$> mapM genAbiValue ts
+   AbiFunctionType ->
+     do xs <- replicateM 24 arbitrary
+        pure (AbiFunction (BS.pack xs))
+  where
+    genUInt :: Int -> Gen Word256
+    genUInt n = arbitraryIntegralWithMax (2^n-1) :: Gen Word256
+
+instance Arbitrary AbiType where
+  arbitrary = oneof
+    [ (AbiUIntType . (* 8)) <$> choose (1, 32)
+    , (AbiIntType . (* 8)) <$> choose (1, 32)
+    , pure AbiAddressType
+    , pure AbiBoolType
+    , AbiBytesType <$> choose (1,32)
+    , pure AbiBytesDynamicType
+    , pure AbiStringType
+    , AbiArrayDynamicType <$> scale (`div` 2) arbitrary
+    , AbiArrayType
+        <$> (getPositive <$> arbitrary)
+        <*> scale (`div` 2) arbitrary
+    ]
+
+instance Arbitrary AbiValue where
+  arbitrary = arbitrary >>= genAbiValue
+  shrink = \case
+    AbiArrayDynamic t v ->
+      Vector.toList v ++
+        map (AbiArrayDynamic t . Vector.fromList)
+            (shrinkList shrink (Vector.toList v))
+    AbiBytesDynamic b -> AbiBytesDynamic . BS.pack <$> shrinkList shrinkIntegral (BS.unpack b)
+    AbiString b -> AbiString . BS.pack <$> shrinkList shrinkIntegral (BS.unpack b)
+    AbiBytes n a | n <= 32 -> shrink $ AbiUInt (n * 8) (word256 a)
+    --bytesN for N > 32 don't really exist right now anyway..
+    AbiBytes _ _ | otherwise -> []
+    AbiArray _ t v ->
+      Vector.toList v ++
+        map (\x -> AbiArray (length x) t (Vector.fromList x))
+            (shrinkList shrink (Vector.toList v))
+    AbiTuple v -> Vector.toList $ AbiTuple . Vector.fromList . shrink <$> v
+    AbiUInt n a -> AbiUInt n <$> (shrinkIntegral a)
+    AbiInt n a -> AbiInt n <$> (shrinkIntegral a)
+    AbiBool b -> AbiBool <$> shrink b
+    AbiAddress a -> [AbiAddress 0xacab, AbiAddress 0xdeadbeef, AbiAddress 0xbabeface]
+      <> (AbiAddress <$> shrinkIntegral a)
+    AbiFunction b -> shrink $ AbiBytes 24 b
 
 -- A modification of 'arbitrarySizedBoundedIntegral' quickcheck library
 -- which takes the maxbound explicitly rather than relying on a Bounded instance.

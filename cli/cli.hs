@@ -6,18 +6,12 @@
 
 module Main where
 
-import Control.Monad (void, when, forM_, unless)
+import Control.Monad (when, forM_, unless)
 import Control.Monad.ST (RealWorld, stToIO)
-import Control.Monad.State.Strict (liftIO)
 import Data.ByteString (ByteString)
-import Data.ByteString qualified as ByteString
-import Data.ByteString.Char8 qualified as Char8
-import Data.ByteString.Lazy qualified as LazyByteString
 import Data.DoubleWord (Word256)
 import Data.List (intersperse)
-import Data.Map qualified as Map
-import Data.Maybe (fromMaybe, mapMaybe)
-import Data.Text (pack)
+import Data.Maybe (fromMaybe, mapMaybe, fromJust)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Version (showVersion)
@@ -33,22 +27,20 @@ import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirector
 import System.FilePath ((</>))
 import System.Exit (exitFailure, exitWith, ExitCode(..))
 
-import EVM (initialContract, makeVm)
-import EVM.Concrete (createAddress)
-import EVM.Dapp (findUnitTests, dappInfo, DappInfo, emptyDapp)
+import EVM (initialContract, abstractContract, makeVm)
+import EVM.ABI (Sig(..))
+import EVM.Dapp (dappInfo, DappInfo, emptyDapp)
 import EVM.Expr qualified as Expr
-import EVM.Facts qualified as Facts
-import EVM.Facts.Git qualified as Git
+import EVM.Concrete qualified as Concrete
 import GitHash
-import EVM.FeeSchedule qualified as FeeSchedule
-import EVM.Fetch qualified
+import EVM.FeeSchedule (feeSchedule)
+import EVM.Fetch qualified as Fetch
 import EVM.Format (hexByteString, strip0x, showTraceTree, formatExpr)
 import EVM.Solidity
 import EVM.Solvers
 import EVM.Stepper qualified
 import EVM.SymExec
 import EVM.Transaction qualified
-import EVM.TTY qualified as TTY
 import EVM.Types hiding (word)
 import EVM.UnitTest
 
@@ -79,8 +71,6 @@ data Command w
   -- remote state opts
       , rpc           :: w ::: Maybe URL        <?> "Fetch state from a remote node"
       , block         :: w ::: Maybe W256       <?> "Block state is be fetched from"
-      , state         :: w ::: Maybe String     <?> "Path to state repository"
-      , cache         :: w ::: Maybe String     <?> "Path to rpc cache repository"
 
   -- symbolic execution opts
       , root          :: w ::: Maybe String       <?> "Path to  project root directory (default: . )"
@@ -88,7 +78,6 @@ data Command w
       , initialStorage :: w ::: Maybe (InitialStorage) <?> "Starting state for storage: Empty, Abstract (default Abstract)"
       , sig           :: w ::: Maybe Text         <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]           <?> "Values to encode"
-      , debug         :: w ::: Bool               <?> "Run interactively"
       , getModels     :: w ::: Bool               <?> "Print example testcase for each execution path"
       , showTree      :: w ::: Bool               <?> "Print branches explored in tree view"
       , showReachableTree :: w ::: Bool           <?> "Print only reachable branches explored in tree view"
@@ -135,11 +124,7 @@ data Command w
       , maxcodesize :: w ::: Maybe W256        <?> "Block: max code size"
       , prevRandao  :: w ::: Maybe W256        <?> "Block: prevRandao"
       , chainid     :: w ::: Maybe W256        <?> "Env: chainId"
-      , debug       :: w ::: Bool              <?> "Run interactively"
-      , jsontrace   :: w ::: Bool              <?> "Print json trace output at every step"
       , trace       :: w ::: Bool              <?> "Dump trace"
-      , state       :: w ::: Maybe String      <?> "Path to state repository"
-      , cache       :: w ::: Maybe String      <?> "Path to rpc cache repository"
       , rpc         :: w ::: Maybe URL         <?> "Fetch state from a remote node"
       , block       :: w ::: Maybe W256        <?> "Block state is be fetched from"
       , root        :: w ::: Maybe String      <?> "Path to  project root directory (default: . )"
@@ -148,18 +133,10 @@ data Command w
   | Test -- Run DSTest unit tests
       { root        :: w ::: Maybe String               <?> "Path to  project root directory (default: . )"
       , projectType   :: w ::: Maybe ProjectType        <?> "Is this a Foundry or DappTools project (default: Foundry)"
-      , debug         :: w ::: Bool                     <?> "Run interactively"
-      , jsontrace     :: w ::: Bool                     <?> "Print json trace output at every step"
-      , fuzzRuns      :: w ::: Maybe Int                <?> "Number of times to run fuzz tests"
-      , depth         :: w ::: Maybe Int                <?> "Number of transactions to explore"
-      , replay        :: w ::: Maybe (Text, ByteString) <?> "Custom fuzz case to run/debug"
       , rpc           :: w ::: Maybe URL                <?> "Fetch state from a remote node"
       , verbose       :: w ::: Maybe Int                <?> "Append call trace: {1} failures {2} all"
       , coverage      :: w ::: Bool                     <?> "Coverage analysis"
-      , state         :: w ::: Maybe String             <?> "Path to state repository"
-      , cache         :: w ::: Maybe String             <?> "Path to rpc cache repository"
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
-      , covMatch      :: w ::: Maybe String             <?> "Coverage filter - only print coverage for files matching regex"
       , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
       , ffi           :: w ::: Bool                     <?> "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)"
@@ -190,71 +167,6 @@ data InitialStorage
   = Empty
   | Abstract
   deriving (Show, Read, Options.ParseField)
-
-data Mode = Debug | Run | JsonTrace deriving (Eq, Show)
-
-optsMode :: Command Options.Unwrapped -> Mode
-optsMode x
-  | x.debug = Debug
-  | x.jsontrace = JsonTrace
-  | otherwise = Run
-
-applyCache :: (Maybe String, Maybe String) -> IO (VM RealWorld -> VM RealWorld)
-applyCache (state, cache) =
-  let applyState = flip Facts.apply
-      applyCache' = flip Facts.applyCache
-  in case (state, cache) of
-    (Nothing, Nothing) -> do
-      pure id
-    (Nothing, Just cachePath) -> do
-      facts <- Git.loadFacts (Git.RepoAt cachePath)
-      pure $ applyCache' facts
-    (Just statePath, Nothing) -> do
-      facts <- Git.loadFacts (Git.RepoAt statePath)
-      pure $ applyState facts
-    (Just statePath, Just cachePath) -> do
-      cacheFacts <- Git.loadFacts (Git.RepoAt cachePath)
-      stateFacts <- Git.loadFacts (Git.RepoAt statePath)
-      pure $ (applyState stateFacts) . (applyCache' cacheFacts)
-
-unitTestOptions :: Command Options.Unwrapped -> SolverGroup -> Maybe BuildOutput -> IO (UnitTestOptions RealWorld)
-unitTestOptions cmd solvers buildOutput = do
-  root <- getRoot cmd
-  let srcInfo = maybe emptyDapp (dappInfo root) buildOutput
-
-  vmModifier <- applyCache (cmd.state, cmd.cache)
-
-  params <- getParametersFromEnvironmentVariables cmd.rpc
-
-  let
-    testn = params.number
-    block' = if 0 == testn
-       then EVM.Fetch.Latest
-       else EVM.Fetch.BlockNumber testn
-
-  pure UnitTestOptions
-    { solvers = solvers
-    , rpcInfo = case cmd.rpc of
-         Just url -> Just (block', url)
-         Nothing  -> Nothing
-    , maxIter = cmd.maxIterations
-    , askSmtIters = cmd.askSmtIterations
-    , smtDebug = cmd.smtdebug
-    , smtTimeout = cmd.smttimeout
-    , solver = cmd.solver
-    , covMatch = pack <$> cmd.covMatch
-    , verbose = cmd.verbose
-    , match = pack $ fromMaybe ".*" cmd.match
-    , maxDepth = cmd.depth
-    , fuzzRuns = fromMaybe 100 cmd.fuzzRuns
-    , replay = do
-        arg' <- cmd.replay
-        pure (fst arg', LazyByteString.fromStrict (hexByteString "--replay" $ strip0x $ snd arg'))
-    , vmModifier = vmModifier
-    , testParams = params
-    , dapp = srcInfo
-    , ffiAllowed = cmd.ffi
-    }
 
 getFullVersion :: [Char]
 getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
@@ -289,14 +201,8 @@ main = do
             Right out -> do
               -- TODO: which functions here actually require a BuildOutput, and which can take it as a Maybe?
               testOpts <- unitTestOptions cmd solvers (Just out)
-              case (cmd.coverage, optsMode cmd) of
-                (False, Run) -> do
-                  res <- unitTest testOpts out.contracts cmd.cache
-                  unless res exitFailure
-                (False, Debug) -> liftIO $ TTY.main testOpts root (Just out)
-                (False, JsonTrace) -> internalError "json traces not implemented for dappTest"
-                (True, _) -> liftIO $ dappCoverage testOpts (optsMode cmd) out
-
+              res <- unitTest testOpts out.contracts
+              unless res exitFailure
 
 equivalence :: Command Options.Unwrapped -> IO ()
 equivalence cmd = do
@@ -377,7 +283,7 @@ buildCalldata cmd = case (cmd.calldata, cmd.sig) of
 -- If function signatures are known, they should always be given for best results.
 assert :: Command Options.Unwrapped -> IO ()
 assert cmd = do
-  let block'  = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber cmd.block
+  let block'  = maybe Fetch.Latest Fetch.BlockNumber cmd.block
       rpcinfo = (,) block' <$> cmd.rpc
   calldata <- buildCalldata cmd
   preState <- symvmFromCommand cmd calldata
@@ -386,48 +292,39 @@ assert cmd = do
   let solverCount = fromMaybe cores cmd.numSolvers
   solver <- getSolver cmd
   withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
-    if cmd.debug then do
-      srcInfo <- getSrcInfo cmd
-      void $ TTY.runFromVM
-        solvers
-        rpcinfo
-        cmd.maxIterations
-        srcInfo
-        preState
-    else do
-      let opts = VeriOpts {
-        simp = True,
-        debug = cmd.smtdebug,
-        maxIter = cmd.maxIterations,
-        askSmtIters = cmd.askSmtIterations,
-        loopHeuristic = cmd.loopDetectionHeuristic,
-        rpcInfo = rpcinfo
-      }
-      (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
-      case res of
-        [Qed _] -> do
-          putStrLn "\nQED: No reachable property violations discovered\n"
-          showExtras solvers cmd calldata expr
-        _ -> do
-          let cexs = snd <$> mapMaybe getCex res
-              timeouts = mapMaybe getTimeout res
-              counterexamples
-                | null cexs = []
-                | otherwise =
-                   [ ""
-                   , "Discovered the following counterexamples:"
-                   , ""
-                   ] <> fmap (formatCex (fst calldata)) cexs
-              unknowns
-                | null timeouts = []
-                | otherwise =
-                   [ ""
-                   , "Could not determine reachability of the following end states:"
-                   , ""
-                   ] <> fmap (formatExpr) timeouts
-          T.putStrLn $ T.unlines (counterexamples <> unknowns)
-          showExtras solvers cmd calldata expr
-          exitFailure
+    let opts = VeriOpts {
+      simp = True,
+      debug = cmd.smtdebug,
+      maxIter = cmd.maxIterations,
+      askSmtIters = cmd.askSmtIterations,
+      loopHeuristic = cmd.loopDetectionHeuristic,
+      rpcInfo = rpcinfo
+    }
+    (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
+    case res of
+      [Qed _] -> do
+        putStrLn "\nQED: No reachable property violations discovered\n"
+        showExtras solvers cmd calldata expr
+      _ -> do
+        let cexs = snd <$> mapMaybe getCex res
+            timeouts = mapMaybe getTimeout res
+            counterexamples
+              | null cexs = []
+              | otherwise =
+                 [ ""
+                 , "Discovered the following counterexamples:"
+                 , ""
+                 ] <> fmap (formatCex (fst calldata)) cexs
+            unknowns
+              | null timeouts = []
+              | otherwise =
+                 [ ""
+                 , "Could not determine reachability of the following end states:"
+                 , ""
+                 ] <> fmap (formatExpr) timeouts
+        T.putStrLn $ T.unlines (counterexamples <> unknowns)
+        showExtras solvers cmd calldata expr
+        exitFailure
 
 showExtras :: SolverGroup -> Command Options.Unwrapped -> (Expr Buf, [Prop]) -> Expr End -> IO ()
 showExtras solvers cmd calldata expr = do
@@ -445,34 +342,6 @@ showExtras solvers cmd calldata expr = do
     ms <- produceModels solvers expr
     forM_ ms (showModel (fst calldata))
 
-dappCoverage :: UnitTestOptions RealWorld -> Mode -> BuildOutput -> IO ()
-dappCoverage opts _ bo@(BuildOutput (Contracts cs) cache) = do
-  let unitTests = findUnitTests opts.match $ Map.elems cs
-  covs <- mconcat <$> mapM
-    (coverageForUnitTestContract opts cs cache) unitTests
-  let
-    dapp = dappInfo "." bo
-    f (k, vs) = do
-      when (shouldPrintCoverage opts.covMatch (T.pack k)) $ do
-        putStr ("\x1b[0m" ++ "————— hevm coverage for ") -- Prefixed with color reset
-        putStrLn (k ++ " —————")
-        putStrLn ""
-        forM_ vs $ \(n, bs) -> do
-          case ByteString.find (\x -> x /= 0x9 && x /= 0x20 && x /= 0x7d) bs of
-            Nothing -> putStr "\x1b[38;5;240m" -- Gray (Coverage status isn't relevant)
-            Just _ ->
-              case n of
-                -1 -> putStr "\x1b[38;5;240m" -- Gray (Coverage status isn't relevant)
-                0  -> putStr "\x1b[31m" -- Red (Uncovered)
-                _  -> putStr "\x1b[32m" -- Green (Covered)
-          Char8.putStrLn bs
-        putStrLn ""
-  mapM_ f (Map.toList (coverageReport dapp covs))
-
-shouldPrintCoverage :: Maybe Text -> Text -> Bool
-shouldPrintCoverage (Just covMatch) file = regexMatches covMatch file
-shouldPrintCoverage Nothing file = not (isTestOrLib file)
-
 isTestOrLib :: Text -> Bool
 isTestOrLib file = T.isSuffixOf ".t.sol" file || areAnyPrefixOf ["src/test/", "src/tests/", "lib/"] file
 
@@ -483,63 +352,41 @@ launchExec :: Command Options.Unwrapped -> IO ()
 launchExec cmd = do
   dapp <- getSrcInfo cmd
   vm <- vmFromCommand cmd
+  let
+    block = maybe Fetch.Latest Fetch.BlockNumber cmd.block
+    rpcinfo = (,) block <$> cmd.rpc
+
   -- TODO: we shouldn't need solvers to execute this code
   withSolvers Z3 0 Nothing $ \solvers -> do
-    case optsMode cmd of
-      Run -> do
-        vm' <- EVM.Stepper.interpret (EVM.Fetch.oracle solvers rpcinfo) vm EVM.Stepper.runFully
-        when cmd.trace $ T.hPutStr stderr (showTraceTree dapp vm')
-        case vm'.result of
-          Just (VMFailure (Revert msg)) -> do
-            let res = case msg of
-                        ConcreteBuf bs -> bs
-                        _ -> "<symbolic>"
-            putStrLn $ "Revert: " <> (show $ ByteStringS res)
-            exitWith (ExitFailure 2)
-          Just (VMFailure err) -> do
-            putStrLn $ "Error: " <> show err
-            exitWith (ExitFailure 2)
-          Just (Unfinished p) -> do
-            putStrLn $ "Could not continue execution: " <> show p
-            exitWith (ExitFailure 2)
-          Just (VMSuccess buf) -> do
-            let msg = case buf of
-                  ConcreteBuf msg' -> msg'
-                  _ -> "<symbolic>"
-            print $ "Return: " <> (show $ ByteStringS msg)
-            case cmd.state of
-              Nothing -> pure ()
-              Just path -> case Facts.vmFacts vm' of
-                Right fs -> Git.saveFacts (Git.RepoAt path) fs
-                Left e -> do
-                  putStrLn "Error when serializing vm state:"
-                  putStrLn e
-                  exitFailure
-            case cmd.cache of
-              Nothing -> pure ()
-              Just path -> case Facts.cacheFacts vm'.cache of
-                Right fs -> Git.saveFacts (Git.RepoAt path) fs
-                Left e -> do
-                  putStrLn "Error when serializing vm state:"
-                  putStrLn e
-                  exitFailure
-          _ ->
-            internalError "no EVM result"
-
-      Debug -> void $ TTY.runFromVM solvers rpcinfo Nothing dapp vm
-      --JsonTrace -> void $ execStateT (interpretWithTrace fetcher EVM.Stepper.runFully) vm
-      _ -> internalError "TODO"
-     where block = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber cmd.block
-           rpcinfo = (,) block <$> cmd.rpc
+    vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcinfo) vm EVM.Stepper.runFully
+    when cmd.trace $ T.hPutStr stderr (showTraceTree dapp vm')
+    case vm'.result of
+      Just (VMFailure (Revert msg)) -> do
+        let res = case msg of
+                    ConcreteBuf bs -> bs
+                    _ -> "<symbolic>"
+        putStrLn $ "Revert: " <> (show $ ByteStringS res)
+        exitWith (ExitFailure 2)
+      Just (VMFailure err) -> do
+        putStrLn $ "Error: " <> show err
+        exitWith (ExitFailure 2)
+      Just (Unfinished p) -> do
+        putStrLn $ "Could not continue execution: " <> show p
+        exitWith (ExitFailure 2)
+      Just (VMSuccess buf) -> do
+        let msg = case buf of
+              ConcreteBuf msg' -> msg'
+              _ -> "<symbolic>"
+        print $ "Return: " <> (show $ ByteStringS msg)
+      _ ->
+        internalError "no EVM result"
 
 -- | Creates a (concrete) VM from command line options
 vmFromCommand :: Command Options.Unwrapped -> IO (VM RealWorld)
 vmFromCommand cmd = do
-  withCache <- applyCache (cmd.state, cmd.cache)
-
   (miner,ts,baseFee,blockNum,prevRan) <- case cmd.rpc of
     Nothing -> pure (LitAddr 0,Lit 0,0,0,0)
-    Just url -> EVM.Fetch.fetchBlockFrom block url >>= \case
+    Just url -> Fetch.fetchBlockFrom block url >>= \case
       Nothing -> error "Error: Could not fetch block"
       Just Block{..} -> pure ( coinbase
                              , timestamp
@@ -550,7 +397,7 @@ vmFromCommand cmd = do
 
   contract <- case (cmd.rpc, cmd.address, cmd.code) of
     (Just url, Just addr', Just c) -> do
-      EVM.Fetch.fetchContractFrom block url addr' >>= \case
+      Fetch.fetchContractFrom block url addr' >>= \case
         Nothing ->
           error $ "Error: contract not found: " <> show address
         Just contract ->
@@ -563,7 +410,7 @@ vmFromCommand cmd = do
               & set #external (contract.external)
 
     (Just url, Just addr', Nothing) ->
-      EVM.Fetch.fetchContractFrom block url addr' >>= \case
+      Fetch.fetchContractFrom block url addr' >>= \case
         Nothing ->
           error $ "Error: contract not found: " <> show address
         Just contract -> pure contract
@@ -580,20 +427,20 @@ vmFromCommand cmd = do
         Nothing -> internalError "unexpected symbolic timestamp when executing vm test"
 
   vm <- stToIO $ vm0 baseFee miner ts' blockNum prevRan contract
-  pure $ EVM.Transaction.initTx $ withCache vm
+  pure $ EVM.Transaction.initTx vm
     where
-        block   = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber cmd.block
+        block   = maybe Fetch.Latest Fetch.BlockNumber cmd.block
         value   = word (.value) 0
-        caller  = eaddr (.caller) (LitAddr 0)
-        origin  = addr (.origin) 0
+        caller  = addr (.caller) (LitAddr 0)
+        origin  = addr (.origin) (LitAddr 0)
         calldata = ConcreteBuf $ bytes (.calldata) ""
         decipher = hexByteString "bytes" . strip0x
         mkCode bs = if cmd.create
                     then InitCode bs mempty
                     else RuntimeCode (ConcreteRuntimeCode bs)
         address = if cmd.create
-                  then eaddr (.address) (createAddress origin (W64 $ word64 (.nonce) 0))
-                  else eaddr (.address) (LitAddr 0xacab)
+                  then addr (.address) (Concrete.createAddress (fromJust $ maybeLitAddr origin) (W64 $ word64 (.nonce) 0))
+                  else addr (.address) (LitAddr 0xacab)
 
         vm0 baseFee miner ts blockNum prevRan c = makeVm $ VMOpts
           { contract      = c
@@ -601,19 +448,19 @@ vmFromCommand cmd = do
           , value         = Lit value
           , address       = address
           , caller        = caller
-          , origin        = LitAddr origin
+          , origin        = origin
           , gas           = word64 (.gas) 0xffffffffffffffff
           , baseFee       = baseFee
           , priorityFee   = word (.priorityFee) 0
           , gaslimit      = word64 (.gaslimit) 0xffffffffffffffff
-          , coinbase      = eaddr (.coinbase) miner
+          , coinbase      = addr (.coinbase) miner
           , number        = word (.number) blockNum
           , timestamp     = Lit $ word (.timestamp) ts
           , blockGaslimit = word64 (.gaslimit) 0xffffffffffffffff
           , gasprice      = word (.gasprice) 0
           , maxCodeSize   = word (.maxcodesize) 0xffffffff
           , prevRandao    = word (.prevRandao) prevRan
-          , schedule      = FeeSchedule.berlin
+          , schedule      = feeSchedule
           , chainId       = word (.chainid) 1
           , create        = (.create) cmd
           , baseState     = EmptyBase
@@ -622,15 +469,14 @@ vmFromCommand cmd = do
           }
         word f def = fromMaybe def (f cmd)
         word64 f def = fromMaybe def (f cmd)
-        addr f def = fromMaybe def (f cmd)
-        eaddr f def = maybe def LitAddr (f cmd)
+        addr f def = maybe def LitAddr (f cmd)
         bytes f def = maybe def decipher (f cmd)
 
 symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM RealWorld)
 symvmFromCommand cmd calldata = do
   (miner,blockNum,baseFee,prevRan) <- case cmd.rpc of
-    Nothing -> return (LitAddr 0,0,0,0)
-    Just url -> EVM.Fetch.fetchBlockFrom block url >>= \case
+    Nothing -> pure (SymAddr "miner",0,0,0)
+    Just url -> Fetch.fetchBlockFrom block url >>= \case
       Nothing -> error "Error: Could not fetch block"
       Just Block{..} -> pure ( coinbase
                              , number
@@ -642,12 +488,10 @@ symvmFromCommand cmd calldata = do
     caller = SymAddr "caller"
     ts = maybe Timestamp Lit cmd.timestamp
     callvalue = maybe TxValue Lit cmd.value
-  -- TODO: rework this, ConcreteS not needed anymore
-  withCache <- applyCache (cmd.state, cmd.cache)
 
   contract <- case (cmd.rpc, cmd.address, cmd.code) of
     (Just url, Just addr', _) ->
-      EVM.Fetch.fetchContractFrom block url addr' >>= \case
+      Fetch.fetchContractFrom block url addr' >>= \case
         Nothing ->
           error "Error: contract not found."
         Just contract' -> pure contract''
@@ -663,30 +507,28 @@ symvmFromCommand cmd calldata = do
                         & set #external    (contract'.external)
 
     (_, _, Just c)  ->
-      pure (initialContract . mkCode $ decipher c)
+      pure ((`abstractContract` address) . mkCode $ decipher c)
     (_, _, Nothing) ->
       error "Error: must provide at least (rpc + address) or code"
 
   vm <- stToIO $ vm0 baseFee miner ts blockNum prevRan calldata callvalue caller contract
-  pure $ EVM.Transaction.initTx (withCache vm)
+  pure $ EVM.Transaction.initTx vm
 
   where
     decipher = hexByteString "bytes" . strip0x
-    block = maybe EVM.Fetch.Latest EVM.Fetch.BlockNumber cmd.block
-    origin = addr (.origin) 0
+    block = maybe Fetch.Latest Fetch.BlockNumber cmd.block
+    origin = eaddr (.origin) (SymAddr "origin")
     mkCode bs = if cmd.create
                    then InitCode bs mempty
                    else RuntimeCode (ConcreteRuntimeCode bs)
-    address = if cmd.create
-          then eaddr (.address) (createAddress origin (W64 $ word64 (.nonce) 0))
-          else eaddr (.address) (LitAddr 0xacab)
+    address = eaddr (.address) (SymAddr "entrypoint")
     vm0 baseFee miner ts blockNum prevRan cd callvalue caller c = makeVm $ VMOpts
       { contract      = c
       , calldata      = cd
       , value         = callvalue
       , address       = address
       , caller        = caller
-      , origin        = LitAddr origin
+      , origin        = origin
       , gas           = word64 (.gas) 0xffffffffffffffff
       , gaslimit      = word64 (.gaslimit) 0xffffffffffffffff
       , baseFee       = baseFee
@@ -698,7 +540,7 @@ symvmFromCommand cmd calldata = do
       , gasprice      = word (.gasprice) 0
       , maxCodeSize   = word (.maxcodesize) 0xffffffff
       , prevRandao    = word (.prevRandao) prevRan
-      , schedule      = FeeSchedule.berlin
+      , schedule      = feeSchedule
       , chainId       = word (.chainid) 1
       , create        = (.create) cmd
       , baseState     = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
@@ -707,9 +549,41 @@ symvmFromCommand cmd calldata = do
       }
     word f def = fromMaybe def (f cmd)
     word64 f def = fromMaybe def (f cmd)
-    addr f def = fromMaybe def (f cmd)
     eaddr f def = maybe def LitAddr (f cmd)
 
+unitTestOptions :: Command Options.Unwrapped -> SolverGroup -> Maybe BuildOutput -> IO (UnitTestOptions RealWorld)
+unitTestOptions cmd solvers buildOutput = do
+  root <- getRoot cmd
+  let srcInfo = maybe emptyDapp (dappInfo root) buildOutput
+
+  let rpcinfo = case (cmd.number, cmd.rpc) of
+          (Just block, Just url) -> Just (Fetch.BlockNumber block, url)
+          (Nothing, Just url) -> Just (Fetch.Latest, url)
+          _ -> Nothing
+  params <- paramsFromRpc rpcinfo
+
+  let
+    testn = params.number
+    block' = if 0 == testn
+       then Fetch.Latest
+       else Fetch.BlockNumber testn
+
+  pure UnitTestOptions
+    { solvers = solvers
+    , rpcInfo = case cmd.rpc of
+         Just url -> Just (block', url)
+         Nothing  -> Nothing
+    , maxIter = cmd.maxIterations
+    , askSmtIters = cmd.askSmtIterations
+    , smtDebug = cmd.smtdebug
+    , smtTimeout = cmd.smttimeout
+    , solver = cmd.solver
+    , verbose = cmd.verbose
+    , match = T.pack $ fromMaybe ".*" cmd.match
+    , testParams = params
+    , dapp = srcInfo
+    , ffiAllowed = cmd.ffi
+    }
 parseInitialStorage :: InitialStorage -> BaseState
 parseInitialStorage Empty = EmptyBase
 parseInitialStorage Abstract = AbstractBase

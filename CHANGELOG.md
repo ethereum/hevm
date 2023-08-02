@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - symbolic solidity tests no longer consider reverts to be a failure, and check only for the ds-test failed bit or unser defined assertion failures (i.e. `Panic(0x01)`)
 - `vm.prank` now works correctly when passed a symbolic address
 - The `--initial-storage` flag no longer accepts a concrete prestore (valid values are now `Empty` or `Abstract`)
+- The visual debugger has been removed
+- All concrete ds-test executors have been removed (i.e. plain, fuzzer, invariant)
+- Rpc caching and state serialization has been removed (i.e. all `--cache` / `--state` flags)
+- The various `DAPP_TEST` variables are no longer observed
 
 ### Internals
 
