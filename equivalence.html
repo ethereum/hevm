@@ -172,6 +172,7 @@
                         [--smttimeout NATURAL] [--max-iterations INTEGER]
                         [--solver TEXT] [--smtoutput] [--smtdebug]
                         [--ask-smt-iterations INTEGER]
+                        [--loop-detection-heuristic LOOPHEURISTIC]
 
 Available options:
   -h,--help                Show this help text
@@ -189,7 +190,11 @@ Available options:
   --ask-smt-iterations INTEGER
                            Number of times we may revisit a particular branching
                            point before we consult the smt solver to check
-                           reachability (default: 5)
+                           reachability (default: 1) (default: 1)
+  --loop-detection-heuristic LOOPHEURISTIC
+                           Which heuristic should be used to determine if we are
+                           in a loop: StackBased (default) or Naive
+                           (default: StackBased)
 </code></pre>
 <p>Symbolically execute both the code given in <code>--code-a</code> and <code>--code-b</code> and try to prove equivalence between their outputs and storages.</p>
 <p>If <code>--sig</code> is given, calldata is assumed to take the form of the function given.
