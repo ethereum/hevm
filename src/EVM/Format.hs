@@ -187,7 +187,7 @@ formatSBinary (ConcreteBuf bs) = formatBinary bs
 formatSBinary (AbstractBuf t) = "<" <> t <> " abstract buf>"
 formatSBinary _ = internalError "formatSBinary: implement me"
 
-showTraceTree :: DappInfo -> VM -> Text
+showTraceTree :: DappInfo -> VM s -> Text
 showTraceTree dapp vm =
   let forest = traceForest vm
       traces = fmap (fmap (unpack . showTrace dapp (vm.env.contracts))) forest

@@ -20,6 +20,7 @@ import EVM.Solidity
 import EVM.Solvers
 import EVM.TTY qualified as TTY
 import EVM.UnitTest
+import Control.Monad.ST (RealWorld)
 
 runSolidityTestCustom :: FilePath -> Text -> Maybe Natural -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> IO Bool
 runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectType = do
@@ -44,7 +45,7 @@ debugSolidityTest testFile rpcinfo = do
           opts <- testOpts solvers root (Just bo) ".*" Nothing True rpcinfo
           TTY.main opts root (Just bo)
 
-testOpts :: SolverGroup -> FilePath -> Maybe BuildOutput -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO UnitTestOptions
+testOpts :: SolverGroup -> FilePath -> Maybe BuildOutput -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO (UnitTestOptions RealWorld)
 testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
   let srcInfo = maybe emptyDapp (dappInfo root) buildOutput
 

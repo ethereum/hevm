@@ -7,6 +7,7 @@ import Prelude hiding (LT, GT)
 
 import GHC.TypeLits
 import Data.Proxy
+import Control.Monad.ST (RealWorld, stToIO)
 import Control.Monad.State.Strict
 import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
@@ -88,21 +89,21 @@ tests = testGroup "hevm"
         let dummyContract =
               (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)))
                 { external = True }
-            vm = vmForEthrunCreation ""
+        vm <- stToIO $ vmForEthrunCreation ""
             -- perform the initial access
-            vm1 = execState (EVM.accessStorage (LitAddr 0) (Lit 0) (pure . pure ())) vm
-            -- it should fetch the contract first
-            vm2 = case vm1.result of
-                    Just (HandleEffect (Query (PleaseFetchContract _addr _ continue))) ->
-                      execState (continue dummyContract) vm1
-                    _ -> internalError "unexpected result"
+        vm1 <- stToIO $ execStateT (EVM.accessStorage (LitAddr 0) (Lit 0) (pure . pure ())) vm
+        -- it should fetch the contract first
+        vm2 <- case vm1.result of
+                Just (HandleEffect (Query (PleaseFetchContract _addr _ continue))) ->
+                  stToIO $ execStateT (continue dummyContract) vm1
+                _ -> internalError "unexpected result"
             -- then it should fetch the slow
-            vm3 = case vm2.result of
+        vm3 <- case vm2.result of
                     Just (HandleEffect (Query (PleaseFetchSlot _addr _slot continue))) ->
-                      execState (continue 1337) vm2
+                      stToIO $ execStateT (continue 1337) vm2
                     _ -> internalError "unexpected result"
             -- perform the same access as for vm1
-            vm4 = execState (EVM.accessStorage (LitAddr 0) (Lit 0) (pure . pure ())) vm3
+        vm4 <- stToIO $ execStateT (EVM.accessStorage (LitAddr 0) (Lit 0) (pure . pure ())) vm3
 
         -- there won't be query now as accessStorage uses fetch cache
         assertBool (show vm4.result) (isNothing vm4.result)
@@ -2026,10 +2027,10 @@ tests = testGroup "hevm"
           Just c <- solcRuntime "C" code
           Just a <- solcRuntime "A" code
           (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> do
-            let vm = abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing False
-                       & set (#state % #callvalue) (Lit 0)
-                       & over (#env % #contracts)
-                          (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
+            vm <- stToIO $ abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing False
+                    <&> set (#state % #callvalue) (Lit 0)
+                    <&> over (#env % #contracts)
+                       (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
             verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
 
           let storeCex = cex.store
@@ -2090,7 +2091,7 @@ tests = testGroup "hevm"
         ,
         ignoreTest $ testCase "safemath distributivity (yul)" $ do
           let yulsafeDistributivity = hex "6355a79a6260003560e01c14156016576015601f565b5b60006000fd60a1565b603d602d604435600435607c565b6039602435600435607c565b605d565b6052604b604435602435605d565b600435607c565b141515605a57fe5b5b565b6000828201821115151560705760006000fd5b82820190505b92915050565b6000818384048302146000841417151560955760006000fd5b82820290505b92915050565b"
-          let vm =  abstractVM (mkCalldata (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []) yulsafeDistributivity Nothing False
+          vm <- stToIO $ abstractVM (mkCalldata (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []) yulsafeDistributivity Nothing False
           (_, [Qed _]) <-  withSolvers Z3 1 Nothing $ \s -> verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
         ,
@@ -2702,9 +2703,10 @@ runSimpleVM x ins = do
        s -> internalError $ show s
 
 -- | Takes a creation code and returns a vm with the result of executing the creation code
-loadVM :: ByteString -> IO (Maybe VM)
+loadVM :: ByteString -> IO (Maybe (VM RealWorld))
 loadVM x = do
-  vm1 <- Stepper.interpret (Fetch.zero 0 Nothing) (vmForEthrunCreation x) Stepper.runFully
+  vm <- stToIO $ vmForEthrunCreation x
+  vm1 <- Stepper.interpret (Fetch.zero 0 Nothing) vm Stepper.runFully
   case vm1.result of
      Just (VMSuccess (ConcreteBuf targetCode)) -> do
        let target = vm1.state.contract
@@ -2716,7 +2718,7 @@ loadVM x = do
       replaceCodeOfSelf (RuntimeCode $ ConcreteRuntimeCode targetCode)
       resetState
       assign (#state % #gas) 0xffffffffffffffff -- kludge
-      loadContract target
+      execState (loadContract target) <$> get >>= put
 
 hex :: ByteString -> ByteString
 hex s =
@@ -2767,7 +2769,7 @@ runStatements stmts args t = do
     }
   |] (abiMethod s (AbiTuple $ Vector.fromList args))
 
-getStaticAbiArgs :: Int -> VM -> [Expr EWord]
+getStaticAbiArgs :: Int -> VM s -> [Expr EWord]
 getStaticAbiArgs n vm =
   let cd = vm.state.calldata
   in decodeStaticArgs 4 n cd
@@ -3253,7 +3255,7 @@ bothM f (a, a') = do
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
 
-checkBadCheatCode :: Text -> Postcondition
+checkBadCheatCode :: Text -> Postcondition s
 checkBadCheatCode sig _ = \case
   (Failure _ _ (BadCheatCode s)) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
   _ -> PBool True

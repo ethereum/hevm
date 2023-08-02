@@ -9,11 +9,12 @@ import Control.Monad.Trans.State.Strict (get, State)
 import Data.ByteString (ByteString)
 import Data.Maybe (isNothing)
 import Optics.Core
+import Control.Monad.ST (ST)
 
 ethrunAddress :: Addr
 ethrunAddress = Addr 0x00a329c0648769a73afac7f9381e08fb43dbea72
 
-vmForEthrunCreation :: ByteString -> VM
+vmForEthrunCreation :: ByteString -> ST s (VM s)
 vmForEthrunCreation creationCode =
   (makeVm $ VMOpts
     { contract = initialContract (InitCode creationCode mempty)
@@ -39,24 +40,24 @@ vmForEthrunCreation creationCode =
     , create = False
     , txAccessList = mempty
     , allowFFI = False
-    }) & set (#env % #contracts % at (LitAddr ethrunAddress))
+    }) <&> set (#env % #contracts % at (LitAddr ethrunAddress))
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
 
-exec :: State VM VMResult
+exec :: EVM s (VMResult s)
 exec = do
   vm <- get
   case vm.result of
     Nothing -> exec1 >> exec
     Just r -> pure r
 
-run :: State VM VM
+run :: EVM s (VM s)
 run = do
   vm <- get
   case vm.result of
     Nothing -> exec1 >> run
     Just _ -> pure vm
 
-execWhile :: (VM -> Bool) -> State VM Int
+execWhile :: (VM s -> Bool) -> State (VM s) Int
 execWhile p = go 0
   where
     go i = do
