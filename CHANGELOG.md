@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The visual debugger has been removed
 - All concrete ds-test executors have been removed (i.e. plain, fuzzer, invariant)
 - Rpc caching and state serialization has been removed (i.e. all `--cache` / `--state` flags)
+- The various `DAPP_TEST` variables are no longer observed
 
 ### Internals
 
