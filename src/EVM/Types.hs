@@ -66,6 +66,7 @@ instance From Nibble Int where from = fromIntegral
 instance From W256 Integer where from = fromIntegral
 instance From Word8 W256 where from = fromIntegral
 instance From Word8 Word256 where from = fromIntegral
+instance From Word64 Word256 where from = fromIntegral
 instance From Word32 W256 where from = fromIntegral
 instance From Word32 Word256 where from = fromIntegral
 instance From Word64 W256 where from = fromIntegral
@@ -103,7 +104,7 @@ data EType
   | EWord
   | Byte
   | End
-  deriving (Typeable)
+  deriving (Typeable, Show, Read)
 
 
 -- Variables refering to a global environment
