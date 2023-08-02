@@ -617,6 +617,7 @@ data RuntimeConfig = RuntimeConfig
   { allowFFI :: Bool
   , overrideCaller :: Maybe (Expr EAddr)
   , baseState :: BaseState
+  , modelGas :: Bool
   }
   deriving (Show)
 
