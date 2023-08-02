@@ -1,12 +1,11 @@
 # `hevm dapp-test`
 
 ```
-Usage: hevm test [--root STRING] [--project-type PROJECTTYPE] [--debug]
-                 [--jsontrace] [--fuzz-runs INT] [--depth INT]
-                 [--replay (TEXT,BYTESTRING)] [--rpc TEXT] [--verbose INT]
-                 [--coverage] [--state STRING] [--cache STRING] [--match STRING]
-                 [--cov-match STRING] [--solver TEXT] [--smtdebug] [--ffi]
-                 [--smttimeout NATURAL] [--max-iterations INTEGER]
+Usage: hevm test [--root STRING] [--project-type PROJECTTYPE] [--rpc TEXT]
+                 [--verbose INT] [--coverage] [--match STRING] [--solver TEXT]
+                 [--smtdebug] [--ffi] [--smttimeout NATURAL]
+                 [--max-iterations INTEGER]
+                 [--loop-detection-heuristic LOOPHEURISTIC]
                  [--ask-smt-iterations INTEGER]
 
 Available options:
@@ -15,20 +14,10 @@ Available options:
   --project-type PROJECTTYPE
                            Is this a Foundry or DappTools project (default:
                            Foundry)
-  --debug                  Run interactively
-  --jsontrace              Print json trace output at every step
-  --fuzz-runs INT          Number of times to run fuzz tests
-  --depth INT              Number of transactions to explore
-  --replay (TEXT,BYTESTRING)
-                           Custom fuzz case to run/debug
   --rpc TEXT               Fetch state from a remote node
   --verbose INT            Append call trace: {1} failures {2} all
   --coverage               Coverage analysis
-  --state STRING           Path to state repository
-  --cache STRING           Path to rpc cache repository
   --match STRING           Test case filter - only run methods matching regex
-  --cov-match STRING       Coverage filter - only print coverage for files
-                           matching regex
   --solver TEXT            Used SMT solver: z3 (default) or cvc5
   --smtdebug               Print smt queries sent to the solver
   --ffi                    Allow the usage of the hevm.ffi() cheatcode (WARNING:
@@ -37,10 +26,14 @@ Available options:
   --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
   --max-iterations INTEGER Number of times we may revisit a particular branching
                            point
+  --loop-detection-heuristic LOOPHEURISTIC
+                           Which heuristic should be used to determine if we are
+                           in a loop: StackBased (default) or Naive
+                           (default: StackBased)
   --ask-smt-iterations INTEGER
                            Number of times we may revisit a particular branching
                            point before we consult the smt solver to check
-                           reachability (default: 5)
+                           reachability (default: 1) (default: 1)
 ```
 
 `hevm test` will execute all solidity unit tests that make use of the `DSTest` assertion library

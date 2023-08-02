@@ -4,7 +4,7 @@
 
 Since Hevm is an EVM implementation mainly dedicated to testing and exploration, it features a set of `cheat codes` which can manipulate the environment in which the execution is run.
 
-These can be accessed by calling into a contract (typically called `Hevm`) at address `0x7109709ECfa91a80626fF3989D68f67F5b1DD12D`, which implements the following methods:
+These can be accessed by calling into a contract (typically called `Vm`) at address `0x7109709ECfa91a80626fF3989D68f67F5b1DD12D`, which implements the following methods:
 
 - `function warp(uint x) public`
   Sets the block timestamp to `x`.
@@ -31,22 +31,3 @@ These can be accessed by calling into a contract (typically called `Hevm`) at ad
 
 - `function prank(address sender) public`
   Sets `msg.sender` to the specified `sender` for the next call.
-
-## Environment Variables
-
-These environment variables can be used to control block parameters:
-
-| Variable               | Default                                      | Synopsis                                                                                                      |
-| ---------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `DAPP_TEST_ADDRESS`    | `0xb4c79daB8f259C7Aee6E5b2Aa729821864227e84` | The address to deploy the test contract to                                                                    |
-| `DAPP_TEST_CALLER`     | `0x00a329c0648769a73afac7f9381e08fb43dbea72` | The address to set `msg.sender` to when calling into the test contract                                        |
-| `DAPP_TEST_ORIGIN`     | `0x00a329c0648769a73afac7f9381e08fb43dbea72` | The address to set `tx.orgin` to when calling into the test contract                                          |
-| `DAPP_TEST_GAS_CREATE` | `0xffffffffffff`                             | The gas to provide when creating the testing contract                                                         |
-| `DAPP_TEST_GAS_CALL`   | `0xffffffffffff`                             | The gas to provide to each call made to the testing contract                                                  |
-| `DAPP_TEST_BALANCE`    | `0xffffffffffffffffffffffff`                 | The balance to provide to `DAPP_TEST_ADDRESS`                                                                 |
-| `DAPP_TEST_COINBASE`   | `0x0000000000000000000000000000000000000000` | The coinbase address. Will be set to the coinbase for the block at `DAPP_TEST_NUMBER` if rpc is enabled       |
-| `DAPP_TEST_NUMBER`     | `0`                                          | The block number. Will be set to the latest block if rpc is enabled                                           |
-| `DAPP_TEST_TIMESTAMP`  | `0`                                          | The block timestamp. Will be set to the timestamp for the block at `DAPP_TEST_NUMBER` if rpc is enabled       |
-| `DAPP_TEST_GAS_LIMIT`  | `0`                                          | The block gas limit to use                                                                                    |
-| `DAPP_TEST_GAS_PRICE`  | `0`                                          | The gas price to use                                                                                          |
-| `DAPP_TEST_PREVRANDAO` | `0`                                          | The value for PREVRANDAO. Will be set to the value for the block at `DAPP_TEST_NUMBER` if rpc is enabled  |
