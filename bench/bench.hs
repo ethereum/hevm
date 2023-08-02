@@ -2,7 +2,6 @@ module Main where
 
 import GHC.Natural
 import Control.Monad
-import Control.Monad.ST (stToIO)
 import Data.Maybe
 import System.Environment (getEnv)
 
@@ -20,7 +19,6 @@ import qualified Data.ByteString.Lazy as LazyByteString
 import EVM.SymExec
 import EVM.Solidity
 import EVM.Solvers
-import EVM.Dapp
 import EVM.Format (hexByteString)
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
