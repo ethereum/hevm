@@ -280,16 +280,17 @@ symFailure UnitTestOptions {..} testName cd types failures' =
             _ -> ""
         ]
 
-prettyCalldata :: (?context :: DappContext) => SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
-prettyCalldata cex buf sig types = head (Text.splitOn "(" sig) <> showCalldata cex types buf
-
-showCalldata :: (?context :: DappContext) => SMTCex -> [AbiType] -> Expr Buf -> Text
-showCalldata cex tps buf = "(" <> intercalate "," (fmap showVal vals) <> ")"
+prettyCalldata :: SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
+prettyCalldata cex buf sig types = head (Text.splitOn "(" sig) <> "(" <> body <> ")"
   where
     argdata = Expr.drop 4 . simplify . defaultSymbolicValues $ subModel cex buf
-    vals = case decodeBuf tps argdata of
-             CAbi v -> v
-             _ -> internalError $ "unable to abi decode function arguments:\n" <> (Text.unpack $ formatExpr argdata)
+    body = case decodeBuf types argdata of
+      CAbi v -> intercalate "," (fmap showVal v)
+      NoVals -> case argdata of
+          ConcreteBuf c -> pack (bsToHex c)
+          _ -> err
+      SAbi _ -> err
+    err = internalError $ "unable to produce a concrete model for calldata: " <> show buf
 
 showVal :: AbiValue -> Text
 showVal (AbiBytes _ bs) = formatBytes bs
