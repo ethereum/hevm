@@ -233,8 +233,8 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
 
     -- display results
     if all isQed results
-    then if allReverts
-         then pure ("\x1b[31m[FAIL]\x1b[0m " <> testName, Right $ allBranchRev testName)
+    then if allReverts && (not shouldFail)
+         then pure ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left $ allBranchRev testName)
          else pure ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "")
     else do
       let x = mapMaybe extractCex results
