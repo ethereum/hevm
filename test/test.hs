@@ -1931,6 +1931,21 @@ tests = testGroup "hevm"
           (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn "oob byte reads always return 0"
         ,
+        testCase "injectivity of keccak (diff sizes)" $ do
+          Just c <- solcRuntime "A"
+            [i|
+            contract A {
+              function f(uint128 x, uint256 y) external pure {
+                assert(
+                    keccak256(abi.encodePacked(x)) !=
+                    keccak256(abi.encodePacked(y))
+                );
+              }
+            }
+            |]
+          Right _ <- reachableUserAsserts c (Just $ Sig "f(uint128,uint256)" [AbiUIntType 128, AbiUIntType 256])
+          pure ()
+        ,
         testCase "injectivity of keccak (32 bytes)" $ do
           Just c <- solcRuntime "A"
             [i|
