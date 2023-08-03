@@ -1030,6 +1030,13 @@ evalProp prop =
     go (PImpl (PBool l) (PBool r)) = PBool ((Prelude.not l) || r)
     go (PImpl (PBool False) _) = PBool True
 
+    go (PEq (Eq a b) (Lit 0)) = PNeg (PEq a b)
+    go (PEq (Eq a b) (Lit 1)) = PEq a b
+
+    go (PEq (Sub a b) (Lit 0)) = PEq a b
+
+    go (PNeg (PNeg a)) = a
+
     go (PEq (Lit l) (Lit r)) = PBool (l == r)
     go o@(PEq l r)
       | l == r = PBool True
