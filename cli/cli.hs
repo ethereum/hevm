@@ -134,6 +134,7 @@ data Command w
       { root        :: w ::: Maybe String               <?> "Path to  project root directory (default: . )"
       , projectType   :: w ::: Maybe ProjectType        <?> "Is this a Foundry or DappTools project (default: Foundry)"
       , rpc           :: w ::: Maybe URL                <?> "Fetch state from a remote node"
+      , number        :: w ::: Maybe W256               <?> "Block: number"
       , verbose       :: w ::: Maybe Int                <?> "Append call trace: {1} failures {2} all"
       , coverage      :: w ::: Bool                     <?> "Coverage analysis"
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
