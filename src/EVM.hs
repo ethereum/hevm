@@ -44,7 +44,6 @@ import Data.Text (unpack, pack)
 import Data.Text.Encoding (decodeUtf8)
 import Data.Tree
 import Data.Tree.Zipper qualified as Zipper
-import Data.Tuple.Curry
 import Data.Typeable
 import Data.Vector qualified as V
 import Data.Vector.Storable qualified as SV
@@ -345,38 +344,38 @@ exec1 = do
 
         OpStop -> doStop
 
-        OpAdd -> stackOp2 g_verylow (uncurry Expr.add)
-        OpMul -> stackOp2 g_low (uncurry Expr.mul)
-        OpSub -> stackOp2 g_verylow (uncurry Expr.sub)
+        OpAdd -> stackOp2 g_verylow Expr.add
+        OpMul -> stackOp2 g_low Expr.mul
+        OpSub -> stackOp2 g_verylow Expr.sub
 
-        OpDiv -> stackOp2 g_low (uncurry Expr.div)
+        OpDiv -> stackOp2 g_low Expr.div
 
-        OpSdiv -> stackOp2 g_low (uncurry Expr.sdiv)
+        OpSdiv -> stackOp2 g_low Expr.sdiv
 
-        OpMod -> stackOp2 g_low (uncurry Expr.mod)
+        OpMod -> stackOp2 g_low Expr.mod
 
-        OpSmod -> stackOp2 g_low (uncurry Expr.smod)
-        OpAddmod -> stackOp3 g_mid (uncurryN Expr.addmod)
-        OpMulmod -> stackOp3 g_mid (uncurryN Expr.mulmod)
+        OpSmod -> stackOp2 g_low Expr.smod
+        OpAddmod -> stackOp3 g_mid Expr.addmod
+        OpMulmod -> stackOp3 g_mid Expr.mulmod
 
-        OpLt -> stackOp2 g_verylow (uncurry Expr.lt)
-        OpGt -> stackOp2 g_verylow (uncurry Expr.gt)
-        OpSlt -> stackOp2 g_verylow (uncurry Expr.slt)
-        OpSgt -> stackOp2 g_verylow (uncurry Expr.sgt)
+        OpLt -> stackOp2 g_verylow Expr.lt
+        OpGt -> stackOp2 g_verylow Expr.gt
+        OpSlt -> stackOp2 g_verylow Expr.slt
+        OpSgt -> stackOp2 g_verylow Expr.sgt
 
-        OpEq -> stackOp2 g_verylow (uncurry Expr.eq)
+        OpEq -> stackOp2 g_verylow Expr.eq
         OpIszero -> stackOp1 g_verylow Expr.iszero
 
-        OpAnd -> stackOp2 g_verylow (uncurry Expr.and)
-        OpOr -> stackOp2 g_verylow (uncurry Expr.or)
-        OpXor -> stackOp2 g_verylow (uncurry Expr.xor)
+        OpAnd -> stackOp2 g_verylow Expr.and
+        OpOr -> stackOp2 g_verylow Expr.or
+        OpXor -> stackOp2 g_verylow Expr.xor
         OpNot -> stackOp1 g_verylow Expr.not
 
-        OpByte -> stackOp2 g_verylow (\(i, w) -> Expr.padByte $ Expr.indexWord i w)
+        OpByte -> stackOp2 g_verylow (\i w -> Expr.padByte $ Expr.indexWord i w)
 
-        OpShl -> stackOp2 g_verylow (uncurry Expr.shl)
-        OpShr -> stackOp2 g_verylow (uncurry Expr.shr)
-        OpSar -> stackOp2 g_verylow (uncurry Expr.sar)
+        OpShl -> stackOp2 g_verylow Expr.shl
+        OpShr -> stackOp2 g_verylow Expr.shr
+        OpSar -> stackOp2 g_verylow Expr.sar
 
         -- more accurately refered to as KECCAK
         OpSha3 ->
@@ -764,7 +763,7 @@ exec1 = do
                 (#state % #stack) .= Expr.exp base exponent' : xs
             _ -> underrun
 
-        OpSignextend -> stackOp2 g_low (uncurry Expr.sex)
+        OpSignextend -> stackOp2 g_low Expr.sex
 
         OpCreate ->
           notStatic $
@@ -2247,7 +2246,7 @@ pushAddr (GVar _) = error "Internal Error: Unexpected GVar"
 stackOp1
   :: (?op :: Word8)
   => Word64
-  -> ((Expr EWord) -> (Expr EWord))
+  -> (Expr EWord -> Expr EWord)
   -> EVM s ()
 stackOp1 cost f =
   use (#state % #stack) >>= \case
@@ -2255,35 +2254,35 @@ stackOp1 cost f =
       burn cost $ do
         next
         let !y = f x
-        (#state % #stack) .= y : xs
+        #state % #stack .= y : xs
     _ ->
       underrun
 
 stackOp2
   :: (?op :: Word8)
   => Word64
-  -> (((Expr EWord), (Expr EWord)) -> (Expr EWord))
+  -> (Expr EWord -> Expr EWord -> Expr EWord)
   -> EVM s ()
 stackOp2 cost f =
   use (#state % #stack) >>= \case
     x:y:xs ->
       burn cost $ do
         next
-        (#state % #stack) .= f (x, y) : xs
+        #state % #stack .= f x y : xs
     _ ->
       underrun
 
 stackOp3
   :: (?op :: Word8)
   => Word64
-  -> (((Expr EWord), (Expr EWord), (Expr EWord)) -> (Expr EWord))
+  -> (Expr EWord -> Expr EWord -> Expr EWord -> Expr EWord)
   -> EVM s ()
 stackOp3 cost f =
   use (#state % #stack) >>= \case
     x:y:z:xs ->
       burn cost $ do
       next
-      (#state % #stack) .= f (x, y, z) : xs
+      (#state % #stack) .= f x y z : xs
     _ ->
       underrun
 
