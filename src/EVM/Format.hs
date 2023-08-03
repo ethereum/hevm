@@ -142,7 +142,7 @@ showValue t b = head $ textValues [t] b
 
 showCall :: (?context :: DappContext) => [AbiType] -> Expr Buf -> Text
 showCall ts (ConcreteBuf bs) = showValues ts $ ConcreteBuf (BS.drop 4 bs)
-showCall _ _ = "<symbolic>"
+showCall _ _ = "(<symbolic>)"
 
 showError :: (?context :: DappContext) => Expr Buf -> Text
 showError (ConcreteBuf bs) =
@@ -299,12 +299,12 @@ showTrace dapp env trace =
     FrameTrace (CreationContext addr (Lit hash) _ _ ) -> -- FIXME: irrefutable pattern
       "create "
       <> maybeContractName (preview (ix hash % _2) dapp.solcByHash)
-      <> "@" <> pack (show addr)
+      <> "@" <> formatAddr addr
       <> pos
     FrameTrace (CreationContext addr _ _ _ ) ->
       "create "
       <> "<unknown contract>"
-      <> "@" <> pack (show addr)
+      <> "@" <> formatAddr addr
       <> pos
     FrameTrace (CallContext target context _ _ hash abi calldata _ _) ->
       let calltype = if target == context
@@ -316,7 +316,7 @@ showTrace dapp env trace =
           calltype
             <> case target of
                  LitAddr 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D -> "HEVM"
-                 _ -> pack (show target)
+                 _ -> formatAddr target
             <> pack "::"
             <> case Map.lookup (unsafeInto (fromMaybe 0x00 abi)) fullAbiMap of
                  Just m  ->
@@ -341,6 +341,12 @@ showTrace dapp env trace =
                  (abi >>= fmap getAbiTypes . maybeAbiName solc)
             <> "\x1b[0m"
             <> pos
+
+formatAddr :: Expr EAddr -> Text
+formatAddr = \case
+  LitAddr a -> pack (show a)
+  SymAddr a -> "symbolic(" <> a <> ")"
+  GVar _ -> internalError "Unexpected GVar"
 
 getAbiTypes :: Text -> [Maybe AbiType]
 getAbiTypes abi = map (parseTypeName mempty) types
@@ -427,7 +433,7 @@ formatPartial = \case
       , indent 2 $ T.unlines . fmap formatSomeExpr $ args
       ]
     ]
-  MaxIterationsReached pc addr -> T.pack $ "Max Iterations Reached in contract: " <> show addr <> " pc: " <> show pc
+  MaxIterationsReached pc addr -> "Max Iterations Reached in contract: " <> formatAddr addr <> " pc: " <> pack (show pc)
 
 formatSomeExpr :: SomeExpr -> Text
 formatSomeExpr (SomeExpr e) = formatExpr e
