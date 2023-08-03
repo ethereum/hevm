@@ -847,6 +847,21 @@ isLitWord (Lit _) = True
 isLitWord (WAddr (LitAddr _)) = True
 isLitWord _ = False
 
+isSuccess :: Expr End -> Bool
+isSuccess = \case
+  Success {} -> True
+  _ -> False
+
+isFailure :: Expr End -> Bool
+isFailure = \case
+  Failure {} -> True
+  _ -> False
+
+isPartial :: Expr End -> Bool
+isPartial = \case
+  Partial {} -> True
+  _ -> False
+
 -- | Returns the byte at idx from the given word.
 indexWord :: Expr EWord -> Expr EWord -> Expr Byte
 -- Simplify masked reads:
