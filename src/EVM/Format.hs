@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ImplicitParams #-}
 
 module EVM.Format
@@ -31,6 +32,8 @@ module EVM.Format
   , hexText
   , bsToHex
   ) where
+
+import Prelude hiding (LT, GT)
 
 import EVM.Types
 import EVM (traceForest, traceForest', traceContext, cheatCode)
@@ -436,25 +439,34 @@ formatExpr :: Expr a -> Text
 formatExpr = go
   where
     go :: Expr a -> Text
-    go = \case
+    go x = T.stripEnd $ case x of
       Lit w -> T.pack $ show w
+      (Var v) -> "(Var " <> T.pack (show v) <> ")"
+      (GVar v) -> "(GVar " <> T.pack (show v) <> ")"
       LitByte w -> T.pack $ show w
 
-      ITE c t f -> rstrip . T.unlines $
-        [ "(ITE (" <> formatExpr c <> ")"
-        , indent 2 (formatExpr t)
-        , indent 2 (formatExpr f)
+      ITE c t f -> T.unlines
+        [ "(ITE"
+        , indent 2 $ T.unlines
+          [ formatExpr c
+          , formatExpr t
+          , formatExpr f
+          ]
         , ")"]
       Success asserts _ buf store -> T.unlines
-        [ "(Return"
+        [ "(Success"
         , indent 2 $ T.unlines
           [ "Data:"
           , indent 2 $ formatExpr buf
           , ""
-          , "Store:"
-          , indent 2 $ T.unlines (fmap (\(a,s) -> (formatExpr a) <> " : " <> (formatExpr s)) (Map.toList store))
+          , "State:"
+          , indent 2 $ T.unlines (fmap (\(k,v) ->
+              T.unlines
+                [ formatExpr k <> ":"
+                , indent 2 $ formatExpr v
+                ]) (Map.toList store))
           , "Assertions:"
-          , indent 2 $ T.pack $ show asserts
+          , indent 2 . T.unlines $ fmap formatProp asserts
           ]
         , ")"
         ]
@@ -464,7 +476,7 @@ formatExpr = go
           [ "Reason:"
           , indent 2 $ formatPartial err
           , "Assertions:"
-          , indent 2 $ T.pack $ show asserts
+          , indent 2 . T.unlines $ fmap formatProp asserts
           ]
         , ")"
         ]
@@ -474,7 +486,7 @@ formatExpr = go
           [ "Error:"
           , indent 2 $ formatError err
           , "Assertions:"
-          , indent 2 $ T.pack $ show asserts
+          , indent 2 . T.unlines $ fmap formatProp asserts
           ]
         , ")"
         ]
@@ -499,12 +511,134 @@ formatExpr = go
           ]
         , ")"
         ]
-
-      And a b -> T.unlines
-        [ "(And"
+      ReadByte idx buf -> T.unlines
+        [ "(ReadByte"
         , indent 2 $ T.unlines
-          [ formatExpr a
-          , formatExpr b
+          [ "idx:"
+          , indent 2 $ formatExpr idx
+          , "buf: "
+          , indent 2 $ formatExpr buf
+          ]
+        , ")"
+        ]
+
+      Add a b -> fmt "Add" [a, b]
+      Sub a b -> fmt "Sub" [a, b]
+      Mul a b -> fmt "Mul" [a, b]
+      Div a b -> fmt "Div" [a, b]
+      SDiv a b -> fmt "SDiv" [a, b]
+      Mod a b -> fmt "Mod" [a, b]
+      SMod a b -> fmt "SMod" [a, b]
+      AddMod a b c -> fmt "AddMod" [a, b, c]
+      MulMod a b c -> fmt "MulMod" [a, b, c]
+      Exp a b -> fmt "Exp" [a, b]
+      SEx a b -> fmt "SEx" [a, b]
+      Min a b -> fmt "Min" [a, b]
+      Max a b -> fmt "Min" [a, b]
+
+      LT a b -> fmt "LT" [a, b]
+      GT a b -> fmt "GT" [a, b]
+      LEq a b -> fmt "LEq" [a, b]
+      GEq a b -> fmt "GEq" [a, b]
+      SLT a b -> fmt "SLT" [a, b]
+      SGT a b -> fmt "SGT" [a, b]
+      Eq a b -> fmt "Eq" [a, b]
+      EqByte a b -> fmt "Eq" [a, b]
+      IsZero a -> fmt "IsZero" [a]
+
+      And a b -> fmt "And" [a, b]
+      Or a b -> fmt "Or" [a, b]
+      Xor a b -> fmt "Xor" [a, b]
+      Not a -> fmt "Not" [a]
+      SHL a b -> fmt "SHL" [a, b]
+      SHR a b -> fmt "SHR" [a, b]
+      SAR a b -> fmt "SAR" [a, b]
+
+      e@Origin -> T.pack (show e)
+      e@Coinbase -> T.pack (show e)
+      e@Timestamp -> T.pack (show e)
+      e@BlockNumber -> T.pack (show e)
+      e@PrevRandao -> T.pack (show e)
+      e@GasLimit -> T.pack (show e)
+      e@ChainId -> T.pack (show e)
+      e@BaseFee -> T.pack (show e)
+      e@TxValue -> T.pack (show e)
+      e@(Gas {}) -> "(" <> T.pack (show e) <> ")"
+
+      BlockHash a -> fmt "BlockHash" [a]
+      Balance a -> fmt "Balance" [a]
+      CodeSize a -> fmt "CodeSize" [a]
+      CodeHash a -> fmt "CodeHash" [a]
+
+
+      JoinBytes zero one two three four five six seven eight nine
+        ten eleven twelve thirteen fourteen fifteen sixteen seventeen
+        eighteen nineteen twenty twentyone twentytwo twentythree twentyfour
+        twentyfive twentysix twentyseven twentyeight twentynine thirty thirtyone -> fmt "JoinBytes"
+        [ zero
+        , one
+        , two
+        , three
+        , four
+        , five
+        , six
+        , seven
+        , eight
+        , nine
+        , ten
+        , eleven
+        , twelve
+        , thirteen
+        , fourteen
+        , fifteen
+        , sixteen
+        , seventeen
+        , eighteen
+        , nineteen
+        , twenty
+        , twentyone
+        , twentytwo
+        , twentythree
+        , twentyfour
+        , twentyfive
+        , twentysix
+        , twentyseven
+        , twentyeight
+        , twentynine
+        , thirty
+        , thirtyone
+        ]
+
+      LogEntry addr dat topics -> T.unlines
+        [ "(LogEntry"
+        , indent 2 $ T.unlines
+          [ "addr:"
+          , indent 2 $ formatExpr addr
+          , "data:"
+          , indent 2 $ formatExpr dat
+          , "topics:"
+          , indent 2 . T.unlines $ fmap formatExpr topics
+          ]
+        , ")"
+        ]
+
+      a@(SymAddr {}) -> "(" <> T.pack (show a) <> ")"
+      LitAddr a -> T.pack (show a)
+      WAddr a -> fmt "WAddr" [a]
+
+      BufLength b -> fmt "BufLength" [b]
+
+      C code store bal nonce -> T.unlines
+        [ "(Contract"
+        , indent 2 $ T.unlines
+          [ "code:"
+          , indent 2 $ formatCode code
+          , "storage:"
+          , indent 2 $ formatExpr store
+          , "balance:"
+          , indent 2 $ formatExpr bal
+          , "nonce:"
+          , indent 2 $ formatNonce nonce
           ]
         , ")"
         ]
@@ -531,14 +665,18 @@ formatExpr = go
         , ")"
         , formatExpr prev
         ]
-      ConcreteStore s -> T.unlines
-        [ "(ConcreteStore"
-        , indent 2 $ T.unlines
-          [ "vals:"
-          , indent 2 $ T.unlines $ fmap (T.pack . show) $ Map.toList s
+      AbstractStore a ->
+        "(AbstractStore " <> formatExpr a <> ")"
+      ConcreteStore s -> if null s
+        then "(ConcreteStore <empty>)"
+        else T.unlines
+          [ "(ConcreteStore"
+          , indent 2 $ T.unlines
+            [ "vals:"
+            , indent 2 $ T.unlines $ fmap (T.pack . show) $ Map.toList s
+            ]
+          , ")"
           ]
-        , ")"
-        ]
 
       -- Buffers
 
@@ -581,16 +719,63 @@ formatExpr = go
           , indent 2 $ T.pack $ prettyHex bs
           , ")"
           ]
-
+      b@(AbstractBuf _) -> "(" <> T.pack (show b) <> ")"
 
       -- Hashes
-      Keccak b -> T.unlines
-       [ "(Keccak"
-       , indent 2 $ formatExpr b
-       , ")"
-       ]
+      Keccak b -> fmt "Keccak" [b]
+      SHA256 b -> fmt "SHA256" [b]
+      where
+        fmt nm args = T.unlines
+          [ "(" <> nm
+          , indent 2 $ T.unlines $ fmap formatExpr args
+          , ")"
+          ]
 
-      a -> T.pack $ show a
+formatProp :: Prop -> Text
+formatProp x = T.stripEnd $ case x of
+  PEq a b -> fmt "PEq" [a, b]
+  PLT a b -> fmt "PLT" [a, b]
+  PGT a b -> fmt "PGT" [a, b]
+  PGEq a b -> fmt "PLT" [a, b]
+  PLEq a b -> fmt "PGT" [a, b]
+  PNeg a -> fmt' "PNeg" [a]
+  PAnd a b -> fmt' "PAnd" [a, b]
+  POr a b -> fmt' "POr" [a, b]
+  PImpl a b -> fmt' "PImpl" [a, b]
+  PBool a -> T.pack (show a)
+  where
+    fmt nm args = T.unlines
+      [ "(" <> nm
+      , indent 2 $ T.unlines $ fmap formatExpr args
+      , ")"
+      ]
+    fmt' nm args = T.unlines
+      [ "(" <> nm
+      , indent 2 $ T.unlines $ fmap formatProp args
+      , ")"
+      ]
+
+formatNonce :: Maybe W64 -> Text
+formatNonce = \case
+  Just w -> T.pack $ show w
+  Nothing -> "symbolic"
+
+formatCode :: ContractCode -> Text
+formatCode = \case
+  UnknownCode _ -> "Unknown"
+  InitCode c d -> T.unlines
+    [ "(InitCode"
+    , indent 2 $ T.unlines
+      [ "code: " <> T.pack (bsToHex c)
+      , "data: " <> formatExpr d
+      ]
+    , ")"
+    ]
+  RuntimeCode (ConcreteRuntimeCode c)
+    -> "(RuntimeCode " <> T.pack (bsToHex c) <> ")"
+  RuntimeCode (SymbolicRuntimeCode bs)
+    -> "(RuntimeCode " <> T.pack (show (fmap formatExpr bs)) <> ")"
+
 
 strip0x :: ByteString -> ByteString
 strip0x bs = if "0x" `Char8.isPrefixOf` bs then Char8.drop 2 bs else bs
