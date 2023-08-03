@@ -48,29 +48,26 @@ contract SolidityTest is DSTest {
         assertEq(b, c.a());
     }
 
-    function proveFail_revertSmoke() public {
+    // requires do not trigger a failure in `prove_` tests
+    function prove_no_fail_require() public {
         require(false);
+    }
+
+    // all branches in a proveFail test must end in one of:
+    //  - a require
+    //  - a failed user defined assert
+    //  - a failed ds-test assertion violation
+    function proveFail_require() public {
+        require(false);
+    }
+
+    function proveFail_userAssertSmoke() public {
+        assert(false);
     }
 
     function proveFail_assertSmoke() public {
         assertTrue(false);
     }
-
-    // Takes too long, disabling here, moving to benchmarks
-    // function prove_transfer(uint supply, address usr, uint amt) public {
-    //     if (amt > supply) return; // no underflow
-    //
-    //     token.mint(address(this), supply);
-    //
-    //     uint prebal = token.balanceOf(usr);
-    //     token.transfer(usr, amt);
-    //     uint postbal = token.balanceOf(usr);
-    //
-    //     uint expected = usr == address(this)
-    //                     ? 0    // self transfer is a noop
-    //                     : amt; // otherwise `amt` has been transfered to `usr`
-    //     assertEq(expected, postbal - prebal);
-    // }
 
     function prove_burn(uint supply, uint amt) public {
         if (amt > supply) return; // no undeflow

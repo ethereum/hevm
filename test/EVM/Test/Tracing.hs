@@ -13,7 +13,8 @@ module EVM.Test.Tracing where
 
 import Control.Monad (when)
 import Control.Monad.Operational qualified as Operational
-import Control.Monad.State.Strict (StateT(..), liftIO, runState)
+import Control.Monad.ST (RealWorld, ST, stToIO)
+import Control.Monad.State.Strict (StateT(..), liftIO)
 import Control.Monad.State.Strict qualified as State
 import Data.Aeson ((.:), (.:?))
 import Data.Aeson qualified as JSON
@@ -36,22 +37,21 @@ import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty (testGroup, TestTree)
-import Test.Tasty.HUnit (assertEqual)
+import Test.Tasty.HUnit (assertEqual, testCase)
 import Test.Tasty.QuickCheck hiding (Failure, Success)
-import Witch (into)
+import Witch (into, unsafeInto)
 
 import Optics.Core hiding (pre)
 import Optics.State
-import Optics.Zoom
 
 import EVM (makeVm, initialContract, exec1)
 import EVM.Assembler (assemble)
 import EVM.Expr qualified as Expr
+import EVM.Concrete qualified as Concrete
 import EVM.Exec (ethrunAddress)
 import EVM.Fetch qualified as Fetch
 import EVM.Format (bsToHex, formatBinary)
-import EVM.Concrete (createAddress)
-import EVM.FeeSchedule qualified as FeeSchedule
+import EVM.FeeSchedule
 import EVM.Op (intToOpName)
 import EVM.Sign (deriveAddr)
 import EVM.Solvers
@@ -65,10 +65,10 @@ data VMTrace =
   VMTrace
   { tracePc      :: Int
   , traceOp      :: Int
-  , traceStack   :: [W256]
-  , traceMemSize :: Word64
+  , traceGas     :: Data.Word.Word64
+  , traceMemSize :: Data.Word.Word64
   , traceDepth   :: Int
-  , traceGas     :: Word64
+  , traceStack   :: [W256]
   , traceError   :: Maybe String
   } deriving (Generic, Show)
 
@@ -96,6 +96,7 @@ data EVMToolTrace =
     , opName :: String
     , stack :: [W256]
     , error :: Maybe String
+    , gasCost :: Maybe W256
     } deriving (Generic, Show)
 
 instance JSON.FromJSON EVMToolTrace where
@@ -109,6 +110,7 @@ instance JSON.FromJSON EVMToolTrace where
     <*> v .: "opName"
     <*> v .: "stack"
     <*> v .:? "error"
+    <*> v .:? "gasCost"
 
 mkBlockHash:: Int -> Expr 'EWord
 mkBlockHash x = (into x :: Integer) & show & Char8.pack & EVM.Types.keccak' & Lit
@@ -120,6 +122,8 @@ data EVMToolOutput =
   EVMToolOutput
     { output :: ByteStringS
     , gasUsed :: W256
+    , time :: Maybe Integer
+    , error :: Maybe String
     } deriving (Generic, Show)
 
 instance JSON.FromJSON EVMToolOutput
@@ -140,14 +144,14 @@ data EVMToolEnv = EVMToolEnv
   , gasLimit    :: Data.Word.Word64
   , baseFee     :: W256
   , maxCodeSize :: W256
-  , schedule    :: FeeSchedule.FeeSchedule Data.Word.Word64
+  , schedule    :: FeeSchedule Data.Word.Word64
   , blockHashes :: Map.Map Int W256
   } deriving (Show, Generic)
 
 instance JSON.ToJSON EVMToolEnv where
   toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON $ b.coinbase))
                          , ("currentDifficulty", (JSON.toJSON $ b.prevRandao))
-                         , ("currentGasLimit"  , (JSON.toJSON ("0x" ++ showHex (toInteger $ b.gasLimit) "")))
+                         , ("currentGasLimit"  , (JSON.toJSON ("0x" ++ showHex (into @Integer b.gasLimit) "")))
                          , ("currentNumber"    , (JSON.toJSON $ b.number))
                          , ("currentTimestamp" , (JSON.toJSON tstamp))
                          , ("currentBaseFee"   , (JSON.toJSON $ b.baseFee))
@@ -167,7 +171,7 @@ emptyEvmToolEnv = EVMToolEnv { coinbase = 0
                              , gasLimit   = 0xffffffffffffffff
                              , baseFee    = 0
                              , maxCodeSize= 0xffffffff
-                             , schedule   = FeeSchedule.berlin
+                             , schedule   = feeSchedule
                              , blockHashes = mempty
                              }
 
@@ -263,7 +267,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
                              }
     txn = EVM.Transaction.Transaction
       { txdata     = txData
-      , gasLimit = fromIntegral gaslimitExec
+      , gasLimit = unsafeInto gaslimitExec
       , gasPrice = Just 1
       , nonce    = 172
       , toAddr   = Just 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
@@ -281,23 +285,20 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
                         , timestamp   =  Lit 0x3e8
                         , number      =  0x0
                         , prevRandao  =  0x0
-                        , gasLimit    =  fromIntegral gaslimitExec
+                        , gasLimit    =  unsafeInto gaslimitExec
                         , baseFee     =  0x0
                         , maxCodeSize =  0xfffff
-                        , schedule    =  FeeSchedule.berlin
+                        , schedule    =  feeSchedule
                         , blockHashes =  blockHashesDefault
                         }
     sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
-    fromAddress :: Addr
     fromAddress = fromJust $ deriveAddr sk
-    toAddress :: Addr
     toAddress = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
 
 getHEVMRet :: OpContract -> ByteString -> Int -> IO (Either (EvmError, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult))
 getHEVMRet contr txData gaslimitExec = do
   let (txn, evmEnv, contrAlloc, fromAddress, toAddress, _) = evmSetup contr txData gaslimitExec
-  hevmRun <- runCodeWithTrace Nothing evmEnv contrAlloc txn (fromAddress, toAddress)
-  return hevmRun
+  runCodeWithTrace Nothing evmEnv contrAlloc txn (LitAddr fromAddress) (LitAddr toAddress)
 
 getEVMToolRet :: OpContract -> ByteString -> Int -> IO (Maybe EVMToolResult)
 getEVMToolRet contr txData gaslimitExec = do
@@ -325,8 +326,7 @@ getEVMToolRet contr txData gaslimitExec = do
     putStrLn $ "evmtool exited with code " <> show exitCode
     putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
     putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
-  evmtoolResult <- JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
-  return evmtoolResult
+  JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
 
 -- Compares traces of evmtool (from go-ethereum) and HEVM
 compareTraces :: [VMTrace] -> [EVMToolTrace] -> IO (Bool)
@@ -341,20 +341,18 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
           bPc = b.pc
           aStack = a.traceStack
           bStack = b.stack
-          aGas = fromIntegral a.traceGas
+          aGas = into a.traceGas
           bGas = b.gas
-      if aGas /= bGas then do
-                          putStrLn "GAS doesn't match:"
-                          putStrLn $ "HEVM's gas   : " <> (show aGas)
-                          putStrLn $ "evmtool's gas: " <> (show bGas)
-                          else
-                          -- putStrLn $ "Gas match   : " <> (show aGas)
-                          return ()
-      if aOp /= bOp || aPc /= bPc then
-                          putStrLn $ "HEVM: " <> (intToOpName aOp) <> " (pc " <> (show aPc) <> ") --- evmtool " <> (intToOpName bOp) <> " (pc " <> (show bPc) <> ")"
-                          else
-                          -- putStrLn $ "trace element match. " <> (intToOpName aOp) <> " pc: " <> (show aPc)
-                          return ()
+      putStrLn $ "hevm: " <> intToOpName aOp <> " pc: " <> show aPc <> " gas: " <> show aGas <> " stack: " <> show aStack
+      putStrLn $ "geth: " <> intToOpName bOp <> " pc: " <> show bPc <> " gas: " <> show bGas <> " stack: " <> show bStack
+
+      when (aGas /= bGas) $ do
+        putStrLn "GAS doesn't match:"
+        putStrLn $ "HEVM's gas   : " <> (show aGas)
+        putStrLn $ "evmtool's gas: " <> (show bGas)
+        putStrLn $ "executing opcode: " <> (intToOpName aOp)
+      when (aOp /= bOp || aPc /= bPc) $ do
+        putStrLn $ "HEVM: " <> (intToOpName aOp) <> " (pc " <> (show aPc) <> ") --- evmtool " <> (intToOpName bOp) <> " (pc " <> (show bPc) <> ")"
 
       when (isJust b.error) $ do
         putStrLn $ "Error by evmtool: " <> (show b.error)
@@ -403,25 +401,25 @@ getTraceOutput evmtoolResult =
 deleteTraceOutputFiles :: Maybe EVMToolResult -> IO ()
 deleteTraceOutputFiles evmtoolResult =
   case evmtoolResult of
-    Nothing -> return ()
+    Nothing -> pure ()
     Just res -> do
       let traceFileName = getTraceFileName res
       System.Directory.removeFile traceFileName
       System.Directory.removeFile (traceFileName ++ ".json")
 
 -- Create symbolic VM from concrete VM
-symbolify :: VM -> VM
+symbolify :: VM s -> VM s
 symbolify vm = vm { state = vm.state { calldata = AbstractBuf "calldata" } }
 
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
-runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> IO (Either (EvmError, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
-runCodeWithTrace rpcinfo evmEnv alloc txn (fromAddr, toAddress) = withSolvers Z3 0 Nothing $ \solvers -> do
-  let origVM = vmForRuntimeCode code' calldata' evmEnv alloc txn (fromAddr, toAddress)
-      calldata' = ConcreteBuf txn.txdata
+runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> IO (Either (EvmError, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
+runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 Nothing $ \solvers -> do
+  let calldata' = ConcreteBuf txn.txdata
       code' = alloc.code
-      buildExpr :: SolverGroup -> VM -> IO (Expr End)
+      buildExpr :: SolverGroup -> VM RealWorld -> IO (Expr End)
       buildExpr s vm = interpret (Fetch.oracle s Nothing) Nothing 1 Naive vm runExpr
+  origVM <- stToIO $ vmForRuntimeCode code' calldata' evmEnv alloc txn fromAddr toAddress
 
   expr <- buildExpr solvers $ symbolify origVM
   (res, (vm, trace)) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (origVM, [])
@@ -429,24 +427,23 @@ runCodeWithTrace rpcinfo evmEnv alloc txn (fromAddr, toAddress) = withSolvers Z3
     Left x -> pure $ Left (x, trace)
     Right _ -> pure $ Right (expr, trace, vmres vm)
 
-vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> (Addr, Addr) -> VM
-vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress) =
-  let contr = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
-      contrWithBal = (contr :: Contract) { balance = alloc.balance }
-  in
-  (makeVm $ VMOpts
-    { contract = contrWithBal
+vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> ST s (VM s)
+vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
+  let contract = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
+                 & set #balance (Lit alloc.balance)
+  in (makeVm $ VMOpts
+    { contract = contract
     , calldata = (calldata', [])
     , value = Lit txn.value
-    , initialStorage = EmptyStore
+    , baseState = EmptyBase
     , address =  toAddress
-    , caller = Expr.litAddr fromAddr
+    , caller = fromAddr
     , origin = fromAddr
-    , coinbase = evmToolEnv.coinbase
+    , coinbase = LitAddr evmToolEnv.coinbase
     , number = evmToolEnv.number
     , timestamp = evmToolEnv.timestamp
     , gasprice = fromJust txn.gasPrice
-    , gas = txn.gasLimit - fromIntegral (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
+    , gas = txn.gasLimit - (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
     , gaslimit = txn.gasLimit
     , blockGaslimit = evmToolEnv.gasLimit
     , prevRandao = evmToolEnv.prevRandao
@@ -458,19 +455,26 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn (fromAddr, toAddress
     , create = False
     , txAccessList = mempty
     , allowFFI = False
-    }) & set (#env % #contracts % at ethrunAddress)
+    }) <&> set (#env % #contracts % at (LitAddr ethrunAddress))
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty))))
-       & set (#state % #calldata) calldata'
+       <&> set (#state % #calldata) calldata'
 
 runCode :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe (Expr Buf))
 runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
-  let origVM = vmForRuntimeCode code' calldata' emptyEvmToolEnv emptyEVMToolAlloc EVM.Transaction.emptyTransaction (ethrunAddress, createAddress ethrunAddress 1)
+  origVM <- stToIO $ vmForRuntimeCode
+              code'
+              calldata'
+              emptyEvmToolEnv
+              emptyEVMToolAlloc
+              EVM.Transaction.emptyTransaction
+              (LitAddr ethrunAddress)
+              (Concrete.createAddress ethrunAddress 1)
   res <- Stepper.interpret (Fetch.oracle solvers rpcinfo) origVM Stepper.execFully
   pure $ case res of
     Left _ -> Nothing
     Right b -> Just b
 
-vmtrace :: VM -> VMTrace
+vmtrace :: VM s -> VMTrace
 vmtrace vm =
   let
     memsize = vm.state.memorySize
@@ -485,7 +489,7 @@ vmtrace vm =
              , traceError = readoutError vm.result
              }
   where
-    readoutError :: Maybe VMResult -> Maybe String
+    readoutError :: Maybe (VMResult s) -> Maybe String
     readoutError (Just (VMFailure e)) = case e of
       -- NOTE: error text made to closely match go-ethereum's errors.go file
       OutOfGas {}             -> Just "out of gas"
@@ -508,7 +512,7 @@ vmtrace vm =
       err                     -> Just $ "HEVM error: " <> show err
     readoutError _ = Nothing
 
-vmres :: VM -> VMTraceResult
+vmres :: VM s -> VMTraceResult
 vmres vm =
   let
     gasUsed' = vm.tx.gaslimit - vm.state.gas
@@ -523,22 +527,23 @@ vmres vm =
      , gasUsed = gasUsed'
      }
 
-type TraceState = (VM, [VMTrace])
+type TraceState s = (VM s, [VMTrace])
 
-execWithTrace :: StateT TraceState IO VMResult
+execWithTrace :: StateT (TraceState RealWorld) IO (VMResult RealWorld)
 execWithTrace = do
   _ <- runWithTrace
   fromJust <$> use (_1 % #result)
 
-runWithTrace :: StateT TraceState IO VM
+runWithTrace :: StateT (TraceState RealWorld) IO (VM RealWorld)
 runWithTrace = do
   -- This is just like `exec` except for every instruction evaluated,
   -- we also increment a counter indexed by the current code location.
   vm0 <- use _1
   case vm0.result of
     Nothing -> do
-      State.modify (\(a, b) -> (a, b ++ [vmtrace vm0]))
-      zoom _1 (State.state (runState exec1))
+      State.modify' (\(a, b) -> (a, b ++ [vmtrace vm0]))
+      vm' <- liftIO $ stToIO $ State.execStateT exec1 vm0
+      assign _1 vm'
       runWithTrace
     Just (VMFailure _) -> do
       -- Update error text for last trace element
@@ -550,16 +555,16 @@ runWithTrace = do
     Just _ -> pure vm0
 
 interpretWithTrace
-  :: Fetch.Fetcher
-  -> Stepper.Stepper a
-  -> StateT TraceState IO a
+  :: Fetch.Fetcher RealWorld
+  -> Stepper.Stepper RealWorld a
+  -> StateT (TraceState RealWorld) IO a
 interpretWithTrace fetcher =
   eval . Operational.view
 
   where
     eval
-      :: Operational.ProgramView Stepper.Action a
-      -> StateT TraceState IO a
+      :: Operational.ProgramView (Stepper.Action RealWorld) a
+      -> StateT (TraceState RealWorld) IO a
 
     eval (Operational.Return x) =
       pure x
@@ -568,22 +573,26 @@ interpretWithTrace fetcher =
       case action of
         Stepper.Exec ->
           execWithTrace >>= interpretWithTrace fetcher . k
-        Stepper.Run ->
-          runWithTrace >>= interpretWithTrace fetcher . k
         Stepper.Wait q -> case q of
           PleaseAskSMT (Lit x) _ continue ->
             interpretWithTrace fetcher (Stepper.evm (continue (Case (x > 0))) >>= k)
           _ -> do
             m <- liftIO (fetcher q)
-            zoom _1 (State.state (runState m)) >> interpretWithTrace fetcher (k ())
+            vm <- use _1
+            vm' <- liftIO $ stToIO $ State.execStateT m vm
+            assign _1 vm'
+            interpretWithTrace fetcher (k ())
         Stepper.Ask _ ->
           internalError "cannot make choice in this interpreter"
         Stepper.IOAct q ->
           liftIO q >>= interpretWithTrace fetcher . k
-        Stepper.EVM m ->
-          zoom _1 (State.state (runState m)) >>= interpretWithTrace fetcher . k
+        Stepper.EVM m -> do
+          vm <- use _1
+          (r, vm') <- liftIO $ stToIO $ State.runStateT m vm
+          assign _1 vm'
+          interpretWithTrace fetcher (k r)
 
-data OpContract = OpContract [Op]
+newtype OpContract = OpContract [Op]
 instance Show OpContract where
   show (OpContract a) = "OpContract " ++ (show a)
 
@@ -646,11 +655,11 @@ fixContractJumps (OpContract ops) = do
       OpJumpi -> do
         let filtDests = (filter (> pos) jumpDests)
         rndPos <- randItem filtDests
-        fixup ax (pos+34) (ret++[(OpPush (Lit (fromInteger (fromIntegral rndPos)))), (OpJumpi)])
+        fixup ax (pos+34) (ret++[(OpPush (Lit (unsafeInto rndPos))), (OpJumpi)])
       OpJump -> do
         let filtDests = (filter (> pos) jumpDests)
         rndPos <- randItem filtDests
-        fixup ax (pos+34) (ret++[(OpPush (Lit (fromInteger (fromIntegral rndPos)))), (OpJump)])
+        fixup ax (pos+34) (ret++[(OpPush (Lit (unsafeInto rndPos))), (OpJump)])
       myop@(OpPush _) -> fixup ax (pos+33) (ret++[myop])
       myop -> fixup ax (pos+1) (ret++[myop])
   fmap OpContract ops2
@@ -661,37 +670,40 @@ genPush n = vectorOf n onePush
     onePush :: Gen Op
     onePush  = do
       p <- chooseInt (1, 10)
-      pure $ OpPush (Lit (fromIntegral p))
+      pure $ OpPush (Lit (unsafeInto p))
 
 genContract :: Int -> Gen [Op]
 genContract n = do
     y <- chooseInt (3, 6)
     pushes <- genPush y
     normalOps <- vectorOf (3*n+40) genOne
+    large :: Bool <- chooseAny
+    extra <- if large then vectorOf (100) genOne
+                      else pure []
     addReturn <- chooseInt (0, 10)
-    let contr = pushes ++ normalOps
+    let contr = pushes ++ normalOps ++ extra
     if addReturn < 10 then pure $ contr++[OpPush (Lit 0x40), OpPush (Lit 0x0), OpReturn]
                       else pure contr
   where
     genOne :: Gen Op
     genOne = frequency [
       -- math ops
-      (200, frequency [
-          (1, pure OpAdd)
-        , (1, pure OpMul)
+      (20, frequency [
+          (2, pure OpAdd)
+        , (2, pure OpMul)
         , (1, pure OpSub)
-        , (1, pure OpDiv)
+        , (2, pure OpDiv)
         , (1, pure OpSdiv)
-        , (1, pure OpMod)
+        , (2, pure OpMod)
         , (1, pure OpSmod)
         , (1, pure OpAddmod)
-        , (1, pure OpMulmod)
+        , (2, pure OpMulmod)
         , (1, pure OpExp)
         , (1, pure OpSignextend)
-        , (1, pure OpLt)
-        , (1, pure OpGt)
-        , (1, pure OpSlt)
-        , (1, pure OpSgt)
+        , (2, pure OpLt)
+        , (2, pure OpGt)
+        , (2, pure OpSlt)
+        , (2, pure OpSgt)
         , (1, pure OpSha3)
       ])
       -- Comparison & binary ops
@@ -708,8 +720,8 @@ genContract n = do
         , (1, pure OpSar)
       ])
       -- calldata
-      , (800, pure OpCalldataload)
-      , (200, pure OpCalldatacopy)
+      , (200, pure OpCalldataload)
+      , (800, pure OpCalldatacopy)
       -- Get some info
       , (100, frequency [
           (10, pure OpAddress)
@@ -742,8 +754,8 @@ genContract n = do
       -- memory manip
       , (1200, frequency [
           (50, pure OpMload)
-        , (50, pure OpMstore)
-        , (1, pure OpMstore8)
+        , (1, pure OpMstore)
+        , (300, pure OpMstore8)
       ])
       -- storage manip
       , (100, frequency [
@@ -751,7 +763,7 @@ genContract n = do
         , (1, pure OpSstore)
       ])
       -- Jumping around
-      , (20, frequency [
+      , (50, frequency [
             (1, pure OpJump)
           , (10, pure OpJumpi)
       ])
@@ -770,16 +782,16 @@ genContract n = do
           (1, pure OpPop)
         , (400, do
             -- x <- arbitrary
-            large <- chooseInt (0, 100)
+            large <- chooseInt (0, 2000)
             x <- if large == 0 then chooseBoundedIntegral (0::W256, (2::W256)^(256::W256)-1)
                                else chooseBoundedIntegral (0, 10)
-            pure $ OpPush (Lit (fromIntegral x)))
+            pure $ OpPush (Lit x))
         , (10, do
             x <- chooseInt (1, 10)
-            pure $ OpDup (fromIntegral x))
+            pure $ OpDup (unsafeInto x))
         , (10, do
             x <- chooseInt (1, 10)
-            pure $ OpSwap (fromIntegral x))
+            pure $ OpSwap (unsafeInto x))
       ])]
       -- End states
       -- , (1, frequency [
@@ -795,12 +807,13 @@ forceLit _ = undefined
 randItem :: [a] -> IO a
 randItem = generate . Test.QuickCheck.elements
 
-getOp :: VM -> Word8
+getOp :: VM s -> Word8
 getOp vm =
   let pcpos  = vm ^. #state % #pc
       code' = vm ^. #state % #code
       xs = case code' of
-        InitCode _ _ -> internalError "InitCode instead of RuntimeCode"
+        UnknownCode _ -> internalError "UnknownCode instead of RuntimeCode"
+        InitCode bs _ -> BS.drop pcpos bs
         RuntimeCode (ConcreteRuntimeCode xs') -> BS.drop pcpos xs'
         RuntimeCode (SymbolicRuntimeCode _) -> internalError "RuntimeCode is symbolic"
   in if xs == BS.empty then 0
@@ -808,68 +821,128 @@ getOp vm =
 
 tests :: TestTree
 tests = testGroup "contract-quickcheck-run"
-    [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract) -> ioProperty $ do
-        txDataRaw <- generate $ sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
-        gaslimitExec <- generate $ chooseInt (40000, 0xffff)
+    [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract, GasLimitInt gasLimit, TxDataRaw txDataRaw) -> ioProperty $ do
         let txData = BS.pack $ toEnum <$> txDataRaw
         -- TODO: By removing external calls, we fuzz less
         --       It should work also when we external calls. Removing for now.
         contrFixed <- fixContractJumps $ removeExtcalls contr
-        evmtoolResult <- getEVMToolRet contrFixed txData gaslimitExec
-        hevmRun <- getHEVMRet contrFixed txData gaslimitExec
-        (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
-        case hevmRun of
-          (Right (expr, hevmTrace, hevmTraceResult)) -> do
-            let
-              concretize :: Expr a -> Expr Buf -> Expr a
-              concretize a c = mapExpr go a
-                where
-                  go :: Expr a -> Expr a
-                  go = \case
-                             AbstractBuf "calldata" -> c
-                             y -> y
-              concretizedExpr = concretize expr (ConcreteBuf txData)
-              simplConcExpr = Expr.simplify concretizedExpr
-              getReturnVal :: Expr End -> Maybe ByteString
-              getReturnVal (Success _ _ (ConcreteBuf bs) _) = Just bs
-              getReturnVal _ = Nothing
-              simplConcrExprRetval = getReturnVal simplConcExpr
-            traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
-            -- putStrLn $ "HEVM trace   : " <> show hevmTrace
-            -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.toTrace)
-            assertEqual "Traces and gas must match" traceOK True
-            let resultOK = evmtoolTraceOutput.output.output == hevmTraceResult.out
-            if resultOK then do
-              putStrLn $ "HEVM & evmtool's outputs match: '" <> (bsToHex $ bssToBs evmtoolTraceOutput.output.output) <> "'"
-              if isNothing simplConcrExprRetval || (fromJust simplConcrExprRetval) == (bssToBs hevmTraceResult.out)
-                 then do
-                   putStr "OK, symbolic interpretation -> concrete calldata -> Expr.simplify gives the same answer."
-                   if isNothing simplConcrExprRetval then putStrLn ", but it was a Nothing, so not strong equivalence"
-                                                     else putStrLn ""
-                 else do
-                   putStrLn $ "concretized expr           : " <> (show concretizedExpr)
-                   putStrLn $ "simplified concretized expr: " <> (show simplConcExpr)
-                   putStrLn $ "return value computed      : " <> (show simplConcrExprRetval)
-                   putStrLn $ "evmtool's return value     : " <> (show hevmTraceResult.out)
-                   assertEqual "Simplified, concretized expression must match evmtool's output." True False
-            else do
-              putStrLn $ "Name of trace file: " <> (getTraceFileName $ fromJust evmtoolResult)
-              putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
-              T.putStrLn $ "HEVM result: " <> (formatBinary $ bssToBs hevmTraceResult.out)
-              T.putStrLn $ "evm result : " <> (formatBinary $ bssToBs evmtoolTraceOutput.output.output)
-              putStrLn $ "HEVM result len: " <> (show (BS.length $ bssToBs hevmTraceResult.out))
-              putStrLn $ "evm result  len: " <> (show (BS.length $ bssToBs evmtoolTraceOutput.output.output))
-            assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
-          Left (evmerr, hevmTrace) -> do
-            putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
-            -- putStrLn $ "evmtool result was: " <> show (fromJust evmtoolResult)
-            -- putStrLn $ "output by evmtool is: '" <> bsToHex evmtoolTraceOutput.toOutput.output <> "'"
-            traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
-            assertEqual "Traces and gas must match" traceOK True
-        System.Directory.removeFile "txs.json"
-        System.Directory.removeFile "alloc-out.json"
-        System.Directory.removeFile "alloc.json"
-        System.Directory.removeFile "result.json"
-        System.Directory.removeFile "env.json"
-        deleteTraceOutputFiles evmtoolResult
+        checkTraceAndOutputs contrFixed gasLimit txData
+      , testCase "calldata-wraparound" $ do
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 31),OpMstore8] -- value, offs
+              , [OpPush (Lit 0x3),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- size, offs, destOffs
+              , [OpPush (Lit 0x20),OpPush (Lit 0),OpReturn] -- datasize, offs
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5])
+      , testCase "calldata-wraparound2" $ do
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 0),OpMstore8] -- value, offs
+              , [OpPush (Lit 0x10),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- size, offs, destOffs
+              , [OpPush (Lit 0x20),OpPush (Lit 0),OpReturn] -- datasize, offs
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5])
+      , testCase "calldata-overwrite-with-0-if-oversized" $ do
+        -- supposed to copy 1...6 and then 0s, overwriting the 0xff with 0
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs
+              , [OpPush (Lit 10),OpPush (Lit 0),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
+              , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
+      , testCase "calldata-overwrite-correct-size" $ do
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- value, offs
+              , [OpPush (Lit 10),OpPush (Lit 0),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
+              , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
+      , testCase "calldata-offset-copy" $ do
+        let contract = OpContract $ concat
+              [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- value, offs
+              , [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs
+              , [OpPush (Lit 10),OpPush (Lit 4),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
+              , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
+              ]
+        checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
     ]
+
+checkTraceAndOutputs :: OpContract -> Int -> ByteString -> IO ()
+checkTraceAndOutputs contract gasLimit txData = do
+  evmtoolResult <- getEVMToolRet contract txData gasLimit
+  hevmRun <- getHEVMRet contract txData gasLimit
+  (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
+  case hevmRun of
+    (Right (expr, hevmTrace, hevmTraceResult)) -> do
+      let
+        concretize :: Expr a -> Expr Buf -> Expr a
+        concretize a c = mapExpr go a
+          where
+            go :: Expr a -> Expr a
+            go = \case
+                       AbstractBuf "calldata" -> c
+                       y -> y
+        concretizedExpr = concretize expr (ConcreteBuf txData)
+        simplConcExpr = Expr.simplify concretizedExpr
+        getReturnVal :: Expr End -> Maybe ByteString
+        getReturnVal (Success _ _ (ConcreteBuf bs) _) = Just bs
+        getReturnVal _ = Nothing
+        simplConcrExprRetval = getReturnVal simplConcExpr
+      traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
+      -- putStrLn $ "HEVM trace   : " <> show hevmTrace
+      -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.trace)
+      assertEqual "Traces and gas must match" traceOK True
+      let resultOK = evmtoolTraceOutput.output.output == hevmTraceResult.out
+      if resultOK then do
+        putStrLn $ "HEVM & evmtool's outputs match: '" <> (bsToHex $ bssToBs evmtoolTraceOutput.output.output) <> "'"
+        if isNothing simplConcrExprRetval || (fromJust simplConcrExprRetval) == (bssToBs hevmTraceResult.out)
+           then do
+             putStr "OK, symbolic interpretation -> concrete calldata -> Expr.simplify gives the same answer."
+             if isNothing simplConcrExprRetval then putStrLn ", but it was a Nothing, so not strong equivalence"
+                                               else putStrLn ""
+           else do
+             putStrLn $ "original expr                    : " <> (show expr)
+             putStrLn $ "concretized expr                 : " <> (show concretizedExpr)
+             putStrLn $ "simplified concretized expr      : " <> (show simplConcExpr)
+             putStrLn $ "evmtoolTraceOutput.output.output : " <> (show (evmtoolTraceOutput.output.output))
+             putStrLn $ "HEVM trace result output         : " <> (bsToHex (bssToBs hevmTraceResult.out))
+             putStrLn $ "ret value computed via symb+conc : " <> (bsToHex (fromJust simplConcrExprRetval))
+             assertEqual "Simplified, concretized expression must match evmtool's output." True False
+      else do
+        putStrLn $ "Name of trace file: " <> (getTraceFileName $ fromJust evmtoolResult)
+        putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
+        T.putStrLn $ "HEVM result: " <> (formatBinary $ bssToBs hevmTraceResult.out)
+        T.putStrLn $ "evm result : " <> (formatBinary $ bssToBs evmtoolTraceOutput.output.output)
+        putStrLn $ "HEVM result len: " <> (show (BS.length $ bssToBs hevmTraceResult.out))
+        putStrLn $ "evm result  len: " <> (show (BS.length $ bssToBs evmtoolTraceOutput.output.output))
+      assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
+    Left (evmerr, hevmTrace) -> do
+      putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
+      -- putStrLn $ "evmtool result was: " <> show (fromJust evmtoolResult)
+      -- putStrLn $ "output by evmtool is: '" <> bsToHex evmtoolTraceOutput.toOutput.output <> "'"
+      traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
+      assertEqual "Traces and gas must match" traceOK True
+  System.Directory.removeFile "txs.json"
+  System.Directory.removeFile "alloc-out.json"
+  System.Directory.removeFile "alloc.json"
+  System.Directory.removeFile "result.json"
+  System.Directory.removeFile "env.json"
+  deleteTraceOutputFiles evmtoolResult
+
+-- GasLimitInt
+newtype GasLimitInt = GasLimitInt (Int)
+  deriving (Show, Eq)
+
+instance Arbitrary GasLimitInt where
+  arbitrary = do
+    let mkLimit = chooseInt (50000, 0xfffff)
+    fmap GasLimitInt mkLimit
+
+-- GenTxDataRaw
+newtype TxDataRaw = TxDataRaw ([Int])
+  deriving (Show, Eq)
+
+instance Arbitrary TxDataRaw where
+  arbitrary = do
+    let
+      txDataRaw = sized $ \n -> vectorOf (10*n+5) $ chooseInt (0,255)
+    fmap TxDataRaw txDataRaw

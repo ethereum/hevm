@@ -7,6 +7,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import GHC.IO.Handle (hClose)
+import GHC.Natural
 import Paths_hevm qualified as Paths
 import System.Directory
 import System.IO.Temp
@@ -17,37 +18,27 @@ import EVM.Dapp (dappInfo, emptyDapp)
 import EVM.Fetch (RpcInfo)
 import EVM.Solidity
 import EVM.Solvers
-import EVM.TTY qualified as TTY
 import EVM.UnitTest
+import Control.Monad.ST (RealWorld)
 
-runSolidityTestCustom :: FilePath -> Text -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> IO Bool
-runSolidityTestCustom testFile match maxIter ffiAllowed rpcinfo projectType = do
+runSolidityTestCustom :: FilePath -> Text -> Maybe Natural -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> IO Bool
+runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectType = do
   withSystemTempDirectory "dapp-test" $ \root -> do
     compile projectType root testFile >>= \case
       Left e -> error e
       Right bo@(BuildOutput contracts _) -> do
-        withSolvers Z3 1 Nothing $ \solvers -> do
+        withSolvers Z3 1 timeout $ \solvers -> do
           opts <- testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
-          unitTest opts contracts Nothing
+          unitTest opts contracts
 
 runSolidityTest :: FilePath -> Text -> IO Bool
-runSolidityTest testFile match = runSolidityTestCustom testFile match Nothing True Nothing Foundry
+runSolidityTest testFile match = runSolidityTestCustom testFile match Nothing Nothing True Nothing Foundry
 
-debugSolidityTest :: FilePath -> RpcInfo -> IO ()
-debugSolidityTest testFile rpcinfo = do
-  withSystemTempDirectory "dapp-test" $ \root -> do
-    compile DappTools root testFile >>= \case
-      Left e -> error e
-      Right bo -> do
-        withSolvers Z3 1 Nothing $ \solvers -> do
-          opts <- testOpts solvers root (Just bo) ".*" Nothing True rpcinfo
-          TTY.main opts root (Just bo)
-
-testOpts :: SolverGroup -> FilePath -> Maybe BuildOutput -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO UnitTestOptions
+testOpts :: SolverGroup -> FilePath -> Maybe BuildOutput -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO (UnitTestOptions RealWorld)
 testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
   let srcInfo = maybe emptyDapp (dappInfo root) buildOutput
 
-  params <- getParametersFromEnvironmentVariables Nothing
+  params <- paramsFromRpc rpcinfo
 
   pure UnitTestOptions
     { solvers = solvers
@@ -57,13 +48,8 @@ testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
     , smtDebug = False
     , smtTimeout = Nothing
     , solver = Nothing
-    , covMatch = Nothing
     , verbose = Just 1
     , match = match
-    , maxDepth = Nothing
-    , fuzzRuns = 100
-    , replay = Nothing
-    , vmModifier = id
     , testParams = params
     , dapp = srcInfo
     , ffiAllowed = allowFFI

@@ -2,7 +2,7 @@ import {DSTest} from "ds-test/test.sol";
 
 // tests unwind support in precompiles
 contract Unwind is DSTest {
-    function testInvalidSum() public {
+    function prove_invalid_sum() public {
         bytes32 x = hex"01";
         try this.callBn256Add(x, x, x, x) returns (bytes32[2] memory) {
             failed();

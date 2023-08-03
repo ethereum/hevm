@@ -24,7 +24,7 @@ contract ConstantinopleTests is DSTest {
     bytes32 deploysdeadcode = 0x600d600c600039600d6000f363deadbeef60005260206000f300000000000000;
 
     // EXTCODEHASH of non-existent account is 0
-    function test_extcodehash_1() public {
+    function check_extcodehash_1() public {
         uint256 h;
         assembly {
             h := extcodehash(0x10)
@@ -32,7 +32,7 @@ contract ConstantinopleTests is DSTest {
         assertEq(h, 0);
     }
     // EXTCODEHASH of account with no code is keccak256("")
-    function test_extcodehash_2() public {
+    function check_extcodehash_2() public {
         address a;
         uint256 h;
         assembly {
@@ -44,7 +44,7 @@ contract ConstantinopleTests is DSTest {
         assertEq(h, 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470);
     }
     // EXTCODEHASH of account with code 0xdeadbeef is keccak256(0xdeadbeef)
-    function test_extcodehash_3() public {
+    function check_extcodehash_3() public {
         address a;
         uint256 h;
 
@@ -65,7 +65,7 @@ contract ConstantinopleTests is DSTest {
     }
     // EXTCODEHASH of the notmuch contract should be same as
     // doing EXTCODECOPY and then keccak256
-    function test_extcodehash_4() public {
+    function check_extcodehash_4() public {
         address a = address(notmuch);
         uint256 h;
 
@@ -85,7 +85,7 @@ contract ConstantinopleTests is DSTest {
 
     // address of account created by CREATE2 is
     // keccak256(0xff + address + salt + keccak256(init_code))[12:]
-    function test_create2_1() public {
+    function check_create2_1() public {
         address a;
         uint256 salt = 0xfacefeed;
         assembly {
@@ -110,7 +110,7 @@ contract ConstantinopleTests is DSTest {
         assertEq(a, expected_a);
     }
     // calling a CREATE2 contract works as expected
-    function test_create2_2() public {
+    function check_create2_2() public {
         address a;
         uint256 salt = 0xfacefeed;
         assembly {
@@ -127,7 +127,7 @@ contract ConstantinopleTests is DSTest {
 
     // SHL, SHR and SAR tests taken from
     // https://github.com/ethereum/EIPs/blob/fde32dfd6b24bac7bfabf6c1ebe3f5a603d5ff4c/EIPS/eip-145.md
-    function test_shl() public {
+    function check_shl() public {
         uint z;
 
         assembly {
@@ -186,7 +186,7 @@ contract ConstantinopleTests is DSTest {
         assertEq(z, 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe);
     }
 
-    function test_shr() public {
+    function check_shr() public {
         uint z;
 
         assembly {
@@ -245,7 +245,7 @@ contract ConstantinopleTests is DSTest {
         assertEq(z, 0x0000000000000000000000000000000000000000000000000000000000000000);
     }
 
-    function test_sar() public {
+    function check_sar() public {
         uint z;
 
         assembly {

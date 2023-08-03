@@ -3,18 +3,19 @@
 ```sh
 Usage: hevm symbolic [--code TEXT] [--calldata TEXT] [--address ADDR]
                      [--caller ADDR] [--origin ADDR] [--coinbase ADDR]
-                     [--value W256] [--nonce W256] [--gas WORD64]
+                     [--value W256] [--nonce WORD64] [--gas WORD64]
                      [--number W256] [--timestamp W256] [--basefee W256]
                      [--priority-fee W256] [--gaslimit WORD64] [--gasprice W256]
                      [--create] [--maxcodesize W256] [--prev-randao W256]
                      [--chainid W256] [--rpc TEXT] [--block W256]
-                     [--state STRING] [--cache STRING] [--json-file STRING]
-                     [--dapp-root STRING] [--initial-storage INITIALSTORAGE]
-                     [--sig TEXT] [--arg STRING]... [--debug] [--get-models]
-                     [--show-tree] [--show-reachable-tree]
-                     [--smttimeout NATURAL] [--max-iterations INTEGER]
-                     [--solver TEXT] [--smtdebug] [--assertions [WORD256]]
-                     [--ask-smt-iterations INTEGER] [--num-solvers NATURAL]
+                     [--root STRING] [--project-type PROJECTTYPE]
+                     [--initial-storage INITIALSTORAGE] [--sig TEXT]
+                     [--arg STRING]... [--get-models] [--show-tree]
+                     [--show-reachable-tree] [--smttimeout NATURAL]
+                     [--max-iterations INTEGER] [--solver TEXT] [--smtdebug]
+                     [--assertions [WORD256]] [--ask-smt-iterations INTEGER]
+                     [--num-solvers NATURAL]
+                     [--loop-detection-heuristic LOOPHEURISTIC]
 
 Available options:
   -h,--help                Show this help text
@@ -25,7 +26,7 @@ Available options:
   --origin ADDR            Tx: origin
   --coinbase ADDR          Block: coinbase
   --value W256             Tx: Eth amount
-  --nonce W256             Nonce of origin
+  --nonce WORD64           Nonce of origin
   --gas WORD64             Tx: gas amount
   --number W256            Block: number
   --timestamp W256         Block: timestamp
@@ -39,29 +40,35 @@ Available options:
   --chainid W256           Env: chainId
   --rpc TEXT               Fetch state from a remote node
   --block W256             Block state is be fetched from
-  --state STRING           Path to state repository
-  --cache STRING           Path to rpc cache repository
-  --json-file STRING       Filename or path to dapp build output (default:
-                           out/*.solc.json)
-  --dapp-root STRING       Path to dapp project root directory (default: . )
+  --root STRING            Path to project root directory (default: . )
+  --project-type PROJECTTYPE
+                           Is this a Foundry or DappTools project (default:
+                           Foundry)
   --initial-storage INITIALSTORAGE
-                           Starting state for storage: Empty, Abstract, Concrete <STORE> (default Abstract)
+                           Starting state for storage: Empty, Abstract (default
+                           Abstract)
   --sig TEXT               Signature of types to decode / encode
   --arg STRING             Values to encode
-  --debug                  Run interactively
   --get-models             Print example testcase for each execution path
   --show-tree              Print branches explored in tree view
   --show-reachable-tree    Print only reachable branches explored in tree view
   --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
-  --max-iterations INTEGER Number of times we may revisit a particular branching point
+  --max-iterations INTEGER Number of times we may revisit a particular branching
+                           point
   --solver TEXT            Used SMT solver: z3 (default) or cvc5
   --smtdebug               Print smt queries sent to the solver
-  --assertions [WORD256]   Comma seperated list of solc panic codes to check for (default: user defined assertions)
+  --assertions [WORD256]   Comma seperated list of solc panic codes to check for
+                           (default: user defined assertion violations only)
   --ask-smt-iterations INTEGER
                            Number of times we may revisit a particular branching
                            point before we consult the smt solver to check
-                           reachability (default: 5)
-  --num-solvers NATURAL    Number of solver instances to use (default: number of cpu cores)
+                           reachability (default: 1) (default: 1)
+  --num-solvers NATURAL    Number of solver instances to use (default: number of
+                           cpu cores)
+  --loop-detection-heuristic LOOPHEURISTIC
+                           Which heuristic should be used to determine if we are
+                           in a loop: StackBased (default) or Naive
+                           (default: StackBased)
 ```
 
 Run a symbolic execution against the given parameters, searching for assertion violations.
@@ -79,8 +86,6 @@ will return counterexamples for arithmetic overflow (`0x11`) and user defined as
 ```
 hevm symbolic --code $CODE --assertions '[0x01, 0x11]'
 ```
-
-`--debug` enters an interactive debugger where the user can navigate the full execution space.
 
 The default value for `calldata` and `caller` are symbolic values, but can be specialized to concrete functions with their corresponding flags.
 
@@ -113,19 +118,10 @@ This can be useful for automatic test case generation.
 The default timeout for SMT queries is no timeout. If your program is taking longer than a couple of minutes to run,
 you can experiment with configuring the timeout to somewhere around 10s by doing `--smttimeout 10000`
 
-Storage can be initialized in three ways:
+Storage can be initialized in two ways:
 
 - `Empty`: all storage slots for all contracts are initialized to zero
 - `Abstract`: all storage slots are initialized as unconstrained abstract values
-- `Concrete <STORE>`: all storage slots except those mentioned in the <STORE> spec are initialized to zero
-
-When specifying a starting concrete store, the initial state can be passed to cli as a list of tuples. For example:
-
-```
-hevm symbolic --code <CODE> --initial-storage "Concrete [(0x0, [(0x1, 0x100)])]"
-```
-
-Would execute with a starting storage state, where address 0x0 has storage slot 0x1 set to 0x100.
 
 `hevm` uses an eager approach for symbolic execution, meaning that it will first attempt to explore
 all branches in the program (without querying the smt solver to check if they are reachable or not).

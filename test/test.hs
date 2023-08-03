@@ -7,6 +7,7 @@ import Prelude hiding (LT, GT)
 
 import GHC.TypeLits
 import Data.Proxy
+import Control.Monad.ST (RealWorld, stToIO)
 import Control.Monad.State.Strict
 import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
@@ -15,12 +16,14 @@ import Data.ByteString.Base16 qualified as BS16
 import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
 import Data.DoubleWord
+import Data.Either
 import Data.List qualified as List
 import Data.Map.Strict qualified as Map
 import Data.Maybe
 import Data.String.Here
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Typeable
 import Data.Vector qualified as Vector
@@ -28,7 +31,7 @@ import GHC.Conc (getNumProcessors)
 import System.Directory
 import System.Environment
 import Test.Tasty
-import Test.Tasty.QuickCheck hiding (Failure, Success)
+import Test.Tasty.QuickCheck hiding (Failure, Success, isSuccess)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()
@@ -37,20 +40,18 @@ import Test.Tasty.Runners hiding (Failure, Success)
 import Test.Tasty.ExpectedFailure
 import Text.RE.TDFA.String
 import Text.RE.Replace
-import Witch (into, unsafeInto)
+import Witch (unsafeInto, into)
 
-import Optics.Core hiding (pre, re)
+import Optics.Core hiding (pre, re, elements)
 import Optics.State
 import Optics.Operators.Unsafe
 
 import EVM hiding (choose)
 import EVM.ABI
-import EVM.Concrete (createAddress)
 import EVM.Exec
 import EVM.Expr qualified as Expr
 import EVM.Fetch qualified as Fetch
-import EVM.Format (hexText)
-import EVM.Patricia qualified as Patricia
+import EVM.Format (hexText, formatExpr)
 import EVM.Precompiled
 import EVM.RLP
 import EVM.SMT hiding (one)
@@ -77,41 +78,32 @@ tests = testGroup "hevm"
   , testGroup "StorageTests"
     [ testCase "read-from-sstore" $ assertEqual ""
         (Lit 0xab)
-        (Expr.readStorage' (Lit 0x0) (Lit 0x0) (SStore (Lit 0x0) (Lit 0x0) (Lit 0xab) AbstractStore))
+        (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x0) (Lit 0xab) (AbstractStore (LitAddr 0x0))))
     , testCase "read-from-concrete" $ assertEqual ""
         (Lit 0xab)
-        (Expr.readStorage' (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])]))
-    , testCase "read-past-abstract-writes-to-different-address" $ assertEqual ""
+        (Expr.readStorage' (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, 0xab)]))
+    , testCase "read-past-write" $ assertEqual ""
         (Lit 0xab)
-        (Expr.readStorage' (Lit 0x0) (Lit 0x0) (SStore (Lit 0x1) (Var "a") (Var "b") (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])])))
-    , testCase "abstract-slots-block-reads-for-same-address" $ assertEqual ""
-        (SLoad (Lit 0x0) (Lit 0x0) (SStore (Lit 0x0) (Var "b") (Var "c") (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])])))
-        (Expr.readStorage' (Lit 0x0) (Lit 0x0)
-          (SStore (Lit 0x1) (Var "1312") (Var "acab") (SStore (Lit 0x0) (Var "b") (Var "c") (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])]))))
-    , testCase "abstract-addrs-block-reads" $ assertEqual ""
-        (SLoad (Lit 0x0) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])])))
-        (Expr.readStorage' (Lit 0x0) (Lit 0x0)
-          (SStore (Lit 0xacab) (Lit 0xdead) (Lit 0x0) (SStore (Var "1312") (Lit 0x0) (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, Map.fromList [(0x0, 0xab)])]))))
-
+        (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x1) (Var "b") (ConcreteStore $ Map.fromList [(0x0, 0xab)])))
     , testCase "accessStorage uses fetchedStorage" $ do
         let dummyContract =
               (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)))
                 { external = True }
-            vm = vmForEthrunCreation ""
+        vm <- stToIO $ vmForEthrunCreation ""
             -- perform the initial access
-            vm1 = execState (EVM.accessStorage 0 (Lit 0) (pure . pure ())) vm
-            -- it should fetch the contract first
-            vm2 = case vm1.result of
-                    Just (HandleEffect (Query (PleaseFetchContract _addr continue))) ->
-                      execState (continue dummyContract) vm1
-                    _ -> internalError "unexpected result"
+        vm1 <- stToIO $ execStateT (EVM.accessStorage (LitAddr 0) (Lit 0) (pure . pure ())) vm
+        -- it should fetch the contract first
+        vm2 <- case vm1.result of
+                Just (HandleEffect (Query (PleaseFetchContract _addr _ continue))) ->
+                  stToIO $ execStateT (continue dummyContract) vm1
+                _ -> internalError "unexpected result"
             -- then it should fetch the slow
-            vm3 = case vm2.result of
+        vm3 <- case vm2.result of
                     Just (HandleEffect (Query (PleaseFetchSlot _addr _slot continue))) ->
-                      execState (continue 1337) vm2
+                      stToIO $ execStateT (continue 1337) vm2
                     _ -> internalError "unexpected result"
             -- perform the same access as for vm1
-            vm4 = execState (EVM.accessStorage 0 (Lit 0) (pure . pure ())) vm3
+        vm4 <- stToIO $ execStateT (EVM.accessStorage (LitAddr 0) (Lit 0) (pure . pure ())) vm3
 
         -- there won't be query now as accessStorage uses fetch cache
         assertBool (show vm4.result) (isNothing vm4.result)
@@ -150,17 +142,16 @@ tests = testGroup "hevm"
     , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> ioProperty $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
-    -- https://github.com/ethereum/hevm/issues/311
-    , ignoreTest $ testProperty "word-simplification" $ \(ZeroDepthWord expr) -> ioProperty $ do
+    , testProperty "word-simplification" $ \(ZeroDepthWord expr) -> ioProperty $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
-    , testProperty "readStorage-equivalance" $ \(store, addr, slot) -> ioProperty $ do
-        let simplified = Expr.readStorage' addr slot store
-            full = SLoad addr slot store
+    , testProperty "readStorage-equivalance" $ \(store, slot) -> ioProperty $ do
+        let simplified = Expr.readStorage' slot store
+            full = SLoad slot store
         checkEquiv simplified full
-    , testProperty "writeStorage-equivalance" $ \(val, GenWriteStorageExpr (addr, slot, store)) -> ioProperty $ do
-        let simplified = Expr.writeStorage addr slot val store
-            full = SStore addr slot val store
+    , testProperty "writeStorage-equivalance" $ \(val, GenWriteStorageExpr (slot, store)) -> ioProperty $ do
+        let simplified = Expr.writeStorage slot val store
+            full = SStore slot val store
         checkEquiv simplified full
     , testProperty "readWord-equivalance" $ \(buf, idx) -> ioProperty $ do
         let simplified = Expr.readWord idx buf
@@ -234,6 +225,13 @@ tests = testGroup "hevm"
           Just asList -> do
             let asBuf = Expr.fromList asList
             checkEquiv asBuf input
+    , testProperty "evalProp-equivalence-lit" $ \(LitProp p) -> ioProperty $ do
+        let simplified = Expr.evalProp p
+        assertBool "must evaluate down to a literal bool" (isPBool simplified)
+        checkEquivProp simplified p
+    , testProperty "evalProp-equivalence-sym" $ \(p) -> ioProperty $ do
+        let simplified = Expr.evalProp p
+        checkEquivProp simplified p
     ]
   , testGroup "MemoryTests"
     [ testCase "read-write-same-byte"  $ assertEqual ""
@@ -293,14 +291,10 @@ tests = testGroup "hevm"
         (LitByte 0xbb)
         (Expr.indexWord (Lit 2) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
     , testCase "encodeConcreteStore-overwrite" $
-      let
-        w :: Int -> W256
-        w x = W256 $ EVM.Types.word256 $ BS.pack [fromIntegral x]
-      in
       assertEqual ""
+        "(store (store ((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000) (_ bv1 256) (_ bv2 256)) (_ bv3 256) (_ bv4 256))"
         (EVM.SMT.encodeConcreteStore $
-          Map.fromList [(w 1, (Map.fromList [(w 2, w 99), (w 2, w 100)]))])
-        "(sstore (_ bv1 256) (_ bv2 256) (_ bv100 256) emptyStore)"
+          Map.fromList [(W256 1, W256 2), (W256 3, W256 4)])
     , testCase "indexword-oob-sym" $ assertEqual ""
         -- indexWord should return 0 for oob access
         (LitByte 0x0)
@@ -451,31 +445,14 @@ tests = testGroup "hevm"
 
   , testGroup "RLP encodings"
     [ testProperty "rlp decode is a retraction (bytes)" $ \(Bytes bs) ->
---      withMaxSuccess 100000 $
       rlpdecode (rlpencode (BS bs)) == Just (BS bs)
     , testProperty "rlp encode is a partial inverse (bytes)" $ \(Bytes bs) ->
---      withMaxSuccess 100000 $
         case rlpdecode bs of
           Just r -> rlpencode r == bs
           Nothing -> True
     ,  testProperty "rlp decode is a retraction (RLP)" $ \(RLPData r) ->
---       withMaxSuccess 100000 $
        rlpdecode (rlpencode r) == Just r
     ]
-  , testGroup "Merkle Patricia Trie"
-    [  testProperty "update followed by delete is id" $ \(Bytes r, Bytes s, Bytes t) ->
-        whenFail
-        (putStrLn ("r:" <> (show (ByteStringS r))) >>
-         putStrLn ("s:" <> (show (ByteStringS s))) >>
-         putStrLn ("t:" <> (show (ByteStringS t)))) $
---       withMaxSuccess 100000 $
-       Patricia.insertValues [(r, BS.pack[1]), (s, BS.pack[2]), (t, BS.pack[3]),
-                              (r, mempty), (s, mempty), (t, mempty)]
-       === (Just $ Patricia.Literal Patricia.Empty)
-    ]
- , testGroup "Remote State Tests"
-   [
-   ]
  , testGroup "Panic code tests via symbolic execution"
   [
      testCase "assert-fail" $ do
@@ -599,7 +576,56 @@ tests = testGroup "hevm"
           checkAssert s [0x41] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "expected counterexample found"
       ,
-      -- TODO the system currently does not allow for symbolic JUMP
+      testCase "vm.prank underflow" $ do
+        Just c <- solcRuntime "C"
+            [i|
+              interface Vm {
+                function prank(address) external;
+              }
+              contract Payable {
+                  function hi() public payable {}
+              }
+              contract C {
+                function f() external {
+                  Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+
+                  uint amt = 10;
+                  address from = address(0xacab);
+                  require(from.balance < amt);
+
+                  Payable target = new Payable();
+                  vm.prank(from);
+                  target.hi{value : amt}();
+                }
+              }
+            |]
+        r <- allBranchesFail c Nothing
+        assertBool "all branches must fail" (isRight r)
+      ,
+      testCase "call ffi when disabled" $ do
+        Just c <- solcRuntime "C"
+            [i|
+              interface Vm {
+                function ffi(string[] calldata) external;
+              }
+              contract C {
+                function f() external {
+                  Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+
+                  string[] memory inputs = new string[](2);
+                  inputs[0] = "echo";
+                  inputs[1] = "acab";
+
+                  // should fail to explore this branch
+                  vm.ffi(inputs);
+                }
+              }
+            |]
+        Right e <- reachableUserAsserts c Nothing
+        T.putStrLn $ formatExpr e
+        assertBool "The expression is not partial" $ Expr.containsNode isPartial e
+      ,
+      -- TODO: we can't deal with symbolic jump conditions
       expectFail $ testCase "call-zero-inited-var-thats-a-function" $ do
         Just c <- solcRuntime "MyContract"
             [i|
@@ -616,10 +642,12 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x51] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $
+          \s -> checkAssert s [0x51] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+        let a = fromJust $ Map.lookup (Var "arg1") cex.vars
+        assertEqual "unexpected cex value" a 44
         putStrLn "expected counterexample found"
- ]
-
+  ]
   , testGroup "Dapp-Tests"
     [ testCase "Trivial-Pass" $ do
         let testFile = "test/contracts/pass/trivial.sol"
@@ -628,19 +656,17 @@ tests = testGroup "hevm"
         -- quick smokecheck to make sure that we can parse dapptools style build outputs
         let cases =
               [ ("test/contracts/pass/trivial.sol", ".*", True)
-              , ("test/contracts/pass/invariants.sol", "invariantTestThisBal", True)
               , ("test/contracts/pass/dsProvePass.sol", "proveEasy", True)
               , ("test/contracts/fail/trivial.sol", ".*", False)
-              , ("test/contracts/fail/invariantFail.sol", "invariantCount", False)
               , ("test/contracts/fail/dsProveFail.sol", "prove_add", False)
               ]
         results <- forM cases $ \(testFile, match, expected) -> do
-          actual <- runSolidityTestCustom testFile match Nothing False Nothing DappTools
+          actual <- runSolidityTestCustom testFile match Nothing Nothing False Nothing DappTools
           pure (actual == expected)
         assertBool "test result" (and results)
     , testCase "Trivial-Fail" $ do
         let testFile = "test/contracts/fail/trivial.sol"
-        runSolidityTest testFile "testFalse" >>= assertEqual "test result" False
+        runSolidityTest testFile "prove_false" >>= assertEqual "test result" False
     , testCase "Abstract" $ do
         let testFile = "test/contracts/pass/abstract.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
@@ -650,32 +676,25 @@ tests = testGroup "hevm"
     , testCase "Prove-Tests-Pass" $ do
         let testFile = "test/contracts/pass/dsProvePass.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "prefix-check-for-dapp" $ do
+        let testFile = "test/contracts/fail/check-prefix.sol"
+        runSolidityTest testFile "check_trivial" >>= assertEqual "test result" False
     , testCase "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
         runSolidityTest testFile "prove_trivial" >>= assertEqual "test result" False
+        runSolidityTest testFile "prove_trivial_dstest" >>= assertEqual "test result" False
         runSolidityTest testFile "prove_add" >>= assertEqual "test result" False
-        --runSolidityTest testFile "prove_smtTimeout" >>= assertEqual "test result" False
+        runSolidityTestCustom testFile "prove_smtTimeout" (Just 1) Nothing False Nothing Foundry >>= assertEqual "test result" False
         runSolidityTest testFile "prove_multi" >>= assertEqual "test result" False
         -- TODO: implement overflow checking optimizations and enable, currently this runs forever
         --runSolidityTest testFile "prove_distributivity" >>= assertEqual "test result" False
     , testCase "Loop-Tests" $ do
         let testFile = "test/contracts/pass/loops.sol"
-        runSolidityTestCustom testFile "prove_loop" (Just 10) False Nothing Foundry >>= assertEqual "test result" True
-        runSolidityTestCustom testFile "prove_loop" (Just 100) False Nothing Foundry >>= assertEqual "test result" False
-    , testCase "Invariant-Tests-Pass" $ do
-        let testFile = "test/contracts/pass/invariants.sol"
-        runSolidityTest testFile ".*" >>= assertEqual "test result" True
-    , testCase "Invariant-Tests-Fail" $ do
-        let testFile = "test/contracts/fail/invariantFail.sol"
-        runSolidityTest testFile "invariantFirst" >>= assertEqual "test result" False
-        runSolidityTest testFile "invariantCount" >>= assertEqual "test result" False
+        runSolidityTestCustom testFile "prove_loop" Nothing (Just 10) False Nothing Foundry >>= assertEqual "test result" True
+        runSolidityTestCustom testFile "prove_loop" Nothing (Just 100) False Nothing Foundry >>= assertEqual "test result" False
     , testCase "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
-    , testCase "Cheat-Codes-Fail" $ do
-        let testFile = "test/contracts/fail/cheatCodes.sol"
-        runSolidityTestCustom testFile "testBadFFI" Nothing False Nothing Foundry >>= assertEqual "test result" False
-        runSolidityTestCustom testFile "test_prank_underflow" Nothing False Nothing Foundry >>= assertEqual "test result" False
     , testCase "Unwind" $ do
         let testFile = "test/contracts/pass/unwind.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
@@ -767,6 +786,295 @@ tests = testGroup "hevm"
         (e, [Qed _]) <- withSolvers Z3 1 Nothing $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBool "The expression is partial" $ not (Expr.containsNode isPartial e)
+    ]
+  , testGroup "Symbolic Addresses"
+    [ testCase "symbolic-address-create" $ do
+        let src = [i|
+                  contract A {
+                    constructor() payable {}
+                  }
+                  contract C {
+                    function fun(uint256 a) external{
+                      require(address(this).balance > a);
+                      new A{value:a}();
+                    }
+                  }
+                  |]
+        Just a <- solcRuntime "A" src
+        Just c <- solcRuntime "C" src
+        let sig = Sig "fun(uint256)" [AbiUIntType 256]
+        (expr, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
+          verifyContract s c (Just sig) [] defaultVeriOpts Nothing Nothing
+        let isSuc (Success {}) = True
+            isSuc _ = False
+        case filter isSuc (flattenExpr expr) of
+          [Success _ _ _ store] -> do
+            let ca = fromJust (Map.lookup (SymAddr "freshSymAddr1") store)
+            let code = case ca.code of
+                  RuntimeCode (ConcreteRuntimeCode c') -> c'
+                  _ -> internalError "expected concrete code"
+            assertEqual "balance mismatch" (Var "arg1") ca.balance
+            assertEqual "code mismatch" (stripBytecodeMetadata a) (stripBytecodeMetadata code)
+            assertEqual "nonce mismatch" (Just 1) ca.nonce
+          _ -> assertBool "too many success nodes!" False
+    , testCase "symbolic-balance-call" $ do
+        let src = [i|
+                  contract A {
+                    function f() public payable returns (uint) {
+                      return msg.value;
+                    }
+                  }
+                  contract C {
+                    function fun(uint256 x) external {
+                      require(address(this).balance > x);
+                      A a = new A();
+                      uint res = a.f{value:x}();
+                      assert(res == x);
+                    }
+                  }
+                  |]
+        Just c <- solcRuntime "C" src
+        res <- reachableUserAsserts c Nothing
+        assertBool "unexpected cex" (isRight res)
+    -- TODO: implement missing aliasing rules
+    , expectFail $ testCase "deployed-contract-addresses-cannot-alias" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract A {}
+            contract C {
+              function f() external {
+                A a = new A();
+                if (address(a) == address(this)) assert(false);
+              }
+            }
+          |]
+        res <- reachableUserAsserts c Nothing
+        assertBool "should not be able to alias" (isRight res)
+    , testCase "addresses-in-args-can-alias-anything" $ do
+        let addrs :: [Text]
+            addrs = ["address(this)", "tx.origin", "block.coinbase", "msg.sender"]
+            sig = Just $ Sig "f(address)" [AbiAddressType]
+            checkVs vs = [i|
+                           contract C {
+                             function f(address a) external {
+                               if (${vs} == a) assert(false);
+                             }
+                           }
+                         |]
+
+        [self, origin, coinbase, caller] <- forM addrs $ \addr -> do
+          Just c <- solcRuntime "C" (checkVs addr)
+          Left [cex] <- reachableUserAsserts c sig
+          pure cex.addrs
+
+        let check as a = (Map.lookup (SymAddr "arg1") as) @?= (Map.lookup a as)
+        check self (SymAddr "entrypoint")
+        check origin (SymAddr "origin")
+        check coinbase (SymAddr "coinbase")
+        check caller (SymAddr "caller")
+    , testCase "addresses-in-args-can-alias-themselves" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract C {
+              function f(address a, address b) external {
+                if (a == b) assert(false);
+              }
+            }
+          |]
+        let sig = Just $ Sig "f(address,address)" [AbiAddressType,AbiAddressType]
+        Left [cex] <- reachableUserAsserts c sig
+        let arg1 = fromJust $ Map.lookup (SymAddr "arg1") cex.addrs
+            arg2 = fromJust $ Map.lookup (SymAddr "arg1") cex.addrs
+        assertEqual "should match" arg1 arg2
+    -- TODO: fails due to missing aliasing rules
+    , expectFail $ testCase "tx.origin cannot alias deployed contracts" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract A {}
+            contract C {
+              function f() external {
+                address a = address(new A());
+                if (tx.origin == a) assert(false);
+              }
+            }
+          |]
+        cexs <- reachableUserAsserts c Nothing
+        assertBool "unexpected cex" (isRight cexs)
+    , testCase "tx.origin can alias everything else" $ do
+        let addrs = ["address(this)", "block.coinbase", "msg.sender", "arg"] :: [Text]
+            sig = Just $ Sig "f(address)" [AbiAddressType]
+            checkVs vs = [i|
+                           contract C {
+                             function f(address arg) external {
+                               if (${vs} == tx.origin) assert(false);
+                             }
+                           }
+                         |]
+
+        [self, coinbase, caller, arg] <- forM addrs $ \addr -> do
+          Just c <- solcRuntime "C" (checkVs addr)
+          Left [cex] <- reachableUserAsserts c sig
+          pure cex.addrs
+
+        let check as a = (Map.lookup (SymAddr "origin") as) @?= (Map.lookup a as)
+        check self (SymAddr "entrypoint")
+        check coinbase (SymAddr "coinbase")
+        check caller (SymAddr "caller")
+        check arg (SymAddr "arg1")
+    , testCase "coinbase can alias anything" $ do
+        let addrs = ["address(this)", "tx.origin", "msg.sender", "a", "arg"] :: [Text]
+            sig = Just $ Sig "f(address)" [AbiAddressType]
+            checkVs vs = [i|
+                           contract A {}
+                           contract C {
+                             function f(address arg) external {
+                               address a = address(new A());
+                               if (${vs} == block.coinbase) assert(false);
+                             }
+                           }
+                         |]
+
+        [self, origin, caller, a, arg] <- forM addrs $ \addr -> do
+          Just c <- solcRuntime "C" (checkVs addr)
+          Left [cex] <- reachableUserAsserts c sig
+          pure cex.addrs
+
+        let check as a' = (Map.lookup (SymAddr "coinbase") as) @?= (Map.lookup a' as)
+        check self (SymAddr "entrypoint")
+        check origin (SymAddr "origin")
+        check caller (SymAddr "caller")
+        check a (SymAddr "freshSymAddr1")
+        check arg (SymAddr "arg1")
+    , testCase "caller can alias anything" $ do
+        let addrs = ["address(this)", "tx.origin", "block.coinbase", "a", "arg"] :: [Text]
+            sig = Just $ Sig "f(address)" [AbiAddressType]
+            checkVs vs = [i|
+                           contract A {}
+                           contract C {
+                             function f(address arg) external {
+                               address a = address(new A());
+                               if (${vs} == msg.sender) assert(false);
+                             }
+                           }
+                         |]
+
+        [self, origin, coinbase, a, arg] <- forM addrs $ \addr -> do
+          Just c <- solcRuntime "C" (checkVs addr)
+          Left [cex] <- reachableUserAsserts c sig
+          pure cex.addrs
+
+        let check as a' = (Map.lookup (SymAddr "caller") as) @?= (Map.lookup a' as)
+        check self (SymAddr "entrypoint")
+        check origin (SymAddr "origin")
+        check coinbase (SymAddr "coinbase")
+        check a (SymAddr "freshSymAddr1")
+        check arg (SymAddr "arg1")
+    , testCase "vm.load fails for a potentially aliased address" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            interface Vm {
+              function load(address,bytes32) external;
+            }
+            contract C {
+              function f() external {
+                Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+                vm.load(msg.sender, 0x0);
+              }
+            }
+          |]
+        (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s ->
+          verifyContract s c Nothing [] defaultVeriOpts Nothing (Just $ checkBadCheatCode "load(address,bytes32)")
+        pure ()
+    , testCase "vm.store fails for a potentially aliased address" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            interface Vm {
+                function store(address,bytes32,bytes32) external;
+            }
+            contract C {
+              function f() external {
+                Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+                vm.store(msg.sender, 0x0, 0x0);
+              }
+            }
+          |]
+        (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s ->
+          verifyContract s c Nothing [] defaultVeriOpts Nothing (Just $ checkBadCheatCode "store(address,bytes32,bytes32)")
+        pure ()
+    -- TODO: make this work properly
+    , testCase "transfering-eth-does-not-dealias" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            // we can't do calls to unknown code yet so we use selfdestruct
+            contract Send {
+              constructor(address payable dst) payable {
+                selfdestruct(dst);
+              }
+            }
+            contract C {
+              function f() external {
+                uint preSender = msg.sender.balance;
+                uint preOrigin = tx.origin.balance;
+
+                new Send{value:10}(payable(msg.sender));
+                new Send{value:5}(payable(tx.origin));
+
+                if (msg.sender == tx.origin) {
+                  assert(preSender == preOrigin
+                      && msg.sender.balance == preOrigin + 15
+                      && tx.origin.balance == preSender + 15);
+                } else {
+                  assert(msg.sender.balance == preSender + 10
+                      && tx.origin.balance == preOrigin + 5);
+                }
+              }
+            }
+          |]
+        Right e <- reachableUserAsserts c Nothing
+        -- TODO: this should work one day
+        assertBool "should be partial" (Expr.containsNode isPartial e)
+    , testCase "addresses-in-context-are-symbolic" $ do
+        Just a <- solcRuntime "A"
+          [i|
+            contract A {
+              function f() external {
+                assert(msg.sender != address(0x0));
+              }
+            }
+          |]
+        Just b <- solcRuntime "B"
+          [i|
+            contract B {
+              function f() external {
+                assert(block.coinbase != address(0x1));
+              }
+            }
+          |]
+        Just c <- solcRuntime "C"
+          [i|
+            contract C {
+              function f() external {
+                assert(tx.origin != address(0x2));
+              }
+            }
+          |]
+        Just d <- solcRuntime "D"
+          [i|
+            contract D {
+              function f() external {
+                assert(address(this) != address(0x3));
+              }
+            }
+          |]
+        [acex,bcex,ccex,dcex] <- forM [a,b,c,d] $ \con -> do
+          Left [cex] <- reachableUserAsserts con Nothing
+          assertEqual "wrong number of addresses" 1 (length (Map.keys cex.addrs))
+          pure cex
+
+        assertEqual "wrong model for a" (Addr 0) (fromJust $ Map.lookup (SymAddr "caller") acex.addrs)
+        assertEqual "wrong model for b" (Addr 1) (fromJust $ Map.lookup (SymAddr "coinbase") bcex.addrs)
+        assertEqual "wrong model for c" (Addr 2) (fromJust $ Map.lookup (SymAddr "origin") ccex.addrs)
+        assertEqual "wrong model for d" (Addr 3) (fromJust $ Map.lookup (SymAddr "entrypoint") dcex.addrs)
     ]
   , testGroup "Symbolic execution"
       [
@@ -1150,7 +1458,9 @@ tests = testGroup "hevm"
               in case leaf of
                    Success _ _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
                    _ -> PBool True
-        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s safeAdd (Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts AbstractStore (Just pre) (Just post)
+            sig = Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
+        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
+          verifyContract s safeAdd sig [] defaultVeriOpts (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
 
@@ -1177,7 +1487,7 @@ tests = testGroup "hevm"
                    Success _ _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
                    _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
-          verifyContract s safeAdd (Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts AbstractStore (Just pre) (Just post)
+          verifyContract s safeAdd (Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
       ,
       testCase "summary storage writes" $ do
@@ -1197,13 +1507,18 @@ tests = testGroup "hevm"
             post prestate leaf =
               let y = case getStaticAbiArgs 1 prestate of
                         [y'] -> y'
-                        _ -> internalError "expected 1 arg"
-                  this = Expr.litAddr $ prestate.state.codeContract
-                  prex = Expr.readStorage' this (Lit 0) prestate.env.storage
+                        _ -> error "expected 1 arg"
+                  this = prestate.state.codeContract
+                  prestore = (fromJust (Map.lookup this prestate.env.contracts)).storage
+                  prex = Expr.readStorage' (Lit 0) prestore
               in case leaf of
-                Success _ _ _ postStore -> Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' this (Lit 0) postStore)
+                Success _ _ _ postState -> let
+                    poststore = (fromJust (Map.lookup this postState)).storage
+                  in Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' (Lit 0) poststore)
                 _ -> PBool True
-        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts AbstractStore (Just pre) (Just post)
+            sig = Just (Sig "f(uint256)" [AbiUIntType 256])
+        (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
+          verifyContract s c sig [] defaultVeriOpts (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         -- tests how whiffValue handles Neg via application of the triple IsZero simplification rule
@@ -1251,18 +1566,21 @@ tests = testGroup "hevm"
               post prestate poststate =
                 let (x,y) = case getStaticAbiArgs 2 prestate of
                         [x',y'] -> (x',y')
-                        _ -> internalError "expected 2 args"
-                    this = Expr.litAddr $ prestate.state.codeContract
-                    prestore = prestate.env.storage
-                    prex = Expr.readStorage' this x prestore
-                    prey = Expr.readStorage' this y prestore
+                        _ -> error "expected 2 args"
+                    this = prestate.state.codeContract
+                    prestore = (fromJust (Map.lookup this prestate.env.contracts)).storage
+                    prex = Expr.readStorage' x prestore
+                    prey = Expr.readStorage' y prestore
                 in case poststate of
-                     Success _ _ _ poststore -> let
-                           postx = Expr.readStorage' this x poststore
-                           posty = Expr.readStorage' this y poststore
+                     Success _ _ _ postcs -> let
+                           poststore = (fromJust (Map.lookup this postcs)).storage
+                           postx = Expr.readStorage' x poststore
+                           posty = Expr.readStorage' y poststore
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
-          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts AbstractStore (Just pre) (Just post)
+              sig = Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
+          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
+            verifyContract s c sig [] defaultVeriOpts (Just pre) (Just post)
           putStrLn "Correct, this can never fail"
         ,
         -- Inspired by these `msg.sender == to` token bugs
@@ -1282,21 +1600,24 @@ tests = testGroup "hevm"
             }
             |]
           let pre vm = (Lit 0) .== vm.state.callvalue
-              post prestate poststate =
+              post prestate leaf =
                 let (x,y) = case getStaticAbiArgs 2 prestate of
                         [x',y'] -> (x',y')
-                        _ -> internalError "expected 2 args"
-                    this = Expr.litAddr $ prestate.state.codeContract
-                    prestore =  prestate.env.storage
-                    prex = Expr.readStorage' this x prestore
-                    prey = Expr.readStorage' this y prestore
-                in case poststate of
-                     Success _ _ _ poststore -> let
-                           postx = Expr.readStorage' this x poststore
-                           posty = Expr.readStorage' this y poststore
+                        _ -> error "expected 2 args"
+                    this = prestate.state.codeContract
+                    prestore = (fromJust (Map.lookup this prestate.env.contracts)).storage
+                    prex = Expr.readStorage' x prestore
+                    prey = Expr.readStorage' y prestore
+                in case leaf of
+                     Success _ _ _ poststate -> let
+                           poststore = (fromJust (Map.lookup this poststate)).storage
+                           postx = Expr.readStorage' x poststore
+                           posty = Expr.readStorage' y poststore
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
-          (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts AbstractStore (Just pre) (Just post)
+              sig = Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
+          (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s ->
+            verifyContract s c sig [] defaultVeriOpts (Just pre) (Just post)
           let x = getVar ctr "arg1"
           let y = getVar ctr "arg2"
           putStrLn $ "y:" <> show y
@@ -1708,14 +2029,14 @@ tests = testGroup "hevm"
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "multiple-contracts" $ do
-          let code' =
+          let code =
                 [i|
                   contract C {
                     uint x;
                     A constant a = A(0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B);
 
                     function call_A() public view {
-                      // should fail since a.x() can be anything
+                      // should fail since x can be anything
                       assert(a.x() == x);
                     }
                   }
@@ -1723,25 +2044,22 @@ tests = testGroup "hevm"
                     uint public x;
                   }
                 |]
-              aAddr = Addr 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
-          Just c <- solcRuntime "C" code'
-          Just a <- solcRuntime "A" code'
+              aAddr = LitAddr (Addr 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B)
+              cAddr = SymAddr "entrypoint"
+          Just c <- solcRuntime "C" code
+          Just a <- solcRuntime "A" code
           (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> do
-            let vm0 = abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing AbstractStore
-            let vm = vm0
-                  & set (#state % #callvalue) (Lit 0)
-                  & over (#env % #contracts)
+            vm <- stToIO $ abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing False
+                    <&> set (#state % #callvalue) (Lit 0)
+                    <&> over (#env % #contracts)
                        (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
             verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
 
           let storeCex = cex.store
-              addrC = into $ createAddress ethrunAddress 1
-              addrA = W256 0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
-              testCex = Map.size storeCex == 2 &&
-                        case (Map.lookup addrC storeCex, Map.lookup addrA storeCex) of
-                          (Just sC, Just sA) -> Map.size sC == 1 && Map.size sA == 1 &&
-                            case (Map.lookup 0 sC, Map.lookup 0 sA) of
+              testCex = case (Map.lookup cAddr storeCex, Map.lookup aAddr storeCex) of
+                          (Just sC, Just sA) -> case (Map.lookup 0 sC, Map.lookup 0 sA) of
                               (Just x, Just y) -> x /= y
+                              (Just x, Nothing) -> x /= 0
                               _ -> False
                           _ -> False
           assertBool "Did not find expected storage cex" testCex
@@ -1795,7 +2113,7 @@ tests = testGroup "hevm"
         ,
         ignoreTest $ testCase "safemath distributivity (yul)" $ do
           let yulsafeDistributivity = hex "6355a79a6260003560e01c14156016576015601f565b5b60006000fd60a1565b603d602d604435600435607c565b6039602435600435607c565b605d565b6052604b604435602435605d565b600435607c565b141515605a57fe5b5b565b6000828201821115151560705760006000fd5b82820190505b92915050565b6000818384048302146000841417151560955760006000fd5b82820290505b92915050565b"
-          let vm =  abstractVM (mkCalldata (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []) yulsafeDistributivity Nothing AbstractStore
+          vm <- stToIO $ abstractVM (mkCalldata (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []) yulsafeDistributivity Nothing False
           (_, [Qed _]) <-  withSolvers Z3 1 Nothing $ \s -> verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
         ,
@@ -1836,7 +2154,7 @@ tests = testGroup "hevm"
             }
             |]
           (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
-          let addr = into $ createAddress ethrunAddress 1
+          let addr = SymAddr "entrypoint"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
                           Just s -> Map.size s == 2 &&
@@ -1859,7 +2177,7 @@ tests = testGroup "hevm"
             }
             |]
           (_, [(Cex (_, cex))]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
-          let addr = into $ createAddress ethrunAddress 1
+          let addr = SymAddr "entrypoint"
               a = getVar cex "arg1"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
@@ -1882,12 +2200,21 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $ \s -> verifyContract s c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts EmptyStore Nothing (Just $ checkAssertions [0x01])
-          let testCex = Map.null cex.store
+          let sig = Just (Sig "fun(uint256)" [AbiUIntType 256])
+          (_, [Cex (_, cex)]) <- withSolvers Z3 1 Nothing $
+            \s -> verifyContract s c sig [] defaultVeriOpts Nothing (Just $ checkAssertions [0x01])
+          let addr = SymAddr "entrypoint"
+              testCex = Map.size cex.store == 1 &&
+                        case Map.lookup addr cex.store of
+                          Just s -> Map.size s == 2 &&
+                                    case (Map.lookup 0 s, Map.lookup 1 s) of
+                                      (Just x, Just y) -> x == y
+                                      _ -> False
+                          _ -> False
           assertBool "Did not find expected storage cex" testCex
           putStrLn "Expected counterexample found"
- ]
-  , testGroup "Equivalence checking"
+  ]
+  , testGroup "equivalence-checking"
     [
       testCase "eq-yul-simple-cex" $ do
         Just aPrgm <- yul ""
@@ -1916,32 +2243,146 @@ tests = testGroup "hevm"
       ,
       testCase "eq-sol-exp-qed" $ do
         Just aPrgm <- solcRuntime "C"
-            [i|
-              contract C {
-                function a(uint8 x) public returns (uint8 b) {
-                  unchecked {
-                    b = x*2;
-                  }
+          [i|
+            contract C {
+              function a(uint8 x) public returns (uint8 b) {
+                unchecked {
+                  b = x*2;
                 }
               }
-            |]
+            }
+          |]
         Just bPrgm <- solcRuntime "C"
           [i|
-              contract C {
-                function a(uint8 x) public returns (uint8 b) {
-                  unchecked {
-                    b =  x<<1;
-                  }
+            contract C {
+              function a(uint8 x) public returns (uint8 b) {
+                unchecked {
+                  b = x<<1;
                 }
               }
+            }
           |]
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqual "Must have no difference" [Qed ()] a
-          return ()
+      ,
+      testCase "eq-balance-differs" $ do
+        Just aPrgm <- solcRuntime "C"
+          [i|
+            contract Send {
+              constructor(address payable dst) payable {
+                selfdestruct(dst);
+              }
+            }
+            contract C {
+              function f() public {
+                new Send{value:2}(payable(address(0x0)));
+              }
+            }
+          |]
+        Just bPrgm <- solcRuntime "C"
+          [i|
+            contract Send {
+              constructor(address payable dst) payable {
+                selfdestruct(dst);
+              }
+            }
+            contract C {
+              function f() public {
+                new Send{value:1}(payable(address(0x0)));
+              }
+            }
+          |]
+        withSolvers Z3 3 Nothing $ \s -> do
+          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          assertBool "Must differ" (all isCex a)
+      ,
+      -- TODO: this fails because we don't check equivalence of deployed contracts
+      expectFail $ testCase "eq-handles-contract-deployment" $ do
+        Just aPrgm <- solcRuntime "B"
+          [i|
+            contract Send {
+              constructor(address payable dst) payable {
+                selfdestruct(dst);
+              }
+            }
+
+            contract A {
+              address parent;
+              constructor(address p) {
+                parent = p;
+              }
+              function evil() public {
+                parent.call(abi.encode(B.drain.selector));
+              }
+            }
+
+            contract B {
+              address child;
+              function a() public {
+                child = address(new A(address(this)));
+              }
+              function drain() public {
+                require(msg.sender == child);
+                new Send{value: address(this).balance}(payable(address(0x0)));
+              }
+            }
+          |]
+        Just bPrgm <- solcRuntime "D"
+          [i|
+            contract Send {
+              constructor(address payable dst) payable {
+                selfdestruct(dst);
+              }
+            }
+
+            contract C {
+              address parent;
+              constructor(address p) {
+                  parent = p;
+              }
+            }
+
+            contract D {
+              address child;
+              function a() public {
+                child = address(new C(address(this)));
+              }
+              function drain() public {
+                require(msg.sender == child);
+                new Send{value: address(this).balance}(payable(address(0x0)));
+              }
+            }
+          |]
+        withSolvers Z3 3 Nothing $ \s -> do
+          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          assertBool "Must differ" (all isCex a)
+      ,
+      testCase "eq-unknown-addr" $ do
+        Just aPrgm <- solcRuntime "C"
+          [i|
+            contract C {
+              address addr;
+              function a(address a, address b) public {
+                addr = a;
+              }
+            }
+          |]
+        Just bPrgm <- solcRuntime "C"
+          [i|
+            contract C {
+              address addr;
+              function a(address a, address b) public {
+                addr = b;
+              }
+            }
+          |]
+        withSolvers Z3 3 Nothing $ \s -> do
+          let cd = mkCalldata (Just (Sig "a(address,address)" [AbiAddressType, AbiAddressType])) []
+          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd
+          assertEqual "Must be different" (any isCex a) True
       ,
       testCase "eq-sol-exp-cex" $ do
-        -- These yul programs are not equivalent: (try --calldata $(seth --to-uint256 2) for example)
         Just aPrgm <- solcRuntime "C"
             [i|
               contract C {
@@ -1965,7 +2406,6 @@ tests = testGroup "hevm"
         withSolvers Z3 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqual "Must be different" (any isCex a) True
-          return ()
       , testCase "eq-all-yul-optimization-tests" $ do
         let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }
             ignoredTests =
@@ -2247,15 +2687,20 @@ tests = testGroup "hevm"
   where
     (===>) = assertSolidityComputation
 
+checkEquivProp :: Prop -> Prop -> IO Bool
+checkEquivProp = checkEquivBase (\l r -> PNeg (PImpl l r .&& PImpl r l))
 
 checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO Bool
-checkEquiv l r = withSolvers Z3 1 (Just 10) $ \solvers -> do
+checkEquiv = checkEquivBase (./=)
+
+checkEquivBase :: Eq a => (a -> a -> Prop) -> a -> a -> IO Bool
+checkEquivBase mkprop l r = withSolvers Z3 1 (Just 1) $ \solvers -> do
   if l == r
      then do
        putStrLn "skip"
        pure True
      else do
-       let smt = assertProps [l ./= r]
+       let smt = assertProps [mkprop l r]
        res <- checkSat solvers smt
        print res
        pure $ case res of
@@ -2280,9 +2725,10 @@ runSimpleVM x ins = do
        s -> internalError $ show s
 
 -- | Takes a creation code and returns a vm with the result of executing the creation code
-loadVM :: ByteString -> IO (Maybe VM)
+loadVM :: ByteString -> IO (Maybe (VM RealWorld))
 loadVM x = do
-  vm1 <- Stepper.interpret (Fetch.zero 0 Nothing) (vmForEthrunCreation x) Stepper.runFully
+  vm <- stToIO $ vmForEthrunCreation x
+  vm1 <- Stepper.interpret (Fetch.zero 0 Nothing) vm Stepper.runFully
   case vm1.result of
      Just (VMSuccess (ConcreteBuf targetCode)) -> do
        let target = vm1.state.contract
@@ -2294,7 +2740,7 @@ loadVM x = do
       replaceCodeOfSelf (RuntimeCode $ ConcreteRuntimeCode targetCode)
       resetState
       assign (#state % #gas) 0xffffffffffffffff -- kludge
-      loadContract target
+      execState (loadContract target) <$> get >>= put
 
 hex :: ByteString -> ByteString
 hex s =
@@ -2345,7 +2791,7 @@ runStatements stmts args t = do
     }
   |] (abiMethod s (AbiTuple $ Vector.fromList args))
 
-getStaticAbiArgs :: Int -> VM -> [Expr EWord]
+getStaticAbiArgs :: Int -> VM s -> [Expr EWord]
 getStaticAbiArgs n vm =
   let cd = vm.state.calldata
   in decodeStaticArgs 4 n cd
@@ -2385,11 +2831,26 @@ instance Arbitrary RLPData where
 instance Arbitrary Word128 where
   arbitrary = liftM2 fromHiAndLo arbitrary arbitrary
 
+instance Arbitrary Word160 where
+  arbitrary = liftM2 fromHiAndLo arbitrary arbitrary
+
 instance Arbitrary Word256 where
   arbitrary = liftM2 fromHiAndLo arbitrary arbitrary
 
+instance Arbitrary W64 where
+  arbitrary = fmap W64 arbitrary
+
 instance Arbitrary W256 where
   arbitrary = fmap W256 arbitrary
+
+instance Arbitrary Addr where
+  arbitrary = fmap Addr arbitrary
+
+instance Arbitrary (Expr EAddr) where
+  arbitrary = oneof
+    [ fmap LitAddr arbitrary
+    , fmap SymAddr genName
+    ]
 
 instance Arbitrary (Expr Storage) where
   arbitrary = sized genStorage
@@ -2405,6 +2866,25 @@ instance Arbitrary (Expr Buf) where
 
 instance Arbitrary (Expr End) where
   arbitrary = sized genEnd
+
+instance Arbitrary (ContractCode) where
+  arbitrary = oneof
+    [ fmap UnknownCode arbitrary
+    , liftM2 InitCode arbitrary arbitrary
+    , fmap RuntimeCode arbitrary
+    ]
+
+instance Arbitrary (RuntimeCode) where
+  arbitrary = oneof
+    [ fmap ConcreteRuntimeCode arbitrary
+    , fmap SymbolicRuntimeCode arbitrary
+    ]
+
+instance Arbitrary (Vector.Vector (Expr Byte)) where
+  arbitrary = fmap Vector.fromList (listOf1 arbitrary)
+
+instance Arbitrary (Expr EContract) where
+  arbitrary = sized genEContract
 
 -- LitOnly
 newtype LitOnly a = LitOnly a
@@ -2426,6 +2906,14 @@ instance Arbitrary (LitOnly (Expr EWord)) where
 
 instance Arbitrary (LitOnly (Expr Buf)) where
   arbitrary = LitOnly . ConcreteBuf <$> arbitrary
+
+genEContract :: Int -> Gen (Expr EContract)
+genEContract sz = do
+  c <- arbitrary
+  b <- defaultWord sz
+  n <- arbitrary
+  s <- genStorage sz
+  pure $ C c s b n
 
 -- ZeroDepthWord
 newtype ZeroDepthWord = ZeroDepthWord (Expr EWord)
@@ -2463,34 +2951,31 @@ instance Arbitrary GenCopySliceBuf where
     fmap GenCopySliceBuf mkBuf
 
 -- GenWriteStorageExpr
-newtype GenWriteStorageExpr = GenWriteStorageExpr (Expr EWord, Expr EWord, Expr Storage)
+newtype GenWriteStorageExpr = GenWriteStorageExpr (Expr EWord, Expr Storage)
   deriving (Show, Eq)
 
 instance Arbitrary GenWriteStorageExpr where
   arbitrary = do
-    addr <- arbitrary
     slot <- arbitrary
     let mkStore = oneof
-          [ pure EmptyStore
+          [ pure $ ConcreteStore mempty
           , fmap ConcreteStore arbitrary
           , do
               -- generate some write chains where we know that at least one
               -- write matches either the input addr, or both the input
               -- addr and slot
-              let matchAddr = liftM2 (SStore addr) arbitrary arbitrary
-                  matchBoth = fmap (SStore addr slot) arbitrary
-                  addWrites :: Expr Storage -> Int -> Gen (Expr Storage)
+              let addWrites :: Expr Storage -> Int -> Gen (Expr Storage)
                   addWrites b 0 = pure b
-                  addWrites b n = liftM4 SStore arbitrary arbitrary arbitrary (addWrites b (n - 1))
+                  addWrites b n = liftM3 SStore arbitrary arbitrary (addWrites b (n - 1))
               s <- arbitrary
-              addMatch <- oneof [ matchAddr, matchBoth ]
+              addMatch <- fmap (SStore slot) arbitrary
               let withMatch = addMatch s
               newWrites <- oneof [ pure 0, pure 1, fmap (`mod` 5) arbitrary ]
               addWrites withMatch newWrites
           , arbitrary
           ]
     store <- mkStore
-    pure $ GenWriteStorageExpr (addr, slot, store)
+    pure $ GenWriteStorageExpr (slot, store)
 
 -- GenWriteByteIdx
 newtype GenWriteByteIdx = GenWriteByteIdx (Expr EWord)
@@ -2500,8 +2985,34 @@ instance Arbitrary GenWriteByteIdx where
   arbitrary = do
     -- 1st: can never overflow an Int
     -- 2nd: can overflow an Int
-    let mkIdx = frequency [ (10, genLit (fromIntegral (1_000_000 :: Int))) , (1, fmap Lit arbitrary) ]
+    let mkIdx = frequency [ (10, genLit 1_000_000) , (1, fmap Lit arbitrary) ]
     fmap GenWriteByteIdx mkIdx
+
+newtype LitProp = LitProp Prop
+  deriving (Show, Eq)
+
+instance Arbitrary LitProp where
+  arbitrary = LitProp <$> sized (genProp True)
+
+instance Arbitrary Prop where
+  arbitrary = sized (genProp False)
+
+genProp :: Bool -> Int -> Gen (Prop)
+genProp _ 0 = PBool <$> arbitrary
+genProp onlyLits sz = oneof
+  [ liftM2 PEq subWord subWord
+  , liftM2 PLT subWord subWord
+  , liftM2 PGT subWord subWord
+  , liftM2 PLEq subWord subWord
+  , liftM2 PGEq subWord subWord
+  , fmap PNeg subProp
+  , liftM2 PAnd subProp subProp
+  , liftM2 POr subProp subProp
+  , liftM2 PImpl subProp subProp
+  ]
+  where
+    subWord = if onlyLits then Lit <$> arbitrary else genWord 1 (sz `div` 2)
+    subProp = genProp onlyLits (sz `div` 2)
 
 genByte :: Int -> Gen (Expr Byte)
 genByte 0 = fmap LitByte arbitrary
@@ -2519,7 +3030,7 @@ genLit bound = do
   pure $ Lit (w `mod` bound)
 
 genNat :: Gen Int
-genNat = fmap fromIntegral (arbitrary :: Gen Natural)
+genNat = fmap unsafeInto (arbitrary :: Gen Natural)
 
 genName :: Gen Text
 -- In order not to generate SMT reserved words, we prepend with "esc_"
@@ -2533,12 +3044,11 @@ genEnd 0 = oneof
  ]
 genEnd sz = oneof
  [ fmap (Failure mempty mempty . Revert) subBuf
- , liftM4 Success (return mempty) (return mempty) subBuf subStore
+ , liftM4 Success (return mempty) (return mempty) subBuf arbitrary
  , liftM3 ITE subWord subEnd subEnd
  ]
  where
    subBuf = defaultBuf (sz `div` 2)
-   subStore = genStorage (sz `div` 2)
    subWord = defaultWord (sz `div` 2)
    subEnd = genEnd (sz `div` 2)
 
@@ -2560,9 +3070,6 @@ genWord litFreq 0 = frequency
       , pure GasLimit
       , pure ChainId
       , pure BaseFee
-      , fmap CallValue genNat
-      , fmap Caller genNat
-      , fmap Address genNat
       --, liftM2 SelfBalance arbitrary arbitrary
       --, liftM2 Gas arbitrary arbitrary
       , fmap Lit arbitrary
@@ -2612,7 +3119,7 @@ genWord litFreq sz = frequency
     --, fmap ExtCodeHash subWord
     , fmap Keccak subBuf
     , fmap SHA256 subBuf
-    , liftM3 SLoad subWord subWord subStore
+    , liftM2 SLoad subWord subStore
     , liftM2 ReadWord subWord subBuf
     , fmap BufLength subBuf
     , do
@@ -2742,11 +3249,10 @@ genBuf bound sz = oneof
 
 genStorage :: Int -> Gen (Expr Storage)
 genStorage 0 = oneof
-  [ pure AbstractStore
-  , pure EmptyStore
-  --, fmap ConcreteStore arbitrary
+  [ fmap AbstractStore arbitrary
+  , fmap ConcreteStore arbitrary
   ]
-genStorage sz = liftM4 SStore subWord subWord subWord subStore
+genStorage sz = liftM3 SStore subWord subWord subStore
   where
     subStore = genStorage (sz `div` 10)
     subWord = defaultWord (sz `div` 5)
@@ -2770,3 +3276,27 @@ bothM f (a, a') = do
 
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
+
+checkBadCheatCode :: Text -> Postcondition s
+checkBadCheatCode sig _ = \case
+  (Failure _ _ (BadCheatCode s)) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
+  _ -> PBool True
+
+allBranchesFail :: ByteString -> Maybe Sig -> IO (Either [SMTCex] (Expr End))
+allBranchesFail = checkPost (Just p)
+  where
+    p _ = \case
+      Success _ _ _ _ -> PBool False
+      _ -> PBool True
+
+reachableUserAsserts :: ByteString -> Maybe Sig -> IO (Either [SMTCex] (Expr End))
+reachableUserAsserts = checkPost (Just $ checkAssertions [0x01])
+
+checkPost :: Maybe (Postcondition RealWorld) -> ByteString -> Maybe Sig -> IO (Either [SMTCex] (Expr End))
+checkPost post c sig = do
+  (e, res) <- withSolvers Z3 1 Nothing $ \s ->
+    verifyContract s c sig [] defaultVeriOpts Nothing post
+  let cexs = snd <$> mapMaybe getCex res
+  case cexs of
+    [] -> pure $ Right e
+    cs -> pure $ Left cs

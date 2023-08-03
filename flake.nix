@@ -17,24 +17,63 @@
       url = "github:ethereum/tests/v12.2";
       flake = false;
     };
+    cabal-head = {
+      url = "github:haskell/cabal";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, solidity, ethereum-tests, foundry, ... }:
+  outputs = { self, nixpkgs, flake-utils, solidity, ethereum-tests, foundry, cabal-head, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        # use latest z3
-        z3-latest = pkgs.z3_4_12;
-
-        pkgs = nixpkgs.legacyPackages.${system};
+        pkgs = (import nixpkgs { inherit system; config = { allowBroken = true; }; });
         testDeps = with pkgs; [
           go-ethereum
           solc
-          z3-latest
+          z3
           cvc5
           git
         ] ++ lib.optional (!pkgs.stdenv.isDarwin && !pkgs.stdenv.isAarch64) [
           foundry.defaultPackage.${system}
         ];
+
+        # custom package set capable of building latest (unreleased) `cabal-install`.
+        # This gives us support for multiple home units in cabal repl
+        cabal-multi-pkgs = pkgs.haskell.packages.ghc94.override {
+          overrides = with pkgs.haskell.lib; self: super: rec {
+            cabal-install = dontCheck (self.callCabal2nix "cabal-install" "${cabal-head}/cabal-install" {});
+            cabal-install-solver = dontCheck (self.callCabal2nix "cabal-install-solver" "${cabal-head}/cabal-install-solver" {});
+            Cabal-described = dontCheck (self.callCabal2nix "Cabal-described" "${cabal-head}/Cabal-described" {});
+            Cabal-QuickCheck = dontCheck (self.callCabal2nix "Cabal-QuickCheck" "${cabal-head}/Cabal-QuickCheck" {});
+            Cabal-tree-diff = dontCheck (self.callCabal2nix "Cabal-tree-diff" "${cabal-head}/Cabal-tree-diff" {});
+            Cabal-syntax = dontCheck (self.callCabal2nix "Cabal-syntax" "${cabal-head}/Cabal-syntax" {});
+            Cabal = dontCheck (self.callCabal2nix "Cabal" "${cabal-head}/Cabal" {});
+            unix = dontCheck (doJailbreak super.unix_2_8_1_1);
+            filepath = dontCheck (doJailbreak super.filepath_1_4_100_3);
+            process = dontCheck (doJailbreak super.process_1_6_17_0);
+            directory = dontCheck (doJailbreak (super.directory_1_3_7_1));
+            tasty = dontCheck (doJailbreak super.tasty);
+            QuickCheck = dontCheck (doJailbreak super.QuickCheck);
+            hashable = dontCheck (doJailbreak super.hashable);
+            async = dontCheck (doJailbreak super.async);
+            hspec-meta = dontCheck (doJailbreak super.hspec-meta);
+            hpc = dontCheck (doJailbreak super.hpc);
+            ghci = dontCheck (doJailbreak super.ghci);
+            ghc-boot = dontCheck (doJailbreak super.ghc-boot);
+            setenv = dontCheck (doJailbreak super.setenv);
+            vector = dontCheck (doJailbreak super.vector);
+            network-uri = dontCheck (doJailbreak super.network-uri);
+            aeson = dontCheck (doJailbreak super.aeson);
+            th-compat = dontCheck (doJailbreak super.th-compat);
+            safe-exceptions = dontCheck (doJailbreak super.safe-exceptions);
+            bifunctors = dontCheck (doJailbreak super.bifunctors);
+            base-compat-batteries = dontCheck (doJailbreak super.base-compat-batteries);
+            distributative = dontCheck (doJailbreak super.distributative);
+            semialign = dontCheck (doJailbreak super.semialign);
+            semigroupoids = dontCheck (doJailbreak super.semigroupoids);
+            hackage-security = dontCheck (doJailbreak super.hackage-security);
+          };
+        };
 
         secp256k1-static = stripDylib (pkgs.secp256k1.overrideAttrs (attrs: {
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
@@ -82,7 +121,7 @@
           buildInputs = [ makeWrapper ];
           postBuild = ''
             wrapProgram $out/bin/hevm \
-              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3-latest cvc5 ])}"
+              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3 cvc5 ])}"
           '';
         };
 
@@ -130,7 +169,7 @@
 
         # --- packages ----
 
-        packages.withTests = hevmUnwrapped;
+        packages.ci = with pkgs.haskell.lib; doBenchmark (dontHaddock (disableLibraryProfiling hevmUnwrapped));
         packages.noTests = pkgs.haskell.lib.dontCheck hevmUnwrapped;
         packages.hevm = hevmWrapped;
         packages.redistributable = hevmRedistributable;
@@ -148,19 +187,22 @@
           in haskellPackages.shellFor {
             packages = _: [ hevmUnwrapped ];
             buildInputs = [
+              # cabal from nixpkgs
+              # haskellPackages.cabal-install
+              cabal-multi-pkgs.cabal-install
               mdbook
               yarn
-              haskellPackages.cabal-install
               haskellPackages.eventlog2html
               haskellPackages.haskell-language-server
             ] ++ testDeps;
             withHoogle = true;
 
-            # NOTE: hacks for bugged cabal new-repl
-            LD_LIBRARY_PATH = libraryPath;
             HEVM_SOLIDITY_REPO = solidity;
             DAPP_SOLC = "${pkgs.solc}/bin/solc";
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
+
+            # NOTE: hacks for bugged cabal new-repl
+            LD_LIBRARY_PATH = libraryPath;
             shellHook = lib.optionalString stdenv.isDarwin ''
               export DYLD_LIBRARY_PATH="${libraryPath}";
             '';

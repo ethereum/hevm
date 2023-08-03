@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+## Fixed
+
+- CopySlice wraparound issue especially during CopyCallBytesToMemory
+- Contracts deployed during symbolic execution are created with an empty storage (instead of abstract in previous versions)
+- EVM.Solidity.toCode to include contractName in error string
+- Better cex reconstruction in cases where branches do not refer to all input variables in calldata
+- Correctly handle empty bytestring compiled contracts' JSON
+
+## Changed
+
+### UI
+
+- 'check' prefix now recognized as a function signature to symbolically execute for Dapps
+- symbolic solidity tests no longer consider reverts to be a failure, and check only for the ds-test failed bit or unser defined assertion failures (i.e. `Panic(0x01)`)
+- `vm.prank` now works correctly when passed a symbolic address
+- The `--initial-storage` flag no longer accepts a concrete prestore (valid values are now `Empty` or `Abstract`)
+- The visual debugger has been removed
+- All concrete ds-test executors have been removed (i.e. plain, fuzzer, invariant)
+- Rpc caching and state serialization has been removed (i.e. all `--cache` / `--state` flags)
+- The various `DAPP_TEST` variables are no longer observed
+
+### Internals
+
+- Contract addresses can now be fully symbolic
+- Contract balances can now be fully symbolic
+- Contract code can now be fully abstract. Calls into contracts with unknown code will fail with `UnexpectedSymbolicArg`.
+- Run expression simplification on branch conditions
+
+## API Changes
+
+Support for fully symbolic contract addresses required some very extensive changes to our storage model:
+
+- A new type has been added to `Expr` that can represent concrete or symbolic addresses
+- The contracts mapping is now keyed on terms of type `Expr EAddr` (instead of `Addr`)
+- Storage has been moved from a global storage mapping in `vm.env` into a per contract one
+- Terms of type `Expr Storage` now model a per contract store (i.e. W256 -> W256)
+- A new type has been added to `Expr`: `EContract`. It has one constructor that
+  is a simplified view of the full `Contract` typed used in the `VM` storage mapping.
+- `Success` nodes in `Expr End` now return a mapping from `Expr EAddr` to `Expr EContract` instead of an `Expr Storage`.
+- Nonces are now modeled as a `Maybe Word64` (where `Nothing` can be read as "symbolic").
+- `Expr Storage` no longer has an `EmptyStore` constructor (use `ConcreteStore mempty` instead)
+- Contract balances are now fully symbolic
+- Contract code can now be unknown. There is a new constructor for `ContractCode` to represent this (`UnknownCode`)
+- `VMOpts` no longer takes an initial store, and instead takes a `baseState`
+  which can be either `EmptyBase` or `AbstractBase`. This controls whether
+  storage should be inialized as empty or fully abstract. Regardless of this
+  setting contracts that are deployed at runtime via a call to
+  `CREATE`/`CREATE2` have zero initialized storage.
+
 ## [0.51.3] - 2023-07-14
 
 ## Fixed
