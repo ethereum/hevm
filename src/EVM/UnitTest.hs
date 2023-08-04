@@ -63,9 +63,9 @@ data TestVMParams = TestVMParams
   { address       :: Expr EAddr
   , caller        :: Expr EAddr
   , origin        :: Expr EAddr
-  , gasCreate     :: Word64
-  , gasCall       :: Word64
-  , baseFee       :: W256
+  , gasCreate     :: Gas
+  , gasCall       :: Gas
+  , baseFee       :: Expr EWord
   , priorityFee   :: W256
   , balanceCreate :: W256
   , coinbase      :: Expr EAddr
@@ -424,8 +424,11 @@ makeTxCall params (cd, cdProps) = do
   assign (#state % #caller) params.caller
   assign (#state % #gas) params.gasCall
   origin <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (#env % #contracts % at params.origin)
-  let insufficientBal = maybe False (\b -> b < params.gasprice * (into params.gasCall)) (maybeLitWord origin.balance)
-  when insufficientBal $ internalError "insufficient balance for gas cost"
+  case params.gasCall of
+    Gas gascall -> do
+      let insufficientBal = maybe False (\b -> b < params.gasprice * into gascall) (maybeLitWord origin.balance)
+      when insufficientBal $ internalError "insufficient balance for gas cost"
+    _ -> noop
   vm <- get
   put $ initTx vm
 
@@ -465,7 +468,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract = do
 paramsFromRpc :: Fetch.RpcInfo -> IO TestVMParams
 paramsFromRpc rpcinfo = do
   (miner,ts,blockNum,ran,limit,base) <- case rpcinfo of
-    Nothing -> pure (SymAddr "miner", Lit 0, 0, 0, 0, 0)
+    Nothing -> pure (SymAddr "miner", Lit 0, 0, 0, 0, Lit 0)
     Just (block, url) -> Fetch.fetchBlockFrom block url >>= \case
       Nothing -> internalError "Could not fetch block"
       Just Block{..} -> pure ( coinbase
@@ -482,8 +485,8 @@ paramsFromRpc rpcinfo = do
     { address = LitAddr 0xacab
     , caller = SymAddr "caller"
     , origin = SymAddr "origin"
-    , gasCreate = defaultGasForCreating
-    , gasCall = defaultGasForInvoking
+    , gasCreate = Gas defaultGasForCreating
+    , gasCall = Gas defaultGasForInvoking
     , baseFee = base
     , priorityFee = 0
     , balanceCreate = defaultBalanceForTestContract

@@ -115,7 +115,7 @@ parseBlock j = do
   number     <- readText <$> j ^? key "number" % _String
   gasLimit   <- readText <$> j ^? key "gasLimit" % _String
   let
-   baseFee = readText <$> j ^? key "baseFeePerGas" % _String
+   baseFee = Lit . readText <$> j ^? key "baseFeePerGas" % _String
    -- It seems unclear as to whether this field should still be called mixHash or renamed to prevRandao
    -- According to https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4399.md it should be renamed
    -- but alchemy is still returning mixHash
@@ -128,7 +128,7 @@ parseBlock j = do
      (Nothing, Just _, Just d) -> d
      _ -> internalError "block contains both difficulty and prevRandao"
   -- default codesize, default gas limit, default feescedule
-  pure $ Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff feeSchedule
+  pure $ Block coinbase timestamp number prd gasLimit (fromMaybe (Lit 0) baseFee) 0xffffffff feeSchedule
 
 fetchWithSession :: Text -> Session -> Value -> IO (Maybe Value)
 fetchWithSession url sess x = do

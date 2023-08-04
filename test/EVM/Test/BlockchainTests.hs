@@ -369,10 +369,10 @@ fromBlockchainCase' block tx preState postState =
          , caller        = LitAddr origin
          , baseState     = EmptyBase
          , origin        = LitAddr origin
-         , gas           = tx.gasLimit - txGasCost feeSchedule tx
-         , baseFee       = block.baseFee
+         , gas           = (Gas tx.gasLimit) - txGasCost feeSchedule tx
+         , baseFee       = Lit block.baseFee
          , priorityFee   = priorityFee tx block.baseFee
-         , gaslimit      = tx.gasLimit
+         , gaslimit      = Gas tx.gasLimit
          , number        = block.number
          , timestamp     = Lit block.timestamp
          , coinbase      = LitAddr block.coinbase
@@ -428,7 +428,7 @@ validateTx tx block cs = do
   originNonce   <- (view #nonce)   <$> view (at origin) cs
   let gasDeposit = (effectiveprice tx block.baseFee) * (into tx.gasLimit)
   if gasDeposit + tx.value <= originBalance
-    && (Just (unsafeInto tx.nonce) == originNonce) && block.baseFee <= maxBaseFee tx
+    && (Just (truncateTo tx.nonce) == originNonce) && block.baseFee <= maxBaseFee tx
   then Just ()
   else Nothing
 

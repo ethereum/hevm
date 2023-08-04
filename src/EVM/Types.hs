@@ -1,4 +1,6 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -9,6 +11,7 @@ module EVM.Types where
 
 import GHC.Stack (HasCallStack, prettyCallStack, callStack)
 import Control.Arrow ((>>>))
+import Control.Applicative
 import Control.Monad.ST (ST)
 import Control.Monad.State.Strict (StateT, mzero)
 import Crypto.Hash (hash, Keccak_256, Digest)
@@ -70,17 +73,21 @@ mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
 -- We ignore hlint to supress the warnings about `fromIntegral` and friends here
 #ifndef __HLINT__
 
+instance From Gas (Maybe Word64) where from (G w) = w
+instance From Word8 Gas where from = G . Just . into
 instance From Addr Integer where from = fromIntegral
 instance From Addr W256 where from = fromIntegral
 instance From Int256 Integer where from = fromIntegral
 instance From Nibble Int where from = fromIntegral
 instance From W256 Integer where from = fromIntegral
+instance From W256 (Expr EWord) where from = Lit
 instance From Word8 W256 where from = fromIntegral
 instance From Word8 Word256 where from = fromIntegral
 instance From Word32 W256 where from = fromIntegral
 instance From Word32 Word256 where from = fromIntegral
 instance From Word32 ByteString where from = toStrict . Binary.encode
 instance From Word64 W256 where from = fromIntegral
+instance From Word64 (Expr EWord) where from = Lit . fromIntegral
 instance From W64 W256 where from = fromIntegral
 instance From Word256 Integer where from = fromIntegral
 instance From Word256 W256 where from = fromIntegral
@@ -98,15 +105,47 @@ instance TryFrom W256 Int64 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom W256 Int256 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom W256 Word8 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom W256 Word32 where tryFrom = maybeTryFrom toIntegralSized
--- TODO: hevm relies on this behavior
-instance TryFrom W256 Word64 where tryFrom = Right . fromIntegral
-instance TryFrom W256 W64 where tryFrom = Right . fromIntegral
 instance TryFrom Word160 Word8 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Word256 Int where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Word256 Int256 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Word256 Word8 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Word256 Word32 where tryFrom = maybeTryFrom toIntegralSized
 instance TryFrom Word512 W256 where tryFrom = maybeTryFrom toIntegralSized
+
+class TruncateFrom a b where
+  truncateFrom :: a -> b
+
+truncateTo :: forall b a . TruncateFrom a b => a -> b
+truncateTo = truncateFrom
+
+instance TruncateFrom W256 Word64 where truncateFrom = fromIntegral
+instance TruncateFrom W256 W64 where truncateFrom = fromIntegral
+instance TruncateFrom W256 Gas where truncateFrom = fromIntegral
+instance TruncateFrom (Expr EWord) Gas where
+  truncateFrom (Lit w) = truncateFrom w
+  truncateFrom _ = NoGas
+
+
+instance TryFrom (Expr EWord) Gas where
+  tryFrom (Lit w) = case tryInto @Gas w of
+    Right v -> pure v
+    Left _ -> Left (TryFromException (Lit w) Nothing)
+  tryFrom _ = Right NoGas
+
+instance TryFrom W256 Gas where
+  tryFrom w = case toIntegralSized w of
+    Just v -> pure . G . Just $ v
+    Nothing -> Left (TryFromException w Nothing)
+
+instance TryFrom Int Gas where
+  tryFrom w = case tryInto @Word64 w of
+    Right v -> pure . G . Just $ v
+    Left e -> Left (into e)
+
+instance TryFrom Integer Gas where
+  tryFrom w = case tryInto @Word64 w of
+    Right v -> pure . G . Just $ v
+    Left e -> Left (into e)
 
 truncateToAddr :: W256 -> Addr
 truncateToAddr = fromIntegral
@@ -282,10 +321,9 @@ data Expr (a :: EType) where
   -- frame context
 
   Balance        :: Expr EAddr -> Expr EWord
-
-  Gas            :: Int                -- frame idx
-                 -> Int                -- PC
-                 -> Expr EWord
+  -- TODO: should this be made more precise? maybe with a unique frame idx, and
+  -- a per frame counter? how important is it to know that gas decreases monotonically per frame?
+  SymGas         :: Int -> Expr EWord
 
   -- code
 
@@ -515,7 +553,7 @@ data EvmError
   | InvalidMemoryAccess
   | CallDepthLimitReached
   | MaxCodeSizeExceeded W256 W256
-  | MaxInitCodeSizeExceeded W256 W256
+  | MaxInitCodeSizeExceeded W256 (Expr EWord)
   | InvalidFormat
   | PrecompileFailure
   | ReturnDataOutOfBounds
@@ -594,7 +632,7 @@ data VM s = VM
   , logs           :: [Expr Log]
   , traces         :: Zipper.TreePos Zipper.Empty Trace
   , cache          :: Cache
-  , burned         :: {-# UNPACK #-} !Word64
+  , burned         :: !Gas
   , iterations     :: Map CodeLocation (Int, [Expr EWord])
   -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
@@ -602,6 +640,26 @@ data VM s = VM
   , config         :: RuntimeConfig
   }
   deriving (Show, Generic)
+
+newtype Gas = G (Maybe Word64)
+  deriving (Show, Eq)
+
+pattern Gas :: Word64 -> Gas
+pattern Gas n = G (Just n)
+
+pattern NoGas :: Gas
+pattern NoGas = G Nothing
+
+both :: (a -> b) -> (a,a) -> (b,b)
+both f (a,b) = (f a, f b)
+
+instance Num Gas where
+  G l + G r = G $ liftA2 (+) l r
+  G l * G r = G $ liftA2 (*) l r
+  abs (G x) = G $ fmap abs x
+  signum (G x) = G $ fmap signum x
+  negate (G x) = G $ fmap negate x
+  fromInteger i = Gas (fromInteger i)
 
 -- | Alias for the type of e.g. @exec1@.
 type EVM s a = StateT (VM s) (ST s) a
@@ -638,8 +696,8 @@ data FrameContext
   | CallContext
     { target        :: Expr EAddr
     , context       :: Expr EAddr
-    , offset        :: W256
-    , size          :: W256
+    , offset        :: Expr EWord
+    , size          :: Expr EWord
     , codehash      :: Expr EWord
     , abi           :: Maybe W256
     , calldata      :: Expr Buf
@@ -667,11 +725,11 @@ data FrameState s = FrameState
   , pc           :: {-# UNPACK #-} !Int
   , stack        :: [Expr EWord]
   , memory       :: Memory s
-  , memorySize   :: Word64
+  , memorySize   :: Maybe Word64
   , calldata     :: Expr Buf
   , callvalue    :: Expr EWord
   , caller       :: Expr EAddr
-  , gas          :: {-# UNPACK #-} !Word64
+  , gas          :: !Gas
   , returndata   :: Expr Buf
   , static       :: Bool
   }
@@ -689,8 +747,9 @@ type MutableMemory s = STVector s Word8
 
 -- | The state that spans a whole transaction
 data TxState = TxState
-  { gasprice    :: W256
-  , gaslimit    :: Word64
+  -- TODO: should these be symbolic?
+  { gasprice    :: Expr EWord
+  , gaslimit    :: Gas
   , priorityFee :: W256
   , origin      :: Expr EAddr
   , toAddr      :: Expr EAddr
@@ -706,6 +765,7 @@ data Env = Env
   { contracts      :: Map (Expr EAddr) Contract
   , chainId        :: W256
   , freshAddresses :: Int
+  , gasVars        :: Int
   }
   deriving (Show, Generic)
 
@@ -716,9 +776,9 @@ data Block = Block
   , number      :: W256
   , prevRandao  :: W256
   , gaslimit    :: Word64
-  , baseFee     :: W256
+  , baseFee     :: Expr EWord
   , maxCodeSize :: W256
-  , schedule    :: FeeSchedule Word64
+  , schedule    :: FeeSchedule Gas
   } deriving (Show, Generic)
 
 -- | Full contract state
@@ -846,8 +906,8 @@ data VMOpts = VMOpts
   , address :: Expr EAddr
   , caller :: Expr EAddr
   , origin :: Expr EAddr
-  , gas :: Word64
-  , gaslimit :: Word64
+  , gas :: Gas
+  , gaslimit :: Gas
   , number :: W256
   , timestamp :: Expr EWord
   , coinbase :: Expr EAddr
@@ -855,8 +915,8 @@ data VMOpts = VMOpts
   , maxCodeSize :: W256
   , blockGaslimit :: Word64
   , gasprice :: W256
-  , baseFee :: W256
-  , schedule :: FeeSchedule Word64
+  , baseFee :: Expr EWord
+  , schedule :: FeeSchedule Gas
   , chainId :: W256
   , create :: Bool
   , txAccessList :: Map (Expr EAddr) [W256]
@@ -1213,12 +1273,6 @@ packNibbles :: [Nibble] -> ByteString
 packNibbles [] = mempty
 packNibbles (n1:n2:ns) = BS.singleton (toByte n1 n2) <> packNibbles ns
 packNibbles _ = internalError "can't pack odd number of nibbles"
-
-toWord64 :: W256 -> Maybe Word64
-toWord64 n =
-  if n <= into (maxBound :: Word64)
-    then let (W256 (Word256 _ (Word128 _ n'))) = n in Just n'
-    else Nothing
 
 toInt :: W256 -> Maybe Int
 toInt n =

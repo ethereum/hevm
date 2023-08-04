@@ -169,7 +169,7 @@ signingData tx =
           BS tx.txdata,
           rlpAccessList]
 
-accessListPrice :: FeeSchedule Word64 -> [AccessListEntry] -> Word64
+accessListPrice :: FeeSchedule Gas -> [AccessListEntry] -> Gas
 accessListPrice fs al =
     sum (map
       (\ale ->
@@ -177,7 +177,7 @@ accessListPrice fs al =
         (fs.g_access_list_storage_key  * (unsafeInto . length) ale.storageKeys))
         al)
 
-txGasCost :: FeeSchedule Word64 -> Transaction -> Word64
+txGasCost :: FeeSchedule Gas -> Transaction -> Gas
 txGasCost fs tx =
   let calldata     = tx.txdata
       zeroBytes    = BS.count 0 calldata
@@ -187,7 +187,7 @@ txGasCost fs tx =
         + (accessListPrice fs tx.accessList )
       zeroCost     = fs.g_txdatazero
       nonZeroCost  = fs.g_txdatanonzero
-      initcodeCost = fs.g_initcodeword * unsafeInto (ceilDiv (BS.length calldata) 32)
+      initcodeCost = fs.g_initcodeword * (Gas $ unsafeInto (ceilDiv (BS.length calldata) 32))
   in baseCost + zeroCost * (unsafeInto zeroBytes) + nonZeroCost * (unsafeInto nonZeroBytes)
 
 instance FromJSON AccessListEntry where
@@ -235,13 +235,14 @@ newAccount :: Contract
 newAccount = initialContract (RuntimeCode (ConcreteRuntimeCode ""))
 
 -- | Increments origin nonce and pays gas deposit
-setupTx :: Expr EAddr -> Expr EAddr -> W256 -> Word64 -> Map (Expr EAddr) Contract -> Map (Expr EAddr) Contract
-setupTx origin coinbase gasPrice gasLimit prestate =
+setupTx :: Expr EAddr -> Expr EAddr -> Expr EWord -> Gas -> Map (Expr EAddr) Contract -> Map (Expr EAddr) Contract
+setupTx origin coinbase (Lit gasPrice) (Gas gasLimit) prestate =
   let gasCost = gasPrice * (into gasLimit)
   in (Map.adjust ((over #nonce   (fmap ((+) 1)))
                . (over #balance (`Expr.sub` (Lit gasCost)))) origin)
     . touchAccount origin
     . touchAccount coinbase $ prestate
+setupTx _ _ _ _ prestate = prestate
 
 -- | Given a valid tx loaded into the vm state,
 -- subtract gas payment from the origin, increment the nonce

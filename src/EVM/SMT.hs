@@ -235,7 +235,7 @@ referencedFrameContext expr = nubOrd $ foldTerm go [] expr
     go = \case
       TxValue -> [(fromString "txvalue", [])]
       v@(Balance a) -> [(fromString "balance_" <> formatEAddr a, [PLT v (Lit $ 2 ^ (96 :: Int))])]
-      Gas {} -> internalError "TODO: GAS"
+      SymGas {} -> internalError "TODO: GAS"
       _ -> []
 
 referencedBlockContext :: TraversableTerm a => a -> [(Builder, [Prop])]

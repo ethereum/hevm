@@ -23,6 +23,7 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
 import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Map.Strict qualified as Map
+import Data.Map.Strict (Map)
 import Data.Text.IO qualified as T
 import Data.Vector qualified as Vector
 import Data.Word (Word8, Word64)
@@ -144,8 +145,8 @@ data EVMToolEnv = EVMToolEnv
   , gasLimit    :: Data.Word.Word64
   , baseFee     :: W256
   , maxCodeSize :: W256
-  , schedule    :: FeeSchedule Data.Word.Word64
-  , blockHashes :: Map.Map Int W256
+  , schedule    :: FeeSchedule Gas
+  , blockHashes :: Map Int W256
   } deriving (Show, Generic)
 
 instance JSON.ToJSON EVMToolEnv where
@@ -443,11 +444,11 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
     , number = evmToolEnv.number
     , timestamp = evmToolEnv.timestamp
     , gasprice = fromJust txn.gasPrice
-    , gas = txn.gasLimit - (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
-    , gaslimit = txn.gasLimit
+    , gas = (Gas txn.gasLimit) - (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
+    , gaslimit = (Gas txn.gasLimit)
     , blockGaslimit = evmToolEnv.gasLimit
     , prevRandao = evmToolEnv.prevRandao
-    , baseFee = evmToolEnv.baseFee
+    , baseFee = (Lit evmToolEnv.baseFee)
     , priorityFee = fromJust txn.maxPriorityFeeGas
     , maxCodeSize = evmToolEnv.maxCodeSize
     , schedule = evmToolEnv.schedule
@@ -476,18 +477,20 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
 
 vmtrace :: VM s -> VMTrace
 vmtrace vm =
-  let
-    memsize = vm.state.memorySize
-  in VMTrace { tracePc = vm.state.pc
-             , traceOp = into $ getOp vm
-             , traceGas = vm.state.gas
-             , traceMemSize = memsize
-             -- increment to match geth format
-             , traceDepth = 1 + length (vm.frames)
-             -- reverse to match geth format
-             , traceStack = reverse $ forceLit <$> vm.state.stack
-             , traceError = readoutError vm.result
-             }
+  let memsize = vm.state.memorySize
+  in case (memsize, vm.state.gas) of
+    (Just msize, Gas gas) -> VMTrace
+      { tracePc = vm.state.pc
+      , traceOp = into $ getOp vm
+      , traceGas = gas
+      , traceMemSize = msize
+      -- increment to match geth format
+      , traceDepth = 1 + length (vm.frames)
+      -- reverse to match geth format
+      , traceStack = reverse $ forceLit <$> vm.state.stack
+      , traceError = readoutError vm.result
+      }
+    mg -> error $ "Cannot trace when gas is symbolic: " <> show mg
   where
     readoutError :: Maybe (VMResult s) -> Maybe String
     readoutError (Just (VMFailure e)) = case e of
@@ -513,19 +516,19 @@ vmtrace vm =
     readoutError _ = Nothing
 
 vmres :: VM s -> VMTraceResult
-vmres vm =
-  let
-    gasUsed' = vm.tx.gaslimit - vm.state.gas
-    res = case vm.result of
-      Just (VMSuccess (ConcreteBuf b)) -> (ByteStringS b)
-      Just (VMSuccess x) -> internalError $ "unhandled: " <> (show x)
-      Just (VMFailure (Revert (ConcreteBuf b))) -> (ByteStringS b)
-      Just (VMFailure _) -> ByteStringS mempty
-      _ -> ByteStringS mempty
-  in VMTraceResult
-     { out = res
-     , gasUsed = gasUsed'
-     }
+vmres vm = case (vm.tx.gaslimit - vm.state.gas) of
+  Gas gasused -> let
+      res = case vm.result of
+        Just (VMSuccess (ConcreteBuf b)) -> (ByteStringS b)
+        Just (VMSuccess x) -> internalError $ "unhandled: " <> (show x)
+        Just (VMFailure (Revert (ConcreteBuf b))) -> (ByteStringS b)
+        Just (VMFailure _) -> ByteStringS mempty
+        _ -> ByteStringS mempty
+    in VMTraceResult
+       { out = res
+       , gasUsed = gasused
+       }
+  _ -> error "unable to trace when gas is symbolic"
 
 type TraceState s = (VM s, [VMTrace])
 

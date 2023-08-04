@@ -222,7 +222,7 @@ loadSymVM x callvalue cd create =
     , prevRandao = 42069
     , gas = 0xffffffffffffffff
     , gaslimit = 0xffffffffffffffff
-    , baseFee = 0
+    , baseFee = Lit 0
     , priorityFee = 0
     , maxCodeSize = 0xffffffff
     , schedule = feeSchedule
@@ -851,7 +851,7 @@ formatCex cd m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
         go :: Expr EWord -> W256 -> Bool
         go (TxValue) _ = True
         go (Balance {}) _ = internalError "TODO: BALANCE"
-        go (Gas {}) _ = internalError "TODO: Gas"
+        go (SymGas {}) _ = internalError "TODO: Gas"
         go _ _ = False
 
     blockCtx :: [Text]
