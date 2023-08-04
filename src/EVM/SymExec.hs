@@ -277,8 +277,11 @@ interpret fetcher maxIter askSmtIters heuristic vm =
               interpret fetcher maxIter askSmtIters heuristic vm' (k r)
 
         case q of
-          PleaseAskSMT cond _ continue -> do
-            case cond of
+          PleaseAskSMT cond preconds continue -> do
+            let
+              simpCond = Expr.simplify cond
+              (Expr.ConstState _ canBeSat) = Expr.constFoldProp ((simpCond ./= Lit 0):preconds)
+            case simpCond of
               -- is the condition concrete?
               Lit c ->
                 -- have we reached max iterations, are we inside a loop?
@@ -308,9 +311,12 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                     performQuery
                   -- otherwise just try both branches and don't ask the solver
                   _ -> do
-                    (r, vm') <- stToIO $ runStateT (continue EVM.Types.Unknown) vm
+                    (r, vm') <- case canBeSat of
+                      False ->
+                        stToIO $ runStateT (continue (Case False)) vm
+                      True ->
+                        stToIO $ runStateT (continue EVM.Types.Unknown) vm
                     interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-
           _ -> performQuery
 
       Stepper.EVM m -> do

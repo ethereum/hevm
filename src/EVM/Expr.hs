@@ -20,6 +20,7 @@ import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
 import Witch (unsafeInto, into, tryFrom)
+import Control.Monad.State
 
 import Optics.Core
 
@@ -1057,3 +1058,52 @@ evalProp prop =
       | l == r = PBool True
       | otherwise = o
     go p = p
+
+
+data ConstState = ConstState
+  { values :: Map.Map (Expr EWord) W256
+  , canBeSat :: Bool
+  }
+  deriving (Show)
+
+-- | Folds constants
+constFoldProp :: [Prop] -> ConstState
+constFoldProp ps = execState (mapM constProp ps) (ConstState mempty True)
+  where
+    constProp :: Prop -> State ConstState Prop
+    constProp prop = go (evalProp prop)
+    go :: Prop -> State ConstState Prop
+    go x = case x of
+        PEq a (Lit l) -> do
+          s <- get
+          case Map.lookup a s.values of
+            Just l2 -> case l==l2 of
+                True -> pure $ PBool True
+                False -> do
+                  put $ s{canBeSat=False}
+                  pure $ PBool False
+            Nothing -> do
+              let vs' = Map.insert a l s.values
+              put $ s{values=vs'}
+              pure $ PBool True
+        PEq a@(Lit _) b -> go (PEq b a)
+        PAnd a b -> do
+          _ <- go a
+          _ <- go b
+          pure $ PBool True
+        POr a b -> do
+          let
+            ConstState _ v1 = constFoldProp [a]
+            ConstState _ v2 = constFoldProp [b]
+          _ <- if (Prelude.not v1) then go a
+                                   else pure $ PBool True
+          _ <- if (Prelude.not v2) then go b
+                                   else pure $ PBool True
+          s <- get
+          put $ s{canBeSat=(s.canBeSat && (v1 || v2))}
+          pure $ POr a b
+        PBool False -> do
+          s <- get
+          put $ s{canBeSat=False}
+          pure $ PBool False
+        e -> pure e
