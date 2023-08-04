@@ -382,7 +382,7 @@ launchExec cmd = do
         internalError "no EVM result"
 
 -- | Creates a (concrete) VM from command line options
-vmFromCommand :: Command Options.Unwrapped -> IO (VM RealWorld)
+vmFromCommand :: Gas gas => Command Options.Unwrapped -> IO (VM gas RealWorld)
 vmFromCommand cmd = do
   (miner,ts,baseFee,blockNum,prevRan) <- case cmd.rpc of
     Nothing -> pure (LitAddr 0,Lit 0,0,0,0)
@@ -472,7 +472,7 @@ vmFromCommand cmd = do
         addr f def = maybe def LitAddr (f cmd)
         bytes f def = maybe def decipher (f cmd)
 
-symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM RealWorld)
+symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM gas RealWorld)
 symvmFromCommand cmd calldata = do
   (miner,blockNum,baseFee,prevRan) <- case cmd.rpc of
     Nothing -> pure (SymAddr "miner",0,0,0)

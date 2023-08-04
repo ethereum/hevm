@@ -168,7 +168,7 @@ fromConcrete :: Expr Storage -> Map W256 W256
 fromConcrete (ConcreteStore s) = s
 fromConcrete s = internalError $ "unexpected abstract store: " <> show s
 
-checkStateFail :: Bool -> Case -> VM RealWorld -> (Bool, Bool, Bool, Bool) -> IO String
+checkStateFail :: Bool -> Case -> VM Word64 RealWorld -> (Bool, Bool, Bool, Bool) -> IO String
 checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
   let
     printContracts :: Map Addr Contract -> IO ()
@@ -200,7 +200,7 @@ checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
     printContracts actual
   pure (unwords reason)
 
-checkExpectation :: Bool -> Case -> VM RealWorld -> IO (Maybe String)
+checkExpectation :: Bool -> Case -> VM Word64 RealWorld -> IO (Maybe String)
 checkExpectation diff x vm = do
   let expectation = x.testExpectation
       (okState, b2, b3, b4, b5) = checkExpectedContracts vm expectation
@@ -227,7 +227,7 @@ c1 === c2 =
       (RuntimeCode a', RuntimeCode b') -> a' == b'
       _ -> internalError "unexpected code"
 
-checkExpectedContracts :: VM RealWorld -> Map Addr Contract -> (Bool, Bool, Bool, Bool, Bool)
+checkExpectedContracts :: VM Word64 RealWorld -> Map Addr Contract -> (Bool, Bool, Bool, Bool, Bool)
 checkExpectedContracts vm expected =
   let cs = fmap (clearZeroStorage . clearOrigStorage) $ forceConcreteAddrs vm.env.contracts
   in ( (expected ~= cs)
@@ -453,7 +453,7 @@ checkTx tx block prestate = do
   else
     pure prestate
 
-vmForCase :: Case -> IO (VM RealWorld)
+vmForCase :: Case -> IO (VM Word64 RealWorld)
 vmForCase x = do
   vm <- stToIO $ makeVm x.vmOpts
     <&> set (#env % #contracts) (Map.mapKeys LitAddr x.checkContracts)

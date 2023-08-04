@@ -31,50 +31,51 @@ import EVM.Exec qualified
 import EVM.Fetch qualified as Fetch
 import EVM.Types
 import Control.Monad.ST (stToIO, RealWorld)
+import Data.Word (Word64)
 
 -- | The instruction type of the operational monad
-data Action s a where
+data Action gas s a where
 
   -- | Keep executing until an intermediate result is reached
-  Exec :: Action s (VMResult s)
+  Exec :: Action gas s (VMResult gas s)
 
   -- | Wait for a query to be resolved
-  Wait :: Query s -> Action s ()
+  Wait :: Query gas s -> Action gas s ()
 
   -- | Multiple things can happen
-  Ask :: Choose s -> Action s ()
+  Ask :: Choose gas s -> Action gas s ()
 
   -- | Embed a VM state transformation
-  EVM  :: EVM s a -> Action s a
+  EVM  :: EVM gas s a -> Action gas s a
 
   -- | Perform an IO action
-  IOAct :: IO a -> Action s a
+  IOAct :: IO a -> Action gas s a
 
 -- | Type alias for an operational monad of @Action@
-type Stepper s a = Program (Action s) a
+type Stepper gas s a = Program (Action gas s) a
 
 -- Singleton actions
 
-exec :: Stepper s (VMResult s)
+exec :: Stepper gas s (VMResult gas s)
 exec = singleton Exec
 
-run :: Stepper s (VM s)
+run :: Stepper gas s (VM gas s)
 run = exec >> evm get
 
-wait :: Query s -> Stepper s ()
+wait :: Query gas s -> Stepper gas s ()
 wait = singleton . Wait
 
-ask :: Choose s -> Stepper s ()
+ask :: Choose gas s -> Stepper gas s ()
 ask = singleton . Ask
 
-evm :: EVM s a -> Stepper s a
+evm :: EVM gas s a -> Stepper gas s a
 evm = singleton . EVM
 
-evmIO :: IO a -> Stepper s a
+evmIO :: IO a -> Stepper gas s a
 evmIO = singleton . IOAct
 
 -- | Run the VM until final result, resolving all queries
-execFully :: Stepper s (Either EvmError (Expr Buf))
+execFully :: Stepper gas s (Either EvmError (Expr Buf))
 execFully =
   exec >>= \case
     HandleEffect (Query q) ->
@@ -89,7 +90,7 @@ execFully =
       -> internalError $ "partial execution encountered during concrete execution: " <> show x
 
 -- | Run the VM until its final state
-runFully :: Stepper s (VM s)
+runFully :: Stepper gas s (VM gas s)
 runFully = do
   vm <- run
   case vm.result of
@@ -101,13 +102,17 @@ runFully = do
     Just _ ->
       pure vm
 
-enter :: Text -> Stepper s ()
+enter :: Text -> Stepper gas s ()
 enter t = evm (EVM.pushTrace (EntryTrace t))
 
-interpret :: Fetch.Fetcher RealWorld -> VM RealWorld -> Stepper RealWorld a -> IO a
+interpret
+  :: Fetch.Fetcher Word64 RealWorld
+  -> VM Word64 RealWorld
+  -> Stepper Word64 RealWorld a
+  -> IO a
 interpret fetcher vm = eval . view
   where
-    eval :: ProgramView (Action RealWorld) a -> IO a
+    eval :: ProgramView (Action Word64 RealWorld) a -> IO a
     eval (Return x) = pure x
     eval (action :>>= k) =
       case action of

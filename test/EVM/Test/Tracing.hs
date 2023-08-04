@@ -408,7 +408,7 @@ deleteTraceOutputFiles evmtoolResult =
       System.Directory.removeFile (traceFileName ++ ".json")
 
 -- Create symbolic VM from concrete VM
-symbolify :: VM s -> VM s
+symbolify :: VM gas s -> VM gas s
 symbolify vm = vm { state = vm.state { calldata = AbstractBuf "calldata" } }
 
 -- | Takes a runtime code and calls it with the provided calldata
@@ -417,8 +417,8 @@ runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transacti
 runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 Nothing $ \solvers -> do
   let calldata' = ConcreteBuf txn.txdata
       code' = alloc.code
-      buildExpr :: SolverGroup -> VM RealWorld -> IO (Expr End)
-      buildExpr s vm = interpret (Fetch.oracle s Nothing) Nothing 1 Naive vm runExpr
+      buildExpr :: SolverGroup -> VM Word64 RealWorld -> IO (Expr End)
+      buildExpr s vm = interpret (Fetch.oracle s Nothing) Nothing 1 Naive (undefined vm) runExpr
   origVM <- stToIO $ vmForRuntimeCode code' calldata' evmEnv alloc txn fromAddr toAddress
 
   expr <- buildExpr solvers $ symbolify origVM
@@ -427,7 +427,7 @@ runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 
     Left x -> pure $ Left (x, trace)
     Right _ -> pure $ Right (expr, trace, vmres vm)
 
-vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> ST s (VM s)
+vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> ST s (VM Word64 s)
 vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
   let contract = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
                  & set #balance (Lit alloc.balance)
@@ -474,7 +474,7 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
     Left _ -> Nothing
     Right b -> Just b
 
-vmtrace :: VM s -> VMTrace
+vmtrace :: VM Word64 s -> VMTrace
 vmtrace vm =
   let
     memsize = vm.state.memorySize
@@ -489,7 +489,7 @@ vmtrace vm =
              , traceError = readoutError vm.result
              }
   where
-    readoutError :: Maybe (VMResult s) -> Maybe String
+    readoutError :: Maybe (VMResult gas s) -> Maybe String
     readoutError (Just (VMFailure e)) = case e of
       -- NOTE: error text made to closely match go-ethereum's errors.go file
       OutOfGas {}             -> Just "out of gas"
@@ -512,7 +512,7 @@ vmtrace vm =
       err                     -> Just $ "HEVM error: " <> show err
     readoutError _ = Nothing
 
-vmres :: VM s -> VMTraceResult
+vmres :: VM Word64 s -> VMTraceResult
 vmres vm =
   let
     gasUsed' = vm.tx.gaslimit - vm.state.gas
@@ -527,14 +527,14 @@ vmres vm =
      , gasUsed = gasUsed'
      }
 
-type TraceState s = (VM s, [VMTrace])
+type TraceState s = (VM Word64 s, [VMTrace])
 
-execWithTrace :: StateT (TraceState RealWorld) IO (VMResult RealWorld)
+execWithTrace :: StateT (TraceState RealWorld) IO (VMResult Word64 RealWorld)
 execWithTrace = do
   _ <- runWithTrace
   fromJust <$> use (_1 % #result)
 
-runWithTrace :: StateT (TraceState RealWorld) IO (VM RealWorld)
+runWithTrace :: StateT (TraceState RealWorld) IO (VM Word64 RealWorld)
 runWithTrace = do
   -- This is just like `exec` except for every instruction evaluated,
   -- we also increment a counter indexed by the current code location.
@@ -555,15 +555,15 @@ runWithTrace = do
     Just _ -> pure vm0
 
 interpretWithTrace
-  :: Fetch.Fetcher RealWorld
-  -> Stepper.Stepper RealWorld a
+  :: Fetch.Fetcher Word64 RealWorld
+  -> Stepper.Stepper Word64 RealWorld a
   -> StateT (TraceState RealWorld) IO a
 interpretWithTrace fetcher =
   eval . Operational.view
 
   where
     eval
-      :: Operational.ProgramView (Stepper.Action RealWorld) a
+      :: Operational.ProgramView (Stepper.Action Word64 RealWorld) a
       -> StateT (TraceState RealWorld) IO a
 
     eval (Operational.Return x) =
@@ -807,7 +807,7 @@ forceLit _ = undefined
 randItem :: [a] -> IO a
 randItem = generate . Test.QuickCheck.elements
 
-getOp :: VM s -> Word8
+getOp :: VM gas s -> Word8
 getOp vm =
   let pcpos  = vm ^. #state % #pc
       code' = vm ^. #state % #code

@@ -111,7 +111,7 @@ unitTest opts (Contracts cs) = do
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
 -- to create the test contract, give it an initial balance, and run `setUp()'.
-initializeUnitTest :: UnitTestOptions s -> SolcContract -> Stepper s ()
+initializeUnitTest :: Gas gas => UnitTestOptions s -> SolcContract -> Stepper gas s ()
 initializeUnitTest opts theContract = do
 
   let addr = opts.testParams.address
@@ -194,7 +194,7 @@ runUnitTestContract
 
 
 -- | Define the thread spawner for symbolic tests
-symRun :: UnitTestOptions RealWorld -> VM RealWorld -> Sig -> IO (Text, Either Text Text)
+symRun :: UnitTestOptions RealWorld -> VM Word64 RealWorld -> Sig -> IO (Text, Either Text Text)
 symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     let cd = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName
@@ -221,7 +221,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
                                    Partial _ _ _ -> PBool True
                                    _ -> internalError "Invalid leaf node"
 
-    vm' <- Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
+    vm' <- undefined <$> Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
       Stepper.evm $ do
         pushTrace (EntryTrace testName)
         makeTxCall testParams cd
@@ -285,7 +285,7 @@ showVal (AbiBytes _ bs) = formatBytes bs
 showVal (AbiAddress addr) = Text.pack  . show $ addr
 showVal v = Text.pack . show $ v
 
-execSymTest :: UnitTestOptions RealWorld -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper RealWorld (Expr End)
+execSymTest :: Gas gas => UnitTestOptions RealWorld -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper gas RealWorld (Expr End)
 execSymTest UnitTestOptions{ .. } method cd = do
   -- Set up the call to the test method
   Stepper.evm $ do
@@ -294,7 +294,7 @@ execSymTest UnitTestOptions{ .. } method cd = do
   -- Try running the test method
   runExpr
 
-checkSymFailures :: UnitTestOptions RealWorld -> Stepper RealWorld (VM RealWorld)
+checkSymFailures :: Gas gas => UnitTestOptions RealWorld -> Stepper gas RealWorld (VM gas RealWorld)
 checkSymFailures UnitTestOptions { .. } = do
   -- Ask whether any assertions failed
   Stepper.evm $ do
@@ -307,7 +307,7 @@ indentLines n s =
   let p = Text.replicate n " "
   in Text.unlines (map (p <>) (Text.lines s))
 
-passOutput :: VM s -> UnitTestOptions s -> Text -> Text
+passOutput :: VM gas s -> UnitTestOptions s -> Text -> Text
 passOutput vm UnitTestOptions { .. } testName =
   let ?context = DappContext { info = dapp, env = vm.env.contracts }
   in let v = fromMaybe 0 verbose
@@ -322,7 +322,7 @@ passOutput vm UnitTestOptions { .. } testName =
       ]
     else ""
 
-failOutput :: VM s -> UnitTestOptions s -> Text -> Text
+failOutput :: VM gas s -> UnitTestOptions s -> Text -> Text
 failOutput vm UnitTestOptions { .. } testName =
   let ?context = DappContext { info = dapp, env = vm.env.contracts }
   in mconcat
@@ -407,14 +407,14 @@ formatTestLog events (LogEntry _ args (topic:_)) =
                   _ -> Nothing
               _ -> Just "<symbolic decimal>"
 
-abiCall :: TestVMParams -> Either (Text, AbiValue) ByteString -> EVM s ()
+abiCall :: Gas gas => TestVMParams -> Either (Text, AbiValue) ByteString -> EVM gas s ()
 abiCall params args =
   let cd = case args of
         Left (sig, args') -> abiMethod sig args'
         Right b -> b
   in makeTxCall params (ConcreteBuf cd, [])
 
-makeTxCall :: TestVMParams -> (Expr Buf, [Prop]) -> EVM s ()
+makeTxCall :: Gas gas => TestVMParams -> (Expr Buf, [Prop]) -> EVM gas s ()
 makeTxCall params (cd, cdProps) = do
   resetState
   assign (#tx % #isCreate) False
@@ -422,14 +422,14 @@ makeTxCall params (cd, cdProps) = do
   assign (#state % #calldata) cd
   #constraints %= (<> cdProps)
   assign (#state % #caller) params.caller
-  assign (#state % #gas) params.gasCall
+  assign (#state % #gas) (gasFromWord64 params.gasCall)
   origin <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (#env % #contracts % at params.origin)
   let insufficientBal = maybe False (\b -> b < params.gasprice * (into params.gasCall)) (maybeLitWord origin.balance)
   when insufficientBal $ internalError "insufficient balance for gas cost"
   vm <- get
   put $ initTx vm
 
-initialUnitTestVm :: UnitTestOptions s -> SolcContract -> ST s (VM s)
+initialUnitTestVm :: Gas gas => UnitTestOptions s -> SolcContract -> ST s (VM gas s)
 initialUnitTestVm (UnitTestOptions {..}) theContract = do
   vm <- makeVm $ VMOpts
            { contract = initialContract (InitCode theContract.creationCode mempty)

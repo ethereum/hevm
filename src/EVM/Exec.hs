@@ -10,11 +10,12 @@ import Data.ByteString (ByteString)
 import Data.Maybe (isNothing)
 import Optics.Core
 import Control.Monad.ST (ST)
+import Data.Word (Word64)
 
 ethrunAddress :: Addr
 ethrunAddress = Addr 0x00a329c0648769a73afac7f9381e08fb43dbea72
 
-vmForEthrunCreation :: ByteString -> ST s (VM s)
+vmForEthrunCreation :: Gas gas => ByteString -> ST s (VM gas s)
 vmForEthrunCreation creationCode =
   (makeVm $ VMOpts
     { contract = initialContract (InitCode creationCode mempty)
@@ -43,21 +44,23 @@ vmForEthrunCreation creationCode =
     }) <&> set (#env % #contracts % at (LitAddr ethrunAddress))
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
 
-exec :: EVM s (VMResult s)
+{-# SPECIALISE exec :: EVM Word64 s (VMResult Word64 s) #-}
+exec :: Gas gas => EVM gas s (VMResult gas s)
 exec = do
   vm <- get
   case vm.result of
     Nothing -> exec1 >> exec
     Just r -> pure r
 
-run :: EVM s (VM s)
+{-# SPECIALISE run :: EVM Word64 s (VM Word64 s) #-}
+run :: Gas gas => EVM gas s (VM gas s)
 run = do
   vm <- get
   case vm.result of
     Nothing -> exec1 >> run
     Just _ -> pure vm
 
-execWhile :: (VM s -> Bool) -> State (VM s) Int
+execWhile :: (VM gas s -> Bool) -> State (VM gas s) Int
 execWhile p = go 0
   where
     go i = do

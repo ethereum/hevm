@@ -28,7 +28,7 @@ import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
-import EVM (makeVm, abstractContract, getCodeLocation, isValidJumpDest)
+import EVM (makeVm, abstractContract, getCodeLocation, isValidJumpDest, SymGas)
 import EVM.Exec
 import EVM.Fetch qualified as Fetch
 import EVM.ABI
@@ -187,9 +187,9 @@ combineFragments fragments base = go (Lit 4) fragments (base, [])
 abstractVM
   :: (Expr Buf, [Prop])
   -> ByteString
-  -> Maybe (Precondition s)
+  -> Maybe (Precondition SymGas s)
   -> Bool
-  -> ST s (VM s)
+  -> ST s (VM SymGas s)
 abstractVM cd contractCode maybepre create = do
   let value = TxValue
   let code = if create then InitCode contractCode mempty else RuntimeCode (ConcreteRuntimeCode contractCode)
@@ -204,7 +204,7 @@ loadSymVM
   -> Expr EWord
   -> (Expr Buf, [Prop])
   -> Bool
-  -> ST s (VM s)
+  -> ST s (VM SymGas s)
 loadSymVM x callvalue cd create =
   (makeVm $ VMOpts
     { contract = abstractContract x (SymAddr "entrypoint")
@@ -235,18 +235,18 @@ loadSymVM x callvalue cd create =
 -- | Interpreter which explores all paths at branching points. Returns an
 -- 'Expr End' representing the possible executions.
 interpret
-  :: Fetch.Fetcher RealWorld
+  :: Fetch.Fetcher SymGas RealWorld
   -> Maybe Integer -- max iterations
   -> Integer -- ask smt iterations
   -> LoopHeuristic
-  -> VM RealWorld
-  -> Stepper RealWorld (Expr End)
+  -> VM SymGas RealWorld
+  -> Stepper SymGas RealWorld (Expr End)
   -> IO (Expr End)
 interpret fetcher maxIter askSmtIters heuristic vm =
   eval . Operational.view
   where
   eval
-    :: Operational.ProgramView (Stepper.Action RealWorld) (Expr End)
+    :: Operational.ProgramView (Stepper.Action SymGas RealWorld) (Expr End)
     -> IO (Expr End)
 
   eval (Operational.Return x) = pure x
@@ -317,7 +317,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
         (r, vm') <- stToIO $ runStateT m vm
         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
 
-maxIterationsReached :: VM s -> Maybe Integer -> Maybe Bool
+maxIterationsReached :: VM gas s -> Maybe Integer -> Maybe Bool
 maxIterationsReached _ Nothing = Nothing
 maxIterationsReached vm (Just maxIter) =
   let codelocation = getCodeLocation vm
@@ -326,7 +326,7 @@ maxIterationsReached vm (Just maxIter) =
      then Map.lookup (codelocation, iters - 1) vm.cache.path
      else Nothing
 
-askSmtItersReached :: VM s -> Integer -> Bool
+askSmtItersReached :: VM gas s -> Integer -> Bool
 askSmtItersReached vm askSmtIters = let
     codelocation = getCodeLocation vm
     (iters, _) = view (at codelocation % non (0, [])) vm.iterations
@@ -340,7 +340,7 @@ askSmtItersReached vm askSmtIters = let
 
  This heuristic is not perfect, and can certainly be tricked, but should generally be good enough for most compiler generated and non pathological user generated loops.
  -}
-isLoopHead :: LoopHeuristic -> VM s -> Maybe Bool
+isLoopHead :: LoopHeuristic -> VM gas s -> Maybe Bool
 isLoopHead Naive _ = Just True
 isLoopHead StackBased vm = let
     loc = getCodeLocation vm
@@ -351,8 +351,8 @@ isLoopHead StackBased vm = let
        Just (_, oldStack) -> Just $ filter isValid oldStack == filter isValid vm.state.stack
        Nothing -> Nothing
 
-type Precondition s = VM s -> Prop
-type Postcondition s = VM s -> Expr End -> Prop
+type Precondition gas s = VM gas s -> Prop
+type Postcondition gas s = VM gas s -> Expr End -> Prop
 
 checkAssert
   :: SolverGroup
@@ -384,7 +384,7 @@ checkAssert solvers errs c signature' concreteArgs opts =
 
   see: https://docs.soliditylang.org/en/v0.8.6/control-structures.html?highlight=Panic#panic-via-assert-and-error-via-require
 -}
-checkAssertions :: [Word256] -> Postcondition s
+checkAssertions :: [Word256] -> Postcondition gas s
 checkAssertions errs _ = \case
   Failure _ _ (Revert (ConcreteBuf msg)) -> PBool $ msg `notElem` (fmap panicMsg errs)
   Failure _ _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
@@ -421,15 +421,15 @@ verifyContract
   -> Maybe Sig
   -> [String]
   -> VeriOpts
-  -> Maybe (Precondition RealWorld)
-  -> Maybe (Postcondition RealWorld)
+  -> Maybe (Precondition SymGas RealWorld)
+  -> Maybe (Postcondition SymGas RealWorld)
   -> IO (Expr End, [VerifyResult])
 verifyContract solvers theCode signature' concreteArgs opts maybepre maybepost = do
   preState <- stToIO $ abstractVM (mkCalldata signature' concreteArgs) theCode maybepre False
   verify solvers opts preState maybepost
 
 -- | Stepper that parses the result of Stepper.runFully into an Expr End
-runExpr :: Stepper.Stepper RealWorld (Expr End)
+runExpr :: Stepper.Stepper gas RealWorld (Expr End)
 runExpr = do
   vm <- Stepper.runFully
   let asserts = vm.keccakEqs <> vm.constraints
@@ -522,8 +522,8 @@ getPartials = mapMaybe go
 verify
   :: SolverGroup
   -> VeriOpts
-  -> VM RealWorld
-  -> Maybe (Postcondition RealWorld)
+  -> VM SymGas RealWorld
+  -> Maybe (Postcondition SymGas RealWorld)
   -> IO (Expr End, [VerifyResult])
 verify solvers opts preState maybepost = do
   putStrLn "Exploring contract"
@@ -579,7 +579,7 @@ verify solvers opts preState maybepost = do
       Unsat -> Qed ()
       Error e -> internalError $ "solver responded with error: " <> show e
 
-expandCex :: VM s -> SMTCex -> SMTCex
+expandCex :: VM gas s -> SMTCex -> SMTCex
 expandCex prestate c = c { store = Map.union c.store concretePreStore }
   where
     concretePreStore = Map.mapMaybe (maybeConcreteStore . (.storage))

@@ -530,27 +530,27 @@ data PartialExec
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
-data Effect s
-  = Query (Query s)
-  | Choose (Choose s)
-deriving instance Show (Effect s)
+data Effect gas s
+  = Query (Query gas s)
+  | Choose (Choose gas s)
+deriving instance Show (Effect gas s)
 
 -- | Queries halt execution until resolved through RPC calls or SMT queries
-data Query s where
-  PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM s ()) -> Query s
-  PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM s ()) -> Query s
-  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM s ()) -> Query s
-  PleaseDoFFI         :: [String] -> (ByteString -> EVM s ()) -> Query s
+data Query gas s where
+  PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM gas s ()) -> Query gas s
+  PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM gas s ()) -> Query gas s
+  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM gas s ()) -> Query gas s
+  PleaseDoFFI         :: [String] -> (ByteString -> EVM gas s ()) -> Query gas s
 
 -- | Execution could proceed down one of two branches
-data Choose s where
-  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM s ()) -> Choose s
+data Choose gas s where
+  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM gas s ()) -> Choose gas s
 
 -- | The possible return values of a SMT query
 data BranchCondition = Case Bool | Unknown
   deriving Show
 
-instance Show (Query s) where
+instance Show (Query gas s) where
   showsPrec _ = \case
     PleaseFetchContract addr base _ ->
       (("<EVM.Query: fetch contract " ++ show addr ++ show base ++ ">") ++)
@@ -565,29 +565,29 @@ instance Show (Query s) where
     PleaseDoFFI cmd _ ->
       (("<EVM.Query: do ffi: " ++ (show cmd)) ++)
 
-instance Show (Choose s) where
+instance Show (Choose gas s) where
   showsPrec _ = \case
     PleaseChoosePath _ _ ->
       (("<EVM.Choice: waiting for user to select path (0,1)") ++)
 
 -- | The possible result states of a VM
-data VMResult s
+data VMResult gas s
   = VMFailure EvmError      -- ^ An operation failed
   | VMSuccess (Expr Buf)    -- ^ Reached STOP, RETURN, or end-of-code
-  | HandleEffect (Effect s) -- ^ An effect must be handled for execution to continue
+  | HandleEffect (Effect gas s) -- ^ An effect must be handled for execution to continue
   | Unfinished PartialExec  -- ^ Execution could not continue further
 
-deriving instance Show (VMResult s)
+deriving instance Show (VMResult gas s)
 
 
 -- VM State ----------------------------------------------------------------------------------------
 
 
 -- | The state of a stepwise EVM execution
-data VM s = VM
-  { result         :: Maybe (VMResult s)
-  , state          :: FrameState s
-  , frames         :: [Frame s]
+data VM gas s = VM
+  { result         :: Maybe (VMResult gas s)
+  , state          :: FrameState gas s
+  , frames         :: [Frame gas s]
   , env            :: Env
   , block          :: Block
   , tx             :: TxState
@@ -603,8 +603,10 @@ data VM s = VM
   }
   deriving (Show, Generic)
 
+type ConcreateVM s = VM Word64 s
+
 -- | Alias for the type of e.g. @exec1@.
-type EVM s a = StateT (VM s) (ST s) a
+type EVM gas s a = StateT (VM gas s) (ST s) a
 
 -- | The VM base state (i.e. should new contracts be created with abstract balance / storage?)
 data BaseState
@@ -621,9 +623,9 @@ data RuntimeConfig = RuntimeConfig
   deriving (Show)
 
 -- | An entry in the VM's "call/create stack"
-data Frame s = Frame
+data Frame gas s = Frame
   { context :: FrameContext
-  , state   :: FrameState s
+  , state   :: FrameState gas s
   }
   deriving (Show)
 
@@ -660,7 +662,7 @@ data SubState = SubState
   deriving (Eq, Ord, Show)
 
 -- | The "registers" of the VM along with memory and data stack
-data FrameState s = FrameState
+data FrameState gas s = FrameState
   { contract     :: Expr EAddr
   , codeContract :: Expr EAddr
   , code         :: ContractCode
@@ -671,7 +673,7 @@ data FrameState s = FrameState
   , calldata     :: Expr Buf
   , callvalue    :: Expr EWord
   , caller       :: Expr EAddr
-  , gas          :: {-# UNPACK #-} !Word64
+  , gas          :: !gas
   , returndata   :: Expr Buf
   , static       :: Bool
   }
