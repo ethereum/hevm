@@ -51,7 +51,7 @@ import Data.Vector.Storable.Mutable qualified as SV
 import Data.Vector.Unboxed qualified as VUnboxed
 import Data.Vector.Unboxed.Mutable qualified as VUnboxed.Mutable
 import Data.Word (Word8, Word32, Word64)
-import Witch (into, tryFrom, unsafeInto)
+import Witch (into, tryFrom, unsafeInto, tryInto)
 
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
@@ -60,7 +60,7 @@ import Crypto.Number.ModArithmetic (expFast)
 class Gas gas where
   burn :: Word64 -> EVM gas s () -> EVM gas s ()
   returnGas :: Word64 -> EVM gas s ()
-  forceGas :: Proxy gas -> Expr EWord -> Word64
+  forceGas :: Proxy gas -> Expr EWord -> W256
   gasToWord64 :: gas -> Word64
   gasFromWord64 :: Word64 -> gas
   initialGas :: gas
@@ -92,11 +92,11 @@ instance Gas Word64 where
   returnGas remainingGas =
     modifying (#state % #gas) (+ remainingGas)
 
-  {-# INLINABLE forceGas #-}
-  forceGas :: Proxy Word64 -> Expr EWord -> Word64
+  {-# INLINE forceGas #-}
+  forceGas :: Proxy Word64 -> Expr EWord -> W256
   forceGas _ w =
     case maybeLitWord w of
-      Just ww -> fromIntegral ww
+      Just ww -> ww
       Nothing -> error "expected concrete word"
 
   {-# INLINE gasFromWord64 #-}
@@ -277,7 +277,7 @@ next = modifying (#state % #pc) (+ (opSize ?op))
 -- | Executes the EVM one step
 {-# SPECIALISE exec1 :: EVM Word64 s () #-}
 {-# INLINABLE exec1 #-}
-exec1 :: Gas gas => EVM gas s ()
+exec1 :: forall gas s. Gas gas => EVM gas s ()
 exec1 = do
   vm <- get
 
@@ -383,15 +383,15 @@ exec1 = do
                     bytes <- readMemory xOffset' xSize'
                     let (topics, xs') = splitAt (into n) xs
                         logs'         = (LogEntry (WAddr self) bytes topics) : vm.logs
-                    case (tryFrom xSize) of
-                      (Right sz) ->
-                        burn (g_log + g_logdata * sz + (into n) * g_logtopic) $
+                    case tryInto $ forceGas (Proxy :: Proxy gas) xSize' of
+                      Right xSizeGas ->
+                        burn (g_log + g_logdata * xSizeGas + into n * g_logtopic) $ do
                           accessMemoryRange xOffset xSize $ do
                             traceTopLog logs'
                             next
                             assign (#state % #stack) xs'
                             assign #logs logs'
-                      _ -> vmError IllegalOverflow
+                      Left _ -> vmError IllegalOverflow
             _ ->
               underrun
 
@@ -808,8 +808,10 @@ exec1 = do
           --       https://hackage.haskell.org/package/sbv-9.0/docs/src/Data.SBV.Core.Model.html#.%5E
           --       However, it requires symbolic gas, since the gas depends on the exponent
           case stk of
-            base:exponent':xs -> forceConcrete exponent' "EXP: symbolic exponent" $ \exponent ->
-              let cost = if exponent == 0
+            base:exponent':xs ->
+              let
+                exponent = forceGas (Proxy :: Proxy gas) exponent'
+                cost = if exponent == 0
                          then g_exp
                          else g_exp + g_expbyte * unsafeInto (ceilDiv (1 + log2 exponent) 8)
               in burn cost $ do
