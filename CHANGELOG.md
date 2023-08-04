@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Changed
 
+- Less noisy console output during tracing
+
 ### UI
 
 - 'check' prefix now recognized as a function signature to symbolically execute for Dapps
