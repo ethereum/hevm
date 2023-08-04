@@ -12,6 +12,13 @@ These can be accessed by calling into a contract (typically called `Vm`) at addr
 - `function roll(uint x) public`
   Sets the block number to `x`.
 
+- `function assume(bool b) public`
+  Add the condition `b` to the assumption base for the current branch. This functions almost identically to `require`.
+
+- `function deal(uint usr, uint amt) public`
+  Sets the eth balance of `usr` to `amt`. Note that if `usr` is a symbolic address, then it must be the address of a contract that has already been deployed.
+  This restriction is in place to ensure soundness of our symbolic address encoding with respect to potential aliasing of symbolic addresses.
+
 - `function store(address c, bytes32 loc, bytes32 val) public`
   Sets the slot `loc` of contract `c` to `val`.
 
