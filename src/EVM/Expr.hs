@@ -21,6 +21,7 @@ import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
 import Witch (unsafeInto, into, tryFrom)
 import Data.Containers.ListUtils (nubOrd)
+import Control.Monad.State
 
 import Optics.Core
 
@@ -1120,3 +1121,88 @@ containsNode p = getAny . foldExpr go (Any False)
 inRange :: Int -> Expr EWord -> Prop
 inRange sz e = PAnd (PGEq e (Lit 0)) (PLEq e (Lit $ 2 ^ sz - 1))
 
+-- | Evaluate the provided proposition down to its most concrete result
+evalProp :: Prop -> Prop
+evalProp prop =
+  let new = mapProp' go prop
+  in if (new == prop) then prop else evalProp new
+  where
+    go :: Prop -> Prop
+    go (PLT (Lit l) (Lit r)) = PBool (l < r)
+    go (PGT (Lit l) (Lit r)) = PBool (l > r)
+    go (PGEq (Lit l) (Lit r)) = PBool (l >= r)
+    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
+    go (PNeg (PBool b)) = PBool (Prelude.not b)
+
+    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
+    go (PAnd (PBool False) _) = PBool False
+    go (PAnd _ (PBool False)) = PBool False
+
+    go (POr (PBool l) (PBool r)) = PBool (l || r)
+    go (POr (PBool True) _) = PBool True
+    go (POr _ (PBool True)) = PBool True
+
+    go (PImpl (PBool l) (PBool r)) = PBool ((Prelude.not l) || r)
+    go (PImpl (PBool False) _) = PBool True
+
+    go (PEq (Eq a b) (Lit 0)) = PNeg (PEq a b)
+    go (PEq (Eq a b) (Lit 1)) = PEq a b
+
+    go (PEq (Sub a b) (Lit 0)) = PEq a b
+
+    go (PNeg (PNeg a)) = a
+
+    go (PEq (Lit l) (Lit r)) = PBool (l == r)
+    go o@(PEq l r)
+      | l == r = PBool True
+      | otherwise = o
+    go p = p
+
+
+data ConstState = ConstState
+  { values :: Map.Map (Expr EWord) W256
+  , canBeSat :: Bool
+  }
+  deriving (Show)
+
+-- | Folds constants
+constFoldProp :: [Prop] -> ConstState
+constFoldProp ps = execState (mapM constProp ps) (ConstState mempty True)
+  where
+    constProp :: Prop -> State ConstState Prop
+    constProp prop = go (evalProp prop)
+    go :: Prop -> State ConstState Prop
+    go x = case x of
+        PEq a (Lit l) -> do
+          s <- get
+          case Map.lookup a s.values of
+            Just l2 -> case l==l2 of
+                True -> pure $ PBool True
+                False -> do
+                  put $ s{canBeSat=False}
+                  pure $ PBool False
+            Nothing -> do
+              let vs' = Map.insert a l s.values
+              put $ s{values=vs'}
+              pure $ PBool True
+        PEq a@(Lit _) b -> go (PEq b a)
+        PAnd a b -> do
+          _ <- go a
+          _ <- go b
+          pure $ PBool True
+        POr a b -> do
+          let
+            ConstState _ v1 = constFoldProp [a]
+            ConstState _ v2 = constFoldProp [b]
+          _ <- if (Prelude.not v1) then go a
+                                   else pure $ PBool True
+          _ <- if (Prelude.not v2) then go b
+                                   else pure $ PBool True
+          s <- get
+          put $ s{canBeSat=(s.canBeSat && (v1 || v2))}
+          pure $ POr a b
+        PBool False -> do
+          s <- get
+          put $ s{canBeSat=False}
+          pure $ PBool False
+        e -> pure e
