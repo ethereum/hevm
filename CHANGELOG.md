@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## Added
+
+- The `vm.etch` cheatcode is now supported
+
 ## Fixed
 
 - CopySlice wraparound issue especially during CopyCallBytesToMemory

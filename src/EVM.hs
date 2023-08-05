@@ -1643,6 +1643,18 @@ cheatActions =
             let msg = "ffi disabled: run again with --ffi if you want to allow tests to call external scripts"
             in partial $ UnexpectedSymbolicArg vm.state.pc msg [],
 
+      action "etch(address,bytes)" $
+        \sig _ _ input -> case decodeStaticArgs 0 1 input of
+          [x]  -> forceAddr x "vm.etch address" $ \addr ->
+            case decodeBuf [AbiBytesDynamicType] (Expr.drop 32 input) of
+              CAbi b -> case b of
+                [AbiBytesDynamic bs] -> fetchAccount addr $ \_ ->
+                  assign (#env % #contracts % ix addr % #code)
+                    (RuntimeCode (ConcreteRuntimeCode bs))
+                _ -> vmError (BadCheatCode sig)
+              _ -> vmError (BadCheatCode sig)
+          _ -> vmError (BadCheatCode sig),
+
       action "warp(uint256)" $
         \sig _ _ input -> case decodeStaticArgs 0 1 input of
           [x]  -> assign (#block % #timestamp) x

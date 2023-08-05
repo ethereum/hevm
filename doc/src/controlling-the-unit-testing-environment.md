@@ -18,6 +18,9 @@ These can be accessed by calling into a contract (typically called `Vm`) at addr
 - `function load(address c, bytes32 loc) public returns (bytes32 val)`
   Reads the slot `loc` of contract `c`.
 
+- `function etch(address usr, bytes calldata code) public returns (bytes32 val)`
+  Sets the bytecode of an address `usr` to `code`
+
 - `function sign(uint sk, bytes32 digest) public returns (uint8 v, bytes32 r, bytes32 s)`
   Signs the `digest` using the private key `sk`. Note that signatures produced via `hevm.sign` will leak the private key.
 

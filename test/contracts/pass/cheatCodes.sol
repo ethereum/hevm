@@ -4,6 +4,7 @@ import "ds-test/test.sol";
 
 interface Hevm {
     function warp(uint256) external;
+    function etch(address,bytes memory) external;
     function roll(uint256) external;
     function load(address,bytes32) external returns (bytes32);
     function store(address,bytes32,bytes32) external;
@@ -25,6 +26,18 @@ contract Prankster {
 
 contract Payable {
     function hi() public payable {}
+}
+
+contract Ret1 {
+    function f() public returns (uint) {
+        return 1;
+    }
+}
+
+contract Ret2 {
+    function f() public returns (uint) {
+        return 2;
+    }
 }
 
 contract CheatCodes is DSTest {
@@ -123,7 +136,18 @@ contract CheatCodes is DSTest {
         assertEq(prankster.prankme(), address(this));
     }
 
-    function test_prank_val() public {
+    function prove_etch() public {
+        Ret1 c = new Ret1();
+        assert(c.f() == 1);
+        assertEq0(address(c).code, type(Ret1).runtimeCode);
+
+        hevm.etch(address(c), type(Ret2).runtimeCode);
+
+        assert(c.f() == 2);
+        assertEq0(address(c).code, type(Ret2).runtimeCode);
+    }
+
+    function prove_prank_val() public {
         address from = address(0x1312);
         uint amt = 10;
 
