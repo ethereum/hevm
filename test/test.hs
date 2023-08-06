@@ -24,6 +24,8 @@ import Data.String.Here
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
+import Data.Text.Lazy qualified as TL
+import Data.Text.Builder.Linear
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Typeable
 import Data.Vector qualified as Vector
@@ -63,6 +65,7 @@ import EVM.Test.Tracing qualified as Tracing
 import EVM.Test.Utils
 import EVM.Traversals
 import EVM.Types
+import EVM.Props.SMT (SMT(..), parseSMT, serialize)
 
 main :: IO ()
 main = defaultMain tests
@@ -72,9 +75,20 @@ main = defaultMain tests
 runSubSet :: String -> IO ()
 runSubSet p = defaultMain . applyPattern p $ tests
 
+perfTest :: IO ()
+perfTest = do
+  s <- generate $ genSMT 40
+  BS.writeFile "out.smt2" (runBuilderBS . serialize $ s)
+
 tests :: TestTree
 tests = testGroup "hevm"
   [ Tracing.tests
+  , testGroup "smt parser"
+    [ testProperty  "smt roundtrip" $ \(smt :: SMT) -> ioProperty $ do
+        let s = runBuilder . serialize $ smt
+            p = parseSMT s
+        assertEqual "" (Right smt) p
+    ]
   , testGroup "StorageTests"
     [ testCase "read-from-sstore" $ assertEqual ""
         (Lit 0xab)
@@ -3300,3 +3314,18 @@ checkPost post c sig = do
   case cexs of
     [] -> pure $ Right e
     cs -> pure $ Left cs
+
+instance Arbitrary SMT where
+  arbitrary = sized genSMT
+
+genSMT :: Int -> Gen SMT
+genSMT 0 = oneof
+  [ Id <$> genName
+  , SInt <$> arbitrary
+  , SBV <$> arbitrary <*> arbitrary
+  , SBool <$> arbitrary
+  ]
+genSMT sz = L <$> listOf subExpr
+  where
+    subExpr = genSMT (sz `div` 10)
+
