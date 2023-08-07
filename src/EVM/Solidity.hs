@@ -388,7 +388,9 @@ solcRuntime contract src = do
 functionAbi :: Text -> IO Method
 functionAbi f = do
   (json, path) <- solidity' ("contract ABI { function " <> f <> " public {}}")
-  let (Contracts sol, _, _) = fromJust $ readStdJSON json
+  let (Contracts sol, _, _) = fromMaybe
+                                (internalError . T.unpack $ "unable to parse solc output:\n" <> json)
+                                (readStdJSON json)
   case Map.toList $ (fromJust (Map.lookup (path <> ":ABI") sol)).abiMap of
      [(_,b)] -> pure b
      _ -> internalError "unexpected abi format"
