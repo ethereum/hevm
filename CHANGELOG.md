@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - EVM.Solidity.toCode to include contractName in error string
 - Better cex reconstruction in cases where branches do not refer to all input variables in calldata
 - Correctly handle empty bytestring compiled contracts' JSON
+- "test" option was broken due to missing `--number` option, this is now fixed
 
 ## Changed
 
