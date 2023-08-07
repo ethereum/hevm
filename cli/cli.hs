@@ -135,6 +135,7 @@ data Command w
       , projectType   :: w ::: Maybe ProjectType        <?> "Is this a Foundry or DappTools project (default: Foundry)"
       , rpc           :: w ::: Maybe URL                <?> "Fetch state from a remote node"
       , verbose       :: w ::: Maybe Int                <?> "Append call trace: {1} failures {2} all"
+      , number        :: w ::: Maybe W256               <?> "Block: number"
       , coverage      :: w ::: Bool                     <?> "Coverage analysis"
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
       , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default) or cvc5"
