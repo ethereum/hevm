@@ -194,7 +194,7 @@ smt2Line txt = SMT2 [txt] mempty mempty
 
 assertProps :: [Prop] -> SMT2
 assertProps ps =
-  let encs = map propToSMT psAbstElim
+  let encs = map propToSMT psElimAbst
       abstSMT = map propToSMT abstProps
       intermediates = declareIntermediates bufs stores in
   prelude
@@ -202,7 +202,7 @@ assertProps ps =
   <> smt2Line ""
   <> (declareAddrs addresses)
   <> smt2Line ""
-  <> (declareBufs psAbstElim bufs stores)
+  <> (declareBufs psElim bufs stores)
   <> smt2Line ""
   <> (declareVars . nubOrd $ foldl (<>) [] allVars)
   <> smt2Line ""
@@ -220,17 +220,17 @@ assertProps ps =
   <> SMT2 mempty mempty mempty { storeReads = storageReads }
 
   where
-    (psAbst, bufs, stores) = eliminateProps ps
-    (psAbstElim, abst@(AbstState abstExprToInt _)) = abstractAwayProps psAbst
+    (psElim, bufs, stores) = eliminateProps ps
+    (psElimAbst, abst@(AbstState abstExprToInt _)) = abstractAwayProps psElim
 
     abstProps = map toProp (Map.toList abstExprToInt)
       where
       toProp :: (Expr EWord, Int) -> Prop
       toProp (e, num) = PEq e (Var (TS.pack ("abst_" ++ (show num))))
 
-    allVars = fmap referencedVars psAbst <> fmap referencedVars bufVals <> fmap referencedVars storeVals <> [abstrVars abst]
-    frameCtx = fmap referencedFrameContext psAbst <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
-    blockCtx = fmap referencedBlockContext psAbst <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
+    allVars = fmap referencedVars psElim <> fmap referencedVars bufVals <> fmap referencedVars storeVals <> [abstrVars abst]
+    frameCtx = fmap referencedFrameContext psElim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
+    blockCtx = fmap referencedBlockContext psElim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
 
     abstrVars :: AbstState -> [Builder]
     abstrVars (AbstState b _) = map ((\v->fromString ("abst_" ++ show v)) . snd) (Map.toList b)
@@ -243,13 +243,13 @@ assertProps ps =
 
     keccakAssumes
       = smt2Line "; keccak assumptions"
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psAbstElim bufVals storeVals)) mempty mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psElimAbst bufVals storeVals)) mempty mempty
       <> smt2Line "; keccak computations"
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psAbstElim bufVals storeVals)) mempty mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psElimAbst bufVals storeVals)) mempty mempty
 
     readAssumes
       = smt2Line "; read assumptions"
-        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads psAbstElim bufs stores)) mempty mempty
+        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads psElimAbst bufs stores)) mempty mempty
 
 referencedAbstractStores :: TraversableTerm a => a -> Set Builder
 referencedAbstractStores term = foldTerm go mempty term
