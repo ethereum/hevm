@@ -534,7 +534,7 @@ formatExpr = go
       Exp a b -> fmt "Exp" [a, b]
       SEx a b -> fmt "SEx" [a, b]
       Min a b -> fmt "Min" [a, b]
-      Max a b -> fmt "Min" [a, b]
+      Max a b -> fmt "Max" [a, b]
 
       LT a b -> fmt "LT" [a, b]
       GT a b -> fmt "GT" [a, b]
