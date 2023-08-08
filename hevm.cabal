@@ -4,20 +4,15 @@ name:
 version:
   0.51.3
 synopsis:
-  Ethereum virtual machine evaluator
-description:
-  Hevm implements the Ethereum virtual machine semantics.
-  .
-  It can be used as a library, and it also comes with an executable
-  that can run unit test suites, optionally with a visual TTY debugger.
+  Symbolic EVM Evaluator
 homepage:
-  https://github.com/dapphub/dapptools
+  https://github.com/ethereum/hevm
 license:
   AGPL-3.0-only
 author:
-  Mikael Brockman, Martin Lundfall, dxo
+  dxo, Martin Lundfall, Mikael Brockman
 maintainer:
-  mikael@brockman.se, martin.lundfall@gmail.com, git@d-xo.org
+  git@d-xo.org
 category:
   Ethereum
 build-type:
@@ -74,6 +69,7 @@ common shared
     RecordWildCards
     TypeFamilies
     ViewPatterns
+    DataKinds
 
 library
   import: shared
@@ -83,25 +79,18 @@ library
     EVM.Assembler,
     EVM.Concrete,
     EVM.Dapp,
-    EVM.Debug,
-    EVM.Dev,
     EVM.Expr,
     EVM.SMT,
     EVM.Solvers,
     EVM.Exec,
-    EVM.Facts,
-    EVM.Facts.Git,
     EVM.Format,
     EVM.Fetch,
     EVM.FeeSchedule,
-    EVM.Hexdump,
     EVM.Op,
-    EVM.Patricia,
     EVM.Precompiled,
     EVM.RLP,
     EVM.Solidity,
     EVM.Stepper,
-    EVM.StorageLayout,
     EVM.SymExec,
     EVM.Traversals,
     EVM.CSE,
@@ -110,10 +99,6 @@ library
     EVM.Types,
     EVM.UnitTest,
     EVM.Sign,
-  if !os(windows)
-    exposed-modules:
-      EVM.TTY,
-      EVM.TTYCenteredList
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -168,6 +153,7 @@ library
     multiset                          >= 0.3.4 && < 0.4,
     operational                       >= 0.2.3 && < 0.3,
     optparse-generic                  >= 1.3.1 && < 1.5,
+    pretty-hex                        >= 1.1 && < 1.2,
     quickcheck-text                   >= 0.1.2 && < 0.2,
     restless-git                      >= 0.7 && < 0.8,
     rosezipper                        >= 0.2 && < 0.3,
@@ -177,7 +163,6 @@ library
     regex-tdfa                        >= 1.2.3 && < 1.4,
     base                              >= 4.9 && < 5,
     here                              >= 1.2.13 && < 1.3,
-    tuple                             >= 0.3.0.2 && < 0.4,
     smt2-parser                       >= 0.1.0.1,
     word-wrap                         >= 0.5 && < 0.6,
     spool                             >= 0.1 && < 0.2,
@@ -195,9 +180,9 @@ library
 executable hevm
   import: shared
   hs-source-dirs:
-    hevm-cli
+    cli
   main-is:
-    hevm-cli.hs
+    cli.hs
   ghc-options: -threaded -with-rtsopts=-N
   other-modules:
     Paths_hevm

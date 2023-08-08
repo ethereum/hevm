@@ -12,15 +12,16 @@ import Prelude hiding (LT, GT)
 import Control.Monad
 import Data.Containers.ListUtils (nubOrd)
 import Data.ByteString (ByteString)
-import Data.Bifunctor (second)
 import Data.ByteString qualified as BS
 import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.String.Here
-import Data.Maybe (fromJust)
-import Data.Map (Map)
-import Data.Map qualified as Map
+import Data.Maybe (fromJust, fromMaybe)
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
+import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Word (Word8)
 import Data.Text.Lazy (Text)
 import Data.Text qualified as TS
@@ -43,22 +44,30 @@ import EVM.Types
 -- ** Encoding ** ----------------------------------------------------------------------------------
 
 
--- variable names in SMT that we want to get values for
+-- | Data that we need to construct a nice counterexample
 data CexVars = CexVars
-  { calldata     :: [Text]
-  , buffers      :: Map Text (Expr EWord) -- buffers and guesses at their maximum size
-  , storeReads   :: [(Expr EWord, Expr EWord)] -- a list of relevant store reads
+  { -- | variable names that we need models for to reconstruct calldata
+    calldata     :: [Text]
+    -- | symbolic address names
+  , addrs        :: [Text]
+    -- | buffer names and guesses at their maximum size
+  , buffers      :: Map Text (Expr EWord)
+    -- | reads from abstract storage
+  , storeReads   :: Map (Expr EAddr) (Set (Expr EWord))
+    -- | the names of any block context variables
   , blockContext :: [Text]
+    -- | the names of any tx context variables
   , txContext    :: [Text]
   }
   deriving (Eq, Show)
 
 instance Semigroup CexVars where
-  (CexVars a b c d e) <> (CexVars a2 b2 c2 d2 e2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2) (e <> e2)
+  (CexVars a b c d e f) <> (CexVars a2 b2 c2 d2 e2 f2) = CexVars (a <> a2) (b <> b2) (c <> c2) (d <> d2) (e <> e2) (f <> f2)
 
 instance Monoid CexVars where
     mempty = CexVars
       { calldata = mempty
+      , addrs = mempty
       , buffers = mempty
       , storeReads = mempty
       , blockContext = mempty
@@ -84,8 +93,9 @@ data CompressedBuf
 -- | a final post shrinking cex, buffers here are all represented as concrete bytestrings
 data SMTCex = SMTCex
   { vars :: Map (Expr EWord) W256
+  , addrs :: Map (Expr EAddr) Addr
   , buffers :: Map (Expr Buf) BufModel
-  , store :: Map W256 (Map W256 W256)
+  , store :: Map (Expr EAddr) (Map W256 W256)
   , blockContext :: Map (Expr EWord) W256
   , txContext :: Map (Expr EWord) W256
   }
@@ -186,8 +196,12 @@ assertProps ps =
       abstSMT = map propToSMT abstProps
       intermediates = declareIntermediates bufs stores in
   prelude
-  <> declareBufs ps bufs stores
-  <> smt2Line ""
+  <> (declareAbstractStores abstractStores)
+  <> SMT2 [""] mempty
+  <> (declareAddrs addresses)
+  <> SMT2 [""] mempty
+  <> (declareBufs ps_elim bufs stores)
+  <> SMT2 [""] mempty
   <> (declareVars . nubOrd $ foldl (<>) [] allVars)
   <> smt2Line ""
   <> (declareFrameContext . nubOrd $ foldl (<>) [] frameCtx)
@@ -221,7 +235,9 @@ assertProps ps =
 
     bufVals = Map.elems bufs
     storeVals = Map.elems stores
-    storageReads = nubOrd $ concatMap findStorageReads ps
+    storageReads = Map.unionsWith (<>) $ fmap findStorageReads ps
+    abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores ps)
+    addresses = Set.toList $ Set.unions (fmap referencedWAddrs ps)
 
     keccakAssumes
       = smt2Line "; keccak assumptions"
@@ -232,6 +248,20 @@ assertProps ps =
     readAssumes
       = smt2Line "; read assumptions"
         <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads psAbstrElim bufs stores)) mempty mempty
+
+referencedAbstractStores :: TraversableTerm a => a -> Set Builder
+referencedAbstractStores term = foldTerm go mempty term
+  where
+    go = \case
+      AbstractStore s -> Set.singleton (storeName s)
+      _ -> mempty
+
+referencedWAddrs :: TraversableTerm a => a -> Set Builder
+referencedWAddrs term = foldTerm go mempty term
+  where
+    go = \case
+      WAddr(a@(SymAddr _)) -> Set.singleton (formatEAddr a)
+      _ -> mempty
 
 referencedBufs :: TraversableTerm a => a -> [Builder]
 referencedBufs expr = nubOrd $ foldTerm go [] expr
@@ -254,11 +284,8 @@ referencedFrameContext expr = nubOrd $ foldTerm go [] expr
   where
     go :: Expr a -> [(Builder, [Prop])]
     go = \case
-      CallValue a -> [(fromLazyText $ T.append "callvalue_" (T.pack . show $ a), [])]
-      Caller a -> [(fromLazyText $ T.append "caller_" (T.pack . show $ a), [inRange 160 (Caller a)])]
-      Address a -> [(fromLazyText $ T.append "address_" (T.pack . show $ a), [inRange 160 (Address a)])]
-      Balance {} -> internalError "TODO: BALANCE"
-      SelfBalance {} -> internalError "TODO: SELFBALANCE"
+      TxValue -> [(fromString "txvalue", [])]
+      v@(Balance a) -> [(fromString "balance_" <> formatEAddr a, [PLT v (Lit $ 2 ^ (96 :: Int))])]
       Gas {} -> internalError "TODO: GAS"
       _ -> []
 
@@ -283,17 +310,17 @@ referencedBlockContext expr = nubOrd $ foldTerm go [] expr
 -- the store (e.g, SLoad addr idx (SStore addr idx val AbstractStore)).
 -- However, we expect that most of such reads will have been
 -- simplified away.
-findStorageReads :: Prop -> [(Expr EWord, Expr EWord)]
-findStorageReads = foldProp go []
+findStorageReads :: Prop -> Map (Expr EAddr) (Set (Expr EWord))
+findStorageReads p = Map.fromListWith (<>) $ foldProp go mempty p
   where
-    go :: Expr a -> [(Expr EWord, Expr EWord)]
+    go :: Expr a -> [(Expr EAddr, Set (Expr EWord))]
     go = \case
-      SLoad addr slot storage -> [(addr, slot) | containsNode isAbstractStore storage]
+      SLoad slot store ->
+        [((fromMaybe (error $ "Internal Error: could not extract address from: " <> show store) (Expr.getAddr store)), Set.singleton slot) | containsNode isAbstractStore store]
       _ -> []
 
-    isAbstractStore AbstractStore = True
+    isAbstractStore (AbstractStore _) = True
     isAbstractStore _ = False
-
 
 findBufferAccess :: TraversableTerm a => [a] -> [(Expr EWord, Expr EWord, Expr Buf)]
 findBufferAccess = foldl (foldTerm go) mempty
@@ -372,6 +399,12 @@ declareVars names = SMT2 (["; variables"] <> fmap declare names) mempty cexvars
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
     cexvars = (mempty :: CexVars){ calldata = fmap toLazyText names }
 
+-- Given a list of variable names, create an SMT2 object with the variables declared
+declareAddrs :: [Builder] -> SMT2
+declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) cexvars
+  where
+    declare n = "(declare-const " <> n <> " Addr)"
+    cexvars = (mempty :: CexVars){ addrs = fmap toLazyText names }
 
 declareFrameContext :: [(Builder, [Prop])] -> SMT2
 declareFrameContext names = SMT2 (["; frame context"] <> concatMap declare names) mempty cexvars
@@ -380,6 +413,10 @@ declareFrameContext names = SMT2 (["; frame context"] <> concatMap declare names
                         <> fmap (\p -> "(assert " <> propToSMT p <> ")") props
     cexvars = (mempty :: CexVars){ txContext = fmap (toLazyText . fst) names }
 
+declareAbstractStores :: [Builder] -> SMT2
+declareAbstractStores names = SMT2 (["; abstract base stores"] <> fmap declare names) mempty
+  where
+    declare n = "(declare-const " <> n <> " Storage)"
 
 declareBlockContext :: [(Builder, [Prop])] -> SMT2
 declareBlockContext names = SMT2 (["; block context"] <> concatMap declare names) mempty cexvars
@@ -400,10 +437,11 @@ prelude =  SMT2 src mempty mempty
     ; types
     (define-sort Byte () (_ BitVec 8))
     (define-sort Word () (_ BitVec 256))
+    (define-sort Addr () (_ BitVec 160))
     (define-sort Buf () (Array Word Byte))
 
-    ; address -> slot -> value
-    (define-sort Storage () (Array Word (Array Word Word)))
+    ; slot -> value
+    (define-sort Storage () (Array Word Word))
 
     ; hash functions
     (declare-fun keccak (Buf) Word)
@@ -559,6 +597,7 @@ prelude =  SMT2 src mempty mempty
 
     ; block context
     (declare-fun blockhash (Word) Word)
+    (declare-fun codesize (Addr) Word)
 
     ; macros
     (define-fun signext ( (b Word) (val Word)) Word
@@ -593,22 +632,14 @@ prelude =  SMT2 src mempty mempty
       (ite (= b (_ bv28 256)) ((_ sign_extend 24 ) ((_ extract 231  0) val))
       (ite (= b (_ bv29 256)) ((_ sign_extend 16 ) ((_ extract 239  0) val))
       (ite (= b (_ bv30 256)) ((_ sign_extend 8  ) ((_ extract 247  0) val)) val))))))))))))))))))))))))))))))))
-
-    ; storage
-    (declare-const abstractStore Storage)
-    (define-const emptyStore Storage ((as const Storage) ((as const (Array (_ BitVec 256) (_ BitVec 256))) #x0000000000000000000000000000000000000000000000000000000000000000)))
-
-    (define-fun sstore ((addr Word) (key Word) (val Word) (storage Storage)) Storage (store storage addr (store (select storage addr) key val)))
-
-    (define-fun sload ((addr Word) (key Word) (storage Storage)) Word (select (select storage addr) key))
     |]
 
 exprToSMT :: Expr a -> Builder
 exprToSMT = \case
   Lit w -> fromLazyText $ "(_ bv" <> (T.pack $ show (into w :: Integer)) <> " 256)"
   Var s -> fromText s
-  GVar (BufVar n) -> fromLazyText $ "buf" <> (T.pack . show $ n)
-  GVar (StoreVar n) -> fromLazyText $ "store" <> (T.pack . show $ n)
+  GVar (BufVar n) -> fromString $ "buf" <> (show n)
+  GVar (StoreVar n) -> fromString $ "store" <> (show n)
   JoinBytes
     z o two three four five six seven
     eight nine ten eleven twelve thirteen fourteen fifteen
@@ -697,14 +728,16 @@ exprToSMT = \case
     let enc = exprToSMT a in
     "(sha256 " <> enc <> ")"
 
-  CallValue a -> fromLazyText $ T.append "callvalue_" (T.pack . show $ a)
-  Caller a -> fromLazyText $ T.append "caller_" (T.pack . show $ a)
-  Address a -> fromLazyText $ T.append "address_" (T.pack . show $ a)
+  TxValue -> fromString "txvalue"
+  Balance a -> fromString "balance_" <> formatEAddr a
 
   Origin ->  "origin"
   BlockHash a ->
     let enc = exprToSMT a in
     "(blockhash " <> enc <> ")"
+  CodeSize a ->
+    let enc = exprToSMT a in
+    "(codesize " <> enc <> ")"
   Coinbase -> "coinbase"
   Timestamp -> "timestamp"
   BlockNumber -> "blocknumber"
@@ -712,6 +745,9 @@ exprToSMT = \case
   GasLimit -> "gaslimit"
   ChainId -> "chainid"
   BaseFee -> "basefee"
+
+  a@(SymAddr _) -> formatEAddr a
+  WAddr(a@(SymAddr _)) -> "(concat (_ bv0 96)" `sp` exprToSMT a `sp` ")"
 
   LitByte b -> fromLazyText $ "(_ bv" <> T.pack (show (into b :: Integer)) <> " 8)"
   IndexWord idx w -> case idx of
@@ -742,16 +778,14 @@ exprToSMT = \case
     "(writeWord " <> encIdx `sp` encVal `sp` encPrev <> ")"
   CopySlice srcIdx dstIdx size src dst ->
     copySlice srcIdx dstIdx size (exprToSMT src) (exprToSMT dst)
-  EmptyStore -> "emptyStore"
   ConcreteStore s -> encodeConcreteStore s
-  AbstractStore -> "abstractStore"
-  SStore addr idx val prev ->
-    let encAddr = exprToSMT addr
-        encIdx = exprToSMT idx
+  AbstractStore a -> storeName a
+  SStore idx val prev ->
+    let encIdx = exprToSMT idx
         encVal = exprToSMT val
         encPrev = exprToSMT prev in
-    "(sstore" `sp` encAddr `sp` encIdx `sp` encVal `sp` encPrev <> ")"
-  SLoad addr idx store -> op3 "sload" addr idx store
+    "(store" `sp` encPrev `sp` encIdx `sp` encVal <> ")"
+  SLoad idx store -> op2 "select" store idx
 
   a -> internalError $ "TODO: implement: " <> show a
   where
@@ -762,11 +796,6 @@ exprToSMT = \case
       let aenc = exprToSMT a
           benc = exprToSMT b in
       "(" <> op `sp` aenc `sp` benc <> ")"
-    op3 op a b c =
-      let aenc = exprToSMT a
-          benc = exprToSMT b
-          cenc = exprToSMT c in
-      "(" <> op `sp` aenc `sp` benc `sp` cenc <> ")"
     op2CheckZero op a b =
       let aenc = exprToSMT a
           benc = exprToSMT b in
@@ -862,20 +891,28 @@ writeBytes bytes buf = snd $ BS.foldl' wrap (0, exprToSMT buf) bytes
           idxSMT = exprToSMT . Lit . unsafeInto $ idx
         in (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
 
-encodeConcreteStore :: Map W256 (Map W256 W256) -> Builder
-encodeConcreteStore s = foldl encodeWrite "emptyStore" writes
+encodeConcreteStore :: Map W256 W256 -> Builder
+encodeConcreteStore s = foldl encodeWrite "((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000)" (Map.toList s)
   where
-    asList = fmap (second Map.toList) $ Map.toList s
-    writes = concatMap (\(addr, ws) -> fmap (\(k, v) -> (addr, k, v)) ws) asList
-    encodeWrite prev (addr, key, val) = let
-        encAddr = exprToSMT (Lit addr)
+    encodeWrite prev (key, val) = let
         encKey = exprToSMT (Lit key)
         encVal = exprToSMT (Lit val)
-      in "(sstore " <> encAddr `sp` encKey `sp` encVal `sp` prev <> ")"
+      in "(store " <> prev `sp` encKey `sp` encVal <> ")"
+
+storeName :: Expr EAddr -> Builder
+storeName a = fromString ("baseStore_") <> formatEAddr a
+
+formatEAddr :: Expr EAddr -> Builder
+formatEAddr = \case
+  LitAddr a -> fromString ("litaddr_" <> show a)
+  SymAddr a -> fromText ("symaddr_" <> a)
+  GVar _ -> internalError "unexpected GVar"
 
 
 -- ** Cex parsing ** --------------------------------------------------------------------------------
 
+parseAddr :: SpecConstant -> Addr
+parseAddr = parseSC
 
 parseW256 :: SpecConstant -> W256
 parseW256 = parseSC
@@ -897,6 +934,12 @@ parseErr res = internalError $ "cannot parse solver response: " <> show res
 parseVar :: TS.Text -> Expr EWord
 parseVar = Var
 
+parseEAddr :: TS.Text -> Expr EAddr
+parseEAddr name
+  | Just a <- TS.stripPrefix "litaddr_" name = LitAddr (read (TS.unpack a))
+  | Just a <- TS.stripPrefix "symaddr_" name = SymAddr a
+  | otherwise = internalError $ "cannot parse: " <> show name
+
 parseBlockCtx :: TS.Text -> Expr EWord
 parseBlockCtx "origin" = Origin
 parseBlockCtx "coinbase" = Coinbase
@@ -908,32 +951,34 @@ parseBlockCtx "chainid" = ChainId
 parseBlockCtx "basefee" = BaseFee
 parseBlockCtx t = internalError $ "cannot parse " <> (TS.unpack t) <> " into an Expr"
 
-parseFrameCtx :: TS.Text -> Expr EWord
-parseFrameCtx name = case TS.unpack name of
-  ('c':'a':'l':'l':'v':'a':'l':'u':'e':'_':frame) -> CallValue (read frame)
-  ('c':'a':'l':'l':'e':'r':'_':frame) -> Caller (read frame)
-  ('a':'d':'d':'r':'e':'s':'s':'_':frame) -> Address (read frame)
-  t -> internalError $ "cannot parse " <> t <> " into an Expr"
+parseTxCtx :: TS.Text -> Expr EWord
+parseTxCtx name
+  | name == "txvalue" = TxValue
+  | Just a <- TS.stripPrefix "balance_" name = Balance (parseEAddr a)
+  | otherwise = internalError $ "cannot parse " <> (TS.unpack name) <> " into an Expr"
+
+getAddrs :: (TS.Text -> Expr EAddr) -> (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr EAddr) Addr)
+getAddrs parseName getVal names = Map.mapKeys parseName <$> foldM (getOne parseAddr getVal) mempty names
 
 getVars :: (TS.Text -> Expr EWord) -> (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr EWord) W256)
-getVars parseFn getVal names = Map.mapKeys parseFn <$> foldM getOne mempty names
-  where
-    getOne :: Map TS.Text W256 -> TS.Text -> IO (Map TS.Text W256)
-    getOne acc name = do
-      raw <- getVal (T.fromStrict name)
-      let
-        parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
-          Right (ResSpecific (valParsed :| [])) -> valParsed
-          r -> parseErr r
-        val = case parsed of
-          (TermQualIdentifier (
-            Unqualified (IdSymbol symbol)),
-            TermSpecConstant sc)
-              -> if symbol == name
-                 then parseW256 sc
-                 else internalError "solver did not return model for requested value"
-          r -> parseErr r
-      pure $ Map.insert name val acc
+getVars parseName getVal names = Map.mapKeys parseName <$> foldM (getOne parseW256 getVal) mempty names
+
+getOne :: (SpecConstant -> a) -> (Text -> IO Text) -> Map TS.Text a -> TS.Text -> IO (Map TS.Text a)
+getOne parseVal getVal acc name = do
+  raw <- getVal (T.fromStrict name)
+  let
+    parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
+      Right (ResSpecific (valParsed :| [])) -> valParsed
+      r -> parseErr r
+    val = case parsed of
+      (TermQualIdentifier (
+        Unqualified (IdSymbol symbol)),
+        TermSpecConstant sc)
+          -> if symbol == name
+             then parseVal sc
+             else internalError "solver did not return model for requested value"
+      r -> parseErr r
+  pure $ Map.insert name val acc
 
 -- | Queries the solver for models for each of the expressions representing the
 -- max read index for a given buffer
@@ -1010,35 +1055,35 @@ getBufs getVal bufs = foldM getBuf mempty bufs
                             <> " in environment mapping"
           p -> parseErr p
 
-getStore :: (Text -> IO Text) -> [(Expr EWord, Expr EWord)] -> IO (Map W256 (Map W256 W256))
-getStore getVal sreads = do
-  raw <- getVal "abstractStore"
-  let parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
-                 Right (ResSpecific (valParsed :| [])) -> valParsed
-                 r -> parseErr r
-      -- first interpret SMT term as a function
-      fun = case parsed of
-              (TermQualIdentifier (Unqualified (IdSymbol symbol)), term) ->
-                if symbol == "abstractStore"
-                then interpret2DArray Map.empty term
-                else internalError "solver did not return model for requested value"
-              r -> parseErr r
+-- | Takes a Map containing all reads from a store with an abstract base, as
+-- well as the conrete part of the storage prestate and returns a fully
+-- concretized storage
+getStore
+  :: (Text -> IO Text)
+  -> Map (Expr EAddr) (Set (Expr EWord))
+  -> IO (Map (Expr EAddr) (Map W256 W256))
+getStore getVal abstractReads =
+  fmap Map.fromList $ forM (Map.toList abstractReads) $ \(addr, slots) -> do
+    let name = toLazyText (storeName addr)
+    raw <- getVal name
+    let parsed = case parseCommentFreeFileMsg getValueRes (T.toStrict raw) of
+                   Right (ResSpecific (valParsed :| [])) -> valParsed
+                   r -> parseErr r
+        -- first interpret SMT term as a function
+        fun = case parsed of
+                (TermQualIdentifier (Unqualified (IdSymbol symbol)), term) ->
+                  if symbol == (T.toStrict name)
+                  then interpret1DArray Map.empty term
+                  else error "Internal Error: solver did not return model for requested value"
+                r -> parseErr r
 
-  -- then create a map by adding only the locations that are read by the program
-  foldM (\m (addr, slot) -> do
-            addr' <- queryValue getVal addr
-            slot' <- queryValue getVal slot
-            pure $ addElem addr' slot' m fun) Map.empty sreads
+    -- then create a map by adding only the locations that are read by the program
+    store <- foldM (\m slot -> do
+      slot' <- queryValue getVal slot
+      pure $ Map.insert slot' (fun slot') m) Map.empty slots
+    pure (addr, store)
 
-  where
-
-    addElem :: W256 -> W256 -> Map W256 (Map W256 W256) -> (W256 -> W256 -> W256) -> Map W256 (Map W256 W256)
-    addElem addr slot store fun =
-      case Map.lookup addr store of
-        Just m -> Map.insert addr (Map.insert slot (fun addr slot) m) store
-        Nothing -> Map.insert addr (Map.singleton slot (fun addr slot)) store
-
-
+-- | Ask the solver to give us the concrete value of an arbitrary abstract word
 queryValue :: (Text -> IO Text) -> Expr EWord -> IO W256
 queryValue _ (Lit w) = pure w
 queryValue getVal w = do
@@ -1050,8 +1095,6 @@ queryValue getVal w = do
         (_, TermSpecConstant sc) -> pure $ parseW256 sc
         _ -> internalError $ "cannot parse model for: " <> show w
     r -> parseErr r
-
-
 
 -- | Interpret an N-dimensional array as a value of type a.
 -- Parameterized by an interpretation function for array values.
@@ -1094,7 +1137,3 @@ interpret1DArray = interpretNDArray interpretW256
         Just t -> interpretW256 env t
         Nothing -> internalError "unknown identifier, cannot parse array"
     interpretW256 _ t = internalError $ "cannot parse array value. Unexpected term: " <> (show t)
-
--- | Interpret an 2-dimensional array as a function
-interpret2DArray :: (Map Symbol Term) -> Term -> (W256 -> W256 -> W256)
-interpret2DArray = interpretNDArray interpret1DArray

@@ -14,7 +14,7 @@ import EVM.Traversals
 import EVM.Types
 import EVM.Expr
 
-data BuilderState = BuilderState
+newtype BuilderState = BuilderState
   { keccaks :: Set (Expr EWord) }
   deriving (Show)
 

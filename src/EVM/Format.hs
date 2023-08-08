@@ -33,11 +33,10 @@ module EVM.Format
   ) where
 
 import EVM.Types
-import EVM (cheatCode, traceForest, traceForest', traceContext)
+import EVM (traceForest, traceForest', traceContext, cheatCode)
 import EVM.ABI (getAbiSeq, parseTypeName, AbiValue(..), AbiType(..), SolError(..), Indexed(..), Event(..))
 import EVM.Dapp (DappContext(..), DappInfo(..), showTraceLocation)
 import EVM.Expr qualified as Expr
-import EVM.Hexdump (prettyHex, paddedShowHex)
 import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
 
 import Control.Arrow ((>>>))
@@ -60,17 +59,18 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Tree.View (showTree)
 import Data.Vector (Vector)
+import Hexdump (prettyHex)
 import Numeric (showHex)
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Base16 qualified as BS16
-import Witch (into, unsafeInto)
+import Witch (into, unsafeInto, tryFrom)
 
 data Signedness = Signed | Unsigned
   deriving (Show)
 
 showDec :: Signedness -> W256 -> Text
 showDec signed (W256 w)
-  | i == into cheatCode = "<hevm cheat address>"
+  | Right i' <- tryFrom i, LitAddr i' == cheatCode = "<hevm cheat address>"
   | (i :: Integer) == 2 ^ (256 :: Integer) - 1 = "MAX_UINT256"
   | otherwise = T.pack (show (i :: Integer))
   where
@@ -78,7 +78,7 @@ showDec signed (W256 w)
           Signed   -> into (signedWord w)
           Unsigned -> into w
 
-showWordExact :: W256 -> Text
+showWordExact :: Integral i => i -> Text
 showWordExact w = humanizeInteger (toInteger w)
 
 showWordExplanation :: W256 -> DappInfo -> Text
@@ -110,7 +110,7 @@ showAbiValue (AbiBytes _ bs) = formatBinary bs
 showAbiValue (AbiAddress addr) =
   let dappinfo = ?context.info
       contracts = ?context.env
-      name = case Map.lookup addr contracts of
+      name = case Map.lookup (LitAddr addr) contracts of
         Nothing -> ""
         Just contract ->
           let hash = maybeLitWord contract.codehash
@@ -142,7 +142,7 @@ showValue t b = head $ textValues [t] b
 
 showCall :: (?context :: DappContext) => [AbiType] -> Expr Buf -> Text
 showCall ts (ConcreteBuf bs) = showValues ts $ ConcreteBuf (BS.drop 4 bs)
-showCall _ _ = "<symbolic>"
+showCall _ _ = "(<symbolic>)"
 
 showError :: (?context :: DappContext) => Expr Buf -> Text
 showError (ConcreteBuf bs) =
@@ -187,7 +187,7 @@ formatSBinary (ConcreteBuf bs) = formatBinary bs
 formatSBinary (AbstractBuf t) = "<" <> t <> " abstract buf>"
 formatSBinary _ = internalError "formatSBinary: implement me"
 
-showTraceTree :: DappInfo -> VM -> Text
+showTraceTree :: DappInfo -> VM s -> Text
 showTraceTree dapp vm =
   let forest = traceForest vm
       traces = fmap (fmap (unpack . showTrace dapp (vm.env.contracts))) forest
@@ -203,7 +203,7 @@ showTraceTree' dapp leaf =
 unindexed :: [(Text, AbiType, Indexed)] -> [AbiType]
 unindexed ts = [t | (_, t, NotIndexed) <- ts]
 
-showTrace :: DappInfo -> Map Addr Contract -> Trace -> Text
+showTrace :: DappInfo -> Map (Expr EAddr) Contract -> Trace -> Text
 showTrace dapp env trace =
   let ?context = DappContext { info = dapp, env = env }
   in let
@@ -299,12 +299,12 @@ showTrace dapp env trace =
     FrameTrace (CreationContext addr (Lit hash) _ _ ) -> -- FIXME: irrefutable pattern
       "create "
       <> maybeContractName (preview (ix hash % _2) dapp.solcByHash)
-      <> "@" <> pack (show addr)
+      <> "@" <> formatAddr addr
       <> pos
     FrameTrace (CreationContext addr _ _ _ ) ->
       "create "
       <> "<unknown contract>"
-      <> "@" <> pack (show addr)
+      <> "@" <> formatAddr addr
       <> pos
     FrameTrace (CallContext target context _ _ hash abi calldata _ _) ->
       let calltype = if target == context
@@ -315,8 +315,8 @@ showTrace dapp env trace =
         Nothing ->
           calltype
             <> case target of
-                 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D -> "HEVM"
-                 _ -> pack (show target)
+                 LitAddr 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D -> "HEVM"
+                 _ -> formatAddr target
             <> pack "::"
             <> case Map.lookup (unsafeInto (fromMaybe 0x00 abi)) fullAbiMap of
                  Just m  ->
@@ -341,6 +341,12 @@ showTrace dapp env trace =
                  (abi >>= fmap getAbiTypes . maybeAbiName solc)
             <> "\x1b[0m"
             <> pos
+
+formatAddr :: Expr EAddr -> Text
+formatAddr = \case
+  LitAddr a -> pack (show a)
+  SymAddr a -> "symbolic(" <> a <> ")"
+  GVar _ -> internalError "Unexpected GVar"
 
 getAbiTypes :: Text -> [Maybe AbiType]
 getAbiTypes abi = map (parseTypeName mempty) types
@@ -427,7 +433,7 @@ formatPartial = \case
       , indent 2 $ T.unlines . fmap formatSomeExpr $ args
       ]
     ]
-  MaxIterationsReached pc addr -> T.pack $ "Max Iterations Reached in contract: " <> show addr <> " pc: " <> show pc
+  MaxIterationsReached pc addr -> "Max Iterations Reached in contract: " <> formatAddr addr <> " pc: " <> pack (show pc)
 
 formatSomeExpr :: SomeExpr -> Text
 formatSomeExpr (SomeExpr e) = formatExpr e
@@ -452,7 +458,17 @@ formatExpr = go
           , indent 2 $ formatExpr buf
           , ""
           , "Store:"
-          , indent 2 $ formatExpr store
+          , indent 2 $ T.unlines (fmap (\(a,s) -> (formatExpr a) <> " : " <> (formatExpr s)) (Map.toList store))
+          , "Assertions:"
+          , indent 2 $ T.pack $ show asserts
+          ]
+        , ")"
+        ]
+      Partial asserts _ err -> T.unlines
+        [ "(Partial"
+        , indent 2 $ T.unlines
+          [ "Reason:"
+          , indent 2 $ formatPartial err
           , "Assertions:"
           , indent 2 $ T.pack $ show asserts
           ]
@@ -500,24 +516,20 @@ formatExpr = go
         ]
 
       -- Stores
-      SLoad addr slot store -> T.unlines
+      SLoad slot store -> T.unlines
         [ "(SLoad"
         , indent 2 $ T.unlines
-          [ "addr:"
-          , indent 2 $ formatExpr addr
-          , "slot:"
+          [ "slot:"
           , indent 2 $ formatExpr slot
           , "store:"
           , indent 2 $ formatExpr store
           ]
         , ")"
         ]
-      SStore addr slot val prev -> T.unlines
+      SStore slot val prev -> T.unlines
         [ "(SStore"
         , indent 2 $ T.unlines
-          [ "addr:"
-          , indent 2 $ formatExpr addr
-          , "slot:"
+          [ "slot:"
           , indent 2 $ formatExpr slot
           , "val:"
           , indent 2 $ formatExpr val
@@ -527,7 +539,10 @@ formatExpr = go
         ]
       ConcreteStore s -> T.unlines
         [ "(ConcreteStore"
-        , indent 2 $ T.unlines $ fmap (T.pack . show) $ Map.toList $ fmap (T.pack . show . Map.toList) s
+        , indent 2 $ T.unlines
+          [ "vals:"
+          , indent 2 $ T.unlines $ fmap (T.pack . show) $ Map.toList s
+          ]
         , ")"
         ]
 
@@ -569,7 +584,7 @@ formatExpr = go
         "" -> "(ConcreteBuf \"\")"
         _ -> T.unlines
           [ "(ConcreteBuf"
-          , indent 2 $ T.pack $ prettyHex 0 bs
+          , indent 2 $ T.pack $ prettyHex bs
           , ")"
           ]
 
@@ -603,5 +618,3 @@ hexText t =
 
 bsToHex :: ByteString -> String
 bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
-
-

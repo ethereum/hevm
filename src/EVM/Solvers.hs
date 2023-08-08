@@ -156,11 +156,12 @@ getModel inst cexvars = do
     getRaw :: IO SMTCex
     getRaw = do
       vars <- getVars parseVar (getValue inst) (fmap T.toStrict cexvars.calldata)
+      addrs <- getAddrs parseEAddr (getValue inst) (fmap T.toStrict cexvars.addrs)
       buffers <- getBufs (getValue inst) (Map.keys cexvars.buffers)
       storage <- getStore (getValue inst) cexvars.storeReads
       blockctx <- getVars parseBlockCtx (getValue inst) (fmap T.toStrict cexvars.blockContext)
-      txctx <- getVars parseFrameCtx (getValue inst) (fmap T.toStrict cexvars.txContext)
-      pure $ SMTCex vars buffers storage blockctx txctx
+      txctx <- getVars parseTxCtx (getValue inst) (fmap T.toStrict cexvars.txContext)
+      pure $ SMTCex vars addrs buffers storage blockctx txctx
 
     -- sometimes the solver might give us back a model for the max read index
     -- that is too high to be a useful cex (e.g. in the case of reads from a
@@ -191,17 +192,17 @@ getModel inst cexvars = do
     shrinkBuf buf hint = do
       let encBound = "(_ bv" <> (T.pack $ show (into hint :: Integer)) <> " 256)"
       sat <- liftIO $ do
-        sendLine' inst "(push)"
-        sendLine' inst $ "(assert (bvule " <> buf <> "_length " <> encBound <> "))"
+        checkCommand inst "(push)"
+        checkCommand inst $ "(assert (bvule " <> buf <> "_length " <> encBound <> "))"
         sendLine inst "(check-sat)"
       case sat of
         "sat" -> do
           model <- liftIO getRaw
           put model
         "unsat" -> do
-          liftIO $ sendLine' inst "(pop)"
+          liftIO $ checkCommand inst "(pop)"
           shrinkBuf buf (if hint == 0 then hint + 1 else hint * 2)
-        _ -> internalError "SMT solver returned unexpected result (neither sat/unsat), which HEVM currently cannot handle"
+        e -> internalError $ "Unexpected solver output: " <> (T.unpack e)
 
     -- Collapses the abstract description of a models buffers down to a bytestring
     mkConcrete :: SMTCex -> SMTCex
@@ -233,6 +234,8 @@ solverArgs solver timeout = case solver of
   CVC5 ->
     [ "--lang=smt"
     , "--produce-models"
+    , "--print-success"
+    , "--interactive"
     , "--tlimit-per=" <> mkTimeout timeout
     ]
   Custom _ -> []
@@ -244,10 +247,12 @@ spawnSolver solver timeout = do
   (Just stdin, Just stdout, Just stderr, process) <- createProcess cmd
   hSetBuffering stdin (BlockBuffering (Just 1000000))
   let solverInstance = SolverInstance solver stdin stdout stderr process
+
   case solver of
     CVC5 -> pure solverInstance
     _ -> do
       _ <- sendLine' solverInstance $ "(set-option :timeout " <> mkTimeout timeout <> ")"
+      _ <- sendLine solverInstance "(set-option :print-success true)"
       pure solverInstance
 
 -- | Cleanly shutdown a running solver instnace
@@ -257,8 +262,22 @@ stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
 sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
 sendScript solver (SMT2 cmds _ _) = do
-  sendLine' solver (splitSExpr $ fmap toLazyText cmds)
-  pure $ Right()
+  let sexprs = splitSExpr $ fmap toLazyText cmds
+  go sexprs
+  where
+    go [] = pure $ Right ()
+    go (c:cs) = do
+      out <- sendCommand solver c
+      case out of
+        "success" -> go cs
+        e -> pure $ Left $ "Solver returned an error:\n" <> e <> "\nwhile sending the following line: " <> c
+
+checkCommand :: SolverInstance -> Text -> IO ()
+checkCommand inst cmd = do
+  res <- sendCommand inst cmd
+  case res of
+    "success" -> pure ()
+    _ -> error $ "Internal Error: Unexpected solver output: " <> (T.unpack res)
 
 -- | Sends a single command to the solver, returns the first available line from the output buffer
 sendCommand :: SolverInstance -> Text -> IO Text
@@ -311,11 +330,11 @@ readSExpr h = go 0 0 []
 
 -- From a list of lines, take each separate SExpression and put it in
 -- its own list, after removing comments.
-splitSExpr :: [Text] -> Text
+splitSExpr :: [Text] -> [Text]
 splitSExpr ls =
   -- split lines, strip comments, and append everything to a single line
   let text = T.intercalate " " $ T.takeWhile (/= ';') <$> concatMap T.lines ls in
-  T.unlines $ filter (/= "") $ go text []
+  filter (/= "") $ go text []
   where
     go "" acc = reverse acc
     go text acc =

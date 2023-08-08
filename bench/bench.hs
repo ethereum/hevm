@@ -19,10 +19,7 @@ import qualified Data.ByteString.Lazy as LazyByteString
 import EVM.SymExec
 import EVM.Solidity
 import EVM.Solvers
-import EVM.Dapp
-import EVM.Types (Expr(AbstractStore))
 import EVM.Format (hexByteString)
-import qualified EVM.TTY as TTY
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 
@@ -63,7 +60,7 @@ bcjsons = do
 blockchainTests :: IO (Map.Map FilePath (Map.Map String BCTests.Case)) -> Benchmark
 blockchainTests ts = bench "blockchain-tests" $ nfIO $ do
   tests <- ts
-  putStrLn "\n    executing tests:"
+  putStrLn "    executing blockchain tests"
   let cases = concat . Map.elems . (fmap Map.toList) $ tests
       ignored = Map.keys BCTests.commonProblematicTests
   foldM (\acc (n, c) ->
@@ -78,7 +75,7 @@ blockchainTests ts = bench "blockchain-tests" $ nfIO $ do
 runBCTest :: BCTests.Case -> IO Bool
 runBCTest x =
  do
-  let vm0 = BCTests.vmForCase x
+  vm0 <- BCTests.vmForCase x
   result <- Stepper.interpret (Fetch.zero 0 Nothing) vm0 Stepper.runFully
   maybeReason <- BCTests.checkExpectation False x result
   pure $ isNothing maybeReason
@@ -86,11 +83,6 @@ runBCTest x =
 
 --- Helpers ----------------------------------------------------------------------------------------
 
-
-debugContract :: ByteString -> IO ()
-debugContract c = withSolvers CVC5 4 Nothing $ \solvers -> do
-  let prestate = abstractVM (mkCalldata Nothing []) c Nothing AbstractStore False
-  void $ TTY.runFromVM solvers Nothing Nothing emptyDapp prestate
 
 findPanics :: Solver -> Natural -> Integer -> ByteString -> IO ()
 findPanics solver count iters c = do

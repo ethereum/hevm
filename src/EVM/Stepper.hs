@@ -23,57 +23,58 @@ where
 -- as the framework for monadic interpretation.
 
 import Control.Monad.Operational (Program, ProgramViewT(..), ProgramView, singleton, view)
-import Control.Monad.State.Strict (execState, runState, get)
+import Control.Monad.State.Strict (execStateT, runStateT, get)
 import Data.Text (Text)
 
 import EVM qualified
 import EVM.Exec qualified
 import EVM.Fetch qualified as Fetch
 import EVM.Types
+import Control.Monad.ST (stToIO, RealWorld)
 
 -- | The instruction type of the operational monad
-data Action a where
+data Action s a where
 
   -- | Keep executing until an intermediate result is reached
-  Exec :: Action VMResult
+  Exec :: Action s (VMResult s)
 
   -- | Wait for a query to be resolved
-  Wait :: Query -> Action ()
+  Wait :: Query s -> Action s ()
 
   -- | Multiple things can happen
-  Ask :: Choose -> Action ()
+  Ask :: Choose s -> Action s ()
 
   -- | Embed a VM state transformation
-  EVM  :: EVM a -> Action a
+  EVM  :: EVM s a -> Action s a
 
   -- | Perform an IO action
-  IOAct :: IO a -> Action a
+  IOAct :: IO a -> Action s a
 
 -- | Type alias for an operational monad of @Action@
-type Stepper a = Program Action a
+type Stepper s a = Program (Action s) a
 
 -- Singleton actions
 
-exec :: Stepper VMResult
+exec :: Stepper s (VMResult s)
 exec = singleton Exec
 
-run :: Stepper VM
+run :: Stepper s (VM s)
 run = exec >> evm get
 
-wait :: Query -> Stepper ()
+wait :: Query s -> Stepper s ()
 wait = singleton . Wait
 
-ask :: Choose -> Stepper ()
+ask :: Choose s -> Stepper s ()
 ask = singleton . Ask
 
-evm :: EVM a -> Stepper a
+evm :: EVM s a -> Stepper s a
 evm = singleton . EVM
 
-evmIO :: IO a -> Stepper a
+evmIO :: IO a -> Stepper s a
 evmIO = singleton . IOAct
 
 -- | Run the VM until final result, resolving all queries
-execFully :: Stepper (Either EvmError (Expr Buf))
+execFully :: Stepper s (Either EvmError (Expr Buf))
 execFully =
   exec >>= \case
     HandleEffect (Query q) ->
@@ -88,7 +89,7 @@ execFully =
       -> internalError $ "partial execution encountered during concrete execution: " <> show x
 
 -- | Run the VM until its final state
-runFully :: Stepper VM
+runFully :: Stepper s (VM s)
 runFully = do
   vm <- run
   case vm.result of
@@ -100,31 +101,33 @@ runFully = do
     Just _ ->
       pure vm
 
-enter :: Text -> Stepper ()
+enter :: Text -> Stepper s ()
 enter t = evm (EVM.pushTrace (EntryTrace t))
 
-interpret :: Fetch.Fetcher -> VM -> Stepper a -> IO a
+interpret :: Fetch.Fetcher RealWorld -> VM RealWorld -> Stepper RealWorld a -> IO a
 interpret fetcher vm = eval . view
   where
-    eval :: ProgramView Action a -> IO a
+    eval :: ProgramView (Action RealWorld) a -> IO a
     eval (Return x) = pure x
     eval (action :>>= k) =
       case action of
-        Exec ->
-          let (r, vm') = runState EVM.Exec.exec vm
-          in interpret fetcher vm' (k r)
-        Wait (PleaseAskSMT (Lit c) _ continue) ->
-          let (r, vm') = runState (continue (Case (c > 0))) vm
-          in interpret fetcher vm' (k r)
+        Exec -> do
+          (r, vm') <- stToIO $ runStateT EVM.Exec.exec vm
+          interpret fetcher vm' (k r)
+        Wait (PleaseAskSMT (Lit c) _ continue) -> do
+          (r, vm') <- stToIO $ runStateT (continue (Case (c > 0))) vm
+          interpret fetcher vm' (k r)
+        Wait (PleaseAskSMT c _ _) ->
+          error $ "cannot handle symbolic branch conditions in this interpreter: " <> show c
         Wait q -> do
           m <- fetcher q
-          let vm' = execState m vm
+          vm' <- stToIO $ execStateT m vm
           interpret fetcher vm' (k ())
         Ask _ ->
           internalError "cannot make choices with this interpreter"
         IOAct m -> do
           r <- m
           interpret fetcher vm (k r)
-        EVM m ->
-          let (r, vm') = runState m vm
-          in interpret fetcher vm' (k r)
+        EVM m -> do
+          (r, vm') <- stToIO $ runStateT m vm
+          interpret fetcher vm' (k r)

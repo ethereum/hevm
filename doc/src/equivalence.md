@@ -6,6 +6,7 @@ Usage: hevm equivalence --code-a TEXT --code-b TEXT [--sig TEXT]
                         [--smttimeout NATURAL] [--max-iterations INTEGER]
                         [--solver TEXT] [--smtoutput] [--smtdebug]
                         [--ask-smt-iterations INTEGER]
+                        [--loop-detection-heuristic LOOPHEURISTIC]
 
 Available options:
   -h,--help                Show this help text
@@ -23,7 +24,11 @@ Available options:
   --ask-smt-iterations INTEGER
                            Number of times we may revisit a particular branching
                            point before we consult the smt solver to check
-                           reachability (default: 5)
+                           reachability (default: 1) (default: 1)
+  --loop-detection-heuristic LOOPHEURISTIC
+                           Which heuristic should be used to determine if we are
+                           in a loop: StackBased (default) or Naive
+                           (default: StackBased)
 ```
 
 Symbolically execute both the code given in `--code-a` and `--code-b` and try to prove equivalence between their outputs and storages.
