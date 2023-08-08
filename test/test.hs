@@ -31,7 +31,7 @@ import GHC.Conc (getNumProcessors)
 import System.Directory
 import System.Environment
 import Test.Tasty
-import Test.Tasty.QuickCheck hiding (Failure, Success, isSuccess)
+import Test.Tasty.QuickCheck hiding (Failure, Success)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()

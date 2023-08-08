@@ -12,6 +12,10 @@ contract SolidityTest is DSTest {
         assert(false);
     }
 
+    function prove_all_branches_fail() public {
+        require(false);
+    }
+
     function prove_trivial_dstest() public {
         assertEq(uint(1), uint(2));
     }

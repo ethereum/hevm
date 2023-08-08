@@ -878,8 +878,13 @@ formatCex cd m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
 -- but it's probably good enough for now
 defaultSymbolicValues :: Expr a -> Expr a
 defaultSymbolicValues e = subBufs (foldTerm symbufs mempty e)
-                        . subVars (foldTerm symwords mempty e) $ e
+                        . subVars (foldTerm symwords mempty e)
+                        . subAddrs (foldTerm symaddrs mempty e) $ e
   where
+    symaddrs :: Expr a -> Map (Expr EAddr) Addr
+    symaddrs = \case
+      a@(SymAddr _) -> Map.singleton a (Addr 0x1312)
+      _ -> mempty
     symbufs :: Expr a -> Map (Expr Buf) ByteString
     symbufs = \case
       a@(AbstractBuf _) -> Map.singleton a ""
