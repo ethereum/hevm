@@ -148,10 +148,12 @@ declareIntermediates bufs stores =
   in  foldr (<>) (SMT2[""] mempty mempty) smt2
   where
     compareFst (l, _) (r, _) = compare l r
-    encodeBuf n expr = SMT2 ["(define-const buf" <> (fromString . show $ n) <> " Buf " <> exprToSMT expr <> ")\n"]  mempty mempty <> encodeBufLen n expr
-    encodeBufLen n expr = let blen = bufLengthEnv bufs True expr
-      in SMT2 ["(define-const buf" <> (fromString . show $ n) <>"_length" <> " (_ BitVec 256) " <> exprToSMT blen <> ")"] mempty mempty
-    encodeStore n expr = SMT2 ["(define-const store" <> (fromString . show $ n) <> " Storage " <> exprToSMT expr <> ")"] mempty mempty
+    encodeBuf n expr =
+      SMT2 ["(define-const buf" <> (fromString . show $ n) <> " Buf " <> exprToSMT expr <> ")\n"]  mempty mempty <> encodeBufLen n expr
+    encodeBufLen n expr =
+      SMT2 ["(define-const buf" <> (fromString . show $ n) <>"_length" <> " (_ BitVec 256) " <> exprToSMT (bufLengthEnv bufs True expr) <> ")"] mempty mempty
+    encodeStore n expr =
+      SMT2 ["(define-const store" <> (fromString . show $ n) <> " Storage " <> exprToSMT expr <> ")"] mempty mempty
 
 
 data AbstState = AbstState
@@ -192,16 +194,16 @@ smt2Line txt = SMT2 [txt] mempty mempty
 
 assertProps :: [Prop] -> SMT2
 assertProps ps =
-  let encs = map propToSMT psAbstrElim
+  let encs = map propToSMT psAbstElim
       abstSMT = map propToSMT abstProps
       intermediates = declareIntermediates bufs stores in
   prelude
   <> (declareAbstractStores abstractStores)
-  <> SMT2 [""] mempty
+  <> smt2Line ""
   <> (declareAddrs addresses)
-  <> SMT2 [""] mempty
-  <> (declareBufs ps_elim bufs stores)
-  <> SMT2 [""] mempty
+  <> smt2Line ""
+  <> (declareBufs psAbstElim bufs stores)
+  <> smt2Line ""
   <> (declareVars . nubOrd $ foldl (<>) [] allVars)
   <> smt2Line ""
   <> (declareFrameContext . nubOrd $ foldl (<>) [] frameCtx)
@@ -219,7 +221,7 @@ assertProps ps =
 
   where
     (psAbst, bufs, stores) = eliminateProps ps
-    (psAbstrElim, abst@(AbstState abstExprToInt _)) = abstractAwayProps psAbst
+    (psAbstElim, abst@(AbstState abstExprToInt _)) = abstractAwayProps psAbst
 
     abstProps = map toProp (Map.toList abstExprToInt)
       where
@@ -241,13 +243,13 @@ assertProps ps =
 
     keccakAssumes
       = smt2Line "; keccak assumptions"
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psAbstrElim bufVals storeVals)) mempty mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psAbstElim bufVals storeVals)) mempty mempty
       <> smt2Line "; keccak computations"
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psAbstrElim bufVals storeVals)) mempty mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psAbstElim bufVals storeVals)) mempty mempty
 
     readAssumes
       = smt2Line "; read assumptions"
-        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads psAbstrElim bufs stores)) mempty mempty
+        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads psAbstElim bufs stores)) mempty mempty
 
 referencedAbstractStores :: TraversableTerm a => a -> Set Builder
 referencedAbstractStores term = foldTerm go mempty term
@@ -446,7 +448,6 @@ prelude =  SMT2 src mempty mempty
     ; hash functions
     (declare-fun keccak (Buf) Word)
     (declare-fun sha256 (Buf) Word)
-    (define-fun max ((a (_ BitVec 256)) (b (_ BitVec 256))) (_ BitVec 256) (ite (bvult a b) b a))
 
   ; word indexing
   (define-fun indexWord31 ((w Word)) Byte ((_ extract 7 0) w))
