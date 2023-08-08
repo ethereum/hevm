@@ -543,7 +543,7 @@ formatExpr = go
       SLT a b -> fmt "SLT" [a, b]
       SGT a b -> fmt "SGT" [a, b]
       Eq a b -> fmt "Eq" [a, b]
-      EqByte a b -> fmt "Eq" [a, b]
+      EqByte a b -> fmt "EqByte" [a, b]
       IsZero a -> fmt "IsZero" [a]
 
       And a b -> fmt "And" [a, b]
