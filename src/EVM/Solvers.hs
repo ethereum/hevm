@@ -126,15 +126,16 @@ withSolvers solver count timeout cont = do
                 "unsat" -> pure Unsat
                 "timeout" -> pure Unknown
                 "unknown" -> pure Unknown
-                "sat" -> do
-                  _ <- sendScript inst (SMT2 refineEqs mempty mempty)
-                  sat2 <- sendLine inst "(check-sat)"
-                  case sat2 of
-                    "unsat" -> pure Unsat
-                    "timeout" -> pure Unknown
-                    "unknown" -> pure Unknown
-                    "sat" -> Sat <$> getModel inst cexvars
-                    _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat2
+                "sat" -> if null refineEqs then Sat <$> getModel inst cexvars
+                         else do
+                              _ <- sendScript inst (SMT2 refineEqs mempty mempty)
+                              sat2 <- sendLine inst "(check-sat)"
+                              case sat2 of
+                                "unsat" -> pure Unsat
+                                "timeout" -> pure Unknown
+                                "unknown" -> pure Unknown
+                                "sat" -> Sat <$> getModel inst cexvars
+                                _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat2
                 _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
           writeChan r res
 
