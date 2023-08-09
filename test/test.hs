@@ -2727,7 +2727,7 @@ checkEquivBase mkprop l r = withSolvers Z3 1 (Just 1) $ \solvers -> do
        putStrLn "skip"
        pure True
      else do
-       let smt = assertProps [mkprop l r]
+       let smt = assertProps [mkprop l r] False
        res <- checkSat solvers smt
        print res
        pure $ case res of

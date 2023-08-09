@@ -144,6 +144,7 @@ data Command w
       , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in seconds (default: 300)"
       , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point"
       , loopDetectionHeuristic :: w ::: LoopHeuristic   <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
+      , abstRefine    :: w ::: Bool                      <?> "Use abstraction refinement"
       , askSmtIterations :: w ::: Integer               <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       }
   | Version
@@ -214,6 +215,7 @@ equivalence cmd = do
                           , maxIter = cmd.maxIterations
                           , askSmtIters = cmd.askSmtIterations
                           , loopHeuristic = cmd.loopDetectionHeuristic
+                          , abstRefine = cmd.abstRefine
                           , rpcInfo = Nothing
                           }
   calldata <- buildCalldata cmd
@@ -299,6 +301,7 @@ assert cmd = do
       maxIter = cmd.maxIterations,
       askSmtIters = cmd.askSmtIterations,
       loopHeuristic = cmd.loopDetectionHeuristic,
+      abstRefine = cmd.abstRefine,
       rpcInfo = rpcinfo
     }
     (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)

@@ -192,8 +192,8 @@ abstractAwayProps ps = runState (mapM abstrAway ps) (AbstState mempty 0)
 smt2Line :: Builder -> SMT2
 smt2Line txt = SMT2 [txt] mempty mempty
 
-assertProps :: [Prop] -> SMT2
-assertProps ps =
+assertProps :: [Prop] -> Bool -> SMT2
+assertProps ps abstRefine =
   let encs = map propToSMT psElimAbst
       abstSMT = map propToSMT abstProps
       intermediates = declareIntermediates bufs stores in
@@ -221,7 +221,9 @@ assertProps ps =
 
   where
     (psElim, bufs, stores) = eliminateProps ps
-    (psElimAbst, abst@(AbstState abstExprToInt _)) = abstractAwayProps psElim
+    (psElimAbst, abst@(AbstState abstExprToInt _)) = if abstRefine
+      then abstractAwayProps psElim
+      else (psElim, AbstState mempty 0)
 
     abstProps = map toProp (Map.toList abstExprToInt)
       where
