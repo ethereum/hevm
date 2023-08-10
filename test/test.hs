@@ -24,11 +24,11 @@ import Data.String.Here
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
-import Data.Text.Lazy qualified as TL
 import Data.Text.Builder.Linear
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Typeable
 import Data.Vector qualified as Vector
+import FlatParse.Basic (Result(..))
 import GHC.Conc (getNumProcessors)
 import System.Directory
 import System.Environment
@@ -84,10 +84,15 @@ tests :: TestTree
 tests = testGroup "hevm"
   [ Tracing.tests
   , testGroup "smt parser"
-    [ testProperty  "smt roundtrip" $ \(smt :: SMT) -> ioProperty $ do
-        let s = runBuilder . serialize $ smt
-            p = parseSMT s
-        assertEqual "" (Right smt) p
+    [ testProperty  "roundtrip valid smt" $ \(expected :: SMT) -> ioProperty $ do
+        let s = runBuilderBS . serialize $ expected
+        case parseSMT s of
+          (OK actual _) -> assertEqual "" expected actual
+          e -> assertBool ("unexpected parse error: " <> show e) False
+    , testProperty  "roundtrip random bytes" $ \(bs :: ByteString) -> ioProperty $ do
+        case parseSMT bs of
+          (OK actual _) -> assertEqual "" bs (runBuilderBS . serialize $ actual)
+          _ -> assertBool "" True
     ]
   , testGroup "StorageTests"
     [ testCase "read-from-sstore" $ assertEqual ""
@@ -3320,10 +3325,8 @@ instance Arbitrary SMT where
 
 genSMT :: Int -> Gen SMT
 genSMT 0 = oneof
-  [ Id <$> genName
-  , SInt <$> arbitrary
-  , SBV <$> arbitrary <*> arbitrary
-  , SBool <$> arbitrary
+  [ A <$> genName
+  , pure (L [])
   ]
 genSMT sz = L <$> listOf subExpr
   where

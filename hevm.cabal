@@ -174,7 +174,8 @@ library
     witch                             >= 1.1 && < 1.3,
     sexpresso,
     hashable,
-    text-builder-linear
+    text-builder-linear,
+    flatparse
   if !os(windows)
     build-depends:
       brick                           >= 1.4 && < 2.0,
@@ -285,7 +286,8 @@ common test-base
     optics-core,
     optics-extra,
     text-builder-linear,
-    witch
+    witch,
+    flatparse
 
 library test-utils
   import:

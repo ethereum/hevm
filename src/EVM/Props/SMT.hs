@@ -1,25 +1,22 @@
 {-# Language OverloadedStrings #-}
+{-# Language TemplateHaskell #-}
 {-# Language DeriveAnyClass #-}
 {-# Language DeriveGeneric #-}
 {-# Language PatternSynonyms #-}
 
 module EVM.Props.SMT where
 
-import Debug.Trace
-
+import Data.ByteString (ByteString)
+import Data.Char
 import Data.Hashable
+import Data.HashMap.Strict (HashMap)
+import Data.HashMap.Strict qualified as HM
 import Data.List (intersperse, foldl')
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.IO qualified as T
 import Data.Text.Builder.Linear
-import Data.Void
 import GHC.Generics
-import GHC.Natural
-import Text.Megaparsec
-import Text.Megaparsec.Char
-import qualified Text.Megaparsec.Char.Lexer as L
-import Witch
+import FlatParse.Basic
 
 
 -- Types -------------------------------------------------------------------------------------------
@@ -28,10 +25,7 @@ import Witch
 -- smt statements are s-expressions
 data SMT
   = L [SMT]
-  | Id    Text
-  | SInt  Integer
-  | SBV   Natural Natural
-  | SBool Bool
+  | A Text
   deriving (Eq, Show, Read, Generic, Hashable)
 
 -- scripts are lists of smt statements
@@ -45,16 +39,7 @@ class Serializable a where
   serialize :: a -> Builder
 
 instance Serializable SMT where
-  serialize (Id t) = fromText t
-  serialize (SInt val) = fromText . T.pack . show $ val
-  serialize (SBool True) = "true"
-  serialize (SBool False) = "false"
-  serialize (SBV sz val)
-    = serialize (L
-      [ Id "_"
-      , Id ("bv" <> (T.pack $ show (into @Integer val)))
-      , Id (T.pack $ show (into sz :: Integer))
-      ])
+  serialize (A t) = fromText t
   serialize (L xs)
     = parens
     . foldl' (<>) mempty
@@ -77,90 +62,48 @@ pprint = runBuilder . serialize
 
 -- Parsing -----------------------------------------------------------------------------------------
 
+ws, open, close :: Parser () ()
+ws      = skipMany $(switch [| case _ of " " -> pure (); "\n" -> pure () |])
+open    = $(char '(') >> ws
+close   = $(char ')') >> ws
 
-type Parser = Parsec Void Text
+-- | characters allowed in a name
+nameChar :: Parser () Char
+nameChar = satisfy (`elem` ("~!@$%^&*_-+=<>.?/" :: String))
 
--- | Space Consumer.
-sc :: Parser ()
-sc = L.space
-  space1
-  (L.skipLineComment ";")
-  empty
+ident :: Parser () SMT
+ident = do
+  c <- nameChar <|> (satisfy isLatinLetter)
+  cs <- many (satisfy isAlphaNum <|> nameChar)
+  ws
+  pure (A . T.pack $ c : cs)
 
-lexeme :: Parser a -> Parser a
-lexeme = L.lexeme sc
+sexp :: Parser () SMT
+sexp = branch open go ident
+  where
+    go = do
+      s <- many sexp
+      close
+      pure (L s)
 
-symbol :: Text -> Parser Text
-symbol = L.symbol sc
+src :: Parser () SMT
+src = do
+  s <- sexp
+  eof
+  pure s
 
-brackets :: Parser a -> Parser a
-brackets = between (symbol "(") (symbol ")")
-
--- | parse a lexeme into a boolean
-bool :: Parser Bool
-bool = lexeme $ False <$ string "false" <|> True <$ string "true"
-
--- | parse a lexeme into a signed integer
-integer :: Parser Integer
-integer = label "integer" $ L.signed sc (lexeme L.decimal)
-
--- | parse a bitvector literal: (_ bv<v> <sz>)
-bitvec :: Parser (Natural, Natural)
-bitvec = label "bitvector" $ brackets $ do
-  _ <- symbol "_"
-  _ <- char 'b'
-  _ <- char 'v'
-  v <- integer
-  sz <- integer
-  case (tryFrom v, tryFrom sz) of
-    (Right v', Right sz') -> pure (sz', v')
-    _ -> error "TODO"
-
--- | special chars allowed in smt names
-nameChar :: Parser Char
-nameChar = oneOf @[] "~!@$%^&*_-+=<>.?/"
-
--- | parse a lexeme into a
-identifier :: Parser String
-identifier = label "identifier" $ lexeme $ do
-  c <- nameChar <|> letterChar
-  cs <- many (alphaNumChar <|> nameChar)
-  pure (c : cs)
-
-list :: Parser SMT
-list = label "S-expression" $ brackets (L <$> many smt)
-
-smt :: Parser SMT
-smt = choice
-  [ uncurry SBV <$> try bitvec
-  , list
-  , SInt <$> integer
-  , SBool <$> bool
-  , Id . T.pack <$> identifier
-  ]
-
-parseSMT :: Text -> Either Text SMT
-parseSMT input = case parse (between sc eof smt) "" input of
-  Left err -> Left . T.pack $ errorBundlePretty err
-  Right output -> Right output
-
-testParser :: Text -> IO ()
-testParser input = case parseSMT input of
-  Left e -> T.putStrLn e
-  Right s -> do
-    print s
-    T.putStrLn . runBuilder . serialize $ s
+parseSMT :: ByteString -> Result () SMT
+parseSMT = runParser src
 
 
--- Patterns ----------------------------------------------------------------------------------------
+-- CSE ---------------------------------------------------------------------------------------------
 
 
-pattern Add x y = L [Id "add", x, y]
-pattern Sub x y = L [Id "sub", x, y]
+-- takes an smt statement and pulls common subexpressions out into let bound variables
+eliminate :: SMT -> SMT
+eliminate = undefined
+  where
+    -- produce a map with counts of each subexpression
+    count :: HashMap SMT Int -> SMT -> HashMap SMT Int
+    count acc e@(A _) = HM.alter (maybe (Just 0) (Just . (+ 1))) e acc
 
-pattern BvAdd x y = L [Id "bvadd", x, y]
-pattern BvSub x y = L [Id "bvsub", x, y]
-
-pattern And x y = L [Id "and", x, y]
-pattern Eq x y = L [Id "=", x, y]
-pattern Neq x y = L [Id "distinct", x, y]
