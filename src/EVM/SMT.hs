@@ -210,6 +210,7 @@ referencedWAddrs term = foldTerm go mempty term
   where
     go = \case
       WAddr(a@(SymAddr _)) -> Set.singleton (formatEAddr a)
+      a@(LitAddr _) -> Set.singleton (formatEAddr a)
       _ -> mempty
 
 referencedBufs :: TraversableTerm a => a -> [Builder]
@@ -696,6 +697,7 @@ exprToSMT = \case
   BaseFee -> "basefee"
 
   a@(SymAddr _) -> formatEAddr a
+  a@(LitAddr _) -> formatEAddr a
   WAddr(a@(SymAddr _)) -> "(concat (_ bv0 96)" `sp` exprToSMT a `sp` ")"
 
   LitByte b -> fromLazyText $ "(_ bv" <> T.pack (show (into b :: Integer)) <> " 8)"

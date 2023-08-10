@@ -1091,6 +1091,33 @@ tests = testGroup "hevm"
         (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256)" [AbiIntType 256])) [] defaultVeriOpts
         putStrLn "Require works as expected"
      ,
+     ignoreTest $ testCase "wrong-prank" $ do
+       Just c <- solcRuntime "MyTest"
+         [i|
+            interface Vm {
+              function prank(address) external;
+            }
+            contract BalanceDemo {
+                function demo()public{
+                    Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+                    //send this.balance to msg.sender
+                    address(msg.sender).call{value: address(this).balance}("");
+                    vm.prank(msg.sender);
+                    address(0).call{value: 1}("");
+                    assert(false);
+                }
+            }
+            contract MyTest {
+              function a() public {
+                BalanceDemo baldemo;
+                baldemo.demo();
+              }
+            }
+         |]
+       -- should reach assert fail
+       (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "a()" [])) [] debugVeriOpts
+       putStrLn "reached assert"
+     ,
      testCase "ITE-with-bitwise-AND" $ do
        Just c <- solcRuntime "C"
          [i|
