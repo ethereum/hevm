@@ -77,6 +77,7 @@ data VeriOpts = VeriOpts
   , maxIter :: Maybe Integer
   , askSmtIters :: Integer
   , loopHeuristic :: LoopHeuristic
+  , abstRefine :: Bool
   , rpcInfo :: Fetch.RpcInfo
   }
   deriving (Eq, Show)
@@ -88,6 +89,7 @@ defaultVeriOpts = VeriOpts
   , maxIter = Nothing
   , askSmtIters = 1
   , loopHeuristic = StackBased
+  , abstRefine = False
   , rpcInfo = Nothing
   }
 
@@ -495,7 +497,7 @@ reachable solvers e = do
               (Nothing, Nothing) -> Nothing
         pure (fst tres <> fst fres, subexpr)
       leaf -> do
-        let query = assertProps pcs
+        let query = assertProps pcs False
         res <- checkSat solvers query
         case res of
           Sat _ -> pure ([query], Just leaf)
@@ -561,7 +563,7 @@ verify solvers opts preState maybepost = do
             _ -> True
         assumes = preState.constraints
         withQueries = canViolate <&> \leaf ->
-          (assertProps (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)
+          (assertProps (PNeg (post preState leaf) : assumes <> extractProps leaf) opts.abstRefine, leaf)
       putStrLn $ "Checking for reachability of "
                    <> show (length withQueries)
                    <> " potential property violation(s)"
@@ -673,7 +675,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     -- used or not
     check :: UnsatCache -> (Set Prop) -> Int -> IO (EquivResult, Bool)
     check knownUnsat props idx = do
-      let smt = assertProps $ Set.toList props
+      let smt = assertProps (Set.toList props) opts.abstRefine
       -- if debug is on, write the query to a file
       let filename = "equiv-query-" <> show idx <> ".smt2"
       when opts.debug $ TL.writeFile filename (formatSMT2 smt <> "\n\n(check-sat)")
@@ -772,7 +774,7 @@ both' f (x, y) = (f x, f y)
 produceModels :: SolverGroup -> Expr End -> IO [(Expr End, CheckSatResult)]
 produceModels solvers expr = do
   let flattened = flattenExpr expr
-      withQueries = fmap (\e -> (assertProps . extractProps $ e, e)) flattened
+      withQueries = fmap (\e -> ((flip assertProps False) . extractProps $ e, e)) flattened
   results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
     res <- checkSat solvers query
     pure (res, leaf)

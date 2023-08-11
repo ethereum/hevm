@@ -31,6 +31,7 @@ import Language.SMT2.Parser (getValueRes, parseCommentFreeFileMsg)
 import Language.SMT2.Syntax (Symbol, SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
 import Numeric (readHex, readBin)
 import Witch (into, unsafeInto)
+import Control.Monad.State
 
 import EVM.CSE
 import EVM.Expr (writeByte, bufLengthEnv, containsNode, bufLength, minLength, inRange)
@@ -100,6 +101,11 @@ data SMTCex = SMTCex
   }
   deriving (Eq, Show)
 
+
+-- | Used for abstraction-refinement of the SMT formula
+newtype RefinementEqs = RefinementEqs [Builder]
+  deriving (Eq, Show, Monoid, Semigroup)
+
 flattenBufs :: SMTCex -> Maybe SMTCex
 flattenBufs cex = do
   bs <- mapM collapse cex.buffers
@@ -119,17 +125,17 @@ collapse model = case toBuf model of
 getVar :: SMTCex -> TS.Text -> W256
 getVar cex name = fromJust $ Map.lookup (Var name) cex.vars
 
-data SMT2 = SMT2 [Builder] CexVars
+data SMT2 = SMT2 [Builder] RefinementEqs CexVars
   deriving (Eq, Show)
 
 instance Semigroup SMT2 where
-  (SMT2 a b) <> (SMT2 a2 b2) = SMT2 (a <> a2) (b <> b2)
+  (SMT2 a (RefinementEqs b) c) <> (SMT2 a2 (RefinementEqs b2) c2) = SMT2 (a <> a2) (RefinementEqs (b <> b2)) (c <> c2)
 
 instance Monoid SMT2 where
-  mempty = SMT2 mempty mempty
+  mempty = SMT2 mempty mempty mempty
 
 formatSMT2 :: SMT2 -> Text
-formatSMT2 (SMT2 ls _) = T.unlines (fmap toLazyText ls)
+formatSMT2 (SMT2 ls _ _) = T.unlines (fmap toLazyText ls)
 
 -- | Reads all intermediate variables from the builder state and produces SMT declaring them as constants
 declareIntermediates :: BufEnv -> StoreEnv -> SMT2
@@ -138,65 +144,114 @@ declareIntermediates bufs stores =
       encBs = Map.mapWithKey encodeBuf bufs
       sorted = List.sortBy compareFst $ Map.toList $ encSs <> encBs
       decls = fmap snd sorted
-  in SMT2 ([fromText "; intermediate buffers & stores"] <> decls) mempty
+      smt2 = (SMT2 [fromText "; intermediate buffers & stores"] mempty mempty):decls
+  in  foldr (<>) (SMT2[""] mempty mempty) smt2
   where
     compareFst (l, _) (r, _) = compare l r
     encodeBuf n expr =
-      "(define-const buf" <> (fromString . show $ n) <> " Buf " <> exprToSMT expr <> ")\n" <> encodeBufLen n expr
+      SMT2 ["(define-const buf" <> (fromString . show $ n) <> " Buf " <> exprToSMT expr <> ")\n"]  mempty mempty <> encodeBufLen n expr
     encodeBufLen n expr =
-      "(define-const buf" <> (fromString . show $ n) <>"_length" <> " (_ BitVec 256) " <> exprToSMT (bufLengthEnv bufs True expr) <> ")"
+      SMT2 ["(define-const buf" <> (fromString . show $ n) <>"_length" <> " (_ BitVec 256) " <> exprToSMT (bufLengthEnv bufs True expr) <> ")"] mempty mempty
     encodeStore n expr =
-       "(define-const store" <> (fromString . show $ n) <> " Storage " <> exprToSMT expr <> ")"
+      SMT2 ["(define-const store" <> (fromString . show $ n) <> " Storage " <> exprToSMT expr <> ")"] mempty mempty
 
-assertProps :: [Prop] -> SMT2
-assertProps ps =
-  let encs = map propToSMT ps_elim
+
+data AbstState = AbstState
+  { words :: Map (Expr EWord) Int
+  , count :: Int
+  }
+  deriving (Show)
+
+abstractAwayProps :: [Prop] -> ([Prop], AbstState)
+abstractAwayProps ps = runState (mapM abstrAway ps) (AbstState mempty 0)
+  where
+    abstrAway :: Prop -> State AbstState Prop
+    abstrAway prop = mapPropM go prop
+    go :: Expr a -> State AbstState (Expr a)
+    go x = case x of
+        e@(Mod{})    -> abstrExpr e
+        e@(SMod{})   -> abstrExpr e
+        e@(MulMod{}) -> abstrExpr e
+        e@(AddMod{}) -> abstrExpr e
+        e@(Mul{})    -> abstrExpr e
+        e@(Div{})    -> abstrExpr e
+        e@(SDiv {})  -> abstrExpr e
+        e -> pure e
+        where
+            abstrExpr e = do
+              s <- get
+              case Map.lookup e s.words of
+                Just v -> pure (Var (TS.pack ("abst_" ++ show v)))
+                Nothing -> do
+                  let
+                    next = s.count
+                    bs' = Map.insert e next s.words
+                  put $ s{words=bs', count=next+1}
+                  pure $ Var (TS.pack ("abst_" ++ show next))
+
+smt2Line :: Builder -> SMT2
+smt2Line txt = SMT2 [txt] mempty mempty
+
+assertProps :: [Prop] -> Bool -> SMT2
+assertProps ps abstRefine =
+  let encs = map propToSMT psElimAbst
+      abstSMT = map propToSMT abstProps
       intermediates = declareIntermediates bufs stores in
   prelude
   <> (declareAbstractStores abstractStores)
-  <> SMT2 [""] mempty
+  <> smt2Line ""
   <> (declareAddrs addresses)
-  <> SMT2 [""] mempty
-  <> (declareBufs ps_elim bufs stores)
-  <> SMT2 [""] mempty
+  <> smt2Line ""
+  <> (declareBufs psElim bufs stores)
+  <> smt2Line ""
   <> (declareVars . nubOrd $ foldl (<>) [] allVars)
-  <> SMT2 [""] mempty
+  <> smt2Line ""
   <> (declareFrameContext . nubOrd $ foldl (<>) [] frameCtx)
-  <> SMT2 [""] mempty
+  <> smt2Line ""
   <> (declareBlockContext . nubOrd $ foldl (<>) [] blockCtx)
-  <> SMT2 [""] mempty
+  <> smt2Line ""
   <> intermediates
-  <> SMT2 [""] mempty
+  <> smt2Line ""
   <> keccakAssumes
   <> readAssumes
-  <> SMT2 [""] mempty
-  <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty
-  <> SMT2 [] mempty{ storeReads = storageReads }
+  <> smt2Line ""
+  <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty mempty
+  <> SMT2 mempty (RefinementEqs $ fmap (\p -> "(assert " <> p <> ")") abstSMT) mempty
+  <> SMT2 mempty mempty mempty { storeReads = storageReads }
 
   where
-    (ps_elim, bufs, stores) = eliminateProps ps
+    (psElim, bufs, stores) = eliminateProps ps
+    (psElimAbst, abst@(AbstState abstExprToInt _)) = if abstRefine
+      then abstractAwayProps psElim
+      else (psElim, AbstState mempty 0)
 
-    allVars = fmap referencedVars ps_elim <> fmap referencedVars bufVals <> fmap referencedVars storeVals
-    frameCtx = fmap referencedFrameContext ps_elim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
-    blockCtx = fmap referencedBlockContext ps_elim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
+    abstProps = map toProp (Map.toList abstExprToInt)
+      where
+      toProp :: (Expr EWord, Int) -> Prop
+      toProp (e, num) = PEq e (Var (TS.pack ("abst_" ++ (show num))))
+
+    allVars = fmap referencedVars psElim <> fmap referencedVars bufVals <> fmap referencedVars storeVals <> [abstrVars abst]
+    frameCtx = fmap referencedFrameContext psElim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
+    blockCtx = fmap referencedBlockContext psElim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
+
+    abstrVars :: AbstState -> [Builder]
+    abstrVars (AbstState b _) = map ((\v->fromString ("abst_" ++ show v)) . snd) (Map.toList b)
 
     bufVals = Map.elems bufs
     storeVals = Map.elems stores
-
     storageReads = Map.unionsWith (<>) $ fmap findStorageReads ps
     abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores ps)
     addresses = Set.toList $ Set.unions (fmap referencedWAddrs ps)
 
     keccakAssumes
-      = SMT2 ["; keccak assumptions"] mempty
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions ps_elim bufVals storeVals)) mempty
-      <> SMT2 ["; keccak computations"] mempty
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute ps_elim bufVals storeVals)) mempty
-
+      = smt2Line "; keccak assumptions"
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psElimAbst bufVals storeVals)) mempty mempty
+      <> smt2Line "; keccak computations"
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psElimAbst bufVals storeVals)) mempty mempty
 
     readAssumes
-      = SMT2 ["; read assumptions"] mempty
-        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads ps_elim bufs stores)) mempty
+      = smt2Line "; read assumptions"
+        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads psElimAbst bufs stores)) mempty mempty
 
 referencedAbstractStores :: TraversableTerm a => a -> Set Builder
 referencedAbstractStores term = foldTerm go mempty term
@@ -334,7 +389,7 @@ discoverMaxReads props benv senv = bufMap
 
 -- | Returns an SMT2 object with all buffers referenced from the input props declared, and with the appropriate cex extraction metadata attached
 declareBufs :: [Prop] -> BufEnv -> StoreEnv -> SMT2
-declareBufs props bufEnv storeEnv = SMT2 ("; buffers" : fmap declareBuf allBufs <> ("; buffer lengths" : fmap declareLength allBufs)) cexvars
+declareBufs props bufEnv storeEnv = SMT2 ("; buffers" : fmap declareBuf allBufs <> ("; buffer lengths" : fmap declareLength allBufs)) mempty cexvars
   where
     cexvars = (mempty :: CexVars){ buffers = discoverMaxReads props bufEnv storeEnv }
     allBufs = fmap fromLazyText $ Map.keys cexvars.buffers
@@ -343,40 +398,41 @@ declareBufs props bufEnv storeEnv = SMT2 ("; buffers" : fmap declareBuf allBufs 
 
 -- Given a list of variable names, create an SMT2 object with the variables declared
 declareVars :: [Builder] -> SMT2
-declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars
+declareVars names = SMT2 (["; variables"] <> fmap declare names) mempty cexvars
   where
     declare n = "(declare-const " <> n <> " (_ BitVec 256))"
     cexvars = (mempty :: CexVars){ calldata = fmap toLazyText names }
 
 -- Given a list of variable names, create an SMT2 object with the variables declared
 declareAddrs :: [Builder] -> SMT2
-declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) cexvars
+declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) mempty cexvars
   where
     declare n = "(declare-const " <> n <> " Addr)"
     cexvars = (mempty :: CexVars){ addrs = fmap toLazyText names }
 
 declareFrameContext :: [(Builder, [Prop])] -> SMT2
-declareFrameContext names = SMT2 (["; frame context"] <> concatMap declare names) cexvars
+declareFrameContext names = SMT2 (["; frame context"] <> concatMap declare names) mempty cexvars
   where
     declare (n,props) = [ "(declare-const " <> n <> " (_ BitVec 256))" ]
                         <> fmap (\p -> "(assert " <> propToSMT p <> ")") props
     cexvars = (mempty :: CexVars){ txContext = fmap (toLazyText . fst) names }
 
 declareAbstractStores :: [Builder] -> SMT2
-declareAbstractStores names = SMT2 (["; abstract base stores"] <> fmap declare names) mempty
+declareAbstractStores names = SMT2 (["; abstract base stores"] <> fmap declare names) mempty mempty
   where
     declare n = "(declare-const " <> n <> " Storage)"
 
 declareBlockContext :: [(Builder, [Prop])] -> SMT2
-declareBlockContext names = SMT2 (["; block context"] <> concatMap declare names) cexvars
+declareBlockContext names = SMT2 (["; block context"] <> concatMap declare names) mempty cexvars
   where
     declare (n, props) = [ "(declare-const " <> n <> " (_ BitVec 256))" ]
                          <> fmap (\p -> "(assert " <> propToSMT p <> ")") props
     cexvars = (mempty :: CexVars){ blockContext = fmap (toLazyText . fst) names }
 
-
 prelude :: SMT2
-prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
+prelude =  SMT2 src mempty mempty
+  where
+  src = fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   ; logic
   ; TODO: this creates an error when used with z3?
   ;(set-logic QF_AUFBV)
@@ -394,7 +450,6 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   ; hash functions
   (declare-fun keccak (Buf) Word)
   (declare-fun sha256 (Buf) Word)
-
   (define-fun max ((a (_ BitVec 256)) (b (_ BitVec 256))) (_ BitVec 256) (ite (bvult a b) b a))
 
   ; word indexing
