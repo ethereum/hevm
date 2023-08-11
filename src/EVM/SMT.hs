@@ -176,6 +176,7 @@ abstractAwayProps ps = runState (mapM abstrAway ps) (AbstState mempty 0)
         e@(Mul{})    -> abstrExpr e
         e@(Div{})    -> abstrExpr e
         e@(SDiv {})  -> abstrExpr e
+        e@(ReadWord {})-> abstrExpr e
         e -> pure e
         where
             abstrExpr e = do
