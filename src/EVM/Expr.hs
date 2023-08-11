@@ -685,14 +685,10 @@ simplify e = if (mapExpr go e == e)
       | a == b = Lit 1
       | otherwise = Lit 0
     go (Eq (Lit 0) (Sub a b)) = Eq a b
-    go (Eq a b@(Lit _)) = Eq b a
-    go (Eq a b) =
-      case (aSimp, bSimp) of
-        (Lit x,Lit y) -> if x == y then Lit 1 else Lit 0
-        _ -> Eq aSimp bSimp
-      where
-          aSimp = simplify a
-          bSimp = simplify b
+    -- go (Eq a b@(Lit _)) = Eq b a
+    go o@(Eq a b)
+      | a == b = Lit 1
+      | otherwise = o
 
     -- redundant ITE
     go (ITE (Lit x) a b)
