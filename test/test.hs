@@ -2016,7 +2016,7 @@ tests = testGroup "hevm"
           assertEqual "w==z for hash collision" w z
           putStrLn "expected counterexample found"
         ,
-        testCase "calldata beyond calldatasize is 0 (symbolic calldata)" $ do
+        testCase "calldata-beyond calldatasize is 0 (symbolic calldata)" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -2033,7 +2033,7 @@ tests = testGroup "hevm"
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        testCase "calldata beyond calldatasize is 0 (concrete dalldata prefix)" $ do
+        testCase "calldata-beyond calldatasize is 0 (concrete dalldata prefix)" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -2050,7 +2050,7 @@ tests = testGroup "hevm"
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        testCase "calldata symbolic access" $ do
+        testCase "calldata-symbolic-access" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -2067,7 +2067,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] debugVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "multiple-contracts" $ do
