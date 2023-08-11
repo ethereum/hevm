@@ -786,8 +786,21 @@ simplify e = if (mapExpr go e == e)
     go (EVM.Types.Not (EVM.Types.Not a)) = a
 
     -- Some trivial min / max eliminations
-    go (Max (Lit 0) a) = a
-    go (Min (Lit 0) _) = Lit 0
+    go (Max a b) = case (a, b) of
+                    (Lit 0, _) -> b
+                    _ -> EVM.Expr.max a b
+    go (Min a b) = case (a, b) of
+                     (Lit 0, _) -> Lit 0
+                     _ -> EVM.Expr.min a b
+
+    -- Some trivial mul eliminations
+    go (Mul a b) = case (a, b) of
+                     (Lit 0, _) -> Lit 0
+                     (Lit 1, _) -> b
+                     _ -> mul a b
+    -- Some trivial div eliminations
+    go (Div (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
+    go (Div _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
 
     -- If a >= b then the value of the `Max` expression can never be < b
     go o@(LT (Max (Lit a) _) (Lit b))
