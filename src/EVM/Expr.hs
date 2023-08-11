@@ -674,21 +674,19 @@ simplify e = if (mapExpr go e == e)
     go (EVM.Types.LT _ (Lit 0)) = Lit 0
 
     -- normalize all comparisons in terms of LT
-    go (EVM.Types.GT a b) = EVM.Types.LT b a
-    go (EVM.Types.GEq a b) = EVM.Types.LEq b a
-    go (EVM.Types.LEq a b) = EVM.Types.IsZero (EVM.Types.GT a b)
-
+    go (EVM.Types.GT a b) = lt b a
+    go (EVM.Types.GEq a b) = leq b a
+    go (EVM.Types.LEq a b) = EVM.Types.IsZero (gt a b)
     go (IsZero a) = iszero a
 
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
       | a == b = Lit 1
       | otherwise = Lit 0
-    go (Eq (Lit 0) (Sub a b)) = Eq a b
-    -- go (Eq a b@(Lit _)) = Eq b a
-    go o@(Eq a b)
+    go (Eq (Lit 0) (Sub a b)) = eq a b
+    go (Eq a b)
       | a == b = Lit 1
-      | otherwise = o
+      | otherwise = eq a b
 
     -- redundant ITE
     go (ITE (Lit x) a b)
@@ -724,28 +722,28 @@ simplify e = if (mapExpr go e == e)
     go (Add (Sub orig (Lit x)) (Lit y)) = Add orig (Lit (y-x))
 
     -- redundant add / sub
-    go o@(Sub (Add a b) c)
+    go (Sub (Add a b) c)
       | a == c = b
       | b == c = a
-      | otherwise = o
+      | otherwise = sub (add a b) c
 
     -- add / sub identities
-    go o@(Add a b)
+    go (Add a b)
       | b == (Lit 0) = a
       | a == (Lit 0) = b
-      | otherwise = o
-    go o@(Sub a b)
+      | otherwise = add a b
+    go (Sub a b)
       | a == b = Lit 0
       | b == (Lit 0) = a
-      | otherwise = o
+      | otherwise = sub a b
 
     -- SHL / SHR by 0
-    go o@(SHL a v)
+    go (SHL a v)
       | a == (Lit 0) = v
-      | otherwise = o
-    go o@(SHR a v)
+      | otherwise = shl a v
+    go (SHR a v)
       | a == (Lit 0) = v
-      | otherwise = o
+      | otherwise = shr a v
 
     -- doubled And
     go o@(And a (And b c))
