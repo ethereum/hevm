@@ -99,6 +99,9 @@ rpcVeriOpts info = defaultVeriOpts { rpcInfo = Just info }
 debugVeriOpts :: VeriOpts
 debugVeriOpts = defaultVeriOpts { debug = True }
 
+debugVeriOptsAbst :: VeriOpts
+debugVeriOptsAbst = debugVeriOpts { abstRefine = True }
+
 extractCex :: VerifyResult -> Maybe (Expr End, SMTCex)
 extractCex (Cex c) = Just c
 extractCex _ = Nothing
