@@ -293,7 +293,6 @@ sendCommand inst cmd = do
 -- | Sends a string to the solver and appends a newline, returns the first available line from the output buffer
 sendLine :: SolverInstance -> Text -> IO Text
 sendLine (SolverInstance _ stdin stdout _ _) cmd = do
-  putStrLn $ show cmd
   T.hPutStr stdin (T.append cmd "\n")
   hFlush stdin
   T.hGetLine stdout
@@ -301,7 +300,6 @@ sendLine (SolverInstance _ stdin stdout _ _) cmd = do
 -- | Sends a string to the solver and appends a newline, doesn't return stdout
 sendLine' :: SolverInstance -> Text -> IO ()
 sendLine' (SolverInstance _ stdin _ _ _) cmd = do
-  putStrLn $ show cmd
   T.hPutStr stdin (T.append cmd "\n")
   hFlush stdin
 
