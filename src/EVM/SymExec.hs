@@ -89,7 +89,7 @@ defaultVeriOpts = VeriOpts
   , maxIter = Nothing
   , askSmtIters = 1
   , loopHeuristic = StackBased
-  , abstRefine = False
+  , abstRefine = True
   , rpcInfo = Nothing
   }
 
@@ -99,8 +99,8 @@ rpcVeriOpts info = defaultVeriOpts { rpcInfo = Just info }
 debugVeriOpts :: VeriOpts
 debugVeriOpts = defaultVeriOpts { debug = True }
 
-debugVeriOptsAbst :: VeriOpts
-debugVeriOptsAbst = debugVeriOpts { abstRefine = True }
+debugAbstVeriOpts :: VeriOpts
+debugAbstVeriOpts = defaultVeriOpts { abstRefine = True }
 
 extractCex :: VerifyResult -> Maybe (Expr End, SMTCex)
 extractCex (Cex c) = Just c

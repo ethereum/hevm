@@ -246,13 +246,13 @@ assertProps ps abstRefine =
 
     keccakAssumes
       = smt2Line "; keccak assumptions"
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psElimAbst bufVals storeVals)) mempty mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psElim bufVals storeVals)) mempty mempty
       <> smt2Line "; keccak computations"
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psElimAbst bufVals storeVals)) mempty mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psElim bufVals storeVals)) mempty mempty
 
     readAssumes
       = smt2Line "; read assumptions"
-        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads psElimAbst bufs stores)) mempty mempty
+        <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads psElim bufs stores)) mempty mempty
 
 referencedAbstractStores :: TraversableTerm a => a -> Set Builder
 referencedAbstractStores term = foldTerm go mempty term
