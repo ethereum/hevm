@@ -192,7 +192,7 @@ abstractVM
   -> ST s (VM s)
 abstractVM cd contractCode maybepre create = do
   let value = TxValue
-  let code = if create then InitCode contractCode mempty else RuntimeCode (ConcreteRuntimeCode contractCode)
+  let code = if create then InitCode contractCode (fst cd) else RuntimeCode (ConcreteRuntimeCode contractCode)
   vm <- loadSymVM code value (if create then mempty else cd) create
   let precond = case maybepre of
                 Nothing -> []
