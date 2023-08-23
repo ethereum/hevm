@@ -245,6 +245,7 @@ spawnSolver solver timeout = do
   case solver of
     Bitwuzla -> do
       _ <- sendLine solverInstance "(set-option :print-success true)"
+      -- _ <- sendLine solverInstance $ "(set-option :timeout " <> mkTimeout timeout <> ")"
       pure solverInstance
     Z3 -> do
       _ <- sendLine' solverInstance $ "(set-option :timeout " <> mkTimeout timeout <> ")"
@@ -289,6 +290,7 @@ sendCommand inst cmd = do
 -- | Sends a string to the solver and appends a newline, returns the first available line from the output buffer
 sendLine :: SolverInstance -> Text -> IO Text
 sendLine (SolverInstance _ stdin stdout _) cmd = do
+  putStrLn $ show cmd
   T.hPutStr stdin (T.append cmd "\n")
   hFlush stdin
   T.hGetLine stdout
@@ -296,6 +298,7 @@ sendLine (SolverInstance _ stdin stdout _) cmd = do
 -- | Sends a string to the solver and appends a newline, doesn't return stdout
 sendLine' :: SolverInstance -> Text -> IO ()
 sendLine' (SolverInstance _ stdin _ _) cmd = do
+  putStrLn $ show cmd
   T.hPutStr stdin (T.append cmd "\n")
   hFlush stdin
 

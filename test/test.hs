@@ -64,6 +64,9 @@ import EVM.Test.Utils
 import EVM.Traversals
 import EVM.Types
 
+defaultSolver :: Solver
+defaultSolver = Bitwuzla
+
 main :: IO ()
 main = defaultMain tests
 
@@ -477,7 +480,7 @@ tests = testGroup "hevm"
              }
             }
            |]
-       (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+       (_, [Cex (_, ctr)]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
        assertEqual "Must be 0" 0 $ getVar ctr "arg1"
        putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getVar ctr "arg1")
      ,
@@ -490,7 +493,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x11] c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Cex (_, ctr)]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s [0x11] c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         let x = getVar ctr "arg1"
         let y = getVar ctr "arg2"
 
@@ -507,7 +510,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x12] c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Cex (_, ctr)]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s [0x12] c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         assertEqual "Division by 0 needs b=0" (getVar ctr "arg2") 0
         putStrLn "expected counterexample found"
      ,
@@ -520,7 +523,7 @@ tests = testGroup "hevm"
                }
              }
              |]
-         (_, [Cex _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x1] c Nothing [] defaultVeriOpts
+         (_, [Cex _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s [0x1] c Nothing [] defaultVeriOpts
          putStrLn "expected counterexample found"
       ,
      testCase "enum-conversion-fail" $ do
@@ -533,7 +536,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x21] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Cex (_, ctr)]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s [0x21] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         assertBool "Enum is only defined for 0 and 1" $ (getVar ctr "arg1") > 1
         putStrLn "expected counterexample found"
      ,
@@ -554,7 +557,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        a <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x31] c (Just (Sig "fun(uint8)" [AbiUIntType 8])) [] defaultVeriOpts
+        a <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s [0x31] c (Just (Sig "fun(uint8)" [AbiUIntType 8])) [] defaultVeriOpts
         print $ length a
         print $ show a
         putStrLn "expected counterexample found"
@@ -571,7 +574,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, _)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x32] c (Just (Sig "fun(uint8)" [AbiUIntType 8])) [] defaultVeriOpts
+        (_, [Cex (_, _)]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s [0x32] c (Just (Sig "fun(uint8)" [AbiUIntType 8])) [] defaultVeriOpts
         -- assertBool "Access must be beyond element 2" $ (getVar ctr "arg1") > 1
         putStrLn "expected counterexample found"
       ,
@@ -585,7 +588,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex _]) <- withSolvers Bitwuzla 1 Nothing $ \s ->
+        (_, [Cex _]) <- withSolvers defaultSolver 1 Nothing $ \s ->
           checkAssert s [0x41] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "expected counterexample found"
       ,
@@ -655,7 +658,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, cex)]) <- withSolvers Bitwuzla 1 Nothing $
+        (_, [Cex (_, cex)]) <- withSolvers defaultSolver 1 Nothing $
           \s -> checkAssert s [0x51] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         let a = fromJust $ Map.lookup (Var "arg1") cex.vars
         assertEqual "unexpected cex value" a 44
@@ -726,7 +729,7 @@ tests = testGroup "hevm"
             |]
         let sig = Just $ Sig "fun()" []
             opts = defaultVeriOpts{ maxIter = Just 3 }
-        (e, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $
+        (e, [Qed _]) <- withSolvers defaultSolver 1 Nothing $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBool "The expression is not partial" $ isPartial e
     , testCase "concrete-loops-not-reached" $ do
@@ -743,7 +746,7 @@ tests = testGroup "hevm"
 
         let sig = Just $ Sig "fun()" []
             opts = defaultVeriOpts{ maxIter = Just 6 }
-        (e, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $
+        (e, [Qed _]) <- withSolvers defaultSolver 1 Nothing $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBool "The expression is partial" $ not $ isPartial e
     , testCase "symbolic-loops-reached" $ do
@@ -757,7 +760,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        (e, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $
+        (e, [Qed _]) <- withSolvers defaultSolver 1 Nothing $
           \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] (defaultVeriOpts{ maxIter = Just 5 })
         assertBool "The expression is not partial" $ Expr.containsNode isPartial e
     , testCase "inconsistent-paths" $ do
@@ -777,7 +780,7 @@ tests = testGroup "hevm"
             -- already in an inconsistent path (i == 5, j <= 3, i < j), so we
             -- will continue looping here until we hit max iterations
             opts = defaultVeriOpts{ maxIter = Just 10, askSmtIters = 5 }
-        (e, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $
+        (e, [Qed _]) <- withSolvers defaultSolver 1 Nothing $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBool "The expression is not partial" $ Expr.containsNode isPartial e
     , testCase "symbolic-loops-not-reached" $ do
@@ -796,7 +799,7 @@ tests = testGroup "hevm"
             -- askSmtIters is low enough here to avoid the inconsistent path
             -- conditions, so we never hit maxIters
             opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 1 }
-        (e, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $
+        (e, [Qed _]) <- withSolvers defaultSolver 1 Nothing $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBool "The expression is partial" $ not (Expr.containsNode isPartial e)
     ]
@@ -816,7 +819,7 @@ tests = testGroup "hevm"
         Just a <- solcRuntime "A" src
         Just c <- solcRuntime "C" src
         let sig = Sig "fun(uint256)" [AbiUIntType 256]
-        (expr, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s ->
+        (expr, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s ->
           verifyContract s c (Just sig) [] defaultVeriOpts Nothing Nothing
         let isSuc (Success {}) = True
             isSuc _ = False
@@ -995,7 +998,7 @@ tests = testGroup "hevm"
               }
             }
           |]
-        (_, [Cex _]) <- withSolvers Bitwuzla 1 Nothing $ \s ->
+        (_, [Cex _]) <- withSolvers defaultSolver 1 Nothing $ \s ->
           verifyContract s c Nothing [] defaultVeriOpts Nothing (Just $ checkBadCheatCode "load(address,bytes32)")
         pure ()
     , testCase "vm.store fails for a potentially aliased address" $ do
@@ -1011,7 +1014,7 @@ tests = testGroup "hevm"
               }
             }
           |]
-        (_, [Cex _]) <- withSolvers Bitwuzla 1 Nothing $ \s ->
+        (_, [Cex _]) <- withSolvers defaultSolver 1 Nothing $ \s ->
           verifyContract s c Nothing [] defaultVeriOpts Nothing (Just $ checkBadCheatCode "store(address,bytes32,bytes32)")
         pure ()
     -- TODO: make this work properly
@@ -1101,7 +1104,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256)" [AbiIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256)" [AbiIntType 256])) [] defaultVeriOpts
         putStrLn "Require works as expected"
      ,
      testCase "ITE-with-bitwise-AND" $ do
@@ -1121,7 +1124,7 @@ tests = testGroup "hevm"
          }
          |]
        -- should find a counterexample
-       (_, [Cex _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+       (_, [Cex _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
        putStrLn "expected counterexample found"
      ,
      testCase "ITE-with-bitwise-OR" $ do
@@ -1139,7 +1142,7 @@ tests = testGroup "hevm"
            }
          }
          |]
-       (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+       (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
        putStrLn "this should always be true, due to bitwise OR with positive value"
     ,
     -- CopySlice check
@@ -1166,7 +1169,7 @@ tests = testGroup "hevm"
         }
         |]
       let sig = Just (Sig "checkval(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
-      (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s ->
+      (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s ->
         checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
       putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
@@ -1185,7 +1188,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256,int256)" [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256,int256)" [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
         putStrLn "SAR works as expected"
      ,
      testCase "opcode-sar-pos" $ do
@@ -1202,7 +1205,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256,int256)" [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256,int256)" [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
         putStrLn "SAR works as expected"
      ,
      testCase "opcode-sar-fixedval-pos" $ do
@@ -1219,7 +1222,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256,int256)" [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256,int256)" [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
         putStrLn "SAR works as expected"
      ,
      testCase "opcode-sar-fixedval-neg" $ do
@@ -1236,7 +1239,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256,int256)" [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256,int256)" [AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
         putStrLn "SAR works as expected"
      ,
      testCase "opcode-div-zero-1" $ do
@@ -1253,7 +1256,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        (_, [Qed _])  <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
       ,
      testCase "opcode-sdiv-zero-1" $ do
@@ -1270,7 +1273,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        (_, [Qed _])  <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
       ,
      testCase "opcode-sdiv-zero-2" $ do
@@ -1287,7 +1290,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        (_, [Qed _])  <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
       ,
      testCase "signed-overflow-checks" $ do
@@ -1300,7 +1303,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        (_, [Cex _])  <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint160)" [AbiUIntType 160])) [] defaultVeriOpts
+        (_, [Cex _])  <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint160)" [AbiUIntType 160])) [] defaultVeriOpts
         putStrLn "expected cex discovered"
       ,
      testCase "opcode-signextend-neg" $ do
@@ -1322,7 +1325,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        (_, [Qed _])  <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "signextend works as expected"
       ,
      testCase "opcode-signextend-pos-nochop" $ do
@@ -1340,7 +1343,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint8)" [AbiUIntType 256, AbiUIntType 8])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint8)" [AbiUIntType 256, AbiUIntType 8])) [] defaultVeriOpts
         putStrLn "signextend works as expected"
       ,
       testCase "opcode-signextend-pos-chopped" $ do
@@ -1358,7 +1361,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint8)" [AbiUIntType 256, AbiUIntType 8])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint8)" [AbiUIntType 256, AbiUIntType 8])) [] defaultVeriOpts
         putStrLn "signextend works as expected"
       ,
       -- when b is too large, value is unchanged
@@ -1376,7 +1379,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint8)" [AbiUIntType 256, AbiUIntType 8])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint8)" [AbiUIntType 256, AbiUIntType 8])) [] defaultVeriOpts
         putStrLn "signextend works as expected"
      ,
      testCase "opcode-shl" $ do
@@ -1394,7 +1397,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "SAR works as expected"
      ,
      testCase "opcode-xor-cancel" $ do
@@ -1411,7 +1414,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "XOR works as expected"
       ,
       testCase "opcode-xor-reimplement" $ do
@@ -1427,7 +1430,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "XOR works as expected"
       ,
       testCase "opcode-div-res-zero-on-div-by-zero" $ do
@@ -1444,7 +1447,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint16)" [AbiUIntType 16])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint16)" [AbiUIntType 16])) [] defaultVeriOpts
         putStrLn "DIV by zero is zero"
       ,
       -- Somewhat tautological since we are asserting the precondition
@@ -1472,7 +1475,7 @@ tests = testGroup "hevm"
                    Success _ _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
                    _ -> PBool True
             sig = Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
-        (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s ->
+        (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s ->
           verifyContract s safeAdd sig [] defaultVeriOpts (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
@@ -1499,7 +1502,7 @@ tests = testGroup "hevm"
               in case leaf of
                    Success _ _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
                    _ -> PBool True
-        (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s ->
+        (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s ->
           verifyContract s safeAdd (Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
       ,
@@ -1530,7 +1533,7 @@ tests = testGroup "hevm"
                   in Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' (Lit 0) poststore)
                 _ -> PBool True
             sig = Just (Sig "f(uint256)" [AbiUIntType 256])
-        (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s ->
+        (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s ->
           verifyContract s c sig [] defaultVeriOpts (Just pre) (Just post)
         putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
@@ -1556,7 +1559,7 @@ tests = testGroup "hevm"
                     }
                     |]
             Just c <- yulRuntime "Neg" src
-            (res, [Qed _]) <- withSolvers Bitwuzla 4 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "hello(address)" [AbiAddressType])) [] defaultVeriOpts
+            (res, [Qed _]) <- withSolvers defaultSolver 4 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "hello(address)" [AbiAddressType])) [] defaultVeriOpts
             putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "catch-storage-collisions-noproblem" $ do
@@ -1592,7 +1595,7 @@ tests = testGroup "hevm"
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
               sig = Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
-          (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s ->
+          (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s ->
             verifyContract s c sig [] defaultVeriOpts (Just pre) (Just post)
           putStrLn "Correct, this can never fail"
         ,
@@ -1629,7 +1632,7 @@ tests = testGroup "hevm"
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
               sig = Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
-          (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s ->
+          (_, [Cex (_, ctr)]) <- withSolvers defaultSolver 1 Nothing $ \s ->
             verifyContract s c sig [] defaultVeriOpts (Just pre) (Just post)
           let x = getVar ctr "arg1"
           let y = getVar ctr "arg2"
@@ -1647,7 +1650,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (_, [Cex (Failure _ _ (Revert msg), _)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo()" [])) [] defaultVeriOpts
+          (_, [Cex (Failure _ _ (Revert msg), _)]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo()" [])) [] defaultVeriOpts
           assertEqual "incorrect revert msg" msg (ConcreteBuf $ panicMsg 0x01)
         ,
         testCase "simple-assert-2" $ do
@@ -1659,7 +1662,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (_, [(Cex (_, ctr))]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (_, [(Cex (_, ctr))]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           assertEqual "Must be 10" 10 $ getVar ctr "arg1"
           putStrLn "Got 10 Cex, as expected"
         ,
@@ -1673,7 +1676,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (_, [Cex (_, a), Cex (_, b)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Cex (_, a), Cex (_, b)]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           let ints = map (flip getVar "arg1") [a,b]
           assertBool "0 must be one of the Cex-es" $ isJust $ List.elemIndex 0 ints
           putStrLn "expected 2 counterexamples found, one Cex is the 0 value"
@@ -1688,7 +1691,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (_, [Cex (_, a), Cex (_, b)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Cex (_, a), Cex (_, b)]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           let x = getVar a "arg1"
           let y = getVar b "arg1"
           assertBool "At least one has to be 0, to go through the first assert" (x == 0 || y == 0)
@@ -1704,7 +1707,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (_, [Cex _, Cex _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Cex _, Cex _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "expected 2 counterexamples found"
         ,
         testCase "assert-2nd-arg" $ do
@@ -1716,7 +1719,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Cex (_, ctr)]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           assertEqual "Must be 666" 666 $ getVar ctr "arg2"
           putStrLn "Found arg2 Ctx to be 666"
         ,
@@ -1733,7 +1736,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         -- We zero out everything but the LSB byte. However, byte(31,x) takes the LSB byte
@@ -1750,7 +1753,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Cex (_, ctr)]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           assertBool "last byte must be non-zero" $ ((Data.Bits..&.) (getVar ctr "arg1") 0xff) > 0
           putStrLn "Expected counterexample found"
         ,
@@ -1768,7 +1771,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Cex (_, ctr)]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           assertBool "second to last byte must be non-zero" $ ((Data.Bits..&.) (getVar ctr "arg1") 0xff00) > 0
           putStrLn "Expected counterexample found"
         ,
@@ -1787,7 +1790,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         -- Bitwise OR operation test
@@ -1803,7 +1806,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "When OR-ing with full 1's we should get back full 1's"
         ,
         -- Bitwise OR operation test
@@ -1820,7 +1823,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "When OR-ing with a byte of 1's, we should get 1's back there"
         ,
         testCase "Deposit contract loop (z3)" $ do
@@ -1842,7 +1845,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "deposit(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "deposit(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "Deposit-contract-loop-error-version" $ do
@@ -1864,7 +1867,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s allPanicCodes c (Just (Sig "deposit(uint8)" [AbiUIntType 8])) [] defaultVeriOpts
+          (_, [Cex (_, ctr)]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s allPanicCodes c (Just (Sig "deposit(uint8)" [AbiUIntType 8])) [] defaultVeriOpts
           assertEqual "Must be 255" 255 $ getVar ctr "arg1"
           putStrLn  $ "expected counterexample found, and it's correct: " <> (show $ getVar ctr "arg1")
         ,
@@ -1877,7 +1880,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "check-asm-byte-in-bounds" $ do
@@ -1896,7 +1899,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn "in bounds byte reads return the expected value"
         ,
         testCase "check-div-mod-sdiv-smod-by-zero-constant-prop" $ do
@@ -1926,7 +1929,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "div/mod/sdiv/smod by zero works as expected during constant propagation"
         ,
         testCase "check-asm-byte-oob" $ do
@@ -1941,7 +1944,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn "oob byte reads always return 0"
         ,
         testCase "injectivity of keccak (diff sizes)" $ do
@@ -1968,7 +1971,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "injectivity of keccak contrapositive (32 bytes)" $ do
@@ -1981,7 +1984,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "injectivity of keccak (64 bytes)" $ do
@@ -1993,7 +1996,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256,uint256,uint256,uint256)" (replicate 4 (AbiUIntType 256)))) [] defaultVeriOpts
+          (_, [Cex (_, ctr)]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256,uint256,uint256,uint256)" (replicate 4 (AbiUIntType 256)))) [] defaultVeriOpts
           let x = getVar ctr "arg1"
           let y = getVar ctr "arg2"
           let w = getVar ctr "arg3"
@@ -2016,7 +2019,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "calldata beyond calldatasize is 0 (concrete dalldata prefix)" $ do
@@ -2033,7 +2036,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "calldata symbolic access" $ do
@@ -2053,7 +2056,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "multiple-contracts" $ do
@@ -2076,7 +2079,7 @@ tests = testGroup "hevm"
               cAddr = SymAddr "entrypoint"
           Just c <- solcRuntime "C" code
           Just a <- solcRuntime "A" code
-          (_, [Cex (_, cex)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> do
+          (_, [Cex (_, cex)]) <- withSolvers defaultSolver 1 Nothing $ \s -> do
             vm <- stToIO $ abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing False
                     <&> set (#state % #callvalue) (Lit 0)
                     <&> over (#env % #contracts)
@@ -2110,7 +2113,7 @@ tests = testGroup "hevm"
                 uint public x;
               }
             |]
-          (_, [Cex _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "call_A()" [])) [] defaultVeriOpts
+          (_, [Cex _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "call_A()" [])) [] defaultVeriOpts
           putStrLn "expected counterexample found"
         ,
         testCase "keccak concrete and sym agree" $ do
@@ -2124,7 +2127,7 @@ tests = testGroup "hevm"
                 }
               }
             |]
-          (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "kecc(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "kecc(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "keccak concrete and sym injectivity" $ do
@@ -2136,13 +2139,13 @@ tests = testGroup "hevm"
                 }
               }
             |]
-          (res, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         ignoreTest $ testCase "safemath distributivity (yul)" $ do
           let yulsafeDistributivity = hex "6355a79a6260003560e01c14156016576015601f565b5b60006000fd60a1565b603d602d604435600435607c565b6039602435600435607c565b605d565b6052604b604435602435605d565b600435607c565b141515605a57fe5b5b565b6000828201821115151560705760006000fd5b82820190505b92915050565b6000818384048302146000841417151560955760006000fd5b82820290505b92915050565b"
           vm <- stToIO $ abstractVM (mkCalldata (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []) yulsafeDistributivity Nothing False
-          (_, [Qed _]) <-  withSolvers Bitwuzla 1 Nothing $ \s -> verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
+          (_, [Qed _]) <-  withSolvers defaultSolver 1 Nothing $ \s -> verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
         ,
         testCase "safemath distributivity (sol)" $ do
@@ -2167,7 +2170,7 @@ tests = testGroup "hevm"
               }
             |]
 
-          (_, [Qed _]) <- withSolvers Bitwuzla 1 (Just 99999999) $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers defaultSolver 1 (Just 99999999) $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "Proven"
         ,
         testCase "storage-cex-1" $ do
@@ -2181,7 +2184,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [(Cex (_, cex))]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (_, [(Cex (_, cex))]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           let addr = SymAddr "entrypoint"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
@@ -2204,7 +2207,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (_, [(Cex (_, cex))]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (_, [(Cex (_, cex))]) <- withSolvers defaultSolver 1 Nothing $ \s -> checkAssert s [0x01] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           let addr = SymAddr "entrypoint"
               a = getVar cex "arg1"
               testCex = Map.size cex.store == 1 &&
@@ -2229,7 +2232,7 @@ tests = testGroup "hevm"
             }
             |]
           let sig = Just (Sig "fun(uint256)" [AbiUIntType 256])
-          (_, [Cex (_, cex)]) <- withSolvers Bitwuzla 1 Nothing $
+          (_, [Cex (_, cex)]) <- withSolvers defaultSolver 1 Nothing $
             \s -> verifyContract s c sig [] defaultVeriOpts Nothing (Just $ checkAssertions [0x01])
           let addr = SymAddr "entrypoint"
               testCex = Map.size cex.store == 1 &&
@@ -2265,7 +2268,7 @@ tests = testGroup "hevm"
             default { invalid() }
           }
           |]
-        withSolvers Bitwuzla 3 Nothing $ \s -> do
+        withSolvers defaultSolver 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertBool "Must have a difference" (any isCex a)
       ,
@@ -2290,7 +2293,7 @@ tests = testGroup "hevm"
               }
             }
           |]
-        withSolvers Bitwuzla 3 Nothing $ \s -> do
+        withSolvers defaultSolver 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqual "Must have no difference" [Qed ()] a
       ,
@@ -2321,7 +2324,7 @@ tests = testGroup "hevm"
               }
             }
           |]
-        withSolvers Bitwuzla 3 Nothing $ \s -> do
+        withSolvers defaultSolver 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertBool "Must differ" (all isCex a)
       ,
@@ -2382,7 +2385,7 @@ tests = testGroup "hevm"
               }
             }
           |]
-        withSolvers Bitwuzla 3 Nothing $ \s -> do
+        withSolvers defaultSolver 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertBool "Must differ" (all isCex a)
       ,
@@ -2405,7 +2408,7 @@ tests = testGroup "hevm"
               }
             }
           |]
-        withSolvers Bitwuzla 3 Nothing $ \s -> do
+        withSolvers defaultSolver 3 Nothing $ \s -> do
           let cd = mkCalldata (Just (Sig "a(address,address)" [AbiAddressType, AbiAddressType])) []
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd
           assertEqual "Must be different" (any isCex a) True
@@ -2431,7 +2434,7 @@ tests = testGroup "hevm"
                 }
               }
           |]
-        withSolvers Bitwuzla 3 Nothing $ \s -> do
+        withSolvers defaultSolver 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqual "Must be different" (any isCex a) True
       , testCase "eq-all-yul-optimization-tests" $ do
@@ -2722,7 +2725,7 @@ checkEquiv :: (Typeable a) => Expr a -> Expr a -> IO Bool
 checkEquiv = checkEquivBase (./=)
 
 checkEquivBase :: Eq a => (a -> a -> Prop) -> a -> a -> IO Bool
-checkEquivBase mkprop l r = withSolvers Bitwuzla 1 (Just 1) $ \solvers -> do
+checkEquivBase mkprop l r = withSolvers defaultSolver 1 (Just 1) $ \solvers -> do
   if l == r
      then do
        putStrLn "skip"
@@ -3329,7 +3332,7 @@ explore c s = do
 
 checkPost :: Maybe (Postcondition RealWorld) -> ByteString -> Maybe Sig -> IO (Either [SMTCex] (Expr End))
 checkPost post c sig = do
-  (e, res) <- withSolvers Bitwuzla 1 Nothing $ \s ->
+  (e, res) <- withSolvers defaultSolver 1 Nothing $ \s ->
     verifyContract s c sig [] debugVeriOpts Nothing post
   let cexs = snd <$> mapMaybe getCex res
   case cexs of
