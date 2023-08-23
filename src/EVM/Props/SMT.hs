@@ -1,4 +1,5 @@
 {-# Language OverloadedStrings #-}
+{-# Language ApplicativeDo #-}
 {-# Language TemplateHaskell #-}
 {-# Language DeriveAnyClass #-}
 {-# Language DeriveGeneric #-}
@@ -6,12 +7,15 @@
 
 module EVM.Props.SMT where
 
+import Control.Monad.Identity
+import Control.Monad.State
 import Data.ByteString (ByteString)
 import Data.Char
 import Data.Hashable
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
-import Data.List (intersperse, foldl')
+import Data.List (intersperse, foldl', sortOn)
+import Data.Ord (Down(..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Builder.Linear
@@ -30,6 +34,7 @@ data SMT
 
 -- scripts are lists of smt statements
 newtype Script = Script [SMT]
+  deriving (Eq, Show)
 
 
 -- Serialization -----------------------------------------------------------------------------------
@@ -48,19 +53,21 @@ instance Serializable SMT where
     $ xs
 
 instance Serializable Script where
-  serialize (Script cmds) = foldl' (<>) mempty
-                          . intersperse "\n"
-                          . fmap serialize
-                          $ cmds
+  serialize (Script cmds)
+    = foldl' (<>) mempty
+    . intersperse "\n"
+    . fmap serialize
+    $ cmds
 
 parens :: Builder -> Builder
 parens b = "(" <> b <> ")"
 
-pprint :: Script -> Text
+pprint :: Serializable s => s -> Text
 pprint = runBuilder . serialize
 
 
 -- Parsing -----------------------------------------------------------------------------------------
+
 
 ws, open, close :: Parser () ()
 ws      = skipMany $(switch [| case _ of " " -> pure (); "\n" -> pure () |])
@@ -96,14 +103,66 @@ parseSMT :: ByteString -> Result () SMT
 parseSMT = runParser src
 
 
--- CSE ---------------------------------------------------------------------------------------------
+-- Transformations ---------------------------------------------------------------------------------
 
 
--- takes an smt statement and pulls common subexpressions out into let bound variables
-eliminate :: SMT -> SMT
-eliminate = undefined
+-- | Merge all asserts into a single conjunction
+mergeAsserts :: Script -> Script
+mergeAsserts (Script cmds) = Script $ go [] [] cmds
   where
-    -- produce a map with counts of each subexpression
-    count :: HashMap SMT Int -> SMT -> HashMap SMT Int
-    count acc e@(A _) = HM.alter (maybe (Just 0) (Just . (+ 1))) e acc
+    go :: [SMT] -> [SMT] -> [SMT] -> [SMT]
+    go rest asserts [] = (reverse rest) <> [L [A "assert", eliminate (L (A "and" : asserts))]]
+    go rest asserts (c : cs) = case c of
+      L [A "assert", e] -> go rest (e : asserts) cs
+      e -> go (e : rest) asserts cs
 
+-- | Pull every subexpression out into it's own let bound variable
+eliminate :: SMT -> SMT
+eliminate expr = res
+  where
+    (bound, (vars, _)) = runState (mapSMTM extract expr) (mempty, 0)
+    res = declare bound (invert vars)
+
+    -- assigns each subexpression a unique variable number.
+    -- Since mapSMTM is bottom up, this will be in topological order.
+    extract :: SMT -> State (HashMap SMT Int, Int) SMT
+    extract e@(A _) = pure e
+    extract e@(L _) = do
+      (vs, c) <- get
+      case HM.lookup e vs of
+        Just _ -> pure e
+        Nothing -> do
+          put (HM.insert e c vs, c + 1)
+          pure (mkname c)
+
+    -- declares each subexpression in order as a let bound variable
+    declare :: SMT -> [(Int, SMT)] -> SMT
+    declare s (sortOn (Down . fst) -> vs) = foldl' (\acc (i,e) -> L [A "let", L [L [mkname i, e]], acc]) s vs
+
+    mkname n = A $ "elim_" <> tshow n
+    invert = map (\(x,y) -> (y,x)) . HM.toList
+
+
+-- Utils -------------------------------------------------------------------------------------------
+
+
+tshow :: Show a => a -> Text
+tshow = T.pack . show
+
+mapSMTM :: Monad m => (SMT -> m SMT) -> SMT -> m SMT
+mapSMTM f e@(A _) = f e
+mapSMTM f (L ls) = do
+  ls' <- mapM f ls
+  f (L ls')
+
+mapSMT :: (SMT -> SMT) -> SMT -> SMT
+mapSMT f e = runIdentity (mapSMTM (Identity . f) e)
+
+test :: Script
+test = Script
+  [ L [A "set-logic", A "ALL"]
+  , L [A "declare-const", A "x", A "Int"]
+  , L [A "declare-const", A "y", A "Int"]
+  , L [A "assert", L [A ">=", A "x", A "y"]]
+  , L [A "assert", L [A ">=", A "x", A "110"]]
+  ]

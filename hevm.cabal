@@ -175,7 +175,8 @@ library
     sexpresso,
     hashable,
     text-builder-linear,
-    flatparse
+    flatparse,
+    recursion-schemes
   if !os(windows)
     build-depends:
       brick                           >= 1.4 && < 2.0,
