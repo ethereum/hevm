@@ -652,7 +652,6 @@ flattenProps (a:ax) = case a of
 flattenProps [] = []
 
 simplifyProp :: Expr a -> Expr a
--- simplifyProp p = simplifyPropExp (flattenProps) p
 simplifyProp p = simplifyPropExp (removeTrueProps . map (mapProp' go) . flattenProps) p
   where
     go :: Prop -> Prop
