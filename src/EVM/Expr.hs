@@ -20,6 +20,7 @@ import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
 import Witch (unsafeInto, into, tryFrom)
+import Data.Containers.ListUtils (nubOrd)
 
 import Optics.Core
 
@@ -627,6 +628,50 @@ getAddr (GVar _) = error "cannot determine addr of a GVar"
 
 
 -- ** Whole Expression Simplification ** -----------------------------------------------------------
+
+-- Calls prop simplification for the appropriate types of Expr
+simplifyPropExp :: ([Prop] -> [Prop]) -> Expr b -> Expr b
+simplifyPropExp f expr = case expr of
+  Failure a b c -> Failure (f a) b c
+  Partial a b c -> Partial (f a) b c
+  Success a b c d -> Success (f a) b c d
+  ITE (Lit 0) _ c -> simplifyPropExp f c
+  ITE (Lit _) b _ -> simplifyPropExp f b
+  ITE a b c-> ITE a (simplifyPropExp f b) (simplifyPropExp f c)
+  a -> a
+
+-- Removes PBool True from list
+removeTrueProps :: [Prop] -> [Prop]
+removeTrueProps p = filter (\x -> x /= PBool True) . nubOrd $ p
+
+-- Makes [PAnd a b] into [a,b]
+flattenProps :: [Prop] -> [Prop]
+flattenProps (a:ax) = case a of
+                       PAnd x1 x2 -> x1:x2:flattenProps ax
+                       x -> x:flattenProps ax
+flattenProps [] = []
+
+simplifyProp :: Expr a -> Expr a
+-- simplifyProp p = simplifyPropExp (flattenProps) p
+simplifyProp p = simplifyPropExp (removeTrueProps . map (mapProp' go) . flattenProps) p
+  where
+    go :: Prop -> Prop
+    -- rewrite everything as LEq or LT
+    go (PGEq a b) = go $ PLEq b a
+    go (PGT a b) = go $ PLT a b
+
+    -- trivial LT/LEq comparisions
+    go (PLT  (Var _) (Lit 0)) = PBool False
+    go (PLEq (Lit 0) (Var _)) = PBool True
+    go (PLT  (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) (Var _)) = PBool False
+    go (PLEq (Var _) (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)) = PBool True
+
+    -- negations
+    go (PNeg (PBool True)) = PBool False
+    go (PNeg (PBool False)) = PBool True
+
+    -- fallback
+    go a = a
 
 
 -- | Simple recursive match based AST simplification
