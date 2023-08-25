@@ -232,6 +232,12 @@ tests = testGroup "hevm"
     , testProperty "evalProp-equivalence-sym" $ \(p) -> ioProperty $ do
         let simplified = Expr.evalProp p
         checkEquivProp simplified p
+    , testProperty "simpProp-equivalence-sym" $ \(p :: Prop) -> ioProperty $ do
+        let simplified = Expr.simplifyProp p
+        checkEquivProp simplified p
+    , testProperty "simpProp-equivalence-sym" $ \(LitProp p) -> ioProperty $ do
+        let simplified = Expr.simplifyProp p
+        checkEquivProp simplified p
     ]
   , testGroup "MemoryTests"
     [ testCase "read-write-same-byte"  $ assertEqual ""
@@ -3012,6 +3018,9 @@ instance Arbitrary LitProp where
 instance Arbitrary Prop where
   arbitrary = sized (genProp False)
 
+genProps :: Bool -> Int -> Gen [Prop]
+genProps onlyLits sz2 = listOf $ genProp onlyLits sz2
+
 genProp :: Bool -> Int -> Gen (Prop)
 genProp _ 0 = PBool <$> arbitrary
 genProp onlyLits sz = oneof
@@ -3026,7 +3035,10 @@ genProp onlyLits sz = oneof
   , liftM2 PImpl subProp subProp
   ]
   where
-    subWord = if onlyLits then Lit <$> arbitrary else genWord 1 (sz `div` 2)
+    subWord = if onlyLits then frequency [(2, Lit <$> arbitrary)
+                                         ,(1, pure $ Lit 0)
+                                         ]
+                          else genWord 1 (sz `div` 2)
     subProp = genProp onlyLits (sz `div` 2)
 
 genByte :: Int -> Gen (Expr Byte)
@@ -3053,25 +3065,28 @@ genName = fmap (T.pack . ("esc_" <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
- [ fmap (Failure mempty mempty . UnrecognizedOpcode) arbitrary
- , pure $ Failure mempty mempty IllegalOverflow
- , pure $ Failure mempty mempty SelfDestruction
- ]
+  [ fmap (Failure mempty mempty . UnrecognizedOpcode) arbitrary
+  , pure $ Failure mempty mempty IllegalOverflow
+  , pure $ Failure mempty mempty SelfDestruction
+  ]
 genEnd sz = oneof
- [ fmap (Failure mempty mempty . Revert) subBuf
- , liftM4 Success (return mempty) (return mempty) subBuf arbitrary
- , liftM3 ITE subWord subEnd subEnd
- ]
- where
-   subBuf = defaultBuf (sz `div` 2)
-   subWord = defaultWord (sz `div` 2)
-   subEnd = genEnd (sz `div` 2)
+  [ liftM3 Failure subProp (pure mempty) (fmap Revert subBuf)
+  , liftM4 Success subProp (pure mempty) subBuf arbitrary
+  , liftM3 ITE subWord subEnd subEnd
+  -- TODO Partial
+  ]
+  where
+    subBuf = defaultBuf (sz `div` 2)
+    subWord = defaultWord (sz `div` 2)
+    subEnd = genEnd (sz `div` 2)
+    subProp = genProps False (sz `div` 2)
 
 genWord :: Int -> Int -> Gen (Expr EWord)
 genWord litFreq 0 = frequency
   [ (litFreq, do
       val <- frequency
        [ (10, fmap (`mod` 100) arbitrary)
+       , (1, pure 0)
        , (1, arbitrary)
        ]
       pure $ Lit val

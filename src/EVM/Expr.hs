@@ -13,7 +13,7 @@ import Data.ByteString qualified as BS
 import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
 import Data.List
 import Data.Map.Strict qualified as Map
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, isJust)
 import Data.Semigroup (Any, Any(..), getAny)
 import Data.Vector qualified as V
 import Data.Vector.Storable qualified as VS
@@ -630,34 +630,38 @@ getAddr (GVar _) = error "cannot determine addr of a GVar"
 -- ** Whole Expression Simplification ** -----------------------------------------------------------
 
 -- Calls prop simplification for the appropriate types of Expr
-simplifyPropExp :: ([Prop] -> [Prop]) -> Expr b -> Expr b
-simplifyPropExp f expr = case expr of
+applyToProps :: ([Prop] -> [Prop]) -> Expr b -> Expr b
+applyToProps f expr = case expr of
   Failure a b c -> Failure (f a) b c
   Partial a b c -> Partial (f a) b c
   Success a b c d -> Success (f a) b c d
-  ITE (Lit 0) _ c -> simplifyPropExp f c
-  ITE (Lit _) b _ -> simplifyPropExp f b
-  ITE a b c-> ITE a (simplifyPropExp f b) (simplifyPropExp f c)
+  ITE (Lit 0) _ c -> applyToProps f c
+  ITE (Lit _) b _ -> applyToProps f b
+  ITE a b c-> ITE a (applyToProps f b) (applyToProps f c)
   a -> a
 
--- Removes PBool True from list
-removeTrueProps :: [Prop] -> [Prop]
-removeTrueProps p = filter (\x -> x /= PBool True) . nubOrd $ p
+remRedundantProps :: [Prop] -> [Prop]
+remRedundantProps p = collapseFalse . filter (\x -> x /= PBool True) . nubOrd $ p
+  where
+    collapseFalse :: [Prop] -> [Prop]
+    collapseFalse ps = if isJust $ find (== PBool False) ps then [PBool False] else ps
 
--- Makes [PAnd a b] into [a,b]
-flattenProps :: [Prop] -> [Prop]
-flattenProps (a:ax) = case a of
-                       PAnd x1 x2 -> x1:x2:flattenProps ax
-                       x -> x:flattenProps ax
-flattenProps [] = []
 
-simplifyProp :: Expr a -> Expr a
-simplifyProp p = simplifyPropExp (removeTrueProps . map (mapProp' go) . flattenProps) p
+simplifyProp :: Prop -> Prop
+simplifyProp p = mapProp' go p
   where
     go :: Prop -> Prop
+    -- Handle "OR". Notice: "AND" is flattened and does not exist
+    go (POr (PBool True) _) = PBool True
+    go (POr _ (PBool True)) = PBool True
+
+    -- PImp
+    go (PImpl (PBool True) b) = go b
+    go (PImpl (PBool False) _) = PBool True
+
     -- rewrite everything as LEq or LT
     go (PGEq a b) = go $ PLEq b a
-    go (PGT a b) = go $ PLT a b
+    go (PGT a b) = go $ PLT b a
 
     -- trivial LT/LEq comparisions
     go (PLT  (Var _) (Lit 0)) = PBool False
@@ -671,6 +675,16 @@ simplifyProp p = simplifyPropExp (removeTrueProps . map (mapProp' go) . flattenP
 
     -- fallback
     go a = a
+
+simplifyPropExpr :: Expr a -> Expr a
+simplifyPropExpr e = applyToProps (remRedundantProps . map simplifyProp . flattenProps) e
+  where
+    -- Makes [PAnd a b] into [a,b]
+    flattenProps :: [Prop] -> [Prop]
+    flattenProps (a:ax) = case a of
+                           PAnd x1 x2 -> x1:x2:flattenProps ax
+                           x -> x:flattenProps ax
+    flattenProps [] = []
 
 
 -- | Simple recursive match based AST simplification
