@@ -3037,6 +3037,7 @@ genProp onlyLits sz = oneof
   where
     subWord = if onlyLits then frequency [(2, Lit <$> arbitrary)
                                          ,(1, pure $ Lit 0)
+                                         ,(1, pure $ Lit Expr.maxLit)
                                          ]
                           else genWord 1 (sz `div` 2)
     subProp = genProp onlyLits (sz `div` 2)
@@ -3087,6 +3088,7 @@ genWord litFreq 0 = frequency
       val <- frequency
        [ (10, fmap (`mod` 100) arbitrary)
        , (1, pure 0)
+       , (1, pure Expr.maxLit)
        , (1, arbitrary)
        ]
       pure $ Lit val

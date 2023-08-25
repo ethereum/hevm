@@ -27,6 +27,10 @@ import Optics.Core
 import EVM.Traversals
 import EVM.Types
 
+-- ** Constants **
+
+maxLit :: W256
+maxLit = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 
 -- ** Stack Ops ** ---------------------------------------------------------------------------------
 
@@ -666,8 +670,8 @@ simplifyProp p = mapProp' go p
     -- trivial LT/LEq comparisions
     go (PLT  (Var _) (Lit 0)) = PBool False
     go (PLEq (Lit 0) (Var _)) = PBool True
-    go (PLT  (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) (Var _)) = PBool False
-    go (PLEq (Var _) (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)) = PBool True
+    go (PLT  (Lit val) (Var _)) | val == maxLit = PBool False
+    go (PLEq (Var _) (Lit val)) | val == maxLit = PBool True
 
     -- negations
     go (PNeg (PBool True)) = PBool False
@@ -816,7 +820,7 @@ simplify e = if (mapExpr go e == e)
       | otherwise = o
     go o@(And v (Lit x))
       | x == 0 = Lit 0
-      | x == 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff = v
+      | x == maxLit = v
       | otherwise = o
     go o@(Or (Lit x) b)
       | x == 0 = b
