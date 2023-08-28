@@ -20,6 +20,7 @@ import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
 import Witch (unsafeInto, into, tryFrom)
+import Data.Text qualified as TS
 
 import Optics.Core
 
@@ -575,26 +576,56 @@ stripWrites off size = \case
 -- storage lookups much easier. If the store is backed by an AbstractStore we
 -- always return a symbolic value.
 readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
-readStorage slot store@(ConcreteStore s) = case slot of
-  Lit l -> Lit <$> Map.lookup l s
-  _ -> Just $ SLoad slot store
-readStorage slot' s@(AbstractStore _) = Just $ SLoad slot' s
-readStorage slot' s@(SStore slot val prev) =
-  if slot == slot'
-       -- if address and slot match then we return the val in this write
-  then Just val
-  else case (slot, slot') of
-         -- if the slots don't match and are lits, we can skip this write
-         (Lit _, Lit _) -> readStorage slot' prev
-         -- if the slots don't match syntactically and are abstract then we can't skip this write
-         _ -> Just $ SLoad slot' s
-readStorage _ (GVar _) = error "Can't read from a GVar"
+readStorage slot s@(AbstractStore _) = Just $ SLoad slot s
+readStorage (Lit l) (ConcreteStore s) = Lit <$> Map.lookup l s
+readStorage slot store@(ConcreteStore _) = Just $ SLoad slot store
+readStorage slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
+  -- if address and slot match then we return the val in this write
+  _ | prevSlot == slot -> Just val
+  -- if the slots don't match (see previous guard) and are lits, we can skip this write
+  (Lit _, Lit _) -> readStorage slot prev
+  -- special case of map + map (different slot) -> skip write
+  (Keccak (CopySlice (Lit 0) (Lit 0) (Lit 0x40) (WriteWord (Lit 0) _ (ConcreteBuf a)) (ConcreteBuf "")), Keccak (CopySlice (Lit 0) (Lit 0) (Lit 0x40) (WriteWord (Lit 0) _ (ConcreteBuf b)) (ConcreteBuf ""))) | dontMatchSlot a b -> readStorage slot prev
+  -- special case of array + map -> skip write
+  (Add (Keccak (ConcreteBuf a)) _, Keccak (CopySlice (Lit 0) (Lit 0) (Lit 0x40) _ (ConcreteBuf ""))) | BS.length a /= 0x40 -> readStorage slot prev
+  (Keccak (ConcreteBuf a), Keccak (CopySlice (Lit 0) (Lit 0) (Lit 0x40) _ (ConcreteBuf ""))) | BS.length a /= 0x40 -> readStorage slot prev
+  -- special case of array + map -> skip write
+  (Keccak (CopySlice (Lit 0) (Lit 0) (Lit 0x40) _ (ConcreteBuf "")), Add (Keccak (ConcreteBuf a)) _) | BS.length a /= 64 -> readStorage slot prev
+  (Keccak (CopySlice (Lit 0) (Lit 0) (Lit 0x40) _ (ConcreteBuf "")), Keccak (ConcreteBuf a)) | BS.length a /= 64 -> readStorage slot prev
+  -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
+  (Lit a, Keccak _) | a < 255 -> readStorage slot prev
+  (Keccak _, Lit a) | a < 255 -> readStorage slot prev
+  -- case of array + array, but different position
+  (Keccak (ConcreteBuf a), Keccak (ConcreteBuf b)) | a /= b -> readStorage slot prev
+  _ -> Just $ SLoad slot s
+
+readStorage _ (GVar _) = internalError "Can't read from a GVar"
 
 readStorage' :: Expr EWord -> Expr Storage -> Expr EWord
 readStorage' loc store = case readStorage loc store of
                            Just v -> v
                            Nothing -> Lit 0
 
+dontMatchSlot :: ByteString -> ByteString -> Bool
+dontMatchSlot a b = BS.length a >= 64 && BS.length b >= 64 && diff32to64Byte a b
+  where
+    diff32to64Byte :: ByteString -> ByteString -> Bool
+    diff32to64Byte x y = x32 /= y32
+      where
+       x32 = BS.take 32 $ BS.drop 32 x
+       y32 = BS.take 32 $ BS.drop 32 y
+
+slotPos :: Word8 -> ByteString
+slotPos pos = BS.pack ((replicate 31 (0::Word8))++[pos])
+
+makeKeccak :: Expr a -> Expr a
+makeKeccak e = mapExpr go e
+  where
+    go :: Expr a -> Expr a
+    go orig@(Lit key) = case key of
+      _ | key - 0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563 <= 255 && key- 0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563 >= 0 -> Add (Keccak (ConcreteBuf (slotPos 0))) (Lit (key-0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563))
+      _ -> orig
+    go a = a
 
 -- | Writes a value to a key in a storage expression.
 --
@@ -634,7 +665,7 @@ getAddr (GVar _) = error "cannot determine addr of a GVar"
 simplify :: Expr a -> Expr a
 simplify e = if (mapExpr go e == e)
                then e
-               else simplify (mapExpr go e)
+               else makeKeccak $ simplify (mapExpr go e)
   where
     go :: Expr a -> Expr a
     -- redundant CopySlice
@@ -663,6 +694,8 @@ simplify e = if (mapExpr go e == e)
     go (WriteWord a b c) = writeWord a b c
 
     go (WriteByte a b c) = writeByte a b c
+    go (CopySlice srcOff@(Lit 0) dstOff size@(Lit sz) (WriteWord (Lit 0) value (ConcreteBuf buf)) dst) = (CopySlice srcOff dstOff size (WriteWord (Lit 0) value (ConcreteBuf simplifiedBuf)) dst)
+        where simplifiedBuf = BS.take (unsafeInto sz) buf
     go (CopySlice a b c d f) = copySlice a b c d f
 
     go (IndexWord a b) = indexWord a b

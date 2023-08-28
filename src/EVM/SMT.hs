@@ -584,7 +584,7 @@ prelude =  (flip SMT2) mempty $ fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   |]
 
 exprToSMT :: Expr a -> Builder
-exprToSMT = \case
+exprToSMT expr = case expr of
   Lit w -> fromLazyText $ "(_ bv" <> (T.pack $ show (into w :: Integer)) <> " 256)"
   Var s -> fromText s
   GVar (BufVar n) -> fromString $ "buf" <> (show n)
