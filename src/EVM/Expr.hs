@@ -663,6 +663,8 @@ simplify e = if (mapExpr go e == e)
     go (WriteWord a b c) = writeWord a b c
 
     go (WriteByte a b c) = writeByte a b c
+    go (CopySlice srcOff@(Lit 0) dstOff size@(Lit sz) (WriteWord (Lit 0) value (ConcreteBuf buf)) dst) = (CopySlice srcOff dstOff size (WriteWord (Lit 0) value (ConcreteBuf simplifiedBuf)) dst)
+        where simplifiedBuf = BS.take (unsafeInto sz) buf
     go (CopySlice a b c d f) = copySlice a b c d f
 
     go (IndexWord a b) = indexWord a b
