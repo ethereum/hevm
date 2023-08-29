@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Contract balances can now be fully symbolic
 - Contract code can now be fully abstract. Calls into contracts with unknown code will fail with `UnexpectedSymbolicArg`.
 - Run expression simplification on branch conditions
+- Better simplification of Eq IR elements
 
 ## API Changes
 
