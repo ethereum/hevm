@@ -56,7 +56,7 @@ minProp _ = internalError "expected keccak expression"
 
 injProp :: (Expr EWord, Expr EWord) -> Prop
 injProp (k1@(Keccak b1), k2@(Keccak b2)) =
-  POr (PEq b1 b2) (PNeg (PEq k1 k2))
+  POr ((b1 .== b2) .&& (bufLength b1 .== bufLength b2)) (PNeg (PEq k1 k2))
 injProp _ = internalError "expected keccak expression"
 
 -- Takes a list of props, find all keccak occurences and generates two kinds of assumptions:
@@ -90,7 +90,7 @@ computeKeccakProp :: Prop -> [Prop]
 computeKeccakProp p = foldProp compute [] p
 
 keccakCompute :: [Prop] -> [Expr Buf] -> [Expr Storage] -> [Prop]
-keccakCompute ps buf stores = 
+keccakCompute ps buf stores =
   concatMap computeKeccakProp ps <>
   concatMap computeKeccakExpr buf <>
   concatMap computeKeccakExpr stores
