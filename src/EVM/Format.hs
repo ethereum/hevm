@@ -649,13 +649,13 @@ formatExpr = go
         ]
 
       -- Stores
-      SLoad slot store -> T.unlines
+      SLoad slot storage -> T.unlines
         [ "(SLoad"
         , indent 2 $ T.unlines
           [ "slot:"
           , indent 2 $ formatExpr slot
-          , "store:"
-          , indent 2 $ formatExpr store
+          , "storage:"
+          , indent 2 $ formatExpr storage
           ]
         , ")"
         ]
