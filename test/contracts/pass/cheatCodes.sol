@@ -128,7 +128,7 @@ contract CheatCodes is DSTest {
     }
 
     // this is not supported yet due to restrictions around symbolic address aliasing...
-    function prove_deal_unknown_address(address e, uint val) public {
+    function proveFail_deal_unknown_address(address e, uint val) public {
         hevm.deal(e, val);
         assert(e.balance == val);
     }
