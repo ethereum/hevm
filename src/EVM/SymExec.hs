@@ -280,7 +280,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
           PleaseAskSMT cond preconds continue -> do
             let
               simpCond = Expr.simplify cond
-              (Expr.ConstState _ canBeSat) = Expr.constFoldProp ((simpCond ./= Lit 0):preconds)
+              canBeSat = Expr.constFoldProp ((simpCond ./= Lit 0):preconds)
             case simpCond of
               -- is the condition concrete?
               Lit c ->
