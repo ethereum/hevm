@@ -162,21 +162,21 @@ data AbstState = AbstState
   }
   deriving (Show)
 
-abstractAwayProps :: [Prop] -> ([Prop], AbstState)
-abstractAwayProps ps = runState (mapM abstrAway ps) (AbstState mempty 0)
+abstractAwayProps :: Bool -> Bool -> [Prop] -> ([Prop], AbstState)
+abstractAwayProps abstRefineArith abstRefineMem ps = runState (mapM abstrAway ps) (AbstState mempty 0)
   where
     abstrAway :: Prop -> State AbstState Prop
     abstrAway prop = mapPropM go prop
     go :: Expr a -> State AbstState (Expr a)
     go x = case x of
-        e@(Mod{})    -> abstrExpr e
-        e@(SMod{})   -> abstrExpr e
-        e@(MulMod{}) -> abstrExpr e
-        e@(AddMod{}) -> abstrExpr e
-        e@(Mul{})    -> abstrExpr e
-        e@(Div{})    -> abstrExpr e
-        e@(SDiv {})  -> abstrExpr e
-        e@(ReadWord {})-> abstrExpr e
+        e@(Mod{})       | abstRefineArith  -> abstrExpr e
+        e@(SMod{})      | abstRefineArith  -> abstrExpr e
+        e@(MulMod{})    | abstRefineArith  -> abstrExpr e
+        e@(AddMod{})    | abstRefineArith  -> abstrExpr e
+        e@(Mul{})       | abstRefineArith  -> abstrExpr e
+        e@(Div{})       | abstRefineArith  -> abstrExpr e
+        e@(SDiv {})     | abstRefineArith  -> abstrExpr e
+        e@(ReadWord {}) | abstRefineMem -> abstrExpr e
         e -> pure e
         where
             abstrExpr e = do
@@ -193,8 +193,8 @@ abstractAwayProps ps = runState (mapM abstrAway ps) (AbstState mempty 0)
 smt2Line :: Builder -> SMT2
 smt2Line txt = SMT2 [txt] mempty mempty
 
-assertProps :: [Prop] -> Bool -> SMT2
-assertProps ps abstRefine =
+assertProps :: Bool -> Bool -> [Prop] -> SMT2
+assertProps abstRefineArith abstRefineMem ps =
   let encs = map propToSMT psElimAbst
       abstSMT = map propToSMT abstProps
       intermediates = declareIntermediates bufs stores in
@@ -222,8 +222,8 @@ assertProps ps abstRefine =
 
   where
     (psElim, bufs, stores) = eliminateProps ps
-    (psElimAbst, abst@(AbstState abstExprToInt _)) = if abstRefine
-      then abstractAwayProps psElim
+    (psElimAbst, abst@(AbstState abstExprToInt _)) = if abstRefineArith || abstRefineMem
+      then abstractAwayProps abstRefineArith abstRefineMem psElim
       else (psElim, AbstState mempty 0)
 
     abstProps = map toProp (Map.toList abstExprToInt)
