@@ -1167,7 +1167,7 @@ data ConstState = ConstState
 
 -- | Folds constants
 constFoldProp :: [Prop] -> ConstState
-constFoldProp ps = execState (mapM constProp ps) (ConstState mempty True)
+constFoldProp ps = execState (mapM (go . evalProp) ps) (ConstState mempty True)
   where
     constProp :: Prop -> State ConstState Prop
     constProp prop = go (evalProp prop)
