@@ -1059,9 +1059,6 @@ evalProp prop =
   in if (new == prop) then prop else evalProp new
   where
     go :: Prop -> Prop
-    go (POr (PBool True) _) = PBool True
-    go (POr _ (PBool True)) = PBool True
-
     -- rewrite everything as LEq or LT
     go (PGEq a b) = PLEq b a
     go (PGT a b) = PLT b a
@@ -1082,6 +1079,8 @@ evalProp prop =
     go (PAnd (PBool l) (PBool r)) = PBool (l && r)
     go (PAnd (PBool False) _) = PBool False
     go (PAnd _ (PBool False)) = PBool False
+    go (POr (PBool True) _) = PBool True
+    go (POr _ (PBool True)) = PBool True
     go (POr (PBool l) (PBool r)) = PBool (l || r)
 
     -- Imply
