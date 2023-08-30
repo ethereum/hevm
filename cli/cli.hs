@@ -216,7 +216,8 @@ equivalence cmd = do
                           , maxIter = cmd.maxIterations
                           , askSmtIters = cmd.askSmtIterations
                           , loopHeuristic = cmd.loopDetectionHeuristic
-                          , abstRefine = cmd.abstRefine
+                          , abstRefineArith = cmd.abstractArith
+                          , abstRefineMem = cmd.abstractMemory
                           , rpcInfo = Nothing
                           }
   calldata <- buildCalldata cmd
@@ -302,8 +303,8 @@ assert cmd = do
       maxIter = cmd.maxIterations,
       askSmtIters = cmd.askSmtIterations,
       loopHeuristic = cmd.loopDetectionHeuristic,
-      abstRefineArith = cmd.abstArith,
-      abstRefineMem = cmd.abstMemory,
+      abstRefineArith = cmd.abstractArith,
+      abstRefineMem = cmd.abstractMemory,
       rpcInfo = rpcinfo
     }
     (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
