@@ -1169,8 +1169,6 @@ data ConstState = ConstState
 constFoldProp :: [Prop] -> ConstState
 constFoldProp ps = execState (mapM (go . evalProp) ps) (ConstState mempty True)
   where
-    constProp :: Prop -> State ConstState Prop
-    constProp prop = go (evalProp prop)
     go :: Prop -> State ConstState Prop
     go x = case x of
         PEq a (Lit l) -> do
