@@ -1166,8 +1166,8 @@ data ConstState = ConstState
   deriving (Show)
 
 -- | Folds constants
-constFoldProp :: [Prop] -> ConstState
-constFoldProp ps = execState (mapM (go . evalProp) ps) (ConstState mempty True)
+constFoldProp :: [Prop] -> Bool
+constFoldProp ps = (execState (mapM (go . evalProp) ps) (ConstState mempty True)).canBeSat
   where
     go :: Prop -> State ConstState Prop
     go x = case x of
@@ -1190,8 +1190,8 @@ constFoldProp ps = execState (mapM (go . evalProp) ps) (ConstState mempty True)
           pure $ PBool True
         POr a b -> do
           let
-            ConstState _ v1 = constFoldProp [a]
-            ConstState _ v2 = constFoldProp [b]
+            v1 = constFoldProp [a]
+            v2 = constFoldProp [b]
           _ <- if (Prelude.not v1) then go a
                                    else pure $ PBool True
           _ <- if (Prelude.not v2) then go b
