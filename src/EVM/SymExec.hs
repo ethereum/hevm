@@ -309,11 +309,13 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                   (Just True, True, _) ->
                     -- ask the smt solver about the loop condition
                     performQuery
-                  -- otherwise just try both branches and don't ask the solver
                   _ -> do
                     (r, vm') <- case canBeSat of
+                      -- If constant folding over Props statically determined
+                      -- that it cannot be SAT
                       False ->
                         stToIO $ runStateT (continue (Case False)) vm
+                      -- otherwise just try both branches and don't ask the solver
                       True ->
                         stToIO $ runStateT (continue EVM.Types.Unknown) vm
                     interpret fetcher maxIter askSmtIters heuristic vm' (k r)
