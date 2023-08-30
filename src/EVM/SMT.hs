@@ -102,7 +102,7 @@ data SMTCex = SMTCex
   deriving (Eq, Show)
 
 
--- | Used for abstraction-refinement of the SMT formula
+-- | Used for abstraction-refinement of the SMT formula. Contains assertions that make our query fully precise. These will be added to the assertion stack if we get `sat` with the abstracted query.
 newtype RefinementEqs = RefinementEqs [Builder]
   deriving (Eq, Show, Monoid, Semigroup)
 
