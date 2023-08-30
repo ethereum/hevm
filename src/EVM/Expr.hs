@@ -650,38 +650,8 @@ remRedundantProps p = collapseFalse . filter (\x -> x /= PBool True) . nubOrd $ 
     collapseFalse :: [Prop] -> [Prop]
     collapseFalse ps = if isJust $ find (== PBool False) ps then [PBool False] else ps
 
-
-simplifyProp :: Prop -> Prop
-simplifyProp p = mapProp' go p
-  where
-    go :: Prop -> Prop
-    -- Handle "OR". Notice: "AND" is flattened and does not exist
-    go (POr (PBool True) _) = PBool True
-    go (POr _ (PBool True)) = PBool True
-
-    -- PImp
-    go (PImpl (PBool True) b) = go b
-    go (PImpl (PBool False) _) = PBool True
-
-    -- rewrite everything as LEq or LT
-    go (PGEq a b) = go $ PLEq b a
-    go (PGT a b) = go $ PLT b a
-
-    -- trivial LT/LEq comparisions
-    go (PLT  (Var _) (Lit 0)) = PBool False
-    go (PLEq (Lit 0) (Var _)) = PBool True
-    go (PLT  (Lit val) (Var _)) | val == maxLit = PBool False
-    go (PLEq (Var _) (Lit val)) | val == maxLit = PBool True
-
-    -- negations
-    go (PNeg (PBool True)) = PBool False
-    go (PNeg (PBool False)) = PBool True
-
-    -- fallback
-    go a = a
-
 simplifyPropExpr :: Expr a -> Expr a
-simplifyPropExpr e = applyToProps (remRedundantProps . map simplifyProp . flattenProps) e
+simplifyPropExpr e = applyToProps (remRedundantProps . map evalProp . flattenProps) e
   where
     -- Makes [PAnd a b] into [a,b]
     flattenProps :: [Prop] -> [Prop]
@@ -689,7 +659,6 @@ simplifyPropExpr e = applyToProps (remRedundantProps . map simplifyProp . flatte
                            PAnd x1 x2 -> x1:x2:flattenProps ax
                            x -> x:flattenProps ax
     flattenProps [] = []
-
 
 -- | Simple recursive match based AST simplification
 -- Note: may not terminate!
@@ -1090,30 +1059,40 @@ evalProp prop =
   in if (new == prop) then prop else evalProp new
   where
     go :: Prop -> Prop
-    go (PLT (Lit l) (Lit r)) = PBool (l < r)
-    go (PGT (Lit l) (Lit r)) = PBool (l > r)
-    go (PGEq (Lit l) (Lit r)) = PBool (l >= r)
-    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
-    go (PNeg (PBool b)) = PBool (Prelude.not b)
-
-    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
-    go (PAnd (PBool False) _) = PBool False
-    go (PAnd _ (PBool False)) = PBool False
-
-    go (POr (PBool l) (PBool r)) = PBool (l || r)
     go (POr (PBool True) _) = PBool True
     go (POr _ (PBool True)) = PBool True
 
-    go (PImpl (PBool l) (PBool r)) = PBool ((Prelude.not l) || r)
-    go (PImpl (PBool False) _) = PBool True
+    -- rewrite everything as LEq or LT
+    go (PGEq a b) = PLEq b a
+    go (PGT a b) = PLT b a
 
-    go (PEq (Eq a b) (Lit 0)) = PNeg (PEq a b)
-    go (PEq (Eq a b) (Lit 1)) = PEq a b
+    -- LT/LEq comparisions
+    go (PLT  (Var _) (Lit 0)) = PBool False
+    go (PLEq (Lit 0) (Var _)) = PBool True
+    go (PLT  (Lit val) (Var _)) | val == maxLit = PBool False
+    go (PLEq (Var _) (Lit val)) | val == maxLit = PBool True
+    go (PLT (Lit l) (Lit r)) = PBool (l < r)
+    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
 
-    go (PEq (Sub a b) (Lit 0)) = PEq a b
-
+    -- negations
+    go (PNeg (PBool b)) = PBool (Prelude.not b)
     go (PNeg (PNeg a)) = a
 
+    -- And/Or
+    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
+    go (PAnd (PBool False) _) = PBool False
+    go (PAnd _ (PBool False)) = PBool False
+    go (POr (PBool l) (PBool r)) = PBool (l || r)
+
+    -- Imply
+    go (PImpl (PBool l) (PBool r)) = PBool ((Prelude.not l) || r)
+    go (PImpl (PBool True) b) = b
+    go (PImpl (PBool False) _) = PBool True
+
+    -- Eq
+    go (PEq (Eq a b) (Lit 0)) = PNeg (PEq a b)
+    go (PEq (Eq a b) (Lit 1)) = PEq a b
+    go (PEq (Sub a b) (Lit 0)) = PEq a b
     go (PEq (Lit l) (Lit r)) = PBool (l == r)
     go o@(PEq l r)
       | l == r = PBool True
