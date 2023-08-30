@@ -623,6 +623,8 @@ makeKeccak e = mapExpr go e
   where
     go :: Expr a -> Expr a
     go orig@(Lit key) = case key of
+      -- Only deals with the FIRST dynamic array (array ZERO), as 32B of `0x0` is this value
+      -- Dealing with 1...N is TODO
       _ | key - 0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563 <= 255 && key- 0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563 >= 0 -> Add (Keccak (ConcreteBuf (slotPos 0))) (Lit (key-0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563))
       _ -> orig
     go a = a
