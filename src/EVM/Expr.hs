@@ -663,8 +663,15 @@ simplify e = if (mapExpr go e == e)
     go (WriteWord a b c) = writeWord a b c
 
     go (WriteByte a b c) = writeByte a b c
-    go (CopySlice srcOff@(Lit 0) dstOff size@(Lit sz) (WriteWord (Lit 0) value (ConcreteBuf buf)) dst) = (CopySlice srcOff dstOff size (WriteWord (Lit 0) value (ConcreteBuf simplifiedBuf)) dst)
-        where simplifiedBuf = BS.take (unsafeInto sz) buf
+    go orig@(CopySlice srcOff@(Lit n) dstOff size@(Lit sz)
+        -- It doesn't matter what wOffs we write to, because only the first
+        -- n+sz of ConcreteBuf will be used by CopySlice
+        (WriteWord wOff value (ConcreteBuf buf)) dst)
+          -- Let's not deal with overflow
+          | n+sz >= n && n+sz >= sz = (CopySlice srcOff dstOff size
+              (WriteWord wOff value (ConcreteBuf simplifiedBuf)) dst)
+          | otherwise = orig
+            where simplifiedBuf = BS.take (unsafeInto (n+sz)) buf
     go (CopySlice a b c d f) = copySlice a b c d f
 
     go (IndexWord a b) = indexWord a b
