@@ -576,6 +576,24 @@ tests = testGroup "hevm"
           checkAssert s [0x41] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "expected counterexample found"
       ,
+      testCase "vm.deal unknown address" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            interface Vm {
+              function deal(address,uint256) external;
+            }
+            contract C {
+              // this is not supported yet due to restrictions around symbolic address aliasing...
+              function f(address e, uint val) external {
+                  Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+                  vm.deal(e, val);
+                  assert(e.balance == val);
+              }
+            }
+          |]
+        Right e <- reachableUserAsserts c (Just $ Sig "f(address,uint256)" [AbiAddressType, AbiUIntType 256])
+        assertBool "The expression is not partial" $ Expr.containsNode isPartial e
+      ,
       testCase "vm.prank underflow" $ do
         Just c <- solcRuntime "C"
             [i|

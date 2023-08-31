@@ -1648,6 +1648,19 @@ cheatActions =
           [x]  -> assign (#block % #timestamp) x
           _ -> vmError (BadCheatCode sig),
 
+      action "deal(address,uint256)" $
+        \sig _ _ input -> case decodeStaticArgs 0 2 input of
+          [a, amt] ->
+            forceAddr a "vm.deal: cannot decode target into an address" $ \usr ->
+              fetchAccount usr $ \_ -> do
+                assign (#env % #contracts % ix usr % #balance) amt
+          _ -> vmError (BadCheatCode sig),
+
+      action "assume(bool)" $
+        \sig _ _ input -> case decodeStaticArgs 0 1 input of
+          [c] -> modifying #constraints ((:) (PEq c (Lit 1)))
+          _ -> vmError (BadCheatCode sig),
+
       action "roll(uint256)" $
         \sig _ _ input -> case decodeStaticArgs 0 1 input of
           [x] -> forceConcrete x "cannot roll to a symbolic block number" (assign (#block % #number))
