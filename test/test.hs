@@ -129,7 +129,6 @@ tests = testGroup "hevm"
        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
        putStrLn  $ "counterexample found. Val: " <> (show $ getVar ctr "arg2") -- <> " fromAddr: " <> (show $ getVar ctr "arg1") -- <> " toAddr: " <> (show $ getVar ctr "toAddr")
        putStrLn $ "OK"
-    ]
     , testCase "decompose3" $ do
        Just c <- solcRuntime "MyContract"
         [i|
