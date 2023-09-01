@@ -76,7 +76,7 @@ tests :: TestTree
 tests = testGroup "hevm"
   [ Tracing.tests
   , testGroup "decomp-storage"
-    [ testCase "decompose2" $ do
+    [ testCase "decompose1" $ do
        Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract2 {
@@ -130,6 +130,29 @@ tests = testGroup "hevm"
        putStrLn  $ "counterexample found. Val: " <> (show $ getVar ctr "arg2") -- <> " fromAddr: " <> (show $ getVar ctr "arg1") -- <> " toAddr: " <> (show $ getVar ctr "toAddr")
        putStrLn $ "OK"
     ]
+    , testCase "decompose3" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[] a;
+          mapping(uint => uint) items1;
+          mapping(uint => uint) items2;
+          function transfer(uint acct, uint val1, uint val2) public {
+            uint beforeVal1 = items1[acct];
+            uint beforeVal2 = items2[acct];
+            unchecked {
+              items1[acct] = val1+1;
+              items2[acct] = val2+2;
+              assert(items1[acct]+items2[acct] > beforeVal1 + beforeVal2);
+            }
+          }
+        }
+        |]
+       (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       putStrLn  $ "counterexample found. Val: " <> (show $ getVar ctr "arg2") -- <> " fromAddr: " <> (show $ getVar ctr "arg1") -- <> " toAddr: " <> (show $ getVar ctr "toAddr")
+       putStrLn $ "OK"
+    ]
+
   , testGroup "StorageTests"
     [ testCase "read-from-sstore" $ assertEqual ""
         (Lit 0xab)
