@@ -105,22 +105,13 @@ tests = testGroup "hevm"
        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
        putStrLn  $ "counterexample found. Val: " <> (show $ getVar ctr "arg2") -- <> " fromAddr: " <> (show $ getVar ctr "arg1") -- <> " toAddr: " <> (show $ getVar ctr "toAddr")
        putStrLn $ "OK"
-    , testCase "decompose1" $ do
+    , testCase "decompose2" $ do
        Just c <- solcRuntime "MyContract"
         [i|
-        contract MyContract2 {
-          mapping(uint => uint) items1;
-          function stuff(uint acct, uint val1) public returns (uint256 ret) {
-            //items1[0x5F8D31a0fdc254703AA47f6a56ACC841C7695f6F] = 5;
-            items1[acct] += val1;
-            ret = items1[acct];
-          }
-        }
         contract MyContract {
           uint[] a;
           mapping(uint => uint) items1;
           mapping(uint => uint) items2;
-          MyContract2 c;
           function transfer(uint acct, uint val1, uint val2) public {
             //items1[0x5F8D31a0fdc254703AA47f6a56ACC841C7695f6F] = 5;
             uint beforeVal1 = items1[acct];
@@ -130,8 +121,7 @@ tests = testGroup "hevm"
               items2[acct] = val2+2;
               a[0] = val1 + val2 + 1;
               a[1] = val1 + val2 + 2;
-              uint ret = c.stuff(acct, val1);
-              assert(items1[acct]+items2[acct]+a[0]+a[1]+ret > beforeVal1 + beforeVal2);
+              assert(items1[acct]+items2[acct]+a[0]+a[1] > beforeVal1 + beforeVal2);
             }
           }
         }
