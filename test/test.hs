@@ -133,7 +133,6 @@ tests = testGroup "hevm"
        Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
-          uint[] a;
           mapping(uint => uint) items1;
           mapping(uint => uint) items2;
           function transfer(uint acct, uint val1, uint val2) public {

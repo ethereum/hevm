@@ -849,6 +849,7 @@ encodeConcreteStore s = foldl encodeWrite "((as const Storage) #x000000000000000
       in "(store " <> prev `sp` encKey `sp` encVal <> ")"
 
 storeName :: Expr EAddr -> Builder
+-- this becomes something like: baseStore_symaddr_entrypoint
 storeName a = fromString ("baseStore_") <> formatEAddr a
 
 formatEAddr :: Expr EAddr -> Builder
