@@ -1258,14 +1258,14 @@ query = assign #result . Just . HandleEffect . Query
 choose :: Choose s -> EVM s ()
 choose = assign #result . Just . HandleEffect . Choose
 
-branch :: Expr EWord -> (Bool -> EVM s ()) -> EVM s ()
+branch :: forall s. Expr EWord -> (Bool -> EVM s ()) -> EVM s ()
 branch cond continue = do
   loc <- codeloc
   pathconds <- use #constraints
   query $ PleaseAskSMT cond pathconds (choosePath loc)
   where
     condSimp = Expr.simplify cond
-    -- choosePath :: CodeLocation -> BranchCondition -> EVM s ()
+    choosePath :: CodeLocation -> BranchCondition -> EVM s ()
     choosePath loc (Case v) = do
       assign #result Nothing
       pushTo #constraints $ if v then Expr.evalProp (condSimp ./= Lit 0) else Expr.evalProp (condSimp .== Lit 0)
