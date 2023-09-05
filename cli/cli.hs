@@ -216,8 +216,7 @@ equivalence cmd = do
                           , maxIter = cmd.maxIterations
                           , askSmtIters = cmd.askSmtIterations
                           , loopHeuristic = cmd.loopDetectionHeuristic
-                          , abstRefineArith = cmd.abstractArithmetic
-                          , abstRefineMem = cmd.abstractMemory
+                          , abstRefineConfig = AbstRefineConfig cmd.abstractArithmetic cmd.abstractMemory
                           , rpcInfo = Nothing
                           }
   calldata <- buildCalldata cmd
@@ -297,15 +296,13 @@ assert cmd = do
   let solverCount = fromMaybe cores cmd.numSolvers
   solver <- getSolver cmd
   withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
-    let opts = VeriOpts {
-      simp = True,
-      debug = cmd.smtdebug,
-      maxIter = cmd.maxIterations,
-      askSmtIters = cmd.askSmtIterations,
-      loopHeuristic = cmd.loopDetectionHeuristic,
-      abstRefineArith = cmd.abstractArithmetic,
-      abstRefineMem = cmd.abstractMemory,
-      rpcInfo = rpcinfo
+    let opts = VeriOpts { simp = True
+                        , debug = cmd.smtdebug
+                        , maxIter = cmd.maxIterations
+                        , askSmtIters = cmd.askSmtIterations
+                        , loopHeuristic = cmd.loopDetectionHeuristic
+                        , abstRefineConfig = AbstRefineConfig cmd.abstractArithmetic cmd.abstractMemory
+                        , rpcInfo = rpcinfo
     }
     (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
     case res of

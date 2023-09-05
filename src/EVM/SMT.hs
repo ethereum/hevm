@@ -162,21 +162,21 @@ data AbstState = AbstState
   }
   deriving (Show)
 
-abstractAwayProps :: Bool -> Bool -> [Prop] -> ([Prop], AbstState)
-abstractAwayProps abstRefineArith abstRefineMem ps = runState (mapM abstrAway ps) (AbstState mempty 0)
+abstractAwayProps :: AbstRefineConfig -> [Prop] -> ([Prop], AbstState)
+abstractAwayProps abstRefineConfig ps = runState (mapM abstrAway ps) (AbstState mempty 0)
   where
     abstrAway :: Prop -> State AbstState Prop
     abstrAway prop = mapPropM go prop
     go :: Expr a -> State AbstState (Expr a)
     go x = case x of
-        e@(Mod{})       | abstRefineArith  -> abstrExpr e
-        e@(SMod{})      | abstRefineArith  -> abstrExpr e
-        e@(MulMod{})    | abstRefineArith  -> abstrExpr e
-        e@(AddMod{})    | abstRefineArith  -> abstrExpr e
-        e@(Mul{})       | abstRefineArith  -> abstrExpr e
-        e@(Div{})       | abstRefineArith  -> abstrExpr e
-        e@(SDiv {})     | abstRefineArith  -> abstrExpr e
-        e@(ReadWord {}) | abstRefineMem -> abstrExpr e
+        e@(Mod{})       | abstRefineConfig.arith  -> abstrExpr e
+        e@(SMod{})      | abstRefineConfig.arith  -> abstrExpr e
+        e@(MulMod{})    | abstRefineConfig.arith  -> abstrExpr e
+        e@(AddMod{})    | abstRefineConfig.arith  -> abstrExpr e
+        e@(Mul{})       | abstRefineConfig.arith  -> abstrExpr e
+        e@(Div{})       | abstRefineConfig.arith  -> abstrExpr e
+        e@(SDiv {})     | abstRefineConfig.arith  -> abstrExpr e
+        e@(ReadWord {}) | abstRefineConfig.mem -> abstrExpr e
         e -> pure e
         where
             abstrExpr e = do
@@ -193,8 +193,8 @@ abstractAwayProps abstRefineArith abstRefineMem ps = runState (mapM abstrAway ps
 smt2Line :: Builder -> SMT2
 smt2Line txt = SMT2 [txt] mempty mempty
 
-assertProps :: Bool -> Bool -> [Prop] -> SMT2
-assertProps abstRefineArith abstRefineMem ps =
+assertProps :: AbstRefineConfig -> [Prop] -> SMT2
+assertProps abstRefineConfig ps =
   let encs = map propToSMT psElimAbst
       abstSMT = map propToSMT abstProps
       intermediates = declareIntermediates bufs stores in
@@ -222,8 +222,8 @@ assertProps abstRefineArith abstRefineMem ps =
 
   where
     (psElim, bufs, stores) = eliminateProps ps
-    (psElimAbst, abst@(AbstState abstExprToInt _)) = if abstRefineArith || abstRefineMem
-      then abstractAwayProps abstRefineArith abstRefineMem psElim
+    (psElimAbst, abst@(AbstState abstExprToInt _)) = if abstRefineConfig.arith || abstRefineConfig.mem
+      then abstractAwayProps abstRefineConfig psElim
       else (psElim, AbstState mempty 0)
 
     abstProps = map toProp (Map.toList abstExprToInt)
