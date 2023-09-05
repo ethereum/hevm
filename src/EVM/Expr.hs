@@ -1102,8 +1102,8 @@ evalProp prop =
     go p = p
 
 
--- Magic Constants
-
+-- Magic Constants for array number reversing
+-- Keccak(byte32(0)) =  0x290decd9548....
 preImages :: [(W256, Word8)]
 preImages = [ (0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563, 0)
             , (0xB10E2D527612073B26EECDFD717E6A320CF44B4AFAC2B0732D9FCBE2B7FA0CF6, 1)
