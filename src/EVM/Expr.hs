@@ -1084,7 +1084,7 @@ evalProp prop =
     go (POr (PBool l) (PBool r)) = PBool (l || r)
 
     -- Imply
-    go (PImpl (PBool l) (PBool r)) = PBool ((Prelude.not l) || r)
+    go (PImpl _ (PBool True)) = PBool True
     go (PImpl (PBool True) b) = b
     go (PImpl (PBool False) _) = PBool True
 
