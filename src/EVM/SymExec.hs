@@ -48,7 +48,6 @@ import GHC.Generics (Generic)
 import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
 import Witch (into, unsafeInto)
-import EVM.Expr (collectStores)
 
 data LoopHeuristic
   = Naive
