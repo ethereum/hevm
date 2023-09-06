@@ -633,23 +633,6 @@ getAddr (GVar _) = error "cannot determine addr of a GVar"
 
 -- ** Whole Expression Simplification ** -----------------------------------------------------------
 
--- Calls prop simplification for the appropriate types of Expr
-applyToProps :: ([Prop] -> [Prop]) -> Expr b -> Expr b
-applyToProps f expr = case expr of
-  Failure a b c -> Failure (f a) b c
-  Partial a b c -> Partial (f a) b c
-  Success a b c d -> Success (f a) b c d
-  ITE (Lit 0) _ c -> applyToProps f c
-  ITE (Lit _) b _ -> applyToProps f b
-  ITE a b c-> ITE a (applyToProps f b) (applyToProps f c)
-  a -> a
-
-remRedundantProps :: [Prop] -> [Prop]
-remRedundantProps p = collapseFalse . filter (\x -> x /= PBool True) . nubOrd $ p
-  where
-    collapseFalse :: [Prop] -> [Prop]
-    collapseFalse ps = if isJust $ find (== PBool False) ps then [PBool False] else ps
-
 simplifyProp :: Expr End -> Expr End
 simplifyProp e = applyToProps (remRedundantProps . map evalProp . flattenProps) e
   where
@@ -659,6 +642,22 @@ simplifyProp e = applyToProps (remRedundantProps . map evalProp . flattenProps) 
                            PAnd x1 x2 -> x1:x2:flattenProps ax
                            x -> x:flattenProps ax
     flattenProps [] = []
+    -- Calls prop simplification for the appropriate types of Expr
+    applyToProps :: ([Prop] -> [Prop]) -> Expr b -> Expr b
+    applyToProps f expr = case expr of
+      Failure a b c -> Failure (f a) b c
+      Partial a b c -> Partial (f a) b c
+      Success a b c d -> Success (f a) b c d
+      ITE (Lit 0) _ c -> applyToProps f c
+      ITE (Lit _) b _ -> applyToProps f b
+      ITE a b c-> ITE a (applyToProps f b) (applyToProps f c)
+      a -> a
+    -- removes redundant (constant True/False) props
+    remRedundantProps :: [Prop] -> [Prop]
+    remRedundantProps p = collapseFalse . filter (\x -> x /= PBool True) . nubOrd $ p
+      where
+        collapseFalse :: [Prop] -> [Prop]
+        collapseFalse ps = if isJust $ find (== PBool False) ps then [PBool False] else ps
 
 -- | Simple recursive match based AST simplification
 -- Note: may not terminate!
