@@ -12,8 +12,10 @@ import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
 import Control.Concurrent (forkIO, killThread)
 import Control.Monad
 import Control.Monad.State.Strict
+import Control.Monad.Reader
 import Data.Char (isSpace)
 import Data.Map (Map)
+import Data.IORef
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe, isJust, fromJust)
 import Data.Text qualified as TS
@@ -103,7 +105,7 @@ withSolvers solver count timeout cont = do
   taskQueue <- newChan
   availableInstances <- newChan
   forM_ instances (writeChan availableInstances)
-  orchestrateId <- forkIO $ orchestrate taskQueue availableInstances
+  orchestrateId <- forkIO $ orchestrate taskQueue availableInstances 0
 
   -- run continuation with task queue
   res <- cont (SolverGroup taskQueue)
@@ -113,14 +115,14 @@ withSolvers solver count timeout cont = do
   killThread orchestrateId
   pure res
   where
-    orchestrate :: Chan Task -> Chan SolverInstance -> IO b
-    orchestrate queue avail = do
+    orchestrate :: Chan Task -> Chan SolverInstance -> Int -> IO b
+    orchestrate queue avail fileCounter = do
       task <- readChan queue
       inst <- readChan avail
-      _ <- forkIO $ runTask task inst avail
-      orchestrate queue avail
+      _ <- forkIO $ runTask task inst avail fileCounter
+      orchestrate queue avail (fileCounter + 1)
 
-    runTask (Task smt2@(SMT2 cmds (RefinementEqs refineEqs) cexvars) r debugFName) inst availableInstances = do
+    runTask (Task smt2@(SMT2 cmds (RefinementEqs refineEqs) cexvars) r debugFName) inst availableInstances fileCounter = do
       writeSMT2File smt2 debugFName ("abstracted")
       -- reset solver and send all lines of provided script
       out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty)
@@ -284,7 +286,7 @@ sendScript solver (SMT2 cmds _ _) = do
         "success" -> go cs
         e -> pure $ Left $ "Solver returned an error:\n" <> e <> "\nwhile sending the following line: " <> c
 
-checkCommand :: SolverInstance -> Text -> IO ()
+checkCommand :: SolverInstance -> Text -> ReaderT Text IO ()
 checkCommand inst cmd = do
   res <- sendCommand inst cmd
   case res of
