@@ -623,7 +623,7 @@ getAddr :: Expr Storage -> Maybe (Expr EAddr)
 getAddr (SStore _ _ p) = getAddr p
 getAddr (AbstractStore a) = Just a
 getAddr (ConcreteStore _) = Nothing
-getAddr (GVar _) = error "cannot determine addr of a GVar"
+getAddr (GVar _) = internalError "cannot determine addr of a GVar"
 
 
 -- ** Whole Expression Simplification ** -----------------------------------------------------------
