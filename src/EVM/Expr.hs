@@ -650,8 +650,8 @@ remRedundantProps p = collapseFalse . filter (\x -> x /= PBool True) . nubOrd $ 
     collapseFalse :: [Prop] -> [Prop]
     collapseFalse ps = if isJust $ find (== PBool False) ps then [PBool False] else ps
 
-simplifyPropExpr :: Expr a -> Expr a
-simplifyPropExpr e = applyToProps (remRedundantProps . map evalProp . flattenProps) e
+simplifyProp :: Expr End -> Expr End
+simplifyProp e = applyToProps (remRedundantProps . map evalProp . flattenProps) e
   where
     -- Makes [PAnd a b] into [a,b]
     flattenProps :: [Prop] -> [Prop]

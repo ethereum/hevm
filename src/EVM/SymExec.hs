@@ -533,7 +533,7 @@ verify solvers opts preState maybepost = do
 
   putStrLn "Simplifying expression"
   let exprPartialSimp = if opts.simp then (Expr.simplify exprInter) else exprInter
-  let expr = if opts.simp then (Expr.simplifyPropExpr exprPartialSimp) else exprPartialSimp
+  let expr = if opts.simp then (Expr.simplifyProp exprPartialSimp) else exprPartialSimp
   when opts.debug $ T.writeFile "simplified.expr" (formatExpr expr)
 
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
