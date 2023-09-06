@@ -232,11 +232,11 @@ tests = testGroup "hevm"
     , testProperty "evalProp-equivalence-sym" $ \(p) -> ioProperty $ do
         let simplified = Expr.evalProp p
         checkEquivProp simplified p
-    , testProperty "simpProp-equivalence-sym" $ \(p :: Prop) -> ioProperty $ do
-        let simplified = Expr.simplifyProp p
-        checkEquivProp simplified p
+    , testProperty "simpProp-equivalence-sym" $ \(ps :: [Prop]) -> ioProperty $ do
+        let simplified = pand (Expr.simplifyProps ps)
+        checkEquivProp simplified (pand ps)
     , testProperty "simpProp-equivalence-sym" $ \(LitProp p) -> ioProperty $ do
-        let simplified = Expr.simplifyProp p
+        let simplified = pand (Expr.simplifyProps [p])
         checkEquivProp simplified p
     ]
   , testGroup "MemoryTests"

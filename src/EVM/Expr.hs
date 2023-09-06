@@ -633,30 +633,6 @@ getAddr (GVar _) = error "cannot determine addr of a GVar"
 
 -- ** Whole Expression Simplification ** -----------------------------------------------------------
 
-simplifyProp :: Expr End -> Expr End
-simplifyProp e = applyToProps (remRedundantProps . map evalProp . flattenProps) e
-  where
-    -- Makes [PAnd a b] into [a,b]
-    flattenProps :: [Prop] -> [Prop]
-    flattenProps (a:ax) = case a of
-                           PAnd x1 x2 -> x1:x2:flattenProps ax
-                           x -> x:flattenProps ax
-    flattenProps [] = []
-    -- Calls prop simplification for the appropriate types of Expr
-    applyToProps :: ([Prop] -> [Prop]) -> Expr b -> Expr b
-    applyToProps f expr = case expr of
-      Failure a b c -> Failure (f a) b c
-      Partial a b c -> Partial (f a) b c
-      Success a b c d -> Success (f a) b c d
-      ITE (Lit 0) _ c -> applyToProps f c
-      ITE (Lit _) b _ -> applyToProps f b
-      ITE a b c-> ITE a (applyToProps f b) (applyToProps f c)
-      a -> a
-    -- removes redundant (constant True/False) props
-    remRedundantProps :: [Prop] -> [Prop]
-    remRedundantProps p = collapseFalse . filter (\x -> x /= PBool True) . nubOrd $ p
-    collapseFalse :: [Prop] -> [Prop]
-    collapseFalse ps = if isJust $ find (== PBool False) ps then [PBool False] else ps
 
 -- | Simple recursive match based AST simplification
 -- Note: may not terminate!
@@ -666,6 +642,11 @@ simplify e = if (mapExpr go e == e)
                else simplify (mapExpr go e)
   where
     go :: Expr a -> Expr a
+
+    go (Failure a b c) = Failure (simplifyProps a) b c
+    go (Partial a b c) = Partial (simplifyProps a) b c
+    go (Success a b c d) = Success (simplifyProps a) b c d
+
     -- redundant CopySlice
     go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
 
@@ -833,6 +814,72 @@ simplify e = if (mapExpr go e == e)
            else o
 
     go a = a
+
+
+-- ** Prop Simplification ** -----------------------------------------------------------------------
+
+
+simplifyProps :: [Prop] -> [Prop]
+simplifyProps = remRedundantProps . map evalProp . flattenProps
+
+-- | Evaluate the provided proposition down to its most concrete result
+evalProp :: Prop -> Prop
+evalProp prop =
+  let new = mapProp' go prop
+  in if (new == prop) then prop else evalProp new
+  where
+    go :: Prop -> Prop
+    -- rewrite everything as LEq or LT
+    go (PGEq a b) = PLEq b a
+    go (PGT a b) = PLT b a
+
+    -- LT/LEq comparisions
+    go (PLT  (Var _) (Lit 0)) = PBool False
+    go (PLEq (Lit 0) (Var _)) = PBool True
+    go (PLT  (Lit val) (Var _)) | val == maxLit = PBool False
+    go (PLEq (Var _) (Lit val)) | val == maxLit = PBool True
+    go (PLT (Lit l) (Lit r)) = PBool (l < r)
+    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
+
+    -- negations
+    go (PNeg (PBool b)) = PBool (Prelude.not b)
+    go (PNeg (PNeg a)) = a
+
+    -- And/Or
+    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
+    go (PAnd (PBool False) _) = PBool False
+    go (PAnd _ (PBool False)) = PBool False
+    go (POr (PBool True) _) = PBool True
+    go (POr _ (PBool True)) = PBool True
+    go (POr (PBool l) (PBool r)) = PBool (l || r)
+
+    -- Imply
+    go (PImpl _ (PBool True)) = PBool True
+    go (PImpl (PBool True) b) = b
+    go (PImpl (PBool False) _) = PBool True
+
+    -- Eq
+    go (PEq (Eq a b) (Lit 0)) = PNeg (PEq a b)
+    go (PEq (Eq a b) (Lit 1)) = PEq a b
+    go (PEq (Sub a b) (Lit 0)) = PEq a b
+    go (PEq (Lit l) (Lit r)) = PBool (l == r)
+    go o@(PEq l r)
+      | l == r = PBool True
+      | otherwise = o
+    go p = p
+
+-- Makes [PAnd a b] into [a,b]
+flattenProps :: [Prop] -> [Prop]
+flattenProps [] = []
+flattenProps (a:ax) = case a of
+  PAnd x1 x2 -> x1:x2:flattenProps ax
+  x -> x:flattenProps ax
+
+-- removes redundant (constant True/False) props
+remRedundantProps :: [Prop] -> [Prop]
+remRedundantProps p = collapseFalse . filter (\x -> x /= PBool True) . nubOrd $ p
+  where
+    collapseFalse ps = if isJust $ find (== PBool False) ps then [PBool False] else ps
 
 
 -- ** Conversions ** -------------------------------------------------------------------------------
@@ -1050,48 +1097,3 @@ containsNode p = getAny . foldExpr go (Any False)
 inRange :: Int -> Expr EWord -> Prop
 inRange sz e = PAnd (PGEq e (Lit 0)) (PLEq e (Lit $ 2 ^ sz - 1))
 
--- | Evaluate the provided proposition down to its most concrete result
-evalProp :: Prop -> Prop
-evalProp prop =
-  let new = mapProp' go prop
-  in if (new == prop) then prop else evalProp new
-  where
-    go :: Prop -> Prop
-    -- rewrite everything as LEq or LT
-    go (PGEq a b) = PLEq b a
-    go (PGT a b) = PLT b a
-
-    -- LT/LEq comparisions
-    go (PLT  (Var _) (Lit 0)) = PBool False
-    go (PLEq (Lit 0) (Var _)) = PBool True
-    go (PLT  (Lit val) (Var _)) | val == maxLit = PBool False
-    go (PLEq (Var _) (Lit val)) | val == maxLit = PBool True
-    go (PLT (Lit l) (Lit r)) = PBool (l < r)
-    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
-
-    -- negations
-    go (PNeg (PBool b)) = PBool (Prelude.not b)
-    go (PNeg (PNeg a)) = a
-
-    -- And/Or
-    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
-    go (PAnd (PBool False) _) = PBool False
-    go (PAnd _ (PBool False)) = PBool False
-    go (POr (PBool True) _) = PBool True
-    go (POr _ (PBool True)) = PBool True
-    go (POr (PBool l) (PBool r)) = PBool (l || r)
-
-    -- Imply
-    go (PImpl _ (PBool True)) = PBool True
-    go (PImpl (PBool True) b) = b
-    go (PImpl (PBool False) _) = PBool True
-
-    -- Eq
-    go (PEq (Eq a b) (Lit 0)) = PNeg (PEq a b)
-    go (PEq (Eq a b) (Lit 1)) = PEq a b
-    go (PEq (Sub a b) (Lit 0)) = PEq a b
-    go (PEq (Lit l) (Lit r)) = PBool (l == r)
-    go o@(PEq l r)
-      | l == r = PBool True
-      | otherwise = o
-    go p = p
