@@ -655,9 +655,8 @@ simplifyProp e = applyToProps (remRedundantProps . map evalProp . flattenProps) 
     -- removes redundant (constant True/False) props
     remRedundantProps :: [Prop] -> [Prop]
     remRedundantProps p = collapseFalse . filter (\x -> x /= PBool True) . nubOrd $ p
-      where
-        collapseFalse :: [Prop] -> [Prop]
-        collapseFalse ps = if isJust $ find (== PBool False) ps then [PBool False] else ps
+    collapseFalse :: [Prop] -> [Prop]
+    collapseFalse ps = if isJust $ find (== PBool False) ps then [PBool False] else ps
 
 -- | Simple recursive match based AST simplification
 -- Note: may not terminate!
