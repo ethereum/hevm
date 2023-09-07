@@ -663,6 +663,17 @@ simplify e = if (mapExpr go e == e)
     go (WriteWord a b c) = writeWord a b c
 
     go (WriteByte a b c) = writeByte a b c
+
+    -- truncate some concrete source buffers to the portion relevant for the CopySlice if we're copying a fully concrete region
+    go orig@(CopySlice srcOff@(Lit n) dstOff size@(Lit sz)
+        -- It doesn't matter what wOffs we write to, because only the first
+        -- n+sz of ConcreteBuf will be used by CopySlice
+        (WriteWord wOff value (ConcreteBuf buf)) dst)
+          -- Let's not deal with overflow
+          | n+sz >= n && n+sz >= sz = (CopySlice srcOff dstOff size
+              (WriteWord wOff value (ConcreteBuf simplifiedBuf)) dst)
+          | otherwise = orig
+            where simplifiedBuf = BS.take (unsafeInto (n+sz)) buf
     go (CopySlice a b c d f) = copySlice a b c d f
 
     go (IndexWord a b) = indexWord a b
