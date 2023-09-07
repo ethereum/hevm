@@ -592,8 +592,9 @@ readStorage slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
   -- if the slots don't match (see previous guard) and are lits, we can skip this write
   (Lit _, Lit _) -> readStorage slot prev
 
-  -- slot is for a mapping with a different id than prevSlot -> skip write
-  (MappingSlot idA _, MappingSlot idB _) | idsDontMatch idA idB -> readStorage slot prev
+  -- slot is for a map + map -> skip write
+  (MappingSlot idA _, MappingSlot idB _)   | idsDontMatch idA idB -> readStorage slot prev
+  (MappingSlot _ keyA, MappingSlot _ keyB) | surelyNotEq keyA keyB -> readStorage slot prev
 
   -- special case of array + map -> skip write
   (ArraySlotWithOffset idA _, Keccak64Bytes) | BS.length idA /= 64 -> readStorage slot prev
@@ -609,22 +610,27 @@ readStorage slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
 
   -- case of array + array, but different id's or different concrete offsets
   -- zero offs vs zero offs
-  (ArraySlotZero idA, ArraySlotZero idB)                  | idA /= idB -> readStorage slot prev
+  (ArraySlotZero idA, ArraySlotZero idB)                   | idA /= idB -> readStorage slot prev
   -- zero offs vs non-zero offs
-  (ArraySlotZero idA, ArraySlotWithOffset idB _)          | idA /= idB -> readStorage slot prev
-  (ArraySlotZero _, ArraySlotWithOffset _ (Lit offB))     | offB /= 0 -> readStorage slot prev
+  (ArraySlotZero idA, ArraySlotWithOffset idB _)           | idA /= idB -> readStorage slot prev
+  (ArraySlotZero _, ArraySlotWithOffset _ (Lit offB))      | offB /= 0 -> readStorage slot prev
   -- non-zero offs vs zero offs
-  (ArraySlotWithOffset idA _, ArraySlotZero idB)          | idA /= idB -> readStorage slot prev
-  (ArraySlotWithOffset _ (Lit offA), ArraySlotZero _)     | offA /= 0 -> readStorage slot prev
+  (ArraySlotWithOffset idA _, ArraySlotZero idB)           | idA /= idB -> readStorage slot prev
+  (ArraySlotWithOffset _ (Lit offA), ArraySlotZero _)      | offA /= 0 -> readStorage slot prev
   -- non-zero offs vs non-zero offs
-  (ArraySlotWithOffset idA _, ArraySlotWithOffset idB _)  | idA /= idB -> readStorage slot prev
-  (ArraySlotWithOffset _ (Lit offA), ArraySlotWithOffset _ (Lit offB)) | offA /= offB -> readStorage slot prev
+  (ArraySlotWithOffset idA _, ArraySlotWithOffset idB _)   | idA /= idB -> readStorage slot prev
+  (ArraySlotWithOffset _ offA, ArraySlotWithOffset _ offB) | surelyNotEq offA offB -> readStorage slot prev
 
-  -- if the array offset or mapping keys are literals and differ -> skip write
-  (MappingSlot _ (Lit keyA), MappingSlot _ (Lit keyB))                 | keyA /= keyB -> readStorage slot prev
 
   -- we are unable to determine statically whether or not we can safely move deeper in the write chain, so return an abstract term
   _ -> Just $ SLoad slot s
+
+surelyNotEq :: Expr a -> Expr a -> Bool
+surelyNotEq (Lit a) (Lit b) = a /= b
+surelyNotEq (Add (Lit l1) (Var v1)) (Add (Lit l2) (Var v2)) = l1 /= l2 && v1 == v2
+surelyNotEq (Var v1) (Add (Lit l2) (Var v2)) = l2 /= 0 && v1 == v2
+surelyNotEq (Add (Lit l1) (Var v1)) (Var v2) = l1 /= 0 && v1 == v2
+surelyNotEq _ _ = False
 
 -- storage slots for maps are determined by (keccak (bytes32(key) ++ bytes32(id)))
 pattern MappingSlot :: ByteString -> Expr EWord -> Expr EWord

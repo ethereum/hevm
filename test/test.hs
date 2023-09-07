@@ -91,6 +91,7 @@ tests = testGroup "hevm"
         }
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       -- putStrLn $ T.unpack $ formatExpr expr
        assertEqual "Expression is clean." (badStoresInExpr expr) False
     , testCase "simplify-storage-array-only-2" $ do
        Just c <- solcRuntime "MyContract"
@@ -107,6 +108,24 @@ tests = testGroup "hevm"
         }
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       -- putStrLn $ T.unpack $ formatExpr expr
+       assertEqual "Expression is clean." (badStoresInExpr expr) False
+    , testCase "simplify-storage-array-only-3" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint b;
+          uint[] a;
+          function transfer(uint acct, uint val1) public {
+            unchecked {
+              a[acct] = val1;
+              assert(a[acct] == val1);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       -- putStrLn $ T.unpack $ formatExpr expr
        assertEqual "Expression is clean." (badStoresInExpr expr) False
     , testCase "simplify-storage-map-only-static" $ do
        Just c <- solcRuntime "MyContract"
@@ -139,6 +158,7 @@ tests = testGroup "hevm"
         }
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       -- putStrLn $ T.unpack $ formatExpr expr
        assertEqual "Expression is clean." (badStoresInExpr expr) False
     , testCase "simplify-storage-map-and-array" $ do
        Just c <- solcRuntime "MyContract"
@@ -161,6 +181,7 @@ tests = testGroup "hevm"
         }
        |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       -- putStrLn $ T.unpack $ formatExpr expr
        assertEqual "Expression is clean." (badStoresInExpr expr) False
     ]
   , testGroup "StorageTests"
