@@ -1134,38 +1134,33 @@ data ConstState = ConstState
 constFoldProp :: [Prop] -> Bool
 constFoldProp ps = (execState (mapM (go . evalProp) ps) (ConstState mempty True)).canBeSat
   where
-    go :: Prop -> State ConstState Prop
+    go :: Prop -> State ConstState ()
     go x = case x of
         PEq a (Lit l) -> do
           s <- get
           case Map.lookup a s.values of
             Just l2 -> case l==l2 of
-                True -> pure $ PBool True
+                True -> pure ()
                 False -> do
                   put $ s{canBeSat=False}
-                  pure $ PBool False
             Nothing -> do
               let vs' = Map.insert a l s.values
               put $ s{values=vs'}
-              pure $ PBool True
         PEq a@(Lit _) b -> go (PEq b a)
         PAnd a b -> do
-          _ <- go a
-          _ <- go b
-          pure $ PBool True
+          go a
+          go b
         POr a b -> do
           let
             v1 = constFoldProp [a]
             v2 = constFoldProp [b]
           _ <- if (Prelude.not v1) then go a
-                                   else pure $ PBool True
+                                   else pure ()
           _ <- if (Prelude.not v2) then go b
-                                   else pure $ PBool True
+                                   else pure ()
           s <- get
           put $ s{canBeSat=(s.canBeSat && (v1 || v2))}
-          pure $ POr a b
         PBool False -> do
           s <- get
           put $ s{canBeSat=False}
-          pure $ PBool False
-        e -> pure e
+        _ -> pure ()
