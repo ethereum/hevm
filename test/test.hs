@@ -2239,34 +2239,39 @@ tests = testGroup "hevm"
   [
     testCase "prop-simp-bool1" $ do
       let
-        a = Success [PAnd (PBool True) (PBool False)] mempty (ConcreteBuf "") mempty
+        a = successGen [PAnd (PBool True) (PBool False)]
         b = Expr.simplify a
-      assertEqual "Must simplify down" (Success [PBool False] mempty (ConcreteBuf "") mempty) b
+      assertEqual "Must simplify down" (successGen [PBool False]) b
     , testCase "prop-simp-bool2" $ do
       let
-        a = Success [POr (PBool True) (PBool False)] mempty (ConcreteBuf "") mempty
+        a = successGen [POr (PBool True) (PBool False)]
         b = Expr.simplify a
-      assertEqual "Must simplify down" (Success [] mempty (ConcreteBuf "") mempty) b
+      assertEqual "Must simplify down" (successGen []) b
     , testCase "prop-simp-LT" $ do
       let
-        a = Success [PLT (Lit 1) (Lit 2)] mempty (ConcreteBuf "") mempty
+        a = successGen [PLT (Lit 1) (Lit 2)]
         b = Expr.simplify a
-      assertEqual "Must simplify down" (Success [] mempty (ConcreteBuf "") mempty) b
+      assertEqual "Must simplify down" (successGen []) b
     , testCase "prop-simp-GEq" $ do
       let
-        a = Success [PGEq (Lit 1) (Lit 2)] mempty (ConcreteBuf "") mempty
+        a = successGen [PGEq (Lit 1) (Lit 2)]
         b = Expr.simplify a
-      assertEqual "Must simplify down" (Success [PBool False] mempty (ConcreteBuf "") mempty) b
+      assertEqual "Must simplify down" (successGen [PBool False]) b
     , testCase "prop-simp-multiple" $ do
       let
-        a = Success [PBool False, PBool True] mempty (ConcreteBuf "") mempty
+        a = successGen [PBool False, PBool True]
         b = Expr.simplify a
-      assertEqual "Must simplify down" (Success [PBool False] mempty (ConcreteBuf "") mempty) b
+      assertEqual "Must simplify down" (successGen [PBool False]) b
     , testCase "prop-simp-expr" $ do
       let
-        a = Success [PEq (Add (Lit 1) (Lit 2)) (Sub (Lit 4) (Lit 1))] mempty (ConcreteBuf "") mempty
+        a = successGen [PEq (Add (Lit 1) (Lit 2)) (Sub (Lit 4) (Lit 1))]
         b = Expr.simplify a
-      assertEqual "Must simplify down" (Success [] mempty (ConcreteBuf "") mempty) b
+      assertEqual "Must simplify down" (successGen []) b
+    , testCase "prop-simp-impl" $ do
+      let
+        a = successGen [PImpl (PBool False) (PEq (Var "abc") (Var "bcd"))]
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (successGen []) b
   ]
   , testGroup "equivalence-checking"
     [
@@ -3365,3 +3370,6 @@ checkPost post c sig = do
   case cexs of
     [] -> pure $ Right e
     cs -> pure $ Left cs
+
+successGen :: [Prop] -> Expr End
+successGen props = Success props mempty (ConcreteBuf "") mempty
