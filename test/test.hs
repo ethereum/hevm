@@ -2235,6 +2235,39 @@ tests = testGroup "hevm"
           assertBool "Did not find expected storage cex" testCex
           putStrLn "Expected counterexample found"
   ]
+  , testGroup "simplification-working"
+  [
+    testCase "prop-simp-bool1" $ do
+      let
+        a = Success [PAnd (PBool True) (PBool False)] mempty (ConcreteBuf "") mempty
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (Success [PBool False] mempty (ConcreteBuf "") mempty) b
+    , testCase "prop-simp-bool2" $ do
+      let
+        a = Success [POr (PBool True) (PBool False)] mempty (ConcreteBuf "") mempty
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (Success [] mempty (ConcreteBuf "") mempty) b
+    , testCase "prop-simp-LT" $ do
+      let
+        a = Success [PLT (Lit 1) (Lit 2)] mempty (ConcreteBuf "") mempty
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (Success [] mempty (ConcreteBuf "") mempty) b
+    , testCase "prop-simp-GEq" $ do
+      let
+        a = Success [PGEq (Lit 1) (Lit 2)] mempty (ConcreteBuf "") mempty
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (Success [PBool False] mempty (ConcreteBuf "") mempty) b
+    , testCase "prop-simp-multiple" $ do
+      let
+        a = Success [PBool False, PBool True] mempty (ConcreteBuf "") mempty
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (Success [PBool False] mempty (ConcreteBuf "") mempty) b
+    , testCase "prop-simp-expr" $ do
+      let
+        a = Success [PEq (Add (Lit 1) (Lit 2)) (Sub (Lit 4) (Lit 1))] mempty (ConcreteBuf "") mempty
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (Success [] mempty (ConcreteBuf "") mempty) b
+  ]
   , testGroup "equivalence-checking"
     [
       testCase "eq-yul-simple-cex" $ do
