@@ -585,7 +585,7 @@ readStorage _ (GVar _) = internalError "Can't read from a GVar"
 readStorage slot s@(AbstractStore _) = Just $ SLoad slot s
 readStorage (Lit l) (ConcreteStore s) = Lit <$> Map.lookup l s
 readStorage slot store@(ConcreteStore _) = Just $ SLoad slot store
-readStorage (structureArraySlots -> slot) s@(SStore (structureArraySlots -> prevSlot) val prev) = case (prevSlot, slot) of
+readStorage slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
   -- if address and slot match then we return the val in this write
   _ | prevSlot == slot -> Just val
 
@@ -705,7 +705,7 @@ getAddr (GVar _) = error "cannot determine addr of a GVar"
 simplify :: Expr a -> Expr a
 simplify e = if (mapExpr go e == e)
              then e
-             else simplify (mapExpr go e)
+             else simplify (mapExpr go (structureArraySlots e))
   where
     go :: Expr a -> Expr a
     -- redundant CopySlice

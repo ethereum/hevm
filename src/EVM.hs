@@ -1310,7 +1310,7 @@ accessStorage
 accessStorage addr slot continue = do
   use (#env % #contracts % at addr) >>= \case
     Just c ->
-      case readStorage slot c.storage of
+      case readStorage (Expr.structureArraySlots slot) c.storage of
         Just x ->
           continue x
         Nothing ->
@@ -1321,7 +1321,7 @@ accessStorage addr slot continue = do
                 contract <- preuse (#cache % #fetched % ix addr')
                 case contract of
                   Nothing -> internalError "contract marked external not found in cache"
-                  Just fetched -> case readStorage (Lit slot') fetched.storage of
+                  Just fetched -> case readStorage (Expr.structureArraySlots (Lit slot')) fetched.storage of
                               Nothing -> mkQuery addr' slot'
                               Just val -> continue val
           else do
