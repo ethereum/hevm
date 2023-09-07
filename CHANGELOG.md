@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Contract code can now be fully abstract. Calls into contracts with unknown code will fail with `UnexpectedSymbolicArg`.
 - Run expression simplification on branch conditions
 - Improved Prop simplification
+- CopySlice+WriteWord+ConcreteBuf now truncates ConcreteBuf in special cases
 - Better simplification of Eq IR elements
 
 ## API Changes
