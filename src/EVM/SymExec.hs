@@ -28,7 +28,7 @@ import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
-import EVM (makeVm, abstractContract, getCodeLocation, isValidJumpDest)
+import EVM (makeVm, abstractContract, initialContract, getCodeLocation, isValidJumpDest)
 import EVM.Exec
 import EVM.Fetch qualified as Fetch
 import EVM.ABI
@@ -207,7 +207,7 @@ loadSymVM
   -> ST s (VM s)
 loadSymVM x callvalue cd create =
   (makeVm $ VMOpts
-    { contract = abstractContract x (SymAddr "entrypoint")
+    { contract = if create then initialContract x else abstractContract x (SymAddr "entrypoint")
     , calldata = cd
     , value = callvalue
     , baseState = AbstractBase

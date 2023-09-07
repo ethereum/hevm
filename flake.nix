@@ -3,7 +3,7 @@
 
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
-    nixpkgs.url = "github:nixos/nixpkgs/haskell-updates";
+    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     foundry.url = "github:shazow/foundry.nix/monthly";
     flake-compat = {
       url = "github:edolstra/flake-compat";
@@ -49,7 +49,7 @@
             Cabal-syntax = dontCheck (self.callCabal2nix "Cabal-syntax" "${cabal-head}/Cabal-syntax" {});
             Cabal = dontCheck (self.callCabal2nix "Cabal" "${cabal-head}/Cabal" {});
             unix = dontCheck (doJailbreak super.unix_2_8_1_1);
-            filepath = dontCheck (doJailbreak super.filepath_1_4_100_3);
+            filepath = dontCheck (doJailbreak super.filepath_1_4_100_4);
             process = dontCheck (doJailbreak super.process_1_6_17_0);
             directory = dontCheck (doJailbreak (super.directory_1_3_7_1));
             tasty = dontCheck (doJailbreak super.tasty);

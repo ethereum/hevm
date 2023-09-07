@@ -1258,14 +1258,14 @@ query = assign #result . Just . HandleEffect . Query
 choose :: Choose s -> EVM s ()
 choose = assign #result . Just . HandleEffect . Choose
 
-branch :: Expr EWord -> (Bool -> EVM s ()) -> EVM s ()
+branch :: forall s. Expr EWord -> (Bool -> EVM s ()) -> EVM s ()
 branch cond continue = do
   loc <- codeloc
   pathconds <- use #constraints
   query $ PleaseAskSMT cond pathconds (choosePath loc)
   where
     condSimp = Expr.simplify cond
-    -- choosePath :: CodeLocation -> BranchCondition -> EVM s ()
+    choosePath :: CodeLocation -> BranchCondition -> EVM s ()
     choosePath loc (Case v) = do
       assign #result Nothing
       pushTo #constraints $ if v then Expr.evalProp (condSimp ./= Lit 0) else Expr.evalProp (condSimp .== Lit 0)
@@ -1646,6 +1646,19 @@ cheatActions =
       action "warp(uint256)" $
         \sig _ _ input -> case decodeStaticArgs 0 1 input of
           [x]  -> assign (#block % #timestamp) x
+          _ -> vmError (BadCheatCode sig),
+
+      action "deal(address,uint256)" $
+        \sig _ _ input -> case decodeStaticArgs 0 2 input of
+          [a, amt] ->
+            forceAddr a "vm.deal: cannot decode target into an address" $ \usr ->
+              fetchAccount usr $ \_ -> do
+                assign (#env % #contracts % ix usr % #balance) amt
+          _ -> vmError (BadCheatCode sig),
+
+      action "assume(bool)" $
+        \sig _ _ input -> case decodeStaticArgs 0 1 input of
+          [c] -> modifying #constraints ((:) (PEq c (Lit 1)))
           _ -> vmError (BadCheatCode sig),
 
       action "roll(uint256)" $
