@@ -607,12 +607,19 @@ readStorage slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
   (Lit a, Keccak _) | a < 255 -> readStorage slot prev
   (Keccak _, Lit a) | a < 255 -> readStorage slot prev
 
-  -- case of array + array, but different id's
-  (ArraySlotZero idA, ArraySlotZero idB)                 | idA /= idB -> readStorage slot prev
-  (ArraySlotWithOffset idA _, ArraySlotWithOffset idB _) | idA /= idB -> readStorage slot prev
+  -- case of array + array, but different id's or different concrete offsets
+  -- zero offs vs non-zero offs
+  (ArraySlotZero idA, ArraySlotZero idB)                  | idA /= idB -> readStorage slot prev
+  (ArraySlotZero idA, ArraySlotWithOffset idB _)          | idA /= idB -> readStorage slot prev
+  (ArraySlotZero _, ArraySlotWithOffset _ (Lit offB))     | offB /= 0 -> readStorage slot prev
+  -- non-zero offs vs zero offs
+  (ArraySlotWithOffset idA _, ArraySlotZero idB)          | idA /= idB -> readStorage slot prev
+  (ArraySlotWithOffset _ (Lit offA), ArraySlotZero _)     | offA /= 0 -> readStorage slot prev
+  -- non-zero offs vs non-zero offs
+  (ArraySlotWithOffset idA _, ArraySlotWithOffset idB _)  | idA /= idB -> readStorage slot prev
+  (ArraySlotWithOffset _ (Lit offA), ArraySlotWithOffset _ (Lit offB)) | offA /= offB -> readStorage slot prev
 
   -- if the array offset or mapping keys are literals and differ -> skip write
-  (ArraySlotWithOffset _ (Lit offA), ArraySlotWithOffset _ (Lit offB)) | offA /= offB -> readStorage slot prev
   (MappingSlot _ (Lit keyA), MappingSlot _ (Lit keyB))                 | keyA /= keyB -> readStorage slot prev
 
   -- we are unable to determine statically whether or not we can safely move deeper in the write chain, so return an abstract term
