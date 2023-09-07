@@ -365,6 +365,18 @@ checkAssert
 checkAssert solvers errs c signature' concreteArgs opts =
   verifyContract solvers c signature' concreteArgs opts Nothing (Just $ checkAssertions errs)
 
+getExpr
+  :: SolverGroup
+  -> ByteString
+  -> Maybe Sig
+  -> [String]
+  -> VeriOpts
+  -> IO (Expr End)
+getExpr solvers c signature' concreteArgs opts = do
+      preState <- stToIO $ abstractVM (mkCalldata signature' concreteArgs) c Nothing False
+      exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
+      if opts.simp then (pure $ Expr.simplify exprInter) else pure exprInter
+
 {- | Checks if an assertion violation has been encountered
 
   hevm recognises the following as an assertion violation:

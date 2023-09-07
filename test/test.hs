@@ -75,8 +75,72 @@ runSubSet p = defaultMain . applyPattern p $ tests
 tests :: TestTree
 tests = testGroup "hevm"
   [ Tracing.tests
-  , testGroup "decomp-storage"
-    [ testCase "decompose1" $ do
+  , testGroup "simplify-storage"
+    [ testCase "simplify-storage-array-only-static" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[] a;
+          function transfer(uint acct, uint val1, uint val2) public {
+            unchecked {
+              a[0] = val1 + 1;
+              a[1] = val2 + 2;
+              assert(a[0]+a[1] == val1 + val2 + 3);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       assertEqual "Expression is clean." (badStoresInExpr expr) False
+    , testCase "simplify-storage-array-only-2" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[] a;
+          function transfer(uint acct, uint val1, uint val2) public {
+            unchecked {
+              a[acct] = val1 + 1;
+              a[acct+1] = val2 + 2;
+              assert(a[acct]+a[acct+1] == val1 + val2 + 3);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       assertEqual "Expression is clean." (badStoresInExpr expr) False
+    , testCase "simplify-storage-map-only-static" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping(uint => uint) items1;
+          function transfer(uint acct, uint val1, uint val2) public {
+            unchecked {
+              items1[0] = val1+1;
+              items1[1] = val2+2;
+              assert(items1[0]+items1[1] == val1 + val2 + 3);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       assertEqual "Expression is clean." (badStoresInExpr expr) False
+    , testCase "simplify-storage-map-only-2" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping(uint => uint) items1;
+          function transfer(uint acct, uint val1, uint val2) public {
+            unchecked {
+              items1[acct] = val1+1;
+              items1[acct+1] = val2+2;
+              assert(items1[acct]+items1[acct+1] == val1 + val2 + 3);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       assertEqual "Expression is clean." (badStoresInExpr expr) False
+    , testCase "simplify-storage-map-and-array" $ do
        Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -84,7 +148,6 @@ tests = testGroup "hevm"
           mapping(uint => uint) items1;
           mapping(uint => uint) items2;
           function transfer(uint acct, uint val1, uint val2) public {
-            //items1[0x5F8D31a0fdc254703AA47f6a56ACC841C7695f6F] = 5;
             uint beforeVal1 = items1[acct];
             uint beforeVal2 = items2[acct];
             unchecked {
@@ -96,10 +159,9 @@ tests = testGroup "hevm"
             }
           }
         }
-        |]
-       (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
-       putStrLn  $ "counterexample found. Val: " <> (show $ getVar ctr "arg2") -- <> " fromAddr: " <> (show $ getVar ctr "arg1") -- <> " toAddr: " <> (show $ getVar ctr "toAddr")
-       putStrLn $ "OK"
+       |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       assertEqual "Expression is clean." (badStoresInExpr expr) False
     ]
   , testGroup "StorageTests"
     [ testCase "read-from-sstore" $ assertEqual ""
@@ -3250,6 +3312,24 @@ genWordArith litFreq sz = frequency
   ]
  where
    subWord = genWordArith (litFreq `div` 2) (sz `div` 2)
+
+-- Used to check for unsimplified expressions
+newtype FoundBad = FoundBad { bad :: Bool } deriving (Show)
+initFoundBad :: FoundBad
+initFoundBad = FoundBad { bad = False }
+
+-- Finds SLoad -> SStore. This should not occur in most scenarios
+-- as we can simplify them away
+badStoresInExpr :: Expr a -> Bool
+badStoresInExpr expr = bad
+  where
+    FoundBad bad = execState (mapExprM findBadStore expr) initFoundBad
+    findBadStore :: Expr a-> State FoundBad (Expr a)
+    findBadStore e = case e of
+      (SLoad _ (SStore _ _ _)) -> do
+        put (FoundBad { bad = True })
+        pure e
+      _ -> pure e
 
 defaultBuf :: Int -> Gen (Expr Buf)
 defaultBuf = genBuf (4_000_000)
