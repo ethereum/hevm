@@ -1141,7 +1141,7 @@ constFoldProp ps = (execState (mapM (go . evalProp) ps) (ConstState mempty True)
           case Map.lookup a s.values of
             Just l2 -> case l==l2 of
                 True -> pure ()
-                False -> put $ s{canBeSat=False}
+                False -> put ConstState {canBeSat=False, values=mempty}
             Nothing -> do
               let vs' = Map.insert a l s.values
               put $ s{values=vs'}
@@ -1159,5 +1159,5 @@ constFoldProp ps = (execState (mapM (go . evalProp) ps) (ConstState mempty True)
                                    else pure ()
           s <- get
           put $ s{canBeSat=(s.canBeSat && (v1 || v2))}
-        PBool False -> put $ s{canBeSat=False}
+        PBool False -> put $ ConstState {canBeSat=False, values=mempty}
         _ -> pure ()
