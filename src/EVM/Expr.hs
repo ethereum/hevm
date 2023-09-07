@@ -608,8 +608,9 @@ readStorage slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
   (Keccak _, Lit a) | a < 255 -> readStorage slot prev
 
   -- case of array + array, but different id's or different concrete offsets
-  -- zero offs vs non-zero offs
+  -- zero offs vs zero offs
   (ArraySlotZero idA, ArraySlotZero idB)                  | idA /= idB -> readStorage slot prev
+  -- zero offs vs non-zero offs
   (ArraySlotZero idA, ArraySlotWithOffset idB _)          | idA /= idB -> readStorage slot prev
   (ArraySlotZero _, ArraySlotWithOffset _ (Lit offB))     | offB /= 0 -> readStorage slot prev
   -- non-zero offs vs zero offs
