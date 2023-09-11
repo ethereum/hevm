@@ -583,59 +583,70 @@ readStorage' loc store = case readStorage loc store of
 readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
 readStorage w st = go (structureArraySlots w) (structureArraySlots st)
   where
-  go :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
-  go _ (GVar _) = internalError "Can't read from a GVar"
-  go slot s@(AbstractStore _) = Just $ SLoad slot s
-  go (Lit l) (ConcreteStore s) = Lit <$> Map.lookup l s
-  go slot store@(ConcreteStore _) = Just $ SLoad slot store
-  go slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
-    -- if address and slot match then we return the val in this write
-    _ | prevSlot == slot -> Just val
+    go :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
+    go _ (GVar _) = internalError "Can't read from a GVar"
+    go slot s@(AbstractStore _) = Just $ SLoad slot s
+    go (Lit l) (ConcreteStore s) = Lit <$> Map.lookup l s
+    go slot store@(ConcreteStore _) = Just $ SLoad slot store
+    go slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
+      -- if address and slot match then we return the val in this write
+      _ | prevSlot == slot -> Just val
 
-    -- if the slots don't match (see previous guard) and are lits, we can skip this write
-    (Lit _, Lit _) -> go slot prev
+      -- if the slots don't match (see previous guard) and are lits, we can skip this write
+      (Lit _, Lit _) -> go slot prev
 
-    -- slot is for a map + map -> skip write
-    (MappingSlot idA _, MappingSlot idB _)     | idsDontMatch idA idB  -> go slot prev
-    (MappingSlot _ keyA, MappingSlot _ keyB)   | surelyNotEq keyA keyB -> go slot prev
+      -- slot is for a map + map -> skip write
+      (MappingSlot idA _, MappingSlot idB _)     | idsDontMatch idA idB  -> go slot prev
+      (MappingSlot _ keyA, MappingSlot _ keyB)   | surelyNotEq keyA keyB -> go slot prev
 
-    -- special case of array + map -> skip write
-    (ArraySlotWithOffset idA _, Keccak64Bytes) | BS.length idA /= 64 -> go slot prev
-    (ArraySlotZero idA, Keccak64Bytes)         | BS.length idA /= 64 -> go slot prev
+      -- special case of array + map -> skip write
+      (ArraySlotWithOffset idA _, Keccak64Bytes) | BS.length idA /= 64 -> go slot prev
+      (ArraySlotZero idA, Keccak64Bytes)         | BS.length idA /= 64 -> go slot prev
 
-    -- special case of array + map -> skip write
-    (Keccak64Bytes, ArraySlotWithOffset idA _) | BS.length idA /= 64 -> go slot prev
-    (Keccak64Bytes, ArraySlotZero idA)         | BS.length idA /= 64 -> go slot prev
+      -- special case of array + map -> skip write
+      (Keccak64Bytes, ArraySlotWithOffset idA _) | BS.length idA /= 64 -> go slot prev
+      (Keccak64Bytes, ArraySlotZero idA)         | BS.length idA /= 64 -> go slot prev
 
-    -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
-    (Lit a, Keccak _) | a < 255 -> go slot prev
-    (Keccak _, Lit a) | a < 255 -> go slot prev
+      -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
+      (Lit a, Keccak _) | a < 255 -> go slot prev
+      (Keccak _, Lit a) | a < 255 -> go slot prev
 
-    -- case of array + array, but different id's or different concrete offsets
-    -- zero offs vs zero offs
-    (ArraySlotZero idA, ArraySlotZero idB)                   | idA /= idB -> go slot prev
-    -- zero offs vs non-zero offs
-    (ArraySlotZero idA, ArraySlotWithOffset idB _)           | idA /= idB -> go slot prev
-    (ArraySlotZero _, ArraySlotWithOffset _ (Lit offB))      | offB /= 0  -> go slot prev
-    -- non-zero offs vs zero offs
-    (ArraySlotWithOffset idA _, ArraySlotZero idB)           | idA /= idB -> go slot prev
-    (ArraySlotWithOffset _ (Lit offA), ArraySlotZero _)      | offA /= 0  -> go slot prev
-    -- non-zero offs vs non-zero offs
-    (ArraySlotWithOffset idA _, ArraySlotWithOffset idB _)   | idA /= idB -> go slot prev
-    (ArraySlotWithOffset _ offA, ArraySlotWithOffset _ offB) | surelyNotEq offA offB -> go slot prev
+      -- the chance of adding a value <= 2^32 to any given keccack output
+      -- leading to an overflow is effectively zero. the chance of an overflow
+      -- occuring here is 2^32/2^256 = 2^-224, which is close enough to zero
+      -- for our purposes. This lets us completely simplify reads from write
+      -- chains involving writes to arrays at literal offsets.
+      (Lit a, Add (Keccak _) (Lit b)) | a < 255, b < maxW32 -> go slot prev
+      (Add (Keccak _) (Lit a), Lit b) | a < 255, b < maxW32 -> go slot prev
 
+      -- case of array + array, but different id's or different concrete offsets
+      -- zero offs vs zero offs
+      (ArraySlotZero idA, ArraySlotZero idB)                   | idA /= idB -> go slot prev
+      -- zero offs vs non-zero offs
+      (ArraySlotZero idA, ArraySlotWithOffset idB _)           | idA /= idB -> go slot prev
+      (ArraySlotZero _, ArraySlotWithOffset _ (Lit offB))      | offB /= 0  -> go slot prev
+      -- non-zero offs vs zero offs
+      (ArraySlotWithOffset idA _, ArraySlotZero idB)           | idA /= idB -> go slot prev
+      (ArraySlotWithOffset _ (Lit offA), ArraySlotZero _)      | offA /= 0  -> go slot prev
+      -- non-zero offs vs non-zero offs
+      (ArraySlotWithOffset idA _, ArraySlotWithOffset idB _)   | idA /= idB -> go slot prev
 
-    -- we are unable to determine statically whether or not we can safely move deeper in the write chain, so return an abstract term
-    _ -> Just $ SLoad slot s
+      (ArraySlotWithOffset _ offA, ArraySlotWithOffset _ offB) | surelyNotEq offA offB -> go slot prev
 
-surelyNotEq :: Expr a -> Expr a -> Bool
-surelyNotEq (Lit a) (Lit b) = a /= b
--- never equal: x+y (y is concrete) vs x+z (z is concrete), y!=z
-surelyNotEq (Add (Lit l1) v1) (Add (Lit l2) v2) = l1 /= l2 && v1 == v2
--- never equal: x+y (y is concrete, non-zero) vs x
-surelyNotEq v1 (Add (Lit l2) v2) = l2 /= 0 && v1 == v2
-surelyNotEq (Add (Lit l1) v1) v2 = l1 /= 0 && v1 == v2
-surelyNotEq _ _ = False
+      -- we are unable to determine statically whether or not we can safely move deeper in the write chain, so return an abstract term
+      _ -> Just $ SLoad slot s
+
+    surelyNotEq :: Expr a -> Expr a -> Bool
+    surelyNotEq (Lit a) (Lit b) = a /= b
+    -- never equal: x+y (y is concrete) vs x+z (z is concrete), y!=z
+    surelyNotEq (Add (Lit l1) v1) (Add (Lit l2) v2) = l1 /= l2 && v1 == v2
+    -- never equal: x+y (y is concrete, non-zero) vs x
+    surelyNotEq v1 (Add (Lit l2) v2) = l2 /= 0 && v1 == v2
+    surelyNotEq (Add (Lit l1) v1) v2 = l1 /= 0 && v1 == v2
+    surelyNotEq _ _ = False
+
+    maxW32 :: W256
+    maxW32 = into (maxBound :: Word32)
 
 -- storage slots for maps are determined by (keccak (bytes32(key) ++ bytes32(id)))
 pattern MappingSlot :: ByteString -> Expr EWord -> Expr EWord
