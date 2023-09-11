@@ -1153,10 +1153,8 @@ constFoldProp ps = (execState (mapM (go . evalProp) ps) (ConstState mempty True)
           let
             v1 = constFoldProp [a]
             v2 = constFoldProp [b]
-          _ <- if (Prelude.not v1) then go a
-                                   else pure ()
-          _ <- if (Prelude.not v2) then go b
-                                   else pure ()
+          unless v1 $ go a
+          unless v2 $ go b
           s <- get
           put $ s{canBeSat=(s.canBeSat && (v1 || v2))}
         PBool False -> put $ ConstState {canBeSat=False, values=mempty}
