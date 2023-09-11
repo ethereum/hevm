@@ -14,19 +14,24 @@ import Data.ByteString qualified as BS
 import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
 import Data.List
 import Data.Map.Strict qualified as Map
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, isJust)
 import Data.Semigroup (Any, Any(..), getAny)
 import Data.Vector qualified as V
 import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
 import Witch (unsafeInto, into, tryFrom)
+import Data.Containers.ListUtils (nubOrd)
 
 import Optics.Core
 
 import EVM.Traversals
 import EVM.Types
 
+-- ** Constants **
+
+maxLit :: W256
+maxLit = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 
 -- ** Stack Ops ** ---------------------------------------------------------------------------------
 
@@ -736,7 +741,7 @@ getAddr :: Expr Storage -> Maybe (Expr EAddr)
 getAddr (SStore _ _ p) = getAddr p
 getAddr (AbstractStore a) = Just a
 getAddr (ConcreteStore _) = Nothing
-getAddr (GVar _) = error "cannot determine addr of a GVar"
+getAddr (GVar _) = internalError "cannot determine addr of a GVar"
 
 
 -- ** Whole Expression Simplification ** -----------------------------------------------------------
@@ -750,6 +755,11 @@ simplify e = if (mapExpr go e == e)
              else simplify (mapExpr go (structureArraySlots e))
   where
     go :: Expr a -> Expr a
+
+    go (Failure a b c) = Failure (simplifyProps a) b c
+    go (Partial a b c) = Partial (simplifyProps a) b c
+    go (Success a b c d) = Success (simplifyProps a) b c d
+
     -- redundant CopySlice
     go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
 
@@ -776,8 +786,18 @@ simplify e = if (mapExpr go e == e)
     go (WriteWord a b c) = writeWord a b c
 
     go (WriteByte a b c) = writeByte a b c
-    go (CopySlice srcOff@(Lit 0) dstOff size@(Lit sz) (WriteWord (Lit 0) value (ConcreteBuf buf)) dst) = (CopySlice srcOff dstOff size (WriteWord (Lit 0) value (ConcreteBuf simplifiedBuf)) dst)
-        where simplifiedBuf = BS.take (unsafeInto sz) buf
+
+    -- truncate some concrete source buffers to the portion relevant for the CopySlice if we're copying a fully concrete region
+    go orig@(CopySlice srcOff@(Lit n) dstOff size@(Lit sz)
+        -- It doesn't matter what wOffs we write to, because only the first
+        -- n+sz of ConcreteBuf will be used by CopySlice
+        (WriteWord wOff value (ConcreteBuf buf)) dst)
+          -- Let's not deal with overflow
+          | n+sz >= n && n+sz >= sz = (CopySlice srcOff dstOff size
+              (WriteWord wOff value (ConcreteBuf simplifiedBuf)) dst)
+          | otherwise = orig
+            where simplifiedBuf = BS.take (unsafeInto (n+sz)) buf
+
     go (CopySlice a b c d f) = copySlice a b c d f
 
     go (IndexWord a b) = indexWord a b
@@ -789,20 +809,19 @@ simplify e = if (mapExpr go e == e)
     go (EVM.Types.LT _ (Lit 0)) = Lit 0
 
     -- normalize all comparisons in terms of LT
-    go (EVM.Types.GT a b) = EVM.Types.LT b a
-    go (EVM.Types.GEq a b) = EVM.Types.LEq b a
-    go (EVM.Types.LEq a b) = EVM.Types.IsZero (EVM.Types.GT a b)
-
+    go (EVM.Types.GT a b) = lt b a
+    go (EVM.Types.GEq a b) = leq b a
+    go (EVM.Types.LEq a b) = EVM.Types.IsZero (gt a b)
     go (IsZero a) = iszero a
 
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
       | a == b = Lit 1
       | otherwise = Lit 0
-    go (Eq (Lit 0) (Sub a b)) = Eq a b
-    go o@(Eq a b)
+    go (Eq (Lit 0) (Sub a b)) = eq a b
+    go (Eq a b)
       | a == b = Lit 1
-      | otherwise = o
+      | otherwise = eq a b
 
     -- redundant ITE
     go (ITE (Lit x) a b)
@@ -838,28 +857,28 @@ simplify e = if (mapExpr go e == e)
     go (Add (Sub orig (Lit x)) (Lit y)) = Add orig (Lit (y-x))
 
     -- redundant add / sub
-    go o@(Sub (Add a b) c)
+    go (Sub (Add a b) c)
       | a == c = b
       | b == c = a
-      | otherwise = o
+      | otherwise = sub (add a b) c
 
     -- add / sub identities
-    go o@(Add a b)
+    go (Add a b)
       | b == (Lit 0) = a
       | a == (Lit 0) = b
-      | otherwise = o
-    go o@(Sub a b)
+      | otherwise = add a b
+    go (Sub a b)
       | a == b = Lit 0
       | b == (Lit 0) = a
-      | otherwise = o
+      | otherwise = sub a b
 
     -- SHL / SHR by 0
-    go o@(SHL a v)
+    go (SHL a v)
       | a == (Lit 0) = v
-      | otherwise = o
-    go o@(SHR a v)
+      | otherwise = shl a v
+    go (SHR a v)
       | a == (Lit 0) = v
-      | otherwise = o
+      | otherwise = shr a v
 
     -- doubled And
     go o@(And a (And b c))
@@ -873,7 +892,7 @@ simplify e = if (mapExpr go e == e)
       | otherwise = o
     go o@(And v (Lit x))
       | x == 0 = Lit 0
-      | x == 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff = v
+      | x == maxLit = v
       | otherwise = o
     go o@(Or (Lit x) b)
       | x == 0 = b
@@ -902,8 +921,21 @@ simplify e = if (mapExpr go e == e)
     go (EVM.Types.Not (EVM.Types.Not a)) = a
 
     -- Some trivial min / max eliminations
-    go (Max (Lit 0) a) = a
-    go (Min (Lit 0) _) = Lit 0
+    go (Max a b) = case (a, b) of
+                    (Lit 0, _) -> b
+                    _ -> EVM.Expr.max a b
+    go (Min a b) = case (a, b) of
+                     (Lit 0, _) -> Lit 0
+                     _ -> EVM.Expr.min a b
+
+    -- Some trivial mul eliminations
+    go (Mul a b) = case (a, b) of
+                     (Lit 0, _) -> Lit 0
+                     (Lit 1, _) -> b
+                     _ -> mul a b
+    -- Some trivial div eliminations
+    go (Div (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
+    go (Div _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
 
     -- If a >= b then the value of the `Max` expression can never be < b
     go o@(LT (Max (Lit a) _) (Lit b))
@@ -919,6 +951,72 @@ simplify e = if (mapExpr go e == e)
            else o
 
     go a = a
+
+
+-- ** Prop Simplification ** -----------------------------------------------------------------------
+
+
+simplifyProps :: [Prop] -> [Prop]
+simplifyProps = remRedundantProps . map evalProp . flattenProps
+
+-- | Evaluate the provided proposition down to its most concrete result
+evalProp :: Prop -> Prop
+evalProp prop =
+  let new = mapProp' go prop
+  in if (new == prop) then prop else evalProp new
+  where
+    go :: Prop -> Prop
+    -- rewrite everything as LEq or LT
+    go (PGEq a b) = PLEq b a
+    go (PGT a b) = PLT b a
+
+    -- LT/LEq comparisions
+    go (PLT  (Var _) (Lit 0)) = PBool False
+    go (PLEq (Lit 0) (Var _)) = PBool True
+    go (PLT  (Lit val) (Var _)) | val == maxLit = PBool False
+    go (PLEq (Var _) (Lit val)) | val == maxLit = PBool True
+    go (PLT (Lit l) (Lit r)) = PBool (l < r)
+    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
+
+    -- negations
+    go (PNeg (PBool b)) = PBool (Prelude.not b)
+    go (PNeg (PNeg a)) = a
+
+    -- And/Or
+    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
+    go (PAnd (PBool False) _) = PBool False
+    go (PAnd _ (PBool False)) = PBool False
+    go (POr (PBool True) _) = PBool True
+    go (POr _ (PBool True)) = PBool True
+    go (POr (PBool l) (PBool r)) = PBool (l || r)
+
+    -- Imply
+    go (PImpl _ (PBool True)) = PBool True
+    go (PImpl (PBool True) b) = b
+    go (PImpl (PBool False) _) = PBool True
+
+    -- Eq
+    go (PEq (Eq a b) (Lit 0)) = PNeg (PEq a b)
+    go (PEq (Eq a b) (Lit 1)) = PEq a b
+    go (PEq (Sub a b) (Lit 0)) = PEq a b
+    go (PEq (Lit l) (Lit r)) = PBool (l == r)
+    go o@(PEq l r)
+      | l == r = PBool True
+      | otherwise = o
+    go p = p
+
+-- Makes [PAnd a b] into [a,b]
+flattenProps :: [Prop] -> [Prop]
+flattenProps [] = []
+flattenProps (a:ax) = case a of
+  PAnd x1 x2 -> x1:x2:flattenProps ax
+  x -> x:flattenProps ax
+
+-- removes redundant (constant True/False) props
+remRedundantProps :: [Prop] -> [Prop]
+remRedundantProps p = collapseFalse . filter (\x -> x /= PBool True) . nubOrd $ p
+  where
+    collapseFalse ps = if isJust $ find (== PBool False) ps then [PBool False] else ps
 
 
 -- ** Conversions ** -------------------------------------------------------------------------------
@@ -1135,43 +1233,6 @@ containsNode p = getAny . foldExpr go (Any False)
 
 inRange :: Int -> Expr EWord -> Prop
 inRange sz e = PAnd (PGEq e (Lit 0)) (PLEq e (Lit $ 2 ^ sz - 1))
-
--- | Evaluate the provided proposition down to its most concrete result
-evalProp :: Prop -> Prop
-evalProp prop =
-  let new = mapProp' go prop
-  in if (new == prop) then prop else evalProp new
-  where
-    go :: Prop -> Prop
-    go (PLT (Lit l) (Lit r)) = PBool (l < r)
-    go (PGT (Lit l) (Lit r)) = PBool (l > r)
-    go (PGEq (Lit l) (Lit r)) = PBool (l >= r)
-    go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
-    go (PNeg (PBool b)) = PBool (Prelude.not b)
-
-    go (PAnd (PBool l) (PBool r)) = PBool (l && r)
-    go (PAnd (PBool False) _) = PBool False
-    go (PAnd _ (PBool False)) = PBool False
-
-    go (POr (PBool l) (PBool r)) = PBool (l || r)
-    go (POr (PBool True) _) = PBool True
-    go (POr _ (PBool True)) = PBool True
-
-    go (PImpl (PBool l) (PBool r)) = PBool ((Prelude.not l) || r)
-    go (PImpl (PBool False) _) = PBool True
-
-    go (PEq (Eq a b) (Lit 0)) = PNeg (PEq a b)
-    go (PEq (Eq a b) (Lit 1)) = PEq a b
-
-    go (PEq (Sub a b) (Lit 0)) = PEq a b
-
-    go (PNeg (PNeg a)) = a
-
-    go (PEq (Lit l) (Lit r)) = PBool (l == r)
-    go o@(PEq l r)
-      | l == r = PBool True
-      | otherwise = o
-    go p = p
 
 -- | images of keccak(bytes32(x)) where 0 <= x < 256
 preImages :: [(W256, Word8)]

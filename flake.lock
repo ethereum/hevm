@@ -3,11 +3,11 @@
     "cabal-head": {
       "flake": false,
       "locked": {
-        "lastModified": 1689711523,
-        "narHash": "sha256-lmECGcDNg+rgGAYTaK6v3xMiblrA+W0LOBDrWvaOr4Y=",
+        "lastModified": 1693777827,
+        "narHash": "sha256-zMwVwTztoQGrNIJSxSdVJjYN77rleRjpC+K5AoIl7po=",
         "owner": "haskell",
         "repo": "cabal",
-        "rev": "baa767a90dd8c0d3bafd82b48ff8e83b779f238a",
+        "rev": "24a4603eebfcf7730f00bb69a02d1568990798d5",
         "type": "github"
       },
       "original": {
@@ -54,11 +54,11 @@
         "systems": "systems"
       },
       "locked": {
-        "lastModified": 1687709756,
-        "narHash": "sha256-Y5wKlQSkgEK2weWdOu4J3riRd+kV/VCgHsqLNTTWQ/0=",
+        "lastModified": 1692799911,
+        "narHash": "sha256-3eihraek4qL744EvQXsK1Ha6C3CR7nnT8X2qWap4RNk=",
         "owner": "numtide",
         "repo": "flake-utils",
-        "rev": "dbabf0ca0c0c4bce6ea5eaf65af5cb694d2082c7",
+        "rev": "f9e7cf818399d17d347f847525c5a5a8032e4e44",
         "type": "github"
       },
       "original": {
@@ -88,11 +88,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1688462028,
-        "narHash": "sha256-+43L9rwbNC1cO0LrinxjaolmyIH/STpL67uf2s6+6C0=",
+        "lastModified": 1691140388,
+        "narHash": "sha256-AH3fx2VFGPRSOjnuakab4T4AdUstwTnFTbnkoU4df8Q=",
         "owner": "shazow",
         "repo": "foundry.nix",
-        "rev": "e8fb5553c880942ac5215fb210ada54841605c62",
+        "rev": "6089aad0ef615ac8c7b0c948d6052fa848c99523",
         "type": "github"
       },
       "original": {
@@ -118,16 +118,16 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1688961476,
-        "narHash": "sha256-oYcCy27BdAfU5H5DDQ7vWdrhaIgRCZ5XASORrwrQAAg=",
+        "lastModified": 1693780807,
+        "narHash": "sha256-diV1X53HjSB3fIcDFieh9tGZkJ3vqJJQhTz89NbYw60=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "3ba086a64b3997ee82e331abaf3af7049e3fc742",
+        "rev": "84ef5335abf541d8148433489e0cf79affae3f89",
         "type": "github"
       },
       "original": {
         "owner": "nixos",
-        "ref": "haskell-updates",
+        "ref": "nixpkgs-unstable",
         "repo": "nixpkgs",
         "type": "github"
       }

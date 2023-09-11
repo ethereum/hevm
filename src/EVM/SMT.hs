@@ -1023,7 +1023,7 @@ getStore getVal abstractReads =
                 (TermQualIdentifier (Unqualified (IdSymbol symbol)), term) ->
                   if symbol == (T.toStrict name)
                   then interpret1DArray Map.empty term
-                  else error "Internal Error: solver did not return model for requested value"
+                  else internalError "solver did not return model for requested value"
                 r -> parseErr r
 
     -- then create a map by adding only the locations that are read by the program

@@ -402,6 +402,12 @@ tests = testGroup "hevm"
     , testProperty "evalProp-equivalence-sym" $ \(p) -> ioProperty $ do
         let simplified = Expr.evalProp p
         checkEquivProp simplified p
+    , testProperty "simpProp-equivalence-sym" $ \(ps :: [Prop]) -> ioProperty $ do
+        let simplified = pand (Expr.simplifyProps ps)
+        checkEquivProp simplified (pand ps)
+    , testProperty "simpProp-equivalence-sym" $ \(LitProp p) -> ioProperty $ do
+        let simplified = pand (Expr.simplifyProps [p])
+        checkEquivProp simplified p
     ]
   , testGroup "MemoryTests"
     [ testCase "read-write-same-byte"  $ assertEqual ""
@@ -745,6 +751,24 @@ tests = testGroup "hevm"
         (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s ->
           checkAssert s [0x41] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "expected counterexample found"
+      ,
+      testCase "vm.deal unknown address" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            interface Vm {
+              function deal(address,uint256) external;
+            }
+            contract C {
+              // this is not supported yet due to restrictions around symbolic address aliasing...
+              function f(address e, uint val) external {
+                  Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+                  vm.deal(e, val);
+                  assert(e.balance == val);
+              }
+            }
+          |]
+        Right e <- reachableUserAsserts c (Just $ Sig "f(address,uint256)" [AbiAddressType, AbiUIntType 256])
+        assertBool "The expression is not partial" $ Expr.containsNode isPartial e
       ,
       testCase "vm.prank underflow" $ do
         Just c <- solcRuntime "C"
@@ -2399,6 +2423,44 @@ tests = testGroup "hevm"
           assertBool "Did not find expected storage cex" testCex
           putStrLn "Expected counterexample found"
   ]
+  , testGroup "simplification-working"
+  [
+    testCase "prop-simp-bool1" $ do
+      let
+        a = successGen [PAnd (PBool True) (PBool False)]
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (successGen [PBool False]) b
+    , testCase "prop-simp-bool2" $ do
+      let
+        a = successGen [POr (PBool True) (PBool False)]
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (successGen []) b
+    , testCase "prop-simp-LT" $ do
+      let
+        a = successGen [PLT (Lit 1) (Lit 2)]
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (successGen []) b
+    , testCase "prop-simp-GEq" $ do
+      let
+        a = successGen [PGEq (Lit 1) (Lit 2)]
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (successGen [PBool False]) b
+    , testCase "prop-simp-multiple" $ do
+      let
+        a = successGen [PBool False, PBool True]
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (successGen [PBool False]) b
+    , testCase "prop-simp-expr" $ do
+      let
+        a = successGen [PEq (Add (Lit 1) (Lit 2)) (Sub (Lit 4) (Lit 1))]
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (successGen []) b
+    , testCase "prop-simp-impl" $ do
+      let
+        a = successGen [PImpl (PBool False) (PEq (Var "abc") (Var "bcd"))]
+        b = Expr.simplify a
+      assertEqual "Must simplify down" (successGen []) b
+  ]
   , testGroup "equivalence-checking"
     [
       testCase "eq-yul-simple-cex" $ do
@@ -3182,6 +3244,9 @@ instance Arbitrary LitProp where
 instance Arbitrary Prop where
   arbitrary = sized (genProp False)
 
+genProps :: Bool -> Int -> Gen [Prop]
+genProps onlyLits sz2 = listOf $ genProp onlyLits sz2
+
 genProp :: Bool -> Int -> Gen (Prop)
 genProp _ 0 = PBool <$> arbitrary
 genProp onlyLits sz = oneof
@@ -3196,7 +3261,11 @@ genProp onlyLits sz = oneof
   , liftM2 PImpl subProp subProp
   ]
   where
-    subWord = if onlyLits then Lit <$> arbitrary else genWord 1 (sz `div` 2)
+    subWord = if onlyLits then frequency [(2, Lit <$> arbitrary)
+                                         ,(1, pure $ Lit 0)
+                                         ,(1, pure $ Lit Expr.maxLit)
+                                         ]
+                          else genWord 1 (sz `div` 2)
     subProp = genProp onlyLits (sz `div` 2)
 
 genByte :: Int -> Gen (Expr Byte)
@@ -3223,25 +3292,29 @@ genName = fmap (T.pack . ("esc_" <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
- [ fmap (Failure mempty mempty . UnrecognizedOpcode) arbitrary
- , pure $ Failure mempty mempty IllegalOverflow
- , pure $ Failure mempty mempty SelfDestruction
- ]
+  [ fmap (Failure mempty mempty . UnrecognizedOpcode) arbitrary
+  , pure $ Failure mempty mempty IllegalOverflow
+  , pure $ Failure mempty mempty SelfDestruction
+  ]
 genEnd sz = oneof
- [ fmap (Failure mempty mempty . Revert) subBuf
- , liftM4 Success (return mempty) (return mempty) subBuf arbitrary
- , liftM3 ITE subWord subEnd subEnd
- ]
- where
-   subBuf = defaultBuf (sz `div` 2)
-   subWord = defaultWord (sz `div` 2)
-   subEnd = genEnd (sz `div` 2)
+  [ liftM3 Failure subProp (pure mempty) (fmap Revert subBuf)
+  , liftM4 Success subProp (pure mempty) subBuf arbitrary
+  , liftM3 ITE subWord subEnd subEnd
+  -- TODO Partial
+  ]
+  where
+    subBuf = defaultBuf (sz `div` 2)
+    subWord = defaultWord (sz `div` 2)
+    subEnd = genEnd (sz `div` 2)
+    subProp = genProps False (sz `div` 2)
 
 genWord :: Int -> Int -> Gen (Expr EWord)
 genWord litFreq 0 = frequency
   [ (litFreq, do
       val <- frequency
        [ (10, fmap (`mod` 100) arbitrary)
+       , (1, pure 0)
+       , (1, pure Expr.maxLit)
        , (1, arbitrary)
        ]
       pure $ Lit val
@@ -3503,3 +3576,6 @@ checkPost post c sig = do
   case cexs of
     [] -> pure $ Right e
     cs -> pure $ Left cs
+
+successGen :: [Prop] -> Expr End
+successGen props = Success props mempty (ConcreteBuf "") mempty
