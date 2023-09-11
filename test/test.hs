@@ -91,8 +91,8 @@ tests = testGroup "hevm"
         }
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
-       assertEqual "Expression is clean." (badStoresInExpr expr) False
-    -- this case is somewhat aritficial. we can't simplify this using only
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
+    -- This case is somewhat artificial. We can't simplify this using only
     -- static rewrite rules, because acct is totally abstract and acct + 1
     -- could overflow back to zero. we may be able to do better if we have some
     -- smt assisted simplification that can take branch conditions into account.
@@ -111,7 +111,7 @@ tests = testGroup "hevm"
         }
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
-       assertEqual "Expression is clean." (badStoresInExpr expr) False
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
     , testCase "simplify-storage-array-loop" $ do
        Just c <- solcRuntime "MyContract"
         [i|
@@ -126,7 +126,7 @@ tests = testGroup "hevm"
         }
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256)" [AbiUIntType 256])) [] (debugVeriOpts { maxIter = Just 5 })
-       assertEqual "Expression is clean." (badStoresInExpr expr) False
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
     , testCase "simplify-storage-array-only-3" $ do
        Just c <- solcRuntime "MyContract"
         [i|
@@ -142,7 +142,7 @@ tests = testGroup "hevm"
         }
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
-       assertEqual "Expression is clean." (badStoresInExpr expr) False
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
     , testCase "simplify-storage-map-only-static" $ do
        Just c <- solcRuntime "MyContract"
         [i|
@@ -158,7 +158,7 @@ tests = testGroup "hevm"
         }
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
-       assertEqual "Expression is clean." (badStoresInExpr expr) False
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
     , testCase "simplify-storage-map-only-2" $ do
        Just c <- solcRuntime "MyContract"
         [i|
@@ -175,8 +175,27 @@ tests = testGroup "hevm"
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
        -- putStrLn $ T.unpack $ formatExpr expr
-       assertEqual "Expression is clean." (badStoresInExpr expr) False
-    -- TODO: add a case for maps inside structs
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
+    , testCase "simplify-storage-map-with-struct" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          struct MyStruct {
+            uint a;
+            uint b;
+          }
+          mapping(uint => MyStruct) items1;
+          function transfer(uint acct, uint val1, uint val2) public {
+            unchecked {
+              items1[acct].a = val1+1;
+              items1[acct].b = val2+2;
+              assert(items1[acct].a+items1[acct].b == val1 + val2 + 3);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
     , testCase "simplify-storage-map-and-array" $ do
        Just c <- solcRuntime "MyContract"
         [i|
@@ -199,7 +218,7 @@ tests = testGroup "hevm"
        |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
        -- putStrLn $ T.unpack $ formatExpr expr
-       assertEqual "Expression is clean." (badStoresInExpr expr) False
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
     ]
   , testGroup "StorageTests"
     [ testCase "read-from-sstore" $ assertEqual ""

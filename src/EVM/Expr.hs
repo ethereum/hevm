@@ -608,16 +608,22 @@ readStorage w st = go (structureArraySlots w) (structureArraySlots st)
       (Keccak64Bytes, ArraySlotZero idA)         | BS.length idA /= 64 -> go slot prev
 
       -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
-      (Lit a, Keccak _) | a < 255 -> go slot prev
-      (Keccak _, Lit a) | a < 255 -> go slot prev
+      (Lit a, Keccak _) | a < 256 -> go slot prev
+      (Keccak _, Lit a) | a < 256 -> go slot prev
 
       -- the chance of adding a value <= 2^32 to any given keccack output
       -- leading to an overflow is effectively zero. the chance of an overflow
       -- occuring here is 2^32/2^256 = 2^-224, which is close enough to zero
       -- for our purposes. This lets us completely simplify reads from write
       -- chains involving writes to arrays at literal offsets.
-      (Lit a, Add (Keccak _) (Lit b)) | a < 255, b < maxW32 -> go slot prev
-      (Add (Keccak _) (Lit a), Lit b) | a < 255, b < maxW32 -> go slot prev
+      (Lit a, Add (Keccak _) (Lit b)) | a < 256, b < maxW32 -> go slot prev
+      (Add (Keccak _) (Lit a), Lit b) | a < 256, b < maxW32 -> go slot prev
+
+      -- Finding two Keccaks that are < 256 away from each other should be VERY hard
+      -- This simplification allows us to deal with maps of structs
+      (Add (Keccak _) (Lit a2), Add (Keccak _) (Lit b2)) | a2 /= b2, abs(a2-b2) < 256 -> go slot prev
+      (Add (Keccak _) (Lit a2), (Keccak _)) | a2 > 0, a2 < 256 -> go slot prev
+      ((Keccak _), Add (Keccak _) (Lit b2)) | b2 > 0, b2 < 256 -> go slot prev
 
       -- case of array + array, but different id's or different concrete offsets
       -- zero offs vs zero offs
