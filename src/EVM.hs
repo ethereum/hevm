@@ -1805,23 +1805,29 @@ create :: (?op :: Word8)
   -> W256 -> Word64 -> Expr EWord -> [Expr EWord] -> Expr EAddr -> Expr Buf -> EVM s ()
 create self this xSize xGas xValue xs newAddr initCode = do
   vm0 <- get
+  -- are we exceeding the max init code size
   if xSize > vm0.block.maxCodeSize * 2
   then do
     assign (#state % #stack) (Lit 0 : xs)
     assign (#state % #returndata) mempty
     vmError $ MaxInitCodeSizeExceeded (vm0.block.maxCodeSize * 2) xSize
+  -- are we overflowing the nonce
   else if this.nonce == Just maxBound
   then do
     assign (#state % #stack) (Lit 0 : xs)
     assign (#state % #returndata) mempty
     pushTrace $ ErrorTrace NonceOverflow
     next
+  -- are we overflowing the stack
   else if length vm0.frames >= 1024
   then do
     assign (#state % #stack) (Lit 0 : xs)
     assign (#state % #returndata) mempty
     pushTrace $ ErrorTrace CallDepthLimitReached
     next
+  -- are we deploying to an address that already has a contract?
+  -- note: this check is only sound to do statically if symbolic addresses
+  -- cannot have the value of any existing concrete addresses in the state.
   else if collision $ Map.lookup newAddr vm0.env.contracts
   then burn xGas $ do
     assign (#state % #stack) (Lit 0 : xs)
@@ -1837,7 +1843,6 @@ create self this xSize xGas xValue xs newAddr initCode = do
         next
         touchAccount self
         touchAccount newAddr
-      -- are we overflowing the nonce
       False -> burn xGas $ do
         -- unfortunately we have to apply some (pretty hacky)
         -- heuristics here to parse the unstructured buffer read
