@@ -2139,23 +2139,29 @@ create :: forall t s. (?op :: Word8, VMOps t)
   -> Expr EWord -> Gas t -> Expr EWord -> [Expr EWord] -> Expr EAddr -> Expr Buf -> EVM t s ()
 create self this xSize xGas xValue xs newAddr initCode = do
   vm0 <- get
+  -- are we exceeding the max init code size
   if xSize > Lit (vm0.block.maxCodeSize * 2)
   then do
     assign (#state % #stack) (Lit 0 : xs)
     assign (#state % #returndata) mempty
     vmError $ MaxInitCodeSizeExceeded (vm0.block.maxCodeSize * 2) xSize
+  -- are we overflowing the nonce
   else if this.nonce == Just maxBound
   then do
     assign (#state % #stack) (Lit 0 : xs)
     assign (#state % #returndata) mempty
     pushTrace $ ErrorTrace NonceOverflow
     next
+  -- are we overflowing the stack
   else if length vm0.frames >= 1024
   then do
     assign (#state % #stack) (Lit 0 : xs)
     assign (#state % #returndata) mempty
     pushTrace $ ErrorTrace CallDepthLimitReached
     next
+  -- are we deploying to an address that already has a contract?
+  -- note: this check is only sound to do statically if symbolic addresses
+  -- cannot have the value of any existing concrete addresses in the state.
   else if collision $ Map.lookup newAddr vm0.env.contracts
   then burn' xGas $ do
     assign (#state % #stack) (Lit 0 : xs)
@@ -2171,9 +2177,23 @@ create self this xSize xGas xValue xs newAddr initCode = do
         next
         touchAccount self
         touchAccount newAddr
+<<<<<<< HEAD
       -- are we overflowing the nonce
       False -> burn' xGas $ do
         case parseInitCode initCode of
+=======
+      False -> burn xGas $ do
+        -- unfortunately we have to apply some (pretty hacky)
+        -- heuristics here to parse the unstructured buffer read
+        -- from memory into a code and data section
+        let contract' = do
+              prefixLen <- Expr.concPrefix initCode
+              prefix <- Expr.toList $ Expr.take prefixLen initCode
+              let sym = Expr.drop prefixLen initCode
+              conc <- mapM maybeLitByte prefix
+              pure $ InitCode (BS.pack $ V.toList conc) sym
+        case contract' of
+>>>>>>> 10525566 (EVM: OpCreate: better comments)
           Nothing ->
             partial $ UnexpectedSymbolicArg vm0.state.pc (getOpName vm0.state) "initcode must have a concrete prefix" []
           Just c -> do
