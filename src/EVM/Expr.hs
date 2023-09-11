@@ -751,8 +751,8 @@ getAddr (GVar _) = internalError "cannot determine addr of a GVar"
 -- Note: may not terminate!
 simplify :: Expr a -> Expr a
 simplify e = if (mapExpr go e == e)
-             then e
-             else simplify (mapExpr go (structureArraySlots e))
+               then e
+               else simplify (mapExpr go (structureArraySlots e))
   where
     go :: Expr a -> Expr a
 
@@ -797,7 +797,6 @@ simplify e = if (mapExpr go e == e)
               (WriteWord wOff value (ConcreteBuf simplifiedBuf)) dst)
           | otherwise = orig
             where simplifiedBuf = BS.take (unsafeInto (n+sz)) buf
-
     go (CopySlice a b c d f) = copySlice a b c d f
 
     go (IndexWord a b) = indexWord a b
