@@ -581,52 +581,52 @@ readStorage' loc store = case readStorage loc store of
 -- storage lookups much easier. If the store is backed by an AbstractStore we
 -- always return a symbolic value.
 readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
-readStorage a b = readStorageInter (structureArraySlots a) (structureArraySlots b)
+readStorage w st = go (structureArraySlots w) (structureArraySlots st)
+  where
+  go :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
+  go _ (GVar _) = internalError "Can't read from a GVar"
+  go slot s@(AbstractStore _) = Just $ SLoad slot s
+  go (Lit l) (ConcreteStore s) = Lit <$> Map.lookup l s
+  go slot store@(ConcreteStore _) = Just $ SLoad slot store
+  go slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
+    -- if address and slot match then we return the val in this write
+    _ | prevSlot == slot -> Just val
 
-readStorageInter :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
-readStorageInter _ (GVar _) = internalError "Can't read from a GVar"
-readStorageInter slot s@(AbstractStore _) = Just $ SLoad slot s
-readStorageInter (Lit l) (ConcreteStore s) = Lit <$> Map.lookup l s
-readStorageInter slot store@(ConcreteStore _) = Just $ SLoad slot store
-readStorageInter slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
-  -- if address and slot match then we return the val in this write
-  _ | prevSlot == slot -> Just val
+    -- if the slots don't match (see previous guard) and are lits, we can skip this write
+    (Lit _, Lit _) -> go slot prev
 
-  -- if the slots don't match (see previous guard) and are lits, we can skip this write
-  (Lit _, Lit _) -> readStorageInter slot prev
+    -- slot is for a map + map -> skip write
+    (MappingSlot idA _, MappingSlot idB _)     | idsDontMatch idA idB  -> go slot prev
+    (MappingSlot _ keyA, MappingSlot _ keyB)   | surelyNotEq keyA keyB -> go slot prev
 
-  -- slot is for a map + map -> skip write
-  (MappingSlot idA _, MappingSlot idB _)   | idsDontMatch idA idB -> readStorageInter slot prev
-  (MappingSlot _ keyA, MappingSlot _ keyB) | surelyNotEq keyA keyB -> readStorageInter slot prev
+    -- special case of array + map -> skip write
+    (ArraySlotWithOffset idA _, Keccak64Bytes) | BS.length idA /= 64 -> go slot prev
+    (ArraySlotZero idA, Keccak64Bytes)         | BS.length idA /= 64 -> go slot prev
 
-  -- special case of array + map -> skip write
-  (ArraySlotWithOffset idA _, Keccak64Bytes) | BS.length idA /= 64 -> readStorageInter slot prev
-  (ArraySlotZero idA, Keccak64Bytes)         | BS.length idA /= 64 -> readStorageInter slot prev
+    -- special case of array + map -> skip write
+    (Keccak64Bytes, ArraySlotWithOffset idA _) | BS.length idA /= 64 -> go slot prev
+    (Keccak64Bytes, ArraySlotZero idA)         | BS.length idA /= 64 -> go slot prev
 
-  -- special case of array + map -> skip write
-  (Keccak64Bytes, ArraySlotWithOffset idA _) | BS.length idA /= 64 -> readStorageInter slot prev
-  (Keccak64Bytes, ArraySlotZero idA)         | BS.length idA /= 64 -> readStorageInter slot prev
+    -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
+    (Lit a, Keccak _) | a < 255 -> go slot prev
+    (Keccak _, Lit a) | a < 255 -> go slot prev
 
-  -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
-  (Lit a, Keccak _) | a < 255 -> readStorageInter slot prev
-  (Keccak _, Lit a) | a < 255 -> readStorageInter slot prev
-
-  -- case of array + array, but different id's or different concrete offsets
-  -- zero offs vs zero offs
-  (ArraySlotZero idA, ArraySlotZero idB)                   | idA /= idB -> readStorageInter slot prev
-  -- zero offs vs non-zero offs
-  (ArraySlotZero idA, ArraySlotWithOffset idB _)           | idA /= idB -> readStorageInter slot prev
-  (ArraySlotZero _, ArraySlotWithOffset _ (Lit offB))      | offB /= 0 -> readStorageInter slot prev
-  -- non-zero offs vs zero offs
-  (ArraySlotWithOffset idA _, ArraySlotZero idB)           | idA /= idB -> readStorageInter slot prev
-  (ArraySlotWithOffset _ (Lit offA), ArraySlotZero _)      | offA /= 0 -> readStorageInter slot prev
-  -- non-zero offs vs non-zero offs
-  (ArraySlotWithOffset idA _, ArraySlotWithOffset idB _)   | idA /= idB -> readStorageInter slot prev
-  (ArraySlotWithOffset _ offA, ArraySlotWithOffset _ offB) | surelyNotEq offA offB -> readStorageInter slot prev
+    -- case of array + array, but different id's or different concrete offsets
+    -- zero offs vs zero offs
+    (ArraySlotZero idA, ArraySlotZero idB)                   | idA /= idB -> go slot prev
+    -- zero offs vs non-zero offs
+    (ArraySlotZero idA, ArraySlotWithOffset idB _)           | idA /= idB -> go slot prev
+    (ArraySlotZero _, ArraySlotWithOffset _ (Lit offB))      | offB /= 0  -> go slot prev
+    -- non-zero offs vs zero offs
+    (ArraySlotWithOffset idA _, ArraySlotZero idB)           | idA /= idB -> go slot prev
+    (ArraySlotWithOffset _ (Lit offA), ArraySlotZero _)      | offA /= 0  -> go slot prev
+    -- non-zero offs vs non-zero offs
+    (ArraySlotWithOffset idA _, ArraySlotWithOffset idB _)   | idA /= idB -> go slot prev
+    (ArraySlotWithOffset _ offA, ArraySlotWithOffset _ offB) | surelyNotEq offA offB -> go slot prev
 
 
-  -- we are unable to determine statically whether or not we can safely move deeper in the write chain, so return an abstract term
-  _ -> Just $ SLoad slot s
+    -- we are unable to determine statically whether or not we can safely move deeper in the write chain, so return an abstract term
+    _ -> Just $ SLoad slot s
 
 surelyNotEq :: Expr a -> Expr a -> Bool
 surelyNotEq (Lit a) (Lit b) = a /= b
