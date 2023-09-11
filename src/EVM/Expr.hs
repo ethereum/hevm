@@ -589,6 +589,12 @@ readStorage w st = go (structureArraySlots w) (structureArraySlots st)
     go (Lit l) (ConcreteStore s) = Lit <$> Map.lookup l s
     go slot store@(ConcreteStore _) = Just $ SLoad slot store
     go slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
+      -- Add (Lit x) (Keccak y) -> Add (Keccak y) (Lit x)
+      -- This makes it easier to deal with the rewrites below.
+      -- Note: addition is commutative, and this rewrite always terminates
+      (Add  a@(Lit _) b@(Keccak _), _) -> go slot (SStore (Add b a) val prev)
+      (_, Add a@(Lit _) b@(Keccak _)) -> go (Add b a) s
+
       -- if address and slot match then we return the val in this write
       _ | prevSlot == slot -> Just val
 
