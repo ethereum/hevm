@@ -100,19 +100,39 @@ tests = testGroup "hevm"
        Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
+          uint b;
           uint[] a;
+          function transfer(uint acct, uint val1) public {
+            unchecked {
+              a[acct] = val1;
+              assert(a[acct] == val1);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
+    , expectFail $ testCase "simplify-storage-array-of-struct-symbolic-index" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          struct MyStruct {
+            uint a;
+            uint b;
+          }
+          MyStruct[] arr;
           function transfer(uint acct, uint val1, uint val2) public {
             unchecked {
-              a[acct] = val1 + 1;
-              a[acct+1] = val2 + 2;
-              assert(a[acct]+a[acct+1] == val1 + val2 + 3);
+              arr[acct].a = val1+1;
+              arr[acct].b = val1+2;
+              assert(arr[acct].a + arr[acct].b == val1+val2+3);
             }
           }
         }
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
        assertEqual "Expression is not clean." (badStoresInExpr expr) False
-    , testCase "simplify-storage-array-loop" $ do
+    , testCase "simplify-storage-array-loop-nonstruct" $ do
        Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -127,21 +147,26 @@ tests = testGroup "hevm"
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256)" [AbiUIntType 256])) [] (debugVeriOpts { maxIter = Just 5 })
        assertEqual "Expression is not clean." (badStoresInExpr expr) False
-    , testCase "simplify-storage-array-only-3" $ do
+    , testCase "simplify-storage-array-loop-struct" $ do
        Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
-          uint b;
-          uint[] a;
-          function transfer(uint acct, uint val1) public {
-            unchecked {
-              a[acct] = val1;
-              assert(a[acct] == val1);
+          struct MyStruct {
+            uint a;
+            uint b;
+          }
+          MyStruct[] arr;
+          function transfer(uint v1, uint v2) public {
+            for (uint i = 0; i < arr.length; i++) {
+              arr[i].a = v1+1;
+              arr[i].b = v2+2;
+              assert(arr[i].a + arr[i].b == v1 + v2 + 3);
             }
           }
         }
         |]
-       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] (debugVeriOpts { maxIter = Just 5 })
+       T.writeFile "test.expr" $ formatExpr expr
        assertEqual "Expression is not clean." (badStoresInExpr expr) False
     , testCase "simplify-storage-map-only-static" $ do
        Just c <- solcRuntime "MyContract"
