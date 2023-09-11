@@ -1967,7 +1967,7 @@ tests = testGroup "hevm"
           [i|
             contract A {
               function f() external {
-                assert(msg.sender != address(0x0));
+                assert(msg.sender != address(0x10));
               }
             }
           |]
@@ -1975,7 +1975,7 @@ tests = testGroup "hevm"
           [i|
             contract B {
               function f() external {
-                assert(block.coinbase != address(0x1));
+                assert(block.coinbase != address(0x11));
               }
             }
           |]
@@ -1983,7 +1983,7 @@ tests = testGroup "hevm"
           [i|
             contract C {
               function f() external {
-                assert(tx.origin != address(0x2));
+                assert(tx.origin != address(0x12));
               }
             }
           |]
@@ -1991,7 +1991,7 @@ tests = testGroup "hevm"
           [i|
             contract D {
               function f() external {
-                assert(address(this) != address(0x3));
+                assert(address(this) != address(0x13));
               }
             }
           |]
