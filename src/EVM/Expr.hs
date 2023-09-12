@@ -594,12 +594,6 @@ readStorage w st = go (structureArraySlots w) (structureArraySlots st)
     go (Lit l) (ConcreteStore s) = Lit <$> Map.lookup l s
     go slot store@(ConcreteStore _) = Just $ SLoad slot store
     go slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
-      -- Add (Lit x) (Keccak y) -> Add (Keccak y) (Lit x)
-      -- This makes it easier to deal with the rewrites below.
-      -- Note: addition is commutative, and this rewrite always terminates
-      (Add  a@(Lit _) b@(Keccak _), _) -> go slot (SStore (Add b a) val prev)
-      (_, Add a@(Lit _) b@(Keccak _)) -> go (Add b a) s
-
       -- if address and slot match then we return the val in this write
       _ | prevSlot == slot -> Just val
 
@@ -627,14 +621,14 @@ readStorage w st = go (structureArraySlots w) (structureArraySlots st)
       -- occuring here is 2^32/2^256 = 2^-224, which is close enough to zero
       -- for our purposes. This lets us completely simplify reads from write
       -- chains involving writes to arrays at literal offsets.
-      (Lit a, Add (Keccak _) (Lit b)) | a < 256, b < maxW32 -> go slot prev
-      (Add (Keccak _) (Lit a), Lit b) | a < 256, b < maxW32 -> go slot prev
+      (Lit a, Add (Lit b) (Keccak _) ) | a < 256, b < maxW32 -> go slot prev
+      (Add (Lit a) (Keccak _) , Lit b) | a < 256, b < maxW32 -> go slot prev
 
       -- Finding two Keccaks that are < 256 away from each other should be VERY hard
       -- This simplification allows us to deal with maps of structs
-      (Add (Keccak _) (Lit a2), Add (Keccak _) (Lit b2)) | a2 /= b2, abs(a2-b2) < 256 -> go slot prev
-      (Add (Keccak _) (Lit a2), (Keccak _)) | a2 > 0, a2 < 256 -> go slot prev
-      ((Keccak _), Add (Keccak _) (Lit b2)) | b2 > 0, b2 < 256 -> go slot prev
+      (Add (Lit a2) (Keccak _), Add (Lit b2) (Keccak _)) | a2 /= b2, abs(a2-b2) < 256 -> go slot prev
+      (Add (Lit a2) (Keccak _), (Keccak _)) | a2 > 0, a2 < 256 -> go slot prev
+      ((Keccak _), Add (Lit b2) (Keccak _)) | b2 > 0, b2 < 256 -> go slot prev
 
       -- case of array + array, but different id's or different concrete offsets
       -- zero offs vs zero offs

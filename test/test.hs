@@ -27,6 +27,7 @@ import Data.Text.IO qualified as T
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Typeable
 import Data.Vector qualified as Vector
+import Data.Word (Word8)
 import GHC.Conc (getNumProcessors)
 import System.Directory
 import System.Environment
@@ -408,6 +409,11 @@ tests = testGroup "hevm"
     , testProperty "simpProp-equivalence-sym" $ \(LitProp p) -> ioProperty $ do
         let simplified = pand (Expr.simplifyProps [p])
         checkEquivProp simplified p
+    , testProperty "storage-slot-simp-property" $ \(StorageExp s) -> ioProperty $ do
+        T.writeFile "unsimplified.expr" $ formatExpr s
+        let simplified = Expr.simplify s
+        T.writeFile "simplified.expr" $ formatExpr simplified
+        checkEquiv simplified s
     ]
   , testGroup "MemoryTests"
     [ testCase "read-write-same-byte"  $ assertEqual ""
@@ -3240,6 +3246,60 @@ newtype LitProp = LitProp Prop
 
 instance Arbitrary LitProp where
   arbitrary = LitProp <$> sized (genProp True)
+
+
+newtype StorageExp = StorageExp (Expr EWord)
+  deriving (Show, Eq)
+
+instance Arbitrary StorageExp where
+  arbitrary = StorageExp <$> (genStorageExp)
+
+genStorageExp :: Gen (Expr EWord)
+genStorageExp = do
+  fromPos <- genSlot
+  storage <- genStorageWrites
+  pure $ SLoad fromPos storage
+
+genSlot :: Gen (Expr EWord)
+genSlot = frequency [ (1, do
+                        buf <- genConcreteBufSlot 64
+                        key <- genLit 10
+                        pure $ Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) (WriteWord (Lit 0) key buf) (ConcreteBuf ""))  )
+                     -- map element
+                     ,(2, do
+                        l <- genLit 10
+                        buf <- genConcreteBufSlot 64
+                        pure $ Add (Keccak buf) l)
+                    -- Array element
+                     ,(2, do
+                        l <- genLit 10
+                        buf <- genConcreteBufSlot 32
+                        pure $ Add (Keccak buf) l)
+                     -- member of the Contract
+                     ,(2, pure $ Lit 20)
+                     -- array element
+                     ,(2, do
+                        arrayNum :: Int <- arbitrary
+                        offs :: W256 <- arbitrary
+                        pure $ Lit $ fst (Expr.preImages !! (arrayNum `mod` 3)) + (offs `mod` 3))
+                     -- random stuff
+                     ,(1, pure $ Lit (maxBound :: W256))
+                     ]
+
+-- Generates an N-long buffer, all with the same value, at most 8 different ones
+genConcreteBufSlot :: Int -> Gen (Expr Buf)
+genConcreteBufSlot len = do
+  b :: Word8 <- arbitrary
+  pure $ ConcreteBuf $ BS.pack ([ 0 | _ <- [0..(len-2)]] ++ [b])
+
+genStorageWrites :: Gen (Expr Storage)
+genStorageWrites = do
+  toSlot <- genSlot
+  val <- genLit (maxBound :: W256)
+  store <- frequency [ (3, pure $ AbstractStore (SymAddr ""))
+                     , (2, genStorageWrites)
+                     ]
+  pure $ SStore toSlot val store
 
 instance Arbitrary Prop where
   arbitrary = sized (genProp False)
