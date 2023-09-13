@@ -285,7 +285,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
           PleaseAskSMT cond preconds continue -> do
             let
               simpCond = Expr.simplify cond
-              canBeSat = Expr.constFoldProp ((simpCond ./= Lit 0):preconds)
+              simpProps = Expr.simplifyProps ((simpCond ./= Lit 0):preconds)
             case simpCond of
               -- is the condition concrete?
               Lit c ->
@@ -315,14 +315,11 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                     -- ask the smt solver about the loop condition
                     performQuery
                   _ -> do
-                    (r, vm') <- case canBeSat of
-                      -- If constant folding over Props statically determined
-                      -- that it cannot be SAT
-                      False ->
-                        stToIO $ runStateT (continue (Case False)) vm
-                      -- otherwise just try both branches and don't ask the solver
-                      True ->
-                        stToIO $ runStateT (continue EVM.Types.Unknown) vm
+                    (r, vm') <- case simpProps of
+                      -- if we can statically determine unsatisfiability then we skip exploring the jump
+                      [PBool False] -> stToIO $ runStateT (continue (Case False)) vm
+                      -- otherwise we explore both branches
+                      ps -> stToIO $ runStateT (continue EVM.Types.Unknown) vm
                     interpret fetcher maxIter askSmtIters heuristic vm' (k r)
           _ -> performQuery
 
