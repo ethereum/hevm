@@ -846,8 +846,6 @@ simplify e = if (mapExpr go e == e)
 simplifyProps :: [Prop] -> [Prop]
 simplifyProps = remRedundantProps . map evalProp . flattenProps
 
-
-
 -- | Evaluate the provided proposition down to its most concrete result
 evalProp :: Prop -> Prop
 evalProp prop =
