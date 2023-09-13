@@ -863,6 +863,8 @@ evalProp prop =
     go (PLEq (Var _) (Lit val)) | val == maxLit = PBool True
     go (PLT (Lit l) (Lit r)) = PBool (l < r)
     go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
+    go (PLEq a (Max b _)) | a == b = PBool True
+    go (PLEq a (Max _ b)) | a == b = PBool True
 
     -- negations
     go (PNeg (PBool b)) = PBool (Prelude.not b)
