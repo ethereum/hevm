@@ -844,7 +844,15 @@ simplify e = if (mapExpr go e == e)
 
 
 simplifyProps :: [Prop] -> [Prop]
+<<<<<<< Updated upstream
 simplifyProps = remRedundantProps . map evalProp . flattenProps
+=======
+simplifyProps ps = if canBeSat then simplified else [PBool False]
+  where
+    simplified = remRedundantProps . map evalProp . flattenProps $ ps
+    canBeSat = constFoldProp simplified
+
+>>>>>>> Stashed changes
 
 -- | Evaluate the provided proposition down to its most concrete result
 evalProp :: Prop -> Prop

@@ -148,8 +148,9 @@ declareIntermediates bufs stores =
     encodeStore n expr =
        "(define-const store" <> (fromString . show $ n) <> " Storage " <> exprToSMT expr <> ")"
 
+-- TODO: we would ideally call simplifyProps on input props and generated props all together
 assertProps :: [Prop] -> SMT2
-assertProps ps =
+assertProps (Expr.simplifyProps -> ps) =
   let encs = map propToSMT ps_elim
       intermediates = declareIntermediates bufs stores in
   prelude
@@ -192,7 +193,6 @@ assertProps ps =
       <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions ps_elim bufVals storeVals)) mempty
       <> SMT2 ["; keccak computations"] mempty
       <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute ps_elim bufVals storeVals)) mempty
-
 
     readAssumes
       = SMT2 ["; read assumptions"] mempty
