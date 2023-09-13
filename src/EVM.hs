@@ -12,7 +12,7 @@ import Optics.Zoom
 import Optics.Operators.Unsafe
 
 import EVM.ABI
-import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord,
+import EVM.Expr (writeStorage, readByte, readWord, writeWord,
   writeByte, bufLength, indexWord, litAddr, readBytes, word256At, copySlice, wordToAddr)
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (FeeSchedule (..))
@@ -672,9 +672,9 @@ exec1 = do
                 else do
                   let
                     original =
-                      case Expr.readStorage' x this.origStorage of
+                      case Expr.simplify $ SLoad x this.origStorage of
                         Lit v -> v
-                        _ -> 0
+                        _ -> 0 -- ?? really?
                     storage_cost =
                       case (maybeLitWord current, maybeLitWord new) of
                         (Just current', Just new') ->
@@ -1310,10 +1310,8 @@ accessStorage
 accessStorage addr slot continue = do
   use (#env % #contracts % at addr) >>= \case
     Just c ->
-      case readStorage slot c.storage of
-        Just x ->
-          continue x
-        Nothing ->
+      Debug.Trace.trace ("\n\naccessstorage simp: " <> (show $ Expr.simplify (SLoad slot c.storage)) <> "\nunsimp:" <> show (SLoad slot c.storage)) $ case Expr.simplify (SLoad slot c.storage) of
+        Lit 0 -> -- storage slot not there
           if c.external then
             forceConcreteAddr addr "cannot read storage from symbolic addresses via rpc" $ \addr' ->
               forceConcrete slot "cannot read symbolic slots via RPC" $ \slot' -> do
@@ -1321,12 +1319,13 @@ accessStorage addr slot continue = do
                 contract <- preuse (#cache % #fetched % ix addr')
                 case contract of
                   Nothing -> internalError "contract marked external not found in cache"
-                  Just fetched -> case readStorage (Lit slot') fetched.storage of
-                              Nothing -> mkQuery addr' slot'
-                              Just val -> continue val
+                  Just fetched -> case Expr.simplify $ SLoad (Lit slot') fetched.storage of
+                              val@(Lit _) -> continue val
+                              _ -> mkQuery addr' slot'
           else do
             modifying (#env % #contracts % ix addr % #storage) (writeStorage slot (Lit 0))
             continue $ Lit 0
+        val -> continue val
     Nothing ->
       fetchAccount addr $ \_ ->
         accessStorage addr slot continue
