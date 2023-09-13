@@ -409,10 +409,12 @@ tests = testGroup "hevm"
     , testProperty "simpProp-equivalence-sym" $ \(LitProp p) -> ioProperty $ do
         let simplified = pand (Expr.simplifyProps [p])
         checkEquivProp simplified p
-    , testProperty "storage-slot-simp-property" $ \(StorageExp s) -> ioProperty $ do
-        -- T.writeFile "unsimplified.expr" $ formatExpr s
+    -- This would need to be a fuzz test I think. The SMT encoding of Keccak is not precise
+    -- enough for this to succeed
+    , ignoreTest $ testProperty "storage-slot-simp-property" $ \(StorageExp s) -> ioProperty $ do
+        T.writeFile "unsimplified.expr" $ formatExpr s
         let simplified = Expr.simplify s
-        -- T.writeFile "simplified.expr" $ formatExpr simplified
+        T.writeFile "simplified.expr" $ formatExpr simplified
         checkEquiv simplified s
     ]
   , testGroup "MemoryTests"
