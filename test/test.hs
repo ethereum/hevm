@@ -112,6 +112,7 @@ tests = testGroup "hevm"
         }
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       -- T.writeFile "symbolic-index.expr" $ formatExpr expr
        assertEqual "Expression is not clean." (badStoresInExpr expr) False
     , expectFail $ testCase "simplify-storage-array-of-struct-symbolic-index" $ do
        Just c <- solcRuntime "MyContract"
@@ -167,7 +168,6 @@ tests = testGroup "hevm"
         }
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] (debugVeriOpts { maxIter = Just 5 })
-       T.writeFile "test.expr" $ formatExpr expr
        assertEqual "Expression is not clean." (badStoresInExpr expr) False
     , testCase "simplify-storage-map-only-static" $ do
        Just c <- solcRuntime "MyContract"
@@ -410,9 +410,9 @@ tests = testGroup "hevm"
         let simplified = pand (Expr.simplifyProps [p])
         checkEquivProp simplified p
     , testProperty "storage-slot-simp-property" $ \(StorageExp s) -> ioProperty $ do
-        T.writeFile "unsimplified.expr" $ formatExpr s
+        -- T.writeFile "unsimplified.expr" $ formatExpr s
         let simplified = Expr.simplify s
-        T.writeFile "simplified.expr" $ formatExpr simplified
+        -- T.writeFile "simplified.expr" $ formatExpr simplified
         checkEquiv simplified s
     ]
   , testGroup "MemoryTests"
