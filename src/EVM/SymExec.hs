@@ -77,6 +77,7 @@ data VeriOpts = VeriOpts
   , maxIter :: Maybe Integer
   , askSmtIters :: Integer
   , loopHeuristic :: LoopHeuristic
+  , abstRefineConfig :: AbstRefineConfig
   , rpcInfo :: Fetch.RpcInfo
   }
   deriving (Eq, Show)
@@ -88,6 +89,7 @@ defaultVeriOpts = VeriOpts
   , maxIter = Nothing
   , askSmtIters = 1
   , loopHeuristic = StackBased
+  , abstRefineConfig = abstRefineDefault
   , rpcInfo = Nothing
   }
 
@@ -96,6 +98,9 @@ rpcVeriOpts info = defaultVeriOpts { rpcInfo = Just info }
 
 debugVeriOpts :: VeriOpts
 debugVeriOpts = defaultVeriOpts { debug = True }
+
+debugAbstVeriOpts :: VeriOpts
+debugAbstVeriOpts = defaultVeriOpts { abstRefineConfig = AbstRefineConfig True True }
 
 extractCex :: VerifyResult -> Maybe (Expr End, SMTCex)
 extractCex (Cex c) = Just c
@@ -489,7 +494,7 @@ reachable solvers e = do
               (Nothing, Nothing) -> Nothing
         pure (fst tres <> fst fres, subexpr)
       leaf -> do
-        let query = assertProps pcs
+        let query = assertProps abstRefineDefault pcs
         res <- checkSat solvers query
         case res of
           Sat _ -> pure ([query], Just leaf)
@@ -555,7 +560,7 @@ verify solvers opts preState maybepost = do
             _ -> True
         assumes = preState.constraints
         withQueries = canViolate <&> \leaf ->
-          (assertProps (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)
+          (assertProps opts.abstRefineConfig (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)
       putStrLn $ "Checking for reachability of "
                    <> show (length withQueries)
                    <> " potential property violation(s)"
@@ -667,7 +672,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     -- used or not
     check :: UnsatCache -> (Set Prop) -> Int -> IO (EquivResult, Bool)
     check knownUnsat props idx = do
-      let smt = assertProps $ Set.toList props
+      let smt = assertProps opts.abstRefineConfig (Set.toList props)
       -- if debug is on, write the query to a file
       let filename = "equiv-query-" <> show idx <> ".smt2"
       when opts.debug $ TL.writeFile filename (formatSMT2 smt <> "\n\n(check-sat)")
@@ -766,7 +771,7 @@ both' f (x, y) = (f x, f y)
 produceModels :: SolverGroup -> Expr End -> IO [(Expr End, CheckSatResult)]
 produceModels solvers expr = do
   let flattened = flattenExpr expr
-      withQueries = fmap (\e -> (assertProps . extractProps $ e, e)) flattened
+      withQueries = fmap (\e -> ((assertProps abstRefineDefault) . extractProps $ e, e)) flattened
   results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
     res <- checkSat solvers query
     pure (res, leaf)
