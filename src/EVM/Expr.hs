@@ -586,7 +586,7 @@ readStorage' loc store = case readStorage loc store of
 -- storage lookups much easier. If the store is backed by an AbstractStore we
 -- always return a symbolic value.
 readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
-readStorage (simplify -> w) (simplify -> st) = go w st
+readStorage w st = go (simplify w) st
   where
     go :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
     go _ (GVar _) = internalError "Can't read from a GVar"
