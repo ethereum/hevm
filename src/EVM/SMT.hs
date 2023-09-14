@@ -911,7 +911,7 @@ formatEAddr :: Expr EAddr -> Builder
 formatEAddr = \case
   LitAddr a -> fromString ("litaddr_" <> show a)
   SymAddr a -> fromText ("symaddr_" <> a)
-  GVar _ -> internalError "unexpected GVar"
+  GVar _ -> internalError "Unexpected GVar"
 
 
 -- ** Cex parsing ** --------------------------------------------------------------------------------

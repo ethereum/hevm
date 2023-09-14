@@ -566,7 +566,7 @@ stripWrites off size = \case
   WriteByte i v prev -> WriteByte i v (stripWrites off size prev)
   WriteWord i v prev -> WriteWord i v (stripWrites off size prev)
   CopySlice srcOff dstOff size' src dst -> CopySlice srcOff dstOff size' src dst
-  GVar _ ->  internalError "unexpected GVar in stripWrites"
+  GVar _ ->  internalError "Unexpected GVar in stripWrites"
 
 
 -- ** Storage ** -----------------------------------------------------------------------------------
