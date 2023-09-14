@@ -1087,6 +1087,10 @@ isPartial = \case
   Partial {} -> True
   _ -> False
 
+isSymAddr :: Expr EAddr -> Bool
+isSymAddr (SymAddr _) = True
+isSymAddr _ = False
+
 -- | Returns the byte at idx from the given word.
 indexWord :: Expr EWord -> Expr EWord -> Expr Byte
 -- Simplify masked reads:

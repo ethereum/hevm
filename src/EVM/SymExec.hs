@@ -454,13 +454,17 @@ verifyContract solvers theCode signature' concreteArgs opts maybepre maybepost =
 runExpr :: Stepper.Stepper RealWorld (Expr End)
 runExpr = do
   vm <- Stepper.runFully
-  let asserts = vm.keccakEqs <> vm.constraints
+  let asserts = vm.keccakEqs <> vm.constraints <> consistentStorageKeys vm.env.contracts
       traces = Traces (Zipper.toForest vm.traces) vm.env.contracts
   pure $ case vm.result of
     Just (VMSuccess buf) -> Success asserts traces buf (fmap toEContract vm.env.contracts)
     Just (VMFailure e) -> Failure asserts traces e
     Just (Unfinished p) -> Partial asserts traces p
     _ -> internalError "vm in intermediate state after call to runFully"
+
+-- build constraints that ensure that symbolic storage keys cannot alias other storage keys
+consistentStorageKeys :: Map (Expr EAddr) Contract -> [Prop]
+consistentStorageKeys (Map.keys -> addrs) = [a ./= b | a <- addrs, b <- filter Expr.isSymAddr addrs]
 
 toEContract :: Contract -> Expr EContract
 toEContract c = C c.code c.storage c.balance c.nonce
