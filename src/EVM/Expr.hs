@@ -1133,11 +1133,12 @@ data ConstState = ConstState
 
 -- | Folds constants
 constFoldProp :: [Prop] -> Bool
-constFoldProp ps = (execState (mapM (go . evalProp) ps) (ConstState mempty True)).canBeSat
+constFoldProp ps = oneRun ps (ConstState mempty True)
   where
+    oneRun ps2 startState = (execState (mapM (go . evalProp) ps2) startState).canBeSat
     go :: Prop -> State ConstState ()
     go x = case x of
-        PEq a (Lit l) -> do
+        PEq (Lit l) a -> do
           s <- get
           case Map.lookup a s.values of
             Just l2 -> case l==l2 of
@@ -1146,17 +1147,18 @@ constFoldProp ps = (execState (mapM (go . evalProp) ps) (ConstState mempty True)
             Nothing -> do
               let vs' = Map.insert a l s.values
               put $ s{values=vs'}
-        PEq a@(Lit _) b -> go (PEq b a)
+        PEq a b@(Lit _) -> go (PEq b a)
         PAnd a b -> do
           go a
           go b
         POr a b -> do
-          let
-            v1 = constFoldProp [a]
-            v2 = constFoldProp [b]
-          unless v1 $ go a
-          unless v2 $ go b
           s <- get
-          put $ s{canBeSat=(s.canBeSat && (v1 || v2))}
+          let
+            v1 = oneRun [a] s
+            v2 = oneRun [b] s
+          when (Prelude.not v1) $ go b
+          when (Prelude.not v2) $ go a
+          s2 <- get
+          put $ s{canBeSat=(s2.canBeSat && (v1 || v2))}
         PBool False -> put $ ConstState {canBeSat=False, values=mempty}
         _ -> pure ()
