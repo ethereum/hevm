@@ -319,7 +319,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                       -- if we can statically determine unsatisfiability then we skip exploring the jump
                       [PBool False] -> stToIO $ runStateT (continue (Case False)) vm
                       -- otherwise we explore both branches
-                      ps -> stToIO $ runStateT (continue EVM.Types.Unknown) vm
+                      _ -> stToIO $ runStateT (continue EVM.Types.Unknown) vm
                     interpret fetcher maxIter askSmtIters heuristic vm' (k r)
           _ -> performQuery
 
