@@ -278,7 +278,7 @@ checkCommand inst cmd = do
   res <- sendCommand inst cmd
   case res of
     "success" -> pure ()
-    _ -> error $ "Internal Error: Unexpected solver output: " <> (T.unpack res)
+    _ -> internalError $ "Unexpected solver output: " <> T.unpack res
 
 -- | Sends a single command to the solver, returns the first available line from the output buffer
 sendCommand :: SolverInstance -> Text -> IO Text
