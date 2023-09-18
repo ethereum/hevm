@@ -846,26 +846,13 @@ simplify e = if (mapExpr go e == e)
 simplifyProps :: [Prop] -> [Prop]
 simplifyProps ps = if canBeSat then simplified else [PBool False]
   where
-    simplified = remRedundantProps . map (evalProp . simpInnerExpr) . flattenProps $ ps
+    simplified = remRedundantProps . map evalProp . flattenProps $ ps
     canBeSat = constFoldProp simplified
-    simpInnerExpr :: Prop -> Prop
-    -- rewrite everything as LEq or LT
-    simpInnerExpr (PGEq a b) = simpInnerExpr (PLEq b a)
-    simpInnerExpr (PGT a b) = simpInnerExpr (PLT b a)
-    -- simplifies the inner expression
-    simpInnerExpr (PEq a b) = PEq (simplify a) (simplify b)
-    simpInnerExpr (PLT a b) = PLT (simplify a) (simplify b)
-    simpInnerExpr (PLEq a b) = PLEq (simplify a) (simplify b)
-    simpInnerExpr (PNeg a) = PNeg (simpInnerExpr a)
-    simpInnerExpr (PAnd a b) = PAnd (simpInnerExpr a) (simpInnerExpr b)
-    simpInnerExpr (POr a b) = POr (simpInnerExpr a) (simpInnerExpr b)
-    simpInnerExpr (PImpl a b) = PImpl (simpInnerExpr a) (simpInnerExpr b)
-    simpInnerExpr orig@(PBool _) = orig
 
 -- | Evaluate the provided proposition down to its most concrete result
 evalProp :: Prop -> Prop
 evalProp prop =
-  let new = mapProp' go prop
+  let new = mapProp' go (simpInnerExpr prop)
   in if (new == prop) then prop else evalProp new
   where
     go :: Prop -> Prop
@@ -904,6 +891,22 @@ evalProp prop =
       | l == r = PBool True
       | otherwise = o
     go p = p
+    -- Applies `simplify` to the inner part of a Prop, e.g.
+    -- (PEq (Add (Lit 1) (Lit 2)) (Var "a")) becomes
+    -- (PEq (Lit 3) (Var "a")
+    simpInnerExpr :: Prop -> Prop
+    -- rewrite everything as LEq or LT
+    simpInnerExpr (PGEq a b) = simpInnerExpr (PLEq b a)
+    simpInnerExpr (PGT a b) = simpInnerExpr (PLT b a)
+    -- simplifies the inner expression
+    simpInnerExpr (PEq a b) = PEq (simplify a) (simplify b)
+    simpInnerExpr (PLT a b) = PLT (simplify a) (simplify b)
+    simpInnerExpr (PLEq a b) = PLEq (simplify a) (simplify b)
+    simpInnerExpr (PNeg a) = PNeg (simpInnerExpr a)
+    simpInnerExpr (PAnd a b) = PAnd (simpInnerExpr a) (simpInnerExpr b)
+    simpInnerExpr (POr a b) = POr (simpInnerExpr a) (simpInnerExpr b)
+    simpInnerExpr (PImpl a b) = PImpl (simpInnerExpr a) (simpInnerExpr b)
+    simpInnerExpr orig@(PBool _) = orig
 
 -- Makes [PAnd a b] into [a,b]
 flattenProps :: [Prop] -> [Prop]
