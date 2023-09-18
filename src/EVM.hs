@@ -672,7 +672,7 @@ exec1 = do
                 else do
                   let
                     original =
-                      case Expr.readStorage' x this.origStorage of
+                      case Expr.simplify $ SLoad x this.origStorage of
                         Lit v -> v
                         _ -> 0
                     storage_cost =
