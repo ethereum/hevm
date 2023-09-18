@@ -27,6 +27,7 @@ contract Prankster {
 
 contract Payable {
     function hi() public payable {}
+    receive() external payable {}
 }
 
 contract Empty {}
@@ -192,4 +193,22 @@ contract CheatCodes is DSTest {
 
         assertEq(preBal - postBal, amt);
     }
+
+    function prove_prank_val_2() public {
+        address payable a = payable(address(new Payable()));
+        address payable b = payable(address(new Payable()));
+
+        // send this.balance to a
+        a.call{value: address(this).balance}("");
+        uint aBal = a.balance;
+
+        // send 1 wei from a to b
+        hevm.prank(a);
+        address(b).call{value: 1}("");
+
+        // check balances
+        assertEq(a.balance, aBal - 1);
+        assertEq(b.balance, 1);
+    }
+
 }
