@@ -192,7 +192,6 @@ abstractAwayProps abstRefineConfig ps = runState (mapM abstrAway ps) (AbstState 
 smt2Line :: Builder -> SMT2
 smt2Line txt = SMT2 [txt] mempty mempty
 
-
 assertProps :: AbstRefineConfig -> [Prop] -> SMT2
 assertProps conf ps = assertPropsNoSimp conf (Expr.simplifyProps ps)
 

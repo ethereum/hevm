@@ -842,6 +842,7 @@ simplify e = if (mapExpr go e == e)
 
 -- ** Prop Simplification ** -----------------------------------------------------------------------
 
+
 simplifyProps :: [Prop] -> [Prop]
 simplifyProps ps = if canBeSat then simplified else [PBool False]
   where
