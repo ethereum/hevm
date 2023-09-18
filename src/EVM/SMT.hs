@@ -196,10 +196,9 @@ smt2Line txt = SMT2 [txt] mempty mempty
 assertProps :: AbstRefineConfig -> [Prop] -> SMT2
 assertProps conf ps = assertPropsNoSimp conf (Expr.simplifyProps ps)
 
--- Note: assertProps must NEVER call simplify or simplifyProps, because we use
--- assertProps to verify the correctness of our simplification passes through
--- property-based testing. Hence, our verification could be rendered ineffective
--- if we used simplify/simplifyProps here
+-- Note: we need a version that does NOT call simplify or simplifyProps,
+-- because we make use of it to verify the correctness of our simplification
+-- passes through property-based testing.
 assertPropsNoSimp :: AbstRefineConfig -> [Prop] -> SMT2
 assertPropsNoSimp abstRefineConfig ps =
   let encs = map propToSMT psElimAbst
