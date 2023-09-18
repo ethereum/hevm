@@ -239,6 +239,67 @@ tests = testGroup "hevm"
         let simplified = pand (Expr.simplifyProps [p])
         checkEquivProp simplified p
     ]
+  , testGroup "simpProp-concrete-tests" [
+      testCase "simpProp-concrete-trues" $ do
+        let
+          t = [PBool True, PBool True]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [] simplified
+    , testCase "simpProp-concrete-false1" $ do
+        let
+          t = [PBool True, PBool False]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+    , testCase "simpProp-concrete-false2" $ do
+        let
+          t = [PBool False, PBool False]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+    , testCase "simpProp-concrete-or-1" $ do
+        let
+          -- a = 5 && (a=4 || a=3)  -> False
+          t = [PEq (Lit 5) (Var "a"), POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 3))]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+    , ignoreTest $ testCase "simpProp-concrete-or-2" $ do
+        let
+          -- Currently does not work, because we don't do simplification inside
+          --   POr/PAnd using canBeSat
+          -- a = 5 && (a=4 || a=5)  -> a=5
+          t = [PEq (Lit 5) (Var "a"), POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 5))]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [] simplified
+    , testCase "simpProp-concrete-and-1" $ do
+        let
+          -- a = 5 && (a=4 && a=3)  -> False
+          t = [PEq (Lit 5) (Var "a"), PAnd (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 3))]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+    , testCase "simpProp-concrete-or-of-or" $ do
+        let
+          -- a = 5 && ((a=4 || a=6) || a=3)  -> False
+          t = [PEq (Lit 5) (Var "a"), POr (POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 6))) (PEq (Var "a") (Lit 3))]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+    , testCase "simpProp-concrete-or-eq-rem" $ do
+        let
+          -- a = 5 && ((a=4 || a=6) || a=3)  -> False
+          t = [PEq (Lit 5) (Var "a"), POr (POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 6))) (PEq (Var "a") (Lit 3))]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+    , testCase "simpProp-inner-expr-simp" $ do
+        let
+          -- 5+1 = 6
+          t = [PEq (Add (Lit 5) (Lit 1)) (Var "a")]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PEq (Lit 6) (Var "a")] simplified
+    , testCase "simpProp-inner-expr-simp-with-canBeSat" $ do
+        let
+          -- 5+1 = 6, 6 != 7
+          t = [PAnd (PEq (Add (Lit 5) (Lit 1)) (Var "a")) (PEq (Var "a") (Lit 7))]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+  ]
   , testGroup "MemoryTests"
     [ testCase "read-write-same-byte"  $ assertEqual ""
         (LitByte 0x12)
