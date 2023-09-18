@@ -3355,8 +3355,12 @@ genStorageExp = do
 genSlot :: Gen (Expr EWord)
 genSlot = frequency [ (1, do
                         buf <- genConcreteBufSlot 64
-                        key <- genLit 10
-                        pure $ Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) (WriteWord (Lit 0) key buf) (ConcreteBuf ""))  )
+                        case buf of
+                          (ConcreteBuf b) -> do
+                            key <- genLit 10
+                            pure $ Expr.MappingSlot b key
+                          _ -> internalError "impossible"
+                        )
                      -- map element
                      ,(2, do
                         l <- genLit 10
