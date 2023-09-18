@@ -854,7 +854,7 @@ simplifyProps ps = if canBeSat then simplified else [PBool False]
     -- simplifies the inner expression
     simpInnerExpr (PEq a b) = PEq (simplify a) (simplify b)
     simpInnerExpr (PLT a b) = PLT (simplify a) (simplify b)
-    simpInnerExpr (PLEq a b) = PEq (simplify a) (simplify b)
+    simpInnerExpr (PLEq a b) = PLEq (simplify a) (simplify b)
     simpInnerExpr (PNeg a) = PNeg (simpInnerExpr a)
     simpInnerExpr (PAnd a b) = PAnd (simpInnerExpr a) (simpInnerExpr b)
     simpInnerExpr (POr a b) = POr (simpInnerExpr a) (simpInnerExpr b)
