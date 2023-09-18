@@ -196,7 +196,7 @@ showTraceTree dapp vm =
   in pack $ concatMap showTree traces
 
 showTraceTree' :: DappInfo -> Expr End -> Text
-showTraceTree' _ (ITE {}) = error "Internal Error: ITE does not contain a trace"
+showTraceTree' _ (ITE {}) = internalError "ITE does not contain a trace"
 showTraceTree' dapp leaf =
   let forest = traceForest' leaf
       traces = fmap (fmap (unpack . showTrace dapp (traceContext leaf))) forest

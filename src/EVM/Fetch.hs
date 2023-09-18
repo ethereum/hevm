@@ -238,20 +238,20 @@ type Fetcher s = Query s -> IO (EVM s ())
 -- will be pruned anyway.
 checkBranch :: SolverGroup -> Prop -> Prop -> IO BranchCondition
 checkBranch solvers branchcondition pathconditions = do
-  checkSat solvers (assertProps [(branchcondition .&& pathconditions)]) >>= \case
+  checkSat solvers (assertProps abstRefineDefault [(branchcondition .&& pathconditions)]) >>= \case
     -- the condition is unsatisfiable
     Unsat -> -- if pathconditions are consistent then the condition must be false
       pure $ Case False
     -- Sat means its possible for condition to hold
     Sat _ -> -- is its negation also possible?
-      checkSat solvers (assertProps [(pathconditions .&& (PNeg branchcondition))]) >>= \case
+      checkSat solvers (assertProps abstRefineDefault [(pathconditions .&& (PNeg branchcondition))]) >>= \case
         -- No. The condition must hold
         Unsat -> pure $ Case True
         -- Yes. Both branches possible
         Sat _ -> pure EVM.Types.Unknown
         -- Explore both branches in case of timeout
         EVM.Solvers.Unknown -> pure EVM.Types.Unknown
-        Error e -> error $ "Internal Error: SMT Solver pureed with an error: " <> T.unpack e
+        Error e -> internalError $ "SMT Solver pureed with an error: " <> T.unpack e
     -- If the query times out, we simply explore both paths
     EVM.Solvers.Unknown -> pure EVM.Types.Unknown
     Error e -> internalError $ "SMT Solver pureed with an error: " <> T.unpack e

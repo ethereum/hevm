@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved Prop simplification
 - CopySlice+WriteWord+ConcreteBuf now truncates ConcreteBuf in special cases
 - Better simplification of Eq IR elements
+- Run a toplevel constant folding reasoning system on branch conditions
 
 ## API Changes
 
@@ -83,6 +84,7 @@ Support for fully symbolic contract addresses required some very extensive chang
 ## Changed
 
 - Removed sha3Crack which has been deprecated for keccakEqs
+- Abstraction-refinement for more complicated expressions such as MULMOD
 
 ## Added
 

@@ -397,9 +397,11 @@ tests = testGroup "hevm"
             let asBuf = Expr.fromList asList
             checkEquiv asBuf input
     , testProperty "evalProp-equivalence-lit" $ \(LitProp p) -> ioProperty $ do
-        let simplified = Expr.evalProp p
-        assertBool "must evaluate down to a literal bool" (isPBool simplified)
-        checkEquivProp simplified p
+        let simplified = Expr.simplifyProps [p]
+        case simplified of
+          [] -> checkEquivProp (PBool True) p
+          [val@(PBool _)] -> checkEquivProp val p
+          _ -> assertFailure "must evaluate down to a literal bool"
     , testProperty "evalProp-equivalence-sym" $ \(p) -> ioProperty $ do
         let simplified = Expr.evalProp p
         checkEquivProp simplified p
@@ -417,6 +419,67 @@ tests = testGroup "hevm"
         T.writeFile "simplified.expr" $ formatExpr simplified
         checkEquiv simplified s
     ]
+  , testGroup "simpProp-concrete-tests" [
+      testCase "simpProp-concrete-trues" $ do
+        let
+          t = [PBool True, PBool True]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [] simplified
+    , testCase "simpProp-concrete-false1" $ do
+        let
+          t = [PBool True, PBool False]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+    , testCase "simpProp-concrete-false2" $ do
+        let
+          t = [PBool False, PBool False]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+    , testCase "simpProp-concrete-or-1" $ do
+        let
+          -- a = 5 && (a=4 || a=3)  -> False
+          t = [PEq (Lit 5) (Var "a"), POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 3))]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+    , ignoreTest $ testCase "simpProp-concrete-or-2" $ do
+        let
+          -- Currently does not work, because we don't do simplification inside
+          --   POr/PAnd using canBeSat
+          -- a = 5 && (a=4 || a=5)  -> a=5
+          t = [PEq (Lit 5) (Var "a"), POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 5))]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [] simplified
+    , testCase "simpProp-concrete-and-1" $ do
+        let
+          -- a = 5 && (a=4 && a=3)  -> False
+          t = [PEq (Lit 5) (Var "a"), PAnd (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 3))]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+    , testCase "simpProp-concrete-or-of-or" $ do
+        let
+          -- a = 5 && ((a=4 || a=6) || a=3)  -> False
+          t = [PEq (Lit 5) (Var "a"), POr (POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 6))) (PEq (Var "a") (Lit 3))]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+    , testCase "simpProp-concrete-or-eq-rem" $ do
+        let
+          -- a = 5 && ((a=4 || a=6) || a=3)  -> False
+          t = [PEq (Lit 5) (Var "a"), POr (POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 6))) (PEq (Var "a") (Lit 3))]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+    , testCase "simpProp-inner-expr-simp" $ do
+        let
+          -- 5+1 = 6
+          t = [PEq (Add (Lit 5) (Lit 1)) (Var "a")]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PEq (Lit 6) (Var "a")] simplified
+    , testCase "simpProp-inner-expr-simp-with-canBeSat" $ do
+        let
+          -- 5+1 = 6, 6 != 7
+          t = [PAnd (PEq (Add (Lit 5) (Lit 1)) (Var "a")) (PEq (Var "a") (Lit 7))]
+          simplified = Expr.simplifyProps t
+        assertEqual "Must be equal" [PBool False] simplified
+  ]
   , testGroup "MemoryTests"
     [ testCase "read-write-same-byte"  $ assertEqual ""
         (LitByte 0x12)
@@ -1476,7 +1539,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Qed _])  <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "sdiv works as expected"
       ,
      testCase "signed-overflow-checks" $ do
@@ -1618,6 +1681,33 @@ tests = testGroup "hevm"
             |]
         (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         putStrLn "XOR works as expected"
+      ,
+      testCase "opcode-add-commutative" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 a, uint256 b) external pure {
+                uint256 res1;
+                uint256 res2;
+                assembly {
+                  res1 := add(a,b)
+                  res2 := add(b,a)
+                }
+                assert (res1 == res2);
+              }
+            }
+            |]
+        a <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+        case a of
+          (_, [Cex (_, ctr)]) -> do
+            let x = getVar ctr "arg1"
+            let y = getVar ctr "arg2"
+            putStrLn $ "y:" <> show y
+            putStrLn $ "x:" <> show x
+            assertEqual "Addition is not commutative... that's wrong" False True
+          (_, [Qed _]) -> do
+            putStrLn "adding is commutative"
+          _ -> internalError "Unexpected"
       ,
       testCase "opcode-div-res-zero-on-div-by-zero" $ do
         Just c <- solcRuntime "MyContract"
@@ -2328,13 +2418,13 @@ tests = testGroup "hevm"
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        ignoreTest $ testCase "safemath distributivity (yul)" $ do
+        testCase "safemath-distributivity-yul" $ do
           let yulsafeDistributivity = hex "6355a79a6260003560e01c14156016576015601f565b5b60006000fd60a1565b603d602d604435600435607c565b6039602435600435607c565b605d565b6052604b604435602435605d565b600435607c565b141515605a57fe5b5b565b6000828201821115151560705760006000fd5b82820190505b92915050565b6000818384048302146000841417151560955760006000fd5b82820290505b92915050565b"
           vm <- stToIO $ abstractVM (mkCalldata (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []) yulsafeDistributivity Nothing False
           (_, [Qed _]) <-  withSolvers Z3 1 Nothing $ \s -> verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLn "Proven"
         ,
-        testCase "safemath distributivity (sol)" $ do
+        testCase "safemath-distributivity-sol" $ do
           Just c <- solcRuntime "C"
             [i|
               contract C {
@@ -2356,7 +2446,7 @@ tests = testGroup "hevm"
               }
             |]
 
-          (_, [Qed _]) <- withSolvers Z3 1 (Just 99999999) $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers CVC5 1 (Just 99999999) $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLn "Proven"
         ,
         testCase "storage-cex-1" $ do
@@ -2955,7 +3045,7 @@ checkEquivBase mkprop l r = withSolvers Z3 1 (Just 1) $ \solvers -> do
        putStrLn "skip"
        pure True
      else do
-       let smt = assertProps [mkprop l r]
+       let smt = assertPropsNoSimp abstRefineDefault [mkprop l r]
        res <- checkSat solvers smt
        print res
        pure $ case res of

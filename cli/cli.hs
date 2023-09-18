@@ -89,6 +89,8 @@ data Command w
       , askSmtIterations :: w ::: Integer         <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
+      , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
+      , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: ByteString       <?> "Bytecode of the first program"
@@ -103,6 +105,8 @@ data Command w
       , smtdebug      :: w ::: Bool             <?> "Print smt queries sent to the solver"
       , askSmtIterations :: w ::: Integer       <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
+      , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
+      , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
@@ -144,6 +148,8 @@ data Command w
       , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in seconds (default: 300)"
       , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point"
       , loopDetectionHeuristic :: w ::: LoopHeuristic   <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
+      , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
+      , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
       , askSmtIterations :: w ::: Integer               <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       }
   | Version
@@ -214,6 +220,7 @@ equivalence cmd = do
                           , maxIter = cmd.maxIterations
                           , askSmtIters = cmd.askSmtIterations
                           , loopHeuristic = cmd.loopDetectionHeuristic
+                          , abstRefineConfig = AbstRefineConfig cmd.abstractArithmetic cmd.abstractMemory
                           , rpcInfo = Nothing
                           }
   calldata <- buildCalldata cmd
@@ -293,13 +300,13 @@ assert cmd = do
   let solverCount = fromMaybe cores cmd.numSolvers
   solver <- getSolver cmd
   withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
-    let opts = VeriOpts {
-      simp = True,
-      debug = cmd.smtdebug,
-      maxIter = cmd.maxIterations,
-      askSmtIters = cmd.askSmtIterations,
-      loopHeuristic = cmd.loopDetectionHeuristic,
-      rpcInfo = rpcinfo
+    let opts = VeriOpts { simp = True
+                        , debug = cmd.smtdebug
+                        , maxIter = cmd.maxIterations
+                        , askSmtIters = cmd.askSmtIterations
+                        , loopHeuristic = cmd.loopDetectionHeuristic
+                        , abstRefineConfig = AbstRefineConfig cmd.abstractArithmetic cmd.abstractMemory
+                        , rpcInfo = rpcinfo
     }
     (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
     case res of

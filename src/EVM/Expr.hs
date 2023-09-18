@@ -22,6 +22,7 @@ import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
 import Witch (unsafeInto, into, tryFrom)
 import Data.Containers.ListUtils (nubOrd)
+import Control.Monad.State
 
 import Optics.Core
 
@@ -567,7 +568,7 @@ stripWrites off size = \case
   WriteByte i v prev -> WriteByte i v (stripWrites off size prev)
   WriteWord i v prev -> WriteWord i v (stripWrites off size prev)
   CopySlice srcOff dstOff size' src dst -> CopySlice srcOff dstOff size' src dst
-  GVar _ ->  internalError "unexpected GVar in stripWrites"
+  GVar _ ->  internalError "Unexpected GVar in stripWrites"
 
 
 -- ** Storage ** -----------------------------------------------------------------------------------
@@ -950,18 +951,18 @@ simplify e = if (mapExpr go e == e)
 
 
 simplifyProps :: [Prop] -> [Prop]
-simplifyProps = remRedundantProps . map evalProp . flattenProps
+simplifyProps ps = if canBeSat then simplified else [PBool False]
+  where
+    simplified = remRedundantProps . map evalProp . flattenProps $ ps
+    canBeSat = constFoldProp simplified
 
 -- | Evaluate the provided proposition down to its most concrete result
 evalProp :: Prop -> Prop
 evalProp prop =
-  let new = mapProp' go prop
+  let new = mapProp' go (simpInnerExpr prop)
   in if (new == prop) then prop else evalProp new
   where
     go :: Prop -> Prop
-    -- rewrite everything as LEq or LT
-    go (PGEq a b) = PLEq b a
-    go (PGT a b) = PLT b a
 
     -- LT/LEq comparisions
     go (PLT  (Var _) (Lit 0)) = PBool False
@@ -970,6 +971,8 @@ evalProp prop =
     go (PLEq (Var _) (Lit val)) | val == maxLit = PBool True
     go (PLT (Lit l) (Lit r)) = PBool (l < r)
     go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
+    go (PLEq a (Max b _)) | a == b = PBool True
+    go (PLEq a (Max _ b)) | a == b = PBool True
 
     -- negations
     go (PNeg (PBool b)) = PBool (Prelude.not b)
@@ -997,6 +1000,22 @@ evalProp prop =
       | l == r = PBool True
       | otherwise = o
     go p = p
+    -- Applies `simplify` to the inner part of a Prop, e.g.
+    -- (PEq (Add (Lit 1) (Lit 2)) (Var "a")) becomes
+    -- (PEq (Lit 3) (Var "a")
+    simpInnerExpr :: Prop -> Prop
+    -- rewrite everything as LEq or LT
+    simpInnerExpr (PGEq a b) = simpInnerExpr (PLEq b a)
+    simpInnerExpr (PGT a b) = simpInnerExpr (PLT b a)
+    -- simplifies the inner expression
+    simpInnerExpr (PEq a b) = PEq (simplify a) (simplify b)
+    simpInnerExpr (PLT a b) = PLT (simplify a) (simplify b)
+    simpInnerExpr (PLEq a b) = PLEq (simplify a) (simplify b)
+    simpInnerExpr (PNeg a) = PNeg (simpInnerExpr a)
+    simpInnerExpr (PAnd a b) = PAnd (simpInnerExpr a) (simpInnerExpr b)
+    simpInnerExpr (POr a b) = POr (simpInnerExpr a) (simpInnerExpr b)
+    simpInnerExpr (PImpl a b) = PImpl (simpInnerExpr a) (simpInnerExpr b)
+    simpInnerExpr orig@(PBool _) = orig
 
 -- Makes [PAnd a b] into [a,b]
 flattenProps :: [Prop] -> [Prop]
@@ -1227,6 +1246,45 @@ containsNode p = getAny . foldExpr go (Any False)
 inRange :: Int -> Expr EWord -> Prop
 inRange sz e = PAnd (PGEq e (Lit 0)) (PLEq e (Lit $ 2 ^ sz - 1))
 
+
 -- | images of keccak(bytes32(x)) where 0 <= x < 256
 preImages :: [(W256, Word8)]
 preImages = [(keccak' (word256Bytes . into $ i), i) | i <- [0..255]]
+
+data ConstState = ConstState
+  { values :: Map.Map (Expr EWord) W256
+  , canBeSat :: Bool
+  }
+  deriving (Show)
+
+-- | Folds constants
+constFoldProp :: [Prop] -> Bool
+constFoldProp ps = oneRun ps (ConstState mempty True)
+  where
+    oneRun ps2 startState = (execState (mapM (go . evalProp) ps2) startState).canBeSat
+    go :: Prop -> State ConstState ()
+    go x = case x of
+        PEq (Lit l) a -> do
+          s <- get
+          case Map.lookup a s.values of
+            Just l2 -> case l==l2 of
+                True -> pure ()
+                False -> put ConstState {canBeSat=False, values=mempty}
+            Nothing -> do
+              let vs' = Map.insert a l s.values
+              put $ s{values=vs'}
+        PEq a b@(Lit _) -> go (PEq b a)
+        PAnd a b -> do
+          go a
+          go b
+        POr a b -> do
+          s <- get
+          let
+            v1 = oneRun [a] s
+            v2 = oneRun [b] s
+          when (Prelude.not v1) $ go b
+          when (Prelude.not v2) $ go a
+          s2 <- get
+          put $ s{canBeSat=(s2.canBeSat && (v1 || v2))}
+        PBool False -> put $ ConstState {canBeSat=False, values=mempty}
+        _ -> pure ()

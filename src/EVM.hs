@@ -271,7 +271,7 @@ exec1 = do
 
     else do
       let ?op = case vm.state.code of
-                  UnknownCode _ -> error "Internal Error: Cannot execute unknown code"
+                  UnknownCode _ -> internalError "Cannot execute unknown code"
                   InitCode conc _ -> BS.index conc vm.state.pc
                   RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs vm.state.pc
                   RuntimeCode (SymbolicRuntimeCode ops) ->
@@ -289,7 +289,7 @@ exec1 = do
         OpPush n' -> do
           let n = into n'
               !xs = case vm.state.code of
-                UnknownCode _ -> error "Internal Error: Cannot execute unknown code"
+                UnknownCode _ -> internalError "Cannot execute unknown code"
                 InitCode conc _ -> Lit $ word $ padRight n $ BS.take n (BS.drop (1 + vm.state.pc) conc)
                 RuntimeCode (ConcreteRuntimeCode bs) -> Lit $ word $ BS.take n $ BS.drop (1 + vm.state.pc) bs
                 RuntimeCode (SymbolicRuntimeCode ops) ->
@@ -462,7 +462,7 @@ exec1 = do
                             assign (#state % #stack) xs
                             case toBuf vm.state.code of
                               Just b -> copyBytesToMemory b n' codeOffset memOffset'
-                              Nothing -> error "Internal Error: cannot produce a buffer from UnknownCode"
+                              Nothing -> internalError "Cannot produce a buffer from UnknownCode"
                       else vmError IllegalOverflow
             _ -> underrun
 
@@ -1914,11 +1914,11 @@ replaceCode target newCode =
               , storage = now.storage
               }
         RuntimeCode _ ->
-          error ("internal error: can't replace code of deployed contract " <> show target)
+          internalError $ "Can't replace code of deployed contract " <> show target
         UnknownCode _ ->
-          error "internal error: can't replace unknown code"
+          internalError "Can't replace unknown code"
       Nothing ->
-        internalError "can't replace code of nonexistent contract"
+        internalError "Can't replace code of nonexistent contract"
 
 replaceCodeOfSelf :: ContractCode -> EVM s ()
 replaceCodeOfSelf newCode = do
@@ -2254,7 +2254,7 @@ pushSym x = #state % #stack %= (x :)
 pushAddr :: Expr EAddr -> EVM s ()
 pushAddr (LitAddr x) = #state % #stack %= (Lit (into x) :)
 pushAddr x@(SymAddr _) = #state % #stack %= (WAddr x :)
-pushAddr (GVar _) = error "Internal Error: Unexpected GVar"
+pushAddr (GVar _) = internalError "Unexpected GVar"
 
 stackOp1
   :: (?op :: Word8)
@@ -2323,7 +2323,7 @@ isValidJumpDest vm x = let
       (internalError "self not found in current contracts")
       (Map.lookup self vm.env.contracts)
     op = case code of
-      UnknownCode _ -> error "Internal Error: cannot analyze jumpdests for unknown code"
+      UnknownCode _ -> internalError "Cannot analyze jumpdests for unknown code"
       InitCode ops _ -> BS.indexMaybe ops x
       RuntimeCode (ConcreteRuntimeCode ops) -> BS.indexMaybe ops x
       RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= maybeLitByte
@@ -2339,7 +2339,7 @@ opSize _                          = 1
 -- the program counter value i.  This is needed because source map
 -- entries are per operation, not per byte.
 mkOpIxMap :: ContractCode -> SV.Vector Int
-mkOpIxMap (UnknownCode _) = error "Internal Error: cannot build opIxMap for unknown code"
+mkOpIxMap (UnknownCode _) = internalError "Cannot build opIxMap for unknown code"
 mkOpIxMap (InitCode conc _)
   = SV.create $ SV.new (BS.length conc) >>= \v ->
       -- Loop over the byte string accumulating a vector-mutating action.
@@ -2384,7 +2384,7 @@ vmOp vm =
   let i  = vm ^. #state % #pc
       code' = vm ^. #state % #code
       (op, pushdata) = case code' of
-        UnknownCode _ -> error "Internal Error: cannot get op from unknown code"
+        UnknownCode _ -> internalError "cannot get op from unknown code"
         InitCode xs' _ ->
           (BS.index xs' i, fmap LitByte $ BS.unpack $ BS.drop i xs')
         RuntimeCode (ConcreteRuntimeCode xs') ->
@@ -2404,7 +2404,7 @@ vmOpIx vm =
 mkCodeOps :: ContractCode -> V.Vector (Int, Op)
 mkCodeOps contractCode =
   let l = case contractCode of
-            UnknownCode _ -> error "Internal Error: cannot make codeOps for unknown code"
+            UnknownCode _ -> internalError "Cannot make codeOps for unknown code"
             InitCode bytes _ ->
               LitByte <$> (BS.unpack bytes)
             RuntimeCode (ConcreteRuntimeCode ops) ->
@@ -2534,7 +2534,7 @@ hashcode (RuntimeCode (SymbolicRuntimeCode ops)) = keccak . Expr.fromList $ ops
 -- | The length of the code ignoring any constructor args.
 -- This represents the region that can contain executable opcodes
 opslen :: ContractCode -> Int
-opslen (UnknownCode _) = error "Internal Error: cannot produce concrete opslen for unknown code"
+opslen (UnknownCode _) = internalError "Cannot produce concrete opslen for unknown code"
 opslen (InitCode ops _) = BS.length ops
 opslen (RuntimeCode (ConcreteRuntimeCode ops)) = BS.length ops
 opslen (RuntimeCode (SymbolicRuntimeCode ops)) = length ops
@@ -2545,7 +2545,7 @@ codelen :: ContractCode -> Expr EWord
 codelen (UnknownCode a) = CodeSize a
 codelen c@(InitCode {}) = case toBuf c of
   Just b -> bufLength b
-  Nothing -> error "Internal Error: impossible"
+  Nothing -> internalError "impossible"
 -- these are never going to be negative so unsafeInto is fine here
 codelen (RuntimeCode (ConcreteRuntimeCode ops)) = Lit . unsafeInto $ BS.length ops
 codelen (RuntimeCode (SymbolicRuntimeCode ops)) = Lit . unsafeInto $ length ops
@@ -2563,13 +2563,13 @@ codeloc = do
 
 createAddress :: Expr EAddr -> Maybe W64 -> EVM s (Expr EAddr)
 createAddress (LitAddr a) (Just n) = pure $ Concrete.createAddress a n
-createAddress (GVar _) _ = error "Internal Error: unexpected GVar"
+createAddress (GVar _) _ = internalError "Unexpected GVar"
 createAddress _ _ = freshSymAddr
 
 create2Address :: Expr EAddr -> W256 -> ByteString -> EVM s (Expr EAddr)
 create2Address (LitAddr a) s b = pure $ Concrete.create2Address a s b
 create2Address (SymAddr _) _ _ = freshSymAddr
-create2Address (GVar _) _ _ = error "Internal Error: unexpected GVar"
+create2Address (GVar _) _ _ = internalError "Unexpected GVar"
 
 freshSymAddr :: EVM s (Expr EAddr)
 freshSymAddr = do
@@ -2581,7 +2581,7 @@ isPrecompileAddr :: Expr EAddr -> Bool
 isPrecompileAddr = \case
   LitAddr a -> 0x0 < a && a <= 0x09
   SymAddr _ -> False
-  GVar _ -> error "Internal Error: unexpected GVar"
+  GVar _ -> internalError "Unexpected GVar"
 
 -- * Arithmetic
 

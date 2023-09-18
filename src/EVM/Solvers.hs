@@ -112,21 +112,31 @@ withSolvers solver count timeout cont = do
       _ <- forkIO $ runTask task inst avail
       orchestrate queue avail
 
-    runTask (Task (SMT2 cmds cexvars) r) inst availableInstances = do
+    runTask (Task (SMT2 cmds (RefinementEqs refineEqs) cexvars) r) inst availableInstances = do
       -- reset solver and send all lines of provided script
-      out <- sendScript inst (SMT2 ("(reset)" : cmds) cexvars)
+      out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty)
       case out of
         -- if we got an error then return it
         Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
         -- otherwise call (check-sat), parse the result, and send it down the result channel
         Right () -> do
           sat <- sendLine inst "(check-sat)"
-          res <- case sat of
-            "sat" -> Sat <$> getModel inst cexvars
-            "unsat" -> pure Unsat
-            "timeout" -> pure Unknown
-            "unknown" -> pure Unknown
-            _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
+          res <- do
+              case sat of
+                "unsat" -> pure Unsat
+                "timeout" -> pure Unknown
+                "unknown" -> pure Unknown
+                "sat" -> if null refineEqs then Sat <$> getModel inst cexvars
+                         else do
+                              _ <- sendScript inst (SMT2 refineEqs mempty mempty)
+                              sat2 <- sendLine inst "(check-sat)"
+                              case sat2 of
+                                "unsat" -> pure Unsat
+                                "timeout" -> pure Unknown
+                                "unknown" -> pure Unknown
+                                "sat" -> Sat <$> getModel inst cexvars
+                                _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat2
+                _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
           writeChan r res
 
       -- put the instance back in the list of available instances
@@ -252,7 +262,7 @@ stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just
 
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
 sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
-sendScript solver (SMT2 cmds _) = do
+sendScript solver (SMT2 cmds _ _) = do
   let sexprs = splitSExpr $ fmap toLazyText cmds
   go sexprs
   where
@@ -268,7 +278,7 @@ checkCommand inst cmd = do
   res <- sendCommand inst cmd
   case res of
     "success" -> pure ()
-    _ -> error $ "Internal Error: Unexpected solver output: " <> (T.unpack res)
+    _ -> internalError $ "Unexpected solver output: " <> T.unpack res
 
 -- | Sends a single command to the solver, returns the first available line from the output buffer
 sendCommand :: SolverInstance -> Text -> IO Text
