@@ -226,9 +226,11 @@ tests = testGroup "hevm"
             let asBuf = Expr.fromList asList
             checkEquiv asBuf input
     , testProperty "evalProp-equivalence-lit" $ \(LitProp p) -> ioProperty $ do
-        let simplified = Expr.evalProp p
-        assertBool "must evaluate down to a literal bool" (isPBool simplified)
-        checkEquivProp simplified p
+        let simplified = Expr.simplifyProps [p]
+        case simplified of
+          [] -> checkEquivProp (PBool True) p
+          [val@(PBool _)] -> checkEquivProp val p
+          _ -> assertFailure "must evaluate down to a literal bool"
     , testProperty "evalProp-equivalence-sym" $ \(p) -> ioProperty $ do
         let simplified = Expr.evalProp p
         checkEquivProp simplified p
@@ -2865,7 +2867,7 @@ checkEquivBase mkprop l r = withSolvers Z3 1 (Just 1) $ \solvers -> do
        putStrLn "skip"
        pure True
      else do
-       let smt = assertProps abstRefineDefault [mkprop l r]
+       let smt = assertPropsNoSimp abstRefineDefault [mkprop l r]
        res <- checkSat solvers smt
        print res
        pure $ case res of
