@@ -155,7 +155,6 @@ declareIntermediates bufs stores =
     encodeStore n expr =
       SMT2 ["(define-const store" <> (fromString . show $ n) <> " Storage " <> exprToSMT expr <> ")"] mempty mempty
 
-
 data AbstState = AbstState
   { words :: Map (Expr EWord) Int
   , count :: Int
@@ -194,7 +193,13 @@ smt2Line :: Builder -> SMT2
 smt2Line txt = SMT2 [txt] mempty mempty
 
 assertProps :: AbstRefineConfig -> [Prop] -> SMT2
-assertProps abstRefineConfig ps =
+assertProps conf ps = assertPropsNoSimp conf (Expr.simplifyProps ps)
+
+-- Note: we need a version that does NOT call simplify or simplifyProps,
+-- because we make use of it to verify the correctness of our simplification
+-- passes through property-based testing.
+assertPropsNoSimp :: AbstRefineConfig -> [Prop] -> SMT2
+assertPropsNoSimp abstRefineConfig ps =
   let encs = map propToSMT psElimAbst
       abstSMT = map propToSMT abstProps
       intermediates = declareIntermediates bufs stores in
