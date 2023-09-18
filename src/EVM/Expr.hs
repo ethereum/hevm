@@ -842,12 +842,24 @@ simplify e = if (mapExpr go e == e)
 
 -- ** Prop Simplification ** -----------------------------------------------------------------------
 
-
 simplifyProps :: [Prop] -> [Prop]
 simplifyProps ps = if canBeSat then simplified else [PBool False]
   where
-    simplified = remRedundantProps . map evalProp . flattenProps $ ps
+    simplified = remRedundantProps . map (evalProp . simpInnerExpr) . flattenProps $ ps
     canBeSat = constFoldProp simplified
+    simpInnerExpr :: Prop -> Prop
+    -- rewrite everything as LEq or LT
+    simpInnerExpr (PGEq a b) = simpInnerExpr (PLEq b a)
+    simpInnerExpr (PGT a b) = simpInnerExpr (PLT b a)
+    -- simplifies the inner expression
+    simpInnerExpr (PEq a b) = PEq (simplify a) (simplify b)
+    simpInnerExpr (PLT a b) = PLT (simplify a) (simplify b)
+    simpInnerExpr (PLEq a b) = PEq (simplify a) (simplify b)
+    simpInnerExpr (PNeg a) = PNeg (simpInnerExpr a)
+    simpInnerExpr (PAnd a b) = PAnd (simpInnerExpr a) (simpInnerExpr b)
+    simpInnerExpr (POr a b) = POr (simpInnerExpr a) (simpInnerExpr b)
+    simpInnerExpr (PImpl a b) = PImpl (simpInnerExpr a) (simpInnerExpr b)
+    simpInnerExpr orig@(PBool _) = orig
 
 -- | Evaluate the provided proposition down to its most concrete result
 evalProp :: Prop -> Prop
@@ -856,9 +868,6 @@ evalProp prop =
   in if (new == prop) then prop else evalProp new
   where
     go :: Prop -> Prop
-    -- rewrite everything as LEq or LT
-    go (PGEq a b) = PLEq b a
-    go (PGT a b) = PLT b a
 
     -- LT/LEq comparisions
     go (PLT  (Var _) (Lit 0)) = PBool False
