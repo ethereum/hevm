@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Changed
 
 - Less noisy console output during tracing
+- Minimum distance requirements are now asserted for Keccak function calls. They assert that it's hard to generate two Keccak's that are less than 2**32 afar.
 
 ### UI
 
