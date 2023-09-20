@@ -510,7 +510,7 @@ reachable solvers e = do
         pure (fst tres <> fst fres, subexpr)
       leaf -> do
         let query = assertProps abstRefineDefault pcs
-        res <- checkSat solvers query Nothing
+        res <- checkSat solvers query
         case res of
           Sat _ -> pure ([query], Just leaf)
           Unsat -> pure ([query], Nothing)
@@ -576,14 +576,13 @@ verify solvers opts preState maybepost = do
         assumes = preState.constraints
         withQueries = canViolate <&> \leaf ->
           (assertProps opts.abstRefineConfig (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)
-        debugFName = if opts.debug then Just ("verify-query") else Nothing
       putStrLn $ "Checking for reachability of "
                    <> show (length withQueries)
                    <> " potential property violation(s)"
 
       -- Dispatch the remaining branches to the solver to check for violations
       results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
-        res <- checkSat solvers query debugFName
+        res <- checkSat solvers query
         pure (res, leaf)
       let cexs = filter (\(res, _) -> not . isUnsat $ res) results
       pure $ if Prelude.null cexs then (expr, [Qed ()]) else (expr, fmap toVRes cexs)
@@ -681,16 +680,13 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     -- the solver if we can determine unsatisfiability from the cache already
     -- the last element of the returned tuple indicates whether the cache was
     -- used or not
-    check :: UnsatCache -> (Set Prop) -> Int -> IO (EquivResult, Bool)
-    check knownUnsat props idx = do
-      let
-        smt = assertProps opts.abstRefineConfig (Set.toList props)
-        debugFName = if opts.debug then Just "equiv-query"
-                                   else Nothing
+    check :: UnsatCache -> (Set Prop) -> IO (EquivResult, Bool)
+    check knownUnsat props = do
+      let smt = assertProps opts.abstRefineConfig (Set.toList props)
       ku <- readTVarIO knownUnsat
       res <- if subsetAny props ku
              then pure (True, Unsat)
-             else (fmap ((False),) (checkSat solvers smt debugFName))
+             else (fmap ((False),) (checkSat solvers smt))
       case res of
         (_, Sat x) -> pure (Cex x, False)
         (quick, Unsat) ->
@@ -711,7 +707,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     checkAll :: [(Set Prop)] -> UnsatCache -> Int -> IO [(EquivResult, Bool)]
     checkAll input cache numproc = do
        wrap <- pool numproc
-       parMapIO (wrap . (uncurry $ check cache)) $ zip input [1..]
+       parMapIO (wrap . (check cache)) input
 
 
     -- Takes two branches and returns a set of props that will need to be
@@ -783,7 +779,7 @@ produceModels solvers expr = do
   let flattened = flattenExpr expr
       withQueries = fmap (\e -> ((assertProps abstRefineDefault) . extractProps $ e, e)) flattened
   results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
-    res <- checkSat solvers query Nothing
+    res <- checkSat solvers query
     pure (res, leaf)
   pure $ fmap swap $ filter (\(res, _) -> not . isUnsat $ res) results
 

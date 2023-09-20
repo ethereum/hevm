@@ -12,10 +12,8 @@ import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
 import Control.Concurrent (forkIO, killThread)
 import Control.Monad
 import Control.Monad.State.Strict
-import Control.Monad.Reader
 import Data.Char (isSpace)
 import Data.Map (Map)
-import Data.IORef
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe, isJust, fromJust)
 import Data.Text qualified as TS
@@ -25,6 +23,7 @@ import Data.Text.Lazy.IO qualified as T
 import Data.Text.Lazy.Builder
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
 import Witch (into)
+import GHC.Stack (HasCallStack, prettyCallStack, callStack)
 
 import EVM.SMT
 import EVM.Types (W256, Expr(AbstractBuf), internalError)
@@ -82,19 +81,20 @@ isUnsat :: CheckSatResult -> Bool
 isUnsat Unsat = True
 isUnsat _ = False
 
-checkSat :: SolverGroup -> SMT2 -> Maybe String -> IO CheckSatResult
-checkSat (SolverGroup taskQueue) script debugFName = do
+checkSat :: HasCallStack => SolverGroup -> SMT2 -> IO CheckSatResult
+checkSat (SolverGroup taskQueue) script = do
   -- prepare result channel
   resChan <- newChan
   -- send task to solver group
-  writeChan taskQueue (Task script resChan debugFName)
+  let callingFunc = head . lines $ prettyCallStack callStack
+  writeChan taskQueue (Task script resChan (Just callingFunc))
   -- collect result
   readChan resChan
 
-writeSMT2File :: SMT2 -> Maybe String -> String -> IO ()
-writeSMT2File smt2 fname abst =
+writeSMT2File :: SMT2 -> Maybe String -> Int -> String -> IO ()
+writeSMT2File smt2 fname count abst =
   when (isJust fname) $
-  do T.writeFile (fromJust fname <> "-" <> abst <> ".smt2")
+  do T.writeFile (fromJust fname <> "-" <> (show count) <> "-" <> abst <> ".smt2")
       ("; " <> formatSMT2 smt2 <> "\n\n(check-sat)")
 
 withSolvers :: Solver -> Natural -> Maybe Natural -> (SolverGroup -> IO a) -> IO a
@@ -123,7 +123,7 @@ withSolvers solver count timeout cont = do
       orchestrate queue avail (fileCounter + 1)
 
     runTask (Task smt2@(SMT2 cmds (RefinementEqs refineEqs) cexvars) r debugFName) inst availableInstances fileCounter = do
-      writeSMT2File smt2 debugFName ("abstracted")
+      writeSMT2File smt2 debugFName fileCounter "abstracted"
       -- reset solver and send all lines of provided script
       out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty)
       case out of
@@ -140,7 +140,7 @@ withSolvers solver count timeout cont = do
                 "sat" -> if null refineEqs then Sat <$> getModel inst cexvars
                          else do
                               let refinedSMT2 = SMT2 refineEqs mempty mempty
-                              writeSMT2File refinedSMT2 debugFName ("refined")
+                              writeSMT2File refinedSMT2 debugFName fileCounter "refined"
                               _ <- sendScript inst refinedSMT2
                               sat2 <- sendLine inst "(check-sat)"
                               case sat2 of
@@ -286,7 +286,7 @@ sendScript solver (SMT2 cmds _ _) = do
         "success" -> go cs
         e -> pure $ Left $ "Solver returned an error:\n" <> e <> "\nwhile sending the following line: " <> c
 
-checkCommand :: SolverInstance -> Text -> ReaderT Text IO ()
+checkCommand :: SolverInstance -> Text -> IO ()
 checkCommand inst cmd = do
   res <- sendCommand inst cmd
   case res of

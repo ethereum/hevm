@@ -3046,7 +3046,7 @@ checkEquivBase mkprop l r = withSolvers Z3 1 (Just 1) $ \solvers -> do
        pure True
      else do
        let smt = assertPropsNoSimp abstRefineDefault [mkprop l r]
-       res <- checkSat solvers smt Nothing
+       res <- checkSat solvers smt
        print res
        pure $ case res of
          Unsat -> True
