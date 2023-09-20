@@ -9,6 +9,8 @@ module EVM.Keccak (keccakAssumptions, keccakCompute) where
 import Control.Monad.State
 import Data.Set (Set)
 import Data.Set qualified as Set
+import Data.Word (Word32)
+import Witch (into)
 
 import EVM.Traversals
 import EVM.Types
@@ -50,8 +52,11 @@ combine lst = combine' lst []
       let xcomb = [ (x, y) | y <- xs] in
       combine' xs (xcomb:acc)
 
+maxW32 :: W256
+maxW32 = into (maxBound :: Word32)
+
 minProp :: Expr EWord -> Prop
-minProp k@(Keccak _) = PGT k (Lit 50)
+minProp k@(Keccak _) = PGT k (Lit maxW32)
 minProp _ = internalError "expected keccak expression"
 
 injProp :: (Expr EWord, Expr EWord) -> Prop
@@ -67,13 +72,20 @@ injProp _ = internalError "expected keccak expression"
 --      here by making this claim for each unique pair of keccak invocations
 --      discovered in the input expressions)
 keccakAssumptions :: [Prop] -> [Expr Buf] -> [Expr Storage] -> [Prop]
-keccakAssumptions ps bufs stores = injectivity <> minValue
+keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
   where
     (_, st) = runState (findKeccakPropsExprs ps bufs stores) initState
 
     injectivity = fmap injProp $ combine (Set.toList st.keccaks)
     minValue = fmap minProp (Set.toList st.keccaks)
-
+    minDiffOfPairs = map minDistance $ filter (uncurry (/=)) [(a,b) | a<-(Set.elems st.keccaks), b<-(Set.elems st.keccaks)]
+     where
+      minDistance :: ((Expr EWord), (Expr EWord)) -> Prop
+      minDistance (ka@(Keccak a), kb@(Keccak b)) = PImpl (a ./= b) (PAnd req1 req2)
+        where
+          req1 = (PGEq (Sub ka kb) (Lit maxW32))
+          req2 = (PGEq (Sub kb ka) (Lit maxW32))
+      minDistance _ = internalError "expected Keccak expression"
 compute :: forall a. Expr a -> [Prop]
 compute = \case
   e@(Keccak buf) -> do

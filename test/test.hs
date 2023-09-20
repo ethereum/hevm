@@ -303,7 +303,7 @@ tests = testGroup "hevm"
   -- applying some simplification rules, and then using the smt encoding to
   -- check that the simplified version is semantically equivalent to the
   -- unsimplified one
-  , adjustOption (\(Test.Tasty.QuickCheck.QuickCheckTests n) -> Test.Tasty.QuickCheck.QuickCheckTests (min n 50)) $ testGroup "SimplifierTests"
+  , adjustOption (\(Test.Tasty.QuickCheck.QuickCheckTests n) -> Test.Tasty.QuickCheck.QuickCheckTests (min n 50000)) $ testGroup "SimplifierTests"
     [ testProperty  "buffer-simplification" $ \(expr :: Expr Buf) -> ioProperty $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
@@ -411,13 +411,10 @@ tests = testGroup "hevm"
     , testProperty "simpProp-equivalence-sym" $ \(LitProp p) -> ioProperty $ do
         let simplified = pand (Expr.simplifyProps [p])
         checkEquivProp simplified p
-    -- This would need to be a fuzz test I think. The SMT encoding of Keccak is not precise
-    -- enough for this to succeed
-    , ignoreTest $ testProperty "storage-slot-simp-property" $ \(StorageExp s) -> ioProperty $ do
-        T.writeFile "unsimplified.expr" $ formatExpr s
-        let simplified = Expr.simplify s
-        T.writeFile "simplified.expr" $ formatExpr simplified
-        checkEquiv simplified s
+    , testProperty "storage-slot-simp-property" $ \(StorageExp s) -> ioProperty $ do
+        let s2 = Expr.structureArraySlots s
+        let simplified = Expr.simplify s2
+        checkEquiv simplified s2
     ]
   , testGroup "simpProp-concrete-tests" [
       testCase "simpProp-concrete-trues" $ do
