@@ -5,6 +5,7 @@ module EVM.Format
   ( formatExpr
   , formatSomeExpr
   , formatPartial
+  , formatProp
   , contractNamePart
   , contractPathPart
   , showError
