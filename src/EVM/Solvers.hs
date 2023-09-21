@@ -90,8 +90,9 @@ checkSat (SolverGroup taskQueue) script = do
 
 writeSMT2File :: SMT2 -> Int -> String -> IO ()
 writeSMT2File smt2 count abst =
-  do T.writeFile ("query-" <> (show count) <> "-" <> abst <> ".smt2")
-      ("; " <> formatSMT2 smt2 <> "\n\n(check-sat)")
+  do
+    let content = formatSMT2 smt2 <> "\n\n(check-sat)"
+    T.writeFile ("query-" <> (show count) <> "-" <> abst <> ".smt2") content
 
 withSolvers :: Solver -> Natural -> Maybe Natural -> (SolverGroup -> IO a) -> IO a
 withSolvers solver count timeout cont = do
@@ -118,10 +119,10 @@ withSolvers solver count timeout cont = do
       _ <- forkIO $ runTask task inst avail fileCounter
       orchestrate queue avail (fileCounter + 1)
 
-    runTask (Task smt2@(SMT2 cmds (RefinementEqs refineEqs) cexvars) r) inst availableInstances fileCounter = do
+    runTask (Task smt2@(SMT2 cmds (RefinementEqs refineEqs refps) cexvars ps) r) inst availableInstances fileCounter = do
       writeSMT2File smt2 fileCounter "abstracted"
       -- reset solver and send all lines of provided script
-      out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty)
+      out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty ps)
       case out of
         -- if we got an error then return it
         Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
@@ -135,7 +136,7 @@ withSolvers solver count timeout cont = do
                 "unknown" -> pure Unknown
                 "sat" -> if null refineEqs then Sat <$> getModel inst cexvars
                          else do
-                              let refinedSMT2 = SMT2 refineEqs mempty mempty
+                              let refinedSMT2 = SMT2 refineEqs mempty mempty (ps <> refps)
                               writeSMT2File refinedSMT2 fileCounter "refined"
                               _ <- sendScript inst refinedSMT2
                               sat2 <- sendLine inst "(check-sat)"
@@ -271,7 +272,7 @@ stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just
 
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
 sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
-sendScript solver (SMT2 cmds _ _) = do
+sendScript solver (SMT2 cmds _ _ _) = do
   let sexprs = splitSExpr $ fmap toLazyText cmds
   go sexprs
   where
