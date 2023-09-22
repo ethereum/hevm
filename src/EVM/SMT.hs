@@ -144,7 +144,7 @@ instance Monoid SMT2 where
 formatSMT2 :: SMT2 -> Text
 formatSMT2 (SMT2 ls _ _ ps) = expr <> smt2
  where
- expr = T.replace "\n" "\n;" $ T.pack . TS.unpack $  TS.unlines (fmap formatProp ps)
+ expr = T.concat [T.singleton ';', T.replace "\n" "\n;" $ T.pack . TS.unpack $  TS.unlines (fmap formatProp ps)]
  smt2 = T.unlines (fmap toLazyText ls)
 
 -- | Reads all intermediate variables from the builder state and produces SMT declaring them as constants
