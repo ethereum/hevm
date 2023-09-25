@@ -328,11 +328,11 @@ data Expr (a :: EType) where
   ConcreteStore  :: (Map W256 W256) -> Expr Storage
   AbstractStore  :: Expr EAddr -> Expr Storage
 
-  SLoad          :: Expr EWord         -- index
+  SLoad          :: Expr EWord         -- key
                  -> Expr Storage       -- storage
                  -> Expr EWord         -- result
 
-  SStore         :: Expr EWord         -- index
+  SStore         :: Expr EWord         -- key
                  -> Expr EWord         -- value
                  -> Expr Storage       -- old storage
                  -> Expr Storage       -- new storae

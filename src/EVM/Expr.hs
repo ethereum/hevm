@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 {-|
    Helper functions for working with Expr instances.
@@ -573,6 +574,11 @@ stripWrites off size = \case
 -- ** Storage ** -----------------------------------------------------------------------------------
 
 
+readStorage' :: Expr EWord -> Expr Storage -> Expr EWord
+readStorage' loc store = case readStorage loc store of
+                           Just v -> v
+                           Nothing -> Lit 0
+
 -- | Reads the word at the given slot from the given storage expression.
 --
 -- Note that we return a Nothing instead of a 0x0 if we are reading from a
@@ -581,26 +587,127 @@ stripWrites off size = \case
 -- storage lookups much easier. If the store is backed by an AbstractStore we
 -- always return a symbolic value.
 readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
-readStorage slot store@(ConcreteStore s) = case slot of
-  Lit l -> Lit <$> Map.lookup l s
-  _ -> Just $ SLoad slot store
-readStorage slot' s@(AbstractStore _) = Just $ SLoad slot' s
-readStorage slot' s@(SStore slot val prev) =
-  if slot == slot'
-       -- if address and slot match then we return the val in this write
-  then Just val
-  else case (slot, slot') of
-         -- if the slots don't match and are lits, we can skip this write
-         (Lit _, Lit _) -> readStorage slot' prev
-         -- if the slots don't match syntactically and are abstract then we can't skip this write
-         _ -> Just $ SLoad slot' s
-readStorage _ (GVar _) = error "Can't read from a GVar"
+readStorage w st = go (simplify w) st
+  where
+    go :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
+    go _ (GVar _) = internalError "Can't read from a GVar"
+    go slot s@(AbstractStore _) = Just $ SLoad slot s
+    go (Lit l) (ConcreteStore s) = Lit <$> Map.lookup l s
+    go slot store@(ConcreteStore _) = Just $ SLoad slot store
+    go slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
+      -- if address and slot match then we return the val in this write
+      _ | prevSlot == slot -> Just val
 
-readStorage' :: Expr EWord -> Expr Storage -> Expr EWord
-readStorage' loc store = case readStorage loc store of
-                           Just v -> v
-                           Nothing -> Lit 0
+      -- if the slots don't match (see previous guard) and are lits, we can skip this write
+      (Lit _, Lit _) -> go slot prev
 
+      -- slot is for a map + map -> skip write
+      (MappingSlot idA _, MappingSlot idB _)     | idsDontMatch idA idB  -> go slot prev
+      (MappingSlot _ keyA, MappingSlot _ keyB)   | surelyNotEq keyA keyB -> go slot prev
+
+      -- special case of array + map -> skip write
+      (ArraySlotWithOffset idA _, Keccak64Bytes) | BS.length idA /= 64 -> go slot prev
+      (ArraySlotZero idA, Keccak64Bytes)         | BS.length idA /= 64 -> go slot prev
+
+      -- special case of array + map -> skip write
+      (Keccak64Bytes, ArraySlotWithOffset idA _) | BS.length idA /= 64 -> go slot prev
+      (Keccak64Bytes, ArraySlotZero idA)         | BS.length idA /= 64 -> go slot prev
+
+      -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
+      (Lit a, Keccak _) | a < 256 -> go slot prev
+      (Keccak _, Lit a) | a < 256 -> go slot prev
+
+      -- the chance of adding a value <= 2^32 to any given keccack output
+      -- leading to an overflow is effectively zero. the chance of an overflow
+      -- occuring here is 2^32/2^256 = 2^-224, which is close enough to zero
+      -- for our purposes. This lets us completely simplify reads from write
+      -- chains involving writes to arrays at literal offsets.
+      (Lit a, Add (Lit b) (Keccak _) ) | a < 256, b < maxW32 -> go slot prev
+      (Add (Lit a) (Keccak _) , Lit b) | a < 256, b < maxW32 -> go slot prev
+
+      -- Finding two Keccaks that are < 256 away from each other should be VERY hard
+      -- This simplification allows us to deal with maps of structs
+      (Add (Lit a2) (Keccak _), Add (Lit b2) (Keccak _)) | a2 /= b2, abs(a2-b2) < 256 -> go slot prev
+      (Add (Lit a2) (Keccak _), (Keccak _)) | a2 > 0, a2 < 256 -> go slot prev
+      ((Keccak _), Add (Lit b2) (Keccak _)) | b2 > 0, b2 < 256 -> go slot prev
+
+      -- case of array + array, but different id's or different concrete offsets
+      -- zero offs vs zero offs
+      (ArraySlotZero idA, ArraySlotZero idB)                   | idA /= idB -> go slot prev
+      -- zero offs vs non-zero offs
+      (ArraySlotZero idA, ArraySlotWithOffset idB _)           | idA /= idB -> go slot prev
+      (ArraySlotZero _, ArraySlotWithOffset _ (Lit offB))      | offB /= 0  -> go slot prev
+      -- non-zero offs vs zero offs
+      (ArraySlotWithOffset idA _, ArraySlotZero idB)           | idA /= idB -> go slot prev
+      (ArraySlotWithOffset _ (Lit offA), ArraySlotZero _)      | offA /= 0  -> go slot prev
+      -- non-zero offs vs non-zero offs
+      (ArraySlotWithOffset idA _, ArraySlotWithOffset idB _)   | idA /= idB -> go slot prev
+
+      (ArraySlotWithOffset _ offA, ArraySlotWithOffset _ offB) | surelyNotEq offA offB -> go slot prev
+
+      -- we are unable to determine statically whether or not we can safely move deeper in the write chain, so return an abstract term
+      _ -> Just $ SLoad slot s
+
+    surelyNotEq :: Expr a -> Expr a -> Bool
+    surelyNotEq (Lit a) (Lit b) = a /= b
+    -- never equal: x+y (y is concrete) vs x+z (z is concrete), y!=z
+    surelyNotEq (Add (Lit l1) v1) (Add (Lit l2) v2) = l1 /= l2 && v1 == v2
+    -- never equal: x+y (y is concrete, non-zero) vs x
+    surelyNotEq v1 (Add (Lit l2) v2) = l2 /= 0 && v1 == v2
+    surelyNotEq (Add (Lit l1) v1) v2 = l1 /= 0 && v1 == v2
+    surelyNotEq _ _ = False
+
+    maxW32 :: W256
+    maxW32 = into (maxBound :: Word32)
+
+-- storage slots for maps are determined by (keccak (bytes32(key) ++ bytes32(id)))
+pattern MappingSlot :: ByteString -> Expr EWord -> Expr EWord
+pattern MappingSlot id key = Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) (WriteWord (Lit 0) key (ConcreteBuf id)) (ConcreteBuf ""))
+
+-- keccak of any 64 bytes value
+pattern Keccak64Bytes :: Expr EWord
+pattern Keccak64Bytes <- Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) _ (ConcreteBuf ""))
+
+-- storage slots for arrays are determined by (keccak(bytes32(id)) + offset)
+pattern ArraySlotWithOffset :: ByteString -> Expr EWord -> Expr EWord
+pattern ArraySlotWithOffset id offset = Add (Keccak (ConcreteBuf id)) offset
+
+-- special pattern to match the 0th element because the `Add` term gets simplified out
+pattern ArraySlotZero :: ByteString -> Expr EWord
+pattern ArraySlotZero id = Keccak (ConcreteBuf id)
+
+-- checks if two mapping ids match or not
+idsDontMatch :: ByteString -> ByteString -> Bool
+idsDontMatch a b = BS.length a >= 64 && BS.length b >= 64 && diff32to64Byte a b
+  where
+    diff32to64Byte :: ByteString -> ByteString -> Bool
+    diff32to64Byte x y = x32 /= y32
+      where
+       x32 = BS.take 32 $ BS.drop 32 x
+       y32 = BS.take 32 $ BS.drop 32 y
+
+slotPos :: Word8 -> ByteString
+slotPos pos = BS.pack ((replicate 31 (0::Word8))++[pos])
+
+-- | Turns Literals into keccak(bytes32(id)) + offset (i.e. writes to arrays)
+structureArraySlots :: Expr a -> Expr a
+structureArraySlots e = mapExpr go e
+  where
+    go :: Expr a -> Expr a
+    go orig@(Lit key) = case litToArrayPreimage key of
+      Just (array, offset) -> ArraySlotWithOffset (slotPos array) (Lit offset)
+      _ -> orig
+    go a = a
+
+-- Takes in value, checks if it's within 256 of a pre-computed array hash value
+-- if it is, it returns (array_number, offset)
+litToArrayPreimage :: W256 -> Maybe (Word8, W256)
+litToArrayPreimage val = go preImages
+  where
+    go :: [(W256, Word8)] -> Maybe (Word8, W256)
+    go ((image, preimage):ax) = if val >= image && val-image <= 255 then Just (preimage, val-image)
+                                                                    else go ax
+    go [] = Nothing
 
 -- | Writes a value to a key in a storage expression.
 --
@@ -640,7 +747,7 @@ getAddr (GVar _) = internalError "cannot determine addr of a GVar"
 simplify :: Expr a -> Expr a
 simplify e = if (mapExpr go e == e)
                then e
-               else simplify (mapExpr go e)
+               else simplify (mapExpr go (structureArraySlots e))
   where
     go :: Expr a -> Expr a
 
@@ -1139,6 +1246,10 @@ containsNode p = getAny . foldExpr go (Any False)
 inRange :: Int -> Expr EWord -> Prop
 inRange sz e = PAnd (PGEq e (Lit 0)) (PLEq e (Lit $ 2 ^ sz - 1))
 
+
+-- | images of keccak(bytes32(x)) where 0 <= x < 256
+preImages :: [(W256, Word8)]
+preImages = [(keccak' (word256Bytes . into $ i), i) | i <- [0..255]]
 
 data ConstState = ConstState
   { values :: Map.Map (Expr EWord) W256

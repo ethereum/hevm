@@ -27,6 +27,7 @@ import Data.Text.IO qualified as T
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Typeable
 import Data.Vector qualified as Vector
+import Data.Word (Word8)
 import GHC.Conc (getNumProcessors)
 import System.Directory
 import System.Environment
@@ -75,6 +76,176 @@ runSubSet p = defaultMain . applyPattern p $ tests
 tests :: TestTree
 tests = testGroup "hevm"
   [ Tracing.tests
+  , testGroup "simplify-storage"
+    [ testCase "simplify-storage-array-only-static" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[] a;
+          function transfer(uint acct, uint val1, uint val2) public {
+            unchecked {
+              a[0] = val1 + 1;
+              a[1] = val2 + 2;
+              assert(a[0]+a[1] == val1 + val2 + 3);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
+    -- This case is somewhat artificial. We can't simplify this using only
+    -- static rewrite rules, because acct is totally abstract and acct + 1
+    -- could overflow back to zero. we may be able to do better if we have some
+    -- smt assisted simplification that can take branch conditions into account.
+    , expectFail $ testCase "simplify-storage-array-symbolic-index" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint b;
+          uint[] a;
+          function transfer(uint acct, uint val1) public {
+            unchecked {
+              a[acct] = val1;
+              assert(a[acct] == val1);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       -- T.writeFile "symbolic-index.expr" $ formatExpr expr
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
+    , expectFail $ testCase "simplify-storage-array-of-struct-symbolic-index" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          struct MyStruct {
+            uint a;
+            uint b;
+          }
+          MyStruct[] arr;
+          function transfer(uint acct, uint val1, uint val2) public {
+            unchecked {
+              arr[acct].a = val1+1;
+              arr[acct].b = val1+2;
+              assert(arr[acct].a + arr[acct].b == val1+val2+3);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
+    , testCase "simplify-storage-array-loop-nonstruct" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[] a;
+          function transfer(uint v) public {
+            for (uint i = 0; i < a.length; i++) {
+              a[i] = v;
+              assert(a[i] == v);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256)" [AbiUIntType 256])) [] (debugVeriOpts { maxIter = Just 5 })
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
+    , testCase "simplify-storage-array-loop-struct" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          struct MyStruct {
+            uint a;
+            uint b;
+          }
+          MyStruct[] arr;
+          function transfer(uint v1, uint v2) public {
+            for (uint i = 0; i < arr.length; i++) {
+              arr[i].a = v1+1;
+              arr[i].b = v2+2;
+              assert(arr[i].a + arr[i].b == v1 + v2 + 3);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] (debugVeriOpts { maxIter = Just 5 })
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
+    , testCase "simplify-storage-map-only-static" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping(uint => uint) items1;
+          function transfer(uint acct, uint val1, uint val2) public {
+            unchecked {
+              items1[0] = val1+1;
+              items1[1] = val2+2;
+              assert(items1[0]+items1[1] == val1 + val2 + 3);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
+    , testCase "simplify-storage-map-only-2" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping(uint => uint) items1;
+          function transfer(uint acct, uint val1, uint val2) public {
+            unchecked {
+              items1[acct] = val1+1;
+              items1[acct+1] = val2+2;
+              assert(items1[acct]+items1[acct+1] == val1 + val2 + 3);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       -- putStrLn $ T.unpack $ formatExpr expr
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
+    , testCase "simplify-storage-map-with-struct" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          struct MyStruct {
+            uint a;
+            uint b;
+          }
+          mapping(uint => MyStruct) items1;
+          function transfer(uint acct, uint val1, uint val2) public {
+            unchecked {
+              items1[acct].a = val1+1;
+              items1[acct].b = val2+2;
+              assert(items1[acct].a+items1[acct].b == val1 + val2 + 3);
+            }
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
+    , testCase "simplify-storage-map-and-array" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[] a;
+          mapping(uint => uint) items1;
+          mapping(uint => uint) items2;
+          function transfer(uint acct, uint val1, uint val2) public {
+            uint beforeVal1 = items1[acct];
+            uint beforeVal2 = items2[acct];
+            unchecked {
+              items1[acct] = val1+1;
+              items2[acct] = val2+2;
+              a[0] = val1 + val2 + 1;
+              a[1] = val1 + val2 + 2;
+              assert(items1[acct]+items2[acct]+a[0]+a[1] > beforeVal1 + beforeVal2);
+            }
+          }
+        }
+       |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       -- putStrLn $ T.unpack $ formatExpr expr
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
+    ]
   , testGroup "StorageTests"
     [ testCase "read-from-sstore" $ assertEqual ""
         (Lit 0xab)
@@ -240,6 +411,13 @@ tests = testGroup "hevm"
     , testProperty "simpProp-equivalence-sym" $ \(LitProp p) -> ioProperty $ do
         let simplified = pand (Expr.simplifyProps [p])
         checkEquivProp simplified p
+    -- This would need to be a fuzz test I think. The SMT encoding of Keccak is not precise
+    -- enough for this to succeed
+    , ignoreTest $ testProperty "storage-slot-simp-property" $ \(StorageExp s) -> ioProperty $ do
+        T.writeFile "unsimplified.expr" $ formatExpr s
+        let simplified = Expr.simplify s
+        T.writeFile "simplified.expr" $ formatExpr simplified
+        checkEquiv simplified s
     ]
   , testGroup "simpProp-concrete-tests" [
       testCase "simpProp-concrete-trues" $ do
@@ -3161,6 +3339,64 @@ newtype LitProp = LitProp Prop
 instance Arbitrary LitProp where
   arbitrary = LitProp <$> sized (genProp True)
 
+
+newtype StorageExp = StorageExp (Expr EWord)
+  deriving (Show, Eq)
+
+instance Arbitrary StorageExp where
+  arbitrary = StorageExp <$> (genStorageExp)
+
+genStorageExp :: Gen (Expr EWord)
+genStorageExp = do
+  fromPos <- genSlot
+  storage <- genStorageWrites
+  pure $ SLoad fromPos storage
+
+genSlot :: Gen (Expr EWord)
+genSlot = frequency [ (1, do
+                        buf <- genConcreteBufSlot 64
+                        case buf of
+                          (ConcreteBuf b) -> do
+                            key <- genLit 10
+                            pure $ Expr.MappingSlot b key
+                          _ -> internalError "impossible"
+                        )
+                     -- map element
+                     ,(2, do
+                        l <- genLit 10
+                        buf <- genConcreteBufSlot 64
+                        pure $ Add (Keccak buf) l)
+                    -- Array element
+                     ,(2, do
+                        l <- genLit 10
+                        buf <- genConcreteBufSlot 32
+                        pure $ Add (Keccak buf) l)
+                     -- member of the Contract
+                     ,(2, pure $ Lit 20)
+                     -- array element
+                     ,(2, do
+                        arrayNum :: Int <- arbitrary
+                        offs :: W256 <- arbitrary
+                        pure $ Lit $ fst (Expr.preImages !! (arrayNum `mod` 3)) + (offs `mod` 3))
+                     -- random stuff
+                     ,(1, pure $ Lit (maxBound :: W256))
+                     ]
+
+-- Generates an N-long buffer, all with the same value, at most 8 different ones
+genConcreteBufSlot :: Int -> Gen (Expr Buf)
+genConcreteBufSlot len = do
+  b :: Word8 <- arbitrary
+  pure $ ConcreteBuf $ BS.pack ([ 0 | _ <- [0..(len-2)]] ++ [b])
+
+genStorageWrites :: Gen (Expr Storage)
+genStorageWrites = do
+  toSlot <- genSlot
+  val <- genLit (maxBound :: W256)
+  store <- frequency [ (3, pure $ AbstractStore (SymAddr ""))
+                     , (2, genStorageWrites)
+                     ]
+  pure $ SStore toSlot val store
+
 instance Arbitrary Prop where
   arbitrary = sized (genProp False)
 
@@ -3387,6 +3623,24 @@ genWordArith litFreq sz = frequency
   ]
  where
    subWord = genWordArith (litFreq `div` 2) (sz `div` 2)
+
+-- Used to check for unsimplified expressions
+newtype FoundBad = FoundBad { bad :: Bool } deriving (Show)
+initFoundBad :: FoundBad
+initFoundBad = FoundBad { bad = False }
+
+-- Finds SLoad -> SStore. This should not occur in most scenarios
+-- as we can simplify them away
+badStoresInExpr :: Expr a -> Bool
+badStoresInExpr expr = bad
+  where
+    FoundBad bad = execState (mapExprM findBadStore expr) initFoundBad
+    findBadStore :: Expr a-> State FoundBad (Expr a)
+    findBadStore e = case e of
+      (SLoad _ (SStore _ _ _)) -> do
+        put (FoundBad { bad = True })
+        pure e
+      _ -> pure e
 
 defaultBuf :: Int -> Gen (Expr Buf)
 defaultBuf = genBuf (4_000_000)
