@@ -16,31 +16,33 @@ import EVM.Traversals
 import EVM.Types
 import EVM.Expr
 
-newtype BuilderState = BuilderState
-  { keccaks :: Set (Expr EWord) }
+-- let eqs = map (\(a,b) -> PEq a (Keccak b)) st.keccaks
+
+newtype KeccakStore = KeccakStore
+  { keccakEqs :: Set (Expr EWord) }
   deriving (Show)
 
-initState :: BuilderState
-initState = BuilderState { keccaks = Set.empty }
+initState :: KeccakStore
+initState = KeccakStore { keccakEqs = Set.empty }
 
-go :: forall a. Expr a -> State BuilderState (Expr a)
-go = \case
+keccakFinder :: forall a. Expr a -> State KeccakStore (Expr a)
+keccakFinder = \case
   e@(Keccak _) -> do
     s <- get
-    put $ s{keccaks=Set.insert e s.keccaks}
+    put $ s{keccakEqs=Set.insert e s.keccakEqs}
     pure e
   e -> pure e
 
-findKeccakExpr :: forall a. Expr a -> State BuilderState (Expr a)
-findKeccakExpr e = mapExprM go e
+findKeccakExpr :: forall a. Expr a -> State KeccakStore (Expr a)
+findKeccakExpr e = mapExprM keccakFinder e
 
-findKeccakProp :: Prop -> State BuilderState Prop
-findKeccakProp p = mapPropM go p
+findKeccakProp :: Prop -> State KeccakStore Prop
+findKeccakProp p = mapPropM keccakFinder p
 
-findKeccakPropsExprs :: [Prop] -> [Expr Buf]  -> [Expr Storage]-> State BuilderState ()
+findKeccakPropsExprs :: [Prop] -> [Expr Buf]  -> [Expr Storage]-> State KeccakStore ()
 findKeccakPropsExprs ps bufs stores = do
-  mapM_ findKeccakProp ps;
-  mapM_ findKeccakExpr bufs;
+  mapM_ findKeccakProp ps
+  mapM_ findKeccakExpr bufs
   mapM_ findKeccakExpr stores
 
 
@@ -76,9 +78,9 @@ keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
   where
     (_, st) = runState (findKeccakPropsExprs ps bufs stores) initState
 
-    injectivity = fmap injProp $ combine (Set.toList st.keccaks)
-    minValue = fmap minProp (Set.toList st.keccaks)
-    minDiffOfPairs = map minDistance $ filter (uncurry (/=)) [(a,b) | a<-(Set.elems st.keccaks), b<-(Set.elems st.keccaks)]
+    injectivity = fmap injProp $ combine (Set.toList st.keccakEqs)
+    minValue = fmap minProp (Set.toList st.keccakEqs)
+    minDiffOfPairs = map minDistance $ filter (uncurry (/=)) [(a,b) | a<-(Set.elems st.keccakEqs), b<-(Set.elems st.keccakEqs)]
      where
       minDistance :: ((Expr EWord), (Expr EWord)) -> Prop
       minDistance (ka@(Keccak a), kb@(Keccak b)) = PImpl (a ./= b) (PAnd req1 req2)
@@ -86,6 +88,7 @@ keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
           req1 = (PGEq (Sub ka kb) (Lit maxW32))
           req2 = (PGEq (Sub kb ka) (Lit maxW32))
       minDistance _ = internalError "expected Keccak expression"
+
 compute :: forall a. Expr a -> [Prop]
 compute = \case
   e@(Keccak buf) -> do

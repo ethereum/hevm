@@ -156,7 +156,7 @@ makeVm o = do
     , cache = Cache mempty mempty
     , burned = 0
     , constraints = snd o.calldata
-    , keccakEqs = mempty
+    , keccaks = mempty
     , iterations = mempty
     , config = RuntimeConfig
       { allowFFI = o.allowFFI
@@ -388,9 +388,8 @@ exec1 = do
                       hash <- readMemory xOffset' xSize' >>= \case
                         ConcreteBuf bs -> do
                           let hash' = keccak' bs
-                          eqs <- use #keccakEqs
-                          assign #keccakEqs $
-                            PEq (Lit hash') (Keccak (ConcreteBuf bs)):eqs
+                          ks <- use #keccaks
+                          assign #keccaks $ (Lit hash',ConcreteBuf bs):ks
                           pure $ Lit hash'
                         buf -> pure $ Keccak buf
                       next
