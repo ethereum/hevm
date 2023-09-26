@@ -192,8 +192,8 @@ abstractAwayProps abstRefineConfig ps = runState (mapM abstrAway ps) (AbstState 
 smt2Line :: Builder -> SMT2
 smt2Line txt = SMT2 [txt] mempty mempty
 
-assertProps :: AbstRefineConfig -> [Prop] -> SMT2
-assertProps conf ps = assertPropsNoSimp conf (Expr.simplifyProps ps)
+assertProps :: AbstRefineConfig -> Map W256 ByteString -> [Prop] -> SMT2
+assertProps conf keccakPs ps = assertPropsNoSimp conf (Expr.simplifyProps keccakPs ps)
 
 -- Note: we need a version that does NOT call simplify or simplifyProps,
 -- because we make use of it to verify the correctness of our simplification

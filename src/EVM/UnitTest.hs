@@ -205,20 +205,20 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     -- we need to read from slot 0 in the test contract and mask it with 0x10 to get the value of _failed
     -- we don't need to do this when reading the failed from the cheatcode address since we don't do any packing there
     let failed store = case Map.lookup cheatCode store of
-          Just cheatContract -> (And (readStorage' (Lit 0) (testContract store).storage) (Lit 0x10) .== Lit 0x10)
-                               .|| (readStorage' (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) cheatContract.storage .== Lit 1)
-          Nothing -> And (readStorage' (Lit 0) (testContract store).storage) (Lit 2) .== Lit 2
+          Just cheatContract -> (And (readStorage' mempty (Lit 0) (testContract store).storage) (Lit 0x10) .== Lit 0x10)
+                               .|| (readStorage' mempty (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) cheatContract.storage .== Lit 1)
+          Nothing -> And (readStorage' mempty (Lit 0) (testContract store).storage) (Lit 2) .== Lit 2
         postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
-                                  Success _ _ _ store -> failed store
+                                  Success _ _ _ _ store -> failed store
                                   _ -> PBool True
           False -> \(_, post) -> case post of
-                                   Success _ _ _ store -> PNeg (failed store)
-                                   Failure _ _ (Revert msg) -> case msg of
+                                   Success _ _ _ _ store -> PNeg (failed store)
+                                   Failure _ _ _ (Revert msg) -> case msg of
                                      ConcreteBuf b -> PBool $ b /= panicMsg 0x01
                                      b -> b ./= ConcreteBuf (panicMsg 0x01)
-                                   Failure _ _ _ -> PBool True
-                                   Partial _ _ _ -> PBool True
+                                   Failure _ _ _ _ -> PBool True
+                                   Partial _ _ _ _ -> PBool True
                                    _ -> internalError "Invalid leaf node"
 
     vm' <- Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
@@ -260,7 +260,7 @@ symFailure UnitTestOptions {..} testName cd types failures' =
     ]
     where
       showRes = \case
-        Success _ _ _ _ -> if "proveFail" `isPrefixOf` testName
+        Success _ _ _ _ _ -> if "proveFail" `isPrefixOf` testName
                            then "Successful execution"
                            else "Failed: DSTest Assertion Violation"
         res ->

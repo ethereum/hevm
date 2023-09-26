@@ -94,14 +94,14 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- control flow
 
-      e@(Success a _ c d) -> f e
+      e@(Success a _ keccakPs c d) -> f e
                           <> foldl (foldProp f) mempty a
                           <> go c
                           <> foldl' (foldExpr f) mempty (Map.keys d)
                           <> foldl' (foldEContract f) mempty d
-      e@(Failure a _ (Revert c)) -> f e <> (foldl (foldProp f) mempty a) <> go c
-      e@(Failure a _ _) -> f e <> (foldl (foldProp f) mempty a)
-      e@(Partial a _ _) -> f e <> (foldl (foldProp f) mempty a)
+      e@(Failure a _ _ (Revert c)) -> f e <> (foldl (foldProp f) mempty a) <> go c
+      e@(Failure a _ _ _) -> f e <> (foldl (foldProp f) mempty a)
+      e@(Partial a _ _ _) -> f e <> (foldl (foldProp f) mempty a)
       e@(ITE a b c) -> f e <> (go a) <> (go b) <> (go c)
 
       -- integers
@@ -312,23 +312,23 @@ mapExprM f expr = case expr of
 
   -- control flow
 
-  Failure a b c -> do
-    a' <- mapM (mapPropM f) a
-    f (Failure a' b c)
-  Partial a b c -> do
-    a' <- mapM (mapPropM f) a
-    f (Partial a' b c)
-  Success a b c d -> do
-    a' <- mapM (mapPropM f) a
-    c' <- mapExprM f c
-    d' <- do
-      let x = Map.toList d
+  Failure ps traces keccPs err -> do
+    ps' <- mapM (mapPropM f) ps
+    f (Failure ps' traces keccPs err)
+  Partial ps traces keccPs reason -> do
+    ps' <- mapM (mapPropM f) ps
+    f (Partial ps' traces keccPs reason)
+  Success ps traces keccPs ret post -> do
+    ps' <- mapM (mapPropM f) ps
+    ret' <- mapExprM f ret
+    post' <- do
+      let x = Map.toList post
       x' <- forM x $ \(k,v) -> do
         k' <- f k
         v' <- mapEContractM f v
         pure (k',v')
       pure $ Map.fromList x'
-    f (Success a' b c' d')
+    f (Success ps' traces keccPs ret' post')
   ITE a b c -> do
     a' <- mapExprM f a
     b' <- mapExprM f b

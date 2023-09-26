@@ -215,11 +215,33 @@ data Expr (a :: EType) where
                  -> Expr EWord
 
   -- control flow
+  Partial ::
+    { props :: [Prop]
+    , traces :: Traces
+    , keccakPairs :: Map W256 ByteString
+    , reason :: PartialExec
+    } -> Expr End
 
-  Partial        :: [Prop] -> Traces -> PartialExec -> Expr End
-  Failure        :: [Prop] -> Traces -> EvmError -> Expr End
-  Success        :: [Prop] -> Traces -> Expr Buf -> Map (Expr EAddr) (Expr EContract) -> Expr End
-  ITE            :: Expr EWord -> Expr End -> Expr End -> Expr End
+  Failure ::
+    { props :: [Prop]
+    , traces :: Traces
+    , keccakPairs :: Map W256 ByteString
+    , error :: EvmError
+    } -> Expr End
+
+  Success ::
+    { props :: [Prop]
+    , traces :: Traces
+    , keccakPairs :: Map W256 ByteString
+    , returndata :: Expr Buf
+    , poststate :: Map (Expr EAddr) (Expr EContract)
+    } -> Expr End
+
+  ITE ::
+    { condition :: Expr EWord
+    , iftrue :: Expr End
+    , iffalse :: Expr End
+    } -> Expr End
 
   -- integers
 
@@ -598,7 +620,7 @@ data VM s = VM
   , iterations     :: Map CodeLocation (Int, [Expr EWord])
   -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
-  , keccaks        :: [(Expr EWord, Expr Buf)]
+  , keccakPairs    :: Map W256 ByteString
   , config         :: RuntimeConfig
   }
   deriving (Show, Generic)
@@ -837,10 +859,9 @@ data Traces = Traces
   deriving (Eq, Ord, Show, Generic)
 
 instance Semigroup Traces where
-  (Traces a b) <> (Traces c d) = Traces (a <> c) (b <> d)
+  (Traces a1 b1) <> (Traces a2 b2) = Traces (a1 <> a2) (b1 <> b2)
 instance Monoid Traces where
   mempty = Traces mempty mempty
-
 
 -- VM Initialization -------------------------------------------------------------------------------
 

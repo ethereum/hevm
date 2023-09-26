@@ -43,6 +43,7 @@ import EVM.Traversals
 import EVM.Types
 import EVM.FeeSchedule (feeSchedule)
 import EVM.Format (indent, formatBinary)
+import EVM.Keccak as Keccak
 import GHC.Conc (getNumProcessors)
 import GHC.Generics (Generic)
 import Optics.Core
@@ -284,8 +285,8 @@ interpret fetcher maxIter askSmtIters heuristic vm =
         case q of
           PleaseAskSMT cond preconds continue -> do
             let
-              simpCond = Expr.simplify cond
-              simpProps = Expr.simplifyProps ((simpCond ./= Lit 0):preconds)
+              simpCond = Expr.simplify vm.keccakPairs cond
+              simpProps = Expr.simplifyProps vm.keccakPairs ((simpCond ./= Lit 0):preconds)
             case simpCond of
               -- is the condition concrete?
               Lit c ->
@@ -293,7 +294,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                 case (maxIterationsReached vm maxIter, isLoopHead heuristic vm) of
                   -- Yes. return a partial leaf
                   (Just _, Just True) ->
-                    pure $ Partial vm.keccakEqs (Traces (Zipper.toForest vm.traces) vm.env.contracts) $ MaxIterationsReached vm.state.pc vm.state.contract
+                    pure $ Partial (Keccak.mkKeccakEqs vm.keccakPairs) (Traces (Zipper.toForest vm.traces) vm.env.contracts) vm.keccakPairs $ MaxIterationsReached vm.state.pc vm.state.contract
                   -- No. keep executing
                   _ -> do
                     (r, vm') <- stToIO $ runStateT (continue (Case (c > 0))) vm
@@ -309,7 +310,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                     -- got us to this point and return a partial leaf for the other side
                     (r, vm') <- stToIO $ runStateT (continue (Case $ not n)) vm
                     a <- interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-                    pure $ ITE cond a (Partial vm.keccakEqs (Traces (Zipper.toForest vm.traces) vm.env.contracts) (MaxIterationsReached vm.state.pc vm.state.contract))
+                    pure $ ITE cond a (Partial (Keccak.mkKeccakEqs vm.keccakPairs) (Traces (Zipper.toForest vm.traces) vm.env.contracts)  vm.keccakPairs (MaxIterationsReached vm.state.pc vm.state.contract))
                   -- we're in a loop and askSmtIters has been reached
                   (Just True, True, _) ->
                     -- ask the smt solver about the loop condition
@@ -385,7 +386,7 @@ getExpr
 getExpr solvers c signature' concreteArgs opts = do
       preState <- stToIO $ abstractVM (mkCalldata signature' concreteArgs) c Nothing False
       exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
-      if opts.simp then (pure $ Expr.simplify exprInter) else pure exprInter
+      if opts.simp then (pure $ Expr.simplifyEnd exprInter) else pure exprInter
 
 {- | Checks if an assertion violation has been encountered
 
@@ -408,8 +409,8 @@ getExpr solvers c signature' concreteArgs opts = do
 -}
 checkAssertions :: [Word256] -> Postcondition s
 checkAssertions errs _ = \case
-  Failure _ _ (Revert (ConcreteBuf msg)) -> PBool $ msg `notElem` (fmap panicMsg errs)
-  Failure _ _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
+  Failure _ _ _ (Revert (ConcreteBuf msg)) -> PBool $ msg `notElem` (fmap panicMsg errs)
+  Failure _ _ _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
   _ -> PBool True
 
 -- | By default hevm only checks for user-defined assertions
@@ -454,12 +455,12 @@ verifyContract solvers theCode signature' concreteArgs opts maybepre maybepost =
 runExpr :: Stepper.Stepper RealWorld (Expr End)
 runExpr = do
   vm <- Stepper.runFully
-  let asserts = vm.keccakEqs <> vm.constraints
+  let asserts = Keccak.mkKeccakEqs vm.keccakPairs <> vm.constraints
       traces = Traces (Zipper.toForest vm.traces) vm.env.contracts
   pure $ case vm.result of
-    Just (VMSuccess buf) -> Success asserts traces buf (fmap toEContract vm.env.contracts)
-    Just (VMFailure e) -> Failure asserts traces e
-    Just (Unfinished p) -> Partial asserts traces p
+    Just (VMSuccess buf) -> Success asserts traces vm.keccakPairs buf (fmap toEContract vm.env.contracts)
+    Just (VMFailure e) -> Failure asserts traces vm.keccakPairs e
+    Just (Unfinished p) -> Partial asserts traces vm.keccakPairs p
     _ -> internalError "vm in intermediate state after call to runFully"
 
 toEContract :: Contract -> Expr EContract
@@ -473,9 +474,9 @@ flattenExpr = go []
     go :: [Prop] -> Expr End -> [Expr End]
     go pcs = \case
       ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
-      Success ps trace msg store -> [Success (ps <> pcs) trace msg store]
-      Failure ps trace e -> [Failure (ps <> pcs) trace e]
-      Partial ps trace p -> [Partial (ps <> pcs) trace p]
+      Success ps trace keccakPs msg store -> [Success (ps <> pcs) trace keccakPs msg store]
+      Failure ps trace keccakPs e -> [Failure (ps <> pcs) trace keccakPs e]
+      Partial ps trace keccakPs p -> [Partial (ps <> pcs) trace keccakPs p]
       GVar _ -> internalError "cannot flatten an Expr containing a GVar"
 
 -- | Strips unreachable branches from a given expr
@@ -511,7 +512,7 @@ reachable solvers e = do
               (Nothing, Nothing) -> Nothing
         pure (fst tres <> fst fres, subexpr)
       leaf -> do
-        let query = assertProps abstRefineDefault pcs
+        let query = assertProps abstRefineDefault mempty pcs
         res <- checkSat solvers query
         case res of
           Sat _ -> pure ([query], Just leaf)
@@ -522,13 +523,13 @@ reachable solvers e = do
 extractProps :: Expr End -> [Prop]
 extractProps = \case
   ITE _ _ _ -> []
-  Success asserts _ _ _ -> asserts
-  Failure asserts _ _ -> asserts
-  Partial asserts _ _ -> asserts
+  Success asserts _ _ _ _ -> asserts
+  Failure asserts _ _ _ -> asserts
+  Partial asserts _ _ _ -> asserts
   GVar _ -> internalError "cannot extract props from a GVar"
 
 isPartial :: Expr a -> Bool
-isPartial (Partial _ _ _) = True
+isPartial (Partial _ _ _ _) = True
 isPartial _ = False
 
 getPartials :: [Expr End] -> [PartialExec]
@@ -536,7 +537,7 @@ getPartials = mapMaybe go
   where
     go :: Expr End -> Maybe PartialExec
     go = \case
-      Partial _ _ p -> Just p
+      Partial _ _ _ p -> Just p
       _ -> Nothing
 
 -- | Symbolically execute the VM and check all endstates against the
@@ -554,7 +555,7 @@ verify solvers opts preState maybepost = do
   when opts.debug $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
 
   putStrLn "Simplifying expression"
-  let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
+  let expr = if opts.simp then (Expr.simplifyEnd exprInter) else exprInter
   when opts.debug $ T.writeFile "simplified.expr" (formatExpr expr)
 
   putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
@@ -572,12 +573,13 @@ verify solvers opts preState maybepost = do
       let
         -- Filter out any leaves that can be statically shown to be safe
         canViolate = flip filter flattened $
-          \leaf -> case Expr.evalProp (post preState leaf) of
+          \leaf -> case Expr.evalProp mempty (post preState leaf) of
             PBool True -> False
             _ -> True
         assumes = preState.constraints
         withQueries = canViolate <&> \leaf ->
-          (assertProps opts.abstRefineConfig (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)
+          -- NOTE: this actually simplifies things (see above `opts.simp` check....)
+          (assertProps opts.abstRefineConfig mempty (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)
       putStrLn $ "Checking for reachability of "
                    <> show (length withQueries)
                    <> " potential property violation(s)"
@@ -640,7 +642,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
       let bytecode = if BS.null bs then BS.pack [0] else bs
       prestate <- stToIO $ abstractVM calldata bytecode Nothing False
       expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
-      let simpl = if opts.simp then (Expr.simplify expr) else expr
+      let simpl = if opts.simp then (Expr.simplifyEnd expr) else expr
       pure $ flattenExpr simpl
 
 
@@ -652,7 +654,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
         putStrLn ""
         T.putStrLn . T.unlines . fmap (indent 2 . ("- " <>)) . fmap formatPartial . nubOrd $ ((getPartials branchesA) <> (getPartials branchesB))
 
-      let allPairs = [(a,b) | a <- branchesA, b <- branchesB]
+      let allPairs = [(Expr.simplifyEnd a,Expr.simplifyEnd b) | a <- branchesA, b <- branchesB]
       putStrLn $ "Found " <> show (length allPairs) <> " total pairs of endstates"
 
       when opts.debug $
@@ -689,7 +691,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     -- used or not
     check :: UnsatCache -> (Set Prop) -> Int -> IO (EquivResult, Bool)
     check knownUnsat props idx = do
-      let smt = assertProps opts.abstRefineConfig (Set.toList props)
+      let smt = assertProps opts.abstRefineConfig mempty (Set.toList props)
       -- if debug is on, write the query to a file
       let filename = "equiv-query-" <> show idx <> ".smt2"
       when opts.debug $ TL.writeFile filename (formatSMT2 smt <> "\n\n(check-sat)")
@@ -743,14 +745,14 @@ equivalenceCheck' solvers branchesA branchesB opts = do
 
     resultsDiffer :: Expr End -> Expr End -> Prop
     resultsDiffer aEnd bEnd = case (aEnd, bEnd) of
-      (Success _ _ aOut aState, Success _ _ bOut bState) ->
+      (Success _ _ _ aOut aState, Success _ _ _ bOut bState) ->
         case (aOut == bOut, aState == bState) of
           (True, True) -> PBool False
           (False, True) -> aOut ./= bOut
           (True, False) -> statesDiffer aState bState
           (False, False) -> statesDiffer aState bState .|| aOut ./= bOut
-      (Failure _ _ (Revert a), Failure _ _ (Revert b)) -> if a == b then PBool False else a ./= b
-      (Failure _ _ a, Failure _ _ b) -> if a == b then PBool False else PBool True
+      (Failure _ _ _ (Revert a), Failure _ _ _ (Revert b)) -> if a == b then PBool False else a ./= b
+      (Failure _ _ _ a, Failure _ _ _ b) -> if a == b then PBool False else PBool True
       -- partial end states can't be compared to actual end states, so we always ignore them
       (Partial {}, _) -> PBool False
       (_, Partial {}) -> PBool False
@@ -788,7 +790,7 @@ both' f (x, y) = (f x, f y)
 produceModels :: SolverGroup -> Expr End -> IO [(Expr End, CheckSatResult)]
 produceModels solvers expr = do
   let flattened = flattenExpr expr
-      withQueries = fmap (\e -> ((assertProps abstRefineDefault) . extractProps $ e, e)) flattened
+      withQueries = fmap (\e -> ((assertProps abstRefineDefault mempty) . extractProps $ e, e)) flattened
   results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
     res <- checkSat solvers query
     pure (res, leaf)

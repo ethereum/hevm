@@ -4,19 +4,20 @@
     Module: EVM.Keccak
     Description: Expr passes to determine Keccak assumptions
 -}
-module EVM.Keccak (keccakAssumptions, keccakCompute) where
+module EVM.Keccak (keccakAssumptions, keccakCompute, mkKeccakEqs) where
 
 import Control.Monad.State
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Word (Word32)
 import Witch (into)
+import Data.Map as Map
+import Data.ByteString (ByteString)
 
 import EVM.Traversals
 import EVM.Types
 import EVM.Expr
 
--- let eqs = map (\(a,b) -> PEq a (Keccak b)) st.keccaks
 
 newtype KeccakStore = KeccakStore
   { keccakEqs :: Set (Expr EWord) }
@@ -77,7 +78,7 @@ keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
 
     injectivity = fmap injProp $ combine (Set.toList st.keccakEqs)
     minValue = fmap minProp (Set.toList st.keccakEqs)
-    minDiffOfPairs = map minDistance $ filter (uncurry (/=)) [(a,b) | a<-(Set.elems st.keccakEqs), b<-(Set.elems st.keccakEqs)]
+    minDiffOfPairs = Prelude.map minDistance $ Prelude.filter (uncurry (/=)) [(a,b) | a<-(Set.elems st.keccakEqs), b<-(Set.elems st.keccakEqs)]
      where
       minDistance :: (Expr EWord, Expr EWord) -> Prop
       minDistance (ka@(Keccak a), kb@(Keccak b)) = PImpl (a ./= b) (PAnd req1 req2)
@@ -89,8 +90,7 @@ keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
 compute :: forall a. Expr a -> [Prop]
 compute = \case
   e@(Keccak buf) -> do
-    let b = simplify buf
-    case keccak b of
+    case keccak buf of
       lit@(Lit _) -> [PEq e lit]
       _ -> []
   _ -> []
@@ -106,3 +106,6 @@ keccakCompute ps buf stores =
   concatMap computeKeccakProp ps <>
   concatMap computeKeccakExpr buf <>
   concatMap computeKeccakExpr stores
+
+mkKeccakEqs :: Map W256 ByteString -> [Prop]
+mkKeccakEqs keccaks = Prelude.map (\(a,b) -> PEq (Lit a) (Keccak (ConcreteBuf b))) $ Map.toList keccaks

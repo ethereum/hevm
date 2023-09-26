@@ -574,8 +574,8 @@ stripWrites off size = \case
 -- ** Storage ** -----------------------------------------------------------------------------------
 
 
-readStorage' :: Expr EWord -> Expr Storage -> Expr EWord
-readStorage' loc store = case readStorage loc store of
+readStorage' :: Map.Map W256 ByteString -> Expr EWord -> Expr Storage -> Expr EWord
+readStorage' keccakPs loc store = case readStorage keccakPs loc store of
                            Just v -> v
                            Nothing -> Lit 0
 
@@ -586,8 +586,8 @@ readStorage' loc store = case readStorage loc store of
 -- no explicit writes to the requested slot. This makes implementing rpc
 -- storage lookups much easier. If the store is backed by an AbstractStore we
 -- always return a symbolic value.
-readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
-readStorage w st = go (simplify w) st
+readStorage :: Map.Map W256 ByteString -> Expr EWord -> Expr Storage -> Maybe (Expr EWord)
+readStorage keccakPs w st = go (simplify keccakPs w) st
   where
     go :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
     go _ (GVar _) = internalError "Can't read from a GVar"
@@ -690,8 +690,8 @@ slotPos :: Word8 -> ByteString
 slotPos pos = BS.pack ((replicate 31 (0::Word8))++[pos])
 
 -- | Turns Literals into keccak(bytes32(id)) + offset (i.e. writes to arrays)
-structureArraySlots :: Expr a -> Expr a
-structureArraySlots e = mapExpr go e
+structureArraySlots :: Map.Map W256 ByteString -> Expr a -> Expr a
+structureArraySlots keccakPs e = mapExpr go e
   where
     go :: Expr a -> Expr a
     go orig@(Lit key) = case litToArrayPreimage key of
@@ -744,22 +744,32 @@ getAddr (GVar _) = internalError "cannot determine addr of a GVar"
 
 -- | Simple recursive match based AST simplification
 -- Note: may not terminate!
-simplify :: Expr a -> Expr a
-simplify e = if (mapExpr go e == e)
+--
+simplifyEnd :: Expr End -> Expr End
+simplifyEnd e = go e
+  where
+    go :: Expr End -> Expr End
+    go (Failure a b keccakPs d) = Failure (simplifyProps keccakPs a) b keccakPs d
+    go (Partial a b keccakPs d) = Partial (simplifyProps keccakPs a) b keccakPs d
+    go (Success a b keccakPs d f) = Success (simplifyProps keccakPs a) b keccakPs d f
+    go (ITE _ _ _) = internalError "whatever"
+    go (GVar _) = internalError "whatever"
+
+simplify :: Map.Map W256 ByteString -> Expr a -> Expr a
+simplify keccakPs e = if (mapExpr go (structureArraySlots keccakPs e) == e)
                then e
-               else simplify (mapExpr go (structureArraySlots e))
+               else simplify keccakPs (mapExpr go (structureArraySlots keccakPs e))
   where
     go :: Expr a -> Expr a
-
-    go (Failure a b c) = Failure (simplifyProps a) b c
-    go (Partial a b c) = Partial (simplifyProps a) b c
-    go (Success a b c d) = Success (simplifyProps a) b c d
+    go (Failure {}) = internalError "fail"
+    go (Partial {}) = internalError "fail"
+    go (Success {}) = internalError "fail"
 
     -- redundant CopySlice
     go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
 
     -- simplify storage
-    go (SLoad slot store) = readStorage' slot store
+    go (SLoad slot store) = readStorage' keccakPs slot store
     go (SStore slot val store) = writeStorage slot val store
 
     -- simplify buffers
@@ -950,17 +960,17 @@ simplify e = if (mapExpr go e == e)
 -- ** Prop Simplification ** -----------------------------------------------------------------------
 
 
-simplifyProps :: [Prop] -> [Prop]
-simplifyProps ps = if canBeSat then simplified else [PBool False]
+simplifyProps :: Map.Map W256 ByteString -> [Prop] -> [Prop]
+simplifyProps keccakPs ps = if canBeSat then simplified else [PBool False]
   where
-    simplified = remRedundantProps . map evalProp . flattenProps $ ps
-    canBeSat = constFoldProp simplified
+    simplified = remRedundantProps . map (evalProp keccakPs) . flattenProps $ ps
+    canBeSat = constFoldProp keccakPs simplified
 
 -- | Evaluate the provided proposition down to its most concrete result
-evalProp :: Prop -> Prop
-evalProp prop =
+evalProp :: Map.Map W256 ByteString -> Prop -> Prop
+evalProp keccakPs prop =
   let new = mapProp' go (simpInnerExpr prop)
-  in if (new == prop) then prop else evalProp new
+  in if (new == prop) then prop else evalProp keccakPs new
   where
     go :: Prop -> Prop
 
@@ -1008,9 +1018,9 @@ evalProp prop =
     simpInnerExpr (PGEq a b) = simpInnerExpr (PLEq b a)
     simpInnerExpr (PGT a b) = simpInnerExpr (PLT b a)
     -- simplifies the inner expression
-    simpInnerExpr (PEq a b) = PEq (simplify a) (simplify b)
-    simpInnerExpr (PLT a b) = PLT (simplify a) (simplify b)
-    simpInnerExpr (PLEq a b) = PLEq (simplify a) (simplify b)
+    simpInnerExpr (PEq a b) = PEq (simplify keccakPs a) (simplify keccakPs b)
+    simpInnerExpr (PLT a b) = PLT (simplify keccakPs a) (simplify keccakPs b)
+    simpInnerExpr (PLEq a b) = PLEq (simplify keccakPs a) (simplify keccakPs b)
     simpInnerExpr (PNeg a) = PNeg (simpInnerExpr a)
     simpInnerExpr (PAnd a b) = PAnd (simpInnerExpr a) (simpInnerExpr b)
     simpInnerExpr (POr a b) = POr (simpInnerExpr a) (simpInnerExpr b)
@@ -1043,7 +1053,7 @@ exprToAddr _ = Nothing
 
 -- TODO: make this smarter, probably we will need to use the solver here?
 wordToAddr :: Expr EWord -> Maybe (Expr EAddr)
-wordToAddr = go . simplify
+wordToAddr = go . (simplify mempty)
   where
     go :: Expr EWord -> Maybe (Expr EAddr)
     go = \case
@@ -1258,10 +1268,10 @@ data ConstState = ConstState
   deriving (Show)
 
 -- | Folds constants
-constFoldProp :: [Prop] -> Bool
-constFoldProp ps = oneRun ps (ConstState mempty True)
+constFoldProp :: Map.Map W256 ByteString -> [Prop] -> Bool
+constFoldProp keccakPs ps = oneRun ps (ConstState mempty True)
   where
-    oneRun ps2 startState = (execState (mapM (go . evalProp) ps2) startState).canBeSat
+    oneRun ps2 startState = (execState (mapM (go . evalProp keccakPs) ps2) startState).canBeSat
     go :: Prop -> State ConstState ()
     go x = case x of
         PEq (Lit l) a -> do

@@ -156,7 +156,7 @@ makeVm o = do
     , cache = Cache mempty mempty
     , burned = 0
     , constraints = snd o.calldata
-    , keccaks = mempty
+    , keccakPairs = mempty
     , iterations = mempty
     , config = RuntimeConfig
       { allowFFI = o.allowFFI
@@ -388,8 +388,8 @@ exec1 = do
                       hash <- readMemory xOffset' xSize' >>= \case
                         ConcreteBuf bs -> do
                           let hash' = keccak' bs
-                          ks <- use #keccaks
-                          assign #keccaks $ (Lit hash',ConcreteBuf bs):ks
+                          ks <- use #keccakPairs
+                          assign #keccakPairs $ Map.insert hash' bs ks
                           pure $ Lit hash'
                         buf -> pure $ Keccak buf
                       next
@@ -671,7 +671,7 @@ exec1 = do
                 else do
                   let
                     original =
-                      case Expr.simplify $ SLoad x this.origStorage of
+                      case Expr.simplify vm.keccakPairs  $ SLoad x this.origStorage of
                         Lit v -> v
                         _ -> 0
                     storage_cost =
@@ -1261,21 +1261,24 @@ branch :: forall s. Expr EWord -> (Bool -> EVM s ()) -> EVM s ()
 branch cond continue = do
   loc <- codeloc
   pathconds <- use #constraints
-  query $ PleaseAskSMT cond pathconds (choosePath loc)
-  where
-    condSimp = Expr.simplify cond
+  vm <- get
+  let
+    ks :: Map W256 ByteString = vm.keccakPairs
+    condSimp = Expr.simplify ks cond
     choosePath :: CodeLocation -> BranchCondition -> EVM s ()
-    choosePath loc (Case v) = do
+    choosePath l (Case v) = do
       assign #result Nothing
-      pushTo #constraints $ if v then Expr.evalProp (condSimp ./= Lit 0) else Expr.evalProp (condSimp .== Lit 0)
-      (iteration, _) <- use (#iterations % at loc % non (0,[]))
+      pushTo #constraints $ if v then Expr.evalProp ks (condSimp ./= Lit 0)
+                                 else Expr.evalProp ks (condSimp .== Lit 0)
+      (iteration, _) <- use (#iterations % at l % non (0,[]))
       stack <- use (#state % #stack)
-      assign (#cache % #path % at (loc, iteration)) (Just v)
-      assign (#iterations % at loc) (Just (iteration + 1, stack))
+      assign (#cache % #path % at (l, iteration)) (Just v)
+      assign (#iterations % at l) (Just (iteration + 1, stack))
       continue v
     -- Both paths are possible; we ask for more input
-    choosePath loc Unknown =
-      choose . PleaseChoosePath condSimp $ choosePath loc . Case
+    choosePath l Unknown =
+      choose . PleaseChoosePath condSimp $ choosePath l . Case
+  query $ PleaseAskSMT cond pathconds (choosePath loc)
 
 -- | Construct RPC Query and halt execution until resolved
 fetchAccount :: Expr EAddr -> (Contract -> EVM s ()) -> EVM s ()
@@ -1307,9 +1310,10 @@ accessStorage
   -> (Expr EWord -> EVM s ())
   -> EVM s ()
 accessStorage addr slot continue = do
+  vm <- get
   use (#env % #contracts % at addr) >>= \case
     Just c ->
-      case readStorage slot c.storage of
+      case readStorage vm.keccakPairs slot c.storage of
         Just x ->
           continue x
         Nothing ->
@@ -1320,7 +1324,7 @@ accessStorage addr slot continue = do
                 contract <- preuse (#cache % #fetched % ix addr')
                 case contract of
                   Nothing -> internalError "contract marked external not found in cache"
-                  Just fetched -> case readStorage (Lit slot') fetched.storage of
+                  Just fetched -> case readStorage vm.keccakPairs (Lit slot') fetched.storage of
                               Nothing -> mkQuery addr' slot'
                               Just val -> continue val
           else do
@@ -2221,16 +2225,16 @@ traceForest :: VM s -> Forest Trace
 traceForest vm = zipperRootForest vm.traces
 
 traceForest' :: Expr End -> Forest Trace
-traceForest' (Success _ (Traces f _) _ _) = f
-traceForest' (Partial _ (Traces f _) _) = f
-traceForest' (Failure _ (Traces f _) _) = f
+traceForest' (Success _ (Traces f _) _ _ _) = f
+traceForest' (Partial _ (Traces f _) _ _) = f
+traceForest' (Failure _ (Traces f _) _ _) = f
 traceForest' (ITE {}) = internalError"Internal Error: ITE does not contain a trace"
 traceForest' (GVar {}) = internalError"Internal Error: Unexpected GVar"
 
 traceContext :: Expr End -> Map (Expr EAddr) Contract
-traceContext (Success _ (Traces _ c) _ _) = c
-traceContext (Partial _ (Traces _ c) _) = c
-traceContext (Failure _ (Traces _ c) _) = c
+traceContext (Success _ (Traces _ c ) _ _ _) = c
+traceContext (Partial _ (Traces _ c ) _ _) = c
+traceContext (Failure _ (Traces _ c ) _ _) = c
 traceContext (ITE {}) = internalError"Internal Error: ITE does not contain a trace"
 traceContext (GVar {}) = internalError"Internal Error: Unexpected GVar"
 

@@ -22,6 +22,7 @@ import Data.Maybe (fromMaybe)
 import Data.List (foldl')
 import Data.Text qualified as T
 import Data.Vector qualified as RegularVector
+import Data.Map (Map)
 import Network.Wreq
 import Network.Wreq.Session (Session)
 import Network.Wreq.Session qualified as Session
@@ -206,7 +207,7 @@ oracle solvers info q = do
     PleaseAskSMT branchcondition pathconditions continue -> do
          let pathconds = foldl' PAnd (PBool True) pathconditions
          -- Is is possible to satisfy the condition?
-         continue <$> checkBranch solvers (branchcondition ./= (Lit 0)) pathconds
+         continue <$> checkBranch solvers mempty (branchcondition ./= (Lit 0)) pathconds
 
     PleaseFetchContract addr base continue -> do
       contract <- case info of
@@ -236,15 +237,15 @@ type Fetcher s = Query s -> IO (EVM s ())
 -- When in debug mode, we do not want to be able to navigate to dead paths,
 -- but for normal execution paths with inconsistent pathconditions
 -- will be pruned anyway.
-checkBranch :: SolverGroup -> Prop -> Prop -> IO BranchCondition
-checkBranch solvers branchcondition pathconditions = do
-  checkSat solvers (assertProps abstRefineDefault [(branchcondition .&& pathconditions)]) >>= \case
+checkBranch :: SolverGroup -> Map W256 BS.ByteString -> Prop -> Prop -> IO BranchCondition
+checkBranch solvers keccakPs branchcondition pathconditions = do
+  checkSat solvers (assertProps abstRefineDefault keccakPs [(branchcondition .&& pathconditions)]) >>= \case
     -- the condition is unsatisfiable
     Unsat -> -- if pathconditions are consistent then the condition must be false
       pure $ Case False
     -- Sat means its possible for condition to hold
     Sat _ -> -- is its negation also possible?
-      checkSat solvers (assertProps abstRefineDefault [(pathconditions .&& (PNeg branchcondition))]) >>= \case
+      checkSat solvers (assertProps abstRefineDefault keccakPs [(pathconditions .&& (PNeg branchcondition))]) >>= \case
         -- No. The condition must hold
         Unsat -> pure $ Case True
         -- Yes. Both branches possible
