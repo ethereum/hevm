@@ -54,11 +54,8 @@ combine lst = combine' lst []
       let xcomb = [ (x, y) | y <- xs] in
       combine' xs (xcomb:acc)
 
-maxW32 :: W256
-maxW32 = into (maxBound :: Word32)
-
 minProp :: Expr EWord -> Prop
-minProp k@(Keccak _) = PGT k (Lit maxW32)
+minProp k@(Keccak _) = PGT k (Lit 256)
 minProp _ = internalError "expected keccak expression"
 
 injProp :: (Expr EWord, Expr EWord) -> Prop
@@ -68,7 +65,7 @@ injProp _ = internalError "expected keccak expression"
 
 -- Takes a list of props, find all keccak occurences and generates two kinds of assumptions:
 --   1. Minimum output value: That the output of the invocation is greater than
---      50 (needed to avoid spurious counterexamples due to storage collisions
+--      256 (needed to avoid spurious counterexamples due to storage collisions
 --      with solidity mappings & value type storage slots)
 --   2. Injectivity: That keccak is an injective function (we avoid quantifiers
 --      here by making this claim for each unique pair of keccak invocations
@@ -85,8 +82,8 @@ keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
       minDistance :: (Expr EWord, Expr EWord) -> Prop
       minDistance (ka@(Keccak a), kb@(Keccak b)) = PImpl (a ./= b) (PAnd req1 req2)
         where
-          req1 = (PGEq (Sub ka kb) (Lit maxW32))
-          req2 = (PGEq (Sub kb ka) (Lit maxW32))
+          req1 = (PGEq (Sub ka kb) (Lit 256))
+          req2 = (PGEq (Sub kb ka) (Lit 256))
       minDistance _ = internalError "expected Keccak expression"
 
 compute :: forall a. Expr a -> [Prop]
