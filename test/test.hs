@@ -412,6 +412,10 @@ tests = testGroup "hevm"
         let simplified = pand (Expr.simplifyProps [p])
         checkEquivProp simplified p
     , testProperty "storage-slot-simp-property" $ \(StorageExp s) -> ioProperty $ do
+        -- we have to run `Expr.structureArraySlots` on the unsimplified system, or
+        -- we'd need some form of minimal simplifier for things to work out. As long as
+        -- we trust the structureArraySlots, this is fine, as that function is standalone,
+        -- and quite minimal
         let s2 = Expr.structureArraySlots s
         let simplified = Expr.simplify s2
         checkEquiv simplified s2
