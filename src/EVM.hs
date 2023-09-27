@@ -57,6 +57,8 @@ import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
 import Crypto.Number.ModArithmetic (expFast)
 
+import Debug.Trace
+
 blankState :: ST s (FrameState s)
 blankState = do
   memory <- ConcreteMemory <$> VUnboxed.Mutable.new 0
@@ -1843,10 +1845,17 @@ create self this xSize xGas xValue xs newAddr initCode = do
         -- heuristics here to parse the unstructured buffer read
         -- from memory into a code and data section
         let contract' = do
+              traceM "initcode"
+              traceShowM initcode 
+              traceM "trace 1"
               prefixLen <- Expr.concPrefix initCode
+              traceM "trace 2"
               prefix <- Expr.toList $ Expr.take prefixLen initCode
+              traceM "trace 3"
               let sym = Expr.drop prefixLen initCode
+              traceM "trace 4"
               conc <- mapM maybeLitByte prefix
+              traceM "trace 5"
               pure $ InitCode (BS.pack $ V.toList conc) sym
         case contract' of
           Nothing ->
