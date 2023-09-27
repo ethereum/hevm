@@ -1845,8 +1845,8 @@ create self this xSize xGas xValue xs newAddr initCode = do
         -- heuristics here to parse the unstructured buffer read
         -- from memory into a code and data section
         let contract' = do
-              traceM "initcode"
-              traceShowM initCode 
+              traceM "initcode: "
+              traceM ("initcode : " <> show initCode )
               traceM "trace 1"
               prefixLen <- Expr.concPrefix initCode
               traceM "trace 2"
