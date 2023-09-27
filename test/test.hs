@@ -45,7 +45,6 @@ import Witch (unsafeInto, into)
 
 import Optics.Core hiding (pre, re, elements)
 import Optics.State
-import Optics.Operators.Unsafe
 
 import EVM hiding (choose)
 import EVM.ABI
@@ -683,10 +682,7 @@ tests = testGroup "hevm"
                 }
                 |]
 
-        (json, path') <- solidity' srccode
-        let (Contracts solc', _, _) = fromJust $ readStdJSON json
-            initCode = (solc' ^?! ix (path' <> ":A")).creationCode
-        -- add constructor arguments
+        Just initCode <- solidity "A" srccode
         assertEqual "constructor args screwed up metadata stripping" (stripBytecodeMetadata (initCode <> encodeAbiValue (AbiUInt 256 1))) (stripBytecodeMetadata initCode)
     ]
 
