@@ -696,7 +696,9 @@ structureArraySlots keccakPs e = mapExpr go e
     go :: Expr a -> Expr a
     go orig@(Lit key) = case litToArrayPreimage key of
       Just (array, offset) -> ArraySlotWithOffset (slotPos array) (Lit offset)
-      _ -> orig
+      _ -> case Map.lookup key keccakPs of
+             Just bs -> Keccak (ConcreteBuf bs)
+             _ -> orig
     go a = a
 
 -- Takes in value, checks if it's within 256 of a pre-computed array hash value
