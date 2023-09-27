@@ -913,6 +913,34 @@ tests = testGroup "hevm"
         assertEqual "unexpected cex value" a 44
         putStrLn "expected counterexample found"
   ]
+  , testGroup "Symbolic-Exec-General"
+    -- this produced some hard to debug failures. keeping it around since it seemed to exercise the contract creation code in interesting ways...
+    [ testCase "multiple-symbolic-constructor-calls" $ do
+        Just initCode <- solidity "C"
+          [i|
+            contract A {
+                uint public x;
+                constructor (uint z)  {}
+            }
+
+            contract B {
+                constructor (uint i)  {}
+
+            }
+
+            contract C {
+                constructor(uint u) {
+                  new A(u);
+                  new B(u);
+                }
+            }
+          |]
+        withSolvers Z3 1 Nothing $ \s -> do
+          let calldata = (WriteWord (Lit 0x0) (Var "u") (ConcreteBuf ""), [])
+          initVM <- stToIO $ abstractVM calldata initCode Nothing True
+          expr <- Expr.simplify <$> interpret (Fetch.oracle s Nothing) Nothing 1 StackBased initVM runExpr
+          assertBool "unexptected partial execution" (not $ Expr.containsNode isPartial expr)
+    ]
   , testGroup "Dapp-Tests"
     [ testCase "Trivial-Pass" $ do
         let testFile = "test/contracts/pass/trivial.sol"

@@ -1839,13 +1839,25 @@ create self this xSize xGas xValue xs newAddr initCode = do
         touchAccount newAddr
       -- are we overflowing the nonce
       False -> burn xGas $ do
-        -- unfortunately we have to apply some (pretty hacky)
-        -- heuristics here to parse the unstructured buffer read
-        -- from memory into a code and data section
+        -- solidity implements constructor args by appending them to the end of
+        -- the initcode. we support this internally by treating initCode as a
+        -- concrete region (initCode) followed by a potentially symbolic region
+        -- (arguments).
+        --
+        -- when constructing a contract that has symbolic construcor args, we
+        -- need to apply some heuristics to convert the (unstructured) initcode
+        -- in memory into this structured representation. The (unsound, bad,
+        -- hacky) way that we do this, is by: looking for the first potentially
+        -- symbolic byte in the input buffer and then splitting it there into code / data.
+        --
+        -- TODO: what happens if we pass a concrete arg to a constructor followed by a symbolic part?
+        -- TODO: would life be easier if model initCode as `Vector (Expr Byte)`?
         let contract' = do
-              prefixLen <- Expr.concPrefix initCode
-              prefix <- Expr.toList $ Expr.take prefixLen initCode
-              let sym = Expr.drop prefixLen initCode
+              bytes <- Expr.toList initCode
+              prefixLen <- V.findIndex (not . Expr.isLitByte) bytes
+              let prefix = V.take prefixLen bytes
+              -- unsafeInto: findIndex will always be positive
+              let sym = Expr.drop (unsafeInto prefixLen) initCode
               conc <- mapM maybeLitByte prefix
               pure $ InitCode (BS.pack $ V.toList conc) sym
         case contract' of
