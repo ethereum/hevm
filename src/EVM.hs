@@ -1846,7 +1846,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
         -- from memory into a code and data section
         let contract' = do
               traceM "initcode"
-              traceShowM initcode 
+              traceShowM initCode 
               traceM "trace 1"
               prefixLen <- Expr.concPrefix initCode
               traceM "trace 2"
