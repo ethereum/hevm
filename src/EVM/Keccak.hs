@@ -82,7 +82,7 @@ keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
     minValue = fmap minProp (Set.toList st.keccakEqs)
     minDiffOfPairs = map minDistance $ filter (uncurry (/=)) [(a,b) | a<-(Set.elems st.keccakEqs), b<-(Set.elems st.keccakEqs)]
      where
-      minDistance :: ((Expr EWord), (Expr EWord)) -> Prop
+      minDistance :: (Expr EWord, Expr EWord) -> Prop
       minDistance (ka@(Keccak a), kb@(Keccak b)) = PImpl (a ./= b) (PAnd req1 req2)
         where
           req1 = (PGEq (Sub ka kb) (Lit maxW32))
