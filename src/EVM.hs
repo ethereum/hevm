@@ -1845,17 +1845,15 @@ create self this xSize xGas xValue xs newAddr initCode = do
         -- heuristics here to parse the unstructured buffer read
         -- from memory into a code and data section
         let contract' = do
-              traceM "initcode: "
-              traceM ("initcode : " <> show initCode )
-              traceM "trace 1"
+              traceM ("initcode : " <> show initCode)
               prefixLen <- Expr.concPrefix initCode
-              traceM "trace 2"
+              traceM ("prefixLen : " <> show prefixLen)
               prefix <- Expr.toList $ Expr.take prefixLen initCode
-              traceM "trace 3"
+              traceM ("prefix : " <> show prefix)
               let sym = Expr.drop prefixLen initCode
-              traceM "trace 4"
+              traceM ("sym : " <> show sym)
               conc <- mapM maybeLitByte prefix
-              traceM "trace 5"
+              traceM ("conc : " <> show conc)
               pure $ InitCode (BS.pack $ V.toList conc) sym
         case contract' of
           Nothing ->
