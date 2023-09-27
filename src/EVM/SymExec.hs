@@ -838,7 +838,7 @@ formatCex cd m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
     -- it for branches that do not refer to calldata at all (e.g. the top level
     -- callvalue check inserted by solidity in contracts that don't have any
     -- payable functions).
-    cd' = prettyBuf . Expr.simplify . defaultSymbolicValues $ subModel m cd
+    cd' = prettyBuf . (Expr.simplify mempty) . defaultSymbolicValues $ subModel m cd
 
     storeCex :: [Text]
     storeCex

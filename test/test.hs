@@ -245,17 +245,45 @@ tests = testGroup "hevm"
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
        -- putStrLn $ T.unpack $ formatExpr expr
        assertEqual "Expression is not clean." (badStoresInExpr expr) False
+    , testCase "simplify-storage-some-known-constant" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[] a;
+          mapping(uint => uint) items1;
+          mapping(uint => uint) items2;
+          function transfer(uint acct, uint val1) public {
+            unchecked {
+              items1[acct] += val1;
+            }
+          }
+          function mystuff(uint val1) public {
+            require(items1[0xabba] >= 0);
+            require(items1[0xabba] <= 1000);
+            require(items1[val] <= 1000);
+            uint beforeVal1 = items1[0xabba];
+            transfer(0xabba, val1);
+            unchecked {
+              assert(items1[0xabba] > beforeVal1+val1);
+            }
+          }
+        }
+       |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "mystuff(uint256)" [AbiUIntType 256])) [] debugVeriOpts
+       -- putStrLn $ T.unpack $ formatExpr expr
+       assertEqual "Expression is not clean." (badStoresInExpr expr) False
+
     ]
   , testGroup "StorageTests"
     [ testCase "read-from-sstore" $ assertEqual ""
         (Lit 0xab)
-        (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x0) (Lit 0xab) (AbstractStore (LitAddr 0x0))))
+        (Expr.readStorage' mempty (Lit 0x0) (SStore (Lit 0x0) (Lit 0xab) (AbstractStore (LitAddr 0x0))))
     , testCase "read-from-concrete" $ assertEqual ""
         (Lit 0xab)
-        (Expr.readStorage' (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, 0xab)]))
+        (Expr.readStorage' mempty (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, 0xab)]))
     , testCase "read-past-write" $ assertEqual ""
         (Lit 0xab)
-        (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x1) (Var "b") (ConcreteStore $ Map.fromList [(0x0, 0xab)])))
+        (Expr.readStorage' mempty (Lit 0x0) (SStore (Lit 0x1) (Var "b") (ConcreteStore $ Map.fromList [(0x0, 0xab)])))
     , testCase "accessStorage uses fetchedStorage" $ do
         let dummyContract =
               (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)))
@@ -283,11 +311,11 @@ tests = testGroup "hevm"
     -- common overflow cases that the simplifier was getting wrong
     [ testCase "writeWord-overflow" $ do
         let e = ReadByte (Lit 0x0) (WriteWord (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd) (Lit 0x0) (ConcreteBuf "\255\255\255\255"))
-        b <- checkEquiv e (Expr.simplify e)
+        b <- checkEquiv e (Expr.simplify mempty e)
         assertBool "Simplifier failed" b
     , testCase "CopySlice-overflow" $ do
         let e = ReadWord (Lit 0x0) (CopySlice (Lit 0x0) (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc) (Lit 0x6) (ConcreteBuf "\255\255\255\255\255\255") (ConcreteBuf ""))
-        b <- checkEquiv e (Expr.simplify e)
+        b <- checkEquiv e (Expr.simplify mempty e)
         assertBool "Simplifier failed" b
     , testCase "stripWrites-overflow" $ do
         -- below eventually boils down to
@@ -295,7 +323,7 @@ tests = testGroup "hevm"
         -- which failed before
         let
           a = ReadByte (Lit 0xf0000000000000000000000000000000000000000000000000000000000000) (WriteByte (And (SHA256 (ConcreteBuf "")) (Lit 0x1)) (LitByte 0) (ConcreteBuf ""))
-          b = Expr.simplify a
+          b = Expr.simplify mempty a
         ret <- checkEquiv a b
         assertBool "must be equivalent" ret
     ]
@@ -305,19 +333,19 @@ tests = testGroup "hevm"
   -- unsimplified one
   , adjustOption (\(Test.Tasty.QuickCheck.QuickCheckTests n) -> Test.Tasty.QuickCheck.QuickCheckTests (min n 50)) $ testGroup "SimplifierTests"
     [ testProperty  "buffer-simplification" $ \(expr :: Expr Buf) -> ioProperty $ do
-        let simplified = Expr.simplify expr
+        let simplified = Expr.simplify mempty expr
         checkEquiv expr simplified
     , testProperty "store-simplification" $ \(expr :: Expr Storage) -> ioProperty $ do
-        let simplified = Expr.simplify expr
+        let simplified = Expr.simplify mempty expr
         checkEquiv expr simplified
     , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> ioProperty $ do
-        let simplified = Expr.simplify expr
+        let simplified = Expr.simplify mempty expr
         checkEquiv expr simplified
     , testProperty "word-simplification" $ \(ZeroDepthWord expr) -> ioProperty $ do
-        let simplified = Expr.simplify expr
+        let simplified = Expr.simplify mempty expr
         checkEquiv expr simplified
     , testProperty "readStorage-equivalance" $ \(store, slot) -> ioProperty $ do
-        let simplified = Expr.readStorage' slot store
+        let simplified = Expr.readStorage' mempty slot store
             full = SLoad slot store
         checkEquiv simplified full
     , testProperty "writeStorage-equivalance" $ \(val, GenWriteStorageExpr (slot, store)) -> ioProperty $ do
@@ -334,7 +362,7 @@ tests = testGroup "hevm"
         checkEquiv simplified full
     , testProperty "arith-simplification" $ \(_ :: Int) -> ioProperty $ do
         expr <- generate . sized $ genWordArith 15
-        let simplified = Expr.simplify expr
+        let simplified = Expr.simplify mempty expr
         checkEquiv expr simplified
     , testProperty "readByte-equivalance" $ \(buf, idx) -> ioProperty $ do
         let simplified = Expr.readByte idx buf
@@ -397,50 +425,50 @@ tests = testGroup "hevm"
             let asBuf = Expr.fromList asList
             checkEquiv asBuf input
     , testProperty "evalProp-equivalence-lit" $ \(LitProp p) -> ioProperty $ do
-        let simplified = Expr.simplifyProps [p]
+        let simplified = Expr.simplifyProps mempty [p]
         case simplified of
           [] -> checkEquivProp (PBool True) p
           [val@(PBool _)] -> checkEquivProp val p
           _ -> assertFailure "must evaluate down to a literal bool"
     , testProperty "evalProp-equivalence-sym" $ \(p) -> ioProperty $ do
-        let simplified = Expr.evalProp p
+        let simplified = Expr.evalProp mempty p
         checkEquivProp simplified p
     , testProperty "simpProp-equivalence-sym" $ \(ps :: [Prop]) -> ioProperty $ do
-        let simplified = pand (Expr.simplifyProps ps)
+        let simplified = pand (Expr.simplifyProps mempty ps)
         checkEquivProp simplified (pand ps)
     , testProperty "simpProp-equivalence-sym" $ \(LitProp p) -> ioProperty $ do
-        let simplified = pand (Expr.simplifyProps [p])
+        let simplified = pand (Expr.simplifyProps mempty [p])
         checkEquivProp simplified p
     , testProperty "storage-slot-simp-property" $ \(StorageExp s) -> ioProperty $ do
         -- we have to run `Expr.structureArraySlots` on the unsimplified system, or
         -- we'd need some form of minimal simplifier for things to work out. As long as
         -- we trust the structureArraySlots, this is fine, as that function is standalone,
         -- and quite minimal
-        let s2 = Expr.structureArraySlots s
-        let simplified = Expr.simplify s2
+        let s2 = Expr.structureArraySlots mempty s
+        let simplified = Expr.simplify mempty s2
         checkEquiv simplified s2
     ]
   , testGroup "simpProp-concrete-tests" [
       testCase "simpProp-concrete-trues" $ do
         let
           t = [PBool True, PBool True]
-          simplified = Expr.simplifyProps t
+          simplified = Expr.simplifyProps mempty t
         assertEqual "Must be equal" [] simplified
     , testCase "simpProp-concrete-false1" $ do
         let
           t = [PBool True, PBool False]
-          simplified = Expr.simplifyProps t
+          simplified = Expr.simplifyProps mempty t
         assertEqual "Must be equal" [PBool False] simplified
     , testCase "simpProp-concrete-false2" $ do
         let
           t = [PBool False, PBool False]
-          simplified = Expr.simplifyProps t
+          simplified = Expr.simplifyProps mempty t
         assertEqual "Must be equal" [PBool False] simplified
     , testCase "simpProp-concrete-or-1" $ do
         let
           -- a = 5 && (a=4 || a=3)  -> False
           t = [PEq (Lit 5) (Var "a"), POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 3))]
-          simplified = Expr.simplifyProps t
+          simplified = Expr.simplifyProps mempty t
         assertEqual "Must be equal" [PBool False] simplified
     , ignoreTest $ testCase "simpProp-concrete-or-2" $ do
         let
@@ -448,37 +476,37 @@ tests = testGroup "hevm"
           --   POr/PAnd using canBeSat
           -- a = 5 && (a=4 || a=5)  -> a=5
           t = [PEq (Lit 5) (Var "a"), POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 5))]
-          simplified = Expr.simplifyProps t
+          simplified = Expr.simplifyProps mempty t
         assertEqual "Must be equal" [] simplified
     , testCase "simpProp-concrete-and-1" $ do
         let
           -- a = 5 && (a=4 && a=3)  -> False
           t = [PEq (Lit 5) (Var "a"), PAnd (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 3))]
-          simplified = Expr.simplifyProps t
+          simplified = Expr.simplifyProps mempty t
         assertEqual "Must be equal" [PBool False] simplified
     , testCase "simpProp-concrete-or-of-or" $ do
         let
           -- a = 5 && ((a=4 || a=6) || a=3)  -> False
           t = [PEq (Lit 5) (Var "a"), POr (POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 6))) (PEq (Var "a") (Lit 3))]
-          simplified = Expr.simplifyProps t
+          simplified = Expr.simplifyProps mempty t
         assertEqual "Must be equal" [PBool False] simplified
     , testCase "simpProp-concrete-or-eq-rem" $ do
         let
           -- a = 5 && ((a=4 || a=6) || a=3)  -> False
           t = [PEq (Lit 5) (Var "a"), POr (POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 6))) (PEq (Var "a") (Lit 3))]
-          simplified = Expr.simplifyProps t
+          simplified = Expr.simplifyProps mempty t
         assertEqual "Must be equal" [PBool False] simplified
     , testCase "simpProp-inner-expr-simp" $ do
         let
           -- 5+1 = 6
           t = [PEq (Add (Lit 5) (Lit 1)) (Var "a")]
-          simplified = Expr.simplifyProps t
+          simplified = Expr.simplifyProps mempty t
         assertEqual "Must be equal" [PEq (Lit 6) (Var "a")] simplified
     , testCase "simpProp-inner-expr-simp-with-canBeSat" $ do
         let
           -- 5+1 = 6, 6 != 7
           t = [PAnd (PEq (Add (Lit 5) (Lit 1)) (Var "a")) (PEq (Var "a") (Lit 7))]
-          simplified = Expr.simplifyProps t
+          simplified = Expr.simplifyProps mempty t
         assertEqual "Must be equal" [PBool False] simplified
   ]
   , testGroup "MemoryTests"
@@ -1074,7 +1102,7 @@ tests = testGroup "hevm"
         let isSuc (Success {}) = True
             isSuc _ = False
         case filter isSuc (flattenExpr expr) of
-          [Success _ _ _ store] -> do
+          [Success _ _ _ _ store] -> do
             let ca = fromJust (Map.lookup (SymAddr "freshSymAddr1") store)
             let code = case ca.code of
                   RuntimeCode (ConcreteRuntimeCode c') -> c'
@@ -1749,7 +1777,7 @@ tests = testGroup "hevm"
                              [x', y'] -> (x', y')
                              _ -> internalError "expected 2 args"
               in case leaf of
-                   Success _ _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
+                   Success _ _ _ b _ -> (ReadWord (Lit 0) b) .== (Add x y)
                    _ -> PBool True
             sig = Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
@@ -1777,7 +1805,7 @@ tests = testGroup "hevm"
                              [x', y'] -> (x', y')
                              _ -> internalError "expected 2 args"
               in case leaf of
-                   Success _ _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
+                   Success _ _ _ b _ -> (ReadWord (Lit 0) b) .== (Mul (Lit 2) y)
                    _ -> PBool True
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
           verifyContract s safeAdd (Just (Sig "add(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts (Just pre) (Just post)
@@ -1803,11 +1831,11 @@ tests = testGroup "hevm"
                         _ -> error "expected 1 arg"
                   this = prestate.state.codeContract
                   prestore = (fromJust (Map.lookup this prestate.env.contracts)).storage
-                  prex = Expr.readStorage' (Lit 0) prestore
+                  prex = Expr.readStorage' mempty (Lit 0) prestore
               in case leaf of
-                Success _ _ _ postState -> let
+                Success _ _ _ _ postState -> let
                     poststore = (fromJust (Map.lookup this postState)).storage
-                  in Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' (Lit 0) poststore)
+                  in Expr.add prex (Expr.mul (Lit 2) y) .== (Expr.readStorage' mempty (Lit 0) poststore)
                 _ -> PBool True
             sig = Just (Sig "f(uint256)" [AbiUIntType 256])
         (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
@@ -1862,13 +1890,13 @@ tests = testGroup "hevm"
                         _ -> error "expected 2 args"
                     this = prestate.state.codeContract
                     prestore = (fromJust (Map.lookup this prestate.env.contracts)).storage
-                    prex = Expr.readStorage' x prestore
-                    prey = Expr.readStorage' y prestore
+                    prex = Expr.readStorage' mempty x prestore
+                    prey = Expr.readStorage' mempty y prestore
                 in case poststate of
-                     Success _ _ _ postcs -> let
+                     Success _ _ _ _ postcs -> let
                            poststore = (fromJust (Map.lookup this postcs)).storage
-                           postx = Expr.readStorage' x poststore
-                           posty = Expr.readStorage' y poststore
+                           postx = Expr.readStorage' mempty x poststore
+                           posty = Expr.readStorage' mempty y poststore
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
               sig = Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
@@ -1899,13 +1927,13 @@ tests = testGroup "hevm"
                         _ -> error "expected 2 args"
                     this = prestate.state.codeContract
                     prestore = (fromJust (Map.lookup this prestate.env.contracts)).storage
-                    prex = Expr.readStorage' x prestore
-                    prey = Expr.readStorage' y prestore
+                    prex = Expr.readStorage' mempty x prestore
+                    prey = Expr.readStorage' mempty y prestore
                 in case leaf of
-                     Success _ _ _ poststate -> let
+                     Success _ _ _ _ poststate -> let
                            poststore = (fromJust (Map.lookup this poststate)).storage
-                           postx = Expr.readStorage' x poststore
-                           posty = Expr.readStorage' y poststore
+                           postx = Expr.readStorage' mempty x poststore
+                           posty = Expr.readStorage' mempty y poststore
                        in Expr.add prex prey .== Expr.add postx posty
                      _ -> PBool True
               sig = Just (Sig "f(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
@@ -1927,7 +1955,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (_, [Cex (Failure _ _ (Revert msg), _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo()" [])) [] defaultVeriOpts
+          (_, [Cex (Failure _ _ _ (Revert msg), _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "foo()" [])) [] defaultVeriOpts
           assertEqual "incorrect revert msg" msg (ConcreteBuf $ panicMsg 0x01)
         ,
         testCase "simple-assert-2" $ do
@@ -2527,37 +2555,37 @@ tests = testGroup "hevm"
     testCase "prop-simp-bool1" $ do
       let
         a = successGen [PAnd (PBool True) (PBool False)]
-        b = Expr.simplify a
+        b = Expr.simplify mempty a
       assertEqual "Must simplify down" (successGen [PBool False]) b
     , testCase "prop-simp-bool2" $ do
       let
         a = successGen [POr (PBool True) (PBool False)]
-        b = Expr.simplify a
+        b = Expr.simplify mempty a
       assertEqual "Must simplify down" (successGen []) b
     , testCase "prop-simp-LT" $ do
       let
         a = successGen [PLT (Lit 1) (Lit 2)]
-        b = Expr.simplify a
+        b = Expr.simplify mempty a
       assertEqual "Must simplify down" (successGen []) b
     , testCase "prop-simp-GEq" $ do
       let
         a = successGen [PGEq (Lit 1) (Lit 2)]
-        b = Expr.simplify a
+        b = Expr.simplify mempty a
       assertEqual "Must simplify down" (successGen [PBool False]) b
     , testCase "prop-simp-multiple" $ do
       let
         a = successGen [PBool False, PBool True]
-        b = Expr.simplify a
+        b = Expr.simplify mempty a
       assertEqual "Must simplify down" (successGen [PBool False]) b
     , testCase "prop-simp-expr" $ do
       let
         a = successGen [PEq (Add (Lit 1) (Lit 2)) (Sub (Lit 4) (Lit 1))]
-        b = Expr.simplify a
+        b = Expr.simplify mempty a
       assertEqual "Must simplify down" (successGen []) b
     , testCase "prop-simp-impl" $ do
       let
         a = successGen [PImpl (PBool False) (PEq (Var "abc") (Var "bcd"))]
-        b = Expr.simplify a
+        b = Expr.simplify mempty a
       assertEqual "Must simplify down" (successGen []) b
   ]
   , testGroup "equivalence-checking"
@@ -3449,13 +3477,13 @@ genName = fmap (T.pack . ("esc_" <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
-  [ fmap (Failure mempty mempty . UnrecognizedOpcode) arbitrary
-  , pure $ Failure mempty mempty IllegalOverflow
-  , pure $ Failure mempty mempty SelfDestruction
+  [ fmap ( Failure mempty mempty mempty . UnrecognizedOpcode) arbitrary
+  , pure $ Failure mempty mempty mempty IllegalOverflow
+  , pure $ Failure mempty mempty mempty SelfDestruction
   ]
 genEnd sz = oneof
-  [ liftM3 Failure subProp (pure mempty) (fmap Revert subBuf)
-  , liftM4 Success subProp (pure mempty) subBuf arbitrary
+  [ liftM4 Failure subProp (pure mempty) (pure mempty) (fmap Revert subBuf)
+  , liftM5 Success subProp (pure mempty) (pure mempty) subBuf arbitrary
   , liftM3 ITE subWord subEnd subEnd
   -- TODO Partial
   ]
@@ -3712,14 +3740,14 @@ applyPattern p = localOption (TestPattern (parseExpr p))
 
 checkBadCheatCode :: Text -> Postcondition s
 checkBadCheatCode sig _ = \case
-  (Failure _ _ (BadCheatCode s)) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
+  (Failure _ _ _ (BadCheatCode s)) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
   _ -> PBool True
 
 allBranchesFail :: ByteString -> Maybe Sig -> IO (Either [SMTCex] (Expr End))
 allBranchesFail = checkPost (Just p)
   where
     p _ = \case
-      Success _ _ _ _ -> PBool False
+      Success _ _ _ _ _ -> PBool False
       _ -> PBool True
 
 reachableUserAsserts :: ByteString -> Maybe Sig -> IO (Either [SMTCex] (Expr End))
@@ -3735,4 +3763,4 @@ checkPost post c sig = do
     cs -> pure $ Left cs
 
 successGen :: [Prop] -> Expr End
-successGen props = Success props mempty (ConcreteBuf "") mempty
+successGen props = Success props mempty mempty (ConcreteBuf "") mempty

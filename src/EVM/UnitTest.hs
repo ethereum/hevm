@@ -283,7 +283,7 @@ symFailure UnitTestOptions {..} testName cd types failures' =
 prettyCalldata :: SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
 prettyCalldata cex buf sig types = head (Text.splitOn "(" sig) <> "(" <> body <> ")"
   where
-    argdata = Expr.drop 4 . simplify . defaultSymbolicValues $ subModel cex buf
+    argdata = Expr.drop 4 . (simplify mempty) . defaultSymbolicValues $ subModel cex buf
     body = case decodeBuf types argdata of
       CAbi v -> intercalate "," (fmap showVal v)
       NoVals -> case argdata of

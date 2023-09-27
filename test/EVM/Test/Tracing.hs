@@ -882,9 +882,9 @@ checkTraceAndOutputs contract gasLimit txData = do
                        AbstractBuf "calldata" -> c
                        y -> y
         concretizedExpr = concretize expr (ConcreteBuf txData)
-        simplConcExpr = Expr.simplify concretizedExpr
+        simplConcExpr = Expr.simplifyEnd concretizedExpr
         getReturnVal :: Expr End -> Maybe ByteString
-        getReturnVal (Success _ _ (ConcreteBuf bs) _) = Just bs
+        getReturnVal (Success _ _ _ (ConcreteBuf bs) _) = Just bs
         getReturnVal _ = Nothing
         simplConcrExprRetval = getReturnVal simplConcExpr
       traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
