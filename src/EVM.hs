@@ -57,7 +57,7 @@ import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
 import Crypto.Number.ModArithmetic (expFast)
 
-import Debug.Trace
+import Debug.Trace hiding (trace)
 
 blankState :: ST s (FrameState s)
 blankState = do
