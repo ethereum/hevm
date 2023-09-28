@@ -1852,14 +1852,18 @@ create self this xSize xGas xValue xs newAddr initCode = do
         --
         -- TODO: what happens if we pass a concrete arg to a constructor followed by a symbolic part?
         -- TODO: would life be easier if model initCode as `Vector (Expr Byte)`?
-        let contract' = do
-              bytes <- Expr.toList initCode
-              prefixLen <- V.findIndex (not . Expr.isLitByte) bytes
-              let prefix = V.take prefixLen bytes
-              -- unsafeInto: findIndex will always be positive
-              let sym = Expr.drop (unsafeInto prefixLen) initCode
-              conc <- mapM maybeLitByte prefix
-              pure $ InitCode (BS.pack $ V.toList conc) sym
+        let contract' = case initCode of
+              ConcreteBuf b -> Just (InitCode b mempty)
+              _ -> do
+                bytes <- Expr.toList initCode
+                let prefixLen = case V.findIndex (not . Expr.isLitByte) bytes of
+                      Just l -> l
+                      Nothing -> V.length bytes
+                let prefix = V.take prefixLen bytes
+                -- unsafeInto: findIndex will always be positive
+                let sym = Expr.drop (unsafeInto prefixLen) initCode
+                conc <- mapM maybeLitByte prefix
+                pure $ InitCode (BS.pack $ V.toList conc) sym
         case contract' of
           Nothing ->
             partial $ UnexpectedSymbolicArg vm0.state.pc "initcode must have a concrete prefix" []
