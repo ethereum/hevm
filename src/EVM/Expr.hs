@@ -8,19 +8,23 @@
 module EVM.Expr where
 
 import Prelude hiding (LT, GT)
+import Control.Monad.ST
 import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
 import Data.List
 import Data.Map.Strict qualified as Map
-import Data.Maybe (mapMaybe, isJust)
+import Data.Maybe (mapMaybe, isJust, fromMaybe)
 import Data.Semigroup (Any, Any(..), getAny)
 import Data.Vector qualified as V
+import Data.Vector (Vector)
+import Data.Vector.Mutable qualified as MV
+import Data.Vector.Mutable (MVector)
 import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
-import Witch (unsafeInto, into, tryFrom)
+import Witch (unsafeInto, into, tryFrom, tryInto)
 import Data.Containers.ListUtils (nubOrd)
 import Control.Monad.State
 
@@ -449,6 +453,54 @@ minLength bufEnv = go 0
     go l (GVar (BufVar a)) = do
       b <- Map.lookup a bufEnv
       go l b
+
+-- returns the largest prefix that is guaranteed to be concrete (if one exists)
+concretePrefix :: Expr Buf -> Maybe (Vector (Expr Byte))
+concretePrefix b = let v = mkvec in case V.length v of
+  0 -> Nothing
+  _ -> Just v
+  where
+
+    -- attempts to compute a concrete length for the input buffer buffers with
+    -- a concrete length that is too large to be represented in an Int get `maxBound :: Int` assigned
+    -- TODO: this is maybe sketchy, but it's still worth trying with these
+    -- buffers since the concrete prefix might be a lot smaller?
+    inputLen :: Maybe Int
+    inputLen = case bufLength b of
+      Lit s -> case tryInto @Int s of
+        Right s' -> Just s'
+        Left _ -> Just (maxBound :: Int)
+      _ -> Nothing
+
+    -- builds the vector representing the concrete prefix.
+    -- this is done over a mutable vector that is then frozen to avoid excessive allocation.
+    -- if we know a concrete size for the input buffer, then we allocate that ahead of time, and then shrink at the end.
+    -- if we don't know a concrete size for the input, then we allocate 1kb, and double the size each time we need to grow.
+    mkvec :: Vector (Expr Byte)
+    mkvec = V.create $ do
+      v <- MV.new (fromMaybe 1024 inputLen)
+      (filled, v') <- go 0 v
+      pure $ MV.take filled v'
+
+    -- recursively reads succesive bytes from `b` until we reach a symbolic
+    -- byte returns the larged index read from and a reference to the mutable
+    -- vec (might not be the same as the input because of the call to grow)
+    go :: forall s . Int -> MVector s (Expr Byte) -> ST s (Int, MVector s (Expr Byte))
+    go i v
+      -- if the input buffer has a concrete size, then don't read past the end
+      | Just mr <- inputLen, i >= mr = pure (i, v)
+      -- double the size of the vector if we've reached the end
+      | i >= MV.length v = do
+        v' <- MV.grow v (MV.length v)
+        go i v'
+      -- read the byte at `i` in `b` into `v` if it is concrete, or halt if we've reached a symbolic byte
+      -- unsafeInto: i will always be positive
+      | otherwise = case readByte (Lit . unsafeInto $ i) b of
+          byte@(LitByte _) -> do
+            MV.write v i byte
+            go (i+1) v
+          _ -> pure (i, v)
+
 
 word256At :: Expr EWord -> Lens (Expr Buf) (Expr Buf) (Expr EWord) (Expr EWord)
 word256At i = lens getter setter where

@@ -1855,13 +1855,9 @@ create self this xSize xGas xValue xs newAddr initCode = do
         let contract' = case initCode of
               ConcreteBuf b -> Just (InitCode b mempty)
               _ -> do
-                bytes <- Expr.toList initCode
-                let prefixLen = case V.findIndex (not . Expr.isLitByte) bytes of
-                      Just l -> l
-                      Nothing -> V.length bytes
-                let prefix = V.take prefixLen bytes
+                prefix <- Expr.concretePrefix initCode
                 -- unsafeInto: findIndex will always be positive
-                let sym = Expr.drop (unsafeInto prefixLen) initCode
+                let sym = Expr.drop (unsafeInto (V.length prefix)) initCode
                 conc <- mapM maybeLitByte prefix
                 pure $ InitCode (BS.pack $ V.toList conc) sym
         case contract' of
