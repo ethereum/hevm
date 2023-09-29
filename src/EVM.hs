@@ -117,7 +117,7 @@ makeVm o = do
       , value = o.value
       , substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty
       , isCreate = o.create
-      , txReversion = Map.fromList ((o.address,o.contract):o.contracts)
+      , txReversion = Map.fromList ((o.address,o.contract):o.otherContracts)
       }
     , logs = []
     , traces = Zipper.fromForest []
@@ -148,7 +148,7 @@ makeVm o = do
       }
     , env = Env
       { chainId = o.chainId
-      , contracts = Map.fromList ((o.address,o.contract):o.contracts)
+      , contracts = Map.fromList ((o.address,o.contract):o.otherContracts)
       , freshAddresses = 0
       }
     , cache = Cache mempty mempty

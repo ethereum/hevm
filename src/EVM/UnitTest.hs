@@ -445,7 +445,7 @@ initialUnitTestVm :: UnitTestOptions s -> SolcContract -> ST s (VM s)
 initialUnitTestVm (UnitTestOptions {..}) theContract = do
   vm <- makeVm $ VMOpts
            { contract = initialContract (InitCode theContract.creationCode mempty)
-           , contracts = []
+           , otherContracts = []
            , calldata = mempty
            , value = Lit 0
            , address = testParams.address
