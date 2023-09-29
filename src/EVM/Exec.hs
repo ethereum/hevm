@@ -18,6 +18,7 @@ vmForEthrunCreation :: ByteString -> ST s (VM s)
 vmForEthrunCreation creationCode =
   (makeVm $ VMOpts
     { contract = initialContract (InitCode creationCode mempty)
+    , contracts = []
     , calldata = mempty
     , value = Lit 0
     , baseState = EmptyBase

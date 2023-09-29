@@ -213,6 +213,7 @@ loadSymVM
 loadSymVM x callvalue cd create =
   (makeVm $ VMOpts
     { contract = if create then initialContract x else abstractContract x (SymAddr "entrypoint")
+    , contracts = []
     , calldata = cd
     , value = callvalue
     , baseState = AbstractBase
