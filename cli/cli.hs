@@ -452,6 +452,7 @@ vmFromCommand cmd = do
 
         vm0 baseFee miner ts blockNum prevRan c = makeVm $ VMOpts
           { contract      = c
+          , contracts     = []
           , calldata      = (calldata, [])
           , value         = Lit value
           , address       = address
@@ -532,6 +533,7 @@ symvmFromCommand cmd calldata = do
     address = eaddr (.address) (SymAddr "entrypoint")
     vm0 baseFee miner ts blockNum prevRan cd callvalue caller c = makeVm $ VMOpts
       { contract      = c
+      , contracts     = []
       , calldata      = cd
       , value         = callvalue
       , address       = address

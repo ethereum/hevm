@@ -433,6 +433,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
                  & set #balance (Lit alloc.balance)
   in (makeVm $ VMOpts
     { contract = contract
+    , otherContracts = []
     , calldata = (calldata', [])
     , value = Lit txn.value
     , baseState = EmptyBase
