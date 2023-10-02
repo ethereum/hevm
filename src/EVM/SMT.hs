@@ -193,13 +193,14 @@ smt2Line :: Builder -> SMT2
 smt2Line txt = SMT2 [txt] mempty mempty
 
 assertProps :: AbstRefineConfig -> [Prop] -> SMT2
+-- first simplify to rewrite sload/sstore combos, then concretize&simplify
 assertProps conf ps = assertPropsNoSimp conf (Expr.simplifyProps ps)
 
 -- Note: we need a version that does NOT call simplify or simplifyProps,
 -- because we make use of it to verify the correctness of our simplification
 -- passes through property-based testing.
 assertPropsNoSimp :: AbstRefineConfig -> [Prop] -> SMT2
-assertPropsNoSimp abstRefineConfig ps =
+assertPropsNoSimp abstRefineConfig psPreConc =
   let encs = map propToSMT psElimAbst
       abstSMT = map propToSMT abstProps
       intermediates = declareIntermediates bufs stores in
@@ -226,6 +227,7 @@ assertPropsNoSimp abstRefineConfig ps =
   <> SMT2 mempty mempty mempty { storeReads = storageReads }
 
   where
+    ps = Expr.concrKeccaks False psPreConc
     (psElim, bufs, stores) = eliminateProps ps
     (psElimAbst, abst@(AbstState abstExprToInt _)) = if abstRefineConfig.arith || abstRefineConfig.mem
       then abstractAwayProps abstRefineConfig psElim
@@ -251,9 +253,9 @@ assertPropsNoSimp abstRefineConfig ps =
 
     keccakAssumes
       = smt2Line "; keccak assumptions"
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psElim bufVals storeVals)) mempty mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psPreConc bufVals storeVals)) mempty mempty
       <> smt2Line "; keccak computations"
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psElim bufVals storeVals)) mempty mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psPreConc bufVals storeVals)) mempty mempty
 
     readAssumes
       = smt2Line "; read assumptions"

@@ -468,6 +468,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract = do
            , baseState = EmptyBase
            , txAccessList = mempty -- TODO: support unit test access lists???
            , allowFFI = ffiAllowed
+           , symbolic = True
            }
   let creator =
         initialContract (RuntimeCode (ConcreteRuntimeCode ""))

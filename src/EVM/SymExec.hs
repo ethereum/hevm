@@ -236,6 +236,7 @@ loadSymVM x callvalue cd create =
     , create = create
     , txAccessList = mempty
     , allowFFI = False
+    , symbolic = True
     })
 
 -- | Interpreter which explores all paths at branching points. Returns an
@@ -285,8 +286,9 @@ interpret fetcher maxIter askSmtIters heuristic vm =
         case q of
           PleaseAskSMT cond preconds continue -> do
             let
-              simpCond = Expr.simplify cond
-              simpProps = Expr.simplifyProps ((simpCond ./= Lit 0):preconds)
+              simpCond = Expr.concrKeccakExpr True cond
+              -- no concretiziation here, or we may lose information
+              simpProps = Expr.simplifyProps ((cond ./= Lit 0):preconds)
             case simpCond of
               -- is the condition concrete?
               Lit c ->
@@ -294,7 +296,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                 case (maxIterationsReached vm maxIter, isLoopHead heuristic vm) of
                   -- Yes. return a partial leaf
                   (Just _, Just True) ->
-                    pure $ Partial vm.keccakEqs (Traces (Zipper.toForest vm.traces) vm.env.contracts) $ MaxIterationsReached vm.state.pc vm.state.contract
+                    pure $ Partial [] (Traces (Zipper.toForest vm.traces) vm.env.contracts) $ MaxIterationsReached vm.state.pc vm.state.contract
                   -- No. keep executing
                   _ -> do
                     (r, vm') <- stToIO $ runStateT (continue (Case (c > 0))) vm
@@ -310,7 +312,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                     -- got us to this point and return a partial leaf for the other side
                     (r, vm') <- stToIO $ runStateT (continue (Case $ not n)) vm
                     a <- interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-                    pure $ ITE cond a (Partial vm.keccakEqs (Traces (Zipper.toForest vm.traces) vm.env.contracts) (MaxIterationsReached vm.state.pc vm.state.contract))
+                    pure $ ITE cond a (Partial [] (Traces (Zipper.toForest vm.traces) vm.env.contracts) (MaxIterationsReached vm.state.pc vm.state.contract))
                   -- we're in a loop and askSmtIters has been reached
                   (Just True, True, _) ->
                     -- ask the smt solver about the loop condition
@@ -455,12 +457,11 @@ verifyContract solvers theCode signature' concreteArgs opts maybepre maybepost =
 runExpr :: Stepper.Stepper RealWorld (Expr End)
 runExpr = do
   vm <- Stepper.runFully
-  let asserts = vm.keccakEqs <> vm.constraints
-      traces = Traces (Zipper.toForest vm.traces) vm.env.contracts
+  let traces = Traces (Zipper.toForest vm.traces) vm.env.contracts
   pure $ case vm.result of
-    Just (VMSuccess buf) -> Success asserts traces buf (fmap toEContract vm.env.contracts)
-    Just (VMFailure e) -> Failure asserts traces e
-    Just (Unfinished p) -> Partial asserts traces p
+    Just (VMSuccess buf) -> Success vm.constraints traces buf (fmap toEContract vm.env.contracts)
+    Just (VMFailure e) -> Failure vm.constraints traces e
+    Just (Unfinished p) -> Partial vm.constraints traces p
     _ -> internalError "vm in intermediate state after call to runFully"
 
 toEContract :: Contract -> Expr EContract
@@ -572,6 +573,7 @@ verify solvers opts preState maybepost = do
     Just post -> do
       let
         -- Filter out any leaves that can be statically shown to be safe
+        -- Note: evalProp will always simplify, even though we conditionally simplified above
         canViolate = flip filter flattened $
           \leaf -> case Expr.evalProp (post preState leaf) of
             PBool True -> False
@@ -641,7 +643,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
       let bytecode = if BS.null bs then BS.pack [0] else bs
       prestate <- stToIO $ abstractVM calldata bytecode Nothing False
       expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
-      let simpl = if opts.simp then (Expr.simplify expr) else expr
+      let simpl = if opts.simp then (Expr.simplify) expr else expr
       pure $ flattenExpr simpl
 
 
@@ -837,7 +839,7 @@ formatCex cd m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
     -- it for branches that do not refer to calldata at all (e.g. the top level
     -- callvalue check inserted by solidity in contracts that don't have any
     -- payable functions).
-    cd' = prettyBuf . Expr.simplify . defaultSymbolicValues $ subModel m cd
+    cd' = prettyBuf . (Expr.concrKeccakExpr True) . defaultSymbolicValues $ subModel m cd
 
     storeCex :: [Text]
     storeCex

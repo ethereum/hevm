@@ -154,13 +154,13 @@ makeVm o = do
     , cache = Cache mempty mempty
     , burned = 0
     , constraints = snd o.calldata
-    , keccakEqs = mempty
     , iterations = mempty
     , config = RuntimeConfig
       { allowFFI = o.allowFFI
       , overrideCaller = Nothing
       , baseState = o.baseState
       }
+    , symbolic = o.symbolic
     }
 
 -- | Initialize an abstract contract with unknown code
@@ -384,12 +384,9 @@ exec1 = do
                   burn (g_sha3 + g_sha3word * ceilDiv (unsafeInto xSize) 32) $
                     accessMemoryRange xOffset xSize $ do
                       hash <- readMemory xOffset' xSize' >>= \case
-                        ConcreteBuf bs -> do
-                          let hash' = keccak' bs
-                          eqs <- use #keccakEqs
-                          assign #keccakEqs $
-                            PEq (Lit hash') (Keccak (ConcreteBuf bs)):eqs
-                          pure $ Lit hash'
+                        orig@(ConcreteBuf bs) ->
+                          if vm.symbolic then pure $ Keccak orig
+                                         else pure $ Lit (keccak' bs)
                         buf -> pure $ Keccak buf
                       next
                       assign (#state % #stack) (hash : xs)
@@ -670,7 +667,7 @@ exec1 = do
                 else do
                   let
                     original =
-                      case Expr.simplify $ SLoad x this.origStorage of
+                      case Expr.concrKeccakExpr True $ SLoad x this.origStorage of
                         Lit v -> v
                         _ -> 0
                     storage_cost =
@@ -1263,10 +1260,11 @@ branch cond continue = do
   query $ PleaseAskSMT cond pathconds (choosePath loc)
   where
     condSimp = Expr.simplify cond
+    condSimpConc = Expr.concrKeccakExpr True condSimp
     choosePath :: CodeLocation -> BranchCondition -> EVM s ()
     choosePath loc (Case v) = do
       assign #result Nothing
-      pushTo #constraints $ if v then Expr.evalProp (condSimp ./= Lit 0) else Expr.evalProp (condSimp .== Lit 0)
+      pushTo #constraints $ if v then Expr.evalProp (condSimpConc ./= Lit 0) else Expr.evalProp (condSimpConc .== Lit 0)
       (iteration, _) <- use (#iterations % at loc % non (0,[]))
       stack <- use (#state % #stack)
       assign (#cache % #path % at (loc, iteration)) (Just v)

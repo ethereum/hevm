@@ -411,13 +411,14 @@ tests = testGroup "hevm"
     , testProperty "simpProp-equivalence-sym" $ \(LitProp p) -> ioProperty $ do
         let simplified = pand (Expr.simplifyProps [p])
         checkEquivProp simplified p
-    -- This would need to be a fuzz test I think. The SMT encoding of Keccak is not precise
-    -- enough for this to succeed
-    , ignoreTest $ testProperty "storage-slot-simp-property" $ \(StorageExp s) -> ioProperty $ do
-        T.writeFile "unsimplified.expr" $ formatExpr s
-        let simplified = Expr.simplify s
-        T.writeFile "simplified.expr" $ formatExpr simplified
-        checkEquiv simplified s
+    , testProperty "storage-slot-simp-property" $ \(StorageExp s) -> ioProperty $ do
+        -- we have to run `Expr.structureArraySlots` on the unsimplified system, or
+        -- we'd need some form of minimal simplifier for things to work out. As long as
+        -- we trust the structureArraySlots, this is fine, as that function is standalone,
+        -- and quite minimal
+        let s2 = Expr.structureArraySlots s
+        let simplified = Expr.simplify s2
+        checkEquiv simplified s2
     ]
   , testGroup "simpProp-concrete-tests" [
       testCase "simpProp-concrete-trues" $ do
@@ -937,6 +938,9 @@ tests = testGroup "hevm"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Constantinople" $ do
         let testFile = "test/contracts/pass/constantinople.sol"
+        runSolidityTest testFile ".*" >>= assertEqual "test result" True
+    , testCase "ConstantinopleMin" $ do
+        let testFile = "test/contracts/pass/constantinople_min.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Prove-Tests-Pass" $ do
         let testFile = "test/contracts/pass/dsProvePass.sol"
@@ -2403,7 +2407,7 @@ tests = testGroup "hevm"
                 }
               }
             |]
-          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "kecc(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "kecc(uint256)" [AbiUIntType 256])) [] debugVeriOpts
           putStrLn $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         testCase "keccak concrete and sym injectivity" $ do

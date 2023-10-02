@@ -586,6 +586,11 @@ readStorage' loc store = case readStorage loc store of
 -- no explicit writes to the requested slot. This makes implementing rpc
 -- storage lookups much easier. If the store is backed by an AbstractStore we
 -- always return a symbolic value.
+--
+-- TODO: maybe we can rewrite
+--     Keccak (ConcreteBuf bs) -> when len(bs) = 64
+--     into
+--     MappingSlot id key
 readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
 readStorage w st = go (simplify w) st
   where
@@ -669,6 +674,7 @@ pattern Keccak64Bytes :: Expr EWord
 pattern Keccak64Bytes <- Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) _ (ConcreteBuf ""))
 
 -- storage slots for arrays are determined by (keccak(bytes32(id)) + offset)
+-- note that `normArgs` puts the Lit as the 2nd argument to `Add`
 pattern ArraySlotWithOffset :: ByteString -> Expr EWord -> Expr EWord
 pattern ArraySlotWithOffset id offset = Add (Keccak (ConcreteBuf id)) offset
 
@@ -848,10 +854,21 @@ simplify e = if (mapExpr go e == e)
     -- (a+(c-b))
     -- In other words, subtraction is just adding a much larger number.
     --    So 3-1 mod 6 = 3+(6-1) mod 6 = 3+5 mod 6 = 5+3 mod 6 = 2
-    go (Sub (Sub orig (Lit x)) (Lit y)) = Sub orig (Lit (y+x))
-    go (Sub (Add orig (Lit x)) (Lit y)) = Sub orig (Lit (y-x))
-    go (Add (Add orig (Lit x)) (Lit y)) = Add orig (Lit (y+x))
-    go (Add (Sub orig (Lit x)) (Lit y)) = Add orig (Lit (y-x))
+    -- Notice: all Add is normalized, hence the 1st argument is
+    --    expected to be Lit, if any. Hence `orig` needs to be the
+    --    2nd argument for Add. However, Sub is not normalized
+    go (Add (Lit x) (Add (Lit y) orig)) = add (Lit (x+y)) orig
+    -- add + sub NOTE: every combination of Sub is needed (2)
+    go (Add (Lit x) (Sub (Lit y) orig)) = sub (Lit (x+y)) orig
+    go (Add (Lit x) (Sub orig (Lit y))) = add (Lit (x-y)) orig
+    -- sub + sub NOTE: every combination of Sub is needed (2x2)
+    go (Sub (Lit x) (Sub (Lit y) orig)) = add (Lit (x-y)) orig
+    go (Sub (Lit x) (Sub orig (Lit y))) = sub (Lit (x+y)) orig
+    go (Sub (Sub (Lit x) orig) (Lit y)) = sub (Lit (x-y)) orig
+    go (Sub (Sub orig (Lit x)) (Lit y)) = sub orig (Lit (x+y))
+    -- sub + add NOTE: every combination of Sub is needed (2)
+    go (Sub (Lit x) (Add (Lit y) orig)) = sub (Lit (x-y)) orig
+    go (Sub (Add (Lit x) orig) (Lit y) ) = add (Lit (x-y)) orig
 
     -- redundant add / sub
     go (Sub (Add a b) c)
@@ -1291,3 +1308,31 @@ constFoldProp ps = oneRun ps (ConstState mempty True)
           put $ s{canBeSat=(s2.canBeSat && (v1 || v2))}
         PBool False -> put $ ConstState {canBeSat=False, values=mempty}
         _ -> pure ()
+
+
+concrKeccakExpr :: Bool -> Expr a -> Expr a
+concrKeccakExpr s o = final
+  where
+    conc = if s then simplify o else o
+    conc2 = mapExpr concrKeccakOnePass conc
+    final = if conc2 == o then conc2
+                          else concrKeccakExpr s conc2
+
+concrKeccaks :: Bool -> [Prop] -> [Prop]
+concrKeccaks s o = final
+  where
+    conc = map concrKeccak o
+    conc2 = if s then simplifyProps conc else conc
+    final = if conc2 == o then conc2
+                          else concrKeccaks s conc2
+
+concrKeccak :: Prop -> Prop
+concrKeccak o = final
+  where
+    conc = mapProp concrKeccakOnePass o
+    final = if conc == o then conc
+                          else concrKeccak conc
+
+concrKeccakOnePass :: Expr a -> Expr a
+concrKeccakOnePass (Keccak (ConcreteBuf bs)) = Lit (keccak' bs)
+concrKeccakOnePass x = x
