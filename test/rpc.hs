@@ -145,6 +145,7 @@ vmFromRpc blockNum calldata callvalue caller address = do
     , baseState      = EmptyBase
     , txAccessList   = mempty
     , allowFFI       = False
+    , symbolic       = False
     }) <&> set (#cache % #fetched % at address) (Just ctrct)
 
 testRpc :: Text
