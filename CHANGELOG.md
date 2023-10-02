@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `test` now falls back to displaying an unecoded bytestring for calldata when the model returned by the solver has a different length the length of the arguments in the test signature.
 - we now generate correct counterexamples for branches where only a subset of input variables are referenced by the path conditions
 - `vm.prank` now works correctly when passed a symbolic address
+- storage layout information will now be parsed from the output of `forge build` if it is available
 
 ## Changed
 
