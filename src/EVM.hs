@@ -1839,28 +1839,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
         touchAccount newAddr
       -- are we overflowing the nonce
       False -> burn xGas $ do
-        -- solidity implements constructor args by appending them to the end of
-        -- the initcode. we support this internally by treating initCode as a
-        -- concrete region (initCode) followed by a potentially symbolic region
-        -- (arguments).
-        --
-        -- when constructing a contract that has symbolic construcor args, we
-        -- need to apply some heuristics to convert the (unstructured) initcode
-        -- in memory into this structured representation. The (unsound, bad,
-        -- hacky) way that we do this, is by: looking for the first potentially
-        -- symbolic byte in the input buffer and then splitting it there into code / data.
-        --
-        -- TODO: what happens if we pass a concrete arg to a constructor followed by a symbolic part?
-        -- TODO: would life be easier if model initCode as `Vector (Expr Byte)`?
-        let contract' = case initCode of
-              ConcreteBuf b -> Just (InitCode b mempty)
-              _ -> do
-                prefix <- Expr.concretePrefix initCode
-                -- unsafeInto: findIndex will always be positive
-                let sym = Expr.drop (unsafeInto (V.length prefix)) initCode
-                conc <- mapM maybeLitByte prefix
-                pure $ InitCode (BS.pack $ V.toList conc) sym
-        case contract' of
+        case parseInitCode initCode of
           Nothing ->
             partial $ UnexpectedSymbolicArg vm0.state.pc "initcode must have a concrete prefix" []
           Just c -> do
@@ -1910,6 +1889,28 @@ create self this xSize xGas xValue xs newAddr initCode = do
               , caller       = self
               , gas          = xGas
               }
+
+-- | Parses a raw Buf into an InitCode
+--
+-- solidity implements constructor args by appending them to the end of
+-- the initcode. we support this internally by treating initCode as a
+-- concrete region (initCode) followed by a potentially symbolic region
+-- (arguments).
+--
+-- when constructing a contract that has symbolic construcor args, we
+-- need to apply some heuristics to convert the (unstructured) initcode
+-- in memory into this structured representation. The (unsound, bad,
+-- hacky) way that we do this, is by: looking for the first potentially
+-- symbolic byte in the input buffer and then splitting it there into code / data.
+parseInitCode :: Expr Buf -> Maybe ContractCode
+parseInitCode (ConcreteBuf b) = Just (InitCode b mempty)
+parseInitCode buf = if V.null conc
+                    then Nothing
+                    else Just $ InitCode (BS.pack $ V.toList conc) sym
+  where
+    conc = Expr.concretePrefix buf
+    -- unsafeInto: findIndex will always be positive
+    sym = Expr.drop (unsafeInto (V.length conc)) buf
 
 -- | Replace a contract's code, like when CREATE returns
 -- from the constructor code.
@@ -2319,13 +2320,29 @@ use' f = do
   pure (f vm)
 
 checkJump :: Int -> [Expr EWord] -> EVM s ()
-checkJump x xs = do
+checkJump x xs = noJumpIntoInitData x $ do
   vm <- get
   case isValidJumpDest vm x of
     True -> do
       #state % #stack .= xs
       #state % #pc .= x
     False -> vmError BadJumpDestination
+
+-- fails with partial if we're trying to jump into the symbolic region of an `InitCode`
+noJumpIntoInitData :: Int -> EVM s () -> EVM s ()
+noJumpIntoInitData idx cont = do
+  vm <- get
+  case vm.state.code of
+    -- init code is totally concrete, so we don't return partial if we're
+    -- jumping beyond the range of `ops`
+    InitCode _ (ConcreteBuf "") -> cont
+    -- init code has a symbolic region, so check if we're trying to jump into
+    -- the symbolic region and return partial if we are
+    InitCode ops _ -> if idx > BS.length ops
+                      then partial $ JumpIntoSymbolicCode vm.state.pc idx
+                      else cont
+    -- we're not executing init code, so nothing to check here
+    _ -> cont
 
 isValidJumpDest :: VM s -> Int -> Bool
 isValidJumpDest vm x = let

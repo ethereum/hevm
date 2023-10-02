@@ -24,7 +24,7 @@ import Data.Vector.Mutable (MVector)
 import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
-import Witch (unsafeInto, into, tryFrom, tryInto)
+import Witch (unsafeInto, into, tryFrom)
 import Data.Containers.ListUtils (nubOrd)
 import Control.Monad.State
 
@@ -455,38 +455,35 @@ minLength bufEnv = go 0
       go l b
 
 -- returns the largest prefix that is guaranteed to be concrete (if one exists)
-concretePrefix :: Expr Buf -> Maybe (Vector (Expr Byte))
-concretePrefix b = let v = mkvec in case V.length v of
-  0 -> Nothing
-  _ -> Just v
+-- partial: will hard error if we encounter an input buf with a concrete size > 500mb
+-- partial: will hard error if the prefix is > 500mb
+concretePrefix :: Expr Buf -> Vector Word8
+concretePrefix b = V.create $ do
+    v <- MV.new (fromMaybe 1024 inputLen)
+    (filled, v') <- go 0 v
+    pure $ MV.take filled v'
   where
 
-    -- attempts to compute a concrete length for the input buffer buffers with
-    -- a concrete length that is too large to be represented in an Int get `maxBound :: Int` assigned
-    -- TODO: this is maybe sketchy, but it's still worth trying with these
-    -- buffers since the concrete prefix might be a lot smaller?
+    -- if our prefix is > 500mb then we have other issues and should just bail...
+    maxIdx :: Num i => i
+    maxIdx = 500 * (10 ^ (6 :: Int))
+
+    -- attempts to compute a concrete length for the input buffer
     inputLen :: Maybe Int
     inputLen = case bufLength b of
-      Lit s -> case tryInto @Int s of
-        Right s' -> Just s'
-        Left _ -> Just (maxBound :: Int)
+      Lit s -> if s > maxIdx
+        then internalError "concretePrefix: input buffer size exceeds 500mb"
+        -- unafeInto: s is <= 500,000,000
+        else Just (unsafeInto s)
       _ -> Nothing
-
-    -- builds the vector representing the concrete prefix.
-    -- this is done over a mutable vector that is then frozen to avoid excessive allocation.
-    -- if we know a concrete size for the input buffer, then we allocate that ahead of time, and then shrink at the end.
-    -- if we don't know a concrete size for the input, then we allocate 1kb, and double the size each time we need to grow.
-    mkvec :: Vector (Expr Byte)
-    mkvec = V.create $ do
-      v <- MV.new (fromMaybe 1024 inputLen)
-      (filled, v') <- go 0 v
-      pure $ MV.take filled v'
 
     -- recursively reads succesive bytes from `b` until we reach a symbolic
     -- byte returns the larged index read from and a reference to the mutable
     -- vec (might not be the same as the input because of the call to grow)
-    go :: forall s . Int -> MVector s (Expr Byte) -> ST s (Int, MVector s (Expr Byte))
+    go :: forall s . Int -> MVector s Word8 -> ST s (Int, MVector s Word8)
     go i v
+      -- if the prefix is very large then bail
+      | i >= maxIdx = internalError "concretePrefix: prefix size exceeds 500mb"
       -- if the input buffer has a concrete size, then don't read past the end
       | Just mr <- inputLen, i >= mr = pure (i, v)
       -- double the size of the vector if we've reached the end
@@ -496,7 +493,7 @@ concretePrefix b = let v = mkvec in case V.length v of
       -- read the byte at `i` in `b` into `v` if it is concrete, or halt if we've reached a symbolic byte
       -- unsafeInto: i will always be positive
       | otherwise = case readByte (Lit . unsafeInto $ i) b of
-          byte@(LitByte _) -> do
+          LitByte byte -> do
             MV.write v i byte
             go (i+1) v
           _ -> pure (i, v)

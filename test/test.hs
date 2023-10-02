@@ -26,7 +26,7 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Typeable
-import Data.Vector qualified as Vector
+import Data.Vector qualified as V
 import Data.Word (Word8)
 import GHC.Conc (getNumProcessors)
 import System.Directory
@@ -49,6 +49,7 @@ import Optics.Operators.Unsafe
 
 import EVM hiding (choose)
 import EVM.ABI
+import EVM.Assembler
 import EVM.Exec
 import EVM.Expr qualified as Expr
 import EVM.Fetch qualified as Fetch
@@ -579,20 +580,20 @@ tests = testGroup "hevm"
       \y -> ioProperty $ do
           Just encoded <- runStatements [i| x = abi.encode(a);|]
             [y] AbiBytesDynamicType
-          let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
-                AbiTuple (Vector.toList -> [e]) -> e
+          let solidityEncoded = case decodeAbiValue (AbiTupleType $ V.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
+                AbiTuple (V.toList -> [e]) -> e
                 _ -> internalError "AbiTuple expected"
-          let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [y])
+          let hevmEncoded = encodeAbiValue (AbiTuple $ V.fromList [y])
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
 
     , testProperty "abi encoding vs. solidity (2 args)" $ withMaxSuccess 20 $ forAll (arbitrary >>= bothM genAbiValue) $
       \(x', y') -> ioProperty $ do
           Just encoded <- runStatements [i| x = abi.encode(a, b);|]
             [x', y'] AbiBytesDynamicType
-          let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
-                AbiTuple (Vector.toList -> [e]) -> e
+          let solidityEncoded = case decodeAbiValue (AbiTupleType $ V.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
+                AbiTuple (V.toList -> [e]) -> e
                 _ -> internalError "AbiTuple expected"
-          let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [x',y'])
+          let hevmEncoded = encodeAbiValue (AbiTuple $ V.fromList [x',y'])
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
 
     -- we need a separate test for this because the type of a function is "function() external" in solidity but just "function" in the abi:
@@ -602,11 +603,11 @@ tests = testGroup "hevm"
               function foo(function() external a) public pure returns (bytes memory x) {
                 x = abi.encode(a);
               }
-            |] (abiMethod "foo(function)" (AbiTuple (Vector.singleton y)))
-          let solidityEncoded = case decodeAbiValue (AbiTupleType $ Vector.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
-                AbiTuple (Vector.toList -> [e]) -> e
+            |] (abiMethod "foo(function)" (AbiTuple (V.singleton y)))
+          let solidityEncoded = case decodeAbiValue (AbiTupleType $ V.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
+                AbiTuple (V.toList -> [e]) -> e
                 _ -> internalError "AbiTuple expected"
-          let hevmEncoded = encodeAbiValue (AbiTuple $ Vector.fromList [y])
+          let hevmEncoded = encodeAbiValue (AbiTuple $ V.fromList [y])
           assertEqual "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
     ]
 
@@ -913,7 +914,7 @@ tests = testGroup "hevm"
         assertEqual "unexpected cex value" a 44
         putStrLn "expected counterexample found"
   ]
-  , testGroup "Symbolic-Exec-General"
+  , testGroup "Symbolic-Constructor-Args"
     -- this produced some hard to debug failures. keeping it around since it seemed to exercise the contract creation code in interesting ways...
     [ testCase "multiple-symbolic-constructor-calls" $ do
         Just initCode <- solidity "C"
@@ -940,6 +941,62 @@ tests = testGroup "hevm"
           initVM <- stToIO $ abstractVM calldata initCode Nothing True
           expr <- Expr.simplify <$> interpret (Fetch.oracle s Nothing) Nothing 1 StackBased initVM runExpr
           assertBool "unexptected partial execution" (not $ Expr.containsNode isPartial expr)
+    , testCase "mixed-concrete-symbolic-args" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract B {
+                uint public x;
+                uint public y;
+                constructor (uint i, uint j)  {
+                  x = i;
+                  y = j;
+                }
+
+            }
+
+            contract C {
+                function foo(uint i) public {
+                  B b = new B(10, i);
+                  assert(b.x() == 10);
+                  assert(b.y() == i);
+                }
+            }
+          |]
+        Right expr <- reachableUserAsserts c (Just $ Sig "foo(uint256)" [AbiUIntType 256])
+        assertBool "unexptected partial execution" (not $ Expr.containsNode isPartial expr)
+    , testCase "jump-into-symbolic-region" $ do
+        let
+          -- our initCode just jumps directly to the end
+          code = BS.pack . mapMaybe maybeLitByte $ V.toList $ assemble
+              [ OpPush (Lit 0x85)
+              , OpJump
+              , OpPush (Lit 1)
+              , OpPush (Lit 1)
+              , OpPush (Lit 1)
+              , OpJumpdest
+              ]
+          -- we write a symbolic word to the middle, so the jump above should
+          -- fail since the target is not in the concrete region
+          initCode = (WriteWord (Lit 0x43) (Var "HI") (ConcreteBuf code), [])
+
+          -- we pass in the above initCode buffer as calldata, and then copy
+          -- it into memory before calling Create
+          runtimecode = RuntimeCode (SymbolicRuntimeCode $ assemble
+              [ OpPush (Lit 0x85)
+              , OpPush (Lit 0x0)
+              , OpPush (Lit 0x0)
+              , OpCalldatacopy
+              , OpPush (Lit 0x85)
+              , OpPush (Lit 0x0)
+              , OpPush (Lit 0x0)
+              , OpCreate
+              ])
+        withSolvers Z3 1 Nothing $ \s -> do
+          vm <- stToIO $ loadSymVM runtimecode (Lit 0) initCode False
+          expr <- Expr.simplify <$> interpret (Fetch.oracle s Nothing) Nothing 1 StackBased vm runExpr
+          case expr of
+            Partial _ _ (JumpIntoSymbolicCode _ _) -> assertBool "" True
+            _ -> assertBool "did not encounter expected partial node" False
     ]
   , testGroup "Dapp-Tests"
     [ testCase "Trivial-Pass" $ do
@@ -1574,13 +1631,12 @@ tests = testGroup "hevm"
         Just c <- solcRuntime "C"
             [i|
             contract C {
-              function fun(uint160 a) external {
-                  int256 j = int256(uint256(a)) + 1;
-                  assert(false);
+              function fun(int256 a) external returns (int256) {
+                  return a + a;
               }
             }
             |]
-        (_, [Cex _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint160)" [AbiUIntType 160])) [] defaultVeriOpts
+        (_, [Cex (_, _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x11] c (Just (Sig "fun(int256)" [AbiIntType 256])) [] defaultVeriOpts
         putStrLn "expected cex discovered"
       ,
      testCase "opcode-signextend-neg" $ do
@@ -3162,7 +3218,7 @@ runStatements stmts args t = do
     function foo(${params}) public pure returns (${abiTypeSolidity t} ${defaultDataLocation t} x) {
       ${stmts}
     }
-  |] (abiMethod s (AbiTuple $ Vector.fromList args))
+  |] (abiMethod s (AbiTuple $ V.fromList args))
 
 getStaticAbiArgs :: Int -> VM s -> [Expr EWord]
 getStaticAbiArgs n vm =
@@ -3172,10 +3228,10 @@ getStaticAbiArgs n vm =
 -- includes shaving off 4 byte function sig
 decodeAbiValues :: [AbiType] -> ByteString -> [AbiValue]
 decodeAbiValues types bs =
-  let xy = case decodeAbiValue (AbiTupleType $ Vector.fromList types) (BS.fromStrict (BS.drop 4 bs)) of
+  let xy = case decodeAbiValue (AbiTupleType $ V.fromList types) (BS.fromStrict (BS.drop 4 bs)) of
         AbiTuple xy' -> xy'
         _ -> internalError "AbiTuple expected"
-  in Vector.toList xy
+  in V.toList xy
 
 newtype Bytes = Bytes ByteString
   deriving Eq
@@ -3253,8 +3309,8 @@ instance Arbitrary (RuntimeCode) where
     , fmap SymbolicRuntimeCode arbitrary
     ]
 
-instance Arbitrary (Vector.Vector (Expr Byte)) where
-  arbitrary = fmap Vector.fromList (listOf1 arbitrary)
+instance Arbitrary (V.Vector (Expr Byte)) where
+  arbitrary = fmap V.fromList (listOf1 arbitrary)
 
 instance Arbitrary (Expr EContract) where
   arbitrary = sized genEContract
