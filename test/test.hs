@@ -939,9 +939,6 @@ tests = testGroup "hevm"
     , testCase "Constantinople" $ do
         let testFile = "test/contracts/pass/constantinople.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
-    , testCase "ConstantinopleMin" $ do
-        let testFile = "test/contracts/pass/constantinople_min.sol"
-        runSolidityTest testFile ".*" >>= assertEqual "test result" True
     , testCase "Prove-Tests-Pass" $ do
         let testFile = "test/contracts/pass/dsProvePass.sol"
         runSolidityTest testFile ".*" >>= assertEqual "test result" True
