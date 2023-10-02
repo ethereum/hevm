@@ -788,8 +788,11 @@ simplify e = if (mapExpr go e == e)
         -- n+sz of ConcreteBuf will be used by CopySlice
         (WriteWord wOff value (ConcreteBuf buf)) dst)
           -- Let's not deal with overflow
-          | n+sz >= n && n+sz >= sz = (CopySlice srcOff dstOff size
-              (WriteWord wOff value (ConcreteBuf simplifiedBuf)) dst)
+          | n+sz >= n
+          , n+sz >= sz
+          , n+sz <= maxBytes
+            = (CopySlice srcOff dstOff size
+                (WriteWord wOff value (ConcreteBuf simplifiedBuf)) dst)
           | otherwise = orig
             where simplifiedBuf = BS.take (unsafeInto (n+sz)) buf
     go (CopySlice a b c d f) = copySlice a b c d f
