@@ -51,7 +51,7 @@ combine lst = combine' lst []
       combine' xs (xcomb:acc)
 
 minProp :: Expr EWord -> Prop
-minProp k@(Keccak _) = PGT k (Lit 50)
+minProp k@(Keccak _) = PGT k (Lit 256)
 minProp _ = internalError "expected keccak expression"
 
 injProp :: (Expr EWord, Expr EWord) -> Prop
