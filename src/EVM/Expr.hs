@@ -1003,7 +1003,21 @@ evalProp prop =
     go (PNeg (PNeg a)) = a
 
     -- solc specific stuff
+
+    -- iszero(a) -> (a == 0)
+    -- iszero(iszero(a))) -> ~(a == 0) -> a > 0
+    -- iszero(iszero(a)) == 0 -> ~~(a == 0) -> a == 0
+    -- ~(iszero(iszero(a)) == 0) -> ~~~(a == 0) -> ~(a == 0) -> a > 0
     go (PNeg (PEq (IsZero (IsZero a)) (Lit 0))) = PGT a (Lit 0)
+
+    -- iszero(a) -> (a == 0)
+    -- iszero(a) == 0 -> ~(a == 0)
+    -- ~(iszero(a) == 0) -> ~~(a == 0) -> a == 0
+    go (PNeg (PEq (IsZero a) (Lit 0))) = PEq a (Lit 0)
+
+    -- a < b == 0 -> ~(a < b)
+    -- ~(a < b == 0) -> ~~(a < b) -> a < b
+    go (PNeg (PEq (LT a b) (Lit 0x0))) = PLT a b
 
     -- And/Or
     go (PAnd (PBool l) (PBool r)) = PBool (l && r)
