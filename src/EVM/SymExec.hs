@@ -473,9 +473,9 @@ flattenExpr = go []
     go :: [Prop] -> Expr End -> [Expr End]
     go pcs = \case
       ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
-      Success ps trace msg store -> [Success (ps <> pcs) trace msg store]
-      Failure ps trace e -> [Failure (ps <> pcs) trace e]
-      Partial ps trace p -> [Partial (ps <> pcs) trace p]
+      Success ps trace msg store -> [Success (nubOrd $ ps <> pcs) trace msg store]
+      Failure ps trace e -> [Failure (nubOrd $ ps <> pcs) trace e]
+      Partial ps trace p -> [Partial (nubOrd $ ps <> pcs) trace p]
       GVar _ -> internalError "cannot flatten an Expr containing a GVar"
 
 -- | Strips unreachable branches from a given expr
