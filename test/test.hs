@@ -3194,7 +3194,7 @@ instance Arbitrary Addr where
 instance Arbitrary (Expr EAddr) where
   arbitrary = oneof
     [ fmap LitAddr arbitrary
-    , fmap SymAddr genName
+    , fmap SymAddr (genName "addr")
     ]
 
 instance Arbitrary (Expr Storage) where
@@ -3442,9 +3442,9 @@ genLit bound = do
 genNat :: Gen Int
 genNat = fmap unsafeInto (arbitrary :: Gen Natural)
 
-genName :: Gen Text
+genName :: String -> Gen Text
 -- In order not to generate SMT reserved words, we prepend with "esc_"
-genName = fmap (T.pack . ("esc_" <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z'] <> ['A'..'Z'])
+genName ty = fmap (T.pack . (("esc_" <> ty <> "_") <> )) $ listOf1 (oneof . (fmap pure) $ ['a'..'z'] <> ['A'..'Z'])
 
 genEnd :: Int -> Gen (Expr End)
 genEnd 0 = oneof
@@ -3487,7 +3487,7 @@ genWord litFreq 0 = frequency
       --, liftM2 SelfBalance arbitrary arbitrary
       --, liftM2 Gas arbitrary arbitrary
       , fmap Lit arbitrary
-      , fmap Var genName
+      , fmap Var (genName "word")
       ]
     )
   ]
@@ -3657,7 +3657,7 @@ maybeBoundedLit bound = do
 
 genBuf :: W256 -> Int -> Gen (Expr Buf)
 genBuf _ 0 = oneof
-  [ fmap AbstractBuf genName
+  [ fmap AbstractBuf (genName "buf")
   , fmap ConcreteBuf arbitrary
   ]
 genBuf bound sz = oneof
