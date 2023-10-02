@@ -238,7 +238,7 @@ equivalence cmd = do
         T.putStrLn . T.unlines $
           [ "Not equivalent. The following inputs result in differing behaviours:"
           , "" , "-----", ""
-          ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap (formatCex (AbstractBuf "txdata")) cexs)
+          ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap (formatCex (AbstractBuf "txdata") Nothing) cexs)
         exitFailure
 
 getSolver :: Command Options.Unwrapped -> IO Solver
@@ -322,7 +322,7 @@ assert cmd = do
                  [ ""
                  , "Discovered the following counterexamples:"
                  , ""
-                 ] <> fmap (formatCex (fst calldata)) cexs
+                 ] <> fmap (formatCex (fst calldata) Nothing) cexs
             unknowns
               | null timeouts = []
               | otherwise =
