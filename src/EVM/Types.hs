@@ -848,6 +848,7 @@ instance Monoid Traces where
 -- | A specification for an initial VM state
 data VMOpts = VMOpts
   { contract :: Contract
+  , otherContracts :: [(Expr EAddr, Contract)]
   , calldata :: (Expr Buf, [Prop])
   , baseState :: BaseState
   , value :: Expr EWord
