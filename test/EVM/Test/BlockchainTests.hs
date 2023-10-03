@@ -362,29 +362,30 @@ fromBlockchainCase' block tx preState postState =
       (_, Nothing) -> Left (if isCreate then FailedCreate else InvalidTx)
       (Just origin, Just checkState) -> Right $ Case
         (VMOpts
-         { contract      = EVM.initialContract theCode
-         , calldata      = (cd, [])
-         , value         = Lit tx.value
-         , address       = toAddr
-         , caller        = LitAddr origin
-         , baseState     = EmptyBase
-         , origin        = LitAddr origin
-         , gas           = tx.gasLimit - txGasCost feeSchedule tx
-         , baseFee       = block.baseFee
-         , priorityFee   = priorityFee tx block.baseFee
-         , gaslimit      = tx.gasLimit
-         , number        = block.number
-         , timestamp     = Lit block.timestamp
-         , coinbase      = LitAddr block.coinbase
-         , prevRandao    = block.mixHash
-         , maxCodeSize   = maxCodeSize
-         , blockGaslimit = block.gasLimit
-         , gasprice      = effectiveGasPrice
-         , schedule      = feeSchedule
-         , chainId       = 1
-         , create        = isCreate
-         , txAccessList  = Map.mapKeys LitAddr (txAccessMap tx)
-         , allowFFI      = False
+         { contract       = EVM.initialContract theCode
+         , otherContracts = []
+         , calldata       = (cd, [])
+         , value          = Lit tx.value
+         , address        = toAddr
+         , caller         = LitAddr origin
+         , baseState      = EmptyBase
+         , origin         = LitAddr origin
+         , gas            = tx.gasLimit - txGasCost feeSchedule tx
+         , baseFee        = block.baseFee
+         , priorityFee    = priorityFee tx block.baseFee
+         , gaslimit       = tx.gasLimit
+         , number         = block.number
+         , timestamp      = Lit block.timestamp
+         , coinbase       = LitAddr block.coinbase
+         , prevRandao     = block.mixHash
+         , maxCodeSize    = maxCodeSize
+         , blockGaslimit  = block.gasLimit
+         , gasprice       = effectiveGasPrice
+         , schedule       = feeSchedule
+         , chainId        = 1
+         , create         = isCreate
+         , txAccessList   = Map.mapKeys LitAddr (txAccessMap tx)
+         , allowFFI       = False
          })
         checkState
         postState

@@ -89,6 +89,8 @@ data Command w
       , askSmtIterations :: w ::: Integer         <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
+      , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
+      , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: ByteString       <?> "Bytecode of the first program"
@@ -103,6 +105,8 @@ data Command w
       , smtdebug      :: w ::: Bool             <?> "Print smt queries sent to the solver"
       , askSmtIterations :: w ::: Integer       <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
+      , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
+      , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
@@ -134,6 +138,7 @@ data Command w
       { root        :: w ::: Maybe String               <?> "Path to  project root directory (default: . )"
       , projectType   :: w ::: Maybe ProjectType        <?> "Is this a Foundry or DappTools project (default: Foundry)"
       , rpc           :: w ::: Maybe URL                <?> "Fetch state from a remote node"
+      , number        :: w ::: Maybe W256               <?> "Block: number"
       , verbose       :: w ::: Maybe Int                <?> "Append call trace: {1} failures {2} all"
       , coverage      :: w ::: Bool                     <?> "Coverage analysis"
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
@@ -143,6 +148,8 @@ data Command w
       , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in seconds (default: 300)"
       , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point"
       , loopDetectionHeuristic :: w ::: LoopHeuristic   <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
+      , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
+      , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
       , askSmtIterations :: w ::: Integer               <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       }
   | Version
@@ -213,6 +220,7 @@ equivalence cmd = do
                           , maxIter = cmd.maxIterations
                           , askSmtIters = cmd.askSmtIterations
                           , loopHeuristic = cmd.loopDetectionHeuristic
+                          , abstRefineConfig = AbstRefineConfig cmd.abstractArithmetic cmd.abstractMemory
                           , rpcInfo = Nothing
                           }
   calldata <- buildCalldata cmd
@@ -292,13 +300,13 @@ assert cmd = do
   let solverCount = fromMaybe cores cmd.numSolvers
   solver <- getSolver cmd
   withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
-    let opts = VeriOpts {
-      simp = True,
-      debug = cmd.smtdebug,
-      maxIter = cmd.maxIterations,
-      askSmtIters = cmd.askSmtIterations,
-      loopHeuristic = cmd.loopDetectionHeuristic,
-      rpcInfo = rpcinfo
+    let opts = VeriOpts { simp = True
+                        , debug = cmd.smtdebug
+                        , maxIter = cmd.maxIterations
+                        , askSmtIters = cmd.askSmtIterations
+                        , loopHeuristic = cmd.loopDetectionHeuristic
+                        , abstRefineConfig = AbstRefineConfig cmd.abstractArithmetic cmd.abstractMemory
+                        , rpcInfo = rpcinfo
     }
     (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
     case res of
@@ -443,29 +451,30 @@ vmFromCommand cmd = do
                   else addr (.address) (LitAddr 0xacab)
 
         vm0 baseFee miner ts blockNum prevRan c = makeVm $ VMOpts
-          { contract      = c
-          , calldata      = (calldata, [])
-          , value         = Lit value
-          , address       = address
-          , caller        = caller
-          , origin        = origin
-          , gas           = word64 (.gas) 0xffffffffffffffff
-          , baseFee       = baseFee
-          , priorityFee   = word (.priorityFee) 0
-          , gaslimit      = word64 (.gaslimit) 0xffffffffffffffff
-          , coinbase      = addr (.coinbase) miner
-          , number        = word (.number) blockNum
-          , timestamp     = Lit $ word (.timestamp) ts
-          , blockGaslimit = word64 (.gaslimit) 0xffffffffffffffff
-          , gasprice      = word (.gasprice) 0
-          , maxCodeSize   = word (.maxcodesize) 0xffffffff
-          , prevRandao    = word (.prevRandao) prevRan
-          , schedule      = feeSchedule
-          , chainId       = word (.chainid) 1
-          , create        = (.create) cmd
-          , baseState     = EmptyBase
-          , txAccessList  = mempty -- TODO: support me soon
-          , allowFFI      = False
+          { contract       = c
+          , otherContracts = []
+          , calldata       = (calldata, [])
+          , value          = Lit value
+          , address        = address
+          , caller         = caller
+          , origin         = origin
+          , gas            = word64 (.gas) 0xffffffffffffffff
+          , baseFee        = baseFee
+          , priorityFee    = word (.priorityFee) 0
+          , gaslimit       = word64 (.gaslimit) 0xffffffffffffffff
+          , coinbase       = addr (.coinbase) miner
+          , number         = word (.number) blockNum
+          , timestamp      = Lit $ word (.timestamp) ts
+          , blockGaslimit  = word64 (.gaslimit) 0xffffffffffffffff
+          , gasprice       = word (.gasprice) 0
+          , maxCodeSize    = word (.maxcodesize) 0xffffffff
+          , prevRandao     = word (.prevRandao) prevRan
+          , schedule       = feeSchedule
+          , chainId        = word (.chainid) 1
+          , create         = (.create) cmd
+          , baseState      = EmptyBase
+          , txAccessList   = mempty -- TODO: support me soon
+          , allowFFI       = False
           }
         word f def = fromMaybe def (f cmd)
         word64 f def = fromMaybe def (f cmd)
@@ -523,29 +532,30 @@ symvmFromCommand cmd calldata = do
                    else RuntimeCode (ConcreteRuntimeCode bs)
     address = eaddr (.address) (SymAddr "entrypoint")
     vm0 baseFee miner ts blockNum prevRan cd callvalue caller c = makeVm $ VMOpts
-      { contract      = c
-      , calldata      = cd
-      , value         = callvalue
-      , address       = address
-      , caller        = caller
-      , origin        = origin
-      , gas           = word64 (.gas) 0xffffffffffffffff
-      , gaslimit      = word64 (.gaslimit) 0xffffffffffffffff
-      , baseFee       = baseFee
-      , priorityFee   = word (.priorityFee) 0
-      , coinbase      = eaddr (.coinbase) miner
-      , number        = word (.number) blockNum
-      , timestamp     = ts
-      , blockGaslimit = word64 (.gaslimit) 0xffffffffffffffff
-      , gasprice      = word (.gasprice) 0
-      , maxCodeSize   = word (.maxcodesize) 0xffffffff
-      , prevRandao    = word (.prevRandao) prevRan
-      , schedule      = feeSchedule
-      , chainId       = word (.chainid) 1
-      , create        = (.create) cmd
-      , baseState     = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
-      , txAccessList  = mempty
-      , allowFFI      = False
+      { contract       = c
+      , otherContracts = []
+      , calldata       = cd
+      , value          = callvalue
+      , address        = address
+      , caller         = caller
+      , origin         = origin
+      , gas            = word64 (.gas) 0xffffffffffffffff
+      , gaslimit       = word64 (.gaslimit) 0xffffffffffffffff
+      , baseFee        = baseFee
+      , priorityFee    = word (.priorityFee) 0
+      , coinbase       = eaddr (.coinbase) miner
+      , number         = word (.number) blockNum
+      , timestamp      = ts
+      , blockGaslimit  = word64 (.gaslimit) 0xffffffffffffffff
+      , gasprice       = word (.gasprice) 0
+      , maxCodeSize    = word (.maxcodesize) 0xffffffff
+      , prevRandao     = word (.prevRandao) prevRan
+      , schedule       = feeSchedule
+      , chainId        = word (.chainid) 1
+      , create         = (.create) cmd
+      , baseState      = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
+      , txAccessList   = mempty
+      , allowFFI       = False
       }
     word f def = fromMaybe def (f cmd)
     word64 f def = fromMaybe def (f cmd)

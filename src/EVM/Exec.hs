@@ -19,6 +19,7 @@ vmForEthrunCreation :: Gas gas => ByteString -> ST s (VM gas s)
 vmForEthrunCreation creationCode =
   (makeVm $ VMOpts
     { contract = initialContract (InitCode creationCode mempty)
+    , otherContracts = []
     , calldata = mempty
     , value = Lit 0
     , baseState = EmptyBase

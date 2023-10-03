@@ -49,16 +49,21 @@ contract SolidityTest is DSTest {
     }
 
     // requires do not trigger a failure in `prove_` tests
-    function prove_no_fail_require() public {
-        require(false);
+    function prove_no_fail_require(uint x) public {
+        if (x == 2) {
+            require(false);
+        } else {
+            assert(x != 2);
+        }
     }
 
     // all branches in a proveFail test must end in one of:
     //  - a require
     //  - a failed user defined assert
     //  - a failed ds-test assertion violation
-    function proveFail_require() public {
-        require(false);
+    function proveFail_require(uint x) public {
+        require(x == 100);
+        assert(false);
     }
 
     function proveFail_userAssertSmoke() public {

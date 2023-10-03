@@ -328,11 +328,11 @@ data Expr (a :: EType) where
   ConcreteStore  :: (Map W256 W256) -> Expr Storage
   AbstractStore  :: Expr EAddr -> Expr Storage
 
-  SLoad          :: Expr EWord         -- index
+  SLoad          :: Expr EWord         -- key
                  -> Expr Storage       -- storage
                  -> Expr EWord         -- result
 
-  SStore         :: Expr EWord         -- index
+  SStore         :: Expr EWord         -- key
                  -> Expr EWord         -- value
                  -> Expr Storage       -- old storage
                  -> Expr Storage       -- new storae
@@ -525,8 +525,9 @@ data EvmError
 
 -- | Sometimes we can only partially execute a given program
 data PartialExec
-  = UnexpectedSymbolicArg  { pc :: Int, msg  :: String, args  :: [SomeExpr] }
+  = UnexpectedSymbolicArg { pc :: Int, msg  :: String, args  :: [SomeExpr] }
   | MaxIterationsReached  { pc :: Int, addr :: Expr EAddr }
+  | JumpIntoSymbolicCode  { pc :: Int, jumpDst :: Int }
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
@@ -621,6 +622,15 @@ data RuntimeConfig = RuntimeConfig
   , baseState :: BaseState
   }
   deriving (Show)
+
+abstRefineDefault :: AbstRefineConfig
+abstRefineDefault = AbstRefineConfig False False
+
+data AbstRefineConfig = AbstRefineConfig
+  { arith :: Bool
+  , mem   :: Bool
+  }
+  deriving (Show, Eq)
 
 -- | An entry in the VM's "call/create stack"
 data Frame gas s = Frame
@@ -841,6 +851,7 @@ instance Monoid Traces where
 -- | A specification for an initial VM state
 data VMOpts = VMOpts
   { contract :: Contract
+  , otherContracts :: [(Expr EAddr, Contract)]
   , calldata :: (Expr Buf, [Prop])
   , baseState :: BaseState
   , value :: Expr EWord

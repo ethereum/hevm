@@ -15,7 +15,7 @@ import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, defaultSymbolicValues, panicMsg, VeriOpts(..))
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, defaultSymbolicValues, panicMsg, VeriOpts(..), flattenExpr)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
@@ -228,17 +228,28 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
         get
 
     -- check postconditions against vm
-    (_, results) <- verify solvers (makeVeriOpts opts) vm' (Just postcondition)
+    (e, results) <- verify solvers (makeVeriOpts opts) vm' (Just postcondition)
+    let allReverts = not . (any Expr.isSuccess) . flattenExpr $ e
 
     -- display results
     if all isQed results
-    then do
-      pure ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "")
+    then if allReverts && (not shouldFail)
+         then pure ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left $ allBranchRev testName)
+         else pure ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "")
     else do
       let x = mapMaybe extractCex results
       let y = symFailure opts testName (fst cd) types x
       pure ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y)
 
+allBranchRev :: Text -> Text
+allBranchRev testName = Text.unlines
+  [ "Failure: " <> testName
+  , ""
+  , indentLines 2 $ Text.unlines
+      [ "No reachable assertion violations, but all branches reverted"
+      , "Prefix this testname with `proveFail` if this is expected"
+      ]
+  ]
 symFailure :: UnitTestOptions RealWorld -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> Text
 symFailure UnitTestOptions {..} testName cd types failures' =
   mconcat
@@ -269,16 +280,17 @@ symFailure UnitTestOptions {..} testName cd types failures' =
             _ -> ""
         ]
 
-prettyCalldata :: (?context :: DappContext) => SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
-prettyCalldata cex buf sig types = head (Text.splitOn "(" sig) <> showCalldata cex types buf
-
-showCalldata :: (?context :: DappContext) => SMTCex -> [AbiType] -> Expr Buf -> Text
-showCalldata cex tps buf = "(" <> intercalate "," (fmap showVal vals) <> ")"
+prettyCalldata :: SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
+prettyCalldata cex buf sig types = head (Text.splitOn "(" sig) <> "(" <> body <> ")"
   where
     argdata = Expr.drop 4 . simplify . defaultSymbolicValues $ subModel cex buf
-    vals = case decodeBuf tps argdata of
-             CAbi v -> v
-             _ -> internalError $ "unable to abi decode function arguments:\n" <> (Text.unpack $ formatExpr argdata)
+    body = case decodeBuf types argdata of
+      CAbi v -> intercalate "," (fmap showVal v)
+      NoVals -> case argdata of
+          ConcreteBuf c -> pack (bsToHex c)
+          _ -> err
+      SAbi _ -> err
+    err = internalError $ "unable to produce a concrete model for calldata: " <> show buf
 
 showVal :: AbiValue -> Text
 showVal (AbiBytes _ bs) = formatBytes bs
@@ -433,6 +445,7 @@ initialUnitTestVm :: Gas gas => UnitTestOptions s -> SolcContract -> ST s (VM ga
 initialUnitTestVm (UnitTestOptions {..}) theContract = do
   vm <- makeVm $ VMOpts
            { contract = initialContract (InitCode theContract.creationCode mempty)
+           , otherContracts = []
            , calldata = mempty
            , value = Lit 0
            , address = testParams.address

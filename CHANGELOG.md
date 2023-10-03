@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## Added
+
+- `vm.prank` now handles symbolic addresses
+- added `vm.deal` cheatcode
+- added `vm.assume` cheatcode
+
 ## Fixed
 
 - CopySlice wraparound issue especially during CopyCallBytesToMemory
@@ -14,14 +20,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - EVM.Solidity.toCode to include contractName in error string
 - Better cex reconstruction in cases where branches do not refer to all input variables in calldata
 - Correctly handle empty bytestring compiled contracts' JSON
+- No more false positives when keccak is called with inputs of different sizes
+- `test` now falls back to displaying an unecoded bytestring for calldata when the model returned by the solver has a different length the length of the arguments in the test signature.
+- we now generate correct counterexamples for branches where only a subset of input variables are referenced by the path conditions
+- `vm.prank` now works correctly when passed a symbolic address
 
 ## Changed
 
+- Less noisy console output during tracing
+
 ### UI
 
-- 'check' prefix now recognized as a function signature to symbolically execute for Dapps
-- symbolic solidity tests no longer consider reverts to be a failure, and check only for the ds-test failed bit or unser defined assertion failures (i.e. `Panic(0x01)`)
-- `vm.prank` now works correctly when passed a symbolic address
+- `check` prefix now recognized for symbolic tests
+- solidity tests no longer consider reverts to be a failure, and check only for the ds-test failed bit or unser defined assertion failures (i.e. `Panic(0x01)`). A positive (i.e. non `proveFail`) test with no rechable assertion violations that does not have any succesful branches will still be considered a failure.
+- `test` now takes a `--number` argument to specify which block should be used when making rpc queries
 - The `--initial-storage` flag no longer accepts a concrete prestore (valid values are now `Empty` or `Abstract`)
 - The visual debugger has been removed
 - All concrete ds-test executors have been removed (i.e. plain, fuzzer, invariant)
@@ -34,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Contract balances can now be fully symbolic
 - Contract code can now be fully abstract. Calls into contracts with unknown code will fail with `UnexpectedSymbolicArg`.
 - Run expression simplification on branch conditions
+- SLoad/SStore simplifications based on assumptions regarding Keccak non-collision&preimage
+- Improved Prop simplification
+- CopySlice+WriteWord+ConcreteBuf now truncates ConcreteBuf in special cases
+- Better simplification of Eq IR elements
+- Run a toplevel constant folding reasoning system on branch conditions
 
 ## API Changes
 
@@ -67,6 +84,7 @@ Support for fully symbolic contract addresses required some very extensive chang
 ## Changed
 
 - Removed sha3Crack which has been deprecated for keccakEqs
+- Abstraction-refinement for more complicated expressions such as MULMOD
 
 ## Added
 

@@ -121,29 +121,30 @@ vmFromRpc blockNum calldata callvalue caller address = do
     Just b -> pure b
 
   stToIO $ (makeVm $ VMOpts
-    { contract      = ctrct
-    , calldata      = calldata
-    , value         = callvalue
-    , address       = LitAddr address
-    , caller        = caller
-    , origin        = LitAddr 0xacab
-    , gas           = 0xffffffffffffffff
-    , gaslimit      = 0xffffffffffffffff
-    , baseFee       = blk.baseFee
-    , priorityFee   = 0
-    , coinbase      = blk.coinbase
-    , number        = blk.number
-    , timestamp     = blk.timestamp
-    , blockGaslimit = blk.gaslimit
-    , gasprice      = 0
-    , maxCodeSize   = blk.maxCodeSize
-    , prevRandao    = blk.prevRandao
-    , schedule      = blk.schedule
-    , chainId       = 1
-    , create        = False
-    , baseState     = EmptyBase
-    , txAccessList  = mempty
-    , allowFFI      = False
+    { contract       = ctrct
+    , otherContracts = []
+    , calldata       = calldata
+    , value          = callvalue
+    , address        = LitAddr address
+    , caller         = caller
+    , origin         = LitAddr 0xacab
+    , gas            = 0xffffffffffffffff
+    , gaslimit       = 0xffffffffffffffff
+    , baseFee        = blk.baseFee
+    , priorityFee    = 0
+    , coinbase       = blk.coinbase
+    , number         = blk.number
+    , timestamp      = blk.timestamp
+    , blockGaslimit  = blk.gaslimit
+    , gasprice       = 0
+    , maxCodeSize    = blk.maxCodeSize
+    , prevRandao     = blk.prevRandao
+    , schedule       = blk.schedule
+    , chainId        = 1
+    , create         = False
+    , baseState      = EmptyBase
+    , txAccessList   = mempty
+    , allowFFI       = False
     }) <&> set (#cache % #fetched % at address) (Just ctrct)
 
 testRpc :: Text

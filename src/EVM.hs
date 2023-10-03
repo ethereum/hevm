@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ImplicitParams #-}
 
 module EVM where
@@ -168,8 +169,7 @@ makeVm o = do
       , value = o.value
       , substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty
       , isCreate = o.create
-      , txReversion = Map.fromList
-        [(o.address , o.contract )]
+      , txReversion = Map.fromList ((o.address,o.contract):o.otherContracts)
       }
     , logs = []
     , traces = Zipper.fromForest []
@@ -200,8 +200,7 @@ makeVm o = do
       }
     , env = Env
       { chainId = o.chainId
-      , contracts = Map.fromList
-        [(o.address, o.contract )]
+      , contracts = Map.fromList ((o.address,o.contract):o.otherContracts)
       , freshAddresses = 0
       }
     , cache = Cache mempty mempty
@@ -324,7 +323,7 @@ exec1 = do
 
     else do
       let ?op = case vm.state.code of
-                  UnknownCode _ -> error "Internal Error: Cannot execute unknown code"
+                  UnknownCode _ -> internalError "Cannot execute unknown code"
                   InitCode conc _ -> BS.index conc vm.state.pc
                   RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs vm.state.pc
                   RuntimeCode (SymbolicRuntimeCode ops) ->
@@ -342,7 +341,7 @@ exec1 = do
         OpPush n' -> do
           let n = into n'
               !xs = case vm.state.code of
-                UnknownCode _ -> error "Internal Error: Cannot execute unknown code"
+                UnknownCode _ -> internalError "Cannot execute unknown code"
                 InitCode conc _ -> Lit $ word $ padRight n $ BS.take n (BS.drop (1 + vm.state.pc) conc)
                 RuntimeCode (ConcreteRuntimeCode bs) -> Lit $ word $ BS.take n $ BS.drop (1 + vm.state.pc) bs
                 RuntimeCode (SymbolicRuntimeCode ops) ->
@@ -515,7 +514,7 @@ exec1 = do
                             assign (#state % #stack) xs
                             case toBuf vm.state.code of
                               Just b -> copyBytesToMemory b n' codeOffset memOffset'
-                              Nothing -> error "Internal Error: cannot produce a buffer from UnknownCode"
+                              Nothing -> internalError "Cannot produce a buffer from UnknownCode"
                       else vmError IllegalOverflow
             _ -> underrun
 
@@ -725,7 +724,7 @@ exec1 = do
                 else do
                   let
                     original =
-                      case Expr.readStorage' x this.origStorage of
+                      case Expr.simplify $ SLoad x this.origStorage of
                         Lit v -> v
                         _ -> 0
                     storage_cost =
@@ -1319,14 +1318,15 @@ choose :: Choose gas s -> EVM gas s ()
 choose = assign #result . Just . HandleEffect . Choose
 
 {-# INLINABLE branch #-}
-branch :: Gas gas => Expr EWord -> (Bool -> EVM gas s ()) -> EVM gas s ()
+branch :: forall s gas . Gas gas => Expr EWord -> (Bool -> EVM gas s ()) -> EVM gas s ()
 branch cond continue = do
   loc <- codeloc
   pathconds <- use #constraints
   query $ PleaseAskSMT cond pathconds (choosePath loc)
   where
     condSimp = Expr.simplify cond
-    -- choosePath :: CodeLocation -> BranchCondition -> EVM gas s ()
+
+    choosePath :: CodeLocation -> BranchCondition -> EVM gas s ()
     choosePath loc (Case v) = do
       assign #result Nothing
       pushTo #constraints $ if v then Expr.evalProp (condSimp ./= Lit 0) else Expr.evalProp (condSimp .== Lit 0)
@@ -1701,6 +1701,19 @@ cheatActions =
           [x]  -> assign (#block % #timestamp) x
           _ -> vmError (BadCheatCode sig),
 
+      action "deal(address,uint256)" $
+        \sig _ _ input -> case decodeStaticArgs 0 2 input of
+          [a, amt] ->
+            forceAddr a "vm.deal: cannot decode target into an address" $ \usr ->
+              fetchAccount usr $ \_ -> do
+                assign (#env % #contracts % ix usr % #balance) amt
+          _ -> vmError (BadCheatCode sig),
+
+      action "assume(bool)" $
+        \sig _ _ input -> case decodeStaticArgs 0 1 input of
+          [c] -> modifying #constraints ((:) (PEq c (Lit 1)))
+          _ -> vmError (BadCheatCode sig),
+
       action "roll(uint256)" $
         \sig _ _ input -> case decodeStaticArgs 0 1 input of
           [x] -> forceConcrete x "cannot roll to a symbolic block number" (assign (#block % #number))
@@ -1881,16 +1894,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
         touchAccount newAddr
       -- are we overflowing the nonce
       False -> burn xGas $ do
-        -- unfortunately we have to apply some (pretty hacky)
-        -- heuristics here to parse the unstructured buffer read
-        -- from memory into a code and data section
-        let contract' = do
-              prefixLen <- Expr.concPrefix initCode
-              prefix <- Expr.toList $ Expr.take prefixLen initCode
-              let sym = Expr.drop prefixLen initCode
-              conc <- mapM maybeLitByte prefix
-              pure $ InitCode (BS.pack $ V.toList conc) sym
-        case contract' of
+        case parseInitCode initCode of
           Nothing ->
             partial $ UnexpectedSymbolicArg vm0.state.pc "initcode must have a concrete prefix" []
           Just c -> do
@@ -1943,6 +1947,28 @@ create self this xSize xGas xValue xs newAddr initCode = do
               }
             assign (#state % #gas) g
 
+-- | Parses a raw Buf into an InitCode
+--
+-- solidity implements constructor args by appending them to the end of
+-- the initcode. we support this internally by treating initCode as a
+-- concrete region (initCode) followed by a potentially symbolic region
+-- (arguments).
+--
+-- when constructing a contract that has symbolic construcor args, we
+-- need to apply some heuristics to convert the (unstructured) initcode
+-- in memory into this structured representation. The (unsound, bad,
+-- hacky) way that we do this, is by: looking for the first potentially
+-- symbolic byte in the input buffer and then splitting it there into code / data.
+parseInitCode :: Expr Buf -> Maybe ContractCode
+parseInitCode (ConcreteBuf b) = Just (InitCode b mempty)
+parseInitCode buf = if V.null conc
+                    then Nothing
+                    else Just $ InitCode (BS.pack $ V.toList conc) sym
+  where
+    conc = Expr.concretePrefix buf
+    -- unsafeInto: findIndex will always be positive
+    sym = Expr.drop (unsafeInto (V.length conc)) buf
+
 -- | Replace a contract's code, like when CREATE returns
 -- from the constructor code.
 replaceCode :: Expr EAddr -> ContractCode -> EVM gas s ()
@@ -1958,11 +1984,11 @@ replaceCode target newCode =
               , storage = now.storage
               }
         RuntimeCode _ ->
-          error ("internal error: can't replace code of deployed contract " <> show target)
+          internalError $ "Can't replace code of deployed contract " <> show target
         UnknownCode _ ->
-          error "internal error: can't replace unknown code"
+          internalError "Can't replace unknown code"
       Nothing ->
-        internalError "can't replace code of nonexistent contract"
+        internalError "Can't replace code of nonexistent contract"
 
 replaceCodeOfSelf :: ContractCode -> EVM gas s ()
 replaceCodeOfSelf newCode = do
@@ -2308,7 +2334,7 @@ pushSym x = #state % #stack %= (x :)
 pushAddr :: Expr EAddr -> EVM gas s ()
 pushAddr (LitAddr x) = #state % #stack %= (Lit (into x) :)
 pushAddr x@(SymAddr _) = #state % #stack %= (WAddr x :)
-pushAddr (GVar _) = error "Internal Error: Unexpected GVar"
+pushAddr (GVar _) = internalError "Unexpected GVar"
 
 {-# INLINABLE stackOp1 #-}
 stackOp1
@@ -2365,13 +2391,29 @@ use' f = do
 
 {-# INLINABLE checkJump #-}
 checkJump :: Gas gas => Int -> [Expr EWord] -> EVM gas s ()
-checkJump x xs = do
+checkJump x xs = noJumpIntoInitData x $ do
   vm <- get
   case isValidJumpDest vm x of
     True -> do
       #state % #stack .= xs
       #state % #pc .= x
     False -> vmError BadJumpDestination
+
+-- fails with partial if we're trying to jump into the symbolic region of an `InitCode`
+noJumpIntoInitData :: Gas gas => Int -> EVM gas s () -> EVM gas s ()
+noJumpIntoInitData idx cont = do
+  vm <- get
+  case vm.state.code of
+    -- init code is totally concrete, so we don't return partial if we're
+    -- jumping beyond the range of `ops`
+    InitCode _ (ConcreteBuf "") -> cont
+    -- init code has a symbolic region, so check if we're trying to jump into
+    -- the symbolic region and return partial if we are
+    InitCode ops _ -> if idx > BS.length ops
+                      then partial $ JumpIntoSymbolicCode vm.state.pc idx
+                      else cont
+    -- we're not executing init code, so nothing to check here
+    _ -> cont
 
 isValidJumpDest :: VM gas s -> Int -> Bool
 isValidJumpDest vm x = let
@@ -2381,7 +2423,7 @@ isValidJumpDest vm x = let
       (internalError "self not found in current contracts")
       (Map.lookup self vm.env.contracts)
     op = case code of
-      UnknownCode _ -> error "Internal Error: cannot analyze jumpdests for unknown code"
+      UnknownCode _ -> internalError "Cannot analyze jumpdests for unknown code"
       InitCode ops _ -> BS.indexMaybe ops x
       RuntimeCode (ConcreteRuntimeCode ops) -> BS.indexMaybe ops x
       RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= maybeLitByte
@@ -2397,7 +2439,7 @@ opSize _                          = 1
 -- the program counter value i.  This is needed because source map
 -- entries are per operation, not per byte.
 mkOpIxMap :: ContractCode -> SV.Vector Int
-mkOpIxMap (UnknownCode _) = error "Internal Error: cannot build opIxMap for unknown code"
+mkOpIxMap (UnknownCode _) = internalError "Cannot build opIxMap for unknown code"
 mkOpIxMap (InitCode conc _)
   = SV.create $ SV.new (BS.length conc) >>= \v ->
       -- Loop over the byte string accumulating a vector-mutating action.
@@ -2442,7 +2484,7 @@ vmOp vm =
   let i  = vm ^. #state % #pc
       code' = vm ^. #state % #code
       (op, pushdata) = case code' of
-        UnknownCode _ -> error "Internal Error: cannot get op from unknown code"
+        UnknownCode _ -> internalError "cannot get op from unknown code"
         InitCode xs' _ ->
           (BS.index xs' i, fmap LitByte $ BS.unpack $ BS.drop i xs')
         RuntimeCode (ConcreteRuntimeCode xs') ->
@@ -2462,7 +2504,7 @@ vmOpIx vm =
 mkCodeOps :: ContractCode -> V.Vector (Int, Op)
 mkCodeOps contractCode =
   let l = case contractCode of
-            UnknownCode _ -> error "Internal Error: cannot make codeOps for unknown code"
+            UnknownCode _ -> internalError "Cannot make codeOps for unknown code"
             InitCode bytes _ ->
               LitByte <$> (BS.unpack bytes)
             RuntimeCode (ConcreteRuntimeCode ops) ->
@@ -2592,7 +2634,7 @@ hashcode (RuntimeCode (SymbolicRuntimeCode ops)) = keccak . Expr.fromList $ ops
 -- | The length of the code ignoring any constructor args.
 -- This represents the region that can contain executable opcodes
 opslen :: ContractCode -> Int
-opslen (UnknownCode _) = error "Internal Error: cannot produce concrete opslen for unknown code"
+opslen (UnknownCode _) = internalError "Cannot produce concrete opslen for unknown code"
 opslen (InitCode ops _) = BS.length ops
 opslen (RuntimeCode (ConcreteRuntimeCode ops)) = BS.length ops
 opslen (RuntimeCode (SymbolicRuntimeCode ops)) = length ops
@@ -2603,7 +2645,7 @@ codelen :: ContractCode -> Expr EWord
 codelen (UnknownCode a) = CodeSize a
 codelen c@(InitCode {}) = case toBuf c of
   Just b -> bufLength b
-  Nothing -> error "Internal Error: impossible"
+  Nothing -> internalError "impossible"
 -- these are never going to be negative so unsafeInto is fine here
 codelen (RuntimeCode (ConcreteRuntimeCode ops)) = Lit . unsafeInto $ BS.length ops
 codelen (RuntimeCode (SymbolicRuntimeCode ops)) = Lit . unsafeInto $ length ops
@@ -2621,13 +2663,13 @@ codeloc = do
 
 createAddress :: Expr EAddr -> Maybe W64 -> EVM gas s (Expr EAddr)
 createAddress (LitAddr a) (Just n) = pure $ Concrete.createAddress a n
-createAddress (GVar _) _ = error "Internal Error: unexpected GVar"
+createAddress (GVar _) _ = internalError "Unexpected GVar"
 createAddress _ _ = freshSymAddr
 
 create2Address :: Expr EAddr -> W256 -> ByteString -> EVM gas s (Expr EAddr)
 create2Address (LitAddr a) s b = pure $ Concrete.create2Address a s b
 create2Address (SymAddr _) _ _ = freshSymAddr
-create2Address (GVar _) _ _ = error "Internal Error: unexpected GVar"
+create2Address (GVar _) _ _ = internalError "Unexpected GVar"
 
 freshSymAddr :: EVM gas s (Expr EAddr)
 freshSymAddr = do
@@ -2639,7 +2681,7 @@ isPrecompileAddr :: Expr EAddr -> Bool
 isPrecompileAddr = \case
   LitAddr a -> 0x0 < a && a <= 0x09
   SymAddr _ -> False
-  GVar _ -> error "Internal Error: unexpected GVar"
+  GVar _ -> internalError "Unexpected GVar"
 
 -- * Arithmetic
 
