@@ -742,11 +742,12 @@ exec1 = do
 
         OpMload ->
           case stk of
-            x:xs -> burn g_verylow $ do
-              next
-              buf <- readMemory x (Lit 32)
-              let w = Expr.readWordFromBytes (Lit 0) buf
-              assign (#state % #stack) (w : xs)
+            x:xs -> burn g_verylow $
+              accessMemoryWord x $ do
+                next
+                buf <- readMemory x (Lit 32)
+                let w = Expr.readWordFromBytes (Lit 0) buf
+                assign (#state % #stack) (w : xs)
             _ -> underrun
 
         OpMstore ->
@@ -1892,49 +1893,49 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
         \xGas -> do
           vm0 <- get
           fetchAccount xTo $ \target -> case target.code of
-              UnknownCode _ -> do
-                pc <- use (#state % #pc)
-                partial $ UnexpectedSymbolicArg pc "call target has unknown code" (wrap [xTo])
-              _ -> do
-                burn xGas $ do
-                  calldata <- readMemory xInOffset xInSize
-                  abi <- maybeLitWord . readBytes 4 (Lit 0) <$> readMemory xInOffset (Lit 4)
-                  let newContext = CallContext
-                                    { target    = xTo
-                                    , context   = xContext
-                                    , offset    = xOutOffset
-                                    , size      = xOutSize
-                                    , codehash  = target.codehash
-                                    , callreversion = vm0.env.contracts
-                                    , subState  = vm0.tx.substate
-                                    , abi
-                                    , calldata
-                                    }
-                  pushTrace (FrameTrace newContext)
-                  next
-                  vm1 <- get
+            UnknownCode _ -> do
+              pc <- use (#state % #pc)
+              partial $ UnexpectedSymbolicArg pc "call target has unknown code" (wrap [xTo])
+            _ -> do
+              burn xGas $ do
+                calldata <- readMemory xInOffset xInSize
+                abi <- maybeLitWord . readBytes 4 (Lit 0) <$> readMemory xInOffset (Lit 4)
+                let newContext = CallContext
+                                  { target    = xTo
+                                  , context   = xContext
+                                  , offset    = xOutOffset
+                                  , size      = xOutSize
+                                  , codehash  = target.codehash
+                                  , callreversion = vm0.env.contracts
+                                  , subState  = vm0.tx.substate
+                                  , abi
+                                  , calldata
+                                  }
+                pushTrace (FrameTrace newContext)
+                next
+                vm1 <- get
 
-                  pushTo #frames $ Frame
-                    { state = vm1.state { stack = xs }
-                    , context = newContext
-                    }
+                pushTo #frames $ Frame
+                  { state = vm1.state { stack = xs }
+                  , context = newContext
+                  }
 
-                  let clearInitCode = \case
-                        (InitCode _ _) -> InitCode mempty mempty
-                        a -> a
+                let clearInitCode = \case
+                      (InitCode _ _) -> InitCode mempty mempty
+                      a -> a
 
-                  newMemory <- ConcreteMemory <$> VUnboxed.Mutable.new 0
-                  zoom #state $ do
-                    assign #gas xGas
-                    assign #pc 0
-                    assign #code (clearInitCode target.code)
-                    assign #codeContract xTo
-                    assign #stack mempty
-                    assign #memory newMemory
-                    assign #memorySize 0
-                    assign #returndata mempty
-                    assign #calldata calldata
-                  continue xTo
+                newMemory <- ConcreteMemory <$> VUnboxed.Mutable.new 0
+                zoom #state $ do
+                  assign #gas xGas
+                  assign #pc 0
+                  assign #code (clearInitCode target.code)
+                  assign #codeContract xTo
+                  assign #stack mempty
+                  assign #memory newMemory
+                  assign #memorySize 0
+                  assign #returndata mempty
+                  assign #calldata calldata
+                continue xTo
 
 -- -- * Contract creation
 
@@ -2628,9 +2629,11 @@ costOfCall recipientExists (Lit xValue) availableGas xGas target = do
             else 0
       c_xfer = if xValue /= 0  then g_callvalue else 0
       c_extra = call_base_gas + c_xfer + c_new
-      c_gascap =  condGasVal availableGas c_extra
-                    (minGas xGas (allButOne64th (availableGas - c_extra)))
-                    xGas
+      c_gascap = case (word64FromGas availableGas, word64FromGas c_extra) of
+        (Just ag, Just extra) -> if ag >= extra
+                                 then minGas xGas (allButOne64th (availableGas - c_extra))
+                                 else xGas
+        _ -> initialGas
       c_callgas = if xValue /= 0 then c_gascap + g_callstipend else c_gascap
   pure (c_gascap + c_extra, c_callgas)
 -- calls are free if value is symbolic :)
