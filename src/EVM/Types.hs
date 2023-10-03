@@ -48,7 +48,6 @@ import Data.Vector.Unboxed.Mutable (STVector)
 import Numeric (readHex, showHex)
 import Options.Generic
 import Optics.TH
-import EVM.FeeSchedule (FeeSchedule (..))
 
 import Text.Regex.TDFA qualified as Regex
 import Text.Read qualified
@@ -515,7 +514,7 @@ data EvmError
   | InvalidMemoryAccess
   | CallDepthLimitReached
   | MaxCodeSizeExceeded W256 W256
-  | MaxInitCodeSizeExceeded W256 W256
+  | MaxInitCodeSizeExceeded W256 (Expr EWord)
   | InvalidFormat
   | PrecompileFailure
   | ReturnDataOutOfBounds
@@ -525,9 +524,10 @@ data EvmError
 
 -- | Sometimes we can only partially execute a given program
 data PartialExec
-  = UnexpectedSymbolicArg { pc :: Int, msg  :: String, args  :: [SomeExpr] }
-  | MaxIterationsReached  { pc :: Int, addr :: Expr EAddr }
-  | JumpIntoSymbolicCode  { pc :: Int, jumpDst :: Int }
+  = UnexpectedSymbolicArg    { pc :: Int, msg  :: String, args  :: [SomeExpr] }
+  | MaxIterationsReached     { pc :: Int, addr :: Expr EAddr }
+  | JumpIntoSymbolicCode     { pc :: Int, jumpDst :: Int }
+  | SymbolicGasIntrospection { pc :: Int }
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
@@ -590,8 +590,8 @@ data VM gas s = VM
   , state          :: FrameState gas s
   , frames         :: [Frame gas s]
   , env            :: Env
-  , block          :: Block
-  , tx             :: TxState
+  , block          :: Block gas
+  , tx             :: TxState gas
   , logs           :: [Expr Log]
   , traces         :: Zipper.TreePos Zipper.Empty Trace
   , cache          :: Cache
@@ -650,8 +650,8 @@ data FrameContext
   | CallContext
     { target        :: Expr EAddr
     , context       :: Expr EAddr
-    , offset        :: W256
-    , size          :: W256
+    , offset        :: Expr EWord
+    , size          :: Expr EWord
     , codehash      :: Expr EWord
     , abi           :: Maybe W256
     , calldata      :: Expr Buf
@@ -700,9 +700,9 @@ instance Show (Memory s) where
 type MutableMemory s = STVector s Word8
 
 -- | The state that spans a whole transaction
-data TxState = TxState
+data TxState gas = TxState
   { gasprice    :: W256
-  , gaslimit    :: Word64
+  , gaslimit    :: gas
   , priorityFee :: W256
   , origin      :: Expr EAddr
   , toAddr      :: Expr EAddr
@@ -722,15 +722,14 @@ data Env = Env
   deriving (Show, Generic)
 
 -- | Data about the block
-data Block = Block
+data Block gas = Block
   { coinbase    :: Expr EAddr
   , timestamp   :: Expr EWord
   , number      :: W256
   , prevRandao  :: W256
-  , gaslimit    :: Word64
+  , gaslimit    :: gas
   , baseFee     :: W256
   , maxCodeSize :: W256
-  , schedule    :: FeeSchedule Word64
   } deriving (Show, Generic)
 
 -- | Full contract state
@@ -869,7 +868,6 @@ data VMOpts = VMOpts
   , blockGaslimit :: Word64
   , gasprice :: W256
   , baseFee :: W256
-  , schedule :: FeeSchedule Word64
   , chainId :: W256
   , create :: Bool
   , txAccessList :: Map (Expr EAddr) [W256]

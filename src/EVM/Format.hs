@@ -437,6 +437,7 @@ formatPartial = \case
     ]
   MaxIterationsReached pc addr -> "Max Iterations Reached in contract: " <> formatAddr addr <> " pc: " <> pack (show pc)
   JumpIntoSymbolicCode pc idx -> "Encountered a jump into a potentially symbolic code region while executing initcode. pc: " <> pack (show pc) <> " jump dst: " <> pack (show idx)
+  SymbolicGasIntrospection pc -> "Encountered an attempt to introspect on the value of symbolic gas at pc " <> pack (show pc)
 
 formatSomeExpr :: SomeExpr -> Text
 formatSomeExpr (SomeExpr e) = formatExpr e

@@ -53,7 +53,6 @@ import EVM.Concrete qualified as Concrete
 import EVM.Exec (ethrunAddress)
 import EVM.Fetch qualified as Fetch
 import EVM.Format (bsToHex, formatBinary)
-import EVM.FeeSchedule
 import EVM.Op (intToOpName)
 import EVM.Sign (deriveAddr)
 import EVM.Solvers
@@ -146,7 +145,6 @@ data EVMToolEnv = EVMToolEnv
   , gasLimit    :: Data.Word.Word64
   , baseFee     :: W256
   , maxCodeSize :: W256
-  , schedule    :: FeeSchedule Data.Word.Word64
   , blockHashes :: Map.Map Int W256
   } deriving (Show, Generic)
 
@@ -173,7 +171,6 @@ emptyEvmToolEnv = EVMToolEnv { coinbase = 0
                              , gasLimit   = 0xffffffffffffffff
                              , baseFee    = 0
                              , maxCodeSize= 0xffffffff
-                             , schedule   = feeSchedule
                              , blockHashes = mempty
                              }
 
@@ -290,7 +287,6 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
                         , gasLimit    =  unsafeInto gaslimitExec
                         , baseFee     =  0x0
                         , maxCodeSize =  0xfffff
-                        , schedule    =  feeSchedule
                         , blockHashes =  blockHashesDefault
                         }
     sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
@@ -446,14 +442,13 @@ vmForRuntimeCode _ runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress
     , number = evmToolEnv.number
     , timestamp = evmToolEnv.timestamp
     , gasprice = fromJust txn.gasPrice
-    , gas = txn.gasLimit - (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
+    , gas = txn.gasLimit - (EVM.Transaction.txGasCost txn)
     , gaslimit = txn.gasLimit
     , blockGaslimit = evmToolEnv.gasLimit
     , prevRandao = evmToolEnv.prevRandao
     , baseFee = evmToolEnv.baseFee
     , priorityFee = fromJust txn.maxPriorityFeeGas
     , maxCodeSize = evmToolEnv.maxCodeSize
-    , schedule = evmToolEnv.schedule
     , chainId = txn.chainId
     , create = False
     , txAccessList = mempty

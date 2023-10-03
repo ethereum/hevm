@@ -4,7 +4,6 @@ module EVM.Fetch where
 
 import EVM (initialContract, unknownContract)
 import EVM.ABI
-import EVM.FeeSchedule (feeSchedule)
 import EVM.Format (hexText)
 import EVM.SMT
 import EVM.Solvers
@@ -22,6 +21,7 @@ import Data.Maybe (fromMaybe)
 import Data.List (foldl')
 import Data.Text qualified as T
 import Data.Vector qualified as RegularVector
+import Data.Word (Word64)
 import Network.Wreq
 import Network.Wreq.Session (Session)
 import Network.Wreq.Session qualified as Session
@@ -31,7 +31,7 @@ import System.Process
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where
   QueryCode    :: Addr         -> RpcQuery BS.ByteString
-  QueryBlock   ::                 RpcQuery Block
+  QueryBlock   ::                 RpcQuery (Block Word64)
   QueryBalance :: Addr         -> RpcQuery W256
   QueryNonce   :: Addr         -> RpcQuery W64
   QuerySlot    :: Addr -> W256 -> RpcQuery W256
@@ -108,7 +108,7 @@ fetchQuery n f q =
           t <- preview _String <$> m
           readText <$> t
 
-parseBlock :: (AsValue s, Show s) => s -> Maybe Block
+parseBlock :: (AsValue s, Show s) => s -> Maybe (Block Word64)
 parseBlock j = do
   coinbase   <- LitAddr . readText <$> j ^? key "miner" % _String
   timestamp  <- Lit . readText <$> j ^? key "timestamp" % _String
@@ -128,7 +128,7 @@ parseBlock j = do
      (Nothing, Just _, Just d) -> d
      _ -> internalError "block contains both difficulty and prevRandao"
   -- default codesize, default gas limit, default feescedule
-  pure $ Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff feeSchedule
+  pure $ Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff
 
 fetchWithSession :: Text -> Session -> Value -> IO (Maybe Value)
 fetchWithSession url sess x = do
@@ -158,11 +158,11 @@ fetchSlotWithSession n url sess addr slot =
   fetchQuery n (fetchWithSession url sess) (QuerySlot addr slot)
 
 fetchBlockWithSession
-  :: BlockNumber -> Text -> Session -> IO (Maybe Block)
+  :: BlockNumber -> Text -> Session -> IO (Maybe (Block Word64))
 fetchBlockWithSession n url sess =
   fetchQuery n (fetchWithSession url sess) QueryBlock
 
-fetchBlockFrom :: BlockNumber -> Text -> IO (Maybe Block)
+fetchBlockFrom :: BlockNumber -> Text -> IO (Maybe (Block Word64))
 fetchBlockFrom n url = do
   sess <- Session.newAPISession
   fetchBlockWithSession n url sess

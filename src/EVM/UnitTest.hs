@@ -11,7 +11,6 @@ import EVM.Dapp
 import EVM.Exec
 import EVM.Expr (readStorage', simplify)
 import EVM.Expr qualified as Expr
-import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
@@ -462,7 +461,6 @@ initialUnitTestVm (UnitTestOptions {..}) theContract = do
            , priorityFee = testParams.priorityFee
            , maxCodeSize = testParams.maxCodeSize
            , prevRandao = testParams.prevrandao
-           , schedule = feeSchedule
            , chainId = testParams.chainId
            , create = True
            , baseState = EmptyBase

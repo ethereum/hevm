@@ -42,7 +42,6 @@ import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 import EVM.Traversals
 import EVM.Types
-import EVM.FeeSchedule (feeSchedule)
 import EVM.Format (indent, formatBinary)
 import GHC.Conc (getNumProcessors)
 import GHC.Generics (Generic)
@@ -232,7 +231,6 @@ loadSymVM x callvalue cd create =
     , baseFee = 0
     , priorityFee = 0
     , maxCodeSize = 0xffffffff
-    , schedule = feeSchedule
     , chainId = 1
     , create = create
     , txAccessList = mempty

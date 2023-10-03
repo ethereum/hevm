@@ -2,7 +2,6 @@ module EVM.Exec where
 
 import EVM hiding (createAddress)
 import EVM.Concrete (createAddress)
-import EVM.FeeSchedule (feeSchedule)
 import EVM.Types
 
 import Control.Monad.Trans.State.Strict (get, State)
@@ -37,7 +36,6 @@ vmForEthrunCreation creationCode =
     , baseFee = 0
     , priorityFee = 0
     , maxCodeSize = 0xffffffff
-    , schedule = feeSchedule
     , chainId = 1
     , create = False
     , txAccessList = mempty

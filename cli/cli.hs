@@ -33,7 +33,6 @@ import EVM.Dapp (dappInfo, DappInfo, emptyDapp)
 import EVM.Expr qualified as Expr
 import EVM.Concrete qualified as Concrete
 import GitHash
-import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format (hexByteString, strip0x, showTraceTree, formatExpr)
 import EVM.Solidity
@@ -469,7 +468,6 @@ vmFromCommand cmd = do
           , gasprice       = word (.gasprice) 0
           , maxCodeSize    = word (.maxcodesize) 0xffffffff
           , prevRandao     = word (.prevRandao) prevRan
-          , schedule       = feeSchedule
           , chainId        = word (.chainid) 1
           , create         = (.create) cmd
           , baseState      = EmptyBase
@@ -550,7 +548,6 @@ symvmFromCommand cmd calldata = do
       , gasprice       = word (.gasprice) 0
       , maxCodeSize    = word (.maxcodesize) 0xffffffff
       , prevRandao     = word (.prevRandao) prevRan
-      , schedule       = feeSchedule
       , chainId        = word (.chainid) 1
       , create         = (.create) cmd
       , baseState      = maybe AbstractBase parseInitialStorage (cmd.initialStorage)

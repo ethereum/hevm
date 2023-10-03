@@ -1,6 +1,7 @@
 module EVM.Transaction where
 
-import EVM (initialContract, ceilDiv)
+import EVM (initialContract, ceilDiv, word64FromGas)
+import EVM qualified
 import EVM.FeeSchedule
 import EVM.RLP
 import EVM.Types
@@ -169,25 +170,25 @@ signingData tx =
           BS tx.txdata,
           rlpAccessList]
 
-accessListPrice :: FeeSchedule Word64 -> [AccessListEntry] -> Word64
-accessListPrice fs al =
+accessListPrice :: FeeSchedule Word64 => [AccessListEntry] -> Word64
+accessListPrice al =
     sum (map
       (\ale ->
-        fs.g_access_list_address  +
-        (fs.g_access_list_storage_key  * (unsafeInto . length) ale.storageKeys))
+        g_access_list_address  +
+        (g_access_list_storage_key  * (unsafeInto . length) ale.storageKeys))
         al)
 
-txGasCost :: FeeSchedule Word64 -> Transaction -> Word64
-txGasCost fs tx =
+txGasCost :: FeeSchedule Word64 => Transaction -> Word64
+txGasCost tx =
   let calldata     = tx.txdata
       zeroBytes    = BS.count 0 calldata
       nonZeroBytes = BS.length calldata - zeroBytes
-      baseCost     = fs.g_transaction
-        + (if isNothing tx.toAddr then fs.g_txcreate + initcodeCost else 0)
-        + (accessListPrice fs tx.accessList )
-      zeroCost     = fs.g_txdatazero
-      nonZeroCost  = fs.g_txdatanonzero
-      initcodeCost = fs.g_initcodeword * unsafeInto (ceilDiv (BS.length calldata) 32)
+      baseCost     = g_transaction
+        + (if isNothing tx.toAddr then g_txcreate + initcodeCost else 0)
+        + (accessListPrice tx.accessList )
+      zeroCost     = g_txdatazero
+      nonZeroCost  = g_txdatanonzero
+      initcodeCost = g_initcodeword * unsafeInto (ceilDiv (BS.length calldata) 32)
   in baseCost + zeroCost * (unsafeInto zeroBytes) + nonZeroCost * (unsafeInto nonZeroBytes)
 
 instance FromJSON AccessListEntry where
@@ -235,9 +236,11 @@ newAccount :: Contract
 newAccount = initialContract (RuntimeCode (ConcreteRuntimeCode ""))
 
 -- | Increments origin nonce and pays gas deposit
-setupTx :: Expr EAddr -> Expr EAddr -> W256 -> Word64 -> Map (Expr EAddr) Contract -> Map (Expr EAddr) Contract
+setupTx :: EVM.Gas gas => Expr EAddr -> Expr EAddr -> W256 -> gas -> Map (Expr EAddr) Contract -> Map (Expr EAddr) Contract
 setupTx origin coinbase gasPrice gasLimit prestate =
-  let gasCost = gasPrice * (into gasLimit)
+  let gasCost = case word64FromGas gasLimit of
+                  Just g -> gasPrice * (into g)
+                  Nothing -> 0
   in (Map.adjust ((over #nonce   (fmap ((+) 1)))
                . (over #balance (`Expr.sub` (Lit gasCost)))) origin)
     . touchAccount origin
@@ -246,7 +249,7 @@ setupTx origin coinbase gasPrice gasLimit prestate =
 -- | Given a valid tx loaded into the vm state,
 -- subtract gas payment from the origin, increment the nonce
 -- and pay receiving address
-initTx :: VM gas s -> VM gas s
+initTx :: EVM.Gas gas => VM gas s -> VM gas s
 initTx vm = let
     toAddr   = vm.state.contract
     origin   = vm.tx.origin
