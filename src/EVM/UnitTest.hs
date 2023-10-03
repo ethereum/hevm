@@ -221,7 +221,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
                                    Partial _ _ _ -> PBool True
                                    _ -> internalError "Invalid leaf node"
 
-    vm' <- undefined <$> Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
+    vm' <- Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
       Stepper.evm $ do
         pushTrace (EntryTrace testName)
         makeTxCall testParams cd

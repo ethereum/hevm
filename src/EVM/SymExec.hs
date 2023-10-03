@@ -546,10 +546,11 @@ getPartials = mapMaybe go
 -- | Symbolically execute the VM and check all endstates against the
 -- postcondition, if available.
 verify
-  :: SolverGroup
+  :: EVM.Gas gas
+  => SolverGroup
   -> VeriOpts
-  -> VM SymGas RealWorld
-  -> Maybe (Postcondition SymGas RealWorld)
+  -> VM gas RealWorld
+  -> Maybe (Postcondition gas RealWorld)
   -> IO (Expr End, [VerifyResult])
 verify solvers opts preState maybepost = do
   putStrLn "Exploring contract"
