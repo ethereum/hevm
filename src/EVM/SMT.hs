@@ -296,7 +296,7 @@ referencedFrameContext expr = nubOrd $ foldTerm go [] expr
     go = \case
       TxValue -> [(fromString "txvalue", [])]
       v@(Balance a) -> [(fromString "balance_" <> formatEAddr a, [PLT v (Lit $ 2 ^ (96 :: Int))])]
-      Gas {} -> internalError "TODO: GAS"
+      v@(Gas n) -> [(fromString "gas_" <> fromString (show n), [PLT v (Lit $ 2 ^ (64 :: Int))])]
       _ -> []
 
 referencedBlockContext :: TraversableTerm a => a -> [(Builder, [Prop])]
@@ -738,6 +738,7 @@ exprToSMT = \case
     let enc = exprToSMT a in
     "(sha256 " <> enc <> ")"
 
+  Gas n -> fromString $ "gas_" <> show n
   TxValue -> fromString "txvalue"
   Balance a -> fromString "balance_" <> formatEAddr a
 

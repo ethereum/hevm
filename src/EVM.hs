@@ -21,6 +21,7 @@ import EVM.Op
 import EVM.Precompiled qualified
 import EVM.Solidity
 import EVM.Types
+import EVM.Types qualified as Expr (Expr(Gas))
 import EVM.Sign qualified
 import EVM.Concrete qualified as Concrete
 
@@ -298,6 +299,7 @@ makeVm o = do
       { chainId = o.chainId
       , contracts = Map.fromList ((o.address,o.contract):o.otherContracts)
       , freshAddresses = 0
+      , freshGasVals = 0
       }
     , cache = Cache mempty mempty
     , burned = 0
@@ -719,7 +721,7 @@ exec1 = do
         OpGaslimit ->
           limitStack 1 . burn g_base $ case word64FromGas vm.block.gaslimit of
             Just g -> next >> push (into g)
-            Nothing -> partial $ SymbolicGasIntrospection vm.state.pc
+            Nothing -> next >> pushSym GasLimit
 
         OpChainid ->
           limitStack 1 . burn g_base $
@@ -896,7 +898,10 @@ exec1 = do
         OpGas ->
           limitStack 1 . burn g_base $ case word64FromGas (vm.state.gas - g_base) of
             Just g -> next >> push (into g)
-            Nothing -> partial (SymbolicGasIntrospection vm.state.pc)
+            Nothing -> do
+              modifying (#env % #freshGasVals) (+ 1)
+              n <- use (#env % #freshGasVals)
+              next >> (pushSym $ Expr.Gas n)
 
         OpJumpdest -> burn g_jumpdest next
 

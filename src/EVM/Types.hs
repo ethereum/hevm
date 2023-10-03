@@ -282,9 +282,7 @@ data Expr (a :: EType) where
 
   Balance        :: Expr EAddr -> Expr EWord
 
-  Gas            :: Int                -- frame idx
-                 -> Int                -- PC
-                 -> Expr EWord
+  Gas            :: Int -> Expr EWord
 
   -- code
 
@@ -718,6 +716,7 @@ data Env = Env
   { contracts      :: Map (Expr EAddr) Contract
   , chainId        :: W256
   , freshAddresses :: Int
+  , freshGasVals   :: Int
   }
   deriving (Show, Generic)
 
