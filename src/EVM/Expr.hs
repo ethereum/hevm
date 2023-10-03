@@ -8,15 +8,19 @@
 module EVM.Expr where
 
 import Prelude hiding (LT, GT)
+import Control.Monad.ST
 import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
 import Data.List
 import Data.Map.Strict qualified as Map
-import Data.Maybe (mapMaybe, isJust)
+import Data.Maybe (mapMaybe, isJust, fromMaybe)
 import Data.Semigroup (Any, Any(..), getAny)
 import Data.Vector qualified as V
+import Data.Vector (Vector)
+import Data.Vector.Mutable qualified as MV
+import Data.Vector.Mutable (MVector)
 import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
@@ -428,34 +432,6 @@ bufLengthEnv env useEnv buf = go (Lit 0) buf
         Nothing -> internalError "cannot compute length of open expression"
     go l (GVar (BufVar a)) = EVM.Expr.max l (BufLength (GVar (BufVar a)))
 
--- | If a buffer has a concrete prefix, we return it's length here
-concPrefix :: Expr Buf -> Maybe W256
-concPrefix (WriteWord (Lit srcOff) _ (ConcreteBuf ""))
-  | srcOff == 0 = Nothing
-  | otherwise = Just srcOff
-concPrefix (CopySlice (Lit srcOff) (Lit _) (Lit _) src (ConcreteBuf "")) = do
-  sz <- go 0 src
-  pure . into $ (unsafeInto sz) - srcOff
-  where
-    go :: W256 -> Expr Buf -> Maybe Integer
-    -- base cases
-    go _ (AbstractBuf _) = Nothing
-    go l (ConcreteBuf b) = Just . into $ Prelude.max (unsafeInto . BS.length $ b) l
-
-    -- writes to a concrete index
-    go l (WriteWord (Lit idx) (Lit _) b) = go (Prelude.max l (idx + 32)) b
-    go l (WriteByte (Lit idx) (LitByte _) b) = go (Prelude.max l (idx + 1)) b
-    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (Prelude.max (dstOffset + size) l) dst
-
-    -- writes to an abstract index are ignored
-    go l (WriteWord _ _ b) = go l b
-    go l (WriteByte _ _ b) = go l b
-    go _ (CopySlice _ _ _ _ _) = internalError "cannot compute a concrete prefix length for nested copySlice expressions"
-    go _ (GVar _) = internalError "cannot calculate a concrete prefix of an open expression"
-concPrefix (ConcreteBuf b) = Just (unsafeInto . BS.length $ b)
-concPrefix e = internalError $ "cannot compute a concrete prefix length for: " <> show e
-
-
 -- | Return the minimum possible length of a buffer. In the case of an
 -- abstract buffer, it is the largest write that is made on a concrete
 -- location. Parameterized by an environment for buffer variables.
@@ -477,6 +453,51 @@ minLength bufEnv = go 0
     go l (GVar (BufVar a)) = do
       b <- Map.lookup a bufEnv
       go l b
+
+-- returns the largest prefix that is guaranteed to be concrete (if one exists)
+-- partial: will hard error if we encounter an input buf with a concrete size > 500mb
+-- partial: will hard error if the prefix is > 500mb
+concretePrefix :: Expr Buf -> Vector Word8
+concretePrefix b = V.create $ do
+    v <- MV.new (fromMaybe 1024 inputLen)
+    (filled, v') <- go 0 v
+    pure $ MV.take filled v'
+  where
+
+    -- if our prefix is > 500mb then we have other issues and should just bail...
+    maxIdx :: Num i => i
+    maxIdx = 500 * (10 ^ (6 :: Int))
+
+    -- attempts to compute a concrete length for the input buffer
+    inputLen :: Maybe Int
+    inputLen = case bufLength b of
+      Lit s -> if s > maxIdx
+        then internalError "concretePrefix: input buffer size exceeds 500mb"
+        -- unafeInto: s is <= 500,000,000
+        else Just (unsafeInto s)
+      _ -> Nothing
+
+    -- recursively reads succesive bytes from `b` until we reach a symbolic
+    -- byte returns the larged index read from and a reference to the mutable
+    -- vec (might not be the same as the input because of the call to grow)
+    go :: forall s . Int -> MVector s Word8 -> ST s (Int, MVector s Word8)
+    go i v
+      -- if the prefix is very large then bail
+      | i >= maxIdx = internalError "concretePrefix: prefix size exceeds 500mb"
+      -- if the input buffer has a concrete size, then don't read past the end
+      | Just mr <- inputLen, i >= mr = pure (i, v)
+      -- double the size of the vector if we've reached the end
+      | i >= MV.length v = do
+        v' <- MV.grow v (MV.length v)
+        go i v'
+      -- read the byte at `i` in `b` into `v` if it is concrete, or halt if we've reached a symbolic byte
+      -- unsafeInto: i will always be positive
+      | otherwise = case readByte (Lit . unsafeInto $ i) b of
+          LitByte byte -> do
+            MV.write v i byte
+            go (i+1) v
+          _ -> pure (i, v)
+
 
 word256At :: Expr EWord -> Lens (Expr Buf) (Expr Buf) (Expr EWord) (Expr EWord)
 word256At i = lens getter setter where
@@ -981,6 +1002,9 @@ evalProp prop =
     go (PNeg (PBool b)) = PBool (Prelude.not b)
     go (PNeg (PNeg a)) = a
 
+    -- solc specific stuff
+    go (PNeg (PEq (IsZero (IsZero a)) (Lit 0))) = PGT a (Lit 0)
+
     -- And/Or
     go (PAnd (PBool l) (PBool r)) = PBool (l && r)
     go (PAnd (PBool False) _) = PBool False
@@ -1003,6 +1027,8 @@ evalProp prop =
       | l == r = PBool True
       | otherwise = o
     go p = p
+
+
     -- Applies `simplify` to the inner part of a Prop, e.g.
     -- (PEq (Add (Lit 1) (Lit 2)) (Var "a")) becomes
     -- (PEq (Lit 3) (Var "a")
