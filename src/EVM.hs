@@ -69,7 +69,7 @@ class Gas gas where
 data SymGas = SymGas
 
 instance Gas SymGas where
-  burn _ _ = pure ()
+  burn _ cont = cont
   returnGas _ = pure ()
   forceGas _ _ = 0
   gasToWord64 _ = 0
@@ -98,7 +98,7 @@ instance Gas Word64 where
   forceGas _ w =
     case maybeLitWord w of
       Just ww -> ww
-      Nothing -> error "expected concrete word"
+      Nothing -> internalError "expected concrete word"
 
   {-# INLINE gasFromWord64 #-}
   gasFromWord64 = id

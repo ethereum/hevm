@@ -31,7 +31,6 @@ import EVM.Exec qualified
 import EVM.Fetch qualified as Fetch
 import EVM.Types
 import Control.Monad.ST (stToIO, RealWorld)
-import Data.Word (Word64)
 
 -- | The instruction type of the operational monad
 data Action gas s a where
@@ -106,13 +105,15 @@ enter :: Text -> Stepper gas s ()
 enter t = evm (EVM.pushTrace (EntryTrace t))
 
 interpret
-  :: Fetch.Fetcher Word64 RealWorld
-  -> VM Word64 RealWorld
-  -> Stepper Word64 RealWorld a
+  :: forall gas a
+   . EVM.Gas gas
+  => Fetch.Fetcher gas RealWorld
+  -> VM gas RealWorld
+  -> Stepper gas RealWorld a
   -> IO a
 interpret fetcher vm = eval . view
   where
-    eval :: ProgramView (Action Word64 RealWorld) a -> IO a
+    eval :: ProgramView (Action gas RealWorld) a -> IO a
     eval (Return x) = pure x
     eval (action :>>= k) =
       case action of
@@ -123,7 +124,7 @@ interpret fetcher vm = eval . view
           (r, vm') <- stToIO $ runStateT (continue (Case (c > 0))) vm
           interpret fetcher vm' (k r)
         Wait (PleaseAskSMT c _ _) ->
-          error $ "cannot handle symbolic branch conditions in this interpreter: " <> show c
+          internalError $ "cannot handle symbolic branch conditions in this interpreter: " <> show c
         Wait q -> do
           m <- fetcher q
           vm' <- stToIO $ execStateT m vm

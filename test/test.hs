@@ -27,7 +27,7 @@ import Data.Text.IO qualified as T
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Typeable
 import Data.Vector qualified as V
-import Data.Word (Word8)
+import Data.Word (Word8, Word64)
 import GHC.Conc (getNumProcessors)
 import System.Directory
 import System.Environment
@@ -92,7 +92,8 @@ tests = testGroup "hevm"
           }
         }
         |]
-       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       expr <- withSolvers Z3 1 Nothing $ \s -> do
+         getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
        assertEqual "Expression is not clean." (badStoresInExpr expr) False
     -- This case is somewhat artificial. We can't simplify this using only
     -- static rewrite rules, because acct is totally abstract and acct + 1
@@ -806,7 +807,8 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just (Sig "fun(uint8)" [AbiUIntType 8])) [] defaultVeriOpts
+        (e, _) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x32] c (Just (Sig "fun(uint8)" [AbiUIntType 8])) [] defaultVeriOpts
+        T.writeFile "out.expr" (formatExpr e)
         -- assertBool "Access must be beyond element 2" $ (getVar ctr "arg1") > 1
         putStrLn "expected counterexample found"
       ,
@@ -3154,7 +3156,7 @@ runSimpleVM x ins = do
        s -> internalError $ show s
 
 -- | Takes a creation code and returns a vm with the result of executing the creation code
-loadVM :: ByteString -> IO (Maybe (VM RealWorld))
+loadVM :: ByteString -> IO (Maybe (VM Word64 RealWorld))
 loadVM x = do
   vm <- stToIO $ vmForEthrunCreation x
   vm1 <- Stepper.interpret (Fetch.zero 0 Nothing) vm Stepper.runFully
@@ -3220,7 +3222,7 @@ runStatements stmts args t = do
     }
   |] (abiMethod s (AbiTuple $ V.fromList args))
 
-getStaticAbiArgs :: Int -> VM s -> [Expr EWord]
+getStaticAbiArgs :: Gas gas => Int -> VM gas s -> [Expr EWord]
 getStaticAbiArgs n vm =
   let cd = vm.state.calldata
   in decodeStaticArgs 4 n cd
@@ -3793,7 +3795,7 @@ bothM f (a, a') = do
 applyPattern :: String -> TestTree  -> TestTree
 applyPattern p = localOption (TestPattern (parseExpr p))
 
-checkBadCheatCode :: Text -> Postcondition s
+checkBadCheatCode :: Gas gas => Text -> Postcondition gas s
 checkBadCheatCode sig _ = \case
   (Failure _ _ (BadCheatCode s)) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
   _ -> PBool True
@@ -3808,7 +3810,7 @@ allBranchesFail = checkPost (Just p)
 reachableUserAsserts :: ByteString -> Maybe Sig -> IO (Either [SMTCex] (Expr End))
 reachableUserAsserts = checkPost (Just $ checkAssertions [0x01])
 
-checkPost :: Maybe (Postcondition RealWorld) -> ByteString -> Maybe Sig -> IO (Either [SMTCex] (Expr End))
+checkPost :: Maybe (Postcondition SymGas RealWorld) -> ByteString -> Maybe Sig -> IO (Either [SMTCex] (Expr End))
 checkPost post c sig = do
   (e, res) <- withSolvers Z3 1 Nothing $ \s ->
     verifyContract s c sig [] defaultVeriOpts Nothing post

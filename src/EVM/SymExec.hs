@@ -29,6 +29,7 @@ import Data.Text.Lazy.IO qualified as TL
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
 import EVM (makeVm, abstractContract, initialContract, getCodeLocation, isValidJumpDest, SymGas)
+import EVM qualified
 import EVM.Exec
 import EVM.Fetch qualified as Fetch
 import EVM.ABI
@@ -241,18 +242,20 @@ loadSymVM x callvalue cd create =
 -- | Interpreter which explores all paths at branching points. Returns an
 -- 'Expr End' representing the possible executions.
 interpret
-  :: Fetch.Fetcher SymGas RealWorld
+  :: forall gas
+   . EVM.Gas gas
+  => Fetch.Fetcher gas RealWorld
   -> Maybe Integer -- max iterations
   -> Integer -- ask smt iterations
   -> LoopHeuristic
-  -> VM SymGas RealWorld
-  -> Stepper SymGas RealWorld (Expr End)
+  -> VM gas RealWorld
+  -> Stepper gas RealWorld (Expr End)
   -> IO (Expr End)
 interpret fetcher maxIter askSmtIters heuristic vm =
   eval . Operational.view
   where
   eval
-    :: Operational.ProgramView (Stepper.Action SymGas RealWorld) (Expr End)
+    :: Operational.ProgramView (Stepper.Action gas RealWorld) (Expr End)
     -> IO (Expr End)
 
   eval (Operational.Return x) = pure x

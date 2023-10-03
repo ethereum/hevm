@@ -374,13 +374,13 @@ writeByte offset byte src = WriteByte offset byte src
 
 writeWord :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
 writeWord o@(Lit offset) (WAddr (LitAddr val)) b@(ConcreteBuf _)
-  | offset + 32 < maxBytes
+  | offset < maxBytes
   = writeWord o (Lit $ into val) b
 writeWord (Lit offset) (Lit val) (ConcreteBuf "")
-  | offset + 32 < maxBytes
+  | offset < maxBytes
   = ConcreteBuf $ BS.replicate (unsafeInto offset) 0 <> word256Bytes val
 writeWord o@(Lit offset) v@(Lit val) buf@(ConcreteBuf src)
-  | offset + 32 < maxBytes
+  | offset < maxBytes
     = ConcreteBuf $ (padRight (unsafeInto offset) $ BS.take (unsafeInto offset) src)
                  <> word256Bytes val
                  <> BS.drop ((unsafeInto offset) + 32) src

@@ -15,7 +15,7 @@ import Data.Word (Word64)
 ethrunAddress :: Addr
 ethrunAddress = Addr 0x00a329c0648769a73afac7f9381e08fb43dbea72
 
-vmForEthrunCreation :: Gas gas => ByteString -> ST s (VM gas s)
+vmForEthrunCreation :: ByteString -> ST s (VM Word64 s)
 vmForEthrunCreation creationCode =
   (makeVm $ VMOpts
     { contract = initialContract (InitCode creationCode mempty)

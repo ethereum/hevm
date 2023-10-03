@@ -18,6 +18,7 @@ import Control.Monad.State.Strict (StateT(..), liftIO)
 import Control.Monad.State.Strict qualified as State
 import Data.Aeson ((.:), (.:?))
 import Data.Aeson qualified as JSON
+import Data.Proxy
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
@@ -45,6 +46,7 @@ import Optics.Core hiding (pre)
 import Optics.State
 
 import EVM (makeVm, initialContract, exec1)
+import EVM qualified
 import EVM.Assembler (assemble)
 import EVM.Expr qualified as Expr
 import EVM.Concrete qualified as Concrete
@@ -417,9 +419,9 @@ runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transacti
 runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 Nothing $ \solvers -> do
   let calldata' = ConcreteBuf txn.txdata
       code' = alloc.code
-      buildExpr :: SolverGroup -> VM Word64 RealWorld -> IO (Expr End)
-      buildExpr s vm = interpret (Fetch.oracle s Nothing) Nothing 1 Naive (undefined vm) runExpr
-  origVM <- stToIO $ vmForRuntimeCode code' calldata' evmEnv alloc txn fromAddr toAddress
+      buildExpr :: EVM.Gas gas => SolverGroup -> VM gas RealWorld -> IO (Expr End)
+      buildExpr s vm = interpret (Fetch.oracle s Nothing) Nothing 1 Naive vm runExpr
+  origVM <- stToIO $ vmForRuntimeCode (Proxy @Word64) code' calldata' evmEnv alloc txn fromAddr toAddress
 
   expr <- buildExpr solvers $ symbolify origVM
   (res, (vm, trace)) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (origVM, [])
@@ -427,8 +429,8 @@ runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 
     Left x -> pure $ Left (x, trace)
     Right _ -> pure $ Right (expr, trace, vmres vm)
 
-vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> ST s (VM Word64 s)
-vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
+vmForRuntimeCode :: EVM.Gas gas => Proxy gas -> ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> ST s (VM gas s)
+vmForRuntimeCode _ runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
   let contract = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
                  & set #balance (Lit alloc.balance)
   in (makeVm $ VMOpts
@@ -463,6 +465,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
 runCode :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe (Expr Buf))
 runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
   origVM <- stToIO $ vmForRuntimeCode
+              (Proxy @Word64)
               code'
               calldata'
               emptyEvmToolEnv
