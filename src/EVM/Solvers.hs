@@ -21,10 +21,8 @@ import Data.Text.Lazy (Text)
 import Data.Text.Lazy qualified as T
 import Data.Text.Lazy.IO qualified as T
 import Data.Text.Lazy.Builder
-import Data.Maybe (fromJust, isJust)
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
 import Witch (into)
-import System.IO (openFile, IOMode(..))
 
 import EVM.SMT
 import EVM.Types (W256, Expr(AbstractBuf), internalError)
@@ -122,16 +120,15 @@ withSolvers solver count timeout cont = do
       orchestrate queue avail (fileCounter + 1)
 
     runTask (Task smt2@(SMT2 cmds (RefinementEqs refineEqs refps) cexvars ps) r) inst availableInstances fileCounter = do
-      debugF <- openFile "filename" WriteMode
       writeSMT2File smt2 fileCounter "abstracted"
       -- reset solver and send all lines of provided script
-      out <- sendScript inst (Just debugF) (SMT2 ("(reset)" : cmds) mempty mempty ps)
+      out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty ps)
       case out of
         -- if we got an error then return it
         Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
         -- otherwise call (check-sat), parse the result, and send it down the result channel
         Right () -> do
-          sat <- sendLine inst (Just debugF) "(check-sat)"
+          sat <- sendLine inst "(check-sat)"
           res <- do
               case sat of
                 "unsat" -> pure Unsat
@@ -141,8 +138,8 @@ withSolvers solver count timeout cont = do
                          else do
                               let refinedSMT2 = SMT2 refineEqs mempty mempty (ps <> refps)
                               writeSMT2File refinedSMT2 fileCounter "refined"
-                              _ <- sendScript inst (Just debugF) refinedSMT2
-                              sat2 <- sendLine inst (Just debugF) "(check-sat)"
+                              _ <- sendScript inst refinedSMT2
+                              sat2 <- sendLine inst "(check-sat)"
                               case sat2 of
                                 "unsat" -> pure Unsat
                                 "timeout" -> pure Unknown
@@ -266,7 +263,7 @@ spawnSolver solver timeout = do
     CVC5 -> pure solverInstance
     _ -> do
       _ <- sendLine' solverInstance $ "(set-option :timeout " <> mkTimeout timeout <> ")"
-      _ <- sendLine solverInstance Nothing "(set-option :print-success true)"
+      _ <- sendLine solverInstance "(set-option :print-success true)"
       pure solverInstance
 
 -- | Cleanly shutdown a running solver instnace
@@ -274,50 +271,46 @@ stopSolver :: SolverInstance -> IO ()
 stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just stdin, Just stdout, Just stderr, process)
 
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
-sendScript :: SolverInstance -> Maybe Handle -> SMT2 -> IO (Either Text ())
-sendScript solver debugF (SMT2 cmds _ _ _) = do
+sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
+sendScript solver (SMT2 cmds _ _ _) = do
   let sexprs = splitSExpr $ fmap toLazyText cmds
   go sexprs
   where
     go [] = pure $ Right ()
     go (c:cs) = do
-      out <- sendCommand solver debugF c
+      out <- sendCommand solver c
       case out of
         "success" -> go cs
         e -> pure $ Left $ "Solver returned an error:\n" <> e <> "\nwhile sending the following line: " <> c
 
-checkCommand :: SolverInstance -> Maybe Handle -> Text -> IO ()
-checkCommand inst debugF cmd = do
-  res <- sendCommand inst debugF cmd
+checkCommand :: SolverInstance -> Text -> IO ()
+checkCommand inst cmd = do
+  res <- sendCommand inst cmd
   case res of
     "success" -> pure ()
     _ -> internalError $ "Unexpected solver output: " <> T.unpack res
 
 -- | Sends a single command to the solver, returns the first available line from the output buffer
-sendCommand :: SolverInstance -> Maybe Handle -> Text -> IO Text
-sendCommand inst debugF cmd = do
+sendCommand :: SolverInstance -> Text -> IO Text
+sendCommand inst cmd = do
   -- trim leading whitespace
   let cmd' = T.dropWhile isSpace cmd
   case T.unpack cmd' of
     "" -> pure "success"      -- ignore blank lines
     ';' : _ -> pure "success" -- ignore comments
-    _ -> sendLine inst debugF cmd'
+    _ -> sendLine inst cmd'
 
 -- | Sends a string to the solver and appends a newline, returns the first available line from the output buffer
-sendLine :: SolverInstance -> Maybe Handle -> Text -> IO Text
-sendLine (SolverInstance _ stdin stdout _ _) debugF cmd = do
-  let toWrite = (T.append cmd "\n")
-  T.hPutStr stdin toWrite
-  when (isJust debugF) $ T.hPutStr (fromJust debugF) toWrite
+sendLine :: SolverInstance -> Text -> IO Text
+sendLine (SolverInstance _ stdin stdout _ _) cmd = do
+  T.hPutStr stdin (T.append cmd "\n")
   hFlush stdin
   T.hGetLine stdout
 
 -- | Sends a string to the solver and appends a newline, doesn't return stdout
-sendLine' :: SolverInstance -> Maybe Handle -> Text -> IO ()
-sendLine' (SolverInstance _ stdin _ _ _) debugF cmd = do
-  let toWrite = (T.append cmd "\n")
-  T.hPutStr stdin toWrite
-  when (isJust debugF) $ T.hPutStr (fromJust debugF) toWrite
+sendLine' :: SolverInstance -> Text -> IO ()
+sendLine' (SolverInstance _ stdin _ _ _) cmd = do
+  T.hPutStr stdin (T.append cmd "\n")
   hFlush stdin
 
 -- | Returns a string representation of the model for the requested variable
