@@ -1952,7 +1952,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (_, [Cex (_, a), Cex (_, b)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] debugVeriOpts
+          (_, [Cex (_, a), Cex (_, b)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           let ints = map (flip getVar "arg1") [a,b]
           assertBool "0 must be one of the Cex-es" $ isJust $ List.elemIndex 0 ints
           putStrLn "expected 2 counterexamples found, one Cex is the 0 value"
