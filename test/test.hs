@@ -1723,7 +1723,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint16)" [AbiUIntType 16])) [] debugVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint16)" [AbiUIntType 16])) [] defaultVeriOpts
         putStrLn "DIV by zero is zero"
       ,
       -- Somewhat tautological since we are asserting the precondition
