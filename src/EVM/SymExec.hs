@@ -33,7 +33,7 @@ import EVM.Exec
 import EVM.Fetch qualified as Fetch
 import EVM.ABI
 import EVM.Expr qualified as Expr
-import EVM.Format (formatExpr, formatPartial)
+import EVM.Format (formatExpr, formatPartial, showVal, bsToHex)
 import EVM.SMT (SMTCex(..), SMT2(..), assertProps, formatSMT2)
 import EVM.SMT qualified as SMT
 import EVM.Solvers
@@ -812,7 +812,7 @@ showModel cd (expr, res) = do
       putStrLn ""
       putStrLn "Inputs:"
       putStrLn ""
-      T.putStrLn $ indent 2 $ formatCex cd cex
+      T.putStrLn $ indent 2 $ formatCex cd Nothing cex
       putStrLn ""
       putStrLn "End State:"
       putStrLn ""
@@ -820,8 +820,8 @@ showModel cd (expr, res) = do
       putStrLn ""
 
 
-formatCex :: Expr Buf -> SMTCex -> Text
-formatCex cd m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
+formatCex :: Expr Buf -> Maybe Sig -> SMTCex -> Text
+formatCex cd sig m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
   [ "Calldata:"
   , indent 2 cd'
   , ""
@@ -837,7 +837,9 @@ formatCex cd m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
     -- it for branches that do not refer to calldata at all (e.g. the top level
     -- callvalue check inserted by solidity in contracts that don't have any
     -- payable functions).
-    cd' = prettyBuf . Expr.simplify . defaultSymbolicValues $ subModel m cd
+    cd' = case sig of
+      Nothing -> prettyBuf . Expr.simplify . defaultSymbolicValues $ subModel m cd
+      Just (Sig n ts) -> prettyCalldata m cd n ts
 
     storeCex :: [Text]
     storeCex
@@ -892,6 +894,18 @@ formatCex cd m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
     prettyBuf (ConcreteBuf "") = "Empty"
     prettyBuf (ConcreteBuf bs) = formatBinary bs
     prettyBuf b = internalError $ "Unexpected symbolic buffer:\n" <> T.unpack (formatExpr b)
+
+prettyCalldata :: SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
+prettyCalldata cex buf sig types = head (T.splitOn "(" sig) <> "(" <> body <> ")"
+  where
+    argdata = Expr.drop 4 . Expr.simplify . defaultSymbolicValues $ subModel cex buf
+    body = case decodeBuf types argdata of
+      CAbi v -> T.intercalate "," (fmap showVal v)
+      NoVals -> case argdata of
+          ConcreteBuf c -> T.pack (bsToHex c)
+          _ -> err
+      SAbi _ -> err
+    err = internalError $ "unable to produce a concrete model for calldata: " <> show buf
 
 -- | If the expression contains any symbolic values, default them to some
 -- concrete value The intuition here is that if we still have symbolic values

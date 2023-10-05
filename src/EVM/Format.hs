@@ -30,6 +30,7 @@ module EVM.Format
   , hexByteString
   , hexText
   , bsToHex
+  , showVal
   ) where
 
 import Prelude hiding (LT, GT)
@@ -803,3 +804,8 @@ hexText t =
 
 bsToHex :: ByteString -> String
 bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
+
+showVal :: AbiValue -> Text
+showVal (AbiBytes _ bs) = formatBytes bs
+showVal (AbiAddress addr) = T.pack  . show $ addr
+showVal v = T.pack . show $ v

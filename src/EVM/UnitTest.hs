@@ -9,13 +9,13 @@ import EVM.SMT
 import EVM.Solvers
 import EVM.Dapp
 import EVM.Exec
-import EVM.Expr (readStorage', simplify)
+import EVM.Expr (readStorage')
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, subModel, defaultSymbolicValues, panicMsg, VeriOpts(..), flattenExpr)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
@@ -279,23 +279,6 @@ symFailure UnitTestOptions {..} testName cd types failures' =
               ]
             _ -> ""
         ]
-
-prettyCalldata :: SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
-prettyCalldata cex buf sig types = head (Text.splitOn "(" sig) <> "(" <> body <> ")"
-  where
-    argdata = Expr.drop 4 . simplify . defaultSymbolicValues $ subModel cex buf
-    body = case decodeBuf types argdata of
-      CAbi v -> intercalate "," (fmap showVal v)
-      NoVals -> case argdata of
-          ConcreteBuf c -> pack (bsToHex c)
-          _ -> err
-      SAbi _ -> err
-    err = internalError $ "unable to produce a concrete model for calldata: " <> show buf
-
-showVal :: AbiValue -> Text
-showVal (AbiBytes _ bs) = formatBytes bs
-showVal (AbiAddress addr) = Text.pack  . show $ addr
-showVal v = Text.pack . show $ v
 
 execSymTest :: UnitTestOptions RealWorld -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper RealWorld (Expr End)
 execSymTest UnitTestOptions{ .. } method cd = do
