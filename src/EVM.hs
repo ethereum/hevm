@@ -67,16 +67,13 @@ class (Num gas, FeeSchedule gas) => Gas gas where
   initialGas :: gas
   maxGasVal :: gas
 
-  -- we can't require Integral for gas since we can't implement it for SymGas
-  -- so we have to copy the ops we need here
+  -- we can't require Integral or Ord for gas since we can't implement it for
+  -- SymGas so we have to stick some extra ops in the class here
   divGas :: gas -> gas -> gas
   ceilDivGas :: gas -> gas -> gas
   minGas :: gas -> gas -> gas
   quotGas :: gas -> gas -> gas
   allButOne64th :: gas -> gas
-
-  -- if the first arg is gte than the second return the third, else the fourth
-  condGasVal :: gas -> gas -> gas -> gas -> gas
 
 data SymGas = SymGas
 
@@ -101,7 +98,6 @@ instance Gas SymGas where
   allButOne64th _ = SymGas
   quotGas _ _ = SymGas
   minGas _ _ = SymGas
-  condGasVal _ _ _ _ = SymGas
 
 instance Gas Word64 where
   -- | Burn gas, failing if insufficient gas is available
@@ -118,6 +114,8 @@ instance Gas Word64 where
 
   {-# INLINE gasFromWord64 #-}
   gasFromWord64 = id
+
+  {-# INLINE word64FromGas #-}
   word64FromGas = Just
   gasFromEWord (Lit w) = case tryInto @Word64 w of
     Right g -> Just g
@@ -126,20 +124,23 @@ instance Gas Word64 where
 
   {-# INLINE initialGas #-}
   initialGas = 0
+
+  {-# INLINE maxGasVal #-}
   maxGasVal = maxBound
 
+  {-# INLINE divGas #-}
   divGas = div
+
+  {-# INLINE ceilDivGas #-}
   ceilDivGas = ceilDiv
+
+  {-# INLINE quotGas #-}
   quotGas = quot
+
+  {-# INLINE minGas #-}
   minGas = min
 
-  -- sufficientGas available required insufficient sufficient
-  --   = if available < required
-  --     then insufficient available required
-  --     else sufficient
-  --
-  condGasVal a b x y = if a >= b then x else y
-
+  {-# INLINE allButOne64th #-}
   allButOne64th n = n - div n 64
 
 
