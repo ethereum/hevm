@@ -85,7 +85,6 @@ library
     EVM.Exec,
     EVM.Format,
     EVM.Fetch,
-    EVM.FeeSchedule,
     EVM.Op,
     EVM.Precompiled,
     EVM.RLP,

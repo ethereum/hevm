@@ -2,7 +2,6 @@ module EVM.Test.BlockchainTests where
 
 import EVM (initialContract, makeVm)
 import EVM.Concrete qualified as EVM
-import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified
 import EVM.Format (hexText)
 import EVM.Stepper qualified
@@ -370,7 +369,7 @@ fromBlockchainCase' block tx preState postState =
          , caller         = LitAddr origin
          , baseState      = EmptyBase
          , origin         = LitAddr origin
-         , gas            = tx.gasLimit - txGasCost feeSchedule tx
+         , gas            = tx.gasLimit
          , baseFee        = block.baseFee
          , priorityFee    = priorityFee tx block.baseFee
          , gaslimit       = tx.gasLimit
@@ -381,7 +380,6 @@ fromBlockchainCase' block tx preState postState =
          , maxCodeSize    = maxCodeSize
          , blockGaslimit  = block.gasLimit
          , gasprice       = effectiveGasPrice
-         , schedule       = feeSchedule
          , chainId        = 1
          , create         = isCreate
          , txAccessList   = Map.mapKeys LitAddr (txAccessMap tx)

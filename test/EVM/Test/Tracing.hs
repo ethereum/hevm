@@ -51,7 +51,6 @@ import EVM.Concrete qualified as Concrete
 import EVM.Exec (ethrunAddress)
 import EVM.Fetch qualified as Fetch
 import EVM.Format (bsToHex, formatBinary)
-import EVM.FeeSchedule
 import EVM.Op (intToOpName)
 import EVM.Sign (deriveAddr)
 import EVM.Solvers
@@ -65,7 +64,6 @@ data VMTrace =
   VMTrace
   { tracePc      :: Int
   , traceOp      :: Int
-  , traceGas     :: Data.Word.Word64
   , traceMemSize :: Data.Word.Word64
   , traceDepth   :: Int
   , traceStack   :: [W256]
@@ -144,7 +142,6 @@ data EVMToolEnv = EVMToolEnv
   , gasLimit    :: Data.Word.Word64
   , baseFee     :: W256
   , maxCodeSize :: W256
-  , schedule    :: FeeSchedule Data.Word.Word64
   , blockHashes :: Map.Map Int W256
   } deriving (Show, Generic)
 
@@ -171,7 +168,6 @@ emptyEvmToolEnv = EVMToolEnv { coinbase = 0
                              , gasLimit   = 0xffffffffffffffff
                              , baseFee    = 0
                              , maxCodeSize= 0xffffffff
-                             , schedule   = feeSchedule
                              , blockHashes = mempty
                              }
 
@@ -288,7 +284,6 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
                         , gasLimit    =  unsafeInto gaslimitExec
                         , baseFee     =  0x0
                         , maxCodeSize =  0xfffff
-                        , schedule    =  feeSchedule
                         , blockHashes =  blockHashesDefault
                         }
     sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
@@ -341,16 +336,9 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
           bPc = b.pc
           aStack = a.traceStack
           bStack = b.stack
-          aGas = into a.traceGas
-          bGas = b.gas
       -- putStrLn $ "hevm: " <> intToOpName aOp <> " pc: " <> show aPc <> " gas: " <> show aGas <> " stack: " <> show aStack
       -- putStrLn $ "geth: " <> intToOpName bOp <> " pc: " <> show bPc <> " gas: " <> show bGas <> " stack: " <> show bStack
 
-      when (aGas /= bGas) $ do
-        putStrLn "GAS doesn't match:"
-        putStrLn $ "HEVM's gas   : " <> (show aGas)
-        putStrLn $ "evmtool's gas: " <> (show bGas)
-        putStrLn $ "executing opcode: " <> (intToOpName aOp)
       when (aOp /= bOp || aPc /= bPc) $ do
         putStrLn $ "HEVM: " <> (intToOpName aOp) <> " (pc " <> (show aPc) <> ") --- evmtool " <> (intToOpName bOp) <> " (pc " <> (show bPc) <> ")"
 
@@ -362,7 +350,7 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
         putStrLn "stacks don't match:"
         putStrLn $ "HEVM's stack   : " <> (show aStack)
         putStrLn $ "evmtool's stack: " <> (show bStack)
-      if aOp == bOp && aStack == bStack && aPc == bPc && aGas == bGas then go ax bx
+      if aOp == bOp && aStack == bStack && aPc == bPc then go ax bx
       else pure False
 
 
@@ -444,14 +432,13 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
     , number = evmToolEnv.number
     , timestamp = evmToolEnv.timestamp
     , gasprice = fromJust txn.gasPrice
-    , gas = txn.gasLimit - (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
+    , gas = txn.gasLimit
     , gaslimit = txn.gasLimit
     , blockGaslimit = evmToolEnv.gasLimit
     , prevRandao = evmToolEnv.prevRandao
     , baseFee = evmToolEnv.baseFee
     , priorityFee = fromJust txn.maxPriorityFeeGas
     , maxCodeSize = evmToolEnv.maxCodeSize
-    , schedule = evmToolEnv.schedule
     , chainId = txn.chainId
     , create = False
     , txAccessList = mempty
@@ -481,7 +468,6 @@ vmtrace vm =
     memsize = vm.state.memorySize
   in VMTrace { tracePc = vm.state.pc
              , traceOp = into $ getOp vm
-             , traceGas = vm.state.gas
              , traceMemSize = memsize
              -- increment to match geth format
              , traceDepth = 1 + length (vm.frames)
@@ -516,7 +502,7 @@ vmtrace vm =
 vmres :: VM s -> VMTraceResult
 vmres vm =
   let
-    gasUsed' = vm.tx.gaslimit - vm.state.gas
+    gasUsed' = vm.tx.gaslimit
     res = case vm.result of
       Just (VMSuccess (ConcreteBuf b)) -> (ByteStringS b)
       Just (VMSuccess x) -> internalError $ "unhandled: " <> (show x)

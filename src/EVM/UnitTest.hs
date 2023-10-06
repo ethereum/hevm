@@ -11,7 +11,6 @@ import EVM.Dapp
 import EVM.Exec
 import EVM.Expr (readStorage')
 import EVM.Expr qualified as Expr
-import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
@@ -417,7 +416,6 @@ makeTxCall params (cd, cdProps) = do
   assign (#state % #calldata) cd
   #constraints %= (<> cdProps)
   assign (#state % #caller) params.caller
-  assign (#state % #gas) params.gasCall
   origin <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (#env % #contracts % at params.origin)
   let insufficientBal = maybe False (\b -> b < params.gasprice * (into params.gasCall)) (maybeLitWord origin.balance)
   when insufficientBal $ internalError "insufficient balance for gas cost"
@@ -445,7 +443,6 @@ initialUnitTestVm (UnitTestOptions {..}) theContract = do
            , priorityFee = testParams.priorityFee
            , maxCodeSize = testParams.maxCodeSize
            , prevRandao = testParams.prevrandao
-           , schedule = feeSchedule
            , chainId = testParams.chainId
            , create = True
            , baseState = EmptyBase

@@ -1,7 +1,6 @@
 module EVM.Transaction where
 
-import EVM (initialContract, ceilDiv)
-import EVM.FeeSchedule
+import EVM (initialContract)
 import EVM.RLP
 import EVM.Types
 import EVM.Format (hexText)
@@ -14,14 +13,13 @@ import Data.Aeson (FromJSON (..))
 import Data.Aeson qualified as JSON
 import Data.Aeson.Types qualified as JSON
 import Data.ByteString (ByteString, cons)
-import Data.ByteString qualified as BS
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (fromMaybe, isNothing, fromJust)
+import Data.Maybe (fromMaybe, fromJust)
 import Data.Word (Word64)
 import GHC.Generics (Generic)
 import Numeric (showHex)
-import Witch (into, unsafeInto)
+import Witch (into)
 
 data AccessListEntry = AccessListEntry {
   address :: Addr,
@@ -168,27 +166,6 @@ signingData tx =
           rlpWord256 tx.value,
           BS tx.txdata,
           rlpAccessList]
-
-accessListPrice :: FeeSchedule Word64 -> [AccessListEntry] -> Word64
-accessListPrice fs al =
-    sum (map
-      (\ale ->
-        fs.g_access_list_address  +
-        (fs.g_access_list_storage_key  * (unsafeInto . length) ale.storageKeys))
-        al)
-
-txGasCost :: FeeSchedule Word64 -> Transaction -> Word64
-txGasCost fs tx =
-  let calldata     = tx.txdata
-      zeroBytes    = BS.count 0 calldata
-      nonZeroBytes = BS.length calldata - zeroBytes
-      baseCost     = fs.g_transaction
-        + (if isNothing tx.toAddr then fs.g_txcreate + initcodeCost else 0)
-        + (accessListPrice fs tx.accessList )
-      zeroCost     = fs.g_txdatazero
-      nonZeroCost  = fs.g_txdatanonzero
-      initcodeCost = fs.g_initcodeword * unsafeInto (ceilDiv (BS.length calldata) 32)
-  in baseCost + zeroCost * (unsafeInto zeroBytes) + nonZeroCost * (unsafeInto nonZeroBytes)
 
 instance FromJSON AccessListEntry where
   parseJSON (JSON.Object val) = do

@@ -4,7 +4,6 @@ module EVM.Fetch where
 
 import EVM (initialContract, unknownContract)
 import EVM.ABI
-import EVM.FeeSchedule (feeSchedule)
 import EVM.Format (hexText)
 import EVM.SMT
 import EVM.Solvers
@@ -128,7 +127,7 @@ parseBlock j = do
      (Nothing, Just _, Just d) -> d
      _ -> internalError "block contains both difficulty and prevRandao"
   -- default codesize, default gas limit, default feescedule
-  pure $ Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff feeSchedule
+  pure $ Block coinbase timestamp number prd gasLimit (fromMaybe 0 baseFee) 0xffffffff
 
 fetchWithSession :: Text -> Session -> Value -> IO (Maybe Value)
 fetchWithSession url sess x = do

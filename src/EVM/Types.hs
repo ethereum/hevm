@@ -48,7 +48,6 @@ import Data.Vector.Unboxed.Mutable (STVector)
 import Numeric (readHex, showHex)
 import Options.Generic
 import Optics.TH
-import EVM.FeeSchedule (FeeSchedule (..))
 
 import Text.Regex.TDFA qualified as Regex
 import Text.Read qualified
@@ -283,9 +282,7 @@ data Expr (a :: EType) where
 
   Balance        :: Expr EAddr -> Expr EWord
 
-  Gas            :: Int                -- frame idx
-                 -> Int                -- PC
-                 -> Expr EWord
+  Gas            :: Int -> Expr EWord
 
   -- code
 
@@ -515,7 +512,7 @@ data EvmError
   | InvalidMemoryAccess
   | CallDepthLimitReached
   | MaxCodeSizeExceeded W256 W256
-  | MaxInitCodeSizeExceeded W256 W256
+  | MaxInitCodeSizeExceeded W256 (Expr EWord)
   | InvalidFormat
   | PrecompileFailure
   | ReturnDataOutOfBounds
@@ -595,7 +592,6 @@ data VM s = VM
   , logs           :: [Expr Log]
   , traces         :: Zipper.TreePos Zipper.Empty Trace
   , cache          :: Cache
-  , burned         :: {-# UNPACK #-} !Word64
   , iterations     :: Map CodeLocation (Int, [Expr EWord])
   -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
@@ -648,8 +644,8 @@ data FrameContext
   | CallContext
     { target        :: Expr EAddr
     , context       :: Expr EAddr
-    , offset        :: W256
-    , size          :: W256
+    , offset        :: Expr EWord
+    , size          :: Expr EWord
     , codehash      :: Expr EWord
     , abi           :: Maybe W256
     , calldata      :: Expr Buf
@@ -664,7 +660,6 @@ data SubState = SubState
   , touchedAccounts     :: [Expr EAddr]
   , accessedAddresses   :: Set (Expr EAddr)
   , accessedStorageKeys :: Set (Expr EAddr, W256)
-  , refunds             :: [(Expr EAddr, Word64)]
   -- in principle we should include logs here, but do not for now
   }
   deriving (Eq, Ord, Show)
@@ -681,7 +676,6 @@ data FrameState s = FrameState
   , calldata     :: Expr Buf
   , callvalue    :: Expr EWord
   , caller       :: Expr EAddr
-  , gas          :: {-# UNPACK #-} !Word64
   , returndata   :: Expr Buf
   , static       :: Bool
   }
@@ -716,6 +710,7 @@ data Env = Env
   { contracts      :: Map (Expr EAddr) Contract
   , chainId        :: W256
   , freshAddresses :: Int
+  , freshGasVals   :: Int
   }
   deriving (Show, Generic)
 
@@ -728,7 +723,6 @@ data Block = Block
   , gaslimit    :: Word64
   , baseFee     :: W256
   , maxCodeSize :: W256
-  , schedule    :: FeeSchedule Word64
   } deriving (Show, Generic)
 
 -- | Full contract state
@@ -867,7 +861,6 @@ data VMOpts = VMOpts
   , blockGaslimit :: Word64
   , gasprice :: W256
   , baseFee :: W256
-  , schedule :: FeeSchedule Word64
   , chainId :: W256
   , create :: Bool
   , txAccessList :: Map (Expr EAddr) [W256]
