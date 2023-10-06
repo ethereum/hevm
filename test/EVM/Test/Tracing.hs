@@ -74,7 +74,14 @@ data VMTrace =
   } deriving (Generic, Show)
 
 instance JSON.ToJSON VMTrace where
-  toEncoding = JSON.genericToEncoding JSON.defaultOptions
+  toJSON t = JSON.object
+    [ ("pc", JSON.toJSON t.tracePc)
+    , ("op", JSON.toJSON t.traceOp)
+    , ("gas", JSON.toJSON t.traceGas)
+    , ("memSize", JSON.toJSON t.traceMemSize)
+    , ("stack", JSON.toJSON t.traceStack)
+    , ("depth", JSON.toJSON t.traceDepth)
+    ]
 instance JSON.FromJSON VMTrace
 
 data VMTraceResult =
@@ -473,20 +480,21 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
     Left _ -> Nothing
     Right b -> Just b
 
-vmtrace :: VM Word64 s -> VMTrace
-vmtrace vm =
-  let
-    memsize = vm.state.memorySize
-  in VMTrace { tracePc = vm.state.pc
-             , traceOp = into $ getOp vm
-             , traceGas = vm.state.gas
-             , traceMemSize = memsize
-             -- increment to match geth format
-             , traceDepth = 1 + length (vm.frames)
-             -- reverse to match geth format
-             , traceStack = reverse $ forceLit <$> vm.state.stack
-             , traceError = readoutError vm.result
-             }
+vmtrace :: VM Word64 s -> Maybe VMTrace
+vmtrace vm = do
+  let memsize = vm.state.memorySize
+  op <- getOp vm
+  pure $ VMTrace
+    { tracePc = vm.state.pc
+    , traceOp = into op
+    , traceGas = vm.state.gas
+    , traceMemSize = memsize
+    -- increment to match geth format
+    , traceDepth = 1 + length (vm.frames)
+    -- reverse to match geth format
+    , traceStack = reverse $ forceLit <$> vm.state.stack
+    , traceError = readoutError vm.result
+    }
   where
     readoutError :: Maybe (VMResult gas s) -> Maybe String
     readoutError (Just (VMFailure e)) = case e of
@@ -540,17 +548,26 @@ runWithTrace = do
   vm0 <- use _1
   case vm0.result of
     Nothing -> do
-      State.modify' (\(a, b) -> (a, b ++ [vmtrace vm0]))
-      vm' <- liftIO $ stToIO $ State.execStateT exec1 vm0
-      assign _1 vm'
-      runWithTrace
+      case vmtrace vm0 of
+        Nothing -> do
+          vm' <- liftIO $ stToIO $ State.execStateT exec1 vm0
+          assign _1 vm'
+          runWithTrace
+        Just trace -> do
+          State.modify' (\(a, b) -> (a, b ++ [trace]))
+          vm' <- liftIO $ stToIO $ State.execStateT exec1 vm0
+          assign _1 vm'
+          runWithTrace
     Just (VMFailure _) -> do
-      -- Update error text for last trace element
-      (a, b) <- State.get
-      let updatedElem = (last b) {traceError = (vmtrace vm0).traceError}
-          updatedTraces = take (length b - 1) b ++ [updatedElem]
-      State.put (a, updatedTraces)
-      pure vm0
+      case vmtrace vm0 of
+        Nothing -> error "no trace for error"
+        Just t -> do
+          -- Update error text for last trace element
+          (a, b) <- State.get
+          let updatedElem = (last b) {traceError = t.traceError}
+              updatedTraces = take (length b - 1) b ++ [updatedElem]
+          State.put (a, updatedTraces)
+          pure vm0
     Just _ -> pure vm0
 
 interpretWithTrace
@@ -806,7 +823,7 @@ forceLit _ = undefined
 randItem :: [a] -> IO a
 randItem = generate . Test.QuickCheck.elements
 
-getOp :: VM gas s -> Word8
+getOp :: VM gas s -> Maybe Word8
 getOp vm =
   let pcpos  = vm ^. #state % #pc
       code' = vm ^. #state % #code
@@ -815,9 +832,8 @@ getOp vm =
         InitCode bs _ -> BS.drop pcpos bs
         RuntimeCode (ConcreteRuntimeCode xs') -> BS.drop pcpos xs'
         RuntimeCode (SymbolicRuntimeCode _) -> internalError "RuntimeCode is symbolic"
-  in if xs == BS.empty then 0
-                       else BS.head xs
-
+  in if xs == BS.empty then Nothing
+                       else Just $ BS.head xs
 tests :: TestTree
 tests = testGroup "contract-quickcheck-run"
     [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract, GasLimitInt gasLimit, TxDataRaw txDataRaw) -> ioProperty $ do

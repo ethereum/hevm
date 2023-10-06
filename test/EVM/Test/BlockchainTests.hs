@@ -17,6 +17,7 @@ import Control.Monad.State.Strict
 import Data.Aeson ((.:), (.:?), FromJSON (..))
 import Data.Aeson qualified as JSON
 import Data.Aeson.Types qualified as JSON
+import Data.Aeson.Text qualified as JSON
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as Lazy
 import Data.ByteString.Lazy qualified as LazyByteString
@@ -24,6 +25,8 @@ import Data.List (isInfixOf)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromJust, fromMaybe, isNothing, isJust)
+import Data.Text.Lazy.IO qualified as TL
+import Data.Text.Lazy.Builder
 import Data.Word (Word64)
 import System.Environment (lookupEnv, getEnv)
 import System.FilePath.Find qualified as Find

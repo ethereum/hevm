@@ -61,11 +61,9 @@ import Crypto.Number.ModArithmetic (expFast)
 
 class (Num gas, FeeSchedule gas) => Gas gas where
   burn :: gas -> EVM gas s () -> EVM gas s ()
-  returnGas :: gas -> EVM gas s ()
   word64FromGas :: gas -> Maybe Word64
   gasFromWord64 :: Word64 -> gas
   gasFromEWord :: Expr EWord -> Maybe gas
-  sufficientGas :: gas -> gas -> (gas -> gas -> EVM gas s ()) -> EVM gas s () -> EVM gas s ()
   initialGas :: gas
   maxGasVal :: gas
 
@@ -93,11 +91,9 @@ instance Num SymGas where
 
 instance Gas SymGas where
   burn _ cont = cont
-  returnGas _ = pure ()
   gasFromWord64 _ = SymGas
   gasFromEWord _ = Just SymGas
   initialGas = SymGas
-  sufficientGas _ _ _ cont = cont
   maxGasVal = SymGas
   divGas _ _ = SymGas
   ceilDivGas _ _ = SymGas
@@ -120,11 +116,6 @@ instance Gas Word64 where
       else
         vmError (OutOfGas available n)
 
-  returnGas :: Word64 -> EVM Word64 s ()
-  returnGas remainingGas = do
-    modifying #burned (subtract remainingGas)
-    modifying (#state % #gas) (+ remainingGas)
-
   {-# INLINE gasFromWord64 #-}
   gasFromWord64 = id
   word64FromGas = Just
@@ -142,11 +133,11 @@ instance Gas Word64 where
   quotGas = quot
   minGas = min
 
-  sufficientGas available required insufficient sufficient
-    = if available < required
-      then insufficient available required
-      else sufficient
-
+  -- sufficientGas available required insufficient sufficient
+  --   = if available < required
+  --     then insufficient available required
+  --     else sufficient
+  --
   condGasVal a b x y = if a >= b then x else y
 
   allButOne64th n = n - div n 64
@@ -816,54 +807,60 @@ exec1 = do
           case stk of
             x:new:xs ->
               accessStorage self x $ \current -> do
-                availableGas <- use (#state % #gas)
-                sufficientGas availableGas g_callstipend
-                  (\a req ->
-                    -- TODO: fromJust is OK here cos this will only ever get called when gas is a Word64, but this code really does not spark joy...
-                    finishFrame (FrameErrored (OutOfGas (fromJust $ word64FromGas a) (fromJust $ word64FromGas req)))
-                  ) $ do
-                    let
-                      original =
-                        case Expr.simplify $ SLoad x this.origStorage of
-                          Lit v -> v
-                          _ -> 0
-                      storage_cost =
-                        case (maybeLitWord current, maybeLitWord new) of
-                          (Just current', Just new') ->
-                             if (current' == new') then g_sload
-                             else if (current' == original) && (original == 0) then g_sset
-                             else if (current' == original) then g_sreset
-                             else g_sload
-
-                          -- if any of the arguments are symbolic,
-                          -- assume worst case scenario
-                          _-> g_sset
-
-                    acc <- accessStorageForGas self x
-                    let cold_storage_cost = if acc then 0 else g_cold_sload
-                    burn (storage_cost + cold_storage_cost) $ do
+                let updateStore = do
                       next
                       assign (#state % #stack) xs
                       modifying (#env % #contracts % ix self % #storage) (writeStorage x new)
 
-                      case (maybeLitWord current, maybeLitWord new) of
-                         (Just current', Just new') ->
-                            unless (current' == new') $
-                              if current' == original then
-                                when (original /= 0 && new' == 0) $
-                                  refund (g_sreset + g_access_list_storage_key)
-                              else do
-                                when (original /= 0) $
-                                  if current' == 0
-                                  then unRefund (g_sreset + g_access_list_storage_key)
-                                  else when (new' == 0) $ refund (g_sreset + g_access_list_storage_key)
-                                when (original == new') $
-                                  if original == 0
-                                  then refund (g_sset - g_sload)
-                                  else refund (g_sreset - g_sload)
-                         -- if any of the arguments are symbolic,
-                         -- don't change the refund counter
-                         _ -> noop
+                availableGas <- use (#state % #gas)
+                case (word64FromGas availableGas, word64FromGas @gas g_callstipend) of
+                  (Just avail, Just stipend) ->
+                    if avail <= stipend
+                    then finishFrame (FrameErrored (OutOfGas avail stipend))
+                    else do
+                      let
+                        original =
+                          case Expr.simplify $ SLoad x this.origStorage of
+                            Lit v -> v
+                            _ -> 0
+                        storage_cost =
+                          case (maybeLitWord current, maybeLitWord new) of
+                            (Just current', Just new') ->
+                               if (current' == new') then g_sload
+                               else if (current' == original) && (original == 0) then g_sset
+                               else if (current' == original) then g_sreset
+                               else g_sload
+
+                            -- if any of the arguments are symbolic,
+                            -- assume worst case scenario
+                            _-> g_sset
+
+                      acc <- accessStorageForGas self x
+                      let cold_storage_cost = if acc then 0 else g_cold_sload
+                      burn (storage_cost + cold_storage_cost) $ do
+                        updateStore
+
+                        case (maybeLitWord current, maybeLitWord new) of
+                           (Just current', Just new') ->
+                              unless (current' == new') $
+                                if current' == original then
+                                  when (original /= 0 && new' == 0) $
+                                    refund (g_sreset + g_access_list_storage_key)
+                                else do
+                                  when (original /= 0) $
+                                    if current' == 0
+                                    then unRefund (g_sreset + g_access_list_storage_key)
+                                    else when (new' == 0) $ refund (g_sreset + g_access_list_storage_key)
+                                  when (original == new') $
+                                    if original == 0
+                                    then refund (g_sset - g_sload)
+                                    else refund (g_sreset - g_sload)
+                           -- if any of the arguments are symbolic,
+                           -- don't change the refund counter
+                           _ -> noop
+
+                  -- if we have symbolic gas we skip all the nonsense above and just update storage directly
+                  _ -> updateStore
             _ -> underrun
 
         OpJump ->
@@ -1227,136 +1224,141 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
                          assign (#state % #stack) (Lit 0 : xs)
                          pushTrace $ ErrorTrace PrecompileFailure
                          next
-  sufficientGas gasCap cost
-    (\_ _ -> burn gasCap $ do
-      assign (#state % #stack) (Lit 0 : xs)
-      next) $
-    burn cost $
-    case preCompileAddr of
-      -- ECRECOVER
-      0x1 ->
-        -- TODO: support symbolic variant
-        forceConcreteBuf input "ECRECOVER" $ \input' -> do
-          case EVM.Precompiled.execute 0x1 (truncpadlit 128 input') 32 of
-            Nothing -> do
-              -- return no output for invalid signature
-              assign (#state % #stack) (Lit 1 : xs)
-              assign (#state % #returndata) mempty
-              next
-            Just output -> do
-              assign (#state % #stack) (Lit 1 : xs)
-              assign (#state % #returndata) (ConcreteBuf output)
-              copyBytesToMemory (ConcreteBuf output) outSize (Lit 0) outOffset
-              next
+      exec = do
+        burn cost $
+          case preCompileAddr of
+            -- ECRECOVER
+            0x1 ->
+              -- TODO: support symbolic variant
+              forceConcreteBuf input "ECRECOVER" $ \input' -> do
+                case EVM.Precompiled.execute 0x1 (truncpadlit 128 input') 32 of
+                  Nothing -> do
+                    -- return no output for invalid signature
+                    assign (#state % #stack) (Lit 1 : xs)
+                    assign (#state % #returndata) mempty
+                    next
+                  Just output -> do
+                    assign (#state % #stack) (Lit 1 : xs)
+                    assign (#state % #returndata) (ConcreteBuf output)
+                    copyBytesToMemory (ConcreteBuf output) outSize (Lit 0) outOffset
+                    next
 
-      -- SHA2-256
-      0x2 ->
-        forceConcreteBuf input "SHA2-256" $ \input' -> do
-          let
-            hash = sha256Buf input'
-            sha256Buf x = ConcreteBuf $ BA.convert (Crypto.hash x :: Digest SHA256)
-          assign (#state % #stack) (Lit 1 : xs)
-          assign (#state % #returndata) hash
-          copyBytesToMemory hash outSize (Lit 0) outOffset
-          next
-
-      -- RIPEMD-160
-      0x3 ->
-        -- TODO: support symbolic variant
-        forceConcreteBuf input "RIPEMD160" $ \input' -> do
-          let
-            padding = BS.pack $ replicate 12 0
-            hash' = BA.convert (Crypto.hash input' :: Digest RIPEMD160)
-            hash  = ConcreteBuf $ padding <> hash'
-          assign (#state % #stack) (Lit 1 : xs)
-          assign (#state % #returndata) hash
-          copyBytesToMemory hash outSize (Lit 0) outOffset
-          next
-
-      -- IDENTITY
-      0x4 -> do
-          assign (#state % #stack) (Lit 1 : xs)
-          assign (#state % #returndata) input
-          copyCallBytesToMemory input outSize outOffset
-          next
-
-      -- MODEXP
-      0x5 ->
-        -- TODO: support symbolic variant
-        forceConcreteBuf input "MODEXP" $ \input' -> do
-          let
-            (lenb, lene, lenm) = parseModexpLength input'
-
-            output = ConcreteBuf $
-              if isZero (96 + lenb + lene) lenm input'
-              then truncpadlit (unsafeInto lenm) (asBE (0 :: Int))
-              else
+            -- SHA2-256
+            0x2 ->
+              forceConcreteBuf input "SHA2-256" $ \input' -> do
                 let
-                  b = asInteger $ lazySlice 96 lenb input'
-                  e = asInteger $ lazySlice (96 + lenb) lene input'
-                  m = asInteger $ lazySlice (96 + lenb + lene) lenm input'
-                in
-                  padLeft (unsafeInto lenm) (asBE (expFast b e m))
-          assign (#state % #stack) (Lit 1 : xs)
-          assign (#state % #returndata) output
-          copyBytesToMemory output outSize (Lit 0) outOffset
-          next
-
-      -- ECADD
-      0x6 ->
-        -- TODO: support symbolic variant
-        forceConcreteBuf input "ECADD" $ \input' ->
-          case EVM.Precompiled.execute 0x6 (truncpadlit 128 input') 64 of
-            Nothing -> precompileFail
-            Just output -> do
-              let truncpaddedOutput = ConcreteBuf $ truncpadlit 64 output
-              assign (#state % #stack) (Lit 1 : xs)
-              assign (#state % #returndata) truncpaddedOutput
-              copyBytesToMemory truncpaddedOutput outSize (Lit 0) outOffset
-              next
-
-      -- ECMUL
-      0x7 ->
-        -- TODO: support symbolic variant
-        forceConcreteBuf input "ECMUL" $ \input' ->
-          case EVM.Precompiled.execute 0x7 (truncpadlit 96 input') 64 of
-          Nothing -> precompileFail
-          Just output -> do
-            let truncpaddedOutput = ConcreteBuf $ truncpadlit 64 output
-            assign (#state % #stack) (Lit 1 : xs)
-            assign (#state % #returndata) truncpaddedOutput
-            copyBytesToMemory truncpaddedOutput outSize (Lit 0) outOffset
-            next
-
-      -- ECPAIRING
-      0x8 ->
-        -- TODO: support symbolic variant
-        forceConcreteBuf input "ECPAIR" $ \input' ->
-          case EVM.Precompiled.execute 0x8 input' 32 of
-          Nothing -> precompileFail
-          Just output -> do
-            let truncpaddedOutput = ConcreteBuf $ truncpadlit 32 output
-            assign (#state % #stack) (Lit 1 : xs)
-            assign (#state % #returndata) truncpaddedOutput
-            copyBytesToMemory truncpaddedOutput outSize (Lit 0) outOffset
-            next
-
-      -- BLAKE2
-      0x9 ->
-        -- TODO: support symbolic variant
-        forceConcreteBuf input "BLAKE2" $ \input' -> do
-          case (BS.length input', 1 >= BS.last input') of
-            (213, True) -> case EVM.Precompiled.execute 0x9 input' 64 of
-              Just output -> do
-                let truncpaddedOutput = ConcreteBuf $ truncpadlit 64 output
+                  hash = sha256Buf input'
+                  sha256Buf x = ConcreteBuf $ BA.convert (Crypto.hash x :: Digest SHA256)
                 assign (#state % #stack) (Lit 1 : xs)
-                assign (#state % #returndata) truncpaddedOutput
-                copyBytesToMemory truncpaddedOutput outSize (Lit 0) outOffset
+                assign (#state % #returndata) hash
+                copyBytesToMemory hash outSize (Lit 0) outOffset
                 next
-              Nothing -> precompileFail
-            _ -> precompileFail
 
-      _ -> notImplemented
+            -- RIPEMD-160
+            0x3 ->
+              -- TODO: support symbolic variant
+              forceConcreteBuf input "RIPEMD160" $ \input' -> do
+                let
+                  padding = BS.pack $ replicate 12 0
+                  hash' = BA.convert (Crypto.hash input' :: Digest RIPEMD160)
+                  hash  = ConcreteBuf $ padding <> hash'
+                assign (#state % #stack) (Lit 1 : xs)
+                assign (#state % #returndata) hash
+                copyBytesToMemory hash outSize (Lit 0) outOffset
+                next
+
+            -- IDENTITY
+            0x4 -> do
+                assign (#state % #stack) (Lit 1 : xs)
+                assign (#state % #returndata) input
+                copyCallBytesToMemory input outSize outOffset
+                next
+
+            -- MODEXP
+            0x5 ->
+              -- TODO: support symbolic variant
+              forceConcreteBuf input "MODEXP" $ \input' -> do
+                let
+                  (lenb, lene, lenm) = parseModexpLength input'
+
+                  output = ConcreteBuf $
+                    if isZero (96 + lenb + lene) lenm input'
+                    then truncpadlit (unsafeInto lenm) (asBE (0 :: Int))
+                    else
+                      let
+                        b = asInteger $ lazySlice 96 lenb input'
+                        e = asInteger $ lazySlice (96 + lenb) lene input'
+                        m = asInteger $ lazySlice (96 + lenb + lene) lenm input'
+                      in
+                        padLeft (unsafeInto lenm) (asBE (expFast b e m))
+                assign (#state % #stack) (Lit 1 : xs)
+                assign (#state % #returndata) output
+                copyBytesToMemory output outSize (Lit 0) outOffset
+                next
+
+            -- ECADD
+            0x6 ->
+              -- TODO: support symbolic variant
+              forceConcreteBuf input "ECADD" $ \input' ->
+                case EVM.Precompiled.execute 0x6 (truncpadlit 128 input') 64 of
+                  Nothing -> precompileFail
+                  Just output -> do
+                    let truncpaddedOutput = ConcreteBuf $ truncpadlit 64 output
+                    assign (#state % #stack) (Lit 1 : xs)
+                    assign (#state % #returndata) truncpaddedOutput
+                    copyBytesToMemory truncpaddedOutput outSize (Lit 0) outOffset
+                    next
+
+            -- ECMUL
+            0x7 ->
+              -- TODO: support symbolic variant
+              forceConcreteBuf input "ECMUL" $ \input' ->
+                case EVM.Precompiled.execute 0x7 (truncpadlit 96 input') 64 of
+                Nothing -> precompileFail
+                Just output -> do
+                  let truncpaddedOutput = ConcreteBuf $ truncpadlit 64 output
+                  assign (#state % #stack) (Lit 1 : xs)
+                  assign (#state % #returndata) truncpaddedOutput
+                  copyBytesToMemory truncpaddedOutput outSize (Lit 0) outOffset
+                  next
+
+            -- ECPAIRING
+            0x8 ->
+              -- TODO: support symbolic variant
+              forceConcreteBuf input "ECPAIR" $ \input' ->
+                case EVM.Precompiled.execute 0x8 input' 32 of
+                Nothing -> precompileFail
+                Just output -> do
+                  let truncpaddedOutput = ConcreteBuf $ truncpadlit 32 output
+                  assign (#state % #stack) (Lit 1 : xs)
+                  assign (#state % #returndata) truncpaddedOutput
+                  copyBytesToMemory truncpaddedOutput outSize (Lit 0) outOffset
+                  next
+
+            -- BLAKE2
+            0x9 ->
+              -- TODO: support symbolic variant
+              forceConcreteBuf input "BLAKE2" $ \input' -> do
+                case (BS.length input', 1 >= BS.last input') of
+                  (213, True) -> case EVM.Precompiled.execute 0x9 input' 64 of
+                    Just output -> do
+                      let truncpaddedOutput = ConcreteBuf $ truncpadlit 64 output
+                      assign (#state % #stack) (Lit 1 : xs)
+                      assign (#state % #returndata) truncpaddedOutput
+                      copyBytesToMemory truncpaddedOutput outSize (Lit 0) outOffset
+                      next
+                    Nothing -> precompileFail
+                  _ -> precompileFail
+
+            _ -> notImplemented
+  case (word64FromGas gasCap, word64FromGas cost) of
+    (Just gc, Just c) -> if gc < c
+                         then do
+                           burn gasCap $ do
+                             assign (#state % #stack) (Lit 0 : xs)
+                             next
+                         else exec
+    _ -> exec
 
 truncpadlit :: Int -> ByteString -> ByteString
 truncpadlit n xs = if m > n then BS.take n xs
@@ -2161,7 +2163,9 @@ finishFrame how = do
       -- in advance; this unburns the remainder and adds it to the
       -- parent frame.
       let remainingGas = oldVm.state.gas
-          reclaimRemainingGasAllowance = returnGas remainingGas
+          reclaimRemainingGasAllowance = do
+            modifying #burned (subtract remainingGas)
+            modifying (#state % #gas) (+ remainingGas)
 
       -- Now dispatch on whether we were creating or calling,
       -- and whether we shall return, revert, or internalError(six cases).

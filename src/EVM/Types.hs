@@ -593,7 +593,7 @@ data VM gas s = VM
   , logs           :: [Expr Log]
   , traces         :: Zipper.TreePos Zipper.Empty Trace
   , cache          :: Cache
-  , burned         :: {-# UNPACK #-} !Word64
+  , burned         :: {-# UNPACK #-} !gas
   , iterations     :: Map CodeLocation (Int, [Expr EWord])
   -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
