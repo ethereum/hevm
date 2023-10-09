@@ -1807,7 +1807,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint16)" [AbiUIntType 16])) [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint16)" [AbiUIntType 16])) [] debugVeriOpts
         putStrLn "DIV by zero is zero"
       ,
       -- Somewhat tautological since we are asserting the precondition
@@ -2036,7 +2036,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-          (_, [Cex (_, a), Cex (_, b)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Cex (_, a), Cex (_, b)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] debugVeriOpts
           let ints = map (flip getVar "arg1") [a,b]
           assertBool "0 must be one of the Cex-es" $ isJust $ List.elemIndex 0 ints
           putStrLn "expected 2 counterexamples found, one Cex is the 0 value"
@@ -3130,7 +3130,8 @@ checkEquivBase mkprop l r = withSolvers Z3 1 (Just 1) $ \solvers -> do
        pure True
      else do
        let smt = assertPropsNoSimp abstRefineDefault [mkprop l r]
-       res <- checkSat solvers smt
+       let smt = assertProps abstRefineDefault [mkprop l r]
+       res <- checkSat solvers smt Nothing
        print res
        pure $ case res of
          Unsat -> True

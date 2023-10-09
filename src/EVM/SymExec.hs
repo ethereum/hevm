@@ -24,8 +24,6 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
-import Data.Text.Lazy qualified as TL
-import Data.Text.Lazy.IO qualified as TL
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
 import EVM (makeVm, abstractContract, initialContract, getCodeLocation, isValidJumpDest)
@@ -513,7 +511,7 @@ reachable solvers e = do
         pure (fst tres <> fst fres, subexpr)
       leaf -> do
         let query = assertProps abstRefineDefault pcs
-        res <- checkSat solvers query
+        res <- checkSat solvers query Nothing
         case res of
           Sat _ -> pure ([query], Just leaf)
           Unsat -> pure ([query], Nothing)
@@ -579,18 +577,14 @@ verify solvers opts preState maybepost = do
         assumes = preState.constraints
         withQueries = canViolate <&> \leaf ->
           (assertProps opts.abstRefineConfig (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)
+        debugFName = if opts.debug then Just ("verify-query") else Nothing
       putStrLn $ "Checking for reachability of "
                    <> show (length withQueries)
                    <> " potential property violation(s)"
 
-      when opts.debug $ forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
-        TL.writeFile
-          ("query-" <> show idx <> ".smt2")
-          ("; " <> (TL.pack $ show leaf) <> "\n\n" <> formatSMT2 q <> "\n\n(check-sat)")
-
       -- Dispatch the remaining branches to the solver to check for violations
       results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
-        res <- checkSat solvers query
+        res <- checkSat solvers query debugFName
         pure (res, leaf)
       let cexs = filter (\(res, _) -> not . isUnsat $ res) results
       pure $ if Prelude.null cexs then (expr, [Qed ()]) else (expr, fmap toVRes cexs)
@@ -690,15 +684,14 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     -- used or not
     check :: UnsatCache -> (Set Prop) -> Int -> IO (EquivResult, Bool)
     check knownUnsat props idx = do
-      let smt = assertProps opts.abstRefineConfig (Set.toList props)
-      -- if debug is on, write the query to a file
-      let filename = "equiv-query-" <> show idx <> ".smt2"
-      when opts.debug $ TL.writeFile filename (formatSMT2 smt <> "\n\n(check-sat)")
-
+      let
+        smt = assertProps opts.abstRefineConfig (Set.toList props)
+        debugFName = if opts.debug then Just "equiv-query"
+                                   else Nothing
       ku <- readTVarIO knownUnsat
       res <- if subsetAny props ku
              then pure (True, Unsat)
-             else (fmap ((False),) (checkSat solvers smt))
+             else (fmap ((False),) (checkSat solvers smt debugFName))
       case res of
         (_, Sat x) -> pure (Cex x, False)
         (quick, Unsat) ->
@@ -710,7 +703,7 @@ equivalenceCheck' solvers branchesA branchesB opts = do
               atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
               pure (Qed (), False)
         (_, EVM.Solvers.Unknown) -> pure (Timeout (), False)
-        (_, Error txt) -> internalError $ "solver returned: " <> (T.unpack txt) <> if opts.debug then "\n SMT file was: " <> filename <> "" else ""
+        (_, Error txt) -> internalError $ "solver returned: " <> (T.unpack txt)
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
@@ -791,7 +784,7 @@ produceModels solvers expr = do
   let flattened = flattenExpr expr
       withQueries = fmap (\e -> ((assertProps abstRefineDefault) . extractProps $ e, e)) flattened
   results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
-    res <- checkSat solvers query
+    res <- checkSat solvers query Nothing
     pure (res, leaf)
   pure $ fmap swap $ filter (\(res, _) -> not . isUnsat $ res) results
 

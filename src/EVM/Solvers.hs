@@ -15,7 +15,7 @@ import Control.Monad.State.Strict
 import Data.Char (isSpace)
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust, fromJust)
 import Data.Text qualified as TS
 import Data.Text.Lazy (Text)
 import Data.Text.Lazy qualified as T
@@ -57,6 +57,7 @@ newtype SolverGroup = SolverGroup (Chan Task)
 data Task = Task
   { script :: SMT2
   , resultChan :: Chan CheckSatResult
+  , debugFName :: Maybe String
   }
 
 -- | The result of a call to (check-sat)
@@ -79,14 +80,20 @@ isUnsat :: CheckSatResult -> Bool
 isUnsat Unsat = True
 isUnsat _ = False
 
-checkSat :: SolverGroup -> SMT2 -> IO CheckSatResult
-checkSat (SolverGroup taskQueue) script = do
+checkSat :: SolverGroup -> SMT2 -> Maybe String -> IO CheckSatResult
+checkSat (SolverGroup taskQueue) script debugFName = do
   -- prepare result channel
   resChan <- newChan
   -- send task to solver group
-  writeChan taskQueue (Task script resChan)
+  writeChan taskQueue (Task script resChan debugFName)
   -- collect result
   readChan resChan
+
+writeSMT2File :: SMT2 -> Maybe String -> String -> IO ()
+writeSMT2File smt2 fname abst =
+  when (isJust fname) $
+  do T.writeFile (fromJust fname <> "-" <> abst <> ".smt2")
+      ("; " <> formatSMT2 smt2 <> "\n\n(check-sat)")
 
 withSolvers :: Solver -> Natural -> Maybe Natural -> (SolverGroup -> IO a) -> IO a
 withSolvers solver count timeout cont = do
@@ -106,13 +113,15 @@ withSolvers solver count timeout cont = do
   killThread orchestrateId
   pure res
   where
+    orchestrate :: Chan Task -> Chan SolverInstance -> IO b
     orchestrate queue avail = do
       task <- readChan queue
       inst <- readChan avail
       _ <- forkIO $ runTask task inst avail
       orchestrate queue avail
 
-    runTask (Task (SMT2 cmds (RefinementEqs refineEqs) cexvars) r) inst availableInstances = do
+    runTask (Task smt2@(SMT2 cmds (RefinementEqs refineEqs) cexvars) r debugFName) inst availableInstances = do
+      writeSMT2File smt2 debugFName ("abstracted")
       -- reset solver and send all lines of provided script
       out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty)
       case out of
@@ -128,7 +137,9 @@ withSolvers solver count timeout cont = do
                 "unknown" -> pure Unknown
                 "sat" -> if null refineEqs then Sat <$> getModel inst cexvars
                          else do
-                              _ <- sendScript inst (SMT2 refineEqs mempty mempty)
+                              let refinedSMT2 = SMT2 refineEqs mempty mempty
+                              writeSMT2File refinedSMT2 debugFName ("refined")
+                              _ <- sendScript inst refinedSMT2
                               sat2 <- sendLine inst "(check-sat)"
                               case sat2 of
                                 "unsat" -> pure Unsat

@@ -238,13 +238,13 @@ type Fetcher s = Query s -> IO (EVM s ())
 -- will be pruned anyway.
 checkBranch :: SolverGroup -> Prop -> Prop -> IO BranchCondition
 checkBranch solvers branchcondition pathconditions = do
-  checkSat solvers (assertProps abstRefineDefault [(branchcondition .&& pathconditions)]) >>= \case
+  checkSat solvers (assertProps abstRefineDefault [(branchcondition .&& pathconditions)]) Nothing >>= \case
     -- the condition is unsatisfiable
     Unsat -> -- if pathconditions are consistent then the condition must be false
       pure $ Case False
     -- Sat means its possible for condition to hold
     Sat _ -> -- is its negation also possible?
-      checkSat solvers (assertProps abstRefineDefault [(pathconditions .&& (PNeg branchcondition))]) >>= \case
+      checkSat solvers (assertProps abstRefineDefault [(pathconditions .&& (PNeg branchcondition))]) Nothing >>= \case
         -- No. The condition must hold
         Unsat -> pure $ Case True
         -- Yes. Both branches possible
