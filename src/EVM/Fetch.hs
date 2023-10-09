@@ -27,6 +27,9 @@ import Network.Wreq.Session (Session)
 import Network.Wreq.Session qualified as Session
 import Numeric.Natural (Natural)
 import System.Process
+import Control.Monad.IO.Class
+import EVM.Effects
+import Control.Monad.IO.Unlift
 
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where
@@ -182,23 +185,23 @@ fetchChainIdFrom url = do
   sess <- Session.newAPISession
   fetchQuery Latest (fetchWithSession url sess) QueryChainId
 
-http :: Natural -> Maybe Natural -> BlockNumber -> Text -> Fetcher s
+http :: Natural -> Maybe Natural -> BlockNumber -> Text -> Fetcher m s
 http smtjobs smttimeout n url q =
   withSolvers Z3 smtjobs smttimeout $ \s ->
     oracle s (Just (n, url)) q
 
-zero :: Natural -> Maybe Natural -> Fetcher s
+zero :: Natural -> Maybe Natural -> Fetcher m s
 zero smtjobs smttimeout q =
   withSolvers Z3 smtjobs smttimeout $ \s ->
     oracle s Nothing q
 
 -- smtsolving + (http or zero)
-oracle :: SolverGroup -> RpcInfo -> Fetcher s
+oracle :: SolverGroup -> RpcInfo -> Fetcher m s
 oracle solvers info q = do
   case q of
     PleaseDoFFI vals continue -> case vals of
        cmd : args -> do
-          (_, stdout', _) <- readProcessWithExitCode cmd args ""
+          (_, stdout', _) <- liftIO $ readProcessWithExitCode cmd args ""
           pure . continue . encodeAbiValue $
             AbiTuple (RegularVector.fromList [ AbiBytesDynamic . hexText . pack $ stdout'])
        _ -> internalError (show vals)
@@ -215,7 +218,7 @@ oracle solvers info q = do
             AbstractBase -> unknownContract (LitAddr addr)
             EmptyBase -> emptyContract
           in pure $ Just c
-        Just (n, url) -> fetchContractFrom n url addr
+        Just (n, url) -> liftIO $ fetchContractFrom n url addr
       case contract of
         Just x -> pure $ continue x
         Nothing -> internalError $ "oracle error: " ++ show q
@@ -224,27 +227,27 @@ oracle solvers info q = do
       case info of
         Nothing -> pure (continue 0)
         Just (n, url) ->
-         fetchSlotFrom n url addr slot >>= \case
+         liftIO $ fetchSlotFrom n url addr slot >>= \case
            Just x  -> pure (continue x)
            Nothing ->
              internalError $ "oracle error: " ++ show q
 
-type Fetcher s = Query s -> IO (EVM s ())
+type Fetcher m s = (ReadConfig m, MonadUnliftIO m) => Query s -> m (EVM s ())
 
 -- | Checks which branches are satisfiable, checking the pathconditions for consistency
 -- if the third argument is true.
 -- When in debug mode, we do not want to be able to navigate to dead paths,
 -- but for normal execution paths with inconsistent pathconditions
 -- will be pruned anyway.
-checkBranch :: SolverGroup -> Prop -> Prop -> IO BranchCondition
-checkBranch solvers branchcondition pathconditions = do
-  checkSat solvers (assertProps abstRefineDefault [(branchcondition .&& pathconditions)]) Nothing >>= \case
+checkBranch :: (MonadUnliftIO m, ReadConfig m) => SolverGroup -> Prop -> Prop -> m BranchCondition
+checkBranch solvers branchcondition pathconditions = liftIO $ do
+  checkSat solvers (assertProps abstRefineDefault [(branchcondition .&& pathconditions)]) >>= \case
     -- the condition is unsatisfiable
     Unsat -> -- if pathconditions are consistent then the condition must be false
       pure $ Case False
     -- Sat means its possible for condition to hold
     Sat _ -> -- is its negation also possible?
-      checkSat solvers (assertProps abstRefineDefault [(pathconditions .&& (PNeg branchcondition))]) Nothing >>= \case
+      checkSat solvers (assertProps abstRefineDefault [(pathconditions .&& (PNeg branchcondition))]) >>= \case
         -- No. The condition must hold
         Unsat -> pure $ Case True
         -- Yes. Both branches possible

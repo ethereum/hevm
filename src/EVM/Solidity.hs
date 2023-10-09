@@ -51,6 +51,7 @@ import Optics.Operators.Unsafe
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.IO.Unlift
 import Data.Aeson hiding (json)
 import Data.Aeson.Types
 import Data.Aeson.Optics
@@ -378,8 +379,10 @@ solidity contract src = do
   let (Contracts sol, _, _) = fromJust $ readStdJSON json
   pure $ Map.lookup (path <> ":" <> contract) sol <&> (.creationCode)
 
-solcRuntime :: Text -> Text -> IO (Maybe ByteString)
-solcRuntime contract src = do
+solcRuntime
+  :: (MonadUnliftIO m)
+  => Text -> Text -> m (Maybe ByteString)
+solcRuntime contract src = liftIO $ do
   (json, path) <- solidity' src
   case readStdJSON json of
     Just (Contracts sol, _, _) -> pure $ Map.lookup (path <> ":" <> contract) sol <&> (.runtimeCode)

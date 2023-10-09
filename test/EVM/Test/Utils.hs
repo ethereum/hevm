@@ -20,18 +20,25 @@ import EVM.Solidity
 import EVM.Solvers
 import EVM.UnitTest
 import Control.Monad.ST (RealWorld)
+import Control.Monad.IO.Unlift
+import Control.Monad.Catch (MonadMask)
+import EVM.Effects
 
-runSolidityTestCustom :: FilePath -> Text -> Maybe Natural -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> IO Bool
+runSolidityTestCustom
+  :: (MonadMask m, MonadUnliftIO m, ReadConfig m)
+  => FilePath -> Text -> Maybe Natural -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> m Bool
 runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectType = do
   withSystemTempDirectory "dapp-test" $ \root -> do
-    compile projectType root testFile >>= \case
+    (liftIO $ compile projectType root testFile) >>= \case
       Left e -> error e
       Right bo@(BuildOutput contracts _) -> do
         withSolvers Z3 1 timeout $ \solvers -> do
-          opts <- testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
+          opts <- liftIO $ testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
           unitTest opts contracts
 
-runSolidityTest :: FilePath -> Text -> IO Bool
+runSolidityTest
+  :: (MonadMask m, MonadUnliftIO m, ReadConfig m)
+  => FilePath -> Text -> m Bool
 runSolidityTest testFile match = runSolidityTestCustom testFile match Nothing Nothing True Nothing Foundry
 
 testOpts :: SolverGroup -> FilePath -> Maybe BuildOutput -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO (UnitTestOptions RealWorld)

@@ -8,6 +8,7 @@ module Main where
 
 import Control.Monad (when, forM_, unless)
 import Control.Monad.ST (RealWorld, stToIO)
+import Control.Monad.IO.Unlift
 import Data.ByteString (ByteString)
 import Data.DoubleWord (Word256)
 import Data.List (intersperse)
@@ -41,8 +42,9 @@ import EVM.Solvers
 import EVM.Stepper qualified
 import EVM.SymExec
 import EVM.Transaction qualified
-import EVM.Types hiding (word)
+import EVM.Types hiding (word, Env)
 import EVM.UnitTest
+import EVM.Effects
 
 -- This record defines the program's command-line options
 -- automatically via the `optparse-generic` package.
@@ -183,6 +185,9 @@ getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
       Right val -> "git rev " <> giBranch val <>  "@" <> giHash val
       Left _ -> "no git revision present"
 
+mainEnv :: Env
+mainEnv = Env { config = Config { dumpQueries = True } }
+
 main :: IO ()
 main = do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
@@ -190,28 +195,29 @@ main = do
     Version {} ->putStrLn getFullVersion
     Symbolic {} -> do
       root <- getRoot cmd
-      withCurrentDirectory root $ assert cmd
-    Equivalence {} -> equivalence cmd
-    Exec {} ->
-      launchExec cmd
+      withCurrentDirectory root $ runEnv mainEnv $ assert cmd
+    Equivalence {} -> runEnv mainEnv $ equivalence cmd
+    Exec {} -> runEnv mainEnv $ launchExec cmd
     Test {} -> do
       root <- getRoot cmd
       withCurrentDirectory root $ do
         cores <- unsafeInto <$> getNumProcessors
         solver <- getSolver cmd
-        withSolvers solver cores cmd.smttimeout $ \solvers -> do
-          buildOut <- readBuildOutput root (getProjectType cmd)
+        runEnv mainEnv $ withSolvers solver cores cmd.smttimeout $ \solvers -> do
+          buildOut <- liftIO $ readBuildOutput root (getProjectType cmd)
           case buildOut of
-            Left e -> do
+            Left e -> liftIO $ do
               putStrLn $ "Error: " <> e
               exitFailure
             Right out -> do
               -- TODO: which functions here actually require a BuildOutput, and which can take it as a Maybe?
-              testOpts <- unitTestOptions cmd solvers (Just out)
+              testOpts <- liftIO $ unitTestOptions cmd solvers (Just out)
               res <- unitTest testOpts out.contracts
-              unless res exitFailure
+              liftIO $ unless res exitFailure
 
-equivalence :: Command Options.Unwrapped -> IO ()
+equivalence
+  :: (MonadUnliftIO m, ReadConfig m)
+  => Command Options.Unwrapped -> m ()
 equivalence cmd = do
   let bytecodeA = hexByteString "--code" . strip0x $ cmd.codeA
       bytecodeB = hexByteString "--code" . strip0x $ cmd.codeB
@@ -223,17 +229,17 @@ equivalence cmd = do
                           , abstRefineConfig = AbstRefineConfig cmd.abstractArithmetic cmd.abstractMemory
                           , rpcInfo = Nothing
                           }
-  calldata <- buildCalldata cmd
-  solver <- getSolver cmd
+  calldata <- liftIO $ buildCalldata cmd
+  solver <- liftIO $ getSolver cmd
   withSolvers solver 3 Nothing $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata
     case any isCex res of
-      False -> do
+      False -> liftIO $ do
         putStrLn "No discrepancies found"
         when (any isTimeout res) $ do
           putStrLn "But timeout(s) occurred"
           exitFailure
-      True -> do
+      True -> liftIO $ do
         let cexs = mapMaybe getCex res
         T.putStrLn . T.unlines $
           [ "Not equivalent. The following inputs result in differing behaviours:"
@@ -289,16 +295,18 @@ buildCalldata cmd = case (cmd.calldata, cmd.sig) of
 
 
 -- If function signatures are known, they should always be given for best results.
-assert :: Command Options.Unwrapped -> IO ()
+assert
+  :: (MonadUnliftIO m, ReadConfig m)
+  => Command Options.Unwrapped -> m ()
 assert cmd = do
   let block'  = maybe Fetch.Latest Fetch.BlockNumber cmd.block
       rpcinfo = (,) block' <$> cmd.rpc
-  calldata <- buildCalldata cmd
-  preState <- symvmFromCommand cmd calldata
+  calldata <- liftIO $ buildCalldata cmd
+  preState <- liftIO $ symvmFromCommand cmd calldata
   let errCodes = fromMaybe defaultPanicCodes cmd.assertions
-  cores <- unsafeInto <$> getNumProcessors
+  cores <- liftIO $ unsafeInto <$> getNumProcessors
   let solverCount = fromMaybe cores cmd.numSolvers
-  solver <- getSolver cmd
+  solver <- liftIO $ getSolver cmd
   withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
     let opts = VeriOpts { simp = True
                         , debug = cmd.smtdebug
@@ -310,7 +318,7 @@ assert cmd = do
     }
     (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
     case res of
-      [Qed _] -> do
+      [Qed _] -> liftIO $ do
         putStrLn "\nQED: No reachable property violations discovered\n"
         showExtras solvers cmd calldata expr
       _ -> do
@@ -330,9 +338,10 @@ assert cmd = do
                  , "Could not determine reachability of the following end states:"
                  , ""
                  ] <> fmap (formatExpr) timeouts
-        T.putStrLn $ T.unlines (counterexamples <> unknowns)
-        showExtras solvers cmd calldata expr
-        exitFailure
+        liftIO $ do
+          T.putStrLn $ T.unlines (counterexamples <> unknowns)
+          showExtras solvers cmd calldata expr
+          exitFailure
 
 showExtras :: SolverGroup -> Command Options.Unwrapped -> (Expr Buf, [Prop]) -> Expr End -> IO ()
 showExtras solvers cmd calldata expr = do
@@ -356,10 +365,12 @@ isTestOrLib file = T.isSuffixOf ".t.sol" file || areAnyPrefixOf ["src/test/", "s
 areAnyPrefixOf :: [Text] -> Text -> Bool
 areAnyPrefixOf prefixes t = any (flip T.isPrefixOf t) prefixes
 
-launchExec :: Command Options.Unwrapped -> IO ()
+launchExec
+  :: (MonadUnliftIO m, ReadConfig m)
+  => Command Options.Unwrapped -> m ()
 launchExec cmd = do
-  dapp <- getSrcInfo cmd
-  vm <- vmFromCommand cmd
+  dapp <- liftIO $ getSrcInfo cmd
+  vm <- liftIO $ vmFromCommand cmd
   let
     block = maybe Fetch.Latest Fetch.BlockNumber cmd.block
     rpcinfo = (,) block <$> cmd.rpc
@@ -367,21 +378,21 @@ launchExec cmd = do
   -- TODO: we shouldn't need solvers to execute this code
   withSolvers Z3 0 Nothing $ \solvers -> do
     vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcinfo) vm EVM.Stepper.runFully
-    when cmd.trace $ T.hPutStr stderr (showTraceTree dapp vm')
+    liftIO $ when cmd.trace $ T.hPutStr stderr (showTraceTree dapp vm')
     case vm'.result of
-      Just (VMFailure (Revert msg)) -> do
+      Just (VMFailure (Revert msg)) -> liftIO $ do
         let res = case msg of
                     ConcreteBuf bs -> bs
                     _ -> "<symbolic>"
         putStrLn $ "Revert: " <> (show $ ByteStringS res)
         exitWith (ExitFailure 2)
-      Just (VMFailure err) -> do
+      Just (VMFailure err) -> liftIO $ do
         putStrLn $ "Error: " <> show err
         exitWith (ExitFailure 2)
-      Just (Unfinished p) -> do
+      Just (Unfinished p) -> liftIO $ do
         putStrLn $ "Could not continue execution: " <> show p
         exitWith (ExitFailure 2)
-      Just (VMSuccess buf) -> do
+      Just (VMSuccess buf) -> liftIO $ do
         let msg = case buf of
               ConcreteBuf msg' -> msg'
               _ -> "<symbolic>"
