@@ -19,11 +19,16 @@ import qualified Data.ByteString.Lazy as LazyByteString
 import EVM.SymExec
 import EVM.Solidity
 import EVM.Solvers
+import EVM.Effects
 import EVM.Format (hexByteString)
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 
 import EVM.Test.BlockchainTests qualified as BCTests
+
+
+benchEnv :: Env
+benchEnv = Env { config = Config { dumpQueries = True } }
 
 main :: IO ()
 main = defaultMain
@@ -76,7 +81,7 @@ runBCTest :: BCTests.Case -> IO Bool
 runBCTest x =
  do
   vm0 <- BCTests.vmForCase x
-  result <- Stepper.interpret (Fetch.zero 0 Nothing) vm0 Stepper.runFully
+  result <- runEnv benchEnv $ Stepper.interpret (Fetch.zero 0 Nothing) vm0 Stepper.runFully
   maybeReason <- BCTests.checkExpectation False x result
   pure $ isNothing maybeReason
 
@@ -86,7 +91,7 @@ runBCTest x =
 
 findPanics :: Solver -> Natural -> Integer -> ByteString -> IO ()
 findPanics solver count iters c = do
-  _ <- withSolvers solver count Nothing $ \s -> do
+  _ <- runEnv benchEnv $ withSolvers solver count Nothing $ \s -> do
     let opts = defaultVeriOpts
           { maxIter = Just iters
           , askSmtIters = iters + 1
