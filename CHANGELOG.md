@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CopySlice+WriteWord+ConcreteBuf now truncates ConcreteBuf in special cases
 - Better simplification of Eq IR elements
 - Run a toplevel constant folding reasoning system on branch conditions
+- Global config via a monad, which should allow for more refactoring
 
 ## API Changes
 
