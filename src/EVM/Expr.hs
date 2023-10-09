@@ -279,12 +279,17 @@ readWord i b = readWordFromBytes i b
 -- returns an abstract ReadWord expression if a concrete word cannot be constructed
 readWordFromBytes :: Expr EWord -> Expr Buf -> Expr EWord
 readWordFromBytes (Lit idx) (ConcreteBuf bs) =
-  -- the word we are trying to read is within the address space of the buffer
   if idx <= (maxBound :: W256) - 31
+  -- the word we are trying to read is within the address space of the buffer
   then case toInt idx of
          Nothing -> Lit 0
          Just i -> Lit $ word $ padRight 32 $ BS.take 32 $ BS.drop i bs
-  else ReadWord (Lit idx) (ConcreteBuf bs)
+  -- if the word we are trying to read goes outside of bounds, then
+  -- wraparound and take the remaing bytes from the beginning of the
+  -- buffer
+  else case toInt ((maxBound :: W256) - idx + 1) of
+         Nothing -> Lit 0 -- should never reach here because maxBound - idx + 1 < 32
+         Just i -> Lit $ word $ padLeft i $ BS.take (32 - i) bs
 readWordFromBytes i@(Lit idx) buf = let
     bytes = [readByte (Lit i') buf | i' <- [idx .. idx + 31]]
   in if Prelude.and . (fmap isLitByte) $ bytes
