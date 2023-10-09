@@ -373,8 +373,10 @@ yulRuntime contractName src = do
       bytecode = c ^?! key "evm" ^?! key "deployedBytecode" ^?! key "object" % _String
   pure $ (toCode contractName) <$> (Just bytecode)
 
-solidity :: Text -> Text -> IO (Maybe ByteString)
-solidity contract src = do
+solidity
+  :: (MonadUnliftIO m)
+  => Text -> Text -> m (Maybe ByteString)
+solidity contract src = liftIO $ do
   (json, path) <- solidity' src
   let (Contracts sol, _, _) = fromJust $ readStdJSON json
   pure $ Map.lookup (path <> ":" <> contract) sol <&> (.creationCode)

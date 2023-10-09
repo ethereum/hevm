@@ -939,7 +939,7 @@ tests = testGroup "hevm"
   ]
   , testGroup "Symbolic-Constructor-Args"
     -- this produced some hard to debug failures. keeping it around since it seemed to exercise the contract creation code in interesting ways...
-    [ testCase "multiple-symbolic-constructor-calls" $ do
+    [ test "multiple-symbolic-constructor-calls" $ do
         Just initCode <- solidity "C"
           [i|
             contract A {
@@ -961,10 +961,10 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 1 Nothing $ \s -> do
           let calldata = (WriteWord (Lit 0x0) (Var "u") (ConcreteBuf ""), [])
-          initVM <- stToIO $ abstractVM calldata initCode Nothing True
+          initVM <- liftIO $ stToIO $ abstractVM calldata initCode Nothing True
           expr <- Expr.simplify <$> interpret (Fetch.oracle s Nothing) Nothing 1 StackBased initVM runExpr
-          assertBool "unexptected partial execution" (not $ Expr.containsNode isPartial expr)
-    , testCase "mixed-concrete-symbolic-args" $ do
+          assertBoolM "unexptected partial execution" (not $ Expr.containsNode isPartial expr)
+    , test "mixed-concrete-symbolic-args" $ do
         Just c <- solcRuntime "C"
           [i|
             contract B {
@@ -986,8 +986,8 @@ tests = testGroup "hevm"
             }
           |]
         Right expr <- reachableUserAsserts c (Just $ Sig "foo(uint256)" [AbiUIntType 256])
-        assertBool "unexptected partial execution" (not $ Expr.containsNode isPartial expr)
-    , testCase "jump-into-symbolic-region" $ do
+        assertBoolM "unexptected partial execution" (not $ Expr.containsNode isPartial expr)
+    , test "jump-into-symbolic-region" $ do
         let
           -- our initCode just jumps directly to the end
           code = BS.pack . mapMaybe maybeLitByte $ V.toList $ assemble
@@ -1015,11 +1015,11 @@ tests = testGroup "hevm"
               , OpCreate
               ])
         withSolvers Z3 1 Nothing $ \s -> do
-          vm <- stToIO $ loadSymVM runtimecode (Lit 0) initCode False
+          vm <- liftIO $ stToIO $ loadSymVM runtimecode (Lit 0) initCode False
           expr <- Expr.simplify <$> interpret (Fetch.oracle s Nothing) Nothing 1 StackBased vm runExpr
           case expr of
-            Partial _ _ (JumpIntoSymbolicCode _ _) -> assertBool "" True
-            _ -> assertBool "did not encounter expected partial node" False
+            Partial _ _ (JumpIntoSymbolicCode _ _) -> assertBoolM "" True
+            _ -> assertBoolM "did not encounter expected partial node" False
     ]
   , testGroup "Dapp-Tests"
     [ test "Trivial-Pass" $ do

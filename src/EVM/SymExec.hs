@@ -33,7 +33,7 @@ import EVM.Fetch qualified as Fetch
 import EVM.ABI
 import EVM.Expr qualified as Expr
 import EVM.Format (formatExpr, formatPartial, showVal, bsToHex)
-import EVM.SMT (SMTCex(..), SMT2(..), assertProps, formatSMT2)
+import EVM.SMT (SMTCex(..), SMT2(..), assertProps)
 import EVM.SMT qualified as SMT
 import EVM.Solvers
 import EVM.Stepper (Stepper)
