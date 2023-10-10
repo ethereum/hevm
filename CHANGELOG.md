@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Changed
+- Less noisy console output during tracing
+- Minimum distance requirements are now asserted for Keccak function calls. They assert that it's hard to generate two Keccak's that are less than 256 afar.
+- Keccak concretization is now done only after all simplification are performed. This helps with simplification pre-concretization
+
+
 ## [0.52.0] - 2023-10-26
 
 This is a major breaking release that removes several user facing features and includes non trivial
@@ -76,7 +82,6 @@ This release also includes many small bugfixes:
 ## API Changes
 
 ### Reworked Storage Model / Symbolic Addresses
-
 Adding symbolic addresses required some fairly significant changes to the way that we model storage.
 We introduced a new address type to `Expr` (`Expr EAddr`), that allows us to model fully symbolic
 addresses. Instead of modelling storage as a global symbolic 2D map (`address -> word -> word`) in

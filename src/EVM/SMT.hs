@@ -211,7 +211,7 @@ assertProps conf ps = assertPropsNoSimp conf (Expr.simplifyProps ps)
 -- because we make use of it to verify the correctness of our simplification
 -- passes through property-based testing.
 assertPropsNoSimp :: Config -> [Prop] -> SMT2
-assertPropsNoSimp config ps =
+assertPropsNoSimp config psPreConc =
   let encs = map propToSMT psElimAbst
       abstSMT = map propToSMT abstProps
       intermediates = declareIntermediates bufs stores in
@@ -239,6 +239,7 @@ assertPropsNoSimp config ps =
   <> SMT2 mempty mempty mempty ps
 
   where
+    ps = Expr.concKeccakSimps False psPreConc
     (psElim, bufs, stores) = eliminateProps ps
     (psElimAbst, abst@(AbstState abstExprToInt _)) = if config.abstRefineArith || config.abstRefineMem
       then abstractAwayProps config psElim
@@ -264,9 +265,9 @@ assertPropsNoSimp config ps =
 
     keccakAssumes
       = smt2Line "; keccak assumptions"
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psElim bufVals storeVals)) mempty mempty mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psPreConc bufVals storeVals)) mempty mempty mempty
       <> smt2Line "; keccak computations"
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psElim bufVals storeVals)) mempty mempty mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psPreConc bufVals storeVals)) mempty mempty mempty
 
     readAssumes
       = smt2Line "; read assumptions"

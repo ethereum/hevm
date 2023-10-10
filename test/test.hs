@@ -447,11 +447,14 @@ tests = testGroup "hevm"
     , testProperty "simpProp-equivalence-sym" $ \(LitProp p) -> prop $ do
         let simplified = pand (Expr.simplifyProps [p])
         checkEquivProp simplified p
-    -- This would need to be a fuzz test I think. The SMT encoding of Keccak is not precise
-    -- enough for this to succeed
-    , ignoreTest $ testProperty "storage-slot-simp-property" $ \(StorageExp s) -> prop $ do
-        let simplified = Expr.simplify s
-        checkEquiv simplified s
+    , testProperty "storage-slot-simp-property" $ \(StorageExp s) -> prop $ do
+        -- we have to run `Expr.structureArraySlots` on the unsimplified system, or
+        -- we'd need some form of minimal simplifier for things to work out. As long as
+        -- we trust the structureArraySlots, this is fine, as that function is standalone,
+        -- and quite minimal
+        let s2 = Expr.structureArraySlots s
+        let simplified = Expr.simplify s2
+        checkEquiv simplified s2
     ]
   , testGroup "simpProp-concrete-tests" [
       test "simpProp-concrete-trues" $ do
@@ -1053,12 +1056,18 @@ tests = testGroup "hevm"
     , test "Constantinople" $ do
         let testFile = "test/contracts/pass/constantinople.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True
+    , test "ConstantinopleMin" $ do
+        let testFile = "test/contracts/pass/constantinople_min.sol"
+        runSolidityTest testFile ".*" >>= assertEqualM "test result" True
     , test "Prove-Tests-Pass" $ do
         let testFile = "test/contracts/pass/dsProvePass.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True
     , test "prefix-check-for-dapp" $ do
         let testFile = "test/contracts/fail/check-prefix.sol"
         runSolidityTest testFile "check_trivial" >>= assertEqualM "test result" False
+    , test "transfer-dapp" $ do
+        let testFile = "test/contracts/pass/transfer.sol"
+        runSolidityTest testFile "prove_transfer" >>= assertEqualM "should prove transfer" True
     , test "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
         runSolidityTest testFile "prove_trivial" >>= assertEqualM "test result" False

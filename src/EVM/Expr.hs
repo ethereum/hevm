@@ -690,6 +690,7 @@ pattern Keccak64Bytes :: Expr EWord
 pattern Keccak64Bytes <- Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) _ (ConcreteBuf ""))
 
 -- storage slots for arrays are determined by (keccak(bytes32(id)) + offset)
+-- note that `normArgs` puts the Lit as the 2nd argument to `Add`
 pattern ArraySlotWithOffset :: ByteString -> Expr EWord -> Expr EWord
 pattern ArraySlotWithOffset id offset = Add (Keccak (ConcreteBuf id)) offset
 
@@ -780,6 +781,9 @@ simplify e = if (mapExpr go e == e)
     go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
 
     -- simplify storage
+    go (Keccak (ConcreteBuf bs)) = case BS.length bs == 64 of
+      True -> MappingSlot bs (Lit $ word bs)
+      False -> Keccak (ConcreteBuf bs)
     go (SLoad slot store) = readStorage' slot store
     go (SStore slot val store) = writeStorage slot val store
 
@@ -870,10 +874,21 @@ simplify e = if (mapExpr go e == e)
     -- (a+(c-b))
     -- In other words, subtraction is just adding a much larger number.
     --    So 3-1 mod 6 = 3+(6-1) mod 6 = 3+5 mod 6 = 5+3 mod 6 = 2
-    go (Sub (Sub orig (Lit x)) (Lit y)) = Sub orig (Lit (y+x))
-    go (Sub (Add orig (Lit x)) (Lit y)) = Sub orig (Lit (y-x))
-    go (Add (Add orig (Lit x)) (Lit y)) = Add orig (Lit (y+x))
-    go (Add (Sub orig (Lit x)) (Lit y)) = Add orig (Lit (y-x))
+    -- Notice: all Add is normalized, hence the 1st argument is
+    --    expected to be Lit, if any. Hence `orig` needs to be the
+    --    2nd argument for Add. However, Sub is not normalized
+    go (Add (Lit x) (Add (Lit y) orig)) = add (Lit (x+y)) orig
+    -- add + sub NOTE: every combination of Sub is needed (2)
+    go (Add (Lit x) (Sub (Lit y) orig)) = sub (Lit (x+y)) orig
+    go (Add (Lit x) (Sub orig (Lit y))) = add (Lit (x-y)) orig
+    -- sub + sub NOTE: every combination of Sub is needed (2x2)
+    go (Sub (Lit x) (Sub (Lit y) orig)) = add (Lit (x-y)) orig
+    go (Sub (Lit x) (Sub orig (Lit y))) = sub (Lit (x+y)) orig
+    go (Sub (Sub (Lit x) orig) (Lit y)) = sub (Lit (x-y)) orig
+    go (Sub (Sub orig (Lit x)) (Lit y)) = sub orig (Lit (x+y))
+    -- sub + add NOTE: every combination of Sub is needed (2)
+    go (Sub (Lit x) (Add (Lit y) orig)) = sub (Lit (x-y)) orig
+    go (Sub (Add (Lit x) orig) (Lit y) ) = add (Lit (x-y)) orig
 
     -- redundant add / sub
     go (Sub (Add a b) c)
@@ -983,6 +998,7 @@ simplifyProps ps = if canBeSat then simplified else [PBool False]
     canBeSat = constFoldProp simplified
 
 -- | Evaluate the provided proposition down to its most concrete result
+-- Also simplifies the inner Expr, if it exists
 simplifyProp :: Prop -> Prop
 simplifyProp prop =
   let new = mapProp' go (simpInnerExpr prop)
@@ -1333,3 +1349,36 @@ constFoldProp ps = oneRun ps (ConstState mempty True)
           put $ s{canBeSat=(s2.canBeSat && (v1 || v2))}
         PBool False -> put $ ConstState {canBeSat=False, values=mempty}
         _ -> pure ()
+
+-- Concretize Keccak Expressions until fixed-point.
+-- Can either simplify before, or not
+concKeccakSimpExpr :: Bool -> Expr a -> Expr a
+concKeccakSimpExpr simp orig = final
+  where
+    simplified = if simp then simplify orig else orig
+    conc = mapExpr concKeccakSimpOnePass simplified
+    final = if conc == orig then conc
+                            else concKeccakSimpExpr simp conc
+
+concKeccakSimps :: Bool -> [Prop] -> [Prop]
+concKeccakSimps simp orig = final
+  where
+    conc = simplifyProps $ map (concKeccakSimp simp) orig
+    final = if conc == orig then conc
+                            else concKeccakSimps simp conc
+
+concKeccakSimp :: Bool -> Prop -> Prop
+concKeccakSimp simp orig = final
+  where
+    simplified = if simp then simplifyProp orig else orig
+    conc = mapProp concKeccakSimpOnePass simplified
+    final = if conc == orig then conc
+                            else concKeccakSimp simp conc
+
+concKeccakSimpOnePass :: Expr a -> Expr a
+concKeccakSimpOnePass (Keccak (ConcreteBuf bs)) = Lit (keccak' bs)
+concKeccakSimpOnePass orig@(Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) orig2@(WriteWord (Lit 0) _ (ConcreteBuf bs)) (ConcreteBuf ""))) =
+  case (BS.length bs, (copySlice (Lit 0) (Lit 0) (Lit 64) (simplify orig2) (ConcreteBuf ""))) of
+    (64, ConcreteBuf a) -> Lit (keccak' a)
+    _ -> orig
+concKeccakSimpOnePass x = x

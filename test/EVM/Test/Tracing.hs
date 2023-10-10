@@ -415,7 +415,10 @@ deleteTraceOutputFiles evmtoolResult =
 
 -- Create symbolic VM from concrete VM
 symbolify :: VM s -> VM s
-symbolify vm = vm { state = vm.state { calldata = AbstractBuf "calldata" } }
+symbolify vm = vm {
+                  state = vm.state { calldata = AbstractBuf "calldata" }
+                  , symbolic = True
+                  }
 
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
@@ -464,6 +467,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
     , create = False
     , txAccessList = mempty
     , allowFFI = False
+    , symbolic = False
     }) <&> set (#env % #contracts % at (LitAddr ethrunAddress))
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty))))
        <&> set (#state % #calldata) calldata'

@@ -599,8 +599,8 @@ data VM s = VM
   , iterations     :: Map CodeLocation (Int, [Expr EWord])
   -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
-  , keccakEqs      :: [Prop]
   , config         :: RuntimeConfig
+  , symbolic       :: Bool
   }
   deriving (Show, Generic)
 
@@ -863,6 +863,7 @@ data VMOpts = VMOpts
   , create :: Bool
   , txAccessList :: Map (Expr EAddr) [W256]
   , allowFFI :: Bool
+  , symbolic :: Bool
   } deriving Show
 
 
