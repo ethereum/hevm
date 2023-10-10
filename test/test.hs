@@ -70,7 +70,11 @@ import EVM.Types hiding (Env)
 import EVM.Effects
 
 testEnv :: Env
-testEnv = Env { config = Config { dumpQueries = False } }
+testEnv = Env { config = defaultConfig {
+  dumpQueries = True
+  , dumpExprs = True
+  , dumpEndStates = True
+  } }
 
 putStrLnM :: (MonadUnliftIO m) => String -> m ()
 putStrLnM a = liftIO $ putStrLn a
@@ -117,7 +121,7 @@ tests = testGroup "hevm"
           }
         }
         |]
-       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
     -- This case is somewhat artificial. We can't simplify this using only
     -- static rewrite rules, because acct is totally abstract and acct + 1
@@ -137,7 +141,7 @@ tests = testGroup "hevm"
           }
         }
         |]
-       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
        -- T.writeFile "symbolic-index.expr" $ formatExpr expr
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
     , expectFail $ test "simplify-storage-array-of-struct-symbolic-index" $ do
@@ -158,7 +162,7 @@ tests = testGroup "hevm"
           }
         }
         |]
-       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
     , test "simplify-storage-array-loop-nonstruct" $ do
        Just c <- solcRuntime "MyContract"
@@ -173,7 +177,7 @@ tests = testGroup "hevm"
           }
         }
         |]
-       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256)" [AbiUIntType 256])) [] (debugVeriOpts { maxIter = Just 5 })
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256)" [AbiUIntType 256])) [] (defaultVeriOpts { maxIter = Just 5 })
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
     , test "simplify-storage-array-loop-struct" $ do
        Just c <- solcRuntime "MyContract"
@@ -193,7 +197,7 @@ tests = testGroup "hevm"
           }
         }
         |]
-       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] (debugVeriOpts { maxIter = Just 5 })
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] (defaultVeriOpts { maxIter = Just 5 })
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
     , test "simplify-storage-map-only-static" $ do
        Just c <- solcRuntime "MyContract"
@@ -209,7 +213,7 @@ tests = testGroup "hevm"
           }
         }
         |]
-       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
     , test "simplify-storage-map-only-2" $ do
        Just c <- solcRuntime "MyContract"
@@ -225,7 +229,7 @@ tests = testGroup "hevm"
           }
         }
         |]
-       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
        -- putStrLnM $ T.unpack $ formatExpr expr
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
     , test "simplify-storage-map-with-struct" $ do
@@ -246,7 +250,7 @@ tests = testGroup "hevm"
           }
         }
         |]
-       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
     , test "simplify-storage-map-and-array" $ do
        Just c <- solcRuntime "MyContract"
@@ -268,7 +272,7 @@ tests = testGroup "hevm"
           }
         }
        |]
-       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] debugVeriOpts
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
        -- putStrLnM $ T.unpack $ formatExpr expr
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
     ]
@@ -3114,7 +3118,8 @@ tests = testGroup "hevm"
             filteredBSym = symbolicMem [ replaceAll "" $ x *=~[re|^//|] | x <- onlyAfter [re|^// step:|] unfiltered, not $ x =~ [re|^$|] ]
           start <- liftIO $ getCurrentTime
           putStrLnM $ "Checking file: " <> f
-          when opts.debug $ liftIO $ do
+          conf <- readConfig
+          when conf.verbose $ liftIO $ do
             putStrLnM "-------------Original Below-----------------"
             mapM_ putStrLn unfiltered
             putStrLnM "------------- Filtered A + Symb below-----------------"

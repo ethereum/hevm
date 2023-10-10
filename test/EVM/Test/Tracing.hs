@@ -833,7 +833,7 @@ getOp vm =
                        else BS.head xs
 
 testEnv :: Env
-testEnv = Env { config = Config { dumpQueries = True } }
+testEnv = Env { config = defaultConfig }
 
 test :: TestName -> ReaderT Env IO () -> TestTree
 test a b = testCase a $ runEnv testEnv b

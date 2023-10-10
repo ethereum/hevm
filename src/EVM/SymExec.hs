@@ -74,7 +74,6 @@ isQed _ = False
 
 data VeriOpts = VeriOpts
   { simp :: Bool
-  , debug :: Bool
   , maxIter :: Maybe Integer
   , askSmtIters :: Integer
   , loopHeuristic :: LoopHeuristic
@@ -86,7 +85,6 @@ data VeriOpts = VeriOpts
 defaultVeriOpts :: VeriOpts
 defaultVeriOpts = VeriOpts
   { simp = True
-  , debug = False
   , maxIter = Nothing
   , askSmtIters = 1
   , loopHeuristic = StackBased
@@ -96,9 +94,6 @@ defaultVeriOpts = VeriOpts
 
 rpcVeriOpts :: (Fetch.BlockNumber, Text) -> VeriOpts
 rpcVeriOpts info = defaultVeriOpts { rpcInfo = Just info }
-
-debugVeriOpts :: VeriOpts
-debugVeriOpts = defaultVeriOpts { debug = True }
 
 debugAbstVeriOpts :: VeriOpts
 debugAbstVeriOpts = defaultVeriOpts { abstRefineConfig = AbstRefineConfig True True }
@@ -556,11 +551,12 @@ verify solvers opts preState maybepost = do
   liftIO $ putStrLn "Exploring contract"
 
   exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
-  when opts.debug $ liftIO $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
+  conf <- readConfig
+  when conf.dumpExprs $ liftIO $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
   liftIO $ do
     putStrLn "Simplifying expression"
     let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
-    when opts.debug $ liftIO $ T.writeFile "simplified.expr" (formatExpr expr)
+    when conf.dumpExprs $ T.writeFile "simplified.expr" (formatExpr expr)
 
     putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
 
@@ -588,7 +584,7 @@ verify solvers opts preState maybepost = do
                      <> " potential property violation(s)"
 
         -- Dispatch the remaining branches to the solver to check for violations
-        results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
+        results <- liftIO $ flip mapConcurrently withQueries $ \(query, leaf) -> do
           res <- checkSat solvers query
           pure (res, leaf)
         let cexs = filter (\(res, _) -> not . isUnsat $ res) results
@@ -662,14 +658,15 @@ equivalenceCheck' solvers branchesA branchesB opts = do
       let allPairs = [(a,b) | a <- branchesA, b <- branchesB]
       liftIO $ putStrLn $ "Found " <> show (length allPairs) <> " total pairs of endstates"
 
-      when opts.debug $ liftIO $
+      conf <- readConfig
+      when conf.dumpEndStates $ liftIO $
         putStrLn $ "endstates in bytecodeA: " <> show (length branchesA)
                    <> "\nendstates in bytecodeB: " <> show (length branchesB)
 
       let differingEndStates = sortBySize (mapMaybe (uncurry distinct) allPairs)
       liftIO $ putStrLn $ "Asking the SMT solver for " <> (show $ length differingEndStates) <> " pairs"
-      when opts.debug $ forM_ (zip differingEndStates [(1::Integer)..]) (\(x, i) ->
-        liftIO $ T.writeFile ("prop-checked-" <> show i) (T.pack $ show x))
+      when conf.dumpEndStates $ forM_ (zip differingEndStates [(1::Integer)..]) (\(x, i) ->
+        liftIO $ T.writeFile ("prop-checked-" <> show i <> ".prop") (T.pack $ show x))
 
       knownUnsat <- liftIO $ newTVarIO []
       procs <- liftIO $ getNumProcessors

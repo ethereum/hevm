@@ -27,7 +27,7 @@ import Control.Monad.IO.Unlift
 import EVM.Effects
 
 rpcEnv :: Env
-rpcEnv = Env { config = Config { dumpQueries = False } }
+rpcEnv = Env { config = defaultConfig }
 
 test :: TestName -> ReaderT Env IO () -> TestTree
 test a b = testCase a $ runEnv rpcEnv b

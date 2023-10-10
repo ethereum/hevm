@@ -66,7 +66,7 @@ data BlockchainCase = BlockchainCase
 
 
 testEnv :: Env
-testEnv = Env { config = Config { dumpQueries = True } }
+testEnv = Env { config = defaultConfig }
 
 main :: IO ()
 main = do

@@ -16,8 +16,18 @@ import Control.Monad.Reader
 
 -- This is a concrete datatype that contains handlers for the above effects inside the IO monad.
 data Config = Config
-  {
-  dumpQueries :: Bool
+  { dumpQueries :: Bool
+  , dumpExprs :: Bool
+  , dumpEndStates :: Bool
+  , verbose :: Bool
+  }
+
+defaultConfig :: Config
+defaultConfig = Config {
+  dumpQueries = False
+  , dumpExprs = False
+  , dumpEndStates = False
+  , verbose = False
   }
 
 

@@ -186,24 +186,25 @@ getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
       Left _ -> "no git revision present"
 
 mainEnv :: Env
-mainEnv = Env { config = Config { dumpQueries = True } }
+mainEnv = Env { config = defaultConfig }
 
 main :: IO ()
 main = do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
+  let env = Env { config = defaultConfig { dumpQueries = cmd.smtdebug} }
   case cmd of
     Version {} ->putStrLn getFullVersion
     Symbolic {} -> do
       root <- getRoot cmd
-      withCurrentDirectory root $ runEnv mainEnv $ assert cmd
-    Equivalence {} -> runEnv mainEnv $ equivalence cmd
-    Exec {} -> runEnv mainEnv $ launchExec cmd
+      withCurrentDirectory root $ runEnv env $ assert cmd
+    Equivalence {} -> runEnv env $ equivalence cmd
+    Exec {} -> runEnv env $ launchExec cmd
     Test {} -> do
       root <- getRoot cmd
       withCurrentDirectory root $ do
         cores <- unsafeInto <$> getNumProcessors
         solver <- getSolver cmd
-        runEnv mainEnv $ withSolvers solver cores cmd.smttimeout $ \solvers -> do
+        runEnv env $ withSolvers solver cores cmd.smttimeout $ \solvers -> do
           buildOut <- liftIO $ readBuildOutput root (getProjectType cmd)
           case buildOut of
             Left e -> liftIO $ do
@@ -222,7 +223,6 @@ equivalence cmd = do
   let bytecodeA = hexByteString "--code" . strip0x $ cmd.codeA
       bytecodeB = hexByteString "--code" . strip0x $ cmd.codeB
       veriOpts = VeriOpts { simp = True
-                          , debug = False
                           , maxIter = cmd.maxIterations
                           , askSmtIters = cmd.askSmtIterations
                           , loopHeuristic = cmd.loopDetectionHeuristic
@@ -309,7 +309,6 @@ assert cmd = do
   solver <- liftIO $ getSolver cmd
   withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
     let opts = VeriOpts { simp = True
-                        , debug = cmd.smtdebug
                         , maxIter = cmd.maxIterations
                         , askSmtIters = cmd.askSmtIterations
                         , loopHeuristic = cmd.loopDetectionHeuristic
@@ -596,7 +595,6 @@ unitTestOptions cmd solvers buildOutput = do
          Nothing  -> Nothing
     , maxIter = cmd.maxIterations
     , askSmtIters = cmd.askSmtIterations
-    , smtDebug = cmd.smtdebug
     , smtTimeout = cmd.smttimeout
     , solver = cmd.solver
     , verbose = cmd.verbose

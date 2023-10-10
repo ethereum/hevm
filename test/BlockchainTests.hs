@@ -5,7 +5,7 @@ import Test.Tasty
 import EVM.Effects
 
 testEnv :: Env
-testEnv = Env { config = Config { dumpQueries = False } }
+testEnv = Env { config = defaultConfig }
 
 main :: IO ()
 main = do

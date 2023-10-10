@@ -52,7 +52,6 @@ data UnitTestOptions s = UnitTestOptions
   , verbose     :: Maybe Int
   , maxIter     :: Maybe Integer
   , askSmtIters :: Integer
-  , smtDebug    :: Bool
   , smtTimeout  :: Maybe Natural
   , solver      :: Maybe Text
   , match       :: Text
@@ -98,8 +97,7 @@ type ABIMethod = Text
 -- | Generate VeriOpts from UnitTestOptions
 makeVeriOpts :: UnitTestOptions s -> VeriOpts
 makeVeriOpts opts =
-   defaultVeriOpts { debug = opts.smtDebug
-                   , maxIter = opts.maxIter
+   defaultVeriOpts { maxIter = opts.maxIter
                    , askSmtIters = opts.askSmtIters
                    , rpcInfo = opts.rpcInfo
                    }
