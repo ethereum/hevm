@@ -946,7 +946,7 @@ tests = testGroup "hevm"
         let testFile = "test/contracts/fail/check-prefix.sol"
         runSolidityTest testFile "check_trivial" False >>= assertEqual "test result" False
     -- too slow, but useful to debug SLoad/SStore combos
-    , ignoeTest $ testCase "transfer-dapp" $ do
+    , testCase "transfer-dapp" $ do
         let testFile = "test/contracts/pass/transfer.sol"
         runSolidityTest testFile "prove_transfer" True >>= assertEqual "should prove transfer" True
     , testCase "Prove-Tests-Fail" $ do
