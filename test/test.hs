@@ -71,9 +71,9 @@ import EVM.Effects
 
 testEnv :: Env
 testEnv = Env { config = defaultConfig {
-  dumpQueries = True
-  , dumpExprs = True
-  , dumpEndStates = True
+  dumpQueries = False
+  , dumpExprs = False
+  , dumpEndStates = False
   } }
 
 putStrLnM :: (MonadUnliftIO m) => String -> m ()
