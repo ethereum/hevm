@@ -3162,20 +3162,22 @@ checkEquiv = checkEquivBase (./=)
 checkEquivBase
   :: (Eq a, MonadUnliftIO m, ReadConfig m)
   => (a -> a -> Prop) -> a -> a -> m Bool
-checkEquivBase mkprop l r = withSolvers Z3 1 (Just 1) $ \solvers -> liftIO $ do
-  if l == r
-     then do
-       putStrLnM "skip"
-       pure True
-     else do
-       let smt = assertPropsNoSimp abstRefineDefault [mkprop l r]
-       res <- checkSat solvers smt
-       print res
-       pure $ case res of
-         Unsat -> True
-         EVM.Solvers.Unknown -> True
-         Sat _ -> False
-         Error _ -> False
+checkEquivBase mkprop l r = do
+  conf <-  readConfig
+  withSolvers Z3 1 (Just 1) $ \solvers -> liftIO $ do
+    if l == r
+       then do
+         putStrLnM "skip"
+         pure True
+       else do
+         let smt = assertPropsNoSimp conf [mkprop l r]
+         res <- checkSat solvers smt
+         print res
+         pure $ case res of
+           Unsat -> True
+           EVM.Solvers.Unknown -> True
+           Sat _ -> False
+           Error _ -> False
 
 -- | Takes a runtime code and calls it with the provided calldata
 

@@ -240,14 +240,15 @@ type Fetcher m s = (ReadConfig m, MonadUnliftIO m) => Query s -> m (EVM s ())
 -- but for normal execution paths with inconsistent pathconditions
 -- will be pruned anyway.
 checkBranch :: (MonadUnliftIO m, ReadConfig m) => SolverGroup -> Prop -> Prop -> m BranchCondition
-checkBranch solvers branchcondition pathconditions = liftIO $ do
-  checkSat solvers (assertProps abstRefineDefault [(branchcondition .&& pathconditions)]) >>= \case
+checkBranch solvers branchcondition pathconditions = do
+  conf <- readConfig
+  liftIO $ checkSat solvers (assertProps conf [(branchcondition .&& pathconditions)]) >>= \case
     -- the condition is unsatisfiable
     Unsat -> -- if pathconditions are consistent then the condition must be false
       pure $ Case False
     -- Sat means its possible for condition to hold
-    Sat _ -> -- is its negation also possible?
-      checkSat solvers (assertProps abstRefineDefault [(pathconditions .&& (PNeg branchcondition))]) >>= \case
+    Sat _ -> do -- is its negation also possible?
+      checkSat solvers (assertProps conf [(pathconditions .&& (PNeg branchcondition))]) >>= \case
         -- No. The condition must hold
         Unsat -> pure $ Case True
         -- Yes. Both branches possible

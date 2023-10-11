@@ -20,7 +20,10 @@ data Config = Config
   , dumpExprs :: Bool
   , dumpEndStates :: Bool
   , verbose :: Bool
+  , abstRefineArith :: Bool
+  , abstRefineMem   :: Bool
   }
+  deriving (Show, Eq)
 
 defaultConfig :: Config
 defaultConfig = Config {
@@ -28,6 +31,8 @@ defaultConfig = Config {
   , dumpExprs = False
   , dumpEndStates = False
   , verbose = False
+  , abstRefineArith = False
+  , abstRefineMem   = False
   }
 
 

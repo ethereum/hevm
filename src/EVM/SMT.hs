@@ -31,7 +31,7 @@ import Language.SMT2.Parser (getValueRes, parseCommentFreeFileMsg)
 import Language.SMT2.Syntax (Symbol, SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
 import Numeric (readHex, readBin)
 import Witch (into, unsafeInto)
-import Control.Monad.State
+import Control.Monad.State (State, runState, get, put)
 import EVM.Format (formatProp)
 
 import EVM.CSE
@@ -40,6 +40,7 @@ import EVM.Expr qualified as Expr
 import EVM.Keccak (keccakAssumptions, keccakCompute)
 import EVM.Traversals
 import EVM.Types
+import EVM.Effects
 
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
@@ -171,21 +172,21 @@ data AbstState = AbstState
   }
   deriving (Show)
 
-abstractAwayProps :: AbstRefineConfig -> [Prop] -> ([Prop], AbstState)
-abstractAwayProps abstRefineConfig ps = runState (mapM abstrAway ps) (AbstState mempty 0)
+abstractAwayProps :: Config -> [Prop] -> ([Prop], AbstState)
+abstractAwayProps conf ps = runState (mapM abstrAway ps) (AbstState mempty 0)
   where
     abstrAway :: Prop -> State AbstState Prop
     abstrAway prop = mapPropM go prop
     go :: Expr a -> State AbstState (Expr a)
     go x = case x of
-        e@(Mod{})       | abstRefineConfig.arith  -> abstrExpr e
-        e@(SMod{})      | abstRefineConfig.arith  -> abstrExpr e
-        e@(MulMod{})    | abstRefineConfig.arith  -> abstrExpr e
-        e@(AddMod{})    | abstRefineConfig.arith  -> abstrExpr e
-        e@(Mul{})       | abstRefineConfig.arith  -> abstrExpr e
-        e@(Div{})       | abstRefineConfig.arith  -> abstrExpr e
-        e@(SDiv {})     | abstRefineConfig.arith  -> abstrExpr e
-        e@(ReadWord {}) | abstRefineConfig.mem -> abstrExpr e
+        e@(Mod{})       | conf.abstRefineArith  -> abstrExpr e
+        e@(SMod{})      | conf.abstRefineArith  -> abstrExpr e
+        e@(MulMod{})    | conf.abstRefineArith  -> abstrExpr e
+        e@(AddMod{})    | conf.abstRefineArith  -> abstrExpr e
+        e@(Mul{})       | conf.abstRefineArith  -> abstrExpr e
+        e@(Div{})       | conf.abstRefineArith  -> abstrExpr e
+        e@(SDiv {})     | conf.abstRefineArith  -> abstrExpr e
+        e@(ReadWord {}) | conf.abstRefineMem -> abstrExpr e
         e -> pure e
         where
             abstrExpr e = do
@@ -203,13 +204,15 @@ smt2Line :: Builder -> SMT2
 smt2Line txt = SMT2 [txt] mempty mempty mempty
 
 assertProps :: AbstRefineConfig -> [Prop] -> SMT2
+assertProps :: Config -> [Prop] -> SMT2
+-- first simplify to rewrite sload/sstore combos, then concretize&simplify
 assertProps conf ps = assertPropsNoSimp conf (Expr.simplifyProps ps)
 
 -- Note: we need a version that does NOT call simplify or simplifyProps,
 -- because we make use of it to verify the correctness of our simplification
 -- passes through property-based testing.
-assertPropsNoSimp :: AbstRefineConfig -> [Prop] -> SMT2
-assertPropsNoSimp abstRefineConfig ps =
+assertPropsNoSimp :: Config -> [Prop] -> SMT2
+assertPropsNoSimp config psPreConc =
   let encs = map propToSMT psElimAbst
       abstSMT = map propToSMT abstProps
       intermediates = declareIntermediates bufs stores in
@@ -238,8 +241,8 @@ assertPropsNoSimp abstRefineConfig ps =
 
   where
     (psElim, bufs, stores) = eliminateProps ps
-    (psElimAbst, abst@(AbstState abstExprToInt _)) = if abstRefineConfig.arith || abstRefineConfig.mem
-      then abstractAwayProps abstRefineConfig psElim
+    (psElimAbst, abst@(AbstState abstExprToInt _)) = if config.abstRefineArith || config.abstRefineMem
+      then abstractAwayProps config psElim
       else (psElim, AbstState mempty 0)
 
     abstProps = map toProp (Map.toList abstExprToInt)

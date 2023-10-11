@@ -191,7 +191,10 @@ mainEnv = Env { config = defaultConfig }
 main :: IO ()
 main = do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
-  let env = Env { config = defaultConfig { dumpQueries = cmd.smtdebug} }
+  let env = Env { config = defaultConfig {
+    dumpQueries = cmd.smtdebug
+    , abstRefineMem = cmd.abstractMemory
+    , abstRefineArith = cmd.abstractArithmetic} }
   case cmd of
     Version {} ->putStrLn getFullVersion
     Symbolic {} -> do
@@ -226,7 +229,6 @@ equivalence cmd = do
                           , maxIter = cmd.maxIterations
                           , askSmtIters = cmd.askSmtIterations
                           , loopHeuristic = cmd.loopDetectionHeuristic
-                          , abstRefineConfig = AbstRefineConfig cmd.abstractArithmetic cmd.abstractMemory
                           , rpcInfo = Nothing
                           }
   calldata <- liftIO $ buildCalldata cmd
@@ -312,13 +314,12 @@ assert cmd = do
                         , maxIter = cmd.maxIterations
                         , askSmtIters = cmd.askSmtIterations
                         , loopHeuristic = cmd.loopDetectionHeuristic
-                        , abstRefineConfig = AbstRefineConfig cmd.abstractArithmetic cmd.abstractMemory
                         , rpcInfo = rpcinfo
     }
     (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
     case res of
-      [Qed _] -> liftIO $ do
-        putStrLn "\nQED: No reachable property violations discovered\n"
+      [Qed _] -> do
+        liftIO $ putStrLn "\nQED: No reachable property violations discovered\n"
         showExtras solvers cmd calldata expr
       _ -> do
         let cexs = snd <$> mapMaybe getCex res
@@ -337,26 +338,28 @@ assert cmd = do
                  , "Could not determine reachability of the following end states:"
                  , ""
                  ] <> fmap (formatExpr) timeouts
-        liftIO $ do
-          T.putStrLn $ T.unlines (counterexamples <> unknowns)
-          showExtras solvers cmd calldata expr
-          exitFailure
+        liftIO $ T.putStrLn $ T.unlines (counterexamples <> unknowns)
+        showExtras solvers cmd calldata expr
+        liftIO $ exitFailure
 
-showExtras :: SolverGroup -> Command Options.Unwrapped -> (Expr Buf, [Prop]) -> Expr End -> IO ()
+showExtras
+  :: (MonadUnliftIO m, ReadConfig m)
+  => SolverGroup -> Command Options.Unwrapped -> (Expr Buf, [Prop]) -> Expr End -> m ()
 showExtras solvers cmd calldata expr = do
-  when cmd.showTree $ do
+  when cmd.showTree $ liftIO $ do
     putStrLn "=== Expression ===\n"
     T.putStrLn $ formatExpr expr
     putStrLn ""
   when cmd.showReachableTree $ do
     reached <- reachable solvers expr
-    putStrLn "=== Reachable Expression ===\n"
-    T.putStrLn (formatExpr . snd $ reached)
-    putStrLn ""
+    liftIO $ do
+      putStrLn "=== Reachable Expression ===\n"
+      T.putStrLn (formatExpr . snd $ reached)
+      putStrLn ""
   when cmd.getModels $ do
-    putStrLn $ "=== Models for " <> show (Expr.numBranches expr) <> " branches ===\n"
+    liftIO $ putStrLn $ "=== Models for " <> show (Expr.numBranches expr) <> " branches ===\n"
     ms <- produceModels solvers expr
-    forM_ ms (showModel (fst calldata))
+    liftIO $ forM_ ms (showModel (fst calldata))
 
 isTestOrLib :: Text -> Bool
 isTestOrLib file = T.isSuffixOf ".t.sol" file || areAnyPrefixOf ["src/test/", "src/tests/", "lib/"] file

@@ -77,7 +77,6 @@ data VeriOpts = VeriOpts
   , maxIter :: Maybe Integer
   , askSmtIters :: Integer
   , loopHeuristic :: LoopHeuristic
-  , abstRefineConfig :: AbstRefineConfig
   , rpcInfo :: Fetch.RpcInfo
   }
   deriving (Eq, Show)
@@ -88,15 +87,11 @@ defaultVeriOpts = VeriOpts
   , maxIter = Nothing
   , askSmtIters = 1
   , loopHeuristic = StackBased
-  , abstRefineConfig = abstRefineDefault
   , rpcInfo = Nothing
   }
 
 rpcVeriOpts :: (Fetch.BlockNumber, Text) -> VeriOpts
 rpcVeriOpts info = defaultVeriOpts { rpcInfo = Just info }
-
-debugAbstVeriOpts :: VeriOpts
-debugAbstVeriOpts = defaultVeriOpts { abstRefineConfig = AbstRefineConfig True True }
 
 extractCex :: VerifyResult -> Maybe (Expr End, SMTCex)
 extractCex (Cex c) = Just c
@@ -486,9 +481,12 @@ flattenExpr = go []
 -- the incremental nature of the task at hand. Introducing support for
 -- incremental queries might let us go even faster here.
 -- TODO: handle errors properly
-reachable :: SolverGroup -> Expr End -> IO ([SMT2], Expr End)
+reachable
+  :: (MonadUnliftIO m, ReadConfig m)
+  => SolverGroup -> Expr End -> m ([SMT2], Expr End)
 reachable solvers e = do
-  res <- go [] e
+  conf <- readConfig
+  res <- liftIO $ go conf [] e
   pure $ second (fromMaybe (internalError "no reachable paths found")) res
   where
     {-
@@ -497,12 +495,12 @@ reachable solvers e = do
        If reachable return the expr wrapped in a Just. If not return Nothing.
        When walking back up the tree drop unreachable subbranches.
     -}
-    go :: [Prop] -> Expr End -> IO ([SMT2], Maybe (Expr End))
-    go pcs = \case
+    go :: Config -> [Prop] -> Expr End -> IO ([SMT2], Maybe (Expr End))
+    go conf pcs = \case
       ITE c t f -> do
         (tres, fres) <- concurrently
-          (go (PEq (Lit 1) c : pcs) t)
-          (go (PEq (Lit 0) c : pcs) f)
+          (go conf (PEq (Lit 1) c : pcs) t)
+          (go conf (PEq (Lit 0) c : pcs) f)
         let subexpr = case (snd tres, snd fres) of
               (Just t', Just f') -> Just $ ITE c t' f'
               (Just t', Nothing) -> Just t'
@@ -510,7 +508,7 @@ reachable solvers e = do
               (Nothing, Nothing) -> Nothing
         pure (fst tres <> fst fres, subexpr)
       leaf -> do
-        let query = assertProps abstRefineDefault pcs
+        let query = assertProps conf pcs
         res <- checkSat solvers query
         case res of
           Sat _ -> pure ([query], Just leaf)
@@ -578,7 +576,7 @@ verify solvers opts preState maybepost = do
               _ -> True
           assumes = preState.constraints
           withQueries = canViolate <&> \leaf ->
-            (assertProps opts.abstRefineConfig (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)
+            (assertProps conf (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)
         putStrLn $ "Checking for reachability of "
                      <> show (length withQueries)
                      <> " potential property violation(s)"
@@ -633,7 +631,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
     False -> do
       branchesA <- getBranches bytecodeA
       branchesB <- getBranches bytecodeB
-      equivalenceCheck' solvers branchesA branchesB opts
+      equivalenceCheck' solvers branchesA branchesB
   where
     -- decompiles the given bytecode into a list of branches
     getBranches :: ByteString -> m [Expr End]
@@ -647,8 +645,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
 
 equivalenceCheck'
   :: forall m . (MonadUnliftIO m, ReadConfig m)
-  => SolverGroup -> [Expr End] -> [Expr End] -> VeriOpts -> m [EquivResult]
-equivalenceCheck' solvers branchesA branchesB opts = do
+  => SolverGroup -> [Expr End] -> [Expr End] -> m [EquivResult]
+equivalenceCheck' solvers branchesA branchesB = do
       when (any isPartial branchesA || any isPartial branchesB) $ liftIO $ do
         putStrLn ""
         putStrLn "WARNING: hevm was only able to partially explore the given contract due to the following issues:"
@@ -669,8 +667,8 @@ equivalenceCheck' solvers branchesA branchesB opts = do
         liftIO $ T.writeFile ("prop-checked-" <> show i <> ".prop") (T.pack $ show x))
 
       knownUnsat <- liftIO $ newTVarIO []
-      procs <- liftIO $ getNumProcessors
-      results <- liftIO $ checkAll differingEndStates knownUnsat procs
+      procs <- liftIO getNumProcessors
+      results <- checkAll differingEndStates knownUnsat procs
 
       let useful = foldr (\(_, b) n -> if b then n+1 else n) (0::Integer) results
       liftIO $ putStrLn $ "Reuse of previous queries was Useful in " <> (show useful) <> " cases"
@@ -691,9 +689,9 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     -- the solver if we can determine unsatisfiability from the cache already
     -- the last element of the returned tuple indicates whether the cache was
     -- used or not
-    check :: UnsatCache -> (Set Prop) -> IO (EquivResult, Bool)
-    check knownUnsat props = do
-      let smt = assertProps opts.abstRefineConfig (Set.toList props)
+    check :: Config -> UnsatCache -> (Set Prop) -> IO (EquivResult, Bool)
+    check conf knownUnsat props = do
+      let smt = assertProps conf (Set.toList props)
       ku <- readTVarIO knownUnsat
       res <- if subsetAny props ku
              then pure (True, Unsat)
@@ -715,10 +713,13 @@ equivalenceCheck' solvers branchesA branchesB opts = do
     -- from left-to-right, and with a max of K threads. This is in contrast to
     -- mapConcurrently which would spawn as many threads as there are jobs, and
     -- run them in a random order. We ordered them correctly, though so that'd be bad
-    checkAll :: [(Set Prop)] -> UnsatCache -> Int -> IO [(EquivResult, Bool)]
+    checkAll
+      :: (MonadUnliftIO m, ReadConfig m)
+      => [(Set Prop)] -> UnsatCache -> Int -> m [(EquivResult, Bool)]
     checkAll input cache numproc = do
-       wrap <- pool numproc
-       parMapIO (wrap . (check cache)) input
+       conf <- readConfig
+       wrap <- liftIO $ pool numproc
+       liftIO $ parMapIO (wrap . (check conf cache)) input
 
 
     -- Takes two branches and returns a set of props that will need to be
@@ -785,11 +786,14 @@ equivalenceCheck' solvers branchesA branchesB opts = do
 both' :: (a -> b) -> (a, a) -> (b, b)
 both' f (x, y) = (f x, f y)
 
-produceModels :: SolverGroup -> Expr End -> IO [(Expr End, CheckSatResult)]
+produceModels
+  :: (MonadUnliftIO m, ReadConfig m)
+  => SolverGroup -> Expr End -> m [(Expr End, CheckSatResult)]
 produceModels solvers expr = do
   let flattened = flattenExpr expr
-      withQueries = fmap (\e -> ((assertProps abstRefineDefault) . extractProps $ e, e)) flattened
-  results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
+      withQueries conf = fmap (\e -> ((assertProps conf) . extractProps $ e, e)) flattened
+  conf <- readConfig
+  results <- liftIO $ (flip mapConcurrently) (withQueries conf) $ \(query, leaf) -> do
     res <- checkSat solvers query
     pure (res, leaf)
   pure $ fmap swap $ filter (\(res, _) -> not . isUnsat $ res) results
