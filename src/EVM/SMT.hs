@@ -203,7 +203,6 @@ abstractAwayProps conf ps = runState (mapM abstrAway ps) (AbstState mempty 0)
 smt2Line :: Builder -> SMT2
 smt2Line txt = SMT2 [txt] mempty mempty mempty
 
-assertProps :: AbstRefineConfig -> [Prop] -> SMT2
 assertProps :: Config -> [Prop] -> SMT2
 -- first simplify to rewrite sload/sstore combos, then concretize&simplify
 assertProps conf ps = assertPropsNoSimp conf (Expr.simplifyProps ps)
@@ -212,7 +211,7 @@ assertProps conf ps = assertPropsNoSimp conf (Expr.simplifyProps ps)
 -- because we make use of it to verify the correctness of our simplification
 -- passes through property-based testing.
 assertPropsNoSimp :: Config -> [Prop] -> SMT2
-assertPropsNoSimp config psPreConc =
+assertPropsNoSimp config ps =
   let encs = map propToSMT psElimAbst
       abstSMT = map propToSMT abstProps
       intermediates = declareIntermediates bufs stores in
