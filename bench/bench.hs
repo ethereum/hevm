@@ -27,7 +27,7 @@ import qualified EVM.Fetch as Fetch
 import EVM.Test.BlockchainTests qualified as BCTests
 
 benchEnv :: Env
-benchEnv = Env { config = Config { dumpQueries = False } }
+benchEnv = Env { config = defaultConfig }
 
 main :: IO ()
 main = defaultMain
