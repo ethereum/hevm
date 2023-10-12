@@ -1266,7 +1266,7 @@ branch cond continue = do
     choosePath :: CodeLocation -> BranchCondition -> EVM s ()
     choosePath loc (Case v) = do
       assign #result Nothing
-      pushTo #constraints $ if v then Expr.evalProp (condSimp ./= Lit 0) else Expr.evalProp (condSimp .== Lit 0)
+      pushTo #constraints $ if v then Expr.simplifyProp (condSimp ./= Lit 0) else Expr.simplifyProp (condSimp .== Lit 0)
       (iteration, _) <- use (#iterations % at loc % non (0,[]))
       stack <- use (#state % #stack)
       assign (#cache % #path % at (loc, iteration)) (Just v)

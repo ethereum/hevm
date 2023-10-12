@@ -573,7 +573,7 @@ verify solvers opts preState maybepost = do
       let
         -- Filter out any leaves that can be statically shown to be safe
         canViolate = flip filter flattened $
-          \leaf -> case Expr.evalProp (post preState leaf) of
+          \leaf -> case Expr.simplifyProp (post preState leaf) of
             PBool True -> False
             _ -> True
         assumes = preState.constraints

@@ -397,14 +397,14 @@ tests = testGroup "hevm"
           Just asList -> do
             let asBuf = Expr.fromList asList
             checkEquiv asBuf input
-    , testProperty "evalProp-equivalence-lit" $ \(LitProp p) -> ioProperty $ do
+    , testProperty "simplifyProp-equivalence-lit" $ \(LitProp p) -> ioProperty $ do
         let simplified = Expr.simplifyProps [p]
         case simplified of
           [] -> checkEquivProp (PBool True) p
           [val@(PBool _)] -> checkEquivProp val p
           _ -> assertFailure "must evaluate down to a literal bool"
-    , testProperty "evalProp-equivalence-sym" $ \(p) -> ioProperty $ do
-        let simplified = Expr.evalProp p
+    , testProperty "simplifyProp-equivalence-sym" $ \(p) -> ioProperty $ do
+        let simplified = Expr.simplifyProp p
         checkEquivProp simplified p
     , testProperty "simpProp-equivalence-sym" $ \(ps :: [Prop]) -> ioProperty $ do
         let simplified = pand (Expr.simplifyProps ps)
