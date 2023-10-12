@@ -3207,6 +3207,7 @@ loadVM x = do
      Just (VMSuccess (ConcreteBuf targetCode)) -> do
        let target = vm1.state.contract
        vm2 <- Stepper.interpret (Fetch.zero 0 Nothing) vm1 (prepVm target targetCode >> Stepper.run)
+       writeTrace vm2
        pure $ Just vm2
      _ -> pure Nothing
   where

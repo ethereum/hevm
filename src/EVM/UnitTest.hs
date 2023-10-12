@@ -170,6 +170,7 @@ runUnitTestContract
         initializeUnitTest opts theContract
         Stepper.evm get
 
+      writeTraceDapp dapp vm1
       case vm1.result of
         Just (VMFailure _) -> liftIO $ do
           Text.putStrLn "\x1b[31m[BAIL]\x1b[0m setUp() "
@@ -232,6 +233,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
         pushTrace (EntryTrace testName)
         makeTxCall testParams cd
         get
+    writeTraceDapp dapp vm'
 
     -- check postconditions against vm
     (e, results) <- verify solvers (makeVeriOpts opts) vm' (Just postcondition)

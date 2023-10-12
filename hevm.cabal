@@ -375,4 +375,5 @@ benchmark bench
     filemanip,
     filepath,
     containers,
-    mtl
+    mtl,
+    unliftio-core

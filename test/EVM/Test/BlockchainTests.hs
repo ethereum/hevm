@@ -144,9 +144,9 @@ runVMTest
 runVMTest diffmode (_name, x) = do
   vm0 <- liftIO $ vmForCase x
   result <- EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) vm0 EVM.Stepper.runFully
-  liftIO $ do
-    maybeReason <- checkExpectation diffmode x result
-    forM_ maybeReason assertFailure
+  writeTrace result
+  maybeReason <- checkExpectation diffmode x result
+  liftIO $ forM_ maybeReason assertFailure
 
 
 -- | Run a vm test and output a geth style per opcode trace
@@ -225,13 +225,15 @@ checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
     printContracts actual
   pure (unwords reason)
 
-checkExpectation :: Bool -> Case -> VM RealWorld -> IO (Maybe String)
+checkExpectation
+  :: (MonadUnliftIO m, ReadConfig m)
+  => Bool -> Case -> VM RealWorld -> m (Maybe String)
 checkExpectation diff x vm = do
   let expectation = x.testExpectation
       (okState, b2, b3, b4, b5) = checkExpectedContracts vm expectation
   if okState then
     pure Nothing
-  else
+  else liftIO $
     Just <$> checkStateFail diff x vm (b2, b3, b4, b5)
 
 -- quotient account state by nullness

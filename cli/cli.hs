@@ -194,7 +194,8 @@ main = do
   let env = Env { config = defaultConfig {
     dumpQueries = cmd.smtdebug
     , abstRefineMem = cmd.abstractMemory
-    , abstRefineArith = cmd.abstractArithmetic} }
+    , abstRefineArith = cmd.abstractArithmetic
+    , dumpTrace = cmd.trace } }
   case cmd of
     Version {} ->putStrLn getFullVersion
     Symbolic {} -> do
@@ -380,7 +381,7 @@ launchExec cmd = do
   -- TODO: we shouldn't need solvers to execute this code
   withSolvers Z3 0 Nothing $ \solvers -> do
     vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcinfo) vm EVM.Stepper.runFully
-    liftIO $ when cmd.trace $ T.hPutStr stderr (showTraceTree dapp vm')
+    writeTraceDapp dapp vm'
     case vm'.result of
       Just (VMFailure (Revert msg)) -> liftIO $ do
         let res = case msg of
