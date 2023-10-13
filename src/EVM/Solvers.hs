@@ -96,7 +96,7 @@ writeSMT2File smt2 count abst =
     let content = formatSMT2 smt2 <> "\n\n(check-sat)"
     T.writeFile ("query-" <> (show count) <> "-" <> abst <> ".smt2") content
 
-withSolvers :: (MonadUnliftIO m, ReadConfig m) => Solver -> Natural -> Maybe Natural -> (SolverGroup -> m a) -> m a
+withSolvers :: App m => Solver -> Natural -> Maybe Natural -> (SolverGroup -> m a) -> m a
 withSolvers solver count timeout cont = do
     -- spawn solvers
     instances <- mapM (const $ liftIO $ spawnSolver solver timeout) [1..count]
@@ -115,7 +115,7 @@ withSolvers solver count timeout cont = do
     liftIO $ killThread orchestrateId
     pure res
   where
-    orchestrate :: (MonadUnliftIO m, ReadConfig m) => Chan Task -> Chan SolverInstance -> Int -> m b
+    orchestrate :: App m => Chan Task -> Chan SolverInstance -> Int -> m b
     orchestrate queue avail fileCounter = do
       task <- liftIO $ readChan queue
       inst <- liftIO $ readChan avail

@@ -232,7 +232,7 @@ loadSymVM x callvalue cd create =
 -- | Interpreter which explores all paths at branching points. Returns an
 -- 'Expr End' representing the possible executions.
 interpret
-  :: forall m . (MonadUnliftIO m, ReadConfig m)
+  :: forall m . App m
   =>  Fetch.Fetcher m RealWorld
   -> Maybe Integer -- max iterations
   -> Integer -- ask smt iterations
@@ -356,7 +356,7 @@ type Precondition s = VM s -> Prop
 type Postcondition s = VM s -> Expr End -> Prop
 
 checkAssert
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => SolverGroup
   -> [Word256]
   -> ByteString
@@ -368,7 +368,7 @@ checkAssert solvers errs c signature' concreteArgs opts =
   verifyContract solvers c signature' concreteArgs opts Nothing (Just $ checkAssertions errs)
 
 getExpr
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => SolverGroup
   -> ByteString
   -> Maybe Sig
@@ -431,7 +431,7 @@ mkCalldata (Just (Sig name types)) args =
   symCalldata name types args (AbstractBuf "txdata")
 
 verifyContract
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => SolverGroup
   -> ByteString
   -> Maybe Sig
@@ -482,7 +482,7 @@ flattenExpr = go []
 -- incremental queries might let us go even faster here.
 -- TODO: handle errors properly
 reachable
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => SolverGroup -> Expr End -> m ([SMT2], Expr End)
 reachable solvers e = do
   conf <- readConfig
@@ -539,7 +539,7 @@ getPartials = mapMaybe go
 -- | Symbolically execute the VM and check all endstates against the
 -- postcondition, if available.
 verify
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => SolverGroup
   -> VeriOpts
   -> VM RealWorld
@@ -616,7 +616,7 @@ type UnsatCache = TVar [Set Prop]
 -- equivalence break, and since we run this check for every pair of end states,
 -- the check is exhaustive.
 equivalenceCheck
-  :: forall m . (MonadUnliftIO m, ReadConfig m)
+  :: forall m . App m
   => SolverGroup
   -> ByteString
   -> ByteString
@@ -644,7 +644,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
 
 
 equivalenceCheck'
-  :: forall m . (MonadUnliftIO m, ReadConfig m)
+  :: forall m . App m
   => SolverGroup -> [Expr End] -> [Expr End] -> m [EquivResult]
 equivalenceCheck' solvers branchesA branchesB = do
       when (any isPartial branchesA || any isPartial branchesB) $ liftIO $ do
@@ -714,7 +714,7 @@ equivalenceCheck' solvers branchesA branchesB = do
     -- mapConcurrently which would spawn as many threads as there are jobs, and
     -- run them in a random order. We ordered them correctly, though so that'd be bad
     checkAll
-      :: (MonadUnliftIO m, ReadConfig m)
+      :: App m
       => [(Set Prop)] -> UnsatCache -> Int -> m [(EquivResult, Bool)]
     checkAll input cache numproc = do
        conf <- readConfig
@@ -787,7 +787,7 @@ both' :: (a -> b) -> (a, a) -> (b, b)
 both' f (x, y) = (f x, f y)
 
 produceModels
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => SolverGroup -> Expr End -> m [(Expr End, CheckSatResult)]
 produceModels solvers expr = do
   let flattened = flattenExpr expr

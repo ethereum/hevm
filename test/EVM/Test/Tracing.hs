@@ -300,7 +300,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
     toAddress = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
 
 getHEVMRet
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => OpContract -> ByteString -> Int -> m (Either (EvmError, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult))
 getHEVMRet contr txData gaslimitExec = do
   let (txn, evmEnv, contrAlloc, fromAddress, toAddress, _) = evmSetup contr txData gaslimitExec
@@ -420,7 +420,7 @@ symbolify vm = vm { state = vm.state { calldata = AbstractBuf "calldata" } }
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
 runCodeWithTrace
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction
   -> Expr EAddr -> Expr EAddr -> m (Either (EvmError, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
 runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 Nothing $ \solvers -> do
@@ -469,7 +469,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
        <&> set (#state % #calldata) calldata'
 
 runCode
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => Fetch.RpcInfo -> ByteString -> Expr Buf -> m (Maybe (Expr Buf))
 runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
   origVM <- liftIO $ stToIO $ vmForRuntimeCode
@@ -541,14 +541,14 @@ vmres vm =
 type TraceState s = (VM s, [VMTrace])
 
 execWithTrace
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => StateT (TraceState RealWorld) m (VMResult RealWorld)
 execWithTrace = do
   _ <- runWithTrace
   fromJust <$> use (_1 % #result)
 
 runWithTrace
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => StateT (TraceState RealWorld) m (VM RealWorld)
 runWithTrace = do
   -- This is just like `exec` except for every instruction evaluated,
@@ -570,7 +570,7 @@ runWithTrace = do
     Just _ -> pure vm0
 
 interpretWithTrace
-  :: forall m a . (MonadUnliftIO m, ReadConfig m)
+  :: forall m a . App m
   => Fetch.Fetcher m RealWorld
   -> Stepper.Stepper RealWorld a
   -> StateT (TraceState RealWorld) m a
@@ -578,7 +578,7 @@ interpretWithTrace fetcher =
   eval . Operational.view
   where
     eval
-      :: (MonadUnliftIO m, ReadConfig m)
+      :: App m
       => Operational.ProgramView (Stepper.Action RealWorld) a
       -> StateT (TraceState RealWorld) m a
     eval (Operational.Return x) = pure x
@@ -889,7 +889,7 @@ tests = testGroup "contract-quickcheck-run"
     ]
 
 checkTraceAndOutputs
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => OpContract -> Int -> ByteString -> m ()
 checkTraceAndOutputs contract gasLimit txData = do
   evmtoolResult <- liftIO $ getEVMToolRet contract txData gasLimit

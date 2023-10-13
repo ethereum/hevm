@@ -80,7 +80,7 @@ putStrLnM :: (MonadUnliftIO m) => String -> m ()
 putStrLnM a = liftIO $ putStrLn a
 
 assertEqualM
-  :: (MonadUnliftIO m, ReadConfig m, Eq a, Show a, HasCallStack)
+  :: (App m, Eq a, Show a, HasCallStack)
   => String -> a -> a -> m ()
 assertEqualM a b c = liftIO $ assertEqual a b c
 
@@ -3150,17 +3150,17 @@ tests = testGroup "hevm"
     (===>) = assertSolidityComputation
 
 checkEquivProp
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => Prop -> Prop -> m Bool
 checkEquivProp = checkEquivBase (\l r -> PNeg (PImpl l r .&& PImpl r l))
 
 checkEquiv
-  :: (Typeable a, MonadUnliftIO m, ReadConfig m)
+  :: (Typeable a, App m)
   => Expr a -> Expr a -> m Bool
 checkEquiv = checkEquivBase (./=)
 
 checkEquivBase
-  :: (Eq a, MonadUnliftIO m, ReadConfig m)
+  :: (Eq a, App m)
   => (a -> a -> Prop) -> a -> a -> m Bool
 checkEquivBase mkprop l r = do
   conf <-  readConfig
@@ -3183,7 +3183,7 @@ checkEquivBase mkprop l r = do
 
 -- | Takes a creation code and some calldata, runs the creation code, and calls the resulting contract with the provided calldata
 runSimpleVM
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => ByteString -> ByteString -> m (Maybe ByteString)
 runSimpleVM x ins = do
   loadVM x >>= \case
@@ -3198,7 +3198,7 @@ runSimpleVM x ins = do
 
 -- | Takes a creation code and returns a vm with the result of executing the creation code
 loadVM
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => ByteString -> m (Maybe (VM RealWorld))
 loadVM x = do
   vm <- liftIO $ stToIO $ vmForEthrunCreation x
@@ -3242,14 +3242,14 @@ defaultDataLocation t =
   else ""
 
 runFunction
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => Text -> ByteString -> m (Maybe ByteString)
 runFunction c input = do
   x <- liftIO $ singleContract "X" c
   runSimpleVM (fromJust x) input
 
 runStatements
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => Text -> [AbiValue] -> AbiType
   -> m (Maybe ByteString)
 runStatements stmts args t = do
@@ -3827,7 +3827,7 @@ data Invocation
   deriving Show
 
 assertSolidityComputation
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => Invocation -> AbiValue -> m ()
 assertSolidityComputation (SolidityCall s args) x =
   do y <- runStatements s args (abiValueType x)
@@ -3850,7 +3850,7 @@ checkBadCheatCode sig _ = \case
   _ -> PBool True
 
 allBranchesFail
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => ByteString -> Maybe Sig -> m (Either [SMTCex] (Expr End))
 allBranchesFail = checkPost (Just p)
   where
@@ -3859,12 +3859,12 @@ allBranchesFail = checkPost (Just p)
       _ -> PBool True
 
 reachableUserAsserts
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => ByteString -> Maybe Sig -> m (Either [SMTCex] (Expr End))
 reachableUserAsserts = checkPost (Just $ checkAssertions [0x01])
 
 checkPost
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => Maybe (Postcondition RealWorld) -> ByteString -> Maybe Sig -> m (Either [SMTCex] (Expr End))
 checkPost post c sig = do
   (e, res) <- withSolvers Z3 1 Nothing $ \s ->

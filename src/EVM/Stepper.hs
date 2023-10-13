@@ -110,7 +110,7 @@ runFully = do
 enter :: Text -> Stepper s ()
 enter t = evm (EVM.pushTrace (EntryTrace t))
 
-interpret :: forall m a . (ReadConfig m, MonadUnliftIO m) => Fetch.Fetcher m RealWorld -> VM RealWorld -> Stepper RealWorld a -> m a
+interpret :: forall m a . (App m) => Fetch.Fetcher m RealWorld -> VM RealWorld -> Stepper RealWorld a -> m a
 interpret fetcher vm = eval . view
   where
     eval :: ProgramView (Action RealWorld) a -> m a

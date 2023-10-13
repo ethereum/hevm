@@ -75,7 +75,7 @@ blockchainTests ts = bench "blockchain-tests" $ nfIO $ do
 
 -- | executes a single test case and returns a boolean value representing its success
 runBCTest
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => BCTests.Case -> m Bool
 runBCTest x =
  do
@@ -91,7 +91,7 @@ runBCTest x =
 
 
 findPanics
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => Solver -> Natural -> Integer -> ByteString -> m ()
 findPanics solver count iters c = do
   _ <- withSolvers solver count Nothing $ \s -> do

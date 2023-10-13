@@ -73,7 +73,7 @@ main = do
   tests <- runEnv testEnv prepareTests
   defaultMain tests
 
-prepareTests :: (MonadUnliftIO m, ReadConfig m) => m TestTree
+prepareTests :: App m => m TestTree
 prepareTests = do
   repo <- liftIO $ getEnv "HEVM_ETHEREUM_TESTS_REPO"
   let testsDir = "BlockchainTests/GeneralStateTests"
@@ -88,7 +88,7 @@ prepareTests = do
   pure $ testGroup "ethereum-tests" groups
 
 testsFromFile
-  :: forall m . (MonadUnliftIO m, ReadConfig m)
+  :: forall m . App m
   => String -> Map String (TestTree -> TestTree) -> m [TestTree]
 testsFromFile file problematicTests = do
   parsed <- parseBCSuite <$> (liftIO $ LazyByteString.readFile file)
@@ -139,7 +139,7 @@ ciProblematicTests = Map.fromList
   ]
 
 runVMTest
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => Bool -> (String, Case) -> m ()
 runVMTest diffmode (_name, x) = do
   vm0 <- liftIO $ vmForCase x
@@ -151,7 +151,7 @@ runVMTest diffmode (_name, x) = do
 
 -- | Run a vm test and output a geth style per opcode trace
 traceVMTest
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => String -> String -> m [VMTrace]
 traceVMTest file test = do
   repo <- liftIO $ getEnv "HEVM_ETHEREUM_TESTS_REPO"
@@ -174,7 +174,7 @@ readTrace = JSON.eitherDecodeFileStrict
 -- | given a path to a test file, a test case from within that file, and a trace from geth from running that test, compare the traces and show where we differ
 -- This would need a few tweaks to geth to make this really usable (i.e. evm statetest show allow running a single test from within the test file).
 traceVsGeth
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => String -> String -> FilePath -> m ()
 traceVsGeth file test gethTrace = do
   hevm <- traceVMTest file test
@@ -226,7 +226,7 @@ checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
   pure (unwords reason)
 
 checkExpectation
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => Bool -> Case -> VM RealWorld -> m (Maybe String)
 checkExpectation diff x vm = do
   let expectation = x.testExpectation

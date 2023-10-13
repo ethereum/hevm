@@ -239,7 +239,7 @@ type Fetcher m s = (ReadConfig m, MonadUnliftIO m) => Query s -> m (EVM s ())
 -- When in debug mode, we do not want to be able to navigate to dead paths,
 -- but for normal execution paths with inconsistent pathconditions
 -- will be pruned anyway.
-checkBranch :: (MonadUnliftIO m, ReadConfig m) => SolverGroup -> Prop -> Prop -> m BranchCondition
+checkBranch :: App m => SolverGroup -> Prop -> Prop -> m BranchCondition
 checkBranch solvers branchcondition pathconditions = do
   conf <- readConfig
   liftIO $ checkSat solvers (assertProps conf [(branchcondition .&& pathconditions)]) >>= \case

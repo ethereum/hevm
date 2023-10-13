@@ -218,7 +218,7 @@ main = do
               liftIO $ unless res exitFailure
 
 equivalence
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => Command Options.Unwrapped -> m ()
 equivalence cmd = do
   let bytecodeA = hexByteString "--code" . strip0x $ cmd.codeA
@@ -296,7 +296,7 @@ buildCalldata cmd = case (cmd.calldata, cmd.sig) of
 
 -- If function signatures are known, they should always be given for best results.
 assert
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => Command Options.Unwrapped -> m ()
 assert cmd = do
   let block'  = maybe Fetch.Latest Fetch.BlockNumber cmd.block
@@ -341,7 +341,7 @@ assert cmd = do
         liftIO $ exitFailure
 
 showExtras
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => SolverGroup -> Command Options.Unwrapped -> (Expr Buf, [Prop]) -> Expr End -> m ()
 showExtras solvers cmd calldata expr = do
   when cmd.showTree $ liftIO $ do
@@ -366,7 +366,7 @@ areAnyPrefixOf :: [Text] -> Text -> Bool
 areAnyPrefixOf prefixes t = any (flip T.isPrefixOf t) prefixes
 
 launchExec
-  :: (MonadUnliftIO m, ReadConfig m)
+  :: App m
   => Command Options.Unwrapped -> m ()
 launchExec cmd = do
   dapp <- liftIO $ getSrcInfo cmd

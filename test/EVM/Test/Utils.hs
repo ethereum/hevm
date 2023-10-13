@@ -25,7 +25,7 @@ import Control.Monad.Catch (MonadMask)
 import EVM.Effects
 
 runSolidityTestCustom
-  :: (MonadMask m, MonadUnliftIO m, ReadConfig m)
+  :: (MonadMask m, App m)
   => FilePath -> Text -> Maybe Natural -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> m Bool
 runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectType = do
   withSystemTempDirectory "dapp-test" $ \root -> do
@@ -37,7 +37,7 @@ runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectT
           unitTest opts contracts
 
 runSolidityTest
-  :: (MonadMask m, MonadUnliftIO m, ReadConfig m)
+  :: (MonadMask m, App m)
   => FilePath -> Text -> m Bool
 runSolidityTest testFile match = runSolidityTestCustom testFile match Nothing Nothing True Nothing Foundry
 
