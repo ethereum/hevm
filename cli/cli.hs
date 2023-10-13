@@ -23,7 +23,6 @@ import Optics.Core ((&), set)
 import Witch (unsafeInto)
 import Options.Generic as Options
 import Paths_hevm qualified as Paths
-import System.IO (stderr)
 import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirectoryExist)
 import System.FilePath ((</>))
 import System.Exit (exitFailure, exitWith, ExitCode(..))
@@ -36,7 +35,7 @@ import EVM.Concrete qualified as Concrete
 import GitHash
 import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
-import EVM.Format (hexByteString, strip0x, showTraceTree, formatExpr)
+import EVM.Format (hexByteString, strip0x, formatExpr)
 import EVM.Solidity
 import EVM.Solvers
 import EVM.Stepper qualified
