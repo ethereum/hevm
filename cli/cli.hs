@@ -184,17 +184,15 @@ getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
       Right val -> "git rev " <> giBranch val <>  "@" <> giHash val
       Left _ -> "no git revision present"
 
-mainEnv :: Env
-mainEnv = Env { config = defaultConfig }
-
 main :: IO ()
 main = do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
-  let env = Env { config = defaultConfig {
-    dumpQueries = cmd.smtdebug
+  let env = Env { config = defaultConfig
+    { dumpQueries = cmd.smtdebug
     , abstRefineMem = cmd.abstractMemory
     , abstRefineArith = cmd.abstractArithmetic
-    , dumpTrace = cmd.trace } }
+    , dumpTrace = cmd.trace
+    } }
   case cmd of
     Version {} ->putStrLn getFullVersion
     Symbolic {} -> do

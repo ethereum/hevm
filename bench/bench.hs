@@ -27,9 +27,6 @@ import qualified EVM.Fetch as Fetch
 
 import EVM.Test.BlockchainTests qualified as BCTests
 
-benchEnv :: Env
-benchEnv = Env { config = defaultConfig }
-
 main :: IO ()
 main = defaultMain
   [ mkbench erc20 "erc20" 0 [1]
@@ -72,7 +69,7 @@ blockchainTests ts = bench "blockchain-tests" $ nfIO $ do
       if n `elem` ignored
       then pure True
       else do
-        res <- runEnv benchEnv $ runBCTest c
+        res <- runApp $ runBCTest c
         pure $ acc && res
     ) True cases
 
@@ -114,8 +111,8 @@ mkbench :: IO ByteString -> String -> Integer -> [Natural] -> Benchmark
 mkbench c name iters counts = localOption WallTime $ env c (bgroup name . bmarks)
   where
     bmarks c' = concat $ [
-       [ bench ("cvc5-" <> show i) $ nfIO $ runEnv benchEnv $ findPanics CVC5 i iters c'
-       , bench ("z3-" <> show i) $ nfIO $ runEnv benchEnv $ findPanics Z3 i iters c'
+       [ bench ("cvc5-" <> show i) $ nfIO $ runApp $ findPanics CVC5 i iters c'
+       , bench ("z3-" <> show i) $ nfIO $ runApp $ findPanics Z3 i iters c'
        ]
        | i <- counts
      ]
