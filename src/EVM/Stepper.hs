@@ -36,7 +36,6 @@ import EVM.Types
 import Control.Monad.ST (stToIO, RealWorld)
 import Control.Monad.IO.Class
 import EVM.Effects
-import Control.Monad.IO.Unlift
 
 -- | The instruction type of the operational monad
 data Action s a where

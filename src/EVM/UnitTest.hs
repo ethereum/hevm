@@ -44,7 +44,6 @@ import GHC.Natural
 import System.IO (hFlush, stdout)
 import Witch (unsafeInto, into)
 import EVM.Effects
-import Control.Monad.IO.Unlift
 
 data UnitTestOptions s = UnitTestOptions
   { rpcInfo     :: Fetch.RpcInfo
