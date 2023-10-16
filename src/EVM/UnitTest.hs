@@ -102,9 +102,7 @@ makeVeriOpts opts =
                    }
 
 -- | Top level CLI endpoint for hevm test
-unitTest
-  :: App m
-  => UnitTestOptions RealWorld -> Contracts -> m Bool
+unitTest :: App m => UnitTestOptions RealWorld -> Contracts -> m Bool
 unitTest opts (Contracts cs) = do
   let unitTests = findUnitTests opts.match $ Map.elems cs
   results <- concatMapM (runUnitTestContract opts cs) unitTests
@@ -198,9 +196,7 @@ runUnitTestContract
 
 
 -- | Define the thread spawner for symbolic tests
-symRun
-  :: App m
-  => UnitTestOptions RealWorld -> VM RealWorld -> Sig -> m (Text, Either Text Text)
+symRun :: App m => UnitTestOptions RealWorld -> VM RealWorld -> Sig -> m (Text, Either Text Text)
 symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     let cd = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName

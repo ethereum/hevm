@@ -64,16 +64,12 @@ defaultConfig = Config
   , dumpTrace = False
   }
 
-writeTraceDapp
-  :: App m
-  => DappInfo -> VM RealWorld -> m ()
+writeTraceDapp :: App m => DappInfo -> VM RealWorld -> m ()
 writeTraceDapp dapp vm = do
   conf <- readConfig
   liftIO $ when conf.dumpTrace $ T.writeFile "VM.trace" (showTraceTree dapp vm)
 
-writeTrace
-  :: App m
-  => VM RealWorld -> m ()
+writeTrace :: App m => VM RealWorld -> m ()
 writeTrace vm = do
   conf <- readConfig
   liftIO $ when conf.dumpTrace $ writeFile "VM.trace" (show $ traceForest vm)

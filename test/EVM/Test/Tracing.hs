@@ -468,9 +468,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty))))
        <&> set (#state % #calldata) calldata'
 
-runCode
-  :: App m
-  => Fetch.RpcInfo -> ByteString -> Expr Buf -> m (Maybe (Expr Buf))
+runCode :: App m => Fetch.RpcInfo -> ByteString -> Expr Buf -> m (Maybe (Expr Buf))
 runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
   origVM <- liftIO $ stToIO $ vmForRuntimeCode
               code'
@@ -540,16 +538,12 @@ vmres vm =
 
 type TraceState s = (VM s, [VMTrace])
 
-execWithTrace
-  :: App m
-  => StateT (TraceState RealWorld) m (VMResult RealWorld)
+execWithTrace :: App m => StateT (TraceState RealWorld) m (VMResult RealWorld)
 execWithTrace = do
   _ <- runWithTrace
   fromJust <$> use (_1 % #result)
 
-runWithTrace
-  :: App m
-  => StateT (TraceState RealWorld) m (VM RealWorld)
+runWithTrace :: App m => StateT (TraceState RealWorld) m (VM RealWorld)
 runWithTrace = do
   -- This is just like `exec` except for every instruction evaluated,
   -- we also increment a counter indexed by the current code location.
@@ -888,9 +882,7 @@ tests = testGroup "contract-quickcheck-run"
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
     ]
 
-checkTraceAndOutputs
-  :: App m
-  => OpContract -> Int -> ByteString -> m ()
+checkTraceAndOutputs :: App m => OpContract -> Int -> ByteString -> m ()
 checkTraceAndOutputs contract gasLimit txData = do
   evmtoolResult <- liftIO $ getEVMToolRet contract txData gasLimit
   hevmRun <- getHEVMRet contract txData gasLimit

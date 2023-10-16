@@ -217,9 +217,7 @@ main = do
               res <- unitTest testOpts out.contracts
               liftIO $ unless res exitFailure
 
-equivalence
-  :: App m
-  => Command Options.Unwrapped -> m ()
+equivalence :: App m => Command Options.Unwrapped -> m ()
 equivalence cmd = do
   let bytecodeA = hexByteString "--code" . strip0x $ cmd.codeA
       bytecodeB = hexByteString "--code" . strip0x $ cmd.codeB
@@ -295,9 +293,7 @@ buildCalldata cmd = case (cmd.calldata, cmd.sig) of
 
 
 -- If function signatures are known, they should always be given for best results.
-assert
-  :: App m
-  => Command Options.Unwrapped -> m ()
+assert :: App m => Command Options.Unwrapped -> m ()
 assert cmd = do
   let block'  = maybe Fetch.Latest Fetch.BlockNumber cmd.block
       rpcinfo = (,) block' <$> cmd.rpc
@@ -340,9 +336,7 @@ assert cmd = do
         showExtras solvers cmd calldata expr
         liftIO $ exitFailure
 
-showExtras
-  :: App m
-  => SolverGroup -> Command Options.Unwrapped -> (Expr Buf, [Prop]) -> Expr End -> m ()
+showExtras :: App m => SolverGroup -> Command Options.Unwrapped -> (Expr Buf, [Prop]) -> Expr End -> m ()
 showExtras solvers cmd calldata expr = do
   when cmd.showTree $ liftIO $ do
     putStrLn "=== Expression ===\n"
@@ -365,9 +359,7 @@ isTestOrLib file = T.isSuffixOf ".t.sol" file || areAnyPrefixOf ["src/test/", "s
 areAnyPrefixOf :: [Text] -> Text -> Bool
 areAnyPrefixOf prefixes t = any (flip T.isPrefixOf t) prefixes
 
-launchExec
-  :: App m
-  => Command Options.Unwrapped -> m ()
+launchExec :: App m => Command Options.Unwrapped -> m ()
 launchExec cmd = do
   dapp <- liftIO $ getSrcInfo cmd
   vm <- liftIO $ vmFromCommand cmd

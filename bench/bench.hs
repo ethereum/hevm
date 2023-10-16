@@ -74,9 +74,7 @@ blockchainTests ts = bench "blockchain-tests" $ nfIO $ do
     ) True cases
 
 -- | executes a single test case and returns a boolean value representing its success
-runBCTest
-  :: App m
-  => BCTests.Case -> m Bool
+runBCTest :: App m => BCTests.Case -> m Bool
 runBCTest x =
  do
   vm0 <- liftIO $ BCTests.vmForCase x
@@ -90,9 +88,7 @@ runBCTest x =
 --- Helpers ----------------------------------------------------------------------------------------
 
 
-findPanics
-  :: App m
-  => Solver -> Natural -> Integer -> ByteString -> m ()
+findPanics :: App m => Solver -> Natural -> Integer -> ByteString -> m ()
 findPanics solver count iters c = do
   _ <- withSolvers solver count Nothing $ \s -> do
     let opts = defaultVeriOpts

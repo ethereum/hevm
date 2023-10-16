@@ -83,9 +83,7 @@ testEnv = Env { config = defaultConfig {
 putStrLnM :: (MonadUnliftIO m) => String -> m ()
 putStrLnM a = liftIO $ putStrLn a
 
-assertEqualM
-  :: (App m, Eq a, Show a, HasCallStack)
-  => String -> a -> a -> m ()
+assertEqualM :: (App m, Eq a, Show a, HasCallStack) => String -> a -> a -> m ()
 assertEqualM a b c = liftIO $ assertEqual a b c
 
 assertBoolM
@@ -96,7 +94,7 @@ assertBoolM a b = liftIO $ assertBool a b
 test :: TestName -> ReaderT Env IO () -> TestTree
 test a b = testCase a $ runEnv testEnv b
 
-prop:: Testable prop => ReaderT Env IO prop -> Property
+prop :: Testable prop => ReaderT Env IO prop -> Property
 prop a = ioProperty $ runEnv testEnv a
 
 main :: IO ()
@@ -3153,19 +3151,13 @@ tests = testGroup "hevm"
   where
     (===>) = assertSolidityComputation
 
-checkEquivProp
-  :: App m
-  => Prop -> Prop -> m Bool
+checkEquivProp :: App m => Prop -> Prop -> m Bool
 checkEquivProp = checkEquivBase (\l r -> PNeg (PImpl l r .&& PImpl r l))
 
-checkEquiv
-  :: (Typeable a, App m)
-  => Expr a -> Expr a -> m Bool
+checkEquiv :: (Typeable a, App m) => Expr a -> Expr a -> m Bool
 checkEquiv = checkEquivBase (./=)
 
-checkEquivBase
-  :: (Eq a, App m)
-  => (a -> a -> Prop) -> a -> a -> m Bool
+checkEquivBase :: (Eq a, App m) => (a -> a -> Prop) -> a -> a -> m Bool
 checkEquivBase mkprop l r = do
   conf <-  readConfig
   withSolvers Z3 1 (Just 1) $ \solvers -> liftIO $ do
@@ -3186,9 +3178,7 @@ checkEquivBase mkprop l r = do
 -- | Takes a runtime code and calls it with the provided calldata
 
 -- | Takes a creation code and some calldata, runs the creation code, and calls the resulting contract with the provided calldata
-runSimpleVM
-  :: App m
-  => ByteString -> ByteString -> m (Maybe ByteString)
+runSimpleVM :: App m => ByteString -> ByteString -> m (Maybe ByteString)
 runSimpleVM x ins = do
   loadVM x >>= \case
     Nothing -> pure Nothing
@@ -3201,9 +3191,7 @@ runSimpleVM x ins = do
        s -> internalError $ show s
 
 -- | Takes a creation code and returns a vm with the result of executing the creation code
-loadVM
-  :: App m
-  => ByteString -> m (Maybe (VM RealWorld))
+loadVM :: App m => ByteString -> m (Maybe (VM RealWorld))
 loadVM x = do
   vm <- liftIO $ stToIO $ vmForEthrunCreation x
   vm1 <- Stepper.interpret (Fetch.zero 0 Nothing) vm Stepper.runFully
@@ -3245,17 +3233,12 @@ defaultDataLocation t =
   then "memory"
   else ""
 
-runFunction
-  :: App m
-  => Text -> ByteString -> m (Maybe ByteString)
+runFunction :: App m => Text -> ByteString -> m (Maybe ByteString)
 runFunction c input = do
   x <- liftIO $ singleContract "X" c
   runSimpleVM (fromJust x) input
 
-runStatements
-  :: App m
-  => Text -> [AbiValue] -> AbiType
-  -> m (Maybe ByteString)
+runStatements :: App m => Text -> [AbiValue] -> AbiType -> m (Maybe ByteString)
 runStatements stmts args t = do
   let params =
         T.intercalate ", "
@@ -3830,9 +3813,7 @@ data Invocation
   = SolidityCall Text [AbiValue]
   deriving Show
 
-assertSolidityComputation
-  :: App m
-  => Invocation -> AbiValue -> m ()
+assertSolidityComputation :: App m => Invocation -> AbiValue -> m ()
 assertSolidityComputation (SolidityCall s args) x =
   do y <- runStatements s args (abiValueType x)
      liftIO $ assertEqual (T.unpack s)
@@ -3853,23 +3834,17 @@ checkBadCheatCode sig _ = \case
   (Failure _ _ (BadCheatCode s)) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
   _ -> PBool True
 
-allBranchesFail
-  :: App m
-  => ByteString -> Maybe Sig -> m (Either [SMTCex] (Expr End))
+allBranchesFail :: App m => ByteString -> Maybe Sig -> m (Either [SMTCex] (Expr End))
 allBranchesFail = checkPost (Just p)
   where
     p _ = \case
       Success _ _ _ _ -> PBool False
       _ -> PBool True
 
-reachableUserAsserts
-  :: App m
-  => ByteString -> Maybe Sig -> m (Either [SMTCex] (Expr End))
+reachableUserAsserts :: App m => ByteString -> Maybe Sig -> m (Either [SMTCex] (Expr End))
 reachableUserAsserts = checkPost (Just $ checkAssertions [0x01])
 
-checkPost
-  :: App m
-  => Maybe (Postcondition RealWorld) -> ByteString -> Maybe Sig -> m (Either [SMTCex] (Expr End))
+checkPost :: App m => Maybe (Postcondition RealWorld) -> ByteString -> Maybe Sig -> m (Either [SMTCex] (Expr End))
 checkPost post c sig = do
   (e, res) <- withSolvers Z3 1 Nothing $ \s ->
     verifyContract s c sig [] defaultVeriOpts Nothing post

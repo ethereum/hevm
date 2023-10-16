@@ -481,9 +481,7 @@ flattenExpr = go []
 -- the incremental nature of the task at hand. Introducing support for
 -- incremental queries might let us go even faster here.
 -- TODO: handle errors properly
-reachable
-  :: App m
-  => SolverGroup -> Expr End -> m ([SMT2], Expr End)
+reachable :: App m => SolverGroup -> Expr End -> m ([SMT2], Expr End)
 reachable solvers e = do
   conf <- readConfig
   res <- liftIO $ go conf [] e
@@ -713,9 +711,7 @@ equivalenceCheck' solvers branchesA branchesB = do
     -- from left-to-right, and with a max of K threads. This is in contrast to
     -- mapConcurrently which would spawn as many threads as there are jobs, and
     -- run them in a random order. We ordered them correctly, though so that'd be bad
-    checkAll
-      :: App m
-      => [(Set Prop)] -> UnsatCache -> Int -> m [(EquivResult, Bool)]
+    checkAll :: App m => [(Set Prop)] -> UnsatCache -> Int -> m [(EquivResult, Bool)]
     checkAll input cache numproc = do
        conf <- readConfig
        wrap <- liftIO $ pool numproc
@@ -786,9 +782,7 @@ equivalenceCheck' solvers branchesA branchesB = do
 both' :: (a -> b) -> (a, a) -> (b, b)
 both' f (x, y) = (f x, f y)
 
-produceModels
-  :: App m
-  => SolverGroup -> Expr End -> m [(Expr End, CheckSatResult)]
+produceModels :: App m => SolverGroup -> Expr End -> m [(Expr End, CheckSatResult)]
 produceModels solvers expr = do
   let flattened = flattenExpr expr
       withQueries conf = fmap (\e -> ((assertProps conf) . extractProps $ e, e)) flattened
