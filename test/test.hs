@@ -74,6 +74,10 @@ testEnv = Env { config = defaultConfig {
   dumpQueries = False
   , dumpExprs = False
   , dumpEndStates = False
+  , verbose = False
+  , abstRefineArith = False
+  , abstRefineMem   = False
+  , dumpTrace = False
   } }
 
 putStrLnM :: (MonadUnliftIO m) => String -> m ()
