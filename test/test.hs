@@ -1542,6 +1542,28 @@ tests = testGroup "hevm"
         checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
+     test "opcode-mul-assoc" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(int256 a, int256 b, int256 c) external pure {
+              int256 tmp1;
+              int256 out1;
+              int256 tmp2;
+              int256 out2;
+              assembly {
+                tmp1 := mul(a, b)
+                out1 := mul(tmp1,c)
+                tmp2 := mul(b, c)
+                out2 := mul(a, tmp2)
+              }
+              assert (out1 == out2);
+              }
+             }
+            |]
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256,int256,int256)" [AbiIntType 256, AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
+        putStrLn "MUL is associative"
+     ,
      -- TODO look at tests here for SAR: https://github.com/dapphub/dapptools/blob/01ef8ea418c3fe49089a44d56013d8fcc34a1ec2/src/dapp-tests/pass/constantinople.sol#L250
      test "opcode-sar-neg" $ do
         Just c <- solcRuntime "MyContract"

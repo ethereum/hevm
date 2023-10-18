@@ -881,6 +881,9 @@ simplify e = if (mapExpr go e == e)
       | b == c = a
       | otherwise = sub (add a b) c
 
+    -- Add is associative
+    go (Add (Add a b) c) = add a (add b c)
+
     -- add / sub identities
     go (Add a b)
       | b == (Lit 0) = a
@@ -947,11 +950,14 @@ simplify e = if (mapExpr go e == e)
                      (Lit 0, _) -> Lit 0
                      _ -> EVM.Expr.min a b
 
+    -- Mul is associative
+    go (Mul (Mul a b) c) = mul a (mul b c)
     -- Some trivial mul eliminations
     go (Mul a b) = case (a, b) of
                      (Lit 0, _) -> Lit 0
                      (Lit 1, _) -> b
                      _ -> mul a b
+
     -- Some trivial div eliminations
     go (Div (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
     go (Div _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
