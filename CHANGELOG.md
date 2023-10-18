@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CopySlice+WriteWord+ConcreteBuf now truncates ConcreteBuf in special cases
 - Better simplification of Eq IR elements
 - Run a toplevel constant folding reasoning system on branch conditions
+- `evalProp` is renamed to `simplifyProp` for consistency
 - Mem explosion in `writeWord` function was possible in case `offset` was close to 2^256. Fixed.
 
 ## API Changes

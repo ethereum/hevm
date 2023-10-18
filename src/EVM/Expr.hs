@@ -978,14 +978,14 @@ simplify e = if (mapExpr go e == e)
 simplifyProps :: [Prop] -> [Prop]
 simplifyProps ps = if canBeSat then simplified else [PBool False]
   where
-    simplified = remRedundantProps . map evalProp . flattenProps $ ps
+    simplified = remRedundantProps . map simplifyProp . flattenProps $ ps
     canBeSat = constFoldProp simplified
 
 -- | Evaluate the provided proposition down to its most concrete result
-evalProp :: Prop -> Prop
-evalProp prop =
+simplifyProp :: Prop -> Prop
+simplifyProp prop =
   let new = mapProp' go (simpInnerExpr prop)
-  in if (new == prop) then prop else evalProp new
+  in if (new == prop) then prop else simplifyProp new
   where
     go :: Prop -> Prop
 
@@ -1305,7 +1305,7 @@ data ConstState = ConstState
 constFoldProp :: [Prop] -> Bool
 constFoldProp ps = oneRun ps (ConstState mempty True)
   where
-    oneRun ps2 startState = (execState (mapM (go . evalProp) ps2) startState).canBeSat
+    oneRun ps2 startState = (execState (mapM (go . simplifyProp) ps2) startState).canBeSat
     go :: Prop -> State ConstState ()
     go x = case x of
         PEq (Lit l) a -> do
