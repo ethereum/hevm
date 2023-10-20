@@ -110,7 +110,7 @@ library
   elif !os(darwin)
     extra-libraries: stdc++
   else
-    extra-libraries: c++
+    -- extra-libraries: c++
     -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
     ld-options: -Wl,-keep_dwarf_unwind
     ghc-options: -fcompact-unwind
@@ -228,6 +228,8 @@ executable hevm
     optics-core,
     githash                       >= 0.1.6 && < 0.2,
     witch
+  if os(darwin)
+    extra-libraries: c++
   if os(windows)
     buildable: False
 
@@ -237,8 +239,6 @@ common test-base
   import: shared
   hs-source-dirs:
     test
-  extra-libraries:
-    secp256k1
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -303,6 +303,8 @@ common test-common
     EVM.Test.Utils
     EVM.Test.Tracing
     EVM.Test.BlockchainTests
+  if os(darwin)
+    extra-libraries: c++
   if os(windows)
     buildable: False
 
@@ -363,3 +365,5 @@ benchmark bench
     filepath,
     containers,
     mtl
+  if os(darwin)
+    extra-libraries: c++
