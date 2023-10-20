@@ -63,7 +63,7 @@ jobs:
       - uses: actions/checkout@v3
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: UCRT64
+          msystem: CLANG64
           path-type: inherit
           update: true
           install: >-
@@ -75,7 +75,8 @@ jobs:
           pacboy: >-
             cmake:p
             ninja:p
-            gcc:p
+            clang:p
+            lld:p
             autotools:p
             gmp:p
             openssl:p
@@ -122,7 +123,8 @@ jobs:
 
       - name: build hevm library
         run: |
-          cabal build --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib"
+          cabal build --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib" \
+                      --extra-include-dirs="D:/a/_temp/msys64/clang64/include" --extra-lib-dirs="D:/a/_temp/msys64/clang64/lib"
 
   cabal-check:
     runs-on: ubuntu-latest
