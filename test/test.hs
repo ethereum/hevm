@@ -281,7 +281,12 @@ tests = testGroup "hevm"
     ]
   , testGroup "SimplifierUnitTests"
     -- common overflow cases that the simplifier was getting wrong
-    [ testCase "writeWord-overflow" $ do
+    [ testCase "bufLength-simp" $ do
+      let
+        a = BufLength (ConcreteBuf "ab")
+        simp = Expr.simplify a
+      assertEqual "Must be simplified down to a Lit" simp (Lit 2)
+    , testCase "writeWord-overflow" $ do
         let e = ReadByte (Lit 0x0) (WriteWord (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd) (Lit 0x0) (ConcreteBuf "\255\255\255\255"))
         b <- checkEquiv e (Expr.simplify e)
         assertBool "Simplifier failed" b
