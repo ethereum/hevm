@@ -79,10 +79,10 @@ jobs:
             autotools:p
             gmp:p
             openssl:p
-      - uses: haskell/actions/setup@v2
+      - uses: haskell-actions/setup@v2
         id: setup
         with:
-          ghc-version: '9.2.8'
+          ghc-version: '9.4.7'
 
       - name: build and install c dependencies
         run: |
