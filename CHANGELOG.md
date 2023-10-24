@@ -53,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Better simplification of Eq IR elements
 - Run a toplevel constant folding reasoning system on branch conditions
 - Global config via a monad, which should allow for more refactoring
+- `evalProp` is renamed to `simplifyProp` for consistency
+- Mem explosion in `writeWord` function was possible in case `offset` was close to 2^256. Fixed.
+- BufLength was not simplified via bufLength function. Fixed.
 
 ## API Changes
 

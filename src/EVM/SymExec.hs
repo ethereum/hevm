@@ -563,28 +563,33 @@ verify solvers opts preState maybepost = do
       T.putStrLn ""
       T.putStrLn . T.unlines . fmap (indent 2 . ("- " <>)) . fmap formatPartial . getPartials $ flattened
 
-    case maybepost of
-      Nothing -> pure (expr, [Qed ()])
-      Just post -> do
-        let
-          -- Filter out any leaves that can be statically shown to be safe
-          canViolate = flip filter flattened $
-            \leaf -> case Expr.evalProp (post preState leaf) of
-              PBool True -> False
-              _ -> True
-          assumes = preState.constraints
-          withQueries = canViolate <&> \leaf ->
-            (assertProps conf (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)
-        putStrLn $ "Checking for reachability of "
-                     <> show (length withQueries)
-                     <> " potential property violation(s)"
+  case maybepost of
+    Nothing -> pure (expr, [Qed ()])
+    Just post -> liftIO $ do
+      let
+        -- Filter out any leaves that can be statically shown to be safe
+        canViolate = flip filter flattened $
+          \leaf -> case Expr.simplifyProp (post preState leaf) of
+            PBool True -> False
+            _ -> True
+        assumes = preState.constraints
+        withQueries = canViolate <&> \leaf ->
+          (assertProps opts.abstRefineConfig (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)
+      putStrLn $ "Checking for reachability of "
+                   <> show (length withQueries)
+                   <> " potential property violation(s)"
 
-        -- Dispatch the remaining branches to the solver to check for violations
-        results <- liftIO $ flip mapConcurrently withQueries $ \(query, leaf) -> do
-          res <- checkSat solvers query
-          pure (res, leaf)
-        let cexs = filter (\(res, _) -> not . isUnsat $ res) results
-        pure $ if Prelude.null cexs then (expr, [Qed ()]) else (expr, fmap toVRes cexs)
+      when opts.debug $ forM_ (zip [(1 :: Int)..] withQueries) $ \(idx, (q, leaf)) -> do
+        TL.writeFile
+          ("query-" <> show idx <> ".smt2")
+          ("; " <> (TL.pack $ show leaf) <> "\n\n" <> formatSMT2 q <> "\n\n(check-sat)")
+
+      -- Dispatch the remaining branches to the solver to check for violations
+      results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
+        res <- checkSat solvers query
+        pure (res, leaf)
+      let cexs = filter (\(res, _) -> not . isUnsat $ res) results
+      pure $ if Prelude.null cexs then (expr, [Qed ()]) else (expr, fmap toVRes cexs)
   where
     toVRes :: (CheckSatResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of

@@ -374,13 +374,13 @@ writeByte offset byte src = WriteByte offset byte src
 
 writeWord :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
 writeWord o@(Lit offset) (WAddr (LitAddr val)) b@(ConcreteBuf _)
-  | offset + 32 < maxBytes
+  | offset < maxBytes && offset + 32 < maxBytes
   = writeWord o (Lit $ into val) b
 writeWord (Lit offset) (Lit val) (ConcreteBuf "")
-  | offset + 32 < maxBytes
+  | offset < maxBytes && offset + 32 < maxBytes
   = ConcreteBuf $ BS.replicate (unsafeInto offset) 0 <> word256Bytes val
 writeWord o@(Lit offset) v@(Lit val) buf@(ConcreteBuf src)
-  | offset + 32 < maxBytes
+  | offset < maxBytes && offset + 32 < maxBytes
     = ConcreteBuf $ (padRight (unsafeInto offset) $ BS.take (unsafeInto offset) src)
                  <> word256Bytes val
                  <> BS.drop ((unsafeInto offset) + 32) src
@@ -788,6 +788,7 @@ simplify e = if (mapExpr go e == e)
     go (ReadWord idx buf) = readWord idx buf
     go o@(ReadByte (Lit _) _) = simplifyReads o
     go (ReadByte idx buf) = readByte idx buf
+    go (BufLength buf) = bufLength buf
 
     -- We can zero out any bytes in a base ConcreteBuf that we know will be overwritten by a later write
     -- TODO: make this fully general for entire write chains, not just a single write.
@@ -954,6 +955,7 @@ simplify e = if (mapExpr go e == e)
     -- Some trivial div eliminations
     go (Div (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
     go (Div _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
+    go (Div a (Lit 1)) = a
 
     -- If a >= b then the value of the `Max` expression can never be < b
     go o@(LT (Max (Lit a) _) (Lit b))
@@ -977,14 +979,14 @@ simplify e = if (mapExpr go e == e)
 simplifyProps :: [Prop] -> [Prop]
 simplifyProps ps = if canBeSat then simplified else [PBool False]
   where
-    simplified = remRedundantProps . map evalProp . flattenProps $ ps
+    simplified = remRedundantProps . map simplifyProp . flattenProps $ ps
     canBeSat = constFoldProp simplified
 
 -- | Evaluate the provided proposition down to its most concrete result
-evalProp :: Prop -> Prop
-evalProp prop =
+simplifyProp :: Prop -> Prop
+simplifyProp prop =
   let new = mapProp' go (simpInnerExpr prop)
-  in if (new == prop) then prop else evalProp new
+  in if (new == prop) then prop else simplifyProp new
   where
     go :: Prop -> Prop
 
@@ -1304,7 +1306,7 @@ data ConstState = ConstState
 constFoldProp :: [Prop] -> Bool
 constFoldProp ps = oneRun ps (ConstState mempty True)
   where
-    oneRun ps2 startState = (execState (mapM (go . evalProp) ps2) startState).canBeSat
+    oneRun ps2 startState = (execState (mapM (go . simplifyProp) ps2) startState).canBeSat
     go :: Prop -> State ConstState ()
     go x = case x of
         PEq (Lit l) a -> do

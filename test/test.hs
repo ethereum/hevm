@@ -47,7 +47,6 @@ import Witch (unsafeInto, into)
 
 import Optics.Core hiding (pre, re, elements)
 import Optics.State
-import Optics.Operators.Unsafe
 
 import EVM hiding (choose)
 import EVM.ABI
@@ -317,6 +316,11 @@ tests = testGroup "hevm"
         let e = ReadByte (Lit 0x0) (WriteWord (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd) (Lit 0x0) (ConcreteBuf "\255\255\255\255"))
         b <- checkEquiv e (Expr.simplify e)
         assertBoolM "Simplifier failed" b
+    , test "bufLength-simp" $ do
+      let
+        a = BufLength (ConcreteBuf "ab")
+        simp = Expr.simplify a
+      assertEqual "Must be simplified down to a Lit" simp (Lit 2)
     , test "CopySlice-overflow" $ do
         let e = ReadWord (Lit 0x0) (CopySlice (Lit 0x0) (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc) (Lit 0x6) (ConcreteBuf "\255\255\255\255\255\255") (ConcreteBuf ""))
         b <- checkEquiv e (Expr.simplify e)
@@ -428,14 +432,14 @@ tests = testGroup "hevm"
           Just asList -> do
             let asBuf = Expr.fromList asList
             checkEquiv asBuf input
-    , testProperty "evalProp-equivalence-lit" $ \(LitProp p) -> prop $ do
+    , testProperty "simplifyProp-equivalence-lit" $ \(LitProp p) -> ioProperty $ do
         let simplified = Expr.simplifyProps [p]
         case simplified of
           [] -> checkEquivProp (PBool True) p
           [val@(PBool _)] -> checkEquivProp val p
-          _ -> liftIO $ assertFailure "must evaluate down to a literal bool"
-    , testProperty "evalProp-equivalence-sym" $ \(p) -> prop $ do
-        let simplified = Expr.evalProp p
+          _ -> assertFailure "must evaluate down to a literal bool"
+    , testProperty "simplifyProp-equivalence-sym" $ \(p) -> ioProperty $ do
+        let simplified = Expr.simplifyProp p
         checkEquivProp simplified p
     , testProperty "simpProp-equivalence-sym" $ \(ps :: [Prop]) -> prop $ do
         let simplified = pand (Expr.simplifyProps ps)
@@ -712,10 +716,7 @@ tests = testGroup "hevm"
                 }
                 |]
 
-        (json, path') <- solidity' srccode
-        let (Contracts solc', _, _) = fromJust $ readStdJSON json
-            initCode = (solc' ^?! ix (path' <> ":A")).creationCode
-        -- add constructor arguments
+        Just initCode <- solidity "A" srccode
         assertEqual "constructor args screwed up metadata stripping" (stripBytecodeMetadata (initCode <> encodeAbiValue (AbiUInt 256 1))) (stripBytecodeMetadata initCode)
     ]
 
