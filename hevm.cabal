@@ -83,6 +83,7 @@ library
     EVM.Expr,
     EVM.SMT,
     EVM.Solvers,
+    EVM.Fuzz,
     EVM.Exec,
     EVM.Format,
     EVM.Fetch,
@@ -180,7 +181,8 @@ library
     spawn                             >= 0.3 && < 0.4,
     filepattern                       >= 0.1.2 && < 0.2,
     witch                             >= 1.1 && < 1.3,
-    unliftio-core                     >= 0.2.1.0
+    unliftio-core                     >= 0.2.1.0,
+    MonadRandom                       >= 0.5.1,
   if !os(windows)
     build-depends:
       brick                           >= 1.4 && < 2.0,

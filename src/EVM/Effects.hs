@@ -54,6 +54,7 @@ data Config = Config
   , abstRefineArith :: Bool
   , abstRefineMem   :: Bool
   , dumpTrace       :: Bool
+  , numCexFuzz      :: Integer
   }
   deriving (Show, Eq)
 
@@ -66,6 +67,7 @@ defaultConfig = Config
   , abstRefineArith = False
   , abstRefineMem   = False
   , dumpTrace = False
+  , numCexFuzz = 30
   }
 
 -- Write to the console
