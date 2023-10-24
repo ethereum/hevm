@@ -320,7 +320,7 @@ tests = testGroup "hevm"
       let
         a = BufLength (ConcreteBuf "ab")
         simp = Expr.simplify a
-      assertEqual "Must be simplified down to a Lit" simp (Lit 2)
+      assertEqualM "Must be simplified down to a Lit" simp (Lit 2)
     , test "CopySlice-overflow" $ do
         let e = ReadWord (Lit 0x0) (CopySlice (Lit 0x0) (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc) (Lit 0x6) (ConcreteBuf "\255\255\255\255\255\255") (ConcreteBuf ""))
         b <- checkEquiv e (Expr.simplify e)
@@ -432,13 +432,13 @@ tests = testGroup "hevm"
           Just asList -> do
             let asBuf = Expr.fromList asList
             checkEquiv asBuf input
-    , testProperty "simplifyProp-equivalence-lit" $ \(LitProp p) -> ioProperty $ do
+    , testProperty "simplifyProp-equivalence-lit" $ \(LitProp p) -> prop $ do
         let simplified = Expr.simplifyProps [p]
         case simplified of
           [] -> checkEquivProp (PBool True) p
           [val@(PBool _)] -> checkEquivProp val p
           _ -> liftIO $ assertFailure "must evaluate down to a literal bool"
-    , testProperty "simplifyProp-equivalence-sym" $ \(p) -> ioProperty $ do
+    , testProperty "simplifyProp-equivalence-sym" $ \(p) -> prop $ do
         let simplified = Expr.simplifyProp p
         checkEquivProp simplified p
     , testProperty "simpProp-equivalence-sym" $ \(ps :: [Prop]) -> prop $ do
