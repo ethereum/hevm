@@ -437,7 +437,7 @@ tests = testGroup "hevm"
         case simplified of
           [] -> checkEquivProp (PBool True) p
           [val@(PBool _)] -> checkEquivProp val p
-          _ -> assertFailure "must evaluate down to a literal bool"
+          _ -> liftIO $ assertFailure "must evaluate down to a literal bool"
     , testProperty "simplifyProp-equivalence-sym" $ \(p) -> ioProperty $ do
         let simplified = Expr.simplifyProp p
         checkEquivProp simplified p
