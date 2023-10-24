@@ -95,10 +95,10 @@ testsFromFile file problematicTests = do
   case parsed of
    Left "No cases to check." -> pure [] -- error "no-cases ok"
    Left _err -> pure [] -- error _err
-   Right allTests -> mapM stuff (Map.toList allTests)
+   Right allTests -> mapM runTest (Map.toList allTests)
   where
-    stuff :: (String , Case) -> m TestTree
-    stuff (name, x) = do
+    runTest :: (String , Case) -> m TestTree
+    runTest (name, x) = do
       exec <- toIO $ runVMTest True (name, x)
       pure $ testCase' name exec
     testCase' :: String -> Assertion -> TestTree
