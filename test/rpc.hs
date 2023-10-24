@@ -71,7 +71,6 @@ tests = testGroup "rpc"
     -- execute against remote state from a ds-test harness
     [ test "dapp-test" $ do
         let testFile = "test/contracts/pass/rpc.sol"
-        -- runSolidityTestCustom testFile ".*" Nothing Nothing False testRpcInfo Foundry >>= assertEqual "test result" True
         res <- runSolidityTestCustom testFile ".*" Nothing Nothing False testRpcInfo Foundry
         liftIO $ assertEqual "test result" True res
 
