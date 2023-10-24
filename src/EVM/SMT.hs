@@ -411,9 +411,11 @@ declareVars names = SMT2 (["; variables"] <> fmap declare names) mempty cexvars
 
 -- Given a list of variable names, create an SMT2 object with the variables declared
 declareAddrs :: [Builder] -> SMT2
-declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) mempty cexvars
+declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names <> fmap assume names) mempty cexvars
   where
     declare n = "(declare-const " <> n <> " Addr)"
+    -- assume that symbolic addresses do not collide with the zero address or precompiles
+    assume n = "(assert (bvugt " <> n <> " (_ bv9 160)))"
     cexvars = (mempty :: CexVars){ addrs = fmap toLazyText names }
 
 declareFrameContext :: [(Builder, [Prop])] -> SMT2
