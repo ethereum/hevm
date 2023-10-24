@@ -58,6 +58,7 @@ common shared
     -Wno-unticked-promoted-constructors
     -Wno-orphans
     -Wno-ambiguous-fields
+    -optc-Wno-ignored-attributes
   default-language: GHC2021
   default-extensions:
     DuplicateRecordFields
