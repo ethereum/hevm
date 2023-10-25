@@ -232,7 +232,7 @@ oracle solvers info q = do
            Nothing ->
              internalError $ "oracle error: " ++ show q
 
-type Fetcher m s = (ReadConfig m, MonadUnliftIO m) => Query s -> m (EVM s ())
+type Fetcher m s = App m => Query s -> m (EVM s ())
 
 -- | Checks which branches are satisfiable, checking the pathconditions for consistency
 -- if the third argument is true.
