@@ -73,7 +73,7 @@ testEnv = Env { config = defaultConfig {
   dumpQueries = False
   , dumpExprs = False
   , dumpEndStates = False
-  , verbose = False
+  , verbose = 0
   , abstRefineArith = False
   , abstRefineMem   = False
   , dumpTrace = False
@@ -3122,7 +3122,7 @@ tests = testGroup "hevm"
           start <- liftIO $ getCurrentTime
           putStrLnM $ "Checking file: " <> f
           conf <- readConfig
-          when conf.verbose $ liftIO $ do
+          when (conf.verbose > 0) $ liftIO $ do
             putStrLnM "-------------Original Below-----------------"
             mapM_ putStrLn unfiltered
             putStrLnM "------------- Filtered A + Symb below-----------------"

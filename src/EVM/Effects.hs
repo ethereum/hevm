@@ -46,7 +46,7 @@ data Config = Config
   { dumpQueries     :: Bool
   , dumpExprs       :: Bool
   , dumpEndStates   :: Bool
-  , verbose         :: Bool
+  , verbose         :: Int
   , abstRefineArith :: Bool
   , abstRefineMem   :: Bool
   , dumpTrace       :: Bool
@@ -58,7 +58,7 @@ defaultConfig = Config
   { dumpQueries = False
   , dumpExprs = False
   , dumpEndStates = False
-  , verbose = False
+  , verbose = 0
   , abstRefineArith = False
   , abstRefineMem   = False
   , dumpTrace = False
