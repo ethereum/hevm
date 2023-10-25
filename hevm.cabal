@@ -195,6 +195,8 @@ executable hevm
   ghc-options: -threaded -with-rtsopts=-N
   other-modules:
     Paths_hevm
+  if os(darwin)
+    extra-libraries: c++
   build-depends:
     QuickCheck,
     aeson,
@@ -229,8 +231,6 @@ executable hevm
     optics-core,
     githash                       >= 0.1.6 && < 0.2,
     witch
-  if os(darwin)
-    extra-libraries: c++
   if os(windows)
     buildable: False
 
@@ -304,10 +304,10 @@ common test-common
     EVM.Test.Utils
     EVM.Test.Tracing
     EVM.Test.BlockchainTests
-  if os(darwin)
-    extra-libraries: c++
   if os(windows)
     buildable: False
+  if os(darwin)
+    extra-libraries: c++
 
 --- Test Suites ---
 
@@ -349,6 +349,8 @@ benchmark bench
     bench
   ghc-options:
     -O2
+  if os(darwin)
+    extra-libraries: c++
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -366,5 +368,3 @@ benchmark bench
     filepath,
     containers,
     mtl
-  if os(darwin)
-    extra-libraries: c++
