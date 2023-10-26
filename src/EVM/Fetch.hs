@@ -29,7 +29,6 @@ import Numeric.Natural (Natural)
 import System.Process
 import Control.Monad.IO.Class
 import EVM.Effects
-import Control.Monad.IO.Unlift
 
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where

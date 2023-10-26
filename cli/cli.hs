@@ -86,7 +86,8 @@ data Command w
       , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point"
       , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
-      , verbose       :: w ::: Maybe Int          <?> "Verbose printing of internal behaviour (default:0)"
+      , debug         :: w ::: Bool               <?> "Debug printing of internal behaviour"
+      , trace         :: w ::: Bool               <?> "Dump trace"
       , assertions    :: w ::: Maybe [Word256]    <?> "Comma separated list of solc panic codes to check for (default: user defined assertion violations only)"
       , askSmtIterations :: w ::: Integer         <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores)"
@@ -105,7 +106,7 @@ data Command w
       , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default) or cvc5"
       , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
       , smtdebug      :: w ::: Bool             <?> "Print smt queries sent to the solver"
-      , verbose       :: w ::: Maybe Int        <?> "Verbose printing of internal behaviour (default:0)"
+      , debug         :: w ::: Bool             <?> "Debug printing of internal behaviour"
       , trace         :: w ::: Bool             <?> "Dump trace"
       , askSmtIterations :: w ::: Integer       <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
@@ -132,6 +133,7 @@ data Command w
       , maxcodesize :: w ::: Maybe W256        <?> "Block: max code size"
       , prevRandao  :: w ::: Maybe W256        <?> "Block: prevRandao"
       , chainid     :: w ::: Maybe W256        <?> "Env: chainId"
+      , debug       :: w ::: Bool              <?> "Debug printing of internal behaviour"
       , trace       :: w ::: Bool              <?> "Dump trace"
       , rpc         :: w ::: Maybe URL         <?> "Fetch state from a remote node"
       , block       :: w ::: Maybe W256        <?> "Block state is be fetched from"
@@ -143,11 +145,12 @@ data Command w
       , projectType   :: w ::: Maybe ProjectType        <?> "Is this a Foundry or DappTools project (default: Foundry)"
       , rpc           :: w ::: Maybe URL                <?> "Fetch state from a remote node"
       , number        :: w ::: Maybe W256               <?> "Block: number"
+      , verbose       :: w ::: Maybe Int                <?> "Append call trace: {1} failures {2} all"
       , coverage      :: w ::: Bool                     <?> "Coverage analysis"
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
       , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
-      , verbose       :: w ::: Maybe Int                <?> "Verbose printing of internal behaviour (default:0)"
+      , debug         :: w ::: Bool                     <?> "Debug printing of internal behaviour"
       , trace         :: w ::: Bool                     <?> "Dump trace"
       , ffi           :: w ::: Bool                     <?> "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)"
       , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in seconds (default: 300)"
@@ -193,7 +196,7 @@ main = do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
   let env = Env { config = defaultConfig
     { dumpQueries = cmd.smtdebug
-    , verbose = fromMaybe 0 cmd.verbose
+    , debug = cmd.debug
     , abstRefineMem = cmd.abstractMemory
     , abstRefineArith = cmd.abstractArithmetic
     , dumpTrace = cmd.trace
