@@ -881,6 +881,12 @@ simplify e = if (mapExpr go e == e)
       | b == c = a
       | otherwise = sub (add a b) c
 
+    -- Add is associative. We are doing left-growing trees because LIT is
+    -- arranged to the left. This way, they accumulate in all combinations.
+    -- See `sim-assoc-add` test cases in test.hs
+    go (Add a (Add b c)) = add (add a b) c
+    go (Add (Add (Lit a) x) (Lit b)) = add (Lit (a+b)) x
+
     -- add / sub identities
     go (Add a b)
       | b == (Lit 0) = a
@@ -947,11 +953,18 @@ simplify e = if (mapExpr go e == e)
                      (Lit 0, _) -> Lit 0
                      _ -> EVM.Expr.min a b
 
+    -- Mul is associative. We are doing left-growing trees because LIT is
+    -- arranged to the left. This way, they accumulate in all combinations.
+    -- See `sim-assoc-add` test cases in test.hs
+    go (Mul a (Mul b c)) = mul (mul a b) c
+    go (Mul (Mul (Lit a) x) (Lit b)) = mul (Lit (a*b)) x
+
     -- Some trivial mul eliminations
     go (Mul a b) = case (a, b) of
                      (Lit 0, _) -> Lit 0
                      (Lit 1, _) -> b
                      _ -> mul a b
+
     -- Some trivial div eliminations
     go (Div (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
     go (Div _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM

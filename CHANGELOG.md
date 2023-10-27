@@ -113,6 +113,7 @@ are no longer explicitly tested or supported.
 - `evalProp` is renamed to `simplifyProp` for consistency
 - Mem explosion in `writeWord` function was possible in case `offset` was close to 2^256. Fixed.
 - BufLength was not simplified via bufLength function. Fixed.
+- Add and Mul are associative, let's use that to make Expr more canonical
 - `VMOpts` no longer takes an initial store, and instead takes a `baseState`
   which can be either `EmptyBase` or `AbstractBase`. This controls whether
   storage should be inialized as empty or fully abstract. Regardless of this

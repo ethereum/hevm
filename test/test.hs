@@ -316,6 +316,36 @@ tests = testGroup "hevm"
         let e = ReadByte (Lit 0x0) (WriteWord (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd) (Lit 0x0) (ConcreteBuf "\255\255\255\255"))
         b <- checkEquiv e (Expr.simplify e)
         assertBoolM "Simplifier failed" b
+    , test "simp-assoc-add1" $ do
+      let simp = Expr.simplify $        Add (Var "a") (Add (Var "b") (Var "c"))
+      assertEqualM "assoc rules" simp $ Add (Add (Var "a") (Var "b")) (Var "c")
+    , test "simp-assoc-add2" $ do
+      let simp = Expr.simplify $        Add (Lit 1) (Add (Var "b") (Var "c"))
+      assertEqualM "assoc rules" simp $ Add (Add (Lit 1) (Var "b")) (Var "c")
+    , test "simp-assoc-add3" $ do
+      let simp = Expr.simplify $        Add (Lit 1) (Add (Lit 2) (Var "c"))
+      assertEqualM "assoc rules" simp $ Add (Lit 3) (Var "c")
+    , test "simp-assoc-add4" $ do
+      let simp = Expr.simplify $        Add (Lit 1) (Add (Var "b") (Lit 2))
+      assertEqualM "assoc rules" simp $ Add (Lit 3) (Var "b")
+    , test "simp-assoc-add5" $ do
+      let simp = Expr.simplify $        Add (Var "a") (Add (Lit 1) (Lit 2))
+      assertEqualM "assoc rules" simp $ Add (Lit 3) (Var "a")
+    , test "simp-assoc-add6" $ do
+      let simp = Expr.simplify $        Add (Lit 7) (Add (Lit 1) (Lit 2))
+      assertEqualM "assoc rules" simp $ Lit 10
+    , test "simp-assoc-add-7" $ do
+      let simp = Expr.simplify $        Add (Var "a") (Add (Var "b") (Lit 2))
+      assertEqualM "assoc rules" simp $ Add (Add (Lit 2) (Var "a")) (Var "b")
+    , test "simp-assoc-add8" $ do
+      let simp = Expr.simplify $        Add (Add (Var "a") (Add (Lit 0x2) (Var "b"))) (Add (Var "c") (Add (Lit 0x2) (Var "d")))
+      assertEqualM "assoc rules" simp $ Add (Add (Add (Add (Lit 0x4) (Var "a")) (Var "b")) (Var "c")) (Var "d")
+    , test "simp-assoc-mul1" $ do
+      let simp = Expr.simplify $        Mul (Var "a") (Mul (Var "b") (Var "c"))
+      assertEqualM "assoc rules" simp $ Mul (Mul (Var "a") (Var "b")) (Var "c")
+    , test "simp-assoc-mul2" $ do
+      let simp = Expr.simplify       $  Mul (Lit 2) (Mul (Var "a") (Lit 3))
+      assertEqualM "assoc rules" simp $ Mul (Lit 6) (Var "a")
     , test "bufLength-simp" $ do
       let
         a = BufLength (ConcreteBuf "ab")
@@ -1541,6 +1571,28 @@ tests = testGroup "hevm"
       (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
         checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+     ,
+     test "opcode-mul-assoc" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(int256 a, int256 b, int256 c) external pure {
+              int256 tmp1;
+              int256 out1;
+              int256 tmp2;
+              int256 out2;
+              assembly {
+                tmp1 := mul(a, b)
+                out1 := mul(tmp1,c)
+                tmp2 := mul(b, c)
+                out2 := mul(a, tmp2)
+              }
+              assert (out1 == out2);
+              }
+             }
+            |]
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256,int256,int256)" [AbiIntType 256, AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
+        putStrLnM "MUL is associative"
      ,
      -- TODO look at tests here for SAR: https://github.com/dapphub/dapptools/blob/01ef8ea418c3fe49089a44d56013d8fcc34a1ec2/src/dapp-tests/pass/constantinople.sol#L250
      test "opcode-sar-neg" $ do
