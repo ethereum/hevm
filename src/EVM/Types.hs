@@ -621,15 +621,6 @@ data RuntimeConfig = RuntimeConfig
   }
   deriving (Show)
 
-abstRefineDefault :: AbstRefineConfig
-abstRefineDefault = AbstRefineConfig False False
-
-data AbstRefineConfig = AbstRefineConfig
-  { arith :: Bool
-  , mem   :: Bool
-  }
-  deriving (Show, Eq)
-
 -- | An entry in the VM's "call/create stack"
 data Frame s = Frame
   { context :: FrameContext

@@ -43,6 +43,7 @@ import Data.Word (Word64)
 import GHC.Natural
 import System.IO (hFlush, stdout)
 import Witch (unsafeInto, into)
+import EVM.Effects
 
 data UnitTestOptions s = UnitTestOptions
   { rpcInfo     :: Fetch.RpcInfo
@@ -50,7 +51,6 @@ data UnitTestOptions s = UnitTestOptions
   , verbose     :: Maybe Int
   , maxIter     :: Maybe Integer
   , askSmtIters :: Integer
-  , smtDebug    :: Bool
   , smtTimeout  :: Maybe Natural
   , solver      :: Maybe Text
   , match       :: Text
@@ -96,14 +96,13 @@ type ABIMethod = Text
 -- | Generate VeriOpts from UnitTestOptions
 makeVeriOpts :: UnitTestOptions s -> VeriOpts
 makeVeriOpts opts =
-   defaultVeriOpts { debug = opts.smtDebug
-                   , maxIter = opts.maxIter
+   defaultVeriOpts { maxIter = opts.maxIter
                    , askSmtIters = opts.askSmtIters
                    , rpcInfo = opts.rpcInfo
                    }
 
 -- | Top level CLI endpoint for hevm test
-unitTest :: UnitTestOptions RealWorld -> Contracts -> IO Bool
+unitTest :: App m => UnitTestOptions RealWorld -> Contracts -> m Bool
 unitTest opts (Contracts cs) = do
   let unitTests = findUnitTests opts.match $ Map.elems cs
   results <- concatMapM (runUnitTestContract opts cs) unitTests
@@ -143,15 +142,16 @@ initializeUnitTest opts theContract = do
     _ -> popTrace
 
 runUnitTestContract
-  :: UnitTestOptions RealWorld
+  :: App m
+  => UnitTestOptions RealWorld
   -> Map Text SolcContract
   -> (Text, [Sig])
-  -> IO [Bool]
+  -> m [Bool]
 runUnitTestContract
   opts@(UnitTestOptions {..}) contractMap (name, testSigs) = do
 
   -- Print a header
-  putStrLn $ "Running " ++ show (length testSigs) ++ " tests for " ++ unpack name
+  liftIO $ putStrLn $ "Running " ++ show (length testSigs) ++ " tests for " ++ unpack name
 
   -- Look for the wanted contract by name from the Solidity info
   case Map.lookup name contractMap of
@@ -161,12 +161,13 @@ runUnitTestContract
 
     Just theContract -> do
       -- Construct the initial VM and begin the contract's constructor
-      vm0 <- stToIO $ initialUnitTestVm opts theContract
+      vm0 <- liftIO $ stToIO $ initialUnitTestVm opts theContract
       vm1 <- Stepper.interpret (Fetch.oracle solvers rpcInfo) vm0 $ do
         Stepper.enter name
         initializeUnitTest opts theContract
         Stepper.evm get
 
+      writeTraceDapp dapp vm1
       case vm1.result of
         Just (VMFailure _) -> liftIO $ do
           Text.putStrLn "\x1b[31m[BAIL]\x1b[0m setUp() "
@@ -179,22 +180,23 @@ runUnitTestContract
           -- Run all the test cases and print their status
           details <- forM testSigs $ \s -> do
             (result, detail) <- symRun opts vm1 s
-            Text.putStrLn result
+            liftIO $ Text.putStrLn result
             pure detail
 
           let running = rights details
               bailing = lefts details
 
-          tick "\n"
-          tick (Text.unlines (filter (not . Text.null) running))
-          tick (Text.unlines bailing)
+          liftIO $ do
+            tick "\n"
+            tick (Text.unlines (filter (not . Text.null) running))
+            tick (Text.unlines bailing)
 
           pure $ fmap isRight details
         _ -> internalError "setUp() did not end with a result"
 
 
 -- | Define the thread spawner for symbolic tests
-symRun :: UnitTestOptions RealWorld -> VM RealWorld -> Sig -> IO (Text, Either Text Text)
+symRun :: App m => UnitTestOptions RealWorld -> VM RealWorld -> Sig -> m (Text, Either Text Text)
 symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     let cd = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName
@@ -226,6 +228,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
         pushTrace (EntryTrace testName)
         makeTxCall testParams cd
         get
+    writeTraceDapp dapp vm'
 
     -- check postconditions against vm
     (e, results) <- verify solvers (makeVeriOpts opts) vm' (Just postcondition)

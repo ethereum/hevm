@@ -12,6 +12,7 @@ import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
 import Control.Concurrent (forkIO, killThread)
 import Control.Monad
 import Control.Monad.State.Strict
+import Control.Monad.IO.Unlift
 import Data.Char (isSpace)
 import Data.Map (Map)
 import Data.Map qualified as Map
@@ -23,6 +24,7 @@ import Data.Text.Lazy.IO qualified as T
 import Data.Text.Lazy.Builder
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
 import Witch (into)
+import EVM.Effects
 
 import EVM.SMT
 import EVM.Types (W256, Expr(AbstractBuf), internalError)
@@ -88,59 +90,74 @@ checkSat (SolverGroup taskQueue) script = do
   -- collect result
   readChan resChan
 
-withSolvers :: Solver -> Natural -> Maybe Natural -> (SolverGroup -> IO a) -> IO a
+writeSMT2File :: SMT2 -> Int -> String -> IO ()
+writeSMT2File smt2 count abst =
+  do
+    let content = formatSMT2 smt2 <> "\n\n(check-sat)"
+    T.writeFile ("query-" <> (show count) <> "-" <> abst <> ".smt2") content
+
+withSolvers :: App m => Solver -> Natural -> Maybe Natural -> (SolverGroup -> m a) -> m a
 withSolvers solver count timeout cont = do
-  -- spawn solvers
-  instances <- mapM (const $ spawnSolver solver timeout) [1..count]
-  -- spawn orchestration thread
-  taskQueue <- newChan
-  availableInstances <- newChan
-  forM_ instances (writeChan availableInstances)
-  orchestrateId <- forkIO $ orchestrate taskQueue availableInstances
+    -- spawn solvers
+    instances <- mapM (const $ liftIO $ spawnSolver solver timeout) [1..count]
+    -- spawn orchestration thread
+    taskQueue <- liftIO newChan
+    availableInstances <- liftIO newChan
+    liftIO $ forM_ instances (writeChan availableInstances)
+    orchestrate' <- toIO $ orchestrate taskQueue availableInstances 0
+    orchestrateId <- liftIO $ forkIO orchestrate'
 
-  -- run continuation with task queue
-  res <- cont (SolverGroup taskQueue)
+    -- run continuation with task queue
+    res <- cont (SolverGroup taskQueue)
 
-  -- cleanup and return results
-  mapM_ stopSolver instances
-  killThread orchestrateId
-  pure res
+    -- cleanup and return results
+    liftIO $ mapM_ (stopSolver) instances
+    liftIO $ killThread orchestrateId
+    pure res
   where
-    orchestrate queue avail = do
-      task <- readChan queue
-      inst <- readChan avail
-      _ <- forkIO $ runTask task inst avail
-      orchestrate queue avail
+    orchestrate :: App m => Chan Task -> Chan SolverInstance -> Int -> m b
+    orchestrate queue avail fileCounter = do
+      task <- liftIO $ readChan queue
+      inst <- liftIO $ readChan avail
+      runTask' <- toIO $ runTask task inst avail fileCounter
+      _ <- liftIO $ forkIO runTask'
+      orchestrate queue avail (fileCounter + 1)
 
-    runTask (Task (SMT2 cmds (RefinementEqs refineEqs) cexvars) r) inst availableInstances = do
-      -- reset solver and send all lines of provided script
-      out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty)
-      case out of
-        -- if we got an error then return it
-        Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
-        -- otherwise call (check-sat), parse the result, and send it down the result channel
-        Right () -> do
-          sat <- sendLine inst "(check-sat)"
-          res <- do
-              case sat of
-                "unsat" -> pure Unsat
-                "timeout" -> pure Unknown
-                "unknown" -> pure Unknown
-                "sat" -> if null refineEqs then Sat <$> getModel inst cexvars
-                         else do
-                              _ <- sendScript inst (SMT2 refineEqs mempty mempty)
-                              sat2 <- sendLine inst "(check-sat)"
-                              case sat2 of
-                                "unsat" -> pure Unsat
-                                "timeout" -> pure Unknown
-                                "unknown" -> pure Unknown
-                                "sat" -> Sat <$> getModel inst cexvars
-                                _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat2
-                _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
-          writeChan r res
+    runTask :: (MonadIO m, ReadConfig m) => Task -> SolverInstance -> Chan SolverInstance -> Int -> m ()
+    runTask (Task smt2@(SMT2 cmds (RefinementEqs refineEqs refps) cexvars ps) r) inst availableInstances fileCounter = do
+      conf <- readConfig
+      liftIO $ do
+        when (conf.dumpQueries) $ writeSMT2File smt2 fileCounter "abstracted"
+        -- reset solver and send all lines of provided script
+        out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty ps)
+        case out of
+          -- if we got an error then return it
+          Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
+          -- otherwise call (check-sat), parse the result, and send it down the result channel
+          Right () -> do
+            sat <- sendLine inst "(check-sat)"
+            res <- do
+                case sat of
+                  "unsat" -> pure Unsat
+                  "timeout" -> pure Unknown
+                  "unknown" -> pure Unknown
+                  "sat" -> if null refineEqs then Sat <$> getModel inst cexvars
+                           else do
+                                let refinedSMT2 = SMT2 refineEqs mempty mempty (ps <> refps)
+                                writeSMT2File refinedSMT2 fileCounter "refined"
+                                _ <- sendScript inst refinedSMT2
+                                sat2 <- sendLine inst "(check-sat)"
+                                case sat2 of
+                                  "unsat" -> pure Unsat
+                                  "timeout" -> pure Unknown
+                                  "unknown" -> pure Unknown
+                                  "sat" -> Sat <$> getModel inst cexvars
+                                  _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat2
+                  _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
+            writeChan r res
 
-      -- put the instance back in the list of available instances
-      writeChan availableInstances inst
+        -- put the instance back in the list of available instances
+        writeChan availableInstances inst
 
 getModel :: SolverInstance -> CexVars -> IO SMTCex
 getModel inst cexvars = do
@@ -262,7 +279,7 @@ stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just
 
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
 sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
-sendScript solver (SMT2 cmds _ _) = do
+sendScript solver (SMT2 cmds _ _ _) = do
   let sexprs = splitSExpr $ fmap toLazyText cmds
   go sexprs
   where

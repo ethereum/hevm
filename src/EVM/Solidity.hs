@@ -48,6 +48,7 @@ import Optics.Operators.Unsafe
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.IO.Unlift
 import Data.Aeson hiding (json)
 import Data.Aeson.Types
 import Data.Aeson.Optics
@@ -366,14 +367,18 @@ yulRuntime contractName src = do
       bytecode = c ^?! key "evm" ^?! key "deployedBytecode" ^?! key "object" % _String
   pure $ (toCode contractName) <$> (Just bytecode)
 
-solidity :: Text -> Text -> IO (Maybe ByteString)
-solidity contract src = do
+solidity
+  :: (MonadUnliftIO m)
+  => Text -> Text -> m (Maybe ByteString)
+solidity contract src = liftIO $ do
   json <- solc Solidity src
   let (Contracts sol, _, _) = fromJust $ readStdJSON json
   pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.creationCode)
 
-solcRuntime :: Text -> Text -> IO (Maybe ByteString)
-solcRuntime contract src = do
+solcRuntime
+  :: (MonadUnliftIO m)
+  => Text -> Text -> m (Maybe ByteString)
+solcRuntime contract src = liftIO $ do
   json <- solc Solidity src
   case readStdJSON json of
     Just (Contracts sol, _, _) -> pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.runtimeCode)

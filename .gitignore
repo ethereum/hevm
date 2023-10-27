@@ -10,3 +10,8 @@ dist/
 dist-newstyle/
 .configured
 cabal.project.local*
+
+# debug files
+*.smt2
+*.prop
+*.expr
