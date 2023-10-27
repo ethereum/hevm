@@ -883,6 +883,7 @@ simplify e = if (mapExpr go e == e)
 
     -- Add is associative
     go (Add (Add a b) c) = add a (add b c)
+    go (Add (Lit a) (Add (Lit b) x)) = add (Lit (a+b)) x
 
     -- add / sub identities
     go (Add a b)
@@ -952,6 +953,8 @@ simplify e = if (mapExpr go e == e)
 
     -- Mul is associative
     go (Mul (Mul a b) c) = mul a (mul b c)
+    go (Mul (Lit a) (Mul (Lit b) x)) = mul (Lit (a*b)) x
+
     -- Some trivial mul eliminations
     go (Mul a b) = case (a, b) of
                      (Lit 0, _) -> Lit 0
