@@ -317,28 +317,34 @@ tests = testGroup "hevm"
         b <- checkEquiv e (Expr.simplify e)
         assertBoolM "Simplifier failed" b
     , test "simp-assoc-add1" $ do
-      let simp = Expr.simplify $        Add (Add (Var "a") (Var "b")) (Var "c")
-      assertEqualM "assoc rules" simp $ Add (Var "a") (Add (Var "b") (Var "c"))
+      let simp = Expr.simplify $        Add (Var "a") (Add (Var "b") (Var "c"))
+      assertEqualM "assoc rules" simp $ Add (Add (Var "a") (Var "b")) (Var "c")
     , test "simp-assoc-add2" $ do
-      let simp = Expr.simplify $        Add (Add (Lit 1) (Var "b")) (Var "c")
-      assertEqualM "assoc rules" simp $ Add (Lit 1) (Add (Var "b") (Var "c"))
+      let simp = Expr.simplify $        Add (Lit 1) (Add (Var "b") (Var "c"))
+      assertEqualM "assoc rules" simp $ Add (Add (Lit 1) (Var "b")) (Var "c")
     , test "simp-assoc-add3" $ do
-      let simp = Expr.simplify       $  Add (Add (Lit 1) (Lit 2)) (Var "c")
+      let simp = Expr.simplify $        Add (Lit 1) (Add (Lit 2) (Var "c"))
       assertEqualM "assoc rules" simp $ Add (Lit 3) (Var "c")
     , test "simp-assoc-add4" $ do
-      let simp = Expr.simplify       $  Add (Add (Lit 1) (Var "b")) (Lit 2)
+      let simp = Expr.simplify $        Add (Lit 1) (Add (Var "b") (Lit 2))
       assertEqualM "assoc rules" simp $ Add (Lit 3) (Var "b")
     , test "simp-assoc-add5" $ do
-      let simp = Expr.simplify       $  Add (Add (Var "a") (Lit 1)) (Lit 2)
+      let simp = Expr.simplify $        Add (Var "a") (Add (Lit 1) (Lit 2))
       assertEqualM "assoc rules" simp $ Add (Lit 3) (Var "a")
     , test "simp-assoc-add6" $ do
-      let simp = Expr.simplify       $  Add (Add (Lit 7) (Lit 1)) (Lit 2)
+      let simp = Expr.simplify $        Add (Lit 7) (Add (Lit 1) (Lit 2))
       assertEqualM "assoc rules" simp $ Lit 10
+    , test "simp-assoc-add-7" $ do
+      let simp = Expr.simplify $        Add (Var "a") (Add (Var "b") (Lit 2))
+      assertEqualM "assoc rules" simp $ Add (Add (Lit 2) (Var "a")) (Var "b")
+    , test "simp-assoc-add8" $ do
+      let simp = Expr.simplify $        Add (Add (Var "a") (Add (Lit 0x2) (Var "b"))) (Add (Var "c") (Add (Lit 0x2) (Var "d")))
+      assertEqualM "assoc rules" simp $ Add (Add (Add (Add (Lit 0x4) (Var "a")) (Var "b")) (Var "c")) (Var "d")
     , test "simp-assoc-mul1" $ do
-      let simp = Expr.simplify $        Mul (Mul (Var "a") (Var "b")) (Var "c")
-      assertEqualM "assoc rules" simp $ Mul (Var "a") (Mul (Var "b") (Var "c"))
+      let simp = Expr.simplify $        Mul (Var "a") (Mul (Var "b") (Var "c"))
+      assertEqualM "assoc rules" simp $ Mul (Mul (Var "a") (Var "b")) (Var "c")
     , test "simp-assoc-mul2" $ do
-      let simp = Expr.simplify       $  Mul (Mul (Var "a") (Lit 2)) (Lit 3)
+      let simp = Expr.simplify       $  Mul (Lit 2) (Mul (Var "a") (Lit 3))
       assertEqualM "assoc rules" simp $ Mul (Lit 6) (Var "a")
     , test "bufLength-simp" $ do
       let
