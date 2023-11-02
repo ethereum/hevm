@@ -259,9 +259,10 @@ assertPropsNoSimp config psPreConc =
 
     bufVals = Map.elems bufs
     storeVals = Map.elems stores
-    storageReads = Map.unionsWith (<>) $ fmap findStorageReads ps
-    abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores ps)
-    addresses = Set.toList $ Set.unions (fmap referencedWAddrs ps)
+    toDeclareAll = (ps <> keccAssump <> keccComp)
+    storageReads = Map.unionsWith (<>) $ fmap findStorageReads toDeclareAll
+    abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores toDeclareAll)
+    addresses = Set.toList $ Set.unions (fmap referencedWAddrs toDeclareAll)
 
     toDeclare = psElim <> keccAssump <> keccComp
     keccAssump = keccakAssumptions psPreConc bufVals storeVals
