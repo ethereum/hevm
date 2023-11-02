@@ -220,7 +220,7 @@ assertPropsNoSimp config psPreConc =
   <> smt2Line ""
   <> (declareAddrs addresses)
   <> smt2Line ""
-  <> (declareBufs psElim bufs stores)
+  <> (declareBufs toDeclare bufs stores)
   <> smt2Line ""
   <> (declareVars . nubOrd $ foldl (<>) [] allVars)
   <> smt2Line ""
@@ -230,7 +230,7 @@ assertPropsNoSimp config psPreConc =
   <> smt2Line ""
   <> intermediates
   <> smt2Line ""
-  <> keccakAssumes
+  <> keccakAssertions
   <> readAssumes
   <> smt2Line ""
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty mempty mempty
@@ -250,9 +250,9 @@ assertPropsNoSimp config psPreConc =
       toProp :: (Expr EWord, Int) -> Prop
       toProp (e, num) = PEq e (Var (TS.pack ("abst_" ++ (show num))))
 
-    allVars = fmap referencedVars psElim <> fmap referencedVars bufVals <> fmap referencedVars storeVals <> [abstrVars abst]
-    frameCtx = fmap referencedFrameContext psElim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
-    blockCtx = fmap referencedBlockContext psElim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
+    allVars = fmap referencedVars toDeclare <> fmap referencedVars bufVals <> fmap referencedVars storeVals <> [abstrVars abst]
+    frameCtx = fmap referencedFrameContext toDeclare <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
+    blockCtx = fmap referencedBlockContext toDeclare <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
 
     abstrVars :: AbstState -> [Builder]
     abstrVars (AbstState b _) = map ((\v->fromString ("abst_" ++ show v)) . snd) (Map.toList b)
@@ -263,11 +263,14 @@ assertPropsNoSimp config psPreConc =
     abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores ps)
     addresses = Set.toList $ Set.unions (fmap referencedWAddrs ps)
 
-    keccakAssumes
+    toDeclare = psElim <> keccAssump <> keccComp
+    keccAssump = keccakAssumptions psPreConc bufVals storeVals
+    keccComp = keccakCompute psPreConc bufVals storeVals
+    keccakAssertions
       = smt2Line "; keccak assumptions"
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakAssumptions psPreConc bufVals storeVals)) mempty mempty mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") keccAssump) mempty mempty mempty
       <> smt2Line "; keccak computations"
-      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (keccakCompute psPreConc bufVals storeVals)) mempty mempty mempty
+      <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") keccComp) mempty mempty mempty
 
     readAssumes
       = smt2Line "; read assumptions"

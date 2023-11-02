@@ -441,10 +441,10 @@ tests = testGroup "hevm"
     , testProperty "simplifyProp-equivalence-sym" $ \(p) -> prop $ do
         let simplified = Expr.simplifyProp p
         checkEquivProp simplified p
-    , testProperty "simpProp-equivalence-sym" $ \(ps :: [Prop]) -> prop $ do
+    , testProperty "simpProp-equivalence-sym-Prop" $ \(ps :: [Prop]) -> prop $ do
         let simplified = pand (Expr.simplifyProps ps)
         checkEquivProp simplified (pand ps)
-    , testProperty "simpProp-equivalence-sym" $ \(LitProp p) -> prop $ do
+    , testProperty "simpProp-equivalence-sym-LitProp" $ \(LitProp p) -> prop $ do
         let simplified = pand (Expr.simplifyProps [p])
         checkEquivProp simplified p
     , testProperty "storage-slot-simp-property" $ \(StorageExp s) -> prop $ do
