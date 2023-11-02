@@ -1036,7 +1036,7 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
                 next
               False -> checkCallDepth
 
-        -- from is not in the state, we insert if if safe to do so and run the checks again
+        -- from is not in the state, we insert it if safe to do so and run the checks again
         (Nothing, _) -> case from of
           LitAddr _ -> do
             -- insert an entry in the state
