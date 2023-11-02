@@ -1307,27 +1307,30 @@ accessStorage addr slot continue = do
   let slotConc = Expr.concKeccakSimpExpr True slot
   use (#env % #contracts % at addr) >>= \case
     Just c ->
-      case readStorage slotConc c.storage of
-        Just x ->
-          continue x
-        Nothing ->
-          if c.external then
-            forceConcreteAddr addr "cannot read storage from symbolic addresses via rpc" $ \addr' ->
-              forceConcrete slotConc "cannot read symbolic slots via RPC" $ \slot' -> do
-                -- check if the slot is cached
-                contract <- preuse (#cache % #fetched % ix addr')
-                case contract of
-                  Nothing -> internalError "contract marked external not found in cache"
-                  Just fetched -> case readStorage (Lit slot') fetched.storage of
-                              Nothing -> mkQuery addr' slot'
-                              Just val -> continue val
-          else do
-            modifying (#env % #contracts % ix addr % #storage) (writeStorage slot (Lit 0))
-            continue $ Lit 0
+      -- Try first without concretization. Then if we get a Just, with concretization
+      -- if both give a Just, should we `continue`
+      case readStorage slot c.storage of
+        Just x -> case readStorage slotConc c.storage of
+          Just _ -> continue x
+          Nothing -> rpcCall c slotConc
+        Nothing -> rpcCall c slotConc
     Nothing ->
       fetchAccount addr $ \_ ->
         accessStorage addr slot continue
   where
+      rpcCall c slotConc = if c.external
+        then forceConcreteAddr addr "cannot read storage from symbolic addresses via rpc" $ \addr' ->
+          forceConcrete slotConc "cannot read symbolic slots via RPC" $ \slot' -> do
+            -- check if the slot is cached
+            contract <- preuse (#cache % #fetched % ix addr')
+            case contract of
+              Nothing -> internalError "contract marked external not found in cache"
+              Just fetched -> case readStorage (Lit slot') fetched.storage of
+                          Nothing -> mkQuery addr' slot'
+                          Just val -> continue val
+        else do
+          modifying (#env % #contracts % ix addr % #storage) (writeStorage slot (Lit 0))
+          continue $ Lit 0
       mkQuery a s = query $
         PleaseFetchSlot a s
           (\x -> do
