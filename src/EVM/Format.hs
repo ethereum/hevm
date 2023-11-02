@@ -5,6 +5,7 @@ module EVM.Format
   ( formatExpr
   , formatSomeExpr
   , formatPartial
+  , formatProp
   , contractNamePart
   , contractPathPart
   , showError
@@ -30,6 +31,7 @@ module EVM.Format
   , hexByteString
   , hexText
   , bsToHex
+  , showVal
   ) where
 
 import Prelude hiding (LT, GT)
@@ -436,6 +438,7 @@ formatPartial = \case
       ]
     ]
   MaxIterationsReached pc addr -> "Max Iterations Reached in contract: " <> formatAddr addr <> " pc: " <> pack (show pc)
+  JumpIntoSymbolicCode pc idx -> "Encountered a jump into a potentially symbolic code region while executing initcode. pc: " <> pack (show pc) <> " jump dst: " <> pack (show idx)
 
 formatSomeExpr :: SomeExpr -> Text
 formatSomeExpr (SomeExpr e) = formatExpr e
@@ -445,7 +448,7 @@ formatExpr = go
   where
     go :: Expr a -> Text
     go x = T.stripEnd $ case x of
-      Lit w -> T.pack $ show w
+      Lit w -> T.pack $ show (into w :: Integer)
       (Var v) -> "(Var " <> T.pack (show v) <> ")"
       (GVar v) -> "(GVar " <> T.pack (show v) <> ")"
       LitByte w -> T.pack $ show w
@@ -802,3 +805,8 @@ hexText t =
 
 bsToHex :: ByteString -> String
 bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
+
+showVal :: AbiValue -> Text
+showVal (AbiBytes _ bs) = formatBytes bs
+showVal (AbiAddress addr) = T.pack  . show $ addr
+showVal v = T.pack . show $ v

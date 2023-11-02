@@ -117,8 +117,7 @@ makeVm o = do
       , value = o.value
       , substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty
       , isCreate = o.create
-      , txReversion = Map.fromList
-        [(o.address , o.contract )]
+      , txReversion = Map.fromList ((o.address,o.contract):o.otherContracts)
       }
     , logs = []
     , traces = Zipper.fromForest []
@@ -149,8 +148,7 @@ makeVm o = do
       }
     , env = Env
       { chainId = o.chainId
-      , contracts = Map.fromList
-        [(o.address, o.contract )]
+      , contracts = Map.fromList ((o.address,o.contract):o.otherContracts)
       , freshAddresses = 0
       }
     , cache = Cache mempty mempty
@@ -1297,7 +1295,7 @@ branch cond continue = do
     choosePath :: CodeLocation -> BranchCondition -> EVM s ()
     choosePath loc (Case v) = do
       assign #result Nothing
-      pushTo #constraints $ if v then Expr.evalProp (condSimp ./= Lit 0) else Expr.evalProp (condSimp .== Lit 0)
+      pushTo #constraints $ if v then Expr.simplifyProp (condSimp ./= Lit 0) else Expr.simplifyProp (condSimp .== Lit 0)
       (iteration, _) <- use (#iterations % at loc % non (0,[]))
       stack <- use (#state % #stack)
       assign (#cache % #path % at (loc, iteration)) (Just v)
@@ -1868,16 +1866,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
         touchAccount newAddr
       -- are we overflowing the nonce
       False -> burn xGas $ do
-        -- unfortunately we have to apply some (pretty hacky)
-        -- heuristics here to parse the unstructured buffer read
-        -- from memory into a code and data section
-        let contract' = do
-              prefixLen <- Expr.concPrefix initCode
-              prefix <- Expr.toList $ Expr.take prefixLen initCode
-              let sym = Expr.drop prefixLen initCode
-              conc <- mapM maybeLitByte prefix
-              pure $ InitCode (BS.pack $ V.toList conc) sym
-        case contract' of
+        case parseInitCode initCode of
           Nothing ->
             partial $ UnexpectedSymbolicArg vm0.state.pc "initcode must have a concrete prefix" []
           Just c -> do
@@ -1927,6 +1916,28 @@ create self this xSize xGas xValue xs newAddr initCode = do
               , caller       = self
               , gas          = xGas
               }
+
+-- | Parses a raw Buf into an InitCode
+--
+-- solidity implements constructor args by appending them to the end of
+-- the initcode. we support this internally by treating initCode as a
+-- concrete region (initCode) followed by a potentially symbolic region
+-- (arguments).
+--
+-- when constructing a contract that has symbolic construcor args, we
+-- need to apply some heuristics to convert the (unstructured) initcode
+-- in memory into this structured representation. The (unsound, bad,
+-- hacky) way that we do this, is by: looking for the first potentially
+-- symbolic byte in the input buffer and then splitting it there into code / data.
+parseInitCode :: Expr Buf -> Maybe ContractCode
+parseInitCode (ConcreteBuf b) = Just (InitCode b mempty)
+parseInitCode buf = if V.null conc
+                    then Nothing
+                    else Just $ InitCode (BS.pack $ V.toList conc) sym
+  where
+    conc = Expr.concretePrefix buf
+    -- unsafeInto: findIndex will always be positive
+    sym = Expr.drop (unsafeInto (V.length conc)) buf
 
 -- | Replace a contract's code, like when CREATE returns
 -- from the constructor code.
@@ -2336,13 +2347,29 @@ use' f = do
   pure (f vm)
 
 checkJump :: Int -> [Expr EWord] -> EVM s ()
-checkJump x xs = do
+checkJump x xs = noJumpIntoInitData x $ do
   vm <- get
   case isValidJumpDest vm x of
     True -> do
       #state % #stack .= xs
       #state % #pc .= x
     False -> vmError BadJumpDestination
+
+-- fails with partial if we're trying to jump into the symbolic region of an `InitCode`
+noJumpIntoInitData :: Int -> EVM s () -> EVM s ()
+noJumpIntoInitData idx cont = do
+  vm <- get
+  case vm.state.code of
+    -- init code is totally concrete, so we don't return partial if we're
+    -- jumping beyond the range of `ops`
+    InitCode _ (ConcreteBuf "") -> cont
+    -- init code has a symbolic region, so check if we're trying to jump into
+    -- the symbolic region and return partial if we are
+    InitCode ops _ -> if idx > BS.length ops
+                      then partial $ JumpIntoSymbolicCode vm.state.pc idx
+                      else cont
+    -- we're not executing init code, so nothing to check here
+    _ -> cont
 
 isValidJumpDest :: VM s -> Int -> Bool
 isValidJumpDest vm x = let

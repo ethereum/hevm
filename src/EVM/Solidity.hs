@@ -1,13 +1,10 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE QuasiQuotes #-}
 
 module EVM.Solidity
   ( solidity
   , solcRuntime
-  , solidity'
-  , yul'
   , yul
   , yulRuntime
   , JumpType (..)
@@ -51,6 +48,7 @@ import Optics.Operators.Unsafe
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.IO.Unlift
 import Data.Aeson hiding (json)
 import Data.Aeson.Types
 import Data.Aeson.Optics
@@ -72,11 +70,10 @@ import Data.List.NonEmpty qualified as NonEmpty
 import Data.Maybe
 import Data.Semigroup
 import Data.Sequence (Seq)
-import Data.String.Here qualified as Here
 import Data.Text (pack, intercalate)
 import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
-import Data.Text.IO (readFile, writeFile)
+import Data.Text.IO (readFile)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Word (Word8)
@@ -84,8 +81,6 @@ import Options.Generic
 import Prelude hiding (readFile, writeFile)
 import System.FilePattern.Directory
 import System.FilePath.Posix
-import System.IO hiding (readFile, writeFile)
-import System.IO.Temp
 import System.Process
 import Text.Read (readMaybe)
 import Witch (unsafeInto)
@@ -358,40 +353,44 @@ readSolc pt root fp =
 
 yul :: Text -> Text -> IO (Maybe ByteString)
 yul contractName src = do
-  (json, path) <- yul' src
-  let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
+  json <- solc Yul src
+  let f = (json ^?! key "contracts") ^?! key (Key.fromText "hevm.sol")
       c = f ^?! key (Key.fromText $ if T.null contractName then "object" else contractName)
       bytecode = c ^?! key "evm" ^?! key "bytecode" ^?! key "object" % _String
   pure $ (toCode contractName) <$> (Just bytecode)
 
 yulRuntime :: Text -> Text -> IO (Maybe ByteString)
 yulRuntime contractName src = do
-  (json, path) <- yul' src
-  let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
+  json <- solc Yul src
+  let f = (json ^?! key "contracts") ^?! key (Key.fromText "hevm.sol")
       c = f ^?! key (Key.fromText $ if T.null contractName then "object" else contractName)
       bytecode = c ^?! key "evm" ^?! key "deployedBytecode" ^?! key "object" % _String
   pure $ (toCode contractName) <$> (Just bytecode)
 
-solidity :: Text -> Text -> IO (Maybe ByteString)
-solidity contract src = do
-  (json, path) <- solidity' src
+solidity
+  :: (MonadUnliftIO m)
+  => Text -> Text -> m (Maybe ByteString)
+solidity contract src = liftIO $ do
+  json <- solc Solidity src
   let (Contracts sol, _, _) = fromJust $ readStdJSON json
-  pure $ Map.lookup (path <> ":" <> contract) sol <&> (.creationCode)
+  pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.creationCode)
 
-solcRuntime :: Text -> Text -> IO (Maybe ByteString)
-solcRuntime contract src = do
-  (json, path) <- solidity' src
+solcRuntime
+  :: (MonadUnliftIO m)
+  => Text -> Text -> m (Maybe ByteString)
+solcRuntime contract src = liftIO $ do
+  json <- solc Solidity src
   case readStdJSON json of
-    Just (Contracts sol, _, _) -> pure $ Map.lookup (path <> ":" <> contract) sol <&> (.runtimeCode)
+    Just (Contracts sol, _, _) -> pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.runtimeCode)
     Nothing -> internalError $ "unable to parse solidity output:\n" <> (T.unpack json)
 
 functionAbi :: Text -> IO Method
 functionAbi f = do
-  (json, path) <- solidity' ("contract ABI { function " <> f <> " public {}}")
+  json <- solc Solidity ("contract ABI { function " <> f <> " public {}}")
   let (Contracts sol, _, _) = fromMaybe
                                 (internalError . T.unpack $ "unable to parse solc output:\n" <> json)
                                 (readStdJSON json)
-  case Map.toList $ (fromJust (Map.lookup (path <> ":ABI") sol)).abiMap of
+  case Map.toList $ (fromJust (Map.lookup "hevm.sol:ABI" sol)).abiMap of
      [(_,b)] -> pure b
      _ -> internalError "unexpected abi format"
 
@@ -437,7 +436,7 @@ readFoundryJSON contractName json = do
         , runtimeSrcmap       = runtimeSrcMap
         , creationSrcmap      = creationSrcMap
         , constructorInputs   = mkConstructor abi
-        , storageLayout       = mempty -- TODO: foundry doesn't expose this?
+        , storageLayout       = mkStorageLayout $ json ^? key "storageLayout"
         , immutableReferences = mempty -- TODO: foundry doesn't expose this?
         }
   pure ( Contracts $ Map.singleton (path <> ":" <> contractName) contract
@@ -661,80 +660,12 @@ toCode contractName t = case BS16.decodeBase16 (encodeUtf8 t) of
             then error $ T.unpack ("Error toCode: unlinked libraries detected in bytecode, in " <> contractName)
             else error $ T.unpack ("Error toCode:" <> e <> ", in " <> contractName)
 
-solidity' :: Text -> IO (Text, Text)
-solidity' src = withSystemTempFile "hevm.sol" $ \path handle -> do
-  hClose handle
-  writeFile path ("//SPDX-License-Identifier: UNLICENSED\n" <> "pragma solidity ^0.8.6;\n" <> src)
-  writeFile (path <> ".json")
-    [Here.i|
-    {
-      "language": "Solidity",
-      "sources": {
-        ${path}: {
-          "urls": [
-            ${path}
-          ]
-        }
-      },
-      "settings": {
-        "outputSelection": {
-          "*": {
-            "*": [
-              "metadata",
-              "evm.bytecode",
-              "evm.deployedBytecode",
-              "abi",
-              "storageLayout",
-              "evm.bytecode.sourceMap",
-              "evm.bytecode.linkReferences",
-              "evm.bytecode.generatedSources",
-              "evm.deployedBytecode.sourceMap",
-              "evm.deployedBytecode.linkReferences",
-              "evm.deployedBytecode.generatedSources"
-            ],
-            "": [
-              "ast"
-            ]
-          }
-        }
-      }
-    }
-    |]
-  x <- pack <$>
-    readProcess
-      "solc"
-      ["--allow-paths", path, "--standard-json", (path <> ".json")]
-      ""
-  pure (x, pack path)
-
-yul' :: Text -> IO (Text, Text)
-yul' src = withSystemTempFile "hevm.yul" $ \path handle -> do
-  hClose handle
-  writeFile path src
-  writeFile (path <> ".json")
-    [Here.i|
-    {
-      "language": "Yul",
-      "sources": { ${path}: { "urls": [ ${path} ] } },
-      "settings": { "outputSelection": { "*": { "*": ["*"], "": [ "*" ] } } }
-    }
-    |]
-  x <- pack <$>
-    readProcess
-      "solc"
-      ["--allow-paths", path, "--standard-json", (path <> ".json")]
-      ""
-  pure (x, pack path)
-
 solc :: Language -> Text -> IO Text
 solc lang src =
-  withSystemTempFile "hevm.sol" $ \path handle -> do
-    hClose handle
-    writeFile path (stdjson lang src)
-    T.pack <$> readProcess
-      "solc"
-      ["--standard-json", path]
-      ""
+  T.pack <$> readProcess
+    "solc"
+    ["--standard-json"]
+    (T.unpack $ stdjson lang src)
 
 data Language = Solidity | Yul
   deriving (Show)

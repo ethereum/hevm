@@ -8,15 +8,19 @@
 module EVM.Expr where
 
 import Prelude hiding (LT, GT)
+import Control.Monad.ST
 import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
 import Data.List
 import Data.Map.Strict qualified as Map
-import Data.Maybe (mapMaybe, isJust)
+import Data.Maybe (mapMaybe, isJust, fromMaybe)
 import Data.Semigroup (Any, Any(..), getAny)
 import Data.Vector qualified as V
+import Data.Vector (Vector)
+import Data.Vector.Mutable qualified as MV
+import Data.Vector.Mutable (MVector)
 import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
@@ -370,13 +374,13 @@ writeByte offset byte src = WriteByte offset byte src
 
 writeWord :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
 writeWord o@(Lit offset) (WAddr (LitAddr val)) b@(ConcreteBuf _)
-  | offset + 32 < maxBytes
+  | offset < maxBytes && offset + 32 < maxBytes
   = writeWord o (Lit $ into val) b
 writeWord (Lit offset) (Lit val) (ConcreteBuf "")
-  | offset + 32 < maxBytes
+  | offset < maxBytes && offset + 32 < maxBytes
   = ConcreteBuf $ BS.replicate (unsafeInto offset) 0 <> word256Bytes val
 writeWord o@(Lit offset) v@(Lit val) buf@(ConcreteBuf src)
-  | offset + 32 < maxBytes
+  | offset < maxBytes && offset + 32 < maxBytes
     = ConcreteBuf $ (padRight (unsafeInto offset) $ BS.take (unsafeInto offset) src)
                  <> word256Bytes val
                  <> BS.drop ((unsafeInto offset) + 32) src
@@ -428,34 +432,6 @@ bufLengthEnv env useEnv buf = go (Lit 0) buf
         Nothing -> internalError "cannot compute length of open expression"
     go l (GVar (BufVar a)) = EVM.Expr.max l (BufLength (GVar (BufVar a)))
 
--- | If a buffer has a concrete prefix, we return it's length here
-concPrefix :: Expr Buf -> Maybe W256
-concPrefix (WriteWord (Lit srcOff) _ (ConcreteBuf ""))
-  | srcOff == 0 = Nothing
-  | otherwise = Just srcOff
-concPrefix (CopySlice (Lit srcOff) (Lit _) (Lit _) src (ConcreteBuf "")) = do
-  sz <- go 0 src
-  pure . into $ (unsafeInto sz) - srcOff
-  where
-    go :: W256 -> Expr Buf -> Maybe Integer
-    -- base cases
-    go _ (AbstractBuf _) = Nothing
-    go l (ConcreteBuf b) = Just . into $ Prelude.max (unsafeInto . BS.length $ b) l
-
-    -- writes to a concrete index
-    go l (WriteWord (Lit idx) (Lit _) b) = go (Prelude.max l (idx + 32)) b
-    go l (WriteByte (Lit idx) (LitByte _) b) = go (Prelude.max l (idx + 1)) b
-    go l (CopySlice _ (Lit dstOffset) (Lit size) _ dst) = go (Prelude.max (dstOffset + size) l) dst
-
-    -- writes to an abstract index are ignored
-    go l (WriteWord _ _ b) = go l b
-    go l (WriteByte _ _ b) = go l b
-    go _ (CopySlice _ _ _ _ _) = internalError "cannot compute a concrete prefix length for nested copySlice expressions"
-    go _ (GVar _) = internalError "cannot calculate a concrete prefix of an open expression"
-concPrefix (ConcreteBuf b) = Just (unsafeInto . BS.length $ b)
-concPrefix e = internalError $ "cannot compute a concrete prefix length for: " <> show e
-
-
 -- | Return the minimum possible length of a buffer. In the case of an
 -- abstract buffer, it is the largest write that is made on a concrete
 -- location. Parameterized by an environment for buffer variables.
@@ -477,6 +453,51 @@ minLength bufEnv = go 0
     go l (GVar (BufVar a)) = do
       b <- Map.lookup a bufEnv
       go l b
+
+-- returns the largest prefix that is guaranteed to be concrete (if one exists)
+-- partial: will hard error if we encounter an input buf with a concrete size > 500mb
+-- partial: will hard error if the prefix is > 500mb
+concretePrefix :: Expr Buf -> Vector Word8
+concretePrefix b = V.create $ do
+    v <- MV.new (fromMaybe 1024 inputLen)
+    (filled, v') <- go 0 v
+    pure $ MV.take filled v'
+  where
+
+    -- if our prefix is > 500mb then we have other issues and should just bail...
+    maxIdx :: Num i => i
+    maxIdx = 500 * (10 ^ (6 :: Int))
+
+    -- attempts to compute a concrete length for the input buffer
+    inputLen :: Maybe Int
+    inputLen = case bufLength b of
+      Lit s -> if s > maxIdx
+        then internalError "concretePrefix: input buffer size exceeds 500mb"
+        -- unafeInto: s is <= 500,000,000
+        else Just (unsafeInto s)
+      _ -> Nothing
+
+    -- recursively reads succesive bytes from `b` until we reach a symbolic
+    -- byte returns the larged index read from and a reference to the mutable
+    -- vec (might not be the same as the input because of the call to grow)
+    go :: forall s . Int -> MVector s Word8 -> ST s (Int, MVector s Word8)
+    go i v
+      -- if the prefix is very large then bail
+      | i >= maxIdx = internalError "concretePrefix: prefix size exceeds 500mb"
+      -- if the input buffer has a concrete size, then don't read past the end
+      | Just mr <- inputLen, i >= mr = pure (i, v)
+      -- double the size of the vector if we've reached the end
+      | i >= MV.length v = do
+        v' <- MV.grow v (MV.length v)
+        go i v'
+      -- read the byte at `i` in `b` into `v` if it is concrete, or halt if we've reached a symbolic byte
+      -- unsafeInto: i will always be positive
+      | otherwise = case readByte (Lit . unsafeInto $ i) b of
+          LitByte byte -> do
+            MV.write v i byte
+            go (i+1) v
+          _ -> pure (i, v)
+
 
 word256At :: Expr EWord -> Lens (Expr Buf) (Expr Buf) (Expr EWord) (Expr EWord)
 word256At i = lens getter setter where
@@ -767,6 +788,7 @@ simplify e = if (mapExpr go e == e)
     go (ReadWord idx buf) = readWord idx buf
     go o@(ReadByte (Lit _) _) = simplifyReads o
     go (ReadByte idx buf) = readByte idx buf
+    go (BufLength buf) = bufLength buf
 
     -- We can zero out any bytes in a base ConcreteBuf that we know will be overwritten by a later write
     -- TODO: make this fully general for entire write chains, not just a single write.
@@ -788,8 +810,11 @@ simplify e = if (mapExpr go e == e)
         -- n+sz of ConcreteBuf will be used by CopySlice
         (WriteWord wOff value (ConcreteBuf buf)) dst)
           -- Let's not deal with overflow
-          | n+sz >= n && n+sz >= sz = (CopySlice srcOff dstOff size
-              (WriteWord wOff value (ConcreteBuf simplifiedBuf)) dst)
+          | n+sz >= n
+          , n+sz >= sz
+          , n+sz <= maxBytes
+            = (CopySlice srcOff dstOff size
+                (WriteWord wOff value (ConcreteBuf simplifiedBuf)) dst)
           | otherwise = orig
             where simplifiedBuf = BS.take (unsafeInto (n+sz)) buf
     go (CopySlice a b c d f) = copySlice a b c d f
@@ -855,6 +880,12 @@ simplify e = if (mapExpr go e == e)
       | a == c = b
       | b == c = a
       | otherwise = sub (add a b) c
+
+    -- Add is associative. We are doing left-growing trees because LIT is
+    -- arranged to the left. This way, they accumulate in all combinations.
+    -- See `sim-assoc-add` test cases in test.hs
+    go (Add a (Add b c)) = add (add a b) c
+    go (Add (Add (Lit a) x) (Lit b)) = add (Lit (a+b)) x
 
     -- add / sub identities
     go (Add a b)
@@ -922,14 +953,22 @@ simplify e = if (mapExpr go e == e)
                      (Lit 0, _) -> Lit 0
                      _ -> EVM.Expr.min a b
 
+    -- Mul is associative. We are doing left-growing trees because LIT is
+    -- arranged to the left. This way, they accumulate in all combinations.
+    -- See `sim-assoc-add` test cases in test.hs
+    go (Mul a (Mul b c)) = mul (mul a b) c
+    go (Mul (Mul (Lit a) x) (Lit b)) = mul (Lit (a*b)) x
+
     -- Some trivial mul eliminations
     go (Mul a b) = case (a, b) of
                      (Lit 0, _) -> Lit 0
                      (Lit 1, _) -> b
                      _ -> mul a b
+
     -- Some trivial div eliminations
     go (Div (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
     go (Div _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
+    go (Div a (Lit 1)) = a
 
     -- If a >= b then the value of the `Max` expression can never be < b
     go o@(LT (Max (Lit a) _) (Lit b))
@@ -953,14 +992,14 @@ simplify e = if (mapExpr go e == e)
 simplifyProps :: [Prop] -> [Prop]
 simplifyProps ps = if canBeSat then simplified else [PBool False]
   where
-    simplified = remRedundantProps . map evalProp . flattenProps $ ps
+    simplified = remRedundantProps . map simplifyProp . flattenProps $ ps
     canBeSat = constFoldProp simplified
 
 -- | Evaluate the provided proposition down to its most concrete result
-evalProp :: Prop -> Prop
-evalProp prop =
+simplifyProp :: Prop -> Prop
+simplifyProp prop =
   let new = mapProp' go (simpInnerExpr prop)
-  in if (new == prop) then prop else evalProp new
+  in if (new == prop) then prop else simplifyProp new
   where
     go :: Prop -> Prop
 
@@ -977,6 +1016,23 @@ evalProp prop =
     -- negations
     go (PNeg (PBool b)) = PBool (Prelude.not b)
     go (PNeg (PNeg a)) = a
+
+    -- solc specific stuff
+
+    -- iszero(a) -> (a == 0)
+    -- iszero(iszero(a))) -> ~(a == 0) -> a > 0
+    -- iszero(iszero(a)) == 0 -> ~~(a == 0) -> a == 0
+    -- ~(iszero(iszero(a)) == 0) -> ~~~(a == 0) -> ~(a == 0) -> a > 0
+    go (PNeg (PEq (IsZero (IsZero a)) (Lit 0))) = PGT a (Lit 0)
+
+    -- iszero(a) -> (a == 0)
+    -- iszero(a) == 0 -> ~(a == 0)
+    -- ~(iszero(a) == 0) -> ~~(a == 0) -> a == 0
+    go (PNeg (PEq (IsZero a) (Lit 0))) = PEq a (Lit 0)
+
+    -- a < b == 0 -> ~(a < b)
+    -- ~(a < b == 0) -> ~~(a < b) -> a < b
+    go (PNeg (PEq (LT a b) (Lit 0x0))) = PLT a b
 
     -- And/Or
     go (PAnd (PBool l) (PBool r)) = PBool (l && r)
@@ -1000,6 +1056,8 @@ evalProp prop =
       | l == r = PBool True
       | otherwise = o
     go p = p
+
+
     -- Applies `simplify` to the inner part of a Prop, e.g.
     -- (PEq (Add (Lit 1) (Lit 2)) (Var "a")) becomes
     -- (PEq (Lit 3) (Var "a")
@@ -1261,7 +1319,7 @@ data ConstState = ConstState
 constFoldProp :: [Prop] -> Bool
 constFoldProp ps = oneRun ps (ConstState mempty True)
   where
-    oneRun ps2 startState = (execState (mapM (go . evalProp) ps2) startState).canBeSat
+    oneRun ps2 startState = (execState (mapM (go . simplifyProp) ps2) startState).canBeSat
     go :: Prop -> State ConstState ()
     go x = case x of
         PEq (Lit l) a -> do
