@@ -2520,7 +2520,7 @@ tests = testGroup "hevm"
           (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "call_A()" [])) [] defaultVeriOpts
           putStrLnM "expected counterexample found"
         ,
-        test "keccak concrete and sym agree" $ do
+        test "keccak-concrete-and-sym-agree" $ do
           Just c <- solcRuntime "C"
             [i|
               contract C {
