@@ -250,21 +250,26 @@ assertPropsNoSimp config psPreConc =
       toProp :: (Expr EWord, Int) -> Prop
       toProp (e, num) = PEq e (Var (TS.pack ("abst_" ++ (show num))))
 
-    allVars = fmap referencedVars toDeclare <> fmap referencedVars bufVals <> fmap referencedVars storeVals <> [abstrVars abst]
-    frameCtx = fmap referencedFrameContext toDeclare <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
-    blockCtx = fmap referencedBlockContext toDeclare <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
+    -- Props storing info that need declaration(s)
+    toDeclarePs     = ps <> keccAssump <> keccComp
+    toDeclarePsElim = psElim <> keccAssump <> keccComp
+
+    -- vars, frames, and block contexts in need of declaration
+    allVars = fmap referencedVars toDeclarePsElim <> fmap referencedVars bufVals <> fmap referencedVars storeVals <> [abstrVars abst]
+    frameCtx = fmap referencedFrameContext toDeclarePsElim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
+    blockCtx = fmap referencedBlockContext toDeclarePsElim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
 
     abstrVars :: AbstState -> [Builder]
     abstrVars (AbstState b _) = map ((\v->fromString ("abst_" ++ show v)) . snd) (Map.toList b)
 
+    -- Buf, Storage, etc. declarations needed
     bufVals = Map.elems bufs
     storeVals = Map.elems stores
-    toDeclareAll = (ps <> keccAssump <> keccComp)
-    storageReads = Map.unionsWith (<>) $ fmap findStorageReads toDeclareAll
-    abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores toDeclareAll)
-    addresses = Set.toList $ Set.unions (fmap referencedWAddrs toDeclareAll)
+    storageReads = Map.unionsWith (<>) $ fmap findStorageReads toDeclarePs
+    abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores toDeclarePs)
+    addresses = Set.toList $ Set.unions (fmap referencedWAddrs toDeclarePs)
 
-    toDeclare = psElim <> keccAssump <> keccComp
+    -- Keccak assertions: concrete values, distance between pairs, injectivity, etc.
     keccAssump = keccakAssumptions psPreConc bufVals storeVals
     keccComp = keccakCompute psPreConc bufVals storeVals
     keccakAssertions
@@ -273,6 +278,7 @@ assertPropsNoSimp config psPreConc =
       <> smt2Line "; keccak computations"
       <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") keccComp) mempty mempty mempty
 
+    -- assert that reads beyond size of buffer & storage is zero
     readAssumes
       = smt2Line "; read assumptions"
         <> SMT2 (fmap (\p -> "(assert " <> propToSMT p <> ")") (assertReads psElim bufs stores)) mempty mempty mempty
