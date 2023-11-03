@@ -220,7 +220,7 @@ assertPropsNoSimp config psPreConc =
   <> smt2Line ""
   <> (declareAddrs addresses)
   <> smt2Line ""
-  <> (declareBufs toDeclare bufs stores)
+  <> (declareBufs toDeclarePsElim bufs stores)
   <> smt2Line ""
   <> (declareVars . nubOrd $ foldl (<>) [] allVars)
   <> smt2Line ""
