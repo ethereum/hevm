@@ -415,8 +415,7 @@ deleteTraceOutputFiles evmtoolResult =
 
 -- Create symbolic VM from concrete VM
 symbolify :: VM s -> VM s
-symbolify vm = vm {
-                  state = vm.state { calldata = AbstractBuf "calldata" }
+symbolify vm = vm { state = vm.state { calldata = AbstractBuf "calldata" }
                   , symbolic = True
                   }
 
