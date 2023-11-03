@@ -236,7 +236,7 @@ assertPropsNoSimp config psPreConc =
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty mempty mempty
   <> SMT2 mempty (RefinementEqs (fmap (\p -> "(assert " <> p <> ")") abstSMT) (psElimAbst <> abstProps)) mempty mempty
   <> SMT2 mempty mempty mempty { storeReads = storageReads } mempty
-  <> SMT2 mempty mempty mempty ps
+  <> SMT2 mempty mempty mempty psPreConc
 
   where
     ps = Expr.concKeccakSimps False psPreConc
