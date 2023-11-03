@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Changed
 - Less noisy console output during tracing
 - Minimum distance requirements are now asserted for Keccak function calls. They assert that it's hard to generate two Keccak's that are less than 256 afar.
-- Keccak concretization is now done only after all simplification are performed. This helps with simplification pre-concretization
+- Keccak concretization is now done only after all simplifications are performed. This helps with simplification pre-concretization
 
 
 ## [0.52.0] - 2023-10-26
