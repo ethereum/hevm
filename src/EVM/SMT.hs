@@ -270,6 +270,7 @@ assertPropsNoSimp config psPreConc =
     addresses = Set.toList $ Set.unions (fmap referencedWAddrs toDeclarePs)
 
     -- Keccak assertions: concrete values, distance between pairs, injectivity, etc.
+    --      This will make sure concrete values of Keccak are asserted, if they can be computed (i.e. can be concretized)
     keccAssump = keccakAssumptions psPreConc bufVals storeVals
     keccComp = keccakCompute psPreConc bufVals storeVals
     keccakAssertions
