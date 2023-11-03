@@ -2534,6 +2534,21 @@ tests = testGroup "hevm"
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "kecc(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
+        test "keccak-concrete-and-sym-agree-nonzero" $ do
+          Just c <- solcRuntime "C"
+            [i|
+              contract C {
+                function kecc(uint x) public pure {
+                  if (x == 55) {
+                    // Note: 3014... is the encode & keccak & uint256 conversion of 55
+                    assert(uint256(keccak256(abi.encode(x))) == 30148980456718914367279254941528755963179627010946392082519497346671089299886);
+                  }
+                }
+              }
+            |]
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "kecc(uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+        ,
         test "keccak concrete and sym injectivity" $ do
           Just c <- solcRuntime "A"
             [i|
