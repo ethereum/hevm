@@ -1018,6 +1018,8 @@ simplifyProp prop =
     go (PNeg (PNeg a)) = a
 
     -- solc specific stuff
+    go (PEq (IsZero (Eq a b)) (Lit 0)) = PEq a b
+    go (PEq (IsZero (IsZero (Eq a b))) (Lit 0)) = PNeg (PEq a b)
 
     -- iszero(a) -> (a == 0)
     -- iszero(iszero(a))) -> ~(a == 0) -> a > 0
