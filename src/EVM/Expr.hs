@@ -421,7 +421,7 @@ bufLengthEnv env useEnv buf = go (Lit 0) buf
   where
     go :: Expr EWord -> Expr Buf -> Expr EWord
     go l (ConcreteBuf b) = EVM.Expr.max l (Lit (unsafeInto . BS.length $ b))
-    go l (AbstractBuf b) = Max l (BufLength (AbstractBuf b))
+    go l (AbstractBuf b) = EVM.Expr.max l (BufLength (AbstractBuf b))
     go l (WriteWord idx _ b) = go (EVM.Expr.max l (add idx (Lit 32))) b
     go l (WriteByte idx _ b) = go (EVM.Expr.max l (add idx (Lit 1))) b
     go l (CopySlice _ dstOffset size _ dst) = go (EVM.Expr.max l (add dstOffset size)) dst
@@ -946,9 +946,7 @@ simplify e = if (mapExpr go e == e)
     go (EVM.Types.Not (EVM.Types.Not a)) = a
 
     -- Some trivial min / max eliminations
-    go (Max a b) = case (a, b) of
-                    (Lit 0, _) -> b
-                    _ -> EVM.Expr.max a b
+    go (Max a b) = EVM.Expr.max a b
     go (Min a b) = case (a, b) of
                      (Lit 0, _) -> Lit 0
                      _ -> EVM.Expr.min a b
@@ -1012,6 +1010,8 @@ simplifyProp prop =
     go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
     go (PLEq a (Max b _)) | a == b = PBool True
     go (PLEq a (Max _ b)) | a == b = PBool True
+    go (PLT (Max (Lit a) b) (Lit c)) | a < c = PLT b (Lit c)
+    go (PLT (Lit 0) (Eq a b)) = PEq a b
 
     -- negations
     go (PNeg (PBool b)) = PBool (Prelude.not b)
@@ -1086,7 +1086,7 @@ flattenProps (a:ax) = case a of
 
 -- removes redundant (constant True/False) props
 remRedundantProps :: [Prop] -> [Prop]
-remRedundantProps p = collapseFalse . filter (\x -> x /= PBool True) . nubOrd $ p
+remRedundantProps p = nubOrd $ collapseFalse . filter (\x -> x /= PBool True) $ p
   where
     collapseFalse ps = if isJust $ find (== PBool False) ps then [PBool False] else ps
 
@@ -1285,6 +1285,8 @@ min :: Expr EWord -> Expr EWord -> Expr EWord
 min x y = normArgs Min Prelude.min x y
 
 max :: Expr EWord -> Expr EWord -> Expr EWord
+max (Lit 0) y = y
+max x (Lit 0) = x
 max x y = normArgs Max Prelude.max x y
 
 numBranches :: Expr End -> Int
