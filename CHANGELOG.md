@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 - New solc-specific simplification rules that should make the final Props a lot more readable
+- Prop is now correctly ordered, better BufLength and Max simplifications of Expr,
+  and further solc-specific simplifications of Expr
 
 ## [0.52.0] - 2023-10-26
 
