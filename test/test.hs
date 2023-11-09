@@ -2702,7 +2702,16 @@ tests = testGroup "hevm"
   ]
   , testGroup "simplification-working"
   [
-    test "prop-simp-bool1" $ do
+    test "PEq-and-PNot-PEq-1" $ do
+      let a = [PEq (Lit 0x539) (Var "arg1"),PNeg (PEq (Lit 0x539) (Var "arg1"))]
+      assertEqualM "Must simplify to PBool False" (Expr.simplifyProps a) ([PBool False])
+    , test "PEq-and-PNot-PEq-2" $ do
+      let a = [PEq (Var "arg1") (Lit 0x539),PNeg (PEq (Lit 0x539) (Var "arg1"))]
+      assertEqualM "Must simplify to PBool False" (Expr.simplifyProps a) ([PBool False])
+    , test "PEq-and-PNot-PEq-3" $ do
+      let a = [PEq (Var "arg1") (Lit 0x539),PNeg (PEq (Var "arg1") (Lit 0x539))]
+      assertEqualM "Must simplify to PBool False" (Expr.simplifyProps a) ([PBool False])
+    , test "prop-simp-bool1" $ do
       let
         a = successGen [PAnd (PBool True) (PBool False)]
         b = Expr.simplify a

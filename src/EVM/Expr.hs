@@ -1326,6 +1326,7 @@ constFoldProp ps = oneRun ps (ConstState mempty True)
     oneRun ps2 startState = (execState (mapM (go . simplifyProp) ps2) startState).canBeSat
     go :: Prop -> State ConstState ()
     go x = case x of
+        -- PEq
         PEq (Lit l) a -> do
           s <- get
           case Map.lookup a s.values of
@@ -1336,6 +1337,16 @@ constFoldProp ps = oneRun ps (ConstState mempty True)
               let vs' = Map.insert a l s.values
               put $ s{values=vs'}
         PEq a b@(Lit _) -> go (PEq b a)
+        -- PNeg
+        PNeg (PEq (Lit l) a) -> do
+          s <- get
+          case Map.lookup a s.values of
+            Just l2 -> case l==l2 of
+                True -> put ConstState {canBeSat=False, values=mempty}
+                False -> pure ()
+            Nothing -> pure()
+        PNeg (PEq a b@(Lit _)) -> go $ PNeg (PEq b a)
+        -- Others
         PAnd a b -> do
           go a
           go b
