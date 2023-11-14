@@ -762,6 +762,9 @@ getAddr (GVar _) = internalError "cannot determine addr of a GVar"
 
 -- ** Whole Expression Simplification ** -----------------------------------------------------------
 
+pattern MAX_UINT :: W256
+pattern MAX_UINT = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
 
 -- | Simple recursive match based AST simplification
 -- Note: may not terminate!
@@ -782,6 +785,9 @@ simplify e = if (mapExpr go e == e)
     -- simplify storage
     go (SLoad slot store) = readStorage' slot store
     go (SStore slot val store) = writeStorage slot val store
+
+    -- act generates stuff like this sometimes...
+    go (Mod a (Lit MAX_UINT)) = a
 
     -- simplify buffers
     go o@(ReadWord (Lit _) _) = simplifyReads o
