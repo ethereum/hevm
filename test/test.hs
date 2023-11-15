@@ -296,7 +296,7 @@ tests = testGroup "hevm"
         let dummyContract =
               (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)))
                 { external = True }
-        vm <- liftIO $ stToIO $ vmForEthrunCreation ""
+        vm :: VM Concrete RealWorld <- liftIO $ stToIO $ vmForEthrunCreation ""
             -- perform the initial access
         vm1 <- liftIO $ stToIO $ execStateT (EVM.accessStorage (LitAddr 0) (Lit 0) (pure . pure ())) vm
         -- it should fetch the contract first
@@ -3418,7 +3418,7 @@ runSimpleVM x ins = do
        s -> internalError $ show s
 
 -- | Takes a creation code and returns a vm with the result of executing the creation code
-loadVM :: App m => ByteString -> m (Maybe (VM RealWorld))
+loadVM :: App m => ByteString -> m (Maybe (VM Concrete RealWorld))
 loadVM x = do
   vm <- liftIO $ stToIO $ vmForEthrunCreation x
   vm1 <- Stepper.interpret (Fetch.zero 0 Nothing) vm Stepper.runFully
@@ -3483,7 +3483,7 @@ runStatements stmts args t = do
     }
   |] (abiMethod s (AbiTuple $ V.fromList args))
 
-getStaticAbiArgs :: Int -> VM s -> [Expr EWord]
+getStaticAbiArgs :: Int -> VM Symbolic s -> [Expr EWord]
 getStaticAbiArgs n vm =
   let cd = vm.state.calldata
   in decodeStaticArgs 4 n cd

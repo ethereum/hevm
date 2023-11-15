@@ -52,10 +52,10 @@ data Block = Block
   } deriving Show
 
 data Case = Case
-  { vmOpts      :: VMOpts
+  { vmOpts      :: VMOpts Concrete
   , checkContracts  :: Map Addr Contract
   , testExpectation :: Map Addr Contract
-  } deriving Show
+  } -- deriving Show
 
 data BlockchainCase = BlockchainCase
   { blocks  :: [Block]
@@ -193,7 +193,7 @@ fromConcrete :: Expr Storage -> Map W256 W256
 fromConcrete (ConcreteStore s) = s
 fromConcrete s = internalError $ "unexpected abstract store: " <> show s
 
-checkStateFail :: Bool -> Case -> VM RealWorld -> (Bool, Bool, Bool, Bool) -> IO String
+checkStateFail :: Bool -> Case -> VM Concrete RealWorld -> (Bool, Bool, Bool, Bool) -> IO String
 checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
   let
     printContracts :: Map Addr Contract -> IO ()
@@ -227,7 +227,7 @@ checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
 
 checkExpectation
   :: App m
-  => Bool -> Case -> VM RealWorld -> m (Maybe String)
+  => Bool -> Case -> VM Concrete RealWorld -> m (Maybe String)
 checkExpectation diff x vm = do
   let expectation = x.testExpectation
       (okState, b2, b3, b4, b5) = checkExpectedContracts vm expectation
@@ -254,7 +254,7 @@ c1 === c2 =
       (RuntimeCode a', RuntimeCode b') -> a' == b'
       _ -> internalError "unexpected code"
 
-checkExpectedContracts :: VM RealWorld -> Map Addr Contract -> (Bool, Bool, Bool, Bool, Bool)
+checkExpectedContracts :: VM Concrete RealWorld -> Map Addr Contract -> (Bool, Bool, Bool, Bool, Bool)
 checkExpectedContracts vm expected =
   let cs = fmap (clearZeroStorage . clearOrigStorage) $ forceConcreteAddrs vm.env.contracts
   in ( (expected ~= cs)
@@ -482,7 +482,7 @@ checkTx tx block prestate = do
   else
     pure prestate
 
-vmForCase :: Case -> IO (VM RealWorld)
+vmForCase :: Case -> IO (VM Concrete RealWorld)
 vmForCase x = do
   vm <- stToIO $ makeVm x.vmOpts
     <&> set (#env % #contracts) (Map.mapKeys LitAddr x.checkContracts)

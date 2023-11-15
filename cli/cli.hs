@@ -48,7 +48,7 @@ import EVM.Effects
 -- This record defines the program's command-line options
 -- automatically via the `optparse-generic` package.
 data Command w
-  = Symbolic -- Symbolically explore an abstract program, or specialized with specified env & calldata
+  = Symbolic' -- Symbolically explore an abstract program, or specialized with specified env & calldata
   -- vm opts
       { code          :: w ::: Maybe ByteString <?> "Program bytecode"
       , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
@@ -207,7 +207,7 @@ main = do
     } }
   case cmd of
     Version {} ->putStrLn getFullVersion
-    Symbolic {} -> do
+    Symbolic' {} -> do
       root <- getRoot cmd
       withCurrentDirectory root $ runEnv env $ assert cmd
     Equivalence {} -> runEnv env $ equivalence cmd
@@ -405,7 +405,7 @@ launchExec cmd = do
         internalError "no EVM result"
 
 -- | Creates a (concrete) VM from command line options
-vmFromCommand :: Command Options.Unwrapped -> IO (VM RealWorld)
+vmFromCommand :: Command Options.Unwrapped -> IO (VM Concrete RealWorld)
 vmFromCommand cmd = do
   (miner,ts,baseFee,blockNum,prevRan) <- case cmd.rpc of
     Nothing -> pure (LitAddr 0,Lit 0,0,0,0)
@@ -497,7 +497,7 @@ vmFromCommand cmd = do
         addr f def = maybe def LitAddr (f cmd)
         bytes f def = maybe def decipher (f cmd)
 
-symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM RealWorld)
+symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM Symbolic RealWorld)
 symvmFromCommand cmd calldata = do
   (miner,blockNum,baseFee,prevRan) <- case cmd.rpc of
     Nothing -> pure (SymAddr "miner",0,0,0)
@@ -555,7 +555,7 @@ symvmFromCommand cmd calldata = do
       , address        = address
       , caller         = caller
       , origin         = origin
-      , gas            = word64 (.gas) 0xffffffffffffffff
+      , gas            = () -- word64 (.gas) 0xffffffffffffffff
       , gaslimit       = word64 (.gaslimit) 0xffffffffffffffff
       , baseFee        = baseFee
       , priorityFee    = word (.priorityFee) 0
