@@ -52,6 +52,8 @@ common shared
       -g3
       -fdistinct-constructor-tables
       -finfo-table-map
+      -fspecialize-aggresively
+      -fexpose-all-unfoldings
       -eventlog
   ghc-options:
     -Wall

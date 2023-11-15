@@ -73,12 +73,12 @@ class Monad m => TTY m where
   writeOutput :: Text -> m ()
   writeErr :: Text -> m ()
 
-writeTraceDapp :: App m => DappInfo -> VM RealWorld -> m ()
+writeTraceDapp :: App m => DappInfo -> VM t RealWorld -> m ()
 writeTraceDapp dapp vm = do
   conf <- readConfig
   liftIO $ when conf.dumpTrace $ T.writeFile "VM.trace" (showTraceTree dapp vm)
 
-writeTrace :: App m => VM RealWorld -> m ()
+writeTrace :: App m => VM t RealWorld -> m ()
 writeTrace vm = do
   conf <- readConfig
   liftIO $ when conf.dumpTrace $ writeFile "VM.trace" (show $ traceForest vm)
