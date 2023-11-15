@@ -56,15 +56,17 @@ import Witch (into, tryFrom, unsafeInto)
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
 import Crypto.Number.ModArithmetic (expFast)
+import Data.STRef.Unboxed
 
 blankState :: ST s (FrameState s)
 blankState = do
   memory <- ConcreteMemory <$> VUnboxed.Mutable.new 0
+  pc <- newSTRefU 0
   pure $ FrameState
     { contract     = LitAddr 0
     , codeContract = LitAddr 0
     , code         = RuntimeCode (ConcreteRuntimeCode "")
-    , pc           = 0
+    , pc
     , stack        = mempty
     , memory
     , memorySize   = 0
@@ -105,6 +107,7 @@ makeVm o = do
       initialAccessedStorageKeys = fromList $ foldMap (uncurry (map . (,))) (Map.toList txaccessList)
       touched = if o.create then [txorigin] else [txorigin, txtoAddr]
   memory <- ConcreteMemory <$> VUnboxed.Mutable.new 0
+  pc <- newSTRefU 0
   pure $ VM
     { result = Nothing
     , frames = mempty
@@ -132,7 +135,7 @@ makeVm o = do
       , schedule = o.schedule
       }
     , state = FrameState
-      { pc = 0
+      { pc
       , stack = mempty
       , memory
       , memorySize = 0
@@ -219,7 +222,16 @@ isCreation = \case
 
 -- | Update program counter
 next :: (?op :: Word8) => EVM s ()
-next = modifying (#state % #pc) (+ (opSize ?op))
+next = do
+  vm <- get
+  lift $ modifySTRefU vm.state.pc (+ (opSize ?op))
+  -- modifying (#state % #pc) (+ (opSize ?op))
+
+readPC :: EVM s Int
+readPC = do
+  vm <- get
+  lift $ readSTRefU vm.state.pc
+
 
 -- | Executes the EVM one step
 exec1 :: EVM s ()
@@ -258,23 +270,25 @@ exec1 = do
                   out <- use (#state % #returndata)
                   finishFrame (FrameReturned out)
               e -> partial $
-                     UnexpectedSymbolicArg vmx.state.pc "precompile returned a symbolic value" (wrap [e])
+                     UnexpectedSymbolicArg 0 {-vmx.state.pc-} "precompile returned a symbolic value" (wrap [e])
             _ ->
               underrun
       e -> partial $
-             UnexpectedSymbolicArg vm.state.pc "cannot call precompiles with symbolic data" (wrap [e])
+             UnexpectedSymbolicArg 0 {-vm.state.pc-} "cannot call precompiles with symbolic data" (wrap [e])
 
-  else if vm.state.pc >= opslen vm.state.code
+  else do
+   pc <- readPC
+   if pc >= opslen vm.state.code
     then doStop
 
     else do
       let ?op = case vm.state.code of
                   UnknownCode _ -> internalError "Cannot execute unknown code"
-                  InitCode conc _ -> BS.index conc vm.state.pc
-                  RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs vm.state.pc
+                  InitCode conc _ -> BS.index conc pc
+                  RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs pc
                   RuntimeCode (SymbolicRuntimeCode ops) ->
                     fromMaybe (internalError "could not analyze symbolic code") $
-                      maybeLitByte $ ops V.! vm.state.pc
+                      maybeLitByte $ ops V.! pc
 
       case getOp (?op) of
 
@@ -288,10 +302,10 @@ exec1 = do
           let n = into n'
               !xs = case vm.state.code of
                 UnknownCode _ -> internalError "Cannot execute unknown code"
-                InitCode conc _ -> Lit $ word $ padRight n $ BS.take n (BS.drop (1 + vm.state.pc) conc)
-                RuntimeCode (ConcreteRuntimeCode bs) -> Lit $ word $ BS.take n $ BS.drop (1 + vm.state.pc) bs
+                InitCode conc _ -> Lit $ word $ padRight n $ BS.take n (BS.drop (1 + pc) conc)
+                RuntimeCode (ConcreteRuntimeCode bs) -> Lit $ word $ BS.take n $ BS.drop (1 + pc) bs
                 RuntimeCode (SymbolicRuntimeCode ops) ->
-                  let bytes = V.take n $ V.drop (1 + vm.state.pc) ops
+                  let bytes = V.take n $ V.drop (1 + pc) ops
                   in readWord (Lit 0) $ Expr.fromList $ padLeft' 32 bytes
           limitStack 1 $
             burn g_verylow $ do
@@ -504,7 +518,7 @@ exec1 = do
                         case view bytecode c of
                           Just b -> copyBytesToMemory b codeSize' codeOffset memOffset'
                           Nothing -> do
-                            pc <- use (#state % #pc)
+                            pc <- readPC
                             partial $ UnexpectedSymbolicArg pc "Cannot copy from unknown code at" (wrap [extAccount])
             _ -> underrun
 
@@ -734,8 +748,9 @@ exec1 = do
             _ -> underrun
 
         OpPc ->
-          limitStack 1 . burn g_base $
-            next >> push (unsafeInto vm.state.pc)
+          limitStack 1 . burn g_base $ do
+            pc <- readPC
+            next >> push (unsafeInto pc)
 
         OpMsize ->
           limitStack 1 . burn g_base $
@@ -944,7 +959,8 @@ exec1 = do
                     else do
                       doStop
               a -> do
-                pc <- use (#state % #pc)
+                pc <- readPC
+                -- pc <- use (#state % #pc)
                 partial $ UnexpectedSymbolicArg pc "trying to self destruct to a symbolic address" (wrap [a])
 
         OpRevert ->
@@ -982,7 +998,7 @@ transfer src dst val = do
           (#env % #contracts) %= (Map.insert src (mkc src))
           transfer src dst val
         SymAddr _ -> do
-          pc <- use (#state % #pc)
+          pc <- readPC -- use (#state % #pc)
           partial $ UnexpectedSymbolicArg pc "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [src])
         GVar _ -> internalError "Unexpected GVar"
     -- recipient not in state
@@ -992,7 +1008,7 @@ transfer src dst val = do
           (#env % #contracts) %= (Map.insert dst (mkc dst))
           transfer src dst val
         SymAddr _ -> do
-          pc <- use (#state % #pc)
+          pc <- readPC -- use (#state % #pc)
           partial $ UnexpectedSymbolicArg pc "Attempting to transfer eth to a symbolic address that is not present in the state" (wrap [dst])
         GVar _ -> internalError "Unexpected GVar"
 
@@ -1043,7 +1059,7 @@ precompiledContract this xGas precompileAddr recipient xValue inOffset inSize ou
       executePrecompile precompileAddr gas' inOffset inSize outOffset outSize xs
       self <- use (#state % #contract)
       stk <- use (#state % #stack)
-      pc' <- use (#state % #pc)
+      pc' <- readPC -- use (#state % #pc)
       result' <- use #result
       case result' of
         Nothing -> case stk of
@@ -1248,7 +1264,8 @@ pushToSequence :: MonadState s m => Setter s s (Seq a) (Seq a) -> a -> m ()
 pushToSequence f x = f %= (Seq.|> x)
 
 getCodeLocation :: VM s -> CodeLocation
-getCodeLocation vm = (vm.state.contract, vm.state.pc)
+getCodeLocation vm =
+  (vm.state.contract, 0)--vm.state.pc)
 
 query :: Query s -> EVM s ()
 query = assign #result . Just . HandleEffect . Query
@@ -1283,7 +1300,7 @@ fetchAccount addr continue =
     Just c -> continue c
     Nothing -> case addr of
       SymAddr _ -> do
-        pc <- use (#state % #pc)
+        pc <- readPC -- use (#state % #pc)
         partial $ UnexpectedSymbolicArg pc "trying to access a symbolic address that isn't already present in storage" (wrap [addr])
       LitAddr a -> do
         use (#cache % #fetched % at a) >>= \case
@@ -1372,7 +1389,7 @@ finalize = do
       revertSubstate
     Just (VMSuccess output) -> do
       -- deposit the code from a creation tx
-      pc' <- use (#state % #pc)
+      pc' <- readPC -- use (#state % #pc)
       creation <- use (#tx % #isCreate)
       createe  <- use (#state % #contract)
       createeExists <- (Map.member createe) <$> use (#env % #contracts)
@@ -1468,71 +1485,71 @@ burn n continue = do
 forceAddr :: Expr EWord -> String -> (Expr EAddr -> EVM s ()) -> EVM s ()
 forceAddr n msg continue = case wordToAddr n of
   Nothing -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n])
+    pc <- readPC
+    partial $ UnexpectedSymbolicArg pc msg (wrap [n])
   Just c -> continue c
 
 forceConcrete :: Expr EWord -> String -> (W256 -> EVM s ()) -> EVM s ()
 forceConcrete n msg continue = case maybeLitWord n of
   Nothing -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n])
+    pc <- readPC
+    partial $ UnexpectedSymbolicArg pc msg (wrap [n])
   Just c -> continue c
 
 forceConcreteAddr :: Expr EAddr -> String -> (Addr -> EVM s ()) -> EVM s ()
 forceConcreteAddr n msg continue = case maybeLitAddr n of
   Nothing -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n])
+    pc <- readPC
+    partial $ UnexpectedSymbolicArg pc msg (wrap [n])
   Just c -> continue c
 
 forceConcreteAddr2 :: (Expr EAddr, Expr EAddr) -> String -> ((Addr, Addr) -> EVM s ()) -> EVM s ()
 forceConcreteAddr2 (n,m) msg continue = case (maybeLitAddr n, maybeLitAddr m) of
   (Just c, Just d) -> continue (c,d)
   _ -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n, m])
+    pc <- readPC
+    partial $ UnexpectedSymbolicArg pc msg (wrap [n, m])
 
 forceConcrete2 :: (Expr EWord, Expr EWord) -> String -> ((W256, W256) -> EVM s ()) -> EVM s ()
 forceConcrete2 (n,m) msg continue = case (maybeLitWord n, maybeLitWord m) of
   (Just c, Just d) -> continue (c, d)
   _ -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n, m])
+    pc <- readPC
+    partial $ UnexpectedSymbolicArg pc msg (wrap [n, m])
 
 forceConcrete3 :: (Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256) -> EVM s ()) -> EVM s ()
 forceConcrete3 (k,n,m) msg continue = case (maybeLitWord k, maybeLitWord n, maybeLitWord m) of
   (Just c, Just d, Just f) -> continue (c, d, f)
   _ -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [k, n, m])
+    pc <- readPC
+    partial $ UnexpectedSymbolicArg pc msg (wrap [k, n, m])
 
 forceConcrete4 :: (Expr EWord, Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256, W256) -> EVM s ()) -> EVM s ()
 forceConcrete4 (k,l,n,m) msg continue = case (maybeLitWord k, maybeLitWord l, maybeLitWord n, maybeLitWord m) of
   (Just b, Just c, Just d, Just f) -> continue (b, c, d, f)
   _ -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [k, l, n, m])
+    pc <- readPC
+    partial $ UnexpectedSymbolicArg pc msg (wrap [k, l, n, m])
 
 forceConcrete5 :: (Expr EWord, Expr EWord, Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256, W256, W256) -> EVM s ()) -> EVM s ()
 forceConcrete5 (k,l,m,n,o) msg continue = case (maybeLitWord k, maybeLitWord l, maybeLitWord m, maybeLitWord n, maybeLitWord o) of
   (Just a, Just b, Just c, Just d, Just e) -> continue (a, b, c, d, e)
   _ -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [k, l, m, n, o])
+    pc <- readPC
+    partial $ UnexpectedSymbolicArg pc msg (wrap [k, l, m, n, o])
 
 forceConcrete6 :: (Expr EWord, Expr EWord, Expr EWord, Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256, W256, W256, W256) -> EVM s ()) -> EVM s ()
 forceConcrete6 (k,l,m,n,o,p) msg continue = case (maybeLitWord k, maybeLitWord l, maybeLitWord m, maybeLitWord n, maybeLitWord o, maybeLitWord p) of
   (Just a, Just b, Just c, Just d, Just e, Just f) -> continue (a, b, c, d, e, f)
   _ -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [k, l, m, n, o, p])
+    pc <- readPC
+    partial $ UnexpectedSymbolicArg pc msg (wrap [k, l, m, n, o, p])
 
 forceConcreteBuf :: Expr Buf -> String -> (ByteString -> EVM s ()) -> EVM s ()
 forceConcreteBuf (ConcreteBuf b) _ continue = continue b
 forceConcreteBuf b msg _ = do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [b])
+    pc <- readPC
+    partial $ UnexpectedSymbolicArg pc msg (wrap [b])
 
 -- * Substate manipulation
 refund :: Word64 -> EVM s ()
@@ -1600,7 +1617,7 @@ cheat (inOffset, inSize) (outOffset, outSize) = do
   abi <- readBytes 4 (Lit 0) <$> readMemory (Lit inOffset) (Lit 4)
   pushTrace $ FrameTrace (CallContext cheatCode cheatCode inOffset inSize (Lit 0) (maybeLitWord abi) input vm.env.contracts vm.tx.substate)
   case maybeLitWord abi of
-    Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc "symbolic cheatcode selector" (wrap [abi])
+    Nothing -> partial $ UnexpectedSymbolicArg 0 {- vm.state.pc-} "symbolic cheatcode selector" (wrap [abi])
     Just (unsafeInto -> abi') ->
       case Map.lookup abi' cheatActions of
         Nothing ->
@@ -1639,7 +1656,7 @@ cheatActions =
               _ -> vmError (BadCheatCode sig)
           else
             let msg = "ffi disabled: run again with --ffi if you want to allow tests to call external scripts"
-            in partial $ UnexpectedSymbolicArg vm.state.pc msg [],
+            in partial $ UnexpectedSymbolicArg 0 {-vm.state.pc-} msg [],
 
       action "warp(uint256)" $
         \sig _ _ input -> case decodeStaticArgs 0 1 input of
@@ -1744,7 +1761,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           vm0 <- get
           fetchAccount xTo $ \target -> case target.code of
               UnknownCode _ -> do
-                pc <- use (#state % #pc)
+                pc <- readPC -- use (#state % #pc)
                 partial $ UnexpectedSymbolicArg pc "call target has unknown code" (wrap [xTo])
               _ -> do
                 burn xGas $ do
@@ -1775,9 +1792,10 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                         a -> a
 
                   newMemory <- ConcreteMemory <$> VUnboxed.Mutable.new 0
+                  newPc <- lift $ newSTRefU 0
                   zoom #state $ do
                     assign #gas xGas
-                    assign #pc 0
+                    assign #pc newPc
                     assign #code (clearInitCode target.code)
                     assign #codeContract xTo
                     assign #stack mempty
@@ -1839,7 +1857,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
       False -> burn xGas $ do
         case parseInitCode initCode of
           Nothing ->
-            partial $ UnexpectedSymbolicArg vm0.state.pc "initcode must have a concrete prefix" []
+            partial $ UnexpectedSymbolicArg 0 {-vm0.state.pc-} "initcode must have a concrete prefix" []
           Just c -> do
             let
               newContract = initialContract c
@@ -2078,7 +2096,7 @@ finishFrame how = do
                   case Expr.toList output of
                     Nothing -> partial $
                       UnexpectedSymbolicArg
-                        oldVm.state.pc
+                        0 {-oldVm.state.pc-}
                         "runtime code cannot have an abstract length"
                         (wrap [output])
                     Just newCode -> do
@@ -2197,11 +2215,12 @@ readMemory offset' size' = do
 withTraceLocation :: TraceData -> EVM s Trace
 withTraceLocation x = do
   vm <- get
+  pc <- readPC
   let this = fromJust $ currentContract vm
   pure Trace
     { tracedata = x
     , contract = this
-    , opIx = fromMaybe 0 $ this.opIxMap SV.!? vm.state.pc
+    , opIx = fromMaybe 0 $ this.opIxMap SV.!? pc
     }
 
 pushTrace :: TraceData -> EVM s ()
@@ -2323,13 +2342,14 @@ checkJump x xs = noJumpIntoInitData x $ do
   case isValidJumpDest vm x of
     True -> do
       #state % #stack .= xs
-      #state % #pc .= x
+      lift $ writeSTRefU vm.state.pc x
     False -> vmError BadJumpDestination
 
 -- fails with partial if we're trying to jump into the symbolic region of an `InitCode`
 noJumpIntoInitData :: Int -> EVM s () -> EVM s ()
 noJumpIntoInitData idx cont = do
   vm <- get
+  pc <- readPC
   case vm.state.code of
     -- init code is totally concrete, so we don't return partial if we're
     -- jumping beyond the range of `ops`
@@ -2337,7 +2357,7 @@ noJumpIntoInitData idx cont = do
     -- init code has a symbolic region, so check if we're trying to jump into
     -- the symbolic region and return partial if we are
     InitCode ops _ -> if idx > BS.length ops
-                      then partial $ JumpIntoSymbolicCode vm.state.pc idx
+                      then partial $ JumpIntoSymbolicCode pc idx
                       else cont
     -- we're not executing init code, so nothing to check here
     _ -> cont
@@ -2408,7 +2428,7 @@ mkOpIxMap (RuntimeCode (SymbolicRuntimeCode ops))
 
 vmOp :: VM s -> Maybe Op
 vmOp vm =
-  let i  = vm ^. #state % #pc
+  let i  = 0 -- vm ^. #state % #pc
       code' = vm ^. #state % #code
       (op, pushdata) = case code' of
         UnknownCode _ -> internalError "cannot get op from unknown code"
@@ -2425,7 +2445,7 @@ vmOp vm =
 vmOpIx :: VM s -> Maybe Int
 vmOpIx vm =
   do self <- currentContract vm
-     self.opIxMap SV.!? vm.state.pc
+     self.opIxMap SV.!? 0 -- vm.state.pc
 
 -- Maps operation indicies into a pair of (bytecode index, operation)
 mkCodeOps :: ContractCode -> V.Vector (Int, Op)
@@ -2586,7 +2606,8 @@ toBuf (RuntimeCode (SymbolicRuntimeCode ops)) = Just $ Expr.fromList ops
 codeloc :: EVM s CodeLocation
 codeloc = do
   vm <- get
-  pure (vm.state.contract, vm.state.pc)
+  pc <- readPC
+  pure (vm.state.contract, pc)
 
 createAddress :: Expr EAddr -> Maybe W64 -> EVM s (Expr EAddr)
 createAddress (LitAddr a) (Just n) = pure $ Concrete.createAddress a n

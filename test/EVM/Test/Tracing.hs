@@ -487,7 +487,7 @@ vmtrace :: VM s -> VMTrace
 vmtrace vm =
   let
     memsize = vm.state.memorySize
-  in VMTrace { tracePc = vm.state.pc
+  in VMTrace { tracePc = 0 -- vm.state.pc
              , traceOp = into $ getOp vm
              , traceGas = vm.state.gas
              , traceMemSize = memsize
@@ -816,7 +816,7 @@ randItem = generate . Test.QuickCheck.elements
 
 getOp :: VM s -> Word8
 getOp vm =
-  let pcpos  = vm ^. #state % #pc
+  let pcpos  = 0 -- vm ^. #state % #pc
       code' = vm ^. #state % #code
       xs = case code' of
         UnknownCode _ -> internalError "UnknownCode instead of RuntimeCode"

@@ -53,6 +53,7 @@ import EVM.FeeSchedule (FeeSchedule (..))
 import Text.Regex.TDFA qualified as Regex
 import Text.Read qualified
 import Witch
+import Data.STRef.Unboxed (STRefU)
 
 
 -- Template Haskell --------------------------------------------------------------------------
@@ -615,7 +616,7 @@ data VM s = VM
   , keccakEqs      :: [Prop]
   , config         :: RuntimeConfig
   }
-  deriving (Show, Generic)
+  deriving (Generic)
 
 -- | Alias for the type of e.g. @exec1@.
 type EVM s a = StateT (VM s) (ST s) a
@@ -639,7 +640,7 @@ data Frame s = Frame
   { context :: FrameContext
   , state   :: FrameState s
   }
-  deriving (Show)
+  deriving ()
 
 -- | Call/create info
 data FrameContext
@@ -678,7 +679,8 @@ data FrameState s = FrameState
   { contract     :: Expr EAddr
   , codeContract :: Expr EAddr
   , code         :: ContractCode
-  , pc           :: {-# UNPACK #-} !Int
+  -- , pc           :: {-# UNPACK #-} !Int
+  , pc :: STRefU s Int
   , stack        :: [Expr EWord]
   , memory       :: Memory s
   , memorySize   :: Word64
@@ -689,7 +691,7 @@ data FrameState s = FrameState
   , returndata   :: Expr Buf
   , static       :: Bool
   }
-  deriving (Show, Generic)
+  deriving (Generic)
 
 data Memory s
   = ConcreteMemory (MutableMemory s)
