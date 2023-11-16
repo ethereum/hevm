@@ -2655,7 +2655,7 @@ instance VMOps Symbolic where
   burn _ continue = continue
   burn' _ continue = continue
   initialGas = ()
-  ensureGas _ _ = pure ()
+  ensureGas _ continue = continue
   gasTryFrom _ = Right ()
 
   costOfCreate _ _ _ _ = ((), ())
