@@ -1819,8 +1819,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
     modifying (#env % #contracts % ix self % #nonce) (fmap ((+) 1))
     next
   -- do we have enough balance
-  else do
-    branch (Expr.gt xValue this.balance) $ \case
+  else branch (Expr.gt xValue this.balance) $ \case
       True -> do
         assign (#state % #stack) (Lit 0 : xs)
         assign (#state % #returndata) mempty
@@ -2297,11 +2296,6 @@ stackOp3 cost f =
 
 -- * Bytecode data functions
 
-use' :: (VM t s -> a) -> EVM t s a
-use' f = do
-  vm <- get
-  pure (f vm)
-
 checkJump :: VMOps t => Int -> [Expr EWord] -> EVM t s ()
 checkJump x xs = noJumpIntoInitData x $ do
   vm <- get
@@ -2597,12 +2591,12 @@ freezeMemory memory =
 class VMOps (t :: VMType) where
   burn :: Word64 -> EVM t s () -> EVM t s ()
   burn' :: Gas t -> EVM t s () -> EVM t s ()
-  -- TODO: change to EVMWord t
+  -- TODO: change to EvmWord t
   burnExp :: Expr EWord -> EVM t s () -> EVM t s ()
 
   initialGas :: Gas t
   ensureGas :: Word64 -> EVM t s () -> EVM t s ()
-  -- TODO: change to EVMWord t
+  -- TODO: change to EvmWord t
   gasTryFrom :: Expr EWord -> Either () (Gas t)
 
   -- Gas cost of create, including hash cost if needed

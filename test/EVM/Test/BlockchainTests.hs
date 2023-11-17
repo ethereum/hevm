@@ -55,7 +55,7 @@ data Case = Case
   { vmOpts      :: VMOpts Concrete
   , checkContracts  :: Map Addr Contract
   , testExpectation :: Map Addr Contract
-  } -- deriving Show
+  } deriving Show
 
 data BlockchainCase = BlockchainCase
   { blocks  :: [Block]
