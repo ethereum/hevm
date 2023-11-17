@@ -102,7 +102,7 @@ makeVeriOpts opts =
                    }
 
 -- | Top level CLI endpoint for hevm test
-unitTest :: (App m) => UnitTestOptions RealWorld -> Contracts -> m Bool
+unitTest :: App m => UnitTestOptions RealWorld -> Contracts -> m Bool
 unitTest opts (Contracts cs) = do
   let unitTests = findUnitTests opts.match $ Map.elems cs
   results <- concatMapM (runUnitTestContract opts cs) unitTests
@@ -142,7 +142,7 @@ initializeUnitTest opts theContract = do
     _ -> popTrace
 
 runUnitTestContract
-  :: (App m)
+  :: App m
   => UnitTestOptions RealWorld
   -> Map Text SolcContract
   -> (Text, [Sig])

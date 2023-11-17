@@ -622,10 +622,11 @@ data VM (t :: VMType) s = VM
   }
   deriving (Generic)
 
+deriving instance Show (VM Symbolic s)
+deriving instance Show (VM Concrete s)
+
 -- | Alias for the type of e.g. @exec1@.
 type EVM (t :: VMType) s a = StateT (VM t s) (ST s) a
-
--- type EVM s a = StateT (VM s) (ST s) a
 
 -- | The VM base state (i.e. should new contracts be created with abstract balance / storage?)
 data BaseState
@@ -646,7 +647,9 @@ data Frame (t :: VMType) s = Frame
   { context :: FrameContext
   , state   :: FrameState t s
   }
-  -- deriving (Show)
+
+deriving instance Show (Frame Symbolic s)
+deriving instance Show (Frame Concrete s)
 
 -- | Call/create info
 data FrameContext
@@ -697,6 +700,9 @@ data FrameState (t :: VMType) s = FrameState
   , static       :: Bool
   }
   deriving (Generic)
+
+deriving instance Show (FrameState Symbolic s)
+deriving instance Show (FrameState Concrete s)
 
 data Memory s
   = ConcreteMemory (MutableMemory s)
@@ -884,7 +890,10 @@ data VMOpts (t :: VMType) = VMOpts
   , create :: Bool
   , txAccessList :: Map (Expr EAddr) [W256]
   , allowFFI :: Bool
-  } -- deriving Show
+  }
+
+deriving instance Show (VMOpts Symbolic)
+deriving instance Show (VMOpts Concrete)
 
 
 -- Opcodes -----------------------------------------------------------------------------------------
