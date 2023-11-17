@@ -750,13 +750,10 @@ exec1 = do
           --       https://hackage.haskell.org/package/sbv-9.0/docs/src/Data.SBV.Core.Model.html#.%5E
           --       However, it requires symbolic gas, since the gas depends on the exponent
           case stk of
-            base:exponent':xs -> forceConcrete exponent' "EXP: symbolic exponent" $ \exponent ->
-              let cost = if exponent == 0
-                         then g_exp
-                         else g_exp + g_expbyte * unsafeInto (ceilDiv (1 + log2 exponent) 8)
-              in burn cost $ do
+            base:exponent:xs ->
+              burnExp exponent $ do
                 next
-                (#state % #stack) .= Expr.exp base exponent' : xs
+                (#state % #stack) .= Expr.exp base exponent : xs
             _ -> underrun
 
         OpSignextend -> stackOp2 g_low Expr.sex
@@ -780,12 +777,12 @@ exec1 = do
         OpCall ->
           case stk of
             xGas':xTo':xValue:xInOffset':xInSize':xOutOffset':xOutSize':xs ->
-              forceConcrete5 (xGas', xInOffset', xInSize', xOutOffset', xOutSize') "CALL" $
-              \(xGas, xInOffset, xInSize, xOutOffset, xOutSize) ->
+              forceConcrete4 (xInOffset', xInSize', xOutOffset', xOutSize') "CALL" $
+              \(xInOffset, xInSize, xOutOffset, xOutSize) ->
                 branch (Expr.gt xValue (Lit 0)) $ \gt0 -> do
                   (if gt0 then notStatic else id) $
                     forceAddr xTo' "unable to determine a call target" $ \xTo ->
-                      case gasTryFrom xGas of
+                      case gasTryFrom xGas' of
                         Left _ -> vmError IllegalOverflow
                         Right gas ->
                           delegateCall this gas xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
@@ -805,10 +802,10 @@ exec1 = do
         OpCallcode ->
           case stk of
             xGas':xTo':xValue:xInOffset':xInSize':xOutOffset':xOutSize':xs ->
-              forceConcrete5 (xGas', xInOffset', xInSize', xOutOffset', xOutSize') "CALLCODE" $
-              \(xGas, xInOffset, xInSize, xOutOffset, xOutSize) ->
+              forceConcrete4 (xInOffset', xInSize', xOutOffset', xOutSize') "CALLCODE" $
+              \(xInOffset, xInSize, xOutOffset, xOutSize) ->
                 forceAddr xTo' "unable to determine a call target" $ \xTo ->
-                  case gasTryFrom xGas of
+                  case gasTryFrom xGas' of
                     Left _ -> vmError IllegalOverflow
                     Right gas ->
                       delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
@@ -856,15 +853,15 @@ exec1 = do
         OpDelegatecall ->
           case stk of
             xGas':xTo:xInOffset':xInSize':xOutOffset':xOutSize':xs ->
-              forceConcrete5 (xGas', xInOffset', xInSize', xOutOffset', xOutSize') "DELEGATECALL" $
-              \(xGas, xInOffset, xInSize, xOutOffset, xOutSize) ->
+              forceConcrete4 (xInOffset', xInSize', xOutOffset', xOutSize') "DELEGATECALL" $
+              \(xInOffset, xInSize, xOutOffset, xOutSize) ->
                 case wordToAddr xTo of
                   Nothing -> do
                     loc <- codeloc
                     let msg = "Unable to determine a call target"
                     partial $ UnexpectedSymbolicArg (snd loc) msg [SomeExpr xTo]
                   Just xTo' ->
-                    case gasTryFrom xGas of
+                    case gasTryFrom xGas' of
                       Left _ -> vmError IllegalOverflow
                       Right gas ->
                         delegateCall this gas xTo' self (Lit 0) xInOffset xInSize xOutOffset xOutSize xs $
@@ -892,15 +889,15 @@ exec1 = do
         OpStaticcall ->
           case stk of
             xGas':xTo:xInOffset':xInSize':xOutOffset':xOutSize':xs ->
-              forceConcrete5 (xGas', xInOffset', xInSize', xOutOffset', xOutSize') "STATICCALL" $
-              \(xGas, xInOffset, xInSize, xOutOffset, xOutSize) -> do
+              forceConcrete4 (xInOffset', xInSize', xOutOffset', xOutSize') "STATICCALL" $
+              \(xInOffset, xInSize, xOutOffset, xOutSize) -> do
                 case wordToAddr xTo of
                   Nothing -> do
                     loc <- codeloc
                     let msg = "Unable to determine a call target"
                     partial $ UnexpectedSymbolicArg (snd loc) msg [SomeExpr xTo]
                   Just xTo' ->
-                    case gasTryFrom xGas of
+                    case gasTryFrom xGas' of
                       Left _ -> vmError IllegalOverflow
                       Right gas ->
                         delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs $
@@ -1439,20 +1436,6 @@ notStatic continue = do
     then vmError StateChangeWhileStatic
     else continue
 
-  {-
--- | Burn gas, failing if insufficient gas is available
-burn :: Word64 -> EVM s () -> EVM s ()
-burn n continue = do
-  available <- use (#state % #gas)
-  if n <= available
-    then do
-      #state % #gas %= (subtract n)
-      #burned %= (+ n)
-      continue
-    else
-      vmError (OutOfGas available n)
-      -}
-
 forceAddr :: Expr EWord -> String -> (Expr EAddr -> EVM t s ()) -> EVM t s ()
 forceAddr n msg continue = case wordToAddr n of
   Nothing -> do
@@ -1501,20 +1484,6 @@ forceConcrete4 (k,l,n,m) msg continue = case (maybeLitWord k, maybeLitWord l, ma
   _ -> do
     vm <- get
     partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [k, l, n, m])
-
-forceConcrete5 :: (Expr EWord, Expr EWord, Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256, W256, W256) -> EVM t s ()) -> EVM t s ()
-forceConcrete5 (k,l,m,n,o) msg continue = case (maybeLitWord k, maybeLitWord l, maybeLitWord m, maybeLitWord n, maybeLitWord o) of
-  (Just a, Just b, Just c, Just d, Just e) -> continue (a, b, c, d, e)
-  _ -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [k, l, m, n, o])
-
-forceConcrete6 :: (Expr EWord, Expr EWord, Expr EWord, Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256, W256, W256, W256) -> EVM t s ()) -> EVM t s ()
-forceConcrete6 (k,l,m,n,o,p) msg continue = case (maybeLitWord k, maybeLitWord l, maybeLitWord m, maybeLitWord n, maybeLitWord o, maybeLitWord p) of
-  (Just a, Just b, Just c, Just d, Just e, Just f) -> continue (a, b, c, d, e, f)
-  _ -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [k, l, m, n, o, p])
 
 forceConcreteBuf :: Expr Buf -> String -> (ByteString -> EVM t s ()) -> EVM t s ()
 forceConcreteBuf (ConcreteBuf b) _ continue = continue b
@@ -1567,7 +1536,7 @@ accessStorageForGas addr key = do
       let accessed = member (addr, litword) accessedStrkeys
       assign (#tx % #substate % #accessedStorageKeys) (insert (addr, litword) accessedStrkeys)
       pure accessed
-    _ -> return False
+    _ -> pure False
 
 -- * Cheat codes
 
@@ -1675,7 +1644,7 @@ cheatActions =
         \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
           [sk, hash] ->
             forceConcrete2 (sk, hash) "cannot sign symbolic data" $ \(sk', hash') -> do
-              let (v,r,s) = EVM.Sign.sign hash' (toInteger sk')
+              let (v,r,s) = EVM.Sign.sign hash' (into sk')
                   encoded = encodeAbiValue $
                     AbiTuple (V.fromList
                       [ AbiUInt 8 $ into v
@@ -1852,7 +1821,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
                   ConcreteStore _ -> ConcreteStore mempty
                   AbstractStore a -> AbstractStore a
                   SStore _ _ p -> resetStorage p
-                  GVar _  -> error "unexpected global variable"
+                  GVar _  -> internalError "unexpected global variable"
 
             modifying (#env % #contracts % ix newAddr % #storage) resetStorage
             modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage
@@ -2593,9 +2562,13 @@ freezeMemory memory =
 class VMOps (t :: VMType) where
   burn :: Word64 -> EVM t s () -> EVM t s ()
   burn' :: Gas t -> EVM t s () -> EVM t s ()
+  -- TODO: change to EVMWord t
+  burnExp :: Expr EWord -> EVM t s () -> EVM t s ()
+
   initialGas :: Gas t
   ensureGas :: Word64 -> EVM t s () -> EVM t s ()
-  gasTryFrom :: W256 -> Either () (Gas t)
+  -- TODO: change to EVMWord t
+  gasTryFrom :: Expr EWord -> Either () (Gas t)
 
   -- Gas cost of create, including hash cost if needed
   costOfCreate :: FeeSchedule Word64 -> Gas t -> W256 -> Bool -> (Gas t, Gas t)
@@ -2605,24 +2578,19 @@ class VMOps (t :: VMType) where
     -> (Gas t -> EVM t s ()) -> EVM t s ()
 
   reclaimRemainingGasAllowance :: VM t s -> EVM t s ()
-
   payRefunds :: EVM t s ()
-
   pushGas :: EVM t s ()
-
   enoughGas :: Word64 -> Gas t -> Bool
-
   subGas :: Gas t -> Word64 -> Gas t
-
   toGas :: Word64 -> Gas t
 
 instance VMOps Symbolic where
   burn _ continue = continue
   burn' _ continue = continue
+  burnExp _ continue = continue
   initialGas = ()
   ensureGas _ continue = continue
   gasTryFrom _ = Right ()
-
   costOfCreate _ _ _ _ = ((), ())
   costOfCall _ _ _ _ _ _ continue = continue ()
   reclaimRemainingGasAllowance _ = pure ()
@@ -2647,6 +2615,16 @@ instance VMOps Concrete where
         vmError (OutOfGas available n)
 
   burn' = burn
+
+  burnExp exponent' continue = do
+    forceConcrete exponent' "EXP: symbolic exponent" $ \exponent -> do
+      vm <- get
+      let FeeSchedule {..} = vm.block.schedule
+          cost = if exponent == 0
+                 then g_exp
+                 else g_exp + g_expbyte * unsafeInto (ceilDiv (1 + log2 exponent) 8)
+      burn cost continue
+
   initialGas = 0
   ensureGas amount continue = do
     availableGas <- use (#state % #gas)
@@ -2656,9 +2634,13 @@ instance VMOps Concrete where
     else continue
 
   gasTryFrom w256 =
-    case tryFrom w256 of
+    case tryFrom $ forceLit w256 of
       Left _ -> Left ()
       Right a -> Right a
+    where
+      forceLit :: Expr EWord -> W256
+      forceLit (Lit w) = w
+      forceLit _ = internalError "concrete vm, shouldn't ever happen"
 
   -- Gas cost of create, including hash cost if needed
   costOfCreate (FeeSchedule {..}) availableGas size hashNeeded = (createCost, initGas)
@@ -2744,8 +2726,7 @@ symbolifyFrame frame = frame { state = symbolifyFrameState frame.state }
 symbolifyResult :: VMResult Concrete s -> VMResult Symbolic s
 symbolifyResult result =
   case result of
-    HandleEffect _ -> error "shouldn't happen"
+    HandleEffect _ -> internalError "shouldn't happen"
     VMFailure e -> VMFailure e
     VMSuccess b -> VMSuccess b
     Unfinished p -> Unfinished p
-
