@@ -2659,6 +2659,8 @@ tests = testGroup "hevm"
               uint x;
               uint y;
               function fun(uint256 a) external{
+                require(x != 0);
+                require(y != 0);
                 assert (x == y);
               }
             }
@@ -2691,11 +2693,11 @@ tests = testGroup "hevm"
               a = getVar cex "arg1"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
-                          Just s -> Map.size s == 2 &&
-                                    case (Map.lookup 0 s, Map.lookup (10 + a) s) of
+                          Just s -> case (Map.lookup 0 s, Map.lookup (10 + a) s) of
                                       (Just x, Just y) -> x >= y
+                                      (Just x, Nothing) -> x > 0 -- arr1 can be Nothing, it'll then be zero
                                       _ -> False
-                          _ -> False
+                          Nothing -> False -- arr2 must contain an element, or it'll be 0
           assertBoolM "Did not find expected storage cex" testCex
           putStrLnM "Expected counterexample found"
         ,
@@ -2706,6 +2708,8 @@ tests = testGroup "hevm"
               uint x;
               uint y;
               function fun(uint256 a) external{
+                require (x != 0);
+                require (y != 0);
                 assert (x != y);
               }
             }

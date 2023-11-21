@@ -67,7 +67,7 @@ defaultConfig = Config
   , abstRefineArith = False
   , abstRefineMem   = False
   , dumpTrace = False
-  , numCexFuzz = 30
+  , numCexFuzz = 100
   }
 
 -- Write to the console
