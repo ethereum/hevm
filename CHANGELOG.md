@@ -76,6 +76,7 @@ This release also includes many small bugfixes:
 - `test` now falls back to displaying an unecoded bytestring for calldata when the model returned by the solver has a different length the length of the arguments in the test signature.
 - we now generate correct counterexamples for branches where only a subset of input variables are referenced by the path conditions
 - `vm.prank` now works correctly when passed a symbolic address
+- `vm.prank` now works correctly when the next call transfers value
 - storage layout information will now be parsed from the output of `forge build` if it is available
 
 ## API Changes

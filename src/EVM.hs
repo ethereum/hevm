@@ -1011,14 +1011,9 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
       availableGas <- use (#state % #gas)
       let recipientExists = accountExists xContext vm
       (cost, gas') <- costOfCall fees recipientExists xValue availableGas xGas xTo
-      burn (cost - gas') $
-        branch (Expr.gt xValue this.balance) $ \case
-          True -> do
-            assign (#state % #stack) (Lit 0 : xs)
-            assign (#state % #returndata) mempty
-            pushTrace $ ErrorTrace (BalanceTooLow xValue this.balance)
-            next
-          False ->
+      let from = fromMaybe vm.state.contract vm.config.overrideCaller
+      fromBal <- preuse $ #env % #contracts % ix from % #balance
+      let checkCallDepth =
             if length vm.frames >= 1024
             then do
               assign (#state % #stack) (Lit 0 : xs)
@@ -1026,6 +1021,40 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
               pushTrace $ ErrorTrace CallDepthLimitReached
               next
             else continue gas'
+      case (fromBal, xValue) of
+        -- we're not transfering any value, and can skip the balance check
+        (_, Lit 0) -> burn (cost - gas') checkCallDepth
+
+        -- from is in the state, we check if they have enough balance
+        (Just fb, _) -> do
+          burn (cost - gas') $
+            branch (Expr.gt xValue fb) $ \case
+              True -> do
+                assign (#state % #stack) (Lit 0 : xs)
+                assign (#state % #returndata) mempty
+                pushTrace $ ErrorTrace (BalanceTooLow xValue this.balance)
+                next
+              False -> checkCallDepth
+
+        -- from is not in the state, we insert it if safe to do so and run the checks again
+        (Nothing, _) -> case from of
+          LitAddr _ -> do
+            -- insert an entry in the state
+            let contract = case vm.config.baseState of
+                  AbstractBase -> unknownContract from
+                  EmptyBase -> emptyContract
+            (#env % #contracts) %= (Map.insert from contract)
+            -- run callChecks again
+            callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize xs continue
+
+          -- adding a symbolic address into the state here would be unsound (due to potential aliasing)
+          SymAddr _ -> do
+            pc <- use (#state % #pc)
+            partial $ UnexpectedSymbolicArg pc "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [from])
+          GVar _ -> internalError "Unexpected GVar"
+
+
+
 
 precompiledContract
   :: (?op :: Word8)
