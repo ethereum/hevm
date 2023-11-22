@@ -568,12 +568,7 @@ verify solvers opts preState maybepost = do
       Just post -> liftIO $ do
         let
           -- Filter out any leaves from `flattened` that can be statically shown to be safe
-          tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf, leaf)
-            where
-              toProps leaf = PNeg (post preState leaf) : assumes <> extractProps leaf
-              toPropsFinal leaf = if opts.simp then Expr.simplifyProps $ toProps leaf
-                                               else toProps leaf
-          assumes = preState.constraints
+          tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf preState.constraints post, leaf)
           withQueries = filter canBeSat tocheck <&> \(a, leaf) -> (assertProps conf a, leaf)
         putStrLn $ "Checking for reachability of "
                      <> show (length withQueries)
@@ -586,6 +581,9 @@ verify solvers opts preState maybepost = do
         let cexs = filter (\(res, _) -> not . isUnsat $ res) results
         pure $ if Prelude.null cexs then (expr, [Qed ()]) else (expr, fmap toVRes cexs)
   where
+    toProps leaf constr post = PNeg (post preState leaf) : constr <> extractProps leaf
+    toPropsFinal leaf constr post = if opts.simp then Expr.simplifyProps $ toProps leaf constr post
+                                                 else toProps leaf constr post
     canBeSat (a, _) = case a of
         [PBool False] -> False
         _ -> True
