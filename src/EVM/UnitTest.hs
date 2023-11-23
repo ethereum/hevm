@@ -110,7 +110,7 @@ unitTest opts (Contracts cs) = do
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
 -- to create the test contract, give it an initial balance, and run `setUp()'.
-initializeUnitTest :: VMOps t => UnitTestOptions s -> SolcContract -> Stepper t s ()
+initializeUnitTest :: UnitTestOptions s -> SolcContract -> Stepper Concrete s ()
 initializeUnitTest opts theContract = do
 
   let addr = opts.testParams.address
