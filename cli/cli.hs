@@ -389,9 +389,6 @@ launchExec cmd = do
       Just (VMFailure err) -> liftIO $ do
         putStrLn $ "Error: " <> show err
         exitWith (ExitFailure 2)
-      Just (Unfinished p) -> liftIO $ do
-        putStrLn $ "Could not continue execution: " <> show p
-        exitWith (ExitFailure 2)
       Just (VMSuccess buf) -> liftIO $ do
         let msg = case buf of
               ConcreteBuf msg' -> msg'

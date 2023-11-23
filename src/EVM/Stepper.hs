@@ -47,7 +47,7 @@ data Action t s a where
   Wait :: Query t s -> Action t s ()
 
   -- | Multiple things can happen
-  Ask :: Choose t s -> Action t s ()
+  Ask :: Choose s -> Action Symbolic s ()
 
   -- | Embed a VM state transformation
   EVM  :: EVM t s a -> Action t s a
@@ -69,7 +69,7 @@ run = exec >> evm get
 wait :: Query t s -> Stepper t s ()
 wait = singleton . Wait
 
-ask :: Choose t s -> Stepper t s ()
+ask :: Choose s -> Stepper Symbolic s ()
 ask = singleton . Ask
 
 evm :: EVM t s a -> Stepper t s a
@@ -124,19 +124,12 @@ interpret fetcher vm = eval . view
         Exec -> do
           (r, vm') <- liftIO $ stToIO $ runStateT EVM.Exec.exec vm
           interpret fetcher vm' (k r)
-        Wait (PleaseAskSMT (Lit c) _ continue) -> do
-          (r, vm') <- liftIO $ stToIO $ runStateT (continue (Case (c > 0))) vm
-          interpret fetcher vm' (k r)
-        Wait (PleaseAskSMT c _ _) ->
-          error $ "cannot handle symbolic branch conditions in this interpreter: " <> show c
         Wait q -> do
           m <- fetcher q
           vm' <- liftIO $ stToIO $ execStateT m vm
           interpret fetcher vm' (k ())
-        Ask _ ->
-          internalError "cannot make choices with this interpreter"
         IOAct m -> do
-          r <- liftIO $ m
+          r <- liftIO m
           interpret fetcher vm (k r)
         EVM m -> do
           (r, vm') <- liftIO $ stToIO $ runStateT m vm

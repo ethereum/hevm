@@ -1247,31 +1247,11 @@ getCodeLocation vm = (vm.state.contract, vm.state.pc)
 query :: Query t s -> EVM t s ()
 query = assign #result . Just . HandleEffect . Query
 
-choose :: Choose t s -> EVM t s ()
+choose :: Choose s -> EVM Symbolic s ()
 choose = assign #result . Just . HandleEffect . Choose
 
-branch :: forall t s. Expr EWord -> (Bool -> EVM t s ()) -> EVM t s ()
-branch cond continue = do
-  loc <- codeloc
-  pathconds <- use #constraints
-  query $ PleaseAskSMT cond pathconds (choosePath loc)
-  where
-    condSimp = Expr.simplify cond
-    choosePath :: CodeLocation -> BranchCondition -> EVM t s ()
-    choosePath loc (Case v) = do
-      assign #result Nothing
-      pushTo #constraints $ if v then Expr.simplifyProp (condSimp ./= Lit 0) else Expr.simplifyProp (condSimp .== Lit 0)
-      (iteration, _) <- use (#iterations % at loc % non (0,[]))
-      stack <- use (#state % #stack)
-      assign (#cache % #path % at (loc, iteration)) (Just v)
-      assign (#iterations % at loc) (Just (iteration + 1, stack))
-      continue v
-    -- Both paths are possible; we ask for more input
-    choosePath loc Unknown =
-      choose . PleaseChoosePath condSimp $ choosePath loc . Case
-
 -- | Construct RPC Query and halt execution until resolved
-fetchAccount :: Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
+fetchAccount :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
 fetchAccount addr continue =
   use (#env % #contracts % at addr) >>= \case
     Just c -> continue c
@@ -1295,7 +1275,7 @@ fetchAccount addr continue =
       GVar _ -> internalError "Unexpected GVar"
 
 accessStorage
-  :: Expr EAddr
+  :: VMOps t => Expr EAddr
   -> Expr EWord
   -> (Expr EWord -> EVM t s ())
   -> EVM t s ()
@@ -1436,56 +1416,56 @@ notStatic continue = do
     then vmError StateChangeWhileStatic
     else continue
 
-forceAddr :: Expr EWord -> String -> (Expr EAddr -> EVM t s ()) -> EVM t s ()
+forceAddr :: VMOps t => Expr EWord -> String -> (Expr EAddr -> EVM t s ()) -> EVM t s ()
 forceAddr n msg continue = case wordToAddr n of
   Nothing -> do
     vm <- get
     partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n])
   Just c -> continue c
 
-forceConcrete :: Expr EWord -> String -> (W256 -> EVM t s ()) -> EVM t s ()
+forceConcrete :: VMOps t => Expr EWord -> String -> (W256 -> EVM t s ()) -> EVM t s ()
 forceConcrete n msg continue = case maybeLitWord n of
   Nothing -> do
     vm <- get
     partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n])
   Just c -> continue c
 
-forceConcreteAddr :: Expr EAddr -> String -> (Addr -> EVM t s ()) -> EVM t s ()
+forceConcreteAddr :: VMOps t => Expr EAddr -> String -> (Addr -> EVM t s ()) -> EVM t s ()
 forceConcreteAddr n msg continue = case maybeLitAddr n of
   Nothing -> do
     vm <- get
     partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n])
   Just c -> continue c
 
-forceConcreteAddr2 :: (Expr EAddr, Expr EAddr) -> String -> ((Addr, Addr) -> EVM t s ()) -> EVM t s ()
+forceConcreteAddr2 :: VMOps t => (Expr EAddr, Expr EAddr) -> String -> ((Addr, Addr) -> EVM t s ()) -> EVM t s ()
 forceConcreteAddr2 (n,m) msg continue = case (maybeLitAddr n, maybeLitAddr m) of
   (Just c, Just d) -> continue (c,d)
   _ -> do
     vm <- get
     partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n, m])
 
-forceConcrete2 :: (Expr EWord, Expr EWord) -> String -> ((W256, W256) -> EVM t s ()) -> EVM t s ()
+forceConcrete2 :: VMOps t => (Expr EWord, Expr EWord) -> String -> ((W256, W256) -> EVM t s ()) -> EVM t s ()
 forceConcrete2 (n,m) msg continue = case (maybeLitWord n, maybeLitWord m) of
   (Just c, Just d) -> continue (c, d)
   _ -> do
     vm <- get
     partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n, m])
 
-forceConcrete3 :: (Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256) -> EVM t s ()) -> EVM t s ()
+forceConcrete3 :: VMOps t => (Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256) -> EVM t s ()) -> EVM t s ()
 forceConcrete3 (k,n,m) msg continue = case (maybeLitWord k, maybeLitWord n, maybeLitWord m) of
   (Just c, Just d, Just f) -> continue (c, d, f)
   _ -> do
     vm <- get
     partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [k, n, m])
 
-forceConcrete4 :: (Expr EWord, Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256, W256) -> EVM t s ()) -> EVM t s ()
+forceConcrete4 :: VMOps t => (Expr EWord, Expr EWord, Expr EWord, Expr EWord) -> String -> ((W256, W256, W256, W256) -> EVM t s ()) -> EVM t s ()
 forceConcrete4 (k,l,n,m) msg continue = case (maybeLitWord k, maybeLitWord l, maybeLitWord n, maybeLitWord m) of
   (Just b, Just c, Just d, Just f) -> continue (b, c, d, f)
   _ -> do
     vm <- get
     partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [k, l, n, m])
 
-forceConcreteBuf :: Expr Buf -> String -> (ByteString -> EVM t s ()) -> EVM t s ()
+forceConcreteBuf :: VMOps t => Expr Buf -> String -> (ByteString -> EVM t s ()) -> EVM t s ()
 forceConcreteBuf (ConcreteBuf b) _ continue = continue b
 forceConcreteBuf b msg _ = do
     vm <- get
@@ -1903,9 +1883,6 @@ resetState = do
 vmError :: VMOps t => EvmError -> EVM t s ()
 vmError e = finishFrame (FrameErrored e)
 
-partial :: PartialExec -> EVM t s ()
-partial e = assign #result (Just (Unfinished e))
-
 wrap :: Typeable a => [Expr a] -> [SomeExpr]
 wrap = fmap SomeExpr
 
@@ -2271,7 +2248,7 @@ checkJump x xs = noJumpIntoInitData x $ do
     False -> vmError BadJumpDestination
 
 -- fails with partial if we're trying to jump into the symbolic region of an `InitCode`
-noJumpIntoInitData :: Int -> EVM t s () -> EVM t s ()
+noJumpIntoInitData :: VMOps t => Int -> EVM t s () -> EVM t s ()
 noJumpIntoInitData idx cont = do
   vm <- get
   case vm.state.code of
@@ -2578,6 +2555,9 @@ class VMOps (t :: VMType) where
   subGas :: Gas t -> Word64 -> Gas t
   toGas :: Word64 -> Gas t
 
+  partial :: PartialExec -> EVM t s ()
+  branch :: Expr EWord -> (Bool -> EVM t s ()) -> EVM t s ()
+
 instance VMOps Symbolic where
   burn _ continue = continue
   burn' _ continue = continue
@@ -2596,6 +2576,26 @@ instance VMOps Symbolic where
   enoughGas _ _ = True
   subGas _ _ = ()
   toGas _ = ()
+
+  partial e = assign #result (Just (Unfinished e))
+  branch cond continue = do
+    loc <- codeloc
+    pathconds <- use #constraints
+    query $ PleaseAskSMT cond pathconds (choosePath loc)
+    where
+      condSimp = Expr.simplify cond
+      -- choosePath :: CodeLocation -> BranchCondition -> EVM t s ()
+      choosePath loc (Case v) = do
+        assign #result Nothing
+        pushTo #constraints $ if v then Expr.simplifyProp (condSimp ./= Lit 0) else Expr.simplifyProp (condSimp .== Lit 0)
+        (iteration, _) <- use (#iterations % at loc % non (0,[]))
+        stack <- use (#state % #stack)
+        assign (#cache % #path % at (loc, iteration)) (Just v)
+        assign (#iterations % at loc) (Just (iteration + 1, stack))
+        continue v
+      -- Both paths are possible; we ask for more input
+      choosePath loc Unknown =
+        choose . PleaseChoosePath condSimp $ choosePath loc . Case
 
 instance VMOps Concrete where
   burn n continue = do
@@ -2702,6 +2702,11 @@ instance VMOps Concrete where
 
   toGas amount = amount
 
+  partial _ = error "won't happen during concrete exec"
+
+  branch (Lit cond) continue = continue (cond > 0)
+  branch _ _ = error "won't happen during concrete exec"
+
 -- Create symbolic VM from concrete VM
 symbolify :: VM Concrete s -> VM Symbolic s
 symbolify vm =
@@ -2723,4 +2728,3 @@ symbolifyResult result =
     HandleEffect _ -> internalError "shouldn't happen"
     VMFailure e -> VMFailure e
     VMSuccess b -> VMSuccess b
-    Unfinished p -> Unfinished p
