@@ -72,13 +72,13 @@ import EVM.Effects
 
 testEnv :: Env
 testEnv = Env { config = defaultConfig {
-  dumpQueries = False
-  , dumpExprs = False
-  , dumpEndStates = False
-  , debug = False
-  , abstRefineArith = False
-  , abstRefineMem   = False
-  , dumpTrace = False
+  dumpQueries = True
+  , dumpExprs = True
+  , dumpEndStates = True
+  , debug = True
+  , abstRefineArith = True
+  , abstRefineMem   = True
+  , dumpTrace = True
   } }
 
 putStrLnM :: (MonadUnliftIO m) => String -> m ()
@@ -1579,6 +1579,49 @@ tests = testGroup "hevm"
       (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s ->
         checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+     ,
+     test "check-expr-slice1" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              uint[] x;
+              function fun(uint256 a, uint256 b, uint256 c) external {
+                unchecked {
+                  x[0] = a + 1;
+                  x[1] = b + 2;
+                  require(a > b);
+                  assert(a > b);
+                }
+              }
+             }
+            |]
+
+        let sig = Just (Sig "fun(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])
+        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c sig [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        putStrLnM $ "expr: " <> show expr
+     ,
+     test "check-expr-slice2" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              uint[] x;
+              function fun(uint256 a, uint256 b, uint256 c) external {
+                unchecked {
+                  x[0] = c+2;
+                  uint z = 0;
+                  if (x[0]>20) { z = 10; }
+                  require(a > b);
+                  assert(a > b);
+                }
+              }
+             }
+            |]
+
+        let sig = Just (Sig "fun(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])
+        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c sig [] defaultVeriOpts
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        putStrLnM $ "expr: " <> show expr
      ,
      test "opcode-mul-assoc" $ do
         Just c <- solcRuntime "MyContract"
