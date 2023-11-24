@@ -1308,7 +1308,10 @@ accessStorage addr slot continue = do
   use (#env % #contracts % at addr) >>= \case
     Just c ->
       -- Try first without concretization. Then if we get a Just, with concretization
-      -- if both give a Just, should we `continue`
+      -- if both give a Just, should we `continue`.
+      -- --> This is because readStorage can do smart rewrites, but only in case
+      --     the expression is of a particular format, which can be destroyed by simplification.
+      --     However, without concretization, it may not find things that are actually in the storage
       case readStorage slot c.storage of
         Just x -> case readStorage slotConc c.storage of
           Just _ -> continue x
