@@ -6,7 +6,7 @@ import EVM.Fetch qualified
 import EVM.Format (hexText)
 import EVM.Stepper qualified
 import EVM.Transaction
-import EVM.Types hiding (Block, Case)
+import EVM.Types hiding (Block, Case, Env)
 import EVM.Test.Tracing (interpretWithTrace, VMTrace, compareTraces, EVMToolTraceOutput(..))
 
 import Optics.Core
@@ -14,10 +14,11 @@ import Control.Arrow ((***), (&&&))
 import Control.Monad
 import Control.Monad.ST (RealWorld, stToIO)
 import Control.Monad.State.Strict
+import Control.Monad.IO.Unlift
+import EVM.Effects
 import Data.Aeson ((.:), (.:?), FromJSON (..))
 import Data.Aeson qualified as JSON
 import Data.Aeson.Types qualified as JSON
-import Data.Aeson.Text qualified as JSON
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as Lazy
 import Data.ByteString.Lazy qualified as LazyByteString
@@ -25,8 +26,6 @@ import Data.List (isInfixOf)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromJust, fromMaybe, isNothing, isJust)
-import Data.Text.Lazy.IO qualified as TL
-import Data.Text.Lazy.Builder
 import Data.Word (Word64)
 import System.Environment (lookupEnv, getEnv)
 import System.FilePath.Find qualified as Find
@@ -64,38 +63,48 @@ data BlockchainCase = BlockchainCase
   , network :: String
   } deriving Show
 
+
+testEnv :: Env
+testEnv = Env { config = defaultConfig }
+
 main :: IO ()
 main = do
-  tests <- prepareTests
+  tests <- runEnv testEnv prepareTests
   defaultMain tests
 
-prepareTests :: IO TestTree
+prepareTests :: App m => m TestTree
 prepareTests = do
-  repo <- getEnv "HEVM_ETHEREUM_TESTS_REPO"
+  repo <- liftIO $ getEnv "HEVM_ETHEREUM_TESTS_REPO"
   let testsDir = "BlockchainTests/GeneralStateTests"
   let dir = repo </> testsDir
-  jsonFiles <- Find.find Find.always (Find.extension Find.==? ".json") dir
-  putStrLn "Loading and parsing json files from ethereum-tests..."
-  isCI <- isJust <$> lookupEnv "CI"
+  jsonFiles <- liftIO $ Find.find Find.always (Find.extension Find.==? ".json") dir
+  liftIO $ putStrLn "Loading and parsing json files from ethereum-tests..."
+  isCI <- liftIO $ isJust <$> lookupEnv "CI"
   let problematicTests = if isCI then commonProblematicTests <> ciProblematicTests else commonProblematicTests
   let ignoredFiles = if isCI then ciIgnoredFiles else []
   groups <- mapM (\f -> testGroup (makeRelative repo f) <$> (if any (`isInfixOf` f) ignoredFiles then pure [] else testsFromFile f problematicTests)) jsonFiles
-  putStrLn "Loaded."
+  liftIO $ putStrLn "Loaded."
   pure $ testGroup "ethereum-tests" groups
 
-testsFromFile :: String -> Map String (TestTree -> TestTree) -> IO [TestTree]
+testsFromFile
+  :: forall m . App m
+  => String -> Map String (TestTree -> TestTree) -> m [TestTree]
 testsFromFile file problematicTests = do
-  parsed <- parseBCSuite <$> LazyByteString.readFile file
+  parsed <- parseBCSuite <$> (liftIO $ LazyByteString.readFile file)
   case parsed of
    Left "No cases to check." -> pure [] -- error "no-cases ok"
    Left _err -> pure [] -- error _err
-   Right allTests -> pure $
-     (\(name, x) -> testCase' name $ runVMTest True (name, x)) <$> Map.toList allTests
+   Right allTests -> mapM runTest (Map.toList allTests)
   where
-  testCase' name assertion =
-    case Map.lookup name problematicTests of
-      Just f -> f (testCase name assertion)
-      Nothing -> testCase name assertion
+    runTest :: (String , Case) -> m TestTree
+    runTest (name, x) = do
+      exec <- toIO $ runVMTest True (name, x)
+      pure $ testCase' name exec
+    testCase' :: String -> Assertion -> TestTree
+    testCase' name assertion =
+      case Map.lookup name problematicTests of
+        Just f -> f (testCase name (liftIO assertion))
+        Nothing -> testCase name (liftIO assertion)
 
 -- CI has issues with some heaver tests, disable in bulk
 ciIgnoredFiles :: [String]
@@ -128,24 +137,34 @@ ciProblematicTests = Map.fromList
   , ("loopExp_d9g0v0_Shanghai", ignoreTest)
   ]
 
-runVMTest :: Bool -> (String, Case) -> IO ()
+runVMTest
+  :: App m
+  => Bool -> (String, Case) -> m ()
 runVMTest diffmode (_name, x) = do
-  vm0 <- vmForCase x
+  vm0 <- liftIO $ vmForCase x
   result <- EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) vm0 EVM.Stepper.runFully
+  writeTrace result
   maybeReason <- checkExpectation diffmode x result
-  forM_ maybeReason assertFailure
+  liftIO $ forM_ maybeReason assertFailure
+
 
 -- | Run a vm test and output a geth style per opcode trace
-traceVMTest :: String -> String -> IO [VMTrace]
+traceVMTest
+  :: App m
+  => String -> String -> m [VMTrace]
 traceVMTest file test = do
-  repo <- getEnv "HEVM_ETHEREUM_TESTS_REPO"
-  Right allTests <- parseBCSuite <$> LazyByteString.readFile (repo </> file)
-  let x = case filter (\(name, _) -> name == test) $ Map.toList allTests of
+  repo <- liftIO $ getEnv "HEVM_ETHEREUM_TESTS_REPO"
+  allTests <- parseBCSuite <$> (liftIO $ LazyByteString.readFile (repo </> file))
+  let x = case filter (\(name, _) -> name == test) $ Map.toList (getRight allTests) of
         [(_, x')] -> x'
         _ -> internalError "test not found"
-  vm0 <- vmForCase x
+  vm0 <- liftIO $ vmForCase x
   (_, (_, ts)) <- runStateT (interpretWithTrace (EVM.Fetch.zero 0 (Just 0)) EVM.Stepper.runFully) (vm0, [])
   pure ts
+    where
+      getRight :: Either a b -> b
+      getRight (Right a) = a
+      getRight (Left _) = error "Not allowed"
 
 -- | Read a geth trace from disk
 readTrace :: FilePath -> IO (Either String EVMToolTraceOutput)
@@ -153,11 +172,14 @@ readTrace = JSON.eitherDecodeFileStrict
 
 -- | given a path to a test file, a test case from within that file, and a trace from geth from running that test, compare the traces and show where we differ
 -- This would need a few tweaks to geth to make this really usable (i.e. evm statetest show allow running a single test from within the test file).
-traceVsGeth :: String -> String -> FilePath -> IO ()
+traceVsGeth
+  :: App m
+  => String -> String -> FilePath -> m ()
 traceVsGeth file test gethTrace = do
   hevm <- traceVMTest file test
-  EVMToolTraceOutput ts _ <- fromJust <$> (JSON.decodeFileStrict gethTrace :: IO (Maybe EVMToolTraceOutput))
-  _ <- compareTraces hevm ts
+  decodedContents <- liftIO (JSON.decodeFileStrict gethTrace :: IO (Maybe EVMToolTraceOutput))
+  let EVMToolTraceOutput ts _ = fromJust decodedContents
+  _ <- liftIO $ compareTraces hevm ts
   pure ()
 
 splitEithers :: (Filterable f) => f (Either a b) -> (f a, f b)
@@ -202,13 +224,15 @@ checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
     printContracts actual
   pure (unwords reason)
 
-checkExpectation :: Bool -> Case -> VM Word64 RealWorld -> IO (Maybe String)
+checkExpectation
+  :: App m
+  => Bool -> Case -> VM Word64 RealWorld -> m (Maybe String)
 checkExpectation diff x vm = do
   let expectation = x.testExpectation
       (okState, b2, b3, b4, b5) = checkExpectedContracts vm expectation
   if okState then
     pure Nothing
-  else
+  else liftIO $
     Just <$> checkStateFail diff x vm (b2, b3, b4, b5)
 
 -- quotient account state by nullness

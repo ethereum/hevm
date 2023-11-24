@@ -374,13 +374,13 @@ writeByte offset byte src = WriteByte offset byte src
 
 writeWord :: Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf
 writeWord o@(Lit offset) (WAddr (LitAddr val)) b@(ConcreteBuf _)
-  | offset < maxBytes
+  | offset < maxBytes && offset + 32 < maxBytes
   = writeWord o (Lit $ into val) b
 writeWord (Lit offset) (Lit val) (ConcreteBuf "")
-  | offset < maxBytes
+  | offset < maxBytes && offset + 32 < maxBytes
   = ConcreteBuf $ BS.replicate (unsafeInto offset) 0 <> word256Bytes val
 writeWord o@(Lit offset) v@(Lit val) buf@(ConcreteBuf src)
-  | offset < maxBytes
+  | offset < maxBytes && offset + 32 < maxBytes
     = ConcreteBuf $ (padRight (unsafeInto offset) $ BS.take (unsafeInto offset) src)
                  <> word256Bytes val
                  <> BS.drop ((unsafeInto offset) + 32) src
@@ -421,7 +421,7 @@ bufLengthEnv env useEnv buf = go (Lit 0) buf
   where
     go :: Expr EWord -> Expr Buf -> Expr EWord
     go l (ConcreteBuf b) = EVM.Expr.max l (Lit (unsafeInto . BS.length $ b))
-    go l (AbstractBuf b) = Max l (BufLength (AbstractBuf b))
+    go l (AbstractBuf b) = EVM.Expr.max l (BufLength (AbstractBuf b))
     go l (WriteWord idx _ b) = go (EVM.Expr.max l (add idx (Lit 32))) b
     go l (WriteByte idx _ b) = go (EVM.Expr.max l (add idx (Lit 1))) b
     go l (CopySlice _ dstOffset size _ dst) = go (EVM.Expr.max l (add dstOffset size)) dst
@@ -788,6 +788,7 @@ simplify e = if (mapExpr go e == e)
     go (ReadWord idx buf) = readWord idx buf
     go o@(ReadByte (Lit _) _) = simplifyReads o
     go (ReadByte idx buf) = readByte idx buf
+    go (BufLength buf) = bufLength buf
 
     -- We can zero out any bytes in a base ConcreteBuf that we know will be overwritten by a later write
     -- TODO: make this fully general for entire write chains, not just a single write.
@@ -880,6 +881,12 @@ simplify e = if (mapExpr go e == e)
       | b == c = a
       | otherwise = sub (add a b) c
 
+    -- Add is associative. We are doing left-growing trees because LIT is
+    -- arranged to the left. This way, they accumulate in all combinations.
+    -- See `sim-assoc-add` test cases in test.hs
+    go (Add a (Add b c)) = add (add a b) c
+    go (Add (Add (Lit a) x) (Lit b)) = add (Lit (a+b)) x
+
     -- add / sub identities
     go (Add a b)
       | b == (Lit 0) = a
@@ -939,21 +946,27 @@ simplify e = if (mapExpr go e == e)
     go (EVM.Types.Not (EVM.Types.Not a)) = a
 
     -- Some trivial min / max eliminations
-    go (Max a b) = case (a, b) of
-                    (Lit 0, _) -> b
-                    _ -> EVM.Expr.max a b
+    go (Max a b) = EVM.Expr.max a b
     go (Min a b) = case (a, b) of
                      (Lit 0, _) -> Lit 0
                      _ -> EVM.Expr.min a b
+
+    -- Mul is associative. We are doing left-growing trees because LIT is
+    -- arranged to the left. This way, they accumulate in all combinations.
+    -- See `sim-assoc-add` test cases in test.hs
+    go (Mul a (Mul b c)) = mul (mul a b) c
+    go (Mul (Mul (Lit a) x) (Lit b)) = mul (Lit (a*b)) x
 
     -- Some trivial mul eliminations
     go (Mul a b) = case (a, b) of
                      (Lit 0, _) -> Lit 0
                      (Lit 1, _) -> b
                      _ -> mul a b
+
     -- Some trivial div eliminations
     go (Div (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
     go (Div _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
+    go (Div a (Lit 1)) = a
 
     -- If a >= b then the value of the `Max` expression can never be < b
     go o@(LT (Max (Lit a) _) (Lit b))
@@ -977,14 +990,14 @@ simplify e = if (mapExpr go e == e)
 simplifyProps :: [Prop] -> [Prop]
 simplifyProps ps = if canBeSat then simplified else [PBool False]
   where
-    simplified = remRedundantProps . map evalProp . flattenProps $ ps
+    simplified = remRedundantProps . map simplifyProp . flattenProps $ ps
     canBeSat = constFoldProp simplified
 
 -- | Evaluate the provided proposition down to its most concrete result
-evalProp :: Prop -> Prop
-evalProp prop =
+simplifyProp :: Prop -> Prop
+simplifyProp prop =
   let new = mapProp' go (simpInnerExpr prop)
-  in if (new == prop) then prop else evalProp new
+  in if (new == prop) then prop else simplifyProp new
   where
     go :: Prop -> Prop
 
@@ -997,13 +1010,31 @@ evalProp prop =
     go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
     go (PLEq a (Max b _)) | a == b = PBool True
     go (PLEq a (Max _ b)) | a == b = PBool True
+    go (PLT (Max (Lit a) b) (Lit c)) | a < c = PLT b (Lit c)
+    go (PLT (Lit 0) (Eq a b)) = PEq a b
 
     -- negations
     go (PNeg (PBool b)) = PBool (Prelude.not b)
     go (PNeg (PNeg a)) = a
 
     -- solc specific stuff
+    go (PEq (IsZero (Eq a b)) (Lit 0)) = PEq a b
+    go (PEq (IsZero (IsZero (Eq a b))) (Lit 0)) = PNeg (PEq a b)
+
+    -- iszero(a) -> (a == 0)
+    -- iszero(iszero(a))) -> ~(a == 0) -> a > 0
+    -- iszero(iszero(a)) == 0 -> ~~(a == 0) -> a == 0
+    -- ~(iszero(iszero(a)) == 0) -> ~~~(a == 0) -> ~(a == 0) -> a > 0
     go (PNeg (PEq (IsZero (IsZero a)) (Lit 0))) = PGT a (Lit 0)
+
+    -- iszero(a) -> (a == 0)
+    -- iszero(a) == 0 -> ~(a == 0)
+    -- ~(iszero(a) == 0) -> ~~(a == 0) -> a == 0
+    go (PNeg (PEq (IsZero a) (Lit 0))) = PEq a (Lit 0)
+
+    -- a < b == 0 -> ~(a < b)
+    -- ~(a < b == 0) -> ~~(a < b) -> a < b
+    go (PNeg (PEq (LT a b) (Lit 0x0))) = PLT a b
 
     -- And/Or
     go (PAnd (PBool l) (PBool r)) = PBool (l && r)
@@ -1055,7 +1086,7 @@ flattenProps (a:ax) = case a of
 
 -- removes redundant (constant True/False) props
 remRedundantProps :: [Prop] -> [Prop]
-remRedundantProps p = collapseFalse . filter (\x -> x /= PBool True) . nubOrd $ p
+remRedundantProps p = nubOrd $ collapseFalse . filter (\x -> x /= PBool True) $ p
   where
     collapseFalse ps = if isJust $ find (== PBool False) ps then [PBool False] else ps
 
@@ -1254,6 +1285,8 @@ min :: Expr EWord -> Expr EWord -> Expr EWord
 min x y = normArgs Min Prelude.min x y
 
 max :: Expr EWord -> Expr EWord -> Expr EWord
+max (Lit 0) y = y
+max x (Lit 0) = x
 max x y = normArgs Max Prelude.max x y
 
 numBranches :: Expr End -> Int
@@ -1290,9 +1323,10 @@ data ConstState = ConstState
 constFoldProp :: [Prop] -> Bool
 constFoldProp ps = oneRun ps (ConstState mempty True)
   where
-    oneRun ps2 startState = (execState (mapM (go . evalProp) ps2) startState).canBeSat
+    oneRun ps2 startState = (execState (mapM (go . simplifyProp) ps2) startState).canBeSat
     go :: Prop -> State ConstState ()
     go x = case x of
+        -- PEq
         PEq (Lit l) a -> do
           s <- get
           case Map.lookup a s.values of
@@ -1303,6 +1337,16 @@ constFoldProp ps = oneRun ps (ConstState mempty True)
               let vs' = Map.insert a l s.values
               put $ s{values=vs'}
         PEq a b@(Lit _) -> go (PEq b a)
+        -- PNeg
+        PNeg (PEq (Lit l) a) -> do
+          s <- get
+          case Map.lookup a s.values of
+            Just l2 -> case l==l2 of
+                True -> put ConstState {canBeSat=False, values=mempty}
+                False -> pure ()
+            Nothing -> pure()
+        PNeg (PEq a b@(Lit _)) -> go $ PNeg (PEq b a)
+        -- Others
         PAnd a b -> do
           go a
           go b

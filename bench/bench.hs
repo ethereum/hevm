@@ -2,6 +2,7 @@ module Main where
 
 import GHC.Natural
 import Control.Monad
+import Control.Monad.IO.Unlift
 import Data.Maybe
 import System.Environment (getEnv)
 
@@ -19,6 +20,7 @@ import qualified Data.ByteString.Lazy as LazyByteString
 import EVM.SymExec
 import EVM.Solidity
 import EVM.Solvers
+import EVM.Effects
 import EVM.Format (hexByteString)
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
@@ -67,16 +69,18 @@ blockchainTests ts = bench "blockchain-tests" $ nfIO $ do
       if n `elem` ignored
       then pure True
       else do
-        res <- runBCTest c
+        res <- runApp $ runBCTest c
         pure $ acc && res
     ) True cases
 
 -- | executes a single test case and returns a boolean value representing its success
-runBCTest :: BCTests.Case -> IO Bool
+runBCTest :: App m => BCTests.Case -> m Bool
 runBCTest x =
  do
-  vm0 <- BCTests.vmForCase x
+  vm0 <- liftIO $ BCTests.vmForCase x
   result <- Stepper.interpret (Fetch.zero 0 Nothing) vm0 Stepper.runFully
+  writeTrace vm0
+
   maybeReason <- BCTests.checkExpectation False x result
   pure $ isNothing maybeReason
 
@@ -84,7 +88,7 @@ runBCTest x =
 --- Helpers ----------------------------------------------------------------------------------------
 
 
-findPanics :: Solver -> Natural -> Integer -> ByteString -> IO ()
+findPanics :: App m => Solver -> Natural -> Integer -> ByteString -> m ()
 findPanics solver count iters c = do
   _ <- withSolvers solver count Nothing $ \s -> do
     let opts = defaultVeriOpts
@@ -92,7 +96,7 @@ findPanics solver count iters c = do
           , askSmtIters = iters + 1
           }
     checkAssert s allPanicCodes c Nothing [] opts
-  putStrLn "done"
+  liftIO $ putStrLn "done"
 
 
 -- constructs a benchmark suite that checks the given bytecode for reachable
@@ -103,8 +107,8 @@ mkbench :: IO ByteString -> String -> Integer -> [Natural] -> Benchmark
 mkbench c name iters counts = localOption WallTime $ env c (bgroup name . bmarks)
   where
     bmarks c' = concat $ [
-       [ bench ("cvc5-" <> show i) $ nfIO $ findPanics CVC5 i iters c'
-       , bench ("z3-" <> show i) $ nfIO $ findPanics Z3 i iters c'
+       [ bench ("cvc5-" <> show i) $ nfIO $ runApp $ findPanics CVC5 i iters c'
+       , bench ("z3-" <> show i) $ nfIO $ runApp $ findPanics Z3 i iters c'
        ]
        | i <- counts
      ]

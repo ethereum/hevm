@@ -8,6 +8,7 @@ module Main where
 
 import Control.Monad (when, forM_, unless)
 import Control.Monad.ST (RealWorld, stToIO)
+import Control.Monad.IO.Unlift
 import Data.ByteString (ByteString)
 import Data.DoubleWord (Word256)
 import Data.List (intersperse)
@@ -22,7 +23,6 @@ import Optics.Core ((&), set)
 import Witch (unsafeInto)
 import Options.Generic as Options
 import Paths_hevm qualified as Paths
-import System.IO (stderr)
 import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirectoryExist)
 import System.FilePath ((</>))
 import System.Exit (exitFailure, exitWith, ExitCode(..))
@@ -34,14 +34,15 @@ import EVM.Expr qualified as Expr
 import EVM.Concrete qualified as Concrete
 import GitHash
 import EVM.Fetch qualified as Fetch
-import EVM.Format (hexByteString, strip0x, showTraceTree, formatExpr)
+import EVM.Format (hexByteString, strip0x, formatExpr)
 import EVM.Solidity
 import EVM.Solvers
 import EVM.Stepper qualified
 import EVM.SymExec
 import EVM.Transaction qualified
-import EVM.Types hiding (word)
+import EVM.Types hiding (word, Env)
 import EVM.UnitTest
+import EVM.Effects
 
 -- This record defines the program's command-line options
 -- automatically via the `optparse-generic` package.
@@ -84,7 +85,9 @@ data Command w
       , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point"
       , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
-      , assertions    :: w ::: Maybe [Word256]    <?> "Comma seperated list of solc panic codes to check for (default: user defined assertion violations only)"
+      , debug         :: w ::: Bool               <?> "Debug printing of internal behaviour"
+      , trace         :: w ::: Bool               <?> "Dump trace"
+      , assertions    :: w ::: Maybe [Word256]    <?> "Comma separated list of solc panic codes to check for (default: user defined assertion violations only)"
       , askSmtIterations :: w ::: Integer         <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
@@ -102,6 +105,8 @@ data Command w
       , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default) or cvc5"
       , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
       , smtdebug      :: w ::: Bool             <?> "Print smt queries sent to the solver"
+      , debug         :: w ::: Bool             <?> "Debug printing of internal behaviour"
+      , trace         :: w ::: Bool             <?> "Dump trace"
       , askSmtIterations :: w ::: Integer       <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
@@ -127,6 +132,7 @@ data Command w
       , maxcodesize :: w ::: Maybe W256        <?> "Block: max code size"
       , prevRandao  :: w ::: Maybe W256        <?> "Block: prevRandao"
       , chainid     :: w ::: Maybe W256        <?> "Env: chainId"
+      , debug       :: w ::: Bool              <?> "Debug printing of internal behaviour"
       , trace       :: w ::: Bool              <?> "Dump trace"
       , rpc         :: w ::: Maybe URL         <?> "Fetch state from a remote node"
       , block       :: w ::: Maybe W256        <?> "Block state is be fetched from"
@@ -143,6 +149,8 @@ data Command w
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
       , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default) or cvc5"
       , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
+      , debug         :: w ::: Bool                     <?> "Debug printing of internal behaviour"
+      , trace         :: w ::: Bool                     <?> "Dump trace"
       , ffi           :: w ::: Bool                     <?> "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)"
       , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in seconds (default: 300)"
       , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point"
@@ -185,59 +193,63 @@ getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
 main :: IO ()
 main = do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
+  let env = Env { config = defaultConfig
+    { dumpQueries = cmd.smtdebug
+    , debug = cmd.debug
+    , abstRefineMem = cmd.abstractMemory
+    , abstRefineArith = cmd.abstractArithmetic
+    , dumpTrace = cmd.trace
+    } }
   case cmd of
     Version {} ->putStrLn getFullVersion
     Symbolic {} -> do
       root <- getRoot cmd
-      withCurrentDirectory root $ assert cmd
-    Equivalence {} -> equivalence cmd
-    Exec {} ->
-      launchExec cmd
+      withCurrentDirectory root $ runEnv env $ assert cmd
+    Equivalence {} -> runEnv env $ equivalence cmd
+    Exec {} -> runEnv env $ launchExec cmd
     Test {} -> do
       root <- getRoot cmd
       withCurrentDirectory root $ do
         cores <- unsafeInto <$> getNumProcessors
         solver <- getSolver cmd
-        withSolvers solver cores cmd.smttimeout $ \solvers -> do
-          buildOut <- readBuildOutput root (getProjectType cmd)
+        runEnv env $ withSolvers solver cores cmd.smttimeout $ \solvers -> do
+          buildOut <- liftIO $ readBuildOutput root (getProjectType cmd)
           case buildOut of
-            Left e -> do
+            Left e -> liftIO $ do
               putStrLn $ "Error: " <> e
               exitFailure
             Right out -> do
               -- TODO: which functions here actually require a BuildOutput, and which can take it as a Maybe?
-              testOpts <- unitTestOptions cmd solvers (Just out)
+              testOpts <- liftIO $ unitTestOptions cmd solvers (Just out)
               res <- unitTest testOpts out.contracts
-              unless res exitFailure
+              liftIO $ unless res exitFailure
 
-equivalence :: Command Options.Unwrapped -> IO ()
+equivalence :: App m => Command Options.Unwrapped -> m ()
 equivalence cmd = do
   let bytecodeA = hexByteString "--code" . strip0x $ cmd.codeA
       bytecodeB = hexByteString "--code" . strip0x $ cmd.codeB
       veriOpts = VeriOpts { simp = True
-                          , debug = False
                           , maxIter = cmd.maxIterations
                           , askSmtIters = cmd.askSmtIterations
                           , loopHeuristic = cmd.loopDetectionHeuristic
-                          , abstRefineConfig = AbstRefineConfig cmd.abstractArithmetic cmd.abstractMemory
                           , rpcInfo = Nothing
                           }
-  calldata <- buildCalldata cmd
-  solver <- getSolver cmd
+  calldata <- liftIO $ buildCalldata cmd
+  solver <- liftIO $ getSolver cmd
   withSolvers solver 3 Nothing $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata
     case any isCex res of
-      False -> do
+      False -> liftIO $ do
         putStrLn "No discrepancies found"
         when (any isTimeout res) $ do
           putStrLn "But timeout(s) occurred"
           exitFailure
-      True -> do
+      True -> liftIO $ do
         let cexs = mapMaybe getCex res
         T.putStrLn . T.unlines $
           [ "Not equivalent. The following inputs result in differing behaviours:"
           , "" , "-----", ""
-          ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap (formatCex (AbstractBuf "txdata")) cexs)
+          ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap (formatCex (AbstractBuf "txdata") Nothing) cexs)
         exitFailure
 
 getSolver :: Command Options.Unwrapped -> IO Solver
@@ -288,29 +300,27 @@ buildCalldata cmd = case (cmd.calldata, cmd.sig) of
 
 
 -- If function signatures are known, they should always be given for best results.
-assert :: Command Options.Unwrapped -> IO ()
+assert :: App m => Command Options.Unwrapped -> m ()
 assert cmd = do
   let block'  = maybe Fetch.Latest Fetch.BlockNumber cmd.block
       rpcinfo = (,) block' <$> cmd.rpc
-  calldata <- buildCalldata cmd
-  preState <- symvmFromCommand cmd calldata
+  calldata <- liftIO $ buildCalldata cmd
+  preState <- liftIO $ symvmFromCommand cmd calldata
   let errCodes = fromMaybe defaultPanicCodes cmd.assertions
-  cores <- unsafeInto <$> getNumProcessors
+  cores <- liftIO $ unsafeInto <$> getNumProcessors
   let solverCount = fromMaybe cores cmd.numSolvers
-  solver <- getSolver cmd
+  solver <- liftIO $ getSolver cmd
   withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
     let opts = VeriOpts { simp = True
-                        , debug = cmd.smtdebug
                         , maxIter = cmd.maxIterations
                         , askSmtIters = cmd.askSmtIterations
                         , loopHeuristic = cmd.loopDetectionHeuristic
-                        , abstRefineConfig = AbstRefineConfig cmd.abstractArithmetic cmd.abstractMemory
                         , rpcInfo = rpcinfo
     }
     (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
     case res of
       [Qed _] -> do
-        putStrLn "\nQED: No reachable property violations discovered\n"
+        liftIO $ putStrLn "\nQED: No reachable property violations discovered\n"
         showExtras solvers cmd calldata expr
       _ -> do
         let cexs = snd <$> mapMaybe getCex res
@@ -321,7 +331,7 @@ assert cmd = do
                  [ ""
                  , "Discovered the following counterexamples:"
                  , ""
-                 ] <> fmap (formatCex (fst calldata)) cexs
+                 ] <> fmap (formatCex (fst calldata) Nothing) cexs
             unknowns
               | null timeouts = []
               | otherwise =
@@ -329,25 +339,26 @@ assert cmd = do
                  , "Could not determine reachability of the following end states:"
                  , ""
                  ] <> fmap (formatExpr) timeouts
-        T.putStrLn $ T.unlines (counterexamples <> unknowns)
+        liftIO $ T.putStrLn $ T.unlines (counterexamples <> unknowns)
         showExtras solvers cmd calldata expr
-        exitFailure
+        liftIO $ exitFailure
 
-showExtras :: SolverGroup -> Command Options.Unwrapped -> (Expr Buf, [Prop]) -> Expr End -> IO ()
+showExtras :: App m => SolverGroup -> Command Options.Unwrapped -> (Expr Buf, [Prop]) -> Expr End -> m ()
 showExtras solvers cmd calldata expr = do
-  when cmd.showTree $ do
+  when cmd.showTree $ liftIO $ do
     putStrLn "=== Expression ===\n"
     T.putStrLn $ formatExpr expr
     putStrLn ""
   when cmd.showReachableTree $ do
     reached <- reachable solvers expr
-    putStrLn "=== Reachable Expression ===\n"
-    T.putStrLn (formatExpr . snd $ reached)
-    putStrLn ""
+    liftIO $ do
+      putStrLn "=== Reachable Expression ===\n"
+      T.putStrLn (formatExpr . snd $ reached)
+      putStrLn ""
   when cmd.getModels $ do
-    putStrLn $ "=== Models for " <> show (Expr.numBranches expr) <> " branches ===\n"
+    liftIO $ putStrLn $ "=== Models for " <> show (Expr.numBranches expr) <> " branches ===\n"
     ms <- produceModels solvers expr
-    forM_ ms (showModel (fst calldata))
+    liftIO $ forM_ ms (showModel (fst calldata))
 
 isTestOrLib :: Text -> Bool
 isTestOrLib file = T.isSuffixOf ".t.sol" file || areAnyPrefixOf ["src/test/", "src/tests/", "lib/"] file
@@ -355,10 +366,10 @@ isTestOrLib file = T.isSuffixOf ".t.sol" file || areAnyPrefixOf ["src/test/", "s
 areAnyPrefixOf :: [Text] -> Text -> Bool
 areAnyPrefixOf prefixes t = any (flip T.isPrefixOf t) prefixes
 
-launchExec :: Command Options.Unwrapped -> IO ()
+launchExec :: App m => Command Options.Unwrapped -> m ()
 launchExec cmd = do
-  dapp <- getSrcInfo cmd
-  vm <- vmFromCommand cmd
+  dapp <- liftIO $ getSrcInfo cmd
+  vm <- liftIO $ vmFromCommand cmd
   let
     block = maybe Fetch.Latest Fetch.BlockNumber cmd.block
     rpcinfo = (,) block <$> cmd.rpc
@@ -366,21 +377,21 @@ launchExec cmd = do
   -- TODO: we shouldn't need solvers to execute this code
   withSolvers Z3 0 Nothing $ \solvers -> do
     vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcinfo) vm EVM.Stepper.runFully
-    when cmd.trace $ T.hPutStr stderr (showTraceTree dapp vm')
+    writeTraceDapp dapp vm'
     case vm'.result of
-      Just (VMFailure (Revert msg)) -> do
+      Just (VMFailure (Revert msg)) -> liftIO $ do
         let res = case msg of
                     ConcreteBuf bs -> bs
                     _ -> "<symbolic>"
         putStrLn $ "Revert: " <> (show $ ByteStringS res)
         exitWith (ExitFailure 2)
-      Just (VMFailure err) -> do
+      Just (VMFailure err) -> liftIO $ do
         putStrLn $ "Error: " <> show err
         exitWith (ExitFailure 2)
-      Just (Unfinished p) -> do
+      Just (Unfinished p) -> liftIO $ do
         putStrLn $ "Could not continue execution: " <> show p
         exitWith (ExitFailure 2)
-      Just (VMSuccess buf) -> do
+      Just (VMSuccess buf) -> liftIO $ do
         let msg = case buf of
               ConcreteBuf msg' -> msg'
               _ -> "<symbolic>"
@@ -582,7 +593,6 @@ unitTestOptions cmd solvers buildOutput = do
          Nothing  -> Nothing
     , maxIter = cmd.maxIterations
     , askSmtIters = cmd.askSmtIterations
-    , smtDebug = cmd.smtdebug
     , smtTimeout = cmd.smttimeout
     , solver = cmd.solver
     , verbose = cmd.verbose

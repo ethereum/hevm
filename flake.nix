@@ -134,6 +134,8 @@
           grep = "${pkgs.gnugrep}/bin/grep";
           otool = "${pkgs.darwin.binutils.bintools}/bin/otool";
           install_name_tool = "${pkgs.darwin.binutils.bintools}/bin/install_name_tool";
+          codesign_allocate = "${pkgs.darwin.binutils.bintools}/bin/codesign_allocate";
+          codesign = "${pkgs.darwin.sigtool}/bin/codesign";
         in if pkgs.stdenv.isLinux
         then pkgs.haskell.lib.dontCheck hevmUnwrapped
         else pkgs.runCommand "stripNixRefs" {} ''
@@ -151,6 +153,7 @@
           chmod 777 $out/bin/hevm
           ${install_name_tool} -change "$cxx" /usr/lib/libc++.1.dylib $out/bin/hevm
           ${install_name_tool} -change "$iconv" /usr/lib/libiconv.dylib $out/bin/hevm
+          CODESIGN_ALLOCATE=${codesign_allocate} ${codesign} -f -s - $out/bin/hevm
           chmod 555 $out/bin/hevm
         '';
 

@@ -2,7 +2,7 @@ cabal-version: 3.0
 name:
   hevm
 version:
-  0.51.3
+  0.52.0
 synopsis:
   Symbolic EVM Evaluator
 homepage:
@@ -58,6 +58,7 @@ common shared
     -Wno-unticked-promoted-constructors
     -Wno-orphans
     -Wno-ambiguous-fields
+    -optc-Wno-ignored-attributes
     -fspecialize-aggressively
     -fexpose-all-unfoldings
   default-language: GHC2021
@@ -101,12 +102,22 @@ library
     EVM.Types,
     EVM.UnitTest,
     EVM.Sign,
+    EVM.Effects,
   other-modules:
     Paths_hevm
   autogen-modules:
     Paths_hevm
-  if os(linux) || os(windows)
+  if impl(ghc >= 9.4) && !os(darwin)
+    -- darwin is skipped because it produces this error when building
+    -- > ghc: loadArchive: Neither an archive, nor a fat archive: `/nix/store/l3lkdfm7sg1wwc850451cikqds766h15-clang-wrapper-11.1.0/bin/clang++'
+    build-depends: system-cxx-std-lib
+  elif !os(darwin)
     extra-libraries: stdc++
+  else
+    -- extra-libraries: c++
+    -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
+    ld-options: -Wl,-keep_dwarf_unwind
+    ghc-options: -fcompact-unwind
   extra-libraries:
     secp256k1, ff, gmp
   c-sources:
@@ -170,7 +181,8 @@ library
     stm                               >= 2.5.0 && < 2.6.0,
     spawn                             >= 0.3 && < 0.4,
     filepattern                       >= 0.1.2 && < 0.2,
-    witch                             >= 1.1 && < 1.3
+    witch                             >= 1.1 && < 1.3,
+    unliftio-core                     >= 0.2.1.0
   if !os(windows)
     build-depends:
       brick                           >= 1.4 && < 2.0,
@@ -189,10 +201,6 @@ executable hevm
     Paths_hevm
   if os(darwin)
     extra-libraries: c++
-    ld-options: -Wl,-keep_dwarf_unwind
-    ghc-options: -fcompact-unwind
-  else
-    extra-libraries: stdc++
   build-depends:
     QuickCheck,
     aeson,
@@ -226,7 +234,8 @@ executable hevm
     spawn,
     optics-core,
     githash                       >= 0.1.6 && < 0.2,
-    witch
+    witch,
+    unliftio-core
   if os(windows)
     buildable: False
 
@@ -236,8 +245,6 @@ common test-base
   import: shared
   hs-source-dirs:
     test
-  extra-libraries:
-    secp256k1
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -279,7 +286,10 @@ common test-base
     operational,
     optics-core,
     optics-extra,
-    witch
+    witch,
+    unliftio-core,
+    exceptions,
+    MissingH
 
 library test-utils
   import:
@@ -306,11 +316,6 @@ common test-common
     buildable: False
   if os(darwin)
     extra-libraries: c++
-    -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
-    ld-options: -Wl,-keep_dwarf_unwind
-    ghc-options: -fcompact-unwind
-  else
-    extra-libraries: stdc++
 
 --- Test Suites ---
 
@@ -353,9 +358,7 @@ benchmark bench
   ghc-options:
     -O2
   if os(darwin)
-     extra-libraries: c++
-  else
-     extra-libraries: stdc++
+    extra-libraries: c++
   other-modules:
     Paths_hevm
   autogen-modules:
@@ -372,4 +375,5 @@ benchmark bench
     filemanip,
     filepath,
     containers,
-    mtl
+    mtl,
+    unliftio-core

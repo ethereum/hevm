@@ -5,15 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## Added
+- New solc-specific simplification rules that should make the final Props a lot more readable
+- Prop is now correctly ordered, better BufLength and Max simplifications of Expr,
+  and further solc-specific simplifications of Expr
+- Simplify earlier and don't check reachability for things statically determined to be FALSE
+
+## [0.52.0] - 2023-10-26
+
+This is a major breaking release that removes several user facing features and includes non trivial
+breakage for library users. These changes mean the code is significantly simpler, more performant,
+and allow support for new features like fully symbolic addresses.
+
+In addition to the changes below, this release includes significant work on performance
+optimization for symbolic execution.
 
 ## Added
 
-- `vm.prank` now handles symbolic addresses
-- added `vm.deal` cheatcode
-- added `vm.assume` cheatcode
+The major new user facing feature in this release is support for fully symbolic addresses (including
+fully symbolic addresses for deployed contracts). This allows tests to be writen that call
+`vm.prank` with a symbolic value, making some tests (e.g. access control, token transfer logic) much
+more comprehensive.
+
+Some restrictions around reading balances from and transfering value between symbolic addresses are
+currently in place. Currently, if the address is symbolic, then you will only be able to read it's
+balance, or transfer value to/from it, if it is the address of a contract that is actually deployed.
+This is required to ensure soundness in the face of aliasing between symbolic addresses. We intend
+to lift this restriction in a future release.
+
+### Other
+
+- Support for `vm.deal`
+- Support for `vm.assume` (this is semantically identical to using `require`, but does simplify the
+    process of porting exisitng fuzz tests to be symbolic)
+- the `check` prefix now recognized for symbolic tests
+- `hevm test` now takes a `--number` argument to specify which block should be used when making rpc queries
+
+## Changed
+
+### Revert Semantics in Solidity Tests
+
+solidity tests no longer consider reverts to be a failure, and check only for the ds-test failed bit
+or user defined assertion failures (i.e. `Panic(0x01)`). This makes writing tests much easier as
+users no longer have to consider trivial reverts (e.g. arithmetic overflow).
+
+A positive (i.e. `prove`/`check`) test with no rechable assertion violations that does not have any
+succesful branches will still be considered a failure.
+
+## Removed
+
+hevm has been around for a while, and over time has accumulated many features. We decided to remove
+some of these features in the interest of focusing our attention, increasing our iteration speed and
+simplifying maintainance. The following user facing features have been removed from this release:
+
+- The visual debugger has been removed
+- All concrete ds-test executors have been removed (i.e. plain, fuzzer, invariant)
+- Rpc caching and state serialization has been removed (i.e. all `--cache` / `--state` flags)
+- The various `DAPP_TEST` variables are no longer observed
+- The `--initial-storage` flag no longer accepts a concrete prestore (valid values are now `Empty` or `Abstract`)
 
 ## Fixed
+
+This release also includes many small bugfixes:
 
 - CopySlice wraparound issue especially during CopyCallBytesToMemory
 - Contracts deployed during symbolic execution are created with an empty storage (instead of abstract in previous versions)
@@ -24,25 +77,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `test` now falls back to displaying an unecoded bytestring for calldata when the model returned by the solver has a different length the length of the arguments in the test signature.
 - we now generate correct counterexamples for branches where only a subset of input variables are referenced by the path conditions
 - `vm.prank` now works correctly when passed a symbolic address
+- `vm.prank` now works correctly when the next call transfers value
+- storage layout information will now be parsed from the output of `forge build` if it is available
 
-## Changed
+## API Changes
 
-- Less noisy console output during tracing
+### Reworked Storage Model / Symbolic Addresses
 
-### UI
+Adding symbolic addresses required some fairly significant changes to the way that we model storage.
+We introduced a new address type to `Expr` (`Expr EAddr`), that allows us to model fully symbolic
+addresses. Instead of modelling storage as a global symbolic 2D map (`address -> word -> word`) in
+`vm.env`, each contract now has it's own symbolic 1D map (`word -> word`), that is stored in the
+`vm.contracts` mapping. `vm.contracts` is now keyed on `Expr EAddr` instead of `Addr`. Addresses
+that are keys to the `vm.contracts` mapping are asserted to be distinct in our smt encoding. This
+allows us to support symbolic addresses in a fully static manner (i.e. we do not currently need to
+make any extra smt queries when looking up storage for a symbolic address).
 
-- `check` prefix now recognized for symbolic tests
-- solidity tests no longer consider reverts to be a failure, and check only for the ds-test failed bit or unser defined assertion failures (i.e. `Panic(0x01)`). A positive (i.e. non `proveFail`) test with no rechable assertion violations that does not have any succesful branches will still be considered a failure.
-- `test` now takes a `--number` argument to specify which block should be used when making rpc queries
-- The `--initial-storage` flag no longer accepts a concrete prestore (valid values are now `Empty` or `Abstract`)
-- The visual debugger has been removed
-- All concrete ds-test executors have been removed (i.e. plain, fuzzer, invariant)
-- Rpc caching and state serialization has been removed (i.e. all `--cache` / `--state` flags)
-- The various `DAPP_TEST` variables are no longer observed
+### Mutable Memory & ST
 
-### Internals
+We now use a mutable representation of memory if it is currently completely concrete. This is a
+significant performance improvement, and fixed a particulary egregious memory leak. It does entail
+the use of the `ST` monad, and introduces a new type parameter to the `VM` type that tags a given
+instance with it's thread local state. Library users will now need to either use the ST moand and
+`runST` or `stToIO` to compose and sequence vm executions.
 
-- Contract addresses can now be fully symbolic
+## GHC 9.4
+
+Hevm is now built with ghc9.4. While earlier compiler versions may continue to work for now, they
+are no longer explicitly tested or supported.
+
+### Other
+
 - Contract balances can now be fully symbolic
 - Contract code can now be fully abstract. Calls into contracts with unknown code will fail with `UnexpectedSymbolicArg`.
 - Run expression simplification on branch conditions
@@ -51,22 +116,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CopySlice+WriteWord+ConcreteBuf now truncates ConcreteBuf in special cases
 - Better simplification of Eq IR elements
 - Run a toplevel constant folding reasoning system on branch conditions
-
-## API Changes
-
-Support for fully symbolic contract addresses required some very extensive changes to our storage model:
-
-- A new type has been added to `Expr` that can represent concrete or symbolic addresses
-- The contracts mapping is now keyed on terms of type `Expr EAddr` (instead of `Addr`)
-- Storage has been moved from a global storage mapping in `vm.env` into a per contract one
-- Terms of type `Expr Storage` now model a per contract store (i.e. W256 -> W256)
-- A new type has been added to `Expr`: `EContract`. It has one constructor that
-  is a simplified view of the full `Contract` typed used in the `VM` storage mapping.
-- `Success` nodes in `Expr End` now return a mapping from `Expr EAddr` to `Expr EContract` instead of an `Expr Storage`.
-- Nonces are now modeled as a `Maybe Word64` (where `Nothing` can be read as "symbolic").
-- `Expr Storage` no longer has an `EmptyStore` constructor (use `ConcreteStore mempty` instead)
-- Contract balances are now fully symbolic
-- Contract code can now be unknown. There is a new constructor for `ContractCode` to represent this (`UnknownCode`)
+- Global config via a monad, which should allow for more refactoring
+- `evalProp` is renamed to `simplifyProp` for consistency
+- Mem explosion in `writeWord` function was possible in case `offset` was close to 2^256. Fixed.
+- BufLength was not simplified via bufLength function. Fixed.
+- Add and Mul are associative, let's use that to make Expr more canonical
 - `VMOpts` no longer takes an initial store, and instead takes a `baseState`
   which can be either `EmptyBase` or `AbstractBase`. This controls whether
   storage should be inialized as empty or fully abstract. Regardless of this

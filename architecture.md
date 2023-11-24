@@ -7,11 +7,11 @@ which gives a secure and predictable bundling of dependencies.
 
 # Steppers & Interpreters
 
-The core evm semnatics in hevm can be found in `EVM.hs`. EVM state is contained in the `VM` record,
+The core evm semantics in hevm can be found in `EVM.hs`. EVM state is contained in the `VM` record,
 and the `exec1` function executes a single opcode inside the monad `type EVM a = State VM a`.
 
 The core semantics are pure, and should information from the outside world be required to continue
-execution (rpc queries, smt queires, user input), execution will halt, and the `result` field of the
+execution (rpc queries, smt queries, user input), execution will halt, and the `result` field of the
 VM will be an instance of `VMFailure (Query _)`.
 
 Multiple steps of EVM execution are orchestrated via interpreters for a meta language. Programs in
@@ -30,7 +30,7 @@ instantiated with fetchers that could have different fetching strategies (e.g. c
 
 Interpreters execute Steppers and use their Fetcher to handle any Queries that need to be resolved.
 
-This architecure is very modular and pluggable, and allows the core semantics to be shared between
+This architecture is very modular and pluggable, and allows the core semantics to be shared between
 different interpreters, as well as the reuse of steppers between different interpreters, making it
 easy to e.g. replay a failed test in the debug interpreter, or to share the same test execution
 strategy between concrete and symbolic interpreters.
@@ -66,7 +66,7 @@ graph LR
 
 The symbolic execution features in hevm are built using a custom IR (imaginatively named `Expr`). This is a summarized trace semantics of a given EVM program.
 
-One important principle is that of local context: e.g. each term representing a read from a Buf / Storage will always contain a snapshot of the state of the buffer / store at the time the read occured. This ensures that all context relevant to a given operation is contained within the term that represents that operation, and allows subsequent analysis to be stateless.
+One important principle is that of local context: e.g. each term representing a read from a Buf / Storage will always contain a snapshot of the state of the buffer / store at the time the read occurred. This ensures that all context relevant to a given operation is contained within the term that represents that operation, and allows subsequent analysis to be stateless.
 
 Expressions in this language can have the following types:
 

@@ -63,8 +63,8 @@ jobs:
       - uses: actions/checkout@v3
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: UCRT64
-          path-type: inherit
+          msystem: CLANG64
+          path-type: minimal
           update: true
           install: >-
             base-devel
@@ -75,14 +75,23 @@ jobs:
           pacboy: >-
             cmake:p
             ninja:p
-            gcc:p
+            clang:p
+            lld:p
             autotools:p
             gmp:p
             openssl:p
-      - uses: haskell/actions/setup@v2
+      - uses: haskell-actions/setup@v2
         id: setup
         with:
-          ghc-version: '9.2.8'
+          ghc-version: '9.4.7'
+
+      - name: Extract GHC & Cabal paths
+        run: |
+          HASKELL_PATHS="$(cygpath -u "$GHC_PATH"):$(cygpath -u "$CABAL_PATH")"
+          echo "HASKELL_PATHS=$HASKELL_PATHS" >> "$GITHUB_ENV"
+        env:
+          GHC_PATH: ${{ steps.setup.outputs.ghc-path }}
+          CABAL_PATH: ${{ steps.setup.outputs.cabal-path }}
 
       - name: build and install c dependencies
         run: |
@@ -94,6 +103,7 @@ jobs:
           echo "::endgroup::"
       - name: Configure the build
         run: |
+          export PATH="$HASKELL_PATHS:$PATH"
           cabal configure --disable-tests --disable-benchmarks --disable-documentation
           cabal build --dry-run
           # The last step generates dist-newstyle/cache/plan.json for the cache key.
@@ -109,7 +119,9 @@ jobs:
           restore-keys: ${{ env.key }}-
 
       - name: Install haskell dependencies
-        run: cabal build all --only-dependencies
+        run: |
+          export PATH="$HASKELL_PATHS:$PATH"
+          cabal build all --only-dependencies
 
       # Cache dependencies already, so that we do not have to rebuild them should the subsequent steps fail.
       - name: Save cached dependencies
@@ -122,7 +134,9 @@ jobs:
 
       - name: build hevm library
         run: |
-          cabal build --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib"
+          export PATH="$HASKELL_PATHS:$PATH"
+          cabal build --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib" \
+                      --extra-include-dirs="D:/a/_temp/msys64/clang64/include" --extra-lib-dirs="D:/a/_temp/msys64/clang64/lib"
 
   cabal-check:
     runs-on: ubuntu-latest

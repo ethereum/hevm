@@ -1,4 +1,7 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
+
 
 module EVM.Stepper
   ( Action (..)
@@ -31,6 +34,8 @@ import EVM.Exec qualified
 import EVM.Fetch qualified as Fetch
 import EVM.Types
 import Control.Monad.ST (stToIO, RealWorld)
+import Control.Monad.IO.Class
+import EVM.Effects
 
 -- | The instruction type of the operational monad
 data Action gas s a where
@@ -105,35 +110,35 @@ enter :: Text -> Stepper gas s ()
 enter t = evm (EVM.pushTrace (EntryTrace t))
 
 interpret
-  :: forall gas a
-   . EVM.Gas gas
-  => Fetch.Fetcher gas RealWorld
+  :: forall m gas a
+   . (App m, EVM.Gas gas)
+  => Fetch.Fetcher m gas RealWorld
   -> VM gas RealWorld
   -> Stepper gas RealWorld a
-  -> IO a
+  -> m a
 interpret fetcher vm = eval . view
   where
-    eval :: ProgramView (Action gas RealWorld) a -> IO a
+    eval :: ProgramView (Action gas RealWorld) a -> m a
     eval (Return x) = pure x
     eval (action :>>= k) =
       case action of
         Exec -> do
-          (r, vm') <- stToIO $ runStateT EVM.Exec.exec vm
+          (r, vm') <- liftIO $ stToIO $ runStateT EVM.Exec.exec vm
           interpret fetcher vm' (k r)
         Wait (PleaseAskSMT (Lit c) _ continue) -> do
-          (r, vm') <- stToIO $ runStateT (continue (Case (c > 0))) vm
+          (r, vm') <- liftIO $ stToIO $ runStateT (continue (Case (c > 0))) vm
           interpret fetcher vm' (k r)
         Wait (PleaseAskSMT c _ _) ->
           internalError $ "cannot handle symbolic branch conditions in this interpreter: " <> show c
         Wait q -> do
           m <- fetcher q
-          vm' <- stToIO $ execStateT m vm
+          vm' <- liftIO $ stToIO $ execStateT m vm
           interpret fetcher vm' (k ())
         Ask _ ->
           internalError "cannot make choices with this interpreter"
         IOAct m -> do
-          r <- m
+          r <- liftIO m
           interpret fetcher vm (k r)
         EVM m -> do
-          (r, vm') <- stToIO $ runStateT m vm
+          (r, vm') <- liftIO $ stToIO $ runStateT m vm
           interpret fetcher vm' (k r)
