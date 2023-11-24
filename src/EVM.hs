@@ -385,19 +385,19 @@ exec1 = do
         -- more accurately refered to as KECCAK
         OpSha3 ->
           case stk of
-            xOffset:xSize:xs ->
-              burn (g_sha3 + g_sha3word * ceilDiv (unsafeInto xSize) 32) $
-                accessMemoryRange xOffset xSize $ do
-                  hash <- readMemory xOffset xSize >>= \case
-                    ConcreteBuf bs -> do
-                      let hash' = keccak' bs
-                      eqs <- use #keccakEqs
-                      assign #keccakEqs $
-                        PEq (Lit hash') (Keccak (ConcreteBuf bs)):eqs
-                      pure $ Lit hash'
-                    buf -> pure $ Keccak buf
-                  next
-                  assign (#state % #stack) (hash : xs)
+            xOffset:xSize:xs -> do
+              whenLit xSize $ \size -> burn'' (g_sha3 + g_sha3word * ceilDiv (unsafeInto size) 32)
+              accessMemoryRange xOffset xSize $ do
+                hash <- readMemory xOffset xSize >>= \case
+                  ConcreteBuf bs -> do
+                    let hash' = keccak' bs
+                    eqs <- use #keccakEqs
+                    assign #keccakEqs $
+                      PEq (Lit hash') (Keccak (ConcreteBuf bs)):eqs
+                    pure $ Lit hash'
+                  buf -> pure $ Keccak buf
+                next
+                assign (#state % #stack) (hash : xs)
             _ -> underrun
 
         OpAddress ->
@@ -436,12 +436,12 @@ exec1 = do
 
         OpCalldatacopy ->
           case stk of
-            xTo:xFrom:xSize:xs ->
-              burn (g_verylow + g_copy * ceilDiv (unsafeInto xSize) 32) $
-                accessMemoryRange xTo xSize $ do
-                  next
-                  assign (#state % #stack) xs
-                  copyBytesToMemory vm.state.calldata xSize xFrom xTo
+            xTo:xFrom:xSize:xs -> do
+              whenLit xSize (\size -> burn'' (g_verylow + g_copy * ceilDiv (unsafeInto size) 32))
+              accessMemoryRange xTo xSize $ do
+                next
+                assign (#state % #stack) xs
+                copyBytesToMemory vm.state.calldata xSize xFrom xTo
             _ -> underrun
 
         OpCodesize ->
@@ -450,22 +450,23 @@ exec1 = do
 
         OpCodecopy ->
           case stk of
-            memOffset:codeOffset:n':xs ->
-              case n' of
+            memOffset:codeOffset:n':xs -> let
+              action = accessMemoryRange memOffset n' $ do
+                next
+                assign (#state % #stack) xs
+                case toBuf vm.state.code of
+                  Just b -> copyBytesToMemory b n' codeOffset memOffset
+                  Nothing -> internalError "Cannot produce a buffer from UnknownCode"
+              in case n' of
                 Lit n -> case toWord64 n of
                   Nothing -> vmError IllegalOverflow
                   Just n'' ->
-                    if n'' <= ( (maxBound :: Word64) - g_verylow ) `div` g_copy * 32 then
-                      burn (g_verylow + g_copy * ceilDiv (unsafeInto n) 32) $
-                        accessMemoryRange memOffset n' $ do
-                          next
-                          assign (#state % #stack) xs
-                          case toBuf vm.state.code of
-                            Just b -> copyBytesToMemory b n' codeOffset memOffset
-                            Nothing -> internalError "Cannot produce a buffer from UnknownCode"
+                    if n'' <= ( (maxBound :: Word64) - g_verylow ) `div` g_copy * 32
+                    then burn (g_verylow + g_copy * ceilDiv (unsafeInto n) 32) action
                     else vmError IllegalOverflow
                 _ -> do
                   pushTo #constraints $ n' .< (Lit $ 2 ^ (64 :: Int))
+                  action
             _ -> underrun
 
         OpGasprice ->
@@ -499,16 +500,16 @@ exec1 = do
               forceAddr extAccount' "EXTCODECOPY" $ \extAccount -> do
                 acc <- accessAccountForGas extAccount
                 let cost = if acc then g_warm_storage_read else g_cold_account_access
-                burn (cost + g_copy * ceilDiv (unsafeInto codeSize) 32) $
-                  accessMemoryRange memOffset codeSize $
-                    fetchAccount extAccount $ \c -> do
-                      next
-                      assign (#state % #stack) xs
-                      case view bytecode c of
-                        Just b -> copyBytesToMemory b codeSize codeOffset memOffset
-                        Nothing -> do
-                          pc <- use (#state % #pc)
-                          partial $ UnexpectedSymbolicArg pc "Cannot copy from unknown code at" (wrap [extAccount])
+                whenLit codeSize $ \size -> burn'' (cost + g_copy * ceilDiv (unsafeInto size) 32)
+                accessMemoryRange memOffset codeSize $
+                  fetchAccount extAccount $ \c -> do
+                    next
+                    assign (#state % #stack) xs
+                    case view bytecode c of
+                      Just b -> copyBytesToMemory b codeSize codeOffset memOffset
+                      Nothing -> do
+                        pc <- use (#state % #pc)
+                        partial $ UnexpectedSymbolicArg pc "Cannot copy from unknown code at" (wrap [extAccount])
             _ -> underrun
 
         OpReturndatasize ->
@@ -517,22 +518,22 @@ exec1 = do
 
         OpReturndatacopy ->
           case stk of
-            xTo:xFrom:xSize:xs ->
-              burn (g_verylow + g_copy * ceilDiv (unsafeInto xSize) 32) $
-                accessMemoryRange xTo xSize $ do
-                  next
-                  assign (#state % #stack) xs
+            xTo:xFrom:xSize:xs -> do
+              whenLit xSize $ \sz -> burn'' (g_verylow + g_copy * ceilDiv (unsafeInto sz) 32)
+              accessMemoryRange xTo xSize $ do
+                next
+                assign (#state % #stack) xs
 
-                  let jump True = vmError ReturnDataOutOfBounds
-                      jump False = copyBytesToMemory vm.state.returndata xSize xFrom xTo
+                let jump True = vmError ReturnDataOutOfBounds
+                    jump False = copyBytesToMemory vm.state.returndata xSize xFrom xTo
 
-                  case (xFrom, xSize, bufLength vm.state.returndata) of
-                    (Lit f, Lit sz, Lit l) ->
-                      jump $ l < f + sz || f + sz < f
-                    _ -> do
-                      let oob = Expr.lt (bufLength vm.state.returndata) (Expr.add xFrom xSize)
-                          overflow = Expr.lt (Expr.add xFrom xSize) (xFrom)
-                      branch (Expr.or oob overflow) jump
+                case (xFrom, xSize, bufLength vm.state.returndata) of
+                  (Lit f, Lit sz, Lit l) ->
+                    jump $ l < f + sz || f + sz < f
+                  _ -> do
+                    let oob = Expr.lt (bufLength vm.state.returndata) (Expr.add xFrom xSize)
+                        overflow = Expr.lt (Expr.add xFrom xSize) (xFrom)
+                    branch (Expr.or oob overflow) jump
             _ -> underrun
 
         OpExtcodehash ->
@@ -2070,7 +2071,7 @@ accessMemoryRange (Lit offs) (Lit sz) continue =
         then vmError IllegalOverflow
         else accessUnboundedMemoryRange offs64 sz64 continue
 accessMemoryRange offs sz continue = do
-  -- accessing memory past 2^64 is undefined behaviour
+  -- accessing memory past 2^64 is undefined behaviour in geth
   pushTo #constraints $ Expr.add offs sz .<= (Lit $ 2 ^ (64 :: Int))
   continue
 
@@ -2553,6 +2554,7 @@ freezeMemory memory =
 class VMOps (t :: VMType) where
   burn :: Word64 -> EVM t s () -> EVM t s ()
   burn' :: Gas t -> EVM t s () -> EVM t s ()
+  burn'' :: Word64 -> EVM t s ()
   -- TODO: change to EvmWord t
   burnExp :: Expr EWord -> EVM t s () -> EVM t s ()
 
@@ -2578,6 +2580,7 @@ class VMOps (t :: VMType) where
 instance VMOps Symbolic where
   burn _ continue = continue
   burn' _ continue = continue
+  burn'' _ = pure ()
   burnExp _ continue = continue
   initialGas = ()
   ensureGas _ continue = continue
@@ -2606,6 +2609,7 @@ instance VMOps Concrete where
         vmError (OutOfGas available n)
 
   burn' = burn
+  burn'' n = burn n (pure ())
 
   burnExp exponent' continue = do
     forceConcrete exponent' "EXP: symbolic exponent" $ \exponent -> do
@@ -2634,12 +2638,13 @@ instance VMOps Concrete where
       forceLit _ = internalError "concrete vm, shouldn't ever happen"
 
   -- Gas cost of create, including hash cost if needed
-  costOfCreate (FeeSchedule {..}) availableGas size hashNeeded = (createCost, initGas)
+  costOfCreate (FeeSchedule {..}) availableGas (Lit size) hashNeeded = (createCost, initGas)
     where
       byteCost   = if hashNeeded then g_sha3word + g_initcodeword else g_initcodeword
       createCost = g_create + codeCost
       codeCost   = byteCost * (ceilDiv (unsafeInto size) 32)
       initGas    = allButOne64th (availableGas - createCost)
+  costOfCreate _ _ _ _ = internalError "symbolic word encountered in concrete vm"
 
   -- Gas cost function for CALL, transliterated from the Yellow Paper.
   costOfCall (FeeSchedule {..}) recipientExists (Lit xValue) availableGas xGas target continue = do
@@ -2721,3 +2726,8 @@ symbolifyResult result =
     VMFailure e -> VMFailure e
     VMSuccess b -> VMSuccess b
     Unfinished p -> Unfinished p
+
+-- | Conditionally execute an action only if the input is concrete
+whenLit :: Expr EWord -> (W256 -> EVM t s ()) -> EVM t s ()
+whenLit (Lit w) action = action w
+whenLit _ _ = pure ()
