@@ -58,6 +58,8 @@ common shared
     -Wno-unticked-promoted-constructors
     -Wno-orphans
     -Wno-ambiguous-fields
+    -fspecialize-aggressively
+    -fexpose-all-unfoldings
   default-language: GHC2021
   default-extensions:
     DuplicateRecordFields
