@@ -1354,6 +1354,9 @@ constFoldProp ps = oneRun ps (ConstState mempty True)
 concKeccakSimpExpr :: Expr a -> Expr a
 concKeccakSimpExpr orig = untilFixpoint ((mapExpr concKeccakOnePass) . simplify) orig
 
+-- Only concretize Keccak in Props
+-- Needed because if it also simplified, we may not find some simplification errors, as
+-- simplification would always be ON
 concKeccakProps :: [Prop] -> [Prop]
 concKeccakProps orig = simplifyProps $ untilFixpoint (map (mapProp concKeccakOnePass)) orig
 
