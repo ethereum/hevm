@@ -276,10 +276,9 @@ interpret fetcher maxIter askSmtIters heuristic vm =
         case q of
           PleaseAskSMT cond preconds continue -> do
             let
-              simpCond = Expr.concKeccakSimpExpr True cond
               -- no concretiziation here, or we may lose information
               simpProps = Expr.simplifyProps ((cond ./= Lit 0):preconds)
-            case simpCond of
+            case Expr.concKeccakSimpExpr cond of
               -- is the condition concrete?
               Lit c ->
                 -- have we reached max iterations, are we inside a loop?
@@ -836,7 +835,7 @@ formatCex cd sig m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
     -- callvalue check inserted by solidity in contracts that don't have any
     -- payable functions).
     cd' = case sig of
-      Nothing -> prettyBuf . (Expr.concKeccakSimpExpr True) . defaultSymbolicValues $ subModel m cd
+      Nothing -> prettyBuf . Expr.concKeccakSimpExpr . defaultSymbolicValues $ subModel m cd
       Just (Sig n ts) -> prettyCalldata m cd n ts
 
     storeCex :: [Text]

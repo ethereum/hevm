@@ -1350,35 +1350,20 @@ constFoldProp ps = oneRun ps (ConstState mempty True)
         PBool False -> put $ ConstState {canBeSat=False, values=mempty}
         _ -> pure ()
 
--- Concretize Keccak Expressions until fixed-point.
--- Can either simplify before, or not
-concKeccakSimpExpr :: Bool -> Expr a -> Expr a
-concKeccakSimpExpr simp orig = final
-  where
-    simplified = if simp then simplify orig else orig
-    conc = mapExpr concKeccakSimpOnePass simplified
-    final = if conc == orig then conc
-                            else concKeccakSimpExpr simp conc
+-- Concretize & simplify Keccak expressions until fixed-point.
+concKeccakSimpExpr :: Expr a -> Expr a
+concKeccakSimpExpr orig = untilFixpoint ((mapExpr concKeccakOnePass) . simplify) orig
 
-concKeccakSimps :: Bool -> [Prop] -> [Prop]
-concKeccakSimps simp orig = final
-  where
-    conc = simplifyProps $ map (concKeccakSimp simp) orig
-    final = if conc == orig then conc
-                            else concKeccakSimps simp conc
+concKeccakProps :: [Prop] -> [Prop]
+concKeccakProps orig = simplifyProps $ untilFixpoint (map (mapProp concKeccakOnePass)) orig
 
-concKeccakSimp :: Bool -> Prop -> Prop
-concKeccakSimp simp orig = final
-  where
-    simplified = if simp then simplifyProp orig else orig
-    conc = mapProp concKeccakSimpOnePass simplified
-    final = if conc == orig then conc
-                            else concKeccakSimp simp conc
-
-concKeccakSimpOnePass :: Expr a -> Expr a
-concKeccakSimpOnePass (Keccak (ConcreteBuf bs)) = Lit (keccak' bs)
-concKeccakSimpOnePass orig@(Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) orig2@(WriteWord (Lit 0) _ (ConcreteBuf bs)) (ConcreteBuf ""))) =
+-- Simplifies in case the input to the Keccak is of specific array/map format and
+--            can be simplified into a concrete value
+-- Turns (Keccak ConcreteBuf) into a Lit
+concKeccakOnePass :: Expr a -> Expr a
+concKeccakOnePass (Keccak (ConcreteBuf bs)) = Lit (keccak' bs)
+concKeccakOnePass orig@(Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) orig2@(WriteWord (Lit 0) _ (ConcreteBuf bs)) (ConcreteBuf ""))) =
   case (BS.length bs, (copySlice (Lit 0) (Lit 0) (Lit 64) (simplify orig2) (ConcreteBuf ""))) of
     (64, ConcreteBuf a) -> Lit (keccak' a)
     _ -> orig
-concKeccakSimpOnePass x = x
+concKeccakOnePass x = x

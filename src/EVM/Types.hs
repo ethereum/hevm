@@ -1311,6 +1311,10 @@ paddedShowHex w n = pad ++ str
      str = showHex n ""
      pad = replicate (w - length str) '0'
 
+untilFixpoint :: Eq a => (a -> a) -> a -> a
+untilFixpoint f a = if f a == a
+                    then a
+                    else untilFixpoint f (f a)
 
 -- Optics ------------------------------------------------------------------------------------------
 

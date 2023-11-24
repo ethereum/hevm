@@ -667,7 +667,7 @@ exec1 = do
                 else do
                   let
                     original =
-                      case Expr.concKeccakSimpExpr True $ SLoad x this.origStorage of
+                      case Expr.concKeccakSimpExpr $ SLoad x this.origStorage of
                         Lit v -> v
                         _ -> 0
                     storage_cost =
@@ -1260,7 +1260,7 @@ branch cond continue = do
   query $ PleaseAskSMT cond pathconds (choosePath loc)
   where
     condSimp = Expr.simplify cond
-    condSimpConc = Expr.concKeccakSimpExpr True condSimp
+    condSimpConc = Expr.concKeccakSimpExpr condSimp
     choosePath :: CodeLocation -> BranchCondition -> EVM s ()
     choosePath loc (Case v) = do
       assign #result Nothing
@@ -1304,7 +1304,7 @@ accessStorage
   -> (Expr EWord -> EVM s ())
   -> EVM s ()
 accessStorage addr slot continue = do
-  let slotConc = Expr.concKeccakSimpExpr True slot
+  let slotConc = Expr.concKeccakSimpExpr slot
   use (#env % #contracts % at addr) >>= \case
     Just c ->
       -- Try first without concretization. Then if we get a Just, with concretization

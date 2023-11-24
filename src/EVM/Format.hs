@@ -314,7 +314,7 @@ showTrace dapp env trace =
       let calltype = if target == context
                      then "call "
                      else "delegatecall "
-          hash' = fromJust $ maybeLitWord hash
+          hash' = fromJust $ maybeLitWord $ Expr.concKeccakSimpExpr hash
       in case preview (ix hash' % _2) dapp.solcByHash of
         Nothing ->
           calltype
