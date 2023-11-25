@@ -703,16 +703,16 @@ exec1 = do
                   Just i -> checkJump i xs
             _ -> underrun
 
-        OpJumpi -> do
+        OpJumpi ->
           case stk of
-            (x:y:xs) -> forceConcrete x "JUMPI: symbolic jumpdest" $ \x' ->
-                burn g_high $
-                  let jump :: Bool -> EVM t s ()
-                      jump False = assign (#state % #stack) xs >> next
-                      jump _    = case toInt x' of
-                        Nothing -> vmError BadJumpDestination
-                        Just i -> checkJump i xs
-                  in branch y jump
+            x:y:xs -> forceConcrete x "JUMPI: symbolic jumpdest" $ \x' ->
+              burn g_high $
+                let jump :: Bool -> EVM t s ()
+                    jump False = assign (#state % #stack) xs >> next
+                    jump _    = case toInt x' of
+                      Nothing -> vmError BadJumpDestination
+                      Just i -> checkJump i xs
+                in branch y jump
             _ -> underrun
 
         OpPc ->
@@ -759,11 +759,11 @@ exec1 = do
 
         OpCall ->
           case stk of
-            xGas':xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
+            xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
               branch (Expr.gt xValue (Lit 0)) $ \gt0 -> do
                 (if gt0 then notStatic else id) $
                   forceAddr xTo' "unable to determine a call target" $ \xTo ->
-                    case gasTryFrom xGas' of
+                    case gasTryFrom xGas of
                       Left _ -> vmError IllegalOverflow
                       Right gas ->
                         delegateCall this gas xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
@@ -782,9 +782,9 @@ exec1 = do
 
         OpCallcode ->
           case stk of
-            xGas':xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
+            xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
               forceAddr xTo' "unable to determine a call target" $ \xTo ->
-                case gasTryFrom xGas' of
+                case gasTryFrom xGas of
                   Left _ -> vmError IllegalOverflow
                   Right gas ->
                     delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
@@ -864,14 +864,14 @@ exec1 = do
 
         OpStaticcall ->
           case stk of
-            xGas':xTo:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
+            xGas:xTo:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
               case wordToAddr xTo of
                 Nothing -> do
                   loc <- codeloc
                   let msg = "Unable to determine a call target"
                   partial $ UnexpectedSymbolicArg (snd loc) msg [SomeExpr xTo]
                 Just xTo' ->
-                  case gasTryFrom xGas' of
+                  case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
                     Right gas ->
                       delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs $
@@ -2572,7 +2572,6 @@ freezeMemory memory =
 
 
 class VMOps (t :: VMType) where
-  burn :: Word64 -> EVM t s () -> EVM t s ()
   burn' :: Gas t -> EVM t s () -> EVM t s ()
   -- TODO: change to EvmWord t
   burnExp :: Expr EWord -> EVM t s () -> EVM t s ()
@@ -2603,7 +2602,6 @@ class VMOps (t :: VMType) where
   toGas :: Word64 -> Gas t
 
 instance VMOps Symbolic where
-  burn _ continue = continue
   burn' _ continue = continue
   burnExp _ continue = continue
   burnSha3 _ continue = continue
@@ -2629,7 +2627,7 @@ instance VMOps Symbolic where
   toGas _ = ()
 
 instance VMOps Concrete where
-  burn n continue = do
+  burn' n continue = do
     available <- use (#state % #gas)
     if n <= available
       then do
@@ -2639,15 +2637,12 @@ instance VMOps Concrete where
       else
         vmError (OutOfGas available n)
 
-  burn' = burn
-
-  burnExp exponent' continue = do
-    forceConcrete exponent' "EXP: symbolic exponent" $ \exponent -> do
-      FeeSchedule {..} <- gets (.block.schedule)
-      let cost = if exponent == 0
-            then g_exp
-            else g_exp + g_expbyte * unsafeInto (ceilDiv (1 + log2 exponent) 8)
-      burn cost continue
+  burnExp (forceLit -> exponent) continue = do
+    FeeSchedule {..} <- gets (.block.schedule)
+    let cost = if exponent == 0
+          then g_exp
+          else g_exp + g_expbyte * unsafeInto (ceilDiv (1 + log2 exponent) 8)
+    burn cost continue
 
   burnSha3 (forceLit -> xSize) continue = do
     FeeSchedule {..} <- gets (.block.schedule)
@@ -2658,11 +2653,11 @@ instance VMOps Concrete where
     burn (g_verylow + g_copy * ceilDiv (unsafeInto xSize) 32) continue
 
   burnCodecopy (forceLit -> n) continue =
-    case toWord64 n of
-      Nothing -> vmError IllegalOverflow
-      Just n'' -> do
+    case tryFrom n of
+      Left _ -> vmError IllegalOverflow
+      Right n' -> do
         FeeSchedule {..} <- gets (.block.schedule)
-        if n'' <= ( (maxBound :: Word64) - g_verylow ) `div` g_copy * 32 then
+        if n' <= ( (maxBound :: Word64) - g_verylow ) `div` g_copy * 32 then
           burn (g_verylow + g_copy * ceilDiv (unsafeInto n) 32) continue
         else vmError IllegalOverflow
 
@@ -2684,15 +2679,16 @@ instance VMOps Concrete where
       _ -> vmError IllegalOverflow
 
   initialGas = 0
+
   ensureGas amount continue = do
     availableGas <- use (#state % #gas)
 
     if availableGas <= amount then
-      finishFrame (FrameErrored (OutOfGas availableGas amount))
+      vmError (OutOfGas availableGas amount)
     else continue
 
-  gasTryFrom w256 =
-    case tryFrom $ forceLit w256 of
+  gasTryFrom (forceLit -> w256) =
+    case tryFrom w256 of
       Left _ -> Left ()
       Right a -> Right a
 
@@ -2705,7 +2701,7 @@ instance VMOps Concrete where
       initGas    = allButOne64th (availableGas - createCost)
 
   -- Gas cost function for CALL, transliterated from the Yellow Paper.
-  costOfCall (FeeSchedule {..}) recipientExists (Lit xValue) availableGas xGas target continue = do
+  costOfCall (FeeSchedule {..}) recipientExists (forceLit -> xValue) availableGas xGas target continue = do
     acc <- accessAccountForGas target
     let call_base_gas = if acc then g_warm_storage_read else g_cold_account_access
         c_new = if not recipientExists && xValue /= 0
@@ -2718,11 +2714,7 @@ instance VMOps Concrete where
                     else xGas
         c_callgas = if xValue /= 0 then c_gascap + g_callstipend else c_gascap
     let (cost, gas') = (c_gascap + c_extra, c_callgas)
-
-    -- burn (cost - gas') $
     continue cost gas'
-  -- calls are free if value is symbolic :)
-  costOfCall _ _ _ _ _ _ continue = continue 0 0
 
   -- When entering a call, the gas allowance is counted as burned
   -- in advance; this unburns the remainder and adds it to the
@@ -2731,7 +2723,6 @@ instance VMOps Concrete where
     let remainingGas = oldVm.state.gas
     modifying #burned (subtract remainingGas)
     modifying (#state % #gas) (+ remainingGas)
-
 
   payRefunds = do
     -- compute and pay the refund to the caller and the
@@ -2760,7 +2751,7 @@ instance VMOps Concrete where
 
   subGas gasCap cost = gasCap - cost
 
-  toGas amount = amount
+  toGas = id
 
 -- Create symbolic VM from concrete VM
 symbolify :: VM Concrete s -> VM Symbolic s
@@ -2788,3 +2779,6 @@ symbolifyResult result =
 forceLit :: Expr EWord -> W256
 forceLit (Lit w) = w
 forceLit _ = internalError "concrete vm, shouldn't ever happen"
+
+burn :: VMOps t => Word64 -> EVM t s () -> EVM t s ()
+burn = burn' . toGas
