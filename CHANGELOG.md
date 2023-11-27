@@ -6,10 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Changed
-- Less noisy console output during tracing
 - Minimum distance requirements are now asserted for Keccak function calls. They assert that it's hard to generate two Keccak's that are less than 256 afar.
 - Keccak concretization is now done only after all simplifications are performed. This helps with simplification pre-concretization
 
+## Added
+- New solc-specific simplification rules that should make the final Props a lot more readable
+- Prop is now correctly ordered, better BufLength and Max simplifications of Expr,
+  and further solc-specific simplifications of Expr
+- Simplify earlier and don't check reachability for things statically determined to be FALSE
 
 ## [0.52.0] - 2023-10-26
 
@@ -77,6 +81,7 @@ This release also includes many small bugfixes:
 - `test` now falls back to displaying an unecoded bytestring for calldata when the model returned by the solver has a different length the length of the arguments in the test signature.
 - we now generate correct counterexamples for branches where only a subset of input variables are referenced by the path conditions
 - `vm.prank` now works correctly when passed a symbolic address
+- `vm.prank` now works correctly when the next call transfers value
 - storage layout information will now be parsed from the output of `forge build` if it is available
 
 ## API Changes
@@ -118,6 +123,7 @@ are no longer explicitly tested or supported.
 - `evalProp` is renamed to `simplifyProp` for consistency
 - Mem explosion in `writeWord` function was possible in case `offset` was close to 2^256. Fixed.
 - BufLength was not simplified via bufLength function. Fixed.
+- Add and Mul are associative, let's use that to make Expr more canonical
 - `VMOpts` no longer takes an initial store, and instead takes a `baseState`
   which can be either `EmptyBase` or `AbstractBase`. This controls whether
   storage should be inialized as empty or fully abstract. Regardless of this

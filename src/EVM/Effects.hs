@@ -31,14 +31,18 @@ import Control.Monad.IO.Unlift
 import EVM.Dapp (DappInfo)
 import EVM.Types (VM(..))
 import Control.Monad.ST (RealWorld)
+import Data.Text (Text)
 import Data.Text.IO qualified as T
+import System.IO (stderr)
 import EVM.Format (showTraceTree)
 import EVM (traceForest)
+
 
 -- Abstract Effects --------------------------------------------------------------------------------
 -- Here we define the abstract interface for the effects that we wish to model
 
--- Global config
+
+-- Read from global config
 class Monad m => ReadConfig m where
   readConfig ::  m Config
 
@@ -64,6 +68,11 @@ defaultConfig = Config
   , dumpTrace = False
   }
 
+-- Write to the console
+class Monad m => TTY m where
+  writeOutput :: Text -> m ()
+  writeErr :: Text -> m ()
+
 writeTraceDapp :: App m => DappInfo -> VM RealWorld -> m ()
 writeTraceDapp dapp vm = do
   conf <- readConfig
@@ -74,7 +83,9 @@ writeTrace vm = do
   conf <- readConfig
   liftIO $ when conf.dumpTrace $ writeFile "VM.trace" (show $ traceForest vm)
 
+
 -- IO Interpretation -------------------------------------------------------------------------------
+
 
 newtype Env = Env
   { config :: Config
@@ -88,12 +99,18 @@ instance Monad m => ReadConfig (ReaderT Env m) where
     e <- ask
     pure e.config
 
+instance (Monad m, MonadIO m) => TTY (ReaderT Env m) where
+  writeOutput txt = liftIO $ T.putStrLn txt
+  writeErr txt = liftIO $ T.hPutStr stderr txt
+
 runEnv :: Env -> ReaderT Env m a -> m a
 runEnv e a = runReaderT a e
 
+
 -- Helpful Aliases ---------------------------------------------------------------------------------
 
-type App m = (MonadUnliftIO m, ReadConfig m)
+
+type App m = (MonadUnliftIO m, ReadConfig m, TTY m)
 
 runApp :: ReaderT Env m a -> m a
 runApp = runEnv defaultEnv

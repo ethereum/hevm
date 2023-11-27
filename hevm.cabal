@@ -286,7 +286,8 @@ common test-base
     optics-extra,
     witch,
     unliftio-core,
-    exceptions
+    exceptions,
+    MissingH
 
 library test-utils
   import:

@@ -567,14 +567,9 @@ verify solvers opts preState maybepost = do
       Nothing -> pure (expr, [Qed ()])
       Just post -> liftIO $ do
         let
-          -- Filter out any leaves that can be statically shown to be safe
-          canViolate = flip filter flattened $
-            \leaf -> case Expr.simplifyProp (post preState leaf) of
-              PBool True -> False
-              _ -> True
-          assumes = preState.constraints
-          withQueries = canViolate <&> \leaf ->
-            (assertProps conf (PNeg (post preState leaf) : assumes <> extractProps leaf), leaf)
+          -- Filter out any leaves from `flattened` that can be statically shown to be safe
+          tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf preState.constraints post, leaf)
+          withQueries = filter canBeSat tocheck <&> \(a, leaf) -> (assertProps conf a, leaf)
         putStrLn $ "Checking for reachability of "
                      <> show (length withQueries)
                      <> " potential property violation(s)"
@@ -586,6 +581,12 @@ verify solvers opts preState maybepost = do
         let cexs = filter (\(res, _) -> not . isUnsat $ res) results
         pure $ if Prelude.null cexs then (expr, [Qed ()]) else (expr, fmap toVRes cexs)
   where
+    toProps leaf constr post = PNeg (post preState leaf) : constr <> extractProps leaf
+    toPropsFinal leaf constr post = if opts.simp then Expr.simplifyProps $ toProps leaf constr post
+                                                 else toProps leaf constr post
+    canBeSat (a, _) = case a of
+        [PBool False] -> False
+        _ -> True
     toVRes :: (CheckSatResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
       Sat model -> Cex (leaf, expandCex preState model)

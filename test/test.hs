@@ -20,6 +20,7 @@ import Data.Binary.Get (runGetOrFail)
 import Data.DoubleWord
 import Data.Either
 import Data.List qualified as List
+import Data.List.Utils as DLU
 import Data.Map.Strict qualified as Map
 import Data.Maybe
 import Data.String.Here
@@ -44,6 +45,7 @@ import Test.Tasty.ExpectedFailure
 import Text.RE.TDFA.String
 import Text.RE.Replace
 import Witch (unsafeInto, into)
+import Data.Containers.ListUtils (nubOrd)
 
 import Optics.Core hiding (pre, re, elements)
 import Optics.State
@@ -316,6 +318,42 @@ tests = testGroup "hevm"
         let e = ReadByte (Lit 0x0) (WriteWord (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd) (Lit 0x0) (ConcreteBuf "\255\255\255\255"))
         b <- checkEquiv e (Expr.simplify e)
         assertBoolM "Simplifier failed" b
+    , test "simp-max-buflength" $ do
+      let simp = Expr.simplify $ Max (Lit 0) (BufLength (AbstractBuf "txdata"))
+      assertEqualM "max-buflength rules" simp $ BufLength (AbstractBuf "txdata")
+    , test "simp-PLT-max" $ do
+      let simp = Expr.simplifyProp $ PLT (Max (Lit 5) (BufLength (AbstractBuf "txdata"))) (Lit 99)
+      assertEqualM "max-buflength rules" simp $ PLT (BufLength (AbstractBuf "txdata")) (Lit 99)
+    , test "simp-assoc-add1" $ do
+      let simp = Expr.simplify $        Add (Var "a") (Add (Var "b") (Var "c"))
+      assertEqualM "assoc rules" simp $ Add (Add (Var "a") (Var "b")) (Var "c")
+    , test "simp-assoc-add2" $ do
+      let simp = Expr.simplify $        Add (Lit 1) (Add (Var "b") (Var "c"))
+      assertEqualM "assoc rules" simp $ Add (Add (Lit 1) (Var "b")) (Var "c")
+    , test "simp-assoc-add3" $ do
+      let simp = Expr.simplify $        Add (Lit 1) (Add (Lit 2) (Var "c"))
+      assertEqualM "assoc rules" simp $ Add (Lit 3) (Var "c")
+    , test "simp-assoc-add4" $ do
+      let simp = Expr.simplify $        Add (Lit 1) (Add (Var "b") (Lit 2))
+      assertEqualM "assoc rules" simp $ Add (Lit 3) (Var "b")
+    , test "simp-assoc-add5" $ do
+      let simp = Expr.simplify $        Add (Var "a") (Add (Lit 1) (Lit 2))
+      assertEqualM "assoc rules" simp $ Add (Lit 3) (Var "a")
+    , test "simp-assoc-add6" $ do
+      let simp = Expr.simplify $        Add (Lit 7) (Add (Lit 1) (Lit 2))
+      assertEqualM "assoc rules" simp $ Lit 10
+    , test "simp-assoc-add-7" $ do
+      let simp = Expr.simplify $        Add (Var "a") (Add (Var "b") (Lit 2))
+      assertEqualM "assoc rules" simp $ Add (Add (Lit 2) (Var "a")) (Var "b")
+    , test "simp-assoc-add8" $ do
+      let simp = Expr.simplify $        Add (Add (Var "a") (Add (Lit 0x2) (Var "b"))) (Add (Var "c") (Add (Lit 0x2) (Var "d")))
+      assertEqualM "assoc rules" simp $ Add (Add (Add (Add (Lit 0x4) (Var "a")) (Var "b")) (Var "c")) (Var "d")
+    , test "simp-assoc-mul1" $ do
+      let simp = Expr.simplify $        Mul (Var "a") (Mul (Var "b") (Var "c"))
+      assertEqualM "assoc rules" simp $ Mul (Mul (Var "a") (Var "b")) (Var "c")
+    , test "simp-assoc-mul2" $ do
+      let simp = Expr.simplify       $  Mul (Lit 2) (Mul (Var "a") (Lit 3))
+      assertEqualM "assoc rules" simp $ Mul (Lit 6) (Var "a")
     , test "bufLength-simp" $ do
       let
         a = BufLength (ConcreteBuf "ab")
@@ -1551,6 +1589,28 @@ tests = testGroup "hevm"
         checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
      ,
+     test "opcode-mul-assoc" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(int256 a, int256 b, int256 c) external pure {
+              int256 tmp1;
+              int256 out1;
+              int256 tmp2;
+              int256 out2;
+              assembly {
+                tmp1 := mul(a, b)
+                out1 := mul(tmp1,c)
+                tmp2 := mul(b, c)
+                out2 := mul(a, tmp2)
+              }
+              assert (out1 == out2);
+              }
+             }
+            |]
+        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256,int256,int256)" [AbiIntType 256, AbiIntType 256, AbiIntType 256])) [] defaultVeriOpts
+        putStrLnM "MUL is associative"
+     ,
      -- TODO look at tests here for SAR: https://github.com/dapphub/dapptools/blob/01ef8ea418c3fe49089a44d56013d8fcc34a1ec2/src/dapp-tests/pass/constantinople.sol#L250
      test "opcode-sar-neg" $ do
         Just c <- solcRuntime "MyContract"
@@ -2666,7 +2726,16 @@ tests = testGroup "hevm"
   ]
   , testGroup "simplification-working"
   [
-    test "prop-simp-bool1" $ do
+    test "PEq-and-PNot-PEq-1" $ do
+      let a = [PEq (Lit 0x539) (Var "arg1"),PNeg (PEq (Lit 0x539) (Var "arg1"))]
+      assertEqualM "Must simplify to PBool False" (Expr.simplifyProps a) ([PBool False])
+    , test "PEq-and-PNot-PEq-2" $ do
+      let a = [PEq (Var "arg1") (Lit 0x539),PNeg (PEq (Lit 0x539) (Var "arg1"))]
+      assertEqualM "Must simplify to PBool False" (Expr.simplifyProps a) ([PBool False])
+    , test "PEq-and-PNot-PEq-3" $ do
+      let a = [PEq (Var "arg1") (Lit 0x539),PNeg (PEq (Var "arg1") (Lit 0x539))]
+      assertEqualM "Must simplify to PBool False" (Expr.simplifyProps a) ([PBool False])
+    , test "prop-simp-bool1" $ do
       let
         a = successGen [PAnd (PBool True) (PBool False)]
         b = Expr.simplify a
@@ -2701,6 +2770,25 @@ tests = testGroup "hevm"
         a = successGen [PImpl (PBool False) (PEq (Var "abc") (Var "bcd"))]
         b = Expr.simplify a
       assertEqualM "Must simplify down" (successGen []) b
+    , test "propSimp-no-duplicate1" $ do
+      let a = [PAnd (PGEq (Max (Lit 0x44) (BufLength (AbstractBuf "txdata"))) (Lit 0x44)) (PLT (Max (Lit 0x44) (BufLength (AbstractBuf "txdata"))) (Lit 0x10000000000000000)), PAnd (PGEq (Var "arg1") (Lit 0x0)) (PLEq (Var "arg1") (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)),PEq (Lit 0x63) (Var "arg2"),PEq (Lit 0x539) (Var "arg1"),PEq TxValue (Lit 0x0),PEq (IsZero (Eq (Lit 0x63) (Var "arg2"))) (Lit 0x0)]
+      let simp = Expr.simplifyProps a
+      assertEqualM "must not duplicate" simp (nubOrd simp)
+      assertEqualM "We must be able to remove all duplicates" (length $ nubOrd simp) (length $ DLU.uniq simp)
+    , test "propSimp-no-duplicate2" $ do
+      let a = [PNeg (PBool False),PAnd (PGEq (Max (Lit 0x44) (BufLength (AbstractBuf "txdata"))) (Lit 0x44)) (PLT (Max (Lit 0x44) (BufLength (AbstractBuf "txdata"))) (Lit 0x10000000000000000)),PAnd (PGEq (Var "arg2") (Lit 0x0)) (PLEq (Var "arg2") (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)),PAnd (PGEq (Var "arg1") (Lit 0x0)) (PLEq (Var "arg1") (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)),PEq (Lit 0x539) (Var "arg1"),PNeg (PEq (Lit 0x539) (Var "arg1")),PEq TxValue (Lit 0x0),PLT (BufLength (AbstractBuf "txdata")) (Lit 0x10000000000000000),PEq (IsZero (Eq (Lit 0x539) (Var "arg1"))) (Lit 0x0),PNeg (PEq (IsZero (Eq (Lit 0x539) (Var "arg1"))) (Lit 0x0)),PNeg (PEq (IsZero TxValue) (Lit 0x0))]
+      let simp = Expr.simplifyProps a
+      assertEqualM "must not duplicate" simp (nubOrd simp)
+      assertEqualM "must not duplicate" (length simp) (length $ DLU.uniq simp)
+    , test "full-order-prop1" $ do
+      let a = [PNeg (PBool False),PAnd (PGEq (Max (Lit 0x44) (BufLength (AbstractBuf "txdata"))) (Lit 0x44)) (PLT (Max (Lit 0x44) (BufLength (AbstractBuf "txdata"))) (Lit 0x10000000000000000)),PAnd (PGEq (Var "arg2") (Lit 0x0)) (PLEq (Var "arg2") (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)),PAnd (PGEq (Var "arg1") (Lit 0x0)) (PLEq (Var "arg1") (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)),PEq (Lit 0x539) (Var "arg1"),PNeg (PEq (Lit 0x539) (Var "arg1")),PEq TxValue (Lit 0x0),PLT (BufLength (AbstractBuf "txdata")) (Lit 0x10000000000000000),PEq (IsZero (Eq (Lit 0x539) (Var "arg1"))) (Lit 0x0),PNeg (PEq (IsZero (Eq (Lit 0x539) (Var "arg1"))) (Lit 0x0)),PNeg (PEq (IsZero TxValue) (Lit 0x0))]
+      let simp = Expr.simplifyProps a
+      assertEqualM "We must be able to remove all duplicates" (length $ nubOrd simp) (length $ DLU.uniq simp)
+    , test "full-order-prop2" $ do
+      let a =[PNeg (PBool False),PAnd (PGEq (Max (Lit 0x44) (BufLength (AbstractBuf "txdata"))) (Lit 0x44)) (PLT (Max (Lit 0x44) (BufLength (AbstractBuf "txdata"))) (Lit 0x10000000000000000)),PAnd (PGEq (Var "arg2") (Lit 0x0)) (PLEq (Var "arg2") (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)),PAnd (PGEq (Var "arg1") (Lit 0x0)) (PLEq (Var "arg1") (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)),PEq (Lit 0x63) (Var "arg2"),PEq (Lit 0x539) (Var "arg1"),PEq TxValue (Lit 0x0),PLT (BufLength (AbstractBuf "txdata")) (Lit 0x10000000000000000),PEq (IsZero (Eq (Lit 0x63) (Var "arg2"))) (Lit 0x0),PEq (IsZero (Eq (Lit 0x539) (Var "arg1"))) (Lit 0x0),PNeg (PEq (IsZero TxValue) (Lit 0x0))]
+      let simp = Expr.simplifyProps a
+      assertEqualM "must not duplicate" simp (nubOrd simp)
+      assertEqualM "We must be able to remove all duplicates" (length $ nubOrd simp) (length $ DLU.uniq simp)
   ]
   , testGroup "equivalence-checking"
     [
