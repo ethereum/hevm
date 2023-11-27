@@ -87,6 +87,7 @@ This release also includes many small bugfixes:
 ## API Changes
 
 ### Reworked Storage Model / Symbolic Addresses
+
 Adding symbolic addresses required some fairly significant changes to the way that we model storage.
 We introduced a new address type to `Expr` (`Expr EAddr`), that allows us to model fully symbolic
 addresses. Instead of modelling storage as a global symbolic 2D map (`address -> word -> word`) in
