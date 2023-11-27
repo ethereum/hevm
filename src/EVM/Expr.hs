@@ -1358,7 +1358,7 @@ concKeccakSimpExpr orig = untilFixpoint ((mapExpr concKeccakOnePass) . simplify)
 -- Needed because if it also simplified, we may not find some simplification errors, as
 -- simplification would always be ON
 concKeccakProps :: [Prop] -> [Prop]
-concKeccakProps orig = simplifyProps $ untilFixpoint (map (mapProp concKeccakOnePass)) orig
+concKeccakProps orig = untilFixpoint (map (mapProp concKeccakOnePass)) orig
 
 -- Simplifies in case the input to the Keccak is of specific array/map format and
 --            can be simplified into a concrete value
