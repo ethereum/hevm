@@ -20,28 +20,28 @@ import Data.Word (Word8)
 import Test.QuickCheck.Gen
 
 import EVM.Types (Prop(..), W256, Expr(..), EType(..), internalError, keccak')
-import EVM.SMT (BufModel(..), SMTCex(..))
+import EVM.SMT qualified as SMT (BufModel(..), SMTCex(..))
 import Test.QuickCheck (Arbitrary(arbitrary))
 import Test.QuickCheck.Random (mkQCGen)
 
 -- TODO: Extract Var X = Lit Z, and set it
-tryCexFuzz :: [Prop] -> Integer -> (Maybe (SMTCex))
+tryCexFuzz :: [Prop] -> Integer -> (Maybe (SMT.SMTCex))
 tryCexFuzz ps tries = unGen (testVals tries) (mkQCGen 0) 1337
   where
     vars = extractVars ps
     bufs = extractBufs ps
     stores = extractStorage ps
-    testVals :: Integer -> Gen (Maybe SMTCex)
+    testVals :: Integer -> Gen (Maybe SMT.SMTCex)
     testVals 0 = pure Nothing
     testVals todo = do
-      varVals <- getVals vars
+      varvals <- getvals vars
       bufVals <- getBufs bufs
       storeVals <- getStores stores
       let
-        ret =  filterCorrectKeccak $ map (substituteEWord varVals . substituteBuf bufVals . substituteStores storeVals) ps
+        ret =  filterCorrectKeccak $ map (substituteEWord varvals . substituteBuf bufVals . substituteStores storeVals) ps
         retSimp =  Expr.simplifyProps ret
-      if null retSimp then pure $ Just (SMTCex {
-                                    vars = varVals
+      if null retSimp then pure $ Just (SMT.SMTCex {
+                                    vars = varvals
                                     , addrs = mempty
                                     , buffers = bufVals
                                     , store = storeVals
@@ -66,13 +66,13 @@ substituteEWord valMap p = mapProp go p
     go a = a
 
 
-substituteBuf :: Map (Expr Buf) BufModel -> Prop -> Prop
+substituteBuf :: Map (Expr Buf) SMT.BufModel -> Prop -> Prop
 substituteBuf valMap p = mapProp go p
   where
     go :: Expr a -> Expr a
     go orig@(AbstractBuf _) = case (valMap !? orig) of
-                                Just (Flat x) -> ConcreteBuf x
-                                Just (Comp _) -> internalError "No compressed allowed in fuzz"
+                                Just (SMT.Flat x) -> ConcreteBuf x
+                                Just (SMT.Comp _) -> internalError "No compressed allowed in fuzz"
                                 Nothing -> orig
     go a = a
 
@@ -102,12 +102,12 @@ findVarProp p = mapPropM go p
     go :: forall a. Expr a -> State CollectVars (Expr a)
     go = \case
       e@(Var a) -> do
-        s :: CollectVars <- get
-        put CollectVars {vars=Set.insert (Var a) s.vars, vals = s.vals}
+        s <- get
+        put $ s {vars = Set.insert (Var a) s.vars}
         pure e
       e@(Lit a) -> do
-        s :: CollectVars <- get
-        put $ s{vals=Set.insert a s.vals}
+        s <- get
+        put (s {vals=Set.insert a s.vals} ::CollectVars)
         pure e
       e -> pure e
 
@@ -142,12 +142,12 @@ findBufProp p = mapPropM go p
 --- Store extraction
 data CollectStorage = CollectStorage { addrs :: Set.Set (Expr EAddr)
                                      , keys :: Set.Set W256
-                                     , values :: Set.Set W256
+                                     , vals :: Set.Set W256
                                      }
   deriving (Show)
 
 initStorageState :: CollectStorage
-initStorageState = CollectStorage { addrs = Set.empty, keys = Set.empty, values = Set.fromList [0x0, 0x1, Expr.maxLit] }
+initStorageState = CollectStorage { addrs = Set.empty, keys = Set.empty, vals = Set.fromList [0x0, 0x1, Expr.maxLit] }
 
 extractStorage :: [Prop] -> CollectStorage
 extractStorage ps = execState (mapM_ findStorageProp ps) initStorageState
@@ -159,21 +159,21 @@ findStorageProp p = mapPropM go p
     go = \case
       e@(AbstractStore a) -> do
         s <- get
-        put $  CollectStorage {addrs=Set.insert a s.addrs, keys=s.keys, values=s.values}
+        put s {addrs=Set.insert a s.addrs}
         pure e
       e@(SLoad (Lit val) _) -> do
         s <- get
         put $ s{keys=Set.insert val s.keys}
         pure e
       e@(SStore _ (Lit val) _) -> do
-          s <- get
-          put $ s{values=Set.insert val s.values}
-          pure e
+        s <- get
+        put (s {vals=Set.insert val s.vals} :: CollectStorage)
+        pure e
       e -> pure e
 
 -- Var value and TX value generation
-getVals :: CollectVars -> Gen (Map (Expr EWord) W256)
-getVals vars = do
+getvals :: CollectVars -> Gen (Map (Expr EWord) W256)
+getvals vars = do
     bufs <- go (Set.toList vars.vars) mempty
     addTxStuff bufs
   where
@@ -210,7 +210,7 @@ getStores storesLoads = go (Set.toList storesLoads.addrs) mempty
           oneWrite = do
                     a <- getRndElem storesLoads.keys
                     b <- frequency [(1, getRndW256)
-                                   ,(3, elements $ Set.toList storesLoads.values)
+                                   ,(3, elements $ Set.toList storesLoads.vals)
                                    ]
                     pure (fromMaybe (0::W256) a, b)
     getRndElem :: Set W256 -> Gen (Maybe W256)
@@ -218,10 +218,10 @@ getStores storesLoads = go (Set.toList storesLoads.addrs) mempty
                          else do fmap Just $ elements $ Set.toList choices
 
 -- Buf value generation
-getBufs :: [Expr Buf] -> Gen (Map (Expr Buf) BufModel)
+getBufs :: [Expr Buf] -> Gen (Map (Expr Buf) SMT.BufModel)
 getBufs bufs = go bufs mempty
   where
-    go :: [Expr Buf] -> Map (Expr Buf) BufModel -> Gen (Map (Expr Buf) BufModel)
+    go :: [Expr Buf] -> Map (Expr Buf) SMT.BufModel -> Gen (Map (Expr Buf) SMT.BufModel)
     go [] valMap = pure valMap
     go (a:ax) valMap = do
       bytes :: [Word8] <- frequency [
@@ -230,7 +230,7 @@ getBufs bufs = go bufs mempty
                 replicateM x arbitrary)
             , (1, replicateM 0 arbitrary)
        ]
-      go ax (Map.insert a (Flat $ BS.pack bytes) valMap)
+      go ax (Map.insert a (SMT.Flat $ BS.pack bytes) valMap)
 
 getRndW256 :: Gen W256
 getRndW256 = do
