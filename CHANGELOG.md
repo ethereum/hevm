@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Changed
+- Minimum distance requirements are now asserted for Keccak function calls. They assert that it's hard to generate two Keccak's that are less than 256 afar.
+- Keccak concretization is now done only after all simplifications are performed. This helps with simplification pre-concretization
+
 ## Added
 - New solc-specific simplification rules that should make the final Props a lot more readable
 - Prop is now correctly ordered, better BufLength and Max simplifications of Expr,

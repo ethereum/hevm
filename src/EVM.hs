@@ -154,13 +154,13 @@ makeVm o = do
     , cache = Cache mempty mempty
     , burned = 0
     , constraints = snd o.calldata
-    , keccakEqs = mempty
     , iterations = mempty
     , config = RuntimeConfig
       { allowFFI = o.allowFFI
       , overrideCaller = Nothing
       , baseState = o.baseState
       }
+    , symbolic = o.symbolic
     }
 
 -- | Initialize an abstract contract with unknown code
@@ -384,12 +384,9 @@ exec1 = do
                   burn (g_sha3 + g_sha3word * ceilDiv (unsafeInto xSize) 32) $
                     accessMemoryRange xOffset xSize $ do
                       hash <- readMemory xOffset' xSize' >>= \case
-                        ConcreteBuf bs -> do
-                          let hash' = keccak' bs
-                          eqs <- use #keccakEqs
-                          assign #keccakEqs $
-                            PEq (Lit hash') (Keccak (ConcreteBuf bs)):eqs
-                          pure $ Lit hash'
+                        orig@(ConcreteBuf bs) ->
+                          if vm.symbolic then pure $ Keccak orig
+                                         else pure $ Lit (keccak' bs)
                         buf -> pure $ Keccak buf
                       next
                       assign (#state % #stack) (hash : xs)
@@ -670,7 +667,7 @@ exec1 = do
                 else do
                   let
                     original =
-                      case Expr.simplify $ SLoad x this.origStorage of
+                      case Expr.concKeccakSimpExpr $ SLoad x this.origStorage of
                         Lit v -> v
                         _ -> 0
                     storage_cost =
@@ -1292,10 +1289,11 @@ branch cond continue = do
   query $ PleaseAskSMT cond pathconds (choosePath loc)
   where
     condSimp = Expr.simplify cond
+    condSimpConc = Expr.concKeccakSimpExpr condSimp
     choosePath :: CodeLocation -> BranchCondition -> EVM s ()
     choosePath loc (Case v) = do
       assign #result Nothing
-      pushTo #constraints $ if v then Expr.simplifyProp (condSimp ./= Lit 0) else Expr.simplifyProp (condSimp .== Lit 0)
+      pushTo #constraints $ if v then Expr.simplifyProp (condSimpConc ./= Lit 0) else Expr.simplifyProp (condSimpConc .== Lit 0)
       (iteration, _) <- use (#iterations % at loc % non (0,[]))
       stack <- use (#state % #stack)
       assign (#cache % #path % at (loc, iteration)) (Just v)
@@ -1335,29 +1333,36 @@ accessStorage
   -> (Expr EWord -> EVM s ())
   -> EVM s ()
 accessStorage addr slot continue = do
+  let slotConc = Expr.concKeccakSimpExpr slot
   use (#env % #contracts % at addr) >>= \case
     Just c ->
+      -- Try first without concretization. Then if we get a Just, with concretization
+      -- if both give a Just, should we `continue`.
+      -- --> This is because readStorage can do smart rewrites, but only in case
+      --     the expression is of a particular format, which can be destroyed by simplification.
+      --     However, without concretization, it may not find things that are actually in the storage
       case readStorage slot c.storage of
-        Just x ->
-          continue x
-        Nothing ->
-          if c.external then
-            forceConcreteAddr addr "cannot read storage from symbolic addresses via rpc" $ \addr' ->
-              forceConcrete slot "cannot read symbolic slots via RPC" $ \slot' -> do
-                -- check if the slot is cached
-                contract <- preuse (#cache % #fetched % ix addr')
-                case contract of
-                  Nothing -> internalError "contract marked external not found in cache"
-                  Just fetched -> case readStorage (Lit slot') fetched.storage of
-                              Nothing -> mkQuery addr' slot'
-                              Just val -> continue val
-          else do
-            modifying (#env % #contracts % ix addr % #storage) (writeStorage slot (Lit 0))
-            continue $ Lit 0
+        Just x -> case readStorage slotConc c.storage of
+          Just _ -> continue x
+          Nothing -> rpcCall c slotConc
+        Nothing -> rpcCall c slotConc
     Nothing ->
       fetchAccount addr $ \_ ->
         accessStorage addr slot continue
   where
+      rpcCall c slotConc = if c.external
+        then forceConcreteAddr addr "cannot read storage from symbolic addresses via rpc" $ \addr' ->
+          forceConcrete slotConc "cannot read symbolic slots via RPC" $ \slot' -> do
+            -- check if the slot is cached
+            contract <- preuse (#cache % #fetched % ix addr')
+            case contract of
+              Nothing -> internalError "contract marked external not found in cache"
+              Just fetched -> case readStorage (Lit slot') fetched.storage of
+                          Nothing -> mkQuery addr' slot'
+                          Just val -> continue val
+        else do
+          modifying (#env % #contracts % ix addr % #storage) (writeStorage slot (Lit 0))
+          continue $ Lit 0
       mkQuery a s = query $
         PleaseFetchSlot a s
           (\x -> do

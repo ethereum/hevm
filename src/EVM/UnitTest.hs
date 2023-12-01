@@ -175,8 +175,6 @@ runUnitTestContract
           tick $ failOutput vm1 opts "setUp()"
           pure [False]
         Just (VMSuccess _) -> do
-          let
-
           -- Run all the test cases and print their status
           details <- forM testSigs $ \s -> do
             (result, detail) <- symRun opts vm1 s
@@ -454,6 +452,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract = do
            , baseState = EmptyBase
            , txAccessList = mempty -- TODO: support unit test access lists???
            , allowFFI = ffiAllowed
+           , symbolic = True
            }
   let creator =
         initialContract (RuntimeCode (ConcreteRuntimeCode ""))
