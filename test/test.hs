@@ -95,6 +95,9 @@ assertBoolM a b = liftIO $ assertBool a b
 test :: TestName -> ReaderT Env IO () -> TestTree
 test a b = testCase a $ runEnv testEnv b
 
+testFuzz :: TestName -> ReaderT Env IO () -> TestTree
+testFuzz a b = testCase a $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 100, onlyCexFuzz = True}}) b
+
 prop :: Testable prop => ReaderT Env IO prop -> Property
 prop a = ioProperty $ runEnv testEnv a
 
@@ -2729,7 +2732,7 @@ tests = testGroup "hevm"
           putStrLnM "Expected counterexample found"
   ]
   , testGroup "concr-fuzz"
-    [ test "fuzz-complicated-mul" $ do
+    [ testFuzz "fuzz-complicated-mul" $ do
       Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -2756,7 +2759,7 @@ tests = testGroup "hevm"
       assertBoolM "Must fail" (not val)
       putStrLnM  $ "expected counterexample found, x:  " <> (show x) <> " y: " <> (show y) <> " z: " <> (show z)
       putStrLnM  $ "cex a: " <> (show a) <> " b: " <> (show b)
-    , test "fuzz-stores" $ do
+    , testFuzz "fuzz-stores" $ do
       Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -2769,7 +2772,7 @@ tests = testGroup "hevm"
       let sig = (Sig "func()" [])
       (_, [Cex (_, ctr)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
       putStrLnM  $ "expected counterexample found.  ctr: " <> (show ctr)
-    , test "fuzz-simple-fixed-value" $ do
+    , testFuzz "fuzz-simple-fixed-value" $ do
       Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -2782,7 +2785,7 @@ tests = testGroup "hevm"
       let sig = (Sig "func(uint256)" [AbiUIntType 256])
       (_, [Cex (_, ctr)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
       putStrLnM  $ "expected counterexample found.  ctr: " <> (show ctr)
-    , test "fuzz-simple-fixed-value2" $ do
+    , testFuzz "fuzz-simple-fixed-value2" $ do
       Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -2794,7 +2797,7 @@ tests = testGroup "hevm"
       let sig = (Sig "func(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
       (_, [Cex (_, ctr)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
       putStrLnM  $ "expected counterexample found.  ctr: " <> (show ctr)
-    , test "fuzz-simple-fixed-value3" $ do
+    , testFuzz "fuzz-simple-fixed-value3" $ do
       Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -2806,6 +2809,34 @@ tests = testGroup "hevm"
       let sig = (Sig "func(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
       (_, [Cex (_, ctr1), Cex (_, ctr2)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
       putStrLnM  $ "expected counterexamples found.  ctr1: " <> (show ctr1) <> " ctr2: " <> (show ctr2)
+    , testFuzz "fuzz-simple-fixed-value-store1" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping(uint => uint) items;
+          function func(uint a) public {
+            uint f = items[2];
+            assert(a != f);
+          }
+        }
+        |]
+      let sig = (Sig "func(uint256)" [AbiUIntType 256, AbiUIntType 256])
+      (_, [Cex _]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
+      putStrLnM  $ "expected counterexamples found"
+    , testFuzz "fuzz-simple-fixed-value-store2" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping(uint => uint) items;
+          function func(uint a) public {
+            items[0] = 1337;
+            assert(a != items[0]);
+          }
+        }
+        |]
+      let sig = (Sig "func(uint256)" [AbiUIntType 256, AbiUIntType 256])
+      (_, [Cex (_, ctr1)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
+      putStrLnM  $ "expected counterexamples found: " <> show ctr1
   ]
   , testGroup "simplification-working"
   [

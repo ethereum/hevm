@@ -134,7 +134,7 @@ withSolvers solver count timeout cont = do
           then do
             when (conf.debug) $ putStrLn $ "Cex found via fuzzing:" <> (show fuzzResult)
             writeChan r (Sat $ fromJust fuzzResult)
-          else do
+          else if not conf.onlyCexFuzz then do
             when (conf.debug) $ putStrLn "Fuzzing failed to find a Cex"
             -- reset solver and send all lines of provided script
             out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty ps)
@@ -163,6 +163,9 @@ withSolvers solver count timeout cont = do
                                       _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat2
                       _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
                 writeChan r res
+          else do
+            when (conf.debug) $ putStrLn "Fuzzing failed to find a Cex, not trying SMT due to onlyCexFuzz"
+            writeChan r Unknown
 
         -- put the instance back in the list of available instances
         writeChan availableInstances inst

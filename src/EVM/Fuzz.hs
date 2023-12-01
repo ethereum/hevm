@@ -26,8 +26,9 @@ import Test.QuickCheck.Random (mkQCGen)
 
 -- TODO: Extract Var X = Lit Z, and set it
 tryCexFuzz :: [Prop] -> Integer -> (Maybe (SMT.SMTCex))
-tryCexFuzz ps tries = unGen (testVals tries) (mkQCGen 0) 1337
+tryCexFuzz prePs tries = unGen (testVals tries) (mkQCGen 0) 1337
   where
+    ps = Expr.simplifyProps $ Expr.concKeccakProps prePs
     vars = extractVars ps
     bufs = extractBufs ps
     stores = extractStorage ps
@@ -38,8 +39,8 @@ tryCexFuzz ps tries = unGen (testVals tries) (mkQCGen 0) 1337
       bufVals <- getBufs bufs
       storeVals <- getStores stores
       let
-        ret =  filterCorrectKeccak $ map (substituteEWord varvals . substituteBuf bufVals . substituteStores storeVals) ps
-        retSimp =  Expr.simplifyProps ret
+        ret = filterCorrectKeccak $ map (substituteEWord varvals . substituteBuf bufVals . substituteStores storeVals) ps
+        retSimp = Expr.simplifyProps $ Expr.concKeccakProps ret
       if null retSimp then pure $ Just (SMT.SMTCex {
                                     vars = varvals
                                     , addrs = mempty
@@ -103,7 +104,7 @@ findVarProp p = mapPropM go p
     go = \case
       e@(Var a) -> do
         s <- get
-        put $ s {vars = Set.insert (Var a) s.vars}
+        put s {vars = Set.insert (Var a) s.vars}
         pure e
       e@(Lit a) -> do
         s <- get
@@ -135,7 +136,7 @@ findBufProp p = mapPropM go p
     go = \case
       e@(AbstractBuf a) -> do
         s <- get
-        put $ s{bufs=Set.insert (AbstractBuf a) s.bufs}
+        put s {bufs=Set.insert (AbstractBuf a) s.bufs}
         pure e
       e -> pure e
 
@@ -146,14 +147,37 @@ data CollectStorage = CollectStorage { addrs :: Set.Set (Expr EAddr)
                                      }
   deriving (Show)
 
+instance Semigroup (CollectStorage) where
+  (CollectStorage a b c) <> (CollectStorage a2 b2 c2) = CollectStorage (a <> a2) (b <> b2) (c <> c2)
+
 initStorageState :: CollectStorage
 initStorageState = CollectStorage { addrs = Set.empty, keys = Set.empty, vals = Set.fromList [0x0, 0x1, Expr.maxLit] }
 
 extractStorage :: [Prop] -> CollectStorage
-extractStorage ps = execState (mapM_ findStorageProp ps) initStorageState
+extractStorage ps = execState (mapM_ findStoragePropInner ps) initStorageState <>
+    execState (mapM_ findStoragePropComp ps) initStorageState
 
-findStorageProp :: Prop -> State CollectStorage Prop
-findStorageProp p = mapPropM go p
+findStoragePropComp :: Prop -> State CollectStorage Prop
+findStoragePropComp p = go2 p
+  where
+    go2 :: Prop -> State CollectStorage (Prop)
+    go2 = \case
+      PNeg x -> go2 x
+      e@(PEq (Lit val) (SLoad {})) -> do
+        s <- get
+        put (s {vals=Set.insert val s.vals} :: CollectStorage)
+        pure e
+      e@(PLT (Lit val) (SLoad {})) -> do
+        s <- get
+        put (s {vals=Set.insert val s.vals} :: CollectStorage)
+        pure e
+      (PGT a@(Lit _) b@(SLoad {})) -> go2 (PLT a b)
+      (PGEq a@(Lit _) b@(SLoad {})) -> go2 (PLT a b)
+      (PLEq a@(Lit _) b@(SLoad {})) -> go2 (PLT a b)
+      e -> pure e
+
+findStoragePropInner :: Prop -> State CollectStorage Prop
+findStoragePropInner p = mapPropM go p
   where
     go :: forall a. Expr a -> State CollectStorage (Expr a)
     go = \case
@@ -163,7 +187,7 @@ findStorageProp p = mapPropM go p
         pure e
       e@(SLoad (Lit val) _) -> do
         s <- get
-        put $ s{keys=Set.insert val s.keys}
+        put s {keys=Set.insert val s.keys}
         pure e
       e@(SStore _ (Lit val) _) -> do
         s <- get

@@ -836,6 +836,8 @@ simplify e = if (mapExpr go e == e)
     go (EVM.Types.GEq a b) = leq b a
     go (EVM.Types.LEq a b) = EVM.Types.IsZero (gt a b)
     go (IsZero a) = iszero a
+    go (SLT a@(Lit _) b@(Lit _)) = slt a b
+    go (SGT a b) = SLT b a
 
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
