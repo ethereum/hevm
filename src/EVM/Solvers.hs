@@ -16,7 +16,7 @@ import Control.Monad.IO.Unlift
 import Data.Char (isSpace)
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust, fromJust)
 import Data.Text qualified as TS
 import Data.Text.Lazy (Text)
 import Data.Text.Lazy qualified as T
@@ -25,6 +25,7 @@ import Data.Text.Lazy.Builder
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
 import Witch (into)
 import EVM.Effects
+import EVM.Fuzz (tryCexFuzz)
 
 import EVM.SMT
 import EVM.Types (W256, Expr(AbstractBuf), internalError)
@@ -126,35 +127,45 @@ withSolvers solver count timeout cont = do
     runTask :: (MonadIO m, ReadConfig m) => Task -> SolverInstance -> Chan SolverInstance -> Int -> m ()
     runTask (Task smt2@(SMT2 cmds (RefinementEqs refineEqs refps) cexvars ps) r) inst availableInstances fileCounter = do
       conf <- readConfig
+      let fuzzResult = tryCexFuzz ps conf.numCexFuzz
       liftIO $ do
         when (conf.dumpQueries) $ writeSMT2File smt2 fileCounter "abstracted"
-        -- reset solver and send all lines of provided script
-        out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty ps)
-        case out of
-          -- if we got an error then return it
-          Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
-          -- otherwise call (check-sat), parse the result, and send it down the result channel
-          Right () -> do
-            sat <- sendLine inst "(check-sat)"
-            res <- do
-                case sat of
-                  "unsat" -> pure Unsat
-                  "timeout" -> pure Unknown
-                  "unknown" -> pure Unknown
-                  "sat" -> if null refineEqs then Sat <$> getModel inst cexvars
-                           else do
-                                let refinedSMT2 = SMT2 refineEqs mempty mempty (ps <> refps)
-                                writeSMT2File refinedSMT2 fileCounter "refined"
-                                _ <- sendScript inst refinedSMT2
-                                sat2 <- sendLine inst "(check-sat)"
-                                case sat2 of
-                                  "unsat" -> pure Unsat
-                                  "timeout" -> pure Unknown
-                                  "unknown" -> pure Unknown
-                                  "sat" -> Sat <$> getModel inst cexvars
-                                  _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat2
-                  _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
-            writeChan r res
+        if (isJust fuzzResult)
+          then do
+            when (conf.debug) $ putStrLn $ "Cex found via fuzzing:" <> (show fuzzResult)
+            writeChan r (Sat $ fromJust fuzzResult)
+          else if not conf.onlyCexFuzz then do
+            when (conf.debug) $ putStrLn "Fuzzing failed to find a Cex"
+            -- reset solver and send all lines of provided script
+            out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty ps)
+            case out of
+              -- if we got an error then return it
+              Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
+              -- otherwise call (check-sat), parse the result, and send it down the result channel
+              Right () -> do
+                sat <- sendLine inst "(check-sat)"
+                res <- do
+                    case sat of
+                      "unsat" -> pure Unsat
+                      "timeout" -> pure Unknown
+                      "unknown" -> pure Unknown
+                      "sat" -> if null refineEqs then Sat <$> getModel inst cexvars
+                               else do
+                                    let refinedSMT2 = SMT2 refineEqs mempty mempty (ps <> refps)
+                                    writeSMT2File refinedSMT2 fileCounter "refined"
+                                    _ <- sendScript inst refinedSMT2
+                                    sat2 <- sendLine inst "(check-sat)"
+                                    case sat2 of
+                                      "unsat" -> pure Unsat
+                                      "timeout" -> pure Unknown
+                                      "unknown" -> pure Unknown
+                                      "sat" -> Sat <$> getModel inst cexvars
+                                      _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat2
+                      _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
+                writeChan r res
+          else do
+            when (conf.debug) $ putStrLn "Fuzzing failed to find a Cex, not trying SMT due to onlyCexFuzz"
+            writeChan r Unknown
 
         -- put the instance back in the list of available instances
         writeChan availableInstances inst

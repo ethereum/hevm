@@ -95,6 +95,9 @@ assertBoolM a b = liftIO $ assertBool a b
 test :: TestName -> ReaderT Env IO () -> TestTree
 test a b = testCase a $ runEnv testEnv b
 
+testFuzz :: TestName -> ReaderT Env IO () -> TestTree
+testFuzz a b = testCase a $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 100, onlyCexFuzz = True}}) b
+
 prop :: Testable prop => ReaderT Env IO prop -> Property
 prop a = ioProperty $ runEnv testEnv a
 
@@ -2659,6 +2662,8 @@ tests = testGroup "hevm"
               uint x;
               uint y;
               function fun(uint256 a) external{
+                require(x != 0);
+                require(y != 0);
                 assert (x == y);
               }
             }
@@ -2691,11 +2696,11 @@ tests = testGroup "hevm"
               a = getVar cex "arg1"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
-                          Just s -> Map.size s == 2 &&
-                                    case (Map.lookup 0 s, Map.lookup (10 + a) s) of
+                          Just s -> case (Map.lookup 0 s, Map.lookup (10 + a) s) of
                                       (Just x, Just y) -> x >= y
+                                      (Just x, Nothing) -> x > 0 -- arr1 can be Nothing, it'll then be zero
                                       _ -> False
-                          _ -> False
+                          Nothing -> False -- arr2 must contain an element, or it'll be 0
           assertBoolM "Did not find expected storage cex" testCex
           putStrLnM "Expected counterexample found"
         ,
@@ -2706,6 +2711,8 @@ tests = testGroup "hevm"
               uint x;
               uint y;
               function fun(uint256 a) external{
+                require (x != 0);
+                require (y != 0);
                 assert (x != y);
               }
             }
@@ -2723,6 +2730,113 @@ tests = testGroup "hevm"
                           _ -> False
           assertBoolM "Did not find expected storage cex" testCex
           putStrLnM "Expected counterexample found"
+  ]
+  , testGroup "concr-fuzz"
+    [ testFuzz "fuzz-complicated-mul" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          function complicated(uint x, uint y, uint z) public {
+            uint a;
+            uint b;
+            unchecked {
+              a = x * x * x * y * y * y * z;
+              b = x * x * x * x * y * y * z * z;
+            }
+            assert(a == b);
+          }
+        }
+        |]
+      let sig = (Sig "complicated(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])
+      (_, [Cex (_, ctr)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
+      let
+        x = getVar ctr "arg1"
+        y = getVar ctr "arg2"
+        z = getVar ctr "arg3"
+        a = x * x * x * y * y * y * z;
+        b = x * x * x * x * y * y * z * z;
+        val = a == b
+      assertBoolM "Must fail" (not val)
+      putStrLnM  $ "expected counterexample found, x:  " <> (show x) <> " y: " <> (show y) <> " z: " <> (show z)
+      putStrLnM  $ "cex a: " <> (show a) <> " b: " <> (show b)
+    , testFuzz "fuzz-stores" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping(uint => uint) items;
+          function func() public {
+            assert(items[5] == 0);
+          }
+        }
+        |]
+      let sig = (Sig "func()" [])
+      (_, [Cex (_, ctr)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
+      putStrLnM  $ "expected counterexample found.  ctr: " <> (show ctr)
+    , testFuzz "fuzz-simple-fixed-value" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping(uint => uint) items;
+          function func(uint a) public {
+            assert(a != 1337);
+          }
+        }
+        |]
+      let sig = (Sig "func(uint256)" [AbiUIntType 256])
+      (_, [Cex (_, ctr)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
+      putStrLnM  $ "expected counterexample found.  ctr: " <> (show ctr)
+    , testFuzz "fuzz-simple-fixed-value2" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          function func(uint a, uint b) public {
+            assert(!((a == 1337) && (b == 99)));
+          }
+        }
+        |]
+      let sig = (Sig "func(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
+      (_, [Cex (_, ctr)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
+      putStrLnM  $ "expected counterexample found.  ctr: " <> (show ctr)
+    , testFuzz "fuzz-simple-fixed-value3" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          function func(uint a, uint b) public {
+            assert(((a != 1337) && (b != 99)));
+          }
+        }
+        |]
+      let sig = (Sig "func(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
+      (_, [Cex (_, ctr1), Cex (_, ctr2)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
+      putStrLnM  $ "expected counterexamples found.  ctr1: " <> (show ctr1) <> " ctr2: " <> (show ctr2)
+    , testFuzz "fuzz-simple-fixed-value-store1" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping(uint => uint) items;
+          function func(uint a) public {
+            uint f = items[2];
+            assert(a != f);
+          }
+        }
+        |]
+      let sig = (Sig "func(uint256)" [AbiUIntType 256, AbiUIntType 256])
+      (_, [Cex _]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
+      putStrLnM  $ "expected counterexamples found"
+    , testFuzz "fuzz-simple-fixed-value-store2" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping(uint => uint) items;
+          function func(uint a) public {
+            items[0] = 1337;
+            assert(a != items[0]);
+          }
+        }
+        |]
+      let sig = (Sig "func(uint256)" [AbiUIntType 256, AbiUIntType 256])
+      (_, [Cex (_, ctr1)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
+      putStrLnM  $ "expected counterexamples found: " <> show ctr1
   ]
   , testGroup "simplification-working"
   [
