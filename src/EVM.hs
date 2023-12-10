@@ -2571,36 +2571,6 @@ freezeMemory memory =
   ConcreteBuf . BS.pack . VUnboxed.toList <$> VUnboxed.freeze memory
 
 
-class VMOps (t :: VMType) where
-  burn' :: Gas t -> EVM t s () -> EVM t s ()
-  -- TODO: change to EvmWord t
-  burnExp :: Expr EWord -> EVM t s () -> EVM t s ()
-  burnSha3 :: Expr EWord -> EVM t s () -> EVM t s ()
-  burnCalldatacopy :: Expr EWord -> EVM t s () -> EVM t s ()
-  burnCodecopy :: Expr EWord -> EVM t s () -> EVM t s ()
-  burnExtcodecopy :: Expr EAddr -> Expr EWord -> EVM t s () -> EVM t s ()
-  burnReturndatacopy :: Expr EWord -> EVM t s () -> EVM t s ()
-  burnLog :: Expr EWord -> Word8 -> EVM t s () -> EVM t s ()
-
-  initialGas :: Gas t
-  ensureGas :: Word64 -> EVM t s () -> EVM t s ()
-  -- TODO: change to EvmWord t
-  gasTryFrom :: Expr EWord -> Either () (Gas t)
-
-  -- Gas cost of create, including hash cost if needed
-  costOfCreate :: FeeSchedule Word64 -> Gas t -> Expr EWord -> Bool -> (Gas t, Gas t)
-
-  costOfCall
-    :: FeeSchedule Word64 -> Bool -> Expr EWord -> Gas t -> Gas t -> Expr EAddr
-    -> (Word64 -> Word64 -> EVM t s ()) -> EVM t s ()
-
-  reclaimRemainingGasAllowance :: VM t s -> EVM t s ()
-  payRefunds :: EVM t s ()
-  pushGas :: EVM t s ()
-  enoughGas :: Word64 -> Gas t -> Bool
-  subGas :: Gas t -> Word64 -> Gas t
-  toGas :: Word64 -> Gas t
-
 instance VMOps Symbolic where
   burn' _ continue = continue
   burnExp _ continue = continue
