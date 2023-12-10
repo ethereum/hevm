@@ -41,14 +41,15 @@ import EVM.Solvers
 import EVM.Stepper qualified
 import EVM.SymExec
 import EVM.Transaction qualified
-import EVM.Types hiding (word, Env)
+import EVM.Types hiding (word, Env, Symbolic)
+import EVM.Types qualified
 import EVM.UnitTest
 import EVM.Effects
 
 -- This record defines the program's command-line options
 -- automatically via the `optparse-generic` package.
 data Command w
-  = Symbolic' -- Symbolically explore an abstract program, or specialized with specified env & calldata
+  = Symbolic -- Symbolically explore an abstract program, or specialized with specified env & calldata
   -- vm opts
       { code          :: w ::: Maybe ByteString <?> "Program bytecode"
       , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
@@ -207,7 +208,7 @@ main = do
     } }
   case cmd of
     Version {} ->putStrLn getFullVersion
-    Symbolic' {} -> do
+    Symbolic {} -> do
       root <- getRoot cmd
       withCurrentDirectory root $ runEnv env $ assert cmd
     Equivalence {} -> runEnv env $ equivalence cmd
@@ -497,7 +498,7 @@ vmFromCommand cmd = do
         addr f def = maybe def LitAddr (f cmd)
         bytes f def = maybe def decipher (f cmd)
 
-symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM Symbolic RealWorld)
+symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM EVM.Types.Symbolic RealWorld)
 symvmFromCommand cmd calldata = do
   (miner,blockNum,baseFee,prevRan) <- case cmd.rpc of
     Nothing -> pure (SymAddr "miner",0,0,0)
