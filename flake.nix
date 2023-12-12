@@ -33,7 +33,6 @@
           z3
           cvc5
           git
-        ] ++ lib.optional (!(pkgs.stdenv.isDarwin && pkgs.stdenv.isAarch64)) [
           foundry.defaultPackage.${system}
         ];
 
