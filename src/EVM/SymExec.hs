@@ -227,7 +227,6 @@ loadSymVM x callvalue cd create =
     , create = create
     , txAccessList = mempty
     , allowFFI = False
-    , symbolic = True
     })
 
 -- | Interpreter which explores all paths at branching points. Returns an

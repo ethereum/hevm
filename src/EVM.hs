@@ -162,7 +162,6 @@ makeVm o = do
       , overrideCaller = Nothing
       , baseState = o.baseState
       }
-    , symbolic = o.symbolic
     }
 
 -- | Initialize an abstract contract with unknown code
@@ -377,18 +376,10 @@ exec1 = do
               burnSha3 xSize $
                 accessMemoryRange xOffset xSize $ do
                   hash <- readMemory xOffset xSize >>= \case
-                    {-
-                    ConcreteBuf bs -> do
-                      let hash' = keccak' bs
-                      eqs <- use #keccakEqs
-                      assign #keccakEqs $
-                        PEq (Lit hash') (Keccak (ConcreteBuf bs)):eqs
-                      pure $ Lit hash'
-                    buf -> pure $ Keccak buf
-                    -}
                     orig@(ConcreteBuf bs) ->
-                      if vm.symbolic then pure $ Keccak orig
-                                     else pure $ Lit (keccak' bs)
+                      whenSymbolicElse
+                        (pure $ Keccak orig)
+                        (pure $ Lit (keccak' bs))
                     buf -> pure $ Keccak buf
                   next
                   assign (#state % #stack) (hash : xs)
@@ -2595,6 +2586,7 @@ instance VMOps Symbolic where
   enoughGas _ _ = True
   subGas _ _ = ()
   toGas _ = ()
+  whenSymbolicElse a _ = a
 
 instance VMOps Concrete where
   burn' n continue = do
@@ -2722,6 +2714,8 @@ instance VMOps Concrete where
   subGas gasCap cost = gasCap - cost
 
   toGas = id
+
+  whenSymbolicElse _ a = a
 
 -- Create symbolic VM from concrete VM
 symbolify :: VM Concrete s -> VM Symbolic s

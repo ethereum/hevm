@@ -618,7 +618,6 @@ data VM (t :: VMType) s = VM
   -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
   , config         :: RuntimeConfig
-  , symbolic       :: Bool
   }
   deriving (Generic)
 
@@ -793,6 +792,8 @@ class VMOps (t :: VMType) where
   subGas :: Gas t -> Word64 -> Gas t
   toGas :: Word64 -> Gas t
 
+  whenSymbolicElse :: EVM t s a -> EVM t s a -> EVM t s a
+
 -- Bytecode Representations ------------------------------------------------------------------------
 
 
@@ -919,7 +920,6 @@ data VMOpts (t :: VMType) = VMOpts
   , create :: Bool
   , txAccessList :: Map (Expr EAddr) [W256]
   , allowFFI :: Bool
-  , symbolic :: Bool
   }
 
 deriving instance Show (VMOpts Symbolic)

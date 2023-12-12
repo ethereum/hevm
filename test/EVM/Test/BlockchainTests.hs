@@ -413,7 +413,6 @@ fromBlockchainCase' block tx preState postState =
          , create         = isCreate
          , txAccessList   = Map.mapKeys LitAddr (txAccessMap tx)
          , allowFFI       = False
-         , symbolic       = False
          })
         checkState
         postState

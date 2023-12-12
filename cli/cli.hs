@@ -491,7 +491,6 @@ vmFromCommand cmd = do
           , baseState      = EmptyBase
           , txAccessList   = mempty -- TODO: support me soon
           , allowFFI       = False
-          , symbolic       = False
           }
         word f def = fromMaybe def (f cmd)
         word64 f def = fromMaybe def (f cmd)
@@ -573,7 +572,6 @@ symvmFromCommand cmd calldata = do
       , baseState      = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
       , txAccessList   = mempty
       , allowFFI       = False
-      , symbolic       = True
       }
     word f def = fromMaybe def (f cmd)
     word64 f def = fromMaybe def (f cmd)
