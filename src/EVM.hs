@@ -2727,7 +2727,7 @@ symbolify vm =
      }
 
 symbolifyFrameState :: FrameState Concrete s -> FrameState Symbolic s
-symbolifyFrameState state = state { gas = (), calldata = AbstractBuf "calldata" }
+symbolifyFrameState state = state { gas = () }
 
 symbolifyFrame :: Frame Concrete s -> Frame Symbolic s
 symbolifyFrame frame = frame { state = symbolifyFrameState frame.state }
