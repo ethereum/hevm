@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and further solc-specific simplifications of Expr
 - Simplify earlier and don't check reachability for things statically determined to be FALSE
 - New concrete fuzzer that can be controlled via `--num-cex-fuzz`
+- Partial support for dynamic jumps when the jump destination can be computed
+  given already available information
 
 ## [0.52.0] - 2023-10-26
 

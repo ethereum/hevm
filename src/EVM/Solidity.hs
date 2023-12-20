@@ -185,7 +185,7 @@ instance Monoid BuildOutput where
   mempty = BuildOutput mempty mempty
 
 -- | The various project types understood by hevm
-data ProjectType = DappTools | CombinedJSON | Foundry
+data ProjectType = DappTools | CombinedJSON | Foundry | FoundryStdLib
   deriving (Eq, Show, Read, ParseField)
 
 data SourceCache = SourceCache
