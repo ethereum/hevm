@@ -1109,6 +1109,9 @@ tests = testGroup "hevm"
     , test "transfer-dapp" $ do
         let testFile = "test/contracts/pass/transfer.sol"
         runSolidityTest testFile "prove_transfer" >>= assertEqualM "should prove transfer" True
+    , test "badvault-sym-branch" $ do
+        let testFile = "test/contracts/fail/10_BadVault.sol"
+        runSolidityTestCustom testFile "prove_BadVault_usingExploitLaunchPad"  Nothing Nothing True Nothing FoundryStdLib >>= assertEqualM "Must find counterexample" False
     , test "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
         runSolidityTest testFile "prove_trivial" >>= assertEqualM "test result" False

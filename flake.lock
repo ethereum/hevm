@@ -82,6 +82,22 @@
         "type": "github"
       }
     },
+    "forge-std": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1702656582,
+        "narHash": "sha256-qDC/3x/CfeghsqftBJme4IlNGDG7YgV9cx8I5tc30KA=",
+        "owner": "foundry-rs",
+        "repo": "forge-std",
+        "rev": "155d547c449afa8715f538d69454b83944117811",
+        "type": "github"
+      },
+      "original": {
+        "owner": "foundry-rs",
+        "repo": "forge-std",
+        "type": "github"
+      }
+    },
     "foundry": {
       "inputs": {
         "flake-utils": "flake-utils_2",
@@ -138,6 +154,7 @@
         "ethereum-tests": "ethereum-tests",
         "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
+        "forge-std": "forge-std",
         "foundry": "foundry",
         "nixpkgs": "nixpkgs_2",
         "solidity": "solidity"

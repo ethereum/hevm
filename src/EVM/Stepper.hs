@@ -1,8 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-
-
 module EVM.Stepper
   ( Action (..)
   , Stepper
@@ -36,6 +34,7 @@ import EVM.Types
 import Control.Monad.ST (stToIO, RealWorld)
 import Control.Monad.IO.Class
 import EVM.Effects
+import EVM.Expr (concKeccakSimpExpr)
 
 -- | The instruction type of the operational monad
 data Action s a where
@@ -119,11 +118,11 @@ interpret fetcher vm = eval . view
         Exec -> do
           (r, vm') <- liftIO $ stToIO $ runStateT EVM.Exec.exec vm
           interpret fetcher vm' (k r)
-        Wait (PleaseAskSMT (Lit c) _ continue) -> do
-          (r, vm') <- liftIO $ stToIO $ runStateT (continue (Case (c > 0))) vm
-          interpret fetcher vm' (k r)
-        Wait (PleaseAskSMT c _ _) ->
-          error $ "cannot handle symbolic branch conditions in this interpreter: " <> show c
+        Wait (PleaseAskSMT expr _ continue) -> case (concKeccakSimpExpr expr) of
+          Lit c -> do
+            (r, vm') <- liftIO $ stToIO $ runStateT (continue (Case (c > 0))) vm
+            interpret fetcher vm' (k r)
+          _ ->  internalError $ "cannot handle symbolic branch conditions in this interpreter: " <> show expr
         Wait q -> do
           m <- fetcher q
           vm' <- liftIO $ stToIO $ execStateT m vm

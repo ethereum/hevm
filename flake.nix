@@ -21,9 +21,13 @@
       url = "github:haskell/cabal";
       flake = false;
     };
+    forge-std = {
+      url = "github:foundry-rs/forge-std";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, solidity, ethereum-tests, foundry, cabal-head, ... }:
+  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, cabal-head, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs { inherit system; config = { allowBroken = true; }; });
@@ -110,6 +114,7 @@
           ]).overrideAttrs(final: prev: {
             HEVM_SOLIDITY_REPO = solidity;
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
+            HEVM_FORGE_STD_REPO = forge-std;
             DAPP_SOLC = "${pkgs.solc}/bin/solc";
           });
 
@@ -203,6 +208,7 @@
             HEVM_SOLIDITY_REPO = solidity;
             DAPP_SOLC = "${pkgs.solc}/bin/solc";
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
+            HEVM_FORGE_STD_REPO = forge-std;
 
             # NOTE: hacks for bugged cabal new-repl
             LD_LIBRARY_PATH = libraryPath;
