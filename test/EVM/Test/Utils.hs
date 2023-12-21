@@ -23,6 +23,9 @@ import Control.Monad.ST (RealWorld)
 import Control.Monad.IO.Unlift
 import Control.Monad.Catch (MonadMask)
 import EVM.Effects
+import Data.Maybe (fromMaybe)
+import EVM.Types (internalError)
+import System.Environment (lookupEnv)
 
 runSolidityTestCustom
   :: (MonadMask m, App m)
@@ -84,7 +87,10 @@ compile foundryType root src = do
     initStdForgeDir :: FilePath -> IO ()
     initStdForgeDir tld = do
       createDirectoryIfMissing True tld
-      callProcess "forge" ["install", "--root", tld, "--no-git", "foundry-rs/forge-std"]
+      forgeStdRepo <- liftIO $ fromMaybe (internalError "cannot find forge-std repo") <$> (lookupEnv "HEVM_FORGE_STD_REPO")
+      callProcess "mkdir" ["-p", tld]
+      callProcess "cp" ["-r", forgeStdRepo <> "/src", tld <> "/src"]
+      callProcess "cp" ["-r", forgeStdRepo <> "/lib", tld <> "/lib"]
     initLib :: FilePath -> FilePath -> FilePath -> IO ()
     initLib tld srcFile dstFile = do
       createDirectoryIfMissing True (tld <> "/src")
