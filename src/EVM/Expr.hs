@@ -7,8 +7,6 @@
 -}
 module EVM.Expr where
 
-import Debug.Trace
-
 import Prelude hiding (LT, GT)
 import Control.Monad.ST
 import Data.Bits hiding (And, Xor)
@@ -783,28 +781,26 @@ getLogicalIdx (GVar _) = internalError "cannot determine addr of a GVar"
 --     - MappingSlot
 --     - ArraySlotWithOffset
 --     - ArraySlotZero
---
 decomposeStorage :: Expr a -> Maybe (Expr a)
-decomposeStorage = mapExprM go
+decomposeStorage = go
   where
     go :: Expr a -> Maybe (Expr a)
     go (SLoad idx@(Keccak _) store) = case inferLogicalIdx idx of
       Just (logicalIdx, slot) -> do
         base <- setLogicalBase logicalIdx store
         pure (SLoad slot base)
-      Nothing -> trace "1" Nothing
+      Nothing -> Nothing
     go e@(SLoad (Lit idx) _) | idx < 256 = Just e
-    go (SLoad _ _) = trace "2" Nothing
+    go (SLoad _ _) = Nothing
 
-    go s@(SStore idx@(Keccak _) val store) = trace "INSIDE SSTORE" $ case inferLogicalIdx idx of
+    go (SStore idx@(Keccak _) val store) = case inferLogicalIdx idx of
       Just (logicalIdx, slot) -> do
-        traceM "DOING A REWRITE"
-        traceShowM s
+        -- TODO: eliminate writes to other logical indices
         base <- setLogicalBase logicalIdx store
         pure (SStore slot val base)
-      Nothing -> trace "3" Nothing
+      Nothing -> Nothing
     go e@(SStore (Lit idx) _ _) | idx < 256 = Just e
-    go s@(SStore _ _ _) = trace (show s) Nothing
+    go (SStore _ _ _) = Nothing
 
     go e = Just e
 
@@ -813,7 +809,7 @@ decomposeStorage = mapExprM go
       (MappingSlot idx key) -> Just (idxToWord idx, key)
       (ArraySlotWithOffset idx offset) -> Just (idxToWord idx, offset)
       (ArraySlotZero idx) -> Just (idxToWord idx, Lit 0)
-      _ -> trace "5" Nothing
+      _ -> Nothing
 
     idxToWord :: ByteString -> W256
     idxToWord = W256 . word256 . BS.takeEnd 32
@@ -835,7 +831,7 @@ decomposeStorage = mapExprM go
     setLogicalBase _ (ConcreteStore store) =
       if all (< 256) (Map.keys store)
       then Just (ConcreteStore mempty)
-      else trace "6" Nothing
+      else Nothing
     setLogicalBase _ (GVar _) = internalError "Unexpected GVar"
 
 
