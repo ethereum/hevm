@@ -612,7 +612,7 @@ readStorage w st = go (simplify w) st
   where
     go :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
     go _ (GVar _) = internalError "Can't read from a GVar"
-    go slot s@(AbstractStore _) = Just $ SLoad slot s
+    go slot s@(AbstractStore _ _) = Just $ SLoad slot s
     go (Lit l) (ConcreteStore s) = Lit <$> Map.lookup l s
     go slot store@(ConcreteStore _) = Just $ SLoad slot store
     go slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
@@ -756,9 +756,15 @@ writeStorage key val store = SStore key val store
 
 getAddr :: Expr Storage -> Maybe (Expr EAddr)
 getAddr (SStore _ _ p) = getAddr p
-getAddr (AbstractStore a) = Just a
+getAddr (AbstractStore a _) = Just a
 getAddr (ConcreteStore _) = Nothing
 getAddr (GVar _) = internalError "cannot determine addr of a GVar"
+
+getLogicalIdx :: Expr Storage -> Maybe W256
+getLogicalIdx (SStore _ _ p) = getLogicalIdx p
+getLogicalIdx (AbstractStore _ idx) = idx
+getLogicalIdx (ConcreteStore _) = Nothing
+getLogicalIdx (GVar _) = internalError "cannot determine addr of a GVar"
 
 
 -- ** Whole Expression Simplification ** -----------------------------------------------------------

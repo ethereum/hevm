@@ -1000,7 +1000,7 @@ subStores model b = Map.foldlWithKey subStore b model
       where
         go :: Expr a -> Expr a
         go = \case
-          v@(AbstractStore a)
+          v@(AbstractStore a _)
             -> if a == var
                then ConcreteStore val
                else v

@@ -167,8 +167,8 @@ makeVm o = do
 unknownContract :: Expr EAddr -> Contract
 unknownContract addr = Contract
   { code        = UnknownCode addr
-  , storage     = AbstractStore addr
-  , origStorage = AbstractStore addr
+  , storage     = AbstractStore addr Nothing
+  , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = Nothing
   , codehash    = hashcode (UnknownCode addr)
@@ -181,8 +181,8 @@ unknownContract addr = Contract
 abstractContract :: ContractCode -> Expr EAddr -> Contract
 abstractContract code addr = Contract
   { code        = code
-  , storage     = AbstractStore addr
-  , origStorage = AbstractStore addr
+  , storage     = AbstractStore addr Nothing
+  , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = if isCreation code then Just 1 else Just 0
   , codehash    = hashcode code
@@ -1895,9 +1895,10 @@ create self this xSize xGas xValue xs newAddr initCode = do
               resetStorage :: Expr Storage -> Expr Storage
               resetStorage = \case
                   ConcreteStore _ -> ConcreteStore mempty
-                  AbstractStore a -> AbstractStore a
+                  AbstractStore a Nothing -> AbstractStore a Nothing
                   SStore _ _ p -> resetStorage p
-                  GVar _  -> error "unexpected global variable"
+                  AbstractStore _ (Just _) -> internalError "unexpected logical store in EVM.hs"
+                  GVar _  -> internalError "unexpected global variable"
 
             modifying (#env % #contracts % ix newAddr % #storage) resetStorage
             modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage

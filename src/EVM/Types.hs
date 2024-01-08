@@ -326,7 +326,9 @@ data Expr (a :: EType) where
   -- storage
 
   ConcreteStore  :: (Map W256 W256) -> Expr Storage
-  AbstractStore  :: Expr EAddr -> Expr Storage
+  AbstractStore  :: Expr EAddr -- which contract is this store for?
+                 -> Maybe W256 -- which logical store does this refer to? (e.g. solidity mappings / arrays)
+                 -> Expr Storage
 
   SLoad          :: Expr EWord         -- key
                  -> Expr Storage       -- storage

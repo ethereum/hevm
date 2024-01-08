@@ -673,8 +673,8 @@ formatExpr = go
         , ")"
         , formatExpr prev
         ]
-      AbstractStore a ->
-        "(AbstractStore " <> formatExpr a <> ")"
+      AbstractStore a idx ->
+        "(AbstractStore " <> formatExpr a <> " " <> T.pack (show idx) <> ")"
       ConcreteStore s -> if null s
         then "(ConcreteStore <empty>)"
         else T.unlines

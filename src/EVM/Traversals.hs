@@ -185,7 +185,7 @@ foldExpr f acc expr = acc <> (go expr)
       -- storage
 
       e@(ConcreteStore _) -> f e
-      e@(AbstractStore _) -> f e
+      e@(AbstractStore _ _) -> f e
       e@(SLoad a b) -> f e <> (go a) <> (go b)
       e@(SStore a b c) -> f e <> (go a) <> (go b) <> (go c)
 
@@ -512,7 +512,7 @@ mapExprM f expr = case expr of
   -- storage
 
   ConcreteStore b -> f (ConcreteStore b)
-  AbstractStore a -> f (AbstractStore a)
+  AbstractStore a b -> f (AbstractStore a b)
   SLoad a b -> do
     a' <- mapExprM f a
     b' <- mapExprM f b

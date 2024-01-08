@@ -285,7 +285,7 @@ tests = testGroup "hevm"
   , testGroup "StorageTests"
     [ test "read-from-sstore" $ assertEqualM ""
         (Lit 0xab)
-        (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x0) (Lit 0xab) (AbstractStore (LitAddr 0x0))))
+        (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x0) (Lit 0xab) (AbstractStore (LitAddr 0x0) Nothing)))
     , test "read-from-concrete" $ assertEqualM ""
         (Lit 0xab)
         (Expr.readStorage' (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, 0xab)]))
@@ -3742,7 +3742,7 @@ genStorageWrites :: Gen (Expr Storage)
 genStorageWrites = do
   toSlot <- genSlot
   val <- genLit (maxBound :: W256)
-  store <- frequency [ (3, pure $ AbstractStore (SymAddr ""))
+  store <- frequency [ (3, pure $ AbstractStore (SymAddr "") Nothing)
                      , (2, genStorageWrites)
                      ]
   pure $ SStore toSlot val store
@@ -4031,7 +4031,7 @@ genBuf bound sz = oneof
 
 genStorage :: Int -> Gen (Expr Storage)
 genStorage 0 = oneof
-  [ fmap AbstractStore arbitrary
+  [ liftM2 AbstractStore arbitrary arbitrary
   , fmap ConcreteStore arbitrary
   ]
 genStorage sz = liftM3 SStore subWord subWord subStore
