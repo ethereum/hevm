@@ -19,6 +19,7 @@ Available options:
   --coverage               Coverage analysis
   --match STRING           Test case filter - only run methods matching regex
   --solver TEXT            Used SMT solver: z3 (default) or cvc5
+  --num-solvers NATURAL    Number of solver instances to use (default: number of cpu cores)
   --smtdebug               Print smt queries sent to the solver
   --ffi                    Allow the usage of the hevm.ffi() cheatcode (WARNING:
                            this allows test authors to execute arbitrary code on
