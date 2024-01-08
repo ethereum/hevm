@@ -160,6 +160,7 @@ cdLen = go (Lit 4)
       [] -> acc
       (hd:tl) -> case hd of
                    St _ _ -> go (Expr.add acc (Lit 32)) tl
+                   Comp xs | all isSt xs -> go acc (xs <> tl)
                    _ -> internalError "unsupported"
 
 writeSelector :: Expr Buf -> Text -> Expr Buf
@@ -176,8 +177,16 @@ combineFragments fragments base = go (Lit 4) fragments (base, [])
     go _ [] acc = acc
     go idx (f:rest) (buf, ps) =
       case f of
+        -- static fragments get written as a word in place
         St p w -> go (Expr.add idx (Lit 32)) rest (Expr.writeWord idx w buf, p <> ps)
+        -- compound fragments that contain only static fragments get written in place
+        Comp xs | all isSt xs -> go idx (xs <> rest) (buf,ps)
+        -- dynamic fragments are not yet supported... :/
         s -> internalError $ "unsupported cd fragment: " <> show s
+
+isSt :: CalldataFragment -> Bool
+isSt (St {}) = True
+isSt _ = False
 
 
 abstractVM
