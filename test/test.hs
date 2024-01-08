@@ -221,7 +221,8 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mapping_access(address,address)" [AbiAddressType, AbiAddressType])) [] defaultVeriOpts
-      putStrLnM $ T.unpack $ formatExpr expr
+      let a = mapExprM Expr.decomposeStorage expr
+      putStrLnM $ T.unpack $ formatExpr (fromJust a)
     , test "simplify-storage-map-only-static" $ do
        Just c <- solcRuntime "MyContract"
         [i|
