@@ -7,6 +7,8 @@
 -}
 module EVM.Expr where
 
+import Debug.Trace
+
 import Prelude hiding (LT, GT)
 import Control.Monad.ST
 import Data.Bits hiding (And, Xor)
@@ -768,6 +770,74 @@ getLogicalIdx (GVar _) = internalError "cannot determine addr of a GVar"
 
 
 -- ** Whole Expression Simplification ** -----------------------------------------------------------
+
+
+-- | Splits storage into logical substores (solc based heuristic) if it safe to do so
+-- safe if
+--   - all base stores must be one of:
+--     - concrete + empty
+--     - concrete + all keys < 256
+--     - abstract
+--   - all read / write indices must be one of:
+--     - Lit < 256
+--     - MappingSlot
+--     - ArraySlotWithOffset
+--     - ArraySlotZero
+--
+decomposeStorage :: Expr a -> Maybe (Expr a)
+decomposeStorage = mapExprM go
+  where
+    go :: Expr a -> Maybe (Expr a)
+    go (SLoad idx@(Keccak _) store) = case inferLogicalIdx idx of
+      Just (logicalIdx, slot) -> do
+        base <- setLogicalBase logicalIdx store
+        pure (SLoad slot base)
+      Nothing -> trace "1" Nothing
+    go e@(SLoad (Lit idx) _) | idx < 256 = Just e
+    go (SLoad _ _) = trace "2" Nothing
+
+    go s@(SStore idx@(Keccak _) val store) = trace "INSIDE SSTORE" $ case inferLogicalIdx idx of
+      Just (logicalIdx, slot) -> do
+        traceM "DOING A REWRITE"
+        traceShowM s
+        base <- setLogicalBase logicalIdx store
+        pure (SStore slot val base)
+      Nothing -> trace "3" Nothing
+    go e@(SStore (Lit idx) _ _) | idx < 256 = Just e
+    go s@(SStore _ _ _) = trace (show s) Nothing
+
+    go e = Just e
+
+    inferLogicalIdx :: Expr EWord -> Maybe (W256, Expr EWord)
+    inferLogicalIdx = \case
+      (MappingSlot idx key) -> Just (idxToWord idx, key)
+      (ArraySlotWithOffset idx offset) -> Just (idxToWord idx, offset)
+      (ArraySlotZero idx) -> Just (idxToWord idx, Lit 0)
+      _ -> trace "5" Nothing
+
+    idxToWord :: ByteString -> W256
+    idxToWord = W256 . word256 . BS.takeEnd 32
+
+    -- Updates the logical base store of the given expression if it is safe to do so
+    setLogicalBase :: W256 -> Expr Storage -> Maybe (Expr Storage)
+
+    -- abstract bases get their logical idx set to the new value
+    setLogicalBase new (AbstractStore addr _) = Just $ AbstractStore addr (Just new)
+    setLogicalBase new (SStore i v s) = do
+      b <- setLogicalBase new s
+      Just $ SStore i v b
+
+    -- empty concrete base is safe to reuse without any rewriting
+    setLogicalBase _ s@(ConcreteStore m) | Map.null m = Just s
+
+    -- if the existing base is concrete but we have writes to only keys < 256
+    -- then we can safely rewrite the base to an empty ConcreteStore (safe because we assume keccack(x) > 256)
+    setLogicalBase _ (ConcreteStore store) =
+      if all (< 256) (Map.keys store)
+      then Just (ConcreteStore mempty)
+      else trace "6" Nothing
+    setLogicalBase _ (GVar _) = internalError "Unexpected GVar"
+
 
 
 -- | Simple recursive match based AST simplification
