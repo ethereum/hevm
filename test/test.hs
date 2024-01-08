@@ -205,6 +205,23 @@ tests = testGroup "hevm"
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] (defaultVeriOpts { maxIter = Just 5 })
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
+    , test "different-addr" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping (address => uint) balances;
+          mapping (uint => bool) auth;
+          mapping (address => mapping (address => uint)) allowance;
+          function prove_mapping_access(address x, address y) public {
+              require(x != y);
+              balances[x] = 1;
+              balances[y] = 2;
+              assert(balances[x] != balances[y]);
+          }
+        }
+        |]
+      expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mapping_access(address,address)" [AbiAddressType, AbiAddressType])) [] defaultVeriOpts
+      putStrLnM $ T.unpack $ formatExpr expr
     , test "simplify-storage-map-only-static" $ do
        Just c <- solcRuntime "MyContract"
         [i|
