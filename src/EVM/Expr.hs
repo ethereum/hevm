@@ -803,7 +803,7 @@ decomposeCheckTypes inp = result.storeType /= Mixed
     go e@(SLoad (MappingSlot {}) _) = setMap e
     go e@(SLoad (ArraySlotWithOffset {}) _) = setArray e
     go e@(SLoad (ArraySlotZero {}) _) = setArray e
-    go e@(SLoad (Lit x) _) | x < 256 = setArray e
+    go e@(SLoad (Lit x) _) | x < 256 = setSmall e
     go e@(SLoad _ _) = setMixed e
     go e@(SStore (MappingSlot {}) _ _) = setMap e
     go e@(SStore (ArraySlotZero {}) _ _) = setArray e
