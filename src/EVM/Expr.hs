@@ -781,47 +781,106 @@ getLogicalIdx (GVar _) = internalError "cannot determine addr of a GVar"
 --     - MappingSlot
 --     - ArraySlotWithOffset
 --     - ArraySlotZero
+--  - mixing within the same store & load is not permitted
+data StorageType = SmallSlot | Array | Map | Mixed | UNK
+  deriving (Show, Eq)
+
+newtype CollectStorageType = CollectStorageType {storeType :: StorageType }
+  deriving (Show)
+
+initCollectStorageType :: CollectStorageType
+initCollectStorageType = CollectStorageType {storeType = UNK }
+
+decomposeCheckTypes :: Expr a -> Bool
+decomposeCheckTypes inp = result.storeType /= Mixed
+  where
+    result = execState (decomposeCheckTypesRunner inp) initCollectStorageType
+
+    decomposeCheckTypesRunner :: forall a. Expr a -> State CollectStorageType (Expr a)
+    decomposeCheckTypesRunner a = go a
+
+    go :: forall b. Expr b -> State CollectStorageType (Expr b)
+    go e@(SLoad (MappingSlot {}) _) = setMap e
+    go e@(SLoad (ArraySlotWithOffset {}) _) = setArray e
+    go e@(SLoad (ArraySlotZero {}) _) = setArray e
+    go e@(SLoad (Lit x) _) | x < 256 = setArray e
+    go e@(SLoad _ _) = setMixed e
+    go e@(SStore (MappingSlot {}) _ _) = setMap e
+    go e@(SStore (ArraySlotZero {}) _ _) = setArray e
+    go e@(SStore (ArraySlotWithOffset {}) _ _) = setArray e
+    go e@(SStore (Lit x) _ _) | x < 256 = setSmall e
+    go e@(SStore _ _ _) = setMixed e
+    go e = pure e
+
+    -- Helper functions for detecting mixed load/store
+    setMixed e = do
+      put CollectStorageType {storeType = Mixed}
+      pure e
+    setMap e = do
+      s <- get
+      case s.storeType of
+        Array -> put s {storeType = Mixed}
+        SmallSlot -> put s {storeType = Mixed}
+        UNK -> put s {storeType = Map}
+        _ -> pure ()
+      pure e
+    setArray e = do
+      s <- get
+      case s.storeType of
+        Map -> put s {storeType = Mixed}
+        SmallSlot -> put s {storeType = Mixed}
+        UNK -> put s {storeType = Array}
+        _ -> pure ()
+      pure e
+    setSmall e = do
+      s <- get
+      case s.storeType of
+        Map -> put s {storeType = Mixed}
+        Array -> put s {storeType = Mixed}
+        UNK -> put s {storeType = SmallSlot}
+        _ -> pure ()
+      pure e
+
 decomposeStorage :: Expr a -> Maybe (Expr a)
 decomposeStorage = go
   where
+    -- NOTE: it's a bad idea to rewrite SStore on its own, we should rewrite SLoad, which calls SStore
+    --       this ensures that the rewrite happens to the whole SLoad... chain. If we rewrite SStore,
+    --       we will impact the returned "final state" of the system that will then be incorrect since
+    --       the final state actually contains all the Keccak-s
     go :: Expr a -> Maybe (Expr a)
-    go (SLoad idx@(Keccak _) store) = case inferLogicalIdx idx of
-      Just (logicalIdx, slot) -> do
-        base <- setLogicalBase logicalIdx store
-        pure (SLoad slot base)
-      Nothing -> Nothing
-    go e@(SLoad (Lit idx) _) | idx < 256 = Just e
-    go (SLoad _ _) = Nothing
-
-    go (SStore idx@(Keccak _) val store) = case inferLogicalIdx idx of
-      Just (logicalIdx, slot) -> do
-        -- TODO: eliminate writes to other logical indices
-        base <- setLogicalBase logicalIdx store
-        pure (SStore slot val base)
-      Nothing -> Nothing
-    go e@(SStore (Lit idx) _ _) | idx < 256 = Just e
-    go (SStore _ _ _) = Nothing
+    go e@(SLoad origKey store) = if Prelude.not (decomposeCheckTypes e) then Nothing else case inferLogicalIdx origKey of
+      Just (idx, key) -> do
+        base <- setLogicalBase idx store
+        pure (SLoad key base)
+      _ -> Nothing
 
     go e = Just e
 
     inferLogicalIdx :: Expr EWord -> Maybe (W256, Expr EWord)
     inferLogicalIdx = \case
+      Lit a | a >= 256 -> Nothing
+      Lit a -> Just (0, Lit a)
       (MappingSlot idx key) -> Just (idxToWord idx, key)
-      (ArraySlotWithOffset idx offset) -> Just (idxToWord idx, offset)
-      (ArraySlotZero idx) -> Just (idxToWord idx, Lit 0)
+      (ArraySlotWithOffset idx offset) | BS.length idx == 32 -> Just (idxToWord64 idx, offset)
+      (ArraySlotZero idx) | BS.length idx == 32 -> Just (idxToWord64 idx, Lit 0)
       _ -> Nothing
 
     idxToWord :: ByteString -> W256
     idxToWord = W256 . word256 . BS.takeEnd 32
+    -- Arrays take the whole `id` and keccak it. It's supposed to be 64B
+    idxToWord64 :: ByteString -> W256
+    idxToWord64 = W256 . word256 . BS.takeEnd 64
 
     -- Updates the logical base store of the given expression if it is safe to do so
     setLogicalBase :: W256 -> Expr Storage -> Maybe (Expr Storage)
 
     -- abstract bases get their logical idx set to the new value
-    setLogicalBase new (AbstractStore addr _) = Just $ AbstractStore addr (Just new)
-    setLogicalBase new (SStore i v s) = do
-      b <- setLogicalBase new s
-      Just $ SStore i v b
+    setLogicalBase idx (AbstractStore addr _) = Just $ AbstractStore addr (Just idx)
+    setLogicalBase idx (SStore i v s) = do
+      b <- setLogicalBase idx s
+      (idx2, key2) <- inferLogicalIdx i
+      if idx == idx2 then Just (SStore key2 v b) else Nothing
 
     -- empty concrete base is safe to reuse without any rewriting
     setLogicalBase _ s@(ConcreteStore m) | Map.null m = Just s
@@ -833,7 +892,6 @@ decomposeStorage = go
       then Just (ConcreteStore mempty)
       else Nothing
     setLogicalBase _ (GVar _) = internalError "Unexpected GVar"
-
 
 
 -- | Simple recursive match based AST simplification

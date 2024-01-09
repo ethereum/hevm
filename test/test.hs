@@ -205,13 +205,11 @@ tests = testGroup "hevm"
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] (defaultVeriOpts { maxIter = Just 5 })
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
-    , test "different-addr" $ do
+    , test "decompose-1" $ do
       Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
           mapping (address => uint) balances;
-          mapping (uint => bool) auth;
-          mapping (address => mapping (address => uint)) allowance;
           function prove_mapping_access(address x, address y) public {
               require(x != y);
               balances[x] = 1;
@@ -221,8 +219,61 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mapping_access(address,address)" [AbiAddressType, AbiAddressType])) [] defaultVeriOpts
-      let a = mapExprM Expr.decomposeStorage expr
-      putStrLnM $ T.unpack $ formatExpr (fromJust a)
+      let simpExpr = mapExprM Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
+      assertEqualM "Expression is not clean." (isJust simpExpr) True
+    , test "decompose-2" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping (address => uint) balances;
+          function prove_mixed_symoblic_concrete_writes(address x, uint v) public {
+              balances[x] = v;
+              balances[address(0)] = balances[x];
+              assert(balances[address(0)] == v);
+          }
+        }
+        |]
+      expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mixed_symoblic_concrete_writes(address,uint256)" [AbiAddressType, AbiUIntType 256])) [] defaultVeriOpts
+      let simpExpr = mapExprM Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
+      assertEqualM "Expression is not clean." (isJust simpExpr) True
+    , test "decompose-3" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[] a;
+          function prove_array(uint x, uint v1, uint y, uint v2) public {
+              require(v1 != v2);
+              a[x] = v1;
+              a[y] = v2;
+              assert(a[x] == a[y]);
+          }
+        }
+        |]
+      expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_array(uint256,uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+      let simpExpr = mapExprM Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
+      assertEqualM "Expression is not clean." (isJust simpExpr) True
+    , test "decompose-4-mixed" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[] a;
+          mapping( uint => uint) balances;
+          function prove_array(uint x, uint v1, uint y, uint v2) public {
+              require(v1 != v2);
+              balances[x] = v1+1;
+              balances[y] = v1+2;
+              a[x] = v1;
+              assert(balances[x] != balances[y]);
+          }
+        }
+        |]
+      expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_array(uint256,uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+      let simpExpr = mapExprM Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
+      assertEqualM "Expression is not clean." (isJust simpExpr) True
     , test "simplify-storage-map-only-static" $ do
        Just c <- solcRuntime "MyContract"
         [i|
