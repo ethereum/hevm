@@ -274,6 +274,27 @@ tests = testGroup "hevm"
       let simpExpr = mapExprM Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Expression is not clean." (isJust simpExpr) True
+    , test "decompose-5-mixed" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping (address => uint) balances;
+          mapping (uint => bool) auth;
+          function prove_mixed(address x, address y, uint val) public {
+            require(x != y);
+            balances[x] = val;
+            balances[y] = val+2;
+            auth[val+1] = true;
+            if (balances[y] == balances[y]) {
+                assert(balances[y] == val);
+            }
+          }
+        }
+        |]
+      expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mixed(address,address,uint256)" [AbiAddressType, AbiAddressType, AbiUIntType 256])) [] defaultVeriOpts
+      let simpExpr = mapExprM Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
+      assertEqualM "Expression is not clean." (isJust simpExpr) True
     , test "simplify-storage-map-only-static" $ do
        Just c <- solcRuntime "MyContract"
         [i|
