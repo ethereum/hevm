@@ -280,10 +280,14 @@ tests = testGroup "hevm"
         contract MyContract {
           mapping (address => uint) balances;
           mapping (uint => bool) auth;
+          uint a;
+          uint b;
           function prove_mixed(address x, address y, uint val) public {
+            b = val+1;
             require(x != y);
             balances[x] = val;
             balances[y] = val+2;
+            a = val;
             auth[val+1] = true;
             if (balances[y] == balances[y]) {
                 assert(balances[y] == val);
