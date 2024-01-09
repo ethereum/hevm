@@ -151,6 +151,7 @@ data Command w
       , coverage      :: w ::: Bool                     <?> "Coverage analysis"
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
       , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default) or cvc5"
+      , numSolvers    :: w ::: Maybe Natural            <?> "Number of solver instances to use (default: number of cpu cores)"
       , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
       , debug         :: w ::: Bool                     <?> "Debug printing of internal behaviour"
       , trace         :: w ::: Bool                     <?> "Dump trace"
@@ -215,9 +216,10 @@ main = do
     Test {} -> do
       root <- getRoot cmd
       withCurrentDirectory root $ do
-        cores <- unsafeInto <$> getNumProcessors
         solver <- getSolver cmd
-        runEnv env $ withSolvers solver cores cmd.smttimeout $ \solvers -> do
+        cores <- liftIO $ unsafeInto <$> getNumProcessors
+        let solverCount = fromMaybe cores cmd.numSolvers
+        runEnv env $ withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
           buildOut <- liftIO $ readBuildOutput root (getProjectType cmd)
           case buildOut of
             Left e -> liftIO $ do
