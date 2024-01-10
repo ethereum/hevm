@@ -644,7 +644,11 @@ readStorage w st = go (simplify w) st
       -- for our purposes. This lets us completely simplify reads from write
       -- chains involving writes to arrays at literal offsets.
       (Lit a, Add (Lit b) (Keccak _) ) | a < 256, b < maxW32 -> go slot prev
-      (Add (Lit a) (Keccak _) , Lit b) | a < 256, b < maxW32 -> go slot prev
+      (Add (Lit a) (Keccak _) , Lit b) | b < 256, a < maxW32 -> go slot prev
+
+      --- NOTE these are needed to succeed in rewriting arrays with a variable index
+      -- (Lit a, Add (Keccak _) (Var _) ) | a < 256 -> go slot prev
+      -- (Add (Keccak _) (Var _) , Lit b) | b < 256 -> go slot prev
 
       -- Finding two Keccaks that are < 256 away from each other should be VERY hard
       -- This simplification allows us to deal with maps of structs
@@ -841,16 +845,16 @@ decomposeCheckTypes inp = result.storeType /= Mixed
         _ -> pure ()
       pure e
 
-decomposeStorage :: Expr a -> Expr a
+decomposeStorage :: Expr a -> Maybe (Expr a)
 decomposeStorage = go
   where
     -- NOTE: it's a bad idea to rewrite SStore on its own, we should rewrite SLoad, which calls SStore
     --       this ensures that the rewrite happens to the whole SLoad... chain. If we rewrite SStore,
     --       we will impact the returned "final state" of the system that will then be incorrect since
     --       the final state actually contains all the Keccak-s
-    go :: Expr a -> Expr a
-    go e@(SLoad origKey store) = if Prelude.not (decomposeCheckTypes e) then e else fromMaybe e (tryRewrite origKey store)
-    go e = e
+    go :: Expr a -> Maybe (Expr a)
+    go e@(SLoad origKey store) = if Prelude.not (decomposeCheckTypes e) then Nothing else tryRewrite origKey store
+    go e = Just e
 
     tryRewrite :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
     tryRewrite origKey store = case inferLogicalIdx origKey of
@@ -859,26 +863,28 @@ decomposeStorage = go
         pure (SLoad key base)
       _ -> Nothing
 
-    inferLogicalIdx :: Expr EWord -> Maybe (W256, Expr EWord)
+    -- NOTE: we use (Maybe W256) for idx here, because for small slot numbers we want to keep the
+    -- Logical Store value a Nothing
+    inferLogicalIdx :: Expr EWord -> Maybe (Maybe W256, Expr EWord)
     inferLogicalIdx = \case
       Lit a | a >= 256 -> Nothing
-      Lit a -> Just (0, Lit a)
-      (MappingSlot idx key) -> Just (idxToWord idx, key)
-      (ArraySlotWithOffset idx offset) | BS.length idx == 32 -> Just (idxToWord64 idx, offset)
-      (ArraySlotZero idx) | BS.length idx == 32 -> Just (idxToWord64 idx, Lit 0)
+      Lit a -> Just (Nothing, Lit a)
+      (MappingSlot idx key) | BS.length idx == 64 -> Just (Just $ idxToWord idx, key)
+      (ArraySlotWithOffset idx offset) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, offset)
+      (ArraySlotZero idx) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, Lit 0)
       _ -> Nothing
 
     idxToWord :: ByteString -> W256
-    idxToWord = W256 . word256 . BS.takeEnd 32
+    idxToWord = W256 . word256 . (BS.takeEnd 32)
     -- Arrays take the whole `id` and keccak it. It's supposed to be 64B
     idxToWord64 :: ByteString -> W256
-    idxToWord64 = W256 . word256 . BS.takeEnd 64
+    idxToWord64 = W256 . word256 . (BS.takeEnd 64)
 
     -- Updates the logical base store of the given expression if it is safe to do so
-    setLogicalBase :: W256 -> Expr Storage -> Maybe (Expr Storage)
+    setLogicalBase :: Maybe W256 -> Expr Storage -> Maybe (Expr Storage)
 
     -- abstract bases get their logical idx set to the new value
-    setLogicalBase idx (AbstractStore addr _) = Just $ AbstractStore addr (Just idx)
+    setLogicalBase idx (AbstractStore addr _) = Just $ AbstractStore addr idx
     setLogicalBase idx (SStore i v s) = do
       b <- setLogicalBase idx s
       (idx2, key2) <- inferLogicalIdx i
