@@ -4165,9 +4165,9 @@ genStorage :: Int -> Gen (Expr Storage)
 genStorage sz = genStorageMap True sz
 
 genStorageMap :: Bool -> Int -> Gen (Expr Storage)
-genStorageMap withMap 0 = oneof
-  [ liftM2 AbstractStore arbitrary (if withMap then arbitrary else pure Nothing)
-  , fmap ConcreteStore (if withMap then arbitrary else pure mempty)
+genStorageMap withIdx 0 = oneof
+  [ liftM2 AbstractStore arbitrary (if withIdx then arbitrary else pure Nothing)
+  , fmap ConcreteStore (if withIdx then arbitrary else pure mempty)
   ]
 genStorageMap withMap sz = liftM3 SStore key val subStore
   where
