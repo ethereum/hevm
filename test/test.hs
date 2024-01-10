@@ -500,6 +500,16 @@ tests = testGroup "hevm"
     , testProperty "store-simplification" $ \(expr :: Expr Storage) -> prop $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
+    , testProperty "load-simplification" $ \(GenWriteStorageLoad expr) -> prop $ do
+        let simplified = Expr.simplify expr
+        checkEquiv expr simplified
+    , testProperty "load-decompose" $ \(GenWriteStorageLoad expr) -> prop $ do
+        putStrLnM $ T.unpack $ formatExpr expr
+        let decomposed = Expr.decomposeStorage (Expr.simplify expr)
+        putStrLnM $ "-----------------------------------------"
+        putStrLnM $ T.unpack $ formatExpr decomposed
+        putStrLnM $ "\n\n\n\n"
+        checkEquiv expr decomposed
     , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> prop $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
@@ -3927,6 +3937,11 @@ genEnd sz = oneof
     subEnd = genEnd (sz `div` 2)
     subProp = genProps False (sz `div` 2)
 
+genSmallLit :: W256 -> Gen (Expr EWord)
+genSmallLit m = do
+  val :: W256 <- arbitrary
+  pure $ Lit (val `mod` m)
+
 genWord :: Int -> Int -> Gen (Expr EWord)
 genWord litFreq 0 = frequency
   [ (litFreq, do
@@ -4160,14 +4175,54 @@ genBuf bound sz = oneof
     subBuf = genBuf bound (sz `div` 10)
 
 genStorage :: Int -> Gen (Expr Storage)
-genStorage 0 = oneof
-  [ liftM2 AbstractStore arbitrary arbitrary
-  , fmap ConcreteStore arbitrary
+genStorage sz = genStorageMap True sz
+
+genStorageMap :: Bool -> Int -> Gen (Expr Storage)
+genStorageMap withMap 0 = oneof
+  [ liftM2 AbstractStore arbitrary (if withMap then arbitrary else pure Nothing)
+  , fmap ConcreteStore (if withMap then arbitrary else pure mempty)
   ]
-genStorage sz = liftM3 SStore subWord subWord subStore
+genStorageMap withMap sz = liftM3 SStore key val subStore
   where
-    subStore = genStorage (sz `div` 10)
-    subWord = defaultWord (sz `div` 5)
+    subStore = genStorageMap withMap (sz `div` 10)
+    val = defaultWord (sz `div` 5)
+    key = genStorageKey
+
+genStorageKey :: Gen (Expr EWord)
+genStorageKey = frequency
+     -- array slot
+    [ (4, liftM2 Expr.ArraySlotWithOffset (genByteStringKey 32) (genSmallLit 5))
+    , (4, fmap Expr.ArraySlotZero (genByteStringKey 32))
+     -- mapping slot
+    , (8, liftM2 Expr.MappingSlot (genByteStringKey 64) (genSmallLit 5))
+     -- small slot
+    , (4, genLit 20)
+    -- unrecognized slot type
+    , (1, genSmallLit 5)
+    ]
+
+genByteStringKey :: W256 -> Gen (ByteString)
+genByteStringKey len = oneof
+    [ do
+        b :: Word8 <- arbitrary
+        pure $ BS.pack ([ 0 | _ <- [0..(len-2)]] ++ [b `mod` 5])
+    ]
+
+-- GenWriteStorageLoad
+newtype GenWriteStorageLoad = GenWriteStorageLoad (Expr EWord)
+  deriving (Show, Eq)
+
+instance Arbitrary GenWriteStorageLoad where
+  arbitrary = do
+    load <- genStorageLoad 10
+    pure $ GenWriteStorageLoad load
+
+    where
+      genStorageLoad :: Int -> Gen (Expr EWord)
+      genStorageLoad sz = liftM2 SLoad key subStore
+        where
+          subStore = genStorageMap False (sz `div` 10)
+          key = genStorageKey
 
 data Invocation
   = SolidityCall Text [AbiValue]
