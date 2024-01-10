@@ -219,9 +219,9 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mapping_access(address,address)" [AbiAddressType, AbiAddressType])) [] defaultVeriOpts
-      let simpExpr = mapExprM Expr.decomposeStorage expr
-      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
-      assertEqualM "Expression is not clean." (isJust simpExpr) True
+      let simpExpr = mapExpr Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr simpExpr
+      assertEqualM "Expression is not clean." (keccakStoreInExpr simpExpr) False
     , test "decompose-2" $ do
       Just c <- solcRuntime "MyContract"
         [i|
@@ -235,9 +235,9 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mixed_symoblic_concrete_writes(address,uint256)" [AbiAddressType, AbiUIntType 256])) [] defaultVeriOpts
-      let simpExpr = mapExprM Expr.decomposeStorage expr
-      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
-      assertEqualM "Expression is not clean." (isJust simpExpr) True
+      let simpExpr = mapExpr Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr simpExpr
+      assertEqualM "Expression is not clean." (keccakStoreInExpr simpExpr) False
     , test "decompose-3" $ do
       Just c <- solcRuntime "MyContract"
         [i|
@@ -252,9 +252,9 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_array(uint256,uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-      let simpExpr = mapExprM Expr.decomposeStorage expr
-      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
-      assertEqualM "Expression is not clean." (isJust simpExpr) True
+      let simpExpr = mapExpr Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr simpExpr
+      assertEqualM "Expression is not clean." (keccakStoreInExpr simpExpr) False
     , test "decompose-4-mixed" $ do
       Just c <- solcRuntime "MyContract"
         [i|
@@ -271,9 +271,9 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_array(uint256,uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-      let simpExpr = mapExprM Expr.decomposeStorage expr
-      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
-      assertEqualM "Expression is not clean." (isJust simpExpr) True
+      let simpExpr = mapExpr Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr simpExpr
+      assertEqualM "Expression is not clean." (keccakStoreInExpr simpExpr) False
     , test "decompose-5-mixed" $ do
       Just c <- solcRuntime "MyContract"
         [i|
@@ -298,9 +298,26 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mixed(address,address,uint256)" [AbiAddressType, AbiAddressType, AbiUIntType 256])) [] defaultVeriOpts
-      let simpExpr = mapExprM Expr.decomposeStorage expr
-      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
-      assertEqualM "Expression is not clean." (isJust simpExpr) True
+      let simpExpr = mapExpr Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr simpExpr
+      assertEqualM "Expression is not clean." (keccakStoreInExpr simpExpr) False
+    -- TODO check what's going on here. Likely the "arbitrary write through array" is the reason why we fail
+    , expectFail $ test "decompose-6-fail" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[] arr;
+          function prove_mixed(uint val) public {
+            arr[val] = 5;
+            arr[val+1] = val+5;
+            assert(arr[val] == arr[val+1]);
+          }
+        }
+        |]
+      expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mixed(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+      let simpExpr = mapExpr Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr simpExpr
+      assertEqualM "Expression is not clean." (keccakStoreInExpr simpExpr) False
     , test "simplify-storage-map-only-static" $ do
        Just c <- solcRuntime "MyContract"
         [i|
@@ -4087,6 +4104,23 @@ badStoresInExpr expr = bad
         put (FoundBad { bad = True })
         pure e
       _ -> pure e
+
+keccakStoreInExpr :: Expr a -> Bool
+keccakStoreInExpr expr = bad
+  where
+    FoundBad bad = execState (mapExprM findBadLoad expr) initFoundBad
+    findBadLoad :: Expr a-> State FoundBad (Expr a)
+    findBadLoad e = case e of
+      SLoad key store -> do
+        _ <- findBad key e
+        findBad store e
+      _ -> pure e
+    findBad e orig = if isNothing $ mapExprM keccakFinder e then do
+          put (FoundBad { bad = True })
+          pure orig
+        else pure orig
+    keccakFinder (Keccak {}) = Nothing
+    keccakFinder e = Just e
 
 defaultBuf :: Int -> Gen (Expr Buf)
 defaultBuf = genBuf (4_000_000)

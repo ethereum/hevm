@@ -841,21 +841,23 @@ decomposeCheckTypes inp = result.storeType /= Mixed
         _ -> pure ()
       pure e
 
-decomposeStorage :: Expr a -> Maybe (Expr a)
+decomposeStorage :: Expr a -> Expr a
 decomposeStorage = go
   where
     -- NOTE: it's a bad idea to rewrite SStore on its own, we should rewrite SLoad, which calls SStore
     --       this ensures that the rewrite happens to the whole SLoad... chain. If we rewrite SStore,
     --       we will impact the returned "final state" of the system that will then be incorrect since
     --       the final state actually contains all the Keccak-s
-    go :: Expr a -> Maybe (Expr a)
-    go e@(SLoad origKey store) = if Prelude.not (decomposeCheckTypes e) then Nothing else case inferLogicalIdx origKey of
+    go :: Expr a -> Expr a
+    go e@(SLoad origKey store) = if Prelude.not (decomposeCheckTypes e) then e else fromMaybe e (tryRewrite origKey store)
+    go e = e
+
+    tryRewrite :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
+    tryRewrite origKey store = case inferLogicalIdx origKey of
       Just (idx, key) -> do
         base <- setLogicalBase idx store
         pure (SLoad key base)
       _ -> Nothing
-
-    go e = Just e
 
     inferLogicalIdx :: Expr EWord -> Maybe (W256, Expr EWord)
     inferLogicalIdx = \case

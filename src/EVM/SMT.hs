@@ -210,7 +210,7 @@ assertProps :: Config -> [Prop] -> SMT2
 assertProps conf ps = assertPropsNoSimp conf (decompose . Expr.simplifyProps $ ps)
   where
     decompose :: [Prop] -> [Prop]
-    decompose props = fromMaybe props (mapM (mapPropM Expr.decomposeStorage) props)
+    decompose props = map (mapProp Expr.decomposeStorage) props
 
 -- Note: we need a version that does NOT call simplify,
 -- because we make use of it to verify the correctness of our simplification
