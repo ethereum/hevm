@@ -4162,16 +4162,13 @@ genBuf bound sz = oneof
     subBuf = genBuf bound (sz `div` 10)
 
 genStorage :: Int -> Gen (Expr Storage)
-genStorage sz = genStorageMap True sz
-
-genStorageMap :: Bool -> Int -> Gen (Expr Storage)
-genStorageMap withIdx 0 = oneof
-  [ liftM2 AbstractStore arbitrary (if withIdx then arbitrary else pure Nothing)
-  , fmap ConcreteStore (if withIdx then arbitrary else pure mempty)
+genStorage 0 = oneof
+  [ liftM2 AbstractStore arbitrary (pure Nothing)
+  , fmap ConcreteStore arbitrary
   ]
-genStorageMap withMap sz = liftM3 SStore key val subStore
+genStorage sz = liftM3 SStore key val subStore
   where
-    subStore = genStorageMap withMap (sz `div` 10)
+    subStore = genStorage (sz `div` 10)
     val = defaultWord (sz `div` 5)
     key = genStorageKey
 
