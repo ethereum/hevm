@@ -774,36 +774,25 @@ getLogicalIdx (GVar _) = internalError "cannot determine addr of a GVar"
 -- ** Whole Expression Simplification ** -----------------------------------------------------------
 
 
--- | Splits storage into logical substores (solc based heuristic) if it safe to do so
--- safe if
---   - all base stores must be one of:
---     - concrete + empty
---     - concrete + all keys < 256
---     - abstract
---   - all read / write indices must be one of:
---     - Lit < 256
---     - MappingSlot
---     - ArraySlotWithOffset
---     - ArraySlotZero
---  - mixing within the same store & load is not permitted
 data StorageType = SmallSlot | Array | Map | Mixed | UNK
   deriving (Show, Eq)
 
-newtype CollectStorageType = CollectStorageType {storeType :: StorageType }
-  deriving (Show)
+-- newtype CollectStorageType = CollectStorageType {storeType :: StorageType }
+--   deriving (Show)
 
-initCollectStorageType :: CollectStorageType
-initCollectStorageType = CollectStorageType {storeType = UNK }
+-- initCollectStorageType :: CollectStorageType
+-- initCollectStorageType = CollectStorageType {storeType = UNK }
 
-decomposeCheckTypes :: Expr a -> Bool
-decomposeCheckTypes inp = result.storeType /= Mixed
+
+safeToDecompose :: Expr a -> Bool
+safeToDecompose inp = result /= Mixed
   where
-    result = execState (decomposeCheckTypesRunner inp) initCollectStorageType
+    result = execState (safeToDecomposeRunner inp) UNK
 
-    decomposeCheckTypesRunner :: forall a. Expr a -> State CollectStorageType (Expr a)
-    decomposeCheckTypesRunner a = go a
+    safeToDecomposeRunner :: forall a. Expr a -> State StorageType ()
+    safeToDecomposeRunner a = go a
 
-    go :: forall b. Expr b -> State CollectStorageType (Expr b)
+    go :: forall b. Expr b -> State StorageType ()
     go e@(SLoad (MappingSlot {}) _) = setMap e
     go e@(SLoad (ArraySlotZero {}) _) = setArray e
     go e@(SLoad (ArraySlotWithOffset {}) _) = setArray e
@@ -814,46 +803,54 @@ decomposeCheckTypes inp = result.storeType /= Mixed
     go e@(SStore (ArraySlotWithOffset {}) _ _) = setArray e
     go e@(SStore (Lit x) _ _) | x < 256 = setSmall e
     go e@(SStore _ _ _) = setMixed e
-    go e = pure e
+    go _ = pure ()
 
     -- Helper functions for detecting mixed load/store
-    setMixed e = do
-      put CollectStorageType {storeType = Mixed}
-      pure e
-    setMap e = do
+    setMixed _ = do
+      put Mixed
+      pure ()
+    setMap _ = do
       s <- get
-      case s.storeType of
-        Array -> put s {storeType = Mixed}
-        SmallSlot -> put s {storeType = Mixed}
-        UNK -> put s {storeType = Map}
+      case s of
+        Array -> put Mixed
+        SmallSlot -> put Mixed
+        UNK -> put Map
         _ -> pure ()
-      pure e
-    setArray e = do
+      pure ()
+    setArray _ = do
       s <- get
-      case s.storeType of
-        Map -> put s {storeType = Mixed}
-        SmallSlot -> put s {storeType = Mixed}
-        UNK -> put s {storeType = Array}
+      case s of
+        Map -> put Mixed
+        SmallSlot -> put Mixed
+        UNK -> put Array
         _ -> pure ()
-      pure e
-    setSmall e = do
+      pure ()
+    setSmall _ = do
       s <- get
-      case s.storeType of
-        Map -> put s {storeType = Mixed}
-        Array -> put s {storeType = Mixed}
-        UNK -> put s {storeType = SmallSlot}
+      case s of
+        Map -> put Mixed
+        Array -> put Mixed
+        UNK -> put SmallSlot
         _ -> pure ()
-      pure e
+      pure ()
 
+-- | Splits storage into logical sub-stores if (1) all SLoad->SStore* chains are one of:
+--     (1a) Lit < 256, (1b) MappingSlot, (1c) ArraySlotWithOffset, (1d) ArraySlotZero
+--  and (2) there is no mixing of different types (e.g. Map with Array) within
+--  the same SStore -> SLoad* chain, and (3) there is no mixing of different array/map slots.
+--
+--  Mixing (2) and (3) are attempted to be prevented (if possible) as part of the rewrites
+--  done by the `readStorage` function that is ran before this. If there is still mixing here,
+--  we abort with a Nothing.
+--
+--  We do NOT rewrite stand-alone `SStore`-s (i.e. SStores that are not read), since
+--  they are often used to describe a post-state, and are not dispatched as-is to
+--  the solver
 decomposeStorage :: Expr a -> Maybe (Expr a)
 decomposeStorage = go
   where
-    -- NOTE: it's a bad idea to rewrite SStore on its own, we should rewrite SLoad, which calls SStore
-    --       this ensures that the rewrite happens to the whole SLoad... chain. If we rewrite SStore,
-    --       we will impact the returned "final state" of the system that will then be incorrect since
-    --       the final state actually contains all the Keccak-s
     go :: Expr a -> Maybe (Expr a)
-    go e@(SLoad origKey store) = if Prelude.not (decomposeCheckTypes e) then Nothing else tryRewrite origKey store
+    go e@(SLoad origKey store) = if Prelude.not (safeToDecompose e) then Nothing else tryRewrite origKey store
     go e = Just e
 
     tryRewrite :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
