@@ -777,13 +777,6 @@ getLogicalIdx (GVar _) = internalError "cannot determine addr of a GVar"
 data StorageType = SmallSlot | Array | Map | Mixed | UNK
   deriving (Show, Eq)
 
--- newtype CollectStorageType = CollectStorageType {storeType :: StorageType }
---   deriving (Show)
-
--- initCollectStorageType :: CollectStorageType
--- initCollectStorageType = CollectStorageType {storeType = UNK }
-
-
 safeToDecompose :: Expr a -> Bool
 safeToDecompose inp = result /= Mixed
   where
