@@ -4203,7 +4203,7 @@ instance Arbitrary GenWriteStorageLoad where
       genStorageLoad :: Int -> Gen (Expr EWord)
       genStorageLoad sz = liftM2 SLoad key subStore
         where
-          subStore = genStorageMap False (sz `div` 10)
+          subStore = genStorage (sz `div` 10)
           key = genStorageKey
 
 data Invocation
