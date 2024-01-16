@@ -160,11 +160,11 @@ declareIntermediates bufs stores =
   where
     compareFst (l, _) (r, _) = compare l r
     encodeBuf n expr =
-      SMT2 ["(define-const buf" <> (fromString . show $ n) <> " Buf " <> exprToSMT expr <> ")\n"]  mempty mempty mempty <> encodeBufLen n expr
+      SMT2 ["(define-fun buf" <> (fromString . show $ n) <> "() Buf " <> exprToSMT expr <> ")\n"]  mempty mempty mempty <> encodeBufLen n expr
     encodeBufLen n expr =
-      SMT2 ["(define-const buf" <> (fromString . show $ n) <>"_length" <> " (_ BitVec 256) " <> exprToSMT (bufLengthEnv bufs True expr) <> ")"] mempty mempty mempty
+      SMT2 ["(define-fun buf" <> (fromString . show $ n) <>"_length () (_ BitVec 256) " <> exprToSMT (bufLengthEnv bufs True expr) <> ")"] mempty mempty mempty
     encodeStore n expr =
-      SMT2 ["(define-const store" <> (fromString . show $ n) <> " Storage " <> exprToSMT expr <> ")"] mempty mempty mempty
+      SMT2 ["(define-fun store" <> (fromString . show $ n) <> " () Storage " <> exprToSMT expr <> ")"] mempty mempty mempty
 
 data AbstState = AbstState
   { words :: Map (Expr EWord) Int

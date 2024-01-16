@@ -84,7 +84,7 @@ data Command w
       , showReachableTree :: w ::: Bool           <?> "Print only reachable branches explored in tree view"
       , smttimeout    :: w ::: Maybe Natural      <?> "Timeout given to SMT solver in seconds (default: 300)"
       , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point"
-      , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default) or cvc5"
+      , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
       , debug         :: w ::: Bool               <?> "Debug printing of internal behaviour"
       , trace         :: w ::: Bool               <?> "Dump trace"
@@ -104,7 +104,7 @@ data Command w
       , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
       , smttimeout    :: w ::: Maybe Natural    <?> "Timeout given to SMT solver in seconds (default: 300)"
       , maxIterations :: w ::: Maybe Integer    <?> "Number of times we may revisit a particular branching point"
-      , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default) or cvc5"
+      , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
       , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
       , smtdebug      :: w ::: Bool             <?> "Print smt queries sent to the solver"
       , debug         :: w ::: Bool             <?> "Debug printing of internal behaviour"
@@ -150,7 +150,7 @@ data Command w
       , verbose       :: w ::: Maybe Int                <?> "Append call trace: {1} failures {2} all"
       , coverage      :: w ::: Bool                     <?> "Coverage analysis"
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
-      , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default) or cvc5"
+      , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
       , numSolvers    :: w ::: Maybe Natural            <?> "Number of solver instances to use (default: number of cpu cores)"
       , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
       , debug         :: w ::: Bool                     <?> "Debug printing of internal behaviour"
@@ -265,6 +265,7 @@ getSolver cmd = case cmd.solver of
                   Just s -> case T.unpack s of
                               "z3" -> pure Z3
                               "cvc5" -> pure CVC5
+                              "bitwuzla" -> pure Bitwuzla
                               input -> do
                                 putStrLn $ "unrecognised solver: " <> input
                                 exitFailure
