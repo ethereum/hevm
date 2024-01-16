@@ -184,18 +184,18 @@ fetchChainIdFrom url = do
   sess <- Session.newAPISession
   fetchQuery Latest (fetchWithSession url sess) QueryChainId
 
-http :: Natural -> Maybe Natural -> BlockNumber -> Text -> Fetcher m s
+http :: Natural -> Maybe Natural -> BlockNumber -> Text -> Fetcher t m s
 http smtjobs smttimeout n url q =
   withSolvers Z3 smtjobs smttimeout $ \s ->
     oracle s (Just (n, url)) q
 
-zero :: Natural -> Maybe Natural -> Fetcher m s
+zero :: Natural -> Maybe Natural -> Fetcher t m s
 zero smtjobs smttimeout q =
   withSolvers Z3 smtjobs smttimeout $ \s ->
     oracle s Nothing q
 
 -- smtsolving + (http or zero)
-oracle :: SolverGroup -> RpcInfo -> Fetcher m s
+oracle :: SolverGroup -> RpcInfo -> Fetcher t m s
 oracle solvers info q = do
   case q of
     PleaseDoFFI vals continue -> case vals of
@@ -231,7 +231,7 @@ oracle solvers info q = do
            Nothing ->
              internalError $ "oracle error: " ++ show q
 
-type Fetcher m s = App m => Query s -> m (EVM s ())
+type Fetcher t m s = App m => Query t s -> m (EVM t s ())
 
 -- | Checks which branches are satisfiable, checking the pathconditions for consistency
 -- if the third argument is true.

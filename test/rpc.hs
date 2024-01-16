@@ -11,7 +11,7 @@ import Data.Text (Text)
 import Data.Vector qualified as V
 
 import Optics.Core
-import EVM (makeVm)
+import EVM (makeVm, symbolify)
 import EVM.ABI
 import EVM.Fetch
 import EVM.SMT
@@ -107,13 +107,13 @@ tests = testGroup "rpc"
           postc _ _ = PBool True
         vm <- liftIO $ weth9VM blockNum calldata'
         (_, [Cex (_, model)]) <- withSolvers Z3 1 Nothing $ \solvers ->
-          verify solvers (rpcVeriOpts (BlockNumber blockNum, testRpc)) vm (Just postc)
+          verify solvers (rpcVeriOpts (BlockNumber blockNum, testRpc)) (symbolify vm) (Just postc)
         liftIO $ assertBool "model should exceed caller balance" (getVar model "arg2" >= 695836005599316055372648)
     ]
   ]
 
 -- call into WETH9 from 0xf04a... (a large holder)
-weth9VM :: W256 -> (Expr Buf, [Prop]) -> IO (VM RealWorld)
+weth9VM :: W256 -> (Expr Buf, [Prop]) -> IO (VM Concrete RealWorld)
 weth9VM blockNum calldata' = do
   let
     caller' = LitAddr 0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e
@@ -121,7 +121,7 @@ weth9VM blockNum calldata' = do
     callvalue' = Lit 0
   vmFromRpc blockNum calldata' callvalue' caller' weth9
 
-vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EAddr -> Addr -> IO (VM RealWorld)
+vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EAddr -> Addr -> IO (VM Concrete RealWorld)
 vmFromRpc blockNum calldata callvalue caller address = do
   ctrct <- fetchContractFrom (BlockNumber blockNum) testRpc address >>= \case
         Nothing -> internalError $ "contract not found: " <> show address
@@ -156,7 +156,6 @@ vmFromRpc blockNum calldata callvalue caller address = do
     , baseState      = EmptyBase
     , txAccessList   = mempty
     , allowFFI       = False
-    , symbolic       = False
     }) <&> set (#cache % #fetched % at address) (Just ctrct)
 
 testRpc :: Text

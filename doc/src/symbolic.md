@@ -55,7 +55,7 @@ Available options:
   --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
   --max-iterations INTEGER Number of times we may revisit a particular branching
                            point
-  --solver TEXT            Used SMT solver: z3 (default) or cvc5
+  --solver TEXT            Used SMT solver: z3 (default), cvc5, or bitwuzla
   --smtdebug               Print smt queries sent to the solver
   --assertions [WORD256]   Comma separated list of solc panic codes to check for
                            (default: user defined assertion violations only)

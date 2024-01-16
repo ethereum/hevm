@@ -412,7 +412,7 @@ tests = testGroup "hevm"
         let dummyContract =
               (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)))
                 { external = True }
-        vm <- liftIO $ stToIO $ vmForEthrunCreation ""
+        vm :: VM Concrete RealWorld <- liftIO $ stToIO $ vmForEthrunCreation ""
             -- perform the initial access
         vm1 <- liftIO $ stToIO $ execStateT (EVM.accessStorage (LitAddr 0) (Lit 0) (pure . pure ())) vm
         -- it should fetch the contract first
@@ -942,7 +942,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x12] c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x12] c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         assertEqualM "Division by 0 needs b=0" (getVar ctr "arg2") 0
         putStrLnM "expected counterexample found"
      ,
@@ -955,7 +955,7 @@ tests = testGroup "hevm"
                }
              }
              |]
-         (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x1] c Nothing [] defaultVeriOpts
+         (_, [Cex _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x1] c Nothing [] defaultVeriOpts
          putStrLnM "expected counterexample found"
       ,
      test "enum-conversion-fail" $ do
@@ -968,7 +968,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x21] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x21] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         assertBoolM "Enum is only defined for 0 and 1" $ (getVar ctr "arg1") > 1
         putStrLnM "expected counterexample found"
      ,
@@ -1137,7 +1137,7 @@ tests = testGroup "hevm"
                 }
             }
           |]
-        withSolvers Z3 1 Nothing $ \s -> do
+        withSolvers Bitwuzla 1 Nothing $ \s -> do
           let calldata = (WriteWord (Lit 0x0) (Var "u") (ConcreteBuf ""), [])
           initVM <- liftIO $ stToIO $ abstractVM calldata initCode Nothing True
           expr <- Expr.simplify <$> interpret (Fetch.oracle s Nothing) Nothing 1 StackBased initVM runExpr
@@ -2782,7 +2782,7 @@ tests = testGroup "hevm"
               }
             |]
 
-          (_, [Qed _]) <- withSolvers CVC5 1 (Just 99999999) $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers Bitwuzla 1 (Just 99999999) $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLnM "Proven"
         ,
         test "storage-cex-1" $ do
@@ -2937,7 +2937,7 @@ tests = testGroup "hevm"
         }
         |]
       let sig = (Sig "func(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
-      (_, [Cex (_, ctr1), Cex (_, ctr2)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
+      (_, [Cex (_, ctr1), Cex (_, ctr2)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
       putStrLnM  $ "expected counterexamples found.  ctr1: " <> (show ctr1) <> " ctr2: " <> (show ctr2)
     , testFuzz "fuzz-simple-fixed-value-store1" $ do
       Just c <- solcRuntime "MyContract"
@@ -3223,7 +3223,7 @@ tests = testGroup "hevm"
                 }
               }
           |]
-        withSolvers Z3 3 Nothing $ \s -> do
+        withSolvers Bitwuzla 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqualM "Must be different" (any isCex a) True
       , test "eq-all-yul-optimization-tests" $ do
@@ -3548,7 +3548,7 @@ runSimpleVM x ins = do
        s -> internalError $ show s
 
 -- | Takes a creation code and returns a vm with the result of executing the creation code
-loadVM :: App m => ByteString -> m (Maybe (VM RealWorld))
+loadVM :: App m => ByteString -> m (Maybe (VM Concrete RealWorld))
 loadVM x = do
   vm <- liftIO $ stToIO $ vmForEthrunCreation x
   vm1 <- Stepper.interpret (Fetch.zero 0 Nothing) vm Stepper.runFully
@@ -3613,7 +3613,7 @@ runStatements stmts args t = do
     }
   |] (abiMethod s (AbiTuple $ V.fromList args))
 
-getStaticAbiArgs :: Int -> VM s -> [Expr EWord]
+getStaticAbiArgs :: Int -> VM Symbolic s -> [Expr EWord]
 getStaticAbiArgs n vm =
   let cd = vm.state.calldata
   in decodeStaticArgs 4 n cd
