@@ -204,8 +204,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     -- we need to read from slot 0 in the test contract and mask it with 0x10 to get the value of _failed
     -- we don't need to do this when reading the failed from the cheatcode address since we don't do any packing there
     let failed store = case Map.lookup cheatCode store of
-          Just cheatContract -> (And (readStorage' (Lit 0) (testContract store).storage) (Lit 0x10) .== Lit 0x10)
-                               .|| (readStorage' (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) cheatContract.storage .== Lit 1)
+          Just cheatContract -> readStorage' (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) cheatContract.storage .== Lit 1
           Nothing -> And (readStorage' (Lit 0) (testContract store).storage) (Lit 2) .== Lit 2
         postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
