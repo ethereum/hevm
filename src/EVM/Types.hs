@@ -4,6 +4,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 {-# OPTIONS_GHC -Wno-inline-rule-shadowing #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
 
 module EVM.Types where
 
@@ -284,7 +285,6 @@ data Expr (a :: EType) where
   Balance        :: Expr EAddr -> Expr EWord
 
   Gas            :: Int                -- frame idx
-                 -> Int                -- PC
                  -> Expr EWord
 
   -- code
@@ -528,7 +528,7 @@ data EvmError
   | InvalidMemoryAccess
   | CallDepthLimitReached
   | MaxCodeSizeExceeded W256 W256
-  | MaxInitCodeSizeExceeded W256 W256
+  | MaxInitCodeSizeExceeded W256 (Expr EWord)
   | InvalidFormat
   | PrecompileFailure
   | ReturnDataOutOfBounds
@@ -544,27 +544,27 @@ data PartialExec
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
-data Effect s
-  = Query (Query s)
-  | Choose (Choose s)
-deriving instance Show (Effect s)
+data Effect t s
+  = Query (Query t s)
+  | Choose (Choose t s)
+deriving instance Show (Effect t s)
 
 -- | Queries halt execution until resolved through RPC calls or SMT queries
-data Query s where
-  PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM s ()) -> Query s
-  PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM s ()) -> Query s
-  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM s ()) -> Query s
-  PleaseDoFFI         :: [String] -> (ByteString -> EVM s ()) -> Query s
+data Query t s where
+  PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM t s ()) -> Query t s
+  PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM t s ()) -> Query t s
+  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM t s ()) -> Query t s
+  PleaseDoFFI         :: [String] -> (ByteString -> EVM t s ()) -> Query t s
 
 -- | Execution could proceed down one of two branches
-data Choose s where
-  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM s ()) -> Choose s
+data Choose t s where
+  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM t s ()) -> Choose t s
 
 -- | The possible return values of a SMT query
 data BranchCondition = Case Bool | Unknown
   deriving Show
 
-instance Show (Query s) where
+instance Show (Query t s) where
   showsPrec _ = \case
     PleaseFetchContract addr base _ ->
       (("<EVM.Query: fetch contract " ++ show addr ++ show base ++ ">") ++)
@@ -579,46 +579,53 @@ instance Show (Query s) where
     PleaseDoFFI cmd _ ->
       (("<EVM.Query: do ffi: " ++ (show cmd)) ++)
 
-instance Show (Choose s) where
+instance Show (Choose t s) where
   showsPrec _ = \case
     PleaseChoosePath _ _ ->
       (("<EVM.Choice: waiting for user to select path (0,1)") ++)
 
 -- | The possible result states of a VM
-data VMResult s
+data VMResult t s
   = VMFailure EvmError      -- ^ An operation failed
   | VMSuccess (Expr Buf)    -- ^ Reached STOP, RETURN, or end-of-code
-  | HandleEffect (Effect s) -- ^ An effect must be handled for execution to continue
+  | HandleEffect (Effect t s) -- ^ An effect must be handled for execution to continue
   | Unfinished PartialExec  -- ^ Execution could not continue further
 
-deriving instance Show (VMResult s)
+deriving instance Show (VMResult t s)
 
 
 -- VM State ----------------------------------------------------------------------------------------
 
+data VMType = Symbolic | Concrete
+
+type family Gas (t :: VMType) = r | r -> t where
+  Gas Symbolic = ()
+  Gas Concrete = Word64
 
 -- | The state of a stepwise EVM execution
-data VM s = VM
-  { result         :: Maybe (VMResult s)
-  , state          :: FrameState s
-  , frames         :: [Frame s]
+data VM (t :: VMType) s = VM
+  { result         :: Maybe (VMResult t s)
+  , state          :: FrameState t s
+  , frames         :: [Frame t s]
   , env            :: Env
   , block          :: Block
   , tx             :: TxState
   , logs           :: [Expr Log]
   , traces         :: Zipper.TreePos Zipper.Empty Trace
   , cache          :: Cache
-  , burned         :: {-# UNPACK #-} !Word64
+  , burned         :: !(Gas t)
   , iterations     :: Map CodeLocation (Int, [Expr EWord])
   -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
   , config         :: RuntimeConfig
-  , symbolic       :: Bool
   }
-  deriving (Show, Generic)
+  deriving (Generic)
+
+deriving instance Show (VM Symbolic s)
+deriving instance Show (VM Concrete s)
 
 -- | Alias for the type of e.g. @exec1@.
-type EVM s a = StateT (VM s) (ST s) a
+type EVM (t :: VMType) s a = StateT (VM t s) (ST s) a
 
 -- | The VM base state (i.e. should new contracts be created with abstract balance / storage?)
 data BaseState
@@ -635,11 +642,13 @@ data RuntimeConfig = RuntimeConfig
   deriving (Show)
 
 -- | An entry in the VM's "call/create stack"
-data Frame s = Frame
+data Frame (t :: VMType) s = Frame
   { context :: FrameContext
-  , state   :: FrameState s
+  , state   :: FrameState t s
   }
-  deriving (Show)
+
+deriving instance Show (Frame Symbolic s)
+deriving instance Show (Frame Concrete s)
 
 -- | Call/create info
 data FrameContext
@@ -652,8 +661,8 @@ data FrameContext
   | CallContext
     { target        :: Expr EAddr
     , context       :: Expr EAddr
-    , offset        :: W256
-    , size          :: W256
+    , offset        :: Expr EWord
+    , size          :: Expr EWord
     , codehash      :: Expr EWord
     , abi           :: Maybe W256
     , calldata      :: Expr Buf
@@ -674,7 +683,7 @@ data SubState = SubState
   deriving (Eq, Ord, Show)
 
 -- | The "registers" of the VM along with memory and data stack
-data FrameState s = FrameState
+data FrameState (t :: VMType) s = FrameState
   { contract     :: Expr EAddr
   , codeContract :: Expr EAddr
   , code         :: ContractCode
@@ -685,11 +694,14 @@ data FrameState s = FrameState
   , calldata     :: Expr Buf
   , callvalue    :: Expr EWord
   , caller       :: Expr EAddr
-  , gas          :: {-# UNPACK #-} !Word64
+  , gas          :: !(Gas t)
   , returndata   :: Expr Buf
   , static       :: Bool
   }
-  deriving (Show, Generic)
+  deriving (Generic)
+
+deriving instance Show (FrameState Symbolic s)
+deriving instance Show (FrameState Concrete s)
 
 data Memory s
   = ConcreteMemory (MutableMemory s)
@@ -720,6 +732,7 @@ data Env = Env
   { contracts      :: Map (Expr EAddr) Contract
   , chainId        :: W256
   , freshAddresses :: Int
+  , freshGasVals :: Int
   }
   deriving (Show, Generic)
 
@@ -749,6 +762,37 @@ data Contract = Contract
   }
   deriving (Show, Eq, Ord)
 
+class VMOps (t :: VMType) where
+  burn' :: Gas t -> EVM t s () -> EVM t s ()
+  -- TODO: change to EvmWord t
+  burnExp :: Expr EWord -> EVM t s () -> EVM t s ()
+  burnSha3 :: Expr EWord -> EVM t s () -> EVM t s ()
+  burnCalldatacopy :: Expr EWord -> EVM t s () -> EVM t s ()
+  burnCodecopy :: Expr EWord -> EVM t s () -> EVM t s ()
+  burnExtcodecopy :: Expr EAddr -> Expr EWord -> EVM t s () -> EVM t s ()
+  burnReturndatacopy :: Expr EWord -> EVM t s () -> EVM t s ()
+  burnLog :: Expr EWord -> Word8 -> EVM t s () -> EVM t s ()
+
+  initialGas :: Gas t
+  ensureGas :: Word64 -> EVM t s () -> EVM t s ()
+  -- TODO: change to EvmWord t
+  gasTryFrom :: Expr EWord -> Either () (Gas t)
+
+  -- Gas cost of create, including hash cost if needed
+  costOfCreate :: FeeSchedule Word64 -> Gas t -> Expr EWord -> Bool -> (Gas t, Gas t)
+
+  costOfCall
+    :: FeeSchedule Word64 -> Bool -> Expr EWord -> Gas t -> Gas t -> Expr EAddr
+    -> (Word64 -> Word64 -> EVM t s ()) -> EVM t s ()
+
+  reclaimRemainingGasAllowance :: VM t s -> EVM t s ()
+  payRefunds :: EVM t s ()
+  pushGas :: EVM t s ()
+  enoughGas :: Word64 -> Gas t -> Bool
+  subGas :: Gas t -> Word64 -> Gas t
+  toGas :: Word64 -> Gas t
+
+  whenSymbolicElse :: EVM t s a -> EVM t s a -> EVM t s a
 
 -- Bytecode Representations ------------------------------------------------------------------------
 
@@ -851,7 +895,7 @@ instance Monoid Traces where
 
 
 -- | A specification for an initial VM state
-data VMOpts = VMOpts
+data VMOpts (t :: VMType) = VMOpts
   { contract :: Contract
   , otherContracts :: [(Expr EAddr, Contract)]
   , calldata :: (Expr Buf, [Prop])
@@ -861,7 +905,7 @@ data VMOpts = VMOpts
   , address :: Expr EAddr
   , caller :: Expr EAddr
   , origin :: Expr EAddr
-  , gas :: Word64
+  , gas :: Gas t
   , gaslimit :: Word64
   , number :: W256
   , timestamp :: Expr EWord
@@ -876,8 +920,10 @@ data VMOpts = VMOpts
   , create :: Bool
   , txAccessList :: Map (Expr EAddr) [W256]
   , allowFFI :: Bool
-  , symbolic :: Bool
-  } deriving Show
+  }
+
+deriving instance Show (VMOpts Symbolic)
+deriving instance Show (VMOpts Concrete)
 
 
 -- Opcodes -----------------------------------------------------------------------------------------

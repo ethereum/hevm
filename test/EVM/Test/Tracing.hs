@@ -46,7 +46,7 @@ import Witch (into, unsafeInto)
 import Optics.Core hiding (pre)
 import Optics.State
 
-import EVM (makeVm, initialContract, exec1)
+import EVM (makeVm, initialContract, exec1, symbolify)
 import EVM.Assembler (assemble)
 import EVM.Expr qualified as Expr
 import EVM.Concrete qualified as Concrete
@@ -413,12 +413,6 @@ deleteTraceOutputFiles evmtoolResult =
       System.Directory.removeFile traceFileName
       System.Directory.removeFile (traceFileName ++ ".json")
 
--- Create symbolic VM from concrete VM
-symbolify :: VM s -> VM s
-symbolify vm = vm { state = vm.state { calldata = AbstractBuf "calldata" }
-                  , symbolic = True
-                  }
-
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
 runCodeWithTrace
@@ -437,7 +431,7 @@ runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 
     Left x -> pure $ Left (x, trace)
     Right _ -> pure $ Right (expr, trace, vmres vm)
 
-vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> ST s (VM s)
+vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> ST s (VM Concrete s)
 vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
   let contract = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
                  & set #balance (Lit alloc.balance)
@@ -466,7 +460,6 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
     , create = False
     , txAccessList = mempty
     , allowFFI = False
-    , symbolic = False
     }) <&> set (#env % #contracts % at (LitAddr ethrunAddress))
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty))))
        <&> set (#state % #calldata) calldata'
@@ -486,7 +479,7 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
     Left _ -> Nothing
     Right b -> Just b
 
-vmtrace :: VM s -> VMTrace
+vmtrace :: VM Concrete s -> VMTrace
 vmtrace vm =
   let
     memsize = vm.state.memorySize
@@ -501,7 +494,7 @@ vmtrace vm =
              , traceError = readoutError vm.result
              }
   where
-    readoutError :: Maybe (VMResult s) -> Maybe String
+    readoutError :: Maybe (VMResult t s) -> Maybe String
     readoutError (Just (VMFailure e)) = case e of
       -- NOTE: error text made to closely match go-ethereum's errors.go file
       OutOfGas {}             -> Just "out of gas"
@@ -524,7 +517,7 @@ vmtrace vm =
       err                     -> Just $ "HEVM error: " <> show err
     readoutError _ = Nothing
 
-vmres :: VM s -> VMTraceResult
+vmres :: VM Concrete s -> VMTraceResult
 vmres vm =
   let
     gasUsed' = vm.tx.gaslimit - vm.state.gas
@@ -539,14 +532,14 @@ vmres vm =
      , gasUsed = gasUsed'
      }
 
-type TraceState s = (VM s, [VMTrace])
+type TraceState s = (VM Concrete s, [VMTrace])
 
-execWithTrace :: App m => StateT (TraceState RealWorld) m (VMResult RealWorld)
+execWithTrace :: App m => StateT (TraceState RealWorld) m (VMResult Concrete RealWorld)
 execWithTrace = do
   _ <- runWithTrace
   fromJust <$> use (_1 % #result)
 
-runWithTrace :: App m => StateT (TraceState RealWorld) m (VM RealWorld)
+runWithTrace :: App m => StateT (TraceState RealWorld) m (VM Concrete RealWorld)
 runWithTrace = do
   -- This is just like `exec` except for every instruction evaluated,
   -- we also increment a counter indexed by the current code location.
@@ -568,15 +561,15 @@ runWithTrace = do
 
 interpretWithTrace
   :: forall m a . App m
-  => Fetch.Fetcher m RealWorld
-  -> Stepper.Stepper RealWorld a
+  => Fetch.Fetcher Concrete m RealWorld
+  -> Stepper.Stepper Concrete RealWorld a
   -> StateT (TraceState RealWorld) m a
 interpretWithTrace fetcher =
   eval . Operational.view
   where
     eval
       :: App m
-      => Operational.ProgramView (Stepper.Action RealWorld) a
+      => Operational.ProgramView (Stepper.Action Concrete RealWorld) a
       -> StateT (TraceState RealWorld) m a
     eval (Operational.Return x) = pure x
     eval (action Operational.:>>= k) =
@@ -817,7 +810,7 @@ forceLit _ = undefined
 randItem :: [a] -> IO a
 randItem = generate . Test.QuickCheck.elements
 
-getOp :: VM s -> Word8
+getOp :: VM t s -> Word8
 getOp vm =
   let pcpos  = vm ^. #state % #pc
       code' = vm ^. #state % #code
