@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keccak concretization is now done only after all simplifications are performed. This helps with simplification pre-concretization
 
 ## Added
-
+- Optimized smt queries that significantly improve performance when dealing with solidity mappings and arrays
 - Support for using Bitwuzla as a solver
 - Symbolic tests now support statically sized arrays as parameters
 - `hevm test` now has a `num-solvers` parameter that controls how many solver instances to spawn

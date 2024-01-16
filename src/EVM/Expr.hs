@@ -612,7 +612,7 @@ readStorage w st = go (simplify w) st
   where
     go :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
     go _ (GVar _) = internalError "Can't read from a GVar"
-    go slot s@(AbstractStore _) = Just $ SLoad slot s
+    go slot s@(AbstractStore _ _) = Just $ SLoad slot s
     go (Lit l) (ConcreteStore s) = Lit <$> Map.lookup l s
     go slot store@(ConcreteStore _) = Just $ SLoad slot store
     go slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
@@ -644,7 +644,11 @@ readStorage w st = go (simplify w) st
       -- for our purposes. This lets us completely simplify reads from write
       -- chains involving writes to arrays at literal offsets.
       (Lit a, Add (Lit b) (Keccak _) ) | a < 256, b < maxW32 -> go slot prev
-      (Add (Lit a) (Keccak _) , Lit b) | a < 256, b < maxW32 -> go slot prev
+      (Add (Lit a) (Keccak _) , Lit b) | b < 256, a < maxW32 -> go slot prev
+
+      --- NOTE these are needed to succeed in rewriting arrays with a variable index
+      -- (Lit a, Add (Keccak _) (Var _) ) | a < 256 -> go slot prev
+      -- (Add (Keccak _) (Var _) , Lit b) | b < 256 -> go slot prev
 
       -- Finding two Keccaks that are < 256 away from each other should be VERY hard
       -- This simplification allows us to deal with maps of structs
@@ -756,12 +760,136 @@ writeStorage key val store = SStore key val store
 
 getAddr :: Expr Storage -> Maybe (Expr EAddr)
 getAddr (SStore _ _ p) = getAddr p
-getAddr (AbstractStore a) = Just a
+getAddr (AbstractStore a _) = Just a
 getAddr (ConcreteStore _) = Nothing
 getAddr (GVar _) = internalError "cannot determine addr of a GVar"
 
+getLogicalIdx :: Expr Storage -> Maybe W256
+getLogicalIdx (SStore _ _ p) = getLogicalIdx p
+getLogicalIdx (AbstractStore _ idx) = idx
+getLogicalIdx (ConcreteStore _) = Nothing
+getLogicalIdx (GVar _) = internalError "cannot determine addr of a GVar"
+
 
 -- ** Whole Expression Simplification ** -----------------------------------------------------------
+
+
+data StorageType = SmallSlot | Array | Map | Mixed | UNK
+  deriving (Show, Eq)
+
+safeToDecompose :: Expr a -> Bool
+safeToDecompose inp = result /= Mixed
+  where
+    result = execState (safeToDecomposeRunner inp) UNK
+
+    safeToDecomposeRunner :: forall a. Expr a -> State StorageType ()
+    safeToDecomposeRunner a = go a
+
+    go :: forall b. Expr b -> State StorageType ()
+    go e@(SLoad (MappingSlot {}) _) = setMap e
+    go e@(SLoad (ArraySlotZero {}) _) = setArray e
+    go e@(SLoad (ArraySlotWithOffset {}) _) = setArray e
+    go e@(SLoad (Lit x) _) | x < 256 = setSmall e
+    go e@(SLoad _ _) = setMixed e
+    go e@(SStore (MappingSlot {}) _ _) = setMap e
+    go e@(SStore (ArraySlotZero {}) _ _) = setArray e
+    go e@(SStore (ArraySlotWithOffset {}) _ _) = setArray e
+    go e@(SStore (Lit x) _ _) | x < 256 = setSmall e
+    go e@(SStore _ _ _) = setMixed e
+    go _ = pure ()
+
+    -- Helper functions for detecting mixed load/store
+    setMixed _ = do
+      put Mixed
+      pure ()
+    setMap _ = do
+      s <- get
+      case s of
+        Array -> put Mixed
+        SmallSlot -> put Mixed
+        UNK -> put Map
+        _ -> pure ()
+      pure ()
+    setArray _ = do
+      s <- get
+      case s of
+        Map -> put Mixed
+        SmallSlot -> put Mixed
+        UNK -> put Array
+        _ -> pure ()
+      pure ()
+    setSmall _ = do
+      s <- get
+      case s of
+        Map -> put Mixed
+        Array -> put Mixed
+        UNK -> put SmallSlot
+        _ -> pure ()
+      pure ()
+
+-- | Splits storage into logical sub-stores if (1) all SLoad->SStore* chains are one of:
+--     (1a) Lit < 256, (1b) MappingSlot, (1c) ArraySlotWithOffset, (1d) ArraySlotZero
+--  and (2) there is no mixing of different types (e.g. Map with Array) within
+--  the same SStore -> SLoad* chain, and (3) there is no mixing of different array/map slots.
+--
+--  Mixing (2) and (3) are attempted to be prevented (if possible) as part of the rewrites
+--  done by the `readStorage` function that is ran before this. If there is still mixing here,
+--  we abort with a Nothing.
+--
+--  We do NOT rewrite stand-alone `SStore`-s (i.e. SStores that are not read), since
+--  they are often used to describe a post-state, and are not dispatched as-is to
+--  the solver
+decomposeStorage :: Expr a -> Maybe (Expr a)
+decomposeStorage = go
+  where
+    go :: Expr a -> Maybe (Expr a)
+    go e@(SLoad origKey store) = if Prelude.not (safeToDecompose e) then Nothing else tryRewrite origKey store
+    go e = Just e
+
+    tryRewrite :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
+    tryRewrite origKey store = case inferLogicalIdx origKey of
+      Just (idx, key) -> do
+        base <- setLogicalBase idx store
+        pure (SLoad key base)
+      _ -> Nothing
+
+    -- NOTE: we use (Maybe W256) for idx here, because for small slot numbers we want to keep the
+    -- Logical Store value a Nothing
+    inferLogicalIdx :: Expr EWord -> Maybe (Maybe W256, Expr EWord)
+    inferLogicalIdx = \case
+      Lit a | a >= 256 -> Nothing
+      Lit a -> Just (Nothing, Lit a)
+      (MappingSlot idx key) | BS.length idx == 64 -> Just (Just $ idxToWord idx, key)
+      (ArraySlotWithOffset idx offset) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, offset)
+      (ArraySlotZero idx) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, Lit 0)
+      _ -> Nothing
+
+    idxToWord :: ByteString -> W256
+    idxToWord = W256 . word256 . (BS.takeEnd 32)
+    -- Arrays take the whole `id` and keccak it. It's supposed to be 64B
+    idxToWord64 :: ByteString -> W256
+    idxToWord64 = W256 . word256 . (BS.takeEnd 64)
+
+    -- Updates the logical base store of the given expression if it is safe to do so
+    setLogicalBase :: Maybe W256 -> Expr Storage -> Maybe (Expr Storage)
+
+    -- abstract bases get their logical idx set to the new value
+    setLogicalBase idx (AbstractStore addr _) = Just $ AbstractStore addr idx
+    setLogicalBase idx (SStore i v s) = do
+      b <- setLogicalBase idx s
+      (idx2, key2) <- inferLogicalIdx i
+      if idx == idx2 then Just (SStore key2 v b) else Nothing
+
+    -- empty concrete base is safe to reuse without any rewriting
+    setLogicalBase _ s@(ConcreteStore m) | Map.null m = Just s
+
+    -- if the existing base is concrete but we have writes to only keys < 256
+    -- then we can safely rewrite the base to an empty ConcreteStore (safe because we assume keccack(x) > 256)
+    setLogicalBase _ (ConcreteStore store) =
+      if all (< 256) (Map.keys store)
+      then Just (ConcreteStore mempty)
+      else Nothing
+    setLogicalBase _ (GVar _) = internalError "Unexpected GVar"
 
 
 -- | Simple recursive match based AST simplification
