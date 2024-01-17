@@ -5,7 +5,7 @@
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     foundry.url = "github:shazow/foundry.nix/monthly";
-    bitwuzla-pkgs.url = "github:d-xo/nixpkgs/6e7c9e4267f3c2df116bf76d8e31c2602e2d543d";
+    bitwuzla-pkgs.url = "github:d-xo/nixpkgs/94e802bce3a1bc05b3acfc5e876de15fd2ecb564";
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
