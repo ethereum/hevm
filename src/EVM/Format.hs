@@ -191,7 +191,7 @@ formatSBinary (ConcreteBuf bs) = formatBinary bs
 formatSBinary (AbstractBuf t) = "<" <> t <> " abstract buf>"
 formatSBinary _ = internalError "formatSBinary: implement me"
 
-showTraceTree :: DappInfo -> VM s -> Text
+showTraceTree :: DappInfo -> VM t s -> Text
 showTraceTree dapp vm =
   let forest = traceForest vm
       traces = fmap (fmap (unpack . showTrace dapp (vm.env.contracts))) forest
@@ -673,8 +673,8 @@ formatExpr = go
         , ")"
         , formatExpr prev
         ]
-      AbstractStore a ->
-        "(AbstractStore " <> formatExpr a <> ")"
+      AbstractStore a idx ->
+        "(AbstractStore " <> formatExpr a <> " " <> T.pack (show idx) <> ")"
       ConcreteStore s -> if null s
         then "(ConcreteStore <empty>)"
         else T.unlines

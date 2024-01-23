@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "bitwuzla-pkgs": {
+      "locked": {
+        "lastModified": 1705259768,
+        "narHash": "sha256-eHetoB0ckEQ06QDa7EZqeC+qFJEC606K90q/PliNTA4=",
+        "owner": "d-xo",
+        "repo": "nixpkgs",
+        "rev": "6e7c9e4267f3c2df116bf76d8e31c2602e2d543d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "d-xo",
+        "repo": "nixpkgs",
+        "rev": "6e7c9e4267f3c2df116bf76d8e31c2602e2d543d",
+        "type": "github"
+      }
+    },
     "cabal-head": {
       "flake": false,
       "locked": {
@@ -82,6 +98,22 @@
         "type": "github"
       }
     },
+    "forge-std": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1702656582,
+        "narHash": "sha256-qDC/3x/CfeghsqftBJme4IlNGDG7YgV9cx8I5tc30KA=",
+        "owner": "foundry-rs",
+        "repo": "forge-std",
+        "rev": "155d547c449afa8715f538d69454b83944117811",
+        "type": "github"
+      },
+      "original": {
+        "owner": "foundry-rs",
+        "repo": "forge-std",
+        "type": "github"
+      }
+    },
     "foundry": {
       "inputs": {
         "flake-utils": "flake-utils_2",
@@ -134,10 +166,12 @@
     },
     "root": {
       "inputs": {
+        "bitwuzla-pkgs": "bitwuzla-pkgs",
         "cabal-head": "cabal-head",
         "ethereum-tests": "ethereum-tests",
         "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
+        "forge-std": "forge-std",
         "foundry": "foundry",
         "nixpkgs": "nixpkgs_2",
         "solidity": "solidity"

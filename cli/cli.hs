@@ -41,7 +41,8 @@ import EVM.Solvers
 import EVM.Stepper qualified
 import EVM.SymExec
 import EVM.Transaction qualified
-import EVM.Types hiding (word, Env)
+import EVM.Types hiding (word, Env, Symbolic)
+import EVM.Types qualified
 import EVM.UnitTest
 import EVM.Effects
 
@@ -84,7 +85,7 @@ data Command w
       , showReachableTree :: w ::: Bool           <?> "Print only reachable branches explored in tree view"
       , smttimeout    :: w ::: Maybe Natural      <?> "Timeout given to SMT solver in seconds (default: 300)"
       , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point"
-      , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default) or cvc5"
+      , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
       , debug         :: w ::: Bool               <?> "Debug printing of internal behaviour"
       , trace         :: w ::: Bool               <?> "Dump trace"
@@ -104,7 +105,7 @@ data Command w
       , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
       , smttimeout    :: w ::: Maybe Natural    <?> "Timeout given to SMT solver in seconds (default: 300)"
       , maxIterations :: w ::: Maybe Integer    <?> "Number of times we may revisit a particular branching point"
-      , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default) or cvc5"
+      , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
       , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
       , smtdebug      :: w ::: Bool             <?> "Print smt queries sent to the solver"
       , debug         :: w ::: Bool             <?> "Debug printing of internal behaviour"
@@ -150,7 +151,8 @@ data Command w
       , verbose       :: w ::: Maybe Int                <?> "Append call trace: {1} failures {2} all"
       , coverage      :: w ::: Bool                     <?> "Coverage analysis"
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
-      , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default) or cvc5"
+      , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
+      , numSolvers    :: w ::: Maybe Natural            <?> "Number of solver instances to use (default: number of cpu cores)"
       , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
       , debug         :: w ::: Bool                     <?> "Debug printing of internal behaviour"
       , trace         :: w ::: Bool                     <?> "Dump trace"
@@ -215,9 +217,10 @@ main = do
     Test {} -> do
       root <- getRoot cmd
       withCurrentDirectory root $ do
-        cores <- unsafeInto <$> getNumProcessors
         solver <- getSolver cmd
-        runEnv env $ withSolvers solver cores cmd.smttimeout $ \solvers -> do
+        cores <- liftIO $ unsafeInto <$> getNumProcessors
+        let solverCount = fromMaybe cores cmd.numSolvers
+        runEnv env $ withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
           buildOut <- liftIO $ readBuildOutput root (getProjectType cmd)
           case buildOut of
             Left e -> liftIO $ do
@@ -263,6 +266,7 @@ getSolver cmd = case cmd.solver of
                   Just s -> case T.unpack s of
                               "z3" -> pure Z3
                               "cvc5" -> pure CVC5
+                              "bitwuzla" -> pure Bitwuzla
                               input -> do
                                 putStrLn $ "unrecognised solver: " <> input
                                 exitFailure
@@ -405,7 +409,7 @@ launchExec cmd = do
         internalError "no EVM result"
 
 -- | Creates a (concrete) VM from command line options
-vmFromCommand :: Command Options.Unwrapped -> IO (VM RealWorld)
+vmFromCommand :: Command Options.Unwrapped -> IO (VM Concrete RealWorld)
 vmFromCommand cmd = do
   (miner,ts,baseFee,blockNum,prevRan) <- case cmd.rpc of
     Nothing -> pure (LitAddr 0,Lit 0,0,0,0)
@@ -490,14 +494,13 @@ vmFromCommand cmd = do
           , baseState      = EmptyBase
           , txAccessList   = mempty -- TODO: support me soon
           , allowFFI       = False
-          , symbolic       = False
           }
         word f def = fromMaybe def (f cmd)
         word64 f def = fromMaybe def (f cmd)
         addr f def = maybe def LitAddr (f cmd)
         bytes f def = maybe def decipher (f cmd)
 
-symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM RealWorld)
+symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM EVM.Types.Symbolic RealWorld)
 symvmFromCommand cmd calldata = do
   (miner,blockNum,baseFee,prevRan) <- case cmd.rpc of
     Nothing -> pure (SymAddr "miner",0,0,0)
@@ -555,7 +558,7 @@ symvmFromCommand cmd calldata = do
       , address        = address
       , caller         = caller
       , origin         = origin
-      , gas            = word64 (.gas) 0xffffffffffffffff
+      , gas            = ()
       , gaslimit       = word64 (.gaslimit) 0xffffffffffffffff
       , baseFee        = baseFee
       , priorityFee    = word (.priorityFee) 0
@@ -572,7 +575,6 @@ symvmFromCommand cmd calldata = do
       , baseState      = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
       , txAccessList   = mempty
       , allowFFI       = False
-      , symbolic       = True
       }
     word f def = fromMaybe def (f cmd)
     word64 f def = fromMaybe def (f cmd)

@@ -5,6 +5,7 @@
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     foundry.url = "github:shazow/foundry.nix/monthly";
+    bitwuzla-pkgs.url = "github:d-xo/nixpkgs/6e7c9e4267f3c2df116bf76d8e31c2602e2d543d";
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
@@ -21,18 +22,25 @@
       url = "github:haskell/cabal";
       flake = false;
     };
+    forge-std = {
+      url = "github:foundry-rs/forge-std";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, solidity, ethereum-tests, foundry, cabal-head, ... }:
+  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, cabal-head, bitwuzla-pkgs, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs { inherit system; config = { allowBroken = true; }; });
+        bitwuzla = (import bitwuzla-pkgs { inherit system; }).bitwuzla;
         testDeps = with pkgs; [
           go-ethereum
           solc
           z3
           cvc5
           git
+          bitwuzla
+        ] ++ lib.optional (!(pkgs.stdenv.isDarwin && pkgs.stdenv.isAarch64)) [
           foundry.defaultPackage.${system}
         ];
 
@@ -109,6 +117,7 @@
           ]).overrideAttrs(final: prev: {
             HEVM_SOLIDITY_REPO = solidity;
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
+            HEVM_FORGE_STD_REPO = forge-std;
             DAPP_SOLC = "${pkgs.solc}/bin/solc";
           });
 
@@ -120,7 +129,7 @@
           buildInputs = [ makeWrapper ];
           postBuild = ''
             wrapProgram $out/bin/hevm \
-              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3 cvc5 ])}"
+              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3 cvc5 bitwuzla ])}"
           '';
         };
 
@@ -202,6 +211,7 @@
             HEVM_SOLIDITY_REPO = solidity;
             DAPP_SOLC = "${pkgs.solc}/bin/solc";
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
+            HEVM_FORGE_STD_REPO = forge-std;
 
             # NOTE: hacks for bugged cabal new-repl
             LD_LIBRARY_PATH = libraryPath;

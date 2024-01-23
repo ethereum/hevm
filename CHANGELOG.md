@@ -6,15 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Changed
+
 - Minimum distance requirements are now asserted for Keccak function calls. They assert that it's hard to generate two Keccak's that are less than 256 afar.
 - Keccak concretization is now done only after all simplifications are performed. This helps with simplification pre-concretization
 
 ## Added
+
+- Optimized smt queries that significantly improve performance when dealing with solidity mappings and arrays
+- Support for using Bitwuzla as a solver
+- More efficient encoding for failure in ds-test style tests
+- Symbolic tests now support statically sized arrays as parameters
+- `hevm test` now has a `num-solvers` parameter that controls how many solver instances to spawn
 - New solc-specific simplification rules that should make the final Props a lot more readable
 - Prop is now correctly ordered, better BufLength and Max simplifications of Expr,
   and further solc-specific simplifications of Expr
 - Simplify earlier and don't check reachability for things statically determined to be FALSE
 - New concrete fuzzer that can be controlled via `--num-cex-fuzz`
+- Partial support for dynamic jumps when the jump destination can be computed
+  given already available information
 
 ## [0.52.0] - 2023-10-26
 

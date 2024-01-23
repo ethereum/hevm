@@ -185,7 +185,7 @@ instance Monoid BuildOutput where
   mempty = BuildOutput mempty mempty
 
 -- | The various project types understood by hevm
-data ProjectType = DappTools | CombinedJSON | Foundry
+data ProjectType = DappTools | CombinedJSON | Foundry | FoundryStdLib
   deriving (Eq, Show, Read, ParseField)
 
 data SourceCache = SourceCache
@@ -299,7 +299,7 @@ readBuildOutput root CombinedJSON = do
     [x] -> readSolc CombinedJSON root (outDir </> x)
     [] -> pure . Left $ "no json files found in: " <> outDir
     _ -> pure . Left $ "multiple json files found in: " <> outDir
-readBuildOutput root Foundry = do
+readBuildOutput root _ = do
   let outDir = root </> "out"
   jsons <- findJsonFiles outDir
   case (filterMetadata jsons) of
@@ -310,7 +310,8 @@ readBuildOutput root Foundry = do
 
 -- | Finds all json files under the provided filepath, searches recursively
 findJsonFiles :: FilePath -> IO [FilePath]
-findJsonFiles root = getDirectoryFiles root ["**/*.json"]
+findJsonFiles root =  filter (not . isInfixOf "kompiled") -- HACK: this gets added to `out` by `kontrol`
+                  <$> getDirectoryFiles root ["**/*.json"]
 
 -- | Filters out metadata json files
 filterMetadata :: [FilePath] -> [FilePath]
@@ -400,7 +401,7 @@ force s = fromMaybe (internalError s)
 readJSON :: ProjectType -> Text -> Text -> Maybe (Contracts, Asts, Sources)
 readJSON DappTools _ json = readStdJSON json
 readJSON CombinedJSON _ json = readCombinedJSON json
-readJSON Foundry contractName json = readFoundryJSON contractName json
+readJSON _ contractName json = readFoundryJSON contractName json
 
 -- | Reads a foundry json output
 readFoundryJSON :: Text -> Text -> Maybe (Contracts, Asts, Sources)

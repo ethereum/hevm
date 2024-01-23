@@ -23,6 +23,9 @@ import Control.Monad.ST (RealWorld)
 import Control.Monad.IO.Unlift
 import Control.Monad.Catch (MonadMask)
 import EVM.Effects
+import Data.Maybe (fromMaybe)
+import EVM.Types (internalError)
+import System.Environment (lookupEnv)
 
 runSolidityTestCustom
   :: (MonadMask m, App m)
@@ -68,16 +71,26 @@ compile DappTools root src = do
   T.writeFile (root <> "/out/dapp.sol.json") json
   readBuildOutput root DappTools
 compile CombinedJSON _root _src = error "unsupported"
-compile Foundry root src = do
+compile foundryType root src = do
   createDirectory (root <> "/src")
   writeFile (root <> "/src/unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
   initLib (root <> "/lib/ds-test") "test/contracts/lib/test.sol" "test.sol"
   initLib (root <> "/lib/tokens") "test/contracts/lib/erc20.sol" "erc20.sol"
+  case foundryType of
+    FoundryStdLib -> initStdForgeDir (root <> "/lib/forge-std")
+    Foundry -> pure ()
   r@(res,_,_) <- readProcessWithExitCode "forge" ["build", "--root", root] ""
   case res of
     ExitFailure _ -> pure . Left $ "compilation failed: " <> show r
     ExitSuccess -> readBuildOutput root Foundry
   where
+    initStdForgeDir :: FilePath -> IO ()
+    initStdForgeDir tld = do
+      createDirectoryIfMissing True tld
+      forgeStdRepo <- liftIO $ fromMaybe (internalError "cannot find forge-std repo") <$> (lookupEnv "HEVM_FORGE_STD_REPO")
+      callProcess "mkdir" ["-p", tld]
+      callProcess "cp" ["-r", forgeStdRepo <> "/src", tld <> "/src"]
+      callProcess "cp" ["-r", forgeStdRepo <> "/lib", tld <> "/lib"]
     initLib :: FilePath -> FilePath -> FilePath -> IO ()
     initLib tld srcFile dstFile = do
       createDirectoryIfMissing True (tld <> "/src")
