@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Minimum distance requirements are now asserted for Keccak function calls. They assert that it's hard to generate two Keccak's that are less than 256 afar.
 - Keccak concretization is now done only after all simplifications are performed. This helps with simplification pre-concretization
-- Added an (OutOfGas 0 0) error in case the system tries to allocate a large amount of memory during
+- Added an IllegalOverflow error in case the system tries to allocate a large amount of memory during
   abstract gas execution but concrete running. In these cases, the interpreter can out-of-heap
-  as the only check is that the size allocated $<2^{64}$, but that is too large to fit in memory
+  as the only check is that the size allocated $<2^{64}$, but that is too large to fit in memory. Now,
+  we check more stringengly, and still return an IllegalOverflow
 
 ## Added
 
