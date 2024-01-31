@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Partial support for dynamic jumps when the jump destination can be computed
   given already available information
 
+## Fixed
+
+- Traces now correctly perform source mapping to display contract details
+- Event traces now correctly display indexed arguments and argument names
+
 ## [0.52.0] - 2023-10-26
 
 This is a major breaking release that removes several user facing features and includes non trivial
