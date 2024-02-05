@@ -3544,7 +3544,7 @@ runSimpleVM x ins = do
          vm' = set (#state % #calldata) calldata vm
      res <- Stepper.interpret (Fetch.zero 0 Nothing) vm' Stepper.execFully
      case res of
-       (Right (ConcreteBuf bs)) -> pure $ Just bs
+       Right (ConcreteBuf bs) -> pure $ Just bs
        s -> internalError $ show s
 
 -- | Takes a creation code and returns a vm with the result of executing the creation code
@@ -3553,18 +3553,19 @@ loadVM x = do
   vm <- liftIO $ stToIO $ vmForEthrunCreation x
   vm1 <- Stepper.interpret (Fetch.zero 0 Nothing) vm Stepper.runFully
   case vm1.result of
-     Just (VMSuccess (ConcreteBuf targetCode)) -> do
-       let target = vm1.state.contract
-       vm2 <- Stepper.interpret (Fetch.zero 0 Nothing) vm1 (prepVm target targetCode >> Stepper.run)
-       writeTrace vm2
-       pure $ Just vm2
-     _ -> pure Nothing
+    Just (VMSuccess (ConcreteBuf targetCode)) -> do
+      let target = vm1.state.contract
+      vm2 <- Stepper.interpret (Fetch.zero 0 Nothing) vm1 (prepVm target targetCode)
+      writeTrace vm2
+      pure $ Just vm2
+    _ -> pure Nothing
   where
     prepVm target targetCode = Stepper.evm $ do
       replaceCodeOfSelf (RuntimeCode $ ConcreteRuntimeCode targetCode)
       resetState
       assign (#state % #gas) 0xffffffffffffffff -- kludge
       execState (loadContract target) <$> get >>= put
+      get
 
 hex :: ByteString -> ByteString
 hex s =

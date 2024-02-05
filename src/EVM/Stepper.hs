@@ -34,7 +34,6 @@ import EVM.Types
 import Control.Monad.ST (stToIO, RealWorld)
 import Control.Monad.IO.Class
 import EVM.Effects
-import EVM.Expr (concKeccakSimpExpr)
 
 -- | The instruction type of the operational monad
 data Action t s a where
@@ -46,7 +45,7 @@ data Action t s a where
   Wait :: Query t s -> Action t s ()
 
   -- | Multiple things can happen
-  Ask :: Choose t s -> Action t s ()
+  Ask :: Choose s -> Action Symbolic s ()
 
   -- | Embed a VM state transformation
   EVM  :: EVM t s a -> Action t s a
@@ -68,7 +67,7 @@ run = exec >> evm get
 wait :: Query t s -> Stepper t s ()
 wait = singleton . Wait
 
-ask :: Choose t s -> Stepper t s ()
+ask :: Choose s -> Stepper Symbolic s ()
 ask = singleton . Ask
 
 evm :: EVM t s a -> Stepper t s a
@@ -78,19 +77,15 @@ evmIO :: IO a -> Stepper t s a
 evmIO = singleton . IOAct
 
 -- | Run the VM until final result, resolving all queries
-execFully :: Stepper t s (Either EvmError (Expr Buf))
+execFully :: Stepper Concrete s (Either EvmError (Expr Buf))
 execFully =
   exec >>= \case
     HandleEffect (Query q) ->
       wait q >> execFully
-    HandleEffect (Choose q) ->
-      ask q >> execFully
     VMFailure x ->
       pure (Left x)
     VMSuccess x ->
       pure (Right x)
-    Unfinished x
-      -> internalError $ "partial execution encountered during concrete execution: " <> show x
 
 -- | Run the VM until its final state
 runFully :: Stepper t s (VM t s)
@@ -123,19 +118,12 @@ interpret fetcher vm = eval . view
         Exec -> do
           (r, vm') <- liftIO $ stToIO $ runStateT EVM.Exec.exec vm
           interpret fetcher vm' (k r)
-        Wait (PleaseAskSMT expr _ continue) -> case (concKeccakSimpExpr expr) of
-          Lit c -> do
-            (r, vm') <- liftIO $ stToIO $ runStateT (continue (Case (c > 0))) vm
-            interpret fetcher vm' (k r)
-          _ ->  internalError $ "cannot handle symbolic branch conditions in this interpreter: " <> show expr
         Wait q -> do
           m <- fetcher q
           vm' <- liftIO $ stToIO $ execStateT m vm
           interpret fetcher vm' (k ())
-        Ask _ ->
-          internalError "cannot make choices with this interpreter"
         IOAct m -> do
-          r <- liftIO $ m
+          r <- liftIO m
           interpret fetcher vm (k r)
         EVM m -> do
           (r, vm') <- liftIO $ stToIO $ runStateT m vm

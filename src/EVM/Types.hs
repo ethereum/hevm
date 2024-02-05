@@ -546,21 +546,21 @@ data PartialExec
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
-data Effect t s
-  = Query (Query t s)
-  | Choose (Choose t s)
+data Effect t s where
+  Query :: Query t s -> Effect t s
+  Choose :: Choose s -> Effect Symbolic s
 deriving instance Show (Effect t s)
 
 -- | Queries halt execution until resolved through RPC calls or SMT queries
 data Query t s where
   PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM t s ()) -> Query t s
   PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM t s ()) -> Query t s
-  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM t s ()) -> Query t s
+  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM Symbolic s ()) -> Query Symbolic s
   PleaseDoFFI         :: [String] -> (ByteString -> EVM t s ()) -> Query t s
 
 -- | Execution could proceed down one of two branches
-data Choose t s where
-  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM t s ()) -> Choose t s
+data Choose s where
+  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM Symbolic s ()) -> Choose s
 
 -- | The possible return values of a SMT query
 data BranchCondition = Case Bool | Unknown
@@ -581,17 +581,17 @@ instance Show (Query t s) where
     PleaseDoFFI cmd _ ->
       (("<EVM.Query: do ffi: " ++ (show cmd)) ++)
 
-instance Show (Choose t s) where
+instance Show (Choose s) where
   showsPrec _ = \case
     PleaseChoosePath _ _ ->
       (("<EVM.Choice: waiting for user to select path (0,1)") ++)
 
 -- | The possible result states of a VM
-data VMResult t s
-  = VMFailure EvmError      -- ^ An operation failed
-  | VMSuccess (Expr Buf)    -- ^ Reached STOP, RETURN, or end-of-code
-  | HandleEffect (Effect t s) -- ^ An effect must be handled for execution to continue
-  | Unfinished PartialExec  -- ^ Execution could not continue further
+data VMResult (t :: VMType) s where
+  Unfinished :: PartialExec -> VMResult Symbolic s -- ^ Execution could not continue further
+  VMFailure :: EvmError -> VMResult t s            -- ^ An operation failed
+  VMSuccess :: (Expr Buf) -> VMResult t s          -- ^ Reached STOP, RETURN, or end-of-code
+  HandleEffect :: (Effect t s) -> VMResult t s     -- ^ An effect must be handled for execution to continue
 
 deriving instance Show (VMResult t s)
 
@@ -795,6 +795,9 @@ class VMOps (t :: VMType) where
   toGas :: Word64 -> Gas t
 
   whenSymbolicElse :: EVM t s a -> EVM t s a -> EVM t s a
+
+  partial :: PartialExec -> EVM t s ()
+  branch :: Expr EWord -> (Bool -> EVM t s ()) -> EVM t s ()
 
 -- Bytecode Representations ------------------------------------------------------------------------
 

@@ -576,17 +576,12 @@ interpretWithTrace fetcher =
       case action of
         Stepper.Exec ->
           execWithTrace >>= interpretWithTrace fetcher . k
-        Stepper.Wait q -> case q of
-          PleaseAskSMT (Lit x) _ continue ->
-            interpretWithTrace fetcher (Stepper.evm (continue (Case (x > 0))) >>= k)
-          _ -> do
-            m <- State.lift $ fetcher q
-            vm <- use _1
-            vm' <- liftIO $ stToIO $ State.execStateT m vm
-            assign _1 vm'
-            interpretWithTrace fetcher (k ())
-        Stepper.Ask _ ->
-          internalError "cannot make choice in this interpreter"
+        Stepper.Wait q -> do
+          m <- State.lift $ fetcher q
+          vm <- use _1
+          vm' <- liftIO $ stToIO $ State.execStateT m vm
+          assign _1 vm'
+          interpretWithTrace fetcher (k ())
         Stepper.IOAct q ->
           liftIO q >>= interpretWithTrace fetcher . k
         Stepper.EVM m -> do
