@@ -2,13 +2,6 @@
 
 [overview](./overview.md)
 
-# Reference
-
-- [symbolic](./symbolic.md)
-- [equivalence](./equivalence.md)
-- [exec](./exec.md)
-- [dapp-test](./dapp-test.md)
-
 # Tutorials
 
 - [controlling the unit testing environment](./controlling-the-unit-testing-environment.md)
@@ -16,3 +9,10 @@
 - [discovering reachable assertion violations]()
 - [symbolic unit testing]()
 - [equivalence checking]()
+
+# Reference
+
+- [symbolic execution](./symbolic.md)
+- [equivalence checking](./equivalence.md)
+- [concrete execution](./exec.md)
+
