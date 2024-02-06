@@ -345,8 +345,8 @@ formatTestLog _ (GVar _) = internalError "unexpected global variable"
 formatTestLog events (LogEntry _ args (topic:_)) =
   case maybeLitWord topic >>= \t1 -> (Map.lookup t1 events) of
     Nothing -> Nothing
-    Just (Event name _ types) ->
-      case (name <> parenthesise (abiTypeSolidity <$> (unindexed types))) of
+    Just (Event name _ argInfos) ->
+      case (name <> parenthesise (abiTypeSolidity <$> argTypes)) of
         "log(string)" -> Just $ unquote $ showValue AbiStringType args
 
         -- log_named_x(string, x)
@@ -379,12 +379,12 @@ formatTestLog events (LogEntry _ args (topic:_)) =
         _ -> Nothing
 
         where
-          ts = unindexed types
+          argTypes = [argType | (_, argType, NotIndexed) <- argInfos]
           unquote = Text.dropAround (\c -> c == '"' || c == '«' || c == '»')
           log_unnamed =
-            Just $ showValue (head ts) args
+            Just $ showValue (head argTypes) args
           log_named =
-            let (key, val) = case take 2 (textValues ts args) of
+            let (key, val) = case take 2 (textValues argTypes args) of
                   [k, v] -> (k, v)
                   _ -> internalError "shouldn't happen"
             in Just $ unquote key <> ": " <> val
@@ -393,7 +393,7 @@ formatTestLog events (LogEntry _ args (topic:_)) =
           log_named_decimal =
             case args of
               (ConcreteBuf b) ->
-                case toList $ runGet (getAbiSeq (length ts) ts) (BSLazy.fromStrict b) of
+                case toList $ runGet (getAbiSeq (length argTypes) argTypes) (BSLazy.fromStrict b) of
                   [key, (AbiUInt 256 val), (AbiUInt 256 dec)] ->
                     Just $ (unquote (showAbiValue key)) <> ": " <> showDecimal dec val
                   [key, (AbiInt 256 val), (AbiUInt 256 dec)] ->
