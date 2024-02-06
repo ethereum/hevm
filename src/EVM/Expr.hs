@@ -808,10 +808,11 @@ simplify e = if (mapExpr go e == e)
 
     go (WriteByte a b c) = writeByte a b c
 
-    -- truncate some concrete source buffers to the portion relevant for the CopySlice if we're copying a fully concrete region
+    -- eliminate a CopySlice if the resulting buffer is the same as the src buffer
     go (CopySlice (Lit 0) (Lit 0) (Lit s) src (ConcreteBuf ""))
       | bufLength src == (Lit s) = src
        
+    -- truncate some concrete source buffers to the portion relevant for the CopySlice if we're copying a fully concrete region
     go orig@(CopySlice srcOff@(Lit n) dstOff size@(Lit sz)
         -- It doesn't matter what wOffs we write to, because only the first
         -- n+sz of ConcreteBuf will be used by CopySlice
