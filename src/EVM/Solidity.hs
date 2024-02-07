@@ -310,7 +310,8 @@ readBuildOutput root _ = do
 
 -- | Finds all json files under the provided filepath, searches recursively
 findJsonFiles :: FilePath -> IO [FilePath]
-findJsonFiles root = getDirectoryFiles root ["**/*.json"]
+findJsonFiles root =  filter (not . isInfixOf "kompiled") -- HACK: this gets added to `out` by `kontrol`
+                  <$> getDirectoryFiles root ["**/*.json"]
 
 -- | Filters out metadata json files
 filterMetadata :: [FilePath] -> [FilePath]

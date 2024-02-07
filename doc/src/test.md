@@ -1,4 +1,4 @@
-# `hevm dapp-test`
+# `hevm test`
 
 ```
 Usage: hevm test [--root STRING] [--project-type PROJECTTYPE] [--rpc TEXT]
@@ -18,7 +18,8 @@ Available options:
   --verbose INT            Append call trace: {1} failures {2} all
   --coverage               Coverage analysis
   --match STRING           Test case filter - only run methods matching regex
-  --solver TEXT            Used SMT solver: z3 (default) or cvc5
+  --solver TEXT            Used SMT solver: z3 (default), cvc5, or bitwuzla
+
   --num-solvers NATURAL    Number of solver instances to use (default: number of cpu cores)
   --smtdebug               Print smt queries sent to the solver
   --ffi                    Allow the usage of the hevm.ffi() cheatcode (WARNING:

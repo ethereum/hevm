@@ -81,7 +81,8 @@ substituteStores ::  Map (Expr 'EAddr) (Map W256 W256) -> Prop -> Prop
 substituteStores valMap p = mapProp go p
   where
     go :: Expr a -> Expr a
-    go (AbstractStore a) = case valMap !? a of
+    -- TODO: Is this OK??
+    go (AbstractStore a _) = case valMap !? a of
                                   Just m -> ConcreteStore m
                                   Nothing -> ConcreteStore mempty
     go a = a
@@ -141,7 +142,7 @@ findBufProp p = mapPropM go p
       e -> pure e
 
 --- Store extraction
-data CollectStorage = CollectStorage { addrs :: Set.Set (Expr EAddr)
+data CollectStorage = CollectStorage { addrs :: Set.Set (Expr EAddr, Maybe W256)
                                      , keys :: Set.Set W256
                                      , vals :: Set.Set W256
                                      }
@@ -181,9 +182,9 @@ findStoragePropInner p = mapPropM go p
   where
     go :: forall a. Expr a -> State CollectStorage (Expr a)
     go = \case
-      e@(AbstractStore a) -> do
+      e@(AbstractStore a idx) -> do
         s <- get
-        put s {addrs=Set.insert a s.addrs}
+        put s {addrs=Set.insert (a, idx) s.addrs}
         pure e
       e@(SLoad (Lit val) _) -> do
         s <- get
@@ -219,9 +220,9 @@ getvals vars = do
 getStores :: CollectStorage -> Gen (Map (Expr EAddr) (Map W256 W256))
 getStores storesLoads = go (Set.toList storesLoads.addrs) mempty
   where
-    go :: [Expr EAddr] -> Map (Expr EAddr) (Map W256 W256) -> Gen (Map (Expr EAddr) (Map W256 W256))
+    go :: [(Expr EAddr, Maybe W256)] -> Map (Expr EAddr) (Map W256 W256) -> Gen (Map (Expr EAddr) (Map W256 W256))
     go [] addrToValsMap = pure addrToValsMap
-    go (addr:ax) addrToValsMap = do
+    go ((addr, _):ax) addrToValsMap = do
       -- number of elements inserted into storage
       numElems :: Int <- frequency [(1, pure 0)
                                    ,(10, choose (1, 10))

@@ -164,7 +164,7 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- frame context
 
-      e@(Gas _ _) -> f e
+      e@(Gas _) -> f e
       e@(Balance {}) -> f e
 
       -- code
@@ -185,7 +185,7 @@ foldExpr f acc expr = acc <> (go expr)
       -- storage
 
       e@(ConcreteStore _) -> f e
-      e@(AbstractStore _) -> f e
+      e@(AbstractStore _ _) -> f e
       e@(SLoad a b) -> f e <> (go a) <> (go b)
       e@(SStore a b c) -> f e <> (go a) <> (go b) <> (go c)
 
@@ -487,7 +487,7 @@ mapExprM f expr = case expr of
 
   -- frame context
 
-  Gas a b -> f (Gas a b)
+  Gas a -> f (Gas a)
   Balance a -> do
     a' <- mapExprM f a
     f (Balance a')
@@ -512,7 +512,7 @@ mapExprM f expr = case expr of
   -- storage
 
   ConcreteStore b -> f (ConcreteStore b)
-  AbstractStore a -> f (AbstractStore a)
+  AbstractStore a b -> f (AbstractStore a b)
   SLoad a b -> do
     a' <- mapExprM f a
     b' <- mapExprM f b

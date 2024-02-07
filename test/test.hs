@@ -205,6 +205,122 @@ tests = testGroup "hevm"
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] (defaultVeriOpts { maxIter = Just 5 })
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
+    , test "decompose-1" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping (address => uint) balances;
+          function prove_mapping_access(address x, address y) public {
+              require(x != y);
+              balances[x] = 1;
+              balances[y] = 2;
+              assert(balances[x] != balances[y]);
+          }
+        }
+        |]
+      expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mapping_access(address,address)" [AbiAddressType, AbiAddressType])) [] defaultVeriOpts
+      let simpExpr = mapExprM Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
+      assertEqualM "Decompose did not succeed." (isJust simpExpr) True
+    , test "decompose-2" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping (address => uint) balances;
+          function prove_mixed_symoblic_concrete_writes(address x, uint v) public {
+              balances[x] = v;
+              balances[address(0)] = balances[x];
+              assert(balances[address(0)] == v);
+          }
+        }
+        |]
+      expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mixed_symoblic_concrete_writes(address,uint256)" [AbiAddressType, AbiUIntType 256])) [] defaultVeriOpts
+      let simpExpr = mapExprM Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
+      assertEqualM "Decompose did not succeed." (isJust simpExpr) True
+    -- NOTE: we can't do the rewrite below, because x could be very large,
+    -- which would allow us to overwrite *anything in the storage*, and that throws
+    -- everything off.
+    , expectFail $ test "decompose-3" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[] a;
+          function prove_array(uint x, uint v1, uint y, uint v2) public {
+              require(v1 != v2);
+              a[x] = v1;
+              a[y] = v2;
+              assert(a[x] == a[y]);
+          }
+        }
+        |]
+      expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_array(uint256,uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+      let simpExpr = mapExprM Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
+      assertEqualM "Decompose did not succeed." (isJust simpExpr) True
+    , test "decompose-4-mixed" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[] a;
+          mapping( uint => uint) balances;
+          function prove_array(uint x, uint v1, uint y, uint v2) public {
+              require(v1 != v2);
+              balances[x] = v1+1;
+              balances[y] = v1+2;
+              a[x] = v1;
+              assert(balances[x] != balances[y]);
+          }
+        }
+        |]
+      expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_array(uint256,uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+      let simpExpr = mapExprM Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
+      assertEqualM "Decompose did not succeed." (isJust simpExpr) True
+    , test "decompose-5-mixed" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping (address => uint) balances;
+          mapping (uint => bool) auth;
+          uint[] arr;
+          uint a;
+          uint b;
+          function prove_mixed(address x, address y, uint val) public {
+            b = val+1;
+            require(x != y);
+            balances[x] = val;
+            a = val;
+            arr[val] = 5;
+            auth[val+1] = true;
+            balances[y] = val+2;
+            if (balances[y] == balances[y]) {
+                assert(balances[y] == val);
+            }
+          }
+        }
+        |]
+      expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mixed(address,address,uint256)" [AbiAddressType, AbiAddressType, AbiUIntType 256])) [] defaultVeriOpts
+      let simpExpr = mapExprM Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
+      assertEqualM "Decompose did not succeed." (isJust simpExpr) True
+    -- TODO check what's going on here. Likely the "arbitrary write through array" is the reason why we fail
+    , expectFail $ test "decompose-6-fail" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[] arr;
+          function prove_mixed(uint val) public {
+            arr[val] = 5;
+            arr[val+1] = val+5;
+            assert(arr[val] == arr[val+1]);
+          }
+        }
+        |]
+      expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mixed(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+      let simpExpr = mapExprM Expr.decomposeStorage expr
+      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
+      assertEqualM "Decompose did not succeed." (isJust simpExpr) True
     , test "simplify-storage-map-only-static" $ do
        Just c <- solcRuntime "MyContract"
         [i|
@@ -285,7 +401,7 @@ tests = testGroup "hevm"
   , testGroup "StorageTests"
     [ test "read-from-sstore" $ assertEqualM ""
         (Lit 0xab)
-        (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x0) (Lit 0xab) (AbstractStore (LitAddr 0x0))))
+        (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x0) (Lit 0xab) (AbstractStore (LitAddr 0x0) Nothing)))
     , test "read-from-concrete" $ assertEqualM ""
         (Lit 0xab)
         (Expr.readStorage' (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, 0xab)]))
@@ -296,7 +412,7 @@ tests = testGroup "hevm"
         let dummyContract =
               (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)))
                 { external = True }
-        vm <- liftIO $ stToIO $ vmForEthrunCreation ""
+        vm :: VM Concrete RealWorld <- liftIO $ stToIO $ vmForEthrunCreation ""
             -- perform the initial access
         vm1 <- liftIO $ stToIO $ execStateT (EVM.accessStorage (LitAddr 0) (Lit 0) (pure . pure ())) vm
         -- it should fetch the contract first
@@ -387,6 +503,17 @@ tests = testGroup "hevm"
     , testProperty "store-simplification" $ \(expr :: Expr Storage) -> prop $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
+    , testProperty "load-simplification" $ \(GenWriteStorageLoad expr) -> prop $ do
+        let simplified = Expr.simplify expr
+        checkEquiv expr simplified
+    , ignoreTest $ testProperty "load-decompose" $ \(GenWriteStorageLoad expr) -> prop $ do
+        putStrLnM $ T.unpack $ formatExpr expr
+        let simp = Expr.simplify expr
+        let decomposed = fromMaybe simp $ mapExprM Expr.decomposeStorage simp
+        -- putStrLnM $ "-----------------------------------------"
+        -- putStrLnM $ T.unpack $ formatExpr decomposed
+        -- putStrLnM $ "\n\n\n\n"
+        checkEquiv expr decomposed
     , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> prop $ do
         let simplified = Expr.simplify expr
         checkEquiv expr simplified
@@ -815,7 +942,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x12] c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x12] c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
         assertEqualM "Division by 0 needs b=0" (getVar ctr "arg2") 0
         putStrLnM "expected counterexample found"
      ,
@@ -828,7 +955,7 @@ tests = testGroup "hevm"
                }
              }
              |]
-         (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x1] c Nothing [] defaultVeriOpts
+         (_, [Cex _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x1] c Nothing [] defaultVeriOpts
          putStrLnM "expected counterexample found"
       ,
      test "enum-conversion-fail" $ do
@@ -841,7 +968,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        (_, [Cex (_, ctr)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x21] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+        (_, [Cex (_, ctr)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x21] c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         assertBoolM "Enum is only defined for 0 and 1" $ (getVar ctr "arg1") > 1
         putStrLnM "expected counterexample found"
      ,
@@ -1010,7 +1137,7 @@ tests = testGroup "hevm"
                 }
             }
           |]
-        withSolvers Z3 1 Nothing $ \s -> do
+        withSolvers Bitwuzla 1 Nothing $ \s -> do
           let calldata = (WriteWord (Lit 0x0) (Var "u") (ConcreteBuf ""), [])
           initVM <- liftIO $ stToIO $ abstractVM calldata initCode Nothing True
           expr <- Expr.simplify <$> interpret (Fetch.oracle s Nothing) Nothing 1 StackBased initVM runExpr
@@ -2655,7 +2782,7 @@ tests = testGroup "hevm"
               }
             |]
 
-          (_, [Qed _]) <- withSolvers CVC5 1 (Just 99999999) $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+          (_, [Qed _]) <- withSolvers Bitwuzla 1 (Just 99999999) $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLnM "Proven"
         ,
         test "storage-cex-1" $ do
@@ -2810,7 +2937,7 @@ tests = testGroup "hevm"
         }
         |]
       let sig = (Sig "func(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
-      (_, [Cex (_, ctr1), Cex (_, ctr2)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
+      (_, [Cex (_, ctr1), Cex (_, ctr2)]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
       putStrLnM  $ "expected counterexamples found.  ctr1: " <> (show ctr1) <> " ctr2: " <> (show ctr2)
     , testFuzz "fuzz-simple-fixed-value-store1" $ do
       Just c <- solcRuntime "MyContract"
@@ -3096,7 +3223,7 @@ tests = testGroup "hevm"
                 }
               }
           |]
-        withSolvers Z3 3 Nothing $ \s -> do
+        withSolvers Bitwuzla 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqualM "Must be different" (any isCex a) True
       , test "eq-all-yul-optimization-tests" $ do
@@ -3417,27 +3544,28 @@ runSimpleVM x ins = do
          vm' = set (#state % #calldata) calldata vm
      res <- Stepper.interpret (Fetch.zero 0 Nothing) vm' Stepper.execFully
      case res of
-       (Right (ConcreteBuf bs)) -> pure $ Just bs
+       Right (ConcreteBuf bs) -> pure $ Just bs
        s -> internalError $ show s
 
 -- | Takes a creation code and returns a vm with the result of executing the creation code
-loadVM :: App m => ByteString -> m (Maybe (VM RealWorld))
+loadVM :: App m => ByteString -> m (Maybe (VM Concrete RealWorld))
 loadVM x = do
   vm <- liftIO $ stToIO $ vmForEthrunCreation x
   vm1 <- Stepper.interpret (Fetch.zero 0 Nothing) vm Stepper.runFully
   case vm1.result of
-     Just (VMSuccess (ConcreteBuf targetCode)) -> do
-       let target = vm1.state.contract
-       vm2 <- Stepper.interpret (Fetch.zero 0 Nothing) vm1 (prepVm target targetCode >> Stepper.run)
-       writeTrace vm2
-       pure $ Just vm2
-     _ -> pure Nothing
+    Just (VMSuccess (ConcreteBuf targetCode)) -> do
+      let target = vm1.state.contract
+      vm2 <- Stepper.interpret (Fetch.zero 0 Nothing) vm1 (prepVm target targetCode)
+      writeTrace vm2
+      pure $ Just vm2
+    _ -> pure Nothing
   where
     prepVm target targetCode = Stepper.evm $ do
       replaceCodeOfSelf (RuntimeCode $ ConcreteRuntimeCode targetCode)
       resetState
       assign (#state % #gas) 0xffffffffffffffff -- kludge
       execState (loadContract target) <$> get >>= put
+      get
 
 hex :: ByteString -> ByteString
 hex s =
@@ -3486,7 +3614,7 @@ runStatements stmts args t = do
     }
   |] (abiMethod s (AbiTuple $ V.fromList args))
 
-getStaticAbiArgs :: Int -> VM s -> [Expr EWord]
+getStaticAbiArgs :: Int -> VM Symbolic s -> [Expr EWord]
 getStaticAbiArgs n vm =
   let cd = vm.state.calldata
   in decodeStaticArgs 4 n cd
@@ -3742,7 +3870,7 @@ genStorageWrites :: Gen (Expr Storage)
 genStorageWrites = do
   toSlot <- genSlot
   val <- genLit (maxBound :: W256)
-  store <- frequency [ (3, pure $ AbstractStore (SymAddr ""))
+  store <- frequency [ (3, pure $ AbstractStore (SymAddr "") Nothing)
                      , (2, genStorageWrites)
                      ]
   pure $ SStore toSlot val store
@@ -3813,6 +3941,11 @@ genEnd sz = oneof
     subWord = defaultWord (sz `div` 2)
     subEnd = genEnd (sz `div` 2)
     subProp = genProps False (sz `div` 2)
+
+genSmallLit :: W256 -> Gen (Expr EWord)
+genSmallLit m = do
+  val :: W256 <- arbitrary
+  pure $ Lit (val `mod` m)
 
 genWord :: Int -> Int -> Gen (Expr EWord)
 genWord litFreq 0 = frequency
@@ -4031,13 +4164,48 @@ genBuf bound sz = oneof
 
 genStorage :: Int -> Gen (Expr Storage)
 genStorage 0 = oneof
-  [ fmap AbstractStore arbitrary
+  [ liftM2 AbstractStore arbitrary (pure Nothing)
   , fmap ConcreteStore arbitrary
   ]
-genStorage sz = liftM3 SStore subWord subWord subStore
+genStorage sz = liftM3 SStore key val subStore
   where
     subStore = genStorage (sz `div` 10)
-    subWord = defaultWord (sz `div` 5)
+    val = defaultWord (sz `div` 5)
+    key = genStorageKey
+
+genStorageKey :: Gen (Expr EWord)
+genStorageKey = frequency
+     -- array slot
+    [ (4, liftM2 Expr.ArraySlotWithOffset (genByteStringKey 32) (genSmallLit 5))
+    , (4, fmap Expr.ArraySlotZero (genByteStringKey 32))
+     -- mapping slot
+    , (8, liftM2 Expr.MappingSlot (genByteStringKey 64) (genSmallLit 5))
+     -- small slot
+    , (4, genLit 20)
+    -- unrecognized slot type
+    , (1, genSmallLit 5)
+    ]
+
+genByteStringKey :: W256 -> Gen (ByteString)
+genByteStringKey len = do
+  b :: Word8 <- arbitrary
+  pure $ BS.pack ([ 0 | _ <- [0..(len-2)]] ++ [b `mod` 5])
+
+-- GenWriteStorageLoad
+newtype GenWriteStorageLoad = GenWriteStorageLoad (Expr EWord)
+  deriving (Show, Eq)
+
+instance Arbitrary GenWriteStorageLoad where
+  arbitrary = do
+    load <- genStorageLoad 10
+    pure $ GenWriteStorageLoad load
+
+    where
+      genStorageLoad :: Int -> Gen (Expr EWord)
+      genStorageLoad sz = liftM2 SLoad key subStore
+        where
+          subStore = genStorage (sz `div` 10)
+          key = genStorageKey
 
 data Invocation
   = SolidityCall Text [AbiValue]
