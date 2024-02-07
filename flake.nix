@@ -41,7 +41,7 @@
           git
           bitwuzla
         ] ++ lib.optional (!(pkgs.stdenv.isDarwin && pkgs.stdenv.isAarch64)) [
-          # foundry.defaultPackage.${system}
+          foundry.defaultPackage.${system}
         ];
 
         # custom package set capable of building latest (unreleased) `cabal-install`.
