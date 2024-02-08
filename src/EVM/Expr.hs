@@ -627,12 +627,12 @@ readStorage w st = go (simplify w) st
       (MappingSlot _ keyA, MappingSlot _ keyB)   | surelyNotEq keyA keyB -> go slot prev
 
       -- special case of array + map -> skip write
-      (ArraySlotWithOffset idA _, Keccak64Bytes) | BS.length idA /= 64 -> go slot prev
-      (ArraySlotZero idA, Keccak64Bytes)         | BS.length idA /= 64 -> go slot prev
+      (ArraySlotWithOffset idA _, Keccak k)      | bufLength k == Lit 64 && BS.length idA /= 64 -> go slot prev
+      (ArraySlotZero idA, Keccak k)              | bufLength k == Lit 64 && BS.length idA /= 64 -> go slot prev
 
       -- special case of array + map -> skip write
-      (Keccak64Bytes, ArraySlotWithOffset idA _) | BS.length idA /= 64 -> go slot prev
-      (Keccak64Bytes, ArraySlotZero idA)         | BS.length idA /= 64 -> go slot prev
+      (Keccak k, ArraySlotWithOffset idA _)      | bufLength k == Lit 64 && BS.length idA /= 64 -> go slot prev
+      (Keccak k, ArraySlotWithOffset idA _)      | bufLength k == Lit 64 && BS.length idA /= 64 -> go slot prev
 
       -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
       (Lit a, Keccak _) | a < 256 -> go slot prev
@@ -688,10 +688,6 @@ readStorage w st = go (simplify w) st
 -- storage slots for maps are determined by (keccak (bytes32(key) ++ bytes32(id)))
 pattern MappingSlot :: ByteString -> Expr EWord -> Expr EWord
 pattern MappingSlot id key = Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) (WriteWord (Lit 0) key (ConcreteBuf id)) (ConcreteBuf ""))
-
--- keccak of any 64 bytes value
-pattern Keccak64Bytes :: Expr EWord
-pattern Keccak64Bytes <- Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) _ (ConcreteBuf ""))
 
 -- storage slots for arrays are determined by (keccak(bytes32(id)) + offset)
 -- note that `normArgs` puts the Lit as the 2nd argument to `Add`
@@ -787,12 +783,12 @@ safeToDecompose inp = result /= Mixed
 
     go :: forall b. Expr b -> State StorageType ()
     go e@(SLoad (MappingSlot {}) _) = setMap e
-    go e@(SLoad (ArraySlotZero {}) _) = setArray e
+    go e@(SLoad (Keccak x) _) = if bufLength x == Lit 64 then setArray e else setMixed e
     go e@(SLoad (ArraySlotWithOffset {}) _) = setArray e
     go e@(SLoad (Lit x) _) | x < 256 = setSmall e
     go e@(SLoad _ _) = setMixed e
     go e@(SStore (MappingSlot {}) _ _) = setMap e
-    go e@(SStore (ArraySlotZero {}) _ _) = setArray e
+    go e@(SStore (Keccak x) _ _) = if bufLength x == Lit 64 then setArray e else setMixed e
     go e@(SStore (ArraySlotWithOffset {}) _ _) = setArray e
     go e@(SStore (Lit x) _ _) | x < 256 = setSmall e
     go e@(SStore _ _ _) = setMixed e
@@ -939,7 +935,7 @@ simplify e = if (mapExpr go e == e)
     -- eliminate a CopySlice if the resulting buffer is the same as the src buffer
     go (CopySlice (Lit 0) (Lit 0) (Lit s) src (ConcreteBuf ""))
       | bufLength src == (Lit s) = src
-       
+
     -- truncate some concrete source buffers to the portion relevant for the CopySlice if we're copying a fully concrete region
     go orig@(CopySlice srcOff@(Lit n) dstOff size@(Lit sz)
         -- It doesn't matter what wOffs we write to, because only the first
