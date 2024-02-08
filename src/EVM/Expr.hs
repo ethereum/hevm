@@ -623,16 +623,16 @@ readStorage w st = go (simplify w) st
       (Lit _, Lit _) -> go slot prev
 
       -- slot is for a map + map -> skip write
-      (MappingSlot idA _, MappingSlot idB _)     | idsDontMatch idA idB  -> go slot prev
-      (MappingSlot _ keyA, MappingSlot _ keyB)   | surelyNotEq keyA keyB -> go slot prev
+      (MappingSlot idA _, MappingSlot idB _)       | BS.length idB == 64 && BS.length idA == 64 && idsDontMatch idA idB  -> go slot prev
+      (MappingSlot idA keyA, MappingSlot idB keyB) | BS.length idB == 64 && BS.length idA == 64 && surelyNotEq keyA keyB -> go slot prev
 
       -- special case of array + map -> skip write
-      (ArraySlotWithOffset idA _, Keccak k)      | bufLength k == Lit 64 && BS.length idA /= 64 -> go slot prev
-      (ArraySlotZero idA, Keccak k)              | bufLength k == Lit 64 && BS.length idA /= 64 -> go slot prev
+      (ArraySlotWithOffset idA _, Keccak k)      | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
+      (ArraySlotZero idA, Keccak k)              | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
 
-      -- special case of array + map -> skip write
-      (Keccak k, ArraySlotWithOffset idA _)      | bufLength k == Lit 64 && BS.length idA /= 64 -> go slot prev
-      (Keccak k, ArraySlotWithOffset idA _)      | bufLength k == Lit 64 && BS.length idA /= 64 -> go slot prev
+      -- special case of map + array -> skip write
+      (Keccak k, ArraySlotWithOffset idA _)      | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
+      (ArraySlotWithOffset idA _, Keccak k)      | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
 
       -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
       (Lit a, Keccak _) | a < 256 -> go slot prev
@@ -687,7 +687,7 @@ readStorage w st = go (simplify w) st
 
 -- storage slots for maps are determined by (keccak (bytes32(key) ++ bytes32(id)))
 pattern MappingSlot :: ByteString -> Expr EWord -> Expr EWord
-pattern MappingSlot id key = Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) (WriteWord (Lit 0) key (ConcreteBuf id)) (ConcreteBuf ""))
+pattern MappingSlot id key = Keccak (WriteWord (Lit 0) key (ConcreteBuf id))
 
 -- storage slots for arrays are determined by (keccak(bytes32(id)) + offset)
 -- note that `normArgs` puts the Lit as the 2nd argument to `Add`
@@ -782,14 +782,20 @@ safeToDecompose inp = result /= Mixed
     safeToDecomposeRunner a = go a
 
     go :: forall b. Expr b -> State StorageType ()
-    go e@(SLoad (MappingSlot {}) _) = setMap e
-    go e@(SLoad (Keccak x) _) = if bufLength x == Lit 64 then setArray e else setMixed e
-    go e@(SLoad (ArraySlotWithOffset {}) _) = setArray e
+    go e@(SLoad (MappingSlot x _) _) = if BS.length x == 64 then setMap e else setMixed e
+    go e@(SLoad (Keccak x) _) = case bufLength x of
+                                  Lit 32 -> setArray e
+                                  Lit 64 -> setMap e
+                                  _ -> setMixed e
+    go e@(SLoad (ArraySlotWithOffset x _) _) = if BS.length x == 32 then setArray e else setMixed e
     go e@(SLoad (Lit x) _) | x < 256 = setSmall e
     go e@(SLoad _ _) = setMixed e
-    go e@(SStore (MappingSlot {}) _ _) = setMap e
-    go e@(SStore (Keccak x) _ _) = if bufLength x == Lit 64 then setArray e else setMixed e
-    go e@(SStore (ArraySlotWithOffset {}) _ _) = setArray e
+    go e@(SStore (MappingSlot x _) _ _) = if BS.length x == 64 then setMap e else setMixed e
+    go e@(SStore (Keccak x) _ _) =  case bufLength x of
+                                  Lit 32 -> setArray e
+                                  Lit 64 -> setMap e
+                                  _ -> setMixed e
+    go e@(SStore (ArraySlotWithOffset x _) _ _) = if BS.length x == 32 then setArray e else setMixed e
     go e@(SStore (Lit x) _ _) | x < 256 = setSmall e
     go e@(SStore _ _ _) = setMixed e
     go _ = pure ()
@@ -855,7 +861,10 @@ decomposeStorage = go
     inferLogicalIdx = \case
       Lit a | a >= 256 -> Nothing
       Lit a -> Just (Nothing, Lit a)
+      -- maps
+      (Keccak (ConcreteBuf k)) | BS.length k == 64 -> Just (Just $ idxToWord (BS.drop 32 k), Lit $ idxToWord (BS.take 32 k))
       (MappingSlot idx key) | BS.length idx == 64 -> Just (Just $ idxToWord idx, key)
+      -- arrays
       (ArraySlotWithOffset idx offset) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, offset)
       (ArraySlotZero idx) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, Lit 0)
       _ -> Nothing
