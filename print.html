@@ -425,6 +425,18 @@ cheatcode means test authors can execute arbitrary code on user machines as part
 <p><code>function prank(address sender) public</code>
 Sets <code>msg.sender</code> to the specified <code>sender</code> for the next call.</p>
 </li>
+<li>
+<p><code>function createFork(string calldata urlOrAlias) external returns (uint256)</code>
+Creates a new fork with the given endpoint and the <em>latest</em> block and returns the identifier of the fork.</p>
+</li>
+<li>
+<p><code>function selectFork(uint256 forkId) external</code>
+Takes a fork identifier created by <code>createFork</code> and sets the corresponding forked state as active.</p>
+</li>
+<li>
+<p><code>function activeFork() external returns (uint256)</code>
+Returns the identifier of the current fork.</p>
+</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="using-the-visual-debugger"><a class="header" href="#using-the-visual-debugger">using the visual debugger</a></h1>
 
