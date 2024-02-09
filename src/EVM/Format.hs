@@ -415,6 +415,7 @@ prettyError = \case
   ReturnDataOutOfBounds -> "Return data out of bounds"
   NonceOverflow -> "Nonce overflow"
   BadCheatCode a -> "Bad cheat code: sig: " <> show a
+  NonexistentFork a -> "Fork ID does not exist: " <> show a
 
 prettyvmresult :: Expr End -> String
 prettyvmresult (Failure _ _ (Revert (ConcreteBuf ""))) = "Revert"

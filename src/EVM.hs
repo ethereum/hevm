@@ -122,16 +122,7 @@ makeVm o = do
       }
     , logs = []
     , traces = Zipper.fromForest []
-    , block = Block
-      { coinbase = o.coinbase
-      , timestamp = o.timestamp
-      , number = o.number
-      , prevRandao = o.prevRandao
-      , maxCodeSize = o.maxCodeSize
-      , gaslimit = o.blockGaslimit
-      , baseFee = o.baseFee
-      , schedule = o.schedule
-      }
+    , block = block
     , state = FrameState
       { pc = 0
       , stack = mempty
@@ -147,13 +138,8 @@ makeVm o = do
       , returndata = mempty
       , static = False
       }
-    , env = Env
-      { chainId = o.chainId
-      , contracts = Map.fromList ((o.address,o.contract):o.otherContracts)
-      , freshAddresses = 0
-      , freshGasVals = 0
-      }
-    , cache = Cache mempty mempty
+    , env = env
+    , cache = cache
     , burned = initialGas
     , constraints = snd o.calldata
     , iterations = mempty
@@ -162,7 +148,27 @@ makeVm o = do
       , overrideCaller = Nothing
       , baseState = o.baseState
       }
+    , forks = Seq.singleton (ForkState env block cache "")
+    , currentFork = 0
     }
+    where
+    env = Env
+      { chainId = o.chainId
+      , contracts = Map.fromList ((o.address,o.contract):o.otherContracts)
+      , freshAddresses = 0
+      , freshGasVals = 0
+      }
+    block = Block
+      { coinbase = o.coinbase
+      , timestamp = o.timestamp
+      , number = o.number
+      , prevRandao = o.prevRandao
+      , maxCodeSize = o.maxCodeSize
+      , gaslimit = o.blockGaslimit
+      , baseFee = o.baseFee
+      , schedule = o.schedule
+      }
+    cache = Cache mempty mempty
 
 -- | Initialize an abstract contract with unknown code
 unknownContract :: Expr EAddr -> Contract
@@ -1650,8 +1656,57 @@ cheatActions =
           [addr]  -> case wordToAddr addr of
             Just a -> assign (#config % #overrideCaller) (Just a)
             Nothing -> vmError (BadCheatCode sig)
-          _ -> vmError (BadCheatCode sig)
+          _ -> vmError (BadCheatCode sig),
 
+      action "createFork(string)" $
+        \sig outOffset _ input -> case decodeBuf [AbiStringType] input of
+          CAbi valsArr -> case valsArr of
+            [AbiString bytes] -> do
+              forkId <- length <$> gets (.forks)
+              let urlOrAlias = Char8.unpack bytes
+              modify' $ \vm -> vm { forks = vm.forks Seq.|> ForkState vm.env vm.block vm.cache urlOrAlias }
+              let encoded = encodeAbiValue $ AbiUInt 256 (fromIntegral forkId)
+              assign (#state % #returndata) (ConcreteBuf encoded)
+              copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
+            _ -> vmError (BadCheatCode sig)
+          _ -> vmError (BadCheatCode sig),
+
+      action "selectFork(uint256)" $
+        \sig _ _ input -> case decodeStaticArgs 0 1 input of
+          [forkId] ->
+            forceConcrete forkId "forkId must be concrete" $ \(fromIntegral -> forkId') -> do
+              saved <- Seq.lookup forkId' <$> gets (.forks)
+              case saved of
+                Just forkState -> do
+                  vm <- get
+                  let contractAddr = vm.state.contract
+                  let callerAddr = vm.state.caller
+                  fetchAccount contractAddr $ \contractAcct -> fetchAccount callerAddr $ \callerAcct -> do
+                    let
+                      -- the current contract is persited across forks
+                      newContracts = Map.insert callerAddr callerAcct $
+                                     Map.insert contractAddr contractAcct forkState.env.contracts
+                      newEnv = (forkState.env :: Env) { contracts = newContracts }
+
+                    when (vm.currentFork /= forkId') $ do
+                      modify' $ \vm' -> vm'
+                        { env = newEnv
+                        , block = forkState.block
+                        , forks = Seq.adjust' (\state -> (state :: ForkState)
+                            { env = vm.env, block = vm.block, cache = vm.cache }
+                          ) vm.currentFork  vm.forks
+                        , currentFork = forkId'
+                        }
+                Nothing ->
+                  vmError (NonexistentFork forkId')
+          _ -> vmError (BadCheatCode sig),
+
+      action "activeFork()" $
+        \_ outOffset _ _ -> do
+          vm <- get
+          let encoded = encodeAbiValue $ AbiUInt 256 (fromIntegral vm.currentFork)
+          assign (#state % #returndata) (ConcreteBuf encoded)
+          copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
     ]
   where
     action s f = (abiKeccak s, f (abiKeccak s))
