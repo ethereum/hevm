@@ -3,7 +3,7 @@
 
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
-    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs";
     foundry.url = "github:shazow/foundry.nix/monthly";
     bitwuzla-pkgs.url = "github:d-xo/nixpkgs/6e7c9e4267f3c2df116bf76d8e31c2602e2d543d";
     flake-compat = {
