@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   abstract gas execution but concrete running. In these cases, the interpreter can out-of-heap
   as the only check is that the size allocated is less than $2**{64}$, but that is too large to fit in memory. Now,
   we check more stringently, and still return an IllegalOverflow
+- Fixed `--root` option for the `test` subcommand
 
 ## Added
 
