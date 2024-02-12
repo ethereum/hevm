@@ -216,21 +216,20 @@ main = do
     Exec {} -> runEnv env $ launchExec cmd
     Test {} -> do
       root <- getRoot cmd
-      withCurrentDirectory root $ do
-        solver <- getSolver cmd
-        cores <- liftIO $ unsafeInto <$> getNumProcessors
-        let solverCount = fromMaybe cores cmd.numSolvers
-        runEnv env $ withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
-          buildOut <- liftIO $ readBuildOutput root (getProjectType cmd)
-          case buildOut of
-            Left e -> liftIO $ do
-              putStrLn $ "Error: " <> e
-              exitFailure
-            Right out -> do
-              -- TODO: which functions here actually require a BuildOutput, and which can take it as a Maybe?
-              testOpts <- liftIO $ unitTestOptions cmd solvers (Just out)
-              res <- unitTest testOpts out.contracts
-              liftIO $ unless res exitFailure
+      solver <- getSolver cmd
+      cores <- liftIO $ unsafeInto <$> getNumProcessors
+      let solverCount = fromMaybe cores cmd.numSolvers
+      runEnv env $ withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
+        buildOut <- liftIO $ readBuildOutput root (getProjectType cmd)
+        case buildOut of
+          Left e -> liftIO $ do
+            putStrLn $ "Error: " <> e
+            exitFailure
+          Right out -> do
+            -- TODO: which functions here actually require a BuildOutput, and which can take it as a Maybe?
+            testOpts <- liftIO $ unitTestOptions cmd solvers (Just out)
+            res <- unitTest testOpts out.contracts
+            liftIO $ unless res exitFailure
 
 equivalence :: App m => Command Options.Unwrapped -> m ()
 equivalence cmd = do
