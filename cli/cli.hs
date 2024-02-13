@@ -23,7 +23,7 @@ import Optics.Core ((&), set)
 import Witch (unsafeInto)
 import Options.Generic as Options
 import Paths_hevm qualified as Paths
-import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirectoryExist)
+import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirectoryExist, makeAbsolute)
 import System.FilePath ((</>))
 import System.Exit (exitFailure, exitWith, ExitCode(..))
 
@@ -287,7 +287,7 @@ getProjectType :: Command Options.Unwrapped -> ProjectType
 getProjectType cmd = fromMaybe Foundry cmd.projectType
 
 getRoot :: Command Options.Unwrapped -> IO FilePath
-getRoot cmd = maybe getCurrentDirectory pure (cmd.root)
+getRoot cmd = maybe getCurrentDirectory makeAbsolute (cmd.root)
 
 
 -- | Builds a buffer representing calldata based on the given cli arguments
