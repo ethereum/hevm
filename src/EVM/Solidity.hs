@@ -55,7 +55,7 @@ import Data.Aeson.Optics
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Scientific
-import Data.ByteString (ByteString)
+import Data.ByteString (ByteString, readFile)
 import Data.ByteString qualified as BS
 import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Lazy (toStrict)
@@ -73,7 +73,6 @@ import Data.Sequence (Seq)
 import Data.Text (pack, intercalate)
 import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
-import Data.Text.IO (readFile)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Word (Word8)
@@ -344,8 +343,12 @@ lineSubrange xs (s1, n1) i =
     else Just (s1 - s2, min (s2 + n2 - s1) n1)
 
 readSolc :: ProjectType -> FilePath -> FilePath -> IO (Either String BuildOutput)
-readSolc pt root fp =
-  (readJSON pt (T.pack $ takeBaseName fp) <$> readFile fp) >>=
+readSolc pt root fp = do
+  -- NOTE: we cannot and must not use Data.Text.IO.readFile because that takes the locale
+  --       and may fail with very strange errors when the JSON it's reading
+  --       contains any UTF-8 character -- which it will with foundry
+  let fileContents = fmap Data.Text.Encoding.decodeUtf8 (Data.ByteString.readFile fp)
+  (readJSON pt (T.pack $ takeBaseName fp) <$> fileContents) >>=
     \case
       Nothing -> pure . Left $ "unable to parse: " <> fp
       Just (contracts, asts, sources) -> do
