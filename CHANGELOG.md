@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Traces now correctly perform source mapping to display contract details
 - Event traces now correctly display indexed arguments and argument names
 - JSON reading of foundry JSONs was dependent on locale and did not work with many locales.
+- CVC5 needs `--incremental` flag to work properly in abstraction-refinement mode
 
 ## [0.52.0] - 2023-10-26
 
