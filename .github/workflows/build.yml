@@ -13,16 +13,24 @@ jobs:
   nix-build:
     strategy:
       matrix:
-       os: [ ubuntu-latest, macos-latest ]
-       include:
-         - os: ubuntu-latest
-           os_attr: x86_64-linux
-         - os: macos-latest
-           os_attr: x86_64-macos
+        runtime: [ linux-x64, linux-arm64, osx-x64, osx-arm64 ]
+        include:
+        - runtime: linux-x64
+          os: ubuntu-latest
+
+        - runtime: linux-arm64
+          os: ubuntu-latest
+
+        - runtime: osx-x64
+          os: macOS-latest
+
+        - runtime: osx-arm64
+          os: macOS-latest
+
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: build hevm
@@ -43,7 +51,7 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       # can't be run in nix build due to network usage
@@ -60,7 +68,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2
         with:
           msystem: CLANG64
@@ -141,7 +149,7 @@ jobs:
   cabal-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: run cabal check
