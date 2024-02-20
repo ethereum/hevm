@@ -269,6 +269,7 @@ solverArgs solver timeout = case solver of
     , "--produce-models"
     , "--print-success"
     , "--interactive"
+    , "--incremental"
     , "--tlimit-per=" <> mkTimeout timeout
     ]
   Custom _ -> []
