@@ -88,7 +88,7 @@ jobs:
             autotools:p
             gmp:p
             openssl:p
-      - uses: haskell-actions/setup@v2
+      - uses: haskell-actions/setup@v2.6.1
         id: setup
         with:
           ghc-version: '9.4.7'
@@ -117,7 +117,7 @@ jobs:
           # The last step generates dist-newstyle/cache/plan.json for the cache key.
 
       - name: Restore cached dependencies
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         id: cache
         env:
           key: ${{ runner.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-cabal-${{ steps.setup.outputs.cabal-version }}
