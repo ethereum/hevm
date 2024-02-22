@@ -65,7 +65,7 @@ injProp (k1@(Keccak b1), k2@(Keccak b2)) =
 injProp _ = internalError "expected keccak expression"
 
 
--- Takes a list of props, find all keccak occurences and generates two kinds of assumptions:
+-- Takes a list of props, find all keccak occurrences and generates two kinds of assumptions:
 --   1. Minimum output value: That the output of the invocation is greater than
 --      256 (needed to avoid spurious counterexamples due to storage collisions
 --      with solidity mappings & value type storage slots)

@@ -1323,7 +1323,7 @@ tests = testGroup "hevm"
             }
             |]
         let sig = Just $ Sig "fun(uint256)" [AbiUIntType 256]
-            -- we dont' ask the solver about the loop condition until we're
+            -- we don't ask the solver about the loop condition until we're
             -- already in an inconsistent path (i == 5, j <= 3, i < j), so we
             -- will continue looping here until we hit max iterations
             opts = defaultVeriOpts{ maxIter = Just 10, askSmtIters = 5 }
@@ -2375,7 +2375,7 @@ tests = testGroup "hevm"
           assertBoolM "second to last byte must be non-zero" $ ((Data.Bits..&.) (getVar ctr "arg1") 0xff00) > 0
           putStrLnM "Expected counterexample found"
         ,
-        -- Reverse of thest above
+        -- Reverse of test above
         test "check-lsb-msb4 2nd byte rev" $ do
           Just c <- solcRuntime "C"
             [i|

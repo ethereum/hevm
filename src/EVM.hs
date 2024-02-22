@@ -375,7 +375,7 @@ exec1 = do
         OpShr -> stackOp2 g_verylow Expr.shr
         OpSar -> stackOp2 g_verylow Expr.sar
 
-        -- more accurately refered to as KECCAK
+        -- more accurately referred to as KECCAK
         OpSha3 ->
           case stk of
             xOffset:xSize:xs ->
@@ -997,7 +997,7 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
                 next
               else continue (toGas gas')
         case (fromBal, xValue) of
-          -- we're not transfering any value, and can skip the balance check
+          -- we're not transferring any value, and can skip the balance check
           (_, Lit 0) -> burn (cost - gas') checkCallDepth
 
           -- from is in the state, we check if they have enough balance
@@ -1376,7 +1376,7 @@ finalize = do
           case Expr.toList output of
             Nothing ->
               partial $
-                UnexpectedSymbolicArg pc' "runtime code cannot have an abstract lentgh" (wrap [output])
+                UnexpectedSymbolicArg pc' "runtime code cannot have an abstract length" (wrap [output])
             Just ops ->
               onContractCode $ RuntimeCode (SymbolicRuntimeCode ops)
     _ ->
@@ -1683,7 +1683,7 @@ cheatActions =
                   let callerAddr = vm.state.caller
                   fetchAccount contractAddr $ \contractAcct -> fetchAccount callerAddr $ \callerAcct -> do
                     let
-                      -- the current contract is persited across forks
+                      -- the current contract is persisted across forks
                       newContracts = Map.insert callerAddr callerAcct $
                                      Map.insert contractAddr contractAcct forkState.env.contracts
                       newEnv = (forkState.env :: Env) { contracts = newContracts }
@@ -1893,7 +1893,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
 -- concrete region (initCode) followed by a potentially symbolic region
 -- (arguments).
 --
--- when constructing a contract that has symbolic construcor args, we
+-- when constructing a contract that has symbolic constructor args, we
 -- need to apply some heuristics to convert the (unstructured) initcode
 -- in memory into this structured representation. The (unsound, bad,
 -- hacky) way that we do this, is by: looking for the first potentially
@@ -2418,7 +2418,7 @@ vmOpIx vm =
   do self <- currentContract vm
      self.opIxMap SV.!? vm.state.pc
 
--- Maps operation indicies into a pair of (bytecode index, operation)
+-- Maps operation indices into a pair of (bytecode index, operation)
 mkCodeOps :: ContractCode -> V.Vector (Int, Op)
 mkCodeOps contractCode =
   let l = case contractCode of
