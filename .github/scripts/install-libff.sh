@@ -2,6 +2,7 @@
 set -eux -o pipefail
 
 ## The following script builds and installs libff to ~/.local/lib
+#سيؤدي هذا الرمز إلى تثبيت libff على -/.local/lib
 
 INSTALL_VERSION=0.2.1
 
