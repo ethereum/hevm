@@ -75,7 +75,7 @@ contract SolidityTest is DSTest {
     }
 
     function prove_burn(uint supply, uint amt) public {
-        if (amt > supply) return; // no undeflow
+        if (amt > supply) return; // no underflow
 
         token.mint(address(this), supply);
         token.burn(address(this), amt);

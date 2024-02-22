@@ -69,7 +69,7 @@ mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
 -- Conversions -------------------------------------------------------------------------------------
 
 
--- We ignore hlint to supress the warnings about `fromIntegral` and friends here
+-- We ignore hlint to suppress the warnings about `fromIntegral` and friends here
 #ifndef __HLINT__
 
 instance From Addr Integer where from = fromIntegral
@@ -131,7 +131,7 @@ data EType
   | End
   deriving (Typeable)
 
--- Variables refering to a global environment
+-- Variables referring to a global environment
 data GVar (a :: EType) where
   BufVar :: Int -> GVar Buf
   StoreVar :: Int -> GVar Storage
@@ -141,7 +141,7 @@ deriving instance Eq (GVar a)
 deriving instance Ord (GVar a)
 
 {- |
-  Expr implements an abstract respresentation of an EVM program
+  Expr implements an abstract representation of an EVM program
 
   This type can give insight into the provenance of a term which is useful,
   both for the aesthetic purpose of printing terms in a richer way, but also to
@@ -1379,7 +1379,7 @@ formatString bs =
     Right s -> "\"" <> T.unpack s <> "\""
     Left _ -> "❮utf8 decode failed❯: " <> (show $ ByteStringS bs)
 
--- |'paddedShowHex' displays a number in hexidecimal and pads the number
+-- |'paddedShowHex' displays a number in hexadecimal and pads the number
 -- with 0 so that it has a minimum length of @w@.
 paddedShowHex :: (Show a, Integral a) => Int -> a -> String
 paddedShowHex w n = pad ++ str
