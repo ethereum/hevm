@@ -687,9 +687,10 @@ formatExpr = go
           , indent 2 $ formatExpr slot
           , "val:"
           , indent 2 $ formatExpr val
+          , "store:"
+          , indent 2 $ formatExpr prev          
           ]
         , ")"
-        , formatExpr prev
         ]
       AbstractStore a idx ->
         "(AbstractStore " <> formatExpr a <> " " <> T.pack (show idx) <> ")"
