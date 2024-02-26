@@ -714,9 +714,10 @@ formatExpr = go
           , "size:      " <> formatExpr size
           , "src:"
           , indent 2 $ formatExpr src
+          , "dst:"
+          , indent 2 $ formatExpr dst
           ]
         , ")"
-        , formatExpr dst
         ]
       WriteWord idx val buf -> T.unlines
         [ "(WriteWord"
@@ -725,18 +726,19 @@ formatExpr = go
           , indent 2 $ formatExpr idx
           , "val:"
           , indent 2 $ formatExpr val
+          , "buf:"
+          , indent 2 $ formatExpr buf
           ]
         , ")"
-        , formatExpr buf
         ]
       WriteByte idx val buf -> T.unlines
         [ "(WriteByte"
         , indent 2 $ T.unlines
           [ "idx: " <> formatExpr idx
           , "val: " <> formatExpr val
+          , "buf: " <> formatExpr buf
           ]
         , ")"
-        , formatExpr buf
         ]
       ConcreteBuf bs -> case bs of
         "" -> "(ConcreteBuf \"\")"
