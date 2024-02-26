@@ -2,7 +2,7 @@ cabal-version: 3.0
 name:
   hevm
 version:
-  0.52.0
+  0.53.0
 synopsis:
   Symbolic EVM Evaluator
 homepage:
