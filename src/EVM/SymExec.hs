@@ -521,7 +521,7 @@ reachable solvers e = do
           Unsat -> pure ([query], Nothing)
           r -> internalError $ "Invalid solver result: " <> show r
 
--- | Extract contraints stored in Expr End nodes
+-- | Extract constraints stored in Expr End nodes
 extractProps :: Expr End -> [Prop]
 extractProps = \case
   ITE _ _ _ -> []
@@ -838,7 +838,7 @@ formatCex cd sig m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
   where
     -- we attempt to produce a model for calldata by substituting all variables
     -- and buffers provided by the model into the original calldata expression.
-    -- If we have a concrete result then we diplay it, otherwise we diplay
+    -- If we have a concrete result then we display it, otherwise we display
     -- `Any`. This is a little bit of a hack (and maybe unsound?), but we need
     -- it for branches that do not refer to calldata at all (e.g. the top level
     -- callvalue check inserted by solidity in contracts that don't have any
@@ -915,7 +915,7 @@ prettyCalldata cex buf sig types = head (T.splitOn "(" sig) <> "(" <> body <> ")
 
 -- | If the expression contains any symbolic values, default them to some
 -- concrete value The intuition here is that if we still have symbolic values
--- in our calldata expression after substituing in our cex, then they can have
+-- in our calldata expression after substituting in our cex, then they can have
 -- any value and we can safely pick a random value. This is a bit unsatisfying,
 -- we should really be doing smth like: https://github.com/ethereum/hevm/issues/334
 -- but it's probably good enough for now

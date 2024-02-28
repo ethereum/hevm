@@ -205,11 +205,11 @@ sar = op2 SAR (\x y ->
 -- | Extracts the byte at a given index from a Buf.
 --
 -- We do our best to return a concrete value wherever possible, but fallback to
--- an abstract expresion if nescessary. Note that a Buf is an infinite
+-- an abstract expression if necessary. Note that a Buf is an infinite
 -- structure, so reads outside of the bounds of a ConcreteBuf return 0. This is
 -- inline with the semantics of calldata and memory, but not of returndata.
 
--- fuly concrete reads
+-- fully concrete reads
 readByte :: Expr EWord -> Expr Buf -> Expr Byte
 readByte (Lit x) (ConcreteBuf b)
   = if x <= unsafeInto (maxBound :: Int) && i < BS.length b
@@ -235,7 +235,7 @@ readByte i@(Lit x) (CopySlice (Lit srcOffset) (Lit dstOffset) (Lit size) src dst
     then readByte (Lit $ x - (dstOffset - srcOffset)) src
     else readByte i dst
 readByte i@(Lit x) buf@(CopySlice _ (Lit dstOffset) (Lit size) _ dst)
-  -- the byte we are trying to read is compeletely outside of the sliced region
+  -- the byte we are trying to read is completely outside of the sliced region
   = if x - dstOffset >= size
     then readByte i dst
     else ReadByte (Lit x) buf
@@ -269,7 +269,7 @@ readWord idx b@(WriteWord idx' val buf)
 readWord (Lit idx) b@(CopySlice (Lit srcOff) (Lit dstOff) (Lit size) src dst)
   -- the region we are trying to read is enclosed in the sliced region
   | (idx - dstOff) < size && 32 <= size - (idx - dstOff) = readWord (Lit $ srcOff + (idx - dstOff)) src
-  -- the region we are trying to read is compeletely outside of the sliced region
+  -- the region we are trying to read is completely outside of the sliced region
   | (idx - dstOff) >= size && (idx - dstOff) <= (maxBound :: W256) - 31 = readWord (Lit idx) dst
   -- the region we are trying to read partially overlaps the sliced region
   | otherwise = readWordFromBytes (Lit idx) b
@@ -343,7 +343,7 @@ copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e
 -- copying 32 bytes can be rewritten to a WriteWord on dst (e.g. CODECOPY of args during constructors)
 copySlice srcOffset dstOffset (Lit 32) src dst = writeWord dstOffset (readWord srcOffset src) dst
 
--- concrete indicies & abstract src (may produce a concrete result if we are
+-- concrete indices & abstract src (may produce a concrete result if we are
 -- copying from a concrete region of src)
 copySlice s@(Lit srcOffset) d@(Lit dstOffset) sz@(Lit size) src ds@(ConcreteBuf dst)
   | dstOffset < maxBytes, size < maxBytes, srcOffset + (size-1) > srcOffset = let
@@ -355,7 +355,7 @@ copySlice s@(Lit srcOffset) d@(Lit dstOffset) sz@(Lit size) src ds@(ConcreteBuf 
        else CopySlice s d sz src ds
   | otherwise = CopySlice s d sz src ds
 
--- abstract indicies
+-- abstract indices
 copySlice srcOffset dstOffset size src dst = CopySlice srcOffset dstOffset size src dst
 
 
@@ -412,7 +412,7 @@ writeWord offset val src = WriteWord offset val src
 -- | Returns the length of a given buffer
 --
 -- If there are any writes to abstract locations, or CopySlices with an
--- abstract size or dstOffset, an abstract expresion will be returned.
+-- abstract size or dstOffset, an abstract expression will be returned.
 bufLength :: Expr Buf -> Expr EWord
 bufLength = bufLengthEnv mempty False
 
@@ -473,12 +473,12 @@ concretePrefix b = V.create $ do
     inputLen = case bufLength b of
       Lit s -> if s > maxIdx
         then internalError "concretePrefix: input buffer size exceeds 500mb"
-        -- unafeInto: s is <= 500,000,000
+        -- unsafeInto: s is <= 500,000,000
         else Just (unsafeInto s)
       _ -> Nothing
 
-    -- recursively reads succesive bytes from `b` until we reach a symbolic
-    -- byte returns the larged index read from and a reference to the mutable
+    -- recursively reads successive bytes from `b` until we reach a symbolic
+    -- byte returns the large index read from and a reference to the mutable
     -- vec (might not be the same as the input because of the call to grow)
     go :: forall s . Int -> MVector s Word8 -> ST s (Int, MVector s Word8)
     go i v
@@ -529,7 +529,7 @@ toList buf = case bufLength buf of
 fromList :: V.Vector (Expr Byte) -> Expr Buf
 fromList bs = case Prelude.and (fmap isLitByte bs) of
   True -> ConcreteBuf . BS.pack . V.toList . V.mapMaybe maybeLitByte $ bs
-  -- we want to minimize the size of the resulting expresion, so we do two passes:
+  -- we want to minimize the size of the resulting expression, so we do two passes:
   --   1. write all concrete bytes to some base buffer
   --   2. write all symbolic writes on top of this buffer
   -- this is safe because each write in the input vec is to a single byte at a distinct location
@@ -640,7 +640,7 @@ readStorage w st = go (simplify w) st
 
       -- the chance of adding a value <= 2^32 to any given keccack output
       -- leading to an overflow is effectively zero. the chance of an overflow
-      -- occuring here is 2^32/2^256 = 2^-224, which is close enough to zero
+      -- occurring here is 2^32/2^256 = 2^-224, which is close enough to zero
       -- for our purposes. This lets us completely simplify reads from write
       -- chains involving writes to arrays at literal offsets.
       (Lit a, Add (Lit b) (Keccak _) ) | a < 256, b < maxW32 -> go slot prev
@@ -1147,7 +1147,7 @@ simplifyProp prop =
   where
     go :: Prop -> Prop
 
-    -- LT/LEq comparisions
+    -- LT/LEq comparisons
     go (PLT  (Var _) (Lit 0)) = PBool False
     go (PLEq (Lit 0) (Var _)) = PBool True
     go (PLT  (Lit val) (Var _)) | val == maxLit = PBool False
@@ -1298,7 +1298,7 @@ indexWord :: Expr EWord -> Expr EWord -> Expr Byte
 -- Simplify masked reads:
 --
 --
---                reads across the mask boundry
+--                reads across the mask boundary
 --                return an abstract expression
 --                            │
 --                            │
@@ -1322,7 +1322,7 @@ indexWord :: Expr EWord -> Expr EWord -> Expr Byte
 --                    indexWord 31 reads from the LSB
 --
 indexWord i@(Lit idx) e@(And (Lit mask) w)
-  -- if the mask is all 1s then read from the undelrying word
+  -- if the mask is all 1s then read from the underlying word
   -- we need this case to avoid overflow
   | mask == fullWordMask = indexWord (Lit idx) w
   -- if the index is a read from the masked region then read from the underlying word
@@ -1337,7 +1337,7 @@ indexWord i@(Lit idx) e@(And (Lit mask) w)
   , isByteAligned mask
   , idx < unmaskedBytes
     = LitByte 0
-  -- if the mask is not a power of 2, or it does not align with a byte boundry return an abstract expression
+  -- if the mask is not a power of 2, or it does not align with a byte boundary return an abstract expression
   | idx <= 31 = IndexWord i e
   -- reads outside the range of the source word return 0
   | otherwise = LitByte 0

@@ -19,7 +19,7 @@ contract SolidityTestFail2 is DSTest {
 
         uint expected = usr == address(this)
                         ? 0    // self transfer is a noop
-                        : amt; // otherwise `amt` has been transfered to `usr`
+                        : amt; // otherwise `amt` has been transferred to `usr`
         assert(expected == postbal - prebal);
     }
 }

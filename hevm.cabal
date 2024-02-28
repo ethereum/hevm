@@ -2,7 +2,7 @@ cabal-version: 3.0
 name:
   hevm
 version:
-  0.52.0
+  0.53.0
 synopsis:
   Symbolic EVM Evaluator
 homepage:
@@ -328,7 +328,7 @@ test-suite test
   main-is:
     test.hs
 
--- these tests require network access so we split them into a seperate test
+-- these tests require network access so we split them into a separate test
 -- suite to make it easy to skip them when running nix-build
 test-suite rpc-tests
   import:

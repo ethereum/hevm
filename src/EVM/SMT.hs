@@ -119,7 +119,7 @@ flattenBufs cex = do
   bs <- mapM collapse cex.buffers
   pure $ cex{ buffers = bs }
 
--- | Attemps to collapse a compressed buffer representation down to a flattened one
+-- | Attempts to collapse a compressed buffer representation down to a flattened one
 collapse :: BufModel -> Maybe BufModel
 collapse model = case toBuf model of
   Just (ConcreteBuf b) -> Just $ Flat b
@@ -702,7 +702,7 @@ exprToSMT = \case
   Mul a b -> op2 "bvmul" a b
   Exp a b -> case b of
                Lit b' -> expandExp a b'
-               _ -> internalError "cannot encode symbolic exponentation into SMT"
+               _ -> internalError "cannot encode symbolic exponentiation into SMT"
   Min a b ->
     let aenc = exprToSMT a
         benc = exprToSMT b in
@@ -1105,7 +1105,7 @@ getBufs getVal bufs = foldM getBuf mempty bufs
           p -> parseErr p
 
 -- | Takes a Map containing all reads from a store with an abstract base, as
--- well as the conrete part of the storage prestate and returns a fully
+-- well as the concrete part of the storage prestate and returns a fully
 -- concretized storage
 getStore
   :: (Text -> IO Text)
