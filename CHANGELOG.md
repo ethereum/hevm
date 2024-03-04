@@ -10,11 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Added
 
 ## Fixed
--- `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
+- `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
    with declare-fun
+- CVC5 needs `--incremental` flag to work properly in abstraction-refinement mode
+- cli.hs now uses with-utf8 so no release binary will have locale issues anymore
 
 ## [0.53.0] - 2024-02-23
-
 
 ## Changed
 
@@ -47,7 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Traces now correctly perform source mapping to display contract details
 - Event traces now correctly display indexed arguments and argument names
 - JSON reading of foundry JSONs was dependent on locale and did not work with many locales.
-- CVC5 needs `--incremental` flag to work properly in abstraction-refinement mode
 
 ## [0.52.0] - 2023-10-26
 
