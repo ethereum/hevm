@@ -958,20 +958,28 @@ simplify e = if (mapExpr go e == e)
       | a < b = Lit 1
       | otherwise = Lit 0
     go (EVM.Types.LT _ (Lit 0)) = Lit 0
+    go (EVM.Types.LT a (Lit 1)) = iszero a
 
     -- normalize all comparisons in terms of LT
     go (EVM.Types.GT a b) = lt b a
     go (EVM.Types.GEq a b) = leq b a
-    go (EVM.Types.LEq a b) = EVM.Types.IsZero (gt a b)
-    go (IsZero a) = iszero a
+    go (EVM.Types.LEq a b) = iszero (lt b a)
     go (SLT a@(Lit _) b@(Lit _)) = slt a b
     go (SGT a b) = SLT b a
+
+    -- IsZero
+    go (IsZero (IsZero (IsZero a))) = iszero a
+    go (IsZero (IsZero (LT x y))) = lt x y
+    go (IsZero (IsZero (Eq x y))) = eq x y
+    go (IsZero (Xor x y)) = eq x y
+    go (IsZero a) = iszero a
 
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
       | a == b = Lit 1
       | otherwise = Lit 0
     go (Eq (Lit 0) (Sub a b)) = eq a b
+    go (Eq (Lit 0) a) = iszero a
     go (Eq a b)
       | a == b = Lit 1
       | otherwise = eq a b
@@ -994,6 +1002,10 @@ simplify e = if (mapExpr go e == e)
     go (SMod o1@(Lit _) o2@(Lit _)) = EVM.Expr.smod o1 o2
     go (Add o1@(Lit _)  o2@(Lit _)) = EVM.Expr.add  o1 o2
     go (Sub o1@(Lit _)  o2@(Lit _)) = EVM.Expr.sub  o1 o2
+
+    -- Mod
+    go (Mod _ (Lit 0)) = Lit 0
+    go (Mod a b) | a == b = Lit 0
 
     -- double add/sub.
     -- Notice that everything is done mod 2**256. So for example:
@@ -1064,12 +1076,15 @@ simplify e = if (mapExpr go e == e)
       | x == 0 = Lit 0
       | x == maxLit = v
       | otherwise = o
+    go (And a b) | a == b = a
+    go (And a (Not b)) | a == b = Lit 0
     go o@(Or (Lit x) b)
       | x == 0 = b
       | otherwise = o
     go o@(Or a (Lit x))
       | x == 0 = a
       | otherwise = o
+    go (Or a b) | a == b = a
 
     -- If x is ever non zero the Or will always evaluate to some non zero value and the false branch will be unreachable
     -- NOTE: with AND this does not work, because and(0x8, 0x4) = 0
@@ -1112,6 +1127,7 @@ simplify e = if (mapExpr go e == e)
     go (Div (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
     go (Div _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
     go (Div a (Lit 1)) = a
+    -- NOTE: Div x x is NOT 1, because Div 0 0 is 0, not 1.
 
     -- If a >= b then the value of the `Max` expression can never be < b
     go o@(LT (Max (Lit a) _) (Lit b))
