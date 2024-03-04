@@ -233,8 +233,43 @@ mapProp' f = \case
   POr a b -> f $ POr (mapProp' f a) (mapProp' f b)
   PImpl a b -> f $ PImpl (mapProp' f a) (mapProp' f b)
 
+
+mapPropM' :: forall m . (Monad m) => (Prop -> m Prop) -> Prop -> m Prop
+mapPropM' f = \case
+  PBool b -> f $ PBool b
+  PEq a b -> f $ PEq a b
+  PLT a b -> f $ PLT a b
+  PGT a b -> f $ PGT a b
+  PLEq a b -> f $ PLEq a b
+  PGEq a b -> f $ PGEq a b
+  PNeg a -> do
+    x <-mapPropM' f a
+    f $ PNeg x
+  PAnd a b -> do
+    x <- mapPropM' f a
+    y <- (mapPropM' f b)
+    f $ PAnd x y
+  POr a b -> do
+    x <- mapPropM' f a
+    y <- (mapPropM' f b)
+    f $ POr x y
+  PImpl a b -> do
+    x <- mapPropM' f a
+    y <- (mapPropM' f b)
+    f $ PImpl x y
+
 mapExpr :: (forall a . Expr a -> Expr a) -> Expr b -> Expr b
 mapExpr f expr = runIdentity (mapExprM (Identity . f) expr)
+
+-- Like mapExprM but allows a function of type `Expr a -> m ()` to be passed
+mapExprM_ ::  Monad m => (forall a . Expr a -> m ()) -> Expr b -> m ()
+mapExprM_ f expr = void ret
+  where
+    ret = mapExprM (fUpd f) expr
+    fUpd :: Monad m => (Expr a -> m ()) -> (Expr a-> m (Expr a))
+    fUpd action e = do
+      action e
+      pure e
 
 mapExprM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Expr b -> m (Expr b)
 mapExprM f expr = case expr of
@@ -559,6 +594,16 @@ mapExprM f expr = case expr of
   BufLength a -> do
     a' <- mapExprM f a
     f (BufLength a')
+
+-- Like mapPropM but allows a function of type `Expr a -> m ()` to be passed
+mapPropM_ :: Monad m => (forall a . Expr a -> m ()) -> Prop -> m ()
+mapPropM_ f expr = void ret
+  where
+    ret = mapPropM (fUpd f) expr
+    fUpd :: Monad m => (Expr a -> m ()) -> (Expr a-> m (Expr a))
+    fUpd action e = do
+      action e
+      pure e
 
 mapPropM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Prop -> m Prop
 mapPropM f = \case

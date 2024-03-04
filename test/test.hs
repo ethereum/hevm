@@ -79,6 +79,7 @@ testEnv = Env { config = defaultConfig {
   , abstRefineArith = False
   , abstRefineMem   = False
   , dumpTrace = False
+  , decomposeStorage = True
   } }
 
 putStrLnM :: (MonadUnliftIO m) => String -> m ()
@@ -185,6 +186,51 @@ tests = testGroup "hevm"
         |]
        expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "transfer(uint256)" [AbiUIntType 256])) [] (defaultVeriOpts { maxIter = Just 5 })
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
+    , test "simplify-storage-map-newtest1" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping (uint => uint) a;
+          mapping (uint => uint) b;
+          function fun(uint v, uint i) public {
+            require(i < 1000);
+            require(v < 1000);
+            b[i+v] = v+1;
+            a[i] = v;
+            b[i+1] = v+1;
+            assert(a[i] == v);
+            assert(b[i+1] == v+1);
+          }
+        }
+        |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+       assertEqualM "Expression is not clean." (badStoresInExpr expr) False
+       (_, [(Qed _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x11] c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+       liftIO $ putStrLn "OK"
+    , test "simplify-storage-map-todo" $ do
+       Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          mapping (uint => uint) a;
+          mapping (uint => uint) b;
+          function fun(uint v, uint i) public {
+            require(i < 1000);
+            require(v < 1000);
+            a[i] = v;
+            b[i+1] = v+1;
+            b[i+v] = 55; // note: this can overwrite b[i+1], hence assert below can fail
+            assert(a[i] == v);
+            assert(b[i+1] == v+1);
+          }
+        }
+        |]
+       -- TODO: expression below contains (load idx1 (store idx1 (store idx1 (store idx0)))), and the idx0
+       --       is not stripped. This is due to us not doing all we can in this case, see
+       --       note above readStorage. Decompose remedies this (when it can be decomposed)
+       -- expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+       -- putStrLnM $ T.unpack $ formatExpr expr
+       (_, [Cex _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+       liftIO $ putStrLn "OK"
     , test "simplify-storage-array-loop-struct" $ do
        Just c <- solcRuntime "MyContract"
         [i|
@@ -219,6 +265,7 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mapping_access(address,address)" [AbiAddressType, AbiAddressType])) [] defaultVeriOpts
+      putStrLnM $ T.unpack $ formatExpr expr
       let simpExpr = mapExprM Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
@@ -238,10 +285,7 @@ tests = testGroup "hevm"
       let simpExpr = mapExprM Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
-    -- NOTE: we can't do the rewrite below, because x could be very large,
-    -- which would allow us to overwrite *anything in the storage*, and that throws
-    -- everything off.
-    , expectFail $ test "decompose-3" $ do
+    , test "decompose-3" $ do
       Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -256,7 +300,6 @@ tests = testGroup "hevm"
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_array(uint256,uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
       let simpExpr = mapExprM Expr.decomposeStorage expr
-      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
     , test "decompose-4-mixed" $ do
       Just c <- solcRuntime "MyContract"

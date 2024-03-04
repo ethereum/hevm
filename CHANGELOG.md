@@ -6,9 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Changed
+- More complete and precise array/mapping slot rewrite, along with a copySlice improvement
 
 ## Added
 - More POr and PAnd rules
+- Array/Map slot decomposition can be turned off via a flag
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
@@ -16,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CVC5 needs `--incremental` flag to work properly in abstraction-refinement mode
 - cli.hs now uses with-utf8 so no release binary will have locale issues anymore
 - Took ideas for simplification rules from "Super-optimization of Smart Contracts" paper by Albert et al.
+- Decomposition does not take place when entire states are compared, as that would necessitate
+  a different approach.
 
 ## [0.53.0] - 2024-02-23
 
