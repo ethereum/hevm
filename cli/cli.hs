@@ -26,6 +26,7 @@ import Paths_hevm qualified as Paths
 import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirectoryExist, makeAbsolute)
 import System.FilePath ((</>))
 import System.Exit (exitFailure, exitWith, ExitCode(..))
+import Main.Utf8 (withUtf8)
 
 import EVM (initialContract, abstractContract, makeVm)
 import EVM.ABI (Sig(..))
@@ -197,7 +198,7 @@ getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
       Left _ -> "no git revision present"
 
 main :: IO ()
-main = do
+main = withUtf8 $ do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
   let env = Env { config = defaultConfig
     { dumpQueries = cmd.smtdebug
