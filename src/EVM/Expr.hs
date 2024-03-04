@@ -1219,9 +1219,13 @@ simplifyProp prop =
     go (PAnd (PBool l) (PBool r)) = PBool (l && r)
     go (PAnd (PBool False) _) = PBool False
     go (PAnd _ (PBool False)) = PBool False
+    go (PAnd (PBool True) x) = x
+    go (PAnd x (PBool True)) = x
     go (POr (PBool True) _) = PBool True
     go (POr _ (PBool True)) = PBool True
     go (POr (PBool l) (PBool r)) = PBool (l || r)
+    go (POr x (PBool False)) = x
+    go (POr (PBool False) x) = x
 
     -- Imply
     go (PImpl _ (PBool True)) = PBool True
