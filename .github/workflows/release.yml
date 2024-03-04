@@ -5,9 +5,11 @@ on:
       - 'release/[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
-  macosRelease:
-    name: Build MacOS Binary
+  macosRelease-x64:
+    name: Build MacOS-x64 Binary
     runs-on: macos-latest
+    env:
+      PLATFORM: mac-x64
     steps:
       - uses: actions/checkout@v3
       - uses: DeterminateSystems/nix-installer-action@main
@@ -20,9 +22,27 @@ jobs:
         with:
           name: hevm-x86_64-macos
           path: ./hevm-x86_64-macos
+  macosRelease-ARM:
+    name: Build MacOS-ARM64 Binary
+    runs-on: macos-latest
+    env:
+      PLATFORM: mac-arm64
+    steps:
+      - uses: actions/checkout@v3
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: build hevm
+        run: |
+          nix build .#redistributable --out-link hevmMacos
+          cp ./hevmMacos/bin/hevm ./hevm-arm64-macos
+      - uses: actions/upload-artifact@v3
+        with:
+          name: hevm-arm64-macos
+          path: ./hevm-arm64-macos
+          
   linuxRelease:
     name: Create Release
-    needs: macosRelease
+    needs: [macosRelease-ARM, macosRelease-x64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
