@@ -246,6 +246,315 @@ mapExprM_ f expr = void ret
       action e
       pure e
 
+mapExprMNoState ::  Monad m => (forall a . Expr a -> m (Expr a)) -> Expr b -> m (Expr b)
+mapExprMNoState f expr = case expr of
+
+  -- literals & variables
+
+  Lit a -> f (Lit a)
+  LitByte a -> f (LitByte a)
+  Var a -> f (Var a)
+  GVar s -> f (GVar s)
+
+  -- addresses
+
+  c@(C {}) -> mapEContractM f c
+
+  -- addresses
+
+  LitAddr a -> f (LitAddr a)
+  SymAddr a -> f (SymAddr a)
+  WAddr a -> do
+    a' <- mapExprMNoState f a
+    f (WAddr a')
+
+  -- bytes
+
+  IndexWord a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (IndexWord a' b')
+  EqByte a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (EqByte a' b')
+
+  JoinBytes zero one two three four five six seven eight nine
+    ten eleven twelve thirteen fourteen fifteen sixteen seventeen
+    eighteen nineteen twenty twentyone twentytwo twentythree twentyfour
+    twentyfive twentysix twentyseven twentyeight twentynine thirty thirtyone -> do
+    zero' <- mapExprMNoState f zero
+    one' <- mapExprMNoState f one
+    two' <- mapExprMNoState f two
+    three' <- mapExprMNoState f three
+    four' <- mapExprMNoState f four
+    five' <- mapExprMNoState f five
+    six' <- mapExprMNoState f six
+    seven' <- mapExprMNoState f seven
+    eight' <- mapExprMNoState f eight
+    nine' <- mapExprMNoState f nine
+    ten' <- mapExprMNoState f ten
+    eleven' <- mapExprMNoState f eleven
+    twelve' <- mapExprMNoState f twelve
+    thirteen' <- mapExprMNoState f thirteen
+    fourteen' <- mapExprMNoState f fourteen
+    fifteen' <- mapExprMNoState f fifteen
+    sixteen' <- mapExprMNoState f sixteen
+    seventeen' <- mapExprMNoState f seventeen
+    eighteen' <- mapExprMNoState f eighteen
+    nineteen' <- mapExprMNoState f nineteen
+    twenty' <- mapExprMNoState f twenty
+    twentyone' <- mapExprMNoState f twentyone
+    twentytwo' <- mapExprMNoState f twentytwo
+    twentythree' <- mapExprMNoState f twentythree
+    twentyfour' <- mapExprMNoState f twentyfour
+    twentyfive' <- mapExprMNoState f twentyfive
+    twentysix' <- mapExprMNoState f twentysix
+    twentyseven' <- mapExprMNoState f twentyseven
+    twentyeight' <- mapExprMNoState f twentyeight
+    twentynine' <- mapExprMNoState f twentynine
+    thirty' <- mapExprMNoState f thirty
+    thirtyone' <- mapExprMNoState f thirtyone
+    f (JoinBytes zero' one' two' three' four' five' six' seven' eight' nine'
+         ten' eleven' twelve' thirteen' fourteen' fifteen' sixteen' seventeen'
+         eighteen' nineteen' twenty' twentyone' twentytwo' twentythree' twentyfour'
+         twentyfive' twentysix' twentyseven' twentyeight' twentynine' thirty' thirtyone')
+
+  -- control flow
+  orig@(Failure {}) -> pure orig
+  orig@(Partial {}) -> pure orig
+  orig@(Success {}) -> pure orig
+  ITE a b c -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    c' <- mapExprMNoState f c
+    f (ITE a' b' c')
+
+  -- integers
+
+  Add a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (Add a' b')
+  Sub a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (Sub a' b')
+  Mul a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (Mul a' b')
+  Div a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (Div a' b')
+  SDiv a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (SDiv a' b')
+  Mod a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (Mod a' b')
+  SMod a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (SMod a' b')
+  AddMod a b c -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    c' <- mapExprMNoState f c
+    f (AddMod a' b' c')
+  MulMod a b c -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    c' <- mapExprMNoState f c
+    f (MulMod a' b' c')
+  Exp a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (Exp a' b')
+  SEx a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (SEx a' b')
+  Min a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (Min a' b')
+  Max a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (Max a' b')
+
+  -- booleans
+
+  LT a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (LT a' b')
+  GT a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (GT a' b')
+  LEq a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (LEq a' b')
+  GEq a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (GEq a' b')
+  SLT a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (SLT a' b')
+  SGT a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (SGT a' b')
+  Eq a b ->  do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (Eq a' b')
+  IsZero a -> do
+    a' <- mapExprMNoState f a
+    f (IsZero a')
+
+  -- bits
+
+  And a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (And a' b')
+  Or a b ->  do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (Or a' b')
+  Xor a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (Xor a' b')
+  Not a -> do
+    a' <- mapExprMNoState f a
+    f (Not a')
+  SHL a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (SHL a' b')
+  SHR a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (SHR a' b')
+  SAR a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (SAR a' b')
+
+
+  -- Hashes
+
+  Keccak a -> do
+    a' <- mapExprMNoState f a
+    f (Keccak a')
+
+  SHA256 a -> do
+    a' <- mapExprMNoState f a
+    f (SHA256 a')
+
+  -- block context
+
+  Origin -> f Origin
+  Coinbase -> f Coinbase
+  Timestamp -> f Timestamp
+  BlockNumber -> f BlockNumber
+  PrevRandao -> f PrevRandao
+  GasLimit -> f GasLimit
+  ChainId -> f ChainId
+  BaseFee -> f BaseFee
+  BlockHash a -> do
+    a' <- mapExprMNoState f a
+    f (BlockHash a')
+
+  -- tx context
+
+  TxValue -> f TxValue
+
+  -- frame context
+
+  Gas a -> f (Gas a)
+  Balance a -> do
+    a' <- mapExprMNoState f a
+    f (Balance a')
+
+  -- code
+
+  CodeSize a -> do
+    a' <- mapExprMNoState f a
+    f (CodeSize a')
+  CodeHash a -> do
+    a' <- mapExprMNoState f a
+    f (CodeHash a')
+
+  -- logs
+
+  LogEntry a b c -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    c' <- mapM (mapExprMNoState f) c
+    f (LogEntry a' b' c')
+
+  -- storage
+
+  ConcreteStore b -> f (ConcreteStore b)
+  AbstractStore a b -> f (AbstractStore a b)
+  SLoad a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (SLoad a' b')
+  SStore a b c -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    c' <- mapExprMNoState f c
+    f (SStore a' b' c')
+
+  -- buffers
+
+  ConcreteBuf a -> do
+    f (ConcreteBuf a)
+  AbstractBuf a -> do
+    f (AbstractBuf a)
+  ReadWord a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (ReadWord a' b')
+  ReadByte a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    f (ReadByte a' b')
+  WriteWord a b c -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    c' <- mapExprMNoState f c
+    f (WriteWord a' b' c')
+  WriteByte a b c -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    c' <- mapExprMNoState f c
+    f (WriteByte a' b' c')
+
+  CopySlice a b c d e -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    c' <- mapExprMNoState f c
+    d' <- mapExprMNoState f d
+    e' <- mapExprMNoState f e
+    f (CopySlice a' b' c' d' e')
+
+  BufLength a -> do
+    a' <- mapExprMNoState f a
+    f (BufLength a')
+
 mapExprM ::  Monad m => (forall a . Expr a -> m (Expr a)) -> Expr b -> m (Expr b)
 mapExprM f expr = case expr of
 
@@ -579,6 +888,46 @@ mapPropM_ f expr = void ret
     fUpd action e = do
       action e
       pure e
+
+mapPropMNoState :: Monad m => (forall a . Expr a -> m (Expr a)) -> Prop -> m Prop
+mapPropMNoState f = \case
+  PBool b -> pure $ PBool b
+  PEq a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    pure $ PEq a' b'
+  PLT a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    pure $ PLT a' b'
+  PGT a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    pure $ PGT a' b'
+  PLEq a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    pure $ PLEq a' b'
+  PGEq a b -> do
+    a' <- mapExprMNoState f a
+    b' <- mapExprMNoState f b
+    pure $ PGEq a' b'
+  PNeg a -> do
+    a' <- mapPropMNoState f a
+    pure $ PNeg a'
+  PAnd a b -> do
+    a' <- mapPropMNoState f a
+    b' <- mapPropMNoState f b
+    pure $ PAnd a' b'
+  POr a b -> do
+    a' <- mapPropMNoState f a
+    b' <- mapPropMNoState f b
+    pure $ POr a' b'
+  PImpl a b -> do
+    a' <- mapPropMNoState f a
+    b' <- mapPropMNoState f b
+    pure $ PImpl a' b'
+
 
 mapPropM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Prop -> m Prop
 mapPropM f = \case

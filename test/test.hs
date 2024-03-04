@@ -264,8 +264,9 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mapping_access(address,address)" [AbiAddressType, AbiAddressType])) [] defaultVeriOpts
-      let simpExpr = mapExprM Expr.decomposeStorage expr
-      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
+      putStrLnM $ T.unpack $ formatExpr expr
+      let simpExpr = mapExprMNoState Expr.decomposeStorage expr
+      putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
     , test "decompose-2" $ do
       Just c <- solcRuntime "MyContract"
@@ -280,7 +281,7 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mixed_symoblic_concrete_writes(address,uint256)" [AbiAddressType, AbiUIntType 256])) [] defaultVeriOpts
-      let simpExpr = mapExprM Expr.decomposeStorage expr
+      let simpExpr = mapExprMNoState Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
     , test "decompose-3" $ do
@@ -297,7 +298,7 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_array(uint256,uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-      let simpExpr = mapExprM Expr.decomposeStorage expr
+      let simpExpr = mapExprMNoState Expr.decomposeStorage expr
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
     , test "decompose-4-mixed" $ do
       Just c <- solcRuntime "MyContract"
@@ -315,7 +316,7 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_array(uint256,uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-      let simpExpr = mapExprM Expr.decomposeStorage expr
+      let simpExpr = mapExprMNoState Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
     , test "decompose-5-mixed" $ do
@@ -342,7 +343,7 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mixed(address,address,uint256)" [AbiAddressType, AbiAddressType, AbiUIntType 256])) [] defaultVeriOpts
-      let simpExpr = mapExprM Expr.decomposeStorage expr
+      let simpExpr = mapExprMNoState Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
     -- TODO check what's going on here. Likely the "arbitrary write through array" is the reason why we fail
@@ -359,7 +360,7 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "prove_mixed(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
-      let simpExpr = mapExprM Expr.decomposeStorage expr
+      let simpExpr = mapExprMNoState Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
     , test "simplify-storage-map-only-static" $ do
@@ -550,7 +551,7 @@ tests = testGroup "hevm"
     , ignoreTest $ testProperty "load-decompose" $ \(GenWriteStorageLoad expr) -> prop $ do
         putStrLnM $ T.unpack $ formatExpr expr
         let simp = Expr.simplify expr
-        let decomposed = fromMaybe simp $ mapExprM Expr.decomposeStorage simp
+        let decomposed = fromMaybe simp $ mapExprMNoState Expr.decomposeStorage simp
         -- putStrLnM $ "-----------------------------------------"
         -- putStrLnM $ T.unpack $ formatExpr decomposed
         -- putStrLnM $ "\n\n\n\n"

@@ -211,7 +211,7 @@ assertProps conf ps = assertPropsNoSimp conf (decompose . Expr.simplifyProps $ p
   where
     decompose :: [Prop] -> [Prop]
     decompose props = if conf.decomposeStorage && (isJust $ sequence_ safeList)
-                      then fromMaybe props (mapM (mapPropM Expr.decomposeStorage) props)
+                      then fromMaybe props (mapM (mapPropMNoState Expr.decomposeStorage) props)
                       else props
       where
         -- All in this list must be a `Just ()` or we cannot decompose
