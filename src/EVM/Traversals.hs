@@ -236,7 +236,17 @@ mapProp' f = \case
 mapExpr :: (forall a . Expr a -> Expr a) -> Expr b -> Expr b
 mapExpr f expr = runIdentity (mapExprM (Identity . f) expr)
 
-mapExprM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Expr b -> m (Expr b)
+-- Like mapExprM but allows a function of type `Expr a -> m ()` to be passed
+mapExprM_ ::  Monad m => (forall a . Expr a -> m ()) -> Expr b -> m ()
+mapExprM_ f expr = void ret
+  where
+    ret = mapExprM (fUpd f) expr
+    fUpd :: Monad m => (Expr a -> m ()) -> (Expr a-> m (Expr a))
+    fUpd action e = do
+      action e
+      pure e
+
+mapExprM ::  Monad m => (forall a . Expr a -> m (Expr a)) -> Expr b -> m (Expr b)
 mapExprM f expr = case expr of
 
   -- literals & variables
@@ -559,6 +569,16 @@ mapExprM f expr = case expr of
   BufLength a -> do
     a' <- mapExprM f a
     f (BufLength a')
+
+-- Like mapPropM but allows a function of type `Expr a -> m ()` to be passed
+mapPropM_ :: Monad m => (forall a . Expr a -> m ()) -> Prop -> m ()
+mapPropM_ f expr = void ret
+  where
+    ret = mapPropM (fUpd f) expr
+    fUpd :: Monad m => (Expr a -> m ()) -> (Expr a-> m (Expr a))
+    fUpd action e = do
+      action e
+      pure e
 
 mapPropM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Prop -> m Prop
 mapPropM f = \case

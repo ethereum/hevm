@@ -59,6 +59,7 @@ data Config = Config
    -- and uses the fuzzer ONLY to try to find a counterexample.
    -- Returns Unknown if the Cex cannot be found via fuzzing
   , onlyCexFuzz     :: Bool
+  , decomposeStorage:: Bool
   }
   deriving (Show, Eq)
 
@@ -73,6 +74,7 @@ defaultConfig = Config
   , dumpTrace = False
   , numCexFuzz = 10
   , onlyCexFuzz  = False
+  , decomposeStorage = True
   }
 
 -- Write to the console

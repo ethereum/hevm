@@ -17,7 +17,7 @@ import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.String.Here
-import Data.Maybe (fromJust, fromMaybe)
+import Data.Maybe (fromJust, fromMaybe, isJust)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set (Set)
@@ -210,7 +210,12 @@ assertProps :: Config -> [Prop] -> SMT2
 assertProps conf ps = assertPropsNoSimp conf (decompose . Expr.simplifyProps $ ps)
   where
     decompose :: [Prop] -> [Prop]
-    decompose props = fromMaybe props (mapM (mapPropM Expr.decomposeStorage) props)
+    decompose props = if conf.decomposeStorage && (isJust $ sequence_ safeList)
+                      then fromMaybe props (mapM (mapPropM Expr.decomposeStorage) props)
+                      else props
+      where
+        -- All in this list must be a `Just ()` or we cannot decompose
+        safeList = map (mapPropM_ Expr.safeToDecompose) props
 
 -- Note: we need a version that does NOT call simplify,
 -- because we make use of it to verify the correctness of our simplification
