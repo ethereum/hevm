@@ -11,7 +11,7 @@ import Data.Text (Text)
 import Data.Vector qualified as V
 
 import Optics.Core
-import EVM (makeVm)
+import EVM (makeVm, symbolify)
 import EVM.ABI
 import EVM.Fetch
 import EVM.SMT
@@ -20,8 +20,17 @@ import EVM.Stepper qualified as Stepper
 import EVM.SymExec
 import EVM.Test.Utils
 import EVM.Solidity (ProjectType(..))
-import EVM.Types hiding (BlockNumber)
+import EVM.Types hiding (BlockNumber, Env)
 import Control.Monad.ST (stToIO, RealWorld)
+import Control.Monad.Reader (ReaderT)
+import Control.Monad.IO.Unlift
+import EVM.Effects
+
+rpcEnv :: Env
+rpcEnv = Env { config = defaultConfig }
+
+test :: TestName -> ReaderT Env IO () -> TestTree
+test a b = testCase a $ runEnv rpcEnv b
 
 main :: IO ()
 main = defaultMain tests
@@ -60,18 +69,19 @@ tests = testGroup "rpc"
     ]
   , testGroup "execution with remote state"
     -- execute against remote state from a ds-test harness
-    [ testCase "dapp-test" $ do
+    [ test "dapp-test" $ do
         let testFile = "test/contracts/pass/rpc.sol"
-        runSolidityTestCustom testFile ".*" Nothing Nothing False testRpcInfo Foundry >>= assertEqual "test result" True
+        res <- runSolidityTestCustom testFile ".*" Nothing Nothing False testRpcInfo Foundry
+        liftIO $ assertEqual "test result" True res
 
     -- concretely exec "transfer" on WETH9 using remote rpc
     -- https://etherscan.io/token/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2#code
-    , testCase "weth-conc" $ do
+    , test "weth-conc" $ do
         let
           blockNum = 16198552
           wad = 0x999999999999999999
           calldata' = ConcreteBuf $ abiMethod "transfer(address,uint256)" (AbiTuple (V.fromList [AbiAddress (Addr 0xdead), AbiUInt 256 wad]))
-        vm <- weth9VM blockNum (calldata', [])
+        vm <- liftIO $ weth9VM blockNum (calldata', [])
         postVm <- withSolvers Z3 1 Nothing $ \solvers ->
           Stepper.interpret (oracle solvers (Just (BlockNumber blockNum, testRpc))) vm Stepper.runFully
         let
@@ -83,26 +93,27 @@ tests = testGroup "rpc"
           msg = case postVm.result of
             Just (VMSuccess m) -> m
             _ -> internalError "VMSuccess expected"
-        assertEqual "should succeed" msg (ConcreteBuf $ word256Bytes 0x1)
-        assertEqual "should revert" receiverBal (W256 $ 2595433725034301 + wad)
+        liftIO $ do
+          assertEqual "should succeed" msg (ConcreteBuf $ word256Bytes 0x1)
+          assertEqual "should revert" receiverBal (W256 $ 2595433725034301 + wad)
 
     -- symbolically exec "transfer" on WETH9 using remote rpc
     -- https://etherscan.io/token/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2#code
-    , testCase "weth-sym" $ do
+    , test "weth-sym" $ do
         let
           blockNum = 16198552
           calldata' = symCalldata "transfer(address,uint256)" [AbiAddressType, AbiUIntType 256] ["0xdead"] (AbstractBuf "txdata")
           postc _ (Failure _ _ (Revert _)) = PBool False
           postc _ _ = PBool True
-        vm <- weth9VM blockNum calldata'
+        vm <- liftIO $ weth9VM blockNum calldata'
         (_, [Cex (_, model)]) <- withSolvers Z3 1 Nothing $ \solvers ->
-          verify solvers (rpcVeriOpts (BlockNumber blockNum, testRpc)) vm (Just postc)
-        assertBool "model should exceed caller balance" (getVar model "arg2" >= 695836005599316055372648)
+          verify solvers (rpcVeriOpts (BlockNumber blockNum, testRpc)) (symbolify vm) (Just postc)
+        liftIO $ assertBool "model should exceed caller balance" (getVar model "arg2" >= 695836005599316055372648)
     ]
   ]
 
 -- call into WETH9 from 0xf04a... (a large holder)
-weth9VM :: W256 -> (Expr Buf, [Prop]) -> IO (VM RealWorld)
+weth9VM :: W256 -> (Expr Buf, [Prop]) -> IO (VM Concrete RealWorld)
 weth9VM blockNum calldata' = do
   let
     caller' = LitAddr 0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e
@@ -110,7 +121,7 @@ weth9VM blockNum calldata' = do
     callvalue' = Lit 0
   vmFromRpc blockNum calldata' callvalue' caller' weth9
 
-vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EAddr -> Addr -> IO (VM RealWorld)
+vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EAddr -> Addr -> IO (VM Concrete RealWorld)
 vmFromRpc blockNum calldata callvalue caller address = do
   ctrct <- fetchContractFrom (BlockNumber blockNum) testRpc address >>= \case
         Nothing -> internalError $ "contract not found: " <> show address
@@ -121,29 +132,30 @@ vmFromRpc blockNum calldata callvalue caller address = do
     Just b -> pure b
 
   stToIO $ (makeVm $ VMOpts
-    { contract      = ctrct
-    , calldata      = calldata
-    , value         = callvalue
-    , address       = LitAddr address
-    , caller        = caller
-    , origin        = LitAddr 0xacab
-    , gas           = 0xffffffffffffffff
-    , gaslimit      = 0xffffffffffffffff
-    , baseFee       = blk.baseFee
-    , priorityFee   = 0
-    , coinbase      = blk.coinbase
-    , number        = blk.number
-    , timestamp     = blk.timestamp
-    , blockGaslimit = blk.gaslimit
-    , gasprice      = 0
-    , maxCodeSize   = blk.maxCodeSize
-    , prevRandao    = blk.prevRandao
-    , schedule      = blk.schedule
-    , chainId       = 1
-    , create        = False
-    , baseState     = EmptyBase
-    , txAccessList  = mempty
-    , allowFFI      = False
+    { contract       = ctrct
+    , otherContracts = []
+    , calldata       = calldata
+    , value          = callvalue
+    , address        = LitAddr address
+    , caller         = caller
+    , origin         = LitAddr 0xacab
+    , gas            = 0xffffffffffffffff
+    , gaslimit       = 0xffffffffffffffff
+    , baseFee        = blk.baseFee
+    , priorityFee    = 0
+    , coinbase       = blk.coinbase
+    , number         = blk.number
+    , timestamp      = blk.timestamp
+    , blockGaslimit  = blk.gaslimit
+    , gasprice       = 0
+    , maxCodeSize    = blk.maxCodeSize
+    , prevRandao     = blk.prevRandao
+    , schedule       = blk.schedule
+    , chainId        = 1
+    , create         = False
+    , baseState      = EmptyBase
+    , txAccessList   = mempty
+    , allowFFI       = False
     }) <&> set (#cache % #fetched % at address) (Just ctrct)
 
 testRpc :: Text

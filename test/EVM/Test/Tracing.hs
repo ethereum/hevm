@@ -1,11 +1,12 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {-|
 Module      : Tracing
 Description : Tests to fuzz concrete tracing, and symbolic execution
 
 Functions here are used to generate traces for the concrete
-execution of HEVM and check that against evmtool from go-ehereum. Re-using some
+execution of HEVM and check that against evmtool from go-ethereum. Re-using some
 of this code, we also generate a symbolic expression then evaluate it
 concretely through Expr.simplify, then check that against evmtool's output.
 -}
@@ -14,8 +15,9 @@ module EVM.Test.Tracing where
 import Control.Monad (when)
 import Control.Monad.Operational qualified as Operational
 import Control.Monad.ST (RealWorld, ST, stToIO)
-import Control.Monad.State.Strict (StateT(..), liftIO)
+import Control.Monad.State.Strict (StateT(..))
 import Control.Monad.State.Strict qualified as State
+import Control.Monad.Reader (ReaderT)
 import Data.Aeson ((.:), (.:?))
 import Data.Aeson qualified as JSON
 import Data.ByteString (ByteString)
@@ -36,7 +38,7 @@ import Test.QuickCheck (elements)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()
-import Test.Tasty (testGroup, TestTree)
+import Test.Tasty (testGroup, TestTree, TestName)
 import Test.Tasty.HUnit (assertEqual, testCase)
 import Test.Tasty.QuickCheck hiding (Failure, Success)
 import Witch (into, unsafeInto)
@@ -44,7 +46,7 @@ import Witch (into, unsafeInto)
 import Optics.Core hiding (pre)
 import Optics.State
 
-import EVM (makeVm, initialContract, exec1)
+import EVM (makeVm, initialContract, exec1, symbolify)
 import EVM.Assembler (assemble)
 import EVM.Expr qualified as Expr
 import EVM.Concrete qualified as Concrete
@@ -59,7 +61,9 @@ import EVM.Stepper qualified as Stepper
 import EVM.SymExec
 import EVM.Traversals (mapExpr)
 import EVM.Transaction qualified
-import EVM.Types
+import EVM.Types hiding (Env)
+import EVM.Effects
+import Control.Monad.IO.Unlift
 
 data VMTrace =
   VMTrace
@@ -295,7 +299,9 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
     fromAddress = fromJust $ deriveAddr sk
     toAddress = 0x8A8eAFb1cf62BfBeb1741769DAE1a9dd47996192
 
-getHEVMRet :: OpContract -> ByteString -> Int -> IO (Either (EvmError, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult))
+getHEVMRet
+  :: App m
+  => OpContract -> ByteString -> Int -> m (Either (EvmError, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult))
 getHEVMRet contr txData gaslimitExec = do
   let (txn, evmEnv, contrAlloc, fromAddress, toAddress, _) = evmSetup contr txData gaslimitExec
   runCodeWithTrace Nothing evmEnv contrAlloc txn (LitAddr fromAddress) (LitAddr toAddress)
@@ -371,7 +377,7 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
       pure False
     go [] [b] = do
       -- evmtool produces ONE more trace element of the error
-      -- hevm on the other hand stops and doens't produce one more
+      -- hevm on the other hand stops and doesn't produce one more
       if isJust b.error then pure True
                            else do
                              putStrLn $ "Traces don't match. HEVM's trace is longer by:" <> (show b)
@@ -407,19 +413,17 @@ deleteTraceOutputFiles evmtoolResult =
       System.Directory.removeFile traceFileName
       System.Directory.removeFile (traceFileName ++ ".json")
 
--- Create symbolic VM from concrete VM
-symbolify :: VM s -> VM s
-symbolify vm = vm { state = vm.state { calldata = AbstractBuf "calldata" } }
-
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
-runCodeWithTrace :: Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> IO (Either (EvmError, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
+runCodeWithTrace
+  :: App m
+  => Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction
+  -> Expr EAddr -> Expr EAddr -> m (Either (EvmError, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
 runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 Nothing $ \solvers -> do
   let calldata' = ConcreteBuf txn.txdata
       code' = alloc.code
-      buildExpr :: SolverGroup -> VM RealWorld -> IO (Expr End)
       buildExpr s vm = interpret (Fetch.oracle s Nothing) Nothing 1 Naive vm runExpr
-  origVM <- stToIO $ vmForRuntimeCode code' calldata' evmEnv alloc txn fromAddr toAddress
+  origVM <- liftIO $ stToIO $ vmForRuntimeCode code' calldata' evmEnv alloc txn fromAddr toAddress
 
   expr <- buildExpr solvers $ symbolify origVM
   (res, (vm, trace)) <- runStateT (interpretWithTrace (Fetch.oracle solvers rpcinfo) Stepper.execFully) (origVM, [])
@@ -427,12 +431,13 @@ runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 
     Left x -> pure $ Left (x, trace)
     Right _ -> pure $ Right (expr, trace, vmres vm)
 
-vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> ST s (VM s)
+vmForRuntimeCode :: ByteString -> Expr Buf -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction -> Expr EAddr -> Expr EAddr -> ST s (VM Concrete s)
 vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
   let contract = initialContract (RuntimeCode (ConcreteRuntimeCode runtimecode))
                  & set #balance (Lit alloc.balance)
   in (makeVm $ VMOpts
     { contract = contract
+    , otherContracts = []
     , calldata = (calldata', [])
     , value = Lit txn.value
     , baseState = EmptyBase
@@ -459,9 +464,9 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty))))
        <&> set (#state % #calldata) calldata'
 
-runCode :: Fetch.RpcInfo -> ByteString -> Expr Buf -> IO (Maybe (Expr Buf))
+runCode :: App m => Fetch.RpcInfo -> ByteString -> Expr Buf -> m (Maybe (Expr Buf))
 runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
-  origVM <- stToIO $ vmForRuntimeCode
+  origVM <- liftIO $ stToIO $ vmForRuntimeCode
               code'
               calldata'
               emptyEvmToolEnv
@@ -474,7 +479,7 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
     Left _ -> Nothing
     Right b -> Just b
 
-vmtrace :: VM s -> VMTrace
+vmtrace :: VM Concrete s -> VMTrace
 vmtrace vm =
   let
     memsize = vm.state.memorySize
@@ -489,7 +494,7 @@ vmtrace vm =
              , traceError = readoutError vm.result
              }
   where
-    readoutError :: Maybe (VMResult s) -> Maybe String
+    readoutError :: Maybe (VMResult t s) -> Maybe String
     readoutError (Just (VMFailure e)) = case e of
       -- NOTE: error text made to closely match go-ethereum's errors.go file
       OutOfGas {}             -> Just "out of gas"
@@ -512,7 +517,7 @@ vmtrace vm =
       err                     -> Just $ "HEVM error: " <> show err
     readoutError _ = Nothing
 
-vmres :: VM s -> VMTraceResult
+vmres :: VM Concrete s -> VMTraceResult
 vmres vm =
   let
     gasUsed' = vm.tx.gaslimit - vm.state.gas
@@ -527,14 +532,14 @@ vmres vm =
      , gasUsed = gasUsed'
      }
 
-type TraceState s = (VM s, [VMTrace])
+type TraceState s = (VM Concrete s, [VMTrace])
 
-execWithTrace :: StateT (TraceState RealWorld) IO (VMResult RealWorld)
+execWithTrace :: App m => StateT (TraceState RealWorld) m (VMResult Concrete RealWorld)
 execWithTrace = do
   _ <- runWithTrace
   fromJust <$> use (_1 % #result)
 
-runWithTrace :: StateT (TraceState RealWorld) IO (VM RealWorld)
+runWithTrace :: App m => StateT (TraceState RealWorld) m (VM Concrete RealWorld)
 runWithTrace = do
   -- This is just like `exec` except for every instruction evaluated,
   -- we also increment a counter indexed by the current code location.
@@ -555,35 +560,28 @@ runWithTrace = do
     Just _ -> pure vm0
 
 interpretWithTrace
-  :: Fetch.Fetcher RealWorld
-  -> Stepper.Stepper RealWorld a
-  -> StateT (TraceState RealWorld) IO a
+  :: forall m a . App m
+  => Fetch.Fetcher Concrete m RealWorld
+  -> Stepper.Stepper Concrete RealWorld a
+  -> StateT (TraceState RealWorld) m a
 interpretWithTrace fetcher =
   eval . Operational.view
-
   where
     eval
-      :: Operational.ProgramView (Stepper.Action RealWorld) a
-      -> StateT (TraceState RealWorld) IO a
-
-    eval (Operational.Return x) =
-      pure x
-
+      :: App m
+      => Operational.ProgramView (Stepper.Action Concrete RealWorld) a
+      -> StateT (TraceState RealWorld) m a
+    eval (Operational.Return x) = pure x
     eval (action Operational.:>>= k) =
       case action of
         Stepper.Exec ->
           execWithTrace >>= interpretWithTrace fetcher . k
-        Stepper.Wait q -> case q of
-          PleaseAskSMT (Lit x) _ continue ->
-            interpretWithTrace fetcher (Stepper.evm (continue (Case (x > 0))) >>= k)
-          _ -> do
-            m <- liftIO (fetcher q)
-            vm <- use _1
-            vm' <- liftIO $ stToIO $ State.execStateT m vm
-            assign _1 vm'
-            interpretWithTrace fetcher (k ())
-        Stepper.Ask _ ->
-          internalError "cannot make choice in this interpreter"
+        Stepper.Wait q -> do
+          m <- State.lift $ fetcher q
+          vm <- use _1
+          vm' <- liftIO $ stToIO $ State.execStateT m vm
+          assign _1 vm'
+          interpretWithTrace fetcher (k ())
         Stepper.IOAct q ->
           liftIO q >>= interpretWithTrace fetcher . k
         Stepper.EVM m -> do
@@ -607,7 +605,7 @@ removeExtcalls (OpContract ops) = OpContract (filter (noStorageNoExtcalls) ops)
   where
     noStorageNoExtcalls :: Op -> Bool
     noStorageNoExtcalls o = case o of
-                               -- Extrenal info functions
+                               -- External info functions
                                OpExtcodecopy -> False
                                OpExtcodehash -> False
                                OpExtcodesize -> False
@@ -807,7 +805,7 @@ forceLit _ = undefined
 randItem :: [a] -> IO a
 randItem = generate . Test.QuickCheck.elements
 
-getOp :: VM s -> Word8
+getOp :: VM t s -> Word8
 getOp vm =
   let pcpos  = vm ^. #state % #pc
       code' = vm ^. #state % #code
@@ -819,29 +817,38 @@ getOp vm =
   in if xs == BS.empty then 0
                        else BS.head xs
 
+testEnv :: Env
+testEnv = Env { config = defaultConfig }
+
+test :: TestName -> ReaderT Env IO () -> TestTree
+test a b = testCase a $ runEnv testEnv b
+
+prop:: Testable prop => ReaderT Env IO prop -> Property
+prop a = ioProperty $ runEnv testEnv a
+
 tests :: TestTree
 tests = testGroup "contract-quickcheck-run"
-    [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract, GasLimitInt gasLimit, TxDataRaw txDataRaw) -> ioProperty $ do
+    [ testProperty "random-contract-concrete-call" $ \(contr :: OpContract, GasLimitInt gasLimit, TxDataRaw txDataRaw) -> prop $ do
         let txData = BS.pack $ toEnum <$> txDataRaw
         -- TODO: By removing external calls, we fuzz less
         --       It should work also when we external calls. Removing for now.
-        contrFixed <- fixContractJumps $ removeExtcalls contr
+        contrFixed <- liftIO $ fixContractJumps $ removeExtcalls contr
         checkTraceAndOutputs contrFixed gasLimit txData
-      , testCase "calldata-wraparound" $ do
+      , test "calldata-wraparound" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 31),OpMstore8] -- value, offs
               , [OpPush (Lit 0x3),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- size, offs, destOffs
               , [OpPush (Lit 0x20),OpPush (Lit 0),OpReturn] -- datasize, offs
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5])
-      , testCase "calldata-wraparound2" $ do
+      , test "calldata-wraparound2" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 0),OpMstore8] -- value, offs
               , [OpPush (Lit 0x10),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- size, offs, destOffs
               , [OpPush (Lit 0x20),OpPush (Lit 0),OpReturn] -- datasize, offs
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5])
-      , testCase "calldata-overwrite-with-0-if-oversized" $ do
+      , test "calldata-overwrite-with-0-if-oversized" $ do
         -- supposed to copy 1...6 and then 0s, overwriting the 0xff with 0
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs
@@ -849,14 +856,14 @@ tests = testGroup "contract-quickcheck-run"
               , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
-      , testCase "calldata-overwrite-correct-size" $ do
+      , test "calldata-overwrite-correct-size" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- value, offs
               , [OpPush (Lit 10),OpPush (Lit 0),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
               , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
-      , testCase "calldata-offset-copy" $ do
+      , test "calldata-offset-copy" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- value, offs
               , [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs
@@ -866,13 +873,13 @@ tests = testGroup "contract-quickcheck-run"
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
     ]
 
-checkTraceAndOutputs :: OpContract -> Int -> ByteString -> IO ()
+checkTraceAndOutputs :: App m => OpContract -> Int -> ByteString -> m ()
 checkTraceAndOutputs contract gasLimit txData = do
-  evmtoolResult <- getEVMToolRet contract txData gasLimit
+  evmtoolResult <- liftIO $ getEVMToolRet contract txData gasLimit
   hevmRun <- getHEVMRet contract txData gasLimit
-  (Just evmtoolTraceOutput) <- getTraceOutput evmtoolResult
+  evmtoolTraceOutput <- fmap fromJust $ liftIO $ getTraceOutput evmtoolResult
   case hevmRun of
-    (Right (expr, hevmTrace, hevmTraceResult)) -> do
+    (Right (expr, hevmTrace, hevmTraceResult)) -> liftIO $ do
       let
         concretize :: Expr a -> Expr Buf -> Expr a
         concretize a c = mapExpr go a
@@ -892,7 +899,7 @@ checkTraceAndOutputs contract gasLimit txData = do
       -- putStrLn $ "evmtool trace: " <> show (evmtoolTraceOutput.trace)
       assertEqual "Traces and gas must match" traceOK True
       let resultOK = evmtoolTraceOutput.output.output == hevmTraceResult.out
-      if resultOK then do
+      if resultOK then liftIO $ do
         putStrLn $ "HEVM & evmtool's outputs match: '" <> (bsToHex $ bssToBs evmtoolTraceOutput.output.output) <> "'"
         if isNothing simplConcrExprRetval || (fromJust simplConcrExprRetval) == (bssToBs hevmTraceResult.out)
            then do
@@ -915,18 +922,19 @@ checkTraceAndOutputs contract gasLimit txData = do
         putStrLn $ "HEVM result len: " <> (show (BS.length $ bssToBs hevmTraceResult.out))
         putStrLn $ "evm result  len: " <> (show (BS.length $ bssToBs evmtoolTraceOutput.output.output))
       assertEqual "Contract exec successful. HEVM & evmtool's outputs must match" resultOK True
-    Left (evmerr, hevmTrace) -> do
+    Left (evmerr, hevmTrace) -> liftIO $ do
       putStrLn $ "HEVM contract exec issue: " <> (show evmerr)
       -- putStrLn $ "evmtool result was: " <> show (fromJust evmtoolResult)
       -- putStrLn $ "output by evmtool is: '" <> bsToHex evmtoolTraceOutput.toOutput.output <> "'"
       traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
       assertEqual "Traces and gas must match" traceOK True
-  System.Directory.removeFile "txs.json"
-  System.Directory.removeFile "alloc-out.json"
-  System.Directory.removeFile "alloc.json"
-  System.Directory.removeFile "result.json"
-  System.Directory.removeFile "env.json"
-  deleteTraceOutputFiles evmtoolResult
+  liftIO $ do
+    System.Directory.removeFile "txs.json"
+    System.Directory.removeFile "alloc-out.json"
+    System.Directory.removeFile "alloc.json"
+    System.Directory.removeFile "result.json"
+    System.Directory.removeFile "env.json"
+    deleteTraceOutputFiles evmtoolResult
 
 -- GasLimitInt
 newtype GasLimitInt = GasLimitInt (Int)

@@ -1,13 +1,10 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE QuasiQuotes #-}
 
 module EVM.Solidity
   ( solidity
   , solcRuntime
-  , solidity'
-  , yul'
   , yul
   , yulRuntime
   , JumpType (..)
@@ -51,13 +48,14 @@ import Optics.Operators.Unsafe
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.IO.Unlift
 import Data.Aeson hiding (json)
 import Data.Aeson.Types
 import Data.Aeson.Optics
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Scientific
-import Data.ByteString (ByteString)
+import Data.ByteString (ByteString, readFile)
 import Data.ByteString qualified as BS
 import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Lazy (toStrict)
@@ -72,11 +70,9 @@ import Data.List.NonEmpty qualified as NonEmpty
 import Data.Maybe
 import Data.Semigroup
 import Data.Sequence (Seq)
-import Data.String.Here qualified as Here
 import Data.Text (pack, intercalate)
 import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
-import Data.Text.IO (readFile, writeFile)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Word (Word8)
@@ -84,8 +80,6 @@ import Options.Generic
 import Prelude hiding (readFile, writeFile)
 import System.FilePattern.Directory
 import System.FilePath.Posix
-import System.IO hiding (readFile, writeFile)
-import System.IO.Temp
 import System.Process
 import Text.Read (readMaybe)
 import Witch (unsafeInto)
@@ -190,7 +184,7 @@ instance Monoid BuildOutput where
   mempty = BuildOutput mempty mempty
 
 -- | The various project types understood by hevm
-data ProjectType = DappTools | CombinedJSON | Foundry
+data ProjectType = DappTools | CombinedJSON | Foundry | FoundryStdLib
   deriving (Eq, Show, Read, ParseField)
 
 data SourceCache = SourceCache
@@ -288,7 +282,7 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
 
     go c (xs, state, p)                        = (xs, internalError ("srcmap: y u " ++ show c ++ " in state" ++ show state ++ "?!?"), p)
 
--- | Reads all solc ouput json files found under the provided filepath and returns them merged into a BuildOutput
+-- | Reads all solc output json files found under the provided filepath and returns them merged into a BuildOutput
 readBuildOutput :: FilePath -> ProjectType -> IO (Either String BuildOutput)
 readBuildOutput root DappTools = do
   let outDir = root </> "out"
@@ -304,7 +298,7 @@ readBuildOutput root CombinedJSON = do
     [x] -> readSolc CombinedJSON root (outDir </> x)
     [] -> pure . Left $ "no json files found in: " <> outDir
     _ -> pure . Left $ "multiple json files found in: " <> outDir
-readBuildOutput root Foundry = do
+readBuildOutput root _ = do
   let outDir = root </> "out"
   jsons <- findJsonFiles outDir
   case (filterMetadata jsons) of
@@ -315,7 +309,8 @@ readBuildOutput root Foundry = do
 
 -- | Finds all json files under the provided filepath, searches recursively
 findJsonFiles :: FilePath -> IO [FilePath]
-findJsonFiles root = getDirectoryFiles root ["**/*.json"]
+findJsonFiles root =  filter (not . isInfixOf "kompiled") -- HACK: this gets added to `out` by `kontrol`
+                  <$> getDirectoryFiles root ["**/*.json"]
 
 -- | Filters out metadata json files
 filterMetadata :: [FilePath] -> [FilePath]
@@ -348,8 +343,12 @@ lineSubrange xs (s1, n1) i =
     else Just (s1 - s2, min (s2 + n2 - s1) n1)
 
 readSolc :: ProjectType -> FilePath -> FilePath -> IO (Either String BuildOutput)
-readSolc pt root fp =
-  (readJSON pt (T.pack $ takeBaseName fp) <$> readFile fp) >>=
+readSolc pt root fp = do
+  -- NOTE: we cannot and must not use Data.Text.IO.readFile because that takes the locale
+  --       and may fail with very strange errors when the JSON it's reading
+  --       contains any UTF-8 character -- which it will with foundry
+  let fileContents = fmap Data.Text.Encoding.decodeUtf8 (Data.ByteString.readFile fp)
+  (readJSON pt (T.pack $ takeBaseName fp) <$> fileContents) >>=
     \case
       Nothing -> pure . Left $ "unable to parse: " <> fp
       Just (contracts, asts, sources) -> do
@@ -358,40 +357,44 @@ readSolc pt root fp =
 
 yul :: Text -> Text -> IO (Maybe ByteString)
 yul contractName src = do
-  (json, path) <- yul' src
-  let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
+  json <- solc Yul src
+  let f = (json ^?! key "contracts") ^?! key (Key.fromText "hevm.sol")
       c = f ^?! key (Key.fromText $ if T.null contractName then "object" else contractName)
       bytecode = c ^?! key "evm" ^?! key "bytecode" ^?! key "object" % _String
   pure $ (toCode contractName) <$> (Just bytecode)
 
 yulRuntime :: Text -> Text -> IO (Maybe ByteString)
 yulRuntime contractName src = do
-  (json, path) <- yul' src
-  let f = (json ^?! key "contracts") ^?! key (Key.fromText path)
+  json <- solc Yul src
+  let f = (json ^?! key "contracts") ^?! key (Key.fromText "hevm.sol")
       c = f ^?! key (Key.fromText $ if T.null contractName then "object" else contractName)
       bytecode = c ^?! key "evm" ^?! key "deployedBytecode" ^?! key "object" % _String
   pure $ (toCode contractName) <$> (Just bytecode)
 
-solidity :: Text -> Text -> IO (Maybe ByteString)
-solidity contract src = do
-  (json, path) <- solidity' src
+solidity
+  :: (MonadUnliftIO m)
+  => Text -> Text -> m (Maybe ByteString)
+solidity contract src = liftIO $ do
+  json <- solc Solidity src
   let (Contracts sol, _, _) = fromJust $ readStdJSON json
-  pure $ Map.lookup (path <> ":" <> contract) sol <&> (.creationCode)
+  pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.creationCode)
 
-solcRuntime :: Text -> Text -> IO (Maybe ByteString)
-solcRuntime contract src = do
-  (json, path) <- solidity' src
+solcRuntime
+  :: (MonadUnliftIO m)
+  => Text -> Text -> m (Maybe ByteString)
+solcRuntime contract src = liftIO $ do
+  json <- solc Solidity src
   case readStdJSON json of
-    Just (Contracts sol, _, _) -> pure $ Map.lookup (path <> ":" <> contract) sol <&> (.runtimeCode)
+    Just (Contracts sol, _, _) -> pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.runtimeCode)
     Nothing -> internalError $ "unable to parse solidity output:\n" <> (T.unpack json)
 
 functionAbi :: Text -> IO Method
 functionAbi f = do
-  (json, path) <- solidity' ("contract ABI { function " <> f <> " public {}}")
+  json <- solc Solidity ("contract ABI { function " <> f <> " public {}}")
   let (Contracts sol, _, _) = fromMaybe
                                 (internalError . T.unpack $ "unable to parse solc output:\n" <> json)
                                 (readStdJSON json)
-  case Map.toList $ (fromJust (Map.lookup (path <> ":ABI") sol)).abiMap of
+  case Map.toList $ (fromJust (Map.lookup "hevm.sol:ABI" sol)).abiMap of
      [(_,b)] -> pure b
      _ -> internalError "unexpected abi format"
 
@@ -401,7 +404,7 @@ force s = fromMaybe (internalError s)
 readJSON :: ProjectType -> Text -> Text -> Maybe (Contracts, Asts, Sources)
 readJSON DappTools _ json = readStdJSON json
 readJSON CombinedJSON _ json = readCombinedJSON json
-readJSON Foundry contractName json = readFoundryJSON contractName json
+readJSON _ contractName json = readFoundryJSON contractName json
 
 -- | Reads a foundry json output
 readFoundryJSON :: Text -> Text -> Maybe (Contracts, Asts, Sources)
@@ -437,7 +440,7 @@ readFoundryJSON contractName json = do
         , runtimeSrcmap       = runtimeSrcMap
         , creationSrcmap      = creationSrcMap
         , constructorInputs   = mkConstructor abi
-        , storageLayout       = mempty -- TODO: foundry doesn't expose this?
+        , storageLayout       = mkStorageLayout $ json ^? key "storageLayout"
         , immutableReferences = mempty -- TODO: foundry doesn't expose this?
         }
   pure ( Contracts $ Map.singleton (path <> ":" <> contractName) contract
@@ -661,80 +664,12 @@ toCode contractName t = case BS16.decodeBase16 (encodeUtf8 t) of
             then error $ T.unpack ("Error toCode: unlinked libraries detected in bytecode, in " <> contractName)
             else error $ T.unpack ("Error toCode:" <> e <> ", in " <> contractName)
 
-solidity' :: Text -> IO (Text, Text)
-solidity' src = withSystemTempFile "hevm.sol" $ \path handle -> do
-  hClose handle
-  writeFile path ("//SPDX-License-Identifier: UNLICENSED\n" <> "pragma solidity ^0.8.6;\n" <> src)
-  writeFile (path <> ".json")
-    [Here.i|
-    {
-      "language": "Solidity",
-      "sources": {
-        ${path}: {
-          "urls": [
-            ${path}
-          ]
-        }
-      },
-      "settings": {
-        "outputSelection": {
-          "*": {
-            "*": [
-              "metadata",
-              "evm.bytecode",
-              "evm.deployedBytecode",
-              "abi",
-              "storageLayout",
-              "evm.bytecode.sourceMap",
-              "evm.bytecode.linkReferences",
-              "evm.bytecode.generatedSources",
-              "evm.deployedBytecode.sourceMap",
-              "evm.deployedBytecode.linkReferences",
-              "evm.deployedBytecode.generatedSources"
-            ],
-            "": [
-              "ast"
-            ]
-          }
-        }
-      }
-    }
-    |]
-  x <- pack <$>
-    readProcess
-      "solc"
-      ["--allow-paths", path, "--standard-json", (path <> ".json")]
-      ""
-  pure (x, pack path)
-
-yul' :: Text -> IO (Text, Text)
-yul' src = withSystemTempFile "hevm.yul" $ \path handle -> do
-  hClose handle
-  writeFile path src
-  writeFile (path <> ".json")
-    [Here.i|
-    {
-      "language": "Yul",
-      "sources": { ${path}: { "urls": [ ${path} ] } },
-      "settings": { "outputSelection": { "*": { "*": ["*"], "": [ "*" ] } } }
-    }
-    |]
-  x <- pack <$>
-    readProcess
-      "solc"
-      ["--allow-paths", path, "--standard-json", (path <> ".json")]
-      ""
-  pure (x, pack path)
-
 solc :: Language -> Text -> IO Text
 solc lang src =
-  withSystemTempFile "hevm.sol" $ \path handle -> do
-    hClose handle
-    writeFile path (stdjson lang src)
-    T.pack <$> readProcess
-      "solc"
-      ["--standard-json", path]
-      ""
+  T.pack <$> readProcess
+    "solc"
+    ["--standard-json"]
+    (T.unpack $ stdjson lang src)
 
 data Language = Solidity | Yul
   deriving (Show)

@@ -5,6 +5,7 @@ module EVM.Format
   ( formatExpr
   , formatSomeExpr
   , formatPartial
+  , formatProp
   , contractNamePart
   , contractPathPart
   , showError
@@ -17,7 +18,6 @@ module EVM.Format
   , showWordExact
   , showWordExplanation
   , parenthesise
-  , unindexed
   , showValue
   , textValues
   , showAbiValue
@@ -30,6 +30,7 @@ module EVM.Format
   , hexByteString
   , hexText
   , bsToHex
+  , showVal
   ) where
 
 import Prelude hiding (LT, GT)
@@ -37,7 +38,7 @@ import Prelude hiding (LT, GT)
 import EVM.Types
 import EVM (traceForest, traceForest', traceContext, cheatCode)
 import EVM.ABI (getAbiSeq, parseTypeName, AbiValue(..), AbiType(..), SolError(..), Indexed(..), Event(..))
-import EVM.Dapp (DappContext(..), DappInfo(..), showTraceLocation)
+import EVM.Dapp (DappContext(..), DappInfo(..), findSrc, showTraceLocation)
 import EVM.Expr qualified as Expr
 import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
 
@@ -52,10 +53,10 @@ import Data.ByteString.Lazy (toStrict, fromStrict)
 import Data.Char qualified as Char
 import Data.DoubleWord (signedWord)
 import Data.Foldable (toList)
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, sort)
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (catMaybes, fromMaybe, fromJust)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text, pack, unpack, intercalate, dropEnd, splitOn)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
@@ -110,15 +111,9 @@ showAbiValue (AbiString bs) = formatBytes bs
 showAbiValue (AbiBytesDynamic bs) = formatBytes bs
 showAbiValue (AbiBytes _ bs) = formatBinary bs
 showAbiValue (AbiAddress addr) =
-  let dappinfo = ?context.info
-      contracts = ?context.env
-      name = case Map.lookup (LitAddr addr) contracts of
+  let name = case Map.lookup (LitAddr addr) ?context.env of
         Nothing -> ""
-        Just contract ->
-          let hash = maybeLitWord contract.codehash
-          in case hash of
-               Just h -> maybeContractName' (preview (ix h % _2) dappinfo.solcByHash)
-               Nothing -> ""
+        Just contract -> maybeContractName' (findSrc contract ?context.info)
   in
     name <> "@" <> (pack $ show addr)
 showAbiValue v = pack $ show v
@@ -189,21 +184,18 @@ formatSBinary (ConcreteBuf bs) = formatBinary bs
 formatSBinary (AbstractBuf t) = "<" <> t <> " abstract buf>"
 formatSBinary _ = internalError "formatSBinary: implement me"
 
-showTraceTree :: DappInfo -> VM s -> Text
+showTraceTree :: DappInfo -> VM t s -> Text
 showTraceTree dapp vm =
   let forest = traceForest vm
       traces = fmap (fmap (unpack . showTrace dapp (vm.env.contracts))) forest
   in pack $ concatMap showTree traces
 
 showTraceTree' :: DappInfo -> Expr End -> Text
-showTraceTree' _ (ITE {}) = error "Internal Error: ITE does not contain a trace"
+showTraceTree' _ (ITE {}) = internalError "ITE does not contain a trace"
 showTraceTree' dapp leaf =
   let forest = traceForest' leaf
       traces = fmap (fmap (unpack . showTrace dapp (traceContext leaf))) forest
   in pack $ concatMap showTree traces
-
-unindexed :: [(Text, AbiType, Indexed)] -> [AbiType]
-unindexed ts = [t | (_, t, NotIndexed) <- ts]
 
 showTrace :: DappInfo -> Map (Expr EAddr) Contract -> Trace -> Text
 showTrace dapp env trace =
@@ -213,37 +205,17 @@ showTrace dapp env trace =
       case showTraceLocation dapp trace of
         Left x -> " \x1b[1m" <> x <> "\x1b[0m"
         Right x -> " \x1b[1m(" <> x <> ")\x1b[0m"
-    fullAbiMap = dapp.abiMap
   in case trace.tracedata of
     EventTrace _ bytes topics ->
-      let logn = mconcat
-            [ "\x1b[36m"
-            , "log" <> (pack (show (length topics)))
-            , parenthesise ((map (pack . show) topics) ++ [formatSBinary bytes])
-            , "\x1b[0m"
-            ] <> pos
-          knownTopic name types = mconcat
-            [ "\x1b[36m"
-            , name
-            , showValues (unindexed types) bytes
-            -- todo: show indexed
-            , "\x1b[0m"
-            ] <> pos
-          lognote sig usr = mconcat
-            [ "\x1b[36m"
-            , "LogNote"
-            , parenthesise [sig, usr, "..."]
-            , "\x1b[0m"
-            ] <> pos
-      in case topics of
+      case topics of
         [] ->
           logn
-        (t1:_) ->
-          case maybeLitWord t1 of
+        firstTopic:restTopics ->
+          case maybeLitWord firstTopic of
             Just topic ->
               case Map.lookup topic dapp.eventMap of
-                Just (Event name _ types) ->
-                  knownTopic name types
+                Just (Event name _ argInfos) ->
+                  showEvent name argInfos restTopics
                 Nothing ->
                   case topics of
                     [_, t2, _, _] ->
@@ -272,6 +244,55 @@ showTrace dapp env trace =
                       logn
             Nothing ->
               logn
+      where
+        logn = mconcat
+          [ "\x1b[36m"
+          , "log" <> (pack (show (length topics)))
+          , parenthesise ((map (pack . show) topics) ++ [formatSBinary bytes])
+          , "\x1b[0m"
+          ] <> pos
+
+        showEvent eventName argInfos indexedTopics = mconcat
+          [ "\x1b[36m"
+          , eventName
+          , parenthesise (snd <$> sort (unindexedArgs <> indexedArgs))
+          , "\x1b[0m"
+          ] <> pos
+          where
+          -- We maintain the original position of event arguments since indexed
+          -- and not indexed arguments can be interleaved.
+          unindexedArgs :: [(Int, Text)]
+          unindexedArgs =
+            let (positions, names, abiTypes) = unzip3 (filterArgInfos NotIndexed)
+            in zip positions (zipWith withName names (textValues abiTypes bytes))
+
+          indexedArgs :: [(Int, Text)]
+          indexedArgs =
+            let (positions, names, abiTypes) = unzip3 (filterArgInfos Indexed)
+            in zip positions (zipWith withName names (zipWith showTopic abiTypes indexedTopics))
+            where
+            showTopic :: AbiType -> Expr EWord -> Text
+            showTopic abiType topic =
+              case maybeLitWord (Expr.concKeccakSimpExpr topic) of
+                Just w -> head $ textValues [abiType] (ConcreteBuf (word256Bytes w))
+                _ -> "<symbolic>"
+
+          withName :: Text -> Text -> Text
+          withName "" value = value
+          withName argName value = argName <> "=" <> value
+
+          filterArgInfos :: Indexed -> [(Int, Text, AbiType)]
+          filterArgInfos which =
+            [ (i, argName, argType) | (i, (argName, argType, indexed)) <- zip [0..] argInfos
+                                    , indexed == which
+            ]
+
+        lognote sig usr = mconcat
+          [ "\x1b[36m"
+          , "LogNote"
+          , parenthesise [sig, usr, "..."]
+          , "\x1b[0m"
+          ] <> pos
 
     ErrorTrace e ->
       case e of
@@ -280,9 +301,9 @@ showTrace dapp env trace =
         _ ->
           "\x1b[91merror\x1b[0m " <> pack (show e) <> pos
 
-    ReturnTrace out (CallContext _ _ _ _ _ (Just abi) _ _ _) ->
+    ReturnTrace out (CallContext { abi = Just abi }) ->
       "← " <>
-        case Map.lookup (unsafeInto abi) fullAbiMap of
+        case Map.lookup (unsafeInto abi) dapp.abiMap of
           Just m  ->
             case unzip m.output of
               ([], []) ->
@@ -298,29 +319,23 @@ showTrace dapp env trace =
       in "← " <> formatExpr l <> " bytes of code"
     EntryTrace t ->
       t
-    FrameTrace (CreationContext addr (Lit hash) _ _ ) -> -- FIXME: irrefutable pattern
+    FrameTrace (CreationContext { address }) ->
       "create "
-      <> maybeContractName (preview (ix hash % _2) dapp.solcByHash)
-      <> "@" <> formatAddr addr
+      <> maybeContractName (findSrcFromAddr address)
+      <> "@" <> formatAddr address
       <> pos
-    FrameTrace (CreationContext addr _ _ _ ) ->
-      "create "
-      <> "<unknown contract>"
-      <> "@" <> formatAddr addr
-      <> pos
-    FrameTrace (CallContext target context _ _ hash abi calldata _ _) ->
+    FrameTrace (CallContext { target, context, abi, calldata }) ->
       let calltype = if target == context
                      then "call "
                      else "delegatecall "
-          hash' = fromJust $ maybeLitWord hash
-      in case preview (ix hash' % _2) dapp.solcByHash of
+      in case findSrcFromAddr target of
         Nothing ->
           calltype
             <> case target of
                  LitAddr 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D -> "HEVM"
                  _ -> formatAddr target
             <> pack "::"
-            <> case Map.lookup (unsafeInto (fromMaybe 0x00 abi)) fullAbiMap of
+            <> case Map.lookup (unsafeInto (fromMaybe 0x00 abi)) dapp.abiMap of
                  Just m  ->
                    "\x1b[1m"
                    <> m.name
@@ -343,6 +358,10 @@ showTrace dapp env trace =
                  (abi >>= fmap getAbiTypes . maybeAbiName solc)
             <> "\x1b[0m"
             <> pos
+    where
+    findSrcFromAddr addr = do
+      contract <- Map.lookup addr env
+      findSrc contract dapp
 
 formatAddr :: Expr EAddr -> Text
 formatAddr = \case
@@ -396,6 +415,7 @@ prettyError = \case
   ReturnDataOutOfBounds -> "Return data out of bounds"
   NonceOverflow -> "Nonce overflow"
   BadCheatCode a -> "Bad cheat code: sig: " <> show a
+  NonexistentFork a -> "Fork ID does not exist: " <> show a
 
 prettyvmresult :: Expr End -> String
 prettyvmresult (Failure _ _ (Revert (ConcreteBuf ""))) = "Revert"
@@ -436,6 +456,7 @@ formatPartial = \case
       ]
     ]
   MaxIterationsReached pc addr -> "Max Iterations Reached in contract: " <> formatAddr addr <> " pc: " <> pack (show pc)
+  JumpIntoSymbolicCode pc idx -> "Encountered a jump into a potentially symbolic code region while executing initcode. pc: " <> pack (show pc) <> " jump dst: " <> pack (show idx)
 
 formatSomeExpr :: SomeExpr -> Text
 formatSomeExpr (SomeExpr e) = formatExpr e
@@ -445,7 +466,7 @@ formatExpr = go
   where
     go :: Expr a -> Text
     go x = T.stripEnd $ case x of
-      Lit w -> T.pack $ show w
+      Lit w -> T.pack $ show (into w :: Integer)
       (Var v) -> "(Var " <> T.pack (show v) <> ")"
       (GVar v) -> "(GVar " <> T.pack (show v) <> ")"
       LitByte w -> T.pack $ show w
@@ -666,12 +687,13 @@ formatExpr = go
           , indent 2 $ formatExpr slot
           , "val:"
           , indent 2 $ formatExpr val
+          , "store:"
+          , indent 2 $ formatExpr prev          
           ]
         , ")"
-        , formatExpr prev
         ]
-      AbstractStore a ->
-        "(AbstractStore " <> formatExpr a <> ")"
+      AbstractStore a idx ->
+        "(AbstractStore " <> formatExpr a <> " " <> T.pack (show idx) <> ")"
       ConcreteStore s -> if null s
         then "(ConcreteStore <empty>)"
         else T.unlines
@@ -693,9 +715,10 @@ formatExpr = go
           , "size:      " <> formatExpr size
           , "src:"
           , indent 2 $ formatExpr src
+          , "dst:"
+          , indent 2 $ formatExpr dst
           ]
         , ")"
-        , formatExpr dst
         ]
       WriteWord idx val buf -> T.unlines
         [ "(WriteWord"
@@ -704,18 +727,19 @@ formatExpr = go
           , indent 2 $ formatExpr idx
           , "val:"
           , indent 2 $ formatExpr val
+          , "buf:"
+          , indent 2 $ formatExpr buf
           ]
         , ")"
-        , formatExpr buf
         ]
       WriteByte idx val buf -> T.unlines
         [ "(WriteByte"
         , indent 2 $ T.unlines
           [ "idx: " <> formatExpr idx
           , "val: " <> formatExpr val
+          , "buf: " <> formatExpr buf
           ]
         , ")"
-        , formatExpr buf
         ]
       ConcreteBuf bs -> case bs of
         "" -> "(ConcreteBuf \"\")"
@@ -802,3 +826,8 @@ hexText t =
 
 bsToHex :: ByteString -> String
 bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
+
+showVal :: AbiValue -> Text
+showVal (AbiBytes _ bs) = formatBytes bs
+showVal (AbiAddress addr) = T.pack  . show $ addr
+showVal v = T.pack . show $ v

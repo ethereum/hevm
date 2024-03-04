@@ -4,6 +4,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 {-# OPTIONS_GHC -Wno-inline-rule-shadowing #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
 
 module EVM.Types where
 
@@ -36,6 +37,7 @@ import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Set (Set)
+import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
 import Data.Serialize qualified as Cereal
 import Data.Text qualified as T
@@ -67,7 +69,7 @@ mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
 -- Conversions -------------------------------------------------------------------------------------
 
 
--- We ignore hlint to supress the warnings about `fromIntegral` and friends here
+-- We ignore hlint to suppress the warnings about `fromIntegral` and friends here
 #ifndef __HLINT__
 
 instance From Addr Integer where from = fromIntegral
@@ -129,7 +131,7 @@ data EType
   | End
   deriving (Typeable)
 
--- Variables refering to a global environment
+-- Variables referring to a global environment
 data GVar (a :: EType) where
   BufVar :: Int -> GVar Buf
   StoreVar :: Int -> GVar Storage
@@ -139,7 +141,7 @@ deriving instance Eq (GVar a)
 deriving instance Ord (GVar a)
 
 {- |
-  Expr implements an abstract respresentation of an EVM program
+  Expr implements an abstract representation of an EVM program
 
   This type can give insight into the provenance of a term which is useful,
   both for the aesthetic purpose of printing terms in a richer way, but also to
@@ -284,7 +286,6 @@ data Expr (a :: EType) where
   Balance        :: Expr EAddr -> Expr EWord
 
   Gas            :: Int                -- frame idx
-                 -> Int                -- PC
                  -> Expr EWord
 
   -- code
@@ -326,13 +327,15 @@ data Expr (a :: EType) where
   -- storage
 
   ConcreteStore  :: (Map W256 W256) -> Expr Storage
-  AbstractStore  :: Expr EAddr -> Expr Storage
+  AbstractStore  :: Expr EAddr -- which contract is this store for?
+                 -> Maybe W256 -- which logical store does this refer to? (e.g. solidity mappings / arrays)
+                 -> Expr Storage
 
-  SLoad          :: Expr EWord         -- index
+  SLoad          :: Expr EWord         -- key
                  -> Expr Storage       -- storage
                  -> Expr EWord         -- result
 
-  SStore         :: Expr EWord         -- index
+  SStore         :: Expr EWord         -- key
                  -> Expr EWord         -- value
                  -> Expr Storage       -- old storage
                  -> Expr Storage       -- new storae
@@ -479,17 +482,30 @@ instance Ord Prop where
   PBool a <= PBool b = a <= b
   PEq (a :: Expr x) (b :: Expr x) <= PEq (c :: Expr y) (d :: Expr y)
     = case eqT @x @y of
-       Just Refl -> a <= c && b <= d
-       Nothing -> False
-  PLT a b <= PLT c d = a <= c && b <= d
-  PGT a b <= PGT c d = a <= c && b <= d
-  PGEq a b <= PGEq c d = a <= c && b <= d
-  PLEq a b <= PLEq c d = a <= c && b <= d
+       Just Refl -> a <= c || b <= d
+       Nothing -> toNum a <= toNum c
+  PLT a b <= PLT c d = a <= c || b <= d
+  PGT a b <= PGT c d = a <= c || b <= d
+  PGEq a b <= PGEq c d = a <= c || b <= d
+  PLEq a b <= PLEq c d = a <= c || b <= d
   PNeg a <= PNeg b = a <= b
-  PAnd a b <= PAnd c d = a <= c && b <= d
-  POr a b <= POr c d = a <= c && b <= d
-  PImpl a b <= PImpl c d = a <= c && b <= d
-  _ <= _ = False
+  PAnd a b <= PAnd c d = a <= c || b <= d
+  POr a b <= POr c d = a <= c || b <= d
+  PImpl a b <= PImpl c d = a <= c || b <= d
+  a <= b = asNum a <= asNum b
+    where
+      asNum :: Prop -> Int
+      asNum (PBool {}) = 0
+      asNum (PEq   {}) = 1
+      asNum (PLT   {}) = 2
+      asNum (PGT   {}) = 3
+      asNum (PGEq  {}) = 4
+      asNum (PLEq  {}) = 5
+      asNum (PNeg  {}) = 6
+      asNum (PAnd  {}) = 7
+      asNum (POr   {}) = 8
+      asNum (PImpl {}) = 9
+
 
 
 isPBool :: Prop -> Bool
@@ -515,42 +531,44 @@ data EvmError
   | InvalidMemoryAccess
   | CallDepthLimitReached
   | MaxCodeSizeExceeded W256 W256
-  | MaxInitCodeSizeExceeded W256 W256
+  | MaxInitCodeSizeExceeded W256 (Expr EWord)
   | InvalidFormat
   | PrecompileFailure
   | ReturnDataOutOfBounds
   | NonceOverflow
   | BadCheatCode FunctionSelector
+  | NonexistentFork Int
   deriving (Show, Eq, Ord)
 
 -- | Sometimes we can only partially execute a given program
 data PartialExec
-  = UnexpectedSymbolicArg  { pc :: Int, msg  :: String, args  :: [SomeExpr] }
+  = UnexpectedSymbolicArg { pc :: Int, msg  :: String, args  :: [SomeExpr] }
   | MaxIterationsReached  { pc :: Int, addr :: Expr EAddr }
+  | JumpIntoSymbolicCode  { pc :: Int, jumpDst :: Int }
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
-data Effect s
-  = Query (Query s)
-  | Choose (Choose s)
-deriving instance Show (Effect s)
+data Effect t s where
+  Query :: Query t s -> Effect t s
+  Choose :: Choose s -> Effect Symbolic s
+deriving instance Show (Effect t s)
 
 -- | Queries halt execution until resolved through RPC calls or SMT queries
-data Query s where
-  PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM s ()) -> Query s
-  PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM s ()) -> Query s
-  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM s ()) -> Query s
-  PleaseDoFFI         :: [String] -> (ByteString -> EVM s ()) -> Query s
+data Query t s where
+  PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM t s ()) -> Query t s
+  PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM t s ()) -> Query t s
+  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM Symbolic s ()) -> Query Symbolic s
+  PleaseDoFFI         :: [String] -> (ByteString -> EVM t s ()) -> Query t s
 
 -- | Execution could proceed down one of two branches
 data Choose s where
-  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM s ()) -> Choose s
+  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM Symbolic s ()) -> Choose s
 
 -- | The possible return values of a SMT query
 data BranchCondition = Case Bool | Unknown
   deriving Show
 
-instance Show (Query s) where
+instance Show (Query t s) where
   showsPrec _ = \case
     PleaseFetchContract addr base _ ->
       (("<EVM.Query: fetch contract " ++ show addr ++ show base ++ ">") ++)
@@ -571,40 +589,57 @@ instance Show (Choose s) where
       (("<EVM.Choice: waiting for user to select path (0,1)") ++)
 
 -- | The possible result states of a VM
-data VMResult s
-  = VMFailure EvmError      -- ^ An operation failed
-  | VMSuccess (Expr Buf)    -- ^ Reached STOP, RETURN, or end-of-code
-  | HandleEffect (Effect s) -- ^ An effect must be handled for execution to continue
-  | Unfinished PartialExec  -- ^ Execution could not continue further
+data VMResult (t :: VMType) s where
+  Unfinished :: PartialExec -> VMResult Symbolic s -- ^ Execution could not continue further
+  VMFailure :: EvmError -> VMResult t s            -- ^ An operation failed
+  VMSuccess :: (Expr Buf) -> VMResult t s          -- ^ Reached STOP, RETURN, or end-of-code
+  HandleEffect :: (Effect t s) -> VMResult t s     -- ^ An effect must be handled for execution to continue
 
-deriving instance Show (VMResult s)
+deriving instance Show (VMResult t s)
 
 
 -- VM State ----------------------------------------------------------------------------------------
 
+data VMType = Symbolic | Concrete
+
+type family Gas (t :: VMType) = r | r -> t where
+  Gas Symbolic = ()
+  Gas Concrete = Word64
 
 -- | The state of a stepwise EVM execution
-data VM s = VM
-  { result         :: Maybe (VMResult s)
-  , state          :: FrameState s
-  , frames         :: [Frame s]
+data VM (t :: VMType) s = VM
+  { result         :: Maybe (VMResult t s)
+  , state          :: FrameState t s
+  , frames         :: [Frame t s]
   , env            :: Env
   , block          :: Block
   , tx             :: TxState
   , logs           :: [Expr Log]
   , traces         :: Zipper.TreePos Zipper.Empty Trace
   , cache          :: Cache
-  , burned         :: {-# UNPACK #-} !Word64
+  , burned         :: !(Gas t)
   , iterations     :: Map CodeLocation (Int, [Expr EWord])
   -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
-  , keccakEqs      :: [Prop]
   , config         :: RuntimeConfig
+  , forks          :: Seq ForkState
+  , currentFork    :: Int
+  }
+  deriving (Generic)
+
+data ForkState = ForkState
+  { env :: Env
+  , block :: Block
+  , cache :: Cache
+  , urlOrAlias :: String
   }
   deriving (Show, Generic)
 
+deriving instance Show (VM Symbolic s)
+deriving instance Show (VM Concrete s)
+
 -- | Alias for the type of e.g. @exec1@.
-type EVM s a = StateT (VM s) (ST s) a
+type EVM (t :: VMType) s a = StateT (VM t s) (ST s) a
 
 -- | The VM base state (i.e. should new contracts be created with abstract balance / storage?)
 data BaseState
@@ -621,11 +656,13 @@ data RuntimeConfig = RuntimeConfig
   deriving (Show)
 
 -- | An entry in the VM's "call/create stack"
-data Frame s = Frame
+data Frame (t :: VMType) s = Frame
   { context :: FrameContext
-  , state   :: FrameState s
+  , state   :: FrameState t s
   }
-  deriving (Show)
+
+deriving instance Show (Frame Symbolic s)
+deriving instance Show (Frame Concrete s)
 
 -- | Call/create info
 data FrameContext
@@ -638,8 +675,8 @@ data FrameContext
   | CallContext
     { target        :: Expr EAddr
     , context       :: Expr EAddr
-    , offset        :: W256
-    , size          :: W256
+    , offset        :: Expr EWord
+    , size          :: Expr EWord
     , codehash      :: Expr EWord
     , abi           :: Maybe W256
     , calldata      :: Expr Buf
@@ -660,7 +697,7 @@ data SubState = SubState
   deriving (Eq, Ord, Show)
 
 -- | The "registers" of the VM along with memory and data stack
-data FrameState s = FrameState
+data FrameState (t :: VMType) s = FrameState
   { contract     :: Expr EAddr
   , codeContract :: Expr EAddr
   , code         :: ContractCode
@@ -671,11 +708,14 @@ data FrameState s = FrameState
   , calldata     :: Expr Buf
   , callvalue    :: Expr EWord
   , caller       :: Expr EAddr
-  , gas          :: {-# UNPACK #-} !Word64
+  , gas          :: !(Gas t)
   , returndata   :: Expr Buf
   , static       :: Bool
   }
-  deriving (Show, Generic)
+  deriving (Generic)
+
+deriving instance Show (FrameState Symbolic s)
+deriving instance Show (FrameState Concrete s)
 
 data Memory s
   = ConcreteMemory (MutableMemory s)
@@ -706,6 +746,7 @@ data Env = Env
   { contracts      :: Map (Expr EAddr) Contract
   , chainId        :: W256
   , freshAddresses :: Int
+  , freshGasVals :: Int
   }
   deriving (Show, Generic)
 
@@ -735,6 +776,40 @@ data Contract = Contract
   }
   deriving (Show, Eq, Ord)
 
+class VMOps (t :: VMType) where
+  burn' :: Gas t -> EVM t s () -> EVM t s ()
+  -- TODO: change to EvmWord t
+  burnExp :: Expr EWord -> EVM t s () -> EVM t s ()
+  burnSha3 :: Expr EWord -> EVM t s () -> EVM t s ()
+  burnCalldatacopy :: Expr EWord -> EVM t s () -> EVM t s ()
+  burnCodecopy :: Expr EWord -> EVM t s () -> EVM t s ()
+  burnExtcodecopy :: Expr EAddr -> Expr EWord -> EVM t s () -> EVM t s ()
+  burnReturndatacopy :: Expr EWord -> EVM t s () -> EVM t s ()
+  burnLog :: Expr EWord -> Word8 -> EVM t s () -> EVM t s ()
+
+  initialGas :: Gas t
+  ensureGas :: Word64 -> EVM t s () -> EVM t s ()
+  -- TODO: change to EvmWord t
+  gasTryFrom :: Expr EWord -> Either () (Gas t)
+
+  -- Gas cost of create, including hash cost if needed
+  costOfCreate :: FeeSchedule Word64 -> Gas t -> Expr EWord -> Bool -> (Gas t, Gas t)
+
+  costOfCall
+    :: FeeSchedule Word64 -> Bool -> Expr EWord -> Gas t -> Gas t -> Expr EAddr
+    -> (Word64 -> Word64 -> EVM t s ()) -> EVM t s ()
+
+  reclaimRemainingGasAllowance :: VM t s -> EVM t s ()
+  payRefunds :: EVM t s ()
+  pushGas :: EVM t s ()
+  enoughGas :: Word64 -> Gas t -> Bool
+  subGas :: Gas t -> Word64 -> Gas t
+  toGas :: Word64 -> Gas t
+
+  whenSymbolicElse :: EVM t s a -> EVM t s a -> EVM t s a
+
+  partial :: PartialExec -> EVM t s ()
+  branch :: Expr EWord -> (Bool -> EVM t s ()) -> EVM t s ()
 
 -- Bytecode Representations ------------------------------------------------------------------------
 
@@ -837,8 +912,9 @@ instance Monoid Traces where
 
 
 -- | A specification for an initial VM state
-data VMOpts = VMOpts
+data VMOpts (t :: VMType) = VMOpts
   { contract :: Contract
+  , otherContracts :: [(Expr EAddr, Contract)]
   , calldata :: (Expr Buf, [Prop])
   , baseState :: BaseState
   , value :: Expr EWord
@@ -846,7 +922,7 @@ data VMOpts = VMOpts
   , address :: Expr EAddr
   , caller :: Expr EAddr
   , origin :: Expr EAddr
-  , gas :: Word64
+  , gas :: Gas t
   , gaslimit :: Word64
   , number :: W256
   , timestamp :: Expr EWord
@@ -861,7 +937,10 @@ data VMOpts = VMOpts
   , create :: Bool
   , txAccessList :: Map (Expr EAddr) [W256]
   , allowFFI :: Bool
-  } deriving Show
+  }
+
+deriving instance Show (VMOpts Symbolic)
+deriving instance Show (VMOpts Concrete)
 
 
 -- Opcodes -----------------------------------------------------------------------------------------
@@ -1300,7 +1379,7 @@ formatString bs =
     Right s -> "\"" <> T.unpack s <> "\""
     Left _ -> "❮utf8 decode failed❯: " <> (show $ ByteStringS bs)
 
--- |'paddedShowHex' displays a number in hexidecimal and pads the number
+-- |'paddedShowHex' displays a number in hexadecimal and pads the number
 -- with 0 so that it has a minimum length of @w@.
 paddedShowHex :: (Show a, Integral a) => Int -> a -> String
 paddedShowHex w n = pad ++ str
@@ -1308,6 +1387,10 @@ paddedShowHex w n = pad ++ str
      str = showHex n ""
      pad = replicate (w - length str) '0'
 
+untilFixpoint :: Eq a => (a -> a) -> a -> a
+untilFixpoint f a = if f a == a
+                    then a
+                    else untilFixpoint f (f a)
 
 -- Optics ------------------------------------------------------------------------------------------
 

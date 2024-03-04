@@ -13,16 +13,24 @@ jobs:
   nix-build:
     strategy:
       matrix:
-       os: [ ubuntu-latest, macos-latest ]
-       include:
-         - os: ubuntu-latest
-           os_attr: x86_64-linux
-         - os: macos-latest
-           os_attr: x86_64-macos
+        runtime: [ linux-x64, linux-arm64, osx-x64, osx-arm64 ]
+        include:
+        - runtime: linux-x64
+          os: ubuntu-latest
+
+        - runtime: linux-arm64
+          os: ubuntu-latest
+
+        - runtime: osx-x64
+          os: macOS-latest
+
+        - runtime: osx-arm64
+          os: macOS-latest
+
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: build hevm
@@ -30,7 +38,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: hevm-${{ matrix.os_attr }}
+          name: hevm-${{ matrix.runtime }}
           path: result/bin/hevm
 
   extra-tests:
@@ -43,7 +51,7 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       # can't be run in nix build due to network usage
@@ -60,11 +68,11 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: UCRT64
-          path-type: inherit
+          msystem: CLANG64
+          path-type: minimal
           update: true
           install: >-
             base-devel
@@ -75,14 +83,23 @@ jobs:
           pacboy: >-
             cmake:p
             ninja:p
-            gcc:p
+            clang:p
+            lld:p
             autotools:p
             gmp:p
             openssl:p
-      - uses: haskell/actions/setup@v2
+      - uses: haskell-actions/setup@v2.6.1
         id: setup
         with:
-          ghc-version: '9.2.8'
+          ghc-version: '9.4.7'
+
+      - name: Extract GHC & Cabal paths
+        run: |
+          HASKELL_PATHS="$(cygpath -u "$GHC_PATH"):$(cygpath -u "$CABAL_PATH")"
+          echo "HASKELL_PATHS=$HASKELL_PATHS" >> "$GITHUB_ENV"
+        env:
+          GHC_PATH: ${{ steps.setup.outputs.ghc-path }}
+          CABAL_PATH: ${{ steps.setup.outputs.cabal-path }}
 
       - name: build and install c dependencies
         run: |
@@ -94,12 +111,13 @@ jobs:
           echo "::endgroup::"
       - name: Configure the build
         run: |
+          export PATH="$HASKELL_PATHS:$PATH"
           cabal configure --disable-tests --disable-benchmarks --disable-documentation
           cabal build --dry-run
           # The last step generates dist-newstyle/cache/plan.json for the cache key.
 
       - name: Restore cached dependencies
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         id: cache
         env:
           key: ${{ runner.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-cabal-${{ steps.setup.outputs.cabal-version }}
@@ -109,7 +127,9 @@ jobs:
           restore-keys: ${{ env.key }}-
 
       - name: Install haskell dependencies
-        run: cabal build all --only-dependencies
+        run: |
+          export PATH="$HASKELL_PATHS:$PATH"
+          cabal build all --only-dependencies
 
       # Cache dependencies already, so that we do not have to rebuild them should the subsequent steps fail.
       - name: Save cached dependencies
@@ -122,12 +142,14 @@ jobs:
 
       - name: build hevm library
         run: |
-          cabal build --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib"
+          export PATH="$HASKELL_PATHS:$PATH"
+          cabal build --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib" \
+                      --extra-include-dirs="D:/a/_temp/msys64/clang64/include" --extra-lib-dirs="D:/a/_temp/msys64/clang64/lib"
 
   cabal-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: run cabal check

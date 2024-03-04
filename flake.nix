@@ -3,8 +3,9 @@
 
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
-    nixpkgs.url = "github:nixos/nixpkgs/haskell-updates";
+    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     foundry.url = "github:shazow/foundry.nix/monthly";
+    bitwuzla-pkgs.url = "github:d-xo/nixpkgs/6e7c9e4267f3c2df116bf76d8e31c2602e2d543d";
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
@@ -21,18 +22,24 @@
       url = "github:haskell/cabal";
       flake = false;
     };
+    forge-std = {
+      url = "github:foundry-rs/forge-std";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, solidity, ethereum-tests, foundry, cabal-head, ... }:
+  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, cabal-head, bitwuzla-pkgs, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs { inherit system; config = { allowBroken = true; }; });
+        bitwuzla = (import bitwuzla-pkgs { inherit system; }).bitwuzla;
         testDeps = with pkgs; [
           go-ethereum
           solc
           z3
           cvc5
           git
+          bitwuzla
         ] ++ lib.optional (!(pkgs.stdenv.isDarwin && pkgs.stdenv.isAarch64)) [
           foundry.defaultPackage.${system}
         ];
@@ -49,7 +56,7 @@
             Cabal-syntax = dontCheck (self.callCabal2nix "Cabal-syntax" "${cabal-head}/Cabal-syntax" {});
             Cabal = dontCheck (self.callCabal2nix "Cabal" "${cabal-head}/Cabal" {});
             unix = dontCheck (doJailbreak super.unix_2_8_1_1);
-            filepath = dontCheck (doJailbreak super.filepath_1_4_100_3);
+            filepath = dontCheck (doJailbreak super.filepath_1_4_100_4);
             process = dontCheck (doJailbreak super.process_1_6_17_0);
             directory = dontCheck (doJailbreak (super.directory_1_3_7_1));
             tasty = dontCheck (doJailbreak super.tasty);
@@ -110,6 +117,7 @@
           ]).overrideAttrs(final: prev: {
             HEVM_SOLIDITY_REPO = solidity;
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
+            HEVM_FORGE_STD_REPO = forge-std;
             DAPP_SOLC = "${pkgs.solc}/bin/solc";
           });
 
@@ -121,7 +129,7 @@
           buildInputs = [ makeWrapper ];
           postBuild = ''
             wrapProgram $out/bin/hevm \
-              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3 cvc5 ])}"
+              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3 cvc5 bitwuzla ])}"
           '';
         };
 
@@ -134,6 +142,8 @@
           grep = "${pkgs.gnugrep}/bin/grep";
           otool = "${pkgs.darwin.binutils.bintools}/bin/otool";
           install_name_tool = "${pkgs.darwin.binutils.bintools}/bin/install_name_tool";
+          codesign_allocate = "${pkgs.darwin.binutils.bintools}/bin/codesign_allocate";
+          codesign = "${pkgs.darwin.sigtool}/bin/codesign";
         in if pkgs.stdenv.isLinux
         then pkgs.haskell.lib.dontCheck hevmUnwrapped
         else pkgs.runCommand "stripNixRefs" {} ''
@@ -151,6 +161,7 @@
           chmod 777 $out/bin/hevm
           ${install_name_tool} -change "$cxx" /usr/lib/libc++.1.dylib $out/bin/hevm
           ${install_name_tool} -change "$iconv" /usr/lib/libiconv.dylib $out/bin/hevm
+          CODESIGN_ALLOCATE=${codesign_allocate} ${codesign} -f -s - $out/bin/hevm
           chmod 555 $out/bin/hevm
         '';
 
@@ -200,6 +211,7 @@
             HEVM_SOLIDITY_REPO = solidity;
             DAPP_SOLC = "${pkgs.solc}/bin/solc";
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
+            HEVM_FORGE_STD_REPO = forge-std;
 
             # NOTE: hacks for bugged cabal new-repl
             LD_LIBRARY_PATH = libraryPath;

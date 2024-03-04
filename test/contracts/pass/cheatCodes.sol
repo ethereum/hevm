@@ -4,6 +4,8 @@ import "ds-test/test.sol";
 
 interface Hevm {
     function warp(uint256) external;
+    function deal(address,uint256) external;
+    function assume(bool) external;
     function roll(uint256) external;
     function load(address,bytes32) external returns (bytes32);
     function store(address,bytes32,bytes32) external;
@@ -25,7 +27,10 @@ contract Prankster {
 
 contract Payable {
     function hi() public payable {}
+    receive() external payable {}
 }
+
+contract Empty {}
 
 contract CheatCodes is DSTest {
     address store = address(new HasStorage());
@@ -123,7 +128,56 @@ contract CheatCodes is DSTest {
         assertEq(prankster.prankme(), address(this));
     }
 
-    function test_prank_val() public {
+    // this is not supported yet due to restrictions around symbolic address aliasing...
+    function proveFail_deal_unknown_address(address e, uint val) public {
+        hevm.deal(e, val);
+        assert(e.balance == val);
+    }
+
+    function prove_deal_simple(uint val) public {
+        address e = address(new Empty());
+        assert(e.balance == 0);
+        hevm.deal(e, val);
+        assert(e.balance == val);
+    }
+
+    function prove_deal_no_underflow(uint val) public {
+        require(address(this).balance < val);
+        prove_deal_simple(val);
+    }
+
+    function prove_deal_multiple(uint val1, uint val2) public {
+        address e = address(new Empty());
+
+        assert(e.balance == 0);
+        hevm.deal(e, val1);
+        assert(e.balance == val1);
+
+        hevm.deal(e, val2);
+        assert(e.balance == val2);
+    }
+
+    function prove_assume(bool b) public {
+        hevm.assume(b);
+        assert(b);
+    }
+
+    function prove_assume(uint v) public {
+        hevm.assume(v > 10);
+        assert(v > 10);
+    }
+
+    function proveFail_assume(uint v) public {
+        hevm.assume(v > 10);
+        assert(v <= 10);
+    }
+
+    function proveFail_assume(bool b) public {
+        hevm.assume(b);
+        assert(!b);
+    }
+
+    function prove_prank_val() public {
         address from = address(0x1312);
         uint amt = 10;
 
@@ -139,4 +193,22 @@ contract CheatCodes is DSTest {
 
         assertEq(preBal - postBal, amt);
     }
+
+    function prove_prank_val_2() public {
+        address payable a = payable(address(new Payable()));
+        address payable b = payable(address(new Payable()));
+
+        // send this.balance to a
+        a.call{value: address(this).balance}("");
+        uint aBal = a.balance;
+
+        // send 1 wei from a to b
+        hevm.prank(a);
+        address(b).call{value: 1}("");
+
+        // check balances
+        assertEq(a.balance, aBal - 1);
+        assertEq(b.balance, 1);
+    }
+
 }

@@ -20,18 +20,28 @@ import EVM.Solidity
 import EVM.Solvers
 import EVM.UnitTest
 import Control.Monad.ST (RealWorld)
+import Control.Monad.IO.Unlift
+import Control.Monad.Catch (MonadMask)
+import EVM.Effects
+import Data.Maybe (fromMaybe)
+import EVM.Types (internalError)
+import System.Environment (lookupEnv)
 
-runSolidityTestCustom :: FilePath -> Text -> Maybe Natural -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> IO Bool
+runSolidityTestCustom
+  :: (MonadMask m, App m)
+  => FilePath -> Text -> Maybe Natural -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> m Bool
 runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectType = do
   withSystemTempDirectory "dapp-test" $ \root -> do
-    compile projectType root testFile >>= \case
+    (liftIO $ compile projectType root testFile) >>= \case
       Left e -> error e
       Right bo@(BuildOutput contracts _) -> do
         withSolvers Z3 1 timeout $ \solvers -> do
-          opts <- testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
+          opts <- liftIO $ testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
           unitTest opts contracts
 
-runSolidityTest :: FilePath -> Text -> IO Bool
+runSolidityTest
+  :: (MonadMask m, App m)
+  => FilePath -> Text -> m Bool
 runSolidityTest testFile match = runSolidityTestCustom testFile match Nothing Nothing True Nothing Foundry
 
 testOpts :: SolverGroup -> FilePath -> Maybe BuildOutput -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO (UnitTestOptions RealWorld)
@@ -45,7 +55,6 @@ testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
     , rpcInfo = rpcinfo
     , maxIter = maxIter
     , askSmtIters = 1
-    , smtDebug = False
     , smtTimeout = Nothing
     , solver = Nothing
     , verbose = Just 1
@@ -62,16 +71,26 @@ compile DappTools root src = do
   T.writeFile (root <> "/out/dapp.sol.json") json
   readBuildOutput root DappTools
 compile CombinedJSON _root _src = error "unsupported"
-compile Foundry root src = do
+compile foundryType root src = do
   createDirectory (root <> "/src")
   writeFile (root <> "/src/unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
   initLib (root <> "/lib/ds-test") "test/contracts/lib/test.sol" "test.sol"
   initLib (root <> "/lib/tokens") "test/contracts/lib/erc20.sol" "erc20.sol"
+  case foundryType of
+    FoundryStdLib -> initStdForgeDir (root <> "/lib/forge-std")
+    Foundry -> pure ()
   r@(res,_,_) <- readProcessWithExitCode "forge" ["build", "--root", root] ""
   case res of
     ExitFailure _ -> pure . Left $ "compilation failed: " <> show r
     ExitSuccess -> readBuildOutput root Foundry
   where
+    initStdForgeDir :: FilePath -> IO ()
+    initStdForgeDir tld = do
+      createDirectoryIfMissing True tld
+      forgeStdRepo <- liftIO $ fromMaybe (internalError "cannot find forge-std repo") <$> (lookupEnv "HEVM_FORGE_STD_REPO")
+      callProcess "mkdir" ["-p", tld]
+      callProcess "cp" ["-r", forgeStdRepo <> "/src", tld <> "/src"]
+      callProcess "cp" ["-r", forgeStdRepo <> "/lib", tld <> "/lib"]
     initLib :: FilePath -> FilePath -> FilePath -> IO ()
     initLib tld srcFile dstFile = do
       createDirectoryIfMissing True (tld <> "/src")

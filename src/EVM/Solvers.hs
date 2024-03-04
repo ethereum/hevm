@@ -12,17 +12,20 @@ import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
 import Control.Concurrent (forkIO, killThread)
 import Control.Monad
 import Control.Monad.State.Strict
+import Control.Monad.IO.Unlift
 import Data.Char (isSpace)
 import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust, fromJust)
 import Data.Text qualified as TS
 import Data.Text.Lazy (Text)
 import Data.Text.Lazy qualified as T
 import Data.Text.Lazy.IO qualified as T
 import Data.Text.Lazy.Builder
-import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..))
+import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..), createPipe)
 import Witch (into)
+import EVM.Effects
+import EVM.Fuzz (tryCexFuzz)
 
 import EVM.SMT
 import EVM.Types (W256, Expr(AbstractBuf), internalError)
@@ -46,7 +49,6 @@ data SolverInstance = SolverInstance
   { solvertype :: Solver
   , stdin      :: Handle
   , stdout     :: Handle
-  , stderr     :: Handle
   , process    :: ProcessHandle
   }
 
@@ -88,49 +90,84 @@ checkSat (SolverGroup taskQueue) script = do
   -- collect result
   readChan resChan
 
-withSolvers :: Solver -> Natural -> Maybe Natural -> (SolverGroup -> IO a) -> IO a
+writeSMT2File :: SMT2 -> Int -> String -> IO ()
+writeSMT2File smt2 count abst =
+  do
+    let content = formatSMT2 smt2 <> "\n\n(check-sat)"
+    T.writeFile ("query-" <> (show count) <> "-" <> abst <> ".smt2") content
+
+withSolvers :: App m => Solver -> Natural -> Maybe Natural -> (SolverGroup -> m a) -> m a
 withSolvers solver count timeout cont = do
-  -- spawn solvers
-  instances <- mapM (const $ spawnSolver solver timeout) [1..count]
-  -- spawn orchestration thread
-  taskQueue <- newChan
-  availableInstances <- newChan
-  forM_ instances (writeChan availableInstances)
-  orchestrateId <- forkIO $ orchestrate taskQueue availableInstances
+    -- spawn solvers
+    instances <- mapM (const $ liftIO $ spawnSolver solver timeout) [1..count]
+    -- spawn orchestration thread
+    taskQueue <- liftIO newChan
+    availableInstances <- liftIO newChan
+    liftIO $ forM_ instances (writeChan availableInstances)
+    orchestrate' <- toIO $ orchestrate taskQueue availableInstances 0
+    orchestrateId <- liftIO $ forkIO orchestrate'
 
-  -- run continuation with task queue
-  res <- cont (SolverGroup taskQueue)
+    -- run continuation with task queue
+    res <- cont (SolverGroup taskQueue)
 
-  -- cleanup and return results
-  mapM_ stopSolver instances
-  killThread orchestrateId
-  pure res
+    -- cleanup and return results
+    liftIO $ mapM_ (stopSolver) instances
+    liftIO $ killThread orchestrateId
+    pure res
   where
-    orchestrate queue avail = do
-      task <- readChan queue
-      inst <- readChan avail
-      _ <- forkIO $ runTask task inst avail
-      orchestrate queue avail
+    orchestrate :: App m => Chan Task -> Chan SolverInstance -> Int -> m b
+    orchestrate queue avail fileCounter = do
+      task <- liftIO $ readChan queue
+      inst <- liftIO $ readChan avail
+      runTask' <- toIO $ runTask task inst avail fileCounter
+      _ <- liftIO $ forkIO runTask'
+      orchestrate queue avail (fileCounter + 1)
 
-    runTask (Task (SMT2 cmds cexvars) r) inst availableInstances = do
-      -- reset solver and send all lines of provided script
-      out <- sendScript inst (SMT2 ("(reset)" : cmds) cexvars)
-      case out of
-        -- if we got an error then return it
-        Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
-        -- otherwise call (check-sat), parse the result, and send it down the result channel
-        Right () -> do
-          sat <- sendLine inst "(check-sat)"
-          res <- case sat of
-            "sat" -> Sat <$> getModel inst cexvars
-            "unsat" -> pure Unsat
-            "timeout" -> pure Unknown
-            "unknown" -> pure Unknown
-            _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
-          writeChan r res
+    runTask :: (MonadIO m, ReadConfig m) => Task -> SolverInstance -> Chan SolverInstance -> Int -> m ()
+    runTask (Task smt2@(SMT2 cmds (RefinementEqs refineEqs refps) cexvars ps) r) inst availableInstances fileCounter = do
+      conf <- readConfig
+      let fuzzResult = tryCexFuzz ps conf.numCexFuzz
+      liftIO $ do
+        when (conf.dumpQueries) $ writeSMT2File smt2 fileCounter "abstracted"
+        if (isJust fuzzResult)
+          then do
+            when (conf.debug) $ putStrLn $ "Cex found via fuzzing:" <> (show fuzzResult)
+            writeChan r (Sat $ fromJust fuzzResult)
+          else if not conf.onlyCexFuzz then do
+            when (conf.debug) $ putStrLn "Fuzzing failed to find a Cex"
+            -- reset solver and send all lines of provided script
+            out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty ps)
+            case out of
+              -- if we got an error then return it
+              Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
+              -- otherwise call (check-sat), parse the result, and send it down the result channel
+              Right () -> do
+                sat <- sendLine inst "(check-sat)"
+                res <- do
+                    case sat of
+                      "unsat" -> pure Unsat
+                      "timeout" -> pure Unknown
+                      "unknown" -> pure Unknown
+                      "sat" -> if null refineEqs then Sat <$> getModel inst cexvars
+                               else do
+                                    let refinedSMT2 = SMT2 refineEqs mempty mempty (ps <> refps)
+                                    writeSMT2File refinedSMT2 fileCounter "refined"
+                                    _ <- sendScript inst refinedSMT2
+                                    sat2 <- sendLine inst "(check-sat)"
+                                    case sat2 of
+                                      "unsat" -> pure Unsat
+                                      "timeout" -> pure Unknown
+                                      "unknown" -> pure Unknown
+                                      "sat" -> Sat <$> getModel inst cexvars
+                                      _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat2
+                      _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
+                writeChan r res
+          else do
+            when (conf.debug) $ putStrLn "Fuzzing failed to find a Cex, not trying SMT due to onlyCexFuzz"
+            writeChan r Unknown
 
-      -- put the instance back in the list of available instances
-      writeChan availableInstances inst
+        -- put the instance back in the list of available instances
+        writeChan availableInstances inst
 
 getModel :: SolverInstance -> CexVars -> IO SMTCex
 getModel inst cexvars = do
@@ -183,7 +220,7 @@ getModel inst cexvars = do
     shrinkBuf buf hint = do
       let encBound = "(_ bv" <> (T.pack $ show (into hint :: Integer)) <> " 256)"
       sat <- liftIO $ do
-        checkCommand inst "(push)"
+        checkCommand inst "(push 1)"
         checkCommand inst $ "(assert (bvule " <> buf <> "_length " <> encBound <> "))"
         sendLine inst "(check-sat)"
       case sat of
@@ -191,7 +228,7 @@ getModel inst cexvars = do
           model <- liftIO getRaw
           put model
         "unsat" -> do
-          liftIO $ checkCommand inst "(pop)"
+          liftIO $ checkCommand inst "(pop 1)"
           shrinkBuf buf (if hint == 0 then hint + 1 else hint * 2)
         e -> internalError $ "Unexpected solver output: " <> (T.unpack e)
 
@@ -216,10 +253,15 @@ mkTimeout t = T.pack $ show $ (1000 *)$ case t of
   Nothing -> 300 :: Natural
   Just t' -> t'
 
--- | Arguments used when spawing a solver instance
+-- | Arguments used when spawning a solver instance
 solverArgs :: Solver -> Maybe Natural -> [Text]
 solverArgs solver timeout = case solver of
-  Bitwuzla -> internalError "TODO: Bitwuzla args"
+  Bitwuzla ->
+    [ "--lang=smt2"
+    , "--produce-models"
+    , "--time-limit-per=" <> mkTimeout timeout
+    , "--bv-solver=preprop"
+    ]
   Z3 ->
     [ "-in" ]
   CVC5 ->
@@ -227,6 +269,7 @@ solverArgs solver timeout = case solver of
     , "--produce-models"
     , "--print-success"
     , "--interactive"
+    , "--incremental"
     , "--tlimit-per=" <> mkTimeout timeout
     ]
   Custom _ -> []
@@ -234,25 +277,35 @@ solverArgs solver timeout = case solver of
 -- | Spawns a solver instance, and sets the various global config options that we use for our queries
 spawnSolver :: Solver -> Maybe (Natural) -> IO SolverInstance
 spawnSolver solver timeout = do
-  let cmd = (proc (show solver) (fmap T.unpack $ solverArgs solver timeout)) { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe }
-  (Just stdin, Just stdout, Just stderr, process) <- createProcess cmd
+  (readout, writeout) <- createPipe
+  let cmd
+        = (proc (show solver) (fmap T.unpack $ solverArgs solver timeout))
+            { std_in = CreatePipe
+            , std_out = UseHandle writeout
+            , std_err = UseHandle writeout
+            }
+  (Just stdin, Nothing, Nothing, process) <- createProcess cmd
   hSetBuffering stdin (BlockBuffering (Just 1000000))
-  let solverInstance = SolverInstance solver stdin stdout stderr process
+  let solverInstance = SolverInstance solver stdin readout process
 
   case solver of
     CVC5 -> pure solverInstance
-    _ -> do
+    Bitwuzla -> do
+      _ <- sendLine solverInstance "(set-option :print-success true)"
+      pure solverInstance
+    Z3 -> do
       _ <- sendLine' solverInstance $ "(set-option :timeout " <> mkTimeout timeout <> ")"
       _ <- sendLine solverInstance "(set-option :print-success true)"
       pure solverInstance
+    Custom _ -> pure solverInstance
 
--- | Cleanly shutdown a running solver instnace
+-- | Cleanly shutdown a running solver instance
 stopSolver :: SolverInstance -> IO ()
-stopSolver (SolverInstance _ stdin stdout stderr process) = cleanupProcess (Just stdin, Just stdout, Just stderr, process)
+stopSolver (SolverInstance _ stdin stdout process) = cleanupProcess (Just stdin, Just stdout, Nothing, process)
 
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
 sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
-sendScript solver (SMT2 cmds _) = do
+sendScript solver (SMT2 cmds _ _ _) = do
   let sexprs = splitSExpr $ fmap toLazyText cmds
   go sexprs
   where
@@ -268,7 +321,7 @@ checkCommand inst cmd = do
   res <- sendCommand inst cmd
   case res of
     "success" -> pure ()
-    _ -> error $ "Internal Error: Unexpected solver output: " <> (T.unpack res)
+    _ -> internalError $ "Unexpected solver output: " <> T.unpack res
 
 -- | Sends a single command to the solver, returns the first available line from the output buffer
 sendCommand :: SolverInstance -> Text -> IO Text
@@ -282,20 +335,20 @@ sendCommand inst cmd = do
 
 -- | Sends a string to the solver and appends a newline, returns the first available line from the output buffer
 sendLine :: SolverInstance -> Text -> IO Text
-sendLine (SolverInstance _ stdin stdout _ _) cmd = do
+sendLine (SolverInstance _ stdin stdout _) cmd = do
   T.hPutStr stdin (T.append cmd "\n")
   hFlush stdin
   T.hGetLine stdout
 
 -- | Sends a string to the solver and appends a newline, doesn't return stdout
 sendLine' :: SolverInstance -> Text -> IO ()
-sendLine' (SolverInstance _ stdin _ _ _) cmd = do
+sendLine' (SolverInstance _ stdin _ _) cmd = do
   T.hPutStr stdin (T.append cmd "\n")
   hFlush stdin
 
 -- | Returns a string representation of the model for the requested variable
 getValue :: SolverInstance -> Text -> IO Text
-getValue (SolverInstance _ stdin stdout _ _) var = do
+getValue (SolverInstance _ stdin stdout _) var = do
   T.hPutStr stdin (T.append (T.append "(get-value (" var) "))\n")
   hFlush stdin
   fmap (T.unlines . reverse) (readSExpr stdout)
