@@ -1,11 +1,20 @@
-## [0.53.0] - 2024-02-23
-
 # Changelog
 
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## Changed
+
+## Added
+
+## Fixed
+-- `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
+   with declare-fun
+
+## [0.53.0] - 2024-02-23
+
 
 ## Changed
 
@@ -38,7 +47,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Traces now correctly perform source mapping to display contract details
 - Event traces now correctly display indexed arguments and argument names
 - JSON reading of foundry JSONs was dependent on locale and did not work with many locales.
-- `concat` is a 2-ary, not an n-ary function in SMT2LIB
 - CVC5 needs `--incremental` flag to work properly in abstraction-refinement mode
 
 ## [0.52.0] - 2023-10-26
