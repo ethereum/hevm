@@ -892,11 +892,11 @@ decomposeStorage = go
     setLogicalBase _ (AbstractStore _ _) = Nothing
     setLogicalBase idx (SStore k v prevStorage) = do
       (idx2, _) <- inferLogicalIdx k
+      b <- setLogicalBase idx prevStorage
       if idx == idx2 then do
-        b <- setLogicalBase idx prevStorage
         Just (SStore k v b)
       else do
-        Just prevStorage
+        setLogicalBase idx b
 
     -- empty concrete base is safe to reuse without any rewriting
     setLogicalBase _ s@(ConcreteStore m) | Map.null m = Just s
