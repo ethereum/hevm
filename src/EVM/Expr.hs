@@ -889,12 +889,12 @@ decomposeStorage = go
     setLogicalBase :: Maybe W256 -> Expr Storage -> Maybe (Expr Storage)
 
     setLogicalBase idx (AbstractStore addr Nothing) = Just $ AbstractStore addr idx
-    setLogicalBase _ (AbstractStore _ _) = Nothing
+    setLogicalBase _ (AbstractStore _ _) = Nothing -- should be error I think....
     setLogicalBase idx (SStore k v prevStorage) = do
-      (idx2, _) <- inferLogicalIdx k
+      (idx2, key2) <- inferLogicalIdx k
       b <- setLogicalBase idx prevStorage
       if idx == idx2 then do
-        Just (SStore k v b)
+        Just (SStore key2 v b)
       else do
         setLogicalBase idx b
 
