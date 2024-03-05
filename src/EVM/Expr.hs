@@ -853,17 +853,7 @@ decomposeStorage = go
   where
     go :: Expr a -> Maybe (Expr a)
     go (SLoad key store) = tryRewriteLoad key store
-    go (SStore key value storage) = tryRewriteStore key value storage
     go e = Just e
-
-    tryRewriteStore :: Expr EWord -> Expr EWord -> Expr Storage -> Maybe (Expr Storage)
-    tryRewriteStore origKey val store = case inferLogicalIdx origKey of
-      Just (idx, key) -> do
-        -- base <- trace ("setLogicalBase called with " <> show idx <>  " -- " <> show store <> " ----- " <> (show (setLogicalBase idx store)) ) $ setLogicalBase idx store
-        base <- setLogicalBase idx store
-        pure (SStore key val base)
-      -- _ -> trace ("nothing here due to SStore " <> show origKey  <> " -- " <> show val <> " -- " <> show store) $ Nothing
-      _ -> Nothing
 
     tryRewriteLoad :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
     tryRewriteLoad origKey store = case inferLogicalIdx origKey of
@@ -898,13 +888,15 @@ decomposeStorage = go
     -- Updates the logical base store of the given expression if it is safe to do so
     setLogicalBase :: Maybe W256 -> Expr Storage -> Maybe (Expr Storage)
 
-    -- abstract bases get their logical idx set to the new value
     setLogicalBase idx (AbstractStore addr Nothing) = Just $ AbstractStore addr idx
-    setLogicalBase idx (AbstractStore addr idx2) | idx == idx2  = Just $ AbstractStore addr idx
     setLogicalBase _ (AbstractStore _ _) = Nothing
-    setLogicalBase idx (SStore key2 v prevStorage) = do
-      b <- setLogicalBase idx prevStorage
-      Just (SStore key2 v b)
+    setLogicalBase idx (SStore k v prevStorage) = do
+      (idx2, _) <- inferLogicalIdx k
+      if idx == idx2 then do
+        b <- setLogicalBase idx prevStorage
+        Just (SStore k v b)
+      else do
+        Just (SStore k v prevStorage)
 
     -- empty concrete base is safe to reuse without any rewriting
     setLogicalBase _ s@(ConcreteStore m) | Map.null m = Just s
