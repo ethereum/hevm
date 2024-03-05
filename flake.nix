@@ -217,6 +217,7 @@
             LD_LIBRARY_PATH = libraryPath;
             shellHook = lib.optionalString stdenv.isDarwin ''
               export DYLD_LIBRARY_PATH="${libraryPath}";
+              export NIX_BUILD_CORES=8
             '';
           };
       }
