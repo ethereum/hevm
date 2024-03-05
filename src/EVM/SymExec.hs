@@ -698,7 +698,9 @@ equivalenceCheck' solvers branchesA branchesB = do
     -- used or not
     check :: Config -> UnsatCache -> (Set Prop) -> IO (EquivResult, Bool)
     check conf knownUnsat props = do
-      liftIO $ when conf.debug $ putStrLn $ "Checking equivalence of props:\n" <> show props
+      liftIO $ when conf.debug $ do
+        putStrLn $ "Checking equivalence of props:\n" <> show props
+        mapM_ print props
       let smt = assertProps conf (Set.toList props)
       ku <- readTVarIO knownUnsat
       res <- if subsetAny props ku
