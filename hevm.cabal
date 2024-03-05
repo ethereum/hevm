@@ -46,13 +46,13 @@ common shared
     ghc-options: -Werror
   if flag(debug)
     ghc-options:
-      -jsem
+      -j8
       -g3
       -fdistinct-constructor-tables
       -finfo-table-map
       -eventlog
   ghc-options:
-    -jsem
+    -j8
     -Wall
     -Wno-unticked-promoted-constructors
     -Wno-orphans
@@ -75,7 +75,7 @@ common shared
 
 library
   import: shared
-  ghc-options: -jsem
+  ghc-options: -j8
   exposed-modules:
     EVM,
     EVM.ABI,
@@ -118,7 +118,7 @@ library
     -- extra-libraries: c++
     -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
     ld-options: -Wl,-keep_dwarf_unwind
-    ghc-options: -fcompact-unwind -jsem
+    ghc-options: -fcompact-unwind -j8
   extra-libraries:
     secp256k1, ff, gmp
   c-sources:
@@ -197,7 +197,7 @@ executable hevm
     cli
   main-is:
     cli.hs
-  ghc-options: -threaded -with-rtsopts=-N -jsem
+  ghc-options: -threaded -with-rtsopts=-N -j8
   other-modules:
     Paths_hevm
   if os(darwin)
@@ -307,7 +307,7 @@ common test-common
   import:
     test-base
   if flag(devel)
-    ghc-options: -threaded -with-rtsopts=-N -jsem
+    ghc-options: -threaded -with-rtsopts=-N -j8
   build-depends:
     test-utils
   other-modules:
@@ -359,7 +359,7 @@ benchmark bench
     bench
   ghc-options:
     -O2
-    -jsem
+    -j8
   if os(darwin)
     extra-libraries: c++
   other-modules:
