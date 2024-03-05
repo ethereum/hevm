@@ -44,8 +44,6 @@ source-repository head
 common shared
   if flag(ci)
     ghc-options: -Werror
-  if flag(devel)
-    ghc-options: -j
   if flag(debug)
     ghc-options:
       -j
@@ -54,6 +52,7 @@ common shared
       -finfo-table-map
       -eventlog
   ghc-options:
+    -j
     -Wall
     -Wno-unticked-promoted-constructors
     -Wno-orphans
