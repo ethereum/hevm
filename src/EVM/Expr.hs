@@ -786,6 +786,9 @@ safeToDecomposeProp p = void $ mapPropM' findPEqStore p
     findPEqStore :: Prop -> Maybe Prop
     findPEqStore = \case
       (PEq (SStore {}) (SStore {})) -> Nothing
+      (PEq (AbstractStore {}) (SStore {})) -> Nothing
+      (PEq (SStore {}) (AbstractStore {})) -> Nothing
+      (PEq (AbstractStore {}) (AbstractStore {})) -> Nothing
       a -> Just a
 
 safeToDecompose :: Expr a -> Maybe ()
