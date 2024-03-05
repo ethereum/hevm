@@ -210,12 +210,13 @@ assertProps :: Config -> [Prop] -> SMT2
 assertProps conf ps = assertPropsNoSimp conf (decompose . Expr.simplifyProps $ ps)
   where
     decompose :: [Prop] -> [Prop]
-    decompose props = if conf.decomposeStorage && (isJust $ sequence_ safeList)
+    decompose props = if conf.decomposeStorage && (isJust $ sequence_ safeList) && (isJust $ sequence_ safeList2)
                       then fromMaybe props (mapM (mapPropMNoState Expr.decomposeStorage) props)
                       else props
       where
         -- All in this list must be a `Just ()` or we cannot decompose
         safeList = map (mapPropM_ Expr.safeToDecompose) props
+        safeList2 = map Expr.safeToDecomposeProp props
 
 -- Note: we need a version that does NOT call simplify,
 -- because we make use of it to verify the correctness of our simplification

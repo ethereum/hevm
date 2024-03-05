@@ -780,6 +780,14 @@ getLogicalIdx (GVar _) = internalError "cannot determine addr of a GVar"
 data StorageType = SmallSlot | Array | Map | Mixed | UNK
   deriving (Show, Eq)
 
+safeToDecomposeProp :: Prop -> Maybe ()
+safeToDecomposeProp p = void $ mapPropM' findPEqStore p
+  where
+    findPEqStore :: Prop -> Maybe Prop
+    findPEqStore = \case
+      (PEq (SStore {}) (SStore {})) -> Nothing
+      a -> Just a
+
 safeToDecompose :: Expr a -> Maybe ()
 safeToDecompose inp = if result /= Mixed then Just () else Nothing
   where

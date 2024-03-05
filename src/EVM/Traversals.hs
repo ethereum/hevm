@@ -233,6 +233,31 @@ mapProp' f = \case
   POr a b -> f $ POr (mapProp' f a) (mapProp' f b)
   PImpl a b -> f $ PImpl (mapProp' f a) (mapProp' f b)
 
+
+mapPropM' :: forall m . (Monad m) => (Prop -> m Prop) -> Prop -> m Prop
+mapPropM' f = \case
+  PBool b -> f $ PBool b
+  PEq a b -> f $ PEq a b
+  PLT a b -> f $ PLT a b
+  PGT a b -> f $ PGT a b
+  PLEq a b -> f $ PLEq a b
+  PGEq a b -> f $ PGEq a b
+  PNeg a -> do
+    x <-mapPropM' f a
+    f $ PNeg x
+  PAnd a b -> do
+    x <- mapPropM' f a
+    y <- (mapPropM' f b)
+    f $ PAnd x y
+  POr a b -> do
+    x <- mapPropM' f a
+    y <- (mapPropM' f b)
+    f $ POr x y
+  PImpl a b -> do
+    x <- mapPropM' f a
+    y <- (mapPropM' f b)
+    f $ PImpl x y
+
 mapExpr :: (forall a . Expr a -> Expr a) -> Expr b -> Expr b
 mapExpr f expr = runIdentity (mapExprM (Identity . f) expr)
 
