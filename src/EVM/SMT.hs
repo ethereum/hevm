@@ -41,7 +41,6 @@ import EVM.Keccak (keccakAssumptions, keccakCompute)
 import EVM.Traversals
 import EVM.Types
 import EVM.Effects
-import Debug.Trace
 
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
