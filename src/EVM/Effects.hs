@@ -26,16 +26,18 @@ only.
 
 module EVM.Effects where
 
-import Control.Monad.Reader
+import Control.Monad (when)
 import Control.Monad.IO.Unlift
-import EVM.Dapp (DappInfo)
-import EVM.Types (VM(..))
+import Control.Monad.Reader
 import Control.Monad.ST (RealWorld)
 import Data.Text (Text)
 import Data.Text.IO qualified as T
 import System.IO (stderr)
-import EVM.Format (showTraceTree)
+
 import EVM (traceForest)
+import EVM.Dapp (DappInfo)
+import EVM.Format (showTraceTree)
+import EVM.Types (VM(..))
 
 
 -- Abstract Effects --------------------------------------------------------------------------------

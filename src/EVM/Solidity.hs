@@ -658,7 +658,7 @@ containsLinkerHole :: Text -> Bool
 containsLinkerHole = regexMatches "__\\$[a-z0-9]{34}\\$__"
 
 toCode :: Text -> Text -> ByteString
-toCode contractName t = case BS16.decodeBase16 (encodeUtf8 t) of
+toCode contractName t = case BS16.decodeBase16Untyped (encodeUtf8 t) of
   Right d -> d
   Left e -> if containsLinkerHole t
             then error $ T.unpack ("Error toCode: unlinked libraries detected in bytecode, in " <> contractName)
