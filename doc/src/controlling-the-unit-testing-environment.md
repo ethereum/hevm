@@ -47,3 +47,6 @@ These can be accessed by calling into a contract (typically called `Vm`) at addr
 
 - `function activeFork() external returns (uint256)`
   Returns the identifier of the current fork.
+
+- `function label(address addr, string calldata label) external`
+  Labels the address in traces

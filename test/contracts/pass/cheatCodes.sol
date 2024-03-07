@@ -13,6 +13,7 @@ interface Hevm {
     function addr(uint256) external returns (address);
     function ffi(string[] calldata) external returns (bytes memory);
     function prank(address) external;
+    function label(address addr, string calldata label) external;
 }
 
 contract HasStorage {
@@ -211,4 +212,8 @@ contract CheatCodes is DSTest {
         assertEq(b.balance, 1);
     }
 
+    function prove_label_works() public {
+        hevm.label(address(this), "label");
+        assert(true);
+    }
 }
