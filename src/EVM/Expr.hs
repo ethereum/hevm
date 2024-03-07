@@ -1203,14 +1203,19 @@ simplifyProp prop =
     go :: Prop -> Prop
 
     -- LT/LEq comparisons
+    go (PGT a b) = PLT b a
+    go (PGEq a b) = PLEq b a
     go (PLT  (Var _) (Lit 0)) = PBool False
-    go (PLEq (Lit 0) (Var _)) = PBool True
+    go (PLEq (Lit 0) _) = PBool True
+    go (PLEq (WAddr _) (Lit 1461501637330902918203684832716283019655932542975)) = PBool True
+    go (PLEq _ (Lit x)) | x == maxLit = PBool True
     go (PLT  (Lit val) (Var _)) | val == maxLit = PBool False
     go (PLEq (Var _) (Lit val)) | val == maxLit = PBool True
     go (PLT (Lit l) (Lit r)) = PBool (l < r)
     go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
     go (PLEq a (Max b _)) | a == b = PBool True
     go (PLEq a (Max _ b)) | a == b = PBool True
+    go (PLEq (Sub a b) c) | a == c = PLEq b a
     go (PLT (Max (Lit a) b) (Lit c)) | a < c = PLT b (Lit c)
     go (PLT (Lit 0) (Eq a b)) = PEq a b
 
@@ -1226,7 +1231,7 @@ simplifyProp prop =
     -- iszero(iszero(a))) -> ~(a == 0) -> a > 0
     -- iszero(iszero(a)) == 0 -> ~~(a == 0) -> a == 0
     -- ~(iszero(iszero(a)) == 0) -> ~~~(a == 0) -> ~(a == 0) -> a > 0
-    go (PNeg (PEq (IsZero (IsZero a)) (Lit 0))) = PGT a (Lit 0)
+    go (PNeg (PEq (IsZero (IsZero a)) (Lit 0))) = PLT (Lit 0) a
 
     -- iszero(a) -> (a == 0)
     -- iszero(a) == 0 -> ~(a == 0)
@@ -1258,6 +1263,7 @@ simplifyProp prop =
     go (PEq (Eq a b) (Lit 0)) = PNeg (PEq a b)
     go (PEq (Eq a b) (Lit 1)) = PEq a b
     go (PEq (Sub a b) (Lit 0)) = PEq a b
+    go (PEq (LT a b) (Lit 0)) = PLEq b a
     go (PEq (Lit l) (Lit r)) = PBool (l == r)
     go o@(PEq l r)
       | l == r = PBool True
