@@ -1,6 +1,4 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
 module EVM.SymExec where
 
@@ -50,6 +48,7 @@ import Options.Generic (ParseField, ParseFields, ParseRecord)
 import Witch (into, unsafeInto)
 import EVM.Effects
 import Control.Monad.IO.Unlift
+import Control.Monad (when, forM_)
 
 data LoopHeuristic
   = Naive
@@ -680,7 +679,7 @@ equivalenceCheck' solvers branchesA branchesB = do
 
       let useful = foldr (\(_, b) n -> if b then n+1 else n) (0::Integer) results
       liftIO $ putStrLn $ "Reuse of previous queries was Useful in " <> (show useful) <> " cases"
-      case all isQed . fmap fst $ results of
+      case all (isQed . fst) results of
         True -> pure [Qed ()]
         False -> pure $ filter (/= Qed ()) . fmap fst $ results
   where

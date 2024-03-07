@@ -1,8 +1,8 @@
 module Main where
 
-import EVM.Test.BlockchainTests qualified  as BlockchainTests
 import Test.Tasty
 import EVM.Effects
+import EVM.Test.BlockchainTests qualified as BlockchainTests
 
 testEnv :: Env
 testEnv = Env { config = defaultConfig }
