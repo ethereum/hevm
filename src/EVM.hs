@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ImplicitParams #-}
 
 module EVM where
@@ -150,6 +149,7 @@ makeVm o = do
       }
     , forks = Seq.singleton (ForkState env block cache "")
     , currentFork = 0
+    , labels = mempty
     }
     where
     env = Env
@@ -1537,8 +1537,9 @@ cheat
 cheat (inOffset, inSize) (outOffset, outSize) = do
   vm <- get
   input <- readMemory (Expr.add inOffset (Lit 4)) (Expr.sub inSize (Lit 4))
+  calldata <- readMemory inOffset inSize
   abi <- readBytes 4 (Lit 0) <$> readMemory inOffset (Lit 4)
-  pushTrace $ FrameTrace (CallContext cheatCode cheatCode inOffset inSize (Lit 0) (maybeLitWord abi) input vm.env.contracts vm.tx.substate)
+  pushTrace $ FrameTrace (CallContext cheatCode cheatCode inOffset inSize (Lit 0) (maybeLitWord abi) calldata vm.env.contracts vm.tx.substate)
   case maybeLitWord abi of
     Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc "symbolic cheatcode selector" (wrap [abi])
     Just (unsafeInto -> abi') ->
@@ -1554,160 +1555,167 @@ cheat (inOffset, inSize) (outOffset, outSize) = do
 type CheatAction t s = Expr EWord -> Expr EWord -> Expr Buf -> EVM t s ()
 
 cheatActions :: VMOps t => Map FunctionSelector (CheatAction t s)
-cheatActions =
-  Map.fromList
-    [ action "ffi(string[])" $
-        \sig outOffset outSize input -> do
-          vm <- get
-          if vm.config.allowFFI then
-            case decodeBuf [AbiArrayDynamicType AbiStringType] input of
-              CAbi valsArr -> case valsArr of
-                [AbiArrayDynamic AbiStringType strsV] ->
-                  let
-                    cmd = fmap
-                            (\case
-                              (AbiString a) -> unpack $ decodeUtf8 a
-                              _ -> "")
-                            (V.toList strsV)
-                    cont bs = do
-                      let encoded = ConcreteBuf bs
-                      assign (#state % #returndata) encoded
-                      copyBytesToMemory encoded outSize (Lit 0) outOffset
-                      assign #result Nothing
-                  in query (PleaseDoFFI cmd cont)
-                _ -> vmError (BadCheatCode sig)
+cheatActions = Map.fromList
+  [ action "ffi(string[])" $
+      \sig outOffset outSize input -> do
+        vm <- get
+        if vm.config.allowFFI then
+          case decodeBuf [AbiArrayDynamicType AbiStringType] input of
+            CAbi valsArr -> case valsArr of
+              [AbiArrayDynamic AbiStringType strsV] ->
+                let
+                  cmd = fmap
+                          (\case
+                            (AbiString a) -> unpack $ decodeUtf8 a
+                            _ -> "")
+                          (V.toList strsV)
+                  cont bs = do
+                    let encoded = ConcreteBuf bs
+                    assign (#state % #returndata) encoded
+                    copyBytesToMemory encoded outSize (Lit 0) outOffset
+                    assign #result Nothing
+                in query (PleaseDoFFI cmd cont)
               _ -> vmError (BadCheatCode sig)
-          else
-            let msg = "ffi disabled: run again with --ffi if you want to allow tests to call external scripts"
-            in partial $ UnexpectedSymbolicArg vm.state.pc msg [],
-
-      action "warp(uint256)" $
-        \sig _ _ input -> case decodeStaticArgs 0 1 input of
-          [x]  -> assign (#block % #timestamp) x
-          _ -> vmError (BadCheatCode sig),
-
-      action "deal(address,uint256)" $
-        \sig _ _ input -> case decodeStaticArgs 0 2 input of
-          [a, amt] ->
-            forceAddr a "vm.deal: cannot decode target into an address" $ \usr ->
-              fetchAccount usr $ \_ -> do
-                assign (#env % #contracts % ix usr % #balance) amt
-          _ -> vmError (BadCheatCode sig),
-
-      action "assume(bool)" $
-        \sig _ _ input -> case decodeStaticArgs 0 1 input of
-          [c] -> modifying #constraints ((:) (PEq c (Lit 1)))
-          _ -> vmError (BadCheatCode sig),
-
-      action "roll(uint256)" $
-        \sig _ _ input -> case decodeStaticArgs 0 1 input of
-          [x] -> forceConcrete x "cannot roll to a symbolic block number" (assign (#block % #number))
-          _ -> vmError (BadCheatCode sig),
-
-      action "store(address,bytes32,bytes32)" $
-        \sig _ _ input -> case decodeStaticArgs 0 3 input of
-          [a, slot, new] -> case wordToAddr a of
-            Just a'@(LitAddr _) -> fetchAccount a' $ \_ ->
-              modifying (#env % #contracts % ix a' % #storage) (writeStorage slot new)
             _ -> vmError (BadCheatCode sig)
-          _ -> vmError (BadCheatCode sig),
+        else
+          let msg = "ffi disabled: run again with --ffi if you want to allow tests to call external scripts"
+          in partial $ UnexpectedSymbolicArg vm.state.pc msg []
 
-      action "load(address,bytes32)" $
-        \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
-          [a, slot] -> case wordToAddr a of
-            Just a'@(LitAddr _) -> fetchAccount a' $ \_ ->
-              accessStorage a' slot $ \res -> do
-                assign (#state % #returndata % word256At (Lit 0)) res
-                let buf = writeWord (Lit 0) res (ConcreteBuf "")
-                copyBytesToMemory buf (Lit 32) (Lit 0) outOffset
-            _ -> vmError (BadCheatCode sig)
-          _ -> vmError (BadCheatCode sig),
+  , action "warp(uint256)" $
+      \sig _ _ input -> case decodeStaticArgs 0 1 input of
+        [x]  -> assign (#block % #timestamp) x
+        _ -> vmError (BadCheatCode sig)
 
-      action "sign(uint256,bytes32)" $
-        \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
-          [sk, hash] ->
-            forceConcrete2 (sk, hash) "cannot sign symbolic data" $ \(sk', hash') -> do
-              let (v,r,s) = EVM.Sign.sign hash' (into sk')
-                  encoded = encodeAbiValue $
-                    AbiTuple (V.fromList
-                      [ AbiUInt 8 $ into v
-                      , AbiBytes 32 (word256Bytes r)
-                      , AbiBytes 32 (word256Bytes s)
-                      ])
-              assign (#state % #returndata) (ConcreteBuf encoded)
-              copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
-          _ -> vmError (BadCheatCode sig),
+  , action "deal(address,uint256)" $
+      \sig _ _ input -> case decodeStaticArgs 0 2 input of
+        [a, amt] ->
+          forceAddr a "vm.deal: cannot decode target into an address" $ \usr ->
+            fetchAccount usr $ \_ -> do
+              assign (#env % #contracts % ix usr % #balance) amt
+        _ -> vmError (BadCheatCode sig)
 
-      action "addr(uint256)" $
-        \sig outOffset _ input -> case decodeStaticArgs 0 1 input of
-          [sk] -> forceConcrete sk "cannot derive address for a symbolic key" $ \sk' -> do
-            let a = EVM.Sign.deriveAddr $ into sk'
-            case a of
-              Nothing -> vmError (BadCheatCode sig)
-              Just address -> do
-                let expAddr = litAddr address
-                assign (#state % #returndata % word256At (Lit 0)) expAddr
-                let buf = ConcreteBuf $ word256Bytes (into address)
-                copyBytesToMemory buf (Lit 32) (Lit 0) outOffset
-          _ -> vmError (BadCheatCode sig),
+  , action "assume(bool)" $
+      \sig _ _ input -> case decodeStaticArgs 0 1 input of
+        [c] -> modifying #constraints ((:) (PEq c (Lit 1)))
+        _ -> vmError (BadCheatCode sig)
 
-      action "prank(address)" $
-        \sig _ _ input -> case decodeStaticArgs 0 1 input of
-          [addr]  -> case wordToAddr addr of
-            Just a -> assign (#config % #overrideCaller) (Just a)
+  , action "roll(uint256)" $
+      \sig _ _ input -> case decodeStaticArgs 0 1 input of
+        [x] -> forceConcrete x "cannot roll to a symbolic block number" (assign (#block % #number))
+        _ -> vmError (BadCheatCode sig)
+
+  , action "store(address,bytes32,bytes32)" $
+      \sig _ _ input -> case decodeStaticArgs 0 3 input of
+        [a, slot, new] -> case wordToAddr a of
+          Just a'@(LitAddr _) -> fetchAccount a' $ \_ ->
+            modifying (#env % #contracts % ix a' % #storage) (writeStorage slot new)
+          _ -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode sig)
+
+  , action "load(address,bytes32)" $
+      \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
+        [a, slot] -> case wordToAddr a of
+          Just a'@(LitAddr _) -> fetchAccount a' $ \_ ->
+            accessStorage a' slot $ \res -> do
+              assign (#state % #returndata % word256At (Lit 0)) res
+              let buf = writeWord (Lit 0) res (ConcreteBuf "")
+              copyBytesToMemory buf (Lit 32) (Lit 0) outOffset
+          _ -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode sig)
+
+  , action "sign(uint256,bytes32)" $
+      \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
+        [sk, hash] ->
+          forceConcrete2 (sk, hash) "cannot sign symbolic data" $ \(sk', hash') -> do
+            let (v,r,s) = EVM.Sign.sign hash' (into sk')
+                encoded = encodeAbiValue $
+                  AbiTuple (V.fromList
+                    [ AbiUInt 8 $ into v
+                    , AbiBytes 32 (word256Bytes r)
+                    , AbiBytes 32 (word256Bytes s)
+                    ])
+            assign (#state % #returndata) (ConcreteBuf encoded)
+            copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
+        _ -> vmError (BadCheatCode sig)
+
+  , action "addr(uint256)" $
+      \sig outOffset _ input -> case decodeStaticArgs 0 1 input of
+        [sk] -> forceConcrete sk "cannot derive address for a symbolic key" $ \sk' -> do
+          let a = EVM.Sign.deriveAddr $ into sk'
+          case a of
             Nothing -> vmError (BadCheatCode sig)
-          _ -> vmError (BadCheatCode sig),
+            Just address -> do
+              let expAddr = litAddr address
+              assign (#state % #returndata % word256At (Lit 0)) expAddr
+              let buf = ConcreteBuf $ word256Bytes (into address)
+              copyBytesToMemory buf (Lit 32) (Lit 0) outOffset
+        _ -> vmError (BadCheatCode sig)
 
-      action "createFork(string)" $
-        \sig outOffset _ input -> case decodeBuf [AbiStringType] input of
-          CAbi valsArr -> case valsArr of
-            [AbiString bytes] -> do
-              forkId <- length <$> gets (.forks)
-              let urlOrAlias = Char8.unpack bytes
-              modify' $ \vm -> vm { forks = vm.forks Seq.|> ForkState vm.env vm.block vm.cache urlOrAlias }
-              let encoded = encodeAbiValue $ AbiUInt 256 (fromIntegral forkId)
-              assign (#state % #returndata) (ConcreteBuf encoded)
-              copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
-            _ -> vmError (BadCheatCode sig)
-          _ -> vmError (BadCheatCode sig),
+  , action "prank(address)" $
+      \sig _ _ input -> case decodeStaticArgs 0 1 input of
+        [addr]  -> case wordToAddr addr of
+          Just a -> assign (#config % #overrideCaller) (Just a)
+          Nothing -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode sig)
 
-      action "selectFork(uint256)" $
-        \sig _ _ input -> case decodeStaticArgs 0 1 input of
-          [forkId] ->
-            forceConcrete forkId "forkId must be concrete" $ \(fromIntegral -> forkId') -> do
-              saved <- Seq.lookup forkId' <$> gets (.forks)
-              case saved of
-                Just forkState -> do
-                  vm <- get
-                  let contractAddr = vm.state.contract
-                  let callerAddr = vm.state.caller
-                  fetchAccount contractAddr $ \contractAcct -> fetchAccount callerAddr $ \callerAcct -> do
-                    let
-                      -- the current contract is persisted across forks
-                      newContracts = Map.insert callerAddr callerAcct $
-                                     Map.insert contractAddr contractAcct forkState.env.contracts
-                      newEnv = (forkState.env :: Env) { contracts = newContracts }
+  , action "createFork(string)" $
+      \sig outOffset _ input -> case decodeBuf [AbiStringType] input of
+        CAbi valsArr -> case valsArr of
+          [AbiString bytes] -> do
+            forkId <- length <$> gets (.forks)
+            let urlOrAlias = Char8.unpack bytes
+            modify' $ \vm -> vm { forks = vm.forks Seq.|> ForkState vm.env vm.block vm.cache urlOrAlias }
+            let encoded = encodeAbiValue $ AbiUInt 256 (fromIntegral forkId)
+            assign (#state % #returndata) (ConcreteBuf encoded)
+            copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
+          _ -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode sig)
 
-                    when (vm.currentFork /= forkId') $ do
-                      modify' $ \vm' -> vm'
-                        { env = newEnv
-                        , block = forkState.block
-                        , forks = Seq.adjust' (\state -> (state :: ForkState)
-                            { env = vm.env, block = vm.block, cache = vm.cache }
-                          ) vm.currentFork  vm.forks
-                        , currentFork = forkId'
-                        }
-                Nothing ->
-                  vmError (NonexistentFork forkId')
-          _ -> vmError (BadCheatCode sig),
+  , action "selectFork(uint256)" $
+      \sig _ _ input -> case decodeStaticArgs 0 1 input of
+        [forkId] ->
+          forceConcrete forkId "forkId must be concrete" $ \(fromIntegral -> forkId') -> do
+            saved <- Seq.lookup forkId' <$> gets (.forks)
+            case saved of
+              Just forkState -> do
+                vm <- get
+                let contractAddr = vm.state.contract
+                let callerAddr = vm.state.caller
+                fetchAccount contractAddr $ \contractAcct -> fetchAccount callerAddr $ \callerAcct -> do
+                  let
+                    -- the current contract is persisted across forks
+                    newContracts = Map.insert callerAddr callerAcct $
+                                   Map.insert contractAddr contractAcct forkState.env.contracts
+                    newEnv = (forkState.env :: Env) { contracts = newContracts }
 
-      action "activeFork()" $
-        \_ outOffset _ _ -> do
-          vm <- get
-          let encoded = encodeAbiValue $ AbiUInt 256 (fromIntegral vm.currentFork)
-          assign (#state % #returndata) (ConcreteBuf encoded)
-          copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
-    ]
+                  when (vm.currentFork /= forkId') $ do
+                    modify' $ \vm' -> vm'
+                      { env = newEnv
+                      , block = forkState.block
+                      , forks = Seq.adjust' (\state -> (state :: ForkState)
+                          { env = vm.env, block = vm.block, cache = vm.cache }
+                        ) vm.currentFork  vm.forks
+                      , currentFork = forkId'
+                      }
+              Nothing ->
+                vmError (NonexistentFork forkId')
+        _ -> vmError (BadCheatCode sig)
+
+  , action "activeFork()" $
+      \_ outOffset _ _ -> do
+        vm <- get
+        let encoded = encodeAbiValue $ AbiUInt 256 (fromIntegral vm.currentFork)
+        assign (#state % #returndata) (ConcreteBuf encoded)
+        copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
+
+  , action "label(address,string)" $
+      \sig _ _ input -> case decodeBuf [AbiAddressType, AbiStringType] input of
+        CAbi valsArr -> case valsArr of
+          [AbiAddress addr, AbiString label] ->
+            #labels %= Map.insert addr (decodeUtf8 label)
+          _ -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode sig)
+  ]
   where
     action s f = (abiKeccak s, f (abiKeccak s))
 
@@ -2229,16 +2237,16 @@ traceForest :: VM t s -> Forest Trace
 traceForest vm = zipperRootForest vm.traces
 
 traceForest' :: Expr End -> Forest Trace
-traceForest' (Success _ (Traces f _) _ _) = f
-traceForest' (Partial _ (Traces f _) _) = f
-traceForest' (Failure _ (Traces f _) _) = f
+traceForest' (Success _ (TraceContext f _ _) _ _) = f
+traceForest' (Partial _ (TraceContext f _ _) _) = f
+traceForest' (Failure _ (TraceContext f _ _) _) = f
 traceForest' (ITE {}) = internalError"Internal Error: ITE does not contain a trace"
 traceForest' (GVar {}) = internalError"Internal Error: Unexpected GVar"
 
-traceContext :: Expr End -> Map (Expr EAddr) Contract
-traceContext (Success _ (Traces _ c) _ _) = c
-traceContext (Partial _ (Traces _ c) _) = c
-traceContext (Failure _ (Traces _ c) _) = c
+traceContext :: Expr End -> TraceContext
+traceContext (Success _ c _ _) = c
+traceContext (Partial _ c _) = c
+traceContext (Failure _ c _) = c
 traceContext (ITE {}) = internalError"Internal Error: ITE does not contain a trace"
 traceContext (GVar {}) = internalError"Internal Error: Unexpected GVar"
 

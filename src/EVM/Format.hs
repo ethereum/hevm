@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ImplicitParams #-}
 
 module EVM.Format
@@ -54,7 +53,6 @@ import Data.Char qualified as Char
 import Data.DoubleWord (signedWord)
 import Data.Foldable (toList)
 import Data.List (isPrefixOf, sort)
-import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text, pack, unpack, intercalate, dropEnd, splitOn)
@@ -109,13 +107,8 @@ prettyIfConcreteWord = \case
 showAbiValue :: (?context :: DappContext) => AbiValue -> Text
 showAbiValue (AbiString bs) = formatBytes bs
 showAbiValue (AbiBytesDynamic bs) = formatBytes bs
-showAbiValue (AbiBytes _ bs) = formatBinary bs
-showAbiValue (AbiAddress addr) =
-  let name = case Map.lookup (LitAddr addr) ?context.env of
-        Nothing -> ""
-        Just contract -> maybeContractName' (findSrc contract ?context.info)
-  in
-    name <> "@" <> (pack $ show addr)
+showAbiValue (AbiBytes _ bs) = formatBytes bs
+showAbiValue (AbiAddress addr) = ppAddr (LitAddr addr) False
 showAbiValue v = pack $ show v
 
 textAbiValues :: (?context :: DappContext) => Vector AbiValue -> [Text]
@@ -186,21 +179,26 @@ formatSBinary _ = internalError "formatSBinary: implement me"
 
 showTraceTree :: DappInfo -> VM t s -> Text
 showTraceTree dapp vm =
-  let forest = traceForest vm
-      traces = fmap (fmap (unpack . showTrace dapp (vm.env.contracts))) forest
+  let ?context = DappContext { info = dapp
+                             , contracts = vm.env.contracts
+                             , labels = vm.labels }
+  in let forest = traceForest vm
+         traces = fmap (fmap (unpack . showTrace)) forest
   in pack $ concatMap showTree traces
 
 showTraceTree' :: DappInfo -> Expr End -> Text
 showTraceTree' _ (ITE {}) = internalError "ITE does not contain a trace"
 showTraceTree' dapp leaf =
-  let forest = traceForest' leaf
-      traces = fmap (fmap (unpack . showTrace dapp (traceContext leaf))) forest
+  let ?context = DappContext { info = dapp, contracts, labels }
+  in let forest = traceForest' leaf
+         traces = fmap (fmap (unpack . showTrace)) forest
   in pack $ concatMap showTree traces
+  where TraceContext { contracts, labels } = traceContext leaf
 
-showTrace :: DappInfo -> Map (Expr EAddr) Contract -> Trace -> Text
-showTrace dapp env trace =
-  let ?context = DappContext { info = dapp, env = env }
-  in let
+showTrace :: (?context :: DappContext) => Trace -> Text
+showTrace trace =
+  let
+    dapp = ?context.info
     pos =
       case showTraceLocation dapp trace of
         Left x -> " \x1b[1m" <> x <> "\x1b[0m"
@@ -253,10 +251,11 @@ showTrace dapp env trace =
           ] <> pos
 
         showEvent eventName argInfos indexedTopics = mconcat
-          [ "\x1b[36m"
+          [ "emit "
+          , "\x1b[36m"
           , eventName
-          , parenthesise (snd <$> sort (unindexedArgs <> indexedArgs))
           , "\x1b[0m"
+          , parenthesise (snd <$> sort (unindexedArgs <> indexedArgs))
           ] <> pos
           where
           -- We maintain the original position of event arguments since indexed
@@ -321,47 +320,65 @@ showTrace dapp env trace =
       t
     FrameTrace (CreationContext { address }) ->
       "create "
-      <> maybeContractName (findSrcFromAddr address)
-      <> "@" <> formatAddr address
+      <> ppAddr address True
       <> pos
     FrameTrace (CallContext { target, context, abi, calldata }) ->
       let calltype = if target == context
                      then "call "
                      else "delegatecall "
-      in case findSrcFromAddr target of
+      in
+      calltype
+      <> ppAddr target False
+      <> "::"
+      <> case findSrcFromAddr target of
         Nothing ->
-          calltype
-            <> case target of
-                 LitAddr 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D -> "HEVM"
-                 _ -> formatAddr target
-            <> pack "::"
-            <> case Map.lookup (unsafeInto (fromMaybe 0x00 abi)) dapp.abiMap of
-                 Just m  ->
-                   "\x1b[1m"
-                   <> m.name
-                   <> "\x1b[0m"
-                   <> showCall (catMaybes (getAbiTypes m.methodSignature)) calldata
-                 Nothing ->
-                   formatSBinary calldata
-            <> pos
+          case Map.lookup (unsafeInto (fromMaybe 0x00 abi)) dapp.abiMap of
+            Just m  ->
+              "\x1b[1m"
+              <> m.name <> "XD"
+              <> "\x1b[0m"
+              <> showCall (catMaybes (getAbiTypes m.methodSignature)) calldata
+            Nothing ->
+              formatSBinary calldata
+          <> pos
 
         Just solc ->
-          calltype
-            <> "\x1b[1m"
-            <> contractNamePart solc.contractName
-            <> "::"
-            <> maybe "[fallback function]"
+          maybe "[fallback function]"
                  (fromMaybe "[unknown method]" . maybeAbiName solc)
                  abi
-            <> maybe ("(" <> formatSBinary calldata <> ")")
-                 (\x -> showCall (catMaybes x) calldata)
-                 (abi >>= fmap getAbiTypes . maybeAbiName solc)
-            <> "\x1b[0m"
-            <> pos
+          <> maybe ("(" <> formatSBinary calldata <> ")")
+                   (\x -> showCall (catMaybes x) calldata)
+                   (abi >>= fmap getAbiTypes . maybeAbiName solc)
+          <> pos
     where
     findSrcFromAddr addr = do
-      contract <- Map.lookup addr env
-      findSrc contract dapp
+      contract <- Map.lookup addr ?context.contracts
+      findSrc contract ?context.info
+
+ppAddr :: (?context :: DappContext) => Expr EAddr -> Bool -> Text
+ppAddr addr alwaysShowAddr =
+  let
+    sourceName = case Map.lookup addr ?context.contracts of
+      Nothing ->
+        case addr of
+          LitAddr 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D -> Just "HEVM"
+          _ -> Nothing
+      Just contract ->
+        case (findSrc contract ?context.info) of
+          Just x -> Just (contractNamePart x.contractName)
+          Nothing -> Nothing
+    label = case do litAddr <- maybeLitAddr addr
+                    Map.lookup litAddr ?context.labels of
+              Nothing -> ""
+              Just l -> "[" <> "\x1b[1m" <> l <> "\x1b[0m" <> "]"
+    name = maybe "" (\n -> "\x1b[1m" <> n <> "\x1b[0m") sourceName <> label
+  in
+    if name == "" then
+      formatAddr addr
+    else if alwaysShowAddr then
+      name <> "@" <> formatAddr addr
+    else
+      name
 
 formatAddr :: Expr EAddr -> Text
 formatAddr = \case
@@ -375,14 +392,6 @@ getAbiTypes abi = map (parseTypeName mempty) types
     types =
       filter (/= "") $
         splitOn "," (dropEnd 1 (last (splitOn "(" abi)))
-
-maybeContractName :: Maybe SolcContract -> Text
-maybeContractName =
-  maybe "<unknown contract>" (contractNamePart . (.contractName))
-
-maybeContractName' :: Maybe SolcContract -> Text
-maybeContractName' =
-  maybe "" (contractNamePart . (.contractName))
 
 maybeAbiName :: SolcContract -> W256 -> Maybe Text
 maybeAbiName solc abi = Map.lookup (unsafeInto abi) solc.abiMap <&> (.methodSignature)
@@ -688,7 +697,7 @@ formatExpr = go
           , "val:"
           , indent 2 $ formatExpr val
           , "store:"
-          , indent 2 $ formatExpr prev          
+          , indent 2 $ formatExpr prev
           ]
         , ")"
         ]
