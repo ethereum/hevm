@@ -266,7 +266,7 @@ mapExprM_ ::  Monad m => (forall a . Expr a -> m ()) -> Expr b -> m ()
 mapExprM_ f expr = void ret
   where
     ret = mapExprM (fUpd f) expr
-    fUpd :: Monad m => (Expr a -> m ()) -> (Expr a-> m (Expr a))
+    fUpd :: Monad m => (Expr a -> m ()) -> (Expr a -> m (Expr a))
     fUpd action e = do
       action e
       pure e
