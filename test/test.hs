@@ -79,6 +79,8 @@ testEnv = Env { config = defaultConfig {
   , abstRefineArith = False
   , abstRefineMem   = False
   , dumpTrace = False
+  , numCexFuzz = 10
+  , onlyCexFuzz  = False
   , decomposeStorage = True
   } }
 
