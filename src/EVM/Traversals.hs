@@ -247,15 +247,15 @@ mapPropM' f = \case
     f $ PNeg x
   PAnd a b -> do
     x <- mapPropM' f a
-    y <- (mapPropM' f b)
+    y <- mapPropM' f b
     f $ PAnd x y
   POr a b -> do
     x <- mapPropM' f a
-    y <- (mapPropM' f b)
+    y <- mapPropM' f b
     f $ POr x y
   PImpl a b -> do
     x <- mapPropM' f a
-    y <- (mapPropM' f b)
+    y <- mapPropM' f b
     f $ PImpl x y
 
 mapExpr :: (forall a . Expr a -> Expr a) -> Expr b -> Expr b
