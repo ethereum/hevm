@@ -243,7 +243,7 @@ mapPropM' f = \case
   PLEq a b -> f $ PLEq a b
   PGEq a b -> f $ PGEq a b
   PNeg a -> do
-    x <-mapPropM' f a
+    x <- mapPropM' f a
     f $ PNeg x
   PAnd a b -> do
     x <- mapPropM' f a
