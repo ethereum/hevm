@@ -37,6 +37,7 @@ import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Set (Set)
+import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
 import Data.Serialize qualified as Cereal
 import Data.Text qualified as T
@@ -68,7 +69,7 @@ mkUnpackedDoubleWord "Word512" ''Word256 "Int512" ''Int256 ''Word256
 -- Conversions -------------------------------------------------------------------------------------
 
 
--- We ignore hlint to supress the warnings about `fromIntegral` and friends here
+-- We ignore hlint to suppress the warnings about `fromIntegral` and friends here
 #ifndef __HLINT__
 
 instance From Addr Integer where from = fromIntegral
@@ -130,7 +131,7 @@ data EType
   | End
   deriving (Typeable)
 
--- Variables refering to a global environment
+-- Variables referring to a global environment
 data GVar (a :: EType) where
   BufVar :: Int -> GVar Buf
   StoreVar :: Int -> GVar Storage
@@ -140,7 +141,7 @@ deriving instance Eq (GVar a)
 deriving instance Ord (GVar a)
 
 {- |
-  Expr implements an abstract respresentation of an EVM program
+  Expr implements an abstract representation of an EVM program
 
   This type can give insight into the provenance of a term which is useful,
   both for the aesthetic purpose of printing terms in a richer way, but also to
@@ -217,9 +218,9 @@ data Expr (a :: EType) where
 
   -- control flow
 
-  Partial        :: [Prop] -> Traces -> PartialExec -> Expr End
-  Failure        :: [Prop] -> Traces -> EvmError -> Expr End
-  Success        :: [Prop] -> Traces -> Expr Buf -> Map (Expr EAddr) (Expr EContract) -> Expr End
+  Partial        :: [Prop] -> TraceContext -> PartialExec -> Expr End
+  Failure        :: [Prop] -> TraceContext -> EvmError -> Expr End
+  Success        :: [Prop] -> TraceContext -> Expr Buf -> Map (Expr EAddr) (Expr EContract) -> Expr End
   ITE            :: Expr EWord -> Expr End -> Expr End -> Expr End
 
   -- integers
@@ -536,6 +537,7 @@ data EvmError
   | ReturnDataOutOfBounds
   | NonceOverflow
   | BadCheatCode FunctionSelector
+  | NonexistentFork Int
   deriving (Show, Eq, Ord)
 
 -- | Sometimes we can only partially execute a given program
@@ -546,21 +548,21 @@ data PartialExec
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
-data Effect t s
-  = Query (Query t s)
-  | Choose (Choose t s)
+data Effect t s where
+  Query :: Query t s -> Effect t s
+  Choose :: Choose s -> Effect Symbolic s
 deriving instance Show (Effect t s)
 
 -- | Queries halt execution until resolved through RPC calls or SMT queries
 data Query t s where
   PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM t s ()) -> Query t s
   PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM t s ()) -> Query t s
-  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM t s ()) -> Query t s
+  PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM Symbolic s ()) -> Query Symbolic s
   PleaseDoFFI         :: [String] -> (ByteString -> EVM t s ()) -> Query t s
 
 -- | Execution could proceed down one of two branches
-data Choose t s where
-  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM t s ()) -> Choose t s
+data Choose s where
+  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM Symbolic s ()) -> Choose s
 
 -- | The possible return values of a SMT query
 data BranchCondition = Case Bool | Unknown
@@ -581,17 +583,17 @@ instance Show (Query t s) where
     PleaseDoFFI cmd _ ->
       (("<EVM.Query: do ffi: " ++ (show cmd)) ++)
 
-instance Show (Choose t s) where
+instance Show (Choose s) where
   showsPrec _ = \case
     PleaseChoosePath _ _ ->
       (("<EVM.Choice: waiting for user to select path (0,1)") ++)
 
 -- | The possible result states of a VM
-data VMResult t s
-  = VMFailure EvmError      -- ^ An operation failed
-  | VMSuccess (Expr Buf)    -- ^ Reached STOP, RETURN, or end-of-code
-  | HandleEffect (Effect t s) -- ^ An effect must be handled for execution to continue
-  | Unfinished PartialExec  -- ^ Execution could not continue further
+data VMResult (t :: VMType) s where
+  Unfinished :: PartialExec -> VMResult Symbolic s -- ^ Execution could not continue further
+  VMFailure :: EvmError -> VMResult t s            -- ^ An operation failed
+  VMSuccess :: (Expr Buf) -> VMResult t s          -- ^ Reached STOP, RETURN, or end-of-code
+  HandleEffect :: (Effect t s) -> VMResult t s     -- ^ An effect must be handled for execution to continue
 
 deriving instance Show (VMResult t s)
 
@@ -620,8 +622,19 @@ data VM (t :: VMType) s = VM
   -- ^ how many times we've visited a loc, and what the contents of the stack were when we were there last
   , constraints    :: [Prop]
   , config         :: RuntimeConfig
+  , forks          :: Seq ForkState
+  , currentFork    :: Int
+  , labels         :: Map Addr Text
   }
   deriving (Generic)
+
+data ForkState = ForkState
+  { env :: Env
+  , block :: Block
+  , cache :: Cache
+  , urlOrAlias :: String
+  }
+  deriving (Show, Generic)
 
 deriving instance Show (VM Symbolic s)
 deriving instance Show (VM Concrete s)
@@ -796,6 +809,9 @@ class VMOps (t :: VMType) where
 
   whenSymbolicElse :: EVM t s a -> EVM t s a -> EVM t s a
 
+  partial :: PartialExec -> EVM t s ()
+  branch :: Expr EWord -> (Bool -> EVM t s ()) -> EVM t s ()
+
 -- Bytecode Representations ------------------------------------------------------------------------
 
 
@@ -881,16 +897,17 @@ data TraceData
   deriving (Eq, Ord, Show, Generic)
 
 -- | Wrapper type containing vm traces and the context needed to pretty print them properly
-data Traces = Traces
+data TraceContext = TraceContext
   { traces :: Forest Trace
   , contracts :: Map (Expr EAddr) Contract
+  , labels :: Map Addr Text
   }
   deriving (Eq, Ord, Show, Generic)
 
-instance Semigroup Traces where
-  (Traces a b) <> (Traces c d) = Traces (a <> c) (b <> d)
-instance Monoid Traces where
-  mempty = Traces mempty mempty
+instance Semigroup TraceContext where
+  (TraceContext a b c) <> (TraceContext d e f) = TraceContext (a <> d) (b <> e) (c <> f)
+instance Monoid TraceContext where
+  mempty = TraceContext mempty mempty mempty
 
 
 -- VM Initialization -------------------------------------------------------------------------------
@@ -1364,7 +1381,7 @@ formatString bs =
     Right s -> "\"" <> T.unpack s <> "\""
     Left _ -> "❮utf8 decode failed❯: " <> (show $ ByteStringS bs)
 
--- |'paddedShowHex' displays a number in hexidecimal and pads the number
+-- |'paddedShowHex' displays a number in hexadecimal and pads the number
 -- with 0 so that it has a minimum length of @w@.
 paddedShowHex :: (Show a, Integral a) => Int -> a -> String
 paddedShowHex w n = pad ++ str

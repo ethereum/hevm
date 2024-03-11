@@ -45,7 +45,8 @@ data Code = Code
 
 data DappContext = DappContext
   { info :: DappInfo
-  , env  :: Map (Expr EAddr) Contract
+  , contracts :: Map (Expr EAddr) Contract
+  , labels :: Map Addr Text
   }
 
 dappInfo :: FilePath -> BuildOutput -> DappInfo

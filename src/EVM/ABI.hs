@@ -24,7 +24,7 @@
 
   Nested sequences are encoded recursively with no special treatment.
 
-  Calldata args are encoded as heterogenous sequences sans length prefix.
+  Calldata args are encoded as heterogeneous sequences sans length prefix.
 
 -}
 module EVM.ABI

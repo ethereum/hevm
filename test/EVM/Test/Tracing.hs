@@ -6,7 +6,7 @@ Module      : Tracing
 Description : Tests to fuzz concrete tracing, and symbolic execution
 
 Functions here are used to generate traces for the concrete
-execution of HEVM and check that against evmtool from go-ehereum. Re-using some
+execution of HEVM and check that against evmtool from go-ethereum. Re-using some
 of this code, we also generate a symbolic expression then evaluate it
 concretely through Expr.simplify, then check that against evmtool's output.
 -}
@@ -377,7 +377,7 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
       pure False
     go [] [b] = do
       -- evmtool produces ONE more trace element of the error
-      -- hevm on the other hand stops and doens't produce one more
+      -- hevm on the other hand stops and doesn't produce one more
       if isJust b.error then pure True
                            else do
                              putStrLn $ "Traces don't match. HEVM's trace is longer by:" <> (show b)
@@ -576,17 +576,12 @@ interpretWithTrace fetcher =
       case action of
         Stepper.Exec ->
           execWithTrace >>= interpretWithTrace fetcher . k
-        Stepper.Wait q -> case q of
-          PleaseAskSMT (Lit x) _ continue ->
-            interpretWithTrace fetcher (Stepper.evm (continue (Case (x > 0))) >>= k)
-          _ -> do
-            m <- State.lift $ fetcher q
-            vm <- use _1
-            vm' <- liftIO $ stToIO $ State.execStateT m vm
-            assign _1 vm'
-            interpretWithTrace fetcher (k ())
-        Stepper.Ask _ ->
-          internalError "cannot make choice in this interpreter"
+        Stepper.Wait q -> do
+          m <- State.lift $ fetcher q
+          vm <- use _1
+          vm' <- liftIO $ stToIO $ State.execStateT m vm
+          assign _1 vm'
+          interpretWithTrace fetcher (k ())
         Stepper.IOAct q ->
           liftIO q >>= interpretWithTrace fetcher . k
         Stepper.EVM m -> do
@@ -610,7 +605,7 @@ removeExtcalls (OpContract ops) = OpContract (filter (noStorageNoExtcalls) ops)
   where
     noStorageNoExtcalls :: Op -> Bool
     noStorageNoExtcalls o = case o of
-                               -- Extrenal info functions
+                               -- External info functions
                                OpExtcodecopy -> False
                                OpExtcodehash -> False
                                OpExtcodesize -> False

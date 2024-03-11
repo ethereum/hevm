@@ -293,7 +293,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                 case (maxIterationsReached vm maxIter, isLoopHead heuristic vm) of
                   -- Yes. return a partial leaf
                   (Just _, Just True) ->
-                    pure $ Partial [] (Traces (Zipper.toForest vm.traces) vm.env.contracts) $ MaxIterationsReached vm.state.pc vm.state.contract
+                    pure $ Partial [] (TraceContext (Zipper.toForest vm.traces) vm.env.contracts vm.labels) $ MaxIterationsReached vm.state.pc vm.state.contract
                   -- No. keep executing
                   _ -> do
                     (r, vm') <- liftIO $ stToIO $ runStateT (continue (Case (c > 0))) vm
@@ -309,7 +309,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                     -- got us to this point and return a partial leaf for the other side
                     (r, vm') <- liftIO $ stToIO $ runStateT (continue (Case $ not n)) vm
                     a <- interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-                    pure $ ITE cond a (Partial [] (Traces (Zipper.toForest vm.traces) vm.env.contracts) (MaxIterationsReached vm.state.pc vm.state.contract))
+                    pure $ ITE cond a (Partial [] (TraceContext (Zipper.toForest vm.traces) vm.env.contracts vm.labels) (MaxIterationsReached vm.state.pc vm.state.contract))
                   -- we're in a loop and askSmtIters has been reached
                   (Just True, True, _) ->
                     -- ask the smt solver about the loop condition
@@ -457,7 +457,7 @@ verifyContract solvers theCode signature' concreteArgs opts maybepre maybepost =
 runExpr :: Stepper.Stepper Symbolic RealWorld (Expr End)
 runExpr = do
   vm <- Stepper.runFully
-  let traces = Traces (Zipper.toForest vm.traces) vm.env.contracts
+  let traces = TraceContext (Zipper.toForest vm.traces) vm.env.contracts vm.labels
   pure $ case vm.result of
     Just (VMSuccess buf) -> Success vm.constraints traces buf (fmap toEContract vm.env.contracts)
     Just (VMFailure e) -> Failure vm.constraints traces e
@@ -521,7 +521,7 @@ reachable solvers e = do
           Unsat -> pure ([query], Nothing)
           r -> internalError $ "Invalid solver result: " <> show r
 
--- | Extract contraints stored in Expr End nodes
+-- | Extract constraints stored in Expr End nodes
 extractProps :: Expr End -> [Prop]
 extractProps = \case
   ITE _ _ _ -> []
@@ -838,7 +838,7 @@ formatCex cd sig m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
   where
     -- we attempt to produce a model for calldata by substituting all variables
     -- and buffers provided by the model into the original calldata expression.
-    -- If we have a concrete result then we diplay it, otherwise we diplay
+    -- If we have a concrete result then we display it, otherwise we display
     -- `Any`. This is a little bit of a hack (and maybe unsound?), but we need
     -- it for branches that do not refer to calldata at all (e.g. the top level
     -- callvalue check inserted by solidity in contracts that don't have any
@@ -915,7 +915,7 @@ prettyCalldata cex buf sig types = head (T.splitOn "(" sig) <> "(" <> body <> ")
 
 -- | If the expression contains any symbolic values, default them to some
 -- concrete value The intuition here is that if we still have symbolic values
--- in our calldata expression after substituing in our cex, then they can have
+-- in our calldata expression after substituting in our cex, then they can have
 -- any value and we can safely pick a random value. This is a bit unsatisfying,
 -- we should really be doing smth like: https://github.com/ethereum/hevm/issues/334
 -- but it's probably good enough for now

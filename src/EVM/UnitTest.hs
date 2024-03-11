@@ -110,7 +110,7 @@ unitTest opts (Contracts cs) = do
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
 -- to create the test contract, give it an initial balance, and run `setUp()'.
-initializeUnitTest :: VMOps t => UnitTestOptions s -> SolcContract -> Stepper t s ()
+initializeUnitTest :: UnitTestOptions s -> SolcContract -> Stepper Concrete s ()
 initializeUnitTest opts theContract = do
 
   let addr = opts.testParams.address
@@ -263,13 +263,13 @@ symFailure UnitTestOptions {..} testName cd types failures' =
                            then "Successful execution"
                            else "Failed: DSTest Assertion Violation"
         res ->
-          let ?context = DappContext { info = dapp, env = traceContext res}
+          let ?context = dappContext (traceContext res)
           in Text.pack $ prettyvmresult res
       mkMsg (leaf, cex) = Text.unlines
         ["Counterexample:"
         ,""
         ,"  result:   " <> showRes leaf
-        ,"  calldata: " <> let ?context =  DappContext dapp (traceContext leaf)
+        ,"  calldata: " <> let ?context = dappContext (traceContext leaf)
                            in prettyCalldata cex cd testName types
         , case verbose of
             Just _ -> Text.unlines
@@ -278,6 +278,8 @@ symFailure UnitTestOptions {..} testName cd types failures' =
               ]
             _ -> ""
         ]
+      dappContext TraceContext { contracts, labels } =
+        DappContext { info = dapp, contracts, labels }
 
 execSymTest :: UnitTestOptions RealWorld -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper Symbolic RealWorld (Expr End)
 execSymTest UnitTestOptions{ .. } method cd = do
@@ -303,7 +305,9 @@ indentLines n s =
 
 passOutput :: VM t s -> UnitTestOptions s -> Text -> Text
 passOutput vm UnitTestOptions { .. } testName =
-  let ?context = DappContext { info = dapp, env = vm.env.contracts }
+  let ?context = DappContext { info = dapp
+                             , contracts = vm.env.contracts
+                             , labels = vm.labels }
   in let v = fromMaybe 0 verbose
   in if (v > 1) then
     mconcat
@@ -318,7 +322,9 @@ passOutput vm UnitTestOptions { .. } testName =
 
 failOutput :: VM t s -> UnitTestOptions s -> Text -> Text
 failOutput vm UnitTestOptions { .. } testName =
-  let ?context = DappContext { info = dapp, env = vm.env.contracts }
+  let ?context = DappContext { info = dapp
+                             , contracts = vm.env.contracts
+                             , labels = vm.labels }
   in mconcat
   [ "Failure: "
   , fromMaybe "" (stripSuffix "()" testName)
@@ -345,8 +351,8 @@ formatTestLog _ (GVar _) = internalError "unexpected global variable"
 formatTestLog events (LogEntry _ args (topic:_)) =
   case maybeLitWord topic >>= \t1 -> (Map.lookup t1 events) of
     Nothing -> Nothing
-    Just (Event name _ types) ->
-      case (name <> parenthesise (abiTypeSolidity <$> (unindexed types))) of
+    Just (Event name _ argInfos) ->
+      case (name <> parenthesise (abiTypeSolidity <$> argTypes)) of
         "log(string)" -> Just $ unquote $ showValue AbiStringType args
 
         -- log_named_x(string, x)
@@ -379,12 +385,12 @@ formatTestLog events (LogEntry _ args (topic:_)) =
         _ -> Nothing
 
         where
-          ts = unindexed types
+          argTypes = [argType | (_, argType, NotIndexed) <- argInfos]
           unquote = Text.dropAround (\c -> c == '"' || c == '«' || c == '»')
           log_unnamed =
-            Just $ showValue (head ts) args
+            Just $ showValue (head argTypes) args
           log_named =
-            let (key, val) = case take 2 (textValues ts args) of
+            let (key, val) = case take 2 (textValues argTypes args) of
                   [k, v] -> (k, v)
                   _ -> internalError "shouldn't happen"
             in Just $ unquote key <> ": " <> val
@@ -393,7 +399,7 @@ formatTestLog events (LogEntry _ args (topic:_)) =
           log_named_decimal =
             case args of
               (ConcreteBuf b) ->
-                case toList $ runGet (getAbiSeq (length ts) ts) (BSLazy.fromStrict b) of
+                case toList $ runGet (getAbiSeq (length argTypes) argTypes) (BSLazy.fromStrict b) of
                   [key, (AbiUInt 256 val), (AbiUInt 256 dec)] ->
                     Just $ (unquote (showAbiValue key)) <> ": " <> showDecimal dec val
                   [key, (AbiInt 256 val), (AbiUInt 256 dec)] ->

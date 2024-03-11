@@ -253,7 +253,7 @@ mkTimeout t = T.pack $ show $ (1000 *)$ case t of
   Nothing -> 300 :: Natural
   Just t' -> t'
 
--- | Arguments used when spawing a solver instance
+-- | Arguments used when spawning a solver instance
 solverArgs :: Solver -> Maybe Natural -> [Text]
 solverArgs solver timeout = case solver of
   Bitwuzla ->
@@ -269,6 +269,7 @@ solverArgs solver timeout = case solver of
     , "--produce-models"
     , "--print-success"
     , "--interactive"
+    , "--incremental"
     , "--tlimit-per=" <> mkTimeout timeout
     ]
   Custom _ -> []
@@ -298,7 +299,7 @@ spawnSolver solver timeout = do
       pure solverInstance
     Custom _ -> pure solverInstance
 
--- | Cleanly shutdown a running solver instnace
+-- | Cleanly shutdown a running solver instance
 stopSolver :: SolverInstance -> IO ()
 stopSolver (SolverInstance _ stdin stdout process) = cleanupProcess (Just stdin, Just stdout, Nothing, process)
 

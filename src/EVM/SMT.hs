@@ -119,7 +119,7 @@ flattenBufs cex = do
   bs <- mapM collapse cex.buffers
   pure $ cex{ buffers = bs }
 
--- | Attemps to collapse a compressed buffer representation down to a flattened one
+-- | Attempts to collapse a compressed buffer representation down to a flattened one
 collapse :: BufModel -> Maybe BufModel
 collapse model = case toBuf model of
   Just (ConcreteBuf b) -> Just $ Flat b
@@ -429,39 +429,39 @@ declareBufs props bufEnv storeEnv = SMT2 ("; buffers" : fmap declareBuf allBufs 
   where
     cexvars = (mempty :: CexVars){ buffers = discoverMaxReads props bufEnv storeEnv }
     allBufs = fmap fromLazyText $ Map.keys cexvars.buffers
-    declareBuf n = "(declare-const " <> n <> " (Array (_ BitVec 256) (_ BitVec 8)))"
-    declareLength n = "(declare-const " <> n <> "_length" <> " (_ BitVec 256))"
+    declareBuf n = "(declare-fun " <> n <> " () (Array (_ BitVec 256) (_ BitVec 8)))"
+    declareLength n = "(declare-fun " <> n <> "_length" <> " () (_ BitVec 256))"
 
 -- Given a list of variable names, create an SMT2 object with the variables declared
 declareVars :: [Builder] -> SMT2
 declareVars names = SMT2 (["; variables"] <> fmap declare names) mempty cexvars mempty
   where
-    declare n = "(declare-const " <> n <> " (_ BitVec 256))"
+    declare n = "(declare-fun " <> n <> " () (_ BitVec 256))"
     cexvars = (mempty :: CexVars){ calldata = fmap toLazyText names }
 
 -- Given a list of variable names, create an SMT2 object with the variables declared
 declareAddrs :: [Builder] -> SMT2
 declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) mempty cexvars mempty
   where
-    declare n = "(declare-const " <> n <> " Addr)"
+    declare n = "(declare-fun " <> n <> " () Addr)"
     cexvars = (mempty :: CexVars){ addrs = fmap toLazyText names }
 
 declareFrameContext :: [(Builder, [Prop])] -> SMT2
 declareFrameContext names = SMT2 (["; frame context"] <> concatMap declare names) mempty cexvars mempty
   where
-    declare (n,props) = [ "(declare-const " <> n <> " (_ BitVec 256))" ]
+    declare (n,props) = [ "(declare-fun " <> n <> " () (_ BitVec 256))" ]
                         <> fmap (\p -> "(assert " <> propToSMT p <> ")") props
     cexvars = (mempty :: CexVars){ txContext = fmap (toLazyText . fst) names }
 
 declareAbstractStores :: [Builder] -> SMT2
 declareAbstractStores names = SMT2 (["; abstract base stores"] <> fmap declare names) mempty mempty mempty
   where
-    declare n = "(declare-const " <> n <> " Storage)"
+    declare n = "(declare-fun " <> n <> " () Storage)"
 
 declareBlockContext :: [(Builder, [Prop])] -> SMT2
 declareBlockContext names = SMT2 (["; block context"] <> concatMap declare names) mempty cexvars mempty
   where
-    declare (n, props) = [ "(declare-const " <> n <> " (_ BitVec 256))" ]
+    declare (n, props) = [ "(declare-fun " <> n <> " () (_ BitVec 256))" ]
                          <> fmap (\p -> "(assert " <> propToSMT p <> ")") props
     cexvars = (mempty :: CexVars){ blockContext = fmap (toLazyText . fst) names }
 
@@ -470,9 +470,14 @@ prelude =  SMT2 src mempty mempty mempty
   where
   src = fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   ; logic
-  ; TODO: this creates an error when used with z3?
+  (set-info :smt-lib-version 2.6)
   ;(set-logic QF_AUFBV)
   (set-logic ALL)
+  (set-info :source |
+  Generator: hevm
+  Application: hevm symbolic execution system
+  |)
+  (set-info :category "industrial")
 
   ; types
   (define-sort Byte () (_ BitVec 8))
@@ -564,37 +569,38 @@ prelude =  SMT2 src mempty mempty mempty
   (define-fun readWord ((idx Word) (buf Buf)) Word
     (concat
       (select buf idx)
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000001))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000002))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000003))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000004))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000005))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000006))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000007))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000008))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000009))
-      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000a))
-      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000b))
-      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000c))
-      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000d))
-      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000e))
-      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000f))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000010))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000011))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000012))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000013))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000014))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000015))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000016))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000017))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000018))
-      (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000019))
-      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001a))
-      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001b))
-      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001c))
-      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001d))
-      (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001e))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000001))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000002))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000003))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000004))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000005))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000006))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000007))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000008))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000009))
+      (concat (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000a))
+      (concat (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000b))
+      (concat (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000c))
+      (concat (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000d))
+      (concat (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000e))
+      (concat (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000000f))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000010))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000011))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000012))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000013))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000014))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000015))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000016))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000017))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000018))
+      (concat (select buf (bvadd idx #x0000000000000000000000000000000000000000000000000000000000000019))
+      (concat (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001a))
+      (concat (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001b))
+      (concat (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001c))
+      (concat (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001d))
+      (concat (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001e))
       (select buf (bvadd idx #x000000000000000000000000000000000000000000000000000000000000001f))
+      ))))))))))))))))))))))))))))))
     )
   )
 
@@ -696,7 +702,7 @@ exprToSMT = \case
   Mul a b -> op2 "bvmul" a b
   Exp a b -> case b of
                Lit b' -> expandExp a b'
-               _ -> internalError "cannot encode symbolic exponentation into SMT"
+               _ -> internalError "cannot encode symbolic exponentiation into SMT"
   Min a b ->
     let aenc = exprToSMT a
         benc = exprToSMT b in
@@ -1099,7 +1105,7 @@ getBufs getVal bufs = foldM getBuf mempty bufs
           p -> parseErr p
 
 -- | Takes a Map containing all reads from a store with an abstract base, as
--- well as the conrete part of the storage prestate and returns a fully
+-- well as the concrete part of the storage prestate and returns a fully
 -- concretized storage
 getStore
   :: (Text -> IO Text)

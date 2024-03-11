@@ -7,9 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Changed
 
+## Added
+- More POr and PAnd rules
+- More PEq, PLEq, and PLT rules
+- New `label` cheatcode.
+- Updated Bitwuzla to newer version
+
+## Fixed
+- `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
+   with declare-fun
+- CVC5 needs `--incremental` flag to work properly in abstraction-refinement mode
+- cli.hs now uses with-utf8 so no release binary will have locale issues anymore
+- Took ideas for simplification rules from "Super-optimization of Smart Contracts" paper by Albert et al.
+
+## [0.53.0] - 2024-02-23
+
+## Changed
+
 - Minimum distance requirements are now asserted for Keccak function calls. They assert that it's hard to generate two Keccak's that are less than 256 afar.
 - Keccak concretization is now done only after all simplifications are performed. This helps with simplification pre-concretization
-- Updated Bitwuzla to newer version
+- Added an IllegalOverflow error in case the system tries to allocate a large amount of memory during
+  abstract gas execution but concrete running. In these cases, the interpreter can out-of-heap
+  as the only check is that the size allocated is less than $2**{64}$, but that is too large to fit in memory. Now,
+  we check more stringently, and still return an IllegalOverflow
+- Fixed `--root` option for the `test` subcommand
 
 ## Added
 
@@ -25,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New concrete fuzzer that can be controlled via `--num-cex-fuzz`
 - Partial support for dynamic jumps when the jump destination can be computed
   given already available information
+- Added three forking cheatcodes: `createFork`, `selectFork`, and `activeFork`
+
+## Fixed
+
+- Traces now correctly perform source mapping to display contract details
+- Event traces now correctly display indexed arguments and argument names
+- JSON reading of foundry JSONs was dependent on locale and did not work with many locales.
 
 ## [0.52.0] - 2023-10-26
 

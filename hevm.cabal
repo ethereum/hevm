@@ -2,7 +2,7 @@ cabal-version: 3.0
 name:
   hevm
 version:
-  0.52.0
+  0.53.0
 synopsis:
   Symbolic EVM Evaluator
 homepage:
@@ -236,7 +236,8 @@ executable hevm
     optics-core,
     githash                       >= 0.1.6 && < 0.2,
     witch,
-    unliftio-core
+    unliftio-core,
+    with-utf8                     >= 1.0.0.0
   if os(windows)
     buildable: False
 
@@ -328,7 +329,7 @@ test-suite test
   main-is:
     test.hs
 
--- these tests require network access so we split them into a seperate test
+-- these tests require network access so we split them into a separate test
 -- suite to make it easy to skip them when running nix-build
 test-suite rpc-tests
   import:

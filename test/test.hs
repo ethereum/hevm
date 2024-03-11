@@ -1255,6 +1255,9 @@ tests = testGroup "hevm"
     , test "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True
+    , test "Cheat-Codes-Fork-Pass" $ do
+        let testFile = "test/contracts/pass/cheatCodesFork.sol"
+        runSolidityTest testFile ".*" >>= assertEqualM "test result" True
     , test "Unwind" $ do
         let testFile = "test/contracts/pass/unwind.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True
@@ -1320,7 +1323,7 @@ tests = testGroup "hevm"
             }
             |]
         let sig = Just $ Sig "fun(uint256)" [AbiUIntType 256]
-            -- we dont' ask the solver about the loop condition until we're
+            -- we don't ask the solver about the loop condition until we're
             -- already in an inconsistent path (i == 5, j <= 3, i < j), so we
             -- will continue looping here until we hit max iterations
             opts = defaultVeriOpts{ maxIter = Just 10, askSmtIters = 5 }
@@ -2372,7 +2375,7 @@ tests = testGroup "hevm"
           assertBoolM "second to last byte must be non-zero" $ ((Data.Bits..&.) (getVar ctr "arg1") 0xff00) > 0
           putStrLnM "Expected counterexample found"
         ,
-        -- Reverse of thest above
+        -- Reverse of test above
         test "check-lsb-msb4 2nd byte rev" $ do
           Just c <- solcRuntime "C"
             [i|
@@ -3544,7 +3547,7 @@ runSimpleVM x ins = do
          vm' = set (#state % #calldata) calldata vm
      res <- Stepper.interpret (Fetch.zero 0 Nothing) vm' Stepper.execFully
      case res of
-       (Right (ConcreteBuf bs)) -> pure $ Just bs
+       Right (ConcreteBuf bs) -> pure $ Just bs
        s -> internalError $ show s
 
 -- | Takes a creation code and returns a vm with the result of executing the creation code
@@ -3553,18 +3556,19 @@ loadVM x = do
   vm <- liftIO $ stToIO $ vmForEthrunCreation x
   vm1 <- Stepper.interpret (Fetch.zero 0 Nothing) vm Stepper.runFully
   case vm1.result of
-     Just (VMSuccess (ConcreteBuf targetCode)) -> do
-       let target = vm1.state.contract
-       vm2 <- Stepper.interpret (Fetch.zero 0 Nothing) vm1 (prepVm target targetCode >> Stepper.run)
-       writeTrace vm2
-       pure $ Just vm2
-     _ -> pure Nothing
+    Just (VMSuccess (ConcreteBuf targetCode)) -> do
+      let target = vm1.state.contract
+      vm2 <- Stepper.interpret (Fetch.zero 0 Nothing) vm1 (prepVm target targetCode)
+      writeTrace vm2
+      pure $ Just vm2
+    _ -> pure Nothing
   where
     prepVm target targetCode = Stepper.evm $ do
       replaceCodeOfSelf (RuntimeCode $ ConcreteRuntimeCode targetCode)
       resetState
       assign (#state % #gas) 0xffffffffffffffff -- kludge
       execState (loadContract target) <$> get >>= put
+      get
 
 hex :: ByteString -> ByteString
 hex s =
