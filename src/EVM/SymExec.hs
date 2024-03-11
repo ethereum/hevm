@@ -293,7 +293,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                 case (maxIterationsReached vm maxIter, isLoopHead heuristic vm) of
                   -- Yes. return a partial leaf
                   (Just _, Just True) ->
-                    pure $ Partial [] (Traces (Zipper.toForest vm.traces) vm.env.contracts) $ MaxIterationsReached vm.state.pc vm.state.contract
+                    pure $ Partial [] (TraceContext (Zipper.toForest vm.traces) vm.env.contracts vm.labels) $ MaxIterationsReached vm.state.pc vm.state.contract
                   -- No. keep executing
                   _ -> do
                     (r, vm') <- liftIO $ stToIO $ runStateT (continue (Case (c > 0))) vm
@@ -309,7 +309,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                     -- got us to this point and return a partial leaf for the other side
                     (r, vm') <- liftIO $ stToIO $ runStateT (continue (Case $ not n)) vm
                     a <- interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-                    pure $ ITE cond a (Partial [] (Traces (Zipper.toForest vm.traces) vm.env.contracts) (MaxIterationsReached vm.state.pc vm.state.contract))
+                    pure $ ITE cond a (Partial [] (TraceContext (Zipper.toForest vm.traces) vm.env.contracts vm.labels) (MaxIterationsReached vm.state.pc vm.state.contract))
                   -- we're in a loop and askSmtIters has been reached
                   (Just True, True, _) ->
                     -- ask the smt solver about the loop condition
@@ -457,7 +457,7 @@ verifyContract solvers theCode signature' concreteArgs opts maybepre maybepost =
 runExpr :: Stepper.Stepper Symbolic RealWorld (Expr End)
 runExpr = do
   vm <- Stepper.runFully
-  let traces = Traces (Zipper.toForest vm.traces) vm.env.contracts
+  let traces = TraceContext (Zipper.toForest vm.traces) vm.env.contracts vm.labels
   pure $ case vm.result of
     Just (VMSuccess buf) -> Success vm.constraints traces buf (fmap toEContract vm.env.contracts)
     Just (VMFailure e) -> Failure vm.constraints traces e

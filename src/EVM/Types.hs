@@ -218,9 +218,9 @@ data Expr (a :: EType) where
 
   -- control flow
 
-  Partial        :: [Prop] -> Traces -> PartialExec -> Expr End
-  Failure        :: [Prop] -> Traces -> EvmError -> Expr End
-  Success        :: [Prop] -> Traces -> Expr Buf -> Map (Expr EAddr) (Expr EContract) -> Expr End
+  Partial        :: [Prop] -> TraceContext -> PartialExec -> Expr End
+  Failure        :: [Prop] -> TraceContext -> EvmError -> Expr End
+  Success        :: [Prop] -> TraceContext -> Expr Buf -> Map (Expr EAddr) (Expr EContract) -> Expr End
   ITE            :: Expr EWord -> Expr End -> Expr End -> Expr End
 
   -- integers
@@ -624,6 +624,7 @@ data VM (t :: VMType) s = VM
   , config         :: RuntimeConfig
   , forks          :: Seq ForkState
   , currentFork    :: Int
+  , labels         :: Map Addr Text
   }
   deriving (Generic)
 
@@ -896,16 +897,17 @@ data TraceData
   deriving (Eq, Ord, Show, Generic)
 
 -- | Wrapper type containing vm traces and the context needed to pretty print them properly
-data Traces = Traces
+data TraceContext = TraceContext
   { traces :: Forest Trace
   , contracts :: Map (Expr EAddr) Contract
+  , labels :: Map Addr Text
   }
   deriving (Eq, Ord, Show, Generic)
 
-instance Semigroup Traces where
-  (Traces a b) <> (Traces c d) = Traces (a <> c) (b <> d)
-instance Monoid Traces where
-  mempty = Traces mempty mempty
+instance Semigroup TraceContext where
+  (TraceContext a b c) <> (TraceContext d e f) = TraceContext (a <> d) (b <> e) (c <> f)
+instance Monoid TraceContext where
+  mempty = TraceContext mempty mempty mempty
 
 
 -- VM Initialization -------------------------------------------------------------------------------
