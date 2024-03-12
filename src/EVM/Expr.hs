@@ -786,8 +786,8 @@ data StorageType = SmallSlot | Array | Map | Mixed | UNK
 -- as a TODO. Currently this only affects equivalence checking as there is no
 -- EVM bytecode to compare the FULL state, so such comparison could only be
 -- generated via hevm itself
-safeToDecomposeProp :: Prop -> Maybe ()
-safeToDecomposeProp p = void $ mapPropM' findPEqStore p
+safeToDecomposeProp :: Prop -> Bool
+safeToDecomposeProp p = isJust $ mapPropM' findPEqStore p
   where
     findPEqStore :: Prop -> Maybe Prop
     findPEqStore = \case

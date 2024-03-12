@@ -216,7 +216,7 @@ assertProps conf ps = assertPropsNoSimp conf (decompose . Expr.simplifyProps $ p
       where
         -- All in these lists must be a `Just ()` or we cannot decompose
         safeExprs = all (isJust . mapPropM_ Expr.safeToDecompose) props
-        safeProps = all (isJust . Expr.safeToDecomposeProp) props
+        safeProps = all Expr.safeToDecomposeProp props
 
 -- Note: we need a version that does NOT call simplify,
 -- because we make use of it to verify the correctness of our simplification

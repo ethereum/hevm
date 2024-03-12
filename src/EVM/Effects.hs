@@ -47,19 +47,19 @@ class Monad m => ReadConfig m where
   readConfig ::  m Config
 
 data Config = Config
-  { dumpQueries     :: Bool
-  , dumpExprs       :: Bool
-  , dumpEndStates   :: Bool
-  , debug           :: Bool
-  , abstRefineArith :: Bool
-  , abstRefineMem   :: Bool
-  , dumpTrace       :: Bool
-  , numCexFuzz      :: Integer
+  { dumpQueries      :: Bool
+  , dumpExprs        :: Bool
+  , dumpEndStates    :: Bool
+  , debug            :: Bool
+  , abstRefineArith  :: Bool
+  , abstRefineMem    :: Bool
+  , dumpTrace        :: Bool
+  , numCexFuzz       :: Integer
    -- Used to debug fuzzer in test.hs. It disables the SMT solver
    -- and uses the fuzzer ONLY to try to find a counterexample.
    -- Returns Unknown if the Cex cannot be found via fuzzing
-  , onlyCexFuzz     :: Bool
-  , decomposeStorage:: Bool
+  , onlyCexFuzz      :: Bool
+  , decomposeStorage :: Bool
   }
   deriving (Show, Eq)
 
