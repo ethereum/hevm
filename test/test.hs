@@ -4222,7 +4222,7 @@ genStorage sz = liftM3 SStore key val subStore
 genStorageKey :: Gen (Expr EWord)
 genStorageKey = frequency
      -- array slot
-    [ (4, liftM2 Expr.ArraySlotWithOffset (genByteStringKey 32) (genSmallLit 5))
+    [ (4, liftM2 Expr.ArraySlotWithOffs (genByteStringKey 32) (genSmallLit 5))
     , (4, fmap Expr.ArraySlotZero (genByteStringKey 32))
      -- mapping slot
     , (8, liftM2 Expr.MappingSlot (genByteStringKey 64) (genSmallLit 5))
