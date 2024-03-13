@@ -554,7 +554,8 @@ verify
   -> m (Expr End, [VerifyResult])
 verify solvers opts preState maybepost = do
   conf <- readConfig
-  when conf.debug $ liftIO $ putStrLn "Exploring"
+  let call = mconcat ["prefix 0x", getCallPrefix preState.state.calldata]
+  when conf.debug $ liftIO $ putStrLn $ "Exploring call " <> call
 
   exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
   when conf.dumpExprs $ liftIO $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
@@ -563,13 +564,13 @@ verify solvers opts preState maybepost = do
     let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
     when conf.dumpExprs $ T.writeFile "simplified.expr" (formatExpr expr)
 
-    putStrLn $ "Exploration finished, " <> show (Expr.numBranches expr) <> " branches to check"
+    when conf.debug $ putStrLn $ "Exploration finished, " <> show (Expr.numBranches expr) <> " branches to check in call " <> call
 
     let flattened = flattenExpr expr
     when (any isPartial flattened) $ do
-      let callPrefix = getCallPrefix preState.state.calldata
-      T.putStrLn $ "\x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the call prefix 0x" <> T.pack callPrefix <> " due to the following issue(s):"
-      T.putStr . T.unlines . fmap (indent 2 . ("- " <>)) . fmap formatPartial . getPartials $ flattened
+      T.putStrLn $ indent 3 "\x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the call "
+                  <> T.pack call <> " due to the following issue(s):"
+      T.putStr . T.unlines . fmap (indent 5 . ("- " <>)) . fmap formatPartial . getPartials $ flattened
 
     case maybepost of
       Nothing -> pure (expr, [Qed ()])
@@ -578,9 +579,8 @@ verify solvers opts preState maybepost = do
           -- Filter out any leaves from `flattened` that can be statically shown to be safe
           tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf preState.constraints post, leaf)
           withQueries = filter canBeSat tocheck <&> \(a, leaf) -> (assertProps conf a, leaf)
-        putStrLn $ "Checking for reachability of "
-                     <> show (length withQueries)
-                     <> " potential property violation(s)"
+        when conf.debug $ putStrLn $ "   Checking for reachability of " <> show (length withQueries)
+                     <> " potential property violation(s) in call " <> call
 
         -- Dispatch the remaining branches to the solver to check for violations
         results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
