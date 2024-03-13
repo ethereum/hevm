@@ -79,7 +79,7 @@ compile foundryType root src = do
   case foundryType of
     FoundryStdLib -> initStdForgeDir (root <> "/lib/forge-std")
     Foundry -> pure ()
-  r@(res,_,_) <- readProcessWithExitCode "forge" ["build", "--root", root] ""
+  r@(res,_,_) <- readProcessWithExitCode "forge" ["build", "--ast", "--root", root] ""
   case res of
     ExitFailure _ -> pure . Left $ "compilation failed: " <> show r
     ExitSuccess -> readBuildOutput root Foundry
