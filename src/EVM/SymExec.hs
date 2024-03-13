@@ -564,7 +564,7 @@ verify solvers opts preState maybepost = do
     let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
     when conf.dumpExprs $ T.writeFile "simplified.expr" (formatExpr expr)
 
-    when conf.debug $ putStrLn $ "Exploration finished, " <> show (Expr.numBranches expr) <> " branches to check in call " <> call
+    when conf.debug $ putStrLn $ "Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
 
     let flattened = flattenExpr expr
     when (any isPartial flattened) $ do
