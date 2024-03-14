@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CVC5 needs `--incremental` flag to work properly in abstraction-refinement mode
 - cli.hs now uses with-utf8 so no release binary will have locale issues anymore
 - Took ideas for simplification rules from "Super-optimization of Smart Contracts" paper by Albert et al.
+- Printing panic uint256 as hex, not as int
 - Decomposition does not take place when entire states are compared, as that would necessitate
   a different approach.
 
