@@ -15,7 +15,7 @@ import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, isCex)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
@@ -173,12 +173,11 @@ runUnitTestContract
           tick $ failOutput vm1 opts "setUp()"
           pure [False]
         Just (VMSuccess _) -> do
-          detailsResults <- forM testSigs $ \s -> symRun opts vm1 s
-          pure $ mconcat detailsResults
+          forM testSigs $ \s -> symRun opts vm1 s
         _ -> internalError "setUp() did not end with a result"
 
 -- | Define the thread spawner for symbolic tests
-symRun :: App m => UnitTestOptions RealWorld -> VM Concrete RealWorld -> Sig -> m [Bool]
+symRun :: App m => UnitTestOptions RealWorld -> VM Concrete RealWorld -> Sig -> m Bool
 symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     liftIO $ putStrLn $ "\x1b[96m[RUNNING]\x1b[0m " <> Text.unpack testName
     let cd = symCalldata testName types [] (AbstractBuf "txdata")
@@ -221,16 +220,16 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     then if allReverts && (not shouldFail)
          then do
            liftIO $ putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n" <> Text.unpack allBranchRev
-           pure [False]
+           pure False
          else do
            liftIO $ putStr $ "   \x1b[32m[PASS]\x1b[0m " <> Text.unpack testName <> "\n"
-           pure $ fmap (not . isCex) results
+           pure True
     else do
       -- not all is Qed
       let x = mapMaybe extractCex results
       let y = symFailure opts testName (fst cd) types x
       liftIO $ putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n" <> Text.unpack y
-      pure $ fmap (not . isCex) results
+      pure False
 
 allBranchRev :: Text
 allBranchRev = intercalate "\n"
