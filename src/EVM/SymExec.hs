@@ -25,6 +25,7 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
+import Text.Printf (printf)
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
 import EVM (makeVm, abstractContract, initialContract, getCodeLocation, isValidJumpDest)
@@ -552,24 +553,24 @@ verify
   -> Maybe (Postcondition RealWorld)
   -> m (Expr End, [VerifyResult])
 verify solvers opts preState maybepost = do
-  liftIO $ putStrLn "Exploring contract"
+  conf <- readConfig
+  let call = mconcat ["prefix 0x", getCallPrefix preState.state.calldata]
+  when conf.debug $ liftIO $ putStrLn $ "Exploring call " <> call
 
   exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
-  conf <- readConfig
   when conf.dumpExprs $ liftIO $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
   liftIO $ do
-    putStrLn "Simplifying expression"
+    when conf.debug $ putStrLn "Simplifying expression"
     let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
     when conf.dumpExprs $ T.writeFile "simplified.expr" (formatExpr expr)
 
-    putStrLn $ "Explored contract (" <> show (Expr.numBranches expr) <> " branches)"
+    when conf.debug $ putStrLn $ "Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
 
     let flattened = flattenExpr expr
     when (any isPartial flattened) $ do
-      T.putStrLn ""
-      T.putStrLn "WARNING: hevm was only able to partially explore the given contract due to the following issues:"
-      T.putStrLn ""
-      T.putStrLn . T.unlines . fmap (indent 2 . ("- " <>)) . fmap formatPartial . getPartials $ flattened
+      T.putStrLn $ indent 3 "\x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the call "
+                  <> T.pack call <> " due to the following issue(s):"
+      T.putStr . T.unlines . fmap (indent 5 . ("- " <>)) . fmap formatPartial . getPartials $ flattened
 
     case maybepost of
       Nothing -> pure (expr, [Qed ()])
@@ -578,9 +579,8 @@ verify solvers opts preState maybepost = do
           -- Filter out any leaves from `flattened` that can be statically shown to be safe
           tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf preState.constraints post, leaf)
           withQueries = filter canBeSat tocheck <&> \(a, leaf) -> (assertProps conf a, leaf)
-        putStrLn $ "Checking for reachability of "
-                     <> show (length withQueries)
-                     <> " potential property violation(s)"
+        when conf.debug $ putStrLn $ "   Checking for reachability of " <> show (length withQueries)
+                     <> " potential property violation(s) in call " <> call
 
         -- Dispatch the remaining branches to the solver to check for violations
         results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
@@ -589,6 +589,9 @@ verify solvers opts preState maybepost = do
         let cexs = filter (\(res, _) -> not . isUnsat $ res) results
         pure $ if Prelude.null cexs then (expr, [Qed ()]) else (expr, fmap toVRes cexs)
   where
+    getCallPrefix :: Expr Buf -> String
+    getCallPrefix (WriteByte (Lit 0) (LitByte a) (WriteByte (Lit 1) (LitByte b) (WriteByte (Lit 2) (LitByte c) (WriteByte (Lit 3) (LitByte d) _)))) = mconcat $ map (printf "%02x") [a,b,c,d]
+    getCallPrefix _ = "unknown"
     toProps leaf constr post = PNeg (post preState leaf) : constr <> extractProps leaf
     toPropsFinal leaf constr post = if opts.simp then Expr.simplifyProps $ toProps leaf constr post
                                                  else toProps leaf constr post
@@ -655,10 +658,8 @@ equivalenceCheck'
   => SolverGroup -> [Expr End] -> [Expr End] -> m [EquivResult]
 equivalenceCheck' solvers branchesA branchesB = do
       when (any isPartial branchesA || any isPartial branchesB) $ liftIO $ do
-        putStrLn ""
-        putStrLn "WARNING: hevm was only able to partially explore the given contract due to the following issues:"
-        putStrLn ""
-        T.putStrLn . T.unlines . fmap (indent 2 . ("- " <>)) . fmap formatPartial . nubOrd $ ((getPartials branchesA) <> (getPartials branchesB))
+        putStrLn "\x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the given contract due to the following issue(s):"
+        T.putStr . T.unlines . fmap (indent 2 . ("- " <>)) . fmap formatPartial . nubOrd $ ((getPartials branchesA) <> (getPartials branchesB))
 
       let allPairs = [(a,b) | a <- branchesA, b <- branchesB]
       liftIO $ putStrLn $ "Found " <> show (length allPairs) <> " total pairs of endstates"

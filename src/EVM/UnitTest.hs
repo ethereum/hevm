@@ -30,7 +30,6 @@ import Data.ByteString.Lazy qualified as BSLazy
 import Data.Binary.Get (runGet)
 import Data.ByteString (ByteString)
 import Data.Decimal (DecimalRaw(..))
-import Data.Either (isRight, rights, lefts)
 import Data.Foldable (toList)
 import Data.Map (Map)
 import Data.Map qualified as Map
@@ -151,7 +150,7 @@ runUnitTestContract
   opts@(UnitTestOptions {..}) contractMap (name, testSigs) = do
 
   -- Print a header
-  liftIO $ putStrLn $ "Running " ++ show (length testSigs) ++ " tests for " ++ unpack name
+  liftIO $ putStrLn $ "\nChecking " ++ show (length testSigs) ++ " function(s) in contract " ++ unpack name
 
   -- Look for the wanted contract by name from the Solidity info
   case Map.lookup name contractMap of
@@ -171,30 +170,16 @@ runUnitTestContract
       case vm1.result of
         Just (VMFailure _) -> liftIO $ do
           Text.putStrLn "\x1b[31m[BAIL]\x1b[0m setUp() "
-          tick "\n"
           tick $ failOutput vm1 opts "setUp()"
           pure [False]
         Just (VMSuccess _) -> do
-          -- Run all the test cases and print their status
-          details <- forM testSigs $ \s -> do
-            (result, detail) <- symRun opts vm1 s
-            liftIO $ Text.putStrLn result
-            pure detail
-
-          let running = rights details
-              bailing = lefts details
-
-          liftIO $ do
-            tick "\n"
-            tick (Text.unlines (filter (not . Text.null) running))
-            tick (Text.unlines bailing)
-
-          pure $ fmap isRight details
+          forM testSigs $ \s -> symRun opts vm1 s
         _ -> internalError "setUp() did not end with a result"
 
 -- | Define the thread spawner for symbolic tests
-symRun :: App m => UnitTestOptions RealWorld -> VM Concrete RealWorld -> Sig -> m (Text, Either Text Text)
+symRun :: App m => UnitTestOptions RealWorld -> VM Concrete RealWorld -> Sig -> m Bool
 symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
+    liftIO $ putStrLn $ "\x1b[96m[RUNNING]\x1b[0m " <> Text.unpack testName
     let cd = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName
         testContract store = fromMaybe (internalError "test contract not found in state") (Map.lookup vm.state.contract store)
@@ -233,29 +218,31 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     -- display results
     if all isQed results
     then if allReverts && (not shouldFail)
-         then pure ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left $ allBranchRev testName)
-         else pure ("\x1b[32m[PASS]\x1b[0m " <> testName, Right "")
+         then do
+           liftIO $ putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n" <> Text.unpack allBranchRev
+           pure False
+         else do
+           liftIO $ putStr $ "   \x1b[32m[PASS]\x1b[0m " <> Text.unpack testName <> "\n"
+           pure True
     else do
+      -- not all is Qed
       let x = mapMaybe extractCex results
       let y = symFailure opts testName (fst cd) types x
-      pure ("\x1b[31m[FAIL]\x1b[0m " <> testName, Left y)
+      liftIO $ putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n" <> Text.unpack y
+      pure False
 
-allBranchRev :: Text -> Text
-allBranchRev testName = Text.unlines
-  [ "Failure: " <> testName
-  , ""
-  , indentLines 2 $ Text.unlines
-      [ "No reachable assertion violations, but all branches reverted"
-      , "Prefix this testname with `proveFail` if this is expected"
+allBranchRev :: Text
+allBranchRev = intercalate "\n"
+  [ Text.concat $ indentLines 3 <$>
+      [ "Reason:"
+      , "  No reachable assertion violations, but all branches reverted"
+      , "  Prefix this testname with `proveFail` if this is expected"
       ]
   ]
 symFailure :: UnitTestOptions RealWorld -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> Text
 symFailure UnitTestOptions {..} testName cd types failures' =
   mconcat
-    [ "Failure: "
-    , testName
-    , "\n\n"
-    , intercalate "\n" $ indentLines 2 . mkMsg <$> failures'
+    [ Text.concat $ indentLines 3 . mkMsg <$> failures'
     ]
     where
       showRes = \case
@@ -265,19 +252,15 @@ symFailure UnitTestOptions {..} testName cd types failures' =
         res ->
           let ?context = dappContext (traceContext res)
           in Text.pack $ prettyvmresult res
-      mkMsg (leaf, cex) = Text.unlines
+      mkMsg (leaf, cex) = intercalate "\n" $
         ["Counterexample:"
-        ,""
         ,"  result:   " <> showRes leaf
         ,"  calldata: " <> let ?context = dappContext (traceContext leaf)
                            in prettyCalldata cex cd testName types
-        , case verbose of
-            Just _ -> Text.unlines
-              [ ""
-              , indentLines 2 (showTraceTree' dapp leaf)
-              ]
-            _ -> ""
-        ]
+        ] <> verbText leaf
+      verbText leaf = case verbose of
+            Just _ -> [Text.unlines [ indentLines 2 (showTraceTree' dapp leaf)]]
+            _ -> mempty
       dappContext TraceContext { contracts, labels } =
         DappContext { info = dapp, contracts, labels }
 
