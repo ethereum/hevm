@@ -347,10 +347,10 @@ readSolc pt root fp = do
   -- NOTE: we cannot and must not use Data.Text.IO.readFile because that takes the locale
   --       and may fail with very strange errors when the JSON it's reading
   --       contains any UTF-8 character -- which it will with foundry
-  let fileContents = fmap Data.Text.Encoding.decodeUtf8 (Data.ByteString.readFile fp)
-  (readJSON pt (T.pack $ takeBaseName fp) <$> fileContents) >>=
-    \case
-      Nothing -> pure . Left $ "unable to parse: " <> fp
+  fileContents <- fmap Data.Text.Encoding.decodeUtf8 $ Data.ByteString.readFile fp
+  let contractName = T.pack $ takeBaseName fp
+  case readJSON pt contractName fileContents of
+      Nothing -> pure . Left $ "unable to parse " <> show pt <> " project JSON: " <> fp
       Just (contracts, asts, sources) -> do
         sourceCache <- makeSourceCache root sources asts
         pure (Right (BuildOutput contracts sourceCache))
