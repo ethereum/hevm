@@ -79,6 +79,43 @@ You can read more about testing and cheat codes in the (Foundy
 Book)[https://book.getfoundry.sh/forge/cheatcodes]. Below are the cheat codes
 that hevm supports.
 
+## Understanding Counterexamples
+
+When hevm discovers a failure, it prints an example call how to trigger the failure. Let's see the following
+simple solidity code:
+
+```
+pragma solidity ^0.8.19;
+import {Test} from "forge-std/Test.sol";
+contract MyContract is Test {
+  mapping (address => uint) balances;
+  function prove_single_fail(address recv, uint amt) public {
+    require(balances[recv] < 100);
+    if (balances[recv] + amt > 100) { revert(); }
+    balances[recv] += amt;
+    assert(balances[recv] < 100);
+  }
+}
+```
+
+After compiling with `forge build`, when ran under hevm, we get:
+
+```
+$ hevm test
+Checking 1 function(s) in contract src/contract-fail.sol:MyContract
+[RUNNING] prove_single_fail(address,uint256)
+   [FAIL] prove_single_fail(address,uint256)
+   Counterexample:
+     result:   Revert: 0x4e487b710000000000000000000000000000000000000000000000000000000000000001
+     calldata: prove_single_fail(0x0000000000000000000000000000000000000000,100)
+```
+
+Here, hevm provided us with a calldata, where the receiver happens to be the
+zero address, and the value sent is exactly 100. This indeed is the boundary
+condition where the function call fails. The function should have had a `>=`
+rather than a `>` in the `if`. Notice that in this case, while hevm filled in
+the `address` to give a complete call, the address itself is irrelevant,
+although this is not explicitly mentioned.
 
 ## Test Cases that Must Always Revert
 
