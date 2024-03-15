@@ -607,6 +607,13 @@ readStorage' loc store = case readStorage loc store of
 -- no explicit writes to the requested slot. This makes implementing rpc
 -- storage lookups much easier. If the store is backed by an AbstractStore we
 -- always return a symbolic value.
+--
+-- This does not strip writes that cannot possibly match a read, in case there are
+-- some write(s) in between that it cannot statically determine to be removable, because
+-- it will early-abort. So (load idx1 (store idx1 (store idx1 (store idx0)))) will not strip
+-- the idx0 store, in case things in between cannot be stripped. See simplify-storage-map-todo
+-- test for an example where this happens. Note that decomposition solves this, though late in
+-- the simplification lifecycle (just before SMT generation, which can be too late)
 readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
 readStorage w st = go (simplify w) st
   where
@@ -623,16 +630,16 @@ readStorage w st = go (simplify w) st
       (Lit _, Lit _) -> go slot prev
 
       -- slot is for a map + map -> skip write
-      (MappingSlot idA _, MappingSlot idB _)     | idsDontMatch idA idB  -> go slot prev
-      (MappingSlot _ keyA, MappingSlot _ keyB)   | surelyNotEq keyA keyB -> go slot prev
+      (MappingSlot idA _, MappingSlot idB _)       | BS.length idB == 64 && BS.length idA == 64 && idsDontMatch idA idB  -> go slot prev
+      (MappingSlot idA keyA, MappingSlot idB keyB) | BS.length idB == 64 && BS.length idA == 64 && surelyNotEq keyA keyB -> go slot prev
 
       -- special case of array + map -> skip write
-      (ArraySlotWithOffset idA _, Keccak64Bytes) | BS.length idA /= 64 -> go slot prev
-      (ArraySlotZero idA, Keccak64Bytes)         | BS.length idA /= 64 -> go slot prev
+      (ArraySlotWithOffs idA _, Keccak   k)      | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
+      (ArraySlotZero idA, Keccak k)              | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
 
-      -- special case of array + map -> skip write
-      (Keccak64Bytes, ArraySlotWithOffset idA _) | BS.length idA /= 64 -> go slot prev
-      (Keccak64Bytes, ArraySlotZero idA)         | BS.length idA /= 64 -> go slot prev
+      -- special case of map + array -> skip write
+      (Keccak k, ArraySlotWithOffs idA _)      | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
+      (ArraySlotWithOffs idA _, Keccak k)      | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
 
       -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
       (Lit a, Keccak _) | a < 256 -> go slot prev
@@ -658,17 +665,17 @@ readStorage w st = go (simplify w) st
 
       -- case of array + array, but different id's or different concrete offsets
       -- zero offs vs zero offs
-      (ArraySlotZero idA, ArraySlotZero idB)                   | idA /= idB -> go slot prev
+      (ArraySlotZero idA, ArraySlotZero idB)                   | BS.length idA == 32, BS.length idB == 32, idA /= idB -> go slot prev
       -- zero offs vs non-zero offs
-      (ArraySlotZero idA, ArraySlotWithOffset idB _)           | idA /= idB -> go slot prev
-      (ArraySlotZero _, ArraySlotWithOffset _ (Lit offB))      | offB /= 0  -> go slot prev
+      (ArraySlotZero idA, ArraySlotWithOffs idB _)             | BS.length idA == 32, BS.length idB == 32, idA /= idB -> go slot prev
+      (ArraySlotZero idA, ArraySlotWithOffs idB (Lit offB))    | BS.length idA == 32, BS.length idB == 32, offB /= 0  -> go slot prev
       -- non-zero offs vs zero offs
-      (ArraySlotWithOffset idA _, ArraySlotZero idB)           | idA /= idB -> go slot prev
-      (ArraySlotWithOffset _ (Lit offA), ArraySlotZero _)      | offA /= 0  -> go slot prev
+      (ArraySlotWithOffs idA _, ArraySlotZero idB)             | BS.length idA == 32, BS.length idB == 32, idA /= idB -> go slot prev
+      (ArraySlotWithOffs idA (Lit offA), ArraySlotZero idB)    | BS.length idA == 32, BS.length idB == 32, offA /= 0  -> go slot prev
       -- non-zero offs vs non-zero offs
-      (ArraySlotWithOffset idA _, ArraySlotWithOffset idB _)   | idA /= idB -> go slot prev
+      (ArraySlotWithOffs idA _, ArraySlotWithOffs idB _)       | BS.length idA == 32, BS.length idB == 32, idA /= idB -> go slot prev
 
-      (ArraySlotWithOffset _ offA, ArraySlotWithOffset _ offB) | surelyNotEq offA offB -> go slot prev
+      (ArraySlotWithOffs idA offA, ArraySlotWithOffs idB offB) | BS.length idA == 32, BS.length idB == 32, surelyNotEq offA offB -> go slot prev
 
       -- we are unable to determine statically whether or not we can safely move deeper in the write chain, so return an abstract term
       _ -> Just $ SLoad slot s
@@ -687,16 +694,12 @@ readStorage w st = go (simplify w) st
 
 -- storage slots for maps are determined by (keccak (bytes32(key) ++ bytes32(id)))
 pattern MappingSlot :: ByteString -> Expr EWord -> Expr EWord
-pattern MappingSlot id key = Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) (WriteWord (Lit 0) key (ConcreteBuf id)) (ConcreteBuf ""))
-
--- keccak of any 64 bytes value
-pattern Keccak64Bytes :: Expr EWord
-pattern Keccak64Bytes <- Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) _ (ConcreteBuf ""))
+pattern MappingSlot idx key = Keccak (WriteWord (Lit 0) key (ConcreteBuf idx))
 
 -- storage slots for arrays are determined by (keccak(bytes32(id)) + offset)
 -- note that `normArgs` puts the Lit as the 2nd argument to `Add`
-pattern ArraySlotWithOffset :: ByteString -> Expr EWord -> Expr EWord
-pattern ArraySlotWithOffset id offset = Add (Keccak (ConcreteBuf id)) offset
+pattern ArraySlotWithOffs :: ByteString -> Expr EWord -> Expr EWord
+pattern ArraySlotWithOffs id offset = Add (Keccak (ConcreteBuf id)) offset
 
 -- special pattern to match the 0th element because the `Add` term gets simplified out
 pattern ArraySlotZero :: ByteString -> Expr EWord
@@ -721,7 +724,7 @@ structureArraySlots e = mapExpr go e
   where
     go :: Expr a -> Expr a
     go orig@(Lit key) = case litToArrayPreimage key of
-      Just (array, offset) -> ArraySlotWithOffset (slotPos array) (Lit offset)
+      Just (array, offset) -> ArraySlotWithOffs (slotPos array) (Lit offset)
       _ -> orig
     go a = a
 
@@ -777,8 +780,27 @@ getLogicalIdx (GVar _) = internalError "cannot determine addr of a GVar"
 data StorageType = SmallSlot | Array | Map | Mixed | UNK
   deriving (Show, Eq)
 
-safeToDecompose :: Expr a -> Bool
-safeToDecompose inp = result /= Mixed
+-- We can't currently decompose cases when the FULL returned state is equated
+-- This is because the decomposition would need to take into account that ALL
+-- maps/arrays/small-slots need to be equivalent. This could be done, but is left
+-- as a TODO. Currently this only affects equivalence checking as there is no
+-- EVM bytecode to compare the FULL state, so such comparison could only be
+-- generated via hevm itself
+safeToDecomposeProp :: Prop -> Bool
+safeToDecomposeProp p = isJust $ mapPropM' findPEqStore p
+  where
+    findPEqStore :: Prop -> Maybe Prop
+    findPEqStore = \case
+      (PEq (SStore {}) (SStore {})) -> Nothing
+      (PEq (AbstractStore {}) (SStore {})) -> Nothing
+      (PEq (SStore {}) (AbstractStore {})) -> Nothing
+      (PEq (AbstractStore {}) (AbstractStore {})) -> Nothing
+      a -> Just a
+
+-- This checks if the decomposition is possible by making sure there is no
+-- mixture of different types of accesses such as array/map/small-slot.
+safeToDecompose :: Expr a -> Maybe ()
+safeToDecompose inp = if result /= Mixed then Just () else Nothing
   where
     result = execState (safeToDecomposeRunner inp) UNK
 
@@ -786,14 +808,20 @@ safeToDecompose inp = result /= Mixed
     safeToDecomposeRunner a = go a
 
     go :: forall b. Expr b -> State StorageType ()
-    go e@(SLoad (MappingSlot {}) _) = setMap e
-    go e@(SLoad (ArraySlotZero {}) _) = setArray e
-    go e@(SLoad (ArraySlotWithOffset {}) _) = setArray e
+    go e@(SLoad (MappingSlot x _) _) = if BS.length x == 64 then setMap e else setMixed e
+    go e@(SLoad (Keccak x) _) = case bufLength x of
+                                  Lit 32 -> setArray e
+                                  Lit 64 -> setMap e
+                                  _ -> setMixed e
+    go e@(SLoad (ArraySlotWithOffs x _) _) = if BS.length x == 32 then setArray e else setMixed e
     go e@(SLoad (Lit x) _) | x < 256 = setSmall e
     go e@(SLoad _ _) = setMixed e
-    go e@(SStore (MappingSlot {}) _ _) = setMap e
-    go e@(SStore (ArraySlotZero {}) _ _) = setArray e
-    go e@(SStore (ArraySlotWithOffset {}) _ _) = setArray e
+    go e@(SStore (MappingSlot x _) _ _) = if BS.length x == 64 then setMap e else setMixed e
+    go e@(SStore (Keccak x) _ _) =  case bufLength x of
+                                  Lit 32 -> setArray e
+                                  Lit 64 -> setMap e
+                                  _ -> setMixed e
+    go e@(SStore (ArraySlotWithOffs x _) _ _) = if BS.length x == 32 then setArray e else setMixed e
     go e@(SStore (Lit x) _ _) | x < 256 = setSmall e
     go e@(SStore _ _ _) = setMixed e
     go _ = pure ()
@@ -828,9 +856,9 @@ safeToDecompose inp = result /= Mixed
       pure ()
 
 -- | Splits storage into logical sub-stores if (1) all SLoad->SStore* chains are one of:
---     (1a) Lit < 256, (1b) MappingSlot, (1c) ArraySlotWithOffset, (1d) ArraySlotZero
+--     (1a) Lit < 256, (1b) MappingSlot, (1c) ArraySlotWithOffs, (1d) ArraySlotZero
 --  and (2) there is no mixing of different types (e.g. Map with Array) within
---  the same SStore -> SLoad* chain, and (3) there is no mixing of different array/map slots.
+--  the same SStore -> SLoad* chain
 --
 --  Mixing (2) and (3) are attempted to be prevented (if possible) as part of the rewrites
 --  done by the `readStorage` function that is ran before this. If there is still mixing here,
@@ -843,7 +871,7 @@ decomposeStorage :: Expr a -> Maybe (Expr a)
 decomposeStorage = go
   where
     go :: Expr a -> Maybe (Expr a)
-    go e@(SLoad origKey store) = if Prelude.not (safeToDecompose e) then Nothing else tryRewrite origKey store
+    go (SLoad key store) = tryRewrite key store
     go e = Just e
 
     tryRewrite :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
@@ -859,8 +887,14 @@ decomposeStorage = go
     inferLogicalIdx = \case
       Lit a | a >= 256 -> Nothing
       Lit a -> Just (Nothing, Lit a)
+      -- maps
+      (Keccak (ConcreteBuf k)) | BS.length k == 64 -> do
+        let key = idxToWord (BS.take 32 k)
+            idx = Lit $ idxToWord (BS.drop 32 k)
+        Just (Just key, idx)
       (MappingSlot idx key) | BS.length idx == 64 -> Just (Just $ idxToWord idx, key)
-      (ArraySlotWithOffset idx offset) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, offset)
+      -- arrays
+      (ArraySlotWithOffs idx offset) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, offset)
       (ArraySlotZero idx) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, Lit 0)
       _ -> Nothing
 
@@ -873,12 +907,16 @@ decomposeStorage = go
     -- Updates the logical base store of the given expression if it is safe to do so
     setLogicalBase :: Maybe W256 -> Expr Storage -> Maybe (Expr Storage)
 
-    -- abstract bases get their logical idx set to the new value
-    setLogicalBase idx (AbstractStore addr _) = Just $ AbstractStore addr idx
-    setLogicalBase idx (SStore i v s) = do
-      b <- setLogicalBase idx s
-      (idx2, key2) <- inferLogicalIdx i
-      if idx == idx2 then Just (SStore key2 v b) else Nothing
+    setLogicalBase idx (AbstractStore addr Nothing) = Just $ AbstractStore addr idx
+    setLogicalBase idx (AbstractStore addr idx2) | idx == idx2 = Just $ AbstractStore addr idx
+    setLogicalBase _ (AbstractStore _ _) = internalError "we only rewrite idx once, on load"
+    setLogicalBase idx (SStore k v prevStorage) = do
+      (idx2, key2) <- inferLogicalIdx k
+      b <- setLogicalBase idx prevStorage
+      -- If it's not the same IDX, we can skip. This is possible because there are no
+      -- mixed arrays/maps/small-slots, as checked by safeToDecompose
+      if idx == idx2 then Just (SStore key2 v b)
+      else setLogicalBase idx b
 
     -- empty concrete base is safe to reuse without any rewriting
     setLogicalBase _ s@(ConcreteStore m) | Map.null m = Just s
@@ -909,9 +947,6 @@ simplify e = if (mapExpr go e == e)
     go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
 
     -- simplify storage
-    go (Keccak (ConcreteBuf bs)) = case BS.length bs == 64 of
-      True -> MappingSlot bs (Lit $ word bs)
-      False -> Keccak (ConcreteBuf bs)
     go (SLoad slot store) = readStorage' slot store
     go (SStore slot val store) = writeStorage slot val store
 
@@ -935,6 +970,10 @@ simplify e = if (mapExpr go e == e)
     go (WriteWord a b c) = writeWord a b c
 
     go (WriteByte a b c) = writeByte a b c
+
+    -- eliminate a CopySlice if the resulting buffer is the same as the src buffer
+    go (CopySlice (Lit 0) (Lit 0) (Lit s) src (ConcreteBuf ""))
+      | bufLength src == (Lit s) = src
 
     -- truncate some concrete source buffers to the portion relevant for the CopySlice if we're copying a fully concrete region
     go orig@(CopySlice srcOff@(Lit n) dstOff size@(Lit sz)

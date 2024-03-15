@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Changed
 - Improved printing of results. Should be more intuitive to understand what hevm found.
+- More complete and precise array/mapping slot rewrite, along with a copySlice improvement
 
 ## Added
 - More POr and PAnd rules
+- Array/Map slot decomposition can be turned off via a flag
 - More PEq, PLEq, and PLT rules
 - New `label` cheatcode.
 - Updated Bitwuzla to newer version
@@ -20,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CVC5 needs `--incremental` flag to work properly in abstraction-refinement mode
 - cli.hs now uses with-utf8 so no release binary will have locale issues anymore
 - Took ideas for simplification rules from "Super-optimization of Smart Contracts" paper by Albert et al.
+- Printing panic uint256 as hex, not as int
+- Decomposition does not take place when entire states are compared, as that would necessitate
+  a different approach.
 
 ## [0.53.0] - 2024-02-23
 

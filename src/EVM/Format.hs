@@ -144,7 +144,7 @@ showError (ConcreteBuf bs) =
                   -- Method ID for Error(string)
                   "\b\195y\160" -> showCall [AbiStringType] (ConcreteBuf bs)
                   -- Method ID for Panic(uint256)
-                  "NH{q"        -> "Panic" <> showCall [AbiUIntType 256] (ConcreteBuf bs)
+                  "NH{q"        -> "Panic" <> parenthesise [formatBinary bs]
                   _             -> formatBinary bs
 showError b = T.pack $ show b
 
