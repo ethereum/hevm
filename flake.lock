@@ -3,11 +3,11 @@
     "cabal-head": {
       "flake": false,
       "locked": {
-        "lastModified": 1710002016,
-        "narHash": "sha256-bHQB6TRqUlL9N/562+2qqjyNzStyLE7y/z9G3eHzPoU=",
+        "lastModified": 1710761747,
+        "narHash": "sha256-7p5Nl+ZoWjdRa29dWFsvW+vS7j6034+RjtXSb25HhuE=",
         "owner": "haskell",
         "repo": "cabal",
-        "rev": "74b1f2152aafff08d92493ef2cdb0c28630bae14",
+        "rev": "46e822152c9b3f38044870115d7a198b3a509d66",
         "type": "github"
       },
       "original": {
@@ -85,11 +85,11 @@
     "forge-std": {
       "flake": false,
       "locked": {
-        "lastModified": 1709159040,
-        "narHash": "sha256-GZlyyJQbMP9VVGz45nQl8eLd+nknspe94M/hjTf8bhM=",
+        "lastModified": 1710711594,
+        "narHash": "sha256-s/J7odpWysj4U93knIRA28aZqXworZH6IVIjIXD78Yc=",
         "owner": "foundry-rs",
         "repo": "forge-std",
-        "rev": "2f6762e4f73f3d835457c220b5f62dfeeb6f6341",
+        "rev": "bb4ceea94d6f10eeb5b41dc2391c6c8bf8e734ef",
         "type": "github"
       },
       "original": {
@@ -134,16 +134,16 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1710143600,
-        "narHash": "sha256-3QYhGOBDksFvcaLX1aU3dy4/ByK61PGAIp3hDN2if34=",
+        "lastModified": 1710734606,
+        "narHash": "sha256-rFJl+WXfksu2NkWJWKGd5Km17ZGEjFg9hOQNwstsoU8=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "ae118ca36a0f65cadd4396a7afbf7b4ce6986516",
+        "rev": "79bb4155141a5e68f2bdee2bf6af35b1d27d3a1d",
         "type": "github"
       },
       "original": {
         "owner": "nixos",
-        "ref": "haskell-updates",
+        "ref": "nixpkgs-unstable",
         "repo": "nixpkgs",
         "type": "github"
       }
