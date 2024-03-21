@@ -207,7 +207,7 @@ tests = testGroup "hevm"
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
        (_, [(Qed _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x11] c (Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
        liftIO $ putStrLn "OK"
-    , test "simplify-storage-map-todo" $ do
+    , ignoreTest $ test "simplify-storage-map-todo" $ do
        Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {

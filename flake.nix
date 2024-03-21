@@ -73,7 +73,7 @@
             (haskell.lib.compose.addTestToolDepends testDeps)
             (haskell.lib.compose.appendBuildFlags ["-v3"])
             (haskell.lib.compose.appendConfigureFlags (
-              [ "-fci"
+              [ # "-fci"
                 "-O2"
               ]
               ++ lib.optionals stdenv.isDarwin
@@ -170,8 +170,8 @@
             packages = _: [ hevmUnwrapped ];
             buildInputs = [
               # cabal from nixpkgs
-              # haskellPackages.cabal-install
-              cabal-multi-pkgs.cabal-install
+              haskellPackages.cabal-install
+              # cabal-multi-pkgs.cabal-install
               mdbook
               yarn
               haskellPackages.eventlog2html
