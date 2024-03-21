@@ -62,7 +62,7 @@
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         }));
 
-        hevmUnwrapped = (with pkgs; lib.pipe (
+        hevmUnwrapped = (with (if pkgs.stdenv.isDarwin then pkgs else pkgs.pkgsStatic); lib.pipe (
           haskellPackages.callCabal2nix "hevm" ./. {
             # Haskell libs with the same names as C libs...
             # Depend on the C libs, not the Haskell libs.
@@ -76,18 +76,14 @@
             (haskell.lib.compose.appendConfigureFlags (
               [ "-fci"
                 "-O2"
-                "--extra-lib-dirs=${stripDylib (pkgs.gmp.override { withStatic = true; })}/lib"
+              ]
+              ++ lib.optionals stdenv.isDarwin
+              [ "--extra-lib-dirs=${stripDylib (pkgs.gmp.override { withStatic = true; })}/lib"
                 "--extra-lib-dirs=${stripDylib secp256k1-static}/lib"
                 "--extra-lib-dirs=${stripDylib (libff.override { enableStatic = true; })}/lib"
                 "--extra-lib-dirs=${zlib.static}/lib"
                 "--extra-lib-dirs=${stripDylib (libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
                 "--extra-lib-dirs=${stripDylib (ncurses.override { enableStatic = true; })}/lib"
-              ]
-              ++ lib.optionals stdenv.isLinux [
-                "--enable-executable-static"
-                # TODO: replace this with musl: https://stackoverflow.com/a/57478728
-                "--extra-lib-dirs=${glibc}/lib"
-                "--extra-lib-dirs=${glibc.static}/lib"
               ]))
             haskell.lib.dontHaddock
           ]).overrideAttrs(final: prev: {

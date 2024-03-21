@@ -25,7 +25,7 @@ import EVM.Concrete qualified as Concrete
 
 import Control.Monad (unless, when)
 import Control.Monad.ST (ST)
-import Control.Monad.State.Strict hiding (state)
+import Control.Monad.State.Strict (MonadState, State, get, gets, lift, modify', put)
 import Data.Bits (FiniteBits, countLeadingZeros, finiteBitSize)
 import Data.ByteArray qualified as BA
 import Data.ByteString (ByteString)
