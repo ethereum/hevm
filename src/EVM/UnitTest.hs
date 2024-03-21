@@ -23,8 +23,8 @@ import EVM.Stepper qualified as Stepper
 
 import Control.Monad (void, when, forM)
 import Control.Monad.ST (RealWorld, ST, stToIO)
-import Control.Monad.State.Strict hiding (state)
-import Optics.Core hiding (elements)
+import Control.Monad.State.Strict (execState, get, put, liftIO)
+import Optics.Core
 import Optics.State
 import Optics.State.Operators
 import Data.Binary.Get (runGet)

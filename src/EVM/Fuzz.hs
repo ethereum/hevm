@@ -6,7 +6,7 @@
 module EVM.Fuzz where
 
 import Control.Monad (replicateM)
-import Control.Monad.State
+import Control.Monad.State (State, get, put, execState)
 import Data.Map.Strict as Map (fromList, Map, (!), (!?), insert)
 import Data.Maybe (fromMaybe)
 import Data.Set as Set (insert, Set, empty, toList, fromList)

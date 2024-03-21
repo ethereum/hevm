@@ -7,7 +7,7 @@ import Control.Concurrent.Spawn (parMapIO, pool)
 import Control.Concurrent.STM (atomically, TVar, readTVarIO, readTVar, newTVarIO, writeTVar)
 import Control.Monad.Operational qualified as Operational
 import Control.Monad.ST (RealWorld, stToIO, ST)
-import Control.Monad.State.Strict
+import Control.Monad.State.Strict (runStateT)
 import Data.Bifunctor (second)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS

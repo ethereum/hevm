@@ -9,7 +9,8 @@ module EVM.Expr where
 
 import Prelude hiding (LT, GT)
 import Control.Monad (unless)
-import Control.Monad.ST
+import Control.Monad.ST (ST)
+import Control.Monad.State (put, get, execState, State)
 import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -27,7 +28,6 @@ import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
 import Witch (unsafeInto, into, tryFrom)
 import Data.Containers.ListUtils (nubOrd)
-import Control.Monad.State
 
 import Optics.Core
 
