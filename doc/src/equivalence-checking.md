@@ -1,9 +1,6 @@
 # Equivalence Checking
 
-Equivalence checking allows to check whether two bytecodes do the same thing under all input
-circumstances. This allows to e.g. create two functions, one that is known to be good, and
-another that uses less gas, but is hard to check for correctness. Then, with equivalence
-checking, one can check whether the two behave the same.
+Equivalence checking enables the comparison of two bytecodes determine if they perform the same actions under all possible input conditions. This process, for example, allows for the creation of two functions: one that is verified to be reliable, and another that consumes less gas, but whose correctness is challenging to ascertain. Through equivalence checking, it is possible to ascertain whether the two functions exhibit identical behavior.
 
 ## Finding Discrepancies
 
@@ -38,38 +35,36 @@ contract MyContract {
 
 Now ask hevm if they are equivalent. First, let's compile both contracts and get their bytecode
 
-```
+```shell
 bytecode1=$(solc --bin-runtime "contract1.sol" | tail -n1)
 bytecode2=$(solc --bin-runtime "contract2.sol" | tail -n1)
 ```
 
 Let's ask hevm to compare the two:
 
-```
+```shell
 $ cabal run exe:hevm -- equivalence \
       --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
       --code-b $(solc --bin-runtime "contract2.sol" | tail -n1)
-Found 90 total pairs of endstates
-Asking the SMT solver for 58 pairs
-Reuse of previous queries was Useful in 0 cases
-Not equivalent. The following inputs result in differing behaviours:
------
-Calldata:
-  0xafc2c94900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000023
-Storage:
-  Addr SymAddr "entrypoint": [(0x0,0x10)]
-Transaction Context:
-  TxValue: 0x0
+
+  Found 90 total pairs of endstates
+  Asking the SMT solver for 58 pairs
+  Reuse of previous queries was Useful in 0 cases
+  Not equivalent. The following inputs result in differing behaviours:
+  -----
+  Calldata:
+    0xafc2c94900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000023
+  Storage:
+    Addr SymAddr "entrypoint": [(0x0,0x10)]
+  Transaction Context:
+    TxValue: 0x0
 ```
 
-This tells us that with a value of 0x23 being sent, which corresponds
-to 35, the two are not equivalent. This is indeed the case: one will add `35
-div 2 = 17` twice, which is 34, the other will add 35.
+This tells us that with a value of 0x23 being sent, which corresponds to 35, the two are not equivalent. This is indeed the case: one will add `35 div 2 = 17` twice, which is 34, the other will add 35.
 
-# Fixing and Proving Correctness
+## Fixing and Proving Correctness
 
-Let's fix the above issue by incrementing the balance by 1 in case it's an odd
-value. Let's call this `contract3.sol`:
+Let's fix the above issue by incrementing the balance by 1 in case it's an odd value. Let's call this `contract3.sol`:
 
 ```solidity
 //SPDX-License-Identifier: MIT
@@ -87,18 +82,15 @@ contract MyContract {
 
 Let's check whether this new contract is indeed equivalent:
 
-```
+```shell
 $ cabal run exe:hevm -- equivalence \
     --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
     --code-b $(solc --bin-runtime "contract3.sol" | tail -n1)
-Found 108 total pairs of endstates
-Asking the SMT solver for 74 pairs
-Reuse of previous queries was Useful in 0 cases
-No discrepancies found
+
+  Found 108 total pairs of endstates
+  Asking the SMT solver for 74 pairs
+  Reuse of previous queries was Useful in 0 cases
+  No discrepancies found
 ```
 
-Hevm reports that the two are now equivalent, even though they clearly don't
-consume the same amount of gas and have widely different EVM bytecodes. Yet for
-an outside observer, they behave the same. Notice that hevm didn't simply fuzz
-the contract and within a given out of time it didn't find a counterexample.
-Instead, it _proved_ the two equivalent from an outside observer perspective.
+Hevm reports that the two are now equivalent, even though they clearly don't consume the same amount of gas and have widely different EVM bytecode. Yet for an outside observer, they behave the same. Notice that hevm didn't simply fuzz the contract and within a given out of time it didn't find a counterexample. Instead, it _proved_ the two equivalent from an outside observer perspective.
