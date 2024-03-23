@@ -3,10 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "parcel build theme/theme.js --no-source-maps && cp dist/theme.js theme/highlight.js"
+    "build": "parcel build theme/theme.js --no-source-maps && cp dist/theme.js theme/highlight.js",
+    "fmt:docs": "npx prettier@next --config .prettierrc.js --write '**/*.md' --no-cache"
   },
   "devDependencies": {
-    "parcel": "^2.8.1"
+    "parcel": "^2.8.1",
+    "prettier": "^4.0.0-alpha.8"
   },
   "dependencies": {
     "highlight.js": "^10.7.3",

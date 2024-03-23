@@ -15,4 +15,3 @@
 - [Symbolic unit execution](./symbolic.md)
 - [Equivalence checking](./equivalence.md)
 - [Concrete execution](./exec.md)
-
