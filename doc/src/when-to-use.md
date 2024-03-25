@@ -17,9 +17,9 @@ incorrect input, no incorrect behaviour).
 
 Fuzzing and symbolic execution fits within the [exploratory
 testing](https://en.wikipedia.org/wiki/Exploratory_testing) part of
-the test system. These test cases have a set of preconditions and
-postconditions, but the actual action (e.g. function call) is performed by an
-external entity. Let's see an example:
+the testing methodology. Exploratory test cases usually have a set of
+(sometimes implicit) pre- and postconditions, but the actual action (e.g.
+function call) is performed by an external entity. Let's see an example:
 
 ```solidity
 pragma solidity ^0.8.19;
@@ -31,15 +31,17 @@ contract MyContract is DSTest {
     unchecked {
      balance += amt;
     }
-    assert(balance > amt);
+    assert(balance >= amt);
   }
 }
 ```
 
-This function is very easy to break -- simply pick an `amt` that overflows the
-`balance`, and the postcondition `balance > amt` will not hold. A fuzzer finds this kind of bug very easily.
-However, fuzzers find it hard to find bugs that are either specifically hidden (e.g. by a malicious developer),
-or that have a complicated code path towards them. Let's see a simple one:
+This function is easy to break by picking an `amt` that overflows `balance`,
+so that the postcondition `balance > amt` will not hold. A
+[fuzzer](https://en.wikipedia.org/wiki/Fuzzing) finds this kind of bug very
+easily. However, fuzzers have trouble finding bugs that are either specifically
+hidden (e.g. by a malicious developer), or that have a complicated code path
+towards them. Let's see a simple one:
 
 
 ```solidity
@@ -65,12 +67,27 @@ Calling this contract with `amt = 9479` and `amt2 = 12583` will set the balance
 to 1337 which is less than `amt*amt2`, breaking the postcondition. However, a
 fuzzer, e.g. [Echidna](https://github.com/crytic/echidna) will likely not find
 those numbers, because `uint` has a potential range of `2**256` and so it'd be
-looking for a needle in a haystack, when looking randomly. Notice that the
-difference here, compared to the previous example, is that the previous example
-has _many_ different inputs that will break the postcondition, whereas here,
-there are only very few.
+looking for a needle in a haystack, when looking randomly. Here's how to run
+Echidna on the multiplication test:
 
-Hevm, on the other hand, finds the bug in both of these bugs. This is because
+```solidity
+pragma solidity ^0.8.19;
+contract MyContract {
+ // the rest is the same
+}
+```
+
+Then run:
+```
+echidna --test-mode assertion src/multiply-test.sol
+```
+
+Echidna will terminate after 50k runs, with all tests passing. Notice that the
+difference here, compared to the previous example, is that the overflow example
+has _many_ different inputs that can break the postcondition, whereas here only
+one can.
+
+Hevm finds the bug in both of these functions. This is because
 hevm (and symbolic execution frameworks in general) try to find the bug via
 proof-directed search rather than using random inputs. In hevm, we try to prove
 that there are no inputs to the test case such that given the preconditions, the

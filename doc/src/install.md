@@ -1,12 +1,26 @@
 # Quick Installation Guide
 
-To fastest way to start using hevm, is:
-* Install
+To fastest way to start using hevm is to install
   [Foundry](https://book.getfoundry.sh/getting-started/installation#using-foundryup),
-  often via `curl -L https://foundry.paradigm.xyz | bash`
-* Download the static hevm binary from [the github
-  repository](https://github.com/ethereum/hevm/releases/) for your platform and
-  put it in your path so it can be executed via typing "hevm".
+  e.g. via
+```
+curl -L https://foundry.paradigm.xyz | bash
+```
+
+Next, you need to have either [Z3](https://github.com/Z3Prover/z3) or
+[CVC5](https://cvc5.github.io/) installed. Often, these can be installed via:
+```
+$ sudo apt-get install z3
+```
+or similar. If you installed CVC5 instead, you will need to pass the flag
+"--solver cvc5" to "hevm test" later.
+
+
+Finally, download the static hevm binary from [the github
+repository](https://github.com/ethereum/hevm/releases/) for your platform and
+put it in your path so it can be executed via typing "hevm".
+
+# How to Check if it Works
 
 Once you have the above, you can go to the root of your forge-based project
 and build it:
@@ -27,7 +41,7 @@ Checking 1 function(s) in contract src/contract-pass.sol:MyContract
    [PASS] prove_pass(address,uint256)
 ```
 
-See [ds-test-based Testing](./ds-test-tutorial.md) for details.
+See [ds-test Tutorial](./ds-test-tutorial.md) for details.
 
 Note that Foundry provides the solidity compiler, hence there is no need to
 install solidity separately.
