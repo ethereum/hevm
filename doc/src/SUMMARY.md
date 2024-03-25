@@ -1,6 +1,6 @@
 [Getting Started](./getting-started.md)
-[Installation](./install.md)
-[Rationale](./rationale.md)
+[Quick Installation](./install.md)
+[When to Use hevm](./when-to-use.md)
 
 # Capabilities
 
@@ -15,4 +15,3 @@
 - [Symbolic unit execution](./symbolic.md)
 - [Equivalence checking](./equivalence.md)
 - [Concrete execution](./exec.md)
-

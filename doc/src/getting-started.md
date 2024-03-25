@@ -146,34 +146,6 @@ test and so this omission is not detected.
 - Prove equivalence of two different bytecode objects such as two functions or
     even entire contracts.
 
-## Similarities and Differences to Other Tools
-
-Hevm is similar to [Halmos](https://github.com/a16z/halmos) and
-[Kontrol]https://docs.runtimeverification.com/kontrol/overview/readme)
-in its approach.
-
-However, it is quite different from static code analysis tools such as
-[Oyente](https://github.com/enzymefinance/oyente),
-[Slither](https://github.com/crytic/slither), and
-[Mythril](https://github.com/ConsenSys/mythril). While these 3 tools typically
-use some form of symbolic execution to try to validate their results, their
-main method of operation is not via symbolic execution, and they can, and do,
-report false positives.
-
-Notice that static code analysis tools will find bugs that the author(s) didn't
-write a test case for, as they typically have a (large) set of preconfigured
-test-cases that they will report on, if they can find a way to violate them. In
-that sense, it may be valuable to run them alongside hevm.
-
-Finally,
-[SMTChecker](https://github.com/ethereum/solidity/blob/develop/docs/smtchecker.rst)
-may also be interesting to run alongside hevm. SMTChecker is very different
-from both approaches detailed above. While SMTChecker is capable of reliably
-finding both reentrancy and loop-related bugs, the tools above can only do so
-on a best effort basis. Hevm often reports a warning of incompleteness for
-such problems, while static code analysis tools either report potential
-positives or may even not discover them at all.
-
 ## History
 Hevm was originally developed as part of the
 [dapptools](https://github.com/dapphub/dapptools/) project, and was forked to
