@@ -11,7 +11,7 @@ To fastest way to start using hevm, is:
 Once you have the above, you can go to the root of your forge-based project,
 build with `forge build` and then and issue `hevm test`, which will run all
 tests of your project that start with `prove_` or `proveFalse_`. See
-[ds-test-based Testing](./dstest-tutorial.md) for details.
+[ds-test-based Testing](./ds-test-tutorial.md) for details.
 
 Note that Foundry provides the solidity compiler, hence there is no need to
 install solidity separately.

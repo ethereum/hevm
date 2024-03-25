@@ -18,7 +18,9 @@ contract BadVaultTest is Test {
 }
 ```
 
-Once you have written such a test case, you need to compile with `forge build` (see [forge documentation](https://book.getfoundry.sh/forge/tests) for more details) and then:
+Once you have written such a test case, you need to compile with `forge build`
+(see [forge documentation](https://book.getfoundry.sh/forge/tests) for more
+details) and then:
 
 ```
 $ hevm test
