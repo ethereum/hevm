@@ -15,7 +15,7 @@ These can be accessed by calling into a contract (typically called `Vm`) at addr
 - `function assume(bool b) public`
   Add the condition `b` to the assumption base for the current branch. This functions almost identically to `require`.
 
-- `function deal(uint usr, uint amt) public`
+- `function deal(address usr, uint amt) public`
   Sets the eth balance of `usr` to `amt`. Note that if `usr` is a symbolic address, then it must be the address of a contract that has already been deployed.
   This restriction is in place to ensure soundness of our symbolic address encoding with respect to potential aliasing of symbolic addresses.
 
