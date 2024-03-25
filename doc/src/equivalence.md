@@ -49,8 +49,16 @@ Available options:
                            problem
 ```
 
-Symbolically execute both the code given in `--code-a` and `--code-b` and try to prove equivalence between their outputs and storages.
+Symbolically execute both the code given in `--code-a` and `--code-b` and try
+to prove equivalence between their outputs and storages. Extracting bytecode
+from solidity contracts can be done via, e.g.:
 
-If `--sig` is given, calldata is assumed to take the form of the function given.
-If left out, calldata is a fully abstract buffer of at most 256 bytes.
+```
+hevm equivalence \
+    --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
+    --code-b $(solc --bin-runtime "contract2.sol" | tail -n1)
+```
+
+If `--sig` is given, calldata is assumed to take the form of the function
+given. If left out, calldata is a fully abstract buffer of at most 256 bytes.
 

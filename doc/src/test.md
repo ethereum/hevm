@@ -57,16 +57,10 @@ Available options:
                            reachability (default: 1) (default: 1)
 ```
 
-`hevm test` executes all solidity unit tests that make use of the `DSTest` assertion library
+`hevm test` executes all solidity unit tests that make use of the `ds-test` assertion library
 (a.k.a "Foundry tests"). It supports both foundry based (the default) and dapptools based projects.
-
-It has support for:
-- unit tests (`test` prefix, no arguments)
-- fuzz tests (`test` prefix, with function arguments)
-- invariant tests (`invariant` prefix, with function arguments)
-- symbolic tests (`prove` prefix, with function arguments)
 
 A more detailed introduction to symbolic unit tests with `hevm` can be found
 [here](https://fv.ethereum.org/2020/12/11/symbolic-execution-with-ds-test/). An
-overview of using ds-test for solidity testing can be found in the [foundry
+overview of using DStest for solidity testing can be found in the [foundry
 book](https://book.getfoundry.sh/forge/tests).

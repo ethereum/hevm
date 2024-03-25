@@ -1,4 +1,4 @@
-# Equivalence Checking
+# Equivalence Checking Tutorial
 
 Equivalence checking allows to check whether two bytecodes do the same thing under all input
 circumstances. This allows to e.g. create two functions, one that is known to be good, and
@@ -36,7 +36,7 @@ contract MyContract {
 }
 ```
 
-Now ask hevm if they are equivalent. First, let's compile both contracts and get their bytecode
+Now ask hevm if they are equivalent. First, let's compile both contracts and get their bytecode:
 
 ```
 bytecode1=$(solc --bin-runtime "contract1.sol" | tail -n1)
@@ -46,7 +46,7 @@ bytecode2=$(solc --bin-runtime "contract2.sol" | tail -n1)
 Let's ask hevm to compare the two:
 
 ```
-$ cabal run exe:hevm -- equivalence \
+$ hevm equivalence \
       --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
       --code-b $(solc --bin-runtime "contract2.sol" | tail -n1)
 Found 90 total pairs of endstates
@@ -88,7 +88,7 @@ contract MyContract {
 Let's check whether this new contract is indeed equivalent:
 
 ```
-$ cabal run exe:hevm -- equivalence \
+$ hevm equivalence \
     --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
     --code-b $(solc --bin-runtime "contract3.sol" | tail -n1)
 Found 108 total pairs of endstates

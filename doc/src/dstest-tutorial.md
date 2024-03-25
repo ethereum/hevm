@@ -1,10 +1,8 @@
-# Controlling the Unit Testing Environment
-
-## Writing Tests
+# Ds-test Tutorial
 
 Test cases must be prepended with `prove_` and the testing contract must
-inherit from `Test` from (Forge's standard test
-library)[https://book.getfoundry.sh/forge/forge-std]. First, import Test:
+inherit from `Test` from [Forge's standard test
+library](https://book.getfoundry.sh/forge/forge-std). First, import Test:
 `import {Test} from "forge-std/Test.sol";` and then inherit from it via `... is
 Test`. This allows hevm to discover the test cases it needs to run. Like so:
 
@@ -72,7 +70,7 @@ contract BadVaultTest is Test {
 
 The postconditions should check the state of the contract after the call(s) are
 complete. In particular, it should check that the changes that the function applied
-did not break any of the (invariants)[https://en.wikipedia.org/wiki/Invariant_(mathematics)] 
+did not break any of the (invariants)[https://en.wikipedia.org/wiki/Invariant_(mathematics)]
 of the contract, such as total number of tokens.
 
 You can read more about testing and cheat codes in the (Foundry

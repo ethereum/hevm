@@ -2,16 +2,16 @@
 [Quick Installation](./install.md)
 [When to Use hevm](./when-to-use.md)
 
-# Capabilities
+# Tutorials
 
-- [DSTest-based Testing](./dstest-tutorial.md)
+- [ds-test tutorial](./dstest-tutorial.md)
 <!-- - [Discovering reachable assertion violations]() -->
-- [Equivalence checking](./equivalence-checking.md)
+- [Equivalence checking tutorial](./equivalence-checking-tutorial.md)
 <!-- - [Symbolic unit testing]() -->
 
 # Reference
 
-- [DSTest-base Testing](./test.md)
+- [ds-test proving](./test.md)
 - [Symbolic unit execution](./symbolic.md)
 - [Equivalence checking](./equivalence.md)
 - [Concrete execution](./exec.md)
