@@ -1,6 +1,6 @@
 [Getting Started](./getting-started.md)
 [Quick Installation](./install.md)
-[When to Use hevm](./when-to-use.md)
+[When to Use](./when-to-use.md)
 
 # Tutorials
 
