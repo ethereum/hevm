@@ -1,10 +1,9 @@
-# Summary
+[Getting Started](./getting-started.md)
+[Installation](./install.md)
+[Rationale](./rationale.md)
 
-[Quick Overview](./overview.md)
+# Capabilities
 
-# Tutorials
-
-- [Installation](./install.md)
 - [DSTest-based Testing](./dstest-tutorial.md)
 <!-- - [Discovering reachable assertion violations]() -->
 - [Equivalence checking](./equivalence-checking.md)

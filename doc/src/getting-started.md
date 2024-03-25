@@ -1,4 +1,4 @@
-# Overview
+# Getting Started
 
 The hevm project is an implementation of the Ethereum Virtual Machine (EVM)
 focused on symbolic analysis of evm bytecode. This essentially means that hevm
