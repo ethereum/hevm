@@ -75,7 +75,7 @@ complete. In particular, it should check that the changes that the function appl
 did not break any of the (invariants)[https://en.wikipedia.org/wiki/Invariant_(mathematics)] 
 of the contract, such as total number of tokens.
 
-You can read more about testing and cheat codes in the (Foundy
+You can read more about testing and cheat codes in the (Foundry
 Book)[https://book.getfoundry.sh/forge/cheatcodes]. Below are the cheat codes
 that hevm supports.
 
@@ -119,7 +119,8 @@ although this is not explicitly mentioned.
 
 ## Test Cases that Must Always Revert
 
-Hevm assumes that a test case should not always revert. If you have such a test case, Hevm will warn you and return a FAIL. For example this toy contract:
+Hevm assumes that a test case should not always revert. If you have such a test
+case, hevm will warn you and return a FAIL. For example this toy contract:
 
 ```solidity
 pragma solidity ^0.8.19;

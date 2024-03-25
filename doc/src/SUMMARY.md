@@ -4,6 +4,7 @@
 
 # Tutorials
 
+- [Installation](./install.md)
 - [DSTest-based Testing](./dstest-tutorial.md)
 <!-- - [Discovering reachable assertion violations]() -->
 - [Equivalence checking](./equivalence-checking.md)
