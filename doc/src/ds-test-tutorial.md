@@ -191,7 +191,7 @@ methods
 | Function | Description |
 | --- | --- |
 |`function prank(address sender) public`| Sets `msg.sender` to the specified `sender` for the next call.|
-| `function deal(uint usr, uint amt) public`| Sets the eth balance of `usr` to `amt`. Note that if `usr` is a symbolic address, then it must be the address of a contract that has already been deployed. This restriction is in place to ensure soundness of our symbolic address encoding with respect to potential aliasing of symbolic addresses.|
+|`function deal(uint usr, uint amt) public`| Sets the eth balance of `usr` to `amt`. Note that if `usr` is a symbolic address, then it must be the address of a contract that has already been deployed. This restriction is in place to ensure soundness of our symbolic address encoding with respect to potential aliasing of symbolic addresses.|
 |`function store(address c, bytes32 loc, bytes32 val) public`| Sets the slot `loc` of contract `c` to `val`.|
 |`function warp(uint x) public`| Sets the block timestamp to `x`.|
 |`function roll(uint x) public`| Sets the block number to `x`.|
