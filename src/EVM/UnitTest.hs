@@ -21,6 +21,7 @@ import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 
+import Control.Monad (void, when, forM)
 import Control.Monad.ST (RealWorld, ST, stToIO)
 import Optics.Core hiding (elements)
 import Optics.State

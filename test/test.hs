@@ -7,6 +7,7 @@ import Prelude hiding (LT, GT)
 
 import GHC.TypeLits
 import Data.Proxy
+import Control.Monad
 import Control.Monad.ST (RealWorld, stToIO)
 import Control.Monad.State.Strict
 import Control.Monad.IO.Unlift
@@ -3615,7 +3616,7 @@ loadVM x = do
 
 hex :: ByteString -> ByteString
 hex s =
-  case BS16.decodeBase16 s of
+  case BS16.decodeBase16Untyped s of
     Right x -> x
     Left e -> internalError $ T.unpack e
 

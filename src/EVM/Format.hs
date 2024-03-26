@@ -39,7 +39,7 @@ import EVM (traceForest, traceForest', traceContext, cheatCode)
 import EVM.ABI (getAbiSeq, parseTypeName, AbiValue(..), AbiType(..), SolError(..), Indexed(..), Event(..))
 import EVM.Dapp (DappContext(..), DappInfo(..), findSrc, showTraceLocation)
 import EVM.Expr qualified as Expr
-import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
+import EVM.Solidity (SolcContract(..), Method(..))
 
 import Control.Arrow ((>>>))
 import Optics.Core
@@ -823,13 +823,13 @@ strip0x' s = if "0x" `isPrefixOf` s then drop 2 s else s
 
 hexByteString :: String -> ByteString -> ByteString
 hexByteString msg bs =
-  case BS16.decodeBase16 bs of
+  case BS16.decodeBase16Untyped bs of
     Right x -> x
     _ -> internalError $ "invalid hex bytestring for " ++ msg
 
 hexText :: Text -> ByteString
 hexText t =
-  case BS16.decodeBase16 (T.encodeUtf8 (T.drop 2 t)) of
+  case BS16.decodeBase16Untyped (T.encodeUtf8 (T.drop 2 t)) of
     Right x -> x
     _ -> internalError $ "invalid hex bytestring " ++ show t
 

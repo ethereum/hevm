@@ -8,6 +8,7 @@
 module EVM.Expr where
 
 import Prelude hiding (LT, GT)
+import Control.Monad (when)
 import Control.Monad.ST
 import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
