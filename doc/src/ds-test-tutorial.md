@@ -1,4 +1,4 @@
-# Ds-test Tutorial
+# ds-test Tutorial
 
 Test cases must be prepended with `prove_` and the testing contract must
 inherit from `Test` from [Forge's standard test

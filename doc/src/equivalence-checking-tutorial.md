@@ -38,14 +38,14 @@ contract MyContract {
 
 Now ask hevm if they are equivalent. First, let's compile both contracts and get their bytecode:
 
-```
+```shell
 bytecode1=$(solc --bin-runtime "contract1.sol" | tail -n1)
 bytecode2=$(solc --bin-runtime "contract2.sol" | tail -n1)
 ```
 
 Let's ask hevm to compare the two:
 
-```
+```shell
 $ hevm equivalence \
       --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
       --code-b $(solc --bin-runtime "contract2.sol" | tail -n1)
@@ -66,7 +66,7 @@ This tells us that with a value of 0x23 being sent, which corresponds
 to 35, the two are not equivalent. This is indeed the case: one will add `35
 div 2 = 17` twice, which is 34, the other will add 35.
 
-# Fixing and Proving Correctness
+## Fixing and Proving Correctness
 
 Let's fix the above issue by incrementing the balance by 1 in case it's an odd
 value. Let's call this [contract3.sol](contract3.sol):
@@ -87,7 +87,7 @@ contract MyContract {
 
 Let's check whether this new contract is indeed equivalent:
 
-```
+```shell
 $ hevm equivalence \
     --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
     --code-b $(solc --bin-runtime "contract3.sol" | tail -n1)
