@@ -1,5 +1,5 @@
 [book]
-authors = ["dxo"]
+authors = ["dxo", "msoos"]
 language = "en"
 multilingual = false
 src = "src"
