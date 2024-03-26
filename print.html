@@ -395,7 +395,7 @@ Sets the block number to <code>x</code>.</p>
 Add the condition <code>b</code> to the assumption base for the current branch. This functions almost identically to <code>require</code>.</p>
 </li>
 <li>
-<p><code>function deal(uint usr, uint amt) public</code>
+<p><code>function deal(address usr, uint amt) public</code>
 Sets the eth balance of <code>usr</code> to <code>amt</code>. Note that if <code>usr</code> is a symbolic address, then it must be the address of a contract that has already been deployed.
 This restriction is in place to ensure soundness of our symbolic address encoding with respect to potential aliasing of symbolic addresses.</p>
 </li>
