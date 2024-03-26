@@ -4,8 +4,8 @@
 
 # Tutorials
 
-[DSTest-based Testing](./ds-test-tutorial.md)
-[Equivalence checking](./equivalence-checking-tutorial.md)
+[ds-test tutorial](./ds-test-tutorial.md)
+[Equivalence checking tutorial](./equivalence-checking-tutorial.md)
 <!-- [Symbolic unit testing]() -->
 <!-- [Discovering reachable assertion violations]() -->
 
