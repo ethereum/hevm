@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 [Getting Started](./getting-started.md)
 [Quick Installation](./install.md)
 [When to Use](./when-to-use.md)
@@ -6,14 +5,14 @@
 
 # Tutorials
 
-[DSTest-based Testing](./dstest-tutorial.md)
-[Equivalence checking](./equivalence-checking.md)
+[DSTest-based Testing](./ds-test-tutorial.md)
+[Equivalence checking](./equivalence-checking-tutorial.md)
 <!-- [Symbolic unit testing]() -->
 <!-- [Discovering reachable assertion violations]() -->
 
 # Reference
 
-- [DSTest-base Testing](./test.md)
+- [ds-test proving](./test.md)
 - [Symbolic unit execution](./symbolic.md)
 - [Equivalence checking](./equivalence.md)
 - [Concrete execution](./exec.md)
