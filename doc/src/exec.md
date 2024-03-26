@@ -61,7 +61,7 @@ Virtual Machine will put `0x647175696e6550383480393834f3` in the RETURNDATA.
 To execute a mainnet transaction:
 
 ```
-# install seth as per https://github.com/makerdao/developerguides/blob/master/devtools/seth/seth-guide/seth-guide.md 
+# install seth as per https://github.com/makerdao/developerguides/blob/master/devtools/seth/seth-guide/seth-guide.md
 $ export ETH_RPC_URL=https://mainnet.infura.io/v3/YOUR_API_KEY_HERE
 $ export TXHASH=0xd2235b9554e51e8ff5b3de62039d5ab6e591164b593d892e42b2ffe0e3e4e426
 hevm exec --caller $(seth tx $TXHASH from) --address $(seth tx $TXHASH to) --calldata $(seth tx $TXHASH input) --rpc $ETH_RPC_URL --block $(($(seth tx $TXHASH blockNumber)-1)) --gas $(seth tx $TXHASH gas)

@@ -20,7 +20,7 @@ original program, but may use less gas to execute. This can be done via
 that the behaviour of the two bytecodes is the same, or will give inputs
 where they differ.
 
-## Example Use-Case
+## Practical Scenario
 
 Let's say we have a function that allows transfer of money, but no balance can
 be larger than or equal to 100. Let's see the contract and its associated check:

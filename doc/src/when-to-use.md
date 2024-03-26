@@ -22,6 +22,7 @@ the testing methodology. Exploratory test cases usually have a set of
 function call) is performed by an external entity. Let's see an example:
 
 ```solidity
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 import "ds-test/test.sol";
 
@@ -45,6 +46,7 @@ towards them. Let's see a simple one:
 
 
 ```solidity
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 import "ds-test/test.sol";
 
@@ -71,6 +73,7 @@ looking for a needle in a haystack, when looking randomly. Here's how to run
 Echidna on the multiplication test:
 
 ```solidity
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 contract MyContract {
  // the rest is the same
@@ -146,3 +149,14 @@ finding both reentrancy and loop-related bugs, the tools above can only do so
 on a best effort basis. Hevm often reports a warning of incompleteness for
 such problems, while static code analysis tools either report potential
 positives or may even not discover them at all.
+
+
+| Tool | Approach | Primary Method | Notes |
+| --- | --- | --- | --- |
+| **hevm** | Symbolic analysis of EVM bytecode | Symbolic execution | Focuses on exploring all execution possibilities, identifying potential assertion violations, and optimizing gas usage. Can prove equivalence between bytecodes. |
+| **Halmos** | Similar to hevm | Not specified | Approach similar to hevm, but the document does not detail specific methodologies or differences. |
+| **Kontrol** | Similar to hevm | Not specified | Approach similar to hevm, with a focus presumably on symbolic analysis as well, but further details are not provided in the document. |
+| **Oyente** | Static code analysis | Partial symbolic execution | Uses symbolic execution to validate results but primarily relies on static analysis. Can report false positives. |
+| **Slither** | Static code analysis | Partial symbolic execution | Similar to Oyente, uses static analysis as its main method, complemented by symbolic execution for validation. Known for reporting false positives. |
+| **Mythril** | Static code analysis | Partial symbolic execution | Combines static code analysis with symbolic execution for result validation. Like Oyente and Slither, can report false positives. |
+| **SMTChecker** | Different from both hevm and static code analysis tools | SMT solving | Capable of finding reentrancy and loop-related bugs reliably, which other tools might miss or report incompletely. Offers a distinct approach from symbolic execution. |
