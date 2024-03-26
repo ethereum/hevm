@@ -54,7 +54,7 @@ We now need a copy of hevm (see
 which can be installed e.g. with `apt-get` on ubuntu/debian or `homebrew` on Mac,
 and a copy of [Foundry](https://getfoundry.sh/):
 
-```sh
+```shell
 $ sudo apt-get install z3  # install z3
 $ curl -L https://foundry.paradigm.xyz | bash # install foundryup
 $ foundryup # install forge and other foundry binaries
@@ -89,7 +89,7 @@ Compiler run successful!
 
 Now let's run `hevm` to see if it finds the bug:
 
-```sh
+```shell
 $ hevm test --solver z3
 Running 1 tests for src/contract.sol:MyContract
 [FAIL] prove_add_value(address,uint256)
@@ -116,7 +116,7 @@ should now say:
 
 Let's re-build with forge and check with hevm once again:
 
-```sh
+```shell
 $ forge build
 [⠰] Compiling...
 [⠔] Compiling 1 files with 0.8.19

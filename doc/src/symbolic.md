@@ -1,6 +1,6 @@
 # `hevm symbolic`
 
-```sh
+```shell
 Usage: hevm symbolic [--code TEXT] [--calldata TEXT] [--address ADDR]
                      [--caller ADDR] [--origin ADDR] [--coinbase ADDR]
                      [--value W256] [--nonce WORD64] [--gas WORD64]
@@ -100,7 +100,7 @@ This is best illustrated through a few examples:
 
 Calldata specialized to the bytestring `0xa9059cbb` followed by 64 symbolic bytes:
 
-```sh
+```shell
 hevm symbolic --sig "transfer(address,uint256)" --code $(<dstoken.bin-runtime)
 ```
 
@@ -108,7 +108,7 @@ Calldata specialized to the bytestring
 `0xa9059cbb0000000000000000000000007cfa93148b0b13d88c1dce8880bd4e175fb0dedf`
 followed by 32 symbolic bytes.
 
-```sh
+```shell
 hevm symbolic --sig "transfer(address,uint256)" --arg 0x7cFA93148B0B13d88c1DcE8880bd4e175fb0DeDF --code $(<dstoken.bin-runtime)
 ```
 
@@ -116,7 +116,7 @@ Calldata specialized to the bytestring `0xa9059cbb` followed by 32 symbolic
 bytes, followed by the bytestring
 `0000000000000000000000000000000000000000000000000000000000000000`:
 
-```sh
+```shell
 hevm symbolic --sig "transfer(address,uint256)" --arg "<symbolic>" --arg 0 --code $(<dstoken.bin-runtime)
 ```
 

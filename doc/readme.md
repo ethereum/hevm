@@ -8,13 +8,13 @@ are included in the nix-shell.
 You can then serve the documentation locally by calling the [`serve`
 command][mdbook-serve] from the `book` directory:
 
-```sh
+```shell
 mdbook serve
 ```
 
 Alternatively it can be called from the root of the repository:
 
-```sh
+```shell
 mdbook serve doc
 ```
 
@@ -26,7 +26,7 @@ In order to highlight the Solidity code examples in the book we override
 mdBook's built-in [highlight.js] with our own. To update the highlighting code,
 run the following commands using [yarn]:
 
-```sh
+```shell
 yarn install
 yarn build
 ```
