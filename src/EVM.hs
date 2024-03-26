@@ -23,6 +23,7 @@ import EVM.Types qualified as Expr (Expr(Gas))
 import EVM.Sign qualified
 import EVM.Concrete qualified as Concrete
 
+import Control.Monad (unless, when)
 import Control.Monad.ST (ST)
 import Control.Monad.State.Strict hiding (state)
 import Data.Bits (FiniteBits, countLeadingZeros, finiteBitSize)
