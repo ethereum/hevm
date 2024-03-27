@@ -4,7 +4,7 @@
 symbolic execution, equivalence checking, and unit testing of smart contracts.
 `hevm` can symbolically execute smart contracts, run unit tests, and run
 arbitrary EVM code. It can run on state set up in a [`ds-test` testing
-harness](https://book.getfoundry.sh/forge/forge-std), and/or fetched on demand from
+harness](https://book.getfoundry.sh/forge/forge-std), or fetched on demand from
 live network using `rpc` calls.
 
 `hevm` was originally developed as part of the

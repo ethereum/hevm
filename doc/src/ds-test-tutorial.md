@@ -182,16 +182,16 @@ Which is now the expected outcome.
 ## Supported Cheat Codes
 
 Since hevm is an EVM implementation mainly dedicated to testing and
-exploration, it features a set of `cheat codes` which can manipulate the
+exploration, it features a set of "cheat codes" which can manipulate the
 environment in which the execution is run. These can be accessed by calling
 into a contract (typically called `Vm`) at address
-`0x7109709ECfa91a80626fF3989D68f67F5b1DD12D`, which implements the following
-methods
+`0x7109709ECfa91a80626fF3989D68f67F5b1DD12D`, which happens to be keccak("hevm cheat code"),
+implementing the following methods:
 
 | Function | Description |
 | --- | --- |
 |`function prank(address sender) public`| Sets `msg.sender` to the specified `sender` for the next call.|
-|`function deal(uint usr, uint amt) public`| Sets the eth balance of `usr` to `amt`. Note that if `usr` is a symbolic address, then it must be the address of a contract that has already been deployed. This restriction is in place to ensure soundness of our symbolic address encoding with respect to potential aliasing of symbolic addresses.|
+|`function deal(address usr, uint amt) public`| Sets the eth balance of `usr` to `amt`. Note that if `usr` is a symbolic address, then it must be the address of a contract that has already been deployed. This restriction is in place to ensure soundness of our symbolic address encoding with respect to potential aliasing of symbolic addresses.|
 |`function store(address c, bytes32 loc, bytes32 val) public`| Sets the slot `loc` of contract `c` to `val`.|
 |`function warp(uint x) public`| Sets the block timestamp to `x`.|
 |`function roll(uint x) public`| Sets the block number to `x`.|
