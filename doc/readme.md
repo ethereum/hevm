@@ -23,7 +23,7 @@ mdbook serve doc
 ## Updating syntax highlighting
 
 In order to highlight the Solidity code examples in the book we override
-mdBook's built-in [highlight.js] with our own. To update the highlighting code,
+mdBook's built-in [highlight.js] with our own. To update the syntax highlighting,
 run the following commands using [yarn]:
 
 ```shell
