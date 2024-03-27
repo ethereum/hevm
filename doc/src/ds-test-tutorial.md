@@ -76,8 +76,8 @@ did not break any of the (invariants)[https://en.wikipedia.org/wiki/Invariant_(m
 of the contract, such as total number of tokens.
 
 You can read more about testing and cheat codes in the (Foundry
-Book)[https://book.getfoundry.sh/forge/cheatcodes]. Below are the cheat codes
-that hevm supports.
+Book)[https://book.getfoundry.sh/forge/cheatcodes] and you can see the
+hevm-supported cheat codes [below](#supported-cheat-codes).
 
 ## Understanding Counterexamples
 
