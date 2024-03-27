@@ -12,7 +12,7 @@ maliciously) hidden. Symbolic Execution can also _prove_ that no postcondition
 can be violated, increasing the overall confidence in the contract. Note, however,
 that Symbolic Execution does not automatically generate postconditions for
 well-known bug classes like static code analysis tools do. Instead, these
-postconditions ,and their sometimes associated preconditions, need to
+postconditions, and their sometimes associated preconditions, need to
 be explicitly written.
 
 ## Fuzzing versus Symbolic Execution
