@@ -2,7 +2,7 @@
 
 In the cryptocurrency world, it is exceedingly easy to lose a [lot of
 assets](https://chainsec.io/defi-hacks/) due to bugs. This risk can be alleviated
-via a good test approach. Testing is a [discipline of its
+via a good testing approach. Testing is a [discipline of its
 own](https://en.wikipedia.org/wiki/Software_testing) that includes far more
 than simple test cases. Normally, it should include an understanding of what
 needs to be tested (i.e. scope) and for what types of issues (e.g.
