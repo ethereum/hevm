@@ -195,7 +195,7 @@ implementing the following methods:
 |`function store(address c, bytes32 loc, bytes32 val) public`| Sets the slot `loc` of contract `c` to `val`.|
 |`function warp(uint x) public`| Sets the block timestamp to `x`.|
 |`function roll(uint x) public`| Sets the block number to `x`.|
-|`function assume(bool b) public`| Add the condition `b` to the assumption base for the current branch. This functions almost identically to `require`.|
+|`function assume(bool b) public`| Add the condition `b` to the assumption base for the current branch. This functions almost identically to `require`. For most users, `require` is preferable. However, in case you wish to understand & modify the internal IR of hevm, you may want to use `assume`.|
 |`function load(address c, bytes32 loc) public returns (bytes32 val)`| Reads the slot `loc` of contract `c`.|
 |`function sign(uint sk, bytes32 digest) public returns (uint8 v, bytes32 r, bytes32 s)`| Signs the `digest` using the private key `sk`. Note that signatures produced via `hevm.sign` will leak the private key.|
 |`function addr(uint sk) public returns (address addr)`| Derives an ethereum address from the private key `sk`. Note that `hevm.addr(0)` will fail with `BadCheatCode` as `0` is an invalid ECDSA private key.|
