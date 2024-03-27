@@ -1,17 +1,19 @@
 # When to use Symbolic Execution
 
 In the cryptocurrency world, it is exceedingly easy to lose a [lot of
-assets](https://chainsec.io/defi-hacks/) due to bugs. This risk can be alleviated
-via a good testing approach. Testing is a [discipline of its
-own](https://en.wikipedia.org/wiki/Software_testing) that includes far more
-than simple test cases. Normally, it should include an understanding of what
-needs to be tested (i.e. scope) and for what types of issues (e.g.
-malicious/accidental). It normally consists of a test approach, documenting
-what has been tested and what remains to be tested. It should consist of a
-number of unit tests, module tests, integration tests, user acceptance tests,
-and exploratory testing. Written test cases normally consist of both positive
-tests (i.e. correct input, correct behaviour), and negative tests (i.e.
-incorrect input, no incorrect behaviour).
+assets](https://chainsec.io/defi-hacks/) due to bugs. While fuzz testing can
+help find potential issues with digital contracts, it is a tool that can only
+execute the program concretely, one execution at a time. In contrast, Symbolic
+Execution can execute all potential values in a decision path "in one go",
+creating a symbolic expression out of a path, and checking whether it
+can trigger a fault. Hence, Symbolic Execution tends to be more efficient at
+finding bugs than fuzzing when the bugs are rare, or explicitly (i.e.
+maliciously) hidden. Symbolic Execution can also _prove_ that no postcondition
+can be violated, increasing the overall confidence in the contract. Note, however,
+that Symbolic Execution does not automatically generate postconditions for
+well-known bug classes like static code analysis tools do. Instead, these
+postconditions ,and their sometimes associated preconditions, need to
+be explicitly written.
 
 ## Fuzzing versus Symbolic Execution
 
