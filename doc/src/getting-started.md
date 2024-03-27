@@ -1,7 +1,7 @@
 # Getting Started
 
 The hevm project is an implementation of the Ethereum Virtual Machine (EVM)
-focused on symbolic analysis of evm bytecode. This essentially means that hevm
+focused on symbolic analysis of EVM bytecode. This essentially means that hevm
 can try out _all_ execution possibilities of your contract and see it can
 somehow violate some assertions you have, such as e.g. the total number of
 tokens must always be X or that some value must never be greater than Y.
