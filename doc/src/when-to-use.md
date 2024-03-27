@@ -125,7 +125,7 @@ Hence, it is best to use fuzzers at first to find easy-to-find bugs, as fuzzers
 are very efficient at that. Then, once the tests pass the fuzzer, it is
 recommended to use a symbolic execution engine such as hevm.
 
-While hevm is similar to [Halmos](https://github.com/a16z/halmos) and
+hevm is similar to [Halmos](https://github.com/a16z/halmos) and
 [Kontrol](https://docs.runtimeverification.com/kontrol/overview/readme) in its
 approach. However, it is quite different from static code analysis tools such
 as [Oyente](https://github.com/enzymefinance/oyente),
