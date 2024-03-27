@@ -14,12 +14,12 @@ possible, it mathematically proves it so, and tells the user the contract is
 safe. Note that while great pains have gone into making sure hevm's results can
 be trusted, there can always be bugs in hevm or the libraries and tools it uses.
 
-Hevm can not only be used to find bugs in already written programs, but can
-also help you write a program that from the outside behaves the same as the
-original program, but may use less gas to execute. This can be done via
-(equivalence checking)[#equivalence-checking] where hevm will either prove
-that the behaviour of the two bytecodes is the same, or will give inputs
-where they differ.
+Hevm can not only be used to find bugs in programs, but can also help to make
+sure that two programs behave equivalently from the outside. This may be
+advantageous when one may be more efficient (use less gas) to execute, but
+harder to reason about. This can be done via (equivalence
+checking)[#equivalence-checking] where hevm either proves that the behaviour of
+the two bytecodes is the same, or gives inputs where they differ.
 
 ## Practical Scenario
 
