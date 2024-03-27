@@ -44,7 +44,9 @@ Available options:
 ```
 
 Minimum required flags: either you must provide `--code` or you must both pass
-`--rpc` and `--address`. If the execution returns an output, it will be written
+`--rpc` and `--address`. 
+
+If the execution returns an output, it will be written
 to stdout. Exit code indicates whether the execution was successful or
 errored/reverted.
 
