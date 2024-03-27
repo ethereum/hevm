@@ -15,11 +15,11 @@ incorrect input, no incorrect behaviour).
 
 ## Fuzzing versus Symbolic Execution
 
-Fuzzing and symbolic execution fits within the [exploratory
-testing](https://en.wikipedia.org/wiki/Exploratory_testing) part of
-the testing methodology. Exploratory test cases usually have a set of
-(sometimes implicit) pre- and postconditions, but the actual action (e.g.
-function call) is performed by an external entity. Let's see an example:
+Fuzzing tests usually have a set of (sometimes implicit) pre- and
+postconditions, but the actual action (e.g. function call) is performed by an
+external entity, the fuzzer. For C/C++ fuzzing, the implicit postcondition is
+often e.g. that the system does not throw a segmentation fault. For EVM
+bytecode, postconditions need to be explicit. Let's see an example:
 
 ```solidity
 // SPDX-License-Identifier: MIT
