@@ -3,8 +3,9 @@
 The hevm project is an implementation of the Ethereum Virtual Machine (EVM)
 focused on symbolic analysis of EVM bytecode. This essentially means that hevm
 can try out _all_ execution possibilities of your contract and see it can
-somehow violate some assertions you have, such as e.g. the total number of
-tokens must always be X or that some value must never be greater than Y.
+somehow violate some assertions you have. These assertions can be e.g. the
+total number of tokens must always be X, some value must never be
+greater than Y, some value must never overflow, etc.
 
 In some sense, hevm is similar to a fuzzer, but instead of only trying with random
 values to trigger faults, it instead _computes_ whether a fault is possible. If
