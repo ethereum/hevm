@@ -1,14 +1,15 @@
 # hevm
 
-The `hevm` project is an implementation of the Ethereum virtual machine (EVM) made specifically for
-symbolic execution, unit testing and debugging of smart contracts. The `hevm` command line program
-can symbolically execute smart contracts, run unit tests, interactively debug contracts while
-showing the Solidity source, or run arbitrary EVM code. Computations can be performed using local
-state set up in a `dapp` testing harness, or fetched on demand from live networks using `rpc` calls.
+`hevm` is an implementation of the Ethereum virtual machine (EVM) made for
+symbolic execution, equivalence checking, and unit testing of smart contracts.
+`hevm` can symbolically execute smart contracts, run unit tests, and run
+arbitrary EVM code. It can run on state set up in a [`ds-test` testing
+harness](https://book.getfoundry.sh/forge/forge-std), or fetched on demand from
+live network using `rpc` calls.
 
-It was originally developed as part of the [dapptools](https://github.com/dapphub/dapptools/)
-project, and was forked to this repo by the formal methods team at the Ethereum Foundation in August
-2022.
+`hevm` was originally developed as part of the
+[dapptools](https://github.com/dapphub/dapptools/) project, and was forked to
+this repo by the formal methods team at the Ethereum Foundation in August 2022.
 
 ## Documentation & Support
 
@@ -24,10 +25,10 @@ Static binaries for x86 linux and macos are available for each
 [release](https://github.com/ethereum/hevm/releases). These binaries expect to be able to find the
 following programs on `PATH`:
 
-- `git`
 - `solc`
 - `z3`
-- `cvc5`
+- (optionally) `cvc5`
+- (optionally) `bitwuzla`
 
 ### nixpkgs
 
@@ -43,12 +44,6 @@ hevm can be installed directly from the `main` branch of this repo via the follo
 
 ```
 nix profile install github:ethereum/hevm
-```
-
-to install a specific commit you can run:
-
-```
-nix profile install github:ethereum/hevm/<COMMIT_ID>
 ```
 
 ## Development

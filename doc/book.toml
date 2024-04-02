@@ -1,6 +1,19 @@
 [book]
-authors = ["dxo"]
+authors = ["dxo", "msoos"]
 language = "en"
 multilingual = false
 src = "src"
 title = "hevm"
+
+
+[output.html]
+no-section-label = true
+additional-js = ["solidity.min.js"]
+additional-css = ["book.css"]
+git-repository-url = "https://github.com/ethereum/hevm"
+edit-url-template = "hhttps://github.com/ethereum/hevm/edit/main/{path}"
+
+git-repository-icon = "fa-github"
+
+[output.html.fold]
+enable = true
