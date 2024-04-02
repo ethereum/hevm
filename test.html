@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>overview - hevm</title>
+        <title>ds-test proving - hevm</title>
 
 
         <!-- Custom HTML head -->
@@ -29,6 +29,7 @@
         <link rel="stylesheet" href="ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="book.css">
 
     </head>
     <body>
@@ -83,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="overview.html" class="active">overview</a></li><li class="chapter-item expanded affix "><li class="part-title">Reference</li><li class="chapter-item expanded "><a href="symbolic.html"><strong aria-hidden="true">1.</strong> symbolic</a></li><li class="chapter-item expanded "><a href="equivalence.html"><strong aria-hidden="true">2.</strong> equivalence</a></li><li class="chapter-item expanded "><a href="exec.html"><strong aria-hidden="true">3.</strong> exec</a></li><li class="chapter-item expanded "><a href="dapp-test.html"><strong aria-hidden="true">4.</strong> dapp-test</a></li><li class="chapter-item expanded affix "><li class="part-title">Tutorials</li><li class="chapter-item expanded "><a href="controlling-the-unit-testing-environment.html"><strong aria-hidden="true">5.</strong> controlling the unit testing environment</a></li><li class="chapter-item expanded "><a href="using-the-visual-debugger.html"><strong aria-hidden="true">6.</strong> using the visual debugger</a></li><li class="chapter-item expanded "><div><strong aria-hidden="true">7.</strong> discovering reachable assertion violations</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">8.</strong> symbolic unit testing</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">9.</strong> equivalence checking</div></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="ds-test-tutorial.html">ds-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item expanded "><a href="test.html" class="active">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -140,6 +141,12 @@
                         <a href="print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
+                        <a href="https://github.com/ethereum/hevm" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        <a href="hhttps://github.com/ethereum/hevm/edit/main/src/test.md" title="Suggest an edit" aria-label="Suggest an edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
 
                     </div>
                 </div>
@@ -166,22 +173,77 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="overview"><a class="header" href="#overview">Overview</a></h1>
-<p>The <code>hevm</code> project is an implementation of the Ethereum Virtual Machine (EVM) focused on symbolic
-analysis of evm bytecode. It can:</p>
-<ul>
-<li>symbolically execute a smart contract and find reachable assertion violations</li>
-<li>prove equivalence of two different bytecode objects</li>
-<li>execute symbolic solidity tests written using <a href="https://github.com/dapphub/ds-test/"><code>ds-test</code></a> (a.k.a &quot;foundry tests&quot;)</li>
-<li>fetch remote state via rpc</li>
-<li>automatically create test cases</li>
-</ul>
-<p>It was originally developed as part of the <a href="https://github.com/dapphub/dapptools/">dapptools</a> project, and was forked to this repo by the formal methods team at the Ethereum Foundation in August 2022.</p>
+                        <h1 id="hevm-test"><a class="header" href="#hevm-test"><code>hevm test</code></a></h1>
+<pre><code>Usage: hevm test [--root STRING] [--project-type PROJECTTYPE] [--rpc TEXT]
+                 [--number W256] [--verbose INT] [--coverage] [--match STRING]
+                 [--solver TEXT] [--num-solvers NATURAL] [--smtdebug] [--debug]
+                 [--trace] [--ffi] [--smttimeout NATURAL]
+                 [--max-iterations INTEGER]
+                 [--loop-detection-heuristic LOOPHEURISTIC]
+                 [--abstract-arithmetic] [--abstract-memory]
+                 [--num-cex-fuzz INTEGER] [--ask-smt-iterations INTEGER]
+
+Available options:
+  -h,--help                Show this help text
+  --root STRING            Path to project root directory (default: . )
+  --project-type PROJECTTYPE
+                           Is this a Foundry or DappTools project (default:
+                           Foundry)
+  --rpc TEXT               Fetch state from a remote node
+  --number W256            Block: number
+  --verbose INT            Append call trace: {1} failures {2} all
+  --coverage               Coverage analysis
+  --match STRING           Test case filter - only run methods matching regex
+  --solver TEXT            Used SMT solver: z3 (default), cvc5, or bitwuzla
+  --num-solvers NATURAL    Number of solver instances to use (default: number of
+                           cpu cores)
+  --smtdebug               Print smt queries sent to the solver
+  --debug                  Debug printing of internal behaviour
+  --trace                  Dump trace
+  --ffi                    Allow the usage of the hevm.ffi() cheatcode (WARNING:
+                           this allows test authors to execute arbitrary code on
+                           your machine)
+  --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
+  --max-iterations INTEGER Number of times we may revisit a particular branching
+                           point
+  --loop-detection-heuristic LOOPHEURISTIC
+                           Which heuristic should be used to determine if we are
+                           in a loop: StackBased (default) or Naive
+                           (default: StackBased)
+  --abstract-arithmetic    Use abstraction-refinement for complicated arithmetic
+                           functions such as MulMod. This runs the solver first
+                           with abstraction turned on, and if it returns a
+                           potential counterexample, the counterexample is
+                           refined to make sure it is a counterexample for the
+                           actual (not the abstracted) problem
+  --abstract-memory        Use abstraction-refinement for Memory. This runs the
+                           solver first with abstraction turned on, and if it
+                           returns a potential counterexample, the
+                           counterexample is refined to make sure it is a
+                           counterexample for the actual (not the abstracted)
+                           problem
+  --num-cex-fuzz INTEGER   Number of fuzzing tries to do to generate a
+                           counterexample (default: 3) (default: 3)
+  --ask-smt-iterations INTEGER
+                           Number of times we may revisit a particular branching
+                           point before we consult the smt solver to check
+                           reachability (default: 1) (default: 1)
+</code></pre>
+<p><code>hevm test</code> executes all solidity unit tests that make use of the <code>ds-test</code> assertion library
+(a.k.a <a href="https://book.getfoundry.sh/forge/forge-std">Foundry tests</a>). It
+supports both foundry based (the default) and <a href="https://dapp.tools/">dapptools</a> based projects.</p>
+<p>A more detailed introduction to symbolic unit tests with <code>hevm</code> can be found
+<a href="https://fv.ethereum.org/2020/12/11/symbolic-execution-with-ds-test/">here</a>. An
+overview of using ds-test for solidity testing can be found in the <a href="https://book.getfoundry.sh/forge/tests">foundry
+book</a>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="equivalence-checking-tutorial.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
 
                             <a rel="next" href="symbolic.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
@@ -193,6 +255,9 @@ analysis of evm bytecode. It can:</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="equivalence-checking-tutorial.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
 
                     <a rel="next" href="symbolic.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
@@ -218,6 +283,7 @@ analysis of evm bytecode. It can:</p>
         <script src="book.js"></script>
 
         <!-- Custom JS scripts -->
+        <script src="solidity.min.js"></script>
 
 
     </div>
