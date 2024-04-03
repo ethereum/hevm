@@ -1271,11 +1271,11 @@ asBE x = asBE (x `div` 256)
 
 word256Bytes :: W256 -> ByteString
 word256Bytes (W256 (Word256 (Word128 a b) (Word128 c d))) =
-  Cereal.encode a <> Cereal.encode b <> Cereal.encode c <> Cereal.encode d
+  Cereal.encode (a, b, c, d)
 
 word160Bytes :: Addr -> ByteString
 word160Bytes (Addr (Word160 a (Word128 b c))) =
-  Cereal.encode a <> Cereal.encode b <> Cereal.encode c
+  Cereal.encode (a, b, c)
 
 -- Get first and second Nibble from byte
 hi, lo :: Word8 -> Nibble
