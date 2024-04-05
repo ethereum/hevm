@@ -26,6 +26,7 @@ only.
 
 module EVM.Effects where
 
+import Control.Monad (when)
 import Control.Monad.Reader
 import Control.Monad.IO.Unlift
 import EVM.Dapp (DappInfo)

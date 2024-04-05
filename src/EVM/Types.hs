@@ -10,8 +10,9 @@ module EVM.Types where
 
 import GHC.Stack (HasCallStack, prettyCallStack, callStack)
 import Control.Arrow ((>>>))
+import Control.Monad (mzero)
 import Control.Monad.ST (ST)
-import Control.Monad.State.Strict (StateT, mzero)
+import Control.Monad.State.Strict (StateT)
 import Crypto.Hash (hash, Keccak_256, Digest)
 import Data.Aeson
 import Data.Aeson qualified as JSON
@@ -1055,7 +1056,7 @@ instance Show ByteStringS where
         T.decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
 instance JSON.FromJSON ByteStringS where
-  parseJSON (JSON.String x) = case BS16.decodeBase16' x of
+  parseJSON (JSON.String x) = case BS16.decodeBase16Untyped (T.encodeUtf8 x) of
                                 Left _ -> mzero
                                 Right bs -> pure (ByteStringS bs)
   parseJSON _ = mzero

@@ -8,6 +8,7 @@
 module EVM.Fuzz where
 
 import Prelude hiding (LT, GT, lookup)
+import Control.Monad (replicateM)
 import Control.Monad.State
 import Data.Maybe (fromMaybe)
 import Data.Map.Strict as Map (fromList, Map, (!), (!?), insert)
