@@ -112,7 +112,10 @@ jobs:
       - name: Configure the build
         run: |
           export PATH="$HASKELL_PATHS:$PATH"
-          cabal configure --disable-tests --disable-benchmarks --disable-documentation
+          cabal configure --disable-documentation \
+            --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib" \
+            --extra-include-dirs="D:/a/_temp/msys64/clang64/include" --extra-lib-dirs="D:/a/_temp/msys64/clang64/lib" \
+            --ghc-options=-pgml=D:/a/_temp/msys64/clang64/bin/clang.exe
           cabal build --dry-run
           # The last step generates dist-newstyle/cache/plan.json for the cache key.
 
@@ -140,11 +143,28 @@ jobs:
           path: ${{ steps.setup.outputs.cabal-store }}
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
-      - name: build hevm library
+      - name: build hevm
+        id: build
         run: |
           export PATH="$HASKELL_PATHS:$PATH"
-          cabal build --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib" \
-                      --extra-include-dirs="D:/a/_temp/msys64/clang64/include" --extra-lib-dirs="D:/a/_temp/msys64/clang64/lib"
+          cabal build
+          echo "binary=$(cabal list-bin hevm)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: hevm-windows-x64
+          path: ${{ steps.build.outputs.binary }}
+
+      - name: run rpc tests
+        run: |
+          export PATH="$HASKELL_PATHS:$PATH"
+          cabal run rpc-tests
+
+      - name: run ethereum tests
+        run: |
+          export PATH="$HASKELL_PATHS:$PATH"
+          cabal run ethereum-tests
 
   cabal-check:
     runs-on: ubuntu-latest
