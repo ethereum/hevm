@@ -114,7 +114,7 @@ jobs:
       - name: Configure the build
         run: |
           export PATH="$HASKELL_PATHS:$PATH"
-          cabal configure --disable-documentation --enable-executable-static \
+          cabal configure --disable-documentation --enable-executable-static --enable-executable-stripping \
             --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib" \
             --extra-include-dirs="D:/a/_temp/msys64/clang64/include" --extra-lib-dirs="D:/a/_temp/msys64/clang64/lib" \
             --ghc-options=-pgml=D:/a/_temp/msys64/clang64/bin/clang.exe
@@ -146,17 +146,17 @@ jobs:
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
       - name: build hevm
-        id: build
         run: |
           export PATH="$HASKELL_PATHS:$PATH"
           cabal build
-          echo "binary=$(cabal list-bin hevm)" >> "$GITHUB_OUTPUT"
+          mkdir result && cp "$(cabal list-bin hevm)" result/hevm.exe
+          strip result/hevm.exe
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
           name: hevm-windows-x64
-          path: ${{ steps.build.outputs.binary }}
+          path: result/hevm.exe
 
       - uses: actions/checkout@v4
         with:
