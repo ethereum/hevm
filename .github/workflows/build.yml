@@ -158,6 +158,31 @@ jobs:
           name: hevm-windows-x64
           path: ${{ steps.build.outputs.binary }}
 
+      - uses: actions/checkout@v4
+        with:
+          repository: ethereum/solidity
+          ref: 1c8745c54a239d20b6fb0f79a8bd2628d779b27e
+          path: ethereum-solidity
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ethereum/tests
+          ref: v12.2
+          path: ethereum-tests
+
+      - uses: actions/checkout@v4
+        with:
+          repository: foundry-rs/forge-std
+          path: forge-std
+
+      - name: set test variables
+        run: |
+          curl --retry 5 -fsSL https://github.com/ethereum/solidity/releases/download/v0.8.21/solc-windows.exe -o solc-windows.exe
+          echo HEVM_SOLIDITY_REPO="$PWD/ethereum-solidity" >> "$GITHUB_ENV"
+          echo HEVM_ETHEREUM_TESTS_REPO="$PWD/ethereum-tests" >> "$GITHUB_ENV"
+          echo HEVM_FORGE_STD_REPO="$PWD/forge-std" >> "$GITHUB_ENV"
+          echo DAPP_SOLC="$PWD/solc-windows.exe" >> "$GITHUB_ENV"
+
       - name: run rpc tests
         run: |
           export PATH="$HASKELL_PATHS:$PATH"
