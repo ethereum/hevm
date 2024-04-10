@@ -69,6 +69,7 @@ jobs:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
       - uses: msys2/setup-msys2@v2
         with:
           msystem: CLANG64
@@ -88,6 +89,7 @@ jobs:
             autotools:p
             gmp:p
             openssl:p
+            z3:p
       - uses: haskell-actions/setup@v2.7.0
         id: setup
         with:
