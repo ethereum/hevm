@@ -90,6 +90,7 @@ jobs:
             gmp:p
             openssl:p
             z3:p
+            go:p
       - uses: haskell-actions/setup@v2.7.0
         id: setup
         with:
@@ -175,19 +176,24 @@ jobs:
           repository: foundry-rs/forge-std
           path: forge-std
 
-      - name: set test variables
+      - name: prepare test dependencies
         run: |
+          # evm
+          go install github.com/ethereum/go-ethereum/cmd/evm@latest
+          echo EVM_PATH="$(cygpath -u "$(go env GOPATH)/bin")" >> "$GITHUB_ENV"
+          # solc
           mkdir solc
           curl --retry 5 -fsSL https://github.com/ethereum/solidity/releases/download/v0.8.21/solc-windows.exe -o solc/solc.exe
+          echo DAPP_SOLC="$PWD/solc/solc.exe" >> "$GITHUB_ENV"
+          echo DAPP_SOLC_PATH="$PWD/solc/" >> "$GITHUB_ENV"
+          # repos
           echo HEVM_SOLIDITY_REPO="$PWD/ethereum-solidity" >> "$GITHUB_ENV"
           echo HEVM_ETHEREUM_TESTS_REPO="$PWD/ethereum-tests" >> "$GITHUB_ENV"
           echo HEVM_FORGE_STD_REPO="$PWD/forge-std" >> "$GITHUB_ENV"
-          echo DAPP_SOLC="$PWD/solc/solc.exe" >> "$GITHUB_ENV"
-          echo DAPP_SOLC_PATH="$PWD/solc/" >> "$GITHUB_ENV"
 
       - name: run tests
         run: |
-          export PATH="$DAPP_SOLC_PATH:$HASKELL_PATHS:$PATH"
+          export PATH="$EVM_PATH:$DAPP_SOLC_PATH:$HASKELL_PATHS:$PATH"
           cabal run test
 
       - name: run rpc tests
