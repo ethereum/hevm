@@ -34,6 +34,7 @@ import Data.Word (Word8)
 import GHC.Conc (getNumProcessors)
 import System.Directory
 import System.Environment
+import System.Info (os)
 import Test.Tasty
 import Test.Tasty.QuickCheck hiding (Failure, Success)
 import Test.QuickCheck.Instances.Text()
@@ -109,6 +110,10 @@ main = defaultMain tests
 -- https://github.com/UnkindPartition/tasty/tree/ee6fe7136fbcc6312da51d7f1b396e1a2d16b98a#patterns
 runSubSet :: String -> IO ()
 runSubSet p = defaultMain . applyPattern p $ tests
+
+ignoreTestWindows :: TestTree -> TestTree
+ignoreTestWindows t | os == "mingw32" = ignoreTestBecause "unsupported on Windows" t
+                    | otherwise       = t
 
 tests :: TestTree
 tests = testGroup "hevm"
@@ -976,7 +981,7 @@ tests = testGroup "hevm"
         assertBoolM "Overflow must occur" (toInteger x + toInteger y >= maxUint)
         putStrLnM "expected counterexample found"
      ,
-     test "div-by-zero-fail" $ do
+     ignoreTestWindows $ test "div-by-zero-fail" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
@@ -989,7 +994,7 @@ tests = testGroup "hevm"
         assertEqualM "Division by 0 needs b=0" (getVar ctr "arg2") 0
         putStrLnM "expected counterexample found"
      ,
-      test "unused-args-fail" $ do
+      ignoreTestWindows $ test "unused-args-fail" $ do
          Just c <- solcRuntime "C"
              [i|
              contract C {
@@ -1001,7 +1006,7 @@ tests = testGroup "hevm"
          (_, [Cex _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x1] c Nothing [] defaultVeriOpts
          putStrLnM "expected counterexample found"
       ,
-     test "enum-conversion-fail" $ do
+     ignoreTestWindows $ test "enum-conversion-fail" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
@@ -1160,7 +1165,7 @@ tests = testGroup "hevm"
   ]
   , testGroup "Symbolic-Constructor-Args"
     -- this produced some hard to debug failures. keeping it around since it seemed to exercise the contract creation code in interesting ways...
-    [ test "multiple-symbolic-constructor-calls" $ do
+    [ ignoreTestWindows $ test "multiple-symbolic-constructor-calls" $ do
         Just initCode <- solidity "C"
           [i|
             contract A {
@@ -1242,7 +1247,7 @@ tests = testGroup "hevm"
             Partial _ _ (JumpIntoSymbolicCode _ _) -> assertBoolM "" True
             _ -> assertBoolM "did not encounter expected partial node" False
     ]
-  , testGroup "Dapp-Tests"
+  , ignoreTestWindows $ testGroup "Dapp-Tests"
     [ test "Trivial-Pass" $ do
         let testFile = "test/contracts/pass/trivial.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True
@@ -1893,7 +1898,7 @@ tests = testGroup "hevm"
         (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLnM "sdiv works as expected"
       ,
-     test "opcode-sdiv-zero-2" $ do
+     ignoreTestWindows $ test "opcode-sdiv-zero-2" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
@@ -2806,7 +2811,7 @@ tests = testGroup "hevm"
           (_, [Qed _]) <-  withSolvers Z3 1 Nothing $ \s -> verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLnM "Proven"
         ,
-        test "safemath-distributivity-sol" $ do
+        ignoreTestWindows $ test "safemath-distributivity-sol" $ do
           Just c <- solcRuntime "C"
             [i|
               contract C {
@@ -2907,7 +2912,7 @@ tests = testGroup "hevm"
           assertBoolM "Did not find expected storage cex" testCex
           putStrLnM "Expected counterexample found"
   ]
-  , testGroup "concr-fuzz"
+  , ignoreTestWindows $ testGroup "concr-fuzz" $
     [ testFuzz "fuzz-complicated-mul" $ do
       Just c <- solcRuntime "MyContract"
         [i|
@@ -3248,7 +3253,7 @@ tests = testGroup "hevm"
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd
           assertEqualM "Must be different" (any isCex a) True
       ,
-      test "eq-sol-exp-cex" $ do
+      ignoreTestWindows $ test "eq-sol-exp-cex" $ do
         Just aPrgm <- solcRuntime "C"
             [i|
               contract C {
@@ -3272,7 +3277,7 @@ tests = testGroup "hevm"
         withSolvers Bitwuzla 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqualM "Must be different" (any isCex a) True
-      , test "eq-all-yul-optimization-tests" $ do
+      , ignoreTestWindows $ test "eq-all-yul-optimization-tests" $ do
         let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }
             ignoredTests =
                     -- unbounded loop --
