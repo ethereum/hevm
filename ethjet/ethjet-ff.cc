@@ -44,10 +44,6 @@ namespace ethjet_ff {
     alt_bn128_Fq x0 = read_Fq_element(in+32);
     alt_bn128_Fq x1 = read_Fq_element(in);
 
-    mpz_t q;
-    mpz_init(q);
-    alt_bn128_modulus_q.to_mpz(q);
-
     return Fp2_model<alt_bn128_q_limbs, alt_bn128_modulus_q>(x0, x1);
   }
 
@@ -58,9 +54,6 @@ namespace ethjet_ff {
     mpz_init(x_data);
     mpz_import(x_data, 32, 1, sizeof(in[0]), 1, 0, in);
 
-    mpz_t r;
-    mpz_init(r);
-    alt_bn128_modulus_r.to_mpz(r);
     const mp_size_t limbs = alt_bn128_r_limbs;
 
     return Fp_model<limbs, alt_bn128_modulus_r>(bigint<limbs>(x_data));
@@ -123,7 +116,7 @@ namespace ethjet_ff {
     }
     // copy the result to the output buffer
     // with padding
-    for (int i = 1; i <= 32; i++) {
+    for (size_t i = 1; i <= 32; i++) {
       if (i <= x_size)
         out[32-i] = x_arr[x_size-i];
       else
