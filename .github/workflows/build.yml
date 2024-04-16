@@ -181,6 +181,10 @@ jobs:
           # evm
           go install github.com/ethereum/go-ethereum/cmd/evm@latest
           echo EVM_PATH="$(cygpath -u "$(go env GOPATH)/bin")" >> "$GITHUB_ENV"
+          # cvc5
+          curl --retry 5 -fsSL https://github.com/cvc5/cvc5/releases/download/cvc5-1.1.2/cvc5-Win64-static.zip -o cvc5.zip
+          unzip cvc5.zip && rm cvc5.zip
+          echo CVC5_PATH="$PWD/cvc5-Win64-static/bin" >> "$GITHUB_ENV"
           # solc
           mkdir solc
           curl --retry 5 -fsSL https://github.com/ethereum/solidity/releases/download/v0.8.21/solc-windows.exe -o solc/solc.exe
@@ -193,7 +197,7 @@ jobs:
 
       - name: run tests
         run: |
-          export PATH="$EVM_PATH:$DAPP_SOLC_PATH:$HASKELL_PATHS:$PATH"
+          export PATH="$EVM_PATH:$CVC5_PATH:$DAPP_SOLC_PATH:$HASKELL_PATHS:$PATH"
           cabal run test
 
       - name: run rpc tests

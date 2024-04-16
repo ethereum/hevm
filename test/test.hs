@@ -1898,7 +1898,7 @@ tests = testGroup "hevm"
         (_, [Qed _])  <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
         putStrLnM "sdiv works as expected"
       ,
-     ignoreTestWindows $ test "opcode-sdiv-zero-2" $ do
+     test "opcode-sdiv-zero-2" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
@@ -2912,7 +2912,7 @@ tests = testGroup "hevm"
           assertBoolM "Did not find expected storage cex" testCex
           putStrLnM "Expected counterexample found"
   ]
-  , ignoreTestWindows $ testGroup "concr-fuzz" $
+  , testGroup "concr-fuzz"
     [ testFuzz "fuzz-complicated-mul" $ do
       Just c <- solcRuntime "MyContract"
         [i|
@@ -2978,7 +2978,7 @@ tests = testGroup "hevm"
       let sig = (Sig "func(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
       (_, [Cex (_, ctr)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
       putStrLnM  $ "expected counterexample found.  ctr: " <> (show ctr)
-    , testFuzz "fuzz-simple-fixed-value3" $ do
+    , ignoreTestWindows $ testFuzz "fuzz-simple-fixed-value3" $ do
       Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -3277,7 +3277,7 @@ tests = testGroup "hevm"
         withSolvers Bitwuzla 3 Nothing $ \s -> do
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
           assertEqualM "Must be different" (any isCex a) True
-      , ignoreTestWindows $ test "eq-all-yul-optimization-tests" $ do
+      , test "eq-all-yul-optimization-tests" $ do
         let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }
             ignoredTests =
                     -- unbounded loop --
