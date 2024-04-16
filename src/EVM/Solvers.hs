@@ -333,12 +333,16 @@ sendCommand inst cmd = do
     ';' : _ -> pure "success" -- ignore comments
     _ -> sendLine inst cmd'
 
+-- | Strips trailing \r, if present
+stripCarriageReturn :: Text -> Text
+stripCarriageReturn t = fromMaybe t $ T.stripSuffix "\r" t
+
 -- | Sends a string to the solver and appends a newline, returns the first available line from the output buffer
 sendLine :: SolverInstance -> Text -> IO Text
 sendLine (SolverInstance _ stdin stdout _) cmd = do
   T.hPutStrLn stdin cmd
   hFlush stdin
-  T.hGetLine stdout
+  stripCarriageReturn <$> (T.hGetLine stdout)
 
 -- | Sends a string to the solver and appends a newline, doesn't return stdout
 sendLine' :: SolverInstance -> Text -> IO ()
@@ -359,18 +363,20 @@ readSExpr h = go 0 0 []
   where
     go 0 0 _ = do
       line <- T.hGetLine h
-      let ls = T.length $ T.filter (== '(') line
-          rs = T.length $ T.filter (== ')') line
+      let cleanLine = stripCarriageReturn line
+          ls = T.length $ T.filter (== '(') cleanLine
+          rs = T.length $ T.filter (== ')') cleanLine
       if ls == rs
-         then pure [line]
-         else go ls rs [line]
+         then pure [cleanLine]
+         else go ls rs [cleanLine]
     go ls rs prev = do
       line <- T.hGetLine h
-      let ls' = T.length $ T.filter (== '(') line
-          rs' = T.length $ T.filter (== ')') line
+      let cleanLine = stripCarriageReturn line
+          ls' = T.length $ T.filter (== '(') cleanLine
+          rs' = T.length $ T.filter (== ')') cleanLine
       if (ls + ls') == (rs + rs')
-         then pure $ line : prev
-         else go (ls + ls') (rs + rs') (line : prev)
+         then pure $ cleanLine : prev
+         else go (ls + ls') (rs + rs') (cleanLine : prev)
 
 -- From a list of lines, take each separate SExpression and put it in
 -- its own list, after removing comments.
