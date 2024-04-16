@@ -183,6 +183,11 @@ jobs:
           echo HEVM_FORGE_STD_REPO="$PWD/forge-std" >> "$GITHUB_ENV"
           echo DAPP_SOLC="$PWD/solc-windows.exe" >> "$GITHUB_ENV"
 
+      - name: run tests
+        run: |
+          export PATH="$HASKELL_PATHS:$PATH"
+          cabal run test
+
       - name: run rpc tests
         run: |
           export PATH="$HASKELL_PATHS:$PATH"
