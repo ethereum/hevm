@@ -23,7 +23,7 @@ import Data.Aeson qualified as JSON
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
-import Data.Maybe (fromJust, isJust, isNothing)
+import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
 import Data.Map.Strict qualified as Map
 import Data.Text.IO qualified as T
 import Data.Vector qualified as Vector
@@ -33,6 +33,7 @@ import GHC.IO.Exception (ExitCode(ExitSuccess))
 import Numeric (showHex)
 import Paths_hevm qualified as Paths
 import System.Directory (removeFile)
+import System.Environment (lookupEnv)
 import System.Process (readProcessWithExitCode)
 import Test.QuickCheck (elements)
 import Test.QuickCheck.Instances.Text()
@@ -399,7 +400,9 @@ getTraceOutput evmtoolResult =
     Just res -> do
       let traceFileName = getTraceFileName res
       convertPath <- Paths.getDataFileName "test/scripts/convert_trace_to_json.sh"
-      (exitcode, stdout, stderr) <- readProcessWithExitCode "bash" [convertPath, getTraceFileName res] ""
+      maybeShellPath <- (fromMaybe "bash") <$> (lookupEnv "HEVM_SYSTEM_SHELL")
+      let shellPath = if maybeShellPath == "" then "bash" else maybeShellPath
+      (exitcode, stdout, stderr) <- readProcessWithExitCode shellPath [convertPath, getTraceFileName res] ""
       case exitcode of
         ExitSuccess -> JSON.decodeFileStrict (traceFileName ++ ".json") :: IO (Maybe EVMToolTraceOutput)
         _ -> do
