@@ -336,20 +336,20 @@ sendCommand inst cmd = do
 -- | Sends a string to the solver and appends a newline, returns the first available line from the output buffer
 sendLine :: SolverInstance -> Text -> IO Text
 sendLine (SolverInstance _ stdin stdout _) cmd = do
-  T.hPutStr stdin (T.append cmd "\n")
+  T.hPutStrLn stdin cmd
   hFlush stdin
   T.hGetLine stdout
 
 -- | Sends a string to the solver and appends a newline, doesn't return stdout
 sendLine' :: SolverInstance -> Text -> IO ()
 sendLine' (SolverInstance _ stdin _ _) cmd = do
-  T.hPutStr stdin (T.append cmd "\n")
+  T.hPutStrLn stdin cmd
   hFlush stdin
 
 -- | Returns a string representation of the model for the requested variable
 getValue :: SolverInstance -> Text -> IO Text
 getValue (SolverInstance _ stdin stdout _) var = do
-  T.hPutStr stdin (T.append (T.append "(get-value (" var) "))\n")
+  T.hPutStrLn stdin (T.append (T.append "(get-value (" var) "))")
   hFlush stdin
   fmap (T.unlines . reverse) (readSExpr stdout)
 
