@@ -40,7 +40,6 @@
           cvc5
           git
           bitwuzla
-        ] ++ lib.optional (!(pkgs.stdenv.isDarwin && pkgs.stdenv.isAarch64)) [
           foundry.defaultPackage.${system}
         ];
 
