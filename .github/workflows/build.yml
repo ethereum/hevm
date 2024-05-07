@@ -33,7 +33,7 @@ jobs:
       - name: build hevm
         run: nix build .#ci -L
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: hevm-${{ matrix.runtime }}
           path: result/bin/hevm
@@ -85,7 +85,7 @@ jobs:
             autotools:p
             gmp:p
             openssl:p
-      - uses: haskell-actions/setup@v2.6.1
+      - uses: haskell-actions/setup@v2.7.0
         id: setup
         with:
           ghc-version: '9.4.7'
@@ -130,7 +130,7 @@ jobs:
 
       # Cache dependencies already, so that we do not have to rebuild them should the subsequent steps fail.
       - name: Save cached dependencies
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v4
         # Caches are immutable, trying to save with the same key would error.
         if: ${{ steps.cache.outputs.cache-primary-key != steps.cache.outputs.cache-matched-key }}
         with:
