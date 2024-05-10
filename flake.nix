@@ -61,8 +61,37 @@
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         }));
 
+        hp = pkgs.haskellPackages.override {
+          overrides = self: super: rec {
+            galois-field = super.callCabal2nix "galois-field" (pkgs.fetchFromGitHub {
+              owner = "serokell";
+              repo = "galois-field";
+              rev = "75a71a84d46282f25aee936744f641b478d002aa";
+              sha256 = "sha256-TaEXSkMffU6QTE++6Cu2kGQB5cBQHc6fRxM9Y5sTJg4=";
+            }) {};
+
+            elliptic-curve = pkgs.haskell.lib.dontCheck (super.callCabal2nix "elliptic-curve" (pkgs.fetchFromGitHub {
+              owner = "serokell";
+              repo = "elliptic-curve";
+              rev = "08b04840a11d9656574077558677f1f8be306aca";
+              sha256 = "sha256-Mt/LWQCa+6AjIguj80ULgP8/hP/gC7FJV/AYr0IAalo=";
+            }) {});
+
+            # poly = pkgs.haskell.lib.dontCheck super.poly;
+            poly = pkgs.haskell.lib.dontCheck (super.callCabal2nix "poly" (~/projects/poly) { });
+
+            pairing = super.callCabal2nix "pairing" (~/projects/pairing /*pkgs.fetchFromGitHub {
+              owner = "serokell";
+              repo = "pairing";
+              rev = "5758deb5567c2ea90a0d4ee6e3f37fcb1e715841";
+              sha256 = "sha256-W/xyVIid4rcdWa5fCxTqwyKO5YFlC1UgY+MGwHZfOK8=";
+            }*/) { inherit galois-field elliptic-curve; };
+
+          };
+        };
+
         hevmUnwrapped = (with (if pkgs.stdenv.isDarwin then pkgs else pkgs.pkgsStatic); lib.pipe (
-          haskellPackages.callCabal2nix "hevm" ./. {
+          hp.callCabal2nix "hevm" ./. {
             # Haskell libs with the same names as C libs...
             # Depend on the C libs, not the Haskell libs.
             # These are system deps, not Cabal deps.

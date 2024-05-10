@@ -23,7 +23,7 @@ import EVM.Types qualified as Expr (Expr(Gas))
 import EVM.Sign qualified
 import EVM.Concrete qualified as Concrete
 
-import Control.Monad (unless, when)
+import Control.Monad (unless, when, replicateM)
 import Control.Monad.ST (ST)
 import Control.Monad.State.Strict (MonadState, State, get, gets, lift, modify', put)
 import Data.Bits (FiniteBits, countLeadingZeros, finiteBitSize)
@@ -38,6 +38,7 @@ import Data.List (find)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, fromJust, isJust)
+import Data.Serialize qualified as Cereal
 import Data.Set (insert, member, fromList)
 import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
@@ -57,6 +58,11 @@ import Witch (into, tryFrom, unsafeInto)
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
 import Crypto.Number.ModArithmetic (expFast)
+
+import Data.Pairing.BN254 qualified as Pairing
+import Data.Curve.Weierstrass.BN254 qualified as Curve
+import Data.Field.Galois qualified as Galois
+import Data.DoubleWord (Word256(..), Word128(..))
 
 blankState :: VMOps t => ST s (FrameState t s)
 blankState = do
@@ -1158,10 +1164,12 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
       -- ECADD
       0x6 ->
         -- TODO: support symbolic variant
-        forceConcreteBuf input "ECADD" $ \input' ->
-          case EVM.Precompiled.execute 0x6 (truncpadlit 128 input') 64 of
-            Nothing -> precompileFail
-            Just output -> do
+        forceConcreteBuf input "ECADD" $ \input' -> do
+          let decoder = (,) <$> getPoint <*> getPoint
+          case Cereal.runGet decoder (truncpadlit 128 input') of
+            Left _ -> precompileFail
+            Right (p1, p2) -> do
+              let output = encodePoint (addECPoint p1 p2)
               let truncpaddedOutput = ConcreteBuf $ truncpadlit 64 output
               assign (#state % #stack) (Lit 1 : xs)
               assign (#state % #returndata) truncpaddedOutput
@@ -1171,28 +1179,67 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
       -- ECMUL
       0x7 ->
         -- TODO: support symbolic variant
-        forceConcreteBuf input "ECMUL" $ \input' ->
-          case EVM.Precompiled.execute 0x7 (truncpadlit 96 input') 64 of
-          Nothing -> precompileFail
-          Just output -> do
-            let truncpaddedOutput = ConcreteBuf $ truncpadlit 64 output
-            assign (#state % #stack) (Lit 1 : xs)
-            assign (#state % #returndata) truncpaddedOutput
-            copyBytesToMemory truncpaddedOutput outSize (Lit 0) outOffset
-            next
+        forceConcreteBuf input "ECMUL" $ \input' -> do
+          let decoder = (,) <$> getPoint <*> getWord256be
+          case Cereal.runGet decoder (truncpadlit 96 input') of
+            Left _ -> precompileFail
+            Right (p, s) -> do
+              let output = encodePoint (Curve.mul p (Galois.toP (into s)))
+              let truncpaddedOutput = ConcreteBuf $ truncpadlit 64 output
+              assign (#state % #stack) (Lit 1 : xs)
+              assign (#state % #returndata) truncpaddedOutput
+              copyBytesToMemory truncpaddedOutput outSize (Lit 0) outOffset
+              next
 
       -- ECPAIRING
       0x8 ->
         -- TODO: support symbolic variant
-        forceConcreteBuf input "ECPAIR" $ \input' ->
-          case EVM.Precompiled.execute 0x8 input' 32 of
+        forceConcreteBuf input "ECPAIR" $ \input' -> do
+          let
+            decoder n = replicateM n $
+              (,,,,) <$> getPoint <*> getPrime <*> getPrime
+                                  <*> getPrime <*> getPrime
+            inputLen = BS.length input'
+
+          if inputLen `mod` (3 * 64) /= 0 then
+            precompileFail
+          else do
+            let n = inputLen `div` (3 * 64)
+            case Cereal.runGet (decoder n) input' of
+              Left _ -> precompileFail
+              Right pairs -> do
+                if any (\(g1, _,_,_,_) -> g1 == Curve.O) pairs then precompileFail
+                else do
+                    let x = (\(g1, e1, e2, e3, e4) ->
+                              -- suprising "big-endian" encoding
+                              let g2 :: Pairing.G2 Pairing.BN254 = Curve.A (Galois.toE [e2,e1]) (Galois.toE [e4,e3])
+                              in Pairing.miller g1 g2
+                            ) <$> pairs
+                    let y :: W256 = if Pairing.finalExp (mconcat x) == (mempty :: Pairing.GT Pairing.BN254) then 1 else 0
+                    let output = ConcreteBuf $ word256Bytes y
+                    -- error $ show pairs
+                    {-
+                    case EVM.Precompiled.execute 0x8 input' 32 of
+                      Nothing -> precompileFail
+                      Just refoutput -> do
+                        error $ show output <> "\n" <> show refoutput
+                        -}
+                    assign (#state % #stack) (Lit 1 : xs)
+                    assign (#state % #returndata) output
+                    copyBytesToMemory output outSize (Lit 0) outOffset
+                    next
+
+          {-
+        case EVM.Precompiled.execute 0x8 input' 32 of
           Nothing -> precompileFail
           Just output -> do
             let truncpaddedOutput = ConcreteBuf $ truncpadlit 32 output
+            error $ show output
             assign (#state % #stack) (Lit 1 : xs)
             assign (#state % #returndata) truncpaddedOutput
             copyBytesToMemory truncpaddedOutput outSize (Lit 0) outOffset
             next
+            -}
 
       -- BLAKE2
       0x9 ->
@@ -1210,6 +1257,13 @@ executePrecompile preCompileAddr gasCap inOffset inSize outOffset outSize xs  = 
             _ -> precompileFail
 
       _ -> notImplemented
+  where
+  addECPoint p Curve.O       = p
+  addECPoint Curve.O q       = q
+  addECPoint p1@(Curve.A x1 y1) p2@(Curve.A x2 y2)
+    -- fix https://github.com/sdiehl/elliptic-curve/blob/445e196a550e36e0f25bd4d9d6a38676b4cf2be8/src/Data/Curve/Weierstrass.hs#L66
+    | x1 == x2 = if y1 == y2 then Curve.dbl p1 else Curve.O
+    | otherwise = Curve.add p1 p2
 
 truncpadlit :: Int -> ByteString -> ByteString
 truncpadlit n xs = if m > n then BS.take n xs
@@ -2817,3 +2871,32 @@ forceLit _ = internalError "concrete vm, shouldn't ever happen"
 
 burn :: VMOps t => Word64 -> EVM t s () -> EVM t s ()
 burn = burn' . toGas
+
+getPoint :: Cereal.Get Curve.PA
+getPoint = do
+  x1 <- getPrime
+  y1 <- getPrime
+  case mkECPoint x1 y1 of
+    Just p -> pure p
+    Nothing -> fail "invalid point"
+  where
+  mkECPoint 0 0 = Just Curve.O
+  mkECPoint x y = Curve.point x y
+
+encodePoint :: Curve.PA -> ByteString
+encodePoint p =
+  let (x, y) = case p of
+                 Curve.O -> (0, 0)
+                 Curve.A x' y' -> (Galois.fromP x', Galois.fromP y')
+  in word256Bytes (fromIntegral x :: W256) <>
+     word256Bytes (fromIntegral y :: W256)
+
+getWord128be :: Cereal.Get Word128
+getWord128be = Word128 <$> Cereal.getWord64be <*> Cereal.getWord64be
+
+getWord256be :: Cereal.Get Word256
+getWord256be = Word256 <$> getWord128be <*> getWord128be
+
+getPrime :: Cereal.Get (Galois.Prime Curve.Q)
+getPrime =
+  getWord256be >>= pure . Galois.toP . into

@@ -28,7 +28,7 @@ ethjet_free (struct ethjet_context *ctx)
   free (ctx);
 }
 
-/* 
+/*
  * The example contract at 0xdeadbeef just reverses its input.
  */
 int
@@ -125,15 +125,6 @@ ethjet (struct ethjet_context *ctx,
 
   case ETHJET_EXAMPLE:
     return ethjet_example (ctx, in, in_size, out, out_size);
-
-  case ETHJET_ECADD:
-    return ethjet_ecadd (in, in_size, out, out_size);
-
-  case ETHJET_ECMUL:
-    return ethjet_ecmul (in, in_size, out, out_size);
-
-  case ETHJET_ECPAIRING:
-    return ethjet_ecpairing (in, in_size, out, out_size);
 
   case ETHJET_BLAKE2:
     return ethjet_blake2 (in, in_size, out, out_size);
