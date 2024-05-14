@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More PEq, PLEq, and PLT rules
 - New `label` cheatcode.
 - Updated Bitwuzla to newer version
+- New cheatcodes `startPrank()` & `stopPrank()`
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
