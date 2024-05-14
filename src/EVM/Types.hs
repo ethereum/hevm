@@ -652,6 +652,7 @@ data BaseState
 data RuntimeConfig = RuntimeConfig
   { allowFFI :: Bool
   , overrideCaller :: Maybe (Expr EAddr)
+  , resetCaller :: Bool
   , baseState :: BaseState
   }
   deriving (Show)

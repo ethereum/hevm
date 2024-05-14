@@ -11,6 +11,8 @@ interface Hevm {
     function addr(uint256) external returns (address);
     function ffi(string[] calldata) external returns (bytes memory);
     function prank(address) external;
+    function startPrank(address) external;
+    function stopPrank() external;
     function deal(address,uint256) external;
     function createFork(string calldata urlOrAlias) external returns (uint256);
     function selectFork(uint256 forkId) external;
