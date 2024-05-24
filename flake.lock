@@ -98,6 +98,24 @@
         "type": "github"
       }
     },
+    "flake-utils_3": {
+      "inputs": {
+        "systems": "systems_2"
+      },
+      "locked": {
+        "lastModified": 1710146030,
+        "narHash": "sha256-SZ5L6eA7HJ/nmkzGG7/ISclqe6oZdOZTNoesiInkXPQ=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "b1d9ab70662946ef0850d488da1c9019f3a9752a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
     "forge-std": {
       "flake": false,
       "locked": {
@@ -174,7 +192,42 @@
         "forge-std": "forge-std",
         "foundry": "foundry",
         "nixpkgs": "nixpkgs_2",
+        "solc-pkgs": "solc-pkgs",
         "solidity": "solidity"
+      }
+    },
+    "solc-macos-amd64-list-json": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-f5kzXsfnxgad+1FxaGOlflIUVt8RPNBGS5wkqb63DVA=",
+        "type": "file",
+        "url": "https://binaries.soliditylang.org/macosx-amd64/list.json"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://binaries.soliditylang.org/macosx-amd64/list.json"
+      }
+    },
+    "solc-pkgs": {
+      "inputs": {
+        "flake-utils": "flake-utils_3",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "solc-macos-amd64-list-json": "solc-macos-amd64-list-json"
+      },
+      "locked": {
+        "lastModified": 1716193854,
+        "narHash": "sha256-acIXxq64SwV8GktROR8ZmHbNCWmPTSGbshd2MEAxPBw=",
+        "owner": "hellwolf",
+        "repo": "solc.nix",
+        "rev": "b49e5b975bba402d4fdbdaf4c6fd1817822f2b85",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hellwolf",
+        "repo": "solc.nix",
+        "type": "github"
       }
     },
     "solidity": {
@@ -195,6 +248,21 @@
       }
     },
     "systems": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    },
+    "systems_2": {
       "locked": {
         "lastModified": 1681028828,
         "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",

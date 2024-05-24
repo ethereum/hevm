@@ -26,13 +26,18 @@
       url = "github:foundry-rs/forge-std";
       flake = false;
     };
+    solc-pkgs = {
+      url = "github:hellwolf/solc.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, cabal-head, bitwuzla-pkgs, ... }:
+  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, cabal-head, bitwuzla-pkgs, solc-pkgs, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs { inherit system; config = { allowBroken = true; }; });
         bitwuzla = (import bitwuzla-pkgs { inherit system; }).bitwuzla;
+        solc = (solc-pkgs.mkDefault pkgs solc-pkgs.packages.${system}.solc_0_8_24);
         testDeps = with pkgs; [
           go-ethereum
           solc
@@ -117,7 +122,7 @@
             HEVM_SOLIDITY_REPO = solidity;
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
             HEVM_FORGE_STD_REPO = forge-std;
-            DAPP_SOLC = "${pkgs.solc}/bin/solc";
+            DAPP_SOLC = "${solc}/bin/solc";
           });
 
         # wrapped binary for use on systems with nix available. ensures all
@@ -208,7 +213,7 @@
             withHoogle = true;
 
             HEVM_SOLIDITY_REPO = solidity;
-            DAPP_SOLC = "${pkgs.solc}/bin/solc";
+            DAPP_SOLC = "${solc}/bin/solc";
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
             HEVM_FORGE_STD_REPO = forge-std;
 

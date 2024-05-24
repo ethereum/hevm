@@ -3297,6 +3297,14 @@ tests = testGroup "hevm"
                     , "loopInvariantCodeMotion/no_move_state.yul" -- not infinite, but rollaround on a large int
                     , "loopInvariantCodeMotion/no_move_loop.yul"
 
+                    -- infinite recursion
+                    , "unusedStoreEliminator/function_side_effects_2.yul"
+                    , "unusedStoreEliminator/write_before_recursion.yul"
+                    , "fullInliner/multi_fun_callback.yul"
+                    , "conditionalUnsimplifier/side_effects_of_functions.yul"
+                    , "expressionInliner/double_recursive_calls.yul"
+                    , "conditionalSimplifier/side_effects_of_functions.yul"
+
                     -- unexpected symbolic arg --
 
                     -- OpCreate2
