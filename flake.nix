@@ -31,7 +31,6 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs { inherit system; config = { allowBroken = true; }; });
-        bitwuzla = pkgs.callPackage (import ./nix/bitwuzla.nix) {};
         testDeps = with pkgs; [
           go-ethereum
           solc
