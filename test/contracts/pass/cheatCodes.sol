@@ -13,6 +13,8 @@ interface Hevm {
     function addr(uint256) external returns (address);
     function ffi(string[] calldata) external returns (bytes memory);
     function prank(address) external;
+    function startPrank(address) external;
+    function stopPrank() external;
     function label(address addr, string calldata label) external;
 }
 
@@ -129,6 +131,28 @@ contract CheatCodes is DSTest {
         assertEq(prankster.prankme(), address(this));
     }
 
+
+    function prove_startPrank(address caller) public {
+        Prankster prankster = new Prankster();
+        assertEq(prankster.prankme(), address(this));
+
+        hevm.startPrank(address(0xdeadbeef));
+        assertEq(prankster.prankme(), address(0xdeadbeef));
+        assertEq(prankster.prankme(), address(0xdeadbeef));
+        hevm.stopPrank();
+
+        hevm.startPrank(caller);
+        assertEq(prankster.prankme(), caller);
+        assertEq(prankster.prankme(), caller);
+        hevm.stopPrank();
+
+        assertEq(prankster.prankme(), address(this));
+
+        hevm.prank(caller);
+        assertEq(prankster.prankme(), caller);
+        assertEq(prankster.prankme(), address(this));
+    }
+
     // this is not supported yet due to restrictions around symbolic address aliasing...
     function proveFail_deal_unknown_address(address e, uint val) public {
         hevm.deal(e, val);
@@ -210,6 +234,25 @@ contract CheatCodes is DSTest {
         // check balances
         assertEq(a.balance, aBal - 1);
         assertEq(b.balance, 1);
+    }
+
+    function prove_startPrank_val() public {
+        address payable a = payable(address(new Payable()));
+        address payable b = payable(address(new Payable()));
+
+        // send this.balance to a
+        a.call{value: address(this).balance}("");
+        uint aBal = a.balance;
+
+        // send 1 wei from a to b
+        hevm.startPrank(a);
+        address(b).call{value: 1}("");
+        address(b).call{value: 1}("");
+        hevm.stopPrank();
+
+        // check balances
+        assertEq(a.balance, aBal - 2);
+        assertEq(b.balance, 2);
     }
 
     function prove_label_works() public {
