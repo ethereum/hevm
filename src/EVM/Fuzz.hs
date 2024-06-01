@@ -1,5 +1,3 @@
-{-# LANGUAGE ScopedTypeVariables #-}
-
 {- |
     Module: EVM.Fuzz
     Description: Concrete Fuzzer of Exprs
@@ -7,21 +5,22 @@
 
 module EVM.Fuzz where
 
-import Prelude hiding (LT, GT, lookup)
-import Control.Monad.State
-import Data.Maybe (fromMaybe)
+import Control.Monad (replicateM)
+import Control.Monad.State (State, get, put, execState)
 import Data.Map.Strict as Map (fromList, Map, (!), (!?), insert)
-import EVM.Expr qualified as Expr
-import EVM.Expr (bytesToW256)
+import Data.Maybe (fromMaybe)
 import Data.Set as Set (insert, Set, empty, toList, fromList)
-import EVM.Traversals
 import Data.ByteString qualified as BS
 import Data.Word (Word8)
-import Test.QuickCheck.Gen
 
-import EVM.Types (Prop(..), W256, Expr(..), EType(..), internalError, keccak')
+import EVM.Expr qualified as Expr
+import EVM.Expr (bytesToW256)
 import EVM.SMT qualified as SMT (BufModel(..), SMTCex(..))
+import EVM.Traversals
+import EVM.Types (Prop(..), W256, Expr(..), EType(..), internalError, keccak')
+
 import Test.QuickCheck (Arbitrary(arbitrary))
+import Test.QuickCheck.Gen
 import Test.QuickCheck.Random (mkQCGen)
 
 -- TODO: Extract Var X = Lit Z, and set it

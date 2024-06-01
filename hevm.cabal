@@ -108,14 +108,11 @@ library
     Paths_hevm
   autogen-modules:
     Paths_hevm
-  if impl(ghc >= 9.4) && !os(darwin)
-    -- darwin is skipped because it produces this error when building
-    -- > ghc: loadArchive: Neither an archive, nor a fat archive: `/nix/store/l3lkdfm7sg1wwc850451cikqds766h15-clang-wrapper-11.1.0/bin/clang++'
+  if os(linux)
     build-depends: system-cxx-std-lib
-  elif !os(darwin)
     extra-libraries: stdc++
-  else
-    -- extra-libraries: c++
+  if os(darwin)
+    extra-libraries: c++
     -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
     ld-options: -Wl,-keep_dwarf_unwind
     ghc-options: -fcompact-unwind
@@ -131,13 +128,12 @@ library
     ethjet/tinykeccak.h, ethjet/ethjet.h, ethjet/ethjet-ff.h, ethjet/blake2.h
   build-depends:
     QuickCheck                        >= 2.13.2 && < 2.15,
+    quickcheck-text                   >= 0.1.2 && < 0.2,
     Decimal                           >= 0.5.1 && < 0.6,
     containers                        >= 0.6.0 && < 0.7,
-    deepseq                           >= 1.4.4 && < 1.5,
     time                              >= 1.11 && < 1.14,
-    transformers                      >= 0.5.6 && < 0.6,
+    transformers                      >= 0.5 && < 0.7,
     tree-view                         >= 0.5 && < 0.6,
-    abstract-par                      >= 0.3.3 && < 0.4,
     aeson                             >= 2.0.0 && < 2.2,
     bytestring                        >= 0.11.3.1 && < 0.12,
     scientific                        >= 0.3.6 && < 0.4,
@@ -145,39 +141,31 @@ library
     text                              >= 1.2.3 && < 2.1,
     unordered-containers              >= 0.2.10 && < 0.3,
     vector                            >= 0.12.1 && < 0.14,
-    base16                            >= 0.3.2.0 && < 0.3.3.0,
+    base16                            >= 1.0 && < 1.1,
     megaparsec                        >= 9.0.0 && < 10.0,
-    mtl                               >= 2.2.2 && < 2.3,
+    mtl                               >= 2.2 && < 2.4,
     directory                         >= 1.3.3 && < 1.4,
     filepath                          >= 1.4.2 && < 1.5,
     cereal                            >= 0.5.8 && < 0.6,
     cryptonite                        >= 0.30 && < 0.31,
     memory                            >= 0.16.0 && < 0.20,
     data-dword                        >= 0.3.1 && < 0.4,
-    free                              >= 5.1.3 && < 5.2,
-    haskeline                         >= 0.8.0 && < 0.9,
     process                           >= 1.6.5 && < 1.7,
     optics-core                       >= 0.4.1 && < 0.5,
     optics-extra                      >= 0.4.2.1 && < 0.5,
     optics-th                         >= 0.4.1 && < 0.5,
     aeson-optics                      >= 1.2.0.1 && < 1.3,
-    monad-par                         >= 0.3.5 && < 0.4,
     async                             >= 2.2.4 && < 2.3,
-    multiset                          >= 0.3.4 && < 0.4,
     operational                       >= 0.2.3 && < 0.3,
-    optparse-generic                  >= 1.3.1 && < 1.5,
+    optparse-generic                  >= 1.3.1 && < 1.6,
     pretty-hex                        >= 1.1 && < 1.2,
-    quickcheck-text                   >= 0.1.2 && < 0.2,
-    restless-git                      >= 0.7 && < 0.8,
     rosezipper                        >= 0.2 && < 0.3,
-    temporary                         >= 1.3 && < 1.4,
     witherable                        >= 0.3.5 && < 0.5,
     wreq                              >= 0.5.3 && < 0.6,
     regex-tdfa                        >= 1.2.3 && < 1.4,
     base                              >= 4.9 && < 5,
     here                              >= 1.2.13 && < 1.3,
     smt2-parser                       >= 0.1.0.1,
-    word-wrap                         >= 0.5 && < 0.6,
     spool                             >= 0.1 && < 0.2,
     stm                               >= 2.5.0 && < 2.6.0,
     spawn                             >= 0.3 && < 0.4,
@@ -196,8 +184,6 @@ executable hevm
   ghc-options: -threaded -with-rtsopts=-N
   other-modules:
     Paths_hevm
-  if os(darwin)
-    extra-libraries: c++
   build-depends:
     QuickCheck,
     aeson,
@@ -209,12 +195,9 @@ executable hevm
     containers,
     cryptonite,
     data-dword,
-    deepseq,
     directory,
     filepath,
-    free,
     hevm,
-    memory,
     mtl,
     optparse-generic,
     operational,
@@ -223,7 +206,6 @@ executable hevm
     regex-tdfa,
     temporary,
     text,
-    unordered-containers,
     vector,
     stm,
     spawn,
@@ -284,8 +266,7 @@ common test-base
     optics-extra,
     witch,
     unliftio-core,
-    exceptions,
-    MissingH
+    exceptions
 
 library test-utils
   import:

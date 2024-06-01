@@ -4,8 +4,7 @@
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    foundry.url = "github:shazow/foundry.nix/monthly";
-    bitwuzla-pkgs.url = "github:d-xo/nixpkgs/94e802bce3a1bc05b3acfc5e876de15fd2ecb564";
+    foundry.url = "github:shazow/foundry.nix/6089aad0ef615ac8c7b0c948d6052fa848c99523";
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
@@ -28,11 +27,10 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, cabal-head, bitwuzla-pkgs, ... }:
+  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, cabal-head, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs { inherit system; config = { allowBroken = true; }; });
-        bitwuzla = (import bitwuzla-pkgs { inherit system; }).bitwuzla;
         testDeps = with pkgs; [
           go-ethereum
           solc
@@ -45,7 +43,7 @@
 
         # custom package set capable of building latest (unreleased) `cabal-install`.
         # This gives us support for multiple home units in cabal repl
-        cabal-multi-pkgs = pkgs.haskell.packages.ghc94.override {
+        cabal-multi-pkgs = pkgs.haskellPackages.override {
           overrides = with pkgs.haskell.lib; self: super: rec {
             cabal-install = dontCheck (self.callCabal2nix "cabal-install" "${cabal-head}/cabal-install" {});
             cabal-install-solver = dontCheck (self.callCabal2nix "cabal-install-solver" "${cabal-head}/cabal-install-solver" {});
@@ -53,31 +51,8 @@
             Cabal-QuickCheck = dontCheck (self.callCabal2nix "Cabal-QuickCheck" "${cabal-head}/Cabal-QuickCheck" {});
             Cabal-tree-diff = dontCheck (self.callCabal2nix "Cabal-tree-diff" "${cabal-head}/Cabal-tree-diff" {});
             Cabal-syntax = dontCheck (self.callCabal2nix "Cabal-syntax" "${cabal-head}/Cabal-syntax" {});
+            Cabal-tests = dontCheck (self.callCabal2nix "Cabal-tests" "${cabal-head}/Cabal-tests" {});
             Cabal = dontCheck (self.callCabal2nix "Cabal" "${cabal-head}/Cabal" {});
-            unix = dontCheck (doJailbreak super.unix_2_8_1_1);
-            filepath = dontCheck (doJailbreak super.filepath_1_4_100_4);
-            process = dontCheck (doJailbreak super.process_1_6_17_0);
-            directory = dontCheck (doJailbreak (super.directory_1_3_7_1));
-            tasty = dontCheck (doJailbreak super.tasty);
-            QuickCheck = dontCheck (doJailbreak super.QuickCheck);
-            hashable = dontCheck (doJailbreak super.hashable);
-            async = dontCheck (doJailbreak super.async);
-            hspec-meta = dontCheck (doJailbreak super.hspec-meta);
-            hpc = dontCheck (doJailbreak super.hpc);
-            ghci = dontCheck (doJailbreak super.ghci);
-            ghc-boot = dontCheck (doJailbreak super.ghc-boot);
-            setenv = dontCheck (doJailbreak super.setenv);
-            vector = dontCheck (doJailbreak super.vector);
-            network-uri = dontCheck (doJailbreak super.network-uri);
-            aeson = dontCheck (doJailbreak super.aeson);
-            th-compat = dontCheck (doJailbreak super.th-compat);
-            safe-exceptions = dontCheck (doJailbreak super.safe-exceptions);
-            bifunctors = dontCheck (doJailbreak super.bifunctors);
-            base-compat-batteries = dontCheck (doJailbreak super.base-compat-batteries);
-            distributative = dontCheck (doJailbreak super.distributative);
-            semialign = dontCheck (doJailbreak super.semialign);
-            semigroupoids = dontCheck (doJailbreak super.semigroupoids);
-            hackage-security = dontCheck (doJailbreak super.hackage-security);
           };
         };
 
@@ -85,7 +60,7 @@
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         }));
 
-        hevmUnwrapped = (with pkgs; lib.pipe (
+        hevmUnwrapped = (with (if pkgs.stdenv.isDarwin then pkgs else pkgs.pkgsStatic); lib.pipe (
           haskellPackages.callCabal2nix "hevm" ./. {
             # Haskell libs with the same names as C libs...
             # Depend on the C libs, not the Haskell libs.
@@ -97,20 +72,16 @@
             (haskell.lib.compose.addTestToolDepends testDeps)
             (haskell.lib.compose.appendBuildFlags ["-v3"])
             (haskell.lib.compose.appendConfigureFlags (
-              [ "-fci"
+              [ # "-fci"
                 "-O2"
-                "--extra-lib-dirs=${stripDylib (pkgs.gmp.override { withStatic = true; })}/lib"
+              ]
+              ++ lib.optionals stdenv.isDarwin
+              [ "--extra-lib-dirs=${stripDylib (pkgs.gmp.override { withStatic = true; })}/lib"
                 "--extra-lib-dirs=${stripDylib secp256k1-static}/lib"
                 "--extra-lib-dirs=${stripDylib (libff.override { enableStatic = true; })}/lib"
                 "--extra-lib-dirs=${zlib.static}/lib"
                 "--extra-lib-dirs=${stripDylib (libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
                 "--extra-lib-dirs=${stripDylib (ncurses.override { enableStatic = true; })}/lib"
-              ]
-              ++ lib.optionals stdenv.isLinux [
-                "--enable-executable-static"
-                # TODO: replace this with musl: https://stackoverflow.com/a/57478728
-                "--extra-lib-dirs=${glibc}/lib"
-                "--extra-lib-dirs=${glibc.static}/lib"
               ]))
             haskell.lib.dontHaddock
           ]).overrideAttrs(final: prev: {
@@ -198,8 +169,8 @@
             packages = _: [ hevmUnwrapped ];
             buildInputs = [
               # cabal from nixpkgs
-              # haskellPackages.cabal-install
-              cabal-multi-pkgs.cabal-install
+              haskellPackages.cabal-install
+              # cabal-multi-pkgs.cabal-install
               mdbook
               yarn
               haskellPackages.eventlog2html
