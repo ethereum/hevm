@@ -122,13 +122,29 @@ library
   extra-libraries:
     secp256k1, ff, gmp
   c-sources:
-    ethjet/tinykeccak.c, ethjet/blake2.c, ethjet/ethjet.c
+    ethjet/tinykeccak.c, ethjet/blake2.c, ethjet/ethjet.c,
+
+    ethjet/bn256/bn256.c,
+    ethjet/bn256/constants.c,
+    ethjet/bn256/curve.c,
+    ethjet/bn256/gfp12.c,
+    ethjet/bn256/gfp2.c,
+    ethjet/bn256/gfp6.c,
+    ethjet/bn256/optate.c,
+    ethjet/bn256/twist.c
   cxx-sources:
     ethjet/ethjet-ff.cc
   cxx-options:
     -std=c++0x
   install-includes:
     ethjet/tinykeccak.h, ethjet/ethjet.h, ethjet/ethjet-ff.h, ethjet/blake2.h
+    , ethjet/bn256/constants.h
+    , ethjet/bn256/curve.h
+    , ethjet/bn256/gfp12.h
+    , ethjet/bn256/gfp2.h
+    , ethjet/bn256/gfp6.h
+    , ethjet/bn256/optate.h
+    , ethjet/bn256/.h
   build-depends:
     QuickCheck                        >= 2.13.2 && < 2.15,
     Decimal                           >= 0.5.1 && < 0.6,

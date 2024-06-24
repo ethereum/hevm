@@ -1,5 +1,7 @@
 #include "ethjet.h"
 
+#include "bn256/constants.h"
+
 #include <gmp.h>
 #include <stdio.h>
 
@@ -17,6 +19,7 @@ namespace ethjet_ff {
     libff::inhibit_profiling_info     = true;
     libff::inhibit_profiling_counters = true;
     init_alt_bn128_params();
+    init_constants();
   }
 
   // for loading an element of F_q (a coordinate of G_1)

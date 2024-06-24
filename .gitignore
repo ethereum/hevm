@@ -15,3 +15,5 @@ cabal.project.local*
 *.smt2
 *.prop
 *.expr
+
+.ccls-cache
