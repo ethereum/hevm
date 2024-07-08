@@ -200,6 +200,12 @@
             # NOTE: hacks for bugged cabal new-repl
             LD_LIBRARY_PATH = libraryPath;
             shellHook = lib.optionalString stdenv.isDarwin ''
+              # https://gitlab.haskell.org/ghc/ghc/-/issues/23138#note_567034
+              export LIBCXX=$(nix path-info nixpkgs#libcxx)/lib/libc++.so
+              LIB_PATH='./.lib-cxx-ghc-hack/lib'
+              mkdir -p $LIB_PATH
+              ln -s $LIBCXX $LIB_PATH/c++
+
               export DYLD_LIBRARY_PATH="${libraryPath}";
             '';
           };
