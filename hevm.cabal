@@ -111,11 +111,6 @@ library
   if os(linux)
     build-depends: system-cxx-std-lib
     extra-libraries: stdc++
-  if os(darwin)
-    extra-libraries: c++
-    -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
-    ld-options: -Wl,-keep_dwarf_unwind
-    ghc-options: -fcompact-unwind
   extra-libraries:
     secp256k1, ff, gmp
   c-sources:
@@ -184,6 +179,11 @@ executable hevm
   ghc-options: -threaded -with-rtsopts=-N
   other-modules:
     Paths_hevm
+  if os(darwin)
+    extra-libraries: c++
+    -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
+    ld-options: -Wl,-keep_dwarf_unwind
+    ghc-options: -fcompact-unwind
   build-depends:
     QuickCheck,
     aeson,
@@ -293,6 +293,9 @@ common test-common
     buildable: False
   if os(darwin)
     extra-libraries: c++
+    -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
+    ld-options: -Wl,-keep_dwarf_unwind
+    ghc-options: -fcompact-unwind
 
 --- Test Suites ---
 
