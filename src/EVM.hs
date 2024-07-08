@@ -145,6 +145,7 @@ makeVm o = do
     , iterations = mempty
     , config = RuntimeConfig
       { allowFFI = o.allowFFI
+      , resetCaller = True
       , overrideCaller = Nothing
       , baseState = o.baseState
       }
@@ -771,7 +772,9 @@ exec1 = do
                               assign #callvalue xValue
                               assign #caller from'
                               assign #contract callee
-                            assign (#config % #overrideCaller) Nothing
+                            do
+                              resetCaller <- use (#config % #resetCaller)
+                              when (resetCaller) $ assign (#config % #overrideCaller) Nothing
                             touchAccount from'
                             touchAccount callee
                             transfer from' callee xValue
@@ -789,7 +792,9 @@ exec1 = do
                       zoom #state $ do
                         assign #callvalue xValue
                         assign #caller $ fromMaybe self vm.config.overrideCaller
-                      assign (#config % #overrideCaller) Nothing
+                      do
+                        resetCaller <- use (#config % #resetCaller)
+                        when (resetCaller) $ assign (#config % #overrideCaller) Nothing
                       touchAccount self
             _ ->
               underrun
@@ -879,7 +884,9 @@ exec1 = do
                             assign #caller $ fromMaybe self (vm.config.overrideCaller)
                             assign #contract callee
                             assign #static True
-                          assign (#config % #overrideCaller) Nothing
+                          do
+                            resetCaller <- use (#config % #resetCaller)
+                            when (resetCaller) $ assign (#config % #overrideCaller) Nothing
                           touchAccount self
                           touchAccount callee
             _ ->
@@ -1658,6 +1665,21 @@ cheatActions = Map.fromList
           Just a -> assign (#config % #overrideCaller) (Just a)
           Nothing -> vmError (BadCheatCode sig)
         _ -> vmError (BadCheatCode sig)
+          
+  , action "startPrank(address)" $
+      \sig _ _ input -> case decodeStaticArgs 0 1 input of
+        [addr]  -> case wordToAddr addr of
+          Just a -> do
+            assign (#config % #overrideCaller) (Just a)
+            assign (#config % #resetCaller) False
+          Nothing -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode sig)
+
+  , action "stopPrank()" $
+      \_ _ _ _ -> do
+          assign (#config % #overrideCaller) Nothing
+          assign (#config % #resetCaller) True
+
 
   , action "createFork(string)" $
       \sig outOffset _ input -> case decodeBuf [AbiStringType] input of

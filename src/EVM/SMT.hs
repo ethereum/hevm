@@ -900,14 +900,16 @@ propToSMT = \case
 
 -- | Stores a region of src into dst
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Builder -> Builder -> Builder
-copySlice srcOffset dstOffset size@(Lit _) src dst
-  | size == (Lit 0) = dst
-  | otherwise =
-    let size' = (Expr.sub size (Lit 1))
-        encDstOff = exprToSMT (Expr.add dstOffset size')
-        encSrcOff = exprToSMT (Expr.add srcOffset size')
-        child = copySlice srcOffset dstOffset size' src dst in
-    "(store " <> child `sp` encDstOff `sp` "(select " <> src `sp` encSrcOff <> "))"
+copySlice srcOffset dstOffset size0@(Lit _) src dst =
+  "(let ((src " <> src <> ")) " <> internal size0 <> ")"
+  where
+    internal (Lit 0) = dst
+    internal size =
+      let size' = (Expr.sub size (Lit 1))
+          encDstOff = exprToSMT (Expr.add dstOffset size')
+          encSrcOff = exprToSMT (Expr.add srcOffset size')
+          child = internal size' in
+      "(store " <> child `sp` encDstOff `sp` "(select src " <> encSrcOff <> "))"
 copySlice _ _ _ _ _ = internalError "TODO: implement copySlice with a symbolically sized region"
 
 -- | Unrolls an exponentiation into a series of multiplications

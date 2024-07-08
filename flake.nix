@@ -25,12 +25,21 @@
       url = "github:foundry-rs/forge-std";
       flake = false;
     };
+    solc-pkgs = {
+      url = "github:hellwolf/solc.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, cabal-head, ... }:
+  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, cabal-head, solc-pkgs, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = (import nixpkgs { inherit system; config = { allowBroken = true; }; });
+        pkgs = (import nixpkgs {
+          inherit system;
+          overlays = [solc-pkgs.overlay];
+          config = { allowBroken = true; };
+        });
+        solc = (solc-pkgs.mkDefault pkgs pkgs.solc_0_8_24);
         testDeps = with pkgs; [
           go-ethereum
           solc
@@ -38,7 +47,6 @@
           cvc5
           git
           bitwuzla
-        ] ++ lib.optional (!(pkgs.stdenv.isDarwin && pkgs.stdenv.isAarch64)) [
           foundry.defaultPackage.${system}
         ];
 
@@ -71,7 +79,7 @@
             HEVM_SOLIDITY_REPO = solidity;
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
             HEVM_FORGE_STD_REPO = forge-std;
-            DAPP_SOLC = "${pkgs.solc}/bin/solc";
+            DAPP_SOLC = "${solc}/bin/solc";
           });
 
         hevmUnwrapped = let
@@ -185,7 +193,7 @@
             withHoogle = true;
 
             HEVM_SOLIDITY_REPO = solidity;
-            DAPP_SOLC = "${pkgs.solc}/bin/solc";
+            DAPP_SOLC = "${solc}/bin/solc";
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
             HEVM_FORGE_STD_REPO = forge-std;
 

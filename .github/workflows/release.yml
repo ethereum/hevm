@@ -9,14 +9,14 @@ jobs:
     name: Build MacOS Binary
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: build hevm
         run: |
           nix build .#redistributable --out-link hevmMacos
           cp ./hevmMacos/bin/hevm ./hevm-x86_64-macos
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: hevm-x86_64-macos
           path: ./hevm-x86_64-macos
@@ -25,7 +25,7 @@ jobs:
     needs: macosRelease
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: build hevm
@@ -33,11 +33,11 @@ jobs:
           nix build .#redistributable --out-link hevmLinux
           cp ./hevmLinux/bin/hevm ./hevm-x86_64-linux
       - name: download macos binary
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: hevm-x86_64-macos
       - name: create github release & upload binaries
-        uses: softprops/action-gh-release@v0.1.15
+        uses: softprops/action-gh-release@v2.0.4
         with:
           files: |
             ./hevm-x86_64-linux
