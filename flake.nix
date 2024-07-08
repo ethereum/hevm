@@ -3,7 +3,7 @@
 
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
-    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:d-xo/nixpkgs/8cae9ca435433dfb15eff3d10af1472a0af27f3f";
     foundry.url = "github:shazow/foundry.nix/6089aad0ef615ac8c7b0c948d6052fa848c99523";
     flake-compat = {
       url = "github:edolstra/flake-compat";
@@ -83,7 +83,7 @@
           });
 
         hevmUnwrapped = let
-            ps = if pkgs.stdenv.isDarwin then pkgs else pkgs;
+            ps = if pkgs.stdenv.isDarwin then pkgs else pkgs.pkgsStatic;
           in (with ps; lib.pipe
             (hevmBase ps)
             [
@@ -200,12 +200,6 @@
             # NOTE: hacks for bugged cabal new-repl
             LD_LIBRARY_PATH = libraryPath;
             shellHook = lib.optionalString stdenv.isDarwin ''
-              # https://gitlab.haskell.org/ghc/ghc/-/issues/23138#note_567034
-              export LIBCXX=$(nix path-info nixpkgs#libcxx)/lib/libc++.so
-              LIB_PATH='./.lib-cxx-ghc-hack/lib'
-              mkdir -p $LIB_PATH
-              ln -s $LIBCXX $LIB_PATH/c++
-
               export DYLD_LIBRARY_PATH="${libraryPath}";
             '';
           };

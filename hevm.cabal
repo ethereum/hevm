@@ -181,8 +181,6 @@ executable hevm
     Paths_hevm
   if os(darwin)
     extra-libraries: c++
-    cc-options: -Blib-cxx-ghc-hack/lib/c++
-    cxx-options: -Blib-cxx-ghc-hack/lib/c++
     -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
     ld-options: -Wl,-keep_dwarf_unwind
     ghc-options: -fcompact-unwind
@@ -294,8 +292,6 @@ common test-common
   if os(windows)
     buildable: False
   if os(darwin)
-    cc-options: -Blib-cxx-ghc-hack/lib/c++
-    cxx-options: -Blib-cxx-ghc-hack/lib/c++
     extra-libraries: c++
     -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
     ld-options: -Wl,-keep_dwarf_unwind
@@ -342,8 +338,6 @@ benchmark bench
   ghc-options:
     -O2
   if os(darwin)
-    cc-options: -Blib-cxx-ghc-hack/lib/c++
-    cxx-options: -Blib-cxx-ghc-hack/lib/c++
     extra-libraries: c++
   other-modules:
     Paths_hevm
