@@ -44,53 +44,58 @@
 
         # custom package set capable of building latest (unreleased) `cabal-install`.
         # This gives us support for multiple home units in cabal repl
-        cabal-multi-pkgs = pkgs.haskellPackages.override {
-          overrides = with pkgs.haskell.lib; self: super: rec {
-            cabal-install = dontCheck (self.callCabal2nix "cabal-install" "${cabal-head}/cabal-install" {});
-            cabal-install-solver = dontCheck (self.callCabal2nix "cabal-install-solver" "${cabal-head}/cabal-install-solver" {});
-            Cabal-described = dontCheck (self.callCabal2nix "Cabal-described" "${cabal-head}/Cabal-described" {});
-            Cabal-QuickCheck = dontCheck (self.callCabal2nix "Cabal-QuickCheck" "${cabal-head}/Cabal-QuickCheck" {});
-            Cabal-tree-diff = dontCheck (self.callCabal2nix "Cabal-tree-diff" "${cabal-head}/Cabal-tree-diff" {});
-            Cabal-syntax = dontCheck (self.callCabal2nix "Cabal-syntax" "${cabal-head}/Cabal-syntax" {});
-            Cabal-tests = dontCheck (self.callCabal2nix "Cabal-tests" "${cabal-head}/Cabal-tests" {});
-            Cabal = dontCheck (self.callCabal2nix "Cabal" "${cabal-head}/Cabal" {});
-          };
-        };
+        # cabal-multi-pkgs = pkgs.haskellPackages.override {
+        #   overrides = with pkgs.haskell.lib; self: super: rec {
+        #     cabal-install = dontCheck (self.callCabal2nix "cabal-install" "${cabal-head}/cabal-install" {});
+        #     cabal-install-solver = dontCheck (self.callCabal2nix "cabal-install-solver" "${cabal-head}/cabal-install-solver" {});
+        #     Cabal-described = dontCheck (self.callCabal2nix "Cabal-described" "${cabal-head}/Cabal-described" {});
+        #     Cabal-QuickCheck = dontCheck (self.callCabal2nix "Cabal-QuickCheck" "${cabal-head}/Cabal-QuickCheck" {});
+        #     Cabal-tree-diff = dontCheck (self.callCabal2nix "Cabal-tree-diff" "${cabal-head}/Cabal-tree-diff" {});
+        #     Cabal-syntax = dontCheck (self.callCabal2nix "Cabal-syntax" "${cabal-head}/Cabal-syntax" {});
+        #     Cabal-tests = dontCheck (self.callCabal2nix "Cabal-tests" "${cabal-head}/Cabal-tests" {});
+        #     Cabal = dontCheck (self.callCabal2nix "Cabal" "${cabal-head}/Cabal" {});
+        #   };
+        # };
 
         secp256k1-static = stripDylib (pkgs.secp256k1.overrideAttrs (attrs: {
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         }));
 
-        hevmUnwrapped = (with (if pkgs.stdenv.isDarwin then pkgs else pkgs.pkgsStatic); lib.pipe (
-          haskellPackages.callCabal2nix "hevm" ./. {
+        hevmBase = ps :
+          (ps.haskellPackages.callCabal2nix "hevm" ./. {
             # Haskell libs with the same names as C libs...
             # Depend on the C libs, not the Haskell libs.
             # These are system deps, not Cabal deps.
-            inherit secp256k1;
-          })
-          [
-            (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
-            (haskell.lib.compose.addTestToolDepends testDeps)
-            (haskell.lib.compose.appendBuildFlags ["-v3"])
-            (haskell.lib.compose.appendConfigureFlags (
-              [ # "-fci"
-                "-O2"
-              ]
-              ++ lib.optionals stdenv.isDarwin
-              [ "--extra-lib-dirs=${stripDylib (pkgs.gmp.override { withStatic = true; })}/lib"
-                "--extra-lib-dirs=${stripDylib secp256k1-static}/lib"
-                "--extra-lib-dirs=${stripDylib (libff.override { enableStatic = true; })}/lib"
-                "--extra-lib-dirs=${zlib.static}/lib"
-                "--extra-lib-dirs=${stripDylib (libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
-                "--extra-lib-dirs=${stripDylib (ncurses.override { enableStatic = true; })}/lib"
-              ]))
-            haskell.lib.dontHaddock
-          ]).overrideAttrs(final: prev: {
+            secp256k1 = ps.secp256k1;
+          }).overrideAttrs(final: prev: {
             HEVM_SOLIDITY_REPO = solidity;
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
             HEVM_FORGE_STD_REPO = forge-std;
             DAPP_SOLC = "${pkgs.solc}/bin/solc";
           });
+
+        hevmUnwrapped = let
+            ps = if pkgs.stdenv.isDarwin then pkgs else pkgs;
+          in (with ps; lib.pipe
+            (hevmBase ps)
+            [
+              (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
+              (haskell.lib.compose.addTestToolDepends testDeps)
+              (haskell.lib.compose.appendBuildFlags ["-v3"])
+              (haskell.lib.compose.appendConfigureFlags (
+                [ # "-fci"
+                  "-O2"
+                ]
+                ++ lib.optionals stdenv.isDarwin
+                [ "--extra-lib-dirs=${stripDylib (pkgs.gmp.override { withStatic = true; })}/lib"
+                  "--extra-lib-dirs=${stripDylib secp256k1-static}/lib"
+                  "--extra-lib-dirs=${stripDylib (libff.override { enableStatic = true; })}/lib"
+                  "--extra-lib-dirs=${zlib.static}/lib"
+                  "--extra-lib-dirs=${stripDylib (libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
+                  "--extra-lib-dirs=${stripDylib (ncurses.override { enableStatic = true; })}/lib"
+                ]))
+              haskell.lib.dontHaddock
+          ]);
 
         # wrapped binary for use on systems with nix available. ensures all
         # required runtime deps are available and on path
@@ -167,7 +172,7 @@
         devShell = with pkgs;
           let libraryPath = "${lib.makeLibraryPath [ libff secp256k1 gmp ]}";
           in haskellPackages.shellFor {
-            packages = _: [ hevmUnwrapped ];
+            packages = _: [ (hevmBase pkgs) ];
             buildInputs = [
               # cabal from nixpkgs
               haskellPackages.cabal-install
