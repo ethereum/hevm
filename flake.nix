@@ -35,9 +35,13 @@
   outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, cabal-head, bitwuzla-pkgs, solc-pkgs, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = (import nixpkgs { inherit system; config = { allowBroken = true; }; });
+        pkgs = (import nixpkgs {
+          inherit system;
+          overlays = [solc-pkgs.overlay];
+          config = { allowBroken = true; };
+        });
         bitwuzla = (import bitwuzla-pkgs { inherit system; }).bitwuzla;
-        solc = (solc-pkgs.mkDefault pkgs solc-pkgs.packages.${system}.solc_0_8_24);
+        solc = (solc-pkgs.mkDefault pkgs pkgs.solc_0_8_24);
         testDeps = with pkgs; [
           go-ethereum
           solc
