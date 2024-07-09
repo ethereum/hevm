@@ -177,7 +177,7 @@ unknownContract :: Expr EAddr -> Contract
 unknownContract addr = Contract
   { code        = UnknownCode addr
   , storage     = AbstractStore addr Nothing
-  , t_storage   = AbstractStore addr Nothing
+  , tStorage    = AbstractStore addr Nothing
   , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = Nothing
@@ -192,7 +192,7 @@ abstractContract :: ContractCode -> Expr EAddr -> Contract
 abstractContract code addr = Contract
   { code        = code
   , storage     = AbstractStore addr Nothing
-  , t_storage   = AbstractStore addr Nothing
+  , tStorage    = AbstractStore addr Nothing
   , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = if isCreation code then Just 1 else Just 0
@@ -211,7 +211,7 @@ initialContract :: ContractCode -> Contract
 initialContract code = Contract
   { code        = code
   , storage     = ConcreteStore mempty
-  , t_storage   = ConcreteStore mempty
+  , tStorage    = ConcreteStore mempty
   , origStorage = ConcreteStore mempty
   , balance     = Lit 0
   , nonce       = if isCreation code then Just 1 else Just 0
@@ -702,24 +702,23 @@ exec1 = do
                        _ -> noop
             _ -> underrun
 
-        OpTload ->
+        OpTLoad ->
           case stk of
             x:xs -> do
-              burn g_warm_storage_read $ -- TODO spec says "hot" not "warm"
+              burn g_warm_storage_read $
                 accessTStorage self x $ \y -> do
                   next
                   assign (#state % #stack) (y:xs)
             _ -> underrun
 
-        OpTstore ->
+        OpTStore ->
           notStatic $
           case stk of
             x:new:xs ->
               burn g_sload $ do
                 next
                 assign (#state % #stack) xs
-                modifying (#env % #contracts % ix self % #t_storage) (writeStorage x new)
-                -- TODO there was some refunding code here, maybe bring it back
+                modifying (#env % #contracts % ix self % #tStorage) (writeStorage x new)
             _ -> underrun
 
         OpJump ->
@@ -1384,8 +1383,8 @@ accessTStorage addr slot continue = do
       -- --> This is because readStorage can do smart rewrites, but only in case
       --     the expression is of a particular format, which can be destroyed by simplification.
       --     However, without concretization, it may not find things that are actually in the storage
-      case readStorage slot c.t_storage of
-        Just x -> case readStorage slotConc c.t_storage of
+      case readStorage slot c.tStorage of
+        Just x -> case readStorage slotConc c.tStorage of
           Just _ -> continue x
           Nothing -> continue $ Lit 0
         Nothing -> continue $ Lit 0
@@ -1395,7 +1394,7 @@ accessTStorage addr slot continue = do
 
 -- TODO integrate this with some existing system
 clearTStorages :: EVM t s ()
-clearTStorages = (#env % #contracts) %= fmap (\c -> c { t_storage = ConcreteStore mempty } :: Contract)
+clearTStorages = (#env % #contracts) %= fmap (\c -> c { tStorage = ConcreteStore mempty } :: Contract)
 
 accountExists :: Expr EAddr -> VM t s -> Bool
 accountExists addr vm =
