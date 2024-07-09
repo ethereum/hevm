@@ -177,32 +177,41 @@
 
         # --- shell ---
 
-        devShell = with pkgs;
-          let libraryPath = "${lib.makeLibraryPath [ libff secp256k1 gmp ]}";
-          in haskellPackages.shellFor {
-            packages = _: [ (hevmBase pkgs) ];
-            buildInputs = [
-              # cabal from nixpkgs
-              haskellPackages.cabal-install
-              # cabal-multi-pkgs.cabal-install
-              mdbook
-              yarn
-              haskellPackages.eventlog2html
-              haskellPackages.haskell-language-server
-            ] ++ testDeps;
-            withHoogle = true;
+        devShells = with pkgs; {
+          default =
+            let libraryPath = "${lib.makeLibraryPath [ libff secp256k1 gmp ]}";
+            in haskellPackages.shellFor {
+              packages = _: [ (hevmBase pkgs) ];
+              buildInputs = [
+                # cabal from nixpkgs
+                haskellPackages.cabal-install
+                # cabal-multi-pkgs.cabal-install
+                mdbook
+                yarn
+                haskellPackages.eventlog2html
+                haskellPackages.haskell-language-server
+              ] ++ testDeps;
+              withHoogle = true;
 
+              HEVM_SOLIDITY_REPO = solidity;
+              DAPP_SOLC = "${solc}/bin/solc";
+              HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
+              HEVM_FORGE_STD_REPO = forge-std;
+
+              # NOTE: hacks for bugged cabal new-repl
+              LD_LIBRARY_PATH = libraryPath;
+              shellHook = lib.optionalString stdenv.isDarwin ''
+                export DYLD_LIBRARY_PATH="${libraryPath}";
+              '';
+            };
+          macos = pkgs.mkShell {
+            buildInputs = testDeps;
             HEVM_SOLIDITY_REPO = solidity;
             DAPP_SOLC = "${solc}/bin/solc";
             HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
             HEVM_FORGE_STD_REPO = forge-std;
-
-            # NOTE: hacks for bugged cabal new-repl
-            LD_LIBRARY_PATH = libraryPath;
-            shellHook = lib.optionalString stdenv.isDarwin ''
-              export DYLD_LIBRARY_PATH="${libraryPath}";
-            '';
           };
+        };
       }
     );
 }
