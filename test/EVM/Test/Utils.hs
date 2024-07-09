@@ -90,7 +90,6 @@ compile foundryType root src = do
       forgeStdRepo <- liftIO $ fromMaybe (internalError "cannot find forge-std repo") <$> (lookupEnv "HEVM_FORGE_STD_REPO")
       callProcess "mkdir" ["-p", tld]
       callProcess "cp" ["-r", forgeStdRepo <> "/src", tld <> "/src"]
-      callProcess "cp" ["-r", forgeStdRepo <> "/lib", tld <> "/lib"]
     initLib :: FilePath -> FilePath -> FilePath -> IO ()
     initLib tld srcFile dstFile = do
       createDirectoryIfMissing True (tld <> "/src")
