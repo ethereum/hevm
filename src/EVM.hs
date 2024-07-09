@@ -176,6 +176,7 @@ unknownContract :: Expr EAddr -> Contract
 unknownContract addr = Contract
   { code        = UnknownCode addr
   , storage     = AbstractStore addr Nothing
+  , t_storage     = AbstractStore addr Nothing
   , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = Nothing
@@ -190,6 +191,7 @@ abstractContract :: ContractCode -> Expr EAddr -> Contract
 abstractContract code addr = Contract
   { code        = code
   , storage     = AbstractStore addr Nothing
+  , t_storage     = AbstractStore addr Nothing
   , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = if isCreation code then Just 1 else Just 0
@@ -208,6 +210,7 @@ initialContract :: ContractCode -> Contract
 initialContract code = Contract
   { code        = code
   , storage     = ConcreteStore mempty
+  , t_storage     = ConcreteStore mempty
   , origStorage = ConcreteStore mempty
   , balance     = Lit 0
   , nonce       = if isCreation code then Just 1 else Just 0
@@ -691,7 +694,27 @@ exec1 = do
                        -- don't change the refund counter
                        _ -> noop
             _ -> underrun
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+        OpTload ->
+          case stk of
+            x:xs -> do
+              burn g_warm_storage_read $ -- TODO spec says "hot" not "warm"
+                accessTStorage self x $ \y -> do
+                  next
+                  assign (#state % #stack) (y:xs)
+            _ -> underrun
 
+        OpTstore ->
+          notStatic $
+          case stk of
+            x:new:xs ->
+              burn g_sload $ do
+                next
+                assign (#state % #stack) xs
+                modifying (#env % #contracts % ix self % #t_storage) (writeStorage x new)
+                -- TODO there was some refunding code here, maybe bring it back
+            _ -> underrun
+-----------------------------------------------------------------------------------------------------------------------------------------------------
         OpJump ->
           case stk of
             x:xs ->
@@ -1335,6 +1358,33 @@ accessStorage addr slot continue = do
               assign #result Nothing
               continue (Lit x))
 
+accessTStorage
+  :: VMOps t => Expr EAddr
+  -> Expr EWord
+  -> (Expr EWord -> EVM t s ())
+  -> EVM t s ()
+accessTStorage addr slot continue = do
+  let slotConc = Expr.concKeccakSimpExpr slot
+  use (#env % #contracts % at addr) >>= \case
+    Just c ->
+      -- Try first without concretization. Then if we get a Just, with concretization
+      -- if both give a Just, should we `continue`.
+      -- --> This is because readStorage can do smart rewrites, but only in case
+      --     the expression is of a particular format, which can be destroyed by simplification.
+      --     However, without concretization, it may not find things that are actually in the storage
+      case readStorage slot c.t_storage of
+        Just x -> case readStorage slotConc c.t_storage of
+          Just _ -> continue x
+          Nothing -> continue $ Lit 0
+        Nothing -> continue $ Lit 0
+    Nothing ->
+      fetchAccount addr $ \_ ->
+        accessStorage addr slot continue
+
+-- TODO figure out where to call this
+clearTStorages :: EVM t s ()
+clearTStorages = (#env % #contracts) %= fmap (\c -> c { t_storage = ConcreteStore mempty } :: Contract)
+
 accountExists :: Expr EAddr -> VM t s -> Bool
 accountExists addr vm =
   case Map.lookup addr vm.env.contracts of
@@ -1885,16 +1935,16 @@ create self this xSize xGas xValue xs newAddr initCode = do
               modifying (ix self % #nonce) (fmap ((+) 1))
 
             let
-              resetStorage :: Expr Storage -> Expr Storage
-              resetStorage = \case
+              reset_storage :: Expr Storage -> Expr Storage
+              reset_storage = \case
                   ConcreteStore _ -> ConcreteStore mempty
                   AbstractStore a Nothing -> AbstractStore a Nothing
-                  SStore _ _ p -> resetStorage p
+                  SStore _ _ p -> reset_storage p
                   AbstractStore _ (Just _) -> internalError "unexpected logical store in EVM.hs"
                   GVar _  -> internalError "unexpected global variable"
 
-            modifying (#env % #contracts % ix newAddr % #storage) resetStorage
-            modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage
+            modifying (#env % #contracts % ix newAddr % #storage) reset_storage
+            modifying (#env % #contracts % ix newAddr % #origStorage) reset_storage
 
             transfer self newAddr xValue
 

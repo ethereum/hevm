@@ -311,6 +311,7 @@ data Expr (a :: EType) where
   C ::
     { code    :: ContractCode
     , storage :: Expr Storage
+    , t_storage :: Expr Storage
     , balance :: Expr EWord
     , nonce   :: Maybe W64
     } -> Expr EContract
@@ -768,6 +769,7 @@ data Block = Block
 data Contract = Contract
   { code        :: ContractCode
   , storage     :: Expr Storage
+  , t_storage     :: Expr Storage
   , origStorage :: Expr Storage
   , balance     :: Expr EWord
   , nonce       :: Maybe W64
@@ -1010,6 +1012,8 @@ data GenericOp a
   | OpMstore8
   | OpSload
   | OpSstore
+  | OpTload
+  | OpTstore
   | OpJump
   | OpJumpi
   | OpPc

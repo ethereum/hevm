@@ -663,13 +663,15 @@ formatExpr = go
 
       BufLength b -> fmt "BufLength" [b]
 
-      C code store bal nonce -> T.unlines
+      C code store tStore bal nonce -> T.unlines
         [ "(Contract"
         , indent 2 $ T.unlines
           [ "code:"
           , indent 2 $ formatCode code
           , "storage:"
           , indent 2 $ formatExpr store
+          , "t_storage:"
+          , indent 2 $ formatExpr tStore
           , "balance:"
           , indent 2 $ formatExpr bal
           , "nonce:"

@@ -466,7 +466,7 @@ runExpr = do
     _ -> internalError "vm in intermediate state after call to runFully"
 
 toEContract :: Contract -> Expr EContract
-toEContract c = C c.code c.storage c.balance c.nonce
+toEContract c = C c.code c.storage c.t_storage c.balance c.nonce
 
 -- | Converts a given top level expr into a list of final states and the
 -- associated path conditions for each state.
