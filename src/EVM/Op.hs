@@ -235,8 +235,8 @@ opString (i, o) = let showPc x | x < 0x10 = '0' : showHex x ""
   OpMstore8 -> "MSTORE8"
   OpSload -> "SLOAD"
   OpSstore -> "SSTORE"
-  OpTload -> "TLOAD"
-  OpTstore -> "TSTORE"
+  OpTLoad -> "TLOAD"
+  OpTStore -> "TSTORE"
   OpJump -> "JUMP"
   OpJumpi -> "JUMPI"
   OpPc -> "PC"
@@ -337,8 +337,8 @@ getOp x = case x of
   0x59 -> OpMsize
   0x5a -> OpGas
   0x5b -> OpJumpdest
-  0x5c -> OpTload
-  0x5d -> OpTstore
+  0x5c -> OpTLoad
+  0x5d -> OpTStore
   0x5f -> OpPush0
   0xf0 -> OpCreate
   0xf1 -> OpCall

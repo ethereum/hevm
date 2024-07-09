@@ -670,7 +670,7 @@ formatExpr = go
           , indent 2 $ formatCode code
           , "storage:"
           , indent 2 $ formatExpr store
-          , "t_storage:"
+          , "tStorage:"
           , indent 2 $ formatExpr tStore
           , "balance:"
           , indent 2 $ formatExpr bal
