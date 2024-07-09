@@ -176,7 +176,7 @@ unknownContract :: Expr EAddr -> Contract
 unknownContract addr = Contract
   { code        = UnknownCode addr
   , storage     = AbstractStore addr Nothing
-  , t_storage     = AbstractStore addr Nothing
+  , t_storage   = AbstractStore addr Nothing
   , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = Nothing
@@ -191,7 +191,7 @@ abstractContract :: ContractCode -> Expr EAddr -> Contract
 abstractContract code addr = Contract
   { code        = code
   , storage     = AbstractStore addr Nothing
-  , t_storage     = AbstractStore addr Nothing
+  , t_storage   = AbstractStore addr Nothing
   , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = if isCreation code then Just 1 else Just 0
@@ -210,7 +210,7 @@ initialContract :: ContractCode -> Contract
 initialContract code = Contract
   { code        = code
   , storage     = ConcreteStore mempty
-  , t_storage     = ConcreteStore mempty
+  , t_storage   = ConcreteStore mempty
   , origStorage = ConcreteStore mempty
   , balance     = Lit 0
   , nonce       = if isCreation code then Just 1 else Just 0
@@ -694,7 +694,7 @@ exec1 = do
                        -- don't change the refund counter
                        _ -> noop
             _ -> underrun
------------------------------------------------------------------------------------------------------------------------------------------------------
+
         OpTload ->
           case stk of
             x:xs -> do
@@ -714,7 +714,7 @@ exec1 = do
                 modifying (#env % #contracts % ix self % #t_storage) (writeStorage x new)
                 -- TODO there was some refunding code here, maybe bring it back
             _ -> underrun
------------------------------------------------------------------------------------------------------------------------------------------------------
+
         OpJump ->
           case stk of
             x:xs ->
@@ -1381,7 +1381,7 @@ accessTStorage addr slot continue = do
       fetchAccount addr $ \_ ->
         accessStorage addr slot continue
 
--- TODO figure out where to call this
+-- TODO integrate this with some existing system
 clearTStorages :: EVM t s ()
 clearTStorages = (#env % #contracts) %= fmap (\c -> c { t_storage = ConcreteStore mempty } :: Contract)
 
@@ -1935,16 +1935,16 @@ create self this xSize xGas xValue xs newAddr initCode = do
               modifying (ix self % #nonce) (fmap ((+) 1))
 
             let
-              reset_storage :: Expr Storage -> Expr Storage
-              reset_storage = \case
+              resetStorage :: Expr Storage -> Expr Storage
+              resetStorage = \case
                   ConcreteStore _ -> ConcreteStore mempty
                   AbstractStore a Nothing -> AbstractStore a Nothing
-                  SStore _ _ p -> reset_storage p
+                  SStore _ _ p -> resetStorage p
                   AbstractStore _ (Just _) -> internalError "unexpected logical store in EVM.hs"
                   GVar _  -> internalError "unexpected global variable"
 
-            modifying (#env % #contracts % ix newAddr % #storage) reset_storage
-            modifying (#env % #contracts % ix newAddr % #origStorage) reset_storage
+            modifying (#env % #contracts % ix newAddr % #storage) resetStorage
+            modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage
 
             transfer self newAddr xValue
 
