@@ -31,10 +31,11 @@ foldProp f acc p = acc <> (go p)
 
 foldEContract :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Expr EContract -> b
 foldEContract f _ g@(GVar _) = f g
-foldEContract f acc (C code storage balance _)
+foldEContract f acc (C code storage tStorage balance _)
   =  acc
   <> foldCode f code
   <> foldExpr f mempty storage
+  <> foldExpr f mempty tStorage
   <> foldExpr f mempty balance
 
 foldContract :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Contract -> b
@@ -648,11 +649,12 @@ mapPropM f = \case
 
 mapEContractM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Expr EContract -> m (Expr EContract)
 mapEContractM _ g@(GVar _) = pure g
-mapEContractM f (C code storage balance nonce) = do
+mapEContractM f (C code storage tStorage balance nonce) = do
   code' <- mapCodeM f code
   storage' <- mapExprM f storage
+  tStorage' <- mapExprM f tStorage
   balance' <- mapExprM f balance
-  pure $ C code' storage' balance' nonce
+  pure $ C code' storage' tStorage' balance' nonce
 
 mapContractM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Contract -> m (Contract)
 mapContractM f c = do
