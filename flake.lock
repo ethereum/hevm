@@ -3,17 +3,16 @@
     "cabal-head": {
       "flake": false,
       "locked": {
-        "lastModified": 1714129193,
-        "narHash": "sha256-RcDLYmk6I+9emffB4wJQXQhV68iV+EO8nCle+ox10ho=",
+        "lastModified": 1720350999,
+        "narHash": "sha256-fh/64oRU4LYliK5jFn0UFaAcik49+ABn2v083gekzO4=",
         "owner": "haskell",
         "repo": "cabal",
-        "rev": "56fb1dc9baa20b079eb0fa84ccafb284a6e91d41",
+        "rev": "2fbfd55bb6e731feeccf22774feec73b3e787302",
         "type": "github"
       },
       "original": {
         "owner": "haskell",
         "repo": "cabal",
-        "rev": "56fb1dc9baa20b079eb0fa84ccafb284a6e91d41",
         "type": "github"
       }
     },
