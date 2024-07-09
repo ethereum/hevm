@@ -83,7 +83,7 @@
           });
 
         hevmUnwrapped = let
-            ps = if pkgs.stdenv.isDarwin then pkgs else pkgs;
+            ps = if pkgs.stdenv.isDarwin then pkgs else pkgs.pkgsStatic;
           in (with ps; lib.pipe
             (hevmBase ps)
             [
