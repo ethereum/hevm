@@ -5,6 +5,8 @@ version:
   0.53.0
 synopsis:
   Symbolic EVM Evaluator
+description:
+  Symbolic EVM semantics in Haskell.
 homepage:
   https://github.com/ethereum/hevm
 license:
@@ -18,9 +20,10 @@ category:
 build-type:
   Simple
 extra-source-files:
-  CHANGELOG.md
   bench/contracts/*.sol
   test/scripts/convert_trace_to_json.sh
+extra-doc-files:
+  CHANGELOG.md
 
 flag ci
   description: Sets flags for compilation in CI
@@ -160,13 +163,13 @@ library
     regex-tdfa                        >= 1.2.3 && < 1.4,
     base                              >= 4.9 && < 5,
     here                              >= 1.2.13 && < 1.3,
-    smt2-parser                       >= 0.1.0.1,
+    smt2-parser                       >= 0.1.0 && < 0.2,
     spool                             >= 0.1 && < 0.2,
     stm                               >= 2.5.0 && < 2.6.0,
     spawn                             >= 0.3 && < 0.4,
     filepattern                       >= 0.1.2 && < 0.2,
     witch                             >= 1.1 && < 1.3,
-    unliftio-core                     >= 0.2.1.0
+    unliftio-core                     >= 0.2.1 && < 0.3,
   hs-source-dirs:
     src
 
@@ -210,10 +213,10 @@ executable hevm
     stm,
     spawn,
     optics-core,
-    githash                       >= 0.1.6 && < 0.2,
+    githash,
     witch,
     unliftio-core,
-    with-utf8                     >= 1.0.0.0
+    with-utf8,
   if os(windows)
     buildable: False
 
@@ -228,7 +231,7 @@ common test-base
   autogen-modules:
     Paths_hevm
   build-depends:
-    HUnit >= 1.6,
+    HUnit,
     QuickCheck,
     quickcheck-instances,
     aeson,
@@ -245,10 +248,10 @@ common test-base
     mtl,
     data-dword,
     process,
-    tasty >= 1.0,
-    tasty-hunit >= 0.10,
-    tasty-quickcheck >= 0.9,
-    tasty-expected-failure >= 0.12,
+    tasty,
+    tasty-hunit,
+    tasty-quickcheck,
+    tasty-expected-failure,
     temporary,
     text,
     regex-tdfa,
@@ -257,10 +260,10 @@ common test-base
     array,
     vector,
     tasty-bench,
-    stm >= 2.5.0,
-    spawn >= 0.3,
+    stm,
+    spawn,
     witherable,
-    smt2-parser >= 0.1.0.1,
+    smt2-parser,
     operational,
     optics-core,
     optics-extra,
