@@ -1,17 +1,18 @@
 {
   "nodes": {
-    "cabal-head": {
+    "cabal-3-12": {
       "flake": false,
       "locked": {
-        "lastModified": 1720350999,
-        "narHash": "sha256-fh/64oRU4LYliK5jFn0UFaAcik49+ABn2v083gekzO4=",
+        "lastModified": 1719273538,
+        "narHash": "sha256-/TECd3cdqGDdlEur88H0KbV7jcE/czc0jecj9921T5c=",
         "owner": "haskell",
         "repo": "cabal",
-        "rev": "2fbfd55bb6e731feeccf22774feec73b3e787302",
+        "rev": "260ecdc3d848782d4df49e629cb0a5dc9e96ca9e",
         "type": "github"
       },
       "original": {
         "owner": "haskell",
+        "ref": "Cabal-v3.12.1.0",
         "repo": "cabal",
         "type": "github"
       }
@@ -168,7 +169,7 @@
     },
     "root": {
       "inputs": {
-        "cabal-head": "cabal-head",
+        "cabal-3-12": "cabal-3-12",
         "ethereum-tests": "ethereum-tests",
         "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
