@@ -73,18 +73,16 @@
         hsPkgs = ps :
           ps.haskellPackages.override {
             overrides = hfinal: hprev: {
-              with-utf8 = (ps.lib.pipe hprev.with-utf8 [
-                (
-                  if ps.stdenv.isDarwin
-                  then [ps.haskell.lib.compose.addExtraLibraries [ps.libiconv]]
-                  else []
-                )
-              ]);
+              with-utf8 = ps.lib.pipe hprev.with-utf8 (
+                if ps.stdenv.isDarwin
+                then [ps.haskell.lib.compose.addExtraLibraries [ps.libiconv]]
+                else []
+              );
             };
           };
 
         hevmBase = ps :
-          (ps.haskellPackages.callCabal2nix "hevm" ./. {
+          ((hsPkgs ps).callCabal2nix "hevm" ./. {
             # Haskell libs with the same names as C libs...
             # Depend on the C libs, not the Haskell libs.
             # These are system deps, not Cabal deps.
