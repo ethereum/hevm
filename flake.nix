@@ -70,6 +70,19 @@
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         }));
 
+        hsPkgs = ps :
+          ps.haskellPackages.override {
+            overrides = hfinal: hprev: {
+              with-utf8 = (ps.lib.pipe hprev.with-utf8 [
+                (
+                  if ps.stdenv.isDarwin
+                  then [ps.haskell.lib.compose.addExtraLibraries [ps.libiconv]]
+                  else []
+                )
+              ]);
+            };
+          };
+
         hevmBase = ps :
           (ps.haskellPackages.callCabal2nix "hevm" ./. {
             # Haskell libs with the same names as C libs...
@@ -92,7 +105,7 @@
             else
                 exec cc "$@"
             fi
-            '';
+          '';
 
         hevmUnwrapped = let
             ps = if pkgs.stdenv.isDarwin then pkgs else pkgs.pkgsStatic;
