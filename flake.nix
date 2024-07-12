@@ -70,15 +70,8 @@
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         }));
 
-        hsPkgs = ps :
-          ps.haskellPackages.override {
-            overrides = self: super: {
-              with-utf8 = super.with-utf8_1_1_0_0;
-            };
-          };
-
         hevmBase = ps :
-          ((hsPkgs ps).callCabal2nix "hevm" ./. {
+          (ps.haskellPackages.callCabal2nix "hevm" ./. {
             # Haskell libs with the same names as C libs...
             # Depend on the C libs, not the Haskell libs.
             # These are system deps, not Cabal deps.
