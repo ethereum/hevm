@@ -182,6 +182,8 @@ executable hevm
   ghc-options: -threaded -with-rtsopts=-N
   other-modules:
     Paths_hevm
+  autogen-modules:
+    Paths_hevm
   if os(darwin)
     extra-libraries: c++
     -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
