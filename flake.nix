@@ -83,6 +83,17 @@
             DAPP_SOLC = "${solc}/bin/solc";
           });
 
+        # workaround for nixpkgs / ghc / macos / cc issue
+        # https://gitlab.haskell.org/ghc/ghc/-/issues/23138
+        cc-workaround-ghc-23138 =
+          pkgs.writeScriptBin "cc-workaround-nix-23138" ''
+            if [ "$1" = "--print-file-name" ] && [ "$2" = "c++" ]; then
+                echo c++
+            else
+                exec cc "$@"
+            fi
+            '';
+
         hevmUnwrapped = let
             ps = if pkgs.stdenv.isDarwin then pkgs else pkgs.pkgsStatic;
           in (with ps; lib.pipe
@@ -102,6 +113,7 @@
                   "--extra-lib-dirs=${zlib.static}/lib"
                   "--extra-lib-dirs=${stripDylib (libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
                   "--extra-lib-dirs=${stripDylib (ncurses.override { enableStatic = true; })}/lib"
+                  "--ghc-options=-pgml=${cc-workaround-nix-23138}/bin/cc-workaround-nix-23138"
                 ]))
               haskell.lib.dontHaddock
           ]);
@@ -178,40 +190,30 @@
 
         # --- shell ---
 
-        devShells = with pkgs; {
-          default =
-            let libraryPath = "${lib.makeLibraryPath [ libff secp256k1 gmp ]}";
-            in haskellPackages.shellFor {
-              packages = _: [ (hevmBase pkgs) ];
-              buildInputs = [
-                # cabal from nixpkgs
-                haskellPackages.cabal-install
-                # cabal-multi-pkgs.cabal-install
-                mdbook
-                yarn
-                haskellPackages.eventlog2html
-                haskellPackages.haskell-language-server
-              ] ++ testDeps;
-              withHoogle = true;
+        devShells.default = with pkgs; let
+          libraryPath = "${lib.makeLibraryPath [ libff secp256k1 gmp ]}";
+        in haskellPackages.shellFor {
+          packages = _: [ (hevmBase pkgs) ];
+          buildInputs = [
+            cabal-3-12-pkgs.cabal-install
+            mdbook
+            yarn
+            haskellPackages.eventlog2html
+            haskellPackages.haskell-language-server
+          ] ++ testDeps;
+          withHoogle = true;
 
-              HEVM_SOLIDITY_REPO = solidity;
-              DAPP_SOLC = "${solc}/bin/solc";
-              HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
-              HEVM_FORGE_STD_REPO = forge-std;
+          # hevm tests expect these to be set
+          HEVM_SOLIDITY_REPO = solidity;
+          DAPP_SOLC = "${solc}/bin/solc";
+          HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
+          HEVM_FORGE_STD_REPO = forge-std;
 
-              # NOTE: hacks for bugged cabal new-repl
-              LD_LIBRARY_PATH = libraryPath;
-              shellHook = lib.optionalString stdenv.isDarwin ''
-                export DYLD_LIBRARY_PATH="${libraryPath}";
-              '';
-            };
-          macos = pkgs.mkShell {
-            buildInputs = testDeps;
-            HEVM_SOLIDITY_REPO = solidity;
-            DAPP_SOLC = "${solc}/bin/solc";
-            HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
-            HEVM_FORGE_STD_REPO = forge-std;
-          };
+          # point cabal repl to system deps
+          LD_LIBRARY_PATH = libraryPath;
+          shellHook = lib.optionalString stdenv.isDarwin ''
+            export DYLD_LIBRARY_PATH="${libraryPath}";
+          '';
         };
       }
     );
