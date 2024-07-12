@@ -86,7 +86,7 @@
         # workaround for nixpkgs / ghc / macos / cc issue
         # https://gitlab.haskell.org/ghc/ghc/-/issues/23138
         cc-workaround-ghc-23138 =
-          pkgs.writeScriptBin "cc-workaround-nix-23138" ''
+          pkgs.writeScriptBin "cc-workaround-ghc-23138" ''
             if [ "$1" = "--print-file-name" ] && [ "$2" = "c++" ]; then
                 echo c++
             else
@@ -113,7 +113,7 @@
                   "--extra-lib-dirs=${zlib.static}/lib"
                   "--extra-lib-dirs=${stripDylib (libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
                   "--extra-lib-dirs=${stripDylib (ncurses.override { enableStatic = true; })}/lib"
-                  "--ghc-options=-pgml=${cc-workaround-nix-23138}/bin/cc-workaround-nix-23138"
+                  "--ghc-options=-pgml=${cc-workaround-ghc-23138}/bin/cc-workaround-ghc-23138"
                 ]))
               haskell.lib.dontHaddock
           ]);
