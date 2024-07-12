@@ -73,11 +73,12 @@
         hsPkgs = ps :
           ps.haskellPackages.override {
             overrides = hfinal: hprev: {
-              with-utf8 = ps.lib.pipe hprev.with-utf8 (
-                if ps.stdenv.isDarwin
-                then [ps.haskell.lib.compose.addExtraLibraries [ps.libiconv]]
-                else []
-              );
+              with-utf8 = if ps.stdenv.isDarwin
+                then
+                  ps.haskell.lib.compose.overrideCabal (drv : {
+                    extraLibraries = [ps.libiconv];
+                  }) hprev.with-utf8
+                else hprev.with-utf8;
             };
           };
 
