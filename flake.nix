@@ -73,11 +73,9 @@
         hsPkgs = ps :
           ps.haskellPackages.override {
             overrides = hfinal: hprev: {
-              with-utf8 = if ps.stdenv.isDarwin
-                then
-                  ps.haskell.lib.compose.overrideCabal (drv : {
-                    extraLibraries = [ps.libiconv];
-                  }) hprev.with-utf8
+              with-utf8 =
+                if (with ps.stdenv; hostPlatform.isDarwin && hostPlatform.isx86)
+                then ps.haskell.lib.compose.overrideCabal (_ : { extraLibraries = [ps.libiconv]; }) hprev.with-utf8
                 else hprev.with-utf8;
             };
           };
@@ -113,7 +111,7 @@
             [
               (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
               (haskell.lib.compose.addTestToolDepends testDeps)
-              (haskell.lib.compose.appendBuildFlags ["-v3"])
+              #(haskell.lib.compose.appendBuildFlags ["-v3"])
               (haskell.lib.compose.appendConfigureFlags (
                 [ "-fci"
                   "-O2"
