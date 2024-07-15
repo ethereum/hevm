@@ -23,6 +23,7 @@ jobs:
           path: ./hevm-x86_64-macos
   macosARMRelease:
     name: Build MacOS Binary
+    needs: macosx86Release
     # macos-14 is arm, see https://github.com/orgs/community/discussions/102846
     #   "Workflows executed on this image will run exclusively on the 3 vCPU M1 runner"
     runs-on: macos-14
@@ -40,7 +41,7 @@ jobs:
           path: ./hevm-arm64-macos
   linuxRelease:
     name: Create Release
-    needs: macosRelease
+    needs: macosARMRelease
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
