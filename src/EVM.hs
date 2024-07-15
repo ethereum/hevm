@@ -1552,7 +1552,7 @@ cheat (inOffset, inSize) (outOffset, outSize) = do
     Just (unsafeInto -> abi') ->
       case Map.lookup abi' cheatActions of
         Nothing ->
-          vmError (BadCheatCode abi')
+          vmError (BadCheatCode "cannot understand cheatcode, maybe cheatcode not supported?" abi')
         Just action -> do
             action outOffset outSize input
             popTrace
@@ -1582,8 +1582,8 @@ cheatActions = Map.fromList
                     copyBytesToMemory encoded outSize (Lit 0) outOffset
                     assign #result Nothing
                 in query (PleaseDoFFI cmd cont)
-              _ -> vmError (BadCheatCode sig)
-            _ -> vmError (BadCheatCode sig)
+              _ -> vmError (BadCheatCode "ffi(string[]) decoding of string failed" sig)
+            _ -> vmError (BadCheatCode "ffi(string[]) parameter decoding failed" sig)
         else
           let msg = "ffi disabled: run again with --ffi if you want to allow tests to call external scripts"
           in partial $ UnexpectedSymbolicArg vm.state.pc msg []
@@ -1591,7 +1591,7 @@ cheatActions = Map.fromList
   , action "warp(uint256)" $
       \sig _ _ input -> case decodeStaticArgs 0 1 input of
         [x]  -> assign (#block % #timestamp) x
-        _ -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode "warp(uint256) parameter decoding failed" sig)
 
   , action "deal(address,uint256)" $
       \sig _ _ input -> case decodeStaticArgs 0 2 input of
@@ -1599,25 +1599,25 @@ cheatActions = Map.fromList
           forceAddr a "vm.deal: cannot decode target into an address" $ \usr ->
             fetchAccount usr $ \_ -> do
               assign (#env % #contracts % ix usr % #balance) amt
-        _ -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode "deal(address,uint256) parameter decoding failed" sig)
 
   , action "assume(bool)" $
       \sig _ _ input -> case decodeStaticArgs 0 1 input of
         [c] -> modifying #constraints ((:) (PEq c (Lit 1)))
-        _ -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode "assume(bool) parameter decoding failed." sig)
 
   , action "roll(uint256)" $
       \sig _ _ input -> case decodeStaticArgs 0 1 input of
         [x] -> forceConcrete x "cannot roll to a symbolic block number" (assign (#block % #number))
-        _ -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode "roll(uint256) parameter decoding failed" sig)
 
   , action "store(address,bytes32,bytes32)" $
       \sig _ _ input -> case decodeStaticArgs 0 3 input of
         [a, slot, new] -> case wordToAddr a of
           Just a'@(LitAddr _) -> fetchAccount a' $ \_ ->
             modifying (#env % #contracts % ix a' % #storage) (writeStorage slot new)
-          _ -> vmError (BadCheatCode sig)
-        _ -> vmError (BadCheatCode sig)
+          _ -> vmError (BadCheatCode "store(address,bytes32,bytes32) issue, address provided may not be an address?" sig)
+        _ -> vmError (BadCheatCode "store(address,bytes32,bytes32) parameter decoding failed" sig)
 
   , action "load(address,bytes32)" $
       \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
@@ -1627,8 +1627,8 @@ cheatActions = Map.fromList
               assign (#state % #returndata % word256At (Lit 0)) res
               let buf = writeWord (Lit 0) res (ConcreteBuf "")
               copyBytesToMemory buf (Lit 32) (Lit 0) outOffset
-          _ -> vmError (BadCheatCode sig)
-        _ -> vmError (BadCheatCode sig)
+          _ -> vmError (BadCheatCode "load(address,bytes32) issue, maybe the address provided is not correct?" sig)
+        _ -> vmError (BadCheatCode "load(address,bytes32) parameter decoding failed" sig)
 
   , action "sign(uint256,bytes32)" $
       \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
@@ -1643,36 +1643,36 @@ cheatActions = Map.fromList
                     ])
             assign (#state % #returndata) (ConcreteBuf encoded)
             copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
-        _ -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode "sign(uint256,bytes32) parameter decoding failed" sig)
 
   , action "addr(uint256)" $
       \sig outOffset _ input -> case decodeStaticArgs 0 1 input of
         [sk] -> forceConcrete sk "cannot derive address for a symbolic key" $ \sk' -> do
           let a = EVM.Sign.deriveAddr $ into sk'
           case a of
-            Nothing -> vmError (BadCheatCode sig)
+            Nothing -> vmError (BadCheatCode "addr(uint256) could not create address from key. Is this a correct key?" sig)
             Just address -> do
               let expAddr = litAddr address
               assign (#state % #returndata % word256At (Lit 0)) expAddr
               let buf = ConcreteBuf $ word256Bytes (into address)
               copyBytesToMemory buf (Lit 32) (Lit 0) outOffset
-        _ -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode "addr(uint256) parameter decoding failed" sig)
 
   , action "prank(address)" $
       \sig _ _ input -> case decodeStaticArgs 0 1 input of
         [addr]  -> case wordToAddr addr of
           Just a -> assign (#config % #overrideCaller) (Just a)
-          Nothing -> vmError (BadCheatCode sig)
-        _ -> vmError (BadCheatCode sig)
-          
+          Nothing -> vmError (BadCheatCode "prank(address)" sig)
+        _ -> vmError (BadCheatCode "prank(address) parameter decoding failed" sig)
+
   , action "startPrank(address)" $
       \sig _ _ input -> case decodeStaticArgs 0 1 input of
         [addr]  -> case wordToAddr addr of
           Just a -> do
             assign (#config % #overrideCaller) (Just a)
             assign (#config % #resetCaller) False
-          Nothing -> vmError (BadCheatCode sig)
-        _ -> vmError (BadCheatCode sig)
+          Nothing -> vmError (BadCheatCode "startPrank(address), could not decode address provided" sig)
+        _ -> vmError (BadCheatCode "startPrank(address) parameter decoding failed" sig)
 
   , action "stopPrank()" $
       \_ _ _ _ -> do
@@ -1690,13 +1690,13 @@ cheatActions = Map.fromList
             let encoded = encodeAbiValue $ AbiUInt 256 (fromIntegral forkId)
             assign (#state % #returndata) (ConcreteBuf encoded)
             copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
-          _ -> vmError (BadCheatCode sig)
-        _ -> vmError (BadCheatCode sig)
+          _ -> vmError (BadCheatCode "createFork(string) string provided may be incorrect?" sig)
+        _ -> vmError (BadCheatCode "createFork(string) parameter decoding failed" sig)
 
   , action "selectFork(uint256)" $
       \sig _ _ input -> case decodeStaticArgs 0 1 input of
         [forkId] ->
-          forceConcrete forkId "forkId must be concrete" $ \(fromIntegral -> forkId') -> do
+          forceConcrete forkId "forkId of 'selectFork' must be concrete" $ \(fromIntegral -> forkId') -> do
             saved <- Seq.lookup forkId' <$> gets (.forks)
             case saved of
               Just forkState -> do
@@ -1721,7 +1721,7 @@ cheatActions = Map.fromList
                       }
               Nothing ->
                 vmError (NonexistentFork forkId')
-        _ -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode "selectFork(uint256) parameter decoding failed" sig)
 
   , action "activeFork()" $
       \_ outOffset _ _ -> do
@@ -1735,8 +1735,8 @@ cheatActions = Map.fromList
         CAbi valsArr -> case valsArr of
           [AbiAddress addr, AbiString label] ->
             #labels %= Map.insert addr (decodeUtf8 label)
-          _ -> vmError (BadCheatCode sig)
-        _ -> vmError (BadCheatCode sig)
+          _ -> vmError (BadCheatCode "label(address,string) address decoding failed" sig)
+        _ -> vmError (BadCheatCode "label(address,string) parameter decoding failed" sig)
   ]
   where
     action s f = (abiKeccak s, f (abiKeccak s))
