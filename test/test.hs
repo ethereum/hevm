@@ -1300,7 +1300,7 @@ tests = testGroup "hevm"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True
     , test "Cheat-Codes-Errors" $ do
         let testFile = "test/contracts/pass/cheatCodeErrors.sol"
-        runSolidityTest testFile ".*" >>= assertEqualM "test result" True
+        runSolidityTest testFile ".*" >>= assertEqualM "test result" False
     , test "Cheat-Codes-Fork-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodesFork.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True

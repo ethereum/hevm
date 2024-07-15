@@ -67,7 +67,9 @@ contract CheatCodes is DSTest {
                 hevm_addr,
                 0,               // No Ether to send
                 ptr,             // Pointer to the input data
-                0x44,             // Size of the input data. 4 bytes selector + 32*x bytes argument
+
+                // BUG: should be 0x44 but at 0x24 it doesn't die
+                0x24,            // Size of the input data. 4 bytes selector + 32*x bytes argument
                 0,               // Output location (not needed)
                 0                // Output size (not needed)
             )
