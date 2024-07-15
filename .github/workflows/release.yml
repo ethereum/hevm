@@ -5,9 +5,10 @@ on:
       - 'release/[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
-  macosRelease:
+  macosx86Release:
     name: Build MacOS Binary
-    runs-on: macos-latest
+    # macos-13 is x86
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
@@ -20,6 +21,23 @@ jobs:
         with:
           name: hevm-x86_64-macos
           path: ./hevm-x86_64-macos
+  macosARMRelease:
+    name: Build MacOS Binary
+    # macos-14 is arm, see https://github.com/orgs/community/discussions/102846
+    #   "Workflows executed on this image will run exclusively on the 3 vCPU M1 runner"
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: build hevm
+        run: |
+          nix build .#redistributable --out-link hevmMacos
+          cp ./hevmMacos/bin/hevm ./hevm-arm64-macos
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hevm-arm64-macos
+          path: ./hevm-arm64-macos
   linuxRelease:
     name: Create Release
     needs: macosRelease
