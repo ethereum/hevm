@@ -4491,7 +4491,7 @@ checkBadCheatCode sig _ = \case
   where
     findBadCheatCode :: Trace -> Maybe FunctionSelector
     findBadCheatCode Trace { tracedata = td } = case td of
-      ErrorTrace (BadCheatCode s) -> Just s
+      ErrorTrace (BadCheatCode _ s) -> Just s
       _ -> Nothing
 
 allBranchesFail :: App m => ByteString -> Maybe Sig -> m (Either [SMTCex] (Expr End))
