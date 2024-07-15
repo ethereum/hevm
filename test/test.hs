@@ -1299,6 +1299,7 @@ tests = testGroup "hevm"
         let testFile = "test/contracts/pass/cheatCodes.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True
     , test "Cheat-Codes-Errors" $ do
+        -- TODO: make this fail with BadCheatCode and check the resulting error
         let testFile = "test/contracts/pass/cheatCodeErrors.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" False
     , test "Cheat-Codes-Fork-Pass" $ do

@@ -39,6 +39,7 @@ contract Empty {}
 contract CheatCodes is DSTest {
     Hevm hevm = Hevm(HEVM_ADDRESS);
 
+    // TODO: make this fail with BadCheatCode and check the error text in test.hs
     function prove_buggy(address e, uint val) public {
         address e = address(new Empty());
         assert(e.balance == 0);
