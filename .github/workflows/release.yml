@@ -5,77 +5,48 @@ on:
       - 'release/[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
-  macosx86Release:
-    name: Build MacOS Binary
-    # macos-13 is x86
-    runs-on: macos-13
+  releaseBuilds:
+    strategy:
+      matrix:
+        include:
+          # macos-13 is x86
+          - os: "macos-13"
+            suffix: "x86_64-macos"
+          # macos-14 is arm, see https://github.com/orgs/community/discussions/102846
+          # "Workflows executed on this image will run exclusively on the 3 vCPU M1 runner"
+          - os: "macos-14"
+            suffix: "arm64-macos"
+          - os: "ubuntu-latest"
+            suffix: "x86_64-linux"
+    name: Build binary on ${{ matrix.os }}
+    runs-on: ${{ matrix.os  }}
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: build hevm
         run: |
-          nix build .#redistributable --out-link hevmMacos
-          cp ./hevmMacos/bin/hevm ./hevm-x86_64-macos
+          nix build .#redistributable --out-link hevm
+          cp ./hevm/bin/hevm ./hevm-${{ matrix.suffix }}
       - uses: actions/upload-artifact@v4
         with:
-          name: hevm-x86_64-macos
-          path: ./hevm-x86_64-macos
-  macosARMRelease:
-    name: Build MacOS Binary
-    # macos-14 is arm, see https://github.com/orgs/community/discussions/102846
-    #   "Workflows executed on this image will run exclusively on the 3 vCPU M1 runner"
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-      - name: build hevm
-        run: |
-          nix build .#redistributable --out-link hevmMacos
-          cp ./hevmMacos/bin/hevm ./hevm-arm64-macos
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hevm-arm64-macos
-          path: ./hevm-arm64-macos
-  linuxRelease:
-    name: Build Linux Binary
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-      - name: build hevm
-        run: |
-          nix build .#redistributable --out-link hevmLinux
-          cp ./hevmLinux/bin/hevm ./hevm-x86_64-linux
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hevm-x86_64-linux
-          path: ./hevm-x86_64-linux
+          name: hevm-${{ matrix.suffix }}
+          path: ./hevm-${{ matrix.suffix }}
   Upload:
-    name: Upload
-    needs: [linuxRelease, macosx86Release, macosARMRelease]
+    needs: [releaseBuilds]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
-      - name: download macos binary
+      - name: download binaries
         uses: actions/download-artifact@v4
         with:
-          name: hevm-arm64-macos
-      - name: download macos binary
-        uses: actions/download-artifact@v4
-        with:
-          name: hevm-x86_64-macos
-      - name: download linux binary
-        uses: actions/download-artifact@v4
-        with:
-          name: hevm-x86_64-linux
+          merge-multiple: true
       - name: create github release & upload binaries
         uses: softprops/action-gh-release@v2.0.4
         with:
+          fail_on_unmatched_files: true
           files: |
             ./hevm-x86_64-linux
             ./hevm-x86_64-macos
