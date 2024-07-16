@@ -58,6 +58,9 @@ jobs:
     needs: [linuxRelease, macosx86Release, macosARMRelease]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: download macos binary
         uses: actions/download-artifact@v4
         with:
