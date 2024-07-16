@@ -60,7 +60,7 @@ contract CheatCodes is DSTest {
 
             // Store the argument for the function call (offset by 4 bytes for the selector)
             mstore(add(ptr, 0x04), e)
-            mstore(add(ptr, 0x24), 5) // BUG HERE
+            mstore(add(ptr, 0x24), 5)
 
             // Call the function (address of the contract is in "address" variable)
             let result := call(
