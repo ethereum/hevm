@@ -56,6 +56,7 @@ jobs:
   Upload:
     name: Upload
     needs: [linuxRelease, macosx86Release, macosARMRelease]
+    runs-on: ubuntu-latest
     steps:
       - name: download macos binary
         uses: actions/download-artifact@v4
