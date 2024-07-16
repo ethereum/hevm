@@ -49,16 +49,33 @@ jobs:
         run: |
           nix build .#redistributable --out-link hevmLinux
           cp ./hevmLinux/bin/hevm ./hevm-x86_64-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hevm-x86_64-linux
+          path: ./hevm-x86_64-linux
+  Upload:
+    name: Upload
+    needs: [linuxRelease, macosx86Release, macosARMRelease]
+    steps:
+      - name: download macos binary
+        uses: actions/download-artifact@v4
+        with:
+          name: hevm-arm64-macos
       - name: download macos binary
         uses: actions/download-artifact@v4
         with:
           name: hevm-x86_64-macos
+      - name: download linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: hevm-x86_64-linux
       - name: create github release & upload binaries
         uses: softprops/action-gh-release@v2.0.4
         with:
           files: |
             ./hevm-x86_64-linux
             ./hevm-x86_64-macos
+            ./hevm-arm64-macos
       - name: prepare hackage artifacts
         run: |
           nix-shell --command "cabal sdist --builddir=${{ runner.temp }}/packages"
