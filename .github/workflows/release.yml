@@ -39,7 +39,7 @@ jobs:
           name: hevm-arm64-macos
           path: ./hevm-arm64-macos
   linuxRelease:
-    name: Create Release
+    name: Build Linux Binary
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
