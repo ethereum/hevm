@@ -72,13 +72,13 @@ import EVM.Effects
 
 testEnv :: Env
 testEnv = Env { config = defaultConfig {
-  dumpQueries = False
-  , dumpExprs = False
-  , dumpEndStates = False
-  , debug = False
-  , abstRefineArith = False
-  , abstRefineMem   = False
-  , dumpTrace = False
+  dumpQueries = True
+  , dumpExprs = True
+  , dumpEndStates = True
+  , debug = True
+  , abstRefineArith = True
+  , abstRefineMem   = True
+  , dumpTrace = True
   , decomposeStorage = True
   } }
 
@@ -347,7 +347,7 @@ tests = testGroup "hevm"
       let simpExpr = mapExprM Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
-    , test "decompose-bug" $ do
+    , test "loop-array-bug" $ do
       Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
