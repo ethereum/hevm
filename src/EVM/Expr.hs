@@ -1224,7 +1224,6 @@ simplifyProp prop =
     go (PNeg (PNeg a)) = a
 
     -- solc specific stuff
-    go (PEq (IsZero (Eq a b)) (Lit 0)) = PEq a b
     go (PEq (IsZero (IsZero (Eq a b))) (Lit 0)) = PNeg (PEq a b)
 
     -- iszero(a) -> (a == 0)
@@ -1259,6 +1258,13 @@ simplifyProp prop =
     go (PImpl (PBool True) b) = b
     go (PImpl (PBool False) _) = PBool True
 
+    -- Double negation
+    go (PEq (IsZero (Eq a b)) (Lit 0)) = PEq a b
+    go (PEq (IsZero (LT a b)) (Lit 0)) = PLT a b
+    go (PEq (IsZero (GT a b)) (Lit 0)) = PGT a b
+    go (PEq (IsZero (LEq a b)) (Lit 0)) = PLEq a b
+    go (PEq (IsZero (GEq a b)) (Lit 0)) = PGEq a b
+
     -- Eq
     go (PEq (Eq a b) (Lit 0)) = PNeg (PEq a b)
     go (PEq (Eq a b) (Lit 1)) = PEq a b
@@ -1292,8 +1298,13 @@ simplifyProp prop =
 flattenProps :: [Prop] -> [Prop]
 flattenProps [] = []
 flattenProps (a:ax) = case a of
-  PAnd x1 x2 -> x1:x2:flattenProps ax
+  PAnd x1 x2 -> (subFlatten x1) ++ (subFlatten x2) ++ flattenProps ax
   x -> x:flattenProps ax
+  where
+    subFlatten :: Prop -> [Prop]
+    subFlatten b = case b of
+      PAnd y1 y2 -> flattenProps [y1,y2]
+      _ -> [b]
 
 -- removes redundant (constant True/False) props
 remRedundantProps :: [Prop] -> [Prop]
