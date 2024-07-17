@@ -268,6 +268,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
         r <- liftIO q
         interpret fetcher maxIter askSmtIters heuristic vm (k r)
       Stepper.Ask (PleaseChoosePath cond continue) -> do
+        liftIO $ putStrLn $ "Asking SMT solver for condition: " <> show cond
         evalLeft <- toIO $ do
           (ra, vma) <- liftIO $ stToIO $ runStateT (continue True) vm { result = Nothing }
           interpret fetcher maxIter askSmtIters heuristic vma (k ra)
@@ -556,8 +557,8 @@ verify solvers opts preState maybepost = do
   conf <- readConfig
   let call = mconcat ["prefix 0x", getCallPrefix preState.state.calldata]
   when conf.debug $ liftIO $ putStrLn $ "Exploring call " <> call
-
   exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
+  when conf.debug $ liftIO $ putStrLn $ "Exploring finished of call" <> call
   when conf.dumpExprs $ liftIO $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
   liftIO $ do
     when conf.debug $ putStrLn "Simplifying expression"

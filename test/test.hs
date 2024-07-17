@@ -357,7 +357,7 @@ tests = testGroup "hevm"
           }
         }
         |]
-      let fun = (Just (Sig "prove_nested_append()" [AbiUIntType 256, AbiUIntType 256]))
+      let fun = (Just (Sig "prove_nested_append()" []))
       (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c fun [] defaultVeriOpts
       putStrLnM "All good."
     -- TODO check what's going on here. Likely the "arbitrary write through array" is the reason why we fail
