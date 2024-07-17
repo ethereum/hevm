@@ -347,6 +347,19 @@ tests = testGroup "hevm"
       let simpExpr = mapExprM Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
+    , test "decompose-bug" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          uint[][] arr2;
+          function prove_nested_append() public {
+            arr2.push([1,2]);
+          }
+        }
+        |]
+      let fun = (Just (Sig "prove_nested_append()" [AbiUIntType 256, AbiUIntType 256]))
+      (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c fun [] defaultVeriOpts
+      putStrLnM "All good."
     -- TODO check what's going on here. Likely the "arbitrary write through array" is the reason why we fail
     , expectFail $ test "decompose-6-fail" $ do
       Just c <- solcRuntime "MyContract"
