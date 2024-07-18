@@ -1298,6 +1298,10 @@ tests = testGroup "hevm"
     , test "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True
+    , test "Cheat-Codes-Errors" $ do
+        -- TODO: make this fail with BadCheatCode and check the resulting error
+        let testFile = "test/contracts/pass/cheatCodeErrors.sol"
+        runSolidityTest testFile ".*" >>= assertEqualM "test result" False
     , test "Cheat-Codes-Fork-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodesFork.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True
@@ -4283,7 +4287,7 @@ applyPattern p = localOption (TestPattern (parseExpr p))
 
 checkBadCheatCode :: Text -> Postcondition s
 checkBadCheatCode sig _ = \case
-  (Failure _ _ (BadCheatCode s)) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
+  (Failure _ _ (BadCheatCode _ s)) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
   _ -> PBool True
 
 allBranchesFail :: App m => ByteString -> Maybe Sig -> m (Either [SMTCex] (Expr End))
