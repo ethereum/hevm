@@ -125,7 +125,8 @@
                   "--extra-lib-dirs=${stripDylib (ncurses.override { enableStatic = true; })}/lib"
                   "--ghc-options=-pgml=${cc-workaround-ghc-23138}/bin/cc-workaround-ghc-23138"
                 ]))
-              haskell.lib.dontHaddock
+              haskell.lib.compose.dontHaddock
+              haskell.lib.compose.doCheck
           ]);
 
         # wrapped binary for use on systems with nix available. ensures all
