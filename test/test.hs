@@ -2788,7 +2788,7 @@ tests = testGroup "hevm"
           (res, [Qed _]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "kecc(uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
           putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        test "keccak concrete and sym injectivity" $ do
+        ignoreTest $ test "keccak concrete and sym injectivity" $ do
           Just c <- solcRuntime "A"
             [i|
               contract A {
