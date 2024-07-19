@@ -353,12 +353,14 @@ tests = testGroup "hevm"
         contract MyContract {
           uint[][] arr2;
           function prove_nested_append() public {
+            require(arr2.length == 0);
+            require(arr2[0].length == 0);
             arr2.push([1,2]);
           }
         }
         |]
       let fun = (Just (Sig "prove_nested_append()" []))
-      (_, [Qed _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s defaultPanicCodes c fun [] defaultVeriOpts
+      (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c fun [] defaultVeriOpts
       putStrLnM "All good."
     -- TODO check what's going on here. Likely the "arbitrary write through array" is the reason why we fail
     , expectFail $ test "decompose-6-fail" $ do
