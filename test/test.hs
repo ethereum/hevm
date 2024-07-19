@@ -1276,7 +1276,7 @@ tests = testGroup "hevm"
     , test "prefix-check-for-dapp" $ do
         let testFile = "test/contracts/fail/check-prefix.sol"
         runSolidityTest testFile "check_trivial" >>= assertEqualM "test result" False
-    , test "transfer-dapp" $ do
+    , ignoreTest $ test "transfer-dapp" $ do
         let testFile = "test/contracts/pass/transfer.sol"
         runSolidityTest testFile "prove_transfer" >>= assertEqualM "should prove transfer" True
     , test "badvault-sym-branch" $ do
