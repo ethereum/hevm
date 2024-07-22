@@ -45,6 +45,7 @@ import EVM.Types hiding (Success)
 
 import Optics.Core
 import Optics.Operators.Unsafe
+import EVM.Effects;
 
 import Control.Applicative
 import Control.Monad
@@ -283,24 +284,24 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
     go c (xs, state, p)                        = (xs, internalError ("srcmap: y u " ++ show c ++ " in state" ++ show state ++ "?!?"), p)
 
 -- | Reads all solc output json files found under the provided filepath and returns them merged into a BuildOutput
-readBuildOutput :: FilePath -> ProjectType -> IO (Either String BuildOutput)
+readBuildOutput :: App m => FilePath -> ProjectType -> m (Either String BuildOutput)
 readBuildOutput root DappTools = do
   let outDir = root </> "out"
-  jsons <- findJsonFiles outDir
+  jsons <- liftIO $ findJsonFiles outDir
   case jsons of
     [x] -> readSolc DappTools root (outDir </> x)
     [] -> pure . Left $ "no json files found in: " <> outDir
     _ -> pure . Left $ "multiple json files found in: " <> outDir
 readBuildOutput root CombinedJSON = do
   let outDir = root </> "out"
-  jsons <- findJsonFiles outDir
+  jsons <- liftIO $ findJsonFiles outDir
   case jsons of
     [x] -> readSolc CombinedJSON root (outDir </> x)
     [] -> pure . Left $ "no json files found in: " <> outDir
     _ -> pure . Left $ "multiple json files found in: " <> outDir
 readBuildOutput root _ = do
   let outDir = root </> "out"
-  jsons <- findJsonFiles outDir
+  jsons <- liftIO $ findJsonFiles outDir
   case (filterMetadata jsons) of
     [] -> pure . Left $ "no json files found in: " <> outDir
     js -> do
@@ -308,9 +309,14 @@ readBuildOutput root _ = do
       pure . (fmap mconcat) $ outputs
 
 -- | Finds all json files under the provided filepath, searches recursively
+-- Filtering out:  * "kompiled" which gets added to `out` by `kontrol`
+--                 * "build-info" which gets added by forge
 findJsonFiles :: FilePath -> IO [FilePath]
-findJsonFiles root =  filter (not . isInfixOf "kompiled") -- HACK: this gets added to `out` by `kontrol`
+findJsonFiles root =  filter (doesNotContain ["build-info", "kompiled"])
                   <$> getDirectoryFiles root ["**/*.json"]
+  where
+    doesNotContain :: [String] -> String -> Bool
+    doesNotContain forbiddenStrs str = all (\forbidden -> not (isInfixOf forbidden str)) forbiddenStrs
 
 -- | Filters out metadata json files
 filterMetadata :: [FilePath] -> [FilePath]
@@ -342,17 +348,19 @@ lineSubrange xs (s1, n1) i =
     then Nothing
     else Just (s1 - s2, min (s2 + n2 - s1) n1)
 
-readSolc :: ProjectType -> FilePath -> FilePath -> IO (Either String BuildOutput)
+readSolc :: App m => ProjectType -> FilePath -> FilePath -> m (Either String BuildOutput)
 readSolc pt root fp = do
   -- NOTE: we cannot and must not use Data.Text.IO.readFile because that takes the locale
   --       and may fail with very strange errors when the JSON it's reading
   --       contains any UTF-8 character -- which it will with foundry
-  fileContents <- fmap Data.Text.Encoding.decodeUtf8 $ Data.ByteString.readFile fp
+  fileContents <- liftIO $ fmap Data.Text.Encoding.decodeUtf8 $ Data.ByteString.readFile fp
   let contractName = T.pack $ takeBaseName fp
   case readJSON pt contractName fileContents of
-      Nothing -> pure . Left $ "unable to parse " <> show pt <> " project JSON: " <> fp
+      Nothing -> pure . Left $ "unable to parse " <> show pt <> " project JSON: " <> fp <> " Contract: " <> show contractName
       Just (contracts, asts, sources) -> do
-        sourceCache <- makeSourceCache root sources asts
+        conf <- readConfig
+        when (conf.debug) $ liftIO $ putStrLn $ "Parsed constract: " <> show contractName <> " file: " <> fp
+        sourceCache <- liftIO $ makeSourceCache root sources asts
         pure (Right (BuildOutput contracts sourceCache))
 
 yul :: Text -> Text -> IO (Maybe ByteString)

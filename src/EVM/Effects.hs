@@ -16,18 +16,11 @@ only.
 
 module EVM.Effects where
 
-import Control.Monad (when)
-import Control.Monad.IO.Unlift (MonadIO(liftIO), MonadUnliftIO)
-import Control.Monad.Reader (ReaderT, runReaderT, ask)
-import Control.Monad.ST (RealWorld)
+import Control.Monad.Reader
+import Control.Monad.IO.Unlift
 import Data.Text (Text)
 import Data.Text.IO qualified as T
 import System.IO (stderr)
-
-import EVM (traceForest)
-import EVM.Dapp (DappInfo)
-import EVM.Format (showTraceTree)
-import EVM.Types (VM(..))
 
 
 -- Abstract Effects --------------------------------------------------------------------------------
@@ -73,17 +66,6 @@ defaultConfig = Config
 class Monad m => TTY m where
   writeOutput :: Text -> m ()
   writeErr :: Text -> m ()
-
-writeTraceDapp :: App m => DappInfo -> VM t RealWorld -> m ()
-writeTraceDapp dapp vm = do
-  conf <- readConfig
-  liftIO $ when conf.dumpTrace $ T.writeFile "VM.trace" (showTraceTree dapp vm)
-
-writeTrace :: App m => VM t RealWorld -> m ()
-writeTrace vm = do
-  conf <- readConfig
-  liftIO $ when conf.dumpTrace $ writeFile "VM.trace" (show $ traceForest vm)
-
 
 -- IO Interpretation -------------------------------------------------------------------------------
 
