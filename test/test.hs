@@ -347,15 +347,35 @@ tests = testGroup "hevm"
       let simpExpr = mapExprM Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
-    , test "loop-array-bug" $ do
+    , test "loop-array-bug1" $ do
       Just c <- solcRuntime "MyContract"
         [i|
+
         contract MyContract {
           uint[][] arr2;
           function prove_nested_append() public {
             require(arr2.length == 0);
+            arr2.push();
+            assert(arr2.length == 1);
             require(arr2[0].length == 0);
-            arr2.push([1,2]);
+            arr2[arr2.length-1] = [1,2];
+          }
+        }
+        |]
+      let fun = (Just (Sig "prove_nested_append()" []))
+      (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c fun [] defaultVeriOpts
+      putStrLnM "All good."
+    , test "loop-array-bug2" $ do
+      Just c <- solcRuntime "MyContract"
+        [i|
+        contract MyContract {
+          function prove_nested_append() public {
+            uint val;
+            uint i;
+            for (i = 0; i < ([1,2].length); i++) {
+              val = i;
+            }
+            assert(i == 2);
           }
         }
         |]
