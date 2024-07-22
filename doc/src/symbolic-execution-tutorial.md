@@ -41,3 +41,5 @@ WHATEVER
 
 TODO: with non-abstract starting state, for example
 
+`--initial-storage Abstract` vs `Empty`
+
