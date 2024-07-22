@@ -358,7 +358,7 @@ tests = testGroup "hevm"
             arr2.push();
             assert(arr2.length == 1);
             require(arr2[0].length == 0);
-            arr2[arr2.length-1] = [1,2];
+            arr2[arr2.length-1] = [99];
           }
         }
         |]
