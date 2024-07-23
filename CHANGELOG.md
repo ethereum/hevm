@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Printing panic uint256 as hex, not as int
 - Decomposition does not take place when entire states are compared, as that would necessitate
   a different approach.
+- `initial-storage` option of `hevm symbolic` is respected
 
 ## [0.53.0] - 2024-02-23
 

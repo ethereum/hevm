@@ -517,6 +517,7 @@ symvmFromCommand cmd calldata = do
     caller = SymAddr "caller"
     ts = maybe Timestamp Lit cmd.timestamp
     callvalue = maybe TxValue Lit cmd.value
+    storageBase = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
 
   contract <- case (cmd.rpc, cmd.address, cmd.code) of
     (Just url, Just addr', _) ->
@@ -535,12 +536,14 @@ symvmFromCommand cmd calldata = do
                         & set #nonce       (contract'.nonce)
                         & set #external    (contract'.external)
 
-    (_, _, Just c)  ->
-      pure ((`abstractContract` address) . mkCode $ decipher c)
+    (_, _, Just c)  -> case storageBase of
+      EmptyBase -> pure (initialContract . mkCode $ decipher c)
+      AbstractBase -> pure ((`abstractContract` address) . mkCode $ decipher c)
+
     (_, _, Nothing) ->
       error "Error: must provide at least (rpc + address) or code"
 
-  vm <- stToIO $ vm0 baseFee miner ts blockNum prevRan calldata callvalue caller contract
+  vm <- stToIO $ vm0 baseFee miner ts blockNum prevRan calldata callvalue caller contract storageBase
   pure $ EVM.Transaction.initTx vm
 
   where
@@ -551,7 +554,7 @@ symvmFromCommand cmd calldata = do
                    then InitCode bs mempty
                    else RuntimeCode (ConcreteRuntimeCode bs)
     address = eaddr (.address) (SymAddr "entrypoint")
-    vm0 baseFee miner ts blockNum prevRan cd callvalue caller c = makeVm $ VMOpts
+    vm0 baseFee miner ts blockNum prevRan cd callvalue caller c baseState = makeVm $ VMOpts
       { contract       = c
       , otherContracts = []
       , calldata       = cd
@@ -573,7 +576,7 @@ symvmFromCommand cmd calldata = do
       , schedule       = feeSchedule
       , chainId        = word (.chainid) 1
       , create         = (.create) cmd
-      , baseState      = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
+      , baseState      = baseState
       , txAccessList   = mempty
       , allowFFI       = False
       }
