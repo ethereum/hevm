@@ -8,7 +8,7 @@ result in an assertion violation. For more details on what exactly is considered
 ## Simple Example
 
 Let's see this toy contract, in file
-[contract-symb-1.sol](contract-symb-1.sol):
+[contract-symb-1.sol](code_examples/contract-symb-1.sol):
 
 ```solidity
 //SPDX-License-Identifier: MIT
@@ -25,14 +25,13 @@ contract MyContract {
 Let's first compile it:
 
 ```shell
-$ solc --bin-runtime doc/src/code_examples/contract-symb-1.sol
+$ solc --bin-runtime contract-symb-1.sol
 ======= contract-symb-1.sol:MyContract =======
 Binary:
 6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f600190506002811460455760446048565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212202bc2d2c44310edeba83b816dca9ef8abcc9cc1c775bae801b393bf4d5ff2d32364736f6c63430008180033
 ```
 
 Now let's symbolically execute it:
-<!-- $ hevm symbolic symbolic --show-tree --sig "simple_symb()" --code "6080604052348015600e575f80fd5b5060b28061001b5f395ff3fe6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f60018114603e575f80fd5b60028114604c57604b604f565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212205b3c554bf52c7f17e2e57ad844a1a323de3ef0c4472642b71a3e3d5eb5a5dd7364736f6c63430008180033 -->
 ```shell
 $ hevm symbolic --sig "simple_symb()" --code "6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f600190506002811460455760446048565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212202bc2d2c44310edeba83b816dca9ef8abcc9cc1c775bae801b393bf4d5ff2d32364736f6c63430008180033"
 
@@ -50,7 +49,7 @@ Storage:
 
 When there are more than one functions in the code, the system will try to
 symbolically execute all. Let's take the file
-[contract-symb-2.sol](contract-symb-2.sol):
+[contract-symb-2.sol](code_examples/contract-symb-2.sol):
 ```solidity
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
@@ -69,7 +68,7 @@ And compile it with solc:
 
 ```shell
 
-$ solc --bin-runtime doc/src/code_examples/contract-symb-2.sol
+$ solc --bin-runtime contract-symb-2.sol
 
 ======= contract-symb-2.sol:MyContract =======
 Binary of the runtime part:
@@ -140,7 +139,7 @@ Storage:
 
 The initial store state of `hevm` is completely abstract. This means that the
 functions are explored for all possible values of the state. Let's take the
-following contract [contract-symb-3.sol](contract-symb-3.sol):
+following contract [contract-symb-3.sol](code_examples/contract-symb-3.sol):
 
 ```solidity
 //SPDX-License-Identifier: MIT
@@ -156,7 +155,7 @@ contract MyContract {
 Let's compile with solc:
 
 ```shell
-solc --bin-runtime doc/src/code_examples/contract-symb-3.sol
+solc --bin-runtime contract-symb-3.sol
 
 ======= contract-symb-3.sol:MyContract =======
 Binary of the runtime part:
