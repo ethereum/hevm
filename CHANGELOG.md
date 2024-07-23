@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated Bitwuzla to newer version
 - New cheatcodes `startPrank()` & `stopPrank()`
 - ARM64 and x86_64 Mac along with Linux x86_64 static binaries for releases
+- Tutorial for symbolic execution
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
