@@ -7,7 +7,7 @@ checking, one can check whether the two behave the same.
 
 ## Finding Discrepancies
 
-Let's see this toy contract, in file [contract1.sol](contract1.sol):
+Let's see this toy contract, in file [contract1.sol](code_examples/contract1.sol):
 
 ```solidity
 //SPDX-License-Identifier: MIT
@@ -21,7 +21,7 @@ contract MyContract {
 }
 ```
 
-And this, slightly modified one, in file [contract2.sol](contract2.sol):
+And this, slightly modified one, in file [contract2.sol](code_examples/contract2.sol):
 
 ```solidity
 //SPDX-License-Identifier: MIT
@@ -69,7 +69,7 @@ div 2 = 17` twice, which is 34, the other will add 35.
 ## Fixing and Proving Correctness
 
 Let's fix the above issue by incrementing the balance by 1 in case it's an odd
-value. Let's call this [contract3.sol](contract3.sol):
+value. Let's call this [contract3.sol](code_examples/contract3.sol):
 
 ```solidity
 //SPDX-License-Identifier: MIT

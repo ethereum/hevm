@@ -6,7 +6,7 @@
 
 - [ds-test tutorial](./ds-test-tutorial.md)
 - [Equivalence checking tutorial](./equivalence-checking-tutorial.md)
-<!-- [Symbolic unit testing]() -->
+- [Symbolic execution tutorial](./symbolic-execution-tutorial.md)
 <!-- [Discovering reachable assertion violations]() -->
 
 # Reference
