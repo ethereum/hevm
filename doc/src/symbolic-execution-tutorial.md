@@ -1,13 +1,7 @@
 # Symbolic Execution Tutorial
 
 Symbolic execution mode of hevm checks whether any call to the contract could
-result in an assertion violation. For more details on what exactly is considered an assertion violation, see
-[symbolic].
-
-
-## Simple Example
-
-Let's see this toy contract, in file
+result in an assertion violation. Let's see a simple contract, in file
 [contract-symb-1.sol](code_examples/contract-symb-1.sol):
 
 ```solidity
@@ -22,7 +16,7 @@ contract MyContract {
 }
 ```
 
-Let's first compile it:
+Let's first compile it with `solc`:
 
 ```shell
 $ solc --bin-runtime contract-symb-1.sol
@@ -117,7 +111,8 @@ $cast sig "simple_symb2()"
 0x86ae3309
 ```
 
-In case you only want to execute a particular function, you tell `hevm` that you only want a particular signature executed:
+In case you only want to execute only a particular function, you tell `hevm`
+that you only want a particular signature executed:
 
 ```shell
 $ hevm symbolic --sig "simple_symb1()" --code "6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220d70d3cfe85d6f0c8a34ce660d76d7f933db353e59397674009e3a3d982275d7e64736f6c63430008180033"
