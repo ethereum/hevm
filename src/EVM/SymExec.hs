@@ -268,7 +268,8 @@ interpret fetcher maxIter askSmtIters heuristic vm =
         r <- liftIO q
         interpret fetcher maxIter askSmtIters heuristic vm (k r)
       Stepper.Ask (PleaseChoosePath cond continue) -> do
-        liftIO $ putStrLn $ "Asking SMT solver for condition: " <> show cond
+        config <- readConfig
+        when (config.debug) $ liftIO $ putStrLn $ "Asking SMT solver for condition: " <> show cond
         evalLeft <- toIO $ do
           (ra, vma) <- liftIO $ stToIO $ runStateT (continue True) vm { result = Nothing }
           interpret fetcher maxIter askSmtIters heuristic vma (k ra)
