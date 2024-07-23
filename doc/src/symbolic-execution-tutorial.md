@@ -186,3 +186,6 @@ cabal run exe:hevm -- symbolic --initial-storage Empty --code "60806040523480156
 
 QED: No reachable property violations discovered
 ```
+
+Here, no counterexamples are discovered, because with empty default state, the
+value of `i` is zero, and therefore `assert(i == 0)` will all never trigger.
