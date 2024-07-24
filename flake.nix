@@ -44,7 +44,7 @@
         testDeps = with pkgs; [
           go-ethereum
           solc
-          z3
+          z3_4_12
           cvc5
           git
           bitwuzla
