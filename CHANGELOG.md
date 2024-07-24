@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `label` cheatcode.
 - Updated Bitwuzla to newer version
 - New cheatcodes `startPrank()` & `stopPrank()`
+- ARM64 and x86_64 Mac along with Linux x86_64 static binaries for releases
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Printing panic uint256 as hex, not as int
 - Decomposition does not take place when entire states are compared, as that would necessitate
   a different approach.
+- `initial-storage` option of `hevm symbolic` is respected
 
 ## [0.53.0] - 2024-02-23
 
