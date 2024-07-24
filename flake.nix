@@ -224,6 +224,7 @@
           LD_LIBRARY_PATH = libraryPath;
           shellHook = lib.optionalString stdenv.isDarwin ''
             export DYLD_LIBRARY_PATH="${libraryPath}";
+            cabal configure --ghc-options=-pgml=${cc-workaround-ghc-23138}/bin/cc-workaround-ghc-23138
           '';
         };
       }
