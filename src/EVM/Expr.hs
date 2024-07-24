@@ -1298,13 +1298,8 @@ simplifyProp prop =
 flattenProps :: [Prop] -> [Prop]
 flattenProps [] = []
 flattenProps (a:ax) = case a of
-  PAnd x1 x2 -> (subFlatten x1) ++ (subFlatten x2) ++ flattenProps ax
+  PAnd x1 x2 -> flattenProps [x1] ++ flattenProps [x2] ++ flattenProps ax
   x -> x:flattenProps ax
-  where
-    subFlatten :: Prop -> [Prop]
-    subFlatten b = case b of
-      PAnd y1 y2 -> flattenProps [y1,y2]
-      _ -> [b]
 
 -- removes redundant (constant True/False) props
 remRedundantProps :: [Prop] -> [Prop]
