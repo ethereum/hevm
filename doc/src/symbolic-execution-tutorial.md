@@ -32,11 +32,14 @@ $ hevm symbolic --sig "simple_symb()" --code "6080604052348015600e575f80fd5b5060
 Discovered the following counterexamples:
 
 Calldata:
-  0x881fc77c5f9a8ff385b17ae4c2b3fc970010862df98bfa2f885b071e8c29c7d920e385230182dad8c17bd5e89e8043a08ada90a6d5efdee4425f85cb863109783e158ba4fba908a0e6fae6c6b51002
+  0x881fc77c
 
 Storage:
   Addr SymAddr "miner": []
   Addr SymAddr "origin": []
+
+Transaction Context:
+  TxValue: 0x0
 ```
 
 ## Symbolically executing a specific function
