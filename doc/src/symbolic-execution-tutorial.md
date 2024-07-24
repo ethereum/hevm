@@ -103,7 +103,7 @@ Transaction Context:
   TxValue: 0x0
 ```
 
-Notice that it discovered two issues. The calldata in each case is the function
+Notice that hevm discovered two issues. The calldata in each case is the function
 signature that `cast` from `foundry` gives for the two functions:
 
 ```shell
@@ -114,8 +114,8 @@ $cast sig "simple_symb2()"
 0x86ae3309
 ```
 
-In case you only want to execute only a particular function, you tell `hevm`
-that you only want a particular signature executed:
+In case you only want to execute only a particular function, you can ask `hevm`
+to only execute a particular function signature via the `--sig` option:
 
 ```shell
 $ hevm symbolic --sig "simple_symb1()" --code "6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220d70d3cfe85d6f0c8a34ce660d76d7f933db353e59397674009e3a3d982275d7e64736f6c63430008180033"
