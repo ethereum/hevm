@@ -1,17 +1,17 @@
 <!DOCTYPE HTML>
-<html lang="en" class="sidebar-visible no-js light">
+<html lang="en" class="light" dir="ltr">
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
         <title>hevm</title>
-        <meta name="robots" content="noindex" />
+        <meta name="robots" content="noindex">
 
 
         <!-- Custom HTML head -->
         
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="theme-color" content="#ffffff" />
+        <meta name="theme-color" content="#ffffff">
 
         <link rel="icon" href="favicon.svg">
         <link rel="shortcut icon" href="favicon.png">
@@ -33,7 +33,7 @@
         <link rel="stylesheet" href="book.css">
 
     </head>
-    <body>
+    <body class="sidebar-visible no-js">
     <div id="body-container">
         <!-- Provide site root to javascript -->
         <script>
@@ -63,31 +63,38 @@
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
             var html = document.querySelector('html');
-            html.classList.remove('no-js')
             html.classList.remove('light')
             html.classList.add(theme);
-            html.classList.add('js');
+            var body = document.querySelector('body');
+            body.classList.remove('no-js')
+            body.classList.add('js');
         </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
 
         <!-- Hide / unhide sidebar before it is displayed -->
         <script>
-            var html = document.querySelector('html');
+            var body = document.querySelector('body');
             var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
             }
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            sidebar_toggle.checked = sidebar === 'visible';
+            body.classList.remove('sidebar-visible');
+            body.classList.add("sidebar-" + sidebar);
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
                 <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="ds-test-tutorial.html">ds-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
             </div>
-            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
         </nav>
 
         <!-- Track and set sidebar scroll position -->
@@ -118,9 +125,9 @@
                                 <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
-                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
                             <i class="fa fa-bars"></i>
-                        </button>
+                        </label>
                         <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
                             <i class="fa fa-paint-brush"></i>
                         </button>
@@ -194,7 +201,7 @@ the two bytecodes is the same, or gives inputs where they differ.</p>
 <p>Let's say we have a function that allows transfer of money, but no balance can
 be larger than or equal to 100. Let's see the contract and its associated check:</p>
 <pre><code class="language-solidity">pragma solidity ^0.8.19;
-import &quot;ds-test/test.sol&quot;;
+import "ds-test/test.sol";
 
 contract MyContract is DSTest {
   mapping (address =&gt; uint) balances;
@@ -226,7 +233,7 @@ $ chmod +x ./hevm-x86_64-linux
 $ forge init .
 $ cat &lt;&lt;EOF &gt; src/contract.sol
 pragma solidity ^0.8.19;
-import &quot;ds-test/test.sol&quot;;
+import "ds-test/test.sol";
 
 contract MyContract is DSTest {
   mapping (address =&gt; uint) balances;
@@ -288,7 +295,7 @@ test and so this omission is not detected.</p>
 <h2 id="capabilities"><a class="header" href="#capabilities">Capabilities</a></h2>
 <ul>
 <li>Symbolic execution of solidity tests written using
-<a href="https://github.com/dapphub/ds-test/"><code>ds-test</code></a> (a.k.a &quot;foundry tests&quot;).
+<a href="https://github.com/dapphub/ds-test/"><code>ds-test</code></a> (a.k.a "foundry tests").
 This allows one to find <em>all</em> potential failure modes of a function.</li>
 <li>Fetch remote state via RPC so your tests can be rooted in the real-world,
 calling out to other, existing contracts, with existing state and already
@@ -311,10 +318,10 @@ e.g. via</p>
 <pre><code>$ sudo apt-get install z3
 </code></pre>
 <p>or similar. If you installed CVC5 instead, you will need to pass the flag
-&quot;--solver cvc5&quot; to &quot;hevm test&quot; later.</p>
+"--solver cvc5" to "hevm test" later.</p>
 <p>Finally, download the static hevm binary from <a href="https://github.com/ethereum/hevm/releases/">the github
 repository</a> for your platform and
-put it in your path so it can be executed via typing &quot;hevm&quot;.</p>
+put it in your path so it can be executed via typing "hevm".</p>
 <h1 id="how-to-check-if-it-works"><a class="header" href="#how-to-check-if-it-works">How to Check if it Works</a></h1>
 <p>Once you have the above, you can go to the root of your forge-based project
 and build it:</p>
@@ -338,7 +345,7 @@ install solidity separately.</p>
 assets</a> due to bugs. While fuzz testing can
 help find potential issues with digital contracts, it is a tool that can only
 execute the program concretely, one execution at a time. In contrast, Symbolic
-Execution can execute all potential values in a decision path &quot;in one go&quot;,
+Execution can execute all potential values in a decision path "in one go",
 creating a symbolic expression out of a path, and checking whether it
 can trigger a fault. Hence, Symbolic Execution tends to be more efficient at
 finding bugs than fuzzing when the bugs are rare, or explicitly (i.e.
@@ -356,7 +363,7 @@ often e.g. that the system does not throw a segmentation fault. For EVM
 bytecode, postconditions need to be explicit. Let's see an example:</p>
 <pre><code class="language-solidity">// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
-import &quot;ds-test/test.sol&quot;;
+import "ds-test/test.sol";
 
 contract MyContract is DSTest {
   uint balance;
@@ -376,7 +383,7 @@ hidden (e.g. by a malicious developer), or that have a complicated code path
 towards them. Let's see a simple one:</p>
 <pre><code class="language-solidity">// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
-import &quot;ds-test/test.sol&quot;;
+import "ds-test/test.sol";
 
 contract MyContract is DSTest {
   uint balance;
@@ -475,9 +482,9 @@ positives or may even not discover them at all.</p>
 <p>Test cases must be prepended with <code>prove_</code> and the testing contract must
 inherit from <code>Test</code> from <a href="https://book.getfoundry.sh/forge/forge-std">Forge's standard test
 library</a>. First, import Test:
-<code>import {Test} from &quot;forge-std/Test.sol&quot;;</code> and then inherit from it via <code>... is Test</code>. This allows hevm to discover the test cases it needs to run. Like so:</p>
+<code>import {Test} from "forge-std/Test.sol";</code> and then inherit from it via <code>... is Test</code>. This allows hevm to discover the test cases it needs to run. Like so:</p>
 <pre><code class="language-solidity">pragma solidity ^0.8.19;
-import {Test} from &quot;forge-std/Test.sol&quot;;
+import {Test} from "forge-std/Test.sol";
 contract BadVaultTest is Test {
   function prove_mytest() {
   // environment setup, preconditions
@@ -505,7 +512,7 @@ are a standard method used by other tools, such as
 <a href="https://book.getfoundry.sh/">Foundry</a>, so you should be able to re-use your
 existing setup. An example setup could be:</p>
 <pre><code class="language-solidity">pragma solidity ^0.8.19;
-import {Test} from &quot;forge-std/Test.sol&quot;;
+import {Test} from "forge-std/Test.sol";
 contract BadVaultTest is Test {
     MyVault vault;
 
@@ -541,7 +548,7 @@ hevm-supported cheat codes <a href="ds-test-tutorial.html#supported-cheat-codes"
 <p>When hevm discovers a failure, it prints an example call how to trigger the failure. Let's see the following
 simple solidity code:</p>
 <pre><code>pragma solidity ^0.8.19;
-import {Test} from &quot;forge-std/Test.sol&quot;;
+import {Test} from "forge-std/Test.sol";
 contract MyContract is Test {
   mapping (address =&gt; uint) balances;
   function prove_single_fail(address recv, uint amt) public {
@@ -571,7 +578,7 @@ although this is not explicitly mentioned.</p>
 <p>Hevm assumes that a test case should not always revert. If you have such a test
 case, hevm will warn you and return a FAIL. For example this toy contract:</p>
 <pre><code class="language-solidity">pragma solidity ^0.8.19;
-import {Test} from &quot;forge-std/Test.sol&quot;;
+import {Test} from "forge-std/Test.sol";
 contract MyContract is Test {
   uint256 cntr;
   function prove_allrevert(uint256 val) public {
@@ -593,7 +600,7 @@ contract MyContract is Test {
 <p>This is sometimes undesirable. In these cases, prefix your contract with
 <code>proveFail_</code> instead of <code>prove_</code>:</p>
 <pre><code class="language-solidity">pragma solidity ^0.8.19;
-import {Test} from &quot;forge-std/Test.sol&quot;;
+import {Test} from "forge-std/Test.sol";
 contract MyContract is Test {
   uint256 cntr;
   function proveFail_allrevert_expected(uint256 val) public {
@@ -616,10 +623,10 @@ contract MyContract is Test {
 <p>Which is now the expected outcome.</p>
 <h2 id="supported-cheat-codes"><a class="header" href="#supported-cheat-codes">Supported Cheat Codes</a></h2>
 <p>Since hevm is an EVM implementation mainly dedicated to testing and
-exploration, it features a set of &quot;cheat codes&quot; which can manipulate the
+exploration, it features a set of "cheat codes" which can manipulate the
 environment in which the execution is run. These can be accessed by calling
 into a contract (typically called <code>Vm</code>) at address
-<code>0x7109709ECfa91a80626fF3989D68f67F5b1DD12D</code>, which happens to be keccak(&quot;hevm cheat code&quot;),
+<code>0x7109709ECfa91a80626fF3989D68f67F5b1DD12D</code>, which happens to be keccak("hevm cheat code"),
 implementing the following methods:</p>
 <div class="table-wrapper"><table><thead><tr><th>Function</th><th>Description</th></tr></thead><tbody>
 <tr><td><code>function prank(address sender) public</code></td><td>Sets <code>msg.sender</code> to the specified <code>sender</code> for the next call.</td></tr>
@@ -669,13 +676,13 @@ contract MyContract {
 }
 </code></pre>
 <p>Now ask hevm if they are equivalent. First, let's compile both contracts and get their bytecode:</p>
-<pre><code class="language-shell">bytecode1=$(solc --bin-runtime &quot;contract1.sol&quot; | tail -n1)
-bytecode2=$(solc --bin-runtime &quot;contract2.sol&quot; | tail -n1)
+<pre><code class="language-shell">bytecode1=$(solc --bin-runtime "contract1.sol" | tail -n1)
+bytecode2=$(solc --bin-runtime "contract2.sol" | tail -n1)
 </code></pre>
 <p>Let's ask hevm to compare the two:</p>
 <pre><code class="language-shell">$ hevm equivalence \
-      --code-a $(solc --bin-runtime &quot;contract1.sol&quot; | tail -n1) \
-      --code-b $(solc --bin-runtime &quot;contract2.sol&quot; | tail -n1)
+      --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
+      --code-b $(solc --bin-runtime "contract2.sol" | tail -n1)
 Found 90 total pairs of endstates
 Asking the SMT solver for 58 pairs
 Reuse of previous queries was Useful in 0 cases
@@ -684,7 +691,7 @@ Not equivalent. The following inputs result in differing behaviours:
 Calldata:
   0xafc2c94900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000023
 Storage:
-  Addr SymAddr &quot;entrypoint&quot;: [(0x0,0x10)]
+  Addr SymAddr "entrypoint": [(0x0,0x10)]
 Transaction Context:
   TxValue: 0x0
 </code></pre>
@@ -707,8 +714,8 @@ contract MyContract {
 </code></pre>
 <p>Let's check whether this new contract is indeed equivalent:</p>
 <pre><code class="language-shell">$ hevm equivalence \
-    --code-a $(solc --bin-runtime &quot;contract1.sol&quot; | tail -n1) \
-    --code-b $(solc --bin-runtime &quot;contract3.sol&quot; | tail -n1)
+    --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
+    --code-b $(solc --bin-runtime "contract3.sol" | tail -n1)
 Found 108 total pairs of endstates
 Asking the SMT solver for 74 pairs
 Reuse of previous queries was Useful in 0 cases
@@ -872,17 +879,17 @@ form suggested by the function signature. With this flag, specific arguments
 can be instantiated to concrete values via the <code>--arg</code> flag.</p>
 <p>This is best illustrated through a few examples:</p>
 <p>Calldata specialized to the bytestring <code>0xa9059cbb</code> followed by 64 symbolic bytes:</p>
-<pre><code class="language-shell">hevm symbolic --sig &quot;transfer(address,uint256)&quot; --code $(&lt;dstoken.bin-runtime)
+<pre><code class="language-shell">hevm symbolic --sig "transfer(address,uint256)" --code $(&lt;dstoken.bin-runtime)
 </code></pre>
 <p>Calldata specialized to the bytestring
 <code>0xa9059cbb0000000000000000000000007cfa93148b0b13d88c1dce8880bd4e175fb0dedf</code>
 followed by 32 symbolic bytes.</p>
-<pre><code class="language-shell">hevm symbolic --sig &quot;transfer(address,uint256)&quot; --arg 0x7cFA93148B0B13d88c1DcE8880bd4e175fb0DeDF --code $(&lt;dstoken.bin-runtime)
+<pre><code class="language-shell">hevm symbolic --sig "transfer(address,uint256)" --arg 0x7cFA93148B0B13d88c1DcE8880bd4e175fb0DeDF --code $(&lt;dstoken.bin-runtime)
 </code></pre>
 <p>Calldata specialized to the bytestring <code>0xa9059cbb</code> followed by 32 symbolic
 bytes, followed by the bytestring
 <code>0000000000000000000000000000000000000000000000000000000000000000</code>:</p>
-<pre><code class="language-shell">hevm symbolic --sig &quot;transfer(address,uint256)&quot; --arg &quot;&lt;symbolic&gt;&quot; --arg 0 --code $(&lt;dstoken.bin-runtime)
+<pre><code class="language-shell">hevm symbolic --sig "transfer(address,uint256)" --arg "&lt;symbolic&gt;" --arg 0 --code $(&lt;dstoken.bin-runtime)
 </code></pre>
 <p>If the <code>--get-models</code> flag is given, example input values will be returned for
 each possible execution path. This can be useful for automatic test case
@@ -959,8 +966,8 @@ Available options:
 to prove equivalence between their outputs and storages. Extracting bytecode
 from solidity contracts can be done via, e.g.:</p>
 <pre><code>hevm equivalence \
-    --code-a $(solc --bin-runtime &quot;contract1.sol&quot; | tail -n1) \
-    --code-b $(solc --bin-runtime &quot;contract2.sol&quot; | tail -n1)
+    --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
+    --code-b $(solc --bin-runtime "contract2.sol" | tail -n1)
 </code></pre>
 <p>If <code>--sig</code> is given, calldata is assumed to take the form of the function
 given. If left out, calldata is a fully abstract buffer of at most 256 bytes.</p>
@@ -1006,13 +1013,13 @@ Available options:
                            Foundry)
 </code></pre>
 <p>Minimum required flags: either you must provide <code>--code</code> or you must both pass
-<code>--rpc</code> and <code>--address</code>. </p>
+<code>--rpc</code> and <code>--address</code>.</p>
 <p>If the execution returns an output, it will be written
 to stdout. Exit code indicates whether the execution was successful or
 errored/reverted.</p>
 <p>Simple example usage:</p>
 <pre><code>hevm exec --code 0x647175696e6550383480393834f3 --gas 0xff
-&quot;Return: 0x647175696e6550383480393834f3&quot;
+"Return: 0x647175696e6550383480393834f3"
 </code></pre>
 <p>Which says that given the EVM bytecode <code>0x647175696e6550383480393834f3</code>, the Ethereum
 Virtual Machine will put <code>0x647175696e6550383480393834f3</code> in the RETURNDATA.</p>

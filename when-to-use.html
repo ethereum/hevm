@@ -1,5 +1,5 @@
 <!DOCTYPE HTML>
-<html lang="en" class="sidebar-visible no-js light">
+<html lang="en" class="light" dir="ltr">
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
@@ -10,7 +10,7 @@
         
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="theme-color" content="#ffffff" />
+        <meta name="theme-color" content="#ffffff">
 
         <link rel="icon" href="favicon.svg">
         <link rel="shortcut icon" href="favicon.png">
@@ -32,7 +32,7 @@
         <link rel="stylesheet" href="book.css">
 
     </head>
-    <body>
+    <body class="sidebar-visible no-js">
     <div id="body-container">
         <!-- Provide site root to javascript -->
         <script>
@@ -62,31 +62,38 @@
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
             var html = document.querySelector('html');
-            html.classList.remove('no-js')
             html.classList.remove('light')
             html.classList.add(theme);
-            html.classList.add('js');
+            var body = document.querySelector('body');
+            body.classList.remove('no-js')
+            body.classList.add('js');
         </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
 
         <!-- Hide / unhide sidebar before it is displayed -->
         <script>
-            var html = document.querySelector('html');
+            var body = document.querySelector('body');
             var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
             }
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            sidebar_toggle.checked = sidebar === 'visible';
+            body.classList.remove('sidebar-visible');
+            body.classList.add("sidebar-" + sidebar);
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
                 <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html" class="active">When to Use</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="ds-test-tutorial.html">ds-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
             </div>
-            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
         </nav>
 
         <!-- Track and set sidebar scroll position -->
@@ -117,9 +124,9 @@
                                 <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
-                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
                             <i class="fa fa-bars"></i>
-                        </button>
+                        </label>
                         <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
                             <i class="fa fa-paint-brush"></i>
                         </button>
@@ -178,7 +185,7 @@
 assets</a> due to bugs. While fuzz testing can
 help find potential issues with digital contracts, it is a tool that can only
 execute the program concretely, one execution at a time. In contrast, Symbolic
-Execution can execute all potential values in a decision path &quot;in one go&quot;,
+Execution can execute all potential values in a decision path "in one go",
 creating a symbolic expression out of a path, and checking whether it
 can trigger a fault. Hence, Symbolic Execution tends to be more efficient at
 finding bugs than fuzzing when the bugs are rare, or explicitly (i.e.
@@ -196,7 +203,7 @@ often e.g. that the system does not throw a segmentation fault. For EVM
 bytecode, postconditions need to be explicit. Let's see an example:</p>
 <pre><code class="language-solidity">// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
-import &quot;ds-test/test.sol&quot;;
+import "ds-test/test.sol";
 
 contract MyContract is DSTest {
   uint balance;
@@ -216,7 +223,7 @@ hidden (e.g. by a malicious developer), or that have a complicated code path
 towards them. Let's see a simple one:</p>
 <pre><code class="language-solidity">// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
-import &quot;ds-test/test.sol&quot;;
+import "ds-test/test.sol";
 
 contract MyContract is DSTest {
   uint balance;
@@ -320,7 +327,7 @@ positives or may even not discover them at all.</p>
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next" href="ds-test-tutorial.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="ds-test-tutorial.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -334,7 +341,7 @@ positives or may even not discover them at all.</p>
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next" href="ds-test-tutorial.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="ds-test-tutorial.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

@@ -1,5 +1,5 @@
 <!DOCTYPE HTML>
-<html lang="en" class="sidebar-visible no-js light">
+<html lang="en" class="light" dir="ltr">
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
@@ -10,7 +10,7 @@
         
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="theme-color" content="#ffffff" />
+        <meta name="theme-color" content="#ffffff">
 
         <link rel="icon" href="favicon.svg">
         <link rel="shortcut icon" href="favicon.png">
@@ -32,7 +32,7 @@
         <link rel="stylesheet" href="book.css">
 
     </head>
-    <body>
+    <body class="sidebar-visible no-js">
     <div id="body-container">
         <!-- Provide site root to javascript -->
         <script>
@@ -62,31 +62,38 @@
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
             var html = document.querySelector('html');
-            html.classList.remove('no-js')
             html.classList.remove('light')
             html.classList.add(theme);
-            html.classList.add('js');
+            var body = document.querySelector('body');
+            body.classList.remove('no-js')
+            body.classList.add('js');
         </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
 
         <!-- Hide / unhide sidebar before it is displayed -->
         <script>
-            var html = document.querySelector('html');
+            var body = document.querySelector('body');
             var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
             }
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            sidebar_toggle.checked = sidebar === 'visible';
+            body.classList.remove('sidebar-visible');
+            body.classList.add("sidebar-" + sidebar);
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
                 <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item expanded "><a href="ds-test-tutorial.html" class="active">ds-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
             </div>
-            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
         </nav>
 
         <!-- Track and set sidebar scroll position -->
@@ -117,9 +124,9 @@
                                 <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
-                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
                             <i class="fa fa-bars"></i>
-                        </button>
+                        </label>
                         <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
                             <i class="fa fa-paint-brush"></i>
                         </button>
@@ -177,9 +184,9 @@
 <p>Test cases must be prepended with <code>prove_</code> and the testing contract must
 inherit from <code>Test</code> from <a href="https://book.getfoundry.sh/forge/forge-std">Forge's standard test
 library</a>. First, import Test:
-<code>import {Test} from &quot;forge-std/Test.sol&quot;;</code> and then inherit from it via <code>... is Test</code>. This allows hevm to discover the test cases it needs to run. Like so:</p>
+<code>import {Test} from "forge-std/Test.sol";</code> and then inherit from it via <code>... is Test</code>. This allows hevm to discover the test cases it needs to run. Like so:</p>
 <pre><code class="language-solidity">pragma solidity ^0.8.19;
-import {Test} from &quot;forge-std/Test.sol&quot;;
+import {Test} from "forge-std/Test.sol";
 contract BadVaultTest is Test {
   function prove_mytest() {
   // environment setup, preconditions
@@ -207,7 +214,7 @@ are a standard method used by other tools, such as
 <a href="https://book.getfoundry.sh/">Foundry</a>, so you should be able to re-use your
 existing setup. An example setup could be:</p>
 <pre><code class="language-solidity">pragma solidity ^0.8.19;
-import {Test} from &quot;forge-std/Test.sol&quot;;
+import {Test} from "forge-std/Test.sol";
 contract BadVaultTest is Test {
     MyVault vault;
 
@@ -243,7 +250,7 @@ hevm-supported cheat codes <a href="#supported-cheat-codes">below</a>.</p>
 <p>When hevm discovers a failure, it prints an example call how to trigger the failure. Let's see the following
 simple solidity code:</p>
 <pre><code>pragma solidity ^0.8.19;
-import {Test} from &quot;forge-std/Test.sol&quot;;
+import {Test} from "forge-std/Test.sol";
 contract MyContract is Test {
   mapping (address =&gt; uint) balances;
   function prove_single_fail(address recv, uint amt) public {
@@ -273,7 +280,7 @@ although this is not explicitly mentioned.</p>
 <p>Hevm assumes that a test case should not always revert. If you have such a test
 case, hevm will warn you and return a FAIL. For example this toy contract:</p>
 <pre><code class="language-solidity">pragma solidity ^0.8.19;
-import {Test} from &quot;forge-std/Test.sol&quot;;
+import {Test} from "forge-std/Test.sol";
 contract MyContract is Test {
   uint256 cntr;
   function prove_allrevert(uint256 val) public {
@@ -295,7 +302,7 @@ contract MyContract is Test {
 <p>This is sometimes undesirable. In these cases, prefix your contract with
 <code>proveFail_</code> instead of <code>prove_</code>:</p>
 <pre><code class="language-solidity">pragma solidity ^0.8.19;
-import {Test} from &quot;forge-std/Test.sol&quot;;
+import {Test} from "forge-std/Test.sol";
 contract MyContract is Test {
   uint256 cntr;
   function proveFail_allrevert_expected(uint256 val) public {
@@ -318,10 +325,10 @@ contract MyContract is Test {
 <p>Which is now the expected outcome.</p>
 <h2 id="supported-cheat-codes"><a class="header" href="#supported-cheat-codes">Supported Cheat Codes</a></h2>
 <p>Since hevm is an EVM implementation mainly dedicated to testing and
-exploration, it features a set of &quot;cheat codes&quot; which can manipulate the
+exploration, it features a set of "cheat codes" which can manipulate the
 environment in which the execution is run. These can be accessed by calling
 into a contract (typically called <code>Vm</code>) at address
-<code>0x7109709ECfa91a80626fF3989D68f67F5b1DD12D</code>, which happens to be keccak(&quot;hevm cheat code&quot;),
+<code>0x7109709ECfa91a80626fF3989D68f67F5b1DD12D</code>, which happens to be keccak("hevm cheat code"),
 implementing the following methods:</p>
 <div class="table-wrapper"><table><thead><tr><th>Function</th><th>Description</th></tr></thead><tbody>
 <tr><td><code>function prank(address sender) public</code></td><td>Sets <code>msg.sender</code> to the specified <code>sender</code> for the next call.</td></tr>
@@ -350,7 +357,7 @@ implementing the following methods:</p>
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next" href="equivalence-checking-tutorial.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="equivalence-checking-tutorial.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -364,7 +371,7 @@ implementing the following methods:</p>
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next" href="equivalence-checking-tutorial.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="equivalence-checking-tutorial.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

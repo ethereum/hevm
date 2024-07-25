@@ -1,5 +1,5 @@
 <!DOCTYPE HTML>
-<html lang="en" class="sidebar-visible no-js light">
+<html lang="en" class="light" dir="ltr">
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
@@ -10,7 +10,7 @@
         
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="theme-color" content="#ffffff" />
+        <meta name="theme-color" content="#ffffff">
 
         <link rel="icon" href="favicon.svg">
         <link rel="shortcut icon" href="favicon.png">
@@ -32,7 +32,7 @@
         <link rel="stylesheet" href="book.css">
 
     </head>
-    <body>
+    <body class="sidebar-visible no-js">
     <div id="body-container">
         <!-- Provide site root to javascript -->
         <script>
@@ -62,31 +62,38 @@
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
             var html = document.querySelector('html');
-            html.classList.remove('no-js')
             html.classList.remove('light')
             html.classList.add(theme);
-            html.classList.add('js');
+            var body = document.querySelector('body');
+            body.classList.remove('no-js')
+            body.classList.add('js');
         </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
 
         <!-- Hide / unhide sidebar before it is displayed -->
         <script>
-            var html = document.querySelector('html');
+            var body = document.querySelector('body');
             var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
             }
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            sidebar_toggle.checked = sidebar === 'visible';
+            body.classList.remove('sidebar-visible');
+            body.classList.add("sidebar-" + sidebar);
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
                 <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="ds-test-tutorial.html">ds-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">ds-test proving</a></li><li class="chapter-item expanded "><a href="symbolic.html" class="active">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
             </div>
-            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
         </nav>
 
         <!-- Track and set sidebar scroll position -->
@@ -117,9 +124,9 @@
                                 <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
-                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
                             <i class="fa fa-bars"></i>
-                        </button>
+                        </label>
                         <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
                             <i class="fa fa-paint-brush"></i>
                         </button>
@@ -263,17 +270,17 @@ form suggested by the function signature. With this flag, specific arguments
 can be instantiated to concrete values via the <code>--arg</code> flag.</p>
 <p>This is best illustrated through a few examples:</p>
 <p>Calldata specialized to the bytestring <code>0xa9059cbb</code> followed by 64 symbolic bytes:</p>
-<pre><code class="language-shell">hevm symbolic --sig &quot;transfer(address,uint256)&quot; --code $(&lt;dstoken.bin-runtime)
+<pre><code class="language-shell">hevm symbolic --sig "transfer(address,uint256)" --code $(&lt;dstoken.bin-runtime)
 </code></pre>
 <p>Calldata specialized to the bytestring
 <code>0xa9059cbb0000000000000000000000007cfa93148b0b13d88c1dce8880bd4e175fb0dedf</code>
 followed by 32 symbolic bytes.</p>
-<pre><code class="language-shell">hevm symbolic --sig &quot;transfer(address,uint256)&quot; --arg 0x7cFA93148B0B13d88c1DcE8880bd4e175fb0DeDF --code $(&lt;dstoken.bin-runtime)
+<pre><code class="language-shell">hevm symbolic --sig "transfer(address,uint256)" --arg 0x7cFA93148B0B13d88c1DcE8880bd4e175fb0DeDF --code $(&lt;dstoken.bin-runtime)
 </code></pre>
 <p>Calldata specialized to the bytestring <code>0xa9059cbb</code> followed by 32 symbolic
 bytes, followed by the bytestring
 <code>0000000000000000000000000000000000000000000000000000000000000000</code>:</p>
-<pre><code class="language-shell">hevm symbolic --sig &quot;transfer(address,uint256)&quot; --arg &quot;&lt;symbolic&gt;&quot; --arg 0 --code $(&lt;dstoken.bin-runtime)
+<pre><code class="language-shell">hevm symbolic --sig "transfer(address,uint256)" --arg "&lt;symbolic&gt;" --arg 0 --code $(&lt;dstoken.bin-runtime)
 </code></pre>
 <p>If the <code>--get-models</code> flag is given, example input values will be returned for
 each possible execution path. This can be useful for automatic test case
@@ -307,7 +314,7 @@ execution by setting this flag to an appropriate value.</p>
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next" href="equivalence.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="equivalence.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -321,7 +328,7 @@ execution by setting this flag to an appropriate value.</p>
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next" href="equivalence.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="equivalence.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
