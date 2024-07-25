@@ -162,13 +162,22 @@
           libs=$(${otool} -L $out/bin/hevm | tail -n +2 | sed 's/^[[:space:]]*//' | cut -d' ' -f1)
 
           # get the paths for libcxx and libiconv
-          cxx=$(echo "$libs" | ${grep} '^/nix/store/.*-libcxx')
-          iconv=$(echo "$libs" | ${grep} '^/nix/store/.*-libiconv')
+          cxx=$(echo "$libs" | ${grep} '^/nix/store/.*/libc++\.')
+          cxxabi=$(echo "$libs" | ${grep} '^/nix/store/.*/libc++abi\.')
+          iconv=$(echo "$libs" | ${grep} '^/nix/store/.*/libiconv\.')
 
           # rewrite /nix/... library paths to point to /usr/lib
           chmod 777 $out/bin/hevm
           ${install_name_tool} -change "$cxx" /usr/lib/libc++.1.dylib $out/bin/hevm
+          ${install_name_tool} -change "$cxxabi" /usr/lib/libc++abi.dylib $out/bin/hevm
           ${install_name_tool} -change "$iconv" /usr/lib/libiconv.dylib $out/bin/hevm
+          # check that no nix deps remain
+          nixdeps=$(${otool} -L $out/bin/hevm | tail -n +2 | { ${grep} /nix/store -c || test $? = 1; })
+          if [ ! "$nixdeps" = "0" ]; then
+            echo "Nix deps remain in redistributable binary!"
+            exit 255
+          fi
+          # re-sign binary
           CODESIGN_ALLOCATE=${codesign_allocate} ${codesign} -f -s - $out/bin/hevm
           chmod 555 $out/bin/hevm
         '';
