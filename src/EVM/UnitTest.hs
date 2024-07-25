@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ImplicitParams #-}
 
 module EVM.UnitTest where
@@ -8,6 +7,7 @@ import EVM.ABI
 import EVM.SMT
 import EVM.Solvers
 import EVM.Dapp
+import EVM.Effects
 import EVM.Exec
 import EVM.Expr (readStorage')
 import EVM.Expr qualified as Expr
@@ -21,14 +21,15 @@ import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 
+import Control.Monad (void, when, forM)
 import Control.Monad.ST (RealWorld, ST, stToIO)
-import Optics.Core hiding (elements)
+import Control.Monad.State.Strict (execState, get, put, liftIO)
+import Optics.Core
 import Optics.State
 import Optics.State.Operators
-import Control.Monad.State.Strict hiding (state)
-import Data.ByteString.Lazy qualified as BSLazy
 import Data.Binary.Get (runGet)
 import Data.ByteString (ByteString)
+import Data.ByteString.Lazy qualified as BSLazy
 import Data.Decimal (DecimalRaw(..))
 import Data.Foldable (toList)
 import Data.Map (Map)
@@ -42,7 +43,6 @@ import Data.Word (Word64)
 import GHC.Natural
 import System.IO (hFlush, stdout)
 import Witch (unsafeInto, into)
-import EVM.Effects
 
 data UnitTestOptions s = UnitTestOptions
   { rpcInfo     :: Fetch.RpcInfo

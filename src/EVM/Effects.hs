@@ -14,28 +14,20 @@ only.
 [1]: https://www.fpcomplete.com/blog/readert-design-pattern/
 -}
 
-{-# Language RankNTypes #-}
-{-# Language FlexibleInstances #-}
-{-# Language KindSignatures #-}
-{-# Language DataKinds #-}
-{-# Language GADTs #-}
-{-# Language DerivingStrategies #-}
-{-# Language DuplicateRecordFields #-}
-{-# Language NoFieldSelectors #-}
-{-# Language ConstraintKinds #-}
-
 module EVM.Effects where
 
-import Control.Monad.Reader
-import Control.Monad.IO.Unlift
-import EVM.Dapp (DappInfo)
-import EVM.Types (VM(..))
+import Control.Monad (when)
+import Control.Monad.IO.Unlift (MonadIO(liftIO), MonadUnliftIO)
+import Control.Monad.Reader (ReaderT, runReaderT, ask)
 import Control.Monad.ST (RealWorld)
 import Data.Text (Text)
 import Data.Text.IO qualified as T
 import System.IO (stderr)
-import EVM.Format (showTraceTree)
+
 import EVM (traceForest)
+import EVM.Dapp (DappInfo)
+import EVM.Format (showTraceTree)
+import EVM.Types (VM(..))
 
 
 -- Abstract Effects --------------------------------------------------------------------------------

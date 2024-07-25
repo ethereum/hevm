@@ -51,12 +51,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
+      # cabal complains if we don't do this...
+      - name: cabal update
+        run: nix-shell --pure --command "cabal update"
       # can't be run in nix build due to network usage
       - name: run rpc tests
-        run: nix-shell --pure --command "cabal run rpc-tests"
+        run: nix-shell --pure --command "cabal --active-repositories=:none run rpc-tests"
       # if we run this in nix build we often get killed due to oom in ci
       - name: run ethereum tests
-        run: nix-shell --pure --command "cabal run ethereum-tests"
+        run: nix-shell --pure --command "cabal --active-repositories=:none run ethereum-tests"
 
   build-windows:
     name: build (windows-latest)

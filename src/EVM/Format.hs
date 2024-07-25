@@ -823,13 +823,13 @@ strip0x' s = if "0x" `isPrefixOf` s then drop 2 s else s
 
 hexByteString :: String -> ByteString -> ByteString
 hexByteString msg bs =
-  case BS16.decodeBase16 bs of
+  case BS16.decodeBase16Untyped bs of
     Right x -> x
     _ -> internalError $ "invalid hex bytestring for " ++ msg
 
 hexText :: Text -> ByteString
 hexText t =
-  case BS16.decodeBase16 (T.encodeUtf8 (T.drop 2 t)) of
+  case BS16.decodeBase16Untyped (T.encodeUtf8 (T.drop 2 t)) of
     Right x -> x
     _ -> internalError $ "invalid hex bytestring " ++ show t
 
