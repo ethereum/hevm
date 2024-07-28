@@ -34,9 +34,9 @@ rpcEnv = Env { config = defaultConfig }
 test :: TestName -> ReaderT Env IO () -> TestTree
 test a b = testCase a $ runEnv rpcEnv b
 
-ignoreTestWindows :: TestTree -> TestTree
-ignoreTestWindows t | os == "mingw32" = ignoreTestBecause "unsupported on Windows" t
-                    | otherwise       = t
+ignoreTestWindows :: String -> TestTree -> TestTree
+ignoreTestWindows reason t | os == "mingw32" = ignoreTestBecause ("unsupported on Windows: " <> reason) t
+                           | otherwise       = t
 
 main :: IO ()
 main = defaultMain tests
@@ -75,7 +75,7 @@ tests = testGroup "rpc"
     ]
   , testGroup "execution with remote state"
     -- execute against remote state from a ds-test harness
-    [ ignoreTestWindows $ test "dapp-test" $ do
+    [ ignoreTestWindows "git command failure" $ test "dapp-test" $ do
         let testFile = "test/contracts/pass/rpc.sol"
         res <- runSolidityTestCustom testFile ".*" Nothing Nothing False testRpcInfo Foundry
         liftIO $ assertEqual "test result" True res

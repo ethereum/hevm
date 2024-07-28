@@ -111,9 +111,9 @@ main = defaultMain tests
 runSubSet :: String -> IO ()
 runSubSet p = defaultMain . applyPattern p $ tests
 
-ignoreTestWindows :: TestTree -> TestTree
-ignoreTestWindows t | os == "mingw32" = ignoreTestBecause "unsupported on Windows" t
-                    | otherwise       = t
+ignoreTestWindows :: String -> TestTree -> TestTree
+ignoreTestWindows reason t | os == "mingw32" = ignoreTestBecause ("unsupported on Windows: " <> reason) t
+                           | otherwise       = t
 
 tests :: TestTree
 tests = testGroup "hevm"
@@ -981,7 +981,7 @@ tests = testGroup "hevm"
         assertBoolM "Overflow must occur" (toInteger x + toInteger y >= maxUint)
         putStrLnM "expected counterexample found"
      ,
-     ignoreTestWindows $ test "div-by-zero-fail" $ do
+     test "div-by-zero-fail" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
@@ -994,7 +994,7 @@ tests = testGroup "hevm"
         assertEqualM "Division by 0 needs b=0" (getVar ctr "arg2") 0
         putStrLnM "expected counterexample found"
      ,
-      ignoreTestWindows $ test "unused-args-fail" $ do
+      test "unused-args-fail" $ do
          Just c <- solcRuntime "C"
              [i|
              contract C {
@@ -1006,7 +1006,7 @@ tests = testGroup "hevm"
          (_, [Cex _]) <- withSolvers Bitwuzla 1 Nothing $ \s -> checkAssert s [0x1] c Nothing [] defaultVeriOpts
          putStrLnM "expected counterexample found"
       ,
-     ignoreTestWindows $ test "enum-conversion-fail" $ do
+     test "enum-conversion-fail" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
@@ -1165,7 +1165,7 @@ tests = testGroup "hevm"
   ]
   , testGroup "Symbolic-Constructor-Args"
     -- this produced some hard to debug failures. keeping it around since it seemed to exercise the contract creation code in interesting ways...
-    [ ignoreTestWindows $ test "multiple-symbolic-constructor-calls" $ do
+    [ test "multiple-symbolic-constructor-calls" $ do
         Just initCode <- solidity "C"
           [i|
             contract A {
@@ -1247,7 +1247,7 @@ tests = testGroup "hevm"
             Partial _ _ (JumpIntoSymbolicCode _ _) -> assertBoolM "" True
             _ -> assertBoolM "did not encounter expected partial node" False
     ]
-  , ignoreTestWindows $ testGroup "Dapp-Tests"
+  , ignoreTestWindows "odd Git failures" $ testGroup "Dapp-Tests"
     [ test "Trivial-Pass" $ do
         let testFile = "test/contracts/pass/trivial.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True
@@ -2811,7 +2811,7 @@ tests = testGroup "hevm"
           (_, [Qed _]) <-  withSolvers Z3 1 Nothing $ \s -> verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLnM "Proven"
         ,
-        ignoreTestWindows $ test "safemath-distributivity-sol" $ do
+        test "safemath-distributivity-sol" $ do
           Just c <- solcRuntime "C"
             [i|
               contract C {
@@ -2978,7 +2978,7 @@ tests = testGroup "hevm"
       let sig = (Sig "func(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
       (_, [Cex (_, ctr)]) <- withSolvers CVC5 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
       putStrLnM  $ "expected counterexample found.  ctr: " <> (show ctr)
-    , ignoreTestWindows $ testFuzz "fuzz-simple-fixed-value3" $ do
+    , testFuzz "fuzz-simple-fixed-value3" $ do
       Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -3253,7 +3253,7 @@ tests = testGroup "hevm"
           a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd
           assertEqualM "Must be different" (any isCex a) True
       ,
-      ignoreTestWindows $ test "eq-sol-exp-cex" $ do
+      test "eq-sol-exp-cex" $ do
         Just aPrgm <- solcRuntime "C"
             [i|
               contract C {
