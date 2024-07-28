@@ -25,6 +25,11 @@ extra-source-files:
 extra-doc-files:
   CHANGELOG.md
 
+flag static-secp256k1
+  description: Sets flags for compilation with static secp256k1
+  default:     False
+  manual:      True
+
 flag ci
   description: Sets flags for compilation in CI
   default:     False
@@ -111,6 +116,9 @@ library
     Paths_hevm
   autogen-modules:
     Paths_hevm
+  if os(windows) && flag(static-secp256k1)
+    cc-options: -DSECP256K1_STATIC
+    cxx-options: -DSECP256K1_STATIC
   if os(darwin)
     -- https://gitlab.haskell.org/ghc/ghc/-/issues/11829
     ld-options: -Wl,-keep_dwarf_unwind

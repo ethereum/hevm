@@ -124,7 +124,7 @@ jobs:
           cabal configure --disable-documentation --enable-executable-static --enable-executable-stripping \
             --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib" \
             --extra-include-dirs="D:/a/_temp/msys64/clang64/include" --extra-lib-dirs="D:/a/_temp/msys64/clang64/lib" \
-            --ghc-options=-pgml=D:/a/_temp/msys64/clang64/bin/clang.exe
+            --ghc-options=-pgml=D:/a/_temp/msys64/clang64/bin/clang.exe -fstatic-secp256k1
           cabal build --dry-run
           # The last step generates dist-newstyle/cache/plan.json for the cache key.
 
