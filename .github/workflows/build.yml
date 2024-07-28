@@ -100,7 +100,7 @@ jobs:
       - uses: haskell-actions/setup@v2.7.0
         id: setup
         with:
-          ghc-version: '9.4.7'
+          ghc-version: '9.6.5'
 
       - name: Extract GHC & Cabal paths
         run: |
