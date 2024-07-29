@@ -7,6 +7,7 @@ import EVM.Fetch qualified
 import EVM.Format (hexText)
 import EVM.Stepper qualified
 import EVM.Transaction
+import EVM.UnitTest (writeTrace)
 import EVM.Types hiding (Block, Case, Env)
 import EVM.Test.Tracing (interpretWithTrace, VMTrace, compareTraces, EVMToolTraceOutput(..))
 

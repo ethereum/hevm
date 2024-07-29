@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ARM64 and x86_64 Mac along with Linux x86_64 static binaries for releases
 - PAnd props are now recursively flattened
 - Double negation in Prop are removed
+- Updated forge to modern version, thereby fixing JSON parsing of new forge JSONs
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing

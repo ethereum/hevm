@@ -33,7 +33,7 @@ runSolidityTestCustom
   => FilePath -> Text -> Maybe Natural -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> m Bool
 runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectType = do
   withSystemTempDirectory "dapp-test" $ \root -> do
-    (liftIO $ compile projectType root testFile) >>= \case
+    (compile projectType root testFile) >>= \case
       Left e -> error e
       Right bo@(BuildOutput contracts _) -> do
         withSolvers Z3 1 timeout $ \solvers -> do
@@ -65,22 +65,22 @@ testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
     , ffiAllowed = allowFFI
     }
 
-compile :: ProjectType -> FilePath -> FilePath -> IO (Either String BuildOutput)
+compile :: App m => ProjectType -> FilePath -> FilePath -> m (Either String BuildOutput)
 compile DappTools root src = do
-  json <- compileWithDSTest src
-  createDirectory (root </> "out")
-  T.writeFile (root </> "out" </> "dapp.sol.json") json
+  json <- liftIO $ compileWithDSTest src
+  liftIO $ createDirectory (root </> "out")
+  liftIO $ T.writeFile (root </> "out" </> "dapp.sol.json") json
   readBuildOutput root DappTools
 compile CombinedJSON _root _src = error "unsupported"
 compile foundryType root src = do
-  createDirectory (root </> "src")
-  writeFile (root </> "src" </> "unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
-  initLib (root </> "lib" </> "ds-test") ("test" </> "contracts" </> "lib" </> "test.sol") "test.sol"
-  initLib (root </> "lib" </> "tokens") ("test" </> "contracts" </> "lib" </> "erc20.sol") "erc20.sol"
+  liftIO $ createDirectory (root </> "src")
+  liftIO $ writeFile (root </> "src" </> "unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
+  liftIO $ initLib (root </> "lib" </> "ds-test") ("test" </> "contracts" </> "lib" </> "test.sol") "test.sol"
+  liftIO $ initLib (root </> "lib" </> "tokens") ("test" </> "contracts" </> "lib" </> "erc20.sol") "erc20.sol"
   case foundryType of
-    FoundryStdLib -> initStdForgeDir (root </> "lib" </> "forge-std")
+    FoundryStdLib -> liftIO $ initStdForgeDir (root </> "lib" </> "forge-std")
     Foundry -> pure ()
-  r@(res,_,_) <- readProcessWithExitCode "forge" ["build", "--root", root] ""
+  r@(res,_,_) <- liftIO $ readProcessWithExitCode "forge" ["build", "--ast", "--root", root] ""
   case res of
     ExitFailure _ -> pure . Left $ "compilation failed: " <> show r
     ExitSuccess -> readBuildOutput root Foundry

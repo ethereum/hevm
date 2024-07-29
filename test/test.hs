@@ -70,6 +70,7 @@ import EVM.Test.Utils
 import EVM.Traversals
 import EVM.Types hiding (Env)
 import EVM.Effects
+import EVM.UnitTest (writeTrace)
 
 testEnv :: Env
 testEnv = Env { config = defaultConfig {

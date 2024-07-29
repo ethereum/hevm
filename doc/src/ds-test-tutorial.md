@@ -98,7 +98,7 @@ contract MyContract is Test {
 }
 ```
 
-After compiling with `forge build`, when ran under hevm, we get:
+After compiling with `forge build --ast`, when ran under hevm, we get:
 
 ```
 $ hevm test

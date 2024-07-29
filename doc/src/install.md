@@ -25,7 +25,7 @@ put it in your path so it can be executed via typing "hevm".
 Once you have the above, you can go to the root of your forge-based project
 and build it:
 ```
-$ forge build
+$ forge build --ast
 [⠒] Compiling...
 [⠆] Compiling 34 files with 0.8.19
 [⠔] Solc 0.8.19 finished in 2.12s
