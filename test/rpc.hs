@@ -3,9 +3,7 @@
 module Main where
 
 import Test.Tasty
-import Test.Tasty.ExpectedFailure
 import Test.Tasty.HUnit
-import System.Info (os)
 
 import Data.Maybe
 import Data.Map qualified as Map
@@ -33,10 +31,6 @@ rpcEnv = Env { config = defaultConfig }
 
 test :: TestName -> ReaderT Env IO () -> TestTree
 test a b = testCase a $ runEnv rpcEnv b
-
-ignoreTestWindows :: String -> TestTree -> TestTree
-ignoreTestWindows reason t | os == "mingw32" = ignoreTestBecause ("unsupported on Windows: " <> reason) t
-                           | otherwise       = t
 
 main :: IO ()
 main = defaultMain tests
@@ -75,7 +69,7 @@ tests = testGroup "rpc"
     ]
   , testGroup "execution with remote state"
     -- execute against remote state from a ds-test harness
-    [ ignoreTestWindows "git command failure" $ test "dapp-test" $ do
+    [ test "dapp-test" $ do
         let testFile = "test/contracts/pass/rpc.sol"
         res <- runSolidityTestCustom testFile ".*" Nothing Nothing False testRpcInfo Foundry
         liftIO $ assertEqual "test result" True res
