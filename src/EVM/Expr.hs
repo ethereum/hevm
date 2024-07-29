@@ -8,7 +8,9 @@
 module EVM.Expr where
 
 import Prelude hiding (LT, GT)
-import Control.Monad.ST
+import Control.Monad (unless)
+import Control.Monad.ST (ST)
+import Control.Monad.State (put, get, execState, State)
 import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -26,7 +28,6 @@ import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
 import Witch (unsafeInto, into, tryFrom)
 import Data.Containers.ListUtils (nubOrd)
-import Control.Monad.State
 
 import Optics.Core
 
@@ -659,7 +660,7 @@ readStorage w st = go (simplify w) st
 
       -- Finding two Keccaks that are < 256 away from each other should be VERY hard
       -- This simplification allows us to deal with maps of structs
-      (Add (Lit a2) (Keccak _), Add (Lit b2) (Keccak _)) | a2 /= b2, abs(a2-b2) < 256 -> go slot prev
+      (Add (Lit a2) (Keccak _), Add (Lit b2) (Keccak _)) | a2 /= b2, abs (a2-b2) < 256 -> go slot prev
       (Add (Lit a2) (Keccak _), (Keccak _)) | a2 > 0, a2 < 256 -> go slot prev
       ((Keccak _), Add (Lit b2) (Keccak _)) | b2 > 0, b2 < 256 -> go slot prev
 
@@ -1224,7 +1225,6 @@ simplifyProp prop =
     go (PNeg (PNeg a)) = a
 
     -- solc specific stuff
-    go (PEq (IsZero (Eq a b)) (Lit 0)) = PEq a b
     go (PEq (IsZero (IsZero (Eq a b))) (Lit 0)) = PNeg (PEq a b)
 
     -- iszero(a) -> (a == 0)
@@ -1259,6 +1259,13 @@ simplifyProp prop =
     go (PImpl (PBool True) b) = b
     go (PImpl (PBool False) _) = PBool True
 
+    -- Double negation
+    go (PEq (IsZero (Eq a b)) (Lit 0)) = PEq a b
+    go (PEq (IsZero (LT a b)) (Lit 0)) = PLT a b
+    go (PEq (IsZero (GT a b)) (Lit 0)) = PGT a b
+    go (PEq (IsZero (LEq a b)) (Lit 0)) = PLEq a b
+    go (PEq (IsZero (GEq a b)) (Lit 0)) = PGEq a b
+
     -- Eq
     go (PEq (Eq a b) (Lit 0)) = PNeg (PEq a b)
     go (PEq (Eq a b) (Lit 1)) = PEq a b
@@ -1292,7 +1299,7 @@ simplifyProp prop =
 flattenProps :: [Prop] -> [Prop]
 flattenProps [] = []
 flattenProps (a:ax) = case a of
-  PAnd x1 x2 -> x1:x2:flattenProps ax
+  PAnd x1 x2 -> flattenProps [x1] ++ flattenProps [x2] ++ flattenProps ax
   x -> x:flattenProps ax
 
 -- removes redundant (constant True/False) props
@@ -1555,7 +1562,7 @@ constFoldProp ps = oneRun ps (ConstState mempty True)
             Just l2 -> case l==l2 of
                 True -> put ConstState {canBeSat=False, values=mempty}
                 False -> pure ()
-            Nothing -> pure()
+            Nothing -> pure ()
         PNeg (PEq a b@(Lit _)) -> go $ PNeg (PEq b a)
         -- Others
         PAnd a b -> do
@@ -1566,8 +1573,8 @@ constFoldProp ps = oneRun ps (ConstState mempty True)
           let
             v1 = oneRun [a] s
             v2 = oneRun [b] s
-          when (Prelude.not v1) $ go b
-          when (Prelude.not v2) $ go a
+          unless v1 $ go b
+          unless v2 $ go a
           s2 <- get
           put $ s{canBeSat=(s2.canBeSat && (v1 || v2))}
         PBool False -> put $ ConstState {canBeSat=False, values=mempty}

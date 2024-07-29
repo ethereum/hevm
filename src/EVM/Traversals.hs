@@ -6,8 +6,9 @@ module EVM.Traversals where
 
 import Prelude hiding (LT, GT)
 
-import Control.Monad.Identity
-import qualified Data.Map.Strict as Map
+import Control.Monad (forM, void)
+import Control.Monad.Identity (Identity(Identity), runIdentity)
+import Data.Map.Strict qualified as Map
 import Data.List (foldl')
 
 import EVM.Types
