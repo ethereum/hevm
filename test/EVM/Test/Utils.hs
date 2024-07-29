@@ -10,6 +10,7 @@ import GHC.IO.Handle (hClose)
 import GHC.Natural
 import Paths_hevm qualified as Paths
 import System.Directory
+import System.FilePath ((</>))
 import System.IO.Temp
 import System.Process
 import System.Exit
@@ -67,17 +68,17 @@ testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
 compile :: ProjectType -> FilePath -> FilePath -> IO (Either String BuildOutput)
 compile DappTools root src = do
   json <- compileWithDSTest src
-  createDirectory (root <> "/out")
-  T.writeFile (root <> "/out/dapp.sol.json") json
+  createDirectory (root </> "out")
+  T.writeFile (root </> "out" </> "dapp.sol.json") json
   readBuildOutput root DappTools
 compile CombinedJSON _root _src = error "unsupported"
 compile foundryType root src = do
-  createDirectory (root <> "/src")
-  writeFile (root <> "/src/unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
-  initLib (root <> "/lib/ds-test") "test/contracts/lib/test.sol" "test.sol"
-  initLib (root <> "/lib/tokens") "test/contracts/lib/erc20.sol" "erc20.sol"
+  createDirectory (root </> "src")
+  writeFile (root </> "src" </> "unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
+  initLib (root </> "lib" </> "ds-test") ("test" </> "contracts" </> "lib" </> "test.sol") "test.sol"
+  initLib (root </> "lib" </> "tokens") ("test" </> "contracts" </> "lib" </> "erc20.sol") "erc20.sol"
   case foundryType of
-    FoundryStdLib -> initStdForgeDir (root <> "/lib/forge-std")
+    FoundryStdLib -> initStdForgeDir (root </> "lib" </> "forge-std")
     Foundry -> pure ()
   r@(res,_,_) <- readProcessWithExitCode "forge" ["build", "--root", root] ""
   case res of
@@ -89,16 +90,16 @@ compile foundryType root src = do
       createDirectoryIfMissing True tld
       forgeStdRepo <- liftIO $ fromMaybe (internalError "cannot find forge-std repo") <$> (lookupEnv "HEVM_FORGE_STD_REPO")
       callProcess "mkdir" ["-p", tld]
-      callProcess "cp" ["-r", forgeStdRepo <> "/src", tld <> "/src"]
+      callProcess "cp" ["-r", forgeStdRepo </> "src", tld </> "src"]
     initLib :: FilePath -> FilePath -> FilePath -> IO ()
     initLib tld srcFile dstFile = do
-      createDirectoryIfMissing True (tld <> "/src")
-      writeFile (tld <> "/src/" <> dstFile) =<< readFile =<< Paths.getDataFileName srcFile
+      createDirectoryIfMissing True (tld </> "src")
+      writeFile (tld </> "src" </> dstFile) =<< readFile =<< Paths.getDataFileName srcFile
       _ <- readProcessWithExitCode "git" ["init", tld] ""
-      callProcess "git" ["config", "--file", tld <> "/.git/config", "user.name", "'hevm'"]
-      callProcess "git" ["config", "--file", tld <> "/.git/config", "user.email", "'hevm@hevm.dev'"]
-      callProcess "git" ["--git-dir", tld <> "/.git", "--work-tree", tld, "add", tld]
-      _ <- readProcessWithExitCode "git" ["--git-dir", tld <> "/.git", "--work-tree", tld, "--no-gpg-sign", "commit", "-m"] ""
+      callProcess "git" ["config", "--file", tld </> ".git" </> "config", "user.name", "'hevm'"]
+      callProcess "git" ["config", "--file", tld </> ".git" </> "config", "user.email", "'hevm@hevm.dev'"]
+      callProcess "git" ["--git-dir", tld </> ".git", "--work-tree", tld, "add", tld]
+      _ <- readProcessWithExitCode "git" ["--git-dir", tld </> ".git", "--work-tree", tld, "--no-gpg-sign", "commit", "-m"] ""
       pure ()
 
 -- We don't want to depend on dapptools here, so we cheat and just call solc with the same options that dapp itself uses
@@ -106,8 +107,8 @@ compileWithDSTest :: FilePath -> IO Text
 compileWithDSTest src =
   withSystemTempFile "input.json" $ \file handle -> do
     hClose handle
-    dsTest <- readFile =<< Paths.getDataFileName "test/contracts/lib/test.sol"
-    erc20 <- readFile =<< Paths.getDataFileName "test/contracts/lib/erc20.sol"
+    dsTest <- readFile =<< Paths.getDataFileName ("test" </> "contracts" </> "lib" </> "test.sol")
+    erc20 <- readFile =<< Paths.getDataFileName ("test" </> "contracts" </> "lib" </> "erc20.sol")
     testFilePath <- Paths.getDataFileName src
     testFile <- readFile testFilePath
     T.writeFile file

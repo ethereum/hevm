@@ -34,6 +34,7 @@ import Data.Word (Word8)
 import GHC.Conc (getNumProcessors)
 import System.Directory
 import System.Environment
+import System.Info (os)
 import Test.Tasty
 import Test.Tasty.QuickCheck hiding (Failure, Success)
 import Test.QuickCheck.Instances.Text()
@@ -109,6 +110,10 @@ main = defaultMain tests
 -- https://github.com/UnkindPartition/tasty/tree/ee6fe7136fbcc6312da51d7f1b396e1a2d16b98a#patterns
 runSubSet :: String -> IO ()
 runSubSet p = defaultMain . applyPattern p $ tests
+
+ignoreTestWindows :: String -> TestTree -> TestTree
+ignoreTestWindows reason t | os == "mingw32" = ignoreTestBecause ("unsupported on Windows: " <> reason) t
+                           | otherwise       = t
 
 tests :: TestTree
 tests = testGroup "hevm"
@@ -1242,7 +1247,7 @@ tests = testGroup "hevm"
             Partial _ _ (JumpIntoSymbolicCode _ _) -> assertBoolM "" True
             _ -> assertBoolM "did not encounter expected partial node" False
     ]
-  , testGroup "Dapp-Tests"
+  , ignoreTestWindows "odd Git failures" $ testGroup "Dapp-Tests"
     [ test "Trivial-Pass" $ do
         let testFile = "test/contracts/pass/trivial.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True

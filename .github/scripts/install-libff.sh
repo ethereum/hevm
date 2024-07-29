@@ -18,6 +18,8 @@ fi
 cd libff
 git checkout "v$INSTALL_VERSION" && git submodule init && git submodule update
 
+patch -p1 < ../.github/scripts/libff.patch
+
 sed -i 's/find_library(GMP_LIBRARY gmp)/find_library(GMP_LIBRARY NAMES libgmp.a)/' CMakeLists.txt
 PREFIX="$HOME/.local"
 ARGS=("-DCMAKE_INSTALL_PREFIX=$PREFIX" "-DWITH_PROCPS=OFF" "-G" "Ninja")
