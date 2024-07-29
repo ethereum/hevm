@@ -247,7 +247,7 @@ contract MyContract is DSTest {
   }
 }
 EOF
-$ forge build
+$ forge build --ast
 [⠊] Compiling...
 [⠒] Compiling 1 files with 0.8.19
 [⠢] Solc 0.8.19 finished in 14.27ms
@@ -276,7 +276,7 @@ should now say:</p>
   }
 </code></pre>
 <p>Let's re-build with forge and check with hevm once again:</p>
-<pre><code class="language-shell">$ forge build
+<pre><code class="language-shell">$ forge build --ast
 [⠰] Compiling...
 [⠔] Compiling 1 files with 0.8.19
 [⠒] Solc 0.8.19 finished in 985.32ms
@@ -325,7 +325,7 @@ put it in your path so it can be executed via typing "hevm".</p>
 <h1 id="how-to-check-if-it-works"><a class="header" href="#how-to-check-if-it-works">How to Check if it Works</a></h1>
 <p>Once you have the above, you can go to the root of your forge-based project
 and build it:</p>
-<pre><code>$ forge build
+<pre><code>$ forge build --ast
 [⠒] Compiling...
 [⠆] Compiling 34 files with 0.8.19
 [⠔] Solc 0.8.19 finished in 2.12s
@@ -559,7 +559,17 @@ contract MyContract is Test {
   }
 }
 </code></pre>
-<p>After compiling with <code>forge build</code>, when ran under hevm, we get:</p>
+<p>When compiling our foundry project, we must either always pass the <code>--ast</code> flag
+to <code>forge build</code>, or, much better, set the <code>ast = true</code> flag in the
+<code>foundry.toml</code> file:</p>
+<pre><code class="language-toml">ast = true
+</code></pre>
+<p>In case neither <code>--ast</code> was passed, nor <code>ast = true</code> was set in the
+<code>foundry.toml</code> file, we will get an error such as:</p>
+<pre><code>Error: unable to parse Foundry project JSON: [...]/out/Base.sol/CommonBase.json Contract: "CommonBase"
+</code></pre>
+<p>In these cases, issue <code>forge clean</code> and run <code>forge build --ast</code> again.</p>
+<p>Once the project has been correctly built, we can run <code>hevm test</code>, and get:</p>
 <pre><code>$ hevm test
 Checking 1 function(s) in contract src/contract-fail.sol:MyContract
 [RUNNING] prove_single_fail(address,uint256)
