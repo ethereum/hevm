@@ -22,6 +22,7 @@ import EVM.Solidity
 import EVM.Solvers
 import EVM.Effects
 import EVM.Format (hexByteString)
+import EVM.UnitTest (writeTrace)
 import qualified EVM.Stepper as Stepper
 import qualified EVM.Fetch as Fetch
 

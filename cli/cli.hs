@@ -225,7 +225,7 @@ main = withUtf8 $ do
       cores <- liftIO $ unsafeInto <$> getNumProcessors
       let solverCount = fromMaybe cores cmd.numSolvers
       runEnv env $ withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
-        buildOut <- liftIO $ readBuildOutput root (getProjectType cmd)
+        buildOut <- readBuildOutput root (getProjectType cmd)
         case buildOut of
           Left e -> liftIO $ do
             putStrLn $ "Error: " <> e
@@ -275,14 +275,15 @@ getSolver cmd = case cmd.solver of
                                 putStrLn $ "unrecognised solver: " <> input
                                 exitFailure
 
-getSrcInfo :: Command Options.Unwrapped -> IO DappInfo
+getSrcInfo :: App m => Command Options.Unwrapped -> m DappInfo
 getSrcInfo cmd = do
-  root <- getRoot cmd
-  withCurrentDirectory root $ do
+  root <- liftIO $ getRoot cmd
+  conf <- readConfig
+  liftIO $ withCurrentDirectory root $ do
     outExists <- doesDirectoryExist (root </> "out")
     if outExists
     then do
-      buildOutput <- readBuildOutput root (getProjectType cmd)
+      buildOutput <- runEnv Env {config = conf} $ readBuildOutput root (getProjectType cmd)
       case buildOutput of
         Left _ -> pure emptyDapp
         Right o -> pure $ dappInfo root o
@@ -381,7 +382,7 @@ areAnyPrefixOf prefixes t = any (flip T.isPrefixOf t) prefixes
 
 launchExec :: App m => Command Options.Unwrapped -> m ()
 launchExec cmd = do
-  dapp <- liftIO $ getSrcInfo cmd
+  dapp <- getSrcInfo cmd
   vm <- liftIO $ vmFromCommand cmd
   let
     block = maybe Fetch.Latest Fetch.BlockNumber cmd.block

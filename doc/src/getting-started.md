@@ -79,7 +79,7 @@ contract MyContract is DSTest {
   }
 }
 EOF
-$ forge build
+$ forge build --ast
 [⠊] Compiling...
 [⠒] Compiling 1 files with 0.8.19
 [⠢] Solc 0.8.19 finished in 14.27ms
@@ -118,7 +118,7 @@ should now say:
 Let's re-build with forge and check with hevm once again:
 
 ```shell
-$ forge build
+$ forge build --ast
 [⠰] Compiling...
 [⠔] Compiling 1 files with 0.8.19
 [⠒] Solc 0.8.19 finished in 985.32ms
