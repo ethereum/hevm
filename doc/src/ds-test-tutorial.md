@@ -98,7 +98,24 @@ contract MyContract is Test {
 }
 ```
 
-After compiling with `forge build --ast`, when ran under hevm, we get:
+When compiling our foundry project, we must either always pass the `--ast` flag
+to `forge build`, or, much better, set the `ast = true` flag in the
+`foundry.toml` file:
+
+```toml
+ast = true
+```
+
+In case neither `--ast` was passed, nor `ast = true` was set in the
+`foundry.toml` file, we will get an error such as:
+
+```
+Error: unable to parse Foundry project JSON: [...]/out/Base.sol/CommonBase.json Contract: "CommonBase"
+```
+
+In these cases, issue `forge clean` and run `forge build --ast` again.
+
+Once the project has been correctly built, we can run `hevm test`, and get:
 
 ```
 $ hevm test
