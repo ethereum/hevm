@@ -89,7 +89,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="ds-test-tutorial.html">ds-test tutorial</a></li><li class="chapter-item expanded "><a href="equivalence-checking-tutorial.html" class="active">Equivalence checking tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="ds-test-tutorial.html">ds-test tutorial</a></li><li class="chapter-item expanded "><a href="equivalence-checking-tutorial.html" class="active">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -186,7 +186,7 @@ circumstances. This allows to e.g. create two functions, one that is known to be
 another that uses less gas, but is hard to check for correctness. Then, with equivalence
 checking, one can check whether the two behave the same.</p>
 <h2 id="finding-discrepancies"><a class="header" href="#finding-discrepancies">Finding Discrepancies</a></h2>
-<p>Let's see this toy contract, in file <a href="contract1.sol">contract1.sol</a>:</p>
+<p>Let's see this toy contract, in file <a href="code_examples/contract1.sol">contract1.sol</a>:</p>
 <pre><code class="language-solidity">//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 contract MyContract {
@@ -197,7 +197,7 @@ contract MyContract {
   }
 }
 </code></pre>
-<p>And this, slightly modified one, in file <a href="contract2.sol">contract2.sol</a>:</p>
+<p>And this, slightly modified one, in file <a href="code_examples/contract2.sol">contract2.sol</a>:</p>
 <pre><code class="language-solidity">//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 contract MyContract {
@@ -233,7 +233,7 @@ Transaction Context:
 to 35, the two are not equivalent. This is indeed the case: one will add <code>35 div 2 = 17</code> twice, which is 34, the other will add 35.</p>
 <h2 id="fixing-and-proving-correctness"><a class="header" href="#fixing-and-proving-correctness">Fixing and Proving Correctness</a></h2>
 <p>Let's fix the above issue by incrementing the balance by 1 in case it's an odd
-value. Let's call this <a href="contract3.sol">contract3.sol</a>:</p>
+value. Let's call this <a href="code_examples/contract3.sol">contract3.sol</a>:</p>
 <pre><code class="language-solidity">//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 contract MyContract {
@@ -269,7 +269,7 @@ Instead, it <em>proved</em> the two equivalent from an outside observer perspect
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="test.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="symbolic-execution-tutorial.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -283,7 +283,7 @@ Instead, it <em>proved</em> the two equivalent from an outside observer perspect
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="test.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="symbolic-execution-tutorial.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

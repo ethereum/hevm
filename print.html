@@ -90,7 +90,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="ds-test-tutorial.html">ds-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="ds-test-tutorial.html">ds-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -662,7 +662,7 @@ circumstances. This allows to e.g. create two functions, one that is known to be
 another that uses less gas, but is hard to check for correctness. Then, with equivalence
 checking, one can check whether the two behave the same.</p>
 <h2 id="finding-discrepancies"><a class="header" href="#finding-discrepancies">Finding Discrepancies</a></h2>
-<p>Let's see this toy contract, in file <a href="contract1.sol">contract1.sol</a>:</p>
+<p>Let's see this toy contract, in file <a href="code_examples/contract1.sol">contract1.sol</a>:</p>
 <pre><code class="language-solidity">//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 contract MyContract {
@@ -673,7 +673,7 @@ contract MyContract {
   }
 }
 </code></pre>
-<p>And this, slightly modified one, in file <a href="contract2.sol">contract2.sol</a>:</p>
+<p>And this, slightly modified one, in file <a href="code_examples/contract2.sol">contract2.sol</a>:</p>
 <pre><code class="language-solidity">//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 contract MyContract {
@@ -709,7 +709,7 @@ Transaction Context:
 to 35, the two are not equivalent. This is indeed the case: one will add <code>35 div 2 = 17</code> twice, which is 34, the other will add 35.</p>
 <h2 id="fixing-and-proving-correctness"><a class="header" href="#fixing-and-proving-correctness">Fixing and Proving Correctness</a></h2>
 <p>Let's fix the above issue by incrementing the balance by 1 in case it's an odd
-value. Let's call this <a href="contract3.sol">contract3.sol</a>:</p>
+value. Let's call this <a href="code_examples/contract3.sol">contract3.sol</a>:</p>
 <pre><code class="language-solidity">//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 contract MyContract {
@@ -736,6 +736,162 @@ consume the same amount of gas and have widely different EVM bytecodes. Yet for
 an outside observer, they behave the same. Notice that hevm didn't simply fuzz
 the contract and within a given out of time it didn't find a counterexample.
 Instead, it <em>proved</em> the two equivalent from an outside observer perspective.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="symbolic-execution-tutorial"><a class="header" href="#symbolic-execution-tutorial">Symbolic Execution Tutorial</a></h1>
+<p>Symbolic execution mode of hevm checks whether any call to the contract could
+result in an assertion violation. Let's see a simple contract, in file
+<a href="code_examples/contract-symb-1.sol">contract-symb-1.sol</a>:</p>
+<pre><code class="language-solidity">//SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+contract MyContract {
+  function simple_symb() public pure {
+    uint i;
+    i = 1;
+    assert(i == 2);
+  }
+}
+</code></pre>
+<p>Let's first compile it with <code>solc</code>:</p>
+<pre><code class="language-shell">$ solc --bin-runtime contract-symb-1.sol
+======= contract-symb-1.sol:MyContract =======
+Binary:
+6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f600190506002811460455760446048565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212202bc2d2c44310edeba83b816dca9ef8abcc9cc1c775bae801b393bf4d5ff2d32364736f6c63430008180033
+</code></pre>
+<p>Now let's symbolically execute it:</p>
+<pre><code class="language-shell">$ hevm symbolic --sig "simple_symb()" --code "6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f600190506002811460455760446048565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212202bc2d2c44310edeba83b816dca9ef8abcc9cc1c775bae801b393bf4d5ff2d32364736f6c63430008180033"
+
+Discovered the following counterexamples:
+
+Calldata:
+  0x881fc77c
+
+Storage:
+  Addr SymAddr "miner": []
+  Addr SymAddr "origin": []
+
+Transaction Context:
+  TxValue: 0x0
+</code></pre>
+<h2 id="symbolically-executing-a-specific-function"><a class="header" href="#symbolically-executing-a-specific-function">Symbolically executing a specific function</a></h2>
+<p>When there are more than one functions in the code, the system will try to
+symbolically execute all. Let's take the file
+<a href="code_examples/contract-symb-2.sol">contract-symb-2.sol</a>:</p>
+<pre><code class="language-solidity">//SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+contract MyContract {
+  uint i;
+  function simple_symb1() public view {
+    assert(i == 2);
+  }
+  function simple_symb2() public view {
+    assert(i == 3);
+  }
+}
+</code></pre>
+<p>And compile it with solc:</p>
+<pre><code class="language-shell">
+$ solc --bin-runtime contract-symb-2.sol
+
+======= contract-symb-2.sol:MyContract =======
+Binary of the runtime part:
+6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220d70d3cfe85d6f0c8a34ce660d76d7f933db353e59397674009e3a3d982275d7e64736f6c63430008180033
+</code></pre>
+<p>Now execute the bytecode symbolically with hevm:</p>
+<pre><code class="language-shell">$ hevm symbolic --code "6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220d70d3cfe85d6f0c8a34ce660d76d7f933db353e59397674009e3a3d982275d7e64736f6c63430008180033"
+
+Discovered the following counterexamples:
+
+Calldata:
+  0x85c2fc71
+
+Storage:
+  Addr SymAddr "entrypoint": [(0x0,0x0)]
+  Addr SymAddr "miner": []
+  Addr SymAddr "origin": []
+
+Transaction Context:
+  TxValue: 0x0
+
+
+Calldata:
+  0x86ae3309
+
+Storage:
+  Addr SymAddr "entrypoint": [(0x0,0x0)]
+  Addr SymAddr "miner": []
+  Addr SymAddr "origin": []
+
+Transaction Context:
+  TxValue: 0x0
+</code></pre>
+<p>Notice that hevm discovered two issues. The calldata in each case is the function
+signature that <code>cast</code> from <code>foundry</code> gives for the two functions:</p>
+<pre><code class="language-shell">$ cast sig "simple_symb1()"
+0x85c2fc71
+
+$cast sig "simple_symb2()"
+0x86ae3309
+</code></pre>
+<p>In case you only want to execute only a particular function, you can ask <code>hevm</code>
+to only execute a particular function signature via the <code>--sig</code> option:</p>
+<pre><code class="language-shell">$ hevm symbolic --sig "simple_symb1()" --code "6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220d70d3cfe85d6f0c8a34ce660d76d7f933db353e59397674009e3a3d982275d7e64736f6c63430008180033"
+
+
+Discovered the following counterexamples:
+
+Calldata:
+  0x85c2fc71
+
+Storage:
+  Addr SymAddr "entrypoint": [(0x0,0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)]
+  Addr SymAddr "miner": []
+  Addr SymAddr "origin": []
+</code></pre>
+<h2 id="abstract-versus-empty-starting-storage"><a class="header" href="#abstract-versus-empty-starting-storage">Abstract versus empty starting storage</a></h2>
+<p>The initial store state of <code>hevm</code> is completely abstract. This means that the
+functions are explored for all possible values of the state. Let's take the
+following contract <a href="code_examples/contract-symb-3.sol">contract-symb-3.sol</a>:</p>
+<pre><code class="language-solidity">//SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+contract MyContract {
+  uint i;
+  function simple_symb() public view {
+    assert(i == 0);
+  }
+}
+</code></pre>
+<p>Let's compile with solc:</p>
+<pre><code class="language-shell">solc --bin-runtime contract-symb-3.sol
+
+======= contract-symb-3.sol:MyContract =======
+Binary of the runtime part:
+6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f805414604057603f6042565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220cf838a7ff084e553805b9b56decd46ea37363e97e26405b2409d22cb905de0e664736f6c63430008180033
+</code></pre>
+<p>With default symbolic execution, a counterexample is found:</p>
+<pre><code class="language-shell">$ cabal hevm symbolic --initial-storage Empty --code "6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f805414604057603f6042565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220cf838a7ff084e553805b9b56decd46ea37363e97e26405b2409d22cb905de0e664736f6c63430008180033"
+
+Discovered the following counterexamples:
+
+Calldata:
+  0x881fc77c
+
+Storage:
+  Addr SymAddr "entrypoint": [(0x0,0x1)]
+  Addr SymAddr "miner": []
+  Addr SymAddr "origin": []
+
+Transaction Context:
+  TxValue: 0x0
+</code></pre>
+<p>However, notice that the counterexample has <code>1</code> as the value for <code>i</code> storage
+variable. However, this contract can never actually assign <code>i</code> to any value.
+Running this contract with <code>--initial-state Empty</code> ensures that the default
+value, 0, is assigned, and the assert can never fail:</p>
+<pre><code class="language-shell">cabal run exe:hevm -- symbolic --initial-storage Empty --code "6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f805414604057603f6042565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220cf838a7ff084e553805b9b56decd46ea37363e97e26405b2409d22cb905de0e664736f6c63430008180033"
+
+QED: No reachable property violations discovered
+</code></pre>
+<p>Here, no counterexamples are discovered, because with empty default state, the
+value of <code>i</code> is zero, and therefore <code>assert(i == 0)</code> will all never trigger.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="hevm-test"><a class="header" href="#hevm-test"><code>hevm test</code></a></h1>
 <pre><code>Usage: hevm test [--root STRING] [--project-type PROJECTTYPE] [--rpc TEXT]
                  [--number W256] [--verbose INT] [--coverage] [--match STRING]

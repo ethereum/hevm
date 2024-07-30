@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>ds-test proving - hevm</title>
+        <title>Symbolic execution tutorial - hevm</title>
 
 
         <!-- Custom HTML head -->
@@ -89,7 +89,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="ds-test-tutorial.html">ds-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item expanded "><a href="test.html" class="active">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="ds-test-tutorial.html">ds-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item expanded "><a href="symbolic-execution-tutorial.html" class="active">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -151,7 +151,7 @@
                         <a href="https://github.com/ethereum/hevm" title="Git repository" aria-label="Git repository">
                             <i id="git-repository-button" class="fa fa-github"></i>
                         </a>
-                        <a href="hhttps://github.com/ethereum/hevm/edit/main/src/test.md" title="Suggest an edit" aria-label="Suggest an edit">
+                        <a href="hhttps://github.com/ethereum/hevm/edit/main/src/symbolic-execution-tutorial.md" title="Suggest an edit" aria-label="Suggest an edit">
                             <i id="git-edit-button" class="fa fa-edit"></i>
                         </a>
 
@@ -180,79 +180,172 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="hevm-test"><a class="header" href="#hevm-test"><code>hevm test</code></a></h1>
-<pre><code>Usage: hevm test [--root STRING] [--project-type PROJECTTYPE] [--rpc TEXT]
-                 [--number W256] [--verbose INT] [--coverage] [--match STRING]
-                 [--solver TEXT] [--num-solvers NATURAL] [--smtdebug] [--debug]
-                 [--trace] [--ffi] [--smttimeout NATURAL]
-                 [--max-iterations INTEGER]
-                 [--loop-detection-heuristic LOOPHEURISTIC]
-                 [--abstract-arithmetic] [--abstract-memory]
-                 [--num-cex-fuzz INTEGER] [--ask-smt-iterations INTEGER]
-
-Available options:
-  -h,--help                Show this help text
-  --root STRING            Path to project root directory (default: . )
-  --project-type PROJECTTYPE
-                           Is this a Foundry or DappTools project (default:
-                           Foundry)
-  --rpc TEXT               Fetch state from a remote node
-  --number W256            Block: number
-  --verbose INT            Append call trace: {1} failures {2} all
-  --coverage               Coverage analysis
-  --match STRING           Test case filter - only run methods matching regex
-  --solver TEXT            Used SMT solver: z3 (default), cvc5, or bitwuzla
-  --num-solvers NATURAL    Number of solver instances to use (default: number of
-                           cpu cores)
-  --smtdebug               Print smt queries sent to the solver
-  --debug                  Debug printing of internal behaviour
-  --trace                  Dump trace
-  --ffi                    Allow the usage of the hevm.ffi() cheatcode (WARNING:
-                           this allows test authors to execute arbitrary code on
-                           your machine)
-  --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
-  --max-iterations INTEGER Number of times we may revisit a particular branching
-                           point
-  --loop-detection-heuristic LOOPHEURISTIC
-                           Which heuristic should be used to determine if we are
-                           in a loop: StackBased (default) or Naive
-                           (default: StackBased)
-  --abstract-arithmetic    Use abstraction-refinement for complicated arithmetic
-                           functions such as MulMod. This runs the solver first
-                           with abstraction turned on, and if it returns a
-                           potential counterexample, the counterexample is
-                           refined to make sure it is a counterexample for the
-                           actual (not the abstracted) problem
-  --abstract-memory        Use abstraction-refinement for Memory. This runs the
-                           solver first with abstraction turned on, and if it
-                           returns a potential counterexample, the
-                           counterexample is refined to make sure it is a
-                           counterexample for the actual (not the abstracted)
-                           problem
-  --num-cex-fuzz INTEGER   Number of fuzzing tries to do to generate a
-                           counterexample (default: 3) (default: 3)
-  --ask-smt-iterations INTEGER
-                           Number of times we may revisit a particular branching
-                           point before we consult the smt solver to check
-                           reachability (default: 1) (default: 1)
+                        <h1 id="symbolic-execution-tutorial"><a class="header" href="#symbolic-execution-tutorial">Symbolic Execution Tutorial</a></h1>
+<p>Symbolic execution mode of hevm checks whether any call to the contract could
+result in an assertion violation. Let's see a simple contract, in file
+<a href="code_examples/contract-symb-1.sol">contract-symb-1.sol</a>:</p>
+<pre><code class="language-solidity">//SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+contract MyContract {
+  function simple_symb() public pure {
+    uint i;
+    i = 1;
+    assert(i == 2);
+  }
+}
 </code></pre>
-<p><code>hevm test</code> executes all solidity unit tests that make use of the <code>ds-test</code> assertion library
-(a.k.a <a href="https://book.getfoundry.sh/forge/forge-std">Foundry tests</a>). It
-supports both foundry based (the default) and <a href="https://dapp.tools/">dapptools</a> based projects.</p>
-<p>A more detailed introduction to symbolic unit tests with <code>hevm</code> can be found
-<a href="https://fv.ethereum.org/2020/12/11/symbolic-execution-with-ds-test/">here</a>. An
-overview of using ds-test for solidity testing can be found in the <a href="https://book.getfoundry.sh/forge/tests">foundry
-book</a>.</p>
+<p>Let's first compile it with <code>solc</code>:</p>
+<pre><code class="language-shell">$ solc --bin-runtime contract-symb-1.sol
+======= contract-symb-1.sol:MyContract =======
+Binary:
+6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f600190506002811460455760446048565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212202bc2d2c44310edeba83b816dca9ef8abcc9cc1c775bae801b393bf4d5ff2d32364736f6c63430008180033
+</code></pre>
+<p>Now let's symbolically execute it:</p>
+<pre><code class="language-shell">$ hevm symbolic --sig "simple_symb()" --code "6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f600190506002811460455760446048565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212202bc2d2c44310edeba83b816dca9ef8abcc9cc1c775bae801b393bf4d5ff2d32364736f6c63430008180033"
+
+Discovered the following counterexamples:
+
+Calldata:
+  0x881fc77c
+
+Storage:
+  Addr SymAddr "miner": []
+  Addr SymAddr "origin": []
+
+Transaction Context:
+  TxValue: 0x0
+</code></pre>
+<h2 id="symbolically-executing-a-specific-function"><a class="header" href="#symbolically-executing-a-specific-function">Symbolically executing a specific function</a></h2>
+<p>When there are more than one functions in the code, the system will try to
+symbolically execute all. Let's take the file
+<a href="code_examples/contract-symb-2.sol">contract-symb-2.sol</a>:</p>
+<pre><code class="language-solidity">//SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+contract MyContract {
+  uint i;
+  function simple_symb1() public view {
+    assert(i == 2);
+  }
+  function simple_symb2() public view {
+    assert(i == 3);
+  }
+}
+</code></pre>
+<p>And compile it with solc:</p>
+<pre><code class="language-shell">
+$ solc --bin-runtime contract-symb-2.sol
+
+======= contract-symb-2.sol:MyContract =======
+Binary of the runtime part:
+6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220d70d3cfe85d6f0c8a34ce660d76d7f933db353e59397674009e3a3d982275d7e64736f6c63430008180033
+</code></pre>
+<p>Now execute the bytecode symbolically with hevm:</p>
+<pre><code class="language-shell">$ hevm symbolic --code "6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220d70d3cfe85d6f0c8a34ce660d76d7f933db353e59397674009e3a3d982275d7e64736f6c63430008180033"
+
+Discovered the following counterexamples:
+
+Calldata:
+  0x85c2fc71
+
+Storage:
+  Addr SymAddr "entrypoint": [(0x0,0x0)]
+  Addr SymAddr "miner": []
+  Addr SymAddr "origin": []
+
+Transaction Context:
+  TxValue: 0x0
+
+
+Calldata:
+  0x86ae3309
+
+Storage:
+  Addr SymAddr "entrypoint": [(0x0,0x0)]
+  Addr SymAddr "miner": []
+  Addr SymAddr "origin": []
+
+Transaction Context:
+  TxValue: 0x0
+</code></pre>
+<p>Notice that hevm discovered two issues. The calldata in each case is the function
+signature that <code>cast</code> from <code>foundry</code> gives for the two functions:</p>
+<pre><code class="language-shell">$ cast sig "simple_symb1()"
+0x85c2fc71
+
+$cast sig "simple_symb2()"
+0x86ae3309
+</code></pre>
+<p>In case you only want to execute only a particular function, you can ask <code>hevm</code>
+to only execute a particular function signature via the <code>--sig</code> option:</p>
+<pre><code class="language-shell">$ hevm symbolic --sig "simple_symb1()" --code "6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220d70d3cfe85d6f0c8a34ce660d76d7f933db353e59397674009e3a3d982275d7e64736f6c63430008180033"
+
+
+Discovered the following counterexamples:
+
+Calldata:
+  0x85c2fc71
+
+Storage:
+  Addr SymAddr "entrypoint": [(0x0,0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)]
+  Addr SymAddr "miner": []
+  Addr SymAddr "origin": []
+</code></pre>
+<h2 id="abstract-versus-empty-starting-storage"><a class="header" href="#abstract-versus-empty-starting-storage">Abstract versus empty starting storage</a></h2>
+<p>The initial store state of <code>hevm</code> is completely abstract. This means that the
+functions are explored for all possible values of the state. Let's take the
+following contract <a href="code_examples/contract-symb-3.sol">contract-symb-3.sol</a>:</p>
+<pre><code class="language-solidity">//SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+contract MyContract {
+  uint i;
+  function simple_symb() public view {
+    assert(i == 0);
+  }
+}
+</code></pre>
+<p>Let's compile with solc:</p>
+<pre><code class="language-shell">solc --bin-runtime contract-symb-3.sol
+
+======= contract-symb-3.sol:MyContract =======
+Binary of the runtime part:
+6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f805414604057603f6042565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220cf838a7ff084e553805b9b56decd46ea37363e97e26405b2409d22cb905de0e664736f6c63430008180033
+</code></pre>
+<p>With default symbolic execution, a counterexample is found:</p>
+<pre><code class="language-shell">$ cabal hevm symbolic --initial-storage Empty --code "6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f805414604057603f6042565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220cf838a7ff084e553805b9b56decd46ea37363e97e26405b2409d22cb905de0e664736f6c63430008180033"
+
+Discovered the following counterexamples:
+
+Calldata:
+  0x881fc77c
+
+Storage:
+  Addr SymAddr "entrypoint": [(0x0,0x1)]
+  Addr SymAddr "miner": []
+  Addr SymAddr "origin": []
+
+Transaction Context:
+  TxValue: 0x0
+</code></pre>
+<p>However, notice that the counterexample has <code>1</code> as the value for <code>i</code> storage
+variable. However, this contract can never actually assign <code>i</code> to any value.
+Running this contract with <code>--initial-state Empty</code> ensures that the default
+value, 0, is assigned, and the assert can never fail:</p>
+<pre><code class="language-shell">cabal run exe:hevm -- symbolic --initial-storage Empty --code "6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f805414604057603f6042565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220cf838a7ff084e553805b9b56decd46ea37363e97e26405b2409d22cb905de0e664736f6c63430008180033"
+
+QED: No reachable property violations discovered
+</code></pre>
+<p>Here, no counterexamples are discovered, because with empty default state, the
+value of <code>i</code> is zero, and therefore <code>assert(i == 0)</code> will all never trigger.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="symbolic-execution-tutorial.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="equivalence-checking-tutorial.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="symbolic.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="test.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -262,11 +355,11 @@ book</a>.</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="symbolic-execution-tutorial.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="equivalence-checking-tutorial.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="symbolic.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="test.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
