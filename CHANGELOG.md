@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PAnd props are now recursively flattened
 - Double negation in Prop are removed
 - Updated forge to modern version, thereby fixing JSON parsing of new forge JSONs
+- Fixed RPC fetching of contract data
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
