@@ -51,9 +51,13 @@ source-repository head
 
 common shared
   if flag(ci)
-    ghc-options: -Werror
+    ghc-options:
+      -Werror
+      -- FIXME: we have to disable this, due to ghc bug: https://gitlab.haskell.org/ghc/ghc/-/issues/24120
+      -Wno-unused-packages
   if flag(devel)
-    ghc-options: -j
+    ghc-options:
+      -j
   if flag(debug)
     ghc-options:
       -j
