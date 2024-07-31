@@ -230,8 +230,8 @@ common test-base
     bytestring,
     filemanip,
     filepath,
-    here,
     hevm,
+    here,
     mtl,
     process,
     tasty,
@@ -250,16 +250,14 @@ common test-base
     exceptions
 
 library test-utils
-  import:
-    test-base
+  import: test-base
   exposed-modules:
     EVM.Test.Utils
     EVM.Test.Tracing
     EVM.Test.BlockchainTests
 
 common test-common
-  import:
-    test-base
+  import: test-base
   if flag(devel)
     ghc-options: -threaded -with-rtsopts=-N
   build-depends:
@@ -272,26 +270,29 @@ common test-common
 --- Test Suites ---
 
 test-suite test
-  import:
-    test-common
+  import: test-common
   type:
     exitcode-stdio-1.0
   main-is:
     test.hs
+  build-depends:
+    base16,
+    binary,
+    data-dword,
+    time,
+    regex
 
 -- these tests require network access so we split them into a separate test
 -- suite to make it easy to skip them when running nix-build
 test-suite rpc-tests
-  import:
-    test-common
+  import: test-common
   type:
     exitcode-stdio-1.0
   main-is:
     rpc.hs
 
 test-suite ethereum-tests
-  import:
-    test-common
+  import: test-common
   type:
     exitcode-stdio-1.0
   main-is:
@@ -320,10 +321,8 @@ benchmark bench
     bytestring,
     text,
     hevm,
-    here,
     test-utils,
     filemanip,
     filepath,
     containers,
-    mtl,
     unliftio-core
