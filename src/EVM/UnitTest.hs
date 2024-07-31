@@ -194,6 +194,8 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     let cd = symCalldata testName types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` testName
         testContract store = fromMaybe (internalError "test contract not found in state") (Map.lookup vm.state.contract store)
+    conf <- readConfig
+    when conf.debug $ liftIO $ putStrLn $ "symRun calldata is: " <> show cd
 
     -- define postcondition depending on `shouldFail`
     -- We directly encode the failure conditions from failed() in ds-test since this is easier to encode than a call into failed()
