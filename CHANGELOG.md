@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved printing of results. Should be more intuitive to understand what hevm found.
 - More complete and precise array/mapping slot rewrite, along with a copySlice improvement
 - Use a let expression in copySlice to decrease expression size
+- Default max iterations is 1 now. `--max-iters -1` now signals no bound. This change is to match other
+  symbolic execution frameworks' default bound and to not go into an infinite loop by default when
+  there could be other, interesting and reachable bugs in the code
 
 ## Added
 - More POr and PAnd rules
