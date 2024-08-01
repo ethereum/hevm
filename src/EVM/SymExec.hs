@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE DeriveAnyClass #-}
 
 module EVM.SymExec where
@@ -26,6 +28,7 @@ import Data.Text.IO qualified as T
 import Text.Printf (printf)
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
+import Data.Vector qualified as V
 import EVM (makeVm, abstractContract, initialContract, getCodeLocation, isValidJumpDest)
 import EVM.Exec
 import EVM.Fetch qualified as Fetch
@@ -118,8 +121,8 @@ symAbiArg name = \case
     if n > 0 && n <= 32
     then let v = Var name in St [Expr.inRange (n * 8) v] v
     else internalError "bad type"
-  AbiArrayType sz tp ->
-    Comp $ fmap (\n -> symAbiArg (name <> n) tp) [T.pack (show n) | n <- [0..sz-1]]
+  AbiArrayType sz tp -> symAbiArg name (AbiTupleType (V.replicate sz tp))
+  AbiTupleType tps -> Comp . V.toList . V.imap (\(T.pack . show -> i) tp -> symAbiArg (name <> i) tp) $ tps
   t -> internalError $ "TODO: symbolic abi encoding for " <> show t
 
 data CalldataFragment
@@ -186,6 +189,7 @@ combineFragments fragments base = go (Lit 4) fragments (base, [])
 
 isSt :: CalldataFragment -> Bool
 isSt (St {}) = True
+isSt (Comp fs) = all isSt fs
 isSt _ = False
 
 

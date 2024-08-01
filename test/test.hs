@@ -5,6 +5,7 @@ module Main where
 
 import Prelude hiding (LT, GT)
 
+import Debug.Trace
 import GHC.TypeLits
 import Data.Proxy
 import Control.Monad
@@ -28,6 +29,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Time (diffUTCTime, getCurrentTime)
+import Data.Tuple.Extra
 import Data.Typeable
 import Data.Vector qualified as V
 import Data.Word (Word8)
@@ -42,6 +44,7 @@ import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty.HUnit
 import Test.Tasty.Runners hiding (Failure, Success)
 import Test.Tasty.ExpectedFailure
+import Test.Tasty.Options
 import Text.RE.TDFA.String
 import Text.RE.Replace
 import Witch (unsafeInto, into)
@@ -70,6 +73,8 @@ import EVM.Traversals
 import EVM.Types hiding (Env)
 import EVM.Effects
 import EVM.UnitTest (writeTrace)
+
+trace' msg x = trace (msg <> ": " <> show x) x
 
 testEnv :: Env
 testEnv = Env { config = defaultConfig {
@@ -823,6 +828,24 @@ tests = testGroup "hevm"
         SolidityCall "x = uint(keccak256(abi.encodePacked(a)));"
           [AbiString ""] ===> AbiUInt 256 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
 
+    , localOption (QuickCheckReplay (Just 773280)) $ testProperty "symbolic abi encoding vs. solidity" $ withMaxSuccess 1000 $ \(SymbolicAbiVal y) -> prop $ do
+          Just encoded <- runStatements [i| x = abi.encode(a);|] [y] AbiBytesDynamicType
+          let solidityEncoded = case decodeAbiValue (AbiTupleType $ V.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
+                AbiTuple (V.toList -> [e]) -> e
+                _ -> internalError "AbiTuple expected"
+          let (hevmEncoded, _) = first (Expr.drop 4) $ combineFragments [symAbiArg "y" (AbiTupleType $ V.fromList [abiValueType y])] (ConcreteBuf "")
+              expectedVals = expectedConcVals "y" (AbiTuple . V.fromList $ [y])
+              hevmConcrete = case Expr.simplify . subModel expectedVals $ hevmEncoded of
+                               ConcreteBuf b -> b
+                               buf -> error ("valMap: " <> show expectedVals <> "\ny:" <> show y <> "\n" <> "buf: " <> show buf)
+          assertEqualM "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmConcrete)
+    , testProperty "symbolic abi encoding vs. solidity (2 args)" $ withMaxSuccess 1000 $ \(SymbolicAbiVal x', SymbolicAbiVal y') -> prop $ do
+          Just encoded <- runStatements [i| x = abi.encode(a, b);|] [x', y'] AbiBytesDynamicType
+          let solidityEncoded = case decodeAbiValue (AbiTupleType $ V.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
+                AbiTuple (V.toList -> [e]) -> e
+                _ -> internalError "AbiTuple expected"
+          let hevmEncoded = encodeAbiValue (AbiTuple $ V.fromList [x',y'])
+          assertEqualM "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
     , testProperty "abi encoding vs. solidity" $ withMaxSuccess 20 $ forAll (arbitrary >>= genAbiValue) $
       \y -> prop $ do
           Just encoded <- runStatements [i| x = abi.encode(a);|]
@@ -3691,6 +3714,31 @@ decodeAbiValues types bs =
         _ -> internalError "AbiTuple expected"
   in V.toList xy
 
+-- abi types that are supported in the symbolic abi encoder
+newtype SymbolicAbiType = SymbolicAbiType AbiType
+  deriving (Eq, Show)
+
+newtype SymbolicAbiVal = SymbolicAbiVal AbiValue
+  deriving (Eq, Show)
+
+instance Arbitrary SymbolicAbiVal where
+  arbitrary = do
+    SymbolicAbiType ty <- arbitrary
+    SymbolicAbiVal <$> genAbiValue ty
+
+instance Arbitrary SymbolicAbiType where
+  arbitrary = SymbolicAbiType <$> oneof
+    [ (AbiUIntType . (* 8)) <$> choose (1, 32)
+    , (AbiIntType . (* 8)) <$> choose (1, 32)
+    , pure AbiAddressType
+    , pure AbiBoolType
+    , AbiBytesType <$> choose (1,32)
+    , do SymbolicAbiType ty <- scale (`div` 2) arbitrary
+         AbiArrayType
+           <$> (getPositive <$> arbitrary)
+           <*> pure ty
+    ]
+
 newtype Bytes = Bytes ByteString
   deriving Eq
 
@@ -4317,3 +4365,17 @@ checkPost post c sig = do
 
 successGen :: [Prop] -> Expr End
 successGen props = Success props mempty (ConcreteBuf "") mempty
+
+-- gets the expected concrete values for symbolic abi testing
+expectedConcVals :: Text -> AbiValue -> SMTCex
+expectedConcVals nm val = case val of
+  AbiUInt {} -> mempty { vars = Map.fromList [(Var nm, mkWord val)] }
+  AbiInt {} -> mempty { vars = Map.fromList [(Var nm, mkWord val)] }
+  AbiAddress {} -> mempty { addrs = Map.fromList [(SymAddr nm, truncateToAddr (mkWord val))] }
+  AbiBool {} -> mempty { vars = Map.fromList [(Var nm, mkWord val)] }
+  AbiBytes {} -> mempty { vars = Map.fromList [(Var nm, mkWord val)] }
+  AbiArray _ _ vals -> mconcat . V.toList . V.imap (\(T.pack . show -> idx) v -> expectedConcVals (nm <> idx) v) $ vals
+  AbiTuple vals -> mconcat . V.toList . V.imap (\(T.pack . show -> idx) v -> expectedConcVals (nm <> idx) v) $ vals
+  _ -> error "unsupported"
+  where
+    mkWord = word . encodeAbiValue
