@@ -177,6 +177,7 @@ unknownContract :: Expr EAddr -> Contract
 unknownContract addr = Contract
   { code        = UnknownCode addr
   , storage     = AbstractStore addr Nothing
+  , tStorage    = AbstractStore addr Nothing
   , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = Nothing
@@ -191,6 +192,7 @@ abstractContract :: ContractCode -> Expr EAddr -> Contract
 abstractContract code addr = Contract
   { code        = code
   , storage     = AbstractStore addr Nothing
+  , tStorage    = AbstractStore addr Nothing
   , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = if isCreation code then Just 1 else Just 0
@@ -209,6 +211,7 @@ initialContract :: ContractCode -> Contract
 initialContract code = Contract
   { code        = code
   , storage     = ConcreteStore mempty
+  , tStorage    = ConcreteStore mempty
   , origStorage = ConcreteStore mempty
   , balance     = Lit 0
   , nonce       = if isCreation code then Just 1 else Just 0
@@ -691,6 +694,25 @@ exec1 = do
                        -- if any of the arguments are symbolic,
                        -- don't change the refund counter
                        _ -> noop
+            _ -> underrun
+
+        OpTLoad ->
+          case stk of
+            x:xs -> do
+              burn g_warm_storage_read $
+                accessTStorage self x $ \y -> do
+                  next
+                  assign (#state % #stack) (y:xs)
+            _ -> underrun
+
+        OpTStore ->
+          notStatic $
+          case stk of
+            x:new:xs ->
+              burn g_sload $ do
+                next
+                assign (#state % #stack) xs
+                modifying (#env % #contracts % ix self % #tStorage) (writeStorage x new)
             _ -> underrun
 
         OpJump ->
@@ -1335,6 +1357,33 @@ accessStorage addr slot continue = do
               modifying (#env % #contracts % ix (LitAddr a) % #storage) (writeStorage (Lit s) (Lit x))
               assign #result Nothing
               continue (Lit x))
+
+accessTStorage
+  :: VMOps t => Expr EAddr
+  -> Expr EWord
+  -> (Expr EWord -> EVM t s ())
+  -> EVM t s ()
+accessTStorage addr slot continue = do
+  let slotConc = Expr.concKeccakSimpExpr slot
+  use (#env % #contracts % at addr) >>= \case
+    Just c ->
+      -- Try first without concretization. Then if we get a Just, with concretization
+      -- if both give a Just, should we `continue`.
+      -- --> This is because readStorage can do smart rewrites, but only in case
+      --     the expression is of a particular format, which can be destroyed by simplification.
+      --     However, without concretization, it may not find things that are actually in the storage
+      case readStorage slot c.tStorage of
+        Just x -> case readStorage slotConc c.tStorage of
+          Just _ -> continue x
+          Nothing -> continue $ Lit 0
+        Nothing -> continue $ Lit 0
+    Nothing ->
+      fetchAccount addr $ \_ ->
+        accessStorage addr slot continue
+
+-- TODO integrate this with some existing system
+clearTStorages :: EVM t s ()
+clearTStorages = (#env % #contracts) %= fmap (\c -> c { tStorage = ConcreteStore mempty } :: Contract)
 
 accountExists :: Expr EAddr -> VM t s -> Bool
 accountExists addr vm =

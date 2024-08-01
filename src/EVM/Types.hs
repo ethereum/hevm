@@ -309,10 +309,11 @@ data Expr (a :: EType) where
   -- A restricted view of a contract that does not include extraneous metadata
   -- from the full constructor defined in the VM state
   C ::
-    { code    :: ContractCode
-    , storage :: Expr Storage
-    , balance :: Expr EWord
-    , nonce   :: Maybe W64
+    { code     :: ContractCode
+    , storage  :: Expr Storage
+    , tStorage :: Expr Storage
+    , balance  :: Expr EWord
+    , nonce    :: Maybe W64
     } -> Expr EContract
 
   -- addresses
@@ -768,6 +769,7 @@ data Block = Block
 data Contract = Contract
   { code        :: ContractCode
   , storage     :: Expr Storage
+  , tStorage    :: Expr Storage
   , origStorage :: Expr Storage
   , balance     :: Expr EWord
   , nonce       :: Maybe W64
@@ -1010,6 +1012,8 @@ data GenericOp a
   | OpMstore8
   | OpSload
   | OpSstore
+  | OpTLoad
+  | OpTStore
   | OpJump
   | OpJumpi
   | OpPc
