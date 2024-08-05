@@ -60,10 +60,10 @@ the future, when gas costs change.
 ## Symbolic arguments to certain EVM opcodes
 
 When a symbolic argument is passed to an EVM opcodes that hevm cannot deal with
-symbolically, this error will be raised. There are number of such EVM opcode, for
+symbolically, an error is raised. There are number of such EVM opcodes, for
 example JUMP, JUMPI, CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2,
-SELFDESTRUCT, etc. If any of these opcodes are called with an argument that is
-symbolic, hevm raises an error, like:
+SELFDESTRUCT, etc. If any of these are called with an argument that is
+symbolic, hevm raises an error, such as:
 
 ```shell
 WARNING: hevm was only able to partially explore the call prefix 0x[...] due to the following issue(s):
@@ -74,7 +74,8 @@ There is no single workaround for this class of issues, as it depends on the
 specific circumstances of the code. In general, we suggest trying to concretize
 the call to the code, such that only what is truly needed to be symbolic is
 left symbolic. For example, you may be able to force partial cocrete execution via
-`require()` statements, thereby concretizing the potential symbolic value.
+`require()` statements, thereby concretizing the potential symbolic value. Similarly,
+dynamically computed JUMP destinations can be avoided via pre-computed jump tables, etc.
 
 ## Jumping into symbolic code
 
