@@ -35,8 +35,11 @@ WARNING: hevm was only able to partially explore the call prefix 0x[...] due to 
 
 In general, the workaround suggested are to try to write code without loops, if
 possible, or to have a limit on the number of iterations, such as `max(k,n)`.
-Potentially long loops are a problem for EVM, as they may be forced by an
-attacker to exhaust gas, thereby potentially e.g. deadlocking the contract.
+Unbounded loops are a problem for digital contracts, as they may be forced by
+an attacker to exhaust gas, thereby potentially e.g. deadlocking the contract.
+This can lock in (large) funds, which can be a very serious issues. Hence,
+limiting loop iterations is a good practice in general -- not only for symbolic
+execution.
 
 
 ## Gas costs
@@ -50,9 +53,9 @@ trace would cost more to execute than the allowable gas limit.
 
 In general, it is possible to check whether the issue can be hit by running the
 hevm-provided counterexample in a concrete execution setting, thereby filtering
-out false positives. However, it is advisable to fix potential issues that are
-only limited by gas, as they may become exploitable in the future, when gas
-costs change.
+out false positives. However, it is strongly advisable to fix potential issues
+that are only guarded due to gas exhaustion, as they may become exploitable in
+the future, when gas costs change.
 
 ## Symbolic arguments to certain EVM opcodes
 
