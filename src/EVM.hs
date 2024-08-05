@@ -1315,13 +1315,13 @@ accessStorage addr slot continue = do
       fetchAccount addr $ \_ ->
         accessStorage addr slot continue
   where
-      rpcCall c slotConc = if c.external
+      rpcCall c slotConc = fetchAccount addr $ \_ ->
+        if c.external
         then forceConcreteAddr addr "cannot read storage from symbolic addresses via rpc" $ \addr' ->
           forceConcrete slotConc "cannot read symbolic slots via RPC" $ \slot' -> do
             -- check if the slot is cached
-            contract <- preuse (#cache % #fetched % ix addr')
-            case contract of
-              Nothing -> internalError "contract marked external not found in cache"
+            use (#env % #contracts % at (LitAddr addr')) >>= \case
+              Nothing -> internalError $ "contract addr " <> show addr' <> " marked external not found in cache"
               Just fetched -> case readStorage (Lit slot') fetched.storage of
                           Nothing -> mkQuery addr' slot'
                           Just val -> continue val
@@ -1665,7 +1665,7 @@ cheatActions = Map.fromList
           Just a -> assign (#config % #overrideCaller) (Just a)
           Nothing -> vmError (BadCheatCode sig)
         _ -> vmError (BadCheatCode sig)
-          
+
   , action "startPrank(address)" $
       \sig _ _ input -> case decodeStaticArgs 0 1 input of
         [addr]  -> case wordToAddr addr of
