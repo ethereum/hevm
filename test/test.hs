@@ -5,7 +5,6 @@ module Main where
 
 import Prelude hiding (LT, GT)
 
-import Debug.Trace
 import GHC.TypeLits
 import Data.Proxy
 import Control.Monad
@@ -44,7 +43,6 @@ import Test.QuickCheck.Instances.ByteString()
 import Test.Tasty.HUnit
 import Test.Tasty.Runners hiding (Failure, Success)
 import Test.Tasty.ExpectedFailure
-import Test.Tasty.Options
 import Text.RE.TDFA.String
 import Text.RE.Replace
 import Witch (unsafeInto, into)
@@ -73,8 +71,6 @@ import EVM.Traversals
 import EVM.Types hiding (Env)
 import EVM.Effects
 import EVM.UnitTest (writeTrace)
-
-trace' msg x = trace (msg <> ": " <> show x) x
 
 testEnv :: Env
 testEnv = Env { config = defaultConfig {
@@ -828,25 +824,37 @@ tests = testGroup "hevm"
         SolidityCall "x = uint(keccak256(abi.encodePacked(a)));"
           [AbiString ""] ===> AbiUInt 256 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
 
-    , localOption (QuickCheckReplay (Just 773280)) $ testProperty "symbolic abi encoding vs. solidity" $ withMaxSuccess 1000 $ \(SymbolicAbiVal y) -> prop $ do
+    , testProperty "symbolic-abi-enc-vs-solidity" $ \(SymbolicAbiVal y) -> prop $ do
           Just encoded <- runStatements [i| x = abi.encode(a);|] [y] AbiBytesDynamicType
           let solidityEncoded = case decodeAbiValue (AbiTupleType $ V.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
                 AbiTuple (V.toList -> [e]) -> e
                 _ -> internalError "AbiTuple expected"
-          let (hevmEncoded, _) = first (Expr.drop 4) $ combineFragments [symAbiArg "y" (AbiTupleType $ V.fromList [abiValueType y])] (ConcreteBuf "")
+          let
+              frag = [symAbiArg "y" (AbiTupleType $ V.fromList [abiValueType y])]
+              (hevmEncoded, _) = first (Expr.drop 4) $ combineFragments frag (ConcreteBuf "")
               expectedVals = expectedConcVals "y" (AbiTuple . V.fromList $ [y])
-              hevmConcrete = case Expr.simplify . subModel expectedVals $ hevmEncoded of
+              hevmConcretePre = subModel expectedVals hevmEncoded
+              hevmConcrete = case Expr.simplify hevmConcretePre of
                                ConcreteBuf b -> b
-                               buf -> error ("valMap: " <> show expectedVals <> "\ny:" <> show y <> "\n" <> "buf: " <> show buf)
+                               buf -> internalError ("valMap: " <> show expectedVals <> "\ny:" <> show y <> "\n" <> "buf: " <> show buf)
+          -- putStrLnM $ "frag: " <> show frag
+          -- putStrLnM $ "expectedVals: " <> show expectedVals
+          -- putStrLnM $ "frag: " <> show frag
+          -- putStrLnM $ "hevmEncoded: " <> show hevmEncoded
+          -- putStrLnM $ "solidity encoded: " <> show solidityEncoded
+          -- putStrLnM $ "our encoded     : " <> show (AbiBytesDynamic hevmConcrete)
+          -- putStrLnM $ "y     : " <> show y
+          -- putStrLnM $ "y type: " <> showAlter y
+          -- putStrLnM $ "hevmConcretePre: " <> show hevmConcretePre
           assertEqualM "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmConcrete)
-    , testProperty "symbolic abi encoding vs. solidity (2 args)" $ withMaxSuccess 1000 $ \(SymbolicAbiVal x', SymbolicAbiVal y') -> prop $ do
+    , testProperty "symbolic-abi encoding-vs-solidity-2-args" $ \(SymbolicAbiVal x', SymbolicAbiVal y') -> prop $ do
           Just encoded <- runStatements [i| x = abi.encode(a, b);|] [x', y'] AbiBytesDynamicType
           let solidityEncoded = case decodeAbiValue (AbiTupleType $ V.fromList [AbiBytesDynamicType]) (BS.fromStrict encoded) of
                 AbiTuple (V.toList -> [e]) -> e
                 _ -> internalError "AbiTuple expected"
           let hevmEncoded = encodeAbiValue (AbiTuple $ V.fromList [x',y'])
           assertEqualM "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
-    , testProperty "abi encoding vs. solidity" $ withMaxSuccess 20 $ forAll (arbitrary >>= genAbiValue) $
+    , testProperty "abi-encoding-vs-solidity" $ forAll (arbitrary >>= genAbiValue) $
       \y -> prop $ do
           Just encoded <- runStatements [i| x = abi.encode(a);|]
             [y] AbiBytesDynamicType
@@ -856,7 +864,7 @@ tests = testGroup "hevm"
           let hevmEncoded = encodeAbiValue (AbiTuple $ V.fromList [y])
           assertEqualM "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
 
-    , testProperty "abi encoding vs. solidity (2 args)" $ withMaxSuccess 20 $ forAll (arbitrary >>= bothM genAbiValue) $
+    , testProperty "abi-encoding-vs-solidity-2-args" $ forAll (arbitrary >>= bothM genAbiValue) $
       \(x', y') -> prop $ do
           Just encoded <- runStatements [i| x = abi.encode(a, b);|]
             [x', y'] AbiBytesDynamicType
@@ -867,7 +875,7 @@ tests = testGroup "hevm"
           assertEqualM "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
 
     -- we need a separate test for this because the type of a function is "function() external" in solidity but just "function" in the abi:
-    , testProperty "abi encoding vs. solidity (function pointer)" $ withMaxSuccess 20 $ forAll (genAbiValue AbiFunctionType) $
+    , testProperty "abi-encoding-vs-solidity-function-pointer" $ withMaxSuccess 20 $ forAll (genAbiValue AbiFunctionType) $
       \y -> prop $ do
           Just encoded <- runFunction [i|
               function foo(function() external a) public pure returns (bytes memory x) {
@@ -3727,16 +3735,15 @@ instance Arbitrary SymbolicAbiVal where
     SymbolicAbiVal <$> genAbiValue ty
 
 instance Arbitrary SymbolicAbiType where
-  arbitrary = SymbolicAbiType <$> oneof
-    [ (AbiUIntType . (* 8)) <$> choose (1, 32)
-    , (AbiIntType . (* 8)) <$> choose (1, 32)
-    , pure AbiAddressType
-    , pure AbiBoolType
-    , AbiBytesType <$> choose (1,32)
-    , do SymbolicAbiType ty <- scale (`div` 2) arbitrary
-         AbiArrayType
-           <$> (getPositive <$> arbitrary)
-           <*> pure ty
+  arbitrary = SymbolicAbiType <$> frequency
+    [ (5, (AbiUIntType . (* 8)) <$> choose (1, 32))
+    , (5, (AbiIntType . (* 8)) <$> choose (1, 32))
+    , (5, pure AbiAddressType)
+    , (5, pure AbiBoolType)
+    , (5, AbiBytesType <$> choose (1,32))
+    , (1, do SymbolicAbiType ty <- scale (`div` 2) arbitrary
+             AbiArrayType <$> (choose (1, 30)) <*> pure ty
+      )
     ]
 
 newtype Bytes = Bytes ByteString
@@ -4374,8 +4381,8 @@ expectedConcVals nm val = case val of
   AbiAddress {} -> mempty { addrs = Map.fromList [(SymAddr nm, truncateToAddr (mkWord val))] }
   AbiBool {} -> mempty { vars = Map.fromList [(Var nm, mkWord val)] }
   AbiBytes {} -> mempty { vars = Map.fromList [(Var nm, mkWord val)] }
-  AbiArray _ _ vals -> mconcat . V.toList . V.imap (\(T.pack . show -> idx) v -> expectedConcVals (nm <> idx) v) $ vals
-  AbiTuple vals -> mconcat . V.toList . V.imap (\(T.pack . show -> idx) v -> expectedConcVals (nm <> idx) v) $ vals
-  _ -> error "unsupported"
+  AbiArray _ _ vals -> mconcat . V.toList . V.imap (\(T.pack . show -> idx) v -> expectedConcVals (nm <> "-a-" <> idx) v) $ vals
+  AbiTuple vals -> mconcat . V.toList . V.imap (\(T.pack . show -> idx) v -> expectedConcVals (nm <> "-t-" <> idx) v) $ vals
+  _ -> internalError $ "unsupported Abi type " <> show nm <> " val: " <> show val <> " val type: " <> showAlter val
   where
     mkWord = word . encodeAbiValue

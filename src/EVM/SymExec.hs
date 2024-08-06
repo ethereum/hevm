@@ -108,22 +108,26 @@ symAbiArg :: Text -> AbiType -> CalldataFragment
 symAbiArg name = \case
   AbiUIntType n ->
     if n `mod` 8 == 0 && n <= 256
-    then let v = Var name in St [Expr.inRange n v] v
+    then St [Expr.inRange n v] v
     else internalError "bad type"
   AbiIntType n ->
     if n `mod` 8 == 0 && n <= 256
     -- TODO: is this correct?
-    then let v = Var name in St [Expr.inRange n v] v
+    then St [Expr.inRange n v] v
     else internalError "bad type"
-  AbiBoolType -> let v = Var name in St [bool v] v
+  AbiBoolType -> St [bool v] v
   AbiAddressType -> St [] (WAddr (SymAddr name))
   AbiBytesType n ->
     if n > 0 && n <= 32
-    then let v = Var name in St [Expr.inRange (n * 8) v] v
+    then St [Expr.inRange (n * 8) v] v
     else internalError "bad type"
-  AbiArrayType sz tp -> symAbiArg name (AbiTupleType (V.replicate sz tp))
-  AbiTupleType tps -> Comp . V.toList . V.imap (\(T.pack . show -> i) tp -> symAbiArg (name <> i) tp) $ tps
+  AbiArrayType sz tps -> do
+    Comp . V.toList . V.imap (\(T.pack . show -> i) tp -> symAbiArg (name <> "-a-" <> i) tp) $ (V.replicate sz tps)
+  AbiTupleType tps ->
+    Comp . V.toList . V.imap (\(T.pack . show -> i) tp -> symAbiArg (name <> "-t-" <> i) tp) $ tps
   t -> internalError $ "TODO: symbolic abi encoding for " <> show t
+  where
+    v = Var name
 
 data CalldataFragment
   = St [Prop] (Expr EWord)
