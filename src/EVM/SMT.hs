@@ -103,6 +103,25 @@ data SMTCex = SMTCex
   }
   deriving (Eq, Show)
 
+instance Semigroup SMTCex where
+  a <> b = SMTCex
+    { vars = a.vars <> b.vars
+    , addrs = a.addrs <> b.addrs
+    , buffers = a.buffers <> b.buffers
+    , store = a.store <> b.store
+    , blockContext = a.blockContext <> b.blockContext
+    , txContext = a.txContext <> b.txContext
+    }
+
+instance Monoid SMTCex where
+  mempty = SMTCex
+    { vars = mempty
+    , addrs = mempty
+    , buffers = mempty
+    , store = mempty
+    , blockContext = mempty
+    , txContext = mempty
+    }
 
 -- | Used for abstraction-refinement of the SMT formula. Contains assertions that make our query fully precise. These will be added to the assertion stack if we get `sat` with the abstracted query.
 data RefinementEqs = RefinementEqs [Builder] [Prop]

@@ -227,6 +227,7 @@ common test-base
     base,
     containers,
     directory,
+    extra,
     bytestring,
     filemanip,
     filepath,

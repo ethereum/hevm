@@ -55,6 +55,7 @@ module EVM.ABI
   , makeAbiValue
   , parseAbiValue
   , selector
+  , showAlter
   ) where
 
 import EVM.Expr (readWord, isLitWord)
@@ -84,6 +85,7 @@ import Data.Vector qualified as Vector
 import Data.Word (Word32)
 import GHC.Generics (Generic)
 import Test.QuickCheck hiding ((.&.), label)
+import Numeric (showHex)
 
 import Text.Megaparsec qualified as P
 import Text.Megaparsec.Char qualified as P
@@ -108,6 +110,9 @@ data AbiValue
   | AbiFunction     BS.ByteString
   deriving (Read, Eq, Ord, Generic)
 
+class ShowAlter a where
+  showAlter :: a -> String
+
 -- | Pretty-print some 'AbiValue'.
 instance Show AbiValue where
   show (AbiUInt _ n)         = show n
@@ -124,6 +129,24 @@ instance Show AbiValue where
   show (AbiTuple v) =
     "(" ++ intercalate ", " (show <$> Vector.toList v) ++ ")"
   show (AbiFunction b)       = show (ByteStringS b)
+
+-- | Pretty-print some 'AbiValue'.
+instance ShowAlter AbiValue where
+  showAlter (AbiUInt _ n)         = "AbiUint " <> showHex n ""
+  showAlter (AbiInt  _ n)         = if n < 0 then "AbiInt- " <> showHex (-n) ""
+                                             else "AbiInt+ " <> showHex n ""
+  showAlter (AbiAddress n)        = "AbiAddress " <> show n
+  showAlter (AbiBool b)           = "AbiBool " <> if b then "true" else "false"
+  showAlter (AbiBytes      _ b)   = "AbiBytes " <> show (ByteStringS b)
+  showAlter (AbiBytesDynamic b)   = "AbiBytesDynamic " <>show (ByteStringS b)
+  showAlter (AbiString       s)   = "AbiString " <> formatString s
+  showAlter (AbiArrayDynamic _ v) = "AbiArrayDynamic " <>
+    "[" ++ intercalate ", " (show <$> Vector.toList v) ++ "]"
+  showAlter (AbiArray      _ _ v) = "AbiArray " <>
+    "[" ++ intercalate ", " (showAlter <$> Vector.toList v) ++ "]"
+  showAlter (AbiTuple v) = "AbiTuple" <>
+    "(" ++ intercalate ", " (show <$> Vector.toList v) ++ ")"
+  showAlter (AbiFunction b)       = "AbiFunction " <> show (ByteStringS b)
 
 data AbiType
   = AbiUIntType         Int
