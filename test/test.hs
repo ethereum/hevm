@@ -669,6 +669,13 @@ tests = testGroup "hevm"
         let simplified = Expr.simplify s2
         checkEquiv simplified s2
     ]
+  , testGroup "constFoldProp-concrete-tests" [
+    test "disjunction-left-false" $ do
+      let
+        t = [PEq (Var "x") (Lit 1), POr (PEq (Var "x") (Lit 0)) (PEq (Var "y") (Lit 1)), PEq (Var "y") (Lit 2)]
+        canBeSat = Expr.constFoldProp t
+      assertEqualM "Must be equal" canBeSat False
+  ]
   , testGroup "simpProp-concrete-tests" [
       test "simpProp-concrete-trues" $ do
         let
