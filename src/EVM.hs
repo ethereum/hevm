@@ -1379,10 +1379,7 @@ accessTStorage addr slot continue = do
   use (#env % #contracts % at addr) >>= \case
     Just c ->
       -- Try first without concretization. Then if we get a Just, with concretization
-      -- if both give a Just, should we `continue`.
-      -- --> This is because readStorage can do smart rewrites, but only in case
-      --     the expression is of a particular format, which can be destroyed by simplification.
-      --     However, without concretization, it may not find things that are actually in the storage
+      -- See `accessStorage` for more details
       case readStorage slot c.tStorage of
         Just x -> case readStorage slotConc c.tStorage of
           Just _ -> continue x
@@ -1390,7 +1387,7 @@ accessTStorage addr slot continue = do
         Nothing -> continue $ Lit 0
     Nothing ->
       fetchAccount addr $ \_ ->
-        accessStorage addr slot continue
+        accessTStorage addr slot continue
 
 -- TODO integrate this with some existing system
 clearTStorages :: EVM t s ()

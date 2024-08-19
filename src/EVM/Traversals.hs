@@ -38,14 +38,6 @@ foldEContract f acc (C code storage tStorage balance _)
   <> foldExpr f mempty tStorage
   <> foldExpr f mempty balance
 
-foldContract :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Contract -> b
-foldContract f acc c
-  =  acc
-  <> foldCode f c.code
-  <> foldExpr f mempty c.storage
-  <> foldExpr f mempty c.origStorage
-  <> foldExpr f mempty c.balance
-
 foldCode :: forall b . Monoid b => (forall a . Expr a -> b) -> ContractCode -> b
 foldCode f = \case
   RuntimeCode (ConcreteRuntimeCode _) -> mempty
