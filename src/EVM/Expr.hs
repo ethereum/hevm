@@ -8,9 +8,9 @@
 module EVM.Expr where
 
 import Prelude hiding (LT, GT)
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import Control.Monad.ST (ST)
-import Control.Monad.State (put, get, execState, State)
+import Control.Monad.State (put, get, modify, execState, State)
 import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -1543,25 +1543,19 @@ constFoldProp ps = oneRun ps (ConstState mempty True)
   where
     oneRun ps2 startState = (execState (mapM (go . simplifyProp) ps2) startState).canBeSat
     go :: Prop -> State ConstState ()
-    go x = case x of
+    go = \case
         -- PEq
         PEq (Lit l) a -> do
           s <- get
           case Map.lookup a s.values of
-            Just l2 -> case l==l2 of
-                True -> pure ()
-                False -> put ConstState {canBeSat=False, values=mempty}
-            Nothing -> do
-              let vs' = Map.insert a l s.values
-              put $ s{values=vs'}
+            Just l2 -> unless (l==l2) $ put ConstState {canBeSat=False, values=mempty}
+            Nothing -> modify (\s' -> s'{values=Map.insert a l s'.values})
         PEq a b@(Lit _) -> go (PEq b a)
         -- PNeg
         PNeg (PEq (Lit l) a) -> do
           s <- get
           case Map.lookup a s.values of
-            Just l2 -> case l==l2 of
-                True -> put ConstState {canBeSat=False, values=mempty}
-                False -> pure ()
+            Just l2 -> when (l==l2) $ put ConstState {canBeSat=False, values=mempty}
             Nothing -> pure ()
         PNeg (PEq a b@(Lit _)) -> go $ PNeg (PEq b a)
         -- Others
@@ -1575,8 +1569,6 @@ constFoldProp ps = oneRun ps (ConstState mempty True)
             v2 = oneRun [b] s
           unless v1 $ go b
           unless v2 $ go a
-          s2 <- get
-          put $ s{canBeSat=(s2.canBeSat && (v1 || v2))}
         PBool False -> put $ ConstState {canBeSat=False, values=mempty}
         _ -> pure ()
 
