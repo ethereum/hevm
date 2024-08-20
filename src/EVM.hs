@@ -1389,7 +1389,6 @@ accessTStorage addr slot continue = do
       fetchAccount addr $ \_ ->
         accessTStorage addr slot continue
 
--- TODO integrate this with some existing system
 clearTStorages :: EVM t s ()
 clearTStorages = (#env % #contracts) %= fmap (\c -> c { tStorage = ConcreteStore mempty } :: Contract)
 
@@ -1427,6 +1426,7 @@ finalize = do
       revertContracts
       revertSubstate
     Just (VMSuccess output) -> do
+      clearTStorages
       -- deposit the code from a creation tx
       pc' <- use (#state % #pc)
       creation <- use (#tx % #isCreate)
