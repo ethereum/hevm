@@ -2971,6 +2971,29 @@ tests = testGroup "hevm"
                           _ -> False
           assertBoolM "Did not find expected storage cex" testCex
           putStrLnM "Expected counterexample found"
+        , test "temp-store-check" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            pragma solidity ^0.8.25;
+            contract C {
+                mapping(address => bool) sentGifts;
+                function stuff(address k) public {
+                    require(sentGifts[k] == false);
+                    assembly {
+                        if tload(0) { revert(0, 0) }
+                        tstore(0, 1)
+                    }
+                    sentGifts[k] = true;
+                    assembly {
+                        tstore(0, 0)
+                    }
+                    assert(sentGifts[k]);
+                }
+            }
+            |]
+          let sig = (Just (Sig "stuff(address)" [AbiAddressType]))
+          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+          putStrLnM $ "Basic tstore check passed, res: " <> show res
   ]
   , testGroup "concr-fuzz"
     [ testFuzz "fuzz-complicated-mul" $ do
