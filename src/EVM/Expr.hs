@@ -1189,10 +1189,10 @@ simplify e = if (mapExpr go e == e)
 
 
 simplifyProps :: [Prop] -> [Prop]
-simplifyProps ps = if canBeSat then simplified else [PBool False]
+simplifyProps ps = if cannotBeSat then [PBool False] else simplified
   where
     simplified = remRedundantProps . map simplifyProp . flattenProps $ ps
-    canBeSat = constFoldProp simplified
+    cannotBeSat = isUnsat simplified
 
 -- | Evaluate the provided proposition down to its most concrete result
 -- Also simplifies the inner Expr, if it exists
@@ -1537,9 +1537,9 @@ data ConstState = ConstState
   }
   deriving (Show)
 
--- | Folds constants
-constFoldProp :: [Prop] -> Bool
-constFoldProp ps = oneRun ps (ConstState mempty True)
+-- | Checks if a conjunction of propositions is definitely unsatisfiable
+isUnsat :: [Prop] -> Bool
+isUnsat ps = Prelude.not $ oneRun ps (ConstState mempty True)
   where
     oneRun ps2 startState = (execState (mapM (go . simplifyProp) ps2) startState).canBeSat
     go :: Prop -> State ConstState ()
