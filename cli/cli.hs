@@ -343,14 +343,14 @@ assert cmd = do
               | null cexs = []
               | otherwise =
                  [ ""
-                 , "Discovered the following counterexamples:"
+                 , ("Discovered the following " <> (T.pack $ show (length cexs)) <> " counterexample(s):")
                  , ""
                  ] <> fmap (formatCex (fst calldata) Nothing) cexs
             unknowns
               | null timeouts = []
               | otherwise =
                  [ ""
-                 , "Could not determine reachability of the following end states:"
+                 , "Could not determine reachability of the following end state(s):"
                  , ""
                  ] <> fmap (formatExpr) timeouts
         liftIO $ T.putStrLn $ T.unlines (counterexamples <> unknowns)
@@ -370,7 +370,7 @@ showExtras solvers cmd calldata expr = do
       T.putStrLn (formatExpr . snd $ reached)
       putStrLn ""
   when cmd.getModels $ do
-    liftIO $ putStrLn $ "=== Models for " <> show (Expr.numBranches expr) <> " branches ===\n"
+    liftIO $ putStrLn $ "=== Models for " <> show (Expr.numBranches expr) <> " branches ==="
     ms <- produceModels solvers expr
     liftIO $ forM_ ms (showModel (fst calldata))
 
