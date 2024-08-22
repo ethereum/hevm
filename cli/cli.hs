@@ -515,9 +515,7 @@ symvmFromCommand cmd calldata = do
                              )
 
   let
-    caller = case cmd.caller of
-               Nothing -> SymAddr "caller"
-               Just a -> LitAddr a
+    caller = maybe (SymAddr "caller") LitAddr cmd.caller
     ts = maybe Timestamp Lit cmd.timestamp
     callvalue = maybe TxValue Lit cmd.value
     storageBase = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
