@@ -870,13 +870,14 @@ formatCex cd sig m@(SMTCex _ addrs _ store blockContext txContext) = T.unlines $
             (showTxCtx key <> ": " <> (T.pack $ show val)) : acc
           ) mempty (filterSubCtx txContext)
         ]
+
     addrsCex :: [Text]
     addrsCex
       | Map.null addrs = []
       | otherwise =
           [ "Addrs:"
-          , indent 2 $ Map.foldrWithKey (\key val _ ->
-              ((T.pack . show $ key) <> ": " <> (T.pack $ show val))
+          , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc ->
+              ((T.pack . show $ key) <> ": " <> (T.pack $ show val)) : acc
             ) mempty addrs
           ]
 
