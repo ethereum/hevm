@@ -1109,22 +1109,18 @@ simplify e = if (mapExpr go e == e)
       | otherwise = o
 
     -- Bitwise AND & OR. These MUST preserve bitwise equivalence
-    go o@(And (Lit x) _)
-      | x == 0 = Lit 0
-      | otherwise = o
-    go o@(And v (Lit x))
-      | x == 0 = Lit 0
-      | x == maxLit = v
-      | otherwise = o
-    go (And a b) | a == b = a
-    go (And a (Not b)) | a == b = Lit 0
-    go o@(Or (Lit x) b)
-      | x == 0 = b
-      | otherwise = o
-    go o@(Or a (Lit x))
-      | x == 0 = a
-      | otherwise = o
-    go (Or a b) | a == b = a
+    go (And a b)
+      | a == b = a
+      | b == (Not a) || a == (Not b) = Lit 0
+      | a == (Lit 0) || b == (Lit 0) = Lit 0
+      | a == (Lit maxLit) = b
+      | b == (Lit maxLit) = a
+      | otherwise = EVM.Expr.and a b
+    go (Or a b)
+      | a == b = a
+      | a == (Lit 0) = b
+      | b == (Lit 0) = a
+      | otherwise = EVM.Expr.or a b
 
     -- If x is ever non zero the Or will always evaluate to some non zero value and the false branch will be unreachable
     -- NOTE: with AND this does not work, because and(0x8, 0x4) = 0

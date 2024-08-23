@@ -746,6 +746,18 @@ tests = testGroup "hevm"
           t = [PAnd (PEq (Add (Lit 5) (Lit 1)) (Var "a")) (PEq (Var "a") (Lit 7))]
           simplified = Expr.simplifyProps t
         assertEqualM "Must be equal" [PBool False] simplified
+    , test "simpProp-inner-expr-bitwise-and" $ do
+        let
+          -- 1 & 2 != 2
+          t = [PEq (And (Lit 1) (Lit 2)) (Lit 2)]
+          simplified = Expr.simplifyProps t
+        assertEqualM "Must be equal" [PBool False] simplified
+    , test "simpProp-inner-expr-bitwise-or" $ do
+        let
+          -- 2 | 4 == 6
+          t = [PEq (Or (Lit 2) (Lit 4)) (Lit 6)]
+          simplified = Expr.simplifyProps t
+        assertEqualM "Must be equal" [] simplified
   ]
   , testGroup "MemoryTests"
     [ test "read-write-same-byte"  $ assertEqualM ""
