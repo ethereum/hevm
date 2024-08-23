@@ -157,7 +157,7 @@ makeVm o = do
     env = Env
       { chainId = o.chainId
       , contracts = Map.fromList ((o.address,o.contract):o.otherContracts)
-      , freshAddresses = 0
+      , freshAddresses = o.freshAddresses
       , freshGasVals = 0
       }
     block = Block
