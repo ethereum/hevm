@@ -1045,7 +1045,11 @@ simplify e = if (mapExpr go e == e)
 
     -- Mod
     go (Mod _ (Lit 0)) = Lit 0
+    go (SMod _ (Lit 0)) = Lit 0
     go (Mod a b) | a == b = Lit 0
+    go (SMod a b) | a == b = Lit 0
+    go (Mod (Lit 0) _) = Lit 0
+    go (SMod (Lit 0) _) = Lit 0
 
     -- double add/sub.
     -- Notice that everything is done mod 2**256. So for example:
@@ -1159,10 +1163,13 @@ simplify e = if (mapExpr go e == e)
                      (Lit 1, _) -> b
                      _ -> mul a b
 
-    -- Some trivial div eliminations
+    -- Some trivial (s)div eliminations
     go (Div (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
     go (Div _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
     go (Div a (Lit 1)) = a
+    go (SDiv (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
+    go (SDiv _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
+    go (SDiv a (Lit 1)) = a
     -- NOTE: Div x x is NOT 1, because Div 0 0 is 0, not 1.
 
     -- If a >= b then the value of the `Max` expression can never be < b
