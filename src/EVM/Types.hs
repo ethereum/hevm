@@ -940,6 +940,7 @@ data VMOpts (t :: VMType) = VMOpts
   , create :: Bool
   , txAccessList :: Map (Expr EAddr) [W256]
   , allowFFI :: Bool
+  , freshAddresses :: Int
   }
 
 deriving instance Show (VMOpts Symbolic)
