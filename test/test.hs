@@ -728,12 +728,6 @@ tests = testGroup "hevm"
           t = [PEq (Lit 5) (Var "a"), POr (POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 6))) (PEq (Var "a") (Lit 3))]
           simplified = Expr.simplifyProps t
         assertEqualM "Must be equal" [PBool False] simplified
-    , test "simpProp-concrete-or-eq-rem" $ do
-        let
-          -- a = 5 && ((a=4 || a=6) || a=3)  -> False
-          t = [PEq (Lit 5) (Var "a"), POr (POr (PEq (Var "a") (Lit 4)) (PEq (Var "a") (Lit 6))) (PEq (Var "a") (Lit 3))]
-          simplified = Expr.simplifyProps t
-        assertEqualM "Must be equal" [PBool False] simplified
     , test "simpProp-inner-expr-simp" $ do
         let
           -- 5+1 = 6
