@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Double negation in Prop are removed
 - Updated forge to modern version, thereby fixing JSON parsing of new forge JSONs
 - Symbolic ABI encoding for tuples, fuzzer for encoder
+- Improved symbolic execution tutorial
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
