@@ -56,12 +56,12 @@ minProp k@(Keccak _) = PGT k (Lit 256)
 minProp _ = internalError "expected keccak expression"
 
 concVal :: Expr EWord -> Prop
-concVal k@(Keccak (ConcreteBuf bs)) = PEq (Lit (keccak' bs)) k
+concVal k@(Keccak (ConcreteBuf bs)) = mkPEq (Lit (keccak' bs)) k
 concVal _ = PBool True
 
 injProp :: (Expr EWord, Expr EWord) -> Prop
 injProp (k1@(Keccak b1), k2@(Keccak b2)) =
-  POr ((b1 .== b2) .&& (bufLength b1 .== bufLength b2)) (PNeg (PEq k1 k2))
+  POr ((b1 .== b2) .&& (bufLength b1 .== bufLength b2)) (PNeg (mkPEq k1 k2))
 injProp _ = internalError "expected keccak expression"
 
 
@@ -94,7 +94,7 @@ compute = \case
   e@(Keccak buf) -> do
     let b = simplify buf
     case keccak b of
-      lit@(Lit _) -> [PEq e lit]
+      lit@(Lit _) -> [mkPEq lit e]
       _ -> []
   _ -> []
 
