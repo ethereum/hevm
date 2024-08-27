@@ -34,7 +34,8 @@ WARNING: hevm was only able to partially explore the call prefix 0x[...] due to 
 ```
 
 In general, the workaround suggested is to try to write code without loops, if
-possible, or to have a limit on the number of iterations, such as `max(k,n)`.
+possible, or to have a limit on the number of iterations. For example, by using
+`max(k,n)` instead of `n` in the loop condition, where `k` is a fixed number.
 Unbounded loops are a problem for digital contracts, as they may be forced by
 an attacker to exhaust gas, thereby potentially e.g. deadlocking the contract.
 This can lock in (large) funds, which can be a very serious issue. Hence,
@@ -43,7 +44,7 @@ execution.
 
 **Best Practices**:
 - Try to write code without loops, if possible.
-- Limit the number of iterations, such as `max(k,n)`.
+- Use `max(k,n)` instead of `n` in the loop condition, where `k` is a fixed number.
 - Avoid unbounded loops to prevent potential gas exhaustion attacks
 
 ## Gas costs
