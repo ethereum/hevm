@@ -68,7 +68,7 @@ the future, when gas costs change.
 
 ## Symbolic arguments to certain EVM opcodes
 
-When a symbolic argument is passed to an EVM opcodes that hevm cannot deal with
+When a symbolic argument is passed to an EVM opcode that hevm cannot deal with
 symbolically, an error is raised. There are number of such EVM opcodes, for
 example JUMP, JUMPI, CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2,
 SELFDESTRUCT, etc. If any of these are called with an argument that is
