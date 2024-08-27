@@ -33,7 +33,7 @@ WARNING: hevm was only able to partially explore the call prefix 0x[...] due to 
   - Max Iterations Reached in contract: 0x[...] pc: [...]
 ```
 
-In general, the workaround suggested are to try to write code without loops, if
+In general, the workaround suggested is to try to write code without loops, if
 possible, or to have a limit on the number of iterations, such as `max(k,n)`.
 Unbounded loops are a problem for digital contracts, as they may be forced by
 an attacker to exhaust gas, thereby potentially e.g. deadlocking the contract.
