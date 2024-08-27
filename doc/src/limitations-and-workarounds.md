@@ -25,7 +25,7 @@ large. The same principle applies to recursion, where the depth of the
 recursion may be unbounded or bounded only by a potentially very large number.
 
 Hence, hevm only explores loops and recursions up to fixed depth `k`, a
-parameter that can be adjusted form the command line via the `--max-iterations
+parameter that can be adjusted from the command line via the `--max-iterations
 k` parameter. Whenever the limit is hit, hevm warns of the incomplete exploration:
 
 ```shell
