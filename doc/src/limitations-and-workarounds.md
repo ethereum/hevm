@@ -41,6 +41,10 @@ This can lock in (large) funds, which can be a very serious issues. Hence,
 limiting loop iterations is a good practice in general -- not only for symbolic
 execution.
 
+**Best Practices**:
+- Try to write code without loops, if possible.
+- Limit the number of iterations, such as `max(k,n)`.
+- Avoid unbounded loops to prevent potential gas exhaustion attacks
 
 ## Gas costs
 
@@ -56,6 +60,11 @@ hevm-provided counterexample in a concrete execution setting, thereby filtering
 out false positives. However, it is strongly advisable to fix potential issues
 that are only guarded due to gas exhaustion, as they may become exploitable in
 the future, when gas costs change.
+
+**Best Practices**:
+- Don't rely on gas exhaustion as a security mechanism.
+- Check potential issues by running the hevm-provided counterexample in a
+  concrete execution setting.
 
 ## Symbolic arguments to certain EVM opcodes
 
@@ -73,9 +82,13 @@ WARNING: hevm was only able to partially explore the call prefix 0x[...] due to 
 There is no single workaround for this class of issues, as it depends on the
 specific circumstances of the code. In general, we suggest trying to concretize
 the call to the code, such that only what is truly needed to be symbolic is
-left symbolic. For example, you may be able to force partial cocrete execution via
+left symbolic. For example, you may be able to force partial concrete execution via
 `require()` statements, thereby concretizing the potential symbolic value. Similarly,
 dynamically computed JUMP destinations can be avoided via pre-computed jump tables, etc.
+
+**Best Practices**:
+* Use `require()` statements to concretize symbolic values
+* Avoid dynamically computed jumps -- use pre-computed jump-tables, if neccesary
 
 ## Jumping into symbolic code
 
