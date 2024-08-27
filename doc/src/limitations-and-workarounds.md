@@ -50,7 +50,7 @@ execution.
 
 Gas is hard to symbolically track, due to certain opcodes, such as SLOAD,
 having different cost depending on the parameters to the opcode. Many symbolic
-execution systems, including hevm, solve this by not fully tracking gas. This
+execution systems, including hevm, solve this by not fully tracking gas.
 This means that hevm may report that an assertion
 failure can occur through a particular execution trace, but that
 trace would cost more to execute than the allowable gas limit.
