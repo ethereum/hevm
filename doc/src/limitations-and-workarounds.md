@@ -37,7 +37,7 @@ In general, the workaround suggested is to try to write code without loops, if
 possible, or to have a limit on the number of iterations, such as `max(k,n)`.
 Unbounded loops are a problem for digital contracts, as they may be forced by
 an attacker to exhaust gas, thereby potentially e.g. deadlocking the contract.
-This can lock in (large) funds, which can be a very serious issues. Hence,
+This can lock in (large) funds, which can be a very serious issue. Hence,
 limiting loop iterations is a good practice in general -- not only for symbolic
 execution.
 
