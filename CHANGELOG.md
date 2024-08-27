@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved symbolic execution tutorial
 - Add `freshAddresses` filed in `VMOpts` so that initial fresh address can be given as input
 - Add `freshAddresses` field in `VMOpts` so that initial fresh address can be given as input
+- Add documentation about limitations and workarounds
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
