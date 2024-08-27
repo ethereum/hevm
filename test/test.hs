@@ -685,6 +685,16 @@ tests = testGroup "hevm"
           t = [PEq (Var "x") (Lit 1), POr (PEq (Var "x") (Lit 2)) (PEq (Var "x") (Lit 0)), PEq (Var "y") (Lit 2)]
           cannotBeSat = Expr.isUnsat t
         assertEqualM "Must be equal" cannotBeSat True
+    , ignoreTest $ test "disequality-and-equality" $ do
+        let
+          t = [PNeg (PEq (Lit 1) (Var "arg1")), PEq (Lit 1) (Var "arg1")]
+          cannotBeSat = Expr.isUnsat t
+        assertEqualM "Must be equal" cannotBeSat True
+    , test "equality-and-disequality" $ do
+        let
+          t = [PEq (Lit 1) (Var "arg1"), PNeg (PEq (Lit 1) (Var "arg1"))]
+          cannotBeSat = Expr.isUnsat t
+        assertEqualM "Must be equal" cannotBeSat True
   ]
   , testGroup "simpProp-concrete-tests" [
       test "simpProp-concrete-trues" $ do
