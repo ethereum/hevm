@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Equivalence checking - hevm</title>
+        <title>Limitations and Workarounds - hevm</title>
 
 
         <!-- Custom HTML head -->
@@ -89,7 +89,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="ds-test-tutorial.html">ds-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item expanded "><a href="equivalence.html" class="active">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html" class="active">Limitations and Workarounds</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="ds-test-tutorial.html">ds-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -151,7 +151,7 @@
                         <a href="https://github.com/ethereum/hevm" title="Git repository" aria-label="Git repository">
                             <i id="git-repository-button" class="fa fa-github"></i>
                         </a>
-                        <a href="hhttps://github.com/ethereum/hevm/edit/main/src/equivalence.md" title="Suggest an edit" aria-label="Suggest an edit">
+                        <a href="hhttps://github.com/ethereum/hevm/edit/main/src/limitations-and-workarounds.md" title="Suggest an edit" aria-label="Suggest an edit">
                             <i id="git-edit-button" class="fa fa-edit"></i>
                         </a>
 
@@ -180,73 +180,103 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="hevm-equivalence"><a class="header" href="#hevm-equivalence"><code>hevm equivalence</code></a></h1>
-<pre><code>Usage: hevm equivalence --code-a TEXT --code-b TEXT [--sig TEXT]
-                        [--arg STRING]... [--calldata TEXT]
-                        [--smttimeout NATURAL] [--max-iterations INTEGER]
-                        [--solver TEXT] [--smtoutput] [--smtdebug] [--debug]
-                        [--trace] [--ask-smt-iterations INTEGER]
-                        [--num-cex-fuzz INTEGER]
-                        [--loop-detection-heuristic LOOPHEURISTIC]
-                        [--abstract-arithmetic] [--abstract-memory]
-
-Available options:
-  -h,--help                Show this help text
-  --code-a TEXT            Bytecode of the first program
-  --code-b TEXT            Bytecode of the second program
-  --sig TEXT               Signature of types to decode / encode
-  --arg STRING             Values to encode
-  --calldata TEXT          Tx: calldata
-  --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
-  --max-iterations INTEGER Number of times we may revisit a particular branching
-                           point
-  --solver TEXT            Used SMT solver: z3 (default), cvc5, or bitwuzla
-  --smtoutput              Print verbose smt output
-  --smtdebug               Print smt queries sent to the solver
-  --debug                  Debug printing of internal behaviour
-  --trace                  Dump trace
-  --ask-smt-iterations INTEGER
-                           Number of times we may revisit a particular branching
-                           point before we consult the smt solver to check
-                           reachability (default: 1) (default: 1)
-  --num-cex-fuzz INTEGER   Number of fuzzing tries to do to generate a
-                           counterexample (default: 3) (default: 3)
-  --loop-detection-heuristic LOOPHEURISTIC
-                           Which heuristic should be used to determine if we are
-                           in a loop: StackBased (default) or Naive
-                           (default: StackBased)
-  --abstract-arithmetic    Use abstraction-refinement for complicated arithmetic
-                           functions such as MulMod. This runs the solver first
-                           with abstraction turned on, and if it returns a
-                           potential counterexample, the counterexample is
-                           refined to make sure it is a counterexample for the
-                           actual (not the abstracted) problem
-  --abstract-memory        Use abstraction-refinement for Memory. This runs the
-                           solver first with abstraction turned on, and if it
-                           returns a potential counterexample, the
-                           counterexample is refined to make sure it is a
-                           counterexample for the actual (not the abstracted)
-                           problem
+                        <h1 id="limitations-and-workarounds"><a class="header" href="#limitations-and-workarounds">Limitations and Workarounds</a></h1>
+<p>Symbolic execution in general, and hevm in particular, have a number of known
+limitations. Many of these limitations can be worked around without too much
+effort. This document describes some of the most common limitations and
+workarounds.</p>
+<h2 id="loops-and-recursion"><a class="header" href="#loops-and-recursion">Loops and recursion</a></h2>
+<p>The most important issue related to symbolic execution is to do with loops and
+recursion. For example, the following code is hard to deal with in a symbolic
+context:</p>
+<pre><code class="language-solidity">function loop(uint n) {
+  for(uint i = 0; i &lt; n; i++) {
+    mystate[i]++;
+  }
+}
 </code></pre>
-<p>Symbolically execute both the code given in <code>--code-a</code> and <code>--code-b</code> and try
-to prove equivalence between their outputs and storages. Extracting bytecode
-from solidity contracts can be done via, e.g.:</p>
-<pre><code>hevm equivalence \
-    --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
-    --code-b $(solc --bin-runtime "contract2.sol" | tail -n1)
+<p>When such a function is called, and <code>n</code> is a symbolic parameter (e.g. parameter
+to a function <code>prove_</code>, such as <code>prove_correct(uint n)</code>), hevm would need to
+create a new execution path for each potential value of <code>n</code>, which can be very
+large. The same principle applies to recursion, where the depth of the
+recursion may be unbounded or bounded only by a potentially very large number.</p>
+<p>Hence, hevm only explores loops and recursions up to fixed depth <code>k</code>, a
+parameter that can be adjusted from the command line via the <code>--max-iterations k</code> parameter. Whenever the limit is hit, hevm warns of the incomplete exploration:</p>
+<pre><code class="language-shell">WARNING: hevm was only able to partially explore the call prefix 0x[...] due to the following issue(s):
+  - Max Iterations Reached in contract: 0x[...] pc: [...]
 </code></pre>
-<p>If <code>--sig</code> is given, calldata is assumed to take the form of the function
-given. If left out, calldata is a fully abstract buffer of at most 256 bytes.</p>
+<p>In general, the workaround suggested is to try to write code without loops, if
+possible, or to have a limit on the number of iterations. For example, by using
+<code>max(k,n)</code> instead of <code>n</code> in the loop condition, where <code>k</code> is a fixed number.
+Unbounded loops are a problem for digital contracts, as they may be forced by
+an attacker to exhaust gas, thereby potentially e.g. deadlocking the contract.
+This can lock in (large) funds, which can be a very serious issue. Hence,
+limiting loop iterations is a good practice in general -- not only for symbolic
+execution.</p>
+<p><strong>Best Practices</strong>:</p>
+<ul>
+<li>Try to write code without loops, if possible.</li>
+<li>Use <code>max(k,n)</code> instead of <code>n</code> in the loop condition, where <code>k</code> is a fixed number.</li>
+<li>Avoid unbounded loops to prevent potential gas exhaustion attacks</li>
+</ul>
+<h2 id="gas-costs"><a class="header" href="#gas-costs">Gas costs</a></h2>
+<p>Gas is hard to symbolically track, due to certain opcodes, such as SLOAD,
+having different cost depending on the parameters to the opcode. Many symbolic
+execution systems, including hevm, solve this by not fully tracking gas.
+This means that hevm may report that an assertion
+failure can occur through a particular execution trace, but that
+trace would cost more to execute than the allowable gas limit.</p>
+<p>In general, it is possible to check whether the issue can be hit by running the
+hevm-provided counterexample in a concrete execution setting, thereby filtering
+out false positives. However, it is strongly advisable to fix potential issues
+that are only guarded due to gas exhaustion, as they may become exploitable in
+the future, when gas costs change.</p>
+<p><strong>Best Practices</strong>:</p>
+<ul>
+<li>Don't rely on gas exhaustion as a security mechanism.</li>
+<li>Check potential issues by running the hevm-provided counterexample in a
+concrete execution setting.</li>
+</ul>
+<h2 id="symbolic-arguments-to-certain-evm-opcodes"><a class="header" href="#symbolic-arguments-to-certain-evm-opcodes">Symbolic arguments to certain EVM opcodes</a></h2>
+<p>When a symbolic argument is passed to an EVM opcode that hevm cannot deal with
+symbolically, an error is raised. There are number of such EVM opcodes, for
+example JUMP, JUMPI, CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2,
+SELFDESTRUCT, etc. If any of these are called with an argument that is
+symbolic, hevm raises an error, such as:</p>
+<pre><code class="language-shell">WARNING: hevm was only able to partially explore the call prefix 0x[...] due to the following issue(s):
+  - Attempting to transfer eth to a symbolic address that is not present in the state
+</code></pre>
+<p>There is no single workaround for this class of issues, as it depends on the
+specific circumstances of the code. In general, we suggest trying to concretize
+the call to the code, such that only what is truly needed to be symbolic is
+left symbolic. For example, you may be able to force partial concrete execution via
+<code>require()</code> statements, thereby concretizing the potential symbolic value. Similarly,
+dynamically computed JUMP destinations can be avoided via pre-computed jump tables, etc.</p>
+<p><strong>Best Practices</strong>:</p>
+<ul>
+<li>Use <code>require()</code> statements to concretize symbolic values</li>
+<li>Avoid dynamically computed jumps -- use pre-computed jump-tables, if neccesary</li>
+</ul>
+<h2 id="jumping-into-symbolic-code"><a class="header" href="#jumping-into-symbolic-code">Jumping into symbolic code</a></h2>
+<p>Jumping into symbolic code is not supported by hevm. This can happen when, e.g.
+a function creates a contract based on a symbolic value, and then jumps into
+the code of that contract. In these cases, you will get a warning like the
+following:</p>
+<pre><code class="language-shell">WARNING: hevm was only able to partially explore the call prefix 0x[...] due to the following issue(s):
+  - Encountered a jump into a potentially symbolic code region while executing initcode. pc: [...] jump dst: [...]
+</code></pre>
+<p>For these cases, we suggest concretizing the call that creates the contract,
+such that the bytecode created and later jumped to, is not symbolic.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="symbolic.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="when-to-use.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="exec.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="ds-test-tutorial.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -256,11 +286,11 @@ given. If left out, calldata is a fully abstract buffer of at most 256 bytes.</p
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="symbolic.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="when-to-use.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="exec.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="ds-test-tutorial.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
