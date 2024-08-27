@@ -829,6 +829,13 @@ showModel cd (expr, res) = do
       putStrLn "End State:"
       T.putStrLn $ indent 2 $ formatExpr expr
 
+formatStorage:: Map (Expr EAddr) (Map W256 W256) -> [Text]
+formatStorage store = [ "Storage:" ]  <> (map (indent 2) addrs)
+  where
+    addrs = Map.foldrWithKey (\key val acc ->
+      ("Addr " <> (T.pack . show $ key)
+          <> ": " <> (T.pack $ show (Map.toList val))) : acc
+      ) mempty store
 
 formatCex :: Expr Buf -> Maybe Sig -> SMTCex -> Text
 formatCex cd sig m@(SMTCex _ addrs _ store blockContext txContext) = T.unlines $
@@ -854,13 +861,7 @@ formatCex cd sig m@(SMTCex _ addrs _ store blockContext txContext) = T.unlines $
     storeCex :: [Text]
     storeCex
       | Map.null store = []
-      | otherwise =
-          [ "Storage:"
-          , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc ->
-              ("Addr " <> (T.pack . show $ key)
-                <> ": " <> (T.pack $ show (Map.toList val))) : acc
-            ) mempty store
-          ]
+      | otherwise = formatStorage store
 
     txCtx :: [Text]
     txCtx

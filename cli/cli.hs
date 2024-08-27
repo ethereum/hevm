@@ -156,6 +156,7 @@ data Command w
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
       , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
       , numSolvers    :: w ::: Maybe Natural            <?> "Number of solver instances to use (default: number of cpu cores)"
+      , symbolicStart :: w ::: Bool                     <?> "Use symbolic starting state of contract"
       , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
       , debug         :: w ::: Bool                     <?> "Debug printing of internal behaviour, and dump internal expressions"
       , trace         :: w ::: Bool                     <?> "Dump trace"
@@ -619,6 +620,7 @@ unitTestOptions cmd solvers buildOutput = do
     , testParams = params
     , dapp = srcInfo
     , ffiAllowed = cmd.ffi
+    , symbStart = cmd.symbolicStart
     }
 parseInitialStorage :: InitialStorage -> BaseState
 parseInitialStorage Empty = EmptyBase

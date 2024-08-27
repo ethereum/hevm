@@ -1665,7 +1665,7 @@ cheatActions = Map.fromList
           Just a -> assign (#config % #overrideCaller) (Just a)
           Nothing -> vmError (BadCheatCode sig)
         _ -> vmError (BadCheatCode sig)
-          
+
   , action "startPrank(address)" $
       \sig _ _ input -> case decodeStaticArgs 0 1 input of
         [addr]  -> case wordToAddr addr of

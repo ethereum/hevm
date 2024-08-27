@@ -27,8 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Printing `Addrs` when running `symbolic` for counterexamples and reachable end states
 - Improved symbolic execution tutorial
 - Add `freshAddresses` filed in `VMOpts` so that initial fresh address can be given as input
-- Add `freshAddresses` field in `VMOpts` so that initial fresh address can be given as input
 - Add documentation about limitations and workarounds
+* Add `--symbolic-start` to allow starting state to be symbolic in "test" mode
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing

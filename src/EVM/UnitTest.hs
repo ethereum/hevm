@@ -15,7 +15,7 @@ import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, formatStorage)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
@@ -57,6 +57,7 @@ data UnitTestOptions s = UnitTestOptions
   , dapp        :: DappInfo
   , testParams  :: TestVMParams
   , ffiAllowed  :: Bool
+  , symbStart   :: Bool
   }
 
 data TestVMParams = TestVMParams
@@ -268,7 +269,7 @@ symFailure UnitTestOptions {..} testName cd types failures' =
         ,"  result:   " <> showRes leaf
         ,"  calldata: " <> let ?context = dappContext (traceContext leaf)
                            in prettyCalldata cex cd testName types
-        ] <> verbText leaf
+        ] <> map (indent 2) (formatStorage cex.store) <> verbText leaf
       verbText leaf = case verbose of
             Just _ -> [Text.unlines [ indentLines 2 (showTraceTree' dapp leaf)]]
             _ -> mempty
@@ -425,8 +426,9 @@ makeTxCall params (cd, cdProps) = do
 
 initialUnitTestVm :: VMOps t => UnitTestOptions s -> SolcContract -> ST s (VM t s)
 initialUnitTestVm (UnitTestOptions {..}) theContract = do
+  let code = InitCode theContract.creationCode mempty
   vm <- makeVm $ VMOpts
-           { contract = initialContract (InitCode theContract.creationCode mempty)
+           { contract = if symbStart then (abstractContract code testParams.address) else initialContract code
            , otherContracts = []
            , calldata = mempty
            , value = Lit 0
