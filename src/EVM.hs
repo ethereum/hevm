@@ -230,8 +230,8 @@ isCreation = \case
 next :: (?op :: Word8) => EVM t s ()
 next = modifying (#state % #pc) (+ (opSize ?op))
 
-getOpInt :: forall (t :: VMType) s . FrameState t s -> Word8
-getOpInt state = case state.code of
+getOpW8 :: forall (t :: VMType) s . FrameState t s -> Word8
+getOpW8 state = case state.code of
       UnknownCode _ -> internalError "Cannot execute unknown code"
       InitCode conc _ -> BS.index conc state.pc
       RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs state.pc
@@ -240,7 +240,7 @@ getOpInt state = case state.code of
           maybeLitByte $ ops V.! state.pc
 
 getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
-getOpName state = intToOpName $ fromEnum $ (getOpInt state)
+getOpName state = intToOpName $ fromEnum $ getOpW8 state
 
 -- | Executes the EVM one step
 exec1 :: forall (t :: VMType) s. VMOps t => EVM t s ()
@@ -286,7 +286,7 @@ exec1 = do
     then doStop
 
     else do
-      let ?op = getOpInt vm.state
+      let ?op = getOpW8 vm.state
       let op = getOpName vm.state
       case getOp (?op) of
 
