@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Symbolic ABI encoding for tuples, fuzzer for encoder
 - Printing `Addrs` when running `symbolic` for counterexamples and reachable end states
 - Improved symbolic execution tutorial
-- Add `freshAddresses` filed in `VMOpts` so that initial fresh address can be given as input
+- More Mod, SMod, Div, and SDiv simplification rules
 - Add `freshAddresses` field in `VMOpts` so that initial fresh address can be given as input
 - Add documentation about limitations and workarounds
 
