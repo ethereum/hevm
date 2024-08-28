@@ -266,8 +266,8 @@ symFailure UnitTestOptions {..} testName cd types failures' =
           in Text.pack $ prettyvmresult res
       mkMsg (leaf, cex) = intercalate "\n" $
         ["Counterexample:"
-        ,"  result:   " <> showRes leaf
-        ,"  calldata: " <> let ?context = dappContext (traceContext leaf)
+        ,"  Result:   " <> showRes leaf
+        ,"  Calldata: " <> let ?context = dappContext (traceContext leaf)
                            in prettyCalldata cex cd testName types
         ] <> map (indent 2) (formatStorage cex.store) <> verbText leaf
       verbText leaf = case verbose of
