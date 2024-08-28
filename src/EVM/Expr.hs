@@ -19,6 +19,7 @@ import Data.List
 import Data.Map.Strict qualified as Map
 import Data.Maybe (mapMaybe, isJust, fromMaybe)
 import Data.Semigroup (Any, Any(..), getAny)
+import Data.Typeable
 import Data.Vector qualified as V
 import Data.Vector (Vector)
 import Data.Vector.Mutable qualified as MV
@@ -199,6 +200,17 @@ sar = op2 SAR (\x y ->
        if msb then maxBound else 0
      else
        fromIntegral $ shiftR asSigned (fromIntegral x))
+
+
+-- Props
+
+peq :: (Typeable a) => Expr a -> Expr a -> Prop
+peq (Lit x) (Lit y) = PBool (x == y)
+peq a@(Lit _) b = PEq a b
+peq a b@(Lit _) = PEq b a -- we always put concrete values on LHS
+peq a b
+  | a == b = PBool True
+  | otherwise = PEq a b
 
 -- ** Bufs ** --------------------------------------------------------------------------------------
 
@@ -1221,29 +1233,29 @@ simplifyProp prop =
     go (PLEq a (Max _ b)) | a == b = PBool True
     go (PLEq (Sub a b) c) | a == c = PLEq b a
     go (PLT (Max (Lit a) b) (Lit c)) | a < c = PLT b (Lit c)
-    go (PLT (Lit 0) (Eq a b)) = mkPEq a b
+    go (PLT (Lit 0) (Eq a b)) = peq a b
 
     -- negations
     go (PNeg (PBool b)) = PBool (Prelude.not b)
     go (PNeg (PNeg a)) = a
 
     -- solc specific stuff
-    go (PEq (IsZero (IsZero (Eq a b))) (Lit 0)) = PNeg (mkPEq a b)
+    go (PEq (Lit 0) (IsZero (IsZero (Eq a b)))) = PNeg (peq a b)
 
     -- iszero(a) -> (a == 0)
     -- iszero(iszero(a))) -> ~(a == 0) -> a > 0
     -- iszero(iszero(a)) == 0 -> ~~(a == 0) -> a == 0
     -- ~(iszero(iszero(a)) == 0) -> ~~~(a == 0) -> ~(a == 0) -> a > 0
-    go (PNeg (PEq (IsZero (IsZero a)) (Lit 0))) = PLT (Lit 0) a
+    go (PNeg (PEq (Lit 0) (IsZero (IsZero a)))) = PLT (Lit 0) a
 
     -- iszero(a) -> (a == 0)
     -- iszero(a) == 0 -> ~(a == 0)
     -- ~(iszero(a) == 0) -> ~~(a == 0) -> a == 0
-    go (PNeg (PEq (IsZero a) (Lit 0))) = mkPEq (Lit 0) a
+    go (PNeg (PEq (Lit 0) (IsZero a))) = peq (Lit 0) a
 
     -- a < b == 0 -> ~(a < b)
     -- ~(a < b == 0) -> ~~(a < b) -> a < b
-    go (PNeg (PEq (LT a b) (Lit 0x0))) = PLT a b
+    go (PNeg (PEq (Lit 0) (LT a b))) = PLT a b
 
     -- And/Or
     go (PAnd (PBool l) (PBool r)) = PBool (l && r)
@@ -1263,21 +1275,19 @@ simplifyProp prop =
     go (PImpl (PBool False) _) = PBool True
 
     -- Double negation
-    go (PEq (IsZero (Eq a b)) (Lit 0)) = mkPEq a b
-    go (PEq (IsZero (LT a b)) (Lit 0)) = PLT a b
-    go (PEq (IsZero (GT a b)) (Lit 0)) = PGT a b
-    go (PEq (IsZero (LEq a b)) (Lit 0)) = PLEq a b
-    go (PEq (IsZero (GEq a b)) (Lit 0)) = PGEq a b
+    go (PEq (Lit 0) (IsZero (Eq a b))) = peq a b
+    go (PEq (Lit 0) (IsZero (LT a b))) = PLT a b
+    go (PEq (Lit 0) (IsZero (GT a b))) = PGT a b
+    go (PEq (Lit 0) (IsZero (LEq a b))) = PLEq a b
+    go (PEq (Lit 0) (IsZero (GEq a b))) = PGEq a b
 
     -- Eq
-    go (PEq (Eq a b) (Lit 0)) = PNeg (mkPEq a b)
-    go (PEq (Eq a b) (Lit 1)) = mkPEq a b
-    go (PEq (Sub a b) (Lit 0)) = mkPEq a b
-    go (PEq (LT a b) (Lit 0)) = PLEq b a
-    go (PEq (Lit l) (Lit r)) = PBool (l == r)
-    go o@(PEq l r)
-      | l == r = PBool True
-      | otherwise = o
+    go (PEq (Lit 0) (Eq a b)) = PNeg (peq a b)
+    go (PEq (Lit 1) (Eq a b)) = peq a b
+    go (PEq (Lit 0) (Sub a b)) = peq a b
+    go (PEq (Lit 0) (LT a b)) = PLEq b a
+    go (PEq l r) = peq l r
+
     go p = p
 
 
@@ -1289,7 +1299,7 @@ simplifyProp prop =
     simpInnerExpr (PGEq a b) = simpInnerExpr (PLEq b a)
     simpInnerExpr (PGT a b) = simpInnerExpr (PLT b a)
     -- simplifies the inner expression
-    simpInnerExpr (PEq a b) = mkPEq (simplify a) (simplify b)
+    simpInnerExpr (PEq a b) = PEq (simplify a) (simplify b)
     simpInnerExpr (PLT a b) = PLT (simplify a) (simplify b)
     simpInnerExpr (PLEq a b) = PLEq (simplify a) (simplify b)
     simpInnerExpr (PNeg a) = PNeg (simpInnerExpr a)

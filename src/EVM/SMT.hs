@@ -278,7 +278,7 @@ assertPropsNoSimp config psPreConc =
     abstProps = map toProp (Map.toList abstExprToInt)
       where
       toProp :: (Expr EWord, Int) -> Prop
-      toProp (e, num) = mkPEq e (Var (TS.pack ("abst_" ++ (show num))))
+      toProp (e, num) = PEq e (Var (TS.pack ("abst_" ++ (show num))))
 
     -- Props storing info that need declaration(s)
     toDeclarePs     = ps <> keccAssump <> keccComp
@@ -404,11 +404,11 @@ assertReads :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
 assertReads props benv senv = concatMap assertRead allReads
   where
     assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
-    assertRead (idx, Lit 32, buf) = [PImpl (PGEq idx (bufLength buf)) (mkPEq (ReadWord idx buf) (Lit 0))]
+    assertRead (idx, Lit 32, buf) = [PImpl (PGEq idx (bufLength buf)) (PEq (ReadWord idx buf) (Lit 0))]
     assertRead (idx, Lit sz, buf) =
       fmap
         -- TODO: unsafeInto instead fromIntegral here makes symbolic tests fail
-        (PImpl (PGEq idx (bufLength buf)) . mkPEq (ReadByte idx buf) . LitByte . fromIntegral)
+        (PImpl (PGEq idx (bufLength buf)) . PEq (ReadByte idx buf) . LitByte . fromIntegral)
         [(0::Int)..unsafeInto sz-1]
     assertRead (_, _, _) = internalError "Cannot generate assertions for accesses of symbolic size"
 

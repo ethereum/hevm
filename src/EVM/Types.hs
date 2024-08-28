@@ -432,14 +432,6 @@ data Prop where
   PBool :: Bool -> Prop
 deriving instance (Show Prop)
 
-mkPEq :: (Typeable a) => Expr a -> Expr a -> Prop
-mkPEq (Lit x) (Lit y) = PBool (x == y)
-mkPEq a@(Lit _) b = PEq a b
-mkPEq a b@(Lit _) = PEq b a -- we always put concrete values on LHS
-mkPEq a b
-  | a == b = PBool True
-  | otherwise = PEq a b
-
 infixr 3 .&&
 (.&&) :: Prop -> Prop -> Prop
 x .&& y = PAnd x y
@@ -460,9 +452,9 @@ x .>= y = PGEq x y
 
 infix 4 .==, ./=
 (.==) :: (Typeable a) => Expr a -> Expr a -> Prop
-x .== y = mkPEq x y
+x .== y = PEq x y
 (./=) :: (Typeable a) => Expr a -> Expr a -> Prop
-x ./= y = PNeg (mkPEq x y)
+x ./= y = PNeg (PEq x y)
 
 pand :: [Prop] -> Prop
 pand = foldl' PAnd (PBool True)
