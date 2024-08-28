@@ -157,7 +157,7 @@ makeVm o = do
     env = Env
       { chainId = o.chainId
       , contracts = Map.fromList ((o.address,o.contract):o.otherContracts)
-      , freshAddresses = 0
+      , freshAddresses = o.freshAddresses
       , freshGasVals = 0
       }
     block = Block
@@ -1604,7 +1604,7 @@ cheatActions = Map.fromList
 
   , action "assume(bool)" $
       \sig _ _ input -> case decodeStaticArgs 0 1 input of
-        [c] -> modifying #constraints ((:) (PEq c (Lit 1)))
+        [c] -> modifying #constraints ((:) (mkPEq (Lit 1) c))
         _ -> vmError (BadCheatCode sig)
 
   , action "roll(uint256)" $

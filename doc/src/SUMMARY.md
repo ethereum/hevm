@@ -1,6 +1,7 @@
 [Getting Started](./getting-started.md)
 [Quick Installation](./install.md)
 [When to Use](./when-to-use.md)
+[Limitations and Workarounds](./limitations-and-workarounds.md)
 
 # Tutorials
 

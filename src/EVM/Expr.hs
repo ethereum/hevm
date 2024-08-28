@@ -1221,14 +1221,14 @@ simplifyProp prop =
     go (PLEq a (Max _ b)) | a == b = PBool True
     go (PLEq (Sub a b) c) | a == c = PLEq b a
     go (PLT (Max (Lit a) b) (Lit c)) | a < c = PLT b (Lit c)
-    go (PLT (Lit 0) (Eq a b)) = PEq a b
+    go (PLT (Lit 0) (Eq a b)) = mkPEq a b
 
     -- negations
     go (PNeg (PBool b)) = PBool (Prelude.not b)
     go (PNeg (PNeg a)) = a
 
     -- solc specific stuff
-    go (PEq (IsZero (IsZero (Eq a b))) (Lit 0)) = PNeg (PEq a b)
+    go (PEq (IsZero (IsZero (Eq a b))) (Lit 0)) = PNeg (mkPEq a b)
 
     -- iszero(a) -> (a == 0)
     -- iszero(iszero(a))) -> ~(a == 0) -> a > 0
@@ -1239,7 +1239,7 @@ simplifyProp prop =
     -- iszero(a) -> (a == 0)
     -- iszero(a) == 0 -> ~(a == 0)
     -- ~(iszero(a) == 0) -> ~~(a == 0) -> a == 0
-    go (PNeg (PEq (IsZero a) (Lit 0))) = PEq a (Lit 0)
+    go (PNeg (PEq (IsZero a) (Lit 0))) = mkPEq (Lit 0) a
 
     -- a < b == 0 -> ~(a < b)
     -- ~(a < b == 0) -> ~~(a < b) -> a < b
@@ -1263,16 +1263,16 @@ simplifyProp prop =
     go (PImpl (PBool False) _) = PBool True
 
     -- Double negation
-    go (PEq (IsZero (Eq a b)) (Lit 0)) = PEq a b
+    go (PEq (IsZero (Eq a b)) (Lit 0)) = mkPEq a b
     go (PEq (IsZero (LT a b)) (Lit 0)) = PLT a b
     go (PEq (IsZero (GT a b)) (Lit 0)) = PGT a b
     go (PEq (IsZero (LEq a b)) (Lit 0)) = PLEq a b
     go (PEq (IsZero (GEq a b)) (Lit 0)) = PGEq a b
 
     -- Eq
-    go (PEq (Eq a b) (Lit 0)) = PNeg (PEq a b)
-    go (PEq (Eq a b) (Lit 1)) = PEq a b
-    go (PEq (Sub a b) (Lit 0)) = PEq a b
+    go (PEq (Eq a b) (Lit 0)) = PNeg (mkPEq a b)
+    go (PEq (Eq a b) (Lit 1)) = mkPEq a b
+    go (PEq (Sub a b) (Lit 0)) = mkPEq a b
     go (PEq (LT a b) (Lit 0)) = PLEq b a
     go (PEq (Lit l) (Lit r)) = PBool (l == r)
     go o@(PEq l r)
@@ -1289,7 +1289,7 @@ simplifyProp prop =
     simpInnerExpr (PGEq a b) = simpInnerExpr (PLEq b a)
     simpInnerExpr (PGT a b) = simpInnerExpr (PLT b a)
     -- simplifies the inner expression
-    simpInnerExpr (PEq a b) = PEq (simplify a) (simplify b)
+    simpInnerExpr (PEq a b) = mkPEq (simplify a) (simplify b)
     simpInnerExpr (PLT a b) = PLT (simplify a) (simplify b)
     simpInnerExpr (PLEq a b) = PLEq (simplify a) (simplify b)
     simpInnerExpr (PNeg a) = PNeg (simpInnerExpr a)

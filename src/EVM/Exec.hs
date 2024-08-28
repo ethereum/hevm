@@ -41,6 +41,7 @@ vmForEthrunCreation creationCode =
     , create = False
     , txAccessList = mempty
     , allowFFI = False
+    , freshAddresses = 0
     }) <&> set (#env % #contracts % at (LitAddr ethrunAddress))
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
 

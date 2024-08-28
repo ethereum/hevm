@@ -101,7 +101,7 @@ extractCex (Cex c) = Just c
 extractCex _ = Nothing
 
 bool :: Expr EWord -> Prop
-bool e = POr (PEq e (Lit 1)) (PEq e (Lit 0))
+bool e = POr (mkPEq (Lit 1) e) (mkPEq (Lit 0) e)
 
 -- | Abstract calldata argument generation
 symAbiArg :: Text -> AbiType -> CalldataFragment
@@ -244,6 +244,7 @@ loadSymVM x callvalue cd create =
     , create = create
     , txAccessList = mempty
     , allowFFI = False
+    , freshAddresses = 0
     })
 
 -- | Interpreter which explores all paths at branching points. Returns an
@@ -419,7 +420,7 @@ getExpr solvers c signature' concreteArgs opts = do
 checkAssertions :: [Word256] -> Postcondition s
 checkAssertions errs _ = \case
   Failure _ _ (Revert (ConcreteBuf msg)) -> PBool $ msg `notElem` (fmap panicMsg errs)
-  Failure _ _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
+  Failure _ _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . mkPEq b . ConcreteBuf . panicMsg) errs)
   _ -> PBool True
 
 -- | By default hevm only checks for user-defined assertions
@@ -482,7 +483,7 @@ flattenExpr = go []
   where
     go :: [Prop] -> Expr End -> [Expr End]
     go pcs = \case
-      ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
+      ITE c t f -> go (PNeg ((mkPEq (Lit 0) c)) : pcs) t <> go (mkPEq (Lit 0) c : pcs) f
       Success ps trace msg store -> [Success (nubOrd $ ps <> pcs) trace msg store]
       Failure ps trace e -> [Failure (nubOrd $ ps <> pcs) trace e]
       Partial ps trace p -> [Partial (nubOrd $ ps <> pcs) trace p]
@@ -513,8 +514,8 @@ reachable solvers e = do
     go conf pcs = \case
       ITE c t f -> do
         (tres, fres) <- concurrently
-          (go conf (PEq (Lit 1) c : pcs) t)
-          (go conf (PEq (Lit 0) c : pcs) f)
+          (go conf (mkPEq (Lit 1) c : pcs) t)
+          (go conf (mkPEq (Lit 0) c : pcs) f)
         let subexpr = case (snd tres, snd fres) of
               (Just t', Just f') -> Just $ ITE c t' f'
               (Just t', Nothing) -> Just t'
