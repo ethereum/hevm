@@ -211,7 +211,7 @@ foldExpr f acc expr = acc <> (go expr)
 mapProp :: (forall a . Expr a -> Expr a) -> Prop -> Prop
 mapProp f = \case
   PBool b -> PBool b
-  PEq a b -> mkPEq (mapExpr f (f a)) (mapExpr f (f b))
+  PEq a b -> PEq (mapExpr f (f a)) (mapExpr f (f b))
   PLT a b -> PLT (mapExpr f (f a)) (mapExpr f (f b))
   PGT a b -> PGT (mapExpr f (f a)) (mapExpr f (f b))
   PLEq a b -> PLEq (mapExpr f (f a)) (mapExpr f (f b))
@@ -612,7 +612,7 @@ mapPropM f = \case
   PEq a b -> do
     a' <- mapExprM f a
     b' <- mapExprM f b
-    pure $ mkPEq a' b'
+    pure $ PEq a' b'
   PLT a b -> do
     a' <- mapExprM f a
     b' <- mapExprM f b
