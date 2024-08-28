@@ -287,7 +287,7 @@ exec1 = do
 
     else do
       let ?op = getOpW8 vm.state
-      let op = getOpName vm.state
+      let opName = getOpName vm.state
       case getOp (?op) of
 
         OpPush0 -> do
@@ -497,7 +497,7 @@ exec1 = do
                         Just b -> copyBytesToMemory b codeSize codeOffset memOffset
                         Nothing -> do
                           pc <- use (#state % #pc)
-                          partial $ UnexpectedSymbolicArg pc op "Cannot copy from unknown code at" (wrap [extAccount])
+                          partial $ UnexpectedSymbolicArg pc opName "Cannot copy from unknown code at" (wrap [extAccount])
             _ -> underrun
 
         OpReturndatasize ->
@@ -845,7 +845,7 @@ exec1 = do
                 Nothing -> do
                   loc <- codeloc
                   let msg = "Unable to determine a call target"
-                  partial $ UnexpectedSymbolicArg (snd loc) op msg [SomeExpr xTo]
+                  partial $ UnexpectedSymbolicArg (snd loc) opName msg [SomeExpr xTo]
                 Just xTo' ->
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
@@ -878,7 +878,7 @@ exec1 = do
                 Nothing -> do
                   loc <- codeloc
                   let msg = "Unable to determine a call target"
-                  partial $ UnexpectedSymbolicArg (snd loc) op msg [SomeExpr xTo]
+                  partial $ UnexpectedSymbolicArg (snd loc) opName msg [SomeExpr xTo]
                 Just xTo' ->
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
@@ -925,7 +925,7 @@ exec1 = do
                       doStop
               a -> do
                 pc <- use (#state % #pc)
-                partial $ UnexpectedSymbolicArg pc op "trying to self destruct to a symbolic address" (wrap [a])
+                partial $ UnexpectedSymbolicArg pc opName "trying to self destruct to a symbolic address" (wrap [a])
 
         OpRevert ->
           case stk of
