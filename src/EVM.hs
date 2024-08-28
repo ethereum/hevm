@@ -230,16 +230,17 @@ isCreation = \case
 next :: (?op :: Word8) => EVM t s ()
 next = modifying (#state % #pc) (+ (opSize ?op))
 
-getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
-getOpName state = intToOpName $ fromEnum $ (?op)
-  where
-    ?op = case state.code of
+getOpW8 :: forall (t :: VMType) s . FrameState t s -> Word8
+getOpW8 state = case state.code of
       UnknownCode _ -> internalError "Cannot execute unknown code"
       InitCode conc _ -> BS.index conc state.pc
       RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs state.pc
       RuntimeCode (SymbolicRuntimeCode ops) ->
         fromMaybe (internalError "could not analyze symbolic code") $
           maybeLitByte $ ops V.! state.pc
+
+getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
+getOpName state = intToOpName $ fromEnum $ getOpW8 state
 
 -- | Executes the EVM one step
 exec1 :: forall (t :: VMType) s. VMOps t => EVM t s ()
@@ -285,14 +286,8 @@ exec1 = do
     then doStop
 
     else do
-      let ?op = case vm.state.code of
-                  UnknownCode _ -> internalError "Cannot execute unknown code"
-                  InitCode conc _ -> BS.index conc vm.state.pc
-                  RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs vm.state.pc
-                  RuntimeCode (SymbolicRuntimeCode ops) ->
-                    fromMaybe (internalError "could not analyze symbolic code") $
-                      maybeLitByte $ ops V.! vm.state.pc
-      let op = getOpName vm.state
+      let ?op = getOpW8 vm.state
+      let opName = getOpName vm.state
       case getOp (?op) of
 
         OpPush0 -> do
@@ -502,7 +497,7 @@ exec1 = do
                         Just b -> copyBytesToMemory b codeSize codeOffset memOffset
                         Nothing -> do
                           pc <- use (#state % #pc)
-                          partial $ UnexpectedSymbolicArg pc op "Cannot copy from unknown code at" (wrap [extAccount])
+                          partial $ UnexpectedSymbolicArg pc opName "Cannot copy from unknown code at" (wrap [extAccount])
             _ -> underrun
 
         OpReturndatasize ->
@@ -850,7 +845,7 @@ exec1 = do
                 Nothing -> do
                   loc <- codeloc
                   let msg = "Unable to determine a call target"
-                  partial $ UnexpectedSymbolicArg (snd loc) op msg [SomeExpr xTo]
+                  partial $ UnexpectedSymbolicArg (snd loc) opName msg [SomeExpr xTo]
                 Just xTo' ->
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
@@ -883,7 +878,7 @@ exec1 = do
                 Nothing -> do
                   loc <- codeloc
                   let msg = "Unable to determine a call target"
-                  partial $ UnexpectedSymbolicArg (snd loc) op msg [SomeExpr xTo]
+                  partial $ UnexpectedSymbolicArg (snd loc) opName msg [SomeExpr xTo]
                 Just xTo' ->
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
@@ -930,7 +925,7 @@ exec1 = do
                       doStop
               a -> do
                 pc <- use (#state % #pc)
-                partial $ UnexpectedSymbolicArg pc op "trying to self destruct to a symbolic address" (wrap [a])
+                partial $ UnexpectedSymbolicArg pc opName "trying to self destruct to a symbolic address" (wrap [a])
 
         OpRevert ->
           case stk of
@@ -968,8 +963,8 @@ transfer src dst val = do
           transfer src dst val
         SymAddr _ -> do
           pc <- use (#state % #pc)
-          vm <- get
-          partial $ UnexpectedSymbolicArg pc (getOpName vm.state) "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [src])
+          state <- use #state
+          partial $ UnexpectedSymbolicArg pc (getOpName state) "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [src])
         GVar _ -> internalError "Unexpected GVar"
     -- recipient not in state
     (_ , Nothing) -> do
@@ -979,8 +974,8 @@ transfer src dst val = do
           transfer src dst val
         SymAddr _ -> do
           pc <- use (#state % #pc)
-          vm <- get
-          partial $ UnexpectedSymbolicArg pc (getOpName vm.state) "Attempting to transfer eth to a symbolic address that is not present in the state" (wrap [dst])
+          state <- use #state
+          partial $ UnexpectedSymbolicArg pc (getOpName state) "Attempting to transfer eth to a symbolic address that is not present in the state" (wrap [dst])
         GVar _ -> internalError "Unexpected GVar"
 
 -- | Checks a *CALL for failure; OOG, too many callframes, memory access etc.
@@ -1046,7 +1041,8 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
             -- adding a symbolic address into the state here would be unsound (due to potential aliasing)
             SymAddr _ -> do
               pc <- use (#state % #pc)
-              partial $ UnexpectedSymbolicArg pc (getOpName vm.state) "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [from])
+              state <- use #state
+              partial $ UnexpectedSymbolicArg pc (getOpName state) "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [from])
             GVar _ -> internalError "Unexpected GVar"
 
 
@@ -1290,8 +1286,8 @@ fetchAccount addr continue =
     Nothing -> case addr of
       SymAddr _ -> do
         pc <- use (#state % #pc)
-        vm <- get
-        partial $ UnexpectedSymbolicArg pc (getOpName vm.state) "trying to access a symbolic address that isn't already present in storage" (wrap [addr])
+        state <- use #state
+        partial $ UnexpectedSymbolicArg pc (getOpName state) "trying to access a symbolic address that isn't already present in storage" (wrap [addr])
       LitAddr a -> do
         use (#cache % #fetched % at a) >>= \case
           Just c -> do
@@ -1398,9 +1394,9 @@ finalize = do
         _ ->
           case Expr.toList output of
             Nothing -> do
-              vm <- get
+              state <- use #state
               partial $
-                UnexpectedSymbolicArg pc' (getOpName vm.state) "runtime code cannot have an abstract length" (wrap [output])
+                UnexpectedSymbolicArg pc' (getOpName state) "runtime code cannot have an abstract length" (wrap [output])
             Just ops ->
               onContractCode $ RuntimeCode (SymbolicRuntimeCode ops)
     _ ->
@@ -1789,8 +1785,8 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           fetchAccount xTo $ \target -> case target.code of
               UnknownCode _ -> do
                 pc <- use (#state % #pc)
-                vm <- get
-                partial $ UnexpectedSymbolicArg pc (getOpName vm.state) "call target has unknown code" (wrap [xTo])
+                state <- use #state
+                partial $ UnexpectedSymbolicArg pc (getOpName state) "call target has unknown code" (wrap [xTo])
               _ -> do
                 burn' xGas $ do
                   calldata <- readMemory xInOffset xInSize
