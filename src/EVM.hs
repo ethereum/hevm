@@ -230,16 +230,17 @@ isCreation = \case
 next :: (?op :: Word8) => EVM t s ()
 next = modifying (#state % #pc) (+ (opSize ?op))
 
-getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
-getOpName state = intToOpName $ fromEnum $ (?op)
-  where
-    ?op = case state.code of
+getOpInt :: forall (t :: VMType) s . FrameState t s -> Word8
+getOpInt state = case state.code of
       UnknownCode _ -> internalError "Cannot execute unknown code"
       InitCode conc _ -> BS.index conc state.pc
       RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs state.pc
       RuntimeCode (SymbolicRuntimeCode ops) ->
         fromMaybe (internalError "could not analyze symbolic code") $
           maybeLitByte $ ops V.! state.pc
+
+getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
+getOpName state = intToOpName $ fromEnum $ (getOpInt state)
 
 -- | Executes the EVM one step
 exec1 :: forall (t :: VMType) s. VMOps t => EVM t s ()
@@ -285,13 +286,7 @@ exec1 = do
     then doStop
 
     else do
-      let ?op = case vm.state.code of
-                  UnknownCode _ -> internalError "Cannot execute unknown code"
-                  InitCode conc _ -> BS.index conc vm.state.pc
-                  RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs vm.state.pc
-                  RuntimeCode (SymbolicRuntimeCode ops) ->
-                    fromMaybe (internalError "could not analyze symbolic code") $
-                      maybeLitByte $ ops V.! vm.state.pc
+      let ?op = getOpInt vm.state
       let op = getOpName vm.state
       case getOp (?op) of
 
