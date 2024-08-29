@@ -455,10 +455,11 @@ formatError = \case
 
 formatPartial :: PartialExec -> Text
 formatPartial = \case
-  (UnexpectedSymbolicArg pc msg args) -> T.unlines
+  (UnexpectedSymbolicArg pc opcode msg args) -> T.unlines
     [ "Unexpected Symbolic Arguments to Opcode"
     , indent 2 $ T.unlines
       [ "msg: " <> T.pack (show msg)
+      , "opcode: " <> T.pack opcode
       , "program counter: " <> T.pack (show pc)
       , "arguments: "
       , indent 2 $ T.unlines . fmap formatSomeExpr $ args
