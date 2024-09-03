@@ -3,16 +3,16 @@
     "ethereum-tests": {
       "flake": false,
       "locked": {
-        "lastModified": 1695037072,
-        "narHash": "sha256-rza1ecAHCwlmUx2AhtheBdUpTC5ZMbPz8vLZDNsC4E8=",
+        "lastModified": 1714730913,
+        "narHash": "sha256-zmiUfpvL7BP7/ko2HjajLaG9aoGFBMbA0jyu3spVG1U=",
         "owner": "ethereum",
         "repo": "tests",
-        "rev": "661356317ac6df52208d54187e692472a25a01f8",
+        "rev": "faf33b471465d3c6cdc3d04fbd690895f78d33f2",
         "type": "github"
       },
       "original": {
         "owner": "ethereum",
-        "ref": "v12.4",
+        "ref": "v13.3",
         "repo": "tests",
         "type": "github"
       }
