@@ -599,6 +599,28 @@ exec1 = do
                   assign (#state % #stack) (w : xs)
             _ -> underrun
 
+
+        OpMcopy ->
+          case stk of
+            dstOff:srcOff:sz:xs ->  do
+              case sz of
+                Lit sz' -> do
+                  let words_copied = (sz' + 31) `div` 32
+                  let g_mcopy = 3*words_copied -- memory access cost is part of accessMemoryRange
+                  burn (g_verylow + (unsafeInto g_mcopy)) $
+                    accessMemoryRange srcOff sz $ accessMemoryRange dstOff sz $ do
+                      next
+                      m <- gets (.state.memory)
+                      case m of
+                        ConcreteMemory mem -> do
+                          buf <- freezeMemory mem
+                          copyBytesToMemory buf sz srcOff dstOff
+                        SymbolicMemory mem -> do
+                          assign (#state % #memory) (SymbolicMemory $ copySlice srcOff dstOff sz mem mem)
+                      assign (#state % #stack) xs
+                _ -> internalError "symbolic size in MCOPY"
+            _ -> underrun
+
         OpMstore ->
           case stk of
             x:y:xs ->
@@ -717,8 +739,8 @@ exec1 = do
             x:new:xs ->
               burn g_sload $ do
                 next
-                assign (#state % #stack) xs
                 modifying (#env % #contracts % ix self % #tStorage) (writeStorage x new)
+                assign (#state % #stack) xs
             _ -> underrun
 
         OpJump ->

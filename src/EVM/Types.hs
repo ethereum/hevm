@@ -1008,6 +1008,7 @@ data GenericOp a
   | OpSelfbalance
   | OpBaseFee
   | OpPop
+  | OpMcopy
   | OpMload
   | OpMstore
   | OpMstore8

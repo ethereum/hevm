@@ -87,6 +87,7 @@ intToOpName a =
     0x5a -> "GAS"
     0x5b -> "JUMPDEST"
     --
+    0x5e -> "MCOPY"
     0x5f -> "PUSH0"
     0x60 -> "PUSH1"
     0x61 -> "PUSH2"
@@ -230,6 +231,7 @@ opString (i, o) = let showPc x | x < 0x10 = '0' : showHex x ""
   OpSelfbalance -> "SELFBALANCE"
   OpBaseFee -> "BASEFEE"
   OpPop -> "POP"
+  OpMcopy -> "MCOPY"
   OpMload -> "MLOAD"
   OpMstore -> "MSTORE"
   OpMstore8 -> "MSTORE8"
@@ -339,6 +341,7 @@ getOp x = case x of
   0x5b -> OpJumpdest
   0x5c -> OpTLoad
   0x5d -> OpTStore
+  0x5e -> OpMcopy
   0x5f -> OpPush0
   0xf0 -> OpCreate
   0xf1 -> OpCall

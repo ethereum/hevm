@@ -71,6 +71,7 @@ assemble os = V.fromList $ concatMap go os
       OpSelfbalance -> [LitByte 0x47]
       OpBaseFee -> [LitByte 0x48]
       OpPop -> [LitByte 0x50]
+      OpMcopy -> [LitByte 0x5e]
       OpMload -> [LitByte 0x51]
       OpMstore -> [LitByte 0x52]
       OpMstore8 -> [LitByte 0x53]
