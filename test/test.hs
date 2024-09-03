@@ -2993,7 +2993,7 @@ tests = testGroup "hevm"
             |]
           let sig = (Just (Sig "stuff(address)" [AbiAddressType]))
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
-          putStrLnM $ "Basic tstore check passed, res: " <> show res
+          putStrLnM $ "Basic tstore check passed" --, res: " <> show res
   ]
   , testGroup "concr-fuzz"
     [ testFuzz "fuzz-complicated-mul" $ do
