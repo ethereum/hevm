@@ -74,17 +74,6 @@
             DAPP_SOLC = "${solc}/bin/solc";
           });
 
-        # workaround for nixpkgs / ghc / macos / cc issue
-        # https://gitlab.haskell.org/ghc/ghc/-/issues/23138
-        cc-workaround-ghc-23138 =
-          pkgs.writeScriptBin "cc-workaround-ghc-23138" ''
-            if [ "$1" = "--print-file-name" ] && [ "$2" = "c++" ]; then
-                echo c++
-            else
-                exec cc "$@"
-            fi
-          '';
-
         hevmUnwrapped = let
             ps = if pkgs.stdenv.isDarwin then pkgs else pkgs.pkgsStatic;
           in (with ps; lib.pipe
@@ -92,7 +81,6 @@
             [
               (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
               (haskell.lib.compose.addTestToolDepends testDeps)
-              #(haskell.lib.compose.appendBuildFlags ["-v3"])
               (haskell.lib.compose.appendConfigureFlags (
                 [ "-fci"
                   "-O2"
@@ -104,7 +92,6 @@
                   "--extra-lib-dirs=${zlib.static}/lib"
                   "--extra-lib-dirs=${stripDylib (libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
                   "--extra-lib-dirs=${stripDylib (ncurses.override { enableStatic = true; })}/lib"
-                  "--ghc-options=-pgml=${cc-workaround-ghc-23138}/bin/cc-workaround-ghc-23138"
                 ]))
               haskell.lib.compose.dontHaddock
               haskell.lib.compose.doCheck
@@ -214,7 +201,6 @@
           LD_LIBRARY_PATH = libraryPath;
           shellHook = lib.optionalString stdenv.isDarwin ''
             export DYLD_LIBRARY_PATH="${libraryPath}";
-            cabal configure --ghc-options=-pgml=${cc-workaround-ghc-23138}/bin/cc-workaround-ghc-23138
           '';
         };
       }
