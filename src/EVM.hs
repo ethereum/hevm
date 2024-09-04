@@ -724,7 +724,7 @@ exec1 = do
                        _ -> noop
             _ -> underrun
 
-        OpTLoad ->
+        OpTload ->
           case stk of
             x:xs -> do
               burn g_warm_storage_read $

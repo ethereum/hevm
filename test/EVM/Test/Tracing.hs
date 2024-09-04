@@ -771,7 +771,7 @@ genContract n = do
           (1, pure OpSload)
         , (1, pure OpSstore)
         , (1, pure OpTStore)
-        , (1, pure OpTLoad)
+        , (1, pure OpTload)
       ])
       -- Jumping around
       , (50, frequency [
