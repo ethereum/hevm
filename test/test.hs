@@ -2992,8 +2992,8 @@ tests = testGroup "hevm"
             }
             |]
           let sig = (Just (Sig "stuff(address)" [AbiAddressType]))
-          (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
-          putStrLnM $ "Basic tstore check passed" --, res: " <> show res
+          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+          putStrLnM $ "Basic tstore check passed"
   ]
   , testGroup "concr-fuzz"
     [ testFuzz "fuzz-complicated-mul" $ do
@@ -3580,6 +3580,11 @@ tests = testGroup "hevm"
                     , "expressionInliner/double_recursive_calls.yul"
                     , "conditionalUnsimplifier/side_effects_of_functions.yul"
                     , "conditionalSimplifier/side_effects_of_functions.yul"
+
+                    -- Due to tstorage warnings treated as errors when running solc with --standard-json
+                    --   these cannot be currently run. See: https://github.com/ethereum/solidity/issues/15397
+                    --   When that fix comes to upstream, we can re-enabled again
+                    , "equalStoreEliminator/transient_storage.yul"
                     ]
 
         solcRepo <- liftIO $ fromMaybe (internalError "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")

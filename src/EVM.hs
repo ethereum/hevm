@@ -733,7 +733,7 @@ exec1 = do
                   assign (#state % #stack) (y:xs)
             _ -> underrun
 
-        OpTStore ->
+        OpTstore ->
           notStatic $
           case stk of
             x:new:xs ->

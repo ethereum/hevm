@@ -1015,7 +1015,7 @@ data GenericOp a
   | OpSload
   | OpSstore
   | OpTload
-  | OpTStore
+  | OpTstore
   | OpJump
   | OpJumpi
   | OpPc

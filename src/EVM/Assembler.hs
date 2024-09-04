@@ -78,7 +78,7 @@ assemble os = V.fromList $ concatMap go os
       OpSload -> [LitByte 0x54]
       OpSstore -> [LitByte 0x55]
       OpTload -> [LitByte 0x5c]
-      OpTStore -> [LitByte 0x5d]
+      OpTstore -> [LitByte 0x5d]
       OpJump -> [LitByte 0x56]
       OpJumpi -> [LitByte 0x57]
       OpPc -> [LitByte 0x58]

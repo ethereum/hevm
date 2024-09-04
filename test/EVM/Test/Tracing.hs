@@ -150,19 +150,19 @@ data EVMToolEnv = EVMToolEnv
   , maxCodeSize :: W256
   , schedule    :: FeeSchedule Data.Word.Word64
   , blockHashes :: Map.Map Int W256
-  , withdrawals :: [(Addr)]
+  , withdrawals :: [Addr]
   , currentRandom :: W256
   } deriving (Show, Generic)
 
 instance JSON.ToJSON EVMToolEnv where
-  toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON $ b.coinbase))
+  toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON b.coinbase))
                          , ("currentGasLimit"  , (JSON.toJSON ("0x" ++ showHex (into @Integer b.gasLimit) "")))
-                         , ("currentNumber"    , (JSON.toJSON $ b.number))
+                         , ("currentNumber"    , (JSON.toJSON b.number))
                          , ("currentTimestamp" , (JSON.toJSON tstamp))
-                         , ("currentBaseFee"   , (JSON.toJSON $ b.baseFee))
-                         , ("blockHashes"      , (JSON.toJSON $ b.blockHashes))
-                         , ("withdrawals"      , (JSON.toJSON $ b.withdrawals))
-                         , ("currentRandom"    , (JSON.toJSON $ b.currentRandom))
+                         , ("currentBaseFee"   , (JSON.toJSON b.baseFee))
+                         , ("blockHashes"      , (JSON.toJSON b.blockHashes))
+                         , ("withdrawals"      , (JSON.toJSON b.withdrawals))
+                         , ("currentRandom"    , (JSON.toJSON b.currentRandom))
                          ]
               where
                 tstamp :: W256
@@ -282,16 +282,16 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
       , maxFeePerGas = Just 1
       , chainId = 1
       }
-    evmEnv = EVMToolEnv { coinbase   =  0xff
-                        , timestamp   =  Lit 0x3e8
-                        , number      =  0x0
-                        , gasLimit    =  unsafeInto gaslimitExec
-                        , baseFee     =  0x0
-                        , maxCodeSize =  0xfffff
-                        , schedule    =  feeSchedule
-                        , blockHashes =  blockHashesDefault
-                        , withdrawals =  mempty
-                        , currentRandom =  42
+    evmEnv = EVMToolEnv { coinbase      = 0xff
+                        , timestamp     = Lit 0x3e8
+                        , number        = 0x0
+                        , gasLimit      = unsafeInto gaslimitExec
+                        , baseFee       = 0x0
+                        , maxCodeSize   = 0xfffff
+                        , schedule      = feeSchedule
+                        , blockHashes   = blockHashesDefault
+                        , withdrawals   = mempty
+                        , currentRandom = 42
                         }
     sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
     fromAddress = fromJust $ deriveAddr sk
@@ -317,7 +317,6 @@ getEVMToolRet contr txData gaslimitExec = do
   JSON.encodeFile "txs.json" txs
   JSON.encodeFile "alloc.json" alloc
   JSON.encodeFile "env.json" evmEnv
-  --run: evm transition --input.alloc alloc.json --input.env env.json --input.txs txs.json --output.alloc alloc-out.json --trace trace.json --output.result result.json
   (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
                                , "--state.fork", "ShanghaiToCancunAtTime15k+1153+5656"
                                , "--input.alloc" , "alloc.json"
@@ -770,7 +769,7 @@ genContract n = do
       , (100, frequency [
           (1, pure OpSload)
         , (1, pure OpSstore)
-        , (1, pure OpTStore)
+        , (1, pure OpTstore)
         , (1, pure OpTload)
       ])
       -- Jumping around
