@@ -3569,22 +3569,14 @@ tests = testGroup "hevm"
                     , "reasoningBasedSimplifier/mulcheck.yul"
                     , "reasoningBasedSimplifier/smod.yul"
 
-                    -- TODO check what's wrong with these!
-                    , "loadResolver/keccak_short.yul" -- ACTUAL bug -- keccak
-                    , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV
-
-                    -- started failing with 9.6 update
-                    , "fullInliner/multi_fun_callback.yul"
-                    , "unusedStoreEliminator/write_before_recursion.yul"
-                    , "unusedStoreEliminator/function_side_effects_2.yul"
-                    , "expressionInliner/double_recursive_calls.yul"
-                    , "conditionalUnsimplifier/side_effects_of_functions.yul"
-                    , "conditionalSimplifier/side_effects_of_functions.yul"
-
                     -- Due to tstorage warnings treated as errors when running solc with --standard-json
                     --   these cannot be currently run. See: https://github.com/ethereum/solidity/issues/15397
                     --   When that fix comes to upstream, we can re-enabled again
                     , "equalStoreEliminator/transient_storage.yul"
+                    , "unusedStoreEliminator/tload.yul"
+                    , "unusedStoreEliminator/tstore.yul"
+                    , "yulOptimizerTests/fullSuite/transient_storage.yul"
+                    , "yulOptimizerTests/unusedPruner/transient_storage.yul"
                     ]
 
         solcRepo <- liftIO $ fromMaybe (internalError "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
