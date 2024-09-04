@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a different approach.
 - `initial-storage` option of `hevm symbolic` is respected
 - `caller` option of `hevm symbolic` is now respected
+* Thanks to the new simplification rules, we can now enable more conformance tests
 
 ## [0.53.0] - 2024-02-23
 
