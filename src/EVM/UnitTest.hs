@@ -209,6 +209,8 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
           False -> \(_, post) -> case post of
                                    Success _ _ _ store -> PNeg (failed store)
                                    Failure _ _ (Revert msg) -> case msg of
+                                   -- TODO: add line here with "asssert failed" as a prefix, see
+                                   --   https://github.com/foundry-rs/foundry/blob/master/crates/cheatcodes/src/test/assert.rs#L183C50-L183C66
                                      ConcreteBuf b -> PBool $ b /= panicMsg 0x01
                                      b -> b ./= ConcreteBuf (panicMsg 0x01)
                                    Failure _ _ _ -> PBool True
@@ -284,6 +286,13 @@ execSymTest UnitTestOptions{ .. } method cd = do
   -- Try running the test method
   runExpr
 
+-- TODO see: https://github.com/foundry-rs/foundry/blob/master/crates/cheatcodes/src/test/assert.rs#L189
+--      see: https://github.com/foundry-rs/foundry/blob/master/crates/cheatcodes/src/inspector.rs#L757
+--      Seems like all failures contain a "assertion failed", see line:
+--        https://github.com/foundry-rs/foundry/blob/master/crates/cheatcodes/src/test/assert.rs#L183C50-L183C66
+--      We'll need to initially at least:
+--        - check "assertion failed" in the revert message (we check for Panic currently NH...)
+--        -
 checkSymFailures :: VMOps t => UnitTestOptions RealWorld -> Stepper t RealWorld (VM t RealWorld)
 checkSymFailures UnitTestOptions { .. } = do
   -- Ask whether any assertions failed
