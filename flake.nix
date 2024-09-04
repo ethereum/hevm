@@ -15,11 +15,7 @@
       flake = false;
     };
     ethereum-tests = {
-      url = "github:ethereum/tests/v12.2";
-      flake = false;
-    };
-    cabal-3-12 = {
-      url = "github:haskell/cabal?ref=Cabal-v3.12.1.0";
+      url = "github:ethereum/tests/v12.4";
       flake = false;
     };
     forge-std = {
@@ -32,7 +28,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, cabal-3-12, solc-pkgs, ... }:
+  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, solc-pkgs, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs {
@@ -50,21 +46,6 @@
           bitwuzla
           foundry.defaultPackage.${system}
         ];
-
-        # custom package set for cabal 3.12 (has support for `--enable-multi-repl`)
-        cabal-3-12-pkgs = pkgs.haskellPackages.override {
-          overrides = with pkgs.haskell.lib; self: super: rec {
-            cabal-install = dontCheck (self.callCabal2nix "cabal-install" "${cabal-3-12}/cabal-install" {});
-            cabal-install-solver = dontCheck (self.callCabal2nix "cabal-install-solver" "${cabal-3-12}/cabal-install-solver" {});
-            Cabal-described = dontCheck (self.callCabal2nix "Cabal-described" "${cabal-3-12}/Cabal-described" {});
-            Cabal-QuickCheck = dontCheck (self.callCabal2nix "Cabal-QuickCheck" "${cabal-3-12}/Cabal-QuickCheck" {});
-            Cabal-tree-diff = dontCheck (self.callCabal2nix "Cabal-tree-diff" "${cabal-3-12}/Cabal-tree-diff" {});
-            Cabal-syntax = dontCheck (self.callCabal2nix "Cabal-syntax" "${cabal-3-12}/Cabal-syntax" {});
-            Cabal-tests = dontCheck (self.callCabal2nix "Cabal" "${cabal-3-12}/Cabal-tests" {});
-            Cabal = dontCheck (self.callCabal2nix "Cabal" "${cabal-3-12}/Cabal" {});
-            hackage-security = dontCheck (doJailbreak super.hackage-security_0_6_2_6);
-          };
-        };
 
         secp256k1-static = stripDylib (pkgs.secp256k1.overrideAttrs (attrs: {
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
@@ -215,7 +196,7 @@
         in haskellPackages.shellFor {
           packages = _: [ (hevmBase pkgs) ];
           buildInputs = [
-            cabal-3-12-pkgs.cabal-install
+            haskellPackages.cabal-install
             mdbook
             yarn
             haskellPackages.eventlog2html

@@ -1,35 +1,18 @@
 {
   "nodes": {
-    "cabal-3-12": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1719273538,
-        "narHash": "sha256-/TECd3cdqGDdlEur88H0KbV7jcE/czc0jecj9921T5c=",
-        "owner": "haskell",
-        "repo": "cabal",
-        "rev": "260ecdc3d848782d4df49e629cb0a5dc9e96ca9e",
-        "type": "github"
-      },
-      "original": {
-        "owner": "haskell",
-        "ref": "Cabal-v3.12.1.0",
-        "repo": "cabal",
-        "type": "github"
-      }
-    },
     "ethereum-tests": {
       "flake": false,
       "locked": {
-        "lastModified": 1682506704,
-        "narHash": "sha256-PyFZhdUQRUbmohoMS+w41rmSFfKeTO2RqHLetWlU4Jw=",
+        "lastModified": 1695037072,
+        "narHash": "sha256-rza1ecAHCwlmUx2AhtheBdUpTC5ZMbPz8vLZDNsC4E8=",
         "owner": "ethereum",
         "repo": "tests",
-        "rev": "b25623d4d7df10e38498cace7adc7eb413c4b20d",
+        "rev": "661356317ac6df52208d54187e692472a25a01f8",
         "type": "github"
       },
       "original": {
         "owner": "ethereum",
-        "ref": "v12.2",
+        "ref": "v12.4",
         "repo": "tests",
         "type": "github"
       }
@@ -153,11 +136,11 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1720368505,
-        "narHash": "sha256-5r0pInVo5d6Enti0YwUSQK4TebITypB42bWy5su3MrQ=",
+        "lastModified": 1725194671,
+        "narHash": "sha256-tLGCFEFTB5TaOKkpfw3iYT9dnk4awTP/q4w+ROpMfuw=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "ab82a9612aa45284d4adf69ee81871a389669a9e",
+        "rev": "b833ff01a0d694b910daca6e2ff4a3f26dee478c",
         "type": "github"
       },
       "original": {
@@ -169,7 +152,6 @@
     },
     "root": {
       "inputs": {
-        "cabal-3-12": "cabal-3-12",
         "ethereum-tests": "ethereum-tests",
         "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
