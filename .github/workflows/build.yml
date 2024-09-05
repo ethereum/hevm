@@ -174,13 +174,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ethereum/solidity
-          ref: 1c8745c54a239d20b6fb0f79a8bd2628d779b27e
+          ref: 8a97fa7a1db1ec509221ead6fea6802c684ee887
           path: ethereum-solidity
 
       - uses: actions/checkout@v4
         with:
           repository: ethereum/tests
-          ref: v12.2
+          ref: v13.3
           path: ethereum-tests
 
       - uses: actions/checkout@v4
