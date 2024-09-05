@@ -80,7 +80,7 @@ prepareTests = do
   let testsDir = "BlockchainTests/GeneralStateTests"
   let dir = repo </> testsDir
   jsonFiles <- liftIO $ Find.find Find.always (Find.extension Find.==? ".json") dir
-  liftIO $ putStrLn "Loading and parsing json files from ethereum-tests..."
+  liftIO $ putStrLn $ "Loading and parsing json files from ethereum-tests from " <> show dir
   isCI <- liftIO $ isJust <$> lookupEnv "CI"
   let problematicTests = if isCI then commonProblematicTests <> ciProblematicTests else commonProblematicTests
   let ignoredFiles = if isCI then ciIgnoredFiles else []
