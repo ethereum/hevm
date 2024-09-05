@@ -544,13 +544,13 @@ tests = testGroup "hevm"
   , adjustOption (\(Test.Tasty.QuickCheck.QuickCheckTests n) -> Test.Tasty.QuickCheck.QuickCheckTests (min n 50)) $ testGroup "SimplifierTests"
     [ testProperty  "buffer-simplification" $ \(expr :: Expr Buf) -> prop $ do
         let simplified = Expr.simplify expr
-        checkEquiv expr simplified
+        checkEquivAndLHS expr simplified
     , testProperty "store-simplification" $ \(expr :: Expr Storage) -> prop $ do
         let simplified = Expr.simplify expr
-        checkEquiv expr simplified
+        checkEquivAndLHS expr simplified
     , testProperty "load-simplification" $ \(GenWriteStorageLoad expr) -> prop $ do
         let simplified = Expr.simplify expr
-        checkEquiv expr simplified
+        checkEquivAndLHS expr simplified
     , ignoreTest $ testProperty "load-decompose" $ \(GenWriteStorageLoad expr) -> prop $ do
         putStrLnM $ T.unpack $ formatExpr expr
         let simp = Expr.simplify expr
@@ -561,49 +561,49 @@ tests = testGroup "hevm"
         checkEquiv expr decomposed
     , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> prop $ do
         let simplified = Expr.simplify expr
-        checkEquiv expr simplified
+        checkEquivAndLHS expr simplified
     , testProperty "word-simplification" $ \(ZeroDepthWord expr) -> prop $ do
         let simplified = Expr.simplify expr
-        checkEquiv expr simplified
+        checkEquivAndLHS expr simplified
     , testProperty "readStorage-equivalance" $ \(store, slot) -> prop $ do
         let simplified = Expr.readStorage' slot store
             full = SLoad slot store
-        checkEquiv simplified full
+        checkEquiv full simplified
     , testProperty "writeStorage-equivalance" $ \(val, GenWriteStorageExpr (slot, store)) -> prop $ do
         let simplified = Expr.writeStorage slot val store
             full = SStore slot val store
-        checkEquiv simplified full
+        checkEquiv full simplified
     , testProperty "readWord-equivalance" $ \(buf, idx) -> prop $ do
         let simplified = Expr.readWord idx buf
             full = ReadWord idx buf
-        checkEquiv simplified full
+        checkEquiv full simplified
     , testProperty "writeWord-equivalance" $ \(idx, val, WriteWordBuf buf) -> prop $ do
         let simplified = Expr.writeWord idx val buf
             full = WriteWord idx val buf
-        checkEquiv simplified full
+        checkEquiv full simplified
     , testProperty "arith-simplification" $ \(_ :: Int) -> prop $ do
         expr <- liftIO $ generate . sized $ genWordArith 15
         let simplified = Expr.simplify expr
-        checkEquiv expr simplified
+        checkEquivAndLHS expr simplified
     , testProperty "readByte-equivalance" $ \(buf, idx) -> prop $ do
         let simplified = Expr.readByte idx buf
             full = ReadByte idx buf
-        checkEquiv simplified full
+        checkEquiv full simplified
     -- we currently only simplify concrete writes over concrete buffers so that's what we test here
     , testProperty "writeByte-equivalance" $ \(LitOnly val, LitOnly buf, GenWriteByteIdx idx) -> prop $ do
         let simplified = Expr.writeByte idx val buf
             full = WriteByte idx val buf
-        checkEquiv simplified full
+        checkEquiv full simplified
     , testProperty "copySlice-equivalance" $ \(srcOff, GenCopySliceBuf src, GenCopySliceBuf dst, LitWord @300 size) -> prop $ do
         -- we bias buffers to be concrete more often than not
         dstOff <- liftIO $ generate (maybeBoundedLit 100_000)
         let simplified = Expr.copySlice srcOff dstOff size src dst
             full = CopySlice srcOff dstOff size src dst
-        checkEquiv simplified full
+        checkEquiv full simplified
     , testProperty "indexWord-equivalence" $ \(src, LitWord @50 idx) -> prop $ do
         let simplified = Expr.indexWord idx src
             full = IndexWord idx src
-        checkEquiv simplified full
+        checkEquiv full simplified
     , testProperty "indexWord-mask-equivalence" $ \(src :: Expr EWord, LitWord @35 idx) -> prop $ do
         mask <- liftIO $ generate $ do
           pow <- arbitrary :: Gen Int
@@ -615,7 +615,7 @@ tests = testGroup "hevm"
           input = And mask src
           simplified = Expr.indexWord idx input
           full = IndexWord idx input
-        checkEquiv simplified full
+        checkEquiv full simplified
     , testProperty "toList-equivalance" $ \buf -> prop $ do
         let
           -- transforms the input buffer to give it a known length
@@ -653,13 +653,13 @@ tests = testGroup "hevm"
           _ -> liftIO $ assertFailure "must evaluate down to a literal bool"
     , testProperty "simplifyProp-equivalence-sym" $ \(p) -> prop $ do
         let simplified = Expr.simplifyProp p
-        checkEquivProp simplified p
+        checkEquivPropAndLHS p simplified
     , testProperty "simpProp-equivalence-sym-Prop" $ \(ps :: [Prop]) -> prop $ do
         let simplified = pand (Expr.simplifyProps ps)
-        checkEquivProp simplified (pand ps)
+        checkEquivPropAndLHS (pand ps) simplified
     , testProperty "simpProp-equivalence-sym-LitProp" $ \(LitProp p) -> prop $ do
         let simplified = pand (Expr.simplifyProps [p])
-        checkEquivProp simplified p
+        checkEquivPropAndLHS p simplified
     , testProperty "storage-slot-simp-property" $ \(StorageExp s) -> prop $ do
         -- we have to run `Expr.structureArraySlots` on the unsimplified system, or
         -- we'd need some form of minimal simplifier for things to work out. As long as
@@ -667,7 +667,7 @@ tests = testGroup "hevm"
         -- and quite minimal
         let s2 = Expr.structureArraySlots s
         let simplified = Expr.simplify s2
-        checkEquiv simplified s2
+        checkEquivAndLHS s2 simplified
     ]
   , testGroup "isUnsat-concrete-tests" [
       test "disjunction-left-false" $ do
@@ -3639,8 +3639,20 @@ tests = testGroup "hevm"
 checkEquivProp :: App m => Prop -> Prop -> m Bool
 checkEquivProp = checkEquivBase (\l r -> PNeg (PImpl l r .&& PImpl r l))
 
+checkEquivPropAndLHS :: App m => Prop -> Prop -> m Bool
+checkEquivPropAndLHS orig simp= do
+  let lhsConst = Expr.checkLHSConstProp simp
+  equiv <- checkEquivBase (\l r -> PNeg (PImpl l r .&& PImpl r l)) orig simp
+  pure $ lhsConst && equiv
+
 checkEquiv :: (Typeable a, App m) => Expr a -> Expr a -> m Bool
 checkEquiv = checkEquivBase (./=)
+
+checkEquivAndLHS :: (Typeable a, App m) => Expr a -> Expr a -> m Bool
+checkEquivAndLHS orig simp = do
+  let lhsConst =  Expr.checkLHSConst simp
+  equiv <- checkEquivBase (./=) orig simp
+  pure $ lhsConst && equiv
 
 checkEquivBase :: (Eq a, App m) => (a -> a -> Prop) -> a -> a -> m Bool
 checkEquivBase mkprop l r = do

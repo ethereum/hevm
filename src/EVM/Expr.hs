@@ -8,7 +8,7 @@
 module EVM.Expr where
 
 import Prelude hiding (LT, GT)
-import Control.Monad (unless, when)
+import Control.Monad (unless, when, void)
 import Control.Monad.ST (ST)
 import Control.Monad.State (put, get, modify, execState, State)
 import Data.Bits hiding (And, Xor)
@@ -1047,6 +1047,9 @@ simplify e = if (mapExpr go e == e)
     -- literal addresses
     go (WAddr (LitAddr a)) = Lit $ into a
 
+    -- XOR normalization
+    go (Xor a  b) = EVM.Expr.xor a b
+
     -- simple div/mod/add/sub
     go (Div o1@(Lit _)  o2@(Lit _)) = EVM.Expr.div  o1 o2
     go (SDiv o1@(Lit _) o2@(Lit _)) = EVM.Expr.sdiv o1 o2
@@ -1605,3 +1608,36 @@ concKeccakOnePass orig@(Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) orig2@(WriteW
     (64, ConcreteBuf a) -> Lit (keccak' a)
     _ -> orig
 concKeccakOnePass x = x
+
+lhsConstHelper ::Expr a -> State Bool (Expr a)
+lhsConstHelper = go
+  where
+    go :: Expr a -> State Bool (Expr a)
+    go e@(Mul (Lit _) _) = pure e
+    go e@(Add (Lit _) _) = pure e
+    go e@(Min (Lit _) _) = pure e
+    go e@(Max (Lit _) _) = pure e
+    go e@(Eq (Lit _) _)  = pure e
+    go e@(And (Lit _) _) = pure e
+    go e@(Or (Lit _) _)  = pure e
+    go e@(Xor (Lit _) _) = pure e
+    go e@(Mul _ (Lit _)) = put False >> pure e
+    go e@(Add _ (Lit _)) = put False >> pure e
+    go e@(Min _ (Lit _)) = put False >> pure e
+    go e@(Max _ (Lit _)) = put False >> pure e
+    go e@(Eq _ (Lit _))  = put False >> pure e
+    go e@(And _ (Lit _)) = put False >> pure e
+    go e@(Or _ (Lit _))  = put False >> pure e
+    go e@(Xor _ (Lit _)) = put False >> pure e
+    go e = pure e
+
+-- Commutative operators should have the constant on the LHS
+checkLHSConstProp :: Prop -> Bool
+checkLHSConstProp a = execState (mapPropM lhsConstHelper a) True
+
+-- Commutative operators should have the constant on the LHS
+checkLHSConst :: Expr a -> Bool
+checkLHSConst a = execState (mapExprM_ go a) True
+  where
+    go :: forall a . Expr a -> State Bool ()
+    go = void . lhsConstHelper
