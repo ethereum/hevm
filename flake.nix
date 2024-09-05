@@ -15,11 +15,7 @@
       flake = false;
     };
     ethereum-tests = {
-      url = "github:ethereum/tests/v12.2";
-      flake = false;
-    };
-    cabal-3-12 = {
-      url = "github:haskell/cabal?ref=Cabal-v3.12.1.0";
+      url = "github:ethereum/tests/v12.4";
       flake = false;
     };
     forge-std = {
@@ -32,7 +28,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, cabal-3-12, solc-pkgs, ... }:
+  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, solc-pkgs, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs {
@@ -51,21 +47,6 @@
           foundry.defaultPackage.${system}
         ];
 
-        # custom package set for cabal 3.12 (has support for `--enable-multi-repl`)
-        cabal-3-12-pkgs = pkgs.haskellPackages.override {
-          overrides = with pkgs.haskell.lib; self: super: rec {
-            cabal-install = dontCheck (self.callCabal2nix "cabal-install" "${cabal-3-12}/cabal-install" {});
-            cabal-install-solver = dontCheck (self.callCabal2nix "cabal-install-solver" "${cabal-3-12}/cabal-install-solver" {});
-            Cabal-described = dontCheck (self.callCabal2nix "Cabal-described" "${cabal-3-12}/Cabal-described" {});
-            Cabal-QuickCheck = dontCheck (self.callCabal2nix "Cabal-QuickCheck" "${cabal-3-12}/Cabal-QuickCheck" {});
-            Cabal-tree-diff = dontCheck (self.callCabal2nix "Cabal-tree-diff" "${cabal-3-12}/Cabal-tree-diff" {});
-            Cabal-syntax = dontCheck (self.callCabal2nix "Cabal-syntax" "${cabal-3-12}/Cabal-syntax" {});
-            Cabal-tests = dontCheck (self.callCabal2nix "Cabal" "${cabal-3-12}/Cabal-tests" {});
-            Cabal = dontCheck (self.callCabal2nix "Cabal" "${cabal-3-12}/Cabal" {});
-            hackage-security = dontCheck (doJailbreak super.hackage-security_0_6_2_6);
-          };
-        };
-
         secp256k1-static = stripDylib (pkgs.secp256k1.overrideAttrs (attrs: {
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         }));
@@ -77,6 +58,8 @@
                 if (with ps.stdenv; hostPlatform.isDarwin && hostPlatform.isx86)
                 then ps.haskell.lib.compose.overrideCabal (_ : { extraLibraries = [ps.libiconv]; }) hprev.with-utf8
                 else hprev.with-utf8;
+              # TODO: temporary fix for static build which is still on 9.4
+              witch = ps.haskell.lib.doJailbreak hprev.witch;
             };
           };
 
@@ -93,17 +76,6 @@
             DAPP_SOLC = "${solc}/bin/solc";
           });
 
-        # workaround for nixpkgs / ghc / macos / cc issue
-        # https://gitlab.haskell.org/ghc/ghc/-/issues/23138
-        cc-workaround-ghc-23138 =
-          pkgs.writeScriptBin "cc-workaround-ghc-23138" ''
-            if [ "$1" = "--print-file-name" ] && [ "$2" = "c++" ]; then
-                echo c++
-            else
-                exec cc "$@"
-            fi
-          '';
-
         hevmUnwrapped = let
             ps = if pkgs.stdenv.isDarwin then pkgs else pkgs.pkgsStatic;
           in (with ps; lib.pipe
@@ -111,7 +83,6 @@
             [
               (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
               (haskell.lib.compose.addTestToolDepends testDeps)
-              #(haskell.lib.compose.appendBuildFlags ["-v3"])
               (haskell.lib.compose.appendConfigureFlags (
                 [ "-fci"
                   "-O2"
@@ -123,7 +94,6 @@
                   "--extra-lib-dirs=${zlib.static}/lib"
                   "--extra-lib-dirs=${stripDylib (libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
                   "--extra-lib-dirs=${stripDylib (ncurses.override { enableStatic = true; })}/lib"
-                  "--ghc-options=-pgml=${cc-workaround-ghc-23138}/bin/cc-workaround-ghc-23138"
                 ]))
               haskell.lib.compose.dontHaddock
               haskell.lib.compose.doCheck
@@ -215,7 +185,7 @@
         in haskellPackages.shellFor {
           packages = _: [ (hevmBase pkgs) ];
           buildInputs = [
-            cabal-3-12-pkgs.cabal-install
+            haskellPackages.cabal-install
             mdbook
             yarn
             haskellPackages.eventlog2html
@@ -233,7 +203,6 @@
           LD_LIBRARY_PATH = libraryPath;
           shellHook = lib.optionalString stdenv.isDarwin ''
             export DYLD_LIBRARY_PATH="${libraryPath}";
-            cabal configure --ghc-options=-pgml=${cc-workaround-ghc-23138}/bin/cc-workaround-ghc-23138
           '';
         };
       }
