@@ -127,6 +127,7 @@ data EType
   | EWord
   | EAddr
   | EContract
+  | EState
   | Byte
   | End
   deriving (Typeable)
@@ -220,7 +221,7 @@ data Expr (a :: EType) where
 
   Partial        :: [Prop] -> TraceContext -> PartialExec -> Expr End
   Failure        :: [Prop] -> TraceContext -> EvmError -> Expr End
-  Success        :: [Prop] -> TraceContext -> Expr Buf -> Map (Expr EAddr) (Expr EContract) -> Expr End
+  Success        :: [Prop] -> TraceContext -> Expr Buf -> Expr EState -> Expr End
   ITE            :: Expr EWord -> Expr End -> Expr End -> Expr End
 
   -- integers
@@ -323,6 +324,14 @@ data Expr (a :: EType) where
   SymAddr        :: Text -> Expr EAddr
   LitAddr        :: Addr -> Expr EAddr
   WAddr          :: Expr EAddr -> Expr EWord
+
+  -- state
+
+  ConcreteState :: Map (Expr EAddr) (Expr EContract) -> Expr EState
+  AbstractState :: Expr EState
+
+  SetContract   :: Expr EAddr -> Expr EContract -> Expr EState -> Expr EState
+  LookupContract :: Expr EAddr -> Expr EState -> Expr EContract
 
   -- storage
 
@@ -745,7 +754,7 @@ data TxState = TxState
 
 -- | Various environmental data
 data Env = Env
-  { contracts      :: Map (Expr EAddr) Contract
+  { contracts      :: Expr EState
   , chainId        :: W256
   , freshAddresses :: Int
   , freshGasVals :: Int
