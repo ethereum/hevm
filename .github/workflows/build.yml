@@ -53,13 +53,13 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@main
       # cabal complains if we don't do this...
       - name: cabal update
-        run: nix-shell --pure --command "cabal update"
+        run: nix develop --command bash -c "cabal update"
       # can't be run in nix build due to network usage
       - name: run rpc tests
-        run: nix-shell --pure --command "cabal --active-repositories=:none run rpc-tests"
+        run: nix develop --command bash -c "cabal --active-repositories=:none run rpc-tests"
       # if we run this in nix build we often get killed due to oom in ci
       - name: run ethereum tests
-        run: nix-shell --pure --command "cabal --active-repositories=:none run ethereum-tests"
+        run: nix develop --command bash -c "cabal --active-repositories=:none run ethereum-tests"
 
   build-windows-bitwuzla:
     name: bitwuzla-build (win64 target)

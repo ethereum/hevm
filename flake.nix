@@ -17,10 +17,6 @@
       url = "github:ethereum/tests/v13.3";
       flake = false;
     };
-    cabal-3-12 = {
-      url = "github:haskell/cabal?ref=Cabal-v3.12.1.0";
-      flake = false;
-    };
     forge-std = {
       url = "github:foundry-rs/forge-std";
       flake = false;
