@@ -184,6 +184,7 @@
         in haskellPackages.shellFor {
           packages = _: [ (hevmBase pkgs) ];
           buildInputs = [
+            curl
             haskellPackages.cabal-install
             mdbook
             yarn
