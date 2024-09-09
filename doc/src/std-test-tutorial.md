@@ -1,4 +1,4 @@
-# ds-test Tutorial
+# Forge std-test Usage Tutorial
 
 Test cases must be prepended with `prove_` and the testing contract must
 inherit from `Test` from [Forge's standard test
@@ -18,7 +18,7 @@ contract BadVaultTest is Test {
 }
 ```
 
-Once you have written such a test case, you need to compile with `forge build`
+Once you have written such a test case, you need to compile with `forge build --ast`
 (see [forge documentation](https://book.getfoundry.sh/forge/tests) for more
 details) and then:
 
@@ -134,6 +134,21 @@ rather than a `>` in the `if`. Notice that in this case, while hevm filled in
 the `address` to give a complete call, the address itself is irrelevant,
 although this is not explicitly mentioned.
 
+## Starting State is Always Concrete
+
+In `test` mode, hevm runs with the starting state set to concrete values. This
+means that with the solidity-generated default constructor of contracts, state
+variables will be zero, and arrays and mappings will be empty. If you need a
+different starting state, such as e.g. tokens already distributed to some
+addresses, you can set that up in the setup phase of your test. This can be
+done via the `beforeTestSetup` function, as documented in the [Foundry
+Book](https://book.getfoundry.sh/forge/writing-tests#before-test-setups).
+
+In case you need a symbolic starting state, see the [Symbolic execution
+tutorial](#symbolic-execution-tutorial). Note that if all you need is a
+symbolic calldata, then you don't need to run `hevm` in symbolic mode, you can
+simply run `hevm test` and hevm will provide you with a symbolic calldata.
+
 ## Test Cases that Must Always Revert
 
 Hevm assumes that a test case should not always revert. If you have such a test
@@ -194,7 +209,6 @@ Checking 1 function(s) in contract src/contract-allrevert-expected.sol:MyContrac
 ```
 
 Which is now the expected outcome.
-
 
 ## Supported Cheat Codes
 

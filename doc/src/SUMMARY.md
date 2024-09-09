@@ -5,14 +5,14 @@
 
 # Tutorials
 
-- [ds-test tutorial](./ds-test-tutorial.md)
+- [Forge std-test tutorial](./std-test-tutorial.md)
 - [Equivalence checking tutorial](./equivalence-checking-tutorial.md)
 - [Symbolic execution tutorial](./symbolic-execution-tutorial.md)
 <!-- [Discovering reachable assertion violations]() -->
 
 # Reference
 
-- [ds-test proving](./test.md)
+- [Forge test proving](./test.md)
 - [Symbolic unit execution](./symbolic.md)
 - [Equivalence checking](./equivalence.md)
 - [Concrete execution](./exec.md)
