@@ -1613,14 +1613,6 @@ lhsConstHelper :: Expr a -> State Bool (Expr a)
 lhsConstHelper = go
   where
     go :: Expr a -> State Bool (Expr a)
-    go e@(Mul (Lit _) _) = pure e
-    go e@(Add (Lit _) _) = pure e
-    go e@(Min (Lit _) _) = pure e
-    go e@(Max (Lit _) _) = pure e
-    go e@(Eq (Lit _) _)  = pure e
-    go e@(And (Lit _) _) = pure e
-    go e@(Or (Lit _) _)  = pure e
-    go e@(Xor (Lit _) _) = pure e
     go e@(Mul _ (Lit _)) = put False >> pure e
     go e@(Add _ (Lit _)) = put False >> pure e
     go e@(Min _ (Lit _)) = put False >> pure e
