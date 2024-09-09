@@ -1609,7 +1609,7 @@ concKeccakOnePass orig@(Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) orig2@(WriteW
     _ -> orig
 concKeccakOnePass x = x
 
-lhsConstHelper ::Expr a -> State Bool (Expr a)
+lhsConstHelper :: Expr a -> State Bool (Expr a)
 lhsConstHelper = go
   where
     go :: Expr a -> State Bool (Expr a)
