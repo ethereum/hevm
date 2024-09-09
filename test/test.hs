@@ -3651,7 +3651,7 @@ checkEquiv = checkEquivBase (./=)
 checkEquivAndLHS :: (Typeable a, App m) => Expr a -> Expr a -> m Bool
 checkEquivAndLHS orig simp = do
   let lhsConst =  Expr.checkLHSConst simp
-  equiv <- checkEquivBase (./=) orig simp
+  equiv <- checkEquiv orig simp
   pure $ lhsConst && equiv
 
 checkEquivBase :: (Eq a, App m) => (a -> a -> Prop) -> a -> a -> m Bool
