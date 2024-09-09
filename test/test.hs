@@ -3640,7 +3640,7 @@ checkEquivProp :: App m => Prop -> Prop -> m Bool
 checkEquivProp = checkEquivBase (\l r -> PNeg (PImpl l r .&& PImpl r l))
 
 checkEquivPropAndLHS :: App m => Prop -> Prop -> m Bool
-checkEquivPropAndLHS orig simp= do
+checkEquivPropAndLHS orig simp = do
   let lhsConst = Expr.checkLHSConstProp simp
   equiv <- checkEquivBase (\l r -> PNeg (PImpl l r .&& PImpl r l)) orig simp
   pure $ lhsConst && equiv
