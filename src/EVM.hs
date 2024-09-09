@@ -116,7 +116,7 @@ makeVm o = do
       , origin = txorigin
       , toAddr = txtoAddr
       , value = o.value
-      , substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty
+      , substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty mempty
       , isCreate = o.create
       , txReversion = Map.fromList ((o.address,o.contract):o.otherContracts)
       }
@@ -948,6 +948,8 @@ exec1 = do
             [] -> underrun
             (xTo':_) -> forceAddr xTo' "SELFDESTRUCT" $ \case
               xTo@(LitAddr _) -> do
+                cc <- use ((#tx % #substate) % #createdContracts)
+                let createdThisTr = self `member` cc
                 acc <- accessAccountForGas xTo
                 let cost = if acc then 0 else g_cold_account_access
                     funds = this.balance
@@ -957,16 +959,14 @@ exec1 = do
                               then g_selfdestruct_newaccount
                               else 0
                   burn (g_selfdestruct + c_new + cost) $ do
-                    selfdestruct self
+                    when createdThisTr $ do
+                      selfdestruct self
                     touchAccount xTo
 
-                    if hasFunds
-                    then fetchAccount xTo $ \_ -> do
-                           #env % #contracts % ix xTo % #balance %= (Expr.add funds)
-                           assign (#env % #contracts % ix self % #balance) (Lit 0)
-                           doStop
-                    else do
-                      doStop
+                    when (not createdThisTr || (xTo /= self)) $ do
+                        #env % #contracts % ix xTo % #balance %= (Expr.add funds)
+                        assign (#env % #contracts % ix self % #balance) (Lit 0)
+                    doStop
               a -> do
                 pc <- use (#state % #pc)
                 partial $ UnexpectedSymbolicArg pc opName "trying to self destruct to a symbolic address" (wrap [a])
@@ -1436,7 +1436,7 @@ finalize :: VMOps t => EVM t s ()
 finalize = do
   let
     revertContracts  = use (#tx % #txReversion) >>= assign (#env % #contracts)
-    revertSubstate   = assign (#tx % #substate) (SubState mempty mempty mempty mempty mempty)
+    revertSubstate   = assign (#tx % #substate) (SubState mempty mempty mempty mempty mempty mempty)
 
   use #result >>= \case
     Just (VMFailure (Revert _)) -> do
@@ -1977,6 +1977,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
 
             modifying (#env % #contracts % ix newAddr % #storage) resetStorage
             modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage
+            modifying ((#tx % #substate) % #createdContracts) (insert newAddr)
 
             transfer self newAddr xValue
 

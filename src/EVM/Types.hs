@@ -695,6 +695,7 @@ data SubState = SubState
   , accessedAddresses   :: Set (Expr EAddr)
   , accessedStorageKeys :: Set (Expr EAddr, W256)
   , refunds             :: [(Expr EAddr, Word64)]
+  , createdContracts    :: Set (Expr EAddr)
   -- in principle we should include logs here, but do not for now
   }
   deriving (Eq, Ord, Show)
