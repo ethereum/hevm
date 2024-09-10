@@ -114,29 +114,29 @@ ciIgnoredFiles = []
 
 commonProblematicTests :: Map String (TestTree -> TestTree)
 commonProblematicTests = Map.fromList
-  [ ("loopMul_d0g0v0_Shanghai", ignoreTestBecause "hevm is too slow")
-  , ("loopMul_d1g0v0_Shanghai", ignoreTestBecause "hevm is too slow")
-  , ("loopMul_d2g0v0_Shanghai", ignoreTestBecause "hevm is too slow")
-  , ("CALLBlake2f_MaxRounds_d0g0v0_Shanghai", ignoreTestBecause "very slow, bypasses timeout due time spent in FFI")
+  [ ("loopMul_d0g0v0_Cancun", ignoreTestBecause "hevm is too slow")
+  , ("loopMul_d1g0v0_Cancun", ignoreTestBecause "hevm is too slow")
+  , ("loopMul_d2g0v0_Cancun", ignoreTestBecause "hevm is too slow")
+  , ("CALLBlake2f_MaxRounds_d0g0v0_Cancun", ignoreTestBecause "very slow, bypasses timeout due time spent in FFI")
   ]
 
 ciProblematicTests :: Map String (TestTree -> TestTree)
 ciProblematicTests = Map.fromList
-  [ ("Return50000_d0g1v0_Shanghai", ignoreTest)
-  , ("Return50000_2_d0g1v0_Shanghai", ignoreTest)
-  , ("randomStatetest177_d0g0v0_Shanghai", ignoreTest)
-  , ("static_Call50000_d0g0v0_Shanghai", ignoreTest)
-  , ("static_Call50000_d1g0v0_Shanghai", ignoreTest)
-  , ("static_Call50000bytesContract50_1_d1g0v0_Shanghai", ignoreTest)
-  , ("static_Call50000bytesContract50_2_d1g0v0_Shanghai", ignoreTest)
-  , ("static_Return50000_2_d0g0v0_Shanghai", ignoreTest)
-  , ("loopExp_d10g0v0_Shanghai", ignoreTest)
-  , ("loopExp_d11g0v0_Shanghai", ignoreTest)
-  , ("loopExp_d12g0v0_Shanghai", ignoreTest)
-  , ("loopExp_d13g0v0_Shanghai", ignoreTest)
-  , ("loopExp_d14g0v0_Shanghai", ignoreTest)
-  , ("loopExp_d8g0v0_Shanghai", ignoreTest)
-  , ("loopExp_d9g0v0_Shanghai", ignoreTest)
+  [ ("Return50000_d0g1v0_Cancun", ignoreTest)
+  , ("Return50000_2_d0g1v0_Cancun", ignoreTest)
+  , ("randomStatetest177_d0g0v0_Cancun", ignoreTest)
+  , ("static_Call50000_d0g0v0_Cancun", ignoreTest)
+  , ("static_Call50000_d1g0v0_Cancun", ignoreTest)
+  , ("static_Call50000bytesContract50_1_d1g0v0_Cancun", ignoreTest)
+  , ("static_Call50000bytesContract50_2_d1g0v0_Cancun", ignoreTest)
+  , ("static_Return50000_2_d0g0v0_Cancun", ignoreTest)
+  , ("loopExp_d10g0v0_Cancun", ignoreTest)
+  , ("loopExp_d11g0v0_Cancun", ignoreTest)
+  , ("loopExp_d12g0v0_Cancun", ignoreTest)
+  , ("loopExp_d13g0v0_Cancun", ignoreTest)
+  , ("loopExp_d14g0v0_Cancun", ignoreTest)
+  , ("loopExp_d8g0v0_Cancun", ignoreTest)
+  , ("loopExp_d9g0v0_Cancun", ignoreTest)
   ]
 
 runVMTest
@@ -370,7 +370,7 @@ errorFatal _ = False
 fromBlockchainCase :: BlockchainCase -> Either BlockchainError Case
 fromBlockchainCase (BlockchainCase blocks preState postState network) =
   case (blocks, network) of
-    ([block], "Shanghai") -> case block.txs of
+    ([block], "Cancun") -> case block.txs of
       [tx] -> fromBlockchainCase' block tx preState postState
       []        -> Left NoTxs
       _         -> Left TooManyTxs
