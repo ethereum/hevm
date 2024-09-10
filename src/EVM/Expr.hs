@@ -8,7 +8,7 @@
 module EVM.Expr where
 
 import Prelude hiding (LT, GT)
-import Control.Monad (unless, when, void)
+import Control.Monad (unless, when)
 import Control.Monad.ST (ST)
 import Control.Monad.State (put, get, modify, execState, State)
 import Data.Bits hiding (And, Xor)
@@ -1609,27 +1609,24 @@ concKeccakOnePass orig@(Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) orig2@(WriteW
     _ -> orig
 concKeccakOnePass x = x
 
-lhsConstHelper :: Expr a -> State Bool (Expr a)
+lhsConstHelper :: Expr a -> Maybe ()
 lhsConstHelper = go
   where
-    go :: Expr a -> State Bool (Expr a)
-    go e@(Mul _ (Lit _)) = put False >> pure e
-    go e@(Add _ (Lit _)) = put False >> pure e
-    go e@(Min _ (Lit _)) = put False >> pure e
-    go e@(Max _ (Lit _)) = put False >> pure e
-    go e@(Eq _ (Lit _))  = put False >> pure e
-    go e@(And _ (Lit _)) = put False >> pure e
-    go e@(Or _ (Lit _))  = put False >> pure e
-    go e@(Xor _ (Lit _)) = put False >> pure e
-    go e = pure e
+    go :: Expr a -> Maybe ()
+    go (Mul _ (Lit _)) = Nothing
+    go (Add _ (Lit _)) = Nothing
+    go (Min _ (Lit _)) = Nothing
+    go (Max _ (Lit _)) = Nothing
+    go (Eq _ (Lit _))  = Nothing
+    go (And _ (Lit _)) = Nothing
+    go (Or _ (Lit _))  = Nothing
+    go (Xor _ (Lit _)) = Nothing
+    go _ = Just ()
 
 -- Commutative operators should have the constant on the LHS
 checkLHSConstProp :: Prop -> Bool
-checkLHSConstProp a = execState (mapPropM lhsConstHelper a) True
+checkLHSConstProp a = isJust $ mapPropM_ lhsConstHelper a
 
 -- Commutative operators should have the constant on the LHS
 checkLHSConst :: Expr a -> Bool
-checkLHSConst a = execState (mapExprM_ go a) True
-  where
-    go :: forall a . Expr a -> State Bool ()
-    go = void . lhsConstHelper
+checkLHSConst a = isJust $ mapExprM_ lhsConstHelper a
