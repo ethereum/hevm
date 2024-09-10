@@ -1047,6 +1047,9 @@ simplify e = if (mapExpr go e == e)
     -- literal addresses
     go (WAddr (LitAddr a)) = Lit $ into a
 
+    -- XOR normalization
+    go (Xor a  b) = EVM.Expr.xor a b
+
     -- simple div/mod/add/sub
     go (Div o1@(Lit _)  o2@(Lit _)) = EVM.Expr.div  o1 o2
     go (SDiv o1@(Lit _) o2@(Lit _)) = EVM.Expr.sdiv o1 o2
@@ -1605,3 +1608,25 @@ concKeccakOnePass orig@(Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) orig2@(WriteW
     (64, ConcreteBuf a) -> Lit (keccak' a)
     _ -> orig
 concKeccakOnePass x = x
+
+lhsConstHelper :: Expr a -> Maybe ()
+lhsConstHelper = go
+  where
+    go :: Expr a -> Maybe ()
+    go (Mul _ (Lit _)) = Nothing
+    go (Add _ (Lit _)) = Nothing
+    go (Min _ (Lit _)) = Nothing
+    go (Max _ (Lit _)) = Nothing
+    go (Eq _ (Lit _))  = Nothing
+    go (And _ (Lit _)) = Nothing
+    go (Or _ (Lit _))  = Nothing
+    go (Xor _ (Lit _)) = Nothing
+    go _ = Just ()
+
+-- Commutative operators should have the constant on the LHS
+checkLHSConstProp :: Prop -> Bool
+checkLHSConstProp a = isJust $ mapPropM_ lhsConstHelper a
+
+-- Commutative operators should have the constant on the LHS
+checkLHSConst :: Expr a -> Bool
+checkLHSConst a = isJust $ mapExprM_ lhsConstHelper a
