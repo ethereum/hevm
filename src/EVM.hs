@@ -963,10 +963,14 @@ exec1 = do
                       selfdestruct self
                     touchAccount xTo
 
-                    when (not createdThisTr || (xTo /= self)) $ do
+                    if hasFunds
+                    then fetchAccount xTo $ \_ -> do
+                      when (not createdThisTr || (xTo /= self)) $ do
                         #env % #contracts % ix xTo % #balance %= (Expr.add funds)
                         assign (#env % #contracts % ix self % #balance) (Lit 0)
-                    doStop
+                      doStop
+                    else
+                      doStop
               a -> do
                 pc <- use (#state % #pc)
                 partial $ UnexpectedSymbolicArg pc opName "trying to self destruct to a symbolic address" (wrap [a])
