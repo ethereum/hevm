@@ -9,7 +9,7 @@ import EVM.Stepper qualified
 import EVM.Transaction
 import EVM.UnitTest (writeTrace)
 import EVM.Types hiding (Block, Case, Env)
-import EVM.Test.Tracing (interpretWithTrace, VMTrace, compareTraces, getTraceOutput, EVMToolResult(..), EVMToolTraceOutput(..))
+import EVM.Test.Tracing (interpretWithTrace, VMTrace, compareTraces, EVMToolTraceOutput(..), decodeTraceOutputHelper)
 
 import Optics.Core
 import Control.Arrow ((***), (&&&))
@@ -24,7 +24,7 @@ import Data.Aeson.Types qualified as JSON
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as Lazy
 import Data.ByteString.Lazy qualified as LazyByteString
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, isPrefixOf)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromJust, fromMaybe, isNothing, isJust)
@@ -81,8 +81,8 @@ prepareTests = do
   repo <- liftIO $ getEnv "HEVM_ETHEREUM_TESTS_REPO"
   let testsDir = "BlockchainTests/GeneralStateTests"
   let dir = repo </> testsDir
-  jsonFiles <- liftIO $ Find.find Find.always (Find.extension Find.==? ".json") dir
-  let jsonFiles = (head jsonFiles):[]
+  jsonFiles1 <- liftIO $ Find.find Find.always (Find.extension Find.==? ".json") dir
+  let jsonFiles = [head jsonFiles1]
   liftIO $ putStrLn $ "Loading and parsing json files from ethereum-tests from " <> show dir
   isCI <- liftIO $ isJust <$> lookupEnv "CI"
   let problematicTests = if isCI then commonProblematicTests <> ciProblematicTests else commonProblematicTests
@@ -156,10 +156,8 @@ runVMTest fname name x = do
 
 
 -- | Run a vm test and output a geth style per opcode trace
-traceVMTest
-  :: App m
-  => String -> Case -> m [VMTrace]
-traceVMTest file x = do
+traceVMTest :: App m => Case -> m [VMTrace]
+traceVMTest x = do
   vm0 <- liftIO $ vmForCase x
   (_, (_, ts)) <- runStateT (interpretWithTrace (EVM.Fetch.zero 0 (Just 0)) EVM.Stepper.runFully) (vm0, [])
   pure ts
@@ -168,8 +166,10 @@ traceVMTest file x = do
 -- This would need a few tweaks to geth to make this really usable (i.e. evm statetest show allow running a single test from within the test file).
 traceVsGeth :: App m => String -> String -> Case -> m ()
 traceVsGeth fname name x = do
+  liftIO $ putStrLn "-> Running `evm --json blocktest` tool."
   (exitCode, evmtoolStdout, evmtoolStderr) <- liftIO $ readProcessWithExitCode "evm" [
-                               "--json" , "blocktest"
+                               "--json"
+                               , "blocktest"
                                , "--run", name
                                , fname
                                ] ""
@@ -177,13 +177,17 @@ traceVsGeth fname name x = do
     putStrLn $ "evmtool exited with code " <> show exitCode
     putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
     putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
-  evmToolResult <- liftIO $ JSON.decodeFileStrict "result.json"
-
-  hevm <- traceVMTest fname x
-  decodedContents <- liftIO $ getTraceOutput evmToolResult
+  hevm <- traceVMTest x
+  liftIO $ writeFile "trace.jsonl" $ filterInfoLines evmtoolStderr
+  decodedContents <- liftIO $ decodeTraceOutputHelper "trace.jsonl"
   let EVMToolTraceOutput ts _ = fromJust decodedContents
+  liftIO $ putStrLn $ "Comparing traces."
   _ <- liftIO $ compareTraces hevm ts
   pure ()
+
+  where
+    filterInfoLines :: String -> String
+    filterInfoLines input = unlines $ filter (not . isPrefixOf "INFO") (lines input)
 
 splitEithers :: (Filterable f) => f (Either a b) -> (f a, f b)
 splitEithers =
@@ -217,7 +221,7 @@ checkStateFail x vm (okBal, okNonce, okData, okCode) = do
     expected = x.testExpectation
     actual = fmap (clearZeroStorage . clearOrigStorage) $ forceConcreteAddrs vm.env.contracts
 
-  putStrLn $ "Failing because of: " <> (unwords reason)
+  putStrLn $ "-> Failing because of: " <> (unwords reason)
   putStrLn "-> Pre balance/state: "
   printContracts check
   putStrLn "-> Expected balance/state: "
@@ -232,9 +236,9 @@ checkExpectation
 checkExpectation x vm = do
   let expectation = x.testExpectation
       (okState, okBal, okNonce, okStor, okCode) = checkExpectedContracts vm expectation
-  liftIO $ putStrLn $ "\nChecking.\n-> state OK: " <> show okState <> " balance OK: " <> show okBal <> " nonce OK: " <> show okNonce <> " storage OK: " <> show okStor <> " code OK: " <> show okCode
+  liftIO $ putStrLn $ "\nChecking.\n--> state OK: " <> show okState <> " balance OK: " <> show okBal <> " nonce OK: " <> show okNonce <> " storage OK: " <> show okStor <> " code OK: " <> show okCode
   if okState then do
-    liftIO $ putStrLn "Pass."
+    liftIO $ putStrLn "->Pass."
     pure Nothing
   else liftIO $ Just <$> checkStateFail x vm (okBal, okNonce, okStor, okCode)
 

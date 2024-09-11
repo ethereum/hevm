@@ -397,10 +397,14 @@ getTraceOutput evmtoolResult =
     Nothing -> pure Nothing
     Just res -> do
       let traceFileName = getTraceFileName res
+      decodeTraceOutputHelper traceFileName
+
+decodeTraceOutputHelper :: String -> IO (Maybe EVMToolTraceOutput)
+decodeTraceOutputHelper traceFileName = do
       convertPath <- Paths.getDataFileName "test/scripts/convert_trace_to_json.sh"
       maybeShellPath <- (fromMaybe "bash") <$> (lookupEnv "HEVM_SYSTEM_SHELL")
       let shellPath = if maybeShellPath == "" then "bash" else maybeShellPath
-      (exitcode, stdout, stderr) <- readProcessWithExitCode shellPath [convertPath, getTraceFileName res] ""
+      (exitcode, stdout, stderr) <- readProcessWithExitCode shellPath [convertPath, traceFileName] ""
       case exitcode of
         ExitSuccess -> do
           -- putStrLn $ "Successfully converted trace to JSON: " <> (show stdout) <> " " <>
