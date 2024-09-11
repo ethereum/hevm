@@ -9,7 +9,7 @@ import EVM.Stepper qualified
 import EVM.Transaction
 import EVM.UnitTest (writeTrace)
 import EVM.Types hiding (Block, Case, Env)
-import EVM.Test.Tracing (interpretWithTrace, VMTrace, compareTraces, EVMToolTraceOutput(..))
+import EVM.Test.Tracing (interpretWithTrace, VMTrace, compareTraces, getTraceOutput, EVMToolResult(..), EVMToolTraceOutput(..))
 
 import Optics.Core
 import Control.Arrow ((***), (&&&))
@@ -32,6 +32,8 @@ import Data.Word (Word64)
 import System.Environment (lookupEnv, getEnv)
 import System.FilePath.Find qualified as Find
 import System.FilePath.Posix (makeRelative, (</>))
+import System.Process (readProcessWithExitCode)
+import GHC.IO.Exception (ExitCode(ExitSuccess))
 import Witch (into, unsafeInto)
 import Witherable (Filterable, catMaybes)
 
@@ -80,6 +82,7 @@ prepareTests = do
   let testsDir = "BlockchainTests/GeneralStateTests"
   let dir = repo </> testsDir
   jsonFiles <- liftIO $ Find.find Find.always (Find.extension Find.==? ".json") dir
+  let jsonFiles = (head jsonFiles):[]
   liftIO $ putStrLn $ "Loading and parsing json files from ethereum-tests from " <> show dir
   isCI <- liftIO $ isJust <$> lookupEnv "CI"
   let problematicTests = if isCI then commonProblematicTests <> ciProblematicTests else commonProblematicTests
@@ -91,17 +94,18 @@ prepareTests = do
 testsFromFile
   :: forall m . App m
   => String -> Map String (TestTree -> TestTree) -> m [TestTree]
-testsFromFile file problematicTests = do
-  parsed <- parseBCSuite <$> (liftIO $ LazyByteString.readFile file)
-  liftIO $ putStrLn $ "Parsed " <> file
+testsFromFile fname problematicTests = do
+  fContents <- liftIO $ LazyByteString.readFile fname
+  let parsed = parseBCSuite fContents
+  liftIO $ putStrLn $ "Parsed " <> fname
   case parsed of
-   Left "No cases to check." -> pure [] -- error "no-cases ok"
-   Left _err -> pure [] -- error _err
-   Right allTests -> mapM runTest (Map.toList allTests)
+    Left "No cases to check." -> pure []
+    Left _err -> pure []
+    Right allTests -> mapM runTest $ Map.toList allTests
   where
     runTest :: (String , Case) -> m TestTree
     runTest (name, x) = do
-      exec <- toIO $ runVMTest name x
+      exec <- toIO $ runVMTest fname name x
       pure $ testCase' name exec
     testCase' :: String -> Assertion -> TestTree
     testCase' name assertion =
@@ -140,11 +144,10 @@ ciProblematicTests = Map.fromList
   , ("loopExp_d9g0v0_Cancun", ignoreTest)
   ]
 
-runVMTest
-  :: App m
-  => String -> Case -> m ()
-runVMTest _name x = do
-  liftIO $ putStrLn $ "\n-----------\nRunning test: " <> _name
+runVMTest :: App m => String -> String -> Case -> m ()
+runVMTest fname name x = do
+  liftIO $ putStrLn $ "\n-----------\nRunning test: " <> name <> " from file: " <> show fname
+  traceVsGeth fname name x
   vm0 <- liftIO $ vmForCase x
   result <- EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) vm0 EVM.Stepper.runFully
   writeTrace result
@@ -155,33 +158,29 @@ runVMTest _name x = do
 -- | Run a vm test and output a geth style per opcode trace
 traceVMTest
   :: App m
-  => String -> String -> m [VMTrace]
-traceVMTest file test = do
-  repo <- liftIO $ getEnv "HEVM_ETHEREUM_TESTS_REPO"
-  allTests <- parseBCSuite <$> (liftIO $ LazyByteString.readFile (repo </> file))
-  let x = case filter (\(name, _) -> name == test) $ Map.toList (getRight allTests) of
-        [(_, x')] -> x'
-        _ -> internalError "test not found"
+  => String -> Case -> m [VMTrace]
+traceVMTest file x = do
   vm0 <- liftIO $ vmForCase x
   (_, (_, ts)) <- runStateT (interpretWithTrace (EVM.Fetch.zero 0 (Just 0)) EVM.Stepper.runFully) (vm0, [])
   pure ts
-    where
-      getRight :: Either a b -> b
-      getRight (Right a) = a
-      getRight (Left _) = error "Not allowed"
-
--- | Read a geth trace from disk
-readTrace :: FilePath -> IO (Either String EVMToolTraceOutput)
-readTrace = JSON.eitherDecodeFileStrict
 
 -- | given a path to a test file, a test case from within that file, and a trace from geth from running that test, compare the traces and show where we differ
 -- This would need a few tweaks to geth to make this really usable (i.e. evm statetest show allow running a single test from within the test file).
-traceVsGeth
-  :: App m
-  => String -> String -> FilePath -> m ()
-traceVsGeth file test gethTrace = do
-  hevm <- traceVMTest file test
-  decodedContents <- liftIO (JSON.decodeFileStrict gethTrace :: IO (Maybe EVMToolTraceOutput))
+traceVsGeth :: App m => String -> String -> Case -> m ()
+traceVsGeth fname name x = do
+  (exitCode, evmtoolStdout, evmtoolStderr) <- liftIO $ readProcessWithExitCode "evm" [
+                               "--json" , "blocktest"
+                               , "--run", name
+                               , fname
+                               ] ""
+  when (exitCode /= ExitSuccess) $ liftIO $ do
+    putStrLn $ "evmtool exited with code " <> show exitCode
+    putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
+    putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
+  evmToolResult <- liftIO $ JSON.decodeFileStrict "result.json"
+
+  hevm <- traceVMTest fname x
+  decodedContents <- liftIO $ getTraceOutput evmToolResult
   let EVMToolTraceOutput ts _ = fromJust decodedContents
   _ <- liftIO $ compareTraces hevm ts
   pure ()
@@ -233,7 +232,7 @@ checkExpectation
 checkExpectation x vm = do
   let expectation = x.testExpectation
       (okState, okBal, okNonce, okStor, okCode) = checkExpectedContracts vm expectation
-  liftIO $ putStrLn $ "\nChecking.  state: " <> show okState <> " balance: " <> show okBal <> " nonce: " <> show okNonce <> " storage: " <> show okStor <> " code: " <> show okCode
+  liftIO $ putStrLn $ "\nChecking.\n-> state OK: " <> show okState <> " balance OK: " <> show okBal <> " nonce OK: " <> show okNonce <> " storage OK: " <> show okStor <> " code OK: " <> show okCode
   if okState then do
     liftIO $ putStrLn "Pass."
     pure Nothing
@@ -337,7 +336,7 @@ parseContracts w v = v .: which >>= parseJSON
           Pre  -> "pre"
           Post -> "postState"
 
-parseBCSuite :: Lazy.ByteString -> Either String (Map String Case)
+parseBCSuite :: Lazy.ByteString-> Either String (Map String Case)
 parseBCSuite x = case (JSON.eitherDecode' x) :: Either String (Map String BlockchainCase) of
   Left e        -> Left e
   Right bcCases -> let allCases = fromBlockchainCase <$> bcCases

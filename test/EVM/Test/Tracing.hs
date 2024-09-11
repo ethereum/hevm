@@ -348,8 +348,8 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
           bStack = b.stack
           aGas = into a.traceGas
           bGas = b.gas
-      -- putStrLn $ "hevm: " <> intToOpName aOp <> " pc: " <> show aPc <> " gas: " <> show aGas <> " stack: " <> show aStack
-      -- putStrLn $ "geth: " <> intToOpName bOp <> " pc: " <> show bPc <> " gas: " <> show bGas <> " stack: " <> show bStack
+      putStrLn $ "hevm: " <> intToOpName aOp <> " pc: " <> show aPc <> " gas: " <> show aGas <> " stack: " <> show aStack
+      putStrLn $ "geth: " <> intToOpName bOp <> " pc: " <> show bPc <> " gas: " <> show bGas <> " stack: " <> show bStack
 
       when (aGas /= bGas) $ do
         putStrLn "GAS doesn't match:"
