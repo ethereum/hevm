@@ -152,6 +152,7 @@ data EVMToolEnv = EVMToolEnv
   , blockHashes :: Map.Map Int W256
   , withdrawals :: [Addr]
   , currentRandom :: W256
+  , parentBeaconBlockRoot :: W256
   } deriving (Show, Generic)
 
 instance JSON.ToJSON EVMToolEnv where
@@ -163,6 +164,7 @@ instance JSON.ToJSON EVMToolEnv where
                          , ("blockHashes"      , (JSON.toJSON b.blockHashes))
                          , ("withdrawals"      , (JSON.toJSON b.withdrawals))
                          , ("currentRandom"    , (JSON.toJSON b.currentRandom))
+                         , ("parentBeaconBlockRoot" , (JSON.toJSON b.parentBeaconBlockRoot))
                          ]
               where
                 tstamp :: W256
@@ -181,6 +183,7 @@ emptyEvmToolEnv = EVMToolEnv { coinbase = 0
                              , blockHashes = mempty
                              , withdrawals = mempty
                              , currentRandom = 42
+                             , parentBeaconBlockRoot = 5
                              }
 
 data EVMToolReceipt =
@@ -292,6 +295,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
                         , blockHashes   = blockHashesDefault
                         , withdrawals   = mempty
                         , currentRandom = 42
+                        , parentBeaconBlockRoot = 5
                         }
     sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
     fromAddress = fromJust $ deriveAddr sk
@@ -318,7 +322,7 @@ getEVMToolRet contr txData gaslimitExec = do
   JSON.encodeFile "alloc.json" alloc
   JSON.encodeFile "env.json" evmEnv
   (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
-                               , "--state.fork", "ShanghaiToCancunAtTime15k+1153+5656"
+                               , "--state.fork", "Cancun"
                                , "--input.alloc" , "alloc.json"
                                , "--input.env" , "env.json"
                                , "--input.txs" , "txs.json"
