@@ -93,6 +93,7 @@ testsFromFile
   => String -> Map String (TestTree -> TestTree) -> m [TestTree]
 testsFromFile file problematicTests = do
   parsed <- parseBCSuite <$> (liftIO $ LazyByteString.readFile file)
+  liftIO $ putStrLn $ "Parsed " <> file
   case parsed of
    Left "No cases to check." -> pure [] -- error "no-cases ok"
    Left _err -> pure [] -- error _err
@@ -100,7 +101,7 @@ testsFromFile file problematicTests = do
   where
     runTest :: (String , Case) -> m TestTree
     runTest (name, x) = do
-      exec <- toIO $ runVMTest True (name, x)
+      exec <- toIO $ runVMTest name x
       pure $ testCase' name exec
     testCase' :: String -> Assertion -> TestTree
     testCase' name assertion =
@@ -141,12 +142,13 @@ ciProblematicTests = Map.fromList
 
 runVMTest
   :: App m
-  => Bool -> (String, Case) -> m ()
-runVMTest diffmode (_name, x) = do
+  => String -> Case -> m ()
+runVMTest _name x = do
+  liftIO $ putStrLn $ "\n-----------\nRunning test: " <> _name
   vm0 <- liftIO $ vmForCase x
   result <- EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) vm0 EVM.Stepper.runFully
   writeTrace result
-  maybeReason <- checkExpectation diffmode x result
+  maybeReason <- checkExpectation x result
   liftIO $ forM_ maybeReason assertFailure
 
 
@@ -194,48 +196,48 @@ fromConcrete :: Expr Storage -> Map W256 W256
 fromConcrete (ConcreteStore s) = s
 fromConcrete s = internalError $ "unexpected abstract store: " <> show s
 
-checkStateFail :: Bool -> Case -> VM Concrete RealWorld -> (Bool, Bool, Bool, Bool) -> IO String
-checkStateFail diff x vm (okMoney, okNonce, okData, okCode) = do
+checkStateFail :: Case -> VM Concrete RealWorld -> (Bool, Bool, Bool, Bool) -> IO String
+checkStateFail x vm (okBal, okNonce, okData, okCode) = do
   let
     printContracts :: Map Addr Contract -> IO ()
     printContracts cs = putStrLn $ Map.foldrWithKey (\k c acc ->
-      acc ++ show k ++ " : "
-                   ++ (show $ fromJust $ c.nonce) ++ " "
+      acc ++ "-->" <> show k ++ " : "
+                   ++ (show $ fromJust c.nonce) ++ " "
                    ++ (show $ fromJust $ maybeLitWord c.balance) ++ " "
-                   ++ (show $ fromConcrete $ c.storage)
+                   ++ (show $ fromConcrete c.storage)
         ++ "\n") "" cs
 
     reason = map fst (filter (not . snd)
-        [ ("bad-state",       okMoney || okNonce || okData  || okCode)
-        , ("bad-balance", not okMoney || okNonce || okData  || okCode)
-        , ("bad-nonce",   not okNonce || okMoney || okData  || okCode)
-        , ("bad-storage", not okData  || okMoney || okNonce || okCode)
-        , ("bad-code",    not okCode  || okMoney || okNonce || okData)
+        [ ("bad-state",       okBal   || okNonce || okData  || okCode)
+        , ("bad-balance", not okBal   || okNonce || okData  || okCode)
+        , ("bad-nonce",   not okNonce || okBal   || okData  || okCode)
+        , ("bad-storage", not okData  || okBal   || okNonce || okCode)
+        , ("bad-code",    not okCode  || okBal   || okNonce || okData)
         ])
     check = x.checkContracts
     expected = x.testExpectation
     actual = fmap (clearZeroStorage . clearOrigStorage) $ forceConcreteAddrs vm.env.contracts
 
-  when diff $ do
-    putStr (unwords reason)
-    putStrLn "\nPre balance/state: "
-    printContracts check
-    putStrLn "\nExpected balance/state: "
-    printContracts expected
-    putStrLn "\nActual balance/state: "
-    printContracts actual
+  putStrLn $ "Failing because of: " <> (unwords reason)
+  putStrLn "-> Pre balance/state: "
+  printContracts check
+  putStrLn "-> Expected balance/state: "
+  printContracts expected
+  putStrLn "-> Actual balance/state: "
+  printContracts actual
   pure (unwords reason)
 
 checkExpectation
   :: App m
-  => Bool -> Case -> VM Concrete RealWorld -> m (Maybe String)
-checkExpectation diff x vm = do
+  => Case -> VM Concrete RealWorld -> m (Maybe String)
+checkExpectation x vm = do
   let expectation = x.testExpectation
-      (okState, b2, b3, b4, b5) = checkExpectedContracts vm expectation
-  if okState then
+      (okState, okBal, okNonce, okStor, okCode) = checkExpectedContracts vm expectation
+  liftIO $ putStrLn $ "\nChecking.  state: " <> show okState <> " balance: " <> show okBal <> " nonce: " <> show okNonce <> " storage: " <> show okStor <> " code: " <> show okCode
+  if okState then do
+    liftIO $ putStrLn "Pass."
     pure Nothing
-  else liftIO $
-    Just <$> checkStateFail diff x vm (b2, b3, b4, b5)
+  else liftIO $ Just <$> checkStateFail x vm (okBal, okNonce, okStor, okCode)
 
 -- quotient account state by nullness
 (~=) :: Map Addr Contract -> Map Addr Contract -> Bool
@@ -344,10 +346,10 @@ parseBCSuite x = case (JSON.eitherDecode' x) :: Either String (Map String Blockc
                        filteredCases = Map.filter keepError allCases
                        (erroredCases, parsedCases) = splitEithers filteredCases
     in if Map.size erroredCases > 0
-    then Left ("errored case: " ++ (show erroredCases))
-    else if Map.size parsedCases == 0
-    then Left "No cases to check."
-    else Right parsedCases
+       then Left ("errored case: " ++ (show erroredCases))
+       else if Map.size parsedCases == 0
+            then Left "No cases to check."
+            else Right parsedCases
 
 
 data BlockchainError
