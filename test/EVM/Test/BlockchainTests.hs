@@ -236,7 +236,7 @@ checkExpectation
 checkExpectation x vm = do
   let expectation = x.testExpectation
       (okState, okBal, okNonce, okStor, okCode) = checkExpectedContracts vm expectation
-  liftIO $ putStrLn $ "\nChecking.\n--> state OK: " <> show okState <> " balance OK: " <> show okBal <> " nonce OK: " <> show okNonce <> " storage OK: " <> show okStor <> " code OK: " <> show okCode
+  liftIO $ putStrLn $ "\nChecking.\n-> state OK: " <> show okState <> " balance OK: " <> show okBal <> " nonce OK: " <> show okNonce <> " storage OK: " <> show okStor <> " code OK: " <> show okCode
   if okState then do
     liftIO $ putStrLn "->Pass."
     pure Nothing
