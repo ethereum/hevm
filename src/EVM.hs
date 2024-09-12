@@ -35,7 +35,7 @@ import Data.ByteString.Lazy qualified as LS
 import Data.ByteString.Char8 qualified as Char8
 import Data.Foldable (toList)
 import Data.List (find)
-import Data.Map.Strict (Map)
+import Data.Map.Strict (Map, (!))
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, fromJust, isJust)
 import Data.Set (insert, member, fromList)
@@ -93,9 +93,23 @@ currentContract vm =
   Map.lookup vm.state.codeContract vm.env.contracts
 
 -- * Data constructors
-
+--
 makeVm :: VMOps t => VMOpts t -> ST s (VM t s)
 makeVm o = do
+  vm <- makeVmNoEIP4788 o
+  let addr = (LitAddr 0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02)
+  let eip4788Present = Map.member addr vm.env.contracts
+  if (eip4788Present)
+  then do
+    -- modify state of `addr` to add EIP-4788
+    let cont :: Contract =  vm.env.contracts ! addr
+    let storage2 :: Expr Storage = writeStorage (Lit 0) (Lit 1) cont.storage
+    let cont2 :: Contract = cont { storage = storage2 } :: Contract
+    pure $ vm { env = vm.env { contracts = Map.insert addr cont2 (vm.env.contracts) } }
+  else pure vm
+
+makeVmNoEIP4788 :: VMOps t => VMOpts t -> ST s (VM t s)
+makeVmNoEIP4788 o = do
   let txaccessList = o.txAccessList
       txorigin = o.origin
       txtoAddr = o.address
