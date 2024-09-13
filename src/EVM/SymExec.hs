@@ -245,6 +245,7 @@ loadSymVM x callvalue cd create =
     , txAccessList = mempty
     , allowFFI = False
     , freshAddresses = 0
+    , beaconRoot = 0
     })
 
 -- | Interpreter which explores all paths at branching points. Returns an

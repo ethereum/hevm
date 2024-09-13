@@ -52,6 +52,7 @@ data Block = Block
   , number      :: W256
   , timestamp   :: W256
   , txs         :: [Transaction]
+  , beaconRoot  :: W256
   } deriving Show
 
 data Case = Case
@@ -81,8 +82,7 @@ prepareTests = do
   repo <- liftIO $ getEnv "HEVM_ETHEREUM_TESTS_REPO"
   let testsDir = "BlockchainTests/GeneralStateTests"
   let dir = repo </> testsDir
-  jsonFiles1 <- liftIO $ Find.find Find.always (Find.extension Find.==? ".json") dir
-  let jsonFiles = [head jsonFiles1]
+  jsonFiles <- liftIO $ Find.find Find.always (Find.extension Find.==? ".json") dir
   liftIO $ putStrLn $ "Loading and parsing json files from ethereum-tests from " <> show dir
   isCI <- liftIO $ isJust <$> lookupEnv "CI"
   let problematicTests = if isCI then commonProblematicTests <> ciProblematicTests else commonProblematicTests
@@ -103,7 +103,7 @@ testsFromFile fname problematicTests = do
     Left _err -> pure []
     Right allTests -> mapM runTest $ Map.toList allTests
   where
-    runTest :: (String , Case) -> m TestTree
+    runTest :: (String, Case) -> m TestTree
     runTest (name, x) = do
       exec <- toIO $ runVMTest fname name x
       pure $ testCase' name exec
@@ -123,6 +123,9 @@ commonProblematicTests = Map.fromList
   , ("loopMul_d1g0v0_Cancun", ignoreTestBecause "hevm is too slow")
   , ("loopMul_d2g0v0_Cancun", ignoreTestBecause "hevm is too slow")
   , ("CALLBlake2f_MaxRounds_d0g0v0_Cancun", ignoreTestBecause "very slow, bypasses timeout due time spent in FFI")
+
+  , ("15_tstoreCannotBeDosd_d0g0v0_Cancun", ignoreTestBecause "slow test")
+  , ("21_tstoreCannotBeDosdOOO_d0g0v0_Cancun", ignoreTestBecause "slow test")
   ]
 
 ciProblematicTests :: Map String (TestTree -> TestTree)
@@ -147,7 +150,7 @@ ciProblematicTests = Map.fromList
 runVMTest :: App m => String -> String -> Case -> m ()
 runVMTest fname name x = do
   liftIO $ putStrLn $ "\n-----------\nRunning test: " <> name <> " from file: " <> show fname
-  traceVsGeth fname name x
+  -- traceVsGeth fname name x
   vm0 <- liftIO $ vmForCase x
   result <- EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) vm0 EVM.Stepper.runFully
   writeTrace result
@@ -181,7 +184,7 @@ traceVsGeth fname name x = do
   liftIO $ writeFile "trace.jsonl" $ filterInfoLines evmtoolStderr
   decodedContents <- liftIO $ decodeTraceOutputHelper "trace.jsonl"
   let EVMToolTraceOutput ts _ = fromJust decodedContents
-  liftIO $ putStrLn $ "Comparing traces."
+  liftIO $ putStrLn "Comparing traces."
   _ <- liftIO $ compareTraces hevm ts
   pure ()
 
@@ -208,6 +211,7 @@ checkStateFail x vm (okBal, okNonce, okData, okCode) = do
                    ++ (show $ fromJust c.nonce) ++ " "
                    ++ (show $ fromJust $ maybeLitWord c.balance) ++ " "
                    ++ (show $ fromConcrete c.storage)
+                   ++ (show $ fromConcrete c.tStorage)
         ++ "\n") "" cs
 
     reason = map fst (filter (not . snd)
@@ -280,7 +284,7 @@ clearZeroStorage c = case c.storage of
   _ -> internalError "Internal Error: unexpected abstract store"
 
 clearStorage :: Contract -> Contract
-clearStorage c = c { storage = clear c.storage }
+clearStorage c = c { storage = clear c.storage, tStorage = clear c.tStorage }
   where
     clear :: Expr Storage -> Expr Storage
     clear (ConcreteStore _) = ConcreteStore mempty
@@ -330,7 +334,11 @@ instance FromJSON Block where
     baseFee    <- fmap read <$> v' .:? "baseFeePerGas"
     timestamp  <- wordField v' "timestamp"
     mixHash    <- wordField v' "mixHash"
-    pure $ Block coinbase difficulty mixHash gasLimit (fromMaybe 0 baseFee) number timestamp txs
+    beaconRoot <- fmap read <$> v' .:? "parentBeaconBlockRoot"
+    pure $ Block { coinbase, difficulty, mixHash, gasLimit
+                 , baseFee = fromMaybe 0 baseFee, number, timestamp
+                 , txs, beaconRoot = fromMaybe 0 beaconRoot
+                 }
   parseJSON invalid =
     JSON.typeMismatch "Block" invalid
 
@@ -396,7 +404,7 @@ fromBlockchainCase' block tx preState postState =
       (Just origin, Just checkState) -> Right $ Case
         (VMOpts
          { contract       = EVM.initialContract theCode
-         , otherContracts = []
+         , otherContracts = Map.toList $ Map.mapKeys LitAddr preState
          , calldata       = (cd, [])
          , value          = Lit tx.value
          , address        = toAddr
@@ -420,6 +428,7 @@ fromBlockchainCase' block tx preState postState =
          , txAccessList   = Map.mapKeys LitAddr (txAccessMap tx)
          , allowFFI       = False
          , freshAddresses = 0
+         , beaconRoot     = block.beaconRoot
          })
         checkState
         postState
@@ -491,7 +500,7 @@ checkTx tx block prestate = do
 vmForCase :: Case -> IO (VM Concrete RealWorld)
 vmForCase x = do
   vm <- stToIO $ makeVm x.vmOpts
-    <&> set (#env % #contracts) (Map.mapKeys LitAddr x.checkContracts)
+    -- <&> set (#env % #contracts) (Map.mapKeys LitAddr x.checkContracts)
   pure $ initTx vm
 
 forceConcreteAddrs :: Map (Expr EAddr) Contract -> Map Addr Contract

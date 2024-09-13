@@ -944,6 +944,7 @@ data VMOpts (t :: VMType) = VMOpts
   , txAccessList :: Map (Expr EAddr) [W256]
   , allowFFI :: Bool
   , freshAddresses :: Int
+  , beaconRoot :: W256
   }
 
 deriving instance Show (VMOpts Symbolic)
