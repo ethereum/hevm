@@ -96,39 +96,6 @@ currentContract vm =
 --
 makeVm :: VMOps t => VMOpts t -> ST s (VM t s)
 makeVm o = do
-  vm <- makeVmNoEIP4788 o
-
-  -- https://eips.ethereum.org/EIPS/eip-4788
-  let beaconRootsAddress = LitAddr 0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02
-  case Map.lookup beaconRootsAddress vm.env.contracts of
-    Just beaconRootsContract -> do
-      -- https://eips.ethereum.org/EIPS/eip-4788#pseudocode
-      -- https://eips.ethereum.org/EIPS/eip-4788#block-processing
-      -- > Clients may decide to omit an explicit EVM call and directly set the
-      -- > storage values. Note: While this is a valid optimization for Ethereum
-      -- > mainnet, it could be problematic on non-mainnet situations in case
-      -- > a different contract is used.
-      let
-        historyBufferLength = 8191
-        timestampIdx = Expr.mod o.timestamp (Lit historyBufferLength)
-        rootIdx = Expr.add timestampIdx (Lit historyBufferLength)
-        storage =
-          writeStorage timestampIdx o.timestamp .
-          writeStorage rootIdx (Lit o.beaconRoot) $
-          beaconRootsContract.storage
-      pure $ vm {
-        env = vm.env {
-          contracts = Map.insert beaconRootsAddress
-                                 (beaconRootsContract { storage } :: Contract)
-                                 vm.env.contracts
-        }
-      }
-
-    -- > if no code exists at BEACON_ROOTS_ADDRESS, the call must fail silently
-    Nothing -> pure vm
-
-makeVmNoEIP4788 :: VMOps t => VMOpts t -> ST s (VM t s)
-makeVmNoEIP4788 o = do
   let txaccessList = o.txAccessList
       txorigin = o.origin
       txtoAddr = o.address
@@ -139,7 +106,7 @@ makeVmNoEIP4788 o = do
       initialAccessedStorageKeys = fromList $ foldMap (uncurry (map . (,))) (Map.toList txaccessList)
       touched = if o.create then [txorigin] else [txorigin, txtoAddr]
   memory <- ConcreteMemory <$> VUnboxed.Mutable.new 0
-  pure $ VM
+  pure $ setEIP4788Storage o $ VM
     { result = Nothing
     , frames = mempty
     , tx = TxState
@@ -204,6 +171,35 @@ makeVmNoEIP4788 o = do
       , schedule = o.schedule
       }
     cache = Cache mempty mempty
+
+-- https://eips.ethereum.org/EIPS/eip-4788
+setEIP4788Storage :: VMOpts t -> VM t s -> VM t s
+setEIP4788Storage o vm = do
+  let beaconRootsAddress = LitAddr 0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02
+  case Map.lookup beaconRootsAddress vm.env.contracts of
+    Just beaconRootsContract -> do
+      -- https://eips.ethereum.org/EIPS/eip-4788#pseudocode
+      -- https://eips.ethereum.org/EIPS/eip-4788#block-processing
+      -- > Clients may decide to omit an explicit EVM call and directly set the
+      -- > storage values. Note: While this is a valid optimization for Ethereum
+      -- > mainnet, it could be problematic on non-mainnet situations in case
+      -- > a different contract is used.
+      let
+        historyBufferLength = 8191
+        timestampIdx = Expr.mod o.timestamp (Lit historyBufferLength)
+        rootIdx = Expr.add timestampIdx (Lit historyBufferLength)
+        storage =
+          Expr.writeStorage timestampIdx o.timestamp .
+          Expr.writeStorage rootIdx (Lit o.beaconRoot) $
+          beaconRootsContract.storage
+      vm {
+        env = vm.env {
+          contracts = Map.insert beaconRootsAddress
+                                 (beaconRootsContract { storage } :: Contract)
+                                 vm.env.contracts
+        }
+      }
+    Nothing -> vm
 
 -- | Initialize an abstract contract with unknown code
 unknownContract :: Expr EAddr -> Contract
@@ -295,7 +291,7 @@ exec1 = do
 
     litSelf = maybeLitAddr self
 
-  if isJust litSelf && (fromJust litSelf) > 0x0 && (fromJust litSelf) <= 0x9 then do
+  if isJust litSelf && (fromJust litSelf) > 0x0 && (fromJust litSelf) <= 0xa then do
     -- call to precompile
     let ?op = 0x00 -- dummy value
     let calldatasize = bufLength vm.state.calldata
@@ -324,6 +320,7 @@ exec1 = do
     else do
       let ?op = getOpW8 vm.state
       let opName = getOpName vm.state
+
       case getOp (?op) of
 
         OpPush0 -> do
@@ -615,6 +612,13 @@ exec1 = do
         OpBaseFee ->
           limitStack 1 . burn g_base $
             next >> push vm.block.baseFee
+
+        OpBlobhash ->
+          stackOp1 g_verylow $ \_ -> Lit 0
+
+        OpBlobBaseFee ->
+          limitStack 1 . burn g_base $
+            next >> push 0
 
         OpPop ->
           case stk of
@@ -981,7 +985,7 @@ exec1 = do
             [] -> underrun
             (xTo':_) -> forceAddr xTo' "SELFDESTRUCT" $ \case
               xTo@(LitAddr _) -> do
-                cc <- use ((#tx % #substate) % #createdContracts)
+                cc <- gets (.tx.substate.createdContracts)
                 let createdThisTr = self `member` cc
                 acc <- accessAccountForGas xTo
                 let cost = if acc then 0 else g_cold_account_access
@@ -992,13 +996,13 @@ exec1 = do
                               then g_selfdestruct_newaccount
                               else 0
                   burn (g_selfdestruct + c_new + cost) $ do
-                    when createdThisTr $ do
+                    when (createdThisTr || isCreation this.code) $ do
                       selfdestruct self
                     touchAccount xTo
 
                     if hasFunds
                     then fetchAccount xTo $ \_ -> do
-                      when (not createdThisTr || (xTo /= self)) $ do
+                      when (createdThisTr || xTo /= self) $ do
                         #env % #contracts % ix xTo % #balance %= (Expr.add funds)
                         assign (#env % #contracts % ix self % #balance) (Lit 0)
                       doStop
@@ -2014,7 +2018,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
 
             modifying (#env % #contracts % ix newAddr % #storage) resetStorage
             modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage
-            modifying ((#tx % #substate) % #createdContracts) (insert newAddr)
+            modifying (#tx % #substate % #createdContracts) (insert newAddr)
 
             transfer self newAddr xValue
 

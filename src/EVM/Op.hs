@@ -74,6 +74,8 @@ intToOpName a =
     0x46 -> "CHAINID"
     0x47 -> "SELFBALANCE"
     0x48 -> "BASEFEE"
+    0x49 -> "BLOBHASH"
+    0x4A -> "BLOBBASEFEE"
     0x50 -> "POP"
     0x51 -> "MLOAD"
     0x52 -> "MSTORE"
@@ -232,6 +234,8 @@ opString (i, o) = let showPc x | x < 0x10 = '0' : showHex x ""
   OpChainid -> "CHAINID"
   OpSelfbalance -> "SELFBALANCE"
   OpBaseFee -> "BASEFEE"
+  OpBlobhash -> "BLOBHASH"
+  OpBlobBaseFee -> "BLOBBASEFEE"
   OpPop -> "POP"
   OpMcopy -> "MCOPY"
   OpMload -> "MLOAD"
@@ -329,6 +333,8 @@ getOp x = case x of
   0x46 -> OpChainid
   0x47 -> OpSelfbalance
   0x48 -> OpBaseFee
+  0x49 -> OpBlobhash
+  0x4A -> OpBlobBaseFee
   0x50 -> OpPop
   0x51 -> OpMload
   0x52 -> OpMstore

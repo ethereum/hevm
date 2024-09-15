@@ -1,6 +1,6 @@
 module EVM.Test.BlockchainTests where
 
-import EVM (initialContract, makeVm)
+import EVM (initialContract, makeVm, setEIP4788Storage)
 import EVM.Concrete qualified as EVM
 import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified
@@ -105,7 +105,7 @@ testsFromFile fname problematicTests = do
   where
     runTest :: (String, Case) -> m TestTree
     runTest (name, x) = do
-      exec <- toIO $ runVMTest fname name x
+      exec <- toIO $ runVMTest x
       pure $ testCase' name exec
     testCase' :: String -> Assertion -> TestTree
     testCase' name assertion =
@@ -126,6 +126,33 @@ commonProblematicTests = Map.fromList
 
   , ("15_tstoreCannotBeDosd_d0g0v0_Cancun", ignoreTestBecause "slow test")
   , ("21_tstoreCannotBeDosdOOO_d0g0v0_Cancun", ignoreTestBecause "slow test")
+
+  -- TODO: implement point evaluation, 0xa precompile, EIP-4844, Cancun
+  , ("idPrecomps_d9g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d117g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d12g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d135g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d153g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d171g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d189g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d207g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d225g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d243g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d261g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d279g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d27g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d297g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d315g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d333g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d351g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d369g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d387g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d45g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d63g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d81g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("precompsEIP2929Cancun_d99g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("makeMoney_d0g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
+  , ("failed_tx_xcf416c53_d0g0v0_Cancun", ignoreTestBecause "EIP-4844 not implemented")
   ]
 
 ciProblematicTests :: Map String (TestTree -> TestTree)
@@ -147,9 +174,8 @@ ciProblematicTests = Map.fromList
   , ("loopExp_d9g0v0_Cancun", ignoreTest)
   ]
 
-runVMTest :: App m => String -> String -> Case -> m ()
-runVMTest fname name x = do
-  liftIO $ putStrLn $ "\n-----------\nRunning test: " <> name <> " from file: " <> show fname
+runVMTest :: App m => Case -> m ()
+runVMTest x = do
   -- traceVsGeth fname name x
   vm0 <- liftIO $ vmForCase x
   result <- EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) vm0 EVM.Stepper.runFully
@@ -240,9 +266,7 @@ checkExpectation
 checkExpectation x vm = do
   let expectation = x.testExpectation
       (okState, okBal, okNonce, okStor, okCode) = checkExpectedContracts vm expectation
-  liftIO $ putStrLn $ "\nChecking.\n-> state OK: " <> show okState <> " balance OK: " <> show okBal <> " nonce OK: " <> show okNonce <> " storage OK: " <> show okStor <> " code OK: " <> show okCode
   if okState then do
-    liftIO $ putStrLn "->Pass."
     pure Nothing
   else liftIO $ Just <$> checkStateFail x vm (okBal, okNonce, okStor, okCode)
 
@@ -257,12 +281,12 @@ checkExpectation x vm = do
 
 (===) :: Contract -> Contract -> Bool
 c1 === c2 =
-  codeEqual && storageEqual && (c1 ^. #balance == c2 ^. #balance) && (c1 ^. #nonce ==  c2 ^. #nonce)
+  codeEqual && storageEqual && c1.balance == c2.balance && c1.nonce == c2.nonce
   where
     storageEqual = c1.storage == c2.storage
-    codeEqual = case (c1 ^. #code, c2 ^. #code) of
+    codeEqual = case (c1.code, c2.code) of
       (RuntimeCode a', RuntimeCode b') -> a' == b'
-      _ -> internalError "unexpected code"
+      codes -> internalError ("unexpected code: \n" <> show codes)
 
 checkExpectedContracts :: VM Concrete RealWorld -> Map Addr Contract -> (Bool, Bool, Bool, Bool, Bool)
 checkExpectedContracts vm expected =
@@ -399,50 +423,50 @@ fromBlockchainCase' :: Block -> Transaction
 fromBlockchainCase' block tx preState postState =
   let isCreate = isNothing tx.toAddr in
   case (sender tx, checkTx tx block preState) of
-      (Nothing, _) -> Left SignatureUnverified
-      (_, Nothing) -> Left (if isCreate then FailedCreate else InvalidTx)
-      (Just origin, Just checkState) -> Right $ Case
-        (VMOpts
-         { contract       = EVM.initialContract theCode
-         , otherContracts = Map.toList $ Map.mapKeys LitAddr preState
-         , calldata       = (cd, [])
-         , value          = Lit tx.value
-         , address        = toAddr
-         , caller         = LitAddr origin
-         , baseState      = EmptyBase
-         , origin         = LitAddr origin
-         , gas            = tx.gasLimit - txGasCost feeSchedule tx
-         , baseFee        = block.baseFee
-         , priorityFee    = priorityFee tx block.baseFee
-         , gaslimit       = tx.gasLimit
-         , number         = block.number
-         , timestamp      = Lit block.timestamp
-         , coinbase       = LitAddr block.coinbase
-         , prevRandao     = block.mixHash
-         , maxCodeSize    = maxCodeSize
-         , blockGaslimit  = block.gasLimit
-         , gasprice       = effectiveGasPrice
-         , schedule       = feeSchedule
-         , chainId        = 1
-         , create         = isCreate
-         , txAccessList   = Map.mapKeys LitAddr (txAccessMap tx)
-         , allowFFI       = False
-         , freshAddresses = 0
-         , beaconRoot     = block.beaconRoot
-         })
-        checkState
-        postState
-          where
-            toAddr = maybe (EVM.createAddress origin (fromJust senderNonce)) LitAddr (tx.toAddr)
-            senderNonce = view (accountAt (LitAddr origin) % #nonce) (Map.mapKeys LitAddr preState)
-            toCode = Map.lookup toAddr (Map.mapKeys LitAddr preState)
-            theCode = if isCreate
-                      then InitCode tx.txdata mempty
-                      else maybe (RuntimeCode (ConcreteRuntimeCode "")) (view #code) toCode
-            effectiveGasPrice = effectiveprice tx block.baseFee
-            cd = if isCreate
-                 then mempty
-                 else ConcreteBuf tx.txdata
+    (Nothing, _) -> Left SignatureUnverified
+    (_, Nothing) -> Left (if isCreate then FailedCreate else InvalidTx)
+    (Just origin, Just checkState) -> Right $ Case
+      (VMOpts
+       { contract       = EVM.initialContract theCode
+       , otherContracts = []
+       , calldata       = (cd, [])
+       , value          = Lit tx.value
+       , address        = toAddr
+       , caller         = LitAddr origin
+       , baseState      = EmptyBase
+       , origin         = LitAddr origin
+       , gas            = tx.gasLimit - txGasCost feeSchedule tx
+       , baseFee        = block.baseFee
+       , priorityFee    = priorityFee tx block.baseFee
+       , gaslimit       = tx.gasLimit
+       , number         = block.number
+       , timestamp      = Lit block.timestamp
+       , coinbase       = LitAddr block.coinbase
+       , prevRandao     = block.mixHash
+       , maxCodeSize    = maxCodeSize
+       , blockGaslimit  = block.gasLimit
+       , gasprice       = effectiveGasPrice
+       , schedule       = feeSchedule
+       , chainId        = 1
+       , create         = isCreate
+       , txAccessList   = Map.mapKeys LitAddr (txAccessMap tx)
+       , allowFFI       = False
+       , freshAddresses = 0
+       , beaconRoot     = block.beaconRoot
+       })
+      checkState
+      postState
+        where
+          toAddr = maybe (EVM.createAddress origin (fromJust senderNonce)) LitAddr (tx.toAddr)
+          senderNonce = view (accountAt (LitAddr origin) % #nonce) (Map.mapKeys LitAddr preState)
+          toCode = Map.lookup toAddr (Map.mapKeys LitAddr preState)
+          theCode = if isCreate
+                    then InitCode tx.txdata mempty
+                    else maybe (RuntimeCode (ConcreteRuntimeCode "")) (.code) toCode
+          effectiveGasPrice = effectiveprice tx block.baseFee
+          cd = if isCreate
+               then mempty
+               else ConcreteBuf tx.txdata
 
 effectiveprice :: Transaction -> W256 -> W256
 effectiveprice tx baseFee = priorityFee tx baseFee + baseFee
@@ -465,17 +489,6 @@ maxBaseFee tx =
      EIP1559Transaction -> fromJust tx.maxFeePerGas
      _ -> fromJust tx.gasPrice
 
-validateTx :: Transaction -> Block -> Map Addr Contract -> Maybe ()
-validateTx tx block cs = do
-  origin        <- sender tx
-  (Lit originBalance) <- (view #balance) <$> view (at origin) cs
-  originNonce   <- (view #nonce)   <$> view (at origin) cs
-  let gasDeposit = (effectiveprice tx block.baseFee) * (into tx.gasLimit)
-  if gasDeposit + tx.value <= originBalance
-    && (Just (unsafeInto tx.nonce) == originNonce) && block.baseFee <= maxBaseFee tx
-  then Just ()
-  else Nothing
-
 checkTx :: Transaction -> Block -> Map Addr Contract -> Maybe (Map Addr Contract)
 checkTx tx block prestate = do
   origin <- sender tx
@@ -497,10 +510,25 @@ checkTx tx block prestate = do
   else
     pure prestate
 
+validateTx :: Transaction -> Block -> Map Addr Contract -> Maybe ()
+validateTx tx block cs = do
+  origin <- sender tx
+  Lit originBalance <- (.balance) <$> Map.lookup origin cs
+  originNonce <- (.nonce) <$> Map.lookup origin cs
+  let gasDeposit = (effectiveprice tx block.baseFee) * (into tx.gasLimit)
+  if gasDeposit + tx.value <= originBalance
+    && (Just (unsafeInto tx.nonce) == originNonce) && block.baseFee <= maxBaseFee tx
+  then Just ()
+  else Nothing
+
 vmForCase :: Case -> IO (VM Concrete RealWorld)
 vmForCase x = do
   vm <- stToIO $ makeVm x.vmOpts
-    -- <&> set (#env % #contracts) (Map.mapKeys LitAddr x.checkContracts)
+    -- TODO: why do we override contracts here instead of using VMOpts otherContracts?
+    <&> set (#env % #contracts) (Map.mapKeys LitAddr x.checkContracts)
+    -- TODO: we need to call this again because we override contracts in the
+    -- previous line
+    <&> setEIP4788Storage x.vmOpts
   pure $ initTx vm
 
 forceConcreteAddrs :: Map (Expr EAddr) Contract -> Map Addr Contract

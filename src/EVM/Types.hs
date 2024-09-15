@@ -1009,6 +1009,8 @@ data GenericOp a
   | OpChainid
   | OpSelfbalance
   | OpBaseFee
+  | OpBlobhash
+  | OpBlobBaseFee
   | OpPop
   | OpMcopy
   | OpMload
@@ -1142,7 +1144,7 @@ instance FromJSON W64 where
   parseJSON v = do
     s <- T.unpack <$> parseJSON v
     case reads s of
-      [(x, "")]  -> return x
+      [(x, "")]  -> pure x
       _          -> fail $ "invalid hex word (" ++ s ++ ")"
 
 

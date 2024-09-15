@@ -451,6 +451,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract = do
            , txAccessList = mempty -- TODO: support unit test access lists???
            , allowFFI = ffiAllowed
            , freshAddresses = 0
+           , beaconRoot = 0
            }
   let creator =
         initialContract (RuntimeCode (ConcreteRuntimeCode ""))

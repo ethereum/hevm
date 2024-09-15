@@ -14,7 +14,7 @@
       flake = false;
     };
     ethereum-tests = {
-      url = "github:ethereum/tests/v13.3";
+      url = "github:ethereum/tests/v13";
       flake = false;
     };
     forge-std = {
