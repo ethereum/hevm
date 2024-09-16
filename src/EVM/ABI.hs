@@ -547,11 +547,11 @@ genAbiValue = \case
    AbiStringType ->
      AbiString . BS.pack <$> listOf arbitrary
    AbiArrayDynamicType t ->
-     do xs <- listOf1 (scale (`div` 2) (genAbiValue t))
+     do xs <- listOf1 (scale (`div` 3) (genAbiValue t))
         pure (AbiArrayDynamic t (Vector.fromList xs))
    AbiArrayType n t ->
      AbiArray n t . Vector.fromList <$>
-       replicateM n (scale (`div` 2) (genAbiValue t))
+       replicateM n (scale (`div` 3) (genAbiValue t))
    AbiTupleType ts ->
      AbiTuple <$> mapM genAbiValue ts
    AbiFunctionType ->
