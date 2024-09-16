@@ -145,22 +145,26 @@ data EVMToolEnv = EVMToolEnv
   { coinbase    :: Addr
   , timestamp   :: Expr EWord
   , number      :: W256
-  , prevRandao  :: W256
   , gasLimit    :: Data.Word.Word64
   , baseFee     :: W256
   , maxCodeSize :: W256
   , schedule    :: FeeSchedule Data.Word.Word64
   , blockHashes :: Map.Map Int W256
+  , withdrawals :: [Addr]
+  , currentRandom :: W256
+  , parentBeaconBlockRoot :: W256
   } deriving (Show, Generic)
 
 instance JSON.ToJSON EVMToolEnv where
-  toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON $ b.coinbase))
-                         , ("currentDifficulty", (JSON.toJSON $ b.prevRandao))
+  toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON b.coinbase))
                          , ("currentGasLimit"  , (JSON.toJSON ("0x" ++ showHex (into @Integer b.gasLimit) "")))
-                         , ("currentNumber"    , (JSON.toJSON $ b.number))
+                         , ("currentNumber"    , (JSON.toJSON b.number))
                          , ("currentTimestamp" , (JSON.toJSON tstamp))
-                         , ("currentBaseFee"   , (JSON.toJSON $ b.baseFee))
-                         , ("blockHashes"      , (JSON.toJSON $ b.blockHashes))
+                         , ("currentBaseFee"   , (JSON.toJSON b.baseFee))
+                         , ("blockHashes"      , (JSON.toJSON b.blockHashes))
+                         , ("withdrawals"      , (JSON.toJSON b.withdrawals))
+                         , ("currentRandom"    , (JSON.toJSON b.currentRandom))
+                         , ("parentBeaconBlockRoot" , (JSON.toJSON b.parentBeaconBlockRoot))
                          ]
               where
                 tstamp :: W256
@@ -172,12 +176,14 @@ emptyEvmToolEnv :: EVMToolEnv
 emptyEvmToolEnv = EVMToolEnv { coinbase = 0
                              , timestamp = Lit 0
                              , number     = 0
-                             , prevRandao = 42069
                              , gasLimit   = 0xffffffffffffffff
                              , baseFee    = 0
                              , maxCodeSize= 0xffffffff
                              , schedule   = feeSchedule
                              , blockHashes = mempty
+                             , withdrawals = mempty
+                             , currentRandom = 42
+                             , parentBeaconBlockRoot = 5
                              }
 
 data EVMToolReceipt =
@@ -191,6 +197,7 @@ data EVMToolReceipt =
     , transactionHash :: String
     , contractAddress :: String
     , gasUsed :: String
+    , effectiveGasPrice :: Maybe String
     , blockHash :: String
     , transactionIndex :: String
     } deriving (Generic, Show)
@@ -206,6 +213,7 @@ instance JSON.FromJSON EVMToolReceipt where
         <*> v .: "transactionHash"
         <*> v .: "contractAddress"
         <*> v .: "gasUsed"
+        <*> v .: "effectiveGasPrice"
         <*> v .: "blockHash"
         <*> v .: "transactionIndex"
 
@@ -217,23 +225,14 @@ data EVMToolResult =
   , logsHash :: String
   , logsBloom :: String
   , receipts :: [EVMToolReceipt]
-  , currentDifficulty :: String
+  , currentDifficulty :: Maybe String
   , gasUsed :: String
-  , rejected :: Maybe [EVMRejected]
+  , currentBaseFee :: String
+  , withdrawalsRoot :: String
   } deriving (Generic, Show)
 
 instance JSON.FromJSON EVMToolResult
 
-data EVMRejected =
-  EVMRejected
-    { index :: Int
-    , err :: String
-    } deriving (Generic, Show)
-
-instance JSON.FromJSON EVMRejected where
-  parseJSON = JSON.withObject "EVMRejected" $ \v -> EVMRejected
-    <$> v .: "index"
-    <*> v .: "error"
 
 data EVMToolAlloc =
   EVMToolAlloc
@@ -286,15 +285,17 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
       , maxFeePerGas = Just 1
       , chainId = 1
       }
-    evmEnv = EVMToolEnv { coinbase   =  0xff
-                        , timestamp   =  Lit 0x3e8
-                        , number      =  0x0
-                        , prevRandao  =  0x0
-                        , gasLimit    =  unsafeInto gaslimitExec
-                        , baseFee     =  0x0
-                        , maxCodeSize =  0xfffff
-                        , schedule    =  feeSchedule
-                        , blockHashes =  blockHashesDefault
+    evmEnv = EVMToolEnv { coinbase      = 0xff
+                        , timestamp     = Lit 0x3e8
+                        , number        = 0x0
+                        , gasLimit      = unsafeInto gaslimitExec
+                        , baseFee       = 0x0
+                        , maxCodeSize   = 0xfffff
+                        , schedule      = feeSchedule
+                        , blockHashes   = blockHashesDefault
+                        , withdrawals   = mempty
+                        , currentRandom = 42
+                        , parentBeaconBlockRoot = 5
                         }
     sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
     fromAddress = fromJust $ deriveAddr sk
@@ -321,7 +322,8 @@ getEVMToolRet contr txData gaslimitExec = do
   JSON.encodeFile "alloc.json" alloc
   JSON.encodeFile "env.json" evmEnv
   (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
-                               ,"--input.alloc" , "alloc.json"
+                               , "--state.fork", "Cancun"
+                               , "--input.alloc" , "alloc.json"
                                , "--input.env" , "env.json"
                                , "--input.txs" , "txs.json"
                                , "--output.alloc" , "alloc-out.json"
@@ -350,8 +352,8 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
           bStack = b.stack
           aGas = into a.traceGas
           bGas = b.gas
-      -- putStrLn $ "hevm: " <> intToOpName aOp <> " pc: " <> show aPc <> " gas: " <> show aGas <> " stack: " <> show aStack
-      -- putStrLn $ "geth: " <> intToOpName bOp <> " pc: " <> show bPc <> " gas: " <> show bGas <> " stack: " <> show bStack
+      putStrLn $ "hevm: " <> intToOpName aOp <> " pc: " <> show aPc <> " gas: " <> show aGas <> " stack: " <> show aStack
+      putStrLn $ "geth: " <> intToOpName bOp <> " pc: " <> show bPc <> " gas: " <> show bGas <> " stack: " <> show bStack
 
       when (aGas /= bGas) $ do
         putStrLn "GAS doesn't match:"
@@ -399,12 +401,19 @@ getTraceOutput evmtoolResult =
     Nothing -> pure Nothing
     Just res -> do
       let traceFileName = getTraceFileName res
+      decodeTraceOutputHelper traceFileName
+
+decodeTraceOutputHelper :: String -> IO (Maybe EVMToolTraceOutput)
+decodeTraceOutputHelper traceFileName = do
       convertPath <- Paths.getDataFileName "test/scripts/convert_trace_to_json.sh"
       maybeShellPath <- (fromMaybe "bash") <$> (lookupEnv "HEVM_SYSTEM_SHELL")
       let shellPath = if maybeShellPath == "" then "bash" else maybeShellPath
-      (exitcode, stdout, stderr) <- readProcessWithExitCode shellPath [convertPath, getTraceFileName res] ""
+      (exitcode, stdout, stderr) <- readProcessWithExitCode shellPath [convertPath, traceFileName] ""
       case exitcode of
-        ExitSuccess -> JSON.decodeFileStrict (traceFileName ++ ".json") :: IO (Maybe EVMToolTraceOutput)
+        ExitSuccess -> do
+          -- putStrLn $ "Successfully converted trace to JSON: " <> (show stdout) <> " " <>
+          --   (show stderr) <> " " <> (show exitcode) <> " " <> (show traceFileName)
+          JSON.decodeFileStrict (traceFileName ++ ".json") :: IO (Maybe EVMToolTraceOutput)
         _ -> do
           putStrLn $ "Error converting trace! exit code:" <> (show exitcode)
           putStrLn $ "stdout: " <> (show stdout)
@@ -458,7 +467,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
     , gas = txn.gasLimit - (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
     , gaslimit = txn.gasLimit
     , blockGaslimit = evmToolEnv.gasLimit
-    , prevRandao = evmToolEnv.prevRandao
+    , prevRandao = evmToolEnv.currentRandom
     , baseFee = evmToolEnv.baseFee
     , priorityFee = fromJust txn.maxPriorityFeeGas
     , maxCodeSize = evmToolEnv.maxCodeSize
@@ -468,6 +477,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
     , txAccessList = mempty
     , allowFFI = False
     , freshAddresses = 0
+    , beaconRoot = 0
     }) <&> set (#env % #contracts % at (LitAddr ethrunAddress))
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty))))
        <&> set (#state % #calldata) calldata'
@@ -517,7 +527,7 @@ vmtrace vm =
       StateChangeWhileStatic  -> Just "write protection"
       ReturnDataOutOfBounds   -> Just "return data out of bounds"
       IllegalOverflow     -> Just "gas uint64 overflow"
-      UnrecognizedOpcode op   -> Just $ "invalid opcode: " <> show op
+      UnrecognizedOpcode op   -> Just $ "invalid opcode: 0x" <> showHex op ""
       NonceOverflow       -> Just "nonce uint64 overflow"
       StackUnderrun       -> Just "stack underflow"
       StackLimitExceeded  -> Just "stack limit reached"
@@ -759,7 +769,8 @@ genContract n = do
       ])
       -- memory manip
       , (1200, frequency [
-          (50, pure OpMload)
+          (10, pure OpMcopy)
+        , (50, pure OpMload)
         , (1, pure OpMstore)
         , (300, pure OpMstore8)
       ])
@@ -767,6 +778,8 @@ genContract n = do
       , (100, frequency [
           (1, pure OpSload)
         , (1, pure OpSstore)
+        , (1, pure OpTstore)
+        , (1, pure OpTload)
       ])
       -- Jumping around
       , (50, frequency [

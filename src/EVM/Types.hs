@@ -309,10 +309,11 @@ data Expr (a :: EType) where
   -- A restricted view of a contract that does not include extraneous metadata
   -- from the full constructor defined in the VM state
   C ::
-    { code    :: ContractCode
-    , storage :: Expr Storage
-    , balance :: Expr EWord
-    , nonce   :: Maybe W64
+    { code     :: ContractCode
+    , storage  :: Expr Storage
+    , tStorage :: Expr Storage
+    , balance  :: Expr EWord
+    , nonce    :: Maybe W64
     } -> Expr EContract
 
   -- addresses
@@ -694,6 +695,7 @@ data SubState = SubState
   , accessedAddresses   :: Set (Expr EAddr)
   , accessedStorageKeys :: Set (Expr EAddr, W256)
   , refunds             :: [(Expr EAddr, Word64)]
+  , createdContracts    :: Set (Expr EAddr)
   -- in principle we should include logs here, but do not for now
   }
   deriving (Eq, Ord, Show)
@@ -768,6 +770,7 @@ data Block = Block
 data Contract = Contract
   { code        :: ContractCode
   , storage     :: Expr Storage
+  , tStorage    :: Expr Storage
   , origStorage :: Expr Storage
   , balance     :: Expr EWord
   , nonce       :: Maybe W64
@@ -941,6 +944,7 @@ data VMOpts (t :: VMType) = VMOpts
   , txAccessList :: Map (Expr EAddr) [W256]
   , allowFFI :: Bool
   , freshAddresses :: Int
+  , beaconRoot :: W256
   }
 
 deriving instance Show (VMOpts Symbolic)
@@ -1005,12 +1009,17 @@ data GenericOp a
   | OpChainid
   | OpSelfbalance
   | OpBaseFee
+  | OpBlobhash
+  | OpBlobBaseFee
   | OpPop
+  | OpMcopy
   | OpMload
   | OpMstore
   | OpMstore8
   | OpSload
   | OpSstore
+  | OpTload
+  | OpTstore
   | OpJump
   | OpJumpi
   | OpPc
@@ -1135,7 +1144,7 @@ instance FromJSON W64 where
   parseJSON v = do
     s <- T.unpack <$> parseJSON v
     case reads s of
-      [(x, "")]  -> return x
+      [(x, "")]  -> pure x
       _          -> fail $ "invalid hex word (" ++ s ++ ")"
 
 

@@ -2971,6 +2971,29 @@ tests = testGroup "hevm"
                           _ -> False
           assertBoolM "Did not find expected storage cex" testCex
           putStrLnM "Expected counterexample found"
+        , test "temp-store-check" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            pragma solidity ^0.8.25;
+            contract C {
+                mapping(address => bool) sentGifts;
+                function stuff(address k) public {
+                    require(sentGifts[k] == false);
+                    assembly {
+                        if tload(0) { revert(0, 0) }
+                        tstore(0, 1)
+                    }
+                    sentGifts[k] = true;
+                    assembly {
+                        tstore(0, 0)
+                    }
+                    assert(sentGifts[k]);
+                }
+            }
+            |]
+          let sig = (Just (Sig "stuff(address)" [AbiAddressType]))
+          (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+          putStrLnM $ "Basic tstore check passed"
   ]
   , testGroup "concr-fuzz"
     [ testFuzz "fuzz-complicated-mul" $ do
@@ -3370,76 +3393,23 @@ tests = testGroup "hevm"
                     , "expressionInliner/double_recursive_calls.yul"
                     , "conditionalSimplifier/side_effects_of_functions.yul"
 
-                    -- unexpected symbolic arg --
-
-                    -- OpCreate2
-                    , "expressionSimplifier/create2_and_mask.yul"
-
-                    -- OpCreate
-                    , "expressionSimplifier/create_and_mask.yul"
-                    , "expressionSimplifier/large_byte_access.yul"
-
-                    -- OpMload
-                    , "yulOptimizerTests/expressionSplitter/inside_function.yul"
-                    , "fullInliner/double_inline.yul"
-                    , "fullInliner/inside_condition.yul"
-                    , "fullInliner/large_function_multi_use.yul"
-                    , "fullInliner/large_function_single_use.yul"
-                    , "fullInliner/no_inline_into_big_global_context.yul"
-                    , "fullSimplify/invariant.yul"
+                    -- Takes too long, would timeout on most test setups.
+                    -- We could probably fix these by "bunching together" queries
+                    , "reasoningBasedSimplifier/mulmod.yul"
+                    , "loadResolver/multi_sload_loop.yul"
+                    , "reasoningBasedSimplifier/mulcheck.yul"
+                    , "reasoningBasedSimplifier/smod.yul"
                     , "fullSuite/abi_example1.yul"
-                    , "ssaAndBack/for_loop.yul"
-                    , "ssaAndBack/multi_assign_multi_var_if.yul"
-                    , "ssaAndBack/multi_assign_multi_var_switch.yul"
-                    , "ssaAndBack/two_vars.yul"
-                    , "ssaTransform/multi_assign.yul"
-                    , "ssaTransform/multi_decl.yul"
-                    , "expressionSplitter/inside_function.yul"
-                    , "fullSuite/ssaReverseComplex.yul"
-
-                    -- OpMstore
-                    , "commonSubexpressionEliminator/function_scopes.yul"
-                    , "commonSubexpressionEliminator/variable_for_variable.yul"
-                    , "expressionSplitter/trivial.yul"
-                    , "fullInliner/multi_return.yul"
-                    , "fullSimplify/constant_propagation.yul"
-                    , "fullSimplify/identity_rules_complex.yul"
-                    , "fullSuite/medium.yul"
-                    , "loadResolver/memory_with_msize.yul"
-                    , "loadResolver/merge_known_write.yul"
+                    , "yulOptimizerTests/fullInliner/large_function_multi_use.yul"
                     , "loadResolver/merge_known_write_with_distance.yul"
-                    , "loadResolver/merge_unknown_write.yul"
-                    , "loadResolver/reassign_value_expression.yul"
                     , "loadResolver/second_mstore_with_delta.yul"
-                    , "loadResolver/second_store_with_delta.yul"
-                    , "loadResolver/simple.yul"
-                    , "loadResolver/simple_memory.yul"
-                    , "fullSuite/ssaReverse.yul"
-                    , "rematerialiser/cheap_caller.yul"
-                    , "rematerialiser/non_movable_instruction.yul"
-                    , "rematerialiser/for_break.yul"
-                    , "rematerialiser/for_continue.yul"
                     , "rematerialiser/for_continue_2.yul"
-                    , "ssaAndBack/multi_assign.yul"
-                    , "ssaAndBack/multi_assign_if.yul"
-                    , "ssaAndBack/multi_assign_switch.yul"
-                    , "ssaAndBack/simple.yul"
-                    , "ssaReverser/simple.yul"
-                    , "loopInvariantCodeMotion/simple_storage.yul"
-
-                    -- OpMstore8
-                    , "loadResolver/memory_with_different_kinds_of_invalidation.yul"
-
-                    -- OpRevert
-                    , "ssaAndBack/ssaReverse.yul"
-                    , "redundantAssignEliminator/for_continue_3.yul"
-                    , "controlFlowSimplifier/terminating_for_revert.yul"
+                    , "rematerialiser/for_continue_with_assignment_in_post.yul"
 
                     -- invalid test --
                     -- https://github.com/ethereum/solidity/issues/9500
                     , "commonSubexpressionEliminator/object_access.yul"
                     , "expressionSplitter/object_access.yul"
-                    , "fullSuite/stack_compressor_msize.yul"
 
                     -- stack too deep --
                     , "fullSuite/abi2.yul"
@@ -3451,17 +3421,6 @@ tests = testGroup "hevm"
                     , "fullInliner/no_inline_into_big_function.yul"
                     , "controlFlowSimplifier/switch_only_default.yul"
                     , "stackLimitEvader" -- all that are in this subdirectory
-
-                    -- wrong number of args --
-                    , "wordSizeTransform/functional_instruction.yul"
-                    , "wordSizeTransform/if.yul"
-                    , "wordSizeTransform/or_bool_renamed.yul"
-                    , "wordSizeTransform/switch_1.yul"
-                    , "wordSizeTransform/switch_2.yul"
-                    , "wordSizeTransform/switch_3.yul"
-                    , "wordSizeTransform/switch_4.yul"
-                    , "wordSizeTransform/switch_5.yul"
-                    , "unusedFunctionParameterPruner/too_many_arguments.yul"
 
                     -- typed yul --
                     , "conditionalSimplifier/add_correct_type_wasm.yul"
@@ -3539,24 +3498,14 @@ tests = testGroup "hevm"
                     , "fullSuite/extcodelength.yul"
                     , "unusedStoreEliminator/create_inside_function.yul"-- "trying to reset symbolic storage with writes in create"
 
-                    -- Takes too long, would timeout on most test setups.
-                    -- We could probably fix these by "bunching together" queries
-                    , "reasoningBasedSimplifier/mulmod.yul"
-                    , "loadResolver/multi_sload_loop.yul"
-                    , "reasoningBasedSimplifier/mulcheck.yul"
-                    , "reasoningBasedSimplifier/smod.yul"
-
-                    -- TODO check what's wrong with these!
-                    , "loadResolver/keccak_short.yul" -- ACTUAL bug -- keccak
-                    , "reasoningBasedSimplifier/signed_division.yul" -- ACTUAL bug, SDIV
-
-                    -- started failing with 9.6 update
-                    , "fullInliner/multi_fun_callback.yul"
-                    , "unusedStoreEliminator/write_before_recursion.yul"
-                    , "unusedStoreEliminator/function_side_effects_2.yul"
-                    , "expressionInliner/double_recursive_calls.yul"
-                    , "conditionalUnsimplifier/side_effects_of_functions.yul"
-                    , "conditionalSimplifier/side_effects_of_functions.yul"
+                    -- Due to tstorage warnings treated as errors when running solc with --standard-json
+                    --   these cannot be currently run. See: https://github.com/ethereum/solidity/issues/15397
+                    --   When that fix comes to upstream, we can re-enabled again
+                    , "equalStoreEliminator/transient_storage.yul"
+                    , "unusedStoreEliminator/tload.yul"
+                    , "unusedStoreEliminator/tstore.yul"
+                    , "yulOptimizerTests/fullSuite/transient_storage.yul"
+                    , "yulOptimizerTests/unusedPruner/transient_storage.yul"
                     ]
 
         solcRepo <- liftIO $ fromMaybe (internalError "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
@@ -3900,7 +3849,8 @@ genEContract sz = do
   b <- defaultWord sz
   n <- arbitrary
   s <- genStorage sz
-  pure $ C c s b n
+  ts <- genStorage sz
+  pure $ C {code=c, storage=s, tStorage=ts, balance=b, nonce=n}
 
 -- ZeroDepthWord
 newtype ZeroDepthWord = ZeroDepthWord (Expr EWord)

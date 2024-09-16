@@ -4,18 +4,17 @@
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    # TODO: we are broken with latest foundry
-    foundry.url = "github:shazow/foundry.nix/6089aad0ef615ac8c7b0c948d6052fa848c99523";
+    foundry.url = "github:shazow/foundry.nix/47f8ae49275eeff9bf0526d45e3c1f76723bb5d3";
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
     };
     solidity = {
-      url = "github:ethereum/solidity/1c8745c54a239d20b6fb0f79a8bd2628d779b27e";
+      url = "github:ethereum/solidity/8a97fa7a1db1ec509221ead6fea6802c684ee887";
       flake = false;
     };
     ethereum-tests = {
-      url = "github:ethereum/tests/v12.4";
+      url = "github:ethereum/tests/v13";
       flake = false;
     };
     forge-std = {
@@ -36,7 +35,7 @@
           overlays = [solc-pkgs.overlay];
           config = { allowBroken = true; };
         });
-        solc = (solc-pkgs.mkDefault pkgs pkgs.solc_0_8_24);
+        solc = (solc-pkgs.mkDefault pkgs pkgs.solc_0_8_26);
         testDeps = with pkgs; [
           go-ethereum
           solc
@@ -185,6 +184,7 @@
         in haskellPackages.shellFor {
           packages = _: [ (hevmBase pkgs) ];
           buildInputs = [
+            curl
             haskellPackages.cabal-install
             mdbook
             yarn

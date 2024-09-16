@@ -93,7 +93,7 @@ currentContract vm =
   Map.lookup vm.state.codeContract vm.env.contracts
 
 -- * Data constructors
-
+--
 makeVm :: VMOps t => VMOpts t -> ST s (VM t s)
 makeVm o = do
   let txaccessList = o.txAccessList
@@ -106,7 +106,7 @@ makeVm o = do
       initialAccessedStorageKeys = fromList $ foldMap (uncurry (map . (,))) (Map.toList txaccessList)
       touched = if o.create then [txorigin] else [txorigin, txtoAddr]
   memory <- ConcreteMemory <$> VUnboxed.Mutable.new 0
-  pure $ VM
+  pure $ setEIP4788Storage o $ VM
     { result = Nothing
     , frames = mempty
     , tx = TxState
@@ -116,7 +116,7 @@ makeVm o = do
       , origin = txorigin
       , toAddr = txtoAddr
       , value = o.value
-      , substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty
+      , substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty mempty
       , isCreate = o.create
       , txReversion = Map.fromList ((o.address,o.contract):o.otherContracts)
       }
@@ -172,11 +172,41 @@ makeVm o = do
       }
     cache = Cache mempty mempty
 
+-- https://eips.ethereum.org/EIPS/eip-4788
+setEIP4788Storage :: VMOpts t -> VM t s -> VM t s
+setEIP4788Storage o vm = do
+  let beaconRootsAddress = LitAddr 0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02
+  case Map.lookup beaconRootsAddress vm.env.contracts of
+    Just beaconRootsContract -> do
+      -- https://eips.ethereum.org/EIPS/eip-4788#pseudocode
+      -- https://eips.ethereum.org/EIPS/eip-4788#block-processing
+      -- > Clients may decide to omit an explicit EVM call and directly set the
+      -- > storage values. Note: While this is a valid optimization for Ethereum
+      -- > mainnet, it could be problematic on non-mainnet situations in case
+      -- > a different contract is used.
+      let
+        historyBufferLength = 8191
+        timestampIdx = Expr.mod o.timestamp (Lit historyBufferLength)
+        rootIdx = Expr.add timestampIdx (Lit historyBufferLength)
+        storage =
+          Expr.writeStorage timestampIdx o.timestamp .
+          Expr.writeStorage rootIdx (Lit o.beaconRoot) $
+          beaconRootsContract.storage
+      vm {
+        env = vm.env {
+          contracts = Map.insert beaconRootsAddress
+                                 (beaconRootsContract { storage } :: Contract)
+                                 vm.env.contracts
+        }
+      }
+    Nothing -> vm
+
 -- | Initialize an abstract contract with unknown code
 unknownContract :: Expr EAddr -> Contract
 unknownContract addr = Contract
   { code        = UnknownCode addr
   , storage     = AbstractStore addr Nothing
+  , tStorage    = AbstractStore addr Nothing
   , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = Nothing
@@ -191,6 +221,7 @@ abstractContract :: ContractCode -> Expr EAddr -> Contract
 abstractContract code addr = Contract
   { code        = code
   , storage     = AbstractStore addr Nothing
+  , tStorage    = AbstractStore addr Nothing
   , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = if isCreation code then Just 1 else Just 0
@@ -209,6 +240,7 @@ initialContract :: ContractCode -> Contract
 initialContract code = Contract
   { code        = code
   , storage     = ConcreteStore mempty
+  , tStorage    = ConcreteStore mempty
   , origStorage = ConcreteStore mempty
   , balance     = Lit 0
   , nonce       = if isCreation code then Just 1 else Just 0
@@ -259,7 +291,7 @@ exec1 = do
 
     litSelf = maybeLitAddr self
 
-  if isJust litSelf && (fromJust litSelf) > 0x0 && (fromJust litSelf) <= 0x9 then do
+  if isJust litSelf && (fromJust litSelf) > 0x0 && (fromJust litSelf) <= 0xa then do
     -- call to precompile
     let ?op = 0x00 -- dummy value
     let calldatasize = bufLength vm.state.calldata
@@ -288,6 +320,7 @@ exec1 = do
     else do
       let ?op = getOpW8 vm.state
       let opName = getOpName vm.state
+
       case getOp (?op) of
 
         OpPush0 -> do
@@ -580,6 +613,13 @@ exec1 = do
           limitStack 1 . burn g_base $
             next >> push vm.block.baseFee
 
+        OpBlobhash ->
+          stackOp1 g_verylow $ \_ -> Lit 0
+
+        OpBlobBaseFee ->
+          limitStack 1 . burn g_base $
+            next >> push 0
+
         OpPop ->
           case stk of
             _:xs -> burn g_base (next >> assign (#state % #stack) xs)
@@ -594,6 +634,28 @@ exec1 = do
                   buf <- readMemory x (Lit 32)
                   let w = Expr.readWordFromBytes (Lit 0) buf
                   assign (#state % #stack) (w : xs)
+            _ -> underrun
+
+
+        OpMcopy ->
+          case stk of
+            dstOff:srcOff:sz:xs ->  do
+              case sz of
+                Lit sz' -> do
+                  let words_copied = (sz' + 31) `div` 32
+                  let g_mcopy = 3*words_copied -- memory access cost is part of accessMemoryRange
+                  burn (g_verylow + (unsafeInto g_mcopy)) $
+                    accessMemoryRange srcOff sz $ accessMemoryRange dstOff sz $ do
+                      next
+                      m <- gets (.state.memory)
+                      case m of
+                        ConcreteMemory mem -> do
+                          buf <- freezeMemory mem
+                          copyBytesToMemory buf sz srcOff dstOff
+                        SymbolicMemory mem -> do
+                          assign (#state % #memory) (SymbolicMemory $ copySlice srcOff dstOff sz mem mem)
+                      assign (#state % #stack) xs
+                _ -> internalError "symbolic size in MCOPY"
             _ -> underrun
 
         OpMstore ->
@@ -697,6 +759,25 @@ exec1 = do
                        -- if any of the arguments are symbolic,
                        -- don't change the refund counter
                        _ -> noop
+            _ -> underrun
+
+        OpTload ->
+          case stk of
+            x:xs -> do
+              burn g_warm_storage_read $
+                accessTStorage self x $ \y -> do
+                  next
+                  assign (#state % #stack) (y:xs)
+            _ -> underrun
+
+        OpTstore ->
+          notStatic $
+          case stk of
+            x:new:xs ->
+              burn g_sload $ do
+                next
+                modifying (#env % #contracts % ix self % #tStorage) (writeStorage x new)
+                assign (#state % #stack) xs
             _ -> underrun
 
         OpJump ->
@@ -904,6 +985,8 @@ exec1 = do
             [] -> underrun
             (xTo':_) -> forceAddr xTo' "SELFDESTRUCT" $ \case
               xTo@(LitAddr _) -> do
+                cc <- gets (.tx.substate.createdContracts)
+                let createdThisTr = self `member` cc
                 acc <- accessAccountForGas xTo
                 let cost = if acc then 0 else g_cold_account_access
                     funds = this.balance
@@ -913,15 +996,17 @@ exec1 = do
                               then g_selfdestruct_newaccount
                               else 0
                   burn (g_selfdestruct + c_new + cost) $ do
-                    selfdestruct self
+                    when (createdThisTr || isCreation this.code) $ do
+                      selfdestruct self
                     touchAccount xTo
 
                     if hasFunds
                     then fetchAccount xTo $ \_ -> do
-                           #env % #contracts % ix xTo % #balance %= (Expr.add funds)
-                           assign (#env % #contracts % ix self % #balance) (Lit 0)
-                           doStop
-                    else do
+                      when (createdThisTr || xTo /= self) $ do
+                        #env % #contracts % ix xTo % #balance %= (Expr.add funds)
+                        assign (#env % #contracts % ix self % #balance) (Lit 0)
+                      doStop
+                    else
                       doStop
               a -> do
                 pc <- use (#state % #pc)
@@ -1347,6 +1432,29 @@ accessStorage addr slot continue = do
               assign #result Nothing
               continue (Lit x))
 
+accessTStorage
+  :: VMOps t => Expr EAddr
+  -> Expr EWord
+  -> (Expr EWord -> EVM t s ())
+  -> EVM t s ()
+accessTStorage addr slot continue = do
+  let slotConc = Expr.concKeccakSimpExpr slot
+  use (#env % #contracts % at addr) >>= \case
+    Just c ->
+      -- Try first without concretization. Then if we get a Just, with concretization
+      -- See `accessStorage` for more details
+      case readStorage slot c.tStorage of
+        Just x -> case readStorage slotConc c.tStorage of
+          Just _ -> continue x
+          Nothing -> continue $ Lit 0
+        Nothing -> continue $ Lit 0
+    Nothing ->
+      fetchAccount addr $ \_ ->
+        accessTStorage addr slot continue
+
+clearTStorages :: EVM t s ()
+clearTStorages = (#env % #contracts) %= fmap (\c -> c { tStorage = ConcreteStore mempty } :: Contract)
+
 accountExists :: Expr EAddr -> VM t s -> Bool
 accountExists addr vm =
   case Map.lookup addr vm.env.contracts of
@@ -1369,7 +1477,7 @@ finalize :: VMOps t => EVM t s ()
 finalize = do
   let
     revertContracts  = use (#tx % #txReversion) >>= assign (#env % #contracts)
-    revertSubstate   = assign (#tx % #substate) (SubState mempty mempty mempty mempty mempty)
+    revertSubstate   = assign (#tx % #substate) (SubState mempty mempty mempty mempty mempty mempty)
 
   use #result >>= \case
     Just (VMFailure (Revert _)) -> do
@@ -1381,6 +1489,7 @@ finalize = do
       revertContracts
       revertSubstate
     Just (VMSuccess output) -> do
+      clearTStorages
       -- deposit the code from a creation tx
       pc' <- use (#state % #pc)
       creation <- use (#tx % #isCreate)
@@ -1909,6 +2018,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
 
             modifying (#env % #contracts % ix newAddr % #storage) resetStorage
             modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage
+            modifying (#tx % #substate % #createdContracts) (insert newAddr)
 
             transfer self newAddr xValue
 

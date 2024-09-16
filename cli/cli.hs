@@ -498,6 +498,7 @@ vmFromCommand cmd = do
           , txAccessList   = mempty -- TODO: support me soon
           , allowFFI       = False
           , freshAddresses = 0
+          , beaconRoot     = 0
           }
         word f def = fromMaybe def (f cmd)
         word64 f def = fromMaybe def (f cmd)
@@ -583,6 +584,7 @@ symvmFromCommand cmd calldata = do
       , txAccessList   = mempty
       , allowFFI       = False
       , freshAddresses = 0
+      , beaconRoot     = 0
       }
     word f def = fromMaybe def (f cmd)
     word64 f def = fromMaybe def (f cmd)
