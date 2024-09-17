@@ -908,7 +908,7 @@ tests = testGroup "hevm"
           assertEqualM "abi encoding mismatch" solidityEncoded (AbiBytesDynamic hevmEncoded)
 
     -- we need a separate test for this because the type of a function is "function() external" in solidity but just "function" in the abi:
-    , testProperty "abi-encoding-vs-solidity-function-pointer" $ withMaxSuccess 20 $ forAll (genAbiValue AbiFunctionType) $
+    , askOption $ \(QuickCheckTests n) -> testProperty "abi-encoding-vs-solidity-function-pointer" $ withMaxSuccess (min n 20) $ forAll (genAbiValue AbiFunctionType) $
       \y -> prop $ do
           Just encoded <- runFunction [i|
               function foo(function() external a) public pure returns (bytes memory x) {
