@@ -335,7 +335,7 @@ showTrace trace =
           case Map.lookup (unsafeInto (fromMaybe 0x00 abi)) dapp.abiMap of
             Just m  ->
               "\x1b[1m"
-              <> m.name <> "XD"
+              <> m.name
               <> "\x1b[0m"
               <> showCall (catMaybes (getAbiTypes m.methodSignature)) calldata
             Nothing ->
