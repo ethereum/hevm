@@ -1,4 +1,5 @@
 {-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module EVM where
 
@@ -12,7 +13,7 @@ import Optics.Operators.Unsafe
 
 import EVM.ABI
 import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord,
-  writeByte, bufLength, indexWord, litAddr, readBytes, word256At, copySlice, wordToAddr)
+  writeByte, bufLength, indexWord, readBytes, copySlice, wordToAddr)
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (FeeSchedule (..))
 import EVM.Op
@@ -22,6 +23,7 @@ import EVM.Types
 import EVM.Types qualified as Expr (Expr(Gas))
 import EVM.Sign qualified
 import EVM.Concrete qualified as Concrete
+import EVM.CheatsTH
 
 import Control.Monad (unless, when)
 import Control.Monad.ST (ST)
@@ -30,11 +32,16 @@ import Data.Bits (FiniteBits, countLeadingZeros, finiteBitSize)
 import Data.ByteArray qualified as BA
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Lazy (fromStrict)
 import Data.ByteString.Lazy qualified as LS
 import Data.ByteString.Char8 qualified as Char8
+import Data.DoubleWord (Int256, Word256)
+import Data.Either (partitionEithers)
+import Data.Either.Extra (maybeToEither)
 import Data.Foldable (toList)
-import Data.List (find)
+import Data.List (find, isPrefixOf)
+import Data.List.Split (splitOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, fromJust, isJust)
@@ -52,6 +59,7 @@ import Data.Vector.Storable.Mutable qualified as SV
 import Data.Vector.Unboxed qualified as VUnboxed
 import Data.Vector.Unboxed.Mutable qualified as VUnboxed.Mutable
 import Data.Word (Word8, Word32, Word64)
+import Text.Read (readMaybe)
 import Witch (into, tryFrom, unsafeInto)
 
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
@@ -152,6 +160,7 @@ makeVm o = do
     , forks = Seq.singleton (ForkState env block cache "")
     , currentFork = 0
     , labels = mempty
+    , osEnv = mempty
     }
     where
     env = Env
@@ -1661,162 +1670,162 @@ cheatCode = LitAddr $ unsafeInto (keccak' "hevm cheat code")
 
 cheat
   :: (?op :: Word8, VMOps t)
-  => (Expr EWord, Expr EWord) -> (Expr EWord, Expr EWord)
+  => (Expr EWord, Expr EWord) -> (Expr EWord, Expr EWord) -> [Expr EWord]
   -> EVM t s ()
-cheat (inOffset, inSize) (outOffset, outSize) = do
+cheat (inOffset, inSize) (outOffset, outSize) xs = do
   vm <- get
   input <- readMemory (Expr.add inOffset (Lit 4)) (Expr.sub inSize (Lit 4))
   calldata <- readMemory inOffset inSize
   abi <- readBytes 4 (Lit 0) <$> readMemory inOffset (Lit 4)
-  pushTrace $ FrameTrace (CallContext cheatCode cheatCode inOffset inSize (Lit 0) (maybeLitWord abi) calldata vm.env.contracts vm.tx.subState)
+  let newContext = CallContext cheatCode cheatCode outOffset outSize (Lit 0) (maybeLitWord abi) calldata vm.env.contracts vm.tx.subState
+
+  pushTrace $ FrameTrace newContext
+  next
+  vm1 <- get
+  pushTo #frames $ Frame
+                    { state = vm1.state { stack = xs }
+                    , context = newContext
+                    }
   case maybeLitWord abi of
     Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) "symbolic cheatcode selector" (wrap [abi])
     Just (unsafeInto -> abi') ->
       case Map.lookup abi' cheatActions of
         Nothing ->
           vmError (BadCheatCode abi')
-        Just action -> do
-            action outOffset outSize input
-            popTrace
-            next
-            push 1
+        Just action ->
+          action input
 
-type CheatAction t s = Expr EWord -> Expr EWord -> Expr Buf -> EVM t s ()
+type CheatAction t s = Expr Buf -> EVM t s ()
 
 cheatActions :: VMOps t => Map FunctionSelector (CheatAction t s)
 cheatActions = Map.fromList
   [ action "ffi(string[])" $
-      \sig outOffset outSize input -> do
+      \sig input -> do
         vm <- get
         if vm.config.allowFFI then
           case decodeBuf [AbiArrayDynamicType AbiStringType] input of
-            CAbi valsArr -> case valsArr of
-              [AbiArrayDynamic AbiStringType strsV] ->
-                let
-                  cmd = fmap
-                          (\case
-                            (AbiString a) -> unpack $ decodeUtf8 a
-                            _ -> "")
-                          (V.toList strsV)
-                  cont bs = do
-                    let encoded = ConcreteBuf bs
-                    assign (#state % #returndata) encoded
-                    copyBytesToMemory encoded outSize (Lit 0) outOffset
-                    assign #result Nothing
-                in query (PleaseDoFFI cmd cont)
-              _ -> vmError (BadCheatCode sig)
+            CAbi [AbiArrayDynamic AbiStringType strsV] ->
+              let
+                cmd = fmap
+                        (\case
+                          (AbiString a) -> toString a
+                          _ -> "")
+                        (V.toList strsV)
+                cont bs = continueOnce $ do
+                  frameReturnBuf bs
+              in query (PleaseDoFFI cmd vm.osEnv cont)
             _ -> vmError (BadCheatCode sig)
         else
           let msg = "ffi disabled: run again with --ffi if you want to allow tests to call external scripts"
           in partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg []
 
   , action "warp(uint256)" $
-      \sig _ _ input -> case decodeStaticArgs 0 1 input of
-        [x]  -> assign (#block % #timestamp) x
+      \sig input -> case decodeStaticArgs 0 1 input of
+        [x]  -> do
+          assign (#block % #timestamp) x
+          doStop
         _ -> vmError (BadCheatCode sig)
 
   , action "deal(address,uint256)" $
-      \sig _ _ input -> case decodeStaticArgs 0 2 input of
+      \sig input -> case decodeStaticArgs 0 2 input of
         [a, amt] ->
           forceAddr a "vm.deal: cannot decode target into an address" $ \usr ->
             fetchAccount usr $ \_ -> do
               assign (#env % #contracts % ix usr % #balance) amt
+              doStop
         _ -> vmError (BadCheatCode sig)
 
   , action "assume(bool)" $
-      \sig _ _ input -> case decodeStaticArgs 0 1 input of
-        [c] -> modifying #constraints ((:) (PEq (Lit 1) c))
+      \sig input -> case decodeStaticArgs 0 1 input of
+        [c] -> do
+          modifying #constraints ((:) (PEq (Lit 1) c))
+          doStop
         _ -> vmError (BadCheatCode sig)
 
   , action "roll(uint256)" $
-      \sig _ _ input -> case decodeStaticArgs 0 1 input of
-        [x] -> forceConcrete x "cannot roll to a symbolic block number" (assign (#block % #number))
+      \sig input -> case decodeStaticArgs 0 1 input of
+        [x] -> forceConcrete x "cannot roll to a symbolic block number" $ \block -> do
+          assign (#block % #number) block
+          doStop
         _ -> vmError (BadCheatCode sig)
 
   , action "store(address,bytes32,bytes32)" $
-      \sig _ _ input -> case decodeStaticArgs 0 3 input of
+      \sig input -> case decodeStaticArgs 0 3 input of
         [a, slot, new] -> case wordToAddr a of
-          Just a'@(LitAddr _) -> fetchAccount a' $ \_ ->
+          Just a'@(LitAddr _) -> fetchAccount a' $ \_ -> do
             modifying (#env % #contracts % ix a' % #storage) (writeStorage slot new)
+            doStop
           _ -> vmError (BadCheatCode sig)
         _ -> vmError (BadCheatCode sig)
 
   , action "load(address,bytes32)" $
-      \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
+      \sig input -> case decodeStaticArgs 0 2 input of
         [a, slot] -> case wordToAddr a of
           Just a'@(LitAddr _) -> fetchAccount a' $ \_ ->
             accessStorage a' slot $ \res -> do
-              assign (#state % #returndata % word256At (Lit 0)) res
               let buf = writeWord (Lit 0) res (ConcreteBuf "")
-              copyBytesToMemory buf (Lit 32) (Lit 0) outOffset
+              frameReturnExpr buf -- TODO reivew
           _ -> vmError (BadCheatCode sig)
         _ -> vmError (BadCheatCode sig)
 
   , action "sign(uint256,bytes32)" $
-      \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
+      \sig input -> case decodeStaticArgs 0 2 input of
         [sk, hash] ->
           forceConcrete2 (sk, hash) "cannot sign symbolic data" $ \(sk', hash') -> do
             let (v,r,s) = EVM.Sign.sign hash' (into sk')
-                encoded = encodeAbiValue $
-                  AbiTuple (V.fromList
+                result = AbiTuple $
+                  V.fromList
                     [ AbiUInt 8 $ into v
                     , AbiBytes 32 (word256Bytes r)
                     , AbiBytes 32 (word256Bytes s)
-                    ])
-            assign (#state % #returndata) (ConcreteBuf encoded)
-            copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
+                    ]
+            frameReturn result -- TODO ??
         _ -> vmError (BadCheatCode sig)
 
   , action "addr(uint256)" $
-      \sig outOffset _ input -> case decodeStaticArgs 0 1 input of
+      \sig input -> case decodeStaticArgs 0 1 input of
         [sk] -> forceConcrete sk "cannot derive address for a symbolic key" $ \sk' -> do
-          let a = EVM.Sign.deriveAddr $ into sk'
-          case a of
+          case EVM.Sign.deriveAddr $ into sk' of
             Nothing -> vmError (BadCheatCode sig)
-            Just address -> do
-              let expAddr = litAddr address
-              assign (#state % #returndata % word256At (Lit 0)) expAddr
-              let buf = ConcreteBuf $ word256Bytes (into address)
-              copyBytesToMemory buf (Lit 32) (Lit 0) outOffset
+            Just address -> do frameReturnBuf $ word256Bytes (into address) -- TODO ??
         _ -> vmError (BadCheatCode sig)
 
   , action "prank(address)" $
-      \sig _ _ input -> case decodeStaticArgs 0 1 input of
+      \sig input -> case decodeStaticArgs 0 1 input of
         [addr]  -> case wordToAddr addr of
-          Just a -> assign (#config % #overrideCaller) (Just a)
+          Just a -> do
+            assign (#config % #overrideCaller) (Just a)
+            doStop
           Nothing -> vmError (BadCheatCode sig)
         _ -> vmError (BadCheatCode sig)
 
   , action "startPrank(address)" $
-      \sig _ _ input -> case decodeStaticArgs 0 1 input of
+      \sig input -> case decodeStaticArgs 0 1 input of
         [addr]  -> case wordToAddr addr of
           Just a -> do
             assign (#config % #overrideCaller) (Just a)
             assign (#config % #resetCaller) False
+            doStop
           Nothing -> vmError (BadCheatCode sig)
         _ -> vmError (BadCheatCode sig)
 
   , action "stopPrank()" $
-      \_ _ _ _ -> do
-          assign (#config % #overrideCaller) Nothing
-          assign (#config % #resetCaller) True
-
+      \_ _ -> do
+        assign (#config % #overrideCaller) Nothing
+        assign (#config % #resetCaller) True
+        doStop
 
   , action "createFork(string)" $
-      \sig outOffset _ input -> case decodeBuf [AbiStringType] input of
-        CAbi valsArr -> case valsArr of
-          [AbiString bytes] -> do
-            forkId <- length <$> gets (.forks)
-            let urlOrAlias = Char8.unpack bytes
-            modify' $ \vm -> vm { forks = vm.forks Seq.|> ForkState vm.env vm.block vm.cache urlOrAlias }
-            let encoded = encodeAbiValue $ AbiUInt 256 (fromIntegral forkId)
-            assign (#state % #returndata) (ConcreteBuf encoded)
-            copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
-          _ -> vmError (BadCheatCode sig)
+      \sig input -> case decodeBuf [AbiStringType] input of
+        CAbi [AbiString bytes] -> do
+          forkId <- length <$> gets (.forks)
+          let urlOrAlias = Char8.unpack bytes
+          modify' $ \vm -> vm { forks = vm.forks Seq.|> ForkState vm.env vm.block vm.cache urlOrAlias }
+          frameReturn $ AbiUInt 256 (fromIntegral forkId)
         _ -> vmError (BadCheatCode sig)
 
   , action "selectFork(uint256)" $
-      \sig _ _ input -> case decodeStaticArgs 0 1 input of
+      \sig input -> case decodeStaticArgs 0 1 input of
         [forkId] ->
           forceConcrete forkId "forkId must be concrete" $ \(fromIntegral -> forkId') -> do
             saved <- Seq.lookup forkId' <$> gets (.forks)
@@ -1841,27 +1850,87 @@ cheatActions = Map.fromList
                         ) vm.currentFork  vm.forks
                       , currentFork = forkId'
                       }
+                  doStop
               Nothing ->
                 vmError (NonexistentFork forkId')
         _ -> vmError (BadCheatCode sig)
 
   , action "activeFork()" $
-      \_ outOffset _ _ -> do
+      \_ _ -> do
         vm <- get
-        let encoded = encodeAbiValue $ AbiUInt 256 (fromIntegral vm.currentFork)
-        assign (#state % #returndata) (ConcreteBuf encoded)
-        copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
+        frameReturn $ AbiUInt 256 (fromIntegral vm.currentFork)
 
   , action "label(address,string)" $
-      \sig _ _ input -> case decodeBuf [AbiAddressType, AbiStringType] input of
-        CAbi valsArr -> case valsArr of
-          [AbiAddress addr, AbiString label] ->
-            #labels %= Map.insert addr (decodeUtf8 label)
-          _ -> vmError (BadCheatCode sig)
+      \sig input -> case decodeBuf [AbiAddressType, AbiStringType] input of
+        CAbi [AbiAddress addr, AbiString label] -> do
+          #labels %= Map.insert addr (decodeUtf8 label)
+          doStop
         _ -> vmError (BadCheatCode sig)
+
+  , action "setEnv(string,string)" $
+      \sig input -> case decodeBuf [AbiStringType, AbiStringType] input of
+        CAbi [AbiString variable, AbiString value] -> do
+          let (varStr, varVal) = (toString variable, toString value)
+          #osEnv %= Map.insert varStr varVal
+          doStop
+        _ -> vmError (BadCheatCode sig)
+
+  -- Single-value environment read cheat actions
+  , $(envReadSingleCheat "envBool(string)") AbiBool stringToBool
+  , $(envReadSingleCheat "envUint(string)") (AbiUInt 256) stringToWord256
+  , $(envReadSingleCheat "envInt(string)") (AbiInt 256) stringToInt256
+  , $(envReadSingleCheat "envAddress(string)") AbiAddress stringToAddress
+  , $(envReadSingleCheat "envBytes32(string)") (AbiBytes 32) stringToBytes32
+  , $(envReadSingleCheat "envString(string)") (\x -> AbiTuple $ V.fromList [AbiString x]) stringToByteString
+  , $(envReadSingleCheat "envBytes(bytes)") (\x -> AbiTuple $ V.fromList [AbiBytesDynamic x]) stringHexToByteString
+
+  -- Multi-value environment read cheat actions
+  , $(envReadMultipleCheat "envBool(string,string)" AbiBoolType) stringToBool
+  , $(envReadMultipleCheat "envUint(string,string)" $ AbiUIntType 256) stringToWord256
+  , $(envReadMultipleCheat "envInt(string,string)" $ AbiIntType 256) stringToInt256
+  , $(envReadMultipleCheat "envAddress(string,string)" AbiAddressType) stringToAddress
+  , $(envReadMultipleCheat "envBytes32(string,string)" $ AbiBytesType 32) stringToBytes32
+  , $(envReadMultipleCheat "envString(string,string)" AbiStringType) stringToByteString
+  , $(envReadMultipleCheat "envBytes(bytes,bytes)" AbiBytesDynamicType) stringHexToByteString
   ]
   where
     action s f = (abiKeccak s, f (abiKeccak s))
+    either' v l r = either l r v
+    frameReturn :: VMOps t => AbiValue -> EVM t s ()
+    frameReturn v = frameReturnBuf $ encodeAbiValue v
+    frameReturnBuf :: VMOps t => ByteString -> EVM t s ()
+    frameReturnBuf buf = frameReturnExpr $ ConcreteBuf buf
+    frameReturnExpr :: VMOps t => Expr Buf -> EVM t s ()
+    frameReturnExpr e = finishFrame (FrameReturned e)
+    frameRevert :: VMOps t => ByteString -> EVM t s ()
+    frameRevert err = finishFrame (FrameReverted $ errorMsg err)
+    errorMsg :: ByteString -> Expr Buf
+    errorMsg err = ConcreteBuf $ selector "Error(string)" <> encodeAbiValue (AbiTuple $ V.fromList [AbiString err])
+    continueOnce cont = do
+      assign #result Nothing
+      cont
+    doStop = finishFrame (FrameReturned mempty)
+    toString = unpack . decodeUtf8
+    strip0x s = if "0x" `isPrefixOf` s then drop 2 s else s
+    stringToBool :: String -> Either ByteString Bool
+    stringToBool s = case s of
+      "true" -> Right True
+      "True" -> Right True
+      "false" -> Right False
+      "False" -> Right False
+      _ -> Left "invalid value"
+    stringToWord256 :: String -> Either ByteString Word256
+    stringToWord256 s = maybeToEither "invalid W256 value" $ readMaybe s
+    stringToInt256 :: String -> Either ByteString Int256
+    stringToInt256 s = maybeToEither "invalid Int256 value" $ readMaybe s
+    stringToAddress :: String -> Either ByteString Addr
+    stringToAddress s = fmap Addr $ maybeToEither "invalid address value" $ readMaybe s
+    stringToBytes32 :: String -> Either ByteString ByteString
+    stringToBytes32 s = fmap word256Bytes $ maybeToEither "invalid bytes32 value" $ readMaybe s
+    stringToByteString :: String -> Either ByteString ByteString
+    stringToByteString = Right . Char8.pack
+    stringHexToByteString :: String -> Either ByteString ByteString
+    stringHexToByteString s = either (const $ Left "invalid bytes value") Right $ BS16.decodeBase16Untyped . Char8.pack . strip0x $ s
 
 -- * General call implementation ("delegateCall")
 -- note that the continuation is ignored in the precompile case
@@ -1885,8 +1954,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           \(xTo', xContext') ->
             precompiledContract this gasGiven xTo' xContext' xValue xInOffset xInSize xOutOffset xOutSize xs
   | xTo == cheatCode = do
-      assign (#state % #stack) xs
-      cheat (xInOffset, xInSize) (xOutOffset, xOutSize)
+      cheat (xInOffset, xInSize) (xOutOffset, xOutSize) xs
   | otherwise =
       callChecks this gasGiven xContext xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
         \xGas -> do
