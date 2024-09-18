@@ -818,7 +818,7 @@ exprToSMT = \case
   BaseFee -> "basefee"
 
   a@(SymAddr _) -> formatEAddr a
-  WAddr(a@(SymAddr _)) -> "(concat (_ bv0 96)" `sp` exprToSMT a `sp` ")"
+  WAddr(a@(SymAddr _)) -> "((_ zero_extend 96)" `sp` exprToSMT a `sp` ")"
 
   LitByte b -> fromLazyText $ "(_ bv" <> T.pack (show (into b :: Integer)) <> " 8)"
   IndexWord idx w -> case idx of
