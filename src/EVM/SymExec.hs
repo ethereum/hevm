@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE DeriveAnyClass #-}
 
@@ -7,6 +8,8 @@ module EVM.SymExec where
 import Control.Concurrent.Async (concurrently, mapConcurrently)
 import Control.Concurrent.Spawn (parMapIO, pool)
 import Control.Concurrent.STM (atomically, TVar, readTVarIO, readTVar, newTVarIO, writeTVar)
+import Control.Monad (when, forM_, forM)
+import Control.Monad.IO.Unlift
 import Control.Monad.Operational qualified as Operational
 import Control.Monad.ST (RealWorld, stToIO, ST)
 import Control.Monad.State.Strict (runStateT)
@@ -29,10 +32,12 @@ import Text.Printf (printf)
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
 import Data.Vector qualified as V
+import Data.Vector.Unboxed qualified as VUnboxed
 import EVM (makeVm, abstractContract, initialContract, getCodeLocation, isValidJumpDest)
 import EVM.Exec
 import EVM.Fetch qualified as Fetch
 import EVM.ABI
+import EVM.Effects
 import EVM.Expr qualified as Expr
 import EVM.Format (formatExpr, formatPartial, showVal, bsToHex)
 import EVM.SMT (SMTCex(..), SMT2(..), assertProps)
@@ -49,9 +54,6 @@ import GHC.Generics (Generic)
 import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
 import Witch (into, unsafeInto)
-import EVM.Effects
-import Control.Monad.IO.Unlift
-import Control.Monad (when, forM_)
 
 data LoopHeuristic
   = Naive
@@ -248,6 +250,25 @@ loadSymVM x callvalue cd create =
     , beaconRoot = 0
     })
 
+-- freezes any mutable refs, making it safe to share between threads
+freezeVM :: VM Symbolic RealWorld -> ST RealWorld (VM Symbolic RealWorld)
+freezeVM vm = do
+    state' <- do
+      mem' <- freeze (vm.state.memory)
+      pure $ vm.state { memory = mem' }
+    frames' <- forM (vm.frames :: [Frame Symbolic RealWorld]) $ \frame -> do
+      mem' <- freeze frame.state.memory
+      pure $ (frame :: Frame Symbolic RealWorld) { state = frame.state { memory = mem' } }
+
+    pure (vm :: VM Symbolic RealWorld)
+      { state = state'
+      , frames = frames'
+      }
+  where
+    freeze = \case
+      ConcreteMemory m -> SymbolicMemory . ConcreteBuf . BS.pack . VUnboxed.toList <$> VUnboxed.freeze m
+      m@(SymbolicMemory _) -> pure m
+
 -- | Interpreter which explores all paths at branching points. Returns an
 -- 'Expr End' representing the possible executions.
 interpret
@@ -277,11 +298,12 @@ interpret fetcher maxIter askSmtIters heuristic vm =
         r <- liftIO q
         interpret fetcher maxIter askSmtIters heuristic vm (k r)
       Stepper.Ask (PleaseChoosePath cond continue) -> do
+        frozen <- liftIO $ stToIO $ freezeVM vm
         evalLeft <- toIO $ do
-          (ra, vma) <- liftIO $ stToIO $ runStateT (continue True) vm { result = Nothing }
+          (ra, vma) <- liftIO $ stToIO $ runStateT (continue True) frozen { result = Nothing }
           interpret fetcher maxIter askSmtIters heuristic vma (k ra)
         evalRight <- toIO $ do
-          (rb, vmb) <- liftIO $ stToIO $ runStateT (continue False) vm { result = Nothing }
+          (rb, vmb) <- liftIO $ stToIO $ runStateT (continue False) frozen { result = Nothing }
           interpret fetcher maxIter askSmtIters heuristic vmb (k rb)
         (a, b) <- liftIO $ concurrently evalLeft evalRight
         pure $ ITE cond a b
