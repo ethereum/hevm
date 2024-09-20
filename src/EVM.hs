@@ -834,13 +834,18 @@ exec1 = do
             xValue:xOffset:xSize:xs ->
               accessMemoryRange xOffset xSize $ do
                 availableGas <- use (#state % #gas)
-                let
-                  (cost, gas') = costOfCreate fees availableGas xSize False
-                newAddr <- createAddress self this.nonce
+                let (cost, gas') = costOfCreate fees availableGas xSize False
+
+                -- handle `prank`
+                let from' = fromMaybe self vm.config.overrideCaller
+                resetCaller <- use (#config % #resetCaller)
+                when (resetCaller) $ assign (#config % #overrideCaller) Nothing
+
+                newAddr <- createAddress from' this.nonce
                 _ <- accessAccountForGas newAddr
                 burn' cost $ do
                   initCode <- readMemory xOffset xSize
-                  create self this xSize gas' xValue xs newAddr initCode
+                  create from' this xSize gas' xValue xs newAddr initCode
             _ -> underrun
 
         OpCall ->
