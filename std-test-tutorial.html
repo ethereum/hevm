@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>ds-test tutorial - hevm</title>
+        <title>Forge std-test tutorial - hevm</title>
 
 
         <!-- Custom HTML head -->
@@ -89,7 +89,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item expanded "><a href="ds-test-tutorial.html" class="active">ds-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item expanded "><a href="std-test-tutorial.html" class="active">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -151,7 +151,7 @@
                         <a href="https://github.com/ethereum/hevm" title="Git repository" aria-label="Git repository">
                             <i id="git-repository-button" class="fa fa-github"></i>
                         </a>
-                        <a href="hhttps://github.com/ethereum/hevm/edit/main/src/ds-test-tutorial.md" title="Suggest an edit" aria-label="Suggest an edit">
+                        <a href="hhttps://github.com/ethereum/hevm/edit/main/src/std-test-tutorial.md" title="Suggest an edit" aria-label="Suggest an edit">
                             <i id="git-edit-button" class="fa fa-edit"></i>
                         </a>
 
@@ -180,7 +180,7 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="ds-test-tutorial"><a class="header" href="#ds-test-tutorial">ds-test Tutorial</a></h1>
+                        <h1 id="forge-std-test-usage-tutorial"><a class="header" href="#forge-std-test-usage-tutorial">Forge std-test Usage Tutorial</a></h1>
 <p>Test cases must be prepended with <code>prove_</code> and the testing contract must
 inherit from <code>Test</code> from <a href="https://book.getfoundry.sh/forge/forge-std">Forge's standard test
 library</a>. First, import Test:
@@ -195,7 +195,7 @@ contract BadVaultTest is Test {
   }
 }
 </code></pre>
-<p>Once you have written such a test case, you need to compile with <code>forge build</code>
+<p>Once you have written such a test case, you need to compile with <code>forge build --ast</code>
 (see <a href="https://book.getfoundry.sh/forge/tests">forge documentation</a> for more
 details) and then:</p>
 <pre><code>$ hevm test
@@ -286,6 +286,18 @@ condition where the function call fails. The function should have had a <code>&g
 rather than a <code>&gt;</code> in the <code>if</code>. Notice that in this case, while hevm filled in
 the <code>address</code> to give a complete call, the address itself is irrelevant,
 although this is not explicitly mentioned.</p>
+<h2 id="starting-state-is-always-concrete"><a class="header" href="#starting-state-is-always-concrete">Starting State is Always Concrete</a></h2>
+<p>In <code>test</code> mode, hevm runs with the starting state set to concrete values. This
+means that with the solidity-generated default constructor of contracts, state
+variables will be zero, and arrays and mappings will be empty. If you need a
+different starting state, such as e.g. tokens already distributed to some
+addresses, you can set that up in the setup phase of your test. This can be
+done via the <code>beforeTestSetup</code> function, as documented in the <a href="https://book.getfoundry.sh/forge/writing-tests#before-test-setups">Foundry
+Book</a>.</p>
+<p>In case you need a symbolic starting state, see the <a href="#symbolic-execution-tutorial">Symbolic execution
+tutorial</a>. Note that if all you need is a
+symbolic calldata, then you don't need to run <code>hevm</code> in symbolic mode, you can
+simply run <code>hevm test</code> and hevm will provide you with a symbolic calldata.</p>
 <h2 id="test-cases-that-must-always-revert"><a class="header" href="#test-cases-that-must-always-revert">Test Cases that Must Always Revert</a></h2>
 <p>Hevm assumes that a test case should not always revert. If you have such a test
 case, hevm will warn you and return a FAIL. For example this toy contract:</p>

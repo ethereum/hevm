@@ -90,7 +90,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="ds-test-tutorial.html">ds-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">ds-test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -337,7 +337,7 @@ Checking 1 function(s) in contract src/contract-pass.sol:MyContract
 [RUNNING] prove_pass(address,uint256)
    [PASS] prove_pass(address,uint256)
 </code></pre>
-<p>See <a href="./ds-test-tutorial.html">ds-test tutorial</a> for details.</p>
+<p>See <a href="./std-test-tutorial.html">Forge std-test tutorial</a> for details.</p>
 <p>Note that Foundry provides the solidity compiler, hence there is no need to
 install solidity separately.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="when-to-use-symbolic-execution"><a class="header" href="#when-to-use-symbolic-execution">When to use Symbolic Execution</a></h1>
@@ -565,7 +565,7 @@ following:</p>
 </code></pre>
 <p>For these cases, we suggest concretizing the call that creates the contract,
 such that the bytecode created and later jumped to, is not symbolic.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="ds-test-tutorial"><a class="header" href="#ds-test-tutorial">ds-test Tutorial</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="forge-std-test-usage-tutorial"><a class="header" href="#forge-std-test-usage-tutorial">Forge std-test Usage Tutorial</a></h1>
 <p>Test cases must be prepended with <code>prove_</code> and the testing contract must
 inherit from <code>Test</code> from <a href="https://book.getfoundry.sh/forge/forge-std">Forge's standard test
 library</a>. First, import Test:
@@ -580,7 +580,7 @@ contract BadVaultTest is Test {
   }
 }
 </code></pre>
-<p>Once you have written such a test case, you need to compile with <code>forge build</code>
+<p>Once you have written such a test case, you need to compile with <code>forge build --ast</code>
 (see <a href="https://book.getfoundry.sh/forge/tests">forge documentation</a> for more
 details) and then:</p>
 <pre><code>$ hevm test
@@ -593,7 +593,7 @@ violations.</p>
 <h2 id="setting-up-tests"><a class="header" href="#setting-up-tests">Setting Up Tests</a></h2>
 <p>Tests usually need to set up the environment in a particular way, such
 as contract address, storage, etc. This can be done via Cheat Codes that
-can change the address of the caller, set block number, etc. See <a href="ds-test-tutorial.html#supported-cheat-codes">Cheat
+can change the address of the caller, set block number, etc. See <a href="std-test-tutorial.html#supported-cheat-codes">Cheat
 Codes</a> below for a range of cheat codes supported. Cheat Codes
 are a standard method used by other tools, such as
 <a href="https://book.getfoundry.sh/">Foundry</a>, so you should be able to re-use your
@@ -630,7 +630,7 @@ did not break any of the (invariants)[https://en.wikipedia.org/wiki/Invariant_(m
 of the contract, such as total number of tokens.</p>
 <p>You can read more about testing and cheat codes in the (Foundry
 Book)[https://book.getfoundry.sh/forge/cheatcodes] and you can see the
-hevm-supported cheat codes <a href="ds-test-tutorial.html#supported-cheat-codes">below</a>.</p>
+hevm-supported cheat codes <a href="std-test-tutorial.html#supported-cheat-codes">below</a>.</p>
 <h2 id="understanding-counterexamples"><a class="header" href="#understanding-counterexamples">Understanding Counterexamples</a></h2>
 <p>When hevm discovers a failure, it prints an example call how to trigger the failure. Let's see the following
 simple solidity code:</p>
@@ -671,6 +671,18 @@ condition where the function call fails. The function should have had a <code>&g
 rather than a <code>&gt;</code> in the <code>if</code>. Notice that in this case, while hevm filled in
 the <code>address</code> to give a complete call, the address itself is irrelevant,
 although this is not explicitly mentioned.</p>
+<h2 id="starting-state-is-always-concrete"><a class="header" href="#starting-state-is-always-concrete">Starting State is Always Concrete</a></h2>
+<p>In <code>test</code> mode, hevm runs with the starting state set to concrete values. This
+means that with the solidity-generated default constructor of contracts, state
+variables will be zero, and arrays and mappings will be empty. If you need a
+different starting state, such as e.g. tokens already distributed to some
+addresses, you can set that up in the setup phase of your test. This can be
+done via the <code>beforeTestSetup</code> function, as documented in the <a href="https://book.getfoundry.sh/forge/writing-tests#before-test-setups">Foundry
+Book</a>.</p>
+<p>In case you need a symbolic starting state, see the <a href="std-test-tutorial.html#symbolic-execution-tutorial">Symbolic execution
+tutorial</a>. Note that if all you need is a
+symbolic calldata, then you don't need to run <code>hevm</code> in symbolic mode, you can
+simply run <code>hevm test</code> and hevm will provide you with a symbolic calldata.</p>
 <h2 id="test-cases-that-must-always-revert"><a class="header" href="#test-cases-that-must-always-revert">Test Cases that Must Always Revert</a></h2>
 <p>Hevm assumes that a test case should not always revert. If you have such a test
 case, hevm will warn you and return a FAIL. For example this toy contract:</p>
@@ -1115,12 +1127,12 @@ Available options:
                            point before we consult the smt solver to check
                            reachability (default: 1) (default: 1)
 </code></pre>
-<p><code>hevm test</code> executes all solidity unit tests that make use of the <code>ds-test</code> assertion library
+<p><code>hevm test</code> executes all solidity unit tests that make use of the <code>std-test</code> assertion library
 (a.k.a <a href="https://book.getfoundry.sh/forge/forge-std">Foundry tests</a>). It
 supports both foundry based (the default) and <a href="https://dapp.tools/">dapptools</a> based projects.</p>
 <p>A more detailed introduction to symbolic unit tests with <code>hevm</code> can be found
-<a href="https://fv.ethereum.org/2020/12/11/symbolic-execution-with-ds-test/">here</a>. An
-overview of using ds-test for solidity testing can be found in the <a href="https://book.getfoundry.sh/forge/tests">foundry
+<a href="https://fv.ethereum.org/2020/12/11/symbolic-execution-with-std-test/">here</a>. An
+overview of using <code>std-test</code> for solidity testing can be found in the <a href="https://book.getfoundry.sh/forge/tests">foundry
 book</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="hevm-symbolic"><a class="header" href="#hevm-symbolic"><code>hevm symbolic</code></a></h1>
 <pre><code class="language-shell">Usage: hevm symbolic [--code TEXT] [--calldata TEXT] [--address ADDR]
