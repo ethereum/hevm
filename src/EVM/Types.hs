@@ -673,7 +673,7 @@ data FrameContext
     { address         :: Expr EAddr
     , codehash        :: Expr EWord
     , createreversion :: Map (Expr EAddr) Contract
-    , substate        :: SubState
+    , subState        :: SubState
     }
   | CallContext
     { target        :: Expr EAddr
@@ -739,7 +739,7 @@ data TxState = TxState
   , origin      :: Expr EAddr
   , toAddr      :: Expr EAddr
   , value       :: Expr EWord
-  , substate    :: SubState
+  , subState    :: SubState
   , isCreate    :: Bool
   , txReversion :: Map (Expr EAddr) Contract
   }
