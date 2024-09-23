@@ -116,7 +116,7 @@ makeVm o = do
       , origin = txorigin
       , toAddr = txtoAddr
       , value = o.value
-      , substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty mempty
+      , subState = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty mempty
       , isCreate = o.create
       , txReversion = Map.fromList ((o.address,o.contract):o.otherContracts)
       }
@@ -985,7 +985,7 @@ exec1 = do
             [] -> underrun
             (xTo':_) -> forceAddr xTo' "SELFDESTRUCT" $ \case
               xTo@(LitAddr _) -> do
-                cc <- gets (.tx.substate.createdContracts)
+                cc <- gets (.tx.subState.createdContracts)
                 let createdThisTr = self `member` cc
                 acc <- accessAccountForGas xTo
                 let cost = if acc then 0 else g_cold_account_access
@@ -1477,7 +1477,7 @@ finalize :: VMOps t => EVM t s ()
 finalize = do
   let
     revertContracts  = use (#tx % #txReversion) >>= assign (#env % #contracts)
-    revertSubstate   = assign (#tx % #substate) (SubState mempty mempty mempty mempty mempty mempty)
+    revertSubstate   = assign (#tx % #subState) (SubState mempty mempty mempty mempty mempty mempty)
 
   use #result >>= \case
     Just (VMFailure (Revert _)) -> do
@@ -1527,11 +1527,11 @@ finalize = do
   -- (see Yellow Paper "Accrued Substate")
   --
   -- remove any destructed addresses
-  destroyedAddresses <- use (#tx % #substate % #selfdestructs)
+  destroyedAddresses <- use (#tx % #subState % #selfdestructs)
   modifying (#env % #contracts)
     (Map.filterWithKey (\k _ -> (k `notElem` destroyedAddresses)))
   -- then, clear any remaining empty and touched addresses
-  touchedAddresses <- use (#tx % #substate % #touchedAccounts)
+  touchedAddresses <- use (#tx % #subState % #touchedAccounts)
   modifying (#env % #contracts)
     (Map.filterWithKey
       (\k a -> not ((k `elem` touchedAddresses) && accountEmpty a)))
@@ -1607,20 +1607,20 @@ forceConcreteBuf b msg _ = do
 refund :: Word64 -> EVM t s ()
 refund n = do
   self <- use (#state % #contract)
-  pushTo (#tx % #substate % #refunds) (self, n)
+  pushTo (#tx % #subState % #refunds) (self, n)
 
 unRefund :: Word64 -> EVM t s ()
 unRefund n = do
   self <- use (#state % #contract)
-  refs <- use (#tx % #substate % #refunds)
-  assign (#tx % #substate % #refunds)
+  refs <- use (#tx % #subState % #refunds)
+  assign (#tx % #subState % #refunds)
     (filter (\(a,b) -> not (a == self && b == n)) refs)
 
 touchAccount :: Expr EAddr -> EVM t s ()
-touchAccount = pushTo ((#tx % #substate) % #touchedAccounts)
+touchAccount = pushTo ((#tx % #subState) % #touchedAccounts)
 
 selfdestruct :: Expr EAddr -> EVM t s ()
-selfdestruct = pushTo ((#tx % #substate) % #selfdestructs)
+selfdestruct = pushTo ((#tx % #subState) % #selfdestructs)
 
 accessAndBurn :: VMOps t => Expr EAddr -> EVM t s () -> EVM t s ()
 accessAndBurn x cont = do
@@ -1633,20 +1633,20 @@ accessAndBurn x cont = do
 -- otherwise cold
 accessAccountForGas :: Expr EAddr -> EVM t s Bool
 accessAccountForGas addr = do
-  accessedAddrs <- use (#tx % #substate % #accessedAddresses)
+  accessedAddrs <- use (#tx % #subState % #accessedAddresses)
   let accessed = member addr accessedAddrs
-  assign (#tx % #substate % #accessedAddresses) (insert addr accessedAddrs)
+  assign (#tx % #subState % #accessedAddresses) (insert addr accessedAddrs)
   pure accessed
 
 -- | returns a wrapped boolean- if true, this slot has been touched before in the txn (warm gas cost as in EIP 2929)
 -- otherwise cold
 accessStorageForGas :: Expr EAddr -> Expr EWord -> EVM t s Bool
 accessStorageForGas addr key = do
-  accessedStrkeys <- use (#tx % #substate % #accessedStorageKeys)
+  accessedStrkeys <- use (#tx % #subState % #accessedStorageKeys)
   case maybeLitWord key of
     Just litword -> do
       let accessed = member (addr, litword) accessedStrkeys
-      assign (#tx % #substate % #accessedStorageKeys) (insert (addr, litword) accessedStrkeys)
+      assign (#tx % #subState % #accessedStorageKeys) (insert (addr, litword) accessedStrkeys)
       pure accessed
     _ -> pure False
 
@@ -1668,7 +1668,7 @@ cheat (inOffset, inSize) (outOffset, outSize) = do
   input <- readMemory (Expr.add inOffset (Lit 4)) (Expr.sub inSize (Lit 4))
   calldata <- readMemory inOffset inSize
   abi <- readBytes 4 (Lit 0) <$> readMemory inOffset (Lit 4)
-  pushTrace $ FrameTrace (CallContext cheatCode cheatCode inOffset inSize (Lit 0) (maybeLitWord abi) calldata vm.env.contracts vm.tx.substate)
+  pushTrace $ FrameTrace (CallContext cheatCode cheatCode inOffset inSize (Lit 0) (maybeLitWord abi) calldata vm.env.contracts vm.tx.subState)
   case maybeLitWord abi of
     Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) "symbolic cheatcode selector" (wrap [abi])
     Just (unsafeInto -> abi') ->
@@ -1907,7 +1907,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                                     , size      = xOutSize
                                     , codehash  = target.codehash
                                     , callreversion = vm0.env.contracts
-                                    , subState  = vm0.tx.substate
+                                    , subState  = vm0.tx.subState
                                     , abi
                                     , calldata
                                     }
@@ -1997,7 +1997,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
                 CreationContext { address   = newAddr
                                 , codehash  = newContract.codehash
                                 , createreversion = vm0.env.contracts
-                                , substate  = vm0.tx.substate
+                                , subState  = vm0.tx.subState
                                 }
 
             zoom (#env % #contracts) $ do
@@ -2018,7 +2018,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
 
             modifying (#env % #contracts % ix newAddr % #storage) resetStorage
             modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage
-            modifying (#tx % #substate % #createdContracts) (insert newAddr)
+            modifying (#tx % #subState % #createdContracts) (insert newAddr)
 
             transfer self newAddr xValue
 
@@ -2154,7 +2154,7 @@ finishFrame how = do
       case nextFrame.context of
 
         -- Were we calling?
-        CallContext _ _ outOffset outSize _ _ _ reversion substate' -> do
+        CallContext _ _ outOffset outSize _ _ _ reversion subState' -> do
 
           -- Excerpt K.1. from the yellow paper:
           -- K.1. Deletion of an Account Despite Out-of-gas.
@@ -2163,12 +2163,12 @@ finishFrame how = do
           -- Against the equation (197), this added 0x03 in the set of touched addresses, and this transaction turned σ[0x03] into ∅.
 
           -- In other words, we special case address 0x03 and keep it in the set of touched accounts during revert
-          touched <- use (#tx % #substate % #touchedAccounts)
+          touched <- use (#tx % #subState % #touchedAccounts)
 
           let
-            substate'' = over #touchedAccounts (maybe id cons (find (LitAddr 3 ==) touched)) substate'
+            subState'' = over #touchedAccounts (maybe id cons (find (LitAddr 3 ==) touched)) subState'
             revertContracts = assign (#env % #contracts) reversion
-            revertSubstate  = assign (#tx % #substate) substate''
+            revertSubstate  = assign (#tx % #subState) subState''
 
           case how of
             -- Case 1: Returning from a call?
@@ -2194,12 +2194,12 @@ finishFrame how = do
               assign (#state % #returndata) mempty
               push 0
         -- Or were we creating?
-        CreationContext _ _ reversion substate' -> do
+        CreationContext _ _ reversion subState' -> do
           creator <- use (#state % #contract)
           let
             createe = oldVm.state.contract
             revertContracts = assign (#env % #contracts) reversion'
-            revertSubstate  = assign (#tx % #substate) substate'
+            revertSubstate  = assign (#tx % #subState) subState'
 
             -- persist the nonce through the reversion
             reversion' = (Map.adjust (over #nonce (fmap ((+) 1))) creator) reversion
@@ -2908,7 +2908,7 @@ instance VMOps Concrete where
     gasRemaining <- use (#state % #gas)
 
     let
-      sumRefunds   = sum (snd <$> tx.substate.refunds)
+      sumRefunds   = sum (snd <$> tx.subState.refunds)
       gasUsed      = tx.gaslimit - gasRemaining
       cappedRefund = min (quot gasUsed 5) sumRefunds
       originPay    = (into $ gasRemaining + cappedRefund) * tx.gasprice
