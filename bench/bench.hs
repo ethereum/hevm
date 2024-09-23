@@ -121,7 +121,7 @@ mkbench c name iters counts = localOption WallTime $ env c (bgroup name . bmarks
 erc20 :: IO ByteString
 erc20 = do
   source <- readFile =<< Paths.getDataFileName "bench/contracts/erc20.sol"
-  Just c <- solcRuntime "ERC20" (T.pack source)
+  Just c <- runApp $ solcRuntime "ERC20" (T.pack source)
   pure c
 
 -- requires solc-0.6.12 to build from source
