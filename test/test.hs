@@ -2994,6 +2994,22 @@ tests = testGroup "hevm"
           let sig = (Just (Sig "stuff(address)" [AbiAddressType]))
           (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
           putStrLnM $ "Basic tstore check passed"
+        , test "dynamic-calldata" $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+              uint x;
+              uint y;
+              function fun(bytes calldata a) external{
+                require(x != 0);
+                require(y != 0);
+                assert (x == y);
+              }
+            }
+            |]
+          let sig = (Just (Sig "fun(bytes)" [AbiBytesDynamicType]))
+          (_, [(Cex _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c sig [] defaultVeriOpts
+          putStrLnM "Expected counterexample found"
   ]
   , testGroup "concr-fuzz"
     [ testFuzz "fuzz-complicated-mul" $ do
