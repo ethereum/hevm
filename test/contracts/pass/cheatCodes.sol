@@ -130,6 +130,17 @@ contract CheatCodes is DSTest {
         assertEq(output, "acab");
     }
 
+    function prove_env_FFI() public {
+        hevm.setEnv("HEVM_TXT_TEST", "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000046163616200000000000000000000000000000000000000000000000000000000");
+        string[] memory inputs = new string[](3);
+        inputs[0] = "sh";
+        inputs[1] = "-c";
+        inputs[2] = "echo -n $HEVM_TXT_TEST";
+
+        (string memory output) = abi.decode(hevm.ffi(inputs), (string));
+        assertEq(output, "acab");
+    }
+
     function prove_envBool() public {
         string memory varname = "ENV_BOOL_TEST";
 
