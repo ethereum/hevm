@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module EVM.Solidity
   ( solidity
@@ -38,6 +39,8 @@ module EVM.Solidity
   , astSrcMap
   , containsLinkerHole
   , makeSourceCache
+  , function
+  , parseSignature
 ) where
 
 import EVM.ABI
@@ -86,6 +89,13 @@ import System.Process
 import Text.Read (readMaybe)
 import Witch (unsafeInto)
 
+import Language.Haskell.TH as TH
+import Language.Haskell.TH.Syntax (liftData)
+import Language.Haskell.TH.Quote
+import GHC.Exts (IsString(..))
+
+import Text.Megaparsec qualified as P
+import Text.Megaparsec.Char qualified as P
 
 data StorageItem = StorageItem
   { slotType :: SlotType
@@ -802,3 +812,64 @@ astSrcMap astIds =
 -- needs to be here not Format due to cyclic module deps
 strip0x'' :: Text -> Text
 strip0x'' s = if "0x" `T.isPrefixOf` s then T.drop 2 s else s
+
+function :: QuasiQuoter
+function =
+  QuasiQuoter
+    ((\(fromString -> s) -> do
+
+      let sig = abiKeccak s
+          argTypes = fromJust $ parseSignature (decodeUtf8 s)
+      args <- forM [0..(length argTypes - 1)] (\i -> TH.newName ("arg" <> show i))
+
+      [|\handler ->
+        ( $(liftData sig)
+        , (\input ->
+          -- TODO: performance, check if any of abiTypes is dynamic, otherwise use decodeStaticArgs
+          case decodeBuf $(liftData argTypes) input of
+            CAbi valsArr -> case valsArr of
+              $(listP $ uncurry abiValueP <$> zip argTypes args) ->
+                Right $
+                  $(foldl' appE [|handler|] (TH.varE <$> args))
+            _ ->
+              -- TODO: split into better errors, invalid encoding or symbolic args
+              Left (BadCheatCode $(liftData sig))
+        ))
+        |]
+
+    ))
+    (internalError "Cannot use q as a pattern")
+    (internalError "Cannot use q as a type")
+    (internalError "Cannot use q as a dec")
+
+
+parseSignature :: Text -> Maybe [AbiType]
+parseSignature s = flip P.parseMaybe s $ do
+  void parseIdentifier
+  void $ P.char '('
+  types <- typeWithArraySuffix mempty `P.sepBy` P.char ','
+  void $ P.char ')'
+  pure types
+
+-- https://docs.soliditylang.org/en/latest/grammar.html#a4.SolidityLexer.Identifier
+parseIdentifier :: P.Parsec () Text String
+parseIdentifier = do
+  first <- P.letterChar <|> P.char '_' <|> P.char '$'
+  rest <- P.many (P.alphaNumChar <|> P.char '_' <|> P.char '$')
+  pure (first : rest)
+
+abiValueP :: AbiType -> TH.Name -> TH.Q TH.Pat
+abiValueP abiType name = case abiType of
+  AbiUIntType _           -> TH.conP 'AbiUInt [TH.wildP, TH.varP name]
+  AbiIntType  _           -> TH.conP 'AbiInt [TH.wildP, TH.varP name]
+  AbiAddressType          -> TH.conP 'AbiAddress [TH.varP name]
+  AbiBoolType             -> TH.conP 'AbiBool [TH.varP name]
+  AbiBytesType _          -> TH.conP 'AbiBytes [TH.wildP, TH.varP name]
+  AbiBytesDynamicType     -> TH.conP 'AbiBytesDynamic [TH.varP name]
+  AbiStringType           -> TH.conP 'AbiString [TH.varP name]
+  AbiArrayDynamicType AbiStringType -> TH.conP 'AbiArrayDynamic [TH.wildP, TH.varP name]
+  -- AbiArrayDynamicType t  -> AbiArrayDynamic t _
+  -- AbiArrayType n t       -> AbiArray n t _
+  -- AbiTupleType v         -> AbiTuple v
+  -- AbiFunctionType        -> AbiFunction _
+  _ -> internalError "unimplemented"

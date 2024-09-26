@@ -52,6 +52,7 @@ module EVM.ABI
   , decodeStaticArgs
   , formatString
   , parseTypeName
+  , typeWithArraySuffix
   , makeAbiValue
   , parseAbiValue
   , selector

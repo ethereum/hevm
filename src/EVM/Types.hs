@@ -56,7 +56,6 @@ import Text.Regex.TDFA qualified as Regex
 import Text.Read qualified
 import Witch
 
-
 -- Template Haskell --------------------------------------------------------------------------
 
 
@@ -1053,7 +1052,7 @@ data GenericOp a
 
 -- | https://docs.soliditylang.org/en/v0.8.19/abi-spec.html#function-selector
 newtype FunctionSelector = FunctionSelector { unFunctionSelector :: Word32 }
-  deriving (Bits, Num, Eq, Ord, Real, Enum, Integral)
+  deriving (Bits, Num, Eq, Ord, Real, Enum, Integral, Data)
 instance Show FunctionSelector where show s = "0x" <> showHex s ""
 
 

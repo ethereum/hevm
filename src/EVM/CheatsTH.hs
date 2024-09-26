@@ -29,13 +29,13 @@ envReadSingleCheat :: String -> Q Exp
 envReadSingleCheat sigString = [|
     \wrap convert ->
         action $sigL $
-            \sig input -> case decodeBuf [AbiStringType] input of
+            \sig input -> Right $ case decodeBuf [AbiStringType] input of
                 CAbi [AbiString variable] -> let
                     varStr = toString variable
                     cont value = continueOnce $ do
                         either' (convert value) frameRevert $ \v -> do
                             frameReturn $ wrap v
-                    in do 
+                    in do
                         vm <- get
                         case Map.lookup varStr vm.osEnv of
                             Just v -> cont v
@@ -49,7 +49,7 @@ envReadMultipleCheat :: String -> AbiType -> Q Exp
 envReadMultipleCheat sigString arrType = [|
     \convert ->
         action $sigL $
-            \sig input -> case decodeBuf [AbiStringType, AbiStringType] input of
+            \sig input -> Right $ case decodeBuf [AbiStringType, AbiStringType] input of
                 CAbi [AbiString variable, AbiString delimiter] -> let
                     (varStr, delimStr) = (toString variable, toString delimiter)
                     cont value = continueOnce $ do
@@ -59,7 +59,7 @@ envReadMultipleCheat sigString arrType = [|
                                 let result = AbiTuple $ V.fromList [AbiArrayDynamic $arrTypeL $ V.fromList $ map $wrapL values]
                                 frameReturn result
                             (e:_) -> frameRevert e
-                    in do 
+                    in do
                         vm <- get
                         case Map.lookup varStr vm.osEnv of
                             Just v -> cont v
