@@ -537,12 +537,24 @@ tests = testGroup "hevm"
           b = Expr.simplify a
         ret <- checkEquiv a b
         assertBoolM "must be equivalent" ret
-    , test "read-beyond-bound (negative-test)" $ do
+    , test "read-beyond-bound-negative-test" $ do
       let
         e1 = CopySlice (Lit 1) (Lit 0) (Lit 2) (ConcreteBuf "a") (ConcreteBuf "")
         e2 = ConcreteBuf "Definitely not the same!"
       equal <- checkEquiv e1 e2
       assertBoolM "Should not be equivalent!" $ not equal
+    , test "read-beyond-bound-positive-test" $ do
+      let
+        e1 = CopySlice (Lit 10) (Lit 0) (Lit 2) (ConcreteBuf "a") (ConcreteBuf "")
+        e2 = ConcreteBuf ""
+      equal <- checkEquiv e1 e2
+      assertBoolM "Should be equivalent!" equal
+    , test "read-beyond-bound-positive-test-2" $ do
+      let
+        e1 = CopySlice (Lit 10) (Lit 0) (Lit 2) (AbstractBuf "mybuf") (ConcreteBuf "")
+        e2 = ConcreteBuf ""
+      equal <- checkEquiv e1 e2
+      assertBoolM "Symbolic can be anything, non-zero even, so it should not be equivalent!" $ not equal
     ]
   -- These tests fuzz the simplifier by generating a random expression,
   -- applying some simplification rules, and then using the smt encoding to
@@ -2720,7 +2732,7 @@ tests = testGroup "hevm"
           assertEqualM "w==z for hash collision" w z
           putStrLnM "expected counterexample found"
         ,
-        test "calldata beyond calldatasize is 0 (symbolic calldata)" $ do
+        test "calldata-beyond-calldatasize-is-0-symbolic-calldata" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -2737,7 +2749,7 @@ tests = testGroup "hevm"
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        test "calldata beyond calldatasize is 0 (concrete dalldata prefix)" $ do
+        test "calldata-beyond-calldatasize-is-0-concrete-dalldata-prefix" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {
@@ -2754,7 +2766,7 @@ tests = testGroup "hevm"
           (res, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
-        test "calldata symbolic access" $ do
+        test "calldata-symbolic-access" $ do
           Just c <- solcRuntime "A"
             [i|
             contract A {

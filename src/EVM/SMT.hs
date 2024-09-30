@@ -401,8 +401,15 @@ findBufferAccess = foldl (foldTerm go) mempty
 -- to zero. Looks for buffer reads in the a list of given predicates
 -- and the buffer and storage environments.
 assertReads :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
-assertReads props benv senv = concatMap assertRead allReads
+assertReads props benv senv = concatMap assertRead (filter (not . isFullyConcrete) allReads)
   where
+    isFullyConcrete :: (x, y, Expr Buf) -> Bool
+    isFullyConcrete (_, _, buf) = isJust $ mapExprM onlyConcrete buf
+      where
+        onlyConcrete :: Expr a -> Maybe (Expr a)
+        onlyConcrete AbstractBuf {} = Nothing
+        onlyConcrete GVar {} = Nothing
+        onlyConcrete x = Just x
     assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
     assertRead (_, Lit 0, _) = []
     assertRead (idx, Lit 32, buf) = [PImpl (PGEq idx (bufLength buf)) (PEq (ReadWord idx buf) (Lit 0))]
