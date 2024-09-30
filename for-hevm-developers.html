@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Equivalence checking - hevm</title>
+        <title>For hevm Developers - hevm</title>
 
 
         <!-- Custom HTML head -->
@@ -89,7 +89,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><a href="for-hevm-developers.html">For hevm Developers</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item expanded "><a href="equivalence.html" class="active">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><a href="for-hevm-developers.html" class="active">For hevm Developers</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -151,7 +151,7 @@
                         <a href="https://github.com/ethereum/hevm" title="Git repository" aria-label="Git repository">
                             <i id="git-repository-button" class="fa fa-github"></i>
                         </a>
-                        <a href="hhttps://github.com/ethereum/hevm/edit/main/src/equivalence.md" title="Suggest an edit" aria-label="Suggest an edit">
+                        <a href="hhttps://github.com/ethereum/hevm/edit/main/src/for-hevm-developers.md" title="Suggest an edit" aria-label="Suggest an edit">
                             <i id="git-edit-button" class="fa fa-edit"></i>
                         </a>
 
@@ -180,73 +180,63 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="hevm-equivalence"><a class="header" href="#hevm-equivalence"><code>hevm equivalence</code></a></h1>
-<pre><code>Usage: hevm equivalence --code-a TEXT --code-b TEXT [--sig TEXT]
-                        [--arg STRING]... [--calldata TEXT]
-                        [--smttimeout NATURAL] [--max-iterations INTEGER]
-                        [--solver TEXT] [--smtoutput] [--smtdebug] [--debug]
-                        [--trace] [--ask-smt-iterations INTEGER]
-                        [--num-cex-fuzz INTEGER]
-                        [--loop-detection-heuristic LOOPHEURISTIC]
-                        [--abstract-arithmetic] [--abstract-memory]
-
-Available options:
-  -h,--help                Show this help text
-  --code-a TEXT            Bytecode of the first program
-  --code-b TEXT            Bytecode of the second program
-  --sig TEXT               Signature of types to decode / encode
-  --arg STRING             Values to encode
-  --calldata TEXT          Tx: calldata
-  --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
-  --max-iterations INTEGER Number of times we may revisit a particular branching
-                           point
-  --solver TEXT            Used SMT solver: z3 (default), cvc5, or bitwuzla
-  --smtoutput              Print verbose smt output
-  --smtdebug               Print smt queries sent to the solver
-  --debug                  Debug printing of internal behaviour
-  --trace                  Dump trace
-  --ask-smt-iterations INTEGER
-                           Number of times we may revisit a particular branching
-                           point before we consult the smt solver to check
-                           reachability (default: 1) (default: 1)
-  --num-cex-fuzz INTEGER   Number of fuzzing tries to do to generate a
-                           counterexample (default: 3) (default: 3)
-  --loop-detection-heuristic LOOPHEURISTIC
-                           Which heuristic should be used to determine if we are
-                           in a loop: StackBased (default) or Naive
-                           (default: StackBased)
-  --abstract-arithmetic    Use abstraction-refinement for complicated arithmetic
-                           functions such as MulMod. This runs the solver first
-                           with abstraction turned on, and if it returns a
-                           potential counterexample, the counterexample is
-                           refined to make sure it is a counterexample for the
-                           actual (not the abstracted) problem
-  --abstract-memory        Use abstraction-refinement for Memory. This runs the
-                           solver first with abstraction turned on, and if it
-                           returns a potential counterexample, the
-                           counterexample is refined to make sure it is a
-                           counterexample for the actual (not the abstracted)
-                           problem
+                        <h1 id="general-overview"><a class="header" href="#general-overview">General overview</a></h1>
+<p>To get an idea about what <code>hevm</code> is, see <a href="https://link.springer.com/content/pdf/10.1007/978-3-031-65627-9_22.pdf?pdf=inline%20link">CAV'24 paper</a>.
+You can also check out a few <a href="https://github.com/msooseth/hevm-presentation">presentations</a> by <a href="https://github.com/msooseth">@msooseth</a>.</p>
+<h1 id="debugging"><a class="header" href="#debugging">Debugging</a></h1>
+<h2 id="printf-style-debugging"><a class="header" href="#printf-style-debugging">Printf-style debugging</a></h2>
+<p>Haskell offers a way to print messages anywhere in the code with <a href="https://hackage.haskell.org/package/base-4.20.0.1/docs/Debug-Trace.html">Debug.Trace</a>.
+The simplest is <code>trace</code> which takes a string and a value and returns the same value while printing the string.
+For example</p>
+<pre><code class="language-haskell">add x y = trace "Hello from add!" (x + y)
 </code></pre>
-<p>Symbolically execute both the code given in <code>--code-a</code> and <code>--code-b</code> and try
-to prove equivalence between their outputs and storages. Extracting bytecode
-from solidity contracts can be done via, e.g.:</p>
-<pre><code>hevm equivalence \
-    --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
-    --code-b $(solc --bin-runtime "contract2.sol" | tail -n1)
+<h1 id="testing"><a class="header" href="#testing">Testing</a></h1>
+<p><code>hevm</code> uses <a href="https://hackage.haskell.org/package/tasty-1.5/docs/Test-Tasty.html">Tasty</a> framework for running tests, including <a href="https://hackage.haskell.org/package/tasty-quickcheck-0.11/docs/Test-Tasty-QuickCheck.html"><code>QuickCheck</code></a> for property-based testing.</p>
+<h2 id="running-tests"><a class="header" href="#running-tests">Running tests</a></h2>
+<p>The basic command to run the tests is:</p>
+<pre><code>cabal run test
 </code></pre>
-<p>If <code>--sig</code> is given, calldata is assumed to take the form of the function
-given. If left out, calldata is a fully abstract buffer of at most 256 bytes.</p>
+<p>For development, it might be beneficial to pass <code>devel</code> flag:</p>
+<pre><code>cabal run -f devel test
+</code></pre>
+<p>This should enable parallel compilation and test runs (see the config file <code>hevm.cabal</code>).</p>
+<p>Additional parameters can be passed to the test runner after <code>--</code>. For example <code>cabal run test -- --help</code> will list all the additional parameters.</p>
+<p>Some of the interesting options are <code>-p &lt;PATTERN&gt;</code> to filter only some of the tests and <code>--quickcheck-tests &lt;NUMBER&gt;</code> to control how many tests quickcheck will generate for each property test.</p>
+<h2 id="on-property-based-testing"><a class="header" href="#on-property-based-testing">On property-based testing</a></h2>
+<p>There are a few ways to control how many tests Quickcheck will generate per property.
+By default, it generates 100 tests (satisfying the precondition).
+This can be controlled by <code>maxSuccess</code> argument passed to Quickcheck, or, in Tasty framework, using <code>localOption (QuickCheckTests &lt;N&gt;)</code>.
+Passing <code>--quickcheck-tests &lt;N&gt;</code> to the binary will change this value to <code>&lt;N&gt;</code>.
+This value can be dynamically adjusted for a test group or a specific test.
+For example, instead of <code>localOption</code> it is possible to use <code>adjustOption</code> for a test group.
+The following ensures that for the following test group, the maximal value of the <code>QuickCheckTests</code> option is <code>50</code> (but if the current value is lower, it will be left unchanged).</p>
+<pre><code>adjustOption (\(Test.Tasty.QuickCheck.QuickCheckTests n) -&gt; Test.Tasty.QuickCheck.QuickCheckTests (min n 50))
+</code></pre>
+<p>Similarly, the <code>maxSuccess</code> value can be modified for a single test. The following sets the number of tests generated to 20 for the particular test:</p>
+<pre><code>testProperty &lt;property_name&gt; $ withMaxSuccess 20 $ ...
+</code></pre>
+<h1 id="profiling"><a class="header" href="#profiling">Profiling</a></h1>
+<h2 id="profiling-haskell-code"><a class="header" href="#profiling-haskell-code">Profiling Haskell code</a></h2>
+<p><strong>NOTE:</strong> Most of the time will likely be spent in the solver, and that will not show up when profiling Haskell application.</p>
+<p>In order to build the application with profiling information, we need to pass <code>--enable-profiling</code> to <code>cabal</code>.
+If we want to profile the test suite, we could run</p>
+<pre><code class="language-bash">cabal run test --enable-profiling -- +RTS -p
+</code></pre>
+<p>Note that <code>+RTS</code> means the next arguments will be passed to GHC and -p instructs the program to create a time profile report.
+This report is written into the <code>.prof</code> file.
+If we want to pass arguments to our executable, we have to indicate this with <code>-RTS</code>, for example, to profile run of only some tests, we would use</p>
+<pre><code class="language-bash">cabal run test --enable-profiling -- +RTS -p -RTS -p &lt;test_to_profile&gt;
+</code></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="symbolic.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="limitations-and-workarounds.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="exec.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="std-test-tutorial.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -256,11 +246,11 @@ given. If left out, calldata is a fully abstract buffer of at most 256 bytes.</p
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="symbolic.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="limitations-and-workarounds.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="exec.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="std-test-tutorial.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

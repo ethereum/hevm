@@ -90,7 +90,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><a href="for-hevm-developers.html">For hevm Developers</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -565,6 +565,53 @@ following:</p>
 </code></pre>
 <p>For these cases, we suggest concretizing the call that creates the contract,
 such that the bytecode created and later jumped to, is not symbolic.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="general-overview"><a class="header" href="#general-overview">General overview</a></h1>
+<p>To get an idea about what <code>hevm</code> is, see <a href="https://link.springer.com/content/pdf/10.1007/978-3-031-65627-9_22.pdf?pdf=inline%20link">CAV'24 paper</a>.
+You can also check out a few <a href="https://github.com/msooseth/hevm-presentation">presentations</a> by <a href="https://github.com/msooseth">@msooseth</a>.</p>
+<h1 id="debugging"><a class="header" href="#debugging">Debugging</a></h1>
+<h2 id="printf-style-debugging"><a class="header" href="#printf-style-debugging">Printf-style debugging</a></h2>
+<p>Haskell offers a way to print messages anywhere in the code with <a href="https://hackage.haskell.org/package/base-4.20.0.1/docs/Debug-Trace.html">Debug.Trace</a>.
+The simplest is <code>trace</code> which takes a string and a value and returns the same value while printing the string.
+For example</p>
+<pre><code class="language-haskell">add x y = trace "Hello from add!" (x + y)
+</code></pre>
+<h1 id="testing"><a class="header" href="#testing">Testing</a></h1>
+<p><code>hevm</code> uses <a href="https://hackage.haskell.org/package/tasty-1.5/docs/Test-Tasty.html">Tasty</a> framework for running tests, including <a href="https://hackage.haskell.org/package/tasty-quickcheck-0.11/docs/Test-Tasty-QuickCheck.html"><code>QuickCheck</code></a> for property-based testing.</p>
+<h2 id="running-tests"><a class="header" href="#running-tests">Running tests</a></h2>
+<p>The basic command to run the tests is:</p>
+<pre><code>cabal run test
+</code></pre>
+<p>For development, it might be beneficial to pass <code>devel</code> flag:</p>
+<pre><code>cabal run -f devel test
+</code></pre>
+<p>This should enable parallel compilation and test runs (see the config file <code>hevm.cabal</code>).</p>
+<p>Additional parameters can be passed to the test runner after <code>--</code>. For example <code>cabal run test -- --help</code> will list all the additional parameters.</p>
+<p>Some of the interesting options are <code>-p &lt;PATTERN&gt;</code> to filter only some of the tests and <code>--quickcheck-tests &lt;NUMBER&gt;</code> to control how many tests quickcheck will generate for each property test.</p>
+<h2 id="on-property-based-testing"><a class="header" href="#on-property-based-testing">On property-based testing</a></h2>
+<p>There are a few ways to control how many tests Quickcheck will generate per property.
+By default, it generates 100 tests (satisfying the precondition).
+This can be controlled by <code>maxSuccess</code> argument passed to Quickcheck, or, in Tasty framework, using <code>localOption (QuickCheckTests &lt;N&gt;)</code>.
+Passing <code>--quickcheck-tests &lt;N&gt;</code> to the binary will change this value to <code>&lt;N&gt;</code>.
+This value can be dynamically adjusted for a test group or a specific test.
+For example, instead of <code>localOption</code> it is possible to use <code>adjustOption</code> for a test group.
+The following ensures that for the following test group, the maximal value of the <code>QuickCheckTests</code> option is <code>50</code> (but if the current value is lower, it will be left unchanged).</p>
+<pre><code>adjustOption (\(Test.Tasty.QuickCheck.QuickCheckTests n) -&gt; Test.Tasty.QuickCheck.QuickCheckTests (min n 50))
+</code></pre>
+<p>Similarly, the <code>maxSuccess</code> value can be modified for a single test. The following sets the number of tests generated to 20 for the particular test:</p>
+<pre><code>testProperty &lt;property_name&gt; $ withMaxSuccess 20 $ ...
+</code></pre>
+<h1 id="profiling"><a class="header" href="#profiling">Profiling</a></h1>
+<h2 id="profiling-haskell-code"><a class="header" href="#profiling-haskell-code">Profiling Haskell code</a></h2>
+<p><strong>NOTE:</strong> Most of the time will likely be spent in the solver, and that will not show up when profiling Haskell application.</p>
+<p>In order to build the application with profiling information, we need to pass <code>--enable-profiling</code> to <code>cabal</code>.
+If we want to profile the test suite, we could run</p>
+<pre><code class="language-bash">cabal run test --enable-profiling -- +RTS -p
+</code></pre>
+<p>Note that <code>+RTS</code> means the next arguments will be passed to GHC and -p instructs the program to create a time profile report.
+This report is written into the <code>.prof</code> file.
+If we want to pass arguments to our executable, we have to indicate this with <code>-RTS</code>, for example, to profile run of only some tests, we would use</p>
+<pre><code class="language-bash">cabal run test --enable-profiling -- +RTS -p -RTS -p &lt;test_to_profile&gt;
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="forge-std-test-usage-tutorial"><a class="header" href="#forge-std-test-usage-tutorial">Forge std-test Usage Tutorial</a></h1>
 <p>Test cases must be prepended with <code>prove_</code> and the testing contract must
 inherit from <code>Test</code> from <a href="https://book.getfoundry.sh/forge/forge-std">Forge's standard test
