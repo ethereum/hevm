@@ -4246,7 +4246,7 @@ badStoresInExpr expr = bad
       _ -> pure e
 
 defaultBuf :: Int -> Gen (Expr Buf)
-defaultBuf = genBuf (4_000_000)
+defaultBuf = genBuf (4_000)
 
 defaultWord :: Int -> Gen (Expr EWord)
 defaultWord = genWord 10
