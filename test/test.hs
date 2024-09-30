@@ -29,6 +29,7 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Tuple.Extra
+import Data.Tree (flatten)
 import Data.Typeable
 import Data.Vector qualified as V
 import Data.Word (Word8)
@@ -1654,7 +1655,7 @@ tests = testGroup "hevm"
         Just c <- solcRuntime "C"
           [i|
             interface Vm {
-              function load(address,bytes32) external;
+              function load(address,bytes32) external returns (bytes32);
             }
             contract C {
               function f() external {
@@ -4349,8 +4350,15 @@ applyPattern p = localOption (TestPattern (parseExpr p))
 
 checkBadCheatCode :: Text -> Postcondition s
 checkBadCheatCode sig _ = \case
-  (Failure _ _ (BadCheatCode s)) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
+  (Failure _ c (Revert _)) -> case mapMaybe findBadCheatCode (concatMap flatten c.traces) of
+    (s:_) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
+    _ -> PBool True
   _ -> PBool True
+  where
+    findBadCheatCode :: Trace -> Maybe FunctionSelector
+    findBadCheatCode Trace { tracedata = td } = case td of
+      ErrorTrace (BadCheatCode s) -> Just s
+      _ -> Nothing
 
 allBranchesFail :: App m => ByteString -> Maybe Sig -> m (Either [SMTCex] (Expr End))
 allBranchesFail = checkPost (Just p)

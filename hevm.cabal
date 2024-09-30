@@ -118,6 +118,7 @@ library
     EVM.Sign,
     EVM.Effects,
   other-modules:
+    EVM.CheatsTH,
     Paths_hevm
   autogen-modules:
     Paths_hevm
@@ -181,6 +182,9 @@ library
     filepattern                       >= 0.1.2 && < 0.2,
     witch                             >= 1.1 && < 1.3,
     unliftio-core                     >= 0.2.1 && < 0.3,
+    split                             >= 0.2.3 && < 0.3,
+    template-haskell                  >= 2.19.0 && < 3,
+    extra                             >= 1.7.14 && < 2,
   hs-source-dirs:
     src
 
