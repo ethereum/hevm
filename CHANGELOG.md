@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-threaded running of Tracing.hs was not possible due to IO race. Fixed.
 - Fixed multi-threading bug in symbolic interpretation
 - Fixed simplification of concrete CopySlice with destination offset beyond destination size
+- Fixed a bug in our SMT encoding of reading multiple consecutive bytes from concrete index
 
 ## [0.53.0] - 2024-02-23
 

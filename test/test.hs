@@ -545,7 +545,7 @@ tests = testGroup "hevm"
           b = Expr.simplify a
         ret <- checkEquiv a b
         assertBoolM "must be equivalent" ret
-    , ignoreTest $ test "read-beyond-bound (negative-test)" $ do
+    , test "read-beyond-bound (negative-test)" $ do
       let
         e1 = CopySlice (Lit 1) (Lit 0) (Lit 2) (ConcreteBuf "a") (ConcreteBuf "")
         e2 = ConcreteBuf "Definitely not the same!"
