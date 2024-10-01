@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More verbose error messages in case of symbolic arguments to opcode
 - Tests to enforce that in Expr and Prop, constants are on the LHS whenever possible
 - Support for MCOPY and TSTORE/TLOAD, i.e. EIP 5656 + 1153 + 4788
+* Fuzz via both SAT and UNSAT, not just UNSAT
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
