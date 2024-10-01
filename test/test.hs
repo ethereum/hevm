@@ -551,6 +551,9 @@ tests = testGroup "hevm"
     [ testProperty  "buffer-simplification" $ \(expr :: Expr Buf) -> prop $ do
         let simplified = Expr.simplify expr
         checkEquivAndLHS expr simplified
+    , testProperty  "buffer-simplification-len" $ \(expr :: Expr Buf) -> prop $ do
+        let simplified2 = Expr.simplify (BufLength expr)
+        checkEquivAndLHS (BufLength expr) simplified2
     , testProperty "store-simplification" $ \(expr :: Expr Storage) -> prop $ do
         let simplified = Expr.simplify expr
         checkEquivAndLHS expr simplified
@@ -3592,7 +3595,7 @@ tests = testGroup "hevm"
     (===>) = assertSolidityComputation
 
 checkEquivProp :: App m => Prop -> Prop -> m Bool
-checkEquivProp = checkEquivBase (\l r -> PNeg (PImpl l r .&& PImpl r l))
+checkEquivProp a b = fmap (fromMaybe True) $ checkEquivBase (\l r -> PNeg (PImpl l r .&& PImpl r l)) a b True
 
 checkEquivPropAndLHS :: App m => Prop -> Prop -> m Bool
 checkEquivPropAndLHS orig simp = do
@@ -3601,7 +3604,13 @@ checkEquivPropAndLHS orig simp = do
   pure $ lhsConst && equiv
 
 checkEquiv :: (Typeable a, App m) => Expr a -> Expr a -> m Bool
-checkEquiv = checkEquivBase (./=)
+checkEquiv a b = do
+  opts <- readConfig
+  if a == b then pure True else do
+    when (opts.debug) $ liftIO $ putStrLn $ "Checking equivalence of " <> show a <> " and " <> show b
+    x <- checkEquivBase (./=) a b True
+    y <- checkEquivBase (.==) a b False
+    pure $ (fromMaybe True x) && not (fromMaybe False y)
 
 checkEquivAndLHS :: (Typeable a, App m) => Expr a -> Expr a -> m Bool
 checkEquivAndLHS orig simp = do
@@ -3609,23 +3618,20 @@ checkEquivAndLHS orig simp = do
   equiv <- checkEquiv orig simp
   pure $ lhsConst && equiv
 
-checkEquivBase :: (Eq a, App m) => (a -> a -> Prop) -> a -> a -> m Bool
-checkEquivBase mkprop l r = do
+checkEquivBase :: (Eq a, App m) => (a -> a -> Prop) -> a -> a -> Bool -> m (Maybe Bool)
+checkEquivBase mkprop l r expect = do
   conf <-  readConfig
   withSolvers Z3 1 (Just 1) $ \solvers -> liftIO $ do
-    if l == r
-       then do
-         putStrLnM "skip"
-         pure True
-       else do
-         let smt = assertPropsNoSimp conf [mkprop l r]
-         res <- checkSat solvers smt
-         print res
-         pure $ case res of
-           Unsat -> True
-           EVM.Solvers.Unknown -> True
-           Sat _ -> False
-           Error _ -> False
+     let smt = assertPropsNoSimp conf [mkprop l r]
+     res <- checkSat solvers smt
+     let
+       ret = case res of
+         Unsat -> Just True
+         Sat _ -> Just False
+         Error _ -> Just (not expect)
+         EVM.Solvers.Unknown -> Nothing
+     when (ret == Just (not expect)) $ print res
+     pure ret
 
 -- | Takes a runtime code and calls it with the provided calldata
 
