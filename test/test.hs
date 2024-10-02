@@ -527,6 +527,12 @@ tests = testGroup "hevm"
     , test "simp-assoc-mul2" $ do
       let simp = Expr.simplify       $  Mul (Lit 2) (Mul (Var "a") (Lit 3))
       assertEqualM "assoc rules" simp $ Mul (Lit 6) (Var "a")
+    , test "simp-zero-write-extend-buffer-len" $ do
+        let
+          expr = BufLength $ CopySlice (Lit 0) (Lit 0x10) (Lit 0) (AbstractBuf "buffer") (ConcreteBuf "bimm")
+          simp = Expr.simplify expr
+        ret <-  checkEquiv expr simp
+        assertEqualM "Must be equivalent" True ret
     , test "bufLength-simp" $ do
       let
         a = BufLength (ConcreteBuf "ab")
