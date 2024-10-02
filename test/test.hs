@@ -567,8 +567,8 @@ tests = testGroup "hevm"
         let simplified = Expr.simplify expr
         checkEquivAndLHS expr simplified
     , testProperty  "buffer-simplification-len" $ \(expr :: Expr Buf) -> prop $ do
-        let simplified2 = Expr.simplify (BufLength expr)
-        checkEquivAndLHS (BufLength expr) simplified2
+        let simplified = Expr.simplify (BufLength expr)
+        checkEquivAndLHS (BufLength expr) simplified
     , testProperty "store-simplification" $ \(expr :: Expr Storage) -> prop $ do
         let simplified = Expr.simplify expr
         checkEquivAndLHS expr simplified
