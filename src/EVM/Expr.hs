@@ -324,37 +324,23 @@ maxBytes = into (maxBound :: Word32) `Prelude.div` 8
 
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf -> Expr Buf
 
--- Copies from empty buffers
-copySlice _ _ (Lit 0) (ConcreteBuf "") dst = dst
-copySlice a b c@(Lit size) d@(ConcreteBuf "") e@(ConcreteBuf "")
-  | size < maxBytes = ConcreteBuf $ BS.replicate (unsafeInto size) 0
-  | otherwise = CopySlice a b c d e
-copySlice srcOffset dstOffset sz@(Lit size) src@(ConcreteBuf "") dst
-  | size < maxBytes = copySlice srcOffset dstOffset (Lit size) (ConcreteBuf $ BS.replicate (unsafeInto size) 0) dst
-  | otherwise = CopySlice srcOffset dstOffset sz src dst
+-- Copying zero bytes is a no-op
+copySlice _ _ (Lit 0) _ dst = dst
 
--- Fully concrete copies
-copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e@(ConcreteBuf "")
-  | srcOffset > unsafeInto (BS.length src), size < maxBytes = ConcreteBuf $ BS.replicate (unsafeInto size) 0
-  | srcOffset <= unsafeInto (BS.length src), dstOffset < maxBytes, size < maxBytes = let
-    hd = BS.replicate (unsafeInto dstOffset) 0
-    sl = padRight (unsafeInto size) $ BS.take (unsafeInto size) (BS.drop (unsafeInto srcOffset) src)
-    in ConcreteBuf $ hd <> sl
-  | otherwise = CopySlice a b c d e
+-- copying 32 bytes can be rewritten to a WriteWord on dst (e.g. CODECOPY of args during constructors)
+copySlice srcOffset dstOffset (Lit 32) src dst = writeWord dstOffset (readWord srcOffset src) dst
 
+-- Fully concrete copy
 copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e@(ConcreteBuf dst)
   | dstOffset < maxBytes
   , size < maxBytes =
       let hd = padRight (unsafeInto dstOffset) $ BS.take (unsafeInto dstOffset) dst
           sl = if srcOffset > unsafeInto (BS.length src)
-            then BS.replicate (unsafeInto size) 0
+            then BS.replicate (unsafeInto size) 0 -- TODO: This has to consider wraparound on source as well
             else padRight (unsafeInto size) $ BS.take (unsafeInto size) (BS.drop (unsafeInto srcOffset) src)
           tl = BS.drop (unsafeInto dstOffset + unsafeInto size) dst
       in ConcreteBuf $ hd <> sl <> tl
   | otherwise = CopySlice a b c d e
-
--- copying 32 bytes can be rewritten to a WriteWord on dst (e.g. CODECOPY of args during constructors)
-copySlice srcOffset dstOffset (Lit 32) src dst = writeWord dstOffset (readWord srcOffset src) dst
 
 -- concrete indices & abstract src (may produce a concrete result if we are
 -- copying from a concrete region of src)
@@ -437,6 +423,7 @@ bufLengthEnv env useEnv buf = go (Lit 0) buf
     go l (AbstractBuf b) = EVM.Expr.max l (BufLength (AbstractBuf b))
     go l (WriteWord idx _ b) = go (EVM.Expr.max l (add idx (Lit 32))) b
     go l (WriteByte idx _ b) = go (EVM.Expr.max l (add idx (Lit 1))) b
+    go l (CopySlice _ _ (Lit 0) _ dst) = go l dst
     go l (CopySlice _ dstOffset size _ dst) = go (EVM.Expr.max l (add dstOffset size)) dst
 
     go l (GVar (BufVar a)) | useEnv =

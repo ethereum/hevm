@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More verbose error messages in case of symbolic arguments to opcode
 - Tests to enforce that in Expr and Prop, constants are on the LHS whenever possible
 - Support for MCOPY and TSTORE/TLOAD, i.e. EIP 5656 + 1153 + 4788
+* Fuzz via both SAT and UNSAT, not just UNSAT
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
@@ -44,9 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a different approach.
 - `initial-storage` option of `hevm symbolic` is respected
 - `caller` option of `hevm symbolic` is now respected
-* Thanks to the new simplification rules, we can now enable more conformance tests
-* Multi-threaded running of Tracing.hs was not possible due to IO race. Fixed.
-* Fixed multi-threading bug in symbolic interpretation
+- Thanks to the new simplification rules, we can now enable more conformance tests
+- Multi-threaded running of Tracing.hs was not possible due to IO race. Fixed.
+- Fixed multi-threading bug in symbolic interpretation
+- Fixed simplification of concrete CopySlice with destination offset beyond destination size
+- Fixed a bug in our SMT encoding of reading multiple consecutive bytes from concrete index
 
 ## [0.53.0] - 2024-02-23
 

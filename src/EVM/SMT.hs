@@ -404,12 +404,9 @@ assertReads :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
 assertReads props benv senv = concatMap assertRead allReads
   where
     assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
+    assertRead (_, Lit 0, _) = []
     assertRead (idx, Lit 32, buf) = [PImpl (PGEq idx (bufLength buf)) (PEq (ReadWord idx buf) (Lit 0))]
-    assertRead (idx, Lit sz, buf) =
-      fmap
-        -- TODO: unsafeInto instead fromIntegral here makes symbolic tests fail
-        (PImpl (PGEq idx (bufLength buf)) . PEq (ReadByte idx buf) . LitByte . fromIntegral)
-        [(0::Int)..unsafeInto sz-1]
+    assertRead (idx, Lit sz, buf) = [PImpl (PGEq (Expr.add idx $ Lit offset) (bufLength buf)) (PEq (ReadByte (Expr.add idx $ Lit offset) buf) (LitByte 0)) | offset <- [(0::W256).. sz-1]]
     assertRead (_, _, _) = internalError "Cannot generate assertions for accesses of symbolic size"
 
     allReads = filter keepRead $ nubOrd $ findBufferAccess props <> findBufferAccess (Map.elems benv) <> findBufferAccess (Map.elems senv)

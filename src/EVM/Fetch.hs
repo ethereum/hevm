@@ -18,6 +18,7 @@ import Data.Aeson hiding (Error)
 import Data.Aeson.Optics
 import Data.ByteString qualified as BS
 import Data.Text (Text, unpack, pack)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.List (foldl')
 import Data.Text qualified as T
@@ -26,6 +27,7 @@ import Network.Wreq
 import Network.Wreq.Session (Session)
 import Network.Wreq.Session qualified as Session
 import Numeric.Natural (Natural)
+import System.Environment (lookupEnv, getEnvironment)
 import System.Process
 import Control.Monad.IO.Class
 import EVM.Effects
@@ -198,9 +200,12 @@ zero smtjobs smttimeout q =
 oracle :: SolverGroup -> RpcInfo -> Fetcher t m s
 oracle solvers info q = do
   case q of
-    PleaseDoFFI vals continue -> case vals of
+    PleaseDoFFI vals envs continue -> case vals of
        cmd : args -> do
-          (_, stdout', _) <- liftIO $ readProcessWithExitCode cmd args ""
+          existingEnv <- liftIO $ getEnvironment
+          let mergedEnv = Map.toList $ Map.union envs $ Map.fromList existingEnv
+          let process = (proc cmd args :: CreateProcess) { env = Just mergedEnv }
+          (_, stdout', _) <- liftIO $ readCreateProcessWithExitCode process ""
           pure . continue . encodeAbiValue $
             AbiTuple (RegularVector.fromList [ AbiBytesDynamic . hexText . pack $ stdout'])
        _ -> internalError (show vals)
@@ -230,6 +235,10 @@ oracle solvers info q = do
            Just x  -> pure (continue x)
            Nothing ->
              internalError $ "oracle error: " ++ show q
+
+    PleaseReadEnv variable continue -> do
+      value <- liftIO $ lookupEnv variable
+      pure . continue $ fromMaybe "" value
 
 type Fetcher t m s = App m => Query t s -> m (EVM t s ())
 

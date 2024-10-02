@@ -29,6 +29,7 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Tuple.Extra
+import Data.Tree (flatten)
 import Data.Typeable
 import Data.Vector qualified as V
 import Data.Word (Word8)
@@ -482,6 +483,14 @@ tests = testGroup "hevm"
         let e = ReadByte (Lit 0x0) (WriteWord (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd) (Lit 0x0) (ConcreteBuf "\255\255\255\255"))
         b <- checkEquiv e (Expr.simplify e)
         assertBoolM "Simplifier failed" b
+    , test "buffer-length-copy-slice-beyond-source1" $ do
+        let e = BufLength (CopySlice (Lit 0x2) (Lit 0x2) (Lit 0x1) (ConcreteBuf "a") (ConcreteBuf ""))
+        b <- checkEquiv e (Expr.simplify e)
+        assertBoolM "Simplifier failed" b
+    , test "buffer-length-copy-slice-beyond-source2" $ do
+        let e = BufLength (CopySlice (Lit 0x2) (Lit 0x2) (Lit 0x1) (ConcreteBuf "") (ConcreteBuf ""))
+        b <- checkEquiv e (Expr.simplify e)
+        assertBoolM "Simplifier failed" b
     , test "simp-max-buflength" $ do
       let simp = Expr.simplify $ Max (Lit 0) (BufLength (AbstractBuf "txdata"))
       assertEqualM "max-buflength rules" simp $ BufLength (AbstractBuf "txdata")
@@ -518,6 +527,12 @@ tests = testGroup "hevm"
     , test "simp-assoc-mul2" $ do
       let simp = Expr.simplify       $  Mul (Lit 2) (Mul (Var "a") (Lit 3))
       assertEqualM "assoc rules" simp $ Mul (Lit 6) (Var "a")
+    , test "simp-zero-write-extend-buffer-len" $ do
+        let
+          expr = BufLength $ CopySlice (Lit 0) (Lit 0x10) (Lit 0) (AbstractBuf "buffer") (ConcreteBuf "bimm")
+          simp = Expr.simplify expr
+        ret <-  checkEquiv expr simp
+        assertEqualM "Must be equivalent" True ret
     , test "bufLength-simp" $ do
       let
         a = BufLength (ConcreteBuf "ab")
@@ -536,7 +551,7 @@ tests = testGroup "hevm"
           b = Expr.simplify a
         ret <- checkEquiv a b
         assertBoolM "must be equivalent" ret
-    , ignoreTest $ test "read-beyond-bound (negative-test)" $ do
+    , test "read-beyond-bound (negative-test)" $ do
       let
         e1 = CopySlice (Lit 1) (Lit 0) (Lit 2) (ConcreteBuf "a") (ConcreteBuf "")
         e2 = ConcreteBuf "Definitely not the same!"
@@ -1657,7 +1672,7 @@ tests = testGroup "hevm"
         Just c <- solcRuntime "C"
           [i|
             interface Vm {
-              function load(address,bytes32) external;
+              function load(address,bytes32) external returns (bytes32);
             }
             contract C {
               function f() external {
@@ -3595,7 +3610,7 @@ tests = testGroup "hevm"
     (===>) = assertSolidityComputation
 
 checkEquivProp :: App m => Prop -> Prop -> m Bool
-checkEquivProp = checkEquivBase (\l r -> PNeg (PImpl l r .&& PImpl r l))
+checkEquivProp a b = fmap (fromMaybe True) $ checkEquivBase (\l r -> PNeg (PImpl l r .&& PImpl r l)) a b True
 
 checkEquivPropAndLHS :: App m => Prop -> Prop -> m Bool
 checkEquivPropAndLHS orig simp = do
@@ -3604,7 +3619,13 @@ checkEquivPropAndLHS orig simp = do
   pure $ lhsConst && equiv
 
 checkEquiv :: (Typeable a, App m) => Expr a -> Expr a -> m Bool
-checkEquiv = checkEquivBase (./=)
+checkEquiv a b = do
+  opts <- readConfig
+  if a == b then pure True else do
+    when (opts.debug) $ liftIO $ putStrLn $ "Checking equivalence of " <> show a <> " and " <> show b
+    x <- checkEquivBase (./=) a b True
+    y <- checkEquivBase (.==) a b False
+    pure $ (fromMaybe True x) && not (fromMaybe False y)
 
 checkEquivAndLHS :: (Typeable a, App m) => Expr a -> Expr a -> m Bool
 checkEquivAndLHS orig simp = do
@@ -3612,23 +3633,20 @@ checkEquivAndLHS orig simp = do
   equiv <- checkEquiv orig simp
   pure $ lhsConst && equiv
 
-checkEquivBase :: (Eq a, App m) => (a -> a -> Prop) -> a -> a -> m Bool
-checkEquivBase mkprop l r = do
+checkEquivBase :: (Eq a, App m) => (a -> a -> Prop) -> a -> a -> Bool -> m (Maybe Bool)
+checkEquivBase mkprop l r expect = do
   conf <-  readConfig
   withSolvers Z3 1 (Just 1) $ \solvers -> liftIO $ do
-    if l == r
-       then do
-         putStrLnM "skip"
-         pure True
-       else do
-         let smt = assertPropsNoSimp conf [mkprop l r]
-         res <- checkSat solvers smt
-         print res
-         pure $ case res of
-           Unsat -> True
-           EVM.Solvers.Unknown -> True
-           Sat _ -> False
-           Error _ -> False
+     let smt = assertPropsNoSimp conf [mkprop l r]
+     res <- checkSat solvers smt
+     let
+       ret = case res of
+         Unsat -> Just True
+         Sat _ -> Just False
+         Error _ -> Just (not expect)
+         EVM.Solvers.Unknown -> Nothing
+     when (ret == Just (not expect)) $ print res
+     pure ret
 
 -- | Takes a runtime code and calls it with the provided calldata
 
@@ -4352,8 +4370,15 @@ applyPattern p = localOption (TestPattern (parseExpr p))
 
 checkBadCheatCode :: Text -> Postcondition s
 checkBadCheatCode sig _ = \case
-  (Failure _ _ (BadCheatCode s)) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
+  (Failure _ c (Revert _)) -> case mapMaybe findBadCheatCode (concatMap flatten c.traces) of
+    (s:_) -> (ConcreteBuf $ into s.unFunctionSelector) ./= (ConcreteBuf $ selector sig)
+    _ -> PBool True
   _ -> PBool True
+  where
+    findBadCheatCode :: Trace -> Maybe FunctionSelector
+    findBadCheatCode Trace { tracedata = td } = case td of
+      ErrorTrace (BadCheatCode s) -> Just s
+      _ -> Nothing
 
 allBranchesFail :: App m => ByteString -> Maybe Sig -> m (Either [SMTCex] (Expr End))
 allBranchesFail = checkPost (Just p)

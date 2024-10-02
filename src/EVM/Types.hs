@@ -559,7 +559,8 @@ data Query t s where
   PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM t s ()) -> Query t s
   PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM t s ()) -> Query t s
   PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM Symbolic s ()) -> Query Symbolic s
-  PleaseDoFFI         :: [String] -> (ByteString -> EVM t s ()) -> Query t s
+  PleaseDoFFI         :: [String] -> Map String String -> (ByteString -> EVM t s ()) -> Query t s
+  PleaseReadEnv       :: String -> (String -> EVM t s ()) -> Query t s
 
 -- | Execution could proceed down one of two branches
 data Choose s where
@@ -581,8 +582,10 @@ instance Show (Query t s) where
       (("<EVM.Query: ask SMT about "
         ++ show condition ++ " in context "
         ++ show constraints ++ ">") ++)
-    PleaseDoFFI cmd _ ->
-      (("<EVM.Query: do ffi: " ++ (show cmd)) ++)
+    PleaseDoFFI cmd env _ ->
+      (("<EVM.Query: do ffi: " ++ (show cmd) ++ " env: " ++ (show env)) ++)
+    PleaseReadEnv variable _ ->
+      (("<EVM.Query: read env: " ++ variable) ++)
 
 instance Show (Choose s) where
   showsPrec _ = \case
@@ -626,6 +629,7 @@ data VM (t :: VMType) s = VM
   , forks          :: Seq ForkState
   , currentFork    :: Int
   , labels         :: Map Addr Text
+  , osEnv          :: Map String String
   }
   deriving (Generic)
 
