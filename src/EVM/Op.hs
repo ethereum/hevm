@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 module EVM.Op
   ( Op
   , GenericOp (..)

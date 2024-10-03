@@ -60,7 +60,7 @@ import Data.Vector.Unboxed qualified as VUnboxed
 import Data.Vector.Unboxed.Mutable qualified as VUnboxed.Mutable
 import Data.Word (Word8, Word32, Word64)
 import Text.Read (readMaybe)
-import Witch (into, tryFrom, unsafeInto)
+import Witch (into, tryFrom, unsafeInto, tryInto)
 
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
@@ -793,9 +793,9 @@ exec1 = do
           case stk of
             x:xs ->
               burn g_mid $ forceConcrete x "JUMP: symbolic jumpdest" $ \x' ->
-                case toInt x' of
-                  Nothing -> vmError BadJumpDestination
-                  Just i -> checkJump i xs
+                case tryInto x' of
+                  Left _ -> vmError BadJumpDestination
+                  Right i -> checkJump i xs
             _ -> underrun
 
         OpJumpi ->
@@ -804,9 +804,9 @@ exec1 = do
               burn g_high $
                 let jump :: Bool -> EVM t s ()
                     jump False = assign (#state % #stack) xs >> next
-                    jump _    = case toInt x' of
-                      Nothing -> vmError BadJumpDestination
-                      Just i -> checkJump i xs
+                    jump _    = case tryInto x' of
+                      Left _ -> vmError BadJumpDestination
+                      Right i -> checkJump i xs
                 in branch y jump
             _ -> underrun
 

@@ -20,7 +20,6 @@ import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
-import Data.Text.IO qualified as T
 
 import Control.Monad (void, when, forM)
 import Control.Monad.ST (RealWorld, ST, stToIO)
@@ -96,7 +95,7 @@ type ABIMethod = Text
 writeTraceDapp :: App m => DappInfo -> VM t RealWorld -> m ()
 writeTraceDapp dapp vm = do
   conf <- readConfig
-  liftIO $ when conf.dumpTrace $ T.writeFile "VM.trace" (showTraceTree dapp vm)
+  liftIO $ when conf.dumpTrace $ Text.writeFile "VM.trace" (showTraceTree dapp vm)
 
 writeTrace :: App m => VM t RealWorld -> m ()
 writeTrace vm = do

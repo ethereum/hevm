@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 {- |
     Module: EVM.Keccak
     Description: Expr passes to determine Keccak assumptions

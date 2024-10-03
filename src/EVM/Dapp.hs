@@ -1,5 +1,3 @@
-{-# Language DataKinds #-}
-
 module EVM.Dapp where
 
 import EVM.ABI

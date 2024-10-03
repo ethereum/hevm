@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 module EVM.Fetch where
 
 import EVM (initialContract, unknownContract)

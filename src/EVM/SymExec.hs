@@ -1,6 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE DeriveAnyClass #-}
 
 module EVM.SymExec where
@@ -13,7 +10,7 @@ import Control.Monad.IO.Unlift
 import Control.Monad.Operational qualified as Operational
 import Control.Monad.ST (RealWorld, stToIO, ST)
 import Control.Monad.State.Strict (runStateT)
-import Data.Bifunctor (second)
+import Data.Bifunctor (second, first)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Containers.ListUtils (nubOrd)
@@ -28,7 +25,6 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
-import Text.Printf (printf)
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
 import Data.Vector qualified as V
@@ -39,7 +35,8 @@ import EVM.Fetch qualified as Fetch
 import EVM.ABI
 import EVM.Effects
 import EVM.Expr qualified as Expr
-import EVM.Format (formatExpr, formatPartial, showVal, bsToHex)
+import EVM.FeeSchedule (feeSchedule)
+import EVM.Format (formatExpr, formatPartial, showVal, bsToHex, indent, formatBinary)
 import EVM.SMT (SMTCex(..), SMT2(..), assertProps)
 import EVM.SMT qualified as SMT
 import EVM.Solvers
@@ -47,12 +44,11 @@ import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 import EVM.Traversals
 import EVM.Types
-import EVM.FeeSchedule (feeSchedule)
-import EVM.Format (indent, formatBinary)
 import GHC.Conc (getNumProcessors)
 import GHC.Generics (Generic)
 import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
+import Text.Printf (printf)
 import Witch (into, unsafeInto)
 
 data LoopHeuristic
@@ -609,8 +605,9 @@ verify solvers opts preState maybepost = do
         let
           -- Filter out any leaves from `flattened` that can be statically shown to be safe
           tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf preState.constraints post, leaf)
-          withQueries = filter canBeSat tocheck <&> \(a, leaf) -> (assertProps conf a, leaf)
-        when conf.debug $ putStrLn $ "   Checking for reachability of " <> show (length withQueries)
+          withQueries = filter canBeSat tocheck <&> first (assertProps conf)
+        when conf.debug $
+          putStrLn $ "   Checking for reachability of " <> show (length withQueries)
                      <> " potential property violation(s) in call " <> call
 
         -- Dispatch the remaining branches to the solver to check for violations

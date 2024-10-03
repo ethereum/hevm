@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
 
@@ -406,9 +405,9 @@ functionAbi f = do
   let (Contracts sol, _, _) = fromMaybe
                                 (internalError . T.unpack $ "unable to parse solc output:\n" <> json)
                                 (readStdJSON json)
-  case Map.toList $ (fromJust (Map.lookup "hevm.sol:ABI" sol)).abiMap of
-     [(_,b)] -> pure b
-     _ -> internalError "unexpected abi format"
+  case Map.toList (fromJust (Map.lookup "hevm.sol:ABI" sol)).abiMap of
+    [(_,b)] -> pure b
+    _ -> internalError "unexpected abi format"
 
 force :: String -> Maybe a -> a
 force s = fromMaybe (internalError s)
