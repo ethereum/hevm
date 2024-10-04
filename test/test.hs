@@ -3624,12 +3624,16 @@ checkEquiv a b = do
   if a == b then pure True else do
     when (opts.debug) $ liftIO $ putStrLn $ "Checking equivalence of " <> show a <> " and " <> show b
     x <- checkEquivBase (./=) a b True
+    when (opts.debug) $ liftIO $ putStrLn $ "UNSAT check, expect True: " <> show x
     y <- checkEquivBase (.==) a b False
+    when (opts.debug) $ liftIO $ putStrLn $ "SAT check, expect False: " <> show x
     pure $ (fromMaybe True x) && not (fromMaybe False y)
 
 checkEquivAndLHS :: (Typeable a, App m) => Expr a -> Expr a -> m Bool
 checkEquivAndLHS orig simp = do
+  opts <- readConfig
   let lhsConst =  Expr.checkLHSConst simp
+  when (opts.debug) $ liftIO $ putStrLn $ "LHS const: " <> show lhsConst
   equiv <- checkEquiv orig simp
   pure $ lhsConst && equiv
 
