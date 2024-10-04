@@ -77,6 +77,7 @@ instance From Addr W256 where from = fromIntegral
 instance From Int256 Integer where from = fromIntegral
 instance From Nibble Int where from = fromIntegral
 instance From W256 Integer where from = fromIntegral
+instance From W256 Word512 where from = fromIntegral
 instance From Word8 W256 where from = fromIntegral
 instance From Word8 Word256 where from = fromIntegral
 instance From Word32 W256 where from = fromIntegral
@@ -1227,17 +1228,9 @@ newtype Nibble = Nibble Word8
   deriving (Num, Integral, Real, Ord, Enum, Eq, Bounded, Generic)
 
 instance Show Nibble where
-  show = (:[]) . intToDigit . fromIntegral
-
+  show = (:[]) . intToDigit . into
 
 -- Conversions -------------------------------------------------------------------------------------
-
-
-toWord512 :: W256 -> Word512
-toWord512 (W256 x) = fromHiAndLo 0 x
-
-fromWord512 :: Word512 -> W256
-fromWord512 x = W256 (loWord x)
 
 maybeLitByte :: Expr Byte -> Maybe Word8
 maybeLitByte (LitByte x) = Just x
@@ -1260,7 +1253,7 @@ maybeConcreteStore _ = Nothing
 word256 :: ByteString -> Word256
 word256 xs | BS.length xs == 1 =
   -- optimize one byte pushes
-  Word256 (Word128 0 0) (Word128 0 (fromIntegral $ BS.head xs))
+  Word256 (Word128 0 0) (Word128 0 (into $ BS.head xs))
 word256 xs = case Cereal.runGet m (padLeft 32 xs) of
                Left _ -> internalError "should not happen"
                Right x -> x
@@ -1316,12 +1309,6 @@ toWord64 n =
     then let (W256 (Word256 _ (Word128 _ n'))) = n in Just n'
     else Nothing
 
-toInt :: W256 -> Maybe Int
-toInt n =
-  if n <= unsafeInto (maxBound :: Int)
-    then let (W256 (Word256 _ (Word128 _ n'))) = n in Just (fromIntegral n')
-    else Nothing
-
 bssToBs :: ByteStringS -> ByteString
 bssToBs (ByteStringS bs) = bs
 
@@ -1335,7 +1322,7 @@ keccakBytes =
     >>> BA.convert
 
 word32 :: [Word8] -> Word32
-word32 xs = sum [ fromIntegral x `shiftL` (8*n)
+word32 xs = sum [ into x `shiftL` (8*n)
                 | (n, x) <- zip [0..] (reverse xs) ]
 
 keccak :: Expr Buf -> Expr EWord
@@ -1357,7 +1344,7 @@ abiKeccak =
 -- Utils -------------------------------------------------------------------------------------------
 
 {- HLINT ignore internalError -}
-internalError:: HasCallStack => [Char] -> a
+internalError :: HasCallStack => [Char] -> a
 internalError m = error $ "Internal Error: " ++ m ++ " -- " ++ (prettyCallStack callStack)
 
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]

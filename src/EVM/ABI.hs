@@ -344,9 +344,9 @@ abiHeadSize x =
         _ -> internalError "impossible"
 
 putAbiSeq :: Vector AbiValue -> Put
-putAbiSeq xs =
-  do putHeads headSize $ toList xs
-     Vector.sequence_ (putAbiTail <$> xs)
+putAbiSeq xs = do
+  putHeads headSize $ toList xs
+  Vector.sequence_ (putAbiTail <$> xs)
   where
     headSize = Vector.sum $ Vector.map abiHeadSize xs
     putHeads _ [] = pure ()
@@ -502,18 +502,17 @@ data AbiVals = NoVals | CAbi [AbiValue] | SAbi [Expr EWord]
   deriving (Show)
 
 decodeBuf :: [AbiType] -> Expr Buf -> AbiVals
-decodeBuf tps (ConcreteBuf b)
-  = case runGetOrFail (getAbiSeq (length tps) tps) (BSLazy.fromStrict b) of
-      Right ("", _, args) -> CAbi (toList args)
-      _ -> NoVals
-decodeBuf tps buf
-  = if containsDynamic tps
-    then NoVals
-    else let
+decodeBuf tps (ConcreteBuf b) =
+  case runGetOrFail (getAbiSeq (length tps) tps) (BSLazy.fromStrict b) of
+    Right ("", _, args) -> CAbi (toList args)
+    _ -> NoVals
+decodeBuf tps buf =
+  if any isDynamic tps then NoVals
+  else
+    let
       vs = decodeStaticArgs 0 (length tps) buf
-      allLit = Prelude.and (fmap isLitWord vs)
       asBS = mconcat $ fmap word256Bytes (mapMaybe maybeLitWord vs)
-    in if not allLit
+    in if not (all isLitWord vs)
        then SAbi vs
        else case runGetOrFail (getAbiSeq (length tps) tps) (BSLazy.fromStrict asBS) of
          Right ("", _, args) -> CAbi (toList args)
@@ -521,7 +520,6 @@ decodeBuf tps buf
 
   where
     isDynamic t = abiKind t == Dynamic
-    containsDynamic = or . fmap isDynamic
 
 decodeStaticArgs :: Int -> Int -> Expr Buf -> [Expr EWord]
 decodeStaticArgs offset numArgs b =
@@ -613,6 +611,6 @@ arbitraryIntegralWithMax maxbound =
            bits n | n `quot` 2 == 0 = 0
                   | otherwise = 1 + bits (n `quot` 2)
            k  = 2^(s*(bits mn `max` bits mx `max` 40) `div` 100)
-       smol <- choose (toInteger mn `max` (-k), toInteger mx `min` k)
+       smol <- choose (into mn `max` (-k), mx `min` k)
        mid <- choose (0, maxbound)
        elements [fromIntegral smol, fromIntegral mid, fromIntegral (maxbound - (fromIntegral smol))]

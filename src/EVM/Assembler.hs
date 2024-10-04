@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 {-|
 Module      : Assembler
 Description : Assembler for EVM opcodes used in the HEVM symbolic checker
