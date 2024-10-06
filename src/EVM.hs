@@ -1670,9 +1670,9 @@ cheatCode = LitAddr $ unsafeInto (keccak' "hevm cheat code")
 
 cheat
   :: (?op :: Word8, VMOps t)
-  => (Expr EWord, Expr EWord) -> (Expr EWord, Expr EWord) -> [Expr EWord]
+  => Gas t -> (Expr EWord, Expr EWord) -> (Expr EWord, Expr EWord) -> [Expr EWord]
   -> EVM t s ()
-cheat (inOffset, inSize) (outOffset, outSize) xs = do
+cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
   vm <- get
   input <- readMemory (Expr.add inOffset (Lit 4)) (Expr.sub inSize (Lit 4))
   calldata <- readMemory inOffset inSize
@@ -1682,7 +1682,7 @@ cheat (inOffset, inSize) (outOffset, outSize) xs = do
   pushTrace $ FrameTrace newContext
   next
   vm1 <- get
-  pushTo #frames $ Frame
+  burn' gas $ pushTo #frames $ Frame
                     { state = vm1.state { stack = xs }
                     , context = newContext
                     }
@@ -1954,7 +1954,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           \(xTo', xContext') ->
             precompiledContract this gasGiven xTo' xContext' xValue xInOffset xInSize xOutOffset xOutSize xs
   | xTo == cheatCode = do
-      cheat (xInOffset, xInSize) (xOutOffset, xOutSize) xs
+      cheat gasGiven (xInOffset, xInSize) (xOutOffset, xOutSize) xs
   | otherwise =
       callChecks this gasGiven xContext xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
         \xGas -> do
