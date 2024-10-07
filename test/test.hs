@@ -562,7 +562,7 @@ tests = testGroup "hevm"
   -- applying some simplification rules, and then using the smt encoding to
   -- check that the simplified version is semantically equivalent to the
   -- unsimplified one
-  , adjustOption (\(Test.Tasty.QuickCheck.QuickCheckTests n) -> Test.Tasty.QuickCheck.QuickCheckTests (min n 50)) $ testGroup "SimplifierTests"
+  , adjustOption (\(Test.Tasty.QuickCheck.QuickCheckTests n) -> Test.Tasty.QuickCheck.QuickCheckTests (div n 2)) $ testGroup "SimplifierTests"
     [ testProperty  "buffer-simplification" $ \(expr :: Expr Buf) -> prop $ do
         let simplified = Expr.simplify expr
         checkEquivAndLHS expr simplified
@@ -692,6 +692,12 @@ tests = testGroup "hevm"
         let s2 = Expr.structureArraySlots s
         let simplified = Expr.simplify s2
         checkEquivAndLHS s2 simplified
+    , test "storage-slot-single" $ do
+        -- this tests that "" and "0"x32 is not equivalent in Keccak
+        let x = SLoad (Add (Keccak (ConcreteBuf "")) (Lit 1)) (SStore (Keccak (ConcreteBuf "\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL\NUL")) (Lit 0) (AbstractStore (SymAddr "stuff") Nothing))
+        let simplified = Expr.simplify x
+        y <- checkEquivAndLHS x simplified
+        assertBoolM "Must be equal" y
     ]
   , testGroup "isUnsat-concrete-tests" [
       test "disjunction-left-false" $ do

@@ -509,9 +509,11 @@ prelude =  SMT2 src mempty mempty mempty
   ; slot -> value
   (define-sort Storage () (Array Word Word))
 
-  ; hash functions
-  (declare-fun keccak (Buf) Word)
-  (declare-fun sha256 (Buf) Word)
+  ; hash functions. They take buffer and a buffer size, and return a Word
+  (declare-fun keccak (Buf Word) Word)
+  (declare-fun sha256 (Buf Word) Word)
+
+  ; helper functions
   (define-fun max ((a (_ BitVec 256)) (b (_ BitVec 256))) (_ BitVec 256) (ite (bvult a b) b a))
 
   ; word indexing
@@ -788,12 +790,14 @@ exprToSMT = \case
   EqByte a b ->
     let cond = op2 "=" a b in
     "(ite " <> cond `sp` one `sp` zero <> ")"
-  Keccak a ->
-    let enc = exprToSMT a in
-    "(keccak " <> enc <> ")"
-  SHA256 a ->
-    let enc = exprToSMT a in
-    "(sha256 " <> enc <> ")"
+  Keccak a -> let
+      enc = exprToSMT a
+      sz = exprToSMT $ Expr.simplify $ BufLength a
+    in "(keccak " <> enc <> " " <> sz <> ")"
+  SHA256 a -> let
+      enc = exprToSMT a
+      sz = exprToSMT $ Expr.simplify $ BufLength a
+    in "(sha256 " <> enc <> " " <> sz <> ")"
 
   TxValue -> fromString "txvalue"
   Balance a -> fromString "balance_" <> formatEAddr a
