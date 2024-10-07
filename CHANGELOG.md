@@ -32,7 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More verbose error messages in case of symbolic arguments to opcode
 - Tests to enforce that in Expr and Prop, constants are on the LHS whenever possible
 - Support for MCOPY and TSTORE/TLOAD, i.e. EIP 5656 + 1153 + 4788
-* Fuzz via both SAT and UNSAT, not just UNSAT
+- All fuzz tests now run twice, once with expected SAT and once with expected UNSAT to check
+  against incorrectly trivial UNSAT queries
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
@@ -50,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed multi-threading bug in symbolic interpretation
 - Fixed simplification of concrete CopySlice with destination offset beyond destination size
 - Fixed a bug in our SMT encoding of reading multiple consecutive bytes from concrete index
+- Fixed bug in SMT encoding that caused empty and all-zero byte arrays to be considered equal
+  and hence lead to false negatives through trivially UNSAT SMT expressions
 
 ## [0.53.0] - 2024-02-23
 
