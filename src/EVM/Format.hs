@@ -828,7 +828,7 @@ hexByteString :: String -> ByteString -> ByteString
 hexByteString msg bs =
   case BS16.decodeBase16Untyped bs of
     Right x -> x
-    _ -> internalError $ "invalid hex bytestring for " ++ msg
+    _ -> internalError $ "invalid hex bytestring for '" ++ msg ++ "'. Bytestring provided: '" ++ show bs ++ "'"
 
 hexText :: Text -> ByteString
 hexText t =
