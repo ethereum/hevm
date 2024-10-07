@@ -3626,7 +3626,7 @@ checkEquiv a b = do
     x <- checkEquivBase (./=) a b True
     when (opts.debug) $ liftIO $ putStrLn $ "UNSAT check, expect True: " <> show x
     y <- checkEquivBase (.==) a b False
-    when (opts.debug) $ liftIO $ putStrLn $ "SAT check, expect False: " <> show x
+    when (opts.debug) $ liftIO $ putStrLn $ "SAT check, expect False: " <> show y
     pure $ (fromMaybe True x) && not (fromMaybe False y)
 
 checkEquivAndLHS :: (Typeable a, App m) => Expr a -> Expr a -> m Bool
