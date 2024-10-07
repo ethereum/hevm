@@ -114,6 +114,7 @@ data Command w
       , trace         :: w ::: Bool             <?> "Dump trace"
       , askSmtIterations :: w ::: Integer       <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , numCexFuzz    :: w ::: Integer          <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
+      , numSolvers    :: w ::: Maybe Natural    <?> "Number of solver instances to use (default: number of cpu cores)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
       , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
@@ -249,7 +250,9 @@ equivalence cmd = do
                           }
   calldata <- liftIO $ buildCalldata cmd
   solver <- liftIO $ getSolver cmd
-  withSolvers solver 3 Nothing $ \s -> do
+  cores <- liftIO $ unsafeInto <$> getNumProcessors
+  let solverCount = fromMaybe cores cmd.numSolvers
+  withSolvers solver solverCount Nothing $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata
     case any isCex res of
       False -> liftIO $ do
