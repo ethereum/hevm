@@ -792,11 +792,11 @@ exprToSMT = \case
     "(ite " <> cond `sp` one `sp` zero <> ")"
   Keccak a -> let
       enc = exprToSMT a
-      sz = exprToSMT $ Expr.simplify $ BufLength a
+      sz = exprToSMT $ Expr.bufLength a
     in "(keccak " <> enc <> " " <> sz <> ")"
   SHA256 a -> let
       enc = exprToSMT a
-      sz = exprToSMT $ Expr.simplify $ BufLength a
+      sz = exprToSMT $ Expr.bufLength a
     in "(sha256 " <> enc <> " " <> sz <> ")"
 
   TxValue -> fromString "txvalue"
