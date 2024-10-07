@@ -252,7 +252,7 @@ equivalence cmd = do
   solver <- liftIO $ getSolver cmd
   cores <- liftIO $ unsafeInto <$> getNumProcessors
   let solverCount = fromMaybe cores cmd.numSolvers
-  withSolvers solver solverCount Nothing $ \s -> do
+  withSolvers solver solverCount cmd.smttimeout $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata
     case any isCex res of
       False -> liftIO $ do
