@@ -1834,6 +1834,20 @@ tests = testGroup "hevm"
          |]
        (_, [Qed _]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
        putStrLnM "this should always be true, due to bitwise OR with positive value"
+     ,
+     test "abstract-returndata-size" $ do
+       Just c <- solcRuntime "C"
+         [i|
+         contract C {
+           function f(uint256 x) public pure {
+             assembly {
+                 return(0, x)
+             }
+           }
+         }
+         |]
+       expr <- withSolvers Z3 1 Nothing $ \s -> getExpr s c (Just (Sig "f(uint256)" [])) [] defaultVeriOpts
+       assertBoolM "The expression is partial" $ not $ Expr.containsNode isPartial expr
     ,
     -- CopySlice check
     -- uses identity precompiled contract (0x4) to copy memory
