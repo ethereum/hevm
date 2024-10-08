@@ -517,6 +517,14 @@ isPBool _ = False
 
 -- Errors ------------------------------------------------------------------------------------------
 
+-- General error helper
+type Err a = Either String a
+getError :: Err a -> String
+getError (Left a) = a
+getError _ = internalError "getLeft on a Right"
+getNonError :: Err a -> a
+getNonError (Right a) = a
+getNonError _ = internalError "getRight on a Left"
 
 -- | Core EVM Error Types
 data EvmError
