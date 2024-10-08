@@ -663,8 +663,17 @@ exec1 = do
                           copyBytesToMemory buf sz srcOff dstOff
                         SymbolicMemory mem -> do
                           assign (#state % #memory) (SymbolicMemory $ copySlice srcOff dstOff sz mem mem)
-                      assign (#state % #stack) xs
-                _ -> internalError "symbolic size in MCOPY"
+                _ -> do
+                  -- symbolic, ignore gas
+                  next
+                  m <- gets (.state.memory)
+                  case m of
+                    ConcreteMemory mem -> do
+                      buf <- freezeMemory mem
+                      copyBytesToMemory buf sz srcOff dstOff
+                    SymbolicMemory mem -> do
+                      assign (#state % #memory) (SymbolicMemory $ copySlice srcOff dstOff sz mem mem)
+              assign (#state % #stack) xs
             _ -> underrun
 
         OpMstore ->
