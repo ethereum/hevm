@@ -38,7 +38,7 @@ runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectT
     (compile projectType root testFile) >>= \case
       Left e -> error e
       Right bo@(BuildOutput contracts _) -> do
-        withSolvers Z3 1 timeout $ \solvers -> do
+        withSolvers Z3 1 1 timeout $ \solvers -> do
           opts <- liftIO $ testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
           unitTest opts contracts
 

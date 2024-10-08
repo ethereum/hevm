@@ -96,10 +96,10 @@ writeSMT2File smt2 count abst =
     let content = formatSMT2 smt2 <> "\n\n(check-sat)"
     T.writeFile ("query-" <> (show count) <> "-" <> abst <> ".smt2") content
 
-withSolvers :: App m => Solver -> Natural -> Maybe Natural -> (SolverGroup -> m a) -> m a
-withSolvers solver count timeout cont = do
+withSolvers :: App m => Solver -> Natural -> Natural -> Maybe Natural -> (SolverGroup -> m a) -> m a
+withSolvers solver count threads timeout cont = do
     -- spawn solvers
-    instances <- mapM (const $ liftIO $ spawnSolver solver timeout) [1..count]
+    instances <- mapM (const $ liftIO $ spawnSolver solver threads timeout) [1..count]
     -- spawn orchestration thread
     taskQueue <- liftIO newChan
     availableInstances <- liftIO newChan
@@ -254,8 +254,8 @@ mkTimeout t = T.pack $ show $ (1000 *)$ case t of
   Just t' -> t'
 
 -- | Arguments used when spawning a solver instance
-solverArgs :: Solver -> Maybe Natural -> [Text]
-solverArgs solver timeout = case solver of
+solverArgs :: Solver -> Natural -> Maybe Natural -> [Text]
+solverArgs solver threads timeout = case solver of
   Bitwuzla ->
     [ "--lang=smt2"
     , "--produce-models"
@@ -263,7 +263,9 @@ solverArgs solver timeout = case solver of
     , "--bv-solver=preprop"
     ]
   Z3 ->
-    [ "-in" ]
+    [ "-st"
+    , "smt.threads=" <> (T.pack $ show threads)
+    , "-in" ]
   CVC5 ->
     [ "--lang=smt"
     , "--produce-models"
@@ -275,11 +277,11 @@ solverArgs solver timeout = case solver of
   Custom _ -> []
 
 -- | Spawns a solver instance, and sets the various global config options that we use for our queries
-spawnSolver :: Solver -> Maybe (Natural) -> IO SolverInstance
-spawnSolver solver timeout = do
+spawnSolver :: Solver -> Natural -> Maybe (Natural) -> IO SolverInstance
+spawnSolver solver threads timeout = do
   (readout, writeout) <- createPipe
   let cmd
-        = (proc (show solver) (fmap T.unpack $ solverArgs solver timeout))
+        = (proc (show solver) (fmap T.unpack $ solverArgs solver threads timeout ))
             { std_in = CreatePipe
             , std_out = UseHandle writeout
             , std_err = UseHandle writeout

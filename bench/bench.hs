@@ -91,7 +91,7 @@ runBCTest x =
 
 findPanics :: App m => Solver -> Natural -> Integer -> ByteString -> m ()
 findPanics solver count iters c = do
-  _ <- withSolvers solver count Nothing $ \s -> do
+  _ <- withSolvers solver count 1 Nothing $ \s -> do
     let opts = defaultVeriOpts
           { maxIter = Just iters
           , askSmtIters = iters + 1

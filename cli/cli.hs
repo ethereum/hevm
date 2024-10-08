@@ -94,6 +94,7 @@ data Command w
       , askSmtIterations :: w ::: Integer         <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , numCexFuzz    :: w ::: Integer            <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
       , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores)"
+      , solverThreads :: w ::: Maybe Natural      <?> "Number of threads for each solver instance. Only respected for Z3 (default: 1)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
       , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
@@ -115,6 +116,7 @@ data Command w
       , askSmtIterations :: w ::: Integer       <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , numCexFuzz    :: w ::: Integer          <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
       , numSolvers    :: w ::: Maybe Natural    <?> "Number of solver instances to use (default: number of cpu cores)"
+      , solverThreads :: w ::: Maybe Natural    <?> "Number of threads for each solver instance. Only respected for Z3 (default: 1)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
       , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
@@ -157,6 +159,7 @@ data Command w
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
       , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
       , numSolvers    :: w ::: Maybe Natural            <?> "Number of solver instances to use (default: number of cpu cores)"
+      , solverThreads :: w ::: Maybe Natural            <?> "Number of threads for each solver instance. Only respected for Z3 (default: 1)"
       , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
       , debug         :: w ::: Bool                     <?> "Debug printing of internal behaviour, and dump internal expressions"
       , trace         :: w ::: Bool                     <?> "Dump trace"
@@ -226,7 +229,7 @@ main = withUtf8 $ do
       solver <- getSolver cmd
       cores <- liftIO $ unsafeInto <$> getNumProcessors
       let solverCount = fromMaybe cores cmd.numSolvers
-      runEnv env $ withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
+      runEnv env $ withSolvers solver solverCount (fromMaybe 1 cmd.solverThreads) cmd.smttimeout $ \solvers -> do
         buildOut <- readBuildOutput root (getProjectType cmd)
         case buildOut of
           Left e -> liftIO $ do
@@ -252,7 +255,7 @@ equivalence cmd = do
   solver <- liftIO $ getSolver cmd
   cores <- liftIO $ unsafeInto <$> getNumProcessors
   let solverCount = fromMaybe cores cmd.numSolvers
-  withSolvers solver solverCount cmd.smttimeout $ \s -> do
+  withSolvers solver solverCount (fromMaybe 1 cmd.solverThreads) cmd.smttimeout $ \s -> do
     res <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata
     case any isCex res of
       False -> liftIO $ do
@@ -328,7 +331,7 @@ assert cmd = do
   cores <- liftIO $ unsafeInto <$> getNumProcessors
   let solverCount = fromMaybe cores cmd.numSolvers
   solver <- liftIO $ getSolver cmd
-  withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
+  withSolvers solver solverCount (fromMaybe 1 cmd.solverThreads) cmd.smttimeout $ \solvers -> do
     let opts = VeriOpts { simp = True
                         , maxIter = cmd.maxIterations
                         , askSmtIters = cmd.askSmtIterations
@@ -393,7 +396,7 @@ launchExec cmd = do
     rpcinfo = (,) block <$> cmd.rpc
 
   -- TODO: we shouldn't need solvers to execute this code
-  withSolvers Z3 0 Nothing $ \solvers -> do
+  withSolvers Z3 0 1 Nothing $ \solvers -> do
     vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcinfo) vm EVM.Stepper.runFully
     writeTraceDapp dapp vm'
     case vm'.result of
