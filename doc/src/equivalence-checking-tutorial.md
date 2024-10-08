@@ -5,6 +5,15 @@ circumstances. This allows to e.g. create two functions, one that is known to be
 another that uses less gas, but is hard to check for correctness. Then, with equivalence
 checking, one can check whether the two behave the same.
 
+The notion of equivalence in hevm is defined as follows. Two contracts are equivalent
+if for all possible inputs, after execution has finished, their observable
+storage state is equivalent and they return the same value. In particular, the
+following is NOT checked when checking for equivalence:
+- [Gas](https://ethereum.org/en/developers/docs/gas/) consumption
+- [Events](https://solidity-by-example.org/events/) emitted
+- Maximum stack depth
+- Maximum memory usage
+
 ## Finding Discrepancies
 
 Let's see this toy contract, in file [contract1.sol](code_examples/contract1.sol):
