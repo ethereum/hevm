@@ -1504,19 +1504,18 @@ finalize = do
       creation <- use (#tx % #isCreate)
       createe  <- use (#state % #contract)
       createeExists <- (Map.member createe) <$> use (#env % #contracts)
-      let onContractCode contractCode =
-            when (creation && createeExists) $ replaceCode createe contractCode
-      case output of
-        ConcreteBuf bs ->
-          onContractCode $ RuntimeCode (ConcreteRuntimeCode bs)
-        _ ->
-          case Expr.toList output of
-            Nothing -> do
-              state <- use #state
-              partial $
-                UnexpectedSymbolicArg pc' (getOpName state) "runtime code cannot have an abstract length" (wrap [output])
-            Just ops ->
-              onContractCode $ RuntimeCode (SymbolicRuntimeCode ops)
+      when (creation && createeExists) $
+        case output of
+          ConcreteBuf bs ->
+            replaceCode createe (RuntimeCode (ConcreteRuntimeCode bs))
+          _ ->
+            case Expr.toList output of
+              Nothing -> do
+                state <- use #state
+                partial $
+                  UnexpectedSymbolicArg pc' (getOpName state) "runtime code cannot have an abstract length" (wrap [output])
+              Just ops ->
+                replaceCode createe (RuntimeCode (SymbolicRuntimeCode ops))
     _ ->
       internalError "Finalising an unfinished tx."
 

@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All fuzz tests now run twice, once with expected SAT and once with expected UNSAT to check
   against incorrectly trivial UNSAT queries
 - Allow --num-solvers option for equivalence checking, use num cores by default
+- Preliminary support for multi-threaded Z3
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
@@ -55,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed bug in SMT encoding that caused empty and all-zero byte arrays to be considered equal
   and hence lead to false negatives through trivially UNSAT SMT expressions
 - Respect --smt-timeout in equivalence checking
+- Fixed the handling of returndata with an abstract size during transaction finalization
 
 ## [0.53.0] - 2024-02-23
 

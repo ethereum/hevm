@@ -186,12 +186,12 @@ fetchChainIdFrom url = do
 
 http :: Natural -> Maybe Natural -> BlockNumber -> Text -> Fetcher t m s
 http smtjobs smttimeout n url q =
-  withSolvers Z3 smtjobs smttimeout $ \s ->
+  withSolvers Z3 smtjobs 1 smttimeout $ \s ->
     oracle s (Just (n, url)) q
 
 zero :: Natural -> Maybe Natural -> Fetcher t m s
 zero smtjobs smttimeout q =
-  withSolvers Z3 smtjobs smttimeout $ \s ->
+  withSolvers Z3 smtjobs 1 smttimeout $ \s ->
     oracle s Nothing q
 
 -- smtsolving + (http or zero)
