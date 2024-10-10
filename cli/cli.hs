@@ -12,7 +12,7 @@ import Control.Monad.IO.Unlift
 import Data.ByteString (ByteString)
 import Data.DoubleWord (Word256)
 import Data.List (intersperse)
-import Data.Maybe (fromMaybe, mapMaybe, fromJust)
+import Data.Maybe (fromMaybe, mapMaybe, fromJust, isNothing)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Version (showVersion)
@@ -243,33 +243,42 @@ main = withUtf8 $ do
 
 equivalence :: App m => Command Options.Unwrapped -> m ()
 equivalence cmd = do
-  let bytecodeA = hexByteString "--code" . strip0x $ cmd.codeA
-      bytecodeB = hexByteString "--code" . strip0x $ cmd.codeB
-      veriOpts = VeriOpts { simp = True
-                          , maxIter = cmd.maxIterations
-                          , askSmtIters = cmd.askSmtIterations
-                          , loopHeuristic = cmd.loopDetectionHeuristic
-                          , rpcInfo = Nothing
-                          }
-  calldata <- liftIO $ buildCalldata cmd
-  solver <- liftIO $ getSolver cmd
-  cores <- liftIO $ unsafeInto <$> getNumProcessors
-  let solverCount = fromMaybe cores cmd.numSolvers
-  withSolvers solver solverCount (fromMaybe 1 cmd.solverThreads) cmd.smttimeout $ \s -> do
-    res <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata
-    case any isCex res of
-      False -> liftIO $ do
-        putStrLn "No discrepancies found"
-        when (any isTimeout res) $ do
-          putStrLn "But timeout(s) occurred"
+  let bytecodeA' = hexByteString $ strip0x cmd.codeA
+      bytecodeB' = hexByteString $ strip0x cmd.codeB
+  if (isNothing bytecodeA') then liftIO $ do
+    putStrLn $ "Error, invalid bytecode for program A: " <> show cmd.codeA
+    exitFailure
+  else if (isNothing bytecodeB') then liftIO $ do
+    putStrLn $ "Error, invalid bytecode for program B: " <> show cmd.codeB
+    exitFailure
+  else do
+    let bytecodeA = fromJust bytecodeA'
+        bytecodeB = fromJust bytecodeB'
+        veriOpts = VeriOpts { simp = True
+                            , maxIter = cmd.maxIterations
+                            , askSmtIters = cmd.askSmtIterations
+                            , loopHeuristic = cmd.loopDetectionHeuristic
+                            , rpcInfo = Nothing
+                            }
+    calldata <- liftIO $ buildCalldata cmd
+    solver <- liftIO $ getSolver cmd
+    cores <- liftIO $ unsafeInto <$> getNumProcessors
+    let solverCount = fromMaybe cores cmd.numSolvers
+    withSolvers solver solverCount (fromMaybe 1 cmd.solverThreads) cmd.smttimeout $ \s -> do
+      res <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata
+      case any isCex res of
+        False -> liftIO $ do
+          putStrLn "No discrepancies found"
+          when (any isTimeout res) $ do
+            putStrLn "But timeout(s) occurred"
+            exitFailure
+        True -> liftIO $ do
+          let cexs = mapMaybe getCex res
+          T.putStrLn . T.unlines $
+            [ "Not equivalent. The following inputs result in differing behaviours:"
+            , "" , "-----", ""
+            ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap (formatCex (AbstractBuf "txdata") Nothing) cexs)
           exitFailure
-      True -> liftIO $ do
-        let cexs = mapMaybe getCex res
-        T.putStrLn . T.unlines $
-          [ "Not equivalent. The following inputs result in differing behaviours:"
-          , "" , "-----", ""
-          ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap (formatCex (AbstractBuf "txdata") Nothing) cexs)
-        exitFailure
 
 getSolver :: Command Options.Unwrapped -> IO Solver
 getSolver cmd = case cmd.solver of
@@ -309,7 +318,12 @@ buildCalldata cmd = case (cmd.calldata, cmd.sig) of
   -- fully abstract calldata
   (Nothing, Nothing) -> pure $ mkCalldata Nothing []
   -- fully concrete calldata
-  (Just c, Nothing) -> pure (ConcreteBuf (hexByteString "bytes" . strip0x $ c), [])
+  (Just c, Nothing) -> do
+    let val = hexByteString $ strip0x c
+    if (isNothing val) then do
+      putStrLn $ "Error, invalid calldata: " <>  show c
+      exitFailure
+    else pure (ConcreteBuf (fromJust val), [])
   -- calldata according to given abi with possible specializations from the `arg` list
   (Nothing, Just sig') -> do
     method' <- functionAbi sig'
@@ -362,7 +376,7 @@ assert cmd = do
                  ] <> fmap (formatExpr) timeouts
         liftIO $ T.putStrLn $ T.unlines (counterexamples <> unknowns)
         showExtras solvers cmd calldata expr
-        liftIO $ exitFailure
+        liftIO exitFailure
 
 showExtras :: App m => SolverGroup -> Command Options.Unwrapped -> (Expr Buf, [Prop]) -> Expr End -> m ()
 showExtras solvers cmd calldata expr = do
@@ -423,7 +437,9 @@ vmFromCommand cmd = do
   (miner,ts,baseFee,blockNum,prevRan) <- case cmd.rpc of
     Nothing -> pure (LitAddr 0,Lit 0,0,0,0)
     Just url -> Fetch.fetchBlockFrom block url >>= \case
-      Nothing -> error "Error: Could not fetch block"
+      Nothing -> do
+        putStrLn $ "Error, Could not fetch block" <> show block <> " from URL: " <> show url
+        exitFailure
       Just Block{..} -> pure ( coinbase
                              , timestamp
                              , baseFee
@@ -433,44 +449,60 @@ vmFromCommand cmd = do
 
   contract <- case (cmd.rpc, cmd.address, cmd.code) of
     (Just url, Just addr', Just c) -> do
-      Fetch.fetchContractFrom block url addr' >>= \case
-        Nothing ->
-          error $ "Error: contract not found: " <> show address
-        Just contract ->
-          -- if both code and url is given,
-          -- fetch the contract and overwrite the code
-          pure $
-            initialContract  (mkCode $ hexByteString "--code" $ strip0x c)
-              & set #balance  (contract.balance)
-              & set #nonce    (contract.nonce)
-              & set #external (contract.external)
+      let code = hexByteString $ strip0x c
+      if (isNothing code) then do
+        putStrLn $ "Error, invalid code: " <> show c
+        exitFailure
+      else
+        Fetch.fetchContractFrom block url addr' >>= \case
+          Nothing -> do
+            putStrLn $ "Error: contract not found: " <> show address
+            exitFailure
+          Just contract ->
+            -- if both code and url is given,
+            -- fetch the contract and overwrite the code
+            pure $
+              initialContract  (mkCode $ fromJust code)
+                & set #balance  (contract.balance)
+                & set #nonce    (contract.nonce)
+                & set #external (contract.external)
 
     (Just url, Just addr', Nothing) ->
       Fetch.fetchContractFrom block url addr' >>= \case
-        Nothing ->
-          error $ "Error: contract not found: " <> show address
+        Nothing -> do
+          putStrLn $ "Error, contract not found: " <> show address
+          exitFailure
         Just contract -> pure contract
 
-    (_, _, Just c)  ->
-      pure $
-        initialContract (mkCode $ hexByteString "--code" $ strip0x c)
+    (_, _, Just c)  -> do
+      let code = hexByteString $ strip0x c
+      if (isNothing code) then do
+        putStrLn $ "Error, invalid code: " <> show c
+        exitFailure
+      else pure $ initialContract (mkCode $ fromJust code)
 
-    (_, _, Nothing) ->
-      error "Error: must provide at least (rpc + address) or code"
+    (_, _, Nothing) -> do
+      putStrLn "Error, must provide at least (rpc + address) or code"
+      exitFailure
 
   let ts' = case maybeLitWord ts of
         Just t -> t
         Nothing -> internalError "unexpected symbolic timestamp when executing vm test"
 
-  vm <- stToIO $ vm0 baseFee miner ts' blockNum prevRan contract
-  pure $ EVM.Transaction.initTx vm
-    where
+  if (isNothing bsCallData) then do
+    putStrLn $ "Error, invalid calldata: " <> show calldata
+    exitFailure
+  else do
+    vm <- stToIO $ vm0 baseFee miner ts' blockNum prevRan contract
+    pure $ EVM.Transaction.initTx vm
+  where
+        bsCallData = bytes (.calldata) (pure "")
         block   = maybe Fetch.Latest Fetch.BlockNumber cmd.block
         value   = word (.value) 0
         caller  = addr (.caller) (LitAddr 0)
         origin  = addr (.origin) (LitAddr 0)
-        calldata = ConcreteBuf $ bytes (.calldata) ""
-        decipher = hexByteString "bytes" . strip0x
+        calldata = ConcreteBuf $ fromJust bsCallData
+        decipher = hexByteString . strip0x
         mkCode bs = if cmd.create
                     then InitCode bs mempty
                     else RuntimeCode (ConcreteRuntimeCode bs)
@@ -516,7 +548,9 @@ symvmFromCommand cmd calldata = do
   (miner,blockNum,baseFee,prevRan) <- case cmd.rpc of
     Nothing -> pure (SymAddr "miner",0,0,0)
     Just url -> Fetch.fetchBlockFrom block url >>= \case
-      Nothing -> error "Error: Could not fetch block"
+      Nothing -> do
+        putStrLn "Error, could not fetch block"
+        exitFailure
       Just Block{..} -> pure ( coinbase
                              , number
                              , baseFee
@@ -532,32 +566,43 @@ symvmFromCommand cmd calldata = do
   contract <- case (cmd.rpc, cmd.address, cmd.code) of
     (Just url, Just addr', _) ->
       Fetch.fetchContractFrom block url addr' >>= \case
-        Nothing ->
-          error "Error: contract not found."
-        Just contract' -> pure contract''
-          where
-            contract'' = case cmd.code of
-              Nothing -> contract'
+        Nothing -> do
+          putStrLn "Error, contract not found."
+          exitFailure
+        Just contract' -> case cmd.code of
+              Nothing -> pure contract'
               -- if both code and url is given,
               -- fetch the contract and overwrite the code
-              Just c -> initialContract (mkCode $ decipher c)
+              Just c -> do
+                let c' = decipher c
+                if (isNothing c') then do
+                  putStrLn $ "Error, invalid code: " <> show c
+                  exitFailure
+                else pure $ do
+                  initialContract (mkCode $ fromJust c')
                         & set #origStorage (contract'.origStorage)
                         & set #balance     (contract'.balance)
                         & set #nonce       (contract'.nonce)
                         & set #external    (contract'.external)
 
-    (_, _, Just c)  -> case storageBase of
-      EmptyBase -> pure (initialContract . mkCode $ decipher c)
-      AbstractBase -> pure ((`abstractContract` address) . mkCode $ decipher c)
+    (_, _, Just c)  -> do
+      let c' = decipher c
+      if (isNothing c') then do
+        putStrLn $ "Error, invalid code: " <> show c
+        exitFailure
+      else case storageBase of
+        EmptyBase -> pure (initialContract . mkCode $ fromJust c')
+        AbstractBase -> pure ((`abstractContract` address) . mkCode $ fromJust c')
 
-    (_, _, Nothing) ->
-      error "Error: must provide at least (rpc + address) or code"
+    (_, _, Nothing) -> do
+      putStrLn "Error, must provide at least (rpc + address) or code"
+      exitFailure
 
   vm <- stToIO $ vm0 baseFee miner ts blockNum prevRan calldata callvalue caller contract storageBase
   pure $ EVM.Transaction.initTx vm
 
   where
-    decipher = hexByteString "bytes" . strip0x
+    decipher = hexByteString . strip0x
     block = maybe Fetch.Latest Fetch.BlockNumber cmd.block
     origin = eaddr (.origin) (SymAddr "origin")
     mkCode bs = if cmd.create

@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and hence lead to false negatives through trivially UNSAT SMT expressions
 - Respect --smt-timeout in equivalence checking
 - Fixed the handling of returndata with an abstract size during transaction finalization
+- Error handling for user-facing cli commands is much improved
 
 ## [0.53.0] - 2024-02-23
 
