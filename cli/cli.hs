@@ -260,8 +260,8 @@ equivalence cmd = do
     case any isCex res of
       False -> liftIO $ do
         putStrLn "No discrepancies found"
-        when (any isTimeout res) $ do
-          putStrLn "But timeout(s) occurred"
+        when (any isTimeout res || any isError res) $ do
+          putStrLn $ "But " <> (show $ length $ filter isTimeout res) <> " timeout(s) and/or " <> (show $ length $ filter isError res) <> " error(s)/incomplete execution(s) occurred"
           exitFailure
       True -> liftIO $ do
         let cexs = mapMaybe getCex res
