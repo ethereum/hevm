@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against incorrectly trivial UNSAT queries
 - Allow --num-solvers option for equivalence checking, use num cores by default
 - Preliminary support for multi-threaded Z3
+- Skip over SMT generation issues due to e.g. CopySlice with symbolic arguments, and return
+  partial results instead of erroring out
+- Fix interpreter's MCOPY handling so that it doesn't error out on symbolic arguments
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing

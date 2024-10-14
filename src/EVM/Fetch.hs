@@ -19,7 +19,6 @@ import Data.Text (Text, unpack, pack)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.List (foldl')
-import Data.Text qualified as T
 import Data.Vector qualified as RegularVector
 import Network.Wreq
 import Network.Wreq.Session (Session)
@@ -200,7 +199,7 @@ oracle solvers info q = do
   case q of
     PleaseDoFFI vals envs continue -> case vals of
        cmd : args -> do
-          existingEnv <- liftIO $ getEnvironment
+          existingEnv <- liftIO getEnvironment
           let mergedEnv = Map.toList $ Map.union envs $ Map.fromList existingEnv
           let process = (proc cmd args :: CreateProcess) { env = Just mergedEnv }
           (_, stdout', _) <- liftIO $ readCreateProcessWithExitCode process ""
@@ -259,9 +258,7 @@ checkBranch solvers branchcondition pathconditions = do
         Unsat -> pure $ Case True
         -- Yes. Both branches possible
         Sat _ -> pure EVM.Types.Unknown
-        -- Explore both branches in case of timeout
-        EVM.Solvers.Unknown -> pure EVM.Types.Unknown
-        Error e -> internalError $ "SMT Solver pureed with an error: " <> T.unpack e
-    -- If the query times out, we simply explore both paths
-    EVM.Solvers.Unknown -> pure EVM.Types.Unknown
-    Error e -> internalError $ "SMT Solver pureed with an error: " <> T.unpack e
+    -- If the query times out, or can't be executed (e.g. symbolic copyslice) we simply explore both paths
+        _ -> pure EVM.Types.Unknown
+    -- If the query times out, or can't be executed (e.g. symbolic copyslice) we simply explore both paths
+    _ -> pure EVM.Types.Unknown
