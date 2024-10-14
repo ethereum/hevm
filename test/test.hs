@@ -705,6 +705,38 @@ tests = testGroup "hevm"
         y <- checkEquivAndLHS x simplified
         assertBoolM "Must be equal" y
     ]
+  , testGroup "concrete-buffer-simplification-large-index" [
+      test "copy-slice-large-index-nooverflow" $ do
+        let
+          e = CopySlice (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) (Lit 0x0) (Lit 0x1) (ConcreteBuf "a") (ConcreteBuf "")
+          s = Expr.simplify e
+        equal <- checkEquiv e s
+        assertEqualM "Must be equal" True equal
+    , test "copy-slice-overflow-back-into-source" $ do
+        let
+          e = CopySlice (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) (Lit 0x0) (Lit 0x2) (ConcreteBuf "a") (ConcreteBuf "")
+          s = Expr.simplify e
+        equal <- checkEquiv e s
+        assertEqualM "Must be equal" True equal
+    , test "copy-slice-overflow-beyond-source" $ do
+        let
+          e = CopySlice (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) (Lit 0x0) (Lit 0x3) (ConcreteBuf "a") (ConcreteBuf "")
+          s = Expr.simplify e
+        equal <- checkEquiv e s
+        assertEqualM "Must be equal" True equal
+    , test "copy-slice-overflow-beyond-source-into-nonempty" $ do
+        let
+          e = CopySlice (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) (Lit 0x0) (Lit 0x3) (ConcreteBuf "a") (ConcreteBuf "b")
+          s = Expr.simplify e
+        equal <- checkEquiv e s
+        assertEqualM "Must be equal" True equal
+    , test "read-word-overflow-back-into-source" $ do
+        let
+          e = ReadWord (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) (ConcreteBuf "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk")
+          s = Expr.simplify e
+        equal <- checkEquiv e s
+        assertEqualM "Must be equal" True equal
+  ]
   , testGroup "isUnsat-concrete-tests" [
       test "disjunction-left-false" $ do
         let
@@ -2807,6 +2839,7 @@ tests = testGroup "hevm"
                   y := calldatasize()
                 }
                 require(z >= y);
+                require(z < 2**64); // Accesses to larger indices are not supported
                 assembly {
                   x := calldataload(z)
                 }
