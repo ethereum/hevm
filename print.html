@@ -807,6 +807,26 @@ implementing the following methods:</p>
 circumstances. This allows to e.g. create two functions, one that is known to be good, and
 another that uses less gas, but is hard to check for correctness. Then, with equivalence
 checking, one can check whether the two behave the same.</p>
+<p>The notion of equivalence in hevm is defined as follows. Two contracts are equivalent
+if for all possible calldata and state, after execution has finished, their observable
+storage state is equivalent and they return the same value. In particular, the
+following is NOT checked when checking for equivalence:</p>
+<ul>
+<li><a href="https://ethereum.org/en/developers/docs/gas/">Gas</a> consumption</li>
+<li><a href="https://solidity-by-example.org/events/">Events</a> emitted</li>
+<li>Maximum stack depth</li>
+<li>Maximum memory usage</li>
+</ul>
+<p>Note that in the Solidity ABI, the calldata's first 4 bytes are the
+<a href="https://docs.soliditylang.org/en/latest/abi-spec.html#function-selector">function selector</a>
+which decide which function is being called, along with the potential
+<a href="https://solidity-by-example.org/fallback/">fallback</a> function mechanism.
+Hence, treating calldata as symbolic covers all possible function calls,
+including fallback functions. While not all contracts
+<a href="https://github.com/ethereum/requests-for-proposals/blob/master/open-rfps/pectra-system-contracts-audit.md">follow the Solidity ABI</a>,
+since hevm's symbolic equivalence checker does not distinguish between function
+selector and function parameter bytes in the calldata, it will still correctly
+check the equivalence of such non-conforming contracts.</p>
 <h2 id="finding-discrepancies"><a class="header" href="#finding-discrepancies">Finding Discrepancies</a></h2>
 <p>Let's see this toy contract, in file <a href="code_examples/contract1.sol">contract1.sol</a>:</p>
 <pre><code class="language-solidity">//SPDX-License-Identifier: MIT
