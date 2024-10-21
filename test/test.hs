@@ -736,6 +736,12 @@ tests = testGroup "hevm"
           s = Expr.simplify e
         equal <- checkEquiv e s
         assertEqualM "Must be equal" True equal
+    , test "copy-slice-overflowing-into-too-short-buffer" $ do
+        let
+          e = BufLength (CopySlice (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) (Lit 0x00) (Lit 0x02) (ConcreteBuf "") (ConcreteBuf ""))
+          s = Expr.simplify e
+        equal <- checkEquiv e s
+        assertEqualM "Must be equal" True equal
   ]
   , testGroup "isUnsat-concrete-tests" [
       test "disjunction-left-false" $ do
