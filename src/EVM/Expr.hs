@@ -348,8 +348,9 @@ copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e
               if srcOffset + size < srcOffset -- overflow, read will continue from begining of the buffer
                 then
                   let headSize = (maxWord256 - srcOffset) + 1
+                      tailSize = size - headSize
                       sliceHead = BS.replicate (unsafeInto headSize) 0
-                      sliceTail = BS.take (unsafeInto (size - headSize)) src
+                      sliceTail = padRight (unsafeInto tailSize) $ BS.take (unsafeInto tailSize) src
                    in
                     sliceHead <> sliceTail
                 else BS.replicate (unsafeInto size) 0
