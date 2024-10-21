@@ -261,7 +261,9 @@ equivalence cmd = do
       False -> liftIO $ do
         putStrLn "No discrepancies found"
         when (any isUnknown res || any isError res) $ do
-          putStrLn $ "But " <> (show $ length $ filter isUnknown res) <> " timeout(s) and/or " <> (show $ length $ filter isError res) <> " error(s)/incomplete execution(s) occurred"
+          putStrLn "But the following issues occurred:"
+          forM_ (groupIssues (filter isError res)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
+          forM_ (groupIssues (filter isUnknown res)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
           exitFailure
       True -> liftIO $ do
         let cexs = mapMaybe getCex res

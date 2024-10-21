@@ -15,7 +15,7 @@ import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, isError, VerifyResult, ProofResult (..))
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, isUnknown, isError, groupIssues)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
@@ -27,7 +27,6 @@ import Control.Monad.State.Strict (execState, get, put, liftIO)
 import Optics.Core
 import Optics.State
 import Optics.State.Operators
-import Data.List (sort, group)
 import Data.Binary.Get (runGet)
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSLazy
@@ -225,9 +224,10 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     -- check postconditions against vm
     (e, results) <- verify solvers (makeVeriOpts opts) (symbolify vm') (Just postcondition)
     let allReverts = not . (any Expr.isSuccess) . flattenExpr $ e
-    when (any isError results) $ liftIO $ do
+    when (any isUnknown results || any isError results) $ liftIO $ do
       putStrLn $ "      \x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the test " <> Text.unpack testName <> " due to: ";
-      forM_ (countOccurrences (filter isError results)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
+      forM_ (groupIssues (filter isError results)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
+      forM_ (groupIssues (filter isUnknown results)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
 
     -- display results
     if all isQed results
@@ -244,14 +244,6 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
       let y = symFailure opts testName (fst cd) types x
       liftIO $ putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n" <> Text.unpack y
       pure False
-    where
-      countOccurrences :: [VerifyResult] -> [(Integer, String)]
-      countOccurrences results = map (\g -> (into (length g), head g)) grouped
-        where
-          getProofErr (EVM.SymExec.Error k) = k
-          getProofErr _ = internalError "shouldn't happen"
-          sorted = sort $ map getProofErr results
-          grouped = group sorted
 
 allBranchRev :: Text
 allBranchRev = intercalate "\n"

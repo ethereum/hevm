@@ -15,7 +15,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Containers.ListUtils (nubOrd)
 import Data.DoubleWord (Word256)
-import Data.List (foldl', sortBy)
+import Data.List (foldl', sortBy, sort, group)
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -76,6 +76,16 @@ isCex _ = False
 isQed :: ProofResult a b c d -> Bool
 isQed (Qed _) = True
 isQed _ = False
+
+groupIssues :: [ProofResult a b c String] -> [(Integer, String)]
+groupIssues results = map (\g -> (into (length g), head g)) grouped
+  where
+    getErr :: ProofResult a b c String -> String
+    getErr (EVM.SymExec.Error k) = k
+    getErr (EVM.SymExec.Unknown _) = "SMT result timeout/unknown"
+    getErr _ = internalError "shouldn't happen"
+    sorted = sort $ map getErr results
+    grouped = group sorted
 
 data VeriOpts = VeriOpts
   { simp :: Bool
