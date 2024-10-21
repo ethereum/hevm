@@ -5,6 +5,26 @@ circumstances. This allows to e.g. create two functions, one that is known to be
 another that uses less gas, but is hard to check for correctness. Then, with equivalence
 checking, one can check whether the two behave the same.
 
+The notion of equivalence in hevm is defined as follows. Two contracts are equivalent
+if for all possible calldata and state, after execution has finished, their observable
+storage state is equivalent and they return the same value. In particular, the
+following is NOT checked when checking for equivalence:
+- [Gas](https://ethereum.org/en/developers/docs/gas/) consumption
+- [Events](https://solidity-by-example.org/events/) emitted
+- Maximum stack depth
+- Maximum memory usage
+
+Note that in the Solidity ABI, the calldata's first 4 bytes are the
+[function selector](https://docs.soliditylang.org/en/latest/abi-spec.html#function-selector)
+which decide which function is being called, along with the potential
+[fallback](https://solidity-by-example.org/fallback/) function mechanism.
+Hence, treating calldata as symbolic covers all possible function calls,
+including fallback functions. While not all contracts
+[follow the Solidity ABI](https://github.com/ethereum/requests-for-proposals/blob/master/open-rfps/pectra-system-contracts-audit.md),
+since hevm's symbolic equivalence checker does not distinguish between function
+selector and function parameter bytes in the calldata, it will still correctly
+check the equivalence of such non-conforming contracts.
+
 ## Finding Discrepancies
 
 Let's see this toy contract, in file [contract1.sol](code_examples/contract1.sol):
