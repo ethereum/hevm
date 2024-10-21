@@ -65,7 +65,7 @@ data Task = Task
 data CheckSatResult
   = Sat SMTCex
   | Unsat
-  | Timeout String
+  | Unknown String
   | Error String
   deriving (Show, Eq)
 
@@ -144,8 +144,8 @@ withSolvers solver count threads timeout cont = do
                 res <- do
                     case sat of
                       "unsat" -> pure Unsat
-                      "timeout" -> pure $ Timeout "Result timeout by SMT solver"
-                      "unknown" -> pure $ Timeout "Result unknown by SMT solver"
+                      "timeout" -> pure $ Unknown "Result timeout by SMT solver"
+                      "unknown" -> pure $ Unknown "Result unknown by SMT solver"
                       "sat" -> if null refineEqs then Sat <$> getModel inst cexvars
                                else do
                                     let refinedSMT2 = SMT2 refineEqs mempty mempty (ps <> refps)
@@ -154,8 +154,8 @@ withSolvers solver count threads timeout cont = do
                                     sat2 <- sendLine inst "(check-sat)"
                                     case sat2 of
                                       "unsat" -> pure Unsat
-                                      "timeout" -> pure $ Timeout "Result timeout by SMT solver"
-                                      "unknown" -> pure $ Timeout "Result unknown by SMT solver"
+                                      "timeout" -> pure $ Unknown "Result timeout by SMT solver"
+                                      "unknown" -> pure $ Unknown "Result unknown by SMT solver"
                                       "sat" -> Sat <$> getModel inst cexvars
                                       _ -> pure . Error $ "Unable to parse solver output: " <> T.unpack sat2
                       _ -> pure . Error $ "Unable to parse SMT solver output: " <> T.unpack sat

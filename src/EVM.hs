@@ -656,16 +656,15 @@ exec1 = do
                   burn (g_verylow + (unsafeInto g_mcopy)) $
                     accessMemoryRange srcOff sz $ accessMemoryRange dstOff sz $ do
                       next
-                      m <- gets (.state.memory)
-                      case m of
-                        ConcreteMemory mem -> do
-                          buf <- freezeMemory mem
-                          copyBytesToMemory buf sz srcOff dstOff
-                        SymbolicMemory mem -> do
-                          assign (#state % #memory) (SymbolicMemory $ copySlice srcOff dstOff sz mem mem)
+                      mcopy sz srcOff dstOff
                 _ -> do
                   -- symbolic, ignore gas
                   next
+                  mcopy sz srcOff dstOff
+              assign (#state % #stack) xs
+            _ -> underrun
+            where
+            mcopy sz srcOff dstOff = do
                   m <- gets (.state.memory)
                   case m of
                     ConcreteMemory mem -> do
@@ -673,8 +672,6 @@ exec1 = do
                       copyBytesToMemory buf sz srcOff dstOff
                     SymbolicMemory mem -> do
                       assign (#state % #memory) (SymbolicMemory $ copySlice srcOff dstOff sz mem mem)
-              assign (#state % #stack) xs
-            _ -> underrun
 
         OpMstore ->
           case stk of

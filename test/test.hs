@@ -3666,7 +3666,7 @@ tests = testGroup "hevm"
             case any isCex res of
               False -> liftIO $ do
                 print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
-                let timeouts = filter isTimeout res
+                let timeouts = filter isUnknown res
                 let errors = filter isError res
                 unless (null timeouts && null errors) $ do
                   putStrLnM $ "But " <> (show $ length timeouts) <> " timeout(s) and " <>  (show $ length errors) <> " error(s) occurred"
@@ -3719,7 +3719,7 @@ checkEquivBase mkprop l r expect = do
          Unsat -> Just True
          Sat _ -> Just False
          EVM.Solvers.Error _ -> Just (not expect)
-         EVM.Solvers.Timeout _ -> Nothing
+         EVM.Solvers.Unknown _ -> Nothing
      when (ret == Just (not expect)) $ print res
      pure ret
 

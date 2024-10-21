@@ -56,14 +56,14 @@ data LoopHeuristic
   | StackBased
   deriving (Eq, Show, Read, ParseField, ParseFields, ParseRecord, Generic)
 
-data ProofResult a b c d = Qed a | Cex b | Timeout c | Error d
+data ProofResult a b c d = Qed a | Cex b | Unknown c | Error d
   deriving (Show, Eq)
 type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End) String
 type EquivResult = ProofResult () (SMTCex) () String
 
-isTimeout :: ProofResult a b c d -> Bool
-isTimeout (EVM.SymExec.Timeout _) = True
-isTimeout _ = False
+isUnknown :: ProofResult a b c d -> Bool
+isUnknown (EVM.SymExec.Unknown _) = True
+isUnknown _ = False
 
 isError :: ProofResult a b c d -> Bool
 isError (EVM.SymExec.Error _) = True
@@ -633,7 +633,7 @@ verify solvers opts preState maybepost = do
     toVRes :: (CheckSatResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
       Sat model -> Cex (leaf, expandCex preState model)
-      EVM.Solvers.Timeout _ -> EVM.SymExec.Timeout leaf
+      EVM.Solvers.Unknown _ -> EVM.SymExec.Unknown leaf
       EVM.Solvers.Error e -> EVM.SymExec.Error e
       Unsat -> Qed ()
 
@@ -746,7 +746,7 @@ equivalenceCheck' solvers branchesA branchesB = do
               -- potential race, but it doesn't matter for correctness
               atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
               pure (Qed (), False)
-        (_, EVM.Solvers.Timeout _) -> pure (EVM.SymExec.Timeout (), False)
+        (_, EVM.Solvers.Unknown _) -> pure (EVM.SymExec.Unknown (), False)
         (_, EVM.Solvers.Error txt) -> pure (EVM.SymExec.Error txt, False)
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
@@ -842,7 +842,7 @@ showModel cd (expr, res) = do
       putStrLn ""
       putStrLn "--- Branch ---"
       putStrLn $ "Error during SMT solving, cannot check branch " <> e
-    EVM.Solvers.Timeout reason -> do
+    EVM.Solvers.Unknown reason -> do
       putStrLn ""
       putStrLn "--- Branch ---"
       putStrLn $ "Unable to produce a model for the following end state due to '" <> reason <> "' :"
@@ -1056,6 +1056,6 @@ getCex :: ProofResult a b c d -> Maybe b
 getCex (Cex c) = Just c
 getCex _ = Nothing
 
-getTimeout :: ProofResult a b c d-> Maybe c
-getTimeout (EVM.SymExec.Timeout c) = Just c
-getTimeout _ = Nothing
+getUnknown :: ProofResult a b c d-> Maybe c
+getUnknown (EVM.SymExec.Unknown c) = Just c
+getUnknown _ = Nothing
