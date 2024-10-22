@@ -260,8 +260,10 @@ equivalence cmd = do
     case any isCex res of
       False -> liftIO $ do
         putStrLn "No discrepancies found"
-        when (any isTimeout res) $ do
-          putStrLn "But timeout(s) occurred"
+        when (any isUnknown res || any isError res) $ do
+          putStrLn "But the following issues occurred:"
+          forM_ (groupIssues (filter isError res)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
+          forM_ (groupIssues (filter isUnknown res)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
           exitFailure
       True -> liftIO $ do
         let cexs = mapMaybe getCex res
@@ -345,7 +347,7 @@ assert cmd = do
         showExtras solvers cmd calldata expr
       _ -> do
         let cexs = snd <$> mapMaybe getCex res
-            timeouts = mapMaybe getTimeout res
+            smtUnknowns = mapMaybe getUnknown res
             counterexamples
               | null cexs = []
               | otherwise =
@@ -354,15 +356,15 @@ assert cmd = do
                  , ""
                  ] <> fmap (formatCex (fst calldata) Nothing) cexs
             unknowns
-              | null timeouts = []
+              | null smtUnknowns = []
               | otherwise =
                  [ ""
                  , "Could not determine reachability of the following end state(s):"
                  , ""
-                 ] <> fmap (formatExpr) timeouts
+                 ] <> fmap (formatExpr) smtUnknowns
         liftIO $ T.putStrLn $ T.unlines (counterexamples <> unknowns)
         showExtras solvers cmd calldata expr
-        liftIO $ exitFailure
+        liftIO exitFailure
 
 showExtras :: App m => SolverGroup -> Command Options.Unwrapped -> (Expr Buf, [Prop]) -> Expr End -> m ()
 showExtras solvers cmd calldata expr = do

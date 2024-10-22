@@ -896,9 +896,8 @@ tests = testGroup "hevm"
         (Expr.indexWord (Lit 2) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
     , test "encodeConcreteStore-overwrite" $
       assertEqualM ""
-        "(store (store ((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000) (_ bv1 256) (_ bv2 256)) (_ bv3 256) (_ bv4 256))"
-        (EVM.SMT.encodeConcreteStore $
-          Map.fromList [(W256 1, W256 2), (W256 3, W256 4)])
+        (pure "(store (store ((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000) (_ bv1 256) (_ bv2 256)) (_ bv3 256) (_ bv4 256))")
+        (EVM.SMT.encodeConcreteStore $ Map.fromList [(W256 1, W256 2), (W256 3, W256 4)])
     , test "indexword-oob-sym" $ assertEqualM ""
         -- indexWord should return 0 for oob access
         (LitByte 0x0)
@@ -1296,6 +1295,51 @@ tests = testGroup "hevm"
         let a = fromJust $ Map.lookup (Var "arg1") cex.vars
         assertEqualM "unexpected cex value" a 44
         putStrLnM "expected counterexample found"
+      ,
+      test "symbolic-mcopy" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 a, uint256 s) external returns (uint) {
+                require(a < 5);
+                assembly {
+                    mcopy(0x2, 0, s)
+                    a:=mload(s)
+                }
+                assert(a < 5);
+                return a;
+              }
+             }
+            |]
+        let sig = Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
+        (_, k) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        putStrLnM $ "Ret: " <> (show k)
+      ,
+      test "symbolic-copyslice" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 a, uint256 s) external returns (uint) {
+                require(a < 10);
+                if (a >= 8) {
+                  assembly {
+                      calldatacopy(0x5, s, s)
+                      a:=mload(s)
+                  }
+                } else {
+                  assembly {
+                      calldatacopy(0x2, 0x2, 5)
+                      a:=mload(s)
+                  }
+                }
+                assert(a < 9);
+                return a;
+              }
+             }
+            |]
+        let sig = Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
+        (_, k) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        putStrLnM $ "Ret: " <> (show k)
   ]
   , testGroup "Symbolic-Constructor-Args"
     -- this produced some hard to debug failures. keeping it around since it seemed to exercise the contract creation code in interesting ways...
@@ -2319,7 +2363,7 @@ tests = testGroup "hevm"
             post prestate leaf =
               let y = case getStaticAbiArgs 1 prestate of
                         [y'] -> y'
-                        _ -> error "expected 1 arg"
+                        _ -> internalError "expected 1 arg"
                   this = prestate.state.codeContract
                   prestore = (fromJust (Map.lookup this prestate.env.contracts)).storage
                   prex = Expr.readStorage' (Lit 0) prestore
@@ -3661,10 +3705,11 @@ tests = testGroup "hevm"
             case any isCex res of
               False -> liftIO $ do
                 print $ "OK. Took " <> (show $ diffUTCTime end start) <> " seconds"
-                let timeouts = filter isTimeout res
-                unless (null timeouts) $ do
-                  putStrLnM $ "But " <> (show $ length timeouts) <> " timeout(s) occurred"
-                  internalError "Encountered timeouts"
+                let timeouts = filter isUnknown res
+                let errors = filter isError res
+                unless (null timeouts && null errors) $ do
+                  putStrLnM $ "But " <> (show $ length timeouts) <> " timeout(s) and " <>  (show $ length errors) <> " error(s) occurred"
+                  internalError "Encountered timeout(s) and/or error(s)"
               True -> liftIO $ do
                 putStrLnM $ "Not OK: " <> show f <> " Got: " <> show res
                 internalError "Was NOT equivalent"
@@ -3712,8 +3757,8 @@ checkEquivBase mkprop l r expect = do
        ret = case res of
          Unsat -> Just True
          Sat _ -> Just False
-         Error _ -> Just (not expect)
-         EVM.Solvers.Unknown -> Nothing
+         EVM.Solvers.Error _ -> Just (not expect)
+         EVM.Solvers.Unknown _ -> Nothing
      when (ret == Just (not expect)) $ print res
      pure ret
 
