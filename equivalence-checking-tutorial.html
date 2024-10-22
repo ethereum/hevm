@@ -280,6 +280,15 @@ consume the same amount of gas and have widely different EVM bytecodes. Yet for
 an outside observer, they behave the same. Notice that hevm didn't simply fuzz
 the contract and within a given out of time it didn't find a counterexample.
 Instead, it <em>proved</em> the two equivalent from an outside observer perspective.</p>
+<h2 id="dealing-with-already-compiled-contracts"><a class="header" href="#dealing-with-already-compiled-contracts">Dealing with Already Compiled Contracts</a></h2>
+<p>If the contracts have already been compiled into a hex string, you can paste
+them into files <code>a.txt</code> and <code>b.txt</code> and compare them via:</p>
+<pre><code class="language-shell">$ hevm equivalence --code-a "$(&lt;a.txt)" --code-b "$(&lt;b.txt)"
+</code></pre>
+<p>You can also copy-paste the contents of the hex strings directly into the
+command line, although this can become cumbersome:</p>
+<pre><code class="language-shell">$ hevm equivalence --code-a "6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f600190506002811460455760446048565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212208c57ae04774d9ebae7d1d11f9d5e730075068bc7988d4c83c6fed85b7f062e7b64736f6c634300081a0033" --code-b "6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220bd2f8a1ba281308f845e212d2b5eceab85e029909fa2409cdca7ede039bae26564736f6c634300081a0033"
+</code></pre>
 
                     </main>
 
