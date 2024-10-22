@@ -824,11 +824,11 @@ strip0x bs = if "0x" `Char8.isPrefixOf` bs then Char8.drop 2 bs else bs
 strip0x' :: String -> String
 strip0x' s = if "0x" `isPrefixOf` s then drop 2 s else s
 
-hexByteString :: String -> ByteString -> ByteString
-hexByteString msg bs =
+hexByteString :: ByteString -> Maybe ByteString
+hexByteString bs =
   case BS16.decodeBase16Untyped bs of
-    Right x -> x
-    _ -> internalError $ "invalid hex bytestring for " ++ msg
+    Right x -> pure x
+    Left _ -> Nothing
 
 hexText :: Text -> ByteString
 hexText t =
