@@ -5,10 +5,6 @@
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     foundry.url = "github:shazow/foundry.nix/47f8ae49275eeff9bf0526d45e3c1f76723bb5d3";
-    flake-compat = {
-      url = "github:edolstra/flake-compat";
-      flake = false;
-    };
     solidity = {
       url = "github:ethereum/solidity/8a97fa7a1db1ec509221ead6fea6802c684ee887";
       flake = false;
@@ -27,7 +23,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, solc-pkgs, ... }:
+  outputs = { nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, solc-pkgs, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs {
@@ -36,21 +32,21 @@
           config = { allowBroken = true; };
         });
         solc = (solc-pkgs.mkDefault pkgs pkgs.solc_0_8_26);
-        testDeps = with pkgs; [
-          go-ethereum
+        testDeps = [
           solc
-          z3_4_12
-          cvc5
-          git
-          bitwuzla
           foundry.defaultPackage.${system}
+          pkgs.go-ethereum
+          pkgs.z3_4_12
+          pkgs.cvc5
+          pkgs.git
+          pkgs.bitwuzla
         ];
 
         secp256k1-static = stripDylib (pkgs.secp256k1.overrideAttrs (attrs: {
           configureFlags = attrs.configureFlags ++ [ "--enable-static" ];
         }));
 
-        hsPkgs = ps :
+        hspkgs = ps :
           ps.haskellPackages.override {
             overrides = hfinal: hprev: {
               with-utf8 =
@@ -61,63 +57,27 @@
               witch = ps.haskell.lib.doJailbreak hprev.witch;
             };
           };
+        hlib = pkgs.haskell.lib;
 
+        # base hevm derivation.
+        # parameterized on the pkgs definition to allow use of `pkgsStatic` or `pkgs` as needed.
         hevmBase = ps :
-          ((hsPkgs ps).callCabal2nix "hevm" ./. {
-            # Haskell libs with the same names as C libs...
-            # Depend on the C libs, not the Haskell libs.
-            # These are system deps, not Cabal deps.
-            secp256k1 = ps.secp256k1;
-          }).overrideAttrs(final: prev: {
-            HEVM_SOLIDITY_REPO = solidity;
-            HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
-            HEVM_FORGE_STD_REPO = forge-std;
-            DAPP_SOLC = "${solc}/bin/solc";
-          });
-
-        hevmUnwrapped = { ps ? if pkgs.stdenv.isDarwin then pkgs else pkgs.pkgsStatic } :
-          (ps.lib.pipe
-            (hevmBase ps)
+          ps.lib.pipe
+            (((hspkgs ps).callCabal2nix "hevm" ./. {
+              secp256k1 = ps.secp256k1;
+            }).overrideAttrs(final: prev: {
+              HEVM_SOLIDITY_REPO = solidity;
+              HEVM_ETHEREUM_TESTS_REPO = ethereum-tests;
+              HEVM_FORGE_STD_REPO = forge-std;
+              DAPP_SOLC = "${solc}/bin/solc";
+            }))
             [
-              (ps.haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
-              (ps.haskell.lib.compose.addTestToolDepends testDeps)
-              (ps.haskell.lib.compose.appendConfigureFlags (
-                [ "-fci"
-                  "-O2"
-                ]
-                ++ ps.lib.optionals ps.stdenv.isDarwin
-                [ "--extra-lib-dirs=${stripDylib (ps.gmp.override { withStatic = true; })}/lib"
-                  "--extra-lib-dirs=${stripDylib secp256k1-static}/lib"
-                  "--extra-lib-dirs=${stripDylib (ps.libff.override { enableStatic = true; })}/lib"
-                  "--extra-lib-dirs=${ps.szlib.static}/lib"
-                  "--extra-lib-dirs=${stripDylib (ps.libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
-                  "--extra-lib-dirs=${stripDylib (ps.ncurses.override { enableStatic = true; })}/lib"
-                ]))
-              ps.haskell.lib.compose.dontHaddock
-              ps.haskell.lib.compose.doCheck
-          ]);
-
-        # wrapped binary for use on systems with nix available.
-        # does not statically link.
-        # ensures all required runtime deps are available and on path.
-        hevmWrapped =
-          pkgs.symlinkJoin {
-            name = "hevm";
-            paths = [ (pkgs.haskell.lib.dontCheck (hevmUnwrapped { ps = pkgs; } )) ];
-            buildInputs = [ pkgs.makeWrapper ];
-            postBuild = ''
-              wrapProgram $out/bin/hevm \
-                --prefix PATH : "${pkgs.lib.makeBinPath [
-                  pkgs.bash
-                  pkgs.coreutils
-                  pkgs.git
-                  pkgs.z3
-                  pkgs.cvc5
-                  pkgs.bitwuzla
-                  solc
-                ]}"
-            '';
-          };
+              (hlib.compose.overrideCabal (old: { testTarget = "test"; }))
+              (hlib.compose.addTestToolDepends testDeps)
+              (hlib.compose.appendConfigureFlags [ "-fci" "-O2" ])
+              hlib.compose.dontHaddock
+              hlib.compose.doCheck
+            ];
 
         # "static" binary for distribution
         # on linux this is actually a real fully static binary
@@ -131,10 +91,10 @@
           codesign_allocate = "${pkgs.darwin.binutils.bintools}/bin/codesign_allocate";
           codesign = "${pkgs.darwin.sigtool}/bin/codesign";
         in if pkgs.stdenv.isLinux
-        then pkgs.haskell.lib.dontCheck hevmUnwrapped
+        then hlib.dontCheck (hevmBase pkgs.pkgsStatic)
         else pkgs.runCommand "stripNixRefs" {} ''
           mkdir -p $out/bin
-          cp ${pkgs.haskell.lib.dontCheck hevmUnwrapped}/bin/hevm $out/bin/
+          cp ${hlib.dontCheck (forceStaticDepsMacos (hevmBase pkgs))}/bin/hevm $out/bin/
 
           # get the list of dynamic libs from otool and tidy the output
           libs=$(${otool} -L $out/bin/hevm | tail -n +2 | sed 's/^[[:space:]]*//' | cut -d' ' -f1)
@@ -160,6 +120,29 @@
           chmod 555 $out/bin/hevm
         '';
 
+
+        # wrapped binary for use on systems with nix available.
+        # does not statically link.
+        # ensures all required runtime deps are available and on path.
+        hevmWrapped =
+          pkgs.symlinkJoin {
+            name = "hevm";
+            paths = [ (hlib.dontCheck (hevmBase pkgs)) ];
+            buildInputs = [ pkgs.makeWrapper ];
+            postBuild = ''
+              wrapProgram $out/bin/hevm \
+                --prefix PATH : "${pkgs.lib.makeBinPath [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.git
+                  pkgs.z3
+                  pkgs.cvc5
+                  pkgs.bitwuzla
+                  solc
+                ]}"
+            '';
+          };
+
         # if we pass a library folder to ghc via --extra-lib-dirs that contains
         # only .a files, then ghc will link that library statically instead of
         # dynamically (even if --enable-executable-static is not passed to cabal).
@@ -171,12 +154,25 @@
           rm -rf $out/**/*.dylib
         '';
 
+        # ensures that all required deps will be linked statically on macos builds
+        forceStaticDepsMacos = p :
+          hlib.appendConfigureFlags p
+            [
+              "--extra-lib-dirs=${stripDylib (pkgs.gmp.override { withStatic = true; })}/lib"
+              "--extra-lib-dirs=${stripDylib secp256k1-static}/lib"
+              "--extra-lib-dirs=${stripDylib (pkgs.libff.override { enableStatic = true; })}/lib"
+              "--extra-lib-dirs=${pkgs.szlib.static}/lib"
+              "--extra-lib-dirs=${stripDylib (pkgs.libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
+              "--extra-lib-dirs=${stripDylib (pkgs.ncurses.override { enableStatic = true; })}/lib"
+            ];
+
+
       in rec {
 
         # --- packages ----
 
-        packages.ci = with pkgs.haskell.lib; doBenchmark (dontHaddock (disableLibraryProfiling hevmUnwrapped));
-        packages.noTests = pkgs.haskell.lib.dontCheck hevmUnwrapped;
+        packages.ci = pkgs.lib.pipe (hevmBase (if pkgs.stdenv.isLinux then pkgs.pkgsStatic else pkgs)) (with hlib.compose; [doBenchmark dontHaddock disableLibraryProfiling]);
+        packages.unwrapped = hlib.dontCheck (hevmBase pkgs);
         packages.hevm = hevmWrapped;
         packages.redistributable = hevmRedistributable;
         packages.default = packages.hevm;
@@ -188,17 +184,17 @@
 
         # --- shell ---
 
-        devShells.default = with pkgs; let
-          libraryPath = "${lib.makeLibraryPath [ libff secp256k1 gmp ]}";
-        in haskellPackages.shellFor {
+        devShells.default = let
+          libraryPath = "${pkgs.lib.makeLibraryPath [ pkgs.libff pkgs.secp256k1 pkgs.gmp ]}";
+        in (hspkgs pkgs).shellFor {
           packages = _: [ (hevmBase pkgs) ];
           buildInputs = [
-            curl
-            haskellPackages.cabal-install
-            mdbook
-            yarn
-            haskellPackages.eventlog2html
-            haskellPackages.haskell-language-server
+            pkgs.curl
+            pkgs.mdbook
+            pkgs.yarn
+            (hspkgs pkgs).cabal-install
+            (hspkgs pkgs).eventlog2html
+            (hspkgs pkgs).haskell-language-server
           ] ++ testDeps;
           withHoogle = true;
 
@@ -210,7 +206,7 @@
 
           # point cabal repl to system deps
           LD_LIBRARY_PATH = libraryPath;
-          shellHook = lib.optionalString stdenv.isDarwin ''
+          shellHook = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
             export DYLD_LIBRARY_PATH="${libraryPath}";
           '';
         };
