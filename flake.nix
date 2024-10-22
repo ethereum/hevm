@@ -75,40 +75,49 @@
             DAPP_SOLC = "${solc}/bin/solc";
           });
 
-        hevmUnwrapped = let
-            ps = if pkgs.stdenv.isDarwin then pkgs else pkgs.pkgsStatic;
-          in (with ps; lib.pipe
+        hevmUnwrapped = { ps ? if pkgs.stdenv.isDarwin then pkgs else pkgs.pkgsStatic } :
+          (ps.lib.pipe
             (hevmBase ps)
             [
-              (haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
-              (haskell.lib.compose.addTestToolDepends testDeps)
-              (haskell.lib.compose.appendConfigureFlags (
+              (ps.haskell.lib.compose.overrideCabal (old: { testTarget = "test"; }))
+              (ps.haskell.lib.compose.addTestToolDepends testDeps)
+              (ps.haskell.lib.compose.appendConfigureFlags (
                 [ "-fci"
                   "-O2"
                 ]
-                ++ lib.optionals stdenv.isDarwin
-                [ "--extra-lib-dirs=${stripDylib (pkgs.gmp.override { withStatic = true; })}/lib"
+                ++ ps.lib.optionals ps.stdenv.isDarwin
+                [ "--extra-lib-dirs=${stripDylib (ps.gmp.override { withStatic = true; })}/lib"
                   "--extra-lib-dirs=${stripDylib secp256k1-static}/lib"
-                  "--extra-lib-dirs=${stripDylib (libff.override { enableStatic = true; })}/lib"
-                  "--extra-lib-dirs=${zlib.static}/lib"
-                  "--extra-lib-dirs=${stripDylib (libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
-                  "--extra-lib-dirs=${stripDylib (ncurses.override { enableStatic = true; })}/lib"
+                  "--extra-lib-dirs=${stripDylib (ps.libff.override { enableStatic = true; })}/lib"
+                  "--extra-lib-dirs=${ps.szlib.static}/lib"
+                  "--extra-lib-dirs=${stripDylib (ps.libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
+                  "--extra-lib-dirs=${stripDylib (ps.ncurses.override { enableStatic = true; })}/lib"
                 ]))
-              haskell.lib.compose.dontHaddock
-              haskell.lib.compose.doCheck
+              ps.haskell.lib.compose.dontHaddock
+              ps.haskell.lib.compose.doCheck
           ]);
 
-        # wrapped binary for use on systems with nix available. ensures all
-        # required runtime deps are available and on path
-        hevmWrapped = with pkgs; symlinkJoin {
-          name = "hevm";
-          paths = [ (haskell.lib.dontCheck hevmUnwrapped) ];
-          buildInputs = [ makeWrapper ];
-          postBuild = ''
-            wrapProgram $out/bin/hevm \
-              --prefix PATH : "${lib.makeBinPath ([ bash coreutils git solc z3 cvc5 bitwuzla ])}"
-          '';
-        };
+        # wrapped binary for use on systems with nix available.
+        # does not statically link.
+        # ensures all required runtime deps are available and on path.
+        hevmWrapped =
+          pkgs.symlinkJoin {
+            name = "hevm";
+            paths = [ (pkgs.haskell.lib.dontCheck (hevmUnwrapped { ps = pkgs; } )) ];
+            buildInputs = [ pkgs.makeWrapper ];
+            postBuild = ''
+              wrapProgram $out/bin/hevm \
+                --prefix PATH : "${pkgs.lib.makeBinPath [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.git
+                  pkgs.z3
+                  pkgs.cvc5
+                  pkgs.bitwuzla
+                  solc
+                ]}"
+            '';
+          };
 
         # "static" binary for distribution
         # on linux this is actually a real fully static binary
