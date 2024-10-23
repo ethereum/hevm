@@ -290,16 +290,10 @@ readWord i b = readWordFromBytes i b
 -- Attempts to read a concrete word from a buffer by reading 32 individual bytes and joining them together
 -- returns an abstract ReadWord expression if a concrete word cannot be constructed
 readWordFromBytes :: Expr EWord -> Expr Buf -> Expr EWord
-readWordFromBytes (Lit idx) (ConcreteBuf bs)
-  | idx + 32 < idx = let
-    -- Overflowing, part of the read will be from the beginning of src
-      hd = BS.replicate (unsafeInto (maxWord256 - idx) + 1) 0
-      tl = BS.take (32 - BS.length hd) bs
-    in Lit $ word $ hd <> tl
-  | otherwise =
-    case tryInto idx of
-      Left _ -> Lit 0
-      Right i -> Lit $ word $ padRight 32 $ BS.take 32 $ BS.drop i bs
+readWordFromBytes (Lit idx) (ConcreteBuf bs) =
+  case tryInto idx of
+    Left _ -> Lit 0
+    Right i -> Lit $ word $ padRight 32 $ BS.take 32 $ BS.drop i bs
 readWordFromBytes i@(Lit idx) buf = let
     bytes = [readByte (Lit i') buf | i' <- [idx .. idx + 31]]
   in if all isLitByte bytes
@@ -344,16 +338,7 @@ copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e
   , size < maxBytes =
       let hd = padRight (unsafeInto dstOffset) $ BS.take (unsafeInto dstOffset) dst
           sl = if srcOffset > unsafeInto (BS.length src)
-            then
-              if srcOffset + size < srcOffset -- overflow, read will continue from begining of the buffer
-                then
-                  let headSize = (maxWord256 - srcOffset) + 1
-                      tailSize = size - headSize
-                      sliceHead = BS.replicate (unsafeInto headSize) 0
-                      sliceTail = padRight (unsafeInto tailSize) $ BS.take (unsafeInto tailSize) src
-                   in
-                    sliceHead <> sliceTail
-                else BS.replicate (unsafeInto size) 0
+            then BS.replicate (unsafeInto size) 0
             else padRight (unsafeInto size) $ BS.take (unsafeInto size) (BS.drop (unsafeInto srcOffset) src)
           tl = BS.drop (unsafeInto dstOffset + unsafeInto size) dst
       in ConcreteBuf $ hd <> sl <> tl
