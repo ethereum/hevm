@@ -3,6 +3,7 @@
 module EVM.CheatsTH where
 
 import EVM.ABI
+import EVM.Types (internalError)
 
 import Data.ByteString.Char8 (pack)
 import Data.Map.Strict qualified as Map
@@ -10,7 +11,6 @@ import Data.Vector qualified as V
 
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
-
 
 liftByteString :: String -> Q Exp
 liftByteString txt = AppE (VarE 'pack) <$> lift txt
@@ -23,7 +23,7 @@ liftAbiType AbiAddressType = [| AbiAddress |]
 liftAbiType (AbiBytesType n) = [| AbiBytes $(lift n) |]
 liftAbiType AbiStringType = [| AbiString |]
 liftAbiType AbiBytesDynamicType = [| AbiBytesDynamic |]
-liftAbiType _ = error "unimplemented"
+liftAbiType _ = internalError "unimplemented"
 
 envReadSingleCheat :: String -> Q Exp
 envReadSingleCheat sigString = [|
@@ -40,7 +40,7 @@ envReadSingleCheat sigString = [|
             case Map.lookup varStr vm.osEnv of
               Just v -> cont v
               Nothing -> query (PleaseReadEnv varStr cont)
-        _ -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode (sigString <> " parameter decoding failed") sig)
    |]
   where
     sigL = liftByteString sigString
@@ -64,7 +64,7 @@ envReadMultipleCheat sigString arrType = [|
             case Map.lookup varStr vm.osEnv of
               Just v -> cont v
               Nothing -> query (PleaseReadEnv varStr cont)
-        _ -> vmError (BadCheatCode sig)
+        _ -> vmError (BadCheatCode (sigString <> " parameter decoding failed") sig)
   |]
   where
     sigL = liftByteString sigString

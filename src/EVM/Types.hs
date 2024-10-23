@@ -546,7 +546,7 @@ data EvmError
   | PrecompileFailure
   | ReturnDataOutOfBounds
   | NonceOverflow
-  | BadCheatCode FunctionSelector
+  | BadCheatCode String FunctionSelector
   | NonexistentFork Int
   deriving (Show, Eq, Ord)
 
