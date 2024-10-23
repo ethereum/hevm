@@ -704,6 +704,14 @@ tests = testGroup "hevm"
         let simplified = Expr.simplify x
         y <- checkEquivAndLHS x simplified
         assertBoolM "Must be equal" y
+     -- TODO
+    , expectFail $ test "word-eq-bug" $ do
+        -- This test is actually OK because the simplified takes into account that it's impossible to find a
+        -- near-collision in the keccak hash
+        let x =  (SLoad (Keccak (AbstractBuf "es")) (SStore (Add (Keccak (ConcreteBuf "")) (Lit 0x1)) (Lit 0xacab) (ConcreteStore (Map.empty))))
+        let simplified = Expr.simplify x
+        y <- checkEquiv x simplified
+        assertBoolM "Must be equal, given keccak distance axiom" y
     ]
   {- NOTE: These tests were designed to test behaviour on reading from a buffer such that the indices overflow 2^256.
            However, such scenarios are impossible in the real world (the operation would run out of gas). The problem
