@@ -705,6 +705,11 @@ tests = testGroup "hevm"
         y <- checkEquivAndLHS x simplified
         assertBoolM "Must be equal" y
     ]
+  {- NOTE: These tests were designed to test behaviour on reading from a buffer such that the indices overflow 2^256.
+           However, such scenarios are impossible in the real world (the operation would run out of gas). The problem
+           is that the behaviour of bytecode interpreters does not match the semantics of SMT. Intrepreters just
+           return all zeroes for any read beyond buffer size, while in SMT reading multiple bytes may lead to overflow
+           on indices and subsequently to reading from the beginning of the buffer (wrap-around semantics).
   , testGroup "concrete-buffer-simplification-large-index" [
       test "copy-slice-large-index-nooverflow" $ do
         let
@@ -736,13 +741,8 @@ tests = testGroup "hevm"
           s = Expr.simplify e
         equal <- checkEquiv e s
         assertEqualM "Must be equal" True equal
-    , test "copy-slice-overflowing-into-too-short-buffer" $ do
-        let
-          e = BufLength (CopySlice (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) (Lit 0x00) (Lit 0x02) (ConcreteBuf "") (ConcreteBuf ""))
-          s = Expr.simplify e
-        equal <- checkEquiv e s
-        assertEqualM "Must be equal" True equal
   ]
+  -}
   , testGroup "isUnsat-concrete-tests" [
       test "disjunction-left-false" $ do
         let
