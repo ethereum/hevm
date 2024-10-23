@@ -1,7 +1,7 @@
 # hevm Book
 
 The hevm book is built using `mdbook` and `yarn`. Known good versions of both
-are included in the nix-shell.
+are included in the flake `devShell`.
 
 ## Running the mdBook server
 

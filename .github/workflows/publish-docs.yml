@@ -13,7 +13,7 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: build docs
-        run: nix-shell --pure --command "cd doc && mdbook build"
+        run: nix develop --ignore-environment --command sh -c "cd doc && mdbook build"
 
       - name: publish docs
         uses: JamesIves/github-pages-deploy-action@v4.6.0
