@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PAnd props are now recursively flattened
 - Double negation in Prop are removed
 - Updated forge to modern version, thereby fixing JSON parsing of new forge JSONs
+- Fixed RPC fetching of contract data
 - Symbolic ABI encoding for tuples, fuzzer for encoder
 - Printing `Addrs` when running `symbolic` for counterexamples and reachable end states
 - Improved symbolic execution tutorial
