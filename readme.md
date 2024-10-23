@@ -51,10 +51,9 @@ nix profile install github:ethereum/hevm
 We use `nix` to manage project dependencies. To start hacking on hevm you should first [install
 nix](https://nixos.org/download.html).
 
-Once nix is installed you can run `nix-shell` (or `nix develop` if you use flakes) from the repo
-root to enter a development shell containing all required dev dependencies. If you use
-[direnv](https://direnv.net/), then you can run `direnv allow`, and the shell will be automatically
-entered each time you cd in the project repo.
+Once nix is installed you can run `nix develop` from the repo root to enter a development shell
+containing all required dev dependencies. If you use [direnv](https://direnv.net/), then you can run
+`direnv allow`, and the shell will be automatically entered each time you cd in the project repo.
 
 Once in the shell you can use the usual `cabal` commands to build and test hevm:
 
