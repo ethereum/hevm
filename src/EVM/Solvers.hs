@@ -17,7 +17,7 @@ import Data.Char (isSpace)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe, isJust, fromJust)
-import Data.Text qualified as TS
+import Data.Either (isLeft)
 import Data.Text.Lazy (Text)
 import Data.Text.Lazy qualified as T
 import Data.Text.Lazy.IO qualified as T
@@ -28,7 +28,7 @@ import EVM.Effects
 import EVM.Fuzz (tryCexFuzz)
 
 import EVM.SMT
-import EVM.Types (W256, Expr(AbstractBuf), internalError)
+import EVM.Types (W256, Expr(AbstractBuf), internalError, Err, getError, getNonError)
 
 -- | Supported solvers
 data Solver
@@ -65,30 +65,28 @@ data Task = Task
 data CheckSatResult
   = Sat SMTCex
   | Unsat
-  | Unknown
-  | Error TS.Text
+  | Unknown String
+  | Error String
   deriving (Show, Eq)
 
 isSat :: CheckSatResult -> Bool
 isSat (Sat _) = True
 isSat _ = False
 
-isErr :: CheckSatResult -> Bool
-isErr (Error _) = True
-isErr _ = False
-
 isUnsat :: CheckSatResult -> Bool
 isUnsat Unsat = True
 isUnsat _ = False
 
-checkSat :: SolverGroup -> SMT2 -> IO CheckSatResult
+checkSat :: SolverGroup -> Err SMT2 -> IO CheckSatResult
 checkSat (SolverGroup taskQueue) script = do
-  -- prepare result channel
-  resChan <- newChan
-  -- send task to solver group
-  writeChan taskQueue (Task script resChan)
-  -- collect result
-  readChan resChan
+  if isLeft script then pure $ Error $ getError script
+  else do
+    -- prepare result channel
+    resChan <- newChan
+    -- send task to solver group
+    writeChan taskQueue (Task (getNonError script) resChan)
+    -- collect result
+    readChan resChan
 
 writeSMT2File :: SMT2 -> Int -> String -> IO ()
 writeSMT2File smt2 count abst =
@@ -96,10 +94,10 @@ writeSMT2File smt2 count abst =
     let content = formatSMT2 smt2 <> "\n\n(check-sat)"
     T.writeFile ("query-" <> (show count) <> "-" <> abst <> ".smt2") content
 
-withSolvers :: App m => Solver -> Natural -> Maybe Natural -> (SolverGroup -> m a) -> m a
-withSolvers solver count timeout cont = do
+withSolvers :: App m => Solver -> Natural -> Natural -> Maybe Natural -> (SolverGroup -> m a) -> m a
+withSolvers solver count threads timeout cont = do
     -- spawn solvers
-    instances <- mapM (const $ liftIO $ spawnSolver solver timeout) [1..count]
+    instances <- mapM (const $ liftIO $ spawnSolver solver threads timeout) [1..count]
     -- spawn orchestration thread
     taskQueue <- liftIO newChan
     availableInstances <- liftIO newChan
@@ -139,15 +137,15 @@ withSolvers solver count timeout cont = do
             out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty ps)
             case out of
               -- if we got an error then return it
-              Left e -> writeChan r (Error ("error while writing SMT to solver: " <> T.toStrict e))
+              Left e -> writeChan r (Error $ "Error while writing SMT to solver: " <> T.unpack e)
               -- otherwise call (check-sat), parse the result, and send it down the result channel
               Right () -> do
                 sat <- sendLine inst "(check-sat)"
                 res <- do
                     case sat of
                       "unsat" -> pure Unsat
-                      "timeout" -> pure Unknown
-                      "unknown" -> pure Unknown
+                      "timeout" -> pure $ Unknown "Result timeout by SMT solver"
+                      "unknown" -> pure $ Unknown "Result unknown by SMT solver"
                       "sat" -> if null refineEqs then Sat <$> getModel inst cexvars
                                else do
                                     let refinedSMT2 = SMT2 refineEqs mempty mempty (ps <> refps)
@@ -156,15 +154,15 @@ withSolvers solver count timeout cont = do
                                     sat2 <- sendLine inst "(check-sat)"
                                     case sat2 of
                                       "unsat" -> pure Unsat
-                                      "timeout" -> pure Unknown
-                                      "unknown" -> pure Unknown
+                                      "timeout" -> pure $ Unknown "Result timeout by SMT solver"
+                                      "unknown" -> pure $ Unknown "Result unknown by SMT solver"
                                       "sat" -> Sat <$> getModel inst cexvars
-                                      _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat2
-                      _ -> pure . Error $ T.toStrict $ "Unable to parse solver output: " <> sat
+                                      _ -> pure . Error $ "Unable to parse solver output: " <> T.unpack sat2
+                      _ -> pure . Error $ "Unable to parse SMT solver output: " <> T.unpack sat
                 writeChan r res
           else do
             when (conf.debug) $ putStrLn "Fuzzing failed to find a Cex, not trying SMT due to onlyCexFuzz"
-            writeChan r Unknown
+            writeChan r $ Error "Option onlyCexFuzz enabled, not running SMT"
 
         -- put the instance back in the list of available instances
         writeChan availableInstances inst
@@ -254,8 +252,8 @@ mkTimeout t = T.pack $ show $ (1000 *)$ case t of
   Just t' -> t'
 
 -- | Arguments used when spawning a solver instance
-solverArgs :: Solver -> Maybe Natural -> [Text]
-solverArgs solver timeout = case solver of
+solverArgs :: Solver -> Natural -> Maybe Natural -> [Text]
+solverArgs solver threads timeout = case solver of
   Bitwuzla ->
     [ "--lang=smt2"
     , "--produce-models"
@@ -263,7 +261,9 @@ solverArgs solver timeout = case solver of
     , "--bv-solver=preprop"
     ]
   Z3 ->
-    [ "-in" ]
+    [ "-st"
+    , "smt.threads=" <> (T.pack $ show threads)
+    , "-in" ]
   CVC5 ->
     [ "--lang=smt"
     , "--produce-models"
@@ -275,11 +275,11 @@ solverArgs solver timeout = case solver of
   Custom _ -> []
 
 -- | Spawns a solver instance, and sets the various global config options that we use for our queries
-spawnSolver :: Solver -> Maybe (Natural) -> IO SolverInstance
-spawnSolver solver timeout = do
+spawnSolver :: Solver -> Natural -> Maybe (Natural) -> IO SolverInstance
+spawnSolver solver threads timeout = do
   (readout, writeout) <- createPipe
   let cmd
-        = (proc (show solver) (fmap T.unpack $ solverArgs solver timeout))
+        = (proc (show solver) (fmap T.unpack $ solverArgs solver threads timeout ))
             { std_in = CreatePipe
             , std_out = UseHandle writeout
             , std_err = UseHandle writeout
@@ -399,8 +399,8 @@ getSExpr :: Text -> (Text, Text)
 getSExpr l = go LPar l 0 []
   where
     go _ text 0 prev@(_:_) = (T.intercalate "" (reverse prev), text)
-    go _ _ r _ | r < 0 = internalError "Unbalanced SExpression"
-    go _ "" _ _  = internalError "Unbalanced SExpression"
+    go _ _ r _ | r < 0 = internalError $ "Unbalanced SExpression: " <> show l
+    go _ "" _ _  = internalError $ "Unbalanced SExpression: " <> show l
     -- find the next left parenthesis
     go LPar line r prev = -- r is how many right parentheses we are missing
       let (before, after) = T.breakOn "(" line in

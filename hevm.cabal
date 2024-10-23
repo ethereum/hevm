@@ -51,9 +51,13 @@ source-repository head
 
 common shared
   if flag(ci)
-    ghc-options: -Werror
+    ghc-options:
+      -Werror
+      -- FIXME: we have to disable this, due to ghc bug: https://gitlab.haskell.org/ghc/ghc/-/issues/24120
+      -Wno-unused-packages
   if flag(devel)
-    ghc-options: -j
+    ghc-options:
+      -j
   if flag(debug)
     ghc-options:
       -j
@@ -66,6 +70,7 @@ common shared
     -Wno-unticked-promoted-constructors
     -Wno-orphans
     -Wno-ambiguous-fields
+    -Wunused-packages
     -optc-Wno-ignored-attributes
     -fspecialize-aggressively
     -fexpose-all-unfoldings
@@ -113,6 +118,7 @@ library
     EVM.Sign,
     EVM.Effects,
   other-modules:
+    EVM.CheatsTH,
     Paths_hevm
   autogen-modules:
     Paths_hevm
@@ -136,10 +142,8 @@ library
   build-depends:
     system-cxx-std-lib                >= 1.0 && < 2.0,
     QuickCheck                        >= 2.13.2 && < 2.15,
-    quickcheck-text                   >= 0.1.2 && < 0.2,
     Decimal                           >= 0.5.1 && < 0.6,
     containers                        >= 0.6.0 && < 0.7,
-    time                              >= 1.11 && < 1.14,
     transformers                      >= 0.5 && < 0.7,
     tree-view                         >= 0.5 && < 0.6,
     aeson                             >= 2.0.0 && < 2.2,
@@ -152,7 +156,6 @@ library
     base16                            >= 1.0 && < 1.1,
     megaparsec                        >= 9.0.0 && < 10.0,
     mtl                               >= 2.2 && < 2.4,
-    directory                         >= 1.3.3 && < 1.4,
     filepath                          >= 1.4.2 && < 1.5,
     cereal                            >= 0.5.8 && < 0.6,
     cryptonite                        >= 0.30 && < 0.31,
@@ -168,7 +171,6 @@ library
     optparse-generic                  >= 1.3.1 && < 1.6,
     pretty-hex                        >= 1.1 && < 1.2,
     rosezipper                        >= 0.2 && < 0.3,
-    witherable                        >= 0.3.5 && < 0.5,
     wreq                              >= 0.5.3 && < 0.6,
     regex-tdfa                        >= 1.2.3 && < 1.4,
     base                              >= 4.9 && < 5,
@@ -180,6 +182,9 @@ library
     filepattern                       >= 0.1.2 && < 0.2,
     witch                             >= 1.1 && < 1.3,
     unliftio-core                     >= 0.2.1 && < 0.3,
+    split                             >= 0.2.3 && < 0.3,
+    template-haskell                  >= 2.19.0 && < 3,
+    extra                             >= 1.7.14 && < 2,
   hs-source-dirs:
     src
 
@@ -195,30 +200,14 @@ executable hevm
   autogen-modules:
     Paths_hevm
   build-depends:
-    QuickCheck,
-    aeson,
-    async,
     base,
-    base16,
-    binary,
     bytestring,
-    containers,
-    cryptonite,
     data-dword,
     directory,
     filepath,
     hevm,
-    mtl,
     optparse-generic,
-    operational,
-    process,
-    quickcheck-text,
-    regex-tdfa,
-    temporary,
     text,
-    vector,
-    stm,
-    spawn,
     optics-core,
     githash,
     witch,
@@ -236,22 +225,19 @@ common test-base
   autogen-modules:
     Paths_hevm
   build-depends:
-    HUnit,
     QuickCheck,
     quickcheck-instances,
     aeson,
     base,
-    base16,
-    binary,
     containers,
     directory,
+    extra,
     bytestring,
     filemanip,
     filepath,
-    here,
     hevm,
+    here,
     mtl,
-    data-dword,
     process,
     tasty,
     tasty-hunit,
@@ -259,16 +245,8 @@ common test-base
     tasty-expected-failure,
     temporary,
     text,
-    regex-tdfa,
-    regex,
-    time,
-    array,
     vector,
-    tasty-bench,
-    stm,
-    spawn,
     witherable,
-    smt2-parser,
     operational,
     optics-core,
     optics-extra,
@@ -277,16 +255,14 @@ common test-base
     exceptions
 
 library test-utils
-  import:
-    test-base
+  import: test-base
   exposed-modules:
     EVM.Test.Utils
     EVM.Test.Tracing
     EVM.Test.BlockchainTests
 
 common test-common
-  import:
-    test-base
+  import: test-base
   if flag(devel)
     ghc-options: -threaded -with-rtsopts=-N
   build-depends:
@@ -299,26 +275,29 @@ common test-common
 --- Test Suites ---
 
 test-suite test
-  import:
-    test-common
+  import: test-common
   type:
     exitcode-stdio-1.0
   main-is:
     test.hs
+  build-depends:
+    base16,
+    binary,
+    data-dword,
+    time,
+    regex
 
 -- these tests require network access so we split them into a separate test
 -- suite to make it easy to skip them when running nix-build
 test-suite rpc-tests
-  import:
-    test-common
+  import: test-common
   type:
     exitcode-stdio-1.0
   main-is:
     rpc.hs
 
 test-suite ethereum-tests
-  import:
-    test-common
+  import: test-common
   type:
     exitcode-stdio-1.0
   main-is:
@@ -347,10 +326,8 @@ benchmark bench
     bytestring,
     text,
     hevm,
-    here,
     test-utils,
     filemanip,
     filepath,
     containers,
-    mtl,
     unliftio-core

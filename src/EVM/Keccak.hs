@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 {- |
     Module: EVM.Keccak
     Description: Expr passes to determine Keccak assumptions
@@ -9,6 +7,7 @@ module EVM.Keccak (keccakAssumptions, keccakCompute) where
 import Control.Monad.State
 import Data.Set (Set)
 import Data.Set qualified as Set
+import Data.List (tails)
 
 import EVM.Traversals
 import EVM.Types
@@ -43,13 +42,8 @@ findKeccakPropsExprs ps bufs stores = do
   mapM_ findKeccakExpr stores
 
 
-combine :: [a] -> [(a,a)]
-combine lst = combine' lst []
-  where
-    combine' [] acc = concat acc
-    combine' (x:xs) acc =
-      let xcomb = [ (x, y) | y <- xs] in
-      combine' xs (xcomb:acc)
+uniquePairs :: [a] -> [(a,a)]
+uniquePairs xs = [(x,y) | (x:ys) <- Data.List.tails xs, y <- ys]
 
 minProp :: Expr EWord -> Prop
 minProp k@(Keccak _) = PGT k (Lit 256)
@@ -77,10 +71,11 @@ keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs <> 
   where
     (_, st) = runState (findKeccakPropsExprs ps bufs stores) initState
 
-    injectivity = fmap injProp $ combine (Set.toList st.keccakEqs)
+    keccakPairs = uniquePairs (Set.toList st.keccakEqs)
+    injectivity = fmap injProp keccakPairs
     concValues = fmap concVal (Set.toList st.keccakEqs)
     minValue = fmap minProp (Set.toList st.keccakEqs)
-    minDiffOfPairs = map minDistance $ filter (uncurry (/=)) [(a,b) | a<-(Set.elems st.keccakEqs), b<-(Set.elems st.keccakEqs)]
+    minDiffOfPairs = map minDistance keccakPairs
      where
       minDistance :: (Expr EWord, Expr EWord) -> Prop
       minDistance (ka@(Keccak a), kb@(Keccak b)) = PImpl (a ./= b) (PAnd req1 req2)
@@ -94,7 +89,7 @@ compute = \case
   e@(Keccak buf) -> do
     let b = simplify buf
     case keccak b of
-      lit@(Lit _) -> [PEq e lit]
+      lit@(Lit _) -> [PEq lit e]
       _ -> []
   _ -> []
 

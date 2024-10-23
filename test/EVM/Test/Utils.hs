@@ -6,7 +6,7 @@ import Data.String.Here
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
-import GHC.IO.Handle (hClose)
+import GHC.IO.Exception (IOErrorType(..))
 import GHC.Natural
 import Paths_hevm qualified as Paths
 import System.Directory
@@ -14,6 +14,8 @@ import System.FilePath ((</>))
 import System.IO.Temp
 import System.Process
 import System.Exit
+import System.IO
+import System.IO.Error (mkIOError)
 
 import EVM.Dapp (dappInfo, emptyDapp)
 import EVM.Fetch (RpcInfo)
@@ -36,7 +38,7 @@ runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectT
     (compile projectType root testFile) >>= \case
       Left e -> error e
       Right bo@(BuildOutput contracts _) -> do
-        withSolvers Z3 1 timeout $ \solvers -> do
+        withSolvers Z3 1 1 timeout $ \solvers -> do
           opts <- liftIO $ testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
           unitTest opts contracts
 
@@ -65,6 +67,21 @@ testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
     , ffiAllowed = allowFFI
     }
 
+processFailedException :: String -> String -> [String] -> Int -> IO a
+processFailedException fun cmd args exit_code =
+      ioError (mkIOError OtherError (fun ++ ": " ++ cmd ++
+                                     concatMap ((' ':) . show) args ++
+                                     " (exit " ++ show exit_code ++ ")")
+                                 Nothing Nothing)
+
+callProcessCwd :: FilePath -> [String] -> FilePath -> IO ()
+callProcessCwd cmd args cwd = do
+    exit_code <- withCreateProcess (proc cmd args) { cwd = Just cwd, delegate_ctlc = True } $ \_ _ _ p ->
+                 waitForProcess p
+    case exit_code of
+      ExitSuccess   -> return ()
+      ExitFailure r -> processFailedException "callProcess" cmd args r
+
 compile :: App m => ProjectType -> FilePath -> FilePath -> m (Either String BuildOutput)
 compile DappTools root src = do
   json <- liftIO $ compileWithDSTest src
@@ -80,9 +97,9 @@ compile foundryType root src = do
   case foundryType of
     FoundryStdLib -> liftIO $ initStdForgeDir (root </> "lib" </> "forge-std")
     Foundry -> pure ()
-  r@(res,_,_) <- liftIO $ readProcessWithExitCode "forge" ["build", "--ast", "--root", root] ""
+  (res,out,err) <- liftIO $ readProcessWithExitCode "forge" ["build", "--ast", "--root", root] ""
   case res of
-    ExitFailure _ -> pure . Left $ "compilation failed: " <> show r
+    ExitFailure _ -> pure . Left $ "compilation failed: " <> "exit code: " <> show res <> "\n\nstdout:\n" <> out <> "\n\nstderr:\n" <> err
     ExitSuccess -> readBuildOutput root Foundry
   where
     initStdForgeDir :: FilePath -> IO ()
@@ -98,8 +115,8 @@ compile foundryType root src = do
       _ <- readProcessWithExitCode "git" ["init", tld] ""
       callProcess "git" ["config", "--file", tld </> ".git" </> "config", "user.name", "'hevm'"]
       callProcess "git" ["config", "--file", tld </> ".git" </> "config", "user.email", "'hevm@hevm.dev'"]
-      callProcess "git" ["--git-dir", tld </> ".git", "--work-tree", tld, "add", tld]
-      _ <- readProcessWithExitCode "git" ["--git-dir", tld </> ".git", "--work-tree", tld, "--no-gpg-sign", "commit", "-m"] ""
+      callProcessCwd "git" ["add", "."] tld
+      callProcessCwd "git" ["commit", "-m", "", "--allow-empty-message", "--no-gpg-sign"] tld
       pure ()
 
 -- We don't want to depend on dapptools here, so we cheat and just call solc with the same options that dapp itself uses

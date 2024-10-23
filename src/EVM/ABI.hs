@@ -55,6 +55,7 @@ module EVM.ABI
   , makeAbiValue
   , parseAbiValue
   , selector
+  , showAlter
   ) where
 
 import EVM.Expr (readWord, isLitWord)
@@ -84,6 +85,7 @@ import Data.Vector qualified as Vector
 import Data.Word (Word32)
 import GHC.Generics (Generic)
 import Test.QuickCheck hiding ((.&.), label)
+import Numeric (showHex)
 
 import Text.Megaparsec qualified as P
 import Text.Megaparsec.Char qualified as P
@@ -108,6 +110,9 @@ data AbiValue
   | AbiFunction     BS.ByteString
   deriving (Read, Eq, Ord, Generic)
 
+class ShowAlter a where
+  showAlter :: a -> String
+
 -- | Pretty-print some 'AbiValue'.
 instance Show AbiValue where
   show (AbiUInt _ n)         = show n
@@ -124,6 +129,24 @@ instance Show AbiValue where
   show (AbiTuple v) =
     "(" ++ intercalate ", " (show <$> Vector.toList v) ++ ")"
   show (AbiFunction b)       = show (ByteStringS b)
+
+-- | Pretty-print some 'AbiValue'.
+instance ShowAlter AbiValue where
+  showAlter (AbiUInt _ n)         = "AbiUint " <> showHex n ""
+  showAlter (AbiInt  _ n)         = if n < 0 then "AbiInt- " <> showHex (-n) ""
+                                             else "AbiInt+ " <> showHex n ""
+  showAlter (AbiAddress n)        = "AbiAddress " <> show n
+  showAlter (AbiBool b)           = "AbiBool " <> if b then "true" else "false"
+  showAlter (AbiBytes      _ b)   = "AbiBytes " <> show (ByteStringS b)
+  showAlter (AbiBytesDynamic b)   = "AbiBytesDynamic " <>show (ByteStringS b)
+  showAlter (AbiString       s)   = "AbiString " <> formatString s
+  showAlter (AbiArrayDynamic _ v) = "AbiArrayDynamic " <>
+    "[" ++ intercalate ", " (show <$> Vector.toList v) ++ "]"
+  showAlter (AbiArray      _ _ v) = "AbiArray " <>
+    "[" ++ intercalate ", " (showAlter <$> Vector.toList v) ++ "]"
+  showAlter (AbiTuple v) = "AbiTuple" <>
+    "(" ++ intercalate ", " (show <$> Vector.toList v) ++ ")"
+  showAlter (AbiFunction b)       = "AbiFunction " <> show (ByteStringS b)
 
 data AbiType
   = AbiUIntType         Int
@@ -321,9 +344,9 @@ abiHeadSize x =
         _ -> internalError "impossible"
 
 putAbiSeq :: Vector AbiValue -> Put
-putAbiSeq xs =
-  do putHeads headSize $ toList xs
-     Vector.sequence_ (putAbiTail <$> xs)
+putAbiSeq xs = do
+  putHeads headSize $ toList xs
+  Vector.sequence_ (putAbiTail <$> xs)
   where
     headSize = Vector.sum $ Vector.map abiHeadSize xs
     putHeads _ [] = pure ()
@@ -479,18 +502,17 @@ data AbiVals = NoVals | CAbi [AbiValue] | SAbi [Expr EWord]
   deriving (Show)
 
 decodeBuf :: [AbiType] -> Expr Buf -> AbiVals
-decodeBuf tps (ConcreteBuf b)
-  = case runGetOrFail (getAbiSeq (length tps) tps) (BSLazy.fromStrict b) of
-      Right ("", _, args) -> CAbi (toList args)
-      _ -> NoVals
-decodeBuf tps buf
-  = if containsDynamic tps
-    then NoVals
-    else let
+decodeBuf tps (ConcreteBuf b) =
+  case runGetOrFail (getAbiSeq (length tps) tps) (BSLazy.fromStrict b) of
+    Right ("", _, args) -> CAbi (toList args)
+    _ -> NoVals
+decodeBuf tps buf =
+  if any isDynamic tps then NoVals
+  else
+    let
       vs = decodeStaticArgs 0 (length tps) buf
-      allLit = Prelude.and (fmap isLitWord vs)
       asBS = mconcat $ fmap word256Bytes (mapMaybe maybeLitWord vs)
-    in if not allLit
+    in if not (all isLitWord vs)
        then SAbi vs
        else case runGetOrFail (getAbiSeq (length tps) tps) (BSLazy.fromStrict asBS) of
          Right ("", _, args) -> CAbi (toList args)
@@ -498,7 +520,6 @@ decodeBuf tps buf
 
   where
     isDynamic t = abiKind t == Dynamic
-    containsDynamic = or . fmap isDynamic
 
 decodeStaticArgs :: Int -> Int -> Expr Buf -> [Expr EWord]
 decodeStaticArgs offset numArgs b =
@@ -524,11 +545,11 @@ genAbiValue = \case
    AbiStringType ->
      AbiString . BS.pack <$> listOf arbitrary
    AbiArrayDynamicType t ->
-     do xs <- listOf1 (scale (`div` 2) (genAbiValue t))
+     do xs <- listOf1 (scale (`div` 3) (genAbiValue t))
         pure (AbiArrayDynamic t (Vector.fromList xs))
    AbiArrayType n t ->
      AbiArray n t . Vector.fromList <$>
-       replicateM n (scale (`div` 2) (genAbiValue t))
+       replicateM n (scale (`div` 3) (genAbiValue t))
    AbiTupleType ts ->
      AbiTuple <$> mapM genAbiValue ts
    AbiFunctionType ->
@@ -590,6 +611,6 @@ arbitraryIntegralWithMax maxbound =
            bits n | n `quot` 2 == 0 = 0
                   | otherwise = 1 + bits (n `quot` 2)
            k  = 2^(s*(bits mn `max` bits mx `max` 40) `div` 100)
-       smol <- choose (toInteger mn `max` (-k), toInteger mx `min` k)
+       smol <- choose (into mn `max` (-k), mx `min` k)
        mid <- choose (0, maxbound)
        elements [fromIntegral smol, fromIntegral mid, fromIntegral (maxbound - (fromIntegral smol))]

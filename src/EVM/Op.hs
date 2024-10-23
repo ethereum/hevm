@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 module EVM.Op
   ( Op
   , GenericOp (..)
@@ -74,6 +72,8 @@ intToOpName a =
     0x46 -> "CHAINID"
     0x47 -> "SELFBALANCE"
     0x48 -> "BASEFEE"
+    0x49 -> "BLOBHASH"
+    0x4A -> "BLOBBASEFEE"
     0x50 -> "POP"
     0x51 -> "MLOAD"
     0x52 -> "MSTORE"
@@ -86,7 +86,10 @@ intToOpName a =
     0x59 -> "MSIZE"
     0x5a -> "GAS"
     0x5b -> "JUMPDEST"
+    0x5c -> "TLOAD"
+    0x5d -> "TSTORE"
     --
+    0x5e -> "MCOPY"
     0x5f -> "PUSH0"
     0x60 -> "PUSH1"
     0x61 -> "PUSH2"
@@ -171,7 +174,7 @@ intToOpName a =
     0xfd -> "REVERT"
     0xfe -> "INVALID"
     0xff -> "SELFDESTRUCT"
-    _ -> "UNKNOWN "
+    _ -> "UNKNOWN (0x" <> showHex a "" <> ")"
 
 opString :: (Integral a, Show a) => (a, Op) -> String
 opString (i, o) = let showPc x | x < 0x10 = '0' : showHex x ""
@@ -229,12 +232,17 @@ opString (i, o) = let showPc x | x < 0x10 = '0' : showHex x ""
   OpChainid -> "CHAINID"
   OpSelfbalance -> "SELFBALANCE"
   OpBaseFee -> "BASEFEE"
+  OpBlobhash -> "BLOBHASH"
+  OpBlobBaseFee -> "BLOBBASEFEE"
   OpPop -> "POP"
+  OpMcopy -> "MCOPY"
   OpMload -> "MLOAD"
   OpMstore -> "MSTORE"
   OpMstore8 -> "MSTORE8"
   OpSload -> "SLOAD"
   OpSstore -> "SSTORE"
+  OpTload -> "TLOAD"
+  OpTstore -> "TSTORE"
   OpJump -> "JUMP"
   OpJumpi -> "JUMPI"
   OpPc -> "PC"
@@ -323,6 +331,8 @@ getOp x = case x of
   0x46 -> OpChainid
   0x47 -> OpSelfbalance
   0x48 -> OpBaseFee
+  0x49 -> OpBlobhash
+  0x4A -> OpBlobBaseFee
   0x50 -> OpPop
   0x51 -> OpMload
   0x52 -> OpMstore
@@ -335,6 +345,9 @@ getOp x = case x of
   0x59 -> OpMsize
   0x5a -> OpGas
   0x5b -> OpJumpdest
+  0x5c -> OpTload
+  0x5d -> OpTstore
+  0x5e -> OpMcopy
   0x5f -> OpPush0
   0xf0 -> OpCreate
   0xf1 -> OpCall

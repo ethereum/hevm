@@ -77,6 +77,7 @@ instance From Addr W256 where from = fromIntegral
 instance From Int256 Integer where from = fromIntegral
 instance From Nibble Int where from = fromIntegral
 instance From W256 Integer where from = fromIntegral
+instance From W256 Word512 where from = fromIntegral
 instance From Word8 W256 where from = fromIntegral
 instance From Word8 Word256 where from = fromIntegral
 instance From Word32 W256 where from = fromIntegral
@@ -309,10 +310,11 @@ data Expr (a :: EType) where
   -- A restricted view of a contract that does not include extraneous metadata
   -- from the full constructor defined in the VM state
   C ::
-    { code    :: ContractCode
-    , storage :: Expr Storage
-    , balance :: Expr EWord
-    , nonce   :: Maybe W64
+    { code     :: ContractCode
+    , storage  :: Expr Storage
+    , tStorage :: Expr Storage
+    , balance  :: Expr EWord
+    , nonce    :: Maybe W64
     } -> Expr EContract
 
   -- addresses
@@ -515,6 +517,14 @@ isPBool _ = False
 
 -- Errors ------------------------------------------------------------------------------------------
 
+-- General error helper
+type Err a = Either String a
+getError :: Err a -> String
+getError (Left a) = a
+getError _ = internalError "getLeft on a Right"
+getNonError :: Err a -> a
+getNonError (Right a) = a
+getNonError _ = internalError "getRight on a Left"
 
 -- | Core EVM Error Types
 data EvmError
@@ -542,7 +552,7 @@ data EvmError
 
 -- | Sometimes we can only partially execute a given program
 data PartialExec
-  = UnexpectedSymbolicArg { pc :: Int, msg  :: String, args  :: [SomeExpr] }
+  = UnexpectedSymbolicArg { pc :: Int, opcode :: String, msg  :: String, args  :: [SomeExpr] }
   | MaxIterationsReached  { pc :: Int, addr :: Expr EAddr }
   | JumpIntoSymbolicCode  { pc :: Int, jumpDst :: Int }
   deriving (Show, Eq, Ord)
@@ -558,7 +568,8 @@ data Query t s where
   PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM t s ()) -> Query t s
   PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM t s ()) -> Query t s
   PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM Symbolic s ()) -> Query Symbolic s
-  PleaseDoFFI         :: [String] -> (ByteString -> EVM t s ()) -> Query t s
+  PleaseDoFFI         :: [String] -> Map String String -> (ByteString -> EVM t s ()) -> Query t s
+  PleaseReadEnv       :: String -> (String -> EVM t s ()) -> Query t s
 
 -- | Execution could proceed down one of two branches
 data Choose s where
@@ -580,8 +591,10 @@ instance Show (Query t s) where
       (("<EVM.Query: ask SMT about "
         ++ show condition ++ " in context "
         ++ show constraints ++ ">") ++)
-    PleaseDoFFI cmd _ ->
-      (("<EVM.Query: do ffi: " ++ (show cmd)) ++)
+    PleaseDoFFI cmd env _ ->
+      (("<EVM.Query: do ffi: " ++ (show cmd) ++ " env: " ++ (show env)) ++)
+    PleaseReadEnv variable _ ->
+      (("<EVM.Query: read env: " ++ variable) ++)
 
 instance Show (Choose s) where
   showsPrec _ = \case
@@ -625,6 +638,7 @@ data VM (t :: VMType) s = VM
   , forks          :: Seq ForkState
   , currentFork    :: Int
   , labels         :: Map Addr Text
+  , osEnv          :: Map String String
   }
   deriving (Generic)
 
@@ -672,7 +686,7 @@ data FrameContext
     { address         :: Expr EAddr
     , codehash        :: Expr EWord
     , createreversion :: Map (Expr EAddr) Contract
-    , substate        :: SubState
+    , subState        :: SubState
     }
   | CallContext
     { target        :: Expr EAddr
@@ -694,6 +708,7 @@ data SubState = SubState
   , accessedAddresses   :: Set (Expr EAddr)
   , accessedStorageKeys :: Set (Expr EAddr, W256)
   , refunds             :: [(Expr EAddr, Word64)]
+  , createdContracts    :: Set (Expr EAddr)
   -- in principle we should include logs here, but do not for now
   }
   deriving (Eq, Ord, Show)
@@ -737,7 +752,7 @@ data TxState = TxState
   , origin      :: Expr EAddr
   , toAddr      :: Expr EAddr
   , value       :: Expr EWord
-  , substate    :: SubState
+  , subState    :: SubState
   , isCreate    :: Bool
   , txReversion :: Map (Expr EAddr) Contract
   }
@@ -768,6 +783,7 @@ data Block = Block
 data Contract = Contract
   { code        :: ContractCode
   , storage     :: Expr Storage
+  , tStorage    :: Expr Storage
   , origStorage :: Expr Storage
   , balance     :: Expr EWord
   , nonce       :: Maybe W64
@@ -940,6 +956,8 @@ data VMOpts (t :: VMType) = VMOpts
   , create :: Bool
   , txAccessList :: Map (Expr EAddr) [W256]
   , allowFFI :: Bool
+  , freshAddresses :: Int
+  , beaconRoot :: W256
   }
 
 deriving instance Show (VMOpts Symbolic)
@@ -1004,12 +1022,17 @@ data GenericOp a
   | OpChainid
   | OpSelfbalance
   | OpBaseFee
+  | OpBlobhash
+  | OpBlobBaseFee
   | OpPop
+  | OpMcopy
   | OpMload
   | OpMstore
   | OpMstore8
   | OpSload
   | OpSstore
+  | OpTload
+  | OpTstore
   | OpJump
   | OpJumpi
   | OpPc
@@ -1134,7 +1157,7 @@ instance FromJSON W64 where
   parseJSON v = do
     s <- T.unpack <$> parseJSON v
     case reads s of
-      [(x, "")]  -> return x
+      [(x, "")]  -> pure x
       _          -> fail $ "invalid hex word (" ++ s ++ ")"
 
 
@@ -1213,17 +1236,9 @@ newtype Nibble = Nibble Word8
   deriving (Num, Integral, Real, Ord, Enum, Eq, Bounded, Generic)
 
 instance Show Nibble where
-  show = (:[]) . intToDigit . fromIntegral
-
+  show = (:[]) . intToDigit . into
 
 -- Conversions -------------------------------------------------------------------------------------
-
-
-toWord512 :: W256 -> Word512
-toWord512 (W256 x) = fromHiAndLo 0 x
-
-fromWord512 :: Word512 -> W256
-fromWord512 x = W256 (loWord x)
 
 maybeLitByte :: Expr Byte -> Maybe Word8
 maybeLitByte (LitByte x) = Just x
@@ -1246,7 +1261,7 @@ maybeConcreteStore _ = Nothing
 word256 :: ByteString -> Word256
 word256 xs | BS.length xs == 1 =
   -- optimize one byte pushes
-  Word256 (Word128 0 0) (Word128 0 (fromIntegral $ BS.head xs))
+  Word256 (Word128 0 0) (Word128 0 (into $ BS.head xs))
 word256 xs = case Cereal.runGet m (padLeft 32 xs) of
                Left _ -> internalError "should not happen"
                Right x -> x
@@ -1302,12 +1317,6 @@ toWord64 n =
     then let (W256 (Word256 _ (Word128 _ n'))) = n in Just n'
     else Nothing
 
-toInt :: W256 -> Maybe Int
-toInt n =
-  if n <= unsafeInto (maxBound :: Int)
-    then let (W256 (Word256 _ (Word128 _ n'))) = n in Just (fromIntegral n')
-    else Nothing
-
 bssToBs :: ByteStringS -> ByteString
 bssToBs (ByteStringS bs) = bs
 
@@ -1321,7 +1330,7 @@ keccakBytes =
     >>> BA.convert
 
 word32 :: [Word8] -> Word32
-word32 xs = sum [ fromIntegral x `shiftL` (8*n)
+word32 xs = sum [ into x `shiftL` (8*n)
                 | (n, x) <- zip [0..] (reverse xs) ]
 
 keccak :: Expr Buf -> Expr EWord
@@ -1343,7 +1352,7 @@ abiKeccak =
 -- Utils -------------------------------------------------------------------------------------------
 
 {- HLINT ignore internalError -}
-internalError:: HasCallStack => [Char] -> a
+internalError :: HasCallStack => [Char] -> a
 internalError m = error $ "Internal Error: " ++ m ++ " -- " ++ (prettyCallStack callStack)
 
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]

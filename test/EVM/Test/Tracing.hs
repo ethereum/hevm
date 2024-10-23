@@ -39,7 +39,7 @@ import Test.QuickCheck (elements)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()
-import Test.Tasty (testGroup, TestTree, TestName)
+import Test.Tasty (testGroup, after, TestTree, TestName, DependencyType(..))
 import Test.Tasty.HUnit (assertEqual, testCase)
 import Test.Tasty.QuickCheck hiding (Failure, Success)
 import Witch (into, unsafeInto)
@@ -145,22 +145,26 @@ data EVMToolEnv = EVMToolEnv
   { coinbase    :: Addr
   , timestamp   :: Expr EWord
   , number      :: W256
-  , prevRandao  :: W256
   , gasLimit    :: Data.Word.Word64
   , baseFee     :: W256
   , maxCodeSize :: W256
   , schedule    :: FeeSchedule Data.Word.Word64
   , blockHashes :: Map.Map Int W256
+  , withdrawals :: [Addr]
+  , currentRandom :: W256
+  , parentBeaconBlockRoot :: W256
   } deriving (Show, Generic)
 
 instance JSON.ToJSON EVMToolEnv where
-  toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON $ b.coinbase))
-                         , ("currentDifficulty", (JSON.toJSON $ b.prevRandao))
+  toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON b.coinbase))
                          , ("currentGasLimit"  , (JSON.toJSON ("0x" ++ showHex (into @Integer b.gasLimit) "")))
-                         , ("currentNumber"    , (JSON.toJSON $ b.number))
+                         , ("currentNumber"    , (JSON.toJSON b.number))
                          , ("currentTimestamp" , (JSON.toJSON tstamp))
-                         , ("currentBaseFee"   , (JSON.toJSON $ b.baseFee))
-                         , ("blockHashes"      , (JSON.toJSON $ b.blockHashes))
+                         , ("currentBaseFee"   , (JSON.toJSON b.baseFee))
+                         , ("blockHashes"      , (JSON.toJSON b.blockHashes))
+                         , ("withdrawals"      , (JSON.toJSON b.withdrawals))
+                         , ("currentRandom"    , (JSON.toJSON b.currentRandom))
+                         , ("parentBeaconBlockRoot" , (JSON.toJSON b.parentBeaconBlockRoot))
                          ]
               where
                 tstamp :: W256
@@ -172,12 +176,14 @@ emptyEvmToolEnv :: EVMToolEnv
 emptyEvmToolEnv = EVMToolEnv { coinbase = 0
                              , timestamp = Lit 0
                              , number     = 0
-                             , prevRandao = 42069
                              , gasLimit   = 0xffffffffffffffff
                              , baseFee    = 0
                              , maxCodeSize= 0xffffffff
                              , schedule   = feeSchedule
                              , blockHashes = mempty
+                             , withdrawals = mempty
+                             , currentRandom = 42
+                             , parentBeaconBlockRoot = 5
                              }
 
 data EVMToolReceipt =
@@ -191,6 +197,7 @@ data EVMToolReceipt =
     , transactionHash :: String
     , contractAddress :: String
     , gasUsed :: String
+    , effectiveGasPrice :: Maybe String
     , blockHash :: String
     , transactionIndex :: String
     } deriving (Generic, Show)
@@ -206,6 +213,7 @@ instance JSON.FromJSON EVMToolReceipt where
         <*> v .: "transactionHash"
         <*> v .: "contractAddress"
         <*> v .: "gasUsed"
+        <*> v .: "effectiveGasPrice"
         <*> v .: "blockHash"
         <*> v .: "transactionIndex"
 
@@ -217,23 +225,14 @@ data EVMToolResult =
   , logsHash :: String
   , logsBloom :: String
   , receipts :: [EVMToolReceipt]
-  , currentDifficulty :: String
+  , currentDifficulty :: Maybe String
   , gasUsed :: String
-  , rejected :: Maybe [EVMRejected]
+  , currentBaseFee :: String
+  , withdrawalsRoot :: String
   } deriving (Generic, Show)
 
 instance JSON.FromJSON EVMToolResult
 
-data EVMRejected =
-  EVMRejected
-    { index :: Int
-    , err :: String
-    } deriving (Generic, Show)
-
-instance JSON.FromJSON EVMRejected where
-  parseJSON = JSON.withObject "EVMRejected" $ \v -> EVMRejected
-    <$> v .: "index"
-    <*> v .: "error"
 
 data EVMToolAlloc =
   EVMToolAlloc
@@ -286,15 +285,17 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
       , maxFeePerGas = Just 1
       , chainId = 1
       }
-    evmEnv = EVMToolEnv { coinbase   =  0xff
-                        , timestamp   =  Lit 0x3e8
-                        , number      =  0x0
-                        , prevRandao  =  0x0
-                        , gasLimit    =  unsafeInto gaslimitExec
-                        , baseFee     =  0x0
-                        , maxCodeSize =  0xfffff
-                        , schedule    =  feeSchedule
-                        , blockHashes =  blockHashesDefault
+    evmEnv = EVMToolEnv { coinbase      = 0xff
+                        , timestamp     = Lit 0x3e8
+                        , number        = 0x0
+                        , gasLimit      = unsafeInto gaslimitExec
+                        , baseFee       = 0x0
+                        , maxCodeSize   = 0xfffff
+                        , schedule      = feeSchedule
+                        , blockHashes   = blockHashesDefault
+                        , withdrawals   = mempty
+                        , currentRandom = 42
+                        , parentBeaconBlockRoot = 5
                         }
     sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
     fromAddress = fromJust $ deriveAddr sk
@@ -321,7 +322,8 @@ getEVMToolRet contr txData gaslimitExec = do
   JSON.encodeFile "alloc.json" alloc
   JSON.encodeFile "env.json" evmEnv
   (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
-                               ,"--input.alloc" , "alloc.json"
+                               , "--state.fork", "Cancun"
+                               , "--input.alloc" , "alloc.json"
                                , "--input.env" , "env.json"
                                , "--input.txs" , "txs.json"
                                , "--output.alloc" , "alloc-out.json"
@@ -399,12 +401,19 @@ getTraceOutput evmtoolResult =
     Nothing -> pure Nothing
     Just res -> do
       let traceFileName = getTraceFileName res
+      decodeTraceOutputHelper traceFileName
+
+decodeTraceOutputHelper :: String -> IO (Maybe EVMToolTraceOutput)
+decodeTraceOutputHelper traceFileName = do
       convertPath <- Paths.getDataFileName "test/scripts/convert_trace_to_json.sh"
       maybeShellPath <- (fromMaybe "bash") <$> (lookupEnv "HEVM_SYSTEM_SHELL")
       let shellPath = if maybeShellPath == "" then "bash" else maybeShellPath
-      (exitcode, stdout, stderr) <- readProcessWithExitCode shellPath [convertPath, getTraceFileName res] ""
+      (exitcode, stdout, stderr) <- readProcessWithExitCode shellPath [convertPath, traceFileName] ""
       case exitcode of
-        ExitSuccess -> JSON.decodeFileStrict (traceFileName ++ ".json") :: IO (Maybe EVMToolTraceOutput)
+        ExitSuccess -> do
+          -- putStrLn $ "Successfully converted trace to JSON: " <> (show stdout) <> " " <>
+          --   (show stderr) <> " " <> (show exitcode) <> " " <> (show traceFileName)
+          JSON.decodeFileStrict (traceFileName ++ ".json") :: IO (Maybe EVMToolTraceOutput)
         _ -> do
           putStrLn $ "Error converting trace! exit code:" <> (show exitcode)
           putStrLn $ "stdout: " <> (show stdout)
@@ -426,7 +435,7 @@ runCodeWithTrace
   :: App m
   => Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction
   -> Expr EAddr -> Expr EAddr -> m (Either (EvmError, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
-runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 Nothing $ \solvers -> do
+runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 1 Nothing $ \solvers -> do
   let calldata' = ConcreteBuf txn.txdata
       code' = alloc.code
       buildExpr s vm = interpret (Fetch.oracle s Nothing) Nothing 1 Naive vm runExpr
@@ -458,7 +467,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
     , gas = txn.gasLimit - (EVM.Transaction.txGasCost evmToolEnv.schedule txn)
     , gaslimit = txn.gasLimit
     , blockGaslimit = evmToolEnv.gasLimit
-    , prevRandao = evmToolEnv.prevRandao
+    , prevRandao = evmToolEnv.currentRandom
     , baseFee = evmToolEnv.baseFee
     , priorityFee = fromJust txn.maxPriorityFeeGas
     , maxCodeSize = evmToolEnv.maxCodeSize
@@ -467,12 +476,14 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
     , create = False
     , txAccessList = mempty
     , allowFFI = False
+    , freshAddresses = 0
+    , beaconRoot = 0
     }) <&> set (#env % #contracts % at (LitAddr ethrunAddress))
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode BS.empty))))
        <&> set (#state % #calldata) calldata'
 
 runCode :: App m => Fetch.RpcInfo -> ByteString -> Expr Buf -> m (Maybe (Expr Buf))
-runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
+runCode rpcinfo code' calldata' = withSolvers Z3 0 1 Nothing $ \solvers -> do
   origVM <- liftIO $ stToIO $ vmForRuntimeCode
               code'
               calldata'
@@ -516,7 +527,7 @@ vmtrace vm =
       StateChangeWhileStatic  -> Just "write protection"
       ReturnDataOutOfBounds   -> Just "return data out of bounds"
       IllegalOverflow     -> Just "gas uint64 overflow"
-      UnrecognizedOpcode op   -> Just $ "invalid opcode: " <> show op
+      UnrecognizedOpcode op   -> Just $ "invalid opcode: 0x" <> showHex op ""
       NonceOverflow       -> Just "nonce uint64 overflow"
       StackUnderrun       -> Just "stack underflow"
       StackLimitExceeded  -> Just "stack limit reached"
@@ -758,7 +769,8 @@ genContract n = do
       ])
       -- memory manip
       , (1200, frequency [
-          (50, pure OpMload)
+          (10, pure OpMcopy)
+        , (50, pure OpMload)
         , (1, pure OpMstore)
         , (300, pure OpMstore8)
       ])
@@ -766,6 +778,8 @@ genContract n = do
       , (100, frequency [
           (1, pure OpSload)
         , (1, pure OpSstore)
+        , (1, pure OpTstore)
+        , (1, pure OpTload)
       ])
       -- Jumping around
       , (50, frequency [
@@ -841,21 +855,21 @@ tests = testGroup "contract-quickcheck-run"
         --       It should work also when we external calls. Removing for now.
         contrFixed <- liftIO $ fixContractJumps $ removeExtcalls contr
         checkTraceAndOutputs contrFixed gasLimit txData
-      , test "calldata-wraparound" $ do
+      , after AllFinish "random-contract-concrete-call" $ test "calldata-wraparound-1" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 31),OpMstore8] -- value, offs
               , [OpPush (Lit 0x3),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- size, offs, destOffs
               , [OpPush (Lit 0x20),OpPush (Lit 0),OpReturn] -- datasize, offs
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5])
-      , test "calldata-wraparound2" $ do
+      , after AllFinish "calldata-wraparound-1" $ test "calldata-wraparound-2" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 0),OpMstore8] -- value, offs
               , [OpPush (Lit 0x10),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- size, offs, destOffs
               , [OpPush (Lit 0x20),OpPush (Lit 0),OpReturn] -- datasize, offs
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5])
-      , test "calldata-overwrite-with-0-if-oversized" $ do
+      , after AllFinish "calldata-wraparound-2" $ test "calldata-overwrite-with-0-if-oversized" $ do
         -- supposed to copy 1...6 and then 0s, overwriting the 0xff with 0
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs
@@ -863,14 +877,14 @@ tests = testGroup "contract-quickcheck-run"
               , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
-      , test "calldata-overwrite-correct-size" $ do
+      , after AllFinish "calldata-overwrite-with-0-if-oversized" $ test "calldata-overwrite-correct-size" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- value, offs
               , [OpPush (Lit 10),OpPush (Lit 0),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
               , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
-      , test "calldata-offset-copy" $ do
+      , after AllFinish "calldata-overwrite-correct-size" $ test "calldata-offset-copy" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- value, offs
               , [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs

@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 {-|
@@ -8,9 +7,9 @@
 module EVM.Expr where
 
 import Prelude hiding (LT, GT)
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import Control.Monad.ST (ST)
-import Control.Monad.State (put, get, execState, State)
+import Control.Monad.State (put, get, modify, execState, State)
 import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -19,6 +18,7 @@ import Data.List
 import Data.Map.Strict qualified as Map
 import Data.Maybe (mapMaybe, isJust, fromMaybe)
 import Data.Semigroup (Any, Any(..), getAny)
+import Data.Typeable
 import Data.Vector qualified as V
 import Data.Vector (Vector)
 import Data.Vector.Mutable qualified as MV
@@ -26,7 +26,7 @@ import Data.Vector.Mutable (MVector)
 import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
-import Witch (unsafeInto, into, tryFrom)
+import Witch (unsafeInto, into, tryFrom, tryInto)
 import Data.Containers.ListUtils (nubOrd)
 
 import Optics.Core
@@ -107,13 +107,13 @@ addmod :: Expr EWord -> Expr EWord -> Expr EWord -> Expr EWord
 addmod = op3 AddMod (\x y z ->
   if z == 0
   then 0
-  else fromIntegral $ (to512 x + to512 y) `Prelude.mod` to512 z)
+  else fromIntegral $ (into @Word512 x + into y) `Prelude.mod` into z)
 
 mulmod :: Expr EWord -> Expr EWord -> Expr EWord -> Expr EWord
 mulmod = op3 MulMod (\x y z ->
-   if z == 0
-   then 0
-   else fromIntegral $ (to512 x * to512 y) `Prelude.mod` to512 z)
+  if z == 0
+  then 0
+  else fromIntegral $ (into @Word512 x * into y) `Prelude.mod` into z)
 
 exp :: Expr EWord -> Expr EWord -> Expr EWord
 exp = op2 Exp (^)
@@ -200,6 +200,17 @@ sar = op2 SAR (\x y ->
      else
        fromIntegral $ shiftR asSigned (fromIntegral x))
 
+
+-- Props
+
+peq :: (Typeable a) => Expr a -> Expr a -> Prop
+peq (Lit x) (Lit y) = PBool (x == y)
+peq a@(Lit _) b = PEq a b
+peq a b@(Lit _) = PEq b a -- we always put concrete values on LHS
+peq a b
+  | a == b = PBool True
+  | otherwise = PEq a b
+
 -- ** Bufs ** --------------------------------------------------------------------------------------
 
 
@@ -280,12 +291,12 @@ readWord i b = readWordFromBytes i b
 -- returns an abstract ReadWord expression if a concrete word cannot be constructed
 readWordFromBytes :: Expr EWord -> Expr Buf -> Expr EWord
 readWordFromBytes (Lit idx) (ConcreteBuf bs) =
-  case toInt idx of
-    Nothing -> Lit 0
-    Just i -> Lit $ word $ padRight 32 $ BS.take 32 $ BS.drop i bs
+  case tryInto idx of
+    Left _ -> Lit 0
+    Right i -> Lit $ word $ padRight 32 $ BS.take 32 $ BS.drop i bs
 readWordFromBytes i@(Lit idx) buf = let
     bytes = [readByte (Lit i') buf | i' <- [idx .. idx + 31]]
-  in if Prelude.and . (fmap isLitByte) $ bytes
+  in if all isLitByte bytes
      then Lit (bytesToW256 . mapMaybe maybeLitByte $ bytes)
      else ReadWord i buf
 readWordFromBytes idx buf = ReadWord idx buf
@@ -310,26 +321,18 @@ readWordFromBytes idx buf = ReadWord idx buf
 maxBytes :: W256
 maxBytes = into (maxBound :: Word32) `Prelude.div` 8
 
+maxWord256 :: W256
+maxWord256 = W256 (maxBound :: Word256)
+
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf -> Expr Buf
 
--- Copies from empty buffers
-copySlice _ _ (Lit 0) (ConcreteBuf "") dst = dst
-copySlice a b c@(Lit size) d@(ConcreteBuf "") e@(ConcreteBuf "")
-  | size < maxBytes = ConcreteBuf $ BS.replicate (unsafeInto size) 0
-  | otherwise = CopySlice a b c d e
-copySlice srcOffset dstOffset sz@(Lit size) src@(ConcreteBuf "") dst
-  | size < maxBytes = copySlice srcOffset dstOffset (Lit size) (ConcreteBuf $ BS.replicate (unsafeInto size) 0) dst
-  | otherwise = CopySlice srcOffset dstOffset sz src dst
+-- Copying zero bytes is a no-op
+copySlice _ _ (Lit 0) _ dst = dst
 
--- Fully concrete copies
-copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e@(ConcreteBuf "")
-  | srcOffset > unsafeInto (BS.length src), size < maxBytes = ConcreteBuf $ BS.replicate (unsafeInto size) 0
-  | srcOffset <= unsafeInto (BS.length src), dstOffset < maxBytes, size < maxBytes = let
-    hd = BS.replicate (unsafeInto dstOffset) 0
-    sl = padRight (unsafeInto size) $ BS.take (unsafeInto size) (BS.drop (unsafeInto srcOffset) src)
-    in ConcreteBuf $ hd <> sl
-  | otherwise = CopySlice a b c d e
+-- copying 32 bytes can be rewritten to a WriteWord on dst (e.g. CODECOPY of args during constructors)
+copySlice srcOffset dstOffset (Lit 32) src dst = writeWord dstOffset (readWord srcOffset src) dst
 
+-- Fully concrete copy
 copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e@(ConcreteBuf dst)
   | dstOffset < maxBytes
   , size < maxBytes =
@@ -340,9 +343,6 @@ copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e
           tl = BS.drop (unsafeInto dstOffset + unsafeInto size) dst
       in ConcreteBuf $ hd <> sl <> tl
   | otherwise = CopySlice a b c d e
-
--- copying 32 bytes can be rewritten to a WriteWord on dst (e.g. CODECOPY of args during constructors)
-copySlice srcOffset dstOffset (Lit 32) src dst = writeWord dstOffset (readWord srcOffset src) dst
 
 -- concrete indices & abstract src (may produce a concrete result if we are
 -- copying from a concrete region of src)
@@ -425,6 +425,7 @@ bufLengthEnv env useEnv buf = go (Lit 0) buf
     go l (AbstractBuf b) = EVM.Expr.max l (BufLength (AbstractBuf b))
     go l (WriteWord idx _ b) = go (EVM.Expr.max l (add idx (Lit 32))) b
     go l (WriteByte idx _ b) = go (EVM.Expr.max l (add idx (Lit 1))) b
+    go l (CopySlice _ _ (Lit 0) _ dst) = go l dst
     go l (CopySlice _ dstOffset size _ dst) = go (EVM.Expr.max l (add dstOffset size)) dst
 
     go l (GVar (BufVar a)) | useEnv =
@@ -1035,6 +1036,9 @@ simplify e = if (mapExpr go e == e)
     -- literal addresses
     go (WAddr (LitAddr a)) = Lit $ into a
 
+    -- XOR normalization
+    go (Xor a  b) = EVM.Expr.xor a b
+
     -- simple div/mod/add/sub
     go (Div o1@(Lit _)  o2@(Lit _)) = EVM.Expr.div  o1 o2
     go (SDiv o1@(Lit _) o2@(Lit _)) = EVM.Expr.sdiv o1 o2
@@ -1045,7 +1049,11 @@ simplify e = if (mapExpr go e == e)
 
     -- Mod
     go (Mod _ (Lit 0)) = Lit 0
+    go (SMod _ (Lit 0)) = Lit 0
     go (Mod a b) | a == b = Lit 0
+    go (SMod a b) | a == b = Lit 0
+    go (Mod (Lit 0) _) = Lit 0
+    go (SMod (Lit 0) _) = Lit 0
 
     -- double add/sub.
     -- Notice that everything is done mod 2**256. So for example:
@@ -1109,22 +1117,18 @@ simplify e = if (mapExpr go e == e)
       | otherwise = o
 
     -- Bitwise AND & OR. These MUST preserve bitwise equivalence
-    go o@(And (Lit x) _)
-      | x == 0 = Lit 0
-      | otherwise = o
-    go o@(And v (Lit x))
-      | x == 0 = Lit 0
-      | x == maxLit = v
-      | otherwise = o
-    go (And a b) | a == b = a
-    go (And a (Not b)) | a == b = Lit 0
-    go o@(Or (Lit x) b)
-      | x == 0 = b
-      | otherwise = o
-    go o@(Or a (Lit x))
-      | x == 0 = a
-      | otherwise = o
-    go (Or a b) | a == b = a
+    go (And a b)
+      | a == b = a
+      | b == (Not a) || a == (Not b) = Lit 0
+      | a == (Lit 0) || b == (Lit 0) = Lit 0
+      | a == (Lit maxLit) = b
+      | b == (Lit maxLit) = a
+      | otherwise = EVM.Expr.and a b
+    go (Or a b)
+      | a == b = a
+      | a == (Lit 0) = b
+      | b == (Lit 0) = a
+      | otherwise = EVM.Expr.or a b
 
     -- If x is ever non zero the Or will always evaluate to some non zero value and the false branch will be unreachable
     -- NOTE: with AND this does not work, because and(0x8, 0x4) = 0
@@ -1163,10 +1167,13 @@ simplify e = if (mapExpr go e == e)
                      (Lit 1, _) -> b
                      _ -> mul a b
 
-    -- Some trivial div eliminations
+    -- Some trivial (s)div eliminations
     go (Div (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
     go (Div _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
     go (Div a (Lit 1)) = a
+    go (SDiv (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
+    go (SDiv _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
+    go (SDiv a (Lit 1)) = a
     -- NOTE: Div x x is NOT 1, because Div 0 0 is 0, not 1.
 
     -- If a >= b then the value of the `Max` expression can never be < b
@@ -1189,10 +1196,10 @@ simplify e = if (mapExpr go e == e)
 
 
 simplifyProps :: [Prop] -> [Prop]
-simplifyProps ps = if canBeSat then simplified else [PBool False]
+simplifyProps ps = if cannotBeSat then [PBool False] else simplified
   where
     simplified = remRedundantProps . map simplifyProp . flattenProps $ ps
-    canBeSat = constFoldProp simplified
+    cannotBeSat = isUnsat simplified
 
 -- | Evaluate the provided proposition down to its most concrete result
 -- Also simplifies the inner Expr, if it exists
@@ -1218,29 +1225,29 @@ simplifyProp prop =
     go (PLEq a (Max _ b)) | a == b = PBool True
     go (PLEq (Sub a b) c) | a == c = PLEq b a
     go (PLT (Max (Lit a) b) (Lit c)) | a < c = PLT b (Lit c)
-    go (PLT (Lit 0) (Eq a b)) = PEq a b
+    go (PLT (Lit 0) (Eq a b)) = peq a b
 
     -- negations
     go (PNeg (PBool b)) = PBool (Prelude.not b)
     go (PNeg (PNeg a)) = a
 
     -- solc specific stuff
-    go (PEq (IsZero (IsZero (Eq a b))) (Lit 0)) = PNeg (PEq a b)
+    go (PEq (Lit 0) (IsZero (IsZero (Eq a b)))) = PNeg (peq a b)
 
     -- iszero(a) -> (a == 0)
     -- iszero(iszero(a))) -> ~(a == 0) -> a > 0
     -- iszero(iszero(a)) == 0 -> ~~(a == 0) -> a == 0
     -- ~(iszero(iszero(a)) == 0) -> ~~~(a == 0) -> ~(a == 0) -> a > 0
-    go (PNeg (PEq (IsZero (IsZero a)) (Lit 0))) = PLT (Lit 0) a
+    go (PNeg (PEq (Lit 0) (IsZero (IsZero a)))) = PLT (Lit 0) a
 
     -- iszero(a) -> (a == 0)
     -- iszero(a) == 0 -> ~(a == 0)
     -- ~(iszero(a) == 0) -> ~~(a == 0) -> a == 0
-    go (PNeg (PEq (IsZero a) (Lit 0))) = PEq a (Lit 0)
+    go (PNeg (PEq (Lit 0) (IsZero a))) = peq (Lit 0) a
 
     -- a < b == 0 -> ~(a < b)
     -- ~(a < b == 0) -> ~~(a < b) -> a < b
-    go (PNeg (PEq (LT a b) (Lit 0x0))) = PLT a b
+    go (PNeg (PEq (Lit 0) (LT a b))) = PLT a b
 
     -- And/Or
     go (PAnd (PBool l) (PBool r)) = PBool (l && r)
@@ -1260,21 +1267,19 @@ simplifyProp prop =
     go (PImpl (PBool False) _) = PBool True
 
     -- Double negation
-    go (PEq (IsZero (Eq a b)) (Lit 0)) = PEq a b
-    go (PEq (IsZero (LT a b)) (Lit 0)) = PLT a b
-    go (PEq (IsZero (GT a b)) (Lit 0)) = PGT a b
-    go (PEq (IsZero (LEq a b)) (Lit 0)) = PLEq a b
-    go (PEq (IsZero (GEq a b)) (Lit 0)) = PGEq a b
+    go (PEq (Lit 0) (IsZero (Eq a b))) = peq a b
+    go (PEq (Lit 0) (IsZero (LT a b))) = PLT a b
+    go (PEq (Lit 0) (IsZero (GT a b))) = PGT a b
+    go (PEq (Lit 0) (IsZero (LEq a b))) = PLEq a b
+    go (PEq (Lit 0) (IsZero (GEq a b))) = PGEq a b
 
     -- Eq
-    go (PEq (Eq a b) (Lit 0)) = PNeg (PEq a b)
-    go (PEq (Eq a b) (Lit 1)) = PEq a b
-    go (PEq (Sub a b) (Lit 0)) = PEq a b
-    go (PEq (LT a b) (Lit 0)) = PLEq b a
-    go (PEq (Lit l) (Lit r)) = PBool (l == r)
-    go o@(PEq l r)
-      | l == r = PBool True
-      | otherwise = o
+    go (PEq (Lit 0) (Eq a b)) = PNeg (peq a b)
+    go (PEq (Lit 1) (Eq a b)) = peq a b
+    go (PEq (Lit 0) (Sub a b)) = peq a b
+    go (PEq (Lit 0) (LT a b)) = PLEq b a
+    go (PEq l r) = peq l r
+
     go p = p
 
 
@@ -1331,9 +1336,6 @@ wordToAddr = go . simplify
 
 litCode :: BS.ByteString -> [Expr Byte]
 litCode bs = fmap LitByte (BS.unpack bs)
-
-to512 :: W256 -> Word512
-to512 = fromIntegral
 
 
 -- ** Helpers ** -----------------------------------------------------------------------------------
@@ -1537,31 +1539,25 @@ data ConstState = ConstState
   }
   deriving (Show)
 
--- | Folds constants
-constFoldProp :: [Prop] -> Bool
-constFoldProp ps = oneRun ps (ConstState mempty True)
+-- | Checks if a conjunction of propositions is definitely unsatisfiable
+isUnsat :: [Prop] -> Bool
+isUnsat ps = Prelude.not $ oneRun ps (ConstState mempty True)
   where
     oneRun ps2 startState = (execState (mapM (go . simplifyProp) ps2) startState).canBeSat
     go :: Prop -> State ConstState ()
-    go x = case x of
+    go = \case
         -- PEq
         PEq (Lit l) a -> do
           s <- get
           case Map.lookup a s.values of
-            Just l2 -> case l==l2 of
-                True -> pure ()
-                False -> put ConstState {canBeSat=False, values=mempty}
-            Nothing -> do
-              let vs' = Map.insert a l s.values
-              put $ s{values=vs'}
+            Just l2 -> unless (l==l2) $ put ConstState {canBeSat=False, values=mempty}
+            Nothing -> modify (\s' -> s'{values=Map.insert a l s'.values})
         PEq a b@(Lit _) -> go (PEq b a)
         -- PNeg
         PNeg (PEq (Lit l) a) -> do
           s <- get
           case Map.lookup a s.values of
-            Just l2 -> case l==l2 of
-                True -> put ConstState {canBeSat=False, values=mempty}
-                False -> pure ()
+            Just l2 -> when (l==l2) $ put ConstState {canBeSat=False, values=mempty}
             Nothing -> pure ()
         PNeg (PEq a b@(Lit _)) -> go $ PNeg (PEq b a)
         -- Others
@@ -1575,8 +1571,6 @@ constFoldProp ps = oneRun ps (ConstState mempty True)
             v2 = oneRun [b] s
           unless v1 $ go b
           unless v2 $ go a
-          s2 <- get
-          put $ s{canBeSat=(s2.canBeSat && (v1 || v2))}
         PBool False -> put $ ConstState {canBeSat=False, values=mempty}
         _ -> pure ()
 
@@ -1600,3 +1594,25 @@ concKeccakOnePass orig@(Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) orig2@(WriteW
     (64, ConcreteBuf a) -> Lit (keccak' a)
     _ -> orig
 concKeccakOnePass x = x
+
+lhsConstHelper :: Expr a -> Maybe ()
+lhsConstHelper = go
+  where
+    go :: Expr a -> Maybe ()
+    go (Mul _ (Lit _)) = Nothing
+    go (Add _ (Lit _)) = Nothing
+    go (Min _ (Lit _)) = Nothing
+    go (Max _ (Lit _)) = Nothing
+    go (Eq _ (Lit _))  = Nothing
+    go (And _ (Lit _)) = Nothing
+    go (Or _ (Lit _))  = Nothing
+    go (Xor _ (Lit _)) = Nothing
+    go _ = Just ()
+
+-- Commutative operators should have the constant on the LHS
+checkLHSConstProp :: Prop -> Bool
+checkLHSConstProp a = isJust $ mapPropM_ lhsConstHelper a
+
+-- Commutative operators should have the constant on the LHS
+checkLHSConst :: Expr a -> Bool
+checkLHSConst a = isJust $ mapExprM_ lhsConstHelper a

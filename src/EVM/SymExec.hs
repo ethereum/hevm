@@ -5,15 +5,17 @@ module EVM.SymExec where
 import Control.Concurrent.Async (concurrently, mapConcurrently)
 import Control.Concurrent.Spawn (parMapIO, pool)
 import Control.Concurrent.STM (atomically, TVar, readTVarIO, readTVar, newTVarIO, writeTVar)
+import Control.Monad (when, forM_, forM)
+import Control.Monad.IO.Unlift
 import Control.Monad.Operational qualified as Operational
 import Control.Monad.ST (RealWorld, stToIO, ST)
 import Control.Monad.State.Strict (runStateT)
-import Data.Bifunctor (second)
+import Data.Bifunctor (second, first)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Containers.ListUtils (nubOrd)
 import Data.DoubleWord (Word256)
-import Data.List (foldl', sortBy)
+import Data.List (foldl', sortBy, sort, group)
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -23,15 +25,18 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
-import Text.Printf (printf)
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
+import Data.Vector qualified as V
+import Data.Vector.Unboxed qualified as VUnboxed
 import EVM (makeVm, abstractContract, initialContract, getCodeLocation, isValidJumpDest)
 import EVM.Exec
 import EVM.Fetch qualified as Fetch
 import EVM.ABI
+import EVM.Effects
 import EVM.Expr qualified as Expr
-import EVM.Format (formatExpr, formatPartial, showVal, bsToHex)
+import EVM.FeeSchedule (feeSchedule)
+import EVM.Format (formatExpr, formatPartial, showVal, bsToHex, indent, formatBinary)
 import EVM.SMT (SMTCex(..), SMT2(..), assertProps)
 import EVM.SMT qualified as SMT
 import EVM.Solvers
@@ -39,38 +44,48 @@ import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 import EVM.Traversals
 import EVM.Types
-import EVM.FeeSchedule (feeSchedule)
-import EVM.Format (indent, formatBinary)
 import GHC.Conc (getNumProcessors)
 import GHC.Generics (Generic)
 import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
+import Text.Printf (printf)
 import Witch (into, unsafeInto)
-import EVM.Effects
-import Control.Monad.IO.Unlift
-import Control.Monad (when, forM_)
 
 data LoopHeuristic
   = Naive
   | StackBased
   deriving (Eq, Show, Read, ParseField, ParseFields, ParseRecord, Generic)
 
-data ProofResult a b c = Qed a | Cex b | Timeout c
+data ProofResult a b c d = Qed a | Cex b | Unknown c | Error d
   deriving (Show, Eq)
-type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End)
-type EquivResult = ProofResult () (SMTCex) ()
+type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End) String
+type EquivResult = ProofResult () (SMTCex) () String
 
-isTimeout :: ProofResult a b c -> Bool
-isTimeout (Timeout _) = True
-isTimeout _ = False
+isUnknown :: ProofResult a b c d -> Bool
+isUnknown (EVM.SymExec.Unknown _) = True
+isUnknown _ = False
 
-isCex :: ProofResult a b c -> Bool
+isError :: ProofResult a b c d -> Bool
+isError (EVM.SymExec.Error _) = True
+isError _ = False
+
+isCex :: ProofResult a b c d -> Bool
 isCex (Cex _) = True
 isCex _ = False
 
-isQed :: ProofResult a b c -> Bool
+isQed :: ProofResult a b c d -> Bool
 isQed (Qed _) = True
 isQed _ = False
+
+groupIssues :: [ProofResult a b c String] -> [(Integer, String)]
+groupIssues results = map (\g -> (into (length g), head g)) grouped
+  where
+    getErr :: ProofResult a b c String -> String
+    getErr (EVM.SymExec.Error k) = k
+    getErr (EVM.SymExec.Unknown _) = "SMT result timeout/unknown"
+    getErr _ = internalError "shouldn't happen"
+    sorted = sort $ map getErr results
+    grouped = group sorted
 
 data VeriOpts = VeriOpts
   { simp :: Bool
@@ -98,29 +113,33 @@ extractCex (Cex c) = Just c
 extractCex _ = Nothing
 
 bool :: Expr EWord -> Prop
-bool e = POr (PEq e (Lit 1)) (PEq e (Lit 0))
+bool e = POr (PEq (Lit 1) e) (PEq (Lit 0) e)
 
 -- | Abstract calldata argument generation
 symAbiArg :: Text -> AbiType -> CalldataFragment
 symAbiArg name = \case
   AbiUIntType n ->
     if n `mod` 8 == 0 && n <= 256
-    then let v = Var name in St [Expr.inRange n v] v
+    then St [Expr.inRange n v] v
     else internalError "bad type"
   AbiIntType n ->
     if n `mod` 8 == 0 && n <= 256
     -- TODO: is this correct?
-    then let v = Var name in St [Expr.inRange n v] v
+    then St [Expr.inRange n v] v
     else internalError "bad type"
-  AbiBoolType -> let v = Var name in St [bool v] v
+  AbiBoolType -> St [bool v] v
   AbiAddressType -> St [] (WAddr (SymAddr name))
   AbiBytesType n ->
     if n > 0 && n <= 32
-    then let v = Var name in St [Expr.inRange (n * 8) v] v
+    then St [Expr.inRange (n * 8) v] v
     else internalError "bad type"
-  AbiArrayType sz tp ->
-    Comp $ fmap (\n -> symAbiArg (name <> n) tp) [T.pack (show n) | n <- [0..sz-1]]
+  AbiArrayType sz tps -> do
+    Comp . V.toList . V.imap (\(T.pack . show -> i) tp -> symAbiArg (name <> "-a-" <> i) tp) $ (V.replicate sz tps)
+  AbiTupleType tps ->
+    Comp . V.toList . V.imap (\(T.pack . show -> i) tp -> symAbiArg (name <> "-t-" <> i) tp) $ tps
   t -> internalError $ "TODO: symbolic abi encoding for " <> show t
+  where
+    v = Var name
 
 data CalldataFragment
   = St [Prop] (Expr EWord)
@@ -186,6 +205,7 @@ combineFragments fragments base = go (Lit 4) fragments (base, [])
 
 isSt :: CalldataFragment -> Bool
 isSt (St {}) = True
+isSt (Comp fs) = all isSt fs
 isSt _ = False
 
 
@@ -236,7 +256,28 @@ loadSymVM x callvalue cd create =
     , create = create
     , txAccessList = mempty
     , allowFFI = False
+    , freshAddresses = 0
+    , beaconRoot = 0
     })
+
+-- freezes any mutable refs, making it safe to share between threads
+freezeVM :: VM Symbolic RealWorld -> ST RealWorld (VM Symbolic RealWorld)
+freezeVM vm = do
+    state' <- do
+      mem' <- freeze (vm.state.memory)
+      pure $ vm.state { memory = mem' }
+    frames' <- forM (vm.frames :: [Frame Symbolic RealWorld]) $ \frame -> do
+      mem' <- freeze frame.state.memory
+      pure $ (frame :: Frame Symbolic RealWorld) { state = frame.state { memory = mem' } }
+
+    pure (vm :: VM Symbolic RealWorld)
+      { state = state'
+      , frames = frames'
+      }
+  where
+    freeze = \case
+      ConcreteMemory m -> SymbolicMemory . ConcreteBuf . BS.pack . VUnboxed.toList <$> VUnboxed.freeze m
+      m@(SymbolicMemory _) -> pure m
 
 -- | Interpreter which explores all paths at branching points. Returns an
 -- 'Expr End' representing the possible executions.
@@ -267,11 +308,12 @@ interpret fetcher maxIter askSmtIters heuristic vm =
         r <- liftIO q
         interpret fetcher maxIter askSmtIters heuristic vm (k r)
       Stepper.Ask (PleaseChoosePath cond continue) -> do
+        frozen <- liftIO $ stToIO $ freezeVM vm
         evalLeft <- toIO $ do
-          (ra, vma) <- liftIO $ stToIO $ runStateT (continue True) vm { result = Nothing }
+          (ra, vma) <- liftIO $ stToIO $ runStateT (continue True) frozen { result = Nothing }
           interpret fetcher maxIter askSmtIters heuristic vma (k ra)
         evalRight <- toIO $ do
-          (rb, vmb) <- liftIO $ stToIO $ runStateT (continue False) vm { result = Nothing }
+          (rb, vmb) <- liftIO $ stToIO $ runStateT (continue False) frozen { result = Nothing }
           interpret fetcher maxIter askSmtIters heuristic vmb (k rb)
         (a, b) <- liftIO $ concurrently evalLeft evalRight
         pure $ ITE cond a b
@@ -465,7 +507,7 @@ runExpr = do
     _ -> internalError "vm in intermediate state after call to runFully"
 
 toEContract :: Contract -> Expr EContract
-toEContract c = C c.code c.storage c.balance c.nonce
+toEContract c = C c.code c.storage c.tStorage c.balance c.nonce
 
 -- | Converts a given top level expr into a list of final states and the
 -- associated path conditions for each state.
@@ -474,7 +516,7 @@ flattenExpr = go []
   where
     go :: [Prop] -> Expr End -> [Expr End]
     go pcs = \case
-      ITE c t f -> go (PNeg ((PEq c (Lit 0))) : pcs) t <> go (PEq c (Lit 0) : pcs) f
+      ITE c t f -> go (PNeg ((PEq (Lit 0) c)) : pcs) t <> go (PEq (Lit 0) c : pcs) f
       Success ps trace msg store -> [Success (nubOrd $ ps <> pcs) trace msg store]
       Failure ps trace e -> [Failure (nubOrd $ ps <> pcs) trace e]
       Partial ps trace p -> [Partial (nubOrd $ ps <> pcs) trace p]
@@ -517,8 +559,8 @@ reachable solvers e = do
         let query = assertProps conf pcs
         res <- checkSat solvers query
         case res of
-          Sat _ -> pure ([query], Just leaf)
-          Unsat -> pure ([query], Nothing)
+          Sat _ -> pure ([getNonError query], Just leaf)
+          Unsat -> pure ([getNonError query], Nothing)
           r -> internalError $ "Invalid solver result: " <> show r
 
 -- | Extract constraints stored in Expr End nodes
@@ -577,8 +619,9 @@ verify solvers opts preState maybepost = do
         let
           -- Filter out any leaves from `flattened` that can be statically shown to be safe
           tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf preState.constraints post, leaf)
-          withQueries = filter canBeSat tocheck <&> \(a, leaf) -> (assertProps conf a, leaf)
-        when conf.debug $ putStrLn $ "   Checking for reachability of " <> show (length withQueries)
+          withQueries = filter canBeSat tocheck <&> first (assertProps conf)
+        when conf.debug $
+          putStrLn $ "   Checking for reachability of " <> show (length withQueries)
                      <> " potential property violation(s) in call " <> call
 
         -- Dispatch the remaining branches to the solver to check for violations
@@ -600,9 +643,9 @@ verify solvers opts preState maybepost = do
     toVRes :: (CheckSatResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
       Sat model -> Cex (leaf, expandCex preState model)
-      EVM.Solvers.Unknown -> Timeout leaf
+      EVM.Solvers.Unknown _ -> EVM.SymExec.Unknown leaf
+      EVM.Solvers.Error e -> EVM.SymExec.Error e
       Unsat -> Qed ()
-      Error e -> internalError $ "solver responded with error: " <> show e
 
 expandCex :: VM Symbolic s -> SMTCex -> SMTCex
 expandCex prestate c = c { store = Map.union c.store concretePreStore }
@@ -713,8 +756,8 @@ equivalenceCheck' solvers branchesA branchesB = do
               -- potential race, but it doesn't matter for correctness
               atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
               pure (Qed (), False)
-        (_, EVM.Solvers.Unknown) -> pure (Timeout (), False)
-        (_, Error txt) -> internalError $ "solver returned: " <> (T.unpack txt)
+        (_, EVM.Solvers.Unknown _) -> pure (EVM.SymExec.Unknown (), False)
+        (_, EVM.Solvers.Error txt) -> pure (EVM.SymExec.Error txt, False)
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
@@ -804,37 +847,35 @@ produceModels solvers expr = do
 showModel :: Expr Buf -> (Expr End, CheckSatResult) -> IO ()
 showModel cd (expr, res) = do
   case res of
-    Unsat -> pure () -- ignore unreachable branches
-    Error e -> internalError $ "smt solver returned an error: " <> show e
-    EVM.Solvers.Unknown -> do
+    EVM.Solvers.Unsat -> pure () -- ignore unreachable branches
+    EVM.Solvers.Error e -> do
+      putStrLn ""
       putStrLn "--- Branch ---"
+      putStrLn $ "Error during SMT solving, cannot check branch " <> e
+    EVM.Solvers.Unknown reason -> do
       putStrLn ""
-      putStrLn "Unable to produce a model for the following end state:"
-      putStrLn ""
+      putStrLn "--- Branch ---"
+      putStrLn $ "Unable to produce a model for the following end state due to '" <> reason <> "' :"
       T.putStrLn $ indent 2 $ formatExpr expr
       putStrLn ""
     Sat cex -> do
+      putStrLn ""
       putStrLn "--- Branch ---"
-      putStrLn ""
       putStrLn "Inputs:"
-      putStrLn ""
       T.putStrLn $ indent 2 $ formatCex cd Nothing cex
-      putStrLn ""
       putStrLn "End State:"
-      putStrLn ""
       T.putStrLn $ indent 2 $ formatExpr expr
-      putStrLn ""
 
 
 formatCex :: Expr Buf -> Maybe Sig -> SMTCex -> Text
-formatCex cd sig m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
+formatCex cd sig m@(SMTCex _ addrs _ store blockContext txContext) = T.unlines $
   [ "Calldata:"
   , indent 2 cd'
-  , ""
   ]
   <> storeCex
   <> txCtx
   <> blockCtx
+  <> addrsCex
   where
     -- we attempt to produce a model for calldata by substituting all variables
     -- and buffers provided by the model into the original calldata expression.
@@ -856,7 +897,6 @@ formatCex cd sig m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
               ("Addr " <> (T.pack . show $ key)
                 <> ": " <> (T.pack $ show (Map.toList val))) : acc
             ) mempty store
-          , ""
           ]
 
     txCtx :: [Text]
@@ -867,8 +907,17 @@ formatCex cd sig m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
         , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc ->
             (showTxCtx key <> ": " <> (T.pack $ show val)) : acc
           ) mempty (filterSubCtx txContext)
-        , ""
         ]
+
+    addrsCex :: [Text]
+    addrsCex
+      | Map.null addrs = []
+      | otherwise =
+          [ "Addrs:"
+          , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc ->
+              ((T.pack . show $ key) <> ": " <> (T.pack $ show val)) : acc
+            ) mempty addrs
+          ]
 
     -- strips the frame arg from frame context vars to make them easier to read
     showTxCtx :: Expr EWord -> Text
@@ -893,7 +942,6 @@ formatCex cd sig m@(SMTCex _ _ _ store blockContext txContext) = T.unlines $
         , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc ->
             (T.pack $ show key <> ": " <> show val) : acc
           ) mempty txContext
-        , ""
         ]
 
     prettyBuf :: Expr Buf -> Text
@@ -1014,10 +1062,10 @@ subStores model b = Map.foldlWithKey subStore b model
                else v
           e -> e
 
-getCex :: ProofResult a b c -> Maybe b
+getCex :: ProofResult a b c d -> Maybe b
 getCex (Cex c) = Just c
 getCex _ = Nothing
 
-getTimeout :: ProofResult a b c -> Maybe c
-getTimeout (Timeout c) = Just c
-getTimeout _ = Nothing
+getUnknown :: ProofResult a b c d-> Maybe c
+getUnknown (EVM.SymExec.Unknown c) = Just c
+getUnknown _ = Nothing

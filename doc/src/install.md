@@ -8,11 +8,11 @@ curl -L https://foundry.paradigm.xyz | bash
 ```
 
 Next, you need to have either [Z3](https://github.com/Z3Prover/z3) or
-[CVC5](https://cvc5.github.io/) installed. Often, these can be installed via:
+[cvc5](https://cvc5.github.io/) installed. Often, these can be installed via:
 ```
 $ sudo apt-get install z3
 ```
-or similar. If you installed CVC5 instead, you will need to pass the flag
+or similar. If you installed cvc5 instead, you will need to pass the flag
 "--solver cvc5" to "hevm test" later.
 
 
@@ -41,7 +41,7 @@ Checking 1 function(s) in contract src/contract-pass.sol:MyContract
    [PASS] prove_pass(address,uint256)
 ```
 
-See [ds-test Tutorial](./ds-test-tutorial.md) for details.
+See [Forge std-test tutorial](./std-test-tutorial.md) for details.
 
 Note that Foundry provides the solidity compiler, hence there is no need to
 install solidity separately.

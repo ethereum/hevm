@@ -3,9 +3,7 @@
 module Main where
 
 import Test.Tasty
-import Test.Tasty.ExpectedFailure
 import Test.Tasty.HUnit
-import System.Info (os)
 
 import Data.Maybe
 import Data.Map qualified as Map
@@ -33,10 +31,6 @@ rpcEnv = Env { config = defaultConfig }
 
 test :: TestName -> ReaderT Env IO () -> TestTree
 test a b = testCase a $ runEnv rpcEnv b
-
-ignoreTestWindows :: String -> TestTree -> TestTree
-ignoreTestWindows reason t | os == "mingw32" = ignoreTestBecause ("unsupported on Windows: " <> reason) t
-                           | otherwise       = t
 
 main :: IO ()
 main = defaultMain tests
@@ -75,7 +69,7 @@ tests = testGroup "rpc"
     ]
   , testGroup "execution with remote state"
     -- execute against remote state from a ds-test harness
-    [ ignoreTestWindows "git command failure" $ test "dapp-test" $ do
+    [ test "dapp-test" $ do
         let testFile = "test/contracts/pass/rpc.sol"
         res <- runSolidityTestCustom testFile ".*" Nothing Nothing False testRpcInfo Foundry
         liftIO $ assertEqual "test result" True res
@@ -88,7 +82,7 @@ tests = testGroup "rpc"
           wad = 0x999999999999999999
           calldata' = ConcreteBuf $ abiMethod "transfer(address,uint256)" (AbiTuple (V.fromList [AbiAddress (Addr 0xdead), AbiUInt 256 wad]))
         vm <- liftIO $ weth9VM blockNum (calldata', [])
-        postVm <- withSolvers Z3 1 Nothing $ \solvers ->
+        postVm <- withSolvers Z3 1 1 Nothing $ \solvers ->
           Stepper.interpret (oracle solvers (Just (BlockNumber blockNum, testRpc))) vm Stepper.runFully
         let
           wethStore = (fromJust $ Map.lookup (LitAddr 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2) postVm.env.contracts).storage
@@ -112,7 +106,7 @@ tests = testGroup "rpc"
           postc _ (Failure _ _ (Revert _)) = PBool False
           postc _ _ = PBool True
         vm <- liftIO $ weth9VM blockNum calldata'
-        (_, [Cex (_, model)]) <- withSolvers Z3 1 Nothing $ \solvers ->
+        (_, [Cex (_, model)]) <- withSolvers Z3 1 1 Nothing $ \solvers ->
           verify solvers (rpcVeriOpts (BlockNumber blockNum, testRpc)) (symbolify vm) (Just postc)
         liftIO $ assertBool "model should exceed caller balance" (getVar model "arg2" >= 695836005599316055372648)
     ]
@@ -162,6 +156,8 @@ vmFromRpc blockNum calldata callvalue caller address = do
     , baseState      = EmptyBase
     , txAccessList   = mempty
     , allowFFI       = False
+    , freshAddresses = 0
+    , beaconRoot     = 0
     }) <&> set (#cache % #fetched % at address) (Just ctrct)
 
 testRpc :: Text

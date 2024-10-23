@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
 
@@ -74,6 +73,7 @@ import Data.Sequence (Seq)
 import Data.Text (pack, intercalate)
 import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import Data.Text.IO (writeFile)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Word (Word8)
@@ -388,13 +388,16 @@ solidity contract src = liftIO $ do
   pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.creationCode)
 
 solcRuntime
-  :: (MonadUnliftIO m)
+  :: App m
   => Text -> Text -> m (Maybe ByteString)
-solcRuntime contract src = liftIO $ do
-  json <- solc Solidity src
-  case readStdJSON json of
-    Just (Contracts sol, _, _) -> pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.runtimeCode)
-    Nothing -> internalError $ "unable to parse solidity output:\n" <> (T.unpack json)
+solcRuntime contract src = do
+  conf <- readConfig
+  liftIO $ do
+    json <- solc Solidity src
+    when conf.dumpExprs $ liftIO $ Data.Text.IO.writeFile "compiled_code.json" json
+    case readStdJSON json of
+      Just (Contracts sol, _, _) -> pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.runtimeCode)
+      Nothing -> internalError $ "unable to parse solidity output:\n" <> (T.unpack json)
 
 functionAbi :: Text -> IO Method
 functionAbi f = do
@@ -402,9 +405,9 @@ functionAbi f = do
   let (Contracts sol, _, _) = fromMaybe
                                 (internalError . T.unpack $ "unable to parse solc output:\n" <> json)
                                 (readStdJSON json)
-  case Map.toList $ (fromJust (Map.lookup "hevm.sol:ABI" sol)).abiMap of
-     [(_,b)] -> pure b
-     _ -> internalError "unexpected abi format"
+  case Map.toList (fromJust (Map.lookup "hevm.sol:ABI" sol)).abiMap of
+    [(_,b)] -> pure b
+    _ -> internalError "unexpected abi format"
 
 force :: String -> Maybe a -> a
 force s = fromMaybe (internalError s)

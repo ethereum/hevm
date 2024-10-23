@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module EVM.Stepper
@@ -23,17 +22,17 @@ where
 -- The implementation uses the operational monad pattern
 -- as the framework for monadic interpretation.
 
+import Control.Monad.IO.Class
 import Control.Monad.Operational (Program, ProgramViewT(..), ProgramView, singleton, view)
+import Control.Monad.ST (stToIO, RealWorld)
 import Control.Monad.State.Strict (execStateT, runStateT, get)
 import Data.Text (Text)
 
 import EVM qualified
+import EVM.Effects
 import EVM.Exec qualified
 import EVM.Fetch qualified as Fetch
 import EVM.Types
-import Control.Monad.ST (stToIO, RealWorld)
-import Control.Monad.IO.Class
-import EVM.Effects
 
 -- | The instruction type of the operational monad
 data Action t s a where

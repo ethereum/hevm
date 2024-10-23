@@ -1,4 +1,5 @@
 {-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module EVM where
 
@@ -12,7 +13,7 @@ import Optics.Operators.Unsafe
 
 import EVM.ABI
 import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord,
-  writeByte, bufLength, indexWord, litAddr, readBytes, word256At, copySlice, wordToAddr)
+  writeByte, bufLength, indexWord, readBytes, copySlice, wordToAddr)
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (FeeSchedule (..))
 import EVM.Op
@@ -22,6 +23,7 @@ import EVM.Types
 import EVM.Types qualified as Expr (Expr(Gas))
 import EVM.Sign qualified
 import EVM.Concrete qualified as Concrete
+import EVM.CheatsTH
 
 import Control.Monad (unless, when)
 import Control.Monad.ST (ST)
@@ -30,11 +32,16 @@ import Data.Bits (FiniteBits, countLeadingZeros, finiteBitSize)
 import Data.ByteArray qualified as BA
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Lazy (fromStrict)
 import Data.ByteString.Lazy qualified as LS
 import Data.ByteString.Char8 qualified as Char8
+import Data.DoubleWord (Int256, Word256)
+import Data.Either (partitionEithers)
+import Data.Either.Extra (maybeToEither)
 import Data.Foldable (toList)
-import Data.List (find)
+import Data.List (find, isPrefixOf)
+import Data.List.Split (splitOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, fromJust, isJust)
@@ -52,7 +59,8 @@ import Data.Vector.Storable.Mutable qualified as SV
 import Data.Vector.Unboxed qualified as VUnboxed
 import Data.Vector.Unboxed.Mutable qualified as VUnboxed.Mutable
 import Data.Word (Word8, Word32, Word64)
-import Witch (into, tryFrom, unsafeInto)
+import Text.Read (readMaybe)
+import Witch (into, tryFrom, unsafeInto, tryInto)
 
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
@@ -93,7 +101,7 @@ currentContract vm =
   Map.lookup vm.state.codeContract vm.env.contracts
 
 -- * Data constructors
-
+--
 makeVm :: VMOps t => VMOpts t -> ST s (VM t s)
 makeVm o = do
   let txaccessList = o.txAccessList
@@ -106,7 +114,7 @@ makeVm o = do
       initialAccessedStorageKeys = fromList $ foldMap (uncurry (map . (,))) (Map.toList txaccessList)
       touched = if o.create then [txorigin] else [txorigin, txtoAddr]
   memory <- ConcreteMemory <$> VUnboxed.Mutable.new 0
-  pure $ VM
+  pure $ setEIP4788Storage o $ VM
     { result = Nothing
     , frames = mempty
     , tx = TxState
@@ -116,7 +124,7 @@ makeVm o = do
       , origin = txorigin
       , toAddr = txtoAddr
       , value = o.value
-      , substate = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty
+      , subState = SubState mempty touched initialAccessedAddrs initialAccessedStorageKeys mempty mempty
       , isCreate = o.create
       , txReversion = Map.fromList ((o.address,o.contract):o.otherContracts)
       }
@@ -152,12 +160,13 @@ makeVm o = do
     , forks = Seq.singleton (ForkState env block cache "")
     , currentFork = 0
     , labels = mempty
+    , osEnv = mempty
     }
     where
     env = Env
       { chainId = o.chainId
       , contracts = Map.fromList ((o.address,o.contract):o.otherContracts)
-      , freshAddresses = 0
+      , freshAddresses = o.freshAddresses
       , freshGasVals = 0
       }
     block = Block
@@ -172,11 +181,41 @@ makeVm o = do
       }
     cache = Cache mempty mempty
 
+-- https://eips.ethereum.org/EIPS/eip-4788
+setEIP4788Storage :: VMOpts t -> VM t s -> VM t s
+setEIP4788Storage o vm = do
+  let beaconRootsAddress = LitAddr 0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02
+  case Map.lookup beaconRootsAddress vm.env.contracts of
+    Just beaconRootsContract -> do
+      -- https://eips.ethereum.org/EIPS/eip-4788#pseudocode
+      -- https://eips.ethereum.org/EIPS/eip-4788#block-processing
+      -- > Clients may decide to omit an explicit EVM call and directly set the
+      -- > storage values. Note: While this is a valid optimization for Ethereum
+      -- > mainnet, it could be problematic on non-mainnet situations in case
+      -- > a different contract is used.
+      let
+        historyBufferLength = 8191
+        timestampIdx = Expr.mod o.timestamp (Lit historyBufferLength)
+        rootIdx = Expr.add timestampIdx (Lit historyBufferLength)
+        storage =
+          Expr.writeStorage timestampIdx o.timestamp .
+          Expr.writeStorage rootIdx (Lit o.beaconRoot) $
+          beaconRootsContract.storage
+      vm {
+        env = vm.env {
+          contracts = Map.insert beaconRootsAddress
+                                 (beaconRootsContract { storage } :: Contract)
+                                 vm.env.contracts
+        }
+      }
+    Nothing -> vm
+
 -- | Initialize an abstract contract with unknown code
 unknownContract :: Expr EAddr -> Contract
 unknownContract addr = Contract
   { code        = UnknownCode addr
   , storage     = AbstractStore addr Nothing
+  , tStorage    = AbstractStore addr Nothing
   , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = Nothing
@@ -191,6 +230,7 @@ abstractContract :: ContractCode -> Expr EAddr -> Contract
 abstractContract code addr = Contract
   { code        = code
   , storage     = AbstractStore addr Nothing
+  , tStorage    = AbstractStore addr Nothing
   , origStorage = AbstractStore addr Nothing
   , balance     = Balance addr
   , nonce       = if isCreation code then Just 1 else Just 0
@@ -209,6 +249,7 @@ initialContract :: ContractCode -> Contract
 initialContract code = Contract
   { code        = code
   , storage     = ConcreteStore mempty
+  , tStorage    = ConcreteStore mempty
   , origStorage = ConcreteStore mempty
   , balance     = Lit 0
   , nonce       = if isCreation code then Just 1 else Just 0
@@ -230,6 +271,18 @@ isCreation = \case
 next :: (?op :: Word8) => EVM t s ()
 next = modifying (#state % #pc) (+ (opSize ?op))
 
+getOpW8 :: forall (t :: VMType) s . FrameState t s -> Word8
+getOpW8 state = case state.code of
+      UnknownCode _ -> internalError "Cannot execute unknown code"
+      InitCode conc _ -> BS.index conc state.pc
+      RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs state.pc
+      RuntimeCode (SymbolicRuntimeCode ops) ->
+        fromMaybe (internalError "could not analyze symbolic code") $
+          maybeLitByte $ ops V.! state.pc
+
+getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
+getOpName state = intToOpName $ fromEnum $ getOpW8 state
+
 -- | Executes the EVM one step
 exec1 :: forall (t :: VMType) s. VMOps t => EVM t s ()
 exec1 = do
@@ -247,7 +300,7 @@ exec1 = do
 
     litSelf = maybeLitAddr self
 
-  if isJust litSelf && (fromJust litSelf) > 0x0 && (fromJust litSelf) <= 0x9 then do
+  if isJust litSelf && (fromJust litSelf) > 0x0 && (fromJust litSelf) <= 0xa then do
     -- call to precompile
     let ?op = 0x00 -- dummy value
     let calldatasize = bufLength vm.state.calldata
@@ -266,7 +319,7 @@ exec1 = do
             out <- use (#state % #returndata)
             finishFrame (FrameReturned out)
         e -> partial $
-               UnexpectedSymbolicArg vmx.state.pc "precompile returned a symbolic value" (wrap [e])
+               UnexpectedSymbolicArg vmx.state.pc (getOpName vmx.state) "precompile returned a symbolic value" (wrap [e])
       _ ->
         underrun
 
@@ -274,13 +327,8 @@ exec1 = do
     then doStop
 
     else do
-      let ?op = case vm.state.code of
-                  UnknownCode _ -> internalError "Cannot execute unknown code"
-                  InitCode conc _ -> BS.index conc vm.state.pc
-                  RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs vm.state.pc
-                  RuntimeCode (SymbolicRuntimeCode ops) ->
-                    fromMaybe (internalError "could not analyze symbolic code") $
-                      maybeLitByte $ ops V.! vm.state.pc
+      let ?op = getOpW8 vm.state
+      let opName = getOpName vm.state
 
       case getOp (?op) of
 
@@ -491,7 +539,7 @@ exec1 = do
                         Just b -> copyBytesToMemory b codeSize codeOffset memOffset
                         Nothing -> do
                           pc <- use (#state % #pc)
-                          partial $ UnexpectedSymbolicArg pc "Cannot copy from unknown code at" (wrap [extAccount])
+                          partial $ UnexpectedSymbolicArg pc opName "Cannot copy from unknown code at" (wrap [extAccount])
             _ -> underrun
 
         OpReturndatasize ->
@@ -574,6 +622,13 @@ exec1 = do
           limitStack 1 . burn g_base $
             next >> push vm.block.baseFee
 
+        OpBlobhash ->
+          stackOp1 g_verylow $ \_ -> Lit 0
+
+        OpBlobBaseFee ->
+          limitStack 1 . burn g_base $
+            next >> push 0
+
         OpPop ->
           case stk of
             _:xs -> burn g_base (next >> assign (#state % #stack) xs)
@@ -589,6 +644,34 @@ exec1 = do
                   let w = Expr.readWordFromBytes (Lit 0) buf
                   assign (#state % #stack) (w : xs)
             _ -> underrun
+
+
+        OpMcopy ->
+          case stk of
+            dstOff:srcOff:sz:xs ->  do
+              case sz of
+                Lit sz' -> do
+                  let words_copied = (sz' + 31) `div` 32
+                  let g_mcopy = 3*words_copied -- memory access cost is part of accessMemoryRange
+                  burn (g_verylow + (unsafeInto g_mcopy)) $
+                    accessMemoryRange srcOff sz $ accessMemoryRange dstOff sz $ do
+                      next
+                      mcopy sz srcOff dstOff
+                _ -> do
+                  -- symbolic, ignore gas
+                  next
+                  mcopy sz srcOff dstOff
+              assign (#state % #stack) xs
+            _ -> underrun
+            where
+            mcopy sz srcOff dstOff = do
+                  m <- gets (.state.memory)
+                  case m of
+                    ConcreteMemory mem -> do
+                      buf <- freezeMemory mem
+                      copyBytesToMemory buf sz srcOff dstOff
+                    SymbolicMemory mem -> do
+                      assign (#state % #memory) (SymbolicMemory $ copySlice srcOff dstOff sz mem mem)
 
         OpMstore ->
           case stk of
@@ -693,13 +776,32 @@ exec1 = do
                        _ -> noop
             _ -> underrun
 
+        OpTload ->
+          case stk of
+            x:xs -> do
+              burn g_warm_storage_read $
+                accessTStorage self x $ \y -> do
+                  next
+                  assign (#state % #stack) (y:xs)
+            _ -> underrun
+
+        OpTstore ->
+          notStatic $
+          case stk of
+            x:new:xs ->
+              burn g_sload $ do
+                next
+                modifying (#env % #contracts % ix self % #tStorage) (writeStorage x new)
+                assign (#state % #stack) xs
+            _ -> underrun
+
         OpJump ->
           case stk of
             x:xs ->
               burn g_mid $ forceConcrete x "JUMP: symbolic jumpdest" $ \x' ->
-                case toInt x' of
-                  Nothing -> vmError BadJumpDestination
-                  Just i -> checkJump i xs
+                case tryInto x' of
+                  Left _ -> vmError BadJumpDestination
+                  Right i -> checkJump i xs
             _ -> underrun
 
         OpJumpi ->
@@ -708,9 +810,9 @@ exec1 = do
               burn g_high $
                 let jump :: Bool -> EVM t s ()
                     jump False = assign (#state % #stack) xs >> next
-                    jump _    = case toInt x' of
-                      Nothing -> vmError BadJumpDestination
-                      Just i -> checkJump i xs
+                    jump _    = case tryInto x' of
+                      Left _ -> vmError BadJumpDestination
+                      Right i -> checkJump i xs
                 in branch y jump
             _ -> underrun
 
@@ -839,7 +941,7 @@ exec1 = do
                 Nothing -> do
                   loc <- codeloc
                   let msg = "Unable to determine a call target"
-                  partial $ UnexpectedSymbolicArg (snd loc) msg [SomeExpr xTo]
+                  partial $ UnexpectedSymbolicArg (snd loc) opName msg [SomeExpr xTo]
                 Just xTo' ->
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
@@ -872,7 +974,7 @@ exec1 = do
                 Nothing -> do
                   loc <- codeloc
                   let msg = "Unable to determine a call target"
-                  partial $ UnexpectedSymbolicArg (snd loc) msg [SomeExpr xTo]
+                  partial $ UnexpectedSymbolicArg (snd loc) opName msg [SomeExpr xTo]
                 Just xTo' ->
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
@@ -898,6 +1000,8 @@ exec1 = do
             [] -> underrun
             (xTo':_) -> forceAddr xTo' "SELFDESTRUCT" $ \case
               xTo@(LitAddr _) -> do
+                cc <- gets (.tx.subState.createdContracts)
+                let createdThisTr = self `member` cc
                 acc <- accessAccountForGas xTo
                 let cost = if acc then 0 else g_cold_account_access
                     funds = this.balance
@@ -907,19 +1011,21 @@ exec1 = do
                               then g_selfdestruct_newaccount
                               else 0
                   burn (g_selfdestruct + c_new + cost) $ do
-                    selfdestruct self
+                    when (createdThisTr || isCreation this.code) $ do
+                      selfdestruct self
                     touchAccount xTo
 
                     if hasFunds
                     then fetchAccount xTo $ \_ -> do
-                           #env % #contracts % ix xTo % #balance %= (Expr.add funds)
-                           assign (#env % #contracts % ix self % #balance) (Lit 0)
-                           doStop
-                    else do
+                      when (createdThisTr || xTo /= self) $ do
+                        #env % #contracts % ix xTo % #balance %= (Expr.add funds)
+                        assign (#env % #contracts % ix self % #balance) (Lit 0)
+                      doStop
+                    else
                       doStop
               a -> do
                 pc <- use (#state % #pc)
-                partial $ UnexpectedSymbolicArg pc "trying to self destruct to a symbolic address" (wrap [a])
+                partial $ UnexpectedSymbolicArg pc opName "trying to self destruct to a symbolic address" (wrap [a])
 
         OpRevert ->
           case stk of
@@ -957,7 +1063,8 @@ transfer src dst val = do
           transfer src dst val
         SymAddr _ -> do
           pc <- use (#state % #pc)
-          partial $ UnexpectedSymbolicArg pc "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [src])
+          state <- use #state
+          partial $ UnexpectedSymbolicArg pc (getOpName state) "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [src])
         GVar _ -> internalError "Unexpected GVar"
     -- recipient not in state
     (_ , Nothing) -> do
@@ -967,7 +1074,8 @@ transfer src dst val = do
           transfer src dst val
         SymAddr _ -> do
           pc <- use (#state % #pc)
-          partial $ UnexpectedSymbolicArg pc "Attempting to transfer eth to a symbolic address that is not present in the state" (wrap [dst])
+          state <- use #state
+          partial $ UnexpectedSymbolicArg pc (getOpName state) "Attempting to transfer eth to a symbolic address that is not present in the state" (wrap [dst])
         GVar _ -> internalError "Unexpected GVar"
 
 -- | Checks a *CALL for failure; OOG, too many callframes, memory access etc.
@@ -1033,7 +1141,8 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
             -- adding a symbolic address into the state here would be unsound (due to potential aliasing)
             SymAddr _ -> do
               pc <- use (#state % #pc)
-              partial $ UnexpectedSymbolicArg pc "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [from])
+              state <- use #state
+              partial $ UnexpectedSymbolicArg pc (getOpName state) "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [from])
             GVar _ -> internalError "Unexpected GVar"
 
 
@@ -1057,6 +1166,7 @@ precompiledContract this xGas precompileAddr recipient xValue inOffset inSize ou
       stk <- use (#state % #stack)
       pc' <- use (#state % #pc)
       result' <- use #result
+      vm <- get
       case result' of
         Nothing -> case stk of
           x:_ -> case maybeLitWord x of
@@ -1068,7 +1178,7 @@ precompiledContract this xGas precompileAddr recipient xValue inOffset inSize ou
                 touchAccount (LitAddr recipient)
                 transfer self (LitAddr recipient) xValue
             _ -> partial $
-                   UnexpectedSymbolicArg pc' "unexpected return value from precompile" (wrap [x])
+                   UnexpectedSymbolicArg pc' (getOpName vm.state) "unexpected return value from precompile" (wrap [x])
           _ -> underrun
         _ -> pure ()
 
@@ -1276,7 +1386,8 @@ fetchAccount addr continue =
     Nothing -> case addr of
       SymAddr _ -> do
         pc <- use (#state % #pc)
-        partial $ UnexpectedSymbolicArg pc "trying to access a symbolic address that isn't already present in storage" (wrap [addr])
+        state <- use #state
+        partial $ UnexpectedSymbolicArg pc (getOpName state) "trying to access a symbolic address that isn't already present in storage" (wrap [addr])
       LitAddr a -> do
         use (#cache % #fetched % at a) >>= \case
           Just c -> do
@@ -1336,6 +1447,29 @@ accessStorage addr slot continue = do
               assign #result Nothing
               continue (Lit x))
 
+accessTStorage
+  :: VMOps t => Expr EAddr
+  -> Expr EWord
+  -> (Expr EWord -> EVM t s ())
+  -> EVM t s ()
+accessTStorage addr slot continue = do
+  let slotConc = Expr.concKeccakSimpExpr slot
+  use (#env % #contracts % at addr) >>= \case
+    Just c ->
+      -- Try first without concretization. Then if we get a Just, with concretization
+      -- See `accessStorage` for more details
+      case readStorage slot c.tStorage of
+        Just x -> case readStorage slotConc c.tStorage of
+          Just _ -> continue x
+          Nothing -> continue $ Lit 0
+        Nothing -> continue $ Lit 0
+    Nothing ->
+      fetchAccount addr $ \_ ->
+        accessTStorage addr slot continue
+
+clearTStorages :: EVM t s ()
+clearTStorages = (#env % #contracts) %= fmap (\c -> c { tStorage = ConcreteStore mempty } :: Contract)
+
 accountExists :: Expr EAddr -> VM t s -> Bool
 accountExists addr vm =
   case Map.lookup addr vm.env.contracts of
@@ -1358,7 +1492,7 @@ finalize :: VMOps t => EVM t s ()
 finalize = do
   let
     revertContracts  = use (#tx % #txReversion) >>= assign (#env % #contracts)
-    revertSubstate   = assign (#tx % #substate) (SubState mempty mempty mempty mempty mempty)
+    revertSubstate   = assign (#tx % #subState) (SubState mempty mempty mempty mempty mempty mempty)
 
   use #result >>= \case
     Just (VMFailure (Revert _)) -> do
@@ -1370,23 +1504,24 @@ finalize = do
       revertContracts
       revertSubstate
     Just (VMSuccess output) -> do
+      clearTStorages
       -- deposit the code from a creation tx
       pc' <- use (#state % #pc)
       creation <- use (#tx % #isCreate)
       createe  <- use (#state % #contract)
       createeExists <- (Map.member createe) <$> use (#env % #contracts)
-      let onContractCode contractCode =
-            when (creation && createeExists) $ replaceCode createe contractCode
-      case output of
-        ConcreteBuf bs ->
-          onContractCode $ RuntimeCode (ConcreteRuntimeCode bs)
-        _ ->
-          case Expr.toList output of
-            Nothing ->
-              partial $
-                UnexpectedSymbolicArg pc' "runtime code cannot have an abstract length" (wrap [output])
-            Just ops ->
-              onContractCode $ RuntimeCode (SymbolicRuntimeCode ops)
+      when (creation && createeExists) $
+        case output of
+          ConcreteBuf bs ->
+            replaceCode createe (RuntimeCode (ConcreteRuntimeCode bs))
+          _ ->
+            case Expr.toList output of
+              Nothing -> do
+                state <- use #state
+                partial $
+                  UnexpectedSymbolicArg pc' (getOpName state) "runtime code cannot have an abstract length" (wrap [output])
+              Just ops ->
+                replaceCode createe (RuntimeCode (SymbolicRuntimeCode ops))
     _ ->
       internalError "Finalising an unfinished tx."
 
@@ -1406,11 +1541,11 @@ finalize = do
   -- (see Yellow Paper "Accrued Substate")
   --
   -- remove any destructed addresses
-  destroyedAddresses <- use (#tx % #substate % #selfdestructs)
+  destroyedAddresses <- use (#tx % #subState % #selfdestructs)
   modifying (#env % #contracts)
     (Map.filterWithKey (\k _ -> (k `notElem` destroyedAddresses)))
   -- then, clear any remaining empty and touched addresses
-  touchedAddresses <- use (#tx % #substate % #touchedAccounts)
+  touchedAddresses <- use (#tx % #subState % #touchedAccounts)
   modifying (#env % #contracts)
     (Map.filterWithKey
       (\k a -> not ((k `elem` touchedAddresses) && accountEmpty a)))
@@ -1445,21 +1580,21 @@ forceAddr :: VMOps t => Expr EWord -> String -> (Expr EAddr -> EVM t s ()) -> EV
 forceAddr n msg continue = case wordToAddr n of
   Nothing -> do
     vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n])
+    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
   Just c -> continue c
 
 forceConcrete :: VMOps t => Expr EWord -> String -> (W256 -> EVM t s ()) -> EVM t s ()
 forceConcrete n msg continue = case maybeLitWord n of
   Nothing -> do
     vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n])
+    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
   Just c -> continue c
 
 forceConcreteAddr :: VMOps t => Expr EAddr -> String -> (Addr -> EVM t s ()) -> EVM t s ()
 forceConcreteAddr n msg continue = case maybeLitAddr n of
   Nothing -> do
     vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n])
+    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
   Just c -> continue c
 
 forceConcreteAddr2 :: VMOps t => (Expr EAddr, Expr EAddr) -> String -> ((Addr, Addr) -> EVM t s ()) -> EVM t s ()
@@ -1467,39 +1602,39 @@ forceConcreteAddr2 (n,m) msg continue = case (maybeLitAddr n, maybeLitAddr m) of
   (Just c, Just d) -> continue (c,d)
   _ -> do
     vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n, m])
+    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n, m])
 
 forceConcrete2 :: VMOps t => (Expr EWord, Expr EWord) -> String -> ((W256, W256) -> EVM t s ()) -> EVM t s ()
 forceConcrete2 (n,m) msg continue = case (maybeLitWord n, maybeLitWord m) of
   (Just c, Just d) -> continue (c, d)
   _ -> do
     vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [n, m])
+    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n, m])
 
 forceConcreteBuf :: VMOps t => Expr Buf -> String -> (ByteString -> EVM t s ()) -> EVM t s ()
 forceConcreteBuf (ConcreteBuf b) _ continue = continue b
 forceConcreteBuf b msg _ = do
     vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc msg (wrap [b])
+    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [b])
 
 -- * Substate manipulation
 refund :: Word64 -> EVM t s ()
 refund n = do
   self <- use (#state % #contract)
-  pushTo (#tx % #substate % #refunds) (self, n)
+  pushTo (#tx % #subState % #refunds) (self, n)
 
 unRefund :: Word64 -> EVM t s ()
 unRefund n = do
   self <- use (#state % #contract)
-  refs <- use (#tx % #substate % #refunds)
-  assign (#tx % #substate % #refunds)
+  refs <- use (#tx % #subState % #refunds)
+  assign (#tx % #subState % #refunds)
     (filter (\(a,b) -> not (a == self && b == n)) refs)
 
 touchAccount :: Expr EAddr -> EVM t s ()
-touchAccount = pushTo ((#tx % #substate) % #touchedAccounts)
+touchAccount = pushTo ((#tx % #subState) % #touchedAccounts)
 
 selfdestruct :: Expr EAddr -> EVM t s ()
-selfdestruct = pushTo ((#tx % #substate) % #selfdestructs)
+selfdestruct = pushTo ((#tx % #subState) % #selfdestructs)
 
 accessAndBurn :: VMOps t => Expr EAddr -> EVM t s () -> EVM t s ()
 accessAndBurn x cont = do
@@ -1512,20 +1647,20 @@ accessAndBurn x cont = do
 -- otherwise cold
 accessAccountForGas :: Expr EAddr -> EVM t s Bool
 accessAccountForGas addr = do
-  accessedAddrs <- use (#tx % #substate % #accessedAddresses)
+  accessedAddrs <- use (#tx % #subState % #accessedAddresses)
   let accessed = member addr accessedAddrs
-  assign (#tx % #substate % #accessedAddresses) (insert addr accessedAddrs)
+  assign (#tx % #subState % #accessedAddresses) (insert addr accessedAddrs)
   pure accessed
 
 -- | returns a wrapped boolean- if true, this slot has been touched before in the txn (warm gas cost as in EIP 2929)
 -- otherwise cold
 accessStorageForGas :: Expr EAddr -> Expr EWord -> EVM t s Bool
 accessStorageForGas addr key = do
-  accessedStrkeys <- use (#tx % #substate % #accessedStorageKeys)
+  accessedStrkeys <- use (#tx % #subState % #accessedStorageKeys)
   case maybeLitWord key of
     Just litword -> do
       let accessed = member (addr, litword) accessedStrkeys
-      assign (#tx % #substate % #accessedStorageKeys) (insert (addr, litword) accessedStrkeys)
+      assign (#tx % #subState % #accessedStorageKeys) (insert (addr, litword) accessedStrkeys)
       pure accessed
     _ -> pure False
 
@@ -1540,162 +1675,162 @@ cheatCode = LitAddr $ unsafeInto (keccak' "hevm cheat code")
 
 cheat
   :: (?op :: Word8, VMOps t)
-  => (Expr EWord, Expr EWord) -> (Expr EWord, Expr EWord)
+  => Gas t -> (Expr EWord, Expr EWord) -> (Expr EWord, Expr EWord) -> [Expr EWord]
   -> EVM t s ()
-cheat (inOffset, inSize) (outOffset, outSize) = do
+cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
   vm <- get
   input <- readMemory (Expr.add inOffset (Lit 4)) (Expr.sub inSize (Lit 4))
   calldata <- readMemory inOffset inSize
   abi <- readBytes 4 (Lit 0) <$> readMemory inOffset (Lit 4)
-  pushTrace $ FrameTrace (CallContext cheatCode cheatCode inOffset inSize (Lit 0) (maybeLitWord abi) calldata vm.env.contracts vm.tx.substate)
+  let newContext = CallContext cheatCode cheatCode outOffset outSize (Lit 0) (maybeLitWord abi) calldata vm.env.contracts vm.tx.subState
+
+  pushTrace $ FrameTrace newContext
+  next
+  vm1 <- get
+  burn' gas $ pushTo #frames $ Frame
+                    { state = vm1.state { stack = xs }
+                    , context = newContext
+                    }
   case maybeLitWord abi of
-    Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc "symbolic cheatcode selector" (wrap [abi])
+    Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) "symbolic cheatcode selector" (wrap [abi])
     Just (unsafeInto -> abi') ->
       case Map.lookup abi' cheatActions of
         Nothing ->
           vmError (BadCheatCode abi')
-        Just action -> do
-            action outOffset outSize input
-            popTrace
-            next
-            push 1
+        Just action ->
+          action input
 
-type CheatAction t s = Expr EWord -> Expr EWord -> Expr Buf -> EVM t s ()
+type CheatAction t s = Expr Buf -> EVM t s ()
 
 cheatActions :: VMOps t => Map FunctionSelector (CheatAction t s)
 cheatActions = Map.fromList
   [ action "ffi(string[])" $
-      \sig outOffset outSize input -> do
+      \sig input -> do
         vm <- get
         if vm.config.allowFFI then
           case decodeBuf [AbiArrayDynamicType AbiStringType] input of
-            CAbi valsArr -> case valsArr of
-              [AbiArrayDynamic AbiStringType strsV] ->
-                let
-                  cmd = fmap
-                          (\case
-                            (AbiString a) -> unpack $ decodeUtf8 a
-                            _ -> "")
-                          (V.toList strsV)
-                  cont bs = do
-                    let encoded = ConcreteBuf bs
-                    assign (#state % #returndata) encoded
-                    copyBytesToMemory encoded outSize (Lit 0) outOffset
-                    assign #result Nothing
-                in query (PleaseDoFFI cmd cont)
-              _ -> vmError (BadCheatCode sig)
+            CAbi [AbiArrayDynamic AbiStringType strsV] ->
+              let
+                cmd = fmap
+                        (\case
+                          (AbiString a) -> toString a
+                          _ -> "")
+                        (V.toList strsV)
+                cont bs = continueOnce $ do
+                  frameReturnBuf bs
+              in query (PleaseDoFFI cmd vm.osEnv cont)
             _ -> vmError (BadCheatCode sig)
         else
           let msg = "ffi disabled: run again with --ffi if you want to allow tests to call external scripts"
-          in partial $ UnexpectedSymbolicArg vm.state.pc msg []
+          in partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg []
 
   , action "warp(uint256)" $
-      \sig _ _ input -> case decodeStaticArgs 0 1 input of
-        [x]  -> assign (#block % #timestamp) x
+      \sig input -> case decodeStaticArgs 0 1 input of
+        [x]  -> do
+          assign (#block % #timestamp) x
+          doStop
         _ -> vmError (BadCheatCode sig)
 
   , action "deal(address,uint256)" $
-      \sig _ _ input -> case decodeStaticArgs 0 2 input of
+      \sig input -> case decodeStaticArgs 0 2 input of
         [a, amt] ->
           forceAddr a "vm.deal: cannot decode target into an address" $ \usr ->
             fetchAccount usr $ \_ -> do
               assign (#env % #contracts % ix usr % #balance) amt
+              doStop
         _ -> vmError (BadCheatCode sig)
 
   , action "assume(bool)" $
-      \sig _ _ input -> case decodeStaticArgs 0 1 input of
-        [c] -> modifying #constraints ((:) (PEq c (Lit 1)))
+      \sig input -> case decodeStaticArgs 0 1 input of
+        [c] -> do
+          modifying #constraints ((:) (PEq (Lit 1) c))
+          doStop
         _ -> vmError (BadCheatCode sig)
 
   , action "roll(uint256)" $
-      \sig _ _ input -> case decodeStaticArgs 0 1 input of
-        [x] -> forceConcrete x "cannot roll to a symbolic block number" (assign (#block % #number))
+      \sig input -> case decodeStaticArgs 0 1 input of
+        [x] -> forceConcrete x "cannot roll to a symbolic block number" $ \block -> do
+          assign (#block % #number) block
+          doStop
         _ -> vmError (BadCheatCode sig)
 
   , action "store(address,bytes32,bytes32)" $
-      \sig _ _ input -> case decodeStaticArgs 0 3 input of
+      \sig input -> case decodeStaticArgs 0 3 input of
         [a, slot, new] -> case wordToAddr a of
-          Just a'@(LitAddr _) -> fetchAccount a' $ \_ ->
+          Just a'@(LitAddr _) -> fetchAccount a' $ \_ -> do
             modifying (#env % #contracts % ix a' % #storage) (writeStorage slot new)
+            doStop
           _ -> vmError (BadCheatCode sig)
         _ -> vmError (BadCheatCode sig)
 
   , action "load(address,bytes32)" $
-      \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
+      \sig input -> case decodeStaticArgs 0 2 input of
         [a, slot] -> case wordToAddr a of
           Just a'@(LitAddr _) -> fetchAccount a' $ \_ ->
             accessStorage a' slot $ \res -> do
-              assign (#state % #returndata % word256At (Lit 0)) res
               let buf = writeWord (Lit 0) res (ConcreteBuf "")
-              copyBytesToMemory buf (Lit 32) (Lit 0) outOffset
+              frameReturnExpr buf -- TODO reivew
           _ -> vmError (BadCheatCode sig)
         _ -> vmError (BadCheatCode sig)
 
   , action "sign(uint256,bytes32)" $
-      \sig outOffset _ input -> case decodeStaticArgs 0 2 input of
+      \sig input -> case decodeStaticArgs 0 2 input of
         [sk, hash] ->
           forceConcrete2 (sk, hash) "cannot sign symbolic data" $ \(sk', hash') -> do
             let (v,r,s) = EVM.Sign.sign hash' (into sk')
-                encoded = encodeAbiValue $
-                  AbiTuple (V.fromList
+                result = AbiTuple $
+                  V.fromList
                     [ AbiUInt 8 $ into v
                     , AbiBytes 32 (word256Bytes r)
                     , AbiBytes 32 (word256Bytes s)
-                    ])
-            assign (#state % #returndata) (ConcreteBuf encoded)
-            copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
+                    ]
+            frameReturn result -- TODO ??
         _ -> vmError (BadCheatCode sig)
 
   , action "addr(uint256)" $
-      \sig outOffset _ input -> case decodeStaticArgs 0 1 input of
+      \sig input -> case decodeStaticArgs 0 1 input of
         [sk] -> forceConcrete sk "cannot derive address for a symbolic key" $ \sk' -> do
-          let a = EVM.Sign.deriveAddr $ into sk'
-          case a of
+          case EVM.Sign.deriveAddr $ into sk' of
             Nothing -> vmError (BadCheatCode sig)
-            Just address -> do
-              let expAddr = litAddr address
-              assign (#state % #returndata % word256At (Lit 0)) expAddr
-              let buf = ConcreteBuf $ word256Bytes (into address)
-              copyBytesToMemory buf (Lit 32) (Lit 0) outOffset
+            Just address -> do frameReturnBuf $ word256Bytes (into address) -- TODO ??
         _ -> vmError (BadCheatCode sig)
 
   , action "prank(address)" $
-      \sig _ _ input -> case decodeStaticArgs 0 1 input of
+      \sig input -> case decodeStaticArgs 0 1 input of
         [addr]  -> case wordToAddr addr of
-          Just a -> assign (#config % #overrideCaller) (Just a)
+          Just a -> do
+            assign (#config % #overrideCaller) (Just a)
+            doStop
           Nothing -> vmError (BadCheatCode sig)
         _ -> vmError (BadCheatCode sig)
 
   , action "startPrank(address)" $
-      \sig _ _ input -> case decodeStaticArgs 0 1 input of
+      \sig input -> case decodeStaticArgs 0 1 input of
         [addr]  -> case wordToAddr addr of
           Just a -> do
             assign (#config % #overrideCaller) (Just a)
             assign (#config % #resetCaller) False
+            doStop
           Nothing -> vmError (BadCheatCode sig)
         _ -> vmError (BadCheatCode sig)
 
   , action "stopPrank()" $
-      \_ _ _ _ -> do
-          assign (#config % #overrideCaller) Nothing
-          assign (#config % #resetCaller) True
-
+      \_ _ -> do
+        assign (#config % #overrideCaller) Nothing
+        assign (#config % #resetCaller) True
+        doStop
 
   , action "createFork(string)" $
-      \sig outOffset _ input -> case decodeBuf [AbiStringType] input of
-        CAbi valsArr -> case valsArr of
-          [AbiString bytes] -> do
-            forkId <- length <$> gets (.forks)
-            let urlOrAlias = Char8.unpack bytes
-            modify' $ \vm -> vm { forks = vm.forks Seq.|> ForkState vm.env vm.block vm.cache urlOrAlias }
-            let encoded = encodeAbiValue $ AbiUInt 256 (fromIntegral forkId)
-            assign (#state % #returndata) (ConcreteBuf encoded)
-            copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
-          _ -> vmError (BadCheatCode sig)
+      \sig input -> case decodeBuf [AbiStringType] input of
+        CAbi [AbiString bytes] -> do
+          forkId <- length <$> gets (.forks)
+          let urlOrAlias = Char8.unpack bytes
+          modify' $ \vm -> vm { forks = vm.forks Seq.|> ForkState vm.env vm.block vm.cache urlOrAlias }
+          frameReturn $ AbiUInt 256 (fromIntegral forkId)
         _ -> vmError (BadCheatCode sig)
 
   , action "selectFork(uint256)" $
-      \sig _ _ input -> case decodeStaticArgs 0 1 input of
+      \sig input -> case decodeStaticArgs 0 1 input of
         [forkId] ->
           forceConcrete forkId "forkId must be concrete" $ \(fromIntegral -> forkId') -> do
             saved <- Seq.lookup forkId' <$> gets (.forks)
@@ -1720,27 +1855,87 @@ cheatActions = Map.fromList
                         ) vm.currentFork  vm.forks
                       , currentFork = forkId'
                       }
+                  doStop
               Nothing ->
                 vmError (NonexistentFork forkId')
         _ -> vmError (BadCheatCode sig)
 
   , action "activeFork()" $
-      \_ outOffset _ _ -> do
+      \_ _ -> do
         vm <- get
-        let encoded = encodeAbiValue $ AbiUInt 256 (fromIntegral vm.currentFork)
-        assign (#state % #returndata) (ConcreteBuf encoded)
-        copyBytesToMemory (ConcreteBuf encoded) (Lit . unsafeInto . BS.length $ encoded) (Lit 0) outOffset
+        frameReturn $ AbiUInt 256 (fromIntegral vm.currentFork)
 
   , action "label(address,string)" $
-      \sig _ _ input -> case decodeBuf [AbiAddressType, AbiStringType] input of
-        CAbi valsArr -> case valsArr of
-          [AbiAddress addr, AbiString label] ->
-            #labels %= Map.insert addr (decodeUtf8 label)
-          _ -> vmError (BadCheatCode sig)
+      \sig input -> case decodeBuf [AbiAddressType, AbiStringType] input of
+        CAbi [AbiAddress addr, AbiString label] -> do
+          #labels %= Map.insert addr (decodeUtf8 label)
+          doStop
         _ -> vmError (BadCheatCode sig)
+
+  , action "setEnv(string,string)" $
+      \sig input -> case decodeBuf [AbiStringType, AbiStringType] input of
+        CAbi [AbiString variable, AbiString value] -> do
+          let (varStr, varVal) = (toString variable, toString value)
+          #osEnv %= Map.insert varStr varVal
+          doStop
+        _ -> vmError (BadCheatCode sig)
+
+  -- Single-value environment read cheat actions
+  , $(envReadSingleCheat "envBool(string)") AbiBool stringToBool
+  , $(envReadSingleCheat "envUint(string)") (AbiUInt 256) stringToWord256
+  , $(envReadSingleCheat "envInt(string)") (AbiInt 256) stringToInt256
+  , $(envReadSingleCheat "envAddress(string)") AbiAddress stringToAddress
+  , $(envReadSingleCheat "envBytes32(string)") (AbiBytes 32) stringToBytes32
+  , $(envReadSingleCheat "envString(string)") (\x -> AbiTuple $ V.fromList [AbiString x]) stringToByteString
+  , $(envReadSingleCheat "envBytes(bytes)") (\x -> AbiTuple $ V.fromList [AbiBytesDynamic x]) stringHexToByteString
+
+  -- Multi-value environment read cheat actions
+  , $(envReadMultipleCheat "envBool(string,string)" AbiBoolType) stringToBool
+  , $(envReadMultipleCheat "envUint(string,string)" $ AbiUIntType 256) stringToWord256
+  , $(envReadMultipleCheat "envInt(string,string)" $ AbiIntType 256) stringToInt256
+  , $(envReadMultipleCheat "envAddress(string,string)" AbiAddressType) stringToAddress
+  , $(envReadMultipleCheat "envBytes32(string,string)" $ AbiBytesType 32) stringToBytes32
+  , $(envReadMultipleCheat "envString(string,string)" AbiStringType) stringToByteString
+  , $(envReadMultipleCheat "envBytes(bytes,bytes)" AbiBytesDynamicType) stringHexToByteString
   ]
   where
     action s f = (abiKeccak s, f (abiKeccak s))
+    either' v l r = either l r v
+    frameReturn :: VMOps t => AbiValue -> EVM t s ()
+    frameReturn v = frameReturnBuf $ encodeAbiValue v
+    frameReturnBuf :: VMOps t => ByteString -> EVM t s ()
+    frameReturnBuf buf = frameReturnExpr $ ConcreteBuf buf
+    frameReturnExpr :: VMOps t => Expr Buf -> EVM t s ()
+    frameReturnExpr e = finishFrame (FrameReturned e)
+    frameRevert :: VMOps t => ByteString -> EVM t s ()
+    frameRevert err = finishFrame (FrameReverted $ errorMsg err)
+    errorMsg :: ByteString -> Expr Buf
+    errorMsg err = ConcreteBuf $ selector "Error(string)" <> encodeAbiValue (AbiTuple $ V.fromList [AbiString err])
+    continueOnce cont = do
+      assign #result Nothing
+      cont
+    doStop = finishFrame (FrameReturned mempty)
+    toString = unpack . decodeUtf8
+    strip0x s = if "0x" `isPrefixOf` s then drop 2 s else s
+    stringToBool :: String -> Either ByteString Bool
+    stringToBool s = case s of
+      "true" -> Right True
+      "True" -> Right True
+      "false" -> Right False
+      "False" -> Right False
+      _ -> Left "invalid value"
+    stringToWord256 :: String -> Either ByteString Word256
+    stringToWord256 s = maybeToEither "invalid W256 value" $ readMaybe s
+    stringToInt256 :: String -> Either ByteString Int256
+    stringToInt256 s = maybeToEither "invalid Int256 value" $ readMaybe s
+    stringToAddress :: String -> Either ByteString Addr
+    stringToAddress s = fmap Addr $ maybeToEither "invalid address value" $ readMaybe s
+    stringToBytes32 :: String -> Either ByteString ByteString
+    stringToBytes32 s = fmap word256Bytes $ maybeToEither "invalid bytes32 value" $ readMaybe s
+    stringToByteString :: String -> Either ByteString ByteString
+    stringToByteString = Right . Char8.pack
+    stringHexToByteString :: String -> Either ByteString ByteString
+    stringHexToByteString s = either (const $ Left "invalid bytes value") Right $ BS16.decodeBase16Untyped . Char8.pack . strip0x $ s
 
 -- * General call implementation ("delegateCall")
 -- note that the continuation is ignored in the precompile case
@@ -1764,8 +1959,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           \(xTo', xContext') ->
             precompiledContract this gasGiven xTo' xContext' xValue xInOffset xInSize xOutOffset xOutSize xs
   | xTo == cheatCode = do
-      assign (#state % #stack) xs
-      cheat (xInOffset, xInSize) (xOutOffset, xOutSize)
+      cheat gasGiven (xInOffset, xInSize) (xOutOffset, xOutSize) xs
   | otherwise =
       callChecks this gasGiven xContext xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
         \xGas -> do
@@ -1773,7 +1967,8 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           fetchAccount xTo $ \target -> case target.code of
               UnknownCode _ -> do
                 pc <- use (#state % #pc)
-                partial $ UnexpectedSymbolicArg pc "call target has unknown code" (wrap [xTo])
+                state <- use #state
+                partial $ UnexpectedSymbolicArg pc (getOpName state) "call target has unknown code" (wrap [xTo])
               _ -> do
                 burn' xGas $ do
                   calldata <- readMemory xInOffset xInSize
@@ -1785,7 +1980,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                                     , size      = xOutSize
                                     , codehash  = target.codehash
                                     , callreversion = vm0.env.contracts
-                                    , subState  = vm0.tx.substate
+                                    , subState  = vm0.tx.subState
                                     , abi
                                     , calldata
                                     }
@@ -1867,7 +2062,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
       False -> burn' xGas $ do
         case parseInitCode initCode of
           Nothing ->
-            partial $ UnexpectedSymbolicArg vm0.state.pc "initcode must have a concrete prefix" []
+            partial $ UnexpectedSymbolicArg vm0.state.pc (getOpName vm0.state) "initcode must have a concrete prefix" []
           Just c -> do
             let
               newContract = initialContract c
@@ -1875,7 +2070,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
                 CreationContext { address   = newAddr
                                 , codehash  = newContract.codehash
                                 , createreversion = vm0.env.contracts
-                                , substate  = vm0.tx.substate
+                                , subState  = vm0.tx.subState
                                 }
 
             zoom (#env % #contracts) $ do
@@ -1896,6 +2091,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
 
             modifying (#env % #contracts % ix newAddr % #storage) resetStorage
             modifying (#env % #contracts % ix newAddr % #origStorage) resetStorage
+            modifying (#tx % #subState % #createdContracts) (insert newAddr)
 
             transfer self newAddr xValue
 
@@ -2031,7 +2227,7 @@ finishFrame how = do
       case nextFrame.context of
 
         -- Were we calling?
-        CallContext _ _ outOffset outSize _ _ _ reversion substate' -> do
+        CallContext _ _ outOffset outSize _ _ _ reversion subState' -> do
 
           -- Excerpt K.1. from the yellow paper:
           -- K.1. Deletion of an Account Despite Out-of-gas.
@@ -2040,12 +2236,12 @@ finishFrame how = do
           -- Against the equation (197), this added 0x03 in the set of touched addresses, and this transaction turned σ[0x03] into ∅.
 
           -- In other words, we special case address 0x03 and keep it in the set of touched accounts during revert
-          touched <- use (#tx % #substate % #touchedAccounts)
+          touched <- use (#tx % #subState % #touchedAccounts)
 
           let
-            substate'' = over #touchedAccounts (maybe id cons (find (LitAddr 3 ==) touched)) substate'
+            subState'' = over #touchedAccounts (maybe id cons (find (LitAddr 3 ==) touched)) subState'
             revertContracts = assign (#env % #contracts) reversion
-            revertSubstate  = assign (#tx % #substate) substate''
+            revertSubstate  = assign (#tx % #subState) subState''
 
           case how of
             -- Case 1: Returning from a call?
@@ -2071,12 +2267,12 @@ finishFrame how = do
               assign (#state % #returndata) mempty
               push 0
         -- Or were we creating?
-        CreationContext _ _ reversion substate' -> do
+        CreationContext _ _ reversion subState' -> do
           creator <- use (#state % #contract)
           let
             createe = oldVm.state.contract
             revertContracts = assign (#env % #contracts) reversion'
-            revertSubstate  = assign (#tx % #substate) substate'
+            revertSubstate  = assign (#tx % #subState) subState'
 
             -- persist the nonce through the reversion
             reversion' = (Map.adjust (over #nonce (fmap ((+) 1))) creator) reversion
@@ -2097,6 +2293,7 @@ finishFrame how = do
                     Nothing -> partial $
                       UnexpectedSymbolicArg
                         oldVm.state.pc
+                        (getOpName oldVm.state)
                         "runtime code cannot have an abstract length"
                         (wrap [output])
                     Just newCode -> do
@@ -2784,7 +2981,7 @@ instance VMOps Concrete where
     gasRemaining <- use (#state % #gas)
 
     let
-      sumRefunds   = sum (snd <$> tx.substate.refunds)
+      sumRefunds   = sum (snd <$> tx.subState.refunds)
       gasUsed      = tx.gaslimit - gasRemaining
       cappedRefund = min (quot gasUsed 5) sumRefunds
       originPay    = (into $ gasRemaining + cappedRefund) * tx.gasprice

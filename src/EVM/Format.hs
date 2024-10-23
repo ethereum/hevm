@@ -34,12 +34,12 @@ module EVM.Format
 
 import Prelude hiding (LT, GT)
 
-import EVM.Types
 import EVM (traceForest, traceForest', traceContext, cheatCode)
 import EVM.ABI (getAbiSeq, parseTypeName, AbiValue(..), AbiType(..), SolError(..), Indexed(..), Event(..))
 import EVM.Dapp (DappContext(..), DappInfo(..), findSrc, showTraceLocation)
 import EVM.Expr qualified as Expr
 import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
+import EVM.Types
 
 import Control.Arrow ((>>>))
 import Optics.Core
@@ -47,6 +47,8 @@ import Data.Binary.Get (runGetOrFail)
 import Data.Bits (shiftR)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.ByteString.Char8 qualified as Char8
+import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Builder (byteStringHex, toLazyByteString)
 import Data.ByteString.Lazy (toStrict, fromStrict)
 import Data.Char qualified as Char
@@ -62,8 +64,6 @@ import Data.Tree.View (showTree)
 import Data.Vector (Vector)
 import Hexdump (prettyHex)
 import Numeric (showHex)
-import Data.ByteString.Char8 qualified as Char8
-import Data.ByteString.Base16 qualified as BS16
 import Witch (into, unsafeInto, tryFrom)
 
 data Signedness = Signed | Unsigned
@@ -335,7 +335,7 @@ showTrace trace =
           case Map.lookup (unsafeInto (fromMaybe 0x00 abi)) dapp.abiMap of
             Just m  ->
               "\x1b[1m"
-              <> m.name <> "XD"
+              <> m.name
               <> "\x1b[0m"
               <> showCall (catMaybes (getAbiTypes m.methodSignature)) calldata
             Nothing ->
@@ -455,10 +455,11 @@ formatError = \case
 
 formatPartial :: PartialExec -> Text
 formatPartial = \case
-  (UnexpectedSymbolicArg pc msg args) -> T.unlines
+  (UnexpectedSymbolicArg pc opcode msg args) -> T.unlines
     [ "Unexpected Symbolic Arguments to Opcode"
     , indent 2 $ T.unlines
       [ "msg: " <> T.pack (show msg)
+      , "opcode: " <> T.pack opcode
       , "program counter: " <> T.pack (show pc)
       , "arguments: "
       , indent 2 $ T.unlines . fmap formatSomeExpr $ args
@@ -663,13 +664,15 @@ formatExpr = go
 
       BufLength b -> fmt "BufLength" [b]
 
-      C code store bal nonce -> T.unlines
+      C code store tStore bal nonce -> T.unlines
         [ "(Contract"
         , indent 2 $ T.unlines
           [ "code:"
           , indent 2 $ formatCode code
           , "storage:"
           , indent 2 $ formatExpr store
+          , "tStorage:"
+          , indent 2 $ formatExpr tStore
           , "balance:"
           , indent 2 $ formatExpr bal
           , "nonce:"
@@ -821,11 +824,11 @@ strip0x bs = if "0x" `Char8.isPrefixOf` bs then Char8.drop 2 bs else bs
 strip0x' :: String -> String
 strip0x' s = if "0x" `isPrefixOf` s then drop 2 s else s
 
-hexByteString :: String -> ByteString -> ByteString
-hexByteString msg bs =
+hexByteString :: ByteString -> Maybe ByteString
+hexByteString bs =
   case BS16.decodeBase16Untyped bs of
-    Right x -> x
-    _ -> internalError $ "invalid hex bytestring for " ++ msg
+    Right x -> pure x
+    Left _ -> Nothing
 
 hexText :: Text -> ByteString
 hexText t =

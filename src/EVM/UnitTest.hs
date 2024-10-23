@@ -15,14 +15,13 @@ import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, isUnknown, isError, groupIssues)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
-import Data.Text.IO qualified as T
 
-import Control.Monad (void, when, forM)
+import Control.Monad (void, when, forM, forM_)
 import Control.Monad.ST (RealWorld, ST, stToIO)
 import Control.Monad.State.Strict (execState, get, put, liftIO)
 import Optics.Core
@@ -96,7 +95,7 @@ type ABIMethod = Text
 writeTraceDapp :: App m => DappInfo -> VM t RealWorld -> m ()
 writeTraceDapp dapp vm = do
   conf <- readConfig
-  liftIO $ when conf.dumpTrace $ T.writeFile "VM.trace" (showTraceTree dapp vm)
+  liftIO $ when conf.dumpTrace $ Text.writeFile "VM.trace" (showTraceTree dapp vm)
 
 writeTrace :: App m => VM t RealWorld -> m ()
 writeTrace vm = do
@@ -225,6 +224,10 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     -- check postconditions against vm
     (e, results) <- verify solvers (makeVeriOpts opts) (symbolify vm') (Just postcondition)
     let allReverts = not . (any Expr.isSuccess) . flattenExpr $ e
+    when (any isUnknown results || any isError results) $ liftIO $ do
+      putStrLn $ "      \x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the test " <> Text.unpack testName <> " due to: ";
+      forM_ (groupIssues (filter isError results)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
+      forM_ (groupIssues (filter isUnknown results)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
 
     -- display results
     if all isQed results
@@ -450,6 +453,8 @@ initialUnitTestVm (UnitTestOptions {..}) theContract = do
            , baseState = EmptyBase
            , txAccessList = mempty -- TODO: support unit test access lists???
            , allowFFI = ffiAllowed
+           , freshAddresses = 0
+           , beaconRoot = 0
            }
   let creator =
         initialContract (RuntimeCode (ConcreteRuntimeCode ""))
