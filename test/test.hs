@@ -32,7 +32,7 @@ import Data.Tuple.Extra
 import Data.Tree (flatten)
 import Data.Typeable
 import Data.Vector qualified as V
-import Data.Word (Word8)
+import Data.Word (Word8, Word64)
 import GHC.Conc (getNumProcessors)
 import System.Directory
 import System.Environment
@@ -4272,7 +4272,7 @@ genWord litFreq sz = frequency
     , fmap Keccak subBuf
     , fmap SHA256 subBuf
     , liftM2 SLoad subWord subStore
-    , liftM2 ReadWord subWord subBuf
+    , liftM2 ReadWord genReadIndex subBuf
     , fmap BufLength subBuf
     , do
       one <- subByte
@@ -4321,6 +4321,11 @@ genWord litFreq sz = frequency
    subBuf = defaultBuf (sz `div` 10)
    subStore = genStorage (sz `div` 10)
    subByte = genByte (sz `div` 10)
+   genReadIndex = do
+    o :: (Expr EWord) <- subWord
+    pure $ case o of
+      Lit w -> Lit $ w `mod` into (maxBound :: Word64)
+      _ -> o
 
 genWordArith :: Int -> Int -> Gen (Expr EWord)
 genWordArith litFreq 0 = frequency
@@ -4406,7 +4411,7 @@ genBuf bound sz = oneof
   --   - size > 100 (due to unrolling in SMT.hs)
   --   - literal dstOffsets are > 4,000,000 (due to unrolling in SMT.hs)
   -- n.b. that 4,000,000 is the theoretical maximum memory size given a 30,000,000 block gas limit
-  , liftM5 CopySlice subWord (maybeBoundedLit bound) smolLitWord subBuf subBuf
+  , liftM5 CopySlice genReadIndex (maybeBoundedLit bound) smolLitWord subBuf subBuf
   ]
   where
     -- copySlice gets unrolled in the generated SMT so we can't go too crazy here
@@ -4416,6 +4421,11 @@ genBuf bound sz = oneof
     subWord = defaultWord (sz `div` 5)
     subByte = genByte (sz `div` 10)
     subBuf = genBuf bound (sz `div` 10)
+    genReadIndex = do
+      o :: (Expr EWord) <- subWord
+      pure $ case o of
+        Lit w -> Lit $ w `mod` into (maxBound :: Word64)
+        _ -> o
 
 genStorage :: Int -> Gen (Expr Storage)
 genStorage 0 = oneof
