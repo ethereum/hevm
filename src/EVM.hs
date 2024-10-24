@@ -1700,6 +1700,9 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
 
 type CheatAction t s = Expr Buf -> EVM t s ()
 
+-- TODO add: assertTrue etc. from: https://github.com/foundry-rs/forge-std/blob/master/src/StdAssertions.sol
+-- implement: assertTrue.. see list: https://github.com/foundry-rs/foundry/blob/master/crates/cheatcodes/spec/src/vm.rs#L843
+-- TODO: make this a separate file like CheatCodes.hs
 cheatActions :: VMOps t => Map FunctionSelector (CheatAction t s)
 cheatActions = Map.fromList
   [ action "ffi(string[])" $
