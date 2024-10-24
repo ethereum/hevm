@@ -32,6 +32,7 @@ import Data.Bits (FiniteBits, countLeadingZeros, finiteBitSize)
 import Data.ByteArray qualified as BA
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.ByteString.Char8 qualified as BS8
 import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Lazy (fromStrict)
 import Data.ByteString.Lazy qualified as LS
@@ -1903,6 +1904,57 @@ cheatActions = Map.fromList
   , $(envReadMultipleCheat "envBytes32(string,string)" $ AbiBytesType 32) stringToBytes32
   , $(envReadMultipleCheat "envString(string,string)" AbiStringType) stringToByteString
   , $(envReadMultipleCheat "envBytes(bytes,bytes)" AbiBytesDynamicType) stringHexToByteString
+  , action "asserTrue(bool)" $ \sig input ->
+      case decodeBuf [AbiBoolType] input of
+        CAbi [AbiBool True] -> doStop
+        CAbi [AbiBool False] -> frameRevert "assertion failed"
+        _ -> vmError $ BadCheatCode ("assertTrue(bool) parameter decoding failed") sig
+  , action "asserFalse(bool)" $ \sig input ->
+      case decodeBuf [AbiBoolType] input of
+        CAbi [AbiBool False] -> doStop
+        CAbi [AbiBool True] -> frameRevert "assertion failed"
+        _ -> vmError $ BadCheatCode ("assertFalse(bool) parameter decoding failed") sig
+  , action "assertEq(bool,bool)"       $ assertEq AbiBoolType
+  , action "assertEq(uint256,uint256)" $ assertEq (AbiUIntType 256)
+  , action "assertEq(int256,int256)"   $ assertEq (AbiIntType 256)
+  , action "assertEq(address,address)" $ assertEq AbiAddressType
+  , action "assertEq(bytes32,bytes32)" $ assertEq (AbiBytesType 32)
+  , action "assertEq(string,string)"   $ assertEq AbiStringType
+  --
+  , action "assertNotEq(bytes,bytes)"     $ assertNotEq (AbiBytesDynamicType)
+  , action "assertNotEq(bool,bool)"       $ assertNotEq AbiBoolType
+  , action "assertNotEq(uint256,uint256)" $ assertNotEq (AbiUIntType 256)
+  , action "assertNotEq(int256,int256)"   $ assertNotEq (AbiIntType 256)
+  , action "assertNotEq(address,address)" $ assertNotEq AbiAddressType
+  , action "assertNotEq(bytes32,bytes32)" $ assertNotEq (AbiBytesType 32)
+  , action "assertNotEq(string,string)"   $ assertNotEq AbiStringType
+  , action "assertNotEq(bytes,bytes)"     $ assertNotEq (AbiBytesDynamicType)
+  --
+  , action "assertNotEqMsg(bytes,bytes)"     $ assertNotEqMsg (AbiBytesDynamicType)
+  , action "assertNotEqMsg(bool,bool)"       $ assertNotEqMsg AbiBoolType
+  , action "assertNotEqMsg(uint256,uint256)" $ assertNotEqMsg (AbiUIntType 256)
+  , action "assertNotEqMsg(int256,int256)"   $ assertNotEqMsg (AbiIntType 256)
+  , action "assertNotEqMsg(address,address)" $ assertNotEqMsg AbiAddressType
+  , action "assertNotEqMsg(bytes32,bytes32)" $ assertNotEqMsg (AbiBytesType 32)
+  , action "assertNotEqMsg(string,string)"   $ assertNotEqMsg AbiStringType
+  , action "assertNotEqMsg(bytes,bytes)"     $ assertNotEqMsg (AbiBytesDynamicType)
+  --
+  , action "assertEq(bool,bool,string)"       $ assertEqMsg AbiBoolType
+  , action "assertEq(uint256,uint256,string)" $ assertEqMsg (AbiUIntType 256)
+  , action "assertEq(int256,int256,string)"   $ assertEqMsg (AbiIntType 256)
+  , action "assertEq(address,address,string)" $ assertEqMsg AbiAddressType
+  , action "assertEq(bytes32,bytes32,string)" $ assertEqMsg (AbiBytesType 32)
+  , action "assertEq(string,string,string)"   $ assertEqMsg AbiStringType
+  , action "assertEq(bytes,bytes,string)"     $ assertEqMsg (AbiBytesDynamicType)
+  --
+  , action "assertLt(uint256,uint256)" $ assertLt (AbiUIntType 256)
+  , action "assertLt(int256,int256)"   $ assertLt (AbiIntType 256)
+  , action "assertLe(uint256,uint256)" $ assertLe (AbiUIntType 256)
+  , action "assertLe(int256,int256)"   $ assertLe (AbiIntType 256)
+  , action "assertGt(uint256,uint256)" $ assertGt (AbiUIntType 256)
+  , action "assertGt(int256,int256)"   $ assertGt (AbiIntType 256)
+  , action "assertGe(uint256,uint256)" $ assertGe (AbiUIntType 256)
+  , action "assertGe(int256,int256)"   $ assertGe (AbiIntType 256)
   ]
   where
     action s f = (abiKeccak s, f (abiKeccak s))
@@ -1942,6 +1994,55 @@ cheatActions = Map.fromList
     stringToByteString = Right . Char8.pack
     stringHexToByteString :: String -> Either ByteString ByteString
     stringHexToByteString s = either (const $ Left "invalid bytes value") Right $ BS16.decodeBase16Untyped . Char8.pack . strip0x $ s
+    paramDecodeErr abitype name = name <> "(" <> (show abitype) <> "," <> (show abitype) <>
+      ")  parameter decoding failed"
+    paramDecodeMsgErr abitype name = name <> "(" <> (show abitype) <> "," <> (show abitype) <>
+      ",string)  parameter decoding failed"
+    revertErr a b comp = frameRevert $ "assertion failed: " <>
+      BS8.pack (show a) <> " " <> comp <> " " <> BS8.pack (show b)
+    revertMsgErr a b str comp = frameRevert $ "assertion failed: "
+      <> str <> ": " <> BS8.pack (show a) <> " " <> comp <> " " <> BS8.pack (show b)
+    assertEq abitype sig input = do
+      case decodeBuf [abitype, abitype] input of
+        CAbi [a, b] | a == b -> doStop
+        CAbi [a, b] -> revertErr a b "!="
+        _ -> vmError (BadCheatCode (paramDecodeErr abitype "assertEq") sig)
+    assertEqMsg abitype sig input =
+      case decodeBuf [abitype, abitype, AbiStringType] input of
+        CAbi [a, b, _] | a == b -> doStop
+        CAbi [a, b, AbiString str] -> revertMsgErr a b str "!="
+        _ -> vmError (BadCheatCode (paramDecodeMsgErr abitype "assertEq") sig)
+    assertNotEq abitype sig input = do
+      case decodeBuf [abitype, abitype] input of
+        CAbi [a, b] | a /= b -> doStop
+        CAbi [a, b] -> revertErr a b "=="
+        _ -> vmError (BadCheatCode (paramDecodeErr abitype "assertNotEq") sig)
+    assertNotEqMsg abitype sig input = do
+      case decodeBuf [abitype, abitype] input of
+        CAbi [a, b, _] | a /= b -> doStop
+        CAbi [a, b, AbiString str] -> revertMsgErr a b str "=="
+        _ -> vmError (BadCheatCode (paramDecodeMsgErr abitype "assertNotEq") sig)
+    assertLt abitype sig input =
+      case decodeBuf [abitype, abitype] input of
+        CAbi [a, b] | a < b -> doStop
+        CAbi [a, b] -> revertErr a b ">="
+        _ -> vmError (BadCheatCode (paramDecodeErr abitype "assertLt") sig)
+    assertGt abitype sig input =
+      case decodeBuf [abitype, abitype] input of
+        CAbi [a, b] | a > b -> doStop
+        CAbi [a, b] -> revertErr a b "<="
+        _ -> vmError (BadCheatCode (paramDecodeErr abitype "assertGt") sig)
+    assertLe abitype sig input =
+      case decodeBuf [abitype, abitype] input of
+        CAbi [a, b] | a <= b -> doStop
+        CAbi [a, b] -> revertErr a b "<"
+        _ -> vmError (BadCheatCode (paramDecodeErr abitype "assertLe") sig)
+    assertGe abitype sig input =
+      case decodeBuf [abitype, abitype] input of
+        CAbi [a, b] | a >= b -> doStop
+        CAbi [a, b] -> revertErr a b ">"
+        _ -> vmError (BadCheatCode (paramDecodeErr abitype "assertGe") sig)
+
 
 -- * General call implementation ("delegateCall")
 -- note that the continuation is ignored in the precompile case

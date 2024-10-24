@@ -29,6 +29,7 @@ import Optics.State
 import Optics.State.Operators
 import Data.Binary.Get (runGet)
 import Data.ByteString (ByteString)
+import Data.ByteString.Char8 qualified as BS
 import Data.ByteString.Lazy qualified as BSLazy
 import Data.Decimal (DecimalRaw(..))
 import Data.Foldable (toList)
@@ -206,13 +207,16 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
                                   Success _ _ _ store -> failed store
                                   _ -> PBool True
           False -> \(_, post) -> case post of
-                                   Success _ _ _ store -> PNeg (failed store)
-                                   Failure _ _ (Revert msg) -> case msg of
-                                     ConcreteBuf b -> PBool $ b /= panicMsg 0x01
-                                     b -> b ./= ConcreteBuf (panicMsg 0x01)
-                                   Failure _ _ _ -> PBool True
-                                   Partial _ _ _ -> PBool True
-                                   _ -> internalError "Invalid leaf node"
+            Success _ _ _ store -> PNeg (failed store)
+            Failure _ _ (Revert msg) -> case msg of
+              ConcreteBuf b -> do
+                if (BS.isPrefixOf (BS.pack "assert failed") b) ||
+                  b == panicMsg 0x01 then PBool True
+                else PBool False
+              b -> b ./= ConcreteBuf (panicMsg 0x01)
+            Failure _ _ _ -> PBool True
+            Partial _ _ _ -> PBool True
+            _ -> internalError "Invalid leaf node"
 
     vm' <- Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
       Stepper.evm $ do
@@ -286,14 +290,6 @@ execSymTest UnitTestOptions{ .. } method cd = do
     pushTrace (EntryTrace method)
   -- Try running the test method
   runExpr
-
-checkSymFailures :: VMOps t => UnitTestOptions RealWorld -> Stepper t RealWorld (VM t RealWorld)
-checkSymFailures UnitTestOptions { .. } = do
-  -- Ask whether any assertions failed
-  Stepper.evm $ do
-    popTrace
-    abiCall testParams (Left ("failed()", emptyAbi))
-  Stepper.runFully
 
 indentLines :: Int -> Text -> Text
 indentLines n s =
