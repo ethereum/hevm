@@ -65,8 +65,8 @@ keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
     (_, st) = runState (findKeccakPropsExprs ps bufs stores) initState
 
     keccakPairs = uniquePairs (Set.toList st.keccakExprs)
-    injectivity = fmap injProp keccakPairs
-    minValue = fmap minProp (Set.toList st.keccakExprs)
+    injectivity = map injProp keccakPairs
+    minValue = map minProp (Set.toList st.keccakExprs)
     minDiffOfPairs = map minDistance keccakPairs
      where
       minDistance :: (Expr EWord, Expr EWord) -> Prop
