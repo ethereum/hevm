@@ -48,7 +48,7 @@ minProp _ = internalError "expected keccak expression"
 
 injProp :: (Expr EWord, Expr EWord) -> Prop
 injProp (k1@(Keccak b1), k2@(Keccak b2)) =
-  POr ((b1 .== b2) .&& (bufLength b1 .== bufLength b2)) (PNeg (PEq k1 k2))
+  PImpl (PEq k1 k2) ((b1 .== b2) .&& (bufLength b1 .== bufLength b2))
 injProp _ = internalError "expected keccak expression"
 
 
@@ -70,7 +70,7 @@ keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
     minDiffOfPairs = map minDistance keccakPairs
      where
       minDistance :: (Expr EWord, Expr EWord) -> Prop
-      minDistance (ka@(Keccak a), kb@(Keccak b)) = PImpl (a ./= b) (PAnd req1 req2)
+      minDistance (ka@(Keccak a), kb@(Keccak b)) = PImpl ((a ./= b) .|| (bufLength a ./= bufLength b)) (PAnd req1 req2)
         where
           req1 = (PGEq (Sub ka kb) (Lit 256))
           req2 = (PGEq (Sub kb ka) (Lit 256))
