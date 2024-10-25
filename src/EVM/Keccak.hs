@@ -15,15 +15,15 @@ import EVM.Expr
 
 
 newtype KeccakStore = KeccakStore
-  { keccakEqs :: Set (Expr EWord) }
+  { keccakExprs :: Set (Expr EWord) }
   deriving (Show)
 
 initState :: KeccakStore
-initState = KeccakStore { keccakEqs = Set.empty }
+initState = KeccakStore { keccakExprs = Set.empty }
 
 keccakFinder :: forall a. Expr a -> State KeccakStore ()
 keccakFinder = \case
-  e@(Keccak _) -> modify (\s -> s{keccakEqs=Set.insert e s.keccakEqs})
+  e@(Keccak _) -> modify (\s -> s{keccakExprs=Set.insert e s.keccakExprs})
   _ -> pure ()
 
 findKeccakExpr :: forall a. Expr a -> State KeccakStore ()
@@ -64,9 +64,9 @@ keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
   where
     (_, st) = runState (findKeccakPropsExprs ps bufs stores) initState
 
-    keccakPairs = uniquePairs (Set.toList st.keccakEqs)
+    keccakPairs = uniquePairs (Set.toList st.keccakExprs)
     injectivity = fmap injProp keccakPairs
-    minValue = fmap minProp (Set.toList st.keccakEqs)
+    minValue = fmap minProp (Set.toList st.keccakExprs)
     minDiffOfPairs = map minDistance keccakPairs
      where
       minDistance :: (Expr EWord, Expr EWord) -> Prop
