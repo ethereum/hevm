@@ -49,10 +49,6 @@ minProp :: Expr EWord -> Prop
 minProp k@(Keccak _) = PGT k (Lit 256)
 minProp _ = internalError "expected keccak expression"
 
-concVal :: Expr EWord -> Prop
-concVal k@(Keccak (ConcreteBuf bs)) = PEq (Lit (keccak' bs)) k
-concVal _ = PBool True
-
 injProp :: (Expr EWord, Expr EWord) -> Prop
 injProp (k1@(Keccak b1), k2@(Keccak b2)) =
   POr ((b1 .== b2) .&& (bufLength b1 .== bufLength b2)) (PNeg (PEq k1 k2))
@@ -67,13 +63,12 @@ injProp _ = internalError "expected keccak expression"
 --      here by making this claim for each unique pair of keccak invocations
 --      discovered in the input expressions)
 keccakAssumptions :: [Prop] -> [Expr Buf] -> [Expr Storage] -> [Prop]
-keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs <> concValues
+keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
   where
     (_, st) = runState (findKeccakPropsExprs ps bufs stores) initState
 
     keccakPairs = uniquePairs (Set.toList st.keccakEqs)
     injectivity = fmap injProp keccakPairs
-    concValues = fmap concVal (Set.toList st.keccakEqs)
     minValue = fmap minProp (Set.toList st.keccakEqs)
     minDiffOfPairs = map minDistance keccakPairs
      where
