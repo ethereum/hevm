@@ -21,19 +21,16 @@ newtype KeccakStore = KeccakStore
 initState :: KeccakStore
 initState = KeccakStore { keccakEqs = Set.empty }
 
-keccakFinder :: forall a. Expr a -> State KeccakStore (Expr a)
+keccakFinder :: forall a. Expr a -> State KeccakStore ()
 keccakFinder = \case
-  e@(Keccak _) -> do
-    s <- get
-    put $ s{keccakEqs=Set.insert e s.keccakEqs}
-    pure e
-  e -> pure e
+  e@(Keccak _) -> modify (\s -> s{keccakEqs=Set.insert e s.keccakEqs})
+  _ -> pure ()
 
-findKeccakExpr :: forall a. Expr a -> State KeccakStore (Expr a)
-findKeccakExpr e = mapExprM keccakFinder e
+findKeccakExpr :: forall a. Expr a -> State KeccakStore ()
+findKeccakExpr e = mapExprM_ keccakFinder e
 
-findKeccakProp :: Prop -> State KeccakStore Prop
-findKeccakProp p = mapPropM keccakFinder p
+findKeccakProp :: Prop -> State KeccakStore ()
+findKeccakProp p = mapPropM_ keccakFinder p
 
 findKeccakPropsExprs :: [Prop] -> [Expr Buf]  -> [Expr Storage]-> State KeccakStore ()
 findKeccakPropsExprs ps bufs stores = do
