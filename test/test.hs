@@ -704,8 +704,7 @@ tests = testGroup "hevm"
         let simplified = Expr.simplify x
         y <- checkEquivAndLHS x simplified
         assertBoolM "Must be equal" y
-     -- TODO
-    , expectFail $ test "word-eq-bug" $ do
+    , test "word-eq-bug" $ do
         -- This test is actually OK because the simplified takes into account that it's impossible to find a
         -- near-collision in the keccak hash
         let x =  (SLoad (Keccak (AbstractBuf "es")) (SStore (Add (Keccak (ConcreteBuf "")) (Lit 0x1)) (Lit 0xacab) (ConcreteStore (Map.empty))))
