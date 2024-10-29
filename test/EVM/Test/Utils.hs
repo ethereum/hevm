@@ -45,7 +45,7 @@ runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectT
 runSolidityTest
   :: (MonadMask m, App m)
   => FilePath -> Text -> m Bool
-runSolidityTest testFile match = runSolidityTestCustom testFile match Nothing Nothing True Nothing Foundry
+runSolidityTest testFile match = runSolidityTestCustom testFile match Nothing Nothing True Nothing FoundryStdLib
 
 testOpts :: SolverGroup -> FilePath -> Maybe BuildOutput -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO (UnitTestOptions RealWorld)
 testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
@@ -79,7 +79,7 @@ callProcessCwd cmd args cwd = do
     exit_code <- withCreateProcess (proc cmd args) { cwd = Just cwd, delegate_ctlc = True } $ \_ _ _ p ->
                  waitForProcess p
     case exit_code of
-      ExitSuccess   -> return ()
+      ExitSuccess   -> pure ()
       ExitFailure r -> processFailedException "callProcess" cmd args r
 
 compile :: App m => ProjectType -> FilePath -> FilePath -> m (Either String BuildOutput)
@@ -88,11 +88,10 @@ compile DappTools root src = do
   liftIO $ createDirectory (root </> "out")
   liftIO $ T.writeFile (root </> "out" </> "dapp.sol.json") json
   readBuildOutput root DappTools
-compile CombinedJSON _root _src = error "unsupported"
+compile CombinedJSON _root _src = internalError  "unsupported compile type: CombinedJSON"
 compile foundryType root src = do
   liftIO $ createDirectory (root </> "src")
   liftIO $ writeFile (root </> "src" </> "unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
-  liftIO $ initLib (root </> "lib" </> "ds-test") ("test" </> "contracts" </> "lib" </> "test.sol") "test.sol"
   liftIO $ initLib (root </> "lib" </> "tokens") ("test" </> "contracts" </> "lib" </> "erc20.sol") "erc20.sol"
   case foundryType of
     FoundryStdLib -> liftIO $ initStdForgeDir (root </> "lib" </> "forge-std")

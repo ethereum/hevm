@@ -1477,7 +1477,7 @@ tests = testGroup "hevm"
         runSolidityTest testFile "prove_trivial" >>= assertEqualM "test result" False
         runSolidityTest testFile "prove_trivial_dstest" >>= assertEqualM "test result" False
         runSolidityTest testFile "prove_add" >>= assertEqualM "test result" False
-        runSolidityTestCustom testFile "prove_smtTimeout" (Just 1) Nothing False Nothing Foundry >>= assertEqualM "test result" False
+        runSolidityTestCustom testFile "prove_smtTimeout" (Just 1) Nothing False Nothing FoundryStdLib >>= assertEqualM "test result" False
         runSolidityTest testFile "prove_multi" >>= assertEqualM "test result" False
         -- TODO: implement overflow checking optimizations and enable, currently this runs forever
         --runSolidityTest testFile "prove_distributivity" >>= assertEqualM "test result" False
