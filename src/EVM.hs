@@ -1904,40 +1904,51 @@ cheatActions = Map.fromList
   , $(envReadMultipleCheat "envBytes32(string,string)" $ AbiBytesType 32) stringToBytes32
   , $(envReadMultipleCheat "envString(string,string)" AbiStringType) stringToByteString
   , $(envReadMultipleCheat "envBytes(bytes,bytes)" AbiBytesDynamicType) stringHexToByteString
-  , action "asserTrue(bool)" $ \sig input ->
+  , action "assertTrue(bool)" $ \sig input ->
       case decodeBuf [AbiBoolType] input of
         CAbi [AbiBool True] -> doStop
         CAbi [AbiBool False] -> frameRevert "assertion failed"
-        _ -> vmError $ BadCheatCode ("assertTrue(bool) parameter decoding failed") sig
-  , action "asserFalse(bool)" $ \sig input ->
+        SAbi [eword] -> case (Expr.simplify (Expr.iszero eword)) of
+          Lit 1 -> frameRevert "assertion failed"
+          Lit 0 -> doStop
+          ew -> branch (Expr.iszero ew) $ \case
+            True -> frameRevert "assertion failed"
+            False -> doStop
+        k -> vmError $ BadCheatCode ("assertTrue(bool) parameter decoding failed: " <> show k) sig
+  , action "assertFalse(bool)" $ \sig input ->
       case decodeBuf [AbiBoolType] input of
         CAbi [AbiBool False] -> doStop
         CAbi [AbiBool True] -> frameRevert "assertion failed"
-        _ -> vmError $ BadCheatCode ("assertFalse(bool) parameter decoding failed") sig
+        SAbi [eword] -> case (Expr.simplify (Expr.iszero eword)) of
+          Lit 0 -> frameRevert "assertion failed"
+          Lit 1 -> doStop
+          ew -> branch (ew) $ \case
+            False -> frameRevert "assertion failed"
+            True -> doStop
+        k -> vmError $ BadCheatCode ("assertFalse(bool) parameter decoding failed: " <> show k) sig
   , action "assertEq(bool,bool)"       $ assertEq AbiBoolType
   , action "assertEq(uint256,uint256)" $ assertEq (AbiUIntType 256)
   , action "assertEq(int256,int256)"   $ assertEq (AbiIntType 256)
   , action "assertEq(address,address)" $ assertEq AbiAddressType
   , action "assertEq(bytes32,bytes32)" $ assertEq (AbiBytesType 32)
   , action "assertEq(string,string)"   $ assertEq AbiStringType
+  , action "assertEq(bytes,bytes)"     $ assertEq AbiBytesDynamicType
   --
-  , action "assertNotEq(bytes,bytes)"     $ assertNotEq (AbiBytesDynamicType)
   , action "assertNotEq(bool,bool)"       $ assertNotEq AbiBoolType
   , action "assertNotEq(uint256,uint256)" $ assertNotEq (AbiUIntType 256)
   , action "assertNotEq(int256,int256)"   $ assertNotEq (AbiIntType 256)
   , action "assertNotEq(address,address)" $ assertNotEq AbiAddressType
   , action "assertNotEq(bytes32,bytes32)" $ assertNotEq (AbiBytesType 32)
   , action "assertNotEq(string,string)"   $ assertNotEq AbiStringType
-  , action "assertNotEq(bytes,bytes)"     $ assertNotEq (AbiBytesDynamicType)
+  , action "assertNotEq(bytes,bytes)"     $ assertNotEq AbiBytesDynamicType
   --
-  , action "assertNotEqMsg(bytes,bytes)"     $ assertNotEqMsg (AbiBytesDynamicType)
   , action "assertNotEqMsg(bool,bool)"       $ assertNotEqMsg AbiBoolType
   , action "assertNotEqMsg(uint256,uint256)" $ assertNotEqMsg (AbiUIntType 256)
   , action "assertNotEqMsg(int256,int256)"   $ assertNotEqMsg (AbiIntType 256)
   , action "assertNotEqMsg(address,address)" $ assertNotEqMsg AbiAddressType
   , action "assertNotEqMsg(bytes32,bytes32)" $ assertNotEqMsg (AbiBytesType 32)
   , action "assertNotEqMsg(string,string)"   $ assertNotEqMsg AbiStringType
-  , action "assertNotEqMsg(bytes,bytes)"     $ assertNotEqMsg (AbiBytesDynamicType)
+  , action "assertNotEqMsg(bytes,bytes)"     $ assertNotEqMsg AbiBytesDynamicType
   --
   , action "assertEq(bool,bool,string)"       $ assertEqMsg AbiBoolType
   , action "assertEq(uint256,uint256,string)" $ assertEqMsg (AbiUIntType 256)
@@ -1945,7 +1956,7 @@ cheatActions = Map.fromList
   , action "assertEq(address,address,string)" $ assertEqMsg AbiAddressType
   , action "assertEq(bytes32,bytes32,string)" $ assertEqMsg (AbiBytesType 32)
   , action "assertEq(string,string,string)"   $ assertEqMsg AbiStringType
-  , action "assertEq(bytes,bytes,string)"     $ assertEqMsg (AbiBytesDynamicType)
+  , action "assertEq(bytes,bytes,string)"     $ assertEqMsg AbiBytesDynamicType
   --
   , action "assertLt(uint256,uint256)" $ assertLt (AbiUIntType 256)
   , action "assertLt(int256,int256)"   $ assertLt (AbiIntType 256)
@@ -1994,10 +2005,10 @@ cheatActions = Map.fromList
     stringToByteString = Right . Char8.pack
     stringHexToByteString :: String -> Either ByteString ByteString
     stringHexToByteString s = either (const $ Left "invalid bytes value") Right $ BS16.decodeBase16Untyped . Char8.pack . strip0x $ s
-    paramDecodeErr abitype name = name <> "(" <> (show abitype) <> "," <> (show abitype) <>
-      ")  parameter decoding failed"
-    paramDecodeMsgErr abitype name = name <> "(" <> (show abitype) <> "," <> (show abitype) <>
-      ",string)  parameter decoding failed"
+    paramDecodeErr abitype name abivals = name <> "(" <> (show abitype) <> "," <> (show abitype) <>
+      ")  parameter decoding failed. Error: " <> show abivals
+    paramDecodeMsgErr abitype name abivals = name <> "(" <> (show abitype) <> "," <> (show abitype) <>
+      ",string)  parameter decoding failed. Error: " <> show abivals
     revertErr a b comp = frameRevert $ "assertion failed: " <>
       BS8.pack (show a) <> " " <> comp <> " " <> BS8.pack (show b)
     revertMsgErr a b str comp = frameRevert $ "assertion failed: "
@@ -2006,42 +2017,92 @@ cheatActions = Map.fromList
       case decodeBuf [abitype, abitype] input of
         CAbi [a, b] | a == b -> doStop
         CAbi [a, b] -> revertErr a b "!="
-        _ -> vmError (BadCheatCode (paramDecodeErr abitype "assertEq") sig)
-    assertEqMsg abitype sig input =
+        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.eq ew1 ew2)) of
+          Lit 0 -> revertErr ew1 ew2 "!="
+          Lit 1 -> doStop
+          ew -> branch (ew) $ \case
+            False ->revertErr ew1 ew2 "!="
+            True -> doStop
+        abivals -> vmError (BadCheatCode (paramDecodeErr abitype "assertEq" abivals) sig)
+    --  TODO broken: EWords + AbiString don't mix
+    assertEqMsg abitype sig input = do
       case decodeBuf [abitype, abitype, AbiStringType] input of
         CAbi [a, b, _] | a == b -> doStop
         CAbi [a, b, AbiString str] -> revertMsgErr a b str "!="
-        _ -> vmError (BadCheatCode (paramDecodeMsgErr abitype "assertEq") sig)
+        MixAbi ([ew1, ew2], AbiString str) -> case (Expr.simplify (Expr.eq ew1 ew2)) of
+          Lit 0 -> revertErr ew1 ew2 "!="
+          Lit 1 -> doStop
+          ew -> branch (ew) $ \case
+            False ->revertMsgErr ew1 ew2 str "!="
+            True -> doStop
+        abivals -> vmError (BadCheatCode (paramDecodeMsgErr abitype "assertEq" abivals) sig)
+    --  TODO broken: EWords + AbiString don't mix
     assertNotEq abitype sig input = do
       case decodeBuf [abitype, abitype] input of
         CAbi [a, b] | a /= b -> doStop
-        CAbi [a, b] -> revertErr a b "=="
-        _ -> vmError (BadCheatCode (paramDecodeErr abitype "assertNotEq") sig)
+        CAbi [a, b] -> revertErr a b "!="
+        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.iszero $ Expr.eq ew1 ew2)) of
+          Lit 0 -> revertErr ew1 ew2 "!="
+          Lit 1 -> doStop
+          ew -> branch (ew) $ \case
+            False ->revertErr ew1 ew2 "!="
+            True -> doStop
+        abivals -> vmError (BadCheatCode (paramDecodeErr abitype "assertNotEq" abivals) sig)
     assertNotEqMsg abitype sig input = do
       case decodeBuf [abitype, abitype] input of
         CAbi [a, b, _] | a /= b -> doStop
-        CAbi [a, b, AbiString str] -> revertMsgErr a b str "=="
-        _ -> vmError (BadCheatCode (paramDecodeMsgErr abitype "assertNotEq") sig)
-    assertLt abitype sig input =
+        CAbi [a, b, AbiString str] -> revertMsgErr a b str "!="
+        MixAbi ([ew1, ew2], AbiString str) -> case (Expr.simplify (Expr.iszero $ Expr.eq ew1 ew2)) of
+          Lit 0 -> revertErr ew1 ew2 "!="
+          Lit 1 -> doStop
+          ew -> branch (ew) $ \case
+            False ->revertMsgErr ew1 ew2 str "!="
+            True -> doStop
+        abivals -> vmError (BadCheatCode (paramDecodeMsgErr abitype "assertEq" abivals) sig)
+    assertLt abitype sig input = do
       case decodeBuf [abitype, abitype] input of
         CAbi [a, b] | a < b -> doStop
         CAbi [a, b] -> revertErr a b ">="
-        _ -> vmError (BadCheatCode (paramDecodeErr abitype "assertLt") sig)
+        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.lt ew1 ew2)) of
+          Lit 0 -> revertErr ew1 ew2 ">="
+          Lit 1 -> doStop
+          ew -> branch (ew) $ \case
+            False ->revertErr ew1 ew2 ">="
+            True -> doStop
+        abivals -> vmError (BadCheatCode (paramDecodeErr abitype "assertLt" abivals) sig)
     assertGt abitype sig input =
       case decodeBuf [abitype, abitype] input of
         CAbi [a, b] | a > b -> doStop
         CAbi [a, b] -> revertErr a b "<="
-        _ -> vmError (BadCheatCode (paramDecodeErr abitype "assertGt") sig)
+        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.gt ew1 ew2)) of
+          Lit 0 -> revertErr ew1 ew2 "<="
+          Lit 1 -> doStop
+          ew -> branch (ew) $ \case
+            False ->revertErr ew1 ew2 "<="
+            True -> doStop
+        abivals -> vmError (BadCheatCode (paramDecodeErr abitype "assertGt" abivals) sig)
     assertLe abitype sig input =
       case decodeBuf [abitype, abitype] input of
         CAbi [a, b] | a <= b -> doStop
-        CAbi [a, b] -> revertErr a b "<"
-        _ -> vmError (BadCheatCode (paramDecodeErr abitype "assertLe") sig)
+        CAbi [a, b] -> revertErr a b ">"
+        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.leq ew1 ew2)) of
+          Lit 0 -> revertErr ew1 ew2 ">"
+          Lit 1 -> doStop
+          ew -> branch (ew) $ \case
+            False ->revertErr ew1 ew2 ">"
+            True -> doStop
+        abivals -> vmError (BadCheatCode (paramDecodeErr abitype "assertLe" abivals) sig)
     assertGe abitype sig input =
       case decodeBuf [abitype, abitype] input of
         CAbi [a, b] | a >= b -> doStop
-        CAbi [a, b] -> revertErr a b ">"
-        _ -> vmError (BadCheatCode (paramDecodeErr abitype "assertGe") sig)
+        CAbi [a, b] -> revertErr a b "<"
+        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.geq ew1 ew2)) of
+          Lit 0 -> revertErr ew1 ew2 "<"
+          Lit 1 -> doStop
+          ew -> branch (ew) $ \case
+            False ->revertErr ew1 ew2 "<"
+            True -> doStop
+        abivals -> vmError (BadCheatCode (paramDecodeErr abitype "assertGe" abivals) sig)
 
 
 -- * General call implementation ("delegateCall")

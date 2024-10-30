@@ -1,6 +1,6 @@
 pragma experimental ABIEncoderV2;
 
-import "ds-test/test.sol";
+import "forge-std/Test.sol";
 
 interface Hevm {
     function warp(uint256) external;
@@ -50,7 +50,7 @@ contract Payable {
 
 contract Empty {}
 
-contract CheatCodes is DSTest {
+contract CheatCodes is Test {
     address store = address(new HasStorage());
     Hevm hevm = Hevm(HEVM_ADDRESS);
 

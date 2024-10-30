@@ -1,6 +1,6 @@
-import "ds-test/test.sol";
+import "forge-std/Test.sol";
 
-contract SolidityTest is DSTest {
+contract SolidityTest is Test {
 
     function setUp() public {
     }

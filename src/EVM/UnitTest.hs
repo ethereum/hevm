@@ -210,9 +210,8 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
             Success _ _ _ store -> PNeg (failed store)
             Failure _ _ (Revert msg) -> case msg of
               ConcreteBuf b -> do
-                if (BS.isPrefixOf (BS.pack "assert failed") b) ||
-                  b == panicMsg 0x01 then PBool True
-                else PBool False
+                if (BS.isPrefixOf (BS.pack "assert failed") b) || b == panicMsg 0x01 then PBool False
+                else PBool True
               b -> b ./= ConcreteBuf (panicMsg 0x01)
             Failure _ _ _ -> PBool True
             Partial _ _ _ -> PBool True

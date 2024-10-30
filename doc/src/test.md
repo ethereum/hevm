@@ -14,8 +14,6 @@ Available options:
   -h,--help                Show this help text
   --root STRING            Path to project root directory (default: . )
   --project-type PROJECTTYPE
-                           Is this a Foundry or DappTools project (default:
-                           Foundry)
   --rpc TEXT               Fetch state from a remote node
   --number W256            Block: number
   --verbose INT            Append call trace: {1} failures {2} all

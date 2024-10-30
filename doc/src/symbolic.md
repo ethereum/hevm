@@ -42,8 +42,6 @@ Available options:
   --block W256             Block state is be fetched from
   --root STRING            Path to project root directory (default: . )
   --project-type PROJECTTYPE
-                           Is this a Foundry or DappTools project (default:
-                           Foundry)
   --initial-storage INITIALSTORAGE
                            Starting state for storage: Empty, Abstract (default
                            Abstract)

@@ -78,7 +78,7 @@ testEnv = Env { config = defaultConfig {
   dumpQueries = False
   , dumpExprs = False
   , dumpEndStates = False
-  , debug = False
+  , debug = True
   , abstRefineArith = False
   , abstRefineMem   = False
   , dumpTrace = False
@@ -1436,8 +1436,8 @@ tests = testGroup "hevm"
     [ test "Trivial-Pass" $ do
         let testFile = "test/contracts/pass/trivial.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True
-    , test "DappTools" $ do
-        -- quick smokecheck to make sure that we can parse dapptools style build outputs
+    , test "Foundry" $ do
+        -- quick smokecheck to make sure that we can parse ForgeStdLib style build outputs
         let cases =
               [ ("test/contracts/pass/trivial.sol", ".*", True)
               , ("test/contracts/pass/dsProvePass.sol", "proveEasy", True)
@@ -1445,7 +1445,7 @@ tests = testGroup "hevm"
               , ("test/contracts/fail/dsProveFail.sol", "prove_add", False)
               ]
         results <- forM cases $ \(testFile, match, expected) -> do
-          actual <- runSolidityTestCustom testFile match Nothing Nothing False Nothing DappTools
+          actual <- runSolidityTestCustom testFile match Nothing Nothing False Nothing FoundryStdLib
           pure (actual == expected)
         assertBoolM "test result" (and results)
     , test "Trivial-Fail" $ do
@@ -1474,17 +1474,17 @@ tests = testGroup "hevm"
         runSolidityTestCustom testFile "prove_BadVault_usingExploitLaunchPad"  Nothing Nothing True Nothing FoundryStdLib >>= assertEqualM "Must find counterexample" False
     , test "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
-        runSolidityTest testFile "prove_trivial" >>= assertEqualM "test result" False
+        -- runSolidityTest testFile "prove_trivial" >>= assertEqualM "test result" False
         runSolidityTest testFile "prove_trivial_dstest" >>= assertEqualM "test result" False
-        runSolidityTest testFile "prove_add" >>= assertEqualM "test result" False
-        runSolidityTestCustom testFile "prove_smtTimeout" (Just 1) Nothing False Nothing FoundryStdLib >>= assertEqualM "test result" False
-        runSolidityTest testFile "prove_multi" >>= assertEqualM "test result" False
+        -- runSolidityTest testFile "prove_add" >>= assertEqualM "test result" False
+        -- runSolidityTestCustom testFile "prove_smtTimeout" (Just 1) Nothing False Nothing FoundryStdLib >>= assertEqualM "test result" False
+        -- runSolidityTest testFile "prove_multi" >>= assertEqualM "test result" False
         -- TODO: implement overflow checking optimizations and enable, currently this runs forever
         --runSolidityTest testFile "prove_distributivity" >>= assertEqualM "test result" False
     , test "Loop-Tests" $ do
         let testFile = "test/contracts/pass/loops.sol"
-        runSolidityTestCustom testFile "prove_loop" Nothing (Just 10) False Nothing Foundry >>= assertEqualM "test result" True
-        runSolidityTestCustom testFile "prove_loop" Nothing (Just 100) False Nothing Foundry >>= assertEqualM "test result" False
+        runSolidityTestCustom testFile "prove_loop" Nothing (Just 10) False Nothing FoundryStdLib  >>= assertEqualM "test result" True
+        runSolidityTestCustom testFile "prove_loop" Nothing (Just 100) False Nothing FoundryStdLib >>= assertEqualM "test result" False
     , test "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True

@@ -1,10 +1,10 @@
-import "ds-test/test.sol";
+import "forge-std/Test.sol";
 
 contract DeadCode{
     function dummy() external returns (uint256) {}
 }
 
-contract ConstantinopleTests is DSTest {
+contract ConstantinopleTests is Test {
     DeadCode notmuch;
     function setUp() public {
       notmuch = new DeadCode();
