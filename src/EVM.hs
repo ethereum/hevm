@@ -1995,7 +1995,7 @@ cheatActions = Map.fromList
         CAbi [a, b] -> revertErr a b "!="
         SAbi [ew1, ew2] -> case (Expr.simplify (Expr.eq ew1 ew2)) of
           Lit 0 -> revertErr ew1 ew2 "!="
-          Lit 1 -> doStop
+          Lit _ -> doStop
           ew -> branch ew $ \case
             False ->revertErr ew1 ew2 "!="
             True -> doStop
@@ -2003,13 +2003,13 @@ cheatActions = Map.fromList
     assertNotEq abitype sig input = do
       case decodeBuf [abitype, abitype] input of
         CAbi [a, b] | a /= b -> doStop
-        CAbi [a, b] -> revertErr a b "!="
-        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.iszero $ Expr.eq ew1 ew2)) of
-          Lit 0 -> revertErr ew1 ew2 "!="
-          Lit 1 -> doStop
+        CAbi [a, b] -> revertErr a b "=="
+        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.eq ew1 ew2)) of
+          Lit 1 -> revertErr ew1 ew2 "=="
+          Lit _ -> doStop
           ew -> branch ew $ \case
-            False ->revertErr ew1 ew2 "!="
-            True -> doStop
+            True ->revertErr ew1 ew2 "=="
+            False -> doStop
         abivals -> vmError (BadCheatCode (paramDecodeErr abitype "assertNotEq" abivals) sig)
     assertLt abitype sig input = do
       case decodeBuf [abitype, abitype] input of
@@ -2017,7 +2017,7 @@ cheatActions = Map.fromList
         CAbi [a, b] -> revertErr a b ">="
         SAbi [ew1, ew2] -> case (Expr.simplify (Expr.lt ew1 ew2)) of
           Lit 0 -> revertErr ew1 ew2 ">="
-          Lit 1 -> doStop
+          Lit _ -> doStop
           ew -> branch ew $ \case
             False ->revertErr ew1 ew2 ">="
             True -> doStop
@@ -2028,7 +2028,7 @@ cheatActions = Map.fromList
         CAbi [a, b] -> revertErr a b "<="
         SAbi [ew1, ew2] -> case (Expr.simplify (Expr.gt ew1 ew2)) of
           Lit 0 -> revertErr ew1 ew2 "<="
-          Lit 1 -> doStop
+          Lit _ -> doStop
           ew -> branch ew $ \case
             False ->revertErr ew1 ew2 "<="
             True -> doStop
@@ -2039,7 +2039,7 @@ cheatActions = Map.fromList
         CAbi [a, b] -> revertErr a b ">"
         SAbi [ew1, ew2] -> case (Expr.simplify (Expr.leq ew1 ew2)) of
           Lit 0 -> revertErr ew1 ew2 ">"
-          Lit 1 -> doStop
+          Lit _ -> doStop
           ew -> branch ew $ \case
             False ->revertErr ew1 ew2 ">"
             True -> doStop
