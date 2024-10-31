@@ -21,7 +21,7 @@ import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 
-import Control.Monad (void, when, forM, forM_)
+import Control.Monad (void, when, forM, forM_, unless)
 import Control.Monad.ST (RealWorld, ST, stToIO)
 import Control.Monad.State.Strict (execState, get, put, liftIO)
 import Optics.Core
@@ -227,6 +227,12 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     -- check postconditions against vm
     (e, results) <- verify solvers (makeVeriOpts opts) (symbolify vm') (Just postcondition)
     let allReverts = not . (any Expr.isSuccess) . flattenExpr $ e
+    let fails = filter (Expr.isFailure) $ flattenExpr e
+    unless (null fails) $ liftIO $ do
+      putStrLn $ "      \x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the test " <> Text.unpack testName <> " due to: ";
+      forM_ (fails) $ \case
+        (Failure _ _ err) -> putStrLn $ "      -> " <> show err
+        _ -> internalError "unexpected failure"
     when (any isUnknown results || any isError results) $ liftIO $ do
       putStrLn $ "      \x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the test " <> Text.unpack testName <> " due to: ";
       forM_ (groupIssues (filter isError results)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str

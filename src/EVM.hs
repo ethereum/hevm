@@ -2381,10 +2381,10 @@ finishFrame how = do
               push 0
 
             -- Case 3: Error during a call?
-            FrameErrored _ -> do
+            FrameErrored e -> do
               revertContracts
               revertSubstate
-              assign (#state % #returndata) mempty
+              assign (#state % #returndata) (ConcreteBuf (BS8.pack $ show e))
               push 0
         -- Or were we creating?
         CreationContext _ _ reversion subState' -> do
