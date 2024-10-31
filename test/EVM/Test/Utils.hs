@@ -84,7 +84,7 @@ callProcessCwd cmd args cwd = do
 
 compile :: App m => ProjectType -> FilePath -> FilePath -> m (Either String BuildOutput)
 compile CombinedJSON _root _src = internalError  "unsupported compile type: CombinedJSON"
-compile foundryType root src = do
+compile Foundry root src = do
   liftIO $ createDirectory (root </> "src")
   liftIO $ writeFile (root </> "src" </> "unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
   liftIO $ initLib (root </> "lib" </> "tokens") ("test" </> "contracts" </> "lib" </> "erc20.sol") "erc20.sol"

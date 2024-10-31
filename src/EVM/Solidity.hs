@@ -185,7 +185,7 @@ instance Monoid BuildOutput where
   mempty = BuildOutput mempty mempty
 
 -- | The various project types understood by hevm
-data ProjectType = CombinedJSON | Foundry | FoundryStdLib
+data ProjectType = CombinedJSON | Foundry
   deriving (Eq, Show, Read, ParseField)
 
 data SourceCache = SourceCache

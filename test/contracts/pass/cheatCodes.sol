@@ -52,6 +52,8 @@ contract Empty {}
 
 contract CheatCodes is Test {
     address store = address(new HasStorage());
+    address constant HEVM_ADDRESS =
+        address(bytes20(uint160(uint256(keccak256('hevm cheat code')))));
     Hevm hevm = Hevm(HEVM_ADDRESS);
 
     function prove_warp_concrete() public {

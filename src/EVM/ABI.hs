@@ -58,7 +58,7 @@ module EVM.ABI
   , showAlter
   ) where
 
-import EVM.Expr (readWord, readByte, readBytes, isLitWord)
+import EVM.Expr (readWord, isLitWord)
 import EVM.Types
 
 import Control.Applicative ((<|>))
@@ -71,7 +71,7 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as BSLazy
-import Data.Char (isHexDigit, chr)
+import Data.Char (isHexDigit)
 import Data.Data (Data)
 import Data.DoubleWord (Word256, Int256, signedWord)
 import Data.Functor (($>))
@@ -82,7 +82,7 @@ import Data.Text qualified as Text
 import Data.Text.Encoding (encodeUtf8)
 import Data.Vector (Vector, toList)
 import Data.Vector qualified as Vector
-import Data.Word (Word32, Word8)
+import Data.Word (Word32)
 import GHC.Generics (Generic)
 import Test.QuickCheck hiding ((.&.), label)
 import Numeric (showHex)
@@ -328,22 +328,19 @@ abiTailSize x =
         _ -> internalError "impossible"
 
 abiHeadSize :: AbiValue -> Int
-abiHeadSize x = abiSizeType (abiValueType x)
-
-abiSizeType :: AbiType -> Int
-abiSizeType x =
-  case abiKind x of
+abiHeadSize x =
+  case abiKind (abiValueType x) of
     Dynamic -> 32
     Static ->
       case x of
-        AbiUIntType _  -> 32
-        AbiIntType  _  -> 32
-        AbiBytesType n -> roundTo32Bytes n
-        AbiAddressType -> 32
-        AbiBoolType    -> 32
-        AbiTupleType n  -> sum (abiSizeType <$> n)
-        AbiArrayType n t -> n*(abiSizeType t)
-        AbiFunctionType -> 32
+        AbiUInt _ _  -> 32
+        AbiInt  _ _  -> 32
+        AbiBytes n _ -> roundTo32Bytes n
+        AbiAddress _ -> 32
+        AbiBool _    -> 32
+        AbiTuple v   -> sum (abiHeadSize <$> v)
+        AbiArray _ _ xs -> sum (abiHeadSize <$> xs)
+        AbiFunction _ -> 32
         _ -> internalError "impossible"
 
 putAbiSeq :: Vector AbiValue -> Put
@@ -501,7 +498,7 @@ bytesP = do
     Right d -> pure $ ByteStringS d
     Left _ -> pfail
 
-data AbiVals = NoVals | CAbi [AbiValue] | SAbi [Expr EWord] | MixAbi ([Expr EWord], AbiValue)
+data AbiVals = NoVals | CAbi [AbiValue] | SAbi [Expr EWord]
   deriving (Show)
 
 decodeBuf :: [AbiType] -> Expr Buf -> AbiVals
@@ -509,48 +506,26 @@ decodeBuf tps (ConcreteBuf b) =
   case runGetOrFail (getAbiSeq (length tps) tps) (BSLazy.fromStrict b) of
     Right ("", _, args) -> CAbi (toList args)
     _ -> NoVals
-decodeBuf tpsOrig bufOrig = go tpsOrig bufOrig 0 NoVals
+decodeBuf tps buf =
+  if any isDynamic tps then NoVals
+  else
+    let
+      vs = decodeStaticArgs 0 (length tps) buf
+      asBS = mconcat $ fmap word256Bytes (mapMaybe maybeLitWord vs)
+    in if not (all isLitWord vs)
+       then SAbi vs
+       else case runGetOrFail (getAbiSeq (length tps) tps) (BSLazy.fromStrict asBS) of
+         Right ("", _, args) -> CAbi (toList args)
+         _ -> NoVals
   where
     isDynamic t = abiKind t == Dynamic
-    go :: [AbiType] -> Expr Buf -> Int -> AbiVals -> AbiVals
-    go [] _ _ ret = ret
-    go [AbiStringType] buf off (SAbi acc) = MixAbi (acc, decodeStringArg off buf)
-    go [_] _ _ (SAbi _) = internalError "Currently we can only decode string as last dynamic type"
-    go (x:_) _ _ _ | isDynamic x = internalError "Dynamic type must be last in the list"
-    go (t:ts) buf off (SAbi acc) =
-      let len = abiSizeType t
-          v = readBytes len (Lit (unsafeInto off)) buf
-      in go ts buf (off+len) (SAbi (acc++[v]))
-    go (t:ts) buf off (CAbi acc) | (not . isDynamic) t =
-      let len = abiSizeType t
-          v = readBytes len (Lit (unsafeInto off)) buf
-          asBS = mconcat $ fmap word256Bytes (mapMaybe maybeLitWord [v])
-      in case runGetOrFail (getAbiSeq 1 [t]) (BSLazy.fromStrict asBS) of
-        Right ("", _, args) -> go ts buf (off+len) $ CAbi (acc++(toList args))
-        _ -> NoVals
-    go _ _ _ _ = internalError "decodeBuf: expected concrete buffer"
 
 decodeStaticArgs :: Int -> Int -> Expr Buf -> [Expr EWord]
 decodeStaticArgs offset numArgs b =
   [readWord (Lit . unsafeInto $ i) b | i <- [offset,(offset+32) .. (offset + (numArgs-1)*32)]]
 
-decodeStringArg :: Int -> Expr Buf -> AbiValue
-decodeStringArg offs (ConcreteBuf b) =
-  let len = forceLit $ readBytes 32 (Lit . unsafeInto $ offs) (ConcreteBuf b)
-      str = [readByte (Lit . unsafeInto $ (offs + 32 + (unsafeInto i))) (ConcreteBuf b) | i <- [0..len]]
-      bs = (map toLitByte str)
-  in AbiString $ BS.pack bs
-  where
-    toLitByte :: Expr Byte -> Word8
-    toLitByte (LitByte w) = w
-    toLitByte _ = internalError "String part of calldata should be concrete"
-    forceLit :: Expr EWord -> W256
-    forceLit (Lit w) = w
-    forceLit _ = internalError "String part of calldata should be concrete"
-decodeStringArg _ _  = internalError "decodeStringArg: expected concrete buffer"
-
 -- QuickCheck instances
---
+
 genAbiValue :: AbiType -> Gen AbiValue
 genAbiValue = \case
    AbiUIntType n -> AbiUInt n <$> genUInt n
