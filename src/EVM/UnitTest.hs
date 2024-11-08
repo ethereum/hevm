@@ -227,11 +227,16 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     -- check postconditions against vm
     (e, results) <- verify solvers (makeVeriOpts opts) (symbolify vm') (Just postcondition)
     let allReverts = not . (any Expr.isSuccess) . flattenExpr $ e
-    let fails = filter (Expr.isFailure) $ flattenExpr e
-    unless (null fails) $ liftIO $ do
+    let interpFails = filter (isInterpretFailEnd) $ flattenExpr e
+
+    conf <- readConfig
+    when conf.debug $ liftIO $ forM_ (filter Expr.isFailure (flattenExpr e)) $ \case
+      (Failure _ _ a) ->  putStrLn $ "   -> debug of func: " <> Text.unpack testName <> " Failure at the end of expr: " <> show a;
+      _ -> internalError "cannot be, filtered for failure"
+    unless (null interpFails) $ liftIO $ do
       putStrLn $ "      \x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the test " <> Text.unpack testName <> " due to: ";
-      forM_ (fails) $ \case
-        (Failure _ _ err) -> putStrLn $ "      -> " <> show err
+      forM_ (interpFails) $ \case
+        (Failure _ _ f) -> putStrLn $ "      -> " <> evmErrToString f
         _ -> internalError "unexpected failure"
     when (any isUnknown results || any isError results) $ liftIO $ do
       putStrLn $ "      \x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the test " <> Text.unpack testName <> " due to: ";

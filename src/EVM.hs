@@ -1696,7 +1696,7 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
     Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) "symbolic cheatcode selector" (wrap [abi])
     Just (unsafeInto -> abi') ->
       case Map.lookup abi' cheatActions of
-        Nothing -> vmError (BadCheatCode "cannot understand cheatcode, maybe cheatcode not supported?" abi')
+        Nothing -> vmError (BadCheatCode "Cannot understand cheatcode. " abi')
         Just action -> action input
 
 type CheatAction t s = Expr Buf -> EVM t s ()
@@ -1931,12 +1931,14 @@ cheatActions = Map.fromList
   , action "assertEq(int256,int256)"   $ assertEq (AbiIntType 256)
   , action "assertEq(address,address)" $ assertEq AbiAddressType
   , action "assertEq(bytes32,bytes32)" $ assertEq (AbiBytesType 32)
+  , action "assertEq(string,string)"   $ assertEq (AbiStringType)
   --
   , action "assertNotEq(bool,bool)"       $ assertNotEq AbiBoolType
   , action "assertNotEq(uint256,uint256)" $ assertNotEq (AbiUIntType 256)
   , action "assertNotEq(int256,int256)"   $ assertNotEq (AbiIntType 256)
   , action "assertNotEq(address,address)" $ assertNotEq AbiAddressType
   , action "assertNotEq(bytes32,bytes32)" $ assertNotEq (AbiBytesType 32)
+  , action "assertNotEq(string,string)"   $ assertNotEq (AbiStringType)
   --
   , action "assertLt(uint256,uint256)" $ assertLt (AbiUIntType 256)
   , action "assertLt(int256,int256)"   $ assertLt (AbiIntType 256)
@@ -2326,14 +2328,10 @@ finishFrame how = do
     nextFrame : remainingFrames -> do
 
       -- Insert a debug trace.
-      insertTrace $
-        case how of
-          FrameErrored e ->
-            ErrorTrace e
-          FrameReverted e ->
-            ErrorTrace (Revert e)
-          FrameReturned output ->
-            ReturnTrace output nextFrame.context
+      insertTrace $ case how of
+        FrameReturned output -> ReturnTrace output nextFrame.context
+        FrameReverted e -> ErrorTrace (Revert e)
+        FrameErrored e -> ErrorTrace e
       -- Pop to the previous level of the debug trace stack.
       popTrace
 
@@ -2384,8 +2382,10 @@ finishFrame how = do
             FrameErrored e -> do
               revertContracts
               revertSubstate
-              assign (#state % #returndata) (ConcreteBuf (BS8.pack $ show e))
-              push 0
+              if (isInterpretFailure e) then finishFrame (FrameErrored e)
+              else do
+                assign (#state % #returndata) mempty
+                push 0
         -- Or were we creating?
         CreationContext _ _ reversion subState' -> do
           creator <- use (#state % #contract)
@@ -2428,11 +2428,13 @@ finishFrame how = do
               push 0
 
             -- Case 6: Error during a creation?
-            FrameErrored _ -> do
+            FrameErrored e -> do
               revertContracts
               revertSubstate
-              assign (#state % #returndata) mempty
-              push 0
+              if (isInterpretFailure e) then finishFrame (FrameErrored e)
+              else do
+                assign (#state % #returndata) mempty
+                push 0
 
 
 -- * Memory helpers
