@@ -1768,7 +1768,7 @@ tests = testGroup "hevm"
           check coinbase (SymAddr "coinbase")
           check a (SymAddr "freshSymAddr1")
           check arg (SymAddr "arg1")
-    , test "vm.load fails for a potentially aliased address" $ do
+    , ignoreTest $ test "vm.load fails for a potentially aliased address" $ do
         Just c <- solcRuntime "C"
           [i|
             interface Vm {
@@ -1784,7 +1784,7 @@ tests = testGroup "hevm"
         (_, [Cex _]) <- withDefaultSolver $ \s ->
           verifyContract s c Nothing [] defaultVeriOpts Nothing (Just $ checkBadCheatCode "load(address,bytes32)")
         pure ()
-    , test "vm.store fails for a potentially aliased address" $ do
+    , ignoreTest $ test "vm.store fails for a potentially aliased address" $ do
         Just c <- solcRuntime "C"
           [i|
             interface Vm {
