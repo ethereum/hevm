@@ -2382,10 +2382,8 @@ finishFrame how = do
             FrameErrored e -> do
               revertContracts
               revertSubstate
-              if (isInterpretFailure e) then finishFrame (FrameErrored e)
-              else do
-                assign (#state % #returndata) mempty
-                push 0
+              assign (#state % #returndata) mempty
+              push 0
         -- Or were we creating?
         CreationContext _ _ reversion subState' -> do
           creator <- use (#state % #contract)
@@ -2431,10 +2429,8 @@ finishFrame how = do
             FrameErrored e -> do
               revertContracts
               revertSubstate
-              if (isInterpretFailure e) then finishFrame (FrameErrored e)
-              else do
-                assign (#state % #returndata) mempty
-                push 0
+              assign (#state % #returndata) mempty
+              push 0
 
 
 -- * Memory helpers

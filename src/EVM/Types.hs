@@ -550,17 +550,6 @@ data EvmError
   | NonexistentFork Int
   deriving (Show, Eq, Ord)
 
-isInterpretFailure :: EvmError -> Bool
-isInterpretFailure = \case
-  (BadCheatCode {}) -> True
-  (NonexistentFork {}) -> True
-  _ -> False
-
-isInterpretFailEnd :: Expr a -> Bool
-isInterpretFailEnd = \case
-  (Failure _ _ k) -> isInterpretFailure k
-  _ -> False
-
 evmErrToString :: EvmError -> String
 evmErrToString = \case
   -- NOTE: error text made to closely match go-ethereum's errors.go file
