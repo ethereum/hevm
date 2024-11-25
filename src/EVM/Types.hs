@@ -554,9 +554,6 @@ isInterpretFailure :: EvmError -> Bool
 isInterpretFailure = \case
   (BadCheatCode {}) -> True
   (NonexistentFork {}) -> True
-  PrecompileFailure -> True
-  StateChangeWhileStatic -> True
-  UnrecognizedOpcode _ -> True
   _ -> False
 
 isInterpretFailEnd :: Expr a -> Bool
