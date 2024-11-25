@@ -627,8 +627,10 @@ verify solvers opts preState maybepost = do
         -- Dispatch the remaining branches to the solver to check for violations
         results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
           res <- checkSat solvers query
+          when conf.debug $ putStrLn $ "   SMT result: " <> show res
           pure (res, leaf)
         let cexs = filter (\(res, _) -> not . isUnsat $ res) results
+        when conf.debug $ putStrLn $ "   Found " <> show (length cexs) <> " potential counterexample(s) in call " <> call
         pure $ if Prelude.null cexs then (expr, [Qed ()]) else (expr, fmap toVRes cexs)
   where
     getCallPrefix :: Expr Buf -> String
