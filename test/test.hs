@@ -1781,6 +1781,7 @@ tests = testGroup "hevm"
               }
             }
           |]
+        -- NOTE: we have a postcondition here, not just a regular verification
         (_, [Cex _]) <- withDefaultSolver $ \s ->
           verifyContract s c Nothing [] defaultVeriOpts Nothing (Just $ checkBadCheatCode "load(address,bytes32)")
         pure ()
@@ -1797,6 +1798,7 @@ tests = testGroup "hevm"
               }
             }
           |]
+        -- NOTE: we have a postcondition here, not just a regular verification
         (_, [Cex _]) <- withDefaultSolver $ \s ->
           verifyContract s c Nothing [] defaultVeriOpts Nothing (Just $ checkBadCheatCode "store(address,bytes32,bytes32)")
         pure ()
