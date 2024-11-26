@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More complete and precise array/mapping slot rewrite, along with a copySlice improvement
 - Use a let expression in copySlice to decrease expression size
 - The `--debug` flag now dumps the internal expressions as well
-- hevm now uses the std-forge library's way of detecting failures, i.e. through
+- hevm now uses the forge-std library's way of detecting failures, i.e. through
   reverting with a specific error code
 
 ## Added
