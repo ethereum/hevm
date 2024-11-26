@@ -1991,72 +1991,23 @@ cheatActions = Map.fromList
       ")  parameter decoding failed. Error: " <> show abivals
     revertErr a b comp = frameRevert $ "assertion failed: " <>
       BS8.pack (show a) <> " " <> comp <> " " <> BS8.pack (show b)
-    assertEq abitype sig input = do
+    genAssert comp exprComp invComp name abitype sig input = do
       case decodeBuf [abitype, abitype] input of
-        CAbi [a, b] | a == b -> doStop
-        CAbi [a, b] -> revertErr a b "!="
-        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.eq ew1 ew2)) of
-          Lit 0 -> revertErr ew1 ew2 "!="
-          Lit _ -> doStop
+        CAbi [a, b] | a `comp` b -> doStop
+        CAbi [a, b] -> revertErr a b invComp
+        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.iszero $ exprComp ew1 ew2)) of
+          Lit 0 -> doStop
+          Lit _ -> revertErr ew1 ew2 invComp
           ew -> branch ew $ \case
-            False ->revertErr ew1 ew2 "!="
-            True -> doStop
-        abivals -> vmError (BadCheatCode (paramDecodeErr abitype "assertEq" abivals) sig)
-    assertNotEq abitype sig input = do
-      case decodeBuf [abitype, abitype] input of
-        CAbi [a, b] | a /= b -> doStop
-        CAbi [a, b] -> revertErr a b "=="
-        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.eq ew1 ew2)) of
-          Lit 1 -> revertErr ew1 ew2 "=="
-          Lit _ -> doStop
-          ew -> branch ew $ \case
-            True ->revertErr ew1 ew2 "=="
             False -> doStop
-        abivals -> vmError (BadCheatCode (paramDecodeErr abitype "assertNotEq" abivals) sig)
-    assertLt abitype sig input = do
-      case decodeBuf [abitype, abitype] input of
-        CAbi [a, b] | a < b -> doStop
-        CAbi [a, b] -> revertErr a b ">="
-        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.lt ew1 ew2)) of
-          Lit 0 -> revertErr ew1 ew2 ">="
-          Lit _ -> doStop
-          ew -> branch ew $ \case
-            False ->revertErr ew1 ew2 ">="
-            True -> doStop
-        abivals -> vmError (BadCheatCode (paramDecodeErr abitype "assertLt" abivals) sig)
-    assertGt abitype sig input =
-      case decodeBuf [abitype, abitype] input of
-        CAbi [a, b] | a > b -> doStop
-        CAbi [a, b] -> revertErr a b "<="
-        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.gt ew1 ew2)) of
-          Lit 0 -> revertErr ew1 ew2 "<="
-          Lit _ -> doStop
-          ew -> branch ew $ \case
-            False ->revertErr ew1 ew2 "<="
-            True -> doStop
-        abivals -> vmError (BadCheatCode (paramDecodeErr abitype "assertGt" abivals) sig)
-    assertLe abitype sig input =
-      case decodeBuf [abitype, abitype] input of
-        CAbi [a, b] | a <= b -> doStop
-        CAbi [a, b] -> revertErr a b ">"
-        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.leq ew1 ew2)) of
-          Lit 0 -> revertErr ew1 ew2 ">"
-          Lit _ -> doStop
-          ew -> branch ew $ \case
-            False ->revertErr ew1 ew2 ">"
-            True -> doStop
-        abivals -> vmError (BadCheatCode (paramDecodeErr abitype "assertLe" abivals) sig)
-    assertGe abitype sig input =
-      case decodeBuf [abitype, abitype] input of
-        CAbi [a, b] | a >= b -> doStop
-        CAbi [a, b] -> revertErr a b "<"
-        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.geq ew1 ew2)) of
-          Lit 0 -> revertErr ew1 ew2 "<"
-          Lit 1 -> doStop
-          ew -> branch ew $ \case
-            False ->revertErr ew1 ew2 "<"
-            True -> doStop
-        abivals -> vmError (BadCheatCode (paramDecodeErr abitype "assertGe" abivals) sig)
+            True -> revertErr ew1 ew2 invComp
+        abivals -> vmError (BadCheatCode (paramDecodeErr abitype name abivals) sig)
+    assertEq = genAssert (==) Expr.eq "!=" "assertEq"
+    assertNotEq = genAssert (/=) (\a b -> Expr.iszero $ Expr.eq a b) "==" "assertNotEq"
+    assertLt = genAssert (<) Expr.lt ">=" "assertLt"
+    assertGt = genAssert (>) Expr.gt "<=" "assertGt"
+    assertLe = genAssert (<=) Expr.leq ">" "assertLe"
+    assertGe = genAssert (>=) Expr.geq "<" "assertGe"
 
 
 -- * General call implementation ("delegateCall")
