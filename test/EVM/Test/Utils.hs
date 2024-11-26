@@ -1,11 +1,6 @@
-{-# LANGUAGE QuasiQuotes #-}
-
 module EVM.Test.Utils where
 
-import Data.String.Here
 import Data.Text (Text)
-import Data.Text qualified as T
-import Data.Text.IO qualified as T
 import GHC.IO.Exception (IOErrorType(..))
 import GHC.Natural
 import Paths_hevm qualified as Paths
@@ -14,7 +9,6 @@ import System.FilePath ((</>))
 import System.IO.Temp
 import System.Process
 import System.Exit
-import System.IO
 import System.IO.Error (mkIOError)
 
 import EVM.Dapp (dappInfo, emptyDapp)
@@ -110,62 +104,3 @@ compile Foundry root src = do
       callProcessCwd "git" ["add", "."] tld
       callProcessCwd "git" ["commit", "-m", "", "--allow-empty-message", "--no-gpg-sign"] tld
       pure ()
-
--- We don't want to depend on dapptools here, so we cheat and just call solc with the same options that dapp itself uses
-compileWithDSTest :: FilePath -> IO Text
-compileWithDSTest src =
-  withSystemTempFile "input.json" $ \file handle -> do
-    hClose handle
-    dsTest <- readFile =<< Paths.getDataFileName ("test" </> "contracts" </> "lib" </> "test.sol")
-    erc20 <- readFile =<< Paths.getDataFileName ("test" </> "contracts" </> "lib" </> "erc20.sol")
-    testFilePath <- Paths.getDataFileName src
-    testFile <- readFile testFilePath
-    T.writeFile file
-      [i|
-      {
-        "language": "Solidity",
-        "sources": {
-          "ds-test/test.sol": {
-            "content": ${dsTest}
-          },
-          "tokens/erc20.sol": {
-            "content": ${erc20}
-          },
-          "unit-tests.sol": {
-            "content": ${testFile}
-          }
-        },
-        "settings": {
-          "metadata": {
-            "useLiteralContent": true
-          },
-          "outputSelection": {
-            "*": {
-              "*": [
-                "metadata",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "abi",
-                "storageLayout",
-                "evm.bytecode.sourceMap",
-                "evm.bytecode.linkReferences",
-                "evm.bytecode.generatedSources",
-                "evm.deployedBytecode.sourceMap",
-                "evm.deployedBytecode.linkReferences",
-                "evm.deployedBytecode.generatedSources"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      }
-      |]
-    x <- T.pack <$>
-      readProcess
-        "solc"
-        ["--allow-paths", file, "--standard-json", file]
-        ""
-    return x
-

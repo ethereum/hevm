@@ -275,7 +275,7 @@ symFailure UnitTestOptions {..} testName cd types failures' =
       showRes = \case
         Success _ _ _ _ -> if "proveFail" `isPrefixOf` testName
                            then "Successful execution"
-                           else "Failed: DSTest Assertion Violation"
+                           else "Failed: Test Assertion Violation"
         res ->
           let ?context = dappContext (traceContext res)
           in Text.pack $ prettyvmresult res
