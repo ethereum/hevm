@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   partial results instead of erroring out
 - Fix interpreter's MCOPY handling so that it doesn't error out on symbolic arguments
 - More desciptive errors in case of a cheatcode issue
+- Better and more pretty debug messages
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
@@ -65,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Respect --smt-timeout in equivalence checking
 - Fixed the handling of returndata with an abstract size during transaction finalization
 - Error handling for user-facing cli commands is much improved
+- Fixed call signature generation for test cases
 
 ## [0.53.0] - 2024-02-23
 
