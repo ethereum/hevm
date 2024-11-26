@@ -15,13 +15,13 @@ import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, isUnknown, isError, groupIssues)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, isUnknown, isError, groupIssues)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 
-import Control.Monad (void, when, forM, forM_, unless)
+import Control.Monad (void, when, forM, forM_)
 import Control.Monad.ST (RealWorld, ST, stToIO)
 import Control.Monad.State.Strict (execState, get, put, liftIO)
 import Optics.Core

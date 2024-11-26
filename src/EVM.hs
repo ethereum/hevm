@@ -2330,7 +2330,7 @@ finishFrame how = do
               push 0
 
             -- Case 3: Error during a call?
-            FrameErrored e -> do
+            FrameErrored _ -> do
               revertContracts
               revertSubstate
               assign (#state % #returndata) mempty
@@ -2377,7 +2377,7 @@ finishFrame how = do
               push 0
 
             -- Case 6: Error during a creation?
-            FrameErrored e -> do
+            FrameErrored _ -> do
               revertContracts
               revertSubstate
               assign (#state % #returndata) mempty
