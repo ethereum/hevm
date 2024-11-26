@@ -596,16 +596,16 @@ verify
 verify solvers opts preState maybepost = do
   conf <- readConfig
   let call = mconcat ["prefix 0x", getCallPrefix preState.state.calldata]
-  when conf.debug $ liftIO $ putStrLn $ "Exploring call " <> call
+  when conf.debug $ liftIO $ putStrLn $ "   Exploring call " <> call
 
   exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
   when conf.dumpExprs $ liftIO $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
   liftIO $ do
-    when conf.debug $ putStrLn "Simplifying expression"
+    when conf.debug $ putStrLn "   Simplifying expression"
     let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
     when conf.dumpExprs $ T.writeFile "simplified.expr" (formatExpr expr)
 
-    when conf.debug $ putStrLn $ "Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
+    when conf.debug $ putStrLn $ "   Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
 
     let flattened = flattenExpr expr
     when (any isPartial flattened) $ do

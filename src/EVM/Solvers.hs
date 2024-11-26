@@ -129,10 +129,10 @@ withSolvers solver count threads timeout cont = do
         when (conf.dumpQueries) $ writeSMT2File smt2 fileCounter "abstracted"
         if (isJust fuzzResult)
           then do
-            when (conf.debug) $ putStrLn $ "Cex found via fuzzing:" <> (show fuzzResult)
+            when (conf.debug) $ putStrLn $ "   Cex found via fuzzing:" <> (show fuzzResult)
             writeChan r (Sat $ fromJust fuzzResult)
           else if not conf.onlyCexFuzz then do
-            when (conf.debug) $ putStrLn "Fuzzing failed to find a Cex"
+            when (conf.debug) $ putStrLn "   Fuzzing failed to find a Cex"
             -- reset solver and send all lines of provided script
             out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty ps)
             case out of

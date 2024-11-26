@@ -114,15 +114,19 @@ makeVeriOpts opts =
 -- | Top level CLI endpoint for hevm test
 unitTest :: App m => UnitTestOptions RealWorld -> Contracts -> m Bool
 unitTest opts (Contracts cs) = do
-  let unitTests = findUnitTests opts.match $ Map.elems cs
-  results <- concatMapM (runUnitTestContract opts cs) unitTests
+  let unitTestContrs = findUnitTests opts.match $ Map.elems cs
+  conf <- readConfig
+  when conf.debug $ liftIO $ do
+    putStrLn $ "Found " ++ show (length unitTestContrs) ++ " unit test contract(s) to test:"
+    let x = map (\(a,b) -> "  --> " <> a <> "  ---  functions: " <> (Text.pack $ show b)) unitTestContrs
+    putStrLn $ unlines $ map Text.unpack x
+  results <- concatMapM (runUnitTestContract opts cs) unitTestContrs
   pure $ and results
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
 -- to create the test contract, give it an initial balance, and run `setUp()'.
 initializeUnitTest :: UnitTestOptions s -> SolcContract -> Stepper Concrete s ()
 initializeUnitTest opts theContract = do
-
   let addr = opts.testParams.address
 
   Stepper.evm $ do
@@ -161,7 +165,7 @@ runUnitTestContract
   opts@(UnitTestOptions {..}) contractMap (name, testSigs) = do
 
   -- Print a header
-  liftIO $ putStrLn $ "\nChecking " ++ show (length testSigs) ++ " function(s) in contract " ++ unpack name
+  liftIO $ putStrLn $ "Checking " ++ show (length testSigs) ++ " function(s) in contract " ++ unpack name
 
   -- Look for the wanted contract by name from the Solidity info
   case Map.lookup name contractMap of
@@ -190,9 +194,10 @@ runUnitTestContract
 -- | Define the thread spawner for symbolic tests
 symRun :: App m => UnitTestOptions RealWorld -> VM Concrete RealWorld -> Sig -> m Bool
 symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
-    liftIO $ putStrLn $ "\x1b[96m[RUNNING]\x1b[0m " <> Text.unpack testName
-    let cd = symCalldata testName types [] (AbstractBuf "txdata")
-        shouldFail = "proveFail" `isPrefixOf` testName
+    let callSig = testName <> "(" <> (Text.intercalate "," (map abiTypeSolidity types)) <> ")"
+    liftIO $ putStrLn $ "\x1b[96m[RUNNING]\x1b[0m " <> Text.unpack callSig
+    let cd = symCalldata callSig types [] (AbstractBuf "txdata")
+        shouldFail = "proveFail" `isPrefixOf` callSig
         testContract store = fromMaybe (internalError "test contract not found in state") (Map.lookup vm.state.contract store)
 
     -- define postcondition depending on `shouldFail`
@@ -285,15 +290,6 @@ symFailure UnitTestOptions {..} testName cd types failures' =
             _ -> mempty
       dappContext TraceContext { contracts, labels } =
         DappContext { info = dapp, contracts, labels }
-
-execSymTest :: UnitTestOptions RealWorld -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper Symbolic RealWorld (Expr End)
-execSymTest UnitTestOptions{ .. } method cd = do
-  -- Set up the call to the test method
-  Stepper.evm $ do
-    makeTxCall testParams cd
-    pushTrace (EntryTrace method)
-  -- Try running the test method
-  runExpr
 
 indentLines :: Int -> Text -> Text
 indentLines n s =

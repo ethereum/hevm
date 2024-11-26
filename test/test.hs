@@ -1581,7 +1581,7 @@ tests = testGroup "hevm"
             }
           |]
         let opts = defaultVeriOpts
-        let sig = Nothing
+        let sig = Just $ Sig "prove_tuple_pass((uint256,uint256))" [AbiTupleType (V.fromList [AbiUIntType 256, AbiUIntType 256])]
         (_, [Qed _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] opts
         putStrLnM "Qed, memory tuple is good"
     , test "symbolic-loops-not-reached" $ do
