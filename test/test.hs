@@ -1562,6 +1562,28 @@ tests = testGroup "hevm"
         (e, [Qed _]) <- withDefaultSolver $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBoolM "The expression is not partial" $ Expr.containsNode isPartial e
+    , test "mem-tuple" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract C {
+              struct Pair {
+                uint x;
+                uint y;
+              }
+              function prove_tuple_pass(Pair memory p) public pure {
+                uint256 f = p.x;
+                uint256 g = p.y;
+                unchecked {
+                  p.x+=p.y;
+                  assert(p.x == (f + g));
+                }
+              }
+            }
+          |]
+        let opts = defaultVeriOpts
+        let sig = Nothing
+        (_, [Qed _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] opts
+        putStrLnM "Qed, memory tuple is good"
     , test "symbolic-loops-not-reached" $ do
         Just c <- solcRuntime "C"
             [i|
