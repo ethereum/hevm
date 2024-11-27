@@ -171,7 +171,7 @@ jobs:
           strip result/hevm.exe
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: hevm-windows-x64
           path: result/hevm.exe
