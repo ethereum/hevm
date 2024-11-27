@@ -9,7 +9,6 @@ import EVM.Solvers
 import EVM.Dapp
 import EVM.Effects
 import EVM.Exec
-import EVM.Expr (readStorage')
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
@@ -198,21 +197,14 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     liftIO $ putStrLn $ "\x1b[96m[RUNNING]\x1b[0m " <> Text.unpack callSig
     let cd = symCalldata callSig types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` callSig
-        testContract store = fromMaybe (internalError "test contract not found in state") (Map.lookup vm.state.contract store)
 
     -- define postcondition depending on `shouldFail`
-    -- We directly encode the failure conditions from failed() in ds-test since this is easier to encode than a call into failed()
-    -- we need to read from slot 0 in the test contract and mask it with 0x10 to get the value of _failed
-    -- we don't need to do this when reading the failed from the cheatcode address since we don't do any packing there
-    let failed store = case Map.lookup cheatCode store of
-          Just cheatContract -> readStorage' (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) cheatContract.storage .== Lit 1
-          Nothing -> And (readStorage' (Lit 0) (testContract store).storage) (Lit 2) .== Lit 2
-        postcondition = curry $ case shouldFail of
+    let postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
-            Success _ _ _ store -> failed store
+            Success {} -> PBool False
             _ -> PBool True
           False -> \(_, post) -> case post of
-            Success _ _ _ store -> PNeg (failed store)
+            Success _ _ _ _ -> PBool True
             Failure _ _ (Revert msg) -> case msg of
               ConcreteBuf b ->
                 if (BS.isPrefixOf (selector "Error(string)") b) || b == panicMsg 0x01 then PBool False
