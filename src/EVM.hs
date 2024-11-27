@@ -1696,7 +1696,7 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
     Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) "symbolic cheatcode selector" (wrap [abi])
     Just (unsafeInto -> abi') ->
       case Map.lookup abi' cheatActions of
-        Nothing -> vmError (BadCheatCode "Cannot understand cheatcode. " abi')
+        Nothing -> vmError (BadCheatCode "Cannot understand cheatcode." abi')
         Just action -> action input
 
 type CheatAction t s = Expr Buf -> EVM t s ()
