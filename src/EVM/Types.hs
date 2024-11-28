@@ -665,8 +665,6 @@ data BaseState
 -- | Configuration options that need to be consulted at runtime
 data RuntimeConfig = RuntimeConfig
   { allowFFI :: Bool
-  , overrideCaller :: Maybe (Expr EAddr)
-  , resetCaller :: Bool
   , baseState :: BaseState
   }
   deriving (Show)
@@ -728,6 +726,8 @@ data FrameState (t :: VMType) s = FrameState
   , gas          :: !(Gas t)
   , returndata   :: Expr Buf
   , static       :: Bool
+  , overrideCaller :: Maybe (Expr EAddr)
+  , resetCaller  :: Bool
   }
   deriving (Generic)
 
