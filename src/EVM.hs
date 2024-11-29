@@ -148,7 +148,7 @@ makeVm o = do
       , returndata = mempty
       , static = False
       , overrideCaller = Nothing
-      , resetCaller = True
+      , resetCaller = False
       }
     , env = env
     , cache = cache
