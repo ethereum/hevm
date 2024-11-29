@@ -1820,6 +1820,7 @@ cheatActions = Map.fromList
       \_ _ -> do
         doStop
         assign (#state % #overrideCaller) Nothing
+        assign (#state % #resetCaller) False
 
   , action "createFork(string)" $
       \sig input -> case decodeBuf [AbiStringType] input of
