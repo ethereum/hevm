@@ -990,6 +990,7 @@ exec1 = do
                             assign #contract callee
                             assign #static True
                             assign #overrideCaller Nothing
+                            assign #resetCaller False
                           touchAccount self
                           touchAccount callee
             _ ->
