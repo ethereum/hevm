@@ -878,6 +878,7 @@ exec1 = do
                               assign #caller from'
                               assign #contract callee
                               assign #overrideCaller Nothing
+                              assign #resetCaller False                              
                             touchAccount from'
                             touchAccount callee
                             transfer from' callee xValue
