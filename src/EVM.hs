@@ -898,6 +898,7 @@ exec1 = do
                         assign #callvalue xValue
                         assign #caller $ fromMaybe self overrideC
                         assign #overrideCaller Nothing
+                        assign #resetCaller False
                       touchAccount self
             _ ->
               underrun
