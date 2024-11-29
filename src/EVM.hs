@@ -84,7 +84,7 @@ blankState = do
     , returndata   = mempty
     , static       = False
     , overrideCaller = Nothing
-    , resetCaller  = True
+    , resetCaller  = False
     }
 
 -- | An "external" view of a contract's bytecode, appropriate for
