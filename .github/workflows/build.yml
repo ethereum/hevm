@@ -111,13 +111,16 @@ jobs:
       - name: Extract GHC & Cabal paths
         run: |
           HASKELL_PATHS="$(cygpath -u "$GHC_PATH"):$(cygpath -u "$CABAL_PATH")"
+          HASKELL_MINGW_PATH="$(cygpath -u "$GHC_PATH/../mingw")"
           echo "HASKELL_PATHS=$HASKELL_PATHS" >> "$GITHUB_ENV"
+          echo "HASKELL_MINGW_PATH=$HASKELL_MINGW_PATH" >> "$GITHUB_ENV"
         env:
           GHC_PATH: ${{ steps.setup.outputs.ghc-path }}
           CABAL_PATH: ${{ steps.setup.outputs.cabal-path }}
 
       - name: build and install c dependencies
         run: |
+          export PATH="$HASKELL_MINGW_PATH/bin:$PATH"
           echo "::group::Installing libsecp256k1"
           ./.github/scripts/install-libsecp256k1.sh
           echo "::endgroup::"
@@ -128,9 +131,11 @@ jobs:
         run: |
           export PATH="$HASKELL_PATHS:$PATH"
           cabal configure --disable-documentation --enable-executable-static --enable-executable-stripping \
-            --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib" \
+            --extra-include-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/x86_64-w64-mingw32/include")" --extra-lib-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/x86_64-w64-mingw32/lib")" \
+            --extra-include-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/include")" --extra-lib-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/lib")" \
             --extra-include-dirs="D:/a/_temp/msys64/clang64/include" --extra-lib-dirs="D:/a/_temp/msys64/clang64/lib" \
-            --ghc-options=-pgml=D:/a/_temp/msys64/clang64/bin/clang.exe -fstatic-secp256k1
+            --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib" \
+            --ghc-options=-pgml="$(cygpath -m "$HASKELL_MINGW_PATH/bin/clang.exe")" -fstatic-secp256k1 --constraint="zlib +bundled-c-zlib"
           cabal build --dry-run
           # The last step generates dist-newstyle/cache/plan.json for the cache key.
 
@@ -166,7 +171,7 @@ jobs:
           strip result/hevm.exe
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: hevm-windows-x64
           path: result/hevm.exe
