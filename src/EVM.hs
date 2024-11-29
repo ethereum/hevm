@@ -2015,6 +2015,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                     assign #returndata mempty
                     assign #calldata calldata
                     assign #overrideCaller Nothing
+                    assign #resetCaller False
                   continue xTo
 
 -- -- * Contract creation
