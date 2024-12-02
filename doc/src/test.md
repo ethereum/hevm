@@ -13,9 +13,7 @@ Usage: hevm test [--root STRING] [--project-type PROJECTTYPE] [--rpc TEXT]
 Available options:
   -h,--help                Show this help text
   --root STRING            Path to project root directory (default: . )
-  --project-type PROJECTTYPE
-                           Is this a Foundry or DappTools project (default:
-                           Foundry)
+  --project-type PROJECTTYPE Foundry or CombinedJSON project
   --rpc TEXT               Fetch state from a remote node
   --number W256            Block: number
   --verbose INT            Append call trace: {1} failures {2} all
@@ -57,11 +55,11 @@ Available options:
                            reachability (default: 1) (default: 1)
 ```
 
-`hevm test` executes all solidity unit tests that make use of the `ds-test` assertion library
+`hevm test` executes all solidity unit tests that make use of the `std-test` assertion library
 (a.k.a [Foundry tests](https://book.getfoundry.sh/forge/forge-std)). It
 supports both foundry based (the default) and [dapptools](https://dapp.tools/) based projects.
 
 A more detailed introduction to symbolic unit tests with `hevm` can be found
-[here](https://fv.ethereum.org/2020/12/11/symbolic-execution-with-ds-test/). An
-overview of using ds-test for solidity testing can be found in the [foundry
+[here](https://fv.ethereum.org/2020/12/11/symbolic-execution-with-std-test/). An
+overview of using `std-test` for solidity testing can be found in the [foundry
 book](https://book.getfoundry.sh/forge/tests).

@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 module EVM.Fetch where
 
 import EVM (initialContract, unknownContract)
@@ -18,14 +16,15 @@ import Data.Aeson hiding (Error)
 import Data.Aeson.Optics
 import Data.ByteString qualified as BS
 import Data.Text (Text, unpack, pack)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.List (foldl')
-import Data.Text qualified as T
 import Data.Vector qualified as RegularVector
 import Network.Wreq
 import Network.Wreq.Session (Session)
 import Network.Wreq.Session qualified as Session
 import Numeric.Natural (Natural)
+import System.Environment (lookupEnv, getEnvironment)
 import System.Process
 import Control.Monad.IO.Class
 import EVM.Effects
@@ -186,21 +185,24 @@ fetchChainIdFrom url = do
 
 http :: Natural -> Maybe Natural -> BlockNumber -> Text -> Fetcher t m s
 http smtjobs smttimeout n url q =
-  withSolvers Z3 smtjobs smttimeout $ \s ->
+  withSolvers Z3 smtjobs 1 smttimeout $ \s ->
     oracle s (Just (n, url)) q
 
 zero :: Natural -> Maybe Natural -> Fetcher t m s
 zero smtjobs smttimeout q =
-  withSolvers Z3 smtjobs smttimeout $ \s ->
+  withSolvers Z3 smtjobs 1 smttimeout $ \s ->
     oracle s Nothing q
 
 -- smtsolving + (http or zero)
 oracle :: SolverGroup -> RpcInfo -> Fetcher t m s
 oracle solvers info q = do
   case q of
-    PleaseDoFFI vals continue -> case vals of
+    PleaseDoFFI vals envs continue -> case vals of
        cmd : args -> do
-          (_, stdout', _) <- liftIO $ readProcessWithExitCode cmd args ""
+          existingEnv <- liftIO getEnvironment
+          let mergedEnv = Map.toList $ Map.union envs $ Map.fromList existingEnv
+          let process = (proc cmd args :: CreateProcess) { env = Just mergedEnv }
+          (_, stdout', _) <- liftIO $ readCreateProcessWithExitCode process ""
           pure . continue . encodeAbiValue $
             AbiTuple (RegularVector.fromList [ AbiBytesDynamic . hexText . pack $ stdout'])
        _ -> internalError (show vals)
@@ -231,6 +233,10 @@ oracle solvers info q = do
            Nothing ->
              internalError $ "oracle error: " ++ show q
 
+    PleaseReadEnv variable continue -> do
+      value <- liftIO $ lookupEnv variable
+      pure . continue $ fromMaybe "" value
+
 type Fetcher t m s = App m => Query t s -> m (EVM t s ())
 
 -- | Checks which branches are satisfiable, checking the pathconditions for consistency
@@ -252,9 +258,7 @@ checkBranch solvers branchcondition pathconditions = do
         Unsat -> pure $ Case True
         -- Yes. Both branches possible
         Sat _ -> pure EVM.Types.Unknown
-        -- Explore both branches in case of timeout
-        EVM.Solvers.Unknown -> pure EVM.Types.Unknown
-        Error e -> internalError $ "SMT Solver pureed with an error: " <> T.unpack e
-    -- If the query times out, we simply explore both paths
-    EVM.Solvers.Unknown -> pure EVM.Types.Unknown
-    Error e -> internalError $ "SMT Solver pureed with an error: " <> T.unpack e
+    -- If the query times out, or can't be executed (e.g. symbolic copyslice) we simply explore both paths
+        _ -> pure EVM.Types.Unknown
+    -- If the query times out, or can't be executed (e.g. symbolic copyslice) we simply explore both paths
+    _ -> pure EVM.Types.Unknown

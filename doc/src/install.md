@@ -41,7 +41,7 @@ Checking 1 function(s) in contract src/contract-pass.sol:MyContract
    [PASS] prove_pass(address,uint256)
 ```
 
-See [ds-test tutorial](./ds-test-tutorial.md) for details.
+See [Forge std-test tutorial](./std-test-tutorial.md) for details.
 
 Note that Foundry provides the solidity compiler, hence there is no need to
 install solidity separately.

@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 {- |
     Module: EVM.CSE
     Description: Common subexpression elimination for Expr ast

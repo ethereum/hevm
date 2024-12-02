@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More complete and precise array/mapping slot rewrite, along with a copySlice improvement
 - Use a let expression in copySlice to decrease expression size
 - The `--debug` flag now dumps the internal expressions as well
+- hevm now uses the forge-std library's way of detecting failures, i.e. through
+  reverting with a specific error code unless --assertion-type DSTest is passed
 
 ## Added
 - More POr and PAnd rules
@@ -23,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PAnd props are now recursively flattened
 - Double negation in Prop are removed
 - Updated forge to modern version, thereby fixing JSON parsing of new forge JSONs
+- Fixed RPC fetching of contract data
 - Symbolic ABI encoding for tuples, fuzzer for encoder
 - Printing `Addrs` when running `symbolic` for counterexamples and reachable end states
 - Improved symbolic execution tutorial
@@ -32,6 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More verbose error messages in case of symbolic arguments to opcode
 - Tests to enforce that in Expr and Prop, constants are on the LHS whenever possible
 - Support for MCOPY and TSTORE/TLOAD, i.e. EIP 5656 + 1153 + 4788
+- All fuzz tests now run twice, once with expected SAT and once with expected UNSAT to check
+  against incorrectly trivial UNSAT queries
+- Allow --num-solvers option for equivalence checking, use num cores by default
+- Preliminary support for multi-threaded Z3
+- Skip over SMT generation issues due to e.g. CopySlice with symbolic arguments, and return
+  partial results instead of erroring out
+- Fix interpreter's MCOPY handling so that it doesn't error out on symbolic arguments
+- More desciptive errors in case of a cheatcode issue
+- Better and more pretty debug messages
 
 ## Fixed
 - `vm.prank` is now respected during calls to create
@@ -45,7 +57,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a different approach.
 - `initial-storage` option of `hevm symbolic` is respected
 - `caller` option of `hevm symbolic` is now respected
-* Thanks to the new simplification rules, we can now enable more conformance tests
+- Thanks to the new simplification rules, we can now enable more conformance tests
+- Multi-threaded running of Tracing.hs was not possible due to IO race. Fixed.
+- Fixed multi-threading bug in symbolic interpretation
+- Fixed simplification of concrete CopySlice with destination offset beyond destination size
+- Fixed a bug in our SMT encoding of reading multiple consecutive bytes from concrete index
+- Fixed bug in SMT encoding that caused empty and all-zero byte arrays to be considered equal
+  and hence lead to false negatives through trivially UNSAT SMT expressions
+- Respect --smt-timeout in equivalence checking
+- Fixed the handling of returndata with an abstract size during transaction finalization
+- Error handling for user-facing cli commands is much improved
+- Fixed call signature generation for test cases
+- Fixing prank so it doesn't override the sender address on lower call frames
 
 ## [0.53.0] - 2024-02-23
 

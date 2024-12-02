@@ -82,7 +82,7 @@ tests = testGroup "rpc"
           wad = 0x999999999999999999
           calldata' = ConcreteBuf $ abiMethod "transfer(address,uint256)" (AbiTuple (V.fromList [AbiAddress (Addr 0xdead), AbiUInt 256 wad]))
         vm <- liftIO $ weth9VM blockNum (calldata', [])
-        postVm <- withSolvers Z3 1 Nothing $ \solvers ->
+        postVm <- withSolvers Z3 1 1 Nothing $ \solvers ->
           Stepper.interpret (oracle solvers (Just (BlockNumber blockNum, testRpc))) vm Stepper.runFully
         let
           wethStore = (fromJust $ Map.lookup (LitAddr 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2) postVm.env.contracts).storage
@@ -106,7 +106,7 @@ tests = testGroup "rpc"
           postc _ (Failure _ _ (Revert _)) = PBool False
           postc _ _ = PBool True
         vm <- liftIO $ weth9VM blockNum calldata'
-        (_, [Cex (_, model)]) <- withSolvers Z3 1 Nothing $ \solvers ->
+        (_, [Cex (_, model)]) <- withSolvers Z3 1 1 Nothing $ \solvers ->
           verify solvers (rpcVeriOpts (BlockNumber blockNum, testRpc)) (symbolify vm) (Just postc)
         liftIO $ assertBool "model should exceed caller balance" (getVar model "arg2" >= 695836005599316055372648)
     ]

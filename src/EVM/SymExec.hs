@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE DeriveAnyClass #-}
 
 module EVM.SymExec where
@@ -7,15 +5,17 @@ module EVM.SymExec where
 import Control.Concurrent.Async (concurrently, mapConcurrently)
 import Control.Concurrent.Spawn (parMapIO, pool)
 import Control.Concurrent.STM (atomically, TVar, readTVarIO, readTVar, newTVarIO, writeTVar)
+import Control.Monad (when, forM_, forM)
+import Control.Monad.IO.Unlift
 import Control.Monad.Operational qualified as Operational
 import Control.Monad.ST (RealWorld, stToIO, ST)
 import Control.Monad.State.Strict (runStateT)
-import Data.Bifunctor (second)
+import Data.Bifunctor (second, first)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Containers.ListUtils (nubOrd)
 import Data.DoubleWord (Word256)
-import Data.List (foldl', sortBy)
+import Data.List (foldl', sortBy, sort, group)
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -25,16 +25,18 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
-import Text.Printf (printf)
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
 import Data.Vector qualified as V
+import Data.Vector.Unboxed qualified as VUnboxed
 import EVM (makeVm, abstractContract, initialContract, getCodeLocation, isValidJumpDest)
 import EVM.Exec
 import EVM.Fetch qualified as Fetch
 import EVM.ABI
+import EVM.Effects
 import EVM.Expr qualified as Expr
-import EVM.Format (formatExpr, formatPartial, showVal, bsToHex)
+import EVM.FeeSchedule (feeSchedule)
+import EVM.Format (formatExpr, formatPartial, showVal, bsToHex, indent, formatBinary)
 import EVM.SMT (SMTCex(..), SMT2(..), assertProps)
 import EVM.SMT qualified as SMT
 import EVM.Solvers
@@ -42,38 +44,48 @@ import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 import EVM.Traversals
 import EVM.Types
-import EVM.FeeSchedule (feeSchedule)
-import EVM.Format (indent, formatBinary)
 import GHC.Conc (getNumProcessors)
 import GHC.Generics (Generic)
 import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
+import Text.Printf (printf)
 import Witch (into, unsafeInto)
-import EVM.Effects
-import Control.Monad.IO.Unlift
-import Control.Monad (when, forM_)
 
 data LoopHeuristic
   = Naive
   | StackBased
   deriving (Eq, Show, Read, ParseField, ParseFields, ParseRecord, Generic)
 
-data ProofResult a b c = Qed a | Cex b | Timeout c
+data ProofResult a b c d = Qed a | Cex b | Unknown c | Error d
   deriving (Show, Eq)
-type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End)
-type EquivResult = ProofResult () (SMTCex) ()
+type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End) String
+type EquivResult = ProofResult () (SMTCex) () String
 
-isTimeout :: ProofResult a b c -> Bool
-isTimeout (Timeout _) = True
-isTimeout _ = False
+isUnknown :: ProofResult a b c d -> Bool
+isUnknown (EVM.SymExec.Unknown _) = True
+isUnknown _ = False
 
-isCex :: ProofResult a b c -> Bool
+isError :: ProofResult a b c d -> Bool
+isError (EVM.SymExec.Error _) = True
+isError _ = False
+
+isCex :: ProofResult a b c d -> Bool
 isCex (Cex _) = True
 isCex _ = False
 
-isQed :: ProofResult a b c -> Bool
+isQed :: ProofResult a b c d -> Bool
 isQed (Qed _) = True
 isQed _ = False
+
+groupIssues :: [ProofResult a b c String] -> [(Integer, String)]
+groupIssues results = map (\g -> (into (length g), head g)) grouped
+  where
+    getErr :: ProofResult a b c String -> String
+    getErr (EVM.SymExec.Error k) = k
+    getErr (EVM.SymExec.Unknown _) = "SMT result timeout/unknown"
+    getErr _ = internalError "shouldn't happen"
+    sorted = sort $ map getErr results
+    grouped = group sorted
 
 data VeriOpts = VeriOpts
   { simp :: Bool
@@ -248,6 +260,25 @@ loadSymVM x callvalue cd create =
     , beaconRoot = 0
     })
 
+-- freezes any mutable refs, making it safe to share between threads
+freezeVM :: VM Symbolic RealWorld -> ST RealWorld (VM Symbolic RealWorld)
+freezeVM vm = do
+    state' <- do
+      mem' <- freeze (vm.state.memory)
+      pure $ vm.state { memory = mem' }
+    frames' <- forM (vm.frames :: [Frame Symbolic RealWorld]) $ \frame -> do
+      mem' <- freeze frame.state.memory
+      pure $ (frame :: Frame Symbolic RealWorld) { state = frame.state { memory = mem' } }
+
+    pure (vm :: VM Symbolic RealWorld)
+      { state = state'
+      , frames = frames'
+      }
+  where
+    freeze = \case
+      ConcreteMemory m -> SymbolicMemory . ConcreteBuf . BS.pack . VUnboxed.toList <$> VUnboxed.freeze m
+      m@(SymbolicMemory _) -> pure m
+
 -- | Interpreter which explores all paths at branching points. Returns an
 -- 'Expr End' representing the possible executions.
 interpret
@@ -277,11 +308,12 @@ interpret fetcher maxIter askSmtIters heuristic vm =
         r <- liftIO q
         interpret fetcher maxIter askSmtIters heuristic vm (k r)
       Stepper.Ask (PleaseChoosePath cond continue) -> do
+        frozen <- liftIO $ stToIO $ freezeVM vm
         evalLeft <- toIO $ do
-          (ra, vma) <- liftIO $ stToIO $ runStateT (continue True) vm { result = Nothing }
+          (ra, vma) <- liftIO $ stToIO $ runStateT (continue True) frozen { result = Nothing }
           interpret fetcher maxIter askSmtIters heuristic vma (k ra)
         evalRight <- toIO $ do
-          (rb, vmb) <- liftIO $ stToIO $ runStateT (continue False) vm { result = Nothing }
+          (rb, vmb) <- liftIO $ stToIO $ runStateT (continue False) frozen { result = Nothing }
           interpret fetcher maxIter askSmtIters heuristic vmb (k rb)
         (a, b) <- liftIO $ concurrently evalLeft evalRight
         pure $ ITE cond a b
@@ -527,8 +559,8 @@ reachable solvers e = do
         let query = assertProps conf pcs
         res <- checkSat solvers query
         case res of
-          Sat _ -> pure ([query], Just leaf)
-          Unsat -> pure ([query], Nothing)
+          Sat _ -> pure ([getNonError query], Just leaf)
+          Unsat -> pure ([getNonError query], Nothing)
           r -> internalError $ "Invalid solver result: " <> show r
 
 -- | Extract constraints stored in Expr End nodes
@@ -564,16 +596,16 @@ verify
 verify solvers opts preState maybepost = do
   conf <- readConfig
   let call = mconcat ["prefix 0x", getCallPrefix preState.state.calldata]
-  when conf.debug $ liftIO $ putStrLn $ "Exploring call " <> call
+  when conf.debug $ liftIO $ putStrLn $ "   Exploring call " <> call
 
   exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
   when conf.dumpExprs $ liftIO $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
   liftIO $ do
-    when conf.debug $ putStrLn "Simplifying expression"
+    when conf.debug $ putStrLn "   Simplifying expression"
     let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
     when conf.dumpExprs $ T.writeFile "simplified.expr" (formatExpr expr)
 
-    when conf.debug $ putStrLn $ "Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
+    when conf.debug $ putStrLn $ "   Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
 
     let flattened = flattenExpr expr
     when (any isPartial flattened) $ do
@@ -587,15 +619,18 @@ verify solvers opts preState maybepost = do
         let
           -- Filter out any leaves from `flattened` that can be statically shown to be safe
           tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf preState.constraints post, leaf)
-          withQueries = filter canBeSat tocheck <&> \(a, leaf) -> (assertProps conf a, leaf)
-        when conf.debug $ putStrLn $ "   Checking for reachability of " <> show (length withQueries)
+          withQueries = filter canBeSat tocheck <&> first (assertProps conf)
+        when conf.debug $
+          putStrLn $ "   Checking for reachability of " <> show (length withQueries)
                      <> " potential property violation(s) in call " <> call
 
         -- Dispatch the remaining branches to the solver to check for violations
         results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
           res <- checkSat solvers query
+          when conf.debug $ putStrLn $ "   SMT result: " <> show res
           pure (res, leaf)
         let cexs = filter (\(res, _) -> not . isUnsat $ res) results
+        when conf.debug $ putStrLn $ "   Found " <> show (length cexs) <> " potential counterexample(s) in call " <> call
         pure $ if Prelude.null cexs then (expr, [Qed ()]) else (expr, fmap toVRes cexs)
   where
     getCallPrefix :: Expr Buf -> String
@@ -610,9 +645,9 @@ verify solvers opts preState maybepost = do
     toVRes :: (CheckSatResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
       Sat model -> Cex (leaf, expandCex preState model)
-      EVM.Solvers.Unknown -> Timeout leaf
+      EVM.Solvers.Unknown _ -> EVM.SymExec.Unknown leaf
+      EVM.Solvers.Error e -> EVM.SymExec.Error e
       Unsat -> Qed ()
-      Error e -> internalError $ "solver responded with error: " <> show e
 
 expandCex :: VM Symbolic s -> SMTCex -> SMTCex
 expandCex prestate c = c { store = Map.union c.store concretePreStore }
@@ -723,8 +758,8 @@ equivalenceCheck' solvers branchesA branchesB = do
               -- potential race, but it doesn't matter for correctness
               atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
               pure (Qed (), False)
-        (_, EVM.Solvers.Unknown) -> pure (Timeout (), False)
-        (_, Error txt) -> internalError $ "solver returned: " <> (T.unpack txt)
+        (_, EVM.Solvers.Unknown _) -> pure (EVM.SymExec.Unknown (), False)
+        (_, EVM.Solvers.Error txt) -> pure (EVM.SymExec.Error txt, False)
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
@@ -814,12 +849,15 @@ produceModels solvers expr = do
 showModel :: Expr Buf -> (Expr End, CheckSatResult) -> IO ()
 showModel cd (expr, res) = do
   case res of
-    Unsat -> pure () -- ignore unreachable branches
-    Error e -> internalError $ "smt solver returned an error: " <> show e
-    EVM.Solvers.Unknown -> do
+    EVM.Solvers.Unsat -> pure () -- ignore unreachable branches
+    EVM.Solvers.Error e -> do
       putStrLn ""
       putStrLn "--- Branch ---"
-      putStrLn "Unable to produce a model for the following end state:"
+      putStrLn $ "Error during SMT solving, cannot check branch " <> e
+    EVM.Solvers.Unknown reason -> do
+      putStrLn ""
+      putStrLn "--- Branch ---"
+      putStrLn $ "Unable to produce a model for the following end state due to '" <> reason <> "' :"
       T.putStrLn $ indent 2 $ formatExpr expr
       putStrLn ""
     Sat cex -> do
@@ -1026,10 +1064,10 @@ subStores model b = Map.foldlWithKey subStore b model
                else v
           e -> e
 
-getCex :: ProofResult a b c -> Maybe b
+getCex :: ProofResult a b c d -> Maybe b
 getCex (Cex c) = Just c
 getCex _ = Nothing
 
-getTimeout :: ProofResult a b c -> Maybe c
-getTimeout (Timeout c) = Just c
-getTimeout _ = Nothing
+getUnknown :: ProofResult a b c d-> Maybe c
+getUnknown (EVM.SymExec.Unknown c) = Just c
+getUnknown _ = Nothing

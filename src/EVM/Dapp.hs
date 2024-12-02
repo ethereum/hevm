@@ -1,5 +1,3 @@
-{-# Language DataKinds #-}
-
 module EVM.Dapp where
 
 import EVM.ABI
@@ -102,7 +100,7 @@ mkSig method
   | "check" `isPrefixOf` testname = Just (Sig testname argtypes)
   | otherwise = Nothing
   where
-    testname = method.methodSignature
+    testname = method.name
     argtypes = snd <$> method.inputs
 
 findUnitTests :: Text -> ([SolcContract] -> [(Text, [Sig])])

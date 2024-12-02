@@ -1,9 +1,9 @@
 pragma solidity ^0.8.19;
 
-import "ds-test/test.sol";
+import "forge-std/Test.sol";
 import {ERC20} from "tokens/erc20.sol";
 
-contract SolidityTestFail2 is DSTest {
+contract SolidityTestFail2 is Test {
     ERC20 token;
 
     function setUp() public {
@@ -11,6 +11,7 @@ contract SolidityTestFail2 is DSTest {
     }
 
     function prove_transfer(uint supply, address usr, uint amt) public {
+        // require(supply >= amt, "supply must be greater than or equal to amt");
         token.mint(address(this), supply);
 
         uint prebal = token.balanceOf(usr);
@@ -20,7 +21,7 @@ contract SolidityTestFail2 is DSTest {
         uint expected = usr == address(this)
                         ? 0    // self transfer is a noop
                         : amt; // otherwise `amt` has been transferred to `usr`
-        assert(expected == postbal - prebal);
+        assertTrue(expected == postbal - prebal);
     }
 }
 

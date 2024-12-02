@@ -1,6 +1,6 @@
 pragma experimental ABIEncoderV2;
 
-import "ds-test/test.sol";
+import "forge-std/Test.sol";
 
 interface Hevm {
     function warp(uint256) external;
@@ -28,7 +28,9 @@ contract TestState {
 }
 
 /// @dev This contract's state should be persistent across forks, because it's the contract calling `selectFork`
-contract CheatCodesForkDeployee is DSTest {
+contract CheatCodesForkDeployee is Test {
+    address constant HEVM_ADDRESS =
+        address(bytes20(uint160(uint256(keccak256('hevm cheat code')))));
     Hevm hevm = Hevm(HEVM_ADDRESS);
     address stateContract;
     uint256 forkId1;
@@ -91,7 +93,7 @@ contract CheatCodesForkDeployee is DSTest {
 /// @dev This contract's state should be persistent across forks, because it's the `msg.sender` when running `deployee_prove_ForkedState`.
 ///  We need this "deployer/deployee" architecture so that `msg.sender` will be concrete when running `deployee_prove_ForkedState`.
 ///  If we were to only use the `CheatCodesForkDeployee` contract, the `msg.sender` would be abstract.
-contract CheatCodesFork is DSTest {
+contract CheatCodesFork is Test {
   CheatCodesForkDeployee testContract = new CheatCodesForkDeployee();
   function prove_ForkedState() external {
     testContract.deployee_prove_ForkedState();

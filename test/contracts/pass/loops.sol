@@ -1,6 +1,6 @@
-import "ds-test/test.sol";
+import "forge-std/Test.sol";
 
-contract Loops is DSTest {
+contract Loops is Test {
 
     function prove_loop(uint n) public {
         uint counter = 0;

@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 {-|
@@ -27,7 +26,7 @@ import Data.Vector.Mutable (MVector)
 import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
-import Witch (unsafeInto, into, tryFrom)
+import Witch (unsafeInto, into, tryFrom, tryInto)
 import Data.Containers.ListUtils (nubOrd)
 
 import Optics.Core
@@ -108,13 +107,13 @@ addmod :: Expr EWord -> Expr EWord -> Expr EWord -> Expr EWord
 addmod = op3 AddMod (\x y z ->
   if z == 0
   then 0
-  else fromIntegral $ (to512 x + to512 y) `Prelude.mod` to512 z)
+  else fromIntegral $ (into @Word512 x + into y) `Prelude.mod` into z)
 
 mulmod :: Expr EWord -> Expr EWord -> Expr EWord -> Expr EWord
 mulmod = op3 MulMod (\x y z ->
-   if z == 0
-   then 0
-   else fromIntegral $ (to512 x * to512 y) `Prelude.mod` to512 z)
+  if z == 0
+  then 0
+  else fromIntegral $ (into @Word512 x * into y) `Prelude.mod` into z)
 
 exp :: Expr EWord -> Expr EWord -> Expr EWord
 exp = op2 Exp (^)
@@ -292,12 +291,12 @@ readWord i b = readWordFromBytes i b
 -- returns an abstract ReadWord expression if a concrete word cannot be constructed
 readWordFromBytes :: Expr EWord -> Expr Buf -> Expr EWord
 readWordFromBytes (Lit idx) (ConcreteBuf bs) =
-  case toInt idx of
-    Nothing -> Lit 0
-    Just i -> Lit $ word $ padRight 32 $ BS.take 32 $ BS.drop i bs
+  case tryInto idx of
+    Left _ -> Lit 0
+    Right i -> Lit $ word $ padRight 32 $ BS.take 32 $ BS.drop i bs
 readWordFromBytes i@(Lit idx) buf = let
     bytes = [readByte (Lit i') buf | i' <- [idx .. idx + 31]]
-  in if Prelude.and . (fmap isLitByte) $ bytes
+  in if all isLitByte bytes
      then Lit (bytesToW256 . mapMaybe maybeLitByte $ bytes)
      else ReadWord i buf
 readWordFromBytes idx buf = ReadWord idx buf
@@ -322,26 +321,18 @@ readWordFromBytes idx buf = ReadWord idx buf
 maxBytes :: W256
 maxBytes = into (maxBound :: Word32) `Prelude.div` 8
 
+maxWord256 :: W256
+maxWord256 = W256 (maxBound :: Word256)
+
 copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf -> Expr Buf
 
--- Copies from empty buffers
-copySlice _ _ (Lit 0) (ConcreteBuf "") dst = dst
-copySlice a b c@(Lit size) d@(ConcreteBuf "") e@(ConcreteBuf "")
-  | size < maxBytes = ConcreteBuf $ BS.replicate (unsafeInto size) 0
-  | otherwise = CopySlice a b c d e
-copySlice srcOffset dstOffset sz@(Lit size) src@(ConcreteBuf "") dst
-  | size < maxBytes = copySlice srcOffset dstOffset (Lit size) (ConcreteBuf $ BS.replicate (unsafeInto size) 0) dst
-  | otherwise = CopySlice srcOffset dstOffset sz src dst
+-- Copying zero bytes is a no-op
+copySlice _ _ (Lit 0) _ dst = dst
 
--- Fully concrete copies
-copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e@(ConcreteBuf "")
-  | srcOffset > unsafeInto (BS.length src), size < maxBytes = ConcreteBuf $ BS.replicate (unsafeInto size) 0
-  | srcOffset <= unsafeInto (BS.length src), dstOffset < maxBytes, size < maxBytes = let
-    hd = BS.replicate (unsafeInto dstOffset) 0
-    sl = padRight (unsafeInto size) $ BS.take (unsafeInto size) (BS.drop (unsafeInto srcOffset) src)
-    in ConcreteBuf $ hd <> sl
-  | otherwise = CopySlice a b c d e
+-- copying 32 bytes can be rewritten to a WriteWord on dst (e.g. CODECOPY of args during constructors)
+copySlice srcOffset dstOffset (Lit 32) src dst = writeWord dstOffset (readWord srcOffset src) dst
 
+-- Fully concrete copy
 copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e@(ConcreteBuf dst)
   | dstOffset < maxBytes
   , size < maxBytes =
@@ -352,9 +343,6 @@ copySlice a@(Lit srcOffset) b@(Lit dstOffset) c@(Lit size) d@(ConcreteBuf src) e
           tl = BS.drop (unsafeInto dstOffset + unsafeInto size) dst
       in ConcreteBuf $ hd <> sl <> tl
   | otherwise = CopySlice a b c d e
-
--- copying 32 bytes can be rewritten to a WriteWord on dst (e.g. CODECOPY of args during constructors)
-copySlice srcOffset dstOffset (Lit 32) src dst = writeWord dstOffset (readWord srcOffset src) dst
 
 -- concrete indices & abstract src (may produce a concrete result if we are
 -- copying from a concrete region of src)
@@ -437,6 +425,7 @@ bufLengthEnv env useEnv buf = go (Lit 0) buf
     go l (AbstractBuf b) = EVM.Expr.max l (BufLength (AbstractBuf b))
     go l (WriteWord idx _ b) = go (EVM.Expr.max l (add idx (Lit 32))) b
     go l (WriteByte idx _ b) = go (EVM.Expr.max l (add idx (Lit 1))) b
+    go l (CopySlice _ _ (Lit 0) _ dst) = go l dst
     go l (CopySlice _ dstOffset size _ dst) = go (EVM.Expr.max l (add dstOffset size)) dst
 
     go l (GVar (BufVar a)) | useEnv =
@@ -1347,9 +1336,6 @@ wordToAddr = go . simplify
 
 litCode :: BS.ByteString -> [Expr Byte]
 litCode bs = fmap LitByte (BS.unpack bs)
-
-to512 :: W256 -> Word512
-to512 = fromIntegral
 
 
 -- ** Helpers ** -----------------------------------------------------------------------------------

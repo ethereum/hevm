@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
 
@@ -74,6 +73,7 @@ import Data.Sequence (Seq)
 import Data.Text (pack, intercalate)
 import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import Data.Text.IO (writeFile)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Word (Word8)
@@ -185,7 +185,7 @@ instance Monoid BuildOutput where
   mempty = BuildOutput mempty mempty
 
 -- | The various project types understood by hevm
-data ProjectType = DappTools | CombinedJSON | Foundry | FoundryStdLib
+data ProjectType = CombinedJSON | Foundry
   deriving (Eq, Show, Read, ParseField)
 
 data SourceCache = SourceCache
@@ -285,13 +285,6 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
 
 -- | Reads all solc output json files found under the provided filepath and returns them merged into a BuildOutput
 readBuildOutput :: App m => FilePath -> ProjectType -> m (Either String BuildOutput)
-readBuildOutput root DappTools = do
-  let outDir = root </> "out"
-  jsons <- liftIO $ findJsonFiles outDir
-  case jsons of
-    [x] -> readSolc DappTools root (outDir </> x)
-    [] -> pure . Left $ "no json files found in: " <> outDir
-    _ -> pure . Left $ "multiple json files found in: " <> outDir
 readBuildOutput root CombinedJSON = do
   let outDir = root </> "out"
   jsons <- liftIO $ findJsonFiles outDir
@@ -388,13 +381,16 @@ solidity contract src = liftIO $ do
   pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.creationCode)
 
 solcRuntime
-  :: (MonadUnliftIO m)
+  :: App m
   => Text -> Text -> m (Maybe ByteString)
-solcRuntime contract src = liftIO $ do
-  json <- solc Solidity src
-  case readStdJSON json of
-    Just (Contracts sol, _, _) -> pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.runtimeCode)
-    Nothing -> internalError $ "unable to parse solidity output:\n" <> (T.unpack json)
+solcRuntime contract src = do
+  conf <- readConfig
+  liftIO $ do
+    json <- solc Solidity src
+    when conf.dumpExprs $ liftIO $ Data.Text.IO.writeFile "compiled_code.json" json
+    case readStdJSON json of
+      Just (Contracts sol, _, _) -> pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.runtimeCode)
+      Nothing -> internalError $ "unable to parse solidity output:\n" <> (T.unpack json)
 
 functionAbi :: Text -> IO Method
 functionAbi f = do
@@ -402,15 +398,14 @@ functionAbi f = do
   let (Contracts sol, _, _) = fromMaybe
                                 (internalError . T.unpack $ "unable to parse solc output:\n" <> json)
                                 (readStdJSON json)
-  case Map.toList $ (fromJust (Map.lookup "hevm.sol:ABI" sol)).abiMap of
-     [(_,b)] -> pure b
-     _ -> internalError "unexpected abi format"
+  case Map.toList (fromJust (Map.lookup "hevm.sol:ABI" sol)).abiMap of
+    [(_,b)] -> pure b
+    _ -> internalError "unexpected abi format"
 
 force :: String -> Maybe a -> a
 force s = fromMaybe (internalError s)
 
 readJSON :: ProjectType -> Text -> Text -> Maybe (Contracts, Asts, Sources)
-readJSON DappTools _ json = readStdJSON json
 readJSON CombinedJSON _ json = readCombinedJSON json
 readJSON _ contractName json = readFoundryJSON contractName json
 

@@ -3,7 +3,7 @@
 `hevm` is an implementation of the Ethereum virtual machine (EVM) made for
 symbolic execution, equivalence checking, and unit testing of smart contracts.
 `hevm` can symbolically execute smart contracts, run unit tests, and run
-arbitrary EVM code. It can run on state set up in a [`ds-test` testing
+arbitrary EVM code. It can run on state set up in a [Forge `std-test` testing
 harness](https://book.getfoundry.sh/forge/forge-std), or fetched on demand from
 live network using `rpc` calls.
 
@@ -51,10 +51,9 @@ nix profile install github:ethereum/hevm
 We use `nix` to manage project dependencies. To start hacking on hevm you should first [install
 nix](https://nixos.org/download.html).
 
-Once nix is installed you can run `nix-shell` (or `nix develop` if you use flakes) from the repo
-root to enter a development shell containing all required dev dependencies. If you use
-[direnv](https://direnv.net/), then you can run `direnv allow`, and the shell will be automatically
-entered each time you cd in the project repo.
+Once nix is installed you can run `nix develop` from the repo root to enter a development shell
+containing all required dev dependencies. If you use [direnv](https://direnv.net/), then you can run
+`direnv allow`, and the shell will be automatically entered each time you cd in the project repo.
 
 Once in the shell you can use the usual `cabal` commands to build and test hevm:
 

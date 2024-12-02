@@ -1,5 +1,3 @@
-{-# Language DataKinds #-}
-
 module EVM.Concrete where
 
 import Prelude hiding (Word)

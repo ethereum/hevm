@@ -34,12 +34,12 @@ module EVM.Format
 
 import Prelude hiding (LT, GT)
 
-import EVM.Types
 import EVM (traceForest, traceForest', traceContext, cheatCode)
 import EVM.ABI (getAbiSeq, parseTypeName, AbiValue(..), AbiType(..), SolError(..), Indexed(..), Event(..))
 import EVM.Dapp (DappContext(..), DappInfo(..), findSrc, showTraceLocation)
 import EVM.Expr qualified as Expr
 import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
+import EVM.Types
 
 import Control.Arrow ((>>>))
 import Optics.Core
@@ -47,6 +47,8 @@ import Data.Binary.Get (runGetOrFail)
 import Data.Bits (shiftR)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.ByteString.Char8 qualified as Char8
+import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Builder (byteStringHex, toLazyByteString)
 import Data.ByteString.Lazy (toStrict, fromStrict)
 import Data.Char qualified as Char
@@ -62,8 +64,6 @@ import Data.Tree.View (showTree)
 import Data.Vector (Vector)
 import Hexdump (prettyHex)
 import Numeric (showHex)
-import Data.ByteString.Char8 qualified as Char8
-import Data.ByteString.Base16 qualified as BS16
 import Witch (into, unsafeInto, tryFrom)
 
 data Signedness = Signed | Unsigned
@@ -423,7 +423,7 @@ prettyError = \case
   PrecompileFailure -> "Precompile failure"
   ReturnDataOutOfBounds -> "Return data out of bounds"
   NonceOverflow -> "Nonce overflow"
-  BadCheatCode a -> "Bad cheat code: sig: " <> show a
+  BadCheatCode reason a -> "Bad cheat code: " <>  reason <> " sig: " <> show a
   NonexistentFork a -> "Fork ID does not exist: " <> show a
 
 prettyvmresult :: Expr End -> String
@@ -824,11 +824,11 @@ strip0x bs = if "0x" `Char8.isPrefixOf` bs then Char8.drop 2 bs else bs
 strip0x' :: String -> String
 strip0x' s = if "0x" `isPrefixOf` s then drop 2 s else s
 
-hexByteString :: String -> ByteString -> ByteString
-hexByteString msg bs =
+hexByteString :: ByteString -> Maybe ByteString
+hexByteString bs =
   case BS16.decodeBase16Untyped bs of
-    Right x -> x
-    _ -> internalError $ "invalid hex bytestring for " ++ msg
+    Right x -> pure x
+    Left _ -> Nothing
 
 hexText :: Text -> ByteString
 hexText t =

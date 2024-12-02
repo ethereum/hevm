@@ -39,7 +39,7 @@ import Test.QuickCheck (elements)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
 import Test.QuickCheck.Instances.ByteString()
-import Test.Tasty (testGroup, TestTree, TestName)
+import Test.Tasty (testGroup, after, TestTree, TestName, DependencyType(..))
 import Test.Tasty.HUnit (assertEqual, testCase)
 import Test.Tasty.QuickCheck hiding (Failure, Success)
 import Witch (into, unsafeInto)
@@ -435,7 +435,7 @@ runCodeWithTrace
   :: App m
   => Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction
   -> Expr EAddr -> Expr EAddr -> m (Either (EvmError, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
-runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 Nothing $ \solvers -> do
+runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 1 Nothing $ \solvers -> do
   let calldata' = ConcreteBuf txn.txdata
       code' = alloc.code
       buildExpr s vm = interpret (Fetch.oracle s Nothing) Nothing 1 Naive vm runExpr
@@ -483,7 +483,7 @@ vmForRuntimeCode runtimecode calldata' evmToolEnv alloc txn fromAddr toAddress =
        <&> set (#state % #calldata) calldata'
 
 runCode :: App m => Fetch.RpcInfo -> ByteString -> Expr Buf -> m (Maybe (Expr Buf))
-runCode rpcinfo code' calldata' = withSolvers Z3 0 Nothing $ \solvers -> do
+runCode rpcinfo code' calldata' = withSolvers Z3 0 1 Nothing $ \solvers -> do
   origVM <- liftIO $ stToIO $ vmForRuntimeCode
               code'
               calldata'
@@ -513,26 +513,7 @@ vmtrace vm =
              }
   where
     readoutError :: Maybe (VMResult t s) -> Maybe String
-    readoutError (Just (VMFailure e)) = case e of
-      -- NOTE: error text made to closely match go-ethereum's errors.go file
-      OutOfGas {}             -> Just "out of gas"
-      -- TODO "contract creation code storage out of gas" not handled
-      CallDepthLimitReached   -> Just "max call depth exceeded"
-      BalanceTooLow {}        -> Just "insufficient balance for transfer"
-      -- TODO "contract address collision" not handled
-      Revert {}           -> Just "execution reverted"
-      -- TODO "max initcode size exceeded" not handled
-      MaxCodeSizeExceeded {}  -> Just "max code size exceeded"
-      BadJumpDestination  -> Just "invalid jump destination"
-      StateChangeWhileStatic  -> Just "write protection"
-      ReturnDataOutOfBounds   -> Just "return data out of bounds"
-      IllegalOverflow     -> Just "gas uint64 overflow"
-      UnrecognizedOpcode op   -> Just $ "invalid opcode: 0x" <> showHex op ""
-      NonceOverflow       -> Just "nonce uint64 overflow"
-      StackUnderrun       -> Just "stack underflow"
-      StackLimitExceeded  -> Just "stack limit reached"
-      InvalidMemoryAccess -> Just "write protection"
-      err                     -> Just $ "HEVM error: " <> show err
+    readoutError (Just (VMFailure e)) = Just $ evmErrToString e
     readoutError _ = Nothing
 
 vmres :: VM Concrete s -> VMTraceResult
@@ -855,21 +836,21 @@ tests = testGroup "contract-quickcheck-run"
         --       It should work also when we external calls. Removing for now.
         contrFixed <- liftIO $ fixContractJumps $ removeExtcalls contr
         checkTraceAndOutputs contrFixed gasLimit txData
-      , test "calldata-wraparound" $ do
+      , after AllFinish "random-contract-concrete-call" $ test "calldata-wraparound-1" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 31),OpMstore8] -- value, offs
               , [OpPush (Lit 0x3),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- size, offs, destOffs
               , [OpPush (Lit 0x20),OpPush (Lit 0),OpReturn] -- datasize, offs
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5])
-      , test "calldata-wraparound2" $ do
+      , after AllFinish "calldata-wraparound-1" $ test "calldata-wraparound-2" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 0),OpMstore8] -- value, offs
               , [OpPush (Lit 0x10),OpPush (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),OpPush (Lit 0x0),OpCalldatacopy] -- size, offs, destOffs
               , [OpPush (Lit 0x20),OpPush (Lit 0),OpReturn] -- datasize, offs
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5])
-      , test "calldata-overwrite-with-0-if-oversized" $ do
+      , after AllFinish "calldata-wraparound-2" $ test "calldata-overwrite-with-0-if-oversized" $ do
         -- supposed to copy 1...6 and then 0s, overwriting the 0xff with 0
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs
@@ -877,14 +858,14 @@ tests = testGroup "contract-quickcheck-run"
               , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
-      , test "calldata-overwrite-correct-size" $ do
+      , after AllFinish "calldata-overwrite-with-0-if-oversized" $ test "calldata-overwrite-correct-size" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- value, offs
               , [OpPush (Lit 10),OpPush (Lit 0),OpPush (Lit 0), OpCalldatacopy] -- size, offs, destOffs
               , [OpPush (Lit 10),OpPush (Lit 0x0),OpReturn] -- datasize, offset
               ]
         checkTraceAndOutputs contract 40000 (BS.pack [1, 2, 3, 4, 5, 6])
-      , test "calldata-offset-copy" $ do
+      , after AllFinish "calldata-overwrite-correct-size" $ test "calldata-offset-copy" $ do
         let contract = OpContract $ concat
               [ [OpPush (Lit 0xff),OpPush (Lit 8),OpMstore8] -- value, offs
               , [OpPush (Lit 0xff),OpPush (Lit 1),OpMstore8] -- value, offs

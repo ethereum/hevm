@@ -1,12 +1,12 @@
 module EVM.Transaction where
 
 import EVM (initialContract, ceilDiv)
+import EVM.Expr qualified as Expr
 import EVM.FeeSchedule
-import EVM.RLP
-import EVM.Types
 import EVM.Format (hexText)
+import EVM.RLP
 import EVM.Sign
-import qualified EVM.Expr as Expr
+import EVM.Types
 
 import Optics.Core hiding (cons)
 
@@ -23,16 +23,17 @@ import GHC.Generics (Generic)
 import Numeric (showHex)
 import Witch (into, unsafeInto)
 
-data AccessListEntry = AccessListEntry {
-  address :: Addr,
-  storageKeys :: [W256]
-} deriving (Show, Generic)
+data AccessListEntry = AccessListEntry
+  { address :: Addr
+  , storageKeys :: [W256]
+  } deriving (Show, Generic)
 
 instance JSON.ToJSON AccessListEntry
 
-data TxType = LegacyTransaction
-            | AccessListTransaction
-            | EIP1559Transaction
+data TxType
+  = LegacyTransaction
+  | AccessListTransaction
+  | EIP1559Transaction
   deriving (Show, Eq, Generic)
 
 instance JSON.ToJSON TxType where
@@ -42,39 +43,40 @@ instance JSON.ToJSON TxType where
                AccessListTransaction -> "0x1" -- EIP2930
 
 
-data Transaction = Transaction {
-    txdata            :: ByteString,
-    gasLimit          :: Word64,
-    gasPrice          :: Maybe W256,
-    nonce             :: W256,
-    r                 :: W256,
-    s                 :: W256,
-    toAddr            :: Maybe Addr,
-    v                 :: W256,
-    value             :: W256,
-    txtype            :: TxType,
-    accessList        :: [AccessListEntry],
-    maxPriorityFeeGas :: Maybe W256,
-    maxFeePerGas      :: Maybe W256,
-    chainId           :: W256
-} deriving (Show, Generic)
+data Transaction = Transaction
+  { txdata            :: ByteString
+  , gasLimit          :: Word64
+  , gasPrice          :: Maybe W256
+  , nonce             :: W256
+  , r                 :: W256
+  , s                 :: W256
+  , toAddr            :: Maybe Addr
+  , v                 :: W256
+  , value             :: W256
+  , txtype            :: TxType
+  , accessList        :: [AccessListEntry]
+  , maxPriorityFeeGas :: Maybe W256
+  , maxFeePerGas      :: Maybe W256
+  , chainId           :: W256
+  } deriving (Show, Generic)
 
 instance JSON.ToJSON Transaction where
-  toJSON t = JSON.object [ ("input",             (JSON.toJSON (ByteStringS t.txdata)))
-                         , ("gas",               (JSON.toJSON $ "0x" ++ showHex (into @Integer $ t.gasLimit) ""))
-                         , ("gasPrice",          (JSON.toJSON $ show $ fromJust $ t.gasPrice))
-                         , ("v",                 (JSON.toJSON $ show $ (t.v)-27))
-                         , ("r",                 (JSON.toJSON $ show $ t.r))
-                         , ("s",                 (JSON.toJSON $ show $ t.s))
-                         , ("to",                (JSON.toJSON $ t.toAddr))
-                         , ("nonce",             (JSON.toJSON $ show $ t.nonce))
-                         , ("value",             (JSON.toJSON $ show $ t.value))
-                         , ("type",              (JSON.toJSON $ t.txtype))
-                         , ("accessList",        (JSON.toJSON $ t.accessList))
-                         , ("maxPriorityFeePerGas", (JSON.toJSON $ show $ fromJust $ t.maxPriorityFeeGas))
-                         , ("maxFeePerGas",      (JSON.toJSON $ show $ fromJust $ t.maxFeePerGas))
-                         , ("chainId",           (JSON.toJSON $ show t.chainId))
-                         ]
+  toJSON t = JSON.object
+    [ ("input",             (JSON.toJSON (ByteStringS t.txdata)))
+    , ("gas",               (JSON.toJSON $ "0x" ++ showHex (into @Integer $ t.gasLimit) ""))
+    , ("gasPrice",          (JSON.toJSON $ show $ fromJust t.gasPrice))
+    , ("v",                 (JSON.toJSON $ show $ (t.v)-27))
+    , ("r",                 (JSON.toJSON $ show t.r))
+    , ("s",                 (JSON.toJSON $ show t.s))
+    , ("to",                (JSON.toJSON t.toAddr))
+    , ("nonce",             (JSON.toJSON $ show t.nonce))
+    , ("value",             (JSON.toJSON $ show t.value))
+    , ("type",              (JSON.toJSON t.txtype))
+    , ("accessList",        (JSON.toJSON t.accessList))
+    , ("maxPriorityFeePerGas", (JSON.toJSON $ show $ fromJust t.maxPriorityFeeGas))
+    , ("maxFeePerGas",      (JSON.toJSON $ show $ fromJust t.maxFeePerGas))
+    , ("chainId",           (JSON.toJSON $ show t.chainId))
+    ]
 
 emptyTransaction :: Transaction
 emptyTransaction = Transaction { txdata = mempty
@@ -133,41 +135,47 @@ signingData tx =
           EVM.RLP.List [BS $ word160Bytes accessEntry.address,
                         EVM.RLP.List $ map rlpWordFull accessEntry.storageKeys]
           ) accessList
-        normalData = rlpList [rlpWord256 tx.nonce,
-                              rlpWord256 gasPrice,
-                              rlpWord256 (into tx.gasLimit),
-                              to',
-                              rlpWord256 tx.value,
-                              BS tx.txdata]
-        eip155Data = rlpList [rlpWord256 tx.nonce,
-                              rlpWord256 gasPrice,
-                              rlpWord256 (into tx.gasLimit),
-                              to',
-                              rlpWord256 tx.value,
-                              BS tx.txdata,
-                              rlpWord256 tx.chainId,
-                              rlpWord256 0x0,
-                              rlpWord256 0x0]
-        eip1559Data = cons 0x02 $ rlpList [
-          rlpWord256 tx.chainId,
-          rlpWord256 tx.nonce,
-          rlpWord256 maxPrio,
-          rlpWord256 maxFee,
-          rlpWord256 (into tx.gasLimit),
-          to',
-          rlpWord256 tx.value,
-          BS tx.txdata,
-          rlpAccessList]
+        normalData = rlpList
+          [ rlpWord256 tx.nonce
+          , rlpWord256 gasPrice
+          , rlpWord256 (into tx.gasLimit)
+          , to'
+          , rlpWord256 tx.value
+          , BS tx.txdata
+          ]
+        eip155Data = rlpList
+          [ rlpWord256 tx.nonce
+          , rlpWord256 gasPrice
+          , rlpWord256 (into tx.gasLimit)
+          , to'
+          , rlpWord256 tx.value
+          , BS tx.txdata
+          , rlpWord256 tx.chainId
+          , rlpWord256 0x0
+          , rlpWord256 0x0
+          ]
+        eip1559Data = cons 0x02 $ rlpList
+          [ rlpWord256 tx.chainId
+          , rlpWord256 tx.nonce
+          , rlpWord256 maxPrio
+          , rlpWord256 maxFee
+          , rlpWord256 (into tx.gasLimit)
+          , to'
+          , rlpWord256 tx.value
+          , BS tx.txdata
+          , rlpAccessList
+          ]
 
-        eip2930Data = cons 0x01 $ rlpList [
-          rlpWord256 tx.chainId,
-          rlpWord256 tx.nonce,
-          rlpWord256 gasPrice,
-          rlpWord256 (into tx.gasLimit),
-          to',
-          rlpWord256 tx.value,
-          BS tx.txdata,
-          rlpAccessList]
+        eip2930Data = cons 0x01 $ rlpList
+          [ rlpWord256 tx.chainId
+          , rlpWord256 tx.nonce
+          , rlpWord256 gasPrice
+          , rlpWord256 (into tx.gasLimit)
+          , to'
+          , rlpWord256 tx.value
+          , BS tx.txdata
+          , rlpAccessList
+          ]
 
 accessListPrice :: FeeSchedule Word64 -> [AccessListEntry] -> Word64
 accessListPrice fs al =
@@ -247,7 +255,8 @@ setupTx origin coinbase gasPrice gasLimit prestate =
 -- subtract gas payment from the origin, increment the nonce
 -- and pay receiving address
 initTx :: VM t s -> VM t s
-initTx vm = let
+initTx vm =
+  let
     toAddr   = vm.state.contract
     origin   = vm.tx.origin
     gasPrice = vm.tx.gasprice
@@ -265,6 +274,6 @@ initTx vm = let
          then Map.insert toAddr (toContract & (set #balance oldBalance))
          else touchAccount toAddr)
       $ preState
-    in
-      vm & #env % #contracts .~ initState
-         & #tx % #txReversion .~ preState
+  in
+    vm & #env % #contracts .~ initState
+       & #tx % #txReversion .~ preState
