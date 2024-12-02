@@ -1512,7 +1512,7 @@ tests = testGroup "hevm"
     , test "Loop-Tests" $ do
         let testFile = "test/contracts/pass/loops.sol"
         runSolidityTestCustom testFile "prove_loop" Nothing (Just 10) False Nothing Foundry  >>= assertEqualM "test result" True
-        runSolidityTestCustom testFile "prove_loop" Nothing (Just 100) False Nothing Foundry >>= assertEqualM "test result" False
+        runSolidityTestCustom testFile "prove_loop" Nothing (Just 101) False Nothing Foundry >>= assertEqualM "test result" False
     , test "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True
