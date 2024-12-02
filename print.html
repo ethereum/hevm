@@ -201,9 +201,9 @@ the two bytecodes is the same, or gives inputs where they differ.</p>
 <p>Let's say we have a function that allows transfer of money, but no balance can
 be larger than or equal to 100. Let's see the contract and its associated check:</p>
 <pre><code class="language-solidity">pragma solidity ^0.8.19;
-import "ds-test/test.sol";
+import "foge-std/Test.sol";
 
-contract MyContract is DSTest {
+contract MyContract is Test {
   mapping (address =&gt; uint) balances;
   function prove_add_value(address recv, uint amt) public {
     require(balances[recv] &lt; 100);
@@ -233,9 +233,9 @@ $ chmod +x ./hevm-x86_64-linux
 $ forge init .
 $ cat &lt;&lt;EOF &gt; src/contract.sol
 pragma solidity ^0.8.19;
-import "ds-test/test.sol";
+import "forge-std/Test.sol";
 
-contract MyContract is DSTest {
+contract MyContract is Test {
   mapping (address =&gt; uint) balances;
   function prove_add_value(address recv, uint amt) public {
     require(balances[recv] &lt; 100);
@@ -363,9 +363,9 @@ often e.g. that the system does not throw a segmentation fault. For EVM
 bytecode, postconditions need to be explicit. Let's see an example:</p>
 <pre><code class="language-solidity">// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
-import "ds-test/test.sol";
+import "forge-std/Test.sol";
 
-contract MyContract is DSTest {
+contract MyContract is Test {
   uint balance;
   function test_overflow(uint amt) public {
     unchecked {
@@ -383,9 +383,9 @@ hidden (e.g. by a malicious developer), or that have a complicated code path
 towards them. Let's see a simple one:</p>
 <pre><code class="language-solidity">// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
-import "ds-test/test.sol";
+import "foge-std/Test.sol";
 
-contract MyContract is DSTest {
+contract MyContract is Test {
   uint balance;
   function prove_multiply(uint amt, uint amt2) public {
     require(amt != 1);
@@ -1160,9 +1160,7 @@ solidity</a>.</p>
 Available options:
   -h,--help                Show this help text
   --root STRING            Path to project root directory (default: . )
-  --project-type PROJECTTYPE
-                           Is this a Foundry or DappTools project (default:
-                           Foundry)
+  --project-type PROJECTTYPE Foundry or CombinedJSON project
   --rpc TEXT               Fetch state from a remote node
   --number W256            Block: number
   --verbose INT            Append call trace: {1} failures {2} all
@@ -1251,9 +1249,7 @@ Available options:
   --rpc TEXT               Fetch state from a remote node
   --block W256             Block state is be fetched from
   --root STRING            Path to project root directory (default: . )
-  --project-type PROJECTTYPE
-                           Is this a Foundry or DappTools project (default:
-                           Foundry)
+  --project-type PROJECTTYPE Foundry or CombinedJSON project
   --initial-storage INITIALSTORAGE
                            Starting state for storage: Empty, Abstract (default
                            Abstract)
@@ -1429,9 +1425,7 @@ Available options:
   --rpc TEXT               Fetch state from a remote node
   --block W256             Block state is be fetched from
   --root STRING            Path to project root directory (default: . )
-  --project-type PROJECTTYPE
-                           Is this a Foundry or DappTools project (default:
-                           Foundry)
+  --project-type PROJECTTYPE Foundry or CombinedJSON project
 </code></pre>
 <p>Minimum required flags: either you must provide <code>--code</code> or you must both pass
 <code>--rpc</code> and <code>--address</code>.</p>

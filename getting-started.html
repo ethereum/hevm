@@ -203,9 +203,9 @@ the two bytecodes is the same, or gives inputs where they differ.</p>
 <p>Let's say we have a function that allows transfer of money, but no balance can
 be larger than or equal to 100. Let's see the contract and its associated check:</p>
 <pre><code class="language-solidity">pragma solidity ^0.8.19;
-import "ds-test/test.sol";
+import "foge-std/Test.sol";
 
-contract MyContract is DSTest {
+contract MyContract is Test {
   mapping (address =&gt; uint) balances;
   function prove_add_value(address recv, uint amt) public {
     require(balances[recv] &lt; 100);
@@ -235,9 +235,9 @@ $ chmod +x ./hevm-x86_64-linux
 $ forge init .
 $ cat &lt;&lt;EOF &gt; src/contract.sol
 pragma solidity ^0.8.19;
-import "ds-test/test.sol";
+import "forge-std/Test.sol";
 
-contract MyContract is DSTest {
+contract MyContract is Test {
   mapping (address =&gt; uint) balances;
   function prove_add_value(address recv, uint amt) public {
     require(balances[recv] &lt; 100);

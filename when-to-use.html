@@ -203,9 +203,9 @@ often e.g. that the system does not throw a segmentation fault. For EVM
 bytecode, postconditions need to be explicit. Let's see an example:</p>
 <pre><code class="language-solidity">// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
-import "ds-test/test.sol";
+import "forge-std/Test.sol";
 
-contract MyContract is DSTest {
+contract MyContract is Test {
   uint balance;
   function test_overflow(uint amt) public {
     unchecked {
@@ -223,9 +223,9 @@ hidden (e.g. by a malicious developer), or that have a complicated code path
 towards them. Let's see a simple one:</p>
 <pre><code class="language-solidity">// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
-import "ds-test/test.sol";
+import "foge-std/Test.sol";
 
-contract MyContract is DSTest {
+contract MyContract is Test {
   uint balance;
   function prove_multiply(uint amt, uint amt2) public {
     require(amt != 1);
