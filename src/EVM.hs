@@ -84,6 +84,8 @@ blankState = do
     , gas          = initialGas
     , returndata   = mempty
     , static       = False
+    , overrideCaller = Nothing
+    , resetCaller  = False
     }
 
 -- | An "external" view of a contract's bytecode, appropriate for
@@ -146,6 +148,8 @@ makeVm o = do
       , gas = o.gas
       , returndata = mempty
       , static = False
+      , overrideCaller = Nothing
+      , resetCaller = False
       }
     , env = env
     , cache = cache
@@ -154,8 +158,6 @@ makeVm o = do
     , iterations = mempty
     , config = RuntimeConfig
       { allowFFI = o.allowFFI
-      , resetCaller = True
-      , overrideCaller = Nothing
       , baseState = o.baseState
       }
     , forks = Seq.singleton (ForkState env block cache "")
@@ -867,17 +869,15 @@ exec1 = do
                   forceAddr xTo' "unable to determine a call target" $ \xTo ->
                     case gasTryFrom xGas of
                       Left _ -> vmError IllegalOverflow
-                      Right gas ->
+                      Right gas -> do
+                        overrideC <- use $ #state % #overrideCaller
                         delegateCall this gas xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
                           \callee -> do
-                            let from' = fromMaybe self vm.config.overrideCaller
+                            let from' = fromMaybe self overrideC
                             zoom #state $ do
                               assign #callvalue xValue
                               assign #caller from'
                               assign #contract callee
-                            do
-                              resetCaller <- use (#config % #resetCaller)
-                              when (resetCaller) $ assign (#config % #overrideCaller) Nothing
                             touchAccount from'
                             touchAccount callee
                             transfer from' callee xValue
@@ -890,14 +890,12 @@ exec1 = do
               forceAddr xTo' "unable to determine a call target" $ \xTo ->
                 case gasTryFrom xGas of
                   Left _ -> vmError IllegalOverflow
-                  Right gas ->
+                  Right gas -> do
+                    overrideC <- use $ #state % #overrideCaller
                     delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
                       zoom #state $ do
                         assign #callvalue xValue
-                        assign #caller $ fromMaybe self vm.config.overrideCaller
-                      do
-                        resetCaller <- use (#config % #resetCaller)
-                        when (resetCaller) $ assign (#config % #overrideCaller) Nothing
+                        assign #caller $ fromMaybe self overrideC
                       touchAccount self
             _ ->
               underrun
@@ -979,17 +977,15 @@ exec1 = do
                 Just xTo' ->
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
-                    Right gas ->
+                    Right gas -> do
+                      overrideC <- use $ #state % #overrideCaller
                       delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs $
                         \callee -> do
                           zoom #state $ do
                             assign #callvalue (Lit 0)
-                            assign #caller $ fromMaybe self (vm.config.overrideCaller)
+                            assign #caller $ fromMaybe self overrideC
                             assign #contract callee
                             assign #static True
-                          do
-                            resetCaller <- use (#config % #resetCaller)
-                            when (resetCaller) $ assign (#config % #overrideCaller) Nothing
                           touchAccount self
                           touchAccount callee
             _ ->
@@ -1102,7 +1098,7 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
     accessMemoryRange xOutOffset xOutSize $ do
       availableGas <- use (#state % #gas)
       let recipientExists = accountExists xContext vm
-      let from = fromMaybe vm.state.contract vm.config.overrideCaller
+      let from = fromMaybe vm.state.contract vm.state.overrideCaller
       fromBal <- preuse $ #env % #contracts % ix from % #balance
       costOfCall fees recipientExists xValue availableGas xGas xTo $ \cost gas' -> do
         let checkCallDepth =
@@ -1145,9 +1141,6 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
               state <- use #state
               partial $ UnexpectedSymbolicArg pc (getOpName state) "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [from])
             GVar _ -> internalError "Unexpected GVar"
-
-
-
 
 precompiledContract
   :: (?op :: Word8, VMOps t)
@@ -1800,8 +1793,9 @@ cheatActions = Map.fromList
       \sig input -> case decodeStaticArgs 0 1 input of
         [addr]  -> case wordToAddr addr of
           Just a -> do
-            assign (#config % #overrideCaller) (Just a)
             doStop
+            assign (#state % #overrideCaller) (Just a)
+            assign (#state % #resetCaller) True
           Nothing -> vmError (BadCheatCode "prank(address), could not decode address provided" sig)
         _ -> vmError (BadCheatCode "prank(address) parameter decoding failed" sig)
 
@@ -1809,17 +1803,17 @@ cheatActions = Map.fromList
       \sig input -> case decodeStaticArgs 0 1 input of
         [addr]  -> case wordToAddr addr of
           Just a -> do
-            assign (#config % #overrideCaller) (Just a)
-            assign (#config % #resetCaller) False
             doStop
+            assign (#state % #overrideCaller) (Just a)
+            assign (#state % #resetCaller) False
           Nothing -> vmError (BadCheatCode "startPrank(address), could not decode address provided" sig)
         _ -> vmError (BadCheatCode "startPrank(address) parameter decoding failed" sig)
 
   , action "stopPrank()" $
       \_ _ -> do
-        assign (#config % #overrideCaller) Nothing
-        assign (#config % #resetCaller) True
         doStop
+        assign (#state % #overrideCaller) Nothing
+        assign (#state % #resetCaller) False
 
   , action "createFork(string)" $
       \sig input -> case decodeBuf [AbiStringType] input of
@@ -2036,6 +2030,8 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
   | otherwise =
       callChecks this gasGiven xContext xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
         \xGas -> do
+          resetCaller <- use $ #state % #resetCaller
+          when resetCaller $ assign (#state % #overrideCaller) Nothing
           vm0 <- get
           fetchAccount xTo $ \target -> case target.code of
               UnknownCode _ -> do
@@ -2060,7 +2056,6 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                   pushTrace (FrameTrace newContext)
                   next
                   vm1 <- get
-
                   pushTo #frames $ Frame
                     { state = vm1.state { stack = xs }
                     , context = newContext
@@ -2081,6 +2076,8 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                     assign #memorySize 0
                     assign #returndata mempty
                     assign #calldata calldata
+                    assign #overrideCaller Nothing
+                    assign #resetCaller False
                   continue xTo
 
 -- -- * Contract creation
