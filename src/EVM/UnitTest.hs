@@ -56,6 +56,7 @@ data UnitTestOptions s = UnitTestOptions
   , dapp        :: DappInfo
   , testParams  :: TestVMParams
   , ffiAllowed  :: Bool
+  , checkFailBit:: Bool
   }
 
 data TestVMParams = TestVMParams
@@ -199,12 +200,16 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
         shouldFail = "proveFail" `isPrefixOf` callSig
 
     -- define postcondition depending on `shouldFail`
-    let postcondition = curry $ case shouldFail of
+    let testContract store = fromMaybe (internalError "test contract not found in state") (Map.lookup vm.state.contract store)
+        failed store = case Map.lookup cheatCode store of
+          Just cheatContract -> Expr.readStorage' (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) cheatContract.storage .== Lit 1
+          Nothing -> And (Expr.readStorage' (Lit 0) (testContract store).storage) (Lit 2) .== Lit 2
+        postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
-            Success {} -> PBool False
+            Success _ _ _ store -> if opts.checkFailBit then failed store else PBool False
             _ -> PBool True
           False -> \(_, post) -> case post of
-            Success _ _ _ _ -> PBool True
+            Success _ _ _ store -> if opts.checkFailBit then PNeg (failed store) else PBool True
             Failure _ _ (Revert msg) -> case msg of
               ConcreteBuf b ->
                 if (BS.isPrefixOf (selector "Error(string)") b) || b == panicMsg 0x01 then PBool False

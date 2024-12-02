@@ -77,7 +77,7 @@ data Command w
 
   -- symbolic execution opts
       , root          :: w ::: Maybe String       <?> "Path to  project root directory (default: . )"
-      , projectType   :: w ::: Maybe ProjectType  <?> "Is this a CombinedJSON or Foundry project (default: Foundry)"
+      , projectType   :: w ::: Maybe ProjectType  <?> "Is this a CombinedJSON, Foundry, or DSTest project (default: Foundry)"
       , initialStorage :: w ::: Maybe (InitialStorage) <?> "Starting state for storage: Empty, Abstract (default Abstract)"
       , sig           :: w ::: Maybe Text         <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]           <?> "Values to encode"
@@ -147,11 +147,11 @@ data Command w
       , rpc         :: w ::: Maybe URL         <?> "Fetch state from a remote node"
       , block       :: w ::: Maybe W256        <?> "Block state is be fetched from"
       , root        :: w ::: Maybe String      <?> "Path to  project root directory (default: . )"
-      , projectType :: w ::: Maybe ProjectType <?> "Is this a CombinedJSON or Foundry project (default: Foundry)"
+      , projectType :: w ::: Maybe ProjectType  <?> "Is this a CombinedJSON, Foundry, or DSTest project (default: Foundry)"
       }
   | Test -- Run Foundry unit tests
       { root        :: w ::: Maybe String               <?> "Path to  project root directory (default: . )"
-      , projectType   :: w ::: Maybe ProjectType        <?> "Is this a CombinedJSON or Foundry project (default: Foundry)"
+      , projectType :: w ::: Maybe ProjectType          <?> "Is this a CombinedJSON, Foundry, or DSTest project (default: Foundry)"
       , rpc           :: w ::: Maybe URL                <?> "Fetch state from a remote node"
       , number        :: w ::: Maybe W256               <?> "Block: number"
       , verbose       :: w ::: Maybe Int                <?> "Append call trace: {1} failures {2} all"
@@ -308,7 +308,9 @@ getSrcInfo cmd = do
     else pure emptyDapp
 
 getProjectType :: Command Options.Unwrapped -> ProjectType
-getProjectType cmd = fromMaybe Foundry cmd.projectType
+getProjectType cmd =
+  let pt = fromMaybe Foundry cmd.projectType
+  in if elem pt [Foundry, DSTest] then Foundry else CombinedJSON
 
 getRoot :: Command Options.Unwrapped -> IO FilePath
 getRoot cmd = maybe getCurrentDirectory makeAbsolute (cmd.root)
@@ -674,6 +676,7 @@ unitTestOptions cmd solvers buildOutput = do
     , testParams = params
     , dapp = srcInfo
     , ffiAllowed = cmd.ffi
+    , checkFailBit = cmd.projectType == Just DSTest
     }
 parseInitialStorage :: InitialStorage -> BaseState
 parseInitialStorage Empty = EmptyBase
