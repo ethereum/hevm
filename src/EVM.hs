@@ -855,9 +855,9 @@ exec1 = do
                 let (cost, gas') = costOfCreate fees availableGas xSize False
 
                 -- handle `prank`
-                let from' = fromMaybe self vm.config.overrideCaller
-                resetCaller <- use (#config % #resetCaller)
-                when (resetCaller) $ assign (#config % #overrideCaller) Nothing
+                let from' = fromMaybe self vm.state.overrideCaller
+                resetCaller <- use (#state % #resetCaller)
+                when resetCaller $ assign (#state % #overrideCaller) Nothing
 
                 newAddr <- createAddress from' this.nonce
                 _ <- accessAccountForGas newAddr
