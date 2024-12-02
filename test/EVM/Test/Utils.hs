@@ -1,11 +1,6 @@
-{-# LANGUAGE QuasiQuotes #-}
-
 module EVM.Test.Utils where
 
-import Data.String.Here
 import Data.Text (Text)
-import Data.Text qualified as T
-import Data.Text.IO qualified as T
 import GHC.IO.Exception (IOErrorType(..))
 import GHC.Natural
 import Paths_hevm qualified as Paths
@@ -14,7 +9,6 @@ import System.FilePath ((</>))
 import System.IO.Temp
 import System.Process
 import System.Exit
-import System.IO
 import System.IO.Error (mkIOError)
 
 import EVM.Dapp (dappInfo, emptyDapp)
@@ -65,6 +59,7 @@ testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
     , testParams = params
     , dapp = srcInfo
     , ffiAllowed = allowFFI
+    , checkFailBit = False
     }
 
 processFailedException :: String -> String -> [String] -> Int -> IO a
@@ -79,24 +74,16 @@ callProcessCwd cmd args cwd = do
     exit_code <- withCreateProcess (proc cmd args) { cwd = Just cwd, delegate_ctlc = True } $ \_ _ _ p ->
                  waitForProcess p
     case exit_code of
-      ExitSuccess   -> return ()
+      ExitSuccess   -> pure ()
       ExitFailure r -> processFailedException "callProcess" cmd args r
 
 compile :: App m => ProjectType -> FilePath -> FilePath -> m (Either String BuildOutput)
-compile DappTools root src = do
-  json <- liftIO $ compileWithDSTest src
-  liftIO $ createDirectory (root </> "out")
-  liftIO $ T.writeFile (root </> "out" </> "dapp.sol.json") json
-  readBuildOutput root DappTools
-compile CombinedJSON _root _src = error "unsupported"
-compile foundryType root src = do
+compile CombinedJSON _root _src = internalError  "unsupported compile type: CombinedJSON"
+compile _ root src = do
   liftIO $ createDirectory (root </> "src")
   liftIO $ writeFile (root </> "src" </> "unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
-  liftIO $ initLib (root </> "lib" </> "ds-test") ("test" </> "contracts" </> "lib" </> "test.sol") "test.sol"
   liftIO $ initLib (root </> "lib" </> "tokens") ("test" </> "contracts" </> "lib" </> "erc20.sol") "erc20.sol"
-  case foundryType of
-    FoundryStdLib -> liftIO $ initStdForgeDir (root </> "lib" </> "forge-std")
-    Foundry -> pure ()
+  liftIO $ initStdForgeDir (root </> "lib" </> "forge-std")
   (res,out,err) <- liftIO $ readProcessWithExitCode "forge" ["build", "--ast", "--root", root] ""
   case res of
     ExitFailure _ -> pure . Left $ "compilation failed: " <> "exit code: " <> show res <> "\n\nstdout:\n" <> out <> "\n\nstderr:\n" <> err
@@ -118,62 +105,3 @@ compile foundryType root src = do
       callProcessCwd "git" ["add", "."] tld
       callProcessCwd "git" ["commit", "-m", "", "--allow-empty-message", "--no-gpg-sign"] tld
       pure ()
-
--- We don't want to depend on dapptools here, so we cheat and just call solc with the same options that dapp itself uses
-compileWithDSTest :: FilePath -> IO Text
-compileWithDSTest src =
-  withSystemTempFile "input.json" $ \file handle -> do
-    hClose handle
-    dsTest <- readFile =<< Paths.getDataFileName ("test" </> "contracts" </> "lib" </> "test.sol")
-    erc20 <- readFile =<< Paths.getDataFileName ("test" </> "contracts" </> "lib" </> "erc20.sol")
-    testFilePath <- Paths.getDataFileName src
-    testFile <- readFile testFilePath
-    T.writeFile file
-      [i|
-      {
-        "language": "Solidity",
-        "sources": {
-          "ds-test/test.sol": {
-            "content": ${dsTest}
-          },
-          "tokens/erc20.sol": {
-            "content": ${erc20}
-          },
-          "unit-tests.sol": {
-            "content": ${testFile}
-          }
-        },
-        "settings": {
-          "metadata": {
-            "useLiteralContent": true
-          },
-          "outputSelection": {
-            "*": {
-              "*": [
-                "metadata",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "abi",
-                "storageLayout",
-                "evm.bytecode.sourceMap",
-                "evm.bytecode.linkReferences",
-                "evm.bytecode.generatedSources",
-                "evm.deployedBytecode.sourceMap",
-                "evm.deployedBytecode.linkReferences",
-                "evm.deployedBytecode.generatedSources"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      }
-      |]
-    x <- T.pack <$>
-      readProcess
-        "solc"
-        ["--allow-paths", file, "--standard-json", file]
-        ""
-    return x
-

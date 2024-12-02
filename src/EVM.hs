@@ -32,6 +32,7 @@ import Data.Bits (FiniteBits, countLeadingZeros, finiteBitSize)
 import Data.ByteArray qualified as BA
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.ByteString.Char8 qualified as BS8
 import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Lazy (fromStrict)
 import Data.ByteString.Lazy qualified as LS
@@ -1688,7 +1689,7 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
     Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) "symbolic cheatcode selector" (wrap [abi])
     Just (unsafeInto -> abi') ->
       case Map.lookup abi' cheatActions of
-        Nothing -> vmError (BadCheatCode "cannot understand cheatcode, maybe cheatcode not supported?" abi')
+        Nothing -> vmError (BadCheatCode "Cannot understand cheatcode." abi')
         Just action -> action input
 
 type CheatAction t s = Expr Buf -> EVM t s ()
@@ -1897,6 +1898,50 @@ cheatActions = Map.fromList
   , $(envReadMultipleCheat "envBytes32(string,string)" $ AbiBytesType 32) stringToBytes32
   , $(envReadMultipleCheat "envString(string,string)" AbiStringType) stringToByteString
   , $(envReadMultipleCheat "envBytes(bytes,bytes)" AbiBytesDynamicType) stringHexToByteString
+  , action "assertTrue(bool)" $ \sig input ->
+      case decodeBuf [AbiBoolType] input of
+        CAbi [AbiBool True] -> doStop
+        CAbi [AbiBool False] -> frameRevert "assertion failed"
+        SAbi [eword] -> case (Expr.simplify (Expr.iszero eword)) of
+          Lit 1 -> frameRevert "assertion failed"
+          Lit 0 -> doStop
+          ew -> branch ew $ \case
+            True -> frameRevert "assertion failed"
+            False -> doStop
+        k -> vmError $ BadCheatCode ("assertTrue(bool) parameter decoding failed: " <> show k) sig
+  , action "assertFalse(bool)" $ \sig input ->
+      case decodeBuf [AbiBoolType] input of
+        CAbi [AbiBool False] -> doStop
+        CAbi [AbiBool True] -> frameRevert "assertion failed"
+        SAbi [eword] -> case (Expr.simplify (Expr.iszero eword)) of
+          Lit 0 -> frameRevert "assertion failed"
+          Lit 1 -> doStop
+          ew -> branch ew $ \case
+            False -> frameRevert "assertion failed"
+            True -> doStop
+        k -> vmError $ BadCheatCode ("assertFalse(bool) parameter decoding failed: " <> show k) sig
+  , action "assertEq(bool,bool)"       $ assertEq AbiBoolType
+  , action "assertEq(uint256,uint256)" $ assertEq (AbiUIntType 256)
+  , action "assertEq(int256,int256)"   $ assertEq (AbiIntType 256)
+  , action "assertEq(address,address)" $ assertEq AbiAddressType
+  , action "assertEq(bytes32,bytes32)" $ assertEq (AbiBytesType 32)
+  , action "assertEq(string,string)"   $ assertEq (AbiStringType)
+  --
+  , action "assertNotEq(bool,bool)"       $ assertNotEq AbiBoolType
+  , action "assertNotEq(uint256,uint256)" $ assertNotEq (AbiUIntType 256)
+  , action "assertNotEq(int256,int256)"   $ assertNotEq (AbiIntType 256)
+  , action "assertNotEq(address,address)" $ assertNotEq AbiAddressType
+  , action "assertNotEq(bytes32,bytes32)" $ assertNotEq (AbiBytesType 32)
+  , action "assertNotEq(string,string)"   $ assertNotEq (AbiStringType)
+  --
+  , action "assertLt(uint256,uint256)" $ assertLt (AbiUIntType 256)
+  , action "assertLt(int256,int256)"   $ assertLt (AbiIntType 256)
+  , action "assertLe(uint256,uint256)" $ assertLe (AbiUIntType 256)
+  , action "assertLe(int256,int256)"   $ assertLe (AbiIntType 256)
+  , action "assertGt(uint256,uint256)" $ assertGt (AbiUIntType 256)
+  , action "assertGt(int256,int256)"   $ assertGt (AbiIntType 256)
+  , action "assertGe(uint256,uint256)" $ assertGe (AbiUIntType 256)
+  , action "assertGe(int256,int256)"   $ assertGe (AbiIntType 256)
   ]
   where
     action s f = (abiKeccak s, f (abiKeccak s))
@@ -1936,6 +1981,28 @@ cheatActions = Map.fromList
     stringToByteString = Right . Char8.pack
     stringHexToByteString :: String -> Either ByteString ByteString
     stringHexToByteString s = either (const $ Left "invalid bytes value") Right $ BS16.decodeBase16Untyped . Char8.pack . strip0x $ s
+    paramDecodeErr abitype name abivals = name <> "(" <> (show abitype) <> "," <> (show abitype) <>
+      ")  parameter decoding failed. Error: " <> show abivals
+    revertErr a b comp = frameRevert $ "assertion failed: " <>
+      BS8.pack (show a) <> " " <> comp <> " " <> BS8.pack (show b)
+    genAssert comp exprComp invComp name abitype sig input = do
+      case decodeBuf [abitype, abitype] input of
+        CAbi [a, b] | a `comp` b -> doStop
+        CAbi [a, b] -> revertErr a b invComp
+        SAbi [ew1, ew2] -> case (Expr.simplify (Expr.iszero $ exprComp ew1 ew2)) of
+          Lit 0 -> doStop
+          Lit _ -> revertErr ew1 ew2 invComp
+          ew -> branch ew $ \case
+            False -> doStop
+            True -> revertErr ew1 ew2 invComp
+        abivals -> vmError (BadCheatCode (paramDecodeErr abitype name abivals) sig)
+    assertEq = genAssert (==) Expr.eq "!=" "assertEq"
+    assertNotEq = genAssert (/=) (\a b -> Expr.iszero $ Expr.eq a b) "==" "assertNotEq"
+    assertLt = genAssert (<) Expr.lt ">=" "assertLt"
+    assertGt = genAssert (>) Expr.gt "<=" "assertGt"
+    assertLe = genAssert (<=) Expr.leq ">" "assertLe"
+    assertGe = genAssert (>=) Expr.geq "<" "assertGe"
+
 
 -- * General call implementation ("delegateCall")
 -- note that the continuation is ignored in the precompile case
@@ -2209,14 +2276,10 @@ finishFrame how = do
     nextFrame : remainingFrames -> do
 
       -- Insert a debug trace.
-      insertTrace $
-        case how of
-          FrameErrored e ->
-            ErrorTrace e
-          FrameReverted e ->
-            ErrorTrace (Revert e)
-          FrameReturned output ->
-            ReturnTrace output nextFrame.context
+      insertTrace $ case how of
+        FrameReturned output -> ReturnTrace output nextFrame.context
+        FrameReverted e -> ErrorTrace (Revert e)
+        FrameErrored e -> ErrorTrace e
       -- Pop to the previous level of the debug trace stack.
       popTrace
 

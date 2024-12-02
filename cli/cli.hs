@@ -47,6 +47,9 @@ import EVM.Types qualified
 import EVM.UnitTest
 import EVM.Effects
 
+data AssertionType = DSTest | Forge
+  deriving (Eq, Show, Read, ParseField)
+
 -- This record defines the program's command-line options
 -- automatically via the `optparse-generic` package.
 data Command w
@@ -77,7 +80,8 @@ data Command w
 
   -- symbolic execution opts
       , root          :: w ::: Maybe String       <?> "Path to  project root directory (default: . )"
-      , projectType   :: w ::: Maybe ProjectType  <?> "Is this a Foundry or DappTools project (default: Foundry)"
+      , projectType   :: w ::: Maybe ProjectType  <?> "Is this a CombinedJSON or Foundry project (default: Foundry)"
+      , assertionType :: w ::: Maybe AssertionType <?> "Assertions as per Forge or DSTest (default: Forge)"
       , initialStorage :: w ::: Maybe (InitialStorage) <?> "Starting state for storage: Empty, Abstract (default Abstract)"
       , sig           :: w ::: Maybe Text         <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]           <?> "Values to encode"
@@ -147,11 +151,13 @@ data Command w
       , rpc         :: w ::: Maybe URL         <?> "Fetch state from a remote node"
       , block       :: w ::: Maybe W256        <?> "Block state is be fetched from"
       , root        :: w ::: Maybe String      <?> "Path to  project root directory (default: . )"
-      , projectType :: w ::: Maybe ProjectType <?> "Is this a Foundry or DappTools project (default: Foundry)"
+      , projectType :: w ::: Maybe ProjectType <?> "Is this a CombinedJSON or Foundry project (default: Foundry)"
+      , assertionType :: w ::: Maybe AssertionType <?> "Assertions as per Forge or DSTest (default: Forge)"
       }
-  | Test -- Run DSTest unit tests
+  | Test -- Run Foundry unit tests
       { root        :: w ::: Maybe String               <?> "Path to  project root directory (default: . )"
-      , projectType   :: w ::: Maybe ProjectType        <?> "Is this a Foundry or DappTools project (default: Foundry)"
+      , projectType   :: w ::: Maybe ProjectType        <?> "Is this a CombinedJSON or Foundry project (default: Foundry)"
+      , assertionType :: w ::: Maybe AssertionType <?> "Assertions as per Forge or DSTest (default: Forge)"
       , rpc           :: w ::: Maybe URL                <?> "Fetch state from a remote node"
       , number        :: w ::: Maybe W256               <?> "Block: number"
       , verbose       :: w ::: Maybe Int                <?> "Append call trace: {1} failures {2} all"
@@ -674,6 +680,7 @@ unitTestOptions cmd solvers buildOutput = do
     , testParams = params
     , dapp = srcInfo
     , ffiAllowed = cmd.ffi
+    , checkFailBit = (fromMaybe Forge cmd.assertionType) == DSTest
     }
 parseInitialStorage :: InitialStorage -> BaseState
 parseInitialStorage Empty = EmptyBase

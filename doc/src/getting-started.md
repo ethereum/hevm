@@ -28,9 +28,9 @@ be larger than or equal to 100. Let's see the contract and its associated check:
 
 ```solidity
 pragma solidity ^0.8.19;
-import "ds-test/test.sol";
+import "foge-std/Test.sol";
 
-contract MyContract is DSTest {
+contract MyContract is Test {
   mapping (address => uint) balances;
   function prove_add_value(address recv, uint amt) public {
     require(balances[recv] < 100);
@@ -65,9 +65,9 @@ $ chmod +x ./hevm-x86_64-linux
 $ forge init .
 $ cat <<EOF > src/contract.sol
 pragma solidity ^0.8.19;
-import "ds-test/test.sol";
+import "forge-std/Test.sol";
 
-contract MyContract is DSTest {
+contract MyContract is Test {
   mapping (address => uint) balances;
   function prove_add_value(address recv, uint amt) public {
     require(balances[recv] < 100);

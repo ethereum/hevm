@@ -26,9 +26,9 @@ bytecode, postconditions need to be explicit. Let's see an example:
 ```solidity
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
-import "ds-test/test.sol";
+import "forge-std/Test.sol";
 
-contract MyContract is DSTest {
+contract MyContract is Test {
   uint balance;
   function test_overflow(uint amt) public {
     unchecked {
@@ -50,9 +50,9 @@ towards them. Let's see a simple one:
 ```solidity
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
-import "ds-test/test.sol";
+import "foge-std/Test.sol";
 
-contract MyContract is DSTest {
+contract MyContract is Test {
   uint balance;
   function prove_multiply(uint amt, uint amt2) public {
     require(amt != 1);

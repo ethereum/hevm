@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More complete and precise array/mapping slot rewrite, along with a copySlice improvement
 - Use a let expression in copySlice to decrease expression size
 - The `--debug` flag now dumps the internal expressions as well
+- hevm now uses the forge-std library's way of detecting failures, i.e. through
+  reverting with a specific error code unless --assertion-type DSTest is passed
 
 ## Added
 - More POr and PAnd rules
@@ -41,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   partial results instead of erroring out
 - Fix interpreter's MCOPY handling so that it doesn't error out on symbolic arguments
 - More desciptive errors in case of a cheatcode issue
+- Better and more pretty debug messages
 
 ## Fixed
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
@@ -63,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Respect --smt-timeout in equivalence checking
 - Fixed the handling of returndata with an abstract size during transaction finalization
 - Error handling for user-facing cli commands is much improved
+- Fixed call signature generation for test cases
 - Fixing prank so it doesn't override the sender address on lower call frames
 
 ## [0.53.0] - 2024-02-23

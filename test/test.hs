@@ -1436,8 +1436,8 @@ tests = testGroup "hevm"
     [ test "Trivial-Pass" $ do
         let testFile = "test/contracts/pass/trivial.sol"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" True
-    , test "DappTools" $ do
-        -- quick smokecheck to make sure that we can parse dapptools style build outputs
+    , test "Foundry" $ do
+        -- quick smokecheck to make sure that we can parse ForgeStdLib style build outputs
         let cases =
               [ ("test/contracts/pass/trivial.sol", ".*", True)
               , ("test/contracts/pass/dsProvePass.sol", "proveEasy", True)
@@ -1445,7 +1445,7 @@ tests = testGroup "hevm"
               , ("test/contracts/fail/dsProveFail.sol", "prove_add", False)
               ]
         results <- forM cases $ \(testFile, match, expected) -> do
-          actual <- runSolidityTestCustom testFile match Nothing Nothing False Nothing DappTools
+          actual <- runSolidityTestCustom testFile match Nothing Nothing False Nothing Foundry
           pure (actual == expected)
         assertBoolM "test result" (and results)
     , test "Trivial-Fail" $ do
@@ -1471,7 +1471,7 @@ tests = testGroup "hevm"
         runSolidityTest testFile "prove_transfer" >>= assertEqualM "should prove transfer" True
     , test "badvault-sym-branch" $ do
         let testFile = "test/contracts/fail/10_BadVault.sol"
-        runSolidityTestCustom testFile "prove_BadVault_usingExploitLaunchPad"  Nothing Nothing True Nothing FoundryStdLib >>= assertEqualM "Must find counterexample" False
+        runSolidityTestCustom testFile "prove_BadVault_usingExploitLaunchPad"  Nothing Nothing True Nothing Foundry >>= assertEqualM "Must find counterexample" False
     , test "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
         runSolidityTest testFile "prove_trivial" >>= assertEqualM "test result" False
@@ -1479,11 +1479,10 @@ tests = testGroup "hevm"
         runSolidityTest testFile "prove_add" >>= assertEqualM "test result" False
         runSolidityTestCustom testFile "prove_smtTimeout" (Just 1) Nothing False Nothing Foundry >>= assertEqualM "test result" False
         runSolidityTest testFile "prove_multi" >>= assertEqualM "test result" False
-        -- TODO: implement overflow checking optimizations and enable, currently this runs forever
-        --runSolidityTest testFile "prove_distributivity" >>= assertEqualM "test result" False
+        runSolidityTest testFile "prove_distributivity" >>= assertEqualM "test result" False
     , test "Loop-Tests" $ do
         let testFile = "test/contracts/pass/loops.sol"
-        runSolidityTestCustom testFile "prove_loop" Nothing (Just 10) False Nothing Foundry >>= assertEqualM "test result" True
+        runSolidityTestCustom testFile "prove_loop" Nothing (Just 10) False Nothing Foundry  >>= assertEqualM "test result" True
         runSolidityTestCustom testFile "prove_loop" Nothing (Just 100) False Nothing Foundry >>= assertEqualM "test result" False
     , test "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
@@ -1563,6 +1562,28 @@ tests = testGroup "hevm"
         (e, [Qed _]) <- withDefaultSolver $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBoolM "The expression is not partial" $ Expr.containsNode isPartial e
+    , test "mem-tuple" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract C {
+              struct Pair {
+                uint x;
+                uint y;
+              }
+              function prove_tuple_pass(Pair memory p) public pure {
+                uint256 f = p.x;
+                uint256 g = p.y;
+                unchecked {
+                  p.x+=p.y;
+                  assert(p.x == (f + g));
+                }
+              }
+            }
+          |]
+        let opts = defaultVeriOpts
+        let sig = Just $ Sig "prove_tuple_pass((uint256,uint256))" [AbiTupleType (V.fromList [AbiUIntType 256, AbiUIntType 256])]
+        (_, [Qed _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] opts
+        putStrLnM "Qed, memory tuple is good"
     , test "symbolic-loops-not-reached" $ do
         Just c <- solcRuntime "C"
             [i|
@@ -1782,6 +1803,7 @@ tests = testGroup "hevm"
               }
             }
           |]
+        -- NOTE: we have a postcondition here, not just a regular verification
         (_, [Cex _]) <- withDefaultSolver $ \s ->
           verifyContract s c Nothing [] defaultVeriOpts Nothing (Just $ checkBadCheatCode "load(address,bytes32)")
         pure ()
@@ -1798,6 +1820,7 @@ tests = testGroup "hevm"
               }
             }
           |]
+        -- NOTE: we have a postcondition here, not just a regular verification
         (_, [Cex _]) <- withDefaultSolver $ \s ->
           verifyContract s c Nothing [] defaultVeriOpts Nothing (Just $ checkBadCheatCode "store(address,bytes32,bytes32)")
         pure ()

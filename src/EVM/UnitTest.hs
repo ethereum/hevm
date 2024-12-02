@@ -9,13 +9,12 @@ import EVM.Solvers
 import EVM.Dapp
 import EVM.Effects
 import EVM.Exec
-import EVM.Expr (readStorage')
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, runExpr, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, isUnknown, isError, groupIssues)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, isUnknown, isError, groupIssues)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
@@ -29,6 +28,7 @@ import Optics.State
 import Optics.State.Operators
 import Data.Binary.Get (runGet)
 import Data.ByteString (ByteString)
+import Data.ByteString.Char8 qualified as BS
 import Data.ByteString.Lazy qualified as BSLazy
 import Data.Decimal (DecimalRaw(..))
 import Data.Foldable (toList)
@@ -56,6 +56,7 @@ data UnitTestOptions s = UnitTestOptions
   , dapp        :: DappInfo
   , testParams  :: TestVMParams
   , ffiAllowed  :: Bool
+  , checkFailBit:: Bool
   }
 
 data TestVMParams = TestVMParams
@@ -113,15 +114,19 @@ makeVeriOpts opts =
 -- | Top level CLI endpoint for hevm test
 unitTest :: App m => UnitTestOptions RealWorld -> Contracts -> m Bool
 unitTest opts (Contracts cs) = do
-  let unitTests = findUnitTests opts.match $ Map.elems cs
-  results <- concatMapM (runUnitTestContract opts cs) unitTests
+  let unitTestContrs = findUnitTests opts.match $ Map.elems cs
+  conf <- readConfig
+  when conf.debug $ liftIO $ do
+    putStrLn $ "Found " ++ show (length unitTestContrs) ++ " unit test contract(s) to test:"
+    let x = map (\(a,b) -> "  --> " <> a <> "  ---  functions: " <> (Text.pack $ show b)) unitTestContrs
+    putStrLn $ unlines $ map Text.unpack x
+  results <- concatMapM (runUnitTestContract opts cs) unitTestContrs
   pure $ and results
 
 -- | Assuming a constructor is loaded, this stepper will run the constructor
 -- to create the test contract, give it an initial balance, and run `setUp()'.
 initializeUnitTest :: UnitTestOptions s -> SolcContract -> Stepper Concrete s ()
 initializeUnitTest opts theContract = do
-
   let addr = opts.testParams.address
 
   Stepper.evm $ do
@@ -160,7 +165,7 @@ runUnitTestContract
   opts@(UnitTestOptions {..}) contractMap (name, testSigs) = do
 
   -- Print a header
-  liftIO $ putStrLn $ "\nChecking " ++ show (length testSigs) ++ " function(s) in contract " ++ unpack name
+  liftIO $ putStrLn $ "Checking " ++ show (length testSigs) ++ " function(s) in contract " ++ unpack name
 
   -- Look for the wanted contract by name from the Solidity info
   case Map.lookup name contractMap of
@@ -189,30 +194,30 @@ runUnitTestContract
 -- | Define the thread spawner for symbolic tests
 symRun :: App m => UnitTestOptions RealWorld -> VM Concrete RealWorld -> Sig -> m Bool
 symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
-    liftIO $ putStrLn $ "\x1b[96m[RUNNING]\x1b[0m " <> Text.unpack testName
-    let cd = symCalldata testName types [] (AbstractBuf "txdata")
-        shouldFail = "proveFail" `isPrefixOf` testName
-        testContract store = fromMaybe (internalError "test contract not found in state") (Map.lookup vm.state.contract store)
+    let callSig = testName <> "(" <> (Text.intercalate "," (map abiTypeSolidity types)) <> ")"
+    liftIO $ putStrLn $ "\x1b[96m[RUNNING]\x1b[0m " <> Text.unpack callSig
+    let cd = symCalldata callSig types [] (AbstractBuf "txdata")
+        shouldFail = "proveFail" `isPrefixOf` callSig
 
     -- define postcondition depending on `shouldFail`
-    -- We directly encode the failure conditions from failed() in ds-test since this is easier to encode than a call into failed()
-    -- we need to read from slot 0 in the test contract and mask it with 0x10 to get the value of _failed
-    -- we don't need to do this when reading the failed from the cheatcode address since we don't do any packing there
-    let failed store = case Map.lookup cheatCode store of
-          Just cheatContract -> readStorage' (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) cheatContract.storage .== Lit 1
-          Nothing -> And (readStorage' (Lit 0) (testContract store).storage) (Lit 2) .== Lit 2
+    let testContract store = fromMaybe (internalError "test contract not found in state") (Map.lookup vm.state.contract store)
+        failed store = case Map.lookup cheatCode store of
+          Just cheatContract -> Expr.readStorage' (Lit 0x6661696c65640000000000000000000000000000000000000000000000000000) cheatContract.storage .== Lit 1
+          Nothing -> And (Expr.readStorage' (Lit 0) (testContract store).storage) (Lit 2) .== Lit 2
         postcondition = curry $ case shouldFail of
           True -> \(_, post) -> case post of
-                                  Success _ _ _ store -> failed store
-                                  _ -> PBool True
+            Success _ _ _ store -> if opts.checkFailBit then failed store else PBool False
+            _ -> PBool True
           False -> \(_, post) -> case post of
-                                   Success _ _ _ store -> PNeg (failed store)
-                                   Failure _ _ (Revert msg) -> case msg of
-                                     ConcreteBuf b -> PBool $ b /= panicMsg 0x01
-                                     b -> b ./= ConcreteBuf (panicMsg 0x01)
-                                   Failure _ _ _ -> PBool True
-                                   Partial _ _ _ -> PBool True
-                                   _ -> internalError "Invalid leaf node"
+            Success _ _ _ store -> if opts.checkFailBit then PNeg (failed store) else PBool True
+            Failure _ _ (Revert msg) -> case msg of
+              ConcreteBuf b ->
+                if (BS.isPrefixOf (selector "Error(string)") b) || b == panicMsg 0x01 then PBool False
+                else PBool True
+              b -> b ./= ConcreteBuf (panicMsg 0x01)
+            Failure _ _ _ -> PBool True
+            Partial _ _ _ -> PBool True
+            _ -> internalError "Invalid leaf node"
 
     vm' <- Stepper.interpret (Fetch.oracle solvers rpcInfo) vm $
       Stepper.evm $ do
@@ -224,6 +229,11 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     -- check postconditions against vm
     (e, results) <- verify solvers (makeVeriOpts opts) (symbolify vm') (Just postcondition)
     let allReverts = not . (any Expr.isSuccess) . flattenExpr $ e
+
+    conf <- readConfig
+    when conf.debug $ liftIO $ forM_ (filter Expr.isFailure (flattenExpr e)) $ \case
+      (Failure _ _ a) ->  putStrLn $ "   -> debug of func: " <> Text.unpack testName <> " Failure at the end of expr: " <> show a;
+      _ -> internalError "cannot be, filtered for failure"
     when (any isUnknown results || any isError results) $ liftIO $ do
       putStrLn $ "      \x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the test " <> Text.unpack testName <> " due to: ";
       forM_ (groupIssues (filter isError results)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
@@ -262,7 +272,7 @@ symFailure UnitTestOptions {..} testName cd types failures' =
       showRes = \case
         Success _ _ _ _ -> if "proveFail" `isPrefixOf` testName
                            then "Successful execution"
-                           else "Failed: DSTest Assertion Violation"
+                           else "Failed: Test Assertion Violation"
         res ->
           let ?context = dappContext (traceContext res)
           in Text.pack $ prettyvmresult res
@@ -277,23 +287,6 @@ symFailure UnitTestOptions {..} testName cd types failures' =
             _ -> mempty
       dappContext TraceContext { contracts, labels } =
         DappContext { info = dapp, contracts, labels }
-
-execSymTest :: UnitTestOptions RealWorld -> ABIMethod -> (Expr Buf, [Prop]) -> Stepper Symbolic RealWorld (Expr End)
-execSymTest UnitTestOptions{ .. } method cd = do
-  -- Set up the call to the test method
-  Stepper.evm $ do
-    makeTxCall testParams cd
-    pushTrace (EntryTrace method)
-  -- Try running the test method
-  runExpr
-
-checkSymFailures :: VMOps t => UnitTestOptions RealWorld -> Stepper t RealWorld (VM t RealWorld)
-checkSymFailures UnitTestOptions { .. } = do
-  -- Ask whether any assertions failed
-  Stepper.evm $ do
-    popTrace
-    abiCall testParams (Left ("failed()", emptyAbi))
-  Stepper.runFully
 
 indentLines :: Int -> Text -> Text
 indentLines n s =

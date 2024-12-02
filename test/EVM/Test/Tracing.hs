@@ -513,26 +513,7 @@ vmtrace vm =
              }
   where
     readoutError :: Maybe (VMResult t s) -> Maybe String
-    readoutError (Just (VMFailure e)) = case e of
-      -- NOTE: error text made to closely match go-ethereum's errors.go file
-      OutOfGas {}             -> Just "out of gas"
-      -- TODO "contract creation code storage out of gas" not handled
-      CallDepthLimitReached   -> Just "max call depth exceeded"
-      BalanceTooLow {}        -> Just "insufficient balance for transfer"
-      -- TODO "contract address collision" not handled
-      Revert {}           -> Just "execution reverted"
-      -- TODO "max initcode size exceeded" not handled
-      MaxCodeSizeExceeded {}  -> Just "max code size exceeded"
-      BadJumpDestination  -> Just "invalid jump destination"
-      StateChangeWhileStatic  -> Just "write protection"
-      ReturnDataOutOfBounds   -> Just "return data out of bounds"
-      IllegalOverflow     -> Just "gas uint64 overflow"
-      UnrecognizedOpcode op   -> Just $ "invalid opcode: 0x" <> showHex op ""
-      NonceOverflow       -> Just "nonce uint64 overflow"
-      StackUnderrun       -> Just "stack underflow"
-      StackLimitExceeded  -> Just "stack limit reached"
-      InvalidMemoryAccess -> Just "write protection"
-      err                     -> Just $ "HEVM error: " <> show err
+    readoutError (Just (VMFailure e)) = Just $ evmErrToString e
     readoutError _ = Nothing
 
 vmres :: VM Concrete s -> VMTraceResult

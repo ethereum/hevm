@@ -550,6 +550,32 @@ data EvmError
   | NonexistentFork Int
   deriving (Show, Eq, Ord)
 
+evmErrToString :: EvmError -> String
+evmErrToString = \case
+  -- NOTE: error text made to closely match go-ethereum's errors.go file
+  OutOfGas {}             -> "Out of gas"
+  -- TODO "contract creation code storage out of gas" not handled
+  CallDepthLimitReached   -> "Max call depth exceeded"
+  BalanceTooLow {}        -> "Insufficient balance for transfer"
+  -- TODO "contract address collision" not handled
+  Revert {}               -> "Execution reverted"
+  -- TODO "max initcode size exceeded" not handled
+  MaxCodeSizeExceeded {}  -> "Max code size exceeded"
+  BadJumpDestination      -> "Invalid jump destination"
+  StateChangeWhileStatic  -> "Attempting to modify state while in static context"
+  ReturnDataOutOfBounds   -> "Return data out of bounds"
+  IllegalOverflow         -> "Gas uint64 overflow"
+  UnrecognizedOpcode op   -> "Invalid opcode: 0x" <> showHex op ""
+  NonceOverflow           -> "Nonce uint64 overflow"
+  StackUnderrun           -> "Stack underflow"
+  StackLimitExceeded      -> "Stack limit reached"
+  InvalidMemoryAccess     -> "Write protection"
+  (BadCheatCode err fun)  -> err <> " Cheatcode function selector: " <> show fun
+  NonexistentFork fork    -> "Nonexistent fork: " <> show fork
+  PrecompileFailure       -> "Precompile failure"
+  err                     -> "hevm error: " <> show err
+
+
 -- | Sometimes we can only partially execute a given program
 data PartialExec
   = UnexpectedSymbolicArg { pc :: Int, opcode :: String, msg  :: String, args  :: [SomeExpr] }

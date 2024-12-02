@@ -517,7 +517,6 @@ decodeBuf tps buf =
        else case runGetOrFail (getAbiSeq (length tps) tps) (BSLazy.fromStrict asBS) of
          Right ("", _, args) -> CAbi (toList args)
          _ -> NoVals
-
   where
     isDynamic t = abiKind t == Dynamic
 

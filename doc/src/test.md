@@ -13,9 +13,7 @@ Usage: hevm test [--root STRING] [--project-type PROJECTTYPE] [--rpc TEXT]
 Available options:
   -h,--help                Show this help text
   --root STRING            Path to project root directory (default: . )
-  --project-type PROJECTTYPE
-                           Is this a Foundry or DappTools project (default:
-                           Foundry)
+  --project-type PROJECTTYPE Foundry or CombinedJSON project
   --rpc TEXT               Fetch state from a remote node
   --number W256            Block: number
   --verbose INT            Append call trace: {1} failures {2} all

@@ -1,4 +1,4 @@
-import "ds-test/test.sol";
+import "forge-std/Test.sol";
 import "tokens/erc20.sol";
 
 contract ConstructorArg {
@@ -8,7 +8,7 @@ contract ConstructorArg {
     }
 }
 
-contract SolidityTest is DSTest {
+contract SolidityTest is Test {
     ERC20 token;
 
     function setUp() public {

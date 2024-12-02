@@ -100,7 +100,7 @@ mkSig method
   | "check" `isPrefixOf` testname = Just (Sig testname argtypes)
   | otherwise = Nothing
   where
-    testname = method.methodSignature
+    testname = method.name
     argtypes = snd <$> method.inputs
 
 findUnitTests :: Text -> ([SolcContract] -> [(Text, [Sig])])

@@ -185,7 +185,7 @@ instance Monoid BuildOutput where
   mempty = BuildOutput mempty mempty
 
 -- | The various project types understood by hevm
-data ProjectType = DappTools | CombinedJSON | Foundry | FoundryStdLib
+data ProjectType = CombinedJSON | Foundry
   deriving (Eq, Show, Read, ParseField)
 
 data SourceCache = SourceCache
@@ -285,13 +285,6 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
 
 -- | Reads all solc output json files found under the provided filepath and returns them merged into a BuildOutput
 readBuildOutput :: App m => FilePath -> ProjectType -> m (Either String BuildOutput)
-readBuildOutput root DappTools = do
-  let outDir = root </> "out"
-  jsons <- liftIO $ findJsonFiles outDir
-  case jsons of
-    [x] -> readSolc DappTools root (outDir </> x)
-    [] -> pure . Left $ "no json files found in: " <> outDir
-    _ -> pure . Left $ "multiple json files found in: " <> outDir
 readBuildOutput root CombinedJSON = do
   let outDir = root </> "out"
   jsons <- liftIO $ findJsonFiles outDir
@@ -413,7 +406,6 @@ force :: String -> Maybe a -> a
 force s = fromMaybe (internalError s)
 
 readJSON :: ProjectType -> Text -> Text -> Maybe (Contracts, Asts, Sources)
-readJSON DappTools _ json = readStdJSON json
 readJSON CombinedJSON _ json = readCombinedJSON json
 readJSON _ contractName json = readFoundryJSON contractName json
 
