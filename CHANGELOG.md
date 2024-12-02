@@ -63,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Respect --smt-timeout in equivalence checking
 - Fixed the handling of returndata with an abstract size during transaction finalization
 - Error handling for user-facing cli commands is much improved
+- Fixing prank so it doesn't override the sender address on lower call frames
 
 ## [0.53.0] - 2024-02-23
 

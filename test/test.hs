@@ -1231,7 +1231,7 @@ tests = testGroup "hevm"
         Right e <- reachableUserAsserts c (Just $ Sig "f(address,uint256)" [AbiAddressType, AbiUIntType 256])
         assertBoolM "The expression is not partial" $ Expr.containsNode isPartial e
       ,
-      test "vm.prank underflow" $ do
+      test "vm.prank-underflow" $ do
         Just c <- solcRuntime "C"
             [i|
               interface Vm {
