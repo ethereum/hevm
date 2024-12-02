@@ -65,8 +65,10 @@ contract CheatCodes is Test {
 
     function prove_warp_symbolic(uint128 jump) public {
         uint pre = block.timestamp;
-        hevm.warp(block.timestamp + jump);
-        assertEq(block.timestamp, pre + jump);
+        unchecked {
+          hevm.warp(block.timestamp + jump);
+          assertEq(block.timestamp, pre + jump);
+        }
     }
 
     function prove_roll_concrete() public {
