@@ -877,8 +877,6 @@ exec1 = do
                               assign #callvalue xValue
                               assign #caller from'
                               assign #contract callee
-                              assign #overrideCaller Nothing
-                              assign #resetCaller False
                             touchAccount from'
                             touchAccount callee
                             transfer from' callee xValue
@@ -897,8 +895,6 @@ exec1 = do
                       zoom #state $ do
                         assign #callvalue xValue
                         assign #caller $ fromMaybe self overrideC
-                        assign #overrideCaller Nothing
-                        assign #resetCaller False
                       touchAccount self
             _ ->
               underrun
@@ -989,8 +985,6 @@ exec1 = do
                             assign #caller $ fromMaybe self overrideC
                             assign #contract callee
                             assign #static True
-                            assign #overrideCaller Nothing
-                            assign #resetCaller False
                           touchAccount self
                           touchAccount callee
             _ ->
