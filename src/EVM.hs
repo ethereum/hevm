@@ -1104,8 +1104,6 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
       availableGas <- use (#state % #gas)
       let recipientExists = accountExists xContext vm
       let from = fromMaybe vm.state.contract vm.state.overrideCaller
-      resetCaller <- use $ #state % #resetCaller
-      when resetCaller $ assign (#state % #overrideCaller) Nothing
       fromBal <- preuse $ #env % #contracts % ix from % #balance
       costOfCall fees recipientExists xValue availableGas xGas xTo $ \cost gas' -> do
         let checkCallDepth =
@@ -1971,6 +1969,8 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
   | otherwise =
       callChecks this gasGiven xContext xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
         \xGas -> do
+          resetCaller <- use $ #state % #resetCaller
+          when resetCaller $ assign (#state % #overrideCaller) Nothing
           vm0 <- get
           fetchAccount xTo $ \target -> case target.code of
               UnknownCode _ -> do
