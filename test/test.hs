@@ -1254,6 +1254,8 @@ tests = testGroup "hevm"
                   vm.prank(usr);
                   target = new Owned();
                   assert(target.owner() == usr);
+                  target = new Owned();
+                  assert(target.owner() == address(this));
                 }
               }
             |]
