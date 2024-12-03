@@ -965,12 +965,18 @@ exec1 = do
                   buf <- readMemory xOffset xSize
                   forceConcreteBuf buf "CREATE2" $
                     \initCode -> do
-                      let
-                        (cost, gas') = costOfCreate fees availableGas xSize True
+                      -- handle `prank`
+                      let from' = fromMaybe self vm.state.overrideCaller
+                      resetCaller <- use (#state % #resetCaller)
+                      when resetCaller $ do
+                        assign (#state % #overrideCaller) Nothing
+                        assign (#state % #resetCaller) False
+
+                      let (cost, gas') = costOfCreate fees availableGas xSize True
                       newAddr <- create2Address self xSalt initCode
                       _ <- accessAccountForGas newAddr
                       burn' cost $
-                        create self this xSize gas' xValue xs newAddr (ConcreteBuf initCode)
+                        create from' this xSize gas' xValue xs newAddr (ConcreteBuf initCode)
             _ -> underrun
 
         OpStaticcall ->
