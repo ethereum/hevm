@@ -857,7 +857,9 @@ exec1 = do
                 -- handle `prank`
                 let from' = fromMaybe self vm.state.overrideCaller
                 resetCaller <- use (#state % #resetCaller)
-                when resetCaller $ assign (#state % #overrideCaller) Nothing
+                when resetCaller $ do
+                  assign (#state % #overrideCaller) Nothing
+                  assign (#state % #resetCaller) False
 
                 newAddr <- createAddress from' this.nonce
                 _ <- accessAccountForGas newAddr
