@@ -87,7 +87,7 @@ compile _ root src = do
   liftIO $ writeFile (root </> "src" </> "unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
   liftIO $ initLib (root </> "lib" </> "tokens") ("test" </> "contracts" </> "lib" </> "erc20.sol") "erc20.sol"
   liftIO $ initStdForgeDir (root </> "lib" </> "forge-std")
-  (res,out,err) <- liftIO $ readProcessWithExitCode "forge" ["build", "--ast", "--via-ir", "--root", root] ""
+  (res,out,err) <- liftIO $ readProcessWithExitCode "forge" ["build", "--ast", "--root", root] ""
   case res of
     ExitFailure _ -> pure . Left $ "compilation failed: " <> "exit code: " <> show res <> "\n\nstdout:\n" <> out <> "\n\nstderr:\n" <> err
     ExitSuccess -> readBuildOutput root Foundry
