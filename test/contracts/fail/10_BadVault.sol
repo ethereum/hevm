@@ -36,7 +36,7 @@ contract BadVault {
 struct Call3Value {
     address target;
     uint256 value;
-    bytes4 sig;
+    bytes32 sig;
     bytes32 data;
 }
 
@@ -117,20 +117,20 @@ contract BadVaultTest is Test {
     }
 
     /// @custom:halmos --array-lengths data1=36,data2=36,deferredData=36
-    function test_prove_BadVault_usingExploitLaunchPad(
+    function prove_BadVault_usingExploitLaunchPad(
         address target1,
         uint256 amount1,
-        bytes4 sig1,
+        bytes32 sig1,
         bytes32 data1,
 
         address target2,
         uint256 amount2,
-        bytes4 sig2,
+        bytes32 sig2,
         bytes32 data2,
 
         address deferredTarget,
         uint256 deferredAmount,
-        bytes4 deferredSig,
+        bytes32 deferredSig,
         bytes32 deferredData
 
     ) public {
@@ -146,7 +146,7 @@ contract BadVaultTest is Test {
 
         vm.prank(attacker);
         exploit.go(Call3Value({
-            target: target1,
+            target: address(vault),
             value: amount1,
             sig: sig1,
             data: data1
@@ -154,7 +154,7 @@ contract BadVaultTest is Test {
 
         vm.prank(attacker);
         exploit.defer(Call3Value({
-            target: deferredTarget,
+            target: address(vault),
             value: deferredAmount,
             sig: deferredSig,
             data: deferredData
@@ -162,7 +162,7 @@ contract BadVaultTest is Test {
 
         vm.prank(attacker);
         exploit.go(Call3Value({
-            target: target2,
+            target: address(vault),
             value: amount2,
             sig: sig2,
             data: data2

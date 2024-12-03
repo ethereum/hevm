@@ -173,9 +173,11 @@ formatBinary =
   (<>) "0x" . T.decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
 formatSBinary :: Expr Buf -> Text
-formatSBinary (ConcreteBuf bs) = formatBinary bs
-formatSBinary (AbstractBuf t) = "<" <> t <> " abstract buf>"
-formatSBinary _ = internalError "formatSBinary: implement me"
+formatSBinary e = format $ Expr.concKeccakSimpExpr e
+  where
+    format (ConcreteBuf bs) = formatBinary bs
+    format (AbstractBuf t) = "<" <> t <> " abstract buf>"
+    format e2 = T.pack $ "Symbolic expression: " <> show e2
 
 showTraceTree :: DappInfo -> VM t s -> Text
 showTraceTree dapp vm =

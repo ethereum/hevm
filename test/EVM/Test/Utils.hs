@@ -30,7 +30,10 @@ runSolidityTestCustom
 runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectType = do
   withSystemTempDirectory "dapp-test" $ \root -> do
     (compile projectType root testFile) >>= \case
-      Left e -> error e
+      Left e -> liftIO $ do
+        putStrLn e
+        internalError $ "Error compiling test file " <> show testFile <> " in directory "
+          <> show root <> " using project type " <> show projectType
       Right bo@(BuildOutput contracts _) -> do
         withSolvers Z3 1 1 timeout $ \solvers -> do
           opts <- liftIO $ testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
