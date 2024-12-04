@@ -1231,7 +1231,38 @@ tests = testGroup "hevm"
         Right e <- reachableUserAsserts c (Just $ Sig "f(address,uint256)" [AbiAddressType, AbiUIntType 256])
         assertBoolM "The expression is not partial" $ Expr.containsNode isPartial e
       ,
-      test "vm.prank-underflow" $ do
+      test "vm.prank-create" $ do
+        Just c <- solcRuntime "C"
+            [i|
+              interface Vm {
+                function prank(address) external;
+              }
+              contract Owned {
+                address public owner;
+                constructor() {
+                  owner = msg.sender;
+                }
+              }
+              contract C {
+                function f() external {
+                  Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+
+                  Owned target = new Owned();
+                  assert(target.owner() == address(this));
+
+                  address usr = address(1312);
+                  vm.prank(usr);
+                  target = new Owned();
+                  assert(target.owner() == usr);
+                  target = new Owned();
+                  assert(target.owner() == address(this));
+                }
+              }
+            |]
+        Right _ <- reachableUserAsserts c (Just $ Sig "f()" [])
+        liftIO $ putStrLn "no reachable assertion violations"
+      ,
+      test "vm.prank underflow" $ do
         Just c <- solcRuntime "C"
             [i|
               interface Vm {

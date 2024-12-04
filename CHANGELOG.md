@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Better and more pretty debug messages
 
 ## Fixed
+- `vm.prank` is now respected during calls to create
 - `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
    with declare-fun
 - CVC5 needs `--incremental` flag to work properly in abstraction-refinement mode
