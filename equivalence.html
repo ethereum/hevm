@@ -199,7 +199,7 @@ Available options:
   --calldata TEXT          Tx: calldata
   --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
   --max-iterations INTEGER Number of times we may revisit a particular branching
-                           point
+                           point. Default is 5. Setting to -1 allows infinite looping
   --solver TEXT            Used SMT solver: z3 (default), cvc5, or bitwuzla
   --smtoutput              Print verbose smt output
   --smtdebug               Print smt queries sent to the solver
