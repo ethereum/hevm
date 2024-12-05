@@ -63,7 +63,7 @@
         hlib = pkgs.haskell.lib;
 
         # base hevm derivation.
-        # parameterized on the pkgs definition to allow use of `pkgsStatic` or `pkgs` as needed.
+        # parameterized on the pkgs definition to allow use of `pkgsMusl` or `pkgs` as needed.
         hevmBase = ps :
           ps.lib.pipe
             (((hspkgs ps).callCabal2nix "hevm" ./. {
@@ -94,7 +94,7 @@
           codesign_allocate = "${pkgs.darwin.binutils.bintools}/bin/codesign_allocate";
           codesign = "${pkgs.darwin.sigtool}/bin/codesign";
         in if pkgs.stdenv.isLinux
-        then hlib.dontCheck (hevmBase pkgs.pkgsStatic)
+        then hlib.dontCheck (hevmBase pkgs.pkgsMusl)
         else pkgs.runCommand "stripNixRefs" {} ''
           mkdir -p $out/bin
           cp ${hlib.dontCheck (forceStaticDepsMacos (hevmBase pkgs))}/bin/hevm $out/bin/
@@ -174,7 +174,7 @@
 
         # --- packages ----
 
-        packages.ci = pkgs.lib.pipe (hevmBase (if pkgs.stdenv.isLinux then pkgs.pkgsStatic else pkgs)) (with hlib.compose; [doBenchmark dontHaddock disableLibraryProfiling]);
+        packages.ci = pkgs.lib.pipe (hevmBase (if pkgs.stdenv.isLinux then pkgs.pkgsMusl else pkgs)) (with hlib.compose; [doBenchmark dontHaddock disableLibraryProfiling]);
         packages.unwrapped = hlib.dontCheck (hevmBase pkgs);
         packages.hevm = hevmWrapped;
         packages.redistributable = hevmRedistributable;
