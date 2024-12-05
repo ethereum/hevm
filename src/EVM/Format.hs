@@ -38,7 +38,7 @@ import EVM (traceForest, traceForest', traceContext, cheatCode)
 import EVM.ABI (getAbiSeq, parseTypeName, AbiValue(..), AbiType(..), SolError(..), Indexed(..), Event(..))
 import EVM.Dapp (DappContext(..), DappInfo(..), findSrc, showTraceLocation)
 import EVM.Expr qualified as Expr
-import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
+import EVM.Solidity (SolcContract(..), Method(..))
 import EVM.Types
 
 import Control.Arrow ((>>>))
