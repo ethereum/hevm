@@ -852,13 +852,20 @@ exec1 = do
             xValue:xOffset:xSize:xs ->
               accessMemoryRange xOffset xSize $ do
                 availableGas <- use (#state % #gas)
-                let
-                  (cost, gas') = costOfCreate fees availableGas xSize False
-                newAddr <- createAddress self this.nonce
+                let (cost, gas') = costOfCreate fees availableGas xSize False
+
+                -- handle `prank`
+                let from' = fromMaybe self vm.state.overrideCaller
+                resetCaller <- use (#state % #resetCaller)
+                when resetCaller $ do
+                  assign (#state % #overrideCaller) Nothing
+                  assign (#state % #resetCaller) False
+
+                newAddr <- createAddress from' this.nonce
                 _ <- accessAccountForGas newAddr
                 burn' cost $ do
                   initCode <- readMemory xOffset xSize
-                  create self this xSize gas' xValue xs newAddr initCode
+                  create from' this xSize gas' xValue xs newAddr initCode
             _ -> underrun
 
         OpCall ->
@@ -958,12 +965,18 @@ exec1 = do
                   buf <- readMemory xOffset xSize
                   forceConcreteBuf buf "CREATE2" $
                     \initCode -> do
-                      let
-                        (cost, gas') = costOfCreate fees availableGas xSize True
+                      -- handle `prank`
+                      let from' = fromMaybe self vm.state.overrideCaller
+                      resetCaller <- use (#state % #resetCaller)
+                      when resetCaller $ do
+                        assign (#state % #overrideCaller) Nothing
+                        assign (#state % #resetCaller) False
+
+                      let (cost, gas') = costOfCreate fees availableGas xSize True
                       newAddr <- create2Address self xSalt initCode
                       _ <- accessAccountForGas newAddr
                       burn' cost $
-                        create self this xSize gas' xValue xs newAddr (ConcreteBuf initCode)
+                        create from' this xSize gas' xValue xs newAddr (ConcreteBuf initCode)
             _ -> underrun
 
         OpStaticcall ->

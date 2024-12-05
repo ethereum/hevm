@@ -668,11 +668,7 @@ toCode contractName t = case BS16.decodeBase16Untyped (encodeUtf8 t) of
             else error $ T.unpack ("Error toCode:" <> e <> ", in " <> contractName)
 
 solc :: Language -> Text -> IO Text
-solc lang src =
-  T.pack <$> readProcess
-    "solc"
-    ["--standard-json"]
-    (T.unpack $ stdjson lang src)
+solc lang src = T.pack <$> readProcess "solc" ["--standard-json"] (T.unpack $ stdjson lang src)
 
 data Language = Solidity | Yul
   deriving (Show)
@@ -683,8 +679,7 @@ data StandardJSON = StandardJSON Language Text
 instance ToJSON StandardJSON where
   toJSON (StandardJSON lang src) =
     object [ "language" .= show lang
-           , "sources" .= object ["hevm.sol" .=
-                                   object ["content" .= src]]
+           , "sources" .= object ["hevm.sol" .= object ["content" .= src]]
            , "settings" .=
              object [ "outputSelection" .=
                     object ["*" .=

@@ -89,7 +89,7 @@ data Command w
       , showTree      :: w ::: Bool               <?> "Print branches explored in tree view"
       , showReachableTree :: w ::: Bool           <?> "Print only reachable branches explored in tree view"
       , smttimeout    :: w ::: Maybe Natural      <?> "Timeout given to SMT solver in seconds (default: 300)"
-      , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point"
+      , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point. For no bound, set -1 (default: 5)"
       , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
       , debug         :: w ::: Bool               <?> "Debug printing of internal behaviour, and dump internal expressions"
@@ -111,7 +111,7 @@ data Command w
       , arg           :: w ::: [String]         <?> "Values to encode"
       , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
       , smttimeout    :: w ::: Maybe Natural    <?> "Timeout given to SMT solver in seconds (default: 300)"
-      , maxIterations :: w ::: Maybe Integer    <?> "Number of times we may revisit a particular branching point"
+      , maxIterations :: w ::: Maybe Integer    <?> "Number of times we may revisit a particular branching point. For no bound, set -1 (default: 5)"
       , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
       , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
       , smtdebug      :: w ::: Bool             <?> "Print smt queries sent to the solver"
@@ -171,7 +171,7 @@ data Command w
       , trace         :: w ::: Bool                     <?> "Dump trace"
       , ffi           :: w ::: Bool                     <?> "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)"
       , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in seconds (default: 300)"
-      , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point"
+      , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point. For no bound, set -1 (default: 5)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic   <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
       , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
@@ -261,7 +261,7 @@ equivalence cmd = do
     let bytecodeA = fromJust bytecodeA'
         bytecodeB = fromJust bytecodeB'
         veriOpts = VeriOpts { simp = True
-                            , maxIter = cmd.maxIterations
+                            , maxIter = parseMaxIters cmd.maxIterations
                             , askSmtIters = cmd.askSmtIterations
                             , loopHeuristic = cmd.loopDetectionHeuristic
                             , rpcInfo = Nothing
@@ -319,6 +319,10 @@ getProjectType cmd = fromMaybe Foundry cmd.projectType
 getRoot :: Command Options.Unwrapped -> IO FilePath
 getRoot cmd = maybe getCurrentDirectory makeAbsolute (cmd.root)
 
+parseMaxIters :: Maybe Integer -> Maybe Integer
+parseMaxIters i = if num < 0 then Nothing else Just num
+  where
+    num = fromMaybe (5::Integer) i
 
 -- | Builds a buffer representing calldata based on the given cli arguments
 buildCalldata :: Command Options.Unwrapped -> IO (Expr Buf, [Prop])
@@ -354,13 +358,13 @@ assert cmd = do
   let solverCount = fromMaybe cores cmd.numSolvers
   solver <- liftIO $ getSolver cmd
   withSolvers solver solverCount (fromMaybe 1 cmd.solverThreads) cmd.smttimeout $ \solvers -> do
-    let opts = VeriOpts { simp = True
-                        , maxIter = cmd.maxIterations
+    let veriOpts = VeriOpts { simp = True
+                        , maxIter = parseMaxIters cmd.maxIterations
                         , askSmtIters = cmd.askSmtIterations
                         , loopHeuristic = cmd.loopDetectionHeuristic
                         , rpcInfo = rpcinfo
     }
-    (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
+    (expr, res) <- verify solvers veriOpts preState (Just $ checkAssertions errCodes)
     case res of
       [Qed _] -> do
         liftIO $ putStrLn "\nQED: No reachable property violations discovered\n"
@@ -671,7 +675,7 @@ unitTestOptions cmd solvers buildOutput = do
     , rpcInfo = case cmd.rpc of
          Just url -> Just (block', url)
          Nothing  -> Nothing
-    , maxIter = cmd.maxIterations
+    , maxIter = parseMaxIters cmd.maxIterations
     , askSmtIters = cmd.askSmtIterations
     , smtTimeout = cmd.smttimeout
     , solver = cmd.solver

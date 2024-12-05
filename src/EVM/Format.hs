@@ -173,9 +173,11 @@ formatBinary =
   (<>) "0x" . T.decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
 formatSBinary :: Expr Buf -> Text
-formatSBinary (ConcreteBuf bs) = formatBinary bs
-formatSBinary (AbstractBuf t) = "<" <> t <> " abstract buf>"
-formatSBinary _ = internalError "formatSBinary: implement me"
+formatSBinary e = format $ Expr.concKeccakSimpExpr e
+  where
+    format (ConcreteBuf bs) = formatBinary bs
+    format (AbstractBuf t) = "<" <> t <> " abstract buf>"
+    format e2 = T.pack $ "Symbolic expression: " <> show e2
 
 showTraceTree :: DappInfo -> VM t s -> Text
 showTraceTree dapp vm =
@@ -465,7 +467,7 @@ formatPartial = \case
       , indent 2 $ T.unlines . fmap formatSomeExpr $ args
       ]
     ]
-  MaxIterationsReached pc addr -> "Max Iterations Reached in contract: " <> formatAddr addr <> " pc: " <> pack (show pc)
+  MaxIterationsReached pc addr -> "Max Iterations Reached in contract: " <> formatAddr addr <> " pc: " <> pack (show pc) <> " To increase the maximum, set a fixed large (or negative) value for `--max-iterations` on the command line"
   JumpIntoSymbolicCode pc idx -> "Encountered a jump into a potentially symbolic code region while executing initcode. pc: " <> pack (show pc) <> " jump dst: " <> pack (show idx)
 
 formatSomeExpr :: SomeExpr -> Text

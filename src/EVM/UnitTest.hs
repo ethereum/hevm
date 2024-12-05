@@ -143,7 +143,6 @@ initializeUnitTest opts theContract = do
     -- call setUp(), if it exists, to initialize the test contract
     let theAbi = theContract.abiMap
         setUp  = abiKeccak (encodeUtf8 "setUp()")
-
     when (isJust (Map.lookup setUp theAbi)) $ do
       abiCall opts.testParams (Left ("setUp()", emptyAbi))
       popTrace
