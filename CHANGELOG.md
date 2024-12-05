@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Default max iterations is 5 now. `--max-iters -1` now signals no bound. This change is to match other
   symbolic execution frameworks' default bound and to not go into an infinite loop by default when
   there could be other, interesting and reachable bugs in the code
+- Update to GHC version 9.6.5
 
 ## Added
 - More POr and PAnd rules
@@ -49,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix interpreter's MCOPY handling so that it doesn't error out on symbolic arguments
 - More desciptive errors in case of a cheatcode issue
 - Better and more pretty debug messages
+- Many env* cheatcodes are now supported
 
 ## Fixed
 - `vm.prank` is now respected during calls to create
