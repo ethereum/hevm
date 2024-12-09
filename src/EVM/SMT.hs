@@ -31,7 +31,6 @@ import Language.SMT2.Parser (getValueRes, parseCommentFreeFileMsg)
 import Language.SMT2.Syntax (Symbol, SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
 import Numeric (readHex, readBin)
 import Witch (into, unsafeInto)
-import Control.Monad.State (State, runState, get, put)
 import EVM.Format (formatProp)
 
 import EVM.CSE
@@ -123,16 +122,6 @@ instance Monoid SMTCex where
     , txContext = mempty
     }
 
--- | Used for abstraction-refinement of the SMT formula. Contains assertions that make our query fully precise. These will be added to the assertion stack if we get `sat` with the abstracted query.
-data RefinementEqs = RefinementEqs [Builder] [Prop]
-  deriving (Eq, Show)
-
-instance Semigroup RefinementEqs where
-  (RefinementEqs a b) <> (RefinementEqs a2 b2) = RefinementEqs (a <> a2) (b <> b2)
-
-instance Monoid RefinementEqs where
-  mempty = RefinementEqs mempty mempty
-
 flattenBufs :: SMTCex -> Maybe SMTCex
 flattenBufs cex = do
   bs <- mapM collapse cex.buffers
@@ -152,17 +141,17 @@ collapse model = case toBuf model of
 getVar :: SMTCex -> TS.Text -> W256
 getVar cex name = fromJust $ Map.lookup (Var name) cex.vars
 
-data SMT2 = SMT2 [Builder] RefinementEqs CexVars [Prop]
+data SMT2 = SMT2 [Builder] CexVars [Prop]
   deriving (Eq, Show)
 
 instance Semigroup SMT2 where
-  (SMT2 a (RefinementEqs b refps) c d) <> (SMT2 a2 (RefinementEqs b2 refps2) c2 d2) = SMT2 (a <> a2) (RefinementEqs (b <> b2) (refps <> refps2)) (c <> c2) (d <> d2)
+  (SMT2 a c d) <> (SMT2 a2 c2 d2) = SMT2 (a <> a2) (c <> c2) (d <> d2)
 
 instance Monoid SMT2 where
-  mempty = SMT2 mempty mempty mempty mempty
+  mempty = SMT2 mempty mempty mempty
 
 formatSMT2 :: SMT2 -> Text
-formatSMT2 (SMT2 ls _ _ ps) = expr <> smt2
+formatSMT2 (SMT2 ls _ ps) = expr <> smt2
  where
  expr = T.concat [T.singleton ';', T.replace "\n" "\n;" $ T.pack . TS.unpack $  TS.unlines (fmap formatProp ps)]
  smt2 = T.unlines (fmap toLazyText ls)
@@ -174,20 +163,20 @@ declareIntermediates bufs stores = do
       encBs = Map.mapWithKey encodeBuf bufs
       sorted = List.sortBy compareFst $ Map.toList $ encSs <> encBs
   decls <- mapM snd sorted
-  let smt2 = (SMT2 [fromText "; intermediate buffers & stores"] mempty mempty mempty):decls
+  let smt2 = (SMT2 [fromText "; intermediate buffers & stores"] mempty mempty):decls
   pure $ foldr (<>) mempty smt2
   where
     compareFst (l, _) (r, _) = compare l r
     encodeBuf n expr = do
       buf <- exprToSMT expr
       bufLen <- encodeBufLen n expr
-      pure $ SMT2 ["(define-fun buf" <> (fromString . show $ n) <> "() Buf " <> buf <> ")\n"]  mempty mempty mempty <> bufLen
+      pure $ SMT2 ["(define-fun buf" <> (fromString . show $ n) <> "() Buf " <> buf <> ")\n"]  mempty mempty <> bufLen
     encodeBufLen n expr = do
       bufLen <- exprToSMT (bufLengthEnv bufs True expr)
-      pure $ SMT2 ["(define-fun buf" <> (fromString . show $ n) <>"_length () (_ BitVec 256) " <> bufLen <> ")"] mempty mempty mempty
+      pure $ SMT2 ["(define-fun buf" <> (fromString . show $ n) <>"_length () (_ BitVec 256) " <> bufLen <> ")"] mempty mempty
     encodeStore n expr = do
       storage <- exprToSMT expr
-      pure $ SMT2 ["(define-fun store" <> (fromString . show $ n) <> " () Storage " <> storage <> ")"] mempty mempty mempty
+      pure $ SMT2 ["(define-fun store" <> (fromString . show $ n) <> " () Storage " <> storage <> ")"] mempty mempty
 
 data AbstState = AbstState
   { words :: Map (Expr EWord) Int
@@ -195,42 +184,14 @@ data AbstState = AbstState
   }
   deriving (Show)
 
-abstractAwayProps :: Config -> [Prop] -> ([Prop], AbstState)
-abstractAwayProps conf ps = runState (mapM abstrAway ps) (AbstState mempty 0)
-  where
-    abstrAway :: Prop -> State AbstState Prop
-    abstrAway prop = mapPropM go prop
-    go :: Expr a -> State AbstState (Expr a)
-    go x = case x of
-        e@(Mod{})       | conf.abstRefineArith  -> abstrExpr e
-        e@(SMod{})      | conf.abstRefineArith  -> abstrExpr e
-        e@(MulMod{})    | conf.abstRefineArith  -> abstrExpr e
-        e@(AddMod{})    | conf.abstRefineArith  -> abstrExpr e
-        e@(Mul{})       | conf.abstRefineArith  -> abstrExpr e
-        e@(Div{})       | conf.abstRefineArith  -> abstrExpr e
-        e@(SDiv {})     | conf.abstRefineArith  -> abstrExpr e
-        e@(ReadWord {}) | conf.abstRefineMem -> abstrExpr e
-        e -> pure e
-        where
-            abstrExpr e = do
-              s <- get
-              case Map.lookup e s.words of
-                Just v -> pure (Var (TS.pack ("abst_" ++ show v)))
-                Nothing -> do
-                  let
-                    next = s.count
-                    bs' = Map.insert e next s.words
-                  put $ s{words=bs', count=next+1}
-                  pure $ Var (TS.pack ("abst_" ++ show next))
-
 smt2Line :: Builder -> SMT2
-smt2Line txt = SMT2 [txt] mempty mempty mempty
+smt2Line txt = SMT2 [txt] mempty mempty
 
 assertProps :: Config -> [Prop] -> Err SMT2
 -- simplify to rewrite sload/sstore combos
 -- notice: it is VERY important not to concretize, because Keccak assumptions
 --         will be generated by assertPropsNoSimp, and that needs unconcretized Props
-assertProps conf ps = assertPropsNoSimp conf (decompose . Expr.simplifyProps $ ps)
+assertProps conf ps = assertPropsNoSimp (decompose . Expr.simplifyProps $ ps)
   where
     decompose :: [Prop] -> [Prop]
     decompose props = if conf.decomposeStorage && safeExprs && safeProps
@@ -244,10 +205,10 @@ assertProps conf ps = assertPropsNoSimp conf (decompose . Expr.simplifyProps $ p
 -- Note: we need a version that does NOT call simplify,
 -- because we make use of it to verify the correctness of our simplification
 -- passes through property-based testing.
-assertPropsNoSimp :: Config -> [Prop] -> Err SMT2
-assertPropsNoSimp config psPreConc = do
- encs <- mapM propToSMT psElimAbst
- abstSMT <- mapM propToSMT abstProps
+assertPropsNoSimp :: [Prop] -> Err SMT2
+assertPropsNoSimp psPreConc = do
+ encs <- mapM propToSMT psElim
+ smt <- mapM propToSMT props
  intermediates <- declareIntermediates bufs stores
  readAssumes' <- readAssumes
  keccakAssertions' <- keccakAssertions
@@ -271,19 +232,17 @@ assertPropsNoSimp config psPreConc = do
   <> keccakAssertions'
   <> readAssumes'
   <> smt2Line ""
-  <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty mempty mempty
-  <> SMT2 mempty (RefinementEqs (fmap (\p -> "(assert " <> p <> ")") abstSMT) (psElimAbst <> abstProps)) mempty mempty
-  <> SMT2 mempty mempty mempty { storeReads = storageReads } mempty
-  <> SMT2 mempty mempty mempty psPreConc
+  <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty mempty
+  <> SMT2 smt mempty mempty
+  <> SMT2 mempty mempty { storeReads = storageReads } mempty
+  <> SMT2 mempty mempty psPreConc
 
   where
     ps = Expr.concKeccakProps psPreConc
     (psElim, bufs, stores) = eliminateProps ps
-    (psElimAbst, abst@(AbstState abstExprToInt _)) = if config.abstRefineArith || config.abstRefineMem
-      then abstractAwayProps config psElim
-      else (psElim, AbstState mempty 0)
+    abst@(AbstState exprToInt _) = AbstState mempty 0
 
-    abstProps = map toProp (Map.toList abstExprToInt)
+    props = map toProp (Map.toList exprToInt)
       where
       toProp :: (Expr EWord, Int) -> Prop
       toProp (e, num) = PEq e (Var (TS.pack ("abst_" ++ (show num))))
@@ -315,14 +274,14 @@ assertPropsNoSimp config psPreConc = do
       assumps <- mapM assertSMT keccAssump
       comps <- mapM assertSMT keccComp
       pure $ smt2Line "; keccak assumptions"
-        <> SMT2 assumps mempty mempty mempty
+        <> SMT2 assumps mempty mempty
         <> smt2Line "; keccak computations"
-        <> SMT2 comps mempty mempty mempty
+        <> SMT2 comps mempty mempty
 
     -- assert that reads beyond size of buffer & storage is zero
     readAssumes = do
       assumps <- mapM assertSMT $ assertReads psElim bufs stores
-      pure $ smt2Line "; read assumptions" <> SMT2 assumps mempty mempty mempty
+      pure $ smt2Line "; read assumptions" <> SMT2 assumps mempty mempty
 
 referencedAbstractStores :: TraversableTerm a => a -> Set Builder
 referencedAbstractStores term = foldTerm go mempty term
@@ -457,7 +416,7 @@ discoverMaxReads props benv senv = bufMap
 
 -- | Returns an SMT2 object with all buffers referenced from the input props declared, and with the appropriate cex extraction metadata attached
 declareBufs :: [Prop] -> BufEnv -> StoreEnv -> SMT2
-declareBufs props bufEnv storeEnv = SMT2 ("; buffers" : fmap declareBuf allBufs <> ("; buffer lengths" : fmap declareLength allBufs)) mempty cexvars mempty
+declareBufs props bufEnv storeEnv = SMT2 ("; buffers" : fmap declareBuf allBufs <> ("; buffer lengths" : fmap declareLength allBufs)) cexvars mempty
   where
     cexvars = (mempty :: CexVars){ buffers = discoverMaxReads props bufEnv storeEnv }
     allBufs = fmap fromLazyText $ Map.keys cexvars.buffers
@@ -466,14 +425,14 @@ declareBufs props bufEnv storeEnv = SMT2 ("; buffers" : fmap declareBuf allBufs 
 
 -- Given a list of variable names, create an SMT2 object with the variables declared
 declareVars :: [Builder] -> SMT2
-declareVars names = SMT2 (["; variables"] <> fmap declare names) mempty cexvars mempty
+declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars mempty
   where
     declare n = "(declare-fun " <> n <> " () (_ BitVec 256))"
     cexvars = (mempty :: CexVars){ calldata = fmap toLazyText names }
 
 -- Given a list of variable names, create an SMT2 object with the variables declared
 declareAddrs :: [Builder] -> SMT2
-declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) mempty cexvars mempty
+declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) cexvars mempty
   where
     declare n = "(declare-fun " <> n <> " () Addr)"
     cexvars = (mempty :: CexVars){ addrs = fmap toLazyText names }
@@ -481,7 +440,7 @@ declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) mem
 declareFrameContext :: [(Builder, [Prop])] -> Err SMT2
 declareFrameContext names = do
   decls <- concatMapM declare names
-  pure $ SMT2 (["; frame context"] <> decls) mempty cexvars mempty
+  pure $ SMT2 (["; frame context"] <> decls) cexvars mempty
   where
     declare (n,props) = do
       asserts <- mapM assertSMT props
@@ -489,14 +448,14 @@ declareFrameContext names = do
     cexvars = (mempty :: CexVars){ txContext = fmap (toLazyText . fst) names }
 
 declareAbstractStores :: [Builder] -> SMT2
-declareAbstractStores names = SMT2 (["; abstract base stores"] <> fmap declare names) mempty mempty mempty
+declareAbstractStores names = SMT2 (["; abstract base stores"] <> fmap declare names) mempty mempty
   where
     declare n = "(declare-fun " <> n <> " () Storage)"
 
 declareBlockContext :: [(Builder, [Prop])] -> Err SMT2
 declareBlockContext names = do
   decls <- concatMapM declare names
-  pure $ SMT2 (["; block context"] <> decls) mempty cexvars mempty
+  pure $ SMT2 (["; block context"] <> decls) cexvars mempty
   where
     declare (n, props) = do
       asserts <- mapM assertSMT props
@@ -509,7 +468,7 @@ assertSMT p = do
   pure $ "(assert " <> p' <> ")"
 
 prelude :: SMT2
-prelude =  SMT2 src mempty mempty mempty
+prelude =  SMT2 src mempty mempty
   where
   src = fmap (fromLazyText . T.drop 2) . T.lines $ [i|
   ; logic
