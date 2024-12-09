@@ -36,8 +36,6 @@ data Config = Config
   , dumpExprs        :: Bool
   , dumpEndStates    :: Bool
   , debug            :: Bool
-  , abstRefineArith  :: Bool
-  , abstRefineMem    :: Bool
   , dumpTrace        :: Bool
   , numCexFuzz       :: Integer
    -- Used to debug fuzzer in test.hs. It disables the SMT solver
@@ -54,8 +52,6 @@ defaultConfig = Config
   , dumpExprs = False
   , dumpEndStates = False
   , debug = False
-  , abstRefineArith = False
-  , abstRefineMem   = False
   , dumpTrace = False
   , numCexFuzz = 10
   , onlyCexFuzz  = False

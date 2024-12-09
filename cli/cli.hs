@@ -100,8 +100,6 @@ data Command w
       , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores)"
       , solverThreads :: w ::: Maybe Natural      <?> "Number of threads for each solver instance. Only respected for Z3 (default: 1)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
-      , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
-      , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
       , noDecompose   :: w ::: Bool               <?> "Don't decompose storage slots into separate arrays"
       }
   | Equivalence -- prove equivalence between two programs
@@ -122,8 +120,6 @@ data Command w
       , numSolvers    :: w ::: Maybe Natural    <?> "Number of solver instances to use (default: number of cpu cores)"
       , solverThreads :: w ::: Maybe Natural    <?> "Number of threads for each solver instance. Only respected for Z3 (default: 1)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
-      , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
-      , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
       , noDecompose   :: w ::: Bool             <?> "Don't decompose storage slots into separate arrays"
       }
   | Exec -- Execute a given program with specified env & calldata
@@ -173,8 +169,6 @@ data Command w
       , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in seconds (default: 300)"
       , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point. For no bound, set -1 (default: 5)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic   <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
-      , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
-      , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
       , noDecompose   :: w ::: Bool                     <?> "Don't decompose storage slots into separate arrays"
       , numCexFuzz    :: w ::: Integer                  <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
       , askSmtIterations :: w ::: Integer               <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
@@ -218,8 +212,6 @@ main = withUtf8 $ do
     , debug = cmd.debug
     , dumpExprs = cmd.debug
     , numCexFuzz = cmd.numCexFuzz
-    , abstRefineMem = cmd.abstractMemory
-    , abstRefineArith = cmd.abstractArithmetic
     , dumpTrace = cmd.trace
     , decomposeStorage = Prelude.not cmd.noDecompose
     } }
