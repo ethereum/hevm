@@ -79,8 +79,6 @@ testEnv = Env { config = defaultConfig {
   , dumpExprs = False
   , dumpEndStates = False
   , debug = False
-  , abstRefineArith = False
-  , abstRefineMem   = False
   , dumpTrace = False
   , decomposeStorage = True
   } }
@@ -3810,9 +3808,8 @@ checkEquivAndLHS orig simp = do
 
 checkEquivBase :: (Eq a, App m) => (a -> a -> Prop) -> a -> a -> Bool -> m (Maybe Bool)
 checkEquivBase mkprop l r expect = do
-  conf <-  readConfig
   withSolvers Z3 1 1 (Just 1) $ \solvers -> liftIO $ do
-     let smt = assertPropsNoSimp conf [mkprop l r]
+     let smt = assertPropsNoSimp [mkprop l r]
      res <- checkSat solvers smt
      let
        ret = case res of

@@ -88,11 +88,10 @@ checkSat (SolverGroup taskQueue) script = do
     -- collect result
     readChan resChan
 
-writeSMT2File :: SMT2 -> Int -> String -> IO ()
-writeSMT2File smt2 count abst =
-  do
+writeSMT2File :: SMT2 -> Int -> IO ()
+writeSMT2File smt2 count =
     let content = formatSMT2 smt2 <> "\n\n(check-sat)"
-    T.writeFile ("query-" <> (show count) <> "-" <> abst <> ".smt2") content
+    in T.writeFile ("query-" <> (show count) <> ".smt2") content
 
 withSolvers :: App m => Solver -> Natural -> Natural -> Maybe Natural -> (SolverGroup -> m a) -> m a
 withSolvers solver count threads timeout cont = do
@@ -122,11 +121,11 @@ withSolvers solver count threads timeout cont = do
       orchestrate queue avail (fileCounter + 1)
 
     runTask :: (MonadIO m, ReadConfig m) => Task -> SolverInstance -> Chan SolverInstance -> Int -> m ()
-    runTask (Task smt2@(SMT2 cmds (RefinementEqs refineEqs refps) cexvars ps) r) inst availableInstances fileCounter = do
+    runTask (Task smt2@(SMT2 cmds cexvars ps) r) inst availableInstances fileCounter = do
       conf <- readConfig
       let fuzzResult = tryCexFuzz ps conf.numCexFuzz
       liftIO $ do
-        when (conf.dumpQueries) $ writeSMT2File smt2 fileCounter "abstracted"
+        when (conf.dumpQueries) $ writeSMT2File smt2 fileCounter
         if (isJust fuzzResult)
           then do
             when (conf.debug) $ putStrLn $ "   Cex found via fuzzing:" <> (show fuzzResult)
@@ -134,7 +133,7 @@ withSolvers solver count threads timeout cont = do
           else if not conf.onlyCexFuzz then do
             when (conf.debug) $ putStrLn "   Fuzzing failed to find a Cex"
             -- reset solver and send all lines of provided script
-            out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty mempty ps)
+            out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty ps)
             case out of
               -- if we got an error then return it
               Left e -> writeChan r (Error $ "Error while writing SMT to solver: " <> T.unpack e)
@@ -146,18 +145,7 @@ withSolvers solver count threads timeout cont = do
                       "unsat" -> pure Unsat
                       "timeout" -> pure $ Unknown "Result timeout by SMT solver"
                       "unknown" -> pure $ Unknown "Result unknown by SMT solver"
-                      "sat" -> if null refineEqs then Sat <$> getModel inst cexvars
-                               else do
-                                    let refinedSMT2 = SMT2 refineEqs mempty mempty (ps <> refps)
-                                    writeSMT2File refinedSMT2 fileCounter "refined"
-                                    _ <- sendScript inst refinedSMT2
-                                    sat2 <- sendLine inst "(check-sat)"
-                                    case sat2 of
-                                      "unsat" -> pure Unsat
-                                      "timeout" -> pure $ Unknown "Result timeout by SMT solver"
-                                      "unknown" -> pure $ Unknown "Result unknown by SMT solver"
-                                      "sat" -> Sat <$> getModel inst cexvars
-                                      _ -> pure . Error $ "Unable to parse solver output: " <> T.unpack sat2
+                      "sat" -> Sat <$> getModel inst cexvars
                       _ -> pure . Error $ "Unable to parse SMT solver output: " <> T.unpack sat
                 writeChan r res
           else do
@@ -305,7 +293,7 @@ stopSolver (SolverInstance _ stdin stdout process) = cleanupProcess (Just stdin,
 
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
 sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
-sendScript solver (SMT2 cmds _ _ _) = do
+sendScript solver (SMT2 cmds _ _) = do
   let sexprs = splitSExpr $ fmap toLazyText cmds
   go sexprs
   where

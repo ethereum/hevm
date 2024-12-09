@@ -35,18 +35,6 @@ Available options:
                            Which heuristic should be used to determine if we are
                            in a loop: StackBased (default) or Naive
                            (default: StackBased)
-  --abstract-arithmetic    Use abstraction-refinement for complicated arithmetic
-                           functions such as MulMod. This runs the solver first
-                           with abstraction turned on, and if it returns a
-                           potential counterexample, the counterexample is
-                           refined to make sure it is a counterexample for the
-                           actual (not the abstracted) problem
-  --abstract-memory        Use abstraction-refinement for Memory. This runs the
-                           solver first with abstraction turned on, and if it
-                           returns a potential counterexample, the
-                           counterexample is refined to make sure it is a
-                           counterexample for the actual (not the abstracted)
-                           problem
 ```
 
 Symbolically execute both the code given in `--code-a` and `--code-b` and try
