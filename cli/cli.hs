@@ -561,7 +561,7 @@ symvmFromCommand cmd calldata = do
     Nothing -> pure (SymAddr "miner",0,0,0)
     Just url -> Fetch.fetchBlockFrom block url >>= \case
       Nothing -> do
-        putStrLn "Error, could not fetch block"
+        putStrLn $ "Error, Could not fetch block" <> show block <> " from URL: " <> show url
         exitFailure
       Just Block{..} -> pure ( coinbase
                              , number
