@@ -161,7 +161,7 @@
               "--extra-lib-dirs=${stripDylib (pkgs.gmp.override { withStatic = true; })}/lib"
               "--extra-lib-dirs=${stripDylib secp256k1-static}/lib"
               "--extra-lib-dirs=${stripDylib (pkgs.libff.override { enableStatic = true; })}/lib"
-              "--extra-lib-dirs=${pkgs.szlib.static}/lib"
+              "--extra-lib-dirs=${pkgs.zlib.static}/lib"
               "--extra-lib-dirs=${stripDylib (pkgs.libffi.overrideAttrs (_: { dontDisableStatic = true; }))}/lib"
               "--extra-lib-dirs=${stripDylib (pkgs.ncurses.override { enableStatic = true; })}/lib"
             ];
