@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.54.0] - 2024-12-10
+
 ## Changed
 - Improved printing of results. Should be more intuitive to understand what hevm found.
 - More complete and precise array/mapping slot rewrite, along with a copySlice improvement
@@ -15,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Default max iterations is 5 now. `--max-iters -1` now signals no bound. This change is to match other
   symbolic execution frameworks' default bound and to not go into an infinite loop by default when
   there could be other, interesting and reachable bugs in the code
+- Update to GHC version 9.6.5
 - Abstraction-refinement is no longer an option, it was never really useful and not well-tested
 
 ## Added
@@ -48,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix interpreter's MCOPY handling so that it doesn't error out on symbolic arguments
 - More desciptive errors in case of a cheatcode issue
 - Better and more pretty debug messages
+- Many env* cheatcodes are now supported
 
 ## Fixed
 - `vm.prank` is now respected during calls to create
