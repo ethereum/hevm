@@ -92,6 +92,7 @@ data Command w
       , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point. For no bound, set -1 (default: 5)"
       , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
       , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
+      , noFold        :: w ::: Bool               <?> "Don't perform constant folding. Without constant folding, SMT queries can be useful to do certain analysis and debugging."
       , debug         :: w ::: Bool               <?> "Debug printing of internal behaviour, and dump internal expressions"
       , trace         :: w ::: Bool               <?> "Dump trace"
       , assertions    :: w ::: Maybe [Word256]    <?> "Comma separated list of solc panic codes to check for (default: user defined assertion violations only)"
@@ -113,6 +114,7 @@ data Command w
       , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
       , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
       , smtdebug      :: w ::: Bool             <?> "Print smt queries sent to the solver"
+      , noFold        :: w ::: Bool             <?> "Don't perform constant folding. Without constant folding, SMT queries can be useful to do certain analysis and debugging."
       , debug         :: w ::: Bool             <?> "Debug printing of internal behaviour, and dump internal expressions"
       , trace         :: w ::: Bool             <?> "Dump trace"
       , askSmtIterations :: w ::: Integer       <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
@@ -163,6 +165,7 @@ data Command w
       , numSolvers    :: w ::: Maybe Natural            <?> "Number of solver instances to use (default: number of cpu cores)"
       , solverThreads :: w ::: Maybe Natural            <?> "Number of threads for each solver instance. Only respected for Z3 (default: 1)"
       , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
+      , noFold        :: w ::: Bool                     <?> "Don't perform constant folding. Without constant folding, SMT queries can be useful to do certain analysis and debugging."
       , debug         :: w ::: Bool                     <?> "Debug printing of internal behaviour, and dump internal expressions"
       , trace         :: w ::: Bool                     <?> "Dump trace"
       , ffi           :: w ::: Bool                     <?> "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)"
@@ -214,6 +217,7 @@ main = withUtf8 $ do
     , numCexFuzz = cmd.numCexFuzz
     , dumpTrace = cmd.trace
     , decomposeStorage = Prelude.not cmd.noDecompose
+    , noFold = cmd.noFold
     } }
   case cmd of
     Version {} ->putStrLn getFullVersion

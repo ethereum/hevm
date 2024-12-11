@@ -43,6 +43,7 @@ data Config = Config
    -- Returns Unknown if the Cex cannot be found via fuzzing
   , onlyCexFuzz      :: Bool
   , decomposeStorage :: Bool
+  , noFold           :: Bool
   }
   deriving (Show, Eq)
 
@@ -56,6 +57,7 @@ defaultConfig = Config
   , numCexFuzz = 10
   , onlyCexFuzz  = False
   , decomposeStorage = True
+  , noFold = False
   }
 
 -- Write to the console

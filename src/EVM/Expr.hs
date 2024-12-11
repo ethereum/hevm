@@ -28,6 +28,7 @@ import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
 import Witch (unsafeInto, into, tryFrom, tryInto)
 import Data.Containers.ListUtils (nubOrd)
+import EVM.Effects
 
 import Optics.Core
 
@@ -934,48 +935,56 @@ decomposeStorage = go
 
 -- | Simple recursive match based AST simplification
 -- Note: may not terminate!
-simplify :: Expr a -> Expr a
-simplify e = if (mapExpr go e == e)
-               then e
-               else simplify (mapExpr go (structureArraySlots e))
+simplify :: App m => Expr a -> m (Expr a)
+simplify e = if (mapExprM go e == pure e)
+               then pure e
+               else do
+                 structured <- mapExprM go (structureArraySlots e)
+                 simplify structured
   where
-    go :: Expr a -> Expr a
+    go :: App m => Expr a -> m (Expr a)
 
-    go (Failure a b c) = Failure (simplifyProps a) b c
-    go (Partial a b c) = Partial (simplifyProps a) b c
-    go (Success a b c d) = Success (simplifyProps a) b c d
+    go (Failure a b c) =  do
+      simp <- simplifyProps a
+      pure $ Failure simp b c
+    go (Partial a b c) = do
+      simp <- simplifyProps a
+      pure $ Partial simp b c
+    go (Success a b c d) = do
+      simp <- simplifyProps a
+      pure $ Success simp b c d
 
     -- redundant CopySlice
-    go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
+    go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = pure $ dst
 
     -- simplify storage
-    go (SLoad slot store) = readStorage' slot store
-    go (SStore slot val store) = writeStorage slot val store
+    go (SLoad slot store) = pure $ readStorage' slot store
+    go (SStore slot val store) = pure $ writeStorage slot val store
 
     -- simplify buffers
-    go o@(ReadWord (Lit _) _) = simplifyReads o
-    go (ReadWord idx buf) = readWord idx buf
-    go o@(ReadByte (Lit _) _) = simplifyReads o
-    go (ReadByte idx buf) = readByte idx buf
-    go (BufLength buf) = bufLength buf
+    go o@(ReadWord (Lit _) _) = pure $ simplifyReads o
+    go (ReadWord idx buf) = pure $ readWord idx buf
+    go o@(ReadByte (Lit _) _) = pure $ simplifyReads o
+    go (ReadByte idx buf) = pure $ readByte idx buf
+    go (BufLength buf) = pure $ bufLength buf
 
     -- We can zero out any bytes in a base ConcreteBuf that we know will be overwritten by a later write
     -- TODO: make this fully general for entire write chains, not just a single write.
     go o@(WriteWord (Lit idx) val (ConcreteBuf b))
       | idx < maxBytes
-        = (writeWord (Lit idx) val (
+        = pure $ (writeWord (Lit idx) val (
             ConcreteBuf $
               (BS.take (unsafeInto idx) (padRight (unsafeInto idx) b))
               <> (BS.replicate 32 0)
               <> (BS.drop (unsafeInto idx + 32) b)))
-      | otherwise = o
-    go (WriteWord a b c) = writeWord a b c
+      | otherwise = pure $ o
+    go (WriteWord a b c) = pure $ writeWord a b c
 
-    go (WriteByte a b c) = writeByte a b c
+    go (WriteByte a b c) = pure $ writeByte a b c
 
     -- eliminate a CopySlice if the resulting buffer is the same as the src buffer
     go (CopySlice (Lit 0) (Lit 0) (Lit s) src (ConcreteBuf ""))
-      | bufLength src == (Lit s) = src
+      | bufLength src == (Lit s) = pure $ src
 
     -- truncate some concrete source buffers to the portion relevant for the CopySlice if we're copying a fully concrete region
     go orig@(CopySlice srcOff@(Lit n) dstOff size@(Lit sz)
@@ -986,74 +995,73 @@ simplify e = if (mapExpr go e == e)
           | n+sz >= n
           , n+sz >= sz
           , n+sz <= maxBytes
-            = (CopySlice srcOff dstOff size
-                (WriteWord wOff value (ConcreteBuf simplifiedBuf)) dst)
-          | otherwise = orig
+            = pure (CopySlice srcOff dstOff size (WriteWord wOff value (ConcreteBuf simplifiedBuf)) dst)
+          | otherwise = pure orig
             where simplifiedBuf = BS.take (unsafeInto (n+sz)) buf
-    go (CopySlice a b c d f) = copySlice a b c d f
+    go (CopySlice a b c d f) = pure $ copySlice a b c d f
 
-    go (IndexWord a b) = indexWord a b
+    go (IndexWord a b) = pure $ indexWord a b
 
     -- LT
     go (EVM.Types.LT (Lit a) (Lit b))
-      | a < b = Lit 1
-      | otherwise = Lit 0
-    go (EVM.Types.LT _ (Lit 0)) = Lit 0
-    go (EVM.Types.LT a (Lit 1)) = iszero a
+      | a < b = pure $ Lit 1
+      | otherwise = pure $ Lit 0
+    go (EVM.Types.LT _ (Lit 0)) = pure $ Lit 0
+    go (EVM.Types.LT a (Lit 1)) = pure $ iszero a
 
     -- normalize all comparisons in terms of LT
-    go (EVM.Types.GT a b) = lt b a
-    go (EVM.Types.GEq a b) = leq b a
-    go (EVM.Types.LEq a b) = iszero (lt b a)
-    go (SLT a@(Lit _) b@(Lit _)) = slt a b
-    go (SGT a b) = SLT b a
+    go (EVM.Types.GT a b) = pure $ lt b a
+    go (EVM.Types.GEq a b) = pure $ leq b a
+    go (EVM.Types.LEq a b) = pure $ iszero (lt b a)
+    go (SLT a@(Lit _) b@(Lit _)) = pure $ slt a b
+    go (SGT a b) = pure $ SLT b a
 
     -- IsZero
-    go (IsZero (IsZero (IsZero a))) = iszero a
-    go (IsZero (IsZero (LT x y))) = lt x y
-    go (IsZero (IsZero (Eq x y))) = eq x y
-    go (IsZero (Xor x y)) = eq x y
-    go (IsZero a) = iszero a
+    go (IsZero (IsZero (IsZero a))) = pure $ iszero a
+    go (IsZero (IsZero (LT x y))) = pure $ lt x y
+    go (IsZero (IsZero (Eq x y))) = pure $ eq x y
+    go (IsZero (Xor x y)) = pure $ eq x y
+    go (IsZero a) = pure $ iszero a
 
     -- syntactic Eq reduction
     go (Eq (Lit a) (Lit b))
-      | a == b = Lit 1
-      | otherwise = Lit 0
-    go (Eq (Lit 0) (Sub a b)) = eq a b
-    go (Eq (Lit 0) a) = iszero a
+      | a == b = pure $ Lit 1
+      | otherwise = pure $ Lit 0
+    go (Eq (Lit 0) (Sub a b)) = pure $ eq a b
+    go (Eq (Lit 0) a) = pure $ iszero a
     go (Eq a b)
-      | a == b = Lit 1
-      | otherwise = eq a b
+      | a == b = pure $ Lit 1
+      | otherwise = pure $ eq a b
 
     -- redundant ITE
     go (ITE (Lit x) a b)
-      | x == 0 = b
-      | otherwise = a
+      | x == 0 = pure b
+      | otherwise = pure a
 
     -- address masking
-    go (And (Lit 0xffffffffffffffffffffffffffffffffffffffff) a@(WAddr _)) = a
+    go (And (Lit 0xffffffffffffffffffffffffffffffffffffffff) a@(WAddr _)) = pure a
 
     -- literal addresses
-    go (WAddr (LitAddr a)) = Lit $ into a
+    go (WAddr (LitAddr a)) = pure $ Lit $ into a
 
     -- XOR normalization
-    go (Xor a  b) = EVM.Expr.xor a b
+    go (Xor a  b) = pure $ EVM.Expr.xor a b
 
     -- simple div/mod/add/sub
-    go (Div o1@(Lit _)  o2@(Lit _)) = EVM.Expr.div  o1 o2
-    go (SDiv o1@(Lit _) o2@(Lit _)) = EVM.Expr.sdiv o1 o2
-    go (Mod o1@(Lit _)  o2@(Lit _)) = EVM.Expr.mod  o1 o2
-    go (SMod o1@(Lit _) o2@(Lit _)) = EVM.Expr.smod o1 o2
-    go (Add o1@(Lit _)  o2@(Lit _)) = EVM.Expr.add  o1 o2
-    go (Sub o1@(Lit _)  o2@(Lit _)) = EVM.Expr.sub  o1 o2
+    go (Div o1@(Lit _)  o2@(Lit _)) = pure $ EVM.Expr.div  o1 o2
+    go (SDiv o1@(Lit _) o2@(Lit _)) = pure $ EVM.Expr.sdiv o1 o2
+    go (Mod o1@(Lit _)  o2@(Lit _)) = pure $ EVM.Expr.mod  o1 o2
+    go (SMod o1@(Lit _) o2@(Lit _)) = pure $ EVM.Expr.smod o1 o2
+    go (Add o1@(Lit _)  o2@(Lit _)) = pure $ EVM.Expr.add  o1 o2
+    go (Sub o1@(Lit _)  o2@(Lit _)) = pure $ EVM.Expr.sub  o1 o2
 
     -- Mod
-    go (Mod _ (Lit 0)) = Lit 0
-    go (SMod _ (Lit 0)) = Lit 0
-    go (Mod a b) | a == b = Lit 0
-    go (SMod a b) | a == b = Lit 0
-    go (Mod (Lit 0) _) = Lit 0
-    go (SMod (Lit 0) _) = Lit 0
+    go (Mod _ (Lit 0)) = pure $ Lit 0
+    go (SMod _ (Lit 0)) = pure $ Lit 0
+    go (Mod a b) | a == b = pure $ Lit 0
+    go (SMod a b) | a == b = pure $ Lit 0
+    go (Mod (Lit 0) _) = pure $ Lit 0
+    go (SMod (Lit 0) _) = pure $ Lit 0
 
     -- double add/sub.
     -- Notice that everything is done mod 2**256. So for example:
@@ -1067,139 +1075,141 @@ simplify e = if (mapExpr go e == e)
     -- Notice: all Add is normalized, hence the 1st argument is
     --    expected to be Lit, if any. Hence `orig` needs to be the
     --    2nd argument for Add. However, Sub is not normalized
-    go (Add (Lit x) (Add (Lit y) orig)) = add (Lit (x+y)) orig
+    go (Add (Lit x) (Add (Lit y) orig)) = pure $ add (Lit (x+y)) orig
     -- add + sub NOTE: every combination of Sub is needed (2)
-    go (Add (Lit x) (Sub (Lit y) orig)) = sub (Lit (x+y)) orig
-    go (Add (Lit x) (Sub orig (Lit y))) = add (Lit (x-y)) orig
+    go (Add (Lit x) (Sub (Lit y) orig)) = pure $ sub (Lit (x+y)) orig
+    go (Add (Lit x) (Sub orig (Lit y))) = pure $ add (Lit (x-y)) orig
     -- sub + sub NOTE: every combination of Sub is needed (2x2)
-    go (Sub (Lit x) (Sub (Lit y) orig)) = add (Lit (x-y)) orig
-    go (Sub (Lit x) (Sub orig (Lit y))) = sub (Lit (x+y)) orig
-    go (Sub (Sub (Lit x) orig) (Lit y)) = sub (Lit (x-y)) orig
-    go (Sub (Sub orig (Lit x)) (Lit y)) = sub orig (Lit (x+y))
+    go (Sub (Lit x) (Sub (Lit y) orig)) = pure $ add (Lit (x-y)) orig
+    go (Sub (Lit x) (Sub orig (Lit y))) = pure $ sub (Lit (x+y)) orig
+    go (Sub (Sub (Lit x) orig) (Lit y)) = pure $ sub (Lit (x-y)) orig
+    go (Sub (Sub orig (Lit x)) (Lit y)) = pure $ sub orig (Lit (x+y))
     -- sub + add NOTE: every combination of Sub is needed (2)
-    go (Sub (Lit x) (Add (Lit y) orig)) = sub (Lit (x-y)) orig
-    go (Sub (Add (Lit x) orig) (Lit y) ) = add (Lit (x-y)) orig
+    go (Sub (Lit x) (Add (Lit y) orig)) = pure $ sub (Lit (x-y)) orig
+    go (Sub (Add (Lit x) orig) (Lit y) ) = pure $ add (Lit (x-y)) orig
 
     -- redundant add / sub
     go (Sub (Add a b) c)
-      | a == c = b
-      | b == c = a
-      | otherwise = sub (add a b) c
+      | a == c = pure b
+      | b == c = pure a
+      | otherwise = pure $ sub (add a b) c
 
     -- Add is associative. We are doing left-growing trees because LIT is
     -- arranged to the left. This way, they accumulate in all combinations.
     -- See `sim-assoc-add` test cases in test.hs
-    go (Add a (Add b c)) = add (add a b) c
-    go (Add (Add (Lit a) x) (Lit b)) = add (Lit (a+b)) x
+    go (Add a (Add b c)) = pure $ add (add a b) c
+    go (Add (Add (Lit a) x) (Lit b)) = pure $ add (Lit (a+b)) x
 
     -- add / sub identities
     go (Add a b)
-      | b == (Lit 0) = a
-      | a == (Lit 0) = b
-      | otherwise = add a b
+      | b == (Lit 0) = pure a
+      | a == (Lit 0) = pure b
+      | otherwise = pure $ add a b
     go (Sub a b)
-      | a == b = Lit 0
-      | b == (Lit 0) = a
-      | otherwise = sub a b
+      | a == b = pure $ Lit 0
+      | b == (Lit 0) = pure a
+      | otherwise = pure $ sub a b
 
     -- SHL / SHR by 0
     go (SHL a v)
-      | a == (Lit 0) = v
-      | otherwise = shl a v
+      | a == (Lit 0) = pure v
+      | otherwise = pure $ shl a v
     go (SHR a v)
-      | a == (Lit 0) = v
-      | otherwise = shr a v
+      | a == (Lit 0) = pure v
+      | otherwise = pure $ shr a v
 
     -- doubled And
     go o@(And a (And b c))
-      | a == c = (And a b)
-      | a == b = (And b c)
-      | otherwise = o
+      | a == c = pure (And a b)
+      | a == b = pure (And b c)
+      | otherwise = pure o
 
     -- Bitwise AND & OR. These MUST preserve bitwise equivalence
     go (And a b)
-      | a == b = a
-      | b == (Not a) || a == (Not b) = Lit 0
-      | a == (Lit 0) || b == (Lit 0) = Lit 0
-      | a == (Lit maxLit) = b
-      | b == (Lit maxLit) = a
-      | otherwise = EVM.Expr.and a b
+      | a == b = pure a
+      | b == (Not a) || a == (Not b) = pure $ Lit 0
+      | a == (Lit 0) || b == (Lit 0) = pure $ Lit 0
+      | a == (Lit maxLit) = pure b
+      | b == (Lit maxLit) = pure a
+      | otherwise = pure $ EVM.Expr.and a b
     go (Or a b)
-      | a == b = a
-      | a == (Lit 0) = b
-      | b == (Lit 0) = a
-      | otherwise = EVM.Expr.or a b
+      | a == b = pure a
+      | a == (Lit 0) = pure $ b
+      | b == (Lit 0) = pure a
+      | otherwise = pure $ EVM.Expr.or a b
 
     -- If x is ever non zero the Or will always evaluate to some non zero value and the false branch will be unreachable
     -- NOTE: with AND this does not work, because and(0x8, 0x4) = 0
     go (ITE (Or (Lit x) a) t f)
-      | x == 0 = ITE a t f
-      | otherwise = t
-    go (ITE (Or a b@(Lit _)) t f) = ITE (Or b a) t f
+      | x == 0 = pure $ ITE a t f
+      | otherwise = pure t
+    go (ITE (Or a b@(Lit _)) t f) = pure $ ITE (Or b a) t f
 
     -- we write at least 32, so if x <= 32, it's FALSE
     go o@(EVM.Types.LT (BufLength (WriteWord {})) (Lit x))
-      | x <= 32 = Lit 0
-      | otherwise = o
+      | x <= 32 = pure $ Lit 0
+      | otherwise = pure o
     -- we write at least 32, so if x < 32, it's TRUE
     go o@(EVM.Types.LT (Lit x) (BufLength (WriteWord {})))
-      | x < 32 = Lit 1
-      | otherwise = o
+      | x < 32 = pure $ Lit 1
+      | otherwise = pure o
 
     -- Double NOT is a no-op, since it's a bitwise inversion
-    go (EVM.Types.Not (EVM.Types.Not a)) = a
+    go (EVM.Types.Not (EVM.Types.Not a)) = pure a
 
     -- Some trivial min / max eliminations
-    go (Max a b) = EVM.Expr.max a b
-    go (Min a b) = case (a, b) of
+    go (Max a b) = pure $ EVM.Expr.max a b
+    go (Min a b) = pure $ case (a, b) of
                      (Lit 0, _) -> Lit 0
                      _ -> EVM.Expr.min a b
 
     -- Mul is associative. We are doing left-growing trees because LIT is
     -- arranged to the left. This way, they accumulate in all combinations.
     -- See `sim-assoc-add` test cases in test.hs
-    go (Mul a (Mul b c)) = mul (mul a b) c
-    go (Mul (Mul (Lit a) x) (Lit b)) = mul (Lit (a*b)) x
+    go (Mul a (Mul b c)) = pure $ mul (mul a b) c
+    go (Mul (Mul (Lit a) x) (Lit b)) = pure $ mul (Lit (a*b)) x
 
     -- Some trivial mul eliminations
-    go (Mul a b) = case (a, b) of
+    go (Mul a b) = pure $ case (a, b) of
                      (Lit 0, _) -> Lit 0
                      (Lit 1, _) -> b
                      _ -> mul a b
 
     -- Some trivial (s)div eliminations
-    go (Div (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
-    go (Div _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
-    go (Div a (Lit 1)) = a
-    go (SDiv (Lit 0) _) = Lit 0 -- divide 0 by anything (including 0) is zero in EVM
-    go (SDiv _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
-    go (SDiv a (Lit 1)) = a
+    go (Div (Lit 0) _) = pure $ Lit 0 -- divide 0 by anything (including 0) is zero in EVM
+    go (Div _ (Lit 0)) = pure $ Lit 0 -- divide anything by 0 is zero in EVM
+    go (Div a (Lit 1)) = pure $ a
+    go (SDiv (Lit 0) _) = pure $ Lit 0 -- divide 0 by anything (including 0) is zero in EVM
+    go (SDiv _ (Lit 0)) = pure $ Lit 0 -- divide anything by 0 is zero in EVM
+    go (SDiv a (Lit 1)) = pure $ a
     -- NOTE: Div x x is NOT 1, because Div 0 0 is 0, not 1.
 
     -- If a >= b then the value of the `Max` expression can never be < b
     go o@(LT (Max (Lit a) _) (Lit b))
-      | a >= b = Lit 0
-      | otherwise = o
+      | a >= b = pure $ Lit 0
+      | otherwise = pure $ o
     go o@(SLT (Sub (Max (Lit a) _) (Lit b)) (Lit c))
       = let sa, sb, sc :: Int256
             sa = fromIntegral a
             sb = fromIntegral b
             sc = fromIntegral c
         in if sa >= sb && sa - sb >= sc
-           then Lit 0
-           else o
+           then pure $ Lit 0
+           else pure o
 
-    go a = a
+    go a = pure a
 
 
 -- ** Prop Simplification ** -----------------------------------------------------------------------
 
 
-simplifyProps :: [Prop] -> [Prop]
-simplifyProps ps = if cannotBeSat then [PBool False] else simplified
-  where
-    simplified = remRedundantProps . map simplifyProp . flattenProps $ ps
-    cannotBeSat = isUnsat simplified
+simplifyProps :: App m => [Prop] -> m [Prop]
+simplifyProps ps = do
+  conf <- readConfig
+  let cannotBeSat = if conf.noFold then False else (isUnsat simplified)
+  if cannotBeSat then pure [PBool False] else pure simplified
+    where
+      simplified = remRedundantProps . map simplifyProp . flattenProps $ ps
 
 -- | Evaluate the provided proposition down to its most concrete result
 -- Also simplifies the inner Expr, if it exists
