@@ -7,7 +7,7 @@
 module EVM.Expr where
 
 import Prelude hiding (LT, GT)
-import Control.Monad (unless, when)
+import Control.Monad (unless, when, liftM2)
 import Control.Monad.ST (ST)
 import Control.Monad.State (put, get, modify, execState, State)
 import Data.Bits hiding (And, Xor)
@@ -1213,10 +1213,11 @@ simplifyProps ps = do
 
 -- | Evaluate the provided proposition down to its most concrete result
 -- Also simplifies the inner Expr, if it exists
-simplifyProp :: Prop -> Prop
-simplifyProp prop =
-  let new = mapProp' go (simpInnerExpr prop)
-  in if (new == prop) then prop else simplifyProp new
+simplifyProp :: App m => Prop -> m Prop
+simplifyProp prop = do
+  innerExprSimp <- simpInnerExpr prop
+  let new = mapProp' go innerExprSimp
+  if (new == prop) then pure prop else simplifyProp new
   where
     go :: Prop -> Prop
 
@@ -1296,19 +1297,19 @@ simplifyProp prop =
     -- Applies `simplify` to the inner part of a Prop, e.g.
     -- (PEq (Add (Lit 1) (Lit 2)) (Var "a")) becomes
     -- (PEq (Lit 3) (Var "a")
-    simpInnerExpr :: Prop -> Prop
+    simpInnerExpr :: App m => Prop -> m Prop
     -- rewrite everything as LEq or LT
     simpInnerExpr (PGEq a b) = simpInnerExpr (PLEq b a)
     simpInnerExpr (PGT a b) = simpInnerExpr (PLT b a)
     -- simplifies the inner expression
-    simpInnerExpr (PEq a b) = PEq (simplify a) (simplify b)
-    simpInnerExpr (PLT a b) = PLT (simplify a) (simplify b)
-    simpInnerExpr (PLEq a b) = PLEq (simplify a) (simplify b)
-    simpInnerExpr (PNeg a) = PNeg (simpInnerExpr a)
-    simpInnerExpr (PAnd a b) = PAnd (simpInnerExpr a) (simpInnerExpr b)
-    simpInnerExpr (POr a b) = POr (simpInnerExpr a) (simpInnerExpr b)
-    simpInnerExpr (PImpl a b) = PImpl (simpInnerExpr a) (simpInnerExpr b)
-    simpInnerExpr orig@(PBool _) = orig
+    simpInnerExpr (PEq a b) = liftM2 PEq (simplify a) (simplify b)
+    simpInnerExpr (PLT a b) = liftM2 PLT (simplify a) (simplify b)
+    simpInnerExpr (PLEq a b) = liftM2 PLEq (simplify a) (simplify b)
+    simpInnerExpr (PNeg a) = fmap PNeg (simpInnerExpr a)
+    simpInnerExpr (PAnd a b) = liftM2 PAnd (simpInnerExpr a) (simpInnerExpr b)
+    simpInnerExpr (POr a b) = liftM2 POr (simpInnerExpr a) (simpInnerExpr b)
+    simpInnerExpr (PImpl a b) = liftM2 PImpl (simpInnerExpr a) (simpInnerExpr b)
+    simpInnerExpr orig@(PBool _) = pure orig
 
 -- Makes [PAnd a b] into [a,b]
 flattenProps :: [Prop] -> [Prop]
