@@ -598,10 +598,12 @@ stripWrites off size = \case
 -- ** Storage ** -----------------------------------------------------------------------------------
 
 
-readStorage' :: Expr EWord -> Expr Storage -> Expr EWord
-readStorage' loc store = case readStorage loc store of
-                           Just v -> v
-                           Nothing -> Lit 0
+readStorage' :: App m => Expr EWord -> Expr Storage -> m (Expr EWord)
+readStorage' loc store = do
+  dat <- readStorage loc store
+  case dat of
+    Just v -> pure v
+    Nothing -> pure $ Lit 0
 
 -- | Reads the word at the given slot from the given storage expression.
 --
@@ -617,8 +619,8 @@ readStorage' loc store = case readStorage loc store of
 -- the idx0 store, in case things in between cannot be stripped. See simplify-storage-map-todo
 -- test for an example where this happens. Note that decomposition solves this, though late in
 -- the simplification lifecycle (just before SMT generation, which can be too late)
-readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
-readStorage w st = go (simplify w) st
+readStorage :: App m => Expr EWord -> Expr Storage -> m (Maybe (Expr EWord))
+readStorage w st = liftM2 go (simplify w) (pure st)
   where
     go :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
     go _ (GVar _) = internalError "Can't read from a GVar"
@@ -1338,8 +1340,8 @@ exprToAddr (Lit x) = Just (unsafeInto x)
 exprToAddr _ = Nothing
 
 -- TODO: make this smarter, probably we will need to use the solver here?
-wordToAddr :: Expr EWord -> Maybe (Expr EAddr)
-wordToAddr = go . simplify
+wordToAddr :: App m => Expr EWord -> m (Maybe (Expr EAddr))
+wordToAddr = fmap go . simplify
   where
     go :: Expr EWord -> Maybe (Expr EAddr)
     go = \case
@@ -1588,25 +1590,26 @@ isUnsat ps = Prelude.not $ oneRun ps (ConstState mempty True)
         _ -> pure ()
 
 -- Concretize & simplify Keccak expressions until fixed-point.
-concKeccakSimpExpr :: Expr a -> Expr a
+concKeccakSimpExpr :: App m => Expr a -> m (Expr a)
 concKeccakSimpExpr orig = untilFixpoint ((mapExpr concKeccakOnePass) . simplify) orig
 
 -- Only concretize Keccak in Props
 -- Needed because if it also simplified, we may not find some simplification errors, as
 -- simplification would always be ON
-concKeccakProps :: [Prop] -> [Prop]
+concKeccakProps :: App m => [Prop] -> m [Prop]
 concKeccakProps orig = untilFixpoint (map (mapProp concKeccakOnePass)) orig
 
 -- Simplifies in case the input to the Keccak is of specific array/map format and
 --            can be simplified into a concrete value
 -- Turns (Keccak ConcreteBuf) into a Lit
-concKeccakOnePass :: Expr a -> Expr a
-concKeccakOnePass (Keccak (ConcreteBuf bs)) = Lit (keccak' bs)
-concKeccakOnePass orig@(Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) orig2@(WriteWord (Lit 0) _ (ConcreteBuf bs)) (ConcreteBuf ""))) =
-  case (BS.length bs, (copySlice (Lit 0) (Lit 0) (Lit 64) (simplify orig2) (ConcreteBuf ""))) of
-    (64, ConcreteBuf a) -> Lit (keccak' a)
-    _ -> orig
-concKeccakOnePass x = x
+concKeccakOnePass :: App m => Expr a -> m (Expr a)
+concKeccakOnePass (Keccak (ConcreteBuf bs)) = pure $ Lit (keccak' bs)
+concKeccakOnePass orig@(Keccak (CopySlice (Lit 0) (Lit 0) (Lit 64) orig2@(WriteWord (Lit 0) _ (ConcreteBuf bs)) (ConcreteBuf ""))) = do
+  simplified <- simplify orig2
+  case (BS.length bs, (copySlice (Lit 0) (Lit 0) (Lit 64) simplified (ConcreteBuf ""))) of
+    (64, ConcreteBuf a) -> pure $ Lit (keccak' a)
+    _ -> pure orig
+concKeccakOnePass x = pure x
 
 lhsConstHelper :: Expr a -> Maybe ()
 lhsConstHelper = go

@@ -51,6 +51,7 @@ import Numeric (readHex, showHex)
 import Options.Generic
 import Optics.TH
 import EVM.FeeSchedule (FeeSchedule (..))
+import EVM.Effects (App)
 
 import Text.Regex.TDFA qualified as Regex
 import Text.Read qualified
@@ -1425,10 +1426,11 @@ paddedShowHex w n = pad ++ str
      str = showHex n ""
      pad = replicate (w - length str) '0'
 
-untilFixpoint :: Eq a => (a -> a) -> a -> a
-untilFixpoint f a = if f a == a
-                    then a
-                    else untilFixpoint f (f a)
+untilFixpoint :: App m => Eq a => (a -> m a) -> a -> m a
+untilFixpoint f a =  do
+  applied <- f a
+  if applied == a then pure a
+  else untilFixpoint f applied
 
 -- Optics ------------------------------------------------------------------------------------------
 
