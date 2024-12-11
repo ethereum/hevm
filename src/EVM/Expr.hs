@@ -9,7 +9,7 @@ module EVM.Expr where
 import Prelude hiding (LT, GT)
 import Control.Monad (unless, when, liftM2, (>=>))
 import Control.Monad.ST (ST)
-import Control.Monad.State (put, get, modify, execState, State)
+import Control.Monad.State (put, get, modify, execState, State, lift)
 import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -938,11 +938,12 @@ decomposeStorage = go
 -- | Simple recursive match based AST simplification
 -- Note: may not terminate!
 simplify :: App m => Expr a -> m (Expr a)
-simplify e = if (mapExprM go e == pure e)
-               then pure e
-               else do
-                 structured <- mapExprM go (structureArraySlots e)
-                 simplify structured
+simplify e = do
+  s <- mapExprM go e
+  if (s == e) then pure e
+  else do
+     structured <- mapExprM go (structureArraySlots e)
+     simplify structured
   where
     go :: App m => Expr a -> m (Expr a)
 
@@ -957,10 +958,10 @@ simplify e = if (mapExprM go e == pure e)
       pure $ Success simp b c d
 
     -- redundant CopySlice
-    go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = pure $ dst
+    go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = pure dst
 
     -- simplify storage
-    go (SLoad slot store) = pure $ readStorage' slot store
+    go (SLoad slot store) = readStorage' slot store
     go (SStore slot val store) = pure $ writeStorage slot val store
 
     -- simplify buffers
@@ -1555,13 +1556,15 @@ data ConstState = ConstState
   deriving (Show)
 
 -- | Checks if a conjunction of propositions is definitely unsatisfiable
-isUnsat :: [Prop] -> Bool
-isUnsat ps = Prelude.not $ oneRun ps (ConstState mempty True)
+isUnsat :: App m => [Prop] -> m Bool
+isUnsat ps = do
+  k <- oneRun ps (ConstState mempty True)
+  pure $ Prelude.not k
   where
     -- no need to complicate things, this will only read Env, so use default env
-    mySimp p = runEnv defaultEnv . simplifyProp $ p
-    oneRun ps2 startState = (execState (mapM (fmap go . mySimp) ps2) startState).canBeSat
-    go :: Prop -> State ConstState ()
+    oneRun :: App m => [Prop] -> ConstState -> m Bool
+    oneRun ps2 startState = (execState (mapM (fmap go . simplifyProp) ps2) startState).canBeSat
+    go :: App m => Prop -> m (State ConstState ())
     go = \case
         -- PEq
         PEq (Lit l) a -> do
@@ -1589,7 +1592,7 @@ isUnsat ps = Prelude.not $ oneRun ps (ConstState mempty True)
           unless v1 $ go b
           unless v2 $ go a
         PBool False -> put $ ConstState {canBeSat=False, values=mempty}
-        _ -> pure ()
+        _ -> pure (pure ())
 
 -- Concretize & simplify Keccak expressions until fixed-point.
 concKeccakSimpExpr :: App m => Expr a -> m (Expr a)
