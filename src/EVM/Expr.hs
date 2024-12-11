@@ -7,7 +7,7 @@
 module EVM.Expr where
 
 import Prelude hiding (LT, GT)
-import Control.Monad (unless, when, liftM2)
+import Control.Monad (unless, when, liftM2, (>=>))
 import Control.Monad.ST (ST)
 import Control.Monad.State (put, get, modify, execState, State)
 import Data.Bits hiding (And, Xor)
@@ -1558,7 +1558,9 @@ data ConstState = ConstState
 isUnsat :: [Prop] -> Bool
 isUnsat ps = Prelude.not $ oneRun ps (ConstState mempty True)
   where
-    oneRun ps2 startState = (execState (mapM (go . simplifyProp) ps2) startState).canBeSat
+    -- no need to complicate things, this will only read Env, so use default env
+    mySimp p = runEnv defaultEnv . simplifyProp $ p
+    oneRun ps2 startState = (execState (mapM (fmap go . mySimp) ps2) startState).canBeSat
     go :: Prop -> State ConstState ()
     go = \case
         -- PEq
@@ -1591,13 +1593,13 @@ isUnsat ps = Prelude.not $ oneRun ps (ConstState mempty True)
 
 -- Concretize & simplify Keccak expressions until fixed-point.
 concKeccakSimpExpr :: App m => Expr a -> m (Expr a)
-concKeccakSimpExpr orig = untilFixpoint ((mapExpr concKeccakOnePass) . simplify) orig
+concKeccakSimpExpr = untilFixpoint (simplify >=> mapExprM concKeccakOnePass)
 
 -- Only concretize Keccak in Props
 -- Needed because if it also simplified, we may not find some simplification errors, as
 -- simplification would always be ON
 concKeccakProps :: App m => [Prop] -> m [Prop]
-concKeccakProps orig = untilFixpoint (map (mapProp concKeccakOnePass)) orig
+concKeccakProps = untilFixpoint (mapM (mapPropM concKeccakOnePass))
 
 -- Simplifies in case the input to the Keccak is of specific array/map format and
 --            can be simplified into a concrete value
