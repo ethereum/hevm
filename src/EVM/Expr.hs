@@ -1203,13 +1203,15 @@ simplify e = if (mapExprM go e == pure e)
 -- ** Prop Simplification ** -----------------------------------------------------------------------
 
 
-simplifyProps :: App m => [Prop] -> m [Prop]
+simplifyProps :: forall m . App m => [Prop] -> m [Prop]
 simplifyProps ps = do
   conf <- readConfig
+
+  simplified <- fmap remRedundantProps . flattenAndSimp $ ps
   let cannotBeSat = if conf.noFold then False else (isUnsat simplified)
   if cannotBeSat then pure [PBool False] else pure simplified
-    where
-      simplified = remRedundantProps . map simplifyProp . flattenProps $ ps
+  where
+    flattenAndSimp input = mapM simplifyProp (flattenProps input)
 
 -- | Evaluate the provided proposition down to its most concrete result
 -- Also simplifies the inner Expr, if it exists
