@@ -1,5 +1,8 @@
 name: "Release"
 on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 5 * * 1' # At 05:30 AM, only on Monday
   push:
     tags:
       - 'release/[0-9]+.[0-9]+.[0-9]+'
@@ -22,6 +25,8 @@ jobs:
     runs-on: ${{ matrix.os  }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: build hevm
@@ -37,6 +42,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: download binaries
@@ -44,7 +51,9 @@ jobs:
         with:
           merge-multiple: true
       - name: create github release & upload binaries
-        uses: softprops/action-gh-release@v2.0.4
+        uses: softprops/action-gh-release@v2.2.0
+        # scheduled/manual runs should not create a release
+        if: github.event_name == 'push'
         with:
           fail_on_unmatched_files: true
           files: |
@@ -53,10 +62,14 @@ jobs:
             ./hevm-arm64-macos
       - name: prepare hackage artifacts
         run: |
-          nix-shell --command "cabal sdist --builddir=${{ runner.temp }}/packages"
-          nix-shell --command "cabal haddock lib:hevm --builddir=${{ runner.temp }}/docs --haddock-for-hackage --haddock-option=--hyperlinked-source"
+          # cabal complains if we don't do this...
+          nix develop --command bash -c "cabal update"
+          nix develop --command bash -c "cabal sdist --builddir='$RUNNER_TEMP/packages'"
+          nix develop --command bash -c "cabal haddock lib:hevm --builddir='$RUNNER_TEMP/docs' --haddock-for-hackage --haddock-option=--hyperlinked-source"
       - name: publish to hackage
         uses: haskell-actions/hackage-publish@v1
+        # scheduled/manual runs should not publish anything
+        if: github.event_name == 'push'
         with:
           hackageToken: ${{ secrets.HACKAGE_AUTH_TOKEN }}
           packagesPath: ${{ runner.temp }}/packages/sdist

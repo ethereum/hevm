@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: lookup nix versions
@@ -34,15 +36,22 @@ jobs:
           { echo "libff=$LIBFF_REV"; echo "libsecp256k1=$LIBSECP256K1_REV"; echo "bitwuzla=$BITWUZLA_REV"; } >> "$GITHUB_OUTPUT"
       - name: compare versions
         run: |
-          if [ "${{ steps.nixpkgs.outputs.libff }}" != "${{ steps.local.outputs.libff }}" ]; then
-            echo "libff versions do not match! nix=${{ steps.nixpkgs.outputs.libff }} local=${{ steps.local.outputs.libff }}"
+          if [ "$LIBFF_NIXPKGS" != "$LIBFF_LOCAL" ]; then
+            echo "libff versions do not match! nix=$LIBFF_NIXPKGS local=$LIBFF_LOCAL"
             exit 1
           fi
-          if [ "${{ steps.nixpkgs.outputs.libsecp256k1 }}" != "${{ steps.local.outputs.libsecp256k1 }}" ]; then
-            echo "libsecp256k1 versions do not match! nix=${{ steps.nixpkgs.outputs.libsecp256k1 }} local=${{ steps.local.outputs.libsecp256k1 }}"
+          if [ "$LIBSECP256K1_NIXPKGS" != "$LIBSECP256K1_LOCAL" ]; then
+            echo "libsecp256k1 versions do not match! nix=$LIBSECP256K1_NIXPKGS local=$LIBSECP256K1_LOCAL"
             exit 1
           fi
-          if [ "${{ steps.nixpkgs.outputs.bitwuzla }}" != "${{ steps.local.outputs.bitwuzla }}" ]; then
-            echo "bitwuzla versions do not match! nix=${{ steps.nixpkgs.outputs.bitwuzla }} local=${{ steps.local.outputs.bitwuzla }}"
+          if [ "$BITWUZLA_NIXPKGS" != "$BITWUZLA_LOCAL" ]; then
+            echo "bitwuzla versions do not match! nix=$BITWUZLA_NIXPKGS local=$BITWUZLA_LOCAL"
             exit 1
           fi
+        env:
+          LIBFF_NIXPKGS: ${{ steps.nixpkgs.outputs.libff }}
+          LIBFF_LOCAL: ${{ steps.local.outputs.libff }}
+          LIBSECP256K1_NIXPKGS: ${{ steps.nixpkgs.outputs.libsecp256k1 }}
+          LIBSECP256K1_LOCAL: ${{ steps.local.outputs.libsecp256k1 }}
+          BITWUZLA_NIXPKGS: ${{ steps.nixpkgs.outputs.bitwuzla }}
+          BITWUZLA_LOCAL: ${{ steps.local.outputs.bitwuzla }}

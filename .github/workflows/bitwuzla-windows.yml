@@ -40,6 +40,7 @@ jobs:
           ref: ${{ env.BITWUZLA_VERSION }}
           path: bitwuzla
           submodules: "recursive"
+          persist-credentials: false
 
       - name: Wrap
         if: steps.cache-bitwuzla.outputs.cache-hit != 'true'

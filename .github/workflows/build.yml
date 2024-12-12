@@ -28,6 +28,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: build hevm
@@ -49,6 +51,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       # cabal complains if we don't do this...
@@ -74,6 +78,8 @@ jobs:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           # Pinning to a version in June 2024, so in case a build fails, our CI doesn't fail
@@ -181,17 +187,20 @@ jobs:
           repository: ethereum/solidity
           ref: 8a97fa7a1db1ec509221ead6fea6802c684ee887
           path: ethereum-solidity
+          persist-credentials: false
 
       - uses: actions/checkout@v4
         with:
           repository: ethereum/tests
           ref: v13
           path: ethereum-tests
+          persist-credentials: false
 
       - uses: actions/checkout@v4
         with:
           repository: foundry-rs/forge-std
           path: forge-std
+          persist-credentials: false
 
       - name: download bitwuzla
         uses: actions/download-artifact@v4
@@ -241,6 +250,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: run cabal check
