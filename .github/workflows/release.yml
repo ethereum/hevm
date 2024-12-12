@@ -47,7 +47,7 @@ jobs:
         with:
           merge-multiple: true
       - name: create github release & upload binaries
-        uses: softprops/action-gh-release@v2.0.4
+        uses: softprops/action-gh-release@v2.2.0
         # scheduled/manual runs should not create a release
         if: github.event_name == 'push'
         with:
