@@ -62,6 +62,8 @@ jobs:
             ./hevm-arm64-macos
       - name: prepare hackage artifacts
         run: |
+          # cabal complains if we don't do this...
+          nix develop --command bash -c "cabal update"
           nix develop --command bash -c "cabal sdist --builddir='$RUNNER_TEMP/packages'"
           nix develop --command bash -c "cabal haddock lib:hevm --builddir='$RUNNER_TEMP/docs' --haddock-for-hackage --haddock-option=--hyperlinked-source"
       - name: publish to hackage
