@@ -60,7 +60,7 @@ $ sudo apt-get install z3  # install z3
 $ curl -L https://foundry.paradigm.xyz | bash # install foundryup
 $ foundryup # install forge and other foundry binaries
 $ mkdir mytest && cd mytest
-$ wget https://github.com/ethereum/hevm/releases/download/release/0.54.1/hevm-x86_64-linux
+$ wget https://github.com/ethereum/hevm/releases/download/release/0.54.2/hevm-x86_64-linux
 $ chmod +x ./hevm-x86_64-linux
 $ forge init .
 $ cat <<EOF > src/contract.sol
