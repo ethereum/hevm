@@ -47,20 +47,23 @@
         }));
 
         hspkgs = ps :
-          ps.haskellPackages.override {
+          ps.haskell.packages.ghc98.override {
             overrides = hfinal: hprev: {
-              with-utf8 =
-                if (with ps.stdenv; hostPlatform.isDarwin && hostPlatform.isx86)
-                then ps.haskell.lib.compose.overrideCabal (_ : { extraLibraries = [ps.libiconv]; }) hprev.with-utf8
-                else hprev.with-utf8;
-              # TODO: temporary fix for static build which is still on 9.4
-              witch = ps.haskell.lib.doJailbreak hprev.witch;
+              with-utf8 = ps.haskell.lib.compose.overrideCabal (drv: {
+                version = "1.1.0.0";
+                src = pkgs.fetchFromGitHub {
+                  owner = "serokell";
+                  repo = "haskell-with-utf8";
+                  rev = "cf6e31475da3d9f54439650a70170819daa35f54";
+                  sha256 = "sha256-hxUiZbbcA6RvrVgGk4Vbt/rZT6wnBF3bfYbbQflzQ24=";
+                };
+              }) hprev.with-utf8;
             };
           };
         hlib = pkgs.haskell.lib;
 
         # base hevm derivation.
-        # parameterized on the pkgs definition to allow use of `pkgsStatic` or `pkgs` as needed.
+        # parameterized on the pkgs definition to allow use of `pkgsMusl` or `pkgs` as needed.
         hevmBase = ps :
           ps.lib.pipe
             (((hspkgs ps).callCabal2nix "hevm" ./. {
@@ -91,7 +94,7 @@
           codesign_allocate = "${pkgs.darwin.binutils.bintools}/bin/codesign_allocate";
           codesign = "${pkgs.darwin.sigtool}/bin/codesign";
         in if pkgs.stdenv.isLinux
-        then hlib.dontCheck (hevmBase pkgs.pkgsStatic)
+        then hlib.dontCheck (hevmBase pkgs.pkgsMusl)
         else pkgs.runCommand "stripNixRefs" {} ''
           mkdir -p $out/bin
           cp ${hlib.dontCheck (forceStaticDepsMacos (hevmBase pkgs))}/bin/hevm $out/bin/
@@ -171,7 +174,7 @@
 
         # --- packages ----
 
-        packages.ci = pkgs.lib.pipe (hevmBase (if pkgs.stdenv.isLinux then pkgs.pkgsStatic else pkgs)) (with hlib.compose; [doBenchmark dontHaddock disableLibraryProfiling]);
+        packages.ci = pkgs.lib.pipe (hevmBase (if pkgs.stdenv.isLinux then pkgs.pkgsMusl else pkgs)) (with hlib.compose; [doBenchmark dontHaddock disableLibraryProfiling]);
         packages.unwrapped = hlib.dontCheck (hevmBase pkgs);
         packages.hevm = hevmWrapped;
         packages.redistributable = hevmRedistributable;
