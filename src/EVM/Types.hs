@@ -1266,24 +1266,6 @@ instance Show Nibble where
 
 -- Conversions -------------------------------------------------------------------------------------
 
-maybeLitByte :: Expr Byte -> Maybe Word8
-maybeLitByte (LitByte x) = Just x
-maybeLitByte _ = Nothing
-
-maybeLitWord :: Expr EWord -> Maybe W256
-maybeLitWord (Lit w) = Just w
-maybeLitWord (WAddr (LitAddr w)) = Just (into w)
-maybeLitWord _ = Nothing
-
-maybeLitAddr :: Expr EAddr -> Maybe Addr
-maybeLitAddr (LitAddr a) = Just a
-maybeLitAddr _ = Nothing
-
-maybeConcreteStore :: Expr Storage -> Maybe (Map W256 W256)
-maybeConcreteStore (ConcreteStore s) = Just s
-maybeConcreteStore _ = Nothing
-
-
 word256 :: ByteString -> Word256
 word256 xs | BS.length xs == 1 =
   -- optimize one byte pushes

@@ -46,6 +46,7 @@ import EVM.Types hiding (word, Env, Symbolic)
 import EVM.Types qualified
 import EVM.UnitTest
 import EVM.Effects
+import EVM.Expr (maybeLitWord, maybeLitAddr)
 
 data AssertionType = DSTest | Forge
   deriving (Eq, Show, Read, ParseField)

@@ -40,6 +40,7 @@ import EVM.Dapp (DappContext(..), DappInfo(..), findSrc, showTraceLocation)
 import EVM.Expr qualified as Expr
 import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
 import EVM.Types
+import EVM.Expr (maybeLitWord, maybeLitAddr)
 
 import Control.Arrow ((>>>))
 import Optics.Core

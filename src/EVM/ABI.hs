@@ -60,6 +60,7 @@ module EVM.ABI
 
 import EVM.Expr (readWord, isLitWord)
 import EVM.Types
+import EVM.Expr (maybeLitWord)
 
 import Control.Applicative ((<|>))
 import Control.Monad (replicateM, replicateM_, forM_, void)

@@ -10,6 +10,7 @@ import EVM.Transaction
 import EVM.UnitTest (writeTrace)
 import EVM.Types hiding (Block, Case, Env)
 import EVM.Test.Tracing (interpretWithTrace, VMTrace, compareTraces, EVMToolTraceOutput(..), decodeTraceOutputHelper)
+import EVM.Expr (maybeLitWord, maybeLitAddr)
 
 import Optics.Core
 import Control.Arrow ((***), (&&&))

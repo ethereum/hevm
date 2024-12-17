@@ -24,6 +24,7 @@ import EVM.Types qualified as Expr (Expr(Gas))
 import EVM.Sign qualified
 import EVM.Concrete qualified as Concrete
 import EVM.CheatsTH
+import EVM.Expr (maybeLitByte, maybeLitWord, maybeLitAddr)
 
 import Control.Monad (unless, when)
 import Control.Monad.ST (ST)

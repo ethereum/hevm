@@ -15,6 +15,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
 import Data.List
+import Data.Map qualified as LMap
 import Data.Map.Strict qualified as Map
 import Data.Maybe (mapMaybe, isJust, fromMaybe)
 import Data.Semigroup (Any, Any(..), getAny)
@@ -1326,13 +1327,10 @@ exprToAddr _ = Nothing
 
 -- TODO: make this smarter, probably we will need to use the solver here?
 wordToAddr :: Expr EWord -> Maybe (Expr EAddr)
-wordToAddr = go . simplify
-  where
-    go :: Expr EWord -> Maybe (Expr EAddr)
-    go = \case
-      WAddr a -> Just a
-      Lit a -> Just $ LitAddr (truncateToAddr a)
-      _ -> Nothing
+wordToAddr e = case (concKeccakSimpExpr e) of
+  WAddr a -> Just a
+  Lit a -> Just $ LitAddr (truncateToAddr a)
+  _ -> Nothing
 
 litCode :: BS.ByteString -> [Expr Byte]
 litCode bs = fmap LitByte (BS.unpack bs)
@@ -1616,3 +1614,25 @@ checkLHSConstProp a = isJust $ mapPropM_ lhsConstHelper a
 -- Commutative operators should have the constant on the LHS
 checkLHSConst :: Expr a -> Bool
 checkLHSConst a = isJust $ mapExprM_ lhsConstHelper a
+
+maybeLitByte :: Expr Byte -> Maybe Word8
+maybeLitByte e = case (concKeccakSimpExpr e) of
+  (LitByte x) -> Just x
+  _ -> Nothing
+
+maybeLitWord :: Expr EWord -> Maybe W256
+maybeLitWord e = case (concKeccakSimpExpr e) of
+  (Lit w) -> Just w
+  (WAddr (LitAddr w)) -> Just (into w)
+  _ -> Nothing
+
+maybeLitAddr :: Expr EAddr -> Maybe Addr
+maybeLitAddr e = case (concKeccakSimpExpr e) of
+  (LitAddr a) -> Just a
+  _ -> Nothing
+
+maybeConcreteStore :: Expr Storage -> Maybe (LMap.Map W256 W256)
+maybeConcreteStore e = case (concKeccakSimpExpr e) of
+  (ConcreteStore s) -> Just s
+  _ -> Nothing
+

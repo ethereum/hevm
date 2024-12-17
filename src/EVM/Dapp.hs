@@ -4,6 +4,7 @@ import EVM.ABI
 import EVM.Concrete
 import EVM.Solidity
 import EVM.Types
+import EVM.Expr (maybeLitByte, maybeLitWord)
 
 import Control.Arrow ((>>>), second)
 import Data.Aeson (Value)
