@@ -1326,13 +1326,10 @@ exprToAddr _ = Nothing
 
 -- TODO: make this smarter, probably we will need to use the solver here?
 wordToAddr :: Expr EWord -> Maybe (Expr EAddr)
-wordToAddr = go . simplify
-  where
-    go :: Expr EWord -> Maybe (Expr EAddr)
-    go = \case
-      WAddr a -> Just a
-      Lit a -> Just $ LitAddr (truncateToAddr a)
-      _ -> Nothing
+wordToAddr a = case (simplify a) of
+  WAddr (LitAddr addr) -> Just $ LitAddr addr
+  Lit addr -> Just $ LitAddr (truncateToAddr addr)
+  _ -> Nothing
 
 litCode :: BS.ByteString -> [Expr Byte]
 litCode bs = fmap LitByte (BS.unpack bs)
