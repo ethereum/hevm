@@ -1620,19 +1620,19 @@ maybeLitByte e = case (concKeccakSimpExpr e) of
   (LitByte x) -> Just x
   _ -> Nothing
 
-maybeLitWord :: Expr EWord -> Maybe W256
-maybeLitWord e = case (concKeccakSimpExpr e) of
+maybeLitWordSimp :: Expr EWord -> Maybe W256
+maybeLitWordSimp e = case (concKeccakSimpExpr e) of
   (Lit w) -> Just w
   (WAddr (LitAddr w)) -> Just (into w)
   _ -> Nothing
 
-maybeLitAddr :: Expr EAddr -> Maybe Addr
-maybeLitAddr e = case (concKeccakSimpExpr e) of
+maybeLitAddrSimp :: Expr EAddr -> Maybe Addr
+maybeLitAddrSimp e = case (concKeccakSimpExpr e) of
   (LitAddr a) -> Just a
   _ -> Nothing
 
-maybeConcreteStore :: Expr Storage -> Maybe (LMap.Map W256 W256)
-maybeConcreteStore e = case (concKeccakSimpExpr e) of
+maybeConcStoreSimp :: Expr Storage -> Maybe (LMap.Map W256 W256)
+maybeConcStoreSimp e = case (concKeccakSimpExpr e) of
   (ConcreteStore s) -> Just s
   _ -> Nothing
 

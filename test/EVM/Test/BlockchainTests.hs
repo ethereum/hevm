@@ -10,7 +10,7 @@ import EVM.Transaction
 import EVM.UnitTest (writeTrace)
 import EVM.Types hiding (Block, Case, Env)
 import EVM.Test.Tracing (interpretWithTrace, VMTrace, compareTraces, EVMToolTraceOutput(..), decodeTraceOutputHelper)
-import EVM.Expr (maybeLitWord, maybeLitAddr)
+import EVM.Expr (maybeLitWordSimp, maybeLitAddrSimp)
 
 import Optics.Core
 import Control.Arrow ((***), (&&&))
@@ -236,7 +236,7 @@ checkStateFail x vm (okBal, okNonce, okData, okCode) = do
     printContracts cs = putStrLn $ Map.foldrWithKey (\k c acc ->
       acc ++ "-->" <> show k ++ " : "
                    ++ (show $ fromJust c.nonce) ++ " "
-                   ++ (show $ fromJust $ maybeLitWord c.balance) ++ " "
+                   ++ (show $ fromJust $ maybeLitWordSimp c.balance) ++ " "
                    ++ (show $ fromConcrete c.storage)
                    ++ (show $ fromConcrete c.tStorage)
         ++ "\n") "" cs
@@ -534,5 +534,5 @@ vmForCase x = do
 
 forceConcreteAddrs :: Map (Expr EAddr) Contract -> Map Addr Contract
 forceConcreteAddrs cs = Map.mapKeys
-      (fromMaybe (internalError "Internal Error: unexpected symbolic address") . maybeLitAddr)
+      (fromMaybe (internalError "Internal Error: unexpected symbolic address") . maybeLitAddrSimp)
       cs

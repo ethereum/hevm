@@ -60,7 +60,7 @@ module EVM.ABI
 
 import EVM.Expr (readWord, isLitWord)
 import EVM.Types
-import EVM.Expr (maybeLitWord)
+import EVM.Expr (maybeLitWordSimp)
 
 import Control.Applicative ((<|>))
 import Control.Monad (replicateM, replicateM_, forM_, void)
@@ -512,7 +512,7 @@ decodeBuf tps buf =
   else
     let
       vs = decodeStaticArgs 0 (length tps) buf
-      asBS = mconcat $ fmap word256Bytes (mapMaybe maybeLitWord vs)
+      asBS = mconcat $ fmap word256Bytes (mapMaybe maybeLitWordSimp vs)
     in if not (all isLitWord vs)
        then SAbi vs
        else case runGetOrFail (getAbiSeq (length tps) tps) (BSLazy.fromStrict asBS) of

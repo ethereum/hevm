@@ -19,7 +19,7 @@ import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
-import EVM.Expr (maybeLitWord)
+import EVM.Expr (maybeLitWordSimp)
 
 import Control.Monad (void, when, forM, forM_)
 import Control.Monad.ST (RealWorld, ST, stToIO)
@@ -339,7 +339,7 @@ formatTestLog :: (?context :: DappContext) => Map W256 Event -> Expr Log -> Mayb
 formatTestLog _ (LogEntry _ _ []) = Nothing
 formatTestLog _ (GVar _) = internalError "unexpected global variable"
 formatTestLog events (LogEntry _ args (topic:_)) =
-  case maybeLitWord topic >>= \t1 -> (Map.lookup t1 events) of
+  case maybeLitWordSimp topic >>= \t1 -> (Map.lookup t1 events) of
     Nothing -> Nothing
     Just (Event name _ argInfos) ->
       case (name <> parenthesise (abiTypeSolidity <$> argTypes)) of
@@ -414,7 +414,7 @@ makeTxCall params (cd, cdProps) = do
   assign (#state % #caller) params.caller
   assign (#state % #gas) (toGas params.gasCall)
   origin <- fromMaybe (initialContract (RuntimeCode (ConcreteRuntimeCode ""))) <$> use (#env % #contracts % at params.origin)
-  let insufficientBal = maybe False (\b -> b < params.gasprice * (into params.gasCall)) (maybeLitWord origin.balance)
+  let insufficientBal = maybe False (\b -> b < params.gasprice * (into params.gasCall)) (maybeLitWordSimp origin.balance)
   when insufficientBal $ internalError "insufficient balance for gas cost"
   vm <- get
   put $ initTx vm
@@ -468,7 +468,7 @@ paramsFromRpc rpcinfo = do
                              , gaslimit
                              , baseFee
                              )
-  let ts' = fromMaybe (internalError "received unexpected symbolic timestamp via rpc") (maybeLitWord ts)
+  let ts' = fromMaybe (internalError "received unexpected symbolic timestamp via rpc") (maybeLitWordSimp ts)
   pure $ TestVMParams
     -- TODO: make this symbolic! It needs some tweaking to the way that our
     -- symbolic interpreters work to allow us to symbolically exec constructor initialization

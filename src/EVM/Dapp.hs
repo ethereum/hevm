@@ -4,7 +4,7 @@ import EVM.ABI
 import EVM.Concrete
 import EVM.Solidity
 import EVM.Types
-import EVM.Expr (maybeLitByte, maybeLitWord)
+import EVM.Expr (maybeLitByte, maybeLitWordSimp)
 
 import Control.Arrow ((>>>), second)
 import Data.Aeson (Value)
@@ -139,7 +139,7 @@ srcMap dapp contr opIndex = do
 
 findSrc :: Contract -> DappInfo -> Maybe SolcContract
 findSrc c dapp = do
-  hash <- maybeLitWord c.codehash
+  hash <- maybeLitWordSimp c.codehash
   case Map.lookup hash dapp.solcByHash of
     Just (_, v) -> Just v
     Nothing -> lookupCode c.code dapp
