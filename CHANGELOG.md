@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Added
+- When a staticcall is made to a contract that does not exist, we overapproxiate
+  and return symbolic values
+
 ## [0.54.2] - 2024-12-12
 
 ## Fixed

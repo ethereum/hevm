@@ -164,6 +164,7 @@ makeVm o = do
     , currentFork = 0
     , labels = mempty
     , osEnv = mempty
+    , freshVar = 0
     }
     where
     env = Env
@@ -285,6 +286,14 @@ getOpW8 state = case state.code of
 
 getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
 getOpName state = intToOpName $ fromEnum $ getOpW8 state
+
+canResolveAddr :: forall (t :: VMType) s . VMOps t => Expr EAddr -> EVM t s (Bool)
+canResolveAddr addr = do
+  use (#env % #contracts % at addr) >>= \case
+    Just _ -> pure True
+    Nothing -> case addr of
+      SymAddr _ -> pure False
+      _ -> pure True
 
 -- | Executes the EVM one step
 exec1 :: forall (t :: VMType) s. VMOps t => EVM t s ()
@@ -983,26 +992,37 @@ exec1 = do
           case stk of
             xGas:xTo:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
               case wordToAddr xTo of
-                Nothing -> do
-                  loc <- codeloc
-                  let msg = "Unable to determine a call target"
-                  partial $ UnexpectedSymbolicArg (snd loc) opName msg [SomeExpr xTo]
-                Just xTo' ->
+                Nothing -> fallback
+                Just xTo' -> do
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
                     Right gas -> do
-                      overrideC <- use $ #state % #overrideCaller
-                      delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs $
-                        \callee -> do
-                          zoom #state $ do
-                            assign #callvalue (Lit 0)
-                            assign #caller $ fromMaybe self overrideC
-                            assign #contract callee
-                            assign #static True
-                          touchAccount self
-                          touchAccount callee
+                      ok <- canResolveAddr xTo'
+                      if not ok then fallback
+                      else do
+                        overrideC <- use $ #state % #overrideCaller
+                        delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs $
+                          \callee -> do
+                            zoom #state $ do
+                              assign #callvalue (Lit 0)
+                              assign #caller $ fromMaybe self overrideC
+                              assign #contract callee
+                              assign #static True
+                            touchAccount self
+                            touchAccount callee
             _ ->
               underrun
+            where
+              fallback = do
+                -- Reset caller if needed
+                resetCaller <- use $ #state % #resetCaller
+                when resetCaller $ assign (#state % #overrideCaller) Nothing
+                -- overaapproximate by returning a symbolic value
+                freshVar <- use #freshVar
+                assign #freshVar (freshVar + 1)
+                pushSym (Var ("staticcall-result-stack-" <> (pack . show) freshVar))
+                assign (#state % #returndata) (AbstractBuf ("staticall-result-data-" <> (pack . show) freshVar))
+                next
 
         OpSelfdestruct ->
           notStatic $
