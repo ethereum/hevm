@@ -44,7 +44,8 @@ import EVM.Types hiding (Success)
 
 import Optics.Core
 import Optics.Operators.Unsafe
-import EVM.Effects;
+import EVM.Effects
+import EVM.Expr (maybeLitByte)
 
 import Control.Applicative
 import Control.Monad
