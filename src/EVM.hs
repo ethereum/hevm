@@ -164,6 +164,7 @@ makeVm o = do
     , currentFork = 0
     , labels = mempty
     , osEnv = mempty
+    , freshVar = 0
     }
     where
     env = Env
@@ -984,10 +985,16 @@ exec1 = do
             xGas:xTo:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
               case wordToAddr xTo of
                 Nothing -> do
-                  loc <- codeloc
-                  let msg = "Unable to determine a call target"
-                  partial $ UnexpectedSymbolicArg (snd loc) opName msg [SomeExpr xTo]
-                Just xTo' ->
+                  -- Reset caller if needed
+                  resetCaller <- use $ #state % #resetCaller
+                  when resetCaller $ assign (#state % #overrideCaller) Nothing
+                  -- overaapproximate by returning a symbolic value
+                  freshVar <- use #freshVar
+                  assign #freshVar (freshVar + 1)
+                  pushSym (Var ("staticcall-result-stack-" <> (pack . show) freshVar))
+                  assign (#state % #returndata) (AbstractBuf ("staticall-result-data-" <> (pack . show) freshVar))
+                  next
+                Just xTo' -> do
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
                     Right gas -> do
