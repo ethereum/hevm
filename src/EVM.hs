@@ -287,8 +287,8 @@ getOpW8 state = case state.code of
 getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
 getOpName state = intToOpName $ fromEnum $ getOpW8 state
 
-canResolveAddr :: forall (t :: VMType) s . VMOps t => Expr EAddr -> EVM t s (Bool)
-canResolveAddr addr = do
+canFetchAccount :: forall (t :: VMType) s . VMOps t => Expr EAddr -> EVM t s (Bool)
+canFetchAccount addr = do
   use (#env % #contracts % at addr) >>= \case
     Just _ -> pure True
     Nothing -> case addr of
@@ -996,10 +996,9 @@ exec1 = do
                 Just xTo' -> do
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
-                    Right gas -> do
-                      ok <- canResolveAddr xTo'
-                      if not ok then fallback
-                      else do
+                    Right gas -> canFetchAccount xTo' >>= \case
+                      False -> fallback
+                      True -> do
                         overrideC <- use $ #state % #overrideCaller
                         delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs $
                           \callee -> do
