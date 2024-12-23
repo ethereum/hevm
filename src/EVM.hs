@@ -24,7 +24,7 @@ import EVM.Types qualified as Expr (Expr(Gas))
 import EVM.Sign qualified
 import EVM.Concrete qualified as Concrete
 import EVM.CheatsTH
-import EVM.Expr (maybeLitByte, maybeLitWordSimp, maybeLitAddrSimp)
+import EVM.Expr (maybeLitByteSimp, maybeLitWordSimp, maybeLitAddrSimp)
 
 import Control.Monad (unless, when)
 import Control.Monad.ST (ST)
@@ -282,7 +282,7 @@ getOpW8 state = case state.code of
       RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs state.pc
       RuntimeCode (SymbolicRuntimeCode ops) ->
         fromMaybe (internalError "could not analyze symbolic code") $
-          maybeLitByte $ ops V.! state.pc
+          maybeLitByteSimp $ ops V.! state.pc
 
 getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
 getOpName state = intToOpName $ fromEnum $ getOpW8 state
@@ -2649,7 +2649,7 @@ isValidJumpDest vm x = let
       UnknownCode _ -> internalError "Cannot analyze jumpdests for unknown code"
       InitCode ops _ -> BS.indexMaybe ops x
       RuntimeCode (ConcreteRuntimeCode ops) -> BS.indexMaybe ops x
-      RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= maybeLitByte
+      RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= maybeLitByteSimp
   in case op of
        Nothing -> False
        Just b -> 0x5b == b && OpJumpdest == snd (contract.codeOps V.! (contract.opIxMap SV.! x))
@@ -2688,7 +2688,7 @@ mkOpIxMap (RuntimeCode (SymbolicRuntimeCode ops))
       let (_, _, _, m) = foldl (go v) (0, 0, 0, pure ()) (stripBytecodeMetadataSym $ V.toList ops)
       in m >> pure v
       where
-        go v (0, !i, !j, !m) x = case maybeLitByte x of
+        go v (0, !i, !j, !m) x = case maybeLitByteSimp x of
           Just x' -> if x' >= 0x60 && x' <= 0x7f
             -- start of PUSH op --
                      then (x' - 0x60 + 1, i + 1, j,     m >> SV.write v i j)
@@ -2713,7 +2713,7 @@ vmOp vm =
         RuntimeCode (ConcreteRuntimeCode xs') ->
           (BS.index xs' i, fmap LitByte $ BS.unpack $ BS.drop i xs')
         RuntimeCode (SymbolicRuntimeCode xs') ->
-          ( fromMaybe (internalError "unexpected symbolic code") . maybeLitByte $ xs' V.! i , V.toList $ V.drop i xs')
+          ( fromMaybe (internalError "unexpected symbolic code") . maybeLitByteSimp $ xs' V.! i , V.toList $ V.drop i xs')
   in if (opslen code' < i)
      then Nothing
      else Just (readOp op pushdata)
@@ -2741,7 +2741,7 @@ mkCodeOps contractCode =
         Nothing ->
           mempty
         Just (x, xs') ->
-          let x' = fromMaybe (internalError "unexpected symbolic code argument") $ maybeLitByte x
+          let x' = fromMaybe (internalError "unexpected symbolic code argument") $ maybeLitByteSimp x
               j = opSize x'
           in (i, readOp x' xs') Seq.<| go (i + j) (drop j xs)
 

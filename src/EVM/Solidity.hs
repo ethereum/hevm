@@ -45,7 +45,7 @@ import EVM.Types hiding (Success)
 import Optics.Core
 import Optics.Operators.Unsafe
 import EVM.Effects
-import EVM.Expr (maybeLitByte)
+import EVM.Expr (maybeLitByteSimp)
 
 import Control.Applicative
 import Control.Monad
@@ -730,7 +730,7 @@ stripBytecodeMetadataSym :: [Expr Byte] -> [Expr Byte]
 stripBytecodeMetadataSym b =
   let
     concretes :: [Maybe Word8]
-    concretes = maybeLitByte <$> b
+    concretes = maybeLitByteSimp <$> b
     bzzrs :: [[Maybe Word8]]
     bzzrs = fmap (Just) . BS.unpack <$> knownBzzrPrefixes
     candidates = (flip Data.List.isInfixOf concretes) <$> bzzrs

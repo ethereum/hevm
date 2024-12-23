@@ -73,7 +73,7 @@ import EVM.Traversals
 import EVM.Types hiding (Env)
 import EVM.Effects
 import EVM.UnitTest (writeTrace)
-import EVM.Expr (maybeLitByte)
+import EVM.Expr (maybeLitByteSimp)
 
 testEnv :: Env
 testEnv = Env { config = defaultConfig {
@@ -1450,7 +1450,7 @@ tests = testGroup "hevm"
     , test "jump-into-symbolic-region" $ do
         let
           -- our initCode just jumps directly to the end
-          code = BS.pack . mapMaybe maybeLitByte $ V.toList $ assemble
+          code = BS.pack . mapMaybe maybeLitByteSimp $ V.toList $ assemble
               [ OpPush (Lit 0x85)
               , OpJump
               , OpPush (Lit 1)

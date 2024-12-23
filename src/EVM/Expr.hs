@@ -298,7 +298,7 @@ readWordFromBytes (Lit idx) (ConcreteBuf bs) =
 readWordFromBytes i@(Lit idx) buf = let
     bytes = [readByte (Lit i') buf | i' <- [idx .. idx + 31]]
   in if all isLitByte bytes
-     then Lit (bytesToW256 . mapMaybe maybeLitByte $ bytes)
+     then Lit (bytesToW256 . mapMaybe maybeLitByteSimp $ bytes)
      else ReadWord i buf
 readWordFromBytes idx buf = ReadWord idx buf
 
@@ -353,7 +353,7 @@ copySlice s@(Lit srcOffset) d@(Lit dstOffset) sz@(Lit size) src ds@(ConcreteBuf 
     sl = [readByte (Lit i) src | i <- [srcOffset .. srcOffset + (size - 1)]]
     tl = BS.drop (unsafeInto dstOffset + unsafeInto size) dst
     in if Prelude.and . (fmap isLitByte) $ sl
-       then ConcreteBuf $ hd <> (BS.pack . (mapMaybe maybeLitByte) $ sl) <> tl
+       then ConcreteBuf $ hd <> (BS.pack . (mapMaybe maybeLitByteSimp) $ sl) <> tl
        else CopySlice s d sz src ds
   | otherwise = CopySlice s d sz src ds
 
@@ -531,7 +531,7 @@ toList buf = case bufLength buf of
 
 fromList :: V.Vector (Expr Byte) -> Expr Buf
 fromList bs = case Prelude.and (fmap isLitByte bs) of
-  True -> ConcreteBuf . BS.pack . V.toList . V.mapMaybe maybeLitByte $ bs
+  True -> ConcreteBuf . BS.pack . V.toList . V.mapMaybe maybeLitByteSimp $ bs
   -- we want to minimize the size of the resulting expression, so we do two passes:
   --   1. write all concrete bytes to some base buffer
   --   2. write all symbolic writes on top of this buffer
@@ -1482,7 +1482,7 @@ padBytesLeft n bs
 
 joinBytes :: [Expr Byte] -> Expr EWord
 joinBytes bs
-  | Prelude.and . (fmap isLitByte) $ bs = Lit . bytesToW256 . (mapMaybe maybeLitByte) $ bs
+  | Prelude.and . (fmap isLitByte) $ bs = Lit . bytesToW256 . (mapMaybe maybeLitByteSimp) $ bs
   | otherwise = let
       bytes = padBytesLeft 32 bs
     in JoinBytes
@@ -1615,24 +1615,24 @@ checkLHSConstProp a = isJust $ mapPropM_ lhsConstHelper a
 checkLHSConst :: Expr a -> Bool
 checkLHSConst a = isJust $ mapExprM_ lhsConstHelper a
 
-maybeLitByte :: Expr Byte -> Maybe Word8
-maybeLitByte e = case (concKeccakSimpExpr e) of
-  (LitByte x) -> Just x
+maybeLitByteSimp :: Expr Byte -> Maybe Word8
+maybeLitByteSimp e = case (concKeccakSimpExpr e) of
+  LitByte x -> Just x
   _ -> Nothing
 
 maybeLitWordSimp :: Expr EWord -> Maybe W256
 maybeLitWordSimp e = case (concKeccakSimpExpr e) of
-  (Lit w) -> Just w
-  (WAddr (LitAddr w)) -> Just (into w)
+  Lit w -> Just w
+  WAddr (LitAddr w) -> Just (into w)
   _ -> Nothing
 
 maybeLitAddrSimp :: Expr EAddr -> Maybe Addr
 maybeLitAddrSimp e = case (concKeccakSimpExpr e) of
-  (LitAddr a) -> Just a
+  LitAddr a -> Just a
   _ -> Nothing
 
 maybeConcStoreSimp :: Expr Storage -> Maybe (LMap.Map W256 W256)
 maybeConcStoreSimp e = case (concKeccakSimpExpr e) of
-  (ConcreteStore s) -> Just s
+  ConcreteStore s -> Just s
   _ -> Nothing
 
