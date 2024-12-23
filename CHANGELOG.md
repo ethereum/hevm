@@ -59,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Skip over SMT generation issues due to e.g. CopySlice with symbolic arguments, and return
   partial results instead of erroring out
 - Fix interpreter's MCOPY handling so that it doesn't error out on symbolic arguments
-- More desciptive errors in case of a cheatcode issue
+- More descriptive errors in case of a cheatcode issue
 - Better and more pretty debug messages
 - Many env* cheatcodes are now supported
 
@@ -135,11 +135,11 @@ optimization for symbolic execution.
 ## Added
 
 The major new user facing feature in this release is support for fully symbolic addresses (including
-fully symbolic addresses for deployed contracts). This allows tests to be writen that call
+fully symbolic addresses for deployed contracts). This allows tests to be written that call
 `vm.prank` with a symbolic value, making some tests (e.g. access control, token transfer logic) much
 more comprehensive.
 
-Some restrictions around reading balances from and transfering value between symbolic addresses are
+Some restrictions around reading balances from and transferring value between symbolic addresses are
 currently in place. Currently, if the address is symbolic, then you will only be able to read it's
 balance, or transfer value to/from it, if it is the address of a contract that is actually deployed.
 This is required to ensure soundness in the face of aliasing between symbolic addresses. We intend
@@ -149,7 +149,7 @@ to lift this restriction in a future release.
 
 - Support for `vm.deal`
 - Support for `vm.assume` (this is semantically identical to using `require`, but does simplify the
-    process of porting exisitng fuzz tests to be symbolic)
+    process of porting existing fuzz tests to be symbolic)
 - the `check` prefix now recognized for symbolic tests
 - `hevm test` now takes a `--number` argument to specify which block should be used when making rpc queries
 
@@ -161,14 +161,14 @@ solidity tests no longer consider reverts to be a failure, and check only for th
 or user defined assertion failures (i.e. `Panic(0x01)`). This makes writing tests much easier as
 users no longer have to consider trivial reverts (e.g. arithmetic overflow).
 
-A positive (i.e. `prove`/`check`) test with no rechable assertion violations that does not have any
-succesful branches will still be considered a failure.
+A positive (i.e. `prove`/`check`) test with no reachable assertion violations that does not have any
+successful branches will still be considered a failure.
 
 ## Removed
 
 hevm has been around for a while, and over time has accumulated many features. We decided to remove
 some of these features in the interest of focusing our attention, increasing our iteration speed and
-simplifying maintainance. The following user facing features have been removed from this release:
+simplifying maintenance. The following user facing features have been removed from this release:
 
 - The visual debugger has been removed
 - All concrete ds-test executors have been removed (i.e. plain, fuzzer, invariant)
@@ -186,7 +186,7 @@ This release also includes many small bugfixes:
 - Better cex reconstruction in cases where branches do not refer to all input variables in calldata
 - Correctly handle empty bytestring compiled contracts' JSON
 - No more false positives when keccak is called with inputs of different sizes
-- `test` now falls back to displaying an unecoded bytestring for calldata when the model returned by the solver has a different length the length of the arguments in the test signature.
+- `test` now falls back to displaying an unedcoded bytestring for calldata when the model returned by the solver has a different length the length of the arguments in the test signature.
 - we now generate correct counterexamples for branches where only a subset of input variables are referenced by the path conditions
 - `vm.prank` now works correctly when passed a symbolic address
 - `vm.prank` now works correctly when the next call transfers value
@@ -266,7 +266,7 @@ are no longer explicitly tested or supported.
 
 ## Changed
 
-- SMT2 scripts are now being reprocessed to put one sexpr per line. Having sepxrs that span across multiple lines trigers a bug in CVC5.
+- SMT2 scripts are now being reprocessed to put one sexpr per line. Having sexpr that span across multiple lines trigers a bug in CVC5.
 - Removing long-running tests so we can finish all unit tests in approx 10 minutes on a current-gen laptop CPU
 - Added git revision to `hevm version`
 
