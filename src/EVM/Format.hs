@@ -56,7 +56,7 @@ import Data.DoubleWord (signedWord)
 import Data.Foldable (toList)
 import Data.List (isPrefixOf, sort)
 import Data.Map qualified as Map
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
 import Data.Text (Text, pack, unpack, intercalate, dropEnd, splitOn)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
@@ -121,6 +121,13 @@ textValues ts (ConcreteBuf bs) =
     Left (_, _, _)   -> [formatBinary bs]
 textValues ts _ = fmap (const "<symbolic>") ts
 
+textValue :: (?context :: DappContext) => AbiType -> Expr Buf -> Text
+textValue ts (ConcreteBuf bs) =
+  case runGetOrFail (getAbiSeq 1 [ts]) (fromStrict bs) of
+    Right (_, _, xs) -> fromMaybe (internalError "impossible empty list") $ listToMaybe $ textAbiValues xs
+    Left (_, _, _)   -> formatBinary bs
+textValue _ _ = "<symbolic>"
+
 parenthesise :: [Text] -> Text
 parenthesise ts = "(" <> intercalate ", " ts <> ")"
 
@@ -128,7 +135,7 @@ showValues :: (?context :: DappContext) => [AbiType] -> Expr Buf -> Text
 showValues ts b = parenthesise $ textValues ts b
 
 showValue :: (?context :: DappContext) => AbiType -> Expr Buf -> Text
-showValue t b = head $ textValues [t] b
+showValue t b = textValue t b
 
 showCall :: (?context :: DappContext) => [AbiType] -> Expr Buf -> Text
 showCall ts (ConcreteBuf bs) = showValues ts $ ConcreteBuf (BS.drop 4 bs)
@@ -275,7 +282,7 @@ showTrace trace =
             showTopic :: AbiType -> Expr EWord -> Text
             showTopic abiType topic =
               case maybeLitWord (Expr.concKeccakSimpExpr topic) of
-                Just w -> head $ textValues [abiType] (ConcreteBuf (word256Bytes w))
+                Just w -> textValue abiType (ConcreteBuf (word256Bytes w))
                 _ -> "<symbolic>"
 
           withName :: Text -> Text -> Text

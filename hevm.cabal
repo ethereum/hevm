@@ -55,8 +55,6 @@ common shared
       -Werror
       -- FIXME: we have to disable this, due to ghc bug: https://gitlab.haskell.org/ghc/ghc/-/issues/24120
       -Wno-unused-packages
-      -- FIXME: adjust use of `head` that triggers this warning in GHC 9.8
-      -Wno-error=x-partial
   if flag(devel)
     ghc-options:
       -j
