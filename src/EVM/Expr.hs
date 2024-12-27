@@ -351,7 +351,7 @@ copySlice s@(Lit srcOffset) d@(Lit dstOffset) sz@(Lit size) src ds@(ConcreteBuf 
     hd = padRight (unsafeInto dstOffset) $ BS.take (unsafeInto dstOffset) dst
     sl = [readByte (Lit i) src | i <- [srcOffset .. srcOffset + (size - 1)]]
     tl = BS.drop (unsafeInto dstOffset + unsafeInto size) dst
-    in if Prelude.and . (fmap isLitByte) $ sl
+    in if all isLitByte sl
        then ConcreteBuf $ hd <> (BS.pack . (mapMaybe maybeLitByte) $ sl) <> tl
        else CopySlice s d sz src ds
   | otherwise = CopySlice s d sz src ds
@@ -529,7 +529,7 @@ toList buf = case bufLength buf of
   _ -> Nothing
 
 fromList :: V.Vector (Expr Byte) -> Expr Buf
-fromList bs = case Prelude.and (fmap isLitByte bs) of
+fromList bs = case all isLitByte bs of
   True -> ConcreteBuf . BS.pack . V.toList . V.mapMaybe maybeLitByte $ bs
   -- we want to minimize the size of the resulting expression, so we do two passes:
   --   1. write all concrete bytes to some base buffer
@@ -1484,7 +1484,7 @@ padBytesLeft n bs
 
 joinBytes :: [Expr Byte] -> Expr EWord
 joinBytes bs
-  | Prelude.and . (fmap isLitByte) $ bs = Lit . bytesToW256 . (mapMaybe maybeLitByte) $ bs
+  | all isLitByte bs = Lit . bytesToW256 . (mapMaybe maybeLitByte) $ bs
   | otherwise = let
       bytes = padBytesLeft 32 bs
     in JoinBytes
@@ -1514,7 +1514,7 @@ numBranches (ITE _ t f) = numBranches t + numBranches f
 numBranches _ = 1
 
 allLit :: [Expr Byte] -> Bool
-allLit = Data.List.and . fmap (isLitByte)
+allLit = all isLitByte
 
 -- | True if the given expression contains any node that satisfies the
 -- input predicate

@@ -18,6 +18,7 @@ import Data.List.NonEmpty qualified as NonEmpty
 import Data.String.Here
 import Data.Maybe (fromJust, fromMaybe, isJust, listToMaybe)
 import Data.Either.Extra (fromRight')
+import Data.Foldable (fold)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set (Set)
@@ -164,7 +165,7 @@ declareIntermediates bufs stores = do
       sorted = List.sortBy compareFst $ Map.toList $ encSs <> encBs
   decls <- mapM snd sorted
   let smt2 = (SMT2 [fromText "; intermediate buffers & stores"] mempty mempty):decls
-  pure $ foldr (<>) mempty smt2
+  pure $ fold smt2
   where
     compareFst (l, _) (r, _) = compare l r
     encodeBuf n expr = do
