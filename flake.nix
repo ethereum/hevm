@@ -47,17 +47,14 @@
         }));
 
         hspkgs = ps :
-          ps.haskell.packages.ghc98.override {
+          ps.haskellPackages.override {
             overrides = hfinal: hprev: {
-              with-utf8 = ps.haskell.lib.compose.overrideCabal (drv: {
-                version = "1.1.0.0";
-                src = pkgs.fetchFromGitHub {
-                  owner = "serokell";
-                  repo = "haskell-with-utf8";
-                  rev = "cf6e31475da3d9f54439650a70170819daa35f54";
-                  sha256 = "sha256-hxUiZbbcA6RvrVgGk4Vbt/rZT6wnBF3bfYbbQflzQ24=";
-                };
-              }) hprev.with-utf8;
+              with-utf8 =
+                if (with ps.stdenv; hostPlatform.isDarwin && hostPlatform.isx86)
+                then ps.haskell.lib.compose.overrideCabal (_ : { extraLibraries = [ps.libiconv]; }) hprev.with-utf8
+                else hprev.with-utf8;
+              # TODO: temporary fix for static build which is still on 9.4
+              witch = ps.haskell.lib.doJailbreak hprev.witch;
             };
           };
         hlib = pkgs.haskell.lib;

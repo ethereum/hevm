@@ -83,7 +83,6 @@ common shared
     OverloadedStrings
     OverloadedLabels
     RecordWildCards
-    TypeAbstractions
     TypeFamilies
     ViewPatterns
     DataKinds
