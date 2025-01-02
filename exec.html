@@ -181,7 +181,7 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="hevm-exec"><a class="header" href="#hevm-exec"><code>hevm exec</code></a></h1>
-<p>Run an EVM computation using specified parameters, using an interactive debugger when <code>--debug</code> flag is given.</p>
+<p>Run an EVM computation using specified parameters.</p>
 <pre><code>Usage: hevm exec [--code TEXT] [--calldata TEXT] [--address ADDR]
                  [--caller ADDR] [--origin ADDR] [--coinbase ADDR]
                  [--value W256] [--nonce WORD64] [--gas WORD64] [--number W256]
@@ -217,7 +217,8 @@ Available options:
   --rpc TEXT               Fetch state from a remote node
   --block W256             Block state is be fetched from
   --root STRING            Path to project root directory (default: . )
-  --project-type PROJECTTYPE Foundry or CombinedJSON project
+  --project-type PROJ      Foundry or CombinedJSON project (default: Foundry)
+  --assertion-type ASSERT  Assertions as per Forge or DSTest (default: Forge)
 </code></pre>
 <p>Minimum required flags: either you must provide <code>--code</code> or you must both pass
 <code>--rpc</code> and <code>--address</code>.</p>
