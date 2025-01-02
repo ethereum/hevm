@@ -109,7 +109,7 @@ jobs:
             openssl:p
             z3:p
             go:p
-      - uses: haskell-actions/setup@v2.7.0
+      - uses: haskell-actions/setup@v2.7.7
         id: setup
         with:
           ghc-version: '9.6.5'
