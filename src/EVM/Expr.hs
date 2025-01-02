@@ -1006,10 +1006,6 @@ simplify e = if (mapExpr go e == e)
                                   ,a24, a25, a26, a27 ,a28, a29, a30, a31]
         in Lit (constructWord256 b)
 
-    -- This pattern happens in Solidity for function selectors. Since Lit 0xfff... (28 bytes of 0xff)
-    -- is masking the function selector, it can be simplified to just the function selector bytes
-    go (IndexWord (Lit a) (Or funSel (And (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffff) _))) | a < 4 =
-      indexWord (Lit a) funSel
     go (IndexWord a b) = indexWord a b
 
     -- LT
@@ -1438,6 +1434,10 @@ indexWord i@(Lit idx) e@(And (Lit mask) w)
     fullWordMask = (2 ^ (256 :: W256)) - 1
     unmaskedBytes = fromIntegral $ (countLeadingZeros mask) `Prelude.div` 8
     isByteAligned m = (countLeadingZeros m) `Prelude.mod` 8 == 0
+-- This pattern happens in Solidity for function selectors. Since Lit 0xfff... (28 bytes of 0xff)
+-- is masking the function selector, it can be simplified to just the function selector bytes
+indexWord (Lit a) (Or funSel (And (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffff) _)) | a < 4 =
+  indexWord (Lit a) funSel
 indexWord (Lit idx) (Lit w)
   | idx <= 31 = LitByte . fromIntegral $ shiftR w (248 - unsafeInto idx * 8)
   | otherwise = LitByte 0
