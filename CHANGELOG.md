@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Added
 - JoinBytes simplification rule
 - New simplification rule to help deal with abi.encodeWithSelector
+- When a staticcall is made to a contract that does not exist, we overapproxiate
+  and return symbolic values
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value

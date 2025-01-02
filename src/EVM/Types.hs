@@ -665,6 +665,9 @@ data VM (t :: VMType) s = VM
   , currentFork    :: Int
   , labels         :: Map Addr Text
   , osEnv          :: Map String String
+  , freshVar       :: Int
+  -- ^ used to generate fresh symbolic variable names for overapproximations
+  --   during symbolic execution. See e.g. OpStaticcall
   }
   deriving (Generic)
 
