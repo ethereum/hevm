@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JoinBytes simplification rule
 - New simplification rule to help deal with abi.encodeWithSelector
 
+## Fixed
+- We now try to simplify expressions fully before trying to cast them to a concrete value
+  This should improve issues when "Unexpected Symbolic Arguments to Opcode" was
+  unnecessarily output
+
 ## [0.54.2] - 2024-12-12
 
 ## Fixed
