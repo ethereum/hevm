@@ -1300,7 +1300,7 @@ tests = testGroup "hevm"
             }
             |]
         Right e <- reachableUserAsserts c Nothing
-        assertBoolM "The expression does not contain Partial." $ Prelude.not $ Expr.containsNode isPartial e
+        assertBoolM "The expression should not contain Partial." $ Prelude.not $ Expr.containsNode isPartial e
       ,
       test "call ffi when disabled" $ do
         Just c <- solcRuntime "C"
