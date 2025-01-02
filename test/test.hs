@@ -1286,6 +1286,22 @@ tests = testGroup "hevm"
         r <- allBranchesFail c Nothing
         assertBoolM "all branches must fail" (isRight r)
       ,
+      test "cheatcode-with-selector" $ do
+        Just c <- solcRuntime "C"
+            [i|
+            contract C {
+            function prove_warp_symbolic(uint128 jump) public {
+                    uint pre = block.timestamp;
+                    address hevm = 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D;
+                    (bool success, ) = hevm.call(abi.encodeWithSelector(bytes4(keccak256("warp(uint256)")), block.timestamp+jump));
+                    require(success, "Call to hevm.warp failed");
+                    assert(block.timestamp == pre + jump);
+                }
+            }
+            |]
+        Right e <- reachableUserAsserts c Nothing
+        assertBoolM "The expression does not contain Partial." $ Prelude.not $ Expr.containsNode isPartial e
+      ,
       test "call ffi when disabled" $ do
         Just c <- solcRuntime "C"
             [i|

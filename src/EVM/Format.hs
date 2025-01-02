@@ -471,7 +471,7 @@ formatPartial = \case
   JumpIntoSymbolicCode pc idx -> "Encountered a jump into a potentially symbolic code region while executing initcode. pc: " <> pack (show pc) <> " jump dst: " <> pack (show idx)
 
 formatSomeExpr :: SomeExpr -> Text
-formatSomeExpr (SomeExpr e) = formatExpr e
+formatSomeExpr (SomeExpr e) = formatExpr $ Expr.simplify e
 
 formatExpr :: Expr a -> Text
 formatExpr = go

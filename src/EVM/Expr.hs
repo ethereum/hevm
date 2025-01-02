@@ -992,6 +992,24 @@ simplify e = if (mapExpr go e == e)
             where simplifiedBuf = BS.take (unsafeInto (n+sz)) buf
     go (CopySlice a b c d f) = copySlice a b c d f
 
+    go (JoinBytes (LitByte a0)  (LitByte a1)  (LitByte a2)  (LitByte a3)
+      (LitByte a4)  (LitByte a5)  (LitByte a6)  (LitByte a7)
+      (LitByte a8)  (LitByte a9)  (LitByte a10) (LitByte a11)
+      (LitByte a12) (LitByte a13) (LitByte a14) (LitByte a15)
+      (LitByte a16) (LitByte a17) (LitByte a18) (LitByte a19)
+      (LitByte a20) (LitByte a21) (LitByte a22) (LitByte a23)
+      (LitByte a24) (LitByte a25) (LitByte a26) (LitByte a27)
+      (LitByte a28) (LitByte a29) (LitByte a30) (LitByte a31)) =
+        let b =  map fromIntegral [a0, a1, a2, a3 ,a4, a5, a6, a7
+                                  ,a8, a9, a10, a11 ,a12, a13, a14, a15
+                                  ,a16, a17, a18, a19 ,a20, a21, a22, a23
+                                  ,a24, a25, a26, a27 ,a28, a29, a30, a31]
+        in Lit (constructWord256 b)
+
+    -- This pattern happens in Solidity for function selectors. Since Lit 0xfff... (28 bytes of 0xff)
+    -- is masking the function selector, it can be simplified to just the function selector bytes
+    go (IndexWord (Lit a) (Or funSel (And (Lit 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffff) _))) | a < 4 =
+      indexWord (Lit a) funSel
     go (IndexWord a b) = indexWord a b
 
     -- LT
