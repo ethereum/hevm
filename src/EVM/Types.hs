@@ -1347,6 +1347,20 @@ bssToBs :: ByteStringS -> ByteString
 bssToBs (ByteStringS bs) = bs
 
 
+-- Function to construct a W256 from a list of 32 Word8 values
+constructWord256 :: [Word8] -> W256
+constructWord256 bytes
+    | length bytes == 32 = W256 (Word256 (Word128 w256hi w256m1) (Word128 w256m0 w256lo))
+    | otherwise = internalError "List must contain exactly 32 Word8 values"
+  where
+    w256hi = word8sToWord64 (take 8 bytes)
+    w256m1 = word8sToWord64 (take 8 (drop 8 bytes))
+    w256m0 = word8sToWord64 (take 8 (drop 16 bytes))
+    w256lo = word8sToWord64 (take 8 (drop 24 bytes))
+    word8sToWord64 :: [Word8] -> Word64
+    word8sToWord64 = foldl (\acc byte -> (acc `shiftL` 8) .|. fromIntegral byte) 0
+
+
 -- Keccak hashing ----------------------------------------------------------------------------------
 
 
