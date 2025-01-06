@@ -2101,8 +2101,8 @@ tests = testGroup "hevm"
       let sig = Just (Sig "checkval(uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
       (res, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-      let cexesExt = map (snd . fromJust . extractCex) ret
-      putStrLnM $ "Cexes: \n" <> (unlines $ map ("-> " ++) (map show cexesExt))
+      -- let cexesExt = map (snd . fromJust . extractCex) ret
+      -- putStrLnM $ "Cexes: \n" <> (unlines $ map ("-> " ++) (map show cexesExt))
       let numCexes = sum $ map (fromEnum . isCex) ret
       let numErrs = sum $ map (fromEnum . isError) ret
       let numQeds = sum $ map (fromEnum . isQed) ret
@@ -2123,11 +2123,12 @@ tests = testGroup "hevm"
       let sig = Just (Sig "checkval(address,uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
       (res, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-      let cexesExt = map (snd . fromJust . extractCex) ret
-      putStrLnM $ "Cexes: \n" <> (unlines $ map ("-> " ++) (map show cexesExt))
       let numCexes = sum $ map (fromEnum . isCex) ret
       let numErrs = sum $ map (fromEnum . isError) ret
       let numQeds = sum $ map (fromEnum . isQed) ret
+      -- There are 2 CEX-es, in contrast to the above (staticcall-check-orig2).
+      -- This is because with one CEX, the return DATA
+      -- is empty, and in the other, the return data is non-empty (but symbolic)
       assertEqualM "number of counterexamples" 2 numCexes
       assertEqualM "number of errors" 0 numErrs
       assertEqualM "number of qed-s" 0 numQeds
