@@ -2082,7 +2082,7 @@ tests = testGroup "hevm"
       Just c <- solcRuntime "C"
         [i|
         contract C {
-            function checkval(address inputAddr, uint256 x, uint256 y) public returns (uint256 result) {
+            function checkval(address inputAddr, uint256 x, uint256 y) public {
                 bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, y);
                 (bool success, bytes memory returnData) = inputAddr.staticcall(data);
                 assert(success);
@@ -2097,9 +2097,52 @@ tests = testGroup "hevm"
       let numCexes = sum $ map (fromEnum . isCex) ret
       let numErrs = sum $ map (fromEnum . isError) ret
       let numQeds = sum $ map (fromEnum . isQed) ret
-      assertEqualM "number of counterexamples" numCexes 2
-      assertEqualM "number of symbolic copy errors" numErrs 0
-      assertEqualM "number of qed-s" numQeds 0
+      assertEqualM "number of counterexamples" 2 numCexes
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of qed-s" 0 numQeds
+    -- This checks that calling a symbolic address with staticcall will ALWAYS return 0/1
+    -- which is the semantic of the EVM. We insert a  constraint over the return value
+    -- even when overapproximation is used, as below.
+    , test "staticcall-check-symbolic-yul" $ do
+      Just c <- solcRuntime "C"
+        [i|
+        contract C {
+            function checkval(address inputAddr, uint256 x, uint256 y) public {
+            uint success;
+            assembly {
+              // Allocate memory for the call data
+              let callData := mload(0x40)
+
+              // Function signature for "add(uint256,uint256)" is "0x771602f7"
+              mstore(callData, 0x771602f700000000000000000000000000000000000000000000000000000000)
+
+              // Store the parameters x and y
+              mstore(add(callData, 4), x)
+              mstore(add(callData, 36), y)
+
+              // Perform the static call
+              success := staticcall(
+                  gas(),          // Forward all available gas
+                  inputAddr,      // Address to call
+                  callData,       // Input data location
+                  68,             // Input data size (4 bytes for function signature + 32 bytes each for x and y)
+                  0,              // Output data location (0 means we don't care about the output)
+                  0               // Output data size
+              )
+              }
+              assert(success <= 1);
+          }
+        }
+        |]
+      let sig = Just (Sig "checkval(address,uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
+      (res, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+      putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      let numErrs = sum $ map (fromEnum . isError) ret
+      let numQeds = sum $ map (fromEnum . isQed) ret
+      assertEqualM "number of counterexamples" 0 numCexes -- no counterexamples, because it is always  0/1
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of qed-s" 1 numQeds
     , test "staticcall-check-symbolic2" $ do
       Just c <- solcRuntime "C"
         [i|
@@ -2124,9 +2167,9 @@ tests = testGroup "hevm"
       let numCexes = sum $ map (fromEnum . isCex) ret
       let numErrs = sum $ map (fromEnum . isError) ret
       let numQeds = sum $ map (fromEnum . isQed) ret
-      assertEqualM "number of counterexamples" numCexes 2
-      assertEqualM "number of symbolic copy errors" numErrs 1
-      assertEqualM "number of qed-s" numQeds 0
+      assertEqualM "number of counterexamples" 2 numCexes
+      assertEqualM "number of errors" 1 numErrs
+      assertEqualM "number of qed-s" 0 numQeds
      , test "jump-symbolic" $ do
       Just c <- solcRuntime "C"
         [i|

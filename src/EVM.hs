@@ -1019,7 +1019,9 @@ exec1 = do
                 -- overapproximate by returning a symbolic value
                 freshVar <- use #freshVar
                 assign #freshVar (freshVar + 1)
-                pushSym (Var ("staticcall-result-stack-" <> (pack . show) freshVar))
+                let freshVarExpr = Var ("staticcall-result-stack-" <> (pack . show) freshVar)
+                pushSym freshVarExpr
+                modifying #constraints ((:) (PLEq freshVarExpr (Lit 1) ))
                 assign (#state % #returndata) (AbstractBuf ("staticall-result-data-" <> (pack . show) freshVar))
                 next
 
