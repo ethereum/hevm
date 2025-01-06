@@ -4321,6 +4321,7 @@ genWord litFreq 0 = frequency
       --, liftM2 SelfBalance arbitrary arbitrary
       --, liftM2 Gas arbitrary arbitrary
       , fmap Lit arbitrary
+      , fmap joinBytesFromList $ replicateM 32 arbitrary
       , fmap Var (genName "word")
       ]
     )
