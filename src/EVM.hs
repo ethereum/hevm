@@ -24,6 +24,7 @@ import EVM.Types qualified as Expr (Expr(Gas))
 import EVM.Sign qualified
 import EVM.Concrete qualified as Concrete
 import EVM.CheatsTH
+import EVM.Expr (maybeLitByteSimp, maybeLitWordSimp, maybeLitAddrSimp)
 
 import Control.Monad (unless, when)
 import Control.Monad.ST (ST)
@@ -281,7 +282,7 @@ getOpW8 state = case state.code of
       RuntimeCode (ConcreteRuntimeCode bs) -> BS.index bs state.pc
       RuntimeCode (SymbolicRuntimeCode ops) ->
         fromMaybe (internalError "could not analyze symbolic code") $
-          maybeLitByte $ ops V.! state.pc
+          maybeLitByteSimp $ ops V.! state.pc
 
 getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
 getOpName state = intToOpName $ fromEnum $ getOpW8 state
@@ -296,12 +297,9 @@ exec1 = do
     stk  = vm.state.stack
     self = vm.state.contract
     this = fromMaybe (internalError "state contract") (Map.lookup self vm.env.contracts)
-
     fees@FeeSchedule {..} = vm.block.schedule
-
     doStop = finishFrame (FrameReturned mempty)
-
-    litSelf = maybeLitAddr self
+    litSelf = maybeLitAddrSimp self
 
   if isJust litSelf && (fromJust litSelf) > 0x0 && (fromJust litSelf) <= 0xa then do
     -- call to precompile
@@ -741,7 +739,7 @@ exec1 = do
                         Lit v -> v
                         _ -> 0
                     storage_cost =
-                      case (maybeLitWord current, maybeLitWord new) of
+                      case (maybeLitWordSimp current, maybeLitWordSimp new) of
                         (Just current', Just new') ->
                            if (current' == new') then g_sload
                            else if (current' == original) && (original == 0) then g_sset
@@ -759,7 +757,7 @@ exec1 = do
                     assign (#state % #stack) xs
                     modifying (#env % #contracts % ix self % #storage) (writeStorage x new)
 
-                    case (maybeLitWord current, maybeLitWord new) of
+                    case (maybeLitWordSimp current, maybeLitWordSimp new) of
                        (Just current', Just new') ->
                           unless (current' == new') $
                             if current' == original then
@@ -914,7 +912,7 @@ exec1 = do
                 output <- readMemory xOffset xSize
                 let
                   codesize = fromMaybe (internalError "processing opcode RETURN. Cannot return dynamically sized abstract data")
-                               . maybeLitWord . bufLength $ output
+                               . maybeLitWordSimp . bufLength $ output
                   maxsize = vm.block.maxCodeSize
                   creation = case vm.frames of
                     [] -> vm.tx.isCreate
@@ -1178,7 +1176,7 @@ precompiledContract this xGas precompileAddr recipient xValue inOffset inSize ou
       vm <- get
       case result' of
         Nothing -> case stk of
-          x:_ -> case maybeLitWord x of
+          x:_ -> case maybeLitWordSimp x of
             Just 0 ->
               pure ()
             Just 1 ->
@@ -1593,28 +1591,28 @@ forceAddr n msg continue = case wordToAddr n of
   Just c -> continue c
 
 forceConcrete :: VMOps t => Expr EWord -> String -> (W256 -> EVM t s ()) -> EVM t s ()
-forceConcrete n msg continue = case maybeLitWord n of
+forceConcrete n msg continue = case maybeLitWordSimp n of
   Nothing -> do
     vm <- get
     partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
   Just c -> continue c
 
 forceConcreteAddr :: VMOps t => Expr EAddr -> String -> (Addr -> EVM t s ()) -> EVM t s ()
-forceConcreteAddr n msg continue = case maybeLitAddr n of
+forceConcreteAddr n msg continue = case maybeLitAddrSimp n of
   Nothing -> do
     vm <- get
     partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
   Just c -> continue c
 
 forceConcreteAddr2 :: VMOps t => (Expr EAddr, Expr EAddr) -> String -> ((Addr, Addr) -> EVM t s ()) -> EVM t s ()
-forceConcreteAddr2 (n,m) msg continue = case (maybeLitAddr n, maybeLitAddr m) of
+forceConcreteAddr2 (n,m) msg continue = case (maybeLitAddrSimp n, maybeLitAddrSimp m) of
   (Just c, Just d) -> continue (c,d)
   _ -> do
     vm <- get
     partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n, m])
 
 forceConcrete2 :: VMOps t => (Expr EWord, Expr EWord) -> String -> ((W256, W256) -> EVM t s ()) -> EVM t s ()
-forceConcrete2 (n,m) msg continue = case (maybeLitWord n, maybeLitWord m) of
+forceConcrete2 (n,m) msg continue = case (maybeLitWordSimp n, maybeLitWordSimp m) of
   (Just c, Just d) -> continue (c, d)
   _ -> do
     vm <- get
@@ -1666,7 +1664,7 @@ accessAccountForGas addr = do
 accessStorageForGas :: Expr EAddr -> Expr EWord -> EVM t s Bool
 accessStorageForGas addr key = do
   accessedStrkeys <- use (#tx % #subState % #accessedStorageKeys)
-  case maybeLitWord key of
+  case maybeLitWordSimp key of
     Just litword -> do
       let accessed = member (addr, litword) accessedStrkeys
       assign (#tx % #subState % #accessedStorageKeys) (insert (addr, litword) accessedStrkeys)
@@ -1691,7 +1689,7 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
   input <- readMemory (Expr.add inOffset (Lit 4)) (Expr.sub inSize (Lit 4))
   calldata <- readMemory inOffset inSize
   abi <- readBytes 4 (Lit 0) <$> readMemory inOffset (Lit 4)
-  let newContext = CallContext cheatCode cheatCode outOffset outSize (Lit 0) (maybeLitWord abi) calldata vm.env.contracts vm.tx.subState
+  let newContext = CallContext cheatCode cheatCode outOffset outSize (Lit 0) (maybeLitWordSimp abi) calldata vm.env.contracts vm.tx.subState
 
   pushTrace $ FrameTrace newContext
   next
@@ -1700,7 +1698,7 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
                     { state = vm1.state { stack = xs }
                     , context = newContext
                     }
-  case maybeLitWord abi of
+  case maybeLitWordSimp abi of
     Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) "symbolic cheatcode selector" (wrap [abi])
     Just (unsafeInto -> abi') ->
       case Map.lookup abi' cheatActions of
@@ -2056,7 +2054,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
               _ -> do
                 burn' xGas $ do
                   calldata <- readMemory xInOffset xInSize
-                  abi <- maybeLitWord . readBytes 4 (Lit 0) <$> readMemory xInOffset (Lit 4)
+                  abi <- maybeLitWordSimp . readBytes 4 (Lit 0) <$> readMemory xInOffset (Lit 4)
                   let newContext = CallContext
                                     { target    = xTo
                                     , context   = xContext
@@ -2653,7 +2651,7 @@ isValidJumpDest vm x = let
       UnknownCode _ -> internalError "Cannot analyze jumpdests for unknown code"
       InitCode ops _ -> BS.indexMaybe ops x
       RuntimeCode (ConcreteRuntimeCode ops) -> BS.indexMaybe ops x
-      RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= maybeLitByte
+      RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= maybeLitByteSimp
   in case op of
        Nothing -> False
        Just b -> 0x5b == b && OpJumpdest == snd (contract.codeOps V.! (contract.opIxMap SV.! x))
@@ -2692,7 +2690,7 @@ mkOpIxMap (RuntimeCode (SymbolicRuntimeCode ops))
       let (_, _, _, m) = foldl (go v) (0, 0, 0, pure ()) (stripBytecodeMetadataSym $ V.toList ops)
       in m >> pure v
       where
-        go v (0, !i, !j, !m) x = case maybeLitByte x of
+        go v (0, !i, !j, !m) x = case maybeLitByteSimp x of
           Just x' -> if x' >= 0x60 && x' <= 0x7f
             -- start of PUSH op --
                      then (x' - 0x60 + 1, i + 1, j,     m >> SV.write v i j)
@@ -2717,7 +2715,7 @@ vmOp vm =
         RuntimeCode (ConcreteRuntimeCode xs') ->
           (BS.index xs' i, fmap LitByte $ BS.unpack $ BS.drop i xs')
         RuntimeCode (SymbolicRuntimeCode xs') ->
-          ( fromMaybe (internalError "unexpected symbolic code") . maybeLitByte $ xs' V.! i , V.toList $ V.drop i xs')
+          ( fromMaybe (internalError "unexpected symbolic code") . maybeLitByteSimp $ xs' V.! i , V.toList $ V.drop i xs')
   in if (opslen code' < i)
      then Nothing
      else Just (readOp op pushdata)
@@ -2745,7 +2743,7 @@ mkCodeOps contractCode =
         Nothing ->
           mempty
         Just (x, xs') ->
-          let x' = fromMaybe (internalError "unexpected symbolic code argument") $ maybeLitByte x
+          let x' = fromMaybe (internalError "unexpected symbolic code argument") $ maybeLitByteSimp x
               j = opSize x'
           in (i, readOp x' xs') Seq.<| go (i + j) (drop j xs)
 

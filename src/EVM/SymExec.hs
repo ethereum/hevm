@@ -45,6 +45,7 @@ import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 import EVM.Traversals
 import EVM.Types
+import EVM.Expr (maybeConcStoreSimp)
 import GHC.Conc (getNumProcessors)
 import GHC.Generics (Generic)
 import Optics.Core
@@ -653,7 +654,7 @@ verify solvers opts preState maybepost = do
 expandCex :: VM Symbolic s -> SMTCex -> SMTCex
 expandCex prestate c = c { store = Map.union c.store concretePreStore }
   where
-    concretePreStore = Map.mapMaybe (maybeConcreteStore . (.storage))
+    concretePreStore = Map.mapMaybe (maybeConcStoreSimp . (.storage))
                      . Map.filter (\v -> Expr.containsNode isConcreteStore v.storage)
                      $ (prestate.env.contracts)
     isConcreteStore = \case

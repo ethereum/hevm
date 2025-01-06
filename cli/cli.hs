@@ -46,6 +46,7 @@ import EVM.Types hiding (word, Env, Symbolic)
 import EVM.Types qualified
 import EVM.UnitTest
 import EVM.Effects
+import EVM.Expr (maybeLitWordSimp, maybeLitAddrSimp)
 
 data AssertionType = DSTest | Forge
   deriving (Eq, Show, Read, ParseField)
@@ -489,7 +490,7 @@ vmFromCommand cmd = do
       putStrLn "Error, must provide at least (rpc + address) or code"
       exitFailure
 
-  let ts' = case maybeLitWord ts of
+  let ts' = case maybeLitWordSimp ts of
         Just t -> t
         Nothing -> internalError "unexpected symbolic timestamp when executing vm test"
 
@@ -511,7 +512,7 @@ vmFromCommand cmd = do
                     then InitCode bs mempty
                     else RuntimeCode (ConcreteRuntimeCode bs)
         address = if cmd.create
-                  then addr (.address) (Concrete.createAddress (fromJust $ maybeLitAddr origin) (W64 $ word64 (.nonce) 0))
+                  then addr (.address) (Concrete.createAddress (fromJust $ maybeLitAddrSimp origin) (W64 $ word64 (.nonce) 0))
                   else addr (.address) (LitAddr 0xacab)
 
         vm0 baseFee miner ts blockNum prevRan c = makeVm $ VMOpts

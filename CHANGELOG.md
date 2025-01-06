@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Fixed
+- We now try to simplify expressions fully before trying to cast them to a concrete value
+  This should improve issues when "Unexpected Symbolic Arguments to Opcode" was
+  unnecessarily output
+
 ## [0.54.2] - 2024-12-12
 
 ## Fixed
