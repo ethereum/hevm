@@ -1016,7 +1016,7 @@ exec1 = do
                 -- Reset caller if needed
                 resetCaller <- use $ #state % #resetCaller
                 when resetCaller $ assign (#state % #overrideCaller) Nothing
-                -- overaapproximate by returning a symbolic value
+                -- overapproximate by returning a symbolic value
                 freshVar <- use #freshVar
                 assign #freshVar (freshVar + 1)
                 pushSym (Var ("staticcall-result-stack-" <> (pack . show) freshVar))
