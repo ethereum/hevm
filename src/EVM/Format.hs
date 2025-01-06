@@ -40,6 +40,7 @@ import EVM.Dapp (DappContext(..), DappInfo(..), findSrc, showTraceLocation)
 import EVM.Expr qualified as Expr
 import EVM.Solidity (SolcContract(..), Method(..))
 import EVM.Types
+import EVM.Expr (maybeLitWordSimp, maybeLitAddrSimp)
 
 import Control.Arrow ((>>>))
 import Optics.Core
@@ -218,7 +219,7 @@ showTrace trace =
         [] ->
           logn
         firstTopic:restTopics ->
-          case maybeLitWord firstTopic of
+          case maybeLitWordSimp firstTopic of
             Just topic ->
               case Map.lookup topic dapp.eventMap of
                 Just (Event name _ argInfos) ->
@@ -236,7 +237,7 @@ showTrace trace =
                       -- ) anonymous;
                       let
                         sig = unsafeInto $ shiftR topic 224 :: FunctionSelector
-                        usr = case maybeLitWord t2 of
+                        usr = case maybeLitWordSimp t2 of
                           Just w ->
                             pack $ show (unsafeInto w :: Addr)
                           Nothing  ->
@@ -281,7 +282,7 @@ showTrace trace =
             where
             showTopic :: AbiType -> Expr EWord -> Text
             showTopic abiType topic =
-              case maybeLitWord (Expr.concKeccakSimpExpr topic) of
+              case maybeLitWordSimp (Expr.concKeccakSimpExpr topic) of
                 Just w -> textValue abiType (ConcreteBuf (word256Bytes w))
                 _ -> "<symbolic>"
 
@@ -376,7 +377,7 @@ ppAddr addr alwaysShowAddr =
         case (findSrc contract ?context.info) of
           Just x -> Just (contractNamePart x.contractName)
           Nothing -> Nothing
-    label = case do litAddr <- maybeLitAddr addr
+    label = case do litAddr <- maybeLitAddrSimp addr
                     Map.lookup litAddr ?context.labels of
               Nothing -> ""
               Just l -> "[" <> "\x1b[1m" <> l <> "\x1b[0m" <> "]"
