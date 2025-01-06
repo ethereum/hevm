@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   This should improve issues when "Unexpected Symbolic Arguments to Opcode" was
   unnecessarily output
 
+## Added
+- More simplification rules for Props
+
 ## [0.54.2] - 2024-12-12
 
 ## Fixed
