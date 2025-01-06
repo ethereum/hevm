@@ -950,6 +950,8 @@ exec1 = do
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
                     Right gas ->
+                      -- NOTE: we don't update overrideCaller in this case because
+                      -- forge-std doesn't. see: https://github.com/foundry-rs/foundry/pull/8863
                       delegateCall this gas xTo' self (Lit 0) xInOffset xInSize xOutOffset xOutSize xs $
                         \_ -> touchAccount self
             _ -> underrun

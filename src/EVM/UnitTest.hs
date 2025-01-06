@@ -375,10 +375,11 @@ formatTestLog events (LogEntry _ args (topic:_)) =
         _ -> Nothing
 
         where
+          headErr l = fromMaybe (internalError "shouldn't happen") $ listToMaybe l
           argTypes = [argType | (_, argType, NotIndexed) <- argInfos]
           unquote = Text.dropAround (\c -> c == '"' || c == '«' || c == '»')
           log_unnamed =
-            Just $ showValue (head argTypes) args
+            Just $ showValue (headErr argTypes) args
           log_named =
             let (key, val) = case take 2 (textValues argTypes args) of
                   [k, v] -> (k, v)

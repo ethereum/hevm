@@ -1,6 +1,6 @@
 # `hevm exec`
 
-Run an EVM computation using specified parameters, using an interactive debugger when `--debug` flag is given.
+Run an EVM computation using specified parameters.
 
 ```
 Usage: hevm exec [--code TEXT] [--calldata TEXT] [--address ADDR]
@@ -38,7 +38,8 @@ Available options:
   --rpc TEXT               Fetch state from a remote node
   --block W256             Block state is be fetched from
   --root STRING            Path to project root directory (default: . )
-  --project-type PROJECTTYPE Foundry or CombinedJSON project
+  --project-type PROJ      Foundry or CombinedJSON project (default: Foundry)
+  --assertion-type ASSERT  Assertions as per Forge or DSTest (default: Forge)
 ```
 
 Minimum required flags: either you must provide `--code` or you must both pass

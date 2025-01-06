@@ -15,8 +15,9 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Containers.ListUtils (nubOrd)
 import Data.DoubleWord (Word256)
-import Data.List (foldl', sortBy, sort, group)
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.List (foldl', sortBy, sort)
+import Data.List.NonEmpty qualified as NE
+import Data.Maybe (fromMaybe, mapMaybe, listToMaybe)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Map.Merge.Strict qualified as Map
@@ -79,14 +80,14 @@ isQed (Qed _) = True
 isQed _ = False
 
 groupIssues :: [ProofResult a b c String] -> [(Integer, String)]
-groupIssues results = map (\g -> (into (length g), head g)) grouped
+groupIssues results = map (\g -> (into (length g), NE.head g)) grouped
   where
     getErr :: ProofResult a b c String -> String
     getErr (EVM.SymExec.Error k) = k
     getErr (EVM.SymExec.Unknown _) = "SMT result timeout/unknown"
     getErr _ = internalError "shouldn't happen"
     sorted = sort $ map getErr results
-    grouped = group sorted
+    grouped = NE.group sorted
 
 data VeriOpts = VeriOpts
   { simp :: Bool
@@ -953,7 +954,7 @@ formatCex cd sig m@(SMTCex _ addrs _ store blockContext txContext) = T.unlines $
     prettyBuf b = internalError $ "Unexpected symbolic buffer:\n" <> T.unpack (formatExpr b)
 
 prettyCalldata :: SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
-prettyCalldata cex buf sig types = head (T.splitOn "(" sig) <> "(" <> body <> ")"
+prettyCalldata cex buf sig types = headErr errSig (T.splitOn "(" sig) <> "(" <> body <> ")"
   where
     argdata = Expr.drop 4 . Expr.simplify . defaultSymbolicValues $ subModel cex buf
     body = case decodeBuf types argdata of
@@ -962,7 +963,9 @@ prettyCalldata cex buf sig types = head (T.splitOn "(" sig) <> "(" <> body <> ")
           ConcreteBuf c -> T.pack (bsToHex c)
           _ -> err
       SAbi _ -> err
+    headErr e l = fromMaybe e $ listToMaybe l 
     err = internalError $ "unable to produce a concrete model for calldata: " <> show buf
+    errSig = internalError $ "unable to split sig: " <> show sig
 
 -- | If the expression contains any symbolic values, default them to some
 -- concrete value The intuition here is that if we still have symbolic values

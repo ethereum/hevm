@@ -16,8 +16,9 @@ import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.String.Here
-import Data.Maybe (fromJust, fromMaybe, isJust)
+import Data.Maybe (fromJust, fromMaybe, isJust, listToMaybe)
 import Data.Either.Extra (fromRight')
+import Data.Foldable (fold)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set (Set)
@@ -164,7 +165,7 @@ declareIntermediates bufs stores = do
       sorted = List.sortBy compareFst $ Map.toList $ encSs <> encBs
   decls <- mapM snd sorted
   let smt2 = (SMT2 [fromText "; intermediate buffers & stores"] mempty mempty):decls
-  pure $ foldr (<>) mempty smt2
+  pure $ fold smt2
   where
     compareFst (l, _) (r, _) = compare l r
     encodeBuf n expr = do
@@ -929,9 +930,11 @@ expandExp base expnt
 -- | Concatenates a list of bytes into a larger bitvector
 concatBytes :: [Expr Byte] -> Err Builder
 concatBytes bytes = do
-  let bytesRev = reverse bytes
-  a2 <- exprToSMT (head bytesRev)
-  foldM wrap a2 $ tail bytesRev
+  case List.uncons $ reverse bytes of
+    Nothing -> Left "unexpected empty bytes"
+    Just (h, t) -> do
+      a2 <- exprToSMT h
+      foldM wrap a2 t
   where
     wrap :: Builder -> Expr a -> Err Builder
     wrap inner byte = do
@@ -990,9 +993,14 @@ parseInteger = parseSC
 parseW8 :: SpecConstant -> Word8
 parseW8 = parseSC
 
+readOrError :: (Num a, Eq a) => ReadS a -> TS.Text -> a
+readOrError reader val = fst . headErr . reader . T.unpack . T.fromStrict $ val
+  where
+    headErr x = fromMaybe (internalError "error reading empty result") $ listToMaybe x
+
 parseSC :: (Num a, Eq a) => SpecConstant -> a
-parseSC (SCHexadecimal a) = fst . head . Numeric.readHex . T.unpack . T.fromStrict $ a
-parseSC (SCBinary a) = fst . head . Numeric.readBin . T.unpack . T.fromStrict $ a
+parseSC (SCHexadecimal a) = readOrError Numeric.readHex a
+parseSC (SCBinary a) = readOrError Numeric.readBin a
 parseSC sc = internalError $ "cannot parse: " <> show sc
 
 parseErr :: (Show a) => a -> b
