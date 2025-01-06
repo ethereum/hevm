@@ -2043,11 +2043,9 @@ tests = testGroup "hevm"
       (res, [Qed _]) <- withDefaultSolver $ \s ->
         checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-    ,
-    test "staticcall-check-orig" $ do
+    , test "staticcall-check-orig" $ do
       Just c <- solcRuntime "C"
         [i|
-        // Target contract with a view function
         contract Target {
             function add(uint256 x, uint256 y) external pure returns (uint256) {
               unchecked {
@@ -2056,17 +2054,15 @@ tests = testGroup "hevm"
             }
         }
 
-        // Caller contract using staticcall
         contract C {
-            function checkval(address inputAddr, uint256 x, uint256 y) public returns (uint256 result) {
+            function checkval(uint256 x, uint256 y) public {
                 Target t = new Target();
                 address realAddr = address(t);
-
                 bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, y);
                 (bool success, bytes memory returnData) = realAddr.staticcall(data);
                 assert(success);
 
-                result = abi.decode(returnData, (uint256));
+                uint result = abi.decode(returnData, (uint256));
                 uint expected;
                 unchecked {
                   expected = x + y;
@@ -2075,9 +2071,44 @@ tests = testGroup "hevm"
             }
         }
         |]
-      let sig = Just (Sig "checkval(address,uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
-      (res, [Qed _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+      let sig = Just (Sig "checkval(uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
+      (res, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      let numErrs = sum $ map (fromEnum . isError) ret
+      let numQeds = sum $ map (fromEnum . isQed) ret
+      assertEqualM "number of counterexamples" 0 numCexes
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of qed-s" 1 numQeds
+    , test "staticcall-check-orig2" $ do
+      Just c <- solcRuntime "C"
+        [i|
+        contract Target {
+            function add(uint256 x, uint256 y) external pure returns (uint256) {
+              assert(1 == 0);
+            }
+        }
+        contract C {
+            function checkval(uint256 x, uint256 y) public {
+                Target t = new Target();
+                address realAddr = address(t);
+                bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, y);
+                (bool success, bytes memory returnData) = realAddr.staticcall(data);
+                assert(success);
+            }
+        }
+        |]
+      let sig = Just (Sig "checkval(uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
+      (res, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+      putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+      let cexesExt = map (snd . fromJust . extractCex) ret
+      putStrLnM $ "Cexes: \n" <> (unlines $ map ("-> " ++) (map show cexesExt))
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      let numErrs = sum $ map (fromEnum . isError) ret
+      let numQeds = sum $ map (fromEnum . isQed) ret
+      assertEqualM "number of counterexamples" 1 numCexes
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of qed-s" 0 numQeds
     , test "staticcall-check-symbolic1" $ do
       Just c <- solcRuntime "C"
         [i|
@@ -2092,8 +2123,8 @@ tests = testGroup "hevm"
       let sig = Just (Sig "checkval(address,uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
       (res, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-      -- let cexesExt = map (snd . fromJust . extractCex) ret
-      -- putStrLnM $ "Cexes: \n" <> (unlines $ map ("-> " ++) (map show cexesExt))
+      let cexesExt = map (snd . fromJust . extractCex) ret
+      putStrLnM $ "Cexes: \n" <> (unlines $ map ("-> " ++) (map show cexesExt))
       let numCexes = sum $ map (fromEnum . isCex) ret
       let numErrs = sum $ map (fromEnum . isError) ret
       let numQeds = sum $ map (fromEnum . isQed) ret
@@ -2147,12 +2178,12 @@ tests = testGroup "hevm"
       Just c <- solcRuntime "C"
         [i|
         contract C {
-            function checkval(address inputAddr, uint256 x, uint256 y) public returns (uint256 result) {
+            function checkval(address inputAddr, uint256 x, uint256 y) public {
                 bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, y);
                 (bool success, bytes memory returnData) = inputAddr.staticcall(data);
                 assert(success);
 
-                result = abi.decode(returnData, (uint256));
+                uint result = abi.decode(returnData, (uint256));
                 uint expected;
                 unchecked {
                   expected = x + y;
@@ -2179,7 +2210,7 @@ tests = testGroup "hevm"
 
         // Caller contract using staticcall
         contract C {
-            function checkval(address inputAddr, uint256 x, uint256 y) public returns (uint256 result) {
+            function checkval(address inputAddr, uint256 x, uint256 y) public {
                 Target t = new Target();
                 address realAddr = address(t);
 
