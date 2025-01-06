@@ -38,8 +38,9 @@ import EVM (traceForest, traceForest', traceContext, cheatCode)
 import EVM.ABI (getAbiSeq, parseTypeName, AbiValue(..), AbiType(..), SolError(..), Indexed(..), Event(..))
 import EVM.Dapp (DappContext(..), DappInfo(..), findSrc, showTraceLocation)
 import EVM.Expr qualified as Expr
-import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
+import EVM.Solidity (SolcContract(..), Method(..))
 import EVM.Types
+import EVM.Expr (maybeLitWordSimp, maybeLitAddrSimp)
 
 import Control.Arrow ((>>>))
 import Optics.Core
@@ -56,7 +57,7 @@ import Data.DoubleWord (signedWord)
 import Data.Foldable (toList)
 import Data.List (isPrefixOf, sort)
 import Data.Map qualified as Map
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
 import Data.Text (Text, pack, unpack, intercalate, dropEnd, splitOn)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
@@ -121,6 +122,13 @@ textValues ts (ConcreteBuf bs) =
     Left (_, _, _)   -> [formatBinary bs]
 textValues ts _ = fmap (const "<symbolic>") ts
 
+textValue :: (?context :: DappContext) => AbiType -> Expr Buf -> Text
+textValue ts (ConcreteBuf bs) =
+  case runGetOrFail (getAbiSeq 1 [ts]) (fromStrict bs) of
+    Right (_, _, xs) -> fromMaybe (internalError "impossible empty list") $ listToMaybe $ textAbiValues xs
+    Left (_, _, _)   -> formatBinary bs
+textValue _ _ = "<symbolic>"
+
 parenthesise :: [Text] -> Text
 parenthesise ts = "(" <> intercalate ", " ts <> ")"
 
@@ -128,7 +136,7 @@ showValues :: (?context :: DappContext) => [AbiType] -> Expr Buf -> Text
 showValues ts b = parenthesise $ textValues ts b
 
 showValue :: (?context :: DappContext) => AbiType -> Expr Buf -> Text
-showValue t b = head $ textValues [t] b
+showValue t b = textValue t b
 
 showCall :: (?context :: DappContext) => [AbiType] -> Expr Buf -> Text
 showCall ts (ConcreteBuf bs) = showValues ts $ ConcreteBuf (BS.drop 4 bs)
@@ -211,7 +219,7 @@ showTrace trace =
         [] ->
           logn
         firstTopic:restTopics ->
-          case maybeLitWord firstTopic of
+          case maybeLitWordSimp firstTopic of
             Just topic ->
               case Map.lookup topic dapp.eventMap of
                 Just (Event name _ argInfos) ->
@@ -229,7 +237,7 @@ showTrace trace =
                       -- ) anonymous;
                       let
                         sig = unsafeInto $ shiftR topic 224 :: FunctionSelector
-                        usr = case maybeLitWord t2 of
+                        usr = case maybeLitWordSimp t2 of
                           Just w ->
                             pack $ show (unsafeInto w :: Addr)
                           Nothing  ->
@@ -274,8 +282,8 @@ showTrace trace =
             where
             showTopic :: AbiType -> Expr EWord -> Text
             showTopic abiType topic =
-              case maybeLitWord (Expr.concKeccakSimpExpr topic) of
-                Just w -> head $ textValues [abiType] (ConcreteBuf (word256Bytes w))
+              case maybeLitWordSimp (Expr.concKeccakSimpExpr topic) of
+                Just w -> textValue abiType (ConcreteBuf (word256Bytes w))
                 _ -> "<symbolic>"
 
           withName :: Text -> Text -> Text
@@ -369,7 +377,7 @@ ppAddr addr alwaysShowAddr =
         case (findSrc contract ?context.info) of
           Just x -> Just (contractNamePart x.contractName)
           Nothing -> Nothing
-    label = case do litAddr <- maybeLitAddr addr
+    label = case do litAddr <- maybeLitAddrSimp addr
                     Map.lookup litAddr ?context.labels of
               Nothing -> ""
               Just l -> "[" <> "\x1b[1m" <> l <> "\x1b[0m" <> "]"

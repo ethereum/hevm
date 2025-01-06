@@ -33,6 +33,7 @@ import Data.Tree (flatten)
 import Data.Typeable
 import Data.Vector qualified as V
 import Data.Word (Word8, Word64)
+import Data.Char (digitToInt)
 import GHC.Conc (getNumProcessors)
 import System.Directory
 import System.Environment
@@ -72,6 +73,7 @@ import EVM.Traversals
 import EVM.Types hiding (Env)
 import EVM.Effects
 import EVM.UnitTest (writeTrace)
+import EVM.Expr (maybeLitByteSimp)
 
 testEnv :: Env
 testEnv = Env { config = defaultConfig {
@@ -447,6 +449,24 @@ tests = testGroup "hevm"
        expr <- withDefaultSolver $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
        -- putStrLnM $ T.unpack $ formatExpr expr
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
+    , test "simplify-storage-wordToAddr" $ do
+       let a = "000000000000000000000000d95322745865822719164b1fc167930754c248de000000000000000000000000000000000000000000000000000000000000004a"
+           store = ConcreteStore (Map.fromList[(W256 0xebd33f63ba5dda53a45af725baed5628cdad261db5319da5f5d921521fe1161d,W256 0x5842cf)])
+           expr = SLoad (Keccak (ConcreteBuf (hexStringToByteString a))) store
+           simpExpr = Expr.wordToAddr expr
+           simpExpr2 = Expr.concKeccakSimpExpr expr
+       assertEqualM "Expression should simplify to value." simpExpr (Just $ LitAddr 0x5842cf)
+       assertEqualM "Expression should simplify to value." simpExpr2 (Lit 0x5842cf)
+    , test "simplify-storage-wordToAddr-complex" $ do
+       let a = "000000000000000000000000d95322745865822719164b1fc167930754c248de000000000000000000000000000000000000000000000000000000000000004a"
+           store = ConcreteStore (Map.fromList[(W256 0xebd33f63ba5dda53a45af725baed5628cdad261db5319da5f5d921521fe1161d,W256 0x5842cf)])
+           expr = SLoad (Keccak (ConcreteBuf (hexStringToByteString a))) store
+           writeWChain = WriteWord (Lit 0x32) (Lit 0x72) (WriteWord (Lit 0x0) expr (ConcreteBuf ""))
+           kecc = Keccak (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x20) (WriteWord (Lit 0x0) expr (writeWChain)) (ConcreteBuf ""))
+           keccAnd =  (And (Lit 1461501637330902918203684832716283019655932542975) kecc)
+           outer = And (Lit 1461501637330902918203684832716283019655932542975) (SLoad (keccAnd) (ConcreteStore (Map.fromList[(W256 1184450375068808042203882151692185743185288360635, W256 0xacab)])))
+           simp = Expr.concKeccakSimpExpr outer
+       assertEqualM "Expression should simplify to value." simp (Lit 0xacab)
     ]
   , testGroup "StorageTests"
     [ test "read-from-sstore" $ assertEqualM ""
@@ -1430,7 +1450,7 @@ tests = testGroup "hevm"
     , test "jump-into-symbolic-region" $ do
         let
           -- our initCode just jumps directly to the end
-          code = BS.pack . mapMaybe maybeLitByte $ V.toList $ assemble
+          code = BS.pack . mapMaybe maybeLitByteSimp $ V.toList $ assemble
               [ OpPush (Lit 0x85)
               , OpJump
               , OpPush (Lit 1)
@@ -4709,3 +4729,31 @@ expectedConcVals nm val = case val of
   _ -> internalError $ "unsupported Abi type " <> show nm <> " val: " <> show val <> " val type: " <> showAlter val
   where
     mkWord = word . encodeAbiValue
+
+hexStringToByteString :: String -> BS.ByteString
+hexStringToByteString hexStr
+    | odd (length hexStr) = error "Hex string has an odd length"
+    | otherwise = case traverse hexPairToByte (pairs hexStr) of
+        Just bytes -> (BS.pack bytes)
+        Nothing -> error "Invalid hex string"
+  where
+    -- Convert a pair of hex characters to a byte
+    hexPairToByte :: (Char, Char) -> Maybe Word8
+    hexPairToByte (c1, c2) = do
+        b1 <- hexCharToDigit c1
+        b2 <- hexCharToDigit c2
+        return $ fromIntegral (b1 * 16 + b2)
+
+    -- Convert a single hex character to its integer value
+    hexCharToDigit :: Char -> Maybe Int
+    hexCharToDigit c
+        | c >= '0' && c <= '9' = Just (digitToInt c)
+        | c >= 'a' && c <= 'f' = Just (digitToInt c)
+        | c >= 'A' && c <= 'F' = Just (digitToInt c)
+        | otherwise = Nothing
+
+    -- Split a string into pairs of characters
+    pairs :: [a] -> [(a, a)]
+    pairs [] = []
+    pairs (x:y:xs) = (x, y) : pairs xs
+    pairs _ = error "Unexpected odd length"
