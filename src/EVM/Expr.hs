@@ -1220,7 +1220,9 @@ simplifyProp prop =
     go (PLEq _ (Lit x)) | x == maxLit = PBool True
     go (PLT  (Lit val) (Var _)) | val == maxLit = PBool False
     go (PLEq (Var _) (Lit val)) | val == maxLit = PBool True
+    go (PLT a b) | a == b = PBool False
     go (PLT (Lit l) (Lit r)) = PBool (l < r)
+    go (PLEq a b) | a == b = PBool True
     go (PLEq (Lit l) (Lit r)) = PBool (l <= r)
     go (PLEq a (Max b _)) | a == b = PBool True
     go (PLEq a (Max _ b)) | a == b = PBool True
@@ -1231,6 +1233,9 @@ simplifyProp prop =
     -- negations
     go (PNeg (PBool b)) = PBool (Prelude.not b)
     go (PNeg (PNeg a)) = a
+
+    -- Empty buf
+    go (PEq (Lit 0) (BufLength k)) = peq k (ConcreteBuf "")
 
     -- solc specific stuff
     go (PEq (Lit 0) (IsZero (IsZero (Eq a b)))) = PNeg (peq a b)
