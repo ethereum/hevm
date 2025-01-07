@@ -702,6 +702,11 @@ tests = testGroup "hevm"
     , testProperty "simplifyProp-equivalence-sym" $ \(p) -> prop $ do
         let simplified = Expr.simplifyProp p
         checkEquivPropAndLHS p simplified
+    , testProperty "simplify-joinbytes" $ \(SymbolicJoinBytes exprList) -> prop $ do
+        let x = joinBytesFromList exprList
+        let simplified = Expr.simplify x
+        y <- checkEquiv x simplified
+        assertBoolM "Must be equal" y
     , testProperty "simpProp-equivalence-sym-Prop" $ \(ps :: [Prop]) -> prop $ do
         let simplified = pand (Expr.simplifyProps ps)
         checkEquivPropAndLHS (pand ps) simplified
@@ -1305,6 +1310,22 @@ tests = testGroup "hevm"
             |]
         r <- allBranchesFail c Nothing
         assertBoolM "all branches must fail" (isRight r)
+      ,
+      test "cheatcode-with-selector" $ do
+        Just c <- solcRuntime "C"
+            [i|
+            contract C {
+            function prove_warp_symbolic(uint128 jump) public {
+                    uint pre = block.timestamp;
+                    address hevm = 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D;
+                    (bool success, ) = hevm.call(abi.encodeWithSelector(bytes4(keccak256("warp(uint256)")), block.timestamp+jump));
+                    require(success, "Call to hevm.warp failed");
+                    assert(block.timestamp == pre + jump);
+                }
+            }
+            |]
+        Right e <- reachableUserAsserts c Nothing
+        assertBoolM "The expression should not contain Partial." $ Prelude.not $ Expr.containsNode isPartial e
       ,
       test "call ffi when disabled" $ do
         Just c <- solcRuntime "C"
@@ -4203,6 +4224,23 @@ instance Arbitrary (Expr EWord) where
 instance Arbitrary (Expr Byte) where
   arbitrary = sized genByte
 
+newtype SymbolicJoinBytes = SymbolicJoinBytes [Expr Byte]
+  deriving (Eq, Show)
+
+instance Arbitrary SymbolicJoinBytes where
+  arbitrary = liftM SymbolicJoinBytes $ replicateM 32 arbitrary
+
+joinBytesFromList :: [Expr Byte] -> Expr EWord
+joinBytesFromList [a0, a1, a2, a3, a4, a5, a6, a7,
+                   a8, a9, a10, a11, a12, a13, a14, a15,
+                   a16, a17, a18, a19, a20, a21, a22, a23,
+                   a24, a25, a26, a27, a28, a29, a30, a31] =
+  JoinBytes a0 a1 a2 a3 a4 a5 a6 a7
+            a8 a9 a10 a11 a12 a13 a14 a15
+            a16 a17 a18 a19 a20 a21 a22 a23
+            a24 a25 a26 a27 a28 a29 a30 a31
+joinBytesFromList _ = internalError "List must contain exactly 32 elements"
+
 instance Arbitrary (Expr Buf) where
   arbitrary = sized defaultBuf
 
@@ -4490,6 +4528,7 @@ genWord litFreq 0 = frequency
       --, liftM2 SelfBalance arbitrary arbitrary
       --, liftM2 Gas arbitrary arbitrary
       , fmap Lit arbitrary
+      , fmap joinBytesFromList $ replicateM 32 arbitrary
       , fmap Var (genName "word")
       ]
     )

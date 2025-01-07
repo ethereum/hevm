@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When a staticcall is made to a contract that does not exist, we overapproximate
   and return symbolic values
 - More simplification rules for Props
+- JoinBytes simplification rule
+- New simplification rule to help deal with abi.encodeWithSelector
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
