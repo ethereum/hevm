@@ -67,6 +67,7 @@ import Witch (into, tryFrom, unsafeInto, tryInto)
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
 import Crypto.Number.ModArithmetic (expFast)
+import Debug.Trace (traceM)
 
 blankState :: VMOps t => ST s (FrameState t s)
 blankState = do
@@ -330,7 +331,7 @@ exec1 = do
     else do
       let ?op = getOpW8 vm.state
       let opName = getOpName vm.state
-
+      -- traceM $ "Executing " ++ opName ++ " at " ++ show (vm.state.pc)
       case getOp (?op) of
 
         OpPush0 -> do
@@ -802,7 +803,9 @@ exec1 = do
               burn g_mid $ forceConcrete x "JUMP: symbolic jumpdest" $ \x' ->
                 case tryInto x' of
                   Left _ -> vmError BadJumpDestination
-                  Right i -> checkJump i xs
+                  Right i -> do
+                    traceM $ "Jumping to " ++ show i
+                    checkJump i xs
             _ -> underrun
 
         OpJumpi ->
@@ -1380,7 +1383,7 @@ getCodeLocation :: VM t s -> CodeLocation
 getCodeLocation vm = (vm.state.contract, vm.state.pc)
 
 query :: Query t s -> EVM t s ()
-query = assign #result . Just . HandleEffect . Query
+query q = assign #result $ Just $ HandleEffect (Query q)
 
 choose :: Choose s -> EVM Symbolic s ()
 choose = assign #result . Just . HandleEffect . Choose
@@ -1585,17 +1588,21 @@ notStatic continue = do
 
 forceAddr :: VMOps t => Expr EWord -> String -> (Expr EAddr -> EVM t s ()) -> EVM t s ()
 forceAddr n msg continue = case wordToAddr n of
-  Nothing -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+  Nothing -> oneSolution n $ \case
+    Just sol -> maybe fallback continue (wordToAddr (Lit sol))
+    Nothing -> fallback
   Just c -> continue c
+  where fallback = do
+          vm <- get
+          partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
 
 forceConcrete :: VMOps t => Expr EWord -> String -> (W256 -> EVM t s ()) -> EVM t s ()
 forceConcrete n msg continue = case maybeLitWordSimp n of
-  Nothing -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+  Nothing -> oneSolution n $ maybe fallback continue
   Just c -> continue c
+  where fallback = do
+          vm <- get
+          partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
 
 forceConcreteAddr :: VMOps t => Expr EAddr -> String -> (Addr -> EVM t s ()) -> EVM t s ()
 forceConcreteAddr n msg continue = case maybeLitAddrSimp n of
@@ -2622,6 +2629,7 @@ checkJump x xs = noJumpIntoInitData x $ do
     True -> do
       #state % #stack .= xs
       #state % #pc .= x
+      traceM $ "setting PC to " <> show x
     False -> vmError BadJumpDestination
 
 -- fails with partial if we're trying to jump into the symbolic region of an `InitCode`
@@ -2953,6 +2961,21 @@ instance VMOps Symbolic where
       -- Both paths are possible; we ask for more input
       choosePath loc Unknown =
         choose . PleaseChoosePath condSimp $ choosePath loc . Case
+
+  oneSolution symAddr continue = do
+    pathconds <- use #constraints
+    pc <- zoom #state $ use #pc
+    traceM $ "oneSolution at pc: " ++ show pc
+    query $ PleaseGetSol symAddr pathconds calcAddr
+    where
+      calcAddr (Just concAddr) = do
+        assign #result Nothing
+        traceM $ "oneSolution concAddrs: " ++ show concAddr
+        pushTo #constraints $ Expr.simplifyProp (symAddr .== (Lit concAddr))
+        continue (Just concAddr)
+      calcAddr Nothing = do
+        traceM "oneSolution symAddr"
+        continue Nothing
 
 instance VMOps Concrete where
   burn' n continue = do
