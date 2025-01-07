@@ -8,14 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Added
 - JoinBytes simplification rule
 - New simplification rule to help deal with abi.encodeWithSelector
+- More simplification rules for Props
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
   This should improve issues when "Unexpected Symbolic Arguments to Opcode" was
   unnecessarily output
-
-## Added
-- More simplification rules for Props
 
 ## [0.54.2] - 2024-12-12
 
