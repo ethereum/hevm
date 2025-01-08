@@ -67,7 +67,6 @@ import Witch (into, tryFrom, unsafeInto, tryInto)
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
 import Crypto.Number.ModArithmetic (expFast)
-import Debug.Trace (traceM)
 
 blankState :: VMOps t => ST s (FrameState t s)
 blankState = do
@@ -331,7 +330,6 @@ exec1 = do
     else do
       let ?op = getOpW8 vm.state
       let opName = getOpName vm.state
-      -- traceM $ "Executing " ++ opName ++ " at " ++ show (vm.state.pc)
       case getOp (?op) of
 
         OpPush0 -> do
@@ -803,9 +801,7 @@ exec1 = do
               burn g_mid $ forceConcrete x "JUMP: symbolic jumpdest" $ \x' ->
                 case tryInto x' of
                   Left _ -> vmError BadJumpDestination
-                  Right i -> do
-                    traceM $ "Jumping to " ++ show i
-                    checkJump i xs
+                  Right i -> checkJump i xs
             _ -> underrun
 
         OpJumpi ->
@@ -1386,7 +1382,7 @@ query :: Query t s -> EVM t s ()
 query q = assign #result $ Just $ HandleEffect (Query q)
 
 choose :: Choose s -> EVM Symbolic s ()
-choose = assign #result . Just . HandleEffect . Choose
+choose c = assign #result $ Just $ HandleEffect (Choose c)
 
 -- | Construct RPC Query and halt execution until resolved
 fetchAccount :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
@@ -1706,8 +1702,13 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
                     , context = newContext
                     }
   case maybeLitWordSimp abi of
-    Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) "symbolic cheatcode selector" (wrap [abi])
-    Just (unsafeInto -> abi') ->
+    Nothing -> oneSolution abi $ \case
+      Just concAbi -> runCheat concAbi input
+      Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) "symbolic cheatcode selector" (wrap [abi])
+    Just concAbi -> runCheat concAbi input
+  where
+    runCheat abi input =  do
+      let abi' = unsafeInto abi
       case Map.lookup abi' cheatActions of
         Nothing -> vmError (BadCheatCode "Cannot understand cheatcode." abi')
         Just action -> action input
@@ -2629,7 +2630,6 @@ checkJump x xs = noJumpIntoInitData x $ do
     True -> do
       #state % #stack .= xs
       #state % #pc .= x
-      traceM $ "setting PC to " <> show x
     False -> vmError BadJumpDestination
 
 -- fails with partial if we're trying to jump into the symbolic region of an `InitCode`
@@ -2962,20 +2962,14 @@ instance VMOps Symbolic where
       choosePath loc Unknown =
         choose . PleaseChoosePath condSimp $ choosePath loc . Case
 
-  oneSolution symAddr continue = do
+  oneSolution ewordExpr continue = do
     pathconds <- use #constraints
-    pc <- zoom #state $ use #pc
-    traceM $ "oneSolution at pc: " ++ show pc
-    query $ PleaseGetSol symAddr pathconds calcAddr
-    where
-      calcAddr (Just concAddr) = do
+    query $ PleaseGetSol ewordExpr pathconds $ \case
+      Just concAddr -> do
         assign #result Nothing
-        traceM $ "oneSolution concAddrs: " ++ show concAddr
-        pushTo #constraints $ Expr.simplifyProp (symAddr .== (Lit concAddr))
-        continue (Just concAddr)
-      calcAddr Nothing = do
-        traceM "oneSolution symAddr"
-        continue Nothing
+        pushTo #constraints $ Expr.simplifyProp (ewordExpr .== (Lit concAddr))
+        continue $ Just concAddr
+      Nothing -> continue Nothing
 
 instance VMOps Concrete where
   burn' n continue = do
@@ -3099,16 +3093,12 @@ instance VMOps Concrete where
     push (into vm.state.gas)
 
   enoughGas cost gasCap = cost <= gasCap
-
   subGas gasCap cost = gasCap - cost
-
   toGas = id
-
   whenSymbolicElse _ a = a
-
   partial _ = internalError "won't happen during concrete exec"
-
   branch (forceLit -> cond) continue = continue (cond > 0)
+  oneSolution _ _ = internalError "SMT solver should never be needed in concrete mode"
 
 -- Create symbolic VM from concrete VM
 symbolify :: VM Concrete s -> VM Symbolic s

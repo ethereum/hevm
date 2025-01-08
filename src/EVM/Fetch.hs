@@ -28,7 +28,6 @@ import System.Environment (lookupEnv, getEnvironment)
 import System.Process
 import Control.Monad.IO.Class
 import EVM.Effects
-import Debug.Trace (traceM)
 
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where
@@ -215,7 +214,6 @@ oracle solvers info q = do
 
     PleaseGetSol symAddr pathconditions continue -> do
          let pathconds = foldl' PAnd (PBool True) pathconditions
-         -- traceM $ "Getting solution for " ++ show symAddr
          continue <$> getSolution solvers symAddr pathconds
 
     PleaseFetchContract addr base continue -> do
@@ -265,12 +263,10 @@ getSolution solvers symAddr pathconditions = do
           checkSat solvers (assertProps conf [(PEq (Var "addrQuery") symAddr) .&& conds]) >>= \case
             Sat (SMTCex vars _ _ _ _ _)  -> case (Map.lookup (Var "addrQuery") vars) of
               Just addr -> do
-                traceM $ "Model: " ++ show addr
                 let newConds = PAnd conds (symAddr ./= (Lit addr))
                 collectSolutions (addr:addrs) maxSols newConds conf
               _ -> pure $ Just addrs
             Unsat -> do
-              traceM "No (more) solution(s) found"
               pure $ Just addrs
             -- Error or timeout, we need to be conservative
             _ -> pure Nothing
