@@ -267,7 +267,7 @@ getSolution solvers symAddr pathconditions = do
                 let newConds = PAnd conds (symAddr ./= (Lit addr))
                 when conf.debug $ putStrLn $ "Got one solution to symbolic query:" <> show addr
                 collectSolutions (addr:addrs) maxSols newConds conf
-              _ -> pure $ Just addrs
+              _ -> internalError "No solution to symbolic query"
             Unsat -> do
               when conf.debug $ putStrLn "No more solution(s) to symbolic query."
               pure $ Just addrs
