@@ -1585,7 +1585,7 @@ notStatic continue = do
 forceAddr :: VMOps t => Expr EWord -> String -> (Expr EAddr -> EVM t s ()) -> EVM t s ()
 forceAddr n msg continue = case wordToAddr n of
   Nothing -> oneSolution n $ \case
-    Just sol -> maybe fallback continue (wordToAddr (Lit sol))
+    Just sol -> continue $ LitAddr (truncateToAddr sol)
     Nothing -> fallback
   Just c -> continue c
   where fallback = do
@@ -1602,10 +1602,11 @@ forceConcrete n msg continue = case maybeLitWordSimp n of
 
 forceConcreteAddr :: VMOps t => Expr EAddr -> String -> (Addr -> EVM t s ()) -> EVM t s ()
 forceConcreteAddr n msg continue = case maybeLitAddrSimp n of
-  Nothing -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+  Nothing -> oneSolution (WAddr n) $ maybe fallback $ \c -> continue $ unsafeInto c
   Just c -> continue c
+  where fallback = do
+          vm <- get
+          partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
 
 forceConcreteAddr2 :: VMOps t => (Expr EAddr, Expr EAddr) -> String -> ((Addr, Addr) -> EVM t s ()) -> EVM t s ()
 forceConcreteAddr2 (n,m) msg continue = case (maybeLitAddrSimp n, maybeLitAddrSimp m) of
@@ -2965,10 +2966,10 @@ instance VMOps Symbolic where
   oneSolution ewordExpr continue = do
     pathconds <- use #constraints
     query $ PleaseGetSol ewordExpr pathconds $ \case
-      Just concAddr -> do
+      Just concVal -> do
         assign #result Nothing
-        pushTo #constraints $ Expr.simplifyProp (ewordExpr .== (Lit concAddr))
-        continue $ Just concAddr
+        pushTo #constraints $ Expr.simplifyProp (ewordExpr .== (Lit concVal))
+        continue $ Just concVal
       Nothing -> continue Nothing
 
 instance VMOps Concrete where

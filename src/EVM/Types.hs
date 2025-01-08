@@ -618,9 +618,9 @@ instance Show (Query t s) where
       (("<EVM.Query: ask SMT about "
         ++ show condition ++ " in context "
         ++ show constraints ++ ">") ++)
-    PleaseGetSol addr constraints _ ->
-      (("<EVM.Query: get SMT solution for addr "
-        ++ show addr ++ " in context "
+    PleaseGetSol expr constraints _ ->
+      (("<EVM.Query: ask SMT to get W256 for expression "
+        ++ show expr ++ " in context "
         ++ show constraints ++ ">") ++)
     PleaseDoFFI cmd env _ ->
       (("<EVM.Query: do ffi: " ++ (show cmd) ++ " env: " ++ (show env)) ++)
