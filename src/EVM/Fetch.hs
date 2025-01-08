@@ -27,6 +27,7 @@ import Numeric.Natural (Natural)
 import System.Environment (lookupEnv, getEnvironment)
 import System.Process
 import Control.Monad.IO.Class
+import Control.Monad (when)
 import EVM.Effects
 
 -- | Abstract representation of an RPC fetch request
@@ -264,12 +265,16 @@ getSolution solvers symAddr pathconditions = do
             Sat (SMTCex vars _ _ _ _ _)  -> case (Map.lookup (Var "addrQuery") vars) of
               Just addr -> do
                 let newConds = PAnd conds (symAddr ./= (Lit addr))
+                when conf.debug $ putStrLn $ "Got one solution to symbolic query:" <> show addr
                 collectSolutions (addr:addrs) maxSols newConds conf
               _ -> pure $ Just addrs
             Unsat -> do
+              when conf.debug $ putStrLn "No more solution(s) to symbolic query."
               pure $ Just addrs
             -- Error or timeout, we need to be conservative
-            _ -> pure Nothing
+            res -> do
+              when conf.debug $ putStrLn $ "Symbolic query result is neither SAT nor UNSAT:" <> show res
+              pure Nothing
 
 -- | Checks which branches are satisfiable, checking the pathconditions for consistency
 -- if the third argument is true.
