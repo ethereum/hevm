@@ -232,6 +232,7 @@ assertPropsNoSimp psPreConc = do
   <> smt2Line ""
   <> keccakAssertions'
   <> readAssumes'
+  <> gasOrder
   <> smt2Line ""
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty mempty
   <> SMT2 smt mempty mempty
@@ -256,6 +257,7 @@ assertPropsNoSimp psPreConc = do
     allVars = fmap referencedVars toDeclarePsElim <> fmap referencedVars bufVals <> fmap referencedVars storeVals <> [abstrVars abst]
     frameCtx = fmap referencedFrameContext toDeclarePsElim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
     blockCtx = fmap referencedBlockContext toDeclarePsElim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
+    gasOrder = enforceGasOrder psPreConc
 
     abstrVars :: AbstState -> [Builder]
     abstrVars (AbstState b _) = map ((\v->fromString ("abst_" ++ show v)) . snd) (Map.toList b)
@@ -321,7 +323,7 @@ referencedFrameContext expr = nubOrd $ foldTerm go [] expr
     go = \case
       TxValue -> [(fromString "txvalue", [])]
       v@(Balance a) -> [(fromString "balance_" <> formatEAddr a, [PLT v (Lit $ 2 ^ (96 :: Int))])]
-      Gas {} -> internalError "TODO: GAS"
+      Gas freshVar -> [(fromString ("gas_" <> show freshVar), [])]
       _ -> []
 
 referencedBlockContext :: TraversableTerm a => a -> [(Builder, [Prop])]
@@ -437,6 +439,23 @@ declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) cex
   where
     declare n = "(declare-fun " <> n <> " () Addr)"
     cexvars = (mempty :: CexVars){ addrs = fmap toLazyText names }
+
+enforceGasOrder :: [Prop] -> SMT2
+enforceGasOrder ps = SMT2 (["; gas ordering"] <> order names) mempty mempty
+  where
+    order :: [Int] -> [Builder]
+    order n = consecutivePairs n >>= \case
+      -- The GAS instruction itself costs gas, so it's strictly decreasing
+      (x, y) -> ["(assert (< gas_" <> (fromString . show $ x) <> " gas_" <> (fromString . show $ y) <> "))"]
+    consecutivePairs :: [Int] -> [(Int, Int)]
+    consecutivePairs [] = []
+    consecutivePairs [_] = []
+    consecutivePairs (x:y:xs) = (x, y) : consecutivePairs (y:xs)
+    names :: [Int] = nubOrd $ concatMap (foldProp go mempty) ps
+    go :: Expr a -> [Int]
+    go e = case e of
+      Gas freshVar -> [freshVar]
+      _ -> []
 
 declareFrameContext :: [(Builder, [Prop])] -> Err SMT2
 declareFrameContext names = do
@@ -845,6 +864,7 @@ exprToSMT = \case
     encPrev <- exprToSMT prev
     pure $ "(store" `sp` encPrev `sp` encIdx `sp` encVal <> ")"
   SLoad idx store -> op2 "select" store idx
+  Gas freshVar -> pure $ fromLazyText $ "gas_"  <> (T.pack $ show freshVar)
 
   a -> internalError $ "TODO: implement: " <> show a
   where

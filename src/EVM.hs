@@ -810,7 +810,7 @@ exec1 = do
         OpJump ->
           case stk of
             x:xs ->
-              burn g_mid $ forceConcrete x "JUMP: symbolic jumpdest" $ \x' ->
+              burn g_mid $ forceConcreteLimitSz x 2 "JUMP: symbolic jumpdest" $ \x' ->
                 case tryInto x' of
                   Left _ -> vmError BadJumpDestination
                   Right i -> checkJump i xs
@@ -818,7 +818,7 @@ exec1 = do
 
         OpJumpi ->
           case stk of
-            x:y:xs -> forceConcrete x "JUMPI: symbolic jumpdest" $ \x' ->
+            x:y:xs -> forceConcreteLimitSz x 2 "JUMPI: symbolic jumpdest" $ \x' ->
               burn g_high $
                 let jump :: Bool -> EVM t s ()
                     jump False = assign (#state % #stack) xs >> next
@@ -887,7 +887,7 @@ exec1 = do
                       Left _ -> vmError IllegalOverflow
                       Right gas -> do
                         overrideC <- use $ #state % #overrideCaller
-                        delegateCall this gas xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs $
+                        delegateCall this gas xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs unknownCodeFallback $
                           \callee -> do
                             let from' = fromMaybe self overrideC
                             zoom #state $ do
@@ -908,7 +908,7 @@ exec1 = do
                   Left _ -> vmError IllegalOverflow
                   Right gas -> do
                     overrideC <- use $ #state % #overrideCaller
-                    delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs $ \_ -> do
+                    delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs unknownCodeFallback $ \_ -> do
                       zoom #state $ do
                         assign #callvalue xValue
                         assign #caller $ fromMaybe self overrideC
@@ -963,7 +963,7 @@ exec1 = do
                     Right gas ->
                       -- NOTE: we don't update overrideCaller in this case because
                       -- forge-std doesn't. see: https://github.com/foundry-rs/foundry/pull/8863
-                      delegateCall this gas xTo' self (Lit 0) xInOffset xInSize xOutOffset xOutSize xs $
+                      delegateCall this gas xTo' self (Lit 0) xInOffset xInSize xOutOffset xOutSize xs unknownCodeFallback $
                         \_ -> touchAccount self
             _ -> underrun
 
@@ -994,15 +994,15 @@ exec1 = do
           case stk of
             xGas:xTo:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
               case wordToAddr xTo of
-                Nothing -> fallback
+                Nothing -> fallback undefined
                 Just xTo' -> do
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
                     Right gas -> canFetchAccount xTo' >>= \case
-                      False -> fallback
+                      False -> fallback undefined
                       True -> do
                         overrideC <- use $ #state % #overrideCaller
-                        delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs $
+                        delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs fallback $
                           \callee -> do
                             zoom #state $ do
                               assign #callvalue (Lit 0)
@@ -1012,8 +1012,8 @@ exec1 = do
                             touchAccount self
                             touchAccount callee
               where
-                fallback :: EVM t s ()
-                fallback = do
+                fallback :: a -> EVM t s ()
+                fallback _ = do
                   -- Reset caller if needed
                   resetCaller <- use $ #state % #resetCaller
                   when resetCaller $ assign (#state % #overrideCaller) Nothing
@@ -1605,7 +1605,7 @@ notStatic continue = do
 
 forceAddr :: VMOps t => Expr EWord -> String -> (Expr EAddr -> EVM t s ()) -> EVM t s ()
 forceAddr n msg continue = case wordToAddr n of
-  Nothing -> oneSolution n $ \case
+  Nothing -> manySolutions n 20 $ \case
     Just sol -> continue $ LitAddr (truncateToAddr sol)
     Nothing -> fallback
   Just c -> continue c
@@ -1615,7 +1615,15 @@ forceAddr n msg continue = case wordToAddr n of
 
 forceConcrete :: VMOps t => Expr EWord -> String -> (W256 -> EVM t s ()) -> EVM t s ()
 forceConcrete n msg continue = case maybeLitWordSimp n of
-  Nothing -> oneSolution n $ maybe fallback continue
+  Nothing -> manySolutions n 32 $ maybe fallback continue
+  Just c -> continue c
+  where fallback = do
+          vm <- get
+          partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+
+forceConcreteLimitSz :: VMOps t => Expr EWord -> Int -> String -> (W256 -> EVM t s ()) -> EVM t s ()
+forceConcreteLimitSz n bytes msg continue = case maybeLitWordSimp n of
+  Nothing -> manySolutions n bytes $ maybe fallback continue
   Just c -> continue c
   where fallback = do
           vm <- get
@@ -1623,7 +1631,7 @@ forceConcrete n msg continue = case maybeLitWordSimp n of
 
 forceConcreteAddr :: VMOps t => Expr EAddr -> String -> (Addr -> EVM t s ()) -> EVM t s ()
 forceConcreteAddr n msg continue = case maybeLitAddrSimp n of
-  Nothing -> oneSolution (WAddr n) $ maybe fallback $ \c -> continue $ unsafeInto c
+  Nothing -> manySolutions (WAddr n) 20 $ maybe fallback $ \c -> continue (truncateToAddr c)
   Just c -> continue c
   where fallback = do
           vm <- get
@@ -1706,7 +1714,7 @@ cheatCode :: Expr EAddr
 cheatCode = LitAddr $ unsafeInto (keccak' "hevm cheat code")
 
 cheat
-  :: (?op :: Word8, VMOps t)
+  :: forall t s . (?op :: Word8, VMOps t)
   => Gas t -> (Expr EWord, Expr EWord) -> (Expr EWord, Expr EWord) -> [Expr EWord]
   -> EVM t s ()
 cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
@@ -1724,11 +1732,12 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
                     , context = newContext
                     }
   case maybeLitWordSimp abi of
-    Nothing -> oneSolution abi $ \case
+    Nothing -> manySolutions abi 4 $ \case
       Just concAbi -> runCheat concAbi input
       Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) "symbolic cheatcode selector" (wrap [abi])
     Just concAbi -> runCheat concAbi input
   where
+    runCheat :: W256 -> Expr 'Buf -> EVM t s ()
     runCheat abi input =  do
       let abi' = unsafeInto abi
       case Map.lookup abi' cheatActions of
@@ -2046,6 +2055,11 @@ cheatActions = Map.fromList
     assertLe = genAssert (<=) Expr.leq ">" "assertLe"
     assertGe = genAssert (>=) Expr.geq "<" "assertGe"
 
+unknownCodeFallback :: VMOps t => Expr EAddr -> EVM t s ()
+unknownCodeFallback xTo = do
+  pc <- use (#state % #pc)
+  state <- use #state
+  partial $ UnexpectedSymbolicArg pc (getOpName state) "call target has unknown code" (wrap [xTo])
 
 -- * General call implementation ("delegateCall")
 -- note that the continuation is ignored in the precompile case
@@ -2061,9 +2075,10 @@ delegateCall
   -> Expr EWord
   -> Expr EWord
   -> [Expr EWord]
-  -> (Expr EAddr -> EVM t s ())
+  -> (Expr EAddr -> EVM t s ()) -- fallback
+  -> (Expr EAddr -> EVM t s ()) -- continue
   -> EVM t s ()
-delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOutSize xs continue
+delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOutSize xs fallback continue
   | isPrecompileAddr xTo
       = forceConcreteAddr2 (xTo, xContext) "Cannot call precompile with symbolic addresses" $
           \(xTo', xContext') ->
@@ -2077,10 +2092,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           when resetCaller $ assign (#state % #overrideCaller) Nothing
           vm0 <- get
           fetchAccount xTo $ \target -> case target.code of
-              UnknownCode _ -> do
-                pc <- use (#state % #pc)
-                state <- use #state
-                partial $ UnexpectedSymbolicArg pc (getOpName state) "call target has unknown code" (wrap [xTo])
+              UnknownCode _ -> fallback xTo
               _ -> do
                 burn' xGas $ do
                   calldata <- readMemory xInOffset xInSize
@@ -2984,16 +2996,31 @@ instance VMOps Symbolic where
       choosePath loc Unknown =
         choose . PleaseChoosePath condSimp $ choosePath loc . Case
 
-  oneSolution ewordExpr continue = do
+  manySolutions ewordExpr numBytes continue = do
     pathconds <- use #constraints
-    query $ PleaseGetSol ewordExpr pathconds $ \case
-      Just concVal -> do
+    query $ PleaseGetSols ewordExpr numBytes pathconds $ \case
+      Just concVals -> do
         assign #result Nothing
-        pushTo #constraints $ Expr.simplifyProp (ewordExpr .== (Lit concVal))
-        continue $ Just concVal
+        case (length concVals) of
+          0 -> continue Nothing
+          1 -> runOne $ head concVals
+          _ -> choose . PleaseChoosePath ewordExpr $ runMore concVals
       Nothing -> do
         assign #result Nothing
         continue Nothing
+    where
+      runMore vals leftOrRight = do
+        case length vals of
+          -- if 2, we run both, otherwise, we run 1st and run ourselves with the rest
+          2 -> if leftOrRight then runOne $ head vals
+               else runOne (head $ tail vals)
+          _ -> if leftOrRight then runOne $ head vals
+               else choose . PleaseChoosePath ewordExpr $ runMore (tail vals)
+      runOne val = do
+        assign #result Nothing
+        pushTo #constraints $ Expr.simplifyProp (ewordExpr .== (Lit val))
+        continue $ Just val
+
 
 instance VMOps Concrete where
   burn' n continue = do
@@ -3122,7 +3149,7 @@ instance VMOps Concrete where
   whenSymbolicElse _ a = a
   partial _ = internalError "won't happen during concrete exec"
   branch (forceLit -> cond) continue = continue (cond > 0)
-  oneSolution _ _ = internalError "SMT solver should never be needed in concrete mode"
+  manySolutions _ _ _ = internalError "SMT solver should never be needed in concrete mode"
 
 -- Create symbolic VM from concrete VM
 symbolify :: VM Concrete s -> VM Symbolic s
