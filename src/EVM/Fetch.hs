@@ -27,6 +27,7 @@ import Numeric.Natural (Natural)
 import System.Environment (lookupEnv, getEnvironment)
 import System.Process
 import Control.Monad.IO.Class
+import Control.Monad (when)
 import EVM.Effects
 
 -- | Abstract representation of an RPC fetch request
@@ -212,6 +213,10 @@ oracle solvers info q = do
          -- Is is possible to satisfy the condition?
          continue <$> checkBranch solvers (branchcondition ./= (Lit 0)) pathconds
 
+    PleaseGetSol symAddr pathconditions continue -> do
+         let pathconds = foldl' PAnd (PBool True) pathconditions
+         continue <$> getSolution solvers symAddr pathconds
+
     PleaseFetchContract addr base continue -> do
       contract <- case info of
         Nothing -> let
@@ -238,6 +243,38 @@ oracle solvers info q = do
       pure . continue $ fromMaybe "" value
 
 type Fetcher t m s = App m => Query t s -> m (EVM t s ())
+
+getSolution :: forall m . App m => SolverGroup -> Expr EWord -> Prop -> m (Maybe W256)
+getSolution solvers symAddr pathconditions = do
+  conf <- readConfig
+  liftIO $ do
+    ret <- collectSolutions [] 1 pathconditions conf
+    case ret of
+      Nothing -> pure Nothing
+      Just r -> case length r of
+        0 -> pure Nothing
+        -- Temporary, a future improvement can deal with more than one solution
+        1 -> pure $ Just (r !! 0)
+        _ -> pure Nothing
+    where
+      collectSolutions :: [W256] -> Int -> Prop -> Config -> IO (Maybe [W256])
+      collectSolutions addrs maxSols conds conf = do
+        if (length addrs > maxSols) then pure Nothing
+        else
+          checkSat solvers (assertProps conf [(PEq (Var "addrQuery") symAddr) .&& conds]) >>= \case
+            Sat (SMTCex vars _ _ _ _ _)  -> case (Map.lookup (Var "addrQuery") vars) of
+              Just addr -> do
+                let newConds = PAnd conds (symAddr ./= (Lit addr))
+                when conf.debug $ putStrLn $ "Got one solution to symbolic query:" <> show addr <> " now have " <> show (length addrs + 1) <> " solution(s), max is: " <> show maxSols
+                collectSolutions (addr:addrs) maxSols newConds conf
+              _ -> internalError "No solution to symbolic query"
+            Unsat -> do
+              when conf.debug $ putStrLn "No more solution(s) to symbolic query."
+              pure $ Just addrs
+            -- Error or timeout, we need to be conservative
+            res -> do
+              when conf.debug $ putStrLn $ "Symbolic query result is neither SAT nor UNSAT:" <> show res
+              pure Nothing
 
 -- | Checks which branches are satisfiable, checking the pathconditions for consistency
 -- if the third argument is true.

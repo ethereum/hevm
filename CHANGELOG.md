@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JoinBytes simplification rule
 - New simplification rule to help deal with abi.encodeWithSelector
 - More simplification rules for Props
+- Using the SMT solver to get a single concrete value for a symbolic expression
+  and continue running, whenever possible
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value

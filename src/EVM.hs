@@ -330,7 +330,6 @@ exec1 = do
     else do
       let ?op = getOpW8 vm.state
       let opName = getOpName vm.state
-
       case getOp (?op) of
 
         OpPush0 -> do
@@ -1380,10 +1379,10 @@ getCodeLocation :: VM t s -> CodeLocation
 getCodeLocation vm = (vm.state.contract, vm.state.pc)
 
 query :: Query t s -> EVM t s ()
-query = assign #result . Just . HandleEffect . Query
+query q = assign #result $ Just $ HandleEffect (Query q)
 
 choose :: Choose s -> EVM Symbolic s ()
-choose = assign #result . Just . HandleEffect . Choose
+choose c = assign #result $ Just $ HandleEffect (Choose c)
 
 -- | Construct RPC Query and halt execution until resolved
 fetchAccount :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
@@ -1403,11 +1402,11 @@ fetchAccount addr continue =
           Nothing -> do
             base <- use (#config % #baseState)
             assign (#result) . Just . HandleEffect . Query $
-              PleaseFetchContract a base
-                (\c -> do assign (#cache % #fetched % at a) (Just c)
-                          assign (#env % #contracts % at addr) (Just c)
-                          assign #result Nothing
-                          continue c)
+              PleaseFetchContract a base $ \c -> do
+                assign (#cache % #fetched % at a) (Just c)
+                assign (#env % #contracts % at addr) (Just c)
+                assign #result Nothing
+                continue c
       GVar _ -> internalError "Unexpected GVar"
 
 accessStorage
@@ -1446,13 +1445,11 @@ accessStorage addr slot continue = do
         else do
           modifying (#env % #contracts % ix addr % #storage) (writeStorage slot (Lit 0))
           continue $ Lit 0
-      mkQuery a s = query $
-        PleaseFetchSlot a s
-          (\x -> do
+      mkQuery a s = query $ PleaseFetchSlot a s $ \x -> do
               modifying (#cache % #fetched % ix a % #storage) (writeStorage (Lit s) (Lit x))
               modifying (#env % #contracts % ix (LitAddr a) % #storage) (writeStorage (Lit s) (Lit x))
               assign #result Nothing
-              continue (Lit x))
+              continue $ Lit x
 
 accessTStorage
   :: VMOps t => Expr EAddr
@@ -1585,24 +1582,29 @@ notStatic continue = do
 
 forceAddr :: VMOps t => Expr EWord -> String -> (Expr EAddr -> EVM t s ()) -> EVM t s ()
 forceAddr n msg continue = case wordToAddr n of
-  Nothing -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+  Nothing -> oneSolution n $ \case
+    Just sol -> continue $ LitAddr (truncateToAddr sol)
+    Nothing -> fallback
   Just c -> continue c
+  where fallback = do
+          vm <- get
+          partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
 
 forceConcrete :: VMOps t => Expr EWord -> String -> (W256 -> EVM t s ()) -> EVM t s ()
 forceConcrete n msg continue = case maybeLitWordSimp n of
-  Nothing -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+  Nothing -> oneSolution n $ maybe fallback continue
   Just c -> continue c
+  where fallback = do
+          vm <- get
+          partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
 
 forceConcreteAddr :: VMOps t => Expr EAddr -> String -> (Addr -> EVM t s ()) -> EVM t s ()
 forceConcreteAddr n msg continue = case maybeLitAddrSimp n of
-  Nothing -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+  Nothing -> oneSolution (WAddr n) $ maybe fallback $ \c -> continue $ unsafeInto c
   Just c -> continue c
+  where fallback = do
+          vm <- get
+          partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
 
 forceConcreteAddr2 :: VMOps t => (Expr EAddr, Expr EAddr) -> String -> ((Addr, Addr) -> EVM t s ()) -> EVM t s ()
 forceConcreteAddr2 (n,m) msg continue = case (maybeLitAddrSimp n, maybeLitAddrSimp m) of
@@ -1699,8 +1701,13 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
                     , context = newContext
                     }
   case maybeLitWordSimp abi of
-    Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) "symbolic cheatcode selector" (wrap [abi])
-    Just (unsafeInto -> abi') ->
+    Nothing -> oneSolution abi $ \case
+      Just concAbi -> runCheat concAbi input
+      Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) "symbolic cheatcode selector" (wrap [abi])
+    Just concAbi -> runCheat concAbi input
+  where
+    runCheat abi input =  do
+      let abi' = unsafeInto abi
       case Map.lookup abi' cheatActions of
         Nothing -> vmError (BadCheatCode "Cannot understand cheatcode." abi')
         Just action -> action input
@@ -2933,7 +2940,7 @@ instance VMOps Symbolic where
   toGas _ = ()
   whenSymbolicElse a _ = a
 
-  partial e = assign #result (Just (Unfinished e))
+  partial e = assign #result $ Just (Unfinished e)
   branch cond continue = do
     loc <- codeloc
     pathconds <- use #constraints
@@ -2953,6 +2960,17 @@ instance VMOps Symbolic where
       -- Both paths are possible; we ask for more input
       choosePath loc Unknown =
         choose . PleaseChoosePath condSimp $ choosePath loc . Case
+
+  oneSolution ewordExpr continue = do
+    pathconds <- use #constraints
+    query $ PleaseGetSol ewordExpr pathconds $ \case
+      Just concVal -> do
+        assign #result Nothing
+        pushTo #constraints $ Expr.simplifyProp (ewordExpr .== (Lit concVal))
+        continue $ Just concVal
+      Nothing -> do
+        assign #result Nothing
+        continue Nothing
 
 instance VMOps Concrete where
   burn' n continue = do
@@ -3076,16 +3094,12 @@ instance VMOps Concrete where
     push (into vm.state.gas)
 
   enoughGas cost gasCap = cost <= gasCap
-
   subGas gasCap cost = gasCap - cost
-
   toGas = id
-
   whenSymbolicElse _ a = a
-
   partial _ = internalError "won't happen during concrete exec"
-
   branch (forceLit -> cond) continue = continue (cond > 0)
+  oneSolution _ _ = internalError "SMT solver should never be needed in concrete mode"
 
 -- Create symbolic VM from concrete VM
 symbolify :: VM Concrete s -> VM Symbolic s

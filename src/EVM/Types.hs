@@ -594,6 +594,7 @@ data Query t s where
   PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM t s ()) -> Query t s
   PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM t s ()) -> Query t s
   PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM Symbolic s ()) -> Query Symbolic s
+  PleaseGetSol        :: Expr EWord -> [Prop] -> (Maybe W256 -> EVM Symbolic s ()) -> Query Symbolic s
   PleaseDoFFI         :: [String] -> Map String String -> (ByteString -> EVM t s ()) -> Query t s
   PleaseReadEnv       :: String -> (String -> EVM t s ()) -> Query t s
 
@@ -616,6 +617,10 @@ instance Show (Query t s) where
     PleaseAskSMT condition constraints _ ->
       (("<EVM.Query: ask SMT about "
         ++ show condition ++ " in context "
+        ++ show constraints ++ ">") ++)
+    PleaseGetSol expr constraints _ ->
+      (("<EVM.Query: ask SMT to get W256 for expression "
+        ++ show expr ++ " in context "
         ++ show constraints ++ ">") ++)
     PleaseDoFFI cmd env _ ->
       (("<EVM.Query: do ffi: " ++ (show cmd) ++ " env: " ++ (show env)) ++)
@@ -854,6 +859,7 @@ class VMOps (t :: VMType) where
 
   partial :: PartialExec -> EVM t s ()
   branch :: Expr EWord -> (Bool -> EVM t s ()) -> EVM t s ()
+  oneSolution :: Expr EWord -> (Maybe W256 -> EVM t s ()) -> EVM t s ()
 
 -- Bytecode Representations ------------------------------------------------------------------------
 
