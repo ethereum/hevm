@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - We now try to simplify expressions fully before trying to cast them to a concrete value
   This should improve issues when "Unexpected Symbolic Arguments to Opcode" was
   unnecessarily output
+- Removed dead code related to IOAct in the now deprecated and removed debugger
 
 ## [0.54.2] - 2024-12-12
 
