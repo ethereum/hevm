@@ -288,13 +288,16 @@ getOpW8 state = case state.code of
 getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
 getOpName state = intToOpName $ fromEnum $ getOpW8 state
 
+-- If the address is already in the cache, or can be obtained via API, return True
+-- otherwise, return False
 canFetchAccount :: forall (t :: VMType) s . VMOps t => Expr EAddr -> EVM t s (Bool)
 canFetchAccount addr = do
   use (#env % #contracts % at addr) >>= \case
     Just _ -> pure True
     Nothing -> case addr of
+      LitAddr _ -> pure True
       SymAddr _ -> pure False
-      _ -> pure True
+      GVar _ -> internalError "GVar not allowed here"
 
 -- | Executes the EVM one step
 exec1 :: forall (t :: VMType) s. VMOps t => EVM t s ()
