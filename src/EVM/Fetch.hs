@@ -265,7 +265,7 @@ getSolution solvers symAddr pathconditions = do
             Sat (SMTCex vars _ _ _ _ _)  -> case (Map.lookup (Var "addrQuery") vars) of
               Just addr -> do
                 let newConds = PAnd conds (symAddr ./= (Lit addr))
-                when conf.debug $ putStrLn $ "Got one solution to symbolic query:" <> show addr
+                when conf.debug $ putStrLn $ "Got one solution to symbolic query:" <> show addr <> " now have " <> show (length addrs + 1) <> " solution(s)."
                 collectSolutions (addr:addrs) maxSols newConds conf
               _ -> internalError "No solution to symbolic query"
             Unsat -> do
