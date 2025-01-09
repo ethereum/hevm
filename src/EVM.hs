@@ -2942,7 +2942,7 @@ instance VMOps Symbolic where
   toGas _ = ()
   whenSymbolicElse a _ = a
 
-  partial e = assign #result (Just (Unfinished e))
+  partial e = assign #result $ Just (Unfinished e)
   branch cond continue = do
     loc <- codeloc
     pathconds <- use #constraints
