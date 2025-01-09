@@ -1402,11 +1402,11 @@ fetchAccount addr continue =
           Nothing -> do
             base <- use (#config % #baseState)
             assign (#result) . Just . HandleEffect . Query $
-              PleaseFetchContract a base
-                (\c -> do assign (#cache % #fetched % at a) (Just c)
-                          assign (#env % #contracts % at addr) (Just c)
-                          assign #result Nothing
-                          continue c)
+              PleaseFetchContract a base $ \c -> do
+                assign (#cache % #fetched % at a) (Just c)
+                assign (#env % #contracts % at addr) (Just c)
+                assign #result Nothing
+                continue c
       GVar _ -> internalError "Unexpected GVar"
 
 accessStorage
@@ -1445,13 +1445,11 @@ accessStorage addr slot continue = do
         else do
           modifying (#env % #contracts % ix addr % #storage) (writeStorage slot (Lit 0))
           continue $ Lit 0
-      mkQuery a s = query $
-        PleaseFetchSlot a s
-          (\x -> do
+      mkQuery a s = query $ PleaseFetchSlot a s $ \x -> do
               modifying (#cache % #fetched % ix a % #storage) (writeStorage (Lit s) (Lit x))
               modifying (#env % #contracts % ix (LitAddr a) % #storage) (writeStorage (Lit s) (Lit x))
               assign #result Nothing
-              continue (Lit x))
+              continue $ Lit x
 
 accessTStorage
   :: VMOps t => Expr EAddr
@@ -2970,7 +2968,9 @@ instance VMOps Symbolic where
         assign #result Nothing
         pushTo #constraints $ Expr.simplifyProp (ewordExpr .== (Lit concVal))
         continue $ Just concVal
-      Nothing -> continue Nothing
+      Nothing -> do
+        assign #result Nothing
+        continue Nothing
 
 instance VMOps Concrete where
   burn' n continue = do

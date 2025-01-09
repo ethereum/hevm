@@ -248,7 +248,7 @@ getSolution :: forall m . App m => SolverGroup -> Expr EWord -> Prop -> m (Maybe
 getSolution solvers symAddr pathconditions = do
   conf <- readConfig
   liftIO $ do
-    ret <- collectSolutions [] 2 pathconditions conf
+    ret <- collectSolutions [] 1 pathconditions conf
     case ret of
       Nothing -> pure Nothing
       Just r -> case length r of
@@ -259,13 +259,13 @@ getSolution solvers symAddr pathconditions = do
     where
       collectSolutions :: [W256] -> Int -> Prop -> Config -> IO (Maybe [W256])
       collectSolutions addrs maxSols conds conf = do
-        if (length addrs >= maxSols) then pure Nothing
+        if (length addrs > maxSols) then pure Nothing
         else
           checkSat solvers (assertProps conf [(PEq (Var "addrQuery") symAddr) .&& conds]) >>= \case
             Sat (SMTCex vars _ _ _ _ _)  -> case (Map.lookup (Var "addrQuery") vars) of
               Just addr -> do
                 let newConds = PAnd conds (symAddr ./= (Lit addr))
-                when conf.debug $ putStrLn $ "Got one solution to symbolic query:" <> show addr <> " now have " <> show (length addrs + 1) <> " solution(s)."
+                when conf.debug $ putStrLn $ "Got one solution to symbolic query:" <> show addr <> " now have " <> show (length addrs + 1) <> " solution(s), max is: " <> show maxSols
                 collectSolutions (addr:addrs) maxSols newConds conf
               _ -> internalError "No solution to symbolic query"
             Unsat -> do
