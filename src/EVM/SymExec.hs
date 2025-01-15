@@ -680,6 +680,7 @@ equivalenceCheck
   -> (Expr Buf, [Prop])
   -> m [EquivResult]
 equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
+  conf <- readConfig
   case bytecodeA == bytecodeB of
     True -> liftIO $ do
       putStrLn "bytecodeA and bytecodeB are identical"
@@ -687,6 +688,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
     False -> do
       branchesA <- getBranches bytecodeA
       branchesB <- getBranches bytecodeB
+      when conf.debug $ liftIO $ do
+        putStrLn "bytecodeA and bytecodeB are different, checking for equivalence"
       equivalenceCheck' solvers branchesA branchesB
   where
     -- decompiles the given bytecode into a list of branches

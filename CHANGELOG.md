@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - We now try to simplify expressions fully before trying to cast them to a concrete value
   This should improve issues when "Unexpected Symbolic Arguments to Opcode" was
   unnecessarily output
+- STATICCALL abstraction left incorrect stack, fixed
+- Not all testcases ran due to incorrect filtering, fixed
 
 ## [0.54.2] - 2024-12-12
 

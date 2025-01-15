@@ -3926,6 +3926,10 @@ tests = testGroup "hevm"
                     , "unusedStoreEliminator/tstore.yul"
                     , "yulOptimizerTests/fullSuite/transient_storage.yul"
                     , "yulOptimizerTests/unusedPruner/transient_storage.yul"
+
+                    -- Bug in solidity, fized in newer versions:
+                    -- https://github.com/ethereum/solidity/issues/15397#event-14116827816
+                    , "no_move_transient_storage.yul"
                     ]
 
         solcRepo <- liftIO $ fromMaybe (internalError "cannot find solidity repo") <$> (lookupEnv "HEVM_SOLIDITY_REPO")
@@ -3944,7 +3948,7 @@ tests = testGroup "hevm"
                 False -> recursiveList ax (a:b)
           recursiveList [] b = pure b
         files <- liftIO $ recursiveList fullpaths []
-        let filesFiltered = filter (\file -> not $ any (`List.isSubsequenceOf` file) ignoredTests) files
+        let filesFiltered = filter (\file -> not $ any (`List.isInfixOf` file) ignoredTests) files
 
         -- Takes one file which follows the Solidity Yul optimizer unit tests format,
         -- extracts both the nonoptimized and the optimized versions, and checks equivalence.
