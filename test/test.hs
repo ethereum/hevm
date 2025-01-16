@@ -3428,7 +3428,7 @@ tests = testGroup "hevm"
             }
             |]
           let sig = (Just (Sig "fun(bytes)" [AbiBytesDynamicType]))
-          (_, [(Cex _)]) <- withSolvers Z3 1 Nothing $ \s -> checkAssert s [0x01] c sig [] defaultVeriOpts
+          (_, [(Cex _)]) <- withDefaultSolver $ \s -> checkAssert s [0x01] c sig [] defaultVeriOpts
           putStrLnM "Expected counterexample found"
   ]
   , testGroup "concr-fuzz"

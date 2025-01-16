@@ -140,7 +140,7 @@ symAbiArg name = \case
   AbiTupleType tps ->
     Comp . V.toList . V.imap (\(T.pack . show -> i) tp -> symAbiArg (name <> "-t-" <> i) tp) $ tps
   AbiBytesDynamicType -> do
-    let arr = (AbstractBuf ("db-" <> name))
+    let arr = AbstractBuf ("db-" <> name)
         sz = BufLength arr
     Dy [PEq (Expr.eq (Lit 1) (Lit 1)) (Lit 0x1)] sz arr
   t -> internalError $ "TODO: symbolic abi encoding for " <> show t
