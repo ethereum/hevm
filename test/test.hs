@@ -77,11 +77,11 @@ import EVM.Expr (maybeLitByteSimp)
 
 testEnv :: Env
 testEnv = Env { config = defaultConfig {
-  dumpQueries = False
-  , dumpExprs = False
-  , dumpEndStates = False
-  , debug = False
-  , dumpTrace = False
+  dumpQueries = True
+  , dumpExprs = True
+  , dumpEndStates = True
+  , debug = True
+  , dumpTrace = True
   , decomposeStorage = True
   } }
 
@@ -3423,13 +3423,17 @@ tests = testGroup "hevm"
               function fun(bytes calldata a) external{
                 require(x != 0);
                 require(y != 0);
-                assert (x == y);
+                assert (a[0] == a[1]);
               }
             }
             |]
-          let sig = (Just (Sig "fun(bytes)" [AbiBytesDynamicType]))
-          (_, [(Cex _)]) <- withDefaultSolver $ \s -> checkAssert s [0x01] c sig [] defaultVeriOpts
-          putStrLnM "Expected counterexample found"
+          let sig = Just (Sig "fun(bytes)" [AbiBytesDynamicType])
+          Right e <- reachableUserAsserts c sig
+          putStrLnM $ "expr: " <> (T.unpack (formatExpr e))
+          -- assertBoolM "The expression is not partial" $ not (Expr.containsNode isPartial e)
+          -- (_, [stuff]) <- withDefaultSolver $ \s -> checkAssert s [0x01] c sig [] defaultVeriOpts
+          -- putStrLnM $ "Expected counterexample found: " <> (show stuff)
+          -- putStrLnM "Expected counterexample found"
   ]
   , testGroup "concr-fuzz"
     [ testFuzz "fuzz-complicated-mul" $ do

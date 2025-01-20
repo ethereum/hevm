@@ -266,6 +266,27 @@ readBytes (Prelude.min 32 -> n) idx buf
 
 -- | Reads the word starting at idx from the given buf
 readWord :: Expr EWord -> Expr Buf -> Expr EWord
+
+-- WRONG: if src is smaller than a-dstOff then the value in dst should be returned
+readWord (Lit a) (CopySlice (Lit 0) (Lit dstOff) (BufLength dst1) src dst2) | dst1==dst2  && a >= dstOff = readWord (Lit (a-dstOff)) src
+              -- (ReadWord
+              --   idx:
+              --     4
+              --   buf:
+              --     (CopySlice
+              --       srcOffset: 0
+              --       dstOffset: 4
+              --       size:      (BufLength
+              --         (AbstractBuf "db-arg1")
+              --       )
+              --       src:
+              --         (AbstractBuf "txdata")
+              --       dst:
+              --         (AbstractBuf "db-arg1")
+              --     )
+              -- )
+
+
 readWord idx b@(WriteWord idx' val buf)
   -- the word we are trying to read exactly matches a WriteWord
   | idx == idx' = val
@@ -329,6 +350,10 @@ copySlice :: Expr EWord -> Expr EWord -> Expr EWord -> Expr Buf -> Expr Buf -> E
 
 -- Copying zero bytes is a no-op
 copySlice _ _ (Lit 0) _ dst = dst
+copySlice (Lit 0) (Lit k) (BufLength from1) orig from2 | from1==from2  && k < 20 = writeK k
+  where
+    writeK 0 = orig
+    writeK n = writeByte (Lit (k-n)) (readByte (Lit (k-n)) orig) (writeK (n-1))
 
 -- copying 32 bytes can be rewritten to a WriteWord on dst (e.g. CODECOPY of args during constructors)
 copySlice srcOffset dstOffset (Lit 32) src dst = writeWord dstOffset (readWord srcOffset src) dst

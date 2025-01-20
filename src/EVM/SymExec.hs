@@ -142,7 +142,8 @@ symAbiArg name = \case
   AbiBytesDynamicType -> do
     let arr = AbstractBuf ("db-" <> name)
         sz = BufLength arr
-    Dy [PEq (Expr.eq (Lit 1) (Lit 1)) (Lit 0x1)] sz arr
+        limit = Expr.bufLength arr .< (Lit (2 ^ (10 :: Integer)))
+    Dy [limit] sz arr
   t -> internalError $ "TODO: symbolic abi encoding for " <> show t
   where
     v = Var name
@@ -175,7 +176,7 @@ symCalldata sig typesignature concreteArgs base =
     withSelector = writeSelector cdBuf sig
     sizeConstraints
       = (Expr.bufLength withSelector .>= cdLen calldatas)
-      .&& (Expr.bufLength withSelector .< (Lit (2 ^ (64 :: Integer))))
+      .&& (Expr.bufLength withSelector .< (Lit (2 ^ (10 :: Integer))))
   in (withSelector, sizeConstraints : props)
 
 cdLen :: [CalldataFragment] -> Expr EWord
@@ -229,7 +230,7 @@ abstractVM cd contractCode maybepre create = do
   let precond = case maybepre of
                 Nothing -> []
                 Just p -> [p vm]
-  pure $ vm & over #constraints (<> precond)
+  pure $ vm & over #constraints (<> precond <> snd cd)
 
 loadSymVM
   :: ContractCode
@@ -483,7 +484,7 @@ mkCalldata Nothing _ =
   -- this is way larger than would ever be allowed by the gas limit
   -- and avoids spurious counterexamples during abi decoding
   -- TODO: can we encode calldata as an array with a smaller length?
-  , [Expr.bufLength (AbstractBuf "txdata") .< (Lit (2 ^ (64 :: Integer)))]
+  , [Expr.bufLength (AbstractBuf "txdata") .< (Lit (2 ^ (10 :: Integer)))]
   )
 mkCalldata (Just (Sig name types)) args =
   symCalldata name types args (AbstractBuf "txdata")
@@ -500,6 +501,7 @@ verifyContract
   -> m (Expr End, [VerifyResult])
 verifyContract solvers theCode signature' concreteArgs opts maybepre maybepost = do
   preState <- liftIO $ stToIO $ abstractVM (mkCalldata signature' concreteArgs) theCode maybepre False
+  liftIO $ putStrLn $ "starting constraints: " <> show preState.constraints
   verify solvers opts preState maybepost
 
 -- | Stepper that parses the result of Stepper.runFully into an Expr End
@@ -968,7 +970,7 @@ prettyCalldata cex buf sig types = headErr errSig (T.splitOn "(" sig) <> "(" <> 
           ConcreteBuf c -> T.pack (bsToHex c)
           _ -> err
       SAbi _ -> err
-    headErr e l = fromMaybe e $ listToMaybe l 
+    headErr e l = fromMaybe e $ listToMaybe l
     err = internalError $ "unable to produce a concrete model for calldata: " <> show buf
     errSig = internalError $ "unable to split sig: " <> show sig
 
