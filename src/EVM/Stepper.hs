@@ -10,7 +10,6 @@ module EVM.Stepper
   , wait
   , ask
   , evm
-  , evmIO
   , enter
   , interpret
   )
@@ -49,9 +48,6 @@ data Action t s a where
   -- | Embed a VM state transformation
   EVM  :: EVM t s a -> Action t s a
 
-  -- | Perform an IO action
-  IOAct :: IO a -> Action t s a
-
 -- | Type alias for an operational monad of @Action@
 type Stepper t s a = Program (Action t s) a
 
@@ -71,9 +67,6 @@ ask = singleton . Ask
 
 evm :: EVM t s a -> Stepper t s a
 evm = singleton . EVM
-
-evmIO :: IO a -> Stepper t s a
-evmIO = singleton . IOAct
 
 -- | Run the VM until final result, resolving all queries
 execFully :: Stepper Concrete s (Either EvmError (Expr Buf))
@@ -121,9 +114,6 @@ interpret fetcher vm = eval . view
           m <- fetcher q
           vm' <- liftIO $ stToIO $ execStateT m vm
           interpret fetcher vm' (k ())
-        IOAct m -> do
-          r <- liftIO m
-          interpret fetcher vm (k r)
         EVM m -> do
           (r, vm') <- liftIO $ stToIO $ runStateT m vm
           interpret fetcher vm' (k r)
