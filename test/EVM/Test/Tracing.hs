@@ -581,8 +581,6 @@ interpretWithTrace fetcher =
           vm' <- liftIO $ stToIO $ State.execStateT m vm
           assign _1 vm'
           interpretWithTrace fetcher (k ())
-        Stepper.IOAct q ->
-          liftIO q >>= interpretWithTrace fetcher . k
         Stepper.EVM m -> do
           vm <- use _1
           (r, vm') <- liftIO $ stToIO $ State.runStateT m vm
