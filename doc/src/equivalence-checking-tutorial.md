@@ -138,3 +138,71 @@ command line, although this can become cumbersome:
 ```shell
 $ hevm equivalence --code-a "6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f600190506002811460455760446048565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212208c57ae04774d9ebae7d1d11f9d5e730075068bc7988d4c83c6fed85b7f062e7b64736f6c634300081a0033" --code-b "6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220bd2f8a1ba281308f845e212d2b5eceab85e029909fa2409cdca7ede039bae26564736f6c634300081a0033"
 ```
+
+## Working with Raw Bytcode
+
+The following contract is written in raw assembly. It takes the 1st byte of the
+calldata, multiplies it by 0, and stores it in memory, then returns this value:
+
+```
+PUSH1 0x00
+CALLDATALOAD
+PUSH1 0x00
+MUL
+PUSH1 0x00
+MSTORE
+PUSH1 0x01
+PUSH1 0x00
+RETURN
+```
+
+This can be compiled into bytecode via e.g. [evm.codes](https://evm.codes/),
+which allows us to both simulate this, and to get a bytecode for it: `60003560000260005260016000f3`
+
+Let's compare the above code to an assemblky contract that simply returns 0:
+
+```
+PUSH32 0x0
+PUSH1 0x00
+MSTORE
+PUSH1 0x01
+PUSH1 0x00
+RETURN
+```
+
+This second contract compiles to:
+`7f000000000000000000000000000000000000000000000000000000000000000060005260016000f3`.
+
+
+Let's check whether the two are equivalent:
+
+```shell
+$ hevm equivalence --code-a "60003560000260005260016000f3" --code-b "7f000000000000000000000000000000000000000000000000000000000000000060005260016000f3"
+Found 1 total pairs of endstates
+Asking the SMT solver for 1 pairs
+No discrepancies found
+```
+
+If however we replace the
+```
+PUSH32 0x0
+```
+with
+```
+PUSH32 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+```
+we get:
+
+```shell
+$ hevm equivalence --code-a "60003560000260005260016000f3" --code-b "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff60005260016000f3"
+Found 1 total pairs of endstates
+Asking the SMT solver for 1 pairs
+Reuse of previous queries was Useful in 0 cases
+Not equivalent. The following inputs result in differing behaviours:
+-----
+Calldata:
+  Empty
+```
+
+Which shows that even with empty calldata, the two are not equivalent: one
+returns `0xff` and the other `0x0`.
