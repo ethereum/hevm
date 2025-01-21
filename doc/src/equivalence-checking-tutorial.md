@@ -141,8 +141,12 @@ $ hevm equivalence --code-a "6080604052348015600e575f80fd5b50600436106026575f356
 
 ## Working with Raw Bytcode
 
-The following contract is written in raw assembly. It takes the 1st byte of the
-calldata, multiplies it by 0, and stores it in memory, then returns this value:
+When doing equivalance checking, the returndata of the two systems are
+compared, and the calldata is set to be symbolic. This allows us to compare raw
+bytecode as well -- the code does not need to adhere to the Solidity ABI.
+The following contract is written in raw assembly. It takes
+the 1st byte of the calldata, multiplies it by 0, and stores it in memory, then
+returns this value:
 
 ```
 PUSH1 0x00
