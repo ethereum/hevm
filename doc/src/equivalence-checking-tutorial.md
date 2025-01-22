@@ -144,7 +144,6 @@ $ hevm equivalence --code-a "6080604052348015600e575f80fd5b50600436106026575f356
 When doing equivalance checking, the returndata of the two systems are
 compared, and the calldata is set to be symbolic. This allows us to compare raw
 bytecode as well -- the code does not need to adhere to the Solidity ABI.
-Here, we'll demonstrate this with two raw assembly contracts.
 
 The following contract is written in raw assembly. It takes
 the 1st byte of the calldata, multiplies it by 0, and stores it in memory, then
@@ -163,9 +162,9 @@ RETURN
 ```
 
 This can be compiled into bytecode via e.g. [evm.codes](https://evm.codes/),
-which allows us to both simulate this, and to get a bytecode for it: `60003560000260005260016000f3`
+which allows us to both simulate this, and to get a bytecode for it: `60003560000260005260016000f3`. Notice that since anything multiplied by 0 is zero, for any calldata, this will put 0 into the returndata.
 
-Let's compare the above code to an assemblky contract that simply returns 0:
+Let's compare the above code to an assembly contract that simply returns 0:
 
 ```
 PUSH32 0x0
