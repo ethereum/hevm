@@ -211,6 +211,7 @@ main = withUtf8 $ do
   let env = Env { config = defaultConfig
     { dumpQueries = cmd.smtdebug
     , debug = cmd.debug
+    , dumpEndStates = cmd.debug
     , dumpExprs = cmd.debug
     , numCexFuzz = cmd.numCexFuzz
     , dumpTrace = cmd.trace
