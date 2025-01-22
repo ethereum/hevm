@@ -1011,21 +1011,20 @@ exec1 = do
                               assign #static True
                             touchAccount self
                             touchAccount callee
-            _ ->
-              underrun
-            where
-              fallback = do
-                -- Reset caller if needed
-                resetCaller <- use $ #state % #resetCaller
-                when resetCaller $ assign (#state % #overrideCaller) Nothing
-                -- overapproximate by returning a symbolic value
-                freshVar <- use #freshVar
-                assign #freshVar (freshVar + 1)
-                let freshVarExpr = Var ("staticcall-result-stack-" <> (pack . show) freshVar)
-                pushSym freshVarExpr
-                modifying #constraints ((:) (PLEq freshVarExpr (Lit 1) ))
-                assign (#state % #returndata) (AbstractBuf ("staticall-result-data-" <> (pack . show) freshVar))
-                next
+              where
+                fallback :: EVM t s ()
+                fallback = do
+                  -- Reset caller if needed
+                  resetCaller <- use $ #state % #resetCaller
+                  when resetCaller $ assign (#state % #overrideCaller) Nothing
+                  -- overapproximate by returning a symbolic value
+                  freshVar <- use #freshVar
+                  assign #freshVar (freshVar + 1)
+                  let freshVarExpr = Var ("staticcall-result-stack-" <> (pack . show) freshVar)
+                  modifying #constraints ((:) (PLEq freshVarExpr (Lit 1) ))
+                  assign (#state % #returndata) (AbstractBuf ("staticall-result-data-" <> (pack . show) freshVar))
+                  next >> assign (#state % #stack) (freshVarExpr:xs)
+            _ -> underrun
 
         OpSelfdestruct ->
           notStatic $

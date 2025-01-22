@@ -14,11 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More simplification rules for Props
 - Using the SMT solver to get a single concrete value for a symbolic expression
   and continue running, whenever possible
+- STATICCALL abstraction is now performed in case of symbolic arguments
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
   This should improve issues when "Unexpected Symbolic Arguments to Opcode" was
   unnecessarily output
+- Not all testcases ran due to incorrect filtering, fixed
 - Removed dead code related to IOAct in the now deprecated and removed debugger
 
 ## [0.54.2] - 2024-12-12
