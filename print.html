@@ -911,6 +911,59 @@ them into files <code>a.txt</code> and <code>b.txt</code> and compare them via:<
 command line, although this can become cumbersome:</p>
 <pre><code class="language-shell">$ hevm equivalence --code-a "6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f600190506002811460455760446048565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212208c57ae04774d9ebae7d1d11f9d5e730075068bc7988d4c83c6fed85b7f062e7b64736f6c634300081a0033" --code-b "6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220bd2f8a1ba281308f845e212d2b5eceab85e029909fa2409cdca7ede039bae26564736f6c634300081a0033"
 </code></pre>
+<h2 id="working-with-raw-bytcode"><a class="header" href="#working-with-raw-bytcode">Working with Raw Bytcode</a></h2>
+<p>When doing equivalance checking, the returndata of the two systems are
+compared, and the calldata is set to be symbolic. This allows us to compare raw
+bytecode as well -- the code does not need to adhere to the Solidity <a href="https://docs.soliditylang.org/en/latest/abi-spec.html">ABI</a>.</p>
+<p>The following contract is written in raw assembly. It takes
+the 1st byte of the calldata, multiplies it by 0, and stores it in memory, then
+returns this value:</p>
+<pre><code>PUSH1 0x00
+CALLDATALOAD
+PUSH1 0x00
+MUL
+PUSH1 0x00
+MSTORE
+PUSH1 0x01
+PUSH1 0x00
+RETURN
+</code></pre>
+<p>This can be compiled into bytecode via e.g. <a href="https://evm.codes/">evm.codes</a>,
+which allows us to both simulate this, and to get a bytecode for it: <code>60003560000260005260016000f3</code>. Notice that since anything multiplied by 0 is zero, for any calldata, this will put 0 into the returndata.</p>
+<p>Let's compare the above code to an assembly contract that simply returns 0:</p>
+<pre><code>PUSH32 0x0
+PUSH1 0x00
+MSTORE
+PUSH1 0x01
+PUSH1 0x00
+RETURN
+</code></pre>
+<p>This second contract compiles to:
+<code>7f000000000000000000000000000000000000000000000000000000000000000060005260016000f3</code>.</p>
+<p>Let's check whether the two are equivalent:</p>
+<pre><code class="language-shell">$ hevm equivalence --code-a "60003560000260005260016000f3" --code-b "7f000000000000000000000000000000000000000000000000000000000000000060005260016000f3"
+Found 1 total pairs of endstates
+Asking the SMT solver for 1 pairs
+No discrepancies found
+</code></pre>
+<p>If however we replace the</p>
+<pre><code>PUSH32 0x0
+</code></pre>
+<p>with</p>
+<pre><code>PUSH32 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+</code></pre>
+<p>we get:</p>
+<pre><code class="language-shell">$ hevm equivalence --code-a "60003560000260005260016000f3" --code-b "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff60005260016000f3"
+Found 1 total pairs of endstates
+Asking the SMT solver for 1 pairs
+Reuse of previous queries was Useful in 0 cases
+Not equivalent. The following inputs result in differing behaviours:
+-----
+Calldata:
+  Empty
+</code></pre>
+<p>Which shows that even with empty calldata, the two are not equivalent: one
+returns <code>0xff</code> and the other <code>0x0</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="symbolic-execution-tutorial"><a class="header" href="#symbolic-execution-tutorial">Symbolic Execution Tutorial</a></h1>
 <p>Symbolic execution mode of hevm checks whether any call to the contract could
 result in an assertion violation. Let's see a simple contract, in file
