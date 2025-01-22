@@ -3927,7 +3927,7 @@ tests = testGroup "hevm"
                     , "yulOptimizerTests/fullSuite/transient_storage.yul"
                     , "yulOptimizerTests/unusedPruner/transient_storage.yul"
 
-                    -- Bug in solidity, fized in newer versions:
+                    -- Bug in solidity, fixed in newer versions:
                     -- https://github.com/ethereum/solidity/issues/15397#event-14116827816
                     , "no_move_transient_storage.yul"
                     ]
