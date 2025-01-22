@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Using the SMT solver to get a single concrete value for a symbolic expression
   and continue running, whenever possible
 - STATICCALL abstraction is now performed in case of symbolic arguments
+- Better error messages for JSON parsing
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
