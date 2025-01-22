@@ -921,6 +921,8 @@ copySlice _ _ _ _ _ = Left "CopySlice with a symbolically sized region not curre
 -- | Unrolls an exponentiation into a series of multiplications
 expandExp :: Expr EWord -> W256 -> Err Builder
 expandExp base expnt
+  -- in EVM, anything (including 0) to the power of 0 is 1
+  | expnt == 0 = pure one
   | expnt == 1 = exprToSMT base
   | otherwise = do
     b <- exprToSMT base
