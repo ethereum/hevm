@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Not all testcases ran due to incorrect filtering, fixed
 - Removed dead code related to IOAct in the now deprecated and removed debugger
 - Base case of exponentiation to 0 was not handled, leading to infinite loop
+- Better exponential simplification
 
 ## [0.54.2] - 2024-12-12
 

@@ -705,9 +705,14 @@ exprToSMT = \case
   Add a b -> op2 "bvadd" a b
   Sub a b -> op2 "bvsub" a b
   Mul a b -> op2 "bvmul" a b
-  Exp a b -> case b of
-    Lit b' -> expandExp a b'
-    _ -> Left $ "Cannot encode symbolic exponent into SMT. Offending symbolic value: " <> show b
+  Exp a b -> case a of
+    -- Lit 1 has already been handled via Expr.simplify
+    Lit 0 -> do
+      ite <- exprToSMT b
+      pure $ "(ite (= " <> ite <> " " <> zero <> " ) " <> one <> " " <> zero <> ")"
+    _ -> case b of
+      Lit b' -> expandExp a b'
+      _ -> Left $ "Cannot encode symbolic exponent into SMT. Offending symbolic value: " <> show b
   Min a b -> do
     aenc <- exprToSMT a
     benc <- exprToSMT b

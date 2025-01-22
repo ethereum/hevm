@@ -1372,6 +1372,42 @@ tests = testGroup "hevm"
         let a = fromJust $ Map.lookup (Var "arg1") cex.vars
         assertEqualM "unexpected cex value" a 44
         putStrLnM "expected counterexample found"
+      , test "symbolic-exp-0-to-n" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 a, uint256 b, uint256 k) external pure {
+                uint x = 0 ** b;
+                assert (x == 1);
+              }
+             }
+            |]
+        let sig = Just (Sig "fun(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])
+        a <- withCVC5Solver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        case a of
+          (_, [Cex (_, ctr)]) -> do
+            let b = getVar ctr "arg2"
+            putStrLnM $ "b:" <> show b
+            assertBoolM "b must be non-0" (b /= 0)
+          _ -> assertBoolM "Wrong" False
+      , test "symbolic-exp-0-to-n2" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint256 a, uint256 b, uint256 k) external pure {
+                uint x = 0 ** b;
+                assert (x == 0);
+              }
+             }
+            |]
+        let sig = Just (Sig "fun(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])
+        a <- withCVC5Solver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        case a of
+          (_, [Cex (_, ctr)]) -> do
+            let b = getVar ctr "arg2"
+            putStrLnM $ "b:" <> show b
+            assertBoolM "b must be 0" (b == 0)
+          _ -> assertBoolM "Wrong" False
       ,
       test "symbolic-mcopy" $ do
         Just c <- solcRuntime "MyContract"

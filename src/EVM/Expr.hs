@@ -1190,6 +1190,12 @@ simplify e = if (mapExpr go e == e)
     go (SDiv _ (Lit 0)) = Lit 0 -- divide anything by 0 is zero in EVM
     go (SDiv a (Lit 1)) = a
     -- NOTE: Div x x is NOT 1, because Div 0 0 is 0, not 1.
+    --
+    go (Exp _ (Lit 0)) = Lit 1 -- everything, including 0, to the power of 0 is 1
+    go (Exp a (Lit 1)) = a -- everything, including 0, to the power of 1 is itself
+    go (Exp (Lit 1) _) = Lit 1 -- 1 to any value (including 0) is 1
+    -- NOTE: we can't simplify (Lit 0)^k. If k is 0 it's 1, otherwise it's 0.
+    --       this is encoded in SMT.hs instead, via an SMT "ite"
 
     -- If a >= b then the value of the `Max` expression can never be < b
     go o@(LT (Max (Lit a) _) (Lit b))
