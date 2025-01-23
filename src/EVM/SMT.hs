@@ -708,8 +708,8 @@ exprToSMT = \case
   Exp a b -> case a of
     -- Lit 1 has already been handled via Expr.simplify
     Lit 0 -> do
-      ite <- exprToSMT b
-      pure $ "(ite (= " <> ite <> " " <> zero <> " ) " <> one <> " " <> zero <> ")"
+      benc <- exprToSMT b
+      pure $ "(ite (= " <> benc `sp` zero <> " ) " <> one `sp` zero <> ")"
     _ -> case b of
       Lit b' -> expandExp a b'
       _ -> Left $ "Cannot encode symbolic exponent into SMT. Offending symbolic value: " <> show b
