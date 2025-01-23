@@ -1383,7 +1383,7 @@ tests = testGroup "hevm"
              }
             |]
         let sig = Just (Sig "fun(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])
-        a <- withCVC5Solver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        a <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
         case a of
           (_, [Cex (_, ctr)]) -> do
             let b = getVar ctr "arg2"
@@ -1401,7 +1401,7 @@ tests = testGroup "hevm"
              }
             |]
         let sig = Just (Sig "fun(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])
-        a <- withCVC5Solver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        a <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
         case a of
           (_, [Cex (_, ctr)]) -> do
             let b = getVar ctr "arg2"
