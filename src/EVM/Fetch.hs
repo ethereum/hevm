@@ -246,7 +246,6 @@ oracle solvers info q = do
       traceM $ "Fetching block " <> show blockNo <> " from " <> show url
       liftIO $ fetchBlockFrom (EVM.Fetch.BlockNumber blockNo) (pack url) >>= \case
         Just block  -> do
-          putStrLn $ "Fetched block " <> show blockNo <> " from " <> show url <> " block:  " <> show block
           pure (continue block)
         Nothing -> internalError $ "oracle error: " ++ show q
 
