@@ -1327,6 +1327,7 @@ tests = testGroup "hevm"
         let sig = Just (Sig "fun(uint256)" [AbiUIntType 256])
         (e, [Qed _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
         assertBoolM "The expression must contain Partial." $ Expr.containsNode isPartial e
+      , test "cheatcode-with-selector" $ do
         Just c <- solcRuntime "C"
             [i|
             contract C {
