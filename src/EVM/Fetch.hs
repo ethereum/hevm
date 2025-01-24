@@ -23,12 +23,12 @@ import Data.Vector qualified as RegularVector
 import Network.Wreq
 import Network.Wreq.Session (Session)
 import Network.Wreq.Session qualified as Session
-import Numeric.Natural (Natural)
 import System.Environment (lookupEnv, getEnvironment)
 import System.Process
 import Control.Monad.IO.Class
 import Control.Monad (when)
 import EVM.Effects
+import Debug.Trace (traceM)
 
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where
@@ -184,16 +184,6 @@ fetchChainIdFrom url = do
   sess <- Session.newAPISession
   fetchQuery Latest (fetchWithSession url sess) QueryChainId
 
-http :: Natural -> Maybe Natural -> BlockNumber -> Text -> Fetcher t m s
-http smtjobs smttimeout n url q =
-  withSolvers Z3 smtjobs 1 smttimeout $ \s ->
-    oracle s (Just (n, url)) q
-
-zero :: Natural -> Maybe Natural -> Fetcher t m s
-zero smtjobs smttimeout q =
-  withSolvers Z3 smtjobs 1 smttimeout $ \s ->
-    oracle s Nothing q
-
 -- smtsolving + (http or zero)
 oracle :: SolverGroup -> RpcInfo -> Fetcher t m s
 oracle solvers info q = do
@@ -218,6 +208,7 @@ oracle solvers info q = do
          continue <$> getSolution solvers symAddr pathconds
 
     PleaseFetchContract addr base continue -> do
+      traceM $ "Fetching contract " <> show addr <> "base: " <> show base <> " from " <> show info
       contract <- case info of
         Nothing -> let
           c = case base of
@@ -229,14 +220,23 @@ oracle solvers info q = do
         Just x -> pure $ continue x
         Nothing -> internalError $ "oracle error: " ++ show q
 
-    PleaseFetchSlot addr slot continue ->
+    PleaseFetchSlot addr slot continue -> do
+      traceM $ "Fetching slot " <> show slot <> " from " <> show info
       case info of
         Nothing -> pure (continue 0)
-        Just (n, url) ->
+        Just (n, url) -> do
+         traceM $ "Fetching slot " <> show slot <> " from " <> show url <> " at addr " <> show addr <> " at block " <> show n
          liftIO $ fetchSlotFrom n url addr slot >>= \case
            Just x  -> pure (continue x)
            Nothing ->
              internalError $ "oracle error: " ++ show q
+
+    PleaseFetchBlock url blockNo continue -> do
+      traceM $ "Fetching block " <> show blockNo <> " from " <> show url
+      liftIO $ fetchBlockFrom (EVM.Fetch.BlockNumber blockNo) (pack url) >>= \case
+        Just block  -> do
+          pure (continue block)
+        Nothing -> internalError $ "oracle error: " ++ show q
 
     PleaseReadEnv variable continue -> do
       value <- liftIO $ lookupEnv variable

@@ -67,6 +67,7 @@ import Witch (into, tryFrom, unsafeInto, tryInto)
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
 import Crypto.Number.ModArithmetic (expFast)
+import Debug.Trace (traceM)
 
 blankState :: VMOps t => ST s (FrameState t s)
 blankState = do
@@ -1407,6 +1408,13 @@ query q = assign #result $ Just $ HandleEffect (Query q)
 choose :: Choose s -> EVM Symbolic s ()
 choose c = assign #result $ Just $ HandleEffect (Choose c)
 
+fetchBlockFrom :: VMOps t => String -> W256 -> (Block -> EVM t s ()) -> EVM t s ()
+fetchBlockFrom url blockNo continue = do
+      assign (#result) . Just . HandleEffect . Query $
+        PleaseFetchBlock url blockNo $ \c -> do
+          assign #result Nothing
+          continue c
+
 -- | Construct RPC Query and halt execution until resolved
 fetchAccount :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
 fetchAccount addr continue =
@@ -1899,6 +1907,25 @@ cheatActions = Map.fromList
               Nothing ->
                 vmError (NonexistentFork forkId')
         _ -> vmError (BadCheatCode "selectFork(uint256) parameter decoding failed" sig)
+
+  , action "createSelectFork(string,uint256)" $
+      \sig input -> case decodeBuf [AbiStringType, AbiUIntType 256] input of
+        CAbi [AbiString url, AbiUInt 256 blockNo] -> do
+          let blockNo' = fromIntegral blockNo
+          fetchBlockFrom (BS8.unpack url) blockNo' $ \block -> do
+            traceM $ "here, continuing with block:" <> show  block
+            vm <- get
+            let forks = vm.forks Seq.|> ForkState vm.env block vm.cache (BS8.unpack url)
+            let forkId = length $ forks
+            modify' $ \vm' -> vm'
+              { env = vm.env
+              , block = block
+              , forks =  forks
+              , currentFork = forkId
+              }
+            -- modify' $ \vm' -> vm' { env = vm.env, block = block }
+            frameReturn $ AbiUInt 256 (fromIntegral forkId)
+        _ -> vmError (BadCheatCode "createSelectFork(string,uint256) parameter decoding failed" sig)
 
   , action "activeFork()" $
       \_ _ -> do

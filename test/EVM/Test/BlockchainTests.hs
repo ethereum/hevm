@@ -37,10 +37,12 @@ import System.Process (readProcessWithExitCode)
 import GHC.IO.Exception (ExitCode(ExitSuccess))
 import Witch (into, unsafeInto)
 import Witherable (Filterable, catMaybes)
+import EVM.Solvers (withSolvers, Solver(..))
 
 import Test.Tasty
 import Test.Tasty.ExpectedFailure
 import Test.Tasty.HUnit
+import qualified EVM.Fetch as EVM
 
 data Which = Pre | Post
 
@@ -175,11 +177,15 @@ ciProblematicTests = Map.fromList
   , ("loopExp_d9g0v0_Cancun", ignoreTest)
   ]
 
+zeroFetcher :: EVM.Fetch.Fetcher t m s
+zeroFetcher q = withSolvers Z3 0 1 (Just 0) $ \s ->
+    EVM.oracle s Nothing q
+
 runVMTest :: App m => Case -> m ()
 runVMTest x = do
   -- traceVsGeth fname name x
   vm0 <- liftIO $ vmForCase x
-  result <- EVM.Stepper.interpret (EVM.Fetch.zero 0 (Just 0)) vm0 EVM.Stepper.runFully
+  result <- EVM.Stepper.interpret zeroFetcher vm0 EVM.Stepper.runFully
   writeTrace result
   maybeReason <- checkExpectation x result
   liftIO $ forM_ maybeReason assertFailure
@@ -189,7 +195,7 @@ runVMTest x = do
 traceVMTest :: App m => Case -> m [VMTrace]
 traceVMTest x = do
   vm0 <- liftIO $ vmForCase x
-  (_, (_, ts)) <- runStateT (interpretWithTrace (EVM.Fetch.zero 0 (Just 0)) EVM.Stepper.runFully) (vm0, [])
+  (_, (_, ts)) <- runStateT (interpretWithTrace zeroFetcher EVM.Stepper.runFully) (vm0, [])
   pure ts
 
 -- | given a path to a test file, a test case from within that file, and a trace from geth from running that test, compare the traces and show where we differ
