@@ -85,7 +85,7 @@ import System.FilePath.Posix
 import System.Process
 import Text.Read (readMaybe)
 import Witch (unsafeInto)
-
+import Data.Either.Extra (maybeToEither)
 
 data StorageItem = StorageItem
   { slotType :: SlotType
@@ -285,7 +285,7 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
     go c (xs, state, p)                        = (xs, internalError ("srcmap: y u " ++ show c ++ " in state" ++ show state ++ "?!?"), p)
 
 -- | Reads all solc output json files found under the provided filepath and returns them merged into a BuildOutput
-readBuildOutput :: App m => FilePath -> ProjectType -> m (Either String BuildOutput)
+readBuildOutput :: App m => FilePath -> ProjectType -> m (Err BuildOutput)
 readBuildOutput root CombinedJSON = do
   let outDir = root </> "out"
   jsons <- liftIO $ findJsonFiles outDir
@@ -342,7 +342,7 @@ lineSubrange xs (s1, n1) i =
     then Nothing
     else Just (s1 - s2, min (s2 + n2 - s1) n1)
 
-readSolc :: App m => ProjectType -> FilePath -> FilePath -> m (Either String BuildOutput)
+readSolc :: App m => ProjectType -> FilePath -> FilePath -> m (Err BuildOutput)
 readSolc pt root fp = do
   -- NOTE: we cannot and must not use Data.Text.IO.readFile because that takes the locale
   --       and may fail with very strange errors when the JSON it's reading
@@ -350,10 +350,11 @@ readSolc pt root fp = do
   fileContents <- liftIO $ fmap Data.Text.Encoding.decodeUtf8 $ Data.ByteString.readFile fp
   let contractName = T.pack $ takeBaseName fp
   case readJSON pt contractName fileContents of
-      Nothing -> pure . Left $ "unable to parse " <> show pt <> " project JSON: " <> fp <> " Contract: " <> show contractName
-      Just (contracts, asts, sources) -> do
+      Left err -> pure . Left $ "unable to parse " <> show pt <> " project JSON: " <> fp
+        <> " Contract: " <> show contractName <> "\nError: " <> err
+      Right (contracts, asts, sources) -> do
         conf <- readConfig
-        when (conf.debug) $ liftIO $ putStrLn $ "Parsed constract: " <> show contractName <> " file: " <> fp
+        when (conf.debug) $ liftIO $ putStrLn $ "Parsed contract: " <> show contractName <> " file: " <> fp
         sourceCache <- liftIO $ makeSourceCache root sources asts
         pure (Right (BuildOutput contracts sourceCache))
 
@@ -406,31 +407,31 @@ functionAbi f = do
 force :: String -> Maybe a -> a
 force s = fromMaybe (internalError s)
 
-readJSON :: ProjectType -> Text -> Text -> Maybe (Contracts, Asts, Sources)
+readJSON :: ProjectType -> Text -> Text -> Err (Contracts, Asts, Sources)
 readJSON CombinedJSON _ json = readCombinedJSON json
 readJSON _ contractName json = readFoundryJSON contractName json
 
 -- | Reads a foundry json output
-readFoundryJSON :: Text -> Text -> Maybe (Contracts, Asts, Sources)
+readFoundryJSON :: Text -> Text -> Err (Contracts, Asts, Sources)
 readFoundryJSON contractName json = do
-  runtime <- json ^? key "deployedBytecode"
-  runtimeCode <- (toCode contractName) . strip0x'' <$> runtime ^? key "object" % _String
+  runtime <- maybeToEither "missing 'deployedBytecode' field" $ json ^? key "deployedBytecode"
+  runtimeCode <- maybeToEither "missing 'deployedBytecode.object' field" $
+    (toCode contractName) . strip0x'' <$> runtime ^? key "object" % _String
   runtimeSrcMap <- case runtime ^? key "sourceMap" % _String of
-    Nothing -> makeSrcMaps ""
-    smap -> makeSrcMaps =<< smap
+    Nothing -> Right $ force "Source map creation error" $ makeSrcMaps ""  -- sourceMap is optional
+    Just smap -> maybeToEither "invalid sourceMap format" $ makeSrcMaps smap
 
-  creation <- json ^? key "bytecode"
-  creationCode <- (toCode contractName) . strip0x'' <$> creation ^? key "object" % _String
+  creation <- maybeToEither "missing 'bytecode' field" $ json ^? key "bytecode"
+  creationCode <- maybeToEither "missing 'bytecode.object' field" $
+    (toCode contractName) . strip0x'' <$> creation ^? key "object" % _String
   creationSrcMap <- case creation ^? key "sourceMap" % _String of
-    Nothing -> makeSrcMaps ""
-    smap -> makeSrcMaps =<< smap
+    Nothing -> Right $ force "Source map creation error" $ makeSrcMaps ""  -- sourceMap is optional
+    Just smap -> maybeToEither "invalid sourceMap format" $ makeSrcMaps smap
 
-  ast <- json ^? key "ast"
-  path <- ast ^? key "absolutePath" % _String
-
-  abi <- toList <$> json ^? key "abi" % _Array
-
-  id' <- unsafeInto <$> json ^? key "id" % _Integer
+  ast <- maybeToEither "missing 'ast' field. Recompile with `forge clean && forge build --ast`" $ json ^? key "ast"
+  path <- maybeToEither "missing 'ast.absolutePath' field" $ ast ^? key "absolutePath" % _String
+  abi <- maybeToEither "missing or invalid 'abi' array" $ toList <$> json ^? key "abi" % _Array
+  id' <- maybeToEither "missing or invalid 'id' field" $ unsafeInto <$> json ^? key "id" % _Integer
 
   let contract = SolcContract
         { runtimeCodehash     = keccak' (stripBytecodeMetadata runtimeCode)
@@ -447,10 +448,10 @@ readFoundryJSON contractName json = do
         , storageLayout       = mkStorageLayout $ json ^? key "storageLayout"
         , immutableReferences = mempty -- TODO: foundry doesn't expose this?
         }
-  pure ( Contracts $ Map.singleton (path <> ":" <> contractName) contract
-         , Asts      $ Map.singleton path ast
-         , Sources   $ Map.singleton (SrcFile id' (T.unpack path)) Nothing
-         )
+  Right ( Contracts $ Map.singleton (path <> ":" <> contractName) contract
+        , Asts      $ Map.singleton path ast
+        , Sources   $ Map.singleton (SrcFile id' (T.unpack path)) Nothing
+        )
 
 -- | Parses the standard json output from solc
 readStdJSON :: Text -> Maybe (Contracts, Asts, Sources)
@@ -508,18 +509,18 @@ readStdJSON json = do
       }, fromMaybe mempty srcContents))
 
 -- deprecate me soon
-readCombinedJSON :: Text -> Maybe (Contracts, Asts, Sources)
+readCombinedJSON :: Text -> Err (Contracts, Asts, Sources)
 readCombinedJSON json = do
-  contracts <- f . KeyMap.toHashMapText <$> (json ^? key "contracts" % _Object)
-  sources <- toList . fmap (preview _String) <$> json ^? key "sourceList" % _Array
+  contracts <- maybeToEither "missing or invalid 'contracts' field" $ f . KeyMap.toHashMapText <$> (json ^? key "contracts" % _Object)
+  sources <- maybeToEither "missing or invalid 'sourceList' field" $ toList . fmap (preview _String) <$> json ^? key "sourceList" % _Array
+  astsPre <- maybeToEither "JSON lacks abstract syntax trees (ast). Recompile with `forge clean && forge build --ast`" $ json ^? key "sources" % _Object
   pure ( Contracts contracts
-       , Asts (Map.fromList (HMap.toList asts))
+       , Asts (Map.fromList (HMap.toList (KeyMap.toHashMapText astsPre)))
        , Sources $ Map.fromList $
            (\(path, id') -> (SrcFile id' (T.unpack path), Nothing)) <$>
              zip (catMaybes sources) [0..]
        )
   where
-    asts = KeyMap.toHashMapText $ fromMaybe (error "JSON lacks abstract syntax trees.") (json ^? key "sources" % _Object)
     f x = Map.fromList . HMap.toList $ HMap.mapWithKey g x
     g s x =
       let
