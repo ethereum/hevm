@@ -28,6 +28,7 @@ import Data.Text.Lazy (Text)
 import Data.Text qualified as TS
 import Data.Text.Lazy qualified as T
 import Data.Text.Lazy.Builder
+import qualified Data.Text.Read as TR
 import Language.SMT2.Parser (getValueRes, parseCommentFreeFileMsg)
 import Language.SMT2.Syntax (Symbol, SpecConstant(..), GeneralRes(..), Term(..), QualIdentifier(..), Identifier(..), Sort(..), Index(..), VarBinding(..))
 import Numeric (readHex, readBin)
@@ -1044,12 +1045,20 @@ parseBlockCtx "prevrandao" = PrevRandao
 parseBlockCtx "gaslimit" = GasLimit
 parseBlockCtx "chainid" = ChainId
 parseBlockCtx "basefee" = BaseFee
-parseBlockCtx t = internalError $ "cannot parse " <> (TS.unpack t) <> " into an Expr"
+parseBlockCtx gas = if TS.isPrefixOf (TS.pack "gas_") gas then  Gas (textToInt $ TS.drop 4 gas)
+                    else internalError $ "cannot parse '" <> (TS.unpack gas) <> "' into an Expr"
+
+textToInt :: TS.Text -> Int
+textToInt text =
+    case TR.decimal text of
+        Right (value, _) -> value
+        Left _ -> internalError $ "cannot parse '" <> (TS.unpack text) <> "' into an Int"
 
 parseTxCtx :: TS.Text -> Expr EWord
 parseTxCtx name
   | name == "txvalue" = TxValue
   | Just a <- TS.stripPrefix "balance_" name = Balance (parseEAddr a)
+  | Just a <- TS.stripPrefix "gas_" name = Gas (textToInt a)
   | otherwise = internalError $ "cannot parse " <> (TS.unpack name) <> " into an Expr"
 
 getAddrs :: (TS.Text -> Expr EAddr) -> (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr EAddr) Addr)
