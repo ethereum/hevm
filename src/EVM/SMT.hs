@@ -446,7 +446,7 @@ enforceGasOrder ps = SMT2 (["; gas ordering"] <> order names) mempty mempty
     order :: [Int] -> [Builder]
     order n = consecutivePairs n >>= \case
       -- The GAS instruction itself costs gas, so it's strictly decreasing
-      (x, y) -> ["(assert (< gas_" <> (fromString . show $ x) <> " gas_" <> (fromString . show $ y) <> "))"]
+      (x, y) -> ["(assert (bvult gas_" <> (fromString . show $ x) <> " gas_" <> (fromString . show $ y) <> "))"]
     consecutivePairs :: [Int] -> [(Int, Int)]
     consecutivePairs [] = []
     consecutivePairs [_] = []
