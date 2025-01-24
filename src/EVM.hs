@@ -67,6 +67,7 @@ import Witch (into, tryFrom, unsafeInto, tryInto)
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
 import Crypto.Number.ModArithmetic (expFast)
+import Debug.Trace (traceM)
 
 blankState :: VMOps t => ST s (FrameState t s)
 blankState = do
@@ -1407,6 +1408,13 @@ query q = assign #result $ Just $ HandleEffect (Query q)
 choose :: Choose s -> EVM Symbolic s ()
 choose c = assign #result $ Just $ HandleEffect (Choose c)
 
+fetchBlockFrom :: VMOps t => String -> W256 -> (Block -> EVM t s ()) -> EVM t s ()
+fetchBlockFrom url blockNo continue = do
+      assign (#result) . Just . HandleEffect . Query $
+        PleaseFetchBlock url blockNo $ \c -> do
+          assign #result Nothing
+          continue c
+
 -- | Construct RPC Query and halt execution until resolved
 fetchAccount :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
 fetchAccount addr continue =
@@ -1732,7 +1740,9 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
     runCheat abi input =  do
       let abi' = unsafeInto abi
       case Map.lookup abi' cheatActions of
-        Nothing -> vmError (BadCheatCode "Cannot understand cheatcode." abi')
+        Nothing -> do
+          vm <- get
+          partial $ CheatCodeMissing vm.state.pc abi'
         Just action -> action input
 
 type CheatAction t s = Expr Buf -> EVM t s ()
@@ -1899,6 +1909,17 @@ cheatActions = Map.fromList
               Nothing ->
                 vmError (NonexistentFork forkId')
         _ -> vmError (BadCheatCode "selectFork(uint256) parameter decoding failed" sig)
+
+  , action "createSelectFork(string,uint256)" $
+      \sig input -> case decodeBuf [AbiStringType, AbiUIntType 256] input of
+        CAbi [AbiString url, AbiUInt 256 blockNo] -> do
+          let blockNo' = fromIntegral blockNo
+          -- doStop
+          fetchBlockFrom (BS8.unpack url) blockNo' $ \block -> do
+            traceM $ "here, continuing with block:" <> show  block
+            assign #block block
+            frameReturn $ AbiUInt 256 (fromIntegral blockNo)
+        _ -> vmError (BadCheatCode "createSelectFork(string,uint256) parameter decoding failed" sig)
 
   , action "activeFork()" $
       \_ _ -> do

@@ -465,7 +465,7 @@ formatError = \case
 
 formatPartial :: PartialExec -> Text
 formatPartial = \case
-  (UnexpectedSymbolicArg pc opcode msg args) -> T.unlines
+  UnexpectedSymbolicArg pc opcode msg args -> T.unlines
     [ "Unexpected Symbolic Arguments to Opcode"
     , indent 2 $ T.unlines
       [ "msg: " <> T.pack (show msg)
@@ -477,6 +477,11 @@ formatPartial = \case
     ]
   MaxIterationsReached pc addr -> "Max Iterations Reached in contract: " <> formatAddr addr <> " pc: " <> pack (show pc) <> " To increase the maximum, set a fixed large (or negative) value for `--max-iterations` on the command line"
   JumpIntoSymbolicCode pc idx -> "Encountered a jump into a potentially symbolic code region while executing initcode. pc: " <> pack (show pc) <> " jump dst: " <> pack (show idx)
+  CheatCodeMissing pc selector ->T.unlines
+    [ "Cheat code not recognized"
+    , "program counter: " <> T.pack (show pc)
+    , "selector: " <> T.pack (show selector)
+    ]
 
 formatSomeExpr :: SomeExpr -> Text
 formatSomeExpr (SomeExpr e) = formatExpr $ Expr.simplify e

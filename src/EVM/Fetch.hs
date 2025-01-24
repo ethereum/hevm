@@ -29,6 +29,7 @@ import System.Process
 import Control.Monad.IO.Class
 import Control.Monad (when)
 import EVM.Effects
+import Debug.Trace (traceM)
 
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where
@@ -237,6 +238,14 @@ oracle solvers info q = do
            Just x  -> pure (continue x)
            Nothing ->
              internalError $ "oracle error: " ++ show q
+
+    PleaseFetchBlock url blockNo continue -> do
+      traceM $ "Fetching block " <> show blockNo <> " from " <> show url
+      liftIO $ fetchBlockFrom (EVM.Fetch.BlockNumber blockNo) (pack url) >>= \case
+        Just block  -> do
+          putStrLn $ "Fetched block " <> show blockNo <> " from " <> show url <> " block:  " <> show block
+          pure (continue block)
+        Nothing -> internalError $ "oracle error: " ++ show q
 
     PleaseReadEnv variable continue -> do
       value <- liftIO $ lookupEnv variable

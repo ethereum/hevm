@@ -581,6 +581,7 @@ data PartialExec
   = UnexpectedSymbolicArg { pc :: Int, opcode :: String, msg  :: String, args  :: [SomeExpr] }
   | MaxIterationsReached  { pc :: Int, addr :: Expr EAddr }
   | JumpIntoSymbolicCode  { pc :: Int, jumpDst :: Int }
+  | CheatCodeMissing      { pc :: Int, selector :: FunctionSelector }
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
@@ -593,6 +594,7 @@ deriving instance Show (Effect t s)
 data Query t s where
   PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM t s ()) -> Query t s
   PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM t s ()) -> Query t s
+  PleaseFetchBlock    :: String -> W256 -> (Block -> EVM t s ()) -> Query t s
   PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM Symbolic s ()) -> Query Symbolic s
   PleaseGetSol        :: Expr EWord -> [Prop] -> (Maybe W256 -> EVM Symbolic s ()) -> Query Symbolic s
   PleaseDoFFI         :: [String] -> Map String String -> (ByteString -> EVM t s ()) -> Query t s
@@ -609,11 +611,15 @@ data BranchCondition = Case Bool | Unknown
 instance Show (Query t s) where
   showsPrec _ = \case
     PleaseFetchContract addr base _ ->
-      (("<EVM.Query: fetch contract " ++ show addr ++ show base ++ ">") ++)
+      (("<EVM.Query: fetch from contract " ++ show addr ++ show base ++ ">") ++)
     PleaseFetchSlot addr slot _ ->
       (("<EVM.Query: fetch slot "
         ++ show slot ++ " for "
         ++ show addr ++ ">") ++)
+    PleaseFetchBlock url block _ ->
+      (("<EVM.Query: fetch from url "
+        ++ show url ++ " block "
+        ++ show block ++ ">") ++)
     PleaseAskSMT condition constraints _ ->
       (("<EVM.Query: ask SMT about "
         ++ show condition ++ " in context "
