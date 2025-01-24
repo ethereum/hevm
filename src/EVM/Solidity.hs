@@ -428,7 +428,7 @@ readFoundryJSON contractName json = do
     Nothing -> Right $ force "Source map creation error" $ makeSrcMaps ""  -- sourceMap is optional
     Just smap -> maybeToEither "invalid sourceMap format" $ makeSrcMaps smap
 
-  ast <- maybeToEither "missing 'ast' field. Recmpile with `forge clean && forge build --ast`" $ json ^? key "ast"
+  ast <- maybeToEither "missing 'ast' field. Recompile with `forge clean && forge build --ast`" $ json ^? key "ast"
   path <- maybeToEither "missing 'ast.absolutePath' field" $ ast ^? key "absolutePath" % _String
   abi <- maybeToEither "missing or invalid 'abi' array" $ toList <$> json ^? key "abi" % _Array
   id' <- maybeToEither "missing or invalid 'id' field" $ unsafeInto <$> json ^? key "id" % _Integer
