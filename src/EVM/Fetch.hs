@@ -222,6 +222,7 @@ oracle solvers info q = do
          continue <$> getSolutions solvers symExpr numBytes pathconds
 
     PleaseFetchContract addr base continue -> do
+      traceM $ "Fetching contract " <> show addr <> "base: " <> show base <> " from " <> show info
       contract <- case info of
         Nothing -> let
           c = case base of
@@ -233,10 +234,12 @@ oracle solvers info q = do
         Just x -> pure $ continue x
         Nothing -> internalError $ "oracle error: " ++ show q
 
-    PleaseFetchSlot addr slot continue ->
+    PleaseFetchSlot addr slot continue -> do
+      traceM $ "Fetching slot " <> show slot <> " from " <> show info
       case info of
         Nothing -> pure (continue 0)
-        Just (n, url) ->
+        Just (n, url) -> do
+         traceM $ "Fetching slot " <> show slot <> " from " <> show url <> " at addr " <> show addr <> " at block " <> show n
          liftIO $ fetchSlotFrom n url addr slot >>= \case
            Just x  -> pure (continue x)
            Nothing ->

@@ -1923,11 +1923,19 @@ cheatActions = Map.fromList
       \sig input -> case decodeBuf [AbiStringType, AbiUIntType 256] input of
         CAbi [AbiString url, AbiUInt 256 blockNo] -> do
           let blockNo' = fromIntegral blockNo
-          -- doStop
           fetchBlockFrom (BS8.unpack url) blockNo' $ \block -> do
             traceM $ "here, continuing with block:" <> show  block
-            assign #block block
-            frameReturn $ AbiUInt 256 (fromIntegral blockNo)
+            vm <- get
+            let forks = vm.forks Seq.|> ForkState vm.env block vm.cache (BS8.unpack url)
+            let forkId = length $ forks
+            modify' $ \vm' -> vm'
+              { env = vm.env
+              , block = block
+              , forks =  forks
+              , currentFork = forkId
+              }
+            -- modify' $ \vm' -> vm' { env = vm.env, block = block }
+            frameReturn $ AbiUInt 256 (fromIntegral forkId)
         _ -> vmError (BadCheatCode "createSelectFork(string,uint256) parameter decoding failed" sig)
 
   , action "activeFork()" $
