@@ -30,6 +30,9 @@ import Control.Monad.IO.Class
 import Control.Monad (when)
 import EVM.Effects
 import Debug.Trace (traceM)
+import qualified EVM.Expr as Expr
+import Numeric (showHex,readHex)
+import Data.Bits ((.&.))
 
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where
@@ -214,9 +217,9 @@ oracle solvers info q = do
          -- Is is possible to satisfy the condition?
          continue <$> checkBranch solvers (branchcondition ./= (Lit 0)) pathconds
 
-    PleaseGetSol symAddr pathconditions continue -> do
+    PleaseGetSols symExpr numBytes pathconditions continue -> do
          let pathconds = foldl' PAnd (PBool True) pathconditions
-         continue <$> getSolution solvers symAddr pathconds
+         continue <$> getSolutions solvers symExpr numBytes pathconds
 
     PleaseFetchContract addr base continue -> do
       contract <- case info of
@@ -253,33 +256,41 @@ oracle solvers info q = do
 
 type Fetcher t m s = App m => Query t s -> m (EVM t s ())
 
-getSolution :: forall m . App m => SolverGroup -> Expr EWord -> Prop -> m (Maybe W256)
-getSolution solvers symAddr pathconditions = do
+getSolutions :: forall m . App m => SolverGroup -> Expr EWord -> Int -> Prop -> m (Maybe [W256])
+getSolutions solvers symExprPreSimp numBytes pathconditions = do
   conf <- readConfig
   liftIO $ do
-    ret <- collectSolutions [] 1 pathconditions conf
+    let symExpr = Expr.concKeccakSimpExpr symExprPreSimp
+    when conf.debug $ putStrLn $ "Collecting solutions to symbolic query: " <> show symExpr
+    ret <- collectSolutions [] conf.maxNumBranch symExpr pathconditions conf
     case ret of
       Nothing -> pure Nothing
       Just r -> case length r of
         0 -> pure Nothing
-        -- Temporary, a future improvement can deal with more than one solution
-        1 -> pure $ Just (r !! 0)
-        _ -> pure Nothing
+        _ -> pure $ Just r
     where
-      collectSolutions :: [W256] -> Int -> Prop -> Config -> IO (Maybe [W256])
-      collectSolutions addrs maxSols conds conf = do
-        if (length addrs > maxSols) then pure Nothing
+      createHexValue k =
+          let hexString = concat (replicate k "ff")
+          in fst . head $ readHex hexString
+      collectSolutions :: [W256] -> Int -> Expr EWord -> Prop -> Config -> IO (Maybe [W256])
+      collectSolutions vals maxSols symExpr conds conf = do
+        if (length vals > maxSols) then pure Nothing
         else
-          checkSat solvers (assertProps conf [(PEq (Var "addrQuery") symAddr) .&& conds]) >>= \case
+          checkSat solvers (assertProps conf [(PEq (Var "addrQuery") symExpr) .&& conds]) >>= \case
             Sat (SMTCex vars _ _ _ _ _)  -> case (Map.lookup (Var "addrQuery") vars) of
-              Just addr -> do
-                let newConds = PAnd conds (symAddr ./= (Lit addr))
-                when conf.debug $ putStrLn $ "Got one solution to symbolic query:" <> show addr <> " now have " <> show (length addrs + 1) <> " solution(s), max is: " <> show maxSols
-                collectSolutions (addr:addrs) maxSols newConds conf
+              Just v -> do
+                let hexMask = createHexValue numBytes
+                    maskedVal = v .&. hexMask
+                    cond = (And symExpr (Lit hexMask)) ./= Lit maskedVal
+                    newConds = Expr.simplifyProp $ PAnd conds cond
+                    showedVal = "val: 0x" <> (showHex maskedVal "")
+                when conf.debug $ putStrLn $ "Got one solution to symbolic query," <> showedVal <> " now have " <>
+                  show (length vals + 1) <> " solution(s), max is: " <> show maxSols
+                collectSolutions (maskedVal:vals) maxSols symExpr newConds conf
               _ -> internalError "No solution to symbolic query"
             Unsat -> do
               when conf.debug $ putStrLn "No more solution(s) to symbolic query."
-              pure $ Just addrs
+              pure $ Just vals
             -- Error or timeout, we need to be conservative
             res -> do
               when conf.debug $ putStrLn $ "Symbolic query result is neither SAT nor UNSAT:" <> show res

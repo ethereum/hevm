@@ -286,7 +286,7 @@ data Expr (a :: EType) where
 
   Balance        :: Expr EAddr -> Expr EWord
 
-  Gas            :: Int                -- frame idx
+  Gas            :: Int                -- fresh gas variable
                  -> Expr EWord
 
   -- code
@@ -596,7 +596,7 @@ data Query t s where
   PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM t s ()) -> Query t s
   PleaseFetchBlock    :: String -> W256 -> (Block -> EVM t s ()) -> Query t s
   PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM Symbolic s ()) -> Query Symbolic s
-  PleaseGetSol        :: Expr EWord -> [Prop] -> (Maybe W256 -> EVM Symbolic s ()) -> Query Symbolic s
+  PleaseGetSols       :: Expr EWord -> Int -> [Prop] -> (Maybe [W256] -> EVM Symbolic s ()) -> Query Symbolic s
   PleaseDoFFI         :: [String] -> Map String String -> (ByteString -> EVM t s ()) -> Query t s
   PleaseReadEnv       :: String -> (String -> EVM t s ()) -> Query t s
 
@@ -624,8 +624,10 @@ instance Show (Query t s) where
       (("<EVM.Query: ask SMT about "
         ++ show condition ++ " in context "
         ++ show constraints ++ ">") ++)
-    PleaseGetSol expr constraints _ ->
-      (("<EVM.Query: ask SMT to get W256 for expression "
+    PleaseGetSols expr numBytes constraints _ ->
+      (("<EVM.Query: ask SMT "
+        ++ "for address " ++ show numBytes ++ "bytes "
+        ++ "of W256 for expression "
         ++ show expr ++ " in context "
         ++ show constraints ++ ">") ++)
     PleaseDoFFI cmd env _ ->
@@ -636,7 +638,7 @@ instance Show (Query t s) where
 instance Show (Choose s) where
   showsPrec _ = \case
     PleaseChoosePath _ _ ->
-      (("<EVM.Choice: waiting for user to select path (0,1)") ++)
+      (("<EVM.Choice: system selecting path(s)") ++)
 
 -- | The possible result states of a VM
 data VMResult (t :: VMType) s where
@@ -868,7 +870,7 @@ class VMOps (t :: VMType) where
 
   partial :: PartialExec -> EVM t s ()
   branch :: Expr EWord -> (Bool -> EVM t s ()) -> EVM t s ()
-  oneSolution :: Expr EWord -> (Maybe W256 -> EVM t s ()) -> EVM t s ()
+  manySolutions :: Expr EWord -> Int -> (Maybe W256 -> EVM t s ()) -> EVM t s ()
 
 -- Bytecode Representations ------------------------------------------------------------------------
 

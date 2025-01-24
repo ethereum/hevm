@@ -687,6 +687,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
       branchesB <- getBranches bytecodeB
       when conf.debug $ liftIO $ do
         putStrLn "bytecodeA and bytecodeB are different, checking for equivalence"
+        -- putStrLn $ "endstateA: -> " <> (T.unpack $ T.intercalate "\nendStateA: -> " $ map formatExpr branchesA)
+        -- putStrLn $ "endstateB: -> " <> (T.unpack $ T.intercalate "\nendstateB: -> " $ map formatExpr branchesB)
       equivalenceCheck' solvers branchesA branchesB
   where
     -- decompiles the given bytecode into a list of branches
@@ -963,7 +965,7 @@ prettyCalldata cex buf sig types = headErr errSig (T.splitOn "(" sig) <> "(" <> 
           ConcreteBuf c -> T.pack (bsToHex c)
           _ -> err
       SAbi _ -> err
-    headErr e l = fromMaybe e $ listToMaybe l 
+    headErr e l = fromMaybe e $ listToMaybe l
     err = internalError $ "unable to produce a concrete model for calldata: " <> show buf
     errSig = internalError $ "unable to split sig: " <> show sig
 
