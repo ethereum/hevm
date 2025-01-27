@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Not all testcases ran due to incorrect filtering, fixed
 - Removed dead code related to IOAct in the now deprecated and removed debugger
 - Dumping of END states (.prop) files is now default for `--debug`
+- When cheatcode is missing, we produce a partial execution warning
 
 ## [0.54.2] - 2024-12-12
 

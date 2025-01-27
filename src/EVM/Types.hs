@@ -581,6 +581,7 @@ data PartialExec
   = UnexpectedSymbolicArg { pc :: Int, opcode :: String, msg  :: String, args  :: [SomeExpr] }
   | MaxIterationsReached  { pc :: Int, addr :: Expr EAddr }
   | JumpIntoSymbolicCode  { pc :: Int, jumpDst :: Int }
+  | CheatCodeMissing      { pc :: Int, selector :: FunctionSelector }
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
