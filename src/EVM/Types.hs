@@ -286,7 +286,7 @@ data Expr (a :: EType) where
 
   Balance        :: Expr EAddr -> Expr EWord
 
-  Gas            :: Int                -- frame idx
+  Gas            :: Int                -- fresh gas variable
                  -> Expr EWord
 
   -- code
