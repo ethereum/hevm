@@ -705,9 +705,14 @@ exprToSMT = \case
   Add a b -> op2 "bvadd" a b
   Sub a b -> op2 "bvsub" a b
   Mul a b -> op2 "bvmul" a b
-  Exp a b -> case b of
-               Lit b' -> expandExp a b'
-               _ -> Left "cannot encode symbolic exponentiation into SMT"
+  Exp a b -> case a of
+    -- Lit 1 has already been handled via Expr.simplify
+    Lit 0 -> do
+      benc <- exprToSMT b
+      pure $ "(ite (= " <> benc `sp` zero <> " ) " <> one `sp` zero <> ")"
+    _ -> case b of
+      Lit b' -> expandExp a b'
+      _ -> Left $ "Cannot encode symbolic exponent into SMT. Offending symbolic value: " <> show b
   Min a b -> do
     aenc <- exprToSMT a
     benc <- exprToSMT b
@@ -921,6 +926,8 @@ copySlice _ _ _ _ _ = Left "CopySlice with a symbolically sized region not curre
 -- | Unrolls an exponentiation into a series of multiplications
 expandExp :: Expr EWord -> W256 -> Err Builder
 expandExp base expnt
+  -- in EVM, anything (including 0) to the power of 0 is 1
+  | expnt == 0 = pure one
   | expnt == 1 = exprToSMT base
   | otherwise = do
     b <- exprToSMT base
