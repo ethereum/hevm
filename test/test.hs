@@ -1759,8 +1759,7 @@ tests = testGroup "hevm"
         Just c <- solcRuntime "C" src
         res <- reachableUserAsserts c Nothing
         assertBoolM "unexpected cex" (isRight res)
-    -- TODO: implement missing aliasing rules
-    , expectFail $ test "deployed-contract-addresses-cannot-alias" $ do
+    , testCase "deployed-contract-addresses-cannot-alias" $ do
         Just c <- solcRuntime "C"
           [i|
             contract A {}
@@ -1962,6 +1961,20 @@ tests = testGroup "hevm"
         Right e <- reachableUserAsserts c Nothing
         -- TODO: this should work one day
         assertBoolM "should be partial" (Expr.containsNode isPartial e)
+    , test "symbolic-addresses-cannot-be-zero-or-precompiles" $ do
+        let addrs = [T.pack . show . Addr $ a | a <- [0x0..0x09]]
+            mkC a = fromJust <$> solcRuntime "A"
+              [i|
+                contract A {
+                  function f() external {
+                    assert(msg.sender != address(${a}));
+                  }
+                }
+              |]
+        codes <- mapM mkC addrs
+        results <- mapM (flip reachableUserAsserts (Just (Sig "f()" []))) codes
+        let ok = and $ fmap (isRight) results
+        assertBool "unexpected cex" ok
     , test "addresses-in-context-are-symbolic" $ do
         Just a <- solcRuntime "A"
           [i|

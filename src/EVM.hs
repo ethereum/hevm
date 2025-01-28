@@ -2160,8 +2160,9 @@ create self this xSize xGas xValue xs newAddr initCode = do
     pushTrace $ ErrorTrace CallDepthLimitReached
     next
   -- are we deploying to an address that already has a contract?
-  -- note: this check is only sound to do statically if symbolic addresses
-  -- cannot have the value of any existing concrete addresses in the state.
+  -- note: the symbolic interpreter generates constraints ensuring that
+  -- symbolic storage keys cannot alias other storage keys, making this check
+  -- safe to perform statically
   else if collision $ Map.lookup newAddr vm0.env.contracts
   then burn' xGas $ do
     assign (#state % #stack) (Lit 0 : xs)
