@@ -1514,6 +1514,16 @@ accountEmpty c =
   -- TODO: handle symbolic balance...
   && c.balance == Lit 0
 
+-- Adds constraints such that two symbolic addresses cannot alias each other
+-- and symbolic addresses cannot alias concrete addresses
+addAliasConstraints :: EVM t s ()
+addAliasConstraints = do
+  vm <- get
+  let addrConstr = noClash $ Map.keys vm.env.contracts
+  modifying #constraints ((++) addrConstr)
+  where
+    noClash addrs = [a ./= b | a <- addrs, b <- addrs, Expr.isSymAddr b, a < b]
+
 -- * How to finalize a transaction
 finalize :: VMOps t => EVM t s ()
 finalize = do
@@ -1521,6 +1531,7 @@ finalize = do
     revertContracts  = use (#tx % #txReversion) >>= assign (#env % #contracts)
     revertSubstate   = assign (#tx % #subState) (SubState mempty mempty mempty mempty mempty mempty)
 
+  addAliasConstraints
   use #result >>= \case
     Just (VMFailure (Revert _)) -> do
       revertContracts
@@ -2178,23 +2189,9 @@ create self this xSize xGas xValue xs newAddr initCode = do
         next
         touchAccount self
         touchAccount newAddr
-<<<<<<< HEAD
       -- are we overflowing the nonce
       False -> burn' xGas $ do
         case parseInitCode initCode of
-=======
-      False -> burn xGas $ do
-        -- unfortunately we have to apply some (pretty hacky)
-        -- heuristics here to parse the unstructured buffer read
-        -- from memory into a code and data section
-        let contract' = do
-              prefixLen <- Expr.concPrefix initCode
-              prefix <- Expr.toList $ Expr.take prefixLen initCode
-              let sym = Expr.drop prefixLen initCode
-              conc <- mapM maybeLitByte prefix
-              pure $ InitCode (BS.pack $ V.toList conc) sym
-        case contract' of
->>>>>>> 10525566 (EVM: OpCreate: better comments)
           Nothing ->
             partial $ UnexpectedSymbolicArg vm0.state.pc (getOpName vm0.state) "initcode must have a concrete prefix" []
           Just c -> do

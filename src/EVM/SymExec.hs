@@ -499,17 +499,11 @@ runExpr :: Stepper.Stepper Symbolic RealWorld (Expr End)
 runExpr = do
   vm <- Stepper.runFully
   let traces = TraceContext (Zipper.toForest vm.traces) vm.env.contracts vm.labels
-  let constraints = vm.constraints <> consistentStorageKeys vm.env.contracts
   pure $ case vm.result of
-    Just (VMSuccess buf) -> Success constraints traces buf (fmap toEContract vm.env.contracts)
-    Just (VMFailure e)   -> Failure constraints traces e
-    Just (Unfinished p)  -> Partial constraints traces p
+    Just (VMSuccess buf) -> Success vm.constraints traces buf (fmap toEContract vm.env.contracts)
+    Just (VMFailure e)   -> Failure vm.constraints traces e
+    Just (Unfinished p)  -> Partial vm.constraints traces p
     _ -> internalError "vm in intermediate state after call to runFully"
-
--- build constraints that ensure that symbolic storage keys cannot alias other storage keys
-  -- let asserts = vm.constraints <> consistentStorageKeys vm.env.contracts
-consistentStorageKeys :: Map (Expr EAddr) Contract -> [Prop]
-consistentStorageKeys (Map.keys -> addrs) = [a ./= b | a <- addrs, b <- filter Expr.isSymAddr addrs]
 
 toEContract :: Contract -> Expr EContract
 toEContract c = C c.code c.storage c.tStorage c.balance c.nonce
