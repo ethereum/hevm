@@ -450,8 +450,7 @@ enforceGasOrder ps = SMT2 (["; gas ordering"] <> order names) mempty mempty
       (x, y) -> ["(assert (bvugt gas_" <> (fromString . show $ x) <> " gas_" <> (fromString . show $ y) <> "))"]
     consecutivePairs :: [Int] -> [(Int, Int)]
     consecutivePairs [] = []
-    consecutivePairs [_] = []
-    consecutivePairs (x:y:xs) = (x, y) : consecutivePairs (y:xs)
+    consecutivePairs l = zip l (tail l)
     names :: [Int] = nubOrd $ concatMap (foldProp go mempty) ps
     go :: Expr a -> [Int]
     go e = case e of
