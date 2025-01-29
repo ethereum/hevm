@@ -442,16 +442,16 @@ declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) cex
     cexvars = (mempty :: CexVars){ addrs = fmap toLazyText names }
 
 enforceGasOrder :: [Prop] -> SMT2
-enforceGasOrder ps = SMT2 (["; gas ordering"] <> order names) mempty mempty
+enforceGasOrder ps = SMT2 (["; gas ordering"] <> order indices) mempty mempty
   where
     order :: [Int] -> [Builder]
-    order n = consecutivePairs n >>= \case
+    order n = consecutivePairs n >>= \(x, y)->
       -- The GAS instruction itself costs gas, so it's strictly decreasing
-      (x, y) -> ["(assert (bvugt gas_" <> (fromString . show $ x) <> " gas_" <> (fromString . show $ y) <> "))"]
+      ["(assert (bvugt gas_" <> (fromString . show $ x) <> " gas_" <> (fromString . show $ y) <> "))"]
     consecutivePairs :: [Int] -> [(Int, Int)]
     consecutivePairs [] = []
     consecutivePairs l = zip l (tail l)
-    names :: [Int] = nubOrd $ concatMap (foldProp go mempty) ps
+    indices :: [Int] = nubOrd $ concatMap (foldProp go mempty) ps
     go :: Expr a -> [Int]
     go e = case e of
       Gas freshVar -> [freshVar]
