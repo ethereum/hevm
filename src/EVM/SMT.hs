@@ -9,7 +9,7 @@ module EVM.SMT where
 import Prelude hiding (LT, GT)
 
 import Control.Monad
-import Data.Containers.ListUtils (nubOrd)
+import Data.Containers.ListUtils (nubOrd, nubInt)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.List qualified as List
@@ -451,7 +451,7 @@ enforceGasOrder ps = SMT2 (["; gas ordering"] <> order indices) mempty mempty
     consecutivePairs :: [Int] -> [(Int, Int)]
     consecutivePairs [] = []
     consecutivePairs l = zip l (tail l)
-    indices :: [Int] = nubOrd $ concatMap (foldProp go mempty) ps
+    indices :: [Int] = nubInt $ concatMap (foldProp go mempty) ps
     go :: Expr a -> [Int]
     go e = case e of
       Gas freshVar -> [freshVar]
