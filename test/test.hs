@@ -1310,8 +1310,25 @@ tests = testGroup "hevm"
             |]
         r <- allBranchesFail c Nothing
         assertBoolM "all branches must fail" (isRight r)
-      ,
-      test "cheatcode-with-selector" $ do
+      , test "cheatcode-nonexistent" $ do
+        Just c <- solcRuntime "C"
+            [i|
+              interface Vm {
+                function nonexistent_cheatcode(uint) external;
+              }
+            contract C {
+              function fun(uint a) public {
+                  // Cheatcode address
+                  Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+                  vm.nonexistent_cheatcode(a);
+                  assert(1 == 1);
+              }
+            }
+            |]
+        let sig = Just (Sig "fun(uint256)" [AbiUIntType 256])
+        (e, [Qed _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression must contain Partial." $ Expr.containsNode isPartial e
+      , test "cheatcode-with-selector" $ do
         Just c <- solcRuntime "C"
             [i|
             contract C {
