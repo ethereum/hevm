@@ -1222,7 +1222,7 @@ simplifyProps ps = if cannotBeSat then [PBool False] else simplified
     simplified = if (goOne ps == ps) then ps else simplifyProps (goOne ps)
     cannotBeSat = PBool False `elem` simplified
     goOne :: [Prop] -> [Prop]
-    goOne newPs = remRedundantProps . map simplifyProp . constPropagate . flattenProps $ newPs
+    goOne = remRedundantProps . map simplifyProp . constPropagate . flattenProps
 
 
 -- | Evaluate the provided proposition down to its most concrete result
