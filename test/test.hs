@@ -777,28 +777,28 @@ tests = testGroup "hevm"
       test "disjunction-left-false" $ do
         let
           t = [PEq (Var "x") (Lit 1), POr (PEq (Var "x") (Lit 0)) (PEq (Var "y") (Lit 1)), PEq (Var "y") (Lit 2)]
-          cannotBeSat = Expr.isUnsat t
-        assertEqualM "Must be equal" cannotBeSat True
+          propagated = Expr.constPropagate t
+        assertEqualM "Must contain PBool False" True ((PBool False) `elem` propagated)
     , test "disjunction-right-false" $ do
         let
           t = [PEq (Var "x") (Lit 1), POr (PEq (Var "y") (Lit 1)) (PEq (Var "x") (Lit 0)), PEq (Var "y") (Lit 2)]
-          cannotBeSat = Expr.isUnsat t
-        assertEqualM "Must be equal" cannotBeSat True
+          propagated = Expr.constPropagate t
+        assertEqualM "Must contain PBool False" True ((PBool False) `elem` propagated)
     , test "disjunction-both-false" $ do
         let
           t = [PEq (Var "x") (Lit 1), POr (PEq (Var "x") (Lit 2)) (PEq (Var "x") (Lit 0)), PEq (Var "y") (Lit 2)]
-          cannotBeSat = Expr.isUnsat t
-        assertEqualM "Must be equal" cannotBeSat True
+          propagated = Expr.constPropagate t
+        assertEqualM "Must contain PBool False" True ((PBool False) `elem` propagated)
     , ignoreTest $ test "disequality-and-equality" $ do
         let
           t = [PNeg (PEq (Lit 1) (Var "arg1")), PEq (Lit 1) (Var "arg1")]
-          cannotBeSat = Expr.isUnsat t
-        assertEqualM "Must be equal" cannotBeSat True
+          propagated = Expr.constPropagate t
+        assertEqualM "Must contain PBool False" True ((PBool False) `elem` propagated)
     , test "equality-and-disequality" $ do
         let
           t = [PEq (Lit 1) (Var "arg1"), PNeg (PEq (Lit 1) (Var "arg1"))]
-          cannotBeSat = Expr.isUnsat t
-        assertEqualM "Must be equal" cannotBeSat True
+          propagated = Expr.constPropagate t
+        assertEqualM "Must contain PBool False" True ((PBool False) `elem` propagated)
   ]
   , testGroup "simpProp-concrete-tests" [
       test "simpProp-concrete-trues" $ do
@@ -866,6 +866,26 @@ tests = testGroup "hevm"
           t = [PEq (Or (Lit 2) (Lit 4)) (Lit 6)]
           simplified = Expr.simplifyProps t
         assertEqualM "Must be equal" [] simplified
+    , test "simpProp-constpropagate-1" $ do
+        let
+          -- 5+1 = 6
+          t = [PEq (Add (Lit 5) (Lit 1)) (Var "a"), PEq (Var "b") (Var "a")]
+          simplified = Expr.simplifyProps t
+        assertEqualM "Must be equal" [PEq (Lit 6) (Var "a"), PEq (Lit 6) (Var "b")] simplified
+    , test "simpProp-constpropagate-2" $ do
+        let
+          -- 5+1 = 6
+          t = [PEq (Add (Lit 5) (Lit 1)) (Var "a"), PEq (Var "b") (Var "a"), PEq (Var "c") (Sub (Var "b") (Lit 1))]
+          simplified = Expr.simplifyProps t
+        assertEqualM "Must be equal" [PEq (Lit 6) (Var "a"), PEq (Lit 6) (Var "b"), PEq (Lit 5) (Var "c")] simplified
+    , test "simpProp-constpropagate-3" $ do
+        let
+          t = [ PEq (Add (Lit 5) (Lit 1)) (Var "a") -- a = 6
+              , PEq (Var "b") (Var "a")             -- b = 6
+              , PEq (Var "c") (Sub (Var "b") (Lit 1)) -- c = 5
+              , PEq (Var "d") (Sub (Var "b") (Var "c"))] -- d = 1
+          simplified = Expr.simplifyProps t
+        assertEqualM "Must  know d == 1" ((PEq (Lit 1) (Var "d")) `elem` simplified) True
   ]
   , testGroup "MemoryTests"
     [ test "read-write-same-byte"  $ assertEqualM ""
