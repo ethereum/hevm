@@ -963,7 +963,7 @@ prettyCalldata cex buf sig types = headErr errSig (T.splitOn "(" sig) <> "(" <> 
           ConcreteBuf c -> T.pack (bsToHex c)
           _ -> err
       SAbi _ -> err
-    headErr e l = fromMaybe e $ listToMaybe l 
+    headErr e l = fromMaybe e $ listToMaybe l
     err = internalError $ "unable to produce a concrete model for calldata: " <> show buf
     errSig = internalError $ "unable to split sig: " <> show sig
 
