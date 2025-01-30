@@ -1168,8 +1168,21 @@ tests = testGroup "hevm"
              |]
          (_, [Cex _]) <- withSolvers Bitwuzla 1 1 Nothing $ \s -> checkAssert s [0x1] c Nothing [] defaultVeriOpts
          putStrLnM "expected counterexample found"
-      ,
-     test "enum-conversion-fail" $ do
+     , test "gas-decrease-monotone" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(uint8 a) external {
+                uint a = gasleft();
+                uint b = gasleft();
+                assert(a > b);
+              }
+             }
+            |]
+        let sig = (Just (Sig "fun(uint8)" [AbiUIntType 8]))
+        (_, [Qed _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        putStrLnM "expected Qed found"
+     , test "enum-conversion-fail" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
