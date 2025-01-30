@@ -1743,7 +1743,9 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
     runCheat abi input =  do
       let abi' = unsafeInto abi
       case Map.lookup abi' cheatActions of
-        Nothing -> vmError (BadCheatCode "Cannot understand cheatcode." abi')
+        Nothing -> do
+          vm <- get
+          partial $ CheatCodeMissing vm.state.pc abi'
         Just action -> action input
 
 type CheatAction t s = Expr Buf -> EVM t s ()

@@ -1219,8 +1219,11 @@ simplify e = if (mapExpr go e == e)
 simplifyProps :: [Prop] -> [Prop]
 simplifyProps ps = if cannotBeSat then [PBool False] else simplified
   where
-    simplified = remRedundantProps . map simplifyProp . flattenProps $ ps
-    cannotBeSat = isUnsat simplified
+    simplified = if (goOne ps == ps) then ps else simplifyProps (goOne ps)
+    cannotBeSat = PBool False `elem` simplified
+    goOne :: [Prop] -> [Prop]
+    goOne = remRedundantProps . map simplifyProp . constPropagate . flattenProps
+
 
 -- | Evaluate the provided proposition down to its most concrete result
 -- Also simplifies the inner Expr, if it exists
@@ -1571,38 +1574,54 @@ data ConstState = ConstState
   }
   deriving (Show)
 
--- | Checks if a conjunction of propositions is definitely unsatisfiable
-isUnsat :: [Prop] -> Bool
-isUnsat ps = Prelude.not $ oneRun ps (ConstState mempty True)
+-- | Performs constant propagation
+constPropagate :: [Prop] -> [Prop]
+constPropagate ps =
+ let consts = collectConsts ps (ConstState mempty True)
+ in if consts.canBeSat then substitute consts ps ++ fixVals consts
+    else [PBool False]
   where
-    oneRun ps2 startState = (execState (mapM (go . simplifyProp) ps2) startState).canBeSat
+    -- Fixes the values of the constants
+    fixVals :: ConstState -> [Prop]
+    fixVals cs = Map.foldrWithKey (\k v acc -> peq (Lit v) k : acc) [] cs.values
+
+    -- Substitutes the constants in the props.
+    -- NOTE: will create PEq (Lit x) (Lit x) if x is a constant
+    --       hence we need the fixVals function to add them back in
+    substitute :: ConstState -> [Prop] -> [Prop]
+    substitute cs ps2 = map (mapProp (subsGo cs)) ps2
+    subsGo :: ConstState -> Expr a-> Expr a
+    subsGo cs (Var v) = case Map.lookup (Var v) cs.values of
+      Just x -> Lit x
+      Nothing -> Var v
+    subsGo _ x = x
+
+    -- Collects all the constants in the given props, and sets canBeSat to False if UNSAT
+    collectConsts ps2 startState = execState (mapM go ps2) startState
     go :: Prop -> State ConstState ()
     go = \case
-        -- PEq
         PEq (Lit l) a -> do
           s <- get
           case Map.lookup a s.values of
             Just l2 -> unless (l==l2) $ put ConstState {canBeSat=False, values=mempty}
             Nothing -> modify (\s' -> s'{values=Map.insert a l s'.values})
         PEq a b@(Lit _) -> go (PEq b a)
-        -- PNeg
         PNeg (PEq (Lit l) a) -> do
           s <- get
           case Map.lookup a s.values of
             Just l2 -> when (l==l2) $ put ConstState {canBeSat=False, values=mempty}
             Nothing -> pure ()
         PNeg (PEq a b@(Lit _)) -> go $ PNeg (PEq b a)
-        -- Others
         PAnd a b -> do
           go a
           go b
         POr a b -> do
           s <- get
           let
-            v1 = oneRun [a] s
-            v2 = oneRun [b] s
-          unless v1 $ go b
-          unless v2 $ go a
+            v1 = collectConsts [a] s
+            v2 = collectConsts [b] s
+          unless v1.canBeSat $ go b
+          unless v2.canBeSat $ go a
         PBool False -> put $ ConstState {canBeSat=False, values=mempty}
         _ -> pure ()
 

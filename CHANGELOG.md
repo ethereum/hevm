@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - STATICCALL abstraction is now performed in case of symbolic arguments
 - Better error messages for JSON parsing
 - Aliasing works much better for symbolic and concrete addresses
+- Constant propagation for symbolic values
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Base case of exponentiation to 0 was not handled, leading to infinite loop
 - Better exponential simplification
 - Dumping of END states (.prop) files is now default for `--debug`
+- When cheatcode is missing, we produce a partial execution warning
 
 ## [0.54.2] - 2024-12-12
 
