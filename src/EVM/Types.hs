@@ -621,7 +621,7 @@ instance Show (Query t s) where
         ++ show constraints ++ ">") ++)
     PleaseGetSols expr numBytes constraints _ ->
       (("<EVM.Query: ask SMT "
-        ++ "for address " ++ show numBytes ++ "bytes "
+        ++ "for " ++ show numBytes ++ " bytes "
         ++ "of W256 for expression "
         ++ show expr ++ " in context "
         ++ show constraints ++ ">") ++)
