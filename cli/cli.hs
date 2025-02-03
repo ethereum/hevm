@@ -265,15 +265,16 @@ equivalence cmd = do
     cores <- liftIO $ unsafeInto <$> getNumProcessors
     let solverCount = fromMaybe cores cmd.numSolvers
     withSolvers solver solverCount (fromMaybe 1 cmd.solverThreads) cmd.smttimeout $ \s -> do
-      res <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata
+      (res, e) <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata
+      liftIO $ case (any isCex res, any Expr.isPartial e || any isUnknown res) of
+        (False, False) -> putStrLn "   \x1b[32m[PASS]\x1b[0m Contracts behave equivalently"
+        (True, _) -> putStrLn "   \x1b[31m[FAIL]\x1b[0m Contracts do not behave equivalently"
+        (_, True) -> putStrLn "   \x1b[31m[FAIL]\x1b[0m Contracts may not behave equivalently"
+      liftIO $ printWarnings e res "the contracts under test"
       case any isCex res of
         False -> liftIO $ do
+          when (any isUnknown res || any isError res || any isPartial e) exitFailure
           putStrLn "No discrepancies found"
-          when (any isUnknown res || any isError res) $ do
-            putStrLn "But the following issues occurred:"
-            forM_ (groupIssues (filter isError res)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
-            forM_ (groupIssues (filter isUnknown res)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
-            exitFailure
         True -> liftIO $ do
           let cexs = mapMaybe getCex res
           T.putStrLn . T.unlines $

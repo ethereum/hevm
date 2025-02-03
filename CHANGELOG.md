@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dumping of END states (.prop) files is now default for `--debug`
 - When cheatcode is missing, we produce a partial execution warning
 
+## Changed
+- Warnings are now promoted to errors, so users don't accidentally think that
+  their contract is correct when there were cases/branches that hevm could not
+  fully explore
+
 ## [0.54.2] - 2024-12-12
 
 ## Fixed

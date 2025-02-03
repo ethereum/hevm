@@ -82,7 +82,7 @@ instance Monoid CexVars where
 data BufModel
   = Comp CompressedBuf
   | Flat ByteString
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
 
 -- | This representation lets us store buffers of arbitrary length without
 -- exhausting the available memory, it closely matches the format used by
@@ -90,7 +90,7 @@ data BufModel
 data CompressedBuf
   = Base { byte :: Word8, length :: W256}
   | Write { byte :: Word8, idx :: W256, next :: CompressedBuf }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
 
 
 -- | a final post shrinking cex, buffers here are all represented as concrete bytestrings
@@ -102,7 +102,7 @@ data SMTCex = SMTCex
   , blockContext :: Map (Expr EWord) W256
   , txContext :: Map (Expr EWord) W256
   }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
 
 instance Semigroup SMTCex where
   a <> b = SMTCex

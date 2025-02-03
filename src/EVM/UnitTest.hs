@@ -14,7 +14,7 @@ import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isQed, extractCex, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, isUnknown, isError, groupIssues)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isCex, extractCex, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, isUnknown, isError, groupIssues, groupPartials, ProofResult(..))
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
@@ -184,8 +184,8 @@ runUnitTestContract
       writeTraceDapp dapp vm1
       case vm1.result of
         Just (VMFailure _) -> liftIO $ do
-          Text.putStrLn "\x1b[31m[BAIL]\x1b[0m setUp() "
-          tick $ failOutput vm1 opts "setUp()"
+          Text.putStrLn "   \x1b[31m[BAIL]\x1b[0m setUp() "
+          tick $ indentLines 3 $ failOutput vm1 opts "setUp()"
           pure [False]
         Just (VMSuccess _) -> do
           forM testSigs $ \s -> symRun opts vm1 s
@@ -227,42 +227,52 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     writeTraceDapp dapp vm'
 
     -- check postconditions against vm
-    (e, results) <- verify solvers (makeVeriOpts opts) (symbolify vm') (Just postcondition)
-    let allReverts = not . (any Expr.isSuccess) . flattenExpr $ e
+    (end, results) <- verify solvers (makeVeriOpts opts) (symbolify vm') (Just postcondition)
+    let ends = flattenExpr end
+    let allReverts = not . (any Expr.isSuccess) $ ends
 
     conf <- readConfig
-    when conf.debug $ liftIO $ forM_ (filter Expr.isFailure (flattenExpr e)) $ \case
+    when conf.debug $ liftIO $ forM_ (filter Expr.isFailure ends) $ \case
       (Failure _ _ a) ->  putStrLn $ "   -> debug of func: " <> Text.unpack testName <> " Failure at the end of expr: " <> show a;
       _ -> internalError "cannot be, filtered for failure"
-    when (any isUnknown results || any isError results) $ liftIO $ do
-      putStrLn $ "      \x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the test " <> Text.unpack testName <> " due to: ";
-      forM_ (groupIssues (filter isError results)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
-      forM_ (groupIssues (filter isUnknown results)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
 
     -- display results
-    if all isQed results
-    then if allReverts && (not shouldFail)
-         then do
-           liftIO $ putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n" <> Text.unpack allBranchRev
-           pure False
-         else do
-           liftIO $ putStr $ "   \x1b[32m[PASS]\x1b[0m " <> Text.unpack testName <> "\n"
-           pure True
-    else do
-      -- not all is Qed
-      let x = mapMaybe extractCex results
-      let y = symFailure opts testName (fst cd) types x
-      liftIO $ putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n" <> Text.unpack y
-      pure False
+    let t = "the test " <> Text.unpack testName
+    liftIO $ case (any isCex results, any Expr.isPartial ends || any isUnknown results || any isError results, (allReverts && (not shouldFail))) of
+      -- happy case
+      (False, False, False) -> do
+        putStr $ "   \x1b[32m[PASS]\x1b[0m " <> Text.unpack testName <> "\n"
+        printWarnings ends results t
+        pure True
+      -- there are counterexamples (and maybe other things, but Cex is most important)
+      (True, _, _) -> do
+        let x = mapMaybe extractCex results
+            y = symFailure opts testName (fst cd) types x
+        putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n"
+          <> Text.unpack y
+        printWarnings ends results t
+        pure False
+      -- There are errors/unknowns/partials, we fail them
+      (_, True, _) -> do
+        putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n"
+        printWarnings ends results t
+        pure False
+      -- No cexes/errors/unknowns/partials, but all branches reverted
+      (_, _, True) -> do
+        putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n"
+          <> "          No reachable assertion violations, but all branches reverted\n"
+        printWarnings ends results t
+        pure False
 
-allBranchRev :: Text
-allBranchRev = intercalate "\n"
-  [ Text.concat $ indentLines 3 <$>
-      [ "Reason:"
-      , "  No reachable assertion violations, but all branches reverted"
-      , "  Prefix this testname with `proveFail` if this is expected"
-      ]
-  ]
+printWarnings :: [Expr 'End] -> [ProofResult a b c String] -> String -> IO ()
+printWarnings e results testName = do
+  when (any isUnknown results || any isError results || any Expr.isPartial e) $ do
+    putStrLn $ "   \x1b[33m[WARNING]\x1b[0m hevm was only able to partially explore " <> testName <> " due to: ";
+    forM_ (groupIssues (filter isError results)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
+    forM_ (groupIssues (filter isUnknown results)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
+    forM_ (groupPartials e) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
+  putStrLn ""
+
 symFailure :: UnitTestOptions RealWorld -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> Text
 symFailure UnitTestOptions {..} testName cd types failures' =
   mconcat
@@ -323,7 +333,6 @@ failOutput vm UnitTestOptions { .. } testName =
       Just _ -> indentLines 2 (showTraceTree dapp vm)
       _ -> ""
   , indentLines 2 (formatTestLogs dapp.eventMap vm.logs)
-  , "\n"
   ]
 
 formatTestLogs :: (?context :: DappContext) => Map W256 Event -> [Expr Log] -> Text

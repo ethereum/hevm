@@ -3727,8 +3727,8 @@ tests = testGroup "hevm"
           }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
-          assertBoolM "Must have a difference" (any isCex a)
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          assertBoolM "Must have a difference" (any isCex res)
       ,
       test "eq-sol-exp-qed" $ do
         Just aPrgm <- solcRuntime "C"
@@ -3752,8 +3752,8 @@ tests = testGroup "hevm"
             }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
-          assertEqualM "Must have no difference" [Qed ()] a
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          assertEqualM "Must have no difference" [Qed ()] res
       ,
       test "eq-balance-differs" $ do
         Just aPrgm <- solcRuntime "C"
@@ -3783,8 +3783,8 @@ tests = testGroup "hevm"
             }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
-          assertBoolM "Must differ" (all isCex a)
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          assertBoolM "Must differ" (all isCex res)
       ,
       -- TODO: this fails because we don't check equivalence of deployed contracts
       expectFail $ test "eq-handles-contract-deployment" $ do
@@ -3844,8 +3844,8 @@ tests = testGroup "hevm"
             }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
-          assertBoolM "Must differ" (all isCex a)
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          assertBoolM "Must differ" (all isCex res)
       ,
       test "eq-unknown-addr" $ do
         Just aPrgm <- solcRuntime "C"
@@ -3868,8 +3868,8 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           let cd = mkCalldata (Just (Sig "a(address,address)" [AbiAddressType, AbiAddressType])) []
-          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd
-          assertEqualM "Must be different" (any isCex a) True
+          (res,_) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd
+          assertEqualM "Must be different" (any isCex res) True
       ,
       test "eq-sol-exp-cex" $ do
         Just aPrgm <- solcRuntime "C"
@@ -3893,8 +3893,8 @@ tests = testGroup "hevm"
               }
           |]
         withSolvers Bitwuzla 3 1 Nothing $ \s -> do
-          a <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
-          assertEqualM "Must be different" (any isCex a) True
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          assertEqualM "Must be different" (any isCex res) True
       , test "eq-all-yul-optimization-tests" $ do
         let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }
             ignoredTests =
@@ -4106,7 +4106,7 @@ tests = testGroup "hevm"
           Just bPrgm <- liftIO $ yul "" $ T.pack $ unlines filteredBSym
           procs <- liftIO $ getNumProcessors
           withSolvers CVC5 (unsafeInto procs) 1 (Just 100) $ \s -> do
-            res <- equivalenceCheck s aPrgm bPrgm opts (mkCalldata Nothing [])
+            (res, _) <- equivalenceCheck s aPrgm bPrgm opts (mkCalldata Nothing [])
             end <- liftIO $ getCurrentTime
             case any isCex res of
               False -> liftIO $ do

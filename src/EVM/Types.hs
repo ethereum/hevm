@@ -130,7 +130,7 @@ data EType
   | EContract
   | Byte
   | End
-  deriving (Typeable)
+  deriving (Typeable, Ord, Eq)
 
 -- Variables referring to a global environment
 data GVar (a :: EType) where
@@ -513,7 +513,6 @@ instance Ord Prop where
 isPBool :: Prop -> Bool
 isPBool (PBool _) = True
 isPBool _ = False
-
 
 -- Errors ------------------------------------------------------------------------------------------
 
