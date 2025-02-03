@@ -514,6 +514,7 @@ isPBool :: Prop -> Bool
 isPBool (PBool _) = True
 isPBool _ = False
 
+
 -- Errors ------------------------------------------------------------------------------------------
 
 -- General error helper
