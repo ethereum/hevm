@@ -219,7 +219,7 @@ assertPropsNoSimp psPreConc = do
  pure $ prelude
   <> (declareAbstractStores abstractStores)
   <> smt2Line ""
-  <> (declareAddrs addresses)
+  <> declareConstrainAddrs addresses
   <> smt2Line ""
   <> (declareBufs toDeclarePsElim bufs stores)
   <> smt2Line ""
@@ -268,7 +268,7 @@ assertPropsNoSimp psPreConc = do
     storeVals = Map.elems stores
     storageReads = Map.unionsWith (<>) $ fmap findStorageReads toDeclarePs
     abstractStores = Set.toList $ Set.unions (fmap referencedAbstractStores toDeclarePs)
-    addresses = Set.toList $ Set.unions (fmap referencedWAddrs toDeclarePs)
+    addresses = Set.toList $ Set.unions (fmap referencedAddrs toDeclarePs)
 
     -- Keccak assertions: concrete values, distance between pairs, injectivity, etc.
     --      This will make sure concrete values of Keccak are asserted, if they can be computed (i.e. can be concretized)
@@ -294,11 +294,11 @@ referencedAbstractStores term = foldTerm go mempty term
       AbstractStore s idx -> Set.singleton (storeName s idx)
       _ -> mempty
 
-referencedWAddrs :: TraversableTerm a => a -> Set Builder
-referencedWAddrs term = foldTerm go mempty term
+referencedAddrs :: TraversableTerm a => a -> Set Builder
+referencedAddrs term = foldTerm go mempty term
   where
     go = \case
-      WAddr(a@(SymAddr _)) -> Set.singleton (formatEAddr a)
+      SymAddr a -> Set.singleton (formatEAddr (SymAddr a))
       _ -> mempty
 
 referencedBufs :: TraversableTerm a => a -> [Builder]
@@ -435,10 +435,12 @@ declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars mempty
     cexvars = (mempty :: CexVars){ calldata = fmap toLazyText names }
 
 -- Given a list of variable names, create an SMT2 object with the variables declared
-declareAddrs :: [Builder] -> SMT2
-declareAddrs names = SMT2 (["; symbolic addresseses"] <> fmap declare names) cexvars mempty
+declareConstrainAddrs :: [Builder] -> SMT2
+declareConstrainAddrs names = SMT2 (["; concrete and symbolic addresses"] <> fmap declare names <> fmap assume names) cexvars mempty
   where
     declare n = "(declare-fun " <> n <> " () Addr)"
+    -- assume that symbolic addresses do not collide with the zero address or precompiles
+    assume n = "(assert (bvugt " <> n <> " (_ bv9 160)))"
     cexvars = (mempty :: CexVars){ addrs = fmap toLazyText names }
 
 enforceGasOrder :: [Prop] -> SMT2
@@ -869,6 +871,7 @@ exprToSMT = \case
     encPrev <- exprToSMT prev
     pure $ "(store" `sp` encPrev `sp` encIdx `sp` encVal <> ")"
   SLoad idx store -> op2 "select" store idx
+  LitAddr n -> pure $ fromLazyText $ "(_ bv" <> T.pack (show (into n :: Integer)) <> " 160)"
   Gas freshVar -> pure $ fromLazyText $ "gas_"  <> (T.pack $ show freshVar)
 
   a -> internalError $ "TODO: implement: " <> show a

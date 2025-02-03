@@ -1809,15 +1809,29 @@ tests = testGroup "hevm"
         Just c <- solcRuntime "C" src
         res <- reachableUserAsserts c Nothing
         assertBoolM "unexpected cex" (isRight res)
-    -- TODO: implement missing aliasing rules
-    , expectFail $ test "deployed-contract-addresses-cannot-alias" $ do
+    , test "deployed-contract-addresses-cannot-alias1" $ do
         Just c <- solcRuntime "C"
           [i|
             contract A {}
             contract C {
               function f() external {
                 A a = new A();
-                if (address(a) == address(this)) assert(false);
+                uint256 addr = uint256(uint160(address(a)));
+                uint256 addr2 = uint256(uint160(address(this)));
+                assert(addr != addr2);
+              }
+            }
+          |]
+        res <- reachableUserAsserts c Nothing
+        assertBoolM "should not be able to alias" (isRight res)
+    , test "deployed-contract-addresses-cannot-alias2" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract A {}
+            contract C {
+              function f() external {
+                A a = new A();
+                assert(address(a) != address(this));
               }
             }
           |]
@@ -2012,12 +2026,26 @@ tests = testGroup "hevm"
         Right e <- reachableUserAsserts c Nothing
         -- TODO: this should work one day
         assertBoolM "should be partial" (Expr.containsNode isPartial e)
+    , test "symbolic-addresses-cannot-be-zero-or-precompiles" $ do
+        let addrs = [T.pack . show . Addr $ a | a <- [0x0..0x09]]
+            mkC a = fromJust <$> solcRuntime "A"
+              [i|
+                contract A {
+                  function f() external {
+                    assert(msg.sender != address(${a}));
+                  }
+                }
+              |]
+        codes <- mapM mkC addrs
+        results <- mapM (flip reachableUserAsserts (Just (Sig "f()" []))) codes
+        let ok = and $ fmap (isRight) results
+        assertBoolM "unexpected cex" ok
     , test "addresses-in-context-are-symbolic" $ do
         Just a <- solcRuntime "A"
           [i|
             contract A {
               function f() external {
-                assert(msg.sender != address(0x0));
+                assert(msg.sender != address(0x10));
               }
             }
           |]
@@ -2025,7 +2053,7 @@ tests = testGroup "hevm"
           [i|
             contract B {
               function f() external {
-                assert(block.coinbase != address(0x1));
+                assert(block.coinbase != address(0x11));
               }
             }
           |]
@@ -2033,7 +2061,7 @@ tests = testGroup "hevm"
           [i|
             contract C {
               function f() external {
-                assert(tx.origin != address(0x2));
+                assert(tx.origin != address(0x12));
               }
             }
           |]
@@ -2041,7 +2069,7 @@ tests = testGroup "hevm"
           [i|
             contract D {
               function f() external {
-                assert(address(this) != address(0x3));
+                assert(address(this) != address(0x13));
               }
             }
           |]
@@ -2050,10 +2078,11 @@ tests = testGroup "hevm"
           assertEqualM "wrong number of addresses" 1 (length (Map.keys cex.addrs))
           pure cex
 
-        assertEqualM "wrong model for a" (Addr 0) (fromJust $ Map.lookup (SymAddr "caller") acex.addrs)
-        assertEqualM "wrong model for b" (Addr 1) (fromJust $ Map.lookup (SymAddr "coinbase") bcex.addrs)
-        assertEqualM "wrong model for c" (Addr 2) (fromJust $ Map.lookup (SymAddr "origin") ccex.addrs)
-        assertEqualM "wrong model for d" (Addr 3) (fromJust $ Map.lookup (SymAddr "entrypoint") dcex.addrs)
+        -- Lowest allowed address is 0x10 due to reserved addresses up to 0x9
+        assertEqualM "wrong model for a" (Addr 0x10) (fromJust $ Map.lookup (SymAddr "caller") acex.addrs)
+        assertEqualM "wrong model for b" (Addr 0x11) (fromJust $ Map.lookup (SymAddr "coinbase") bcex.addrs)
+        assertEqualM "wrong model for c" (Addr 0x12) (fromJust $ Map.lookup (SymAddr "origin") ccex.addrs)
+        assertEqualM "wrong model for d" (Addr 0x13) (fromJust $ Map.lookup (SymAddr "entrypoint") dcex.addrs)
     ]
   , testGroup "Symbolic execution"
       [

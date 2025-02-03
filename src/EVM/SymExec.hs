@@ -501,8 +501,8 @@ runExpr = do
   let traces = TraceContext (Zipper.toForest vm.traces) vm.env.contracts vm.labels
   pure $ case vm.result of
     Just (VMSuccess buf) -> Success vm.constraints traces buf (fmap toEContract vm.env.contracts)
-    Just (VMFailure e) -> Failure vm.constraints traces e
-    Just (Unfinished p) -> Partial vm.constraints traces p
+    Just (VMFailure e)   -> Failure vm.constraints traces e
+    Just (Unfinished p)  -> Partial vm.constraints traces p
     _ -> internalError "vm in intermediate state after call to runFully"
 
 toEContract :: Contract -> Expr EContract
@@ -963,7 +963,7 @@ prettyCalldata cex buf sig types = headErr errSig (T.splitOn "(" sig) <> "(" <> 
           ConcreteBuf c -> T.pack (bsToHex c)
           _ -> err
       SAbi _ -> err
-    headErr e l = fromMaybe e $ listToMaybe l 
+    headErr e l = fromMaybe e $ listToMaybe l
     err = internalError $ "unable to produce a concrete model for calldata: " <> show buf
     errSig = internalError $ "unable to split sig: " <> show sig
 
