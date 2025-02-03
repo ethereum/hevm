@@ -2098,6 +2098,24 @@ tests = testGroup "hevm"
             |]
         (_, [Qed _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256)" [AbiIntType 256])) [] defaultVeriOpts
         putStrLnM "Require works as expected"
+     , test "symbolic-to-concrete-multi" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            interface Vm {
+              function deal(address,uint256) external;
+            }
+            contract MyContract {
+              function fun(uint160 a) external {
+                Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+                uint160 c = 10 + (a % 2);
+                address b = address(c);
+                vm.deal(b, 10);
+              }
+             }
+            |]
+        let sig =Just (Sig "fun(uint160)" [AbiUIntType 160])
+        (e, [Qed _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression is partial" $ Prelude.not (Expr.containsNode isPartial e)
      ,
      -- here test
      test "ITE-with-bitwise-AND" $ do
