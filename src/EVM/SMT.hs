@@ -436,7 +436,7 @@ declareVars names = SMT2 (["; variables"] <> fmap declare names) cexvars mempty
 
 -- Given a list of variable names, create an SMT2 object with the variables declared
 declareConstrainAddrs :: [Builder] -> SMT2
-declareConstrainAddrs names = SMT2 (["; concretea and symbolic addresseses"] <> fmap declare names <> fmap assume names) cexvars mempty
+declareConstrainAddrs names = SMT2 (["; concrete and symbolic addresses"] <> fmap declare names <> fmap assume names) cexvars mempty
   where
     declare n = "(declare-fun " <> n <> " () Addr)"
     -- assume that symbolic addresses do not collide with the zero address or precompiles
