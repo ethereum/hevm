@@ -239,7 +239,7 @@ main = withUtf8 $ do
             -- TODO: which functions here actually require a BuildOutput, and which can take it as a Maybe?
             testOpts <- liftIO $ unitTestOptions cmd solvers (Just out)
             res <- unitTest testOpts out.contracts
-            liftIO $ unless res exitFailure
+            liftIO $ unless (uncurry (&&) res) exitFailure
 
 equivalence :: App m => Command Options.Unwrapped -> m ()
 equivalence cmd = do

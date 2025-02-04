@@ -130,7 +130,7 @@ data EType
   | EContract
   | Byte
   | End
-  deriving (Typeable, Ord, Eq)
+  deriving (Typeable)
 
 -- Variables referring to a global environment
 data GVar (a :: EType) where

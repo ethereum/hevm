@@ -1591,64 +1591,66 @@ tests = testGroup "hevm"
   , testGroup "Dapp-Tests"
     [ test "Trivial-Pass" $ do
         let testFile = "test/contracts/pass/trivial.sol"
-        runSolidityTest testFile ".*" >>= assertEqualM "test result" True
+        runSolidityTest testFile ".*" >>= assertEqualM "test result" (True, True)
     , test "Foundry" $ do
         -- quick smokecheck to make sure that we can parse ForgeStdLib style build outputs
         let cases =
-              [ ("test/contracts/pass/trivial.sol", ".*", True)
-              , ("test/contracts/pass/dsProvePass.sol", "proveEasy", True)
-              , ("test/contracts/fail/trivial.sol", ".*", False)
-              , ("test/contracts/fail/dsProveFail.sol", "prove_add", False)
+              [ ("test/contracts/pass/trivial.sol", ".*", (True, True))
+              , ("test/contracts/pass/dsProvePass.sol", "proveEasy", (True, True))
+              , ("test/contracts/fail/trivial.sol", ".*", (False, False))
+              , ("test/contracts/fail/dsProveFail.sol", "prove_add", (False, True))
               ]
-        results <- forM cases $ \(testFile, match, expected) -> do
+        forM_ cases $ \(testFile, match, expected) -> do
           actual <- runSolidityTestCustom testFile match Nothing Nothing False Nothing Foundry
-          pure (actual == expected)
-        assertBoolM "test result" (and results)
+          putStrLnM $ "Test result for " <> testFile <> ": " <> show actual
+          assertEqualM "Must match" actual  expected
     , test "Trivial-Fail" $ do
         let testFile = "test/contracts/fail/trivial.sol"
-        runSolidityTest testFile "prove_false" >>= assertEqualM "test result" False
+        runSolidityTest testFile "prove_false" >>= assertEqualM "test result" (False, False)
     , test "Abstract" $ do
         let testFile = "test/contracts/pass/abstract.sol"
-        runSolidityTest testFile ".*" >>= assertEqualM "test result" True
+        runSolidityTest testFile ".*" >>= assertEqualM "test result" (True, True)
     , test "Constantinople" $ do
         let testFile = "test/contracts/pass/constantinople.sol"
-        runSolidityTest testFile ".*" >>= assertEqualM "test result" True
+        runSolidityTest testFile ".*" >>= assertEqualM "test result" (True, True)
     , test "ConstantinopleMin" $ do
         let testFile = "test/contracts/pass/constantinople_min.sol"
-        runSolidityTest testFile ".*" >>= assertEqualM "test result" True
+        runSolidityTest testFile ".*" >>= assertEqualM "test result" (True, True)
     , test "Prove-Tests-Pass" $ do
         let testFile = "test/contracts/pass/dsProvePass.sol"
-        runSolidityTest testFile ".*" >>= assertEqualM "test result" True
+        runSolidityTest testFile ".*" >>= assertEqualM "test result" (True, True)
     , test "prefix-check-for-dapp" $ do
         let testFile = "test/contracts/fail/check-prefix.sol"
-        runSolidityTest testFile "check_trivial" >>= assertEqualM "test result" False
+        runSolidityTest testFile "check_trivial" >>= assertEqualM "test result" (False, False)
     , test "transfer-dapp" $ do
         let testFile = "test/contracts/pass/transfer.sol"
-        runSolidityTest testFile "prove_transfer" >>= assertEqualM "should prove transfer" True
+        runSolidityTest testFile "prove_transfer" >>= assertEqualM "should prove transfer" (True, True)
     , test "badvault-sym-branch" $ do
         let testFile = "test/contracts/fail/10_BadVault.sol"
-        runSolidityTestCustom testFile "prove_BadVault_usingExploitLaunchPad"  Nothing Nothing True Nothing Foundry >>= assertEqualM "Must find counterexample" False
+        runSolidityTestCustom testFile "prove_BadVault_usingExploitLaunchPad"  Nothing Nothing True Nothing Foundry >>=
+          assertEqualM "Must find counterexample" (False, True)
     , test "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
-        runSolidityTest testFile "prove_trivial" >>= assertEqualM "test result" False
-        runSolidityTest testFile "prove_trivial_dstest" >>= assertEqualM "test result" False
-        runSolidityTest testFile "prove_add" >>= assertEqualM "test result" False
-        runSolidityTestCustom testFile "prove_smtTimeout" (Just 1) Nothing False Nothing Foundry >>= assertEqualM "test result" False
-        runSolidityTest testFile "prove_multi" >>= assertEqualM "test result" False
-        runSolidityTest testFile "prove_distributivity" >>= assertEqualM "test result" False
+        runSolidityTest testFile "prove_trivial" >>= assertEqualM "prove_trivial" (False, False)
+        runSolidityTest testFile "prove_trivial_dstest" >>= assertEqualM "prove_trivial_dstest" (False, False)
+        runSolidityTest testFile "prove_add" >>= assertEqualM "prove_add" (False, True)
+        runSolidityTestCustom testFile "prove_smtTimeout" (Just 1) Nothing False Nothing Foundry
+          >>= assertEqualM "prove_smtTimeout" (True, False)
+        runSolidityTest testFile "prove_multi" >>= assertEqualM "prove_multi" (False, True)
+        runSolidityTest testFile "prove_distributivity" >>= assertEqualM "prove_distributivity" (False, True)
     , test "Loop-Tests" $ do
         let testFile = "test/contracts/pass/loops.sol"
-        runSolidityTestCustom testFile "prove_loop" Nothing (Just 10) False Nothing Foundry  >>= assertEqualM "test result" True
-        runSolidityTestCustom testFile "prove_loop" Nothing (Just 100) False Nothing Foundry >>= assertEqualM "test result" False
+        runSolidityTestCustom testFile "prove_loop" Nothing (Just 10) False Nothing Foundry  >>= assertEqualM "test result" (True, False)
+        runSolidityTestCustom testFile "prove_loop" Nothing (Just 100) False Nothing Foundry >>= assertEqualM "test result" (False, False)
     , test "Cheat-Codes-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodes.sol"
-        runSolidityTest testFile ".*" >>= assertEqualM "test result" True
+        runSolidityTest testFile ".*" >>= assertEqualM "test result" (True, False)
     , test "Cheat-Codes-Fork-Pass" $ do
         let testFile = "test/contracts/pass/cheatCodesFork.sol"
-        runSolidityTest testFile ".*" >>= assertEqualM "test result" True
+        runSolidityTest testFile ".*" >>= assertEqualM "test result" (True, True)
     , test "Unwind" $ do
         let testFile = "test/contracts/pass/unwind.sol"
-        runSolidityTest testFile ".*" >>= assertEqualM "test result" True
+        runSolidityTest testFile ".*" >>= assertEqualM "test result" (True, True)
     ]
   , testGroup "max-iterations"
     [ test "concrete-loops-reached" $ do

@@ -24,9 +24,10 @@ import Data.Maybe (fromMaybe)
 import EVM.Types (internalError)
 import System.Environment (lookupEnv)
 
+-- Returns tuple of (No cex, No warnings)
 runSolidityTestCustom
   :: (MonadMask m, App m)
-  => FilePath -> Text -> Maybe Natural -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> m Bool
+  => FilePath -> Text -> Maybe Natural -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> m (Bool, Bool)
 runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectType = do
   withSystemTempDirectory "dapp-test" $ \root -> do
     (compile projectType root testFile) >>= \case
@@ -39,9 +40,10 @@ runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectT
           opts <- liftIO $ testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
           unitTest opts contracts
 
+-- Returns tuple of (No cex, No warnings)
 runSolidityTest
   :: (MonadMask m, App m)
-  => FilePath -> Text -> m Bool
+  => FilePath -> Text -> m (Bool, Bool)
 runSolidityTest testFile match = runSolidityTestCustom testFile match Nothing Nothing True Nothing Foundry
 
 testOpts :: SolverGroup -> FilePath -> Maybe BuildOutput -> Text -> Maybe Integer -> Bool -> RpcInfo -> IO (UnitTestOptions RealWorld)

@@ -31,9 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When cheatcode is missing, we produce a partial execution warning
 
 ## Changed
-- Warnings are now promoted to errors, so users don't accidentally think that
+- Warnings now lead printing FAIL. This way, users don't accidentally think that
   their contract is correct when there were cases/branches that hevm could not
-  fully explore
+  fully explore. Printing of issues is also now much more organized
 
 ## [0.54.2] - 2024-12-12
 

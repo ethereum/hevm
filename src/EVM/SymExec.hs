@@ -37,7 +37,7 @@ import EVM.ABI
 import EVM.Effects
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (feeSchedule)
-import EVM.Format (formatExpr, formatPartial, showVal, bsToHex, indent, formatBinary, formatPartialShort)
+import EVM.Format (formatExpr, formatPartial, formatPartialShort, showVal, bsToHex, indent, formatBinary)
 import EVM.SMT (SMTCex(..), SMT2(..), assertProps)
 import EVM.SMT qualified as SMT
 import EVM.Solvers
@@ -59,7 +59,7 @@ data LoopHeuristic
   deriving (Eq, Show, Read, ParseField, ParseFields, ParseRecord, Generic)
 
 data ProofResult a b c d = Qed a | Cex b | Unknown c | Error d
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq)
 type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End) String
 type EquivResult = ProofResult () (SMTCex) () String
 
@@ -739,7 +739,10 @@ equivalenceCheck' solvers branchesA branchesB = do
 
       let useful = foldr (\(_, b) n -> if b then n+1 else n) (0::Integer) results
       liftIO $ putStrLn $ "Reuse of previous queries was Useful in " <> (show useful) <> " cases"
-      pure $ nubOrd (map fst results)
+
+      case all (isQed . fst) results of
+        True -> pure [Qed ()]
+        False -> pure $ filter (not . isQed) . fmap fst $ results
   where
     -- we order the sets by size because this gives us more cache hits when
     -- running our queries later on (since we rely on a subset check)
