@@ -127,30 +127,30 @@ bool :: Expr EWord -> Prop
 bool e = POr (PEq (Lit 1) e) (PEq (Lit 0) e)
 
 -- | Abstract calldata argument generation
-symAbiArg :: Text -> AbiType -> CalldataFragment
+symAbiArg :: Text -> AbiType -> Err CalldataFragment
 symAbiArg name = \case
   AbiUIntType n ->
     if n `mod` 8 == 0 && n <= 256
-    then St [Expr.inRange n v] v
-    else internalError "bad type"
+    then pure $ St [Expr.inRange n v] v
+    else Left "bad type"
   AbiIntType n ->
     if n `mod` 8 == 0 && n <= 256
     -- TODO: is this correct?
-    then St [Expr.inRange n v] v
-    else internalError "bad type"
-  AbiBoolType -> St [bool v] v
-  AbiAddressType -> St [] (WAddr (SymAddr name))
+    then pure $ St [Expr.inRange n v] v
+    else Left "bad type"
+  AbiBoolType -> pure $ St [bool v] v
+  AbiAddressType -> pure $ St [] (WAddr (SymAddr name))
   AbiBytesType n ->
     if n > 0 && n <= 32
-    then St [Expr.inRange (n * 8) v] v
-    else internalError "bad type"
-  AbiArrayType sz tps -> do
-    Comp . V.toList . V.imap (\(T.pack . show -> i) tp -> symAbiArg (name <> "-a-" <> i) tp) $ (V.replicate sz tps)
-  AbiTupleType tps ->
-    Comp . V.toList . V.imap (\(T.pack . show -> i) tp -> symAbiArg (name <> "-t-" <> i) tp) $ tps
-  t -> internalError $ "TODO: symbolic abi encoding for " <> show t
+    then pure $ St [Expr.inRange (n * 8) v] v
+    else Left "bad type"
+  AbiArrayType sz tps -> pure . Comp =<< mapM (fun "a") (zip [0..] (replicate sz tps))
+  AbiTupleType tps    -> pure . Comp =<< mapM (fun "a") (zip [0..] (V.toList tps))
+  t -> Left $ "TODO: symbolic abi encoding for " <> show t
   where
     v = Var name
+    fun :: Text -> (Int, AbiType) -> Err CalldataFragment
+    fun n (i, tp) = symAbiArg (name <> "-" <> n <> "-" <> (T.pack . show $ i)) tp
 
 data CalldataFragment
   = St [Prop] (Expr EWord)
@@ -158,30 +158,39 @@ data CalldataFragment
   | Comp [CalldataFragment]
   deriving (Show, Eq)
 
+zipWith3M :: Monad m => (a -> b -> c -> m d) -> [a] -> [b] -> [c] -> m [d]
+zipWith3M _ [] _ _ = pure []
+zipWith3M _ _ [] _ = pure []
+zipWith3M _ _ _ [] = pure []
+zipWith3M f (x:xs) (y:ys) (z:zs) = do
+    result <- f x y z
+    rest <- zipWith3M f xs ys zs
+    pure (result : rest)
+
 -- | Generates calldata matching given type signature, optionally specialized
 -- with concrete arguments.
 -- Any argument given as "<symbolic>" or omitted at the tail of the list are
 -- kept symbolic.
-symCalldata :: Text -> [AbiType] -> [String] -> Expr Buf -> (Expr Buf, [Prop])
-symCalldata sig typesignature concreteArgs base =
+symCalldata :: Text -> [AbiType] -> [String] -> Expr Buf -> Err (Expr Buf, [Prop])
+symCalldata sig typesignature concreteArgs base = do
   let
     args = concreteArgs <> replicate (length typesignature - length concreteArgs) "<symbolic>"
-    mkArg :: AbiType -> String -> Int -> CalldataFragment
+    mkArg :: AbiType -> String -> Int -> Err CalldataFragment
     mkArg typ "<symbolic>" n = symAbiArg (T.pack $ "arg" <> show n) typ
     mkArg typ arg _ =
       case makeAbiValue typ arg of
-        AbiUInt _ w -> St [] . Lit . into $ w
-        AbiInt _ w -> St [] . Lit . unsafeInto $ w
-        AbiAddress w -> St [] . Lit . into $ w
-        AbiBool w -> St [] . Lit $ if w then 1 else 0
-        _ -> internalError "TODO"
-    calldatas = zipWith3 mkArg typesignature args [1..]
-    (cdBuf, props) = combineFragments calldatas base
-    withSelector = writeSelector cdBuf sig
-    sizeConstraints
-      = (Expr.bufLength withSelector .>= cdLen calldatas)
-      .&& (Expr.bufLength withSelector .< (Lit (2 ^ (64 :: Integer))))
-  in (withSelector, sizeConstraints : props)
+        AbiUInt _ w  -> pure $ St [] . Lit . into $ w
+        AbiInt _ w   -> pure $ St [] . Lit . unsafeInto $ w
+        AbiAddress w -> pure $ St [] . Lit . into $ w
+        AbiBool w    -> pure $ St [] . Lit $ if w then 1 else 0
+        _ -> Left "Can't handle this symbolic type"
+  calldatas <- zipWith3M mkArg typesignature args [1..]
+  let (cdBuf, props) = combineFragments calldatas base
+      withSelector = writeSelector cdBuf sig
+      sizeConstraints
+        = (Expr.bufLength withSelector .>= cdLen calldatas)
+        .&& (Expr.bufLength withSelector .< (Lit (2 ^ (64 :: Integer))))
+  pure (withSelector, sizeConstraints : props)
 
 cdLen :: [CalldataFragment] -> Expr EWord
 cdLen = go (Lit 4)
@@ -475,6 +484,10 @@ allPanicCodes = [0x00, 0x01, 0x11, 0x12, 0x21, 0x22, 0x31, 0x32, 0x41, 0x51]
 panicMsg :: Word256 -> ByteString
 panicMsg err = selector "Panic(uint256)" <> encodeAbiValue (AbiUInt 256 err)
 
+getRight :: Err b -> b
+getRight (Right y) = y
+getRight (Left err)  = internalError err
+
 -- | Builds a buffer representing calldata from the provided method description
 -- and concrete arguments
 mkCalldata :: Maybe Sig -> [String] -> (Expr Buf, [Prop])
@@ -486,8 +499,7 @@ mkCalldata Nothing _ =
   -- TODO: can we encode calldata as an array with a smaller length?
   , [Expr.bufLength (AbstractBuf "txdata") .< (Lit (2 ^ (64 :: Integer)))]
   )
-mkCalldata (Just (Sig name types)) args =
-  symCalldata name types args (AbstractBuf "txdata")
+mkCalldata (Just (Sig name types)) args = getRight $ symCalldata name types args (AbstractBuf "txdata")
 
 verifyContract
   :: App m

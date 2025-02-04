@@ -190,13 +190,17 @@ runUnitTestContract
           forM testSigs $ \s -> symRun opts vm1 s
         _ -> internalError "setUp() did not end with a result"
 
+getRight :: Err b -> b
+getRight (Right y) = y
+getRight (Left err)  = internalError err
+
 -- Define the thread spawner for symbolic tests
 -- Returns tuple of (No Cex, No warnings)
 symRun :: App m => UnitTestOptions RealWorld -> VM Concrete RealWorld -> Sig -> m (Bool, Bool)
 symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     let callSig = testName <> "(" <> (Text.intercalate "," (map abiTypeSolidity types)) <> ")"
     liftIO $ putStrLn $ "\x1b[96m[RUNNING]\x1b[0m " <> Text.unpack callSig
-    let cd = symCalldata callSig types [] (AbstractBuf "txdata")
+    let cd = getRight $ symCalldata callSig types [] (AbstractBuf "txdata")
         shouldFail = "proveFail" `isPrefixOf` callSig
 
     -- define postcondition depending on `shouldFail`
