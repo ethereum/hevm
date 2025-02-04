@@ -1514,6 +1514,16 @@ accountEmpty c =
   -- TODO: handle symbolic balance...
   && c.balance == Lit 0
 
+-- Adds constraints such that two symbolic addresses cannot alias each other
+-- and symbolic addresses cannot alias concrete addresses
+addAliasConstraints :: EVM t s ()
+addAliasConstraints = do
+  vm <- get
+  let addrConstr = noClash $ Map.keys vm.env.contracts
+  modifying #constraints ((++) addrConstr)
+  where
+    noClash addrs = [a ./= b | a <- addrs, b <- addrs, Expr.isSymAddr b, a < b]
+
 -- * How to finalize a transaction
 finalize :: VMOps t => EVM t s ()
 finalize = do
@@ -1521,6 +1531,7 @@ finalize = do
     revertContracts  = use (#tx % #txReversion) >>= assign (#env % #contracts)
     revertSubstate   = assign (#tx % #subState) (SubState mempty mempty mempty mempty mempty mempty)
 
+  addAliasConstraints
   use #result >>= \case
     Just (VMFailure (Revert _)) -> do
       revertContracts
@@ -2149,23 +2160,30 @@ create :: forall t s. (?op :: Word8, VMOps t)
   -> Expr EWord -> Gas t -> Expr EWord -> [Expr EWord] -> Expr EAddr -> Expr Buf -> EVM t s ()
 create self this xSize xGas xValue xs newAddr initCode = do
   vm0 <- get
+  -- are we exceeding the max init code size
   if xSize > Lit (vm0.block.maxCodeSize * 2)
   then do
     assign (#state % #stack) (Lit 0 : xs)
     assign (#state % #returndata) mempty
     vmError $ MaxInitCodeSizeExceeded (vm0.block.maxCodeSize * 2) xSize
+  -- are we overflowing the nonce
   else if this.nonce == Just maxBound
   then do
     assign (#state % #stack) (Lit 0 : xs)
     assign (#state % #returndata) mempty
     pushTrace $ ErrorTrace NonceOverflow
     next
+  -- are we overflowing the stack
   else if length vm0.frames >= 1024
   then do
     assign (#state % #stack) (Lit 0 : xs)
     assign (#state % #returndata) mempty
     pushTrace $ ErrorTrace CallDepthLimitReached
     next
+  -- are we deploying to an address that already has a contract?
+  -- note: the symbolic interpreter generates constraints ensuring that
+  -- symbolic storage keys cannot alias other storage keys, making this check
+  -- safe to perform statically
   else if collision $ Map.lookup newAddr vm0.env.contracts
   then burn' xGas $ do
     assign (#state % #stack) (Lit 0 : xs)

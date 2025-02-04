@@ -501,8 +501,8 @@ runExpr = do
   let traces = TraceContext (Zipper.toForest vm.traces) vm.env.contracts vm.labels
   pure $ case vm.result of
     Just (VMSuccess buf) -> Success vm.constraints traces buf (fmap toEContract vm.env.contracts)
-    Just (VMFailure e) -> Failure vm.constraints traces e
-    Just (Unfinished p) -> Partial vm.constraints traces p
+    Just (VMFailure e)   -> Failure vm.constraints traces e
+    Just (Unfinished p)  -> Partial vm.constraints traces p
     _ -> internalError "vm in intermediate state after call to runFully"
 
 toEContract :: Contract -> Expr EContract
