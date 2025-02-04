@@ -255,7 +255,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
       (_, _, True) -> do
         -- No cexes/errors/unknowns/partials, but all branches reverted
         putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n"
-          <> "          No reachable assertion violations, but all branches reverted\n"
+          <> "   No reachable assertion violations, but all branches reverted\n"
     liftIO $ printWarnings ends results t
     pure (not (any isCex results), not (warnings || unexpectedAllRevert))
 
