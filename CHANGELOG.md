@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and continue running, whenever possible
 - STATICCALL abstraction is now performed in case of symbolic arguments
 - Better error messages for JSON parsing
-- Multiple solutions are allowed for a single symbolic expression
+- Multiple solutions are allowed for a single symbolic expression, and they are
+  generated via iterative calls to the SMT solver for quicker solving
 - Aliasing works much better for symbolic and concrete addresses
 - Constant propagation for symbolic values
 
