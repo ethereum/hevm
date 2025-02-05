@@ -3028,12 +3028,12 @@ instance VMOps Symbolic where
         assign #result Nothing
         continue Nothing
     where
-      runMore vals leftOrRight = do
+      runMore vals firstThread = do
         case length vals of
           -- if 2, we run both, otherwise, we run 1st and run ourselves with the rest
-          2 -> if leftOrRight then runOne $ head vals
+          2 -> if firstThread then runOne $ head vals
                else runOne (head $ tail vals)
-          _ -> if leftOrRight then runOne $ head vals
+          _ -> if firstThread then runOne $ head vals
                else runBoth . PleaseRunBoth ewordExpr $ runMore (tail vals)
       runOne val = do
         assign #result Nothing
