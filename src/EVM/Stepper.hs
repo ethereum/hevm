@@ -8,7 +8,7 @@ module EVM.Stepper
   , run
   , runFully
   , wait
-  , ask
+  , fork
   , evm
   , enter
   , interpret
@@ -43,7 +43,7 @@ data Action t s a where
   Wait :: Query t s -> Action t s ()
 
   -- | Multiple things can happen
-  Ask :: Choose s -> Action Symbolic s ()
+  Fork :: RunBoth s -> Action Symbolic s ()
 
   -- | Embed a VM state transformation
   EVM  :: EVM t s a -> Action t s a
@@ -62,8 +62,8 @@ run = exec >> evm get
 wait :: Query t s -> Stepper t s ()
 wait = singleton . Wait
 
-ask :: Choose s -> Stepper Symbolic s ()
-ask = singleton . Ask
+fork :: RunBoth s -> Stepper Symbolic s ()
+fork = singleton . Fork
 
 evm :: EVM t s a -> Stepper t s a
 evm = singleton . EVM
@@ -87,8 +87,8 @@ runFully = do
     Nothing -> internalError "should not occur"
     Just (HandleEffect (Query q)) ->
       wait q >> runFully
-    Just (HandleEffect (Choose q)) ->
-      ask q >> runFully
+    Just (HandleEffect (RunBoth q)) ->
+      fork q >> runFully
     Just _ ->
       pure vm
 

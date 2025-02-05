@@ -587,7 +587,7 @@ data PartialExec
 -- | Effect types used by the vm implementation for side effects & control flow
 data Effect t s where
   Query :: Query t s -> Effect t s
-  Choose :: Choose s -> Effect Symbolic s
+  RunBoth :: RunBoth s -> Effect Symbolic s
 deriving instance Show (Effect t s)
 
 -- | Queries halt execution until resolved through RPC calls or SMT queries
@@ -595,13 +595,13 @@ data Query t s where
   PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM t s ()) -> Query t s
   PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM t s ()) -> Query t s
   PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM Symbolic s ()) -> Query Symbolic s
-  PleaseGetSol        :: Expr EWord -> [Prop] -> (Maybe W256 -> EVM Symbolic s ()) -> Query Symbolic s
+  PleaseGetSols       :: Expr EWord -> Int -> [Prop] -> (Maybe [W256] -> EVM Symbolic s ()) -> Query Symbolic s
   PleaseDoFFI         :: [String] -> Map String String -> (ByteString -> EVM t s ()) -> Query t s
   PleaseReadEnv       :: String -> (String -> EVM t s ()) -> Query t s
 
 -- | Execution could proceed down one of two branches
-data Choose s where
-  PleaseChoosePath    :: Expr EWord -> (Bool -> EVM Symbolic s ()) -> Choose s
+data RunBoth s where
+  PleaseRunBoth    :: Expr EWord -> (Bool -> EVM Symbolic s ()) -> RunBoth s
 
 -- | The possible return values of a SMT query
 data BranchCondition = Case Bool | Unknown
@@ -619,8 +619,10 @@ instance Show (Query t s) where
       (("<EVM.Query: ask SMT about "
         ++ show condition ++ " in context "
         ++ show constraints ++ ">") ++)
-    PleaseGetSol expr constraints _ ->
-      (("<EVM.Query: ask SMT to get W256 for expression "
+    PleaseGetSols expr numBytes constraints _ ->
+      (("<EVM.Query: ask SMT "
+        ++ "for " ++ show numBytes ++ " bytes "
+        ++ "of W256 for expression "
         ++ show expr ++ " in context "
         ++ show constraints ++ ">") ++)
     PleaseDoFFI cmd env _ ->
@@ -628,10 +630,10 @@ instance Show (Query t s) where
     PleaseReadEnv variable _ ->
       (("<EVM.Query: read env: " ++ variable) ++)
 
-instance Show (Choose s) where
+instance Show (RunBoth s) where
   showsPrec _ = \case
-    PleaseChoosePath _ _ ->
-      (("<EVM.Choice: waiting for user to select path (0,1)") ++)
+    PleaseRunBoth _ _ ->
+      (("<EVM.RunBoth: system running both paths") ++)
 
 -- | The possible result states of a VM
 data VMResult (t :: VMType) s where
@@ -863,7 +865,7 @@ class VMOps (t :: VMType) where
 
   partial :: PartialExec -> EVM t s ()
   branch :: Expr EWord -> (Bool -> EVM t s ()) -> EVM t s ()
-  oneSolution :: Expr EWord -> (Maybe W256 -> EVM t s ()) -> EVM t s ()
+  manySolutions :: Expr EWord -> Int -> (Maybe W256 -> EVM t s ()) -> EVM t s ()
 
 -- Bytecode Representations ------------------------------------------------------------------------
 
