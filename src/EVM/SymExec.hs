@@ -306,7 +306,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
       Stepper.Exec -> do
         (r, vm') <- liftIO $ stToIO $ runStateT exec vm
         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
-      Stepper.Ask (PleaseChoosePath cond continue) -> do
+      Stepper.Fork (PleaseRunBoth cond continue) -> do
         frozen <- liftIO $ stToIO $ freezeVM vm
         evalLeft <- toIO $ do
           (ra, vma) <- liftIO $ stToIO $ runStateT (continue True) frozen { result = Nothing }

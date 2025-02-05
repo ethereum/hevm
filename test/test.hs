@@ -53,7 +53,7 @@ import Data.Containers.ListUtils (nubOrd)
 import Optics.Core hiding (pre, re, elements)
 import Optics.State
 
-import EVM hiding (choose)
+import EVM
 import EVM.ABI
 import EVM.Assembler
 import EVM.Exec

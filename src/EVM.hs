@@ -1404,8 +1404,8 @@ getCodeLocation vm = (vm.state.contract, vm.state.pc)
 query :: Query t s -> EVM t s ()
 query q = assign #result $ Just $ HandleEffect (Query q)
 
-choose :: Choose s -> EVM Symbolic s ()
-choose c = assign #result $ Just $ HandleEffect (Choose c)
+runBoth :: RunBoth s -> EVM Symbolic s ()
+runBoth c = assign #result $ Just $ HandleEffect (RunBoth c)
 
 -- | Construct RPC Query and halt execution until resolved
 fetchAccount :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
@@ -2995,11 +2995,11 @@ instance VMOps Symbolic where
   branch cond continue = do
     loc <- codeloc
     pathconds <- use #constraints
-    query $ PleaseAskSMT cond pathconds (choosePath loc)
+    query $ PleaseAskSMT cond pathconds (runBothPaths loc)
     where
       condSimp = Expr.simplify cond
       condSimpConc = Expr.concKeccakSimpExpr condSimp
-      choosePath loc (Case v) = do
+      runBothPaths loc (Case v) = do
         assign #result Nothing
         pushTo #constraints $ if v then Expr.simplifyProp (condSimpConc ./= Lit 0)
                                    else Expr.simplifyProp (condSimpConc .== Lit 0)
@@ -3009,8 +3009,8 @@ instance VMOps Symbolic where
         assign (#iterations % at loc) (Just (iteration + 1, stack))
         continue v
       -- Both paths are possible; we ask for more input
-      choosePath loc Unknown =
-        choose . PleaseChoosePath condSimp $ choosePath loc . Case
+      runBothPaths loc Unknown =
+        runBoth . PleaseRunBoth condSimp $ runBothPaths loc . Case
 
   -- numBytes allows us to specify how many bytes of the returned value is relevant
   -- if it's e.g.a JUMP, only 2 bytes can be relevant. This allows us to avoid
@@ -3023,7 +3023,7 @@ instance VMOps Symbolic where
         case (length concVals) of
           0 -> continue Nothing
           1 -> runOne $ head concVals
-          _ -> choose . PleaseChoosePath ewordExpr $ runMore concVals
+          _ -> runBoth . PleaseRunBoth ewordExpr $ runMore concVals
       Nothing -> do
         assign #result Nothing
         continue Nothing
@@ -3034,7 +3034,7 @@ instance VMOps Symbolic where
           2 -> if leftOrRight then runOne $ head vals
                else runOne (head $ tail vals)
           _ -> if leftOrRight then runOne $ head vals
-               else choose . PleaseChoosePath ewordExpr $ runMore (tail vals)
+               else runBoth . PleaseRunBoth ewordExpr $ runMore (tail vals)
       runOne val = do
         assign #result Nothing
         pushTo #constraints $ Expr.simplifyProp (ewordExpr .== (Lit val))
