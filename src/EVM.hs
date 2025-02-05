@@ -994,15 +994,15 @@ exec1 = do
           case stk of
             xGas:xTo:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
               case wordToAddr xTo of
-                Nothing -> fallback undefined
+                Nothing -> fallback
                 Just xTo' -> do
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
                     Right gas -> canFetchAccount xTo' >>= \case
-                      False -> fallback undefined
+                      False -> fallback
                       True -> do
                         overrideC <- use $ #state % #overrideCaller
-                        delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs fallback $
+                        delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs (const fallback) $
                           \callee -> do
                             zoom #state $ do
                               assign #callvalue (Lit 0)
@@ -1012,8 +1012,8 @@ exec1 = do
                             touchAccount self
                             touchAccount callee
               where
-                fallback :: a -> EVM t s ()
-                fallback _ = do
+                fallback :: EVM t s ()
+                fallback = do
                   -- Reset caller if needed
                   resetCaller <- use $ #state % #resetCaller
                   when resetCaller $ assign (#state % #overrideCaller) Nothing
