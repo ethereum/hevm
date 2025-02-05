@@ -2113,7 +2113,7 @@ tests = testGroup "hevm"
               }
              }
             |]
-        let sig =Just (Sig "fun(uint160)" [AbiUIntType 160])
+        let sig = Just (Sig "fun(uint160)" [AbiUIntType 160])
         (e, [Qed _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
         assertBoolM "The expression is not partial" $ Prelude.not (Expr.containsNode isPartial e)
      ,
