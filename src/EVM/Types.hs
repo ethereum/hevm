@@ -591,9 +591,9 @@ deriving instance Show (Effect t s)
 
 -- | Queries halt execution until resolved through RPC calls or SMT queries
 data Query t s where
-  PleaseFetchContract :: Addr -> BaseState -> (Contract -> EVM t s ()) -> Query t s
-  PleaseFetchSlot     :: Addr -> W256 -> (W256 -> EVM t s ()) -> Query t s
-  PleaseFetchBlock    :: String -> W256 -> (Block -> EVM t s ()) -> Query t s
+  PleaseFetchContract :: RpcInfo -> Addr -> BaseState -> (Contract -> EVM t s ()) -> Query t s
+  PleaseFetchSlot     :: RpcInfo -> Addr -> W256 -> (W256 -> EVM t s ()) -> Query t s
+  PleaseFetchBlock    :: RpcInfo -> (Block -> EVM t s ()) -> Query t s
   PleaseAskSMT        :: Expr EWord -> [Prop] -> (BranchCondition -> EVM Symbolic s ()) -> Query Symbolic s
   PleaseGetSol        :: Expr EWord -> [Prop] -> (Maybe W256 -> EVM Symbolic s ()) -> Query Symbolic s
   PleaseDoFFI         :: [String] -> Map String String -> (ByteString -> EVM t s ()) -> Query t s
@@ -609,16 +609,16 @@ data BranchCondition = Case Bool | Unknown
 
 instance Show (Query t s) where
   showsPrec _ = \case
-    PleaseFetchContract addr base _ ->
+    PleaseFetchContract _ addr base _ ->
       (("<EVM.Query: fetch from contract " ++ show addr ++ show base ++ ">") ++)
-    PleaseFetchSlot addr slot _ ->
+    PleaseFetchSlot _ addr slot _ ->
       (("<EVM.Query: fetch slot "
         ++ show slot ++ " for "
         ++ show addr ++ ">") ++)
-    PleaseFetchBlock url block _ ->
+    PleaseFetchBlock rpcInfo _ ->
       (("<EVM.Query: fetch from url "
-        ++ show url ++ " block "
-        ++ show block ++ ">") ++)
+        ++ (T.unpack rpcInfo.url) ++ " block "
+        ++ show rpcInfo.block ++ ">") ++)
     PleaseAskSMT condition constraints _ ->
       (("<EVM.Query: ask SMT about "
         ++ show condition ++ " in context "
@@ -1439,6 +1439,23 @@ untilFixpoint :: Eq a => (a -> a) -> a -> a
 untilFixpoint f a = if f a == a
                     then a
                     else untilFixpoint f (f a)
+
+data BlockInt = Latest | BlockInt W256
+  deriving (Show, Eq)
+
+deriving instance Show (RpcQuery a)
+
+type RpcInfo = Maybe FinRpcInfo
+data FinRpcInfo = FinRpcInfo {block :: W256, url :: Text}
+
+-- | Abstract representation of an RPC fetch request
+data RpcQuery a where
+  QueryCode    :: Addr         -> RpcQuery BS.ByteString
+  QueryBlock   ::                 RpcQuery Block
+  QueryBalance :: Addr         -> RpcQuery W256
+  QueryNonce   :: Addr         -> RpcQuery W64
+  QuerySlot    :: Addr -> W256 -> RpcQuery W256
+  QueryChainId ::                 RpcQuery W256
 
 -- Optics ------------------------------------------------------------------------------------------
 

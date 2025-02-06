@@ -30,22 +30,6 @@ import Control.Monad (when)
 import EVM.Effects
 import Debug.Trace (traceM)
 
--- | Abstract representation of an RPC fetch request
-data RpcQuery a where
-  QueryCode    :: Addr         -> RpcQuery BS.ByteString
-  QueryBlock   ::                 RpcQuery Block
-  QueryBalance :: Addr         -> RpcQuery W256
-  QueryNonce   :: Addr         -> RpcQuery W64
-  QuerySlot    :: Addr -> W256 -> RpcQuery W256
-  QueryChainId ::                 RpcQuery W256
-
-data BlockNumber = Latest | BlockNumber W256
-  deriving (Show, Eq)
-
-deriving instance Show (RpcQuery a)
-
-type RpcInfo = Maybe (BlockNumber, Text)
-
 rpc :: String -> [Value] -> Value
 rpc method args = object
   [ "jsonrpc" .= ("2.0" :: String)
@@ -54,28 +38,28 @@ rpc method args = object
   , "params"  .= args
   ]
 
-class ToRPC a where
-  toRPC :: a -> Value
+-- class ToRPC a where
+--   toRPC :: a -> Value
 
-instance ToRPC Addr where
-  toRPC = String . pack . show
+-- instance ToRPC Addr where
+--   toRPC = String . pack . show
 
-instance ToRPC W256 where
-  toRPC = String . pack . show
+-- instance ToRPC W256 where
+--   toRPC = String . pack . show
 
-instance ToRPC Bool where
-  toRPC = Bool
+-- instance ToRPC Bool where
+--   toRPC = Bool
 
-instance ToRPC BlockNumber where
-  toRPC Latest          = String "latest"
-  toRPC (EVM.Fetch.BlockNumber n) = String . pack $ show n
+-- instance ToRPC BlockInt where
+--   toRPC Latest          = String "latest"
+--   toRPC (EVM.Fetch.BlockInt n) = String . pack $ show n
 
 readText :: Read a => Text -> a
 readText = read . unpack
 
 fetchQuery
   :: Show a
-  => BlockNumber
+  => BlockInt
   -> (Value -> IO (Maybe Value))
   -> RpcQuery a
   -> IO (Maybe a)
@@ -137,8 +121,7 @@ fetchWithSession url sess x = do
   r <- asValue =<< Session.post sess (unpack url) x
   pure (r ^? (lensVL responseBody) % key "result")
 
-fetchContractWithSession
-  :: BlockNumber -> Text -> Addr -> Session -> IO (Maybe Contract)
+fetchContractWithSession :: BlockInt -> Text -> Addr -> Session -> IO (Maybe Contract)
 fetchContractWithSession n url addr sess = runMaybeT $ do
   let
     fetch :: Show a => RpcQuery a -> IO (Maybe a)
@@ -154,27 +137,25 @@ fetchContractWithSession n url addr sess = runMaybeT $ do
       & set #balance  (Lit balance)
       & set #external True
 
-fetchSlotWithSession
-  :: BlockNumber -> Text -> Session -> Addr -> W256 -> IO (Maybe W256)
+fetchSlotWithSession :: BlockInt -> Text -> Session -> Addr -> W256 -> IO (Maybe W256)
 fetchSlotWithSession n url sess addr slot =
   fetchQuery n (fetchWithSession url sess) (QuerySlot addr slot)
 
-fetchBlockWithSession
-  :: BlockNumber -> Text -> Session -> IO (Maybe Block)
+fetchBlockWithSession :: BlockInt -> Text -> Session -> IO (Maybe Block)
 fetchBlockWithSession n url sess =
   fetchQuery n (fetchWithSession url sess) QueryBlock
 
-fetchBlockFrom :: BlockNumber -> Text -> IO (Maybe Block)
+fetchBlockFrom :: BlockInt -> Text -> IO (Maybe Block)
 fetchBlockFrom n url = do
   sess <- Session.newAPISession
   fetchBlockWithSession n url sess
 
-fetchContractFrom :: BlockNumber -> Text -> Addr -> IO (Maybe Contract)
+fetchContractFrom :: BlockInt -> Text -> Addr -> IO (Maybe Contract)
 fetchContractFrom n url addr = do
   sess <- Session.newAPISession
   fetchContractWithSession n url addr sess
 
-fetchSlotFrom :: BlockNumber -> Text -> Addr -> W256 -> IO (Maybe W256)
+fetchSlotFrom :: BlockInt -> Text -> Addr -> W256 -> IO (Maybe W256)
 fetchSlotFrom n url addr slot = do
   sess <- Session.newAPISession
   fetchSlotWithSession n url sess addr slot
@@ -185,8 +166,8 @@ fetchChainIdFrom url = do
   fetchQuery Latest (fetchWithSession url sess) QueryChainId
 
 -- smtsolving + (http or zero)
-oracle :: SolverGroup -> RpcInfo -> Fetcher t m s
-oracle solvers info q = do
+oracle :: SolverGroup -> Fetcher t m s
+oracle solvers q = do
   case q of
     PleaseDoFFI vals envs continue -> case vals of
        cmd : args -> do
@@ -207,36 +188,34 @@ oracle solvers info q = do
          let pathconds = foldl' PAnd (PBool True) pathconditions
          continue <$> getSolution solvers symAddr pathconds
 
-    PleaseFetchContract addr base continue -> do
-      traceM $ "Fetching contract " <> show addr <> "base: " <> show base <> " from " <> show info
-      contract <- case info of
+    PleaseFetchContract rpcInfo addr base continue -> do
+      contract <- case rpcInfo of
         Nothing -> let
           c = case base of
             AbstractBase -> unknownContract (LitAddr addr)
             EmptyBase -> emptyContract
           in pure $ Just c
-        Just (n, url) -> liftIO $ fetchContractFrom n url addr
+        Just rpcDat -> liftIO $ fetchContractFrom rpcDat.blockNo rpcDat.url addr
       case contract of
         Just x -> pure $ continue x
         Nothing -> internalError $ "oracle error: " ++ show q
 
-    PleaseFetchSlot addr slot continue -> do
-      traceM $ "Fetching slot " <> show slot <> " from " <> show info
-      case info of
+    PleaseFetchSlot rpcInfo addr slot continue -> do
+      case rpcInfo of
         Nothing -> pure (continue 0)
-        Just (n, url) -> do
-         traceM $ "Fetching slot " <> show slot <> " from " <> show url <> " at addr " <> show addr <> " at block " <> show n
-         liftIO $ fetchSlotFrom n url addr slot >>= \case
+        Just rpcDat -> do
+         liftIO $ fetchSlotFrom rpcDat.blockNo rpcDat.url addr slot >>= \case
            Just x  -> pure (continue x)
-           Nothing ->
-             internalError $ "oracle error: " ++ show q
+           Nothing -> internalError $ "oracle error: " ++ show q
 
-    PleaseFetchBlock url blockNo continue -> do
-      traceM $ "Fetching block " <> show blockNo <> " from " <> show url
-      liftIO $ fetchBlockFrom (EVM.Fetch.BlockNumber blockNo) (pack url) >>= \case
-        Just block  -> do
-          pure (continue block)
-        Nothing -> internalError $ "oracle error: " ++ show q
+    PleaseFetchBlock rpcInfo continue -> do
+      -- traceM $ "Fetching block " <> show rpcInfo.blockNo <> " from " <> show rpcInfo.url
+      case rpcInfo of
+        Nothing -> internalError "PleaseFetchBlock: no rpcInfo"
+        Just rpcDat -> do
+          liftIO $ fetchBlockFrom rpcDat.blockNo rpcDat.url >>= \case
+            Just block  -> pure (continue block)
+            Nothing -> internalError $ "oracle error: " ++ show q
 
     PleaseReadEnv variable continue -> do
       value <- liftIO $ lookupEnv variable
