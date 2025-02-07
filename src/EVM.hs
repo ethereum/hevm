@@ -1432,8 +1432,10 @@ fetchAccount addr continue =
             continue c
           Nothing -> do
             base <- use (#config % #baseState)
+            block <- use (#block % #number)
+            let rpcInfo = Just FinRpcInfo {block=block, url="a"}
             assign (#result) . Just . HandleEffect . Query $
-              PleaseFetchContract a base $ \c -> do
+              PleaseFetchContract rpcInfo a base $ \c -> do
                 assign (#cache % #fetched % at a) (Just c)
                 assign (#env % #contracts % at addr) (Just c)
                 assign #result Nothing
