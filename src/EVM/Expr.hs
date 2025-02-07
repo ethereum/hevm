@@ -243,6 +243,9 @@ readByte i@(Lit x) (WriteWord (Lit idx) val src)
            (Lit _) -> indexWord (Lit $ x - idx) val
            _ -> IndexWord (Lit $ x - idx) val
     else readByte i src
+-- reading a byte that is lower than the dstOffset of a CopySlice, so it's just reading from src
+readByte i@(Lit x) (CopySlice _ (Lit dstOffset) _ _ dst) | dstOffset > x =
+  readByte i dst
 readByte i@(Lit x) (CopySlice (Lit srcOffset) (Lit dstOffset) (Lit size) src dst)
   = if x - dstOffset < size
     then readByte (Lit $ x - (dstOffset - srcOffset)) src
