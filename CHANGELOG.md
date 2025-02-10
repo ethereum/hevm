@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multiple solutions are allowed for a single symbolic expression
 - Aliasing works much better for symbolic and concrete addresses
 - Constant propagation for symbolic values
+- Add deployment code flag to the `equivalenceCheck` function
+- New simplification rule for reading a byte that is lower than destination offset in `copySlice`
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -30,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Better exponential simplification
 - Dumping of END states (.prop) files is now default for `--debug`
 - When cheatcode is missing, we produce a partial execution warning
+- The equivalence checker now is able to prove that an empty store is equivalent to a store with all slots initialized to 0.
+
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
