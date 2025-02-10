@@ -37,7 +37,7 @@ import EVM.ABI
 import EVM.Effects
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (feeSchedule)
-import EVM.Format (formatExpr, formatPartial, showVal, bsToHex, indent, formatBinary)
+import EVM.Format (formatExpr, formatPartial, formatPartialShort, showVal, bsToHex, indent, formatBinary)
 import EVM.SMT (SMTCex(..), SMT2(..), assertProps)
 import EVM.SMT qualified as SMT
 import EVM.Solvers
@@ -87,6 +87,15 @@ groupIssues results = map (\g -> (into (length g), NE.head g)) grouped
     getErr (EVM.SymExec.Unknown _) = "SMT result timeout/unknown"
     getErr _ = internalError "shouldn't happen"
     sorted = sort $ map getErr results
+    grouped = NE.group sorted
+
+groupPartials :: [Expr End] -> [(Integer, String)]
+groupPartials e = map (\g -> (into (length g), NE.head g)) grouped
+  where
+    getErr :: Expr End -> String
+    getErr (Partial _ _ reason) = T.unpack $ formatPartialShort reason
+    getErr _ = internalError "shouldn't happen"
+    sorted = sort $ map getErr (filter isPartial e)
     grouped = NE.group sorted
 
 data VeriOpts = VeriOpts
@@ -575,6 +584,13 @@ isPartial :: Expr a -> Bool
 isPartial (Partial _ _ _) = True
 isPartial _ = False
 
+printPartialIssues :: [Expr End] -> String -> IO ()
+printPartialIssues flattened call =
+  when (any isPartial flattened) $ do
+    T.putStrLn $ indent 3 "\x1b[33m[WARNING]\x1b[0m: hevm was only able to partially explore "
+                <> T.pack call <> " due to the following issue(s):"
+    T.putStr . T.unlines . fmap (indent 5 . ("- " <>)) . fmap formatPartial . getPartials $ flattened
+
 getPartials :: [Expr End] -> [PartialExec]
 getPartials = mapMaybe go
   where
@@ -603,14 +619,10 @@ verify solvers opts preState maybepost = do
     when conf.debug $ putStrLn "   Simplifying expression"
     let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
     when conf.dumpExprs $ T.writeFile "simplified.expr" (formatExpr expr)
-
-    when conf.debug $ putStrLn $ "   Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
-
     let flattened = flattenExpr expr
-    when (any isPartial flattened) $ do
-      T.putStrLn $ indent 3 "\x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the call "
-                  <> T.pack call <> " due to the following issue(s):"
-      T.putStr . T.unlines . fmap (indent 5 . ("- " <>)) . fmap formatPartial . getPartials $ flattened
+    when conf.debug $ do
+      printPartialIssues flattened ("the call " <> call)
+      putStrLn $ "   Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
 
     case maybepost of
       Nothing -> pure (expr, [Qed ()])
@@ -675,19 +687,20 @@ equivalenceCheck
   -> ByteString
   -> VeriOpts
   -> (Expr Buf, [Prop])
-  -> m [EquivResult]
+  -> m ([EquivResult], [Expr End])
 equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
   conf <- readConfig
   case bytecodeA == bytecodeB of
     True -> liftIO $ do
       putStrLn "bytecodeA and bytecodeB are identical"
-      pure [Qed ()]
+      pure ([Qed ()], mempty)
     False -> do
-      branchesA <- getBranches bytecodeA
-      branchesB <- getBranches bytecodeB
       when conf.debug $ liftIO $ do
         putStrLn "bytecodeA and bytecodeB are different, checking for equivalence"
-      equivalenceCheck' solvers branchesA branchesB
+      branchesA <- getBranches bytecodeA
+      branchesB <- getBranches bytecodeB
+      res <- equivalenceCheck' solvers branchesA branchesB
+      pure (res, branchesA <> branchesB)
   where
     -- decompiles the given bytecode into a list of branches
     getBranches :: ByteString -> m [Expr End]
@@ -703,14 +716,14 @@ equivalenceCheck'
   :: forall m . App m
   => SolverGroup -> [Expr End] -> [Expr End] -> m [EquivResult]
 equivalenceCheck' solvers branchesA branchesB = do
-      when (any isPartial branchesA || any isPartial branchesB) $ liftIO $ do
-        putStrLn "\x1b[33mWARNING\x1b[0m: hevm was only able to partially explore the given contract due to the following issue(s):"
-        T.putStr . T.unlines . fmap (indent 2 . ("- " <>)) . fmap formatPartial . nubOrd $ ((getPartials branchesA) <> (getPartials branchesB))
+      conf <- readConfig
+      when conf.debug $ do
+        liftIO $ printPartialIssues branchesA "codeA"
+        liftIO $ printPartialIssues branchesB "codeB"
 
       let allPairs = [(a,b) | a <- branchesA, b <- branchesB]
       liftIO $ putStrLn $ "Found " <> show (length allPairs) <> " total pairs of endstates"
 
-      conf <- readConfig
       when conf.dumpEndStates $ liftIO $
         putStrLn $ "endstates in bytecodeA: " <> show (length branchesA)
                    <> "\nendstates in bytecodeB: " <> show (length branchesB)
@@ -726,9 +739,10 @@ equivalenceCheck' solvers branchesA branchesB = do
 
       let useful = foldr (\(_, b) n -> if b then n+1 else n) (0::Integer) results
       liftIO $ putStrLn $ "Reuse of previous queries was Useful in " <> (show useful) <> " cases"
+
       case all (isQed . fst) results of
         True -> pure [Qed ()]
-        False -> pure $ filter (/= Qed ()) . fmap fst $ results
+        False -> pure $ filter (not . isQed) . fmap fst $ results
   where
     -- we order the sets by size because this gives us more cache hits when
     -- running our queries later on (since we rely on a subset check)

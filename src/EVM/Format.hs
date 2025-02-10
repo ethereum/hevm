@@ -4,6 +4,7 @@ module EVM.Format
   ( formatExpr
   , formatSomeExpr
   , formatPartial
+  , formatPartialShort
   , formatProp
   , contractNamePart
   , contractPathPart
@@ -482,6 +483,13 @@ formatPartial = \case
     , "program counter: " <> T.pack (show pc)
     , "function selector: " <> T.pack (show selector)
     ]
+
+formatPartialShort :: PartialExec -> Text
+formatPartialShort = \case
+  UnexpectedSymbolicArg _ opcode _ _ -> "Unexpected symbolic arguments to opcode: " <> T.pack opcode
+  MaxIterationsReached {}            -> "Max iterations reached"
+  JumpIntoSymbolicCode {}            -> "Encountered a jump into a potentially symbolic code region while executing initcode"
+  CheatCodeMissing _ selector        -> "Cheat code not recognized: " <> T.pack (show selector)
 
 formatSomeExpr :: SomeExpr -> Text
 formatSomeExpr (SomeExpr e) = formatExpr $ Expr.simplify e

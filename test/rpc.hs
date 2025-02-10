@@ -72,7 +72,7 @@ tests = testGroup "rpc"
     [ test "dapp-test" $ do
         let testFile = "test/contracts/pass/rpc.sol"
         res <- runSolidityTestCustom testFile ".*" Nothing Nothing False testRpcInfo Foundry
-        liftIO $ assertEqual "test result" True res
+        liftIO $ assertEqual "test result" (True, True) res
 
     -- concretely exec "transfer" on WETH9 using remote rpc
     -- https://etherscan.io/token/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2#code
