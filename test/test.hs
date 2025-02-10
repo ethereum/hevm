@@ -3875,8 +3875,28 @@ tests = testGroup "hevm"
           }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing []) False
           assertBoolM "Must have a difference" (any isCex res)
+      ,
+      test "implicit-constructor" $ do
+        Just initA <- solidity "C"
+          [i|
+            contract C {
+              uint x;
+            }
+          |]
+        Just initB <- solidity "C"
+          [i|
+            contract C {
+              uint x;
+              constructor() {
+                x = 0;
+              }
+            }
+          |]
+        withSolvers Z3 3 1 Nothing $ \s -> do
+          a <- equivalenceCheck s initA initB defaultVeriOpts (mkCalldata Nothing []) True
+          assertEqualM "Must have no difference" [Qed ()] a
       ,
       test "eq-sol-exp-qed" $ do
         Just aPrgm <- solcRuntime "C"
@@ -3900,7 +3920,7 @@ tests = testGroup "hevm"
             }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing []) False
           assertEqualM "Must have no difference" [Qed ()] res
       ,
       test "eq-balance-differs" $ do
@@ -3931,7 +3951,7 @@ tests = testGroup "hevm"
             }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing []) False
           assertBoolM "Must differ" (all isCex res)
       ,
       -- TODO: this fails because we don't check equivalence of deployed contracts
@@ -3992,7 +4012,7 @@ tests = testGroup "hevm"
             }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing []) False
           assertBoolM "Must differ" (all isCex res)
       ,
       test "eq-unknown-addr" $ do
@@ -4016,7 +4036,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           let cd = mkCalldata (Just (Sig "a(address,address)" [AbiAddressType, AbiAddressType])) []
-          (res,_) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd
+          (res,_) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd False
           assertEqualM "Must be different" (any isCex res) True
       ,
       test "eq-sol-exp-cex" $ do
@@ -4041,7 +4061,7 @@ tests = testGroup "hevm"
               }
           |]
         withSolvers Bitwuzla 3 1 Nothing $ \s -> do
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing []) False
           assertEqualM "Must be different" (any isCex res) True
       , test "eq-all-yul-optimization-tests" $ do
         let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }
@@ -4254,7 +4274,7 @@ tests = testGroup "hevm"
           Just bPrgm <- liftIO $ yul "" $ T.pack $ unlines filteredBSym
           procs <- liftIO $ getNumProcessors
           withSolvers CVC5 (unsafeInto procs) 1 (Just 100) $ \s -> do
-            (res, _) <- equivalenceCheck s aPrgm bPrgm opts (mkCalldata Nothing [])
+            (res, _) <- equivalenceCheck s aPrgm bPrgm opts (mkCalldata Nothing []) False
             end <- liftIO $ getCurrentTime
             case any isCex res of
               False -> liftIO $ do
