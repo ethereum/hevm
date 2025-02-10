@@ -696,8 +696,9 @@ equivalenceCheck
   -> ByteString
   -> VeriOpts
   -> (Expr Buf, [Prop])
+  -> Bool
   -> m ([EquivResult], [Expr End])
-equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
+equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
   conf <- readConfig
   case bytecodeA == bytecodeB of
     True -> liftIO $ do
@@ -715,7 +716,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata = do
     getBranches :: ByteString -> m [Expr End]
     getBranches bs = do
       let bytecode = if BS.null bs then BS.pack [0] else bs
-      prestate <- liftIO $ stToIO $ abstractVM calldata bytecode Nothing False
+      prestate <- liftIO $ stToIO $ abstractVM calldata bytecode Nothing create
       expr <- interpret (Fetch.oracle solvers Nothing) opts.maxIter opts.askSmtIters opts.loopHeuristic prestate runExpr
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl
@@ -853,7 +854,7 @@ equivalenceCheck' solvers branchesA branchesB = do
         -- TODO: is this sound? do we need a more sophisticated nonce representation?
         noncesDiffer = PBool (ac.nonce /= bc.nonce)
         storesDiffer = case (ac.storage, bc.storage) of
-          (ConcreteStore as, ConcreteStore bs) -> PBool $ as /= bs
+          (ConcreteStore as, ConcreteStore bs) | not (as == Map.empty || bs == Map.empty) -> PBool $ as /= bs
           (as, bs) -> if as == bs then PBool False else as ./= bs
       in balsDiffer .|| storesDiffer .|| noncesDiffer
 
