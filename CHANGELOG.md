@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More simplification rules that help avoid symbolic copyslice in case of
   STATICCALL overapproximation
 - Test to make sure we don't accidentally overapproximate a working, good STATICCALL
+- Add deployment code flag to the `equivalenceCheck` function
+- New simplification rule for reading a byte that is lower than destination offset in `copySlice`
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -42,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When cheatcode is missing, we produce a partial execution warning
 - Size of calldata can be up to 2**64, not 256. This is now reflected in the documentation
 - We now have less noise during test runs, and assert more about symbolic copyslice tests
+- The equivalence checker now is able to prove that an empty store is equivalent to a store with all slots initialized to 0.
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
