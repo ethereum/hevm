@@ -37,7 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but allows much more thorough exploration of the contract
 - Allow controlling the max buffer sizes via --max-buf-size to something smaller than 2**64
   so we don't get too large buffers as counterexamples
-
+- Add deployment code flag to the `equivalenceCheck` function
+- New simplification rule for reading a byte that is lower than destination offset in `copySlice`
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -52,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Size of calldata can be up to 2**64, not 256. This is now reflected in the documentation
 - We now have less noise during test runs, and assert more about symbolic copyslice tests
 - CopySlice rewrite rule is now less strict while still being sound
+- The equivalence checker now is able to prove that an empty store is equivalent to a store with all slots initialized to 0.
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
