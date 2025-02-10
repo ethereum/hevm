@@ -3767,8 +3767,8 @@ tests = testGroup "hevm"
             }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          a <- equivalenceCheck s initA initB defaultVeriOpts (mkCalldata Nothing []) True
-          assertEqualM "Must have no difference" [Qed ()] a
+          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts (mkCalldata Nothing []) True
+          assertEqualM "Must have no difference" [Qed ()] res
       ,
       test "eq-sol-exp-qed" $ do
         Just aPrgm <- solcRuntime "C"
