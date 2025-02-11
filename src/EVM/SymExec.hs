@@ -37,7 +37,7 @@ import EVM.ABI
 import EVM.Effects
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (feeSchedule)
-import EVM.Format (formatExpr, formatPartial, formatPartialShort, showVal, bsToHex, indent, formatBinary)
+import EVM.Format (formatExpr, formatPartial, formatPartialShort, showVal, indent, formatBinary)
 import EVM.SMT (SMTCex(..), SMT2(..), assertProps)
 import EVM.SMT qualified as SMT
 import EVM.Solvers
@@ -52,6 +52,7 @@ import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
 import Text.Printf (printf)
 import Witch (into, unsafeInto)
+import Debug.Trace (trace)
 
 data LoopHeuristic
   = Naive
@@ -580,6 +581,14 @@ extractProps = \case
   Partial asserts _ _ -> asserts
   GVar _ -> internalError "cannot extract props from a GVar"
 
+extractEndStates :: Expr End -> Map (Expr EAddr) (Expr EContract)
+extractEndStates = \case
+  ITE {} -> mempty
+  Success _ _ _ contr -> contr
+  Failure {} -> mempty
+  Partial  {} -> mempty
+  GVar _ -> internalError "cannot extract props from a GVar"
+
 isPartial :: Expr a -> Bool
 isPartial (Partial _ _ _) = True
 isPartial _ = False
@@ -700,8 +709,24 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
         putStrLn "bytecodeA and bytecodeB are different, checking for equivalence"
       branchesA <- getBranches bytecodeA
       branchesB <- getBranches bytecodeB
-      res <- equivalenceCheck' solvers branchesA branchesB
-      pure (res, branchesA <> branchesB)
+      when conf.debug $ liftIO $ do
+        liftIO $ putStrLn $ "branchesA props: " <> show (map extractProps branchesA)
+        liftIO $ putStrLn $ "branchesB props: " <> show (map extractProps branchesB)
+        liftIO $ putStrLn $ ""
+        liftIO $ putStrLn $ "branchesA endstates: " <> show (map extractEndStates branchesA)
+        liftIO $ putStrLn $ "branchesB endstates: " <> show (map extractEndStates branchesB)
+      -- let k = [(a,b) | a <- branchesA, b <- branchesB]
+      -- prop -> enstate mapping above, basically
+      -- we should run getBranches on RuntimeCode with abstract state & calldata for all, then find SAT for when
+      -- the return state differs, given that the Props are OK
+      -- contract-a: 6080604052348015600e575f80fd5b50600436106026575f3560e01c806387fcff0c14602a575b5f80fd5b60406004803603810190603c91906090565b6054565b604051604b919060c3565b60405180910390f35b5f60069050919050565b5f80fd5b5f819050919050565b6072816062565b8114607b575f80fd5b50565b5f81359050608a81606b565b92915050565b5f6020828403121560a25760a1605e565b5b5f60ad84828501607e565b91505092915050565b60bd816062565b82525050565b5f60208201905060d45f83018460b6565b9291505056fea26469706673582212203e9f9308278219b31894ce14516698758c68f69ef69e60db4b3b8a27afcee21064736f6c634300081a0033
+      -- deployed: a = ByteString "`\128`@R4\128\NAK`\SOW_\128\253[P`\EOT6\DLE`&W_5`\224\FS\128c\135\252\255\f\DC4`*W[_\128\253[`@`\EOT\128\&6\ETX\129\SOH\144`<\145\144`\144V[`TV[`@Q`K\145\144`\195V[`@Q\128\145\ETX\144\243[_`\ACK\144P\145\144PV[_\128\253[_\129\144P\145\144PV[`r\129`bV[\129\DC4`{W_\128\253[PV[_\129\&5\144P`\138\129`kV[\146\145PPV[_` \130\132\ETX\DC2\NAK`\162W`\161`^V[[_`\173\132\130\133\SOH`~V[\145PP\146\145PPV[`\189\129`bV[\130RPPV[_` \130\SOH\144P`\212_\131\SOH\132`\182V[\146\145PPV\254\162dipfsX\"\DC2 >\159\147\b'\130\EM\179\CAN\148\206\DC4Qf\152u\140h\246\158\246\158`\219K;\138'\175\206\226\DLEdsolcC\NUL\b\SUB\NUL3"
+      -- BS16.encodeBase16 a -> "6080604052348015600e575f80fd5b50600436106026575f3560e01c806387fcff0c14602a575b5f80fd5b60406004803603810190603c91906090565b6054565b604051604b919060c3565b60405180910390f35b5f60069050919050565b5f80fd5b5f819050919050565b6072816062565b8114607b575f80fd5b50565b5f81359050608a81606b565b92915050565b5f6020828403121560a25760a1605e565b5b5f60ad84828501607e565b91505092915050565b60bd816062565b82525050565b5f60208201905060d45f83018460b6565b9291505056fea26469706673582212203e9f9308278219b31894ce14516698758c68f69ef69e60db4b3b8a27afcee21064736f6c634300081a0033"
+      if create then
+        undefined
+      else do
+        res <- equivalenceCheck' solvers branchesA branchesB create
+        pure (res, branchesA <> branchesB)
   where
     -- decompiles the given bytecode into a list of branches
     getBranches :: ByteString -> m [Expr End]
@@ -715,8 +740,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
 
 equivalenceCheck'
   :: forall m . App m
-  => SolverGroup -> [Expr End] -> [Expr End] -> m [EquivResult]
-equivalenceCheck' solvers branchesA branchesB = do
+  => SolverGroup -> [Expr End] -> [Expr End] -> Bool -> m [EquivResult]
+equivalenceCheck' solvers branchesA branchesB create = do
       conf <- readConfig
       when conf.debug $ do
         liftIO $ printPartialIssues branchesA "codeA"
@@ -807,16 +832,16 @@ equivalenceCheck' solvers branchesA branchesB = do
         -- if we cannot statically determine whether or not the end states
         -- differ, then we ask the solver if the end states can differ if both
         -- sets of path conditions are satisfiable
-        _ -> Just . Set.fromList $ resultsDiffer aEnd bEnd : extractProps aEnd <> extractProps bEnd
+        _ -> (trace $ "res diff: " <> show (resultsDiffer aEnd bEnd)) $ Just . Set.fromList $ resultsDiffer aEnd bEnd : extractProps aEnd <> extractProps bEnd
 
     resultsDiffer :: Expr End -> Expr End -> Prop
     resultsDiffer aEnd bEnd = case (aEnd, bEnd) of
       (Success _ _ aOut aState, Success _ _ bOut bState) ->
         case (aOut == bOut, aState == bState) of
           (True, True) -> PBool False
-          (False, True) -> aOut ./= bOut
-          (True, False) -> statesDiffer aState bState
-          (False, False) -> statesDiffer aState bState .|| aOut ./= bOut
+          (False, True) -> (trace $ "states diff out :" <> show (aOut ./= bOut)) $ aOut ./= bOut
+          (True, False) -> (trace $ "states diff1:" <> show (statesDiffer aState bState)) $ statesDiffer aState bState
+          (False, False) ->(trace $ "states diff2:" <> show (statesDiffer aState bState) <> " \n\naout: " <> show aOut <> "\n\n, bout:" <> show bOut) $ statesDiffer aState bState .|| aOut ./= bOut
       (Failure _ _ (Revert a), Failure _ _ (Revert b)) -> if a == b then PBool False else a ./= b
       (Failure _ _ a, Failure _ _ b) -> if a == b then PBool False else PBool True
       -- partial end states can't be compared to actual end states, so we always ignore them
@@ -847,7 +872,7 @@ equivalenceCheck' solvers branchesA branchesB = do
         storesDiffer = case (ac.storage, bc.storage) of
           (ConcreteStore as, ConcreteStore bs) | not (as == Map.empty || bs == Map.empty) -> PBool $ as /= bs
           (as, bs) -> if as == bs then PBool False else as ./= bs
-      in balsDiffer .|| storesDiffer .|| noncesDiffer
+      in (trace $ "bals: " <> show balsDiffer <> " stores: " <> show storesDiffer <> " nonce:" <> show noncesDiffer ) $ balsDiffer .|| storesDiffer .|| noncesDiffer
 
 
 both' :: (a -> b) -> (a, a) -> (b, b)

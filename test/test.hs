@@ -77,10 +77,10 @@ import EVM.Expr (maybeLitByteSimp)
 
 testEnv :: Env
 testEnv = Env { config = defaultConfig {
-  dumpQueries = False
-  , dumpExprs = False
-  , dumpEndStates = False
-  , debug = False
+  dumpQueries = True
+  , dumpExprs = True
+  , dumpEndStates = True
+  , debug = True
   , dumpTrace = False
   , decomposeStorage = True
   } }
@@ -3755,6 +3755,9 @@ tests = testGroup "hevm"
           [i|
             contract C {
               uint x;
+              function stuff(uint a) public returns (uint256) {
+                return 6;
+              }
             }
           |]
         Just initB <- solidity "C"
@@ -3763,6 +3766,9 @@ tests = testGroup "hevm"
               uint x;
               constructor() {
                 x = 0;
+              }
+              function stuff(uint a) public returns (uint256) {
+                return 8;
               }
             }
           |]

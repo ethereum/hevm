@@ -269,7 +269,7 @@ equivalence cmd = do
     cores <- liftIO $ unsafeInto <$> getNumProcessors
     let solverCount = fromMaybe cores cmd.numSolvers
     withSolvers solver solverCount (fromMaybe 1 cmd.solverThreads) cmd.smttimeout $ \s -> do
-      (res, e) <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata
+      (res, e) <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata False
       liftIO $ case (any isCex res, any Expr.isPartial e || any isUnknown res) of
         (False, False) -> putStrLn "   \x1b[32m[PASS]\x1b[0m Contracts behave equivalently"
         (True, _)      -> putStrLn "   \x1b[31m[FAIL]\x1b[0m Contracts do not behave equivalently"

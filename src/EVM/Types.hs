@@ -2,6 +2,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 {-# OPTIONS_GHC -Wno-inline-rule-shadowing #-}
 
@@ -25,6 +26,7 @@ import Data.List (foldl')
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Base16 qualified as BS16
+import qualified Data.ByteString.Char8 as BS8
 import Data.ByteString.Builder (byteStringHex, toLazyByteString)
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy (toStrict)
@@ -378,6 +380,11 @@ deriving instance Show (Expr a)
 deriving instance Eq (Expr a)
 deriving instance Ord (Expr a)
 
+-- Override ConcreteBuf because it's VERY hard to read otherwise
+-- This is possible thanks to StandaloneDeriving
+instance Show (Expr a) where
+  show (ConcreteBuf bs) = "ConcreteBuf " ++ bsToHex bs
+  show x               = show x
 
 -- Existential Wrapper -----------------------------------------------------------------------------
 
@@ -931,7 +938,12 @@ data ContractCode
 data RuntimeCode
   = ConcreteRuntimeCode ByteString
   | SymbolicRuntimeCode (V.Vector (Expr Byte))
-  deriving (Show, Eq, Ord)
+  deriving (Eq, Ord)
+instance Show RuntimeCode
+  where
+    show = \case
+      ConcreteRuntimeCode e -> "0x" <> bsToHex e
+      SymbolicRuntimeCode e -> show e
 
 -- Execution Traces --------------------------------------------------------------------------------
 
@@ -1437,6 +1449,10 @@ untilFixpoint :: Eq a => (a -> a) -> a -> a
 untilFixpoint f a = if f a == a
                     then a
                     else untilFixpoint f (f a)
+
+
+bsToHex :: ByteString -> String
+bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
 
 -- Optics ------------------------------------------------------------------------------------------
 
