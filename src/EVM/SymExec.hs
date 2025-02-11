@@ -52,7 +52,7 @@ import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
 import Text.Printf (printf)
 import Witch (into, unsafeInto)
-import Debug.Trace (trace)
+import Debug.Trace (trace, traceM)
 
 data LoopHeuristic
   = Naive
@@ -722,6 +722,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
       -- contract-a: 6080604052348015600e575f80fd5b50600436106026575f3560e01c806387fcff0c14602a575b5f80fd5b60406004803603810190603c91906090565b6054565b604051604b919060c3565b60405180910390f35b5f60069050919050565b5f80fd5b5f819050919050565b6072816062565b8114607b575f80fd5b50565b5f81359050608a81606b565b92915050565b5f6020828403121560a25760a1605e565b5b5f60ad84828501607e565b91505092915050565b60bd816062565b82525050565b5f60208201905060d45f83018460b6565b9291505056fea26469706673582212203e9f9308278219b31894ce14516698758c68f69ef69e60db4b3b8a27afcee21064736f6c634300081a0033
       -- deployed: a = ByteString "`\128`@R4\128\NAK`\SOW_\128\253[P`\EOT6\DLE`&W_5`\224\FS\128c\135\252\255\f\DC4`*W[_\128\253[`@`\EOT\128\&6\ETX\129\SOH\144`<\145\144`\144V[`TV[`@Q`K\145\144`\195V[`@Q\128\145\ETX\144\243[_`\ACK\144P\145\144PV[_\128\253[_\129\144P\145\144PV[`r\129`bV[\129\DC4`{W_\128\253[PV[_\129\&5\144P`\138\129`kV[\146\145PPV[_` \130\132\ETX\DC2\NAK`\162W`\161`^V[[_`\173\132\130\133\SOH`~V[\145PP\146\145PPV[`\189\129`bV[\130RPPV[_` \130\SOH\144P`\212_\131\SOH\132`\182V[\146\145PPV\254\162dipfsX\"\DC2 >\159\147\b'\130\EM\179\CAN\148\206\DC4Qf\152u\140h\246\158\246\158`\219K;\138'\175\206\226\DLEdsolcC\NUL\b\SUB\NUL3"
       -- BS16.encodeBase16 a -> "6080604052348015600e575f80fd5b50600436106026575f3560e01c806387fcff0c14602a575b5f80fd5b60406004803603810190603c91906090565b6054565b604051604b919060c3565b60405180910390f35b5f60069050919050565b5f80fd5b5f819050919050565b6072816062565b8114607b575f80fd5b50565b5f81359050608a81606b565b92915050565b5f6020828403121560a25760a1605e565b5b5f60ad84828501607e565b91505092915050565b60bd816062565b82525050565b5f60208201905060d45f83018460b6565b9291505056fea26469706673582212203e9f9308278219b31894ce14516698758c68f69ef69e60db4b3b8a27afcee21064736f6c634300081a0033"
+      -- cabal run -f devel exe:hevm -- equivalence --smtdebug --debug --code-a $(solc --bin "contract-a.sol" | tail -n1) --code-b $(solc --bin "contract-b.sol" | tail -n1)
       if create then do
         let allPairs = [(a,b) | a <- branchesA, b <- branchesB]
         undefined
@@ -820,44 +821,48 @@ equivalenceCheck' solvers branchesA branchesB create = do
     -- for a given pair of branches, equivalence is violated if there exists an
     -- input that satisfies the branch conditions from both sides and produces
     -- a differing result in each branch
-    distinct :: Bool -> Expr End -> Expr End -> Maybe (Set Prop)
-    distinct True aEnd bEnd = undefined
-    distinct False aEnd bEnd =
-      case resultsDiffer aEnd bEnd of
+    distinct :: App m => Expr End -> Expr End -> m (Maybe (Set Prop))
+    distinct aEnd bEnd = do
+      props <- resultsDiffer aEnd bEnd
+      case props of
         -- if the end states are the same, then they can never produce a
         -- different result under any circumstances
-        PBool False -> Nothing
+        PBool False -> pure Nothing
         -- if we can statically determine that the end states differ, then we
         -- ask the solver to find us inputs that satisfy both sets of branch
         -- conditions
-        PBool True  -> Just . Set.fromList $ extractProps aEnd <> extractProps bEnd
+        PBool True  -> pure $ Just . Set.fromList $ extractProps aEnd <> extractProps bEnd
         -- if we cannot statically determine whether or not the end states
         -- differ, then we ask the solver if the end states can differ if both
         -- sets of path conditions are satisfiable
-        _ -> (trace $ "res diff: " <> show (resultsDiffer aEnd bEnd)) $
-          Just . Set.fromList $ resultsDiffer aEnd bEnd : extractProps aEnd <> extractProps bEnd
+        _ -> do
+          traceM $ "res diff: " <> show (props)
+          pure $ Just . Set.fromList $ props : extractProps aEnd <> extractProps bEnd
 
-    resultsDiffer :: Expr End -> Expr End -> Prop
+    resultsDiffer :: App m => Expr End -> Expr End -> m (Prop)
     resultsDiffer aEnd bEnd = case (aEnd, bEnd) of
       (Success _ _ aOut aState, Success _ _ bOut bState) ->
         case (aOut == bOut, aState == bState) of
-          (True, True) -> PBool False
-          (False, True) -> (trace $ "states diff out :" <> show (aOut ./= bOut)) $
-            aOut ./= bOut
-          (True, False) -> (trace $ "states diff1:" <> show (statesDiffer aState bState)) $
-            statesDiffer aState bState
-          (False, False) ->(trace $ "states diff2:" <> show (statesDiffer aState bState) <> " \n\naout: " <> show aOut <> "\n\n, bout:" <> show bOut) $
-            statesDiffer aState bState .|| aOut ./= bOut
-      (Failure _ _ (Revert a), Failure _ _ (Revert b)) -> if a == b then PBool False else a ./= b
-      (Failure _ _ a, Failure _ _ b) -> if a == b then PBool False else PBool True
+          (True, True) -> pure $ PBool False
+          (False, True) -> do
+            traceM $ "states diff out :" <> show (aOut ./= bOut)
+            pure $ aOut ./= bOut
+          (True, False) -> do
+            traceM $ "states diff1:" <> show (statesDiffer aState bState)
+            pure $ statesDiffer aState bState
+          (False, False) -> do
+            traceM $ "states diff2:" <> show (statesDiffer aState bState) <> " \n\naout: " <> show aOut <> "\n\n, bout:" <> show bOut
+            pure $ statesDiffer aState bState .|| aOut ./= bOut
+      (Failure _ _ (Revert a), Failure _ _ (Revert b)) ->
+        pure $ if a == b then PBool False else a ./= b
+      (Failure _ _ a, Failure _ _ b) ->
+        pure $ if a == b then PBool False else PBool True
       -- partial end states can't be compared to actual end states, so we always ignore them
-      (Partial {}, _) -> PBool False
-      (_, Partial {}) -> PBool False
+      (Partial {}, _) -> pure $ PBool False
+      (_, Partial {}) -> pure $ PBool False
       (ITE _ _ _, _) -> internalError "Expressions must be flattened"
       (_, ITE _ _ _) -> internalError "Expressions must be flattened"
-      (a, b) -> if a == b
-                then PBool False
-                else PBool True
+      (a, b) -> pure $ PBool (a /= b)
 
     statesDiffer :: Map (Expr EAddr) (Expr EContract) -> Map (Expr EAddr) (Expr EContract) -> Prop
     statesDiffer aState bState
