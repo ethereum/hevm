@@ -3,6 +3,10 @@
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE DataKinds #-}
 
 {-# OPTIONS_GHC -Wno-inline-rule-shadowing #-}
 
@@ -379,12 +383,6 @@ data Expr (a :: EType) where
 deriving instance Show (Expr a)
 deriving instance Eq (Expr a)
 deriving instance Ord (Expr a)
-
--- Override ConcreteBuf because it's VERY hard to read otherwise
--- This is possible thanks to StandaloneDeriving
-instance Show (Expr a) where
-  show (ConcreteBuf bs) = "ConcreteBuf " ++ bsToHex bs
-  show x               = show x
 
 -- Existential Wrapper -----------------------------------------------------------------------------
 

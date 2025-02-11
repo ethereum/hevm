@@ -123,6 +123,7 @@ data Command w
       , solverThreads :: w ::: Maybe Natural    <?> "Number of threads for each solver instance. Only respected for Z3 (default: 1)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , noDecompose   :: w ::: Bool             <?> "Don't decompose storage slots into separate arrays"
+      , create      :: w ::: Bool              <?> "Tx: creation"
       , maxBranch     :: w ::: Int              <!> "10" <?> "Max number of branches to explore when encountering a symbolic value (default: 10)"
       }
   | Exec -- Execute a given program with specified env & calldata
@@ -269,7 +270,7 @@ equivalence cmd = do
     cores <- liftIO $ unsafeInto <$> getNumProcessors
     let solverCount = fromMaybe cores cmd.numSolvers
     withSolvers solver solverCount (fromMaybe 1 cmd.solverThreads) cmd.smttimeout $ \s -> do
-      (res, e) <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata False
+      (res, e) <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata cmd.create
       liftIO $ case (any isCex res, any Expr.isPartial e || any isUnknown res) of
         (False, False) -> putStrLn "   \x1b[32m[PASS]\x1b[0m Contracts behave equivalently"
         (True, _)      -> putStrLn "   \x1b[31m[FAIL]\x1b[0m Contracts do not behave equivalently"
