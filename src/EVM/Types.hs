@@ -940,7 +940,7 @@ data RuntimeCode
 instance Show RuntimeCode
   where
     show = \case
-      ConcreteRuntimeCode e -> "0x" <> bsToHex e
+      ConcreteRuntimeCode e -> "ConcreteRuntimeCode 0x" <> bsToHex e
       SymbolicRuntimeCode e -> show e
 
 -- Execution Traces --------------------------------------------------------------------------------
