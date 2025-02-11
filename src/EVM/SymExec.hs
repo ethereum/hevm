@@ -17,7 +17,7 @@ import Data.Containers.ListUtils (nubOrd)
 import Data.DoubleWord (Word256)
 import Data.List (foldl', sortBy, sort)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe, mapMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, mapMaybe, listToMaybe, catMaybes)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Map.Merge.Strict qualified as Map
@@ -723,12 +723,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
       -- deployed: a = ByteString "`\128`@R4\128\NAK`\SOW_\128\253[P`\EOT6\DLE`&W_5`\224\FS\128c\135\252\255\f\DC4`*W[_\128\253[`@`\EOT\128\&6\ETX\129\SOH\144`<\145\144`\144V[`TV[`@Q`K\145\144`\195V[`@Q\128\145\ETX\144\243[_`\ACK\144P\145\144PV[_\128\253[_\129\144P\145\144PV[`r\129`bV[\129\DC4`{W_\128\253[PV[_\129\&5\144P`\138\129`kV[\146\145PPV[_` \130\132\ETX\DC2\NAK`\162W`\161`^V[[_`\173\132\130\133\SOH`~V[\145PP\146\145PPV[`\189\129`bV[\130RPPV[_` \130\SOH\144P`\212_\131\SOH\132`\182V[\146\145PPV\254\162dipfsX\"\DC2 >\159\147\b'\130\EM\179\CAN\148\206\DC4Qf\152u\140h\246\158\246\158`\219K;\138'\175\206\226\DLEdsolcC\NUL\b\SUB\NUL3"
       -- BS16.encodeBase16 a -> "6080604052348015600e575f80fd5b50600436106026575f3560e01c806387fcff0c14602a575b5f80fd5b60406004803603810190603c91906090565b6054565b604051604b919060c3565b60405180910390f35b5f60069050919050565b5f80fd5b5f819050919050565b6072816062565b8114607b575f80fd5b50565b5f81359050608a81606b565b92915050565b5f6020828403121560a25760a1605e565b5b5f60ad84828501607e565b91505092915050565b60bd816062565b82525050565b5f60208201905060d45f83018460b6565b9291505056fea26469706673582212203e9f9308278219b31894ce14516698758c68f69ef69e60db4b3b8a27afcee21064736f6c634300081a0033"
       -- cabal run -f devel exe:hevm -- equivalence --smtdebug --debug --code-a $(solc --bin "contract-a.sol" | tail -n1) --code-b $(solc --bin "contract-b.sol" | tail -n1)
-      if create then do
-        let allPairs = [(a,b) | a <- branchesA, b <- branchesB]
-        undefined
-      else do
-        res <- equivalenceCheck' solvers branchesA branchesB create
-        pure (res, branchesA <> branchesB)
+      res <- equivalenceCheck' solvers branchesA branchesB create
+      pure (res, branchesA <> branchesB)
   where
     -- decompiles the given bytecode into a list of branches
     getBranches :: ByteString -> m [Expr End]
@@ -756,7 +752,8 @@ equivalenceCheck' solvers branchesA branchesB create = do
         putStrLn $ "endstates in bytecodeA: " <> show (length branchesA)
                    <> "\nendstates in bytecodeB: " <> show (length branchesB)
 
-      let differingEndStates = sortBySize (mapMaybe (uncurry (distinct create)) allPairs)
+      disctictPairs <- forM allPairs $ \(a, b) -> distinct a b
+      let differingEndStates = sortBySize $ catMaybes disctictPairs
       liftIO $ putStrLn $ "Asking the SMT solver for " <> (show $ length differingEndStates) <> " pairs"
       when conf.dumpEndStates $ forM_ (zip differingEndStates [(1::Integer)..]) (\(x, i) ->
         liftIO $ T.writeFile ("prop-checked-" <> show i <> ".prop") (T.pack $ show x))
@@ -841,18 +838,31 @@ equivalenceCheck' solvers branchesA branchesB create = do
 
     resultsDiffer :: App m => Expr End -> Expr End -> m (Prop)
     resultsDiffer aEnd bEnd = case (aEnd, bEnd) of
-      (Success _ _ aOut aState, Success _ _ bOut bState) ->
+      (Success props1 _ aOut aState, Success props2 _ bOut bState) ->
         case (aOut == bOut, aState == bState) of
           (True, True) -> pure $ PBool False
           (False, True) -> do
             traceM $ "states diff out :" <> show (aOut ./= bOut)
-            pure $ aOut ./= bOut
+            if create then internalError "note, we need to deal with this too, for create"
+            else pure $ aOut ./= bOut
           (True, False) -> do
             traceM $ "states diff1:" <> show (statesDiffer aState bState)
             pure $ statesDiffer aState bState
           (False, False) -> do
             traceM $ "states diff2:" <> show (statesDiffer aState bState) <> " \n\naout: " <> show aOut <> "\n\n, bout:" <> show bOut
-            pure $ statesDiffer aState bState .|| aOut ./= bOut
+            outDiff <- if create then do
+              case (aOut, bOut) of
+                (ConcreteBuf codeA, ConcreteBuf codeB) -> do
+                  liftIO $ putStrLn $ "codea: " <> bsToHex codeA
+                  liftIO $ putStrLn $ "codeb: " <> bsToHex codeB
+                  (res, a) <- equivalenceCheck solvers codeA codeB defaultVeriOpts (mkCalldata Nothing []) False
+                  liftIO $ putStrLn $ "res: " <> show res
+                  case res of
+                    [Qed ()] -> pure $ PBool False
+                    _ -> pure $ PBool True
+                _ -> internalError "symbolic code returned..."
+            else pure  $ aOut ./= bOut
+            pure $ statesDiffer aState bState .|| outDiff
       (Failure _ _ (Revert a), Failure _ _ (Revert b)) ->
         pure $ if a == b then PBool False else a ./= b
       (Failure _ _ a, Failure _ _ b) ->
