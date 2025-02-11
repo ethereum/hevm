@@ -82,7 +82,10 @@ instance Monoid CexVars where
 data BufModel
   = Comp CompressedBuf
   | Flat ByteString
-  deriving (Eq, Show)
+  deriving (Eq)
+instance Show BufModel where
+  show (Comp c) = "Comp " <> show c
+  show (Flat b) = "Flat 0x" <> bsToHex b
 
 -- | This representation lets us store buffers of arbitrary length without
 -- exhausting the available memory, it closely matches the format used by

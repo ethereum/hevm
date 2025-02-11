@@ -2,6 +2,11 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE DataKinds #-}
 
 {-# OPTIONS_GHC -Wno-inline-rule-shadowing #-}
 
@@ -931,7 +936,12 @@ data ContractCode
 data RuntimeCode
   = ConcreteRuntimeCode ByteString
   | SymbolicRuntimeCode (V.Vector (Expr Byte))
-  deriving (Show, Eq, Ord)
+  deriving (Eq, Ord)
+instance Show RuntimeCode
+  where
+    show = \case
+      ConcreteRuntimeCode e -> "ConcreteRuntimeCode 0x" <> bsToHex e
+      SymbolicRuntimeCode e -> show e
 
 -- Execution Traces --------------------------------------------------------------------------------
 
@@ -1437,6 +1447,9 @@ untilFixpoint :: Eq a => (a -> a) -> a -> a
 untilFixpoint f a = if f a == a
                     then a
                     else untilFixpoint f (f a)
+
+bsToHex :: ByteString -> String
+bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
 
 -- Optics ------------------------------------------------------------------------------------------
 
