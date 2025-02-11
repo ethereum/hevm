@@ -37,7 +37,7 @@ import EVM.ABI
 import EVM.Effects
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (feeSchedule)
-import EVM.Format (formatExpr, formatPartial, formatPartialShort, showVal, bsToHex, indent, formatBinary)
+import EVM.Format (formatExpr, formatPartial, formatPartialShort, showVal, indent, formatBinary, formatProp)
 import EVM.SMT (SMTCex(..), SMT2(..), assertProps)
 import EVM.SMT qualified as SMT
 import EVM.Solvers
@@ -589,6 +589,14 @@ extractProps = \case
   Partial asserts _ _ -> asserts
   GVar _ -> internalError "cannot extract props from a GVar"
 
+extractEndStates :: Expr End -> Map (Expr EAddr) (Expr EContract)
+extractEndStates = \case
+  ITE {} -> mempty
+  Success _ _ _ contr -> contr
+  Failure {} -> mempty
+  Partial  {} -> mempty
+  GVar _ -> internalError "cannot extract props from a GVar"
+
 isPartial :: Expr a -> Bool
 isPartial (Partial _ _ _) = True
 isPartial _ = False
@@ -707,10 +715,19 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
     False -> do
       when conf.debug $ liftIO $ do
         putStrLn "bytecodeA and bytecodeB are different, checking for equivalence"
-      branchesA <- getBranches bytecodeA
-      branchesB <- getBranches bytecodeB
-      res <- equivalenceCheck' solvers branchesA branchesB
-      pure (res, branchesA <> branchesB)
+      branchesAorig <- getBranches bytecodeA
+      branchesBorig <- getBranches bytecodeB
+      when conf.debug $ liftIO $ do
+        liftIO $ putStrLn $ "branchesA props: " <> show (map extractProps branchesAorig)
+        liftIO $ putStrLn $ "branchesB props: " <> show (map extractProps branchesBorig)
+        liftIO $ putStrLn ""
+        liftIO $ putStrLn $ "branchesA endstates: " <> show (map extractEndStates branchesAorig)
+
+        liftIO $ putStrLn $ "branchesB endstates: " <> show (map extractEndStates branchesBorig)
+      let branchesA = rewriteFresh "A-" branchesAorig
+          branchesB = rewriteFresh "B-" branchesBorig
+      (res, ends) <- equivalenceCheck' solvers branchesA branchesB create
+      pure (res, branchesA <> branchesB <> ends)
   where
     -- decompiles the given bytecode into a list of branches
     getBranches :: ByteString -> m [Expr End]
@@ -721,11 +738,20 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl
 
+rewriteFresh :: Text -> [Expr a] -> [Expr a]
+rewriteFresh prefix exprs = fmap (mapExpr mymap) exprs
+  where
+    mymap :: Expr a -> Expr a
+    mymap = \case
+      Gas p x -> Gas (prefix <> p) x
+      Var name | ("-fresh-" `T.isInfixOf` name) -> Var $ prefix <> name
+      AbstractBuf name | ("-fresh-" `T.isInfixOf` name) -> AbstractBuf $ prefix <> name
+      x -> x
 
 equivalenceCheck'
   :: forall m . App m
-  => SolverGroup -> [Expr End] -> [Expr End] -> m [EquivResult]
-equivalenceCheck' solvers branchesA branchesB = do
+  => SolverGroup -> [Expr End] -> [Expr End] -> Bool -> m ([EquivResult], [Expr End])
+equivalenceCheck' solvers branchesA branchesB create = do
       conf <- readConfig
       when conf.debug $ do
         liftIO $ printPartialIssues branchesA "codeA"
@@ -738,21 +764,20 @@ equivalenceCheck' solvers branchesA branchesB = do
         putStrLn $ "endstates in bytecodeA: " <> show (length branchesA)
                    <> "\nendstates in bytecodeB: " <> show (length branchesB)
 
-      let differingEndStates = sortBySize (mapMaybe (uncurry distinct) allPairs)
+      disctictPairs <- forM allPairs $ uncurry distinct
+      let differingEndStates = sortBySize $ mapMaybe (view _1) disctictPairs
+          deployedCexes = concatMap (view _2) disctictPairs
+          ends = concatMap (view _3) disctictPairs
       liftIO $ putStrLn $ "Asking the SMT solver for " <> (show $ length differingEndStates) <> " pairs"
       when conf.dumpEndStates $ forM_ (zip differingEndStates [(1::Integer)..]) (\(x, i) ->
         liftIO $ T.writeFile ("prop-checked-" <> show i <> ".prop") (T.pack $ show x))
 
       knownUnsat <- liftIO $ newTVarIO []
       procs <- liftIO getNumProcessors
-      results <- checkAll differingEndStates knownUnsat procs
-
-      let useful = foldr (\(_, b) n -> if b then n+1 else n) (0::Integer) results
-      liftIO $ putStrLn $ "Reuse of previous queries was Useful in " <> (show useful) <> " cases"
-
-      case all (isQed . fst) results of
-        True -> pure [Qed ()]
-        False -> pure $ filter (not . isQed) . fmap fst $ results
+      cexes <- checkAll differingEndStates knownUnsat procs
+      let allCexes = cexes <> deployedCexes
+      if all isQed allCexes then pure ([Qed ()], ends)
+                            else pure (filter (Prelude.not . isQed) allCexes, ends)
   where
     -- we order the sets by size because this gives us more cache hits when
     -- running our queries later on (since we rely on a subset check)
@@ -767,31 +792,34 @@ equivalenceCheck' solvers branchesA branchesB = do
     -- the solver if we can determine unsatisfiability from the cache already
     -- the last element of the returned tuple indicates whether the cache was
     -- used or not
-    check :: Config -> UnsatCache -> (Set Prop) -> IO (EquivResult, Bool)
+    check :: Config -> UnsatCache -> (Set Prop) -> IO (EquivResult)
     check conf knownUnsat props = do
-      let smt = assertProps conf (Set.toList props)
-      ku <- readTVarIO knownUnsat
-      res <- if subsetAny props ku
-             then pure (True, Unsat)
-             else (fmap ((False),) (checkSat solvers smt))
-      case res of
-        (_, Sat x) -> pure (Cex x, False)
-        (quick, Unsat) ->
-          case quick of
-            True  -> pure (Qed (), quick)
-            False -> do
-              -- nb: we might end up with duplicates here due to a
-              -- potential race, but it doesn't matter for correctness
-              atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
-              pure (Qed (), False)
-        (_, EVM.Solvers.Unknown _) -> pure (EVM.SymExec.Unknown (), False)
-        (_, EVM.Solvers.Error txt) -> pure (EVM.SymExec.Error txt, False)
+      let simpProps = Expr.simplifyProps $ Set.toList props
+      if elem (PBool False) simpProps then pure (Qed ())
+      else do
+        let smt = assertProps conf simpProps
+        ku <- readTVarIO knownUnsat
+        res <- if subsetAny props ku
+               then pure (True, Unsat)
+               else (fmap ((False),) (checkSat solvers smt))
+        case res of
+          (_, Sat x) -> pure (Cex x)
+          (quick, Unsat) ->
+            case quick of
+              True  -> pure (Qed ())
+              False -> do
+                -- nb: we might end up with duplicates here due to a
+                -- potential race, but it doesn't matter for correctness
+                atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
+                pure (Qed ())
+          (_, EVM.Solvers.Unknown _) -> pure (EVM.SymExec.Unknown ())
+          (_, EVM.Solvers.Error txt) -> pure (EVM.SymExec.Error txt)
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
     -- mapConcurrently which would spawn as many threads as there are jobs, and
     -- run them in a random order. We ordered them correctly, though so that'd be bad
-    checkAll :: App m => [(Set Prop)] -> UnsatCache -> Int -> m [(EquivResult, Bool)]
+    checkAll :: App m => [(Set Prop)] -> UnsatCache -> Int -> m [EquivResult]
     checkAll input cache numproc = do
        conf <- readConfig
        wrap <- liftIO $ pool numproc
@@ -803,48 +831,77 @@ equivalenceCheck' solvers branchesA branchesB = do
     -- for a given pair of branches, equivalence is violated if there exists an
     -- input that satisfies the branch conditions from both sides and produces
     -- a differing result in each branch
-    distinct :: Expr End -> Expr End -> Maybe (Set Prop)
-    distinct aEnd bEnd =
-      case resultsDiffer aEnd bEnd of
+    distinct :: App m => Expr End -> Expr End -> m (Maybe (Set Prop), [EquivResult], [Expr End])
+    distinct aEnd bEnd = do
+      (props, res, ends) <- resultsDiffer aEnd bEnd
+      case props of
         -- if the end states are the same, then they can never produce a
         -- different result under any circumstances
-        PBool False -> Nothing
+        PBool False -> pure (Nothing, mempty, mempty)
         -- if we can statically determine that the end states differ, then we
         -- ask the solver to find us inputs that satisfy both sets of branch
         -- conditions
-        PBool True  -> Just . Set.fromList $ extractProps aEnd <> extractProps bEnd
+        PBool True  -> pure (Just . Set.fromList $ extractProps aEnd <> extractProps bEnd, res, ends)
         -- if we cannot statically determine whether or not the end states
         -- differ, then we ask the solver if the end states can differ if both
         -- sets of path conditions are satisfiable
-        _ -> Just . Set.fromList $ resultsDiffer aEnd bEnd : extractProps aEnd <> extractProps bEnd
+        _ -> do
+          pure (Just . Set.fromList $ props : extractProps aEnd <> extractProps bEnd, res, ends)
 
-    resultsDiffer :: Expr End -> Expr End -> Prop
+    resultsDiffer :: App m => Expr End -> Expr End -> m (Prop, [EquivResult], [Expr End])
     resultsDiffer aEnd bEnd = case (aEnd, bEnd) of
-      (Success _ _ aOut aState, Success _ _ bOut bState) ->
+      (Success aProps _ aOut aState, Success bProps _ bOut bState) ->
         case (aOut == bOut, aState == bState) of
-          (True, True) -> PBool False
-          (False, True) -> aOut ./= bOut
-          (True, False) -> statesDiffer aState bState
-          (False, False) -> statesDiffer aState bState .|| aOut ./= bOut
-      (Failure _ _ (Revert a), Failure _ _ (Revert b)) -> if a == b then PBool False else a ./= b
-      (Failure _ _ a, Failure _ _ b) -> if a == b then PBool False else PBool True
+          (True, True) -> pure (PBool False, mempty, mempty)
+          (True, False) -> pure (statesDiffer aState bState, mempty, mempty)
+          (False, _) -> do
+            (outDiff, res, ends) <-
+              if create then checkCreatedDiff aOut bOut aProps bProps
+              else pure (aOut ./= bOut, mempty, mempty)
+            pure (statesDiffer aState bState .|| outDiff, res, ends)
+      (Failure _ _ (Revert a), Failure _ _ (Revert b)) ->
+        pure $ if a == b then (PBool False, mempty, mempty) else (a ./= b, mempty, mempty)
+      (Failure _ _ a, Failure _ _ b) ->
+        let lhs =  if a == b then PBool False else PBool True
+        in pure (lhs, mempty, mempty)
       -- partial end states can't be compared to actual end states, so we always ignore them
-      (Partial {}, _) -> PBool False
-      (_, Partial {}) -> PBool False
+      (Partial {}, _) -> pure (PBool False, mempty, mempty)
+      (_, Partial {}) -> pure (PBool False, mempty, mempty)
       (ITE _ _ _, _) -> internalError "Expressions must be flattened"
       (_, ITE _ _ _) -> internalError "Expressions must be flattened"
-      (a, b) -> if a == b
-                then PBool False
-                else PBool True
+      (a, b) -> pure (PBool (a /= b), mempty, mempty)
+
+    -- If the original check was for create (i.e. undeployed code), then we must also check that the deployed
+    -- code is equivalent. The constraints from the undeployed code (aProps,bProps) influence this check.
+    checkCreatedDiff aOut bOut aProps bProps = do
+      let simpA = Expr.simplify aOut
+          simpB = Expr.simplify bOut
+      case (simpA, simpB) of
+        (ConcreteBuf codeA, ConcreteBuf codeB) -> do
+          -- TODO: use aProps/bProps to constrain the deployed code
+          --       since symbolic code (with constructors taking arguments) is not supported,
+          --       this is currently not necessary
+          conf <- readConfig
+          when conf.debug $ liftIO $ do
+            liftIO $ putStrLn $ "create deployed code A: " <> bsToHex codeA
+              <> " with constraints: " <> (T.unpack . T.unlines $ map formatProp aProps)
+            liftIO $ putStrLn $ "create deployed code B: " <> bsToHex codeB
+              <> " with constraints: " <> (T.unpack . T.unlines $ map formatProp bProps)
+          calldata <- mkCalldata Nothing []
+          (res, ends) <- equivalenceCheck solvers codeA codeB defaultVeriOpts calldata False
+          pure (PBool False, res, ends)
+        _ -> internalError $ "Symbolic code returned from constructor." <> " A: " <> show simpA <> " B: " <> show simpB
 
     statesDiffer :: Map (Expr EAddr) (Expr EContract) -> Map (Expr EAddr) (Expr EContract) -> Prop
-    statesDiffer aState bState
-      = if Set.fromList (Map.keys aState) /= Set.fromList (Map.keys bState)
-        -- TODO: consider possibility of aliased symbolic addresses
-        then PBool True
-        else let
-          merged = (Map.merge Map.dropMissing Map.dropMissing (Map.zipWithMatched (\_ x y -> (x,y))) aState bState)
-        in Map.foldl' (\a (ac, bc) -> a .|| contractsDiffer ac bc) (PBool False) merged
+    statesDiffer aState bState =
+      case aState == bState of
+        True -> PBool False
+        False ->  if Set.fromList (Map.keys aState) /= Set.fromList (Map.keys bState)
+          -- TODO: consider possibility of aliased symbolic addresses
+          then PBool True
+          else let
+            merged = (Map.merge Map.dropMissing Map.dropMissing (Map.zipWithMatched (\_ x y -> (x,y))) aState bState)
+          in Map.foldl' (\a (ac, bc) -> a .|| contractsDiffer ac bc) (PBool False) merged
 
     contractsDiffer :: Expr EContract -> Expr EContract -> Prop
     contractsDiffer ac bc = let

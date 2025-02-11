@@ -40,7 +40,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More symbolic overapproximation for Balance and ExtCodeHash opcodes, fixing
   CodeHash SMT representation
 - Add deployment code flag to the `equivalenceCheck` function
-- New simplification rule for reading a byte that is lower than destination offset in `copySlice`
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -57,7 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CopySlice rewrite rule is now less strict while still being sound
 - Assumptions about reading from buffer after its size are now the same in all cases.
   Previously, they were too weak in case of reading 32 bytes.
-- The equivalence checker now is able to prove that an empty store is equivalent to a store with all slots initialized to 0.
+- The equivalence checker now is able to prove that an empty store is
+  equivalent to a store with all slots initialized to 0.
+- Equivalence checking was incorrectly assuming that overapproximated values
+  were sequentially equivalent. We now distinguish these symbolic values with
+  `A-` and `B-`
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
