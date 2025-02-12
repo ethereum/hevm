@@ -1416,7 +1416,10 @@ from solidity contracts can be done via, e.g.:</p>
     --code-b $(solc --bin-runtime "contract2.sol" | tail -n1)
 </code></pre>
 <p>If <code>--sig</code> is given, calldata is assumed to take the form of the function
-given. If left out, calldata is a fully abstract buffer of at most 256 bytes.</p>
+given. If <code>--calldata</code> is provided, a specific, concrete calldata is used. If
+neither is provided, a fully abstract calldata of at most <code>2**64</code> byte is
+assumed. Note that a <code>2**64</code> byte calldata would go over the gas limit, and
+hence should cover all meaningful cases.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="hevm-exec"><a class="header" href="#hevm-exec"><code>hevm exec</code></a></h1>
 <p>Run an EVM computation using specified parameters.</p>
 <pre><code>Usage: hevm exec [--code TEXT] [--calldata TEXT] [--address ADDR]
