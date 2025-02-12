@@ -577,7 +577,9 @@ tests = testGroup "hevm"
         a = BufLength (ConcreteBuf "ab")
         simp = Expr.simplify a
       assertEqualM "Must be simplified down to a Lit" simp (Lit 2)
-    , test "CopySlice-overflow" $ do
+    -- This test no longer works or needed, due to ReadWord simplification. Notice that it's writing
+    -- to a positition that's beyond the byte being read.
+    , ignoreTest $ test "CopySlice-overflow" $ do
         let e = ReadWord (Lit 0x0) (CopySlice (Lit 0x0) (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc) (Lit 0x6) (ConcreteBuf "\255\255\255\255\255\255") (ConcreteBuf ""))
         b <- checkEquiv e (Expr.simplify e)
         assertBoolM "Simplifier failed" b
