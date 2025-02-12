@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Aliasing works much better for symbolic and concrete addresses
 - Constant propagation for symbolic values
 - Add deployment code flag to the `equivalenceCheck` function
-- New simplification rule for reading a byte that is lower than destination offset in `copySlice`
+- One more simplification rule for `ReadByte` when the `CopySlice` after it
+  is writing after the position being read, so the `CopySlice` can be ignored
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
