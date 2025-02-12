@@ -459,7 +459,7 @@ exec1 = do
 
         OpBalance ->
           case stk of
-            x:xs -> forceAddr x "BALANCE" $ \a ->
+            x:xs -> forceAddr x (defaultFallback "BALANCE") $ \a ->
               accessAndBurn a $
                 fetchAccount a $ \c -> do
                   next
@@ -519,7 +519,7 @@ exec1 = do
 
         OpExtcodesize ->
           case stk of
-            x':xs -> forceAddr x' "EXTCODESIZE" $ \x -> do
+            x':xs -> forceAddr x' (symbolicFallback xs) $ \x -> do
               let impl = accessAndBurn x $
                            fetchAccount x $ \c -> do
                              next
@@ -541,7 +541,7 @@ exec1 = do
         OpExtcodecopy ->
           case stk of
             extAccount':memOffset:codeOffset:codeSize:xs ->
-              forceAddr extAccount' "EXTCODECOPY" $ \extAccount -> do
+              forceAddr extAccount' (defaultFallback "EXTCODECOPY") $ \extAccount -> do
                 burnExtcodecopy extAccount codeSize $
                   accessMemoryRange memOffset codeSize $
                     fetchAccount extAccount $ \c -> do
@@ -580,7 +580,7 @@ exec1 = do
 
         OpExtcodehash ->
           case stk of
-            x':xs -> forceAddr x' "EXTCODEHASH" $ \x ->
+            x':xs -> forceAddr x' (defaultFallback "EXTCODEHASH") $ \x ->
               accessAndBurn x $ do
                 next
                 assign (#state % #stack) xs
@@ -882,7 +882,7 @@ exec1 = do
             xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
               branch (Expr.gt xValue (Lit 0)) $ \gt0 -> do
                 (if gt0 then notStatic else id) $
-                  forceAddr xTo' "unable to determine a call target" $ \xTo ->
+                  forceAddr xTo' (defaultFallback "unable to determine a call target") $ \xTo ->
                     case gasTryFrom xGas of
                       Left _ -> vmError IllegalOverflow
                       Right gas -> do
@@ -903,7 +903,7 @@ exec1 = do
         OpCallcode ->
           case stk of
             xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
-              forceAddr xTo' "unable to determine a call target" $ \xTo ->
+              forceAddr xTo' (defaultFallback "unable to determine a call target") $ \xTo ->
                 case gasTryFrom xGas of
                   Left _ -> vmError IllegalOverflow
                   Right gas -> do
@@ -1030,7 +1030,7 @@ exec1 = do
           notStatic $
           case stk of
             [] -> underrun
-            (xTo':_) -> forceAddr xTo' "SELFDESTRUCT" $ \case
+            (xTo':_) -> forceAddr xTo' (defaultFallback "SELFDESTRUCT") $ \case
               xTo@(LitAddr _) -> do
                 cc <- gets (.tx.subState.createdContracts)
                 let createdThisTr = self `member` cc
@@ -1614,15 +1614,30 @@ notStatic continue = do
     then vmError StateChangeWhileStatic
     else continue
 
-forceAddr :: VMOps t => Expr EWord -> String -> (Expr EAddr -> EVM t s ()) -> EVM t s ()
-forceAddr n msg continue = case wordToAddr n of
+forceAddr :: VMOps t =>
+  Expr EWord
+  -> (Expr EWord -> EVM t s ())
+  -> (Expr EAddr -> EVM t s ())
+  -> EVM t s ()
+forceAddr n fallback continue = case wordToAddr n of
   Nothing -> manySolutions n 20 $ \case
     Just sol -> continue $ LitAddr (truncateToAddr sol)
-    Nothing -> fallback
+    Nothing -> fallback n
   Just c -> continue c
-  where fallback = do
-          vm <- get
-          partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+
+defaultFallback :: VMOps t => String -> Expr EWord -> EVM t s ()
+defaultFallback msg n = do
+  vm <- get
+  partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+
+symbolicFallback:: (VMOps t, ?op :: Word8) => [Expr EWord] -> Expr EWord -> EVM t s ()
+symbolicFallback xs _ = do
+  next
+  freshVar <- use #freshVar
+  assign #freshVar (freshVar + 1)
+  let freshVarExpr = Var ("symbolicFallback-" <> (pack . show) freshVar)
+  assign (#state % #stack) xs
+  pushSym freshVarExpr
 
 forceConcrete :: VMOps t => Expr EWord -> String -> (W256 -> EVM t s ()) -> EVM t s ()
 forceConcrete n = forceConcreteLimitSz n 32
@@ -1789,7 +1804,7 @@ cheatActions = Map.fromList
   , action "deal(address,uint256)" $
       \sig input -> case decodeStaticArgs 0 2 input of
         [a, amt] ->
-          forceAddr a "vm.deal: cannot decode target into an address" $ \usr ->
+          forceAddr a (defaultFallback "vm.deal: cannot decode target into an address") $ \usr ->
             fetchAccount usr $ \_ -> do
               assign (#env % #contracts % ix usr % #balance) amt
               doStop
