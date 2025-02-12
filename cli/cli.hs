@@ -27,6 +27,7 @@ import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirector
 import System.FilePath ((</>))
 import System.Exit (exitFailure, exitWith, ExitCode(..))
 import Main.Utf8 (withUtf8)
+import qualified Data.ByteString.Char8 as BC
 
 import EVM (initialContract, abstractContract, makeVm)
 import EVM.ABI (Sig(..))
@@ -57,6 +58,7 @@ data Command w
   = Symbolic -- Symbolically explore an abstract program, or specialized with specified env & calldata
   -- vm opts
       { code          :: w ::: Maybe ByteString <?> "Program bytecode"
+      , codeFile      :: w ::: Maybe String     <?> "Program bytecode from file"
       , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
       , address       :: w ::: Maybe Addr       <?> "Tx: address"
       , caller        :: w ::: Maybe Addr       <?> "Tx: caller"
@@ -574,19 +576,25 @@ symvmFromCommand cmd calldata = do
     callvalue = maybe TxValue Lit cmd.value
     storageBase = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
 
-  contract <- case (cmd.rpc, cmd.address, cmd.code) of
+  code :: Maybe ByteString <- case cmd.codeFile of
+    Nothing -> pure cmd.code
+    Just file -> do
+      code <- readFile file
+      pure $ Just $ BC.init $ BC.pack code
+
+  contract <- case (cmd.rpc, cmd.address, code) of
     (Just url, Just addr', _) ->
       Fetch.fetchContractFrom block url addr' >>= \case
         Nothing -> do
           putStrLn "Error, contract not found."
           exitFailure
-        Just contract' -> case cmd.code of
+        Just contract' -> case code of
               Nothing -> pure contract'
               -- if both code and url is given,
               -- fetch the contract and overwrite the code
               Just c -> do
                 let c' = decipher c
-                if (isNothing c') then do
+                if isNothing c' then do
                   putStrLn $ "Error, invalid code: " <> show c
                   exitFailure
                 else pure $ do
@@ -597,8 +605,9 @@ symvmFromCommand cmd calldata = do
                         & set #external    (contract'.external)
 
     (_, _, Just c)  -> do
+      putStrLn $ "c:" <> show c
       let c' = decipher c
-      if (isNothing c') then do
+      if isNothing c' then do
         putStrLn $ "Error, invalid code: " <> show c
         exitFailure
       else case storageBase of
