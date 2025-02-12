@@ -764,11 +764,9 @@ equivalenceCheck' solvers branchesA branchesB create = do
       knownUnsat <- liftIO $ newTVarIO []
       procs <- liftIO getNumProcessors
       cexes <- checkAll differingEndStates knownUnsat procs
-      liftIO $ putStrLn $ "deployedCexes:" <> show deployedCexes
       let allCexes = cexes <> deployedCexes
-      case all isQed allCexes of
-        True -> pure ([Qed ()], ends)
-        False -> pure (allCexes, ends)
+      if all isQed allCexes then pure ([Qed ()], ends)
+                            else pure (allCexes, ends)
   where
     -- we order the sets by size because this gives us more cache hits when
     -- running our queries later on (since we rely on a subset check)
