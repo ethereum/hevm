@@ -723,8 +723,8 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
       -- deployed: a = ByteString "`\128`@R4\128\NAK`\SOW_\128\253[P`\EOT6\DLE`&W_5`\224\FS\128c\135\252\255\f\DC4`*W[_\128\253[`@`\EOT\128\&6\ETX\129\SOH\144`<\145\144`\144V[`TV[`@Q`K\145\144`\195V[`@Q\128\145\ETX\144\243[_`\ACK\144P\145\144PV[_\128\253[_\129\144P\145\144PV[`r\129`bV[\129\DC4`{W_\128\253[PV[_\129\&5\144P`\138\129`kV[\146\145PPV[_` \130\132\ETX\DC2\NAK`\162W`\161`^V[[_`\173\132\130\133\SOH`~V[\145PP\146\145PPV[`\189\129`bV[\130RPPV[_` \130\SOH\144P`\212_\131\SOH\132`\182V[\146\145PPV\254\162dipfsX\"\DC2 >\159\147\b'\130\EM\179\CAN\148\206\DC4Qf\152u\140h\246\158\246\158`\219K;\138'\175\206\226\DLEdsolcC\NUL\b\SUB\NUL3"
       -- BS16.encodeBase16 a -> "6080604052348015600e575f80fd5b50600436106026575f3560e01c806387fcff0c14602a575b5f80fd5b60406004803603810190603c91906090565b6054565b604051604b919060c3565b60405180910390f35b5f60069050919050565b5f80fd5b5f819050919050565b6072816062565b8114607b575f80fd5b50565b5f81359050608a81606b565b92915050565b5f6020828403121560a25760a1605e565b5b5f60ad84828501607e565b91505092915050565b60bd816062565b82525050565b5f60208201905060d45f83018460b6565b9291505056fea26469706673582212203e9f9308278219b31894ce14516698758c68f69ef69e60db4b3b8a27afcee21064736f6c634300081a0033"
       -- cabal run -f devel exe:hevm -- equivalence --smtdebug --debug --code-a $(solc --bin "contract-a.sol" | tail -n1) --code-b $(solc --bin "contract-b.sol" | tail -n1)
-      res <- equivalenceCheck' solvers branchesA branchesB create
-      pure (res, branchesA <> branchesB)
+      (res, ends) <- equivalenceCheck' solvers branchesA branchesB create
+      pure (res, branchesA <> branchesB <> ends)
   where
     -- decompiles the given bytecode into a list of branches
     getBranches :: ByteString -> m [Expr End]
@@ -738,7 +738,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
 
 equivalenceCheck'
   :: forall m . App m
-  => SolverGroup -> [Expr End] -> [Expr End] -> Bool -> m [EquivResult]
+  => SolverGroup -> [Expr End] -> [Expr End] -> Bool -> m ([EquivResult], [Expr End])
 equivalenceCheck' solvers branchesA branchesB create = do
       conf <- readConfig
       when conf.debug $ do
@@ -752,8 +752,9 @@ equivalenceCheck' solvers branchesA branchesB create = do
         putStrLn $ "endstates in bytecodeA: " <> show (length branchesA)
                    <> "\nendstates in bytecodeB: " <> show (length branchesB)
 
-      disctictPairs <- forM allPairs $ \(a, b) -> distinct a b
-      let differingEndStates = sortBySize $ catMaybes disctictPairs
+      disctictPairs <- forM allPairs $ uncurry distinct
+      let differingEndStates = sortBySize $ mapMaybe fst disctictPairs
+          ends = concatMap snd disctictPairs
       liftIO $ putStrLn $ "Asking the SMT solver for " <> (show $ length differingEndStates) <> " pairs"
       when conf.dumpEndStates $ forM_ (zip differingEndStates [(1::Integer)..]) (\(x, i) ->
         liftIO $ T.writeFile ("prop-checked-" <> show i <> ".prop") (T.pack $ show x))
@@ -764,10 +765,9 @@ equivalenceCheck' solvers branchesA branchesB create = do
 
       let useful = foldr (\(_, b) n -> if b then n+1 else n) (0::Integer) results
       liftIO $ putStrLn $ "Reuse of previous queries was Useful in " <> (show useful) <> " cases"
-
       case all (isQed . fst) results of
-        True -> pure [Qed ()]
-        False -> pure $ filter (not . isQed) . fmap fst $ results
+        True -> pure ([Qed ()], ends)
+        False -> pure (filter (not . isQed) . fmap fst $ results, ends)
   where
     -- we order the sets by size because this gives us more cache hits when
     -- running our queries later on (since we rely on a subset check)
@@ -818,61 +818,67 @@ equivalenceCheck' solvers branchesA branchesB create = do
     -- for a given pair of branches, equivalence is violated if there exists an
     -- input that satisfies the branch conditions from both sides and produces
     -- a differing result in each branch
-    distinct :: App m => Expr End -> Expr End -> m (Maybe (Set Prop))
+    distinct :: App m => Expr End -> Expr End -> m (Maybe (Set Prop), [Expr End])
     distinct aEnd bEnd = do
-      props <- resultsDiffer aEnd bEnd
+      (props, ends) <- resultsDiffer aEnd bEnd
       case props of
         -- if the end states are the same, then they can never produce a
         -- different result under any circumstances
-        PBool False -> pure Nothing
+        PBool False -> pure (Nothing, mempty)
         -- if we can statically determine that the end states differ, then we
         -- ask the solver to find us inputs that satisfy both sets of branch
         -- conditions
-        PBool True  -> pure $ Just . Set.fromList $ extractProps aEnd <> extractProps bEnd
+        PBool True  -> pure $ (Just . Set.fromList $ extractProps aEnd <> extractProps bEnd, ends)
         -- if we cannot statically determine whether or not the end states
         -- differ, then we ask the solver if the end states can differ if both
         -- sets of path conditions are satisfiable
         _ -> do
-          traceM $ "res diff: " <> show (props)
-          pure $ Just . Set.fromList $ props : extractProps aEnd <> extractProps bEnd
+          -- traceM $ "res diff: " <> show (props)
+          pure $ (Just . Set.fromList $ props : extractProps aEnd <> extractProps bEnd, ends)
 
-    resultsDiffer :: App m => Expr End -> Expr End -> m (Prop)
+    resultsDiffer :: App m => Expr End -> Expr End -> m (Prop, [Expr End])
     resultsDiffer aEnd bEnd = case (aEnd, bEnd) of
       (Success props1 _ aOut aState, Success props2 _ bOut bState) ->
         case (aOut == bOut, aState == bState) of
-          (True, True) -> pure $ PBool False
+          (True, True) -> pure $ (PBool False, mempty)
           (False, True) -> do
-            traceM $ "states diff out :" <> show (aOut ./= bOut)
-            if create then internalError "note, we need to deal with this too, for create"
-            else pure $ aOut ./= bOut
+            -- traceM $ "states diff out :" <> show (aOut ./= bOut)
+            if create then do
+              internalError "note, we need to deal with this too, for create"
+            else pure $ (aOut ./= bOut, mempty)
           (True, False) -> do
-            traceM $ "states diff1:" <> show (statesDiffer aState bState)
-            pure $ statesDiffer aState bState
+            -- traceM $ "states diff1:" <> show (statesDiffer aState bState)
+            pure $ (statesDiffer aState bState, mempty)
           (False, False) -> do
-            traceM $ "states diff2:" <> show (statesDiffer aState bState) <> " \n\naout: " <> show aOut <> "\n\n, bout:" <> show bOut
-            outDiff <- if create then do
+            -- traceM $ "states diff2:" <> show (statesDiffer aState bState)
+            -- traceM $ " \n\n---aout: " <> T.unpack (formatExpr aOut)
+            -- traceM $ "\n\n--- bout:" <> T.unpack (formatExpr bOut)
+            (outDiff, ends) <- if create then do
               case (aOut, bOut) of
                 (ConcreteBuf codeA, ConcreteBuf codeB) -> do
-                  liftIO $ putStrLn $ "codea: " <> bsToHex codeA
-                  liftIO $ putStrLn $ "codeb: " <> bsToHex codeB
-                  (res, a) <- equivalenceCheck solvers codeA codeB defaultVeriOpts (mkCalldata Nothing []) False
+                  conf <- readConfig
+                  when conf.debug $ liftIO $ do
+                    liftIO $ putStrLn $ "codea: " <> bsToHex codeA
+                    liftIO $ putStrLn $ "codeb: " <> bsToHex codeB
+                  (res, ends) <- equivalenceCheck solvers codeA codeB defaultVeriOpts (mkCalldata Nothing []) False
                   liftIO $ putStrLn $ "res: " <> show res
                   case res of
-                    [Qed ()] -> pure $ PBool False
-                    _ -> pure $ PBool True
+                    [Qed ()] -> pure (PBool False, ends)
+                    _ -> pure (PBool True, mempty)
                 _ -> internalError "symbolic code returned..."
-            else pure  $ aOut ./= bOut
-            pure $ statesDiffer aState bState .|| outDiff
+            else pure (aOut ./= bOut, mempty)
+            pure (statesDiffer aState bState .|| outDiff, ends)
       (Failure _ _ (Revert a), Failure _ _ (Revert b)) ->
-        pure $ if a == b then PBool False else a ./= b
+        pure $ if a == b then (PBool False, mempty) else (a ./= b, mempty)
       (Failure _ _ a, Failure _ _ b) ->
-        pure $ if a == b then PBool False else PBool True
+        let lhs =  if a == b then PBool False else PBool True
+        in pure (lhs, mempty)
       -- partial end states can't be compared to actual end states, so we always ignore them
-      (Partial {}, _) -> pure $ PBool False
-      (_, Partial {}) -> pure $ PBool False
+      (Partial {}, _) -> pure (PBool False, mempty)
+      (_, Partial {}) -> pure (PBool False, mempty)
       (ITE _ _ _, _) -> internalError "Expressions must be flattened"
       (_, ITE _ _ _) -> internalError "Expressions must be flattened"
-      (a, b) -> pure $ PBool (a /= b)
+      (a, b) -> pure (PBool (a /= b), mempty)
 
     statesDiffer :: Map (Expr EAddr) (Expr EContract) -> Map (Expr EAddr) (Expr EContract) -> Prop
     statesDiffer aState bState
