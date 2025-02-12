@@ -71,7 +71,7 @@ import EVM.Test.Utils
 import EVM.Traversals
 import EVM.Types hiding (Env)
 import EVM.Effects
-import EVM.UnitTest (writeTrace)
+import EVM.UnitTest (writeTrace, printWarnings)
 import EVM.Expr (maybeLitByteSimp)
 
 testEnv :: Env
@@ -1589,6 +1589,42 @@ tests = testGroup "hevm"
           |]
         Right expr <- reachableUserAsserts c (Just $ Sig "foo(uint256)" [AbiUIntType 256])
         assertBoolM "unexptected partial execution" (not $ Expr.containsNode isPartial expr)
+    , test "extcodesize-symbolic" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract C {
+              function foo(address a, uint x) public {
+               require(x > 10);
+                uint size;
+                assembly {
+                  size := extcodesize(a)
+                }
+                assert(x >= 5);
+              }
+            }
+          |]
+        let sig = (Just $ Sig "foo(address,uint256)" [AbiAddressType, AbiUIntType 256])
+        (e, res) <- withDefaultSolver $
+          \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        liftIO $ printWarnings [e] res "the contracts under test"
+        assertEqualM "Must be QED" res [Qed ()]
+    , test "extcodesize-symbolic2" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract C {
+              function foo(address a, uint x) public {
+                uint size;
+                assembly {
+                  size := extcodesize(a)
+                }
+                assert(size > 5);
+              }
+            }
+          |]
+        let sig = (Just $ Sig "foo(address,uint256)" [AbiAddressType, AbiUIntType 256])
+        (e, res@[Cex _]) <- withDefaultSolver $
+          \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        liftIO $ printWarnings [e] res "the contracts under test"
     , test "jump-into-symbolic-region" $ do
         let
           -- our initCode just jumps directly to the end
@@ -2486,7 +2522,99 @@ tests = testGroup "hevm"
       assertEqualM "number of counterexamples" 2 numCexes
       assertEqualM "number of errors" 1 numErrs
       assertEqualM "number of qed-s" 0 numQeds
-     , test "jump-symbolic" $ do
+    , testCase "call-symbolic-noreent" $ do
+      let conf = testEnv.config {promiseNoReent = True}
+      let myTestEnv :: Env = (testEnv :: Env) {config = conf :: Config}
+      runEnv myTestEnv $ do
+        Just c <- solcRuntime "C"
+          [i|
+          contract C {
+              function checkval(address inputAddr, uint256 x, uint256 y) public {
+                  bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, y);
+                  (bool success, bytes memory returnData) = inputAddr.call(data);
+                  assert(success);
+              }
+          }
+          |]
+        let sig = Just (Sig "checkval(address,uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
+        (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertBoolM "The expression MUST NOT be partial" $ Prelude.not (Expr.containsNode isPartial expr)
+      -- There are 2 CEX-es
+      -- This is because with one CEX, the return DATA
+      -- is empty, and in the other, the return data is non-empty and success is false
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of counterexamples" 2 numCexes
+        assertEqualM "number of qed-s" 0 numQeds
+    , test "call-symbolic-reent" $ do
+      Just c <- solcRuntime "C"
+        [i|
+        contract C {
+            function checkval(address inputAddr, uint256 x, uint256 y) public {
+                bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, y);
+                (bool success, bytes memory returnData) = inputAddr.call(data);
+                assert(success);
+            }
+        }
+        |]
+      let sig = Just (Sig "checkval(address,uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+      assertBoolM "The expression MUST be partial due to CALL to unknown code and no promise" $ (Expr.containsNode isPartial expr)
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      let numErrs = sum $ map (fromEnum . isError) ret
+      let numQeds = sum $ map (fromEnum . isQed) ret
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of counterexamples" 0 numCexes
+      assertEqualM "number of qed-s" 1 numQeds
+    , testCase "call-symbolic-noreent-maxbufsize16" $ do
+      let conf = testEnv.config {promiseNoReent = True, maxBufSize = 4}
+      let myTestEnv :: Env = (testEnv :: Env) {config = conf :: Config}
+      runEnv myTestEnv $ do
+        Just c <- solcRuntime "C"
+          [i|
+          contract C {
+              function checkval(address inputAddr, uint256 x, uint256 y) public {
+                  bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, y);
+                  (bool success, bytes memory returnData) = inputAddr.call(data);
+                  assert(returnData.length < 16);
+              }
+          }
+          |]
+        let sig = Just (Sig "checkval(address,uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
+        (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertBoolM "The expression MUST NOT be partial" $ Prelude.not (Expr.containsNode isPartial expr)
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of counterexamples" 0 numCexes
+        assertEqualM "number of qed-s" 1 numQeds
+    , testCase "call-symbolic-noreent-maxbufsize16-fail" $ do
+      let conf = testEnv.config {promiseNoReent = True, maxBufSize = 20}
+      let myTestEnv :: Env = (testEnv :: Env) {config = conf :: Config}
+      runEnv myTestEnv $ do
+        Just c <- solcRuntime "C"
+          [i|
+          contract C {
+              function checkval(address inputAddr, uint256 x, uint256 y) public {
+                  bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, y);
+                  (bool success, bytes memory returnData) = inputAddr.call(data);
+                  assert(returnData.length < 16);
+              }
+          }
+          |]
+        let sig = Just (Sig "checkval(address,uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
+        (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertBoolM "The expression MUST NOT be partial" $ Prelude.not (Expr.containsNode isPartial expr)
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of counterexamples" 1 numCexes
+        assertEqualM "number of qed-s" 0 numQeds
+    , test "jump-symbolic" $ do
       Just c <- solcRuntime "C"
         [i|
         // Target contract with a view function
@@ -3471,7 +3599,8 @@ tests = testGroup "hevm"
           Just c <- solcRuntime "C" code
           Just a <- solcRuntime "A" code
           (_, [Cex (_, cex)]) <- withDefaultSolver $ \s -> do
-            vm <- liftIO $ stToIO $ abstractVM (mkCalldata (Just (Sig "call_A()" [])) []) c Nothing False
+            calldata <- mkCalldata (Just (Sig "call_A()" [])) []
+            vm <- liftIO $ stToIO $ abstractVM calldata c Nothing False
                     <&> set (#state % #callvalue) (Lit 0)
                     <&> over (#env % #contracts)
                        (Map.insert aAddr (initialContract (RuntimeCode (ConcreteRuntimeCode a))))
@@ -3550,7 +3679,8 @@ tests = testGroup "hevm"
         ,
         test "safemath-distributivity-yul" $ do
           let yulsafeDistributivity = hex "6355a79a6260003560e01c14156016576015601f565b5b60006000fd60a1565b603d602d604435600435607c565b6039602435600435607c565b605d565b6052604b604435602435605d565b600435607c565b141515605a57fe5b5b565b6000828201821115151560705760006000fd5b82820190505b92915050565b6000818384048302146000841417151560955760006000fd5b82820290505b92915050565b"
-          vm <- liftIO $ stToIO $ abstractVM (mkCalldata (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []) yulsafeDistributivity Nothing False
+          calldata <- mkCalldata (Just (Sig "distributivity(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) []
+          vm <- liftIO $ stToIO $ abstractVM calldata yulsafeDistributivity Nothing False
           (_, [Qed _]) <-  withDefaultSolver $ \s -> verify s defaultVeriOpts vm (Just $ checkAssertions defaultPanicCodes)
           putStrLnM "Proven"
         ,
@@ -3875,7 +4005,8 @@ tests = testGroup "hevm"
           }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata
           assertBoolM "Must have a difference" (any isCex res)
       ,
       test "eq-sol-exp-qed" $ do
@@ -3900,7 +4031,8 @@ tests = testGroup "hevm"
             }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata
           assertEqualM "Must have no difference" [Qed ()] res
       ,
       test "eq-balance-differs" $ do
@@ -3931,7 +4063,8 @@ tests = testGroup "hevm"
             }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata
           assertBoolM "Must differ" (all isCex res)
       ,
       -- TODO: this fails because we don't check equivalence of deployed contracts
@@ -3992,7 +4125,8 @@ tests = testGroup "hevm"
             }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata
           assertBoolM "Must differ" (all isCex res)
       ,
       test "eq-unknown-addr" $ do
@@ -4015,7 +4149,7 @@ tests = testGroup "hevm"
             }
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
-          let cd = mkCalldata (Just (Sig "a(address,address)" [AbiAddressType, AbiAddressType])) []
+          cd <- mkCalldata (Just (Sig "a(address,address)" [AbiAddressType, AbiAddressType])) []
           (res,_) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd
           assertEqualM "Must be different" (any isCex res) True
       ,
@@ -4041,7 +4175,8 @@ tests = testGroup "hevm"
               }
           |]
         withSolvers Bitwuzla 3 1 Nothing $ \s -> do
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts (mkCalldata Nothing [])
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata
           assertEqualM "Must be different" (any isCex res) True
       , test "eq-all-yul-optimization-tests" $ do
         let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }
@@ -4254,7 +4389,8 @@ tests = testGroup "hevm"
           Just bPrgm <- liftIO $ yul "" $ T.pack $ unlines filteredBSym
           procs <- liftIO $ getNumProcessors
           withSolvers CVC5 (unsafeInto procs) 1 (Just 100) $ \s -> do
-            (res, _) <- equivalenceCheck s aPrgm bPrgm opts (mkCalldata Nothing [])
+            calldata <- mkCalldata Nothing []
+            (res, _) <- equivalenceCheck s aPrgm bPrgm opts calldata
             end <- liftIO $ getCurrentTime
             case any isCex res of
               False -> liftIO $ do

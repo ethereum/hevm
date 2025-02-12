@@ -108,7 +108,8 @@ interpret fetcher vm = eval . view
     eval (action :>>= k) =
       case action of
         Exec -> do
-          (r, vm') <- liftIO $ stToIO $ runStateT EVM.Exec.exec vm
+          conf <- readConfig
+          (r, vm') <- liftIO $ stToIO $ runStateT (EVM.Exec.exec conf) vm
           interpret fetcher vm' (k r)
         Wait q -> do
           m <- fetcher q
