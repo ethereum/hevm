@@ -17,7 +17,7 @@ import Control.Monad.Operational qualified as Operational
 import Control.Monad.ST (RealWorld, ST, stToIO)
 import Control.Monad.State.Strict (StateT(..))
 import Control.Monad.State.Strict qualified as State
-import Control.Monad.Reader (ReaderT)
+import Control.Monad.Reader (ReaderT, lift)
 import Data.Aeson ((.:), (.:?))
 import Data.Aeson qualified as JSON
 import Data.ByteString (ByteString)
@@ -542,11 +542,12 @@ runWithTrace :: App m => StateT (TraceState RealWorld) m (VM Concrete RealWorld)
 runWithTrace = do
   -- This is just like `exec` except for every instruction evaluated,
   -- we also increment a counter indexed by the current code location.
+  conf <- lift readConfig
   vm0 <- use _1
   case vm0.result of
     Nothing -> do
       State.modify' (\(a, b) -> (a, b ++ [vmtrace vm0]))
-      vm' <- liftIO $ stToIO $ State.execStateT exec1 vm0
+      vm' <- liftIO $ stToIO $ State.execStateT (exec1 conf) vm0
       assign _1 vm'
       runWithTrace
     Just (VMFailure _) -> do

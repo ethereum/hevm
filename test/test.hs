@@ -72,7 +72,7 @@ import EVM.Test.Utils
 import EVM.Traversals
 import EVM.Types hiding (Env)
 import EVM.Effects
-import EVM.UnitTest (writeTrace)
+import EVM.UnitTest (writeTrace, printWarnings)
 import EVM.Expr (maybeLitByteSimp)
 
 testEnv :: Env
@@ -1554,6 +1554,42 @@ tests = testGroup "hevm"
           |]
         Right expr <- reachableUserAsserts c (Just $ Sig "foo(uint256)" [AbiUIntType 256])
         assertBoolM "unexptected partial execution" (not $ Expr.containsNode isPartial expr)
+    , test "extcodesize-symbolic" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract C {
+              function foo(address a, uint x) public {
+               require(x > 10);
+                uint size;
+                assembly {
+                  size := extcodesize(a)
+                }
+                assert(x >= 5);
+              }
+            }
+          |]
+        let sig = (Just $ Sig "foo(address,uint256)" [AbiAddressType, AbiUIntType 256])
+        (e, res) <- withDefaultSolver $
+          \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        liftIO $ printWarnings [e] res "the contracts under test"
+        assertEqualM "Must be QED" res [Qed ()]
+    , test "extcodesize-symbolic2" $ do
+        Just c <- solcRuntime "C"
+          [i|
+            contract C {
+              function foo(address a, uint x) public {
+                uint size;
+                assembly {
+                  size := extcodesize(a)
+                }
+                assert(size > 5);
+              }
+            }
+          |]
+        let sig = (Just $ Sig "foo(address,uint256)" [AbiAddressType, AbiUIntType 256])
+        (e, res@[Cex _]) <- withDefaultSolver $
+          \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        liftIO $ printWarnings [e] res "the contracts under test"
     , test "jump-into-symbolic-region" $ do
         let
           -- our initCode just jumps directly to the end
@@ -2358,7 +2394,50 @@ tests = testGroup "hevm"
       assertEqualM "number of counterexamples" 2 numCexes
       assertEqualM "number of errors" 1 numErrs
       assertEqualM "number of qed-s" 0 numQeds
-     , test "jump-symbolic" $ do
+    , testCase "call-symbolic-noreent" $ do
+      let conf = testEnv.config {promiseNoReent = True}
+      let myTestEnv :: Env = (testEnv :: Env) {config = conf :: Config}
+      runEnv myTestEnv $ do
+        Just c <- solcRuntime "C"
+          [i|
+          contract C {
+              function checkval(address inputAddr, uint256 x, uint256 y) public {
+                  bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, y);
+                  (bool success, bytes memory returnData) = inputAddr.call(data);
+                  assert(success);
+              }
+          }
+          |]
+        let sig = Just (Sig "checkval(address,uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
+        (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression MUST NOT be partial" $ Prelude.not $ Expr.containsNode isPartial expr
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertEqualM "number of counterexamples" 2 numCexes
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of qed-s" 0 numQeds
+      , test "call-symbolic-reent" $ do
+        Just c <- solcRuntime "C"
+          [i|
+          contract C {
+              function checkval(address inputAddr, uint256 x, uint256 y) public {
+                  bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, y);
+                  (bool success, bytes memory returnData) = inputAddr.call(data);
+                  assert(success);
+              }
+          }
+          |]
+        let sig = Just (Sig "checkval(address,uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
+        (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression MUST NOT be partial" $ Expr.containsNode isPartial expr
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertEqualM "number of counterexamples" 0 numCexes
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of qed-s" 1 numQeds
+    , test "jump-symbolic" $ do
       Just c <- solcRuntime "C"
         [i|
         // Target contract with a view function

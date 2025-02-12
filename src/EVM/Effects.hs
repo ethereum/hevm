@@ -44,6 +44,7 @@ data Config = Config
   , onlyCexFuzz      :: Bool
   , decomposeStorage :: Bool
   , maxNumBranch     :: Int
+  , promiseNoReent   :: Bool
   }
   deriving (Show, Eq)
 
@@ -58,6 +59,7 @@ defaultConfig = Config
   , onlyCexFuzz  = False
   , decomposeStorage = True
   , maxNumBranch = 10
+  , promiseNoReent = False
   }
 
 -- Write to the console

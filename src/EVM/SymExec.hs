@@ -313,7 +313,8 @@ interpret fetcher maxIter askSmtIters heuristic vm =
   eval (action Operational.:>>= k) =
     case action of
       Stepper.Exec -> do
-        (r, vm') <- liftIO $ stToIO $ runStateT exec vm
+        conf <- readConfig
+        (r, vm') <- liftIO $ stToIO $ runStateT (exec conf) vm
         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
       Stepper.Fork (PleaseRunBoth cond continue) -> do
         frozen <- liftIO $ stToIO $ freezeVM vm
