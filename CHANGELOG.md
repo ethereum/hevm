@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multiple solutions are allowed for a single symbolic expression
 - Aliasing works much better for symbolic and concrete addresses
 - Constant propagation for symbolic values
+- One more simplification rule for `ReadByte` when the `CopySlice` after it
+  is writing after the position being read, so the `CopySlice` can be ignored
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
