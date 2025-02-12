@@ -840,15 +840,15 @@ equivalenceCheck' solvers branchesA branchesB create = do
     resultsDiffer aEnd bEnd = case (aEnd, bEnd) of
       (Success props1 _ aOut aState, Success props2 _ bOut bState) ->
         case (aOut == bOut, aState == bState) of
-          (True, True) -> pure $ (PBool False, mempty)
+          (True, True) -> pure (PBool False, mempty)
           (False, True) -> do
             -- traceM $ "states diff out :" <> show (aOut ./= bOut)
             if create then do
               internalError "note, we need to deal with this too, for create"
-            else pure $ (aOut ./= bOut, mempty)
+            else pure (aOut ./= bOut, mempty)
           (True, False) -> do
             -- traceM $ "states diff1:" <> show (statesDiffer aState bState)
-            pure $ (statesDiffer aState bState, mempty)
+            pure (statesDiffer aState bState, mempty)
           (False, False) -> do
             -- traceM $ "states diff2:" <> show (statesDiffer aState bState)
             -- traceM $ " \n\n---aout: " <> T.unpack (formatExpr aOut)
@@ -861,7 +861,6 @@ equivalenceCheck' solvers branchesA branchesB create = do
                     liftIO $ putStrLn $ "codea: " <> bsToHex codeA
                     liftIO $ putStrLn $ "codeb: " <> bsToHex codeB
                   (res, ends) <- equivalenceCheck solvers codeA codeB defaultVeriOpts (mkCalldata Nothing []) False
-                  liftIO $ putStrLn $ "res: " <> show res
                   case res of
                     [Qed ()] -> pure (PBool False, ends)
                     _ -> pure (PBool True, mempty)
@@ -899,7 +898,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
         storesDiffer = case (ac.storage, bc.storage) of
           (ConcreteStore as, ConcreteStore bs) | not (as == Map.empty || bs == Map.empty) -> PBool $ as /= bs
           (as, bs) -> if as == bs then PBool False else as ./= bs
-      in (trace $ "bals: " <> show balsDiffer <> " stores: " <> show storesDiffer <> " nonce:" <> show noncesDiffer ) $ balsDiffer .|| storesDiffer .|| noncesDiffer
+      in balsDiffer .|| storesDiffer .|| noncesDiffer
 
 
 both' :: (a -> b) -> (a, a) -> (b, b)
