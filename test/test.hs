@@ -517,7 +517,7 @@ tests = testGroup "hevm"
         assertBoolM "Simplifier failed" b
     , test "simp-readByte" $ do
       let srcOffset = (ReadWord (Lit 0x1) (AbstractBuf "stuff1"))
-          size =(ReadWord (Lit 0x1) (AbstractBuf "stuff2"))
+          size = (ReadWord (Lit 0x1) (AbstractBuf "stuff2"))
           src = (AbstractBuf "stuff2")
           e = ReadByte (Lit 0x0) (CopySlice srcOffset (Lit 0x10) size src (AbstractBuf "dst"))
           simp =Expr.simplify e
