@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Better exponential simplification
 - Dumping of END states (.prop) files is now default for `--debug`
 - When cheatcode is missing, we produce a partial execution warning
+- Size of calldata can be up to 2**64, not 256. This is now reflected in the documentation
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
