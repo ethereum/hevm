@@ -520,7 +520,7 @@ tests = testGroup "hevm"
           size = (ReadWord (Lit 0x1) (AbstractBuf "stuff2"))
           src = (AbstractBuf "stuff2")
           e = ReadByte (Lit 0x0) (CopySlice srcOffset (Lit 0x10) size src (AbstractBuf "dst"))
-          simp =Expr.simplify e
+          simp = Expr.simplify e
       assertEqualM "readByte simplification" simp (ReadByte (Lit 0x0) (AbstractBuf "dst"))
     , test "simp-readByte" $ do
       let srcOffset = (ReadWord (Lit 0x1) (AbstractBuf "stuff1"))
