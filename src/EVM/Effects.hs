@@ -43,12 +43,8 @@ data Config = Config
    -- Returns Unknown if the Cex cannot be found via fuzzing
   , onlyCexFuzz      :: Bool
   , decomposeStorage :: Bool
-<<<<<<< HEAD
   , maxBranch     :: Int
-=======
-  , maxNumBranch     :: Int
   , promiseNoReent   :: Bool
->>>>>>> symbolic-extcodesize
   }
   deriving (Show, Eq)
 
