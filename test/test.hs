@@ -106,10 +106,10 @@ prop :: Testable prop => ReaderT Env IO prop -> Property
 prop a = ioProperty $ runEnv testEnv a
 
 withDefaultSolver :: App m => (SolverGroup -> m a) -> m a
-withDefaultSolver = withSolvers Z3 1 1 Nothing
+withDefaultSolver = withSolvers Z3 3 1 Nothing
 
 withCVC5Solver :: App m => (SolverGroup -> m a) -> m a
-withCVC5Solver = withSolvers CVC5 1 1 Nothing
+withCVC5Solver = withSolvers CVC5 3 1 Nothing
 
 main :: IO ()
 main = defaultMain tests
