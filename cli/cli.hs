@@ -223,6 +223,7 @@ main = withUtf8 $ do
     , dumpTrace = cmd.trace
     , decomposeStorage = Prelude.not cmd.noDecompose
     , maxNumBranch = cmd.maxBranch
+    , promiseNoReent = cmd.promiseNoReent
     } }
   case cmd of
     Version {} ->putStrLn getFullVersion
@@ -266,7 +267,6 @@ equivalence cmd = do
                             , askSmtIters = cmd.askSmtIterations
                             , loopHeuristic = cmd.loopDetectionHeuristic
                             , rpcInfo = Nothing
-                            , promiseNoReent = cmd.promiseNoReent
                             }
     calldata <- liftIO $ buildCalldata cmd
     solver <- liftIO $ getSolver cmd
