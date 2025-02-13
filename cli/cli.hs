@@ -104,7 +104,7 @@ data Command w
       , solverThreads :: w ::: Maybe Natural      <?> "Number of threads for each solver instance. Only respected for Z3 (default: 1)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , noDecompose   :: w ::: Bool               <?> "Don't decompose storage slots into separate arrays"
-      , maxBranch     :: w ::: Int                <!> "10" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
+      , maxBranch     :: w ::: Int                <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: ByteString       <?> "Bytecode of the first program"
@@ -125,7 +125,7 @@ data Command w
       , solverThreads :: w ::: Maybe Natural    <?> "Number of threads for each solver instance. Only respected for Z3 (default: 1)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , noDecompose   :: w ::: Bool             <?> "Don't decompose storage slots into separate arrays"
-      , maxBranch     :: w ::: Int              <!> "10" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
+      , maxBranch     :: w ::: Int              <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
@@ -175,7 +175,7 @@ data Command w
       , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point. For no bound, set -1 (default: 5)"
       , loopDetectionHeuristic :: w ::: LoopHeuristic   <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , noDecompose   :: w ::: Bool                     <?> "Don't decompose storage slots into separate arrays"
-      , maxBranch     :: w ::: Int                      <!> "10" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
+      , maxBranch     :: w ::: Int                      <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
       , numCexFuzz    :: w ::: Integer                  <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
       , askSmtIterations :: w ::: Integer               <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       }
