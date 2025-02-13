@@ -1842,6 +1842,16 @@ cheatActions = Map.fromList
             frameReturn result -- TODO ??
         _ -> vmError (BadCheatCode "sign(uint256,bytes32) parameter decoding failed" sig)
 
+  , action "symData()" $
+      \_ _ ->  do
+        doStop
+        freshVar <- use #freshVar
+        assign #freshVar (freshVar + 1)
+        let freshVarExpr = Var ("symData-result-stack-" <> (pack . show) freshVar)
+        let freshBuf = AbstractBuf ("symData-result-data-" <> (pack . show) freshVar)
+        assign (#state % #returndata) freshBuf
+        pushSym freshVarExpr
+
   , action "addr(uint256)" $
       \sig input -> case decodeStaticArgs 0 1 input of
         [sk] -> forceConcrete sk "cannot derive address for a symbolic key" $ \sk' -> do
