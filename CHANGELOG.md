@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multiple solutions are allowed for a single symbolic expression
 - Aliasing works much better for symbolic and concrete addresses
 - Constant propagation for symbolic values
+- Allow reading deployedBytecode.object from the forge JSON as --code or --code-a/-code-b
+  This alleviates the issue when the contract is large and does not fit the command line
+  limit of 8192 characters
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
