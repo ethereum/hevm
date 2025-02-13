@@ -891,7 +891,7 @@ exec1 conf = do
                             touchAccount from'
                             touchAccount callee
                             transfer from' callee xValue
-              where fallback = genericFreshFallback "CALL" xs
+              where fallback = freshValueFallback "CALL" xs
             _ -> underrun
 
         OpCallcode ->
@@ -1003,7 +1003,7 @@ exec1 conf = do
                             assign #static True
                           touchAccount self
                           touchAccount callee
-              where fallback = genericFreshFallback "STATICCALL" xs
+              where fallback = freshValueFallback "STATICCALL" xs
             _ -> underrun
 
         OpSelfdestruct ->
@@ -1612,8 +1612,8 @@ defaultFallback msg n = do
   vm <- get
   partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
 
-genericFreshFallback :: (VMOps t, ?op :: Word8) => String -> [Expr EWord] -> EVM t s ()
-genericFreshFallback str xs = do
+freshValueFallback :: (VMOps t, ?op :: Word8) => String -> [Expr EWord] -> EVM t s ()
+freshValueFallback str xs = do
   -- Reset caller if needed
   resetCaller <- use $ #state % #resetCaller
   when resetCaller $ assign (#state % #overrideCaller) Nothing
