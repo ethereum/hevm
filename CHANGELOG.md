@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated via iterative calls to the SMT solver for quicker solving
 - Aliasing works much better for symbolic and concrete addresses
 - Constant propagation for symbolic values
+- Allow EXTCODESIZE to be abstracted to a symbolic value.
+- Allow CALL to be extracted in case `--promise-no-reent` is given, promising
+  no reentrancy of contracts. This may skip over reentrancy vulnerabilities
+  but allows much more thorough exploration of the contract
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
