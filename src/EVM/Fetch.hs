@@ -27,11 +27,8 @@ import Numeric.Natural (Natural)
 import System.Environment (lookupEnv, getEnvironment)
 import System.Process
 import Control.Monad.IO.Class
-import Control.Monad (when)
 import EVM.Effects
 import qualified EVM.Expr as Expr
-import Numeric (showHex,readHex)
-import Data.Bits ((.&.))
 
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where
@@ -252,40 +249,18 @@ getSolutions solvers symExprPreSimp numBytes pathconditions = do
   conf <- readConfig
   liftIO $ do
     let symExpr = Expr.concKeccakSimpExpr symExprPreSimp
-    when conf.debug $ putStrLn $ "Collecting solutions to symbolic query: " <> show symExpr
-    ret <- collectSolutions [] conf.maxNumBranch symExpr pathconditions conf
+    -- when conf.debug $ putStrLn $ "Collecting solutions to symbolic query: " <> show symExpr
+    ret <- collectSolutions symExpr pathconditions conf
     case ret of
       Nothing -> pure Nothing
       Just r -> case length r of
         0 -> pure Nothing
         _ -> pure $ Just r
     where
-      createHexValue k =
-          let hexString = concat (replicate k "ff")
-          in fst . head $ readHex hexString
-      collectSolutions :: [W256] -> Int -> Expr EWord -> Prop -> Config -> IO (Maybe [W256])
-      collectSolutions vals maxSols symExpr conds conf = do
-        if (length vals > maxSols) then pure Nothing
-        else
-          checkSat solvers (assertProps conf [(PEq (Var "addrQuery") symExpr) .&& conds]) >>= \case
-            Sat (SMTCex vars _ _ _ _ _)  -> case (Map.lookup (Var "addrQuery") vars) of
-              Just v -> do
-                let hexMask = createHexValue numBytes
-                    maskedVal = v .&. hexMask
-                    cond = (And symExpr (Lit hexMask)) ./= Lit maskedVal
-                    newConds = Expr.simplifyProp $ PAnd conds cond
-                    showedVal = "val: 0x" <> (showHex maskedVal "")
-                when conf.debug $ putStrLn $ "Got one solution to symbolic query," <> showedVal <> " now have " <>
-                  show (length vals + 1) <> " solution(s), max is: " <> show maxSols
-                collectSolutions (maskedVal:vals) maxSols symExpr newConds conf
-              _ -> internalError "No solution to symbolic query"
-            Unsat -> do
-              when conf.debug $ putStrLn "No more solution(s) to symbolic query."
-              pure $ Just vals
-            -- Error or timeout, we need to be conservative
-            res -> do
-              when conf.debug $ putStrLn $ "Symbolic query result is neither SAT nor UNSAT:" <> show res
-              pure Nothing
+      collectSolutions :: Expr EWord -> Prop -> Config -> IO (Maybe [W256])
+      collectSolutions symExpr conds conf = do
+        let smt2 = assertProps conf [(PEq (Var "multiQueryVar") symExpr) .&& conds]
+        checkMulti solvers smt2 $ MultiSol { maxSols = conf.maxBranch , numBytes = numBytes , var = "multiQueryVar" }
 
 -- | Checks which branches are satisfiable, checking the pathconditions for consistency
 -- if the third argument is true.

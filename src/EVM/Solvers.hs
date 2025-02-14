@@ -18,6 +18,7 @@ import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe, isJust, fromJust)
 import Data.Either (isLeft)
+import Data.Text qualified as TStrict
 import Data.Text.Lazy (Text)
 import Data.Text.Lazy qualified as T
 import Data.Text.Lazy.IO qualified as T
@@ -26,9 +27,12 @@ import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_i
 import Witch (into)
 import EVM.Effects
 import EVM.Fuzz (tryCexFuzz)
+import Numeric (readHex)
+import Data.Bits ((.&.))
+import Numeric (showHex)
 
 import EVM.SMT
-import EVM.Types (W256, Expr(AbstractBuf), internalError, Err, getError, getNonError)
+import EVM.Types
 
 -- | Supported solvers
 data Solver
@@ -55,9 +59,23 @@ data SolverInstance = SolverInstance
 -- | A channel representing a group of solvers
 newtype SolverGroup = SolverGroup (Chan Task)
 
+data MultiSol = MultiSol
+  { maxSols :: Int
+  , numBytes :: Int
+  , var :: String
+  }
+
 -- | A script to be executed, a list of models to be extracted in the case of a sat result, and a channel where the result should be written
-data Task = Task
-  { script :: SMT2
+data Task = TaskSingle SingleData | TaskMulti MultiData
+
+data MultiData = MultiData
+  { smt2 :: SMT2
+  , multiSol :: MultiSol
+  , resultChan :: Chan (Maybe [W256])
+  }
+
+data SingleData = SingleData
+  { smt2 :: SMT2
   , resultChan :: Chan CheckSatResult
   }
 
@@ -77,21 +95,32 @@ isUnsat :: CheckSatResult -> Bool
 isUnsat Unsat = True
 isUnsat _ = False
 
-checkSat :: SolverGroup -> Err SMT2 -> IO CheckSatResult
-checkSat (SolverGroup taskQueue) script = do
-  if isLeft script then pure $ Error $ getError script
+checkMulti :: SolverGroup -> Err SMT2 -> MultiSol -> IO (Maybe [W256])
+checkMulti (SolverGroup taskQueue) smt2 multiSol = do
+  if isLeft smt2 then pure Nothing
   else do
     -- prepare result channel
     resChan <- newChan
     -- send task to solver group
-    writeChan taskQueue (Task (getNonError script) resChan)
+    writeChan taskQueue (TaskMulti (MultiData (getNonError smt2) multiSol resChan))
     -- collect result
     readChan resChan
 
-writeSMT2File :: SMT2 -> Int -> IO ()
-writeSMT2File smt2 count =
+checkSat :: SolverGroup -> Err SMT2 -> IO CheckSatResult
+checkSat (SolverGroup taskQueue) smt2 = do
+  if isLeft smt2 then pure $ Error $ getError smt2
+  else do
+    -- prepare result channel
+    resChan <- newChan
+    -- send task to solver group
+    writeChan taskQueue (TaskSingle (SingleData (getNonError smt2) resChan))
+    -- collect result
+    readChan resChan
+
+writeSMT2File :: SMT2 -> String -> IO ()
+writeSMT2File smt2 postfix =
     let content = formatSMT2 smt2 <> "\n\n(check-sat)"
-    in T.writeFile ("query-" <> (show count) <> ".smt2") content
+    in T.writeFile ("query-" <> postfix <> ".smt2") content
 
 withSolvers :: App m => Solver -> Natural -> Natural -> Maybe Natural -> (SolverGroup -> m a) -> m a
 withSolvers solver count threads timeout cont = do
@@ -116,43 +145,107 @@ withSolvers solver count threads timeout cont = do
     orchestrate queue avail fileCounter = do
       task <- liftIO $ readChan queue
       inst <- liftIO $ readChan avail
-      runTask' <- toIO $ runTask task inst avail fileCounter
+      runTask' <- case task of
+        TaskSingle (SingleData smt2 r) -> toIO $ getOneSol smt2 r inst avail fileCounter
+        TaskMulti (MultiData smt2 multiSol r) -> toIO $ getMultiSol smt2 multiSol r inst avail fileCounter
       _ <- liftIO $ forkIO runTask'
       orchestrate queue avail (fileCounter + 1)
 
-    runTask :: (MonadIO m, ReadConfig m) => Task -> SolverInstance -> Chan SolverInstance -> Int -> m ()
-    runTask (Task smt2@(SMT2 cmds cexvars ps) r) inst availableInstances fileCounter = do
+getMultiSol :: forall m. (MonadIO m, ReadConfig m) => SMT2 -> MultiSol -> (Chan (Maybe [W256])) -> SolverInstance -> Chan SolverInstance -> Int -> m ()
+getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCounter = do
+  conf <- readConfig
+  when conf.dumpQueries $ liftIO $ writeSMT2File smt2 (show fileCounter)
+  -- reset solver and send all lines of provided script
+  out <- liftIO $ sendScript inst ("(reset)" : cmds)
+  case out of
+    Left err -> liftIO $ do
+      when conf.debug $ putStrLn $ "Unable to write SMT to solver: " <> (T.unpack err)
+      writeChan r Nothing
+    Right _ -> do
+      sat <- liftIO $ sendLine inst "(check-sat)"
+      subRun [] smt2 sat
+  -- put the instance back in the list of available instances
+  liftIO $ writeChan availableInstances inst
+  where
+    createHexValue k =
+       let hexString = concat (replicate k "ff")
+       in fst . head $ readHex hexString
+    subRun :: (MonadIO m, ReadConfig m) => [W256] -> SMT2 -> Text -> m ()
+    subRun vals fullSmt sat = do
       conf <- readConfig
-      let fuzzResult = tryCexFuzz ps conf.numCexFuzz
-      liftIO $ do
-        when (conf.dumpQueries) $ writeSMT2File smt2 fileCounter
-        if (isJust fuzzResult)
-          then do
-            when (conf.debug) $ putStrLn $ "   Cex found via fuzzing:" <> (show fuzzResult)
-            writeChan r (Sat $ fromJust fuzzResult)
-          else if not conf.onlyCexFuzz then do
-            -- reset solver and send all lines of provided script
-            out <- sendScript inst (SMT2 ("(reset)" : cmds) mempty ps)
-            case out of
-              -- if we got an error then return it
-              Left e -> writeChan r (Error $ "Error while writing SMT to solver: " <> T.unpack e)
-              -- otherwise call (check-sat), parse the result, and send it down the result channel
-              Right () -> do
-                sat <- sendLine inst "(check-sat)"
-                res <- do
-                    case sat of
-                      "unsat" -> pure Unsat
-                      "timeout" -> pure $ Unknown "Result timeout by SMT solver"
-                      "unknown" -> pure $ Unknown "Result unknown by SMT solver"
-                      "sat" -> Sat <$> getModel inst cexvars
-                      _ -> pure . Error $ "Unable to parse SMT solver output: " <> T.unpack sat
-                writeChan r res
+      case sat of
+        "unsat" -> liftIO $ do
+          when conf.debug $ putStrLn $ "No more solutions to query, returning: " <> show vals
+          liftIO $ writeChan r (Just vals)
+        "timeout" -> liftIO $ do
+           when conf.debug $ putStrLn "Timeout inside SMT solver."
+           writeChan r Nothing
+        "unknown" -> liftIO $ do
+           when conf.debug $ putStrLn "Unknown result by SMT solver."
+           writeChan r Nothing
+        "sat" -> do
+          if length vals >= multiSol.maxSols then liftIO $ do
+            when conf.debug $ putStrLn "Too many solutions to symbolic query."
+            writeChan r Nothing
           else do
-            when (conf.debug) $ putStrLn "Fuzzing failed to find a Cex, not trying SMT due to onlyCexFuzz"
-            writeChan r $ Error "Option onlyCexFuzz enabled, not running SMT"
+            cex <- liftIO $ getModel inst cexvars
+            case Map.lookup (Var (TStrict.pack multiSol.var)) cex.vars of
+              Just v -> do
+                let hexMask = createHexValue multiSol.numBytes
+                    maskedVal = v .&. hexMask
+                    toSMT n = show (into n :: Integer)
+                    maskedVar = "(bvand " <> multiSol.var <> " (_ bv" <> toSMT hexMask <> " 256))"
+                    restrict = "(assert (not (= " <> maskedVar <> " (_ bv" <> toSMT maskedVal <> " 256))))"
+                    newSmt = fullSmt <> SMT2 [(fromString restrict)] mempty mempty
+                when conf.debug $ liftIO $ putStrLn $ "Got one solution to symbolic query, val: 0x" <> (showHex maskedVal "") <>
+                  " now have " <> show (length vals + 1) <> " solution(s), max is: " <> show multiSol.maxSols
+                when conf.dumpQueries $ liftIO $ writeSMT2File newSmt (show fileCounter <> "-sol" <> show (length vals))
+                out <- liftIO $ sendLine inst (T.pack restrict)
+                case out of
+                  "success" -> do
+                    out2 <- liftIO $ sendLine inst  (T.pack "(check-sat)")
+                    subRun (maskedVal:vals) newSmt out2
+                  err -> liftIO $ do
+                    when conf.debug $ putStrLn $ "Unable to write SMT to solver: " <> (T.unpack err)
+                    writeChan r Nothing
+              Nothing -> internalError $ "variable " <>  multiSol.var <> " not part of model (i.e. cex) ... that's not possible"
+        err -> liftIO $ do
+          when conf.debug $ putStrLn $ "Unable to write SMT to solver: " <> (T.unpack err)
+          writeChan r Nothing
 
-        -- put the instance back in the list of available instances
-        writeChan availableInstances inst
+getOneSol :: (MonadIO m, ReadConfig m) => SMT2 -> (Chan CheckSatResult) -> SolverInstance -> Chan SolverInstance -> Int -> m ()
+getOneSol smt2@(SMT2 cmds cexvars ps) r inst availableInstances fileCounter = do
+  conf <- readConfig
+  let fuzzResult = tryCexFuzz ps conf.numCexFuzz
+  liftIO $ do
+    when (conf.dumpQueries) $ writeSMT2File smt2 (show fileCounter)
+    if (isJust fuzzResult)
+      then do
+        when (conf.debug) $ putStrLn $ "   Cex found via fuzzing:" <> (show fuzzResult)
+        writeChan r (Sat $ fromJust fuzzResult)
+      else if Prelude.not conf.onlyCexFuzz then do
+        -- reset solver and send all lines of provided script
+        out <- sendScript inst ("(reset)" : cmds)
+        case out of
+          -- if we got an error then return it
+          Left e -> writeChan r (Error $ "Error while writing SMT to solver: " <> T.unpack e)
+          -- otherwise call (check-sat), parse the result, and send it down the result channel
+          Right () -> do
+            sat <- sendLine inst "(check-sat)"
+            res <- do
+                case sat of
+                  "unsat" -> pure Unsat
+                  "timeout" -> pure $ EVM.Solvers.Unknown "Result timeout by SMT solver"
+                  "unknown" -> pure $ EVM.Solvers.Unknown "Result unknown by SMT solver"
+                  "sat" -> Sat <$> getModel inst cexvars
+                  _ -> pure . Error $ "Unable to parse SMT solver output: " <> T.unpack sat
+            writeChan r res
+      else do
+        when (conf.debug) $ putStrLn "Fuzzing failed to find a Cex, not trying SMT due to onlyCexFuzz"
+        writeChan r $ Error "Option onlyCexFuzz enabled, not running SMT"
+
+    -- put the instance back in the list of available instances
+    writeChan availableInstances inst
 
 getModel :: SolverInstance -> CexVars -> IO SMTCex
 getModel inst cexvars = do
@@ -291,8 +384,8 @@ stopSolver :: SolverInstance -> IO ()
 stopSolver (SolverInstance _ stdin stdout process) = cleanupProcess (Just stdin, Just stdout, Nothing, process)
 
 -- | Sends a list of commands to the solver. Returns the first error, if there was one.
-sendScript :: SolverInstance -> SMT2 -> IO (Either Text ())
-sendScript solver (SMT2 cmds _ _) = do
+sendScript :: SolverInstance -> [Builder] -> IO (Either Text ())
+sendScript solver cmds = do
   let sexprs = splitSExpr $ fmap toLazyText cmds
   go sexprs
   where
