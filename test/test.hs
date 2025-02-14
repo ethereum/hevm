@@ -530,6 +530,21 @@ tests = testGroup "hevm"
           simp =Expr.simplify e
       res <- checkEquiv e simp
       assertEqualM "readByte simplification"  res True
+    , test "simp-readWord1" $ do
+      let srcOffset = (ReadWord (Lit 0x1) (AbstractBuf "stuff1"))
+          size = (ReadWord (Lit 0x1) (AbstractBuf "stuff2"))
+          src = (AbstractBuf "stuff2")
+          e = ReadWord (Lit 0x1) (CopySlice srcOffset (Lit 0x40) size src (AbstractBuf "dst"))
+          simp = Expr.simplify e
+      assertEqualM "readWord simplification" simp (ReadWord (Lit 0x1) (AbstractBuf "dst"))
+    , test "simp-readWord2" $ do
+      let srcOffset = (ReadWord (Lit 0x12) (AbstractBuf "stuff1"))
+          size =(Lit 0x1)
+          src = (AbstractBuf "stuff2")
+          e = ReadWord (Lit 0x12) (CopySlice srcOffset (Lit 0x50) size src (AbstractBuf "dst"))
+          simp =Expr.simplify e
+      res <- checkEquiv e simp
+      assertEqualM "readWord simplification"  res True
     , test "simp-max-buflength" $ do
       let simp = Expr.simplify $ Max (Lit 0) (BufLength (AbstractBuf "txdata"))
       assertEqualM "max-buflength rules" simp $ BufLength (AbstractBuf "txdata")
