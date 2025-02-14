@@ -665,7 +665,7 @@ exec1 = do
                 Lit sz' -> do
                   let words_copied = (sz' + 31) `div` 32
                   let g_mcopy = 3*words_copied -- memory access cost is part of accessMemoryRange
-                  burn (g_verylow + (unsafeInto g_mcopy)) $
+                  burn (g_verylow + unsafeInto g_mcopy) $
                     accessMemoryRange srcOff sz $ accessMemoryRange dstOff sz $ do
                       next
                       mcopy sz srcOff dstOff
