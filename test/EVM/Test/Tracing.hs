@@ -23,7 +23,7 @@ import Data.Aeson qualified as JSON
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
-import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
+import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Map.Strict qualified as Map
 import Data.Text.IO qualified as T
 import Data.Vector qualified as Vector
@@ -31,12 +31,10 @@ import Data.Word (Word8, Word64)
 import GHC.Generics (Generic)
 import GHC.IO.Exception (ExitCode(ExitSuccess))
 import Numeric (showHex)
-import Paths_hevm qualified as Paths
 import System.Directory (removeDirectoryRecursive)
-import System.Environment (lookupEnv)
 import System.FilePath ((</>))
 import System.IO.Temp (getCanonicalTemporaryDirectory, createTempDirectory)
-import System.Process (readProcessWithExitCode, readCreateProcessWithExitCode, proc, CreateProcess(..))
+import System.Process (readCreateProcessWithExitCode, proc, CreateProcess(..))
 import Test.QuickCheck (elements)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
@@ -408,20 +406,18 @@ getTraceOutput evmDir evmtoolResult =
 
 decodeTraceOutputHelper :: String -> IO (Maybe EVMToolTraceOutput)
 decodeTraceOutputHelper traceFileName = do
-      convertPath <- Paths.getDataFileName "test/scripts/convert_trace_to_json.sh"
-      maybeShellPath <- (fromMaybe "bash") <$> (lookupEnv "HEVM_SYSTEM_SHELL")
-      let shellPath = if maybeShellPath == "" then "bash" else maybeShellPath
-      (exitcode, stdout, stderr) <- readProcessWithExitCode shellPath [convertPath, traceFileName] ""
-      case exitcode of
-        ExitSuccess -> do
-          -- putStrLn $ "Successfully converted trace to JSON: " <> (show stdout) <> " " <>
-          --   (show stderr) <> " " <> (show exitcode) <> " " <> (show traceFileName)
-          JSON.decodeFileStrict (traceFileName ++ ".json") :: IO (Maybe EVMToolTraceOutput)
-        _ -> do
-          putStrLn $ "Error converting trace! exit code:" <> (show exitcode)
-          putStrLn $ "stdout: " <> (show stdout)
-          putStrLn $ "stderr: " <> (show stderr)
-          pure Nothing
+  traceContents <- readFile traceFileName
+  let traceLines = lines traceContents
+  let (traces, outputLines) = splitAt (length traceLines - 1) traceLines
+  let parsedTraces = map decodeString traces :: [Maybe EVMToolTrace]
+  let parsedOutput = decodeString (outputLines !! 0) :: Maybe EVMToolOutput
+  if all isJust parsedTraces && isJust parsedOutput then
+    pure $ Just $ EVMToolTraceOutput (map fromJust parsedTraces) (fromJust parsedOutput)
+  else
+    pure Nothing
+  where
+    decodeString :: (JSON.FromJSON a) => String -> Maybe a
+    decodeString = JSON.decodeStrict . Char8.pack
 
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly

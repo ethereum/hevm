@@ -228,8 +228,6 @@ jobs:
           echo HEVM_SOLIDITY_REPO="$PWD/ethereum-solidity" >> "$GITHUB_ENV"
           echo HEVM_ETHEREUM_TESTS_REPO="$PWD/ethereum-tests" >> "$GITHUB_ENV"
           echo HEVM_FORGE_STD_REPO="$PWD/forge-std" >> "$GITHUB_ENV"
-          # environment
-          echo HEVM_SYSTEM_SHELL="$(which bash)" >> "$GITHUB_ENV"
 
       - name: run tests
         run: |
