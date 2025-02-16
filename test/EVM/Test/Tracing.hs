@@ -32,9 +32,11 @@ import GHC.Generics (Generic)
 import GHC.IO.Exception (ExitCode(ExitSuccess))
 import Numeric (showHex)
 import Paths_hevm qualified as Paths
-import System.Directory (removeFile)
+import System.Directory (removeDirectoryRecursive)
 import System.Environment (lookupEnv)
-import System.Process (readProcessWithExitCode)
+import System.FilePath ((</>))
+import System.IO.Temp (getCanonicalTemporaryDirectory, createTempDirectory)
+import System.Process (readProcessWithExitCode, readCreateProcessWithExitCode, proc, CreateProcess(..))
 import Test.QuickCheck (elements)
 import Test.QuickCheck.Instances.Text()
 import Test.QuickCheck.Instances.Natural()
@@ -308,8 +310,8 @@ getHEVMRet contr txData gaslimitExec = do
   let (txn, evmEnv, contrAlloc, fromAddress, toAddress, _) = evmSetup contr txData gaslimitExec
   runCodeWithTrace Nothing evmEnv contrAlloc txn (LitAddr fromAddress) (LitAddr toAddress)
 
-getEVMToolRet :: OpContract -> ByteString -> Int -> IO (Maybe EVMToolResult)
-getEVMToolRet contr txData gaslimitExec = do
+getEVMToolRet :: FilePath -> OpContract -> ByteString -> Int -> IO (Maybe EVMToolResult)
+getEVMToolRet evmDir contr txData gaslimitExec = do
   let (txn, evmEnv, contrAlloc, fromAddress, toAddress, sk) = evmSetup contr txData gaslimitExec
       txs = [EVM.Transaction.sign sk txn]
       walletAlloc = EVMToolAlloc{ balance = 0x5ffd4878be161d74
@@ -318,24 +320,25 @@ getEVMToolRet contr txData gaslimitExec = do
                                 }
       alloc :: Map.Map Addr EVMToolAlloc
       alloc = Map.fromList ([ (fromAddress, walletAlloc), (toAddress, contrAlloc)])
-  JSON.encodeFile "txs.json" txs
-  JSON.encodeFile "alloc.json" alloc
-  JSON.encodeFile "env.json" evmEnv
-  (exitCode, evmtoolStdout, evmtoolStderr) <- readProcessWithExitCode "evm" [ "transition"
-                               , "--state.fork", "Cancun"
-                               , "--input.alloc" , "alloc.json"
-                               , "--input.env" , "env.json"
-                               , "--input.txs" , "txs.json"
-                               , "--output.alloc" , "alloc-out.json"
-                               , "--trace.returndata=true"
-                               , "--trace" , "trace.json"
-                               , "--output.result", "result.json"
-                               ] ""
+  JSON.encodeFile (evmDir </> "txs.json") txs
+  JSON.encodeFile (evmDir </> "alloc.json") alloc
+  JSON.encodeFile (evmDir </> "env.json") evmEnv
+  let cmd = (proc "evm" [ "transition"
+                        , "--state.fork", "Cancun"
+                        , "--input.alloc", "alloc.json"
+                        , "--input.env", "env.json"
+                        , "--input.txs", "txs.json"
+                        , "--output.alloc", "alloc-out.json"
+                        , "--trace.returndata=true"
+                        , "--trace", "trace.json"
+                        , "--output.result", "result.json"
+                        ]) { cwd = Just evmDir }
+  (exitCode, evmtoolStdout, evmtoolStderr) <- readCreateProcessWithExitCode cmd ""
   when (exitCode /= ExitSuccess) $ do
     putStrLn $ "evmtool exited with code " <> show exitCode
     putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
     putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
-  JSON.decodeFileStrict "result.json" :: IO (Maybe EVMToolResult)
+  JSON.decodeFileStrict (evmDir </> "result.json") :: IO (Maybe EVMToolResult)
 
 -- Compares traces of evmtool (from go-ethereum) and HEVM
 compareTraces :: [VMTrace] -> [EVMToolTrace] -> IO (Bool)
@@ -389,18 +392,18 @@ compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
       putStrLn $ "Traces don't match. evmtool's trace is longer by:" <> (show b)
       pure False
 
-getTraceFileName :: EVMToolResult -> String
-getTraceFileName evmtoolResult = traceFileName
+getTraceFileName :: FilePath -> EVMToolResult -> String
+getTraceFileName evmDir evmtoolResult = evmDir </> traceFileName
   where
     txName = ((evmtoolResult.receipts) !! 0).transactionHash
     traceFileName = "trace-0-" ++ txName ++ ".jsonl"
 
-getTraceOutput :: Maybe EVMToolResult -> IO (Maybe EVMToolTraceOutput)
-getTraceOutput evmtoolResult =
+getTraceOutput :: FilePath -> Maybe EVMToolResult -> IO (Maybe EVMToolTraceOutput)
+getTraceOutput evmDir evmtoolResult =
   case evmtoolResult of
     Nothing -> pure Nothing
     Just res -> do
-      let traceFileName = getTraceFileName res
+      let traceFileName = getTraceFileName evmDir res
       decodeTraceOutputHelper traceFileName
 
 decodeTraceOutputHelper :: String -> IO (Maybe EVMToolTraceOutput)
@@ -419,15 +422,6 @@ decodeTraceOutputHelper traceFileName = do
           putStrLn $ "stdout: " <> (show stdout)
           putStrLn $ "stderr: " <> (show stderr)
           pure Nothing
-
-deleteTraceOutputFiles :: Maybe EVMToolResult -> IO ()
-deleteTraceOutputFiles evmtoolResult =
-  case evmtoolResult of
-    Nothing -> pure ()
-    Just res -> do
-      let traceFileName = getTraceFileName res
-      System.Directory.removeFile traceFileName
-      System.Directory.removeFile (traceFileName ++ ".json")
 
 -- | Takes a runtime code and calls it with the provided calldata
 --   Uses evmtool's alloc and transaction to set up the VM correctly
@@ -875,9 +869,11 @@ tests = testGroup "contract-quickcheck-run"
 
 checkTraceAndOutputs :: App m => OpContract -> Int -> ByteString -> m ()
 checkTraceAndOutputs contract gasLimit txData = do
-  evmtoolResult <- liftIO $ getEVMToolRet contract txData gasLimit
+  tmpDir <- liftIO getCanonicalTemporaryDirectory
+  evmDir <- liftIO $ createTempDirectory tmpDir "evm-trace"
+  evmtoolResult <- liftIO $ getEVMToolRet evmDir contract txData gasLimit
   hevmRun <- getHEVMRet contract txData gasLimit
-  evmtoolTraceOutput <- fmap fromJust $ liftIO $ getTraceOutput evmtoolResult
+  evmtoolTraceOutput <- fmap fromJust $ liftIO $ getTraceOutput evmDir evmtoolResult
   case hevmRun of
     (Right (expr, hevmTrace, hevmTraceResult)) -> liftIO $ do
       let
@@ -915,7 +911,7 @@ checkTraceAndOutputs contract gasLimit txData = do
              putStrLn $ "ret value computed via symb+conc : " <> (bsToHex (fromJust simplConcrExprRetval))
              assertEqual "Simplified, concretized expression must match evmtool's output." True False
       else do
-        putStrLn $ "Name of trace file: " <> (getTraceFileName $ fromJust evmtoolResult)
+        putStrLn $ "Name of trace file: " <> (getTraceFileName evmDir $ fromJust evmtoolResult)
         putStrLn $ "HEVM result  :" <> (show hevmTraceResult)
         T.putStrLn $ "HEVM result: " <> (formatBinary $ bssToBs hevmTraceResult.out)
         T.putStrLn $ "evm result : " <> (formatBinary $ bssToBs evmtoolTraceOutput.output.output)
@@ -928,13 +924,7 @@ checkTraceAndOutputs contract gasLimit txData = do
       -- putStrLn $ "output by evmtool is: '" <> bsToHex evmtoolTraceOutput.toOutput.output <> "'"
       traceOK <- compareTraces hevmTrace (evmtoolTraceOutput.trace)
       assertEqual "Traces and gas must match" traceOK True
-  liftIO $ do
-    System.Directory.removeFile "txs.json"
-    System.Directory.removeFile "alloc-out.json"
-    System.Directory.removeFile "alloc.json"
-    System.Directory.removeFile "result.json"
-    System.Directory.removeFile "env.json"
-    deleteTraceOutputFiles evmtoolResult
+  liftIO $ removeDirectoryRecursive evmDir
 
 -- GasLimitInt
 newtype GasLimitInt = GasLimitInt (Int)
