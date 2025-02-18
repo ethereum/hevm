@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated via iterative calls to the SMT solver for quicker solving
 - Aliasing works much better for symbolic and concrete addresses
 - Constant propagation for symbolic values
-- Allow reading deployedBytecode.object from the forge JSON as --code-file or --code-a-file/-code-b-file
+- Allow reading deployedBytecode.object from the forge JSON as --code-file or --code-a-file/--code-b-file
   This alleviates the issue when the contract is large and does not fit the command line
   limit of 8192 characters
 - Two more simplification rules: `ReadByte` & `ReadWord` when the `CopySlice`
