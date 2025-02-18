@@ -10,9 +10,10 @@ import Control.Monad (when, forM_, unless)
 import Control.Monad.ST (RealWorld, stToIO)
 import Control.Monad.IO.Unlift
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as BS
 import Data.DoubleWord (Word256)
 import Data.List (intersperse)
-import Data.Maybe (fromMaybe, mapMaybe, fromJust, isNothing)
+import Data.Maybe (fromMaybe, mapMaybe, fromJust, isNothing, isJust)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Version (showVersion)
@@ -27,6 +28,9 @@ import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirector
 import System.FilePath ((</>))
 import System.Exit (exitFailure, exitWith, ExitCode(..))
 import Main.Utf8 (withUtf8)
+import qualified Data.ByteString.Char8 as BC
+import Data.Aeson (decode, (.:))
+import Data.Aeson.Types (parseMaybe)
 
 import EVM (initialContract, abstractContract, makeVm)
 import EVM.ABI (Sig(..))
@@ -57,6 +61,7 @@ data Command w
   = Symbolic -- Symbolically explore an abstract program, or specialized with specified env & calldata
   -- vm opts
       { code          :: w ::: Maybe ByteString <?> "Program bytecode"
+      , codeFile      :: w ::: Maybe String     <?> "Program bytecode from JSON file's deployedBytecode.object field"
       , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
       , address       :: w ::: Maybe Addr       <?> "Tx: address"
       , caller        :: w ::: Maybe Addr       <?> "Tx: caller"
@@ -105,8 +110,10 @@ data Command w
       , maxBranch     :: w ::: Int                <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
       }
   | Equivalence -- prove equivalence between two programs
-      { codeA         :: w ::: ByteString       <?> "Bytecode of the first program"
-      , codeB         :: w ::: ByteString       <?> "Bytecode of the second program"
+      { codeA         :: w ::: Maybe ByteString   <?> "Bytecode of the first program"
+      , codeB         :: w ::: Maybe ByteString   <?> "Bytecode of the second program"
+      , codeAFile     :: w ::: Maybe String     <?> "First program's bytecode from JSON file's deployedBytecode.object field"
+      , codeBFile     :: w ::: Maybe String     <?> "Second program's bytecode from JSON file's deployedBytecode.object field"
       , sig           :: w ::: Maybe Text       <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]         <?> "Values to encode"
       , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
@@ -127,6 +134,7 @@ data Command w
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
+      , codeFile    :: w ::: Maybe String      <?> "Program bytecode from JSON file's deployedBytecode.object field"
       , calldata    :: w ::: Maybe ByteString  <?> "Tx: calldata"
       , address     :: w ::: Maybe Addr        <?> "Tx: address"
       , caller      :: w ::: Maybe Addr        <?> "Tx: caller"
@@ -245,47 +253,71 @@ main = withUtf8 $ do
             res <- unitTest testOpts out.contracts
             liftIO $ unless (uncurry (&&) res) exitFailure
 
+getCode :: Maybe String -> Maybe ByteString -> IO (Maybe ByteString)
+getCode fname code = do
+  when (isJust fname && isJust code) $ do
+    putStrLn "Error: Cannot provide both a file and code"
+    exitFailure
+  case fname of
+    Nothing -> pure code
+    Just f -> fmap Just $ readJSONcode f
+
+readJSONcode :: FilePath -> IO ByteString
+readJSONcode fname = do
+  contents <- BS.readFile fname
+  case decode contents of
+    Nothing -> do
+      putStrLn "Error: Failed to parse JSON given as code file"
+      exitFailure
+    Just json -> case parseMaybe (.: "deployedBytecode") json >>= parseMaybe (.: "object") of
+      Nothing -> do
+        putStrLn "Error: Expected a deployedBytecode object in code file"
+        exitFailure
+      Just obj -> pure $ BC.pack obj
+
 equivalence :: App m => Command Options.Unwrapped -> m ()
 equivalence cmd = do
-  let bytecodeA' = hexByteString $ strip0x cmd.codeA
-      bytecodeB' = hexByteString $ strip0x cmd.codeB
-  if (isNothing bytecodeA') then liftIO $ do
-    putStrLn $ "Error, invalid bytecode for program A: " <> show cmd.codeA
+  bytecodeA' <- liftIO $ getCode cmd.codeAFile cmd.codeA
+  bytecodeB' <- liftIO $ getCode cmd.codeBFile cmd.codeB
+  let bytecodeA = decipher bytecodeA'
+  let bytecodeB = decipher bytecodeB'
+  when (isNothing bytecodeA) $ liftIO $ do
+    putStrLn "Error: invalid or no bytecode for program A. Provide a valid one with --code-a or --code-a-file"
     exitFailure
-  else if (isNothing bytecodeB') then liftIO $ do
-    putStrLn $ "Error, invalid bytecode for program B: " <> show cmd.codeB
+  when (isNothing bytecodeB) $ liftIO $ do
+    putStrLn "Error: invalid or no bytecode for program B. Provide a valid one with --code-b or --code-b-file"
     exitFailure
-  else do
-    let bytecodeA = fromJust bytecodeA'
-        bytecodeB = fromJust bytecodeB'
-        veriOpts = VeriOpts { simp = True
-                            , maxIter = parseMaxIters cmd.maxIterations
-                            , askSmtIters = cmd.askSmtIterations
-                            , loopHeuristic = cmd.loopDetectionHeuristic
-                            , rpcInfo = Nothing
-                            }
-    calldata <- liftIO $ buildCalldata cmd
-    solver <- liftIO $ getSolver cmd
-    cores <- liftIO $ unsafeInto <$> getNumProcessors
-    let solverCount = fromMaybe cores cmd.numSolvers
-    withSolvers solver solverCount (fromMaybe 1 cmd.solverThreads) cmd.smttimeout $ \s -> do
-      (res, e) <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata
-      liftIO $ case (any isCex res, any Expr.isPartial e || any isUnknown res) of
-        (False, False) -> putStrLn "   \x1b[32m[PASS]\x1b[0m Contracts behave equivalently"
-        (True, _)      -> putStrLn "   \x1b[31m[FAIL]\x1b[0m Contracts do not behave equivalently"
-        (_, True)      -> putStrLn "   \x1b[31m[FAIL]\x1b[0m Contracts may not behave equivalently"
-      liftIO $ printWarnings e res "the contracts under test"
-      case any isCex res of
-        False -> liftIO $ do
-          when (any isUnknown res || any isError res || any isPartial e) exitFailure
-          putStrLn "No discrepancies found"
-        True -> liftIO $ do
-          let cexs = mapMaybe getCex res
-          T.putStrLn . T.unlines $
-            [ "Not equivalent. The following inputs result in differing behaviours:"
-            , "" , "-----", ""
-            ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap (formatCex (AbstractBuf "txdata") Nothing) cexs)
-          exitFailure
+
+  let veriOpts = VeriOpts { simp = True
+                          , maxIter = parseMaxIters cmd.maxIterations
+                          , askSmtIters = cmd.askSmtIterations
+                          , loopHeuristic = cmd.loopDetectionHeuristic
+                          , rpcInfo = Nothing
+                          }
+  calldata <- liftIO $ buildCalldata cmd
+  solver <- liftIO $ getSolver cmd
+  cores <- liftIO $ unsafeInto <$> getNumProcessors
+  let solverCount = fromMaybe cores cmd.numSolvers
+  withSolvers solver solverCount (fromMaybe 1 cmd.solverThreads) cmd.smttimeout $ \s -> do
+    (res, e) <- equivalenceCheck s (fromJust bytecodeA) (fromJust bytecodeB) veriOpts calldata
+    liftIO $ case (any isCex res, any Expr.isPartial e || any isUnknown res) of
+      (False, False) -> putStrLn "   \x1b[32m[PASS]\x1b[0m Contracts behave equivalently"
+      (True, _)      -> putStrLn "   \x1b[31m[FAIL]\x1b[0m Contracts do not behave equivalently"
+      (_, True)      -> putStrLn "   \x1b[31m[FAIL]\x1b[0m Contracts may not behave equivalently"
+    liftIO $ printWarnings e res "the contracts under test"
+    case any isCex res of
+      False -> liftIO $ do
+        when (any isUnknown res || any isError res || any isPartial e) exitFailure
+        putStrLn "No discrepancies found"
+      True -> liftIO $ do
+        let cexs = mapMaybe getCex res
+        T.putStrLn . T.unlines $
+          [ "Not equivalent. The following inputs result in differing behaviours:"
+          , "" , "-----", ""
+          ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap (formatCex (AbstractBuf "txdata") Nothing) cexs)
+        exitFailure
+  where
+    decipher = maybe Nothing (hexByteString . strip0x)
 
 getSolver :: Command Options.Unwrapped -> IO Solver
 getSolver cmd = case cmd.solver of
@@ -458,7 +490,8 @@ vmFromCommand cmd = do
                              , prevRandao
                              )
 
-  contract <- case (cmd.rpc, cmd.address, cmd.code) of
+  codeWrapped <- getCode cmd.codeFile cmd.code
+  contract <- case (cmd.rpc, cmd.address, codeWrapped) of
     (Just url, Just addr', Just c) -> do
       let code = hexByteString $ strip0x c
       if (isNothing code) then do
@@ -574,19 +607,20 @@ symvmFromCommand cmd calldata = do
     callvalue = maybe TxValue Lit cmd.value
     storageBase = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
 
-  contract <- case (cmd.rpc, cmd.address, cmd.code) of
+  codeWrapped <- getCode cmd.codeFile cmd.code
+  contract <- case (cmd.rpc, cmd.address, codeWrapped) of
     (Just url, Just addr', _) ->
       Fetch.fetchContractFrom block url addr' >>= \case
         Nothing -> do
           putStrLn "Error, contract not found."
           exitFailure
-        Just contract' -> case cmd.code of
+        Just contract' -> case codeWrapped of
               Nothing -> pure contract'
               -- if both code and url is given,
               -- fetch the contract and overwrite the code
               Just c -> do
                 let c' = decipher c
-                if (isNothing c') then do
+                if isNothing c' then do
                   putStrLn $ "Error, invalid code: " <> show c
                   exitFailure
                 else pure $ do
@@ -598,7 +632,7 @@ symvmFromCommand cmd calldata = do
 
     (_, _, Just c)  -> do
       let c' = decipher c
-      if (isNothing c') then do
+      if isNothing c' then do
         putStrLn $ "Error, invalid code: " <> show c
         exitFailure
       else case storageBase of
