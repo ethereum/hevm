@@ -111,7 +111,7 @@ data Command w
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: Maybe ByteString   <?> "Bytecode of the first program"
-      , codeB         :: w ::: Maybe  ByteString  <?> "Bytecode of the second program"
+      , codeB         :: w ::: Maybe ByteString   <?> "Bytecode of the second program"
       , codeAFile     :: w ::: Maybe String     <?> "First program's bytecode from JSON file's deployedBytecode.object field"
       , codeBFile     :: w ::: Maybe String     <?> "Second program's bytecode from JSON file's deployedBytecode.object field"
       , sig           :: w ::: Maybe Text       <?> "Signature of types to decode / encode"
