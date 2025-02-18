@@ -253,10 +253,10 @@ main = withUtf8 $ do
             res <- unitTest testOpts out.contracts
             liftIO $ unless (uncurry (&&) res) exitFailure
 
-getCode :: String -> (Maybe String) -> (Maybe ByteString) -> IO (Maybe ByteString)
-getCode msg fname code = do
+getCode :: Maybe String -> Maybe ByteString -> IO (Maybe ByteString)
+getCode fname code = do
   when (isJust fname && isJust code) $ do
-    putStrLn $ "Error: Cannot provide both a file and code, i.e. options: " <> msg
+    putStrLn "Error: Cannot provide both a file and code"
     exitFailure
   case fname of
     Nothing -> pure code
@@ -277,8 +277,8 @@ readJSONcode fname = do
 
 equivalence :: App m => Command Options.Unwrapped -> m ()
 equivalence cmd = do
-  bytecodeA' <- liftIO $ getCode "--code-a-file and --code-a" cmd.codeAFile cmd.codeA
-  bytecodeB' <- liftIO $ getCode "--code-b-file and --code-b" cmd.codeBFile cmd.codeB
+  bytecodeA' <- liftIO $ getCode cmd.codeAFile cmd.codeA
+  bytecodeB' <- liftIO $ getCode cmd.codeBFile cmd.codeB
   let bytecodeA = decipher bytecodeA'
   let bytecodeB = decipher bytecodeB'
   when (isNothing bytecodeA) $ liftIO $ do
@@ -490,7 +490,7 @@ vmFromCommand cmd = do
                              , prevRandao
                              )
 
-  codeWrapped <- getCode "--code and --code-file" cmd.codeFile cmd.code
+  codeWrapped <- getCode cmd.codeFile cmd.code
   contract <- case (cmd.rpc, cmd.address, codeWrapped) of
     (Just url, Just addr', Just c) -> do
       let code = hexByteString $ strip0x c
@@ -607,7 +607,7 @@ symvmFromCommand cmd calldata = do
     callvalue = maybe TxValue Lit cmd.value
     storageBase = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
 
-  codeWrapped <- getCode "--code --code-file" cmd.codeFile cmd.code
+  codeWrapped <- getCode cmd.codeFile cmd.code
   contract <- case (cmd.rpc, cmd.address, codeWrapped) of
     (Just url, Just addr', _) ->
       Fetch.fetchContractFrom block url addr' >>= \case
