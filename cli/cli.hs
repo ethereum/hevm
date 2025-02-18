@@ -178,7 +178,7 @@ data Command w
       , maxBranch     :: w ::: Int                      <!> "10" <?> "Max number of branches to explore when encountering a symbolic value (default: 10)"
       , numCexFuzz    :: w ::: Integer                  <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
       , askSmtIterations :: w ::: Integer               <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
-      , promiseNoReent:: w ::: Bool               <!> "Promise no reentrancy is possible into the contrct(s) being examined"
+      , promiseNoReent:: w ::: Bool               <!> "Promise no reentrancy is possible into the contract(s) being examined"
       }
   | Version
 
