@@ -243,6 +243,9 @@ readByte i@(Lit x) (WriteWord (Lit idx) val src)
            (Lit _) -> indexWord (Lit $ x - idx) val
            _ -> IndexWord (Lit $ x - idx) val
     else readByte i src
+-- reading a byte that is lower than the dstOffset of a CopySlice, so it's just reading from dst
+readByte i@(Lit x) (CopySlice _ (Lit dstOffset) _ _ dst) | dstOffset > x =
+  readByte i dst
 readByte i@(Lit x) (CopySlice (Lit srcOffset) (Lit dstOffset) (Lit size) src dst)
   = if x - dstOffset < size
     then readByte (Lit $ x - (dstOffset - srcOffset)) src
@@ -279,6 +282,9 @@ readWord idx b@(WriteWord idx' val buf)
     -- we do not have enough information to statically determine whether or not
     -- the region we want to read overlaps the WriteWord
     _ -> readWordFromBytes idx b
+-- reading a Word that is lower than the dstOffset-32 of a CopySlice, so it's just reading from dst
+readWord i@(Lit x) (CopySlice _ (Lit dstOffset) _ _ dst) | dstOffset > x+32 =
+  readWord i dst
 readWord (Lit idx) b@(CopySlice (Lit srcOff) (Lit dstOff) (Lit size) src dst)
   -- the region we are trying to read is enclosed in the sliced region
   | (idx - dstOff) < size && 32 <= size - (idx - dstOff) = readWord (Lit $ srcOff + (idx - dstOff)) src

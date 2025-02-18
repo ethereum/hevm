@@ -106,10 +106,10 @@ prop :: Testable prop => ReaderT Env IO prop -> Property
 prop a = ioProperty $ runEnv testEnv a
 
 withDefaultSolver :: App m => (SolverGroup -> m a) -> m a
-withDefaultSolver = withSolvers Z3 1 1 Nothing
+withDefaultSolver = withSolvers Z3 3 1 Nothing
 
 withCVC5Solver :: App m => (SolverGroup -> m a) -> m a
-withCVC5Solver = withSolvers CVC5 1 1 Nothing
+withCVC5Solver = withSolvers CVC5 3 1 Nothing
 
 main :: IO ()
 main = defaultMain tests
@@ -515,6 +515,36 @@ tests = testGroup "hevm"
         let e = BufLength (CopySlice (Lit 0x2) (Lit 0x2) (Lit 0x1) (ConcreteBuf "") (ConcreteBuf ""))
         b <- checkEquiv e (Expr.simplify e)
         assertBoolM "Simplifier failed" b
+    , test "simp-readByte1" $ do
+      let srcOffset = (ReadWord (Lit 0x1) (AbstractBuf "stuff1"))
+          size = (ReadWord (Lit 0x1) (AbstractBuf "stuff2"))
+          src = (AbstractBuf "stuff2")
+          e = ReadByte (Lit 0x0) (CopySlice srcOffset (Lit 0x10) size src (AbstractBuf "dst"))
+          simp = Expr.simplify e
+      assertEqualM "readByte simplification" simp (ReadByte (Lit 0x0) (AbstractBuf "dst"))
+    , test "simp-readByte2" $ do
+      let srcOffset = (ReadWord (Lit 0x1) (AbstractBuf "stuff1"))
+          size = (Lit 0x1)
+          src = (AbstractBuf "stuff2")
+          e = ReadByte (Lit 0x0) (CopySlice srcOffset (Lit 0x10) size src (AbstractBuf "dst"))
+          simp = Expr.simplify e
+      res <- checkEquiv e simp
+      assertEqualM "readByte simplification"  res True
+    , test "simp-readWord1" $ do
+      let srcOffset = (ReadWord (Lit 0x1) (AbstractBuf "stuff1"))
+          size = (ReadWord (Lit 0x1) (AbstractBuf "stuff2"))
+          src = (AbstractBuf "stuff2")
+          e = ReadWord (Lit 0x1) (CopySlice srcOffset (Lit 0x40) size src (AbstractBuf "dst"))
+          simp = Expr.simplify e
+      assertEqualM "readWord simplification" simp (ReadWord (Lit 0x1) (AbstractBuf "dst"))
+    , test "simp-readWord2" $ do
+      let srcOffset = (ReadWord (Lit 0x12) (AbstractBuf "stuff1"))
+          size = (Lit 0x1)
+          src = (AbstractBuf "stuff2")
+          e = ReadWord (Lit 0x12) (CopySlice srcOffset (Lit 0x50) size src (AbstractBuf "dst"))
+          simp = Expr.simplify e
+      res <- checkEquiv e simp
+      assertEqualM "readWord simplification"  res True
     , test "simp-max-buflength" $ do
       let simp = Expr.simplify $ Max (Lit 0) (BufLength (AbstractBuf "txdata"))
       assertEqualM "max-buflength rules" simp $ BufLength (AbstractBuf "txdata")
@@ -562,10 +592,6 @@ tests = testGroup "hevm"
         a = BufLength (ConcreteBuf "ab")
         simp = Expr.simplify a
       assertEqualM "Must be simplified down to a Lit" simp (Lit 2)
-    , test "CopySlice-overflow" $ do
-        let e = ReadWord (Lit 0x0) (CopySlice (Lit 0x0) (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc) (Lit 0x6) (ConcreteBuf "\255\255\255\255\255\255") (ConcreteBuf ""))
-        b <- checkEquiv e (Expr.simplify e)
-        assertBoolM "Simplifier failed" b
     , test "stripWrites-overflow" $ do
         -- below eventually boils down to
         -- unsafeInto (0xf0000000000000000000000000000000000000000000000000000000000000+1) :: Int

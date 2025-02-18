@@ -33,6 +33,8 @@ import Data.Word (Word64)
 import System.Environment (lookupEnv, getEnv)
 import System.FilePath.Find qualified as Find
 import System.FilePath.Posix (makeRelative, (</>))
+import System.IO (hPutStr, hClose)
+import System.IO.Temp (withSystemTempFile)
 import System.Process (readProcessWithExitCode)
 import GHC.IO.Exception (ExitCode(ExitSuccess))
 import Witch (into, unsafeInto)
@@ -208,8 +210,10 @@ traceVsGeth fname name x = do
     putStrLn $ "evmtool stderr output:" <> show evmtoolStderr
     putStrLn $ "evmtool stdout output:" <> show evmtoolStdout
   hevm <- traceVMTest x
-  liftIO $ writeFile "trace.jsonl" $ filterInfoLines evmtoolStderr
-  decodedContents <- liftIO $ decodeTraceOutputHelper "trace.jsonl"
+  decodedContents <- liftIO $ withSystemTempFile "trace.jsonl" $ \traceFile hdl -> do
+    hPutStr hdl $ filterInfoLines evmtoolStderr
+    hClose hdl
+    decodeTraceOutputHelper traceFile
   let EVMToolTraceOutput ts _ = fromJust decodedContents
   liftIO $ putStrLn "Comparing traces."
   _ <- liftIO $ compareTraces hevm ts

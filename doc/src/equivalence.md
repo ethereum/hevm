@@ -46,7 +46,8 @@ hevm equivalence \
     --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
     --code-b $(solc --bin-runtime "contract2.sol" | tail -n1)
 ```
-
 If `--sig` is given, calldata is assumed to take the form of the function
-given. If left out, calldata is a fully abstract buffer of at most 256 bytes.
-
+given. If `--calldata` is provided, a specific, concrete calldata is used. If
+neither is provided, a fully abstract calldata of at most `2**64` byte is
+assumed. Note that a `2**64` byte calldata would go over the gas limit, and
+hence should cover all meaningful cases.
