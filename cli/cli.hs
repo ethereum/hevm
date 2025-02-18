@@ -103,7 +103,7 @@ data Command w
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , noDecompose   :: w ::: Bool               <?> "Don't decompose storage slots into separate arrays"
       , maxBranch     :: w ::: Int                <!> "10" <?> "Max number of branches to explore when encountering a symbolic value (default: 10)"
-      , promiseNoReent:: w ::: Bool               <!> "Promise no reentrancy is possible into the contrct(s) being examined"
+      , promiseNoReent:: w ::: Bool               <!> "Promise no reentrancy is possible into the contract(s) being examined"
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: ByteString       <?> "Bytecode of the first program"
