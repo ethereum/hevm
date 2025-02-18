@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated via iterative calls to the SMT solver for quicker solving
 - Aliasing works much better for symbolic and concrete addresses
 - Constant propagation for symbolic values
+- Two more simplification rules: `ReadByte` & `ReadWord` when the `CopySlice`
+  it is reading from is writing after the position being read, so the
+  `CopySlice` can be ignored
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
