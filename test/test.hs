@@ -545,6 +545,13 @@ tests = testGroup "hevm"
           simp = Expr.simplify e
       res <- checkEquiv e simp
       assertEqualM "readWord simplification"  res True
+    , test "simp-empty-buflength" $ do
+      let e = PEq (BufLength (AbstractBuf "mybuf")) (Lit 0)
+      let simp = Expr.simplifyProp e
+      let simpExpected = PEq (AbstractBuf "mybuf") (ConcreteBuf "")
+      assertEqualM "buflen-to-empty" simp simpExpected
+      ret <- checkEquivPropAndLHS e simpExpected
+      assertBoolM "Must be equivalent" ret
     , test "simp-max-buflength" $ do
       let simp = Expr.simplify $ Max (Lit 0) (BufLength (AbstractBuf "txdata"))
       assertEqualM "max-buflength rules" simp $ BufLength (AbstractBuf "txdata")

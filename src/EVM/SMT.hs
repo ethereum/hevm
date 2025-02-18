@@ -420,12 +420,20 @@ discoverMaxReads props benv senv = bufMap
 
 -- | Returns an SMT2 object with all buffers referenced from the input props declared, and with the appropriate cex extraction metadata attached
 declareBufs :: [Prop] -> BufEnv -> StoreEnv -> SMT2
-declareBufs props bufEnv storeEnv = SMT2 ("; buffers" : fmap declareBuf allBufs <> ("; buffer lengths" : fmap declareLength allBufs)) cexvars mempty
+declareBufs props bufEnv storeEnv =
+  SMT2 (smtBufNames <> smtBufLengths <> smtEmptyRelations) cexvars mempty
   where
+    smtBufNames = "; buffers" : fmap declareBuf allBufs
+    smtBufLengths = "; buffer lengths" : fmap declareLength allBufs
+    smtEmptyRelations = "; empty buffer relations" : concatMap emptyRelation allBufs
     cexvars = (mempty :: CexVars){ buffers = discoverMaxReads props bufEnv storeEnv }
     allBufs = fmap fromLazyText $ Map.keys cexvars.buffers
     declareBuf n = "(declare-fun " <> n <> " () (Array (_ BitVec 256) (_ BitVec 8)))"
     declareLength n = "(declare-fun " <> n <> "_length" <> " () (_ BitVec 256))"
+    emptyRelation buf =
+      let bufLen = buf <> "_length"
+      in  ["(assert (=> (= " <> bufLen <> " (_ bv0 256)) (= " <> buf <> " ((as const Buf) #b00000000)) ))"
+          , "(assert (=> (= " <> buf <> " ((as const Buf) #b00000000)) (= " <> bufLen <> " (_ bv0 256)) ))" ]
 
 -- Given a list of variable names, create an SMT2 object with the variables declared
 declareVars :: [Builder] -> SMT2
