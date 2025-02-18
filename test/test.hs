@@ -2312,7 +2312,7 @@ tests = testGroup "hevm"
       (res2, ret2) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig2 [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches res2) <> " paths"
       assertBoolM "The expression is NOT error" $ not $ any isError ret2
-    , test "copyslice-symbolic-why" $ do
+    , test "copyslice-symbolic-used-to-be-copyslice-issue" $ do
       Just c <- solcRuntime "C"
         [i|
          contract MarketManager {
