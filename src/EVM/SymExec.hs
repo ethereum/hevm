@@ -71,6 +71,10 @@ isError :: ProofResult a b c d -> Bool
 isError (EVM.SymExec.Error _) = True
 isError _ = False
 
+getError :: ProofResult a b c String -> Maybe String
+getError (EVM.SymExec.Error e) = Just e
+getError _ = Nothing
+
 isCex :: ProofResult a b c d -> Bool
 isCex (Cex _) = True
 isCex _ = False
