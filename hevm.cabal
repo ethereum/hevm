@@ -213,6 +213,7 @@ executable hevm
     witch,
     unliftio-core,
     with-utf8,
+    aeson,
 
 --- Test Helpers ---
 

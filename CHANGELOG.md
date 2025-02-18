@@ -16,13 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and continue running, whenever possible
 - STATICCALL abstraction is now performed in case of symbolic arguments
 - Better error messages for JSON parsing
-- Multiple solutions are allowed for a single symbolic expression
+- Multiple solutions are allowed for a single symbolic expression, and they are
+  generated via iterative calls to the SMT solver for quicker solving
 - Aliasing works much better for symbolic and concrete addresses
 - Constant propagation for symbolic values
 - Allow EXTCODESIZE to be abstracted to a symbolic value.
 - Allow CALL to be extracted in case `--promise-no-reent` is given, promising
   no reentrancy of contracts. This may skip over reentrancy vulnerabilities
   but allows much more thorough exploration of the contract
+- Allow reading deployedBytecode.object from the forge JSON as --code-file or --code-a-file/--code-b-file
+  This alleviates the issue when the contract is large and does not fit the command line
+  limit of 8192 characters
+- Two more simplification rules: `ReadByte` & `ReadWord` when the `CopySlice`
+  it is reading from is writing after the position being read, so the
+  `CopySlice` can be ignored
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -34,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Better exponential simplification
 - Dumping of END states (.prop) files is now default for `--debug`
 - When cheatcode is missing, we produce a partial execution warning
+- Size of calldata can be up to 2**64, not 256. This is now reflected in the documentation
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that

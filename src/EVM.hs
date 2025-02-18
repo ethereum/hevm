@@ -3031,7 +3031,9 @@ instance VMOps Symbolic where
       Just concVals -> do
         assign #result Nothing
         case (length concVals) of
-          0 -> continue Nothing
+          -- zero solutions means that we are in a branch that's not possible. Revert.
+          -- TODO: stop execution of the EVM completely
+          0 -> finishFrame (FrameReverted (ConcreteBuf ""))
           1 -> runOne $ head concVals
           _ -> runBoth . PleaseRunBoth ewordExpr $ runMore concVals
       Nothing -> do
