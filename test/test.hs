@@ -2327,6 +2327,88 @@ tests = testGroup "hevm"
       assertEqualM "number of counterexamples" 1 numCexes
       assertEqualM "number of errors" 0 numErrs
       assertEqualM "number of qed-s" 0 numQeds
+    , test "copyslice-symbolic-ok" $ do
+      Just c <- solcRuntime "C"
+        [i|
+         contract MarketManager {
+           function tokenDataOf( address mToken) external view returns (uint256) {
+               return 55;
+           }
+         }
+         contract C {
+           function collateralPostedFor(address mToken) public returns (uint256) {
+               MarketManager marketManager = new MarketManager();
+               uint256 collateralPosted = marketManager.tokenDataOf(mToken);
+               assert(collateralPosted == 4);
+               return collateralPosted;
+           }
+         }
+        |]
+      let sig2 = Just (Sig "collateralPostedFor(address)" [AbiAddressType])
+      (res2, ret2) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig2 [] defaultVeriOpts
+      putStrLnM $ "successfully explored: " <> show (Expr.numBranches res2) <> " paths"
+      assertBoolM "The expression is NOT error" $ not $ any isError ret2
+    , test "copyslice-symbolic-used-to-be-copyslice-issue" $ do
+      Just c <- solcRuntime "C"
+        [i|
+         contract MarketManager {
+           function tokenDataOf( address mToken) external view returns (uint256) {
+               return 55;
+           }
+         }
+         contract C {
+           MarketManager marketManager;
+           function collateralPostedFor(address mToken) public returns (uint256) {
+               uint256 collateralPosted = marketManager.tokenDataOf(mToken);
+               assert(collateralPosted == 4);
+               return collateralPosted;
+           }
+         }
+        |]
+      let sig2 = Just (Sig "collateralPostedFor(address)" [AbiAddressType])
+      (res2, ret2) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig2 [] defaultVeriOpts
+      putStrLnM $ "successfully explored: " <> show (Expr.numBranches res2) <> " paths"
+      assertBoolM "The expression is NOT error" $ not $ any isError ret2
+    , test "staticcall-no-overapprox-2" $ do
+      Just c <- solcRuntime "C"
+        [i|
+        contract Target {
+            function add(uint256 x, uint256 y) external pure returns (uint256) {
+              unchecked {
+                return x + y;
+              }
+            }
+        }
+        contract C {
+            function checkval(uint256 x, uint256 y) public {
+                Target t = new Target();
+                address realAddr = address(t);
+                bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, y);
+                (bool success, bytes memory returnData) = realAddr.staticcall(data);
+                assert(success);
+                assert(returnData.length == 32);
+                // Decode the return value
+                uint256 result = abi.decode(returnData, (uint256));
+
+                // Assert that the result is equal to x + y
+                unchecked {
+                  assert(result == x + y);
+                }
+            }
+        }
+        |]
+      let sig = Just (Sig "checkval(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
+      (res, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+      putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+      assertBoolM "The expression is NOT partial" $ not $ Expr.containsNode isPartial res
+      assertBoolM "The expression is NOT unknown" $ not $ any isUnknown ret
+      assertBoolM "The expression is NOT errro" $ not $ any isError ret
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      let numErrs = sum $ map (fromEnum . isError) ret
+      let numQeds = sum $ map (fromEnum . isQed) ret
+      assertEqualM "number of counterexamples" 0 numCexes
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of qed-s" 1 numQeds
     , test "staticcall-check-symbolic1" $ do
       Just c <- solcRuntime "C"
         [i|
