@@ -954,9 +954,9 @@ simplify e = if (mapExpr go e == e)
 
     -- redundant CopySlice
     go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
-    go (CopySlice (Lit 0) (Lit 0) (BufLength (AbstractBuf k1))
-      (CopySlice (Lit 0) (Lit 0) (BufLength (AbstractBuf k2)) (AbstractBuf k3) _)
-      (ConcreteBuf "")) | k1 == k2 && k2 == k3 = (AbstractBuf k1)
+    go (CopySlice (Lit 0) (Lit 0) (BufLength k1)
+      (CopySlice (Lit 0) (Lit 0) (BufLength k2) k3 _)
+      (ConcreteBuf "")) | k1 == k2 && k2 == k3 = k1
 
     -- simplify storage
     go (SLoad slot store) = readStorage' slot store
