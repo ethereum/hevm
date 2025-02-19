@@ -954,9 +954,12 @@ simplify e = if (mapExpr go e == e)
 
     -- redundant CopySlice
     go (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x0) _ dst) = dst
-    go (CopySlice (Lit 0) (Lit 0) (BufLength k1)
-      (CopySlice (Lit 0) (Lit 0) (BufLength k2) k3 _)
-      (ConcreteBuf "")) | k1 == k2 && k2 == k3 = k1
+    -- overwrite empty buf with a buf, return is the buf
+    go (CopySlice (Lit 0) (Lit 0) (BufLength src1) src2 (ConcreteBuf "")) | src1 == src2 = src1
+    -- We write over dst with data from src. As long as we read from where we write, and
+    --    it's the same size, we can just skip the 2nd CopySlice
+    go (CopySlice readOff dstOff size2 (CopySlice srcOff writeOff size1 src _) dst) |
+      size1 == size2 && readOff == writeOff = CopySlice srcOff dstOff size1 src dst
 
     -- simplify storage
     go (SLoad slot store) = readStorage' slot store
