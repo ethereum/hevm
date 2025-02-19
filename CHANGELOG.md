@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CopySlice` can be ignored
 - More simplification rules that help avoid symbolic copyslice in case of
   STATICCALL overapproximation
-- Test to make sure we don't accidentally overapproxmate a working, good STATICCALL
+- Test to make sure we don't accidentally overapproximate a working, good STATICCALL
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
