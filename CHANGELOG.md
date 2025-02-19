@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Two more simplification rules: `ReadByte` & `ReadWord` when the `CopySlice`
   it is reading from is writing after the position being read, so the
   `CopySlice` can be ignored
-- One more simplification rule that helps avoid symbolic copyslice in case of
+- More simplification rules that help avoid symbolic copyslice in case of
   STATICCALL overapproximation
 - Test to make sure we don't accidentally overapproxmate a working, good STATICCALL
 
