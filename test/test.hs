@@ -2337,6 +2337,7 @@ tests = testGroup "hevm"
            function retFor(address addr) public returns (uint256) {
                // NOTE: this is symbolic execution, and no setUp has been ran
                //       hence, this below calls unknown code! So it overapproximates.
+               //       mm is actually 0 here, which we may want to give a warning for
                uint256 ret = mm.get(addr);
                assert(ret == 4);
                return ret;
