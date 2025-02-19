@@ -507,6 +507,16 @@ tests = testGroup "hevm"
         let e = ReadByte (Lit 0x0) (WriteWord (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd) (Lit 0x0) (ConcreteBuf "\255\255\255\255"))
         b <- checkEquiv e (Expr.simplify e)
         assertBoolM "Simplifier failed" b
+    , test "copyslice-simps" $ do
+        let e a b =  CopySlice (Lit 0) (Lit 0) (BufLength (AbstractBuf "buff")) (CopySlice (Lit 0) (Lit 0) (BufLength (AbstractBuf "buff")) (AbstractBuf "buff") (ConcreteBuf a)) (ConcreteBuf b)
+            expr1 = e "" ""
+            expr2 = e "" "aasdfasdf"
+            expr3 = e "9832478932" ""
+            expr4 = e "9832478932" "aasdfasdf"
+        assertEqualM "Not full simp" (Expr.simplify expr1) (AbstractBuf "buff")
+        assertEqualM "Not full simp" (Expr.simplify expr2) $ CopySlice (Lit 0x0) (Lit 0x0) (BufLength (AbstractBuf "buff")) (AbstractBuf "buff") (ConcreteBuf "aasdfasdf")
+        assertEqualM "Not full simp" (Expr.simplify expr3) (AbstractBuf "buff")
+        assertEqualM "Not full simp" (Expr.simplify expr4) $ CopySlice (Lit 0x0) (Lit 0x0) (BufLength (AbstractBuf "buff")) (AbstractBuf "buff") (ConcreteBuf "aasdfasdf")
     , test "buffer-length-copy-slice-beyond-source1" $ do
         let e = BufLength (CopySlice (Lit 0x2) (Lit 0x2) (Lit 0x1) (ConcreteBuf "a") (ConcreteBuf ""))
         b <- checkEquiv e (Expr.simplify e)
