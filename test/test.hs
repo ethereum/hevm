@@ -26,7 +26,6 @@ import Data.Maybe
 import Data.String.Here
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.IO qualified as T
 import Data.Time (diffUTCTime, getCurrentTime)
 import Data.Tuple.Extra
 import Data.Tree (flatten)
@@ -274,9 +273,7 @@ tests = testGroup "hevm"
         }
         |]
       expr <- withDefaultSolver $ \s -> getExpr s c (Just (Sig "prove_mapping_access(address,address)" [AbiAddressType, AbiAddressType])) [] defaultVeriOpts
-      putStrLnM $ T.unpack $ formatExpr expr
       let simpExpr = mapExprM Expr.decomposeStorage expr
-      -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
     , test "decompose-2" $ do
       Just c <- solcRuntime "MyContract"
@@ -1423,7 +1420,6 @@ tests = testGroup "hevm"
               }
             |]
         Right e <- reachableUserAsserts c Nothing
-        liftIO $ T.putStrLn $ formatExpr e
         assertBoolM "The expression is not partial" $ Expr.containsNode isPartial e
       ,
       -- TODO: we can't deal with symbolic jump conditions
@@ -1528,7 +1524,10 @@ tests = testGroup "hevm"
             |]
         let sig = Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
         (_, k) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
-        putStrLnM $ "Ret: " <> (show k)
+        let numErrs = sum $ map (fromEnum . isError) k
+        assertEqualM "number of errors (i.e. copySlice issues) is 1" 1 numErrs
+        let errStrings = mapMaybe EVM.SymExec.getError k
+        assertEqualM "All errors are from copyslice" True $ all ("CopySlice" `List.isInfixOf`) errStrings
   ]
   , testGroup "Symbolic-Constructor-Args"
     -- this produced some hard to debug failures. keeping it around since it seemed to exercise the contract creation code in interesting ways...
