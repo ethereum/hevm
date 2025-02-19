@@ -2312,10 +2312,8 @@ tests = testGroup "hevm"
       (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig2 [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches expr) <> " paths"
       assertBoolM "The expression is NOT error" $ not $ any isError ret
-    -- NOTE: below used to be symbolic copyslice copy error before new copyslice simplification:
-    --       go (CopySlice (Lit 0) (Lit 0) (BufLength (AbstractBuf k1))
-    --         (CopySlice (Lit 0) (Lit 0) (BufLength (AbstractBuf k2)) (AbstractBuf k3) _)
-    --         (ConcreteBuf "")) | k1 == k2 && k2 == k3 = (AbstractBuf k1)
+    -- NOTE: below used to be symbolic copyslice copy error before new copyslice
+    --       simplifications in Expr.simplify
     , test "overapproximates-undeployed-contract" $ do
       Just c <- solcRuntime "C"
         [i|
