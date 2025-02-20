@@ -504,6 +504,16 @@ tests = testGroup "hevm"
         let e = ReadByte (Lit 0x0) (WriteWord (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd) (Lit 0x0) (ConcreteBuf "\255\255\255\255"))
         b <- checkEquiv e (Expr.simplify e)
         assertBoolM "Simplifier failed" b
+    , test "copyslice-simps" $ do
+        let e a b =  CopySlice (Lit 0) (Lit 0) (BufLength (AbstractBuf "buff")) (CopySlice (Lit 0) (Lit 0) (BufLength (AbstractBuf "buff")) (AbstractBuf "buff") (ConcreteBuf a)) (ConcreteBuf b)
+            expr1 = e "" ""
+            expr2 = e "" "aasdfasdf"
+            expr3 = e "9832478932" ""
+            expr4 = e "9832478932" "aasdfasdf"
+        assertEqualM "Not full simp" (Expr.simplify expr1) (AbstractBuf "buff")
+        assertEqualM "Not full simp" (Expr.simplify expr2) $ CopySlice (Lit 0x0) (Lit 0x0) (BufLength (AbstractBuf "buff")) (AbstractBuf "buff") (ConcreteBuf "aasdfasdf")
+        assertEqualM "Not full simp" (Expr.simplify expr3) (AbstractBuf "buff")
+        assertEqualM "Not full simp" (Expr.simplify expr4) $ CopySlice (Lit 0x0) (Lit 0x0) (BufLength (AbstractBuf "buff")) (AbstractBuf "buff") (ConcreteBuf "aasdfasdf")
     , test "buffer-length-copy-slice-beyond-source1" $ do
         let e = BufLength (CopySlice (Lit 0x2) (Lit 0x2) (Lit 0x1) (ConcreteBuf "a") (ConcreteBuf ""))
         b <- checkEquiv e (Expr.simplify e)
@@ -2290,6 +2300,99 @@ tests = testGroup "hevm"
       assertEqualM "number of counterexamples" 1 numCexes
       assertEqualM "number of errors" 0 numErrs
       assertEqualM "number of qed-s" 0 numQeds
+    , test "copyslice-symbolic-ok" $ do
+      Just c <- solcRuntime "C"
+        [i|
+         contract Target {
+           function get(address addr) external view returns (uint256) {
+               return 55;
+           }
+         }
+         contract C {
+           function retFor(address addr) public returns (uint256) {
+               Target mm = new Target();
+               uint256 ret = mm.get(addr);
+               assert(ret == 4);
+               return ret;
+           }
+         }
+        |]
+      let sig2 = Just (Sig "retFor(address)" [AbiAddressType])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig2 [] defaultVeriOpts
+      putStrLnM $ "successfully explored: " <> show (Expr.numBranches expr) <> " paths"
+      assertBoolM "The expression is NOT error" $ not $ any isError ret
+    -- NOTE: below used to be symbolic copyslice copy error before new copyslice
+    --       simplifications in Expr.simplify
+    , test "overapproximates-undeployed-contract" $ do
+      Just c <- solcRuntime "C"
+        [i|
+         contract Target {
+           function get(address addr) external view returns (uint256) {
+               return 55;
+           }
+         }
+         contract C {
+           Target mm;
+           function retFor(address addr) public returns (uint256) {
+               // NOTE: this is symbolic execution, and no setUp has been ran
+               //       hence, this below calls unknown code! So it overapproximates.
+               //       mm is actually 0 here, which we may want to give a warning for
+               uint256 ret = mm.get(addr);
+               assert(ret == 4);
+               return ret;
+           }
+         }
+        |]
+      let sig2 = Just (Sig "retFor(address)" [AbiAddressType])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig2 [] defaultVeriOpts
+      putStrLnM $ "successfully explored: " <> show (Expr.numBranches expr) <> " paths"
+      assertBoolM "The expression is NOT error" $ not $ any isError ret
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      -- There are 2 CEX-es
+      -- This is because with one CEX, the return DATA
+      -- is empty, and in the other, the return data is non-empty (but symbolic)
+      assertEqualM "number of counterexamples" 2 numCexes
+    , test "staticcall-no-overapprox-2" $ do
+      Just c <- solcRuntime "C"
+        [i|
+        contract Target {
+            function add(uint256 x, uint256 y) external pure returns (uint256) {
+              unchecked {
+                return x + y;
+              }
+            }
+        }
+        contract C {
+            function checkval(uint256 x, uint256 y) public {
+                Target t = new Target();
+                address realAddr = address(t);
+                bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, y);
+                (bool success, bytes memory returnData) = realAddr.staticcall(data);
+                assert(success);
+                assert(returnData.length == 32);
+
+                // Decode the return value
+                uint256 result = abi.decode(returnData, (uint256));
+
+                // Assert that the result is equal to x + y
+                unchecked {
+                  assert(result == x + y);
+                }
+            }
+        }
+        |]
+      let sig = Just (Sig "checkval(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
+      (res, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+      putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
+      assertBoolM "The expression is NOT partial" $ not $ Expr.containsNode isPartial res
+      assertBoolM "The expression is NOT unknown" $ not $ any isUnknown ret
+      assertBoolM "The expression is NOT error" $ not $ any isError ret
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      let numErrs = sum $ map (fromEnum . isError) ret
+      let numQeds = sum $ map (fromEnum . isQed) ret
+      assertEqualM "number of counterexamples" 0 numCexes
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of qed-s" 1 numQeds
     , test "staticcall-check-symbolic1" $ do
       Just c <- solcRuntime "C"
         [i|
