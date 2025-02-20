@@ -184,11 +184,7 @@ fetchChainIdFrom url = do
   sess <- Session.newAPISession
   fetchQuery Latest (fetchWithSession url sess) QueryChainId
 
-http :: Natural -> Maybe Natural -> BlockNumber -> Text -> Fetcher t m s
-http smtjobs smttimeout n url q =
-  withSolvers Z3 smtjobs 1 smttimeout $ \s ->
-    oracle s (Just (n, url)) q
-
+-- Only used for testing (test.hs, BlockchainTests.hs)
 zero :: Natural -> Maybe Natural -> Fetcher t m s
 zero smtjobs smttimeout q =
   withSolvers Z3 smtjobs 1 smttimeout $ \s ->
