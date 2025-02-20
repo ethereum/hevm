@@ -483,6 +483,7 @@ formatPartial = \case
     , "program counter: " <> T.pack (show pc)
     , "function selector: " <> T.pack (show selector)
     ]
+  TooManyBraches pc -> T.unlines ["Too many branches", "program counter: " <> pack (show pc)]
 
 formatPartialShort :: PartialExec -> Text
 formatPartialShort = \case
@@ -490,6 +491,7 @@ formatPartialShort = \case
   MaxIterationsReached {}            -> "Max iterations reached"
   JumpIntoSymbolicCode {}            -> "Encountered a jump into a potentially symbolic code region while executing initcode"
   CheatCodeMissing _ selector        -> "Cheat code not recognized: " <> T.pack (show selector)
+  TooManyBraches pc                  -> "Too many branches at program counter: " <> pack (show pc)
 
 formatSomeExpr :: SomeExpr -> Text
 formatSomeExpr (SomeExpr e) = formatExpr $ Expr.simplify e

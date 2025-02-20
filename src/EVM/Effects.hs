@@ -46,6 +46,7 @@ data Config = Config
   , maxBranch     :: Int
   , promiseNoReent   :: Bool
   , maxBufSize       :: Int
+  , maxExplore     :: Maybe Int
   }
   deriving (Show, Eq)
 
@@ -62,6 +63,7 @@ defaultConfig = Config
   , maxBranch = 100
   , promiseNoReent = False
   , maxBufSize = 64
+  , maxExplore = Nothing
   }
 
 -- Write to the console
