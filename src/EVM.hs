@@ -25,6 +25,7 @@ import EVM.Sign qualified
 import EVM.Concrete qualified as Concrete
 import EVM.CheatsTH
 import EVM.Expr (maybeLitByteSimp, maybeLitWordSimp, maybeLitAddrSimp)
+import EVM.Effects (Config (..))
 
 import Control.Monad (unless, when)
 import Control.Monad.ST (ST)
@@ -288,20 +289,9 @@ getOpW8 state = case state.code of
 getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
 getOpName state = intToOpName $ fromEnum $ getOpW8 state
 
--- If the address is already in the cache, or can be obtained via API, return True
--- otherwise, return False
-canFetchAccount :: forall (t :: VMType) s . VMOps t => Expr EAddr -> EVM t s (Bool)
-canFetchAccount addr = do
-  use (#env % #contracts % at addr) >>= \case
-    Just _ -> pure True
-    Nothing -> case addr of
-      LitAddr _ -> pure True
-      SymAddr _ -> pure False
-      GVar _ -> internalError "GVar not allowed here"
-
 -- | Executes the EVM one step
-exec1 :: forall (t :: VMType) s. VMOps t => EVM t s ()
-exec1 = do
+exec1 :: forall (t :: VMType) s. (VMOps t) => Config ->  EVM t s ()
+exec1 conf = do
   vm <- get
 
   let
@@ -340,6 +330,7 @@ exec1 = do
     then doStop
 
     else do
+      let ?conf = conf
       let ?op = getOpW8 vm.state
       let opName = getOpName vm.state
       case getOp (?op) of
@@ -459,14 +450,13 @@ exec1 = do
 
         OpBalance ->
           case stk of
-            x:xs -> forceAddr x "BALANCE" $ \a ->
+            x:xs -> forceAddr x (symbolicFallback xs) $ \a ->
               accessAndBurn a $
                 fetchAccount a $ \c -> do
                   next
                   assign (#state % #stack) xs
                   pushSym c.balance
-            [] ->
-              underrun
+            [] -> underrun
 
         OpOrigin ->
           limitStack 1 . burn g_base $
@@ -519,9 +509,9 @@ exec1 = do
 
         OpExtcodesize ->
           case stk of
-            x':xs -> forceAddr x' "EXTCODESIZE" $ \x -> do
+            x':xs -> forceAddr x' (symbolicFallback xs) $ \x -> do
               let impl = accessAndBurn x $
-                           fetchAccount x $ \c -> do
+                           fetchAccountWithFallback x (symbolicFallback xs) $ \c -> do
                              next
                              assign (#state % #stack) xs
                              case view bytecode c of
@@ -541,7 +531,7 @@ exec1 = do
         OpExtcodecopy ->
           case stk of
             extAccount':memOffset:codeOffset:codeSize:xs ->
-              forceAddr extAccount' "EXTCODECOPY" $ \extAccount -> do
+              forceAddr extAccount' (defaultFallback "EXTCODECOPY") $ \extAccount -> do
                 burnExtcodecopy extAccount codeSize $
                   accessMemoryRange memOffset codeSize $
                     fetchAccount extAccount $ \c -> do
@@ -580,7 +570,7 @@ exec1 = do
 
         OpExtcodehash ->
           case stk of
-            x':xs -> forceAddr x' "EXTCODEHASH" $ \x ->
+            x':xs -> forceAddr x' (symbolicFallback xs) $ \x ->
               accessAndBurn x $ do
                 next
                 assign (#state % #stack) xs
@@ -881,13 +871,17 @@ exec1 = do
           case stk of
             xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
               branch (Expr.gt xValue (Lit 0)) $ \gt0 -> do
+                let addrFallback = if conf.promiseNoReent then const fallback
+                                   else defaultFallback "unable to determine a call target"
                 (if gt0 then notStatic else id) $
-                  forceAddr xTo' "unable to determine a call target" $ \xTo ->
+                  forceAddr xTo' addrFallback $ \xTo ->
                     case gasTryFrom xGas of
                       Left _ -> vmError IllegalOverflow
                       Right gas -> do
                         overrideC <- use $ #state % #overrideCaller
-                        delegateCall this gas xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs unknownCodeFallback $
+                        let delegateFallback = if conf.promiseNoReent then const fallback
+                                               else unknownCodeFallback
+                        delegateCall this gas xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs delegateFallback $
                           \callee -> do
                             let from' = fromMaybe self overrideC
                             zoom #state $ do
@@ -897,24 +891,28 @@ exec1 = do
                             touchAccount from'
                             touchAccount callee
                             transfer from' callee xValue
-            _ ->
-              underrun
+              where fallback = freshValueFallback xs
+            _ -> underrun
 
         OpCallcode ->
           case stk of
-            xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
-              forceAddr xTo' "unable to determine a call target" $ \xTo ->
+            xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs -> do
+              let addrFallback = if conf.promiseNoReent then const fallback
+                                 else defaultFallback "unable to determine a call target"
+              forceAddr xTo' addrFallback $ \xTo ->
                 case gasTryFrom xGas of
                   Left _ -> vmError IllegalOverflow
                   Right gas -> do
                     overrideC <- use $ #state % #overrideCaller
-                    delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs unknownCodeFallback $ \_ -> do
+                    let delegateFallback = if conf.promiseNoReent then const fallback
+                                           else unknownCodeFallback
+                    delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs delegateFallback $ \_ -> do
                       zoom #state $ do
                         assign #callvalue xValue
                         assign #caller $ fromMaybe self overrideC
                       touchAccount self
-            _ ->
-              underrun
+              where fallback = freshValueFallback xs
+            _ -> underrun
 
         OpReturn ->
           case stk of
@@ -998,39 +996,25 @@ exec1 = do
                 Just xTo' -> do
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
-                    Right gas -> canFetchAccount xTo' >>= \case
-                      False -> fallback
-                      True -> do
-                        overrideC <- use $ #state % #overrideCaller
-                        delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs (const fallback) $
-                          \callee -> do
-                            zoom #state $ do
-                              assign #callvalue (Lit 0)
-                              assign #caller $ fromMaybe self overrideC
-                              assign #contract callee
-                              assign #static True
-                            touchAccount self
-                            touchAccount callee
-              where
-                fallback :: EVM t s ()
-                fallback = do
-                  -- Reset caller if needed
-                  resetCaller <- use $ #state % #resetCaller
-                  when resetCaller $ assign (#state % #overrideCaller) Nothing
-                  -- overapproximate by returning a symbolic value
-                  freshVar <- use #freshVar
-                  assign #freshVar (freshVar + 1)
-                  let freshVarExpr = Var ("staticcall-result-stack-" <> (pack . show) freshVar)
-                  modifying #constraints ((:) (PLEq freshVarExpr (Lit 1) ))
-                  assign (#state % #returndata) (AbstractBuf ("staticall-result-data-" <> (pack . show) freshVar))
-                  next >> assign (#state % #stack) (freshVarExpr:xs)
+                    Right gas -> do
+                      overrideC <- use $ #state % #overrideCaller
+                      delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs (const fallback) $
+                        \callee -> do
+                          zoom #state $ do
+                            assign #callvalue (Lit 0)
+                            assign #caller $ fromMaybe self overrideC
+                            assign #contract callee
+                            assign #static True
+                          touchAccount self
+                          touchAccount callee
+              where fallback = freshValueFallback xs
             _ -> underrun
 
         OpSelfdestruct ->
           notStatic $
           case stk of
             [] -> underrun
-            (xTo':_) -> forceAddr xTo' "SELFDESTRUCT" $ \case
+            (xTo':_) -> forceAddr xTo' (defaultFallback "SELFDESTRUCT") $ \case
               xTo@(LitAddr _) -> do
                 cc <- gets (.tx.subState.createdContracts)
                 let createdThisTr = self `member` cc
@@ -1407,16 +1391,18 @@ query q = assign #result $ Just $ HandleEffect (Query q)
 runBoth :: RunBoth s -> EVM Symbolic s ()
 runBoth c = assign #result $ Just $ HandleEffect (RunBoth c)
 
--- | Construct RPC Query and halt execution until resolved
-fetchAccount :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
+fetchAccount  :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
 fetchAccount addr continue =
+  let fallback = defaultFallback "trying to access a symbolic address that isn't already present in storage"
+  in fetchAccountWithFallback addr fallback continue
+
+-- | Construct RPC Query and halt execution until resolved
+fetchAccountWithFallback :: VMOps t => Expr EAddr -> (Expr EAddr -> EVM t s ()) -> (Contract -> EVM t s ()) -> EVM t s ()
+fetchAccountWithFallback addr fallback continue =
   use (#env % #contracts % at addr) >>= \case
     Just c -> continue c
     Nothing -> case addr of
-      SymAddr _ -> do
-        pc <- use (#state % #pc)
-        state <- use #state
-        partial $ UnexpectedSymbolicArg pc (getOpName state) "trying to access a symbolic address that isn't already present in storage" (wrap [addr])
+      SymAddr _ -> fallback addr
       LitAddr a -> do
         use (#cache % #fetched % at a) >>= \case
           Just c -> do
@@ -1614,15 +1600,46 @@ notStatic continue = do
     then vmError StateChangeWhileStatic
     else continue
 
-forceAddr :: VMOps t => Expr EWord -> String -> (Expr EAddr -> EVM t s ()) -> EVM t s ()
-forceAddr n msg continue = case wordToAddr n of
+forceAddr :: VMOps t =>
+  Expr EWord
+  -> (Expr EWord -> EVM t s ())
+  -> (Expr EAddr -> EVM t s ())
+  -> EVM t s ()
+forceAddr n fallback continue = case wordToAddr n of
   Nothing -> manySolutions n 20 $ \case
     Just sol -> continue $ LitAddr (truncateToAddr sol)
-    Nothing -> fallback
+    Nothing -> fallback n
   Just c -> continue c
-  where fallback = do
-          vm <- get
-          partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+
+defaultFallback :: (Typeable a, VMOps t) => String -> Expr a -> EVM t s ()
+defaultFallback msg n = do
+  vm <- get
+  partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+
+freshValueFallback :: (?conf :: Config, VMOps t, ?op :: Word8) => [Expr EWord] -> EVM t s ()
+freshValueFallback xs = do
+  -- Reset caller if needed
+  resetCaller <- use $ #state % #resetCaller
+  when resetCaller $ assign (#state % #overrideCaller) Nothing
+  -- overapproximate by returning a symbolic value
+  freshVar <- use #freshVar
+  assign #freshVar (freshVar + 1)
+  let opName = pack $ show $ getOp ?op
+  let freshVarExpr = Var (opName <> "-result-stack-" <> (pack . show) freshVar)
+  modifying #constraints ((:) (PLEq freshVarExpr (Lit 1) ))
+  let freshReturndataExpr = AbstractBuf (opName <> "-result-data-" <> (pack . show) freshVar)
+  modifying #constraints ((:) (PLEq (bufLength freshReturndataExpr) (Lit (2 ^ ?conf.maxBufSize))))
+  assign (#state % #returndata) freshReturndataExpr
+  next >> assign (#state % #stack) (freshVarExpr:xs)
+
+symbolicFallback:: (VMOps t, ?op :: Word8) => [Expr EWord] -> Expr a -> EVM t s ()
+symbolicFallback xs _ = do
+  next
+  freshVar <- use #freshVar
+  assign #freshVar (freshVar + 1)
+  let freshVarExpr = Var ("symbolicFallback-" <> (pack . show) ?op <> "-" <> (pack . show) freshVar)
+  assign (#state % #stack) xs
+  pushSym freshVarExpr
 
 forceConcrete :: VMOps t => Expr EWord -> String -> (W256 -> EVM t s ()) -> EVM t s ()
 forceConcrete n = forceConcreteLimitSz n 32
@@ -1789,7 +1806,7 @@ cheatActions = Map.fromList
   , action "deal(address,uint256)" $
       \sig input -> case decodeStaticArgs 0 2 input of
         [a, amt] ->
-          forceAddr a "vm.deal: cannot decode target into an address" $ \usr ->
+          forceAddr a (defaultFallback "vm.deal: cannot decode target into an address") $ \usr ->
             fetchAccount usr $ \_ -> do
               assign (#env % #contracts % ix usr % #balance) amt
               doStop
@@ -2100,7 +2117,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           resetCaller <- use $ #state % #resetCaller
           when resetCaller $ assign (#state % #overrideCaller) Nothing
           vm0 <- get
-          fetchAccount xTo $ \target -> case target.code of
+          fetchAccountWithFallback xTo fallback $ \target -> case target.code of
               UnknownCode _ -> fallback xTo
               _ -> do
                 burn' xGas $ do

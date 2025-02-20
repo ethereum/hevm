@@ -196,8 +196,8 @@ symRun :: App m => UnitTestOptions RealWorld -> VM Concrete RealWorld -> Sig -> 
 symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     let callSig = testName <> "(" <> (Text.intercalate "," (map abiTypeSolidity types)) <> ")"
     liftIO $ putStrLn $ "\x1b[96m[RUNNING]\x1b[0m " <> Text.unpack callSig
-    let cd = symCalldata callSig types [] (AbstractBuf "txdata")
-        shouldFail = "proveFail" `isPrefixOf` callSig
+    cd <- symCalldata callSig types [] (AbstractBuf "txdata")
+    let shouldFail = "proveFail" `isPrefixOf` callSig
 
     -- define postcondition depending on `shouldFail`
     let testContract store = fromMaybe (internalError "test contract not found in state") (Map.lookup vm.state.contract store)

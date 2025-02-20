@@ -166,8 +166,9 @@ data CalldataFragment
 -- with concrete arguments.
 -- Any argument given as "<symbolic>" or omitted at the tail of the list are
 -- kept symbolic.
-symCalldata :: Text -> [AbiType] -> [String] -> Expr Buf -> (Expr Buf, [Prop])
-symCalldata sig typesignature concreteArgs base =
+symCalldata :: App m => Text -> [AbiType] -> [String] -> Expr Buf -> m (Expr Buf, [Prop])
+symCalldata sig typesignature concreteArgs base = do
+  conf <- readConfig
   let
     args = concreteArgs <> replicate (length typesignature - length concreteArgs) "<symbolic>"
     mkArg :: AbiType -> String -> Int -> CalldataFragment
@@ -184,8 +185,8 @@ symCalldata sig typesignature concreteArgs base =
     withSelector = writeSelector cdBuf sig
     sizeConstraints
       = (Expr.bufLength withSelector .>= cdLen calldatas)
-      .&& (Expr.bufLength withSelector .< (Lit (2 ^ (64 :: Integer))))
-  in (withSelector, sizeConstraints : props)
+      .&& (Expr.bufLength withSelector .< (Lit (2 ^ conf.maxBufSize)))
+  pure (withSelector, sizeConstraints : props)
 
 cdLen :: [CalldataFragment] -> Expr EWord
 cdLen = go (Lit 4)
@@ -317,7 +318,8 @@ interpret fetcher maxIter askSmtIters heuristic vm =
   eval (action Operational.:>>= k) =
     case action of
       Stepper.Exec -> do
-        (r, vm') <- liftIO $ stToIO $ runStateT exec vm
+        conf <- readConfig
+        (r, vm') <- liftIO $ stToIO $ runStateT (exec conf) vm
         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
       Stepper.Fork (PleaseRunBoth cond continue) -> do
         frozen <- liftIO $ stToIO $ freezeVM vm
@@ -439,7 +441,8 @@ getExpr
   -> VeriOpts
   -> m (Expr End)
 getExpr solvers c signature' concreteArgs opts = do
-      preState <- liftIO $ stToIO $ abstractVM (mkCalldata signature' concreteArgs) c Nothing False
+      calldata <- mkCalldata signature' concreteArgs
+      preState <- liftIO $ stToIO $ abstractVM calldata c Nothing False
       exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
       if opts.simp then (pure $ Expr.simplify exprInter) else pure exprInter
 
@@ -481,15 +484,16 @@ panicMsg err = selector "Panic(uint256)" <> encodeAbiValue (AbiUInt 256 err)
 
 -- | Builds a buffer representing calldata from the provided method description
 -- and concrete arguments
-mkCalldata :: Maybe Sig -> [String] -> (Expr Buf, [Prop])
-mkCalldata Nothing _ =
-  ( AbstractBuf "txdata"
-  -- assert that the length of the calldata is never more than 2^64
-  -- this is way larger than would ever be allowed by the gas limit
-  -- and avoids spurious counterexamples during abi decoding
-  -- TODO: can we encode calldata as an array with a smaller length?
-  , [Expr.bufLength (AbstractBuf "txdata") .< (Lit (2 ^ (64 :: Integer)))]
-  )
+mkCalldata :: App m => Maybe Sig -> [String] -> m (Expr Buf, [Prop])
+mkCalldata Nothing _ = do
+  conf <- readConfig
+  pure ( AbstractBuf "txdata"
+       -- assert that the length of the calldata is never more than 2^64
+       -- this is way larger than would ever be allowed by the gas limit
+       -- and avoids spurious counterexamples during abi decoding
+       -- TODO: can we encode calldata as an array with a smaller length?
+       , [Expr.bufLength (AbstractBuf "txdata") .< (Lit (2 ^ conf.maxBufSize))]
+       )
 mkCalldata (Just (Sig name types)) args =
   symCalldata name types args (AbstractBuf "txdata")
 
@@ -504,7 +508,8 @@ verifyContract
   -> Maybe (Postcondition RealWorld)
   -> m (Expr End, [VerifyResult])
 verifyContract solvers theCode signature' concreteArgs opts maybepre maybepost = do
-  preState <- liftIO $ stToIO $ abstractVM (mkCalldata signature' concreteArgs) theCode maybepre False
+  calldata <- mkCalldata signature' concreteArgs
+  preState <- liftIO $ stToIO $ abstractVM calldata theCode maybepre False
   verify solvers opts preState maybepost
 
 -- | Stepper that parses the result of Stepper.runFully into an Expr End
