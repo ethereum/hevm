@@ -228,6 +228,9 @@ main = withUtf8 $ do
   when (cmd.maxBufSize > 64) $ do
     putStrLn "Error: maxBufSize must be less than or equal to 64. That limits buffers to a size of 2^64, which is more than enough for practical purposes"
     exitFailure
+  when (cmd.maxBufSize < 0) $ do
+    putStrLn "Error: maxBufSize must be at least 0. Negative values do not make sense. A value of zero means at most 1 byte long buffers"
+    exitFailure
   let env = Env { config = defaultConfig
     { dumpQueries = cmd.smtdebug
     , debug = cmd.debug
