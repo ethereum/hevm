@@ -134,7 +134,7 @@ data Command w
       , noDecompose   :: w ::: Bool             <?> "Don't decompose storage slots into separate arrays"
       , maxBranch     :: w ::: Int              <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
       , maxBufSize    :: w ::: Int              <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
-      , promiseNoReent:: w ::: Bool             <!> "Promise no reentrancy is possible into the contrct(s) being examined"
+      , promiseNoReent:: w ::: Bool             <!> "Promise no reentrancy is possible into the contract(s) being examined"
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
