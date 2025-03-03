@@ -225,6 +225,9 @@ getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
 main :: IO ()
 main = withUtf8 $ do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
+  when (cmd.maxBufSize > 64) $ do
+    putStrLn "Error: maxBufSize must be less than or equal to 64. That limits buffers to a size of 2^64, which is more than enough for practical purposes"
+    exitFailure
   let env = Env { config = defaultConfig
     { dumpQueries = cmd.smtdebug
     , debug = cmd.debug
