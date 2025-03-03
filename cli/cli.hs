@@ -189,7 +189,7 @@ data Command w
       , numCexFuzz    :: w ::: Integer                  <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
       , askSmtIterations :: w ::: Integer               <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , maxBufSize    :: w ::: Int                      <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
-      , promiseNoReent:: w ::: Bool                     <!> "Promise no reentrancy is possible into the contrct(s) being examined"
+      , promiseNoReent:: w ::: Bool                     <!> "Promise no reentrancy is possible into the contract(s) being examined"
       }
   | Version
 
