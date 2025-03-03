@@ -1391,7 +1391,7 @@ query q = assign #result $ Just $ HandleEffect (Query q)
 runBoth :: RunBoth s -> EVM Symbolic s ()
 runBoth c = assign #result $ Just $ HandleEffect (RunBoth c)
 
-fetchAccount  :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
+fetchAccount :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
 fetchAccount addr continue =
   let fallback = defaultFallback "trying to access a symbolic address that isn't already present in storage"
   in fetchAccountWithFallback addr fallback continue
