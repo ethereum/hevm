@@ -108,7 +108,7 @@ data Command w
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , noDecompose   :: w ::: Bool               <?> "Don't decompose storage slots into separate arrays"
       , maxBranch     :: w ::: Int                <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
-      , promiseNoReent:: w ::: Bool               <!> "Promise no reentrancy is possible into the contrct(s) being examined"
+      , promiseNoReent:: w ::: Bool               <!> "Promise no reentrancy is possible into the contract(s) being examined"
       , maxBufSize    :: w ::: Int                <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
       }
   | Equivalence -- prove equivalence between two programs
