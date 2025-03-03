@@ -452,7 +452,7 @@ exec1 conf = do
           case stk of
             x:xs -> forceAddr x (symbolicFallback xs) $ \a ->
               accessAndBurn a $
-                fetchAccount a $ \c -> do
+                fetchAccountWithFallback a (symbolicFallback xs) $ \c -> do
                   next
                   assign (#state % #stack) xs
                   pushSym c.balance
@@ -572,9 +572,9 @@ exec1 conf = do
           case stk of
             x':xs -> forceAddr x' (symbolicFallback xs) $ \x ->
               accessAndBurn x $ do
-                next
-                assign (#state % #stack) xs
-                fetchAccount x $ \c ->
+                fetchAccountWithFallback x (symbolicFallback xs) $ \c -> do
+                   next
+                   assign (#state % #stack) xs
                    if accountEmpty c
                      then push (W256 0)
                      else case view bytecode c of
