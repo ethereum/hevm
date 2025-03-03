@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but allows much more thorough exploration of the contract
 - Allow controlling the max buffer sizes via --max-buf-size to something smaller than 2**64
   so we don't get too large buffers as counterexamples
+- More symbolic overapproximation for OpBalance and OpExtCodeHash
 
 
 ## Fixed
