@@ -228,7 +228,9 @@ oracle solvers info q = do
         Just x -> pure $ continue x
         Nothing -> internalError $ "oracle error: " ++ show q
 
-    PleaseFetchSlot addr slot continue ->
+    PleaseFetchSlot addr slot continue -> do
+      conf <- readConfig
+      when (conf.debug) $ liftIO $ putStrLn $ "Fetching slot " <> (show slot) <> " at " <> (show addr)
       case info of
         Nothing -> pure (continue 0)
         Just (n, url) ->
