@@ -453,7 +453,7 @@ exec1 conf = do
           case stk of
             x:xs -> forceAddr x (symbolicFallback xs) $ \a ->
               accessAndBurn a $
-                fetchAccount a $ \c -> do
+                fetchAccountWithFallback a (symbolicFallback xs) $ \c -> do
                   next
                   assign (#state % #stack) xs
                   pushSym c.balance
@@ -573,9 +573,9 @@ exec1 conf = do
           case stk of
             x':xs -> forceAddr x' (symbolicFallback xs) $ \x ->
               accessAndBurn x $ do
-                next
-                assign (#state % #stack) xs
-                fetchAccount x $ \c ->
+                fetchAccountWithFallback x (symbolicFallback xs) $ \c -> do
+                   next
+                   assign (#state % #stack) xs
                    if accountEmpty c
                      then push (W256 0)
                      else case view bytecode c of
@@ -897,22 +897,17 @@ exec1 conf = do
 
         OpCallcode ->
           case stk of
-            xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs -> do
-              let addrFallback = if conf.promiseNoReent then const fallback
-                                 else defaultFallback "unable to determine a call target"
-              forceAddr xTo' addrFallback $ \xTo ->
+            xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
+              forceAddr xTo' (defaultFallback "unable to determine a call target") $ \xTo ->
                 case gasTryFrom xGas of
                   Left _ -> vmError IllegalOverflow
                   Right gas -> do
                     overrideC <- use $ #state % #overrideCaller
-                    let delegateFallback = if conf.promiseNoReent then const fallback
-                                           else unknownCodeFallback
-                    delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs delegateFallback $ \_ -> do
+                    delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs unknownCodeFallback $ \_ -> do
                       zoom #state $ do
                         assign #callvalue xValue
                         assign #caller $ fromMaybe self overrideC
                       touchAccount self
-              where fallback = freshValueFallback xs
             _ -> underrun
 
         OpReturn ->
@@ -1397,7 +1392,7 @@ runBoth limit num c = do
     vm <- get
     assign #result $ Just $ Unfinished (TooManyBraches {pc = vm.state.pc})
 
-fetchAccount  :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
+fetchAccount :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
 fetchAccount addr continue =
   let fallback = defaultFallback "trying to access a symbolic address that isn't already present in storage"
   in fetchAccountWithFallback addr fallback continue
