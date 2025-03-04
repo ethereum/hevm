@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so we don't get too large buffers as counterexamples
 - More symbolic overapproximation for Balance and ExtCodeHash opcodes, fixing
   CodeHash SMT representation
+- Allow limiting the branching factor and the depth of exploration via --max-explore
 
 
 ## Fixed
