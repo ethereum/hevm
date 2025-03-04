@@ -896,22 +896,17 @@ exec1 conf = do
 
         OpCallcode ->
           case stk of
-            xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs -> do
-              let addrFallback = if conf.promiseNoReent then const fallback
-                                 else defaultFallback "unable to determine a call target"
-              forceAddr xTo' addrFallback $ \xTo ->
+            xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
+              forceAddr xTo' (defaultFallback "unable to determine a call target") $ \xTo ->
                 case gasTryFrom xGas of
                   Left _ -> vmError IllegalOverflow
                   Right gas -> do
                     overrideC <- use $ #state % #overrideCaller
-                    let delegateFallback = if conf.promiseNoReent then const fallback
-                                           else unknownCodeFallback
-                    delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs delegateFallback $ \_ -> do
+                    delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs unknownCodeFallback $ \_ -> do
                       zoom #state $ do
                         assign #callvalue xValue
                         assign #caller $ fromMaybe self overrideC
                       touchAccount self
-              where fallback = freshValueFallback xs
             _ -> underrun
 
         OpReturn ->
