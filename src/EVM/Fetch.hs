@@ -217,6 +217,7 @@ oracle solvers info q = do
     PleaseFetchContract addr base continue -> do
       conf <- readConfig
       when (conf.debug) $ liftIO $ putStrLn $ "Fetching contract at " ++ show addr
+      when (addr == 0 && conf.verb > 0) $ liftIO $ putStrLn "Warning: fetching contract at address 0"
       contract <- case info of
         Nothing -> let
           c = case base of
@@ -231,6 +232,7 @@ oracle solvers info q = do
     PleaseFetchSlot addr slot continue -> do
       conf <- readConfig
       when (conf.debug) $ liftIO $ putStrLn $ "Fetching slot " <> (show slot) <> " at " <> (show addr)
+      when (addr == 0 && conf.verb > 0) $ liftIO $ putStrLn "Warning: fetching slot from a contract at address 0"
       case info of
         Nothing -> pure (continue 0)
         Just (n, url) ->
