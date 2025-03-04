@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
   their contract is correct when there were cases/branches that hevm could not
   fully explore. Printing of issues is also now much more organized
+- We now read file as bytecode rather than JSON, as it's more compatible
+  with different input formats
 
 ## [0.54.2] - 2024-12-12
 
