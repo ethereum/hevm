@@ -323,11 +323,12 @@ interpret fetcher maxIter askSmtIters heuristic vm =
         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
       Stepper.Fork (PleaseRunBoth cond continue) -> do
         frozen <- liftIO $ stToIO $ freezeVM vm
+        let newNumExplored = vm.numExplored+1
         evalLeft <- toIO $ do
-          (ra, vma) <- liftIO $ stToIO $ runStateT (continue True) frozen { result = Nothing }
+          (ra, vma) <- liftIO $ stToIO $ runStateT (continue True) frozen { result = Nothing, numExplored = newNumExplored }
           interpret fetcher maxIter askSmtIters heuristic vma (k ra)
         evalRight <- toIO $ do
-          (rb, vmb) <- liftIO $ stToIO $ runStateT (continue False) frozen { result = Nothing }
+          (rb, vmb) <- liftIO $ stToIO $ runStateT (continue False) frozen { result = Nothing, numExplored = newNumExplored }
           interpret fetcher maxIter askSmtIters heuristic vmb (k rb)
         (a, b) <- liftIO $ concurrently evalLeft evalRight
         pure $ ITE cond a b

@@ -76,7 +76,6 @@ data CommonOptions = CommonOptions
   { askSmtIterations ::Integer
   , loopDetectionHeuristic ::LoopHeuristic
   , noDecompose   ::Bool
-  , maxBranch     ::Int
   , solver        ::Text
   , debug         ::Bool
   , calldata      ::Maybe ByteString
@@ -92,6 +91,8 @@ data CommonOptions = CommonOptions
   , maxIterations ::Integer
   , promiseNoReent::Bool
   , maxBufSize    ::Int
+  , maxBranch     ::Int
+  , maxExplore    ::Maybe Int
   }
 
 commonOptions :: Parser CommonOptions
@@ -101,7 +102,6 @@ commonOptions = CommonOptions
   <*> option auto (long "loop-detection-heuristic" <> showDefault <> value StackBased <>
     help "Which heuristic should be used to determine if we are in a loop: StackBased or Naive")
   <*> (switch $ long "no-decompose"         <> help "Don't decompose storage slots into separate arrays")
-  <*> (option auto $ long "max-branch"      <> showDefault <> value 100 <> help "Max number of branches to explore when encountering a symbolic value")
   <*> (strOption $ long "solver"            <> value "z3" <> help "Used SMT solver: z3, cvc5, or bitwuzla")
   <*> (switch $ long "debug"                <> help "Debug printing of internal behaviour, and dump internal expressions")
   <*> (optional $ strOption $ long "calldata" <> help "Tx: calldata")
@@ -117,6 +117,8 @@ commonOptions = CommonOptions
   <*> (option auto $ long "max-iterations"  <> showDefault <> value 5 <> help "Number of times we may revisit a particular branching point. For no bound, set -1")
   <*> (switch $ long "promise-no-reent"     <> help "Promise no reentrancy is possible into the contract(s) being examined")
   <*> (option auto $ long "max-buf-size"    <> value 64 <> help "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)")
+  <*> (option auto $ long "max-branch"      <> showDefault <> value 100 <> help "Max number of branches to explore when encountering a symbolic value. This is a form of branch width limitation per symbolic value")
+  <*> (optional $ option auto $ long "max-explore" <> help "Limit branching factor (i.e. branch width) and total branch depth of exploration (default: unlimited)")
 
 data CommonExecOptions = CommonExecOptions
   { address       ::Maybe Addr
@@ -349,6 +351,7 @@ main = do
         , maxBranch = cOpts.maxBranch
         , promiseNoReent = cOpts.promiseNoReent
         , maxBufSize = cOpts.maxBufSize
+        , maxExplore = cOpts.maxExplore
         , verb = cOpts.verb
         } }
 
