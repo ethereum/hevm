@@ -27,6 +27,7 @@ import Numeric.Natural (Natural)
 import System.Environment (lookupEnv, getEnvironment)
 import System.Process
 import Control.Monad.IO.Class
+import Control.Monad (when)
 import EVM.Effects
 import qualified EVM.Expr as Expr
 
@@ -214,6 +215,9 @@ oracle solvers info q = do
          continue <$> getSolutions solvers symExpr numBytes pathconds
 
     PleaseFetchContract addr base continue -> do
+      conf <- readConfig
+      when (conf.debug) $ liftIO $ putStrLn $ "Fetching contract at " ++ show addr
+      when (addr == 0 && conf.verb > 0) $ liftIO $ putStrLn "Warning: fetching contract at address 0"
       contract <- case info of
         Nothing -> let
           c = case base of
@@ -225,7 +229,10 @@ oracle solvers info q = do
         Just x -> pure $ continue x
         Nothing -> internalError $ "oracle error: " ++ show q
 
-    PleaseFetchSlot addr slot continue ->
+    PleaseFetchSlot addr slot continue -> do
+      conf <- readConfig
+      when (conf.debug) $ liftIO $ putStrLn $ "Fetching slot " <> (show slot) <> " at " <> (show addr)
+      when (addr == 0 && conf.verb > 0) $ liftIO $ putStrLn "Warning: fetching slot from a contract at address 0"
       case info of
         Nothing -> pure (continue 0)
         Just (n, url) ->
