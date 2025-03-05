@@ -321,8 +321,7 @@ exec1 conf = do
             touchAccount self
             out <- use (#state % #returndata)
             finishFrame (FrameReturned out)
-        e -> partial $
-               UnexpectedSymbolicArg vmx.state.pc (getOpName vmx.state) "precompile returned a symbolic value" (wrap [e])
+        e -> unexpectedSymArg "precompile returned a symbolic value" [e]
       _ ->
         underrun
 
@@ -450,7 +449,7 @@ exec1 conf = do
 
         OpBalance ->
           case stk of
-            x:xs -> forceAddr x (symbolicFallback xs) $ \a ->
+            x:xs -> forceAddr x (freshVarFallback xs) $ \a ->
               accessAndBurn a $
                 fetchAccount a $ \c -> do
                   next
@@ -509,9 +508,9 @@ exec1 conf = do
 
         OpExtcodesize ->
           case stk of
-            x':xs -> forceAddr x' (symbolicFallback xs) $ \x -> do
+            x':xs -> forceAddr x' (freshVarFallback xs) $ \x -> do
               let impl = accessAndBurn x $
-                           fetchAccountWithFallback x (symbolicFallback xs) $ \c -> do
+                           fetchAccountWithFallback x (freshVarFallback xs) $ \c -> do
                              next
                              assign (#state % #stack) xs
                              case view bytecode c of
@@ -531,7 +530,7 @@ exec1 conf = do
         OpExtcodecopy ->
           case stk of
             extAccount':memOffset:codeOffset:codeSize:xs ->
-              forceAddr extAccount' (defaultFallback "EXTCODECOPY") $ \extAccount -> do
+              forceAddr extAccount' (unexpectedSymArgW "EXTCODECOPY") $ \extAccount -> do
                 burnExtcodecopy extAccount codeSize $
                   accessMemoryRange memOffset codeSize $
                     fetchAccount extAccount $ \c -> do
@@ -539,9 +538,7 @@ exec1 conf = do
                       assign (#state % #stack) xs
                       case view bytecode c of
                         Just b -> copyBytesToMemory b codeSize codeOffset memOffset
-                        Nothing -> do
-                          pc <- use (#state % #pc)
-                          partial $ UnexpectedSymbolicArg pc opName "Cannot copy from unknown code at" (wrap [extAccount])
+                        Nothing -> unexpectedSymArg "Cannot copy from unknown code at" [extAccount]
             _ -> underrun
 
         OpReturndatasize ->
@@ -570,7 +567,7 @@ exec1 conf = do
 
         OpExtcodehash ->
           case stk of
-            x':xs -> forceAddr x' (symbolicFallback xs) $ \x ->
+            x':xs -> forceAddr x' (freshVarFallback xs) $ \x ->
               accessAndBurn x $ do
                 next
                 assign (#state % #stack) xs
@@ -872,7 +869,7 @@ exec1 conf = do
             xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
               branch (Expr.gt xValue (Lit 0)) $ \gt0 -> do
                 let addrFallback = if conf.promiseNoReent then const fallback
-                                   else defaultFallback "unable to determine a call target"
+                                   else unexpectedSymArgW "unable to determine a call target"
                 (if gt0 then notStatic else id) $
                   forceAddr xTo' addrFallback $ \xTo ->
                     case gasTryFrom xGas of
@@ -880,7 +877,7 @@ exec1 conf = do
                       Right gas -> do
                         overrideC <- use $ #state % #overrideCaller
                         let delegateFallback = if conf.promiseNoReent then const fallback
-                                               else unknownCodeFallback
+                                               else unknownCode
                         delegateCall this gas xTo xTo xValue xInOffset xInSize xOutOffset xOutSize xs delegateFallback $
                           \callee -> do
                             let from' = fromMaybe self overrideC
@@ -891,18 +888,18 @@ exec1 conf = do
                             touchAccount from'
                             touchAccount callee
                             transfer from' callee xValue
-              where fallback = freshValueFallback xs
+              where fallback = freshBufFallback xs
             _ -> underrun
 
         OpCallcode ->
           case stk of
             xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
-              forceAddr xTo' (defaultFallback "unable to determine a call target") $ \xTo ->
+              forceAddr xTo' (unexpectedSymArgW "unable to determine a call target") $ \xTo ->
                 case gasTryFrom xGas of
                   Left _ -> vmError IllegalOverflow
                   Right gas -> do
                     overrideC <- use $ #state % #overrideCaller
-                    delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs unknownCodeFallback $ \_ -> do
+                    delegateCall this gas xTo self xValue xInOffset xInSize xOutOffset xOutSize xs unknownCode $ \_ -> do
                       zoom #state $ do
                         assign #callvalue xValue
                         assign #caller $ fromMaybe self overrideC
@@ -946,17 +943,14 @@ exec1 conf = do
           case stk of
             xGas:xTo:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
               case wordToAddr xTo of
-                Nothing -> do
-                  loc <- codeloc
-                  let msg = "Unable to determine a call target"
-                  partial $ UnexpectedSymbolicArg (snd loc) opName msg [SomeExpr xTo]
+                Nothing -> unexpectedSymArg "unable to determine a call target" [xTo]
                 Just xTo' ->
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
                     Right gas ->
                       -- NOTE: we don't update overrideCaller in this case because
                       -- forge-std doesn't. see: https://github.com/foundry-rs/foundry/pull/8863
-                      delegateCall this gas xTo' self (Lit 0) xInOffset xInSize xOutOffset xOutSize xs unknownCodeFallback $
+                      delegateCall this gas xTo' self (Lit 0) xInOffset xInSize xOutOffset xOutSize xs unknownCode $
                         \_ -> touchAccount self
             _ -> underrun
 
@@ -1002,14 +996,14 @@ exec1 conf = do
                             assign #static True
                           touchAccount self
                           touchAccount callee
-              where fallback = freshValueFallback xs
+              where fallback = freshBufFallback xs
             _ -> underrun
 
         OpSelfdestruct ->
           notStatic $
           case stk of
             [] -> underrun
-            (xTo':_) -> forceAddr xTo' (defaultFallback "SELFDESTRUCT") $ \case
+            (xTo':_) -> forceAddr xTo' (unexpectedSymArgW "SELFDESTRUCT") $ \case
               xTo@(LitAddr _) -> do
                 cc <- gets (.tx.subState.createdContracts)
                 let createdThisTr = self `member` cc
@@ -1034,9 +1028,7 @@ exec1 conf = do
                       doStop
                     else
                       doStop
-              a -> do
-                pc <- use (#state % #pc)
-                partial $ UnexpectedSymbolicArg pc opName "trying to self destruct to a symbolic address" (wrap [a])
+              a -> unexpectedSymArg "trying to self destruct to a symbolic address" [a]
 
         OpRevert ->
           case stk of
@@ -1072,10 +1064,7 @@ transfer src dst val = do
         LitAddr _ -> do
           (#env % #contracts) %= (Map.insert src (mkc src))
           transfer src dst val
-        SymAddr _ -> do
-          pc <- use (#state % #pc)
-          state <- use #state
-          partial $ UnexpectedSymbolicArg pc (getOpName state) "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [src])
+        SymAddr _ -> unexpectedSymArg "Attempting to transfer eth from a symbolic address that is not present in the state" [src]
         GVar _ -> internalError "Unexpected GVar"
     -- recipient not in state
     (_ , Nothing) -> do
@@ -1083,10 +1072,7 @@ transfer src dst val = do
         LitAddr _ -> do
           (#env % #contracts) %= (Map.insert dst (mkc dst))
           transfer src dst val
-        SymAddr _ -> do
-          pc <- use (#state % #pc)
-          state <- use #state
-          partial $ UnexpectedSymbolicArg pc (getOpName state) "Attempting to transfer eth to a symbolic address that is not present in the state" (wrap [dst])
+        SymAddr _ -> unexpectedSymArg "Attempting to transfer eth to a symbolic address that is not present in the state" [dst]
         GVar _ -> internalError "Unexpected GVar"
 
 -- | Checks a *CALL for failure; OOG, too many callframes, memory access etc.
@@ -1150,10 +1136,7 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
               callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize xs continue
 
             -- adding a symbolic address into the state here would be unsound (due to potential aliasing)
-            SymAddr _ -> do
-              pc <- use (#state % #pc)
-              state <- use #state
-              partial $ UnexpectedSymbolicArg pc (getOpName state) "Attempting to transfer eth from a symbolic address that is not present in the state" (wrap [from])
+            SymAddr _ -> unexpectedSymArg "Attempting to transfer eth from a symbolic address that is not present in the state" [from]
             GVar _ -> internalError "Unexpected GVar"
 
 precompiledContract
@@ -1172,9 +1155,7 @@ precompiledContract this xGas precompileAddr recipient xValue inOffset inSize ou
       executePrecompile precompileAddr gas' inOffset inSize outOffset outSize xs
       self <- use (#state % #contract)
       stk <- use (#state % #stack)
-      pc' <- use (#state % #pc)
       result' <- use #result
-      vm <- get
       case result' of
         Nothing -> case stk of
           x:_ -> case maybeLitWordSimp x of
@@ -1185,8 +1166,7 @@ precompiledContract this xGas precompileAddr recipient xValue inOffset inSize ou
                 touchAccount self
                 touchAccount (LitAddr recipient)
                 transfer self (LitAddr recipient) xValue
-            _ -> partial $
-                   UnexpectedSymbolicArg pc' (getOpName vm.state) "unexpected return value from precompile" (wrap [x])
+            _ -> unexpectedSymArg "unexpected return value from precompile" [x]
           _ -> underrun
         _ -> pure ()
 
@@ -1388,7 +1368,7 @@ runBoth c = assign #result $ Just $ HandleEffect (RunBoth c)
 
 fetchAccount :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
 fetchAccount addr continue =
-  let fallback = defaultFallback "trying to access a symbolic address that isn't already present in storage"
+  let fallback = unexpectedSymArgW "trying to access a symbolic address that isn't already present in storage"
   in fetchAccountWithFallback addr fallback continue
 
 -- | Construct RPC Query and halt execution until resolved
@@ -1525,22 +1505,16 @@ finalize = do
     Just (VMSuccess output) -> do
       clearTStorages
       -- deposit the code from a creation tx
-      pc' <- use (#state % #pc)
       creation <- use (#tx % #isCreate)
       createe  <- use (#state % #contract)
       createeExists <- (Map.member createe) <$> use (#env % #contracts)
       when (creation && createeExists) $
         case output of
-          ConcreteBuf bs ->
-            replaceCode createe (RuntimeCode (ConcreteRuntimeCode bs))
+          ConcreteBuf bs -> replaceCode createe (RuntimeCode (ConcreteRuntimeCode bs))
           _ ->
             case Expr.toList output of
-              Nothing -> do
-                state <- use #state
-                partial $
-                  UnexpectedSymbolicArg pc' (getOpName state) "runtime code cannot have an abstract length" (wrap [output])
-              Just ops ->
-                replaceCode createe (RuntimeCode (SymbolicRuntimeCode ops))
+              Nothing -> unexpectedSymArg "runtime code cannot have an abstract length" [output]
+              Just ops -> replaceCode createe (RuntimeCode (SymbolicRuntimeCode ops))
     _ ->
       internalError "Finalising an unfinished tx."
 
@@ -1606,13 +1580,21 @@ forceAddr n fallback continue = case wordToAddr n of
     Nothing -> fallback n
   Just c -> continue c
 
-defaultFallback :: (Typeable a, VMOps t) => String -> Expr a -> EVM t s ()
-defaultFallback msg n = do
-  vm <- get
-  partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+unexpectedSymArg :: (Typeable a, VMOps t) => String -> [Expr a] -> EVM t s ()
+unexpectedSymArg msg n = do
+  pc <- use (#state % #pc)
+  state <- use #state
+  let opName = getOpName state
+  partial $ UnexpectedSymbolicArg pc opName msg (wrap n)
 
-freshValueFallback :: (?conf :: Config, VMOps t, ?op :: Word8) => [Expr EWord] -> EVM t s ()
-freshValueFallback xs = do
+unexpectedSymArgW :: (Typeable a, VMOps t) => String -> Expr a -> EVM t s ()
+unexpectedSymArgW msg n = unexpectedSymArg msg [n]
+
+unknownCode :: VMOps t => Expr EAddr -> EVM t s ()
+unknownCode n = unexpectedSymArg "call target has unknown code" [n]
+
+freshBufFallback :: (?conf :: Config, VMOps t, ?op :: Word8) => [Expr EWord] -> EVM t s ()
+freshBufFallback xs = do
   -- Reset caller if needed
   resetCaller <- use $ #state % #resetCaller
   when resetCaller $ assign (#state % #overrideCaller) Nothing
@@ -1627,14 +1609,17 @@ freshValueFallback xs = do
   assign (#state % #returndata) freshReturndataExpr
   next >> assign (#state % #stack) (freshVarExpr:xs)
 
-symbolicFallback:: (VMOps t, ?op :: Word8) => [Expr EWord] -> Expr a -> EVM t s ()
-symbolicFallback xs _ = do
-  next
+freshVarFallback:: (VMOps t, ?op :: Word8) => [Expr EWord] -> Expr a -> EVM t s ()
+freshVarFallback xs _ = do
+  -- Reset caller if needed
+  resetCaller <- use $ #state % #resetCaller
+  when resetCaller $ assign (#state % #overrideCaller) Nothing
+  -- overapproximate by returning a symbolic value
   freshVar <- use #freshVar
   assign #freshVar (freshVar + 1)
-  let freshVarExpr = Var ("symbolicFallback-" <> (pack . show) ?op <> "-" <> (pack . show) freshVar)
-  assign (#state % #stack) xs
-  pushSym freshVarExpr
+  let opName = pack $ show $ getOp ?op
+  let freshVarExpr = Var (opName <> "-result-stack-" <> (pack . show) freshVar)
+  next >> assign (#state % #stack) (freshVarExpr:xs)
 
 forceConcrete :: VMOps t => Expr EWord -> String -> (W256 -> EVM t s ()) -> EVM t s ()
 forceConcrete n = forceConcreteLimitSz n 32
@@ -1643,37 +1628,27 @@ forceConcreteLimitSz :: VMOps t => Expr EWord -> Int -> String -> (W256 -> EVM t
 forceConcreteLimitSz n bytes msg continue = case maybeLitWordSimp n of
   Nothing -> manySolutions n bytes $ maybe fallback continue
   Just c -> continue c
-  where fallback = do
-          vm <- get
-          partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+  where fallback = unexpectedSymArg msg [n]
 
 forceConcreteAddr :: VMOps t => Expr EAddr -> String -> (Addr -> EVM t s ()) -> EVM t s ()
 forceConcreteAddr n msg continue = case maybeLitAddrSimp n of
   Nothing -> manySolutions (WAddr n) 20 $ maybe fallback $ \c -> continue (truncateToAddr c)
   Just c -> continue c
-  where fallback = do
-          vm <- get
-          partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n])
+  where fallback = unexpectedSymArg msg [n]
 
 forceConcreteAddr2 :: VMOps t => (Expr EAddr, Expr EAddr) -> String -> ((Addr, Addr) -> EVM t s ()) -> EVM t s ()
 forceConcreteAddr2 (n,m) msg continue = case (maybeLitAddrSimp n, maybeLitAddrSimp m) of
   (Just c, Just d) -> continue (c,d)
-  _ -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n, m])
+  _ -> unexpectedSymArg msg [n, m]
 
 forceConcrete2 :: VMOps t => (Expr EWord, Expr EWord) -> String -> ((W256, W256) -> EVM t s ()) -> EVM t s ()
 forceConcrete2 (n,m) msg continue = case (maybeLitWordSimp n, maybeLitWordSimp m) of
   (Just c, Just d) -> continue (c, d)
-  _ -> do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [n, m])
+  _ -> unexpectedSymArg msg [n, m]
 
 forceConcreteBuf :: VMOps t => Expr Buf -> String -> (ByteString -> EVM t s ()) -> EVM t s ()
 forceConcreteBuf (ConcreteBuf b) _ continue = continue b
-forceConcreteBuf b msg _ = do
-    vm <- get
-    partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg (wrap [b])
+forceConcreteBuf b msg _ = unexpectedSymArg msg [b]
 
 -- * Substate manipulation
 refund :: Word64 -> EVM t s ()
@@ -1753,7 +1728,7 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
     -- 4-byte function selector
     Nothing -> manySolutions abi 4 $ \case
       Just concAbi -> runCheat concAbi input
-      Nothing -> partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) "symbolic cheatcode selector" (wrap [abi])
+      Nothing -> unexpectedSymArg "symbolic cheatcode selector" [abi]
     Just concAbi -> runCheat concAbi input
   where
     runCheat :: W256 -> Expr 'Buf -> EVM t s ()
@@ -1787,9 +1762,7 @@ cheatActions = Map.fromList
                 in query (PleaseDoFFI cmd vm.osEnv cont)
               _ -> vmError (BadCheatCode "ffi(string[]) decoding of string failed" sig)
             _ -> vmError (BadCheatCode "ffi(string[]) parameter decoding failed" sig)
-        else
-          let msg = "ffi disabled: run again with --ffi if you want to allow tests to call external scripts"
-          in partial $ UnexpectedSymbolicArg vm.state.pc (getOpName vm.state) msg []
+        else unexpectedSymArg "ffi disabled: run again with --ffi if you want to allow tests to call external scripts" ([] :: [Expr EWord])
 
   , action "warp(uint256)" $
       \sig input -> case decodeStaticArgs 0 1 input of
@@ -1801,7 +1774,7 @@ cheatActions = Map.fromList
   , action "deal(address,uint256)" $
       \sig input -> case decodeStaticArgs 0 2 input of
         [a, amt] ->
-          forceAddr a (defaultFallback "vm.deal: cannot decode target into an address") $ \usr ->
+          forceAddr a (unexpectedSymArgW "vm.deal: cannot decode target into an address") $ \usr ->
             fetchAccount usr $ \_ -> do
               assign (#env % #contracts % ix usr % #balance) amt
               doStop
@@ -2076,12 +2049,6 @@ cheatActions = Map.fromList
     assertLe = genAssert (<=) Expr.leq ">" "assertLe"
     assertGe = genAssert (>=) Expr.geq "<" "assertGe"
 
-unknownCodeFallback :: VMOps t => Expr EAddr -> EVM t s ()
-unknownCodeFallback xTo = do
-  pc <- use (#state % #pc)
-  state <- use #state
-  partial $ UnexpectedSymbolicArg pc (getOpName state) "call target has unknown code" (wrap [xTo])
-
 -- * General call implementation ("delegateCall")
 -- note that the continuation is ignored in the precompile case
 delegateCall
@@ -2214,8 +2181,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
       -- are we overflowing the nonce
       False -> burn' xGas $ do
         case parseInitCode initCode of
-          Nothing ->
-            partial $ UnexpectedSymbolicArg vm0.state.pc (getOpName vm0.state) "initcode must have a concrete prefix" []
+          Nothing -> unexpectedSymArg "initcode must have a concrete prefix" ([] :: [Expr EWord])
           Just c -> do
             let
               newContract = initialContract c
