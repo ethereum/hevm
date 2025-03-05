@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More simplification rules that help avoid symbolic copyslice in case of
   STATICCALL overapproximation
 - Test to make sure we don't accidentally overapproximate a working, good STATICCALL
+- Allow EXTCODESIZE/HASH, BALANCE to be abstracted to a symbolic value.
+- Allow CALL to be extracted in case `--promise-no-reent` is given, promising
+  no reentrancy of contracts. This may skip over reentrancy vulnerabilities
+  but allows much more thorough exploration of the contract
+- Allow controlling the max buffer sizes via --max-buf-size to something smaller than 2**64
+  so we don't get too large buffers as counterexamples
+
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -44,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When cheatcode is missing, we produce a partial execution warning
 - Size of calldata can be up to 2**64, not 256. This is now reflected in the documentation
 - We now have less noise during test runs, and assert more about symbolic copyslice tests
+- CopySlice rewrite rule is now less strict while still being sound
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that

@@ -107,6 +107,8 @@ data Command w
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , noDecompose   :: w ::: Bool               <?> "Don't decompose storage slots into separate arrays"
       , maxBranch     :: w ::: Int                <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
+      , promiseNoReent:: w ::: Bool               <!> "Promise no reentrancy is possible into the contract(s) being examined"
+      , maxBufSize    :: w ::: Int                <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: Maybe ByteString   <?> "Bytecode of the first program"
@@ -130,6 +132,8 @@ data Command w
       , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , noDecompose   :: w ::: Bool             <?> "Don't decompose storage slots into separate arrays"
       , maxBranch     :: w ::: Int              <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
+      , maxBufSize    :: w ::: Int              <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
+      , promiseNoReent:: w ::: Bool             <!> "Promise no reentrancy is possible into the contract(s) being examined"
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
@@ -183,6 +187,8 @@ data Command w
       , maxBranch     :: w ::: Int                      <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
       , numCexFuzz    :: w ::: Integer                  <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
       , askSmtIterations :: w ::: Integer               <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
+      , maxBufSize    :: w ::: Int                      <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
+      , promiseNoReent:: w ::: Bool                     <!> "Promise no reentrancy is possible into the contract(s) being examined"
       }
   | Version
 
@@ -218,6 +224,12 @@ getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
 main :: IO ()
 main = withUtf8 $ do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
+  when (cmd.maxBufSize > 64) $ do
+    putStrLn "Error: maxBufSize must be less than or equal to 64. That limits buffers to a size of 2^64, which is more than enough for practical purposes"
+    exitFailure
+  when (cmd.maxBufSize < 0) $ do
+    putStrLn "Error: maxBufSize must be at least 0. Negative values do not make sense. A value of zero means at most 1 byte long buffers"
+    exitFailure
   let env = Env { config = defaultConfig
     { dumpQueries = cmd.smtdebug
     , debug = cmd.debug
@@ -227,6 +239,8 @@ main = withUtf8 $ do
     , dumpTrace = cmd.trace
     , decomposeStorage = Prelude.not cmd.noDecompose
     , maxBranch = cmd.maxBranch
+    , promiseNoReent = cmd.promiseNoReent
+    , maxBufSize = cmd.maxBufSize
     } }
   case cmd of
     Version {} ->putStrLn getFullVersion
@@ -282,14 +296,13 @@ equivalence cmd = do
   when (isNothing bytecodeB) $ liftIO $ do
     putStrLn "Error: invalid or no bytecode for program B. Provide a valid one with --code-b or --code-b-file"
     exitFailure
-
   let veriOpts = VeriOpts { simp = True
                           , maxIter = parseMaxIters cmd.maxIterations
                           , askSmtIters = cmd.askSmtIterations
                           , loopHeuristic = cmd.loopDetectionHeuristic
                           , rpcInfo = Nothing
                           }
-  calldata <- liftIO $ buildCalldata cmd
+  calldata <- buildCalldata cmd
   solver <- liftIO $ getSolver cmd
   cores <- liftIO $ unsafeInto <$> getNumProcessors
   let solverCount = fromMaybe cores cmd.numSolvers
@@ -351,23 +364,23 @@ parseMaxIters i = if num < 0 then Nothing else Just num
     num = fromMaybe (5::Integer) i
 
 -- | Builds a buffer representing calldata based on the given cli arguments
-buildCalldata :: Command Options.Unwrapped -> IO (Expr Buf, [Prop])
+buildCalldata :: App m => Command Options.Unwrapped -> m (Expr Buf, [Prop])
 buildCalldata cmd = case (cmd.calldata, cmd.sig) of
   -- fully abstract calldata
-  (Nothing, Nothing) -> pure $ mkCalldata Nothing []
+  (Nothing, Nothing) -> mkCalldata Nothing []
   -- fully concrete calldata
   (Just c, Nothing) -> do
     let val = hexByteString $ strip0x c
-    if (isNothing val) then do
+    if (isNothing val) then liftIO $ do
       putStrLn $ "Error, invalid calldata: " <>  show c
       exitFailure
     else pure (ConcreteBuf (fromJust val), [])
   -- calldata according to given abi with possible specializations from the `arg` list
   (Nothing, Just sig') -> do
-    method' <- functionAbi sig'
-    pure $ mkCalldata (Just (Sig method'.methodSignature (snd <$> method'.inputs))) cmd.arg
+    method' <- liftIO $ functionAbi sig'
+    mkCalldata (Just (Sig method'.methodSignature (snd <$> method'.inputs))) cmd.arg
   -- both args provided
-  (_, _) -> do
+  (_, _) -> liftIO $ do
     putStrLn "incompatible options provided: --calldata and --sig"
     exitFailure
 
@@ -377,7 +390,7 @@ assert :: App m => Command Options.Unwrapped -> m ()
 assert cmd = do
   let block'  = maybe Fetch.Latest Fetch.BlockNumber cmd.block
       rpcinfo = (,) block' <$> cmd.rpc
-  calldata <- liftIO $ buildCalldata cmd
+  calldata <- buildCalldata cmd
   preState <- liftIO $ symvmFromCommand cmd calldata
   let errCodes = fromMaybe defaultPanicCodes cmd.assertions
   cores <- liftIO $ unsafeInto <$> getNumProcessors
