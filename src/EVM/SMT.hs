@@ -325,6 +325,7 @@ referencedFrameContext expr = nubOrd $ foldTerm go [] expr
       TxValue -> [(fromString "txvalue", [])]
       v@(Balance a) -> [(fromString "balance_" <> formatEAddr a, [PLT v (Lit $ 2 ^ (96 :: Int))])]
       Gas freshVar -> [(fromString ("gas_" <> show freshVar), [])]
+      CodeHash a@(LitAddr _) -> [(fromString "codehash_" <> formatEAddr a, [])]
       _ -> []
 
 referencedBlockContext :: TraversableTerm a => a -> [(Builder, [Prop])]
@@ -873,6 +874,7 @@ exprToSMT = \case
   SLoad idx store -> op2 "select" store idx
   LitAddr n -> pure $ fromLazyText $ "(_ bv" <> T.pack (show (into n :: Integer)) <> " 160)"
   Gas freshVar -> pure $ fromLazyText $ "gas_"  <> (T.pack $ show freshVar)
+  CodeHash a@(LitAddr _) -> pure $ fromLazyText "codehash_" <> formatEAddr a
 
   a -> internalError $ "TODO: implement: " <> show a
   where
@@ -1067,6 +1069,7 @@ parseTxCtx name
   | name == "txvalue" = TxValue
   | Just a <- TS.stripPrefix "balance_" name = Balance (parseEAddr a)
   | Just a <- TS.stripPrefix "gas_" name = Gas (textToInt a)
+  | Just a <- TS.stripPrefix "codehash_" name = CodeHash (parseEAddr a)
   | otherwise = internalError $ "cannot parse " <> (TS.unpack name) <> " into an Expr"
 
 getAddrs :: (TS.Text -> Expr EAddr) -> (Text -> IO Text) -> [TS.Text] -> IO (Map (Expr EAddr) Addr)
