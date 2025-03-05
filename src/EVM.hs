@@ -331,7 +331,6 @@ exec1 conf = do
     else do
       let ?conf = conf
       let ?op = getOpW8 vm.state
-      let opName = getOpName vm.state
       case getOp (?op) of
 
         OpPush0 -> do
