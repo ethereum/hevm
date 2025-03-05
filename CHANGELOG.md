@@ -20,7 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated via iterative calls to the SMT solver for quicker solving
 - Aliasing works much better for symbolic and concrete addresses
 - Constant propagation for symbolic values
-- Allow reading deployedBytecode.object from the forge JSON as --code-file or --code-a-file/--code-b-file
+- Allow reading bytecode via --code-file or --code-a-file/--code-b-file. Strips
+  `\n`, spaces, and ignores leading `0x` to make it easier to use via e.g.
+  `jq '.deplayedBytecode.object file.json > file.txt'` to parse Forge JSON output
   This alleviates the issue when the contract is large and does not fit the command line
   limit of 8192 characters
 - Two more simplification rules: `ReadByte` & `ReadWord` when the `CopySlice`
@@ -47,8 +49,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
   their contract is correct when there were cases/branches that hevm could not
   fully explore. Printing of issues is also now much more organized
-- We now read file as bytecode rather than JSON, as it's more compatible
-  with different input formats
 
 ## [0.54.2] - 2024-12-12
 
