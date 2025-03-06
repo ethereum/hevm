@@ -53,7 +53,7 @@ import EVM.Expr qualified as Expr
 import EVM.Concrete qualified as Concrete
 import EVM.Exec (ethrunAddress)
 import EVM.Fetch qualified as Fetch
-import EVM.Format (bsToHex, formatBinary)
+import EVM.Format (formatBinary)
 import EVM.FeeSchedule
 import EVM.Op (intToOpName)
 import EVM.Sign (deriveAddr)
