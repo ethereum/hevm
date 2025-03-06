@@ -17,7 +17,7 @@ import Data.Containers.ListUtils (nubOrd)
 import Data.DoubleWord (Word256)
 import Data.List (foldl', sortBy, sort)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe, mapMaybe, listToMaybe, catMaybes)
+import Data.Maybe (fromMaybe, mapMaybe, listToMaybe)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Map.Merge.Strict qualified as Map
@@ -37,7 +37,7 @@ import EVM.ABI
 import EVM.Effects
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (feeSchedule)
-import EVM.Format (formatExpr, formatPartial, formatPartialShort, showVal, indent, formatBinary)
+import EVM.Format (formatExpr, formatPartial, formatPartialShort, showVal, indent, formatBinary, formatProp)
 import EVM.SMT (SMTCex(..), SMT2(..), assertProps)
 import EVM.SMT qualified as SMT
 import EVM.Solvers
@@ -830,22 +830,14 @@ equivalenceCheck' solvers branchesA branchesB create = do
 
     resultsDiffer :: App m => Expr End -> Expr End -> m (Prop, [EquivResult], [Expr End])
     resultsDiffer aEnd bEnd = case (aEnd, bEnd) of
-      (Success props1 _ aOut aState, Success props2 _ bOut bState) ->
+      (Success aProps _ aOut aState, Success bProps _ bOut bState) ->
         case (aOut == bOut, aState == bState) of
           (True, True) -> pure (PBool False, mempty, mempty)
           (True, False) -> pure (statesDiffer aState bState, mempty, mempty)
           (False, _) -> do
-            (outDiff, res, ends) <- if create then do
-              case (aOut, bOut) of
-                (ConcreteBuf codeA, ConcreteBuf codeB) -> do
-                  conf <- readConfig
-                  when conf.debug $ liftIO $ do
-                    liftIO $ putStrLn $ "deployed code A: " <> bsToHex codeA
-                    liftIO $ putStrLn $ "deployed code B: " <> bsToHex codeB
-                  (res, ends) <- equivalenceCheck solvers codeA codeB defaultVeriOpts (mkCalldata Nothing []) False
-                  pure (PBool False, res, ends)
-                _ -> internalError "symbolic code returned..."
-            else pure (aOut ./= bOut, mempty, mempty)
+            (outDiff, res, ends) <-
+              if create then checkCreatedDiff aOut bOut aProps bProps
+              else pure (aOut ./= bOut, mempty, mempty)
             pure (statesDiffer aState bState .|| outDiff, res, ends)
       (Failure _ _ (Revert a), Failure _ _ (Revert b)) ->
         pure $ if a == b then (PBool False, mempty, mempty) else (a ./= b, mempty, mempty)
@@ -858,6 +850,20 @@ equivalenceCheck' solvers branchesA branchesB create = do
       (ITE _ _ _, _) -> internalError "Expressions must be flattened"
       (_, ITE _ _ _) -> internalError "Expressions must be flattened"
       (a, b) -> pure (PBool (a /= b), mempty, mempty)
+
+    checkCreatedDiff aOut bOut aProps bProps = do
+      case (aOut, bOut) of
+        (ConcreteBuf codeA, ConcreteBuf codeB) -> do
+          todo use aProps/bProps
+          conf <- readConfig
+          when conf.debug $ liftIO $ do
+            liftIO $ putStrLn $ "create deployed code A: " <> bsToHex codeA
+              <> " with constraints: " <> (T.unpack . T.unlines $ map formatProp aProps)
+            liftIO $ putStrLn $ "create deployed code B: " <> bsToHex codeB
+              <> " with constraints: " <> (T.unpack . T.unlines $ map formatProp bProps)
+          (res, ends) <- equivalenceCheck solvers codeA codeB defaultVeriOpts (mkCalldata Nothing []) False
+          pure (PBool False, res, ends)
+        _ -> internalError "symbolic code returned..."
 
     statesDiffer :: Map (Expr EAddr) (Expr EContract) -> Map (Expr EAddr) (Expr EContract) -> Prop
     statesDiffer aState bState =
