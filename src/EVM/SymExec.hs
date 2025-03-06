@@ -52,8 +52,6 @@ import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
 import Text.Printf (printf)
 import Witch (into, unsafeInto)
-import Debug.Trace (trace, traceM)
-import Data.Tuple.Optics (_1, _2, _3)
 
 data LoopHeuristic
   = Naive
