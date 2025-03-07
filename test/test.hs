@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE ImplicitParams #-}
 
 module Main where
 
@@ -480,7 +481,8 @@ tests = testGroup "hevm"
               (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)))
                 { external = True }
         vm :: VM Concrete RealWorld <- liftIO $ stToIO $ vmForEthrunCreation ""
-            -- perform the initial access
+        -- perform the initial access
+        let ?conf = testEnv.config
         vm1 <- liftIO $ stToIO $ execStateT (EVM.accessStorage (LitAddr 0) (Lit 0) (pure . pure ())) vm
         -- it should fetch the contract first
         vm2 <- case vm1.result of
@@ -1509,8 +1511,59 @@ tests = testGroup "hevm"
         let sig = Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
         (_, k) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
         putStrLnM $ "Ret: " <> (show k)
-      ,
-      test "symbolic-copyslice" $ do
+      -- below we hit the limit of the depth of the symbolic execution tree
+      , testCase "limit-num-explore-hit-limit" $ do
+        let conf = testEnv.config {maxExplore = Just 3}
+        let myTestEnv :: Env = (testEnv :: Env) {config = conf :: Config}
+        runEnv myTestEnv $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+                function checkval(uint256 a, uint256 b, uint256 c) public {
+                  if (a ==b) {
+                    if (b == c) {
+                      assert(false);
+                    }
+                  }
+                }
+            }
+            |]
+          let sig = Just (Sig "checkval(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])
+          (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+          let numCexes = sum $ map (fromEnum . isCex) ret
+          let numErrs = sum $ map (fromEnum . isError) ret
+          let numQeds = sum $ map (fromEnum . isQed) ret
+          assertBoolM "The expression MUST be partial" (Expr.containsNode isPartial expr)
+          assertEqualM "number of errors" 0 numErrs
+          assertEqualM "number of counterexamples" 0 numCexes
+          assertEqualM "number of qed-s" 1 numQeds
+      -- below we don't hit the limit of the depth of the symbolic execution tree
+      , testCase "limit-num-explore-no-hit-limit" $ do
+        let conf = testEnv.config {maxExplore = Just 4}
+        let myTestEnv :: Env = (testEnv :: Env) {config = conf :: Config}
+        runEnv myTestEnv $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+                function checkval(uint256 a, uint256 b, uint256 c) public {
+                  if (a ==b) {
+                    if (b == c) {
+                      assert(false);
+                    }
+                  }
+                }
+            }
+            |]
+          let sig = Just (Sig "checkval(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])
+          (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+          let numCexes = sum $ map (fromEnum . isCex) ret
+          let numErrs = sum $ map (fromEnum . isError) ret
+          let numQeds = sum $ map (fromEnum . isQed) ret
+          assertBoolM "The expression MUST NOT be partial" $ Prelude.not (Expr.containsNode isPartial expr)
+          assertEqualM "number of errors" 0 numErrs
+          assertEqualM "number of counterexamples" 1 numCexes
+          assertEqualM "number of qed-s" 0 numQeds
+      , test "symbolic-copyslice" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
@@ -2614,6 +2667,144 @@ tests = testGroup "hevm"
         assertEqualM "number of errors" 0 numErrs
         assertEqualM "number of counterexamples" 1 numCexes
         assertEqualM "number of qed-s" 0 numQeds
+    , test "call-balance-symb" $ do
+      Just c <- solcRuntime "C"
+        [i|
+        contract C {
+            function checkval(address inputAddr) public {
+                uint256 balance = inputAddr.balance;
+                assert(balance < 10);
+            }
+        }
+        |]
+      let sig = Just (Sig "checkval(address)" [AbiAddressType])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      let numErrs = sum $ map (fromEnum . isError) ret
+      assertBoolM "The expression MUST NOT be partial" $ Prelude.not (Expr.containsNode isPartial expr)
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of counterexamples" 1 numCexes
+    , test "call-balance-symb2" $ do
+      Just c <- solcRuntime "C"
+        [i|
+        contract C {
+            function checkval() public {
+                uint256 balance = address(0xacab).balance;
+                assert(balance < 10);
+            }
+        }
+        |]
+      let sig = Just (Sig "checkval()" [])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      let numErrs = sum $ map (fromEnum . isError) ret
+      assertBoolM "The expression MUST NOT be partial" $ Prelude.not (Expr.containsNode isPartial expr)
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of counterexamples" 1 numCexes
+    , test "call-balance-concrete-pass" $ do
+      Just c <- solcRuntime "C"
+        [i|
+        interface Vm {
+          function deal(address,uint256) external;
+        }
+        contract Target {
+        }
+        contract C {
+            function checkval() public {
+                Target t = new Target();
+                Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+                vm.deal(address(t), 5);
+                uint256 balance = address(t).balance;
+                assert(balance < 10);
+            }
+        }
+        |]
+      let sig = Just (Sig "checkval()" [])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+      let numErrs = sum $ map (fromEnum . isError) ret
+      let numQeds = sum $ map (fromEnum . isQed) ret
+      assertBoolM "The expression MUST NOT be partial" $ Prelude.not (Expr.containsNode isPartial expr)
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of qed-s" 1 numQeds
+    , test "call-balance-concrete-fail" $ do
+      Just c <- solcRuntime "C"
+        [i|
+        interface Vm {
+          function deal(address,uint256) external;
+        }
+        contract Target {
+        }
+        contract C {
+            function checkval() public {
+                Target t = new Target();
+                Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+                vm.deal(address(t), 5);
+                uint256 balance = address(t).balance;
+                assert(balance < 5);
+            }
+        }
+        |]
+      let sig = Just (Sig "checkval()" [])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+      let numErrs = sum $ map (fromEnum . isError) ret
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      assertBoolM "The expression MUST NOT be partial" $ Prelude.not (Expr.containsNode isPartial expr)
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of counterexamples" 1 numCexes
+    , test "call-extcodehash-symb1" $ do
+      Just c <- solcRuntime "C"
+        [i|
+        contract C {
+            function checkval(address inputAddr) public {
+                bytes32 hash = inputAddr.codehash;
+                assert(uint(hash) < 10);
+            }
+        }
+        |]
+      let sig = Just (Sig "checkval(address)" [AbiAddressType])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      let numErrs = sum $ map (fromEnum . isError) ret
+      assertBoolM "The expression MUST NOT be partial" $ Prelude.not (Expr.containsNode isPartial expr)
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of counterexamples" 1 numCexes
+    , test "call-extcodehash-symb2" $ do
+      Just c <- solcRuntime "C"
+        [i|
+        contract C {
+            function checkval() public {
+                bytes32 hash = address(0xacab).codehash;
+                assert(uint(hash) < 10);
+            }
+        }
+        |]
+      let sig = Just (Sig "checkval()" [])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      let numErrs = sum $ map (fromEnum . isError) ret
+      assertBoolM "The expression MUST NOT be partial" $ Prelude.not (Expr.containsNode isPartial expr)
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of counterexamples" 1 numCexes
+    , test "call-extcodehash-concrete-fail" $ do
+      Just c <- solcRuntime "C"
+        [i|
+        contract Target {
+        }
+        contract C {
+            function checkval() public {
+                Target t = new Target();
+                bytes32 hash = address(t).codehash;
+                assert(uint(hash) == 8);
+            }
+        }
+        |]
+      let sig = Just (Sig "checkval()" [])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+      let numErrs = sum $ map (fromEnum . isError) ret
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      assertBoolM "The expression MUST NOT be partial" $ Prelude.not (Expr.containsNode isPartial expr)
+      assertEqualM "number of errors" 0 numErrs
+      assertEqualM "number of counterexamples" 1 numCexes
     , test "jump-symbolic" $ do
       Just c <- solcRuntime "C"
         [i|

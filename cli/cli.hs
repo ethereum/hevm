@@ -109,6 +109,7 @@ data Command w
       , maxBranch     :: w ::: Int                <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
       , promiseNoReent:: w ::: Bool               <!> "Promise no reentrancy is possible into the contract(s) being examined"
       , maxBufSize    :: w ::: Int                <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
+      , maxExplore    :: w ::: Maybe Int          <?> "Limit branching factor and total branch depth of exploration (default: unlimited)"
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: Maybe ByteString   <?> "Bytecode of the first program"
@@ -134,6 +135,7 @@ data Command w
       , maxBranch     :: w ::: Int              <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
       , maxBufSize    :: w ::: Int              <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
       , promiseNoReent:: w ::: Bool             <!> "Promise no reentrancy is possible into the contract(s) being examined"
+      , maxExplore    :: w ::: Maybe Int        <?> "Limit branching factor and total branch depth of exploration (default: unlimited)"
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
@@ -185,6 +187,7 @@ data Command w
       , loopDetectionHeuristic :: w ::: LoopHeuristic   <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
       , noDecompose   :: w ::: Bool                     <?> "Don't decompose storage slots into separate arrays"
       , maxBranch     :: w ::: Int                      <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
+      , maxExplore    :: w ::: Maybe Int                <?> "Limit branching factor and total branch depth of exploration (default: unlimited)"
       , numCexFuzz    :: w ::: Integer                  <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
       , askSmtIterations :: w ::: Integer               <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , maxBufSize    :: w ::: Int                      <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
@@ -241,6 +244,7 @@ main = withUtf8 $ do
     , maxBranch = cmd.maxBranch
     , promiseNoReent = cmd.promiseNoReent
     , maxBufSize = cmd.maxBufSize
+    , maxExplore = cmd.maxExplore
     } }
   case cmd of
     Version {} ->putStrLn getFullVersion

@@ -27,6 +27,7 @@ import Numeric.Natural (Natural)
 import System.Environment (lookupEnv, getEnvironment)
 import System.Process
 import Control.Monad.IO.Class
+import Control.Monad (when)
 import EVM.Effects
 import qualified EVM.Expr as Expr
 
@@ -214,6 +215,8 @@ oracle solvers info q = do
          continue <$> getSolutions solvers symExpr numBytes pathconds
 
     PleaseFetchContract addr base continue -> do
+      conf <- readConfig
+      when (conf.debug) $ liftIO $ putStrLn $ "Fetching contract at " ++ show addr
       contract <- case info of
         Nothing -> let
           c = case base of
@@ -225,7 +228,9 @@ oracle solvers info q = do
         Just x -> pure $ continue x
         Nothing -> internalError $ "oracle error: " ++ show q
 
-    PleaseFetchSlot addr slot continue ->
+    PleaseFetchSlot addr slot continue -> do
+      conf <- readConfig
+      when (conf.debug) $ liftIO $ putStrLn $ "Fetching slot " <> (show slot) <> " at " <> (show addr)
       case info of
         Nothing -> pure (continue 0)
         Just (n, url) ->
@@ -256,7 +261,10 @@ getSolutions solvers symExprPreSimp numBytes pathconditions = do
       collectSolutions :: Expr EWord -> Prop -> Config -> IO (Maybe [W256])
       collectSolutions symExpr conds conf = do
         let smt2 = assertProps conf [(PEq (Var "multiQueryVar") symExpr) .&& conds]
-        checkMulti solvers smt2 $ MultiSol { maxSols = conf.maxBranch , numBytes = numBytes , var = "multiQueryVar" }
+        let maxNum = case conf.maxExplore of
+                        Just x -> Prelude.min x conf.maxBranch
+                        Nothing -> conf.maxBranch
+        checkMulti solvers smt2 $ MultiSol { maxSols = maxNum , numBytes = numBytes , var = "multiQueryVar" }
 
 -- | Checks which branches are satisfiable, checking the pathconditions for consistency
 -- if the third argument is true.
