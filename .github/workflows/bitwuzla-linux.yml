@@ -20,9 +20,7 @@ jobs:
         if: steps.cache-bitwuzla.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
-          #sudo apt-get install -y libgmp-dev ninja-build mingw-w64
-          #sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
-          #sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+          sudo apt-get install -y libgmp-dev ninja-build
 
       - name: Setup Python Environment
         if: steps.cache-bitwuzla.outputs.cache-hit != 'true'
