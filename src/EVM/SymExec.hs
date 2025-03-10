@@ -744,7 +744,7 @@ rewrite prefix exprs = fmap (mapExpr mymap) exprs
     mymap :: Expr a -> Expr a
     mymap = \case
       -- TODO GAS
-      Var x | ("fresh" `T.isInfixOf` x)-> Var $ prefix <> x
+      Var x | ("-fresh-" `T.isInfixOf` x)-> Var $ prefix <> x
       x -> x
 
 equivalenceCheck'
