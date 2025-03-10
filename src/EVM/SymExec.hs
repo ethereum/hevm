@@ -856,6 +856,8 @@ equivalenceCheck' solvers branchesA branchesB create = do
       (_, ITE _ _ _) -> internalError "Expressions must be flattened"
       (a, b) -> pure (PBool (a /= b), mempty, mempty)
 
+    -- If the original check was for create (i.e. undeployed code), then we must also check that the deployed
+    -- code is equivalent. The constraints from the undeployed code (aProps,bProps) influence this check.
     checkCreatedDiff aOut bOut aProps bProps = do
       case (aOut, bOut) of
         (ConcreteBuf codeA, ConcreteBuf codeB) -> do

@@ -4008,8 +4008,7 @@ tests = testGroup "hevm"
           calldata <- mkCalldata Nothing []
           (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertBoolM "Must have a difference" (any isCex res)
-      ,
-      test "implicit-constructor" $ do
+      , test "constructor-implicit" $ do
         Just initA <- solidity "C"
           [i|
             contract C {
@@ -4028,6 +4027,31 @@ tests = testGroup "hevm"
               }
               function stuff(uint a) public returns (uint256) {
                 return 8;
+              }
+            }
+          |]
+        withSolvers Z3 3 1 Nothing $ \s -> do
+          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts (mkCalldata Nothing []) True
+          assertEqualM "Must have no difference" [Qed ()] res
+      , test "constructor-differing" $ do
+        Just initA <- solidity "C"
+          [i|
+            contract C {
+              uint x;
+              function stuff(uint a) public returns (uint256) {
+                unchecked {return a+x}
+              }
+            }
+          |]
+        Just initB <- solidity "C"
+          [i|
+            contract C {
+              uint x;
+              constructor() {
+                x = 3;
+              }
+              function stuff(uint a) public returns (uint256) {
+                unchecked {return a+x}
               }
             }
           |]
