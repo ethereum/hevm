@@ -715,14 +715,17 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
     False -> do
       when conf.debug $ liftIO $ do
         putStrLn "bytecodeA and bytecodeB are different, checking for equivalence"
-      branchesA <- getBranches bytecodeA
-      branchesB <- getBranches bytecodeB
+      branchesAorig <- getBranches bytecodeA
+      branchesBorig <- getBranches bytecodeB
       when conf.debug $ liftIO $ do
-        liftIO $ putStrLn $ "branchesA props: " <> show (map extractProps branchesA)
-        liftIO $ putStrLn $ "branchesB props: " <> show (map extractProps branchesB)
-        liftIO $ putStrLn $ ""
-        liftIO $ putStrLn $ "branchesA endstates: " <> show (map extractEndStates branchesA)
-        liftIO $ putStrLn $ "branchesB endstates: " <> show (map extractEndStates branchesB)
+        liftIO $ putStrLn $ "branchesA props: " <> show (map extractProps branchesAorig)
+        liftIO $ putStrLn $ "branchesB props: " <> show (map extractProps branchesBorig)
+        liftIO $ putStrLn ""
+        liftIO $ putStrLn $ "branchesA endstates: " <> show (map extractEndStates branchesAorig)
+
+        liftIO $ putStrLn $ "branchesB endstates: " <> show (map extractEndStates branchesBorig)
+      let branchesA = rewrite "A-" branchesAorig
+          branchesB = rewrite "B-" branchesBorig
       (res, ends) <- equivalenceCheck' solvers branchesA branchesB create
       pure (res, branchesA <> branchesB <> ends)
   where
@@ -735,6 +738,14 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
       let simpl = if opts.simp then (Expr.simplify expr) else expr
       pure $ flattenExpr simpl
 
+rewrite :: Text -> [Expr a] -> [Expr a]
+rewrite prefix exprs = fmap (mapExpr mymap) exprs
+  where
+    mymap :: Expr a -> Expr a
+    mymap = \case
+      -- TODO GAS
+      Var x | ("fresh" `T.isInfixOf` x)-> Var $ prefix <> x
+      x -> x
 
 equivalenceCheck'
   :: forall m . App m
@@ -861,7 +872,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
     checkCreatedDiff aOut bOut aProps bProps = do
       case (aOut, bOut) of
         (ConcreteBuf codeA, ConcreteBuf codeB) -> do
-          todo use aProps/bProps
+          -- todo use aProps/bProps
           conf <- readConfig
           when conf.debug $ liftIO $ do
             liftIO $ putStrLn $ "create deployed code A: " <> bsToHex codeA
