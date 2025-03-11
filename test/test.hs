@@ -3992,7 +3992,7 @@ tests = testGroup "hevm"
           (res, _) <- equivalenceCheck s a b defaultVeriOpts calldata
           assertBoolM "Must have a difference" (any isCex res)
           let cexs = mapMaybe getCex res
-          assertEqualM "Must have a cex" (length cexs) 1
+          assertEqualM "Must have exactly one cex" (length cexs) 1
           let cex = head cexs
           let buf = prettyBuf . Expr.concKeccakSimpExpr . defaultSymbolicValues $ subModel cex (AbstractBuf "txdata")
           assertBoolM "Must start with specific string" (T.isPrefixOf "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0cf" buf)
