@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so we don't get too large buffers as counterexamples
 - More symbolic overapproximation for Balance and ExtCodeHash opcodes, fixing
   CodeHash SMT representation
+- Allow user to change the verbosity level. For the moment, this is only to
+  print some warnings related to zero-address dereference
 
 
 ## Fixed
