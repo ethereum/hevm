@@ -41,7 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CodeHash SMT representation
 - Allow limiting the branching factor and the depth of exploration via --max-explore
 
-
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
   This should improve issues when "Unexpected Symbolic Arguments to Opcode" was
