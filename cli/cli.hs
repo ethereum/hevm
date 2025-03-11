@@ -9,8 +9,10 @@ module Main where
 import Control.Monad (when, forM_, unless)
 import Control.Monad.ST (RealWorld, stToIO)
 import Control.Monad.IO.Unlift
+import Control.Exception (try, IOException)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as BS
+import qualified Data.ByteString.Char8 as BC
 import Data.DoubleWord (Word256)
 import Data.List (intersperse)
 import Data.Maybe (fromMaybe, mapMaybe, fromJust, isNothing, isJust)
@@ -28,9 +30,6 @@ import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirector
 import System.FilePath ((</>))
 import System.Exit (exitFailure, exitWith, ExitCode(..))
 import Main.Utf8 (withUtf8)
-import qualified Data.ByteString.Char8 as BC
-import Data.Aeson (decode, (.:))
-import Data.Aeson.Types (parseMaybe)
 
 import EVM (initialContract, abstractContract, makeVm)
 import EVM.ABI (Sig(..))
@@ -61,7 +60,7 @@ data Command w
   = Symbolic -- Symbolically explore an abstract program, or specialized with specified env & calldata
   -- vm opts
       { code          :: w ::: Maybe ByteString <?> "Program bytecode"
-      , codeFile      :: w ::: Maybe String     <?> "Program bytecode from JSON file's deployedBytecode.object field"
+      , codeFile    :: w ::: Maybe String       <?> "Program bytecode in a file"
       , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
       , address       :: w ::: Maybe Addr       <?> "Tx: address"
       , caller        :: w ::: Maybe Addr       <?> "Tx: caller"
@@ -115,8 +114,8 @@ data Command w
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: Maybe ByteString   <?> "Bytecode of the first program"
       , codeB         :: w ::: Maybe ByteString   <?> "Bytecode of the second program"
-      , codeAFile     :: w ::: Maybe String     <?> "First program's bytecode from JSON file's deployedBytecode.object field"
-      , codeBFile     :: w ::: Maybe String     <?> "Second program's bytecode from JSON file's deployedBytecode.object field"
+      , codeAFile     :: w ::: Maybe String     <?> "First program's bytecode in a file"
+      , codeBFile     :: w ::: Maybe String     <?> "Second program's bytecode in a file"
       , sig           :: w ::: Maybe Text       <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]         <?> "Values to encode"
       , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
@@ -140,7 +139,7 @@ data Command w
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
-      , codeFile    :: w ::: Maybe String      <?> "Program bytecode from JSON file's deployedBytecode.object field"
+      , codeFile    :: w ::: Maybe String      <?> "Program bytecode in a file"
       , calldata    :: w ::: Maybe ByteString  <?> "Tx: calldata"
       , address     :: w ::: Maybe Addr        <?> "Tx: address"
       , caller      :: w ::: Maybe Addr        <?> "Tx: caller"
@@ -277,21 +276,17 @@ getCode fname code = do
     putStrLn "Error: Cannot provide both a file and code"
     exitFailure
   case fname of
-    Nothing -> pure code
-    Just f -> fmap Just $ readJSONcode f
-
-readJSONcode :: FilePath -> IO ByteString
-readJSONcode fname = do
-  contents <- BS.readFile fname
-  case decode contents of
-    Nothing -> do
-      putStrLn "Error: Failed to parse JSON given as code file"
-      exitFailure
-    Just json -> case parseMaybe (.: "deployedBytecode") json >>= parseMaybe (.: "object") of
-      Nothing -> do
-        putStrLn "Error: Expected a deployedBytecode object in code file"
-        exitFailure
-      Just obj -> pure $ BC.pack obj
+    Nothing -> pure $ fmap strip code
+    Just f -> do
+      result <- try (BS.readFile f) :: IO (Either IOException BS.ByteString)
+      case result of
+        Left e -> do
+          putStrLn $ "Error reading file: " <> (show e)
+          exitFailure
+        Right content -> do
+          pure $ Just $ strip (BS.toStrict content)
+  where
+    strip = BC.filter (\c -> c /= ' ' && c /= '\n' && c /= '\r' && c /= '\t' && c /= '"')
 
 equivalence :: App m => Command Options.Unwrapped -> m ()
 equivalence cmd = do
