@@ -971,10 +971,10 @@ formatCex cd sig m@(SMTCex _ addrs _ store blockContext txContext) = T.unlines $
           ) mempty txContext
         ]
 
-    prettyBuf :: Expr Buf -> Text
-    prettyBuf (ConcreteBuf "") = "Empty"
-    prettyBuf (ConcreteBuf bs) = formatBinary bs
-    prettyBuf b = internalError $ "Unexpected symbolic buffer:\n" <> T.unpack (formatExpr b)
+prettyBuf :: Expr Buf -> Text
+prettyBuf (ConcreteBuf "") = "Empty"
+prettyBuf (ConcreteBuf bs) = formatBinary bs
+prettyBuf b = internalError $ "Unexpected symbolic buffer:\n" <> T.unpack (formatExpr b)
 
 prettyCalldata :: SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
 prettyCalldata cex buf sig types = headErr errSig (T.splitOn "(" sig) <> "(" <> body <> ")"
