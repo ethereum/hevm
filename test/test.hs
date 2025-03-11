@@ -58,7 +58,7 @@ import EVM.Assembler
 import EVM.Exec
 import EVM.Expr qualified as Expr
 import EVM.Fetch qualified as Fetch
-import EVM.Format (hexText, formatExpr)
+import EVM.Format (hexByteString, hexText, formatExpr)
 import EVM.Precompiled
 import EVM.RLP
 import EVM.SMT hiding (one)
@@ -3983,7 +3983,20 @@ tests = testGroup "hevm"
   ]
   , testGroup "equivalence-checking"
     [
-      test "eq-yul-simple-cex" $ do
+      -- check bug https://github.com/ethereum/hevm/issues/679
+      test "eq-issue-with-length-cex-bug679" $ do
+        let a = fromJust (hexByteString "5f610100526020610100f3")
+            b = fromJust (hexByteString "5f356101f40115610100526020610100f3")
+        withSolvers Z3 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s a b defaultVeriOpts calldata
+          assertBoolM "Must have a difference" (any isCex res)
+          let cexs = mapMaybe getCex res
+          assertEqualM "Must have a cex" (length cexs) 1
+          let cex = head cexs
+          let buf = prettyBuf . Expr.concKeccakSimpExpr . defaultSymbolicValues $ subModel cex (AbstractBuf "txdata")
+          assertBoolM "Must start with specific string" (T.isPrefixOf "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0cf" buf)
+      , test "eq-yul-simple-cex" $ do
         Just aPrgm <- liftIO $ yul ""
           [i|
           {
