@@ -20,7 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated via iterative calls to the SMT solver for quicker solving
 - Aliasing works much better for symbolic and concrete addresses
 - Constant propagation for symbolic values
-- Allow reading deployedBytecode.object from the forge JSON as --code-file or --code-a-file/--code-b-file
+- Allow reading bytecode via --code-file or --code-a-file/--code-b-file. Strips
+  `\n`, spaces, and ignores leading `0x` to make it easier to use via e.g.
+  `jq '.deplayedBytecode.object file.json > file.txt'` to parse Forge JSON output
   This alleviates the issue when the contract is large and does not fit the command line
   limit of 8192 characters
 - Two more simplification rules: `ReadByte` & `ReadWord` when the `CopySlice`
@@ -54,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Size of calldata can be up to 2**64, not 256. This is now reflected in the documentation
 - We now have less noise during test runs, and assert more about symbolic copyslice tests
 - CopySlice rewrite rule is now less strict while still being sound
+- Assumptions about reading from buffer after its size are now the same in all cases.
+  Previously, they were too weak in case of reading 32 bytes.
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
