@@ -47,7 +47,7 @@ jobs:
 
       - name: Configure
         if: steps.cache-bitwuzla.outputs.cache-hit != 'true'
-        run: ./configure.py --prefix=${{ github.workspace }}/bitwuzla/build/install --win64
+        run: ./configure.py --prefix=${{ github.workspace }}/bitwuzla/build/install
         working-directory: bitwuzla
 
       - name: Build
