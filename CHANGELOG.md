@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CodeHash SMT representation
 - PNeg + PGT/PGEq/PLeq/PLT simplification rules
 - We no longer dispatch Props to SMT that can be solved by a simplification
+- Allow user to change the verbosity level. For the moment, this is only to
+  print some warnings related to zero-address dereference
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
