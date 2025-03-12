@@ -483,20 +483,23 @@ instance Eq Prop where
   PImpl a b == PImpl c d = a == c && b == d
   _ == _ = False
 
+-- Note: we cannot compare via `a <= c || b <= d` because then
+--       when a==c but b > d, we'd return TRUE, when we should be
+--       returning FALSE.
 instance Ord Prop where
   PBool a <= PBool b = a <= b
   PEq (a :: Expr x) (b :: Expr x) <= PEq (c :: Expr y) (d :: Expr y)
     = case eqT @x @y of
-       Just Refl -> a <= c || b <= d
+       Just Refl ->        a < c || b < d || (a == c && b == d)
        Nothing -> toNum a <= toNum c
-  PLT a b <= PLT c d = a <= c || b <= d
-  PGT a b <= PGT c d = a <= c || b <= d
-  PGEq a b <= PGEq c d = a <= c || b <= d
-  PLEq a b <= PLEq c d = a <= c || b <= d
-  PNeg a <= PNeg b = a <= b
-  PAnd a b <= PAnd c d = a <= c || b <= d
-  POr a b <= POr c d = a <= c || b <= d
-  PImpl a b <= PImpl c d = a <= c || b <= d
+  PLT a b  <= PLT c d    = a < c || b < d || (a == c && b == d)
+  PGT a b  <= PGT c d    = a < c || b < d || (a == c && b == d)
+  PGEq a b <= PGEq c d   = a < c || b < d || (a == c && b == d)
+  PLEq a b <= PLEq c d   = a < c || b < d || (a == c && b == d)
+  PNeg a   <= PNeg b     = a <= b
+  PAnd a b <= PAnd c d   = a < c || b < d || (a == c && b == d)
+  POr a b  <= POr c d    = a < c || b < d || (a == c && b == d)
+  PImpl a b <= PImpl c d = a < c || b < d || (a == c && b == d)
   a <= b = asNum a <= asNum b
     where
       asNum :: Prop -> Int
