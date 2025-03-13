@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so we don't get too large buffers as counterexamples
 - More symbolic overapproximation for Balance and ExtCodeHash opcodes, fixing
   CodeHash SMT representation
+- PNeg + PGT/PGEq/PLeq/PLT simplification rules
 
 
 ## Fixed
@@ -61,6 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
   their contract is correct when there were cases/branches that hevm could not
   fully explore. Printing of issues is also now much more organized
+- Expressions that are commutative are now canonicalized to have the smaller
+  value on the LHS. This can significantly help with simplifications, automatically
+  determining when (Eq a b) is true when a==b modulo commutativity
 
 ## [0.54.2] - 2024-12-12
 
