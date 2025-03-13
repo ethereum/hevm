@@ -30,6 +30,7 @@ import EVM.Fuzz (tryCexFuzz)
 import Numeric (readHex)
 import Data.Bits ((.&.))
 import Numeric (showHex)
+import EVM.Expr (simplifyProps)
 
 import EVM.SMT
 import EVM.Types
@@ -105,6 +106,19 @@ checkMulti (SolverGroup taskQueue) smt2 multiSol = do
     writeChan taskQueue (TaskMulti (MultiData (getNonError smt2) multiSol resChan))
     -- collect result
     readChan resChan
+
+checkSatWithProps :: App m => SolverGroup -> [Prop] ->m (CheckSatResult, Err SMT2)
+checkSatWithProps (SolverGroup taskQueue) props = do
+  conf <- readConfig
+  let psSimp = simplifyProps props
+  if psSimp == [PBool False] then pure (Unsat, Right mempty)
+  else do
+    let smt2 = assertProps conf psSimp
+    if isLeft smt2 then
+      let err = getError smt2 in pure (EVM.Solvers.Unknown err, Left err)
+    else do
+      res <- liftIO $ checkSat (SolverGroup taskQueue) smt2
+      pure (res, Right (getNonError smt2))
 
 checkSat :: SolverGroup -> Err SMT2 -> IO CheckSatResult
 checkSat (SolverGroup taskQueue) smt2 = do
