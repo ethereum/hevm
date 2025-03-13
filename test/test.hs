@@ -1770,7 +1770,7 @@ tests = testGroup "hevm"
             |]
         (e, [Qed _]) <- withDefaultSolver $
           \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] (defaultVeriOpts{ maxIter = Just 5 })
-        assertBoolM "The expression is not partial" $ Expr.containsNode isPartial e
+        assertBoolM "The expression MUST be partial" $ Expr.containsNode isPartial e
     , test "inconsistent-paths" $ do
         Just c <- solcRuntime "C"
             [i|
@@ -1829,9 +1829,8 @@ tests = testGroup "hevm"
             -- askSmtIters is low enough here to avoid the inconsistent path
             -- conditions, so we never hit maxIters
             opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 1 }
-        (e, [Qed _]) <- withDefaultSolver $
-          \s -> checkAssert s defaultPanicCodes c sig [] opts
-        assertBoolM "The expression is partial" $ not (Expr.containsNode isPartial e)
+        (e, [Qed _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] opts
+        assertBoolM "The expression MUST NOT be partial" $ not (Expr.containsNode isPartial e)
     ]
   , testGroup "Symbolic Addresses"
     [ test "symbolic-address-create" $ do

@@ -573,12 +573,16 @@ reachable solvers e = do
               (Nothing, Nothing) -> Nothing
         pure (fst tres <> fst fres, subexpr)
       leaf -> do
-        let query = assertProps conf pcs
-        res <- checkSat solvers query
-        case res of
-          Sat _ -> pure ([getNonError query], Just leaf)
-          Unsat -> pure ([getNonError query], Nothing)
-          r -> internalError $ "Invalid solver result: " <> show r
+        let pcsSimp = Expr.simplifyProps pcs
+        if pcsSimp == [PBool False]
+          then pure ([], Nothing)
+          else do
+            let query = assertProps conf pcsSimp
+            res <- checkSat solvers query
+            case res of
+              Sat _ -> pure ([getNonError query], Just leaf)
+              Unsat -> pure ([getNonError query], Nothing)
+              r -> internalError $ "Invalid solver result: " <> show r
 
 -- | Extract constraints stored in Expr End nodes
 extractProps :: Expr End -> [Prop]
