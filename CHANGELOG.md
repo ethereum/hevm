@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so we don't get too large buffers as counterexamples
 - More symbolic overapproximation for Balance and ExtCodeHash opcodes, fixing
   CodeHash SMT representation
-
+- We no longer dispatch Props to SMT that can be solved by a simplification
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value

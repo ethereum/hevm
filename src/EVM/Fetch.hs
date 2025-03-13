@@ -271,18 +271,24 @@ getSolutions solvers symExprPreSimp numBytes pathconditions = do
 checkBranch :: App m => SolverGroup -> Prop -> Prop -> m BranchCondition
 checkBranch solvers branchcondition pathconditions = do
   conf <- readConfig
-  liftIO $ checkSat solvers (assertProps conf [(branchcondition .&& pathconditions)]) >>= \case
+  let props = [pathconditions .&& branchcondition]
+      propsSimp = Expr.simplifyProps props
+  if propsSimp == [PBool False] then pure $ Case False
+  else liftIO $ checkSat solvers (assertProps conf propsSimp) >>= \case
     -- the condition is unsatisfiable
     Unsat -> -- if pathconditions are consistent then the condition must be false
       pure $ Case False
     -- Sat means its possible for condition to hold
     Sat _ -> do -- is its negation also possible?
-      checkSat solvers (assertProps conf [(pathconditions .&& (PNeg branchcondition))]) >>= \case
+      let propsNeg = [pathconditions .&& (PNeg branchcondition)]
+          propsNegSimp = Expr.simplifyProps propsNeg
+      if propsNegSimp == [PBool False] then pure $ Case True
+      else checkSat solvers (assertProps conf propsNegSimp) >>= \case
         -- No. The condition must hold
         Unsat -> pure $ Case True
         -- Yes. Both branches possible
         Sat _ -> pure EVM.Types.Unknown
-    -- If the query times out, or can't be executed (e.g. symbolic copyslice) we simply explore both paths
+        -- If the query times out, or can't be executed (e.g. symbolic copyslice) we simply explore both paths
         _ -> pure EVM.Types.Unknown
     -- If the query times out, or can't be executed (e.g. symbolic copyslice) we simply explore both paths
     _ -> pure EVM.Types.Unknown
