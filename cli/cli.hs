@@ -54,6 +54,50 @@ import EVM.Expr (maybeLitWordSimp, maybeLitAddrSimp)
 data AssertionType = DSTest | Forge
   deriving (Eq, Show, Read, ParseField)
 
+data CommonOptions w = CommonOptions
+  { numCexFuzz           :: w ::: Integer
+  , askSmtIterations     :: w ::: Integer
+  , maxBranch            :: w ::: Int
+  , maxBufSize           :: w ::: Int
+  , promiseNoReent       :: w ::: Bool
+  , loopDetectionHeuristic :: w ::: LoopHeuristic
+  , noDecompose          :: w ::: Bool
+  , numSolvers           :: w ::: Maybe Natural
+  , solverThreads        :: w ::: Maybe Natural
+  , smttimeout           :: w ::: Maybe Natural
+  , maxIterations        :: w ::: Maybe Integer
+  , solver               :: w ::: Maybe Text
+  , smtdebug             :: w ::: Bool
+  , debug                :: w ::: Bool
+  , trace                :: w ::: Bool
+  }
+
+data CommonOptions2 w = CommonOptions2
+  { calldata    :: w ::: Maybe ByteString  <?> "Tx: calldata"
+    , address     :: w ::: Maybe Addr        <?> "Tx: address"
+    , caller      :: w ::: Maybe Addr        <?> "Tx: caller"
+    , origin      :: w ::: Maybe Addr        <?> "Tx: origin"
+    , coinbase    :: w ::: Maybe Addr        <?> "Block: coinbase"
+    , value       :: w ::: Maybe W256        <?> "Tx: Eth amount"
+    , nonce       :: w ::: Maybe Word64      <?> "Nonce of origin"
+    , gas         :: w ::: Maybe Word64      <?> "Tx: gas amount"
+    , number      :: w ::: Maybe W256        <?> "Block: number"
+    , timestamp   :: w ::: Maybe W256        <?> "Block: timestamp"
+    , basefee     :: w ::: Maybe W256        <?> "Block: base fee"
+    , priorityFee :: w ::: Maybe W256        <?> "Tx: priority fee"
+    , gaslimit    :: w ::: Maybe Word64      <?> "Tx: gas limit"
+    , gasprice    :: w ::: Maybe W256        <?> "Tx: gas price"
+    , create      :: w ::: Bool              <?> "Tx: creation"
+    , maxcodesize :: w ::: Maybe W256        <?> "Block: max code size"
+    , prevRandao  :: w ::: Maybe W256        <?> "Block: prevRandao"
+    , chainid     :: w ::: Maybe W256        <?> "Env: chainId"
+    , rpc         :: w ::: Maybe URL         <?> "Fetch state from a remote node"
+    , block       :: w ::: Maybe W256        <?> "Block state is be fetched from"
+    , root        :: w ::: Maybe String      <?> "Path to  project root directory (default: . )"
+    , projectType :: w ::: Maybe ProjectType <?> "Is this a CombinedJSON or Foundry project (default: Foundry)"
+    , assertionType :: w ::: Maybe AssertionType <?> "Assertions as per Forge or DSTest (default: Forge)"
+  }
+
 -- This record defines the program's command-line options
 -- automatically via the `optparse-generic` package.
 data Command w
@@ -61,54 +105,15 @@ data Command w
   -- vm opts
       { code          :: w ::: Maybe ByteString <?> "Program bytecode"
       , codeFile    :: w ::: Maybe String       <?> "Program bytecode in a file"
-      , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
-      , address       :: w ::: Maybe Addr       <?> "Tx: address"
-      , caller        :: w ::: Maybe Addr       <?> "Tx: caller"
-      , origin        :: w ::: Maybe Addr       <?> "Tx: origin"
-      , coinbase      :: w ::: Maybe Addr       <?> "Block: coinbase"
-      , value         :: w ::: Maybe W256       <?> "Tx: Eth amount"
-      , nonce         :: w ::: Maybe Word64     <?> "Nonce of origin"
-      , gas           :: w ::: Maybe Word64     <?> "Tx: gas amount"
-      , number        :: w ::: Maybe W256       <?> "Block: number"
-      , timestamp     :: w ::: Maybe W256       <?> "Block: timestamp"
-      , basefee       :: w ::: Maybe W256       <?> "Block: base fee"
-      , priorityFee   :: w ::: Maybe W256       <?> "Tx: priority fee"
-      , gaslimit      :: w ::: Maybe Word64     <?> "Tx: gas limit"
-      , gasprice      :: w ::: Maybe W256       <?> "Tx: gas price"
-      , create        :: w ::: Bool             <?> "Tx: creation"
-      , maxcodesize   :: w ::: Maybe W256       <?> "Block: max code size"
-      , prevRandao    :: w ::: Maybe W256       <?> "Block: prevRandao"
-      , chainid       :: w ::: Maybe W256       <?> "Env: chainId"
-  -- remote state opts
-      , rpc           :: w ::: Maybe URL        <?> "Fetch state from a remote node"
-      , block         :: w ::: Maybe W256       <?> "Block state is be fetched from"
-
-  -- symbolic execution opts
-      , root          :: w ::: Maybe String       <?> "Path to  project root directory (default: . )"
-      , projectType   :: w ::: Maybe ProjectType  <?> "Is this a CombinedJSON or Foundry project (default: Foundry)"
-      , assertionType :: w ::: Maybe AssertionType <?> "Assertions as per Forge or DSTest (default: Forge)"
       , initialStorage :: w ::: Maybe (InitialStorage) <?> "Starting state for storage: Empty, Abstract (default Abstract)"
       , sig           :: w ::: Maybe Text         <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]           <?> "Values to encode"
       , getModels     :: w ::: Bool               <?> "Print example testcase for each execution path"
       , showTree      :: w ::: Bool               <?> "Print branches explored in tree view"
       , showReachableTree :: w ::: Bool           <?> "Print only reachable branches explored in tree view"
-      , smttimeout    :: w ::: Maybe Natural      <?> "Timeout given to SMT solver in seconds (default: 300)"
-      , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point. For no bound, set -1 (default: 5)"
-      , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
-      , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
-      , debug         :: w ::: Bool               <?> "Debug printing of internal behaviour, and dump internal expressions"
-      , trace         :: w ::: Bool               <?> "Dump trace"
       , assertions    :: w ::: Maybe [Word256]    <?> "Comma separated list of solc panic codes to check for (default: user defined assertion violations only)"
-      , askSmtIterations :: w ::: Integer         <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
-      , numCexFuzz    :: w ::: Integer            <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
-      , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores)"
-      , solverThreads :: w ::: Maybe Natural      <?> "Number of threads for each solver instance. Only respected for Z3 (default: 1)"
-      , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
-      , noDecompose   :: w ::: Bool               <?> "Don't decompose storage slots into separate arrays"
-      , maxBranch     :: w ::: Int                <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
-      , promiseNoReent:: w ::: Bool               <!> "Promise no reentrancy is possible into the contract(s) being examined"
-      , maxBufSize    :: w ::: Int                <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
+      , commonOptions :: CommonOptions w
+      , commonOptions2 :: CommonOptions2 w
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: Maybe ByteString   <?> "Bytecode of the first program"
@@ -118,51 +123,15 @@ data Command w
       , sig           :: w ::: Maybe Text       <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]         <?> "Values to encode"
       , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
-      , smttimeout    :: w ::: Maybe Natural    <?> "Timeout given to SMT solver in seconds (default: 300)"
-      , maxIterations :: w ::: Maybe Integer    <?> "Number of times we may revisit a particular branching point. For no bound, set -1 (default: 5)"
-      , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
       , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
-      , smtdebug      :: w ::: Bool             <?> "Print smt queries sent to the solver"
-      , debug         :: w ::: Bool             <?> "Debug printing of internal behaviour, and dump internal expressions"
-      , trace         :: w ::: Bool             <?> "Dump trace"
-      , askSmtIterations :: w ::: Integer       <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , numCexFuzz    :: w ::: Integer          <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
-      , numSolvers    :: w ::: Maybe Natural    <?> "Number of solver instances to use (default: number of cpu cores)"
-      , solverThreads :: w ::: Maybe Natural    <?> "Number of threads for each solver instance. Only respected for Z3 (default: 1)"
-      , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
-      , noDecompose   :: w ::: Bool             <?> "Don't decompose storage slots into separate arrays"
-      , maxBranch     :: w ::: Int              <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
-      , maxBufSize    :: w ::: Int              <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
-      , promiseNoReent:: w ::: Bool             <!> "Promise no reentrancy is possible into the contract(s) being examined"
+      , commonOptions :: CommonOptions w
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
       , codeFile    :: w ::: Maybe String      <?> "Program bytecode in a file"
-      , calldata    :: w ::: Maybe ByteString  <?> "Tx: calldata"
-      , address     :: w ::: Maybe Addr        <?> "Tx: address"
-      , caller      :: w ::: Maybe Addr        <?> "Tx: caller"
-      , origin      :: w ::: Maybe Addr        <?> "Tx: origin"
-      , coinbase    :: w ::: Maybe Addr        <?> "Block: coinbase"
-      , value       :: w ::: Maybe W256        <?> "Tx: Eth amount"
-      , nonce       :: w ::: Maybe Word64      <?> "Nonce of origin"
-      , gas         :: w ::: Maybe Word64      <?> "Tx: gas amount"
-      , number      :: w ::: Maybe W256        <?> "Block: number"
-      , timestamp   :: w ::: Maybe W256        <?> "Block: timestamp"
-      , basefee     :: w ::: Maybe W256        <?> "Block: base fee"
-      , priorityFee :: w ::: Maybe W256        <?> "Tx: priority fee"
-      , gaslimit    :: w ::: Maybe Word64      <?> "Tx: gas limit"
-      , gasprice    :: w ::: Maybe W256        <?> "Tx: gas price"
-      , create      :: w ::: Bool              <?> "Tx: creation"
-      , maxcodesize :: w ::: Maybe W256        <?> "Block: max code size"
-      , prevRandao  :: w ::: Maybe W256        <?> "Block: prevRandao"
-      , chainid     :: w ::: Maybe W256        <?> "Env: chainId"
-      , debug         :: w ::: Bool            <?> "Debug printing of internal behaviour, and dump internal expressions"
-      , trace       :: w ::: Bool              <?> "Dump trace"
-      , rpc         :: w ::: Maybe URL         <?> "Fetch state from a remote node"
-      , block       :: w ::: Maybe W256        <?> "Block state is be fetched from"
-      , root        :: w ::: Maybe String      <?> "Path to  project root directory (default: . )"
-      , projectType :: w ::: Maybe ProjectType <?> "Is this a CombinedJSON or Foundry project (default: Foundry)"
-      , assertionType :: w ::: Maybe AssertionType <?> "Assertions as per Forge or DSTest (default: Forge)"
+      , commonOptions :: CommonOptions w
+      , commonOptions2 :: CommonOptions2 w
       }
   | Test -- Run Foundry unit tests
       { root        :: w ::: Maybe String               <?> "Path to  project root directory (default: . )"
@@ -173,22 +142,11 @@ data Command w
       , verbose       :: w ::: Maybe Int                <?> "Append call trace: {1} failures {2} all"
       , coverage      :: w ::: Bool                     <?> "Coverage analysis"
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
-      , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
-      , numSolvers    :: w ::: Maybe Natural            <?> "Number of solver instances to use (default: number of cpu cores)"
-      , solverThreads :: w ::: Maybe Natural            <?> "Number of threads for each solver instance. Only respected for Z3 (default: 1)"
-      , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
       , debug         :: w ::: Bool                     <?> "Debug printing of internal behaviour, and dump internal expressions"
       , trace         :: w ::: Bool                     <?> "Dump trace"
       , ffi           :: w ::: Bool                     <?> "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)"
-      , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in seconds (default: 300)"
-      , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point. For no bound, set -1 (default: 5)"
-      , loopDetectionHeuristic :: w ::: LoopHeuristic   <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
-      , noDecompose   :: w ::: Bool                     <?> "Don't decompose storage slots into separate arrays"
-      , maxBranch     :: w ::: Int                      <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
       , numCexFuzz    :: w ::: Integer                  <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
-      , askSmtIterations :: w ::: Integer               <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
-      , maxBufSize    :: w ::: Int                      <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
-      , promiseNoReent:: w ::: Bool                     <!> "Promise no reentrancy is possible into the contract(s) being examined"
+      , commonOptions :: CommonOptions w
       }
   | Version
 
@@ -207,6 +165,7 @@ deriving instance Options.ParseField [Word256]
 instance Options.ParseRecord (Command Options.Wrapped) where
   parseRecord =
     Options.parseRecordWithModifiers Options.lispCaseModifiers
+    sdfasdf
 
 data InitialStorage
   = Empty
