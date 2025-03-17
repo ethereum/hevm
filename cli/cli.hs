@@ -30,6 +30,7 @@ import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirector
 import System.FilePath ((</>))
 import System.Exit (exitFailure, exitWith, ExitCode(..))
 import Main.Utf8 (withUtf8)
+import Options.Applicative
 
 import EVM (initialContract, abstractContract, makeVm)
 import EVM.ABI (Sig(..))
@@ -113,7 +114,7 @@ data Command w
       , showReachableTree :: w ::: Bool           <?> "Print only reachable branches explored in tree view"
       , assertions    :: w ::: Maybe [Word256]    <?> "Comma separated list of solc panic codes to check for (default: user defined assertion violations only)"
       , commonOptions :: CommonOptions w
-      , commonOptions2 :: CommonOptions2 w
+      -- , commonOptions2 :: CommonOptions2 w
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: Maybe ByteString   <?> "Bytecode of the first program"
@@ -131,7 +132,7 @@ data Command w
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
       , codeFile    :: w ::: Maybe String      <?> "Program bytecode in a file"
       , commonOptions :: CommonOptions w
-      , commonOptions2 :: CommonOptions2 w
+      -- , commonOptions2 :: CommonOptions2 w
       }
   | Test -- Run Foundry unit tests
       { root        :: w ::: Maybe String               <?> "Path to  project root directory (default: . )"
@@ -162,10 +163,15 @@ instance Options.ParseField (Text, ByteString)
 deriving instance Options.ParseField Word256
 deriving instance Options.ParseField [Word256]
 
+-- Import necessary modules
+
+-- Define the ParseRecord instance for CommonOptions
+instance Options.ParseRecord (CommonOptions Options.Wrapped) where
+  parseRecord = Options.parseRecordWithModifiers Options.lispCaseModifiers
+
 instance Options.ParseRecord (Command Options.Wrapped) where
   parseRecord =
     Options.parseRecordWithModifiers Options.lispCaseModifiers
-    sdfasdf
 
 data InitialStorage
   = Empty
