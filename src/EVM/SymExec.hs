@@ -550,8 +550,7 @@ flattenExpr = go []
 -- TODO: handle errors properly
 reachable :: App m => SolverGroup -> Expr End -> m ([SMT2], Expr End)
 reachable solvers e = do
-  conf <- readConfig
-  res <- liftIO $ go conf [] e
+  res <- go [] e
   pure $ second (fromMaybe (internalError "no reachable paths found")) res
   where
     {-
@@ -560,12 +559,12 @@ reachable solvers e = do
        If reachable return the expr wrapped in a Just. If not return Nothing.
        When walking back up the tree drop unreachable subbranches.
     -}
-    go :: Config -> [Prop] -> Expr End -> IO ([SMT2], Maybe (Expr End))
-    go conf pcs = \case
+    go :: (App m, MonadUnliftIO m) => [Prop] -> Expr End -> m ([SMT2], Maybe (Expr End))
+    go pcs = \case
       ITE c t f -> do
-        (tres, fres) <- concurrently
-          (go conf (PEq (Lit 1) c : pcs) t)
-          (go conf (PEq (Lit 0) c : pcs) f)
+        (tres, fres) <- withRunInIO $ \env -> concurrently
+          (env $ go (PEq (Lit 1) c : pcs) t)
+          (env $ go (PEq (Lit 0) c : pcs) f)
         let subexpr = case (snd tres, snd fres) of
               (Just t', Just f') -> Just $ ITE c t' f'
               (Just t', Nothing) -> Just t'
@@ -573,11 +572,10 @@ reachable solvers e = do
               (Nothing, Nothing) -> Nothing
         pure (fst tres <> fst fres, subexpr)
       leaf -> do
-        let query = assertProps conf pcs
-        res <- checkSat solvers query
+        (res, smt2) <- checkSatWithProps solvers pcs
         case res of
-          Sat _ -> pure ([getNonError query], Just leaf)
-          Unsat -> pure ([getNonError query], Nothing)
+          Sat _ -> pure ([getNonError smt2], Just leaf)
+          Unsat -> pure ([getNonError smt2], Nothing)
           r -> internalError $ "Invalid solver result: " <> show r
 
 -- | Extract constraints stored in Expr End nodes
@@ -766,23 +764,21 @@ equivalenceCheck' solvers branchesA branchesB = do
     -- the solver if we can determine unsatisfiability from the cache already
     -- the last element of the returned tuple indicates whether the cache was
     -- used or not
-    check :: Config -> UnsatCache -> (Set Prop) -> IO (EquivResult, Bool)
-    check conf knownUnsat props = do
-      let smt = assertProps conf (Set.toList props)
-      ku <- readTVarIO knownUnsat
-      res <- if subsetAny props ku
-             then pure (True, Unsat)
-             else (fmap ((False),) (checkSat solvers smt))
+    check :: App m => UnsatCache -> Set Prop -> m (EquivResult, Bool)
+    check knownUnsat props = do
+      ku <- liftIO $ readTVarIO knownUnsat
+      res <- if subsetAny props ku then pure (True, Unsat)
+             else do
+               (res, _) <- checkSatWithProps solvers $ Set.toList props
+               pure (False, res)
       case res of
         (_, Sat x) -> pure (Cex x, False)
-        (quick, Unsat) ->
-          case quick of
-            True  -> pure (Qed (), quick)
-            False -> do
-              -- nb: we might end up with duplicates here due to a
-              -- potential race, but it doesn't matter for correctness
-              atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
-              pure (Qed (), False)
+        (True, Unsat) -> pure (Qed (), True)
+        (False, Unsat) -> do
+          -- nb: we might end up with duplicates here due to a
+          -- potential race, but it doesn't matter for correctness
+          liftIO $ atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
+          pure (Qed (), False)
         (_, EVM.Solvers.Unknown _) -> pure (EVM.SymExec.Unknown (), False)
         (_, EVM.Solvers.Error txt) -> pure (EVM.SymExec.Error txt, False)
 
@@ -790,11 +786,10 @@ equivalenceCheck' solvers branchesA branchesB = do
     -- from left-to-right, and with a max of K threads. This is in contrast to
     -- mapConcurrently which would spawn as many threads as there are jobs, and
     -- run them in a random order. We ordered them correctly, though so that'd be bad
-    checkAll :: App m => [(Set Prop)] -> UnsatCache -> Int -> m [(EquivResult, Bool)]
-    checkAll input cache numproc = do
-       conf <- readConfig
-       wrap <- liftIO $ pool numproc
-       liftIO $ parMapIO (wrap . (check conf cache)) input
+    checkAll :: (App m, MonadUnliftIO m) => [(Set Prop)] -> UnsatCache -> Int -> m [(EquivResult, Bool)]
+    checkAll input cache numproc = withRunInIO $ \env -> do
+       wrap <- pool numproc
+       parMapIO (\e -> wrap (env $ check cache e)) input
 
 
     -- Takes two branches and returns a set of props that will need to be
