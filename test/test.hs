@@ -1778,7 +1778,7 @@ tests = testGroup "hevm"
             |]
         (e, [Qed _]) <- withDefaultSolver $
           \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] (defaultVeriOpts{ maxIter = Just 5 })
-        assertBoolM "The expression is not partial" $ Expr.containsNode isPartial e
+        assertBoolM "The expression MUST be partial" $ Expr.containsNode isPartial e
     , test "inconsistent-paths" $ do
         Just c <- solcRuntime "C"
             [i|
@@ -1837,9 +1837,8 @@ tests = testGroup "hevm"
             -- askSmtIters is low enough here to avoid the inconsistent path
             -- conditions, so we never hit maxIters
             opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 1 }
-        (e, [Qed _]) <- withDefaultSolver $
-          \s -> checkAssert s defaultPanicCodes c sig [] opts
-        assertBoolM "The expression is partial" $ not (Expr.containsNode isPartial e)
+        (e, [Qed _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] opts
+        assertBoolM "The expression MUST NOT be partial" $ not (Expr.containsNode isPartial e)
     ]
   , testGroup "Symbolic Addresses"
     [ test "symbolic-address-create" $ do
@@ -4598,16 +4597,15 @@ checkEquivAndLHS orig simp = do
 
 checkEquivBase :: (Eq a, App m) => (a -> a -> Prop) -> a -> a -> Bool -> m (Maybe Bool)
 checkEquivBase mkprop l r expect = do
-  withSolvers Z3 1 1 (Just 1) $ \solvers -> liftIO $ do
-     let smt = assertPropsNoSimp [mkprop l r]
-     res <- checkSat solvers smt
+  withSolvers Z3 1 1 (Just 1) $ \solvers -> do
+     (res, _) <- checkSatWithProps solvers [mkprop l r]
      let
        ret = case res of
          Unsat -> Just True
          Sat _ -> Just False
          EVM.Solvers.Error _ -> Just (not expect)
          EVM.Solvers.Unknown _ -> Nothing
-     when (ret == Just (not expect)) $ print res
+     when (ret == Just (not expect)) $ liftIO $ print res
      pure ret
 
 -- | Takes a runtime code and calls it with the provided calldata
