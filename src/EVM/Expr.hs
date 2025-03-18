@@ -716,7 +716,7 @@ pattern MappingSlot :: ByteString -> Expr EWord -> Expr EWord
 pattern MappingSlot idx key = Keccak (WriteWord (Lit 0) key (ConcreteBuf idx))
 
 -- storage slots for arrays are determined by (keccak(bytes32(id)) + offset)
--- note that `normArgs` puts the Lit as the 2nd argument to `Add`
+-- note that `normArgs` puts the Lit as the 1st argument to `Add`
 pattern ArraySlotWithOffs :: ByteString -> Expr EWord -> Expr EWord
 pattern ArraySlotWithOffs id offset = Add offset (Keccak (ConcreteBuf id))
 
