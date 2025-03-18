@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More symbolic overapproximation for Balance and ExtCodeHash opcodes, fixing
   CodeHash SMT representation
 - Add deployment code flag to the `equivalenceCheck` function
+- We no longer dispatch Props to SMT that can be solved by a simplification
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
