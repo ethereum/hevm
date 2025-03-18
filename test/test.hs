@@ -353,8 +353,7 @@ tests = testGroup "hevm"
       let simpExpr = mapExprM Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
-    -- TODO check what's going on here. Likely the "arbitrary write through array" is the reason why we fail
-    , expectFail $ test "decompose-6-fail" $ do
+    , test "decompose-6-fail" $ do
       Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -559,11 +558,11 @@ tests = testGroup "hevm"
       let simp = Expr.simplifyProp $ PLT (Max (Lit 5) (BufLength (AbstractBuf "txdata"))) (Lit 99)
       assertEqualM "max-buflength rules" simp $ PLT (BufLength (AbstractBuf "txdata")) (Lit 99)
     , test "simp-assoc-add1" $ do
-      let simp = Expr.simplify $        Add (Var "a") (Add (Var "b") (Var "c"))
-      assertEqualM "assoc rules" simp $ Add (Add (Var "a") (Var "b")) (Var "c")
+      let simp = Expr.simplify $        Add (Add (Var "c") (Var "a")) (Var "b")
+      assertEqualM "assoc rules" simp $ Add (Var "a") (Add (Var "b") (Var "c"))
     , test "simp-assoc-add2" $ do
-      let simp = Expr.simplify $        Add (Lit 1) (Add (Var "b") (Var "c"))
-      assertEqualM "assoc rules" simp $ Add (Add (Lit 1) (Var "b")) (Var "c")
+      let simp = Expr.simplify $        Add (Add (Lit 1) (Var "c")) (Var "b")
+      assertEqualM "assoc rules" simp $ Add (Lit 1) (Add (Var "b") (Var "c"))
     , test "simp-assoc-add3" $ do
       let simp = Expr.simplify $        Add (Lit 1) (Add (Lit 2) (Var "c"))
       assertEqualM "assoc rules" simp $ Add (Lit 3) (Var "c")
@@ -578,16 +577,22 @@ tests = testGroup "hevm"
       assertEqualM "assoc rules" simp $ Lit 10
     , test "simp-assoc-add-7" $ do
       let simp = Expr.simplify $        Add (Var "a") (Add (Var "b") (Lit 2))
-      assertEqualM "assoc rules" simp $ Add (Add (Lit 2) (Var "a")) (Var "b")
+      assertEqualM "assoc rules" simp $ Add (Lit 2) (Add (Var "a") (Var "b"))
     , test "simp-assoc-add8" $ do
       let simp = Expr.simplify $        Add (Add (Var "a") (Add (Lit 0x2) (Var "b"))) (Add (Var "c") (Add (Lit 0x2) (Var "d")))
-      assertEqualM "assoc rules" simp $ Add (Add (Add (Add (Lit 0x4) (Var "a")) (Var "b")) (Var "c")) (Var "d")
+      assertEqualM "assoc rules" simp $ Add (Lit 4) (Add (Var "a") (Add (Var "b") (Add (Var "c") (Var "d"))))
     , test "simp-assoc-mul1" $ do
-      let simp = Expr.simplify $        Mul (Var "a") (Mul (Var "b") (Var "c"))
-      assertEqualM "assoc rules" simp $ Mul (Mul (Var "a") (Var "b")) (Var "c")
+      let simp = Expr.simplify $        Mul (Mul (Var "b") (Var "a")) (Var "c")
+      assertEqualM "assoc rules" simp $ Mul (Var "a") (Mul (Var "b") (Var "c"))
     , test "simp-assoc-mul2" $ do
       let simp = Expr.simplify       $  Mul (Lit 2) (Mul (Var "a") (Lit 3))
       assertEqualM "assoc rules" simp $ Mul (Lit 6) (Var "a")
+    , test "simp-assoc-xor1" $ do
+      let simp = Expr.simplify       $  Xor (Lit 2) (Xor (Var "a") (Lit 3))
+      assertEqualM "assoc rules" simp $ Xor (Lit 1) (Var "a")
+    , test "simp-assoc-xor2" $ do
+      let simp = Expr.simplify       $  Xor (Lit 2) (Xor (Var "b") (Xor (Var "a") (Lit 3)))
+      assertEqualM "assoc rules" simp $ Xor (Lit 1) (Xor (Var "a") (Var "b"))
     , test "simp-zero-write-extend-buffer-len" $ do
         let
           expr = BufLength $ CopySlice (Lit 0) (Lit 0x10) (Lit 0) (AbstractBuf "buffer") (ConcreteBuf "bimm")
@@ -1508,7 +1513,10 @@ tests = testGroup "hevm"
             |]
         let sig = Just (Sig "fun(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])
         (_, k) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
-        putStrLnM $ "Ret: " <> (show k)
+        let numErrs = sum $ map (fromEnum . isError) k
+        assertEqualM "number of errors (i.e. copySlice issues) is 1" 1 numErrs
+        let errStrings = mapMaybe EVM.SymExec.getError k
+        assertEqualM "All errors are from copyslice" True $ all ("CopySlice" `List.isInfixOf`) errStrings
       ,
       test "symbolic-copyslice" $ do
         Just c <- solcRuntime "MyContract"
