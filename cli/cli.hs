@@ -172,7 +172,6 @@ data Command w
       , assertionType :: w ::: Maybe AssertionType <?> "Assertions as per Forge or DSTest (default: Forge)"
       , rpc           :: w ::: Maybe URL                <?> "Fetch state from a remote node"
       , number        :: w ::: Maybe W256               <?> "Block: number"
-      , verbose       :: w ::: Maybe Int                <?> "Append call trace: {1} failures {2} all"
       , coverage      :: w ::: Bool                     <?> "Coverage analysis"
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
       , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
@@ -729,7 +728,6 @@ unitTestOptions cmd solvers buildOutput = do
     , askSmtIters = cmd.askSmtIterations
     , smtTimeout = cmd.smttimeout
     , solver = cmd.solver
-    , verbose = cmd.verbose
     , match = T.pack $ fromMaybe ".*" cmd.match
     , testParams = params
     , dapp = srcInfo
