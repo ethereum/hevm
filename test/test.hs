@@ -4225,6 +4225,94 @@ tests = testGroup "hevm"
           calldata <- mkCalldata Nothing []
           (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertBoolM "Must have a difference" (any isCex res)
+      , test "constructor-same-deployed-diff" $ do
+        Just initA <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = 4;
+              }
+              function stuff(uint b) public returns (uint256) {
+                unchecked{return 2*b+NUMBER;}
+              }
+            }
+          |]
+        Just initB <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = 4;
+              }
+              function stuff(uint b) public returns (uint256) {
+                unchecked {return 4*b+NUMBER;}
+              }
+            }
+          |]
+        withSolvers Z3 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          assertBoolM "Must have difference, we return different values" (all isCex res)
+      , test "constructor-same-deployed-diff2" $ do
+        Just initA <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = 4;
+              }
+              function stuff(uint b) public returns (uint256) {
+                unchecked{return 4*b+NUMBER;}
+              }
+            }
+          |]
+        Just initB <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = 4;
+              }
+              function stuff(uint b) public returns (uint256) {
+                unchecked {return 4*b+NUMBER;}
+              }
+              function stuff_other(uint b) public returns (uint256) {
+                unchecked {return 2*b+NUMBER;}
+              }
+            }
+          |]
+        withSolvers Z3 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          assertBoolM "Must have difference, we return different values" (all isCex res)
+      , test "constructor-same-deployed-diff3" $ do
+        Just initA <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = 4;
+              }
+              function stuff(uint b) public returns (uint256) {
+                unchecked{return 4*b+NUMBER;}
+              }
+            }
+          |]
+        Just initB <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = 4;
+              }
+            }
+          |]
+        withSolvers Z3 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          assertBoolM "Must have difference, we return different values" (all isCex res)
+      -- We set x to be 0 on deployment. Default value is also 0. So they are equivalent
       -- We cannot deal with symbolic code. However, the below will generate symbolic code,
       -- because of the parameter in the constructor that is set to NUMBER in the deployed code.
       -- Hence, this test is ignored.
