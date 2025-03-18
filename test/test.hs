@@ -4131,7 +4131,7 @@ tests = testGroup "hevm"
   , testGroup "equivalence-checking"
     [
       -- diverging gas overapproximations are caught
-      -- previously, they had the same name (gas-...), so they compared equal
+      -- previously, they had the same name (gas_...), so they compared equal
       test "eq-divergent-overapprox-gas" $ do
         Just a <- solcRuntime "C"
           [i|

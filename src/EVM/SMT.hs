@@ -882,7 +882,7 @@ exprToSMT = \case
   SLoad idx store -> op2 "select" store idx
   LitAddr n -> pure $ fromLazyText $ "(_ bv" <> T.pack (show (into n :: Integer)) <> " 160)"
   CodeHash a@(LitAddr _) -> pure $ fromLazyText "codehash_" <> formatEAddr a
-  Gas prefix var -> pure $ fromLazyText $ "gas-" <> T.pack (TS.unpack prefix) <> T.pack (show var)
+  Gas prefix var -> pure $ fromLazyText $ "gas_" <> T.pack (TS.unpack prefix) <> T.pack (show var)
 
   a -> internalError $ "TODO: implement: " <> show a
   where
