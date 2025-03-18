@@ -2,6 +2,8 @@
 
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module Main where
@@ -30,7 +32,6 @@ import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirector
 import System.FilePath ((</>))
 import System.Exit (exitFailure, exitWith, ExitCode(..))
 import Main.Utf8 (withUtf8)
-import Options.Applicative
 
 import EVM (initialContract, abstractContract, makeVm)
 import EVM.ABI (Sig(..))
@@ -55,49 +56,58 @@ import EVM.Expr (maybeLitWordSimp, maybeLitAddrSimp)
 data AssertionType = DSTest | Forge
   deriving (Eq, Show, Read, ParseField)
 
+
 data CommonOptions w = CommonOptions
-  { numCexFuzz           :: w ::: Integer
-  , askSmtIterations     :: w ::: Integer
-  , maxBranch            :: w ::: Int
-  , maxBufSize           :: w ::: Int
-  , promiseNoReent       :: w ::: Bool
-  , loopDetectionHeuristic :: w ::: LoopHeuristic
-  , noDecompose          :: w ::: Bool
-  , numSolvers           :: w ::: Maybe Natural
-  , solverThreads        :: w ::: Maybe Natural
-  , smttimeout           :: w ::: Maybe Natural
+  { smttimeout           :: w ::: Maybe Natural
   , maxIterations        :: w ::: Maybe Integer
   , solver               :: w ::: Maybe Text
   , smtdebug             :: w ::: Bool
   , debug                :: w ::: Bool
   , trace                :: w ::: Bool
+  , askSmtIterations     :: w ::: Integer
+  , numCexFuzz           :: w ::: Integer
+  , numSolvers           :: w ::: Maybe Natural
+  , solverThreads        :: w ::: Maybe Natural
+  , loopDetectionHeuristic :: w ::: LoopHeuristic
+  , noDecompose          :: w ::: Bool
+  , maxBranch            :: w ::: Int
+  , promiseNoReent       :: w ::: Bool
+  , maxBufSize           :: w ::: Int
   }
+  deriving (Options.Generic)
+
+deriving instance Options.ParseFields (CommonOptions Options.Wrapped)
+deriving instance Options.ParseRecord (CommonOptions Options.Wrapped)
 
 data CommonOptions2 w = CommonOptions2
   { calldata    :: w ::: Maybe ByteString  <?> "Tx: calldata"
-    , address     :: w ::: Maybe Addr        <?> "Tx: address"
-    , caller      :: w ::: Maybe Addr        <?> "Tx: caller"
-    , origin      :: w ::: Maybe Addr        <?> "Tx: origin"
-    , coinbase    :: w ::: Maybe Addr        <?> "Block: coinbase"
-    , value       :: w ::: Maybe W256        <?> "Tx: Eth amount"
-    , nonce       :: w ::: Maybe Word64      <?> "Nonce of origin"
-    , gas         :: w ::: Maybe Word64      <?> "Tx: gas amount"
-    , number      :: w ::: Maybe W256        <?> "Block: number"
-    , timestamp   :: w ::: Maybe W256        <?> "Block: timestamp"
-    , basefee     :: w ::: Maybe W256        <?> "Block: base fee"
-    , priorityFee :: w ::: Maybe W256        <?> "Tx: priority fee"
-    , gaslimit    :: w ::: Maybe Word64      <?> "Tx: gas limit"
-    , gasprice    :: w ::: Maybe W256        <?> "Tx: gas price"
-    , create      :: w ::: Bool              <?> "Tx: creation"
-    , maxcodesize :: w ::: Maybe W256        <?> "Block: max code size"
-    , prevRandao  :: w ::: Maybe W256        <?> "Block: prevRandao"
-    , chainid     :: w ::: Maybe W256        <?> "Env: chainId"
-    , rpc         :: w ::: Maybe URL         <?> "Fetch state from a remote node"
-    , block       :: w ::: Maybe W256        <?> "Block state is be fetched from"
-    , root        :: w ::: Maybe String      <?> "Path to  project root directory (default: . )"
-    , projectType :: w ::: Maybe ProjectType <?> "Is this a CombinedJSON or Foundry project (default: Foundry)"
-    , assertionType :: w ::: Maybe AssertionType <?> "Assertions as per Forge or DSTest (default: Forge)"
+  , address     :: w ::: Maybe Addr        <?> "Tx: address"
+  , caller      :: w ::: Maybe Addr        <?> "Tx: caller"
+  , origin      :: w ::: Maybe Addr        <?> "Tx: origin"
+  , coinbase    :: w ::: Maybe Addr        <?> "Block: coinbase"
+  , value       :: w ::: Maybe W256        <?> "Tx: Eth amount"
+  , nonce       :: w ::: Maybe Word64      <?> "Nonce of origin"
+  , gas         :: w ::: Maybe Word64      <?> "Tx: gas amount"
+  , number      :: w ::: Maybe W256        <?> "Block: number"
+  , timestamp   :: w ::: Maybe W256        <?> "Block: timestamp"
+  , basefee     :: w ::: Maybe W256        <?> "Block: base fee"
+  , priorityFee :: w ::: Maybe W256        <?> "Tx: priority fee"
+  , gaslimit    :: w ::: Maybe Word64      <?> "Tx: gas limit"
+  , gasprice    :: w ::: Maybe W256        <?> "Tx: gas price"
+  , create      :: w ::: Bool              <?> "Tx: creation"
+  , maxcodesize :: w ::: Maybe W256        <?> "Block: max code size"
+  , prevRandao  :: w ::: Maybe W256        <?> "Block: prevRandao"
+  , chainid     :: w ::: Maybe W256        <?> "Env: chainId"
+  , rpc         :: w ::: Maybe URL         <?> "Fetch state from a remote node"
+  , block       :: w ::: Maybe W256        <?> "Block state is be fetched from"
+  , root        :: w ::: Maybe String      <?> "Path to  project root directory (default: . )"
+  , projectType :: w ::: Maybe ProjectType <?> "Is this a CombinedJSON or Foundry project (default: Foundry)"
+  , assertionType :: w ::: Maybe AssertionType <?> "Assertions as per Forge or DSTest (default: Forge)"
   }
+  deriving (Options.Generic)
+
+deriving instance Options.ParseFields (CommonOptions2 Options.Wrapped)
+deriving instance Options.ParseRecord (CommonOptions2 Options.Wrapped)
 
 -- This record defines the program's command-line options
 -- automatically via the `optparse-generic` package.
@@ -106,6 +116,7 @@ data Command w
   -- vm opts
       { code          :: w ::: Maybe ByteString <?> "Program bytecode"
       , codeFile    :: w ::: Maybe String       <?> "Program bytecode in a file"
+      , common2 :: CommonOptions2 w
       , initialStorage :: w ::: Maybe (InitialStorage) <?> "Starting state for storage: Empty, Abstract (default Abstract)"
       , sig           :: w ::: Maybe Text         <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]           <?> "Values to encode"
@@ -113,8 +124,6 @@ data Command w
       , showTree      :: w ::: Bool               <?> "Print branches explored in tree view"
       , showReachableTree :: w ::: Bool           <?> "Print only reachable branches explored in tree view"
       , assertions    :: w ::: Maybe [Word256]    <?> "Comma separated list of solc panic codes to check for (default: user defined assertion violations only)"
-      , commonOptions :: CommonOptions w
-      -- , commonOptions2 :: CommonOptions2 w
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: Maybe ByteString   <?> "Bytecode of the first program"
@@ -123,16 +132,15 @@ data Command w
       , codeBFile     :: w ::: Maybe String     <?> "Second program's bytecode in a file"
       , sig           :: w ::: Maybe Text       <?> "Signature of types to decode / encode"
       , arg           :: w ::: [String]         <?> "Values to encode"
-      , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
+      , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata" -- TODO: Do we actually use this??
       , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
-      , numCexFuzz    :: w ::: Integer          <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
-      , commonOptions :: CommonOptions w
+      , common :: CommonOptions w
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
       , codeFile    :: w ::: Maybe String      <?> "Program bytecode in a file"
-      , commonOptions :: CommonOptions w
-      -- , commonOptions2 :: CommonOptions2 w
+      , common :: CommonOptions w
+      , common2 :: CommonOptions2 w
       }
   | Test -- Run Foundry unit tests
       { root        :: w ::: Maybe String               <?> "Path to  project root directory (default: . )"
@@ -143,11 +151,8 @@ data Command w
       , verbose       :: w ::: Maybe Int                <?> "Append call trace: {1} failures {2} all"
       , coverage      :: w ::: Bool                     <?> "Coverage analysis"
       , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
-      , debug         :: w ::: Bool                     <?> "Debug printing of internal behaviour, and dump internal expressions"
-      , trace         :: w ::: Bool                     <?> "Dump trace"
       , ffi           :: w ::: Bool                     <?> "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)"
-      , numCexFuzz    :: w ::: Integer                  <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
-      , commonOptions :: CommonOptions w
+      , common :: CommonOptions w
       }
   | Version
 
@@ -165,13 +170,11 @@ deriving instance Options.ParseField [Word256]
 
 -- Import necessary modules
 
--- Define the ParseRecord instance for CommonOptions
-instance Options.ParseRecord (CommonOptions Options.Wrapped) where
-  parseRecord = Options.parseRecordWithModifiers Options.lispCaseModifiers
+-- instance Options.ParseRecord (CommonOptions Options.Wrapped) where
+--   parseRecord = Options.parseRecord
 
 instance Options.ParseRecord (Command Options.Wrapped) where
-  parseRecord =
-    Options.parseRecordWithModifiers Options.lispCaseModifiers
+  parseRecord = Options.parseRecordWithModifiers Options.lispCaseModifiers
 
 data InitialStorage
   = Empty
