@@ -240,7 +240,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     let allReverts = not . (any Expr.isSuccess) $ ends
     let unexpectedAllRevert = allReverts && not shouldFail
     when conf.debug $ liftIO $ putStrLn $ "symRun -- (cex,warnings,unexpectedAllRevert): " <> show (any isCex results, warnings, unexpectedAllRevert)
-    toPrint <- case (any isCex results, warnings, unexpectedAllRevert) of
+    txtResult <- case (any isCex results, warnings, unexpectedAllRevert) of
       (False, False, False) -> do
         -- happy case
         pure $ "   \x1b[32m[PASS]\x1b[0m " <> Text.unpack testName <> "\n"
@@ -256,7 +256,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
         -- No cexes/errors/unknowns/partials, but all branches reverted
         pure $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n"
           <> "   No reachable assertion violations, but all branches reverted\n"
-    liftIO $ putStr toPrint
+    liftIO $ putStr txtResult
     liftIO $ printWarnings ends results t
     pure (not (any isCex results), not (warnings || unexpectedAllRevert))
 
