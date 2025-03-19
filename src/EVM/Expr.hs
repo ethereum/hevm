@@ -72,16 +72,26 @@ normArgs sym conc l r = case (l, r) of
   where
     doOp = op2 sym conc
 
+-- Same as `normArgs`, but for commutative operators it orders the arguments canonically
+-- This helps in cases when (PEq x1 x2) is comparing x1 and x2 that are equivalent modulo commutativity.
+-- In such cases, normArgsOrd will make sure x1 and x2 look the same.
+-- NOTE: This is compatible with `Lit` being always on the left, as `Lit` is always
+--       less than any other expression
+normArgsOrd :: (Expr EWord -> Expr EWord -> Expr EWord) -> (W256 -> W256 -> W256) -> Expr EWord -> Expr EWord -> Expr EWord
+normArgsOrd sym conc l r = if l <= r then doOp l r else doOp r l
+  where
+    doOp = op2 sym conc
+
 -- Integers
 
 add :: Expr EWord -> Expr EWord -> Expr EWord
-add = normArgs Add (+)
+add = normArgsOrd Add (+)
 
 sub :: Expr EWord -> Expr EWord -> Expr EWord
 sub = op2 Sub (-)
 
 mul :: Expr EWord -> Expr EWord -> Expr EWord
-mul = normArgs Mul (*)
+mul = normArgsOrd Mul (*)
 
 div :: Expr EWord -> Expr EWord -> Expr EWord
 div = op2 Div (\x y -> if y == 0 then 0 else Prelude.div x y)
@@ -156,7 +166,7 @@ sgt = op2 SGT (\x y ->
   in if sx > sy then 1 else 0)
 
 eq :: Expr EWord -> Expr EWord -> Expr EWord
-eq = normArgs Eq (\x y -> if x == y then 1 else 0)
+eq = normArgsOrd Eq (\x y -> if x == y then 1 else 0)
 
 iszero :: Expr EWord -> Expr EWord
 iszero = op1 IsZero (\x -> if x == 0 then 1 else 0)
@@ -164,13 +174,13 @@ iszero = op1 IsZero (\x -> if x == 0 then 1 else 0)
 -- Bits
 
 and :: Expr EWord -> Expr EWord -> Expr EWord
-and = normArgs And (.&.)
+and = normArgsOrd And (.&.)
 
 or :: Expr EWord -> Expr EWord -> Expr EWord
-or = normArgs Or (.|.)
+or = normArgsOrd Or (.|.)
 
 xor :: Expr EWord -> Expr EWord -> Expr EWord
-xor = normArgs Xor Data.Bits.xor
+xor = normArgsOrd Xor Data.Bits.xor
 
 not :: Expr EWord -> Expr EWord
 not = op1 Not complement
@@ -706,9 +716,9 @@ pattern MappingSlot :: ByteString -> Expr EWord -> Expr EWord
 pattern MappingSlot idx key = Keccak (WriteWord (Lit 0) key (ConcreteBuf idx))
 
 -- storage slots for arrays are determined by (keccak(bytes32(id)) + offset)
--- note that `normArgs` puts the Lit as the 2nd argument to `Add`
+-- note that `normArgs` puts the Lit as the 1st argument to `Add`
 pattern ArraySlotWithOffs :: ByteString -> Expr EWord -> Expr EWord
-pattern ArraySlotWithOffs id offset = Add (Keccak (ConcreteBuf id)) offset
+pattern ArraySlotWithOffs id offset = Add offset (Keccak (ConcreteBuf id))
 
 -- special pattern to match the 0th element because the `Add` term gets simplified out
 pattern ArraySlotZero :: ByteString -> Expr EWord
@@ -1063,9 +1073,6 @@ simplify e = if (mapExpr go e == e)
     -- literal addresses
     go (WAddr (LitAddr a)) = Lit $ into a
 
-    -- XOR normalization
-    go (Xor a  b) = EVM.Expr.xor a b
-
     -- simple div/mod/add/sub
     go (Div o1@(Lit _)  o2@(Lit _)) = EVM.Expr.div  o1 o2
     go (SDiv o1@(Lit _) o2@(Lit _)) = EVM.Expr.sdiv o1 o2
@@ -1094,7 +1101,6 @@ simplify e = if (mapExpr go e == e)
     -- Notice: all Add is normalized, hence the 1st argument is
     --    expected to be Lit, if any. Hence `orig` needs to be the
     --    2nd argument for Add. However, Sub is not normalized
-    go (Add (Lit x) (Add (Lit y) orig)) = add (Lit (x+y)) orig
     -- add + sub NOTE: every combination of Sub is needed (2)
     go (Add (Lit x) (Sub (Lit y) orig)) = sub (Lit (x+y)) orig
     go (Add (Lit x) (Sub orig (Lit y))) = add (Lit (x-y)) orig
@@ -1107,17 +1113,32 @@ simplify e = if (mapExpr go e == e)
     go (Sub (Lit x) (Add (Lit y) orig)) = sub (Lit (x-y)) orig
     go (Sub (Add (Lit x) orig) (Lit y) ) = add (Lit (x-y)) orig
 
+    -- Add+Add / Mul+Mul / Xor+Xor simplifications, taking
+    --     advantage of associativity and commutativity
+    -- Since Lit is smallest in the ordering, it will always be the first argument
+    --     hence these will collect Lits. See `simp-assoc..` tests
+    go (Add (Lit a) (Add (Lit b) x)) = add (Lit (a+b)) x
+    go (Mul (Lit a) (Mul (Lit b) x)) = mul (Lit (a*b)) x
+    go (Xor (Lit a) (Xor (Lit b) x)) = EVM.Expr.xor (Lit (Data.Bits.xor a b)) x
+    go (Add a (Add b c)) = add (l !! 0) (add (l !! 1) (l !! 2))
+      where l = sort [a, b, c]
+    go (Mul a (Mul b c)) = mul (l !! 0) (mul (l !! 1) (l !! 2))
+      where l = sort [a, b, c]
+    go (Xor a (Xor b c)) = x (l !! 0) (x (l !! 1) (l !! 2))
+      where l = sort [a, b, c]
+            x = EVM.Expr.xor
+    go (Or a (Or b c)) = o (l !! 0) (o (l !! 1) (l !! 2))
+      where l = sort [a, b, c]
+            o = EVM.Expr.or
+    go (And a (And b c)) = an (l !! 0) (an (l !! 1) (l !! 2))
+      where l = sort [a, b, c]
+            an = EVM.Expr.and
+
     -- redundant add / sub
     go (Sub (Add a b) c)
       | a == c = b
       | b == c = a
       | otherwise = sub (add a b) c
-
-    -- Add is associative. We are doing left-growing trees because LIT is
-    -- arranged to the left. This way, they accumulate in all combinations.
-    -- See `sim-assoc-add` test cases in test.hs
-    go (Add a (Add b c)) = add (add a b) c
-    go (Add (Add (Lit a) x) (Lit b)) = add (Lit (a+b)) x
 
     -- add / sub identities
     go (Add a b)
@@ -1129,6 +1150,9 @@ simplify e = if (mapExpr go e == e)
       | b == (Lit 0) = a
       | otherwise = sub a b
 
+    -- XOR normalization
+    go (Xor a  b) = EVM.Expr.xor a b
+
     -- SHL / SHR by 0
     go (SHL a v)
       | a == (Lit 0) = v
@@ -1136,12 +1160,6 @@ simplify e = if (mapExpr go e == e)
     go (SHR a v)
       | a == (Lit 0) = v
       | otherwise = shr a v
-
-    -- doubled And
-    go o@(And a (And b c))
-      | a == c = (And a b)
-      | a == b = (And b c)
-      | otherwise = o
 
     -- Bitwise AND & OR. These MUST preserve bitwise equivalence
     go (And a b)
@@ -1182,11 +1200,6 @@ simplify e = if (mapExpr go e == e)
                      (Lit 0, _) -> Lit 0
                      _ -> EVM.Expr.min a b
 
-    -- Mul is associative. We are doing left-growing trees because LIT is
-    -- arranged to the left. This way, they accumulate in all combinations.
-    -- See `sim-assoc-add` test cases in test.hs
-    go (Mul a (Mul b c)) = mul (mul a b) c
-    go (Mul (Mul (Lit a) x) (Lit b)) = mul (Lit (a*b)) x
 
     -- Some trivial mul eliminations
     go (Mul a b) = case (a, b) of
@@ -1268,6 +1281,10 @@ simplifyProp prop =
     -- negations
     go (PNeg (PBool b)) = PBool (Prelude.not b)
     go (PNeg (PNeg a)) = a
+    go (PNeg (PGT a b)) = PLEq a b
+    go (PNeg (PGEq a b)) = PLT a b
+    go (PNeg (PLT a b)) = PGEq a b
+    go (PNeg (PLEq a b)) = PGT a b
 
     -- Empty buf
     go (PEq (Lit 0) (BufLength k)) = peq k (ConcreteBuf "")
