@@ -4062,7 +4062,16 @@ tests = testGroup "hevm"
   ]
   , testGroup "simplification-working"
   [
-    test "PEq-and-PNot-PEq-1" $ do
+    test "nubOrd-Prop-working" $ do
+        let a = [ PLT (Lit 0x0) (ReadWord (ReadWord (Lit 0x0) (AbstractBuf "txdata")) (AbstractBuf "txdata"))
+                , PLT (Lit 0x1) (ReadWord (ReadWord (Lit 0x0) (AbstractBuf "txdata")) (AbstractBuf "txdata"))
+                , PLT (Lit 0x2) (ReadWord (ReadWord (Lit 0x0) (AbstractBuf "txdata")) (AbstractBuf "txdata"))
+                , PLT (Lit 0x0) (ReadWord (ReadWord (Lit 0x0) (AbstractBuf "txdata")) (AbstractBuf "txdata"))]
+        let simp = nubOrd a
+            simp2 = List.nub a
+        assertEqualM "Must be 3-length" 3 (length simp)
+        assertEqualM "Must be 3-length" 3 (length simp2)
+    , test "PEq-and-PNot-PEq-1" $ do
       let a = [PEq (Lit 0x539) (Var "arg1"),PNeg (PEq (Lit 0x539) (Var "arg1"))]
       assertEqualM "Must simplify to PBool False" (Expr.simplifyProps a) ([PBool False])
     , test "PEq-and-PNot-PEq-2" $ do
@@ -4128,13 +4137,71 @@ tests = testGroup "hevm"
   ]
   , testGroup "equivalence-checking"
     [
+      -- diverging gas overapproximations are caught
+      -- previously, they had the same name (gas_...), so they compared equal
+      test "eq-divergent-overapprox-gas" $ do
+        Just a <- solcRuntime "C"
+          [i|
+            contract C {
+              uint x;
+              function stuff(uint a) public returns (uint256) {
+                unchecked { x = a * 2; }
+                return gasleft();
+              }
+            }
+          |]
+        Just b <- solcRuntime "C"
+          [i|
+            contract C {
+              uint x;
+              function stuff(uint a) public returns (uint256) {
+                unchecked { x = a + a; }
+                return gasleft();
+              }
+            }
+          |]
+        withSolvers Bitwuzla 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s a b defaultVeriOpts calldata False
+          assertBoolM "Must have a difference" (any isCex res)
+          let cexs = mapMaybe getCex res
+          assertEqualM "Must have exactly one cex" (length cexs) 1
+      -- diverging gas overapproximations are caught
+      -- previously, CALL fresh variables were the same so they compared equal
+      , test "eq-divergent-overapprox-call" $ do
+        Just a <- solcRuntime "C"
+          [i|
+            contract C {
+              function checkval(address inputAddr, uint256 x, uint256 y) public returns (bool) {
+                  bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, y);
+                  (bool success, bytes memory returnData) = inputAddr.staticcall(data);
+                  return success;
+              }
+            }
+          |]
+        Just b <- solcRuntime "C"
+          [i|
+            contract C {
+              function checkval(address inputAddr, uint256 x, uint256 y) public returns (bool) {
+                  bytes memory data = abi.encodeWithSignature("add(uint256,uint256)", x, x);
+                  (bool success, bytes memory returnData) = inputAddr.staticcall(data);
+                  return success;
+              }
+            }
+          |]
+        withSolvers Bitwuzla 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s a b defaultVeriOpts calldata False
+          assertBoolM "Must have a difference" (any isCex res)
+          let cexs = mapMaybe getCex res
+          assertEqualM "Must have exactly one cex" (length cexs) 1
       -- check bug https://github.com/ethereum/hevm/issues/679
-      test "eq-issue-with-length-cex-bug679" $ do
+      , test "eq-issue-with-length-cex-bug679" $ do
         let a = fromJust (hexByteString "5f610100526020610100f3")
             b = fromJust (hexByteString "5f356101f40115610100526020610100f3")
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s a b defaultVeriOpts calldata
+          (res, _) <- equivalenceCheck s a b defaultVeriOpts calldata False
           assertBoolM "Must have a difference" (any isCex res)
           let cexs = mapMaybe getCex res
           assertEqualM "Must have exactly one cex" (length cexs) 1
@@ -4164,10 +4231,184 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertBoolM "Must have a difference" (any isCex res)
-      ,
-      test "eq-sol-exp-qed" $ do
+      , test "constructor-same-deployed-diff" $ do
+        Just initA <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = 4;
+              }
+              function stuff(uint b) public returns (uint256) {
+                unchecked{return 2*b+NUMBER;}
+              }
+            }
+          |]
+        Just initB <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = 4;
+              }
+              function stuff(uint b) public returns (uint256) {
+                unchecked {return 4*b+NUMBER;}
+              }
+            }
+          |]
+        withSolvers Z3 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          assertBoolM "Must have difference, we return different values" (all isCex res)
+      , test "constructor-same-deployed-diff2" $ do
+        Just initA <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = 4;
+              }
+              function stuff(uint b) public returns (uint256) {
+                unchecked{return 4*b+NUMBER;}
+              }
+            }
+          |]
+        Just initB <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = 4;
+              }
+              function stuff(uint b) public returns (uint256) {
+                unchecked {return 4*b+NUMBER;}
+              }
+              function stuff_other(uint b) public returns (uint256) {
+                unchecked {return 2*b+NUMBER;}
+              }
+            }
+          |]
+        withSolvers Z3 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          assertBoolM "Must have difference, we return different values" (all isCex res)
+      , test "constructor-same-deployed-diff3" $ do
+        Just initA <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = 4;
+              }
+              function stuff(uint b) public returns (uint256) {
+                unchecked{return 4*b+NUMBER;}
+              }
+            }
+          |]
+        Just initB <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = 4;
+              }
+            }
+          |]
+        withSolvers Z3 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          assertBoolM "Must have difference, we return different values" (all isCex res)
+      -- We set x to be 0 on deployment. Default value is also 0. So they are equivalent
+      -- We cannot deal with symbolic code. However, the below will generate symbolic code,
+      -- because of the parameter in the constructor that is set to NUMBER in the deployed code.
+      -- Hence, this test is ignored.
+      , ignoreTest $ test "constructor-diff-deploy" $ do
+        Just initA <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = a+4;
+              }
+              function stuff(uint b) public returns (uint256) {
+                return NUMBER;
+              }
+            }
+          |]
+        Just initB <- solidity "C"
+          [i|
+            contract C {
+              uint public immutable NUMBER;
+              constructor(uint a) {
+                NUMBER = a*2;
+              }
+              function stuff(uint b) public returns (uint256) {
+                return NUMBER;
+              }
+            }
+          |]
+        withSolvers Z3 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          assertBoolM "Must have difference" (all isCex res)
+      -- We set x to be 0 on deployment. Default value is also 0. So they are equivalent
+      , test "constructor-implicit" $ do
+        Just initA <- solidity "C"
+          [i|
+            contract C {
+              uint immutable x;
+              function stuff(uint a) public returns (uint256) {
+                unchecked {return 8+a;}
+              }
+            }
+          |]
+        Just initB <- solidity "C"
+          [i|
+            contract C {
+              uint immutable x;
+              constructor() {
+                x = 0;
+              }
+              function stuff(uint a) public returns (uint256) {
+                unchecked {return a+8;}
+              }
+            }
+          |]
+        withSolvers Z3 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          assertEqualM "Must have no difference" [Qed ()] res
+      -- We set x to be 3 vs 0 (default) on deployment. Then, the returned value will be different
+      , test "constructor-differing" $ do
+        Just initA <- solidity "C"
+          [i|
+            contract C {
+              uint x;
+              function stuff(uint a) public returns (uint256) {
+                unchecked {return a+x;}
+              }
+            }
+          |]
+        Just initB <- solidity "C"
+          [i|
+            contract C {
+              uint x;
+              constructor() {
+                x = 3;
+              }
+              function stuff(uint a) public returns (uint256) {
+                unchecked {return a+x;}
+              }
+            }
+          |]
+        withSolvers Z3 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          let cexes = filter isCex res
+          assertBoolM "Must have a difference" (not $ null cexes)
+      , test "eq-sol-exp-qed" $ do
         Just aPrgm <- solcRuntime "C"
           [i|
             contract C {
@@ -4190,7 +4431,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertEqualM "Must have no difference" [Qed ()] res
       ,
       test "eq-balance-differs" $ do
@@ -4222,7 +4463,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertBoolM "Must differ" (all isCex res)
       ,
       -- TODO: this fails because we don't check equivalence of deployed contracts
@@ -4284,7 +4525,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertBoolM "Must differ" (all isCex res)
       ,
       test "eq-unknown-addr" $ do
@@ -4308,7 +4549,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           cd <- mkCalldata (Just (Sig "a(address,address)" [AbiAddressType, AbiAddressType])) []
-          (res,_) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd
+          (res,_) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd False
           assertEqualM "Must be different" (any isCex res) True
       ,
       test "eq-sol-exp-cex" $ do
@@ -4334,7 +4575,7 @@ tests = testGroup "hevm"
           |]
         withSolvers Bitwuzla 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata
+          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertEqualM "Must be different" (any isCex res) True
       , test "eq-all-yul-optimization-tests" $ do
         let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }
@@ -4548,7 +4789,7 @@ tests = testGroup "hevm"
           procs <- liftIO $ getNumProcessors
           withSolvers CVC5 (unsafeInto procs) 1 (Just 100) $ \s -> do
             calldata <- mkCalldata Nothing []
-            (res, _) <- equivalenceCheck s aPrgm bPrgm opts calldata
+            (res, _) <- equivalenceCheck s aPrgm bPrgm opts calldata False
             end <- liftIO $ getCurrentTime
             case any isCex res of
               False -> liftIO $ do

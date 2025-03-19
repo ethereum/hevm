@@ -2,6 +2,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE DataKinds #-}
 
 {-# OPTIONS_GHC -Wno-inline-rule-shadowing #-}
 
@@ -286,7 +288,8 @@ data Expr (a :: EType) where
 
   Balance        :: Expr EAddr -> Expr EWord
 
-  Gas            :: Int                -- fresh gas variable
+  Gas            :: Text               -- prefix needed to distinguish during equivalence checking
+                 -> Int                -- fresh gas variable
                  -> Expr EWord
 
   -- code
@@ -480,20 +483,23 @@ instance Eq Prop where
   PImpl a b == PImpl c d = a == c && b == d
   _ == _ = False
 
+-- Note: we cannot compare via `a <= c || b <= d` because then
+--       when a==c but b > d, we'd return TRUE, when we should be
+--       returning FALSE.
 instance Ord Prop where
   PBool a <= PBool b = a <= b
   PEq (a :: Expr x) (b :: Expr x) <= PEq (c :: Expr y) (d :: Expr y)
     = case eqT @x @y of
-       Just Refl -> a <= c || b <= d
+       Just Refl ->        a <= c || ((a == c) && (b <= d))
        Nothing -> toNum a <= toNum c
-  PLT a b <= PLT c d = a <= c || b <= d
-  PGT a b <= PGT c d = a <= c || b <= d
-  PGEq a b <= PGEq c d = a <= c || b <= d
-  PLEq a b <= PLEq c d = a <= c || b <= d
-  PNeg a <= PNeg b = a <= b
-  PAnd a b <= PAnd c d = a <= c || b <= d
-  POr a b <= POr c d = a <= c || b <= d
-  PImpl a b <= PImpl c d = a <= c || b <= d
+  PNeg a   <= PNeg b     = a <= b
+  PLT a b  <= PLT c d    = a <= c || (a == c && b <= d)
+  PGT a b  <= PGT c d    = a <= c || (a == c && b <= d)
+  PGEq a b <= PGEq c d   = a <= c || (a == c && b <= d)
+  PLEq a b <= PLEq c d   = a <= c || (a == c && b <= d)
+  PAnd a b <= PAnd c d   = a <= c || (a == c && b <= d)
+  POr a b  <= POr c d    = a <= c || (a == c && b <= d)
+  PImpl a b <= PImpl c d = a <= c || (a == c && b <= d)
   a <= b = asNum a <= asNum b
     where
       asNum :: Prop -> Int
@@ -931,7 +937,12 @@ data ContractCode
 data RuntimeCode
   = ConcreteRuntimeCode ByteString
   | SymbolicRuntimeCode (V.Vector (Expr Byte))
-  deriving (Show, Eq, Ord)
+  deriving (Eq, Ord)
+instance Show RuntimeCode
+  where
+    show = \case
+      ConcreteRuntimeCode e -> "ConcreteRuntimeCode 0x" <> bsToHex e
+      SymbolicRuntimeCode e -> show e
 
 -- Execution Traces --------------------------------------------------------------------------------
 
@@ -1437,6 +1448,9 @@ untilFixpoint :: Eq a => (a -> a) -> a -> a
 untilFixpoint f a = if f a == a
                     then a
                     else untilFixpoint f (f a)
+
+bsToHex :: ByteString -> String
+bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
 
 -- Optics ------------------------------------------------------------------------------------------
 

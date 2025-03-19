@@ -158,7 +158,7 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- frame context
 
-      e@(Gas _) -> f e
+      e@(Gas _ _) -> f e
       e@(Balance {}) -> f e
 
       -- code
@@ -516,7 +516,7 @@ mapExprM f expr = case expr of
 
   -- frame context
 
-  Gas a -> f (Gas a)
+  Gas a b -> f (Gas a b)
   Balance a -> do
     a' <- mapExprM f a
     f (Balance a')

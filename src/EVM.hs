@@ -1601,9 +1601,9 @@ freshBufFallback xs = do
   freshVar <- use #freshVar
   assign #freshVar (freshVar + 1)
   let opName = pack $ show $ getOp ?op
-  let freshVarExpr = Var (opName <> "-result-stack-" <> (pack . show) freshVar)
+  let freshVarExpr = Var (opName <> "-result-stack-fresh-" <> (pack . show) freshVar)
   modifying #constraints ((:) (PLEq freshVarExpr (Lit 1) ))
-  let freshReturndataExpr = AbstractBuf (opName <> "-result-data-" <> (pack . show) freshVar)
+  let freshReturndataExpr = AbstractBuf (opName <> "-result-data-fresh-" <> (pack . show) freshVar)
   modifying #constraints ((:) (PLEq (bufLength freshReturndataExpr) (Lit (2 ^ ?conf.maxBufSize))))
   assign (#state % #returndata) freshReturndataExpr
   next >> assign (#state % #stack) (freshVarExpr:xs)
@@ -1617,7 +1617,7 @@ freshVarFallback xs _ = do
   freshVar <- use #freshVar
   assign #freshVar (freshVar + 1)
   let opName = pack $ show $ getOp ?op
-  let freshVarExpr = Var (opName <> "-result-stack-" <> (pack . show) freshVar)
+  let freshVarExpr = Var (opName <> "-result-stack-fresh-" <> (pack . show) freshVar)
   next >> assign (#state % #stack) (freshVarExpr:xs)
 
 forceConcrete :: VMOps t => Expr EWord -> String -> (W256 -> EVM t s ()) -> EVM t s ()
@@ -2962,7 +2962,7 @@ instance VMOps Symbolic where
   pushGas = do
     modifying (#env % #freshGasVals) (+ 1)
     n <- use (#env % #freshGasVals)
-    pushSym $ Expr.Gas n
+    pushSym $ Expr.Gas "" n
   enoughGas _ _ = True
   subGas _ _ = ()
   toGas _ = ()

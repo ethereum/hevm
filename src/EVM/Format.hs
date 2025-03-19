@@ -29,7 +29,6 @@ module EVM.Format
   , strip0x'
   , hexByteString
   , hexText
-  , bsToHex
   , showVal
   ) where
 
@@ -858,9 +857,6 @@ hexText t =
   case BS16.decodeBase16Untyped (T.encodeUtf8 (T.drop 2 t)) of
     Right x -> x
     _ -> internalError $ "invalid hex bytestring " ++ show t
-
-bsToHex :: ByteString -> String
-bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
 
 showVal :: AbiValue -> Text
 showVal (AbiBytes _ bs) = formatBytes bs
