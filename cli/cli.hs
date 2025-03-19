@@ -221,13 +221,18 @@ getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
       Right val -> "git rev " <> giBranch val <>  "@" <> giHash val
       Left _ -> "no git revision present"
 
+getMaxBufSize :: Int -> Command Options.Unwrapped -> Int
+getMaxBufSize def (Version {}) = def
+getMaxBufSize def (Exec {}) = def
+getMaxBufSize _ cmd = cmd.maxBufSize
+
 main :: IO ()
 main = withUtf8 $ do
   cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
-  when (cmd.maxBufSize > 64) $ do
+  when (getMaxBufSize 64 cmd > 64) $ do
     putStrLn "Error: maxBufSize must be less than or equal to 64. That limits buffers to a size of 2^64, which is more than enough for practical purposes"
     exitFailure
-  when (cmd.maxBufSize < 0) $ do
+  when (getMaxBufSize 64 cmd < 0) $ do
     putStrLn "Error: maxBufSize must be at least 0. Negative values do not make sense. A value of zero means at most 1 byte long buffers"
     exitFailure
   let env = Env { config = defaultConfig
@@ -240,7 +245,7 @@ main = withUtf8 $ do
     , decomposeStorage = Prelude.not cmd.noDecompose
     , maxBranch = cmd.maxBranch
     , promiseNoReent = cmd.promiseNoReent
-    , maxBufSize = cmd.maxBufSize
+    , maxBufSize = getMaxBufSize 64 cmd
     } }
   case cmd of
     Version {} ->putStrLn getFullVersion
