@@ -4137,9 +4137,32 @@ tests = testGroup "hevm"
   ]
   , testGroup "equivalence-checking"
     [
+      test "eq-simple-diff" $ do
+        Just a <- solcRuntime "C"
+          [i|
+            contract C {
+              function stuff() public returns (uint256) {
+                return 4;
+              }
+            }
+          |]
+        Just b <- solcRuntime "C"
+          [i|
+            contract C {
+              function stuff() public returns (uint256) {
+                return 5;
+              }
+            }
+          |]
+        withSolvers Bitwuzla 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s a b defaultVeriOpts calldata False
+          assertBoolM "Must have a difference" (any isCex res)
+          let cexs = mapMaybe getCex res
+          assertEqualM "Must have exactly one cex" (length cexs) 1
       -- diverging gas overapproximations are caught
       -- previously, they had the same name (gas_...), so they compared equal
-      test "eq-divergent-overapprox-gas" $ do
+      , test "eq-divergent-overapprox-gas" $ do
         Just a <- solcRuntime "C"
           [i|
             contract C {
