@@ -109,6 +109,7 @@ data Command w
       , maxBranch     :: w ::: Int                <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
       , promiseNoReent:: w ::: Bool               <!> "Promise no reentrancy is possible into the contract(s) being examined"
       , maxBufSize    :: w ::: Int                <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
+      , verb          :: w ::: Int                <!> "1" <?> "Verbosity level (default: 1)"
       }
   | Equivalence -- prove equivalence between two programs
       { codeA         :: w ::: Maybe ByteString   <?> "Bytecode of the first program"
@@ -134,6 +135,7 @@ data Command w
       , maxBranch     :: w ::: Int              <!> "100" <?> "Max number of branches to explore when encountering a symbolic value (default: 100)"
       , maxBufSize    :: w ::: Int              <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
       , promiseNoReent:: w ::: Bool             <!> "Promise no reentrancy is possible into the contract(s) being examined"
+      , verb          :: w ::: Int              <!> "1" <?> "Verbosity level (default: 1)"
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
@@ -189,6 +191,7 @@ data Command w
       , askSmtIterations :: w ::: Integer               <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
       , maxBufSize    :: w ::: Int                      <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
       , promiseNoReent:: w ::: Bool                     <!> "Promise no reentrancy is possible into the contract(s) being examined"
+      , verb          :: w ::: Int                      <!> "1" <?> "Verbosity level (default: 1)"
       }
   | Version
 
@@ -246,6 +249,7 @@ main = withUtf8 $ do
     , maxBranch = cmd.maxBranch
     , promiseNoReent = cmd.promiseNoReent
     , maxBufSize = getMaxBufSize 64 cmd
+    , verb = cmd.verb
     } }
   case cmd of
     Version {} ->putStrLn getFullVersion
