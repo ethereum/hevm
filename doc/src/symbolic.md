@@ -4,7 +4,7 @@
 Usage: hevm symbolic [--code TEXT] [--code-file STRING] [--calldata TEXT] [--address ADDR]
                      [--caller ADDR] [--origin ADDR] [--coinbase ADDR]
                      [--value W256] [--nonce WORD64] [--gas WORD64]
-                     [--number W256] [--timestamp W256] [--basefee W256] ..
+                     [--number W256] [--timestamp W256] [--basefee W256] ...
 ```
 
 Run a symbolic execution against the given parameters, searching for assertion
