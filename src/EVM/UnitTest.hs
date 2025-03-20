@@ -48,7 +48,6 @@ import Witch (unsafeInto, into)
 data UnitTestOptions s = UnitTestOptions
   { rpcInfo     :: Fetch.RpcInfo
   , solvers     :: SolverGroup
-  , verbose     :: Maybe Int
   , maxIter     :: Maybe Integer
   , askSmtIters :: Integer
   , smtTimeout  :: Maybe Natural
@@ -181,10 +180,11 @@ runUnitTestContract
         Stepper.evm get
 
       writeTraceDapp dapp vm1
+      failOut <- failOutput vm1 opts "setUp()"
       case vm1.result of
         Just (VMFailure _) -> liftIO $ do
           Text.putStrLn "   \x1b[31m[BAIL]\x1b[0m setUp() "
-          tick $ indentLines 3 $ failOutput vm1 opts "setUp()"
+          tick $ indentLines 3 failOut
           pure [(True, False)]
         Just (VMSuccess _) -> do
           forM testSigs $ \s -> symRun opts vm1 s
@@ -240,22 +240,23 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     let allReverts = not . (any Expr.isSuccess) $ ends
     let unexpectedAllRevert = allReverts && not shouldFail
     when conf.debug $ liftIO $ putStrLn $ "symRun -- (cex,warnings,unexpectedAllRevert): " <> show (any isCex results, warnings, unexpectedAllRevert)
-    liftIO $ case (any isCex results, warnings, unexpectedAllRevert) of
+    txtResult <- case (any isCex results, warnings, unexpectedAllRevert) of
       (False, False, False) -> do
         -- happy case
-        putStr $ "   \x1b[32m[PASS]\x1b[0m " <> Text.unpack testName <> "\n"
+        pure $ "   \x1b[32m[PASS]\x1b[0m " <> Text.unpack testName <> "\n"
       (True, _, _) -> do
         -- there are counterexamples (and maybe other things, but Cex is most important)
         let x = mapMaybe extractCex results
-            y = symFailure opts testName (fst cd) types x
-        putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n" <> Text.unpack y
+        y <- symFailure opts testName (fst cd) types x
+        pure $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n" <> Text.unpack y
       (_, True, _) -> do
         -- There are errors/unknowns/partials, we fail them
-        putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n"
+        pure $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n"
       (_, _, True) -> do
         -- No cexes/errors/unknowns/partials, but all branches reverted
-        putStr $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n"
+        pure $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n"
           <> "   No reachable assertion violations, but all branches reverted\n"
+    liftIO $ putStr txtResult
     liftIO $ printWarnings ends results t
     pure (not (any isCex results), not (warnings || unexpectedAllRevert))
 
@@ -268,12 +269,11 @@ printWarnings e results testName = do
     forM_ (groupPartials e) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
   putStrLn ""
 
-symFailure :: UnitTestOptions RealWorld -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> Text
-symFailure UnitTestOptions {..} testName cd types failures' =
-  mconcat
-    [ Text.concat $ indentLines 3 . mkMsg <$> failures'
-    ]
-    where
+symFailure :: App m => UnitTestOptions RealWorld -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> m Text
+symFailure UnitTestOptions {..} testName cd types failures' = do
+  conf <- readConfig
+  pure $ mconcat [ Text.concat $ indentLines 3 . mkMsg conf <$> failures' ]
+  where
       showRes = \case
         Success _ _ _ _ -> if "proveFail" `isPrefixOf` testName
                            then "Successful execution"
@@ -281,15 +281,14 @@ symFailure UnitTestOptions {..} testName cd types failures' =
         res ->
           let ?context = dappContext (traceContext res)
           in Text.pack $ prettyvmresult res
-      mkMsg (leaf, cex) = intercalate "\n" $
+      mkMsg conf (leaf, cex) = intercalate "\n" $
         ["Counterexample:"
         ,"  calldata: " <> let ?context = dappContext (traceContext leaf)
                            in prettyCalldata cex cd testName types
         ,"  result:   " <> showRes leaf
-        ] <> verbText leaf
-      verbText leaf = case verbose of
-            Just _ -> [Text.unlines [ indentLines 2 (showTraceTree' dapp leaf)]]
-            _ -> mempty
+        ] <> verbText conf leaf
+      verbText conf leaf = if conf.verb <= 1 then mempty
+                           else [Text.unlines [ indentLines 2 (showTraceTree' dapp leaf)]]
       dappContext TraceContext { contracts, labels } =
         DappContext { info = dapp, contracts, labels }
 
@@ -298,37 +297,20 @@ indentLines n s =
   let p = Text.replicate n " "
   in Text.unlines (map (p <>) (Text.lines s))
 
-passOutput :: VM t s -> UnitTestOptions s -> Text -> Text
-passOutput vm UnitTestOptions { .. } testName =
+failOutput :: App m => VM t s -> UnitTestOptions s -> Text -> m Text
+failOutput vm UnitTestOptions { .. } testName = do
+  conf <- readConfig
   let ?context = DappContext { info = dapp
                              , contracts = vm.env.contracts
                              , labels = vm.labels }
-  in let v = fromMaybe 0 verbose
-  in if (v > 1) then
-    mconcat
-      [ "Success: "
-      , fromMaybe "" (stripSuffix "()" testName)
-      , "\n"
-      , if (v > 2) then indentLines 2 (showTraceTree dapp vm) else ""
-      , indentLines 2 (formatTestLogs dapp.eventMap vm.logs)
-      , "\n"
-      ]
-    else ""
-
-failOutput :: VM t s -> UnitTestOptions s -> Text -> Text
-failOutput vm UnitTestOptions { .. } testName =
-  let ?context = DappContext { info = dapp
-                             , contracts = vm.env.contracts
-                             , labels = vm.labels }
-  in mconcat
-  [ "Failure: "
-  , fromMaybe "" (stripSuffix "()" testName)
-  , "\n"
-  , case verbose of
-      Just _ -> indentLines 2 (showTraceTree dapp vm)
-      _ -> ""
-  , indentLines 2 (formatTestLogs dapp.eventMap vm.logs)
-  ]
+  pure $ mconcat
+    [ "Failure: "
+    , fromMaybe "" (stripSuffix "()" testName)
+    , "\n"
+    , if conf.verb <= 1 then ""
+      else indentLines 2 (showTraceTree dapp vm)
+    , indentLines 2 (formatTestLogs dapp.eventMap vm.logs)
+    ]
 
 formatTestLogs :: (?context :: DappContext) => Map W256 Event -> [Expr Log] -> Text
 formatTestLogs events xs =

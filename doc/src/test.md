@@ -2,7 +2,7 @@
 
 ```
 Usage: hevm test [--root STRING] [--project-type PROJECTTYPE] [--rpc TEXT]
-                 [--number W256] [--verbose INT] [--coverage] [--match STRING]
+                 [--number W256] [--coverage] [--match STRING]
                  [--solver TEXT] [--num-solvers NATURAL] [--smtdebug] [--debug]
                  [--trace] [--ffi] [--smttimeout NATURAL]
                  [--max-iterations INTEGER]
@@ -16,7 +16,6 @@ Available options:
   --project-type PROJECTTYPE Foundry or CombinedJSON project
   --rpc TEXT               Fetch state from a remote node
   --number W256            Block: number
-  --verbose INT            Append call trace: {1} failures {2} all
   --coverage               Coverage analysis
   --match STRING           Test case filter - only run methods matching regex
   --solver TEXT            Used SMT solver: z3 (default), cvc5, or bitwuzla

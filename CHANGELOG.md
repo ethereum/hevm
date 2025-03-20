@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add deployment code flag to the `equivalenceCheck` function
 - PNeg + PGT/PGEq/PLeq/PLT simplification rules
 - We no longer dispatch Props to SMT that can be solved by a simplification
+- Allow user to change the verbosity level via `--verb`. For the moment, this is only to
+  print some warnings related to zero-address dereference and to print `hemv test`'s
+  output in case of failure
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -71,6 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expressions that are commutative are now canonicalized to have the smaller
   value on the LHS. This can significantly help with simplifications, automatically
   determining when (Eq a b) is true when a==b modulo commutativity
+- `hevm test`'s flag ` --verbose` is now `--verb`, which also increases verbosity
+  for other elements of the system
 
 ## [0.54.2] - 2024-12-12
 
