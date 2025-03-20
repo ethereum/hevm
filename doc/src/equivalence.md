@@ -39,7 +39,9 @@ same calldata they:
 - match on the success/failure of the execution
 Importantly, logs are *not* considered in the equivalence check. Hence,
 it is possible that two contracts are considered equivalent by `hevm equivalence` but
-they emit different log items.
+they emit different log items. Furthermore, gas is explicitly not considered,
+as in many cases, the point of the equivalence check is to ensure that the
+contracts are functionally equivalent, but one of them is more gas efficient.
 
 For example, two contracts that are:
 
