@@ -166,7 +166,7 @@ data Command w
       , root        :: w ::: Maybe String      <?> "Path to  project root directory (default: . )"
       , projectType :: w ::: Maybe ProjectType <?> "Is this a CombinedJSON or Foundry project (default: Foundry)"
       , assertionType :: w ::: Maybe AssertionType <?> "Assertions as per Forge or DSTest (default: Forge)"
-      , verb          :: w ::: Int             <!> "1" <?> "Verbosity level (default: 1)"
+      , verb        :: w ::: Int               <!> "1" <?> "Verbosity level (default: 1)"
       }
   | Test -- Run Foundry unit tests
       { root        :: w ::: Maybe String               <?> "Path to  project root directory (default: . )"
