@@ -17,7 +17,7 @@ options, see `hevm equivalence --help`.
 ```shell
 $ solc --bin-runtime "contract1.sol" | tail -n1 > a.bin
 $ solc --bin-runtime "contract2.sol" | tail -n1 > b.bin
-$ hevm equivalence --code-a-file a.txt --code-b-file b.txt
+$ hevm equivalence --code-a-file a.bin --code-b-file b.bin
 ```
 
 ## Calldata size limits
