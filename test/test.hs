@@ -82,6 +82,7 @@ testEnv = Env { config = defaultConfig {
   , debug = False
   , dumpTrace = False
   , decomposeStorage = True
+  , verb = 1
   } }
 
 putStrLnM :: (MonadUnliftIO m) => String -> m ()
@@ -2335,8 +2336,7 @@ tests = testGroup "hevm"
       let sig = Just (Sig "checkval(uint256,uint256)" [AbiAddressType, AbiUIntType 256, AbiUIntType 256])
       (res, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
-      -- let cexesExt = map (snd . fromJust . extractCex) ret
-      -- putStrLnM $ "Cexes: \n" <> (unlines $ map ("-> " ++) (map show cexesExt))
+      assertBoolM "The expression is NOT partial" $ not $ Expr.containsNode isPartial res
       let numCexes = sum $ map (fromEnum . isCex) ret
       let numErrs = sum $ map (fromEnum . isError) ret
       let numQeds = sum $ map (fromEnum . isQed) ret
@@ -2364,9 +2364,10 @@ tests = testGroup "hevm"
       (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig2 [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches expr) <> " paths"
       assertBoolM "The expression is NOT error" $ not $ any isError ret
+      assertBoolM "The expression is NOT partial" $ not $ Expr.containsNode isPartial expr
     -- NOTE: below used to be symbolic copyslice copy error before new copyslice
     --       simplifications in Expr.simplify
-    , test "overapproximates-undeployed-contract" $ do
+    , test "overapproximates-undeployed-contract-symbolic" $ do
       Just c <- solcRuntime "C"
         [i|
          contract Target {
@@ -2378,8 +2379,9 @@ tests = testGroup "hevm"
            Target mm;
            function retFor(address addr) public returns (uint256) {
                // NOTE: this is symbolic execution, and no setUp has been ran
-               //       hence, this below calls unknown code! So it overapproximates.
-               //       mm is actually 0 here, which we may want to give a warning for
+               //       hence, this below calls unknown code! It's trying to load:
+               //       (SLoad (Lit 0x0) (AbstractStore (SymAddr "entrypoint") Nothing))
+               //       So it overapproximates.
                uint256 ret = mm.get(addr);
                assert(ret == 4);
                return ret;
@@ -2390,6 +2392,91 @@ tests = testGroup "hevm"
       (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig2 [] defaultVeriOpts
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches expr) <> " paths"
       assertBoolM "The expression is NOT error" $ not $ any isError ret
+      assertBoolM "The expression is NOT partial" $ not $ Expr.containsNode isPartial expr
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      -- There are 2 CEX-es
+      -- This is because with one CEX, the return DATA
+      -- is empty, and in the other, the return data is non-empty (but symbolic)
+      assertEqualM "number of counterexamples" 2 numCexes
+    , test "overapproximates-unknown-addr" $ do
+      Just c <- solcRuntime "C"
+        [i|
+         contract Target {
+           function get() external view returns (uint256) {
+               return 55;
+           }
+         }
+         contract C {
+           Target mm;
+           function retFor(address addr) public returns (uint256) {
+               Target target = Target(addr);
+               uint256 ret = target.get();
+               assert(ret == 4);
+               return ret;
+           }
+         }
+        |]
+      let sig2 = Just (Sig "retFor(address)" [AbiAddressType])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig2 [] defaultVeriOpts
+      putStrLnM $ "successfully explored: " <> show (Expr.numBranches expr) <> " paths"
+      assertBoolM "The expression is NOT error" $ not $ any isError ret
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      assertBoolM "The expression is NOT partial" $ not $ Expr.containsNode isPartial expr
+      -- There are 2 CEX-es
+      -- This is because with one CEX, the return DATA
+      -- is empty, and in the other, the return data is non-empty (but symbolic)
+      assertEqualM "number of counterexamples" 2 numCexes
+    , test "overapproximates-fixed-zero-addr" $ do
+      Just c <- solcRuntime "C"
+        [i|
+         contract Target {
+           function get() external view returns (uint256) {
+               return 55;
+           }
+         }
+         contract C {
+           Target mm;
+           function retFor() public returns (uint256) {
+               Target target = Target(address(0));
+               uint256 ret = target.get();
+               assert(ret == 4);
+               return ret;
+           }
+         }
+        |]
+      let sig2 = Just (Sig "retFor()" [])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig2 [] defaultVeriOpts
+      putStrLnM $ "successfully explored: " <> show (Expr.numBranches expr) <> " paths"
+      assertBoolM "The expression is NOT error" $ not $ any isError ret
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      assertBoolM "The expression is NOT partial" $ not $ Expr.containsNode isPartial expr
+      -- There are 2 CEX-es
+      -- This is because with one CEX, the return DATA
+      -- is empty, and in the other, the return data is non-empty (but symbolic)
+      assertEqualM "number of counterexamples" 2 numCexes
+    , test "overapproximates-fixed-wrong-addr" $ do
+      Just c <- solcRuntime "C"
+        [i|
+         contract Target {
+           function get() external view returns (uint256) {
+               return 55;
+           }
+         }
+         contract C {
+           Target mm;
+           function retFor() public returns (uint256) {
+               Target target = Target(address(0xacab));
+               uint256 ret = target.get();
+               assert(ret == 4);
+               return ret;
+           }
+         }
+        |]
+      let sig2 = Just (Sig "retFor()" [])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig2 [] defaultVeriOpts
+      putStrLnM $ "successfully explored: " <> show (Expr.numBranches expr) <> " paths"
+      assertBoolM "The expression is NOT error" $ not $ any isError ret
+      assertBoolM "The expression is NOT partial" $ not $ Expr.containsNode isPartial expr
       let numCexes = sum $ map (fromEnum . isCex) ret
       -- There are 2 CEX-es
       -- This is because with one CEX, the return DATA
@@ -4137,9 +4224,32 @@ tests = testGroup "hevm"
   ]
   , testGroup "equivalence-checking"
     [
+      test "eq-simple-diff" $ do
+        Just a <- solcRuntime "C"
+          [i|
+            contract C {
+              function stuff() public returns (uint256) {
+                return 4;
+              }
+            }
+          |]
+        Just b <- solcRuntime "C"
+          [i|
+            contract C {
+              function stuff() public returns (uint256) {
+                return 5;
+              }
+            }
+          |]
+        withSolvers Bitwuzla 3 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          (res, _) <- equivalenceCheck s a b defaultVeriOpts calldata False
+          assertBoolM "Must have a difference" (any isCex res)
+          let cexs = mapMaybe getCex res
+          assertEqualM "Must have exactly one cex" (length cexs) 1
       -- diverging gas overapproximations are caught
       -- previously, they had the same name (gas_...), so they compared equal
-      test "eq-divergent-overapprox-gas" $ do
+      , test "eq-divergent-overapprox-gas" $ do
         Just a <- solcRuntime "C"
           [i|
             contract C {

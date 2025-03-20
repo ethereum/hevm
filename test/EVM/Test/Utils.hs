@@ -59,7 +59,6 @@ testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
     , askSmtIters = 1
     , smtTimeout = Nothing
     , solver = Nothing
-    , verbose = Just 1
     , match = match
     , testParams = params
     , dapp = srcInfo
