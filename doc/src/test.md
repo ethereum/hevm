@@ -11,7 +11,7 @@ Execute all unit tests that make use of the `std-test` assertion library
 a.k.a [Foundry tests](https://book.getfoundry.sh/forge/forge-std) on functions that
 start with `prove_`. This command supports both Foundry- and
 [Dapptools-](https://dapp.tools/)based projects. For a full listing of options,
-see `hevm test --help`.
+see `hevm test --help`. For common options, see [here](./common-options.md).
 
 ## Simple example usage
 

@@ -9,6 +9,7 @@ Usage: hevm symbolic [--code TEXT] [--code-file STRING] [--calldata TEXT] [--add
 
 Run a symbolic execution against the given parameters, searching for assertion
 violations. For a full listing of options, see `hevm symbolic --help`.
+For common options, see [here](./common-options.md).
 
 Counterexamples are returned for any reachable assertion violations. Where
 an assertion violation is defined as either an execution of the invalid opcode

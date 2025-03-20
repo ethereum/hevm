@@ -10,7 +10,8 @@ Usage: hevm equivalence [--code-a TEXT] [--code-b TEXT] [--code-a-file STRING]
 
 Symbolically execute both the code given in `--code-a` and `--code-b` and try
 to prove equivalence between their outputs and storages. For a full listing of
-options, see `hevm equivalence --help`.
+options, see `hevm equivalence --help`. For common options, see
+[here](./common-options.md).
 
 ## Simple example usage
 
