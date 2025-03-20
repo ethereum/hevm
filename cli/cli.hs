@@ -136,6 +136,7 @@ data Command w
       , maxBufSize    :: w ::: Int              <!> "64" <?> "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)"
       , promiseNoReent:: w ::: Bool             <!> "Promise no reentrancy is possible into the contract(s) being examined"
       , verb          :: w ::: Int              <!> "1" <?> "Verbosity level (default: 1)"
+      , create        :: w ::: Bool             <?> "Tx: creation"
       }
   | Exec -- Execute a given program with specified env & calldata
       { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
@@ -165,6 +166,7 @@ data Command w
       , root        :: w ::: Maybe String      <?> "Path to  project root directory (default: . )"
       , projectType :: w ::: Maybe ProjectType <?> "Is this a CombinedJSON or Foundry project (default: Foundry)"
       , assertionType :: w ::: Maybe AssertionType <?> "Assertions as per Forge or DSTest (default: Forge)"
+      , verb          :: w ::: Int             <!> "1" <?> "Verbosity level (default: 1)"
       }
   | Test -- Run Foundry unit tests
       { root        :: w ::: Maybe String               <?> "Path to  project root directory (default: . )"
@@ -315,7 +317,7 @@ equivalence cmd = do
   cores <- liftIO $ unsafeInto <$> getNumProcessors
   let solverCount = fromMaybe cores cmd.numSolvers
   withSolvers solver solverCount (fromMaybe 1 cmd.solverThreads) cmd.smttimeout $ \s -> do
-    (res, e) <- equivalenceCheck s (fromJust bytecodeA) (fromJust bytecodeB) veriOpts calldata
+    (res, e) <- equivalenceCheck s (fromJust bytecodeA) (fromJust bytecodeB) veriOpts calldata cmd.create
     liftIO $ case (any isCex res, any Expr.isPartial e || any isUnknown res) of
       (False, False) -> putStrLn "   \x1b[32m[PASS]\x1b[0m Contracts behave equivalently"
       (True, _)      -> putStrLn "   \x1b[31m[FAIL]\x1b[0m Contracts do not behave equivalently"

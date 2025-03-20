@@ -82,7 +82,10 @@ instance Monoid CexVars where
 data BufModel
   = Comp CompressedBuf
   | Flat ByteString
-  deriving (Eq, Show)
+  deriving (Eq)
+instance Show BufModel where
+  show (Comp c) = "Comp " <> show c
+  show (Flat b) = "Flat 0x" <> bsToHex b
 
 -- | This representation lets us store buffers of arbitrary length without
 -- exhausting the available memory, it closely matches the format used by
@@ -322,10 +325,10 @@ referencedFrameContext expr = nubOrd $ foldTerm go [] expr
   where
     go :: Expr a -> [(Builder, [Prop])]
     go = \case
-      TxValue -> [(fromString "txvalue", [])]
-      v@(Balance a) -> [(fromString "balance_" <> formatEAddr a, [PLT v (Lit $ 2 ^ (96 :: Int))])]
-      Gas freshVar -> [(fromString ("gas_" <> show freshVar), [])]
-      CodeHash a@(LitAddr _) -> [(fromString "codehash_" <> formatEAddr a, [])]
+      o@TxValue -> [(fromRight' $ exprToSMT o, [])]
+      o@(Balance _) -> [(fromRight' $ exprToSMT o, [PLT o (Lit $ 2 ^ (96 :: Int))])]
+      o@(Gas _ _) -> [(fromRight' $ exprToSMT o, [])]
+      o@(CodeHash (LitAddr _)) -> [(fromRight' $ exprToSMT o, [])]
       _ -> []
 
 referencedBlockContext :: TraversableTerm a => a -> [(Builder, [Prop])]
@@ -443,20 +446,26 @@ declareConstrainAddrs names = SMT2 (["; concrete and symbolic addresses"] <> fma
     assume n = "(assert (bvugt " <> n <> " (_ bv9 160)))"
     cexvars = (mempty :: CexVars){ addrs = fmap toLazyText names }
 
+-- The gas is a tuple of (prefix, index). Within each prefix, the gas is strictly decreasing as the
+-- index increases. This function gets a map of Prefix -> [Int], and for each prefix,
+-- enforces the order
 enforceGasOrder :: [Prop] -> SMT2
-enforceGasOrder ps = SMT2 (["; gas ordering"] <> order indices) mempty mempty
+enforceGasOrder ps = SMT2 (["; gas ordering"] <> (concatMap (uncurry order) indices)) mempty mempty
   where
-    order :: [Int] -> [Builder]
-    order n = consecutivePairs n >>= \(x, y)->
+    order :: TS.Text -> [Int] -> [Builder]
+    order prefix n = consecutivePairs (nubInt n) >>= \(x, y)->
       -- The GAS instruction itself costs gas, so it's strictly decreasing
-      ["(assert (bvugt gas_" <> (fromString . show $ x) <> " gas_" <> (fromString . show $ y) <> "))"]
+      ["(assert (bvugt " <> fromRight' (exprToSMT (Gas prefix x)) <> " " <>
+        fromRight' ((exprToSMT (Gas prefix y))) <> "))"]
     consecutivePairs :: [Int] -> [(Int, Int)]
     consecutivePairs [] = []
     consecutivePairs l = zip l (tail l)
-    indices :: [Int] = nubInt $ concatMap (foldProp go mempty) ps
-    go :: Expr a -> [Int]
+    indices = Map.toList $ toMapOfLists $ concatMap (foldProp go mempty) ps
+    toMapOfLists :: [(TS.Text, Int)] -> Map.Map TS.Text [Int]
+    toMapOfLists = foldr (\(k, v) acc -> Map.insertWith (++) k [v] acc) Map.empty
+    go :: Expr a -> [(TS.Text, Int)]
     go e = case e of
-      Gas freshVar -> [freshVar]
+      Gas prefix v -> [(prefix, v)]
       _ -> []
 
 declareFrameContext :: [(Builder, [Prop])] -> Err SMT2
@@ -872,8 +881,8 @@ exprToSMT = \case
     pure $ "(store" `sp` encPrev `sp` encIdx `sp` encVal <> ")"
   SLoad idx store -> op2 "select" store idx
   LitAddr n -> pure $ fromLazyText $ "(_ bv" <> T.pack (show (into n :: Integer)) <> " 160)"
-  Gas freshVar -> pure $ fromLazyText $ "gas_"  <> (T.pack $ show freshVar)
   CodeHash a@(LitAddr _) -> pure $ fromLazyText "codehash_" <> formatEAddr a
+  Gas prefix var -> pure $ fromLazyText $ "gas_" <> T.pack (TS.unpack prefix) <> T.pack (show var)
 
   a -> internalError $ "TODO: implement: " <> show a
   where
@@ -1060,14 +1069,12 @@ parseBlockCtx "prevrandao" = PrevRandao
 parseBlockCtx "gaslimit" = GasLimit
 parseBlockCtx "chainid" = ChainId
 parseBlockCtx "basefee" = BaseFee
-parseBlockCtx gas | TS.isPrefixOf (TS.pack "gas_") gas = Gas (textToInt $ TS.drop 4 gas)
 parseBlockCtx val = internalError $ "cannot parse '" <> (TS.unpack val) <> "' into an Expr"
 
 parseTxCtx :: TS.Text -> Expr EWord
 parseTxCtx name
   | name == "txvalue" = TxValue
   | Just a <- TS.stripPrefix "balance_" name = Balance (parseEAddr a)
-  | Just a <- TS.stripPrefix "gas_" name = Gas (textToInt a)
   | Just a <- TS.stripPrefix "codehash_" name = CodeHash (parseEAddr a)
   | otherwise = internalError $ "cannot parse " <> (TS.unpack name) <> " into an Expr"
 

@@ -107,7 +107,7 @@ checkMulti (SolverGroup taskQueue) smt2 multiSol = do
     -- collect result
     readChan resChan
 
-checkSatWithProps :: App m => SolverGroup -> [Prop] ->m (CheckSatResult, Err SMT2)
+checkSatWithProps :: App m => SolverGroup -> [Prop] -> m (CheckSatResult, Err SMT2)
 checkSatWithProps (SolverGroup taskQueue) props = do
   conf <- readConfig
   let psSimp = simplifyProps props
