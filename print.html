@@ -1202,7 +1202,7 @@ is what's expected for an <a href="https://docs.soliditylang.org/en/latest/contr
 solidity</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="hevm-test"><a class="header" href="#hevm-test"><code>hevm test</code></a></h1>
 <pre><code>Usage: hevm test [--root STRING] [--project-type PROJECTTYPE] [--rpc TEXT]
-                 [--number W256] [--verbose INT] [--coverage] [--match STRING]
+                 [--number W256] [--coverage] [--match STRING]
                  [--solver TEXT] [--num-solvers NATURAL] [--smtdebug] [--debug]
                  [--trace] [--ffi] [--smttimeout NATURAL]
                  [--max-iterations INTEGER]
@@ -1216,7 +1216,6 @@ Available options:
   --project-type PROJECTTYPE Foundry or CombinedJSON project
   --rpc TEXT               Fetch state from a remote node
   --number W256            Block: number
-  --verbose INT            Append call trace: {1} failures {2} all
   --coverage               Coverage analysis
   --match STRING           Test case filter - only run methods matching regex
   --solver TEXT            Used SMT solver: z3 (default), cvc5, or bitwuzla
