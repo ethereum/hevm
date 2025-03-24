@@ -89,7 +89,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><a href="for-hevm-developers.html">For hevm Developers</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item expanded "><a href="symbolic.html" class="active">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><a href="for-hevm-developers.html">For hevm Developers</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item expanded "><a href="symbolic.html" class="active">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li><li class="chapter-item "><a href="common-options.html">Common options</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -181,87 +181,30 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="hevm-symbolic"><a class="header" href="#hevm-symbolic"><code>hevm symbolic</code></a></h1>
-<pre><code class="language-shell">Usage: hevm symbolic [--code TEXT] [--calldata TEXT] [--address ADDR]
+<pre><code class="language-plain">Usage: hevm symbolic [--code TEXT] [--code-file STRING] [--calldata TEXT] [--address ADDR]
                      [--caller ADDR] [--origin ADDR] [--coinbase ADDR]
                      [--value W256] [--nonce WORD64] [--gas WORD64]
-                     [--number W256] [--timestamp W256] [--basefee W256]
-                     [--priority-fee W256] [--gaslimit WORD64] [--gasprice W256]
-                     [--create] [--maxcodesize W256] [--prev-randao W256]
-                     [--chainid W256] [--rpc TEXT] [--block W256]
-                     [--root STRING] [--project-type PROJECTTYPE]
-                     [--initial-storage INITIALSTORAGE] [--sig TEXT]
-                     [--arg STRING]... [--get-models] [--show-tree]
-                     [--show-reachable-tree] [--smttimeout NATURAL]
-                     [--max-iterations INTEGER] [--solver TEXT] [--smtdebug]
-                     [--assertions [WORD256]] [--ask-smt-iterations INTEGER]
-                     [--num-solvers NATURAL]
-                     [--loop-detection-heuristic LOOPHEURISTIC]
-
-Available options:
-  -h,--help                Show this help text
-  --code TEXT              Program bytecode
-  --calldata TEXT          Tx: calldata
-  --address ADDR           Tx: address
-  --caller ADDR            Tx: caller
-  --origin ADDR            Tx: origin
-  --coinbase ADDR          Block: coinbase
-  --value W256             Tx: Eth amount
-  --nonce WORD64           Nonce of origin
-  --gas WORD64             Tx: gas amount
-  --number W256            Block: number
-  --timestamp W256         Block: timestamp
-  --basefee W256           Block: base fee
-  --priority-fee W256      Tx: priority fee
-  --gaslimit WORD64        Tx: gas limit
-  --gasprice W256          Tx: gas price
-  --create                 Tx: creation
-  --maxcodesize W256       Block: max code size
-  --prev-randao W256       Block: prevRandao
-  --chainid W256           Env: chainId
-  --rpc TEXT               Fetch state from a remote node
-  --block W256             Block state is be fetched from
-  --root STRING            Path to project root directory (default: . )
-  --project-type PROJECTTYPE Foundry or CombinedJSON project
-  --initial-storage INITIALSTORAGE
-                           Starting state for storage: Empty, Abstract (default
-                           Abstract)
-  --sig TEXT               Signature of types to decode / encode
-  --arg STRING             Values to encode
-  --get-models             Print example testcase for each execution path
-  --show-tree              Print branches explored in tree view
-  --show-reachable-tree    Print only reachable branches explored in tree view
-  --smttimeout NATURAL     Timeout given to SMT solver in seconds (default: 300)
-  --max-iterations INTEGER Number of times we may revisit a particular branching
-                           point. Default is 5. Setting to -1 allows infinite looping
-  --solver TEXT            Used SMT solver: z3 (default), cvc5, or bitwuzla
-  --smtdebug               Print smt queries sent to the solver
-  --assertions [WORD256]   Comma separated list of solc panic codes to check for
-                           (default: user defined assertion violations only)
-  --ask-smt-iterations INTEGER
-                           Number of times we may revisit a particular branching
-                           point before we consult the smt solver to check
-                           reachability (default: 1) (default: 1)
-  --num-solvers NATURAL    Number of solver instances to use (default: number of
-                           cpu cores)
-  --loop-detection-heuristic LOOPHEURISTIC
-                           Which heuristic should be used to determine if we are
-                           in a loop: StackBased (default) or Naive
-                           (default: StackBased)
+                     [--number W256] [--timestamp W256] [--basefee W256] ...
 </code></pre>
-<p>Run a symbolic execution against the given parameters, searching for assertion violations.</p>
-<p>Counterexamples will be returned for any reachable assertion violations. Where
+<p>Run a symbolic execution against the given parameters, searching for assertion
+violations. For a full listing of options, see <code>hevm symbolic --help</code>.
+For common options, see <a href="./common-options.html">here</a>.</p>
+<p>Counterexamples are returned for any reachable assertion violations. Where
 an assertion violation is defined as either an execution of the invalid opcode
 (<code>0xfe</code>), or a revert with a message of the form
 <code>abi.encodeWithSelector('Panic(uint256)', errCode)</code> with <code>errCode</code> being one of
 the predefined solc assertion codes defined
 <a href="https://docs.soliditylang.org/en/latest/control-structures.html#panic-via-assert-and-error-via-require">here</a>.</p>
+<h2 id="arithmetic-overflow"><a class="header" href="#arithmetic-overflow">Arithmetic overflow</a></h2>
 <p>By default hevm ignores assertion violations that result from arithmetic
 overflow (<code>Panic(0x11)</code>), although this behaviour can be customised via the
 <code>--assertions</code> flag. For example, the following will return counterexamples for
 arithmetic overflow (<code>0x11</code>) and user defined assertions (<code>0x01</code>):</p>
 <pre><code>hevm symbolic --code $CODE --assertions '[0x01, 0x11]'
 </code></pre>
-<p>The default value for <code>calldata</code> and <code>caller</code> are symbolic values, but can be specialized to concrete functions with their corresponding flags.</p>
+<p>The default value for <code>calldata</code> and <code>caller</code> are symbolic values, but can be
+specialized to concrete functions with their corresponding flags.</p>
+<h2 id="specializing-calldata"><a class="header" href="#specializing-calldata">Specializing calldata</a></h2>
 <p>One can also specialize specific arguments to a function signature, while
 leaving others abstract. If <code>--sig</code> is given, calldata is assumed to be of the
 form suggested by the function signature. With this flag, specific arguments
@@ -286,11 +229,13 @@ generation.</p>
 <p>The default timeout for SMT queries is no timeout. If your program is taking
 longer than a couple of minutes to run, you can experiment with configuring the
 timeout to somewhere around 10s by doing <code>--smttimeout 10000</code></p>
+<h2 id="storage"><a class="header" href="#storage">Storage</a></h2>
 <p>Storage can be initialized in two ways:</p>
 <ul>
 <li><code>Empty</code>: all storage slots for all contracts are initialized to zero</li>
 <li><code>Abstract</code>: all storage slots are initialized as unconstrained abstract values</li>
 </ul>
+<h2 id="exploration-strategy"><a class="header" href="#exploration-strategy">Exploration strategy</a></h2>
 <p><code>hevm</code> uses an eager approach for symbolic execution, meaning that it will
 first attempt to explore all branches in the program (without querying the smt
 solver to check if they are reachable or not). Once the full execution tree has
@@ -303,6 +248,11 @@ iterations (controlled by the <code>--ask-smt-iterations</code> flag), the solve
 invoked to check whether a given loop branch is reachable. In cases where the
 number of loop iterations is known in advance, you may be able to speed up
 execution by setting this flag to an appropriate value.</p>
+<h2 id="further-reading"><a class="header" href="#further-reading">Further reading</a></h2>
+<p>For a tutorial on symbolic execution with <code>hevm</code>, see the <a href="symbolic-execution-tutorial.html">the page
+here</a>.
+An older blog post on symbolic execution with <code>hevm</code> can be found
+<a href="https://fv.ethereum.org/2020/07/28/symbolic-hevm-release">here</a>.</p>
 
                     </main>
 

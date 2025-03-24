@@ -89,7 +89,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><a href="for-hevm-developers.html">For hevm Developers</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item expanded "><a href="exec.html" class="active">Concrete execution</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><a href="for-hevm-developers.html">For hevm Developers</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item expanded "><a href="exec.html" class="active">Concrete execution</a></li><li class="chapter-item "><a href="common-options.html">Common options</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -182,57 +182,28 @@
                     <main>
                         <h1 id="hevm-exec"><a class="header" href="#hevm-exec"><code>hevm exec</code></a></h1>
 <p>Run an EVM computation using specified parameters.</p>
-<pre><code>Usage: hevm exec [--code TEXT] [--calldata TEXT] [--address ADDR]
+<pre><code class="language-plain">Usage: hevm exec [--code TEXT] [--code-file STRING] [--calldata TEXT] [--address ADDR]
                  [--caller ADDR] [--origin ADDR] [--coinbase ADDR]
                  [--value W256] [--nonce WORD64] [--gas WORD64] [--number W256]
                  [--timestamp W256] [--basefee W256] [--priority-fee W256]
-                 [--gaslimit WORD64] [--gasprice W256] [--create]
+                 [--gaslimit WORD64] [--gasprice W256]
                  [--maxcodesize W256] [--prev-randao W256] [--chainid W256]
-                 [--debug] [--trace] [--rpc TEXT] [--block W256] [--root STRING]
-                 [--project-type PROJECTTYPE]
-
-Available options:
-  -h,--help                Show this help text
-  --code TEXT              Program bytecode
-  --calldata TEXT          Tx: calldata
-  --address ADDR           Tx: address
-  --caller ADDR            Tx: caller
-  --origin ADDR            Tx: origin
-  --coinbase ADDR          Block: coinbase
-  --value W256             Tx: Eth amount
-  --nonce WORD64           Nonce of origin
-  --gas WORD64             Tx: gas amount
-  --number W256            Block: number
-  --timestamp W256         Block: timestamp
-  --basefee W256           Block: base fee
-  --priority-fee W256      Tx: priority fee
-  --gaslimit WORD64        Tx: gas limit
-  --gasprice W256          Tx: gas price
-  --create                 Tx: creation
-  --maxcodesize W256       Block: max code size
-  --prev-randao W256       Block: prevRandao
-  --chainid W256           Env: chainId
-  --debug                  Debug printing of internal behaviour
-  --trace                  Dump trace
-  --rpc TEXT               Fetch state from a remote node
-  --block W256             Block state is be fetched from
-  --root STRING            Path to project root directory (default: . )
-  --project-type PROJ      Foundry or CombinedJSON project (default: Foundry)
-  --assertion-type ASSERT  Assertions as per Forge or DSTest (default: Forge)
+                 [--trace] [--rpc TEXT] [--block W256] ...
 </code></pre>
-<p>Minimum required flags: either you must provide <code>--code</code> or you must both pass
-<code>--rpc</code> and <code>--address</code>.</p>
+<p>Concretely execute a given EVM bytecode with the specified parameters. Minimum
+required flags: either you must provide <code>--code</code> or you must both pass <code>--rpc</code>
+and <code>--address</code>. For a full listing of options, see <code>hevm exec --help</code>.</p>
 <p>If the execution returns an output, it will be written
 to stdout. Exit code indicates whether the execution was successful or
 errored/reverted.</p>
-<p>Simple example usage:</p>
-<pre><code>hevm exec --code 0x647175696e6550383480393834f3 --gas 0xff
+<h2 id="simple-example-usage"><a class="header" href="#simple-example-usage">Simple example usage</a></h2>
+<pre><code class="language-shell">$ hevm exec --code 0x647175696e6550383480393834f3 --gas 0xff
 "Return: 0x647175696e6550383480393834f3"
 </code></pre>
 <p>Which says that given the EVM bytecode <code>0x647175696e6550383480393834f3</code>, the Ethereum
 Virtual Machine will put <code>0x647175696e6550383480393834f3</code> in the RETURNDATA.</p>
 <p>To execute a mainnet transaction:</p>
-<pre><code># install seth as per
+<pre><code class="language-shell"># install seth as per
 # https://github.com/makerdao/developerguides/blob/master/devtools/seth/seth-guide/seth-guide.md
 $ export ETH_RPC_URL=https://mainnet.infura.io/v3/YOUR_API_KEY_HERE
 $ export TXHASH=0xd2235b9554e51e8ff5b3de62039d5ab6e591164b593d892e42b2ffe0e3e4e426
@@ -249,6 +220,9 @@ hevm exec --caller $(seth tx $TXHASH from) --address $(seth tx $TXHASH to) \
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
+                            <a rel="next prefetch" href="common-options.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
 
                         <div style="clear: both"></div>
                     </nav>
@@ -260,6 +234,9 @@ hevm exec --caller $(seth tx $TXHASH from) --address $(seth tx $TXHASH to) \
                         <i class="fa fa-angle-left"></i>
                     </a>
 
+                    <a rel="next prefetch" href="common-options.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
             </nav>
 
         </div>
