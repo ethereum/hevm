@@ -306,7 +306,7 @@ test-suite ethereum-tests
   main-is:
     BlockchainTests.hs
 
-test-suite cli-tests
+test-suite test-cli
   type:
     exitcode-stdio-1.0
   hs-source-dirs:
@@ -321,6 +321,7 @@ test-suite cli-tests
     text,
     bytestring,
     filepath,
+    split,
   other-modules:
     Paths_hevm
 

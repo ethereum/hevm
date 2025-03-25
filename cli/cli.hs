@@ -259,7 +259,7 @@ commandParser = subparser
       (info (Test <$> testOptions <*> commonOptions <**> helper)
         (progDesc "Prove Foundry unit tests marked with `prove_`"
         <> footer "For more help: https://hevm.dev/std-test-tutorial.html" ))
-  <> command "eq"
+  <> command "equivalence"
       (info (Equal <$> eqOptions <*> commonOptions <**> helper)
         (progDesc "Prove equivalence between two programs"
         <> footer "For more help: https://hevm.dev/equivalence-checking-tutorial.html" ))
