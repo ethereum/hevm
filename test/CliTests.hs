@@ -23,8 +23,8 @@ main = do
         (exitCode, stdout, stderr) <- readProcessWithExitCode "cabal" ["run", "exe:hevm"] ""
         stderr `shouldContain` "Usage: hevm"
 
-      it "hevm symbolic works on small example" $ do
-        let torun = splitOn " " "symbolic --initial-storage Abstract --code 6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f805414604057603f6042565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220cf838a7ff084e553805b9b56decd46ea37363e97e26405b2409d22cb905de0e664736f6c63430008180033"
+      it "hevm symbolic tutorial works -- FAIL" $ do
+        let torun = splitOn " " "symbolic --sig simple_symb() --code 6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f805414604057603f6042565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220cf838a7ff084e553805b9b56decd46ea37363e97e26405b2409d22cb905de0e664736f6c63430008180033"
         (exitCode, stdout, stderr) <- readProcessWithExitCode "cabal" (["run", "exe:hevm", "--" ] ++ torun) ""
         stdout `shouldContain` "Discovered the following"
         exitCode `shouldBe` ExitFailure 1
