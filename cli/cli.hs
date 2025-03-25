@@ -58,7 +58,7 @@ data AssertionType = DSTest | Forge
   deriving (Eq, Show, Read)
 
 projectTypeParser :: Parser ProjectType
-projectTypeParser = option auto (long "projectType" <> showDefault <> value Foundry <> help "Is this a CombinedJSON or Foundry project")
+projectTypeParser = option auto (long "project-type" <> showDefault <> value Foundry <> help "Is this a CombinedJSON or Foundry project")
 
 sigParser :: Parser (Maybe Text)
 sigParser = (optional $ strOption $ long "sig" <> help "Signature of types to decode/encode")
@@ -97,9 +97,10 @@ data CommonOptions = CommonOptions
 
 commonOptions :: Parser CommonOptions
 commonOptions = CommonOptions
-  <$> option auto ( long "askSmtIterations" <> value 1 <>
+  <$> option auto ( long "ask-smt-iterations" <> value 1 <>
     help "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability")
-  <*> option auto (long "loopDetectionHeuristic" <> showDefault <> value StackBased <> help "Which heuristic should be used to determine if we are in a loop: StackBased or Naive")
+  <*> option auto (long "loop-detection-heuristic" <> showDefault <> value StackBased <>
+    help "Which heuristic should be used to determine if we are in a loop: StackBased or Naive")
   <*> (switch $ long "no-decompose"         <> help "Don't decompose storage slots into separate arrays")
   <*> (option auto $ long "max-branch"      <> showDefault <> value 100 <> help "Max number of branches to explore when encountering a symbolic value")
   <*> (strOption $ long "solver"            <> value "z3" <> help "Used SMT solver: z3, cvc5, or bitwuzla")
