@@ -15,7 +15,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.ByteString.Char8 as BC
 import Data.DoubleWord (Word256)
-import Data.List (intersperse)
+import Data.List (intersperse, intercalate)
 import Data.Maybe (fromMaybe, mapMaybe, fromJust, isNothing, isJust)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -481,7 +481,7 @@ assert cFileOpts sOpts cExecOpts cOpts = do
         putStrLn $ "Error: invalid assertion codes: " <> s
         exitFailure
       Just codes -> pure codes
-  when (cOpts.verb > 0) $ liftIO $ putStrLn $ "Using assertion code(s): " <> show errCodes
+  when (cOpts.verb > 0) $ liftIO $ putStrLn $ "Using assertion code(s): " <> intercalate "," (map show errCodes)
   cores <- liftIO $ unsafeInto <$> getNumProcessors
   let solverCount = fromMaybe cores cOpts.numSolvers
   solver <- liftIO $ getSolver cOpts.solver
