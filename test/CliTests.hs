@@ -49,3 +49,9 @@ main = do
         stdout `shouldContain` "No discrepancies found"
         stdout `shouldContain` "PASS"
         exitCode `shouldBe` ExitSuccess
+
+      it "hevm concrete tutorial works" $ do
+        let torun = splitOn " " "exec --code 0x647175696e6550383480393834f3 --gas 0xff"
+        (exitCode, stdout, stderr) <- readProcessWithExitCode "cabal" (["run", "exe:hevm", "--" ] ++ torun) ""
+        stdout `shouldContain` "Return: 0x64"
+        exitCode `shouldBe` ExitSuccess
