@@ -186,6 +186,7 @@ library
     split                             >= 0.2.3 && < 0.3,
     template-haskell                  >= 2.19.0 && < 3,
     extra                             >= 1.7.14 && < 2,
+    hspec                             >= 2.9.0 && < 2.13.0,
   hs-source-dirs:
     src
 
@@ -304,6 +305,24 @@ test-suite ethereum-tests
     exitcode-stdio-1.0
   main-is:
     BlockchainTests.hs
+
+test-suite cli-tests
+  type:
+    exitcode-stdio-1.0
+  hs-source-dirs:
+    test
+  main-is:
+    CliTests.hs
+  build-depends:
+    base,
+    hevm,
+    hspec,
+    process,
+    text,
+    bytestring,
+    filepath,
+  other-modules:
+    Paths_hevm
 
 --- Benchmarks ---
 
