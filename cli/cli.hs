@@ -61,7 +61,7 @@ projectTypeParser :: Parser ProjectType
 projectTypeParser = option auto (long "projectType" <> showDefault <> value Foundry <> help "Is this a CombinedJSON or Foundry project")
 
 sigParser :: Parser (Maybe Text)
-sigParser = (optional $ strOption $ long "sig" <> help "Signature of types to decode / encode")
+sigParser = (optional $ strOption $ long "sig" <> help "Signature of types to decode/encode")
 
 argParser :: Parser [String]
 argParser = (many $ strOption $ long "arg" <> help "Value(s) to encode. Can be given multiple times, once for each argument")
@@ -305,7 +305,7 @@ main = do
     Symbolic cFileOpts symbOpts cExecOpts cOpts -> do
       env <- makeEnv cOpts
       root <- getRoot cOpts
-      withCurrentDirectory root $ runEnv env $ assert cOpts cExecOpts symbOpts cFileOpts
+      withCurrentDirectory root $ runEnv env $ assert cFileOpts symbOpts cExecOpts cOpts
     Equal eqOpts cOpts -> do
       env <- makeEnv cOpts
       runEnv env $ equivalence eqOpts cOpts
@@ -323,7 +323,7 @@ main = do
             exitFailure
           Right out -> do
             -- TODO: which functions here actually require a BuildOutput, and which can take it as a Maybe?
-            unitTestOpts <- liftIO $ unitTestOptions cOpts testOpts solvers (Just out)
+            unitTestOpts <- liftIO $ unitTestOptions testOpts cOpts solvers (Just out)
             res <- unitTest unitTestOpts out.contracts
             liftIO $ unless (uncurry (&&) res) exitFailure
     Exec cFileOpts execOpts cExecOpts cOpts-> do
@@ -467,9 +467,9 @@ buildCalldata cOpts sig arg = case (cOpts.calldata, sig) of
 
 
 -- If function signatures are known, they should always be given for best results.
-assert :: App m => CommonOptions -> CommonExecOptions -> SymbolicOptions -> CommonFileOptions -> m ()
-assert cOpts cExecOpts sOpts cFileOpts = do
-  let block'  = maybe Fetch.Latest Fetch.BlockNumber cExecOpts.block
+assert :: App m => CommonFileOptions -> SymbolicOptions -> CommonExecOptions -> CommonOptions -> m ()
+assert cFileOpts sOpts cExecOpts cOpts = do
+  let block' = maybe Fetch.Latest Fetch.BlockNumber cExecOpts.block
       rpcinfo = (,) block' <$> cExecOpts.rpc
   calldata <- buildCalldata cOpts sOpts.sig sOpts.arg
   preState <- liftIO $ symvmFromCommand cExecOpts sOpts cFileOpts calldata
@@ -572,7 +572,7 @@ launchExec cFileOpts execOpts cExecOpts cOpts = do
 
 -- | Creates a (concrete) VM from command line options
 vmFromCommand :: CommonOptions -> CommonExecOptions -> CommonFileOptions -> ExecOptions -> IO (VM Concrete RealWorld)
-vmFromCommand cmd cExecOpts cFileOpts execOpts= do
+vmFromCommand cOpts cExecOpts cFileOpts execOpts= do
   (miner,ts,baseFee,blockNum,prevRan) <- case cExecOpts.rpc of
     Nothing -> pure (LitAddr 0,Lit 0,0,0,0)
     Just url -> Fetch.fetchBlockFrom block url >>= \case
@@ -681,7 +681,7 @@ vmFromCommand cmd cExecOpts cFileOpts execOpts= do
         word f def = fromMaybe def (f cExecOpts)
         word64 f def = fromMaybe def (f cExecOpts)
         addr f def = maybe def LitAddr (f cExecOpts)
-        bytes f def = maybe def decipher (f cmd)
+        bytes f def = maybe def decipher (f cOpts)
 
 symvmFromCommand :: CommonExecOptions -> SymbolicOptions -> CommonFileOptions -> (Expr Buf, [Prop]) -> IO (VM EVM.Types.Symbolic RealWorld)
 symvmFromCommand cExecOpts sOpts cFileOpts calldata = do
@@ -782,9 +782,9 @@ symvmFromCommand cExecOpts sOpts cFileOpts calldata = do
     word64 f def = fromMaybe def (f cExecOpts)
     eaddr f def = maybe def LitAddr (f cExecOpts)
 
-unitTestOptions :: CommonOptions -> TestOptions -> SolverGroup -> Maybe BuildOutput -> IO (UnitTestOptions RealWorld)
-unitTestOptions cmd testOpts solvers buildOutput = do
-  root <- getRoot cmd
+unitTestOptions :: TestOptions -> CommonOptions -> SolverGroup -> Maybe BuildOutput -> IO (UnitTestOptions RealWorld)
+unitTestOptions testOpts cOpts solvers buildOutput = do
+  root <- getRoot cOpts
   let srcInfo = maybe emptyDapp (dappInfo root) buildOutput
   let rpcinfo = case (testOpts.number, testOpts.rpc) of
           (Just block, Just url) -> Just (Fetch.BlockNumber block, url)
@@ -800,14 +800,14 @@ unitTestOptions cmd testOpts solvers buildOutput = do
     , rpcInfo = case testOpts.rpc of
          Just url -> Just (block', url)
          Nothing  -> Nothing
-    , maxIter = parseMaxIters cmd.maxIterations
-    , askSmtIters = cmd.askSmtIterations
-    , smtTimeout = Just cmd.smttimeout
+    , maxIter = parseMaxIters cOpts.maxIterations
+    , askSmtIters = cOpts.askSmtIterations
+    , smtTimeout = Just cOpts.smttimeout
     , match = T.pack $ fromMaybe ".*" testOpts.match
     , testParams = params
     , dapp = srcInfo
     , ffiAllowed = testOpts.ffi
-    , checkFailBit = cmd.assertionType == DSTest
+    , checkFailBit = cOpts.assertionType == DSTest
     }
 parseInitialStorage :: InitialStorage -> BaseState
 parseInitialStorage Empty = EmptyBase
