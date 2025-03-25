@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow user to change the verbosity level via `--verb`. For the moment, this is only to
   print some warnings related to zero-address dereference and to print `hemv test`'s
   output in case of failure
+- Simple test cases for the CLI
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
