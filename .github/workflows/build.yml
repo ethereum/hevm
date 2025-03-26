@@ -64,6 +64,9 @@ jobs:
       # if we run this in nix build we often get killed due to oom in ci
       - name: run ethereum tests
         run: nix develop --command bash -c "cabal --active-repositories=:none run ethereum-tests"
+      # if we run this in nix build, it complains about running in a sandbox
+      - name: run cli tests
+        run: nix develop --command bash -c "cabal --active-repositories=:none run cli-test"
 
   build-windows-bitwuzla:
     name: bitwuzla-build (win64 target)

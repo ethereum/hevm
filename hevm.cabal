@@ -12,7 +12,7 @@ homepage:
 license:
   AGPL-3.0-only
 author:
-  dxo, Martin Lundfall, Mikael Brockman
+  dxo, Martin Lundfall, Mikael Brockman, Martin Blicha, Zoe Paraskevopoulou, Mate Soos
 maintainer:
   git@d-xo.org
 category:
@@ -89,6 +89,7 @@ common shared
 
 library
   import: shared
+  default-language: GHC2021
   exposed-modules:
     EVM,
     EVM.ABI,
@@ -169,6 +170,7 @@ library
     async                             >= 2.2.4 && < 2.3,
     operational                       >= 0.2.3 && < 0.3,
     optparse-generic                  >= 1.3.1 && < 1.6,
+    optparse-applicative              >= 0.18.0.0 && < 0.20.0.0,
     pretty-hex                        >= 1.1 && < 1.2,
     rosezipper                        >= 0.2 && < 0.3,
     wreq                              >= 0.5.3 && < 0.6,
@@ -185,11 +187,13 @@ library
     split                             >= 0.2.3 && < 0.3,
     template-haskell                  >= 2.19.0 && < 3,
     extra                             >= 1.7.14 && < 2,
+    hspec                             >= 2.9.0 && < 2.13.0,
   hs-source-dirs:
     src
 
 executable hevm
   import: shared
+  default-language: GHC2021
   hs-source-dirs:
     cli
   main-is:
@@ -207,17 +211,19 @@ executable hevm
     filepath,
     hevm,
     optparse-generic,
+    optparse-applicative,
     text,
     optics-core,
     githash,
     witch,
     unliftio-core,
-    with-utf8,
+    split,
 
 --- Test Helpers ---
 
 common test-base
   import: shared
+  default-language: GHC2021
   hs-source-dirs:
     test
   other-modules:
@@ -254,6 +260,7 @@ common test-base
 
 library test-utils
   import: test-base
+  default-language: GHC2021
   exposed-modules:
     EVM.Test.Utils
     EVM.Test.Tracing
@@ -261,6 +268,7 @@ library test-utils
 
 common test-common
   import: test-base
+  default-language: GHC2021
   if flag(devel)
     ghc-options: -threaded -with-rtsopts=-N
   build-depends:
@@ -274,6 +282,7 @@ common test-common
 
 test-suite test
   import: test-common
+  default-language: GHC2021
   type:
     exitcode-stdio-1.0
   main-is:
@@ -291,6 +300,7 @@ test-suite test
 -- suite to make it easy to skip them when running nix-build
 test-suite rpc-tests
   import: test-common
+  default-language: GHC2021
   type:
     exitcode-stdio-1.0
   main-is:
@@ -298,15 +308,36 @@ test-suite rpc-tests
 
 test-suite ethereum-tests
   import: test-common
+  default-language: GHC2021
   type:
     exitcode-stdio-1.0
   main-is:
     BlockchainTests.hs
 
+test-suite cli-test
+  type:
+    exitcode-stdio-1.0
+  default-language: GHC2021
+  hs-source-dirs:
+    test
+  main-is:
+    clitest.hs
+  build-depends:
+    base,
+    hevm,
+    hspec,
+    process,
+    text,
+    bytestring,
+    filepath,
+    split,
+    here,
+
 --- Benchmarks ---
 
 benchmark bench
   import: shared
+  default-language: GHC2021
   type:
     exitcode-stdio-1.0
   main-is:

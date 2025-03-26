@@ -48,3 +48,19 @@ Loops in the code cause a challenge to symbolic execution framework. In order
 to not run indefinitely, hevm will only explore a certain number of iterations
 of a loop before consideing abandoning the exploration of that branch. This
 number can be set via the `--ask-smt-iterations` flag.
+
+## Maximum Branch Limit, ``--max-branch``
+
+Limits the number of branches that are explored in case a symbolic value is
+encountered. For example, if a JUMP instruction is called with a symbolic
+expression, the system will explore all possible valid jump destinations,
+which may be too many. This option limits the branching factor in these cases.
+
+## Maximum Exploration Limt, ``--max-explore``
+
+Limits the branching factor and branching depth of symbolic exploration. This
+is a heuristic way to prevent the exploration from running for too long. Useful
+in scenarios where you use e.g. both symbolic execution and fuzzing, and don't
+want the symbolic execution to run for too long. It will often read to WEARNING-s
+related to `Too many branches at program counter`. This option automatically
+upper-limits the Branch Limit as well.
