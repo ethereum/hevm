@@ -118,7 +118,7 @@ commonOptions = CommonOptions
   <*> (switch $ long "promise-no-reent"     <> help "Promise no reentrancy is possible into the contract(s) being examined")
   <*> (option auto $ long "max-buf-size"    <> value 64 <> help "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)")
   <*> (option auto $ long "max-branch"      <> showDefault <> value 100 <> help "Max number of branches to explore when encountering a symbolic value. This is a form of branch width limitation per symbolic value")
-  <*> (optional $ option auto $ long "max-explore" <> help "Limit branching factor (i.e. branch width) and total branch depth of exploration (default: unlimited)")
+  <*> (optional $ option auto $ long "max-explore" <> help "Limit branching factor (i.e. branch width) and branch depth of exploration (default: unlimited)")
 
 data CommonExecOptions = CommonExecOptions
   { address       ::Maybe Addr
