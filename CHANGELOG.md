@@ -79,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for other elements of the system
 - We now use Options.Applicative and a rather different way of parsing CLI options.
   This should give us much better control over the CLI options and their parsing.
+- block.number can now be symbolic. This only affects library use of hevm
 
 ## [0.54.2] - 2024-12-12
 

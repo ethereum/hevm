@@ -144,7 +144,7 @@ instance JSON.FromJSON EVMToolTraceOutput
 data EVMToolEnv = EVMToolEnv
   { coinbase    :: Addr
   , timestamp   :: Expr EWord
-  , number      :: W256
+  , number      :: Expr EWord
   , gasLimit    :: Data.Word.Word64
   , baseFee     :: W256
   , maxCodeSize :: W256
@@ -158,7 +158,7 @@ data EVMToolEnv = EVMToolEnv
 instance JSON.ToJSON EVMToolEnv where
   toJSON b = JSON.object [ ("currentCoinBase"  , (JSON.toJSON b.coinbase))
                          , ("currentGasLimit"  , (JSON.toJSON ("0x" ++ showHex (into @Integer b.gasLimit) "")))
-                         , ("currentNumber"    , (JSON.toJSON b.number))
+                         , ("currentNumber"    , (JSON.toJSON number))
                          , ("currentTimestamp" , (JSON.toJSON tstamp))
                          , ("currentBaseFee"   , (JSON.toJSON b.baseFee))
                          , ("blockHashes"      , (JSON.toJSON b.blockHashes))
@@ -171,11 +171,15 @@ instance JSON.ToJSON EVMToolEnv where
                 tstamp = case (b.timestamp) of
                               Lit a -> a
                               _ -> internalError "Timestamp needs to be a Lit"
+                number :: W256
+                number = case (b.number) of
+                              Lit a -> a
+                              _ -> internalError "Timestamp needs to be a Lit"
 
 emptyEvmToolEnv :: EVMToolEnv
 emptyEvmToolEnv = EVMToolEnv { coinbase = 0
                              , timestamp = Lit 0
-                             , number     = 0
+                             , number     = Lit 0
                              , gasLimit   = 0xffffffffffffffff
                              , baseFee    = 0
                              , maxCodeSize= 0xffffffff
@@ -287,7 +291,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
       }
     evmEnv = EVMToolEnv { coinbase      = 0xff
                         , timestamp     = Lit 0x3e8
-                        , number        = 0x0
+                        , number        = Lit 0
                         , gasLimit      = unsafeInto gaslimitExec
                         , baseFee       = 0x0
                         , maxCodeSize   = 0xfffff
