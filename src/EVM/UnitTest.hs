@@ -51,7 +51,6 @@ data UnitTestOptions s = UnitTestOptions
   , maxIter     :: Maybe Integer
   , askSmtIters :: Integer
   , smtTimeout  :: Maybe Natural
-  , solver      :: Maybe Text
   , match       :: Text
   , dapp        :: DappInfo
   , testParams  :: TestVMParams
