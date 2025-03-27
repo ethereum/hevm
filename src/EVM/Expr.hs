@@ -634,7 +634,7 @@ readStorage' loc store = case readStorage loc store of
 -- test for an example where this happens. Note that decomposition solves this, though late in
 -- the simplification lifecycle (just before SMT generation, which can be too late)
 readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
-readStorage w st = go (simplify w) st
+readStorage w st = go (simplifyNoStructureSlots w) st
   where
     go :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
     go _ (GVar _) = internalError "Can't read from a GVar"
@@ -952,9 +952,12 @@ decomposeStorage = go
 -- | Simple recursive match based AST simplification
 -- Note: may not terminate!
 simplify :: Expr a -> Expr a
-simplify e = if (mapExpr go e == e)
-               then e
-               else simplify (mapExpr go (structureArraySlots e))
+simplify e = if (simplifyNoStructureSlots e == e) then e
+             else simplify (simplifyNoStructureSlots (structureArraySlots e))
+
+simplifyNoStructureSlots :: Expr a -> Expr a
+simplifyNoStructureSlots e = if (mapExpr go e == e) then e
+                             else simplifyNoStructureSlots (mapExpr go e)
   where
     go :: Expr a -> Expr a
 
@@ -1037,6 +1040,7 @@ simplify e = if (mapExpr go e == e)
       | otherwise = Lit 0
     go (EVM.Types.LT _ (Lit 0)) = Lit 0
     go (EVM.Types.LT a (Lit 1)) = iszero a
+    go (EVM.Types.LT (Lit 0) a) = iszero (Eq (Lit 0) a)
 
     -- normalize all comparisons in terms of LT
     go (EVM.Types.GT a b) = lt b a
@@ -1656,7 +1660,7 @@ constPropagate ps =
 
 -- Concretize & simplify Keccak expressions until fixed-point.
 concKeccakSimpExpr :: Expr a -> Expr a
-concKeccakSimpExpr orig = untilFixpoint ((mapExpr concKeccakOnePass) . simplify) orig
+concKeccakSimpExpr orig = untilFixpoint (simplifyNoStructureSlots . (mapExpr concKeccakOnePass)) (simplify orig)
 
 -- Only concretize Keccak in Props
 -- Needed because if it also simplified, we may not find some simplification errors, as
