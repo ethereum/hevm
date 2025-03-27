@@ -1037,6 +1037,7 @@ simplify e = if (mapExpr go e == e)
       | otherwise = Lit 0
     go (EVM.Types.LT _ (Lit 0)) = Lit 0
     go (EVM.Types.LT a (Lit 1)) = iszero a
+    go (EVM.Types.LT (Lit 0) a) = iszero (Eq (Lit 0) a)
 
     -- normalize all comparisons in terms of LT
     go (EVM.Types.GT a b) = lt b a
