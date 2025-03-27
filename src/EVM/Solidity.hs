@@ -399,8 +399,9 @@ functionAbi :: Text -> IO Method
 functionAbi f = do
   json <- solc Solidity ("contract ABI { function " <> f <> " public {}}")
   let (Contracts sol, _, _) = fromMaybe
-                                (internalError . T.unpack $ "unable to parse solc output:\n" <> json)
-                                (readStdJSON json)
+        (internalError . T.unpack $ "while trying to parse function signature `"
+          <> f <> "`, unable to parse solc output:\n" <> json)
+        (readStdJSON json)
   case Map.toList (fromJust (Map.lookup "hevm.sol:ABI" sol)).abiMap of
     [(_,b)] -> pure b
     _ -> internalError "unexpected abi format"

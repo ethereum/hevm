@@ -115,7 +115,7 @@ parseBlock :: (AsValue s, Show s) => s -> Maybe Block
 parseBlock j = do
   coinbase   <- LitAddr . readText <$> j ^? key "miner" % _String
   timestamp  <- Lit . readText <$> j ^? key "timestamp" % _String
-  number     <- readText <$> j ^? key "number" % _String
+  number     <- Lit . readText <$> j ^? key "number" % _String
   gasLimit   <- readText <$> j ^? key "gasLimit" % _String
   let
    baseFee = readText <$> j ^? key "baseFeePerGas" % _String

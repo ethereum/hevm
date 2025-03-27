@@ -814,7 +814,7 @@ data Env = Env
 data Block = Block
   { coinbase    :: Expr EAddr
   , timestamp   :: Expr EWord
-  , number      :: W256
+  , number      :: Expr EWord
   , prevRandao  :: W256
   , gaslimit    :: Word64
   , baseFee     :: W256
@@ -992,7 +992,7 @@ data VMOpts (t :: VMType) = VMOpts
   , origin :: Expr EAddr
   , gas :: Gas t
   , gaslimit :: Word64
-  , number :: W256
+  , number :: Expr EWord
   , timestamp :: Expr EWord
   , coinbase :: Expr EAddr
   , prevRandao :: W256

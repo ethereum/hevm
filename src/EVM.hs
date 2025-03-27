@@ -580,13 +580,21 @@ exec1 conf = do
               underrun
 
         OpBlockhash -> do
-          -- We adopt the fake block hash scheme of the VMTests,
-          -- so that blockhash(i) is the hash of i as decimal ASCII.
           stackOp1 g_blockhash $ \case
-            Lit i -> if i + 256 < vm.block.number || i >= vm.block.number
-                     then Lit 0
-                     else (into i :: Integer) & show & Char8.pack & keccak' & Lit
+            Lit i -> case vm.block.number of
+              Lit vmBlockNumber ->
+                if i + 256 < vmBlockNumber || i >= vmBlockNumber
+                -- blockhash is 0 if block is too old or too new as per EVM spec
+                then Lit 0
+                -- We adopt the fake block hash scheme of the VMTests,
+                -- so that blockhash(i) is the hash of i as decimal ASCII.
+                else fakeBlockHash i
+              -- For symbolic block numbers, we don't know if it's too old or too new,
+              -- so we return fake block hash
+              _ -> fakeBlockHash i
             i -> BlockHash i
+            where
+              fakeBlockHash i = (into i :: Integer) & show & Char8.pack & keccak' & Lit
 
         OpCoinbase ->
           limitStack 1 . burn g_base $
@@ -598,7 +606,7 @@ exec1 conf = do
 
         OpNumber ->
           limitStack 1 . burn g_base $
-            next >> push vm.block.number
+            next >> pushSym vm.block.number
 
         OpPrevRandao -> do
           limitStack 1 . burn g_base $
@@ -1789,7 +1797,7 @@ cheatActions = Map.fromList
   , action "roll(uint256)" $
       \sig input -> case decodeStaticArgs 0 1 input of
         [x] -> forceConcrete x "cannot roll to a symbolic block number" $ \block -> do
-          assign (#block % #number) block
+          assign (#block % #number) (Lit block)
           doStop
         _ -> vmError (BadCheatCode "roll(uint256) parameter decoding failed" sig)
 
