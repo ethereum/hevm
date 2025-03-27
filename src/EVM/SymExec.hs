@@ -240,6 +240,43 @@ abstractVM cd contractCode maybepre create = do
                 Just p -> [p vm]
   pure $ vm & over #constraints (<> precond)
 
+-- Creates symbolic VM with empty storage, not symbolic storage like loadSymVM
+loadEmptySymVM
+  :: ContractCode
+  -> Expr EWord
+  -> (Expr Buf, [Prop])
+  -> ST s (VM Symbolic s)
+loadEmptySymVM x callvalue cd =
+  (makeVm $ VMOpts
+    { contract = initialContract x
+    , otherContracts = []
+    , calldata = cd
+    , value = callvalue
+    , baseState = EmptyBase
+    , address = SymAddr "entrypoint"
+    , caller = SymAddr "caller"
+    , origin = SymAddr "origin"
+    , coinbase = SymAddr "coinbase"
+    , number = 0
+    , timestamp = Lit 0
+    , blockGaslimit = 0
+    , gasprice = 0
+    , prevRandao = 42069
+    , gas = ()
+    , gaslimit = 0xffffffffffffffff
+    , baseFee = 0
+    , priorityFee = 0
+    , maxCodeSize = 0xffffffff
+    , schedule = feeSchedule
+    , chainId = 1
+    , create = False
+    , txAccessList = mempty
+    , allowFFI = False
+    , freshAddresses = 0
+    , beaconRoot = 0
+    })
+
+-- Creates a symbolic VM that has symbolic storage, unlike loadEmptySymVM
 loadSymVM
   :: ContractCode
   -> Expr EWord
@@ -448,6 +485,20 @@ checkAssert
 checkAssert solvers errs c signature' concreteArgs opts =
   verifyContract solvers c signature' concreteArgs opts Nothing (Just $ checkAssertions errs)
 
+getExprEmptyStore
+  :: App m
+  => SolverGroup
+  -> ByteString
+  -> Maybe Sig
+  -> [String]
+  -> VeriOpts
+  -> m (Expr End)
+getExprEmptyStore solvers c signature' concreteArgs opts = do
+  calldata <- mkCalldata signature' concreteArgs
+  preState <- liftIO $ stToIO $ loadEmptySymVM (RuntimeCode (ConcreteRuntimeCode c)) (Lit 0) calldata
+  exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.maxIter opts.askSmtIters opts.loopHeuristic preState runExpr
+  if opts.simp then (pure $ Expr.simplify exprInter) else pure exprInter
+
 getExpr
   :: App m
   => SolverGroup
@@ -650,6 +701,7 @@ verify solvers opts preState maybepost = do
     when conf.debug $ putStrLn "   Simplifying expression"
     let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
     when conf.dumpExprs $ T.writeFile "simplified.expr" (formatExpr expr)
+    when conf.dumpExprs $ T.writeFile "simplified-conc.expr" (formatExpr $ Expr.simplify $ mapExpr Expr.concKeccakOnePass expr)
     let flattened = flattenExpr expr
     when conf.debug $ do
       printPartialIssues flattened ("the call " <> call)
