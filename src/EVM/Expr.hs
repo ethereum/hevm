@@ -634,7 +634,7 @@ readStorage' loc store = case readStorage loc store of
 -- test for an example where this happens. Note that decomposition solves this, though late in
 -- the simplification lifecycle (just before SMT generation, which can be too late)
 readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
-readStorage w st = go w st
+readStorage w st = go (simplifyNoStructureSlots w) st
   where
     go :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
     go _ (GVar _) = internalError "Can't read from a GVar"
