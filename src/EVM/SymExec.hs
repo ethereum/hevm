@@ -634,6 +634,7 @@ verify solvers opts preState maybepost = do
     when conf.debug $ putStrLn "   Simplifying expression"
     let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
     when conf.dumpExprs $ T.writeFile "simplified.expr" (formatExpr expr)
+    when conf.dumpExprs $ T.writeFile "simplified-conc.expr" (formatExpr $ Expr.simplify $ mapExpr Expr.concKeccakOnePass expr)
     let flattened = flattenExpr expr
     when conf.debug $ do
       printPartialIssues flattened ("the call " <> call)
