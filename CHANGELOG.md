@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow user to change the verbosity level via `--verb`. For the moment, this is only to
   print some warnings related to zero-address dereference and to print `hemv test`'s
   output in case of failure
+- Simple test cases for the CLI
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -77,6 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `hevm test`'s flag ` --verbose` is now `--verb`, which also increases verbosity
   for other elements of the system
 - Add `--arrays-exp` to cvc5 options.
+- We now use Options.Applicative and a rather different way of parsing CLI options.
+  This should give us much better control over the CLI options and their parsing.
 
 ## [0.54.2] - 2024-12-12
 

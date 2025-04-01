@@ -12,7 +12,7 @@ homepage:
 license:
   AGPL-3.0-only
 author:
-  dxo, Martin Lundfall, Mikael Brockman
+  dxo, Martin Lundfall, Mikael Brockman, Martin Blicha, Zoe Paraskevopoulou, Mate Soos
 maintainer:
   git@d-xo.org
 category:
@@ -89,6 +89,7 @@ common shared
 
 library
   import: shared
+  default-language: GHC2021
   exposed-modules:
     EVM,
     EVM.ABI,
@@ -190,6 +191,7 @@ library
 
 executable hevm
   import: shared
+  default-language: GHC2021
   hs-source-dirs:
     cli
   main-is:
@@ -203,21 +205,23 @@ executable hevm
     base,
     bytestring,
     data-dword,
-    directory,
+    directory                         >= 1.3.6 && < 1.4,
     filepath,
     hevm,
     optparse-generic,
+    optparse-applicative              >= 0.18.0.0 && < 0.20.0.0,
     text,
     optics-core,
-    githash,
+    githash                           >= 0.1.5 && < 0.2,
     witch,
     unliftio-core,
-    with-utf8,
+    split,
 
 --- Test Helpers ---
 
 common test-base
   import: shared
+  default-language: GHC2021
   hs-source-dirs:
     test
   other-modules:
@@ -254,6 +258,7 @@ common test-base
 
 library test-utils
   import: test-base
+  default-language: GHC2021
   exposed-modules:
     EVM.Test.Utils
     EVM.Test.Tracing
@@ -261,6 +266,7 @@ library test-utils
 
 common test-common
   import: test-base
+  default-language: GHC2021
   if flag(devel)
     ghc-options: -threaded -with-rtsopts=-N
   build-depends:
@@ -274,6 +280,7 @@ common test-common
 
 test-suite test
   import: test-common
+  default-language: GHC2021
   type:
     exitcode-stdio-1.0
   main-is:
@@ -291,6 +298,7 @@ test-suite test
 -- suite to make it easy to skip them when running nix-build
 test-suite rpc-tests
   import: test-common
+  default-language: GHC2021
   type:
     exitcode-stdio-1.0
   main-is:
@@ -298,15 +306,36 @@ test-suite rpc-tests
 
 test-suite ethereum-tests
   import: test-common
+  default-language: GHC2021
   type:
     exitcode-stdio-1.0
   main-is:
     BlockchainTests.hs
 
+test-suite cli-test
+  type:
+    exitcode-stdio-1.0
+  default-language: GHC2021
+  hs-source-dirs:
+    test
+  main-is:
+    clitest.hs
+  build-depends:
+    base,
+    hevm,
+    hspec,
+    process,
+    text,
+    bytestring,
+    filepath,
+    split,
+    here,
+
 --- Benchmarks ---
 
 benchmark bench
   import: shared
+  default-language: GHC2021
   type:
     exitcode-stdio-1.0
   main-is:
