@@ -27,5 +27,5 @@ CXXFLAGS="-fPIC"
 
 mkdir -p build
 cd build
-CXXFLAGS="$CXXFLAGS" cmake "${ARGS[@]}" ..
+CXXFLAGS="$CXXFLAGS" cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "${ARGS[@]}" ..
 cmake --build . && cmake --install .

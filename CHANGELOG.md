@@ -80,6 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `--arrays-exp` to cvc5 options.
 - We now use Options.Applicative and a rather different way of parsing CLI options.
   This should give us much better control over the CLI options and their parsing.
+- We now build with -DCMAKE_POLICY_VERSION_MINIMUM=3.5 libff, as cmake deprecated 3.5
 
 ## [0.54.2] - 2024-12-12
 
