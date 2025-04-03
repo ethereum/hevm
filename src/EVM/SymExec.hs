@@ -58,7 +58,7 @@ data LoopHeuristic
   | StackBased
   deriving (Eq, Show, Read, ParseField, ParseFields, ParseRecord, Generic)
 
-data ProofResult a b c d = Qed a | Cex b | Unknown c | Error d
+data ProofResult a b c d = Qed a | Cex b | Unknown String | Error d
   deriving (Show, Eq)
 type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End) String
 type EquivResult = ProofResult () (SMTCex) () String
@@ -88,7 +88,7 @@ groupIssues results = map (\g -> (into (length g), NE.head g)) grouped
   where
     getErr :: ProofResult a b c String -> String
     getErr (EVM.SymExec.Error k) = k
-    getErr (EVM.SymExec.Unknown _) = "SMT result timeout/unknown"
+    getErr (EVM.SymExec.Unknown s) = "SMT result timeout/unknown: " <> show s
     getErr _ = internalError "shouldn't happen"
     sorted = sort $ map getErr results
     grouped = NE.group sorted
@@ -800,7 +800,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
       case res of
         Sat x -> pure $ Cex x
         Unsat -> pure $ Qed ()
-        EVM.Solvers.Unknown _ -> pure $ EVM.SymExec.Unknown ()
+        EVM.Solvers.Unknown a -> pure $ EVM.SymExec.Unknown a
         EVM.Solvers.Error txt -> pure $ EVM.SymExec.Error txt
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
