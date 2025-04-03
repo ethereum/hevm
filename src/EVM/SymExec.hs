@@ -88,7 +88,7 @@ groupIssues results = map (\g -> (into (length g), NE.head g)) grouped
   where
     getErr :: ProofResult a b String -> String
     getErr (EVM.SymExec.Error k) = k
-    getErr (EVM.SymExec.Unknown (reason, _)) = "SMT result timeout/unknown: " <> reason
+    getErr (EVM.SymExec.Unknown (reason, _)) = "SMT solver says: " <> reason
     getErr _ = internalError "shouldn't happen"
     sorted = sort $ map getErr results
     grouped = NE.group sorted
