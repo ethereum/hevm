@@ -495,12 +495,12 @@ assert cFileOpts sOpts cExecOpts cOpts = do
     }
     (expr, res) <- verify solvers veriOpts preState (Just $ checkAssertions errCodes)
     case res of
-      [Qed _] -> do
+      [Qed] -> do
         liftIO $ putStrLn "\nQED: No reachable property violations discovered\n"
         showExtras solvers sOpts calldata expr
       _ -> do
         let cexs = snd <$> mapMaybe getCex res
-            smtUnknowns = mapMaybe getUnknown res
+            smtUnknowns = snd <$> mapMaybe getUnknown res
             counterexamples
               | null cexs = []
               | otherwise =
@@ -528,7 +528,7 @@ showExtras solvers sOpts calldata expr = do
   when sOpts.showReachableTree $ do
     reached <- reachable solvers expr
     liftIO $ do
-      putStrLn "=== Reachable Expression ===\n"
+      putStrLn "=== Potentially Reachable Expression ===\n"
       T.putStrLn (formatExpr . snd $ reached)
       putStrLn ""
   when sOpts.getModels $ do

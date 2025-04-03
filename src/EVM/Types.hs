@@ -4,6 +4,8 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE KindSignatures #-}
 
 {-# OPTIONS_GHC -Wno-inline-rule-shadowing #-}
 
@@ -15,7 +17,6 @@ import Control.Monad (mzero)
 import Control.Monad.ST (ST)
 import Control.Monad.State.Strict (StateT)
 import Crypto.Hash (hash, Keccak_256, Digest)
-import Data.Aeson
 import Data.Aeson qualified as JSON
 import Data.Aeson.Types qualified as JSON
 import Data.Bifunctor (first)
@@ -53,6 +54,7 @@ import Numeric (readHex, showHex)
 import Options.Generic
 import Optics.TH
 import EVM.FeeSchedule (FeeSchedule (..))
+import Data.Kind (Type)
 
 import Text.Regex.TDFA qualified as Regex
 import Text.Read qualified
@@ -616,7 +618,7 @@ data RunAll s where
   PleaseRunAll    :: Expr EWord -> [W256] -> (W256 -> EVM Symbolic s ()) -> RunAll s
 
 -- | The possible return values of a SMT query
-data BranchCondition = Case Bool | Unknown
+data BranchCondition = Case Bool | UnknownBranch
   deriving Show
 
 instance Show (Query t s) where
@@ -1118,8 +1120,114 @@ data GenericOp a
   deriving (Show, Eq, Ord, Functor)
 
 
--- Function Selectors ------------------------------------------------------------------------------
+-- | A model for a buffer, either in it's compressed form (for storing parsed
+-- models from a solver), or as a bytestring (for presentation to users)
+data BufModel
+  = Comp CompressedBuf
+  | Flat ByteString
+  deriving (Eq)
+instance Show BufModel where
+  show (Comp c) = "Comp " <> show c
+  show (Flat b) = "Flat 0x" <> bsToHex b
 
+-- | This representation lets us store buffers of arbitrary length without
+-- exhausting the available memory, it closely matches the format used by
+-- smt-lib when returning models for arrays
+data CompressedBuf
+  = Base { byte :: Word8, length :: W256}
+  | Write { byte :: Word8, idx :: W256, next :: CompressedBuf }
+  deriving (Eq, Show)
+
+-- | a final post shrinking cex, buffers here are all represented as concrete bytestrings
+data SMTCex = SMTCex
+  { vars :: Map (Expr EWord) W256
+  , addrs :: Map (Expr EAddr) Addr
+  , buffers :: Map (Expr Buf) BufModel
+  , store :: Map (Expr EAddr) (Map W256 W256)
+  , blockContext :: Map (Expr EWord) W256
+  , txContext :: Map (Expr EWord) W256
+  }
+  deriving (Eq, Show)
+
+instance Semigroup SMTCex where
+  a <> b = SMTCex
+    { vars = a.vars <> b.vars
+    , addrs = a.addrs <> b.addrs
+    , buffers = a.buffers <> b.buffers
+    , store = a.store <> b.store
+    , blockContext = a.blockContext <> b.blockContext
+    , txContext = a.txContext <> b.txContext
+    }
+
+instance Monoid SMTCex where
+  mempty = SMTCex
+    { vars = mempty
+    , addrs = mempty
+    , buffers = mempty
+    , store = mempty
+    , blockContext = mempty
+    , txContext = mempty
+    }
+
+class GetUnknownStr a where
+    getUnknownStr :: a -> String
+
+instance GetUnknownStr String where
+    getUnknownStr = id
+
+instance GetUnknownStr (String, Expr End) where
+    getUnknownStr (s, _) = s
+
+data ProofResult a (b :: Type) where
+    Qed :: ProofResult a b
+    Cex :: a -> ProofResult a b
+    Unknown :: GetUnknownStr b => b -> ProofResult a b
+    Error :: String -> ProofResult a b
+
+instance (Show a, Show b) => Show (ProofResult a b) where
+  show Qed = "Qed"
+  show (Cex c) = "Cex " <> show c
+  show (Unknown u) = "Unknown " <> show u
+  show (Error e) = "Error: " <> e
+
+instance (Eq a, Eq b) => Eq (ProofResult a b) where
+  x == y = case (x, y) of
+    (Unknown u1, Unknown u2) -> u1 == u2
+    (Error a, Error b)       -> a == b
+    (Cex a, Cex b)           -> a == b
+    (Qed, Qed)               -> True
+    _                        -> False
+
+type VerifyResult = ProofResult (Expr End, SMTCex) (String, Expr End)
+type EquivResult = ProofResult (SMTCex) String
+type SMT2Result = ProofResult (SMTCex) String
+
+getUnknown :: ProofResult a b -> Maybe b
+getUnknown (Unknown a) = Just a
+getUnknown _ = Nothing
+
+isUnknown :: ProofResult a b -> Bool
+isUnknown (Unknown _) = True
+isUnknown _ = False
+
+isError :: ProofResult a b -> Bool
+isError (Error _) = True
+isError _ = False
+
+getResError :: ProofResult a b -> Maybe String
+getResError (Error e) = Just e
+getResError _ = Nothing
+
+isCex :: ProofResult a b -> Bool
+isCex (Cex _) = True
+isCex _ = False
+
+isQed :: ProofResult a b -> Bool
+isQed Qed = True
+isQed _ = False
+
+
+-- Function Selectors ------------------------------------------------------------------------------
 
 -- | https://docs.soliditylang.org/en/v0.8.19/abi-spec.html#function-selector
 newtype FunctionSelector = FunctionSelector { unFunctionSelector :: Word32 }
@@ -1172,22 +1280,22 @@ instance JSON.ToJSON W256 where
       cutshow = drop 2 $ show x
       pad = replicate (64 - length (cutshow)) '0'
 
-instance FromJSON W256 where
+instance JSON.FromJSON W256 where
   parseJSON v = do
-    s <- T.unpack <$> parseJSON v
+    s <- T.unpack <$> JSON.parseJSON v
     case reads s of
       [(x, "")]  -> pure x
       _          -> fail $ "invalid hex word (" ++ s ++ ")"
 
-instance FromJSONKey W256 where
-  fromJSONKey = FromJSONKeyTextParser $ \s ->
+instance JSON.FromJSONKey W256 where
+  fromJSONKey = JSON.FromJSONKeyTextParser $ \s ->
     case reads (T.unpack s) of
       [(x, "")]  -> pure x
       _          -> fail $ "invalid word (" ++ T.unpack s ++ ")"
 
-wordField :: JSON.Object -> Key -> JSON.Parser W256
+wordField :: JSON.Object -> JSON.Key -> JSON.Parser W256
 wordField x f = ((readNull 0) . T.unpack)
-                  <$> (x .: f)
+                  <$> (x JSON..: f)
 
 instance ParseField W256
 instance ParseFields W256
@@ -1214,17 +1322,17 @@ instance Show W64 where
 instance JSON.ToJSON W64 where
   toJSON x = JSON.String  $ T.pack $ show x
 
-instance FromJSON W64 where
+instance JSON.FromJSON W64 where
   parseJSON v = do
-    s <- T.unpack <$> parseJSON v
+    s <- T.unpack <$> JSON.parseJSON v
     case reads s of
       [(x, "")]  -> pure x
       _          -> fail $ "invalid hex word (" ++ s ++ ")"
 
 
-word64Field :: JSON.Object -> Key -> JSON.Parser Word64
+word64Field :: JSON.Object -> JSON.Key -> JSON.Parser Word64
 word64Field x f = ((readNull 0) . T.unpack)
-                  <$> (x .: f)
+                  <$> (x JSON..: f)
 
 
 -- Addresses ---------------------------------------------------------------------------------------
@@ -1256,9 +1364,9 @@ toChecksumAddress addr = zipWith transform nibbles addr
 instance JSON.ToJSON Addr where
   toJSON = JSON.String . T.pack . show
 
-instance FromJSON Addr where
+instance JSON.FromJSON Addr where
   parseJSON v = do
-    s <- T.unpack <$> parseJSON v
+    s <- T.unpack <$> JSON.parseJSON v
     case reads s of
       [(x, "")] -> pure x
       _         -> fail $ "invalid address (" ++ s ++ ")"
@@ -1271,17 +1379,17 @@ instance JSON.ToJSONKey Addr where
         where
           hex = show addr
 
-instance FromJSONKey Addr where
-  fromJSONKey = FromJSONKeyTextParser $ \s ->
+instance JSON.FromJSONKey Addr where
+  fromJSONKey = JSON.FromJSONKeyTextParser $ \s ->
     case reads (T.unpack s) of
       [(x, "")] -> pure x
       _         -> fail $ "invalid word (" ++ T.unpack s ++ ")"
 
-addrField :: JSON.Object -> Key -> JSON.Parser Addr
-addrField x f = (read . T.unpack) <$> (x .: f)
+addrField :: JSON.Object -> JSON.Key -> JSON.Parser Addr
+addrField x f = (read . T.unpack) <$> (x JSON..: f)
 
-addrFieldMaybe :: JSON.Object -> Key -> JSON.Parser (Maybe Addr)
-addrFieldMaybe x f = (Text.Read.readMaybe . T.unpack) <$> (x .: f)
+addrFieldMaybe :: JSON.Object -> JSON.Key -> JSON.Parser (Maybe Addr)
+addrFieldMaybe x f = (Text.Read.readMaybe . T.unpack) <$> (x JSON..: f)
 
 instance ParseField Addr
 instance ParseFields Addr
