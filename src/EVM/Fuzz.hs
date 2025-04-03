@@ -15,7 +15,7 @@ import Data.Word (Word8)
 
 import EVM.Expr qualified as Expr
 import EVM.Expr (bytesToW256)
-import EVM.SMT qualified as SMT (BufModel(..), SMTCex(..))
+import EVM.Types qualified as SMT
 import EVM.Traversals
 import EVM.Types (Prop(..), W256, Expr(..), EType(..), internalError, keccak')
 

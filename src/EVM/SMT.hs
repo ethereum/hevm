@@ -77,56 +77,6 @@ instance Monoid CexVars where
       , txContext = mempty
       }
 
--- | A model for a buffer, either in it's compressed form (for storing parsed
--- models from a solver), or as a bytestring (for presentation to users)
-data BufModel
-  = Comp CompressedBuf
-  | Flat ByteString
-  deriving (Eq)
-instance Show BufModel where
-  show (Comp c) = "Comp " <> show c
-  show (Flat b) = "Flat 0x" <> bsToHex b
-
--- | This representation lets us store buffers of arbitrary length without
--- exhausting the available memory, it closely matches the format used by
--- smt-lib when returning models for arrays
-data CompressedBuf
-  = Base { byte :: Word8, length :: W256}
-  | Write { byte :: Word8, idx :: W256, next :: CompressedBuf }
-  deriving (Eq, Show)
-
-
--- | a final post shrinking cex, buffers here are all represented as concrete bytestrings
-data SMTCex = SMTCex
-  { vars :: Map (Expr EWord) W256
-  , addrs :: Map (Expr EAddr) Addr
-  , buffers :: Map (Expr Buf) BufModel
-  , store :: Map (Expr EAddr) (Map W256 W256)
-  , blockContext :: Map (Expr EWord) W256
-  , txContext :: Map (Expr EWord) W256
-  }
-  deriving (Eq, Show)
-
-instance Semigroup SMTCex where
-  a <> b = SMTCex
-    { vars = a.vars <> b.vars
-    , addrs = a.addrs <> b.addrs
-    , buffers = a.buffers <> b.buffers
-    , store = a.store <> b.store
-    , blockContext = a.blockContext <> b.blockContext
-    , txContext = a.txContext <> b.txContext
-    }
-
-instance Monoid SMTCex where
-  mempty = SMTCex
-    { vars = mempty
-    , addrs = mempty
-    , buffers = mempty
-    , store = mempty
-    , blockContext = mempty
-    , txContext = mempty
-    }
-
 flattenBufs :: SMTCex -> Maybe SMTCex
 flattenBufs cex = do
   bs <- mapM collapse cex.buffers
