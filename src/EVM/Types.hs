@@ -588,6 +588,7 @@ data PartialExec
   | MaxIterationsReached  { pc :: Int, addr :: Expr EAddr }
   | JumpIntoSymbolicCode  { pc :: Int, jumpDst :: Int }
   | CheatCodeMissing      { pc :: Int, selector :: FunctionSelector }
+  | TooManyBraches        { pc :: Int}
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
@@ -680,6 +681,7 @@ data VM (t :: VMType) s = VM
   , labels         :: Map Addr Text
   , osEnv          :: Map String String
   , freshVar       :: Int
+  , numExplored    :: Int
   -- ^ used to generate fresh symbolic variable names for overapproximations
   --   during symbolic execution. See e.g. OpStaticcall
   }
@@ -870,8 +872,8 @@ class VMOps (t :: VMType) where
   whenSymbolicElse :: EVM t s a -> EVM t s a -> EVM t s a
 
   partial :: PartialExec -> EVM t s ()
-  branch :: Expr EWord -> (Bool -> EVM t s ()) -> EVM t s ()
-  manySolutions :: Expr EWord -> Int -> (Maybe W256 -> EVM t s ()) -> EVM t s ()
+  branch :: Maybe Int -> Expr EWord -> (Bool -> EVM t s ()) -> EVM t s ()
+  manySolutions :: Maybe Int -> Expr EWord -> Int -> (Maybe W256 -> EVM t s ()) -> EVM t s ()
 
 -- Bytecode Representations ------------------------------------------------------------------------
 

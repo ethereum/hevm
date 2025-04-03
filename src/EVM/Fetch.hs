@@ -263,7 +263,10 @@ getSolutions solvers symExprPreSimp numBytes pathconditions = do
       collectSolutions :: Expr EWord -> Prop -> Config -> IO (Maybe [W256])
       collectSolutions symExpr conds conf = do
         let smt2 = assertProps conf [(PEq (Var "multiQueryVar") symExpr) .&& conds]
-        checkMulti solvers smt2 $ MultiSol { maxSols = conf.maxBranch , numBytes = numBytes , var = "multiQueryVar" }
+        let maxNum = case conf.maxExplore of
+                        Just x -> Prelude.min x conf.maxBranch
+                        Nothing -> conf.maxBranch
+        checkMulti solvers smt2 $ MultiSol { maxSols = maxNum , numBytes = numBytes , var = "multiQueryVar" }
 
 -- | Checks which branches are satisfiable, checking the pathconditions for consistency
 -- if the third argument is true.
