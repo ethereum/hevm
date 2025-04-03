@@ -499,7 +499,7 @@ assert cFileOpts sOpts cExecOpts cOpts = do
         showExtras solvers sOpts calldata expr
       _ -> do
         let cexs = snd <$> mapMaybe getCex res
-            smtUnknowns = mapMaybe getUnknown res
+            smtUnknowns = mapMaybe snd $ mapMaybe getUnknown res
             counterexamples
               | null cexs = []
               | otherwise =

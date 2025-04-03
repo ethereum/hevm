@@ -58,35 +58,35 @@ data LoopHeuristic
   | StackBased
   deriving (Eq, Show, Read, ParseField, ParseFields, ParseRecord, Generic)
 
-data ProofResult a b c d = Qed a | Cex b | Unknown String | Error d
+data ProofResult a b d = Qed a | Cex b | Unknown (String, Maybe (Expr End)) | Error d
   deriving (Show, Eq)
-type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End) String
-type EquivResult = ProofResult () (SMTCex) () String
+type VerifyResult = ProofResult () (Expr End, SMTCex) String
+type EquivResult = ProofResult () (SMTCex) String
 
-isUnknown :: ProofResult a b c d -> Bool
+isUnknown :: ProofResult a b d -> Bool
 isUnknown (EVM.SymExec.Unknown _) = True
 isUnknown _ = False
 
-isError :: ProofResult a b c d -> Bool
+isError :: ProofResult a b d -> Bool
 isError (EVM.SymExec.Error _) = True
 isError _ = False
 
-getError :: ProofResult a b c String -> Maybe String
+getError :: ProofResult a b String -> Maybe String
 getError (EVM.SymExec.Error e) = Just e
 getError _ = Nothing
 
-isCex :: ProofResult a b c d -> Bool
+isCex :: ProofResult a b d -> Bool
 isCex (Cex _) = True
 isCex _ = False
 
-isQed :: ProofResult a b c d -> Bool
+isQed :: ProofResult a b d -> Bool
 isQed (Qed _) = True
 isQed _ = False
 
-groupIssues :: [ProofResult a b c String] -> [(Integer, String)]
+groupIssues :: [ProofResult a b String] -> [(Integer, String)]
 groupIssues results = map (\g -> (into (length g), NE.head g)) grouped
   where
-    getErr :: ProofResult a b c String -> String
+    getErr :: ProofResult a b String -> String
     getErr (EVM.SymExec.Error k) = k
     getErr (EVM.SymExec.Unknown s) = "SMT result timeout/unknown: " <> show s
     getErr _ = internalError "shouldn't happen"
@@ -671,7 +671,7 @@ verify solvers opts preState maybepost = do
     toVRes :: (CheckSatResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
       Sat model -> Cex (leaf, expandCex preState model)
-      EVM.Solvers.Unknown _ -> EVM.SymExec.Unknown leaf
+      EVM.Solvers.Unknown reason -> EVM.SymExec.Unknown (reason, Just leaf)
       EVM.Solvers.Error e -> EVM.SymExec.Error e
       Unsat -> Qed ()
 
@@ -800,7 +800,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
       case res of
         Sat x -> pure $ Cex x
         Unsat -> pure $ Qed ()
-        EVM.Solvers.Unknown a -> pure $ EVM.SymExec.Unknown a
+        EVM.Solvers.Unknown reason -> pure $ EVM.SymExec.Unknown (reason, Nothing)
         EVM.Solvers.Error txt -> pure $ EVM.SymExec.Error txt
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
@@ -1135,10 +1135,10 @@ subStores model b = Map.foldlWithKey subStore b model
                else v
           e -> e
 
-getCex :: ProofResult a b c d -> Maybe b
+getCex :: ProofResult a b d -> Maybe b
 getCex (Cex c) = Just c
 getCex _ = Nothing
 
-getUnknown :: ProofResult a b c d-> Maybe c
-getUnknown (EVM.SymExec.Unknown c) = Just c
+getUnknown :: ProofResult a b d-> Maybe (String, Maybe (Expr End))
+getUnknown (EVM.SymExec.Unknown a) = Just a
 getUnknown _ = Nothing

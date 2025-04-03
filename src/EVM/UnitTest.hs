@@ -259,7 +259,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     liftIO $ printWarnings ends results t
     pure (not (any isCex results), not (warnings || unexpectedAllRevert))
 
-printWarnings :: [Expr 'End] -> [ProofResult a b c String] -> String -> IO ()
+printWarnings :: [Expr 'End] -> [ProofResult a b String] -> String -> IO ()
 printWarnings e results testName = do
   when (any isUnknown results || any isError results || any Expr.isPartial e) $ do
     putStrLn $ "   \x1b[33m[WARNING]\x1b[0m hevm was only able to partially explore " <> testName <> " due to: ";
