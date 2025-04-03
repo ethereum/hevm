@@ -87,7 +87,6 @@ data CommonOptions = CommonOptions
   , solverThreads ::Natural
   , smttimeout    ::Natural
   , smtdebug      ::Bool
-  , smtoutput     ::Bool
   , numSolvers    ::Maybe Natural
   , numCexFuzz    ::Integer
   , maxIterations ::Integer
@@ -113,7 +112,6 @@ commonOptions = CommonOptions
   <*> (option auto $ long "solver-threads"  <> showDefault <> value 1 <> help "Number of threads for each solver instance. Only respected for Z3")
   <*> (option auto $ long "smttimeout"      <> value 300 <> help "Timeout given to SMT solver in seconds")
   <*> (switch $ long "smtdebug"             <> help "Print smt queries sent to the solver")
-  <*> (switch $ long "smtoutput"            <> help "Print verbose smt output")
   <*> (optional $ option auto $ long "num-solvers" <> help "Number of solver instances to use (default: number of cpu cores)")
   <*> (option auto $ long "num-cex-fuzz"    <> showDefault <> value 3 <> help "Number of fuzzing tries to do to generate a counterexample")
   <*> (option auto $ long "max-iterations"  <> showDefault <> value 5 <> help "Number of times we may revisit a particular branching point. For no bound, set -1")
