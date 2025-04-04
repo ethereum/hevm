@@ -66,17 +66,15 @@ groupIssues results = map (\g -> (into (length g), NE.head g)) grouped
     getIssue (Error k) = Just k
     getIssue (Unknown reason) = Just $ "SMT solver says: " <> getUnknownStr reason
     getIssue _ = Nothing
-    sorted = sort $ mapMaybe getIssue results
-    grouped = NE.group sorted
+    grouped = NE.group $ sort $ mapMaybe getIssue results
 
 groupPartials :: [Expr End] -> [(Integer, String)]
 groupPartials e = map (\g -> (into (length g), NE.head g)) grouped
   where
-    getIssue :: Expr End -> Maybe String
-    getIssue (Partial _ _ reason) = Just $ T.unpack $ formatPartialShort reason
-    getIssue _ = Nothing
-    sorted = sort $ mapMaybe getIssue e
-    grouped = NE.group sorted
+    getPartial :: Expr End -> Maybe String
+    getPartial (Partial _ _ reason) = Just $ T.unpack $ formatPartialShort reason
+    getPartial _ = Nothing
+    grouped = NE.group $ sort $ mapMaybe getPartial e
 
 data VeriOpts = VeriOpts
   { simp :: Bool
