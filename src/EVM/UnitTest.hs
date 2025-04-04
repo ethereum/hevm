@@ -4,7 +4,6 @@ module EVM.UnitTest where
 
 import EVM
 import EVM.ABI
-import EVM.SMT
 import EVM.Solvers
 import EVM.Dapp
 import EVM.Effects
@@ -14,7 +13,7 @@ import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, isCex, extractCex, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, isUnknown, isError, groupIssues, groupPartials, ProofResult(..))
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, extractCex, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, groupIssues, groupPartials)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
@@ -259,7 +258,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     liftIO $ printWarnings ends results t
     pure (not (any isCex results), not (warnings || unexpectedAllRevert))
 
-printWarnings :: [Expr 'End] -> [ProofResult a b c String] -> String -> IO ()
+printWarnings :: GetUnknownStr b => [Expr 'End] -> [ProofResult a b] -> String -> IO ()
 printWarnings e results testName = do
   when (any isUnknown results || any isError results || any Expr.isPartial e) $ do
     putStrLn $ "   \x1b[33m[WARNING]\x1b[0m hevm was only able to partially explore " <> testName <> " due to: ";
