@@ -265,13 +265,13 @@ getModel :: SolverInstance -> CexVars -> IO SMTCex
 getModel inst cexvars = do
   -- get an initial version of the model from the solver
   initialModel <- getRaw
-  -- get concrete values for each buffers max read index
-  hints <- capHints <$> queryMaxReads (getValue inst) cexvars.buffers
   -- check the sizes of buffer models and shrink if needed
   if bufsUsable initialModel
-  then do
-    pure (mkConcrete initialModel)
-  else mkConcrete . snd <$> runStateT (shrinkModel hints) initialModel
+  then pure (mkConcrete initialModel)
+  else do
+    -- get concrete values for each buffers max read index
+    hints <- capHints <$> queryMaxReads (getValue inst) cexvars.buffers
+    mkConcrete . snd <$> runStateT (shrinkModel hints) initialModel
   where
     getRaw :: IO SMTCex
     getRaw = do
