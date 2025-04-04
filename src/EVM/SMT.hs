@@ -1149,9 +1149,7 @@ getBufs getVal bufs = foldM getBuf mempty bufs
                 :| [SortSymbol (IdIndexed "BitVec" (IxNumeral "8" :| []))]
               )
             )) ((TermSpecConstant val :| [])))
-            -> case val of
-                 SCHexadecimal "00" -> Base 0 0
-                 v -> Base (parseW8 v) len
+            -> Base (parseW8 val) len
 
           -- writing a byte over some array
           (TermApplication
