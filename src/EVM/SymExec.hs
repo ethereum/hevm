@@ -59,23 +59,23 @@ data LoopHeuristic
   | StackBased
   deriving (Eq, Show, Read, ParseField, ParseFields, ParseRecord, Generic)
 
-groupIssues :: forall a b . GetUnknown b => [ProofResult a b] -> [(Integer, String)]
+groupIssues :: forall a b . GetUnknownStr b => [ProofResult a b] -> [(Integer, String)]
 groupIssues results = map (\g -> (into (length g), NE.head g)) grouped
   where
-    getErr :: ProofResult a b -> String
-    getErr (Error k) = k
-    getErr (Unknown reason) = "SMT solver says: " <> getUnknown reason
-    getErr _ = internalError "shouldn't happen"
-    sorted = sort $ map getErr results
+    getIssue :: ProofResult a b -> Maybe String
+    getIssue (Error k) = Just k
+    getIssue (Unknown reason) = Just $ "SMT solver says: " <> getUnknownStr reason
+    getIssue _ = Nothing
+    sorted = sort $ mapMaybe getIssue results
     grouped = NE.group sorted
 
 groupPartials :: [Expr End] -> [(Integer, String)]
 groupPartials e = map (\g -> (into (length g), NE.head g)) grouped
   where
-    getErr :: Expr End -> String
-    getErr (Partial _ _ reason) = T.unpack $ formatPartialShort reason
-    getErr _ = internalError "shouldn't happen"
-    sorted = sort $ map getErr (filter isPartial e)
+    getIssue :: Expr End -> Maybe String
+    getIssue (Partial _ _ reason) = Just $ T.unpack $ formatPartialShort reason
+    getIssue _ = Nothing
+    sorted = sort $ mapMaybe getIssue e
     grouped = NE.group sorted
 
 data VeriOpts = VeriOpts
@@ -550,9 +550,11 @@ reachable solvers e = do
       leaf -> do
         (res, smt2) <- checkSatWithProps solvers pcs
         case res of
-          Cex _ -> pure ([getNonError smt2], Just leaf)
           Qed -> pure ([getNonError smt2], Nothing)
-          r -> internalError $ "Invalid solver result: " <> show r
+          Cex _ -> pure ([getNonError smt2], Just leaf)
+          -- if we get an error, we don't know if the leaf is reachable or not, so
+          -- we assume it could be reachable
+          _ -> pure ([], Just leaf)
 
 -- | Extract constraints stored in Expr End nodes
 extractProps :: Expr End -> [Prop]
@@ -1109,7 +1111,3 @@ subStores model b = Map.foldlWithKey subStore b model
 getCex :: ProofResult a b -> Maybe a
 getCex (Cex c) = Just c
 getCex _ = Nothing
-
-getFullUnknown :: ProofResult a b -> Maybe b
-getFullUnknown (Unknown a) = Just a
-getFullUnknown _ = Nothing

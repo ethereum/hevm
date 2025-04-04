@@ -1157,33 +1157,42 @@ instance Monoid SMTCex where
     , txContext = mempty
     }
 
-class GetUnknown a where
-    getUnknown :: a -> String
+class GetUnknownStr a where
+    getUnknownStr :: a -> String
 
-instance GetUnknown String where
-    getUnknown = id
+instance GetUnknownStr String where
+    getUnknownStr = id
 
-instance GetUnknown (String, Expr End) where
-    getUnknown (s, _) = s
+instance GetUnknownStr (String, Expr End) where
+    getUnknownStr (s, _) = s
 
 data ProofResult a (b :: Type) where
     Qed :: ProofResult a b
     Cex :: a -> ProofResult a b
-    Unknown :: GetUnknown b => b -> ProofResult a b
+    Unknown :: GetUnknownStr b => b -> ProofResult a b
     Error :: String -> ProofResult a b
 
-instance (Show b, Show c) => Show (ProofResult b c) where
+instance (Show a, Show b) => Show (ProofResult a b) where
   show Qed = "Qed"
-  show (Cex b) = "Cex " <> show b
-  show (Unknown c) = "Unknown " <> getUnknown c
-  show (Error s) = "Error: " <> s
+  show (Cex c) = "Cex " <> show c
+  show (Unknown u) = "Unknown " <> show u
+  show (Error e) = "Error: " <> e
 
+instance (Eq a, Eq b) => Eq (ProofResult a b) where
+  x == y = case (x, y) of
+    (Unknown u1, Unknown u2) -> u1 == u2
+    (Error a, Error b)       -> a == b
+    (Cex a, Cex b)           -> a == b
+    (Qed, Qed)               -> True
+    _                        -> False
 
--- data ProofResult a b c = Qed a | Cex b | Unknown c | Error String
---   deriving (Show, Eq)
 type VerifyResult = ProofResult (Expr End, SMTCex) (String, Expr End)
 type EquivResult = ProofResult (SMTCex) String
 type SMT2Result = ProofResult (SMTCex) String
+
+getUnknown :: ProofResult a b -> Maybe b
+getUnknown (Unknown a) = Just a
+getUnknown _ = Nothing
 
 isUnknown :: ProofResult a b -> Bool
 isUnknown (Unknown _) = True
