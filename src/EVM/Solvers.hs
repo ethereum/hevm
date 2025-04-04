@@ -321,7 +321,10 @@ getModel inst cexvars = do
           put model
         "unsat" -> do
           liftIO $ checkCommand inst "(pop 1)"
-          shrinkBuf buf (if hint == 0 then hint + 1 else hint * 2)
+          let nextHint = if hint == 0 then 1 else hint * 2
+          if nextHint < hint
+            then pure () -- overflow
+            else shrinkBuf buf nextHint
         e -> internalError $ "Unexpected solver output: " <> (T.unpack e)
 
     -- Collapses the abstract description of a models buffers down to a bytestring
