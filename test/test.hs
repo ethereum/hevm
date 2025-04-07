@@ -1528,7 +1528,7 @@ tests = testGroup "hevm"
             [i|
             contract C {
                 function checkval(uint256 a, uint256 b, uint256 c) public {
-                  if (a ==b) {
+                  if (a == b) {
                     if (b == c) {
                       assert(false);
                     }
