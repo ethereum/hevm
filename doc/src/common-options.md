@@ -61,6 +61,6 @@ which may be too many. This option limits the branching factor in these cases.
 Limits the branching factor and branching depth of symbolic exploration. This
 is a heuristic way to prevent the exploration from running for too long. Useful
 in scenarios where you use e.g. both symbolic execution and fuzzing, and don't
-want the symbolic execution to run for too long. It will often read to WEARNING-s
+want the symbolic execution to run for too long. It will often read to WARNING-s
 related to `Too many branches at program counter`. This option automatically
 upper-limits the Branch Limit as well.
