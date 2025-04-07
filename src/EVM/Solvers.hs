@@ -365,6 +365,7 @@ solverArgs solver threads timeout = case solver of
     , "--interactive"
     , "--incremental"
     , "--tlimit-per=" <> mkTimeout timeout
+    , "--arrays-exp"
     ]
   Custom _ -> []
 
