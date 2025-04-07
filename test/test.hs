@@ -4222,6 +4222,27 @@ tests = testGroup "hevm"
       assertEqualM "must not duplicate" simp (nubOrd simp)
       assertEqualM "We must be able to remove all duplicates" (length $ nubOrd simp) (length $ List.nub simp)
   ]
+  , testGroup "calling-solvers"
+  [
+    testCase "correct-model-for-empty-buffer" $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 0}}) $ do
+      withDefaultSolver $ \s -> do
+        let props = [(PEq (BufLength (AbstractBuf "b")) (Lit 0x0))]
+        (res, _) <- checkSatWithProps s props
+        cex :: SMTCex <- case res of
+          Sat c -> pure c
+          _ -> liftIO $ assertFailure "Must be satisfiable!"
+        let value = subModel cex (AbstractBuf "b")
+        assertEqualM "Buffer must be empty" (ConcreteBuf "") value
+    , testCase "correct-model-for-non-empty-buffer-of-all-zeroes" $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 0}}) $ do
+      withDefaultSolver $ \s -> do
+        let props = [(PAnd (PEq (ReadByte (Lit 0x0) (AbstractBuf "b")) (LitByte 0x0)) (PEq (BufLength (AbstractBuf "b")) (Lit 0x1)))]
+        (res, _) <- checkSatWithProps s props
+        cex :: SMTCex <- case res of
+          Sat c -> pure c
+          _ -> liftIO $ assertFailure "Must be satisfiable!"
+        let value = subModel cex (AbstractBuf "b")
+        assertEqualM "Buffer must have size 1 and contain zero byte" (ConcreteBuf "\0") value
+  ]
   , testGroup "equivalence-checking"
     [
       test "eq-simple-diff" $ do
