@@ -56,7 +56,7 @@ encountered. For example, if a JUMP instruction is called with a symbolic
 expression, the system will explore all possible valid jump destinations,
 which may be too many. This option limits the branching factor in these cases.
 
-## Maximum Exploration Limt, ``--max-explore``
+## Maximum Exploration Limit, ``--max-explore``
 
 Limits the branching factor and branching depth of symbolic exploration. This
 is a heuristic way to prevent the exploration from running for too long. Useful
