@@ -4296,7 +4296,7 @@ tests = testGroup "hevm"
         let props = [(PEq (BufLength (AbstractBuf "b")) (Lit 0x0))]
         (res, _) <- checkSatWithProps s props
         cex :: SMTCex <- case res of
-          Sat c -> pure c
+          Cex c -> pure c
           _ -> liftIO $ assertFailure "Must be satisfiable!"
         let value = subModel cex (AbstractBuf "b")
         assertEqualM "Buffer must be empty" (ConcreteBuf "") value
@@ -4305,7 +4305,7 @@ tests = testGroup "hevm"
         let props = [(PAnd (PEq (ReadByte (Lit 0x0) (AbstractBuf "b")) (LitByte 0x0)) (PEq (BufLength (AbstractBuf "b")) (Lit 0x1)))]
         (res, _) <- checkSatWithProps s props
         cex :: SMTCex <- case res of
-          Sat c -> pure c
+          Cex c -> pure c
           _ -> liftIO $ assertFailure "Must be satisfiable!"
         let value = subModel cex (AbstractBuf "b")
         assertEqualM "Buffer must have size 1 and contain zero byte" (ConcreteBuf "\0") value
@@ -4315,7 +4315,7 @@ tests = testGroup "hevm"
         (res, _) <- checkSatWithProps s props
         let
           sat = case res of
-            Sat _ -> True
+            Cex _ -> True
             _ -> False
         assertBoolM "Must be satisfiable!" sat
   ]
