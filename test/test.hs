@@ -4242,6 +4242,15 @@ tests = testGroup "hevm"
           _ -> liftIO $ assertFailure "Must be satisfiable!"
         let value = subModel cex (AbstractBuf "b")
         assertEqualM "Buffer must have size 1 and contain zero byte" (ConcreteBuf "\0") value
+    , testCase "buffer-shrinking-does-not-loop" $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 0}}) $ do
+      withDefaultSolver $ \s -> do
+        let props = [(PGT (BufLength (AbstractBuf "b")) (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb4))]
+        (res, _) <- checkSatWithProps s props
+        let
+          sat = case res of
+            Sat _ -> True
+            _ -> False
+        assertBoolM "Must be satisfiable!" sat
   ]
   , testGroup "equivalence-checking"
     [

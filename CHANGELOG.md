@@ -69,6 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `A-` and `B-`
 - Buffer of all zeroes was interpreted as an empty buffer during parsing SMT model.
   The length of the buffer is now properly taken into account.
+- It was possible to enter an infinite recursion when trying to shrink a buffer found by
+  the SMT solver. We now properly detect that it is not possible to shrink the buffer.
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
