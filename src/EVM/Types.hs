@@ -588,13 +588,14 @@ data PartialExec
   | MaxIterationsReached  { pc :: Int, addr :: Expr EAddr }
   | JumpIntoSymbolicCode  { pc :: Int, jumpDst :: Int }
   | CheatCodeMissing      { pc :: Int, selector :: FunctionSelector }
-  | TooManyBraches        { pc :: Int}
+  | BranchTooDeep         { pc :: Int}
   deriving (Show, Eq, Ord)
 
 -- | Effect types used by the vm implementation for side effects & control flow
 data Effect t s where
   Query :: Query t s -> Effect t s
   RunBoth :: RunBoth s -> Effect Symbolic s
+  RunAll :: RunAll s -> Effect Symbolic s
 deriving instance Show (Effect t s)
 
 -- | Queries halt execution until resolved through RPC calls or SMT queries
@@ -609,6 +610,10 @@ data Query t s where
 -- | Execution could proceed down one of two branches
 data RunBoth s where
   PleaseRunBoth    :: Expr EWord -> (Bool -> EVM Symbolic s ()) -> RunBoth s
+
+-- | Execution could proceed down one of two branches
+data RunAll s where
+  PleaseRunAll    :: Expr EWord -> [W256] -> (W256 -> EVM Symbolic s ()) -> RunAll s
 
 -- | The possible return values of a SMT query
 data BranchCondition = Case Bool | Unknown
@@ -641,6 +646,11 @@ instance Show (RunBoth s) where
   showsPrec _ = \case
     PleaseRunBoth _ _ ->
       (("<EVM.RunBoth: system running both paths") ++)
+
+instance Show (RunAll s) where
+  showsPrec _ = \case
+    PleaseRunAll _ _ _ ->
+      (("<EVM.RunAll: system running all paths") ++)
 
 -- | The possible result states of a VM
 data VMResult (t :: VMType) s where
@@ -681,9 +691,9 @@ data VM (t :: VMType) s = VM
   , labels         :: Map Addr Text
   , osEnv          :: Map String String
   , freshVar       :: Int
-  , numExplored    :: Int
   -- ^ used to generate fresh symbolic variable names for overapproximations
   --   during symbolic execution. See e.g. OpStaticcall
+  , exploreDepth    :: Int
   }
   deriving (Generic)
 

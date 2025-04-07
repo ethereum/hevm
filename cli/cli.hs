@@ -91,8 +91,8 @@ data CommonOptions = CommonOptions
   , maxIterations ::Integer
   , promiseNoReent::Bool
   , maxBufSize    ::Int
-  , maxBranch     ::Int
-  , maxExplore    ::Maybe Int
+  , maxWidth      ::Int
+  , maxDepth      ::Maybe Int
   }
 
 commonOptions :: Parser CommonOptions
@@ -117,8 +117,8 @@ commonOptions = CommonOptions
   <*> (option auto $ long "max-iterations"  <> showDefault <> value 5 <> help "Number of times we may revisit a particular branching point. For no bound, set -1")
   <*> (switch $ long "promise-no-reent"     <> help "Promise no reentrancy is possible into the contract(s) being examined")
   <*> (option auto $ long "max-buf-size"    <> value 64 <> help "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)")
-  <*> (option auto $ long "max-branch"      <> showDefault <> value 100 <> help "Max number of branches to explore when encountering a symbolic value. This is a form of branch width limitation per symbolic value")
-  <*> (optional $ option auto $ long "max-explore" <> help "Limit branching factor (i.e. branch width) and branch depth of exploration (default: unlimited)")
+  <*> (option auto $ long "max-width"      <> showDefault <> value 100 <> help "Max number of concrete values to explore when encountering a symbolic value. This is a form of branch width limitation per symbolic value")
+  <*> (optional $ option auto $ long "max-depth" <> help "Limit maximum depth of branching during exploration (default: unlimited)")
 
 data CommonExecOptions = CommonExecOptions
   { address       ::Maybe Addr
@@ -348,10 +348,10 @@ main = do
         , numCexFuzz = cOpts.numCexFuzz
         , dumpTrace = cOpts.trace
         , decomposeStorage = Prelude.not cOpts.noDecompose
-        , maxBranch = cOpts.maxBranch
         , promiseNoReent = cOpts.promiseNoReent
         , maxBufSize = cOpts.maxBufSize
-        , maxExplore = cOpts.maxExplore
+        , maxWidth = cOpts.maxWidth
+        , maxDepth = cOpts.maxDepth
         , verb = cOpts.verb
         } }
 

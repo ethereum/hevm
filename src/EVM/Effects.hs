@@ -45,8 +45,8 @@ data Config = Config
   , decomposeStorage :: Bool
   , promiseNoReent   :: Bool
   , maxBufSize       :: Int
-  , maxBranch        :: Int
-  , maxExplore       :: Maybe Int
+  , maxWidth         :: Int
+  , maxDepth         :: Maybe Int
   , verb             :: Int
   }
   deriving (Show, Eq)
@@ -63,8 +63,8 @@ defaultConfig = Config
   , decomposeStorage = True
   , promiseNoReent = False
   , maxBufSize = 64
-  , maxBranch = 100
-  , maxExplore = Nothing
+  , maxWidth = 100
+  , maxDepth = Nothing
   , verb = 0
   }
 

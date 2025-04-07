@@ -46,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   print some warnings related to zero-address dereference and to print `hemv test`'s
   output in case of failure
 - Simple test cases for the CLI
-- Allow limiting the branching factor and the depth of exploration via --max-explore
+- Allow limiting the branch depth and width limitation via --max-depth and --max-width
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value

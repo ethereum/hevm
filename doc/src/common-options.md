@@ -49,18 +49,24 @@ to not run indefinitely, hevm will only explore a certain number of iterations
 of a loop before consideing abandoning the exploration of that branch. This
 number can be set via the `--ask-smt-iterations` flag.
 
-## Maximum Branch Limit, ``--max-branch``
+## Maximum Branch Width Limit, ``--max-width``
 
-Limits the number of branches that are explored in case a symbolic value is
-encountered. For example, if a JUMP instruction is called with a symbolic
-expression, the system will explore all possible valid jump destinations,
-which may be too many. This option limits the branching factor in these cases.
+Limits the number of potential concrete values that are explored in case a
+symbolic value is encountered, thus limiting branching width. For example, if a
+JUMP instruction is called with a symbolic expression, the system will explore
+all possible valid jump destinations, which may be too many. This option limits
+the branching factor in these cases. Default is 100.
 
-## Maximum Exploration Limit, ``--max-explore``
+If there are more than the given maximum number of possible values, the system
+will try to deal with the symbolic value, if possible, e.g. via
+over-approximation. If over-approximation is not possible, symbolic execution
+will terminate with a `Partial` node, which is often displayed as "Unexpected
+Symbolic Arguments to Opcode" to the user when e.g. running `hevm test`.
 
-Limits the branching factor and branching depth of symbolic exploration. This
-is a heuristic way to prevent the exploration from running for too long. Useful
-in scenarios where you use e.g. both symbolic execution and fuzzing, and don't
-want the symbolic execution to run for too long. It will often read to WARNING-s
-related to `Too many branches at program counter`. This option automatically
-upper-limits the Branch Limit as well.
+## Maximum Branch Depth Limit, ``--max-depth``
+
+Limits the number of branching points on all paths during symbolic execution.
+This is helpful to prevent the exploration from running for too long. Useful in
+scenarios where you use e.g. both symbolic execution and fuzzing, and don't
+want the symbolic execution to run for too long. It will often read to
+WARNING-s related to `Branches too deep at program counter`.

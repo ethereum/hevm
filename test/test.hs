@@ -1520,8 +1520,9 @@ tests = testGroup "hevm"
         assertEqualM "number of errors (i.e. copySlice issues) is 1" 1 numErrs
         let errStrings = mapMaybe EVM.SymExec.getError k
         assertEqualM "All errors are from copyslice" True $ all ("CopySlice" `List.isInfixOf`) errStrings
+      -- below we hit the limit of the depth of the symbolic execution tree
       , testCase "limit-num-explore-hit-limit" $ do
-        let conf = testEnv.config {maxExplore = Just 3}
+        let conf = testEnv.config {maxDepth = Just 3}
         let myTestEnv :: Env = (testEnv :: Env) {config = conf :: Config}
         runEnv myTestEnv $ do
           Just c <- solcRuntime "C"
@@ -1547,7 +1548,7 @@ tests = testGroup "hevm"
           assertEqualM "number of qed-s" 1 numQeds
       -- below we don't hit the limit of the depth of the symbolic execution tree
       , testCase "limit-num-explore-no-hit-limit" $ do
-        let conf = testEnv.config {maxExplore = Just 4}
+        let conf = testEnv.config {maxDepth = Just 4}
         let myTestEnv :: Env = (testEnv :: Env) {config = conf :: Config}
         runEnv myTestEnv $ do
           Just c <- solcRuntime "C"

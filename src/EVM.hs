@@ -167,7 +167,7 @@ makeVm o = do
     , labels = mempty
     , osEnv = mempty
     , freshVar = 0
-    , numExplored = 0
+    , exploreDepth = 0
     }
     where
     env = Env
@@ -562,7 +562,7 @@ exec1 conf = do
                     _ -> do
                       let oob = Expr.lt (bufLength vm.state.returndata) (Expr.add xFrom xSize)
                           overflow = Expr.lt (Expr.add xFrom xSize) (xFrom)
-                      branch Nothing (Expr.or oob overflow) jump
+                      branch conf.maxDepth (Expr.or oob overflow) jump
             _ -> underrun
 
         OpExtcodehash ->
@@ -812,7 +812,7 @@ exec1 conf = do
                     jump _    = case tryInto x' of
                       Left _ -> vmError BadJumpDestination
                       Right i -> checkJump i xs
-                in branch conf.maxExplore y jump
+                in branch conf.maxDepth y jump
             _ -> underrun
 
         OpPc ->
@@ -867,7 +867,7 @@ exec1 conf = do
         OpCall ->
           case stk of
             xGas:xTo':xValue:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
-              branch conf.maxExplore (Expr.gt xValue (Lit 0)) $ \gt0 -> do
+              branch conf.maxDepth (Expr.gt xValue (Lit 0)) $ \gt0 -> do
                 let addrFallback = if conf.promiseNoReent then const fallback
                                    else unexpectedSymArgW "unable to determine a call target"
                 (if gt0 then notStatic else id) $
@@ -932,7 +932,7 @@ exec1 conf = do
                     case readByte (Lit 0) output of
                       LitByte 0xef -> frameErrored
                       LitByte _ -> frameReturned
-                      y -> branch conf.maxExplore (Expr.eqByte y (LitByte 0xef)) $ \case
+                      y -> branch conf.maxDepth (Expr.eqByte y (LitByte 0xef)) $ \case
                           True -> frameErrored
                           False -> frameReturned
                 else
@@ -1011,7 +1011,7 @@ exec1 conf = do
                 let cost = if acc then 0 else g_cold_account_access
                     funds = this.balance
                     recipientExists = accountExists xTo vm
-                branch (?conf.maxExplore) (Expr.iszero $ Expr.eq funds (Lit 0)) $ \hasFunds -> do
+                branch conf.maxDepth (Expr.iszero $ Expr.eq funds (Lit 0)) $ \hasFunds -> do
                   let c_new = if (not recipientExists) && hasFunds
                               then g_selfdestruct_newaccount
                               else 0
@@ -1041,7 +1041,7 @@ exec1 conf = do
         OpUnknown xxx ->
           vmError $ UnrecognizedOpcode xxx
 
-transfer :: VMOps t => Expr EAddr -> Expr EAddr -> Expr EWord -> EVM t s ()
+transfer :: (VMOps t, ?conf::Config) => Expr EAddr -> Expr EAddr -> Expr EWord -> EVM t s ()
 transfer _ _ (Lit 0) = pure ()
 transfer src dst val = do
   sb <- preuse $ #env % #contracts % ix src % #balance
@@ -1053,7 +1053,7 @@ transfer src dst val = do
   case (sb, db) of
     -- both sender and recipient in state
     (Just srcBal, Just _) ->
-      branch Nothing (Expr.gt val srcBal) $ \case
+      branch (?conf).maxDepth (Expr.gt val srcBal) $ \case
         True -> vmError $ BalanceTooLow val srcBal
         False -> do
           (#env % #contracts % ix src % #balance) %= (`Expr.sub` val)
@@ -1077,7 +1077,7 @@ transfer src dst val = do
 
 -- | Checks a *CALL for failure; OOG, too many callframes, memory access etc.
 callChecks
-  :: forall (t :: VMType) s. (?op :: Word8, VMOps t)
+  :: forall (t :: VMType) s. (?op :: Word8, ?conf :: Config, VMOps t)
   => Contract
   -> Gas t
   -> Expr EAddr
@@ -1116,7 +1116,7 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
           -- from is in the state, we check if they have enough balance
           (Just fb, _) -> do
             burn (cost - gas') $
-              branch Nothing (Expr.gt xValue fb) $ \case
+              branch (?conf).maxDepth (Expr.gt xValue fb) $ \case
                 True -> do
                   assign (#state % #stack) (Lit 0 : xs)
                   assign (#state % #returndata) mempty
@@ -1140,7 +1140,7 @@ callChecks this xGas xContext xTo xValue xInOffset xInSize xOutOffset xOutSize x
             GVar _ -> internalError "Unexpected GVar"
 
 precompiledContract
-  :: (?op :: Word8, VMOps t)
+  :: (?conf :: Config, ?op :: Word8, VMOps t)
   => Contract
   -> Gas t
   -> Addr
@@ -1364,12 +1364,20 @@ query :: Query t s -> EVM t s ()
 query q = assign #result $ Just $ HandleEffect (Query q)
 
 runBoth :: Maybe Int -> Int -> RunBoth s -> EVM Symbolic s ()
-runBoth limit num c = do
-  if (isNothing limit || (num < fromJust limit)) then do
+runBoth depthLimit exploreDepth c = do
+  if (isNothing depthLimit || (exploreDepth < fromJust depthLimit)) then do
     assign #result $ Just $ HandleEffect (RunBoth c)
   else do
     vm <- get
-    assign #result $ Just $ Unfinished (TooManyBraches {pc = vm.state.pc})
+    assign #result $ Just $ Unfinished (BranchTooDeep {pc = vm.state.pc})
+
+runAll :: Maybe Int -> Int -> RunAll s -> EVM Symbolic s ()
+runAll depthLimit exploreDepth c = do
+  if (isNothing depthLimit || (exploreDepth < fromJust depthLimit)) then do
+    assign #result $ Just $ HandleEffect (RunAll c)
+  else do
+    vm <- get
+    assign #result $ Just $ Unfinished (BranchTooDeep {pc = vm.state.pc})
 
 fetchAccount :: VMOps t => Expr EAddr -> (Contract -> EVM t s ()) -> EVM t s ()
 fetchAccount addr continue =
@@ -1580,7 +1588,7 @@ forceAddr :: (?conf :: Config, VMOps t) =>
   -> (Expr EAddr -> EVM t s ())
   -> EVM t s ()
 forceAddr n fallback continue = case wordToAddr n of
-  Nothing -> manySolutions (?conf).maxExplore n 20 $ \case
+  Nothing -> manySolutions (?conf).maxDepth n 20 $ \case
     Just sol -> continue $ LitAddr (truncateToAddr sol)
     Nothing -> fallback n
   Just c -> continue c
@@ -1631,13 +1639,13 @@ forceConcrete n = forceConcreteLimitSz n 32
 
 forceConcreteLimitSz :: (?conf :: Config, VMOps t) => Expr EWord -> Int -> String -> (W256 -> EVM t s ()) -> EVM t s ()
 forceConcreteLimitSz n bytes msg continue = case maybeLitWordSimp n of
-  Nothing -> manySolutions (?conf).maxExplore n bytes $ maybe fallback continue
+  Nothing -> manySolutions (?conf).maxDepth n bytes $ maybe fallback continue
   Just c -> continue c
   where fallback = unexpectedSymArg msg [n]
 
 forceConcreteAddr :: (?conf :: Config, VMOps t) => Expr EAddr -> String -> (Addr -> EVM t s ()) -> EVM t s ()
 forceConcreteAddr n msg continue = case maybeLitAddrSimp n of
-  Nothing -> manySolutions (?conf).maxExplore (WAddr n) 20 $ maybe fallback $ \c -> continue (truncateToAddr c)
+  Nothing -> manySolutions (?conf).maxDepth (WAddr n) 20 $ maybe fallback $ \c -> continue (truncateToAddr c)
   Just c -> continue c
   where fallback = unexpectedSymArg msg [n]
 
@@ -1731,7 +1739,7 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
                     }
   case maybeLitWordSimp abi of
     -- 4-byte function selector
-    Nothing -> manySolutions (?conf).maxExplore abi 4 $ \case
+    Nothing -> manySolutions (?conf).maxDepth abi 4 $ \case
       Just concAbi -> runCheat concAbi input
       Nothing -> unexpectedSymArg "symbolic cheatcode selector" [abi]
     Just concAbi -> runCheat concAbi input
@@ -1956,7 +1964,7 @@ cheatActions = Map.fromList
         SAbi [eword] -> case (Expr.simplify (Expr.iszero eword)) of
           Lit 1 -> frameRevert "assertion failed"
           Lit 0 -> doStop
-          ew -> branch Nothing ew $ \case
+          ew -> branch (?conf).maxDepth ew $ \case
             True -> frameRevert "assertion failed"
             False -> doStop
         k -> vmError $ BadCheatCode ("assertTrue(bool) parameter decoding failed: " <> show k) sig
@@ -1967,7 +1975,7 @@ cheatActions = Map.fromList
         SAbi [eword] -> case (Expr.simplify (Expr.iszero eword)) of
           Lit 0 -> frameRevert "assertion failed"
           Lit 1 -> doStop
-          ew -> branch Nothing ew $ \case
+          ew -> branch (?conf).maxDepth ew $ \case
             False -> frameRevert "assertion failed"
             True -> doStop
         k -> vmError $ BadCheatCode ("assertFalse(bool) parameter decoding failed: " <> show k) sig
@@ -2043,7 +2051,7 @@ cheatActions = Map.fromList
         SAbi [ew1, ew2] -> case (Expr.simplify (Expr.iszero $ exprComp ew1 ew2)) of
           Lit 0 -> doStop
           Lit _ -> revertErr ew1 ew2 invComp
-          ew -> branch Nothing ew $ \case
+          ew -> branch (?conf).maxDepth ew $ \case
             False -> doStop
             True -> revertErr ew1 ew2 invComp
         abivals -> vmError (BadCheatCode (paramDecodeErr abitype name abivals) sig)
@@ -2139,7 +2147,7 @@ collision c' = case c' of
     _ -> True
   Nothing -> False
 
-create :: forall t s. (?op :: Word8, VMOps t)
+create :: forall t s. (?op :: Word8, ?conf::Config, VMOps t)
   => Expr EAddr -> Contract
   -> Expr EWord -> Gas t -> Expr EWord -> [Expr EWord] -> Expr EAddr -> Expr Buf -> EVM t s ()
 create self this xSize xGas xValue xs newAddr initCode = do
@@ -2175,7 +2183,7 @@ create self this xSize xGas xValue xs newAddr initCode = do
     modifying (#env % #contracts % ix self % #nonce) (fmap ((+) 1))
     next
   -- do we have enough balance
-  else branch Nothing (Expr.gt xValue this.balance) $ \case
+  else branch (?conf).maxDepth (Expr.gt xValue this.balance) $ \case
       True -> do
         assign (#state % #stack) (Lit 0 : xs)
         assign (#state % #returndata) mempty
@@ -2975,11 +2983,11 @@ instance VMOps Symbolic where
   whenSymbolicElse a _ = a
 
   partial e = assign #result $ Just (Unfinished e)
-  branch limit cond continue = do
+  branch depthLimit cond continue = do
     loc <- codeloc
     pathconds <- use #constraints
     vm <- get
-    query $ PleaseAskSMT cond pathconds (runBothPaths loc vm.numExplored)
+    query $ PleaseAskSMT cond pathconds (runBothPaths loc vm.exploreDepth)
     where
       condSimp = Expr.simplify cond
       condSimpConc = Expr.concKeccakSimpExpr condSimp
@@ -2993,42 +3001,36 @@ instance VMOps Symbolic where
         assign (#iterations % at loc) (Just (iteration + 1, stack))
         continue v
       -- Both paths are possible; we ask for more input
-      runBothPaths loc numExplored Unknown =
-        (runBoth limit numExplored ) . PleaseRunBoth condSimp $ (runBothPaths loc numExplored) . Case
+      runBothPaths loc exploreDepth Unknown =
+        (runBoth depthLimit exploreDepth ) . PleaseRunBoth condSimp $ (runBothPaths loc exploreDepth) . Case
 
   -- numBytes allows us to specify how many bytes of the returned value is relevant
   -- if it's e.g.a JUMP, only 2 bytes can be relevant. This allows us to avoid
   -- getting solutions that are nonsensical
-  manySolutions :: Maybe Int -> Expr EWord -> Int -> (Maybe W256 -> EVM Symbolic s ()) -> EVM Symbolic s ()
-  manySolutions limit ewordExpr numBytes continue = do
+  manySolutions depthLimit ewordExpr numBytes continue = do
     pathconds <- use #constraints
+    vm <- get
     query $ PleaseGetSols ewordExpr numBytes pathconds $ \case
       Just concVals -> do
         assign #result Nothing
-        vm <- get
         case (length concVals) of
           -- zero solutions means that we are in a branch that's not possible. Revert.
           -- TODO: stop execution of the EVM completely
           0 -> finishFrame (FrameReverted (ConcreteBuf ""))
-          1 -> runOne $ head concVals
-          _ -> (runBoth limit vm.numExplored) . PleaseRunBoth ewordExpr $ runMore concVals
+          1 -> do
+            let val = head concVals
+            assign #result Nothing
+            pushTo #constraints $ Expr.simplifyProp (ewordExpr .== (Lit val))
+            continue $ Just val
+          _ -> runAll depthLimit vm.exploreDepth $ PleaseRunAll ewordExpr concVals runAllPaths
       Nothing -> do
         assign #result Nothing
         continue Nothing
     where
-      runMore vals firstThread = do
-        vm <- get
-        case length vals of
-          -- if 2, we run both, otherwise, we run 1st and run ourselves with the rest
-          2 -> if firstThread then runOne $ head vals
-               else runOne (head $ tail vals)
-          _ -> if firstThread then runOne $ head vals
-               else (runBoth limit vm.numExplored) . PleaseRunBoth ewordExpr $ runMore (tail vals)
-      runOne val = do
+      runAllPaths val = do
         assign #result Nothing
-        pushTo #constraints $ Expr.simplifyProp (ewordExpr .== (Lit val))
+        pushTo #constraints $ Expr.simplifyProp (ewordExpr .== Lit val)
         continue $ Just val
-
 
 instance VMOps Concrete where
   burn' n continue = do
