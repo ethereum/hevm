@@ -217,6 +217,23 @@ timeout if this happens.</p>
 to not run indefinitely, hevm will only explore a certain number of iterations
 of a loop before consideing abandoning the exploration of that branch. This
 number can be set via the <code>--ask-smt-iterations</code> flag.</p>
+<h2 id="maximum-branch-width-limit---max-width"><a class="header" href="#maximum-branch-width-limit---max-width">Maximum Branch Width Limit, <code>--max-width</code></a></h2>
+<p>Limits the number of potential concrete values that are explored in case a
+symbolic value is encountered, thus limiting branching width. For example, if a
+JUMP instruction is called with a symbolic expression, the system will explore
+all possible valid jump destinations, which may be too many. This option limits
+the branching factor in these cases. Default is 100.</p>
+<p>If there are more than the given maximum number of possible values, the system
+will try to deal with the symbolic value, if possible, e.g. via
+over-approximation. If over-approximation is not possible, symbolic execution
+will terminate with a <code>Partial</code> node, which is often displayed as "Unexpected
+Symbolic Arguments to Opcode" to the user when e.g. running <code>hevm test</code>.</p>
+<h2 id="maximum-branch-depth-limit---max-depth"><a class="header" href="#maximum-branch-depth-limit---max-depth">Maximum Branch Depth Limit, <code>--max-depth</code></a></h2>
+<p>Limits the number of branching points on all paths during symbolic execution.
+This is helpful to prevent the exploration from running for too long. Useful in
+scenarios where you use e.g. both symbolic execution and fuzzing, and don't
+want the symbolic execution to run for too long. It will often read to
+WARNING-s related to <code>Branches too deep at program counter</code>.</p>
 
                     </main>
 
