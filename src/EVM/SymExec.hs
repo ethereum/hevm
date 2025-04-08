@@ -321,13 +321,29 @@ interpret fetcher maxIter askSmtIters heuristic vm =
         conf <- readConfig
         (r, vm') <- liftIO $ stToIO $ runStateT (exec conf) vm
         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+      Stepper.ForkMany (PleaseRunAll expr vals continue) -> do
+        when (length vals < 2) $ internalError "PleaseRunAll requires at least 2 branches"
+        frozen <- liftIO $ stToIO $ freezeVM vm
+        let newDepth = vm.exploreDepth+1
+        ends <- withRunInIO $ \runInIO -> mapConcurrently (runInIO . runOne frozen newDepth) vals
+        pure $ goITE (zip vals ends)
+        where
+          goITE :: [(W256, Expr End)] -> Expr End
+          goITE [] = internalError "goITE: empty list"
+          goITE [(_, end)] = end
+          goITE ((val,end):ps) = ITE (Eq expr (Lit val)) end (goITE ps)
+          runOne :: App m => VM 'Symbolic RealWorld -> Int -> W256 -> m (Expr 'End)
+          runOne frozen newDepth v = do
+            (ra, vma) <- liftIO $ stToIO $ runStateT (continue v) frozen { result = Nothing, exploreDepth = newDepth }
+            interpret fetcher maxIter askSmtIters heuristic vma (k ra)
       Stepper.Fork (PleaseRunBoth cond continue) -> do
         frozen <- liftIO $ stToIO $ freezeVM vm
+        let newDepth = vm.exploreDepth+1
         evalLeft <- toIO $ do
-          (ra, vma) <- liftIO $ stToIO $ runStateT (continue True) frozen { result = Nothing }
+          (ra, vma) <- liftIO $ stToIO $ runStateT (continue True) frozen { result = Nothing, exploreDepth = newDepth }
           interpret fetcher maxIter askSmtIters heuristic vma (k ra)
         evalRight <- toIO $ do
-          (rb, vmb) <- liftIO $ stToIO $ runStateT (continue False) frozen { result = Nothing }
+          (rb, vmb) <- liftIO $ stToIO $ runStateT (continue False) frozen { result = Nothing, exploreDepth = newDepth }
           interpret fetcher maxIter askSmtIters heuristic vmb (k rb)
         (a, b) <- liftIO $ concurrently evalLeft evalRight
         pure $ ITE cond a b

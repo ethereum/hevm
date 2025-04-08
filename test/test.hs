@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE ImplicitParams #-}
 
 module Main where
 
@@ -480,7 +481,8 @@ tests = testGroup "hevm"
               (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)))
                 { external = True }
         vm :: VM Concrete RealWorld <- liftIO $ stToIO $ vmForEthrunCreation ""
-            -- perform the initial access
+        -- perform the initial access
+        let ?conf = testEnv.config
         vm1 <- liftIO $ stToIO $ execStateT (EVM.accessStorage (LitAddr 0) (Lit 0) (pure . pure ())) vm
         -- it should fetch the contract first
         vm2 <- case vm1.result of
@@ -1518,8 +1520,59 @@ tests = testGroup "hevm"
         assertEqualM "number of errors (i.e. copySlice issues) is 1" 1 numErrs
         let errStrings = mapMaybe EVM.SymExec.getError k
         assertEqualM "All errors are from copyslice" True $ all ("CopySlice" `List.isInfixOf`) errStrings
-      ,
-      test "symbolic-copyslice" $ do
+      -- below we hit the limit of the depth of the symbolic execution tree
+      , testCase "limit-num-explore-hit-limit" $ do
+        let conf = testEnv.config {maxDepth = Just 3}
+        let myTestEnv :: Env = (testEnv :: Env) {config = conf :: Config}
+        runEnv myTestEnv $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+                function checkval(uint256 a, uint256 b, uint256 c) public {
+                  if (a == b) {
+                    if (b == c) {
+                      assert(false);
+                    }
+                  }
+                }
+            }
+            |]
+          let sig = Just (Sig "checkval(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])
+          (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+          let numCexes = sum $ map (fromEnum . isCex) ret
+          let numErrs = sum $ map (fromEnum . isError) ret
+          let numQeds = sum $ map (fromEnum . isQed) ret
+          assertBoolM "The expression MUST be partial" (Expr.containsNode isPartial expr)
+          assertEqualM "number of errors" 0 numErrs
+          assertEqualM "number of counterexamples" 0 numCexes
+          assertEqualM "number of qed-s" 1 numQeds
+      -- below we don't hit the limit of the depth of the symbolic execution tree
+      , testCase "limit-num-explore-no-hit-limit" $ do
+        let conf = testEnv.config {maxDepth = Just 4}
+        let myTestEnv :: Env = (testEnv :: Env) {config = conf :: Config}
+        runEnv myTestEnv $ do
+          Just c <- solcRuntime "C"
+            [i|
+            contract C {
+                function checkval(uint256 a, uint256 b, uint256 c) public {
+                  if (a == b) {
+                    if (b == c) {
+                      assert(false);
+                    }
+                  }
+                }
+            }
+            |]
+          let sig = Just (Sig "checkval(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])
+          (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+          let numCexes = sum $ map (fromEnum . isCex) ret
+          let numErrs = sum $ map (fromEnum . isError) ret
+          let numQeds = sum $ map (fromEnum . isQed) ret
+          assertBoolM "The expression MUST NOT be partial" $ Prelude.not (Expr.containsNode isPartial expr)
+          assertEqualM "number of errors" 0 numErrs
+          assertEqualM "number of counterexamples" 1 numCexes
+          assertEqualM "number of qed-s" 0 numQeds
+      , test "symbolic-copyslice" $ do
         Just c <- solcRuntime "MyContract"
             [i|
             contract MyContract {
