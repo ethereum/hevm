@@ -267,6 +267,14 @@ following:</p>
 </code></pre>
 <p>For these cases, we suggest concretizing the call that creates the contract,
 such that the bytecode created and later jumped to, is not symbolic.</p>
+<h2 id="setting-block-number"><a class="header" href="#setting-block-number">Setting block number</a></h2>
+<p>The <a href="https://book.getfoundry.sh/cheatcodes/roll?highlight=roll#roll">roll(uint256)
+cheatcode</a> can
+be used to set the block number in the current EVM state. However, it does not
+alter the block number that the RPC calls use. For that, one must use the
+<code>--number</code> command line option. Hence, it is not possible to dynamically change
+what block number the RPC calls fetch from, other than by restarting the hevm
+process with a different block number.</p>
 
                     </main>
 
