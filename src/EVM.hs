@@ -1810,8 +1810,8 @@ cheatActions = Map.fromList
 
   , action "roll(uint256)" $
       \sig input -> case decodeStaticArgs 0 1 input of
-        [x] -> forceConcrete x "cannot roll to a symbolic block number" $ \block -> do
-          assign (#block % #number) (Lit block)
+        [x] -> do
+          assign (#block % #number) x
           doStop
         _ -> vmError (BadCheatCode "roll(uint256) parameter decoding failed" sig)
 
