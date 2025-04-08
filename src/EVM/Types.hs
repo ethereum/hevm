@@ -611,7 +611,7 @@ data Query t s where
 data RunBoth s where
   PleaseRunBoth    :: Expr EWord -> (Bool -> EVM Symbolic s ()) -> RunBoth s
 
--- | Execution could proceed down one of two branches
+-- | Execution could proceed down one of several branches
 data RunAll s where
   PleaseRunAll    :: Expr EWord -> [W256] -> (W256 -> EVM Symbolic s ()) -> RunAll s
 
