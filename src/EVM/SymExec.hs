@@ -660,7 +660,7 @@ verify solvers opts preState maybepost = do
     canBeSat (a, _) = case a of
         [PBool False] -> False
         _ -> True
-    toVRes :: (SMT2Result, Expr End) -> VerifyResult
+    toVRes :: (SMTResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
       Cex model -> Cex (leaf, expandCex preState model)
       Unknown reason -> Unknown (reason, leaf)
@@ -892,7 +892,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
 both' :: (a -> b) -> (a, a) -> (b, b)
 both' f (x, y) = (f x, f y)
 
-produceModels :: App m => SolverGroup -> Expr End -> m [(Expr End, SMT2Result)]
+produceModels :: App m => SolverGroup -> Expr End -> m [(Expr End, SMTResult)]
 produceModels solvers expr = do
   let flattened = flattenExpr expr
       withQueries conf = fmap (\e -> ((SMT.assertProps conf) . extractProps $ e, e)) flattened
@@ -902,7 +902,7 @@ produceModels solvers expr = do
     pure (res, leaf)
   pure $ fmap swap $ filter (\(res, _) -> not . isQed $ res) results
 
-showModel :: Expr Buf -> (Expr End, SMT2Result) -> IO ()
+showModel :: Expr Buf -> (Expr End, SMTResult) -> IO ()
 showModel cd (expr, res) = do
   case res of
     Qed -> pure () -- ignore unreachable branches

@@ -1200,7 +1200,7 @@ instance (Eq a, Eq b) => Eq (ProofResult a b) where
 
 type VerifyResult = ProofResult (Expr End, SMTCex) (String, Expr End)
 type EquivResult = ProofResult (SMTCex) String
-type SMT2Result = ProofResult (SMTCex) String
+type SMTResult = ProofResult (SMTCex) String
 
 getUnknown :: ProofResult a b -> Maybe b
 getUnknown (Unknown a) = Just a

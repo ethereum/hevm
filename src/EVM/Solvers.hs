@@ -77,7 +77,7 @@ data MultiData = MultiData
 
 data SingleData = SingleData
   { smt2 :: SMT2
-  , resultChan :: Chan SMT2Result
+  , resultChan :: Chan SMTResult
   }
 
 checkMulti :: SolverGroup -> Err SMT2 -> MultiSol -> IO (Maybe [W256])
@@ -91,7 +91,7 @@ checkMulti (SolverGroup taskQueue) smt2 multiSol = do
     -- collect result
     readChan resChan
 
-checkSatWithProps :: App m => SolverGroup -> [Prop] -> m (SMT2Result, Err SMT2)
+checkSatWithProps :: App m => SolverGroup -> [Prop] -> m (SMTResult, Err SMT2)
 checkSatWithProps (SolverGroup taskQueue) props = do
   conf <- readConfig
   let psSimp = simplifyProps props
@@ -104,7 +104,7 @@ checkSatWithProps (SolverGroup taskQueue) props = do
       res <- liftIO $ checkSat (SolverGroup taskQueue) smt2
       pure (res, Right (getNonError smt2))
 
-checkSat :: SolverGroup -> Err SMT2 -> IO SMT2Result
+checkSat :: SolverGroup -> Err SMT2 -> IO SMTResult
 checkSat (SolverGroup taskQueue) smt2 = do
   if isLeft smt2 then pure $ Error $ getError smt2
   else do
@@ -211,7 +211,7 @@ getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCo
           when conf.debug $ putStrLn $ "Unable to write SMT to solver: " <> (T.unpack err)
           writeChan r Nothing
 
-getOneSol :: (MonadIO m, ReadConfig m) => SMT2 -> (Chan SMT2Result) -> SolverInstance -> Chan SolverInstance -> Int -> m ()
+getOneSol :: (MonadIO m, ReadConfig m) => SMT2 -> (Chan SMTResult) -> SolverInstance -> Chan SolverInstance -> Int -> m ()
 getOneSol smt2@(SMT2 cmds cexvars ps) r inst availableInstances fileCounter = do
   conf <- readConfig
   let fuzzResult = tryCexFuzz ps conf.numCexFuzz
