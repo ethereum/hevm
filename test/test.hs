@@ -2232,6 +2232,20 @@ tests = testGroup "hevm"
             |]
         (_, [Qed _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(int256)" [AbiIntType 256])) [] defaultVeriOpts
         putStrLnM "Require works as expected"
+     , test "symbolic-block-number" $ do
+       Just c <- solcRuntime "C" [i|
+           interface Vm {
+               function roll(uint) external;
+           }
+           contract C {
+             function myfun(uint x, uint y) public {
+               Vm vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+               vm.roll(x);
+               assert(block.number == y);
+             }
+           } |]
+       (e, [Cex _]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+       assertBoolM "The expression MUST NOT be partial" $ Prelude.not (Expr.containsNode isPartial e)
      , test "symbolic-to-concrete-multi" $ do
         Just c <- solcRuntime "MyContract"
             [i|

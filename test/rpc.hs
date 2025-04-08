@@ -11,7 +11,7 @@ import Data.Text (Text)
 import Data.Vector qualified as V
 
 import Optics.Core
-import EVM (makeVm, symbolify)
+import EVM (makeVm, symbolify, forceLit)
 import EVM.ABI
 import EVM.Fetch
 import EVM.SMT
@@ -42,28 +42,28 @@ tests = testGroup "rpc"
         let block = BlockNumber 15537392
         (cb, numb, basefee, prevRan) <- fetchBlockFrom block testRpc >>= \case
                       Nothing -> internalError "Could not fetch block"
-                      Just Block{..} -> return ( coinbase
+                      Just Block{..} -> pure ( coinbase
                                                    , number
                                                    , baseFee
                                                    , prevRandao
                                                    )
 
         assertEqual "coinbase" (LitAddr 0xea674fdde714fd979de3edf0f56aa9716b898ec8) cb
-        assertEqual "number" (BlockNumber numb) block
+        assertEqual "number" (BlockNumber (forceLit numb)) block
         assertEqual "basefee" 38572377838 basefee
         assertEqual "prevRan" 11049842297455506 prevRan
     , testCase "post-merge-block" $ do
         let block = BlockNumber 16184420
         (cb, numb, basefee, prevRan) <- fetchBlockFrom block testRpc >>= \case
                       Nothing -> internalError "Could not fetch block"
-                      Just Block{..} -> return ( coinbase
+                      Just Block{..} -> pure ( coinbase
                                                    , number
                                                    , baseFee
                                                    , prevRandao
                                                    )
 
         assertEqual "coinbase" (LitAddr 0x690b9a9e9aa1c9db991c7721a92d351db4fac990) cb
-        assertEqual "number" (BlockNumber numb) block
+        assertEqual "number" (BlockNumber (forceLit numb)) block
         assertEqual "basefee" 22163046690 basefee
         assertEqual "prevRan" 0x2267531ab030ed32fd5f2ef51f81427332d0becbd74fe7f4cd5684ddf4b287e0 prevRan
     ]
@@ -125,7 +125,7 @@ vmFromRpc :: W256 -> (Expr Buf, [Prop]) -> Expr EWord -> Expr EAddr -> Addr -> I
 vmFromRpc blockNum calldata callvalue caller address = do
   ctrct <- fetchContractFrom (BlockNumber blockNum) testRpc address >>= \case
         Nothing -> internalError $ "contract not found: " <> show address
-        Just contract' -> return contract'
+        Just contract' -> pure contract'
 
   blk <- fetchBlockFrom (BlockNumber blockNum) testRpc >>= \case
     Nothing -> internalError "could not fetch block"

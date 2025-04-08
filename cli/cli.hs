@@ -576,7 +576,7 @@ launchExec cFileOpts execOpts cExecOpts cOpts = do
 vmFromCommand :: CommonOptions -> CommonExecOptions -> CommonFileOptions -> ExecOptions -> IO (VM Concrete RealWorld)
 vmFromCommand cOpts cExecOpts cFileOpts execOpts= do
   (miner,ts,baseFee,blockNum,prevRan) <- case cExecOpts.rpc of
-    Nothing -> pure (LitAddr 0,Lit 0,0,0,0)
+    Nothing -> pure (LitAddr 0,Lit 0,0,Lit 0,0)
     Just url -> Fetch.fetchBlockFrom block url >>= \case
       Nothing -> do
         putStrLn $ "Error, Could not fetch block" <> show block <> " from URL: " <> show url
@@ -665,7 +665,7 @@ vmFromCommand cOpts cExecOpts cFileOpts execOpts= do
           , priorityFee    = word (.priorityFee) 0
           , gaslimit       = word64 (.gaslimit) 0xffffffffffffffff
           , coinbase       = addr (.coinbase) miner
-          , number         = word (.number) blockNum
+          , number         = maybe blockNum Lit cExecOpts.number
           , timestamp      = Lit $ word (.timestamp) ts
           , blockGaslimit  = word64 (.gaslimit) 0xffffffffffffffff
           , gasprice       = word (.gasprice) 0
@@ -688,7 +688,7 @@ vmFromCommand cOpts cExecOpts cFileOpts execOpts= do
 symvmFromCommand :: CommonExecOptions -> SymbolicOptions -> CommonFileOptions -> (Expr Buf, [Prop]) -> IO (VM EVM.Types.Symbolic RealWorld)
 symvmFromCommand cExecOpts sOpts cFileOpts calldata = do
   (miner,blockNum,baseFee,prevRan) <- case cExecOpts.rpc of
-    Nothing -> pure (SymAddr "miner",0,0,0)
+    Nothing -> pure (SymAddr "miner",Lit 0,0,0)
     Just url -> Fetch.fetchBlockFrom block url >>= \case
       Nothing -> do
         putStrLn $ "Error, Could not fetch block" <> show block <> " from URL: " <> show url
@@ -765,7 +765,7 @@ symvmFromCommand cExecOpts sOpts cFileOpts calldata = do
       , baseFee        = baseFee
       , priorityFee    = word (.priorityFee) 0
       , coinbase       = eaddr (.coinbase) miner
-      , number         = word (.number) blockNum
+      , number         = maybe blockNum Lit cExecOpts.number
       , timestamp      = ts
       , blockGaslimit  = word64 (.gaslimit) 0xffffffffffffffff
       , gasprice       = word (.gasprice) 0

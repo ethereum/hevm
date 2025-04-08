@@ -418,7 +418,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract = do
            , gas = toGas testParams.gasCreate
            , gaslimit = testParams.gasCreate
            , coinbase = testParams.coinbase
-           , number = testParams.number
+           , number = Lit testParams.number
            , timestamp = Lit testParams.timestamp
            , blockGaslimit = testParams.gaslimit
            , gasprice = testParams.gasprice
@@ -444,7 +444,7 @@ initialUnitTestVm (UnitTestOptions {..}) theContract = do
 paramsFromRpc :: Fetch.RpcInfo -> IO TestVMParams
 paramsFromRpc rpcinfo = do
   (miner,ts,blockNum,ran,limit,base) <- case rpcinfo of
-    Nothing -> pure (SymAddr "miner", Lit 0, 0, 0, 0, 0)
+    Nothing -> pure (SymAddr "miner", Lit 0, Lit 0, 0, 0, 0)
     Just (block, url) -> Fetch.fetchBlockFrom block url >>= \case
       Nothing -> internalError "Could not fetch block"
       Just Block{..} -> pure ( coinbase
@@ -467,7 +467,7 @@ paramsFromRpc rpcinfo = do
     , priorityFee = 0
     , balanceCreate = defaultBalanceForTestContract
     , coinbase = miner
-    , number = blockNum
+    , number = forceLit blockNum
     , timestamp = ts'
     , gaslimit = limit
     , gasprice = 0
