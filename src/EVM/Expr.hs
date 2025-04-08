@@ -631,24 +631,23 @@ readStorage w st = go (simplifyNoLitToKeccak w) (simplifyNoLitToKeccak st)
     go slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
       -- if address and slot match then we return the val in this write
       _ | prevSlot == slot -> Just val
-
-      -- if the slots don't match (see previous guard) and are lits, we can skip this write
-      (Lit _, Lit _) -> go slot prev
+      (a, b) | surelyEqual a b-> Just val
+      (a, b) | surelyNotEqual a b -> go slot prev
 
       -- slot is for a map + map -> skip write
-      (MappingSlot idA _, MappingSlot idB _)       | BS.length idB == 64 && BS.length idA == 64 && idsDontMatch idA idB  -> go slot prev
-      (MappingSlot idA (Lit keyA), MappingSlot idB (Lit keyB)) | BS.length idB == 64 && BS.length idA == 64 && keyA /= keyB -> go slot prev
+      (MappingSlot idA _, MappingSlot idB _)       | isMap' idB, isMap' idA, idsDontMatch idA idB  -> go slot prev
+      (MappingSlot idA keyA, MappingSlot idB keyB) | isMap' idB, isMap' idA, surelyNotEqual keyA keyB -> go slot prev
 
       -- special case of array + map -> skip write
-      (ArraySlotWithOffs idA _, Keccak   k)      | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
-      (ArraySlotWithOffs2 idA _ _, Keccak   k)   | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
-      (ArraySlotZero idA, Keccak k)              | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
+      (ArraySlotWithOffs idA _, Keccak k)          | isMap k, isArray idA -> go slot prev
+      (ArraySlotWithOffs2 idA _ _, Keccak k)       | isMap k, isArray idA -> go slot prev
+      (ArraySlotZero idA, Keccak k)                | isMap k, isArray idA -> go slot prev
 
       -- special case of map + array -> skip write
-      (Keccak k, ArraySlotWithOffs idA _)      | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
-      (Keccak k, ArraySlotWithOffs2 idA _ _)   | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
-      (ArraySlotWithOffs idA _, Keccak k)      | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
-      (ArraySlotWithOffs2 idA _ _, Keccak k)   | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
+      (Keccak k, ArraySlotWithOffs idA _)          | isMap k, isArray idA -> go slot prev
+      (Keccak k, ArraySlotWithOffs2 idA _ _)       | isMap k, isArray idA -> go slot prev
+      (ArraySlotWithOffs idA _, Keccak k)          | isMap k, isArray idA -> go slot prev
+      (ArraySlotWithOffs2 idA _ _, Keccak k)       | isMap k, isArray idA -> go slot prev
 
       -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
       (Lit a, Keccak _) | a < 256 -> go slot prev
@@ -659,12 +658,8 @@ readStorage w st = go (simplifyNoLitToKeccak w) (simplifyNoLitToKeccak st)
       -- occurring here is 2^32/2^256 = 2^-224, which is close enough to zero
       -- for our purposes. This lets us completely simplify reads from write
       -- chains involving writes to arrays at literal offsets.
-      (Lit a, Add (Lit b) (Keccak _) ) | a < 256, b < maxW32 -> go slot prev
-      (Add (Lit a) (Keccak _) , Lit b) | b < 256, a < maxW32 -> go slot prev
-
-      --- NOTE these are needed to succeed in rewriting arrays with a variable index
-      -- (Lit a, Add (Keccak _) (Var _) ) | a < 256 -> go slot prev
-      -- (Add (Keccak _) (Var _) , Lit b) | b < 256 -> go slot prev
+      (Lit a, Add (Lit b) (Keccak _)) | a < 256, b < maxW32 -> go slot prev
+      (Add (Lit a) (Keccak _) ,Lit b) | b < 256, a < maxW32 -> go slot prev
 
       -- Finding two Keccaks that are < 256 away from each other should be VERY hard
       -- This simplification allows us to deal with maps of structs
@@ -672,29 +667,49 @@ readStorage w st = go (simplifyNoLitToKeccak w) (simplifyNoLitToKeccak st)
       (Add (Lit a2) (Keccak _), (Keccak _)) | a2 > 0, a2 < 256 -> go slot prev
       ((Keccak _), Add (Lit b2) (Keccak _)) | b2 > 0, b2 < 256 -> go slot prev
 
-      -- case of array + array, but different id's or different concrete offsets
       -- zero offs vs zero offs
-      (ArraySlotZero idA, ArraySlotZero idB)                   | BS.length idA == 32, BS.length idB == 32, idA /= idB -> go slot prev
-      -- zero offs vs non-zero offs
-      (ArraySlotZero idA, ArraySlotWithOffs idB _)             | BS.length idA == 32, BS.length idB == 32, idA /= idB -> go slot prev
-      (ArraySlotZero idA, ArraySlotWithOffs2 idB _ _)          | BS.length idA == 32, BS.length idB == 32, idA /= idB -> go slot prev
-      (ArraySlotZero idA, ArraySlotWithOffs idB (Lit offB))    | BS.length idA == 32, BS.length idB == 32, offB /= 0  -> go slot prev
-      -- non-zero offs vs zero offs
-      (ArraySlotWithOffs idA _, ArraySlotZero idB)             | BS.length idA == 32, BS.length idB == 32, idA /= idB -> go slot prev
-      (ArraySlotWithOffs idA (Lit offA), ArraySlotZero idB)    | BS.length idA == 32, BS.length idB == 32, offA /= 0  -> go slot prev
-      -- non-zero offs vs non-zero offs
-      (ArraySlotWithOffs idA _, ArraySlotWithOffs idB _)       | BS.length idA == 32, BS.length idB == 32, idA /= idB -> go slot prev
+      (ArraySlotZero idA, ArraySlotZero idB)                   | isArray idA, isArray idB, idA /= idB -> go slot prev
 
-      (ArraySlotWithOffs idA (Lit a), ArraySlotWithOffs idB (Lit b)) | BS.length idA == 32, BS.length idB == 32, a /= b -> go slot prev
-      (ArraySlotWithOffs2 idA offA1 offA2, ArraySlotWithOffs2 idB offB1 offB2) | BS.length idA == 32, BS.length idB == 32, offA1 /=offB1, offA2 == offB2 -> go slot prev
-      (ArraySlotWithOffs2 idA offA1 offA2, ArraySlotWithOffs idB offB2) | BS.length idA == 32, BS.length idB == 32, offA1 /= 0, offA2 == offB2 -> go slot prev
-      (ArraySlotWithOffs idB offB2, ArraySlotWithOffs2 idA offA1 offA2) | BS.length idA == 32, BS.length idB == 32, offA1 /= 0, offA2 == offB2 -> go slot prev
+      -- zero offs vs non-zero offs
+      (ArraySlotZero idA, ArraySlotWithOffs idB _)             | isArray idA, isArray idB, idA /= idB -> go slot prev
+      (ArraySlotZero idA, ArraySlotWithOffs idB (Lit offB))    | isArray idA, idA == idB, offB /= 0  -> go slot prev
+      (ArraySlotZero idA, ArraySlotWithOffs2 idB _ _)          | isArray idA, isArray idB, idA /= idB -> go slot prev
+
+      -- non-zero offs vs zero offs
+      (ArraySlotWithOffs idA _, ArraySlotZero idB)             | isArray idA, isArray idB, idA /= idB -> go slot prev
+      (ArraySlotWithOffs idA (Lit offA), ArraySlotZero idB)    | isArray idA, idA == idB, offA /= 0  -> go slot prev
+
+      -- non-zero offs vs non-zero offs, different ids
+      (ArraySlotWithOffs idA _, ArraySlotWithOffs idB _)       | isArray idA, isArray idB, idA /= idB -> go slot prev
+
+      -- non-zero offs vs non-zero offs, same ids
+      (ArraySlotWithOffs idA a, ArraySlotWithOffs idB b)                       | isArray idA, idA == idB,
+        surelyNotEqual a b -> go slot prev
+      (ArraySlotWithOffs idB offB2, ArraySlotWithOffs2 idA offA1 offA2)        | isArray idA, idA == idB,
+        surelyNotEqual (Add (Lit offA1) offA2) offB2 -> go slot prev
+      (ArraySlotWithOffs2 idA offA1 offA2, ArraySlotWithOffs idB offB2)        | isArray idA, idA == idB,
+        surelyNotEqual (Add (Lit offA1) offA2) offB2 -> go slot prev
+      (ArraySlotWithOffs2 idA offA1 offA2, ArraySlotWithOffs2 idB offB1 offB2) | isArray idA, idA == idB,
+        surelyNotEqual (Add (Lit offA1) offA2) (Add (Lit offB1) offB2) -> go slot prev
 
       -- we are unable to determine statically whether or not we can safely move deeper in the write chain, so return an abstract term
       _ -> Just $ SLoad slot s
 
     maxW32 :: W256
     maxW32 = into (maxBound :: Word32)
+    isArray :: ByteString -> Bool
+    isArray b = BS.length b == 32
+    isMap :: Expr Buf -> Bool
+    isMap b = bufLength b == Lit 64
+    isMap' :: ByteString -> Bool
+    isMap' b = BS.length b == 64
+    surelyNotEqual :: Expr EWord -> Expr EWord -> Bool
+    surelyNotEqual a b = case (simplifyNoLitToKeccak (Sub a b)) of
+      Lit k | k > 0 -> True
+      _ -> False
+    surelyEqual :: Expr EWord -> Expr EWord -> Bool
+    surelyEqual a b = simplifyNoLitToKeccak (Sub a b) == Lit 0
+
 
 -- storage slots for maps are determined by (keccak (bytes32(key) ++ bytes32(id)))
 pattern MappingSlot :: ByteString -> Expr EWord -> Expr EWord
@@ -711,7 +726,6 @@ pattern ArraySlotWithOffs2 id offs1 offs2 = Add (Lit offs1) (Add offs2 (Keccak (
 -- special pattern to match the 0th element because the `Add` term gets simplified out
 pattern ArraySlotZero :: ByteString -> Expr EWord
 pattern ArraySlotZero id = Keccak (ConcreteBuf id)
-
 -- checks if two mapping ids match or not
 idsDontMatch :: ByteString -> ByteString -> Bool
 idsDontMatch a b = BS.length a >= 64 && BS.length b >= 64 && diff32to64Byte a b
@@ -821,6 +835,7 @@ safeToDecompose inp = if result /= Mixed then Just () else Nothing
                                   Lit 64 -> setMap e
                                   _ -> setMixed e
     go e@(SLoad (ArraySlotWithOffs x _) _) = if BS.length x == 32 then setArray e else setMixed e
+    go e@(SLoad (ArraySlotWithOffs2 x _ _) _) = if BS.length x == 32 then setArray e else setMixed e
     go e@(SLoad (Lit x) _) | x < 256 = setSmall e
     go e@(SLoad _ _) = setMixed e
     go e@(SStore (MappingSlot x _) _ _) = if BS.length x == 64 then setMap e else setMixed e
@@ -829,6 +844,7 @@ safeToDecompose inp = if result /= Mixed then Just () else Nothing
                                   Lit 64 -> setMap e
                                   _ -> setMixed e
     go e@(SStore (ArraySlotWithOffs x _) _ _) = if BS.length x == 32 then setArray e else setMixed e
+    go e@(SStore (ArraySlotWithOffs2 x _ _) _ _) = if BS.length x == 32 then setArray e else setMixed e
     go e@(SStore (Lit x) _ _) | x < 256 = setSmall e
     go e@(SStore _ _ _) = setMixed e
     go _ = pure ()
@@ -902,6 +918,7 @@ decomposeStorage = go
       (MappingSlot idx key) | BS.length idx == 64 -> Just (Just $ idxToWord idx, key)
       -- arrays
       (ArraySlotWithOffs idx offset) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, offset)
+      (ArraySlotWithOffs2 idx offs1 offs2) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, Add (Lit offs1) offs2)
       (ArraySlotZero idx) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, Lit 0)
       _ -> Nothing
 

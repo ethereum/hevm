@@ -355,7 +355,7 @@ tests = testGroup "hevm"
       let simpExpr = mapExprM Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
-    , ignoreTest $ test "decompose-6" $ do
+    , test "decompose-6" $ do
       Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -413,7 +413,7 @@ tests = testGroup "hevm"
        let sig = (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256]))
        expr <- withDefaultSolver $ \s -> getExpr s c sig [] defaultVeriOpts
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
-    , ignoreTest $ test "simplify-storage-map-only-2" $ do
+    , test "simplify-storage-map-only-2" $ do
        Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
