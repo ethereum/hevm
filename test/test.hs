@@ -355,7 +355,7 @@ tests = testGroup "hevm"
       let simpExpr = mapExprM Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
-    , test "decompose-6-fail" $ do
+    , test "decompose-6" $ do
       Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -371,6 +371,31 @@ tests = testGroup "hevm"
       let simpExpr = mapExprM Expr.decomposeStorage expr
       -- putStrLnM $ T.unpack $ formatExpr (fromJust simpExpr)
       assertEqualM "Decompose did not succeed." (isJust simpExpr) True
+    -- This test uses array.length, which is is concrete 0 only in case we start with an empty storage
+    -- otherwise (i.e. with getExpr) it's symbolic, and the exploration loops forever
+    , test "decompose-7-emtpy-storage" $ do
+       Just c <- solcRuntime "MyContract" [i|
+        contract MyContract {
+          uint[] arr;
+          function nested_append(uint v, uint w) public {
+            arr.push(w);
+            arr.push();
+            arr.push();
+            arr.push(arr[0]-1);
+
+            arr[2] = v;
+            arr[1] = arr[0]-arr[2];
+
+            assert(arr.length == 4);
+            assert(arr[0] == w);
+            assert(arr[1] == w-v);
+            assert(arr[2] == v);
+            assert(arr[3] == w-1);
+          }
+       } |]
+       let sig = Just $ Sig "nested_append(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256]
+       expr <- withDefaultSolver $ \s -> getExprEmptyStore s c sig [] defaultVeriOpts
+       assertEqualM "Expression must be clean." (badStoresInExpr expr) False
     , test "simplify-storage-map-only-static" $ do
        Just c <- solcRuntime "MyContract"
         [i|
@@ -385,7 +410,8 @@ tests = testGroup "hevm"
           }
         }
         |]
-       expr <- withDefaultSolver $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
+       let sig = (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256]))
+       expr <- withDefaultSolver $ \s -> getExpr s c sig [] defaultVeriOpts
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
     , test "simplify-storage-map-only-2" $ do
        Just c <- solcRuntime "MyContract"
@@ -755,11 +781,11 @@ tests = testGroup "hevm"
         let simplified = pand (Expr.simplifyProps [p])
         checkEquivPropAndLHS p simplified
     , testProperty "storage-slot-simp-property" $ \(StorageExp s) -> prop $ do
-        -- we have to run `Expr.structureArraySlots` on the unsimplified system, or
+        -- we have to run `Expr.litToKeccak` on the unsimplified system, or
         -- we'd need some form of minimal simplifier for things to work out. As long as
-        -- we trust the structureArraySlots, this is fine, as that function is standalone,
+        -- we trust the litToKeccak, this is fine, as that function is stand-alone,
         -- and quite minimal
-        let s2 = Expr.structureArraySlots s
+        let s2 = Expr.litToKeccak s
         let simplified = Expr.simplify s2
         checkEquivAndLHS s2 simplified
     , test "storage-slot-single" $ do
