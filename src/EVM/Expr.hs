@@ -61,37 +61,24 @@ op3 :: (Expr EWord -> Expr EWord -> Expr EWord -> Expr EWord)
 op3 _ concrete (Lit x) (Lit y) (Lit z) = Lit (concrete x y z)
 op3 symbolic _ x y z = symbolic x y z
 
--- | If a given binary op is commutative, then we always force Lits to the lhs if
--- only one argument is a Lit. This makes writing pattern matches in the
--- simplifier easier.
+-- | If a given binary op is commutative, then we always order the arguments.
+-- This makes writing pattern matches in the simplifier easier.
+-- It will also force Lit to be the 1st argument, since Lit is the 1st element of Expr (see Types.hs).
 normArgs :: (Expr EWord -> Expr EWord -> Expr EWord) -> (W256 -> W256 -> W256) -> Expr EWord -> Expr EWord -> Expr EWord
-normArgs sym conc l r = case (l, r) of
-  (Lit _, _) -> doOp l r
-  (_, Lit _) -> doOp r l
-  _ -> doOp l r
-  where
-    doOp = op2 sym conc
-
--- Same as `normArgs`, but for commutative operators it orders the arguments canonically
--- This helps in cases when (PEq x1 x2) is comparing x1 and x2 that are equivalent modulo commutativity.
--- In such cases, normArgsOrd will make sure x1 and x2 look the same.
--- NOTE: This is compatible with `Lit` being always on the left, as `Lit` is always
---       less than any other expression
-normArgsOrd :: (Expr EWord -> Expr EWord -> Expr EWord) -> (W256 -> W256 -> W256) -> Expr EWord -> Expr EWord -> Expr EWord
-normArgsOrd sym conc l r = if l <= r then doOp l r else doOp r l
+normArgs sym conc l r = if l <= r then doOp l r else doOp r l
   where
     doOp = op2 sym conc
 
 -- Integers
 
 add :: Expr EWord -> Expr EWord -> Expr EWord
-add = normArgsOrd Add (+)
+add = normArgs Add (+)
 
 sub :: Expr EWord -> Expr EWord -> Expr EWord
 sub = op2 Sub (-)
 
 mul :: Expr EWord -> Expr EWord -> Expr EWord
-mul = normArgsOrd Mul (*)
+mul = normArgs Mul (*)
 
 div :: Expr EWord -> Expr EWord -> Expr EWord
 div = op2 Div (\x y -> if y == 0 then 0 else Prelude.div x y)
@@ -166,7 +153,7 @@ sgt = op2 SGT (\x y ->
   in if sx > sy then 1 else 0)
 
 eq :: Expr EWord -> Expr EWord -> Expr EWord
-eq = normArgsOrd Eq (\x y -> if x == y then 1 else 0)
+eq = normArgs Eq (\x y -> if x == y then 1 else 0)
 
 iszero :: Expr EWord -> Expr EWord
 iszero = op1 IsZero (\x -> if x == 0 then 1 else 0)
@@ -174,13 +161,13 @@ iszero = op1 IsZero (\x -> if x == 0 then 1 else 0)
 -- Bits
 
 and :: Expr EWord -> Expr EWord -> Expr EWord
-and = normArgsOrd And (.&.)
+and = normArgs And (.&.)
 
 or :: Expr EWord -> Expr EWord -> Expr EWord
-or = normArgsOrd Or (.|.)
+or = normArgs Or (.|.)
 
 xor :: Expr EWord -> Expr EWord -> Expr EWord
-xor = normArgsOrd Xor Data.Bits.xor
+xor = normArgs Xor Data.Bits.xor
 
 not :: Expr EWord -> Expr EWord
 not = op1 Not complement
@@ -634,7 +621,7 @@ readStorage' loc store = case readStorage loc store of
 -- test for an example where this happens. Note that decomposition solves this, though late in
 -- the simplification lifecycle (just before SMT generation, which can be too late)
 readStorage :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
-readStorage w st = go (simplify w) st
+readStorage w st = go (simplifyNoLitToKeccak w) (simplifyNoLitToKeccak st)
   where
     go :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
     go _ (GVar _) = internalError "Can't read from a GVar"
@@ -644,21 +631,23 @@ readStorage w st = go (simplify w) st
     go slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
       -- if address and slot match then we return the val in this write
       _ | prevSlot == slot -> Just val
-
-      -- if the slots don't match (see previous guard) and are lits, we can skip this write
-      (Lit _, Lit _) -> go slot prev
+      (a, b) | surelyEqual a b -> Just val
+      (a, b) | surelyNotEqual a b -> go slot prev
 
       -- slot is for a map + map -> skip write
-      (MappingSlot idA _, MappingSlot idB _)       | BS.length idB == 64 && BS.length idA == 64 && idsDontMatch idA idB  -> go slot prev
-      (MappingSlot idA keyA, MappingSlot idB keyB) | BS.length idB == 64 && BS.length idA == 64 && surelyNotEq keyA keyB -> go slot prev
+      (MappingSlot idA _, MappingSlot idB _)       | isMap' idB, isMap' idA, idsDontMatch idA idB  -> go slot prev
+      (MappingSlot idA keyA, MappingSlot idB keyB) | isMap' idB, isMap' idA, surelyNotEqual keyA keyB -> go slot prev
 
       -- special case of array + map -> skip write
-      (ArraySlotWithOffs idA _, Keccak   k)      | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
-      (ArraySlotZero idA, Keccak k)              | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
+      (ArraySlotWithOffs idA _, Keccak k)          | isMap k, isArray idA -> go slot prev
+      (ArraySlotWithOffs2 idA _ _, Keccak k)       | isMap k, isArray idA -> go slot prev
+      (ArraySlotZero idA, Keccak k)                | isMap k, isArray idA -> go slot prev
 
       -- special case of map + array -> skip write
-      (Keccak k, ArraySlotWithOffs idA _)      | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
-      (ArraySlotWithOffs idA _, Keccak k)      | bufLength k == Lit 64 && BS.length idA == 32 -> go slot prev
+      (Keccak k, ArraySlotWithOffs idA _)          | isMap k, isArray idA -> go slot prev
+      (Keccak k, ArraySlotWithOffs2 idA _ _)       | isMap k, isArray idA -> go slot prev
+      (ArraySlotWithOffs idA _, Keccak k)          | isMap k, isArray idA -> go slot prev
+      (ArraySlotWithOffs2 idA _ _, Keccak k)       | isMap k, isArray idA -> go slot prev
 
       -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
       (Lit a, Keccak _) | a < 256 -> go slot prev
@@ -669,12 +658,8 @@ readStorage w st = go (simplify w) st
       -- occurring here is 2^32/2^256 = 2^-224, which is close enough to zero
       -- for our purposes. This lets us completely simplify reads from write
       -- chains involving writes to arrays at literal offsets.
-      (Lit a, Add (Lit b) (Keccak _) ) | a < 256, b < maxW32 -> go slot prev
-      (Add (Lit a) (Keccak _) , Lit b) | b < 256, a < maxW32 -> go slot prev
-
-      --- NOTE these are needed to succeed in rewriting arrays with a variable index
-      -- (Lit a, Add (Keccak _) (Var _) ) | a < 256 -> go slot prev
-      -- (Add (Keccak _) (Var _) , Lit b) | b < 256 -> go slot prev
+      (Lit a, Add (Lit b) (Keccak _)) | a < 256, b < maxW32 -> go slot prev
+      (Add (Lit a) (Keccak _) ,Lit b) | b < 256, a < maxW32 -> go slot prev
 
       -- Finding two Keccaks that are < 256 away from each other should be VERY hard
       -- This simplification allows us to deal with maps of structs
@@ -682,34 +667,49 @@ readStorage w st = go (simplify w) st
       (Add (Lit a2) (Keccak _), (Keccak _)) | a2 > 0, a2 < 256 -> go slot prev
       ((Keccak _), Add (Lit b2) (Keccak _)) | b2 > 0, b2 < 256 -> go slot prev
 
-      -- case of array + array, but different id's or different concrete offsets
       -- zero offs vs zero offs
-      (ArraySlotZero idA, ArraySlotZero idB)                   | BS.length idA == 32, BS.length idB == 32, idA /= idB -> go slot prev
-      -- zero offs vs non-zero offs
-      (ArraySlotZero idA, ArraySlotWithOffs idB _)             | BS.length idA == 32, BS.length idB == 32, idA /= idB -> go slot prev
-      (ArraySlotZero idA, ArraySlotWithOffs idB (Lit offB))    | BS.length idA == 32, BS.length idB == 32, offB /= 0  -> go slot prev
-      -- non-zero offs vs zero offs
-      (ArraySlotWithOffs idA _, ArraySlotZero idB)             | BS.length idA == 32, BS.length idB == 32, idA /= idB -> go slot prev
-      (ArraySlotWithOffs idA (Lit offA), ArraySlotZero idB)    | BS.length idA == 32, BS.length idB == 32, offA /= 0  -> go slot prev
-      -- non-zero offs vs non-zero offs
-      (ArraySlotWithOffs idA _, ArraySlotWithOffs idB _)       | BS.length idA == 32, BS.length idB == 32, idA /= idB -> go slot prev
+      (ArraySlotZero idA, ArraySlotZero idB)                   | isArray idA, isArray idB, idA /= idB -> go slot prev
 
-      (ArraySlotWithOffs idA offA, ArraySlotWithOffs idB offB) | BS.length idA == 32, BS.length idB == 32, surelyNotEq offA offB -> go slot prev
+      -- zero offs vs non-zero offs
+      (ArraySlotZero idA, ArraySlotWithOffs idB _)             | isArray idA, isArray idB, idA /= idB -> go slot prev
+      (ArraySlotZero idA, ArraySlotWithOffs idB (Lit offB))    | isArray idA, idA == idB, offB /= 0  -> go slot prev
+      (ArraySlotZero idA, ArraySlotWithOffs2 idB _ _)          | isArray idA, isArray idB, idA /= idB -> go slot prev
+
+      -- non-zero offs vs zero offs
+      (ArraySlotWithOffs idA _, ArraySlotZero idB)             | isArray idA, isArray idB, idA /= idB -> go slot prev
+      (ArraySlotWithOffs idA (Lit offA), ArraySlotZero idB)    | isArray idA, idA == idB, offA /= 0  -> go slot prev
+
+      -- non-zero offs vs non-zero offs, different ids
+      (ArraySlotWithOffs idA _, ArraySlotWithOffs idB _)       | isArray idA, isArray idB, idA /= idB -> go slot prev
+
+      -- non-zero offs vs non-zero offs, same ids
+      (ArraySlotWithOffs idA a, ArraySlotWithOffs idB b)                       | isArray idA, idA == idB,
+        surelyNotEqual a b -> go slot prev
+      (ArraySlotWithOffs idB offB2, ArraySlotWithOffs2 idA offA1 offA2)        | isArray idA, idA == idB,
+        surelyNotEqual (Add (Lit offA1) offA2) offB2 -> go slot prev
+      (ArraySlotWithOffs2 idA offA1 offA2, ArraySlotWithOffs idB offB2)        | isArray idA, idA == idB,
+        surelyNotEqual (Add (Lit offA1) offA2) offB2 -> go slot prev
+      (ArraySlotWithOffs2 idA offA1 offA2, ArraySlotWithOffs2 idB offB1 offB2) | isArray idA, idA == idB,
+        surelyNotEqual (Add (Lit offA1) offA2) (Add (Lit offB1) offB2) -> go slot prev
 
       -- we are unable to determine statically whether or not we can safely move deeper in the write chain, so return an abstract term
       _ -> Just $ SLoad slot s
 
-    surelyNotEq :: Expr a -> Expr a -> Bool
-    surelyNotEq (Lit a) (Lit b) = a /= b
-    -- never equal: x+y (y is concrete) vs x+z (z is concrete), y!=z
-    surelyNotEq (Add (Lit l1) v1) (Add (Lit l2) v2) = l1 /= l2 && v1 == v2
-    -- never equal: x+y (y is concrete, non-zero) vs x
-    surelyNotEq v1 (Add (Lit l2) v2) = l2 /= 0 && v1 == v2
-    surelyNotEq (Add (Lit l1) v1) v2 = l1 /= 0 && v1 == v2
-    surelyNotEq _ _ = False
-
     maxW32 :: W256
     maxW32 = into (maxBound :: Word32)
+    isArray :: ByteString -> Bool
+    isArray b = BS.length b == 32
+    isMap :: Expr Buf -> Bool
+    isMap b = bufLength b == Lit 64
+    isMap' :: ByteString -> Bool
+    isMap' b = BS.length b == 64
+    surelyNotEqual :: Expr EWord -> Expr EWord -> Bool
+    surelyNotEqual a b = case (simplifyNoLitToKeccak (Sub a b)) of
+      Lit k | k > 0 -> True
+      _ -> False
+    surelyEqual :: Expr EWord -> Expr EWord -> Bool
+    surelyEqual a b = simplifyNoLitToKeccak (Sub a b) == Lit 0
+
 
 -- storage slots for maps are determined by (keccak (bytes32(key) ++ bytes32(id)))
 pattern MappingSlot :: ByteString -> Expr EWord -> Expr EWord
@@ -720,10 +720,12 @@ pattern MappingSlot idx key = Keccak (WriteWord (Lit 0) key (ConcreteBuf idx))
 pattern ArraySlotWithOffs :: ByteString -> Expr EWord -> Expr EWord
 pattern ArraySlotWithOffs id offset = Add offset (Keccak (ConcreteBuf id))
 
+pattern ArraySlotWithOffs2 :: ByteString -> W256 -> Expr EWord -> Expr EWord
+pattern ArraySlotWithOffs2 id offs1 offs2 = Add (Lit offs1) (Add offs2 (Keccak (ConcreteBuf id)))
+
 -- special pattern to match the 0th element because the `Add` term gets simplified out
 pattern ArraySlotZero :: ByteString -> Expr EWord
 pattern ArraySlotZero id = Keccak (ConcreteBuf id)
-
 -- checks if two mapping ids match or not
 idsDontMatch :: ByteString -> ByteString -> Bool
 idsDontMatch a b = BS.length a >= 64 && BS.length b >= 64 && diff32to64Byte a b
@@ -738,8 +740,8 @@ slotPos :: Word8 -> ByteString
 slotPos pos = BS.pack ((replicate 31 (0::Word8))++[pos])
 
 -- | Turns Literals into keccak(bytes32(id)) + offset (i.e. writes to arrays)
-structureArraySlots :: Expr a -> Expr a
-structureArraySlots e = mapExpr go e
+litToKeccak :: Expr a -> Expr a
+litToKeccak e = mapExpr go e
   where
     go :: Expr a -> Expr a
     go orig@(Lit key) = case litToArrayPreimage key of
@@ -833,6 +835,7 @@ safeToDecompose inp = if result /= Mixed then Just () else Nothing
                                   Lit 64 -> setMap e
                                   _ -> setMixed e
     go e@(SLoad (ArraySlotWithOffs x _) _) = if BS.length x == 32 then setArray e else setMixed e
+    go e@(SLoad (ArraySlotWithOffs2 x _ _) _) = if BS.length x == 32 then setArray e else setMixed e
     go e@(SLoad (Lit x) _) | x < 256 = setSmall e
     go e@(SLoad _ _) = setMixed e
     go e@(SStore (MappingSlot x _) _ _) = if BS.length x == 64 then setMap e else setMixed e
@@ -841,6 +844,7 @@ safeToDecompose inp = if result /= Mixed then Just () else Nothing
                                   Lit 64 -> setMap e
                                   _ -> setMixed e
     go e@(SStore (ArraySlotWithOffs x _) _ _) = if BS.length x == 32 then setArray e else setMixed e
+    go e@(SStore (ArraySlotWithOffs2 x _ _) _ _) = if BS.length x == 32 then setArray e else setMixed e
     go e@(SStore (Lit x) _ _) | x < 256 = setSmall e
     go e@(SStore _ _ _) = setMixed e
     go _ = pure ()
@@ -914,6 +918,7 @@ decomposeStorage = go
       (MappingSlot idx key) | BS.length idx == 64 -> Just (Just $ idxToWord idx, key)
       -- arrays
       (ArraySlotWithOffs idx offset) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, offset)
+      (ArraySlotWithOffs2 idx offs1 offs2) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, Add (Lit offs1) offs2)
       (ArraySlotZero idx) | BS.length idx == 32 -> Just (Just $ idxToWord64 idx, Lit 0)
       _ -> Nothing
 
@@ -952,9 +957,10 @@ decomposeStorage = go
 -- | Simple recursive match based AST simplification
 -- Note: may not terminate!
 simplify :: Expr a -> Expr a
-simplify e = if (mapExpr go e == e)
-               then e
-               else simplify (mapExpr go (structureArraySlots e))
+simplify e = untilFixpoint (simplifyNoLitToKeccak . litToKeccak) e
+
+simplifyNoLitToKeccak :: Expr a -> Expr a
+simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
   where
     go :: Expr a -> Expr a
 
@@ -1037,6 +1043,7 @@ simplify e = if (mapExpr go e == e)
       | otherwise = Lit 0
     go (EVM.Types.LT _ (Lit 0)) = Lit 0
     go (EVM.Types.LT a (Lit 1)) = iszero a
+    go (EVM.Types.LT (Lit 0) a) = iszero (Eq (Lit 0) a)
 
     -- normalize all comparisons in terms of LT
     go (EVM.Types.GT a b) = lt b a
@@ -1120,16 +1127,29 @@ simplify e = if (mapExpr go e == e)
     go (Add (Lit a) (Add (Lit b) x)) = add (Lit (a+b)) x
     go (Mul (Lit a) (Mul (Lit b) x)) = mul (Lit (a*b)) x
     go (Xor (Lit a) (Xor (Lit b) x)) = EVM.Expr.xor (Lit (Data.Bits.xor a b)) x
+    go (Add (Add a b) c) = add (l !! 0) (add (l !! 1) (l !! 2))
+      where l = sort [a, b, c]
     go (Add a (Add b c)) = add (l !! 0) (add (l !! 1) (l !! 2))
+      where l = sort [a, b, c]
+    go (Mul (Mul a b) c) = mul (l !! 0) (mul (l !! 1) (l !! 2))
       where l = sort [a, b, c]
     go (Mul a (Mul b c)) = mul (l !! 0) (mul (l !! 1) (l !! 2))
       where l = sort [a, b, c]
+    go (Xor (Xor a b) c) = x (l !! 0) (x (l !! 1) (l !! 2))
+      where l = sort [a, b, c]
+            x = EVM.Expr.xor
     go (Xor a (Xor b c)) = x (l !! 0) (x (l !! 1) (l !! 2))
       where l = sort [a, b, c]
             x = EVM.Expr.xor
+    go (Or (Or a b) c) = o (l !! 0) (o (l !! 1) (l !! 2))
+      where l = sort [a, b, c]
+            o = EVM.Expr.or
     go (Or a (Or b c)) = o (l !! 0) (o (l !! 1) (l !! 2))
       where l = sort [a, b, c]
             o = EVM.Expr.or
+    go (And (And a b) c) = an (l !! 0) (an (l !! 1) (l !! 2))
+      where l = sort [a, b, c]
+            an = EVM.Expr.and
     go (And a (And b c)) = an (l !! 0) (an (l !! 1) (l !! 2))
       where l = sort [a, b, c]
             an = EVM.Expr.and
@@ -1259,9 +1279,11 @@ simplifyProp prop =
   where
     go :: Prop -> Prop
 
-    -- LT/LEq comparisons
+    -- Rewrite PGT/GEq to PLT/PLEq
     go (PGT a b) = PLT b a
     go (PGEq a b) = PLEq b a
+
+    -- PLT/PLEq comparisons
     go (PLT  (Var _) (Lit 0)) = PBool False
     go (PLEq (Lit 0) _) = PBool True
     go (PLEq (WAddr _) (Lit 1461501637330902918203684832716283019655932542975)) = PBool True
@@ -1289,8 +1311,14 @@ simplifyProp prop =
     -- Empty buf
     go (PEq (Lit 0) (BufLength k)) = peq k (ConcreteBuf "")
 
+    -- PEq rewrites (notice -- GT/GEq is always rewritten to LT by simplify)
+    go (PEq (Lit 1) (IsZero (LT a b))) = PLT a b
+    go (PEq (Lit 1) (IsZero (LEq a b))) = PLEq a b
+    go (PEq (Lit 0) (IsZero a)) = PLT (Lit 0) a
+    go (PEq a1 (Add a2 y)) | a1 == a2 = peq y (Lit 0)
+
     -- solc specific stuff
-    go (PEq (Lit 0) (IsZero (IsZero (Eq a b)))) = PNeg (peq a b)
+    go (PLT (Lit 0) (IsZero (Eq a b))) = PNeg (peq a b)
 
     -- iszero(a) -> (a == 0)
     -- iszero(iszero(a))) -> ~(a == 0) -> a > 0
@@ -1324,18 +1352,16 @@ simplifyProp prop =
     go (PImpl (PBool True) b) = b
     go (PImpl (PBool False) _) = PBool True
 
-    -- Double negation
-    go (PEq (Lit 0) (IsZero (Eq a b))) = peq a b
-    go (PEq (Lit 0) (IsZero (LT a b))) = PLT a b
-    go (PEq (Lit 0) (IsZero (GT a b))) = PGT a b
-    go (PEq (Lit 0) (IsZero (LEq a b))) = PLEq a b
-    go (PEq (Lit 0) (IsZero (GEq a b))) = PGEq a b
+    -- Double negation (no need for GT/GEq, as it's rewritten to LT/LEq)
+    go (PLT (Lit 0) (LT a b)) = PLT a b
+    go (PLT (Lit 0) (LEq a b)) = PLEq a b
 
     -- Eq
     go (PEq (Lit 0) (Eq a b)) = PNeg (peq a b)
     go (PEq (Lit 1) (Eq a b)) = peq a b
     go (PEq (Lit 0) (Sub a b)) = peq a b
     go (PEq (Lit 0) (LT a b)) = PLEq b a
+    go (PEq (Lit 0) (LEq a b)) = PLT b a
     go (PEq l r) = peq l r
 
     go p = p
@@ -1656,7 +1682,7 @@ constPropagate ps =
 
 -- Concretize & simplify Keccak expressions until fixed-point.
 concKeccakSimpExpr :: Expr a -> Expr a
-concKeccakSimpExpr orig = untilFixpoint ((mapExpr concKeccakOnePass) . simplify) orig
+concKeccakSimpExpr orig = untilFixpoint (simplifyNoLitToKeccak . (mapExpr concKeccakOnePass)) (simplify orig)
 
 -- Only concretize Keccak in Props
 -- Needed because if it also simplified, we may not find some simplification errors, as
