@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module EVM.SymExec where
 
@@ -38,13 +39,13 @@ import EVM.Effects
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (feeSchedule)
 import EVM.Format (formatExpr, formatPartial, formatPartialShort, showVal, indent, formatBinary, formatProp)
-import EVM.SMT (SMTCex(..), SMT2(..), assertProps)
 import EVM.SMT qualified as SMT
 import EVM.Solvers
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 import EVM.Traversals
-import EVM.Types
+import EVM.Types hiding (Comp)
+import EVM.Types qualified
 import EVM.Expr (maybeConcStoreSimp)
 import GHC.Conc (getNumProcessors)
 import GHC.Generics (Generic)
@@ -58,49 +59,22 @@ data LoopHeuristic
   | StackBased
   deriving (Eq, Show, Read, ParseField, ParseFields, ParseRecord, Generic)
 
-data ProofResult a b c d = Qed a | Cex b | Unknown c | Error d
-  deriving (Show, Eq)
-type VerifyResult = ProofResult () (Expr End, SMTCex) (Expr End) String
-type EquivResult = ProofResult () (SMTCex) () String
-
-isUnknown :: ProofResult a b c d -> Bool
-isUnknown (EVM.SymExec.Unknown _) = True
-isUnknown _ = False
-
-isError :: ProofResult a b c d -> Bool
-isError (EVM.SymExec.Error _) = True
-isError _ = False
-
-getError :: ProofResult a b c String -> Maybe String
-getError (EVM.SymExec.Error e) = Just e
-getError _ = Nothing
-
-isCex :: ProofResult a b c d -> Bool
-isCex (Cex _) = True
-isCex _ = False
-
-isQed :: ProofResult a b c d -> Bool
-isQed (Qed _) = True
-isQed _ = False
-
-groupIssues :: [ProofResult a b c String] -> [(Integer, String)]
+groupIssues :: forall a b . GetUnknownStr b => [ProofResult a b] -> [(Integer, String)]
 groupIssues results = map (\g -> (into (length g), NE.head g)) grouped
   where
-    getErr :: ProofResult a b c String -> String
-    getErr (EVM.SymExec.Error k) = k
-    getErr (EVM.SymExec.Unknown _) = "SMT result timeout/unknown"
-    getErr _ = internalError "shouldn't happen"
-    sorted = sort $ map getErr results
-    grouped = NE.group sorted
+    getIssue :: ProofResult a b -> Maybe String
+    getIssue (Error k) = Just k
+    getIssue (Unknown reason) = Just $ "SMT solver says: " <> getUnknownStr reason
+    getIssue _ = Nothing
+    grouped = NE.group $ sort $ mapMaybe getIssue results
 
 groupPartials :: [Expr End] -> [(Integer, String)]
 groupPartials e = map (\g -> (into (length g), NE.head g)) grouped
   where
-    getErr :: Expr End -> String
-    getErr (Partial _ _ reason) = T.unpack $ formatPartialShort reason
-    getErr _ = internalError "shouldn't happen"
-    sorted = sort $ map getErr (filter isPartial e)
-    grouped = NE.group sorted
+    getPartial :: Expr End -> Maybe String
+    getPartial (Partial _ _ reason) = Just $ T.unpack $ formatPartialShort reason
+    getPartial _ = Nothing
+    grouped = NE.group $ sort $ mapMaybe getPartial e
 
 data VeriOpts = VeriOpts
   { simp :: Bool
@@ -428,7 +402,7 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                       -- if we can statically determine unsatisfiability then we skip exploring the jump
                       [PBool False] -> liftIO $ stToIO $ runStateT (continue (Case False)) vm
                       -- otherwise we explore both branches
-                      _ -> liftIO $ stToIO $ runStateT (continue EVM.Types.Unknown) vm
+                      _ -> liftIO $ stToIO $ runStateT (continue UnknownBranch) vm
                     interpret fetcher maxIter askSmtIters heuristic vm' (k r)
           _ -> performQuery
 
@@ -615,7 +589,7 @@ flattenExpr = go []
 -- the incremental nature of the task at hand. Introducing support for
 -- incremental queries might let us go even faster here.
 -- TODO: handle errors properly
-reachable :: App m => SolverGroup -> Expr End -> m ([SMT2], Expr End)
+reachable :: App m => SolverGroup -> Expr End -> m ([SMT.SMT2], Expr End)
 reachable solvers e = do
   res <- go [] e
   pure $ second (fromMaybe (internalError "no reachable paths found")) res
@@ -626,7 +600,7 @@ reachable solvers e = do
        If reachable return the expr wrapped in a Just. If not return Nothing.
        When walking back up the tree drop unreachable subbranches.
     -}
-    go :: (App m, MonadUnliftIO m) => [Prop] -> Expr End -> m ([SMT2], Maybe (Expr End))
+    go :: (App m, MonadUnliftIO m) => [Prop] -> Expr End -> m ([SMT.SMT2], Maybe (Expr End))
     go pcs = \case
       ITE c t f -> do
         (tres, fres) <- withRunInIO $ \env -> concurrently
@@ -641,9 +615,11 @@ reachable solvers e = do
       leaf -> do
         (res, smt2) <- checkSatWithProps solvers pcs
         case res of
-          Sat _ -> pure ([getNonError smt2], Just leaf)
-          Unsat -> pure ([getNonError smt2], Nothing)
-          r -> internalError $ "Invalid solver result: " <> show r
+          Qed -> pure ([getNonError smt2], Nothing)
+          Cex _ -> pure ([getNonError smt2], Just leaf)
+          -- if we get an error, we don't know if the leaf is reachable or not, so
+          -- we assume it could be reachable
+          _ -> pure ([], Just leaf)
 
 -- | Extract constraints stored in Expr End nodes
 extractProps :: Expr End -> [Prop]
@@ -708,12 +684,12 @@ verify solvers opts preState maybepost = do
       putStrLn $ "   Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
 
     case maybepost of
-      Nothing -> pure (expr, [Qed ()])
+      Nothing -> pure (expr, [Qed])
       Just post -> liftIO $ do
         let
           -- Filter out any leaves from `flattened` that can be statically shown to be safe
           tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf preState.constraints post, leaf)
-          withQueries = filter canBeSat tocheck <&> first (assertProps conf)
+          withQueries = filter canBeSat tocheck <&> first (SMT.assertProps conf)
         when conf.debug $
           putStrLn $ "   Checking for reachability of " <> show (length withQueries)
                      <> " potential property violation(s) in call " <> call
@@ -723,9 +699,9 @@ verify solvers opts preState maybepost = do
           res <- checkSat solvers query
           when conf.debug $ putStrLn $ "   SMT result: " <> show res
           pure (res, leaf)
-        let cexs = filter (\(res, _) -> not . isUnsat $ res) results
+        let cexs = filter (\(res, _) -> not . isQed $ res) results
         when conf.debug $ putStrLn $ "   Found " <> show (length cexs) <> " potential counterexample(s) in call " <> call
-        pure $ if Prelude.null cexs then (expr, [Qed ()]) else (expr, fmap toVRes cexs)
+        pure $ if Prelude.null cexs then (expr, [Qed]) else (expr, fmap toVRes cexs)
   where
     getCallPrefix :: Expr Buf -> String
     getCallPrefix (WriteByte (Lit 0) (LitByte a) (WriteByte (Lit 1) (LitByte b) (WriteByte (Lit 2) (LitByte c) (WriteByte (Lit 3) (LitByte d) _)))) = mconcat $ map (printf "%02x") [a,b,c,d]
@@ -736,12 +712,12 @@ verify solvers opts preState maybepost = do
     canBeSat (a, _) = case a of
         [PBool False] -> False
         _ -> True
-    toVRes :: (CheckSatResult, Expr End) -> VerifyResult
+    toVRes :: (SMTResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
-      Sat model -> Cex (leaf, expandCex preState model)
-      EVM.Solvers.Unknown _ -> EVM.SymExec.Unknown leaf
-      EVM.Solvers.Error e -> EVM.SymExec.Error e
-      Unsat -> Qed ()
+      Cex model -> Cex (leaf, expandCex preState model)
+      Unknown reason -> Unknown (reason, leaf)
+      Error e -> Error e
+      Qed -> Qed
 
 expandCex :: VM Symbolic s -> SMTCex -> SMTCex
 expandCex prestate c = c { store = Map.union c.store concretePreStore }
@@ -777,7 +753,7 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
   case bytecodeA == bytecodeB of
     True -> liftIO $ do
       putStrLn "bytecodeA and bytecodeB are identical"
-      pure ([Qed ()], mempty)
+      pure ([Qed], mempty)
     False -> do
       when conf.debug $ liftIO $ do
         putStrLn "bytecodeA and bytecodeB are different, checking for equivalence"
@@ -842,7 +818,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
       procs <- liftIO getNumProcessors
       cexes <- checkAll differingEndStates knownUnsat procs
       let allCexes = cexes <> deployedCexes
-      if all isQed allCexes then pure ([Qed ()], ends)
+      if all isQed allCexes then pure ([Qed], ends)
                             else pure (filter (Prelude.not . isQed) allCexes, ends)
   where
     -- we order the sets by size because this gives us more cache hits when
@@ -861,15 +837,10 @@ equivalenceCheck' solvers branchesA branchesB create = do
     check :: App m => UnsatCache -> Set Prop -> m EquivResult
     check knownUnsat props = do
       ku <- liftIO $ readTVarIO knownUnsat
-      res <- if subsetAny props ku then pure Unsat
+      if subsetAny props ku then pure $ Qed
              else do
                (res, _) <- checkSatWithProps solvers (Set.toList props)
                pure res
-      case res of
-        Sat x -> pure $ Cex x
-        Unsat -> pure $ Qed ()
-        EVM.Solvers.Unknown _ -> pure $ EVM.SymExec.Unknown ()
-        EVM.Solvers.Error txt -> pure $ EVM.SymExec.Error txt
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
@@ -973,31 +944,31 @@ equivalenceCheck' solvers branchesA branchesB create = do
 both' :: (a -> b) -> (a, a) -> (b, b)
 both' f (x, y) = (f x, f y)
 
-produceModels :: App m => SolverGroup -> Expr End -> m [(Expr End, CheckSatResult)]
+produceModels :: App m => SolverGroup -> Expr End -> m [(Expr End, SMTResult)]
 produceModels solvers expr = do
   let flattened = flattenExpr expr
-      withQueries conf = fmap (\e -> ((assertProps conf) . extractProps $ e, e)) flattened
+      withQueries conf = fmap (\e -> ((SMT.assertProps conf) . extractProps $ e, e)) flattened
   conf <- readConfig
   results <- liftIO $ (flip mapConcurrently) (withQueries conf) $ \(query, leaf) -> do
     res <- checkSat solvers query
     pure (res, leaf)
-  pure $ fmap swap $ filter (\(res, _) -> not . isUnsat $ res) results
+  pure $ fmap swap $ filter (\(res, _) -> not . isQed $ res) results
 
-showModel :: Expr Buf -> (Expr End, CheckSatResult) -> IO ()
+showModel :: Expr Buf -> (Expr End, SMTResult) -> IO ()
 showModel cd (expr, res) = do
   case res of
-    EVM.Solvers.Unsat -> pure () -- ignore unreachable branches
-    EVM.Solvers.Error e -> do
+    Qed -> pure () -- ignore unreachable branches
+    Error e -> do
       putStrLn ""
       putStrLn "--- Branch ---"
       putStrLn $ "Error during SMT solving, cannot check branch " <> e
-    EVM.Solvers.Unknown reason -> do
+    Unknown reason -> do
       putStrLn ""
       putStrLn "--- Branch ---"
       putStrLn $ "Unable to produce a model for the following end state due to '" <> reason <> "' :"
       T.putStrLn $ indent 2 $ formatExpr expr
       putStrLn ""
-    Sat cex -> do
+    Cex cex -> do
       putStrLn ""
       putStrLn "--- Branch ---"
       putStrLn "Inputs:"
@@ -1145,8 +1116,8 @@ subModel c
   . subVars c.txContext
   . subAddrs c.addrs
   where
-    forceFlattened (SMT.Flat bs) = bs
-    forceFlattened b@(SMT.Comp _) = forceFlattened $
+    forceFlattened (Flat bs) = bs
+    forceFlattened b@(EVM.Types.Comp _) = forceFlattened $
       fromMaybe (internalError $ "cannot flatten buffer: " <> show b)
                 (SMT.collapse b)
 
@@ -1203,10 +1174,6 @@ subStores model b = Map.foldlWithKey subStore b model
                else v
           e -> e
 
-getCex :: ProofResult a b c d -> Maybe b
+getCex :: ProofResult a b -> Maybe a
 getCex (Cex c) = Just c
 getCex _ = Nothing
-
-getUnknown :: ProofResult a b c d-> Maybe c
-getUnknown (EVM.SymExec.Unknown c) = Just c
-getUnknown _ = Nothing

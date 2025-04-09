@@ -3009,7 +3009,7 @@ instance VMOps Symbolic where
         assign (#iterations % at loc) (Just (iteration + 1, stack))
         continue v
       -- Both paths are possible; we ask for more input
-      runBothPaths loc exploreDepth Unknown =
+      runBothPaths loc exploreDepth UnknownBranch =
         (runBoth depthLimit exploreDepth ) . PleaseRunBoth condSimp $ (runBothPaths loc exploreDepth) . Case
 
   -- numBytes allows us to specify how many bytes of the returned value is relevant
