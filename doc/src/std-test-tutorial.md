@@ -2,9 +2,23 @@
 
 Test cases must be prepended with `prove_` and the testing contract must
 inherit from `Test` from [Forge's standard test
-library](https://book.getfoundry.sh/forge/forge-std). First, import Test:
-`import {Test} from "forge-std/Test.sol";` and then inherit from it via `... is
-Test`. This allows hevm to discover the test cases it needs to run. Like so:
+library](https://book.getfoundry.sh/forge/forge-std). First, install foundry:
+```
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+```
+
+Then set up a forge project with `forge init`:
+```
+mkdir myproject
+cd myproject
+forge init .
+```
+
+Then, create a new file `src/badvault-test.sol` with the following content.
+First, import Test: `import {Test} from "forge-std/Test.sol";` and then inherit
+from it via `... is Test`. This allows hevm to discover the test cases it needs
+to run. Like so:
 
 ```solidity
 pragma solidity ^0.8.19;
@@ -23,6 +37,7 @@ Once you have written such a test case, you need to compile with `forge build --
 details) and then:
 
 ```
+$ forge build --ast
 $ hevm test
 Checking 1 function(s) in contract src/badvault-test.sol:BadVault
 [RUNNING] prove_mytest(uint256)
