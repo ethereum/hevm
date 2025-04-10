@@ -4344,6 +4344,15 @@ tests = testGroup "hevm"
             Cex _ -> True
             _ -> False
         assertBoolM "Must be satisfiable!" sat
+    , testCase "can-get-value-unrelated-to-large-buffer" $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 0}}) $ do
+      withDefaultSolver $ \s -> do
+        let props = [(PEq (Var "a") (Lit 0x1)), (PGT (BufLength (AbstractBuf "b")) (Lit 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeb4))]
+        (res, _) <- checkSatWithProps s props
+        cex :: SMTCex <- case res of
+          Cex c -> pure c
+          _ -> liftIO $ assertFailure "Must be satisfiable!"
+        let value = subModel cex (Var "a")
+        assertEqualM "Can get value out of model in the presence of large buffer!" value (Lit 0x1)
   ]
   , testGroup "equivalence-checking"
     [
