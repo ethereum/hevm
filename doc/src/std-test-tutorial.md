@@ -52,7 +52,7 @@ contract MyVault {
         balance[msg.sender] += msg.value;
     }
 }
-contract Stuff is Test {
+contract MySetupTest is Test {
       MyVault vault;
       function setUp() public {
         vault = new MyVault();
@@ -63,7 +63,7 @@ contract Stuff is Test {
         vault.deposit{value: 1 ether}();
     }
 
-    function prove_anja(uint8 amt) public {
+    function prove_correct(uint8 amt) public {
         address k = address(1);
         uint pre = vault.balance(k);
         assert(pre == 1 ether);
@@ -72,6 +72,18 @@ contract Stuff is Test {
         assert(vault.balance(k) == pre + amt);
       }
 }
+```
+
+The `setUp` function is called before each test case, and can be used to
+set up the environment. In this case, we create a new vault, and deposit
+1 ether into it. The `vm.deal` function sets the balance of the user to 1
+ether, and the `vm.prank` function sets the caller to the user. This should
+now work:
+```plain
+$ hevm test
+Checking 1 function(s) in contract src/contract-test.sol:MySetupTest
+[RUNNING] prove_correct(uint8)
+   [PASS] prove_correct(uint8)
 ```
 
 The postconditions should check the state of the contract after the call(s) are
