@@ -674,9 +674,9 @@ exec1 conf = do
             mcopy sz srcOff dstOff = do
                   m <- gets (.state.memory)
                   case m of
-                    ConcreteMemory mem -> do
-                      buf <- freezeMemory mem
-                      copyBytesToMemory buf sz srcOff dstOff
+                    ConcreteMemory _ -> do
+                      buf <- readMemory srcOff sz
+                      copyBytesToMemory buf sz (Lit 0) dstOff
                     SymbolicMemory mem -> do
                       assign (#state % #memory) (SymbolicMemory $ copySlice srcOff dstOff sz mem mem)
 
