@@ -40,7 +40,7 @@ can change the address of the caller, set block number, etc. See [Cheat
 Codes](#supported-cheat-codes) below for a range of cheat codes supported. Cheat Codes
 are a standard method used by other tools, such as
 [Foundry](https://book.getfoundry.sh/), so you should be able to re-use your
-existing setup. An example setup could be:
+existing setup. An example setup could be this file in `src/setuptest.sol`:
 
 ```solidity
 pragma solidity ^0.8.19;
@@ -81,25 +81,22 @@ ether, and the `vm.prank` function sets the caller to the user. This should
 now work:
 ```plain
 $ hevm test
-Checking 1 function(s) in contract src/contract-test.sol:MySetupTest
+Checking 1 function(s) in contract src/setuptest.sol:MySetupTest
 [RUNNING] prove_correct(uint8)
-   [PASS] prove_correct(uint8)
+   [PASS] prove_correct
 ```
 
-The postconditions should check the state of the contract after the call(s) are
-complete. In particular, it should check that the changes that the function applied
-did not break any of the (invariants)[https://en.wikipedia.org/wiki/Invariant_(mathematics)]
-of the contract, such as total number of tokens.
-
-You can read more about testing and cheat codes in the (Foundry
+In general, the test should check the postconditions, e.g. the state of the
+contract after the call(s) are complete. It should also check that
+[invariants](https://en.wikipedia.org/wiki/Invariant_(mathematics)) of the
+contract, such as total number of tokens, are not violated. You can read more
+about testing and cheat codes in the (Foundry
 Book)[https://book.getfoundry.sh/forge/cheatcodes] and you can see the
 hevm-supported cheat codes [below](#supported-cheat-codes).
 
 ## Understanding Counterexamples
-
-When hevm discovers a failure, it prints an example call how to trigger the failure. Let's see the following
-simple solidity code:
-
+When hevm discovers a failure, it prints an example call how to trigger the
+failure. Let's see the following simple solidity code:
 ```
 pragma solidity ^0.8.19;
 import {Test} from "forge-std/Test.sol";
@@ -117,14 +114,12 @@ contract MyContract is Test {
 When compiling our foundry project, we must either always pass the `--ast` flag
 to `forge build`, or, much better, set the `ast = true` flag in the
 `foundry.toml` file:
-
 ```toml
 ast = true
 ```
 
 In case neither `--ast` was passed, nor `ast = true` was set in the
 `foundry.toml` file, we will get an error such as:
-
 ```
 Error: unable to parse Foundry project JSON: [...]/out/Base.sol/CommonBase.json Contract: "CommonBase"
 ```
@@ -132,8 +127,7 @@ Error: unable to parse Foundry project JSON: [...]/out/Base.sol/CommonBase.json 
 In these cases, issue `forge clean` and run `forge build --ast` again.
 
 Once the project has been correctly built, we can run `hevm test`, and get:
-
-```
+```plain
 $ hevm test
 Checking 1 function(s) in contract src/contract-fail.sol:MyContract
 [RUNNING] prove_single_fail(address,uint256)
@@ -151,7 +145,6 @@ the `address` to give a complete call, the address itself is irrelevant,
 although this is not explicitly mentioned.
 
 ## Starting State is Always Concrete
-
 In `test` mode, hevm runs with the starting state set to concrete values. This
 means that with the solidity-generated default constructor of contracts, state
 variables will be zero, and arrays and mappings will be empty. If you need a
@@ -166,10 +159,8 @@ symbolic calldata, then you don't need to run `hevm` in symbolic mode, you can
 simply run `hevm test` and hevm will provide you with a symbolic calldata.
 
 ## Test Cases that Must Always Revert
-
 Hevm assumes that a test case should not always revert. If you have such a test
 case, hevm will warn you and return a FAIL. For example this toy contract:
-
 ```solidity
 pragma solidity ^0.8.19;
 import {Test} from "forge-std/Test.sol";
@@ -185,8 +176,7 @@ contract MyContract is Test {
 ```
 
 When compiled with forge and then ran under hevm with `hevm test`, hevm returns:
-
-```
+```plain
 Checking 1 function(s) in contract src/contract-allrevert.sol:MyContract
 [RUNNING] prove_allrevert(uint256)
    [FAIL] prove_allrevert(uint256)
@@ -197,7 +187,6 @@ Checking 1 function(s) in contract src/contract-allrevert.sol:MyContract
 
 This is sometimes undesirable. In these cases, prefix your contract with
 `proveFail_` instead of `prove_`:
-
 ```solidity
 pragma solidity ^0.8.19;
 import {Test} from "forge-std/Test.sol";
@@ -217,8 +206,7 @@ contract MyContract is Test {
 ```
 
 When this is compiled with forge and then checked with hevm, it leads to:
-
-```
+```plain
 Checking 1 function(s) in contract src/contract-allrevert-expected.sol:MyContract
 [RUNNING] proveFail_allrevert_expected(uint256)
    [PASS] proveFail_allrevert_expected(uint256)
@@ -227,7 +215,6 @@ Checking 1 function(s) in contract src/contract-allrevert-expected.sol:MyContrac
 Which is now the expected outcome.
 
 ## Supported Cheat Codes
-
 Since hevm is an EVM implementation mainly dedicated to testing and
 exploration, it features a set of "cheat codes" which can manipulate the
 environment in which the execution is run. These can be accessed by calling
