@@ -1,3 +1,6 @@
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
 [book]
 authors = ["dxo", "msoos"]
 language = "en"
@@ -8,7 +11,7 @@ title = "hevm"
 
 [output.html]
 no-section-label = true
-additional-js = ["solidity.min.js"]
+additional-js = ["solidity.min.js", "mermaid.min.js", "mermaid-init.js"]
 additional-css = ["book.css"]
 git-repository-url = "https://github.com/ethereum/hevm"
 edit-url-template = "hhttps://github.com/ethereum/hevm/edit/main/{path}"

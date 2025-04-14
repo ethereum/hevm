@@ -1,33 +1,32 @@
 # Forge std-test Usage Tutorial
-
-Test cases must be prepended with `prove_` and the testing contract must
-inherit from `Test` from [Forge's standard test
-library](https://book.getfoundry.sh/forge/forge-std). First, install foundry:
-```
+First, install foundry:
+```plain
 curl -L https://foundry.paradigm.xyz | bash
 foundryup
 ```
 
 Then set up a forge project with `forge init`:
-```
+```plain
 mkdir myproject
 cd myproject
-forge init .
+forge init --no-git .
 ```
 
-Then, create a new file `src/badvault-test.sol` with the following content.
-First, import Test: `import {Test} from "forge-std/Test.sol";` and then inherit
-from it via `... is Test`. This allows hevm to discover the test cases it needs
-to run. Like so:
-
+Now, let's create a file `src/example-test.sol` with some simple code.
+Test cases must be prepended with `prove_` and the testing contract must
+inherit from `Test` from [Forge's standard test
+library](https://book.getfoundry.sh/forge/forge-std). So let's import Test:
+`import {Test} from "forge-std/Test.sol";` and then inherit from it via
+` is Test`. This allows hevm to discover the test cases it needs
+to run:
 ```solidity
 pragma solidity ^0.8.19;
 import {Test} from "forge-std/Test.sol";
-contract BadVaultTest is Test {
-  function prove_mytest() {
-  // environment setup, preconditions
-  // call(s) to test
-  // postcondition checks
+contract Example is Test {
+  function prove_mytest() public {
+  // (1) environment setup, preconditions
+  // (2) calls to test
+  // (3) postcondition checks
   }
 }
 ```
@@ -36,18 +35,26 @@ Once you have written such a test case, you need to compile with `forge build --
 (see [forge documentation](https://book.getfoundry.sh/forge/tests) for more
 details) and then:
 
-```
+```plain
 $ forge build --ast
-$ hevm test
-Checking 1 function(s) in contract src/badvault-test.sol:BadVault
+$ hevm test --match "prove_mytest"
+Checking 1 function(s) in contract src/example-test.sol:Example
 [RUNNING] prove_mytest(uint256)
    [PASS] prove_mytest(uint256)
 ```
 
 Here, hevm discovered the test case, and automatically checked it for
-violations.
+violations. If `hevm` is not in the global path, you can run hevm
+from wherever it is installed, and specify the root of the foundry project,
+like so:
+```plain
+./hevm test --root /path/to/foundry/project
+```
 
-## Setting Up Tests
+The `--match ...` options is used to specify which test case(s) to run,
+and it accepts a regular expression.
+
+## Setting Up Test Context
 
 Tests usually need to set up the environment in a particular way, such
 as contract address, storage, etc. This can be done via Cheat Codes that
@@ -55,51 +62,64 @@ can change the address of the caller, set block number, etc. See [Cheat
 Codes](#supported-cheat-codes) below for a range of cheat codes supported. Cheat Codes
 are a standard method used by other tools, such as
 [Foundry](https://book.getfoundry.sh/), so you should be able to re-use your
-existing setup. An example setup could be:
-
+existing setup. An example setup could be put into `src/setup-test.sol`:
 ```solidity
 pragma solidity ^0.8.19;
 import {Test} from "forge-std/Test.sol";
-contract BadVaultTest is Test {
-    MyVault vault;
 
-    function setUp() public {
-        // Set up environment
-        vault = new BadVault();
-
-        address user1 = address(1);
-        vm.deal(user1, 1 ether);
-        vm.prank(user1);
-        vault.deposit{value: 1 ether}();
-
-        address user2 = address(2);
-        vm.deal(user2, 1 ether);
-        vm.prank(user2);
-        vault.deposit{value: 1 ether}();
-
-        address attacker = address(42);
-        vm.prank(attacker);
-        // call(s) to test
-        // postcondition checks
+contract MyVault {
+    mapping(address => uint256) public balance;
+    function deposit() external payable {
+        balance[msg.sender] += msg.value;
     }
+}
+contract MySetupTest is Test {
+    MyVault vault;
+    function setUp() public {
+        vault = new MyVault();
+
+        address user1 = address(42);
+        vm.deal(user1, 7 ether);
+        vm.prank(user1);
+        vault.deposit{value: 7 ether}();
+    }
+
+    function prove_correct(uint8 amt) public {
+        address k = address(42);
+        uint pre = vault.balance(k);
+        assert(pre == 7 ether);
+        vm.prank(k);
+        vault.deposit{value: amt}();
+        assert(vault.balance(k) == pre + amt);
+      }
 }
 ```
 
-The postconditions should check the state of the contract after the call(s) are
-complete. In particular, it should check that the changes that the function applied
-did not break any of the (invariants)[https://en.wikipedia.org/wiki/Invariant_(mathematics)]
-of the contract, such as total number of tokens.
+The `setUp` function is called before each test case, and can be used to
+set up the environment. In this case, we create a new vault, and deposit 7
+ether into it for address 42: the `vm.deal` function sets the balance of the
+user to 7 ether, and the `vm.prank` function sets the caller to address 42. This
+should now pass our test:
+```plain
+$ hevm test
+Checking 1 function(s) in contract src/setup-test.sol:MySetupTest
+[RUNNING] prove_correct(uint8)
+   [PASS] prove_correct
+```
 
-You can read more about testing and cheat codes in the (Foundry
+In general, the test should check the postconditions, e.g. the state of the
+contract after the call(s) are complete. It should also check that
+[invariants](https://en.wikipedia.org/wiki/Invariant_(mathematics)) of the
+contract, such as total number of tokens, are not violated. You can read more
+about testing and cheat codes in the (Foundry
 Book)[https://book.getfoundry.sh/forge/cheatcodes] and you can see the
 hevm-supported cheat codes [below](#supported-cheat-codes).
 
 ## Understanding Counterexamples
-
-When hevm discovers a failure, it prints an example call how to trigger the failure. Let's see the following
-simple solidity code:
-
-```
+When hevm discovers a failure, it prints an example call how to trigger the
+failure. Let's write the following simple solidity code to
+`src/contract-fail.sol`:
+```solidity
 pragma solidity ^0.8.19;
 import {Test} from "forge-std/Test.sol";
 contract MyContract is Test {
@@ -116,23 +136,20 @@ contract MyContract is Test {
 When compiling our foundry project, we must either always pass the `--ast` flag
 to `forge build`, or, much better, set the `ast = true` flag in the
 `foundry.toml` file:
-
 ```toml
 ast = true
 ```
 
 In case neither `--ast` was passed, nor `ast = true` was set in the
-`foundry.toml` file, we will get an error such as:
-
-```
+`foundry.toml` file, when running hevm, we will get an error such as:
+```plain
 Error: unable to parse Foundry project JSON: [...]/out/Base.sol/CommonBase.json Contract: "CommonBase"
 ```
 
 In these cases, issue `forge clean` and run `forge build --ast` again.
 
 Once the project has been correctly built, we can run `hevm test`, and get:
-
-```
+```plain
 $ hevm test
 Checking 1 function(s) in contract src/contract-fail.sol:MyContract
 [RUNNING] prove_single_fail(address,uint256)
@@ -150,14 +167,13 @@ the `address` to give a complete call, the address itself is irrelevant,
 although this is not explicitly mentioned.
 
 ## Starting State is Always Concrete
-
-In `test` mode, hevm runs with the starting state set to concrete values. This
+In `test` mode, hevm runs with the starting state set to concrete values, as
+dictated by the `setUp()` function explained above. This
 means that with the solidity-generated default constructor of contracts, state
-variables will be zero, and arrays and mappings will be empty. If you need a
+variables will be zero (unless set otherwise by `setUp()`),
+and arrays and mappings will be empty. If you need a
 different starting state, such as e.g. tokens already distributed to some
-addresses, you can set that up in the setup phase of your test. This can be
-done via the `beforeTestSetup` function, as documented in the [Foundry
-Book](https://book.getfoundry.sh/forge/writing-tests#before-test-setups).
+addresses, you can set that up in the `setUp()` phase of your test.
 
 In case you need a symbolic starting state, see the [Symbolic execution
 tutorial](#symbolic-execution-tutorial). Note that if all you need is a
@@ -165,10 +181,8 @@ symbolic calldata, then you don't need to run `hevm` in symbolic mode, you can
 simply run `hevm test` and hevm will provide you with a symbolic calldata.
 
 ## Test Cases that Must Always Revert
-
 Hevm assumes that a test case should not always revert. If you have such a test
 case, hevm will warn you and return a FAIL. For example this toy contract:
-
 ```solidity
 pragma solidity ^0.8.19;
 import {Test} from "forge-std/Test.sol";
@@ -184,8 +198,7 @@ contract MyContract is Test {
 ```
 
 When compiled with forge and then ran under hevm with `hevm test`, hevm returns:
-
-```
+```plain
 Checking 1 function(s) in contract src/contract-allrevert.sol:MyContract
 [RUNNING] prove_allrevert(uint256)
    [FAIL] prove_allrevert(uint256)
@@ -196,7 +209,6 @@ Checking 1 function(s) in contract src/contract-allrevert.sol:MyContract
 
 This is sometimes undesirable. In these cases, prefix your contract with
 `proveFail_` instead of `prove_`:
-
 ```solidity
 pragma solidity ^0.8.19;
 import {Test} from "forge-std/Test.sol";
@@ -216,8 +228,7 @@ contract MyContract is Test {
 ```
 
 When this is compiled with forge and then checked with hevm, it leads to:
-
-```
+```plain
 Checking 1 function(s) in contract src/contract-allrevert-expected.sol:MyContract
 [RUNNING] proveFail_allrevert_expected(uint256)
    [PASS] proveFail_allrevert_expected(uint256)
@@ -225,15 +236,55 @@ Checking 1 function(s) in contract src/contract-allrevert-expected.sol:MyContrac
 
 Which is now the expected outcome.
 
-## Supported Cheat Codes
+## Panic Codes
+Solidity generates [different panic
+codes](https://docs.soliditylang.org/en/latest/control-structures.html#panic-via-assert-and-error-via-require)
+for different kinds of issues. The list of panic codes returned by Solidity
+are:
+- 0x00: Used for generic compiler inserted panics, such as e.g. wrong ABI
+  encoding, or if the ABI decoder fails to decode a value.
+- 0x01: If you call assert with an argument that evaluates to false.
+- 0x11: If an arithmetic operation results in underflow or overflow outside of an unchecked { ... } block.
+- 0x12; If you divide or modulo by zero (e.g. 5 / 0 or 23 % 0).
+- 0x21: If you convert a value that is too big or negative into an enum type.
+- 0x22: If you access a storage byte array that is incorrectly encoded.
+- 0x31: If you call .pop() on an empty array.
+- 0x32: If you access an array, bytesN or an array slice at an out-of-bounds or negative index (i.e. x[i] where i >= x.length or i < 0).
+- 0x41: If you allocate too much memory or create an array that is too large.
+- 0x51: If you call a zero-initialized variable of internal function type.
 
+Of these, `hevm test` will only report counterexamples for 0x1, or for custom errors that
+developers define, such as:
+```solidity
+error InsufficientBalance(uint256 requested, uint256 available);
+....
+uint reqested = ...;
+uint available = ...;
+if (requested > available) {
+    revert InsufficientBalance(requested, available);
+}
+```
+
+Notice that for panic codes, the returned counterexample will produce
+a return whose first 4 bytes will be:
+```plain
+$ cast keccak "Panic(uint256)" | cut -c 1-10
+0x4e487b71
+```
+
+And if it's a custom error, the first 4 bytes will be:
+```plain
+$ cast keccak "Error(string)" | cut -c 1-10
+0x08c379a0
+```
+
+## Supported Cheat Codes
 Since hevm is an EVM implementation mainly dedicated to testing and
 exploration, it features a set of "cheat codes" which can manipulate the
 environment in which the execution is run. These can be accessed by calling
 into a contract (typically called `Vm`) at address
 `0x7109709ECfa91a80626fF3989D68f67F5b1DD12D`, which happens to be keccak("hevm cheat code"),
 implementing the following methods:
-
 | Function | Description |
 | --- | --- |
 |`function prank(address sender) public`| Sets `msg.sender` to the specified `sender` for the next call.|
