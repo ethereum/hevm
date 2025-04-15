@@ -458,6 +458,7 @@ fromBlockchainCase' block tx preState postState =
        , allowFFI       = False
        , freshAddresses = 0
        , beaconRoot     = block.beaconRoot
+       , minMemoryChunk = 1
        })
       checkState
       postState
