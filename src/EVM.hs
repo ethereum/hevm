@@ -2953,7 +2953,10 @@ writeMemory memory offset buf = do
   expandMemory targetSize = do
     let toAlloc = targetSize - VUnboxed.Mutable.length memory
     if toAlloc > 0 then do
-      memory' <- VUnboxed.Mutable.grow memory toAlloc
+      -- always grow at least 8k, to avoid the performance impact
+      -- that would happen with repeated small expansion operations,
+      -- as grow does a larger *copy* of the vector on a new place
+      memory' <- VUnboxed.Mutable.grow memory $ max toAlloc 8192
       assign (#state % #memory) (ConcreteMemory memory')
       pure memory'
     else
