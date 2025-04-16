@@ -722,6 +722,7 @@ data BaseState
 -- | Configuration options that need to be consulted at runtime
 data RuntimeConfig = RuntimeConfig
   { allowFFI :: Bool
+  , minMemoryChunk :: Int
   , baseState :: BaseState
   }
   deriving (Show)
@@ -1021,6 +1022,7 @@ data VMOpts (t :: VMType) = VMOpts
   , allowFFI :: Bool
   , freshAddresses :: Int
   , beaconRoot :: W256
+  , minMemoryChunk :: Int
   }
 
 deriving instance Show (VMOpts Symbolic)

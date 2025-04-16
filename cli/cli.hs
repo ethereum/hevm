@@ -679,6 +679,7 @@ vmFromCommand cOpts cExecOpts cFileOpts execOpts= do
           , allowFFI       = False
           , freshAddresses = 0
           , beaconRoot     = 0
+          , minMemoryChunk = 1
           }
         word f def = fromMaybe def (f cExecOpts)
         word64 f def = fromMaybe def (f cExecOpts)
@@ -779,6 +780,7 @@ symvmFromCommand cExecOpts sOpts cFileOpts calldata = do
       , allowFFI       = False
       , freshAddresses = 0
       , beaconRoot     = 0
+      , minMemoryChunk = 1
       }
     word f def = fromMaybe def (f cExecOpts)
     word64 f def = fromMaybe def (f cExecOpts)

@@ -160,6 +160,7 @@ makeVm o = do
     , iterations = mempty
     , config = RuntimeConfig
       { allowFFI = o.allowFFI
+      , minMemoryChunk = o.minMemoryChunk
       , baseState = o.baseState
       }
     , forks = Seq.singleton (ForkState env block cache "")
@@ -674,9 +675,9 @@ exec1 conf = do
             mcopy sz srcOff dstOff = do
                   m <- gets (.state.memory)
                   case m of
-                    ConcreteMemory mem -> do
-                      buf <- freezeMemory mem
-                      copyBytesToMemory buf sz srcOff dstOff
+                    ConcreteMemory _ -> do
+                      buf <- readMemory srcOff sz
+                      copyBytesToMemory buf sz (Lit 0) dstOff
                     SymbolicMemory mem -> do
                       assign (#state % #memory) (SymbolicMemory $ copySlice srcOff dstOff sz mem mem)
 
@@ -2961,7 +2962,12 @@ writeMemory memory offset buf = do
   expandMemory targetSize = do
     let toAlloc = targetSize - VUnboxed.Mutable.length memory
     if toAlloc > 0 then do
-      memory' <- VUnboxed.Mutable.grow memory toAlloc
+      vm <- get
+      -- If you are using pure concrete mode, use a large chunk (e.g. 64k).
+      -- We want to always grow at least a chunk, to avoid the performance impact
+      -- that would happen with repeated small expansion operations, as grow does
+      -- a larger *copy* of the vector on a new place
+      memory' <- VUnboxed.Mutable.grow memory $ max toAlloc vm.config.minMemoryChunk
       assign (#state % #memory) (ConcreteMemory memory')
       pure memory'
     else

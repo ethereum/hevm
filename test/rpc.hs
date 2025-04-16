@@ -158,6 +158,7 @@ vmFromRpc blockNum calldata callvalue caller address = do
     , allowFFI       = False
     , freshAddresses = 0
     , beaconRoot     = 0
+    , minMemoryChunk = 1
     }) <&> set (#cache % #fetched % at address) (Just ctrct)
 
 testRpc :: Text
