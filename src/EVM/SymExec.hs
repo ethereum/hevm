@@ -14,6 +14,7 @@ import Control.Monad.State.Strict (runStateT)
 import Data.Bifunctor (second, first)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.Maybe (mapMaybe)
 import Data.Containers.ListUtils (nubOrd)
 import Data.DoubleWord (Word256)
 import Data.List (foldl', sortBy, sort)
@@ -790,6 +791,7 @@ rewriteFresh prefix exprs = fmap (mapExpr mymap) exprs
       AbstractBuf name | ("-fresh-" `T.isInfixOf` name) -> AbstractBuf $ prefix <> name
       x -> x
 
+-- [Expr End] return is ONLY for partial endstates
 equivalenceCheck'
   :: forall m . App m
   => SolverGroup -> [Expr End] -> [Expr End] -> Bool -> m ([EquivResult], [Expr End])
@@ -806,10 +808,12 @@ equivalenceCheck' solvers branchesA branchesB create = do
         putStrLn $ "endstates in bytecodeA: " <> show (length branchesA)
                    <> "\nendstates in bytecodeB: " <> show (length branchesB)
 
-      disctictPairs <- forM allPairs $ uncurry distinct
-      let differingEndStates = sortBySize $ mapMaybe (view _1) disctictPairs
-          deployedCexes = concatMap (view _2) disctictPairs
-          ends = concatMap (view _3) disctictPairs
+      ps <- forM allPairs $ uncurry distinct
+      let ps1 = concatMap (view _1) ps
+      let ends = concatMap (view _3) ps
+      let deployedCexes = concatMap (view _2) ps
+
+      let differingEndStates = sortBySize ps1
       liftIO $ putStrLn $ "Asking the SMT solver for " <> (show $ length differingEndStates) <> " pairs"
       when conf.dumpEndStates $ forM_ (zip differingEndStates [(1::Integer)..]) (\(x, i) ->
         liftIO $ T.writeFile ("prop-checked-" <> show i <> ".prop") (T.pack $ show x))
@@ -823,8 +827,8 @@ equivalenceCheck' solvers branchesA branchesB create = do
   where
     -- we order the sets by size because this gives us more cache hits when
     -- running our queries later on (since we rely on a subset check)
-    sortBySize :: [Set a] -> [Set a]
-    sortBySize = sortBy (\a b -> if size a > size b then Prelude.LT else Prelude.GT)
+    sortBySize :: [(Set a, b)] -> [(Set a, b)]
+    sortBySize = sortBy (\(a, _) (b, _) -> if Set.size a > Set.size b then Prelude.LT else Prelude.GT)
 
     -- returns True if a is a subset of any of the sets in b
     subsetAny :: Set Prop -> [Set Prop] -> Bool
@@ -834,10 +838,10 @@ equivalenceCheck' solvers branchesA branchesB create = do
     -- the solver if we can determine unsatisfiability from the cache already
     -- the last element of the returned tuple indicates whether the cache was
     -- used or not
-    check :: App m => UnsatCache -> Set Prop -> m EquivResult
-    check knownUnsat props = do
+    check :: App m => UnsatCache -> (Set Prop, String) -> m EquivResult
+    check knownUnsat (props, meaning) = do
       ku <- liftIO $ readTVarIO knownUnsat
-      if subsetAny props ku then pure $ Qed
+      if subsetAny props ku then pure Qed
              else do
                (res, _) <- checkSatWithProps solvers (Set.toList props)
                pure res
@@ -846,7 +850,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
     -- from left-to-right, and with a max of K threads. This is in contrast to
     -- mapConcurrently which would spawn as many threads as there are jobs, and
     -- run them in a random order. We ordered them correctly, though so that'd be bad
-    checkAll :: (App m, MonadUnliftIO m) => [(Set Prop)] -> UnsatCache -> Int -> m [EquivResult]
+    checkAll :: (App m, MonadUnliftIO m) => [(Set Prop, String)] -> UnsatCache -> Int -> m [EquivResult]
     checkAll input cache numproc = withRunInIO $ \env -> do
        wrap <- pool numproc
        parMapIO (\e -> wrap (env $ check cache e)) input
@@ -856,48 +860,54 @@ equivalenceCheck' solvers branchesA branchesB create = do
     -- for a given pair of branches, equivalence is violated if there exists an
     -- input that satisfies the branch conditions from both sides and produces
     -- a differing result in each branch
-    distinct :: App m => Expr End -> Expr End -> m (Maybe (Set Prop), [EquivResult], [Expr End])
+    distinct :: App m => Expr End -> Expr End -> m ([(Set Prop, String)], [EquivResult], [Expr End])
     distinct aEnd bEnd = do
       (props, res, ends) <- resultsDiffer aEnd bEnd
-      case props of
-        -- if the end states are the same, then they can never produce a
-        -- different result under any circumstances
-        PBool False -> pure (Nothing, mempty, mempty)
-        -- if we can statically determine that the end states differ, then we
-        -- ask the solver to find us inputs that satisfy both sets of branch
-        -- conditions
-        PBool True  -> pure (Just . Set.fromList $ extractProps aEnd <> extractProps bEnd, res, ends)
-        -- if we cannot statically determine whether or not the end states
-        -- differ, then we ask the solver if the end states can differ if both
-        -- sets of path conditions are satisfiable
-        _ -> do
-          pure (Just . Set.fromList $ props : extractProps aEnd <> extractProps bEnd, res, ends)
+      pure (mapMaybe stuff $ Set.toList props, res, ends)
 
-    resultsDiffer :: App m => Expr End -> Expr End -> m (Prop, [EquivResult], [Expr End])
+      where
+        stuff :: (Prop, String) -> Maybe ((Set Prop, String))
+        stuff (prop, meaning) = case prop of
+         -- if the end states are the same, then they can never produce a
+         -- different result under any circumstances
+         PBool False -> Nothing
+         -- if we can statically determine that the end states differ, then we
+         -- ask the solver to find us inputs that satisfy both sets of branch
+         -- conditions
+         PBool True  -> Just (Set.fromList $ extractProps aEnd <> extractProps bEnd, meaning)
+         -- if we cannot statically determine whether or not the end states
+         -- differ, then we ask the solver if the end states can differ if both
+         -- sets of path conditions are satisfiable
+         _ -> Just (Set.fromList $ prop : extractProps aEnd <> extractProps bEnd, meaning)
+
+    -- the ENDs from here are IMPORTANT, they may signal partial!!
+    resultsDiffer :: App m => Expr End -> Expr End -> m (Set (Prop, String), [EquivResult], [Expr End])
     resultsDiffer aEnd bEnd = case (aEnd, bEnd) of
       (Success aProps _ aOut aState, Success bProps _ bOut bState) ->
         case (aOut == bOut, aState == bState) of
-          (True, True) -> pure (PBool False, mempty, mempty)
-          (True, False) -> pure (statesDiffer aState bState, mempty, mempty)
+          (True, True) -> pure (mempty, mempty, mempty)
+          (True, False) -> pure (Set.singleton ((statesDiffer aState bState), "States Differ"), mempty, mempty)
           (False, _) -> do
             (outDiff, res, ends) <-
               if create then checkCreatedDiff aOut bOut aProps bProps
-              else pure (aOut ./= bOut, mempty, mempty)
-            pure (statesDiffer aState bState .|| outDiff, res, ends)
+              else pure ((aOut ./= bOut, "output diff"),  mempty, mempty)
+            let mySet = Set.fromList [outDiff, (statesDiffer aState bState, "state or output differ")]
+            pure (mySet, res, ends)
       (Failure _ _ (Revert a), Failure _ _ (Revert b)) ->
-        pure $ if a == b then (PBool False, mempty, mempty) else (a ./= b, mempty, mempty)
+        pure $ if a == b then (mempty, mempty, mempty) else (Set.singleton ((a ./= b), "both failure, but different revert"), mempty, mempty)
       (Failure _ _ a, Failure _ _ b) ->
-        let lhs =  if a == b then PBool False else PBool True
-        in pure (lhs, mempty, mempty)
+        let lhs =  if a == b then (PBool False, "") else (PBool True, "both failure but different state")
+        in pure (Set.singleton lhs, mempty, mempty)
       -- partial end states can't be compared to actual end states, so we always ignore them
-      (Partial {}, _) -> pure (PBool False, mempty, mempty)
-      (_, Partial {}) -> pure (PBool False, mempty, mempty)
+      (Partial {}, _) -> pure (mempty, mempty, mempty)
+      (_, Partial {}) -> pure (mempty, mempty, mempty)
       (ITE _ _ _, _) -> internalError "Expressions must be flattened"
       (_, ITE _ _ _) -> internalError "Expressions must be flattened"
-      (a, b) -> pure (PBool (a /= b), mempty, mempty)
+      (a, b) -> pure (Set.singleton (PBool (a /= b), "what?"), mempty, mempty)
 
     -- If the original check was for create (i.e. undeployed code), then we must also check that the deployed
     -- code is equivalent. The constraints from the undeployed code (aProps,bProps) influence this check.
+    checkCreatedDiff :: Expr Buf -> Expr Buf -> [Prop] -> [Prop] -> m ((Prop, String), [EquivResult], [Expr End])
     checkCreatedDiff aOut bOut aProps bProps = do
       let simpA = Expr.simplify aOut
           simpB = Expr.simplify bOut
@@ -914,7 +924,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
               <> " with constraints: " <> (T.unpack . T.unlines $ map formatProp bProps)
           calldata <- mkCalldata Nothing []
           (res, ends) <- equivalenceCheck solvers codeA codeB defaultVeriOpts calldata False
-          pure (PBool False, res, ends)
+          pure ((PBool False, ""), res, ends)
         _ -> internalError $ "Symbolic code returned from constructor." <> " A: " <> show simpA <> " B: " <> show simpB
 
     statesDiffer :: Map (Expr EAddr) (Expr EContract) -> Map (Expr EAddr) (Expr EContract) -> Prop
