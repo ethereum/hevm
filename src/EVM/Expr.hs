@@ -1310,6 +1310,9 @@ simplifyProp prop =
 
     -- Empty buf
     go (PEq (Lit 0) (BufLength k)) = peq k (ConcreteBuf "")
+    go (PEq (ConcreteBuf a) (ConcreteBuf b))
+      | a == b = PBool True
+      | otherwise = PBool False
 
     -- PEq rewrites (notice -- GT/GEq is always rewritten to LT by simplify)
     go (PEq (Lit 1) (IsZero (LT a b))) = PLT a b
