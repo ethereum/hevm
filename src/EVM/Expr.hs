@@ -1173,6 +1173,8 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
     -- XOR normalization
     go (Xor a  b) = EVM.Expr.xor a b
 
+    go (EqByte a b) = eqByte a b
+
     -- SHL / SHR by 0
     go (SHL a v)
       | a == (Lit 0) = v
