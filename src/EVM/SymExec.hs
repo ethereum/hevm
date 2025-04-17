@@ -809,11 +809,11 @@ equivalenceCheck' solvers branchesA branchesB create = do
                    <> "\nendstates in bytecodeB: " <> show (length branchesB)
 
       ps <- forM allPairs $ uncurry distinct
-      let ps1 = concatMap (view _1) ps
-      let ends = concatMap (view _3) ps
-      let deployedCexes = concatMap (view _2) ps
+      let unknowns = concatMap (view _1) ps
+      let partialEnds = nubOrd $ concatMap (view _3) ps
+      let knownCexes = concatMap (view _2) ps
 
-      let differingEndStates = sortBySize ps1
+      let differingEndStates = sortBySize unknowns
       liftIO $ putStrLn $ "Asking the SMT solver for " <> (show $ length differingEndStates) <> " pairs"
       when conf.dumpEndStates $ forM_ (zip differingEndStates [(1::Integer)..]) (\(x, i) ->
         liftIO $ T.writeFile ("prop-checked-" <> show i <> ".prop") (T.pack $ show x))
@@ -821,9 +821,9 @@ equivalenceCheck' solvers branchesA branchesB create = do
       knownUnsat <- liftIO $ newTVarIO []
       procs <- liftIO getNumProcessors
       cexes <- checkAll differingEndStates knownUnsat procs
-      let allCexes = cexes <> deployedCexes
-      if all isQed allCexes then pure ([Qed], ends)
-                            else pure (filter (Prelude.not . isQed) allCexes, ends)
+      let allCexes = cexes <> knownCexes
+      if all isQed allCexes then pure ([Qed], partialEnds)
+                            else pure (filter (Prelude.not . isQed) allCexes, partialEnds)
   where
     -- we order the sets by size because this gives us more cache hits when
     -- running our queries later on (since we rely on a subset check)
@@ -862,8 +862,9 @@ equivalenceCheck' solvers branchesA branchesB create = do
     -- a differing result in each branch
     distinct :: App m => Expr End -> Expr End -> m ([(Set Prop, String)], [EquivResult], [Expr End])
     distinct aEnd bEnd = do
-      (props, res, ends) <- resultsDiffer aEnd bEnd
-      pure (mapMaybe stuff $ Set.toList props, res, ends)
+      (props, res, deployedPartialEnds) <- resultsDiffer aEnd bEnd
+      let partialEnds = (filter isPartial) [aEnd, bEnd]
+      pure (mapMaybe stuff $ Set.toList props, res, partialEnds <> deployedPartialEnds)
 
       where
         stuff :: (Prop, String) -> Maybe ((Set Prop, String))
