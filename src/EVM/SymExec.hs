@@ -811,7 +811,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
       ps <- forM allPairs $ uncurry distinct
       let unknowns = concatMap (view _1) ps
       let partialEnds = nubOrd $ concatMap (view _3) ps
-      let knownCexes = concatMap (view _2) ps
+      let knownRes = concatMap (view _2) ps
 
       let differingEndStates = sortBySize unknowns
       liftIO $ putStrLn $ "Asking the SMT solver for " <> (show $ length differingEndStates) <> " pairs"
@@ -820,10 +820,10 @@ equivalenceCheck' solvers branchesA branchesB create = do
 
       knownUnsat <- liftIO $ newTVarIO []
       procs <- liftIO getNumProcessors
-      cexes <- checkAll differingEndStates knownUnsat procs
-      let allCexes = cexes <> knownCexes
-      if all isQed allCexes then pure ([Qed], partialEnds)
-                            else pure (filter (Prelude.not . isQed) allCexes, partialEnds)
+      res <- checkAll differingEndStates knownUnsat procs
+      let allRes = res <> knownRes
+      if all isQed allRes then pure ([Qed], partialEnds)
+                            else pure (filter (Prelude.not . isQed) allRes, partialEnds)
   where
     -- we order the sets by size because this gives us more cache hits when
     -- running our queries later on (since we rely on a subset check)
