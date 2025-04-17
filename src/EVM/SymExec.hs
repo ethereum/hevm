@@ -748,13 +748,13 @@ equivalenceCheck
   -> VeriOpts
   -> (Expr Buf, [Prop])
   -> Bool
-  -> m ([EquivResult], [Expr End])
+  -> m ([(EquivResult, String)], [Expr End])
 equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
   conf <- readConfig
   case bytecodeA == bytecodeB of
     True -> liftIO $ do
       putStrLn "bytecodeA and bytecodeB are identical"
-      pure ([Qed], mempty)
+      pure ([(Qed, "equiv bytecode")], mempty)
     False -> do
       when conf.debug $ liftIO $ do
         putStrLn "bytecodeA and bytecodeB are different, checking for equivalence"
@@ -794,7 +794,7 @@ rewriteFresh prefix exprs = fmap (mapExpr mymap) exprs
 -- [Expr End] return is ONLY for partial endstates
 equivalenceCheck'
   :: forall m . App m
-  => SolverGroup -> [Expr End] -> [Expr End] -> Bool -> m ([EquivResult], [Expr End])
+  => SolverGroup -> [Expr End] -> [Expr End] -> Bool -> m ([(EquivResult, String)], [Expr End])
 equivalenceCheck' solvers branchesA branchesB create = do
       conf <- readConfig
       when conf.debug $ do
@@ -822,8 +822,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
       procs <- liftIO getNumProcessors
       res <- checkAll differingEndStates knownUnsat procs
       let allRes = res <> knownRes
-      if all isQed allRes then pure ([Qed], partialEnds)
-                            else pure (filter (Prelude.not . isQed) allRes, partialEnds)
+      pure (allRes, partialEnds)
   where
     -- we order the sets by size because this gives us more cache hits when
     -- running our queries later on (since we rely on a subset check)
@@ -838,19 +837,19 @@ equivalenceCheck' solvers branchesA branchesB create = do
     -- the solver if we can determine unsatisfiability from the cache already
     -- the last element of the returned tuple indicates whether the cache was
     -- used or not
-    check :: App m => UnsatCache -> (Set Prop, String) -> m EquivResult
+    check :: App m => UnsatCache -> (Set Prop, String) -> m (EquivResult, String)
     check knownUnsat (props, meaning) = do
       ku <- liftIO $ readTVarIO knownUnsat
-      if subsetAny props ku then pure Qed
+      if subsetAny props ku then pure (Qed, meaning)
              else do
                (res, _) <- checkSatWithProps solvers (Set.toList props)
-               pure res
+               pure (res, meaning)
 
     -- Allows us to run it in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
     -- mapConcurrently which would spawn as many threads as there are jobs, and
     -- run them in a random order. We ordered them correctly, though so that'd be bad
-    checkAll :: (App m, MonadUnliftIO m) => [(Set Prop, String)] -> UnsatCache -> Int -> m [EquivResult]
+    checkAll :: (App m, MonadUnliftIO m) => [(Set Prop, String)] -> UnsatCache -> Int -> m [(EquivResult, String)]
     checkAll input cache numproc = withRunInIO $ \env -> do
        wrap <- pool numproc
        parMapIO (\e -> wrap (env $ check cache e)) input
@@ -860,7 +859,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
     -- for a given pair of branches, equivalence is violated if there exists an
     -- input that satisfies the branch conditions from both sides and produces
     -- a differing result in each branch
-    distinct :: App m => Expr End -> Expr End -> m ([(Set Prop, String)], [EquivResult], [Expr End])
+    distinct :: App m => Expr End -> Expr End -> m ([(Set Prop, String)], [(EquivResult, String)], [Expr End])
     distinct aEnd bEnd = do
       (props, res, deployedPartialEnds) <- resultsDiffer aEnd bEnd
       let partialEnds = (filter isPartial) [aEnd, bEnd]
@@ -882,7 +881,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
          _ -> Just (Set.fromList $ prop : extractProps aEnd <> extractProps bEnd, meaning)
 
     -- the ENDs from here are IMPORTANT, they may signal partial!!
-    resultsDiffer :: App m => Expr End -> Expr End -> m (Set (Prop, String), [EquivResult], [Expr End])
+    resultsDiffer :: App m => Expr End -> Expr End -> m (Set (Prop, String), [(EquivResult, String)], [Expr End])
     resultsDiffer aEnd bEnd = case (aEnd, bEnd) of
       (Success aProps _ aOut aState, Success bProps _ bOut bState) ->
         case (aOut == bOut, aState == bState) of
@@ -908,7 +907,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
 
     -- If the original check was for create (i.e. undeployed code), then we must also check that the deployed
     -- code is equivalent. The constraints from the undeployed code (aProps,bProps) influence this check.
-    checkCreatedDiff :: Expr Buf -> Expr Buf -> [Prop] -> [Prop] -> m ((Prop, String), [EquivResult], [Expr End])
+    checkCreatedDiff :: Expr Buf -> Expr Buf -> [Prop] -> [Prop] -> m ((Prop, String), [(EquivResult, String)], [Expr End])
     checkCreatedDiff aOut bOut aProps bProps = do
       let simpA = Expr.simplify aOut
           simpB = Expr.simplify bOut
