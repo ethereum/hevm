@@ -397,25 +397,30 @@ equivalence eqOpts cOpts = do
   cores <- liftIO $ unsafeInto <$> getNumProcessors
   let solverCount = fromMaybe cores cOpts.numSolvers
   withSolvers solver solverCount cOpts.solverThreads (Just cOpts.smttimeout) $ \s -> do
-    (res, e) <- equivalenceCheck s (fromJust bytecodeA) (fromJust bytecodeB) veriOpts calldata eqOpts.create
-    liftIO $ case (any isCex res, any Expr.isPartial e || any isUnknown res) of
+    eq <- equivalenceCheck s (fromJust bytecodeA) (fromJust bytecodeB) veriOpts calldata eqOpts.create
+    let anyIssues =  not (null eq.partials) || any (isUnknown . fst) eq.res  || any (isError . fst) eq.res
+    liftIO $ case (any (isCex . fst) eq.res, anyIssues) of
       (False, False) -> putStrLn "   \x1b[32m[PASS]\x1b[0m Contracts behave equivalently"
       (True, _)      -> putStrLn "   \x1b[31m[FAIL]\x1b[0m Contracts do not behave equivalently"
       (_, True)      -> putStrLn "   \x1b[31m[FAIL]\x1b[0m Contracts may not behave equivalently"
-    liftIO $ printWarnings e res "the contracts under test"
-    case any isCex res of
+    liftIO $ printWarnings eq.partials (map fst eq.res) "the contracts under test"
+    case any (isCex . fst) eq.res of
       False -> liftIO $ do
-        when (any isUnknown res || any isError res || any isPartial e) exitFailure
+        when anyIssues exitFailure
         putStrLn "No discrepancies found"
       True -> liftIO $ do
-        let cexs = mapMaybe getCex res
+        let cexes = mapMaybe getCexP eq.res
         T.putStrLn . T.unlines $
           [ "Not equivalent. The following inputs result in differing behaviours:"
           , "" , "-----", ""
-          ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap (showBuffer (AbstractBuf "txdata")) cexs)
+          ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap formatCexes cexes)
         exitFailure
   where
     decipher = maybe Nothing (hexByteString . strip0x)
+    getCexP :: (ProofResult a b, String) -> Maybe (a, String)
+    getCexP (Cex c, reason) = Just (c, reason)
+    getCexP _ = Nothing
+    formatCexes (cex, reason) = formatCex (AbstractBuf "txdata") Nothing cex <> "Difference: " <> T.pack reason
 
 getSolver :: Text -> IO Solver
 getSolver s = case T.unpack s of
