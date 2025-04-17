@@ -16,25 +16,21 @@ or similar. If you installed cvc5 instead, you will need to pass the flag
 "--solver cvc5" to "hevm test" later.
 
 
-Finally, download the static hevm binary from [the github
+Finally, download the static hevm binary from [the GitHub
 repository](https://github.com/ethereum/hevm/releases/) for your platform and
 put it in your path so it can be executed via typing "hevm".
 
 # How to Check if it Works
 
-Once you have the above, you can go to the root of your forge-based project
-and build it:
+Once you have the above, and you have forge installed and a forge-based project
+at hand, re-build it with `--ast` and run the tests with hevm:
 ```
+$ forge clean
 $ forge build --ast
 [⠒] Compiling...
 [⠆] Compiling 34 files with 0.8.19
 [⠔] Solc 0.8.19 finished in 2.12s
 Compiler run successful.
-```
-
-Then run hevm on all functions prefixed with `prove_` as such:
-
-```
 $ hevm test
 Checking 1 function(s) in contract src/contract-pass.sol:MyContract
 [RUNNING] prove_pass(address,uint256)

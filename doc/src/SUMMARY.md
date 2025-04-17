@@ -2,7 +2,6 @@
 [Quick Installation](./install.md)
 [When to Use](./when-to-use.md)
 [Limitations and Workarounds](./limitations-and-workarounds.md)
-[For hevm Developers](./for-hevm-developers.md)
 
 # Tutorials
 
@@ -18,3 +17,8 @@
 - [Equivalence checking](./equivalence.md)
 - [Concrete execution](./exec.md)
 - [Common options](./common-options.md)
+
+# Development
+
+- [Developers tutorial](./for-hevm-developers.md)
+- [System architecture](./architecture.md)

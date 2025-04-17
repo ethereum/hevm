@@ -191,6 +191,7 @@
           buildInputs = [
             pkgs.curl
             pkgs.mdbook
+            pkgs.mdbook-mermaid
             pkgs.yarn
             (hspkgs pkgs).cabal-install
             (hspkgs pkgs).eventlog2html
