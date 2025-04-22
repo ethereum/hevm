@@ -89,7 +89,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><a href="for-hevm-developers.html">For hevm Developers</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item expanded "><a href="equivalence-checking-tutorial.html" class="active">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li><li class="chapter-item "><a href="common-options.html">Common options</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item expanded "><a href="equivalence-checking-tutorial.html" class="active">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li><li class="chapter-item "><a href="common-options.html">Common options</a></li><li class="chapter-item affix "><li class="part-title">Development</li><li class="chapter-item "><a href="for-hevm-developers.html">Developers tutorial</a></li><li class="chapter-item "><a href="architecture.html">System architecture</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -206,7 +206,7 @@ since hevm's symbolic equivalence checker does not distinguish between function
 selector and function parameter bytes in the calldata, it will still correctly
 check the equivalence of such non-conforming contracts.</p>
 <h2 id="finding-discrepancies"><a class="header" href="#finding-discrepancies">Finding Discrepancies</a></h2>
-<p>Let's see this toy contract, in file <a href="code_examples/contract1.sol">contract1.sol</a>:</p>
+<p>Let's see this toy contract, in file contract1.sol:</p>
 <pre><code class="language-solidity">//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 contract MyContract {
@@ -217,7 +217,7 @@ contract MyContract {
   }
 }
 </code></pre>
-<p>And this, slightly modified one, in file <a href="code_examples/contract2.sol">contract2.sol</a>:</p>
+<p>And this, slightly modified one, in file contract2.sol:</p>
 <pre><code class="language-solidity">//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 contract MyContract {
@@ -228,10 +228,6 @@ contract MyContract {
     balances[recv] += amt/2;
   }
 }
-</code></pre>
-<p>Now ask hevm if they are equivalent. First, let's compile both contracts and get their bytecode:</p>
-<pre><code class="language-shell">bytecode1=$(solc --bin-runtime "contract1.sol" | tail -n1)
-bytecode2=$(solc --bin-runtime "contract2.sol" | tail -n1)
 </code></pre>
 <p>Let's ask hevm to compare the two:</p>
 <pre><code class="language-shell">$ hevm equivalence \
@@ -253,7 +249,7 @@ Transaction Context:
 to 35, the two are not equivalent. This is indeed the case: one will add <code>35 div 2 = 17</code> twice, which is 34, the other will add 35.</p>
 <h2 id="fixing-and-proving-correctness"><a class="header" href="#fixing-and-proving-correctness">Fixing and Proving Correctness</a></h2>
 <p>Let's fix the above issue by incrementing the balance by 1 in case it's an odd
-value. Let's call this <a href="code_examples/contract3.sol">contract3.sol</a>:</p>
+value. Let's call this contract3.sol:</p>
 <pre><code class="language-solidity">//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 contract MyContract {
@@ -287,16 +283,16 @@ them into files <code>a.txt</code> and <code>b.txt</code> and compare them via:<
 </code></pre>
 <p>You can also copy-paste the contents of the hex strings directly into the
 command line, although this can become cumbersome:</p>
-<pre><code class="language-shell">$ hevm equivalence --code-a "6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f600190506002811460455760446048565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212208c57ae04774d9ebae7d1d11f9d5e730075068bc7988d4c83c6fed85b7f062e7b64736f6c634300081a0033" --code-b "6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220bd2f8a1ba281308f845e212d2b5eceab85e029909fa2409cdca7ede039bae26564736f6c634300081a0033"
+<pre><code class="language-plain">$ hevm equivalence --code-a "6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f600190506002811460455760446048565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212208c57ae04774d9ebae7d1d11f9d5e730075068bc7988d4c83c6fed85b7f062e7b64736f6c634300081a0033" --code-b "6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220bd2f8a1ba281308f845e212d2b5eceab85e029909fa2409cdca7ede039bae26564736f6c634300081a0033"
 </code></pre>
-<h2 id="working-with-raw-bytcode"><a class="header" href="#working-with-raw-bytcode">Working with Raw Bytcode</a></h2>
-<p>When doing equivalance checking, the returndata of the two systems are
+<h2 id="working-with-raw-bytecode"><a class="header" href="#working-with-raw-bytecode">Working with Raw Bytecode</a></h2>
+<p>When doing equivalence checking, the returndata of the two systems are
 compared, and the calldata is set to be symbolic. This allows us to compare raw
 bytecode as well -- the code does not need to adhere to the Solidity <a href="https://docs.soliditylang.org/en/latest/abi-spec.html">ABI</a>.</p>
 <p>The following contract is written in raw assembly. It takes
 the 1st byte of the calldata, multiplies it by 0, and stores it in memory, then
 returns this value:</p>
-<pre><code>PUSH1 0x00
+<pre><code class="language-plain">PUSH1 0x00
 CALLDATALOAD
 PUSH1 0x00
 MUL
@@ -307,9 +303,11 @@ PUSH1 0x00
 RETURN
 </code></pre>
 <p>This can be compiled into bytecode via e.g. <a href="https://evm.codes/">evm.codes</a>,
-which allows us to both simulate this, and to get a bytecode for it: <code>60003560000260005260016000f3</code>. Notice that since anything multiplied by 0 is zero, for any calldata, this will put 0 into the returndata.</p>
+which allows us to both simulate this, and to get a bytecode for it:
+<code>60003560000260005260016000f3</code>. Notice that since anything multiplied by 0 is
+zero, for any calldata, this will put 0 into the returndata.</p>
 <p>Let's compare the above code to an assembly contract that simply returns 0:</p>
-<pre><code>PUSH32 0x0
+<pre><code class="language-plain">PUSH32 0x0
 PUSH1 0x00
 MSTORE
 PUSH1 0x01
@@ -325,10 +323,10 @@ Asking the SMT solver for 1 pairs
 No discrepancies found
 </code></pre>
 <p>If however we replace the</p>
-<pre><code>PUSH32 0x0
+<pre><code class="language-plain">PUSH32 0x0
 </code></pre>
 <p>with</p>
-<pre><code>PUSH32 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+<pre><code class="language-plain">PUSH32 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 </code></pre>
 <p>we get:</p>
 <pre><code class="language-shell">$ hevm equivalence --code-a "60003560000260005260016000f3" --code-b "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff60005260016000f3"
@@ -390,6 +388,8 @@ returns <code>0xff</code> and the other <code>0x0</code>.</p>
 
         <!-- Custom JS scripts -->
         <script src="solidity.min.js"></script>
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
 
 
     </div>

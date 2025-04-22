@@ -89,7 +89,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><a href="for-hevm-developers.html">For hevm Developers</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item expanded "><a href="symbolic-execution-tutorial.html" class="active">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li><li class="chapter-item "><a href="common-options.html">Common options</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item expanded "><a href="symbolic-execution-tutorial.html" class="active">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li><li class="chapter-item "><a href="common-options.html">Common options</a></li><li class="chapter-item affix "><li class="part-title">Development</li><li class="chapter-item "><a href="for-hevm-developers.html">Developers tutorial</a></li><li class="chapter-item "><a href="architecture.html">System architecture</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -183,7 +183,7 @@
                         <h1 id="symbolic-execution-tutorial"><a class="header" href="#symbolic-execution-tutorial">Symbolic Execution Tutorial</a></h1>
 <p>Symbolic execution mode of hevm checks whether any call to the contract could
 result in an assertion violation. Let's see a simple contract, in file
-<a href="code_examples/contract-symb-1.sol">contract-symb-1.sol</a>:</p>
+contract-symb-1.sol:</p>
 <pre><code class="language-solidity">//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 contract MyContract {
@@ -218,7 +218,7 @@ Transaction Context:
 <h2 id="symbolically-executing-a-specific-function"><a class="header" href="#symbolically-executing-a-specific-function">Symbolically executing a specific function</a></h2>
 <p>When there are more than one functions in the code, the system will try to
 symbolically execute all. Let's take the file
-<a href="code_examples/contract-symb-2.sol">contract-symb-2.sol</a>:</p>
+contract-symb-2.sol:</p>
 <pre><code class="language-solidity">//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 contract MyContract {
@@ -293,7 +293,7 @@ Storage:
 <h2 id="abstract-versus-empty-starting-storage"><a class="header" href="#abstract-versus-empty-starting-storage">Abstract versus empty starting storage</a></h2>
 <p>The initial store state of <code>hevm</code> is completely abstract. This means that the
 functions are explored for all possible values of the state. Let's take the
-following contract <a href="code_examples/contract-symb-3.sol">contract-symb-3.sol</a>:</p>
+following contract contract-symb-3.sol:</p>
 <pre><code class="language-solidity">//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 contract MyContract {
@@ -464,6 +464,8 @@ solidity</a>.</p>
 
         <!-- Custom JS scripts -->
         <script src="solidity.min.js"></script>
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
 
 
     </div>

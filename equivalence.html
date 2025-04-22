@@ -89,7 +89,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><a href="for-hevm-developers.html">For hevm Developers</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item expanded "><a href="equivalence.html" class="active">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li><li class="chapter-item "><a href="common-options.html">Common options</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item "><a href="std-test-tutorial.html">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item expanded "><a href="equivalence.html" class="active">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li><li class="chapter-item "><a href="common-options.html">Common options</a></li><li class="chapter-item affix "><li class="part-title">Development</li><li class="chapter-item "><a href="for-hevm-developers.html">Developers tutorial</a></li><li class="chapter-item "><a href="architecture.html">System architecture</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -192,9 +192,29 @@ to prove equivalence between their outputs and storages. For a full listing of
 options, see <code>hevm equivalence --help</code>. For common options, see
 <a href="./common-options.html">here</a>.</p>
 <h2 id="simple-example-usage"><a class="header" href="#simple-example-usage">Simple example usage</a></h2>
-<pre><code class="language-shell">$ solc --bin-runtime "contract1.sol" | tail -n1 &gt; a.bin
-$ solc --bin-runtime "contract2.sol" | tail -n1 &gt; b.bin
-$ hevm equivalence --code-a-file a.bin --code-b-file b.bin
+<p>Let's set contract1.sol to:</p>
+<pre><code class="language-solidity">contract MyContract {
+  mapping (address =&gt; uint) balances;
+  function my_adder(address recv, uint amt) public {
+    if (balances[recv] + amt &gt;= 100) { revert(); }
+    balances[recv] += amt;
+  }
+}
+</code></pre>
+<p>And let's set contract2.sol to:</p>
+<pre><code class="language-solidity">contract MyContract {
+  mapping (address =&gt; uint) balances;
+  function my_adder(address recv, uint amt) public {
+    if (balances[recv] + amt &gt;= 100) { revert(); }
+    balances[recv] += amt/2;
+    balances[recv] += amt/2;
+  }
+}
+</code></pre>
+<p>Then we can check if they are equivalent by running:</p>
+<pre><code class="language-shell">solc --bin-runtime "contract1.sol" | tail -n1 &gt; a.bin
+solc --bin-runtime "contract2.sol" | tail -n1 &gt; b.bin
+hevm equivalence --code-a-file a.bin --code-b-file b.bin
 </code></pre>
 <h2 id="calldata-size-limits"><a class="header" href="#calldata-size-limits">Calldata size limits</a></h2>
 <p>If <code>--sig</code> is given, calldata is assumed to take the form of the function
@@ -257,18 +277,19 @@ succeeds.</p>
 <h2 id="creation-code-equivalence"><a class="header" href="#creation-code-equivalence">Creation code equivalence</a></h2>
 <p>If you want to check the equivalence of not just the runtime code, but also the
 creation code of two contracts, you can use the <code>--creation</code> flag.  For example
-these two contracts:</p>
+the following two contracts compare equal when compared with <code>--create</code> flag.
+Let's set the first contract to create1.sol:</p>
 <pre><code class="language-solidity">contract C {
   uint private immutable NUMBER;
   constructor(uint a) {
     NUMBER = 2;
   }
   function stuff(uint b) public returns (uint256) {
-    unchecked{return 2+NUMBER+b;}
+    unchecked {return 2+NUMBER+b;}
   }
 }
 </code></pre>
-<p>And:</p>
+<p>And the second contract to create2.sol:</p>
 <pre><code class="language-solidity">contract C {
   uint private immutable NUMBER;
   constructor(uint a) {
@@ -279,10 +300,10 @@ these two contracts:</p>
   }
 }
 </code></pre>
-<p>Will compare equal when compared with <code>--create</code> flag:</p>
-<pre><code class="language-shell">solc --bin a.sol | tail -n1 &gt; a.bin
-solc --bin b.sol | tail -n1 &gt; b.bin
-cabal run exe:hevm equivalence -- --code-a-file a.bin --code-b-file b.bin --create
+<p>And let's compare them via --create:</p>
+<pre><code class="language-shell">solc --bin create1.sol | tail -n1 &gt; create1.bin
+solc --bin create2.sol | tail -n1 &gt; create2.bin
+hevm equivalence --code-a-file create1.bin --code-b-file create2.bin --create
 </code></pre>
 <p>Notice that we used <code>--bin</code> and not <code>--bin-runtime</code> for solc here. Also note that
 in case <code>NUMBER</code> is declared <code>public</code>, the two contracts will not be considered
@@ -339,6 +360,8 @@ tutorial</a>.</p>
 
         <!-- Custom JS scripts -->
         <script src="solidity.min.js"></script>
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
 
 
     </div>

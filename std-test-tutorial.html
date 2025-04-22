@@ -89,7 +89,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><a href="for-hevm-developers.html">For hevm Developers</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item expanded "><a href="std-test-tutorial.html" class="active">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li><li class="chapter-item "><a href="common-options.html">Common options</a></li></ol>
+                <ol class="chapter"><li class="chapter-item affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item affix "><a href="install.html">Quick Installation</a></li><li class="chapter-item affix "><a href="when-to-use.html">When to Use</a></li><li class="chapter-item affix "><a href="limitations-and-workarounds.html">Limitations and Workarounds</a></li><li class="chapter-item affix "><li class="part-title">Tutorials</li><li class="chapter-item expanded "><a href="std-test-tutorial.html" class="active">Forge std-test tutorial</a></li><li class="chapter-item "><a href="equivalence-checking-tutorial.html">Equivalence checking tutorial</a></li><li class="chapter-item "><a href="symbolic-execution-tutorial.html">Symbolic execution tutorial</a></li><li class="chapter-item affix "><li class="part-title">Reference</li><li class="chapter-item "><a href="test.html">Forge test proving</a></li><li class="chapter-item "><a href="symbolic.html">Symbolic unit execution</a></li><li class="chapter-item "><a href="equivalence.html">Equivalence checking</a></li><li class="chapter-item "><a href="exec.html">Concrete execution</a></li><li class="chapter-item "><a href="common-options.html">Common options</a></li><li class="chapter-item affix "><li class="part-title">Development</li><li class="chapter-item "><a href="for-hevm-developers.html">Developers tutorial</a></li><li class="chapter-item "><a href="architecture.html">System architecture</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -181,75 +181,109 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="forge-std-test-usage-tutorial"><a class="header" href="#forge-std-test-usage-tutorial">Forge std-test Usage Tutorial</a></h1>
-<p>Test cases must be prepended with <code>prove_</code> and the testing contract must
+<p>First, install foundry:</p>
+<pre><code class="language-plain">curl -L https://foundry.paradigm.xyz | bash
+foundryup
+</code></pre>
+<p>Then set up a forge project with <code>forge init</code>:</p>
+<pre><code class="language-plain">mkdir myproject
+cd myproject
+forge init --no-git .
+</code></pre>
+<p>Now, let's create a file <code>src/example-test.sol</code> with some simple code.
+Test cases must be prepended with <code>prove_</code> and the testing contract must
 inherit from <code>Test</code> from <a href="https://book.getfoundry.sh/forge/forge-std">Forge's standard test
-library</a>. First, import Test:
-<code>import {Test} from "forge-std/Test.sol";</code> and then inherit from it via <code>... is Test</code>. This allows hevm to discover the test cases it needs to run. Like so:</p>
+library</a>. So let's import Test:
+<code>import {Test} from "forge-std/Test.sol";</code> and then inherit from it via
+<code> is Test</code>. This allows hevm to discover the test cases it needs
+to run:</p>
 <pre><code class="language-solidity">pragma solidity ^0.8.19;
 import {Test} from "forge-std/Test.sol";
-contract BadVaultTest is Test {
-  function prove_mytest() {
-  // environment setup, preconditions
-  // call(s) to test
-  // postcondition checks
+contract Example is Test {
+  function prove_mytest() public {
+  // (1) environment setup, preconditions
+  // (2) calls to test
+  // (3) postcondition checks
   }
 }
 </code></pre>
 <p>Once you have written such a test case, you need to compile with <code>forge build --ast</code>
 (see <a href="https://book.getfoundry.sh/forge/tests">forge documentation</a> for more
 details) and then:</p>
-<pre><code>$ hevm test
-Checking 1 function(s) in contract src/badvault-test.sol:BadVault
+<pre><code class="language-plain">$ forge build --ast
+$ hevm test --match "prove_mytest"
+Checking 1 function(s) in contract src/example-test.sol:Example
 [RUNNING] prove_mytest(uint256)
    [PASS] prove_mytest(uint256)
 </code></pre>
 <p>Here, hevm discovered the test case, and automatically checked it for
-violations.</p>
-<h2 id="setting-up-tests"><a class="header" href="#setting-up-tests">Setting Up Tests</a></h2>
+violations. If <code>hevm</code> is not in the global path, you can run hevm
+from wherever it is installed, and specify the root of the foundry project,
+like so:</p>
+<pre><code class="language-plain">./hevm test --root /path/to/foundry/project
+</code></pre>
+<p>The <code>--match ...</code> options is used to specify which test case(s) to run,
+and it accepts a regular expression.</p>
+<h2 id="setting-up-test-context"><a class="header" href="#setting-up-test-context">Setting Up Test Context</a></h2>
 <p>Tests usually need to set up the environment in a particular way, such
 as contract address, storage, etc. This can be done via Cheat Codes that
 can change the address of the caller, set block number, etc. See <a href="#supported-cheat-codes">Cheat
 Codes</a> below for a range of cheat codes supported. Cheat Codes
 are a standard method used by other tools, such as
 <a href="https://book.getfoundry.sh/">Foundry</a>, so you should be able to re-use your
-existing setup. An example setup could be:</p>
+existing setup. An example setup could be put into <code>src/setup-test.sol</code>:</p>
 <pre><code class="language-solidity">pragma solidity ^0.8.19;
 import {Test} from "forge-std/Test.sol";
-contract BadVaultTest is Test {
-    MyVault vault;
 
-    function setUp() public {
-        // Set up environment
-        vault = new BadVault();
-
-        address user1 = address(1);
-        vm.deal(user1, 1 ether);
-        vm.prank(user1);
-        vault.deposit{value: 1 ether}();
-
-        address user2 = address(2);
-        vm.deal(user2, 1 ether);
-        vm.prank(user2);
-        vault.deposit{value: 1 ether}();
-
-        address attacker = address(42);
-        vm.prank(attacker);
-        // call(s) to test
-        // postcondition checks
+contract MyVault {
+    mapping(address =&gt; uint256) public balance;
+    function deposit() external payable {
+        balance[msg.sender] += msg.value;
     }
 }
+contract MySetupTest is Test {
+    MyVault vault;
+    function setUp() public {
+        vault = new MyVault();
+
+        address user1 = address(42);
+        vm.deal(user1, 7 ether);
+        vm.prank(user1);
+        vault.deposit{value: 7 ether}();
+    }
+
+    function prove_correct(uint8 amt) public {
+        address k = address(42);
+        uint pre = vault.balance(k);
+        assert(pre == 7 ether);
+        vm.prank(k);
+        vault.deposit{value: amt}();
+        assert(vault.balance(k) == pre + amt);
+      }
+}
 </code></pre>
-<p>The postconditions should check the state of the contract after the call(s) are
-complete. In particular, it should check that the changes that the function applied
-did not break any of the (invariants)[https://en.wikipedia.org/wiki/Invariant_(mathematics)]
-of the contract, such as total number of tokens.</p>
-<p>You can read more about testing and cheat codes in the (Foundry
+<p>The <code>setUp</code> function is called before each test case, and can be used to
+set up the environment. In this case, we create a new vault, and deposit 7
+ether into it for address 42: the <code>vm.deal</code> function sets the balance of the
+user to 7 ether, and the <code>vm.prank</code> function sets the caller to address 42. This
+should now pass our test:</p>
+<pre><code class="language-plain">$ hevm test
+Checking 1 function(s) in contract src/setup-test.sol:MySetupTest
+[RUNNING] prove_correct(uint8)
+   [PASS] prove_correct
+</code></pre>
+<p>In general, the test should check the postconditions, e.g. the state of the
+contract after the call(s) are complete. It should also check that
+<a href="https://en.wikipedia.org/wiki/Invariant_(mathematics)">invariants</a> of the
+contract, such as total number of tokens, are not violated. You can read more
+about testing and cheat codes in the (Foundry
 Book)[https://book.getfoundry.sh/forge/cheatcodes] and you can see the
 hevm-supported cheat codes <a href="#supported-cheat-codes">below</a>.</p>
 <h2 id="understanding-counterexamples"><a class="header" href="#understanding-counterexamples">Understanding Counterexamples</a></h2>
-<p>When hevm discovers a failure, it prints an example call how to trigger the failure. Let's see the following
-simple solidity code:</p>
-<pre><code>pragma solidity ^0.8.19;
+<p>When hevm discovers a failure, it prints an example call how to trigger the
+failure. Let's write the following simple solidity code to
+<code>src/contract-fail.sol</code>:</p>
+<pre><code class="language-solidity">pragma solidity ^0.8.19;
 import {Test} from "forge-std/Test.sol";
 contract MyContract is Test {
   mapping (address =&gt; uint) balances;
@@ -267,12 +301,12 @@ to <code>forge build</code>, or, much better, set the <code>ast = true</code> fl
 <pre><code class="language-toml">ast = true
 </code></pre>
 <p>In case neither <code>--ast</code> was passed, nor <code>ast = true</code> was set in the
-<code>foundry.toml</code> file, we will get an error such as:</p>
-<pre><code>Error: unable to parse Foundry project JSON: [...]/out/Base.sol/CommonBase.json Contract: "CommonBase"
+<code>foundry.toml</code> file, when running hevm, we will get an error such as:</p>
+<pre><code class="language-plain">Error: unable to parse Foundry project JSON: [...]/out/Base.sol/CommonBase.json Contract: "CommonBase"
 </code></pre>
 <p>In these cases, issue <code>forge clean</code> and run <code>forge build --ast</code> again.</p>
 <p>Once the project has been correctly built, we can run <code>hevm test</code>, and get:</p>
-<pre><code>$ hevm test
+<pre><code class="language-plain">$ hevm test
 Checking 1 function(s) in contract src/contract-fail.sol:MyContract
 [RUNNING] prove_single_fail(address,uint256)
    [FAIL] prove_single_fail(address,uint256)
@@ -287,13 +321,13 @@ rather than a <code>&gt;</code> in the <code>if</code>. Notice that in this case
 the <code>address</code> to give a complete call, the address itself is irrelevant,
 although this is not explicitly mentioned.</p>
 <h2 id="starting-state-is-always-concrete"><a class="header" href="#starting-state-is-always-concrete">Starting State is Always Concrete</a></h2>
-<p>In <code>test</code> mode, hevm runs with the starting state set to concrete values. This
+<p>In <code>test</code> mode, hevm runs with the starting state set to concrete values, as
+dictated by the <code>setUp()</code> function explained above. This
 means that with the solidity-generated default constructor of contracts, state
-variables will be zero, and arrays and mappings will be empty. If you need a
+variables will be zero (unless set otherwise by <code>setUp()</code>),
+and arrays and mappings will be empty. If you need a
 different starting state, such as e.g. tokens already distributed to some
-addresses, you can set that up in the setup phase of your test. This can be
-done via the <code>beforeTestSetup</code> function, as documented in the <a href="https://book.getfoundry.sh/forge/writing-tests#before-test-setups">Foundry
-Book</a>.</p>
+addresses, you can set that up in the <code>setUp()</code> phase of your test.</p>
 <p>In case you need a symbolic starting state, see the <a href="#symbolic-execution-tutorial">Symbolic execution
 tutorial</a>. Note that if all you need is a
 symbolic calldata, then you don't need to run <code>hevm</code> in symbolic mode, you can
@@ -314,7 +348,7 @@ contract MyContract is Test {
 }
 </code></pre>
 <p>When compiled with forge and then ran under hevm with <code>hevm test</code>, hevm returns:</p>
-<pre><code>Checking 1 function(s) in contract src/contract-allrevert.sol:MyContract
+<pre><code class="language-plain">Checking 1 function(s) in contract src/contract-allrevert.sol:MyContract
 [RUNNING] prove_allrevert(uint256)
    [FAIL] prove_allrevert(uint256)
    Reason:
@@ -340,11 +374,48 @@ contract MyContract is Test {
 }
 </code></pre>
 <p>When this is compiled with forge and then checked with hevm, it leads to:</p>
-<pre><code>Checking 1 function(s) in contract src/contract-allrevert-expected.sol:MyContract
+<pre><code class="language-plain">Checking 1 function(s) in contract src/contract-allrevert-expected.sol:MyContract
 [RUNNING] proveFail_allrevert_expected(uint256)
    [PASS] proveFail_allrevert_expected(uint256)
 </code></pre>
 <p>Which is now the expected outcome.</p>
+<h2 id="panic-codes"><a class="header" href="#panic-codes">Panic Codes</a></h2>
+<p>Solidity generates <a href="https://docs.soliditylang.org/en/latest/control-structures.html#panic-via-assert-and-error-via-require">different panic
+codes</a>
+for different kinds of issues. The list of panic codes returned by Solidity
+are:</p>
+<ul>
+<li>0x00: Used for generic compiler inserted panics, such as e.g. wrong ABI
+encoding, or if the ABI decoder fails to decode a value.</li>
+<li>0x01: If you call assert with an argument that evaluates to false.</li>
+<li>0x11: If an arithmetic operation results in underflow or overflow outside of an unchecked { ... } block.</li>
+<li>0x12; If you divide or modulo by zero (e.g. 5 / 0 or 23 % 0).</li>
+<li>0x21: If you convert a value that is too big or negative into an enum type.</li>
+<li>0x22: If you access a storage byte array that is incorrectly encoded.</li>
+<li>0x31: If you call .pop() on an empty array.</li>
+<li>0x32: If you access an array, bytesN or an array slice at an out-of-bounds or negative index (i.e. x[i] where i &gt;= x.length or i &lt; 0).</li>
+<li>0x41: If you allocate too much memory or create an array that is too large.</li>
+<li>0x51: If you call a zero-initialized variable of internal function type.</li>
+</ul>
+<p>Of these, <code>hevm test</code> will only report counterexamples for 0x1, or for custom errors that
+developers define, such as:</p>
+<pre><code class="language-solidity">error InsufficientBalance(uint256 requested, uint256 available);
+....
+uint reqested = ...;
+uint available = ...;
+if (requested &gt; available) {
+    revert InsufficientBalance(requested, available);
+}
+</code></pre>
+<p>Notice that for panic codes, the returned counterexample will produce
+a return whose first 4 bytes will be:</p>
+<pre><code class="language-plain">$ cast keccak "Panic(uint256)" | cut -c 1-10
+0x4e487b71
+</code></pre>
+<p>And if it's a custom error, the first 4 bytes will be:</p>
+<pre><code class="language-plain">$ cast keccak "Error(string)" | cut -c 1-10
+0x08c379a0
+</code></pre>
 <h2 id="supported-cheat-codes"><a class="header" href="#supported-cheat-codes">Supported Cheat Codes</a></h2>
 <p>Since hevm is an EVM implementation mainly dedicated to testing and
 exploration, it features a set of "cheat codes" which can manipulate the
@@ -375,7 +446,7 @@ implementing the following methods:</p>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="for-hevm-developers.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="limitations-and-workarounds.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
@@ -389,7 +460,7 @@ implementing the following methods:</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="for-hevm-developers.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="limitations-and-workarounds.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
@@ -418,6 +489,8 @@ implementing the following methods:</p>
 
         <!-- Custom JS scripts -->
         <script src="solidity.min.js"></script>
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
 
 
     </div>
