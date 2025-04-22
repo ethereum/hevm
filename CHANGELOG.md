@@ -92,6 +92,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed `--smtoutput` since it was never used
 - We now build with -DCMAKE_POLICY_VERSION_MINIMUM=3.5 libff, as cmake deprecated 3.5
 - CheckSatResult has now been unified with ProofResult via SMTResult
+- If counterexample would require a buffer that's larger than 1GB, we abandon
+  shrinking it.
 - Buffers are now handled more lazily when inspecting a model, which avoids some
   unnecesary internal errors.
 
