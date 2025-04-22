@@ -306,8 +306,8 @@ getModel inst cexvars = do
         "unsat" -> do
           liftIO $ checkCommand inst "(pop 1)"
           let nextHint = if hint == 0 then 1 else hint * 2
-          if nextHint < hint
-            then pure () -- overflow
+          if nextHint < hint || nextHint > 1_073_741_824
+            then pure () -- overflow or over 1GB
             else shrinkBuf buf nextHint
         e -> internalError $ "Unexpected solver output: " <> (T.unpack e)
 
