@@ -2,8 +2,7 @@
 
 Symbolic execution mode of hevm checks whether any call to the contract could
 result in an assertion violation. Let's see a simple contract, in file
-[contract-symb-1.sol](code_examples/contract-symb-1.sol):
-
+contract-symb-1.sol:
 ```solidity
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
@@ -17,7 +16,6 @@ contract MyContract {
 ```
 
 Let's first compile it with `solc`:
-
 ```shell
 $ solc --bin-runtime contract-symb-1.sol
 ======= contract-symb-1.sol:MyContract =======
@@ -43,10 +41,9 @@ Transaction Context:
 ```
 
 ## Symbolically executing a specific function
-
 When there are more than one functions in the code, the system will try to
 symbolically execute all. Let's take the file
-[contract-symb-2.sol](code_examples/contract-symb-2.sol):
+contract-symb-2.sol:
 ```solidity
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
@@ -137,7 +134,7 @@ Storage:
 
 The initial store state of `hevm` is completely abstract. This means that the
 functions are explored for all possible values of the state. Let's take the
-following contract [contract-symb-3.sol](code_examples/contract-symb-3.sol):
+following contract contract-symb-3.sol:
 
 ```solidity
 //SPDX-License-Identifier: MIT
