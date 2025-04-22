@@ -47,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output in case of failure
 - Simple test cases for the CLI
 - Allow limiting the branch depth and width limitation via --max-depth and --max-width
+- When there are zero solutions to a multi-solution query it means that the
+  currently executed branch is in fact impossible. In these cases, unwind all
+  frames and return a Revert with empty returndata.
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -91,6 +94,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CheckSatResult has now been unified with ProofResult via SMTResult
 - If counterexample would require a buffer that's larger than 1GB, we abandon
   shrinking it.
+- Buffers are now handled more lazily when inspecting a model, which avoids some
+  unnecesary internal errors.
 
 ## [0.54.2] - 2024-12-12
 

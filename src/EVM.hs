@@ -2324,6 +2324,15 @@ data FrameResult
   | FrameErrored EvmError -- ^ Any other error
   deriving Show
 
+finishAllFramesAndStop :: VMOps t => EVM t s ()
+finishAllFramesAndStop = do
+  vm <- get
+  case vm.frames of
+    [] -> finishFrame (FrameReturned mempty)
+    _ -> do
+      finishFrame (FrameReturned mempty)
+      finishAllFramesAndStop
+
 -- | This function defines how to pop the current stack frame in either of
 -- the ways specified by 'FrameResult'.
 --
@@ -2518,8 +2527,7 @@ copyBytesToMemory bs size srcOffset memOffset =
             assign (#state % #memory) $
               SymbolicMemory $ copySlice srcOffset memOffset size bs buf
       SymbolicMemory mem ->
-        assign (#state % #memory) $
-          SymbolicMemory $ copySlice srcOffset memOffset size bs mem
+        assign (#state % #memory) $ SymbolicMemory $ copySlice srcOffset memOffset size bs mem
 
 copyCallBytesToMemory
   :: Expr Buf -> Expr EWord -> Expr EWord -> EVM t s ()
@@ -3022,9 +3030,9 @@ instance VMOps Symbolic where
       Just concVals -> do
         assign #result Nothing
         case (length concVals) of
-          -- zero solutions means that we are in a branch that's not possible. Revert.
-          -- TODO: stop execution of the EVM completely
-          0 -> finishFrame (FrameReverted (ConcreteBuf ""))
+          -- zero solutions means that we are in a branch that's not possible
+          -- so revert all frames and stop all execution on this branch
+          0 -> finishAllFramesAndStop
           1 -> do
             let val = head concVals
             assign #result Nothing

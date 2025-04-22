@@ -251,11 +251,11 @@ getModel inst cexvars = do
   initialModel <- getRaw
   -- check the sizes of buffer models and shrink if needed
   if bufsUsable initialModel
-  then pure (mkConcrete initialModel)
+  then pure initialModel
   else do
     -- get concrete values for each buffers max read index
     hints <- capHints <$> queryMaxReads (getValue inst) cexvars.buffers
-    mkConcrete . snd <$> runStateT (shrinkModel hints) initialModel
+    snd <$> runStateT (shrinkModel hints) initialModel
   where
     getRaw :: IO SMTCex
     getRaw = do
@@ -311,11 +311,6 @@ getModel inst cexvars = do
             else shrinkBuf buf nextHint
         e -> internalError $ "Unexpected solver output: " <> (T.unpack e)
 
-    -- Collapses the abstract description of a models buffers down to a bytestring
-    mkConcrete :: SMTCex -> SMTCex
-    mkConcrete c = fromMaybe
-      (internalError $ "counterexample contains buffers that are too large to be represented as a ByteString: " <> show c)
-      (flattenBufs c)
 
     -- we set a pretty arbitrary upper limit (of 1024) to decide if we need to do some shrinking
     bufsUsable :: SMTCex -> Bool

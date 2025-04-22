@@ -412,7 +412,7 @@ equivalence eqOpts cOpts = do
         T.putStrLn . T.unlines $
           [ "Not equivalent. The following inputs result in differing behaviours:"
           , "" , "-----", ""
-          ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap (formatCex (AbstractBuf "txdata") Nothing) cexs)
+          ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap (showBuffer (AbstractBuf "txdata")) cexs)
         exitFailure
   where
     decipher = maybe Nothing (hexByteString . strip0x)

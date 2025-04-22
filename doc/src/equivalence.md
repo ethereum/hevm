@@ -14,11 +14,35 @@ options, see `hevm equivalence --help`. For common options, see
 [here](./common-options.md).
 
 ## Simple example usage
+Let's set contract1.sol to:
+```solidity
+contract MyContract {
+  mapping (address => uint) balances;
+  function my_adder(address recv, uint amt) public {
+    if (balances[recv] + amt >= 100) { revert(); }
+    balances[recv] += amt;
+  }
+}
+```
+
+And let's set contract2.sol to:
+```solidity
+contract MyContract {
+  mapping (address => uint) balances;
+  function my_adder(address recv, uint amt) public {
+    if (balances[recv] + amt >= 100) { revert(); }
+    balances[recv] += amt/2;
+    balances[recv] += amt/2;
+  }
+}
+```
+
+Then we can check if they are equivalent by running:
 
 ```shell
-$ solc --bin-runtime "contract1.sol" | tail -n1 > a.bin
-$ solc --bin-runtime "contract2.sol" | tail -n1 > b.bin
-$ hevm equivalence --code-a-file a.bin --code-b-file b.bin
+solc --bin-runtime "contract1.sol" | tail -n1 > a.bin
+solc --bin-runtime "contract2.sol" | tail -n1 > b.bin
+hevm equivalence --code-a-file a.bin --code-b-file b.bin
 ```
 
 ## Calldata size limits
@@ -105,8 +129,8 @@ succeeds.
 
 If you want to check the equivalence of not just the runtime code, but also the
 creation code of two contracts, you can use the `--creation` flag.  For example
-these two contracts:
-
+the following two contracts compare equal when compared with `--create` flag.
+Let's set the first contract to create1.sol:
 ```solidity
 contract C {
   uint private immutable NUMBER;
@@ -114,13 +138,12 @@ contract C {
     NUMBER = 2;
   }
   function stuff(uint b) public returns (uint256) {
-    unchecked{return 2+NUMBER+b;}
+    unchecked {return 2+NUMBER+b;}
   }
 }
 ```
 
-And:
-
+And the second contract to create2.sol:
 ```solidity
 contract C {
   uint private immutable NUMBER;
@@ -133,12 +156,11 @@ contract C {
 }
 ```
 
-Will compare equal when compared with `--create` flag:
-
+And let's compare them via --create:
 ```shell
-solc --bin a.sol | tail -n1 > a.bin
-solc --bin b.sol | tail -n1 > b.bin
-cabal run exe:hevm equivalence -- --code-a-file a.bin --code-b-file b.bin --create
+solc --bin create1.sol | tail -n1 > create1.bin
+solc --bin create2.sol | tail -n1 > create2.bin
+hevm equivalence --code-a-file create1.bin --code-b-file create2.bin --create
 ```
 
 Notice that we used `--bin` and not `--bin-runtime` for solc here. Also note that
@@ -147,6 +169,5 @@ equivalent, since solidity will generate a getter for `NUMBER`, which will
 return 2/4 respectively.
 
 ## Further reading
-
 For a tutorial on how to use `hevm equivalence`, see the [equivalence checking
 tutorial](symbolic-execution-tutorial.html).

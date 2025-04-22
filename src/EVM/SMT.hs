@@ -77,10 +77,6 @@ instance Monoid CexVars where
       , txContext = mempty
       }
 
-flattenBufs :: SMTCex -> Maybe SMTCex
-flattenBufs cex = do
-  bs <- mapM collapse cex.buffers
-  pure $ cex{ buffers = bs }
 
 -- | Attempts to collapse a compressed buffer representation down to a flattened one
 collapse :: BufModel -> Maybe BufModel

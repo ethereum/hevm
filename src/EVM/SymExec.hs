@@ -976,6 +976,13 @@ showModel cd (expr, res) = do
       putStrLn "End State:"
       T.putStrLn $ indent 2 $ formatExpr expr
 
+showBuffer :: (Expr Buf) -> SMTCex -> Text
+showBuffer buf cex = case Map.lookup buf cex.buffers of
+  Nothing -> internalError "buffer missing in the counterexample"
+  Just buffer -> case SMT.collapse buffer of
+    Nothing -> T.pack $ show buffer
+    Just (Flat bs) -> T.pack $ show bs
+    Just (EVM.Types.Comp _) -> internalError "CompressedBuf returned from collapse"
 
 formatCex :: Expr Buf -> Maybe Sig -> SMTCex -> Text
 formatCex cd sig m@(SMTCex _ addrs _ store blockContext txContext) = T.unlines $
@@ -1088,9 +1095,9 @@ defaultSymbolicValues e = subBufs (foldTerm symbufs mempty e)
     symaddrs = \case
       a@(SymAddr _) -> Map.singleton a (Addr 0x1312)
       _ -> mempty
-    symbufs :: Expr a -> Map (Expr Buf) ByteString
+    symbufs :: Expr a -> Map (Expr Buf) BufModel
     symbufs = \case
-      a@(AbstractBuf _) -> Map.singleton a ""
+      a@(AbstractBuf _) -> Map.singleton a (Flat BS.empty)
       _ -> mempty
     symwords :: Expr a -> Map (Expr EWord) W256
     symwords = \case
@@ -1109,17 +1116,12 @@ defaultSymbolicValues e = subBufs (foldTerm symbufs mempty e)
 -- concrete ones from the Cex.
 subModel :: SMTCex -> Expr a -> Expr a
 subModel c
-  = subBufs (fmap forceFlattened c.buffers)
+  = subBufs c.buffers
   . subStores c.store
   . subVars c.vars
   . subVars c.blockContext
   . subVars c.txContext
   . subAddrs c.addrs
-  where
-    forceFlattened (Flat bs) = bs
-    forceFlattened b@(EVM.Types.Comp _) = forceFlattened $
-      fromMaybe (internalError $ "cannot flatten buffer: " <> show b)
-                (SMT.collapse b)
 
 subVars :: Map (Expr EWord) W256 -> Expr a -> Expr a
 subVars model b = Map.foldlWithKey subVar b model
@@ -1147,18 +1149,21 @@ subAddrs model b = Map.foldlWithKey subAddr b model
                       else v
           e -> e
 
-subBufs :: Map (Expr Buf) ByteString -> Expr a -> Expr a
+subBufs :: Map (Expr Buf) BufModel -> Expr a -> Expr a
 subBufs model b = Map.foldlWithKey subBuf b model
   where
-    subBuf :: Expr a -> Expr Buf -> ByteString -> Expr a
+    subBuf :: Expr a -> Expr Buf -> BufModel -> Expr a
     subBuf x var val = mapExpr go x
       where
         go :: Expr a -> Expr a
         go = \case
           a@(AbstractBuf _) -> if a == var
-                      then ConcreteBuf val
+                      then ConcreteBuf (forceFlattened val)
                       else a
           e -> e
+        forceFlattened :: BufModel -> ByteString
+        forceFlattened (Flat bs) = bs
+        forceFlattened buf@(EVM.Types.Comp _) = forceFlattened $ fromMaybe (internalError $ "cannot flatten buffer: " <> show buf) (SMT.collapse buf)
 
 subStores :: Map (Expr EAddr) (Map W256 W256) -> Expr a -> Expr a
 subStores model b = Map.foldlWithKey subStore b model

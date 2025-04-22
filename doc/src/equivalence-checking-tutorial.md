@@ -26,9 +26,7 @@ selector and function parameter bytes in the calldata, it will still correctly
 check the equivalence of such non-conforming contracts.
 
 ## Finding Discrepancies
-
-Let's see this toy contract, in file [contract1.sol](code_examples/contract1.sol):
-
+Let's see this toy contract, in file contract1.sol:
 ```solidity
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
@@ -41,8 +39,7 @@ contract MyContract {
 }
 ```
 
-And this, slightly modified one, in file [contract2.sol](code_examples/contract2.sol):
-
+And this, slightly modified one, in file contract2.sol:
 ```solidity
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
@@ -56,15 +53,7 @@ contract MyContract {
 }
 ```
 
-Now ask hevm if they are equivalent. First, let's compile both contracts and get their bytecode:
-
-```shell
-bytecode1=$(solc --bin-runtime "contract1.sol" | tail -n1)
-bytecode2=$(solc --bin-runtime "contract2.sol" | tail -n1)
-```
-
 Let's ask hevm to compare the two:
-
 ```shell
 $ hevm equivalence \
       --code-a $(solc --bin-runtime "contract1.sol" | tail -n1) \
@@ -87,10 +76,8 @@ to 35, the two are not equivalent. This is indeed the case: one will add `35
 div 2 = 17` twice, which is 34, the other will add 35.
 
 ## Fixing and Proving Correctness
-
 Let's fix the above issue by incrementing the balance by 1 in case it's an odd
-value. Let's call this [contract3.sol](code_examples/contract3.sol):
-
+value. Let's call this contract3.sol:
 ```solidity
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
@@ -124,24 +111,20 @@ the contract and within a given out of time it didn't find a counterexample.
 Instead, it _proved_ the two equivalent from an outside observer perspective.
 
 ## Dealing with Already Compiled Contracts
-
 If the contracts have already been compiled into a hex string, you can paste
 them into files `a.txt` and `b.txt` and compare them via:
-
 ```shell
 $ hevm equivalence --code-a "$(<a.txt)" --code-b "$(<b.txt)"
 ```
 
 You can also copy-paste the contents of the hex strings directly into the
 command line, although this can become cumbersome:
-
-```shell
+```plain
 $ hevm equivalence --code-a "6080604052348015600e575f80fd5b50600436106026575f3560e01c8063881fc77c14602a575b5f80fd5b60306032565b005b5f600190506002811460455760446048565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212208c57ae04774d9ebae7d1d11f9d5e730075068bc7988d4c83c6fed85b7f062e7b64736f6c634300081a0033" --code-b "6080604052348015600e575f80fd5b50600436106030575f3560e01c806385c2fc7114603457806386ae330914603c575b5f80fd5b603a6044565b005b60426055565b005b60025f541460535760526066565b5b565b60035f541460645760636066565b5b565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea2646970667358221220bd2f8a1ba281308f845e212d2b5eceab85e029909fa2409cdca7ede039bae26564736f6c634300081a0033"
 ```
 
-## Working with Raw Bytcode
-
-When doing equivalance checking, the returndata of the two systems are
+## Working with Raw Bytecode
+When doing equivalence checking, the returndata of the two systems are
 compared, and the calldata is set to be symbolic. This allows us to compare raw
 bytecode as well -- the code does not need to adhere to the Solidity [ABI](https://docs.soliditylang.org/en/latest/abi-spec.html).
 
@@ -149,7 +132,7 @@ The following contract is written in raw assembly. It takes
 the 1st byte of the calldata, multiplies it by 0, and stores it in memory, then
 returns this value:
 
-```
+```plain
 PUSH1 0x00
 CALLDATALOAD
 PUSH1 0x00
@@ -162,11 +145,12 @@ RETURN
 ```
 
 This can be compiled into bytecode via e.g. [evm.codes](https://evm.codes/),
-which allows us to both simulate this, and to get a bytecode for it: `60003560000260005260016000f3`. Notice that since anything multiplied by 0 is zero, for any calldata, this will put 0 into the returndata.
+which allows us to both simulate this, and to get a bytecode for it:
+`60003560000260005260016000f3`. Notice that since anything multiplied by 0 is
+zero, for any calldata, this will put 0 into the returndata.
 
 Let's compare the above code to an assembly contract that simply returns 0:
-
-```
+```plain
 PUSH32 0x0
 PUSH1 0x00
 MSTORE
@@ -180,7 +164,6 @@ This second contract compiles to:
 
 
 Let's check whether the two are equivalent:
-
 ```shell
 $ hevm equivalence --code-a "60003560000260005260016000f3" --code-b "7f000000000000000000000000000000000000000000000000000000000000000060005260016000f3"
 Found 1 total pairs of endstates
@@ -189,15 +172,14 @@ No discrepancies found
 ```
 
 If however we replace the
-```
+```plain
 PUSH32 0x0
 ```
 with
-```
+```plain
 PUSH32 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 ```
 we get:
-
 ```shell
 $ hevm equivalence --code-a "60003560000260005260016000f3" --code-b "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff60005260016000f3"
 Found 1 total pairs of endstates
