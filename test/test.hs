@@ -2244,6 +2244,23 @@ tests = testGroup "hevm"
         assertEqualM "wrong model for c" (Addr 0x12) (fromJust $ Map.lookup (SymAddr "origin") ccex.addrs)
         assertEqualM "wrong model for d" (Addr 0x13) (fromJust $ Map.lookup (SymAddr "entrypoint") dcex.addrs)
     ]
+  , testGroup "printing buffers"
+      -- This test generates a very large buffer that previously would cause an internalError when
+      -- printed via "formatCex". We should be able to print it now.
+      [ test "no-error-on-large-buf" $ do
+        Just c <- solcRuntime "MyContract"
+            [i|
+            contract MyContract {
+              function fun(bytes calldata a) external pure {
+                if (a.length > 0x800000000000) {
+                  assert(false);
+                }
+              }
+             }
+            |]
+        (_, [Cex cex]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+        putStrLnM $ "Cex found:" <> T.unpack (formatCex (AbstractBuf "txdata") Nothing (snd cex))
+      ]
   , testGroup "Symbolic execution"
       [
      test "require-test" $ do
