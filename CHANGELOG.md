@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When there are zero solutions to a multi-solution query it means that the
   currently executed branch is in fact impossible. In these cases, unwind all
   frames and return a Revert with empty returndata.
+- More rewrite rules for PEq, PNeg, missing eqByte call, and distributivity for And
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
