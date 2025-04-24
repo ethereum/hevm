@@ -15,7 +15,6 @@ We have a public matrix chat room
 Static binaries for x86 linux and macos are available for each
 [release](https://github.com/ethereum/hevm/releases). These binaries expect to be able to find the
 following programs on `PATH`:
-- `solc`
 - `z3`
 - (optionally) `cvc5`
 - (optionally) `bitwuzla`
