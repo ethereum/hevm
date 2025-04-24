@@ -1056,7 +1056,7 @@ tests = testGroup "hevm"
               frag = [symAbiArg "y" (AbiTupleType $ V.fromList [abiValueType y])]
               (hevmEncoded, _) = first (Expr.drop 4) $ combineFragments frag (ConcreteBuf "")
               expectedVals = expectedConcVals "y" (AbiTuple . V.fromList $ [y])
-              hevmConcretePre = subModel expectedVals hevmEncoded
+              hevmConcretePre = fromRight (error "cannot happen") $ subModel expectedVals hevmEncoded
               hevmConcrete = case Expr.simplify hevmConcretePre of
                                ConcreteBuf b -> b
                                buf -> internalError ("valMap: " <> show expectedVals <> "\ny:" <> show y <> "\n" <> "buf: " <> show buf)
@@ -4321,19 +4321,19 @@ tests = testGroup "hevm"
       withDefaultSolver $ \s -> do
         let props = [(PEq (BufLength (AbstractBuf "b")) (Lit 0x0))]
         (res, _) <- checkSatWithProps s props
-        cex :: SMTCex <- case res of
+        (cex) <- case res of
           Cex c -> pure c
           _ -> liftIO $ assertFailure "Must be satisfiable!"
-        let value = subModel cex (AbstractBuf "b")
+        let value = fromRight (error "cannot be") $ subModel cex (AbstractBuf "b")
         assertEqualM "Buffer must be empty" (ConcreteBuf "") value
     , testCase "correct-model-for-non-empty-buffer-of-all-zeroes" $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 0}}) $ do
       withDefaultSolver $ \s -> do
         let props = [(PAnd (PEq (ReadByte (Lit 0x0) (AbstractBuf "b")) (LitByte 0x0)) (PEq (BufLength (AbstractBuf "b")) (Lit 0x1)))]
         (res, _) <- checkSatWithProps s props
-        cex :: SMTCex <- case res of
+        (cex) <- case res of
           Cex c -> pure c
           _ -> liftIO $ assertFailure "Must be satisfiable!"
-        let value = subModel cex (AbstractBuf "b")
+        let value = fromRight (error "cannot be") $ subModel cex (AbstractBuf "b")
         assertEqualM "Buffer must have size 1 and contain zero byte" (ConcreteBuf "\0") value
     , testCase "buffer-shrinking-does-not-loop" $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 0}}) $ do
       withDefaultSolver $ \s -> do
@@ -4352,7 +4352,7 @@ tests = testGroup "hevm"
           Cex c -> pure c
           _ -> liftIO $ assertFailure "Must be satisfiable!"
         let value = subModel cex (Var "a")
-        assertEqualM "Can get value out of model in the presence of large buffer!" value (Lit 0x1)
+        assertEqualM "Can get value out of model in the presence of large buffer!" value (Right $ Lit 0x1)
   ]
   , testGroup "equivalence-checking"
     [
@@ -4448,7 +4448,8 @@ tests = testGroup "hevm"
           let cexs = mapMaybe getCex res
           assertEqualM "Must have exactly one cex" (length cexs) 1
           let cex = head cexs
-          let buf = prettyBuf . Expr.concKeccakSimpExpr . defaultSymbolicValues $ subModel cex (AbstractBuf "txdata")
+          let def = fromRight (error "cannot be") $ defaultSymbolicValues $ subModel cex (AbstractBuf "txdata")
+          let buf = prettyBuf $ Expr.concKeccakSimpExpr def
           assertBoolM "Must start with specific string" (T.isPrefixOf "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0cf" buf)
       , test "eq-yul-simple-cex" $ do
         Just aPrgm <- liftIO $ yul ""
