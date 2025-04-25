@@ -44,7 +44,6 @@ vmForEthrunCreation creationCode =
     , allowFFI = False
     , freshAddresses = 0
     , beaconRoot = 0
-    , minMemoryChunk = 1
     }) <&> set (#env % #contracts % at (LitAddr ethrunAddress))
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
 

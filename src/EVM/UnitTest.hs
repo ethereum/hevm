@@ -433,7 +433,6 @@ initialUnitTestVm (UnitTestOptions {..}) theContract = do
            , allowFFI = ffiAllowed
            , freshAddresses = 0
            , beaconRoot = 0
-           , minMemoryChunk = 1
            }
   let creator =
         initialContract (RuntimeCode (ConcreteRuntimeCode ""))
