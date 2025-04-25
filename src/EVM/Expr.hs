@@ -1733,23 +1733,28 @@ checkLHSConst :: Expr a -> Bool
 checkLHSConst a = isJust $ mapExprM_ lhsConstHelper a
 
 maybeLitByteSimp :: Expr Byte -> Maybe Word8
-maybeLitByteSimp e = case (concKeccakSimpExpr e) of
+maybeLitByteSimp (LitByte x) = Just x
+maybeLitByteSimp e = case concKeccakSimpExpr e of
   LitByte x -> Just x
   _ -> Nothing
 
 maybeLitWordSimp :: Expr EWord -> Maybe W256
-maybeLitWordSimp e = case (concKeccakSimpExpr e) of
+maybeLitWordSimp (Lit w) = Just w
+maybeLitWordSimp (WAddr (LitAddr w)) = Just (into w)
+maybeLitWordSimp e = case concKeccakSimpExpr e of
   Lit w -> Just w
   WAddr (LitAddr w) -> Just (into w)
   _ -> Nothing
 
 maybeLitAddrSimp :: Expr EAddr -> Maybe Addr
-maybeLitAddrSimp e = case (concKeccakSimpExpr e) of
+maybeLitAddrSimp (LitAddr a) = Just a
+maybeLitAddrSimp e = case concKeccakSimpExpr e of
   LitAddr a -> Just a
   _ -> Nothing
 
 maybeConcStoreSimp :: Expr Storage -> Maybe (LMap.Map W256 W256)
-maybeConcStoreSimp e = case (concKeccakSimpExpr e) of
+maybeConcStoreSimp (ConcreteStore s) = Just s
+maybeConcStoreSimp e = case concKeccakSimpExpr e of
   ConcreteStore s -> Just s
   _ -> Nothing
 
