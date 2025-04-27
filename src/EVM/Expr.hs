@@ -1098,7 +1098,7 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
     go (SMod (Lit 0) _) = Lit 0
 
     -- Triple And (must be before 3-way sort below)
-    go (And (Lit a) (And (Lit b) c)) = And (Lit (a .&. b)) c
+    go (And (Lit a) (And (Lit b) c)) = And (EVM.Expr.and (Lit a) (Lit b)) c
 
     -- double add/sub.
     -- Notice that everything is done mod 2**256. So for example:
@@ -1314,6 +1314,7 @@ simplifyProp prop =
     go (PNeg (PLT a b)) = PGEq a b
     go (PNeg (PLEq a b)) = PGT a b
     go (PNeg (PAnd a b)) = POr (PNeg a) (PNeg b)
+    go (PNeg (POr a b)) = PAnd (PNeg a) (PNeg b)
 
     -- Empty buf
     go (PEq (Lit 0) (BufLength k)) = peq k (ConcreteBuf "")
@@ -1597,7 +1598,7 @@ joinBytes bs
 
 eqByte :: Expr Byte -> Expr Byte -> Expr EWord
 eqByte (LitByte x) (LitByte y) = Lit $ if x == y then 1 else 0
-eqByte x y = EqByte x y
+eqByte x y = if x < y then EqByte x y else EqByte y x
 
 min :: Expr EWord -> Expr EWord -> Expr EWord
 min x y = normArgs Min Prelude.min x y
