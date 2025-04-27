@@ -856,9 +856,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
     check knownUnsat props = do
       ku <- liftIO $ readTVarIO knownUnsat
       if subsetAny props ku then pure Qed
-             else do
-               (res, _) <- checkSatWithProps solvers (Set.toList props)
-               pure res
+      else fst <$> checkSatWithProps solvers (Set.toList props)
 
     -- Allows us to run the queries in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
