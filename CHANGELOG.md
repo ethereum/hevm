@@ -47,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output in case of failure
 - Simple test cases for the CLI
 - Allow limiting the branch depth and width limitation via --max-depth and --max-width
+- When there are zero solutions to a multi-solution query it means that the
+  currently executed branch is in fact impossible. In these cases, unwind all
+  frames and return a Revert with empty returndata.
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -72,6 +75,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The length of the buffer is now properly taken into account.
 - It was possible to enter an infinite recursion when trying to shrink a buffer found by
   the SMT solver. We now properly detect that it is not possible to shrink the buffer.
+- Pretty printing of buffers is now more robust. Instead of throwing an `internal error`,
+  we now try best to print everything we can, and print an appropriate error message
+  instead of crashing.
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
@@ -89,6 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed `--smtoutput` since it was never used
 - We now build with -DCMAKE_POLICY_VERSION_MINIMUM=3.5 libff, as cmake deprecated 3.5
 - CheckSatResult has now been unified with ProofResult via SMTResult
+- If counterexample would require a buffer that's larger than 1GB, we abandon
+  shrinking it.
 - Buffers are now handled more lazily when inspecting a model, which avoids some
   unnecesary internal errors.
 
