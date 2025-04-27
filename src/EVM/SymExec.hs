@@ -852,22 +852,26 @@ equivalenceCheck' solvers branchesA branchesB create = do
     -- the solver if we can determine unsatisfiability from the cache already
     -- the last element of the returned tuple indicates whether the cache was
     -- used or not
-    check :: App m => UnsatCache -> (Set Prop, String) -> m (EquivResult, String)
-    check knownUnsat (props, meaning) = do
+    check :: App m => UnsatCache -> Set Prop -> m EquivResult
+    check knownUnsat props = do
       ku <- liftIO $ readTVarIO knownUnsat
-      if subsetAny props ku then pure (Qed, meaning)
+      if subsetAny props ku then pure Qed
              else do
                (res, _) <- checkSatWithProps solvers (Set.toList props)
-               pure (res, meaning)
+               pure res
 
-    -- Allows us to run it in parallel. Note that this (seems to) run it
+    -- Allows us to run the queries in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
     -- mapConcurrently which would spawn as many threads as there are jobs, and
     -- run them in a random order. We ordered them correctly, though so that'd be bad
     checkAll :: (App m, MonadUnliftIO m) => [(Set Prop, String)] -> UnsatCache -> Int -> m [(EquivResult, String)]
     checkAll input cache numproc = withRunInIO $ \env -> do
        wrap <- pool numproc
-       parMapIO (\e -> wrap (env $ check cache e)) input
+       parMapIO (runOne env wrap) input
+       where
+         runOne env wrap (props, meaning) = do
+           res <- wrap (env $ check cache props)
+           pure (res, meaning)
 
     -- Takes two branches and returns a set of props that will need to be
     -- satisfied for the two branches to violate the equivalence check. i.e.
