@@ -14,12 +14,11 @@ import Control.Monad.State.Strict (runStateT)
 import Data.Bifunctor (second, first)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
-import Data.Maybe (mapMaybe)
 import Data.Containers.ListUtils (nubOrd)
 import Data.DoubleWord (Word256)
 import Data.List (foldl', sortBy, sort)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Map.Merge.Strict qualified as Map
