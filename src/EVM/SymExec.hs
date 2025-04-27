@@ -986,9 +986,7 @@ showBuffer buf cex = case Map.lookup buf cex.buffers of
 
 formatCex :: Expr Buf -> Maybe Sig -> SMTCex -> Text
 formatCex cd sig m@(SMTCex _ addrs _ store blockContext txContext) = T.unlines $
-  [ "Calldata:"
-  , indent 2 cd'
-  ]
+  [ "Calldata:", indent 2 cd' ]
   <> storeCex
   <> txCtx
   <> blockCtx
@@ -1002,7 +1000,9 @@ formatCex cd sig m@(SMTCex _ addrs _ store blockContext txContext) = T.unlines $
     -- callvalue check inserted by solidity in contracts that don't have any
     -- payable functions).
     cd' = case sig of
-      Nothing -> prettyBuf . Expr.concKeccakSimpExpr . defaultSymbolicValues $ subModel m cd
+      Nothing -> case (defaultSymbolicValues $ subModel m cd) of
+        Right k -> prettyBuf $ Expr.concKeccakSimpExpr k
+        Left err -> T.pack err
       Just (Sig n ts) -> prettyCalldata m cd n ts
 
     storeCex :: [Text]
@@ -1069,16 +1069,21 @@ prettyBuf b = internalError $ "Unexpected symbolic buffer:\n" <> T.unpack (forma
 prettyCalldata :: SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
 prettyCalldata cex buf sig types = headErr errSig (T.splitOn "(" sig) <> "(" <> body <> ")"
   where
-    argdata = Expr.drop 4 . Expr.simplify . defaultSymbolicValues $ subModel cex buf
-    body = case decodeBuf types argdata of
-      CAbi v -> T.intercalate "," (fmap showVal v)
-      NoVals -> case argdata of
-          ConcreteBuf c -> T.pack (bsToHex c)
-          _ -> err
-      SAbi _ -> err
-    headErr e l = fromMaybe e $ listToMaybe l
-    err = internalError $ "unable to produce a concrete model for calldata: " <> show buf
-    errSig = internalError $ "unable to split sig: " <> show sig
+    cd = defaultSymbolicValues $ subModel cex buf
+    argdata :: Err (Expr Buf) = case cd of
+      Right cd' -> Right $ Expr.drop 4 (Expr.simplify cd')
+      Left e -> Left e
+    body = case argdata of
+      Right argdata' -> case decodeBuf types argdata' of
+        CAbi v -> T.intercalate "," (fmap showVal v)
+        NoVals -> case argdata' of
+            ConcreteBuf c -> T.pack (bsToHex c)
+            _ -> T.pack err
+        SAbi _ -> T.pack err
+      Left e -> T.pack e
+    headErr e l = fromMaybe (T.pack e) $ listToMaybe l
+    err = "Error: unable to produce a concrete model for calldata: " <> show buf
+    errSig = "Error unable to split sig: " <> show sig
 
 -- | If the expression contains any symbolic values, default them to some
 -- concrete value The intuition here is that if we still have symbolic values
@@ -1086,10 +1091,12 @@ prettyCalldata cex buf sig types = headErr errSig (T.splitOn "(" sig) <> "(" <> 
 -- any value and we can safely pick a random value. This is a bit unsatisfying,
 -- we should really be doing smth like: https://github.com/ethereum/hevm/issues/334
 -- but it's probably good enough for now
-defaultSymbolicValues :: Expr a -> Expr a
-defaultSymbolicValues e = subBufs (foldTerm symbufs mempty e)
-                        . subVars (foldTerm symwords mempty e)
-                        . subAddrs (foldTerm symaddrs mempty e) $ e
+defaultSymbolicValues :: Err (Expr a) -> Err (Expr a)
+defaultSymbolicValues = \case
+    Right e -> subBufs (foldTerm symbufs mempty e)
+               . subVars (foldTerm symwords mempty e)
+               . subAddrs (foldTerm symaddrs mempty e) $ e
+    Left err -> Left err
   where
     symaddrs :: Expr a -> Map (Expr EAddr) Addr
     symaddrs = \case
@@ -1114,7 +1121,7 @@ defaultSymbolicValues e = subBufs (foldTerm symbufs mempty e)
 
 -- | Takes an expression and a Cex and replaces all abstract values in the buf with
 -- concrete ones from the Cex.
-subModel :: SMTCex -> Expr a -> Expr a
+subModel :: SMTCex -> Expr a -> Err (Expr a)
 subModel c
   = subBufs c.buffers
   . subStores c.store
@@ -1149,21 +1156,27 @@ subAddrs model b = Map.foldlWithKey subAddr b model
                       else v
           e -> e
 
-subBufs :: Map (Expr Buf) BufModel -> Expr a -> Expr a
-subBufs model b = Map.foldlWithKey subBuf b model
+subBufs :: Map (Expr Buf) BufModel -> Expr a -> Err (Expr a)
+subBufs model b = Map.foldlWithKey subBuf (Right b) model
   where
-    subBuf :: Expr a -> Expr Buf -> BufModel -> Expr a
-    subBuf x var val = mapExpr go x
+    subBuf :: Err (Expr a) -> Expr Buf -> BufModel -> Err (Expr a)
+    subBuf x var val = case x of
+      Right x' -> mapExprM go x'
+      Left err -> Left err
       where
-        go :: Expr a -> Expr a
+        go :: Expr a -> Err (Expr a)
         go = \case
-          a@(AbstractBuf _) -> if a == var
-                      then ConcreteBuf (forceFlattened val)
-                      else a
-          e -> e
-        forceFlattened :: BufModel -> ByteString
-        forceFlattened (Flat bs) = bs
-        forceFlattened buf@(EVM.Types.Comp _) = forceFlattened $ fromMaybe (internalError $ "cannot flatten buffer: " <> show buf) (SMT.collapse buf)
+          c@(AbstractBuf _) -> case c == var of
+            True -> case forceFlattened val of
+              Right bs -> Right $ ConcreteBuf bs
+              Left err -> Left $ show c <> " --- cannot flatten buffer: " <> err
+            False -> Right c
+          e -> Right e
+        forceFlattened :: BufModel -> Err ByteString
+        forceFlattened (Flat bs) = Right bs
+        forceFlattened buf@(EVM.Types.Comp _) =  case SMT.collapse buf of
+          Just k -> forceFlattened k
+          Nothing -> Left $ show buf
 
 subStores :: Map (Expr EAddr) (Map W256 W256) -> Expr a -> Expr a
 subStores model b = Map.foldlWithKey subStore b model
