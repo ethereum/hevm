@@ -826,7 +826,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
                    <> "\nendstates in bytecodeB: " <> show (length branchesB)
 
       ps <- forM allPairs $ uncurry distinct
-      let differingEndStates = sortBySize $ concatMap (view _1) ps
+      let differingEndStates = sortBySize $ mapMaybe (view _1) ps
       let knownIssues = foldr ((<>) . (view _2)) mempty ps
       liftIO $ putStrLn $ "Asking the SMT solver for " <> (show $ length differingEndStates) <> " pairs"
       when conf.dumpEndStates $ forM_ (zip differingEndStates [(1::Integer)..]) (\(x, i) ->
@@ -876,23 +876,24 @@ equivalenceCheck' solvers branchesA branchesB create = do
     -- for a given pair of branches, equivalence is violated if there exists an
     -- input that satisfies the branch conditions from both sides and produces
     -- a differing result in each branch
-    distinct :: App m => Expr End -> Expr End -> m ([(Set Prop, String)], EqIssues)
+    distinct :: App m => Expr End -> Expr End -> m (Maybe (Set Prop, String), EqIssues)
     distinct aEnd bEnd = do
       (requireToDiff, issues) <- resultsDiffer aEnd bEnd
       let newIssues = EqIssues [] (filter isPartial [aEnd, bEnd])
-      pure (map collectReqs requireToDiff, issues <> newIssues)
+      pure (collectReqs requireToDiff, issues <> newIssues)
       where
-        collectReqs (reqToDiff, meaning) = (Set.fromList $ Expr.simplifyProps (reqToDiff : extractProps aEnd <> extractProps bEnd), meaning)
+        collectReqs (Just (reqToDiff, meaning)) = Just (Set.fromList $ Expr.simplifyProps (reqToDiff : extractProps aEnd <> extractProps bEnd), meaning)
+        collectReqs Nothing  = Nothing
 
     -- Note that the a==b and similar checks are ONLY syntactic checks. If they are true,
     -- then they are surely equivalent. But if not, we need to check via SMT
-    resultsDiffer :: App m => Expr End -> Expr End -> m ([(Prop, String)], EqIssues)
+    resultsDiffer :: App m => Expr End -> Expr End -> m (Maybe (Prop, String), EqIssues)
     resultsDiffer aEnd bEnd = do
       let deployText :: String = if create then "Undeployed contracts. " else "Deployed contracts. "
       case (aEnd, bEnd) of
         (Success aProps _ aOut aState, Success bProps _ bOut bState) ->
           case (aOut == bOut, aState == bState, create) of
-            (True, True, _) -> pure (mempty, mempty)
+            (True, True, _) -> pure (Nothing, mempty)
             (_, _, True) -> do
               -- Either the deployed code doesn't behave the same, or they start with a different
               -- starting state
@@ -903,29 +904,29 @@ equivalenceCheck' solvers branchesA branchesB create = do
                     "\nState of A: " <> T.unpack (formatState aState) <>
                     "\nRet of B: " <> T.unpack (formatExpr bOut) <>
                     "\nState of B: " <> T.unpack (formatState bState))
-              pure ([deployedStateDiffer], deployedContractIssues)
+              pure (Just deployedStateDiffer, deployedContractIssues)
             (_, _, False) -> do
-              pure ([((aOut ./= bOut) .|| (statesDiffer aState bState),
+              pure (Just ((aOut ./= bOut) .|| (statesDiffer aState bState),
                 deployText <> "Both end in Success, but return values or end state differ. " <>
                 "\nRet of A: " <> T.unpack (formatExpr aOut) <>
                 "\nState of A: " <> T.unpack (formatState aState) <>
                 "\nRet of B: " <> T.unpack (formatExpr bOut) <>
-                "\nState of B: " <> T.unpack (formatState bState))], mempty)
-        (Failure _ _ a, Failure _ _ b) -> pure ([(differentError a b,
+                "\nState of B: " <> T.unpack (formatState bState)), mempty)
+        (Failure _ _ a, Failure _ _ b) -> pure (Just (differentError a b,
                   deployText <> "Both end in Failure but different EVM error." <>
                   "\nA err: " <> T.unpack (formatError a) <>
-                  "\nB err: " <> T.unpack (formatError b))], mempty)
-        ((Failure _ _ a), (Success _ _ b _)) -> pure ([(PBool True,
+                  "\nB err: " <> T.unpack (formatError b)), mempty)
+        ((Failure _ _ a), (Success _ _ b _)) -> pure (Just (PBool True,
           deployText <> "Failure vs Success end states" <>
           "\nA err: " <> T.unpack (formatError a) <>
-          "\nB ret: " <> T.unpack (formatExpr b))], mempty)
-        ((Success _ _ a _), (Failure _ _ b)) -> pure ([(PBool True,
+          "\nB ret: " <> T.unpack (formatExpr b)), mempty)
+        ((Success _ _ a _), (Failure _ _ b)) -> pure (Just (PBool True,
           deployText <> "Success vs Failure end states" <>
           "\nA ret: " <> T.unpack (formatExpr a) <>
-          "\nB err: " <> T.unpack (formatError b))], mempty)
+          "\nB err: " <> T.unpack (formatError b)), mempty)
         -- partial end states can't be compared to actual end states, so we always ignore them
-        (Partial {}, _) -> pure (mempty, mempty)
-        (_, Partial {}) -> pure (mempty, mempty)
+        (Partial {}, _) -> pure (Nothing, mempty)
+        (_, Partial {}) -> pure (Nothing, mempty)
         (ITE _ _ _, _) -> internalError "Expressions must be flattened"
         (_, ITE _ _ _) -> internalError "Expressions must be flattened"
         (GVar _, _) -> internalError "GVar in equivalence check"
