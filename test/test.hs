@@ -4356,8 +4356,22 @@ tests = testGroup "hevm"
       assertEqualM "We must be able to remove all duplicates" (length $ nubOrd simp) (length $ List.nub simp)
   ]
   , testGroup "calling-solvers"
-  [
-    testCase "correct-model-for-empty-buffer" $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 0}}) $ do
+  [ test "no-error-on-large-buf" $ do
+      -- This test generates a very large buffer that previously would cause an internalError when
+      -- printed via "formatCex". We should be able to print it now.
+      Just c <- solcRuntime "MyContract"
+          [i|
+          contract MyContract {
+            function fun(bytes calldata a) external pure {
+              if (a.length > 0x800000000000) {
+                assert(false);
+              }
+            }
+           }
+          |]
+      (_, [Cex cex]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+      putStrLnM $ "Cex found:" <> T.unpack (formatCex (AbstractBuf "txdata") Nothing (snd cex))
+    , testCase "correct-model-for-empty-buffer" $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 0}}) $ do
       withDefaultSolver $ \s -> do
         let props = [(PEq (BufLength (AbstractBuf "b")) (Lit 0x0))]
         (res, _) <- checkSatWithProps s props
