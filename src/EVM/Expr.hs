@@ -203,11 +203,12 @@ sar = op2 SAR (\x y ->
 
 peq :: (Typeable a) => Expr a -> Expr a -> Prop
 peq (Lit x) (Lit y) = PBool (x == y)
-peq a@(Lit _) b = PEq a b
-peq a b@(Lit _) = PEq b a -- we always put concrete values on LHS
+peq (LitByte x) (LitByte y) = PBool (x == y)
+peq (ConcreteBuf x) (ConcreteBuf y) = PBool (x == y)
 peq a b
   | a == b = PBool True
-  | otherwise = PEq a b
+  | otherwise = let args = sort [a, b]
+     in PEq (args !! 0) (args !! 1)
 
 -- ** Bufs ** --------------------------------------------------------------------------------------
 
@@ -1096,6 +1097,9 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
     go (Mod (Lit 0) _) = Lit 0
     go (SMod (Lit 0) _) = Lit 0
 
+    -- Triple And (must be before 3-way sort below)
+    go (And (Lit a) (And (Lit b) c)) = And (EVM.Expr.and (Lit a) (Lit b)) c
+
     -- double add/sub.
     -- Notice that everything is done mod 2**256. So for example:
     -- (a-b)+c observes the same arithmetic equalities as we are used to
@@ -1172,6 +1176,8 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
 
     -- XOR normalization
     go (Xor a  b) = EVM.Expr.xor a b
+
+    go (EqByte a b) = eqByte a b
 
     -- SHL / SHR by 0
     go (SHL a v)
@@ -1307,9 +1313,12 @@ simplifyProp prop =
     go (PNeg (PGEq a b)) = PLT a b
     go (PNeg (PLT a b)) = PGEq a b
     go (PNeg (PLEq a b)) = PGT a b
+    go (PNeg (PAnd a b)) = POr (PNeg a) (PNeg b)
+    go (PNeg (POr a b)) = PAnd (PNeg a) (PNeg b)
 
     -- Empty buf
     go (PEq (Lit 0) (BufLength k)) = peq k (ConcreteBuf "")
+    go (PEq (Lit 0) (Or a b)) = peq a (Lit 0) `PAnd` peq b (Lit 0)
 
     -- PEq rewrites (notice -- GT/GEq is always rewritten to LT by simplify)
     go (PEq (Lit 1) (IsZero (LT a b))) = PLT a b
@@ -1589,7 +1598,7 @@ joinBytes bs
 
 eqByte :: Expr Byte -> Expr Byte -> Expr EWord
 eqByte (LitByte x) (LitByte y) = Lit $ if x == y then 1 else 0
-eqByte x y = EqByte x y
+eqByte x y = if x < y then EqByte x y else EqByte y x
 
 min :: Expr EWord -> Expr EWord -> Expr EWord
 min x y = normArgs Min Prelude.min x y
