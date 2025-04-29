@@ -854,10 +854,11 @@ equivalenceCheck' solvers branchesA branchesB create = do
     check :: App m => UnsatCache -> Set Prop -> m EquivResult
     check knownUnsat props = do
       ku <- liftIO $ readTVarIO knownUnsat
-      if subsetAny props ku then pure Qed
+      let propsSimp = Expr.simplifyProps (Set.toList props)
+      if (propsSimp == [PBool False]) || subsetAny (Set.fromList propsSimp) ku then pure Qed
       else do
-         (ret, _) <- checkSatWithProps solvers (Set.toList props)
-         when (ret == Qed) $ liftIO $ atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (props :)
+         (ret, _) <- checkSatWithProps solvers propsSimp
+         when (ret == Qed) $ liftIO $ atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (Set.fromList propsSimp :)
          pure ret
 
     -- Allows us to run the queries in parallel. Note that this (seems to) run it
