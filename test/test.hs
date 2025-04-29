@@ -4280,6 +4280,46 @@ tests = testGroup "hevm"
         a = successGen [PGEq (Lit 1) (Lit 2)]
         b = Expr.simplify a
       assertEqualM "Must simplify down" (successGen [PBool False]) b
+    , test "prop-simp-liteq-false" $ do
+      let
+        a = [PEq (LitByte 10) (LitByte 12)]
+        b = Expr.simplifyProps a
+      assertEqualM "Must simplify to PBool" ([PBool False]) b
+    , test "prop-simp-concbuf-false" $ do
+      let
+        a = [PEq (ConcreteBuf "a") (ConcreteBuf "ab")]
+        b = Expr.simplifyProps a
+      assertEqualM "Must simplify to PBool" ([PBool False]) b
+    , test "prop-simp-sort-eq-arguments" $ do
+      let
+        a = [PEq (Var "a") (Var "b"), PEq (Var "b") (Var "a")]
+        b = Expr.simplifyProps a
+      assertEqualM "Must reorder and nubOrd" (length b) 1
+    , test "expr-simp-and-commut-assoc" $ do
+      let
+        a = And (Lit 4) (And (Lit 5) (Var "a"))
+        b = Expr.simplify a
+      assertEqualM "Must reorder and perform And" (And (Lit 4) (Var "a")) b
+    , test "expr-simp-order-eqbyte" $ do
+      let
+        a = EqByte (ReadByte (Lit 1) (AbstractBuf "b")) (ReadByte (Lit 1) (AbstractBuf "a"))
+        b = Expr.simplify a
+      assertEqualM "Must order eqbyte params" b (EqByte (ReadByte (Lit 1) (AbstractBuf "a")) (ReadByte (Lit 1) (AbstractBuf "b")))
+    , test "prop-simp-demorgan-pneg-pand" $ do
+      let
+        a = [PNeg (PAnd (PEq (Lit 4) (Var "a")) (PEq (Lit 5) (Var "b")))]
+        b = Expr.simplifyProps a
+      assertEqualM "Must apply demorgan" b [POr (PNeg (PEq (Lit 4) (Var "a"))) (PNeg (PEq (Lit 5) (Var "b")))]
+    , test "prop-simp-demorgan-pneg-por" $ do
+      let
+        a = [PNeg (POr (PEq (Lit 4) (Var "a")) (PEq (Lit 5) (Var "b")))]
+        b = Expr.simplifyProps a
+      assertEqualM "Must apply demorgan" [PNeg (PEq (Lit 4) (Var "a")), PNeg (PEq (Lit 5) (Var "b"))] b
+    , test "prop-simp-lit0-or-both-0" $ do
+      let
+        a = [PEq (Lit 0) (Or (Var "a") (Var "b"))]
+        b = Expr.simplifyProps a
+      assertEqualM "Must apply demorgan" [PEq (Lit 0) (Var "a"), PEq (Lit 0) (Var "b")] b
     , test "prop-simp-multiple" $ do
       let
         a = successGen [PBool False, PBool True]
@@ -4316,8 +4356,30 @@ tests = testGroup "hevm"
       assertEqualM "We must be able to remove all duplicates" (length $ nubOrd simp) (length $ List.nub simp)
   ]
   , testGroup "calling-solvers"
-  [
-    testCase "correct-model-for-empty-buffer" $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 0}}) $ do
+  [ test "no-error-on-large-buf" $ do
+      -- These two tests generates a very large buffer that previously would cause an internalError when
+      -- printed via "formatCex". We should be able to print it now.
+      Just c <- solcRuntime "MyContract" [i|
+          contract MyContract {
+            function fun(bytes calldata a) external pure {
+              if (a.length > 0x800000000000) {
+                assert(false);
+              }
+            }
+           } |]
+      (_, [Cex cex]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+      putStrLnM $ "Cex found:" <> T.unpack (formatCex (AbstractBuf "txdata") Nothing (snd cex))
+    , test "no-error-on-large-buf-pure-print" $ do
+      let bufs = Map.singleton (AbstractBuf "txdata")
+                  (EVM.Types.Comp Write {byte = 1, idx = 0x27, next = Base {byte = 0x66, length = 0xffff000000000000000}})
+      let mycex = SMTCex {vars = mempty
+                         , addrs = mempty
+                         , buffers = bufs
+                         , store = mempty
+                         , blockContext = mempty
+                         , txContext = Map.fromList [(TxValue,0x0)]}
+      putStrLnM $ "Cex found:" <> T.unpack (formatCex (AbstractBuf "txdata") Nothing mycex)
+    , testCase "correct-model-for-empty-buffer" $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 0}}) $ do
       withDefaultSolver $ \s -> do
         let props = [(PEq (BufLength (AbstractBuf "b")) (Lit 0x0))]
         (res, _) <- checkSatWithProps s props
@@ -4375,9 +4437,9 @@ tests = testGroup "hevm"
           |]
         withSolvers Bitwuzla 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s a b defaultVeriOpts calldata False
-          assertBoolM "Must have a difference" (any isCex res)
-          let cexs = mapMaybe getCex res
+          eq <- equivalenceCheck s a b defaultVeriOpts calldata False
+          assertBoolM "Must have a difference" (any (isCex . fst) eq.res)
+          let cexs = mapMaybe (getCex . fst) eq.res
           assertEqualM "Must have exactly one cex" (length cexs) 1
       -- diverging gas overapproximations are caught
       -- previously, they had the same name (gas_...), so they compared equal
@@ -4404,9 +4466,9 @@ tests = testGroup "hevm"
           |]
         withSolvers Bitwuzla 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s a b defaultVeriOpts calldata False
-          assertBoolM "Must have a difference" (any isCex res)
-          let cexs = mapMaybe getCex res
+          eq <- equivalenceCheck s a b defaultVeriOpts calldata False
+          assertBoolM "Must have a difference" (any (isCex . fst) eq.res)
+          let cexs = mapMaybe (getCex . fst) eq.res
           assertEqualM "Must have exactly one cex" (length cexs) 1
       -- diverging gas overapproximations are caught
       -- previously, CALL fresh variables were the same so they compared equal
@@ -4433,9 +4495,9 @@ tests = testGroup "hevm"
           |]
         withSolvers Bitwuzla 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s a b defaultVeriOpts calldata False
-          assertBoolM "Must have a difference" (any isCex res)
-          let cexs = mapMaybe getCex res
+          eq <- equivalenceCheck s a b defaultVeriOpts calldata False
+          assertBoolM "Must have a difference" (any (isCex . fst) eq.res)
+          let cexs = mapMaybe (getCex . fst) eq.res
           assertEqualM "Must have exactly one cex" (length cexs) 1
       -- check bug https://github.com/ethereum/hevm/issues/679
       , test "eq-issue-with-length-cex-bug679" $ do
@@ -4443,9 +4505,9 @@ tests = testGroup "hevm"
             b = fromJust (hexByteString "5f356101f40115610100526020610100f3")
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s a b defaultVeriOpts calldata False
-          assertBoolM "Must have a difference" (any isCex res)
-          let cexs = mapMaybe getCex res
+          eq <- equivalenceCheck s a b defaultVeriOpts calldata False
+          assertBoolM "Must have a difference" (any (isCex . fst) eq.res)
+          let cexs :: [SMTCex] = mapMaybe (getCex . fst) eq.res
           assertEqualM "Must have exactly one cex" (length cexs) 1
           let cex = head cexs
           let def = fromRight (error "cannot be") $ defaultSymbolicValues $ subModel cex (AbstractBuf "txdata")
@@ -4474,8 +4536,8 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
-          assertBoolM "Must have a difference" (any isCex res)
+          eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
+          assertBoolM "Must have a difference" (any (isCex . fst) eq.res)
       , test "constructor-same-deployed-diff" $ do
         Just initA <- solidity "C"
           [i|
@@ -4503,8 +4565,8 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
-          assertBoolM "Must have difference, we return different values" (all isCex res)
+          eq <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          assertBoolM "Must have difference, we return different values" (all (isCex . fst) eq.res)
       , test "constructor-same-deployed-diff2" $ do
         Just initA <- solidity "C"
           [i|
@@ -4535,8 +4597,8 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
-          assertBoolM "Must have difference, we return different values" (all isCex res)
+          eq <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          assertBoolM "Must have difference, we return different values" (all (isCex . fst) eq.res)
       , test "constructor-same-deployed-diff3" $ do
         Just initA <- solidity "C"
           [i|
@@ -4561,8 +4623,8 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
-          assertBoolM "Must have difference, we return different values" (all isCex res)
+          eq <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          assertBoolM "Must have difference, we return different values" (all (isCex . fst) eq.res)
       -- We set x to be 0 on deployment. Default value is also 0. So they are equivalent
       -- We cannot deal with symbolic code. However, the below will generate symbolic code,
       -- because of the parameter in the constructor that is set to NUMBER in the deployed code.
@@ -4594,8 +4656,8 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
-          assertBoolM "Must have difference" (all isCex res)
+          eq <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          assertBoolM "Must have difference" (all (isCex . fst) eq.res)
       -- We set x to be 0 on deployment. Default value is also 0. So they are equivalent
       , test "constructor-implicit" $ do
         Just initA <- solidity "C"
@@ -4621,9 +4683,9 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
-          assertEqualM "Must have no difference" [Qed] res
-      -- We set x to be 3 vs 0 (default) on deployment. Then, the returned value will be different
+          eq <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          assertEqualM "Must have no difference" [Qed] (map fst eq.res)
+      -- We set x to be 3 vs 0 (default) on deployment.
       , test "constructor-differing" $ do
         Just initA <- solidity "C"
           [i|
@@ -4648,8 +4710,8 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s initA initB defaultVeriOpts calldata True
-          let cexes = filter isCex res
+          eq <- equivalenceCheck s initA initB defaultVeriOpts calldata True
+          let cexes = filter (isCex . fst) eq.res
           assertBoolM "Must have a difference" (not $ null cexes)
       , test "eq-sol-exp-qed" $ do
         Just aPrgm <- solcRuntime "C"
@@ -4674,8 +4736,8 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
-          assertEqualM "Must have no difference" [Qed] res
+          eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
+          assertEqualM "Must have no difference" [Qed] (map fst eq.res)
       ,
       test "eq-balance-differs" $ do
         Just aPrgm <- solcRuntime "C"
@@ -4706,8 +4768,8 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
-          assertBoolM "Must differ" (all isCex res)
+          eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
+          assertBoolM "Must differ" (all (isCex . fst) eq.res)
       ,
       -- TODO: this fails because we don't check equivalence of deployed contracts
       expectFail $ test "eq-handles-contract-deployment" $ do
@@ -4768,8 +4830,8 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
-          assertBoolM "Must differ" (all isCex res)
+          eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
+          assertBoolM "Must differ" (all (isCex . fst) eq.res)
       ,
       test "eq-unknown-addr" $ do
         Just aPrgm <- solcRuntime "C"
@@ -4792,8 +4854,8 @@ tests = testGroup "hevm"
           |]
         withSolvers Z3 3 1 Nothing $ \s -> do
           cd <- mkCalldata (Just (Sig "a(address,address)" [AbiAddressType, AbiAddressType])) []
-          (res,_) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd False
-          assertEqualM "Must be different" (any isCex res) True
+          eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts cd False
+          assertEqualM "Must be different" (any (isCex . fst) eq.res) True
       ,
       test "eq-sol-exp-cex" $ do
         Just aPrgm <- solcRuntime "C"
@@ -4818,8 +4880,8 @@ tests = testGroup "hevm"
           |]
         withSolvers Bitwuzla 3 1 Nothing $ \s -> do
           calldata <- mkCalldata Nothing []
-          (res, _) <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
-          assertEqualM "Must be different" (any isCex res) True
+          eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
+          assertEqualM "Must be different" (any (isCex . fst) eq.res) True
       , test "eq-all-yul-optimization-tests" $ do
         let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }
             ignoredTests =
@@ -5032,7 +5094,8 @@ tests = testGroup "hevm"
           procs <- liftIO $ getNumProcessors
           withSolvers CVC5 (unsafeInto procs) 1 (Just 100) $ \s -> do
             calldata <- mkCalldata Nothing []
-            (res, _) <- equivalenceCheck s aPrgm bPrgm opts calldata False
+            eq <- equivalenceCheck s aPrgm bPrgm opts calldata False
+            let res = map fst eq.res
             end <- liftIO $ getCurrentTime
             case any isCex res of
               False -> liftIO $ do
