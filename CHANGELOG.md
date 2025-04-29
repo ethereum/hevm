@@ -100,6 +100,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shrinking it.
 - Buffers are now handled more lazily when inspecting a model, which avoids some
   unnecesary internal errors.
+- EVM memory is now grown on demand using a 2x factor, to avoid repeated smaller
+  increases which hurt concrete execution performance due to their linear cost.
+- The concrete MCOPY implementation has been optimized to avoid freezing the whole
+  EVM memory.
 
 ## [0.54.2] - 2024-12-12
 

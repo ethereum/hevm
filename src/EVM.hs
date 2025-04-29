@@ -674,9 +674,9 @@ exec1 conf = do
             mcopy sz srcOff dstOff = do
                   m <- gets (.state.memory)
                   case m of
-                    ConcreteMemory mem -> do
-                      buf <- freezeMemory mem
-                      copyBytesToMemory buf sz srcOff dstOff
+                    ConcreteMemory _ -> do
+                      buf <- readMemory srcOff sz
+                      copyBytesToMemory buf sz (Lit 0) dstOff
                     SymbolicMemory mem -> do
                       assign (#state % #memory) (SymbolicMemory $ copySlice srcOff dstOff sz mem mem)
 
@@ -2958,10 +2958,18 @@ writeMemory memory offset buf = do
   mapM_ (uncurry (VUnboxed.Mutable.write memory'))
         (zip [offset..] (BS.unpack buf))
   where
-  expandMemory targetSize = do
-    let toAlloc = targetSize - VUnboxed.Mutable.length memory
+  expandMemory requiredSize = do
+    let currentSize = VUnboxed.Mutable.length memory
+    let toAlloc = requiredSize - currentSize
     if toAlloc > 0 then do
-      memory' <- VUnboxed.Mutable.grow memory toAlloc
+      -- As grow does a larger *copy* of the vector on a new place,
+      -- we double the vector size to avoid the performance impact
+      -- that would happen with repeated small expansion operations.
+      let growthFactor = 2
+      let targetSize = requiredSize * growthFactor
+      -- Always grow at least 8k
+      let toGrow = max 8192 $ targetSize - currentSize 
+      memory' <- VUnboxed.Mutable.grow memory toGrow
       assign (#state % #memory) (ConcreteMemory memory')
       pure memory'
     else
