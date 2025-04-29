@@ -6,6 +6,8 @@ module EVM.Format
   , formatPartial
   , formatPartialShort
   , formatProp
+  , formatState
+  , formatError
   , contractNamePart
   , contractPathPart
   , showError
@@ -495,6 +497,13 @@ formatPartialShort = \case
 formatSomeExpr :: SomeExpr -> Text
 formatSomeExpr (SomeExpr e) = formatExpr $ Expr.simplify e
 
+formatState :: Map.Map (Expr EAddr) (Expr EContract) -> Text
+formatState store = indent 2 $ T.unlines (fmap (\(k,v) ->
+              T.unlines
+                [ formatExpr k <> ":"
+                , indent 2 $ formatExpr v
+                ]) (Map.toList store))
+
 formatExpr :: Expr a -> Text
 formatExpr = go
   where
@@ -516,17 +525,10 @@ formatExpr = go
       Success asserts _ buf store -> T.unlines
         [ "(Success"
         , indent 2 $ T.unlines
-          [ "Data:"
-          , indent 2 $ formatExpr buf
+          [ "Data:" , indent 2 $ formatExpr buf
           , ""
-          , "State:"
-          , indent 2 $ T.unlines (fmap (\(k,v) ->
-              T.unlines
-                [ formatExpr k <> ":"
-                , indent 2 $ formatExpr v
-                ]) (Map.toList store))
-          , "Assertions:"
-          , indent 2 . T.unlines $ fmap formatProp asserts
+          , "State:", formatState store
+          , "Assertions:", indent 2 . T.unlines $ fmap formatProp asserts
           ]
         , ")"
         ]
