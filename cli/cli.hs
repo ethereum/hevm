@@ -387,9 +387,11 @@ equivalence eqOpts cOpts = do
     putStrLn "Error: invalid or no bytecode for program B. Provide a valid one with --code-b or --code-b-file"
     exitFailure
   let veriOpts = VeriOpts { simp = True
-                          , maxIter = parseMaxIters cOpts.maxIterations
-                          , askSmtIters = cOpts.askSmtIterations
-                          , loopHeuristic = cOpts.loopDetectionHeuristic
+                          , iterConf = IterConfig {
+                            maxIter = parseMaxIters cOpts.maxIterations
+                            , askSmtIters = cOpts.askSmtIterations
+                            , loopHeuristic = cOpts.loopDetectionHeuristic
+                            }
                           , rpcInfo = Nothing
                           }
   calldata <- buildCalldata cOpts eqOpts.sig eqOpts.arg
@@ -493,9 +495,11 @@ assert cFileOpts sOpts cExecOpts cOpts = do
   solver <- liftIO $ getSolver cOpts.solver
   withSolvers solver solverCount cOpts.solverThreads (Just cOpts.smttimeout) $ \solvers -> do
     let veriOpts = VeriOpts { simp = True
-                        , maxIter = parseMaxIters cOpts.maxIterations
-                        , askSmtIters = cOpts.askSmtIterations
-                        , loopHeuristic = cOpts.loopDetectionHeuristic
+                        , iterConf = IterConfig {
+                          maxIter = parseMaxIters cOpts.maxIterations
+                          , askSmtIters = cOpts.askSmtIterations
+                          , loopHeuristic = cOpts.loopDetectionHeuristic
+                          }
                         , rpcInfo = rpcinfo
     }
     (expr, res) <- verify solvers veriOpts preState (Just $ checkAssertions errCodes)

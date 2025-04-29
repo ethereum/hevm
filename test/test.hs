@@ -194,7 +194,8 @@ tests = testGroup "hevm"
           }
         }
         |]
-       expr <- withDefaultSolver $ \s -> getExpr s c (Just (Sig "transfer(uint256)" [AbiUIntType 256])) [] (defaultVeriOpts { maxIter = Just 5 })
+       let veriOpts = defaultVeriOpts { iterConf = defaultIterConf { maxIter = Just 5 }}
+       expr <- withDefaultSolver $ \s -> getExpr s c (Just (Sig "transfer(uint256)" [AbiUIntType 256])) [] veriOpts
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
     , test "simplify-storage-map-newtest1" $ do
        Just c <- solcRuntime "MyContract"
@@ -259,7 +260,8 @@ tests = testGroup "hevm"
           }
         }
         |]
-       expr <- withDefaultSolver $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] (defaultVeriOpts { maxIter = Just 5 })
+       let veriOpts = defaultVeriOpts { iterConf = defaultIterConf { maxIter = Just 5 }}
+       expr <- withDefaultSolver $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] veriOpts
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
     , test "decompose-1" $ do
       Just c <- solcRuntime "MyContract"
@@ -1652,7 +1654,8 @@ tests = testGroup "hevm"
         withSolvers Bitwuzla 1 1 Nothing $ \s -> do
           let calldata = (WriteWord (Lit 0x0) (Var "u") (ConcreteBuf ""), [])
           initVM <- liftIO $ stToIO $ abstractVM calldata initCode Nothing True
-          expr <- Expr.simplify <$> interpret (Fetch.oracle s Nothing) Nothing 1 StackBased initVM runExpr
+          let iterConf = IterConfig {maxIter=Nothing, askSmtIters=1, loopHeuristic=StackBased }
+          expr <- Expr.simplify <$> interpret (Fetch.oracle s Nothing) iterConf initVM runExpr
           assertBoolM "unexptected partial execution" (not $ Expr.containsNode isPartial expr)
     , test "mixed-concrete-symbolic-args" $ do
         Just c <- solcRuntime "C"
@@ -1742,7 +1745,8 @@ tests = testGroup "hevm"
               ])
         withDefaultSolver $ \s -> do
           vm <- liftIO $ stToIO $ loadSymVM runtimecode (Lit 0) initCode False
-          expr <- Expr.simplify <$> interpret (Fetch.oracle s Nothing) Nothing 1 StackBased vm runExpr
+          let iterConf = IterConfig {maxIter=Nothing, askSmtIters=1, loopHeuristic=StackBased }
+          expr <- Expr.simplify <$> interpret (Fetch.oracle s Nothing) iterConf vm runExpr
           case expr of
             Partial _ _ (JumpIntoSymbolicCode _ _) -> assertBoolM "" True
             _ -> assertBoolM "did not encounter expected partial node" False
@@ -1824,7 +1828,7 @@ tests = testGroup "hevm"
             }
             |]
         let sig = Just $ Sig "fun()" []
-            opts = defaultVeriOpts{ maxIter = Just 3 }
+            opts = defaultVeriOpts { iterConf = defaultIterConf {maxIter = Just 3 }}
         (e, [Qed]) <- withDefaultSolver $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBoolM "The expression is not partial" $ isPartial e
@@ -1841,7 +1845,7 @@ tests = testGroup "hevm"
             |]
 
         let sig = Just $ Sig "fun()" []
-            opts = defaultVeriOpts{ maxIter = Just 6 }
+            opts = defaultVeriOpts{ iterConf = defaultIterConf {maxIter = Just 6 }}
         (e, [Qed]) <- withDefaultSolver $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBoolM "The expression is partial" $ not $ isPartial e
@@ -1856,8 +1860,9 @@ tests = testGroup "hevm"
               }
             }
             |]
+        let veriOpts = defaultVeriOpts { iterConf = defaultIterConf { maxIter = Just 5 }}
         (e, [Qed]) <- withDefaultSolver $
-          \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] (defaultVeriOpts{ maxIter = Just 5 })
+          \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] veriOpts
         assertBoolM "The expression MUST be partial" $ Expr.containsNode isPartial e
     , test "inconsistent-paths" $ do
         Just c <- solcRuntime "C"
@@ -1875,7 +1880,7 @@ tests = testGroup "hevm"
             -- we don't ask the solver about the loop condition until we're
             -- already in an inconsistent path (i == 5, j <= 3, i < j), so we
             -- will continue looping here until we hit max iterations
-            opts = defaultVeriOpts{ maxIter = Just 10, askSmtIters = 5 }
+            opts = defaultVeriOpts{ iterConf = defaultIterConf { maxIter = Just 10, askSmtIters = 5 }}
         (e, [Qed]) <- withDefaultSolver $
           \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBoolM "The expression is not partial" $ Expr.containsNode isPartial e
@@ -1916,7 +1921,7 @@ tests = testGroup "hevm"
         let sig = Just $ Sig "fun(uint256)" [AbiUIntType 256]
             -- askSmtIters is low enough here to avoid the inconsistent path
             -- conditions, so we never hit maxIters
-            opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 1 }
+            opts = defaultVeriOpts{ iterConf = defaultIterConf {maxIter = Just 5, askSmtIters = 1 }}
         (e, [Qed]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] opts
         assertBoolM "The expression MUST NOT be partial" $ not (Expr.containsNode isPartial e)
     ]
@@ -4883,7 +4888,7 @@ tests = testGroup "hevm"
           eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertEqualM "Must be different" (any (isCex . fst) eq.res) True
       , test "eq-all-yul-optimization-tests" $ do
-        let opts = defaultVeriOpts{ maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }
+        let opts = defaultVeriOpts{ iterConf = defaultIterConf {maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }}
             ignoredTests =
                     -- unbounded loop --
                     [ "commonSubexpressionEliminator/branches_for.yul"
