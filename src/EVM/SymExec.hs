@@ -320,17 +320,16 @@ interpret
 interpret fetcher maxIter askSmtIters heuristic vm =
   eval . Operational.view
   where
-  eval
-    :: Operational.ProgramView (Stepper.Action Symbolic RealWorld) (Expr End)
-    -> m (Expr End)
-
+  eval :: Operational.ProgramView (Stepper.Action Symbolic RealWorld) (Expr End) -> m (Expr End)
   eval (Operational.Return x) = pure x
-
   eval (action Operational.:>>= k) =
     case action of
       Stepper.Exec -> do
         conf <- readConfig
         (r, vm') <- liftIO $ stToIO $ runStateT (exec conf) vm
+        interpret fetcher maxIter askSmtIters heuristic vm' (k r)
+      Stepper.EVM m -> do
+        (r, vm') <- liftIO $ stToIO $ runStateT m vm
         interpret fetcher maxIter askSmtIters heuristic vm' (k r)
       Stepper.ForkMany (PleaseRunAll expr vals continue) -> do
         when (length vals < 2) $ internalError "PleaseRunAll requires at least 2 branches"
@@ -405,10 +404,6 @@ interpret fetcher maxIter askSmtIters heuristic vm =
                       _ -> liftIO $ stToIO $ runStateT (continue UnknownBranch) vm
                     interpret fetcher maxIter askSmtIters heuristic vm' (k r)
           _ -> performQuery
-
-      Stepper.EVM m -> do
-        (r, vm') <- liftIO $ stToIO $ runStateT m vm
-        interpret fetcher maxIter askSmtIters heuristic vm' (k r)
 
 maxIterationsReached :: VM Symbolic s -> Maybe Integer -> Maybe Bool
 maxIterationsReached _ Nothing = Nothing

@@ -35,21 +35,16 @@ import EVM.Types
 
 -- | The instruction type of the operational monad
 data Action t s a where
-
   -- | Keep executing until an intermediate result is reached
   Exec :: Action t s (VMResult t s)
-
-  -- | Wait for a query to be resolved
-  Wait :: Query t s -> Action t s ()
-
-  -- | Two things can happen
-  Fork :: RunBoth s -> Action Symbolic s ()
-
-  -- | Many (>2) things can happen
-  ForkMany :: RunAll s -> Action Symbolic s ()
-
   -- | Embed a VM state transformation
   EVM  :: EVM t s a -> Action t s a
+  -- | Wait for a query to be resolved
+  Wait :: Query t s -> Action t s ()
+  -- | Two things can happen
+  Fork :: RunBoth s -> Action Symbolic s ()
+  -- | Many (>2) things can happen
+  ForkMany :: RunAll s -> Action Symbolic s ()
 
 -- | Type alias for an operational monad of @Action@
 type Stepper t s a = Program (Action t s) a
