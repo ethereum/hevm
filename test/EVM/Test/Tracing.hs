@@ -248,7 +248,7 @@ data EVMToolAlloc =
 instance JSON.ToJSON EVMToolAlloc where
   toJSON b = JSON.object [ ("balance" , (JSON.toJSON $ show b.balance))
                          , ("code", (JSON.toJSON $ ByteStringS b.code))
-                         , ("nonce", (JSON.toJSON $ b.nonce))
+                         , ("nonce", (JSON.toJSON b.nonce))
                          ]
 
 emptyEVMToolAlloc :: EVMToolAlloc
@@ -432,7 +432,8 @@ runCodeWithTrace
 runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 1 Nothing $ \solvers -> do
   let calldata' = ConcreteBuf txn.txdata
       code' = alloc.code
-      buildExpr s vm = interpret (Fetch.oracle s Nothing) Nothing 1 Naive vm runExpr
+      iterConf = IterConfig { maxIter = Nothing, askSmtIters = 1, loopHeuristic = Naive }
+      buildExpr s vm = interpret (Fetch.oracle s Nothing) iterConf vm runExpr
   origVM <- liftIO $ stToIO $ vmForRuntimeCode code' calldata' evmEnv alloc txn fromAddr toAddress
 
   expr <- buildExpr solvers $ symbolify origVM
