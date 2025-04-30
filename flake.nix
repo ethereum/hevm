@@ -171,7 +171,7 @@
 
         # --- packages ----
 
-        packages.ci = pkgs.lib.pipe (hevmBase (if pkgs.stdenv.isLinux then pkgs.pkgsStatic else pkgs)) (with hlib.compose; [doBenchmark dontHaddock disableLibraryProfiling]);
+        packages.ci = pkgs.lib.pipe (hevmBase pkgs) (with hlib.compose; [doBenchmark dontHaddock disableLibraryProfiling]);
         packages.unwrapped = hlib.dontCheck (hevmBase pkgs);
         packages.hevm = hevmWrapped;
         packages.redistributable = hevmRedistributable;
