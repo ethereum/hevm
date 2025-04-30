@@ -1,6 +1,7 @@
 module EVM.Test.Utils where
 
 import Data.Text (Text)
+import Data.List (isInfixOf)
 import GHC.IO.Exception (IOErrorType(..))
 import GHC.Natural
 import Paths_hevm qualified as Paths
@@ -90,7 +91,7 @@ compile _ root src = do
   (res,out,err) <- liftIO $ readProcessWithExitCode "forge" ["build", "--ast", "--root", root] ""
   case res of
     ExitFailure _ -> pure . Left $ "compilation failed: " <> "exit code: " <> show res <> "\n\nstdout:\n" <> out <> "\n\nstderr:\n" <> err
-    ExitSuccess -> readBuildOutput root Foundry
+    ExitSuccess -> readFilteredBuildOutput root (\path -> "unit-tests.t.sol" `Data.List.isInfixOf` path) Foundry
   where
     initStdForgeDir :: FilePath -> IO ()
     initStdForgeDir tld = do
