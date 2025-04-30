@@ -1565,9 +1565,11 @@ paddedShowHex w n = pad ++ str
      pad = replicate (w - length str) '0'
 
 untilFixpoint :: Eq a => (a -> a) -> a -> a
-untilFixpoint f a = if f a == a
-                    then a
-                    else untilFixpoint f (f a)
+untilFixpoint f a =
+  let a' = f a in
+    if a' == a
+    then a
+    else untilFixpoint f a'
 
 bsToHex :: ByteString -> String
 bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
