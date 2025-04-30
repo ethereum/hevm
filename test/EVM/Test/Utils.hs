@@ -37,7 +37,7 @@ runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectT
         internalError $ "Error compiling test file " <> show testFile <> " in directory "
           <> show root <> " using project type " <> show projectType
       Right bo@(BuildOutput contracts _) -> do
-        withSolvers Z3 3 1 timeout $ \solvers -> do
+        withSolvers Bitwuzla 3 1 timeout $ \solvers -> do
           opts <- liftIO $ testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
           unitTest opts contracts
 
