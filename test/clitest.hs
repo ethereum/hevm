@@ -117,3 +117,47 @@ main = do
         (exitCode, stdout, stderr) <- readProcessWithExitCode "cabal" ["run", "exe:hevm", "--", "symbolic", "--code", hexStr] ""
         stdout `shouldContain` "Warning: fetching contract at address 0"
 
+      -- file "devcon_example.yul" from "eq-all-yul-optimization-tests" in test.hs
+      -- we check that at least one UNSAT cache hit happens, i.e. the unsat cache is not
+      -- completely broken
+      it "unsat-cache" $ do
+        let a = [i| {
+          calldatacopy(0,0,1024)
+              sstore(0, array_sum(calldataload(0)))
+              function array_sum(x) -> sum {
+                  let length := calldataload(x)
+                  for { let i := 0 } lt(i, length) { i := add(i, 1) } {
+                      sum := add(sum, array_load(x, i))
+                  }
+              }
+              function array_load(x, i) -> v {
+                  let len := calldataload(x)
+                  if iszero(lt(i, len)) { revert(0, 0) }
+                  let data := add(x, 0x20)
+                  v := calldataload(add(data, mul(i, 0x20)))
+              }
+          } |]
+        let b = [i| {
+          calldatacopy(0,0,1024)
+               {
+                   let _1 := calldataload(0)
+                   let sum := 0
+                   let length := calldataload(_1)
+                   let i := 0
+                   for { } true { i := add(i, 1) }
+                   {
+                       let _2 := iszero(lt(i, length))
+                       if _2 { break }
+                       _2 := 0
+                       sum := add(sum, calldataload(add(add(_1, shl(5, i)), 0x20)))
+                   }
+                   sstore(0, sum)
+               }
+           } |]
+        Just aPrgm <- yul (T.pack "") $ T.pack a
+        Just bPrgm <- yul (T.pack "") $ T.pack b
+        let hexStrA = bsToHex aPrgm
+            hexStrB = bsToHex bPrgm
+        (exitCode, stdout, stderr) <- readProcessWithExitCode "cabal" ["run", "exe:hevm", "--", "equivalence", "--num-solvers", "1", "--debug", "--code-a", hexStrA, "--code-b", hexStrB] ""
+        stdout `shouldContain` "Qed found via cache"
+

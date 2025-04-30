@@ -10,12 +10,14 @@ import GHC.Natural
 import GHC.IO.Handle (Handle, hFlush, hSetBuffering, BufferMode(..))
 import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
 import Control.Concurrent (forkIO, killThread)
+import Control.Concurrent.STM (writeTChan, newTChan, TChan, tryReadTChan, atomically)
 import Control.Monad
 import Control.Monad.State.Strict
 import Control.Monad.IO.Unlift
 import Data.Char (isSpace)
 import Data.Map (Map)
 import Data.Map qualified as Map
+import Data.Set (Set, isSubsetOf, fromList)
 import Data.Maybe (fromMaybe, isJust, fromJust)
 import Data.Either (isLeft)
 import Data.Text qualified as TStrict
@@ -69,6 +71,9 @@ data MultiSol = MultiSol
 -- | A script to be executed, a list of models to be extracted in the case of a sat result, and a channel where the result should be written
 data Task = TaskSingle SingleData | TaskMulti MultiData
 
+newtype CacheEntry = CacheEntry [Prop]
+  deriving (Show, Eq)
+
 data MultiData = MultiData
   { smt2 :: SMT2
   , multiSol :: MultiSol
@@ -77,22 +82,27 @@ data MultiData = MultiData
 
 data SingleData = SingleData
   { smt2 :: SMT2
+  , props :: [Prop]
   , resultChan :: Chan SMTResult
   }
 
+-- returns True if a is a superset of any of the sets in bs
+supersetAny :: Set Prop -> [Set Prop] -> Bool
+supersetAny a bs = any (`isSubsetOf` a) bs
+
 checkMulti :: SolverGroup -> Err SMT2 -> MultiSol -> IO (Maybe [W256])
-checkMulti (SolverGroup taskQueue) smt2 multiSol = do
+checkMulti (SolverGroup taskq) smt2 multiSol = do
   if isLeft smt2 then pure Nothing
   else do
     -- prepare result channel
     resChan <- newChan
     -- send task to solver group
-    writeChan taskQueue (TaskMulti (MultiData (getNonError smt2) multiSol resChan))
+    writeChan taskq (TaskMulti (MultiData (getNonError smt2) multiSol resChan))
     -- collect result
     readChan resChan
 
 checkSatWithProps :: App m => SolverGroup -> [Prop] -> m (SMTResult, Err SMT2)
-checkSatWithProps (SolverGroup taskQueue) props = do
+checkSatWithProps sg props = do
   conf <- readConfig
   let psSimp = simplifyProps props
   if psSimp == [PBool False] then pure (Qed, Right mempty)
@@ -101,19 +111,20 @@ checkSatWithProps (SolverGroup taskQueue) props = do
     if isLeft smt2 then
       let err = getError smt2 in pure (Error err, Left err)
     else do
-      res <- liftIO $ checkSat (SolverGroup taskQueue) smt2
+      res <- liftIO $ checkSat sg smt2
       pure (res, Right (getNonError smt2))
 
-checkSat :: SolverGroup -> Err SMT2 -> IO SMTResult
-checkSat (SolverGroup taskQueue) smt2 = do
-  if isLeft smt2 then pure $ Error $ getError smt2
-  else do
-    -- prepare result channel
-    resChan <- newChan
-    -- send task to solver group
-    writeChan taskQueue (TaskSingle (SingleData (getNonError smt2) resChan))
-    -- collect result
-    readChan resChan
+  where
+    checkSat :: SolverGroup -> Err SMT2 -> IO SMTResult
+    checkSat (SolverGroup taskq) smt2 = do
+      if isLeft smt2 then pure $ Error $ getError smt2
+      else do
+        -- prepare result channel
+        resChan <- newChan
+        -- send task to solver group
+        writeChan taskq (TaskSingle (SingleData (getNonError smt2) props resChan))
+        -- collect result
+        readChan resChan
 
 writeSMT2File :: SMT2 -> String -> IO ()
 writeSMT2File smt2 postfix =
@@ -125,29 +136,44 @@ withSolvers solver count threads timeout cont = do
     -- spawn solvers
     instances <- mapM (const $ liftIO $ spawnSolver solver threads timeout) [1..count]
     -- spawn orchestration thread
-    taskQueue <- liftIO newChan
+    taskq <- liftIO newChan
+    cacheq <- liftIO . atomically $ newTChan
     availableInstances <- liftIO newChan
     liftIO $ forM_ instances (writeChan availableInstances)
-    orchestrate' <- toIO $ orchestrate taskQueue availableInstances 0
+    orchestrate' <- toIO $ orchestrate taskq cacheq availableInstances [] 0
     orchestrateId <- liftIO $ forkIO orchestrate'
 
     -- run continuation with task queue
-    res <- cont (SolverGroup taskQueue)
+    res <- cont (SolverGroup taskq)
 
     -- cleanup and return results
     liftIO $ mapM_ (stopSolver) instances
     liftIO $ killThread orchestrateId
     pure res
   where
-    orchestrate :: App m => Chan Task -> Chan SolverInstance -> Int -> m b
-    orchestrate queue avail fileCounter = do
-      task <- liftIO $ readChan queue
-      inst <- liftIO $ readChan avail
-      runTask' <- case task of
-        TaskSingle (SingleData smt2 r) -> toIO $ getOneSol smt2 r inst avail fileCounter
-        TaskMulti (MultiData smt2 multiSol r) -> toIO $ getMultiSol smt2 multiSol r inst avail fileCounter
-      _ <- liftIO $ forkIO runTask'
-      orchestrate queue avail (fileCounter + 1)
+    orchestrate :: App m => Chan Task -> TChan CacheEntry -> Chan SolverInstance -> [Set Prop] -> Int -> m b
+    orchestrate taskq cacheq avail knownUnsat fileCounter = do
+      conf <- readConfig
+      mx <- liftIO . atomically $ tryReadTChan cacheq
+      case mx of
+        Just (CacheEntry props)  -> do
+          let knownUnsat' = (fromList props):knownUnsat
+          when conf.debug $ liftIO $ putStrLn "   adding UNSAT cache"
+          orchestrate taskq cacheq avail knownUnsat' fileCounter
+        Nothing -> do
+          task <- liftIO $ readChan taskq
+          case task of
+            TaskSingle (SingleData _ props r) | supersetAny (fromList props) knownUnsat -> do
+              liftIO $ writeChan r Qed
+              when conf.debug $ liftIO $ putStrLn "   Qed found via cache!"
+              orchestrate taskq cacheq avail knownUnsat fileCounter
+            _ -> do
+              inst <- liftIO $ readChan avail
+              runTask' <- case task of
+                TaskSingle (SingleData smt2 props r) -> toIO $ getOneSol smt2 props r cacheq inst avail fileCounter
+                TaskMulti (MultiData smt2 multiSol r) -> toIO $ getMultiSol smt2 multiSol r inst avail fileCounter
+              _ <- liftIO $ forkIO runTask'
+              orchestrate taskq cacheq avail knownUnsat (fileCounter + 1)
 
 getMultiSol :: forall m. (MonadIO m, ReadConfig m) => SMT2 -> MultiSol -> (Chan (Maybe [W256])) -> SolverInstance -> Chan SolverInstance -> Int -> m ()
 getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCounter = do
@@ -211,8 +237,8 @@ getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCo
           when conf.debug $ putStrLn $ "Unable to write SMT to solver: " <> (T.unpack err)
           writeChan r Nothing
 
-getOneSol :: (MonadIO m, ReadConfig m) => SMT2 -> (Chan SMTResult) -> SolverInstance -> Chan SolverInstance -> Int -> m ()
-getOneSol smt2@(SMT2 cmds cexvars ps) r inst availableInstances fileCounter = do
+getOneSol :: (MonadIO m, ReadConfig m) => SMT2 -> [Prop] -> Chan SMTResult -> TChan CacheEntry -> SolverInstance -> Chan SolverInstance -> Int -> m ()
+getOneSol smt2@(SMT2 cmds cexvars ps) props r cacheq inst availableInstances fileCounter = do
   conf <- readConfig
   let fuzzResult = tryCexFuzz ps conf.numCexFuzz
   liftIO $ do
@@ -232,7 +258,9 @@ getOneSol smt2@(SMT2 cmds cexvars ps) r inst availableInstances fileCounter = do
             sat <- sendLine inst "(check-sat)"
             res <- do
                 case sat of
-                  "unsat" -> pure Qed
+                  "unsat" -> do
+                    liftIO . atomically $ writeTChan cacheq (CacheEntry props)
+                    pure Qed
                   "timeout" -> pure $ Unknown "Result timeout by SMT solver"
                   "unknown" -> pure $ Unknown "Result unknown by SMT solver"
                   "sat" -> Cex <$> getModel inst cexvars
