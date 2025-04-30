@@ -16,6 +16,7 @@ import Control.Monad.IO.Unlift
 import Data.Char (isSpace)
 import Data.Map (Map)
 import Data.Map qualified as Map
+import Data.Set (Set, isSubsetOf, fromList)
 import Data.Maybe (fromMaybe, isJust, fromJust)
 import Data.Either (isLeft)
 import Data.Text qualified as TStrict
@@ -67,7 +68,7 @@ data MultiSol = MultiSol
   }
 
 -- | A script to be executed, a list of models to be extracted in the case of a sat result, and a channel where the result should be written
-data Task = TaskSingle SingleData | TaskMulti MultiData
+data Task = TaskSingle SingleData | TaskMulti MultiData | TaskAddCache [Prop]
 
 data MultiData = MultiData
   { smt2 :: SMT2
@@ -77,8 +78,13 @@ data MultiData = MultiData
 
 data SingleData = SingleData
   { smt2 :: SMT2
+  , props :: [Prop]
   , resultChan :: Chan SMTResult
   }
+
+-- returns True if a is a subset of any of the sets in b
+subsetAny :: [Prop] -> [Set Prop] -> Bool
+subsetAny a b = let s = fromList a in foldr (\bp acc -> acc || isSubsetOf s bp) False b
 
 checkMulti :: SolverGroup -> Err SMT2 -> MultiSol -> IO (Maybe [W256])
 checkMulti (SolverGroup taskQueue) smt2 multiSol = do
@@ -92,7 +98,7 @@ checkMulti (SolverGroup taskQueue) smt2 multiSol = do
     readChan resChan
 
 checkSatWithProps :: App m => SolverGroup -> [Prop] -> m (SMTResult, Err SMT2)
-checkSatWithProps (SolverGroup taskQueue) props = do
+checkSatWithProps sg props = do
   conf <- readConfig
   let psSimp = simplifyProps props
   if psSimp == [PBool False] then pure (Qed, Right mempty)
@@ -101,19 +107,20 @@ checkSatWithProps (SolverGroup taskQueue) props = do
     if isLeft smt2 then
       let err = getError smt2 in pure (Error err, Left err)
     else do
-      res <- liftIO $ checkSat (SolverGroup taskQueue) smt2
+      res <- liftIO $ checkSat sg smt2 psSimp
       pure (res, Right (getNonError smt2))
 
-checkSat :: SolverGroup -> Err SMT2 -> IO SMTResult
-checkSat (SolverGroup taskQueue) smt2 = do
-  if isLeft smt2 then pure $ Error $ getError smt2
-  else do
-    -- prepare result channel
-    resChan <- newChan
-    -- send task to solver group
-    writeChan taskQueue (TaskSingle (SingleData (getNonError smt2) resChan))
-    -- collect result
-    readChan resChan
+  where
+    checkSat :: SolverGroup -> Err SMT2 -> [Prop] -> IO SMTResult
+    checkSat (SolverGroup taskQueue) smt2 props = do
+      if isLeft smt2 then pure $ Error $ getError smt2
+      else do
+        -- prepare result channel
+        resChan <- newChan
+        -- send task to solver group
+        writeChan taskQueue (TaskSingle (SingleData (getNonError smt2) props resChan))
+        -- collect result
+        readChan resChan
 
 writeSMT2File :: SMT2 -> String -> IO ()
 writeSMT2File smt2 postfix =
@@ -128,7 +135,7 @@ withSolvers solver count threads timeout cont = do
     taskQueue <- liftIO newChan
     availableInstances <- liftIO newChan
     liftIO $ forM_ instances (writeChan availableInstances)
-    orchestrate' <- toIO $ orchestrate taskQueue availableInstances 0
+    orchestrate' <- toIO $ orchestrate taskQueue availableInstances [] 0
     orchestrateId <- liftIO $ forkIO orchestrate'
 
     -- run continuation with task queue
@@ -139,15 +146,26 @@ withSolvers solver count threads timeout cont = do
     liftIO $ killThread orchestrateId
     pure res
   where
-    orchestrate :: App m => Chan Task -> Chan SolverInstance -> Int -> m b
-    orchestrate queue avail fileCounter = do
+    orchestrate :: App m => Chan Task -> Chan SolverInstance -> [Set Prop] -> Int -> m b
+    orchestrate queue avail knownUnsat fileCounter = do
+      conf <- readConfig
       task <- liftIO $ readChan queue
-      inst <- liftIO $ readChan avail
-      runTask' <- case task of
-        TaskSingle (SingleData smt2 r) -> toIO $ getOneSol smt2 r inst avail fileCounter
-        TaskMulti (MultiData smt2 multiSol r) -> toIO $ getMultiSol smt2 multiSol r inst avail fileCounter
-      _ <- liftIO $ forkIO runTask'
-      orchestrate queue avail (fileCounter + 1)
+      case task of
+        TaskAddCache props -> do
+          let knownUnsat' = (fromList props):knownUnsat
+          when conf.debug $ liftIO $ putStrLn "   adding UNSAT cache"
+          orchestrate queue avail knownUnsat' fileCounter
+        TaskSingle (SingleData _ props r) | subsetAny props knownUnsat -> do
+          liftIO $ writeChan r Qed
+          when conf.debug $ liftIO $ putStrLn "   Qed found via cache!"
+          orchestrate queue avail knownUnsat fileCounter
+        _ -> do
+          inst <- liftIO $ readChan avail
+          runTask' <- case task of
+            TaskSingle (SingleData smt2 props r) -> toIO $ getOneSol smt2 props r inst avail queue fileCounter
+            TaskMulti (MultiData smt2 multiSol r) -> toIO $ getMultiSol smt2 multiSol r inst avail fileCounter
+          _ <- liftIO $ forkIO runTask'
+          orchestrate queue avail knownUnsat (fileCounter + 1)
 
 getMultiSol :: forall m. (MonadIO m, ReadConfig m) => SMT2 -> MultiSol -> (Chan (Maybe [W256])) -> SolverInstance -> Chan SolverInstance -> Int -> m ()
 getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCounter = do
@@ -211,8 +229,8 @@ getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCo
           when conf.debug $ putStrLn $ "Unable to write SMT to solver: " <> (T.unpack err)
           writeChan r Nothing
 
-getOneSol :: (MonadIO m, ReadConfig m) => SMT2 -> (Chan SMTResult) -> SolverInstance -> Chan SolverInstance -> Int -> m ()
-getOneSol smt2@(SMT2 cmds cexvars ps) r inst availableInstances fileCounter = do
+getOneSol :: (MonadIO m, ReadConfig m) => SMT2 -> [Prop] -> Chan SMTResult -> SolverInstance -> Chan SolverInstance -> (Chan Task) -> Int -> m ()
+getOneSol smt2@(SMT2 cmds cexvars ps) props r inst availableInstances task fileCounter = do
   conf <- readConfig
   let fuzzResult = tryCexFuzz ps conf.numCexFuzz
   liftIO $ do
@@ -232,7 +250,9 @@ getOneSol smt2@(SMT2 cmds cexvars ps) r inst availableInstances fileCounter = do
             sat <- sendLine inst "(check-sat)"
             res <- do
                 case sat of
-                  "unsat" -> pure Qed
+                  "unsat" -> do
+                    writeChan task (TaskAddCache props)
+                    pure Qed
                   "timeout" -> pure $ Unknown "Result timeout by SMT solver"
                   "unknown" -> pure $ Unknown "Result unknown by SMT solver"
                   "sat" -> Cex <$> getModel inst cexvars

@@ -887,6 +887,7 @@ class VMOps (t :: VMType) where
   branch :: Maybe Int -> Expr EWord -> (Bool -> EVM t s ()) -> EVM t s ()
   manySolutions :: Maybe Int -> Expr EWord -> Int -> (Maybe W256 -> EVM t s ()) -> EVM t s ()
 
+
 -- Bytecode Representations ------------------------------------------------------------------------
 
 
@@ -1199,8 +1200,8 @@ instance (Eq a, Eq b) => Eq (ProofResult a b) where
     _                        -> False
 
 type VerifyResult = ProofResult (Expr End, SMTCex) (String, Expr End)
-type EquivResult = ProofResult (SMTCex) String
-type SMTResult = ProofResult (SMTCex) String
+type EquivResult = ProofResult SMTCex String
+type SMTResult = ProofResult SMTCex String
 
 getUnknown :: ProofResult a b -> Maybe b
 getUnknown (Unknown a) = Just a
