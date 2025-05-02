@@ -112,6 +112,9 @@ withDefaultSolver = withSolvers Z3 3 1 Nothing
 withCVC5Solver :: App m => (SolverGroup -> m a) -> m a
 withCVC5Solver = withSolvers CVC5 3 1 Nothing
 
+withBitwuzlaSolver :: App m => (SolverGroup -> m a) -> m a
+withBitwuzlaSolver = withSolvers Bitwuzla 3 1 Nothing
+
 main :: IO ()
 main = defaultMain tests
 
@@ -3867,7 +3870,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
+          (res, [Qed]) <- withBitwuzlaSolver $ \s -> checkAssert s defaultPanicCodes c Nothing [] defaultVeriOpts
           putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         test "calldata beyond calldatasize is 0 (concrete dalldata prefix)" $ do
@@ -3884,7 +3887,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed]) <- withBitwuzlaSolver $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         test "calldata symbolic access" $ do
@@ -3905,7 +3908,7 @@ tests = testGroup "hevm"
               }
             }
             |]
-          (res, [Qed]) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
+          (res, [Qed]) <- withBitwuzlaSolver $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "f(uint256)" [AbiUIntType 256])) [] defaultVeriOpts
           putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
         test "multiple-contracts" $ do
