@@ -103,9 +103,4 @@ compile _ root src = do
     initLib tld srcFile dstFile = do
       createDirectoryIfMissing True (tld </> "src")
       writeFile (tld </> "src" </> dstFile) =<< readFile =<< Paths.getDataFileName srcFile
-      _ <- readProcessWithExitCode "git" ["init", tld] ""
-      callProcess "git" ["config", "--file", tld </> ".git" </> "config", "user.name", "'hevm'"]
-      callProcess "git" ["config", "--file", tld </> ".git" </> "config", "user.email", "'hevm@hevm.dev'"]
-      callProcessCwd "git" ["add", "."] tld
-      callProcessCwd "git" ["commit", "-m", "", "--allow-empty-message", "--no-gpg-sign"] tld
       pure ()
