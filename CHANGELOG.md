@@ -79,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pretty printing of buffers is now more robust. Instead of throwing an `internal error`,
   we now try best to print everything we can, and print an appropriate error message
   instead of crashing.
+- We no longer produce duplicate SMT assertions regarding concrete keccak values.
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
