@@ -24,6 +24,7 @@ import Data.Either
 import Data.List qualified as List
 import Data.Map.Strict qualified as Map
 import Data.Maybe
+import Data.Monoid (Any(..))
 import Data.Set qualified as Set
 import Data.String.Here
 import Data.Text (Text)
@@ -5795,23 +5796,14 @@ genWordArith litFreq sz = frequency
  where
    subWord = genWordArith (litFreq `div` 2) (sz `div` 2)
 
--- Used to check for unsimplified expressions
-newtype FoundBad = FoundBad { bad :: Bool } deriving (Show)
-initFoundBad :: FoundBad
-initFoundBad = FoundBad { bad = False }
 
 -- Finds SLoad -> SStore. This should not occur in most scenarios
 -- as we can simplify them away
 badStoresInExpr :: Expr a -> Bool
-badStoresInExpr expr = bad
+badStoresInExpr = getAny . foldExpr match mempty
   where
-    FoundBad bad = execState (mapExprM findBadStore expr) initFoundBad
-    findBadStore :: Expr a-> State FoundBad (Expr a)
-    findBadStore e = case e of
-      (SLoad _ (SStore _ _ _)) -> do
-        put (FoundBad { bad = True })
-        pure e
-      _ -> pure e
+      match (SLoad _ (SStore _ _ _)) = Any True
+      match _ = Any False
 
 defaultBuf :: Int -> Gen (Expr Buf)
 defaultBuf = genBuf (4_000_000)
