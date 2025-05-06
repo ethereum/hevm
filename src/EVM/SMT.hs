@@ -129,12 +129,6 @@ declareIntermediates bufs stores = do
       storage <- exprToSMT expr
       pure $ SMT2 ["(define-fun store" <> (fromString . show $ n) <> " () Storage " <> storage <> ")"] mempty mempty
 
-data AbstState = AbstState
-  { words :: Map (Expr EWord) Int
-  , count :: Int
-  }
-  deriving (Show)
-
 smt2Line :: Builder -> SMT2
 smt2Line txt = SMT2 [txt] mempty mempty
 
@@ -159,7 +153,6 @@ assertProps conf ps = assertPropsNoSimp (decompose . Expr.simplifyProps $ ps)
 assertPropsNoSimp :: [Prop] -> Err SMT2
 assertPropsNoSimp psPreConc = do
  encs <- mapM propToSMT psElim
- smt <- mapM propToSMT props
  intermediates <- declareIntermediates bufs stores
  readAssumes' <- readAssumes
  keccakAssertions' <- keccakAssertions
@@ -185,32 +178,22 @@ assertPropsNoSimp psPreConc = do
   <> gasOrder
   <> smt2Line ""
   <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty mempty
-  <> SMT2 smt mempty mempty
   <> SMT2 mempty mempty { storeReads = storageReads } mempty
   <> SMT2 mempty mempty psPreConc
 
   where
     ps = Expr.concKeccakProps psPreConc
     (psElim, bufs, stores) = eliminateProps ps
-    abst@(AbstState exprToInt _) = AbstState mempty 0
-
-    props = map toProp (Map.toList exprToInt)
-      where
-      toProp :: (Expr EWord, Int) -> Prop
-      toProp (e, num) = PEq e (Var (TS.pack ("abst_" ++ (show num))))
 
     -- Props storing info that need declaration(s)
     toDeclarePs     = ps <> keccAssump <> keccComp
     toDeclarePsElim = psElim <> keccAssump <> keccComp
 
     -- vars, frames, and block contexts in need of declaration
-    allVars = fmap referencedVars toDeclarePsElim <> fmap referencedVars bufVals <> fmap referencedVars storeVals <> [abstrVars abst]
+    allVars = fmap referencedVars toDeclarePsElim <> fmap referencedVars bufVals <> fmap referencedVars storeVals
     frameCtx = fmap referencedFrameContext toDeclarePsElim <> fmap referencedFrameContext bufVals <> fmap referencedFrameContext storeVals
     blockCtx = fmap referencedBlockContext toDeclarePsElim <> fmap referencedBlockContext bufVals <> fmap referencedBlockContext storeVals
     gasOrder = enforceGasOrder psPreConc
-
-    abstrVars :: AbstState -> [Builder]
-    abstrVars (AbstState b _) = map ((\v->fromString ("abst_" ++ show v)) . snd) (Map.toList b)
 
     -- Buf, Storage, etc. declarations needed
     bufVals = Map.elems bufs
