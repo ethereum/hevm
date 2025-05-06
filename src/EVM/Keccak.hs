@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 {- |
     Module: EVM.Keccak
     Description: Expr passes to determine Keccak assumptions
@@ -9,6 +7,7 @@ module EVM.Keccak (keccakAssumptions, keccakCompute) where
 import Control.Monad.State
 import Data.Set (Set)
 import Data.Set qualified as Set
+import Data.List (tails)
 
 import EVM.Traversals
 import EVM.Types
@@ -16,25 +15,22 @@ import EVM.Expr
 
 
 newtype KeccakStore = KeccakStore
-  { keccakEqs :: Set (Expr EWord) }
+  { keccakExprs :: Set (Expr EWord) }
   deriving (Show)
 
 initState :: KeccakStore
-initState = KeccakStore { keccakEqs = Set.empty }
+initState = KeccakStore { keccakExprs = Set.empty }
 
-keccakFinder :: forall a. Expr a -> State KeccakStore (Expr a)
+keccakFinder :: forall a. Expr a -> State KeccakStore ()
 keccakFinder = \case
-  e@(Keccak _) -> do
-    s <- get
-    put $ s{keccakEqs=Set.insert e s.keccakEqs}
-    pure e
-  e -> pure e
+  e@(Keccak _) -> modify (\s -> s{keccakExprs=Set.insert e s.keccakExprs})
+  _ -> pure ()
 
-findKeccakExpr :: forall a. Expr a -> State KeccakStore (Expr a)
-findKeccakExpr e = mapExprM keccakFinder e
+findKeccakExpr :: forall a. Expr a -> State KeccakStore ()
+findKeccakExpr e = mapExprM_ keccakFinder e
 
-findKeccakProp :: Prop -> State KeccakStore Prop
-findKeccakProp p = mapPropM keccakFinder p
+findKeccakProp :: Prop -> State KeccakStore ()
+findKeccakProp p = mapPropM_ keccakFinder p
 
 findKeccakPropsExprs :: [Prop] -> [Expr Buf]  -> [Expr Storage]-> State KeccakStore ()
 findKeccakPropsExprs ps bufs stores = do
@@ -43,25 +39,16 @@ findKeccakPropsExprs ps bufs stores = do
   mapM_ findKeccakExpr stores
 
 
-combine :: [a] -> [(a,a)]
-combine lst = combine' lst []
-  where
-    combine' [] acc = concat acc
-    combine' (x:xs) acc =
-      let xcomb = [ (x, y) | y <- xs] in
-      combine' xs (xcomb:acc)
+uniquePairs :: [a] -> [(a,a)]
+uniquePairs xs = [(x,y) | (x:ys) <- Data.List.tails xs, y <- ys]
 
 minProp :: Expr EWord -> Prop
 minProp k@(Keccak _) = PGT k (Lit 256)
 minProp _ = internalError "expected keccak expression"
 
-concVal :: Expr EWord -> Prop
-concVal k@(Keccak (ConcreteBuf bs)) = PEq (Lit (keccak' bs)) k
-concVal _ = PBool True
-
 injProp :: (Expr EWord, Expr EWord) -> Prop
 injProp (k1@(Keccak b1), k2@(Keccak b2)) =
-  POr ((b1 .== b2) .&& (bufLength b1 .== bufLength b2)) (PNeg (PEq k1 k2))
+  PImpl (PEq k1 k2) ((b1 .== b2) .&& (bufLength b1 .== bufLength b2))
 injProp _ = internalError "expected keccak expression"
 
 
@@ -73,39 +60,40 @@ injProp _ = internalError "expected keccak expression"
 --      here by making this claim for each unique pair of keccak invocations
 --      discovered in the input expressions)
 keccakAssumptions :: [Prop] -> [Expr Buf] -> [Expr Storage] -> [Prop]
-keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs <> concValues
+keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
   where
     (_, st) = runState (findKeccakPropsExprs ps bufs stores) initState
 
-    injectivity = fmap injProp $ combine (Set.toList st.keccakEqs)
-    concValues = fmap concVal (Set.toList st.keccakEqs)
-    minValue = fmap minProp (Set.toList st.keccakEqs)
-    minDiffOfPairs = map minDistance $ filter (uncurry (/=)) [(a,b) | a<-(Set.elems st.keccakEqs), b<-(Set.elems st.keccakEqs)]
+    keccakPairs = uniquePairs (Set.toList st.keccakExprs)
+    injectivity = map injProp keccakPairs
+    minValue = map minProp (Set.toList st.keccakExprs)
+    minDiffOfPairs = map minDistance keccakPairs
      where
       minDistance :: (Expr EWord, Expr EWord) -> Prop
-      minDistance (ka@(Keccak a), kb@(Keccak b)) = PImpl (a ./= b) (PAnd req1 req2)
+      minDistance (ka@(Keccak a), kb@(Keccak b)) = PImpl ((a ./= b) .|| (bufLength a ./= bufLength b)) (PAnd req1 req2)
         where
           req1 = (PGEq (Sub ka kb) (Lit 256))
           req2 = (PGEq (Sub kb ka) (Lit 256))
       minDistance _ = internalError "expected Keccak expression"
 
-compute :: forall a. Expr a -> [Prop]
+compute :: forall a. Expr a -> Set Prop
 compute = \case
   e@(Keccak buf) -> do
     let b = simplify buf
     case keccak b of
-      lit@(Lit _) -> [PEq e lit]
-      _ -> []
-  _ -> []
+      lit@(Lit _) -> Set.singleton (PEq lit e)
+      _ -> Set.empty
+  _ -> Set.empty
 
-computeKeccakExpr :: forall a. Expr a -> [Prop]
-computeKeccakExpr e = foldExpr compute [] e
+computeKeccakExpr :: forall a. Expr a -> Set Prop
+computeKeccakExpr e = foldExpr compute Set.empty e
 
-computeKeccakProp :: Prop -> [Prop]
-computeKeccakProp p = foldProp compute [] p
+computeKeccakProp :: Prop -> Set Prop
+computeKeccakProp p = foldProp compute Set.empty p
 
 keccakCompute :: [Prop] -> [Expr Buf] -> [Expr Storage] -> [Prop]
 keccakCompute ps buf stores =
-  concatMap computeKeccakProp ps <>
-  concatMap computeKeccakExpr buf <>
-  concatMap computeKeccakExpr stores
+  Set.toList $
+    (foldMap computeKeccakProp ps) <>
+    (foldMap computeKeccakExpr buf) <>
+    (foldMap computeKeccakExpr stores)

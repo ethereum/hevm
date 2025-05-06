@@ -1,7 +1,7 @@
-import {DSTest} from "ds-test/test.sol";
+import {Test} from "forge-std/Test.sol";
 
 // should run and pass
-contract Trivial is DSTest {
+contract Trivial is Test {
     function prove_false() public {
         assertTrue(false);
     }

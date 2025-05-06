@@ -1,7 +1,7 @@
-import {DSTest} from "ds-test/test.sol";
+import {Test} from "forge-std/Test.sol";
 
 // should not be run (no code)
-abstract contract MyTest is DSTest {
+abstract contract MyTest is Test {
     function testAbstract() public {
         assertTrue(true);
     }

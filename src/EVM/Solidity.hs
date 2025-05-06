@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
 
@@ -21,6 +20,7 @@ module EVM.Solidity
   , Reference(..)
   , Mutability(..)
   , readBuildOutput
+  , readFilteredBuildOutput
   , functionAbi
   , makeSrcMaps
   , readSolc
@@ -45,6 +45,8 @@ import EVM.Types hiding (Success)
 
 import Optics.Core
 import Optics.Operators.Unsafe
+import EVM.Effects
+import EVM.Expr (maybeLitByteSimp)
 
 import Control.Applicative
 import Control.Monad
@@ -73,6 +75,7 @@ import Data.Sequence (Seq)
 import Data.Text (pack, intercalate)
 import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import Data.Text.IO (writeFile)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import Data.Word (Word8)
@@ -83,7 +86,7 @@ import System.FilePath.Posix
 import System.Process
 import Text.Read (readMaybe)
 import Witch (unsafeInto)
-
+import Data.Either.Extra (maybeToEither)
 
 data StorageItem = StorageItem
   { slotType :: SlotType
@@ -184,7 +187,7 @@ instance Monoid BuildOutput where
   mempty = BuildOutput mempty mempty
 
 -- | The various project types understood by hevm
-data ProjectType = DappTools | CombinedJSON | Foundry | FoundryStdLib
+data ProjectType = CombinedJSON | Foundry
   deriving (Eq, Show, Read, ParseField)
 
 data SourceCache = SourceCache
@@ -283,24 +286,22 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
     go c (xs, state, p)                        = (xs, internalError ("srcmap: y u " ++ show c ++ " in state" ++ show state ++ "?!?"), p)
 
 -- | Reads all solc output json files found under the provided filepath and returns them merged into a BuildOutput
-readBuildOutput :: FilePath -> ProjectType -> IO (Either String BuildOutput)
-readBuildOutput root DappTools = do
+readBuildOutput :: App m => FilePath -> ProjectType -> m (Err BuildOutput)
+readBuildOutput root projectType = readFilteredBuildOutput root (const True) projectType
+
+readFilteredBuildOutput :: App m => FilePath -> (FilePath -> Bool) -> ProjectType -> m (Err BuildOutput)
+readFilteredBuildOutput root jsonFilter CombinedJSON = do
   let outDir = root </> "out"
-  jsons <- findJsonFiles outDir
-  case jsons of
-    [x] -> readSolc DappTools root (outDir </> x)
-    [] -> pure . Left $ "no json files found in: " <> outDir
-    _ -> pure . Left $ "multiple json files found in: " <> outDir
-readBuildOutput root CombinedJSON = do
-  let outDir = root </> "out"
-  jsons <- findJsonFiles outDir
+  allJsons <- liftIO $ findJsonFiles outDir
+  let jsons = filter jsonFilter allJsons
   case jsons of
     [x] -> readSolc CombinedJSON root (outDir </> x)
     [] -> pure . Left $ "no json files found in: " <> outDir
     _ -> pure . Left $ "multiple json files found in: " <> outDir
-readBuildOutput root _ = do
+readFilteredBuildOutput root jsonFilter _ = do
   let outDir = root </> "out"
-  jsons <- findJsonFiles outDir
+  allJsons <- liftIO $ findJsonFiles outDir
+  let jsons = filter jsonFilter allJsons
   case (filterMetadata jsons) of
     [] -> pure . Left $ "no json files found in: " <> outDir
     js -> do
@@ -308,9 +309,14 @@ readBuildOutput root _ = do
       pure . (fmap mconcat) $ outputs
 
 -- | Finds all json files under the provided filepath, searches recursively
+-- Filtering out:  * "kompiled" which gets added to `out` by `kontrol`
+--                 * "build-info" which gets added by forge
 findJsonFiles :: FilePath -> IO [FilePath]
-findJsonFiles root =  filter (not . isInfixOf "kompiled") -- HACK: this gets added to `out` by `kontrol`
+findJsonFiles root =  filter (doesNotContain ["build-info", "kompiled"])
                   <$> getDirectoryFiles root ["**/*.json"]
+  where
+    doesNotContain :: [String] -> String -> Bool
+    doesNotContain forbiddenStrs str = all (\forbidden -> not (isInfixOf forbidden str)) forbiddenStrs
 
 -- | Filters out metadata json files
 filterMetadata :: [FilePath] -> [FilePath]
@@ -342,17 +348,20 @@ lineSubrange xs (s1, n1) i =
     then Nothing
     else Just (s1 - s2, min (s2 + n2 - s1) n1)
 
-readSolc :: ProjectType -> FilePath -> FilePath -> IO (Either String BuildOutput)
+readSolc :: App m => ProjectType -> FilePath -> FilePath -> m (Err BuildOutput)
 readSolc pt root fp = do
   -- NOTE: we cannot and must not use Data.Text.IO.readFile because that takes the locale
   --       and may fail with very strange errors when the JSON it's reading
   --       contains any UTF-8 character -- which it will with foundry
-  let fileContents = fmap Data.Text.Encoding.decodeUtf8 (Data.ByteString.readFile fp)
-  (readJSON pt (T.pack $ takeBaseName fp) <$> fileContents) >>=
-    \case
-      Nothing -> pure . Left $ "unable to parse: " <> fp
-      Just (contracts, asts, sources) -> do
-        sourceCache <- makeSourceCache root sources asts
+  fileContents <- liftIO $ fmap Data.Text.Encoding.decodeUtf8 $ Data.ByteString.readFile fp
+  let contractName = T.pack $ takeBaseName fp
+  case readJSON pt contractName fileContents of
+      Left err -> pure . Left $ "unable to parse " <> show pt <> " project JSON: " <> fp
+        <> " Contract: " <> show contractName <> "\nError: " <> err
+      Right (contracts, asts, sources) -> do
+        conf <- readConfig
+        when (conf.debug) $ liftIO $ putStrLn $ "Parsed contract: " <> show contractName <> " file: " <> fp
+        sourceCache <- liftIO $ makeSourceCache root sources asts
         pure (Right (BuildOutput contracts sourceCache))
 
 yul :: Text -> Text -> IO (Maybe ByteString)
@@ -380,53 +389,57 @@ solidity contract src = liftIO $ do
   pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.creationCode)
 
 solcRuntime
-  :: (MonadUnliftIO m)
+  :: App m
   => Text -> Text -> m (Maybe ByteString)
-solcRuntime contract src = liftIO $ do
-  json <- solc Solidity src
-  case readStdJSON json of
-    Just (Contracts sol, _, _) -> pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.runtimeCode)
-    Nothing -> internalError $ "unable to parse solidity output:\n" <> (T.unpack json)
+solcRuntime contract src = do
+  conf <- readConfig
+  liftIO $ do
+    json <- solc Solidity src
+    when conf.dumpExprs $ liftIO $ Data.Text.IO.writeFile "compiled_code.json" json
+    case readStdJSON json of
+      Just (Contracts sol, _, _) -> pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.runtimeCode)
+      Nothing -> internalError $ "unable to parse solidity output:\n" <> (T.unpack json)
+
 
 functionAbi :: Text -> IO Method
 functionAbi f = do
   json <- solc Solidity ("contract ABI { function " <> f <> " public {}}")
   let (Contracts sol, _, _) = fromMaybe
-                                (internalError . T.unpack $ "unable to parse solc output:\n" <> json)
-                                (readStdJSON json)
-  case Map.toList $ (fromJust (Map.lookup "hevm.sol:ABI" sol)).abiMap of
-     [(_,b)] -> pure b
-     _ -> internalError "unexpected abi format"
+        (internalError . T.unpack $ "while trying to parse function signature `"
+          <> f <> "`, unable to parse solc output:\n" <> json)
+        (readStdJSON json)
+  case Map.toList (fromJust (Map.lookup "hevm.sol:ABI" sol)).abiMap of
+    [(_,b)] -> pure b
+    _ -> internalError "unexpected abi format"
 
 force :: String -> Maybe a -> a
 force s = fromMaybe (internalError s)
 
-readJSON :: ProjectType -> Text -> Text -> Maybe (Contracts, Asts, Sources)
-readJSON DappTools _ json = readStdJSON json
+readJSON :: ProjectType -> Text -> Text -> Err (Contracts, Asts, Sources)
 readJSON CombinedJSON _ json = readCombinedJSON json
 readJSON _ contractName json = readFoundryJSON contractName json
 
 -- | Reads a foundry json output
-readFoundryJSON :: Text -> Text -> Maybe (Contracts, Asts, Sources)
+readFoundryJSON :: Text -> Text -> Err (Contracts, Asts, Sources)
 readFoundryJSON contractName json = do
-  runtime <- json ^? key "deployedBytecode"
-  runtimeCode <- (toCode contractName) . strip0x'' <$> runtime ^? key "object" % _String
+  runtime <- maybeToEither "missing 'deployedBytecode' field" $ json ^? key "deployedBytecode"
+  runtimeCode <- maybeToEither "missing 'deployedBytecode.object' field" $
+    (toCode contractName) . strip0x'' <$> runtime ^? key "object" % _String
   runtimeSrcMap <- case runtime ^? key "sourceMap" % _String of
-    Nothing -> makeSrcMaps ""
-    smap -> makeSrcMaps =<< smap
+    Nothing -> Right $ force "Source map creation error" $ makeSrcMaps ""  -- sourceMap is optional
+    Just smap -> maybeToEither "invalid sourceMap format" $ makeSrcMaps smap
 
-  creation <- json ^? key "bytecode"
-  creationCode <- (toCode contractName) . strip0x'' <$> creation ^? key "object" % _String
+  creation <- maybeToEither "missing 'bytecode' field" $ json ^? key "bytecode"
+  creationCode <- maybeToEither "missing 'bytecode.object' field" $
+    (toCode contractName) . strip0x'' <$> creation ^? key "object" % _String
   creationSrcMap <- case creation ^? key "sourceMap" % _String of
-    Nothing -> makeSrcMaps ""
-    smap -> makeSrcMaps =<< smap
+    Nothing -> Right $ force "Source map creation error" $ makeSrcMaps ""  -- sourceMap is optional
+    Just smap -> maybeToEither "invalid sourceMap format" $ makeSrcMaps smap
 
-  ast <- json ^? key "ast"
-  path <- ast ^? key "absolutePath" % _String
-
-  abi <- toList <$> json ^? key "abi" % _Array
-
-  id' <- unsafeInto <$> json ^? key "id" % _Integer
+  ast <- maybeToEither "missing 'ast' field. Recompile with `forge clean && forge build --ast`" $ json ^? key "ast"
+  path <- maybeToEither "missing 'ast.absolutePath' field" $ ast ^? key "absolutePath" % _String
+  abi <- maybeToEither "missing or invalid 'abi' array" $ toList <$> json ^? key "abi" % _Array
+  id' <- maybeToEither "missing or invalid 'id' field" $ unsafeInto <$> json ^? key "id" % _Integer
 
   let contract = SolcContract
         { runtimeCodehash     = keccak' (stripBytecodeMetadata runtimeCode)
@@ -443,10 +456,10 @@ readFoundryJSON contractName json = do
         , storageLayout       = mkStorageLayout $ json ^? key "storageLayout"
         , immutableReferences = mempty -- TODO: foundry doesn't expose this?
         }
-  pure ( Contracts $ Map.singleton (path <> ":" <> contractName) contract
-         , Asts      $ Map.singleton path ast
-         , Sources   $ Map.singleton (SrcFile id' (T.unpack path)) Nothing
-         )
+  Right ( Contracts $ Map.singleton (path <> ":" <> contractName) contract
+        , Asts      $ Map.singleton path ast
+        , Sources   $ Map.singleton (SrcFile id' (T.unpack path)) Nothing
+        )
 
 -- | Parses the standard json output from solc
 readStdJSON :: Text -> Maybe (Contracts, Asts, Sources)
@@ -504,18 +517,18 @@ readStdJSON json = do
       }, fromMaybe mempty srcContents))
 
 -- deprecate me soon
-readCombinedJSON :: Text -> Maybe (Contracts, Asts, Sources)
+readCombinedJSON :: Text -> Err (Contracts, Asts, Sources)
 readCombinedJSON json = do
-  contracts <- f . KeyMap.toHashMapText <$> (json ^? key "contracts" % _Object)
-  sources <- toList . fmap (preview _String) <$> json ^? key "sourceList" % _Array
+  contracts <- maybeToEither "missing or invalid 'contracts' field" $ f . KeyMap.toHashMapText <$> (json ^? key "contracts" % _Object)
+  sources <- maybeToEither "missing or invalid 'sourceList' field" $ toList . fmap (preview _String) <$> json ^? key "sourceList" % _Array
+  astsPre <- maybeToEither "JSON lacks abstract syntax trees (ast). Recompile with `forge clean && forge build --ast`" $ json ^? key "sources" % _Object
   pure ( Contracts contracts
-       , Asts (Map.fromList (HMap.toList asts))
+       , Asts (Map.fromList (HMap.toList (KeyMap.toHashMapText astsPre)))
        , Sources $ Map.fromList $
            (\(path, id') -> (SrcFile id' (T.unpack path), Nothing)) <$>
              zip (catMaybes sources) [0..]
        )
   where
-    asts = KeyMap.toHashMapText $ fromMaybe (error "JSON lacks abstract syntax trees.") (json ^? key "sources" % _Object)
     f x = Map.fromList . HMap.toList $ HMap.mapWithKey g x
     g s x =
       let
@@ -658,18 +671,14 @@ containsLinkerHole :: Text -> Bool
 containsLinkerHole = regexMatches "__\\$[a-z0-9]{34}\\$__"
 
 toCode :: Text -> Text -> ByteString
-toCode contractName t = case BS16.decodeBase16 (encodeUtf8 t) of
+toCode contractName t = case BS16.decodeBase16Untyped (encodeUtf8 t) of
   Right d -> d
   Left e -> if containsLinkerHole t
             then error $ T.unpack ("Error toCode: unlinked libraries detected in bytecode, in " <> contractName)
             else error $ T.unpack ("Error toCode:" <> e <> ", in " <> contractName)
 
 solc :: Language -> Text -> IO Text
-solc lang src =
-  T.pack <$> readProcess
-    "solc"
-    ["--standard-json"]
-    (T.unpack $ stdjson lang src)
+solc lang src = T.pack <$> readProcess "solc" ["--standard-json"] (T.unpack $ stdjson lang src)
 
 data Language = Solidity | Yul
   deriving (Show)
@@ -680,8 +689,7 @@ data StandardJSON = StandardJSON Language Text
 instance ToJSON StandardJSON where
   toJSON (StandardJSON lang src) =
     object [ "language" .= show lang
-           , "sources" .= object ["hevm.sol" .=
-                                   object ["content" .= src]]
+           , "sources" .= object ["hevm.sol" .= object ["content" .= src]]
            , "settings" .=
              object [ "outputSelection" .=
                     object ["*" .=
@@ -731,7 +739,7 @@ stripBytecodeMetadataSym :: [Expr Byte] -> [Expr Byte]
 stripBytecodeMetadataSym b =
   let
     concretes :: [Maybe Word8]
-    concretes = maybeLitByte <$> b
+    concretes = maybeLitByteSimp <$> b
     bzzrs :: [[Maybe Word8]]
     bzzrs = fmap (Just) . BS.unpack <$> knownBzzrPrefixes
     candidates = (flip Data.List.isInfixOf concretes) <$> bzzrs

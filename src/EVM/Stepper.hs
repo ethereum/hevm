@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module EVM.Stepper
@@ -9,9 +8,8 @@ module EVM.Stepper
   , run
   , runFully
   , wait
-  , ask
+  , fork
   , evm
-  , evmIO
   , enter
   , interpret
   )
@@ -23,35 +21,30 @@ where
 -- The implementation uses the operational monad pattern
 -- as the framework for monadic interpretation.
 
+import Control.Monad.IO.Class
 import Control.Monad.Operational (Program, ProgramViewT(..), ProgramView, singleton, view)
+import Control.Monad.ST (stToIO, RealWorld)
 import Control.Monad.State.Strict (execStateT, runStateT, get)
 import Data.Text (Text)
 
 import EVM qualified
+import EVM.Effects
 import EVM.Exec qualified
 import EVM.Fetch qualified as Fetch
 import EVM.Types
-import Control.Monad.ST (stToIO, RealWorld)
-import Control.Monad.IO.Class
-import EVM.Effects
 
 -- | The instruction type of the operational monad
 data Action t s a where
-
   -- | Keep executing until an intermediate result is reached
   Exec :: Action t s (VMResult t s)
-
-  -- | Wait for a query to be resolved
-  Wait :: Query t s -> Action t s ()
-
-  -- | Multiple things can happen
-  Ask :: Choose s -> Action Symbolic s ()
-
   -- | Embed a VM state transformation
   EVM  :: EVM t s a -> Action t s a
-
-  -- | Perform an IO action
-  IOAct :: IO a -> Action t s a
+  -- | Wait for a query to be resolved
+  Wait :: Query t s -> Action t s ()
+  -- | Two things can happen
+  Fork :: RunBoth s -> Action Symbolic s ()
+  -- | Many (>2) things can happen
+  ForkMany :: RunAll s -> Action Symbolic s ()
 
 -- | Type alias for an operational monad of @Action@
 type Stepper t s a = Program (Action t s) a
@@ -67,14 +60,14 @@ run = exec >> evm get
 wait :: Query t s -> Stepper t s ()
 wait = singleton . Wait
 
-ask :: Choose s -> Stepper Symbolic s ()
-ask = singleton . Ask
+fork :: RunBoth s -> Stepper Symbolic s ()
+fork = singleton . Fork
+
+forkMany :: RunAll s -> Stepper Symbolic s ()
+forkMany = singleton . ForkMany
 
 evm :: EVM t s a -> Stepper t s a
 evm = singleton . EVM
-
-evmIO :: IO a -> Stepper t s a
-evmIO = singleton . IOAct
 
 -- | Run the VM until final result, resolving all queries
 execFully :: Stepper Concrete s (Either EvmError (Expr Buf))
@@ -95,8 +88,10 @@ runFully = do
     Nothing -> internalError "should not occur"
     Just (HandleEffect (Query q)) ->
       wait q >> runFully
-    Just (HandleEffect (Choose q)) ->
-      ask q >> runFully
+    Just (HandleEffect (RunBoth q)) ->
+      fork q >> runFully
+    Just (HandleEffect (RunAll q)) ->
+      forkMany q >> runFully
     Just _ ->
       pure vm
 
@@ -116,15 +111,13 @@ interpret fetcher vm = eval . view
     eval (action :>>= k) =
       case action of
         Exec -> do
-          (r, vm') <- liftIO $ stToIO $ runStateT EVM.Exec.exec vm
+          conf <- readConfig
+          (r, vm') <- liftIO $ stToIO $ runStateT (EVM.Exec.exec conf) vm
           interpret fetcher vm' (k r)
         Wait q -> do
           m <- fetcher q
           vm' <- liftIO $ stToIO $ execStateT m vm
           interpret fetcher vm' (k ())
-        IOAct m -> do
-          r <- liftIO m
-          interpret fetcher vm (k r)
         EVM m -> do
           (r, vm') <- liftIO $ stToIO $ runStateT m vm
           interpret fetcher vm' (k r)

@@ -1,53 +1,75 @@
 name: "Release"
 on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 5 * * 1' # At 05:30 AM, only on Monday
   push:
     tags:
       - 'release/[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
-  macosRelease:
-    name: Build MacOS Binary
-    runs-on: macos-latest
+  releaseBuilds:
+    strategy:
+      matrix:
+        include:
+          # macos-13 is x86
+          - os: "macos-13"
+            suffix: "x86_64-macos"
+          # macos-14 is arm, see https://github.com/orgs/community/discussions/102846
+          # "Workflows executed on this image will run exclusively on the 3 vCPU M1 runner"
+          - os: "macos-14"
+            suffix: "arm64-macos"
+          - os: "ubuntu-latest"
+            suffix: "x86_64-linux"
+    name: Build binary on ${{ matrix.os }}
+    runs-on: ${{ matrix.os  }}
     steps:
-      - uses: actions/checkout@v3
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: nixbuild/nix-quick-install-action@v30      
       - name: build hevm
         run: |
-          nix build .#redistributable --out-link hevmMacos
-          cp ./hevmMacos/bin/hevm ./hevm-x86_64-macos
-      - uses: actions/upload-artifact@v3
+          nix build .#redistributable --out-link hevm
+          cp ./hevm/bin/hevm ./hevm-${{ matrix.suffix }}
+      - uses: actions/upload-artifact@v4
         with:
-          name: hevm-x86_64-macos
-          path: ./hevm-x86_64-macos
-  linuxRelease:
-    name: Create Release
-    needs: macosRelease
+          name: hevm-${{ matrix.suffix }}
+          path: ./hevm-${{ matrix.suffix }}
+  Upload:
+    needs: [releaseBuilds]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-      - name: build hevm
-        run: |
-          nix build .#redistributable --out-link hevmLinux
-          cp ./hevmLinux/bin/hevm ./hevm-x86_64-linux
-      - name: download macos binary
-        uses: actions/download-artifact@v3
+      - uses: actions/checkout@v4
         with:
-          name: hevm-x86_64-macos
+          persist-credentials: false
+      - name: Install Nix
+        uses: nixbuild/nix-quick-install-action@v30      
+      - name: download binaries
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
       - name: create github release & upload binaries
-        uses: softprops/action-gh-release@v0.1.15
+        uses: softprops/action-gh-release@v2
+        # scheduled/manual runs should not create a release
+        if: github.event_name == 'push'
         with:
+          fail_on_unmatched_files: true
           files: |
             ./hevm-x86_64-linux
             ./hevm-x86_64-macos
+            ./hevm-arm64-macos
       - name: prepare hackage artifacts
         run: |
-          nix-shell --command "cabal sdist --builddir=${{ runner.temp }}/packages"
-          nix-shell --command "cabal haddock lib:hevm --builddir=${{ runner.temp }}/docs --haddock-for-hackage --haddock-option=--hyperlinked-source"
+          # cabal complains if we don't do this...
+          nix develop --command bash -c "cabal update"
+          nix develop --command bash -c "cabal sdist --builddir='$RUNNER_TEMP/packages'"
+          nix develop --command bash -c "cabal haddock lib:hevm --builddir='$RUNNER_TEMP/docs' --haddock-for-hackage --haddock-option=--hyperlinked-source"
       - name: publish to hackage
         uses: haskell-actions/hackage-publish@v1
+        # scheduled/manual runs should not publish anything
+        if: github.event_name == 'push'
         with:
           hackageToken: ${{ secrets.HACKAGE_AUTH_TOKEN }}
           packagesPath: ${{ runner.temp }}/packages/sdist

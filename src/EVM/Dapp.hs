@@ -1,11 +1,10 @@
-{-# Language DataKinds #-}
-
 module EVM.Dapp where
 
 import EVM.ABI
 import EVM.Concrete
 import EVM.Solidity
 import EVM.Types
+import EVM.Expr (maybeLitByteSimp, maybeLitWordSimp)
 
 import Control.Arrow ((>>>), second)
 import Data.Aeson (Value)
@@ -45,7 +44,8 @@ data Code = Code
 
 data DappContext = DappContext
   { info :: DappInfo
-  , env  :: Map (Expr EAddr) Contract
+  , contracts :: Map (Expr EAddr) Contract
+  , labels :: Map Addr Text
   }
 
 dappInfo :: FilePath -> BuildOutput -> DappInfo
@@ -101,7 +101,7 @@ mkSig method
   | "check" `isPrefixOf` testname = Just (Sig testname argtypes)
   | otherwise = Nothing
   where
-    testname = method.methodSignature
+    testname = method.name
     argtypes = snd <$> method.inputs
 
 findUnitTests :: Text -> ([SolcContract] -> [(Text, [Sig])])
@@ -139,7 +139,7 @@ srcMap dapp contr opIndex = do
 
 findSrc :: Contract -> DappInfo -> Maybe SolcContract
 findSrc c dapp = do
-  hash <- maybeLitWord c.codehash
+  hash <- maybeLitWordSimp c.codehash
   case Map.lookup hash dapp.solcByHash of
     Just (_, v) -> Just v
     Nothing -> lookupCode c.code dapp
@@ -154,7 +154,7 @@ lookupCode (RuntimeCode (ConcreteRuntimeCode c)) a =
     Just x -> pure x
     Nothing -> snd <$> find (compareCode c . fst) a.solcByCode
 lookupCode (RuntimeCode (SymbolicRuntimeCode c)) a = let
-    code = BS.pack $ mapMaybe maybeLitByte $ V.toList c
+    code = BS.pack $ mapMaybe maybeLitByteSimp $ V.toList c
   in case snd <$> Map.lookup (keccak' (stripBytecodeMetadata code)) a.solcByHash of
     Just x -> pure x
     Nothing -> snd <$> find (compareCode code . fst) a.solcByCode

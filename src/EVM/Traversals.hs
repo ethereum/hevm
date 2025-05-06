@@ -6,8 +6,9 @@ module EVM.Traversals where
 
 import Prelude hiding (LT, GT)
 
-import Control.Monad.Identity
-import qualified Data.Map.Strict as Map
+import Control.Monad (forM, void)
+import Control.Monad.Identity (Identity(Identity), runIdentity)
+import Data.Map.Strict qualified as Map
 import Data.List (foldl')
 
 import EVM.Types
@@ -30,19 +31,12 @@ foldProp f acc p = acc <> (go p)
 
 foldEContract :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Expr EContract -> b
 foldEContract f _ g@(GVar _) = f g
-foldEContract f acc (C code storage balance _)
+foldEContract f acc (C code storage tStorage balance _)
   =  acc
   <> foldCode f code
   <> foldExpr f mempty storage
+  <> foldExpr f mempty tStorage
   <> foldExpr f mempty balance
-
-foldContract :: forall b . Monoid b => (forall a . Expr a -> b) -> b -> Contract -> b
-foldContract f acc c
-  =  acc
-  <> foldCode f c.code
-  <> foldExpr f mempty c.storage
-  <> foldExpr f mempty c.origStorage
-  <> foldExpr f mempty c.balance
 
 foldCode :: forall b . Monoid b => (forall a . Expr a -> b) -> ContractCode -> b
 foldCode f = \case
@@ -164,7 +158,7 @@ foldExpr f acc expr = acc <> (go expr)
 
       -- frame context
 
-      e@(Gas _) -> f e
+      e@(Gas _ _) -> f e
       e@(Balance {}) -> f e
 
       -- code
@@ -233,8 +227,43 @@ mapProp' f = \case
   POr a b -> f $ POr (mapProp' f a) (mapProp' f b)
   PImpl a b -> f $ PImpl (mapProp' f a) (mapProp' f b)
 
+
+mapPropM' :: forall m . (Monad m) => (Prop -> m Prop) -> Prop -> m Prop
+mapPropM' f = \case
+  PBool b -> f $ PBool b
+  PEq a b -> f $ PEq a b
+  PLT a b -> f $ PLT a b
+  PGT a b -> f $ PGT a b
+  PLEq a b -> f $ PLEq a b
+  PGEq a b -> f $ PGEq a b
+  PNeg a -> do
+    x <- mapPropM' f a
+    f $ PNeg x
+  PAnd a b -> do
+    x <- mapPropM' f a
+    y <- mapPropM' f b
+    f $ PAnd x y
+  POr a b -> do
+    x <- mapPropM' f a
+    y <- mapPropM' f b
+    f $ POr x y
+  PImpl a b -> do
+    x <- mapPropM' f a
+    y <- mapPropM' f b
+    f $ PImpl x y
+
 mapExpr :: (forall a . Expr a -> Expr a) -> Expr b -> Expr b
 mapExpr f expr = runIdentity (mapExprM (Identity . f) expr)
+
+-- Like mapExprM but allows a function of type `Expr a -> m ()` to be passed
+mapExprM_ ::  Monad m => (forall a . Expr a -> m ()) -> Expr b -> m ()
+mapExprM_ f expr = void ret
+  where
+    ret = mapExprM (fUpd f) expr
+    fUpd :: Monad m => (Expr a -> m ()) -> (Expr a -> m (Expr a))
+    fUpd action e = do
+      action e
+      pure e
 
 mapExprM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Expr b -> m (Expr b)
 mapExprM f expr = case expr of
@@ -487,7 +516,7 @@ mapExprM f expr = case expr of
 
   -- frame context
 
-  Gas a -> f (Gas a)
+  Gas a b -> f (Gas a b)
   Balance a -> do
     a' <- mapExprM f a
     f (Balance a')
@@ -560,6 +589,16 @@ mapExprM f expr = case expr of
     a' <- mapExprM f a
     f (BufLength a')
 
+-- Like mapPropM but allows a function of type `Expr a -> m ()` to be passed
+mapPropM_ :: Monad m => (forall a . Expr a -> m ()) -> Prop -> m ()
+mapPropM_ f expr = void ret
+  where
+    ret = mapPropM (fUpd f) expr
+    fUpd :: Monad m => (Expr a -> m ()) -> (Expr a-> m (Expr a))
+    fUpd action e = do
+      action e
+      pure e
+
 mapPropM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Prop -> m Prop
 mapPropM f = \case
   PBool b -> pure $ PBool b
@@ -602,11 +641,12 @@ mapPropM f = \case
 
 mapEContractM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Expr EContract -> m (Expr EContract)
 mapEContractM _ g@(GVar _) = pure g
-mapEContractM f (C code storage balance nonce) = do
+mapEContractM f (C code storage tStorage balance nonce) = do
   code' <- mapCodeM f code
   storage' <- mapExprM f storage
+  tStorage' <- mapExprM f tStorage
   balance' <- mapExprM f balance
-  pure $ C code' storage' balance' nonce
+  pure $ C code' storage' tStorage' balance' nonce
 
 mapContractM :: Monad m => (forall a . Expr a -> m (Expr a)) -> Contract -> m (Contract)
 mapContractM f c = do

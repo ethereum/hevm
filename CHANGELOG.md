@@ -1,11 +1,195 @@
-## [0.53.0] - 2024-02-23
-
 # Changelog
 
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## Added
+- When a staticcall is made to a contract that does not exist, we overapproximate
+  and return symbolic values
+- More simplification rules for Props
+- JoinBytes simplification rule
+- New simplification rule to help deal with abi.encodeWithSelector
+- More simplification rules for Props
+- Using the SMT solver to get a single concrete value for a symbolic expression
+  and continue running, whenever possible
+- STATICCALL abstraction is now performed in case of symbolic arguments
+- Better error messages for JSON parsing
+- Multiple solutions are allowed for a single symbolic expression, and they are
+  generated via iterative calls to the SMT solver for quicker solving
+- Aliasing works much better for symbolic and concrete addresses
+- Constant propagation for symbolic values
+- Allow reading bytecode via --code-file or --code-a-file/--code-b-file. Strips
+  `\n`, spaces, and ignores leading `0x` to make it easier to use via e.g.
+  `jq '.deplayedBytecode.object file.json > file.txt'` to parse Forge JSON output
+  This alleviates the issue when the contract is large and does not fit the command line
+  limit of 8192 characters
+- Two more simplification rules: `ReadByte` & `ReadWord` when the `CopySlice`
+  it is reading from is writing after the position being read, so the
+  `CopySlice` can be ignored
+- More simplification rules that help avoid symbolic copyslice in case of
+  STATICCALL overapproximation
+- Test to make sure we don't accidentally overapproximate a working, good STATICCALL
+- Allow EXTCODESIZE/HASH, BALANCE to be abstracted to a symbolic value.
+- Allow CALL to be extracted in case `--promise-no-reent` is given, promising
+  no reentrancy of contracts. This may skip over reentrancy vulnerabilities
+  but allows much more thorough exploration of the contract
+- Allow controlling the max buffer sizes via --max-buf-size to something smaller than 2**64
+  so we don't get too large buffers as counterexamples
+- More symbolic overapproximation for Balance and ExtCodeHash opcodes, fixing
+  CodeHash SMT representation
+- Add deployment code flag to the `equivalenceCheck` function
+- PNeg + PGT/PGEq/PLeq/PLT simplification rules
+- We no longer dispatch Props to SMT that can be solved by a simplification
+- Allow user to change the verbosity level via `--verb`. For the moment, this is only to
+  print some warnings related to zero-address dereference and to print `hemv test`'s
+  output in case of failure
+- Simple test cases for the CLI
+- Allow limiting the branch depth and width limitation via --max-depth and --max-width
+- When there are zero solutions to a multi-solution query it means that the
+  currently executed branch is in fact impossible. In these cases, unwind all
+  frames and return a Revert with empty returndata.
+- More rewrite rules for PEq, PNeg, missing eqByte call, and distributivity for And
+
+## Fixed
+- We now try to simplify expressions fully before trying to cast them to a concrete value
+  This should improve issues when "Unexpected Symbolic Arguments to Opcode" was
+  unnecessarily output
+- Not all testcases ran due to incorrect filtering, fixed
+- Removed dead code related to IOAct in the now deprecated and removed debugger
+- Base case of exponentiation to 0 was not handled, leading to infinite loop
+- Better exponential simplification
+- Dumping of END states (.prop) files is now default for `--debug`
+- When cheatcode is missing, we produce a partial execution warning
+- Size of calldata can be up to 2**64, not 256. This is now reflected in the documentation
+- We now have less noise during test runs, and assert more about symbolic copyslice tests
+- CopySlice rewrite rule is now less strict while still being sound
+- Assumptions about reading from buffer after its size are now the same in all cases.
+  Previously, they were too weak in case of reading 32 bytes.
+- The equivalence checker now is able to prove that an empty store is
+  equivalent to a store with all slots initialized to 0.
+- Equivalence checking was incorrectly assuming that overapproximated values
+  were sequentially equivalent. We now distinguish these symbolic values with
+  `A-` and `B-`
+- Buffer of all zeroes was interpreted as an empty buffer during parsing SMT model.
+  The length of the buffer is now properly taken into account.
+- It was possible to enter an infinite recursion when trying to shrink a buffer found by
+  the SMT solver. We now properly detect that it is not possible to shrink the buffer.
+- Pretty printing of buffers is now more robust. Instead of throwing an `internal error`,
+  we now try best to print everything we can, and print an appropriate error message
+  instead of crashing.
+- We no longer produce duplicate SMT assertions regarding concrete keccak values.
+
+## Changed
+- Warnings now lead printing FAIL. This way, users don't accidentally think that
+  their contract is correct when there were cases/branches that hevm could not
+  fully explore. Printing of issues is also now much more organized
+- Expressions that are commutative are now canonicalized to have the smaller
+  value on the LHS. This can significantly help with simplifications, automatically
+  determining when (Eq a b) is true when a==b modulo commutativity
+- `hevm test`'s flag ` --verbose` is now `--verb`, which also increases verbosity
+  for other elements of the system
+- Add `--arrays-exp` to cvc5 options.
+- We now use Options.Applicative and a rather different way of parsing CLI options.
+  This should give us much better control over the CLI options and their parsing.
+- block.number can now be symbolic. This only affects library use of hevm
+- Removed `--smtoutput` since it was never used
+- We now build with -DCMAKE_POLICY_VERSION_MINIMUM=3.5 libff, as cmake deprecated 3.5
+- CheckSatResult has now been unified with ProofResult via SMTResult
+- If counterexample would require a buffer that's larger than 1GB, we abandon
+  shrinking it.
+- Buffers are now handled more lazily when inspecting a model, which avoids some
+  unnecesary internal errors.
+- EVM memory is now grown on demand using a 2x factor, to avoid repeated smaller
+  increases which hurt concrete execution performance due to their linear cost.
+- The concrete MCOPY implementation has been optimized to avoid freezing the whole
+  EVM memory.
+
+## [0.54.2] - 2024-12-12
+
+## Fixed
+- Fixed GitHub release action to upload release binaries
+
+## [0.54.1] - 2024-12-12
+
+## Fixed
+- Fixed GitHub release action to create release binaries
+
+## [0.54.0] - 2024-12-10
+
+## Changed
+- Improved printing of results. Should be more intuitive to understand what hevm found.
+- More complete and precise array/mapping slot rewrite, along with a copySlice improvement
+- Use a let expression in copySlice to decrease expression size
+- The `--debug` flag now dumps the internal expressions as well
+- hevm now uses the forge-std library's way of detecting failures, i.e. through
+  reverting with a specific error code unless --assertion-type DSTest is passed
+- Default max iterations is 5 now. `--max-iters -1` now signals no bound. This change is to match other
+  symbolic execution frameworks' default bound and to not go into an infinite loop by default when
+  there could be other, interesting and reachable bugs in the code
+- Update to GHC version 9.6.5
+- Abstraction-refinement is no longer an option, it was never really useful and not well-tested
+
+## Added
+- More POr and PAnd rules
+- Array/Map slot decomposition can be turned off via a flag
+- More PEq, PLEq, and PLT rules
+- New `label` cheatcode.
+- Updated Bitwuzla to newer version
+- New cheatcodes `startPrank()` & `stopPrank()`
+- ARM64 and x86_64 Mac along with Linux x86_64 static binaries for releases
+- Tutorial for symbolic execution
+- PAnd props are now recursively flattened
+- Double negation in Prop are removed
+- Updated forge to modern version, thereby fixing JSON parsing of new forge JSONs
+- Fixed RPC fetching of contract data
+- Symbolic ABI encoding for tuples, fuzzer for encoder
+- Printing `Addrs` when running `symbolic` for counterexamples and reachable end states
+- Improved symbolic execution tutorial
+- More Mod, SMod, Div, and SDiv simplification rules
+- Add `freshAddresses` field in `VMOpts` so that initial fresh address can be given as input
+- Add documentation about limitations and workarounds
+- More verbose error messages in case of symbolic arguments to opcode
+- Tests to enforce that in Expr and Prop, constants are on the LHS whenever possible
+- Support for MCOPY and TSTORE/TLOAD, i.e. EIP 5656 + 1153 + 4788
+- All fuzz tests now run twice, once with expected SAT and once with expected UNSAT to check
+  against incorrectly trivial UNSAT queries
+- Allow --num-solvers option for equivalence checking, use num cores by default
+- Preliminary support for multi-threaded Z3
+- Skip over SMT generation issues due to e.g. CopySlice with symbolic arguments, and return
+  partial results instead of erroring out
+- Fix interpreter's MCOPY handling so that it doesn't error out on symbolic arguments
+- More desciptive errors in case of a cheatcode issue
+- Better and more pretty debug messages
+- Many env* cheatcodes are now supported
+
+## Fixed
+- `vm.prank` is now respected during calls to create
+- `concat` is a 2-ary, not an n-ary function in SMT2LIB, declare-const does not exist in QF_AUFBV, replacing
+   with declare-fun
+- CVC5 needs `--incremental` flag to work properly in abstraction-refinement mode
+- cli.hs now uses with-utf8 so no release binary will have locale issues anymore
+- Took ideas for simplification rules from "Super-optimization of Smart Contracts" paper by Albert et al.
+- Printing panic uint256 as hex, not as int
+- Decomposition does not take place when entire states are compared, as that would necessitate
+  a different approach.
+- `initial-storage` option of `hevm symbolic` is respected
+- `caller` option of `hevm symbolic` is now respected
+- Thanks to the new simplification rules, we can now enable more conformance tests
+- Multi-threaded running of Tracing.hs was not possible due to IO race. Fixed.
+- Fixed multi-threading bug in symbolic interpretation
+- Fixed simplification of concrete CopySlice with destination offset beyond destination size
+- Fixed a bug in our SMT encoding of reading multiple consecutive bytes from concrete index
+- Fixed bug in SMT encoding that caused empty and all-zero byte arrays to be considered equal
+  and hence lead to false negatives through trivially UNSAT SMT expressions
+- Respect --smt-timeout in equivalence checking
+- Fixed the handling of returndata with an abstract size during transaction finalization
+- Error handling for user-facing cli commands is much improved
+- Fixed call signature generation for test cases
+- Fixing prank so it doesn't override the sender address on lower call frames
+
+## [0.53.0] - 2024-02-23
 
 ## Changed
 
@@ -16,6 +200,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as the only check is that the size allocated is less than $2**{64}$, but that is too large to fit in memory. Now,
   we check more stringently, and still return an IllegalOverflow
 - Fixed `--root` option for the `test` subcommand
+- Use `-Wunused-packages` and eliminate unused deps.
 
 ## Added
 
@@ -38,7 +223,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Traces now correctly perform source mapping to display contract details
 - Event traces now correctly display indexed arguments and argument names
 - JSON reading of foundry JSONs was dependent on locale and did not work with many locales.
-- CVC5 needs `--incremental` flag to work properly in abstraction-refinement mode
 
 ## [0.52.0] - 2023-10-26
 

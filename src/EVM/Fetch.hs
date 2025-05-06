@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 module EVM.Fetch where
 
 import EVM (initialContract, unknownContract)
@@ -18,17 +16,20 @@ import Data.Aeson hiding (Error)
 import Data.Aeson.Optics
 import Data.ByteString qualified as BS
 import Data.Text (Text, unpack, pack)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.List (foldl')
-import Data.Text qualified as T
 import Data.Vector qualified as RegularVector
 import Network.Wreq
 import Network.Wreq.Session (Session)
 import Network.Wreq.Session qualified as Session
 import Numeric.Natural (Natural)
+import System.Environment (lookupEnv, getEnvironment)
 import System.Process
 import Control.Monad.IO.Class
+import Control.Monad (when)
 import EVM.Effects
+import qualified EVM.Expr as Expr
 
 -- | Abstract representation of an RPC fetch request
 data RpcQuery a where
@@ -114,7 +115,7 @@ parseBlock :: (AsValue s, Show s) => s -> Maybe Block
 parseBlock j = do
   coinbase   <- LitAddr . readText <$> j ^? key "miner" % _String
   timestamp  <- Lit . readText <$> j ^? key "timestamp" % _String
-  number     <- readText <$> j ^? key "number" % _String
+  number     <- Lit . readText <$> j ^? key "number" % _String
   gasLimit   <- readText <$> j ^? key "gasLimit" % _String
   let
    baseFee = readText <$> j ^? key "baseFeePerGas" % _String
@@ -184,23 +185,22 @@ fetchChainIdFrom url = do
   sess <- Session.newAPISession
   fetchQuery Latest (fetchWithSession url sess) QueryChainId
 
-http :: Natural -> Maybe Natural -> BlockNumber -> Text -> Fetcher t m s
-http smtjobs smttimeout n url q =
-  withSolvers Z3 smtjobs smttimeout $ \s ->
-    oracle s (Just (n, url)) q
-
+-- Only used for testing (test.hs, BlockchainTests.hs)
 zero :: Natural -> Maybe Natural -> Fetcher t m s
 zero smtjobs smttimeout q =
-  withSolvers Z3 smtjobs smttimeout $ \s ->
+  withSolvers Z3 smtjobs 1 smttimeout $ \s ->
     oracle s Nothing q
 
 -- smtsolving + (http or zero)
 oracle :: SolverGroup -> RpcInfo -> Fetcher t m s
 oracle solvers info q = do
   case q of
-    PleaseDoFFI vals continue -> case vals of
+    PleaseDoFFI vals envs continue -> case vals of
        cmd : args -> do
-          (_, stdout', _) <- liftIO $ readProcessWithExitCode cmd args ""
+          existingEnv <- liftIO getEnvironment
+          let mergedEnv = Map.toList $ Map.union envs $ Map.fromList existingEnv
+          let process = (proc cmd args :: CreateProcess) { env = Just mergedEnv }
+          (_, stdout', _) <- liftIO $ readCreateProcessWithExitCode process ""
           pure . continue . encodeAbiValue $
             AbiTuple (RegularVector.fromList [ AbiBytesDynamic . hexText . pack $ stdout'])
        _ -> internalError (show vals)
@@ -210,7 +210,14 @@ oracle solvers info q = do
          -- Is is possible to satisfy the condition?
          continue <$> checkBranch solvers (branchcondition ./= (Lit 0)) pathconds
 
+    PleaseGetSols symExpr numBytes pathconditions continue -> do
+         let pathconds = foldl' PAnd (PBool True) pathconditions
+         continue <$> getSolutions solvers symExpr numBytes pathconds
+
     PleaseFetchContract addr base continue -> do
+      conf <- readConfig
+      when (conf.debug) $ liftIO $ putStrLn $ "Fetching contract at " ++ show addr
+      when (addr == 0 && conf.verb > 0) $ liftIO $ putStrLn "Warning: fetching contract at address 0"
       contract <- case info of
         Nothing -> let
           c = case base of
@@ -222,7 +229,10 @@ oracle solvers info q = do
         Just x -> pure $ continue x
         Nothing -> internalError $ "oracle error: " ++ show q
 
-    PleaseFetchSlot addr slot continue ->
+    PleaseFetchSlot addr slot continue -> do
+      conf <- readConfig
+      when (conf.debug) $ liftIO $ putStrLn $ "Fetching slot " <> (show slot) <> " at " <> (show addr)
+      when (addr == 0 && conf.verb > 0) $ liftIO $ putStrLn "Warning: fetching slot from a contract at address 0"
       case info of
         Nothing -> pure (continue 0)
         Just (n, url) ->
@@ -231,7 +241,29 @@ oracle solvers info q = do
            Nothing ->
              internalError $ "oracle error: " ++ show q
 
+    PleaseReadEnv variable continue -> do
+      value <- liftIO $ lookupEnv variable
+      pure . continue $ fromMaybe "" value
+
 type Fetcher t m s = App m => Query t s -> m (EVM t s ())
+
+getSolutions :: forall m . App m => SolverGroup -> Expr EWord -> Int -> Prop -> m (Maybe [W256])
+getSolutions solvers symExprPreSimp numBytes pathconditions = do
+  conf <- readConfig
+  liftIO $ do
+    let symExpr = Expr.concKeccakSimpExpr symExprPreSimp
+    -- when conf.debug $ putStrLn $ "Collecting solutions to symbolic query: " <> show symExpr
+    ret <- collectSolutions symExpr pathconditions conf
+    case ret of
+      Nothing -> pure Nothing
+      Just r -> case length r of
+        0 -> pure Nothing
+        _ -> pure $ Just r
+    where
+      collectSolutions :: Expr EWord -> Prop -> Config -> IO (Maybe [W256])
+      collectSolutions symExpr conds conf = do
+        let smt2 = assertProps conf [(PEq (Var "multiQueryVar") symExpr) .&& conds]
+        checkMulti solvers smt2 $ MultiSol { maxSols = conf.maxWidth , numBytes = numBytes , var = "multiQueryVar" }
 
 -- | Checks which branches are satisfiable, checking the pathconditions for consistency
 -- if the third argument is true.
@@ -240,21 +272,20 @@ type Fetcher t m s = App m => Query t s -> m (EVM t s ())
 -- will be pruned anyway.
 checkBranch :: App m => SolverGroup -> Prop -> Prop -> m BranchCondition
 checkBranch solvers branchcondition pathconditions = do
-  conf <- readConfig
-  liftIO $ checkSat solvers (assertProps conf [(branchcondition .&& pathconditions)]) >>= \case
+  let props = [pathconditions .&& branchcondition]
+  checkSatWithProps solvers props >>= \case
     -- the condition is unsatisfiable
-    Unsat -> -- if pathconditions are consistent then the condition must be false
+    (Qed, _) -> -- if pathconditions are consistent then the condition must be false
       pure $ Case False
     -- Sat means its possible for condition to hold
-    Sat _ -> do -- is its negation also possible?
-      checkSat solvers (assertProps conf [(pathconditions .&& (PNeg branchcondition))]) >>= \case
+    (Cex {}, _) -> do -- is its negation also possible?
+      let propsNeg = [pathconditions .&& (PNeg branchcondition)]
+      checkSatWithProps solvers propsNeg >>= \case
         -- No. The condition must hold
-        Unsat -> pure $ Case True
+        (Qed, _) -> pure $ Case True
         -- Yes. Both branches possible
-        Sat _ -> pure EVM.Types.Unknown
-        -- Explore both branches in case of timeout
-        EVM.Solvers.Unknown -> pure EVM.Types.Unknown
-        Error e -> internalError $ "SMT Solver pureed with an error: " <> T.unpack e
-    -- If the query times out, we simply explore both paths
-    EVM.Solvers.Unknown -> pure EVM.Types.Unknown
-    Error e -> internalError $ "SMT Solver pureed with an error: " <> T.unpack e
+        (Cex {}, _) -> pure UnknownBranch
+        -- If the query times out, or can't be executed (e.g. symbolic copyslice) we simply explore both paths
+        _ -> pure UnknownBranch
+    -- If the query times out, or can't be executed (e.g. symbolic copyslice) we simply explore both paths
+    _ -> pure UnknownBranch

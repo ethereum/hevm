@@ -1,4 +1,4 @@
-#include <cstdint>
+#include <stdint.h>
 #include "blake2.h"
 
 #define ROTR64(x, y) (((x) >> (y)) ^ ((x) << (64 - (y))))

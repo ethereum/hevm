@@ -1,11 +1,13 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ImplicitParams #-}
 
 module EVM.Format
   ( formatExpr
   , formatSomeExpr
   , formatPartial
+  , formatPartialShort
   , formatProp
+  , formatState
+  , formatError
   , contractNamePart
   , contractPathPart
   , showError
@@ -29,18 +31,18 @@ module EVM.Format
   , strip0x'
   , hexByteString
   , hexText
-  , bsToHex
   , showVal
   ) where
 
 import Prelude hiding (LT, GT)
 
-import EVM.Types
 import EVM (traceForest, traceForest', traceContext, cheatCode)
 import EVM.ABI (getAbiSeq, parseTypeName, AbiValue(..), AbiType(..), SolError(..), Indexed(..), Event(..))
 import EVM.Dapp (DappContext(..), DappInfo(..), findSrc, showTraceLocation)
 import EVM.Expr qualified as Expr
-import EVM.Solidity (SolcContract(..), Method(..), contractName, abiMap)
+import EVM.Solidity (SolcContract(..), Method(..))
+import EVM.Types
+import EVM.Expr (maybeLitWordSimp, maybeLitAddrSimp)
 
 import Control.Arrow ((>>>))
 import Optics.Core
@@ -48,15 +50,16 @@ import Data.Binary.Get (runGetOrFail)
 import Data.Bits (shiftR)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.ByteString.Char8 qualified as Char8
+import Data.ByteString.Base16 qualified as BS16
 import Data.ByteString.Builder (byteStringHex, toLazyByteString)
 import Data.ByteString.Lazy (toStrict, fromStrict)
 import Data.Char qualified as Char
 import Data.DoubleWord (signedWord)
 import Data.Foldable (toList)
 import Data.List (isPrefixOf, sort)
-import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
 import Data.Text (Text, pack, unpack, intercalate, dropEnd, splitOn)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
@@ -64,8 +67,6 @@ import Data.Tree.View (showTree)
 import Data.Vector (Vector)
 import Hexdump (prettyHex)
 import Numeric (showHex)
-import Data.ByteString.Char8 qualified as Char8
-import Data.ByteString.Base16 qualified as BS16
 import Witch (into, unsafeInto, tryFrom)
 
 data Signedness = Signed | Unsigned
@@ -109,13 +110,8 @@ prettyIfConcreteWord = \case
 showAbiValue :: (?context :: DappContext) => AbiValue -> Text
 showAbiValue (AbiString bs) = formatBytes bs
 showAbiValue (AbiBytesDynamic bs) = formatBytes bs
-showAbiValue (AbiBytes _ bs) = formatBinary bs
-showAbiValue (AbiAddress addr) =
-  let name = case Map.lookup (LitAddr addr) ?context.env of
-        Nothing -> ""
-        Just contract -> maybeContractName' (findSrc contract ?context.info)
-  in
-    name <> "@" <> (pack $ show addr)
+showAbiValue (AbiBytes _ bs) = formatBytes bs
+showAbiValue (AbiAddress addr) = ppAddr (LitAddr addr) False
 showAbiValue v = pack $ show v
 
 textAbiValues :: (?context :: DappContext) => Vector AbiValue -> [Text]
@@ -128,6 +124,13 @@ textValues ts (ConcreteBuf bs) =
     Left (_, _, _)   -> [formatBinary bs]
 textValues ts _ = fmap (const "<symbolic>") ts
 
+textValue :: (?context :: DappContext) => AbiType -> Expr Buf -> Text
+textValue ts (ConcreteBuf bs) =
+  case runGetOrFail (getAbiSeq 1 [ts]) (fromStrict bs) of
+    Right (_, _, xs) -> fromMaybe (internalError "impossible empty list") $ listToMaybe $ textAbiValues xs
+    Left (_, _, _)   -> formatBinary bs
+textValue _ _ = "<symbolic>"
+
 parenthesise :: [Text] -> Text
 parenthesise ts = "(" <> intercalate ", " ts <> ")"
 
@@ -135,7 +138,7 @@ showValues :: (?context :: DappContext) => [AbiType] -> Expr Buf -> Text
 showValues ts b = parenthesise $ textValues ts b
 
 showValue :: (?context :: DappContext) => AbiType -> Expr Buf -> Text
-showValue t b = head $ textValues [t] b
+showValue t b = textValue t b
 
 showCall :: (?context :: DappContext) => [AbiType] -> Expr Buf -> Text
 showCall ts (ConcreteBuf bs) = showValues ts $ ConcreteBuf (BS.drop 4 bs)
@@ -151,7 +154,7 @@ showError (ConcreteBuf bs) =
                   -- Method ID for Error(string)
                   "\b\195y\160" -> showCall [AbiStringType] (ConcreteBuf bs)
                   -- Method ID for Panic(uint256)
-                  "NH{q"        -> "Panic" <> showCall [AbiUIntType 256] (ConcreteBuf bs)
+                  "NH{q"        -> "Panic" <> parenthesise [formatBinary bs]
                   _             -> formatBinary bs
 showError b = T.pack $ show b
 
@@ -180,27 +183,34 @@ formatBinary =
   (<>) "0x" . T.decodeUtf8 . toStrict . toLazyByteString . byteStringHex
 
 formatSBinary :: Expr Buf -> Text
-formatSBinary (ConcreteBuf bs) = formatBinary bs
-formatSBinary (AbstractBuf t) = "<" <> t <> " abstract buf>"
-formatSBinary _ = internalError "formatSBinary: implement me"
+formatSBinary e = format $ Expr.concKeccakSimpExpr e
+  where
+    format (ConcreteBuf bs) = formatBinary bs
+    format (AbstractBuf t) = "<" <> t <> " abstract buf>"
+    format e2 = T.pack $ "Symbolic expression: " <> show e2
 
 showTraceTree :: DappInfo -> VM t s -> Text
 showTraceTree dapp vm =
-  let forest = traceForest vm
-      traces = fmap (fmap (unpack . showTrace dapp (vm.env.contracts))) forest
+  let ?context = DappContext { info = dapp
+                             , contracts = vm.env.contracts
+                             , labels = vm.labels }
+  in let forest = traceForest vm
+         traces = fmap (fmap (unpack . showTrace)) forest
   in pack $ concatMap showTree traces
 
 showTraceTree' :: DappInfo -> Expr End -> Text
 showTraceTree' _ (ITE {}) = internalError "ITE does not contain a trace"
 showTraceTree' dapp leaf =
-  let forest = traceForest' leaf
-      traces = fmap (fmap (unpack . showTrace dapp (traceContext leaf))) forest
+  let ?context = DappContext { info = dapp, contracts, labels }
+  in let forest = traceForest' leaf
+         traces = fmap (fmap (unpack . showTrace)) forest
   in pack $ concatMap showTree traces
+  where TraceContext { contracts, labels } = traceContext leaf
 
-showTrace :: DappInfo -> Map (Expr EAddr) Contract -> Trace -> Text
-showTrace dapp env trace =
-  let ?context = DappContext { info = dapp, env = env }
-  in let
+showTrace :: (?context :: DappContext) => Trace -> Text
+showTrace trace =
+  let
+    dapp = ?context.info
     pos =
       case showTraceLocation dapp trace of
         Left x -> " \x1b[1m" <> x <> "\x1b[0m"
@@ -211,7 +221,7 @@ showTrace dapp env trace =
         [] ->
           logn
         firstTopic:restTopics ->
-          case maybeLitWord firstTopic of
+          case maybeLitWordSimp firstTopic of
             Just topic ->
               case Map.lookup topic dapp.eventMap of
                 Just (Event name _ argInfos) ->
@@ -229,7 +239,7 @@ showTrace dapp env trace =
                       -- ) anonymous;
                       let
                         sig = unsafeInto $ shiftR topic 224 :: FunctionSelector
-                        usr = case maybeLitWord t2 of
+                        usr = case maybeLitWordSimp t2 of
                           Just w ->
                             pack $ show (unsafeInto w :: Addr)
                           Nothing  ->
@@ -253,10 +263,11 @@ showTrace dapp env trace =
           ] <> pos
 
         showEvent eventName argInfos indexedTopics = mconcat
-          [ "\x1b[36m"
+          [ "emit "
+          , "\x1b[36m"
           , eventName
-          , parenthesise (snd <$> sort (unindexedArgs <> indexedArgs))
           , "\x1b[0m"
+          , parenthesise (snd <$> sort (unindexedArgs <> indexedArgs))
           ] <> pos
           where
           -- We maintain the original position of event arguments since indexed
@@ -273,8 +284,8 @@ showTrace dapp env trace =
             where
             showTopic :: AbiType -> Expr EWord -> Text
             showTopic abiType topic =
-              case maybeLitWord (Expr.concKeccakSimpExpr topic) of
-                Just w -> head $ textValues [abiType] (ConcreteBuf (word256Bytes w))
+              case maybeLitWordSimp (Expr.concKeccakSimpExpr topic) of
+                Just w -> textValue abiType (ConcreteBuf (word256Bytes w))
                 _ -> "<symbolic>"
 
           withName :: Text -> Text -> Text
@@ -321,47 +332,65 @@ showTrace dapp env trace =
       t
     FrameTrace (CreationContext { address }) ->
       "create "
-      <> maybeContractName (findSrcFromAddr address)
-      <> "@" <> formatAddr address
+      <> ppAddr address True
       <> pos
     FrameTrace (CallContext { target, context, abi, calldata }) ->
       let calltype = if target == context
                      then "call "
                      else "delegatecall "
-      in case findSrcFromAddr target of
+      in
+      calltype
+      <> ppAddr target False
+      <> "::"
+      <> case findSrcFromAddr target of
         Nothing ->
-          calltype
-            <> case target of
-                 LitAddr 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D -> "HEVM"
-                 _ -> formatAddr target
-            <> pack "::"
-            <> case Map.lookup (unsafeInto (fromMaybe 0x00 abi)) dapp.abiMap of
-                 Just m  ->
-                   "\x1b[1m"
-                   <> m.name
-                   <> "\x1b[0m"
-                   <> showCall (catMaybes (getAbiTypes m.methodSignature)) calldata
-                 Nothing ->
-                   formatSBinary calldata
-            <> pos
+          case Map.lookup (unsafeInto (fromMaybe 0x00 abi)) dapp.abiMap of
+            Just m  ->
+              "\x1b[1m"
+              <> m.name
+              <> "\x1b[0m"
+              <> showCall (catMaybes (getAbiTypes m.methodSignature)) calldata
+            Nothing ->
+              formatSBinary calldata
+          <> pos
 
         Just solc ->
-          calltype
-            <> "\x1b[1m"
-            <> contractNamePart solc.contractName
-            <> "::"
-            <> maybe "[fallback function]"
+          maybe "[fallback function]"
                  (fromMaybe "[unknown method]" . maybeAbiName solc)
                  abi
-            <> maybe ("(" <> formatSBinary calldata <> ")")
-                 (\x -> showCall (catMaybes x) calldata)
-                 (abi >>= fmap getAbiTypes . maybeAbiName solc)
-            <> "\x1b[0m"
-            <> pos
+          <> maybe ("(" <> formatSBinary calldata <> ")")
+                   (\x -> showCall (catMaybes x) calldata)
+                   (abi >>= fmap getAbiTypes . maybeAbiName solc)
+          <> pos
     where
     findSrcFromAddr addr = do
-      contract <- Map.lookup addr env
-      findSrc contract dapp
+      contract <- Map.lookup addr ?context.contracts
+      findSrc contract ?context.info
+
+ppAddr :: (?context :: DappContext) => Expr EAddr -> Bool -> Text
+ppAddr addr alwaysShowAddr =
+  let
+    sourceName = case Map.lookup addr ?context.contracts of
+      Nothing ->
+        case addr of
+          LitAddr 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D -> Just "HEVM"
+          _ -> Nothing
+      Just contract ->
+        case (findSrc contract ?context.info) of
+          Just x -> Just (contractNamePart x.contractName)
+          Nothing -> Nothing
+    label = case do litAddr <- maybeLitAddrSimp addr
+                    Map.lookup litAddr ?context.labels of
+              Nothing -> ""
+              Just l -> "[" <> "\x1b[1m" <> l <> "\x1b[0m" <> "]"
+    name = maybe "" (\n -> "\x1b[1m" <> n <> "\x1b[0m") sourceName <> label
+  in
+    if name == "" then
+      formatAddr addr
+    else if alwaysShowAddr then
+      name <> "@" <> formatAddr addr
+    else
+      name
 
 formatAddr :: Expr EAddr -> Text
 formatAddr = \case
@@ -375,14 +404,6 @@ getAbiTypes abi = map (parseTypeName mempty) types
     types =
       filter (/= "") $
         splitOn "," (dropEnd 1 (last (splitOn "(" abi)))
-
-maybeContractName :: Maybe SolcContract -> Text
-maybeContractName =
-  maybe "<unknown contract>" (contractNamePart . (.contractName))
-
-maybeContractName' :: Maybe SolcContract -> Text
-maybeContractName' =
-  maybe "" (contractNamePart . (.contractName))
 
 maybeAbiName :: SolcContract -> W256 -> Maybe Text
 maybeAbiName solc abi = Map.lookup (unsafeInto abi) solc.abiMap <&> (.methodSignature)
@@ -414,7 +435,7 @@ prettyError = \case
   PrecompileFailure -> "Precompile failure"
   ReturnDataOutOfBounds -> "Return data out of bounds"
   NonceOverflow -> "Nonce overflow"
-  BadCheatCode a -> "Bad cheat code: sig: " <> show a
+  BadCheatCode reason a -> "Bad cheat code: " <>  reason <> " sig: " <> show a
   NonexistentFork a -> "Fork ID does not exist: " <> show a
 
 prettyvmresult :: Expr End -> String
@@ -446,20 +467,42 @@ formatError = \case
 
 formatPartial :: PartialExec -> Text
 formatPartial = \case
-  (UnexpectedSymbolicArg pc msg args) -> T.unlines
+  UnexpectedSymbolicArg pc opcode msg args -> T.unlines
     [ "Unexpected Symbolic Arguments to Opcode"
     , indent 2 $ T.unlines
       [ "msg: " <> T.pack (show msg)
+      , "opcode: " <> T.pack opcode
       , "program counter: " <> T.pack (show pc)
       , "arguments: "
       , indent 2 $ T.unlines . fmap formatSomeExpr $ args
       ]
     ]
-  MaxIterationsReached pc addr -> "Max Iterations Reached in contract: " <> formatAddr addr <> " pc: " <> pack (show pc)
+  MaxIterationsReached pc addr -> "Max Iterations Reached in contract: " <> formatAddr addr <> " pc: " <> pack (show pc) <> " To increase the maximum, set a fixed large (or negative) value for `--max-iterations` on the command line"
   JumpIntoSymbolicCode pc idx -> "Encountered a jump into a potentially symbolic code region while executing initcode. pc: " <> pack (show pc) <> " jump dst: " <> pack (show idx)
+  CheatCodeMissing pc selector ->T.unlines
+    [ "Cheat code not recognized"
+    , "program counter: " <> T.pack (show pc)
+    , "function selector: " <> T.pack (show selector)
+    ]
+  BranchTooDeep pc -> T.unlines ["Branches too deep at program counter: " <> pack (show pc)]
+
+formatPartialShort :: PartialExec -> Text
+formatPartialShort = \case
+  UnexpectedSymbolicArg _ opcode _ _ -> "Unexpected symbolic arguments to opcode: " <> T.pack opcode
+  MaxIterationsReached {}            -> "Max iterations reached"
+  JumpIntoSymbolicCode {}            -> "Encountered a jump into a potentially symbolic code region while executing initcode"
+  CheatCodeMissing _ selector        -> "Cheat code not recognized: " <> T.pack (show selector)
+  BranchTooDeep pc                   -> "Branches too deep at program counter: " <> pack (show pc)
 
 formatSomeExpr :: SomeExpr -> Text
-formatSomeExpr (SomeExpr e) = formatExpr e
+formatSomeExpr (SomeExpr e) = formatExpr $ Expr.simplify e
+
+formatState :: Map.Map (Expr EAddr) (Expr EContract) -> Text
+formatState store = indent 2 $ T.unlines (fmap (\(k,v) ->
+              T.unlines
+                [ formatExpr k <> ":"
+                , indent 2 $ formatExpr v
+                ]) (Map.toList store))
 
 formatExpr :: Expr a -> Text
 formatExpr = go
@@ -482,17 +525,10 @@ formatExpr = go
       Success asserts _ buf store -> T.unlines
         [ "(Success"
         , indent 2 $ T.unlines
-          [ "Data:"
-          , indent 2 $ formatExpr buf
+          [ "Data:" , indent 2 $ formatExpr buf
           , ""
-          , "State:"
-          , indent 2 $ T.unlines (fmap (\(k,v) ->
-              T.unlines
-                [ formatExpr k <> ":"
-                , indent 2 $ formatExpr v
-                ]) (Map.toList store))
-          , "Assertions:"
-          , indent 2 . T.unlines $ fmap formatProp asserts
+          , "State:", formatState store
+          , "Assertions:", indent 2 . T.unlines $ fmap formatProp asserts
           ]
         , ")"
         ]
@@ -654,13 +690,15 @@ formatExpr = go
 
       BufLength b -> fmt "BufLength" [b]
 
-      C code store bal nonce -> T.unlines
+      C code store tStore bal nonce -> T.unlines
         [ "(Contract"
         , indent 2 $ T.unlines
           [ "code:"
           , indent 2 $ formatCode code
           , "storage:"
           , indent 2 $ formatExpr store
+          , "tStorage:"
+          , indent 2 $ formatExpr tStore
           , "balance:"
           , indent 2 $ formatExpr bal
           , "nonce:"
@@ -688,7 +726,7 @@ formatExpr = go
           , "val:"
           , indent 2 $ formatExpr val
           , "store:"
-          , indent 2 $ formatExpr prev          
+          , indent 2 $ formatExpr prev
           ]
         , ")"
         ]
@@ -812,20 +850,17 @@ strip0x bs = if "0x" `Char8.isPrefixOf` bs then Char8.drop 2 bs else bs
 strip0x' :: String -> String
 strip0x' s = if "0x" `isPrefixOf` s then drop 2 s else s
 
-hexByteString :: String -> ByteString -> ByteString
-hexByteString msg bs =
-  case BS16.decodeBase16 bs of
-    Right x -> x
-    _ -> internalError $ "invalid hex bytestring for " ++ msg
+hexByteString :: ByteString -> Maybe ByteString
+hexByteString bs =
+  case BS16.decodeBase16Untyped bs of
+    Right x -> pure x
+    Left _ -> Nothing
 
 hexText :: Text -> ByteString
 hexText t =
-  case BS16.decodeBase16 (T.encodeUtf8 (T.drop 2 t)) of
+  case BS16.decodeBase16Untyped (T.encodeUtf8 (T.drop 2 t)) of
     Right x -> x
     _ -> internalError $ "invalid hex bytestring " ++ show t
-
-bsToHex :: ByteString -> String
-bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
 
 showVal :: AbiValue -> Text
 showVal (AbiBytes _ bs) = formatBytes bs

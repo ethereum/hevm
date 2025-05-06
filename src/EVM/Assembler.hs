@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 {-|
 Module      : Assembler
 Description : Assembler for EVM opcodes used in the HEVM symbolic checker
@@ -70,12 +68,17 @@ assemble os = V.fromList $ concatMap go os
       OpChainid -> [LitByte 0x46]
       OpSelfbalance -> [LitByte 0x47]
       OpBaseFee -> [LitByte 0x48]
+      OpBlobhash -> [LitByte 0x49]
+      OpBlobBaseFee -> [LitByte 0x4A]
       OpPop -> [LitByte 0x50]
+      OpMcopy -> [LitByte 0x5e]
       OpMload -> [LitByte 0x51]
       OpMstore -> [LitByte 0x52]
       OpMstore8 -> [LitByte 0x53]
       OpSload -> [LitByte 0x54]
       OpSstore -> [LitByte 0x55]
+      OpTload -> [LitByte 0x5c]
+      OpTstore -> [LitByte 0x5d]
       OpJump -> [LitByte 0x56]
       OpJumpi -> [LitByte 0x57]
       OpPc -> [LitByte 0x58]

@@ -10,6 +10,7 @@ import Data.ByteString (ByteString)
 import Data.Maybe (isNothing)
 import Optics.Core
 import Control.Monad.ST (ST)
+import EVM.Effects (Config)
 
 ethrunAddress :: Addr
 ethrunAddress = Addr 0x00a329c0648769a73afac7f9381e08fb43dbea72
@@ -26,7 +27,7 @@ vmForEthrunCreation creationCode =
     , caller = LitAddr ethrunAddress
     , origin = LitAddr ethrunAddress
     , coinbase = LitAddr 0
-    , number = 0
+    , number = Lit 0
     , timestamp = Lit 0
     , blockGaslimit = 0
     , gasprice = 0
@@ -41,21 +42,23 @@ vmForEthrunCreation creationCode =
     , create = False
     , txAccessList = mempty
     , allowFFI = False
+    , freshAddresses = 0
+    , beaconRoot = 0
     }) <&> set (#env % #contracts % at (LitAddr ethrunAddress))
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
 
-exec :: VMOps t => EVM t s (VMResult t s)
-exec = do
+exec :: (VMOps t) => Config -> EVM t s (VMResult t s)
+exec conf = do
   vm <- get
   case vm.result of
-    Nothing -> exec1 >> exec
+    Nothing -> exec1 conf >> exec conf
     Just r -> pure r
 
-run :: VMOps t => EVM t s (VM t s)
-run = do
+run :: (VMOps t) => Config -> EVM t s (VM t s)
+run conf = do
   vm <- get
   case vm.result of
-    Nothing -> exec1 >> run
+    Nothing -> exec1 conf >> run conf
     Just _ -> pure vm
 
 execWhile :: (VM t s -> Bool) -> State (VM t s) Int

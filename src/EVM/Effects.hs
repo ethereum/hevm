@@ -14,28 +14,13 @@ only.
 [1]: https://www.fpcomplete.com/blog/readert-design-pattern/
 -}
 
-{-# Language RankNTypes #-}
-{-# Language FlexibleInstances #-}
-{-# Language KindSignatures #-}
-{-# Language DataKinds #-}
-{-# Language GADTs #-}
-{-# Language DerivingStrategies #-}
-{-# Language DuplicateRecordFields #-}
-{-# Language NoFieldSelectors #-}
-{-# Language ConstraintKinds #-}
-
 module EVM.Effects where
 
 import Control.Monad.Reader
 import Control.Monad.IO.Unlift
-import EVM.Dapp (DappInfo)
-import EVM.Types (VM(..))
-import Control.Monad.ST (RealWorld)
 import Data.Text (Text)
 import Data.Text.IO qualified as T
 import System.IO (stderr)
-import EVM.Format (showTraceTree)
-import EVM (traceForest)
 
 
 -- Abstract Effects --------------------------------------------------------------------------------
@@ -47,18 +32,22 @@ class Monad m => ReadConfig m where
   readConfig ::  m Config
 
 data Config = Config
-  { dumpQueries     :: Bool
-  , dumpExprs       :: Bool
-  , dumpEndStates   :: Bool
-  , debug           :: Bool
-  , abstRefineArith :: Bool
-  , abstRefineMem   :: Bool
-  , dumpTrace       :: Bool
-  , numCexFuzz      :: Integer
+  { dumpQueries      :: Bool
+  , dumpExprs        :: Bool
+  , dumpEndStates    :: Bool
+  , debug            :: Bool
+  , dumpTrace        :: Bool
+  , numCexFuzz       :: Integer
    -- Used to debug fuzzer in test.hs. It disables the SMT solver
    -- and uses the fuzzer ONLY to try to find a counterexample.
    -- Returns Unknown if the Cex cannot be found via fuzzing
-  , onlyCexFuzz     :: Bool
+  , onlyCexFuzz      :: Bool
+  , decomposeStorage :: Bool
+  , promiseNoReent   :: Bool
+  , maxBufSize       :: Int
+  , maxWidth         :: Int
+  , maxDepth         :: Maybe Int
+  , verb             :: Int
   }
   deriving (Show, Eq)
 
@@ -68,28 +57,21 @@ defaultConfig = Config
   , dumpExprs = False
   , dumpEndStates = False
   , debug = False
-  , abstRefineArith = False
-  , abstRefineMem   = False
   , dumpTrace = False
   , numCexFuzz = 10
   , onlyCexFuzz  = False
+  , decomposeStorage = True
+  , promiseNoReent = False
+  , maxBufSize = 64
+  , maxWidth = 100
+  , maxDepth = Nothing
+  , verb = 0
   }
 
 -- Write to the console
 class Monad m => TTY m where
   writeOutput :: Text -> m ()
   writeErr :: Text -> m ()
-
-writeTraceDapp :: App m => DappInfo -> VM t RealWorld -> m ()
-writeTraceDapp dapp vm = do
-  conf <- readConfig
-  liftIO $ when conf.dumpTrace $ T.writeFile "VM.trace" (showTraceTree dapp vm)
-
-writeTrace :: App m => VM t RealWorld -> m ()
-writeTrace vm = do
-  conf <- readConfig
-  liftIO $ when conf.dumpTrace $ writeFile "VM.trace" (show $ traceForest vm)
-
 
 -- IO Interpretation -------------------------------------------------------------------------------
 

@@ -12,11 +12,11 @@ import System.IO.Unsafe
 -- | Opaque representation of the C library's context struct.
 data EthjetContext
 
-foreign import ccall "ethjet_init"
+foreign import ccall unsafe "ethjet_init"
   ethjet_init :: IO (Ptr EthjetContext)
-foreign import ccall "&ethjet_free"
+foreign import ccall unsafe "&ethjet_free"
   ethjet_free :: FunPtr (Ptr EthjetContext -> IO ())
-foreign import ccall "ethjet"
+foreign import ccall unsafe "ethjet"
   ethjet
     :: Ptr EthjetContext     -- initialized context
     -> CInt                  -- operation

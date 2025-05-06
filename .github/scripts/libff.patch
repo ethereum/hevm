@@ -1,0 +1,215 @@
+diff --git a/libff/algebra/fields/bigint.tcc b/libff/algebra/fields/bigint.tcc
+index d78e94f..0b08431 100755
+--- a/libff/algebra/fields/bigint.tcc
++++ b/libff/algebra/fields/bigint.tcc
+@@ -25,39 +25,32 @@ bigint<n>::bigint(const unsigned long x) /// Initalize from a small integer
+ template<mp_size_t n>
+ bigint<n>::bigint(const char* s) /// Initialize from a string containing an integer in decimal notation
+ {
+-    size_t l = strlen(s);
+-    unsigned char* s_copy = new unsigned char[l];
+-
+-    for (size_t i = 0; i < l; ++i)
+-    {
+-        assert(s[i] >= '0' && s[i] <= '9');
+-        s_copy[i] = s[i] - '0';
+-    }
++    mpz_t k;
++    mpz_init(k);
+ 
+-    mp_size_t limbs_written = mpn_set_str(this->data, s_copy, l, 10);
+ #ifndef NDEBUG
+-    assert(limbs_written <= n);
+-#else
+-    UNUSED(limbs_written);
++    assert(mpz_size(k) <= n);
+ #endif
+ 
+-    delete[] s_copy;
++    mpz_set_str(k, s, 10);
++    for (size_t i = 0; i < n; i++)
++    {
++        data[i] = mpz_getlimbn(k, i);
++    }
++    mpz_clear(k);
+ }
+ 
+ template<mp_size_t n>
+ bigint<n>::bigint(const mpz_t r) /// Initialize from MPZ element
+ {
+-    mpz_t k;
+-    mpz_init_set(k, r);
++#ifndef NDEBUG
++    assert(mpz_size(r) <= n);
++#endif
+ 
+-    for (size_t i = 0; i < n; ++i)
++    for (size_t i = 0; i < n; i++)
+     {
+-        data[i] = mpz_get_ui(k);
+-        mpz_fdiv_q_2exp(k, k, GMP_NUMB_BITS);
++        data[i] = mpz_getlimbn(r, i);
+     }
+-
+-    assert(mpz_sgn(k) == 0);
+-    mpz_clear(k);
+ }
+ 
+ template<mp_size_t n>
+@@ -127,7 +120,10 @@ size_t bigint<n>::num_bits() const
+         }
+         else
+         {
+-            return ((i+1) * GMP_NUMB_BITS) - __builtin_clzl(x);
++            if(sizeof(x) == sizeof(unsigned long))
++                return ((i+1) * GMP_NUMB_BITS) - __builtin_clzl(x);
++            else
++                return ((i+1) * GMP_NUMB_BITS) - __builtin_clzll(x);
+         }
+     }
+     return 0;
+@@ -142,13 +138,10 @@ unsigned long bigint<n>::as_ulong() const
+ template<mp_size_t n>
+ void bigint<n>::to_mpz(mpz_t r) const
+ {
+-    mpz_set_ui(r, 0);
+-
+-    for (int i = n-1; i >= 0; --i)
+-    {
+-        mpz_mul_2exp(r, r, GMP_NUMB_BITS);
+-        mpz_add_ui(r, r, this->data[i]);
+-    }
++    mp_limb_t* xp;
++    xp = mpz_limbs_modify(r, n);
++    memcpy(xp, this->data, sizeof(this->data[0]) * n);
++    mpz_limbs_finish(r, n);
+ }
+ 
+ template<mp_size_t n>
+diff --git a/libff/algebra/fields/field_utils.tcc b/libff/algebra/fields/field_utils.tcc
+index 216caae..3ef2f29 100755
+--- a/libff/algebra/fields/field_utils.tcc
++++ b/libff/algebra/fields/field_utils.tcc
+@@ -67,7 +67,7 @@ std::vector<FieldT> pack_int_vector_into_field_element_vector(const std::vector<
+             const size_t word_or_0 = (word_index < v.size() ? v[word_index] : 0);
+             const size_t bit = (word_or_0 >> pos_in_word) & 1;
+ 
+-            b.data[j / GMP_NUMB_BITS] |= bit << (j % GMP_NUMB_BITS);
++            b.data[j / GMP_NUMB_BITS] |= ((unsigned long long)bit) << (j % GMP_NUMB_BITS);
+         }
+         result[i] = FieldT(b);
+     }
+@@ -88,7 +88,7 @@ std::vector<FieldT> pack_bit_vector_into_field_element_vector(const bit_vector &
+         bigint<FieldT::num_limbs> b;
+         for (size_t j = 0; j < chunk_bits; ++j)
+         {
+-            b.data[j / GMP_NUMB_BITS] |= ((i * chunk_bits + j) < v.size() && v[i * chunk_bits + j] ? 1ll : 0ll) << (j % GMP_NUMB_BITS);
++            b.data[j / GMP_NUMB_BITS] |= ((unsigned long long)((i * chunk_bits + j) < v.size() && v[i * chunk_bits + j] ? 1ll : 0ll)) << (j % GMP_NUMB_BITS);
+         }
+         result[i] = FieldT(b);
+     }
+diff --git a/libff/algebra/fields/fp.tcc b/libff/algebra/fields/fp.tcc
+index 2d919fa..b18a351 100755
+--- a/libff/algebra/fields/fp.tcc
++++ b/libff/algebra/fields/fp.tcc
+@@ -733,7 +733,7 @@ Fp_model<n, modulus> Fp_model<n,modulus>::random_element() /// returns random el
+             const std::size_t part = bitno/GMP_NUMB_BITS;
+             const std::size_t bit = bitno - (GMP_NUMB_BITS*part);
+ 
+-            r.mont_repr.data[part] &= ~(1ul<<bit);
++            r.mont_repr.data[part] &= ~(1ull<<bit);
+ 
+             bitno--;
+         }
+diff --git a/libff/algebra/fields/fp12_2over3over2.tcc b/libff/algebra/fields/fp12_2over3over2.tcc
+index 6220c4f..dfa2158 100755
+--- a/libff/algebra/fields/fp12_2over3over2.tcc
++++ b/libff/algebra/fields/fp12_2over3over2.tcc
+@@ -348,7 +348,7 @@ Fp12_2over3over2_model<n, modulus> Fp12_2over3over2_model<n,modulus>::cyclotomic
+                 res = res.cyclotomic_squared();
+             }
+ 
+-            if (exponent.data[i] & (1ul<<j))
++            if (exponent.data[i] & (1ull<<j))
+             {
+                 found_one = true;
+                 res = res * (*this);
+diff --git a/libff/algebra/scalar_multiplication/multiexp.tcc b/libff/algebra/scalar_multiplication/multiexp.tcc
+index 0c85e2b..03e11fc 100755
+--- a/libff/algebra/scalar_multiplication/multiexp.tcc
++++ b/libff/algebra/scalar_multiplication/multiexp.tcc
+@@ -347,7 +347,7 @@ T multi_exp_inner(
+         const size_t bbits = b.r.num_bits();
+         const size_t limit = (abits-bbits >= 20 ? 20 : abits-bbits);
+ 
+-        if (bbits < 1ul<<limit)
++        if (bbits < 1ull<<limit)
+         {
+             /*
+               In this case, exponentiating to the power of a is cheaper than
+@@ -553,9 +553,9 @@ window_table<T> get_window_table(const size_t scalar_size,
+                                  const size_t window,
+                                  const T &g)
+ {
+-    const size_t in_window = 1ul<<window;
++    const size_t in_window = 1ull<<window;
+     const size_t outerc = (scalar_size+window-1)/window;
+-    const size_t last_in_window = 1ul<<(scalar_size - (outerc-1)*window);
++    const size_t last_in_window = 1ull<<(scalar_size - (outerc-1)*window);
+ #ifdef DEBUG
+     if (!inhibit_profiling_info)
+     {
+diff --git a/libff/algebra/scalar_multiplication/wnaf.tcc b/libff/algebra/scalar_multiplication/wnaf.tcc
+index 5a8205e..ff63266 100755
+--- a/libff/algebra/scalar_multiplication/wnaf.tcc
++++ b/libff/algebra/scalar_multiplication/wnaf.tcc
+@@ -62,10 +62,10 @@ template<typename T, mp_size_t n>
+ T fixed_window_wnaf_exp(const size_t window_size, const T &base, const bigint<n> &scalar)
+ {
+     std::vector<long> naf = find_wnaf(window_size, scalar);
+-    std::vector<T> table(1ul<<(window_size-1));
++    std::vector<T> table(1ull<<(window_size-1));
+     T tmp = base;
+     T dbl = base.dbl();
+-    for (size_t i = 0; i < 1ul<<(window_size-1); ++i)
++    for (size_t i = 0; i < 1ull<<(window_size-1); ++i)
+     {
+         table[i] = tmp;
+         tmp = tmp + dbl;
+diff --git a/libff/common/rng.tcc b/libff/common/rng.tcc
+index 92eecea..5ac11db 100755
+--- a/libff/common/rng.tcc
++++ b/libff/common/rng.tcc
+@@ -57,7 +57,7 @@ FieldT SHA512_rng(const uint64_t idx)
+             const std::size_t part = bitno/GMP_NUMB_BITS;
+             const std::size_t bit = bitno - (GMP_NUMB_BITS*part);
+ 
+-            rval.data[part] &= ~(1ul<<bit);
++            rval.data[part] &= ~(1ull<<bit);
+ 
+             bitno--;
+         }
+diff --git a/libff/common/utils.cpp b/libff/common/utils.cpp
+index 38d230c..9c560a6 100755
+--- a/libff/common/utils.cpp
++++ b/libff/common/utils.cpp
+@@ -53,8 +53,8 @@ size_t to_twos_complement(int i, size_t w)
+ 
+ int from_twos_complement(size_t i, size_t w)
+ {
+-    assert(i < (1ul<<w));
+-    return (i < (1ul<<(w-1))) ? i : i - (1ul<<w);
++    assert(i < (1ull<<w));
++    return (i < (1ull<<(w-1))) ? i : i - (1ull<<w);
+ }
+ 
+ size_t bitreverse(size_t n, const size_t l)
+@@ -75,7 +75,7 @@ bit_vector int_list_to_bits(const std::initializer_list<unsigned long> &l, const
+     {
+         for (size_t j = 0; j < wordsize; ++j)
+         {
+-            res[i*wordsize + j] = (*(l.begin()+i) & (1ul<<(wordsize-1-j)));
++            res[i*wordsize + j] = (*(l.begin()+i) & (1ull<<(wordsize-1-j)));
+         }
+     }
+     return res;

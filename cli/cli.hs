@@ -3,16 +3,20 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Main where
 
 import Control.Monad (when, forM_, unless)
 import Control.Monad.ST (RealWorld, stToIO)
 import Control.Monad.IO.Unlift
+import Control.Exception (try, IOException)
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as BS
+import qualified Data.ByteString.Char8 as BC
 import Data.DoubleWord (Word256)
-import Data.List (intersperse)
-import Data.Maybe (fromMaybe, mapMaybe, fromJust)
+import Data.List (intersperse, intercalate)
+import Data.Maybe (fromMaybe, mapMaybe, fromJust, isNothing, isJust)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Version (showVersion)
@@ -21,11 +25,14 @@ import GHC.Conc (getNumProcessors)
 import Numeric.Natural (Natural)
 import Optics.Core ((&), set)
 import Witch (unsafeInto)
-import Options.Generic as Options
+import Options.Generic as OptionsGeneric
+import Options.Applicative as Options
 import Paths_hevm qualified as Paths
 import System.Directory (withCurrentDirectory, getCurrentDirectory, doesDirectoryExist, makeAbsolute)
 import System.FilePath ((</>))
 import System.Exit (exitFailure, exitWith, ExitCode(..))
+import Data.List.Split (splitOn)
+import Text.Read (readMaybe)
 
 import EVM (initialContract, abstractContract, makeVm)
 import EVM.ABI (Sig(..))
@@ -45,148 +52,239 @@ import EVM.Types hiding (word, Env, Symbolic)
 import EVM.Types qualified
 import EVM.UnitTest
 import EVM.Effects
+import EVM.Expr (maybeLitWordSimp, maybeLitAddrSimp)
 
--- This record defines the program's command-line options
--- automatically via the `optparse-generic` package.
-data Command w
-  = Symbolic -- Symbolically explore an abstract program, or specialized with specified env & calldata
-  -- vm opts
-      { code          :: w ::: Maybe ByteString <?> "Program bytecode"
-      , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
-      , address       :: w ::: Maybe Addr       <?> "Tx: address"
-      , caller        :: w ::: Maybe Addr       <?> "Tx: caller"
-      , origin        :: w ::: Maybe Addr       <?> "Tx: origin"
-      , coinbase      :: w ::: Maybe Addr       <?> "Block: coinbase"
-      , value         :: w ::: Maybe W256       <?> "Tx: Eth amount"
-      , nonce         :: w ::: Maybe Word64     <?> "Nonce of origin"
-      , gas           :: w ::: Maybe Word64     <?> "Tx: gas amount"
-      , number        :: w ::: Maybe W256       <?> "Block: number"
-      , timestamp     :: w ::: Maybe W256       <?> "Block: timestamp"
-      , basefee       :: w ::: Maybe W256       <?> "Block: base fee"
-      , priorityFee   :: w ::: Maybe W256       <?> "Tx: priority fee"
-      , gaslimit      :: w ::: Maybe Word64     <?> "Tx: gas limit"
-      , gasprice      :: w ::: Maybe W256       <?> "Tx: gas price"
-      , create        :: w ::: Bool             <?> "Tx: creation"
-      , maxcodesize   :: w ::: Maybe W256       <?> "Block: max code size"
-      , prevRandao    :: w ::: Maybe W256       <?> "Block: prevRandao"
-      , chainid       :: w ::: Maybe W256       <?> "Env: chainId"
-  -- remote state opts
-      , rpc           :: w ::: Maybe URL        <?> "Fetch state from a remote node"
-      , block         :: w ::: Maybe W256       <?> "Block state is be fetched from"
+data AssertionType = DSTest | Forge
+  deriving (Eq, Show, Read)
 
-  -- symbolic execution opts
-      , root          :: w ::: Maybe String       <?> "Path to  project root directory (default: . )"
-      , projectType   :: w ::: Maybe ProjectType  <?> "Is this a Foundry or DappTools project (default: Foundry)"
-      , initialStorage :: w ::: Maybe (InitialStorage) <?> "Starting state for storage: Empty, Abstract (default Abstract)"
-      , sig           :: w ::: Maybe Text         <?> "Signature of types to decode / encode"
-      , arg           :: w ::: [String]           <?> "Values to encode"
-      , getModels     :: w ::: Bool               <?> "Print example testcase for each execution path"
-      , showTree      :: w ::: Bool               <?> "Print branches explored in tree view"
-      , showReachableTree :: w ::: Bool           <?> "Print only reachable branches explored in tree view"
-      , smttimeout    :: w ::: Maybe Natural      <?> "Timeout given to SMT solver in seconds (default: 300)"
-      , maxIterations :: w ::: Maybe Integer      <?> "Number of times we may revisit a particular branching point"
-      , solver        :: w ::: Maybe Text         <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
-      , smtdebug      :: w ::: Bool               <?> "Print smt queries sent to the solver"
-      , debug         :: w ::: Bool               <?> "Debug printing of internal behaviour"
-      , trace         :: w ::: Bool               <?> "Dump trace"
-      , assertions    :: w ::: Maybe [Word256]    <?> "Comma separated list of solc panic codes to check for (default: user defined assertion violations only)"
-      , askSmtIterations :: w ::: Integer         <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
-      , numCexFuzz    :: w ::: Integer            <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
-      , numSolvers    :: w ::: Maybe Natural      <?> "Number of solver instances to use (default: number of cpu cores)"
-      , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
-      , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
-      , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
-      }
-  | Equivalence -- prove equivalence between two programs
-      { codeA         :: w ::: ByteString       <?> "Bytecode of the first program"
-      , codeB         :: w ::: ByteString       <?> "Bytecode of the second program"
-      , sig           :: w ::: Maybe Text       <?> "Signature of types to decode / encode"
-      , arg           :: w ::: [String]         <?> "Values to encode"
-      , calldata      :: w ::: Maybe ByteString <?> "Tx: calldata"
-      , smttimeout    :: w ::: Maybe Natural    <?> "Timeout given to SMT solver in seconds (default: 300)"
-      , maxIterations :: w ::: Maybe Integer    <?> "Number of times we may revisit a particular branching point"
-      , solver        :: w ::: Maybe Text       <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
-      , smtoutput     :: w ::: Bool             <?> "Print verbose smt output"
-      , smtdebug      :: w ::: Bool             <?> "Print smt queries sent to the solver"
-      , debug         :: w ::: Bool             <?> "Debug printing of internal behaviour"
-      , trace         :: w ::: Bool             <?> "Dump trace"
-      , askSmtIterations :: w ::: Integer       <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
-      , numCexFuzz    :: w ::: Integer          <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
-      , loopDetectionHeuristic :: w ::: LoopHeuristic <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
-      , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
-      , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
-      }
-  | Exec -- Execute a given program with specified env & calldata
-      { code        :: w ::: Maybe ByteString  <?> "Program bytecode"
-      , calldata    :: w ::: Maybe ByteString  <?> "Tx: calldata"
-      , address     :: w ::: Maybe Addr        <?> "Tx: address"
-      , caller      :: w ::: Maybe Addr        <?> "Tx: caller"
-      , origin      :: w ::: Maybe Addr        <?> "Tx: origin"
-      , coinbase    :: w ::: Maybe Addr        <?> "Block: coinbase"
-      , value       :: w ::: Maybe W256        <?> "Tx: Eth amount"
-      , nonce       :: w ::: Maybe Word64      <?> "Nonce of origin"
-      , gas         :: w ::: Maybe Word64      <?> "Tx: gas amount"
-      , number      :: w ::: Maybe W256        <?> "Block: number"
-      , timestamp   :: w ::: Maybe W256        <?> "Block: timestamp"
-      , basefee     :: w ::: Maybe W256        <?> "Block: base fee"
-      , priorityFee :: w ::: Maybe W256        <?> "Tx: priority fee"
-      , gaslimit    :: w ::: Maybe Word64      <?> "Tx: gas limit"
-      , gasprice    :: w ::: Maybe W256        <?> "Tx: gas price"
-      , create      :: w ::: Bool              <?> "Tx: creation"
-      , maxcodesize :: w ::: Maybe W256        <?> "Block: max code size"
-      , prevRandao  :: w ::: Maybe W256        <?> "Block: prevRandao"
-      , chainid     :: w ::: Maybe W256        <?> "Env: chainId"
-      , debug       :: w ::: Bool              <?> "Debug printing of internal behaviour"
-      , trace       :: w ::: Bool              <?> "Dump trace"
-      , rpc         :: w ::: Maybe URL         <?> "Fetch state from a remote node"
-      , block       :: w ::: Maybe W256        <?> "Block state is be fetched from"
-      , root        :: w ::: Maybe String      <?> "Path to  project root directory (default: . )"
-      , projectType :: w ::: Maybe ProjectType <?> "Is this a Foundry or DappTools project (default: Foundry)"
-      }
-  | Test -- Run DSTest unit tests
-      { root        :: w ::: Maybe String               <?> "Path to  project root directory (default: . )"
-      , projectType   :: w ::: Maybe ProjectType        <?> "Is this a Foundry or DappTools project (default: Foundry)"
-      , rpc           :: w ::: Maybe URL                <?> "Fetch state from a remote node"
-      , number        :: w ::: Maybe W256               <?> "Block: number"
-      , verbose       :: w ::: Maybe Int                <?> "Append call trace: {1} failures {2} all"
-      , coverage      :: w ::: Bool                     <?> "Coverage analysis"
-      , match         :: w ::: Maybe String             <?> "Test case filter - only run methods matching regex"
-      , solver        :: w ::: Maybe Text               <?> "Used SMT solver: z3 (default), cvc5, or bitwuzla"
-      , numSolvers    :: w ::: Maybe Natural            <?> "Number of solver instances to use (default: number of cpu cores)"
-      , smtdebug      :: w ::: Bool                     <?> "Print smt queries sent to the solver"
-      , debug         :: w ::: Bool                     <?> "Debug printing of internal behaviour"
-      , trace         :: w ::: Bool                     <?> "Dump trace"
-      , ffi           :: w ::: Bool                     <?> "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)"
-      , smttimeout    :: w ::: Maybe Natural            <?> "Timeout given to SMT solver in seconds (default: 300)"
-      , maxIterations :: w ::: Maybe Integer            <?> "Number of times we may revisit a particular branching point"
-      , loopDetectionHeuristic :: w ::: LoopHeuristic   <!> "StackBased" <?> "Which heuristic should be used to determine if we are in a loop: StackBased (default) or Naive"
-      , abstractArithmetic    :: w ::: Bool             <?> "Use abstraction-refinement for complicated arithmetic functions such as MulMod. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
-      , abstractMemory    :: w ::: Bool                      <?> "Use abstraction-refinement for Memory. This runs the solver first with abstraction turned on, and if it returns a potential counterexample, the counterexample is refined to make sure it is a counterexample for the actual (not the abstracted) problem"
-      , numCexFuzz    :: w ::: Integer                  <!> "3" <?> "Number of fuzzing tries to do to generate a counterexample (default: 3)"
-      , askSmtIterations :: w ::: Integer               <!> "1" <?> "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability (default: 1)"
-      }
+projectTypeParser :: Parser ProjectType
+projectTypeParser = option auto (long "project-type" <> showDefault <> value Foundry <> help "Is this a CombinedJSON or Foundry project")
+
+sigParser :: Parser (Maybe Text)
+sigParser = (optional $ strOption $ long "sig" <> help "Signature of types to decode/encode")
+
+argParser :: Parser [String]
+argParser = (many $ strOption $ long "arg" <> help "Value(s) to encode. Can be given multiple times, once for each argument")
+
+createParser :: Parser Bool
+createParser = switch $ long "create" <> help "Tx: creation"
+
+rpcParser :: Parser (Maybe URL)
+rpcParser = (optional $ strOption $ long "rpc" <> help "Fetch state from a remote node")
+
+data CommonOptions = CommonOptions
+  { askSmtIterations ::Integer
+  , loopDetectionHeuristic ::LoopHeuristic
+  , noDecompose   ::Bool
+  , solver        ::Text
+  , debug         ::Bool
+  , calldata      ::Maybe ByteString
+  , trace         ::Bool
+  , verb          ::Int
+  , root          ::Maybe String
+  , assertionType ::AssertionType
+  , solverThreads ::Natural
+  , smttimeout    ::Natural
+  , smtdebug      ::Bool
+  , numSolvers    ::Maybe Natural
+  , numCexFuzz    ::Integer
+  , maxIterations ::Integer
+  , promiseNoReent::Bool
+  , maxBufSize    ::Int
+  , maxWidth      ::Int
+  , maxDepth      ::Maybe Int
+  }
+
+commonOptions :: Parser CommonOptions
+commonOptions = CommonOptions
+  <$> option auto ( long "ask-smt-iterations" <> value 1 <>
+    help "Number of times we may revisit a particular branching point before we consult the smt solver to check reachability")
+  <*> option auto (long "loop-detection-heuristic" <> showDefault <> value StackBased <>
+    help "Which heuristic should be used to determine if we are in a loop: StackBased or Naive")
+  <*> (switch $ long "no-decompose"         <> help "Don't decompose storage slots into separate arrays")
+  <*> (strOption $ long "solver"            <> value "z3" <> help "Used SMT solver: z3, cvc5, or bitwuzla")
+  <*> (switch $ long "debug"                <> help "Debug printing of internal behaviour, and dump internal expressions")
+  <*> (optional $ strOption $ long "calldata" <> help "Tx: calldata")
+  <*> (switch $ long "trace"                <> help "Dump trace")
+  <*> (option auto $ long "verb"            <> showDefault <> value 1 <> help "Append call trace: {1} failures {2} all")
+  <*> (optional $ strOption $ long "root"   <> help "Path to  project root directory")
+  <*> (option auto $ long "assertion-type"  <> showDefault <> value Forge <> help "Assertions as per Forge or DSTest")
+  <*> (option auto $ long "solver-threads"  <> showDefault <> value 1 <> help "Number of threads for each solver instance. Only respected for Z3")
+  <*> (option auto $ long "smttimeout"      <> value 300 <> help "Timeout given to SMT solver in seconds")
+  <*> (switch $ long "smtdebug"             <> help "Print smt queries sent to the solver")
+  <*> (optional $ option auto $ long "num-solvers" <> help "Number of solver instances to use (default: number of cpu cores)")
+  <*> (option auto $ long "num-cex-fuzz"    <> showDefault <> value 3 <> help "Number of fuzzing tries to do to generate a counterexample")
+  <*> (option auto $ long "max-iterations"  <> showDefault <> value 5 <> help "Number of times we may revisit a particular branching point. For no bound, set -1")
+  <*> (switch $ long "promise-no-reent"     <> help "Promise no reentrancy is possible into the contract(s) being examined")
+  <*> (option auto $ long "max-buf-size"    <> value 64 <> help "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)")
+  <*> (option auto $ long "max-width"      <> showDefault <> value 100 <> help "Max number of concrete values to explore when encountering a symbolic value. This is a form of branch width limitation per symbolic value")
+  <*> (optional $ option auto $ long "max-depth" <> help "Limit maximum depth of branching during exploration (default: unlimited)")
+
+data CommonExecOptions = CommonExecOptions
+  { address       ::Maybe Addr
+  , caller        ::Maybe Addr
+  , origin        ::Maybe Addr
+  , coinbase      ::Maybe Addr
+  , value         ::Maybe W256
+  , nonce         ::Maybe Word64
+  , gas           ::Maybe Word64
+  , number        ::Maybe W256
+  , timestamp     ::Maybe W256
+  , basefee       ::Maybe W256
+  , priorityFee   ::Maybe W256
+  , gaslimit      ::Maybe Word64
+  , gasprice      ::Maybe W256
+  , maxcodesize   ::Maybe W256
+  , prevRandao    ::Maybe W256
+  , chainid       ::Maybe W256
+  , rpc           ::Maybe URL
+  , block         ::Maybe W256
+}
+
+commonExecOptions :: Parser CommonExecOptions
+commonExecOptions = CommonExecOptions
+  <$> (optional $ option auto $ long "address"       <> help "Tx: address")
+  <*> (optional $ option auto $ long "caller"        <> help "Tx: caller")
+  <*> (optional $ option auto $ long "origin"        <> help "Tx: origin")
+  <*> (optional $ option auto $ long "coinbase"      <> help "Block: coinbase")
+  <*> (optional $ option auto $ long "value"         <> help "Tx: Eth amount")
+  <*> (optional $ option auto $ long "nonce"         <> help "Nonce of origin")
+  <*> (optional $ option auto $ long "gas"           <> help "Tx: gas amount")
+  <*> (optional $ option auto $ long "number"        <> help "Block: number")
+  <*> (optional $ option auto $ long "timestamp"     <> help "Block: timestamp")
+  <*> (optional $ option auto $ long "basefee"       <> help "Block: base fee")
+  <*> (optional $ option auto $ long "priority-fee"  <> help "Tx: priority fee")
+  <*> (optional $ option auto $ long "gaslimit"      <> help "Tx: gas limit")
+  <*> (optional $ option auto $ long "gasprice"      <> help "Tx: gas price")
+  <*> (optional $ option auto $ long "maxcodesize"   <> help "Block: max code size")
+  <*> (optional $ option auto $ long "prev-randao"   <> help "Block: prevRandao")
+  <*> (optional $ option auto $ long "chainid"       <> help "Env: chainId")
+  <*> rpcParser
+  <*> (optional $ option auto $ long "block"         <> help "Block state is be fetched from")
+
+data CommonFileOptions = CommonFileOptions
+ { code        ::Maybe ByteString
+ , codeFile    ::Maybe String
+ }
+
+commonFileOptions :: Parser CommonFileOptions
+commonFileOptions = CommonFileOptions
+  <$> (optional $ strOption $ long "code" <> help "Program bytecode")
+  <*> (optional $ strOption $ long "code-file" <> help "Program bytecode in a file")
+
+data TestOptions = TestOptions
+  { projectType   ::ProjectType
+  , rpc           ::Maybe URL
+  , number        ::Maybe W256
+  , coverage      ::Bool
+  , match         ::Maybe String
+  , ffi           ::Bool
+  }
+
+testOptions :: Parser TestOptions
+testOptions = TestOptions
+  <$> projectTypeParser
+  <*> rpcParser
+  <*> (optional $ option auto $ long "number" <> help "Block: number")
+  <*> (switch $ long "coverage" <> help "Coverage analysis")
+  <*> (optional $ strOption $ long "match" <> help "Test case filter - only run methods matching regex")
+  <*> (switch $ long "ffi" <> help "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)")
+
+
+data EqOptions = EqOptions
+  { codeA         ::Maybe ByteString
+  , codeB         ::Maybe ByteString
+  , codeAFile     ::Maybe String
+  , codeBFile     ::Maybe String
+  , sig           ::Maybe Text
+  , arg           ::[String]
+  , create        ::Bool
+  }
+
+eqOptions :: Parser EqOptions
+eqOptions = EqOptions
+  <$> (optional $ strOption $ long "code-a"      <> help "Bytecode of the first program")
+  <*> (optional $ strOption $ long "code-b"      <> help "Bytecode of the second program")
+  <*> (optional $ strOption $ long "code-a-file" <> help "First program's bytecode in a file")
+  <*> (optional $ strOption $ long "code-b-file" <> help "Second program's bytecode in a file")
+  <*> sigParser
+  <*> argParser
+  <*> createParser
+
+data SymbolicOptions = SymbolicOptions
+  { projectType       ::ProjectType
+  , initialStorage    ::Maybe InitialStorage
+  , getModels         ::Bool
+  , showTree          ::Bool
+  , showReachableTree ::Bool
+  , assertions        ::Maybe String
+  , sig               ::Maybe Text
+  , arg               ::[String]
+  , create            ::Bool
+  }
+
+symbolicOptions :: Parser SymbolicOptions
+symbolicOptions = SymbolicOptions
+  <$> projectTypeParser
+  <*> (optional $ option auto $ long "initial-storage" <> help "Starting state for storage: Empty, Abstract (default Abstract)")
+  <*> (switch $ long "get-models" <> help "Print example testcase for each execution path")
+  <*> (switch $ long "show-tree" <> help "Print branches explored in tree view")
+  <*> (switch $ long "show-reachable-tree" <> showDefault <> help "Print only reachable branches explored in tree view")
+  <*> (optional $ strOption $ long "assertions" <> help "Comma separated list of solc panic codes to check for (default: user defined assertion violations only)")
+  <*> sigParser
+  <*> argParser
+  <*> createParser
+
+data ExecOptions = ExecOptions
+  { projectType   ::ProjectType
+  , create :: Bool
+  }
+execOptions :: Parser ExecOptions
+execOptions = ExecOptions
+  <$> projectTypeParser
+  <*> createParser
+
+-- Combined options data type
+data Command
+  = Symbolic   CommonFileOptions SymbolicOptions CommonExecOptions CommonOptions
+  | Equal      EqOptions CommonOptions
+  | Test       TestOptions  CommonOptions
+  | Exec       CommonFileOptions ExecOptions CommonExecOptions CommonOptions
   | Version
 
-  deriving (Options.Generic)
+-- Parser for the subcommands
+commandParser :: Parser Command
+commandParser = subparser
+  ( command "test"
+      (info (Test <$> testOptions <*> commonOptions <**> helper)
+        (progDesc "Prove Foundry unit tests marked with `prove_`"
+        <> footer "For more help: https://hevm.dev/std-test-tutorial.html" ))
+  <> command "equivalence"
+      (info (Equal <$> eqOptions <*> commonOptions <**> helper)
+        (progDesc "Prove equivalence between two programs"
+        <> footer "For more help: https://hevm.dev/equivalence-checking-tutorial.html" ))
+  <> command "symbolic"
+      (info (Symbolic <$> commonFileOptions <*> symbolicOptions <*> commonExecOptions <*> commonOptions <**> helper)
+        (progDesc "Symbolically explore an abstract program"
+        <> footer "For more help, see: https://hevm.dev/symbolic-execution-tutorial.html" ))
+  <> command "exec"
+      (info (Exec <$> commonFileOptions <*> execOptions <*> commonExecOptions <*> commonOptions <**> helper)
+        (progDesc "Concretely execute a given program"
+        <> footer "For more help, see https://hevm.dev/exec.html" ))
+  <> command "version"
+      (info (pure Version)
+        (progDesc "Show the version of the tool"))
+  )
 
 type URL = Text
 
-
--- For some reason haskell can't derive a
--- parseField instance for (Text, ByteString)
-instance Options.ParseField (Text, ByteString)
-
-deriving instance Options.ParseField Word256
-deriving instance Options.ParseField [Word256]
-
-instance Options.ParseRecord (Command Options.Wrapped) where
-  parseRecord =
-    Options.parseRecordWithModifiers Options.lispCaseModifiers
+deriving instance OptionsGeneric.ParseField Word256
+deriving instance OptionsGeneric.ParseField [Word256]
 
 data InitialStorage
   = Empty
   | Abstract
-  deriving (Show, Read, Options.ParseField)
+  deriving (Show, Read, OptionsGeneric.ParseField)
 
 getFullVersion :: [Char]
 getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
@@ -198,173 +296,252 @@ getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
 
 main :: IO ()
 main = do
-  cmd <- Options.unwrapRecord "hevm -- Ethereum evaluator"
-  let env = Env { config = defaultConfig
-    { dumpQueries = cmd.smtdebug
-    , debug = cmd.debug
-    , numCexFuzz = cmd.numCexFuzz
-    , abstRefineMem = cmd.abstractMemory
-    , abstRefineArith = cmd.abstractArithmetic
-    , dumpTrace = cmd.trace
-    } }
+  cmd <- execParser $ info (commandParser <**> helper)
+    ( Options.fullDesc
+    <> progDesc "hevm, a symbolic and concrete EVM bytecode execution framework"
+    <> footer "See https://hevm.dev for more information"
+    )
+
   case cmd of
-    Version {} ->putStrLn getFullVersion
-    Symbolic {} -> do
-      root <- getRoot cmd
-      withCurrentDirectory root $ runEnv env $ assert cmd
-    Equivalence {} -> runEnv env $ equivalence cmd
-    Exec {} -> runEnv env $ launchExec cmd
-    Test {} -> do
-      root <- getRoot cmd
-      solver <- getSolver cmd
+    Symbolic cFileOpts symbOpts cExecOpts cOpts -> do
+      env <- makeEnv cOpts
+      root <- getRoot cOpts
+      withCurrentDirectory root $ runEnv env $ assert cFileOpts symbOpts cExecOpts cOpts
+    Equal eqOpts cOpts -> do
+      env <- makeEnv cOpts
+      runEnv env $ equivalence eqOpts cOpts
+    Test testOpts cOpts -> do
+      env <- makeEnv cOpts
+      root <- getRoot cOpts
+      solver <- getSolver cOpts.solver
       cores <- liftIO $ unsafeInto <$> getNumProcessors
-      let solverCount = fromMaybe cores cmd.numSolvers
-      runEnv env $ withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
-        buildOut <- liftIO $ readBuildOutput root (getProjectType cmd)
+      let solverCount = fromMaybe cores cOpts.numSolvers
+      runEnv env $ withSolvers solver solverCount cOpts.solverThreads (Just cOpts.smttimeout) $ \solvers -> do
+        buildOut <- readBuildOutput root testOpts.projectType
         case buildOut of
           Left e -> liftIO $ do
             putStrLn $ "Error: " <> e
             exitFailure
           Right out -> do
             -- TODO: which functions here actually require a BuildOutput, and which can take it as a Maybe?
-            testOpts <- liftIO $ unitTestOptions cmd solvers (Just out)
-            res <- unitTest testOpts out.contracts
-            liftIO $ unless res exitFailure
+            unitTestOpts <- liftIO $ unitTestOptions testOpts cOpts solvers (Just out)
+            res <- unitTest unitTestOpts out.contracts
+            liftIO $ unless (uncurry (&&) res) exitFailure
+    Exec cFileOpts execOpts cExecOpts cOpts-> do
+      env <- makeEnv cOpts
+      runEnv env $ launchExec cFileOpts execOpts cExecOpts cOpts
+    Version {} ->putStrLn getFullVersion
+  where
+    makeEnv :: CommonOptions -> IO Env
+    makeEnv cOpts = do
+      when (cOpts.maxBufSize > 64) $ do
+        putStrLn "Error: maxBufSize must be less than or equal to 64. That limits buffers to a size of 2^64, which is more than enough for practical purposes"
+        exitFailure
+      when (cOpts.maxBufSize < 0) $ do
+        putStrLn "Error: maxBufSize must be at least 0. Negative values do not make sense. A value of zero means at most 1 byte long buffers"
+        exitFailure
+      pure Env { config = defaultConfig
+        { dumpQueries = cOpts.smtdebug
+        , debug = cOpts.debug
+        , dumpEndStates = cOpts.debug
+        , dumpExprs = cOpts.debug
+        , numCexFuzz = cOpts.numCexFuzz
+        , dumpTrace = cOpts.trace
+        , decomposeStorage = Prelude.not cOpts.noDecompose
+        , promiseNoReent = cOpts.promiseNoReent
+        , maxBufSize = cOpts.maxBufSize
+        , maxWidth = cOpts.maxWidth
+        , maxDepth = cOpts.maxDepth
+        , verb = cOpts.verb
+        } }
 
-equivalence :: App m => Command Options.Unwrapped -> m ()
-equivalence cmd = do
-  let bytecodeA = hexByteString "--code" . strip0x $ cmd.codeA
-      bytecodeB = hexByteString "--code" . strip0x $ cmd.codeB
-      veriOpts = VeriOpts { simp = True
-                          , maxIter = cmd.maxIterations
-                          , askSmtIters = cmd.askSmtIterations
-                          , loopHeuristic = cmd.loopDetectionHeuristic
+
+getCode :: Maybe String -> Maybe ByteString -> IO (Maybe ByteString)
+getCode fname code = do
+  when (isJust fname && isJust code) $ do
+    putStrLn "Error: Cannot provide both a file and code"
+    exitFailure
+  case fname of
+    Nothing -> pure $ fmap strip code
+    Just f -> do
+      result <- try (BS.readFile f) :: IO (Either IOException BS.ByteString)
+      case result of
+        Left e -> do
+          putStrLn $ "Error reading file: " <> show e
+          exitFailure
+        Right content -> do
+          pure $ Just $ strip (BS.toStrict content)
+  where
+    strip = BC.filter (\c -> c /= ' ' && c /= '\n' && c /= '\r' && c /= '\t' && c /= '"')
+
+equivalence :: App m => EqOptions -> CommonOptions -> m ()
+equivalence eqOpts cOpts = do
+  bytecodeA' <- liftIO $ getCode eqOpts.codeAFile eqOpts.codeA
+  bytecodeB' <- liftIO $ getCode eqOpts.codeBFile eqOpts.codeB
+  let bytecodeA = decipher bytecodeA'
+  let bytecodeB = decipher bytecodeB'
+  when (isNothing bytecodeA) $ liftIO $ do
+    putStrLn "Error: invalid or no bytecode for program A. Provide a valid one with --code-a or --code-a-file"
+    exitFailure
+  when (isNothing bytecodeB) $ liftIO $ do
+    putStrLn "Error: invalid or no bytecode for program B. Provide a valid one with --code-b or --code-b-file"
+    exitFailure
+  let veriOpts = VeriOpts { simp = True
+                          , iterConf = IterConfig {
+                            maxIter = parseMaxIters cOpts.maxIterations
+                            , askSmtIters = cOpts.askSmtIterations
+                            , loopHeuristic = cOpts.loopDetectionHeuristic
+                            }
                           , rpcInfo = Nothing
                           }
-  calldata <- liftIO $ buildCalldata cmd
-  solver <- liftIO $ getSolver cmd
-  withSolvers solver 3 Nothing $ \s -> do
-    res <- equivalenceCheck s bytecodeA bytecodeB veriOpts calldata
-    case any isCex res of
+  calldata <- buildCalldata cOpts eqOpts.sig eqOpts.arg
+  solver <- liftIO $ getSolver cOpts.solver
+  cores <- liftIO $ unsafeInto <$> getNumProcessors
+  let solverCount = fromMaybe cores cOpts.numSolvers
+  withSolvers solver solverCount cOpts.solverThreads (Just cOpts.smttimeout) $ \s -> do
+    eq <- equivalenceCheck s (fromJust bytecodeA) (fromJust bytecodeB) veriOpts calldata eqOpts.create
+    let anyIssues =  not (null eq.partials) || any (isUnknown . fst) eq.res  || any (isError . fst) eq.res
+    liftIO $ case (any (isCex . fst) eq.res, anyIssues) of
+      (False, False) -> putStrLn "   \x1b[32m[PASS]\x1b[0m Contracts behave equivalently"
+      (True, _)      -> putStrLn "   \x1b[31m[FAIL]\x1b[0m Contracts do not behave equivalently"
+      (_, True)      -> putStrLn "   \x1b[31m[FAIL]\x1b[0m Contracts may not behave equivalently"
+    liftIO $ printWarnings eq.partials (map fst eq.res) "the contracts under test"
+    case any (isCex . fst) eq.res of
       False -> liftIO $ do
+        when anyIssues exitFailure
         putStrLn "No discrepancies found"
-        when (any isTimeout res) $ do
-          putStrLn "But timeout(s) occurred"
-          exitFailure
       True -> liftIO $ do
-        let cexs = mapMaybe getCex res
+        let cexes = mapMaybe getCexP eq.res
         T.putStrLn . T.unlines $
           [ "Not equivalent. The following inputs result in differing behaviours:"
           , "" , "-----", ""
-          ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap (formatCex (AbstractBuf "txdata") Nothing) cexs)
+          ] <> (intersperse (T.unlines [ "", "-----" ]) $ fmap formatCexes cexes)
         exitFailure
+  where
+    decipher = maybe Nothing (hexByteString . strip0x)
+    getCexP :: (ProofResult a b, String) -> Maybe (a, String)
+    getCexP (Cex c, reason) = Just (c, reason)
+    getCexP _ = Nothing
+    formatCexes (cex, reason) = formatCex (AbstractBuf "txdata") Nothing cex <> "Difference: " <> T.pack reason
 
-getSolver :: Command Options.Unwrapped -> IO Solver
-getSolver cmd = case cmd.solver of
-                  Nothing -> pure Z3
-                  Just s -> case T.unpack s of
-                              "z3" -> pure Z3
-                              "cvc5" -> pure CVC5
-                              "bitwuzla" -> pure Bitwuzla
-                              input -> do
-                                putStrLn $ "unrecognised solver: " <> input
-                                exitFailure
+getSolver :: Text -> IO Solver
+getSolver s = case T.unpack s of
+  "z3" -> pure Z3
+  "cvc5" -> pure CVC5
+  "bitwuzla" -> pure Bitwuzla
+  input -> do
+    putStrLn $ "unrecognised solver: " <> input
+    exitFailure
 
-getSrcInfo :: Command Options.Unwrapped -> IO DappInfo
-getSrcInfo cmd = do
-  root <- getRoot cmd
-  withCurrentDirectory root $ do
-    outExists <- doesDirectoryExist (root </> "out")
+getSrcInfo :: App m => ExecOptions -> CommonOptions -> m DappInfo
+getSrcInfo execOpts cOpts = do
+  root <- liftIO $ getRoot cOpts
+  conf <- readConfig
+  liftIO $ withCurrentDirectory root $ do
+    outExists <- doesDirectoryExist (root System.FilePath.</> "out")
     if outExists
     then do
-      buildOutput <- readBuildOutput root (getProjectType cmd)
+      buildOutput <- runEnv Env {config = conf} $ readBuildOutput root execOpts.projectType
       case buildOutput of
         Left _ -> pure emptyDapp
         Right o -> pure $ dappInfo root o
     else pure emptyDapp
 
-getProjectType :: Command Options.Unwrapped -> ProjectType
-getProjectType cmd = fromMaybe Foundry cmd.projectType
+getRoot :: CommonOptions -> IO FilePath
+getRoot cmd = maybe getCurrentDirectory makeAbsolute cmd.root
 
-getRoot :: Command Options.Unwrapped -> IO FilePath
-getRoot cmd = maybe getCurrentDirectory makeAbsolute (cmd.root)
-
+parseMaxIters :: Integer -> Maybe Integer
+parseMaxIters num = if num < 0 then Nothing else Just num
 
 -- | Builds a buffer representing calldata based on the given cli arguments
-buildCalldata :: Command Options.Unwrapped -> IO (Expr Buf, [Prop])
-buildCalldata cmd = case (cmd.calldata, cmd.sig) of
+buildCalldata :: App m => CommonOptions -> Maybe Text -> [String] -> m (Expr Buf, [Prop])
+buildCalldata cOpts sig arg = case (cOpts.calldata, sig) of
   -- fully abstract calldata
-  (Nothing, Nothing) -> pure $ mkCalldata Nothing []
+  (Nothing, Nothing) -> mkCalldata Nothing []
   -- fully concrete calldata
-  (Just c, Nothing) -> pure (ConcreteBuf (hexByteString "bytes" . strip0x $ c), [])
+  (Just c, Nothing) -> do
+    let val = hexByteString $ strip0x c
+    if (isNothing val) then liftIO $ do
+      putStrLn $ "Error, invalid calldata: " <>  show c
+      exitFailure
+    else pure (ConcreteBuf (fromJust val), [])
   -- calldata according to given abi with possible specializations from the `arg` list
   (Nothing, Just sig') -> do
-    method' <- functionAbi sig'
-    pure $ mkCalldata (Just (Sig method'.methodSignature (snd <$> method'.inputs))) cmd.arg
+    method' <- liftIO $ functionAbi sig'
+    mkCalldata (Just (Sig method'.methodSignature (snd <$> method'.inputs))) arg
   -- both args provided
-  (_, _) -> do
+  (_, _) -> liftIO $ do
     putStrLn "incompatible options provided: --calldata and --sig"
     exitFailure
 
 
 -- If function signatures are known, they should always be given for best results.
-assert :: App m => Command Options.Unwrapped -> m ()
-assert cmd = do
-  let block'  = maybe Fetch.Latest Fetch.BlockNumber cmd.block
-      rpcinfo = (,) block' <$> cmd.rpc
-  calldata <- liftIO $ buildCalldata cmd
-  preState <- liftIO $ symvmFromCommand cmd calldata
-  let errCodes = fromMaybe defaultPanicCodes cmd.assertions
+assert :: App m => CommonFileOptions -> SymbolicOptions -> CommonExecOptions -> CommonOptions -> m ()
+assert cFileOpts sOpts cExecOpts cOpts = do
+  let block' = maybe Fetch.Latest Fetch.BlockNumber cExecOpts.block
+      rpcinfo = (,) block' <$> cExecOpts.rpc
+  calldata <- buildCalldata cOpts sOpts.sig sOpts.arg
+  preState <- liftIO $ symvmFromCommand cExecOpts sOpts cFileOpts calldata
+  errCodes <- case sOpts.assertions of
+    Nothing -> pure defaultPanicCodes
+    Just s -> case (mapM readMaybe $ splitOn "," s) of
+      Nothing -> liftIO $ do
+        putStrLn $ "Error: invalid assertion codes: " <> s
+        exitFailure
+      Just codes -> pure codes
+  when (cOpts.verb > 0) $ liftIO $ putStrLn $ "Using assertion code(s): " <> intercalate "," (map show errCodes)
   cores <- liftIO $ unsafeInto <$> getNumProcessors
-  let solverCount = fromMaybe cores cmd.numSolvers
-  solver <- liftIO $ getSolver cmd
-  withSolvers solver solverCount cmd.smttimeout $ \solvers -> do
-    let opts = VeriOpts { simp = True
-                        , maxIter = cmd.maxIterations
-                        , askSmtIters = cmd.askSmtIterations
-                        , loopHeuristic = cmd.loopDetectionHeuristic
+  let solverCount = fromMaybe cores cOpts.numSolvers
+  solver <- liftIO $ getSolver cOpts.solver
+  withSolvers solver solverCount cOpts.solverThreads (Just cOpts.smttimeout) $ \solvers -> do
+    let veriOpts = VeriOpts { simp = True
+                        , iterConf = IterConfig {
+                          maxIter = parseMaxIters cOpts.maxIterations
+                          , askSmtIters = cOpts.askSmtIterations
+                          , loopHeuristic = cOpts.loopDetectionHeuristic
+                          }
                         , rpcInfo = rpcinfo
     }
-    (expr, res) <- verify solvers opts preState (Just $ checkAssertions errCodes)
+    (expr, res) <- verify solvers veriOpts preState (Just $ checkAssertions errCodes)
     case res of
-      [Qed _] -> do
+      [Qed] -> do
         liftIO $ putStrLn "\nQED: No reachable property violations discovered\n"
-        showExtras solvers cmd calldata expr
+        showExtras solvers sOpts calldata expr
       _ -> do
         let cexs = snd <$> mapMaybe getCex res
-            timeouts = mapMaybe getTimeout res
+            smtUnknowns = snd <$> mapMaybe getUnknown res
             counterexamples
               | null cexs = []
               | otherwise =
                  [ ""
-                 , "Discovered the following counterexamples:"
+                 , ("Discovered the following " <> (T.pack $ show (length cexs)) <> " counterexample(s):")
                  , ""
                  ] <> fmap (formatCex (fst calldata) Nothing) cexs
             unknowns
-              | null timeouts = []
+              | null smtUnknowns = []
               | otherwise =
                  [ ""
-                 , "Could not determine reachability of the following end states:"
+                 , "Could not determine reachability of the following end state(s):"
                  , ""
-                 ] <> fmap (formatExpr) timeouts
+                 ] <> fmap (formatExpr) smtUnknowns
         liftIO $ T.putStrLn $ T.unlines (counterexamples <> unknowns)
-        showExtras solvers cmd calldata expr
-        liftIO $ exitFailure
+        showExtras solvers sOpts calldata expr
+        liftIO exitFailure
 
-showExtras :: App m => SolverGroup -> Command Options.Unwrapped -> (Expr Buf, [Prop]) -> Expr End -> m ()
-showExtras solvers cmd calldata expr = do
-  when cmd.showTree $ liftIO $ do
+showExtras :: App m => SolverGroup ->SymbolicOptions -> (Expr Buf, [Prop]) -> Expr End -> m ()
+showExtras solvers sOpts calldata expr = do
+  when sOpts.showTree $ liftIO $ do
     putStrLn "=== Expression ===\n"
     T.putStrLn $ formatExpr expr
     putStrLn ""
-  when cmd.showReachableTree $ do
+  when sOpts.showReachableTree $ do
     reached <- reachable solvers expr
     liftIO $ do
-      putStrLn "=== Reachable Expression ===\n"
+      putStrLn "=== Potentially Reachable Expression ===\n"
       T.putStrLn (formatExpr . snd $ reached)
       putStrLn ""
-  when cmd.getModels $ do
-    liftIO $ putStrLn $ "=== Models for " <> show (Expr.numBranches expr) <> " branches ===\n"
+  when sOpts.getModels $ do
+    liftIO $ putStrLn $ "=== Models for " <> show (Expr.numBranches expr) <> " branches ==="
     ms <- produceModels solvers expr
     liftIO $ forM_ ms (showModel (fst calldata))
 
@@ -374,16 +551,16 @@ isTestOrLib file = T.isSuffixOf ".t.sol" file || areAnyPrefixOf ["src/test/", "s
 areAnyPrefixOf :: [Text] -> Text -> Bool
 areAnyPrefixOf prefixes t = any (flip T.isPrefixOf t) prefixes
 
-launchExec :: App m => Command Options.Unwrapped -> m ()
-launchExec cmd = do
-  dapp <- liftIO $ getSrcInfo cmd
-  vm <- liftIO $ vmFromCommand cmd
+launchExec :: App m => CommonFileOptions -> ExecOptions -> CommonExecOptions -> CommonOptions -> m ()
+launchExec cFileOpts execOpts cExecOpts cOpts = do
+  dapp <- getSrcInfo execOpts cOpts
+  vm <- liftIO $ vmFromCommand cOpts cExecOpts cFileOpts execOpts
   let
-    block = maybe Fetch.Latest Fetch.BlockNumber cmd.block
-    rpcinfo = (,) block <$> cmd.rpc
+    block = maybe Fetch.Latest Fetch.BlockNumber cExecOpts.block
+    rpcinfo = (,) block <$> cExecOpts.rpc
 
   -- TODO: we shouldn't need solvers to execute this code
-  withSolvers Z3 0 Nothing $ \solvers -> do
+  withSolvers Z3 0 1 Nothing $ \solvers -> do
     vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcinfo) vm EVM.Stepper.runFully
     writeTraceDapp dapp vm'
     case vm'.result of
@@ -405,12 +582,14 @@ launchExec cmd = do
         internalError "no EVM result"
 
 -- | Creates a (concrete) VM from command line options
-vmFromCommand :: Command Options.Unwrapped -> IO (VM Concrete RealWorld)
-vmFromCommand cmd = do
-  (miner,ts,baseFee,blockNum,prevRan) <- case cmd.rpc of
-    Nothing -> pure (LitAddr 0,Lit 0,0,0,0)
+vmFromCommand :: CommonOptions -> CommonExecOptions -> CommonFileOptions -> ExecOptions -> IO (VM Concrete RealWorld)
+vmFromCommand cOpts cExecOpts cFileOpts execOpts= do
+  (miner,ts,baseFee,blockNum,prevRan) <- case cExecOpts.rpc of
+    Nothing -> pure (LitAddr 0,Lit 0,0,Lit 0,0)
     Just url -> Fetch.fetchBlockFrom block url >>= \case
-      Nothing -> error "Error: Could not fetch block"
+      Nothing -> do
+        putStrLn $ "Error, Could not fetch block" <> show block <> " from URL: " <> show url
+        exitFailure
       Just Block{..} -> pure ( coinbase
                              , timestamp
                              , baseFee
@@ -418,58 +597,75 @@ vmFromCommand cmd = do
                              , prevRandao
                              )
 
-  contract <- case (cmd.rpc, cmd.address, cmd.code) of
+  codeWrapped <- getCode cFileOpts.codeFile cFileOpts.code
+  contract <- case (cExecOpts.rpc, cExecOpts.address, codeWrapped) of
     (Just url, Just addr', Just c) -> do
-      Fetch.fetchContractFrom block url addr' >>= \case
-        Nothing ->
-          error $ "Error: contract not found: " <> show address
-        Just contract ->
-          -- if both code and url is given,
-          -- fetch the contract and overwrite the code
-          pure $
-            initialContract  (mkCode $ hexByteString "--code" $ strip0x c)
-              & set #balance  (contract.balance)
-              & set #nonce    (contract.nonce)
-              & set #external (contract.external)
+      let code = hexByteString $ strip0x c
+      if isNothing code then do
+        putStrLn $ "Error, invalid code: " <> show c
+        exitFailure
+      else
+        Fetch.fetchContractFrom block url addr' >>= \case
+          Nothing -> do
+            putStrLn $ "Error: contract not found: " <> show address
+            exitFailure
+          Just contract ->
+            -- if both code and url is given,
+            -- fetch the contract and overwrite the code
+            pure $
+              initialContract  (mkCode $ fromJust code)
+                & set #balance  (contract.balance)
+                & set #nonce    (contract.nonce)
+                & set #external (contract.external)
 
     (Just url, Just addr', Nothing) ->
       Fetch.fetchContractFrom block url addr' >>= \case
-        Nothing ->
-          error $ "Error: contract not found: " <> show address
+        Nothing -> do
+          putStrLn $ "Error, contract not found: " <> show address
+          exitFailure
         Just contract -> pure contract
 
-    (_, _, Just c)  ->
-      pure $
-        initialContract (mkCode $ hexByteString "--code" $ strip0x c)
+    (_, _, Just c)  -> do
+      let code = hexByteString $ strip0x c
+      if (isNothing code) then do
+        putStrLn $ "Error, invalid code: " <> show c
+        exitFailure
+      else pure $ initialContract (mkCode $ fromJust code)
 
-    (_, _, Nothing) ->
-      error "Error: must provide at least (rpc + address) or code"
+    (_, _, Nothing) -> do
+      putStrLn "Error, must provide at least (rpc + address) or code"
+      exitFailure
 
-  let ts' = case maybeLitWord ts of
+  let ts' = case maybeLitWordSimp ts of
         Just t -> t
         Nothing -> internalError "unexpected symbolic timestamp when executing vm test"
 
-  vm <- stToIO $ vm0 baseFee miner ts' blockNum prevRan contract
-  pure $ EVM.Transaction.initTx vm
-    where
-        block   = maybe Fetch.Latest Fetch.BlockNumber cmd.block
-        value   = word (.value) 0
+  if (isNothing bsCallData) then do
+    putStrLn $ "Error, invalid calldata: " <> show calldata
+    exitFailure
+  else do
+    vm <- stToIO $ vm0 baseFee miner ts' blockNum prevRan contract
+    pure $ EVM.Transaction.initTx vm
+  where
+        bsCallData = bytes (.calldata) (pure "")
+        block   = maybe Fetch.Latest Fetch.BlockNumber cExecOpts.block
+        val     = word (.value) 0
         caller  = addr (.caller) (LitAddr 0)
         origin  = addr (.origin) (LitAddr 0)
-        calldata = ConcreteBuf $ bytes (.calldata) ""
-        decipher = hexByteString "bytes" . strip0x
-        mkCode bs = if cmd.create
+        calldata = ConcreteBuf $ fromJust bsCallData
+        decipher = hexByteString . strip0x
+        mkCode bs = if execOpts.create
                     then InitCode bs mempty
                     else RuntimeCode (ConcreteRuntimeCode bs)
-        address = if cmd.create
-                  then addr (.address) (Concrete.createAddress (fromJust $ maybeLitAddr origin) (W64 $ word64 (.nonce) 0))
+        address = if execOpts.create
+                  then addr (.address) (Concrete.createAddress (fromJust $ maybeLitAddrSimp origin) (W64 $ word64 (.nonce) 0))
                   else addr (.address) (LitAddr 0xacab)
 
         vm0 baseFee miner ts blockNum prevRan c = makeVm $ VMOpts
           { contract       = c
           , otherContracts = []
           , calldata       = (calldata, [])
-          , value          = Lit value
+          , value          = Lit val
           , address        = address
           , caller         = caller
           , origin         = origin
@@ -478,7 +674,7 @@ vmFromCommand cmd = do
           , priorityFee    = word (.priorityFee) 0
           , gaslimit       = word64 (.gaslimit) 0xffffffffffffffff
           , coinbase       = addr (.coinbase) miner
-          , number         = word (.number) blockNum
+          , number         = maybe blockNum Lit cExecOpts.number
           , timestamp      = Lit $ word (.timestamp) ts
           , blockGaslimit  = word64 (.gaslimit) 0xffffffffffffffff
           , gasprice       = word (.gasprice) 0
@@ -486,22 +682,26 @@ vmFromCommand cmd = do
           , prevRandao     = word (.prevRandao) prevRan
           , schedule       = feeSchedule
           , chainId        = word (.chainid) 1
-          , create         = (.create) cmd
+          , create         = (.create) execOpts
           , baseState      = EmptyBase
           , txAccessList   = mempty -- TODO: support me soon
           , allowFFI       = False
+          , freshAddresses = 0
+          , beaconRoot     = 0
           }
-        word f def = fromMaybe def (f cmd)
-        word64 f def = fromMaybe def (f cmd)
-        addr f def = maybe def LitAddr (f cmd)
-        bytes f def = maybe def decipher (f cmd)
+        word f def = fromMaybe def (f cExecOpts)
+        word64 f def = fromMaybe def (f cExecOpts)
+        addr f def = maybe def LitAddr (f cExecOpts)
+        bytes f def = maybe def decipher (f cOpts)
 
-symvmFromCommand :: Command Options.Unwrapped -> (Expr Buf, [Prop]) -> IO (VM EVM.Types.Symbolic RealWorld)
-symvmFromCommand cmd calldata = do
-  (miner,blockNum,baseFee,prevRan) <- case cmd.rpc of
-    Nothing -> pure (SymAddr "miner",0,0,0)
+symvmFromCommand :: CommonExecOptions -> SymbolicOptions -> CommonFileOptions -> (Expr Buf, [Prop]) -> IO (VM EVM.Types.Symbolic RealWorld)
+symvmFromCommand cExecOpts sOpts cFileOpts calldata = do
+  (miner,blockNum,baseFee,prevRan) <- case cExecOpts.rpc of
+    Nothing -> pure (SymAddr "miner",Lit 0,0,0)
     Just url -> Fetch.fetchBlockFrom block url >>= \case
-      Nothing -> error "Error: Could not fetch block"
+      Nothing -> do
+        putStrLn $ "Error, Could not fetch block" <> show block <> " from URL: " <> show url
+        exitFailure
       Just Block{..} -> pure ( coinbase
                              , number
                              , baseFee
@@ -509,44 +709,59 @@ symvmFromCommand cmd calldata = do
                              )
 
   let
-    caller = SymAddr "caller"
-    ts = maybe Timestamp Lit cmd.timestamp
-    callvalue = maybe TxValue Lit cmd.value
+    caller = maybe (SymAddr "caller") LitAddr cExecOpts.caller
+    ts = maybe Timestamp Lit cExecOpts.timestamp
+    callvalue = maybe TxValue Lit cExecOpts.value
+    storageBase = maybe AbstractBase parseInitialStorage (sOpts.initialStorage)
 
-  contract <- case (cmd.rpc, cmd.address, cmd.code) of
+  codeWrapped <- getCode cFileOpts.codeFile cFileOpts.code
+  contract <- case (cExecOpts.rpc, cExecOpts.address, codeWrapped) of
     (Just url, Just addr', _) ->
       Fetch.fetchContractFrom block url addr' >>= \case
-        Nothing ->
-          error "Error: contract not found."
-        Just contract' -> pure contract''
-          where
-            contract'' = case cmd.code of
-              Nothing -> contract'
+        Nothing -> do
+          putStrLn "Error, contract not found."
+          exitFailure
+        Just contract' -> case codeWrapped of
+              Nothing -> pure contract'
               -- if both code and url is given,
               -- fetch the contract and overwrite the code
-              Just c -> initialContract (mkCode $ decipher c)
+              Just c -> do
+                let c' = decipher c
+                if isNothing c' then do
+                  putStrLn $ "Error, invalid code: " <> show c
+                  exitFailure
+                else pure $ do
+                  initialContract (mkCode $ fromJust c')
                         & set #origStorage (contract'.origStorage)
                         & set #balance     (contract'.balance)
                         & set #nonce       (contract'.nonce)
                         & set #external    (contract'.external)
 
-    (_, _, Just c)  ->
-      pure ((`abstractContract` address) . mkCode $ decipher c)
-    (_, _, Nothing) ->
-      error "Error: must provide at least (rpc + address) or code"
+    (_, _, Just c)  -> do
+      let c' = decipher c
+      if isNothing c' then do
+        putStrLn $ "Error, invalid code: " <> show c
+        exitFailure
+      else case storageBase of
+        EmptyBase -> pure (initialContract . mkCode $ fromJust c')
+        AbstractBase -> pure ((`abstractContract` address) . mkCode $ fromJust c')
 
-  vm <- stToIO $ vm0 baseFee miner ts blockNum prevRan calldata callvalue caller contract
+    (_, _, Nothing) -> do
+      putStrLn "Error, must provide at least (rpc + address) or code"
+      exitFailure
+
+  vm <- stToIO $ vm0 baseFee miner ts blockNum prevRan calldata callvalue caller contract storageBase
   pure $ EVM.Transaction.initTx vm
 
   where
-    decipher = hexByteString "bytes" . strip0x
-    block = maybe Fetch.Latest Fetch.BlockNumber cmd.block
+    decipher = hexByteString . strip0x
+    block = maybe Fetch.Latest Fetch.BlockNumber cExecOpts.block
     origin = eaddr (.origin) (SymAddr "origin")
-    mkCode bs = if cmd.create
+    mkCode bs = if sOpts.create
                    then InitCode bs mempty
                    else RuntimeCode (ConcreteRuntimeCode bs)
     address = eaddr (.address) (SymAddr "entrypoint")
-    vm0 baseFee miner ts blockNum prevRan cd callvalue caller c = makeVm $ VMOpts
+    vm0 baseFee miner ts blockNum prevRan cd callvalue caller c baseState = makeVm $ VMOpts
       { contract       = c
       , otherContracts = []
       , calldata       = cd
@@ -559,7 +774,7 @@ symvmFromCommand cmd calldata = do
       , baseFee        = baseFee
       , priorityFee    = word (.priorityFee) 0
       , coinbase       = eaddr (.coinbase) miner
-      , number         = word (.number) blockNum
+      , number         = maybe blockNum Lit cExecOpts.number
       , timestamp      = ts
       , blockGaslimit  = word64 (.gaslimit) 0xffffffffffffffff
       , gasprice       = word (.gasprice) 0
@@ -567,46 +782,43 @@ symvmFromCommand cmd calldata = do
       , prevRandao     = word (.prevRandao) prevRan
       , schedule       = feeSchedule
       , chainId        = word (.chainid) 1
-      , create         = (.create) cmd
-      , baseState      = maybe AbstractBase parseInitialStorage (cmd.initialStorage)
+      , create         = (.create) sOpts
+      , baseState      = baseState
       , txAccessList   = mempty
       , allowFFI       = False
+      , freshAddresses = 0
+      , beaconRoot     = 0
       }
-    word f def = fromMaybe def (f cmd)
-    word64 f def = fromMaybe def (f cmd)
-    eaddr f def = maybe def LitAddr (f cmd)
+    word f def = fromMaybe def (f cExecOpts)
+    word64 f def = fromMaybe def (f cExecOpts)
+    eaddr f def = maybe def LitAddr (f cExecOpts)
 
-unitTestOptions :: Command Options.Unwrapped -> SolverGroup -> Maybe BuildOutput -> IO (UnitTestOptions RealWorld)
-unitTestOptions cmd solvers buildOutput = do
-  root <- getRoot cmd
+unitTestOptions :: TestOptions -> CommonOptions -> SolverGroup -> Maybe BuildOutput -> IO (UnitTestOptions RealWorld)
+unitTestOptions testOpts cOpts solvers buildOutput = do
+  root <- getRoot cOpts
   let srcInfo = maybe emptyDapp (dappInfo root) buildOutput
-
-  let rpcinfo = case (cmd.number, cmd.rpc) of
+  let rpcinfo = case (testOpts.number, testOpts.rpc) of
           (Just block, Just url) -> Just (Fetch.BlockNumber block, url)
           (Nothing, Just url) -> Just (Fetch.Latest, url)
           _ -> Nothing
   params <- paramsFromRpc rpcinfo
-
-  let
-    testn = params.number
-    block' = if 0 == testn
+  let testn = params.number
+      block' = if 0 == testn
        then Fetch.Latest
        else Fetch.BlockNumber testn
-
   pure UnitTestOptions
     { solvers = solvers
-    , rpcInfo = case cmd.rpc of
+    , rpcInfo = case testOpts.rpc of
          Just url -> Just (block', url)
          Nothing  -> Nothing
-    , maxIter = cmd.maxIterations
-    , askSmtIters = cmd.askSmtIterations
-    , smtTimeout = cmd.smttimeout
-    , solver = cmd.solver
-    , verbose = cmd.verbose
-    , match = T.pack $ fromMaybe ".*" cmd.match
+    , maxIter = parseMaxIters cOpts.maxIterations
+    , askSmtIters = cOpts.askSmtIterations
+    , smtTimeout = Just cOpts.smttimeout
+    , match = T.pack $ fromMaybe ".*" testOpts.match
     , testParams = params
     , dapp = srcInfo
-    , ffiAllowed = cmd.ffi
+    , ffiAllowed = testOpts.ffi
+    , checkFailBit = cOpts.assertionType == DSTest
     }
 parseInitialStorage :: InitialStorage -> BaseState
 parseInitialStorage Empty = EmptyBase

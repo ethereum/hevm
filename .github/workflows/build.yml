@@ -13,30 +13,39 @@ jobs:
   nix-build:
     strategy:
       matrix:
-        runtime: [ linux-x64, linux-arm64, osx-x64, osx-arm64 ]
+        runtime: [ linux-x64, osx-x64, osx-arm64 ]
         include:
         - runtime: linux-x64
           os: ubuntu-latest
 
-        - runtime: linux-arm64
-          os: ubuntu-latest
-
         - runtime: osx-x64
-          os: macOS-latest
+          os: macos-13
 
         - runtime: osx-arm64
-          os: macOS-latest
+          os: macos-14
 
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: nixbuild/nix-quick-install-action@v30
+      - name: Nix cache
+        id: cache
+        uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-build-${{ matrix.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          purge: true
+          purge-prefixes: nix-build-${{ matrix.os }}-
+          purge-created: 0
+          purge-primary-key: never
+          gc-max-store-size: 1G
       - name: build hevm
         run: nix build .#ci -L
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: hevm-${{ matrix.runtime }}
           path: result/bin/hevm
@@ -52,23 +61,55 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: nixbuild/nix-quick-install-action@v30
+      - name: Nix cache
+        id: cache
+        uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-tests-${{ matrix.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          purge: true
+          purge-prefixes: nix-tests-${{ matrix.os }}-
+          purge-created: 0
+          purge-primary-key: never
+          gc-max-store-size: 1G
+      # cabal complains if we don't do this...
+      - name: cabal update
+        run: nix develop --command bash -c "cabal update"
       # can't be run in nix build due to network usage
       - name: run rpc tests
-        run: nix-shell --pure --command "cabal run rpc-tests"
+        run: nix develop --command bash -c "cabal --active-repositories=:none run rpc-tests"
       # if we run this in nix build we often get killed due to oom in ci
       - name: run ethereum tests
-        run: nix-shell --pure --command "cabal run ethereum-tests"
+        run: nix develop --command bash -c "cabal --active-repositories=:none run ethereum-tests"
+      # if we run this in nix build, it complains about running in a sandbox
+      - name: run cli tests
+        run: nix develop --command bash -c "cabal --active-repositories=:none run cli-test"
+
+  build-windows-bitwuzla:
+    name: bitwuzla-build (win64 target)
+    uses: ./.github/workflows/bitwuzla-windows.yml
 
   build-windows:
     name: build (windows-latest)
+    needs: [build-windows-bitwuzla]
     runs-on: windows-latest
     defaults:
       run:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          # Pinning to a version in June 2024, so in case a build fails, our CI doesn't fail
+          version: nightly-5ac78a9cd4b94dc53d1fe5e0f42372b28b5a7559
+      - run: |
+          echo FOUNDRY_PATH="$(dirname "$(which forge)")" >> "$GITHUB_ENV"
+        shell: bash
       - uses: msys2/setup-msys2@v2
         with:
           msystem: CLANG64
@@ -80,6 +121,7 @@ jobs:
             openssl-devel
             git
             unzip
+            bash
           pacboy: >-
             cmake:p
             ninja:p
@@ -88,21 +130,26 @@ jobs:
             autotools:p
             gmp:p
             openssl:p
-      - uses: haskell-actions/setup@v2.6.1
+            z3:p
+            go:p
+      - uses: haskell-actions/setup@v2.7.7
         id: setup
         with:
-          ghc-version: '9.4.7'
+          ghc-version: '9.6.5'
 
       - name: Extract GHC & Cabal paths
         run: |
           HASKELL_PATHS="$(cygpath -u "$GHC_PATH"):$(cygpath -u "$CABAL_PATH")"
+          HASKELL_MINGW_PATH="$(cygpath -u "$GHC_PATH/../mingw")"
           echo "HASKELL_PATHS=$HASKELL_PATHS" >> "$GITHUB_ENV"
+          echo "HASKELL_MINGW_PATH=$HASKELL_MINGW_PATH" >> "$GITHUB_ENV"
         env:
           GHC_PATH: ${{ steps.setup.outputs.ghc-path }}
           CABAL_PATH: ${{ steps.setup.outputs.cabal-path }}
 
       - name: build and install c dependencies
         run: |
+          export PATH="$HASKELL_MINGW_PATH/bin:$PATH"
           echo "::group::Installing libsecp256k1"
           ./.github/scripts/install-libsecp256k1.sh
           echo "::endgroup::"
@@ -112,7 +159,12 @@ jobs:
       - name: Configure the build
         run: |
           export PATH="$HASKELL_PATHS:$PATH"
-          cabal configure --disable-tests --disable-benchmarks --disable-documentation
+          cabal configure --disable-documentation --enable-executable-static --enable-executable-stripping \
+            --extra-include-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/x86_64-w64-mingw32/include")" --extra-lib-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/x86_64-w64-mingw32/lib")" \
+            --extra-include-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/include")" --extra-lib-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/lib")" \
+            --extra-include-dirs="D:/a/_temp/msys64/clang64/include" --extra-lib-dirs="D:/a/_temp/msys64/clang64/lib" \
+            --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib" \
+            --ghc-options=-pgml="$(cygpath -m "$HASKELL_MINGW_PATH/bin/clang.exe")" -fstatic-secp256k1 --constraint="zlib +bundled-c-zlib"
           cabal build --dry-run
           # The last step generates dist-newstyle/cache/plan.json for the cache key.
 
@@ -133,24 +185,105 @@ jobs:
 
       # Cache dependencies already, so that we do not have to rebuild them should the subsequent steps fail.
       - name: Save cached dependencies
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v4
         # Caches are immutable, trying to save with the same key would error.
         if: ${{ steps.cache.outputs.cache-primary-key != steps.cache.outputs.cache-matched-key }}
         with:
           path: ${{ steps.setup.outputs.cabal-store }}
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
-      - name: build hevm library
+      - name: build hevm
         run: |
           export PATH="$HASKELL_PATHS:$PATH"
-          cabal build --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib" \
-                      --extra-include-dirs="D:/a/_temp/msys64/clang64/include" --extra-lib-dirs="D:/a/_temp/msys64/clang64/lib"
+          cabal build
+          mkdir result && cp "$(cabal list-bin hevm)" result/hevm.exe
+          strip result/hevm.exe
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hevm-windows-x64
+          path: result/hevm.exe
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ethereum/solidity
+          ref: 8a97fa7a1db1ec509221ead6fea6802c684ee887
+          path: ethereum-solidity
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ethereum/tests
+          ref: v13
+          path: ethereum-tests
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: foundry-rs/forge-std
+          path: forge-std
+          persist-credentials: false
+
+      - name: download bitwuzla
+        uses: actions/download-artifact@v4
+        with:
+          name: bitwuzla-win64
+          path: bitwuzla-win64
+
+      - name: prepare test dependencies
+        run: |
+          # bitwuzla
+          echo BITWUZLA_PATH="$PWD/bitwuzla-win64/bin" >> "$GITHUB_ENV"
+          # evm
+          go install github.com/ethereum/go-ethereum/cmd/evm@latest
+          echo EVM_PATH="$(cygpath -u "$(go env GOPATH)/bin")" >> "$GITHUB_ENV"
+          # cvc5
+          curl --retry 5 -fsSL https://github.com/cvc5/cvc5/releases/download/cvc5-1.1.2/cvc5-Win64-static.zip -o cvc5.zip
+          unzip cvc5.zip && rm cvc5.zip
+          echo CVC5_PATH="$PWD/cvc5-Win64-static/bin" >> "$GITHUB_ENV"
+          # solc
+          mkdir solc
+          curl --retry 5 -fsSL https://github.com/ethereum/solidity/releases/download/v0.8.26/solc-windows.exe -o solc/solc.exe
+          echo DAPP_SOLC="$PWD/solc/solc.exe" >> "$GITHUB_ENV"
+          echo DAPP_SOLC_PATH="$PWD/solc/" >> "$GITHUB_ENV"
+          # repos
+          echo HEVM_SOLIDITY_REPO="$PWD/ethereum-solidity" >> "$GITHUB_ENV"
+          echo HEVM_ETHEREUM_TESTS_REPO="$PWD/ethereum-tests" >> "$GITHUB_ENV"
+          echo HEVM_FORGE_STD_REPO="$PWD/forge-std" >> "$GITHUB_ENV"
+
+      - name: run tests
+        run: |
+          export PATH="$EVM_PATH:$CVC5_PATH:$BITWUZLA_PATH:$DAPP_SOLC_PATH:$FOUNDRY_PATH:$HASKELL_PATHS:$PATH"
+          cabal run test
+
+      - name: run rpc tests
+        run: |
+          export PATH="$BITWUZLA_PATH:$FOUNDRY_PATH:$HASKELL_PATHS:$PATH"
+          cabal run rpc-tests
+
+      - name: run ethereum tests
+        run: |
+          export PATH="$HASKELL_PATHS:$PATH"
+          cabal run ethereum-tests
 
   cabal-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: nixbuild/nix-quick-install-action@v30
+      - name: Nix cache
+        id: cache
+        uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-cabal-check-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          purge: true
+          purge-prefixes: nix-cabal-check-
+          purge-created: 0
+          purge-primary-key: never
+          gc-max-store-size: 1G
       - name: run cabal check
         run: nix develop -c cabal check --verbose=3
