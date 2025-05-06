@@ -3,6 +3,7 @@
 
 module Main where
 
+import Control.Monad.State.Strict (liftIO)
 import Data.Aeson qualified as JSON
 import Data.ByteString.UTF8 as BSU 
 import Data.ByteString qualified as ByteString
@@ -13,6 +14,7 @@ import Data.Maybe
 import Data.String.Here
 import EVM
 import EVM.ABI
+import EVM.Effects (App, runApp)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Sign
@@ -34,10 +36,10 @@ import EVM.FeeSchedule (feeSchedule)
 -- benchmark hevm and EVM tool on the folder called benchmarks
 -- using tasty-bench
 
-vmFromByteString :: ByteString -> IO (VM RealWorld)
-vmFromByteString = vmFromRawByteString . hexByteString "bytes"
+vmFromByteString :: App m => ByteString -> m (VM Concrete RealWorld)
+vmFromByteString = liftIO . vmFromRawByteString . fromJust . hexByteString
 
-vmFromRawByteString :: ByteString -> IO (VM RealWorld)
+vmFromRawByteString :: ByteString -> IO (VM Concrete RealWorld)
 vmFromRawByteString bs =
   bs
     & ConcreteRuntimeCode
@@ -47,10 +49,10 @@ vmFromRawByteString bs =
     & stToIO
     & fmap EVM.Transaction.initTx
 
-vm0 :: Contract -> ST s (VM s)
+vm0 :: Contract -> ST s (VM Concrete s)
 vm0 c = makeVm $ vm0Opts c
 
-vm0Opts :: Contract -> VMOpts
+vm0Opts :: Contract -> VMOpts Concrete
 vm0Opts c =
   VMOpts
     { contract = c,
@@ -65,7 +67,7 @@ vm0Opts c =
       priorityFee = 0,
       gaslimit = 0xffffffffffffffff,
       coinbase = LitAddr 0,
-      number = 0,
+      number = Lit 0,
       timestamp = Lit 0,
       blockGaslimit = 0xffffffffffffffff,
       gasprice = 0,
@@ -75,17 +77,20 @@ vm0Opts c =
       chainId = 1,
       create = False,
       txAccessList = mempty, -- TODO: support me soon
-      allowFFI = False
+      allowFFI = False,
+      otherContracts = [],
+      freshAddresses = 0,
+      beaconRoot = 0
     }
 
 benchCode :: ByteString -> Benchmark
-benchCode bs = bench "interpret" $ nfIO $ do
+benchCode bs = bench "interpret" $ nfIO $ runApp $ do
   vm <- vmFromByteString bs
   isRight <$> Stepper.interpret (Fetch.zero 0 Nothing) vm Stepper.execFully
 
 benchFile :: FilePath -> Benchmark
-benchFile path = bench (show path) $ nfIO $ do
-  bs <- strip0x <$> ByteString.readFile path
+benchFile path = bench (show path) $ nfIO $ runApp $ do
+  bs <- liftIO $ strip0x <$> ByteString.readFile path
   vm <- vmFromByteString bs
   isRight <$> Stepper.interpret (Fetch.zero 0 Nothing) vm Stepper.execFully
 
@@ -94,7 +99,7 @@ benchFolder :: FilePath -> IO [Benchmark]
 benchFolder path = map benchFile <$> Find.find Find.always (Find.extension Find.==? ".bin") path
 
 -- why do we need this?
-vmOptsToTestVMParams :: VMOpts -> TestVMParams
+vmOptsToTestVMParams :: VMOpts Concrete -> TestVMParams
 vmOptsToTestVMParams v =
   TestVMParams
     { address = v.address,
@@ -108,7 +113,9 @@ vmOptsToTestVMParams v =
         Lit x -> x
         _ -> 0,
       coinbase = v.coinbase,
-      number = v.number,
+      number = case v.number of
+        Lit x -> x
+        _ -> 0,
       timestamp = case v.timestamp of
         Lit x -> x
         _ -> 0,
@@ -119,20 +126,20 @@ vmOptsToTestVMParams v =
       chainId = v.chainId
     }
 
-callMainForBytecode :: ByteString -> IO (Either EvmError (Expr 'Buf))
+callMainForBytecode :: App m => ByteString -> m (Either EvmError (Expr 'Buf))
 callMainForBytecode bs = do
-  vm <- vmFromRawByteString bs
+  vm <- liftIO $ vmFromRawByteString bs
   Stepper.interpret (Fetch.zero 0 Nothing) vm (Stepper.evm (abiCall (vmOptsToTestVMParams (vm0Opts (initialContract (RuntimeCode (ConcreteRuntimeCode bs))))) (Left ("main()", emptyAbi))) >> Stepper.execFully)
 
 benchMain :: (String, ByteString) -> Benchmark
-benchMain (name, bs) = bench name $ nfIO $ (\x -> if isRight x then () else error "failed") <$> callMainForBytecode bs
+benchMain (name, bs) = bench name $ nfIO $ runApp $ (\x -> if isRight x then () else error "failed") <$> callMainForBytecode bs
 
 benchBytecodes :: [ByteString] -> [Benchmark]
-benchBytecodes = map (\x -> bench "bytecode" $ nfIO (do
-                                                       vm <- vmFromRawByteString x
+benchBytecodes = map (\x -> bench "bytecode" $ nfIO $ runApp (do
+                                                       vm <- liftIO $ vmFromRawByteString x
                                                        isRight <$> (Stepper.interpret (Fetch.zero 0 Nothing) vm Stepper.execFully)))
 
-callMain :: TestVMParams -> EVM s ()
+callMain :: TestVMParams -> EVM Concrete s ()
 callMain params = makeTxCall params (ConcreteBuf (abiMethod "main()" emptyAbi), [])
 
 evmSetup' :: [Word8] -> ByteString -> (EVM.Transaction.Transaction, EVMToolEnv, EVMToolAlloc, Addr, Addr, Integer)
@@ -166,13 +173,15 @@ evmSetup' contr txData = (txn, evmEnv, contrAlloc, fromAddress, toAddress, sk)
       EVMToolEnv
         { coinbase = 0xff,
           timestamp = Lit 0x3e8,
-          number = 0x0,
-          prevRandao = 0x0,
+          number = Lit 0x0,
           gasLimit = 0xffffffffffffff,
           baseFee = 0x0,
           maxCodeSize = 0xfffff,
           schedule = feeSchedule,
-          blockHashes = blockHashesDefault
+          blockHashes = blockHashesDefault,
+          withdrawals = mempty,
+          currentRandom = 42,
+          parentBeaconBlockRoot = 5
         }
     sk = 0xDC38EE117CAE37750EB1ECC5CFD3DE8E85963B481B93E732C5D0CB66EE6B0C9D
     fromAddress :: Addr
@@ -182,7 +191,7 @@ evmSetup' contr txData = (txn, evmEnv, contrAlloc, fromAddress, toAddress, sk)
 
 runGethOnFile :: FilePath -> IO Benchmark
 runGethOnFile path = do
-  bs <- hexByteString "bytes" . strip0x <$> ByteString.readFile path
+  bs <- fromJust . hexByteString . strip0x <$> ByteString.readFile path
   let contr = ByteString.unpack bs
   let (txn, evmEnv, contrAlloc, fromAddress, toAddress, sk) = evmSetup' contr mempty
       txs = [EVM.Transaction.sign sk txn]
@@ -263,7 +272,7 @@ simple_loop n = do
             }
           }
         |]
-  fmap fromJust (solcRuntime "A" src)
+  fmap fromJust (runApp $ solcRuntime "A" src)
 
 -- Computes prime numbers and stores them up to n.
 primes :: Int -> IO ByteString
@@ -297,7 +306,7 @@ primes n = do
             }
           }
         |]
-  fmap fromJust (solcRuntime "A" src)
+  fmap fromJust (runApp $ solcRuntime "A" src)
 
 -- Program that repeatedly hashes a value
 hashes :: Int -> IO ByteString
@@ -313,7 +322,7 @@ hashes n = do
             }
           }
         |]
-  fmap fromJust (solcRuntime "A" src)
+  fmap fromJust (runApp $ solcRuntime "A" src)
 
 -- Program that repeatedly hashes a value and stores it in a map
 hashmem :: Int -> IO ByteString
@@ -332,7 +341,7 @@ hashmem n = do
             }
           }
         |]
-  fmap fromJust (solcRuntime "A" src)
+  fmap fromJust (runApp $ solcRuntime "A" src)
 
 balanceTransfer :: Int -> IO ByteString
 balanceTransfer n = do
@@ -347,7 +356,7 @@ balanceTransfer n = do
             }
           }
         |]
-  fmap fromJust (solcRuntime "A" src)
+  fmap fromJust (runApp $ solcRuntime "A" src)
 
 funcCall :: Int -> IO ByteString
 funcCall n = do
@@ -365,7 +374,7 @@ funcCall n = do
             }
           }
         |]
-  fmap fromJust (solcRuntime "A" src)
+  fmap fromJust (runApp $ solcRuntime "A" src)
 
 -- creates n contracts
 contractCreation :: Int -> IO ByteString
@@ -382,7 +391,7 @@ contractCreation n = do
             }
           }
         |]
-  fmap fromJust (solcRuntime "A" src)
+  fmap fromJust (runApp $ solcRuntime "A" src)
 
 contractCreationMem :: Int -> IO ByteString
 contractCreationMem n = do
@@ -398,4 +407,4 @@ contractCreationMem n = do
             }
           }
         |]
-  fmap fromJust (solcRuntime "A" src)
+  fmap fromJust (runApp $ solcRuntime "A" src)
