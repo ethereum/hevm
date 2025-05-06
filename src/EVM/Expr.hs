@@ -535,7 +535,7 @@ toList buf = case bufLength buf of
 
 fromList :: V.Vector (Expr Byte) -> Expr Buf
 fromList bs = case all isLitByte bs of
-  True -> ConcreteBuf . BS.pack . V.toList . V.mapMaybe maybeLitByteSimp $ bs
+  True -> ConcreteBuf . vectorToByteString . VS.convert $ V.map getLitByte bs
   -- we want to minimize the size of the resulting expression, so we do two passes:
   --   1. write all concrete bytes to some base buffer
   --   2. write all symbolic writes on top of this buffer
@@ -543,16 +543,20 @@ fromList bs = case all isLitByte bs of
   -- runs in O(2n) time, and has pretty minimal allocation & copy overhead in
   -- the concrete part (a single preallocated vec, with no copies)
   False -> V.ifoldl' applySymWrites (ConcreteBuf concreteBytes) bs
-    where
-      concreteBytes :: ByteString
-      concreteBytes = vectorToByteString $ VS.generate (V.length bs) (\idx ->
-        case bs V.! idx of
-          LitByte b -> b
-          _ -> 0)
+  where
+    getLitByte :: (Expr Byte) -> Word8
+    getLitByte (LitByte w) = w
+    getLitByte _ = internalError "Impossible!"
 
-      applySymWrites :: Expr Buf -> Int -> Expr Byte -> Expr Buf
-      applySymWrites buf _ (LitByte _) = buf
-      applySymWrites buf idx by = WriteByte (Lit $ unsafeInto idx) by buf
+    concreteBytes :: ByteString
+    concreteBytes = vectorToByteString $ VS.generate (V.length bs) (\idx ->
+      case bs V.! idx of
+        LitByte b -> b
+        _ -> 0)
+
+    applySymWrites :: Expr Buf -> Int -> Expr Byte -> Expr Buf
+    applySymWrites buf _ (LitByte _) = buf
+    applySymWrites buf idx by = WriteByte (Lit $ unsafeInto idx) by buf
 
 instance Semigroup (Expr Buf) where
   (ConcreteBuf a) <> (ConcreteBuf b) = ConcreteBuf $ a <> b

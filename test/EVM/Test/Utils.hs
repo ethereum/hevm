@@ -1,6 +1,7 @@
 module EVM.Test.Utils where
 
 import Data.Text (Text)
+import Data.List (isInfixOf)
 import GHC.IO.Exception (IOErrorType(..))
 import GHC.Natural
 import Paths_hevm qualified as Paths
@@ -36,7 +37,7 @@ runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectT
         internalError $ "Error compiling test file " <> show testFile <> " in directory "
           <> show root <> " using project type " <> show projectType
       Right bo@(BuildOutput contracts _) -> do
-        withSolvers Z3 3 1 timeout $ \solvers -> do
+        withSolvers Bitwuzla 3 1 timeout $ \solvers -> do
           opts <- liftIO $ testOpts solvers root (Just bo) match maxIter ffiAllowed rpcinfo
           unitTest opts contracts
 
@@ -90,7 +91,7 @@ compile _ root src = do
   (res,out,err) <- liftIO $ readProcessWithExitCode "forge" ["build", "--ast", "--root", root] ""
   case res of
     ExitFailure _ -> pure . Left $ "compilation failed: " <> "exit code: " <> show res <> "\n\nstdout:\n" <> out <> "\n\nstderr:\n" <> err
-    ExitSuccess -> readBuildOutput root Foundry
+    ExitSuccess -> readFilteredBuildOutput root (\path -> "unit-tests.t.sol" `Data.List.isInfixOf` path) Foundry
   where
     initStdForgeDir :: FilePath -> IO ()
     initStdForgeDir tld = do
@@ -102,9 +103,4 @@ compile _ root src = do
     initLib tld srcFile dstFile = do
       createDirectoryIfMissing True (tld </> "src")
       writeFile (tld </> "src" </> dstFile) =<< readFile =<< Paths.getDataFileName srcFile
-      _ <- readProcessWithExitCode "git" ["init", tld] ""
-      callProcess "git" ["config", "--file", tld </> ".git" </> "config", "user.name", "'hevm'"]
-      callProcess "git" ["config", "--file", tld </> ".git" </> "config", "user.email", "'hevm@hevm.dev'"]
-      callProcessCwd "git" ["add", "."] tld
-      callProcessCwd "git" ["commit", "-m", "", "--allow-empty-message", "--no-gpg-sign"] tld
       pure ()

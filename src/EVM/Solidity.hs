@@ -20,6 +20,7 @@ module EVM.Solidity
   , Reference(..)
   , Mutability(..)
   , readBuildOutput
+  , readFilteredBuildOutput
   , functionAbi
   , makeSrcMaps
   , readSolc
@@ -286,16 +287,21 @@ makeSrcMaps = (\case (_, Fe, _) -> Nothing; x -> Just (done x))
 
 -- | Reads all solc output json files found under the provided filepath and returns them merged into a BuildOutput
 readBuildOutput :: App m => FilePath -> ProjectType -> m (Err BuildOutput)
-readBuildOutput root CombinedJSON = do
+readBuildOutput root projectType = readFilteredBuildOutput root (const True) projectType
+
+readFilteredBuildOutput :: App m => FilePath -> (FilePath -> Bool) -> ProjectType -> m (Err BuildOutput)
+readFilteredBuildOutput root jsonFilter CombinedJSON = do
   let outDir = root </> "out"
-  jsons <- liftIO $ findJsonFiles outDir
+  allJsons <- liftIO $ findJsonFiles outDir
+  let jsons = filter jsonFilter allJsons
   case jsons of
     [x] -> readSolc CombinedJSON root (outDir </> x)
     [] -> pure . Left $ "no json files found in: " <> outDir
     _ -> pure . Left $ "multiple json files found in: " <> outDir
-readBuildOutput root _ = do
+readFilteredBuildOutput root jsonFilter _ = do
   let outDir = root </> "out"
-  jsons <- liftIO $ findJsonFiles outDir
+  allJsons <- liftIO $ findJsonFiles outDir
+  let jsons = filter jsonFilter allJsons
   case (filterMetadata jsons) of
     [] -> pure . Left $ "no json files found in: " <> outDir
     js -> do
