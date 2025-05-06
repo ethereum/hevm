@@ -24,6 +24,7 @@ import Data.Either
 import Data.List qualified as List
 import Data.Map.Strict qualified as Map
 import Data.Maybe
+import Data.Set qualified as Set
 import Data.String.Here
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -74,6 +75,7 @@ import EVM.Types hiding (Env)
 import EVM.Effects
 import EVM.UnitTest (writeTrace, printWarnings)
 import EVM.Expr (maybeLitByteSimp)
+import Data.Text.Internal.Builder (toLazyText)
 
 testEnv :: Env
 testEnv = Env { config = defaultConfig {
@@ -4420,6 +4422,14 @@ tests = testGroup "hevm"
           _ -> liftIO $ assertFailure "Must be satisfiable!"
         let value = subModel cex (Var "a")
         assertEqualM "Can get value out of model in the presence of large buffer!" value (Right $ Lit 0x1)
+    , test "no-duplicates-with-concrete-keccak" $ do
+      let props = [(PGT (Var "a") (Keccak (ConcreteBuf "abcdef"))), (PGT (Var "b") (Keccak (ConcreteBuf "abcdef")))]
+      conf <- readConfig
+      let SMT2 builders _ _ = fromRight (internalError "Must succeed") (assertProps conf props)
+      let texts = fmap toLazyText builders
+      let sexprs = splitSExpr texts
+      let noDuplicates = ((length sexprs) == (Set.size (Set.fromList sexprs)))
+      assertBoolM "There were duplicate lines in SMT encoding" noDuplicates
   ]
   , testGroup "equivalence-checking"
     [

@@ -76,23 +76,24 @@ keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
           req2 = (PGEq (Sub kb ka) (Lit 256))
       minDistance _ = internalError "expected Keccak expression"
 
-compute :: forall a. Expr a -> [Prop]
+compute :: forall a. Expr a -> Set Prop
 compute = \case
   e@(Keccak buf) -> do
     let b = simplify buf
     case keccak b of
-      lit@(Lit _) -> [PEq lit e]
-      _ -> []
-  _ -> []
+      lit@(Lit _) -> Set.singleton (PEq lit e)
+      _ -> Set.empty
+  _ -> Set.empty
 
-computeKeccakExpr :: forall a. Expr a -> [Prop]
-computeKeccakExpr e = foldExpr compute [] e
+computeKeccakExpr :: forall a. Expr a -> Set Prop
+computeKeccakExpr e = foldExpr compute Set.empty e
 
-computeKeccakProp :: Prop -> [Prop]
-computeKeccakProp p = foldProp compute [] p
+computeKeccakProp :: Prop -> Set Prop
+computeKeccakProp p = foldProp compute Set.empty p
 
 keccakCompute :: [Prop] -> [Expr Buf] -> [Expr Storage] -> [Prop]
 keccakCompute ps buf stores =
-  concatMap computeKeccakProp ps <>
-  concatMap computeKeccakExpr buf <>
-  concatMap computeKeccakExpr stores
+  Set.toList $
+    (foldMap computeKeccakProp ps) <>
+    (foldMap computeKeccakExpr buf) <>
+    (foldMap computeKeccakExpr stores)
