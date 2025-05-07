@@ -515,6 +515,13 @@ checkAssertions errs _ = \case
   Failure _ _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
   _ -> PBool True
 
+checkAssertionsOrStop :: [Word256] -> Postcondition s
+checkAssertionsOrStop errs _ = \case
+  Success {}                             -> PBool False
+  Failure _ _ (Revert (ConcreteBuf msg)) -> PBool $ msg `notElem` (fmap panicMsg errs)
+  Failure _ _ (Revert b)                 -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
+  _                                      -> PBool True
+
 -- | By default hevm only checks for user-defined assertions
 defaultPanicCodes :: [Word256]
 defaultPanicCodes = [0x01]
@@ -721,6 +728,64 @@ verify solvers opts preState maybepost = do
       Unknown reason -> Unknown (reason, leaf)
       Error e -> Error e
       Qed -> Qed
+
+-- | Symbolically execute the VM and find possible inputs given the
+-- postcondition, if available.
+findInputs
+  :: App m
+  => SolverGroup
+  -> VeriOpts
+  -> Fetch.Fetcher Symbolic m RealWorld
+  -> VM Symbolic RealWorld
+  -> Maybe (Postcondition RealWorld)
+  -> m [(Expr End, SMTResult)]
+findInputs solvers opts fetcher preState maybepost = do
+  conf <- readConfig
+  let call = mconcat ["prefix 0x", getCallPrefix preState.state.calldata]
+  when conf.debug $ liftIO $ putStrLn $ "   Exploring call " <> call
+
+  exprInter <- interpret fetcher opts.iterConf preState runExpr
+  when conf.dumpExprs $ liftIO $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
+  liftIO $ do
+    when conf.debug $ putStrLn "   Simplifying expression"
+    let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
+    when conf.dumpExprs $ T.writeFile "simplified.expr" (formatExpr expr)
+    when conf.dumpExprs $ T.writeFile "simplified-conc.expr" (formatExpr $ Expr.simplify $ mapExpr Expr.concKeccakOnePass expr)
+    when conf.debug $ putStrLn "   Flattening expression"
+    let flattened = flattenExpr expr
+    when conf.debug $ do
+      printPartialIssues flattened ("the call " <> call)
+      putStrLn $ "   Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
+
+    case maybepost of
+      Nothing -> pure [(expr, Qed)]
+      Just post -> liftIO $ do
+        let
+          -- Filter out any leaves from `flattened` that can be statically shown to be safe
+          tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf preState.constraints post, leaf)
+          withQueries = filter canBeSat tocheck <&> first (SMT.assertProps conf)
+        when conf.debug $
+          putStrLn $ "   Checking for reachability of " <> show (length withQueries)
+                     <> " potential property violation(s) in call " <> call
+
+        -- Dispatch the remaining branches to the solver to check for violations
+        results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
+          res <- checkSat solvers query
+          when conf.debug $ putStrLn $ "   SMT result: " <> show res
+          pure (res, leaf)
+        let cexs = fmap swap $ filter (\(res, _) -> not . isQed $ res) results
+        when conf.debug $ putStrLn $ "   Found " <> show (length cexs) <> " potential inputs(s) in call " <> call
+        pure cexs
+  where
+    getCallPrefix :: Expr Buf -> String
+    getCallPrefix (WriteByte (Lit 0) (LitByte a) (WriteByte (Lit 1) (LitByte b) (WriteByte (Lit 2) (LitByte c) (WriteByte (Lit 3) (LitByte d) _)))) = mconcat $ map (printf "%02x") [a,b,c,d]
+    getCallPrefix _ = "unknown"
+    toProps leaf constr post = PNeg (post preState leaf) : constr <> extractProps leaf
+    toPropsFinal leaf constr post = if opts.simp then Expr.simplifyProps $ toProps leaf constr post
+                                                 else toProps leaf constr post
+    canBeSat (a, _) = case a of
+        [PBool False] -> False
+        _ -> True
 
 expandCex :: VM Symbolic s -> SMTCex -> SMTCex
 expandCex prestate c = c { store = Map.union c.store concretePreStore }
