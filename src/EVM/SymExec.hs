@@ -5,7 +5,7 @@ module EVM.SymExec where
 
 import Control.Concurrent.Async (concurrently, mapConcurrently)
 import Control.Concurrent.Spawn (parMapIO, pool)
-import Control.Concurrent.STM (TVar, readTVarIO, newTVarIO)
+import Control.Concurrent.STM (TVar, readTVarIO, newTVarIO, writeTVar, atomically, readTVar)
 import Control.Monad (when, forM_, forM)
 import Control.Monad.IO.Unlift
 import Control.Monad.Operational qualified as Operational
@@ -835,9 +835,8 @@ equivalenceCheck' solvers branchesA branchesB create = do
       when conf.dumpEndStates $ forM_ (zip differingEndStates [(1::Integer)..]) (\(x, i) ->
         liftIO $ T.writeFile ("prop-checked-" <> show i <> ".prop") (T.pack $ show x))
 
-      knownUnsat <- liftIO $ newTVarIO []
       procs <- liftIO getNumProcessors
-      newDifferences <- checkAll differingEndStates knownUnsat procs
+      newDifferences <- checkAll differingEndStates procs
       let additionalIssues = EqIssues newDifferences mempty
       pure $ knownIssues <> additionalIssues
 
@@ -858,19 +857,24 @@ equivalenceCheck' solvers branchesA branchesB create = do
     check :: App m => UnsatCache -> Set Prop -> m EquivResult
     check knownUnsat props = do
       ku <- liftIO $ readTVarIO knownUnsat
-      if subsetAny props ku then pure Qed
-      else fst <$> checkSatWithProps solvers (Set.toList props)
+      let propsSimp = Expr.simplifyProps (Set.toList props)
+      if (propsSimp == [PBool False]) || subsetAny (Set.fromList propsSimp) ku then pure Qed
+      else do
+         (ret, _) <- checkSatWithProps solvers propsSimp
+         when (ret == Qed) $ liftIO $ atomically $ readTVar knownUnsat >>= writeTVar knownUnsat . (Set.fromList propsSimp :)
+         pure ret
 
     -- Allows us to run the queries in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
     -- mapConcurrently which would spawn as many threads as there are jobs, and
     -- run them in a random order. We ordered them correctly, though so that'd be bad
-    checkAll :: (App m, MonadUnliftIO m) => [(Set Prop, String)] -> UnsatCache -> Int -> m [(EquivResult, String)]
-    checkAll input cache numproc = withRunInIO $ \env -> do
+    checkAll :: (App m, MonadUnliftIO m) => [(Set Prop, String)] -> Int -> m [(EquivResult, String)]
+    checkAll input numproc = withRunInIO $ \env -> do
        wrap <- pool numproc
-       parMapIO (runOne env wrap) input
+       cache <- liftIO $ newTVarIO []
+       parMapIO (runOne env cache wrap) input
        where
-         runOne env wrap (props, meaning) = do
+         runOne env cache wrap (props, meaning) = do
            res <- wrap (env $ check cache props)
            pure (res, meaning)
 
