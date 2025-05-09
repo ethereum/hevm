@@ -30,7 +30,8 @@ import Data.Text.IO qualified as T
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
 import Data.Vector qualified as V
-import Data.Vector.Unboxed qualified as VUnboxed
+import Data.Vector.Storable qualified as VS
+import Data.Vector.Storable.ByteString (vectorToByteString)
 import EVM (makeVm, abstractContract, initialContract, getCodeLocation, isValidJumpDest)
 import EVM.Exec
 import EVM.Fetch qualified as Fetch
@@ -313,7 +314,7 @@ freezeVM vm = do
       }
   where
     freeze = \case
-      ConcreteMemory m -> SymbolicMemory . ConcreteBuf . BS.pack . VUnboxed.toList <$> VUnboxed.freeze m
+      ConcreteMemory m -> SymbolicMemory . ConcreteBuf . vectorToByteString <$> VS.freeze m
       m@(SymbolicMemory _) -> pure m
 
 -- | Interpreter which explores all paths at branching points. Returns an
