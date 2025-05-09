@@ -409,7 +409,7 @@ interpret fetcher iterConf vm =
                       -- if we can statically determine unsatisfiability then we skip exploring the jump
                       [PBool False] -> liftIO $ stToIO $ runStateT (continue (Case False)) vm
                       -- otherwise we explore both branches
-                      _ -> liftIO $ stToIO $ runStateT (continue UnknownBranch) vm
+                      _ -> liftIO $ stToIO $ runStateT (continue UnknownBranch) vm {exploreDepth = vm.exploreDepth+1}
                     interpret fetcher iterConf vm' (k r)
           _ -> performQuery
 
