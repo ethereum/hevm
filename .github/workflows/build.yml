@@ -160,11 +160,11 @@ jobs:
         run: |
           export PATH="$HASKELL_PATHS:$PATH"
           cabal configure --disable-documentation --enable-executable-static --enable-executable-stripping \
-            --extra-include-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/x86_64-w64-mingw32/include")" --extra-lib-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/x86_64-w64-mingw32/lib")" \
-            --extra-include-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/include")" --extra-lib-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/lib")" \
-            --extra-include-dirs="D:/a/_temp/msys64/clang64/include" --extra-lib-dirs="D:/a/_temp/msys64/clang64/lib" \
+            --extra-lib-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/x86_64-w64-mingw32/lib")" \
+            --extra-lib-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/lib")" \
+            --extra-lib-dirs="D:/a/_temp/msys64/clang64/lib" \
             --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib" \
-            --ghc-options=-pgml="$(cygpath -m "$HASKELL_MINGW_PATH/bin/clang.exe")" -fstatic-secp256k1 --constraint="zlib +bundled-c-zlib"
+            --ghc-options=-pgml="$(cygpath -m "$HASKELL_MINGW_PATH/bin/clang.exe") -optc-idirafter -optcD:/a/_temp/msys64/clang64/include -optcxx-idirafter -optcxxD:/a/_temp/msys64/clang64/include" -fstatic-secp256k1 --constraint="zlib +bundled-c-zlib"
           cabal build --dry-run
           # The last step generates dist-newstyle/cache/plan.json for the cache key.
 
