@@ -1649,11 +1649,13 @@ containsNode p = getAny . foldExpr go (Any False)
 inRange :: Int -> Expr EWord -> Prop
 inRange sz e = PAnd (PGEq e (Lit 0)) (PLEq e (Lit $ 2 ^ sz - 1))
 
+-- | images of keccak(bytes32(x)) where 0 <= x < 256
+preImages :: [(W256, Word8)]
+preImages = [(keccak' (word256Bytes . into $ i), i) | i <- [0..255]]
 
 -- | images of keccak(bytes32(x)) where 0 <= x < 256
 preImageLookupMap :: Map.Map W256 (Word8, W256)
-preImageLookupMap = Map.fromList $ map (\(imageHash, originalId) -> (imageHash, (originalId, imageHash + fromInteger 255))) preImagesSource
-  where preImagesSource = [(keccak' (word256Bytes . into $ i), i) | i <- [0..255]]
+preImageLookupMap = Map.fromList $ map (\(imageHash, originalId) -> (imageHash, (originalId, imageHash + fromInteger 255))) preImages
 data ConstState = ConstState
   { values :: Map.Map (Expr EWord) W256
   , canBeSat :: Bool
