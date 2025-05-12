@@ -295,11 +295,11 @@ getModel inst cexvars = do
     shrinkBuf :: Text -> W256 -> StateT SMTCex IO ()
     shrinkBuf buf hint = do
       let encBound = "(_ bv" <> (T.pack $ show (into hint :: Integer)) <> " 256)"
-      sat <- liftIO $ do
+      answer <- liftIO $ do
         checkCommand inst "(push 1)"
         checkCommand inst $ "(assert (bvule " <> buf <> "_length " <> encBound <> "))"
         sendLine inst "(check-sat)"
-      case sat of
+      case answer of
         "sat" -> do
           model <- liftIO getRaw
           put model
@@ -309,7 +309,9 @@ getModel inst cexvars = do
           if nextHint < hint || nextHint > 1_073_741_824
             then pure () -- overflow or over 1GB
             else shrinkBuf buf nextHint
-        e -> internalError $ "Unexpected solver output: " <> (T.unpack e)
+        _ -> do -- unexpected answer -> clean up and do not change the model
+          liftIO $ checkCommand inst "(pop 1)"
+          pure ()
 
 
     -- we set a pretty arbitrary upper limit (of 1024) to decide if we need to do some shrinking
