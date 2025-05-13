@@ -1167,13 +1167,14 @@ precompiledContract this xGas precompileAddr recipient xValue inOffset inSize ou
       case result' of
         Nothing -> case stk of
           x:_ -> case maybeLitWordSimp x of
-            Just 0 ->
+            Just 0 -> pure ()
+            Just 1 -> do
+              when (xValue /= Lit 0) $ do
+                fetchAccount (LitAddr recipient) $ \_ -> do
+                  touchAccount self
+                  touchAccount (LitAddr recipient)
+                  transfer self (LitAddr recipient) xValue
               pure ()
-            Just 1 ->
-              fetchAccount (LitAddr recipient) $ \_ -> do
-                touchAccount self
-                touchAccount (LitAddr recipient)
-                transfer self (LitAddr recipient) xValue
             _ -> unexpectedSymArg "unexpected return value from precompile" [x]
           _ -> underrun
         _ -> pure ()
