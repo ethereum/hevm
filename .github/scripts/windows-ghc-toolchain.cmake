@@ -3,8 +3,8 @@ set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_C_COMPILER "$ENV{HASKELL_MINGW_PATH}/bin/cc.exe")
 set(CMAKE_CXX_COMPILER "$ENV{HASKELL_MINGW_PATH}/bin/c++.exe")
 
-set(CMAKE_C_FLAGS "-idirafter D:/a/_temp/msys64/clang64/include")
-set(CMAKE_CXX_FLAGS "-idirafter D:/a/_temp/msys64/clang64/include")
+set(CMAKE_C_FLAGS "-idirafter $ENV{SYSTEM_MINGW_PATH}/include")
+set(CMAKE_CXX_FLAGS "-idirafter $ENV{SYSTEM_MINGW_PATH}/include")
 
 set(CMAKE_FIND_ROOT_PATH "$ENV{HASKELL_MINGW_PATH}")
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM BOTH)

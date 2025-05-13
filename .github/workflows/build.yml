@@ -111,6 +111,7 @@ jobs:
           echo FOUNDRY_PATH="$(dirname "$(which forge)")" >> "$GITHUB_ENV"
         shell: bash
       - uses: msys2/setup-msys2@v2
+        id: msys2
         with:
           msystem: CLANG64
           path-type: minimal
@@ -141,11 +142,14 @@ jobs:
         run: |
           HASKELL_PATHS="$(cygpath -u "$GHC_PATH"):$(cygpath -u "$CABAL_PATH")"
           HASKELL_MINGW_PATH="$(cygpath -u "$GHC_PATH/../mingw")"
+          SYSTEM_MINGW_PATH="$(cygpath -m "$MSYS2_LOCATION/$MSYSTEM")"
           echo "HASKELL_PATHS=$HASKELL_PATHS" >> "$GITHUB_ENV"
           echo "HASKELL_MINGW_PATH=$HASKELL_MINGW_PATH" >> "$GITHUB_ENV"
+          echo "SYSTEM_MINGW_PATH=$SYSTEM_MINGW_PATH" >> "$GITHUB_ENV"
         env:
           GHC_PATH: ${{ steps.setup.outputs.ghc-path }}
           CABAL_PATH: ${{ steps.setup.outputs.cabal-path }}
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
 
       - name: build and install c dependencies
         run: |
@@ -162,9 +166,9 @@ jobs:
           cabal configure --disable-documentation --enable-executable-static --enable-executable-stripping \
             --extra-lib-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/x86_64-w64-mingw32/lib")" \
             --extra-lib-dirs="$(cygpath -m "$HASKELL_MINGW_PATH/lib")" \
-            --extra-lib-dirs="D:/a/_temp/msys64/clang64/lib" \
+            --extra-lib-dirs="$SYSTEM_MINGW_PATH/lib" \
             --extra-include-dirs="$HOME/.local/include" --extra-lib-dirs="$HOME/.local/lib" \
-            --ghc-options=-pgml="$(cygpath -m "$HASKELL_MINGW_PATH/bin/clang.exe") -optc-idirafter -optcD:/a/_temp/msys64/clang64/include -optcxx-idirafter -optcxxD:/a/_temp/msys64/clang64/include" -fstatic-secp256k1 --constraint="zlib +bundled-c-zlib"
+            --ghc-options=-pgml="$(cygpath -m "$HASKELL_MINGW_PATH/bin/clang.exe") -optc-idirafter -optc$SYSTEM_MINGW_PATH/include -optcxx-idirafter -optcxx$SYSTEM_MINGW_PATH/include" -fstatic-secp256k1 --constraint="zlib +bundled-c-zlib"
           cabal build --dry-run
           # The last step generates dist-newstyle/cache/plan.json for the cache key.
 
