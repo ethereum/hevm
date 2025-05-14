@@ -21,8 +21,12 @@ git checkout "v$INSTALL_VERSION" && git submodule init && git submodule update
 patch -p1 < ../.github/scripts/libff.patch
 
 sed -i 's/find_library(GMP_LIBRARY gmp)/find_library(GMP_LIBRARY NAMES libgmp.a)/' CMakeLists.txt
+# This ends up causing the system headers to be included with -I and
+# thus they override the GHC mingw compiler ones. So this removes it
+# and re-adds the include with idirafter via the toolchain file
+sed -i '/INCLUDE_DIRECTORIES.*OPENSSL_INCLUDE_DIR/d' CMakeLists.txt
 PREFIX="$HOME/.local"
-ARGS=("-DCMAKE_INSTALL_PREFIX=$PREFIX" "-DWITH_PROCPS=OFF" "-G" "Ninja")
+ARGS=("-DCMAKE_INSTALL_PREFIX=$PREFIX" "-DWITH_PROCPS=OFF" "-G" "Ninja" "-DCMAKE_TOOLCHAIN_FILE=$PWD/../.github/scripts/windows-ghc-toolchain.cmake")
 CXXFLAGS="-fPIC"
 
 mkdir -p build
