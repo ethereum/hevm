@@ -100,6 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CheckSatResult has now been unified with ProofResult via SMTResult
 - If counterexample would require a buffer that's larger than 1GB, we abandon
   shrinking it.
+- If solver is not able to solve a query while attempting to shrink the model, we
+  abandon the attempt gracefully instead of crashing with internal error.
 - Buffers are now handled more lazily when inspecting a model, which avoids some
   unnecesary internal errors.
 - EVM memory is now grown on demand using a 2x factor, to avoid repeated smaller
