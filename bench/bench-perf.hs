@@ -37,10 +37,10 @@ import EVM.FeeSchedule (feeSchedule)
 -- using tasty-bench
 
 vmFromByteString :: App m => ByteString -> m (VM Concrete RealWorld)
-vmFromByteString = liftIO . vmFromRawByteString . fromJust . hexByteString
+vmFromByteString = vmFromRawByteString . fromJust . hexByteString
 
-vmFromRawByteString :: ByteString -> IO (VM Concrete RealWorld)
-vmFromRawByteString bs =
+vmFromRawByteString :: App m => ByteString -> m (VM Concrete RealWorld)
+vmFromRawByteString bs = liftIO $
   bs
     & ConcreteRuntimeCode
     & RuntimeCode
@@ -128,15 +128,15 @@ vmOptsToTestVMParams v =
 
 callMainForBytecode :: App m => ByteString -> m (Either EvmError (Expr 'Buf))
 callMainForBytecode bs = do
-  vm <- liftIO $ vmFromRawByteString bs
+  vm <- vmFromRawByteString bs
   Stepper.interpret (Fetch.zero 0 Nothing) vm (Stepper.evm (abiCall (vmOptsToTestVMParams (vm0Opts (initialContract (RuntimeCode (ConcreteRuntimeCode bs))))) (Left ("main()", emptyAbi))) >> Stepper.execFully)
 
 benchMain :: (String, ByteString) -> Benchmark
-benchMain (name, bs) = bench name $ nfIO $ runApp $ (\x -> if isRight x then () else error "failed") <$> callMainForBytecode bs
+benchMain (name, bs) = bench name $ nfIO $ runApp $ (\x -> if isRight x then () else internalError "failed") <$> callMainForBytecode bs
 
 benchBytecodes :: [ByteString] -> [Benchmark]
 benchBytecodes = map (\x -> bench "bytecode" $ nfIO $ runApp (do
-                                                       vm <- liftIO $ vmFromRawByteString x
+                                                       vm <- vmFromRawByteString x
                                                        isRight <$> (Stepper.interpret (Fetch.zero 0 Nothing) vm Stepper.execFully)))
 
 callMain :: TestVMParams -> EVM Concrete s ()
@@ -246,7 +246,7 @@ main = do
         ll <- mkBench prog [2 ^ n | n :: Int <- [1 .. 14]]
         pure $ bgroup name (benchMain <$> ll)
   let benchmarks = [ 
-                     ("loop", simple_loop)
+                     ("loop", simpleLoop)
                    , ("primes", primes)
                    , ("hashes", hashes)
                    , ("hashmem", hashmem)
@@ -259,8 +259,8 @@ main = do
   
 
 -- Loop that adds up n numbers
-simple_loop :: Int -> IO ByteString
-simple_loop n = do
+simpleLoop :: Int -> IO ByteString
+simpleLoop n = do
   let src =
         [i|
           contract A {
