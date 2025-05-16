@@ -48,8 +48,8 @@ import Data.Text.Encoding qualified as T
 import Data.Tree (Forest)
 import Data.Tree.Zipper qualified as Zipper
 import Data.Vector qualified as V
-import Data.Vector.Storable qualified as SV
-import Data.Vector.Unboxed.Mutable (STVector)
+import Data.Vector.Storable qualified as VS
+import Data.Vector.Storable.Mutable (STVector)
 import Numeric (readHex, showHex)
 import Options.Generic
 import Optics.TH
@@ -842,7 +842,7 @@ data Contract = Contract
   , balance     :: Expr EWord
   , nonce       :: Maybe W64
   , codehash    :: Expr EWord
-  , opIxMap     :: SV.Vector Int
+  , opIxMap     :: VS.Vector Int
   , codeOps     :: V.Vector (Int, Op)
   , external    :: Bool
   }
