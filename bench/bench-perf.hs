@@ -141,7 +141,7 @@ simpleLoop n = do
         |]
   fmap fromJust (runApp $ solcRuntime "A" src)
 
--- Computes prime numbers and stores them up to n.
+-- Computes prime numbers and stores them up to n
 primes :: Int -> IO ByteString
 primes n = do
   let src =
@@ -210,6 +210,7 @@ hashmem n = do
         |]
   fmap fromJust (runApp $ solcRuntime "A" src)
 
+-- Transfer ETH to an address n times
 balanceTransfer :: Int -> IO ByteString
 balanceTransfer n = do
   let src =
@@ -225,6 +226,7 @@ balanceTransfer n = do
         |]
   fmap fromJust (runApp $ solcRuntime "A" src)
 
+-- Call a public function n times
 funcCall :: Int -> IO ByteString
 funcCall n = do
   let src =
@@ -243,7 +245,7 @@ funcCall n = do
         |]
   fmap fromJust (runApp $ solcRuntime "A" src)
 
--- creates n contracts
+-- Creates n contracts
 contractCreation :: Int -> IO ByteString
 contractCreation n = do
   let src =
@@ -260,6 +262,7 @@ contractCreation n = do
         |]
   fmap fromJust (runApp $ solcRuntime "A" src)
 
+-- Create n contracts with a string in them
 contractCreationMem :: Int -> IO ByteString
 contractCreationMem n = do
   let src =
