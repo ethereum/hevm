@@ -5,7 +5,7 @@ contract SolidityTest is Test {
     function setUp() public {
     }
 
-    function check_trivial() public {
+    function prove_trivial() public {
         assertTrue(false);
     }
 }

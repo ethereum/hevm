@@ -178,6 +178,7 @@ data TestOptions = TestOptions
   , number        ::Maybe W256
   , coverage      ::Bool
   , match         ::Maybe String
+  , prefix        ::String
   , ffi           ::Bool
   }
 
@@ -188,6 +189,7 @@ testOptions = TestOptions
   <*> (optional $ option auto $ long "number" <> help "Block: number")
   <*> (switch $ long "coverage" <> help "Coverage analysis")
   <*> (optional $ strOption $ long "match" <> help "Test case filter - only run methods matching regex")
+  <*> (strOption $ long "prefix"  <> showDefault <> value "prove" <> help "Prefix for test cases to prove")
   <*> (switch $ long "ffi" <> help "Allow the usage of the hevm.ffi() cheatcode (WARNING: this allows test authors to execute arbitrary code on your machine)")
 
 
@@ -257,7 +259,7 @@ commandParser :: Parser Command
 commandParser = subparser
   ( command "test"
       (info (Test <$> testOptions <*> commonOptions <**> helper)
-        (progDesc "Prove Foundry unit tests marked with `prove_`"
+        (progDesc "Prove Foundry unit tests prefixed with `prove` by default"
         <> footer "For more help: https://hevm.dev/std-test-tutorial.html" ))
   <> command "equivalence"
       (info (Equal <$> eqOptions <*> commonOptions <**> helper)
@@ -815,6 +817,7 @@ unitTestOptions testOpts cOpts solvers buildOutput = do
     , askSmtIters = cOpts.askSmtIterations
     , smtTimeout = Just cOpts.smttimeout
     , match = T.pack $ fromMaybe ".*" testOpts.match
+    , prefix = T.pack testOpts.prefix
     , testParams = params
     , dapp = srcInfo
     , ffiAllowed = testOpts.ffi
