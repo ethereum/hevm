@@ -371,7 +371,7 @@ benchmark bench-perf
   hs-source-dirs:
     bench
   ghc-options:
-    -O2 -threaded -with-rtsopts=-N
+    -O2 -threaded -with-rtsopts=-N -fproc-alignment=64
   other-modules:
     Paths_hevm
   autogen-modules:
