@@ -378,16 +378,9 @@ benchmark bench-perf
     Paths_hevm
   build-depends:
     base,
-    tasty-bench,
-    bytestring,
-    hevm,
     here,
-    test-utils,
-    filemanip,
-    containers,
+    hevm,
     mtl,
-    aeson,
-    process,
-    directory,
-    temporary,
+    tasty-bench,
+    test-utils,
     utf8-string
