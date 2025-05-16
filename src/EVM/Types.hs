@@ -485,37 +485,34 @@ instance Eq Prop where
   PImpl a b == PImpl c d = a == c && b == d
   _ == _ = False
 
--- Note: we cannot compare via `a <= c || b <= d` because then
---       when a==c but b > d, we'd return TRUE, when we should be
---       returning FALSE.
 instance Ord Prop where
-  PBool a <= PBool b = a <= b
-  PEq (a :: Expr x) (b :: Expr x) <= PEq (c :: Expr y) (d :: Expr y)
-    = case eqT @x @y of
-       Just Refl ->        a <= c || ((a == c) && (b <= d))
-       Nothing -> toNum a <= toNum c
-  PNeg a   <= PNeg b     = a <= b
-  PLT a b  <= PLT c d    = a <= c || (a == c && b <= d)
-  PGT a b  <= PGT c d    = a <= c || (a == c && b <= d)
-  PGEq a b <= PGEq c d   = a <= c || (a == c && b <= d)
-  PLEq a b <= PLEq c d   = a <= c || (a == c && b <= d)
-  PAnd a b <= PAnd c d   = a <= c || (a == c && b <= d)
-  POr a b  <= POr c d    = a <= c || (a == c && b <= d)
-  PImpl a b <= PImpl c d = a <= c || (a == c && b <= d)
-  a <= b = asNum a <= asNum b
-    where
-      asNum :: Prop -> Int
-      asNum (PBool {}) = 0
-      asNum (PEq   {}) = 1
-      asNum (PLT   {}) = 2
-      asNum (PGT   {}) = 3
-      asNum (PGEq  {}) = 4
-      asNum (PLEq  {}) = 5
-      asNum (PNeg  {}) = 6
-      asNum (PAnd  {}) = 7
-      asNum (POr   {}) = 8
-      asNum (PImpl {}) = 9
+  compare (PBool a) (PBool b) = compare a b
+  compare (PEq (a :: Expr x) (b :: Expr x)) (PEq (c :: Expr y) (d :: Expr y)) =
+    case eqT @x @y of
+      Just Refl -> compare (a, b) (c, d)
+      Nothing   -> compare (typeRep a) (typeRep c)
+  compare (PNeg a) (PNeg b) = compare a b
+  compare (PLT a1 b1) (PLT a2 b2) = compare (a1, b1) (a2, b2)
+  compare (PGT a1 b1) (PGT a2 b2) = compare (a1, b1) (a2, b2)
+  compare (PGEq a1 b1) (PGEq a2 b2) = compare (a1, b1) (a2, b2)
+  compare (PLEq a1 b1) (PLEq a2 b2) = compare (a1, b1) (a2, b2)
+  compare (PAnd a1 b1) (PAnd a2 b2) = compare (a1, b1) (a2, b2)
+  compare (POr a1 b1) (POr a2 b2) = compare (a1, b1) (a2, b2)
+  compare (PImpl a1 b1) (PImpl a2 b2) = compare (a1, b1) (a2, b2)
+  compare a b = compare (tag a) (tag b)
 
+    where
+      tag :: Prop -> Int
+      tag PBool{} = 0
+      tag PEq{}   = 1
+      tag PLT{}   = 2
+      tag PGT{}   = 3
+      tag PGEq{}  = 4
+      tag PLEq{}  = 5
+      tag PNeg{}  = 6
+      tag PAnd{}  = 7
+      tag POr{}   = 8
+      tag PImpl{} = 9
 
 
 isPBool :: Prop -> Bool
