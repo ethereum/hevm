@@ -4251,9 +4251,9 @@ tests = testGroup "hevm"
       (_, [Cex (_, ctr1)]) <- withCVC5Solver $ \s -> checkAssert s defaultPanicCodes c (Just sig) [] defaultVeriOpts
       putStrLnM  $ "expected counterexamples found: " <> show ctr1
   ]
-  , testGroup "simplification-working"
+  , testGroup "prop-and-expr-properties"
   [
-    test "nubOrd-Prop-working" $ do
+    test "nubOrd-Prop-PLT" $ do
         let a = [ PLT (Lit 0x0) (ReadWord (ReadWord (Lit 0x0) (AbstractBuf "txdata")) (AbstractBuf "txdata"))
                 , PLT (Lit 0x1) (ReadWord (ReadWord (Lit 0x0) (AbstractBuf "txdata")) (AbstractBuf "txdata"))
                 , PLT (Lit 0x2) (ReadWord (ReadWord (Lit 0x0) (AbstractBuf "txdata")) (AbstractBuf "txdata"))
@@ -4262,7 +4262,19 @@ tests = testGroup "hevm"
             simp2 = List.nub a
         assertEqualM "Must be 3-length" 3 (length simp)
         assertEqualM "Must be 3-length" 3 (length simp2)
-    , test "PEq-and-PNot-PEq-1" $ do
+    , test "nubOrd-Prop-PEq" $ do
+        let a = [ PEq (Lit 0x0) (ReadWord (Lit 0x0) (AbstractBuf "txdata"))
+                , PEq (Lit 0x0) (ReadWord (Lit 0x1) (AbstractBuf "txdata"))
+                , PEq (Lit 0x0) (ReadWord (Lit 0x2) (AbstractBuf "txdata"))
+                , PEq (Lit 0x0) (ReadWord (Lit 0x0) (AbstractBuf "txdata"))]
+        let simp = nubOrd a
+            simp2 = List.nub a
+        assertEqualM "Must be 3-length" 3 (length simp)
+        assertEqualM "Must be 3-length" 3 (length simp2)
+  ]
+  , testGroup "simplification-working"
+  [
+    test "PEq-and-PNot-PEq-1" $ do
       let a = [PEq (Lit 0x539) (Var "arg1"),PNeg (PEq (Lit 0x539) (Var "arg1"))]
       assertEqualM "Must simplify to PBool False" (Expr.simplifyProps a) ([PBool False])
     , test "PEq-and-PNot-PEq-2" $ do
