@@ -109,18 +109,19 @@ mkBench f l = mapM (\n -> (show n,) <$> f n) l
 
 main :: IO ()
 main = do
-  let f (name, prog) = do
-        ll <- mkBench prog [2 ^ n | n :: Int <- [1 .. 14]]
+  let f (name, prog, limit) = do
+        ll <- mkBench prog [2 ^ n | n :: Int <- [1 .. fromMaybe 14 limit]]
         pure $ bgroup name (benchMain <$> ll)
   let benchmarks = [ 
-                     ("loop", simpleLoop)
-                   , ("primes", primes)
-                   , ("hashes", hashes)
-                   , ("hashmem", hashmem)
-                   , ("balanceTransfer", balanceTransfer)
-                   , ("funcCall", funcCall)
-                   , ("contractCreation", contractCreation)
-                   , ("contractCreationMem", contractCreationMem)
+                     ("loop", simpleLoop, Nothing)
+                   , ("primes", primes, Nothing)
+                   , ("hashes", hashes, Nothing)
+                   , ("hashmem", hashmem, Nothing)
+                   , ("balanceTransfer", balanceTransfer, Nothing)
+                   , ("funcCall", funcCall, Nothing)
+                   , ("contractCreation", contractCreation, Nothing)
+                   , ("contractCreationMem", contractCreationMem, Nothing)
+                   , ("arrayCreationMem", arrayCreationMem, Just 9)
                    ]
   defaultMain =<< mapM f benchmarks
   
@@ -273,6 +274,29 @@ contractCreationMem n = do
             function main() public {
               for (uint i = 0; i < ${n}; i++) {
                 b = new B();
+              }
+            }
+          }
+        |]
+  fmap fromJust (runApp $ solcRuntime "A" src)
+
+-- Create large array in memory
+arrayCreationMem :: Int -> IO ByteString
+arrayCreationMem n = do
+  let src =
+        [i|
+          struct C { int24 a; int24 b; uint256 c; uint128 d; }
+          contract A {
+            function work() public returns (C[] memory ret) {
+                ret = new C[](${n});
+                for(uint a = 0; a < ${n}; a++) {
+                    ret[a] = C({a:1, b:1, c:0xffffffffffffff, d:5});
+                }
+                return ret;
+            }
+            function main() public {
+              for (uint i = 0; i < ${n}; i++) {
+                C[] memory ret = work();
               }
             }
           }
