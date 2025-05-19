@@ -1790,7 +1790,7 @@ tests = testGroup "hevm"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" (True, True)
     , test "prefix-check-for-dapp" $ do
         let testFile = "test/contracts/fail/check-prefix.sol"
-        runSolidityTest testFile "check_trivial" >>= assertEqualM "test result" (False, False)
+        runSolidityTest testFile "prove_trivial" >>= assertEqualM "test result" (False, False)
     , test "transfer-dapp" $ do
         let testFile = "test/contracts/pass/transfer.sol"
         runSolidityTest testFile "prove_transfer" >>= assertEqualM "should prove transfer" (True, True)

@@ -51,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   currently executed branch is in fact impossible. In these cases, unwind all
   frames and return a Revert with empty returndata.
 - More rewrite rules for PEq, PNeg, missing eqByte call, and distributivity for And
+- Allow changing of the prefix from "prove" via --prefix in `test` mode
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -108,6 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   increases which hurt concrete execution performance due to their linear cost.
 - The concrete MCOPY implementation has been optimized to avoid freezing the whole
   EVM memory.
+- We no longer accept `check` as a prefix for test cases by default.
 
 ## [0.54.2] - 2024-12-12
 
