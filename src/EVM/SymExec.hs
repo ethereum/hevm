@@ -373,9 +373,6 @@ interpret fetcher iterConf vm =
 
         case q of
           PleaseAskSMT cond preconds continue -> do
-            let
-              -- no concretiziation here, or we may lose information
-              simpProps = Expr.simplifyProps ((cond ./= Lit 0):preconds)
             case Expr.concKeccakSimpExpr cond of
               -- is the condition concrete?
               Lit c ->
@@ -405,7 +402,7 @@ interpret fetcher iterConf vm =
                     -- ask the smt solver about the loop condition
                     performQuery
                   _ -> do
-                    (r, vm') <- case simpProps of
+                    (r, vm') <- case Expr.concKeccakProps ((cond ./= Lit 0):preconds) of
                       -- if we can statically determine unsatisfiability then we skip exploring the jump
                       [PBool False] -> liftIO $ stToIO $ runStateT (continue (Case False)) vm
                       [] -> liftIO $ stToIO $ runStateT (continue (Case True)) vm

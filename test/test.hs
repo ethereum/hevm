@@ -1582,7 +1582,7 @@ tests = testGroup "hevm"
           assertEqualM "number of qed-s" 1 numQeds
       -- below we don't hit the limit of the depth of the symbolic execution tree
       , testCase "limit-num-explore-no-hit-limit" $ do
-        let conf = testEnv.config {maxDepth = Just 4}
+        let conf = testEnv.config {maxDepth = Just 7}
         let myTestEnv :: Env = (testEnv :: Env) {config = conf :: Config}
         runEnv myTestEnv $ do
           Just c <- solcRuntime "C"
