@@ -1554,7 +1554,7 @@ For example</p>
 <pre><code class="language-haskell">add x y = trace "Hello from add!" (x + y)
 </code></pre>
 <h1 id="testing"><a class="header" href="#testing">Testing</a></h1>
-<p><code>hevm</code> uses <a href="https://hackage.haskell.org/package/tasty-1.5/docs/Test-Tasty.html">Tasty</a> framework for running tests, including <a href="https://hackage.haskell.org/package/tasty-quickcheck-0.11/docs/Test-Tasty-QuickCheck.html"><code>QuickCheck</code></a> for property-based testing.</p>
+<p><code>hevm</code> uses <a href="https://hackage.haskell.org/package/tasty-1.5/docs/Test-Tasty.html">Tasty</a> framework for running tests, including <a href="https://hackage.haskell.org/package/tasty-quickcheck-0.11/docs/Test-Tasty-QuickCheck.html"><code>QuickCheck</code></a> for property-based testing. It also uses <a href="https://github.com/Bodigrim/tasty-bench"><code>tasty-bench</code></a> for benchmarking.</p>
 <h2 id="running-tests"><a class="header" href="#running-tests">Running tests</a></h2>
 <p>The basic command to run the tests is:</p>
 <pre><code>cabal run test
@@ -1577,6 +1577,23 @@ The following ensures that for the following test group, the maximal value of th
 </code></pre>
 <p>Similarly, the <code>maxSuccess</code> value can be modified for a single test. The following sets the number of tests generated to 20 for the particular test:</p>
 <pre><code>testProperty &lt;property_name&gt; $ withMaxSuccess 20 $ ...
+</code></pre>
+<h2 id="running-benchmarks"><a class="header" href="#running-benchmarks">Running benchmarks</a></h2>
+<p>You can also measure and compare the performance across hevm versions using the benchmarks.
+<code>bench-perf</code> focuses on concrete execution performance, and <code>bench</code> is aimed at
+symbolic execution and solving. Refer to the tasty-bench documentation for more detailed
+usage information.</p>
+<pre><code class="language-plain"># Measure time and memory usage
+$ cabal run bench-perf -- +RTS -T
+
+# Collect timings for a base version
+$ cabal run bench-perf  -- --csv baseline.csv
+
+# Perform some changes on the hevm code
+# ...
+
+# Benchmark changed code and compare with baseline
+$ cabal run bench-perf  -- --baseline baseline.csv
 </code></pre>
 <h1 id="profiling"><a class="header" href="#profiling">Profiling</a></h1>
 <h2 id="profiling-haskell-code"><a class="header" href="#profiling-haskell-code">Profiling Haskell code</a></h2>
