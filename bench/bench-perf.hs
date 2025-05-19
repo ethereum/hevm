@@ -68,7 +68,6 @@ vm0Opts c =
       beaconRoot = 0
     }
 
--- why do we need this?
 vmOptsToTestVMParams :: VMOpts Concrete -> TestVMParams
 vmOptsToTestVMParams v =
   TestVMParams
