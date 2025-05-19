@@ -406,11 +406,10 @@ interpret fetcher iterConf vm =
                     performQuery
                   _ -> do
                     (r, vm') <- case simpProps of
-                      let newDepth = vm.exploreDepth+1
                       -- if we can statically determine unsatisfiability then we skip exploring the jump
-                      [] -> liftIO $ stToIO $ runStateT (continue (Case True)) vm {exploreDepth = newDepth}
+                      [PBool False] -> liftIO $ stToIO $ runStateT (continue (Case False)) vm
                       -- otherwise we explore both branches
-                      _ -> liftIO $ stToIO $ runStateT (continue UnknownBranch) vm {exploreDepth = newDepth}
+                      _ -> liftIO $ stToIO $ runStateT (continue UnknownBranch) vm {exploreDepth = vm.exploreDepth+1}
                     interpret fetcher iterConf vm' (k r)
           _ -> performQuery
 
