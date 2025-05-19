@@ -5,7 +5,7 @@ module EVM.SymExec where
 
 import Control.Concurrent.Async (concurrently, mapConcurrently)
 import Control.Concurrent.Spawn (parMapIO, pool)
-import Control.Concurrent.STM (TVar, readTVarIO, newTVarIO)
+import Control.Concurrent.STM (TVar, readTVarIO, newTVarIO, atomically, modifyTVar')
 import Control.Monad (when, forM_, forM)
 import Control.Monad.IO.Unlift
 import Control.Monad.Operational qualified as Operational
@@ -843,21 +843,29 @@ equivalenceCheck' solvers branchesA branchesB create = do
     -- we order the sets by size because this gives us more cache hits when
     -- running our queries later on (since we rely on a subset check)
     sortBySize :: [(Set a, b)] -> [(Set a, b)]
-    sortBySize = sortBy (\(a, _) (b, _) -> if Set.size a > Set.size b then Prelude.LT else Prelude.GT)
+    sortBySize = sortBy (\(a, _) (b, _) -> compare (Set.size a) (Set.size b))
 
-    -- returns True if a is a subset of any of the sets in b
-    subsetAny :: Set Prop -> [Set Prop] -> Bool
-    subsetAny a b = foldr (\bp acc -> acc || isSubsetOf a bp) False b
+
+    -- returns True if a is a supeset of any of the sets in bs
+    supersetAny :: Set Prop -> [Set Prop] -> Bool
+    supersetAny a bs = any (`isSubsetOf` a) bs
 
     -- checks for satisfiability of all the props in the provided set. skips
     -- the solver if we can determine unsatisfiability from the cache already
     -- the last element of the returned tuple indicates whether the cache was
     -- used or not
     check :: App m => UnsatCache -> Set Prop -> m EquivResult
-    check knownUnsat props = do
+    check knownUnsat props =
+      if (Set.member (PBool False) props) then pure Qed else do
       ku <- liftIO $ readTVarIO knownUnsat
-      if subsetAny props ku then pure Qed
-      else fst <$> checkSatWithProps solvers (Set.toList props)
+      if supersetAny props ku then pure Qed
+      else do
+        (res, _) <- checkSatWithProps solvers (Set.toList props)
+        case res of
+          Qed -> do
+            _ <- liftIO $ atomically $ modifyTVar' knownUnsat (props :)
+            pure Qed
+          other -> pure other
 
     -- Allows us to run the queries in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
