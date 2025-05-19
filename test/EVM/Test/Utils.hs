@@ -60,6 +60,7 @@ testOpts solvers root buildOutput match maxIter allowFFI rpcinfo = do
     , askSmtIters = 1
     , smtTimeout = Nothing
     , match = match
+    , prefix = "prove"
     , testParams = params
     , dapp = srcInfo
     , ffiAllowed = allowFFI
