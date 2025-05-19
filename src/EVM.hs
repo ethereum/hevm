@@ -2968,7 +2968,7 @@ writeMemory memory offset buf = do
       let growthFactor = 2
       let targetSize = requiredSize * growthFactor
       -- Always grow at least 8k
-      let toGrow = max 8192 $ targetSize - currentSize 
+      let toGrow = max 8192 $ targetSize - currentSize
       memory' <- VUnboxed.Mutable.grow memory toGrow
       assign (#state % #memory) (ConcreteMemory memory')
       pure memory'
