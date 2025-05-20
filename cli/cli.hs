@@ -54,7 +54,7 @@ import EVM.UnitTest
 import EVM.Effects
 import EVM.Expr (maybeLitWordSimp, maybeLitAddrSimp)
 
-data AssertionType = DSTest | Forge | Echidna
+data AssertionType = DSTest | Forge
   deriving (Eq, Show, Read)
 
 projectTypeParser :: Parser ProjectType
@@ -108,7 +108,7 @@ commonOptions = CommonOptions
   <*> (switch $ long "trace"                <> help "Dump trace")
   <*> (option auto $ long "verb"            <> showDefault <> value 1 <> help "Append call trace: {1} failures {2} all")
   <*> (optional $ strOption $ long "root"   <> help "Path to  project root directory")
-  <*> (option auto $ long "assertion-type"  <> showDefault <> value Forge <> help "Assertions as per Forge, DSTest, or Echidna")
+  <*> (option auto $ long "assertion-type"  <> showDefault <> value Forge <> help "Assertions as per Forge or DSTest")
   <*> (option auto $ long "solver-threads"  <> showDefault <> value 1 <> help "Number of threads for each solver instance. Only respected for Z3")
   <*> (option auto $ long "smttimeout"      <> value 300 <> help "Timeout given to SMT solver in seconds")
   <*> (switch $ long "smtdebug"             <> help "Print smt queries sent to the solver")
@@ -504,7 +504,7 @@ assert cFileOpts sOpts cExecOpts cOpts = do
                           }
                         , rpcInfo = rpcinfo
     }
-    (expr, res) <- verify solvers veriOpts preState (Just $ checkAssertions (if (cOpts.assertionType == Echidna) then [0x1] else errCodes))
+    (expr, res) <- verify solvers veriOpts preState (Just $ checkAssertions errCodes)
     case res of
       [Qed] -> do
         liftIO $ putStrLn "\nQED: No reachable property violations discovered\n"

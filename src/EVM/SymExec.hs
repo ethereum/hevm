@@ -682,7 +682,7 @@ verify solvers opts preState maybepost = do
 
 verifyResults :: VM Symbolic RealWorld -> Expr End -> [(SMTResult, Expr End)] -> (Expr End, [VerifyResult])
 verifyResults preState expr cexs = if Prelude.null cexs then (expr, [Qed]) else (expr, fmap toVRes cexs)
-    where
+  where
     toVRes :: (SMTResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
       Cex model -> Cex (leaf, expandCex preState model)
@@ -735,7 +735,7 @@ verifyInputs solvers opts fetcher preState maybepost = do
           when conf.debug $ putStrLn $ "   SMT result: " <> show res
           pure (res, leaf)
         let cexs = filter (\(res, _) -> not . isQed $ res) results
-        when conf.debug $ putStrLn $ "   Found " <> show (length cexs) <> " potential inputs(s) in call " <> call
+        when conf.debug $ putStrLn $ "   Found " <> show (length cexs) <> " potential counterexample(s) in call " <> call
         pure (expr, cexs)
   where
     getCallPrefix :: Expr Buf -> String
