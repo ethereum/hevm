@@ -1636,9 +1636,6 @@ inRange sz e = PAnd (PGEq e (Lit 0)) (PLEq e (Lit $ 2 ^ sz - 1))
 preImages :: [(W256, Word8)]
 preImages = [(keccak' (word256Bytes . into $ i), i) | i <- [0..255]]
 
--- | images of keccak(bytes32(x)) where 0 <= x < 256
-preImageLookupMap :: Map.Map W256 (Word8, W256)
-preImageLookupMap = Map.fromList $ map (\(imageHash, originalId) -> (imageHash, (originalId, imageHash + fromInteger 255))) preImages
 data ConstState = ConstState
   { values :: Map.Map (Expr EWord) W256
   , canBeSat :: Bool
