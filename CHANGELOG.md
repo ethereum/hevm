@@ -106,6 +106,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When pranking an address, we used the non-pranked address' nonce
   to calculate the new address. This was incorrect, and lead to address clash,
   as the nonce was never incremented.
+- We only report FAIL in `test` mode for assertion failures that match the
+  string prefix "assertion failed", or match function selector Panic(uint256)
+  with a parameter 0x1. Previously, `require(a==b, "reason")` was a cause for
+  FAIL in case a!=b was possible. This has now been fixed.
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
