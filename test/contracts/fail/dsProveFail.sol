@@ -12,7 +12,7 @@ contract SolidityTest is Test {
         assert(false);
     }
 
-    function prove_all_branches_fail() public {
+    function prove_all_branches_revert() public {
         require(false);
     }
 
@@ -26,6 +26,8 @@ contract SolidityTest is Test {
         }
     }
 
+    // This seems to be fast now on SMT solvers, due to built-in heuristics
+    // hence no timeout
     function prove_smtTimeout(uint x, uint y, uint z) public {
         if ((x * y / z) * (x / y) / (x * y) == (x * x * x * y * z / x * z * y)) {
             assertTrue(false);

@@ -210,7 +210,10 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
             Success _ _ _ store -> if opts.checkFailBit then PNeg (failed store) else PBool True
             Failure _ _ (Revert msg) -> case msg of
               ConcreteBuf b ->
-                if (BS.isPrefixOf (selector "Error(string)") b) || b == panicMsg 0x01 then PBool False
+                -- We need to drop the selector (4B), the offset value (aligned to 32B), and the length of the string (aligned to 32B)
+                -- NOTE: assertTrue/assertFalse does not have the double colon after "assertion failed"
+                let assertFail = selector "Error(string)" `BS.isPrefixOf` b && "assertion failed" `BS.isPrefixOf` (BS.drop (4+32+32) b)
+                in if assertFail || b == panicMsg 0x01 then PBool False
                 else PBool True
               b -> b ./= ConcreteBuf (panicMsg 0x01)
             Failure _ _ _ -> PBool True
