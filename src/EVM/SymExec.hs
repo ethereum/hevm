@@ -515,13 +515,6 @@ checkAssertions errs _ = \case
   Failure _ _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
   _ -> PBool True
 
-checkAssertionsOrStop :: [Word256] -> Postcondition s
-checkAssertionsOrStop errs _ = \case
-  Success {}                             -> PBool False
-  Failure _ _ (Revert (ConcreteBuf msg)) -> PBool $ msg `notElem` (fmap panicMsg errs)
-  Failure _ _ (Revert b)                 -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
-  _                                      -> PBool True
-
 -- | By default hevm only checks for user-defined assertions
 defaultPanicCodes :: [Word256]
 defaultPanicCodes = [0x01]
