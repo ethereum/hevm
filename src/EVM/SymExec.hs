@@ -713,7 +713,7 @@ verify solvers opts preState maybepost = do
     canBeSat (a, _) = case a of
         [PBool False] -> False
         _ -> True
-    toVRes :: (SMTResult , Expr End) -> VerifyResult
+    toVRes :: (SMTResult, Expr End) -> VerifyResult
     toVRes (res, leaf) = case res of
       Cex model -> Cex (leaf, expandCex preState model)
       Unknown reason -> Unknown (reason, leaf)
