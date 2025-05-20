@@ -30,7 +30,8 @@ import Data.Text.IO qualified as T
 import Data.Tree.Zipper qualified as Zipper
 import Data.Tuple (swap)
 import Data.Vector qualified as V
-import Data.Vector.Unboxed qualified as VUnboxed
+import Data.Vector.Storable qualified as VS
+import Data.Vector.Storable.ByteString (vectorToByteString)
 import EVM (makeVm, abstractContract, initialContract, getCodeLocation, isValidJumpDest)
 import EVM.Exec
 import EVM.Fetch qualified as Fetch
@@ -313,7 +314,7 @@ freezeVM vm = do
       }
   where
     freeze = \case
-      ConcreteMemory m -> SymbolicMemory . ConcreteBuf . BS.pack . VUnboxed.toList <$> VUnboxed.freeze m
+      ConcreteMemory m -> SymbolicMemory . ConcreteBuf . vectorToByteString <$> VS.freeze m
       m@(SymbolicMemory _) -> pure m
 
 -- | Interpreter which explores all paths at branching points. Returns an
@@ -373,9 +374,6 @@ interpret fetcher iterConf vm =
 
         case q of
           PleaseAskSMT cond preconds continue -> do
-            let
-              -- no concretiziation here, or we may lose information
-              simpProps = Expr.simplifyProps ((cond ./= Lit 0):preconds)
             case Expr.concKeccakSimpExpr cond of
               -- is the condition concrete?
               Lit c ->
@@ -405,11 +403,11 @@ interpret fetcher iterConf vm =
                     -- ask the smt solver about the loop condition
                     performQuery
                   _ -> do
+                    let simpProps = Expr.simplifyProps $ Expr.concKeccakProps ((cond ./= Lit 0):preconds)
                     (r, vm') <- case simpProps of
-                      -- if we can statically determine unsatisfiability then we skip exploring the jump
                       [PBool False] -> liftIO $ stToIO $ runStateT (continue (Case False)) vm
-                      -- otherwise we explore both branches
-                      _ -> liftIO $ stToIO $ runStateT (continue UnknownBranch) vm
+                      [] -> liftIO $ stToIO $ runStateT (continue (Case True)) vm
+                      _ -> liftIO $ stToIO $ runStateT (continue UnknownBranch) vm {exploreDepth = vm.exploreDepth+1}
                     interpret fetcher iterConf vm' (k r)
           _ -> performQuery
 

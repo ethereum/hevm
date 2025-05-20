@@ -57,10 +57,9 @@ import Data.Tree
 import Data.Tree.Zipper qualified as Zipper
 import Data.Typeable
 import Data.Vector qualified as V
-import Data.Vector.Storable qualified as SV
-import Data.Vector.Storable.Mutable qualified as SV
-import Data.Vector.Unboxed qualified as VUnboxed
-import Data.Vector.Unboxed.Mutable qualified as VUnboxed.Mutable
+import Data.Vector.Storable qualified as VS
+import Data.Vector.Storable.Mutable qualified as VS.Mutable
+import Data.Vector.Storable.ByteString (vectorToByteString)
 import Data.Word (Word8, Word32, Word64)
 import Text.Read (readMaybe)
 import Witch (into, tryFrom, unsafeInto, tryInto)
@@ -71,7 +70,7 @@ import Crypto.Number.ModArithmetic (expFast)
 
 blankState :: VMOps t => ST s (FrameState t s)
 blankState = do
-  memory <- ConcreteMemory <$> VUnboxed.Mutable.new 0
+  memory <- ConcreteMemory <$> VS.Mutable.new 0
   pure $ FrameState
     { contract     = LitAddr 0
     , codeContract = LitAddr 0
@@ -118,7 +117,7 @@ makeVm o = do
         ++ (Map.keys txaccessList)
       initialAccessedStorageKeys = fromList $ foldMap (uncurry (map . (,))) (Map.toList txaccessList)
       touched = if o.create then [txorigin] else [txorigin, txtoAddr]
-  memory <- ConcreteMemory <$> VUnboxed.Mutable.new 0
+  memory <- ConcreteMemory <$> VS.Mutable.new 0
   pure $ setEIP4788Storage o $ VM
     { result = Nothing
     , frames = mempty
@@ -2129,7 +2128,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
                         (InitCode _ _) -> InitCode mempty mempty
                         a -> a
 
-                  newMemory <- ConcreteMemory <$> VUnboxed.Mutable.new 0
+                  newMemory <- ConcreteMemory <$> VS.Mutable.new 0
                   zoom #state $ do
                     assign #gas xGas
                     assign #pc 0
@@ -2541,7 +2540,7 @@ readMemory offset' size' = do
     ConcreteMemory mem -> do
       case (offset', size') of
         (Lit offset, Lit size) -> do
-          let memSize :: Word64 = unsafeInto (VUnboxed.Mutable.length mem)
+          let memSize :: Word64 = unsafeInto (VS.Mutable.length mem)
           if size > Expr.maxBytes ||
              offset + size > Expr.maxBytes ||
              offset >= into memSize then
@@ -2551,8 +2550,8 @@ readMemory offset' size' = do
             let pastEnd = (unsafeInto offset + unsafeInto size) - unsafeInto memSize
             let fromMemSize = if pastEnd > 0 then unsafeInto size - pastEnd else unsafeInto size
 
-            buf <- VUnboxed.freeze $ VUnboxed.Mutable.slice (unsafeInto offset) fromMemSize mem
-            let dataFromMem = BS.pack $ VUnboxed.toList buf
+            buf <- VS.freeze $ VS.Mutable.slice (unsafeInto offset) fromMemSize mem
+            let dataFromMem = vectorToByteString buf
             pure $ ConcreteBuf $ dataFromMem <> BS.replicate pastEnd 0
         _ -> do
           buf <- freezeMemory mem
@@ -2569,7 +2568,7 @@ withTraceLocation x = do
   pure Trace
     { tracedata = x
     , contract = this
-    , opIx = fromMaybe 0 $ this.opIxMap SV.!? vm.state.pc
+    , opIx = fromMaybe 0 $ this.opIxMap VS.!? vm.state.pc
     }
 
 pushTrace :: TraceData -> EVM t s ()
@@ -2719,7 +2718,7 @@ isValidJumpDest vm x = let
       RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= maybeLitByteSimp
   in case op of
        Nothing -> False
-       Just b -> 0x5b == b && OpJumpdest == snd (contract.codeOps V.! (contract.opIxMap SV.! x))
+       Just b -> 0x5b == b && OpJumpdest == snd (contract.codeOps V.! (contract.opIxMap VS.! x))
 
 opSize :: Word8 -> Int
 opSize x | x >= 0x60 && x <= 0x7f = into x - 0x60 + 2
@@ -2728,10 +2727,10 @@ opSize _                          = 1
 --  i of the resulting vector contains the operation index for
 -- the program counter value i.  This is needed because source map
 -- entries are per operation, not per byte.
-mkOpIxMap :: ContractCode -> SV.Vector Int
+mkOpIxMap :: ContractCode -> VS.Vector Int
 mkOpIxMap (UnknownCode _) = internalError "Cannot build opIxMap for unknown code"
 mkOpIxMap (InitCode conc _)
-  = SV.create $ SV.new (BS.length conc) >>= \v ->
+  = VS.create $ VS.Mutable.new (BS.length conc) >>= \v ->
       -- Loop over the byte string accumulating a vector-mutating action.
       -- This is somewhat obfuscated, but should be fast.
       let (_, _, _, m) = BS.foldl' (go v) (0 :: Word8, 0, 0, pure ()) conc
@@ -2739,34 +2738,34 @@ mkOpIxMap (InitCode conc _)
       where
         -- concrete case
         go v (0, !i, !j, !m) x | x >= 0x60 && x <= 0x7f =
-          {- Start of PUSH op. -} (x - 0x60 + 1, i + 1, j,     m >> SV.write v i j)
+          {- Start of PUSH op. -} (x - 0x60 + 1, i + 1, j,     m >> VS.Mutable.write v i j)
         go v (1, !i, !j, !m) _ =
-          {- End of PUSH op. -}   (0,            i + 1, j + 1, m >> SV.write v i j)
+          {- End of PUSH op. -}   (0,            i + 1, j + 1, m >> VS.Mutable.write v i j)
         go v (0, !i, !j, !m) _ =
-          {- Other op. -}         (0,            i + 1, j + 1, m >> SV.write v i j)
+          {- Other op. -}         (0,            i + 1, j + 1, m >> VS.Mutable.write v i j)
         go v (n, !i, !j, !m) _ =
-          {- PUSH data. -}        (n - 1,        i + 1, j,     m >> SV.write v i j)
+          {- PUSH data. -}        (n - 1,        i + 1, j,     m >> VS.Mutable.write v i j)
 
 mkOpIxMap (RuntimeCode (ConcreteRuntimeCode ops)) =
   mkOpIxMap (InitCode ops mempty) -- a bit hacky
 
 mkOpIxMap (RuntimeCode (SymbolicRuntimeCode ops))
-  = SV.create $ SV.new (length ops) >>= \v ->
+  = VS.create $ VS.Mutable.new (length ops) >>= \v ->
       let (_, _, _, m) = foldl (go v) (0, 0, 0, pure ()) (stripBytecodeMetadataSym $ V.toList ops)
       in m >> pure v
       where
         go v (0, !i, !j, !m) x = case maybeLitByteSimp x of
           Just x' -> if x' >= 0x60 && x' <= 0x7f
             -- start of PUSH op --
-                     then (x' - 0x60 + 1, i + 1, j,     m >> SV.write v i j)
+                     then (x' - 0x60 + 1, i + 1, j,     m >> VS.Mutable.write v i j)
             -- other data --
-                     else (0,             i + 1, j + 1, m >> SV.write v i j)
+                     else (0,             i + 1, j + 1, m >> VS.Mutable.write v i j)
           _ -> internalError $ "cannot analyze symbolic code:\nx: " <> show x <> " i: " <> show i <> " j: " <> show j
 
         go v (1, !i, !j, !m) _ =
-          {- End of PUSH op. -}   (0,            i + 1, j + 1, m >> SV.write v i j)
+          {- End of PUSH op. -}   (0,            i + 1, j + 1, m >> VS.Mutable.write v i j)
         go v (n, !i, !j, !m) _ =
-          {- PUSH data. -}        (n - 1,        i + 1, j,     m >> SV.write v i j)
+          {- PUSH data. -}        (n - 1,        i + 1, j,     m >> VS.Mutable.write v i j)
 
 
 vmOp :: VM t s -> Maybe Op
@@ -2788,7 +2787,7 @@ vmOp vm =
 vmOpIx :: VM t s -> Maybe Int
 vmOpIx vm =
   do self <- currentContract vm
-     self.opIxMap SV.!? vm.state.pc
+     self.opIxMap VS.!? vm.state.pc
 
 -- Maps operation indices into a pair of (bytecode index, operation)
 mkCodeOps :: ContractCode -> V.Vector (Int, Op)
@@ -2955,11 +2954,11 @@ log2 x = finiteBitSize x - 1 - countLeadingZeros x
 writeMemory :: MutableMemory s -> Int -> ByteString -> EVM t s ()
 writeMemory memory offset buf = do
   memory' <- expandMemory (offset + BS.length buf)
-  mapM_ (uncurry (VUnboxed.Mutable.write memory'))
+  mapM_ (uncurry (VS.Mutable.write memory'))
         (zip [offset..] (BS.unpack buf))
   where
   expandMemory requiredSize = do
-    let currentSize = VUnboxed.Mutable.length memory
+    let currentSize = VS.Mutable.length memory
     let toAlloc = requiredSize - currentSize
     if toAlloc > 0 then do
       -- As grow does a larger *copy* of the vector on a new place,
@@ -2969,7 +2968,7 @@ writeMemory memory offset buf = do
       let targetSize = requiredSize * growthFactor
       -- Always grow at least 8k
       let toGrow = max 8192 $ targetSize - currentSize
-      memory' <- VUnboxed.Mutable.grow memory toGrow
+      memory' <- VS.Mutable.grow memory toGrow
       assign (#state % #memory) (ConcreteMemory memory')
       pure memory'
     else
@@ -2977,7 +2976,7 @@ writeMemory memory offset buf = do
 
 freezeMemory :: MutableMemory s -> EVM t s (Expr Buf)
 freezeMemory memory =
-  ConcreteBuf . BS.pack . VUnboxed.toList <$> VUnboxed.freeze memory
+  ConcreteBuf . vectorToByteString <$> VS.freeze memory
 
 
 instance VMOps Symbolic where
