@@ -82,7 +82,7 @@ data SingleData = SingleData
   , resultChan :: Chan SMTResult
   }
 
--- returns True if a is a supeset of any of the sets in bs
+-- returns True if a is a superset of any of the sets in bs
 supersetAny :: Set Prop -> [Set Prop] -> Bool
 supersetAny a bs = any (`isSubsetOf` a) bs
 
