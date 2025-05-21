@@ -307,7 +307,7 @@ findBufferAccess = foldl (foldTerm go) mempty
 -- to zero. Looks for buffer reads in the a list of given predicates
 -- and the buffer and storage environments.
 assertReads :: [Prop] -> BufEnv -> StoreEnv -> [Prop]
-assertReads props benv senv = concatMap assertRead allReads
+assertReads props benv senv = nubOrd $ concatMap assertRead allReads
   where
     assertRead :: (Expr EWord, Expr EWord, Expr Buf) -> [Prop]
     assertRead (_, Lit 0, _) = []
