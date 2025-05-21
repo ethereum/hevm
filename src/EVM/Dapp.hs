@@ -27,7 +27,6 @@ data DappInfo = DappInfo
   , solcByHash :: Map W256 (CodeType, SolcContract)
   , solcByCode :: [(Code, SolcContract)] -- for contracts with `immutable` vars.
   , sources    :: SourceCache
-  , unitTests  :: [(Text, [Sig])]
   , abiMap     :: Map FunctionSelector Method
   , eventMap   :: Map W256 Event
   , errorMap   :: Map W256 SolError
@@ -57,7 +56,6 @@ dappInfo root (BuildOutput (Contracts cs) sources) =
 
   in DappInfo
     { root = root
-    , unitTests = findAllUnitTests solcs
     , sources = sources
     , solcByName = cs
     , solcByHash =
@@ -92,37 +90,33 @@ emptyDapp = dappInfo "" mempty
 unitTestMarkerAbi :: FunctionSelector
 unitTestMarkerAbi = abiKeccak (encodeUtf8 "IS_TEST()")
 
-findAllUnitTests :: [SolcContract] -> [(Text, [Sig])]
-findAllUnitTests = findUnitTests ".*:.*\\.(check|prove).*"
-
-mkSig :: Method -> Maybe Sig
-mkSig method
-  | "prove" `isPrefixOf` testname = Just (Sig testname argtypes)
-  | "check" `isPrefixOf` testname = Just (Sig testname argtypes)
+mkSig :: Text -> Method -> Maybe Sig
+mkSig prefix method
+  | prefix `isPrefixOf` testname = Just (Sig testname argtypes)
   | otherwise = Nothing
   where
     testname = method.name
     argtypes = snd <$> method.inputs
 
-findUnitTests :: Text -> ([SolcContract] -> [(Text, [Sig])])
-findUnitTests match =
+findUnitTests :: Text -> Text -> ([SolcContract] -> [(Text, [Sig])])
+findUnitTests prefix match =
   concatMap $ \c ->
     case Map.lookup unitTestMarkerAbi c.abiMap of
       Nothing -> []
       Just _  ->
-        let testNames = unitTestMethodsFiltered (regexMatches match) c
+        let testNames = unitTestMethodsFiltered prefix (regexMatches match) c
         in [(c.contractName, testNames) | not (BS.null c.runtimeCode) && not (null testNames)]
 
-unitTestMethodsFiltered :: (Text -> Bool) -> (SolcContract -> [Sig])
-unitTestMethodsFiltered matcher c =
+unitTestMethodsFiltered :: Text -> (Text -> Bool) -> (SolcContract -> [Sig])
+unitTestMethodsFiltered prefix matcher c =
   let testName (Sig n _) = c.contractName <> "." <> n
-  in filter (matcher . testName) (unitTestMethods c)
+  in filter (matcher . testName) (unitTestMethods prefix c)
 
-unitTestMethods :: SolcContract -> [Sig]
-unitTestMethods =
+unitTestMethods :: Text -> SolcContract -> [Sig]
+unitTestMethods prefix =
   (.abiMap)
   >>> Map.elems
-  >>> mapMaybe mkSig
+  >>> mapMaybe (mkSig prefix)
 
 traceSrcMap :: DappInfo -> Trace -> Maybe SrcMap
 traceSrcMap dapp trace = srcMap dapp trace.contract trace.opIx

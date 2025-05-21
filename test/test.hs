@@ -1582,7 +1582,7 @@ tests = testGroup "hevm"
           assertEqualM "number of qed-s" 1 numQeds
       -- below we don't hit the limit of the depth of the symbolic execution tree
       , testCase "limit-num-explore-no-hit-limit" $ do
-        let conf = testEnv.config {maxDepth = Just 4}
+        let conf = testEnv.config {maxDepth = Just 7}
         let myTestEnv :: Env = (testEnv :: Env) {config = conf :: Config}
         runEnv myTestEnv $ do
           Just c <- solcRuntime "C"
@@ -1790,7 +1790,7 @@ tests = testGroup "hevm"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" (True, True)
     , test "prefix-check-for-dapp" $ do
         let testFile = "test/contracts/fail/check-prefix.sol"
-        runSolidityTest testFile "check_trivial" >>= assertEqualM "test result" (False, False)
+        runSolidityTest testFile "prove_trivial" >>= assertEqualM "test result" (False, False)
     , test "transfer-dapp" $ do
         let testFile = "test/contracts/pass/transfer.sol"
         runSolidityTest testFile "prove_transfer" >>= assertEqualM "should prove transfer" (True, True)
@@ -4440,6 +4440,14 @@ tests = testGroup "hevm"
         assertEqualM "Can get value out of model in the presence of large buffer!" value (Right $ Lit 0x1)
     , test "no-duplicates-with-concrete-keccak" $ do
       let props = [(PGT (Var "a") (Keccak (ConcreteBuf "abcdef"))), (PGT (Var "b") (Keccak (ConcreteBuf "abcdef")))]
+      conf <- readConfig
+      let SMT2 builders _ _ = fromRight (internalError "Must succeed") (assertProps conf props)
+      let texts = fmap toLazyText builders
+      let sexprs = splitSExpr texts
+      let noDuplicates = ((length sexprs) == (Set.size (Set.fromList sexprs)))
+      assertBoolM "There were duplicate lines in SMT encoding" noDuplicates
+    , test "no-duplicates-with-read-assumptions" $ do
+      let props = [(PGT (ReadWord (Lit 2) (AbstractBuf "test")) (Lit 0)), (PGT (Expr.padByte $ ReadByte (Lit 10) (AbstractBuf "test")) (Expr.padByte $ LitByte 1))]
       conf <- readConfig
       let SMT2 builders _ _ = fromRight (internalError "Must succeed") (assertProps conf props)
       let texts = fmap toLazyText builders

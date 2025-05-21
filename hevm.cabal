@@ -360,3 +360,27 @@ benchmark bench
     filepath,
     containers,
     unliftio-core
+
+benchmark bench-perf
+  import: shared
+  default-language: GHC2021
+  type:
+    exitcode-stdio-1.0
+  main-is:
+    bench-perf.hs
+  hs-source-dirs:
+    bench
+  ghc-options:
+    -O2 -threaded -with-rtsopts=-N -fproc-alignment=64
+  other-modules:
+    Paths_hevm
+  autogen-modules:
+    Paths_hevm
+  build-depends:
+    base,
+    here,
+    hevm,
+    mtl,
+    tasty-bench,
+    test-utils,
+    utf8-string

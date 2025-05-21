@@ -48,8 +48,8 @@ import Data.Text.Encoding qualified as T
 import Data.Tree (Forest)
 import Data.Tree.Zipper qualified as Zipper
 import Data.Vector qualified as V
-import Data.Vector.Storable qualified as SV
-import Data.Vector.Unboxed.Mutable (STVector)
+import Data.Vector.Storable qualified as VS
+import Data.Vector.Storable.Mutable (STVector)
 import Numeric (readHex, showHex)
 import Options.Generic
 import Optics.TH
@@ -842,7 +842,7 @@ data Contract = Contract
   , balance     :: Expr EWord
   , nonce       :: Maybe W64
   , codehash    :: Expr EWord
-  , opIxMap     :: SV.Vector Int
+  , opIxMap     :: VS.Vector Int
   , codeOps     :: V.Vector (Int, Op)
   , external    :: Bool
   }
@@ -1196,8 +1196,8 @@ instance (Eq a, Eq b) => Eq (ProofResult a b) where
     _                        -> False
 
 type VerifyResult = ProofResult (Expr End, SMTCex) (String, Expr End)
-type EquivResult = ProofResult (SMTCex) String
-type SMTResult = ProofResult (SMTCex) String
+type EquivResult = ProofResult SMTCex String
+type SMTResult = ProofResult SMTCex String
 
 getUnknown :: ProofResult a b -> Maybe b
 getUnknown (Unknown a) = Just a

@@ -51,6 +51,7 @@ data UnitTestOptions s = UnitTestOptions
   , askSmtIters :: Integer
   , smtTimeout  :: Maybe Natural
   , match       :: Text
+  , prefix      :: Text
   , dapp        :: DappInfo
   , testParams  :: TestVMParams
   , ffiAllowed  :: Bool
@@ -112,7 +113,7 @@ makeVeriOpts opts =
 -- | Returns tuple of (No Cex, No warnings)
 unitTest :: App m => UnitTestOptions RealWorld -> Contracts -> m (Bool, Bool)
 unitTest opts (Contracts cs) = do
-  let unitTestContrs = findUnitTests opts.match $ Map.elems cs
+  let unitTestContrs = findUnitTests opts.prefix opts.match $ Map.elems cs
   conf <- readConfig
   when conf.debug $ liftIO $ do
     putStrLn $ "Found " ++ show (length unitTestContrs) ++ " unit test contract(s) to test:"

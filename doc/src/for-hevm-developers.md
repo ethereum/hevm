@@ -16,7 +16,7 @@ add x y = trace "Hello from add!" (x + y)
 
 # Testing
 
-`hevm` uses [Tasty](https://hackage.haskell.org/package/tasty-1.5/docs/Test-Tasty.html) framework for running tests, including [`QuickCheck`](https://hackage.haskell.org/package/tasty-quickcheck-0.11/docs/Test-Tasty-QuickCheck.html) for property-based testing.
+`hevm` uses [Tasty](https://hackage.haskell.org/package/tasty-1.5/docs/Test-Tasty.html) framework for running tests, including [`QuickCheck`](https://hackage.haskell.org/package/tasty-quickcheck-0.11/docs/Test-Tasty-QuickCheck.html) for property-based testing. It also uses [`tasty-bench`](https://github.com/Bodigrim/tasty-bench) for benchmarking.
 
 
 ## Running tests
@@ -54,6 +54,28 @@ Similarly, the `maxSuccess` value can be modified for a single test. The followi
 ```
 testProperty <property_name> $ withMaxSuccess 20 $ ...
 ```
+
+## Running benchmarks
+
+You can also measure and compare the performance across hevm versions using the benchmarks.
+`bench-perf` focuses on concrete execution performance, and `bench` is aimed at
+symbolic execution and solving. Refer to the tasty-bench documentation for more detailed
+usage information.
+
+```plain
+# Measure time and memory usage
+$ cabal run bench-perf -- +RTS -T
+
+# Collect timings for a base version
+$ cabal run bench-perf  -- --csv baseline.csv
+
+# Perform some changes on the hevm code
+# ...
+
+# Benchmark changed code and compare with baseline
+$ cabal run bench-perf  -- --baseline baseline.csv
+```
+
 
 # Profiling
 
