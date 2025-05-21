@@ -51,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   currently executed branch is in fact impossible. In these cases, unwind all
   frames and return a Revert with empty returndata.
 - More rewrite rules for PEq, PNeg, missing eqByte call, and distributivity for And
+- UNSAT cache is now in `Solvers.hs` and is therefore shared across all threads.
+  Hence, it is now active even during branch queries.
 - Allow changing of the prefix from "prove" via --prefix in `test` mode
 - More complete simplification during interpretation
 
