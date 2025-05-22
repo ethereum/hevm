@@ -668,24 +668,49 @@ verify
   -> Maybe (Postcondition RealWorld)
   -> m (Expr End, [VerifyResult])
 verify solvers opts preState maybepost = do
+  (expr, res) <- verifyInputs solvers opts (Fetch.oracle solvers opts.rpcInfo) preState maybepost
+  pure $ verifyResults preState expr res
+
+verifyResults :: VM Symbolic RealWorld -> Expr End -> [(SMTResult, Expr End)] -> (Expr End, [VerifyResult])
+verifyResults preState expr cexs = if Prelude.null cexs then (expr, [Qed]) else (expr, fmap toVRes cexs)
+  where
+    toVRes :: (SMTResult, Expr End) -> VerifyResult
+    toVRes (res, leaf) = case res of
+      Cex model -> Cex (leaf, expandCex preState model)
+      Unknown reason -> Unknown (reason, leaf)
+      Error e -> Error e
+      Qed -> Qed
+
+-- | Symbolically execute the VM and find possible inputs given the
+-- postcondition, if available.
+verifyInputs
+  :: App m
+  => SolverGroup
+  -> VeriOpts
+  -> Fetch.Fetcher Symbolic m RealWorld
+  -> VM Symbolic RealWorld
+  -> Maybe (Postcondition RealWorld)
+  -> m (Expr End, [(SMTResult, Expr End)])
+verifyInputs solvers opts fetcher preState maybepost = do
   conf <- readConfig
   let call = mconcat ["prefix 0x", getCallPrefix preState.state.calldata]
   when conf.debug $ liftIO $ putStrLn $ "   Exploring call " <> call
 
-  exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.iterConf preState runExpr
+  exprInter <- interpret fetcher opts.iterConf preState runExpr
   when conf.dumpExprs $ liftIO $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
   liftIO $ do
     when conf.debug $ putStrLn "   Simplifying expression"
     let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
     when conf.dumpExprs $ T.writeFile "simplified.expr" (formatExpr expr)
     when conf.dumpExprs $ T.writeFile "simplified-conc.expr" (formatExpr $ Expr.simplify $ mapExpr Expr.concKeccakOnePass expr)
+    when conf.debug $ putStrLn "   Flattening expression"
     let flattened = flattenExpr expr
     when conf.debug $ do
       printPartialIssues flattened ("the call " <> call)
       putStrLn $ "   Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
 
     case maybepost of
-      Nothing -> pure (expr, [Qed])
+      Nothing -> pure (expr, [(Qed, expr)])
       Just post -> liftIO $ do
         let
           -- Filter out any leaves from `flattened` that can be statically shown to be safe
@@ -702,7 +727,7 @@ verify solvers opts preState maybepost = do
           pure (res, leaf)
         let cexs = filter (\(res, _) -> not . isQed $ res) results
         when conf.debug $ putStrLn $ "   Found " <> show (length cexs) <> " potential counterexample(s) in call " <> call
-        pure $ if Prelude.null cexs then (expr, [Qed]) else (expr, fmap toVRes cexs)
+        pure (expr, cexs)
   where
     getCallPrefix :: Expr Buf -> String
     getCallPrefix (WriteByte (Lit 0) (LitByte a) (WriteByte (Lit 1) (LitByte b) (WriteByte (Lit 2) (LitByte c) (WriteByte (Lit 3) (LitByte d) _)))) = mconcat $ map (printf "%02x") [a,b,c,d]
@@ -713,12 +738,6 @@ verify solvers opts preState maybepost = do
     canBeSat (a, _) = case a of
         [PBool False] -> False
         _ -> True
-    toVRes :: (SMTResult, Expr End) -> VerifyResult
-    toVRes (res, leaf) = case res of
-      Cex model -> Cex (leaf, expandCex preState model)
-      Unknown reason -> Unknown (reason, leaf)
-      Error e -> Error e
-      Qed -> Qed
 
 expandCex :: VM Symbolic s -> SMTCex -> SMTCex
 expandCex prestate c = c { store = Map.union c.store concretePreStore }
