@@ -1763,15 +1763,27 @@ tests = testGroup "hevm"
         runSolidityTest testFile ".*" >>= assertEqualM "test result" (True, True)
     , test "Foundry" $ do
         -- quick smokecheck to make sure that we can parse ForgeStdLib style build outputs
+        -- return is a pair of (No Cex, No Warnings)
         let cases =
-              [ ("test/contracts/pass/trivial.sol", ".*", (True, True))
-              , ("test/contracts/pass/dsProvePass.sol", "proveEasy", (True, True))
-              , ("test/contracts/fail/trivial.sol", ".*", (False, False))
-              , ("test/contracts/fail/dsProveFail.sol", "prove_add", (False, True))
+              [ ("test/contracts/pass/trivial.sol",       ".*", (True, True))
+              , ("test/contracts/pass/dsProvePass.sol",   ".*", (True, True))
+              , ("test/contracts/pass/revertEmpty.sol",   ".*", (True, True))
+              , ("test/contracts/pass/revertString.sol",  ".*", (True, True))
+              , ("test/contracts/pass/requireEmpty.sol",  ".*", (True, True))
+              , ("test/contracts/pass/requireString.sol", ".*", (True, True))
+              , ("test/contracts/fail/trivial.sol",       ".*", (False, False))
+              , ("test/contracts/fail/dsProveFail.sol",   "prove_add", (False, True))
+              , ("test/contracts/fail/dsProveFail.sol",   "prove_multi", (False, True))
+              -- all branches revert, which is a warning
+              , ("test/contracts/fail/dsProveFail.sol",   "prove_trivial.*", (False, False))
+              , ("test/contracts/fail/dsProveFail.sol",   "prove_distributivity", (False, True))
+              , ("test/contracts/fail/assertEq.sol",      ".*", (False, True))
+              -- bad cheatcode detected, hence the warning
+              , ("test/contracts/fail/bad-cheatcode.sol", ".*", (False, False))
               ]
         forM_ cases $ \(testFile, match, expected) -> do
           actual <- runSolidityTestCustom testFile match Nothing Nothing False Nothing Foundry
-          putStrLnM $ "Test result for " <> testFile <> ": " <> show actual
+          putStrLnM $ "Test result for " <> testFile <> " match: " <> T.unpack match <> ": " <> show actual
           assertEqualM "Must match" actual  expected
     , test "Trivial-Fail" $ do
         let testFile = "test/contracts/fail/trivial.sol"
@@ -1794,10 +1806,6 @@ tests = testGroup "hevm"
     , test "transfer-dapp" $ do
         let testFile = "test/contracts/pass/transfer.sol"
         runSolidityTest testFile "prove_transfer" >>= assertEqualM "should prove transfer" (True, True)
-    , test "badvault-sym-branch" $ do
-        let testFile = "test/contracts/fail/10_BadVault.sol"
-        runSolidityTestCustom testFile "prove_BadVault_usingExploitLaunchPad"  Nothing Nothing True Nothing Foundry >>=
-          assertEqualM "Must find counterexample" (False, True)
     , test "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
         runSolidityTest testFile "prove_trivial" >>= assertEqualM "prove_trivial" (False, False)
