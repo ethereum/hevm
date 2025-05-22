@@ -505,6 +505,7 @@ getExpr solvers c signature' concreteArgs opts = do
     - 0x51: If you call a zero-initialized variable of internal function type.
 
   see: https://docs.soliditylang.org/en/v0.8.6/control-structures.html?highlight=Panic#panic-via-assert-and-error-via-require
+  NOTE: does not deal with e.g. `assertEq()`
 -}
 checkAssertions :: [Word256] -> Postcondition s
 checkAssertions errs _ = \case
