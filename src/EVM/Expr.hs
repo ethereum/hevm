@@ -757,7 +757,7 @@ litToArrayPreimage val =
       -- We have found an 'foundImageHashKey' such that 'foundImageHashKey <= val'.
       -- Now we must check if 'val' is also within the 256-byte range starting at 'foundImageHashKey',
       -- i.e., 'val <= foundImageHashKey + 255'.
-      if val <= image_upper_bound then
+      if val <= foundImageHashKey + 255 then
         Just (array_id, val - foundImageHashKey) -- Return the id and the offset from the hash
       else
         -- 'val' is greater than the upper bound for 'foundImageHashKey'.
