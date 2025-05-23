@@ -949,9 +949,7 @@ exec1 conf = do
         OpDelegatecall ->
           case stk of
             xGas:xTo:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
-              case wordToAddr xTo of
-                Nothing -> unexpectedSymArg "unable to determine a call target" [xTo]
-                Just xTo' ->
+              forceAddr xTo (const $ unexpectedSymArg "unable to determine a call target" [xTo]) $ \xTo' ->
                   case gasTryFrom xGas of
                     Left _ -> vmError IllegalOverflow
                     Right gas ->
@@ -987,23 +985,21 @@ exec1 conf = do
         OpStaticcall ->
           case stk of
             xGas:xTo:xInOffset:xInSize:xOutOffset:xOutSize:xs ->
-              case wordToAddr xTo of
-                Nothing -> fallback
-                Just xTo' -> do
-                  case gasTryFrom xGas of
-                    Left _ -> vmError IllegalOverflow
-                    Right gas -> do
-                      overrideC <- use $ #state % #overrideCaller
-                      delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs (const fallback) $
-                        \callee -> do
-                          zoom #state $ do
-                            assign #callvalue (Lit 0)
-                            assign #caller $ fromMaybe self overrideC
-                            assign #contract callee
-                            assign #static True
-                          touchAccount self
-                          touchAccount callee
-              where fallback = freshBufFallback xs
+              forceAddr xTo (const fallback) $ \xTo' -> case gasTryFrom xGas of
+                Left _ -> vmError IllegalOverflow
+                Right gas -> do
+                  overrideC <- use $ #state % #overrideCaller
+                  delegateCall this gas xTo' xTo' (Lit 0) xInOffset xInSize xOutOffset xOutSize xs (const fallback) $
+                    \callee -> do
+                      zoom #state $ do
+                        assign #callvalue (Lit 0)
+                        assign #caller $ fromMaybe self overrideC
+                        assign #contract callee
+                        assign #static True
+                      touchAccount self
+                      touchAccount callee
+                where
+                  fallback = freshBufFallback xs
             _ -> underrun
 
         OpSelfdestruct ->

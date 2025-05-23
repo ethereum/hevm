@@ -1765,6 +1765,8 @@ tests = testGroup "hevm"
         -- quick smokecheck to make sure that we can parse ForgeStdLib style build outputs
         let cases =
               [ ("test/contracts/pass/trivial.sol", ".*", (True, True))
+              , ("test/contracts/pass/no-overapprox-staticcall.sol", ".*", (True, True))
+              , ("test/contracts/pass/no-overapprox-delegatecall.sol", ".*", (True, True))
               , ("test/contracts/pass/dsProvePass.sol", "proveEasy", (True, True))
               , ("test/contracts/fail/trivial.sol", ".*", (False, False))
               , ("test/contracts/fail/dsProveFail.sol", "prove_add", (False, True))

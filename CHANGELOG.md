@@ -53,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More rewrite rules for PEq, PNeg, missing eqByte call, and distributivity for And
 - Allow changing of the prefix from "prove" via --prefix in `test` mode
 - More complete simplification during interpretation
+- SMT-based resolving of addresses now works for delegatecall and staticcall
+  opcodes as well
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
