@@ -5,13 +5,12 @@ module EVM.SymExec where
 
 import Control.Concurrent.Async (concurrently, mapConcurrently)
 import Control.Concurrent.Spawn (parMapIO, pool)
-import Control.Concurrent.STM (TVar, readTVarIO, newTVarIO, atomically, modifyTVar')
 import Control.Monad (when, forM_, forM)
 import Control.Monad.IO.Unlift
 import Control.Monad.Operational qualified as Operational
 import Control.Monad.ST (RealWorld, stToIO, ST)
 import Control.Monad.State.Strict (runStateT)
-import Data.Bifunctor (second, first)
+import Data.Bifunctor (second)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Containers.ListUtils (nubOrd)
@@ -22,7 +21,7 @@ import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Map.Merge.Strict qualified as Map
-import Data.Set (Set, isSubsetOf)
+import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -698,36 +697,34 @@ verifyInputs solvers opts fetcher preState maybepost = do
 
   exprInter <- interpret fetcher opts.iterConf preState runExpr
   when conf.dumpExprs $ liftIO $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
-  liftIO $ do
-    when conf.debug $ putStrLn "   Simplifying expression"
-    let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
-    when conf.dumpExprs $ T.writeFile "simplified.expr" (formatExpr expr)
-    when conf.dumpExprs $ T.writeFile "simplified-conc.expr" (formatExpr $ Expr.simplify $ mapExpr Expr.concKeccakOnePass expr)
-    when conf.debug $ putStrLn "   Flattening expression"
-    let flattened = flattenExpr expr
-    when conf.debug $ do
-      printPartialIssues flattened ("the call " <> call)
-      putStrLn $ "   Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
+  let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
+      flattened = flattenExpr expr
+  when conf.dumpExprs $ liftIO $ do
+    T.writeFile "simplified.expr" (formatExpr expr)
+    T.writeFile "simplified-conc.expr" (formatExpr $ Expr.simplify $ mapExpr Expr.concKeccakOnePass expr)
+    putStrLn "   Flattening expression"
+    printPartialIssues flattened ("the call " <> call)
+    putStrLn $ "   Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
 
-    case maybepost of
-      Nothing -> pure (expr, [(Qed, expr)])
-      Just post -> liftIO $ do
-        let
-          -- Filter out any leaves from `flattened` that can be statically shown to be safe
-          tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf preState.constraints post, leaf)
-          withQueries = filter canBeSat tocheck <&> first (SMT.assertProps conf)
-        when conf.debug $
-          putStrLn $ "   Checking for reachability of " <> show (length withQueries)
-                     <> " potential property violation(s) in call " <> call
+  case maybepost of
+    Nothing -> pure (expr, [(Qed, expr)])
+    Just post -> do
+      let
+        -- Filter out any leaves from `flattened` that can be statically shown to be safe
+        tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf preState.constraints post, leaf)
+        withQueries = filter canBeSat tocheck
+      when conf.debug $ liftIO $ putStrLn $ "   Checking for reachability of " <> show (length withQueries)
+        <> " potential property violation(s) in call " <> call
 
-        -- Dispatch the remaining branches to the solver to check for violations
-        results <- flip mapConcurrently withQueries $ \(query, leaf) -> do
-          res <- checkSat solvers query
-          when conf.debug $ putStrLn $ "   SMT result: " <> show res
-          pure (res, leaf)
-        let cexs = filter (\(res, _) -> not . isQed $ res) results
-        when conf.debug $ putStrLn $ "   Found " <> show (length cexs) <> " potential counterexample(s) in call " <> call
-        pure (expr, cexs)
+      -- Dispatch the remaining branches to the solver to check for violations
+      results <- withRunInIO $ \env -> flip mapConcurrently withQueries $ \(query, leaf) -> do
+        res <- env $ checkSatWithProps solvers query
+        when conf.debug $ putStrLn $ "   SMT result: " <> show (fst res)
+        pure (fst res, leaf)
+      let cexs = filter (\(res, _) -> not . isQed $ res) results
+      when conf.debug $ liftIO $
+        putStrLn $ "   Found " <> show (length cexs) <> " potential counterexample(s) in call " <> call
+      pure (expr, cexs)
   where
     getCallPrefix :: Expr Buf -> String
     getCallPrefix (WriteByte (Lit 0) (LitByte a) (WriteByte (Lit 1) (LitByte b) (WriteByte (Lit 2) (LitByte c) (WriteByte (Lit 3) (LitByte d) _)))) = mconcat $ map (printf "%02x") [a,b,c,d]
@@ -748,8 +745,6 @@ expandCex prestate c = c { store = Map.union c.store concretePreStore }
     isConcreteStore = \case
       ConcreteStore _ -> True
       _ -> False
-
-type UnsatCache = TVar [Set Prop]
 
 data EqIssues = EqIssues
   { res :: [(EquivResult, String)]
@@ -852,51 +847,28 @@ equivalenceCheck' solvers branchesA branchesB create = do
       when conf.dumpEndStates $ forM_ (zip differingEndStates [(1::Integer)..]) (\(x, i) ->
         liftIO $ T.writeFile ("prop-checked-" <> show i <> ".prop") (T.pack $ show x))
 
-      knownUnsat <- liftIO $ newTVarIO []
       procs <- liftIO getNumProcessors
-      newDifferences <- checkAll differingEndStates knownUnsat procs
+      newDifferences <- checkAll differingEndStates procs
       let additionalIssues = EqIssues newDifferences mempty
       pure $ knownIssues <> additionalIssues
 
   where
-    -- we order the sets by size because this gives us more cache hits when
+    -- we order the sets by size because this gives us more UNSAT cache hits when
     -- running our queries later on (since we rely on a subset check)
     sortBySize :: [(Set a, b)] -> [(Set a, b)]
     sortBySize = sortBy (\(a, _) (b, _) -> compare (Set.size a) (Set.size b))
-
-
-    -- returns True if a is a supeset of any of the sets in bs
-    supersetAny :: Set Prop -> [Set Prop] -> Bool
-    supersetAny a bs = any (`isSubsetOf` a) bs
-
-    -- checks for satisfiability of all the props in the provided set. skips
-    -- the solver if we can determine unsatisfiability from the cache already
-    -- the last element of the returned tuple indicates whether the cache was
-    -- used or not
-    check :: App m => UnsatCache -> Set Prop -> m EquivResult
-    check knownUnsat props =
-      if (Set.member (PBool False) props) then pure Qed else do
-      ku <- liftIO $ readTVarIO knownUnsat
-      if supersetAny props ku then pure Qed
-      else do
-        (res, _) <- checkSatWithProps solvers (Set.toList props)
-        case res of
-          Qed -> do
-            _ <- liftIO $ atomically $ modifyTVar' knownUnsat (props :)
-            pure Qed
-          other -> pure other
 
     -- Allows us to run the queries in parallel. Note that this (seems to) run it
     -- from left-to-right, and with a max of K threads. This is in contrast to
     -- mapConcurrently which would spawn as many threads as there are jobs, and
     -- run them in a random order. We ordered them correctly, though so that'd be bad
-    checkAll :: (App m, MonadUnliftIO m) => [(Set Prop, String)] -> UnsatCache -> Int -> m [(EquivResult, String)]
-    checkAll input cache numproc = withRunInIO $ \env -> do
+    checkAll :: (App m, MonadUnliftIO m) => [(Set Prop, String)] -> Int -> m [(EquivResult, String)]
+    checkAll input numproc = withRunInIO $ \env -> do
        wrap <- pool numproc
        parMapIO (runOne env wrap) input
        where
          runOne env wrap (props, meaning) = do
-           res <- wrap (env $ check cache props)
+           res <- wrap (env $ fst <$> checkSatWithProps solvers (Set.toList props))
            pure (res, meaning)
 
     -- Takes two branches and returns a set of props that will need to be
@@ -1021,10 +993,9 @@ both' f (x, y) = (f x, f y)
 produceModels :: App m => SolverGroup -> Expr End -> m [(Expr End, SMTResult)]
 produceModels solvers expr = do
   let flattened = flattenExpr expr
-      withQueries conf = fmap (\e -> ((SMT.assertProps conf) . extractProps $ e, e)) flattened
-  conf <- readConfig
-  results <- liftIO $ (flip mapConcurrently) (withQueries conf) $ \(query, leaf) -> do
-    res <- checkSat solvers query
+      withQueries = fmap (\e -> (extractProps e, e)) flattened
+  results <- withRunInIO $ \runInIO -> (flip mapConcurrently) withQueries $ \(query, leaf) -> do
+    (res, _) <- runInIO $ checkSatWithProps solvers query
     pure (res, leaf)
   pure $ fmap swap $ filter (\(res, _) -> not . isQed $ res) results
 
