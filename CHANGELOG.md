@@ -55,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More complete simplification during interpretation
 - SMT-based resolving of addresses now works for delegatecall and staticcall
   opcodes as well
+- Rewrite rule to deal with some forms of argument packing by Solidity
+  via masking
+- More rewrite rules for array and map lookups.
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
