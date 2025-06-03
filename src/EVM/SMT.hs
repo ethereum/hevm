@@ -19,6 +19,8 @@ import Data.String.Here
 import Data.Maybe (fromJust, fromMaybe, isJust, listToMaybe)
 import Data.Either.Extra (fromRight')
 import Data.Foldable (fold)
+import Data.HashMap.Strict (HashMap)
+import Data.HashMap.Strict qualified as HashMap
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set (Set)
@@ -928,8 +930,8 @@ writeBytes bytes buf =  do
           idxSMT <- exprToSMT . Lit . unsafeInto $ idx
           pure (idx + 1, "(store " <> inner `sp` idxSMT `sp` byteSMT <> ")")
 
-encodeConcreteStore :: Map W256 W256 -> Err Builder
-encodeConcreteStore s = foldM encodeWrite ("((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000)") (Map.toList s)
+encodeConcreteStore :: HashMap W256 W256 -> Err Builder
+encodeConcreteStore s = foldM encodeWrite ("((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000)") (HashMap.toList s)
   where
     encodeWrite :: Builder -> (W256, W256) -> Err Builder
     encodeWrite prev (key, val) = do
@@ -1109,7 +1111,7 @@ getBufs getVal bufs = foldM getBuf mempty bufs
 getStore
   :: (Text -> IO Text)
   -> Map (Expr EAddr, Maybe W256) (Set (Expr EWord))
-  -> IO (Map (Expr EAddr) (Map W256 W256))
+  -> IO (Map (Expr EAddr) (HashMap W256 W256))
 getStore getVal abstractReads =
   fmap Map.fromList $ forM (Map.toList abstractReads) $ \((addr, idx), slots) -> do
     let name = toLazyText (storeName addr idx)
@@ -1128,7 +1130,7 @@ getStore getVal abstractReads =
     -- then create a map by adding only the locations that are read by the program
     store <- foldM (\m slot -> do
       slot' <- queryValue getVal slot
-      pure $ Map.insert slot' (fun slot') m) Map.empty slots
+      pure $ HashMap.insert slot' (fun slot') m) HashMap.empty slots
     pure (addr, store)
 
 -- | Ask the solver to give us the concrete value of an arbitrary abstract word
