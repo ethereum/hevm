@@ -965,6 +965,8 @@ simplify :: Expr a -> Expr a
 simplify e = untilFixpoint (simplifyNoLitToKeccak . litToKeccak) e
 
 simplifyNoLitToKeccak :: Expr a -> Expr a
+simplifyNoLitToKeccak l@(Lit _) = l
+simplifyNoLitToKeccak s@(ConcreteStore _) = s
 simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
   where
     go :: Expr a -> Expr a
