@@ -121,6 +121,7 @@ main = do
                    , ("contractCreation", contractCreation, Nothing)
                    , ("contractCreationMem", contractCreationMem, Nothing)
                    , ("arrayCreationMem", arrayCreationMem, Just 9)
+                   , ("mapStorage", mapStorage, Nothing)
                    ]
   defaultMain =<< mapM f benchmarks
   
@@ -296,6 +297,23 @@ arrayCreationMem n = do
             function main() public {
               for (uint i = 0; i < ${n}; i++) {
                 C[] memory ret = work();
+              }
+            }
+          }
+        |]
+  fmap fromJust (runApp $ solcRuntime "A" src)
+
+-- Create large map in storage
+mapStorage :: Int -> IO ByteString
+mapStorage n = do
+  let src =
+        [i|
+          struct C { uint256 a; uint256 b; }
+          contract A {
+            mapping(uint256 => mapping(uint256 => C)) m;
+            function main() public {
+              for (uint i = 0; i < ${n}; i++) {
+                m[i][${n}-i] = C(i, ${n});
               }
             }
           }
