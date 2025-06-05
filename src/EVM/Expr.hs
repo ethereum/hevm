@@ -749,10 +749,9 @@ litToArrayPreimage :: W256 -> Maybe (Word8, W256)
 litToArrayPreimage val =
   -- Find the largest 'imageHashKey' in our map such that 'imageHashKey <= val'.
   case Map.lookupLE val preImageLookupMap of
-    Just (foundImageHashKey, (array_id, image_upper_bound)) ->
+    Just (foundImageHashKey, array_id) ->
       -- 'foundImageHashKey' is one of the keccak hashes from preImagesSource.
       -- 'array_id' is the original Word8 (0-255) that produced this hash.
-      -- 'image_upper_bound' is 'foundImageHashKey + 255'.
 
       -- We have found an 'foundImageHashKey' such that 'foundImageHashKey <= val'.
       -- Now we must check if 'val' is also within the 256-byte range starting at 'foundImageHashKey',
@@ -769,13 +768,11 @@ litToArrayPreimage val =
       -- This implies 'val' is smaller than all computed 'image' hashes.
       Nothing
 
--- Your litToKeccak function remains structurally the same,
--- but now calls the optimized litToArrayPreimage.
 litToKeccak :: Expr a -> Expr a
 litToKeccak e = mapExpr go e
   where
     go :: Expr a -> Expr a
-    go orig@(Lit key) = case litToArrayPreimage key of -- This now calls the optimized version
+    go orig@(Lit key) = case litToArrayPreimage key of
       Just (array, offset) -> ArraySlotWithOffs (slotPos array) (Lit offset)
       _ -> orig
     go otherNode = otherNode
@@ -1654,8 +1651,8 @@ preImages :: [(W256, Word8)]
 preImages = [(keccak' (word256Bytes . into $ i), i) | i <- [0..255]]
 
 -- | images of keccak(bytes32(x)) where 0 <= x < 256
-preImageLookupMap :: Map.Map W256 (Word8, W256)
-preImageLookupMap = Map.fromList $ map (\(imageHash, originalId) -> (imageHash, (originalId, imageHash + fromInteger 255))) preImages
+preImageLookupMap :: Map.Map W256 Word8
+preImageLookupMap = Map.fromList preImages
 data ConstState = ConstState
   { values :: Map.Map (Expr EWord) W256
   , canBeSat :: Bool
