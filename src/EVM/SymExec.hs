@@ -15,6 +15,8 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Containers.ListUtils (nubOrd)
 import Data.DoubleWord (Word256)
+import Data.HashMap.Strict (HashMap)
+import Data.HashMap.Strict qualified as HashMap
 import Data.List (foldl', sortBy, sort)
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
@@ -982,7 +984,7 @@ equivalenceCheck' solvers branchesA branchesB create = do
         -- TODO: is this sound? do we need a more sophisticated nonce representation?
         noncesDiffer = PBool (ac.nonce /= bc.nonce)
         storesDiffer = case (ac.storage, bc.storage) of
-          (ConcreteStore as, ConcreteStore bs) | not (as == Map.empty || bs == Map.empty) -> PBool $ as /= bs
+          (ConcreteStore as, ConcreteStore bs) | not (as == HashMap.empty || bs == HashMap.empty) -> PBool $ as /= bs
           (as, bs) -> if as == bs then PBool False else as ./= bs
       in balsDiffer .|| storesDiffer .|| noncesDiffer
 
@@ -1057,7 +1059,7 @@ formatCex cd sig m@(SMTCex _ addrs _ store blockContext txContext) = T.unlines $
           [ "Storage:"
           , indent 2 $ T.unlines $ Map.foldrWithKey (\key val acc ->
               ("Addr " <> (T.pack . show $ key)
-                <> ": " <> (T.pack $ show (Map.toList val))) : acc
+                <> ": " <> (T.pack $ show (HashMap.toList val))) : acc
             ) mempty store
           ]
 
@@ -1223,10 +1225,10 @@ subBufs model b = Map.foldlWithKey subBuf (Right b) model
           Just k -> forceFlattened k
           Nothing -> Left $ show buf
 
-subStores :: Map (Expr EAddr) (Map W256 W256) -> Expr a -> Expr a
+subStores :: Map (Expr EAddr) (HashMap W256 W256) -> Expr a -> Expr a
 subStores model b = Map.foldlWithKey subStore b model
   where
-    subStore :: Expr a -> Expr EAddr -> Map W256 W256 -> Expr a
+    subStore :: Expr a -> Expr EAddr -> HashMap W256 W256 -> Expr a
     subStore x var val = mapExpr go x
       where
         go :: Expr a -> Expr a
