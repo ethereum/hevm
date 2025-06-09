@@ -1633,6 +1633,8 @@ containsNode p = getAny . foldExpr go (Any False)
 inRange :: Int -> Expr EWord -> Prop
 inRange sz e = PAnd (PGEq e (Lit 0)) (PLEq e (Lit $ 2 ^ sz - 1))
 
+inRangeSigned :: Int -> Expr EWord -> Prop
+inRangeSigned sz e = PAnd (PLEq e (Lit $ 2 ^ (sz - 1) - 1)) (PLT e (Lit $ 2 ^ (sz - 1)))
 
 -- | images of keccak(bytes32(x)) where 0 <= x < 256
 preImages :: [(W256, Word8)]
