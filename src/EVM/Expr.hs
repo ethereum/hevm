@@ -744,7 +744,30 @@ idsDontMatch a b = BS.length a >= 64 && BS.length b >= 64 && diff32to64Byte a b
 slotPos :: Word8 -> ByteString
 slotPos pos = BS.pack ((replicate 31 (0::Word8))++[pos])
 
--- | Turns Literals into keccak(bytes32(id)) + offset (i.e. writes to arrays)
+-- Optimized litToArrayPreimage using the pre-computed map
+litToArrayPreimage :: W256 -> Maybe (Word8, W256)
+litToArrayPreimage val =
+  -- Find the largest 'imageHashKey' in our map such that 'imageHashKey <= val'.
+  case Map.lookupLE val preImageLookupMap of
+    Just (foundImageHashKey, array_id) ->
+      -- 'foundImageHashKey' is one of the keccak hashes from preImagesSource.
+      -- 'array_id' is the original Word8 (0-255) that produced this hash.
+
+      -- We have found an 'foundImageHashKey' such that 'foundImageHashKey <= val'.
+      -- Now we must check if 'val' is also within the 256-byte range starting at 'foundImageHashKey',
+      -- i.e., 'val <= foundImageHashKey + 255'.
+      if val <= foundImageHashKey + 255 then
+        Just (array_id, val - foundImageHashKey) -- Return the id and the offset from the hash
+      else
+        -- 'val' is greater than the upper bound for 'foundImageHashKey'.
+        -- Since 'foundImageHashKey' was the largest key <= 'val', no other
+        -- (smaller) key in the map could satisfy the condition for its interval if this one doesn't.
+        Nothing
+    Nothing ->
+      -- No key in 'preImageLookupMap' is less than or equal to 'val'.
+      -- This implies 'val' is smaller than all computed 'image' hashes.
+      Nothing
+
 litToKeccak :: Expr a -> Expr a
 litToKeccak e = mapExpr go e
   where
@@ -752,17 +775,7 @@ litToKeccak e = mapExpr go e
     go orig@(Lit key) = case litToArrayPreimage key of
       Just (array, offset) -> ArraySlotWithOffs (slotPos array) (Lit offset)
       _ -> orig
-    go a = a
-
--- Takes in value, checks if it's within 256 of a pre-computed array hash value
--- if it is, it returns (array_number, offset)
-litToArrayPreimage :: W256 -> Maybe (Word8, W256)
-litToArrayPreimage val = go preImages
-  where
-    go :: [(W256, Word8)] -> Maybe (Word8, W256)
-    go ((image, preimage):ax) = if val >= image && val-image <= 255 then Just (preimage, val-image)
-                                                                    else go ax
-    go [] = Nothing
+    go otherNode = otherNode
 
 -- | Writes a value to a key in a storage expression.
 --
@@ -1640,6 +1653,9 @@ inRangeSigned sz e = PAnd (PLEq e (Lit $ 2 ^ (sz - 1) - 1)) (PLT e (Lit $ 2 ^ (s
 preImages :: [(W256, Word8)]
 preImages = [(keccak' (word256Bytes . into $ i), i) | i <- [0..255]]
 
+-- | images of keccak(bytes32(x)) where 0 <= x < 256
+preImageLookupMap :: Map.Map W256 Word8
+preImageLookupMap = Map.fromList preImages
 data ConstState = ConstState
   { values :: Map.Map (Expr EWord) W256
   , canBeSat :: Bool
