@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   opcodes as well
 - UNSAT cache is now in `Solvers.hs` and is therefore shared across all threads.
   Hence, it is now active even during branch queries.
+- More rewrite rules for array and map lookups.
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
