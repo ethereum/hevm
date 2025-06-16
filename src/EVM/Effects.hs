@@ -35,6 +35,7 @@ data Config = Config
   { dumpQueries      :: Bool
   , dumpExprs        :: Bool
   , dumpEndStates    :: Bool
+  , dumpUnsolved     :: Maybe FilePath
   , debug            :: Bool
   , dumpTrace        :: Bool
   , numCexFuzz       :: Integer
@@ -57,6 +58,7 @@ defaultConfig = Config
   { dumpQueries = False
   , dumpExprs = False
   , dumpEndStates = False
+  , dumpUnsolved = Nothing
   , debug = False
   , dumpTrace = False
   , numCexFuzz = 10

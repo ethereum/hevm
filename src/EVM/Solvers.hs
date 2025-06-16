@@ -206,6 +206,12 @@ getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCo
            writeChan r Nothing
         "unknown" -> liftIO $ do
            when conf.debug $ putStrLn "Unknown result by SMT solver."
+           case conf.dumpUnsolved of
+             Just fp -> do
+              let filename = fp <> "unsolved-" <> show fileCounter <> "-sol" <> show (length vals)
+              liftIO $ putStrLn $ "Dumping unsolved SMT query to: " <> filename  
+              liftIO $ writeSMT2File fullSmt filename
+             Nothing -> pure ()
            writeChan r Nothing
         "sat" -> do
           if length vals >= multiSol.maxSols then liftIO $ do
