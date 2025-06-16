@@ -93,6 +93,7 @@ assemble os = V.fromList $ concatMap go os
       OpDelegatecall -> [LitByte 0xF4]
       OpCreate2 -> [LitByte 0xF5]
       OpRevert -> [LitByte 0xFD]
+      OpInvalid -> [LitByte 0xFE]
       OpSelfdestruct -> [LitByte 0xFF]
       OpDup n ->
         if 1 <= n && n <= 16

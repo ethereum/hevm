@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   opcodes as well
 - UNSAT cache is now in `Solvers.hs` and is therefore shared across all threads.
   Hence, it is now active even during branch queries.
+- Added handling the INVALID (0xFE) opcode in the interpreter.
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -88,9 +89,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - We no longer produce duplicate SMT assertions regarding concrete keccak values.
 - Ord is now correctly implemented for Prop.
 - We only report FAIL in `test` mode for assertion failures that match the
-  string prefix "assertion failed", or match function selector Panic(uint256)
-  with a parameter 0x1. Previously, `require(a==b, "reason")` was a cause for
-  FAIL in case a!=b was possible. This has now been fixed.
+  string prefix ("assertion failed" || "invalid opcode: INVALID"), or match
+  function selector Panic(uint256) with a parameter 0x1. Previously,
+  `require(a==b, "reason")` was a cause for FAIL in case a!=b was possible.
+  This has now been fixed.
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
