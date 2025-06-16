@@ -43,6 +43,8 @@ import Data.Word (Word64)
 import GHC.Natural
 import System.IO (hFlush, stdout)
 import Witch (unsafeInto, into)
+import Data.Vector qualified as V
+import Data.Char (ord)
 
 data UnitTestOptions s = UnitTestOptions
   { rpcInfo     :: Fetch.RpcInfo
@@ -210,9 +212,14 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
             Success _ _ _ store -> if opts.checkFailBit then PNeg (failed store) else PBool True
             Failure _ _ (Revert msg) -> case msg of
               ConcreteBuf b ->
-                if (BS.isPrefixOf (selector "Error(string)") b) || b == panicMsg 0x01 then PBool False
+                -- We need to drop the selector (4B), the offset value (aligned to 32B), and the length of the string (aligned to 32B)
+                -- NOTE: assertTrue/assertFalse does not have the double colon after "assertion failed"
+                let assertFail = selector "Error(string)" `BS.isPrefixOf` b &&
+                      ("assertion failed" `BS.isPrefixOf` (BS.drop (4+32+32) b) ||
+                      "Invalid opcode: INVALID" `BS.isPrefixOf` (BS.drop (4+32+32) b))
+                in if assertFail || b == panicMsg 0x01 then PBool False
                 else PBool True
-              b -> b ./= ConcreteBuf (panicMsg 0x01)
+              _ -> symbolicFail msg
             Failure _ _ _ -> PBool True
             Partial _ _ _ -> PBool True
             _ -> internalError "Invalid leaf node"
@@ -257,7 +264,14 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     liftIO $ putStr txtResult
     liftIO $ printWarnings ends results t
     pure (not (any isCex results), not (warnings || unexpectedAllRevert))
-
+    where
+      symbolicFail :: Expr Buf -> Prop
+      symbolicFail e =
+        let text = V.fromList $ map (fromIntegral . ord) "assertion failed"
+            panic = e == ConcreteBuf (panicMsg 0x01)
+            assertFail =  V.take (length text) (Expr.concretePrefix e) == text
+        in PBool ((not panic) && (not assertFail))
+--
 printWarnings :: GetUnknownStr b => [Expr 'End] -> [ProofResult a b] -> String -> IO ()
 printWarnings e results testName = do
   when (any isUnknown results || any isError results || any Expr.isPartial e) $ do

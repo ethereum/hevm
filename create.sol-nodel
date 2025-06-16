@@ -1,0 +1,10 @@
+contract C {
+    uint public k;
+
+    constructor() {
+        k = 1;
+    }
+}
+contract D is C {
+    constructor(uint newI) C() {}
+}
