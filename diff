@@ -1,0 +1,21 @@
+commit 91804dadcf011d009032e6c11baf6b1e9ac807fb
+Author: Mate Soos <mate.soos@argot.org>
+Date:   Mon Jun 16 11:38:23 2025 +0200
+
+    No
+
+diff --git a/src/EVM/Expr.hs b/src/EVM/Expr.hs
+index a84eb5d3..edf6e5d9 100644
+--- a/src/EVM/Expr.hs
++++ b/src/EVM/Expr.hs
+@@ -1103,10 +1103,6 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
+       | x == 0 = b
+       | otherwise = a
+ 
+-    -- Masking as as per Solidity bit-packing of e.g. function parameters
+-    go (And (Lit mask1) (Or (And (Lit mask2) _) x)) | (mask1 .&. mask2 == 0)
+-         = And (Lit mask1) x
+-
+     -- address masking
+     go (And (Lit 0xffffffffffffffffffffffffffffffffffffffff) a@(WAddr _)) = a
+ 
