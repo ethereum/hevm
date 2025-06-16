@@ -195,6 +195,7 @@ getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCo
       writeChan r Nothing
     Right _ -> do
       sat <- liftIO $ sendLine inst "(check-sat)"
+      when conf.dumpQueries $ liftIO $ writeSMT2File smt2 (show fileCounter <> "-origquery")
       subRun [] smt2 sat
   -- put the instance back in the list of available instances
   liftIO $ writeChan availableInstances inst
