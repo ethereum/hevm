@@ -124,7 +124,7 @@ symAbiArg name = \case
   AbiIntType n ->
     if n `mod` 8 == 0 && n <= 256
     -- TODO: is this correct?
-    then St [Expr.inRange n v] v
+    then St [Expr.inRangeSigned n v] v
     else internalError "bad type"
   AbiBoolType -> St [bool v] v
   AbiAddressType -> St [] (WAddr (SymAddr name))
