@@ -74,7 +74,7 @@ import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as BSLazy
 import Data.Char (isHexDigit)
 import Data.Data (Data)
-import Data.DoubleWord (Word256, Int256, signedWord)
+import Data.DoubleWord (Word256, signedWord, BinaryWord (SignedWord))
 import Data.Functor (($>))
 import Data.List (intercalate)
 import Data.Maybe (mapMaybe)
@@ -99,7 +99,7 @@ data Sig = Sig Text [AbiType]
 
 data AbiValue
   = AbiUInt         Int Word256
-  | AbiInt          Int Int256
+  | AbiInt          Int (SignedWord Word256)
   | AbiAddress      Addr
   | AbiBool         Bool
   | AbiBytes        Int BS.ByteString
@@ -223,7 +223,11 @@ getAbi t = label (Text.unpack (abiTypeSolidity t)) $
       xs <- replicateM word32Count getWord32be
       pure (AbiUInt n (pack32 word32Count xs))
 
-    AbiIntType n   -> asUInt n (AbiInt n)
+    AbiIntType n   -> do
+      let word32Count = 8 * div (n + 255) 256
+      xs <- replicateM word32Count getWord32be
+      pure (AbiInt n (signedWord $ pack32 word32Count xs))
+
     AbiAddressType -> asUInt 256 AbiAddress
     AbiBoolType    -> asUInt 256 (AbiBool . (> (0 :: Integer)))
 
