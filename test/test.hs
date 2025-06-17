@@ -1147,8 +1147,7 @@ tests = testGroup "hevm"
         assertEqualM "number of counterexamples" 1 numCexes
         assertEqualM "number of errors" 0 numErrs
         assertEqualM "number of qed-s" 0 numQeds
-    -- BUG: currently failing, but test above, with a simple assert works
-    , ignoreTest $ test "negative-numbers-zero-comp" $ do
+    , test "negative-numbers-zero-comp" $ do
         Just c <- solcRuntime "C" [i|
             contract C {
               function fun(int256 x) public {

@@ -1997,13 +1997,13 @@ cheatActions = Map.fromList
   , action "assertNotEq(string,string)"   $ assertNotEq (AbiStringType)
   --
   , action "assertLt(uint256,uint256)" $ assertLt (AbiUIntType 256)
-  , action "assertLt(int256,int256)"   $ assertLt (AbiIntType 256)
+  , action "assertLt(int256,int256)"   $ assertSLt (AbiIntType 256)
   , action "assertLe(uint256,uint256)" $ assertLe (AbiUIntType 256)
-  , action "assertLe(int256,int256)"   $ assertLe (AbiIntType 256)
+  , action "assertLe(int256,int256)"   $ assertSLe (AbiIntType 256)
   , action "assertGt(uint256,uint256)" $ assertGt (AbiUIntType 256)
-  , action "assertGt(int256,int256)"   $ assertGt (AbiIntType 256)
+  , action "assertGt(int256,int256)"   $ assertSGt (AbiIntType 256)
   , action "assertGe(uint256,uint256)" $ assertGe (AbiUIntType 256)
-  , action "assertGe(int256,int256)"   $ assertGe (AbiIntType 256)
+  , action "assertGe(int256,int256)"   $ assertSGe (AbiIntType 256)
   ]
   where
     action s f = (abiKeccak s, f (abiKeccak s))
@@ -2058,12 +2058,16 @@ cheatActions = Map.fromList
             False -> doStop
             True -> revertErr ew1 ew2 invComp
         abivals -> vmError (BadCheatCode (paramDecodeErr abitype name abivals) sig)
-    assertEq = genAssert (==) Expr.eq "!=" "assertEq"
+    assertEq =    genAssert (==) Expr.eq "!=" "assertEq"
     assertNotEq = genAssert (/=) (\a b -> Expr.iszero $ Expr.eq a b) "==" "assertNotEq"
-    assertLt = genAssert (<) Expr.lt ">=" "assertLt"
-    assertGt = genAssert (>) Expr.gt "<=" "assertGt"
-    assertLe = genAssert (<=) Expr.leq ">" "assertLe"
-    assertGe = genAssert (>=) Expr.geq "<" "assertGe"
+    assertLt =    genAssert (<)  Expr.lt ">=" "assertLt"
+    assertSLt =   genAssert (<)  Expr.slt ">=" "assertLt"
+    assertGt =    genAssert (>)  Expr.gt "<=" "assertGt"
+    assertSGt =   genAssert (>)  Expr.sgt "<=" "assertGt"
+    assertLe =    genAssert (<=) Expr.leq ">" "assertLe"
+    assertSLe =   genAssert (<=) (\a b -> Expr.iszero $ Expr.sgt a b) ">" "assertLe"
+    assertGe =    genAssert (>=) Expr.geq "<" "assertGe"
+    assertSGe =   genAssert (>=) (\a b -> Expr.iszero $ Expr.slt a b) "<" "assertGe"
 
 -- * General call implementation ("delegateCall")
 -- note that the continuation is ignored in the precompile case
