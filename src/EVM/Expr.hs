@@ -1644,10 +1644,10 @@ containsNode p = getAny . foldExpr go (Any False)
     go _ = Any False
 
 inRange :: Int -> Expr EWord -> Prop
-inRange sz e = PLEq e (Lit $ 2 ^ sz - 1)
+inRange sz e = if sz == 256 then PBool True else PLEq e (Lit $ 2 ^ sz - 1)
 
 inRangeSigned :: Int -> Expr EWord -> Prop
-inRangeSigned sz e = PLEq e (Lit $ 2 ^ (sz - 1) - 1)
+inRangeSigned sz e = ((PLEq e (Lit $ 2 ^ (sz - 1) - 1)) `POr` (PGEq e $ Lit $ ((2 ^ sz) - 2 ^ (sz -  1))))
 
 -- | images of keccak(bytes32(x)) where 0 <= x < 256
 preImages :: [(W256, Word8)]
