@@ -87,6 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of crashing.
 - We no longer produce duplicate SMT assertions regarding concrete keccak values.
 - Ord is now correctly implemented for Prop.
+- Signed and unsigned integers have more refined ranges.
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
