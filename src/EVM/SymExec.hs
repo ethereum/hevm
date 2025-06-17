@@ -692,7 +692,7 @@ verifyInputs
   -> Fetch.Fetcher Symbolic m RealWorld
   -> VM Symbolic RealWorld
   -> Maybe (Postcondition RealWorld)
-  -> m (Expr End, [(SMTResult, Expr End)], [Text])
+  -> m (Expr End, [(SMTResult, Expr End)], [PartialExec])
 verifyInputs solvers opts fetcher preState maybepost = do
   conf <- readConfig
   let call = mconcat ["prefix 0x", getCallPrefix preState.state.calldata]
@@ -706,7 +706,7 @@ verifyInputs solvers opts fetcher preState maybepost = do
     T.writeFile "simplified.expr" (formatExpr expr)
     T.writeFile "simplified-conc.expr" (formatExpr $ Expr.simplify $ mapExpr Expr.concKeccakOnePass expr)
 
-  let partials = getAllPartials flattened
+  let partials = getPartials flattened
   when conf.debug $ liftIO $ do
     putStrLn "   Flattening expression"
     printPartialIssues flattened ("the call " <> call)
