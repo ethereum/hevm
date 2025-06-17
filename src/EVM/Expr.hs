@@ -1312,7 +1312,7 @@ simplifyProp prop =
     go (PLT  (Var _) (Lit 0)) = PBool False
     go (PLEq (Lit 0) _) = PBool True
     go (PLEq (WAddr _) (Lit 1461501637330902918203684832716283019655932542975)) = PBool True
-    go (PLEq x (Lit 0)) = PEq x (Lit 0)
+    go (PLEq x (Lit 0)) = peq (Lit 0) x
     go (PLEq _ (Lit x)) | x == maxLit = PBool True
     go (PLT  (Lit val) (Var _)) | val == maxLit = PBool False
     go (PLEq (Var _) (Lit val)) | val == maxLit = PBool True
