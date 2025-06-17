@@ -1050,6 +1050,163 @@ tests = testGroup "hevm"
           [AbiUInt 256 1] ===> AbiUInt 256 2
         SolidityCall "unchecked { x = a - 1; }"
           [AbiUInt 8 0] ===> AbiUInt 8 255
+    , test "negative-assert-only" $ do
+        Just c <- solcRuntime "C" [i|
+            contract C {
+              function fun(int256 x) public {
+                assert(x >= 0);
+              }
+            } |]
+        let sig = Just $ Sig "fun(int256)" [AbiIntType 256]
+        (e, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression must not be partial" $ not (Expr.containsNode isPartial e)
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertEqualM "number of counterexamples" 1 numCexes
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of qed-s" 0 numQeds
+    , test "negative-numbers-nonzero-comp-1" $ do
+        Just c <- solcRuntime "C" [i|
+            contract C {
+              function fun(int256 x) public {
+                  // Cheatcode address
+                  address vm = 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D;
+                  bytes memory data = abi.encodeWithSignature("assertGe(int256,int256)", x, -1);
+                  (bool success, ) = vm.staticcall(data);
+                  assert(success == true);
+              }
+            } |]
+        let sig = Just $ Sig "fun(int256)" [AbiIntType 256]
+        (e, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression must not be partial" $ not (Expr.containsNode isPartial e)
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertEqualM "number of counterexamples" 1 numCexes
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of qed-s" 0 numQeds
+    , test "negative-numbers-nonzero-comp-2" $ do
+        Just c <- solcRuntime "C" [i|
+            contract C {
+              function fun(int256 x) public {
+                  // Cheatcode address
+                  address vm = 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D;
+                  bytes memory data = abi.encodeWithSignature("assertGe(int256,int256)", x, 1);
+                  (bool success, ) = vm.staticcall(data);
+                  assert(success == true);
+              }
+            } |]
+        let sig = Just $ Sig "fun(int256)" [AbiIntType 256]
+        (e, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression must not be partial" $ not (Expr.containsNode isPartial e)
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertEqualM "number of counterexamples" 1 numCexes
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of qed-s" 0 numQeds
+    , ignoreTest $ test "negative-numbers-min" $ do
+        Just c <- solcRuntime "C" [i|
+            contract C {
+              function fun(int256 x) public {
+                  // Cheatcode address
+                  address vm = 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D;
+                  bytes memory data = abi.encodeWithSignature("assertLt(int256,int256)", x, type(int256).min);
+                  (bool success, ) = vm.staticcall(data);
+                  assert(success == true);
+              }
+            } |]
+        let sig = Just $ Sig "fun(int256)" [AbiIntType 256]
+        (e, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression must not be partial" $ not (Expr.containsNode isPartial e)
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertEqualM "number of counterexamples" 0 numCexes
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of qed-s" 1 numQeds
+    , test "negative-numbers-int128-1" $ do
+        Just c <- solcRuntime "C" [i|
+            contract C {
+              function fun(int128 y) public {
+                  int256 x = int256(y);
+                  // Cheatcode address
+                  address vm = 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D;
+                  bytes memory data = abi.encodeWithSignature("assertLt(int256,int256)", x, -1);
+                  (bool success, ) = vm.staticcall(data);
+                  assert(success == true);
+              }
+            } |]
+        let sig = Just $ Sig "fun(int128)" [AbiIntType 128]
+        (e, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression must not be partial" $ not (Expr.containsNode isPartial e)
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertEqualM "number of counterexamples" 1 numCexes
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of qed-s" 0 numQeds
+    , ignoreTest $ test "negative-numbers-zero-comp" $ do
+        Just c <- solcRuntime "C" [i|
+            contract C {
+              function fun(int256 x) public {
+                  // Cheatcode address
+                  address vm = 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D;
+                  bytes memory data = abi.encodeWithSignature("assertGe(int256,int256)", x, 0);
+                  (bool success, ) = vm.staticcall(data);
+                  assert(success == true);
+              }
+            } |]
+        let sig = Just $ Sig "fun(int256)" [AbiIntType 256]
+        (e, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression must not be partial" $ not (Expr.containsNode isPartial e)
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertEqualM "number of counterexamples" 1 numCexes
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of qed-s" 0 numQeds
+    , test "positive-numbers-cex" $ do
+        Just c <- solcRuntime "C" [i|
+            contract C {
+              function fun(uint256 x) public {
+                  // Cheatcode address
+                  address vm = 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D;
+                  bytes memory data = abi.encodeWithSignature("assertGe(uint256,uint256)", x, 1);
+                  (bool success, ) = vm.staticcall(data);
+                  assert(success == true);
+              }
+            } |]
+        let sig = Just $ Sig "fun(uint256)" [AbiUIntType 256]
+        (e, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression must not be partial" $ not (Expr.containsNode isPartial e)
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertEqualM "number of counterexamples" 1 numCexes
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of qed-s" 0 numQeds
+    , test "positive-numbers-qed" $ do
+        Just c <- solcRuntime "C" [i|
+            contract C {
+              function fun(uint256 x) public {
+                  // Cheatcode address
+                  address vm = 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D;
+                  bytes memory data = abi.encodeWithSignature("assertGe(uint256,uint256)", x, 0);
+                  (bool success, ) = vm.staticcall(data);
+                  assert(success == true);
+              }
+            } |]
+        let sig = Just $ Sig "fun(uint256)" [AbiUIntType 256]
+        (e, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression must not be partial" $ not (Expr.containsNode isPartial e)
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertEqualM "number of counterexamples" 0 numCexes
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of qed-s" 1 numQeds
 
     , test "keccak256()" $
         SolidityCall "x = uint(keccak256(abi.encodePacked(a)));"
