@@ -1944,6 +1944,27 @@ tests = testGroup "hevm"
                   assert(success == true);
               }
             } |]
+        let sig = Just $ Sig "fun(int128)" [AbiIntType 128]
+        (e, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression must not be partial" $ not (Expr.containsNode isPartial e)
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertEqualM "number of counterexamples" 1 numCexes
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of qed-s" 0 numQeds
+    , test "negative-numbers-int128" $ do
+        Just c <- solcRuntime "C" [i|
+            contract C {
+              function fun(int128 y) public {
+                  int256 x = int256(y);
+                  // Cheatcode address
+                  address vm = 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D;
+                  bytes memory data = abi.encodeWithSignature("assertLt(int256,int256)", x, -1);
+                  (bool success, ) = vm.staticcall(data);
+                  assert(success == true);
+              }
+            } |]
         let sig = Just $ Sig "fun(int256)" [AbiIntType 256]
         (e, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
         assertBoolM "The expression must not be partial" $ not (Expr.containsNode isPartial e)
