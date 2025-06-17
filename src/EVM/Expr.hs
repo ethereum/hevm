@@ -1312,6 +1312,7 @@ simplifyProp prop =
     go (PLT  (Var _) (Lit 0)) = PBool False
     go (PLEq (Lit 0) _) = PBool True
     go (PLEq (WAddr _) (Lit 1461501637330902918203684832716283019655932542975)) = PBool True
+    go (PLEq x (Lit 0)) = PEq x (Lit 0)
     go (PLEq _ (Lit x)) | x == maxLit = PBool True
     go (PLT  (Lit val) (Var _)) | val == maxLit = PBool False
     go (PLEq (Var _) (Lit val)) | val == maxLit = PBool True
@@ -1645,6 +1646,9 @@ containsNode p = getAny . foldExpr go (Any False)
 
 inRange :: Int -> Expr EWord -> Prop
 inRange sz e = PAnd (PGEq e (Lit 0)) (PLEq e (Lit $ 2 ^ sz - 1))
+
+inRangeSigned :: Int -> Expr EWord -> Prop
+inRangeSigned sz e = ((PLEq e (Lit $ 2 ^ (sz - 1) - 1)) `POr` (PGEq e $ Lit $ ((2 ^ sz) - 2 ^ (sz -  1))))
 
 -- | images of keccak(bytes32(x)) where 0 <= x < 256
 preImages :: [(W256, Word8)]

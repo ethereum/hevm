@@ -124,7 +124,7 @@ symAbiArg name = \case
   AbiIntType n ->
     if n `mod` 8 == 0 && n <= 256
     -- TODO: is this correct?
-    then St [Expr.inRange n v] v
+    then St [Expr.inRangeSigned n v] v
     else internalError "bad type"
   AbiBoolType -> St [bool v] v
   AbiAddressType -> St [] (WAddr (SymAddr name))
@@ -712,7 +712,7 @@ verifyInputs solvers opts fetcher preState maybepost = do
       let
         -- Filter out any leaves from `flattened` that can be statically shown to be safe
         tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf preState.constraints post, leaf)
-        withQueries = filter canBeSat tocheck
+      let withQueries = filter canBeSat tocheck
       when conf.debug $ liftIO $ putStrLn $ "   Checking for reachability of " <> show (length withQueries)
         <> " potential property violation(s) in call " <> call
 
