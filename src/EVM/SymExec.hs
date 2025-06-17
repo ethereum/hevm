@@ -649,9 +649,6 @@ printPartialIssues flattened call =
                 <> T.pack call <> " due to the following issue(s):"
     T.putStr . T.unlines . fmap (indent 5 . ("- " <>)) . fmap formatPartial . getPartials $ flattened
 
-getAllPartials :: [Expr End] -> [Text]
-getAllPartials = fmap formatPartial . getPartials
-
 getPartials :: [Expr End] -> [PartialExec]
 getPartials = mapMaybe go
   where
