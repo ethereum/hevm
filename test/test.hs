@@ -1872,6 +1872,22 @@ tests = testGroup "hevm"
         (e, [Qed]) <- withDefaultSolver $
           \s -> checkAssert s defaultPanicCodes c (Just (Sig "fun(uint256)" [AbiUIntType 256])) [] veriOpts
         assertBoolM "The expression MUST be partial" $ Expr.containsNode isPartial e
+    , test "negative-assert-only" $ do
+        Just c <- solcRuntime "C" [i|
+            contract C {
+              function fun(int256 x) public {
+                assert(x >= 0);
+              }
+            } |]
+        let sig = Just $ Sig "fun(int256)" [AbiIntType 256]
+        (e, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig [] defaultVeriOpts
+        assertBoolM "The expression must not be partial" $ not (Expr.containsNode isPartial e)
+        let numCexes = sum $ map (fromEnum . isCex) ret
+        let numErrs = sum $ map (fromEnum . isError) ret
+        let numQeds = sum $ map (fromEnum . isQed) ret
+        assertEqualM "number of counterexamples" 1 numCexes
+        assertEqualM "number of errors" 0 numErrs
+        assertEqualM "number of qed-s" 0 numQeds
     , test "negative-numbers-nonzero-comp-1" $ do
         Just c <- solcRuntime "C" [i|
             contract C {
