@@ -667,7 +667,7 @@ verify
   -> Maybe (Postcondition RealWorld)
   -> m (Expr End, [VerifyResult])
 verify solvers opts preState maybepost = do
-  (expr, res) <- verifyInputs solvers opts (Fetch.oracle solvers opts.rpcInfo) preState maybepost
+  (expr, res, _) <- verifyInputs solvers opts (Fetch.oracle solvers opts.rpcInfo) preState maybepost
   pure $ verifyResults preState expr res
 
 verifyResults :: VM Symbolic RealWorld -> Expr End -> [(SMTResult, Expr End)] -> (Expr End, [VerifyResult])
@@ -689,7 +689,7 @@ verifyInputs
   -> Fetch.Fetcher Symbolic m RealWorld
   -> VM Symbolic RealWorld
   -> Maybe (Postcondition RealWorld)
-  -> m (Expr End, [(SMTResult, Expr End)])
+  -> m (Expr End, [(SMTResult, Expr End)], [PartialExec])
 verifyInputs solvers opts fetcher preState maybepost = do
   conf <- readConfig
   let call = mconcat ["prefix 0x", getCallPrefix preState.state.calldata]
@@ -702,12 +702,15 @@ verifyInputs solvers opts fetcher preState maybepost = do
   when conf.dumpExprs $ liftIO $ do
     T.writeFile "simplified.expr" (formatExpr expr)
     T.writeFile "simplified-conc.expr" (formatExpr $ Expr.simplify $ mapExpr Expr.concKeccakOnePass expr)
+
+  let partials = getPartials flattened
+  when conf.debug $ liftIO $ do
     putStrLn "   Flattening expression"
     printPartialIssues flattened ("the call " <> call)
     putStrLn $ "   Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
 
   case maybepost of
-    Nothing -> pure (expr, [(Qed, expr)])
+    Nothing -> pure (expr, [(Qed, expr)], partials)
     Just post -> do
       let
         -- Filter out any leaves from `flattened` that can be statically shown to be safe
@@ -724,7 +727,7 @@ verifyInputs solvers opts fetcher preState maybepost = do
       let cexs = filter (\(res, _) -> not . isQed $ res) results
       when conf.debug $ liftIO $
         putStrLn $ "   Found " <> show (length cexs) <> " potential counterexample(s) in call " <> call
-      pure (expr, cexs)
+      pure (expr, cexs, partials)
   where
     getCallPrefix :: Expr Buf -> String
     getCallPrefix (WriteByte (Lit 0) (LitByte a) (WriteByte (Lit 1) (LitByte b) (WriteByte (Lit 2) (LitByte c) (WriteByte (Lit 3) (LitByte d) _)))) = mconcat $ map (printf "%02x") [a,b,c,d]
