@@ -2628,6 +2628,29 @@ tests = testGroup "hevm"
       putStrLnM $ "successfully explored: " <> show (Expr.numBranches expr) <> " paths"
       assertBoolM "The expression is NOT error" $ not $ any isError ret
       assertBoolM "The expression is NOT partial" $ not $ Expr.containsNode isPartial expr
+    , test "no-overapprox-when-present" $ do
+      Just c <- solcRuntime "C" [i|
+        contract ERC20 {
+          function f() public {
+          }
+        }
+
+        contract C {
+          address token;
+
+          function no_overapp() public {
+            token = address(new ERC20());
+            token.delegatecall(abi.encodeWithSignature("f()"));
+          }
+        } |]
+      let sig2 = Just (Sig "no_overapp()" [])
+      (expr, ret) <- withDefaultSolver $ \s -> checkAssert s defaultPanicCodes c sig2 [] defaultVeriOpts
+      -- putStrLnM $ "expr: " <> show expr
+      putStrLnM $ "successfully explored: " <> show (Expr.numBranches expr) <> " paths"
+      assertBoolM "The expression is NOT error" $ not $ any isError ret
+      assertBoolM "The expression is NOT partial" $ not $ Expr.containsNode isPartial expr
+      let numCexes = sum $ map (fromEnum . isCex) ret
+      assertEqualM "number of counterexamples" 0 numCexes
     -- NOTE: below used to be symbolic copyslice copy error before new copyslice
     --       simplifications in Expr.simplify
     , test "overapproximates-undeployed-contract-symbolic" $ do
@@ -4110,8 +4133,7 @@ tests = testGroup "hevm"
                           _ -> False
           assertBoolM "Did not find expected storage cex" testCex
           putStrLnM "expected counterexample found"
-        ,
-        expectFail $ test "calling unique contracts (read from storage)" $ do
+        , test "calling-unique-contracts--read-from-storage" $ do
           Just c <- solcRuntime "C"
             [i|
               contract C {

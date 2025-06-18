@@ -1094,6 +1094,10 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
       | x == 0 = b
       | otherwise = a
 
+    -- Masking as as per Solidity bit-packing of e.g. function parameters
+    go (And (Lit mask1) (Or (And (Lit mask2) _) x)) | (mask1 .&. mask2 == 0)
+         = And (Lit mask1) x
+
     -- address masking
     go (And (Lit 0xffffffffffffffffffffffffffffffffffffffff) a@(WAddr _)) = a
 
