@@ -1071,6 +1071,8 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
     go (EVM.Types.LEq a b) = iszero (lt b a)
     go (SLT a@(Lit _) b@(Lit _)) = slt a b
     go (SGT a b) = SLT b a
+    go (SEx a (SEx a2 b)) | a == a2  = sex a b
+    go (SEx a b) = sex a b
 
     -- IsZero
     go (IsZero (IsZero (IsZero a))) = iszero a
@@ -1329,6 +1331,14 @@ simplifyProp prop =
     go (PLT (Max (Lit a) b) (Lit c)) | a < c = PLT b (Lit c)
     go (PLT (Lit 0) (Eq a b)) = peq a b
 
+    -- when it's PLT but comparison on the RHS then it's just (PEq 1 RHS)
+    go (PLT (Lit 0) (a@LT {})) = peq (Lit 1) a
+    go (PLT (Lit 0) (a@LEq {})) = peq (Lit 1) a
+    go (PLT (Lit 0) (a@SLT {})) = peq (Lit 1) a
+    go (PLT (Lit 0) (a@GT {})) = peq (Lit 1) a
+    go (PLT (Lit 0) (a@GEq {})) = peq (Lit 1) a
+    go (PLT (Lit 0) (a@SGT {})) = peq (Lit 1) a
+
     -- negations
     go (PNeg (PBool b)) = PBool (Prelude.not b)
     go (PNeg (PNeg a)) = a
@@ -1385,8 +1395,6 @@ simplifyProp prop =
     go (PImpl (PBool False) _) = PBool True
 
     -- Double negation (no need for GT/GEq, as it's rewritten to LT/LEq)
-    go (PLT (Lit 0) (LT a b)) = PLT a b
-    go (PLT (Lit 0) (LEq a b)) = PLEq a b
 
     -- Eq
     go (PEq (Lit 0) (Eq a b)) = PNeg (peq a b)
@@ -1394,6 +1402,10 @@ simplifyProp prop =
     go (PEq (Lit 0) (Sub a b)) = peq a b
     go (PEq (Lit 0) (LT a b)) = PLEq b a
     go (PEq (Lit 0) (LEq a b)) = PLT b a
+    go (PEq (Lit 1) (LT a b)) = PLT a b
+    go (PEq (Lit 1) (LEq a b)) = PLEq a b
+    go (PEq (Lit 1) (GT a b)) = PGT a b
+    go (PEq (Lit 1) (GEq a b)) = PGEq a b
     go (PEq l r) = peq l r
 
     go p = p

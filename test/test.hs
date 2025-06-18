@@ -103,11 +103,19 @@ assertBoolM a b = liftIO $ assertBool a b
 test :: TestName -> ReaderT Env IO () -> TestTree
 test a b = testCase a $ runEnv testEnv b
 
+testNoSimplify :: TestName -> ReaderT Env IO () -> TestTree
+testNoSimplify a b = let testEnvNoSimp = Env { config = testEnv.config { simp = False } }
+  in testCase a $ runEnv testEnvNoSimp b
+
 testFuzz :: TestName -> ReaderT Env IO () -> TestTree
 testFuzz a b = testCase a $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 100, onlyCexFuzz = True}}) b
 
 prop :: Testable prop => ReaderT Env IO prop -> Property
 prop a = ioProperty $ runEnv testEnv a
+
+propNoSimpNoFuzz :: Testable prop => ReaderT Env IO prop -> Property
+propNoSimpNoFuzz a = let testEnvNoSimp = Env { config = testEnv.config { numCexFuzz = 0, simp = False } }
+  in ioProperty $ runEnv testEnvNoSimp a
 
 withDefaultSolver :: App m => (SolverGroup -> m a) -> m a
 withDefaultSolver = withSolvers Z3 3 1 Nothing
@@ -4452,6 +4460,52 @@ tests = testGroup "hevm"
             simp2 = List.nub a
         assertEqualM "Must be 3-length" 3 (length simp)
         assertEqualM "Must be 3-length" 3 (length simp2)
+    -- we run these without the simplifier inside `checkSatWithProps`, so
+    -- we can test the SMT solver's ability to handle sign extension
+    , testNoSimplify "sign-extend-1" $ do
+        let p = (PEq (Lit 1) (SLT (Lit 1774544) (SEx (Lit 2) (Lit 1774567))))
+        let simp = Expr.simplifyProps [p]
+        assertEqualM "Must simplify to PBool True" simp []
+        withDefaultSolver $ \s -> do
+          (res, _) <- checkSatWithProps s [p]
+          _ <- case res of
+            Cex c -> pure c
+            _ -> liftIO $ assertFailure "Must be satisfiable!"
+          pure ()
+    , testNoSimplify "sign-extend-2" $ do
+      let p = (PEq (Lit 1) (SLT (SEx (Lit 2) (Var "arg1")) (Lit 0)))
+      withDefaultSolver $ \s -> do
+        (res, _) <- checkSatWithProps s [p]
+        _ <- case res of
+          Cex c -> pure c
+          _ -> liftIO $ assertFailure "Must be satisfiable!"
+        pure()
+    , testNoSimplify "sign-extend-3" $ do
+      let p = PAnd
+                (PEq (Lit 1) (SLT (SEx (Lit 2) (Var "arg1")) (Lit 115792089237316195423570985008687907853269984665640564039457584007913128752664)))
+                (PEq (Var "arg1") (SEx (Lit 2) (Var "arg1")))
+      withDefaultSolver $ \s -> do
+        (res, _) <- checkSatWithProps s [p]
+        _ <- case res of
+          Cex c -> pure c
+          _ -> liftIO $ assertFailure "Must be satisfiable!"
+        pure()
+    , testProperty "sign-extend-vs-smt" $ \(a :: W256, b :: W256) -> propNoSimpNoFuzz $ do
+        let p = (PEq (Var "arg1") (SEx (Lit (a `mod` 50)) (Lit b)))
+        withDefaultSolver $ \s -> do
+          (res, _) <- checkSatWithProps s [p]
+          cex <- case res of
+            Cex c -> pure c
+            _ -> liftIO $ assertFailure "Must be satisfiable!"
+          let res1 = fromRight (internalError "cannot be") $ subModel cex (Var "arg1")
+          res1W <- case res1 of
+            Lit x -> pure x
+            _ -> internalError "Expected Lit"
+          let res2 = Expr.simplifyProps [p]
+          res2W <- case res2 of
+            [PEq (Lit x) (Var "arg1")] -> pure x
+            _ -> internalError "Expected PEq"
+          assertEqualM "Must be equivalent concrete values" res1W res2W
   ]
   , testGroup "simplification-working"
   [
@@ -5826,11 +5880,6 @@ genEnd sz = oneof
     subEnd = genEnd (sz `div` 2)
     subProp = genProps False (sz `div` 2)
 
-genSmallLit :: W256 -> Gen (Expr EWord)
-genSmallLit m = do
-  val :: W256 <- arbitrary
-  pure $ Lit (val `mod` m)
-
 genWord :: Int -> Int -> Gen (Expr EWord)
 genWord litFreq 0 = frequency
   [ (litFreq, do
@@ -6062,14 +6111,14 @@ genStorage sz = liftM3 SStore key val subStore
 genStorageKey :: Gen (Expr EWord)
 genStorageKey = frequency
      -- array slot
-    [ (4, liftM2 Expr.ArraySlotWithOffs (genByteStringKey 32) (genSmallLit 5))
+    [ (4, liftM2 Expr.ArraySlotWithOffs (genByteStringKey 32) (genLit 5))
     , (4, fmap Expr.ArraySlotZero (genByteStringKey 32))
      -- mapping slot
-    , (8, liftM2 Expr.MappingSlot (genByteStringKey 64) (genSmallLit 5))
+    , (8, liftM2 Expr.MappingSlot (genByteStringKey 64) (genLit 5))
      -- small slot
     , (4, genLit 20)
     -- unrecognized slot type
-    , (1, genSmallLit 5)
+    , (1, genLit 5)
     ]
 
 genByteStringKey :: W256 -> Gen (ByteString)
