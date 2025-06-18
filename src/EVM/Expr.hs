@@ -643,16 +643,25 @@ readStorage w st = go (simplifyNoLitToKeccak w) (simplifyNoLitToKeccak st)
       (MappingSlot idA _, MappingSlot idB _)       | isMap' idB, isMap' idA, idsDontMatch idA idB  -> go slot prev
       (MappingSlot idA keyA, MappingSlot idB keyB) | isMap' idB, isMap' idA, surelyNotEqual keyA keyB -> go slot prev
 
-      -- special case of array + map -> skip write
+      -- special case of: array + map -> skip write OR map + array with offset zero -> skip write
+      -- Note that none of these allow to "Add" an offset, only to overwrite the input to
+      -- Keccak. Hence to clash, one would need to find 2 inputs to keccak of
+      -- different lengths that clash when keccak-ed
       (ArraySlotWithOffs idA _, Keccak k)          | isMap k, isArray idA -> go slot prev
       (ArraySlotWithOffs2 idA _ _, Keccak k)       | isMap k, isArray idA -> go slot prev
       (ArraySlotZero idA, Keccak k)                | isMap k, isArray idA -> go slot prev
+      (MappingSlot idA _, ArraySlotZero idB)          | isMap' idA, isArray idB  -> go slot prev
+      (Keccak idA, ArraySlotZero idB)                 | isMap idA, isArray idB -> go slot prev
+      (ArraySlotZero idA, MappingSlot idB _)          | isArray idA, isMap' idB  -> go slot prev
+      (ArraySlotZero idA, Keccak idB)                 | isArray idA, isMap idB  -> go slot prev
 
-      -- special case of map + array -> skip write
-      (Keccak k, ArraySlotWithOffs idA _)          | isMap k, isArray idA -> go slot prev
-      (Keccak k, ArraySlotWithOffs2 idA _ _)       | isMap k, isArray idA -> go slot prev
-      (ArraySlotWithOffs idA _, Keccak k)          | isMap k, isArray idA -> go slot prev
-      (ArraySlotWithOffs2 idA _ _, Keccak k)       | isMap k, isArray idA -> go slot prev
+      -- as above, but with low concrete offset
+      -- NOTE: ArraySlotWithOffs2 could only be rewritten if both offsets are Lit (i.e. concrete)
+      --       but then the simplifier rewrites it to ArraySlotWithOffs
+      (MappingSlot idA _, ArraySlotWithOffs idB (Lit offs)) | isMap' idA, isArray idB, offs < 256  -> go slot prev
+      (Keccak idA, ArraySlotWithOffs idB (Lit offs))        | isMap idA, isArray idB, offs < 256 -> go slot prev
+      (ArraySlotWithOffs idA (Lit offs), Keccak idB)        | isArray idA, isMap idB, offs < 256 -> go slot prev
+      (ArraySlotWithOffs idA (Lit offs), MappingSlot idB _) | isArray idA, isMap' idB, offs < 256 -> go slot prev
 
       -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
       (Lit a, Keccak _) | a < 256 -> go slot prev
