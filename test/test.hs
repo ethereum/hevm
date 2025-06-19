@@ -5826,11 +5826,6 @@ genEnd sz = oneof
     subEnd = genEnd (sz `div` 2)
     subProp = genProps False (sz `div` 2)
 
-genSmallLit :: W256 -> Gen (Expr EWord)
-genSmallLit m = do
-  val :: W256 <- arbitrary
-  pure $ Lit (val `mod` m)
-
 genWord :: Int -> Int -> Gen (Expr EWord)
 genWord litFreq 0 = frequency
   [ (litFreq, do
@@ -6062,14 +6057,14 @@ genStorage sz = liftM3 SStore key val subStore
 genStorageKey :: Gen (Expr EWord)
 genStorageKey = frequency
      -- array slot
-    [ (4, liftM2 Expr.ArraySlotWithOffs (genByteStringKey 32) (genSmallLit 5))
+    [ (4, liftM2 Expr.ArraySlotWithOffs (genByteStringKey 32) (genLit 5))
     , (4, fmap Expr.ArraySlotZero (genByteStringKey 32))
      -- mapping slot
-    , (8, liftM2 Expr.MappingSlot (genByteStringKey 64) (genSmallLit 5))
+    , (8, liftM2 Expr.MappingSlot (genByteStringKey 64) (genLit 5))
      -- small slot
     , (4, genLit 20)
     -- unrecognized slot type
-    , (1, genSmallLit 5)
+    , (1, genLit 5)
     ]
 
 genByteStringKey :: W256 -> Gen (ByteString)
