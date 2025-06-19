@@ -103,11 +103,19 @@ assertBoolM a b = liftIO $ assertBool a b
 test :: TestName -> ReaderT Env IO () -> TestTree
 test a b = testCase a $ runEnv testEnv b
 
+testNoSimplify :: TestName -> ReaderT Env IO () -> TestTree
+testNoSimplify a b = let testEnvNoSimp = Env { config = testEnv.config { simp = False } }
+  in testCase a $ runEnv testEnvNoSimp b
+
 testFuzz :: TestName -> ReaderT Env IO () -> TestTree
 testFuzz a b = testCase a $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 100, onlyCexFuzz = True}}) b
 
 prop :: Testable prop => ReaderT Env IO prop -> Property
 prop a = ioProperty $ runEnv testEnv a
+
+propNoSimpNoFuzz :: Testable prop => ReaderT Env IO prop -> Property
+propNoSimpNoFuzz a = let testEnvNoSimp = Env { config = testEnv.config { numCexFuzz = 0, simp = False } }
+  in ioProperty $ runEnv testEnvNoSimp a
 
 withDefaultSolver :: App m => (SolverGroup -> m a) -> m a
 withDefaultSolver = withSolvers Z3 3 1 Nothing
@@ -662,19 +670,19 @@ tests = testGroup "hevm"
   -- check that the simplified version is semantically equivalent to the
   -- unsimplified one
   , adjustOption (\(Test.Tasty.QuickCheck.QuickCheckTests n) -> Test.Tasty.QuickCheck.QuickCheckTests (div n 2)) $ testGroup "SimplifierTests"
-    [ testProperty  "buffer-simplification" $ \(expr :: Expr Buf) -> prop $ do
+    [ testProperty  "buffer-simplification" $ \(expr :: Expr Buf) -> propNoSimpNoFuzz $ do
         let simplified = Expr.simplify expr
         checkEquivAndLHS expr simplified
-    , testProperty  "buffer-simplification-len" $ \(expr :: Expr Buf) -> prop $ do
+    , testProperty  "buffer-simplification-len" $ \(expr :: Expr Buf) -> propNoSimpNoFuzz $ do
         let simplified = Expr.simplify (BufLength expr)
         checkEquivAndLHS (BufLength expr) simplified
-    , testProperty "store-simplification" $ \(expr :: Expr Storage) -> prop $ do
+    , testProperty "store-simplification" $ \(expr :: Expr Storage) -> propNoSimpNoFuzz $ do
         let simplified = Expr.simplify expr
         checkEquivAndLHS expr simplified
-    , testProperty "load-simplification" $ \(GenWriteStorageLoad expr) -> prop $ do
+    , testProperty "load-simplification" $ \(GenWriteStorageLoad expr) -> propNoSimpNoFuzz $ do
         let simplified = Expr.simplify expr
         checkEquivAndLHS expr simplified
-    , ignoreTest $ testProperty "load-decompose" $ \(GenWriteStorageLoad expr) -> prop $ do
+    , ignoreTest $ testProperty "load-decompose" $ \(GenWriteStorageLoad expr) -> propNoSimpNoFuzz $ do
         putStrLnM $ T.unpack $ formatExpr expr
         let simp = Expr.simplify expr
         let decomposed = fromMaybe simp $ mapExprM Expr.decomposeStorage simp
@@ -682,52 +690,52 @@ tests = testGroup "hevm"
         -- putStrLnM $ T.unpack $ formatExpr decomposed
         -- putStrLnM $ "\n\n\n\n"
         checkEquiv expr decomposed
-    , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> prop $ do
+    , testProperty "byte-simplification" $ \(expr :: Expr Byte) -> propNoSimpNoFuzz $ do
         let simplified = Expr.simplify expr
         checkEquivAndLHS expr simplified
-    , testProperty "word-simplification" $ \(ZeroDepthWord expr) -> prop $ do
+    , testProperty "word-simplification" $ \(ZeroDepthWord expr) -> propNoSimpNoFuzz $ do
         let simplified = Expr.simplify expr
         checkEquivAndLHS expr simplified
-    , testProperty "readStorage-equivalance" $ \(store, slot) -> prop $ do
+    , testProperty "readStorage-equivalance" $ \(store, slot) -> propNoSimpNoFuzz $ do
         let simplified = Expr.readStorage' slot store
             full = SLoad slot store
         checkEquiv full simplified
-    , testProperty "writeStorage-equivalance" $ \(val, GenWriteStorageExpr (slot, store)) -> prop $ do
+    , testProperty "writeStorage-equivalance" $ \(val, GenWriteStorageExpr (slot, store)) -> propNoSimpNoFuzz $ do
         let simplified = Expr.writeStorage slot val store
             full = SStore slot val store
         checkEquiv full simplified
-    , testProperty "readWord-equivalance" $ \(buf, idx) -> prop $ do
+    , testProperty "readWord-equivalance" $ \(buf, idx) -> propNoSimpNoFuzz $ do
         let simplified = Expr.readWord idx buf
             full = ReadWord idx buf
         checkEquiv full simplified
-    , testProperty "writeWord-equivalance" $ \(idx, val, WriteWordBuf buf) -> prop $ do
+    , testProperty "writeWord-equivalance" $ \(idx, val, WriteWordBuf buf) -> propNoSimpNoFuzz $ do
         let simplified = Expr.writeWord idx val buf
             full = WriteWord idx val buf
         checkEquiv full simplified
-    , testProperty "arith-simplification" $ \(_ :: Int) -> prop $ do
+    , testProperty "arith-simplification" $ \(_ :: Int) -> propNoSimpNoFuzz $ do
         expr <- liftIO $ generate . sized $ genWordArith 15
         let simplified = Expr.simplify expr
         checkEquivAndLHS expr simplified
-    , testProperty "readByte-equivalance" $ \(buf, idx) -> prop $ do
+    , testProperty "readByte-equivalance" $ \(buf, idx) -> propNoSimpNoFuzz $ do
         let simplified = Expr.readByte idx buf
             full = ReadByte idx buf
         checkEquiv full simplified
     -- we currently only simplify concrete writes over concrete buffers so that's what we test here
-    , testProperty "writeByte-equivalance" $ \(LitOnly val, LitOnly buf, GenWriteByteIdx idx) -> prop $ do
+    , testProperty "writeByte-equivalance" $ \(LitOnly val, LitOnly buf, GenWriteByteIdx idx) -> propNoSimpNoFuzz $ do
         let simplified = Expr.writeByte idx val buf
             full = WriteByte idx val buf
         checkEquiv full simplified
-    , testProperty "copySlice-equivalance" $ \(srcOff, GenCopySliceBuf src, GenCopySliceBuf dst, LitWord @300 size) -> prop $ do
+    , testProperty "copySlice-equivalance" $ \(srcOff, GenCopySliceBuf src, GenCopySliceBuf dst, LitWord @300 size) -> propNoSimpNoFuzz $ do
         -- we bias buffers to be concrete more often than not
         dstOff <- liftIO $ generate (maybeBoundedLit 100_000)
         let simplified = Expr.copySlice srcOff dstOff size src dst
             full = CopySlice srcOff dstOff size src dst
         checkEquiv full simplified
-    , testProperty "indexWord-equivalence" $ \(src, LitWord @50 idx) -> prop $ do
+    , testProperty "indexWord-equivalence" $ \(src, LitWord @50 idx) -> propNoSimpNoFuzz $ do
         let simplified = Expr.indexWord idx src
             full = IndexWord idx src
         checkEquiv full simplified
-    , testProperty "indexWord-mask-equivalence" $ \(src :: Expr EWord, LitWord @35 idx) -> prop $ do
+    , testProperty "indexWord-mask-equivalence" $ \(src :: Expr EWord, LitWord @35 idx) -> propNoSimpNoFuzz $ do
         mask <- liftIO $ generate $ do
           pow <- arbitrary :: Gen Int
           frequency
@@ -739,7 +747,7 @@ tests = testGroup "hevm"
           simplified = Expr.indexWord idx input
           full = IndexWord idx input
         checkEquiv full simplified
-    , testProperty "toList-equivalance" $ \buf -> prop $ do
+    , testProperty "toList-equivalance" $ \buf -> propNoSimpNoFuzz $ do
         let
           -- transforms the input buffer to give it a known length
           fixLength :: Expr Buf -> Gen (Expr Buf)
@@ -768,27 +776,27 @@ tests = testGroup "hevm"
           Just asList -> do
             let asBuf = Expr.fromList asList
             checkEquiv asBuf input
-    , testProperty "simplifyProp-equivalence-lit" $ \(LitProp p) -> prop $ do
+    , testProperty "simplifyProp-equivalence-lit" $ \(LitProp p) -> propNoSimpNoFuzz $ do
         let simplified = Expr.simplifyProps [p]
         case simplified of
           [] -> checkEquivProp (PBool True) p
           [val@(PBool _)] -> checkEquivProp val p
           _ -> liftIO $ assertFailure "must evaluate down to a literal bool"
-    , testProperty "simplifyProp-equivalence-sym" $ \(p) -> prop $ do
+    , testProperty "simplifyProp-equivalence-sym" $ \(p) -> propNoSimpNoFuzz $ do
         let simplified = Expr.simplifyProp p
         checkEquivPropAndLHS p simplified
-    , testProperty "simplify-joinbytes" $ \(SymbolicJoinBytes exprList) -> prop $ do
+    , testProperty "simplify-joinbytes" $ \(SymbolicJoinBytes exprList) -> propNoSimpNoFuzz $ do
         let x = joinBytesFromList exprList
         let simplified = Expr.simplify x
         y <- checkEquiv x simplified
         assertBoolM "Must be equal" y
-    , testProperty "simpProp-equivalence-sym-Prop" $ \(ps :: [Prop]) -> prop $ do
+    , testProperty "simpProp-equivalence-sym-Prop" $ \(ps :: [Prop]) -> propNoSimpNoFuzz $ do
         let simplified = pand (Expr.simplifyProps ps)
         checkEquivPropAndLHS (pand ps) simplified
-    , testProperty "simpProp-equivalence-sym-LitProp" $ \(LitProp p) -> prop $ do
+    , testProperty "simpProp-equivalence-sym-LitProp" $ \(LitProp p) -> propNoSimpNoFuzz $ do
         let simplified = pand (Expr.simplifyProps [p])
         checkEquivPropAndLHS p simplified
-    , testProperty "storage-slot-simp-property" $ \(StorageExp s) -> prop $ do
+    , testProperty "storage-slot-simp-property" $ \(StorageExp s) -> propNoSimpNoFuzz $ do
         -- we have to run `Expr.litToKeccak` on the unsimplified system, or
         -- we'd need some form of minimal simplifier for things to work out. As long as
         -- we trust the litToKeccak, this is fine, as that function is stand-alone,
@@ -4452,6 +4460,52 @@ tests = testGroup "hevm"
             simp2 = List.nub a
         assertEqualM "Must be 3-length" 3 (length simp)
         assertEqualM "Must be 3-length" 3 (length simp2)
+    -- we run these without the simplifier inside `checkSatWithProps`, so
+    -- we can test the SMT solver's ability to handle sign extension
+    , testNoSimplify "sign-extend-1" $ do
+        let p = (PEq (Lit 1) (SLT (Lit 1774544) (SEx (Lit 2) (Lit 1774567))))
+        let simp = Expr.simplifyProps [p]
+        assertEqualM "Must simplify to PBool True" simp []
+        withDefaultSolver $ \s -> do
+          (res, _) <- checkSatWithProps s [p]
+          _ <- case res of
+            Cex c -> pure c
+            _ -> liftIO $ assertFailure "Must be satisfiable!"
+          pure ()
+    , testNoSimplify "sign-extend-2" $ do
+      let p = (PEq (Lit 1) (SLT (SEx (Lit 2) (Var "arg1")) (Lit 0)))
+      withDefaultSolver $ \s -> do
+        (res, _) <- checkSatWithProps s [p]
+        _ <- case res of
+          Cex c -> pure c
+          _ -> liftIO $ assertFailure "Must be satisfiable!"
+        pure()
+    , testNoSimplify "sign-extend-3" $ do
+      let p = PAnd
+                (PEq (Lit 1) (SLT (SEx (Lit 2) (Var "arg1")) (Lit 115792089237316195423570985008687907853269984665640564039457584007913128752664)))
+                (PEq (Var "arg1") (SEx (Lit 2) (Var "arg1")))
+      withDefaultSolver $ \s -> do
+        (res, _) <- checkSatWithProps s [p]
+        _ <- case res of
+          Cex c -> pure c
+          _ -> liftIO $ assertFailure "Must be satisfiable!"
+        pure()
+    , testProperty "sign-extend-vs-smt" $ \(a :: W256, b :: W256) -> propNoSimpNoFuzz $ do
+        let p = (PEq (Var "arg1") (SEx (Lit (a `mod` 50)) (Lit b)))
+        withDefaultSolver $ \s -> do
+          (res, _) <- checkSatWithProps s [p]
+          cex <- case res of
+            Cex c -> pure c
+            _ -> liftIO $ assertFailure "Must be satisfiable!"
+          let res1 = fromRight (internalError "cannot be") $ subModel cex (Var "arg1")
+          res1W <- case res1 of
+            Lit x -> pure x
+            _ -> internalError "Expected Lit"
+          let res2 = Expr.simplifyProps [p]
+          res2W <- case res2 of
+            [PEq (Lit x) (Var "arg1")] -> pure x
+            _ -> internalError "Expected PEq"
+          assertEqualM "Must be equivalent concrete values" res1W res2W
   ]
   , testGroup "simplification-working"
   [

@@ -1071,6 +1071,8 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
     go (EVM.Types.LEq a b) = iszero (lt b a)
     go (SLT a@(Lit _) b@(Lit _)) = slt a b
     go (SGT a b) = SLT b a
+    go (SEx a (SEx a2 b)) | a == a2  = sex a b
+    go (SEx a b) = sex a b
 
     -- IsZero
     go (IsZero (IsZero (IsZero a))) = iszero a
