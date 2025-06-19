@@ -60,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rewrite rule to deal with some forms of argument packing by Solidity
   via masking
 - More rewrite rules for (PLT (Lit 0) _) and (PEq (Lit 1) _)
+- Simplification can now be turned off from the cli via --no-simplify
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -92,6 +93,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ord is now correctly implemented for Prop.
 - Signed and unsigned integers have more refined ranges.
 - Symbolic interpretation of assertGe/Gt/Le/Lt over signed integers now works correctly.
+- SignExtend is now correctly being constant-folded
+- Some of our property-based testing was ineffective because of inadvertent
+  simplification  happening before calling the SMT solver. This has now been fixed.
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
