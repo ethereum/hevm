@@ -59,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Hence, it is now active even during branch queries.
 - Rewrite rule to deal with some forms of argument packing by Solidity
   via masking
+- More rewrite rules for (PLT (Lit 0) _) and (PEq (Lit 1) _)
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
