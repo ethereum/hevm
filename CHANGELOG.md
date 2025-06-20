@@ -96,9 +96,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SignExtend is now correctly being constant-folded
 - Some of our property-based testing was ineffective because of inadvertent
   simplification  happening before calling the SMT solver. This has now been fixed.
-- When pranking an address, we used the non-pranked address' nonce
-  to calculate the new address. This was incorrect, and lead to address clash,
-  as the nonce was never incremented.
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
