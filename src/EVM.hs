@@ -864,7 +864,11 @@ exec1 conf = do
                   assign (#state % #overrideCaller) Nothing
                   assign (#state % #resetCaller) False
 
-                newAddr <- createAddress from' this.nonce
+                nonce <- zoom (#env % #contracts) $ do
+                  contr <- use (at from')
+                  pure $ maybe Nothing (\c -> c.nonce) contr
+
+                newAddr <- createAddress from' nonce
                 _ <- accessAccountForGas newAddr
                 burn' cost $ do
                   initCode <- readMemory xOffset xSize
