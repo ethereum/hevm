@@ -1961,6 +1961,12 @@ tests = testGroup "hevm"
     , test "transfer-dapp" $ do
         let testFile = "test/contracts/pass/transfer.sol"
         runSolidityTest testFile "prove_transfer" >>= assertEqualM "should prove transfer" (True, True)
+    , test "nonce-issues" $ do
+        let testFile = "test/contracts/pass/nonce-issues.sol"
+        runSolidityTest testFile "prove_prank_addr_exists" >>= assertEqualM "should not bail" (True, True)
+        -- TODO: Currently fails, because we don't know how to increment the
+        -- nonce of a non-existent address.
+        -- runSolidityTest testFile "prove_nonce_addr_nonexistent" >>= assertEqualM "should not bail" (True, True)
     , test "badvault-sym-branch" $ do
         let testFile = "test/contracts/fail/10_BadVault.sol"
         runSolidityTestCustom testFile "prove_BadVault_usingExploitLaunchPad"  Nothing Nothing True Nothing Foundry >>=
