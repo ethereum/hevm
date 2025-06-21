@@ -36,6 +36,8 @@ import Data.Int (Int64)
 import Data.Word (Word8, Word32, Word64)
 import Data.DoubleWord
 import Data.DoubleWord.TH
+import Data.Hashable (Hashable, hashWithSalt)
+import Data.HashMap.Strict (HashMap)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
@@ -333,7 +335,7 @@ data Expr (a :: EType) where
 
   -- storage
 
-  ConcreteStore  :: (Map W256 W256) -> Expr Storage
+  ConcreteStore  :: (HashMap W256 W256) -> Expr Storage
   AbstractStore  :: Expr EAddr -- which contract is this store for?
                  -> Maybe W256 -- which logical store does this refer to? (e.g. solidity mappings / arrays)
                  -> Expr Storage
@@ -1140,7 +1142,7 @@ data SMTCex = SMTCex
   { vars :: Map (Expr EWord) W256
   , addrs :: Map (Expr EAddr) Addr
   , buffers :: Map (Expr Buf) BufModel
-  , store :: Map (Expr EAddr) (Map W256 W256)
+  , store :: Map (Expr EAddr) (HashMap W256 W256)
   , blockContext :: Map (Expr EWord) W256
   , txContext :: Map (Expr EWord) W256
   }
@@ -1299,6 +1301,8 @@ instance ParseFields W256
 instance ParseRecord W256 where
   parseRecord = fmap getOnly parseRecord
 
+instance Hashable W256 where
+    hashWithSalt s (W256 w) = s `hashWithSalt` w
 
 -- Word64 wrapper ----------------------------------------------------------------------------------
 
