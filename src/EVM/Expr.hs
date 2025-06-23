@@ -1291,22 +1291,29 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
 
 -- ** Prop Simplification ** -----------------------------------------------------------------------
 
-
 simplifyProps :: [Prop] -> [Prop]
-simplifyProps ps = if cannotBeSat then [PBool False] else simplified
+simplifyProps = simplifyPropsPre simplifyProp
+
+simplifyPropsPre :: forall a. (Expr a -> Expr a) -> [Prop] -> [Prop]
+simplifyPropsPre f ps = if cannotBeSat then [PBool False] else simplified
   where
-    simplified = if (goOne ps == ps) then ps else simplifyProps (goOne ps)
+    simplified = if (goOne ps == ps) then ps else simplifyPropsPre f (goOne ps)
     cannotBeSat = PBool False `elem` simplified
     goOne :: [Prop] -> [Prop]
     goOne = remRedundantProps . map simplifyProp . constPropagate . flattenProps
 
+simplifyProp :: Prop -> Prop
+simplifyProp = simplifyPropPre simplify
+
+simplifyPropConc :: Prop -> Prop
+simplifyPropConc = simplifyPropPre concKeccakSimpExpr
 
 -- | Evaluate the provided proposition down to its most concrete result
 -- Also simplifies the inner Expr, if it exists
-simplifyProp :: Prop -> Prop
-simplifyProp prop =
+simplifyPropPre :: forall a. (Expr a -> Expr a) -> Prop -> Prop
+simplifyPropPre f prop =
   let new = mapProp' go (simpInnerExpr prop)
-  in if (new == prop) then prop else simplifyProp new
+  in if (new == prop) then prop else simplifyPropPre f new
   where
     go :: Prop -> Prop
 
@@ -1411,7 +1418,7 @@ simplifyProp prop =
     go p = p
 
 
-    -- Applies `simplify` to the inner part of a Prop, e.g.
+    -- Applies `f to the inner part of a Prop, e.g.
     -- (PEq (Add (Lit 1) (Lit 2)) (Var "a")) becomes
     -- (PEq (Lit 3) (Var "a")
     simpInnerExpr :: Prop -> Prop
@@ -1419,9 +1426,9 @@ simplifyProp prop =
     simpInnerExpr (PGEq a b) = simpInnerExpr (PLEq b a)
     simpInnerExpr (PGT a b) = simpInnerExpr (PLT b a)
     -- simplifies the inner expression
-    simpInnerExpr (PEq a b) = PEq (simplify a) (simplify b)
-    simpInnerExpr (PLT a b) = PLT (simplify a) (simplify b)
-    simpInnerExpr (PLEq a b) = PLEq (simplify a) (simplify b)
+    simpInnerExpr (PEq a b) = PEq (f a) (f b)
+    simpInnerExpr (PLT a b) = PLT (f a) (f b)
+    simpInnerExpr (PLEq a b) = PLEq (f a) (f b)
     simpInnerExpr (PNeg a) = PNeg (simpInnerExpr a)
     simpInnerExpr (PAnd a b) = PAnd (simpInnerExpr a) (simpInnerExpr b)
     simpInnerExpr (POr a b) = POr (simpInnerExpr a) (simpInnerExpr b)

@@ -32,7 +32,8 @@ import EVM.Fuzz (tryCexFuzz)
 import Numeric (readHex)
 import Data.Bits ((.&.))
 import Numeric (showHex)
-import EVM.Expr (simplifyProps)
+import EVM.Expr (simplifyProps, concKeccakSimpExpr, simplifyProp)
+import EVM.Traversals (foldProp)
 
 import EVM.SMT
 import EVM.Types
@@ -107,14 +108,21 @@ checkSatWithProps sg props = do
   let psSimp = if conf.simp then simplifyProps props else props
   if psSimp == [PBool False] then pure (Qed, Right mempty)
   else do
-    let smt2 = if conf.simp then assertProps conf psSimp else assertPropsNoSimp psSimp
-    if isLeft smt2 then
-      let err = getError smt2 in pure (Error err, Left err)
-    else do
-      res <- liftIO $ checkSat sg smt2
-      pure (res, Right (getNonError smt2))
+    if conf.simp then do
+      let conc = foldProp simplifyPropConc psSimp
+      if conc == [PBool False] then pure (Qed, Right mempty)
+      else realWord
+    else realWork
 
   where
+    realWork = do
+      let smt2 = if conf.simp then assertProps conf psSimp else assertPropsNoSimp psSimp
+      if isLeft smt2 then
+        let err = getError smt2 in pure (Error err, Left err)
+      else do
+        res <- liftIO $ checkSat sg smt2
+        pure (res, Right (getNonError smt2))
+
     checkSat :: SolverGroup -> Err SMT2 -> IO SMTResult
     checkSat (SolverGroup taskq) smt2 = do
       if isLeft smt2 then pure $ Error $ getError smt2
