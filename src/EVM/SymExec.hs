@@ -91,16 +91,14 @@ defaultIterConf = IterConfig
   }
 
 data VeriOpts = VeriOpts
-  { simp :: Bool
-  , iterConf :: IterConfig
+  { iterConf :: IterConfig
   , rpcInfo :: Fetch.RpcInfo
   }
   deriving (Eq, Show)
 
 defaultVeriOpts :: VeriOpts
 defaultVeriOpts = VeriOpts
-  { simp = True
-  , iterConf = defaultIterConf
+  { iterConf = defaultIterConf
   , rpcInfo = Nothing
   }
 
@@ -124,7 +122,7 @@ symAbiArg name = \case
   AbiIntType n ->
     if n `mod` 8 == 0 && n <= 256
     -- TODO: is this correct?
-    then St [Expr.inRange n v] v
+    then St [Expr.inRangeSigned n v] v
     else internalError "bad type"
   AbiBoolType -> St [bool v] v
   AbiAddressType -> St [] (WAddr (SymAddr name))
@@ -468,10 +466,11 @@ getExprEmptyStore
   -> VeriOpts
   -> m (Expr End)
 getExprEmptyStore solvers c signature' concreteArgs opts = do
+  conf <- readConfig
   calldata <- mkCalldata signature' concreteArgs
   preState <- liftIO $ stToIO $ loadEmptySymVM (RuntimeCode (ConcreteRuntimeCode c)) (Lit 0) calldata
   exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.iterConf preState runExpr
-  if opts.simp then (pure $ Expr.simplify exprInter) else pure exprInter
+  if conf.simp then (pure $ Expr.simplify exprInter) else pure exprInter
 
 getExpr
   :: App m
@@ -482,10 +481,11 @@ getExpr
   -> VeriOpts
   -> m (Expr End)
 getExpr solvers c signature' concreteArgs opts = do
-      calldata <- mkCalldata signature' concreteArgs
-      preState <- liftIO $ stToIO $ abstractVM calldata c Nothing False
-      exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.iterConf preState runExpr
-      if opts.simp then (pure $ Expr.simplify exprInter) else pure exprInter
+  conf <- readConfig
+  calldata <- mkCalldata signature' concreteArgs
+  preState <- liftIO $ stToIO $ abstractVM calldata c Nothing False
+  exprInter <- interpret (Fetch.oracle solvers opts.rpcInfo) opts.iterConf preState runExpr
+  if conf.simp then (pure $ Expr.simplify exprInter) else pure exprInter
 
 {- | Checks if an assertion violation has been encountered
 
@@ -667,7 +667,7 @@ verify
   -> Maybe (Postcondition RealWorld)
   -> m (Expr End, [VerifyResult])
 verify solvers opts preState maybepost = do
-  (expr, res) <- verifyInputs solvers opts (Fetch.oracle solvers opts.rpcInfo) preState maybepost
+  (expr, res, _) <- verifyInputs solvers opts (Fetch.oracle solvers opts.rpcInfo) preState maybepost
   pure $ verifyResults preState expr res
 
 verifyResults :: VM Symbolic RealWorld -> Expr End -> [(SMTResult, Expr End)] -> (Expr End, [VerifyResult])
@@ -689,7 +689,7 @@ verifyInputs
   -> Fetch.Fetcher Symbolic m RealWorld
   -> VM Symbolic RealWorld
   -> Maybe (Postcondition RealWorld)
-  -> m (Expr End, [(SMTResult, Expr End)])
+  -> m (Expr End, [(SMTResult, Expr End)], [PartialExec])
 verifyInputs solvers opts fetcher preState maybepost = do
   conf <- readConfig
   let call = mconcat ["prefix 0x", getCallPrefix preState.state.calldata]
@@ -697,21 +697,24 @@ verifyInputs solvers opts fetcher preState maybepost = do
 
   exprInter <- interpret fetcher opts.iterConf preState runExpr
   when conf.dumpExprs $ liftIO $ T.writeFile "unsimplified.expr" (formatExpr exprInter)
-  let expr = if opts.simp then (Expr.simplify exprInter) else exprInter
+  let expr = if conf.simp then (Expr.simplify exprInter) else exprInter
       flattened = flattenExpr expr
   when conf.dumpExprs $ liftIO $ do
     T.writeFile "simplified.expr" (formatExpr expr)
     T.writeFile "simplified-conc.expr" (formatExpr $ Expr.simplify $ mapExpr Expr.concKeccakOnePass expr)
+
+  let partials = getPartials flattened
+  when conf.debug $ liftIO $ do
     putStrLn "   Flattening expression"
     printPartialIssues flattened ("the call " <> call)
     putStrLn $ "   Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
 
   case maybepost of
-    Nothing -> pure (expr, [(Qed, expr)])
+    Nothing -> pure (expr, [(Qed, expr)], partials)
     Just post -> do
       let
         -- Filter out any leaves from `flattened` that can be statically shown to be safe
-        tocheck = flip map flattened $ \leaf -> (toPropsFinal leaf preState.constraints post, leaf)
+        tocheck = flip map flattened $ \leaf -> (toPropsFinal conf leaf preState.constraints post, leaf)
         withQueries = filter canBeSat tocheck
       when conf.debug $ liftIO $ putStrLn $ "   Checking for reachability of " <> show (length withQueries)
         <> " potential property violation(s) in call " <> call
@@ -724,13 +727,13 @@ verifyInputs solvers opts fetcher preState maybepost = do
       let cexs = filter (\(res, _) -> not . isQed $ res) results
       when conf.debug $ liftIO $
         putStrLn $ "   Found " <> show (length cexs) <> " potential counterexample(s) in call " <> call
-      pure (expr, cexs)
+      pure (expr, cexs, partials)
   where
     getCallPrefix :: Expr Buf -> String
     getCallPrefix (WriteByte (Lit 0) (LitByte a) (WriteByte (Lit 1) (LitByte b) (WriteByte (Lit 2) (LitByte c) (WriteByte (Lit 3) (LitByte d) _)))) = mconcat $ map (printf "%02x") [a,b,c,d]
     getCallPrefix _ = "unknown"
     toProps leaf constr post = PNeg (post preState leaf) : constr <> extractProps leaf
-    toPropsFinal leaf constr post = if opts.simp then Expr.simplifyProps $ toProps leaf constr post
+    toPropsFinal conf leaf constr post = if conf.simp then Expr.simplifyProps $ toProps leaf constr post
                                                  else toProps leaf constr post
     canBeSat (a, _) = case a of
         [PBool False] -> False
@@ -800,12 +803,13 @@ equivalenceCheck solvers bytecodeA bytecodeB opts calldata create = do
       pure $ oneQedOrNoQed issues <> partialIssues
   where
     -- decompiles the given bytecode into a list of branches
-    getBranches :: ByteString -> m [Expr End]
+    getBranches :: App m => ByteString -> m [Expr End]
     getBranches bs = do
+      conf <- readConfig
       let bytecode = if BS.null bs then BS.pack [0] else bs
       prestate <- liftIO $ stToIO $ abstractVM calldata bytecode Nothing create
       expr <- interpret (Fetch.oracle solvers Nothing) opts.iterConf prestate runExpr
-      let simpl = if opts.simp then (Expr.simplify expr) else expr
+      let simpl = if conf.simp then Expr.simplify expr else expr
       pure $ flattenExpr simpl
     oneQedOrNoQed :: EqIssues -> EqIssues
     oneQedOrNoQed (EqIssues res partials) =

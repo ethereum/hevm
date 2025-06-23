@@ -93,6 +93,7 @@ data CommonOptions = CommonOptions
   , maxBufSize    ::Int
   , maxWidth      ::Int
   , maxDepth      ::Maybe Int
+  , noSimplify    ::Bool
   }
 
 commonOptions :: Parser CommonOptions
@@ -119,6 +120,7 @@ commonOptions = CommonOptions
   <*> (option auto $ long "max-buf-size"    <> value 64 <> help "Maximum size of buffers such as calldata and returndata in exponents of 2 (default: 64, i.e. 2^64 bytes)")
   <*> (option auto $ long "max-width"      <> showDefault <> value 100 <> help "Max number of concrete values to explore when encountering a symbolic value. This is a form of branch width limitation per symbolic value")
   <*> (optional $ option auto $ long "max-depth" <> help "Limit maximum depth of branching during exploration (default: unlimited)")
+  <*> (switch $ long "no-simplify" <> help "Don't perform simplification of expressions")
 
 data CommonExecOptions = CommonExecOptions
   { address       ::Maybe Addr
@@ -355,6 +357,7 @@ main = do
         , maxWidth = cOpts.maxWidth
         , maxDepth = cOpts.maxDepth
         , verb = cOpts.verb
+        , simp = Prelude.not cOpts.noSimplify
         } }
 
 
@@ -388,8 +391,7 @@ equivalence eqOpts cOpts = do
   when (isNothing bytecodeB) $ liftIO $ do
     putStrLn "Error: invalid or no bytecode for program B. Provide a valid one with --code-b or --code-b-file"
     exitFailure
-  let veriOpts = VeriOpts { simp = True
-                          , iterConf = IterConfig {
+  let veriOpts = VeriOpts { iterConf = IterConfig {
                             maxIter = parseMaxIters cOpts.maxIterations
                             , askSmtIters = cOpts.askSmtIterations
                             , loopHeuristic = cOpts.loopDetectionHeuristic
@@ -496,14 +498,13 @@ assert cFileOpts sOpts cExecOpts cOpts = do
   let solverCount = fromMaybe cores cOpts.numSolvers
   solver <- liftIO $ getSolver cOpts.solver
   withSolvers solver solverCount cOpts.solverThreads (Just cOpts.smttimeout) $ \solvers -> do
-    let veriOpts = VeriOpts { simp = True
-                        , iterConf = IterConfig {
-                          maxIter = parseMaxIters cOpts.maxIterations
-                          , askSmtIters = cOpts.askSmtIterations
-                          , loopHeuristic = cOpts.loopDetectionHeuristic
-                          }
-                        , rpcInfo = rpcinfo
-    }
+    let veriOpts = VeriOpts { iterConf = IterConfig {
+                              maxIter = parseMaxIters cOpts.maxIterations
+                              , askSmtIters = cOpts.askSmtIterations
+                              , loopHeuristic = cOpts.loopDetectionHeuristic
+                              }
+                            , rpcInfo = rpcinfo
+                            }
     (expr, res) <- verify solvers veriOpts preState (Just $ checkAssertions errCodes)
     case res of
       [Qed] -> do

@@ -48,6 +48,7 @@ data Config = Config
   , maxWidth         :: Int
   , maxDepth         :: Maybe Int
   , verb             :: Int
+  , simp             :: Bool
   }
   deriving (Show, Eq)
 
@@ -66,6 +67,7 @@ defaultConfig = Config
   , maxWidth = 100
   , maxDepth = Nothing
   , verb = 0
+  , simp = True
   }
 
 -- Write to the console

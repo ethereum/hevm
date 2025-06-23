@@ -104,10 +104,10 @@ checkMulti (SolverGroup taskq) smt2 multiSol = do
 checkSatWithProps :: App m => SolverGroup -> [Prop] -> m (SMTResult, Err SMT2)
 checkSatWithProps sg props = do
   conf <- readConfig
-  let psSimp = simplifyProps props
+  let psSimp = if conf.simp then simplifyProps props else props
   if psSimp == [PBool False] then pure (Qed, Right mempty)
   else do
-    let smt2 = assertProps conf psSimp
+    let smt2 = if conf.simp then assertProps conf psSimp else assertPropsNoSimp psSimp
     if isLeft smt2 then
       let err = getError smt2 in pure (Error err, Left err)
     else do
