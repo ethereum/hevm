@@ -864,9 +864,10 @@ exec1 conf = do
                   assign (#state % #overrideCaller) Nothing
                   assign (#state % #resetCaller) False
 
+                touchAddress from'
                 nonce <- zoom (#env % #contracts) $ do
                   contr <- use (at from')
-                  pure $ maybe Nothing (\c -> c.nonce) contr
+                  pure $ (\c -> c.nonce) =<< contr
 
                 newAddr <- createAddress from' nonce
                 _ <- accessAccountForGas newAddr
@@ -979,6 +980,8 @@ exec1 conf = do
                         assign (#state % #overrideCaller) Nothing
                         assign (#state % #resetCaller) False
 
+                      touchAddress from'
+
                       let (cost, gas') = costOfCreate fees availableGas xSize True
                       newAddr <- create2Address self xSalt initCode
                       _ <- accessAccountForGas newAddr
@@ -1053,10 +1056,6 @@ transfer _ _ (Lit 0) = pure ()
 transfer src dst val = do
   sb <- preuse $ #env % #contracts % ix src % #balance
   db <- preuse $ #env % #contracts % ix dst % #balance
-  baseState <- use (#config % #baseState)
-  let mkc = case baseState of
-              AbstractBase -> unknownContract
-              EmptyBase -> const emptyContract
   case (sb, db) of
     -- both sender and recipient in state
     (Just srcBal, Just _) ->
@@ -1069,7 +1068,7 @@ transfer src dst val = do
     (Nothing, Just _) -> do
       case src of
         LitAddr _ -> do
-          (#env % #contracts) %= (Map.insert src (mkc src))
+          touchAddress src
           transfer src dst val
         SymAddr _ -> unexpectedSymArg "Attempting to transfer eth from a symbolic address that is not present in the state" [src]
         GVar _ -> internalError "Unexpected GVar"
@@ -1077,7 +1076,7 @@ transfer src dst val = do
     (_ , Nothing) -> do
       case dst of
         LitAddr _ -> do
-          (#env % #contracts) %= (Map.insert dst (mkc dst))
+          touchAddress dst
           transfer src dst val
         SymAddr _ -> unexpectedSymArg "Attempting to transfer eth to a symbolic address that is not present in the state" [dst]
         GVar _ -> internalError "Unexpected GVar"
@@ -1588,6 +1587,17 @@ notStatic continue = do
   if bad
     then vmError StateChangeWhileStatic
     else continue
+
+-- Ensures the account `addr` exists on the VM environment.
+-- Useful when `addr` needs to e.g. keep a eth balance or
+-- be the source of contract deployments via pranks
+touchAddress :: VMOps t => Expr EAddr -> EVM t s ()
+touchAddress addr = do
+  baseState <- use (#config % #baseState)
+  let mkc = case baseState of
+              AbstractBase -> unknownContract
+              EmptyBase -> const emptyContract
+  (#env % #contracts) %= (Map.insertWith (\_ e -> e) addr (mkc addr))
 
 forceAddr :: (?conf :: Config, VMOps t) =>
   Expr EWord
