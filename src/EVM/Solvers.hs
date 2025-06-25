@@ -206,12 +206,7 @@ getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCo
            writeChan r Nothing
         "unknown" -> liftIO $ do
            when conf.debug $ putStrLn "Unknown result by SMT solver."
-           case conf.dumpUnsolved of
-             Just fp -> do
-              let filename = fp <> "unsolved-" <> show fileCounter <> "-sol" <> show (length vals)
-              liftIO $ putStrLn $ "Dumping unsolved SMT query to: " <> filename  
-              liftIO $ writeSMT2File fullSmt filename
-             Nothing -> pure ()
+           dumpUnsolved fullSmt fileCounter conf.dumpUnsolved
            writeChan r Nothing
         "sat" -> do
           if length vals >= multiSol.maxSols then liftIO $ do
@@ -268,7 +263,9 @@ getOneSol smt2@(SMT2 cmds cexvars ps) props r cacheq inst availableInstances fil
                     liftIO . atomically $ writeTChan cacheq (CacheEntry props)
                     pure Qed
                   "timeout" -> pure $ Unknown "Result timeout by SMT solver"
-                  "unknown" -> pure $ Unknown "Result unknown by SMT solver"
+                  "unknown" -> do
+                    dumpUnsolved smt2 fileCounter conf.dumpUnsolved
+                    pure $ Unknown "Result unknown by SMT solver"
                   "sat" -> Cex <$> getModel inst cexvars
                   _ -> pure . Error $ "Unable to parse SMT solver output: " <> T.unpack sat
             writeChan r res
@@ -278,6 +275,15 @@ getOneSol smt2@(SMT2 cmds cexvars ps) props r cacheq inst availableInstances fil
 
     -- put the instance back in the list of available instances
     writeChan availableInstances inst
+
+dumpUnsolved :: SMT2 -> Int -> Maybe FilePath -> IO ()
+dumpUnsolved fullSmt fileCounter dump = do
+   case dump of
+     Just fp -> do
+      let filename = fp <> "unsolved-" <> show fileCounter
+      putStrLn $ "Dumping unsolved SMT query to: " <> filename
+      writeSMT2File fullSmt filename
+     Nothing -> pure ()
 
 getModel :: SolverInstance -> CexVars -> IO SMTCex
 getModel inst cexvars = do
