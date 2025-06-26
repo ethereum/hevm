@@ -388,7 +388,7 @@ enforceGasOrder ps = SMT2 (["; gas ordering"] <> (concatMap (uncurry order) indi
         fromRight' ((exprToSMT (Gas prefix y))) <> "))"]
     consecutivePairs :: [Int] -> [(Int, Int)]
     consecutivePairs [] = []
-    consecutivePairs l = zip l (tail l)
+    consecutivePairs l@(_:t) = zip l t
     indices = Map.toList $ toMapOfLists $ concatMap (foldProp go mempty) ps
     toMapOfLists :: [(TS.Text, Int)] -> Map.Map TS.Text [Int]
     toMapOfLists = foldr (\(k, v) acc -> Map.insertWith (++) k [v] acc) Map.empty
