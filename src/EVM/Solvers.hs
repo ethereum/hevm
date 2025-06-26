@@ -367,7 +367,8 @@ solverArgs solver threads timeout = case solver of
     [ "--lang=smt2"
     , "--produce-models"
     , "--time-limit-per=" <> mkTimeout timeout
-    , "--bv-solver=preprop"
+    -- , "--bv-solver=preprop"
+    , "--abstraction"
     ]
   EmptySolver ->
     [ "--lang=smt2"
@@ -385,6 +386,9 @@ solverArgs solver threads timeout = case solver of
     , "--incremental"
     , "--tlimit-per=" <> mkTimeout timeout
     , "--arrays-exp"
+    , "--solve-bv-as-int=sum"
+   -- TODO: add yices
+   -- TODO: add princess solver
     ]
   Custom _ -> []
 
