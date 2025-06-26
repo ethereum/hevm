@@ -2,7 +2,7 @@ on:
   workflow_call:
 
 env:
-    BITWUZLA_VERSION: 0.6.1
+    BITWUZLA_VERSION: 0.7.0
 
 jobs:
   build:
