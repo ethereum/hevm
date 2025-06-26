@@ -721,18 +721,18 @@ exprToSMT = \case
     aExp <- exprToSMT a
     bExp <- exprToSMT b
     cExp <- exprToSMT c
-    let aLift = "(concat (_ bv0 256) " <> aExp <> ")"
-        bLift = "(concat (_ bv0 256) " <> bExp <> ")"
-        cLift = "(concat (_ bv0 256) " <> cExp <> ")"
-    pure $ "((_ extract 255 0) (ite (= " <> cExp <> " (_ bv0 256)) (_ bv0 512) (bvurem (bvmul " <> aLift `sp` bLift <> ")" <> cLift <> ")))"
+    let aLift = "((_ zero_extend 256) " <> aExp <> ")"
+        bLift = "((_ zero_extend 256) " <> bExp <> ")"
+        cLift = "((_ zero_extend 256) " <> cExp <> ")"
+    pure $ "(ite (= " <> cExp <> " (_ bv0 256)) (_ bv0 256) ((_ extract 255 0) (bvurem (bvmul " <> aLift `sp` bLift <> ")" <> cLift <> ")))"
   AddMod a b c -> do
     aExp <- exprToSMT a
     bExp <- exprToSMT b
     cExp <- exprToSMT c
-    let aLift = "(concat (_ bv0 256) " <> aExp <> ")"
-        bLift = "(concat (_ bv0 256) " <> bExp <> ")"
-        cLift = "(concat (_ bv0 256) " <> cExp <> ")"
-    pure $ "((_ extract 255 0) (ite (= " <> cExp <> " (_ bv0 256)) (_ bv0 512) (bvurem (bvadd " <> aLift `sp` bLift <> ")" <> cLift <> ")))"
+    let aLift = "((_ zero_extend 1) " <> aExp <> ")"
+        bLift = "((_ zero_extend 1) " <> bExp <> ")"
+        cLift = "((_ zero_extend 1) " <> cExp <> ")"
+    pure $ "(ite (= " <> cExp <> " (_ bv0 256)) (_ bv0 256) ((_ extract 255 0) (bvurem (bvadd " <> aLift `sp` bLift <> ")" <> cLift <> ")))"
   EqByte a b -> do
     cond <- op2 "=" a b
     pure $ "(ite " <> cond `sp` one `sp` zero <> ")"
