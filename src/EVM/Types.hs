@@ -458,9 +458,9 @@ x .> y = PGT x y
 x .>= y = PGEq x y
 
 infix 4 .==, ./=
-(.==) :: (Typeable a) => Expr a -> Expr a -> Prop
+(.==) :: forall a. (Typeable a) => Expr a -> Expr a -> Prop
 x .== y = PEq x y
-(./=) :: (Typeable a) => Expr a -> Expr a -> Prop
+(./=) :: forall a. (Typeable a) => Expr a -> Expr a -> Prop
 x ./= y = PNeg (PEq x y)
 
 pand :: [Prop] -> Prop

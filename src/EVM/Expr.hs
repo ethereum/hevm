@@ -1,4 +1,7 @@
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE GADTs #-}
 
 {-|
    Helper functions for working with Expr instances.
@@ -974,7 +977,7 @@ decomposeStorage = go
 
 -- | Simple recursive match based AST simplification
 -- Note: may not terminate!
-simplify :: Expr a -> Expr a
+simplify :: forall a. Typeable a => Expr a -> Expr a
 simplify e = untilFixpoint (simplifyNoLitToKeccak . litToKeccak) e
 
 simplifyNoLitToKeccak :: Expr a -> Expr a
@@ -1294,7 +1297,10 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
 simplifyProps :: [Prop] -> [Prop]
 simplifyProps = simplifyPropsPre simplifyProp
 
-simplifyPropsPre :: forall a. (Expr a -> Expr a) -> [Prop] -> [Prop]
+simplifyPropsConc :: [Prop] -> [Prop]
+simplifyPropsConc = simplifyPropsPre simplifyPropConc
+
+simplifyPropsPre :: (Prop -> Prop) -> [Prop] -> [Prop]
 simplifyPropsPre f ps = if cannotBeSat then [PBool False] else simplified
   where
     simplified = if (goOne ps == ps) then ps else simplifyPropsPre f (goOne ps)
@@ -1310,9 +1316,10 @@ simplifyPropConc = simplifyPropPre concKeccakSimpExpr
 
 -- | Evaluate the provided proposition down to its most concrete result
 -- Also simplifies the inner Expr, if it exists
-simplifyPropPre :: forall a. (Expr a -> Expr a) -> Prop -> Prop
+
+simplifyPropPre :: forall a. Typeable a => (Expr a -> Expr a) -> Prop -> Prop
 simplifyPropPre f prop =
-  let new = mapProp' go (simpInnerExpr prop)
+  let new = mapProp' go (simpInnerExpr f prop)
   in if (new == prop) then prop else simplifyPropPre f new
   where
     go :: Prop -> Prop
@@ -1417,23 +1424,32 @@ simplifyPropPre f prop =
 
     go p = p
 
+    simpInnerExpr :: (Expr a -> Expr a) -> Prop -> Prop
+    simpInnerExpr g = \case
+      PGEq a b -> case eqT @a @EWord of
+        Just Refl -> simpInnerExpr g (PLEq b a)
+        Nothing -> internalError "PGEq only supported for EWord"
+      PGT a b -> case eqT @a @EWord of
+        Just Refl -> simpInnerExpr g (PLT b a)
+        Nothing -> internalError "PGT only supported for EWord"
+      PLT a b -> case eqT @a @EWord of
+        Just Refl -> PLT (g a) (g b)
+        Nothing -> internalError "PLT only supported for EWord"
+      PLEq a b -> case eqT @a @EWord of
+        Just Refl -> PLEq (g a) (g b)
+        Nothing -> internalError "PLEq only supported for EWord"
 
-    -- Applies `f to the inner part of a Prop, e.g.
-    -- (PEq (Add (Lit 1) (Lit 2)) (Var "a")) becomes
-    -- (PEq (Lit 3) (Var "a")
-    simpInnerExpr :: Prop -> Prop
-    -- rewrite everything as LEq or LT
-    simpInnerExpr (PGEq a b) = simpInnerExpr (PLEq b a)
-    simpInnerExpr (PGT a b) = simpInnerExpr (PLT b a)
-    -- simplifies the inner expression
-    simpInnerExpr (PEq a b) = PEq (f a) (f b)
-    simpInnerExpr (PLT a b) = PLT (f a) (f b)
-    simpInnerExpr (PLEq a b) = PLEq (f a) (f b)
-    simpInnerExpr (PNeg a) = PNeg (simpInnerExpr a)
-    simpInnerExpr (PAnd a b) = PAnd (simpInnerExpr a) (simpInnerExpr b)
-    simpInnerExpr (POr a b) = POr (simpInnerExpr a) (simpInnerExpr b)
-    simpInnerExpr (PImpl a b) = PImpl (simpInnerExpr a) (simpInnerExpr b)
-    simpInnerExpr orig@(PBool _) = orig
+      -- Equality (polymorphic)
+      PEq a b -> PEq (g a) (g b)
+
+      -- Logical operations
+      PNeg a -> PNeg (simpInnerExpr g a)
+      PAnd a b -> PAnd (simpInnerExpr g a) (simpInnerExpr g b)
+      POr a b -> POr (simpInnerExpr g a) (simpInnerExpr g b)
+      PImpl a b -> PImpl (simpInnerExpr g a) (simpInnerExpr g b)
+
+      -- Base case
+      PBool b -> PBool b
 
 -- Makes [PAnd a b] into [a,b]
 flattenProps :: [Prop] -> [Prop]
@@ -1737,7 +1753,7 @@ constPropagate ps =
         _ -> pure ()
 
 -- Concretize & simplify Keccak expressions until fixed-point.
-concKeccakSimpExpr :: Expr a -> Expr a
+concKeccakSimpExpr :: forall a. Typeable a => Expr a -> Expr a
 concKeccakSimpExpr orig = untilFixpoint (simplifyNoLitToKeccak . (mapExpr concKeccakOnePass)) (simplify orig)
 
 -- Only concretize Keccak in Props
