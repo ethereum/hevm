@@ -42,6 +42,7 @@ import EVM.Keccak (keccakAssumptions, keccakCompute)
 import EVM.Traversals
 import EVM.Types
 import EVM.Effects
+import Debug.Trace (trace)
 
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
@@ -147,12 +148,17 @@ assertProps conf ps = assertPropsNoSimp (decompose . Expr.simplifyProps $ ps)
         safeExprs = all (isJust . mapPropM_ Expr.safeToDecompose) props
         safeProps = all Expr.safeToDecomposeProp props
 
+concIfConc :: Prop -> Prop
+concIfConc p = case Expr.concKeccakPropSimp p of
+  a@(PBool _) -> trace ("p is: " <> show p <> " a is: " <> show a )$ a
+  a -> trace ("NO SIMP p is: " <> show p <> " a is: " <> show a )$ p
+
 -- Note: we need a version that does NOT call simplify,
 -- because we make use of it to verify the correctness of our simplification
 -- passes through property-based testing.
 assertPropsNoSimp :: [Prop] -> Err SMT2
 assertPropsNoSimp psPreConc = do
- encs <- mapM propToSMT psElim
+ encs <- mapM propToSMT concPsIfConc
  intermediates <- declareIntermediates bufs stores
  readAssumes' <- readAssumes
  keccakAssertions' <- keccakAssertions
@@ -183,7 +189,8 @@ assertPropsNoSimp psPreConc = do
 
   where
     ps = Expr.concKeccakProps psPreConc
-    (psElim, bufs, stores) = eliminateProps ps
+    concPsIfConc = map concIfConc ps
+    (psElim, bufs, stores) = eliminateProps concPsIfConc
 
     -- Props storing info that need declaration(s)
     toDeclarePs     = ps <> keccAssump <> keccComp
@@ -711,11 +718,13 @@ exprToSMT = \case
   SHL a b -> op2 "bvshl" b a
   SHR a b -> op2 "bvlshr" b a
   SAR a b -> op2 "bvashr" b a
+  -- TODO: use sign_extend
   SEx a b -> op2 "signext" a b
   Div a b -> op2CheckZero "bvudiv" a b
   SDiv a b -> op2CheckZero "bvsdiv" a b
   Mod a b -> op2CheckZero "bvurem" a b
   SMod a b -> op2CheckZero "bvsrem" a b
+  -- TODO: use zero_extend!
   -- NOTE: this needs to do the MUL at a higher precision, then MOD, then downcast
   MulMod a b c -> do
     aExp <- exprToSMT a

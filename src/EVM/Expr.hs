@@ -109,8 +109,7 @@ addmod = op3 AddMod (\x y z ->
 
 mulmod :: Expr EWord -> Expr EWord -> Expr EWord -> Expr EWord
 mulmod = op3 MulMod (\x y z ->
-  if z == 0
-  then 0
+  if z == 0 then 0
   else fromIntegral $ (into @Word512 x * into y) `Prelude.mod` into z)
 
 exp :: Expr EWord -> Expr EWord -> Expr EWord
@@ -1000,6 +999,7 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
     -- simplify storage
     go (SLoad slot store) = readStorage' slot store
     go (SStore slot val store) = writeStorage slot val store
+    go (MulMod a b c) = mulmod a b c
 
     -- simplify buffers
     go o@(ReadWord (Lit _) _) = simplifyReads o
@@ -1738,6 +1738,9 @@ concKeccakSimpExpr orig = untilFixpoint (simplifyNoLitToKeccak . (mapExpr concKe
 -- simplification would always be ON
 concKeccakProps :: [Prop] -> [Prop]
 concKeccakProps orig = untilFixpoint (map (mapProp concKeccakOnePass)) orig
+
+concKeccakPropSimp :: Prop -> Prop
+concKeccakPropSimp orig = untilFixpoint (mapProp (concKeccakOnePass . simplifyNoLitToKeccak)) orig
 
 -- Simplifies in case the input to the Keccak is of specific array/map format and
 --            can be simplified into a concrete value
