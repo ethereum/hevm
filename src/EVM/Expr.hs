@@ -1000,6 +1000,7 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
     go (SLoad slot store) = readStorage' slot store
     go (SStore slot val store) = writeStorage slot val store
     go (MulMod a b c) = mulmod a b c
+    go (AddMod a b c) = addmod a b c
 
     -- simplify buffers
     go o@(ReadWord (Lit _) _) = simplifyReads o
