@@ -36,7 +36,7 @@
           solc
           foundry.defaultPackage.${system}
           pkgs.go-ethereum
-          pkgs.z3_4_12
+          pkgs.z3
           pkgs.cvc5
           pkgs.git
           pkgs.bitwuzla
