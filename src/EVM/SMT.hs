@@ -42,7 +42,6 @@ import EVM.Keccak (keccakAssumptions, keccakCompute)
 import EVM.Traversals
 import EVM.Types
 import EVM.Effects
-import Debug.Trace (trace)
 
 
 -- ** Encoding ** ----------------------------------------------------------------------------------
@@ -150,8 +149,8 @@ assertProps conf ps = assertPropsNoSimp (decompose . Expr.simplifyProps $ ps)
 
 concIfConc :: Prop -> Prop
 concIfConc p = case Expr.concKeccakPropSimp p of
-  a@(PBool _) -> trace ("p is: " <> show p <> " a is: " <> show a )$ a
-  a -> trace ("NO SIMP p is: " <> show p <> " a is: " <> show a )$ p
+  a@(PBool _) -> a
+  _ -> p
 
 -- Note: we need a version that does NOT call simplify,
 -- because we make use of it to verify the correctness of our simplification
