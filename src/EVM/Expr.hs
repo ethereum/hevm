@@ -40,6 +40,12 @@ import EVM.Types
 maxLit :: W256
 maxLit = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 
+maxLitSigned :: W256
+maxLitSigned = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+minLitSigned :: W256
+minLitSigned = 0x1000000000000000000000000000000000000000000000000000000000000000
+
 -- ** Stack Ops ** ---------------------------------------------------------------------------------
 
 
@@ -103,14 +109,12 @@ smod = op2 SMod (\x y ->
 
 addmod :: Expr EWord -> Expr EWord -> Expr EWord -> Expr EWord
 addmod = op3 AddMod (\x y z ->
-  if z == 0
-  then 0
+  if z == 0 then 0
   else fromIntegral $ (into @Word512 x + into y) `Prelude.mod` into z)
 
 mulmod :: Expr EWord -> Expr EWord -> Expr EWord -> Expr EWord
 mulmod = op3 MulMod (\x y z ->
-  if z == 0
-  then 0
+  if z == 0 then 0
   else fromIntegral $ (into @Word512 x * into y) `Prelude.mod` into z)
 
 exp :: Expr EWord -> Expr EWord -> Expr EWord
@@ -203,12 +207,19 @@ sar = op2 SAR (\x y ->
 
 peq :: (Typeable a) => Expr a -> Expr a -> Prop
 peq (Lit x) (Lit y) = PBool (x == y)
+peq (LitAddr x) (LitAddr y) = PBool (x == y)
 peq (LitByte x) (LitByte y) = PBool (x == y)
 peq (ConcreteBuf x) (ConcreteBuf y) = PBool (x == y)
 peq a b
   | a == b = PBool True
   | otherwise = let args = sort [a, b]
      in PEq (args !! 0) (args !! 1)
+
+pleq :: Expr EWord -> Expr EWord -> Prop
+pleq (Lit a) (Lit b) = PBool (a <= b)
+pleq a b
+  | a == b = PBool True
+  | otherwise = PLEq a b
 
 -- ** Bufs ** --------------------------------------------------------------------------------------
 
@@ -1057,21 +1068,9 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
 
     go (IndexWord a b) = indexWord a b
 
-    -- LT
-    go (EVM.Types.LT (Lit a) (Lit b))
-      | a < b = Lit 1
-      | otherwise = Lit 0
-    go (EVM.Types.LT _ (Lit 0)) = Lit 0
-    go (EVM.Types.LT a (Lit 1)) = iszero a
-    go (EVM.Types.LT (Lit 0) a) = iszero (Eq (Lit 0) a)
 
-    -- normalize all comparisons in terms of LT
-    go (EVM.Types.GT a b) = lt b a
-    go (EVM.Types.GEq a b) = leq b a
-    go (EVM.Types.LEq a b) = iszero (lt b a)
-    go (SLT a@(Lit _) b@(Lit _)) = slt a b
-    go (SGT a b) = SLT b a
     go (SEx a (SEx a2 b)) | a == a2  = sex a b
+    go (SEx _ (Lit 0)) = Lit 0
     go (SEx a b) = sex a b
 
     -- IsZero
@@ -1106,14 +1105,6 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
     -- literal addresses
     go (WAddr (LitAddr a)) = Lit $ into a
 
-    -- simple div/mod/add/sub
-    go (Div o1@(Lit _)  o2@(Lit _)) = EVM.Expr.div  o1 o2
-    go (SDiv o1@(Lit _) o2@(Lit _)) = EVM.Expr.sdiv o1 o2
-    go (Mod o1@(Lit _)  o2@(Lit _)) = EVM.Expr.mod  o1 o2
-    go (SMod o1@(Lit _) o2@(Lit _)) = EVM.Expr.smod o1 o2
-    go (Add o1@(Lit _)  o2@(Lit _)) = EVM.Expr.add  o1 o2
-    go (Sub o1@(Lit _)  o2@(Lit _)) = EVM.Expr.sub  o1 o2
-
     -- Mod
     go (Mod _ (Lit 0)) = Lit 0
     go (SMod _ (Lit 0)) = Lit 0
@@ -1121,6 +1112,18 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
     go (SMod a b) | a == b = Lit 0
     go (Mod (Lit 0) _) = Lit 0
     go (SMod (Lit 0) _) = Lit 0
+
+    -- MulMod
+    go (MulMod (Lit 0) _ _) = Lit 0
+    go (MulMod _ (Lit 0) _) = Lit 0
+    go (MulMod _ _ (Lit 0)) = Lit 0
+    go (MulMod a b c) = mulmod a b c
+
+    -- AddMod
+    go (AddMod (Lit 0) a b) = Mod a b
+    go (AddMod a (Lit 0) b) = Mod a b
+    go (AddMod _ _ (Lit 0)) = Lit 0
+    go (AddMod a b c) = addmod a b c
 
     -- Triple And (must be before 3-way sort below)
     go (And (Lit a) (And (Lit b) c)) = And (EVM.Expr.and (Lit a) (Lit b)) c
@@ -1207,9 +1210,11 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
     -- SHL / SHR by 0
     go (SHL a v)
       | a == (Lit 0) = v
+      | v == (Lit 0) = v
       | otherwise = shl a v
     go (SHR a v)
       | a == (Lit 0) = v
+      | v == (Lit 0) = v
       | otherwise = shr a v
 
     -- Bitwise AND & OR. These MUST preserve bitwise equivalence
@@ -1286,6 +1291,29 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
            then Lit 0
            else o
 
+    -- normalize all comparisons in terms of (S)LT
+    go (EVM.Types.GT a b) = lt b a
+    go (EVM.Types.GEq a b) = leq b a
+    go (EVM.Types.LEq a b) = iszero (lt b a)
+    go (SGT a b) = slt b a
+
+    -- LT
+    go (EVM.Types.LT _ (Lit 0)) = Lit 0
+    go (EVM.Types.LT a (Lit 1)) = iszero a
+    go (EVM.Types.LT (Lit 0) a) = iszero (Eq (Lit 0) a)
+    go (EVM.Types.LT a b) = lt a b
+
+    -- SLT
+    go (SLT _ (Lit a)) | a == minLitSigned = Lit 0
+    go (SLT (Lit a) _) | a == maxLitSigned = Lit 0
+    go (SLT a b) = slt a b
+
+    -- simple div/mod/add/sub
+    go (Div  o1 o2) = EVM.Expr.div  o1 o2
+    go (SDiv o1 o2) = EVM.Expr.sdiv o1 o2
+    go (Mod  o1 o2) = EVM.Expr.mod  o1 o2
+    go (SMod o1 o2) = EVM.Expr.smod o1 o2
+
     go a = a
 
 
@@ -1330,6 +1358,7 @@ simplifyProp prop =
     go (PLEq (Sub a b) c) | a == c = PLEq b a
     go (PLT (Max (Lit a) b) (Lit c)) | a < c = PLT b (Lit c)
     go (PLT (Lit 0) (Eq a b)) = peq a b
+    go (PLEq a b) = pleq a b
 
     -- when it's PLT but comparison on the RHS then it's just (PEq 1 RHS)
     go (PLT (Lit 0) (a@LT {})) = peq (Lit 1) a
@@ -1338,6 +1367,7 @@ simplifyProp prop =
     go (PLT (Lit 0) (a@GT {})) = peq (Lit 1) a
     go (PLT (Lit 0) (a@GEq {})) = peq (Lit 1) a
     go (PLT (Lit 0) (a@SGT {})) = peq (Lit 1) a
+    go (POr (PLEq a1 (Lit b)) (PLEq (Lit c) a2)) | a1 == a2 && c == b+1 = PBool True
 
     -- negations
     go (PNeg (PBool b)) = PBool (Prelude.not b)
@@ -1348,6 +1378,7 @@ simplifyProp prop =
     go (PNeg (PLEq a b)) = PGT a b
     go (PNeg (PAnd a b)) = POr (PNeg a) (PNeg b)
     go (PNeg (POr a b)) = PAnd (PNeg a) (PNeg b)
+    go (PNeg (PEq (Lit 1) (IsZero b))) = PEq (Lit 0) (IsZero b)
 
     -- Empty buf
     go (PEq (Lit 0) (BufLength k)) = peq k (ConcreteBuf "")
@@ -1738,6 +1769,10 @@ concKeccakSimpExpr orig = untilFixpoint (simplifyNoLitToKeccak . (mapExpr concKe
 -- simplification would always be ON
 concKeccakProps :: [Prop] -> [Prop]
 concKeccakProps orig = untilFixpoint (map (mapProp concKeccakOnePass)) orig
+
+-- As above, but also simplify, to fixedpoint
+concKeccakSimpProps :: [Prop] -> [Prop]
+concKeccakSimpProps orig = untilFixpoint (simplifyProps . map (mapProp concKeccakOnePass)) orig
 
 -- Simplifies in case the input to the Keccak is of specific array/map format and
 --            can be simplified into a concrete value

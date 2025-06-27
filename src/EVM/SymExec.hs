@@ -400,7 +400,7 @@ interpret fetcher iterConf vm =
                     -- ask the smt solver about the loop condition
                     performQuery
                   _ -> do
-                    let simpProps = Expr.simplifyProps $ Expr.concKeccakProps ((cond ./= Lit 0):preconds)
+                    let simpProps = Expr.concKeccakSimpProps ((cond ./= Lit 0):preconds)
                     (r, vm') <- case simpProps of
                       [PBool False] -> liftIO $ stToIO $ runStateT (continue (Case False)) vm
                       [] -> liftIO $ stToIO $ runStateT (continue (Case True)) vm

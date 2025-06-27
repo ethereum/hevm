@@ -27,7 +27,7 @@ import Test.QuickCheck.Random (mkQCGen)
 tryCexFuzz :: [Prop] -> Integer -> (Maybe (SMT.SMTCex))
 tryCexFuzz prePs tries = unGen (testVals tries) (mkQCGen 0) 1337
   where
-    ps = Expr.simplifyProps $ Expr.concKeccakProps prePs
+    ps = Expr.concKeccakSimpProps prePs
     vars = extractVars ps
     bufs = extractBufs ps
     stores = extractStorage ps
@@ -39,7 +39,7 @@ tryCexFuzz prePs tries = unGen (testVals tries) (mkQCGen 0) 1337
       storeVals <- getStores stores
       let
         ret = filterCorrectKeccak $ map (substituteEWord varvals . substituteBuf bufVals . substituteStores storeVals) ps
-        retSimp = Expr.simplifyProps $ Expr.concKeccakProps ret
+        retSimp = Expr.concKeccakSimpProps ret
       if null retSimp then pure $ Just (SMT.SMTCex {
                                     vars = varvals
                                     , addrs = mempty
