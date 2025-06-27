@@ -663,7 +663,7 @@ deriving instance Show (VMResult t s)
 
 -- VM State ----------------------------------------------------------------------------------------
 
-data VMType = Symbolic | Concrete
+data VMType = Symbolic | Concrete | Transpile
 
 type family Gas (t :: VMType) = r | r -> t where
   Gas Symbolic = ()
@@ -764,6 +764,13 @@ data SubState = SubState
   -- in principle we should include logs here, but do not for now
   }
   deriving (Eq, Ord, Show)
+
+data BasicBlock (t :: VMType) s = BasicBlock
+  { code :: ContractCode
+  , ops  :: V.Vector (Int, Op)
+  , opIxMap :: VS.Vector Int
+  }
+  deriving (Show, Generic)
 
 -- | The "registers" of the VM along with memory and data stack
 data FrameState (t :: VMType) s = FrameState
