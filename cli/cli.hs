@@ -86,6 +86,7 @@ data CommonOptions = CommonOptions
   , solverThreads ::Natural
   , smttimeout    ::Natural
   , smtdebug      ::Bool
+  , dumpUnsolved  ::Maybe String
   , numSolvers    ::Maybe Natural
   , numCexFuzz    ::Integer
   , maxIterations ::Integer
@@ -113,6 +114,7 @@ commonOptions = CommonOptions
   <*> (option auto $ long "solver-threads"  <> showDefault <> value 1 <> help "Number of threads for each solver instance. Only respected for Z3")
   <*> (option auto $ long "smttimeout"      <> value 300 <> help "Timeout given to SMT solver in seconds")
   <*> (switch $ long "smtdebug"             <> help "Print smt queries sent to the solver")
+  <*> (optional $ strOption $ long "dump-unsolved" <> help "Dump unsolved SMT queries to this (relative) path")
   <*> (optional $ option auto $ long "num-solvers" <> help "Number of solver instances to use (default: number of cpu cores)")
   <*> (option auto $ long "num-cex-fuzz"    <> showDefault <> value 3 <> help "Number of fuzzing tries to do to generate a counterexample")
   <*> (option auto $ long "max-iterations"  <> showDefault <> value 5 <> help "Number of times we may revisit a particular branching point. For no bound, set -1")
@@ -346,6 +348,7 @@ main = do
         exitFailure
       pure Env { config = defaultConfig
         { dumpQueries = cOpts.smtdebug
+        , dumpUnsolved = cOpts.dumpUnsolved
         , debug = cOpts.debug
         , dumpEndStates = cOpts.debug
         , dumpExprs = cOpts.debug
