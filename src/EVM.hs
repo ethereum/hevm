@@ -3050,12 +3050,11 @@ instance VMOps Symbolic where
     query $ PleaseGetSols ewordExpr numBytes pathconds $ \case
       Just concVals -> do
         assign #result Nothing
-        case (length concVals) of
+        case concVals of
           -- zero solutions means that we are in a branch that's not possible
           -- so revert all frames and stop all execution on this branch
-          0 -> finishAllFramesAndStop
-          1 -> do
-            let val = head concVals
+          [] -> finishAllFramesAndStop
+          [val] -> do
             assign #result Nothing
             pushTo #constraints $ Expr.simplifyProp (ewordExpr .== (Lit val))
             continue $ Just val

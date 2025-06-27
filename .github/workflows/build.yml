@@ -136,17 +136,33 @@ jobs:
       - uses: haskell-actions/setup@v2.7.7
         id: setup
         with:
-          ghc-version: '9.6.5'
+          ghc-version: '9.8.4'
 
       - name: Extract GHC & Cabal paths
         run: |
           HASKELL_PATHS="$(cygpath -u "$GHC_PATH"):$(cygpath -u "$CABAL_PATH")"
+          # This relative path works only if GHC was installed using chocalatey, but not when it was installed with ghcup
           HASKELL_MINGW_PATH="$(cygpath -u "$GHC_PATH/../mingw")"
           SYSTEM_MINGW_PATH="$(cygpath -m "$MSYS2_LOCATION/$MSYSTEM")"
+          if [ ! -d "$HASKELL_MINGW_PATH" ]; then
+            echo "The expected HASKELL_MINGW directory $HASKELL_MINGW_PATH does not exist"
+            echo "Trying to locate it via ghcup"
+            GHCUP_PATH=$(cygpath -u "C:\ghcup\bin\ghcup.exe")
+            GHC_REAL_PATH=$("$GHCUP_PATH" whereis ghc "$GHC_VERSION" | tr -d '\r')
+            HASKELL_MINGW_PATH="$(cygpath -u "$(dirname $GHC_REAL_PATH)"/../mingw)"
+          fi
+          echo "SYSTEM_MINGW_PATH is $SYSTEM_MINGW_PATH"
+          echo "HASKELL_MINGW_PATH is $HASKELL_MINGW_PATH"
+
+          if [ ! -d "$HASKELL_MINGW_PATH" ]; then
+            echo "Failed to locate GHC-bundled mingw"
+            exit 1
+          fi
           echo "HASKELL_PATHS=$HASKELL_PATHS" >> "$GITHUB_ENV"
           echo "HASKELL_MINGW_PATH=$HASKELL_MINGW_PATH" >> "$GITHUB_ENV"
           echo "SYSTEM_MINGW_PATH=$SYSTEM_MINGW_PATH" >> "$GITHUB_ENV"
         env:
+          GHC_VERSION: ${{ steps.setup.outputs.ghc-version }}
           GHC_PATH: ${{ steps.setup.outputs.ghc-path }}
           CABAL_PATH: ${{ steps.setup.outputs.cabal-path }}
           MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}

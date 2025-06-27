@@ -51,7 +51,7 @@ import EVM.Expr (maybeLitByteSimp)
 import Control.Applicative
 import Control.Monad
 import Control.Monad.IO.Unlift
-import Data.Aeson hiding (json)
+import Data.Aeson (encode)
 import Data.Aeson.Types
 import Data.Aeson.Optics
 import Data.Aeson.Key qualified as Key

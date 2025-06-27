@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE TypeAbstractions #-}
 
 module Main where
 
@@ -4786,8 +4787,9 @@ tests = testGroup "hevm"
           eq <- equivalenceCheck s a b defaultVeriOpts calldata False
           assertBoolM "Must have a difference" (any (isCex . fst) eq.res)
           let cexs :: [SMTCex] = mapMaybe (getCex . fst) eq.res
-          assertEqualM "Must have exactly one cex" (length cexs) 1
-          let cex = head cexs
+          cex <- case cexs of
+            [cex] -> pure cex
+            _     -> liftIO $ assertFailure "Must have exactly one cex"
           let def = fromRight (error "cannot be") $ defaultSymbolicValues $ subModel cex (AbstractBuf "txdata")
           let buf = prettyBuf $ Expr.concKeccakSimpExpr def
           assertBoolM "Must start with specific string" (T.isPrefixOf "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0cf" buf)

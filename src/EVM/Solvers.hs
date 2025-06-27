@@ -29,7 +29,6 @@ import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_i
 import Witch (into)
 import EVM.Effects
 import EVM.Fuzz (tryCexFuzz)
-import Numeric (readHex)
 import Data.Bits ((.&.))
 import Numeric (showHex)
 import EVM.Expr (simplifyProps)
@@ -192,9 +191,9 @@ getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCo
   -- put the instance back in the list of available instances
   liftIO $ writeChan availableInstances inst
   where
-    createHexValue k =
-       let hexString = concat (replicate k "ff")
-       in fst . head $ readHex hexString
+    maskFromBytesCount k
+      | k <= 32 = (2 ^ (8 * k) - 1)
+      | otherwise = internalError "Byte length exceeds 256-bit capacity"
     subRun :: (MonadIO m, ReadConfig m) => [W256] -> SMT2 -> Text -> m ()
     subRun vals fullSmt sat = do
       conf <- readConfig
@@ -216,7 +215,7 @@ getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCo
             cex <- liftIO $ getModel inst cexvars
             case Map.lookup (Var (TStrict.pack multiSol.var)) cex.vars of
               Just v -> do
-                let hexMask = createHexValue multiSol.numBytes
+                let hexMask = maskFromBytesCount multiSol.numBytes
                     maskedVal = v .&. hexMask
                     toSMT n = show (into n :: Integer)
                     maskedVar = "(bvand " <> multiSol.var <> " (_ bv" <> toSMT hexMask <> " 256))"
