@@ -92,6 +92,7 @@ collapse model = case toBuf model of
 getVar :: SMTCex -> TS.Text -> W256
 getVar cex name = fromJust $ Map.lookup (Var name) cex.vars
 
+-- Props are ONLY for pretty printing the query Props
 data SMT2 = SMT2 [Builder] CexVars [Prop]
   deriving (Eq, Show)
 
@@ -177,12 +178,10 @@ assertPropsNoSimp psPreConc = do
   <> readAssumes'
   <> gasOrder
   <> smt2Line ""
-  <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) mempty mempty
-  <> SMT2 mempty mempty { storeReads = storageReads } mempty
-  <> SMT2 mempty mempty psPreConc
+  <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) (cexInfo storageReads) ps
 
   where
-    ps = Expr.concKeccakProps psPreConc
+    ps = Expr.concKeccakSimpProps psPreConc
     (psElim, bufs, stores) = eliminateProps ps
 
     -- Props storing info that need declaration(s)
@@ -218,6 +217,10 @@ assertPropsNoSimp psPreConc = do
     readAssumes = do
       assumps <- mapM assertSMT $ assertReads psElim bufs stores
       pure $ smt2Line "; read assumptions" <> SMT2 assumps mempty mempty
+
+    cexInfo :: Map (Expr 'EAddr, Maybe W256) (Set (Expr 'EWord)) -> CexVars
+    cexInfo a = mempty { storeReads = a }
+
 
 referencedAbstractStores :: TraversableTerm a => a -> Set Builder
 referencedAbstractStores term = foldTerm go mempty term

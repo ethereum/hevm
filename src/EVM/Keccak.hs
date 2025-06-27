@@ -63,10 +63,10 @@ keccakAssumptions :: [Prop] -> [Expr Buf] -> [Expr Storage] -> [Prop]
 keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
   where
     (_, st) = runState (findKeccakPropsExprs ps bufs stores) initState
-
-    keccakPairs = uniquePairs (Set.toList st.keccakExprs)
+    ks = Set.toList $ Set.map concretizeKeccakParam st.keccakExprs
+    keccakPairs = uniquePairs ks
     injectivity = map injProp keccakPairs
-    minValue = map minProp (Set.toList st.keccakExprs)
+    minValue = map minProp ks
     minDiffOfPairs = map minDistance keccakPairs
      where
       minDistance :: (Expr EWord, Expr EWord) -> Prop
@@ -76,12 +76,16 @@ keccakAssumptions ps bufs stores = injectivity <> minValue <> minDiffOfPairs
           req2 = (PGEq (Sub kb ka) (Lit 256))
       minDistance _ = internalError "expected Keccak expression"
 
+concretizeKeccakParam :: Expr EWord -> Expr EWord
+concretizeKeccakParam (Keccak buf) = Keccak (concKeccakSimpExpr buf)
+concretizeKeccakParam _ = internalError "Cannot happen"
+
 compute :: forall a. Expr a -> Set Prop
 compute = \case
   e@(Keccak buf) -> do
     let b = simplify buf
     case keccak b of
-      lit@(Lit _) -> Set.singleton (PEq lit e)
+      lit@(Lit _) -> Set.singleton (PEq lit (concretizeKeccakParam e))
       _ -> Set.empty
   _ -> Set.empty
 

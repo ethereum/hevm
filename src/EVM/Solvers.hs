@@ -126,9 +126,9 @@ checkSatWithProps sg props = do
         readChan resChan
 
 writeSMT2File :: SMT2 -> String -> IO ()
-writeSMT2File smt2 postfix =
+writeSMT2File smt2 postfix = do
     let content = formatSMT2 smt2 <> "\n\n(check-sat)"
-    in T.writeFile ("query-" <> postfix <> ".smt2") content
+    T.writeFile ("query-" <> postfix <> ".smt2") content
 
 withSolvers :: App m => Solver -> Natural -> Natural -> Maybe Natural -> (SolverGroup -> m a) -> m a
 withSolvers solver count threads timeout cont = do
