@@ -1357,6 +1357,7 @@ simplifyProp prop =
     go (PLT (Lit 0) (a@GT {})) = peq (Lit 1) a
     go (PLT (Lit 0) (a@GEq {})) = peq (Lit 1) a
     go (PLT (Lit 0) (a@SGT {})) = peq (Lit 1) a
+    go (POr (PLEq a1 (Lit b)) (PLEq (Lit c) a2)) | a1 == a2 && c == b+1 = PBool True
 
     -- negations
     go (PNeg (PBool b)) = PBool (Prelude.not b)
