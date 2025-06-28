@@ -29,7 +29,7 @@ import EVM.Effects (Config (..))
 
 import Control.Monad (unless, when)
 import Control.Monad.ST (ST)
-import Control.Monad.State.Strict (MonadState, State, get, gets, lift, modify', put)
+import Control.Monad.State.Strict (MonadState, State, StateT, get, gets, lift, modify', put)
 import Data.Bits (FiniteBits, countLeadingZeros, finiteBitSize)
 import Data.ByteArray qualified as BA
 import Data.ByteString (ByteString)
@@ -63,6 +63,7 @@ import Data.Vector.Storable.ByteString (vectorToByteString)
 import Data.Word (Word8, Word32, Word64)
 import Text.Read (readMaybe)
 import Witch (into, tryFrom, unsafeInto, tryInto)
+import Witch.From (From)
 
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
@@ -288,6 +289,33 @@ getOpW8 state = case state.code of
 
 getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
 getOpName state = intToOpName $ fromEnum $ getOpW8 state
+
+{-# INLINE runOpcodeDup #-}
+runOpcodeDup :: (From source Int, VMOps t, ?op::Word8) =>
+                source -> StateT (VM t s) (ST s) ()
+runOpcodeDup i = do 
+    vm <- get
+    let
+      stk  = vm.state.stack
+      FeeSchedule {..} = vm.block.schedule
+    case preview (ix (into i - 1)) stk of
+              Nothing -> underrun
+              Just y ->
+                limitStack 1 $
+                  burn g_verylow $ do
+                    next
+                    pushSym y
+
+{-# INLINE runOpcodePush0 #-}
+runOpcodePush0 :: (VMOps t, ?op::Word8) =>
+                StateT (VM t s) (ST s) ()
+runOpcodePush0 = do
+  vm <- get
+  let FeeSchedule {..} = vm.block.schedule
+  limitStack 1 $
+    burn g_base $ do
+      next
+      pushSym (Lit 0)
 
 -- | Executes the EVM one step
 exec1 :: forall (t :: VMType) s. (VMOps t) => Config ->  EVM t s ()

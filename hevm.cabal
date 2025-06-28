@@ -104,6 +104,7 @@ library
     EVM.Format,
     EVM.Fetch,
     EVM.FeeSchedule,
+    EVM.Futamura,
     EVM.Op,
     EVM.Precompiled,
     EVM.RLP,
@@ -141,6 +142,10 @@ library
   install-includes:
     ethjet/tinykeccak.h, ethjet/ethjet.h, ethjet/ethjet-ff.h, ethjet/blake2.h
   build-depends:
+    ghc                               >= 9.6 && < 10,
+    ghc-paths                         >= 0.1,
+    directory                         >= 1.3,
+    temporary                         >= 1.2.0 && < 1.4, 
     system-cxx-std-lib                >= 1.0 && < 2.0,
     QuickCheck                        >= 2.13.2 && < 2.15,
     Decimal                           >= 0.5.1 && < 0.6,
