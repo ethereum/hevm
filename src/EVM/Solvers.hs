@@ -31,7 +31,7 @@ import EVM.Effects
 import EVM.Fuzz (tryCexFuzz)
 import Data.Bits ((.&.))
 import Numeric (showHex)
-import EVM.Expr (simplifyProps)
+import EVM.Expr (simplifyPropsConc, simplifyPropConc, simplifyProps, concKeccakSimpExpr, simplifyProp)
 
 import EVM.SMT
 import EVM.Types
@@ -104,7 +104,8 @@ checkSatWithProps :: App m => SolverGroup -> [Prop] -> m (SMTResult, Err SMT2)
 checkSatWithProps sg props = do
   conf <- readConfig
   let psSimp = if conf.simp then simplifyProps props else props
-  if psSimp == [PBool False] then pure (Qed, Right mempty)
+      conc = simplifyPropsConc psSimp
+  if (psSimp == [PBool False] || (conf.simp && conc == [PBool False])) then pure (Qed, Right mempty)
   else do
     let smt2 = if conf.simp then assertProps conf psSimp else assertPropsNoSimp psSimp
     if isLeft smt2 then
