@@ -53,6 +53,7 @@ import EVM.Types qualified
 import EVM.UnitTest
 import EVM.Effects
 import EVM.Expr (maybeLitWordSimp, maybeLitAddrSimp)
+import EVM.Futamura (compileAndRunSpecialized)
 
 data AssertionType = DSTest | Forge
   deriving (Eq, Show, Read)
@@ -300,6 +301,7 @@ getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
 
 main :: IO ()
 main = do
+  _ <- compileAndRunSpecialized [OpPush0] undefined
   cmd <- execParser $ info (commandParser <**> helper)
     ( Options.fullDesc
     <> progDesc "hevm, a symbolic and concrete EVM bytecode execution framework"
