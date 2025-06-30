@@ -61,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   via masking
 - More rewrite rules for (PLT (Lit 0) _) and (PEq (Lit 1) _)
 - Simplification can now be turned off from the cli via --no-simplify
+- More rewrite rules for array and map lookups.
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value

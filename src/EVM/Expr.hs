@@ -639,20 +639,26 @@ readStorage w st = go (simplifyNoLitToKeccak w) (simplifyNoLitToKeccak st)
       (a, b) | surelyEqual a b -> Just val
       (a, b) | surelyNotEqual a b -> go slot prev
 
-      -- slot is for a map + map -> skip write
-      (MappingSlot idA _, MappingSlot idB _)       | isMap' idB, isMap' idA, idsDontMatch idA idB  -> go slot prev
-      (MappingSlot idA keyA, MappingSlot idB keyB) | isMap' idB, isMap' idA, surelyNotEqual keyA keyB -> go slot prev
+      (MappingSlot idA _, MappingSlot idB _)                | isMap' idB, isMap' idA, idsDontMatch idA idB  -> go slot prev
+      (MappingSlot idA keyA, MappingSlot idB keyB)          | isMap' idB, isMap' idA, idA == idB, surelyNotEqual keyA keyB -> go slot prev
+      (MappingSlot idA _, ArraySlotZero idB)                | isMap' idA, isArray idB  -> go slot prev
 
-      -- special case of array + map -> skip write
-      (ArraySlotWithOffs idA _, Keccak k)          | isMap k, isArray idA -> go slot prev
-      (ArraySlotWithOffs2 idA _ _, Keccak k)       | isMap k, isArray idA -> go slot prev
-      (ArraySlotZero idA, Keccak k)                | isMap k, isArray idA -> go slot prev
+      (ArraySlotZero idA, ArraySlotZero idB)                   | isArray idA, isArray idB, idA /= idB -> go slot prev
+      (ArraySlotZero idA, ArraySlotWithOffs idB (Lit off))     | isArray idA, isArray idB, idA /= idB, off < 256, off /= 0 -> go slot prev
+      (ArraySlotZero idA, ArraySlotWithOffs idB (Lit off))     | isArray idA, idA == idB, off /= 0  -> go slot prev
+      (ArraySlotZero idA, MappingSlot idB _)                   | isArray idA, isMap' idB  -> go slot prev
+      (ArraySlotZero idA, Keccak idB)                          | isArray idA, isMap idB  -> go slot prev
 
-      -- special case of map + array -> skip write
-      (Keccak k, ArraySlotWithOffs idA _)          | isMap k, isArray idA -> go slot prev
-      (Keccak k, ArraySlotWithOffs2 idA _ _)       | isMap k, isArray idA -> go slot prev
-      (ArraySlotWithOffs idA _, Keccak k)          | isMap k, isArray idA -> go slot prev
-      (ArraySlotWithOffs2 idA _ _, Keccak k)       | isMap k, isArray idA -> go slot prev
+      (ArraySlotWithOffs idA (Lit off), ArraySlotZero idB)     | isArray idA, isArray idB, idA /= idB, off < 256 -> go slot prev
+      (ArraySlotWithOffs idA (Lit off), ArraySlotZero idB)     | isArray idA, idA == idB, off /= 0  -> go slot prev
+      (ArraySlotWithOffs idA (Lit offA), ArraySlotWithOffs idB (Lit offB))  | isArray idA, isArray idB, idA /= idB, offA < 256, offB < 256 -> go slot prev
+      (ArraySlotWithOffs idA offA, ArraySlotWithOffs idB offB)              | isArray idA, idA == idB, surelyNotEqual offA offB -> go slot prev
+      (ArraySlotWithOffs idB offB2, ArraySlotWithOffs2 idA offA1 offA2)     | isArray idA, idA == idB, surelyNotEqual (Add (Lit offA1) offA2) offB2 -> go slot prev
+      (ArraySlotWithOffs idA (Lit off), Keccak idB)            | isArray idA, isMap idB, off < 256 -> go slot prev
+      (ArraySlotWithOffs idA (Lit off), MappingSlot idB _)     | isArray idA, isMap' idB, off < 256 -> go slot prev
+
+      (Keccak idA, ArraySlotZero idB)                 | isMap idA, isArray idB -> go slot prev
+      (Keccak idA, ArraySlotWithOffs idB (Lit offs))  | isMap idA, isArray idB, offs < 256 -> go slot prev
 
       -- Fixed SMALL value will never match Keccak (well, it might, but that's VERY low chance)
       (Lit a, Keccak _) | a < 256 -> go slot prev
@@ -663,39 +669,26 @@ readStorage w st = go (simplifyNoLitToKeccak w) (simplifyNoLitToKeccak st)
       -- occurring here is 2^32/2^256 = 2^-224, which is close enough to zero
       -- for our purposes. This lets us completely simplify reads from write
       -- chains involving writes to arrays at literal offsets.
-      (Lit a, Add (Lit b) (Keccak _)) | a < 256, b < maxW32 -> go slot prev
-      (Add (Lit a) (Keccak _) ,Lit b) | b < 256, a < maxW32 -> go slot prev
+      (Lit a, Add (Lit offB) (Keccak _)) | a < 256, offB < maxW32 -> go slot prev
+      (Add (Lit offA) (Keccak _), Lit b) | b < 256, offA < maxW32 -> go slot prev
 
       -- Finding two Keccaks that are < 256 away from each other should be VERY hard
       -- This simplification allows us to deal with maps of structs
-      (Add (Lit a2) (Keccak _), Add (Lit b2) (Keccak _)) | a2 /= b2, abs (a2-b2) < 256 -> go slot prev
-      (Add (Lit a2) (Keccak _), (Keccak _)) | a2 > 0, a2 < 256 -> go slot prev
-      ((Keccak _), Add (Lit b2) (Keccak _)) | b2 > 0, b2 < 256 -> go slot prev
+      (Add (Lit a) (Keccak _), Add (Lit b) (Keccak _)) | a /= b, abs (a-b) < 256 -> go slot prev
+      (Add (Lit a) (Keccak _), (Keccak _)) | a > 0, a < 256 -> go slot prev
+      ((Keccak _), Add (Lit b) (Keccak _)) | b > 0, b < 256 -> go slot prev
 
-      -- zero offs vs zero offs
-      (ArraySlotZero idA, ArraySlotZero idB)                   | isArray idA, isArray idB, idA /= idB -> go slot prev
-
-      -- zero offs vs non-zero offs
-      (ArraySlotZero idA, ArraySlotWithOffs idB _)             | isArray idA, isArray idB, idA /= idB -> go slot prev
-      (ArraySlotZero idA, ArraySlotWithOffs idB (Lit offB))    | isArray idA, idA == idB, offB /= 0  -> go slot prev
-      (ArraySlotZero idA, ArraySlotWithOffs2 idB _ _)          | isArray idA, isArray idB, idA /= idB -> go slot prev
-
-      -- non-zero offs vs zero offs
-      (ArraySlotWithOffs idA _, ArraySlotZero idB)             | isArray idA, isArray idB, idA /= idB -> go slot prev
-      (ArraySlotWithOffs idA (Lit offA), ArraySlotZero idB)    | isArray idA, idA == idB, offA /= 0  -> go slot prev
-
-      -- non-zero offs vs non-zero offs, different ids
-      (ArraySlotWithOffs idA _, ArraySlotWithOffs idB _)       | isArray idA, isArray idB, idA /= idB -> go slot prev
-
-      -- non-zero offs vs non-zero offs, same ids
-      (ArraySlotWithOffs idA a, ArraySlotWithOffs idB b)                       | isArray idA, idA == idB,
-        surelyNotEqual a b -> go slot prev
-      (ArraySlotWithOffs idB offB2, ArraySlotWithOffs2 idA offA1 offA2)        | isArray idA, idA == idB,
-        surelyNotEqual (Add (Lit offA1) offA2) offB2 -> go slot prev
       (ArraySlotWithOffs2 idA offA1 offA2, ArraySlotWithOffs idB offB2)        | isArray idA, idA == idB,
         surelyNotEqual (Add (Lit offA1) offA2) offB2 -> go slot prev
       (ArraySlotWithOffs2 idA offA1 offA2, ArraySlotWithOffs2 idB offB1 offB2) | isArray idA, idA == idB,
         surelyNotEqual (Add (Lit offA1) offA2) (Add (Lit offB1) offB2) -> go slot prev
+
+      -- DANGEROUS: offset could possibly be VERY large and SPECIFIC in order to make them clash
+      -- This would constitute a hack, and would require a specifically badly written code
+      (MappingSlot idA _, ArraySlotWithOffs idB _) | isMap' idA, isArray idB  -> go slot prev
+      (MappingSlot idA _, ArraySlotWithOffs2 idB _ _) | isMap' idA, isArray idB  -> go slot prev
+      (ArraySlotWithOffs idA _, MappingSlot idB _) | isArray idA, isMap' idB  -> go slot prev
+      (ArraySlotWithOffs2 idA _ _, MappingSlot idB _) | isArray idA, isMap' idB  -> go slot prev
 
       -- we are unable to determine statically whether or not we can safely move deeper in the write chain, so return an abstract term
       _ -> Just $ SLoad slot s
@@ -731,6 +724,7 @@ pattern ArraySlotWithOffs2 id offs1 offs2 = Add (Lit offs1) (Add offs2 (Keccak (
 -- special pattern to match the 0th element because the `Add` term gets simplified out
 pattern ArraySlotZero :: ByteString -> Expr EWord
 pattern ArraySlotZero id = Keccak (ConcreteBuf id)
+
 -- checks if two mapping ids match or not
 idsDontMatch :: ByteString -> ByteString -> Bool
 idsDontMatch a b = BS.length a >= 64 && BS.length b >= 64 && diff32to64Byte a b
