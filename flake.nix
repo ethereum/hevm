@@ -18,7 +18,7 @@
       flake = false;
     };
     empty-smt-solver = {
-      url = "github:msooseth/empty-smt-solver/a3e97a0361864e15e4a0152d6af81cdbc48d9b1a";
+      url = "github:msooseth/empty-smt-solver/828d6fff618c43ee65d85ba01690dcefc4631f20";
       flake = true;
     };
     solc-pkgs = {
