@@ -41,12 +41,14 @@ data Solver
   = Z3
   | CVC5
   | Bitwuzla
+  | EmptySolver
   | Custom Text
 
 instance Show Solver where
   show Z3 = "z3"
   show CVC5 = "cvc5"
   show Bitwuzla = "bitwuzla"
+  show EmptySolver = "empty-solver"
   show (Custom s) = T.unpack s
 
 
