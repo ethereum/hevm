@@ -2,7 +2,7 @@ cabal-version: 3.0
 name:
   hevm
 version:
-  0.54.2
+  0.54.3
 synopsis:
   Symbolic EVM Evaluator
 description:
@@ -104,6 +104,7 @@ library
     EVM.Format,
     EVM.Fetch,
     EVM.FeeSchedule,
+    EVM.Opcodes,
     EVM.Futamura,
     EVM.Op,
     EVM.Precompiled,
@@ -146,7 +147,7 @@ library
     ghc-paths                         >= 0.1,
     ghc-boot-th                       >= 9.6 && < 10,
     directory                         >= 1.3,
-    temporary                         >= 1.2.0 && < 1.4, 
+    temporary                         >= 1.2.0 && < 1.4,
     system-cxx-std-lib                >= 1.0 && < 2.0,
     QuickCheck                        >= 2.13.2 && < 2.15,
     Decimal                           >= 0.5.1 && < 0.6,
@@ -202,7 +203,7 @@ executable hevm
     cli
   main-is:
     cli.hs
-  ghc-options: -threaded -with-rtsopts=-N
+  ghc-options: -threaded -with-rtsopts=-N -optl-rdynamic
   other-modules:
     Paths_hevm
   autogen-modules:

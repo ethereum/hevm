@@ -138,6 +138,7 @@ data CommonExecOptions = CommonExecOptions
   , gaslimit      ::Maybe Word64
   , gasprice      ::Maybe W256
   , maxcodesize   ::Maybe W256
+  , useFutamura   ::Bool
   , prevRandao    ::Maybe W256
   , chainid       ::Maybe W256
   , rpc           ::Maybe URL
@@ -160,6 +161,7 @@ commonExecOptions = CommonExecOptions
   <*> (optional $ option auto $ long "gaslimit"      <> help "Tx: gas limit")
   <*> (optional $ option auto $ long "gasprice"      <> help "Tx: gas price")
   <*> (optional $ option auto $ long "maxcodesize"   <> help "Block: max code size")
+  <*> (switch $ long "use-futamura"  <> help "Use Futamura specialization for execution")
   <*> (optional $ option auto $ long "prev-randao"   <> help "Block: prevRandao")
   <*> (optional $ option auto $ long "chainid"       <> help "Env: chainId")
   <*> rpcParser
@@ -301,7 +303,6 @@ getFullVersion = showVersion Paths.version <> " [" <> gitVersion <> "]"
 
 main :: IO ()
 main = do
-  _ <- compileAndRunSpecialized [OpPush0] undefined
   cmd <- execParser $ info (commandParser <**> helper)
     ( Options.fullDesc
     <> progDesc "hevm, a symbolic and concrete EVM bytecode execution framework"
@@ -566,7 +567,10 @@ launchExec cFileOpts execOpts cExecOpts cOpts = do
 
   -- TODO: we shouldn't need solvers to execute this code
   withSolvers Z3 0 1 Nothing $ \solvers -> do
-    vm' <- EVM.Stepper.interpret (Fetch.oracle solvers rpcinfo) vm EVM.Stepper.runFully
+    vm' <- case cExecOpts.useFutamura of
+      True  -> liftIO $ compileAndRunSpecialized vm
+      False -> EVM.Stepper.interpret (Fetch.oracle solvers rpcinfo) vm EVM.Stepper.runFully
+
     writeTraceDapp dapp vm'
     case vm'.result of
       Just (VMFailure (Revert msg)) -> liftIO $ do

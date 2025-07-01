@@ -1,10 +1,8 @@
-{-# LANGUAGE ImplicitParams, FlexibleContexts, GADTs #-}
-
 module EVM.Futamura where
 
 import Control.Monad.State.Strict
 import Control.Monad.ST
-import System.Directory (getTemporaryDirectory, doesFileExist)
+import System.Directory (getTemporaryDirectory)
 import System.IO.Temp (createTempDirectory)
 import System.FilePath
 import System.Process (readProcess)
@@ -15,69 +13,17 @@ import Data.Maybe (catMaybes, listToMaybe)
 import Data.Char (isSpace)
 import Unsafe.Coerce
 
-import GHC
+import GHC (SuccessFlag(..), compileExpr, mkModuleName, simpleImportDecl, InteractiveImport(..), setContext, LoadHowMuch(..), load, setTargets, guessTarget, setSessionDynFlags, getSessionDynFlags, runGhc)
 import GHC.Paths (libdir)
 import GHC.LanguageExtensions.Type (Extension(..))
-import GHC.Driver.Flags (Language(..))
-import GHC.Driver.Session (PackageFlag(..), PackageArg(..), ModRenaming(..), PackageDBFlag(..), PkgDbRef(..), xopt_set)
+import GHC.Driver.Session --(PackageFlag(..), PackageArg(..), ModRenaming(..), PackageDBFlag(..), PkgDbRef(..), xopt_set)
 
--- Adjust imports to your project
-import EVM.Op
-import EVM.Types
+import EVM.Opcodes
+import EVM (currentContract)
+import EVM.Op (getOp)
+import EVM.Types (VM, GenericOp(..), ContractCode(..), RuntimeCode(..), contract, code)
 
-projectPackages :: [String]
-projectPackages =
-  [ "ghc"
-  , "ghc-paths"
-  , "ghc-boot-th"
-  , "directory"
-  , "temporary"
-  , "system-cxx-std-lib"
-  , "QuickCheck"
-  , "Decimal"
-  , "containers"
-  , "transformers"
-  , "tree-view"
-  , "aeson"
-  , "bytestring"
-  , "scientific"
-  , "binary"
-  , "text"
-  , "unordered-containers"
-  , "vector"
-  , "base16"
-  , "megaparsec"
-  , "mtl"
-  , "filepath"
-  , "cereal"
-  , "cryptonite"
-  , "memory"
-  , "data-dword"
-  , "process"
-  , "optics-core"
-  , "optics-extra"
-  , "optics-th"
-  , "aeson-optics"
-  , "async"
-  , "operational"
-  , "optparse-generic"
-  , "pretty-hex"
-  , "rosezipper"
-  , "wreq"
-  , "regex-tdfa"
-  , "base"
-  , "here"
-  , "smt2-parser"
-  , "spool"
-  , "stm"
-  , "spawn"
-  , "filepattern"
-  , "witch"
-  , "unliftio-core"
-  , "split"
-  , "template-haskell"
-  , "extra"
-  ]
+import qualified Data.ByteString as BS
 
 -- Code from Halive
 
@@ -90,11 +36,6 @@ extractKey key conf = extractValue <$> parse conf
 
     parse = listToMaybe . filter (key `isPrefixOf`) . lines
     extractValue = dropWhileEnd isSpace . dropWhile isSpace . drop keyLen
--- From ghc-mod
-mightExist :: FilePath -> IO (Maybe FilePath)
-mightExist f = do
-    exists <- doesFileExist f
-    return $ if exists then (Just f) else (Nothing)
 
 ------------------------
 ---------- Stack project
@@ -116,18 +57,6 @@ updateDynFlagsWithStackDB dflags =
             let pkgs = map (PackageDB . PkgDbPath) stackDBs
             return dflags { packageDBFlags = pkgs ++ packageDBFlags dflags }
 
-addPackageFlags :: [String] -> DynFlags -> DynFlags
-addPackageFlags pkgs df =
-    df{packageFlags = packageFlags df ++ expose `map` pkgs}
-  where
-    expose pkg = ExposePackage pkg (PackageArg pkg) (ModRenaming True [])
-
-addPackageHides :: [String] -> DynFlags -> DynFlags
-addPackageHides pkgs df =
-    df{packageFlags = packageFlags df ++ hide `map` pkgs}
-    where
-        hide pkg = HidePackage pkg
-
 --------------------------------------------------------------------------------
 -- | Generate Haskell Code From a List of Opcodes
 --------------------------------------------------------------------------------
@@ -135,22 +64,42 @@ addPackageHides pkgs df =
 generateHaskellCode :: [GenericOp Word8] -> String
 generateHaskellCode ops =
   unlines $
-    [ "module Generated where"
+    [ "{-# LANGUAGE ImplicitParams #-}"
+    , "module Generated where"
     , "import Control.Monad.State.Strict"
     , "import Control.Monad.ST"
-    , "import EVM (runOpcodePush0)"
     , "import Data.Word (Word8)"
+    , "import EVM"
     , "import EVM.Types"
     , "import EVM.Op"
+    , "import EVM.Expr qualified as Expr"
+    , "import EVM.FeeSchedule (FeeSchedule (..))"
+    , ""
+    , "runOpcodeAdd :: " ++ runOpcodeAddType
+    , "runOpcodeAdd = " ++ runOpcodeAddSrc
+    , "runOpcodePush0 ::" ++ runOpcodePush0Type
+    , "runOpcodePush0 = " ++ runOpcodePush0Src
+    , "runOpcodeStop :: " ++ runOpcodeStopType
+    , "runOpcodeStop = " ++ runOpcodeStopSrc
+    , "runOpcodeRevert :: " ++ runOpcodeRevertType
+    , "runOpcodeRevert = " ++ runOpcodeRevertSrc
     , ""
     , "runSpecialized :: StateT (VM Concrete s) (ST s) ()"
     , "runSpecialized = do"
-    ] ++ map genOp ops
+    ] ++ map (checkIfVmResulted . genOp) ops -- ++ [" doStop"]
+
+checkIfVmResulted :: String -> String
+checkIfVmResulted op =
+  " get >>= \\vm ->\n" ++
+  "   case vm.result of\n" ++
+  "     Nothing ->" ++ op ++ "\n" ++
+  "     Just r -> return ()"
 
 genOp :: GenericOp Word8 -> String
-genOp (OpPush n)  = " let ?op = 1 in runOpcodePush " ++ show n
 genOp (OpPush0)   = " let ?op = 1 in runOpcodePush0"
-genOp (OpAdd)     = "  runOpcodeAdd"
+genOp (OpRevert)  = " let ?op = 1 in runOpcodeRevert"
+genOp (OpStop)    = " let ?op = 1 in runOpcodeStop"
+genOp (OpAdd)     = " let ?op = 1 in runOpcodeAdd"
 genOp (OpDup i)   = "  runOpcodeDup " ++ show i
 -- Add more opcodes as needed
 genOp other       = error $ "Opcode not supported in specialization: " ++ show other
@@ -159,13 +108,19 @@ genOp other       = error $ "Opcode not supported in specialization: " ++ show o
 -- | Compile and Run a Specialized EVM Program at Runtime
 --------------------------------------------------------------------------------
 
-compileAndRunSpecialized :: [GenericOp Word8] -> VM t s -> IO (VM t s)
-compileAndRunSpecialized ops vmState = do
+compileAndRunSpecialized :: VM t s -> IO (VM t s)
+compileAndRunSpecialized vm = do
   tmpDir <- getTemporaryDirectory >>= \tmp -> createTempDirectory tmp "evmjit"
+  let contract = currentContract vm
+  let ops = case contract of
+              Nothing -> error "No current contract found in VM"
+              Just c -> map getOp $ BS.unpack $ extractCode $ c.code
   let hsPath = tmpDir </> "Generated.hs"
   putStrLn $ "Generating Haskell code for EVM specialization in: " ++ hsPath
   writeFile hsPath (generateHaskellCode ops)
-  dynCompileAndRun hsPath vmState
+  dynCompileAndRun hsPath vm
+   where extractCode (RuntimeCode (ConcreteRuntimeCode ops)) = ops
+         extractCode _ = error "Expected ConcreteRuntimeCode"
 
 --------------------------------------------------------------------------------
 -- | Use GHC API to Compile and Run the Generated Code
@@ -194,13 +149,9 @@ dynCompileAndRun :: forall t s. FilePath -> VM t s -> IO (VM t s)
 dynCompileAndRun filePath vmState = runGhc (Just libdir) $ do
   dflags0 <- getSessionDynFlags
   dflags1 <- updateDynFlagsWithStackDB dflags0
-  let dflags2 = foldl xopt_set dflags1 neededExtensionFlags
-  let dflags3 = addPackageFlags projectPackages dflags2
-  let dflags4 = addPackageHides ["base16-bytestring", "crypton"] dflags3
-  _ <- setSessionDynFlags dflags4 { 
-    importPaths = importPaths dflags1, -- ++ ["/Users/g/Code/echidna/hevm"], 
+  let dflags = foldl xopt_set dflags1 neededExtensionFlags
+  _ <- setSessionDynFlags dflags {
     language = Just GHC2021,
-    ghcLink   = LinkBinary,      -- Link everything in memory
     verbosity = 1,
     debugLevel = 1
   }
