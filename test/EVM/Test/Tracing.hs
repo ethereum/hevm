@@ -791,7 +791,6 @@ genContract n = do
       -- , (1, frequency [
       --    (1, pure OpStop)
       --  , (10, pure OpReturn)
-      --  , (10, pure OpInvalid)
       --  , (10, pure OpRevert)
       -- ])
 

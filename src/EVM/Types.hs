@@ -1107,7 +1107,6 @@ data GenericOp a
   | OpDelegatecall
   | OpCreate2
   | OpRevert
-  | OpInvalid
   | OpSelfdestruct
   | OpDup !Word8
   | OpSwap !Word8

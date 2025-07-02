@@ -1049,10 +1049,7 @@ exec1 conf = do
                 finishFrame (FrameReverted output)
             _ -> underrun
 
-        OpInvalid -> finishFrame (FrameReverted $ errorMsg "Invalid opcode: INVALID")
-
-        OpUnknown xxx ->
-          vmError $ UnrecognizedOpcode xxx
+        OpUnknown xxx -> vmError $ UnrecognizedOpcode xxx
 
 transfer :: (VMOps t, ?conf::Config) => Expr EAddr -> Expr EAddr -> Expr EWord -> EVM t s ()
 transfer _ _ (Lit 0) = pure ()
@@ -1773,10 +1770,6 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
           partial $ CheatCodeMissing vm.state.pc abi'
         Just action -> action input
 
-
-errorMsg :: ByteString -> Expr Buf
-errorMsg err = ConcreteBuf $ selector "Error(string)" <> encodeAbiValue (AbiTuple $ V.fromList [AbiString err])
-
 type CheatAction t s = Expr Buf -> EVM t s ()
 
 cheatActions :: (?conf :: Config, VMOps t) => Map FunctionSelector (CheatAction t s)
@@ -2037,6 +2030,8 @@ cheatActions = Map.fromList
     frameReturnExpr e = finishFrame (FrameReturned e)
     frameRevert :: VMOps t => ByteString -> EVM t s ()
     frameRevert err = finishFrame (FrameReverted $ errorMsg err)
+    errorMsg :: ByteString -> Expr Buf
+    errorMsg err = ConcreteBuf $ selector "Error(string)" <> encodeAbiValue (AbiTuple $ V.fromList [AbiString err])
     continueOnce cont = do
       assign #result Nothing
       cont
