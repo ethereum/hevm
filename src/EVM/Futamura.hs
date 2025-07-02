@@ -19,11 +19,12 @@ import GHC (SuccessFlag(..), compileExpr, mkModuleName, simpleImportDecl, Intera
 import GHC.Paths (libdir)
 import GHC.LanguageExtensions.Type (Extension(..))
 import GHC.Driver.Session --(PackageFlag(..), PackageArg(..), ModRenaming(..), PackageDBFlag(..), PkgDbRef(..), xopt_set)
+import GHC.Driver.Monad (Ghc)
 
 import EVM.Opcodes (opcodesImpl)
 import EVM (currentContract)
 import EVM.Op (getOp)
-import EVM.Types (VM, GenericOp(..), ContractCode(..), RuntimeCode(..), contract, code)
+import EVM.Types (VM, GenericOp(..), ContractCode(..), RuntimeCode(..), contract, code, result, state, pc, VMResult(..))
 
 import qualified Data.ByteString as BS
 
@@ -87,15 +88,8 @@ generateHaskellCode bbs =
     , "import EVM.FeeSchedule (FeeSchedule (..))"
     , "" ]
     ++ map genOpImpl opcodesImpl
-    ++ [""] ++ concatMap genBasicBlockImpl bbs
-    -- ++ genBasicBlockList [bb]
-
---genBasicBlockList :: [(BasicBlockRange, [GenericOp Word8])] -> [String]
---genBasicBlockList [] = []
---genBasicBlockList bbs = [
---   "basicBlocks :: (VMOps t, ?op::Word8) => [((Int, Int), StateT (VM t s) (ST s) ())]",
---   "basicBlocks = [" ++ (intercalate " ," $ map genBasicBlockName bbs) ++ "]"
---  ]
+    ++ [""]
+    ++ concatMap genBasicBlockImpl bbs
 
 genBasicBlockFuncName :: (BasicBlockRange, [GenericOp Word8]) -> String
 genBasicBlockFuncName ((start, end), _) = "runBasicBlock_" ++ show start ++ "_" ++ show end
@@ -150,7 +144,9 @@ compileAndRunSpecialized vm = do
   writeFile hsPath (generateHaskellCode bb)
 
   let bbFuncNames = map genBasicBlockFuncName bb
-  dynCompileAndRun hsPath bbFuncNames
+  fs <- dynCompileAndRun hsPath bbFuncNames
+  return (\x -> runSpecialized (zip (map fst bb) fs) x)
+
    where extractCode (RuntimeCode (ConcreteRuntimeCode ops)) = ops
          extractCode _ = error "Expected ConcreteRuntimeCode"
 
@@ -243,8 +239,8 @@ neededExtensionFlags =
     , DisambiguateRecordFields
     ]
 
-dynCompileAndRun :: forall t s. FilePath -> [String] -> IO (VM t s -> VM t s)
-dynCompileAndRun filePath bbNames = runGhc (Just libdir) $ do
+dynCompileAndRun :: forall t s. FilePath -> [String] -> IO [(VM t s -> VM t s)]
+dynCompileAndRun filePath bbFuncNames = runGhc (Just libdir) $ do
   dflags0 <- getSessionDynFlags
   dflags1 <- updateDynFlagsWithStackDB dflags0
   let dflags = foldl xopt_set dflags1 neededExtensionFlags
@@ -263,11 +259,53 @@ dynCompileAndRun filePath bbNames = runGhc (Just libdir) $ do
 
   setContext [IIDecl $ simpleImportDecl (mkModuleName "Generated")]
 
-  let firstBlock = head bbNames
-  liftIO $ putStrLn $ "Getting basic block: " ++ firstBlock
-  value <- compileExpr ("Generated." ++ firstBlock)
+  -- Compile each basic block function
+  compiledBlocks <- mapM extractBasicBlockFunction bbFuncNames
+  liftIO $ putStrLn "Compilation successful, returning functions."
+  return compiledBlocks
 
-  let specialized :: forall s1. StateT (VM t s) (ST s1) ()
-      specialized = unsafeCoerce value
+ where
+  extractBasicBlockFunction bbName = do
+    value <- compileExpr ("Generated." ++ bbName)
+    let specialized :: forall s1. StateT (VM t s) (ST s1) ()
+        specialized = unsafeCoerce value
+    return $ \vm -> runST (execStateT specialized vm)
 
-  return $ \vm -> runST (execStateT specialized vm)
+-- | Run the specialized VM for each basic block
+--   This function takes a VM and a list of basic blocks with their ranges,
+--   and returns a VM that has executed until vm.result is not Nothing.
+--   It should use the state.pc to determine which block to run next.
+runSpecialized :: [(BasicBlockRange, VM t s -> VM t s)] -> VM t s -> VM t s
+runSpecialized bbs vm =
+  -- The execution loop continues as long as the VM has not produced a result.
+  -- This also serves as the base case for the recursion.
+  case vm.result of
+    Just _ -> vm
+    Nothing ->
+      -- Find the compiled function for the basic block at the current program counter.
+      -- In the EVM, valid jump destinations must be a JUMPDEST opcode.
+      -- Our `splitBasicBlocks` logic ensures that every JUMPDEST starts a new
+      -- basic block. Therefore, we can find the correct block by matching
+      -- vm.pc with the starting address of a block.
+      let
+        currentPc = fromIntegral vm.state.pc
+        -- We can use `lookup` for an efficient search by converting the list of
+        -- blocks into an association list of (startAddress, function).
+        blockAssocList = map (\((start, _), f) -> (start, f)) bbs
+        maybeBlockFunc = lookup currentPc blockAssocList
+      in
+        case maybeBlockFunc of
+          -- If a matching block is found, execute its compiled function.
+          Just blockFunc ->
+            -- The `blockFunc` takes the current VM state and returns the new
+            -- state after executing the opcodes in that block.
+            let newVm = blockFunc vm
+            -- Continue execution from the new VM state by making a recursive call.
+            in runSpecialized bbs newVm
+
+          -- If no block starts at the current PC, it means we've jumped to an
+          -- invalid location (i.e., not a JUMPDEST).
+          Nothing ->
+            -- In this case, we terminate the VM with an `InvalidJump` error,
+            -- as per EVM semantics.
+            error "Invalid jump destination: no basic block starts at the current PC"
