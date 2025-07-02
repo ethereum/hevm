@@ -568,7 +568,8 @@ launchExec cFileOpts execOpts cExecOpts cOpts = do
   -- TODO: we shouldn't need solvers to execute this code
   withSolvers Z3 0 1 Nothing $ \solvers -> do
     vm' <- case cExecOpts.useFutamura of
-      True  -> liftIO $ compileAndRunSpecialized vm
+      True  ->  do f <- liftIO (compileAndRunSpecialized vm)
+                   return $ f vm
       False -> EVM.Stepper.interpret (Fetch.oracle solvers rpcinfo) vm EVM.Stepper.runFully
 
     writeTraceDapp dapp vm'

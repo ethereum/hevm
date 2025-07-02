@@ -18,7 +18,7 @@ import GHC.Paths (libdir)
 import GHC.LanguageExtensions.Type (Extension(..))
 import GHC.Driver.Session --(PackageFlag(..), PackageArg(..), ModRenaming(..), PackageDBFlag(..), PkgDbRef(..), xopt_set)
 
-import EVM.Opcodes
+import EVM.Opcodes (opcodesImpl)
 import EVM (currentContract)
 import EVM.Op (getOp)
 import EVM.Types (VM, GenericOp(..), ContractCode(..), RuntimeCode(..), contract, code)
@@ -66,27 +66,35 @@ generateHaskellCode ops =
   unlines $
     [ "{-# LANGUAGE ImplicitParams #-}"
     , "module Generated where"
+    , "import Optics.Core"
+    , "import Optics.State"
+    , "import Optics.State.Operators"
+    , "import Optics.Zoom"
+    , "import Optics.Operators.Unsafe"
+    , ""
     , "import Control.Monad.State.Strict"
     , "import Control.Monad.ST"
     , "import Data.Word (Word8)"
+    , "import Witch.From (From)"
+    , "import Witch (into)"
+    , ""
     , "import EVM"
     , "import EVM.Types"
     , "import EVM.Op"
     , "import EVM.Expr qualified as Expr"
     , "import EVM.FeeSchedule (FeeSchedule (..))"
-    , ""
-    , "runOpcodeAdd :: " ++ runOpcodeAddType
-    , "runOpcodeAdd = " ++ runOpcodeAddSrc
-    , "runOpcodePush0 ::" ++ runOpcodePush0Type
-    , "runOpcodePush0 = " ++ runOpcodePush0Src
-    , "runOpcodeStop :: " ++ runOpcodeStopType
-    , "runOpcodeStop = " ++ runOpcodeStopSrc
-    , "runOpcodeRevert :: " ++ runOpcodeRevertType
-    , "runOpcodeRevert = " ++ runOpcodeRevertSrc
-    , ""
+    , "" ]
+    ++ map genOpImpl opcodesImpl ++
+    [ ""
     , "runSpecialized :: StateT (VM Concrete s) (ST s) ()"
     , "runSpecialized = do"
-    ] ++ map (checkIfVmResulted . genOp) ops -- ++ [" doStop"]
+    ] ++ map (checkIfVmResulted . genOp) ops
+
+
+genOpImpl :: (String, String, String, String) -> String
+genOpImpl (opName, opParams, typeSig, src) =
+  "runOpcode" ++ opName ++ " :: " ++ typeSig ++ "\n" ++
+  "runOpcode" ++ opName ++ opParams ++ " = " ++ src ++ "\n"
 
 checkIfVmResulted :: String -> String
 checkIfVmResulted op =
@@ -100,15 +108,17 @@ genOp (OpPush0)   = " let ?op = 1 in runOpcodePush0"
 genOp (OpRevert)  = " let ?op = 1 in runOpcodeRevert"
 genOp (OpStop)    = " let ?op = 1 in runOpcodeStop"
 genOp (OpAdd)     = " let ?op = 1 in runOpcodeAdd"
-genOp (OpDup i)   = "  runOpcodeDup " ++ show i
+genOp (OpDup i)   = " let ?op = 1 in runOpcodeDup (" ++ show i ++ " :: Int)"
+genOp (OpSwap i)  = " let ?op = 1 in runOpcodeSwap (" ++ show i ++ " :: Int)"
 -- Add more opcodes as needed
 genOp other       = error $ "Opcode not supported in specialization: " ++ show other
 
---------------------------------------------------------------------------------
--- | Compile and Run a Specialized EVM Program at Runtime
---------------------------------------------------------------------------------
-
-compileAndRunSpecialized :: VM t s -> IO (VM t s)
+-- | Compile and return a function that runs the specialized VM
+--   This function will generate Haskell code based on the current contract's opcodes,
+--   compile it using GHC API, and return a function that can be used to run
+--   the specialized VM.
+--   The generated code will be placed in a temporary directory.
+compileAndRunSpecialized :: VM t s -> IO (VM t s -> VM t s)
 compileAndRunSpecialized vm = do
   tmpDir <- getTemporaryDirectory >>= \tmp -> createTempDirectory tmp "evmjit"
   let contract = currentContract vm
@@ -118,7 +128,7 @@ compileAndRunSpecialized vm = do
   let hsPath = tmpDir </> "Generated.hs"
   putStrLn $ "Generating Haskell code for EVM specialization in: " ++ hsPath
   writeFile hsPath (generateHaskellCode ops)
-  dynCompileAndRun hsPath vm
+  dynCompileAndRun hsPath
    where extractCode (RuntimeCode (ConcreteRuntimeCode ops)) = ops
          extractCode _ = error "Expected ConcreteRuntimeCode"
 
@@ -145,12 +155,12 @@ neededExtensionFlags =
     , DisambiguateRecordFields
     ]
 
-dynCompileAndRun :: forall t s. FilePath -> VM t s -> IO (VM t s)
-dynCompileAndRun filePath vmState = runGhc (Just libdir) $ do
+dynCompileAndRun :: forall t s. FilePath -> IO (VM t s -> VM t s)
+dynCompileAndRun filePath = runGhc (Just libdir) $ do
   dflags0 <- getSessionDynFlags
   dflags1 <- updateDynFlagsWithStackDB dflags0
   let dflags = foldl xopt_set dflags1 neededExtensionFlags
-  _ <- setSessionDynFlags dflags {
+  _ <- setSessionDynFlags $ updOptLevel 2 $ dflags {
     language = Just GHC2021,
     verbosity = 1,
     debugLevel = 1
@@ -170,4 +180,4 @@ dynCompileAndRun filePath vmState = runGhc (Just libdir) $ do
   let specialized :: forall s1. StateT (VM t s) (ST s1) ()
       specialized = unsafeCoerce value
 
-  return $ runST (execStateT specialized vmState)
+  return $ \vm -> runST (execStateT specialized vm)
