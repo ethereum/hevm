@@ -19,6 +19,7 @@ import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 import EVM.Expr (maybeLitWordSimp)
+import Data.List (foldl')
 
 import Control.Monad (void, when, forM, forM_)
 import Control.Monad.ST (RealWorld, ST, stToIO)
@@ -29,6 +30,7 @@ import Optics.State.Operators
 import Data.Binary.Get (runGet)
 import Data.ByteString (ByteString)
 import Data.ByteString.Char8 qualified as BS
+import Data.ByteString.Internal (c2w)
 import Data.ByteString.Lazy qualified as BSLazy
 import Data.Decimal (DecimalRaw(..))
 import Data.Foldable (toList)
@@ -210,13 +212,13 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
             _ -> PBool True
           False -> \(_, post) -> case post of
             Success _ _ _ store -> if opts.checkFailBit then PNeg (failed store) else PBool True
+            Failure _ _ (UnrecognizedOpcode 0xfe) -> PBool False
             Failure _ _ (Revert msg) -> case msg of
               ConcreteBuf b ->
                 -- We need to drop the selector (4B), the offset value (aligned to 32B), and the length of the string (aligned to 32B)
                 -- NOTE: assertTrue/assertFalse does not have the double colon after "assertion failed"
-                let assertFail = selector "Error(string)" `BS.isPrefixOf` b &&
-                      ("assertion failed" `BS.isPrefixOf` (BS.drop (4+32+32) b) ||
-                      "Invalid opcode: INVALID" `BS.isPrefixOf` (BS.drop (4+32+32) b))
+                let assertFail = (selector "Error(string)" `BS.isPrefixOf` b) &&
+                      ("assertion failed" `BS.isPrefixOf` (BS.drop (4+32+32) b))
                 in if assertFail || b == panicMsg 0x01 then PBool False
                 else PBool True
               _ -> symbolicFail msg
@@ -267,10 +269,25 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     where
       symbolicFail :: Expr Buf -> Prop
       symbolicFail e =
-        let text = V.fromList $ map (fromIntegral . ord) "assertion failed"
+        let origTxt = "assertion failed"
+            txtLen = length origTxt
+            w8Txt = V.fromList $ map (fromIntegral . ord) origTxt
             panic = e == ConcreteBuf (panicMsg 0x01)
-            assertFail =  V.take (length text) (Expr.concretePrefix e) == text
-        in PBool ((not panic) && (not assertFail))
+            concretePrefix = Expr.concretePrefix e
+            assertFail =
+              if (length concretePrefix < txtLen) then symBytesEq e origTxt
+              else PBool (V.take txtLen concretePrefix == w8Txt)
+        in PBool (not panic) .&& PNeg assertFail
+      symBytesEq :: Expr Buf -> String -> Prop
+      symBytesEq buf str = let acc = go str buf 0 []
+        in foldl' PAnd (PBool True) acc
+        where
+          go :: String -> Expr Buf -> Int -> [Prop] -> [Prop]
+          go "" _ _ acc = acc
+          go (a:ax) b n acc = go ax b (n+1) (PEq lhs rhs:acc)
+            where
+              lhs = LitByte (c2w a)
+              rhs = Expr.readByte (Lit (fromIntegral n)) b
 --
 printWarnings :: GetUnknownStr b => [Expr 'End] -> [ProofResult a b] -> String -> IO ()
 printWarnings e results testName = do
