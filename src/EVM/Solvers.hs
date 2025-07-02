@@ -106,7 +106,7 @@ checkSatWithProps sg props = do
   let psSimp = if conf.simp then simplifyProps props else props
   if psSimp == [PBool False] then pure (Qed, Right mempty)
   else do
-    let smt2 = if conf.simp then assertProps conf psSimp else assertPropsNoSimp psSimp
+    let smt2 = assertProps conf psSimp
     if isLeft smt2 then
       let err = getError smt2 in pure (Error err, Left err)
     else do
@@ -126,9 +126,9 @@ checkSatWithProps sg props = do
         readChan resChan
 
 writeSMT2File :: SMT2 -> String -> IO ()
-writeSMT2File smt2 postfix =
+writeSMT2File smt2 postfix = do
     let content = formatSMT2 smt2 <> "\n\n(check-sat)"
-    in T.writeFile ("query-" <> postfix <> ".smt2") content
+    T.writeFile ("query-" <> postfix <> ".smt2") content
 
 withSolvers :: App m => Solver -> Natural -> Natural -> Maybe Natural -> (SolverGroup -> m a) -> m a
 withSolvers solver count threads timeout cont = do

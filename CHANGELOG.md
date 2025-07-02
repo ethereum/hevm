@@ -61,6 +61,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   via masking
 - More rewrite rules for (PLT (Lit 0) _) and (PEq (Lit 1) _)
 - Simplification can now be turned off from the cli via --no-simplify
+- When doing Keccak concretization, and simplification is enabled,
+  we do both until fixedpoint
+- When gathering Keccak axioms, we simplify the bytestring that
+  the keccak is applied to
+- More rewrite rules for MulMod, AddMod, SHL, SHR, SLT, and SignExtend
+- PLEq is now concretized in case it can be computed
+- More SignExtend test cases
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
