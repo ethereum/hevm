@@ -13,6 +13,8 @@ import Data.Word (Word8)
 import Data.List (isPrefixOf, dropWhileEnd, intercalate)
 import Data.Maybe (catMaybes, listToMaybe)
 import Data.Char (isSpace)
+import Data.IntMap.Lazy (IntMap, lookup, fromList)
+import Prelude hiding (lookup)
 import Unsafe.Coerce
 
 import GHC (SuccessFlag(..), compileExpr, mkModuleName, simpleImportDecl, InteractiveImport(..), setContext, LoadHowMuch(..), load, setTargets, guessTarget, setSessionDynFlags, getSessionDynFlags, runGhc)
@@ -77,13 +79,13 @@ generateHaskellCode bbs =
     , ""
     , "import Control.Monad.State.Strict"
     , "import Control.Monad.ST"
-    , "import Data.Word (Word8)"
+    , "import Data.Word (Word8, Word64)"
     , "import Witch.From (From)"
     , "import Witch (into, tryInto)"
     , "import Data.ByteString qualified as BS"
     , "import Data.Vector qualified as V"
     , ""
-    , "import EVM"
+    , "import EVM hiding (stackOp2)"
     , "import EVM.Types"
     , "import EVM.Op"
     , "import EVM.Expr qualified as Expr"
@@ -115,10 +117,16 @@ isBasicBlockInvalid _ = False
 filterBasicBlocks :: [(BasicBlockRange, [GenericOp Word8])] -> [(BasicBlockRange, [GenericOp Word8])]
 filterBasicBlocks = takeWhile (not . isBasicBlockInvalid)
 
-genOpImpl :: (String, String, String, String) -> String
-genOpImpl (opName, opParams, typeSig, src) =
+genOpImpl :: (String, String, String, String, Bool) -> String
+genOpImpl (opName, opParams, typeSig, src, True) =
+  "{-# INLINE runOpcode" ++ opName ++ " #-}\n" ++
   "runOpcode" ++ opName ++ " :: " ++ typeSig ++ "\n" ++
   "runOpcode" ++ opName ++ opParams ++ " = " ++ src ++ "\n"
+
+genOpImpl (opName, opParams, typeSig, src, False) =
+  "{-# INLINE " ++ opName ++ " #-}\n" ++
+  opName ++ " :: " ++ typeSig ++ "\n" ++
+  opName ++ opParams ++ " = " ++ src ++ "\n"
 
 checkIfVmResulted :: String -> String
 checkIfVmResulted op =
@@ -148,7 +156,7 @@ genOp (OpMload)   = " let ?op = opToWord8(OpMload) in runOpcodeMLoad"
 genOp (OpSlt)     = " let ?op = opToWord8(OpSlt) in runOpcodeSlt"
 genOp (OpIszero)  = " let ?op = opToWord8(OpIszero) in runOpcodeIsZero"
 genOp (OpEq)      = " let ?op = opToWord8(OpEq) in runOpcodeEq"
-genOp (OpUnknown n) = "error \"Unknown opcode: " ++ show n ++ "\""
+genOp (OpUnknown _) = " let ?op = 1 in runOpcodeRevert" --"error \"Unknown opcode: " ++ show n ++ "\""
 -- Add more opcodes as needed
 genOp other       = error $ "Opcode not supported in specialization: " ++ show other
 
@@ -157,7 +165,7 @@ genOp other       = error $ "Opcode not supported in specialization: " ++ show o
 --   compile it using GHC API, and return a function that can be used to run
 --   the specialized VM.
 --   The generated code will be placed in a temporary directory.
-compileAndRunSpecialized :: VM t s -> IO (VM t s -> VM t s)
+compileAndRunSpecialized :: forall t s. VM t s -> IO (VM t s -> VM t s)
 compileAndRunSpecialized vm = do
   tmpDir <- getTemporaryDirectory >>= \tmp -> createTempDirectory tmp "evmjit"
   let contract = currentContract vm
@@ -173,8 +181,15 @@ compileAndRunSpecialized vm = do
 
   let bbFuncNames = map genBasicBlockFuncName bb
   fs <- dynCompileAndRun hsPath bbFuncNames
-  return (\x -> runSpecialized (zip (map fst bb) fs) x)
+  let blockMap = fromList
+        [ (start, func)
+        | (((start, _), _), func) <- zip bb fs
+        ]
 
+  -- We take the result of execStateT, which has type `ST s (VM t s)`,
+  -- and we unsafely coerce it to `forall s'. ST s' (VM t s)`,
+  -- which is exactly what `runST` expects.
+  return $ \x -> runST (unsafeCoerce $ execStateT (dispatcherLoop blockMap) x)
    where extractCode (RuntimeCode (ConcreteRuntimeCode ops)) = ops
          extractCode _ = error "Expected ConcreteRuntimeCode"
 
@@ -292,7 +307,7 @@ neededExtensionFlags =
     , DisambiguateRecordFields
     ]
 
-dynCompileAndRun :: forall t s. FilePath -> [String] -> IO [(VM t s -> VM t s)]
+dynCompileAndRun :: forall t s. FilePath -> [String] -> IO [StateT (VM t s) (ST s) ()]
 dynCompileAndRun filePath bbFuncNames = runGhc (Just libdir) $ do
   dflags0 <- getSessionDynFlags
   dflags1 <- updateDynFlagsWithStackDB dflags0
@@ -322,44 +337,35 @@ dynCompileAndRun filePath bbFuncNames = runGhc (Just libdir) $ do
     value <- compileExpr ("Generated." ++ bbName)
     let specialized :: forall s1. StateT (VM t s) (ST s1) ()
         specialized = unsafeCoerce value
-    return $ \vm -> runST (execStateT specialized vm)
+    return specialized
 
--- | Run the specialized VM for each basic block
---   This function takes a VM and a list of basic blocks with their ranges,
---   and returns a VM that has executed until vm.result is not Nothing.
---   It should use the state.pc to determine which block to run next.
-runSpecialized :: [(BasicBlockRange, VM t s -> VM t s)] -> VM t s -> VM t s
-runSpecialized bbs vm =
-  -- The execution loop continues as long as the VM has not produced a result.
-  -- This also serves as the base case for the recursion.
+-- This is the new, efficient execution loop (a trampoline).
+-- It runs entirely within the StateT monad, never exiting until the VM halts.
+dispatcherLoop :: forall t s. IntMap (StateT (VM t s) (ST s) ()) -> StateT (VM t s) (ST s) ()
+dispatcherLoop blockMap = do
+  vm <- get
   case vm.result of
-    Just _ -> vm
-    Nothing ->
-      -- Find the compiled function for the basic block at the current program counter.
-      -- In the EVM, valid jump destinations must be a JUMPDEST opcode.
-      -- Our `splitBasicBlocks` logic ensures that every JUMPDEST starts a new
-      -- basic block. Therefore, we can find the correct block by matching
-      -- vm.pc with the starting address of a block.
-      let
-        currentPc = fromIntegral vm.state.pc
-        -- We can use `lookup` for an efficient search by converting the list of
-        -- blocks into an association list of (startAddress, function).
-        blockAssocList = map (\((start, _), f) -> (start, f)) bbs
-        maybeBlockFunc = lookup currentPc blockAssocList
-      in
-        case maybeBlockFunc of
-          -- If a matching block is found, execute its compiled function.
-          Just blockFunc ->
-            -- The `blockFunc` takes the current VM state and returns the new
-            -- state after executing the opcodes in that block.
-            let newVm = blockFunc vm
-            -- Continue execution from the new VM state by making a recursive call.
-            in runSpecialized bbs newVm
+    -- Base case: The VM has halted. Stop the loop.
+    Just _ -> pure ()
 
-          -- If no block starts at the current PC, it means we've jumped to an
-          -- invalid location (i.e., not a JUMPDEST).
-          Nothing -> if (vm.state.pc >= opslen vm.state.code) then
-                      error $ "Invalid jump destination: " ++ show vm.state.pc
-                      --vm {result = Just (VMSuccess $ ConcreteBuf $ BS.fromString $ show vm.state.pc)}
-                     else
-                      vm {result = Just (VMFailure $ BadJumpDestination)}
+    -- Recursive step: The VM is still running.
+    Nothing -> do
+      let currentPc = fromIntegral vm.state.pc
+
+      case lookup currentPc blockMap of
+        -- Found a compiled block at the current PC.
+        Just blockAction -> do
+          -- Execute the action for this block. It will modify the VM state,
+          -- including changing the PC for the next jump.
+          blockAction
+          -- Loop to the next block without exiting the monad.
+          dispatcherLoop blockMap
+
+        -- No block starts at the current PC.
+        Nothing ->
+          -- This is an invalid jump. Modify the VM state to set the error
+          -- and the loop will terminate on the next iteration.
+          if (vm.state.pc >= opslen vm.state.code) then
+            error $ "Invalid jump destination: " ++ show vm.state.pc
+          else
+            modify' (\v -> v { result = Just (VMFailure BadJumpDestination) })

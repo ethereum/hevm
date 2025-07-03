@@ -504,27 +504,41 @@ runOpcodeEqSrc = "do\n\
 runOpcodeEqType :: String
 runOpcodeEqType = "(VMOps t, ?op::Word8) => StateT (VM t s) (ST s) ()"
 
-opcodesImpl :: [(String, String, String, String)]
+runOpcodeStackOp2Src :: String
+runOpcodeStackOp2Src =
+  "use (#state % #stack) >>= \\case\n\
+\  x:y:xs ->\n\
+\    burn cost $ do\n\
+\      next\n\
+\      #state % #stack .= f x y : xs\n\
+\  _ ->\n\
+\    underrun"
+
+runOpcodeStackOp2Type :: String
+runOpcodeStackOp2Type = "(?op :: Word8, VMOps t) => Word64 -> (Expr EWord -> Expr EWord -> Expr EWord) -> EVM t s ()"
+
+opcodesImpl :: [(String, String, String, String, Bool)]
 opcodesImpl =
   [
-    ("Add",  "", runOpcodeAddType, runOpcodeAddSrc)
-  , ("Mul",  "", runOpcodeMulType, runOpcodeMulSrc)
-  , ("Sub",  "", runOpcodeSubType, runOpcodeSubSrc)
-  , ("Div",  "", runOpcodeDivType, runOpcodeDivSrc)
-  , ("Mod",  "", runOpcodeModType, runOpcodeModSrc)
-  , ("Push0", "", runOpcodePush0Type, runOpcodePush0Src)
-  , ("Push", " i", runOpcodePushType, runOpcodePushSrc)
-  , ("Pop",  "", runOpcodePopType, runOpcodePopSrc)
-  , ("Stop", "", runOpcodeStopType, runOpcodeStopSrc)
-  , ("Revert", "", runOpcodeRevertType, runOpcodeRevertSrc)
-  , ("Dup", " i", runOpcodeDupType, runOpcodeDupSrc)
-  , ("Swap", " i", runOpcodeSwapType, runOpcodeSwapSrc)
-  , ("MStore", "", runOpcodeMStoreType, runOpcodeMStoreSrc)
-  , ("MLoad", "", runOpcodeMLoadType, runOpcodeMLoadSrc)
-  , ("IsZero", "", runOpcodeIsZeroType, runOpcodeIsZeroSrc)
-  , ("Eq", "", runOpcodeEqType, runOpcodeEqSrc)
-  , ("Jumpi", "", runOpcodeJumpiType, runOpcodeJumpiSrc)
-  , ("Jump", "", runOpcodeJumpType, runOpcodeJumpSrc)
-  , ("Jumpdest", "", runOpcodeJumpdestType, runOpcodeJumpdestSrc)
-  , ("Slt", "", runOpcodeSltType, runOpcodeSltSrc)
+    ("Add",  "", runOpcodeAddType, runOpcodeAddSrc, True)
+  , ("Mul",  "", runOpcodeMulType, runOpcodeMulSrc, True)
+  , ("Sub",  "", runOpcodeSubType, runOpcodeSubSrc, True)
+  , ("Div",  "", runOpcodeDivType, runOpcodeDivSrc, True)
+  , ("Mod",  "", runOpcodeModType, runOpcodeModSrc, True)
+  , ("Push0", "", runOpcodePush0Type, runOpcodePush0Src, True)
+  , ("Push", " i", runOpcodePushType, runOpcodePushSrc, True)
+  , ("Pop",  "", runOpcodePopType, runOpcodePopSrc, True)
+  , ("Stop", "", runOpcodeStopType, runOpcodeStopSrc, True)
+  , ("Revert", "", runOpcodeRevertType, runOpcodeRevertSrc, True)
+  , ("Dup", " i", runOpcodeDupType, runOpcodeDupSrc, True)
+  , ("Swap", " i", runOpcodeSwapType, runOpcodeSwapSrc, True)
+  , ("MStore", "", runOpcodeMStoreType, runOpcodeMStoreSrc, True)
+  , ("MLoad", "", runOpcodeMLoadType, runOpcodeMLoadSrc, True)
+  , ("IsZero", "", runOpcodeIsZeroType, runOpcodeIsZeroSrc, True)
+  , ("Eq", "", runOpcodeEqType, runOpcodeEqSrc, True)
+  , ("Jumpi", "", runOpcodeJumpiType, runOpcodeJumpiSrc, True)
+  , ("Jump", "", runOpcodeJumpType, runOpcodeJumpSrc, True)
+  , ("Jumpdest", "", runOpcodeJumpdestType, runOpcodeJumpdestSrc, True)
+  , ("Slt", "", runOpcodeSltType, runOpcodeSltSrc, True)
+  , ("stackOp2", " cost f", runOpcodeStackOp2Type, runOpcodeStackOp2Src, False)
   ]
