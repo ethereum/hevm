@@ -691,7 +691,8 @@ instance ToJSON StandardJSON where
     object [ "language" .= show lang
            , "sources" .= object ["hevm.sol" .= object ["content" .= src]]
            , "settings" .=
-             object [ "outputSelection" .=
+             object [ "viaIR" .= True
+                    , "outputSelection" .=
                     object ["*" .=
                       object ["*" .= (toJSON
                               ["metadata" :: String,
