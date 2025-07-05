@@ -342,4 +342,4 @@ swapOperations n = do
             }
         }
         |]
-  fmap fromJust (runApp $ solcRuntime "A" src)
+  fmap fromJust (runApp $ solcRuntime' "A" src True)
