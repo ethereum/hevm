@@ -9,7 +9,6 @@ import Optics.Core
 import Optics.State
 import Optics.State.Operators
 import Optics.Zoom
-import Optics.Operators.Unsafe
 
 import EVM.ABI
 import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord,
