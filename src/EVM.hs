@@ -363,14 +363,21 @@ exec1 conf = do
                   pushSym y
 
         OpSwap i ->
-          if length stk < (into i) + 1
-            then underrun
-            else
-              burn g_verylow $ do
-                next
-                zoom (#state % #stack) $ do
-                  assign (ix 0) (stk ^?! ix (into i))
-                  assign (ix (into i)) (stk ^?! ix 0)
+          case stk of
+            (x:xs) ->
+              let (first_i_minus_1, at_i_onwards) = splitAt (into i - 1) xs
+              in
+              case at_i_onwards of
+                (y:rest_after_y) ->
+                  burn g_verylow $ do
+                    next
+                    let newStack = y : (first_i_minus_1 ++ (x : rest_after_y))
+                    vm' <- get
+                    put $ modifyState (vm'.state { stack = newStack }) vm'
+                [] -> underrun
+            [] -> underrun
+          where modifyState :: FrameState t s -> VM t s -> VM t s
+                modifyState st x = x { state = st }
 
         OpLog n ->
           notStatic $
