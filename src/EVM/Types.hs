@@ -1406,19 +1406,12 @@ instance Show Nibble where
 
 -- Conversions -------------------------------------------------------------------------------------
 
+{-# INLINE word256 #-}
 word256 :: ByteString -> Word256
-word256 xs | BS.length xs == 1 =
-  -- optimize one byte pushes
-  Word256 (Word128 0 0) (Word128 0 (into $ BS.head xs))
-word256 xs = case Cereal.runGet m (padLeft 32 xs) of
-               Left _ -> internalError "should not happen"
-               Right x -> x
+word256 = BS.foldl' go 0
   where
-    m = do a <- Cereal.getWord64be
-           b <- Cereal.getWord64be
-           c <- Cereal.getWord64be
-           d <- Cereal.getWord64be
-           pure $ Word256 (Word128 a b) (Word128 c d)
+    go :: Word256 -> Word8 -> Word256
+    go acc byte = (acc `shiftL` 8) .|. fromIntegral byte
 
 word :: ByteString -> W256
 word = W256 . word256
