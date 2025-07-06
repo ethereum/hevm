@@ -4,6 +4,7 @@
 module EVM.Solidity
   ( solidity
   , solcRuntime
+  , solcRuntime'
   , yul
   , yulRuntime
   , JumpType (..)
@@ -366,7 +367,7 @@ readSolc pt root fp = do
 
 yul :: Text -> Text -> IO (Maybe ByteString)
 yul contractName src = do
-  json <- solc Yul src
+  json <- solc Yul src False
   let f = (json ^?! key "contracts") ^?! key (Key.fromText "hevm.sol")
       c = f ^?! key (Key.fromText $ if T.null contractName then "object" else contractName)
       bytecode = c ^?! key "evm" ^?! key "bytecode" ^?! key "object" % _String
@@ -374,7 +375,7 @@ yul contractName src = do
 
 yulRuntime :: Text -> Text -> IO (Maybe ByteString)
 yulRuntime contractName src = do
-  json <- solc Yul src
+  json <- solc Yul src False
   let f = (json ^?! key "contracts") ^?! key (Key.fromText "hevm.sol")
       c = f ^?! key (Key.fromText $ if T.null contractName then "object" else contractName)
       bytecode = c ^?! key "evm" ^?! key "deployedBytecode" ^?! key "object" % _String
@@ -384,26 +385,30 @@ solidity
   :: (MonadUnliftIO m)
   => Text -> Text -> m (Maybe ByteString)
 solidity contract src = liftIO $ do
-  json <- solc Solidity src
+  json <- solc Solidity src False
   let (Contracts sol, _, _) = fromJust $ readStdJSON json
   pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.creationCode)
 
-solcRuntime
+solcRuntime'
   :: App m
-  => Text -> Text -> m (Maybe ByteString)
-solcRuntime contract src = do
+  => Text -> Text -> Bool -> m (Maybe ByteString)
+solcRuntime' contract src viaIR = do
   conf <- readConfig
   liftIO $ do
-    json <- solc Solidity src
+    json <- solc Solidity src viaIR
     when conf.dumpExprs $ liftIO $ Data.Text.IO.writeFile "compiled_code.json" json
     case readStdJSON json of
       Just (Contracts sol, _, _) -> pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.runtimeCode)
       Nothing -> internalError $ "unable to parse solidity output:\n" <> (T.unpack json)
 
+solcRuntime
+  :: App m
+  => Text -> Text -> m (Maybe ByteString)
+solcRuntime contract src = solcRuntime' contract src False
 
 functionAbi :: Text -> IO Method
 functionAbi f = do
-  json <- solc Solidity ("contract ABI { function " <> f <> " public {}}")
+  json <- solc Solidity ("contract ABI { function " <> f <> " public {}}") False
   let (Contracts sol, _, _) = fromMaybe
         (internalError . T.unpack $ "while trying to parse function signature `"
           <> f <> "`, unable to parse solc output:\n" <> json)
@@ -677,21 +682,22 @@ toCode contractName t = case BS16.decodeBase16Untyped (encodeUtf8 t) of
             then error $ T.unpack ("Error toCode: unlinked libraries detected in bytecode, in " <> contractName)
             else error $ T.unpack ("Error toCode:" <> e <> ", in " <> contractName)
 
-solc :: Language -> Text -> IO Text
-solc lang src = T.pack <$> readProcess "solc" ["--standard-json"] (T.unpack $ stdjson lang src)
+solc :: Language -> Text -> Bool -> IO Text
+solc lang src viaIR = T.pack <$> readProcess "solc" ["--standard-json"] (T.unpack $ stdjson lang src viaIR)
 
 data Language = Solidity | Yul
   deriving (Show)
 
-data StandardJSON = StandardJSON Language Text
+data StandardJSON = StandardJSON Language Text Bool
 -- more options later perhaps
 
 instance ToJSON StandardJSON where
-  toJSON (StandardJSON lang src) =
+  toJSON (StandardJSON lang src viaIR) =
     object [ "language" .= show lang
            , "sources" .= object ["hevm.sol" .= object ["content" .= src]]
            , "settings" .=
-             object [ "outputSelection" .=
+             object [ "viaIR" .= viaIR
+                    , "outputSelection" .=
                     object ["*" .=
                       object ["*" .= (toJSON
                               ["metadata" :: String,
@@ -713,8 +719,8 @@ instance ToJSON StandardJSON where
                     ]
            ]
 
-stdjson :: Language -> Text -> Text
-stdjson lang src = decodeUtf8 $ toStrict $ encode $ StandardJSON lang src
+stdjson :: Language -> Text -> Bool -> Text
+stdjson lang src viaIR = decodeUtf8 $ toStrict $ encode $ StandardJSON lang src viaIR
 
 -- | When doing CREATE and passing constructor arguments, Solidity loads
 -- the argument data via the creation bytecode, since there is no "calldata"

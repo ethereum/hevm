@@ -9,7 +9,6 @@ import Optics.Core
 import Optics.State
 import Optics.State.Operators
 import Optics.Zoom
-import Optics.Operators.Unsafe
 
 import EVM.ABI
 import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord,
@@ -363,14 +362,16 @@ exec1 conf = do
                   pushSym y
 
         OpSwap i ->
-          if length stk < (into i) + 1
-            then underrun
-            else
+          case (stk ^? ix_i, stk ^? ix_0) of
+            (Just ei, Just e0) ->
               burn g_verylow $ do
                 next
                 zoom (#state % #stack) $ do
-                  assign (ix 0) (stk ^?! ix (into i))
-                  assign (ix (into i)) (stk ^?! ix 0)
+                  ix_i .= e0
+                  ix_0 .= ei
+            _ -> underrun
+          where
+            (ix_i, ix_0) = (ix (into i), ix 0)
 
         OpLog n ->
           notStatic $
