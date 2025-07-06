@@ -25,6 +25,7 @@ import GHC.Paths (libdir)
 import GHC.LanguageExtensions.Type (Extension(..))
 import GHC.Driver.Session --(PackageFlag(..), PackageArg(..), ModRenaming(..), PackageDBFlag(..), PkgDbRef(..), xopt_set)
 import GHC.Driver.Monad (Ghc)
+import GHC.Driver.Flags (DumpFlag(..))
 
 import EVM.Opcodes (opcodesImpl)
 import EVM (currentContract, opslen)
@@ -88,7 +89,7 @@ generateHaskellCode cfg =
     , "import Data.ByteString qualified as BS"
     , "import Data.Vector qualified as V"
     , ""
-    , "import EVM hiding (stackOp2)"
+    , "import EVM hiding (stackOp2, next)"
     , "import EVM.Types"
     , "import EVM.Op"
     , "import EVM.Expr qualified as Expr"
@@ -114,7 +115,7 @@ genBasicBlockImpl cfg block =
     successorStmt = "  " ++ genSuccessorDispatch cfg block
   in
     unlines $
-      [ "{-# INLINE " ++ funcName ++ " #-}",
+      [ --"{-# INLINE " ++ funcName ++ " #-}",
         funcName ++ " :: StateT (VM Concrete s) (ST s) ()",
         funcName ++ " = do"
       ] ++ opCodeStmts ++ [successorStmt]
@@ -365,12 +366,12 @@ filterDataSection cfg =
 
 genOpImpl :: (String, String, String, String, Bool) -> String
 genOpImpl (opName, opParams, typeSig, src, True) =
-  "{-# INLINE runOpcode" ++ opName ++ " #-}\n" ++
+  --"{-# INLINE runOpcode" ++ opName ++ " #-}\n" ++
   "runOpcode" ++ opName ++ " :: " ++ typeSig ++ "\n" ++
   "runOpcode" ++ opName ++ opParams ++ " = " ++ src ++ "\n"
 
 genOpImpl (opName, opParams, typeSig, src, False) =
-  "{-# INLINE " ++ opName ++ " #-}\n" ++
+  --"{-# INLINE " ++ opName ++ " #-}\n" ++
   opName ++ " :: " ++ typeSig ++ "\n" ++
   opName ++ opParams ++ " = " ++ src ++ "\n"
 
@@ -382,12 +383,12 @@ checkIfVmResulted op =
   "     Just r -> return ()"
 
 genOp :: GenericOp Word8 -> String
-genOp (OpPush0)   = "let ?op = 1 in runOpcodePush0"
-genOp (OpRevert)  = "let ?op = 1 in runOpcodeRevert"
-genOp (OpStop)    = "let ?op = 1 in runOpcodeStop"
-genOp (OpAdd)     = "let ?op = 1 in runOpcodeAdd"
-genOp (OpDup i)   = "let ?op = 1 in runOpcodeDup (" ++ show i ++ " :: Int)"
-genOp (OpSwap i)  = "let ?op = opToWord8(OpSwap " ++ show i ++") in runOpcodeSwap (" ++ show i ++ " :: Int)"
+genOp (OpPush0)   = "let ?op = opToWord8(OpPush0) in runOpcodePush0"
+genOp (OpRevert)  = "let ?op = opToWord8(OpRevert) in runOpcodeRevert"
+genOp (OpStop)    = "let ?op = opToWord8(OpStop) in runOpcodeStop"
+genOp (OpAdd)     = "let ?op = opToWord8(OpAdd) in runOpcodeAdd"
+genOp (OpDup i)   = "let ?op = opToWord8(OpDup " ++ show i ++ ") in runOpcodeDup (" ++ show i ++ " :: Int)"
+genOp (OpSwap i)  = "let ?op = opToWord8(OpSwap " ++ show i ++ ") in runOpcodeSwap (" ++ show i ++ " :: Int)"
 genOp (OpMul)     = "let ?op = opToWord8(OpMul) in runOpcodeMul"
 genOp (OpSub)     = "let ?op = opToWord8(OpSub) in runOpcodeSub"
 genOp (OpDiv)     = "let ?op = opToWord8(OpDiv) in runOpcodeDiv"
@@ -451,13 +452,25 @@ neededExtensionFlags =
     , FlexibleInstances
     , ConstraintKinds
     , DisambiguateRecordFields
+    , MonoLocalBinds
     ]
+
+usefulDumpFlags :: [DumpFlag]
+usefulDumpFlags =
+    [ Opt_D_dump_simpl]
+
+usefulGeneralFlags :: [GeneralFlag]
+usefulGeneralFlags =
+    [ Opt_DumpToFile ]
 
 dynCompileAndRun :: forall t s. FilePath -> String -> IO (StateT (VM t s) (ST s) ())
 dynCompileAndRun filePath startBlockName = runGhc (Just libdir) $ do
   dflags0 <- getSessionDynFlags
   dflags1 <- updateDynFlagsWithStackDB dflags0
-  let dflags = foldl xopt_set dflags1 neededExtensionFlags
+
+  let dflags2 = foldl dopt_set dflags1 usefulDumpFlags
+  let dflags3 = foldl gopt_set dflags2 usefulGeneralFlags
+  let dflags = foldl xopt_set dflags3 neededExtensionFlags
   _ <- setSessionDynFlags $ updOptLevel 2 $ dflags {
     language = Just GHC2021,
     verbosity = 1,

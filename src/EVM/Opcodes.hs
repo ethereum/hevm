@@ -10,7 +10,7 @@ import Optics.Operators.Unsafe
 
 
 import Control.Monad.ST (ST)
-import Control.Monad.State.Strict (StateT, get, gets)
+import Control.Monad.State.Strict (StateT, get, put, gets)
 import Witch.From (From)
 import Witch (into, tryInto)
 import Data.Word (Word8)
@@ -23,18 +23,41 @@ import EVM.FeeSchedule (FeeSchedule (..))
 import EVM.Expr qualified as Expr
 import EVM.Effects (defaultConfig, maxDepth)
 
+--{-# INLINE modifyState #-}
+--modifyState :: (FrameState t s -> FrameState t s) -> VM t s -> VM t s
+--modifyState f vm = vm { state = f (vm.state) }
+
 runOpcodeAdd :: (VMOps t, ?op::Word8) => StateT (VM t s) (ST s) ()
 runOpcodeAdd = do
   vm <- get
-  let
-    FeeSchedule {..} = vm.block.schedule
-  stackOp2 g_verylow Expr.add
+  let FeeSchedule {..} = vm.block.schedule
+  let stk = vm.state.stack
+  case stk of
+    x:y:xs -> burn g_verylow $ do
+      next
+      vm' <- get
+      let add (Lit a) (Lit b) = Lit (a + b)
+          add a b = Expr.add a b
+      put $ modifyState (vm'.state { stack = add x y : xs }) vm'
+    _ -> underrun
+  where modifyState :: FrameState t s -> VM t s -> VM t s
+        modifyState st vm = vm { state = st }
 
 runOpcodeAddSrc :: String
 runOpcodeAddSrc = "do\n\
 \  vm <- get\n\
 \  let FeeSchedule {..} = vm.block.schedule\n\
-\  stackOp2 g_verylow Expr.add"
+\  let stk = vm.state.stack\n\
+\  case stk of\n\
+\    x:y:xs -> burn g_verylow $ do\n\
+\      next\n\
+\      vm' <- get\n\
+\      let add (Lit a) (Lit b) = Lit (a + b)\n\
+\          add a b = Expr.add a b\n\
+\      put $ modifyState (vm'.state { stack = add x y : xs }) vm'\n\
+\    _ -> underrun\n\
+\  where modifyState :: FrameState t s -> VM t s -> VM t s\n\
+\        modifyState st vm = vm { state = st }"
 
 runOpcodeAddType :: String
 runOpcodeAddType = "(VMOps t, ?op::Word8) => StateT (VM t s) (ST s) ()"
@@ -50,7 +73,17 @@ runOpcodeMulSrc :: String
 runOpcodeMulSrc = "do\n\
 \  vm <- get\n\
 \  let FeeSchedule {..} = vm.block.schedule\n\
-\  stackOp2 g_low Expr.mul"
+\  let stk = vm.state.stack\n\
+\  case stk of\n\
+\    x:y:xs -> burn g_low $ do\n\
+\      next\n\
+\      vm' <- get\n\
+\      let f (Lit a) (Lit b) = Lit (a * b)\n\
+\          f a b = Expr.mul a b\n\
+\      put $ modifyState (vm'.state { stack = f x y : xs }) vm'\n\
+\    _ -> underrun\n\
+\  where modifyState :: FrameState t s -> VM t s -> VM t s\n\
+\        modifyState st vm = vm { state = st }"
 
 runOpcodeMulType :: String
 runOpcodeMulType = "(VMOps t, ?op::Word8) => StateT (VM t s) (ST s) ()"
@@ -66,7 +99,17 @@ runOpcodeSubSrc :: String
 runOpcodeSubSrc = "do\n\
 \  vm <- get\n\
 \  let FeeSchedule {..} = vm.block.schedule\n\
-\  stackOp2 g_verylow Expr.sub"
+\  let stk = vm.state.stack\n\
+\  case stk of\n\
+\    x:y:xs -> burn g_low $ do\n\
+\      next\n\
+\      vm' <- get\n\
+\      let f (Lit a) (Lit b) = Lit (a - b)\n\
+\          f a b = Expr.sub a b\n\
+\      put $ modifyState (vm'.state { stack = f x y : xs }) vm'\n\
+\    _ -> underrun\n\
+\  where modifyState :: FrameState t s -> VM t s -> VM t s\n\
+\        modifyState st vm = vm { state = st }"
 
 runOpcodeSubType :: String
 runOpcodeSubType = "(VMOps t, ?op::Word8) => StateT (VM t s) (ST s) ()"
@@ -111,26 +154,26 @@ runOpcodeDup i = do
   let
     stk  = vm.state.stack
     FeeSchedule {..} = vm.block.schedule
-  case preview (ix (into i - 1)) stk of
-    Nothing -> underrun
-    Just y ->
-      limitStack 1 $
-        burn g_verylow $ do
-          next
-          pushSym y
+  let remainingStack = drop (into i - 1) stk
+  case remainingStack of
+    [] -> underrun
+    (x:_) -> limitStack 1 $
+      burn g_verylow $ do
+        next
+        pushSym x
 
 runOpcodeDupSrc :: String
 runOpcodeDupSrc = "do\n\
-\  vm <- get\n\
-\  let stk = vm.state.stack\n\
-\  let FeeSchedule {..} = vm.block.schedule\n\
-\  case preview (ix (into i - 1)) stk of\n\
-\    Nothing -> underrun\n\
-\    Just y ->\n\
-\      limitStack 1 $\n\
-\        burn g_verylow $ do\n\
-\          next\n\
-\          pushSym y"
+\ vm <- get\n\
+\ let stk = vm.state.stack\n\
+\ let FeeSchedule {..} = vm.block.schedule\n\
+\ let remainingStack = drop (into i - 1) stk\n\
+\ case remainingStack of\n\
+\   [] -> underrun\n\
+\   (x:_) -> limitStack 1 $\n\
+\     burn g_verylow $ do\n\
+\       next\n\
+\       pushSym x"
 
 runOpcodeDupType :: String
 runOpcodeDupType = "(From source Int, VMOps t, ?op::Word8) => source -> StateT (VM t s) (ST s) ()"
@@ -138,31 +181,37 @@ runOpcodeDupType = "(From source Int, VMOps t, ?op::Word8) => source -> StateT (
 runOpcodeSwap :: (?op::Word8, VMOps t, From source Int) => source -> StateT (VM t s) (ST s) ()
 runOpcodeSwap i = do
   vm <- get
-  let
-    stk  = vm.state.stack
-    FeeSchedule {..} = vm.block.schedule
-  if length stk < (into i) + 1
-    then underrun
-    else
+  let stk = vm.state.stack
+  let FeeSchedule {..} = vm.block.schedule
+  case (stk ^? ix_i, stk ^? ix_0) of
+    (Just ei, Just e0) ->
       burn g_verylow $ do
         next
         zoom (#state % #stack) $ do
-          assign (ix 0) (stk ^?! ix (into i))
-          assign (ix (into i)) (stk ^?! ix 0)
+          ix_i .= e0
+          ix_0 .= ei
+    _ -> underrun
+  where
+    (ix_i, ix_0) = (ix (into i), ix 0)
+  --where modifyState :: FrameState t s -> VM t s -> VM t s
+  --      modifyState st vm = vm { state = st }
 
 runOpcodeSwapSrc :: String
 runOpcodeSwapSrc = "do\n\
 \  vm <- get\n\
 \  let stk = vm.state.stack\n\
 \  let FeeSchedule {..} = vm.block.schedule\n\
-\  if length stk < (into i) + 1\n\
-\    then underrun\n\
-\    else\n\
+\  case (stk ^? ix_i, stk ^? ix_0) of\n\
+\    (Just ei, Just e0) ->\n\
 \      burn g_verylow $ do\n\
 \        next\n\
 \        zoom (#state % #stack) $ do\n\
-\          assign (ix 0) (stk ^?! ix (into i))\n\
-\          assign (ix (into i)) (stk ^?! ix 0)"
+\          ix_i .= e0\n\
+\          ix_0 .= ei\n\
+\    _ -> underrun\n\
+\  where\n\
+\    (ix_i, ix_0) = (ix (into i), ix 0)\n"
+
 
 runOpcodeSwapType :: String
 runOpcodeSwapType = "(?op::Word8, VMOps t, From source Int) => source -> StateT (VM t s) (ST s) ()"
@@ -517,6 +566,23 @@ runOpcodeStackOp2Src =
 runOpcodeStackOp2Type :: String
 runOpcodeStackOp2Type = "(?op :: Word8, VMOps t) => Word64 -> (Expr EWord -> Expr EWord -> Expr EWord) -> EVM t s ()"
 
+nextFast :: (?op :: Word8) => EVM t s ()
+nextFast = do
+  vm <- get
+  put $ modifyState (vm.state { pc = vm.state.pc + fromIntegral (opSize ?op) }) vm
+  where modifyState :: FrameState t s -> VM t s -> VM t s
+        modifyState st vm = vm { state = st }
+
+runOpcodeNextSrc :: String
+runOpcodeNextSrc = "do\n\
+\  vm <- get\n\
+\  put $ modifyState (vm.state { pc = vm.state.pc + fromIntegral (opSize ?op) }) vm\n\
+\  where modifyState :: FrameState t s -> VM t s -> VM t s\n\
+\        modifyState st vm = vm { state = st }"
+
+runOpcodeNextType :: String
+runOpcodeNextType = "(?op :: Word8) => EVM t s ()"
+
 opcodesImpl :: [(String, String, String, String, Bool)]
 opcodesImpl =
   [
@@ -541,4 +607,5 @@ opcodesImpl =
   , ("Jumpdest", "", runOpcodeJumpdestType, runOpcodeJumpdestSrc, True)
   , ("Slt", "", runOpcodeSltType, runOpcodeSltSrc, True)
   , ("stackOp2", " cost f", runOpcodeStackOp2Type, runOpcodeStackOp2Src, False)
+  , ("next", "", runOpcodeNextType, runOpcodeNextSrc, False)
   ]
