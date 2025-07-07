@@ -122,6 +122,7 @@ main = do
                    , ("contractCreationMem", contractCreationMem, Nothing)
                    , ("arrayCreationMem", arrayCreationMem, Just 9)
                    , ("mapStorage", mapStorage, Nothing)
+                   , ("swapOperations", swapOperations, Nothing)
                    ]
   defaultMain =<< mapM f benchmarks
   
@@ -319,3 +320,26 @@ mapStorage n = do
           }
         |]
   fmap fromJust (runApp $ solcRuntime "A" src)
+
+-- Do many swaps
+swapOperations :: Int -> IO ByteString
+swapOperations n = do
+  let src =
+        [i|
+          contract A {
+            function main() public pure {
+                (uint a0, uint a1, uint a2, uint a3, uint a4, uint a5, uint a6, uint a7, uint a8, uint a9, uint a10, uint a11, uint a12, uint a13, uint a14, uint a15) = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
+                for (uint i = 0; i < ${n}; i++) {
+                    (a0, a15) = (a15, a0);
+                    (a1, a14) = (a14, a1);
+                    (a2, a13) = (a13, a2);
+                    (a3, a12) = (a12, a3);
+                    (a4, a11) = (a11, a4);
+                    (a5, a10) = (a10, a5);
+                    (a6, a9) = (a9, a6);
+                    (a7, a8) = (a8, a7);
+                }
+            }
+        }
+        |]
+  fmap fromJust (runApp $ solcRuntime' "A" src True)
