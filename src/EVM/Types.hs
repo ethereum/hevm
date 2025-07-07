@@ -1408,7 +1408,7 @@ instance Show Nibble where
 
 {-# INLINE word256 #-}
 word256 :: ByteString -> Word256
-word256 = BS.foldl' go 0
+word256 xs = BS.foldl' go 0 (padLeft 32 xs)
   where
     go :: Word256 -> Word8 -> Word256
     go acc byte = (acc `shiftL` 8) .|. fromIntegral byte
