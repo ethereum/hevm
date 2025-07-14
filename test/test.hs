@@ -1950,11 +1950,15 @@ tests = testGroup "hevm"
               , ("test/contracts/fail/assertEq.sol",      ".*", (False, True))
               -- bad cheatcode detected, hence the warning
               , ("test/contracts/fail/bad-cheatcode.sol", ".*", (False, False))
-              ]
+              -- symbolic failures -- either the text or the selector is symbolic
+              , ("test/contracts/fail/symbolicFail.sol",      "prove_symb_fail_allrev_text.*", (False, False))
+              , ("test/contracts/fail/symbolicFail.sol",      "prove_symb_fail_somerev_text.*", (False, True))
+              , ("test/contracts/fail/symbolicFail.sol",      "prove_symb_fail_allrev_selector.*", (False, False))
+              , ("test/contracts/fail/symbolicFail.sol",      "prove_symb_fail_somerev_selector.*", (False, True))]
         forM_ cases $ \(testFile, match, expected) -> do
           actual <- runSolidityTestCustom testFile match Nothing Nothing False Nothing Foundry
           putStrLnM $ "Test result for " <> testFile <> " match: " <> T.unpack match <> ": " <> show actual
-          assertEqualM "Must match" actual  expected
+          assertEqualM "Must match" expected actual
     , test "Trivial-Fail" $ do
         let testFile = "test/contracts/fail/trivial.sol"
         runSolidityTest testFile "prove_false" >>= assertEqualM "test result" (False, False)

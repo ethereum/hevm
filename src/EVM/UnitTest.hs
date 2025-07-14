@@ -215,10 +215,9 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
             Failure _ _ (UnrecognizedOpcode 0xfe) -> PBool False
             Failure _ _ (Revert msg) -> case msg of
               ConcreteBuf b ->
-                -- We need to drop the selector (4B), the offset value (aligned to 32B), and the length of the string (aligned to 32B)
                 -- NOTE: assertTrue/assertFalse does not have the double colon after "assertion failed"
                 let assertFail = (selector "Error(string)" `BS.isPrefixOf` b) &&
-                      ("assertion failed" `BS.isPrefixOf` (BS.drop (4+32+32) b))
+                      ("assertion failed" `BS.isPrefixOf` (BS.drop txtOffset b))
                 in if assertFail || b == panicMsg 0x01 then PBool False
                 else PBool True
               _ -> symbolicFail msg
@@ -264,9 +263,14 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
         pure $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n"
           <> "   No reachable assertion violations, but all branches reverted\n"
     liftIO $ putStr txtResult
+    when (unexpectedAllRevert && (warnings || (any isCex results))) $ do
+      -- if we display a FAILED due to Cex/warnings, we should also mention everything reverted
+      liftIO $ putStrLn $ "   \x1b[33m[WARNING]\x1b[0m " <> Text.unpack testName <> " all branches reverted\n"
     liftIO $ printWarnings ends results t
     pure (not (any isCex results), not (warnings || unexpectedAllRevert))
     where
+      -- The offset of the text is: the selector (4B), the offset value (aligned to 32B), and the length of the string (aligned to 32B)
+      txtOffset = 4+32+32
       symbolicFail :: Expr Buf -> Prop
       symbolicFail e =
         let origTxt = "assertion failed"
@@ -275,11 +279,12 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
             panic = e == ConcreteBuf (panicMsg 0x01)
             concretePrefix = Expr.concretePrefix e
             assertFail =
-              if (length concretePrefix < txtLen) then symBytesEq e origTxt
-              else PBool (V.take txtLen concretePrefix == w8Txt)
+              if (length concretePrefix < txtOffset+txtLen)
+              then PAnd (symBytesEq 0 e (BS.unpack $ selector "Error(string)")) (symBytesEq 68 e origTxt)
+              else PBool (V.drop txtOffset (V.take (txtLen+txtOffset) concretePrefix) == w8Txt)
         in PBool (not panic) .&& PNeg assertFail
-      symBytesEq :: Expr Buf -> String -> Prop
-      symBytesEq buf str = let acc = go str buf 0 []
+      symBytesEq :: Int -> Expr Buf -> String -> Prop
+      symBytesEq off buf str = let acc = go str buf off []
         in foldl' PAnd (PBool True) acc
         where
           go :: String -> Expr Buf -> Int -> [Prop] -> [Prop]
