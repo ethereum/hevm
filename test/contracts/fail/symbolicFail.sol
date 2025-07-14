@@ -2,12 +2,12 @@ import "forge-std/Test.sol";
 
 contract SolidityTest is Test {
 
-    function prove_manual_fail_somerev(uint x) public {
+    function prove_conc_fail_somerev(uint x) public {
       if (x == 0) prove_manual_fail_allrev(x);
       else return;
     }
 
-    function prove_manual_fail_allrev(uint x) public {
+    function prove_conc_fail_allrev(uint x) public {
       assembly {
         // Load free memory pointer
         let ptr := mload(0x40)

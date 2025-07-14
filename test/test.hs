@@ -1951,6 +1951,8 @@ tests = testGroup "hevm"
               -- bad cheatcode detected, hence the warning
               , ("test/contracts/fail/bad-cheatcode.sol", ".*", (False, False))
               -- symbolic failures -- either the text or the selector is symbolic
+              , ("test/contracts/fail/symbolicFail.sol",      "prove_conc_fail_allrev.*", (False, False))
+              , ("test/contracts/fail/symbolicFail.sol",      "prove_conc_fail_somerev.*", (False, False))
               , ("test/contracts/fail/symbolicFail.sol",      "prove_symb_fail_allrev_text.*", (False, False))
               , ("test/contracts/fail/symbolicFail.sol",      "prove_symb_fail_somerev_text.*", (False, True))
               , ("test/contracts/fail/symbolicFail.sol",      "prove_symb_fail_allrev_selector.*", (False, False))
