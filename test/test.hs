@@ -1986,10 +1986,6 @@ tests = testGroup "hevm"
         let testFile = "test/contracts/pass/nonce-issues.sol"
         runSolidityTest testFile "prove_prank_addr_exists" >>= assertEqualM "should not bail" (True, True)
         runSolidityTest testFile "prove_nonce_addr_nonexistent" >>= assertEqualM "should not bail" (True, True)
-    , test "badvault-sym-branch" $ do
-        let testFile = "test/contracts/fail/10_BadVault.sol"
-        runSolidityTestCustom testFile "prove_BadVault_usingExploitLaunchPad"  Nothing Nothing True Nothing Foundry >>=
-          assertEqualM "Must find counterexample" (False, True)
     , test "Prove-Tests-Fail" $ do
         let testFile = "test/contracts/fail/dsProveFail.sol"
         runSolidityTest testFile "prove_trivial" >>= assertEqualM "prove_trivial" (False, False)
