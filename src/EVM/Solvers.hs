@@ -81,7 +81,7 @@ data MultiData = MultiData
 
 data SingleData = SingleData
   { smt2 :: SMT2
-  , props :: [Prop]
+  , props :: Maybe [Prop]
   , resultChan :: Chan SMTResult
   }
 
@@ -110,20 +110,20 @@ checkSatWithProps sg props = do
     if isLeft smt2 then
       let err = getError smt2 in pure (Error err, Left err)
     else do
-      res <- liftIO $ checkSat sg smt2
+      res <- liftIO $ checkSat sg (Just props) smt2
       pure (res, Right (getNonError smt2))
 
-  where
-    checkSat :: SolverGroup -> Err SMT2 -> IO SMTResult
-    checkSat (SolverGroup taskq) smt2 = do
-      if isLeft smt2 then pure $ Error $ getError smt2
-      else do
-        -- prepare result channel
-        resChan <- newChan
-        -- send task to solver group
-        writeChan taskq (TaskSingle (SingleData (getNonError smt2) props resChan))
-        -- collect result
-        readChan resChan
+-- When props is Nothing, the cache will not be filled or used
+checkSat :: SolverGroup -> Maybe [Prop] -> Err SMT2 -> IO SMTResult
+checkSat (SolverGroup taskq) props smt2 = do
+  if isLeft smt2 then pure $ Error $ getError smt2
+  else do
+    -- prepare result channel
+    resChan <- newChan
+    -- send task to solver group
+    writeChan taskq (TaskSingle (SingleData (getNonError smt2) props resChan))
+    -- collect result
+    readChan resChan
 
 writeSMT2File :: SMT2 -> String -> IO ()
 writeSMT2File smt2 postfix = do
@@ -162,7 +162,7 @@ withSolvers solver count threads timeout cont = do
         Nothing -> do
           task <- liftIO $ readChan taskq
           case task of
-            TaskSingle (SingleData _ props r) | supersetAny (fromList props) knownUnsat -> do
+            TaskSingle (SingleData _ props r) | isJust props && supersetAny (fromList (fromJust props)) knownUnsat -> do
               liftIO $ writeChan r Qed
               when conf.debug $ liftIO $ putStrLn "   Qed found via cache!"
               orchestrate taskq cacheq avail knownUnsat fileCounter
@@ -237,7 +237,7 @@ getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCo
           when conf.debug $ putStrLn $ "Unable to write SMT to solver: " <> (T.unpack err)
           writeChan r Nothing
 
-getOneSol :: (MonadIO m, ReadConfig m) => SMT2 -> [Prop] -> Chan SMTResult -> TChan CacheEntry -> SolverInstance -> Chan SolverInstance -> Int -> m ()
+getOneSol :: (MonadIO m, ReadConfig m) => SMT2 -> Maybe [Prop] -> Chan SMTResult -> TChan CacheEntry -> SolverInstance -> Chan SolverInstance -> Int -> m ()
 getOneSol smt2@(SMT2 cmds cexvars ps) props r cacheq inst availableInstances fileCounter = do
   conf <- readConfig
   let fuzzResult = tryCexFuzz ps conf.numCexFuzz
@@ -259,7 +259,7 @@ getOneSol smt2@(SMT2 cmds cexvars ps) props r cacheq inst availableInstances fil
             res <- do
                 case sat of
                   "unsat" -> do
-                    liftIO . atomically $ writeTChan cacheq (CacheEntry props)
+                    when (isJust props) $ liftIO . atomically $ writeTChan cacheq (CacheEntry (fromJust props))
                     pure Qed
                   "timeout" -> pure $ Unknown "Result timeout by SMT solver"
                   "unknown" -> pure $ Unknown "Result unknown by SMT solver"
