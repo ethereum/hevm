@@ -68,8 +68,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More rewrite rules for MulMod, AddMod, SHL, SHR, SLT, and SignExtend
 - PLEq is now concretized in case it can be computed
 - More SignExtend test cases
-- Added handling the INVALID (0xFE) opcode in the interpreter.
-- Added special handling of the INVALID (0xfe) opcode for assertion failure in UnitTest.hs
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
@@ -109,8 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to calculate the new address. This was incorrect, and lead to address clash,
   as the nonce was never incremented.
 - We only report FAIL in `test` mode for assertion failures that match the
-  string prefix "assertion failed" (either concretely or symbolically), or
-  "Invalid opcode: 0xfe" (concretely), or match function selector "Panic(uint256)"
+  string prefix "assertion failed", or match function selector Panic(uint256)
   with a parameter 0x1. Previously, `require(a==b, "reason")` was a cause for
   FAIL in case a!=b was possible. This has now been fixed.
 
