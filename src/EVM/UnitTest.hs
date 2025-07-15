@@ -280,7 +280,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
             concretePrefix = Expr.concretePrefix e
             assertFail =
               if (length concretePrefix < txtOffset+txtLen)
-              then PAnd (symBytesEq 0 e (BS.unpack $ selector "Error(string)")) (symBytesEq 68 e origTxt)
+              then PAnd (symBytesEq 0 e (BS.unpack $ selector "Error(string)")) (symBytesEq txtOffset e origTxt)
               else PBool (V.drop txtOffset (V.take (txtLen+txtOffset) concretePrefix) == w8Txt)
         in PBool (not panic) .&& PNeg assertFail
       symBytesEq :: Int -> Expr Buf -> String -> Prop
