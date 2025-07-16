@@ -19,6 +19,7 @@ import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
 import EVM.Expr (maybeLitWordSimp)
+import Data.List (foldl')
 
 import Control.Monad (void, when, forM, forM_)
 import Control.Monad.ST (RealWorld, ST, stToIO)
@@ -29,6 +30,7 @@ import Optics.State.Operators
 import Data.Binary.Get (runGet)
 import Data.ByteString (ByteString)
 import Data.ByteString.Char8 qualified as BS
+import Data.ByteString.Internal (c2w)
 import Data.ByteString.Lazy qualified as BSLazy
 import Data.Decimal (DecimalRaw(..))
 import Data.Foldable (toList)
@@ -43,6 +45,8 @@ import Data.Word (Word64)
 import GHC.Natural
 import System.IO (hFlush, stdout)
 import Witch (unsafeInto, into)
+import Data.Vector qualified as V
+import Data.Char (ord)
 
 data UnitTestOptions s = UnitTestOptions
   { rpcInfo     :: Fetch.RpcInfo
@@ -208,11 +212,15 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
             _ -> PBool True
           False -> \(_, post) -> case post of
             Success _ _ _ store -> if opts.checkFailBit then PNeg (failed store) else PBool True
+            Failure _ _ (UnrecognizedOpcode 0xfe) -> PBool False
             Failure _ _ (Revert msg) -> case msg of
               ConcreteBuf b ->
-                if (BS.isPrefixOf (selector "Error(string)") b) || b == panicMsg 0x01 then PBool False
+                -- NOTE: assertTrue/assertFalse does not have the double colon after "assertion failed"
+                let assertFail = (selector "Error(string)" `BS.isPrefixOf` b) &&
+                      ("assertion failed" `BS.isPrefixOf` (BS.drop txtOffset b))
+                in if assertFail || b == panicMsg 0x01 then PBool False
                 else PBool True
-              b -> b ./= ConcreteBuf (panicMsg 0x01)
+              _ -> symbolicFail msg
             Failure _ _ _ -> PBool True
             Partial _ _ _ -> PBool True
             _ -> internalError "Invalid leaf node"
@@ -255,9 +263,37 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
         pure $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n"
           <> "   No reachable assertion violations, but all branches reverted\n"
     liftIO $ putStr txtResult
+    when (unexpectedAllRevert && (warnings || (any isCex results))) $ do
+      -- if we display a FAILED due to Cex/warnings, we should also mention everything reverted
+      liftIO $ putStrLn $ "   \x1b[33m[WARNING]\x1b[0m " <> Text.unpack testName <> " all branches reverted\n"
     liftIO $ printWarnings ends results t
     pure (not (any isCex results), not (warnings || unexpectedAllRevert))
-
+    where
+      -- The offset of the text is: the selector (4B), the offset value (aligned to 32B), and the length of the string (aligned to 32B)
+      txtOffset = 4+32+32
+      symbolicFail :: Expr Buf -> Prop
+      symbolicFail e =
+        let origTxt = "assertion failed"
+            txtLen = length origTxt
+            w8Txt = V.fromList $ map (fromIntegral . ord) origTxt
+            panic = e == ConcreteBuf (panicMsg 0x01)
+            concretePrefix = Expr.concretePrefix e
+            assertFail =
+              if (length concretePrefix < txtOffset+txtLen)
+              then PAnd (symBytesEq 0 e (BS.unpack $ selector "Error(string)")) (symBytesEq txtOffset e origTxt)
+              else PBool (V.drop txtOffset (V.take (txtLen+txtOffset) concretePrefix) == w8Txt)
+        in PBool (not panic) .&& PNeg assertFail
+      symBytesEq :: Int -> Expr Buf -> String -> Prop
+      symBytesEq off buf str = let acc = go str buf off []
+        in foldl' PAnd (PBool True) acc
+        where
+          go :: String -> Expr Buf -> Int -> [Prop] -> [Prop]
+          go "" _ _ acc = acc
+          go (a:ax) b n acc = go ax b (n+1) (PEq lhs rhs:acc)
+            where
+              lhs = LitByte (c2w a)
+              rhs = Expr.readByte (Lit (fromIntegral n)) b
+--
 printWarnings :: GetUnknownStr b => [Expr 'End] -> [ProofResult a b] -> String -> IO ()
 printWarnings e results testName = do
   when (any isUnknown results || any isError results || any Expr.isPartial e) $ do

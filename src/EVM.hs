@@ -1049,8 +1049,7 @@ exec1 conf = do
                 finishFrame (FrameReverted output)
             _ -> underrun
 
-        OpUnknown xxx ->
-          vmError $ UnrecognizedOpcode xxx
+        OpUnknown xxx -> vmError $ UnrecognizedOpcode xxx
 
 transfer :: (VMOps t, ?conf::Config) => Expr EAddr -> Expr EAddr -> Expr EWord -> EVM t s ()
 transfer _ _ (Lit 0) = pure ()
