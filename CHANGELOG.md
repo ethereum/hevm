@@ -68,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More rewrite rules for MulMod, AddMod, SHL, SHR, SLT, and SignExtend
 - PLEq is now concretized in case it can be computed
 - More SignExtend test cases
+- Rewrite rules to deal with specific exponentiation patterns
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value

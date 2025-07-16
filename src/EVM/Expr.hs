@@ -1186,6 +1186,12 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
       where l = sort [a, b, c]
             an = EVM.Expr.and
 
+    -- A special pattern sometimes generated from Solidity that uses exponentiation to simulate bit shift.
+    -- We can rewrite the exponentiation into a bit-shift under certain conditions.
+    go (Exp (Lit 0x100) offset@(Mul (Lit a) (Mod _ (Lit b))))
+      | a * b <= 32 && (maxWord256 `Prelude.div` a) > b = shl (Lit 1) (mul (Lit 8) offset)
+    go (Exp (Lit 0x100) offset@(Mod _ (Lit 32))) = (shl (Lit 1) (mul (Lit 8) offset))
+
     -- redundant add / sub
     go (Sub (Add a b) c)
       | a == c = b

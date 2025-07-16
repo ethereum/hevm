@@ -5189,6 +5189,58 @@ tests = testGroup "hevm"
           calldata <- mkCalldata Nothing []
           eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertEqualM "Must be different" (any (isCex . fst) eq.res) True
+      , test "eq-storage-write-to-static-array-uint128" $ do
+        Just aPrgm <- solcRuntime "C"
+            [i|
+              contract C {
+                uint128[5] arr;
+                function set(uint i, uint64 v) external returns (uint) {
+                  arr[i] = v;
+                  arr[i] = v;
+                  return 0;
+                }
+              }
+            |]
+        Just bPrgm <- solcRuntime "C"
+          [i|
+              contract C {
+                uint128[5] arr;
+                function set(uint i, uint64 v) external returns (uint) {
+                  arr[i] = v;
+                  return 0;
+                }
+              }
+          |]
+        withSolvers Bitwuzla 1 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
+          assertEqualM "Must have no difference" [Qed] (map fst eq.res)
+      , test "eq-storage-write-to-static-array-uint8" $ do
+        Just aPrgm <- solcRuntime "C"
+            [i|
+              contract C {
+                uint8[10] arr;
+                function set(uint i, uint8 v) external returns (uint) {
+                  arr[i] = v;
+                  arr[i] = v;
+                  return 0;
+                }
+              }
+            |]
+        Just bPrgm <- solcRuntime "C"
+          [i|
+              contract C {
+                uint8[10] arr;
+                function set(uint i, uint8 v) external returns (uint) {
+                  arr[i] = v;
+                  return 0;
+                }
+              }
+          |]
+        withSolvers Bitwuzla 1 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
+          assertEqualM "Must have no difference" [Qed] (map fst eq.res)
       , test "eq-all-yul-optimization-tests" $ do
         let opts = defaultVeriOpts{ iterConf = defaultIterConf {maxIter = Just 5, askSmtIters = 20, loopHeuristic = Naive }}
             ignoredTests =
