@@ -5195,7 +5195,7 @@ tests = testGroup "hevm"
             [i|
               contract C {
                 uint128[5] arr;
-                function set(uint i, uint64 v) external returns (uint) {
+                function set(uint i, uint128 v) external returns (uint) {
                   arr[i] = v;
                   arr[i] = v;
                   return 0;
@@ -5206,14 +5206,14 @@ tests = testGroup "hevm"
           [i|
               contract C {
                 uint128[5] arr;
-                function set(uint i, uint64 v) external returns (uint) {
+                function set(uint i, uint128 v) external returns (uint) {
                   arr[i] = v;
                   return 0;
                 }
               }
           |]
         withSolvers Bitwuzla 1 1 Nothing $ \s -> do
-          calldata <- mkCalldata Nothing []
+          calldata <- mkCalldata (Just (Sig "set(uint256,uint128)" [AbiUIntType 256, AbiUIntType 128])) []
           eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertEqualM "Must have no difference" [Qed] (map fst eq.res)
       ,
@@ -5240,7 +5240,7 @@ tests = testGroup "hevm"
               }
           |]
         withSolvers Bitwuzla 1 1 Nothing $ \s -> do
-          calldata <- mkCalldata Nothing []
+          calldata <- mkCalldata (Just (Sig "set(uint256,uint8)" [AbiUIntType 256, AbiUIntType 8])) []
           eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertEqualM "Must have no difference" [Qed] (map fst eq.res)
       ,
@@ -5267,7 +5267,7 @@ tests = testGroup "hevm"
               }
           |]
         withSolvers Bitwuzla 1 1 Nothing $ \s -> do
-          calldata <- mkCalldata Nothing []
+          calldata <- mkCalldata (Just (Sig "set(uint256,uint32)" [AbiUIntType 256, AbiUIntType 32])) []
           eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertEqualM "Must have no difference" [Qed] (map fst eq.res)
       , test "eq-all-yul-optimization-tests" $ do
