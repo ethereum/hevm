@@ -5189,7 +5189,8 @@ tests = testGroup "hevm"
           calldata <- mkCalldata Nothing []
           eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertEqualM "Must be different" (any (isCex . fst) eq.res) True
-      , test "eq-storage-write-to-static-array-uint128" $ do
+      ,
+      test "eq-storage-write-to-static-array-uint128" $ do
         Just aPrgm <- solcRuntime "C"
             [i|
               contract C {
@@ -5215,7 +5216,8 @@ tests = testGroup "hevm"
           calldata <- mkCalldata Nothing []
           eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
           assertEqualM "Must have no difference" [Qed] (map fst eq.res)
-      , test "eq-storage-write-to-static-array-uint8" $ do
+      ,
+      test "eq-storage-write-to-static-array-uint8" $ do
         Just aPrgm <- solcRuntime "C"
             [i|
               contract C {
@@ -5232,6 +5234,33 @@ tests = testGroup "hevm"
               contract C {
                 uint8[10] arr;
                 function set(uint i, uint8 v) external returns (uint) {
+                  arr[i] = v;
+                  return 0;
+                }
+              }
+          |]
+        withSolvers Bitwuzla 1 1 Nothing $ \s -> do
+          calldata <- mkCalldata Nothing []
+          eq <- equivalenceCheck s aPrgm bPrgm defaultVeriOpts calldata False
+          assertEqualM "Must have no difference" [Qed] (map fst eq.res)
+      ,
+      test "eq-storage-write-to-static-array-uint32" $ do
+        Just aPrgm <- solcRuntime "C"
+            [i|
+              contract C {
+                uint32[5] arr;
+                function set(uint i, uint32 v) external returns (uint) {
+                  arr[i] = 1;
+                  arr[i] = v;
+                  return 0;
+                }
+              }
+            |]
+        Just bPrgm <- solcRuntime "C"
+          [i|
+              contract C {
+                uint32[5] arr;
+                function set(uint i, uint32 v) external returns (uint) {
                   arr[i] = v;
                   return 0;
                 }
