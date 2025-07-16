@@ -111,6 +111,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   string prefix "assertion failed", or match function selector Panic(uint256)
   with a parameter 0x1. Previously, `require(a==b, "reason")` was a cause for
   FAIL in case a!=b was possible. This has now been fixed.
+- Out of bounds reads could occur in Haskell when trying to determine
+  valid jump destinations. This has now been fixed.
 
 ## Changed
 - Warnings now lead printing FAIL. This way, users don't accidentally think that
