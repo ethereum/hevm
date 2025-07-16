@@ -310,7 +310,7 @@ main = do
     Symbolic cFileOpts symbOpts cExecOpts cOpts -> do
       env <- makeEnv cOpts
       root <- getRoot cOpts
-      withCurrentDirectory root $ runEnv env $ assert cFileOpts symbOpts cExecOpts cOpts
+      withCurrentDirectory root $ runEnv env $ symbCheck cFileOpts symbOpts cExecOpts cOpts
     Equal eqOpts cOpts -> do
       env <- makeEnv cOpts
       runEnv env $ equivalence eqOpts cOpts
@@ -480,8 +480,8 @@ buildCalldata cOpts sig arg = case (cOpts.calldata, sig) of
 
 
 -- If function signatures are known, they should always be given for best results.
-assert :: App m => CommonFileOptions -> SymbolicOptions -> CommonExecOptions -> CommonOptions -> m ()
-assert cFileOpts sOpts cExecOpts cOpts = do
+symbCheck :: App m => CommonFileOptions -> SymbolicOptions -> CommonExecOptions -> CommonOptions -> m ()
+symbCheck cFileOpts sOpts cExecOpts cOpts = do
   let block' = maybe Fetch.Latest Fetch.BlockNumber cExecOpts.block
       rpcinfo = (,) block' <$> cExecOpts.rpc
   calldata <- buildCalldata cOpts sOpts.sig sOpts.arg
@@ -512,7 +512,6 @@ assert cFileOpts sOpts cExecOpts cOpts = do
         showExtras solvers sOpts calldata expr
       _ -> do
         let cexs = snd <$> mapMaybe getCex res
-            smtUnknowns = snd <$> mapMaybe getUnknown res
             counterexamples
               | null cexs = []
               | otherwise =
@@ -520,14 +519,8 @@ assert cFileOpts sOpts cExecOpts cOpts = do
                  , ("Discovered the following " <> (T.pack $ show (length cexs)) <> " counterexample(s):")
                  , ""
                  ] <> fmap (formatCex (fst calldata) Nothing) cexs
-            unknowns
-              | null smtUnknowns = []
-              | otherwise =
-                 [ ""
-                 , "Could not determine reachability of the following end state(s):"
-                 , ""
-                 ] <> fmap (formatExpr) smtUnknowns
-        liftIO $ T.putStrLn $ T.unlines (counterexamples <> unknowns)
+        liftIO $ T.putStrLn $ T.unlines counterexamples
+        liftIO $ printWarnings [expr] res "symbolically"
         showExtras solvers sOpts calldata expr
         liftIO exitFailure
 

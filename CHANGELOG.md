@@ -139,6 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The concrete MCOPY implementation has been optimized to avoid freezing the whole
   EVM memory.
 - We no longer accept `check` as a prefix for test cases by default.
+- The way we print warnings for `symbolic` mode now matches that of `test` mode.
 
 ## [0.54.2] - 2024-12-12
 
