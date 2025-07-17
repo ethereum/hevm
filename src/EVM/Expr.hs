@@ -197,7 +197,7 @@ sar :: Expr EWord -> Expr EWord -> Expr EWord
 sar = op2 SAR (\x y ->
   let msb = testBit y 255
       asSigned = fromIntegral y :: Int256
-  in if x > 256 then
+  in if x >= 255 then
        if msb then maxBound else 0
      else
        fromIntegral $ shiftR asSigned (fromIntegral x))
@@ -1213,7 +1213,7 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
 
     go (EqByte a b) = eqByte a b
 
-    -- SHL / SHR by 0
+    -- SHL / SHR / SAR
     go (SHL a v)
       | a == (Lit 0) = v
       | v == (Lit 0) = v
@@ -1222,6 +1222,11 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
       | a == (Lit 0) = v
       | v == (Lit 0) = v
       | otherwise = shr a v
+    go (SAR _ (Lit v)) | v == maxBound = Lit v
+    go (SAR a v)
+       | a == (Lit 0) = v
+       | v == (Lit 0) = v
+       | otherwise = sar a v
 
     -- Bitwise AND & OR. These MUST preserve bitwise equivalence
     go (And a b)
@@ -1329,7 +1334,7 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
 simplifyProps :: [Prop] -> [Prop]
 simplifyProps ps = if cannotBeSat then [PBool False] else simplified
   where
-    simplified = if (goOne ps == ps) then ps else simplifyProps (goOne ps)
+    simplified = untilFixpoint goOne ps
     cannotBeSat = PBool False `elem` simplified
     goOne :: [Prop] -> [Prop]
     goOne = remRedundantProps . map simplifyProp . constPropagate . flattenProps
@@ -1770,7 +1775,7 @@ constPropagate ps =
 concKeccakSimpExpr :: Expr a -> Expr a
 concKeccakSimpExpr orig = untilFixpoint (simplifyNoLitToKeccak . (mapExpr concKeccakOnePass)) (simplify orig)
 
--- Only concretize Keccak in Props
+-- Concretize Keccak in Props, but don't simplify
 -- Needed because if it also simplified, we may not find some simplification errors, as
 -- simplification would always be ON
 concKeccakProps :: [Prop] -> [Prop]
