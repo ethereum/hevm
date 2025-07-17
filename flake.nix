@@ -17,13 +17,17 @@
       url = "github:foundry-rs/forge-std";
       flake = false;
     };
+    empty-smt-solver = {
+      url = "github:msooseth/empty-smt-solver/74bd120fdb730fde8e44243305e669e5e8a3e02a";
+      flake = true;
+    };
     solc-pkgs = {
       url = "github:hellwolf/solc.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { nixpkgs, flake-utils, solidity, forge-std, ethereum-tests, foundry, solc-pkgs, ... }:
+  outputs = { nixpkgs, flake-utils, solidity, empty-smt-solver, forge-std, ethereum-tests, foundry, solc-pkgs, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs {
@@ -196,6 +200,7 @@
             (hspkgs pkgs).cabal-install
             (hspkgs pkgs).eventlog2html
             (hspkgs pkgs).haskell-language-server
+            empty-smt-solver.packages.${system}.default
           ] ++ testDeps;
           withHoogle = true;
 
