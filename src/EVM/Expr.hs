@@ -1073,12 +1073,6 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
     go (SEx _ (Lit 0)) = Lit 0
     go (SEx a b) = sex a b
 
-    -- SAR
-    go (SAR _ (Lit 0)) = Lit 0
-    go (SAR _ (Lit x)) | x == maxBound = Lit x
-    go (SAR (Lit 0) b) = b
-    go (SAR a b) = sar a b
-
     -- IsZero
     go (IsZero (IsZero (IsZero a))) = iszero a
     go (IsZero (IsZero (LT x y))) = lt x y
@@ -1219,7 +1213,7 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
 
     go (EqByte a b) = eqByte a b
 
-    -- SHL / SHR by 0
+    -- SHL / SHR / SAR
     go (SHL a v)
       | a == (Lit 0) = v
       | v == (Lit 0) = v
@@ -1228,6 +1222,11 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
       | a == (Lit 0) = v
       | v == (Lit 0) = v
       | otherwise = shr a v
+    go (SAR _ (Lit v)) | v == maxBound = Lit v
+    go (SAR a v)
+       | a == (Lit 0) = v
+       | v == (Lit 0) = v
+       | otherwise = sar a v
 
     -- Bitwise AND & OR. These MUST preserve bitwise equivalence
     go (And a b)
