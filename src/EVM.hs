@@ -2732,7 +2732,9 @@ isValidJumpDest vm x = let
       RuntimeCode (SymbolicRuntimeCode ops) -> ops V.!? x >>= maybeLitByteSimp
   in case op of
        Nothing -> False
-       Just b -> 0x5b == b && OpJumpdest == snd (contract.codeOps V.! (contract.opIxMap VS.! x))
+       Just b -> 0x5b == b && (isJust $ contract.opIxMap VS.!? x)
+         && (isJust $ contract.codeOps V.!? (contract.opIxMap VS.! x))
+         && OpJumpdest == snd (contract.codeOps V.! (contract.opIxMap VS.! x))
 
 opSize :: Word8 -> Int
 opSize x | x >= 0x60 && x <= 0x7f = into x - 0x60 + 2
