@@ -69,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PLEq is now concretized in case it can be computed
 - More SignExtend test cases
 - Rewrite rules to deal with specific exponentiation patterns
+- Added missing simplification and concretization of the SAR instruction
 
 ## Fixed
 - We now try to simplify expressions fully before trying to cast them to a concrete value
