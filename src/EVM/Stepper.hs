@@ -7,6 +7,7 @@ module EVM.Stepper
   , execFully
   , run
   , runFully
+  , runFullyNoEffects
   , wait
   , fork
   , evm
@@ -95,8 +96,12 @@ runFully = do
     Just _ ->
       pure vm
 
+runFullyNoEffects :: VMOps t => Config -> VM t RealWorld -> IO (VM t RealWorld, VM t RealWorld)
+runFullyNoEffects conf vm = stToIO $ runStateT (EVM.Exec.run conf) vm
+
 enter :: Text -> Stepper t s ()
 enter t = evm (EVM.pushTrace (EntryTrace t))
+
 
 interpret
   :: forall m a . (App m)

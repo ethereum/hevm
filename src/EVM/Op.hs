@@ -5,6 +5,7 @@ module EVM.Op
   , intToOpName
   , getOp
   , readOp
+  , opToWord8
   ) where
 
 import EVM.Expr qualified as Expr
@@ -359,3 +360,90 @@ getOp x = case x of
   0xfa -> OpStaticcall
   0xff -> OpSelfdestruct
   _    -> OpUnknown x
+
+-- | Convert a 'GenericOp' to an Word8
+opToWord8 :: GenericOp Word8 -> Word8
+opToWord8 (OpDup n) = 0x80 + fromIntegral (n - 1)
+opToWord8 (OpSwap n) = 0x90 + fromIntegral (n - 1)
+opToWord8 (OpLog n) = 0xa0 + fromIntegral n
+opToWord8 (OpPush n) = 0x60 + fromIntegral (n - 1)
+opToWord8 OpPush0 = 0x5f
+opToWord8 OpStop = 0x00
+opToWord8 OpAdd = 0x01
+opToWord8 OpMul = 0x02
+opToWord8 OpSub = 0x03
+opToWord8 OpDiv = 0x04
+opToWord8 OpSdiv = 0x05
+opToWord8 OpMod = 0x06
+opToWord8 OpSmod = 0x07
+opToWord8 OpAddmod = 0x08
+opToWord8 OpMulmod = 0x09
+opToWord8 OpExp = 0x0a
+opToWord8 OpSignextend = 0x0b
+opToWord8 OpLt = 0x10
+opToWord8 OpGt = 0x11
+opToWord8 OpSlt = 0x12
+opToWord8 OpSgt = 0x13
+opToWord8 OpEq = 0x14
+opToWord8 OpIszero = 0x15
+opToWord8 OpAnd = 0x16
+opToWord8 OpOr = 0x17
+opToWord8 OpXor = 0x18
+opToWord8 OpNot = 0x19
+opToWord8 OpByte = 0x1a
+opToWord8 OpShl = 0x1b
+opToWord8 OpShr = 0x1c
+opToWord8 OpSar = 0x1d
+opToWord8 OpSha3 = 0x20
+opToWord8 OpAddress = 0x30
+opToWord8 OpBalance = 0x31
+opToWord8 OpOrigin = 0x32
+opToWord8 OpCaller = 0x33
+opToWord8 OpCallvalue = 0x34
+opToWord8 OpCalldataload = 0x35
+opToWord8 OpCalldatasize = 0x36
+opToWord8 OpCalldatacopy = 0x37
+opToWord8 OpCodesize = 0x38
+opToWord8 OpCodecopy = 0x39
+opToWord8 OpGasprice = 0x3a
+opToWord8 OpExtcodesize = 0x3b
+opToWord8 OpExtcodecopy = 0x3c
+opToWord8 OpReturndatasize = 0x3d
+opToWord8 OpReturndatacopy = 0x3e
+opToWord8 OpExtcodehash = 0x3f
+opToWord8 OpBlockhash = 0x40
+opToWord8 OpCoinbase = 0x41
+opToWord8 OpTimestamp = 0x42
+opToWord8 OpNumber = 0x43
+opToWord8 OpPrevRandao = 0x44
+opToWord8 OpGaslimit = 0x45
+opToWord8 OpChainid = 0x46
+opToWord8 OpSelfbalance = 0x47
+opToWord8 OpBaseFee = 0x48
+opToWord8 OpBlobhash = 0x49
+opToWord8 OpBlobBaseFee = 0x4a
+opToWord8 OpPop = 0x50
+opToWord8 OpMcopy = 0x5e
+opToWord8 OpMload = 0x51
+opToWord8 OpMstore = 0x52
+opToWord8 OpMstore8 = 0x53
+opToWord8 OpSload = 0x54
+opToWord8 OpSstore = 0x55
+opToWord8 OpTload = 0x5c
+opToWord8 OpTstore = 0x5d
+opToWord8 OpJump = 0x56
+opToWord8 OpJumpi = 0x57
+opToWord8 OpPc = 0x58
+opToWord8 OpMsize = 0x59
+opToWord8 OpGas = 0x5a
+opToWord8 OpJumpdest = 0x5b
+opToWord8 OpCreate = 0xf0
+opToWord8 OpCall = 0xf1
+opToWord8 OpStaticcall = 0xfa
+opToWord8 OpCallcode = 0xf2
+opToWord8 OpReturn = 0xf3
+opToWord8 OpDelegatecall = 0xf4
+opToWord8 OpCreate2 = 0xf5
+opToWord8 OpSelfdestruct = 0xff
+opToWord8 OpRevert = 0xfd
+opToWord8 (OpUnknown x) = x
