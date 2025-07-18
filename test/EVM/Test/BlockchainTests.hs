@@ -25,6 +25,8 @@ import Data.Aeson.Types qualified as JSON
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as Lazy
 import Data.ByteString.Lazy qualified as LazyByteString
+import Data.HashMap.Strict (HashMap)
+import Data.HashMap.Strict qualified as HashMap
 import Data.List (isInfixOf, isPrefixOf)
 import Data.Map (Map)
 import Data.Map qualified as Map
@@ -229,7 +231,7 @@ splitEithers =
   . (fmap fst &&& fmap snd)
   . (fmap (preview _Left &&& preview _Right))
 
-fromConcrete :: Expr Storage -> Map W256 W256
+fromConcrete :: Expr Storage -> HashMap W256 W256
 fromConcrete (ConcreteStore s) = s
 fromConcrete s = internalError $ "unexpected abstract store: " <> show s
 
@@ -308,7 +310,7 @@ clearOrigStorage = set #origStorage (ConcreteStore mempty)
 
 clearZeroStorage :: Contract -> Contract
 clearZeroStorage c = case c.storage of
-  ConcreteStore m -> let store = Map.filter (/= 0) m
+  ConcreteStore m -> let store = HashMap.filter (/= 0) m
                      in set #storage (ConcreteStore store) c
   _ -> internalError "Internal Error: unexpected abstract store"
 
