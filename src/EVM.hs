@@ -735,8 +735,6 @@ exec1 conf = do
                   assign (#state % #stack) (y:xs)
             _ -> underrun
 
-        -- TODO: gotta collect Keccak equivalences here. When a concrete value
-        -- is written, we forget its pre-image
         OpSstore ->
           notStatic $
           case stk of
