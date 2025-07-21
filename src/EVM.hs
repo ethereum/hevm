@@ -58,7 +58,7 @@ import Data.Typeable
 import Data.Vector qualified as V
 import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.Mutable qualified as VS.Mutable
-import Data.Vector.Storable.ByteString (vectorToByteString)
+import Data.Vector.Storable.ByteString (vectorToByteString, byteStringToVector)
 import Data.Word (Word8, Word32, Word64)
 import Text.Read (readMaybe)
 import Witch (into, tryFrom, unsafeInto, tryInto)
@@ -2970,8 +2970,8 @@ log2 x = finiteBitSize x - 1 - countLeadingZeros x
 writeMemory :: MutableMemory s -> Int -> ByteString -> EVM t s ()
 writeMemory memory offset buf = do
   memory' <- expandMemory (offset + BS.length buf)
-  mapM_ (uncurry (VS.Mutable.write memory'))
-        (zip [offset..] (BS.unpack buf))
+  VS.iforM_ (byteStringToVector buf) $ \i v -> do
+    VS.Mutable.unsafeWrite memory' (offset + i) v
   where
   expandMemory requiredSize = do
     let currentSize = VS.Mutable.length memory
