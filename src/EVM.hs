@@ -428,6 +428,8 @@ exec1 conf = do
         OpSar -> stackOp2 g_verylow Expr.sar
 
         -- more accurately referred to as KECCAK
+        -- TODO: during setUp(), we run this concretely, so the keccaks are not stored
+        --       in a symbolic way, which leads to issues
         OpSha3 ->
           case stk of
             xOffset:xSize:xs ->
