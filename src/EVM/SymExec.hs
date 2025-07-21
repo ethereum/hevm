@@ -734,8 +734,8 @@ verifyInputs solvers opts fetcher preState maybepost = do
     getCallPrefix (WriteByte (Lit 0) (LitByte a) (WriteByte (Lit 1) (LitByte b) (WriteByte (Lit 2) (LitByte c) (WriteByte (Lit 3) (LitByte d) _)))) = mconcat $ map (printf "%02x") [a,b,c,d]
     getCallPrefix _ = "unknown"
     toProps leaf constr post = PNeg (post preState leaf) : constr <> extractProps leaf
-    toPropsFinal conf leaf constr post = if conf.simp then Expr.simplifyProps $ toProps leaf constr post
-                                                 else toProps leaf constr post
+    toPropsFinal conf leaf constr post = toProps leaf constr post --if conf.simp then Expr.simplifyProps $ toProps leaf constr post
+                                                 -- else toProps leaf constr post
     canBeSat (a, _) = case a of
         [PBool False] -> False
         _ -> True
