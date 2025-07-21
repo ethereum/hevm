@@ -274,7 +274,7 @@ isCreation = \case
 
 -- | Update program counter
 next :: (?op :: Word8) => EVM t s ()
-next = modifying (#state % #pc) (+ (opSize ?op))
+next = modifying' (#state % #pc) (+ (opSize ?op))
 
 getOpW8 :: forall (t :: VMType) s . FrameState t s -> Word8
 getOpW8 state = case state.code of
@@ -2699,7 +2699,7 @@ checkJump x xs = noJumpIntoInitData x $ do
   case isValidJumpDest vm x of
     True -> do
       assign' (#state % #stack) xs
-      #state % #pc .= x
+      assign' (#state % #pc) x
     False -> vmError BadJumpDestination
 
 -- fails with partial if we're trying to jump into the symbolic region of an `InitCode`
