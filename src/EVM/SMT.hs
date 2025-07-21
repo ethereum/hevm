@@ -138,8 +138,8 @@ smt2Line txt = SMT2 [txt] mempty mempty
 --         need unconcretized Props
 assertProps :: Config -> [Prop] -> Err SMT2
 assertProps conf ps =
-  if not conf.simp then assertPropsHelper False ps
-  else assertPropsHelper True (decompose . Expr.simplifyProps $ ps)
+  if not conf.simp then assertPropsHelper False ps ps
+  else assertPropsHelper True (decompose . Expr.simplifyProps $ ps) ps
   where
     decompose :: [Prop] -> [Prop]
     decompose props = if conf.decomposeStorage && safeExprs && safeProps
@@ -154,8 +154,8 @@ assertProps conf ps =
 -- Note: we need a version that does NOT call simplify,
 -- because we make use of it to verify the correctness of our simplification
 -- passes through property-based testing.
-assertPropsHelper :: Bool -> [Prop]  -> Err SMT2
-assertPropsHelper simp psPreConc = do
+assertPropsHelper :: Bool -> [Prop] -> [Prop] -> Err SMT2
+assertPropsHelper simp psPreConc origProps = do
  encs <- mapM propToSMT psElim
  intermediates <- declareIntermediates bufs stores
  readAssumes' <- readAssumes
@@ -181,7 +181,7 @@ assertPropsHelper simp psPreConc = do
   <> readAssumes'
   <> gasOrder
   <> smt2Line ""
-  <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) (cexInfo storageReads) ps
+  <> SMT2 (fmap (\p -> "(assert " <> p <> ")") encs) (cexInfo storageReads) origProps
 
   where
     ps = if simp then Expr.concKeccakSimpProps psPreConc else Expr.concKeccakProps psPreConc
@@ -206,8 +206,8 @@ assertPropsHelper simp psPreConc = do
 
     -- Keccak assertions: concrete values, distance between pairs, injectivity, etc.
     --      This will make sure concrete values of Keccak are asserted, if they can be computed (i.e. can be concretized)
-    keccAssump = keccakAssumptions psPreConc bufVals storeVals
-    keccComp = keccakCompute psPreConc bufVals storeVals
+    keccAssump = keccakAssumptions (origProps <> ps) bufVals storeVals
+    keccComp = keccakCompute (origProps <> ps) bufVals storeVals
     keccakAssertions = do
       assumps <- mapM assertSMT keccAssump
       comps <- mapM assertSMT keccComp
