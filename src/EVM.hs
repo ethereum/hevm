@@ -66,7 +66,6 @@ import Witch (into, tryFrom, unsafeInto, tryInto)
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
 import Crypto.Number.ModArithmetic (expFast)
-import Debug.Trace (trace)
 
 blankState :: VMOps t => ST s (FrameState t s)
 blankState = do
@@ -167,6 +166,7 @@ makeVm o = do
     , osEnv = mempty
     , freshVar = 0
     , exploreDepth = 0
+    , keccakPreImgs = []
     }
     where
     env = Env
@@ -438,10 +438,14 @@ exec1 conf = do
                 accessMemoryRange xOffset xSize $ do
                   hash <- readMemory xOffset xSize >>= \case
                     orig@(ConcreteBuf bs) ->
-                      (trace $ "stuffsha31: " <> show orig) $ whenSymbolicElse
-                        (trace ("stuffsha31 -- symbolic") $ pure $ Keccak orig)
-                        (trace ("stuffsha31 -- concrete") $ pure $ Lit (keccak' bs))
-                    buf -> (trace $ "stuffsha32: " <> show buf) $ pure $ Keccak buf
+                      whenSymbolicElse
+                        (pure $ Keccak orig)
+                        (do
+                          let kc = keccak' bs
+                          modifying #keccakPreImgs ((bs, kc):)
+                          pure $ Lit kc
+                        )
+                    buf -> pure $ Keccak buf
                   next
                   assign (#state % #stack) (hash : xs)
             _ -> underrun
@@ -740,7 +744,7 @@ exec1 conf = do
           notStatic $
           case stk of
             x:new:xs ->
-              (trace $ "stuff: " <> show x ) $ accessStorage self x $ \current -> do
+              accessStorage self x $ \current -> do
                 ensureGas g_callstipend $ do
                   let
                     original =

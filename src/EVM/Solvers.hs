@@ -32,8 +32,8 @@ import EVM.Fuzz (tryCexFuzz)
 import Data.Bits ((.&.))
 import Numeric (showHex)
 import EVM.Expr (simplifyProps)
-import EVM.Format (formatProp)
-import Data.Text qualified as TS
+-- import EVM.Format (formatProp)
+-- import Data.Text qualified as TS
 
 import EVM.SMT
 import EVM.Types
