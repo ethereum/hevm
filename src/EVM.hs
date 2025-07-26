@@ -166,6 +166,7 @@ makeVm o = do
     , osEnv = mempty
     , freshVar = 0
     , exploreDepth = 0
+    , keccakPreImgs = []
     }
     where
     env = Env
@@ -428,6 +429,8 @@ exec1 conf = do
         OpSar -> {-# SCC "OpSar" #-} stackOp2 g_verylow Expr.sar
 
         -- more accurately referred to as KECCAK
+        -- TODO: during setUp(), we run this concretely, so the keccaks are not stored
+        --       in a symbolic way, which leads to issues
         OpSha3 -> {-# SCC "OpSha3" #-}
           case stk of
             xOffset:xSize:xs ->
@@ -437,7 +440,11 @@ exec1 conf = do
                     orig@(ConcreteBuf bs) ->
                       whenSymbolicElse
                         (pure $ Keccak orig)
-                        (pure $ Lit (keccak' bs))
+                        (do
+                          let kc = keccak' bs
+                          modifying #keccakPreImgs ((bs, kc):)
+                          pure $ Lit kc
+                        )
                     buf -> pure $ Keccak buf
                   next
                   assign' (#state % #stack) (hash : xs)

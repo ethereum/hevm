@@ -32,6 +32,8 @@ import EVM.Fuzz (tryCexFuzz)
 import Data.Bits ((.&.))
 import Numeric (showHex)
 import EVM.Expr (simplifyProps)
+-- import EVM.Format (formatProp)
+-- import Data.Text qualified as TS
 
 import EVM.SMT
 import EVM.Types
@@ -103,10 +105,13 @@ checkMulti (SolverGroup taskq) smt2 multiSol = do
 checkSatWithProps :: App m => SolverGroup -> [Prop] -> m (SMTResult, Err SMT2)
 checkSatWithProps sg props = do
   conf <- readConfig
+  -- let expr = T.concat [T.singleton ';', T.replace "\n" "\n;" $ T.pack . TS.unpack $  TS.unlines (fmap formatProp props)]
+  -- liftIO $ putStrLn $ "Checking satisfiability with properties...:\n" <> (T.unpack expr)
+
   let psSimp = if conf.simp then simplifyProps props else props
   if psSimp == [PBool False] then pure (Qed, Right mempty)
   else do
-    let smt2 = assertProps conf psSimp
+    let smt2 = assertProps conf props
     if isLeft smt2 then
       let err = getError smt2 in pure (Error err, Left err)
     else do
