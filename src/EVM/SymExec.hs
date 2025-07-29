@@ -709,13 +709,13 @@ verifyInputs solvers opts fetcher preState maybepost = do
     putStrLn "   Flattening expression"
     printPartialIssues flattened ("the call " <> call)
     putStrLn $ "   Exploration finished, " <> show (Expr.numBranches expr) <> " branch(es) to check in call " <> call
-
+    putStrLn $ "   Keccak preimages in state: " <> (show $ length preState.keccakPreImgs)
   case maybepost of
     Nothing -> pure (expr, [(Qed, expr)], partials)
     Just post -> do
       let
         -- Filter out any leaves from `flattened` that can be statically shown to be safe
-        tocheck = flip map flattened $ \leaf -> (toPropsFinal conf leaf preState.constraints post, leaf)
+        tocheck = flip map flattened $ \leaf -> (toProps leaf preState post, leaf)
         withQueries = filter canBeSat tocheck
       when conf.debug $ liftIO $ putStrLn $ "   Checking for reachability of " <> show (length withQueries)
         <> " potential property violation(s) in call " <> call
@@ -733,9 +733,9 @@ verifyInputs solvers opts fetcher preState maybepost = do
     getCallPrefix :: Expr Buf -> String
     getCallPrefix (WriteByte (Lit 0) (LitByte a) (WriteByte (Lit 1) (LitByte b) (WriteByte (Lit 2) (LitByte c) (WriteByte (Lit 3) (LitByte d) _)))) = mconcat $ map (printf "%02x") [a,b,c,d]
     getCallPrefix _ = "unknown"
-    toProps leaf constr post = PNeg (post preState leaf) : constr <> extractProps leaf
-    toPropsFinal conf leaf constr post = if conf.simp then Expr.simplifyProps $ toProps leaf constr post
-                                                 else toProps leaf constr post
+    toProps leaf vm post = let keccakConstraints = map (\(bs, k)-> PEq (Keccak (ConcreteBuf bs)) (Lit k)) (Set.toList vm.keccakPreImgs)
+     in PNeg (post preState leaf) : vm.constraints <> extractProps leaf <> keccakConstraints
+
     canBeSat (a, _) = case a of
         [PBool False] -> False
         _ -> True

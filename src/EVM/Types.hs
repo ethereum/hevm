@@ -696,7 +696,8 @@ data VM (t :: VMType) s = VM
   , freshVar       :: Int
   -- ^ used to generate fresh symbolic variable names for overapproximations
   --   during symbolic execution. See e.g. OpStaticcall
-  , exploreDepth    :: Int
+  , exploreDepth   :: Int
+  , keccakPreImgs  :: Set (ByteString, W256)
   }
   deriving (Generic)
 

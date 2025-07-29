@@ -5,16 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
-
-## Changed
-- Updated forge to 1.2.3 and forge-std to 60acb7aa (1.9.7+)
+## [Unreleased]
 
 ## Fixed
 - We now extract more Keccak computations than before from the Props to assert
   more Keccak equalities.
 - Faster word256Bytes and word160Bytes functions to help concrete execution
   performance
+
+## Changed
+- Updated forge to 1.2.3 and forge-std to 60acb7aa (1.9.7+)
+- We now gather Keccak axioms during `setUp()` and inject them into the SMT solver.
+  This helps us finding more correct Keccak preimages
 
 ## [0.55.1] - 2025-07-22
 

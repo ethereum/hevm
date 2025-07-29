@@ -166,6 +166,7 @@ makeVm o = do
     , osEnv = mempty
     , freshVar = 0
     , exploreDepth = 0
+    , keccakPreImgs = fromList []
     }
     where
     env = Env
@@ -437,7 +438,11 @@ exec1 conf = do
                     orig@(ConcreteBuf bs) ->
                       whenSymbolicElse
                         (pure $ Keccak orig)
-                        (pure $ Lit (keccak' bs))
+                        (do
+                          let kc = keccak' bs
+                          modifying #keccakPreImgs (insert (bs, kc))
+                          pure $ Lit kc
+                        )
                     buf -> pure $ Keccak buf
                   next
                   assign' (#state % #stack) (hash : xs)
