@@ -82,10 +82,10 @@ concretizeKeccakParam _ = internalError "Cannot happen"
 
 compute :: forall a. Expr a -> Set Prop
 compute = \case
-  e@(Keccak buf) -> do
-    let b = simplify buf
+  Keccak buf -> do
+    let b = concKeccakSimpExpr buf
     case keccak b of
-      lit@(Lit _) -> Set.singleton (PEq lit (concretizeKeccakParam e))
+      lit@(Lit _) -> Set.singleton (PEq lit (Keccak b))
       _ -> Set.empty
   _ -> Set.empty
 
