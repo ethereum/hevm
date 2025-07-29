@@ -71,11 +71,11 @@
     "forge-std": {
       "flake": false,
       "locked": {
-        "lastModified": 1715903882,
-        "narHash": "sha256-Uqr0ZwCnQL9ShWxIgG/ci/5ukGyuqt2n+C0GFKlJiho=",
+        "lastModified": 1749634666,
+        "narHash": "sha256-5HqpP/aicV71AXF+MYCg3mxHFnG8Wn1Ov3W6C35uNFk=",
         "owner": "foundry-rs",
         "repo": "forge-std",
-        "rev": "52715a217dc51d0de15877878ab8213f6cbbbab5",
+        "rev": "60acb7aaadcce2d68e52986a0a66fe79f07d138f",
         "type": "github"
       },
       "original": {
@@ -90,17 +90,17 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1724145005,
-        "narHash": "sha256-fTvalF9fSKWJj/HJWtHQ8DrMR1nBH1NV1w/x+O4M/Zw=",
+        "lastModified": 1752867797,
+        "narHash": "sha256-oT129SDSr7SI9ThTd6ZbpmShh5f2tzUH3S4hl6c5/7w=",
         "owner": "shazow",
         "repo": "foundry.nix",
-        "rev": "47f8ae49275eeff9bf0526d45e3c1f76723bb5d3",
+        "rev": "d4445852933ab5bc61ca532cb6c5d3276d89c478",
         "type": "github"
       },
       "original": {
         "owner": "shazow",
+        "ref": "stable",
         "repo": "foundry.nix",
-        "rev": "47f8ae49275eeff9bf0526d45e3c1f76723bb5d3",
         "type": "github"
       }
     },

@@ -4,7 +4,7 @@
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    foundry.url = "github:shazow/foundry.nix/47f8ae49275eeff9bf0526d45e3c1f76723bb5d3";
+    foundry.url = "github:shazow/foundry.nix/stable";
     solidity = {
       url = "github:ethereum/solidity/8a97fa7a1db1ec509221ead6fea6802c684ee887";
       flake = false;
