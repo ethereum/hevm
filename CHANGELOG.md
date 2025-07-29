@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## Changed
+- Updated forge to 1.2.3 and forge-std to 60acb7aa (1.9.7+)
+
 ## Fixed
 - We now extract more Keccak computations than before from the Props to assert
   more Keccak equalities.
 
-## [0.55.1] - 2025-7-22
+## [0.55.1] - 2025-07-22
 
 ## Added
 - When a staticcall is made to a contract that does not exist, we overapproximate
