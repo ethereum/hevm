@@ -31,7 +31,7 @@ runSolidityTestCustom
   => FilePath -> Text -> Maybe Natural -> Maybe Integer -> Bool -> RpcInfo -> ProjectType -> m (Bool, Bool)
 runSolidityTestCustom testFile match timeout maxIter ffiAllowed rpcinfo projectType = do
   withSystemTempDirectory "dapp-test" $ \root -> do
-    (compile projectType root testFile) >>= \case
+    compile projectType root testFile >>= \case
       Left e -> liftIO $ do
         putStrLn e
         internalError $ "Error compiling test file " <> show testFile <> " in directory "
