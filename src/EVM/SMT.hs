@@ -136,10 +136,10 @@ smt2Line txt = SMT2 [txt] mempty mempty
 -- simplify to rewrite sload/sstore combos
 -- notice: it is VERY important not to concretize early, because Keccak assumptions
 --         need unconcretized Props
-assertProps :: Config -> [Prop] -> Err SMT2
-assertProps conf ps =
-  if not conf.simp then assertPropsHelper False ps
-  else assertPropsHelper True (decompose . Expr.simplifyProps $ ps)
+assertProps :: Config -> [Prop] -> [Prop] -> Err SMT2
+assertProps conf ps origProps =
+  if not conf.simp then assertPropsHelper False ps origProps
+  else assertPropsHelper True (decompose . Expr.simplifyProps $ ps) origProps
   where
     decompose :: [Prop] -> [Prop]
     decompose props = if conf.decomposeStorage && safeExprs && safeProps
@@ -154,8 +154,8 @@ assertProps conf ps =
 -- Note: we need a version that does NOT call simplify,
 -- because we make use of it to verify the correctness of our simplification
 -- passes through property-based testing.
-assertPropsHelper :: Bool -> [Prop]  -> Err SMT2
-assertPropsHelper simp psPreConc = do
+assertPropsHelper :: Bool -> [Prop] -> [Prop] -> Err SMT2
+assertPropsHelper simp psPreConc origProps = do
  encs <- mapM propToSMT psElim
  intermediates <- declareIntermediates bufs stores
  readAssumes' <- readAssumes
@@ -206,8 +206,8 @@ assertPropsHelper simp psPreConc = do
 
     -- Keccak assertions: concrete values, distance between pairs, injectivity, etc.
     --      This will make sure concrete values of Keccak are asserted, if they can be computed (i.e. can be concretized)
-    keccAssump = keccakAssumptions psPreConc bufVals storeVals
-    keccComp = keccakCompute psPreConc bufVals storeVals
+    keccAssump = keccakAssumptions origProps bufVals storeVals
+    keccComp = keccakCompute origProps bufVals storeVals
     keccakAssertions = do
       assumps <- mapM assertSMT keccAssump
       comps <- mapM assertSMT keccComp

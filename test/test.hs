@@ -4721,6 +4721,14 @@ tests = testGroup "hevm"
       let sexprs = splitSExpr texts
       let noDuplicates = ((length sexprs) == (Set.size (Set.fromList sexprs)))
       assertBoolM "There were duplicate lines in SMT encoding" noDuplicates
+    , test "all-keccak-asserted" $ do
+      -- let props = [(PGT (ReadWord (Lit 2) (AbstractBuf "test")) (Lit 0)), (PGT (Expr.padByte $ ReadByte (Lit 10) (AbstractBuf "test")) (Expr.padByte $ LitByte 1))]
+      -- conf <- readConfig
+      -- let SMT2 builders _ _ = fromRight (internalError "Must succeed") (assertProps conf props)
+      -- let texts = fmap toLazyText builders
+      -- let sexprs = splitSExpr texts
+      -- let noDuplicates = ((length sexprs) == (Set.size (Set.fromList sexprs)))
+      assertBoolM "There were duplicate lines in SMT encoding" noDuplicates
   ]
   , testGroup "equivalence-checking"
     [
