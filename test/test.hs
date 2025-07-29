@@ -78,6 +78,7 @@ import EVM.Effects
 import EVM.UnitTest (writeTrace, printWarnings)
 import EVM.Expr (maybeLitByteSimp)
 import Data.Text.Internal.Builder (toLazyText)
+import EVM.Keccak (keccakCompute)
 
 testEnv :: Env
 testEnv = Env { config = defaultConfig {
@@ -4721,6 +4722,13 @@ tests = testGroup "hevm"
       let sexprs = splitSExpr texts
       let noDuplicates = ((length sexprs) == (Set.size (Set.fromList sexprs)))
       assertBoolM "There were duplicate lines in SMT encoding" noDuplicates
+     , test "all-keccak-asserted" $ do
+      let buf1 = (Keccak (ConcreteBuf "abc"))
+          eq = (Eq buf1 (Lit 0x12))
+          buf2 = WriteWord eq (Lit 0x0) mempty
+          props = [PEq (Keccak buf2) (Lit 0x123)]
+          computes = keccakCompute props [] []
+      assertEqualM "Must compute two keccaks" 2 (length computes)
   ]
   , testGroup "equivalence-checking"
     [
