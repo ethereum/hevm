@@ -313,6 +313,7 @@ test-suite ethereum-tests
     BlockchainTests.hs
 
 test-suite cli-test
+  import: test-common
   type:
     exitcode-stdio-1.0
   default-language: GHC2021
