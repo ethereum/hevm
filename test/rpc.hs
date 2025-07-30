@@ -6,6 +6,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import Data.Maybe
+import Data.HashMap.Strict qualified as HashMap
 import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Vector qualified as V
@@ -89,7 +90,7 @@ tests = testGroup "rpc"
           wethStore' = case wethStore of
             ConcreteStore s -> s
             _ -> internalError "Expecting concrete store"
-          receiverBal = fromJust $ Map.lookup (keccak' (word256Bytes 0xdead <> word256Bytes 0x3)) wethStore'
+          receiverBal = fromJust $ HashMap.lookup (keccak' (word256Bytes 0xdead <> word256Bytes 0x3)) wethStore'
           msg = case postVm.result of
             Just (VMSuccess m) -> m
             _ -> internalError "VMSuccess expected"
