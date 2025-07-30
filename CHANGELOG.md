@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Fixed
 - We now extract more Keccak computations than before from the Props to assert
   more Keccak equalities.
+- Faster word256Bytes and word160Bytes functions to help concrete execution
+  performance
 
 ## [0.55.1] - 2025-07-22
 
