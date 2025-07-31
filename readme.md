@@ -13,11 +13,21 @@ We have a public matrix chat room
 
 ## Installing via Static Binaries
 Static binaries for x86 linux and macos are available for each
-[release](https://github.com/ethereum/hevm/releases). These binaries expect to be able to find the
-following programs on `PATH`:
-- `z3`
-- (optionally) `cvc5`
-- (optionally) `bitwuzla`
+[release](https://github.com/ethereum/hevm/releases). These binaries expect to have `z3` installed.
+You can install `z3` via your package manager, such as `apt install z3` on Ubuntu,
+or `brew install z3` on macOS.
+
+## Quick User Guide for a Forge Project
+For a Forge project, you can run:
+```bash
+cd my-forge-project
+forge clean
+forge build --ast
+hevm test --prefix test # will symbolically execute all tests prefixed with "test"
+```
+
+For a more comprehensive guide on how to use hevm for a Forge project, see our [Forge
+std-test tutorial](https://hevm.dev/std-test-tutorial.html)
 
 ## Installing via nix
 hevm nix package is available in
