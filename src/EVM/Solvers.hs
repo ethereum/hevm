@@ -41,12 +41,14 @@ data Solver
   = Z3
   | CVC5
   | Bitwuzla
+  | EmptySolver
   | Custom Text
 
 instance Show Solver where
   show Z3 = "z3"
   show CVC5 = "cvc5"
   show Bitwuzla = "bitwuzla"
+  show EmptySolver = "empty-smt-solver"
   show (Custom s) = T.unpack s
 
 
@@ -206,6 +208,7 @@ getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCo
            writeChan r Nothing
         "unknown" -> liftIO $ do
            when conf.debug $ putStrLn "Unknown result by SMT solver."
+           dumpUnsolved fullSmt fileCounter conf.dumpUnsolved
            writeChan r Nothing
         "sat" -> do
           if length vals >= multiSol.maxSols then liftIO $ do
@@ -262,7 +265,9 @@ getOneSol smt2@(SMT2 cmds cexvars ps) props r cacheq inst availableInstances fil
                     when (isJust props) $ liftIO . atomically $ writeTChan cacheq (CacheEntry (fromJust props))
                     pure Qed
                   "timeout" -> pure $ Unknown "Result timeout by SMT solver"
-                  "unknown" -> pure $ Unknown "Result unknown by SMT solver"
+                  "unknown" -> do
+                    dumpUnsolved smt2 fileCounter conf.dumpUnsolved
+                    pure $ Unknown "Result unknown by SMT solver"
                   "sat" -> Cex <$> getModel inst cexvars
                   _ -> pure . Error $ "Unable to parse SMT solver output: " <> T.unpack sat
             writeChan r res
@@ -272,6 +277,15 @@ getOneSol smt2@(SMT2 cmds cexvars ps) props r cacheq inst availableInstances fil
 
     -- put the instance back in the list of available instances
     writeChan availableInstances inst
+
+dumpUnsolved :: SMT2 -> Int -> Maybe FilePath -> IO ()
+dumpUnsolved fullSmt fileCounter dump = do
+   case dump of
+     Just fp -> do
+      let filename = fp <> "unsolved-" <> show fileCounter
+      putStrLn $ "Dumping unsolved SMT query to: " <> filename
+      writeSMT2File fullSmt filename
+     Nothing -> pure ()
 
 getModel :: SolverInstance -> CexVars -> IO SMTCex
 getModel inst cexvars = do
@@ -379,6 +393,7 @@ solverArgs solver threads timeout = case solver of
     , "--tlimit-per=" <> mkTimeout timeout
     , "--arrays-exp"
     ]
+  EmptySolver -> []
   Custom _ -> []
 
 -- | Spawns a solver instance, and sets the various global config options that we use for our queries
@@ -400,6 +415,7 @@ spawnSolver solver threads timeout = do
     Bitwuzla -> do
       _ <- sendLine solverInstance "(set-option :print-success true)"
       pure solverInstance
+    EmptySolver -> pure solverInstance
     Z3 -> do
       _ <- sendLine' solverInstance $ "(set-option :timeout " <> mkTimeout timeout <> ")"
       _ <- sendLine solverInstance "(set-option :print-success true)"
