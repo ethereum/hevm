@@ -436,6 +436,7 @@ getSolver s = case T.unpack s of
   "z3" -> pure Z3
   "cvc5" -> pure CVC5
   "bitwuzla" -> pure Bitwuzla
+  "empty" -> pure EmptySolver
   input -> do
     putStrLn $ "unrecognised solver: " <> input
     exitFailure

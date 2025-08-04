@@ -42,12 +42,14 @@ data Solver
   = Z3
   | CVC5
   | Bitwuzla
+  | EmptySolver
   | Custom Text
 
 instance Show Solver where
   show Z3 = "z3"
   show CVC5 = "cvc5"
   show Bitwuzla = "bitwuzla"
+  show EmptySolver = "empty-smt-solver"
   show (Custom s) = T.unpack s
 
 
@@ -390,6 +392,7 @@ solverArgs solver threads timeout = case solver of
     , "--tlimit-per=" <> mkTimeout timeout
     , "--arrays-exp"
     ]
+  EmptySolver -> []
   Custom _ -> []
 
 -- | Spawns a solver instance, and sets the various global config options that we use for our queries
@@ -411,6 +414,7 @@ spawnSolver solver threads timeout = do
     Bitwuzla -> do
       _ <- sendLine solverInstance "(set-option :print-success true)"
       pure solverInstance
+    EmptySolver -> pure solverInstance
     Z3 -> do
       _ <- sendLine' solverInstance $ "(set-option :timeout " <> mkTimeout timeout <> ")"
       _ <- sendLine solverInstance "(set-option :print-success true)"
