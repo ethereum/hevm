@@ -2143,7 +2143,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
     -- Here, we are sure that the address has been deployed
     multiCall :: VM t s -> Expr 'Buf -> Maybe W256 -> Gas t -> W256 -> EVM t s ()
     multiCall vm0 calldata abi xGas addrW256 = do
-      let addr = LitAddr (fromInteger . toInteger $ addrW256)
+      let addr = LitAddr $ truncateToAddr addrW256
           contract = vm0.env.contracts Map.! addr
       actualCall vm0 addr contract calldata abi xGas
 
