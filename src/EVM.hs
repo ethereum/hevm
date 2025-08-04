@@ -2120,12 +2120,12 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           resetCaller <- use $ #state % #resetCaller
           when resetCaller $ assign (#state % #overrideCaller) Nothing
           vm0 <- get
-          fetchAccountWithFallback xTo (actualFallback xGas vm0) $ \target -> case target.code of
+          fetchAccountWithFallback xTo (actualFallback xGas vm0) $ \contract -> case contract.code of
               UnknownCode _  -> actualFallback xGas vm0 xTo
               _ -> do
                 burn' xGas $ do
                   (calldata, abi) <- getCalldataAbi
-                  actualCall vm0 xTo target.codehash target.code calldata abi xGas
+                  actualCall vm0 xTo contract calldata abi xGas
   where
     actualFallback xGas vm0 addr = do
       if not (?conf.onlyDeployed) then fallback addr
@@ -2143,25 +2143,23 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
     -- Here, we are sure that the address has been deployed
     multiCall :: VM t s -> Expr 'Buf -> Maybe W256 -> Gas t -> W256 -> EVM t s ()
     multiCall vm0 calldata abi xGas addrW256 = do
-      let targetAddr :: Expr 'EAddr = LitAddr (fromInteger . toInteger $ addrW256)
-          contract = vm0.env.contracts Map.! targetAddr
-          targetHash = contract.codehash
-          targetCode = contract.code
-      actualCall vm0 targetAddr targetHash targetCode calldata abi xGas
+      let addr = LitAddr (fromInteger . toInteger $ addrW256)
+          contract = vm0.env.contracts Map.! addr
+      actualCall vm0 addr contract calldata abi xGas
 
     getCalldataAbi = do
       calldata <- readMemory xInOffset xInSize
       abi <- maybeLitWordSimp . readBytes 4 (Lit 0) <$> readMemory xInOffset (Lit 4)
       pure (calldata, abi)
 
-    actualCall :: VM t s -> Expr 'EAddr -> Expr 'EWord -> ContractCode -> Expr 'Buf -> Maybe W256 -> Gas t -> EVM t s ()
-    actualCall vm0 targetAddr targetHash targetCode calldata abi xGas = do
+    actualCall :: VM t s -> Expr EAddr -> Contract -> Expr 'Buf -> Maybe W256 -> Gas t -> EVM t s ()
+    actualCall vm0 targetAddr contract calldata abi xGas = do
       let newContext = CallContext
                         { target    = targetAddr
                         , context   = xContext
                         , offset    = xOutOffset
                         , size      = xOutSize
-                        , codehash  = targetHash
+                        , codehash  = contract.codehash
                         , callreversion = vm0.env.contracts
                         , subState  = vm0.tx.subState
                         , abi
@@ -2183,7 +2181,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
       zoom #state $ do
         assign #gas xGas
         assign #pc 0
-        assign #code (clearInitCode targetCode)
+        assign #code (clearInitCode contract.code)
         assign #codeContract targetAddr
         assign #stack mempty
         assign #memory newMemory
