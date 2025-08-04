@@ -183,8 +183,8 @@ main = do
                    sstore(0, sum)
                }
            } |]
-        Just aPrgm <- yul (T.pack "") $ T.pack a
-        Just bPrgm <- yul (T.pack "") $ T.pack b
+        Right aPrgm <- yul (T.pack "") $ T.pack a
+        Right bPrgm <- yul (T.pack "") $ T.pack b
         let hexStrA = Types.bsToHex aPrgm
             hexStrB = Types.bsToHex bPrgm
         (_, stdout, _) <- readProcessWithExitCode "cabal" ["run", "exe:hevm", "--", "equivalence", "--num-solvers", "1", "--debug", "--code-a", hexStrA, "--code-b", hexStrB] ""

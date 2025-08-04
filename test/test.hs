@@ -3631,7 +3631,7 @@ tests = testGroup "hevm"
                       }
                     }
                     |]
-            Just c <- liftIO $ yulRuntime "Neg" src
+            Right c <- liftIO $ yulRuntime "Neg" src
             (res, [Qed]) <- withSolvers Z3 4 1 Nothing $ \s -> checkAssert s defaultPanicCodes c (Just (Sig "hello(address)" [AbiAddressType])) [] defaultVeriOpts
             putStrLnM $ "successfully explored: " <> show (Expr.numBranches res) <> " paths"
         ,
@@ -4836,7 +4836,7 @@ tests = testGroup "hevm"
           let buf = prettyBuf $ Expr.concKeccakSimpExpr def
           assertBoolM "Must start with specific string" (T.isPrefixOf "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0cf" buf)
       , test "eq-yul-simple-cex" $ do
-        Just aPrgm <- liftIO $ yul ""
+        Right aPrgm <- liftIO $ yul ""
           [i|
           {
             calldatacopy(0, 0, 32)
@@ -4846,7 +4846,7 @@ tests = testGroup "hevm"
             default { invalid() }
           }
           |]
-        Just bPrgm <- liftIO $ yul ""
+        Right bPrgm <- liftIO $ yul ""
           [i|
           {
             calldatacopy(0, 0, 32)
@@ -5492,8 +5492,8 @@ tests = testGroup "hevm"
             putStrLnM "------------- Filtered B + Symb below-----------------"
             mapM_ putStrLn filteredBSym
             putStrLnM "------------- END -----------------"
-          Just aPrgm <- liftIO $ yul "" $ T.pack $ unlines filteredASym
-          Just bPrgm <- liftIO $ yul "" $ T.pack $ unlines filteredBSym
+          Right aPrgm <- liftIO $ yul "" $ T.pack $ unlines filteredASym
+          Right bPrgm <- liftIO $ yul "" $ T.pack $ unlines filteredBSym
           procs <- liftIO $ getNumProcessors
           withSolvers CVC5 (unsafeInto procs) 1 (Just 100) $ \s -> do
             calldata <- mkCalldata Nothing []

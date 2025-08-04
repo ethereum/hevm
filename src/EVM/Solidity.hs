@@ -87,7 +87,7 @@ import System.FilePath.Posix
 import System.Process
 import Text.Read (readMaybe)
 import Witch (unsafeInto)
-import Data.Either.Extra (maybeToEither)
+import Data.Either.Extra (maybeToEither, fromRight)
 
 data StorageItem = StorageItem
   { slotType :: SlotType
@@ -371,23 +371,24 @@ readSolc pt root fp = do
       _ -> "missing " <> (T.unpack field) <> " field"
     explain (MissingOrInvalidJsonField field) = "missing or invalid " <> (T.unpack field) <> " field"
     explain (InvalidSourceMap) = "invalid sourceMap format"
-    explain _ = internalError "TODO"
+    explain (UnlinkedLibrary contract) = "Unlinked libraries detected in bytecode, in " <> (T.unpack contract)
+    explain (OtherError contract errMsg) = "Error when reading bytecode of " <> (T.unpack contract) <> ": " <> T.unpack errMsg
 
-yul :: Text -> Text -> IO (Maybe ByteString)
+yul :: Text -> Text -> IO (Either BytecodeReadingError ByteString)
 yul contractName src = do
   json <- solc Yul src False
   let f = (json ^?! key "contracts") ^?! key (Key.fromText "hevm.sol")
       c = f ^?! key (Key.fromText $ if T.null contractName then "object" else contractName)
       bytecode = c ^?! key "evm" ^?! key "bytecode" ^?! key "object" % _String
-  pure $ (toCode contractName) <$> (Just bytecode)
+  pure $ toCode contractName bytecode
 
-yulRuntime :: Text -> Text -> IO (Maybe ByteString)
+yulRuntime :: Text -> Text -> IO (Either BytecodeReadingError ByteString)
 yulRuntime contractName src = do
   json <- solc Yul src False
   let f = (json ^?! key "contracts") ^?! key (Key.fromText "hevm.sol")
       c = f ^?! key (Key.fromText $ if T.null contractName then "object" else contractName)
       bytecode = c ^?! key "evm" ^?! key "deployedBytecode" ^?! key "object" % _String
-  pure $ (toCode contractName) <$> (Just bytecode)
+  pure $ toCode contractName bytecode
 
 solidity
   :: (MonadUnliftIO m)
@@ -432,8 +433,8 @@ data BytecodeReadingError
   = MissingJsonField Text
   | MissingOrInvalidJsonField Text
   | InvalidSourceMap
-  | UnlinkedLibrary
-  | OtherError
+  | UnlinkedLibrary Text
+  | OtherError Text Text
 
 type BuildArtifacts = (Contracts, Asts, Sources)
 
@@ -447,15 +448,13 @@ readJSON Foundry contractName json = readFoundryJSON contractName json
 readFoundryJSON :: Text -> Text -> Either BytecodeReadingError BuildArtifacts
 readFoundryJSON contractName json = do
   runtime <- maybeToEither (MissingJsonField "deployedBytecode") $ json ^? key "deployedBytecode"
-  runtimeCode <- maybeToEither (MissingJsonField "deployedBytecode.object") $
-    (toCode contractName) . strip0x'' <$> runtime ^? key "object" % _String
+  runtimeCode <- (maybeToEither (MissingJsonField "deployedBytecode.object") $ runtime ^? key "object" % _String) >>= (toCode contractName) . strip0x''
   runtimeSrcMap <- case runtime ^? key "sourceMap" % _String of
     Nothing -> pure mempty  -- sourceMap is optional
     Just smap -> maybeToEither InvalidSourceMap $ makeSrcMaps smap
 
   creation <- maybeToEither (MissingJsonField "bytecode") $ json ^? key "bytecode"
-  creationCode <- maybeToEither (MissingJsonField "bytecode.object") $
-    (toCode contractName) . strip0x'' <$> creation ^? key "object" % _String
+  creationCode <- (maybeToEither (MissingJsonField "bytecode.object") $ creation ^? key "object" % _String) >>= (toCode contractName) . strip0x''
   creationSrcMap <- case creation ^? key "sourceMap" % _String of
     Nothing -> pure mempty  -- sourceMap is optional
     Just smap -> maybeToEither InvalidSourceMap $ makeSrcMaps smap
@@ -510,8 +509,8 @@ readStdJSON json = do
         sc = s <> ":" <> c
         runtime = evmstuff ^?! key "deployedBytecode"
         creation =  evmstuff ^?! key "bytecode"
-        theRuntimeCode = (toCode sc) $ fromMaybe "" $ runtime ^? key "object" % _String
-        theCreationCode = (toCode sc) $ fromMaybe "" $ creation ^? key "object" % _String
+        theRuntimeCode = fromRight mempty $ (toCode sc) $ fromMaybe "" $ runtime ^? key "object" % _String
+        theCreationCode = fromRight mempty $ (toCode sc) $ fromMaybe "" $ creation ^? key "object" % _String
         srcContents :: Maybe (HMap.HashMap Text Text)
         srcContents = do metadata <- x ^? key "metadata" % _String
                          srcs <- KeyMap.toHashMapText <$> metadata ^? key "sources" % _Object
@@ -543,7 +542,8 @@ readStdJSON json = do
 -- TODO: deprecate me soon
 readCombinedJSON :: Text -> Either BytecodeReadingError BuildArtifacts
 readCombinedJSON json = do
-  contracts <- maybeToEither (MissingOrInvalidJsonField "contracts") $ extractContract <$> (json ^? key "contracts" % _Object)
+  rawContracts <- maybeToEither (MissingOrInvalidJsonField "contracts") (json ^? key "contracts" % _Object)
+  contracts <- Map.traverseWithKey extractContract $ KeyMap.toMapText rawContracts
   sources <- maybeToEither (MissingOrInvalidJsonField "sourceList") $ toList . fmap (preview _String) <$> json ^? key "sourceList" % _Array
   astsPre <- maybeToEither (MissingJsonField "sources") $ json ^? key "sources" % _Object
   pure ( Contracts contracts
@@ -553,30 +553,30 @@ readCombinedJSON json = do
              zip (catMaybes sources) [0..]
        )
   where
-    extractContract x = KeyMap.toMapText $ KeyMap.mapWithKey extractContract' x
-    extractContract' c x =
+    extractContract :: Text -> Value -> Either BytecodeReadingError SolcContract
+    extractContract contractName x = do
+      runtimeCode <- (toCode contractName) =<< maybeToEither (MissingJsonField "bin-runtime") (x ^? key "bin-runtime" % _String)
+      creationCode <- (toCode contractName) =<< maybeToEither (MissingJsonField "bin") (x ^? key "bin" % _String)
       let
-        contractName = Key.toText c
-        theRuntimeCode = (toCode contractName) (x ^?! key "bin-runtime" % _String)
-        theCreationCode = (toCode contractName) (x ^?! key "bin" % _String)
         abis = toList $ case (x ^?! key "abi") ^? _Array of
                  Just v -> v                                       -- solc >= 0.8
                  Nothing -> (x ^?! key "abi" % _String) ^?! _Array -- solc <  0.8
-      in SolcContract {
-        runtimeCode      = theRuntimeCode,
-        creationCode     = theCreationCode,
-        runtimeCodehash  = keccak' (stripBytecodeMetadata theRuntimeCode),
-        creationCodehash = keccak' (stripBytecodeMetadata theCreationCode),
-        runtimeSrcmap    = force "internal error: srcmap-runtime" (makeSrcMaps (x ^?! key "srcmap-runtime" % _String)),
-        creationSrcmap   = force "internal error: srcmap" (makeSrcMaps (x ^?! key "srcmap" % _String)),
-        contractName = contractName,
-        constructorInputs = mkConstructor abis,
-        abiMap       = mkAbiMap abis,
-        eventMap     = mkEventMap abis,
-        errorMap     = mkErrorMap abis,
-        storageLayout = mkStorageLayout $ x ^? key "storage-layout",
-        immutableReferences = mempty
-      }
+        contract = SolcContract {
+          runtimeCode      = runtimeCode,
+          creationCode     = creationCode,
+          runtimeCodehash  = keccak' (stripBytecodeMetadata runtimeCode),
+          creationCodehash = keccak' (stripBytecodeMetadata creationCode),
+          runtimeSrcmap    = force "internal error: srcmap-runtime" (makeSrcMaps (x ^?! key "srcmap-runtime" % _String)),
+          creationSrcmap   = force "internal error: srcmap" (makeSrcMaps (x ^?! key "srcmap" % _String)),
+          contractName = contractName,
+          constructorInputs = mkConstructor abis,
+          abiMap       = mkAbiMap abis,
+          eventMap     = mkEventMap abis,
+          errorMap     = mkErrorMap abis,
+          storageLayout = mkStorageLayout $ x ^? key "storage-layout",
+          immutableReferences = mempty
+        }
+      pure contract
 
 mkAbiMap :: [Value] -> Map FunctionSelector Method
 mkAbiMap abis = Map.fromList $
@@ -695,12 +695,12 @@ parseMethodInput x =
 containsLinkerHole :: Text -> Bool
 containsLinkerHole = regexMatches "__\\$[a-z0-9]{34}\\$__"
 
-toCode :: Text -> Text -> ByteString
+toCode :: Text -> Text -> Either BytecodeReadingError ByteString
 toCode contractName t = case BS16.decodeBase16Untyped (encodeUtf8 t) of
-  Right d -> d
+  Right d -> Right d
   Left e -> if containsLinkerHole t
-            then error $ T.unpack ("Error toCode: unlinked libraries detected in bytecode, in " <> contractName)
-            else error $ T.unpack ("Error toCode:" <> e <> ", in " <> contractName)
+            then Left $ UnlinkedLibrary contractName
+            else Left $ OtherError contractName e
 
 solc :: Language -> Text -> Bool -> IO Text
 solc lang src viaIR = T.pack <$> readProcess "solc" ["--standard-json"] (T.unpack $ stdjson lang src viaIR)
