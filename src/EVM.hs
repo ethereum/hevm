@@ -2121,7 +2121,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           when resetCaller $ assign (#state % #overrideCaller) Nothing
           vm0 <- get
           fetchAccountWithFallback xTo (actualFallback xGas vm0) $ \contract -> case contract.code of
-              UnknownCode _  -> actualFallback xGas vm0 xTo
+              UnknownCode _ -> actualFallback xGas vm0 xTo
               _ -> do
                 burn' xGas $ do
                   (calldata, abi) <- getCalldataAbi
