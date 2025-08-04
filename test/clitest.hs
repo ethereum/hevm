@@ -17,6 +17,7 @@ import Data.List.Split (splitOn)
 import Data.Text qualified as T
 import Data.String.Here
 import System.IO.Temp
+import System.Directory (doesFileExist, removeFile)
 
 import EVM.Solidity
 import EVM.Types qualified as Types
@@ -198,3 +199,25 @@ main = do
       -- both should fail with address 0x1234 -- a SPECIFIC address, not a ranomly generated one
       it "keccak-assumptions-setup" $ runOneKeccakTest "test/contracts/fail/keccak-preimage-setup.sol"
       it "keccak-assumptions-constructor" $ runOneKeccakTest "test/contracts/fail/keccak-preimage-constructor.sol"
+
+      it "dump unsolved" $ do
+        -- >>> (139487132679483*2347234698674) % 982374892374389278894734
+        -- 278198683154907855159120
+        Just c <- runApp $ solcRuntime (T.pack "C") (T.pack [i|
+           contract C {
+             function stuff(uint a, uint b) public returns (uint) {
+                 uint c = 0;
+                 unchecked {
+                 c = (a * b) % 982374892374389278894734;
+                 }
+                 assert (c != 278198683154907855159120);
+                 return c;
+             }
+           }
+          |])
+        let hexStr = Types.bsToHex c
+        _ <- readProcessWithExitCode "cabal" ["run", "exe:hevm", "--", "symbolic", "--code", hexStr, "--smttimeout", "1", "--dump-unsolved", "."] ""
+        let filename = "query-unsolved-0.smt2"
+        fileExists <- doesFileExist filename
+        shouldBe fileExists True
+        removeFile filename
