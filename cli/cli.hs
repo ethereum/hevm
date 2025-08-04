@@ -94,6 +94,7 @@ data CommonOptions = CommonOptions
   , maxWidth      ::Int
   , maxDepth      ::Maybe Int
   , noSimplify    ::Bool
+  , onlyDeployed  ::Bool
   }
 
 commonOptions :: Parser CommonOptions
@@ -121,6 +122,7 @@ commonOptions = CommonOptions
   <*> (option auto $ long "max-width"      <> showDefault <> value 100 <> help "Max number of concrete values to explore when encountering a symbolic value. This is a form of branch width limitation per symbolic value")
   <*> (optional $ option auto $ long "max-depth" <> help "Limit maximum depth of branching during exploration (default: unlimited)")
   <*> (switch $ long "no-simplify" <> help "Don't perform simplification of expressions")
+  <*> (switch $ long "only-deployed" <> help "When trying to resolve unknown addresses, only use addresses of deployed contracts")
 
 data CommonExecOptions = CommonExecOptions
   { address       ::Maybe Addr
@@ -358,6 +360,7 @@ main = do
         , maxDepth = cOpts.maxDepth
         , verb = cOpts.verb
         , simp = Prelude.not cOpts.noSimplify
+        , onlyDeployed = cOpts.onlyDeployed
         } }
 
 

@@ -49,6 +49,7 @@ data Config = Config
   , maxDepth         :: Maybe Int
   , verb             :: Int
   , simp             :: Bool
+  , onlyDeployed     :: Bool
   }
   deriving (Show, Eq)
 
@@ -68,6 +69,7 @@ defaultConfig = Config
   , maxDepth = Nothing
   , verb = 0
   , simp = True
+  , onlyDeployed = False
   }
 
 -- Write to the console

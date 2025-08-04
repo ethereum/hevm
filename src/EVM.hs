@@ -2119,48 +2119,51 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           when resetCaller $ assign (#state % #overrideCaller) Nothing
           vm0 <- get
           fetchAccountWithFallback xTo fallback $ \target -> case target.code of
-              UnknownCode _ -> fallback xTo
+              UnknownCode _ | not ?conf.onlyDeployed -> fallback xTo
               _ -> do
                 burn' xGas $ do
                   calldata <- readMemory xInOffset xInSize
                   abi <- maybeLitWordSimp . readBytes 4 (Lit 0) <$> readMemory xInOffset (Lit 4)
-                  let newContext = CallContext
-                                    { target    = xTo
-                                    , context   = xContext
-                                    , offset    = xOutOffset
-                                    , size      = xOutSize
-                                    , codehash  = target.codehash
-                                    , callreversion = vm0.env.contracts
-                                    , subState  = vm0.tx.subState
-                                    , abi
-                                    , calldata
-                                    }
-                  pushTrace (FrameTrace newContext)
-                  next
-                  vm1 <- get
-                  pushTo #frames $ Frame
-                    { state = vm1.state { stack = xs }
-                    , context = newContext
-                    }
+                  actualCall vm0 xTo target.codehash target.code calldata abi xGas
+  where
+    actualCall vm0 targetAddr targetHash targetCode calldata abi xGas = do
+      let newContext = CallContext
+                        { target    = targetAddr
+                        , context   = xContext
+                        , offset    = xOutOffset
+                        , size      = xOutSize
+                        , codehash  = targetHash
+                        , callreversion = vm0.env.contracts
+                        , subState  = vm0.tx.subState
+                        , abi
+                        , calldata
+                        }
+      pushTrace (FrameTrace newContext)
+      next
+      vm1 <- get
+      pushTo #frames $ Frame
+        { state = vm1.state { stack = xs }
+        , context = newContext
+        }
 
-                  let clearInitCode = \case
-                        (InitCode _ _) -> InitCode mempty mempty
-                        a -> a
+      let clearInitCode = \case
+            (InitCode _ _) -> InitCode mempty mempty
+            a -> a
 
-                  newMemory <- ConcreteMemory <$> VS.Mutable.new 0
-                  zoom #state $ do
-                    assign #gas xGas
-                    assign #pc 0
-                    assign #code (clearInitCode target.code)
-                    assign #codeContract xTo
-                    assign #stack mempty
-                    assign #memory newMemory
-                    assign #memorySize 0
-                    assign #returndata mempty
-                    assign #calldata calldata
-                    assign #overrideCaller Nothing
-                    assign #resetCaller False
-                  continue xTo
+      newMemory <- ConcreteMemory <$> VS.Mutable.new 0
+      zoom #state $ do
+        assign #gas xGas
+        assign #pc 0
+        assign #code (clearInitCode targetCode)
+        assign #codeContract xTo
+        assign #stack mempty
+        assign #memory newMemory
+        assign #memorySize 0
+        assign #returndata mempty
+        assign #calldata calldata
+        assign #overrideCaller Nothing
+        assign #resetCaller False
+      continue xTo
 
 -- -- * Contract creation
 
