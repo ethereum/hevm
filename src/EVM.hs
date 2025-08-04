@@ -64,6 +64,7 @@ import Data.Vector.Storable.ByteString (vectorToByteString, byteStringToVector)
 import Data.Word (Word8, Word32, Word64)
 import Text.Read (readMaybe)
 import Witch (into, tryFrom, unsafeInto, tryInto)
+import Debug.Trace (traceM, traceShowM, trace)
 
 import Crypto.Hash (Digest, SHA256, RIPEMD160)
 import Crypto.Hash qualified as Crypto
@@ -2120,34 +2121,40 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           resetCaller <- use $ #state % #resetCaller
           when resetCaller $ assign (#state % #overrideCaller) Nothing
           vm0 <- get
-          fetchAccountWithFallback xTo fallback $ \target -> case target.code of
-              UnknownCode _  -> do
-                if not (?conf.onlyDeployed) then fallback xTo
-                else case eqT @t @Symbolic of
-                  Just Refl -> do
-                    burn' xGas $ do
-                      (calldata, abi) <- getCalldataAbi
-                      let potentialAddrs = Map.keys vm0.env.contracts
-                      let concVals = mapMaybe filterConcrete potentialAddrs
-                      runAll (?conf.maxDepth) vm0.exploreDepth $ PleaseRunAll (WAddr xTo) concVals (callHelper vm0 calldata abi xGas)
-                  _ -> internalError "delegateCall: UnknownCode in concrete mode"
+          fetchAccountWithFallback xTo (actualFallback xGas vm0) $ \target -> case target.code of
+              UnknownCode _  -> actualFallback xGas vm0 xTo
               _ -> do
                 burn' xGas $ do
                   (calldata, abi) <- getCalldataAbi
                   actualCall vm0 xTo target.codehash target.code calldata abi xGas
   where
+    actualFallback xGas vm0 addr = do
+      if not (?conf.onlyDeployed) then trace ("here?") $ fallback addr
+      else trace ("there") $ case eqT @t @Symbolic of
+        Just Refl -> do
+          burn' xGas $ do
+            (calldata, abi) <- getCalldataAbi
+            let concVals = mapMaybe filterConcrete $ Map.keys vm0.env.contracts
+            runAll (?conf.maxDepth) vm0.exploreDepth $ PleaseRunAll (WAddr xTo) concVals (callHelper vm0 calldata abi xGas)
+        _ -> internalError "delegateCall: UnknownCode in concrete mode"
     filterConcrete :: Expr EAddr -> Maybe W256
-    filterConcrete (LitAddr w) = Just (fromInteger $ toInteger $ w.addressWord160)
+    filterConcrete (LitAddr w) = Just (fromInteger $ toInteger w.addressWord160)
     filterConcrete _ = Nothing
-    callHelper vm0 calldata abi xGas addr = do
-      let targetAddr = truncateToAddr addr
-          targetHash = undefined
-          targetCode = undefined
-      actualCall vm0 (LitAddr targetAddr) targetHash targetCode calldata abi xGas
+    -- addr is W256
+    callHelper :: VM t s -> Expr 'Buf -> Maybe W256 -> Gas t -> W256 -> EVM t s ()
+    callHelper vm0 calldata abi xGas addrW256 = do
+      let targetAddr :: Expr 'EAddr = litToAddr addrW256
+          contract = vm0.env.contracts Map.! targetAddr
+          targetHash = contract.codehash
+          targetCode = contract.code
+      actualCall vm0 targetAddr targetHash targetCode calldata abi xGas
     getCalldataAbi = do
       calldata <- readMemory xInOffset xInSize
       abi <- maybeLitWordSimp . readBytes 4 (Lit 0) <$> readMemory xInOffset (Lit 4)
       pure (calldata, abi)
+    litToAddr :: W256 -> Expr EAddr
+    litToAddr w = LitAddr (fromInteger . toInteger $ w)
+    actualCall :: VM t s -> Expr 'EAddr -> Expr 'EWord -> ContractCode -> Expr 'Buf -> Maybe W256 -> Gas t -> EVM t s ()
     actualCall vm0 targetAddr targetHash targetCode calldata abi xGas = do
       let newContext = CallContext
                         { target    = targetAddr
