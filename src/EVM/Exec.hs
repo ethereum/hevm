@@ -4,13 +4,14 @@ import EVM hiding (createAddress)
 import EVM.Concrete (createAddress)
 import EVM.FeeSchedule (feeSchedule)
 import EVM.Types
+import EVM.Effects (Config)
 
 import Control.Monad.Trans.State.Strict (get, State)
 import Data.ByteString (ByteString)
 import Data.Maybe (isNothing)
 import Optics.Core
 import Control.Monad.ST (ST)
-import EVM.Effects (Config)
+import Data.Typeable (Typeable)
 
 ethrunAddress :: Addr
 ethrunAddress = Addr 0x00a329c0648769a73afac7f9381e08fb43dbea72
@@ -47,14 +48,14 @@ vmForEthrunCreation creationCode =
     }) <&> set (#env % #contracts % at (LitAddr ethrunAddress))
              (Just (initialContract (RuntimeCode (ConcreteRuntimeCode ""))))
 
-exec :: (VMOps t) => Config -> EVM t s (VMResult t s)
+exec :: (VMOps t, Typeable t) => Config -> EVM t s (VMResult t s)
 exec conf = do
   vm <- get
   case vm.result of
     Nothing -> exec1 conf >> exec conf
     Just r -> pure r
 
-run :: (VMOps t) => Config -> EVM t s (VM t s)
+run :: (VMOps t, Typeable t) => Config -> EVM t s (VM t s)
 run conf = do
   vm <- get
   case vm.result of

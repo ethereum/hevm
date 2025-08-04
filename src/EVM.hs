@@ -1,5 +1,7 @@
 {-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 module EVM where
 
@@ -46,7 +48,7 @@ import Data.List (find, isPrefixOf)
 import Data.List.Split (splitOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe, fromJust, isJust, isNothing)
+import Data.Maybe (fromMaybe, fromJust, isJust, isNothing, mapMaybe)
 import Data.Set (insert, member, fromList)
 import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
@@ -290,7 +292,7 @@ getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
 getOpName state = intToOpName $ fromEnum $ getOpW8 state
 
 -- | Executes the EVM one step
-exec1 :: forall (t :: VMType) s. (VMOps t) => Config ->  EVM t s ()
+exec1 :: forall (t :: VMType) s. (VMOps t, Typeable t) => Config ->  EVM t s ()
 exec1 conf = do
   vm <- get
 
@@ -2091,7 +2093,7 @@ cheatActions = Map.fromList
 -- * General call implementation ("delegateCall")
 -- note that the continuation is ignored in the precompile case
 delegateCall
-  :: (VMOps t, ?op :: Word8, ?conf :: Config)
+  :: forall t s . (VMOps t, Typeable t, ?op :: Word8, ?conf :: Config)
   => Contract
   -> Gas t
   -> Expr EAddr
@@ -2119,13 +2121,33 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           when resetCaller $ assign (#state % #overrideCaller) Nothing
           vm0 <- get
           fetchAccountWithFallback xTo fallback $ \target -> case target.code of
-              UnknownCode _ | not ?conf.onlyDeployed -> fallback xTo
+              UnknownCode _  -> do
+                if not (?conf.onlyDeployed) then fallback xTo
+                else case eqT @t @Symbolic of
+                  Just Refl -> do
+                    burn' xGas $ do
+                      (calldata, abi) <- getCalldataAbi
+                      let potentialAddrs = Map.keys vm0.env.contracts
+                      let concVals = mapMaybe filterConcrete potentialAddrs
+                      runAll (?conf.maxDepth) vm0.exploreDepth $ PleaseRunAll (WAddr xTo) concVals (callHelper vm0 calldata abi xGas)
+                  _ -> internalError "delegateCall: UnknownCode in concrete mode"
               _ -> do
                 burn' xGas $ do
-                  calldata <- readMemory xInOffset xInSize
-                  abi <- maybeLitWordSimp . readBytes 4 (Lit 0) <$> readMemory xInOffset (Lit 4)
+                  (calldata, abi) <- getCalldataAbi
                   actualCall vm0 xTo target.codehash target.code calldata abi xGas
   where
+    filterConcrete :: Expr EAddr -> Maybe W256
+    filterConcrete (LitAddr w) = Just (fromInteger $ toInteger $ w.addressWord160)
+    filterConcrete _ = Nothing
+    callHelper vm0 calldata abi xGas addr = do
+      let targetAddr = truncateToAddr addr
+          targetHash = undefined
+          targetCode = undefined
+      actualCall vm0 (LitAddr targetAddr) targetHash targetCode calldata abi xGas
+    getCalldataAbi = do
+      calldata <- readMemory xInOffset xInSize
+      abi <- maybeLitWordSimp . readBytes 4 (Lit 0) <$> readMemory xInOffset (Lit 4)
+      pure (calldata, abi)
     actualCall vm0 targetAddr targetHash targetCode calldata abi xGas = do
       let newContext = CallContext
                         { target    = targetAddr
