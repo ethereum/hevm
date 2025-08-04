@@ -2140,6 +2140,7 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
     filterConcrete (LitAddr w) = Just (fromInteger $ toInteger w.addressWord160)
     filterConcrete _ = Nothing
 
+    -- Here, we are sure that the address has been deployed
     multiCall :: VM t s -> Expr 'Buf -> Maybe W256 -> Gas t -> W256 -> EVM t s ()
     multiCall vm0 calldata abi xGas addrW256 = do
       let targetAddr :: Expr 'EAddr = litToAddr addrW256
