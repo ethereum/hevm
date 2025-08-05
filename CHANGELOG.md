@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   more Keccak equalities.
 - Faster word256Bytes and word160Bytes functions to help concrete execution
   performance
+- Instead of using the maxWidth, a hardcoded value of 20 was used in forcing
+  an address. This has now been fixed
 
 ## Changed
 - Updated forge to 1.2.3 and forge-std to 60acb7aa (1.9.7+)

@@ -1610,7 +1610,7 @@ forceAddr :: (?conf :: Config, VMOps t) =>
   -> (Expr EAddr -> EVM t s ())
   -> EVM t s ()
 forceAddr n fallback continue = case wordToAddr n of
-  Nothing -> manySolutions (?conf).maxDepth n 20 $ \case
+  Nothing -> manySolutions (?conf).maxDepth n (?conf).maxWidth $ \case
     Just sol -> continue $ LitAddr (truncateToAddr sol)
     Nothing -> fallback n
   Just c -> continue c
@@ -1667,7 +1667,7 @@ forceConcreteLimitSz n bytes msg continue = case maybeLitWordSimp n of
 
 forceConcreteAddr :: (?conf :: Config, VMOps t) => Expr EAddr -> String -> (Addr -> EVM t s ()) -> EVM t s ()
 forceConcreteAddr n msg continue = case maybeLitAddrSimp n of
-  Nothing -> manySolutions (?conf).maxDepth (WAddr n) 20 $ maybe fallback $ \c -> continue (truncateToAddr c)
+  Nothing -> manySolutions (?conf).maxDepth (WAddr n) (?conf).maxWidth $ maybe fallback $ \c -> continue (truncateToAddr c)
   Just c -> continue c
   where fallback = unexpectedSymArg msg [n]
 
