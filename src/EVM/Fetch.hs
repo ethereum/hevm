@@ -252,7 +252,7 @@ getSolutions solvers symExprPreSimp numBytes pathconditions = do
   conf <- readConfig
   liftIO $ do
     let symExpr = Expr.concKeccakSimpExpr symExprPreSimp
-    -- when conf.debug $ putStrLn $ "Collecting solutions to symbolic query: " <> show symExpr
+    when conf.debug $ putStrLn $ "Collecting solutions to symbolic query: " <> show symExpr
     ret <- collectSolutions symExpr pathconditions conf
     case ret of
       Nothing -> pure Nothing

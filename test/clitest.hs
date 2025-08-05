@@ -35,8 +35,8 @@ testEnv = Env { config = defaultConfig {
   , verb = 1
   } }
 
-runOneKeccakTest :: FilePath -> IO ()
-runOneKeccakTest testFile = do
+runForgeTest :: FilePath -> [String] -> IO (ExitCode, String, String)
+runForgeTest testFile extraOptions = do
   withSystemTempDirectory "dapp-test" $ \root -> do
     let projectType = Foundry
     ret <- runEnv testEnv $ compile projectType root testFile
@@ -46,11 +46,9 @@ runOneKeccakTest testFile = do
         Types.internalError $ "Error compiling test file " <> show testFile <> " in directory "
           <> show root <> " using project type " <> show projectType
       Right _ -> do
-        (exitCode, stdout, stderr) <- readProcessWithExitCode "cabal" ["run", "exe:hevm", "--", "test"
-          , "--root", root, "--debug", "--num-cex-fuzz", "0", "--smtdebug"] ""
-        stderr `shouldNotContain` "CallStack"
-        stdout `shouldContain` "0x0000000000000000000000000000000000001234"
-        exitCode `shouldBe` (ExitFailure 1)
+        let options = ["run", "exe:hevm", "--", "test" , "--root", root] <> extraOptions
+        (exitCode, stdout, stderr) <- readProcessWithExitCode "cabal" options ""
+        pure (exitCode, stdout, stderr)
 
 main :: IO ()
 main = do
@@ -197,9 +195,20 @@ main = do
         exitCode `shouldBe` ExitSuccess
 
       -- both should fail with address 0x1234 -- a SPECIFIC address, not a ranomly generated one
-      it "keccak-assumptions-setup" $ runOneKeccakTest "test/contracts/fail/keccak-preimage-setup.sol"
-      it "keccak-assumptions-constructor" $ runOneKeccakTest "test/contracts/fail/keccak-preimage-constructor.sol"
-
+      it "keccak-assumptions-setup" $ do
+        (exitCode, stdout, stderr) <- runForgeTest "test/contracts/fail/keccak-preimage-setup.sol" ["--debug", "--num-cex-fuzz", "0", "--smtdebug"]
+        stderr `shouldNotContain` "CallStack"
+        stdout `shouldContain` "0x0000000000000000000000000000000000001234"
+        exitCode `shouldBe` (ExitFailure 1)
+      it "keccak-assumptions-constructor" $ do
+        (exitCode, stdout, stderr) <- runForgeTest "test/contracts/fail/keccak-preimage-constructor.sol" ["--debug", "--num-cex-fuzz", "0", "--smtdebug"]
+        stderr `shouldNotContain` "CallStack"
+        stdout `shouldContain` "0x0000000000000000000000000000000000001234"
+        exitCode `shouldBe` (ExitFailure 1)
+      it "only-deployed-contracts" $ do
+        (_, stdout, stderr) <- runForgeTest "test/contracts/pass/only-deployed-contracts.sol" ["--only-deployed"]
+        stderr `shouldNotContain` "CallStack"
+        stdout `shouldContain` "[PASS]"
       it "dump unsolved" $ do
         -- >>> (139487132679483*2347234698674) % 982374892374389278894734
         -- 278198683154907855159120

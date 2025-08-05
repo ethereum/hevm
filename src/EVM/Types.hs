@@ -616,7 +616,7 @@ data RunBoth s where
 
 -- | Execution could proceed down one of several branches
 data RunAll s where
-  PleaseRunAll    :: Expr EWord -> [W256] -> (W256 -> EVM Symbolic s ()) -> RunAll s
+  PleaseRunAll    :: Expr EWord -> [Expr EWord] -> (Expr EWord -> EVM Symbolic s ()) -> RunAll s
 
 -- | The possible return values of a SMT query
 data BranchCondition = Case Bool | UnknownBranch
@@ -653,7 +653,7 @@ instance Show (RunBoth s) where
 instance Show (RunAll s) where
   showsPrec _ = \case
     PleaseRunAll _ _ _ ->
-      (("<EVM.RunAll: system running all paths") ++)
+      (("<EVM.RunAll: system running all paths for Expr EWord-s") ++)
 
 -- | The possible result states of a VM
 data VMResult (t :: VMType) s where
@@ -1604,6 +1604,19 @@ untilFixpoint f a =
 
 bsToHex :: ByteString -> String
 bsToHex bs = concatMap (paddedShowHex 2) (BS.unpack bs)
+
+-- Used during forceAddr to deal with symbolic addresses
+forceEAddrToEWord :: Expr EAddr -> Expr EWord
+forceEAddrToEWord = \case
+  LitAddr a -> Lit (into a)
+  SymAddr a ->  WAddr (SymAddr a)
+  _ -> internalError "Unexpected forceAddr"
+
+forceEWordToEAddr :: Expr 'EWord -> Expr 'EAddr
+forceEWordToEAddr = \case
+  Lit a -> LitAddr (truncateToAddr a)
+  WAddr (SymAddr a) -> SymAddr a
+  _ -> internalError "delegateCall: expected concrete address"
 
 -- Optics ------------------------------------------------------------------------------------------
 

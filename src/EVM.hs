@@ -46,7 +46,7 @@ import Data.List (find, isPrefixOf)
 import Data.List.Split (splitOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe, fromJust, isJust, isNothing)
+import Data.Maybe (fromMaybe, fromJust, isJust, isNothing, mapMaybe)
 import Data.Set (insert, member, fromList)
 import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
@@ -290,7 +290,7 @@ getOpName :: forall (t :: VMType) s . FrameState t s -> [Char]
 getOpName state = intToOpName $ fromEnum $ getOpW8 state
 
 -- | Executes the EVM one step
-exec1 :: forall (t :: VMType) s. (VMOps t) => Config ->  EVM t s ()
+exec1 :: forall (t :: VMType) s. (VMOps t, Typeable t) => Config ->  EVM t s ()
 exec1 conf = do
   vm <- get
 
@@ -1604,16 +1604,38 @@ touchAddress addr = do
               EmptyBase -> const emptyContract
   (#env % #contracts) %= (Map.insertWith (\_ e -> e) addr (mkc addr))
 
-forceAddr :: (?conf :: Config, VMOps t) =>
+onlyDeployed :: forall t s . (?conf :: Config, VMOps t, Typeable t) =>
   Expr EWord
   -> (Expr EWord -> EVM t s ())
   -> (Expr EAddr -> EVM t s ())
   -> EVM t s ()
-forceAddr n fallback continue = case wordToAddr n of
-  Nothing -> manySolutions (?conf).maxDepth n 20 $ \case
+onlyDeployed addrExpr fallback continue = do
+    vm <- get
+    if not (?conf.onlyDeployed) then fallback addrExpr
+    else case eqT @t @Symbolic of
+      Just Refl -> do
+        let deployedAddrs = map forceEAddrToEWord $ mapMaybe (codeMustExist vm) $ Map.keys vm.env.contracts
+        runAll (?conf.maxDepth) vm.exploreDepth $ PleaseRunAll addrExpr deployedAddrs (continue . forceEWordToEAddr)
+      _ -> internalError "Unknown address in Concrete mode"
+  where
+    codeMustExist :: (VM t s) -> Expr EAddr -> Maybe (Expr EAddr)
+    codeMustExist vm addr = do
+      contr <- Map.lookup addr vm.env.contracts
+      case contr.code of
+        RuntimeCode (ConcreteRuntimeCode _) -> Just addr
+        _ -> Nothing
+
+forceAddr :: forall t s . (?conf :: Config, VMOps t, Typeable t) =>
+  Expr EWord
+  -> (Expr EWord -> EVM t s ())
+  -> (Expr EAddr -> EVM t s ())
+  -> EVM t s ()
+forceAddr addrExpr fallback continue = case wordToAddr addrExpr of
+  Nothing -> manySolutions (?conf).maxDepth addrExpr 20 $ \case
     Just sol -> continue $ LitAddr (truncateToAddr sol)
-    Nothing -> fallback n
+    Nothing -> onlyDeployed addrExpr fallback continue
   Just c -> continue c
+
 
 unexpectedSymArg :: (Typeable a, VMOps t) => String -> [Expr a] -> EVM t s ()
 unexpectedSymArg msg n = do
@@ -1742,7 +1764,7 @@ cheatCode :: Expr EAddr
 cheatCode = LitAddr $ unsafeInto (keccak' "hevm cheat code")
 
 cheat
-  :: forall t s . (?conf :: Config, ?op :: Word8, VMOps t)
+  :: forall t s . (?conf :: Config, ?op :: Word8, VMOps t, Typeable t)
   => Gas t -> (Expr EWord, Expr EWord) -> (Expr EWord, Expr EWord) -> [Expr EWord]
   -> EVM t s ()
 cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
@@ -1777,7 +1799,7 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
 
 type CheatAction t s = Expr Buf -> EVM t s ()
 
-cheatActions :: (?conf :: Config, VMOps t) => Map FunctionSelector (CheatAction t s)
+cheatActions :: (?conf :: Config, VMOps t, Typeable t) => Map FunctionSelector (CheatAction t s)
 cheatActions = Map.fromList
   [ action "ffi(string[])" $
       \sig input -> do
@@ -2091,7 +2113,7 @@ cheatActions = Map.fromList
 -- * General call implementation ("delegateCall")
 -- note that the continuation is ignored in the precompile case
 delegateCall
-  :: (VMOps t, ?op :: Word8, ?conf :: Config)
+  :: forall t s . (VMOps t, ?op :: Word8, ?conf :: Config, Typeable t)
   => Contract
   -> Gas t
   -> Expr EAddr
@@ -2118,49 +2140,55 @@ delegateCall this gasGiven xTo xContext xValue xInOffset xInSize xOutOffset xOut
           resetCaller <- use $ #state % #resetCaller
           when resetCaller $ assign (#state % #overrideCaller) Nothing
           vm0 <- get
-          fetchAccountWithFallback xTo fallback $ \target -> case target.code of
-              UnknownCode _ -> fallback xTo
-              _ -> do
-                burn' xGas $ do
-                  calldata <- readMemory xInOffset xInSize
-                  abi <- maybeLitWordSimp . readBytes 4 (Lit 0) <$> readMemory xInOffset (Lit 4)
-                  let newContext = CallContext
-                                    { target    = xTo
-                                    , context   = xContext
-                                    , offset    = xOutOffset
-                                    , size      = xOutSize
-                                    , codehash  = target.codehash
-                                    , callreversion = vm0.env.contracts
-                                    , subState  = vm0.tx.subState
-                                    , abi
-                                    , calldata
-                                    }
-                  pushTrace (FrameTrace newContext)
-                  next
-                  vm1 <- get
-                  pushTo #frames $ Frame
-                    { state = vm1.state { stack = xs }
-                    , context = newContext
-                    }
+          fetchAccountWithFallback xTo (betterFallback xGas vm0) $ \target -> case target.code of
+              UnknownCode _ -> betterFallback xGas vm0 xTo
+              _ -> actualCall target xTo xGas vm0
+  where
+    betterFallback :: Gas t -> (VM t s) -> Expr 'EAddr -> EVM t s ()
+    betterFallback xGas vm0 addr = onlyDeployed (forceEAddrToEWord addr) (fallback . forceEWordToEAddr) $ \a -> do
+        let target = fromJust $ Map.lookup a vm0.env.contracts
+        actualCall target a xGas vm0
+    actualCall target addr xGas vm0 = do
+        burn' xGas $ do
+          calldata <- readMemory xInOffset xInSize
+          abi <- maybeLitWordSimp . readBytes 4 (Lit 0) <$> readMemory xInOffset (Lit 4)
+          let newContext = CallContext
+                            { target    = addr
+                            , context   = xContext
+                            , offset    = xOutOffset
+                            , size      = xOutSize
+                            , codehash  = target.codehash
+                            , callreversion = vm0.env.contracts
+                            , subState  = vm0.tx.subState
+                            , abi
+                            , calldata
+                            }
+          pushTrace (FrameTrace newContext)
+          next
+          vm1 <- get
+          pushTo #frames $ Frame
+            { state = vm1.state { stack = xs }
+            , context = newContext
+            }
 
-                  let clearInitCode = \case
-                        (InitCode _ _) -> InitCode mempty mempty
-                        a -> a
+          let clearInitCode = \case
+                (InitCode _ _) -> InitCode mempty mempty
+                a -> a
 
-                  newMemory <- ConcreteMemory <$> VS.Mutable.new 0
-                  zoom #state $ do
-                    assign #gas xGas
-                    assign #pc 0
-                    assign #code (clearInitCode target.code)
-                    assign #codeContract xTo
-                    assign #stack mempty
-                    assign #memory newMemory
-                    assign #memorySize 0
-                    assign #returndata mempty
-                    assign #calldata calldata
-                    assign #overrideCaller Nothing
-                    assign #resetCaller False
-                  continue xTo
+          newMemory <- ConcreteMemory <$> VS.Mutable.new 0
+          zoom #state $ do
+            assign #gas xGas
+            assign #pc 0
+            assign #code (clearInitCode target.code)
+            assign #codeContract addr
+            assign #stack mempty
+            assign #memory newMemory
+            assign #memorySize 0
+            assign #returndata mempty
+            assign #calldata calldata
+            assign #overrideCaller Nothing
+            assign #resetCaller False
+          continue addr
 
 -- -- * Contract creation
 
@@ -3065,15 +3093,17 @@ instance VMOps Symbolic where
             assign #result Nothing
             pushTo #constraints $ Expr.simplifyProp (ewordExpr .== (Lit val))
             continue $ Just val
-          _ -> runAll depthLimit vm.exploreDepth $ PleaseRunAll ewordExpr concVals runAllPaths
+          _ -> runAll depthLimit vm.exploreDepth $ PleaseRunAll ewordExpr (map Lit concVals) runAllPaths
       Nothing -> do
         assign #result Nothing
         continue Nothing
     where
       runAllPaths val = do
         assign #result Nothing
-        pushTo #constraints $ Expr.simplifyProp (ewordExpr .== Lit val)
-        continue $ Just val
+        pushTo #constraints $ Expr.simplifyProp (ewordExpr .== val)
+        case val of
+          Lit v -> continue $ Just v
+          _ -> internalError "runAllPaths can only get concrete values here"
 
 instance VMOps Concrete where
   burn' n continue = do
