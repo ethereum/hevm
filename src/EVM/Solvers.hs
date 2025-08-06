@@ -26,6 +26,7 @@ import Data.Text.Lazy qualified as T
 import Data.Text.Lazy.IO qualified as T
 import Data.Text.Lazy.Builder
 import System.Process (createProcess, cleanupProcess, proc, ProcessHandle, std_in, std_out, std_err, StdStream(..), createPipe)
+import System.FilePath ((</>))
 import Witch (into)
 import EVM.Effects
 import EVM.Fuzz (tryCexFuzz)
@@ -125,10 +126,11 @@ checkSat (SolverGroup taskq) props smt2 = do
     -- collect result
     readChan resChan
 
-writeSMT2File :: SMT2 -> String -> IO ()
-writeSMT2File smt2 postfix = do
+writeSMT2File :: SMT2 -> FilePath -> String -> IO ()
+writeSMT2File smt2 path postfix = do
     let content = formatSMT2 smt2 <> "\n\n(check-sat)"
-    T.writeFile ("query-" <> postfix <> ".smt2") content
+        fullPath = path </> "query-" <> postfix <> ".smt2"
+    T.writeFile fullPath content
 
 withSolvers :: App m => Solver -> Natural -> Natural -> Maybe Natural -> (SolverGroup -> m a) -> m a
 withSolvers solver count threads timeout cont = do
@@ -177,7 +179,7 @@ withSolvers solver count threads timeout cont = do
 getMultiSol :: forall m. (MonadIO m, ReadConfig m) => SMT2 -> MultiSol -> (Chan (Maybe [W256])) -> SolverInstance -> Chan SolverInstance -> Int -> m ()
 getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCounter = do
   conf <- readConfig
-  when conf.dumpQueries $ liftIO $ writeSMT2File smt2 (show fileCounter)
+  when conf.dumpQueries $ liftIO $ writeSMT2File smt2 "." (show fileCounter)
   -- reset solver and send all lines of provided script
   out <- liftIO $ sendScript inst ("(reset)" : cmds)
   case out of
@@ -186,7 +188,7 @@ getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCo
       writeChan r Nothing
     Right _ -> do
       sat <- liftIO $ sendLine inst "(check-sat)"
-      when conf.dumpQueries $ liftIO $ writeSMT2File smt2 (show fileCounter <> "-origquery")
+      when conf.dumpQueries $ liftIO $ writeSMT2File smt2 "." (show fileCounter <> "-origquery")
       subRun [] smt2 sat
   -- put the instance back in the list of available instances
   liftIO $ writeChan availableInstances inst
@@ -206,6 +208,7 @@ getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCo
            writeChan r Nothing
         "unknown" -> liftIO $ do
            when conf.debug $ putStrLn "Unknown result by SMT solver."
+           dumpUnsolved fullSmt fileCounter conf.dumpUnsolved
            writeChan r Nothing
         "sat" -> do
           if length vals >= multiSol.maxSols then liftIO $ do
@@ -223,7 +226,7 @@ getMultiSol smt2@(SMT2 cmds cexvars _) multiSol r inst availableInstances fileCo
                     newSmt = fullSmt <> SMT2 [(fromString restrict)] mempty mempty
                 when conf.debug $ liftIO $ putStrLn $ "Got one solution to symbolic query, val: 0x" <> (showHex maskedVal "") <>
                   " now have " <> show (length vals + 1) <> " solution(s), max is: " <> show multiSol.maxSols
-                when conf.dumpQueries $ liftIO $ writeSMT2File newSmt (show fileCounter <> "-sol" <> show (length vals))
+                when conf.dumpQueries $ liftIO $ writeSMT2File newSmt "." (show fileCounter <> "-sol" <> show (length vals))
                 out <- liftIO $ sendLine inst (T.pack restrict)
                 case out of
                   "success" -> do
@@ -242,7 +245,7 @@ getOneSol smt2@(SMT2 cmds cexvars ps) props r cacheq inst availableInstances fil
   conf <- readConfig
   let fuzzResult = tryCexFuzz ps conf.numCexFuzz
   liftIO $ do
-    when (conf.dumpQueries) $ writeSMT2File smt2 (show fileCounter)
+    when (conf.dumpQueries) $ writeSMT2File smt2 "." (show fileCounter)
     if (isJust fuzzResult)
       then do
         when (conf.debug) $ putStrLn $ "   Cex found via fuzzing:" <> (show fuzzResult)
@@ -262,7 +265,9 @@ getOneSol smt2@(SMT2 cmds cexvars ps) props r cacheq inst availableInstances fil
                     when (isJust props) $ liftIO . atomically $ writeTChan cacheq (CacheEntry (fromJust props))
                     pure Qed
                   "timeout" -> pure $ Unknown "Result timeout by SMT solver"
-                  "unknown" -> pure $ Unknown "Result unknown by SMT solver"
+                  "unknown" -> do
+                    dumpUnsolved smt2 fileCounter conf.dumpUnsolved
+                    pure $ Unknown "Result unknown by SMT solver"
                   "sat" -> Cex <$> getModel inst cexvars
                   _ -> pure . Error $ "Unable to parse SMT solver output: " <> T.unpack sat
             writeChan r res
@@ -272,6 +277,12 @@ getOneSol smt2@(SMT2 cmds cexvars ps) props r cacheq inst availableInstances fil
 
     -- put the instance back in the list of available instances
     writeChan availableInstances inst
+
+dumpUnsolved :: SMT2 -> Int -> Maybe FilePath -> IO ()
+dumpUnsolved fullSmt fileCounter dump = do
+   case dump of
+     Just path -> writeSMT2File fullSmt path $ "unsolved-" <> show fileCounter
+     Nothing -> pure ()
 
 getModel :: SolverInstance -> CexVars -> IO SMTCex
 getModel inst cexvars = do

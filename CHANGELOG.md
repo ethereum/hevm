@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## Added
+- Allow dumping unsolved SMT files via `--dump-unsolved`
+
 ## Fixed
 - We now extract more Keccak computations than before from the Props to assert
   more Keccak equalities.
