@@ -358,21 +358,12 @@ readSolc pt root fp = do
   let contractName = T.pack $ takeBaseName fp
   case readJSON pt contractName fileContents of
       Left err -> pure . Left $ "unable to parse " <> show pt <> " project JSON: " <> fp
-        <> " Contract: " <> show contractName <> "\nError: " <> explain err
+        <> " Contract: " <> show contractName <> "\nError: " <> show err
       Right (contracts, asts, sources) -> do
         conf <- readConfig
         when (conf.debug) $ liftIO $ putStrLn $ "Parsed contract: " <> show contractName <> " file: " <> fp
         sourceCache <- liftIO $ makeSourceCache root sources asts
         pure (Right (BuildOutput contracts sourceCache))
-  where
-    explain :: BytecodeReadingError -> String
-    explain (MissingJsonField field) = case field of
-      ast | ast == "ast" || ast == "sources" -> "missing field " <> (T.unpack ast) <> ". Recompile with `forge clean && forge build --ast"
-      _ -> "missing " <> (T.unpack field) <> " field"
-    explain (MissingOrInvalidJsonField field) = "missing or invalid " <> (T.unpack field) <> " field"
-    explain (InvalidSourceMap) = "invalid sourceMap format"
-    explain (UnlinkedLibrary contract) = "Unlinked libraries detected in bytecode, in " <> (T.unpack contract)
-    explain (OtherError contract errMsg) = "Error when reading bytecode of " <> (T.unpack contract) <> ": " <> T.unpack errMsg
 
 yul :: Text -> Text -> IO (Either BytecodeReadingError ByteString)
 yul contractName src = do
@@ -435,6 +426,15 @@ data BytecodeReadingError
   | InvalidSourceMap
   | UnlinkedLibrary Text
   | OtherError Text Text
+
+instance Show BytecodeReadingError where
+  show (MissingJsonField field) = case field of
+      _ | field == "ast" || field == "sources" -> "missing field " <> (T.unpack field) <> ". Recompile with `forge clean && forge build --ast"
+        | otherwise -> "missing " <> (T.unpack field) <> " field"
+  show (MissingOrInvalidJsonField field) = "missing or invalid " <> (T.unpack field) <> " field"
+  show (InvalidSourceMap) = "invalid sourceMap format"
+  show (UnlinkedLibrary contract) = "Unlinked libraries detected in bytecode of contract " <> (T.unpack contract)
+  show (OtherError contract errMsg) = "Error when reading bytecode of " <> (T.unpack contract) <> ": " <> T.unpack errMsg
 
 type BuildArtifacts = (Contracts, Asts, Sources)
 
