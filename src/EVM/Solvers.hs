@@ -281,10 +281,7 @@ getOneSol smt2@(SMT2 cmds cexvars ps) props r cacheq inst availableInstances fil
 dumpUnsolved :: SMT2 -> Int -> Maybe FilePath -> IO ()
 dumpUnsolved fullSmt fileCounter dump = do
    case dump of
-     Just path -> do
-      let filename = "unsolved-" <> show fileCounter
-      putStrLn $ "Dumping unsolved SMT query to: " <> path <> filename
-      writeSMT2File fullSmt path filename
+     Just path -> writeSMT2File fullSmt path $ "unsolved-" <> show fileCounter
      Nothing -> pure ()
 
 getModel :: SolverInstance -> CexVars -> IO SMTCex
