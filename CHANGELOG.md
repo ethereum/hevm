@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 - Allow dumping unsolved SMT files via `--dump-unsolved`
+- Allow resolving unknown addresses to only those that are already deployed
+  via option `--only-deployed`
 
 ## Fixed
 - We now extract more Keccak computations than before from the Props to assert
