@@ -66,8 +66,7 @@ import Data.Char (isDigit)
 import Data.Foldable
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.HashMap.Strict qualified as HMap
-import Data.List (sort, isPrefixOf, isInfixOf, isSuffixOf, elemIndex, tails, findIndex)
+import Data.List (isPrefixOf, isInfixOf, isSuffixOf, elemIndex, tails, findIndex)
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Maybe
@@ -88,6 +87,7 @@ import System.Process
 import Text.Read (readMaybe)
 import Witch (unsafeInto)
 import Data.Either.Extra (maybeToEither, fromRight)
+import qualified Data.Bifunctor as Bifunctor (first)
 
 data StorageItem = StorageItem
   { slotType :: SlotType
@@ -384,8 +384,9 @@ solidity
   => Text -> Text -> m (Maybe ByteString)
 solidity contract src = liftIO $ do
   json <- solc Solidity src False
-  let (Contracts sol, _, _) = fromJust $ readStdJSON json
-  pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.creationCode)
+  case readStdJSON json of
+      Right (Contracts sol) -> pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.creationCode)
+      Left e -> internalError $ "unable to parse solidity output:\n" <> (T.unpack json) <> "\n" <> show e
 
 solcRuntime'
   :: App m
@@ -396,8 +397,8 @@ solcRuntime' contract src viaIR = do
     json <- solc Solidity src viaIR
     when conf.dumpExprs $ liftIO $ Data.Text.IO.writeFile "compiled_code.json" json
     case readStdJSON json of
-      Just (Contracts sol, _, _) -> pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.runtimeCode)
-      Nothing -> internalError $ "unable to parse solidity output:\n" <> (T.unpack json)
+      Right (Contracts sol) -> pure $ Map.lookup ("hevm.sol:" <> contract) sol <&> (.runtimeCode)
+      Left _ -> internalError $ "unable to parse solidity output:\n" <> (T.unpack json)
 
 solcRuntime
   :: App m
@@ -407,7 +408,7 @@ solcRuntime contract src = solcRuntime' contract src False
 functionAbi :: Text -> IO Method
 functionAbi f = do
   json <- solc Solidity ("contract ABI { function " <> f <> " public {}}") False
-  let (Contracts sol, _, _) = fromMaybe
+  let Contracts sol = fromRight
         (internalError . T.unpack $ "while trying to parse function signature `"
           <> f <> "`, unable to parse solc output:\n" <> json)
         (readStdJSON json)
@@ -421,6 +422,7 @@ force s = fromMaybe (internalError s)
 data BytecodeReadingError
   = MissingJsonField Text
   | MissingOrInvalidJsonField Text
+  | AesonParsingError Text
   | InvalidSourceMap
   | UnlinkedLibrary Text
   | OtherError Text Text
@@ -430,6 +432,7 @@ instance Show BytecodeReadingError where
       _ | field == "ast" || field == "sources" -> "missing field " <> (T.unpack field) <> ". Recompile with `forge clean && forge build --ast"
         | otherwise -> "missing " <> (T.unpack field) <> " field"
   show (MissingOrInvalidJsonField field) = "missing or invalid " <> (T.unpack field) <> " field"
+  show (AesonParsingError errMsg) = "Error when parsing JSON: " <> (T.unpack errMsg)
   show (InvalidSourceMap) = "invalid sourceMap format"
   show (UnlinkedLibrary contract) = "Unlinked libraries detected in bytecode of contract " <> (T.unpack contract)
   show (OtherError contract errMsg) = "Error when reading bytecode of " <> (T.unpack contract) <> ": " <> T.unpack errMsg
@@ -482,60 +485,82 @@ readFoundryJSON contractName json = do
         , Sources   $ Map.singleton (SrcFile id' (T.unpack path)) Nothing
         )
 
+
+-- Contract schema in solc's Standard JSON, based on https://docs.soliditylang.org/en/latest/using-the-compiler.html#output-description
+data ContractJSON = ContractJSON
+  { abi                 :: Value
+  , metadata            :: Maybe T.Text
+  , storageLayout       :: Maybe Value
+  , evm                 :: EvmSection
+  } deriving (Show, Generic)
+
+-- EVM Section
+data EvmSection = EvmSection
+  { bytecode            :: BytecodeSection
+  , deployedBytecode    :: BytecodeSection
+  } deriving (Show, Generic)
+
+-- Bytecode Section
+data BytecodeSection = BytecodeSection
+  { object              :: Maybe T.Text
+  , sourceMap           :: Maybe T.Text
+  , immutableReferences :: Maybe Value
+  } deriving (Show, Generic)
+
+instance FromJSON ContractJSON
+instance FromJSON EvmSection
+instance FromJSON BytecodeSection
+
 -- | Parses the standard json output from solc
-readStdJSON :: Text -> Maybe BuildArtifacts
+readStdJSON :: Text -> Either BytecodeReadingError Contracts
 readStdJSON json = do
-  contracts <- KeyMap.toHashMapText <$> json ^? key "contracts" % _Object
-  -- TODO: support the general case of "urls" and "content" in the standard json
-  sources <- KeyMap.toHashMapText <$>  json ^? key "sources" % _Object
-  let asts = force "JSON lacks abstract syntax trees." . preview (key "ast") <$> sources
-      contractMap = f contracts
-      getId src = unsafeInto $ (force "" $ HMap.lookup src sources) ^?! key "id" % _Integer
-      contents src = (SrcFile (getId src) (T.unpack src), encodeUtf8 <$> HMap.lookup src (mconcat $ Map.elems $ snd <$> contractMap))
-  pure ( Contracts $ fst <$> contractMap
-         , Asts      $ Map.fromList (HMap.toList asts)
-         , Sources   $ Map.fromList $ contents <$> (sort $ HMap.keys sources)
-         )
-  where
-    f :: (AsValue s) => HMap.HashMap Text s -> (Map Text (SolcContract, (HMap.HashMap Text Text)))
-    f x = Map.fromList . (concatMap g) . HMap.toList $ x
-    g (s, x) = h s <$> HMap.toList (KeyMap.toHashMapText (fromMaybe (internalError "Could not parse json object") (preview _Object x)))
-    h :: Text -> (Text, Value) -> (Text, (SolcContract, HMap.HashMap Text Text))
-    h s (c, x) =
-      let
-        evmstuff = x ^?! key "evm"
-        sc = s <> ":" <> c
-        runtime = evmstuff ^?! key "deployedBytecode"
-        creation =  evmstuff ^?! key "bytecode"
-        theRuntimeCode = fromRight mempty $ (toCode sc) $ fromMaybe "" $ runtime ^? key "object" % _String
-        theCreationCode = fromRight mempty $ (toCode sc) $ fromMaybe "" $ creation ^? key "object" % _String
-        srcContents :: Maybe (HMap.HashMap Text Text)
-        srcContents = do metadata <- x ^? key "metadata" % _String
-                         srcs <- KeyMap.toHashMapText <$> metadata ^? key "sources" % _Object
-                         pure $ fmap
-                           (fromMaybe (internalError "could not parse contents field into a string") . preview (key "content" % _String))
-                           (HMap.filter (isJust . preview (key "content")) srcs)
-        abis = force ("abi key not found in " <> show x) $
-          toList <$> x ^? key "abi" % _Array
-      in (sc, (SolcContract {
-        runtimeCode      = theRuntimeCode,
-        creationCode     = theCreationCode,
-        runtimeCodehash  = keccak' (stripBytecodeMetadata theRuntimeCode),
-        creationCodehash = keccak' (stripBytecodeMetadata theCreationCode),
-        runtimeSrcmap    = force "srcmap-runtime" (makeSrcMaps (runtime ^?! key "sourceMap" % _String)),
-        creationSrcmap   = force "srcmap" (makeSrcMaps (creation ^?! key "sourceMap" % _String)),
-        contractName = sc,
+  let parseContracts :: KeyMap.KeyMap Value -> Either BytecodeReadingError (Map.Map Text (Map.Map Text ContractJSON))
+      parseContracts km = traverse (Bifunctor.first (AesonParsingError . T.pack) . parseEither parseJSON) (KeyMap.toMapText km)
+
+      flattenContracts :: Map Text (Map Text ContractJSON) -> Map Text ContractJSON
+      flattenContracts = Map.foldMapWithKey flattenOne
+        where
+          flattenOne :: Text -> Map Text ContractJSON -> Map Text ContractJSON
+          flattenOne fileName contractsInFile = Map.mapKeys (\contractName -> fileName <> ":" <> contractName) contractsInFile
+
+  contractsObject <- maybeToEither (MissingJsonField "contracts") $ json ^? key "contracts" % _Object
+  contracts <- translate =<< flattenContracts <$> (parseContracts contractsObject)
+  pure (Contracts contracts)
+  where 
+    translate :: Map Text ContractJSON -> Either BytecodeReadingError (Map Text SolcContract)
+    translate m = Map.traverseWithKey translateOne m
+    
+    translateOne :: Text -> ContractJSON -> Either BytecodeReadingError SolcContract
+    translateOne contractName contractData = do
+      runtimeCode <- toCode contractName (fromMaybe "" contractData.evm.deployedBytecode.object)
+      creationCode <- toCode contractName (fromMaybe "" contractData.evm.bytecode.object)
+      runtimeSrcMap <- case contractData.evm.deployedBytecode.sourceMap of
+        Nothing -> pure mempty
+        Just smap -> maybeToEither InvalidSourceMap $ makeSrcMaps smap
+      creationSrcMap <- case contractData.evm.bytecode.sourceMap of
+        Nothing -> pure mempty
+        Just smap -> maybeToEither InvalidSourceMap $ makeSrcMaps smap
+      abis <- maybeToEither (MissingJsonField "abi") (contractData.abi ^? _Array <&> toList)
+
+      pure SolcContract {
+        runtimeCode = runtimeCode,
+        creationCode = creationCode,
+        runtimeCodehash = keccak' (stripBytecodeMetadata runtimeCode),
+        creationCodehash = keccak' (stripBytecodeMetadata creationCode),
+        runtimeSrcmap = runtimeSrcMap,
+        creationSrcmap = creationSrcMap,
+        contractName = contractName,
         constructorInputs = mkConstructor abis,
-        abiMap        = mkAbiMap abis,
-        eventMap      = mkEventMap abis,
-        errorMap      = mkErrorMap abis,
-        storageLayout = mkStorageLayout $ x ^? key "storageLayout",
-        immutableReferences = fromMaybe mempty $
-          do x' <- runtime ^? key "immutableReferences"
-             case fromJSON x' of
-               Success a -> pure a
-               _ -> Nothing
-      }, fromMaybe mempty srcContents))
+        abiMap = mkAbiMap abis,
+        eventMap = mkEventMap abis,
+        errorMap = mkErrorMap abis,
+        storageLayout = mkStorageLayout contractData.storageLayout,
+        immutableReferences = fromMaybe mempty $ do
+          x' <- contractData.evm.deployedBytecode.immutableReferences
+          case fromJSON x' of
+            Success a -> pure a
+            _ -> Nothing
+      }
 
 -- TODO: deprecate me soon
 readCombinedJSON :: Text -> Either BytecodeReadingError BuildArtifacts
