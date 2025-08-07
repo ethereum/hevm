@@ -9,7 +9,7 @@ import EVM.Stepper qualified
 import EVM.Transaction
 import EVM.UnitTest (writeTrace)
 import EVM.Types hiding (Block, Case, Env)
-import EVM.Test.Tracing (interpretWithTrace, VMTrace, compareTraces, EVMToolTraceOutput(..), decodeTraceOutputHelper)
+import EVM.Test.Tracing (compareTraces, EVMToolTraceOutput(..), decodeTraceOutputHelper)
 import EVM.Expr (maybeLitWordSimp, maybeLitAddrSimp)
 
 import Optics.Core
@@ -188,10 +188,10 @@ runVMTest x = do
 
 
 -- | Run a vm test and output a geth style per opcode trace
-traceVMTest :: App m => Case -> m [VMTrace]
+traceVMTest :: App m => Case -> m [EVM.Stepper.VMTrace]
 traceVMTest x = do
   vm0 <- liftIO $ vmForCase x
-  (_, (_, ts)) <- runStateT (interpretWithTrace (EVM.Fetch.zero 0 (Just 0)) EVM.Stepper.runFully) (vm0, [])
+  (_, (_, ts)) <- runStateT (EVM.Stepper.interpretWithTrace (EVM.Fetch.zero 0 (Just 0)) EVM.Stepper.runFully) (vm0, [])
   pure ts
 
 -- | given a path to a test file, a test case from within that file, and a trace from geth from running that test, compare the traces and show where we differ

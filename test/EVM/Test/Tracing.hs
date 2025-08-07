@@ -13,11 +13,9 @@ concretely through Expr.simplify, then check that against evmtool's output.
 module EVM.Test.Tracing where
 
 import Control.Monad (when)
-import Control.Monad.Operational qualified as Operational
-import Control.Monad.ST (RealWorld, ST, stToIO)
+import Control.Monad.ST (ST, stToIO)
 import Control.Monad.State.Strict (StateT(..))
-import Control.Monad.State.Strict qualified as State
-import Control.Monad.Reader (ReaderT, lift)
+import Control.Monad.Reader (ReaderT)
 import Data.Aeson ((.:), (.:?))
 import Data.Aeson qualified as JSON
 import Data.ByteString (ByteString)
@@ -45,9 +43,8 @@ import Test.Tasty.QuickCheck hiding (Failure, Success)
 import Witch (into, unsafeInto)
 
 import Optics.Core hiding (pre)
-import Optics.State
 
-import EVM (makeVm, initialContract, exec1, symbolify)
+import EVM (makeVm, initialContract, symbolify)
 import EVM.Assembler (assemble)
 import EVM.Expr qualified as Expr
 import EVM.Concrete qualified as Concrete
@@ -65,17 +62,7 @@ import EVM.Transaction qualified
 import EVM.Types hiding (Env)
 import EVM.Effects
 import Control.Monad.IO.Unlift
-
-data VMTrace =
-  VMTrace
-  { tracePc      :: Int
-  , traceOp      :: Int
-  , traceGas     :: Data.Word.Word64
-  , traceMemSize :: Data.Word.Word64
-  , traceDepth   :: Int
-  , traceStack   :: [W256]
-  , traceError   :: Maybe String
-  } deriving (Generic, Show)
+import EVM.Stepper (interpretWithTrace, VMTrace (..) )
 
 instance JSON.ToJSON VMTrace where
   toEncoding = JSON.genericToEncoding JSON.defaultOptions
@@ -492,24 +479,6 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 1 Nothing $ \solvers -> do
     Left _ -> Nothing
     Right b -> Just b
 
-vmtrace :: VM Concrete s -> VMTrace
-vmtrace vm =
-  let
-    memsize = vm.state.memorySize
-  in VMTrace { tracePc = vm.state.pc
-             , traceOp = into $ getOp vm
-             , traceGas = vm.state.gas
-             , traceMemSize = memsize
-             -- increment to match geth format
-             , traceDepth = 1 + length (vm.frames)
-             -- reverse to match geth format
-             , traceStack = reverse $ forceLit <$> vm.state.stack
-             , traceError = readoutError vm.result
-             }
-  where
-    readoutError :: Maybe (VMResult t s) -> Maybe String
-    readoutError (Just (VMFailure e)) = Just $ evmErrToString e
-    readoutError _ = Nothing
 
 vmres :: VM Concrete s -> VMTraceResult
 vmres vm =
@@ -526,62 +495,6 @@ vmres vm =
      , gasUsed = gasUsed'
      }
 
-type TraceState s = (VM Concrete s, [VMTrace])
-
-execWithTrace :: App m => StateT (TraceState RealWorld) m (VMResult Concrete RealWorld)
-execWithTrace = do
-  _ <- runWithTrace
-  fromJust <$> use (_1 % #result)
-
-runWithTrace :: App m => StateT (TraceState RealWorld) m (VM Concrete RealWorld)
-runWithTrace = do
-  -- This is just like `exec` except for every instruction evaluated,
-  -- we also increment a counter indexed by the current code location.
-  conf <- lift readConfig
-  vm0 <- use _1
-  case vm0.result of
-    Nothing -> do
-      State.modify' (\(a, b) -> (a, b ++ [vmtrace vm0]))
-      vm' <- liftIO $ stToIO $ State.execStateT (exec1 conf) vm0
-      assign _1 vm'
-      runWithTrace
-    Just (VMFailure _) -> do
-      -- Update error text for last trace element
-      (a, b) <- State.get
-      let updatedElem = (last b) {traceError = (vmtrace vm0).traceError}
-          updatedTraces = take (length b - 1) b ++ [updatedElem]
-      State.put (a, updatedTraces)
-      pure vm0
-    Just _ -> pure vm0
-
-interpretWithTrace
-  :: forall m a . App m
-  => Fetch.Fetcher Concrete m RealWorld
-  -> Stepper.Stepper Concrete RealWorld a
-  -> StateT (TraceState RealWorld) m a
-interpretWithTrace fetcher =
-  eval . Operational.view
-  where
-    eval
-      :: App m
-      => Operational.ProgramView (Stepper.Action Concrete RealWorld) a
-      -> StateT (TraceState RealWorld) m a
-    eval (Operational.Return x) = pure x
-    eval (action Operational.:>>= k) =
-      case action of
-        Stepper.Exec ->
-          execWithTrace >>= interpretWithTrace fetcher . k
-        Stepper.Wait q -> do
-          m <- State.lift $ fetcher q
-          vm <- use _1
-          vm' <- liftIO $ stToIO $ State.execStateT m vm
-          assign _1 vm'
-          interpretWithTrace fetcher (k ())
-        Stepper.EVM m -> do
-          vm <- use _1
-          (r, vm') <- liftIO $ stToIO $ State.runStateT m vm
-          assign _1 vm'
-          interpretWithTrace fetcher (k r)
 
 newtype OpContract = OpContract [Op]
 instance Show OpContract where
@@ -794,15 +707,11 @@ genContract n = do
       --  , (10, pure OpRevert)
       -- ])
 
-forceLit :: Expr EWord -> W256
-forceLit (Lit x) = x
-forceLit _ = undefined
-
 randItem :: [a] -> IO a
 randItem = generate . Test.QuickCheck.elements
 
-getOp :: VM t s -> Word8
-getOp vm =
+getOpFromVM :: VM t s -> Word8
+getOpFromVM vm =
   let pcpos  = vm ^. #state % #pc
       code' = vm ^. #state % #code
       xs = case code' of
