@@ -13,7 +13,7 @@ import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, extractCex, prettyCalldata, panicMsg, VeriOpts(..), flattenExpr, groupIssues, groupPartials, IterConfig(..), defaultIterConf)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, extractCex, prettyCalldata, prettyCalldata2, panicMsg, VeriOpts(..), flattenExpr, groupIssues, groupPartials, IterConfig(..), defaultIterConf)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
@@ -47,6 +47,8 @@ import System.IO (hFlush, stdout)
 import Witch (unsafeInto, into)
 import Data.Vector qualified as V
 import Data.Char (ord)
+import Data.Either (rights)
+import Debug.Trace (traceM)
 
 data UnitTestOptions s = UnitTestOptions
   { rpcInfo     :: Fetch.RpcInfo
@@ -159,6 +161,33 @@ initializeUnitTest opts theContract = do
     Left e -> pushTrace (ErrorTrace e)
     _ -> popTrace
 
+concRunUnitTestContract :: App m
+  => UnitTestOptions RealWorld
+  -> VM Concrete RealWorld
+  -> ReproducibleCex
+  -> m Bool
+concRunUnitTestContract (UnitTestOptions {..}) vm1 repCex = do
+  liftIO $ putStrLn $ "Checking " ++ Text.unpack repCex.testName ++ " function"
+  conf <- readConfig
+  liftIO $ when conf.dumpTrace $ Text.writeFile "VM.trace-before" (showTraceTree dapp vm1)
+  vm2 <- Stepper.interpret (Fetch.oracle solvers rpcInfo) vm1 $ do
+    Stepper.evm $ do
+     makeTxCall testParams ((ConcreteBuf repCex.callData), [])
+     pushTrace (EntryTrace "checking cex")
+    res <- Stepper.execFully
+    traceM $ "res is: " <> show res
+    Stepper.evm $ case res of
+        Left e -> pushTrace (ErrorTrace e)
+        _ -> popTrace
+    Stepper.evm get
+  liftIO $ putStrLn $ "vm ret: " <> show vm2.result -- <> " after running: " <> show repCex.callData
+  liftIO $ when conf.dumpTrace $ Text.writeFile "VM.trace-after" (showTraceTree dapp vm2)
+  case vm2.result of
+    Just (VMFailure _) -> pure True
+    Just (VMSuccess _) -> pure False
+    _ -> do
+      pure False
+
 -- Returns tuple of (No Cex, No warnings)
 runUnitTestContract
   :: App m
@@ -241,7 +270,6 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
       _ -> internalError "cannot be, filtered for failure"
 
     -- display results
-    let t = "the test " <> Text.unpack testName
     let warnings = any Expr.isPartial ends || any isUnknown results || any isError results
     let allReverts = not . (any Expr.isSuccess) $ ends
     let unexpectedAllRevert = allReverts && not shouldFail
@@ -254,6 +282,10 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
         -- there are counterexamples (and maybe other things, but Cex is most important)
         let x = mapMaybe extractCex results
         y <- symFailure opts testName (fst cd) types x
+        k <- getReproFailures testName (fst cd) (map snd x)
+        rep <- mapM (concRunUnitTestContract opts vm) $ rights k
+        liftIO $ putStrLn ("repro failures are: " <> show k)
+        liftIO $ putStrLn ("repro runs are: " <> show rep)
         pure $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n" <> Text.unpack y
       (_, True, _) -> do
         -- There are errors/unknowns/partials, we fail them
@@ -266,7 +298,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
     when (unexpectedAllRevert && (warnings || (any isCex results))) $ do
       -- if we display a FAILED due to Cex/warnings, we should also mention everything reverted
       liftIO $ putStrLn $ "   \x1b[33m[WARNING]\x1b[0m " <> Text.unpack testName <> " all branches reverted\n"
-    liftIO $ printWarnings ends results t
+    liftIO $ printWarnings ends results $ "the test " <> Text.unpack testName
     pure (not (any isCex results), not (warnings || unexpectedAllRevert))
     where
       -- The offset of the text is: the selector (4B), the offset value (aligned to 32B), and the length of the string (aligned to 32B)
@@ -302,6 +334,16 @@ printWarnings e results testName = do
     forM_ (groupIssues (filter isUnknown results)) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
     forM_ (groupPartials e) $ \(num, str) -> putStrLn $ "      " <> show num <> "x -> " <> str
   putStrLn ""
+
+getReproFailures :: App m => Text -> Expr Buf -> [SMTCex] -> m [Err ReproducibleCex]
+getReproFailures testName cd failures = do
+  fullCDs <- mapM myCallData failures
+  pure $ map (\case
+                Left err -> Left err
+                Right fullCD -> Right $ ReproducibleCex { testName = testName, callData = fullCD}) fullCDs
+  where
+    myCallData :: App m => SMTCex -> m (Err ByteString)
+    myCallData cex = prettyCalldata2 cex cd testName
 
 symFailure :: App m => UnitTestOptions RealWorld -> Text -> Expr Buf -> [AbiType] -> [(Expr End, SMTCex)] -> m Text
 symFailure UnitTestOptions {..} testName cd types failures' = do

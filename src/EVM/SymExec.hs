@@ -53,6 +53,7 @@ import Optics.Core
 import Options.Generic (ParseField, ParseFields, ParseRecord)
 import Text.Printf (printf)
 import Witch (into, unsafeInto)
+import Data.Text.Encoding (encodeUtf8)
 
 data LoopHeuristic
   = Naive
@@ -1115,6 +1116,20 @@ prettyBuf :: Expr Buf -> Text
 prettyBuf (ConcreteBuf "") = "Empty"
 prettyBuf (ConcreteBuf bs) = formatBinary bs
 prettyBuf b = internalError $ "Unexpected symbolic buffer:\n" <> T.unpack (formatExpr b)
+
+prettyCalldata2 :: App m => SMTCex -> Expr Buf -> Text -> m (Err ByteString)
+prettyCalldata2 cex buf sig = do
+  let sigKeccak = BS.take 4 $ keccakSig $ encodeUtf8 sig
+  pure $ (sigKeccak <>) <$> body
+  where
+    cd = defaultSymbolicValues $ subModel cex buf
+    argdata = case cd of
+      Right cd' -> Right $ Expr.drop 4 (Expr.simplify cd')
+      Left e -> Left e
+    body = forceConcrete =<< argdata
+    forceConcrete :: (Expr Buf) -> Err ByteString
+    forceConcrete (ConcreteBuf k) = Right k
+    forceConcrete _ = Left "Symbolic buffer in calldata, cannot produce concrete model"
 
 prettyCalldata :: SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
 prettyCalldata cex buf sig types = headErr errSig (T.splitOn "(" sig) <> "(" <> body <> ")"

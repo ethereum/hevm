@@ -1171,6 +1171,12 @@ instance Monoid SMTCex where
     , txContext = mempty
     }
 
+data ReproducibleCex = ReproducibleCex
+  { testName :: Text
+  , callData :: ByteString
+  }
+  deriving (Show, Eq)
+
 class GetUnknownStr a where
     getUnknownStr :: a -> String
 
@@ -1535,6 +1541,9 @@ keccak buf = Keccak buf
 
 keccak' :: ByteString -> W256
 keccak' = keccakBytes >>> BS.take 32 >>> word
+
+keccakSig :: ByteString -> ByteString
+keccakSig = keccakBytes >>> BS.take 4
 
 abiKeccak :: ByteString -> FunctionSelector
 abiKeccak =
