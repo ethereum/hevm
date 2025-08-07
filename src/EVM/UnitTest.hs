@@ -172,8 +172,8 @@ concRunUnitTestContract (UnitTestOptions {..}) vm1 repCex = do
   liftIO $ when conf.dumpTrace $ Text.writeFile "VM.trace-before" (showTraceTree dapp vm1)
   vm2 <- Stepper.interpret (Fetch.oracle solvers rpcInfo) vm1 $ do
     Stepper.evm $ do
-      makeTxCall testParams ((ConcreteBuf repCex.callData), [])
-      pushTrace (EntryTrace "checking cex")
+      pushTrace (EntryTrace $ "checking cex for function " <> repCex.testName <> " with calldata: " <> (Text.pack $ bsToHex repCex.callData))
+      makeTxCall testParams (ConcreteBuf repCex.callData, [])
     res <- Stepper.execFully
     traceM $ "res is: " <> show res
     Stepper.evm $ case res of
