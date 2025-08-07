@@ -1171,6 +1171,16 @@ instance Monoid SMTCex where
     , txContext = mempty
     }
 
+data ReproducibleCex = ReproducibleCex
+  { testName :: Text
+  , callData :: ByteString
+  }
+  deriving (Eq)
+instance Show ReproducibleCex where
+  show (ReproducibleCex name data') =
+    "ReproducibleCex { testName = " <> show name <>
+    ", callData = 0x" <> bsToHex data' <> " }"
+
 class GetUnknownStr a where
     getUnknownStr :: a -> String
 
@@ -1536,6 +1546,9 @@ keccak buf = Keccak buf
 keccak' :: ByteString -> W256
 keccak' = keccakBytes >>> BS.take 32 >>> word
 
+keccakSig :: ByteString -> ByteString
+keccakSig = keccakBytes >>> BS.take 4
+
 abiKeccak :: ByteString -> FunctionSelector
 abiKeccak =
   keccakBytes
@@ -1617,6 +1630,10 @@ forceEWordToEAddr = \case
   Lit a -> LitAddr (truncateToAddr a)
   WAddr (SymAddr a) -> SymAddr a
   _ -> internalError "Unexpected EWord type forced to address"
+
+forceLit :: Expr EWord -> W256
+forceLit (Lit x) = x
+forceLit x = internalError $ "concrete vm, shouldn't ever happen: " <> show x
 
 -- Optics ------------------------------------------------------------------------------------------
 
