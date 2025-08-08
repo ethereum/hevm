@@ -366,19 +366,17 @@ readSolc pt root fp = do
         pure (Right (BuildOutput contracts sourceCache))
 
 yul :: Text -> Text -> IO (Either BytecodeReadingError ByteString)
-yul contractName src = do
-  json <- solc Yul src False
-  let f = (json ^?! key "contracts") ^?! key (Key.fromText "hevm.sol")
-      c = f ^?! key (Key.fromText $ if T.null contractName then "object" else contractName)
-      bytecode = c ^?! key "evm" ^?! key "bytecode" ^?! key "object" % _String
-  pure $ toCode contractName bytecode
+yul contractName src = yul' contractName src False
 
 yulRuntime :: Text -> Text -> IO (Either BytecodeReadingError ByteString)
-yulRuntime contractName src = do
+yulRuntime contractName src = yul' contractName src True
+
+yul' :: Text -> Text -> Bool -> IO (Either BytecodeReadingError ByteString)
+yul' contractName src deployed = do
   json <- solc Yul src False
-  let f = (json ^?! key "contracts") ^?! key (Key.fromText "hevm.sol")
+  let f = (json ^?! key "contracts") ^?! key "hevm.sol"
       c = f ^?! key (Key.fromText $ if T.null contractName then "object" else contractName)
-      bytecode = c ^?! key "evm" ^?! key "deployedBytecode" ^?! key "object" % _String
+      bytecode = c ^?! key "evm" ^?! key (if deployed then "deployedBytecode" else "bytecode") ^?! key "object" % _String
   pure $ toCode contractName bytecode
 
 solidity
