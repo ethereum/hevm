@@ -1610,13 +1610,13 @@ forceEAddrToEWord :: Expr EAddr -> Expr EWord
 forceEAddrToEWord = \case
   LitAddr a -> Lit (into a)
   SymAddr a ->  WAddr (SymAddr a)
-  _ -> internalError "Unexpected forceAddr"
+  _ -> internalError "Unexpected address type forced to EWord"
 
 forceEWordToEAddr :: Expr 'EWord -> Expr 'EAddr
 forceEWordToEAddr = \case
   Lit a -> LitAddr (truncateToAddr a)
   WAddr (SymAddr a) -> SymAddr a
-  _ -> internalError "delegateCall: expected concrete address"
+  _ -> internalError "Unexpected EWord type forced to address"
 
 -- Optics ------------------------------------------------------------------------------------------
 
