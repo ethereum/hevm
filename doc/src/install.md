@@ -16,7 +16,7 @@ $ sudo apt-get install z3 cvc5
 or similar for Linux. For Mac:
 ```
 brew install z3
-brew install --cask cvc5/cvc5/cvc5
+brew install --cask cvc5
 ```
 
 If you installed cvc5 and want to use it, you will need to pass the flag
