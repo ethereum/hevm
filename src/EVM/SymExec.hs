@@ -509,6 +509,7 @@ getExpr solvers c signature' concreteArgs opts = do
 -}
 checkAssertions :: [Word256] -> Postcondition s
 checkAssertions errs _ = \case
+  Failure _ _ (UnrecognizedOpcode 0xfe)  -> PBool False
   Failure _ _ (Revert (ConcreteBuf msg)) -> PBool $ msg `notElem` (fmap panicMsg errs)
   Failure _ _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
   _ -> PBool True

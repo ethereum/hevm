@@ -144,6 +144,20 @@ main = do
         (_, stdout, _) <- readProcessWithExitCode "cabal" ["run", "exe:hevm", "--", "symbolic", "--code", hexStr] ""
         stdout `shouldContain` "Warning: fetching contract at address 0"
 
+      it "empty solver is always unknown" $ do
+        Just c <- runApp $ solcRuntime (T.pack "C") (T.pack [i|
+           contract C {
+             function myfun(uint a) public returns (uint) {
+                 uint ret = 4*a;
+                 assert(ret == 4);
+                 return ret;
+             }
+           }
+          |])
+        let hexStr = Types.bsToHex c
+        (_, stdout, _) <- readProcessWithExitCode "cabal" ["run", "exe:hevm", "--", "symbolic", "--solver", "empty", "--code", hexStr] ""
+        stdout `shouldContain` "SMT solver says: Result unknown by SMT solver"
+
       -- file "devcon_example.yul" from "eq-all-yul-optimization-tests" in test.hs
       -- we check that at least one UNSAT cache hit happens, i.e. the unsat cache is not
       -- completely broken
@@ -181,8 +195,8 @@ main = do
                    sstore(0, sum)
                }
            } |]
-        Just aPrgm <- yul (T.pack "") $ T.pack a
-        Just bPrgm <- yul (T.pack "") $ T.pack b
+        Right aPrgm <- yul (T.pack "") $ T.pack a
+        Right bPrgm <- yul (T.pack "") $ T.pack b
         let hexStrA = Types.bsToHex aPrgm
             hexStrB = Types.bsToHex bPrgm
         (_, stdout, _) <- readProcessWithExitCode "cabal" ["run", "exe:hevm", "--", "equivalence", "--num-solvers", "1", "--debug", "--code-a", hexStrA, "--code-b", hexStrB] ""
