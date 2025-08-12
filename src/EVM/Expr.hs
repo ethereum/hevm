@@ -753,7 +753,7 @@ idsDontMatch a b = BS.length a >= 64 && BS.length b >= 64 && diff32to64Byte a b
        y32 = BS.take 32 $ BS.drop 32 y
 
 slotPos :: Word8 -> ByteString
-slotPos pos = BS.pack ((replicate 31 (0::Word8))++[pos])
+slotPos pos = BS.replicate 31 0 <> BS.singleton pos
 
 -- Optimized litToArrayPreimage using the pre-computed map
 litToArrayPreimage :: W256 -> Maybe (Word8, W256)
@@ -1022,13 +1022,17 @@ simplifyNoLitToKeccak e = untilFixpoint (mapExpr go) e
     -- We can zero out any bytes in a base ConcreteBuf that we know will be overwritten by a later write
     -- TODO: make this fully general for entire write chains, not just a single write.
     go o@(WriteWord (Lit idx) val (ConcreteBuf b))
-      | idx < maxBytes
-        = (writeWord (Lit idx) val (
-            ConcreteBuf $
-              (BS.take (unsafeInto idx) (padRight (unsafeInto idx) b))
-              <> (BS.replicate 32 0)
-              <> (BS.drop (unsafeInto idx + 32) b)))
-      | otherwise = o
+      | idx >= maxBytes = o
+      | BS.length b >= (unsafeInto idx + 32) =
+          let
+            slot = BS.take 32 (BS.drop (unsafeInto idx) b)
+            isSlotZero = BS.all (== 0) slot
+            content = if isSlotZero
+              then b
+              else (BS.take (unsafeInto idx) b)
+                <> (BS.replicate 32 0)
+                <> (BS.drop (unsafeInto idx + 32) b)
+          in writeWord (Lit idx) val (ConcreteBuf content)
     go (WriteWord a b c) = writeWord a b c
 
     go (WriteByte a b c) = writeByte a b c
