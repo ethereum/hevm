@@ -649,14 +649,14 @@ printPartialIssues flattened call =
   when (any isPartial flattened) $ do
     T.putStrLn $ indent 3 "\x1b[33m[WARNING]\x1b[0m: hevm was only able to partially explore "
                 <> T.pack call <> " due to the following issue(s):"
-    T.putStr . T.unlines . fmap (indent 5 . ("- " <>)) . fmap formatPartial . getPartials $ flattened
+    T.putStr . T.unlines . fmap (indent 5 . ("- " <>)) . fmap formatPartial . (map fst) . getPartials $ flattened
 
-getPartials :: [Expr End] -> [PartialExec]
+getPartials :: [Expr End] -> [(PartialExec, Expr End)]
 getPartials = mapMaybe go
   where
-    go :: Expr End -> Maybe PartialExec
+    go :: Expr End -> Maybe (PartialExec, Expr End)
     go = \case
-      Partial _ _ p -> Just p
+      e@(Partial _ _ p) -> Just (p, e)
       _ -> Nothing
 
 -- | Symbolically execute the VM and check all endstates against the
@@ -691,7 +691,7 @@ verifyInputs
   -> Fetch.Fetcher Symbolic m RealWorld
   -> VM Symbolic RealWorld
   -> Maybe (Postcondition RealWorld)
-  -> m (Expr End, [(SMTResult, Expr End)], [PartialExec])
+  -> m (Expr End, [(SMTResult, Expr End)], [(PartialExec, Expr End)])
 verifyInputs solvers opts fetcher preState maybepost = do
   conf <- readConfig
   let call = mconcat ["prefix 0x", getCallPrefix preState.state.calldata]
