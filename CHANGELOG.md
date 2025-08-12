@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow dumping unsolved SMT files via `--dump-unsolved`
 - New empty solver option that simply makes sure that all SMT queries return
   unknown
+- Allow `verifyInputs` to return partial expressions
 
 ## Fixed
 - We now extract more Keccak computations than before from the Props to assert
