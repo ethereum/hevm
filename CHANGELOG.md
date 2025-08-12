@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 - Allow dumping unsolved SMT files via `--dump-unsolved`
+- Allow resolving unknown addresses to only those that are already deployed
+  via option `--only-deployed`
 - New empty solver option that simply makes sure that all SMT queries return
   unknown
 - Allow `verifyInputs` to return partial expressions

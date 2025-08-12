@@ -344,11 +344,11 @@ interpret fetcher iterConf vm =
         ends <- withRunInIO $ \runInIO -> mapConcurrently (runInIO . runOne frozen newDepth) vals
         pure $ goITE (zip vals ends)
         where
-          goITE :: [(W256, Expr End)] -> Expr End
+          goITE :: [(Expr EWord, Expr End)] -> Expr End
           goITE [] = internalError "goITE: empty list"
           goITE [(_, end)] = end
-          goITE ((val,end):ps) = ITE (Eq expr (Lit val)) end (goITE ps)
-          runOne :: App m => VM 'Symbolic RealWorld -> Int -> W256 -> m (Expr 'End)
+          goITE ((val,end):ps) = ITE (Eq expr val) end (goITE ps)
+          runOne :: App m => VM 'Symbolic RealWorld -> Int -> Expr EWord -> m (Expr 'End)
           runOne frozen newDepth v = do
             (ra, vma) <- liftIO $ stToIO $ runStateT (continue v) frozen { result = Nothing, exploreDepth = newDepth }
             interpret fetcher iterConf vma (k ra)
@@ -509,6 +509,7 @@ getExpr solvers c signature' concreteArgs opts = do
 -}
 checkAssertions :: [Word256] -> Postcondition s
 checkAssertions errs _ = \case
+  Failure _ _ (UnrecognizedOpcode 0xfe)  -> PBool False
   Failure _ _ (Revert (ConcreteBuf msg)) -> PBool $ msg `notElem` (fmap panicMsg errs)
   Failure _ _ (Revert b) -> foldl' PAnd (PBool True) (fmap (PNeg . PEq b . ConcreteBuf . panicMsg) errs)
   _ -> PBool True
