@@ -10,6 +10,7 @@ import Control.Monad.IO.Unlift
 import Control.Monad.Operational qualified as Operational
 import Control.Monad.ST (RealWorld, stToIO, ST)
 import Control.Monad.State.Strict (runStateT)
+import Control.Arrow ((>>>))
 import Data.Bifunctor (second)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -1132,6 +1133,8 @@ calldataFromCex cex buf funName types = do
     forceConcrete :: (Expr Buf) -> Err ByteString
     forceConcrete (ConcreteBuf k) = Right k
     forceConcrete _ = Left "Symbolic buffer in calldata, cannot produce concrete model"
+    keccakSig :: ByteString -> ByteString
+    keccakSig = keccakBytes >>> BS.take 4
 
 prettyCalldata :: SMTCex -> Expr Buf -> Text -> [AbiType] -> Text
 prettyCalldata cex buf sig types = headErr errSig (T.splitOn "(" sig) <> "(" <> body <> ")"

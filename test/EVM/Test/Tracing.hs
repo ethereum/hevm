@@ -480,7 +480,6 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 1 Nothing $ \solvers -> do
     Right b -> Just b
 
 
-
 vmres :: VM Concrete s -> VMTraceResult
 vmres vm =
   let
@@ -495,7 +494,6 @@ vmres vm =
      { out = res
      , gasUsed = gasUsed'
      }
-
 
 
 newtype OpContract = OpContract [Op]

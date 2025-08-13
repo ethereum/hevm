@@ -1546,9 +1546,6 @@ keccak buf = Keccak buf
 keccak' :: ByteString -> W256
 keccak' = keccakBytes >>> BS.take 32 >>> word
 
-keccakSig :: ByteString -> ByteString
-keccakSig = keccakBytes >>> BS.take 4
-
 abiKeccak :: ByteString -> FunctionSelector
 abiKeccak =
   keccakBytes

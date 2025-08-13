@@ -160,12 +160,12 @@ initializeUnitTest opts theContract = do
     Left e -> pushTrace (ErrorTrace e)
     _ -> popTrace
 
-concRunUnitTestContract :: App m
+validateCex :: App m
   => UnitTestOptions RealWorld
   -> VM Concrete RealWorld
   -> ReproducibleCex
   -> m Bool
-concRunUnitTestContract uTestOpts vm repCex = do
+validateCex uTestOpts vm repCex = do
   let utoConc = uTestOpts { testParams = uTestOpts.testParams { caller = LitAddr 0xacab}}
   conf <- readConfig
   when conf.debug $ liftIO $ putStrLn $ "Repro running function: " <> show utoConc.testParams.address <>
@@ -297,14 +297,12 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
       (True, _, _) -> do
         -- there are counterexamples (and maybe other things, but Cex is most important)
         let x = mapMaybe extractCex results
-
-        k <- getReproFailures testName types (fst cd) (map snd x)
-        rep <- mapM (traverse $ concRunUnitTestContract opts vm) k
-        when conf.debug $ liftIO $ putStrLn $ "Cex reproduction runs' results are: " <> show rep
-        let toPrintData = zipWith (\(a, b) c -> (a, b, c)) x rep
-
-        y <- symFailure opts testName (fst cd) types toPrintData
-        pure $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n" <> Text.unpack y
+        failsToRepro <- getReproFailures testName types (fst cd) (map snd x)
+        validation <- mapM (traverse $ validateCex opts vm) failsToRepro
+        when conf.debug $ liftIO $ putStrLn $ "Cex reproduction runs' results are: " <> show validation
+        let toPrintData = zipWith (\(a, b) c -> (a, b, c)) x validation
+        txtFails <- symFailure opts testName (fst cd) types toPrintData
+        pure $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n" <> Text.unpack txtFails
       (_, True, _) -> do
         -- There are errors/unknowns/partials, we fail them
         pure $ "   \x1b[31m[FAIL]\x1b[0m " <> Text.unpack testName <> "\n"
