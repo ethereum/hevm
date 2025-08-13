@@ -189,7 +189,7 @@ validateCex uTestOpts vm repCex = do
     Left err -> case err of
       (UnrecognizedOpcode 0xfe) -> True
       (Revert (ConcreteBuf msg)) ->
-         msg `elem` (fmap panicMsg defaultPanicCodes) ||
+         msg == panicMsg 0x01 ||
            let sel = selector "Error(string)"
            in (sel `BS.isPrefixOf` msg) && ("assertion failed" `BS.isPrefixOf` (BS.drop (4+32+32) msg))
       _ -> False
