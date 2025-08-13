@@ -300,7 +300,7 @@ symRun opts@UnitTestOptions{..} vm (Sig testName types) = do
 
         k <- getReproFailures testName types (fst cd) (map snd x)
         rep <- mapM (traverse $ concRunUnitTestContract opts vm) k
-        when conf.debug $ liftIO $ putStrLn $ "Ces reproduction runs' results are: " <> show rep
+        when conf.debug $ liftIO $ putStrLn $ "Cex reproduction runs' results are: " <> show rep
         let toPrintData = zipWith (\(a, b) c -> (a, b, c)) x rep
 
         y <- symFailure opts testName (fst cd) types toPrintData
@@ -388,7 +388,7 @@ symFailure UnitTestOptions {..} testName cd types fails = do
 
       reproToText :: Err Bool -> Text
       reproToText (Left err) = "\x1b[33m[error attempting to reproduce: " <> pack err <> "]\x1b[0m"
-      reproToText (Right repro) = if repro then "\x1b[90m[reproducible]\x1b[0m" else "\x1b[31m[not reproducible]\x1b[0m"
+      reproToText (Right repro) = if repro then "\x1b[90m[validated]\x1b[0m" else "\x1b[31m[not reproducible]\x1b[0m"
 
 indentLines :: Int -> Text -> Text
 indentLines n s =
