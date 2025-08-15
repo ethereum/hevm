@@ -36,7 +36,7 @@ import Witch (into, unsafeInto)
 import EVM.Format (formatProp)
 
 import EVM.CSE
-import EVM.Expr (writeByte, bufLengthEnv, containsNode, bufLength, minLength, inRange)
+import EVM.Expr (writeByte, bufLengthEnv, bufLength, minLength, inRange)
 import EVM.Expr qualified as Expr
 import EVM.Keccak (keccakAssumptions, keccakCompute)
 import EVM.Traversals
@@ -288,16 +288,20 @@ referencedBlockContext expr = nubOrd $ foldTerm go [] expr
 -- However, we expect that most of such reads will have been
 -- simplified away.
 findStorageReads :: Prop -> Map (Expr EAddr, Maybe W256) (Set (Expr EWord))
-findStorageReads p = Map.fromListWith (<>) $ foldProp go mempty p
+findStorageReads p = foldProp go mempty p
   where
-    go :: Expr a -> [((Expr EAddr, Maybe W256), Set (Expr EWord))]
+    go :: Expr a -> Map (Expr EAddr, Maybe W256) (Set (Expr EWord))
     go = \case
-      SLoad slot store ->
-        [((fromMaybe (internalError $ "could not extract address from: " <> show store) (Expr.getAddr store), Expr.getLogicalIdx store), Set.singleton slot) | containsNode isAbstractStore store]
-      _ -> []
+      SLoad slot store | baseIsAbstractStore store -> case Expr.getAddr store of
+          Nothing -> internalError $ "could not extract address from: " <> show store
+          Just address -> Map.singleton (address, Expr.getLogicalIdx store) (Set.singleton slot)
+      _ -> mempty
 
-    isAbstractStore (AbstractStore _ _) = True
-    isAbstractStore _ = False
+    baseIsAbstractStore :: Expr 'Storage -> Bool
+    baseIsAbstractStore (AbstractStore _ _) = True
+    baseIsAbstractStore (ConcreteStore _) = False
+    baseIsAbstractStore (SStore _ _ base) = baseIsAbstractStore base
+    baseIsAbstractStore (GVar _) = internalError "Unexpected GVar"
 
 findBufferAccess :: TraversableTerm a => [a] -> [(Expr EWord, Expr EWord, Expr Buf)]
 findBufferAccess = foldl (foldTerm go) mempty

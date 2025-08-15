@@ -4736,6 +4736,16 @@ tests = testGroup "hevm"
           props = [PEq (Keccak buf2) (Lit 0x123)]
           computes = keccakCompute props [] []
       assertEqualM "Must compute two keccaks" 2 (length computes)
+    , testCase "store-over-concrete-buffer" $ runEnv (testEnv {config = testEnv.config {numCexFuzz = 0, simp = False}}) $ do
+      let
+        as = AbstractStore (SymAddr "test") Nothing
+        cs = ConcreteStore $ Map.fromList [(0x1,0x2)]
+        e1 = SLoad (Lit 0x1) (SStore (Lit 0x8) (SLoad (Lit 0x40) as) cs)
+        eq = PEq e1 (Lit 0x0)
+      conf <- readConfig
+      let SMT2 _ (CexVars _ _ _ storeReads _ _) _ = fromRight (internalError "Must succeed") (assertProps conf [eq])
+      let expected = Map.singleton (SymAddr "test", Nothing) (Set.singleton (Lit 0x40))
+      assertEqualM "Reads must be properly collected" storeReads expected
   ]
   , testGroup "equivalence-checking"
     [
