@@ -88,13 +88,8 @@ jobs:
       - name: run cli tests
         run: nix develop --command bash -c "cabal --active-repositories=:none run cli-test"
 
-  build-windows-bitwuzla:
-    name: bitwuzla-build (win64 target)
-    uses: ./.github/workflows/bitwuzla-windows.yml
-
   build-windows:
     name: build (windows-latest)
-    needs: [build-windows-bitwuzla]
     runs-on: windows-latest
     defaults:
       run:
@@ -245,23 +240,19 @@ jobs:
           path: forge-std
           persist-credentials: false
 
-      - name: download bitwuzla
-        uses: actions/download-artifact@v4
-        with:
-          name: bitwuzla-win64
-          path: bitwuzla-win64
-
       - name: prepare test dependencies
         run: |
           # bitwuzla
-          echo BITWUZLA_PATH="$PWD/bitwuzla-win64/bin" >> "$GITHUB_ENV"
+          curl --retry 5 -fsSL https://github.com/bitwuzla/bitwuzla/releases/download/0.8.2/Bitwuzla-Win64-x86_64-static.zip -o bitwuzla.zip
+          unzip bitwuzla.zip && rm bitwuzla.zip
+          echo BITWUZLA_PATH="$PWD/Bitwuzla-Win64-x86_64-static/bin" >> "$GITHUB_ENV"
           # evm
           go install github.com/ethereum/go-ethereum/cmd/evm@latest
           echo EVM_PATH="$(cygpath -u "$(go env GOPATH)/bin")" >> "$GITHUB_ENV"
           # cvc5
-          curl --retry 5 -fsSL https://github.com/cvc5/cvc5/releases/download/cvc5-1.1.2/cvc5-Win64-static.zip -o cvc5.zip
+          curl --retry 5 -fsSL https://github.com/cvc5/cvc5/releases/download/cvc5-1.3.0/cvc5-Win64-x86_64-static.zip -o cvc5.zip
           unzip cvc5.zip && rm cvc5.zip
-          echo CVC5_PATH="$PWD/cvc5-Win64-static/bin" >> "$GITHUB_ENV"
+          echo CVC5_PATH="$PWD/cvc5-Win64-x86_64-static/bin" >> "$GITHUB_ENV"
           # solc
           mkdir solc
           curl --retry 5 -fsSL https://github.com/ethereum/solidity/releases/download/v0.8.26/solc-windows.exe -o solc/solc.exe

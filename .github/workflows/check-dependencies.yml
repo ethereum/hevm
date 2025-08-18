@@ -22,18 +22,16 @@ jobs:
         run: |
           NIXPKGS_REV="$(jq -r '.nodes.nixpkgs_2.locked.rev' < flake.lock)"
           VERSIONS="$(nix eval -I "nixpkgs=https://github.com/NixOS/nixpkgs/archive/$NIXPKGS_REV.tar.gz" --impure --json \
-                      --expr 'let pkgs = (import <nixpkgs> {}); in { "secp256k1" = pkgs.secp256k1.version; "ff" = pkgs.libff.version; "bitwuzla" = pkgs.bitwuzla.version; }')"
+                      --expr 'let pkgs = (import <nixpkgs> {}); in { "secp256k1" = pkgs.secp256k1.version; "ff" = pkgs.libff.version; }')"
           LIBFF_REV="$(jq .ff -r <<<"$VERSIONS")"
           LIBSECP256K1_REV="$(jq .secp256k1 -r <<<"$VERSIONS")"
-          BITWUZLA_REV="$(jq .bitwuzla -r <<<"$VERSIONS")"
-          { echo "nixpkgs=$NIXPKGS_REV"; echo "libff=$LIBFF_REV"; echo "libsecp256k1=$LIBSECP256K1_REV"; echo "bitwuzla=$BITWUZLA_REV"; } >> "$GITHUB_OUTPUT"
+          { echo "nixpkgs=$NIXPKGS_REV"; echo "libff=$LIBFF_REV"; echo "libsecp256k1=$LIBSECP256K1_REV"; } >> "$GITHUB_OUTPUT"
       - name: lookup local versions
         id: local
         run: |
           LIBFF_REV="$(grep '^INSTALL_VERSION=' .github/scripts/install-libff.sh | cut -f2 -d=)"
           LIBSECP256K1_REV="$(grep '^INSTALL_VERSION=' .github/scripts/install-libsecp256k1.sh | cut -f2 -d=)"
-          BITWUZLA_REV="$(grep 'BITWUZLA_VERSION:' .github/workflows/bitwuzla-windows.yml | cut -f2 -d: | sed 's/\s//')"
-          { echo "libff=$LIBFF_REV"; echo "libsecp256k1=$LIBSECP256K1_REV"; echo "bitwuzla=$BITWUZLA_REV"; } >> "$GITHUB_OUTPUT"
+          { echo "libff=$LIBFF_REV"; echo "libsecp256k1=$LIBSECP256K1_REV"; } >> "$GITHUB_OUTPUT"
       - name: compare versions
         run: |
           if [ "$LIBFF_NIXPKGS" != "$LIBFF_LOCAL" ]; then
@@ -44,14 +42,8 @@ jobs:
             echo "libsecp256k1 versions do not match! nix=$LIBSECP256K1_NIXPKGS local=$LIBSECP256K1_LOCAL"
             exit 1
           fi
-          if [ "$BITWUZLA_NIXPKGS" != "$BITWUZLA_LOCAL" ]; then
-            echo "bitwuzla versions do not match! nix=$BITWUZLA_NIXPKGS local=$BITWUZLA_LOCAL"
-            exit 1
-          fi
         env:
           LIBFF_NIXPKGS: ${{ steps.nixpkgs.outputs.libff }}
           LIBFF_LOCAL: ${{ steps.local.outputs.libff }}
           LIBSECP256K1_NIXPKGS: ${{ steps.nixpkgs.outputs.libsecp256k1 }}
           LIBSECP256K1_LOCAL: ${{ steps.local.outputs.libsecp256k1 }}
-          BITWUZLA_NIXPKGS: ${{ steps.nixpkgs.outputs.bitwuzla }}
-          BITWUZLA_LOCAL: ${{ steps.local.outputs.bitwuzla }}
