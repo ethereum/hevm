@@ -142,7 +142,6 @@ library
   install-includes:
     ethjet/tinykeccak.h, ethjet/ethjet.h, ethjet/ethjet-ff.h, ethjet/blake2.h
   build-depends:
-    system-cxx-std-lib                >= 1.0 && < 2.0,
     QuickCheck                        >= 2.13.2 && < 2.15,
     Decimal                           >= 0.5.1 && < 0.6,
     containers                        >= 0.6.0 && < 0.7,
@@ -202,6 +201,7 @@ executable hevm
   autogen-modules:
     Paths_hevm
   build-depends:
+    system-cxx-std-lib                >= 1.0 && < 2.0,
     base,
     bytestring,
     data-dword,
@@ -284,6 +284,7 @@ test-suite test
   main-is:
     test.hs
   build-depends:
+    system-cxx-std-lib                >= 1.0 && < 2.0,
     base16,
     binary,
     data-dword,
@@ -302,6 +303,8 @@ test-suite rpc-tests
     exitcode-stdio-1.0
   main-is:
     rpc.hs
+  build-depends:
+    system-cxx-std-lib                >= 1.0 && < 2.0,
 
 test-suite ethereum-tests
   import: test-common
@@ -310,6 +313,8 @@ test-suite ethereum-tests
     exitcode-stdio-1.0
   main-is:
     BlockchainTests.hs
+  build-depends:
+    system-cxx-std-lib                >= 1.0 && < 2.0,
 
 test-suite cli-test
   import: test-common
@@ -321,6 +326,7 @@ test-suite cli-test
   main-is:
     clitest.hs
   build-depends:
+    system-cxx-std-lib                >= 1.0 && < 2.0,
     base,
     hevm,
     hspec,
