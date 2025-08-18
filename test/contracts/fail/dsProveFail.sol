@@ -26,13 +26,15 @@ contract SolidityTest is Test {
         }
     }
 
-    // This seems to be fast now on SMT solvers, due to built-in heuristics
-    // hence no timeout
-    function prove_smtTimeout(uint x, uint y, uint z) public {
-        if ((x * y / z) * (x / y) / (x * y) == (x * x * x * y * z / x * z * y)) {
-            assertTrue(false);
-        } else {
-            assertTrue(true);
+    function prove_smtTimeout(uint128 p, uint128 q) public {
+        unchecked {
+            uint256 product = uint256(p) * uint256(q);
+            uint256 N = 0xFFFFFFFFFFFFFFFF6DBE8AFB4BF7B8B9D5D8F8B5C7E5B0B2D6B1B5B8F8B9D5D8;
+            if (product == N) {
+                assertTrue(false);
+            } else {
+                assertTrue(true);
+            }
         }
     }
 
