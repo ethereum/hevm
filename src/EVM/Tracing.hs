@@ -4,8 +4,8 @@
 module EVM.Tracing
   ( interpretWithTrace
   , execWithTrace
-  , vmtrace
-  , VMTrace (..)
+  , vmTraceStep
+  , VMTraceStep (..)
   )
 where
 
@@ -33,8 +33,8 @@ import EVM.Fetch qualified as Fetch
 import EVM.Types
 import EVM.Stepper
 
-data VMTrace =
-  VMTrace
+data VMTraceStep =
+  VMTraceStep
   { tracePc      :: Int
   , traceOp      :: Int
   , traceGas     :: Data.Word.Word64
@@ -44,9 +44,9 @@ data VMTrace =
   , traceError   :: Maybe String
   } deriving (Generic)
 
-instance Show VMTrace where
-  show (VMTrace pc op gas memSize depth stack err) =
-    "VMTrace { "
+instance Show VMTraceStep where
+  show (VMTraceStep pc op gas memSize depth stack err) =
+    "VMTraceStep { "
     ++ "tracePc = " ++ show pc
     ++ ", Op = " ++ show (intToOpName op)
     ++ ", Gas = " ++ show gas
@@ -56,7 +56,7 @@ instance Show VMTrace where
     ++ ", Error = " ++ show err
     ++ " }"
 
-type TraceState s = (VM Concrete s, [VMTrace])
+type TraceState s = (VM Concrete s, [VMTraceStep])
 
 execWithTrace :: App m => StateT (TraceState RealWorld) m (VMResult Concrete RealWorld)
 execWithTrace = do
@@ -71,14 +71,14 @@ runWithTrace = do
   vm0 <- use _1
   case vm0.result of
     Nothing -> do
-      State.modify' (\(a, b) -> (a, b ++ [vmtrace vm0]))
+      State.modify' (\(a, b) -> (a, b ++ [vmTraceStep vm0]))
       vm' <- liftIO $ stToIO $ State.execStateT (exec1 conf) vm0
       assign _1 vm'
       runWithTrace
     Just (VMFailure _) -> do
       -- Update error text for last trace element
       (a, b) <- State.get
-      let updatedElem = (last b) {traceError = (vmtrace vm0).traceError}
+      let updatedElem = (last b) {traceError = (vmTraceStep vm0).traceError}
           updatedTraces = take (length b - 1) b ++ [updatedElem]
       State.put (a, updatedTraces)
       pure vm0
@@ -113,11 +113,11 @@ interpretWithTrace fetcher =
           assign _1 vm'
           interpretWithTrace fetcher (k r)
 
-vmtrace :: VM Concrete s -> VMTrace
-vmtrace vm =
+vmTraceStep :: VM Concrete s -> VMTraceStep
+vmTraceStep vm =
   let
     memsize = vm.state.memorySize
-  in VMTrace { tracePc = vm.state.pc
+  in VMTraceStep { tracePc = vm.state.pc
              , traceOp = into $ getOpFromVM vm
              , traceGas = vm.state.gas
              , traceMemSize = memsize

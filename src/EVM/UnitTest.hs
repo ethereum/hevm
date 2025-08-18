@@ -183,7 +183,7 @@ validateCex uTestOpts vm repCex = do
   (res, (vm3, vmtrace)) <- runStateT (Tracing.interpretWithTrace (Fetch.oracle utoConc.solvers utoConc.rpcInfo) Stepper.execFully) (vm2, [])
   -- res <- Stepper.interpret (Fetch.oracle utoConc.solvers utoConc.rpcInfo) vm2 Stepper.execFully
   when conf.debug $ liftIO $ do
-    putStrLn $ "vm trace: " <> unlines (map show vmtrace)
+    putStrLn $ "vm step trace: " <> unlines (map show vmtrace)
     putStrLn $ "vm res: " <> show res
     putStrLn $ "vm res: " <> show vm3.result
   pure $ case res of

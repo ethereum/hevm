@@ -189,7 +189,7 @@ runVMTest x = do
 
 
 -- | Run a vm test and output a geth style per opcode trace
-traceVMTest :: App m => Case -> m [Tracing.VMTrace]
+traceVMTest :: App m => Case -> m [Tracing.VMTraceStep]
 traceVMTest x = do
   vm0 <- liftIO $ vmForCase x
   (_, (_, ts)) <- runStateT (Tracing.interpretWithTrace (EVM.Fetch.zero 0 (Just 0)) EVM.Stepper.runFully) (vm0, [])

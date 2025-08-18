@@ -62,19 +62,19 @@ import EVM.Transaction qualified
 import EVM.Types hiding (Env)
 import EVM.Effects
 import Control.Monad.IO.Unlift
-import EVM.Tracing (interpretWithTrace, VMTrace (..) )
+import EVM.Tracing (interpretWithTrace, VMTraceStep (..) )
 
-instance JSON.ToJSON VMTrace where
+instance JSON.ToJSON VMTraceStep where
   toEncoding = JSON.genericToEncoding JSON.defaultOptions
-instance JSON.FromJSON VMTrace
+instance JSON.FromJSON VMTraceStep
 
-data VMTraceResult =
-  VMTraceResult
+data VMTraceStepResult =
+  VMTraceStepResult
   { out  :: ByteStringS
   , gasUsed :: Data.Word.Word64
   } deriving (Generic, Show)
 
-instance JSON.ToJSON VMTraceResult where
+instance JSON.ToJSON VMTraceStepResult where
   toEncoding = JSON.genericToEncoding JSON.defaultOptions
 
 data EVMToolTrace =
@@ -294,7 +294,7 @@ evmSetup contr txData gaslimitExec = (txn, evmEnv, contrAlloc, fromAddress, toAd
 
 getHEVMRet
   :: App m
-  => OpContract -> ByteString -> Int -> m (Either (EvmError, [VMTrace]) (Expr 'End, [VMTrace], VMTraceResult))
+  => OpContract -> ByteString -> Int -> m (Either (EvmError, [VMTraceStep]) (Expr 'End, [VMTraceStep], VMTraceStepResult))
 getHEVMRet contr txData gaslimitExec = do
   let (txn, evmEnv, contrAlloc, fromAddress, toAddress, _) = evmSetup contr txData gaslimitExec
   runCodeWithTrace Nothing evmEnv contrAlloc txn (LitAddr fromAddress) (LitAddr toAddress)
@@ -330,10 +330,10 @@ getEVMToolRet evmDir contr txData gaslimitExec = do
   JSON.decodeFileStrict (evmDir </> "result.json") :: IO (Maybe EVMToolResult)
 
 -- Compares traces of evmtool (from go-ethereum) and HEVM
-compareTraces :: [VMTrace] -> [EVMToolTrace] -> IO (Bool)
+compareTraces :: [VMTraceStep] -> [EVMToolTrace] -> IO (Bool)
 compareTraces hevmTrace evmTrace = go hevmTrace evmTrace
   where
-    go :: [VMTrace] -> [EVMToolTrace] -> IO (Bool)
+    go :: [VMTraceStep] -> [EVMToolTrace] -> IO (Bool)
     go [] [] = pure True
     go (a:ax) (b:bx) = do
       let aOp = a.traceOp
@@ -415,7 +415,7 @@ decodeTraceOutputHelper traceFileName = do
 runCodeWithTrace
   :: App m
   => Fetch.RpcInfo -> EVMToolEnv -> EVMToolAlloc -> EVM.Transaction.Transaction
-  -> Expr EAddr -> Expr EAddr -> m (Either (EvmError, [VMTrace]) ((Expr 'End, [VMTrace], VMTraceResult)))
+  -> Expr EAddr -> Expr EAddr -> m (Either (EvmError, [VMTraceStep]) ((Expr 'End, [VMTraceStep], VMTraceStepResult)))
 runCodeWithTrace rpcinfo evmEnv alloc txn fromAddr toAddress = withSolvers Z3 0 1 Nothing $ \solvers -> do
   let calldata' = ConcreteBuf txn.txdata
       code' = alloc.code
@@ -480,7 +480,7 @@ runCode rpcinfo code' calldata' = withSolvers Z3 0 1 Nothing $ \solvers -> do
     Right b -> Just b
 
 
-vmres :: VM Concrete s -> VMTraceResult
+vmres :: VM Concrete s -> VMTraceStepResult
 vmres vm =
   let
     gasUsed' = vm.tx.gaslimit - vm.state.gas
@@ -490,7 +490,7 @@ vmres vm =
       Just (VMFailure (Revert (ConcreteBuf b))) -> (ByteStringS b)
       Just (VMFailure _) -> ByteStringS mempty
       _ -> ByteStringS mempty
-  in VMTraceResult
+  in VMTraceStepResult
      { out = res
      , gasUsed = gasUsed'
      }
