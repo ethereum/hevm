@@ -13,11 +13,12 @@ import EVM.FeeSchedule (feeSchedule)
 import EVM.Fetch qualified as Fetch
 import EVM.Format
 import EVM.Solidity
-import EVM.SymExec (defaultVeriOpts, symCalldata, verify, extractCex, prettyCalldata, calldataFromCex, panicMsg, VeriOpts(..), flattenExpr, groupIssues, groupPartials, IterConfig(..), defaultIterConf, defaultPanicCodes, calldataFromCex)
+import EVM.SymExec (defaultVeriOpts, symCalldata, verify, extractCex, prettyCalldata, calldataFromCex, panicMsg, VeriOpts(..), flattenExpr, groupIssues, groupPartials, IterConfig(..), defaultIterConf, calldataFromCex)
 import EVM.Types
 import EVM.Transaction (initTx)
 import EVM.Stepper (Stepper)
 import EVM.Stepper qualified as Stepper
+import EVM.Tracing qualified as Tracing
 import EVM.Expr (maybeLitWordSimp)
 import Data.List (foldl')
 
@@ -179,7 +180,7 @@ validateCex uTestOpts vm repCex = do
       makeTxCall utoConc.testParams (ConcreteBuf repCex.callData, [])
     Stepper.evm get
 
-  (res, (vm3, vmtrace)) <- runStateT (Stepper.interpretWithTrace (Fetch.oracle utoConc.solvers utoConc.rpcInfo) Stepper.execFully) (vm2, [])
+  (res, (vm3, vmtrace)) <- runStateT (Tracing.interpretWithTrace (Fetch.oracle utoConc.solvers utoConc.rpcInfo) Stepper.execFully) (vm2, [])
   -- res <- Stepper.interpret (Fetch.oracle utoConc.solvers utoConc.rpcInfo) vm2 Stepper.execFully
   when conf.debug $ liftIO $ do
     putStrLn $ "vm trace: " <> unlines (map show vmtrace)

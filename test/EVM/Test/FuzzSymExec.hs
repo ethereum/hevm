@@ -10,7 +10,7 @@ execution of HEVM and check that against evmtool from go-ethereum. Re-using some
 of this code, we also generate a symbolic expression then evaluate it
 concretely through Expr.simplify, then check that against evmtool's output.
 -}
-module EVM.Test.Tracing where
+module EVM.Test.FuzzSymExec where
 
 import Control.Monad (when)
 import Control.Monad.ST (ST, stToIO)
@@ -62,7 +62,7 @@ import EVM.Transaction qualified
 import EVM.Types hiding (Env)
 import EVM.Effects
 import Control.Monad.IO.Unlift
-import EVM.Stepper (interpretWithTrace, VMTrace (..) )
+import EVM.Tracing (interpretWithTrace, VMTrace (..) )
 
 instance JSON.ToJSON VMTrace where
   toEncoding = JSON.genericToEncoding JSON.defaultOptions
