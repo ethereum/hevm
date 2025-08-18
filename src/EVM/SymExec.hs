@@ -734,8 +734,12 @@ verifyInputs solvers opts fetcher preState maybepost = do
     getCallPrefix :: Expr Buf -> String
     getCallPrefix (WriteByte (Lit 0) (LitByte a) (WriteByte (Lit 1) (LitByte b) (WriteByte (Lit 2) (LitByte c) (WriteByte (Lit 3) (LitByte d) _)))) = mconcat $ map (printf "%02x") [a,b,c,d]
     getCallPrefix _ = "unknown"
-    toProps leaf vm post = let keccakConstraints = map (\(bs, k)-> PEq (Keccak (ConcreteBuf bs)) (Lit k)) (Set.toList vm.keccakPreImgs)
-     in PNeg (post preState leaf) : vm.constraints <> extractProps leaf <> keccakConstraints
+    toProps leaf vm post = let
+      postCondition = post preState leaf
+      keccakConstraints = map (\(bs, k)-> PEq (Keccak (ConcreteBuf bs)) (Lit k)) (Set.toList vm.keccakPreImgs)
+     in case postCondition of
+      PBool True -> [PBool False]
+      _ -> PNeg postCondition : vm.constraints <> extractProps leaf <> keccakConstraints
 
     canBeSat (a, _) = case a of
         [PBool False] -> False
