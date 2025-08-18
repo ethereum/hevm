@@ -186,15 +186,17 @@ validateCex uTestOpts vm repCex = do
     putStrLn $ "vm step trace: " <> unlines (map show vmtrace)
     putStrLn $ "vm res: " <> show res
     putStrLn $ "vm res: " <> show vm3.result
-  pure $ case res of
-    Left err -> case err of
-      (UnrecognizedOpcode 0xfe) -> True
-      (Revert (ConcreteBuf msg)) ->
-         msg == panicMsg 0x01 ||
-           let sel = selector "Error(string)"
-           in (sel `BS.isPrefixOf` msg) && ("assertion failed" `BS.isPrefixOf` (BS.drop (4+32+32) msg))
-      _ -> False
-    Right _ -> utoConc.checkFailBit && (dsTestFailedConc vm3.env.contracts)
+  let shouldFail = "proveFail" `isPrefixOf` repCex.testName
+  let ret = case res of
+              Left err -> case err of
+                (UnrecognizedOpcode 0xfe) -> True
+                (Revert (ConcreteBuf msg)) ->
+                   msg == panicMsg 0x01 ||
+                     let sel = selector "Error(string)"
+                     in (sel `BS.isPrefixOf` msg) && ("assertion failed" `BS.isPrefixOf` (BS.drop (4+32+32) msg))
+                _ -> False
+              Right _ -> utoConc.checkFailBit && (dsTestFailedConc vm3.env.contracts)
+  pure (ret /= shouldFail)
 
 -- Returns tuple of (No Cex, No warnings)
 runUnitTestContract
