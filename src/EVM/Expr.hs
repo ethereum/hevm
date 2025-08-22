@@ -27,7 +27,7 @@ import Data.Vector.Mutable (MVector)
 import Data.Vector.Storable qualified as VS
 import Data.Vector.Storable.ByteString
 import Data.Word (Word8, Word32)
-import Witch (unsafeInto, into, tryFrom, tryInto)
+import Witch (unsafeInto, into, tryInto)
 import Data.Containers.ListUtils (nubOrd)
 
 import Optics.Core
@@ -583,40 +583,9 @@ instance Monoid (Expr Buf) where
 -- | Removes any irrelevant writes when reading from a buffer
 simplifyReads :: Expr a -> Expr a
 simplifyReads = \case
-  ReadWord (Lit idx) b -> readWord (Lit idx) (stripWrites idx 32 b)
-  ReadByte (Lit idx) b -> readByte (Lit idx) (stripWrites idx 1 b)
+  ReadWord (Lit idx) b -> readWord (Lit idx) b
+  ReadByte (Lit idx) b -> readByte (Lit idx) b
   a -> a
-
--- | Strips writes from the buffer that can be statically determined to be out of range
--- TODO: are the bounds here correct? I think there might be some off by one mistakes...
-stripWrites :: W256 -> W256 -> Expr Buf -> Expr Buf
-stripWrites off size = \case
-  AbstractBuf s -> AbstractBuf s
-  ConcreteBuf b -> ConcreteBuf $ case off <= off + size of
-                                    True -> case tryFrom @W256 (off + size) of
-                                      Right n -> BS.take n b
-                                      Left _ -> b
-                                    False -> b
-  WriteByte (Lit idx) v prev
-    -> if idx - off >= size
-       then stripWrites off size prev
-       else WriteByte (Lit idx) v (stripWrites off size prev)
-  -- TODO: handle partial overlaps
-  WriteWord (Lit idx) v prev
-    -> if idx - off >= size && idx - off <= (maxBound :: W256) - 31
-       then stripWrites off size prev
-       else WriteWord (Lit idx) v (stripWrites off size prev)
-  CopySlice (Lit srcOff) (Lit dstOff) (Lit size') src dst
-    -> if dstOff - off >= size && dstOff - off <= (maxBound :: W256) - size' - 1
-       then stripWrites off size dst
-       else CopySlice (Lit srcOff) (Lit dstOff) (Lit size')
-                      (stripWrites srcOff size' src)
-                      (stripWrites off size dst)
-  WriteByte i v prev -> WriteByte i v (stripWrites off size prev)
-  WriteWord i v prev -> WriteWord i v (stripWrites off size prev)
-  CopySlice srcOff dstOff size' src dst -> CopySlice srcOff dstOff size' src dst
-  GVar _ ->  internalError "Unexpected GVar in stripWrites"
-
 
 -- ** Storage ** -----------------------------------------------------------------------------------
 
