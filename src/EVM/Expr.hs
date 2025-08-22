@@ -278,6 +278,7 @@ readBytes (Prelude.min 32 -> n) idx buf
 
 -- | Reads the word starting at idx from the given buf
 readWord :: Expr EWord -> Expr Buf -> Expr EWord
+readWord idx buf@(AbstractBuf _) = ReadWord idx buf
 readWord idx b@(WriteWord idx' val buf)
   -- the word we are trying to read exactly matches a WriteWord
   | idx == idx' = val
@@ -310,6 +311,7 @@ readWordFromBytes (Lit idx) (ConcreteBuf bs) =
   case tryInto idx of
     Left _ -> Lit 0
     Right i -> Lit $ word $ padRight 32 $ BS.take 32 $ BS.drop i bs
+readWordFromBytes idx buf@(AbstractBuf _) = ReadWord idx buf
 readWordFromBytes i@(Lit idx) buf = let
     bytes = [readByte (Lit i') buf | i' <- [idx .. idx + 31]]
   in if all isLitByte bytes
