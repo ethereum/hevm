@@ -292,6 +292,8 @@ readWord idx b@(WriteWord idx' val buf)
     -- we do not have enough information to statically determine whether or not
     -- the region we want to read overlaps the WriteWord
     _ -> readWordFromBytes idx b
+readWord i@(Lit idx) (WriteByte (Lit idx') _ buf)
+  | idx' < idx || (idx' >= idx + 32 && idx <= (maxBound :: W256) - 32) = readWord i buf
 -- reading a Word that is lower than the dstOffset-32 of a CopySlice, so it's just reading from dst
 readWord i@(Lit x) (CopySlice _ (Lit dstOffset) _ _ dst) | dstOffset >= x+32 =
   readWord i dst
