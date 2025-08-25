@@ -57,6 +57,7 @@ import Data.ByteString.Lazy (toStrict, fromStrict)
 import Data.Char qualified as Char
 import Data.DoubleWord (signedWord)
 import Data.Foldable (toList)
+import Data.HashMap.Strict qualified as HashMap
 import Data.List (isPrefixOf, sort)
 import Data.Map qualified as Map
 import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
@@ -738,7 +739,7 @@ formatExpr = go
           [ "(ConcreteStore"
           , indent 2 $ T.unlines
             [ "vals:"
-            , indent 2 $ T.unlines $ fmap (T.pack . show) $ Map.toList s
+            , indent 2 $ T.unlines $ fmap (T.pack . show) $ HashMap.toList s
             ]
           , ")"
           ]

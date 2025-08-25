@@ -14,8 +14,9 @@ import Data.Bits hiding (And, Xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.DoubleWord (Int256, Word256(Word256), Word128(Word128))
+import Data.HashMap.Lazy qualified as LHashMap
+import Data.HashMap.Strict qualified as HashMap
 import Data.List
-import Data.Map qualified as LMap
 import Data.Map.Strict qualified as Map
 import Data.Maybe (mapMaybe, isJust, fromMaybe)
 import Data.Semigroup (Any, Any(..), getAny)
@@ -642,7 +643,7 @@ readStorage w st = go (simplifyNoLitToKeccak w) (simplifyNoLitToKeccak st)
     go :: Expr EWord -> Expr Storage -> Maybe (Expr EWord)
     go _ (GVar _) = internalError "Can't read from a GVar"
     go slot s@(AbstractStore _ _) = Just $ SLoad slot s
-    go (Lit l) (ConcreteStore s) = Lit <$> Map.lookup l s
+    go (Lit l) (ConcreteStore s) = Lit <$> HashMap.lookup l s
     go slot store@(ConcreteStore _) = Just $ SLoad slot store
     go slot s@(SStore prevSlot val prev) = case (prevSlot, slot) of
       -- if address and slot match then we return the val in this write
@@ -794,7 +795,7 @@ litToKeccak e = mapExpr go e
 -- ConcreteStore, otherwise we add a new write to the storage expression.
 writeStorage :: Expr EWord -> Expr EWord -> Expr Storage -> Expr Storage
 writeStorage k@(Lit key) v@(Lit val) store = case store of
-  ConcreteStore s -> ConcreteStore (Map.insert key val s)
+  ConcreteStore s -> ConcreteStore (HashMap.insert key val s)
   _ -> SStore k v store
 writeStorage key val store@(SStore key' val' prev)
      = if key == key'
@@ -972,12 +973,12 @@ decomposeStorage = go
       else setLogicalBase idx b
 
     -- empty concrete base is safe to reuse without any rewriting
-    setLogicalBase _ s@(ConcreteStore m) | Map.null m = Just s
+    setLogicalBase _ s@(ConcreteStore m) | HashMap.null m = Just s
 
     -- if the existing base is concrete but we have writes to only keys < 256
     -- then we can safely rewrite the base to an empty ConcreteStore (safe because we assume keccack(x) > 256)
     setLogicalBase _ (ConcreteStore store) =
-      if all (< 256) (Map.keys store)
+      if all (< 256) (HashMap.keys store)
       then Just (ConcreteStore mempty)
       else Nothing
     setLogicalBase _ (GVar _) = internalError "Unexpected GVar"
@@ -1842,7 +1843,7 @@ maybeLitAddrSimp e = case concKeccakSimpExpr e of
   LitAddr a -> Just a
   _ -> Nothing
 
-maybeConcStoreSimp :: Expr Storage -> Maybe (LMap.Map W256 W256)
+maybeConcStoreSimp :: Expr Storage -> Maybe (LHashMap.HashMap W256 W256)
 maybeConcStoreSimp (ConcreteStore s) = Just s
 maybeConcStoreSimp e = case concKeccakSimpExpr e of
   ConcreteStore s -> Just s

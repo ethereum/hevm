@@ -186,6 +186,7 @@ library
     split                             >= 0.2.3 && < 0.3,
     template-haskell                  >= 2.19.0 && < 3,
     extra                             >= 1.7.14 && < 2,
+    hashable                          >= 1.4.4.0 && < 2,
   hs-source-dirs:
     src
 
@@ -247,6 +248,7 @@ common test-base
     tasty-expected-failure,
     temporary,
     text,
+    unordered-containers,
     vector,
     witherable,
     operational,
@@ -290,6 +292,7 @@ test-suite test
     binary,
     data-dword,
     extra,
+    hashable,
     here,
     time,
     regex

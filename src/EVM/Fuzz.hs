@@ -7,7 +7,8 @@ module EVM.Fuzz where
 
 import Control.Monad (replicateM)
 import Control.Monad.State (State, get, put, execState)
-import Data.Map.Strict as Map (fromList, Map, (!), (!?), insert)
+import Data.HashMap.Strict as HashMap (fromList, HashMap)
+import Data.Map.Strict as Map (Map, (!), (!?), insert)
 import Data.Maybe (fromMaybe)
 import Data.Set as Set (insert, Set, empty, toList, fromList)
 import Data.ByteString qualified as BS
@@ -76,7 +77,7 @@ substituteBuf valMap p = mapProp go p
                                 Nothing -> orig
     go a = a
 
-substituteStores ::  Map (Expr 'EAddr) (Map W256 W256) -> Prop -> Prop
+substituteStores ::  Map (Expr 'EAddr) (HashMap W256 W256) -> Prop -> Prop
 substituteStores valMap p = mapProp go p
   where
     go :: Expr a -> Expr a
@@ -216,10 +217,10 @@ getvals vars = do
       go ax (Map.insert a val valMap)
 
 -- Storage value generation
-getStores :: CollectStorage -> Gen (Map (Expr EAddr) (Map W256 W256))
+getStores :: CollectStorage -> Gen (Map (Expr EAddr) (HashMap W256 W256))
 getStores storesLoads = go (Set.toList storesLoads.addrs) mempty
   where
-    go :: [(Expr EAddr, Maybe W256)] -> Map (Expr EAddr) (Map W256 W256) -> Gen (Map (Expr EAddr) (Map W256 W256))
+    go :: [(Expr EAddr, Maybe W256)] -> Map (Expr EAddr) (HashMap W256 W256) -> Gen (Map (Expr EAddr) (HashMap W256 W256))
     go [] addrToValsMap = pure addrToValsMap
     go ((addr, _):ax) addrToValsMap = do
       -- number of elements inserted into storage
@@ -228,7 +229,7 @@ getStores storesLoads = go (Set.toList storesLoads.addrs) mempty
                                    ,(1, choose (11, 100))
                                    ]
       l <- replicateM numElems oneWrite
-      go ax (Map.insert addr (Map.fromList l) addrToValsMap)
+      go ax (Map.insert addr (HashMap.fromList l) addrToValsMap)
         where
           oneWrite :: Gen (W256, W256)
           oneWrite = do

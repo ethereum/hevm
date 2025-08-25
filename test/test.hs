@@ -22,6 +22,8 @@ import Data.Binary.Put (runPut)
 import Data.Binary.Get (runGetOrFail)
 import Data.DoubleWord
 import Data.Either
+import Data.Hashable (Hashable)
+import Data.HashMap.Strict qualified as HashMap
 import Data.List qualified as List
 import Data.Map.Strict qualified as Map
 import Data.Maybe
@@ -493,7 +495,7 @@ tests = testGroup "hevm"
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
     , test "simplify-storage-wordToAddr" $ do
        let a = "000000000000000000000000d95322745865822719164b1fc167930754c248de000000000000000000000000000000000000000000000000000000000000004a"
-           store = ConcreteStore (Map.fromList[(W256 0xebd33f63ba5dda53a45af725baed5628cdad261db5319da5f5d921521fe1161d,W256 0x5842cf)])
+           store = ConcreteStore (HashMap.fromList[(W256 0xebd33f63ba5dda53a45af725baed5628cdad261db5319da5f5d921521fe1161d,W256 0x5842cf)])
            expr = SLoad (Keccak (ConcreteBuf (hexStringToByteString a))) store
            simpExpr = Expr.wordToAddr expr
            simpExpr2 = Expr.concKeccakSimpExpr expr
@@ -501,12 +503,12 @@ tests = testGroup "hevm"
        assertEqualM "Expression should simplify to value." simpExpr2 (Lit 0x5842cf)
     , test "simplify-storage-wordToAddr-complex" $ do
        let a = "000000000000000000000000d95322745865822719164b1fc167930754c248de000000000000000000000000000000000000000000000000000000000000004a"
-           store = ConcreteStore (Map.fromList[(W256 0xebd33f63ba5dda53a45af725baed5628cdad261db5319da5f5d921521fe1161d,W256 0x5842cf)])
+           store = ConcreteStore (HashMap.fromList[(W256 0xebd33f63ba5dda53a45af725baed5628cdad261db5319da5f5d921521fe1161d,W256 0x5842cf)])
            expr = SLoad (Keccak (ConcreteBuf (hexStringToByteString a))) store
            writeWChain = WriteWord (Lit 0x32) (Lit 0x72) (WriteWord (Lit 0x0) expr (ConcreteBuf ""))
            kecc = Keccak (CopySlice (Lit 0x0) (Lit 0x0) (Lit 0x20) (WriteWord (Lit 0x0) expr (writeWChain)) (ConcreteBuf ""))
            keccAnd =  (And (Lit 1461501637330902918203684832716283019655932542975) kecc)
-           outer = And (Lit 1461501637330902918203684832716283019655932542975) (SLoad (keccAnd) (ConcreteStore (Map.fromList[(W256 1184450375068808042203882151692185743185288360635, W256 0xacab)])))
+           outer = And (Lit 1461501637330902918203684832716283019655932542975) (SLoad (keccAnd) (ConcreteStore (HashMap.fromList[(W256 1184450375068808042203882151692185743185288360635, W256 0xacab)])))
            simp = Expr.concKeccakSimpExpr outer
        assertEqualM "Expression should simplify to value." simp (Lit 0xacab)
     ]
@@ -516,10 +518,10 @@ tests = testGroup "hevm"
         (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x0) (Lit 0xab) (AbstractStore (LitAddr 0x0) Nothing)))
     , test "read-from-concrete" $ assertEqualM ""
         (Lit 0xab)
-        (Expr.readStorage' (Lit 0x0) (ConcreteStore $ Map.fromList [(0x0, 0xab)]))
+        (Expr.readStorage' (Lit 0x0) (ConcreteStore $ HashMap.fromList [(0x0, 0xab)]))
     , test "read-past-write" $ assertEqualM ""
         (Lit 0xab)
-        (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x1) (Var "b") (ConcreteStore $ Map.fromList [(0x0, 0xab)])))
+        (Expr.readStorage' (Lit 0x0) (SStore (Lit 0x1) (Var "b") (ConcreteStore $ HashMap.fromList [(0x0, 0xab)])))
     , test "accessStorage uses fetchedStorage" $ do
         let dummyContract =
               (initialContract (RuntimeCode (ConcreteRuntimeCode mempty)))
@@ -815,7 +817,7 @@ tests = testGroup "hevm"
     , test "word-eq-bug" $ do
         -- This test is actually OK because the simplified takes into account that it's impossible to find a
         -- near-collision in the keccak hash
-        let x =  (SLoad (Keccak (AbstractBuf "es")) (SStore (Add (Keccak (ConcreteBuf "")) (Lit 0x1)) (Lit 0xacab) (ConcreteStore (Map.empty))))
+        let x =  (SLoad (Keccak (AbstractBuf "es")) (SStore (Add (Keccak (ConcreteBuf "")) (Lit 0x1)) (Lit 0xacab) (ConcreteStore (HashMap.empty))))
         let simplified = Expr.simplify x
         y <- checkEquiv x simplified
         assertBoolM "Must be equal, given keccak distance axiom" y
@@ -1029,10 +1031,12 @@ tests = testGroup "hevm"
         -- same as above, but with offset 2
         (LitByte 0xbb)
         (Expr.indexWord (Lit 2) (Lit 0xff22bb4455667788990011223344556677889900112233445566778899001122))
-    , test "encodeConcreteStore-overwrite" $
-      assertEqualM ""
-        (pure "(store (store ((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000) (_ bv1 256) (_ bv2 256)) (_ bv3 256) (_ bv4 256))")
-        (EVM.SMT.encodeConcreteStore $ Map.fromList [(W256 1, W256 2), (W256 3, W256 4)])
+    , test "encodeConcreteStore-overwrite" $ do
+        -- HashMap has no defined order so encoding may differ
+        let encoded = fromRight "err" $ EVM.SMT.encodeConcreteStore $ HashMap.fromList [(W256 1, W256 2), (W256 3, W256 4)]
+        let options = ["(store (store ((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000) (_ bv1 256) (_ bv2 256)) (_ bv3 256) (_ bv4 256))",
+                       "(store (store ((as const Storage) #x0000000000000000000000000000000000000000000000000000000000000000) (_ bv3 256) (_ bv4 256)) (_ bv1 256) (_ bv2 256))"]
+        assertBoolM "encoding must match" (encoded `elem` options)
     , test "indexword-oob-sym" $ assertEqualM ""
         -- indexWord should return 0 for oob access
         (LitByte 0x0)
@@ -4163,7 +4167,7 @@ tests = testGroup "hevm"
 
           let storeCex = cex.store
               testCex = case (Map.lookup cAddr storeCex, Map.lookup aAddr storeCex) of
-                          (Just sC, Just sA) -> case (Map.lookup 0 sC, Map.lookup 0 sA) of
+                          (Just sC, Just sA) -> case (HashMap.lookup 0 sC, HashMap.lookup 0 sA) of
                               (Just x, Just y) -> x /= y
                               (Just x, Nothing) -> x /= 0
                               _ -> False
@@ -4280,8 +4284,8 @@ tests = testGroup "hevm"
           let addr = SymAddr "entrypoint"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
-                          Just s -> Map.size s == 2 &&
-                                    case (Map.lookup 0 s, Map.lookup 1 s) of
+                          Just s -> HashMap.size s == 2 &&
+                                    case (HashMap.lookup 0 s, HashMap.lookup 1 s) of
                                       (Just x, Just y) -> x /= y
                                       _ -> False
                           _ -> False
@@ -4304,7 +4308,7 @@ tests = testGroup "hevm"
               a = getVar cex "arg1"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
-                          Just s -> case (Map.lookup 0 s, Map.lookup (10 + a) s) of
+                          Just s -> case (HashMap.lookup 0 s, HashMap.lookup (10 + a) s) of
                                       (Just x, Just y) -> x >= y
                                       (Just x, Nothing) -> x > 0 -- arr1 can be Nothing, it'll then be zero
                                       _ -> False
@@ -4331,8 +4335,8 @@ tests = testGroup "hevm"
           let addr = SymAddr "entrypoint"
               testCex = Map.size cex.store == 1 &&
                         case Map.lookup addr cex.store of
-                          Just s -> Map.size s == 2 &&
-                                    case (Map.lookup 0 s, Map.lookup 1 s) of
+                          Just s -> HashMap.size s == 2 &&
+                                    case (HashMap.lookup 0 s, HashMap.lookup 1 s) of
                                       (Just x, Just y) -> x == y
                                       _ -> False
                           _ -> False
@@ -5784,6 +5788,14 @@ instance Arbitrary (V.Vector (Expr Byte)) where
 
 instance Arbitrary (Expr EContract) where
   arbitrary = sized genEContract
+
+instance (Hashable k, Arbitrary k) => Arbitrary1 (HashMap.HashMap k) where
+  liftArbitrary = fmap HashMap.fromList . liftArbitrary . liftArbitrary
+  liftShrink shr = map HashMap.fromList . liftShrink (liftShrink shr) . HashMap.toList
+
+instance (Hashable k, Arbitrary k, Arbitrary v) => Arbitrary (HashMap.HashMap k v) where
+  arbitrary = arbitrary1
+  shrink = shrink1
 
 -- LitOnly
 newtype LitOnly a = LitOnly a
