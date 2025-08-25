@@ -1,5 +1,4 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE DataKinds #-}
 
 module EVM.Stepper
   ( Action (..)
@@ -23,12 +22,10 @@ where
 -- as the framework for monadic interpretation.
 
 import Control.Monad.IO.Class
-import Control.Monad.Operational (Program, ProgramViewT(..), ProgramView, singleton)
+import Control.Monad.Operational (Program, ProgramViewT(..), ProgramView, singleton, view)
 import Control.Monad.ST (stToIO, RealWorld)
-import Control.Monad.State.Strict (execStateT, get)
+import Control.Monad.State.Strict (execStateT, get, StateT(..))
 import Data.Text (Text)
-import Control.Monad.State.Strict (StateT(..))
-import Control.Monad.Operational qualified as Operational
 
 import EVM qualified
 import EVM.Effects
@@ -107,7 +104,7 @@ interpret
   -> VM Concrete RealWorld
   -> Stepper Concrete RealWorld a
   -> m a
-interpret fetcher vm = eval . Operational.view
+interpret fetcher vm = eval . view
   where
     eval :: ProgramView (Action Concrete RealWorld) a -> m a
     eval (Return x) = pure x
