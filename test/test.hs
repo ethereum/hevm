@@ -1013,6 +1013,9 @@ tests = testGroup "hevm"
         -- write word and read it at the same offset of 16
         (Lit 0x12)
         (Expr.readWord (Lit 0x20) (WriteWord (Lit 0x20) (Lit 0x12) mempty))
+    , test "read-word-over-write-byte" $ assertEqualM ""
+        (ReadWord (Lit 0x4) (AbstractBuf "abs"))
+        (Expr.readWord (Lit 0x4) (WriteByte (Lit 0x1) (LitByte 0x12) (AbstractBuf "abs")))
     , test "read-word-copySlice-overlap" $ assertEqualM ""
         -- we should not recurse into a copySlice if the read index + 32 overlaps the sliced region
         (ReadWord (Lit 40) (CopySlice (Lit 0) (Lit 30) (Lit 12) (WriteWord (Lit 10) (Lit 0x64) (AbstractBuf "hi")) (AbstractBuf "hi")))
