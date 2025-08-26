@@ -156,11 +156,7 @@ tests = testGroup "hevm"
         |]
        expr <- withDefaultSolver $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256,uint256)" [AbiUIntType 256, AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
-    -- This case is somewhat artificial. We can't simplify this using only
-    -- static rewrite rules, because acct is totally abstract and acct + 1
-    -- could overflow back to zero. we may be able to do better if we have some
-    -- smt assisted simplification that can take branch conditions into account.
-    , expectFail $ test "simplify-storage-array-symbolic-index" $ do
+    , test "simplify-storage-array-symbolic-index" $ do
        Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
@@ -175,9 +171,9 @@ tests = testGroup "hevm"
         }
         |]
        expr <- withDefaultSolver $ \s -> getExpr s c (Just (Sig "transfer(uint256,uint256)" [AbiUIntType 256, AbiUIntType 256])) [] defaultVeriOpts
-       -- T.writeFile "symbolic-index.expr" $ formatExpr expr
+       -- putStrLnM $ T.unpack $ formatExpr expr
        assertEqualM "Expression is not clean." (badStoresInExpr expr) False
-    , expectFail $ test "simplify-storage-array-of-struct-symbolic-index" $ do
+    , test "simplify-storage-array-of-struct-symbolic-index" $ do
        Just c <- solcRuntime "MyContract"
         [i|
         contract MyContract {
