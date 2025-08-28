@@ -1433,10 +1433,12 @@ accessStorage addr slot continue = do
       case readStorage slot c.storage of
         Just x -> case readStorage slotConc c.storage of
           Just (Lit _) -> continue x
+          Just _ | not c.external -> continue x
           _ -> rpcCall c slotConc
         Nothing -> rpcCall c slotConc
     Nothing ->
-      fetchAccount addr $ \_ -> accessStorage addr slot continue
+      fetchAccount addr $ \_ ->
+        accessStorage addr slot continue
   where
       rpcCall c slotConc = fetchAccount addr $ \_ ->
         if c.external
@@ -1445,18 +1447,18 @@ accessStorage addr slot continue = do
             -- check if the slot is cached
             use (#env % #contracts % at (LitAddr addr')) >>= \case
               Nothing -> internalError $ "contract addr " <> show addr' <> " marked external not found in cache"
-              Just fetched -> if concStoreContains (Lit slot') fetched.storage
-                then continue $ SLoad (Lit slot') c.storage
+              Just contr -> if concStoreContains (Lit slot') contr.storage
+                then continue $ SLoad (Lit slot') contr.storage
                 else mkQuery addr' slot'
         else do
           modifying (#env % #contracts % ix addr % #storage) (writeStorage slot (Lit 0))
           continue $ Lit 0
       mkQuery a s = query $ PleaseFetchSlot a s $ \x -> do
-              modifying (#cache % #fetched % ix a % #storage) (writeDeepStorage (Lit s) (Lit x))
-              modifying (#env % #contracts % ix (LitAddr a) % #storage) (writeDeepStorage (Lit s) (Lit x))
-              assign #result Nothing
-              contr <- fromJust <$> gets (preview (#env % #contracts % ix (LitAddr a)))
-              continue $ SLoad (Lit s) (contr ^. #storage)
+        assign #result Nothing
+        modifying (#cache % #fetched % ix a % #storage) (writeDeepStorage (Lit s) (Lit x))
+        modifying (#env % #contracts % ix (LitAddr a) % #storage) (writeDeepStorage (Lit s) (Lit x))
+        contr <- fromJust <$> gets (preview (#env % #contracts % ix (LitAddr a)))
+        continue $ SLoad (Lit s) (contr ^. #storage)
 
 accessTStorage
   :: VMOps t => Expr EAddr
