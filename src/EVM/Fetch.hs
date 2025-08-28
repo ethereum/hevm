@@ -241,7 +241,6 @@ writeMockDataToFile filePath mockData = do
 
 fetchWithSession :: Text -> Session -> Value -> IO (Maybe Value)
 fetchWithSession url sess x = do
-  putStrLn $ "Fetching from " ++ unpack url ++ " with payload: " ++ show x
   r <- asValue =<< Session.post sess (unpack url) x
   pure (r ^? (lensVL responseBody) % key "result")
 

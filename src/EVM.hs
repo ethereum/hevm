@@ -1416,8 +1416,7 @@ fetchAccountWithFallback addr fallback continue =
                 continue c
       GVar _ -> internalError "Unexpected GVar"
 
-accessStorage
-  :: (?conf :: Config, VMOps t) => Expr EAddr
+accessStorage :: forall s t . (?conf :: Config, VMOps t, Typeable t) => Expr EAddr
   -> Expr EWord
   -> (Expr EWord -> EVM t s ())
   -> EVM t s ()
@@ -1453,12 +1452,16 @@ accessStorage addr slot continue = do
         else do
           modifying (#env % #contracts % ix addr % #storage) (writeStorage slot (Lit 0))
           continue $ Lit 0
+      mkQuery :: Addr -> W256 -> EVM t s ()
       mkQuery a s = query $ PleaseFetchSlot a s $ \x -> do
         assign #result Nothing
         modifying (#cache % #fetched % ix a % #storage) (writeDeepStorage (Lit s) (Lit x))
         modifying (#env % #contracts % ix (LitAddr a) % #storage) (writeDeepStorage (Lit s) (Lit x))
-        contr <- fromJust <$> gets (preview (#env % #contracts % ix (LitAddr a)))
-        continue $ SLoad (Lit s) (contr ^. #storage)
+        case eqT @t @Concrete of
+          Just Refl -> continue (Lit x)
+          Nothing -> do
+            contr <- fromJust <$> gets (preview (#env % #contracts % ix (LitAddr a)))
+            continue $ SLoad (Lit s) (contr ^. #storage)
 
 accessTStorage
   :: VMOps t => Expr EAddr
