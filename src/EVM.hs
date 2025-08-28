@@ -2045,6 +2045,13 @@ cheatActions = Map.fromList
   , action "assertGt(int256,int256)"   $ assertSGt (AbiIntType 256)
   , action "assertGe(uint256,uint256)" $ assertGe (AbiUIntType 256)
   , action "assertGe(int256,int256)"   $ assertSGe (AbiIntType 256)
+  --
+  , action "toString(address)" $ toStringCheat AbiAddressType
+  , action "toString(bool)"    $ toStringCheat AbiBoolType
+  , action "toString(uint256)" $ toStringCheat (AbiUIntType 256)
+  , action "toString(int256)"  $ toStringCheat (AbiIntType 256)
+  , action "toString(bytes32)" $ toStringCheat (AbiBytesType 32)
+  , action "toString(bytes)"   $ toStringCheat AbiBytesDynamicType
   ]
   where
     action s f = (abiKeccak s, f (abiKeccak s))
@@ -2109,6 +2116,10 @@ cheatActions = Map.fromList
     assertSLe =   genAssert (<=) (\a b -> Expr.iszero $ Expr.sgt a b) ">" "assertLe"
     assertGe =    genAssert (>=) Expr.geq "<" "assertGe"
     assertSGe =   genAssert (>=) (\a b -> Expr.iszero $ Expr.slt a b) "<" "assertGe"
+    toStringCheat abitype sig input = do
+      case decodeBuf [abitype] input of
+        CAbi [val] -> frameReturn $ AbiTuple $ V.fromList [AbiString $ Char8.pack $ show val]
+        _ -> vmError (BadCheatCode ("toString parameter decoding failed for " <> show abitype) sig)
 
 -- * General call implementation ("delegateCall")
 -- note that the continuation is ignored in the precompile case

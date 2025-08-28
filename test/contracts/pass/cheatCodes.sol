@@ -31,6 +31,12 @@ interface Hevm {
     function envString(string calldata key, string calldata delimiter) external returns (string[] memory values);
     function envBytes(bytes calldata key) external returns (bytes memory value);
     function envBytes(bytes calldata key, bytes calldata delimiter) external returns (bytes[] memory values);
+    function toString(address value) external returns (string memory);
+    function toString(bool value) external returns (string memory);
+    function toString(uint256 value) external returns (string memory);
+    function toString(int256 value) external returns (string memory);
+    function toString(bytes32 value) external returns (string memory);
+    function toString(bytes memory value) external returns (string memory);
 }
 
 contract HasStorage {
@@ -470,5 +476,75 @@ contract CheatCodes is Test {
     function prove_label_works() public {
         hevm.label(address(this), "label");
         assert(true);
+    }
+
+    function prove_toString_address() public {
+        address testAddr = address(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+        string memory result = hevm.toString(testAddr);
+        assertEq(result, "0x7109709ECfa91a80626fF3989D68f67F5b1DD12D");
+
+        address zeroAddr = address(0);
+        string memory zeroResult = hevm.toString(zeroAddr);
+        assertEq(zeroResult, "0x0000000000000000000000000000000000000000");
+    }
+
+    function prove_toString_bool() public {
+        string memory trueResult = hevm.toString(true);
+        assertEq(trueResult, "true");
+
+        string memory falseResult = hevm.toString(false);
+        assertEq(falseResult, "false");
+    }
+
+    function prove_toString_uint256() public {
+        string memory zeroResult = hevm.toString(uint256(0));
+        assertEq(zeroResult, "0");
+
+        string memory smallResult = hevm.toString(uint256(123));
+        assertEq(smallResult, "123");
+
+        string memory maxResult = hevm.toString(type(uint256).max);
+        assertEq(maxResult, "115792089237316195423570985008687907853269984665640564039457584007913129639935");
+    }
+
+    function prove_toString_int256() public {
+        string memory zeroResult = hevm.toString(int256(0));
+        assertEq(zeroResult, "0");
+
+        string memory positiveResult = hevm.toString(int256(123));
+        assertEq(positiveResult, "123");
+
+        string memory negativeResult = hevm.toString(int256(-123));
+        assertEq(negativeResult, "-123");
+
+        string memory minResult = hevm.toString(type(int256).min);
+        assertEq(minResult, "-57896044618658097711785492504343953926634992332820282019728792003956564819968");
+
+        string memory maxResult = hevm.toString(type(int256).max);
+        assertEq(maxResult, "57896044618658097711785492504343953926634992332820282019728792003956564819967");
+    }
+
+    function prove_toString_bytes32() public {
+        bytes32 testBytes = 0x7109709ECfa91a80626fF3989D68f67F5b1DD12D000000000000000000000000;
+        string memory result = hevm.toString(testBytes);
+        assertEq(result, "0x7109709ecfa91a80626ff3989d68f67f5b1dd12d000000000000000000000000");
+
+        bytes32 zeroBytes = bytes32(0);
+        string memory zeroResult = hevm.toString(zeroBytes);
+        assertEq(zeroResult, "0x0000000000000000000000000000000000000000000000000000000000000000");
+    }
+
+    function prove_toString_bytes() public {
+        bytes memory testBytes = hex"7109709ECfa91a80626fF3989D68f67F5b1DD12D";
+        string memory result = hevm.toString(testBytes);
+        assertEq(result, "0x7109709ecfa91a80626ff3989d68f67f5b1dd12d");
+
+        bytes memory emptyBytes = "";
+        string memory emptyResult = hevm.toString(emptyBytes);
+        assertEq(emptyResult, "0x");
+
+        bytes memory shortBytes = hex"acab";
+        string memory shortResult = hevm.toString(shortBytes);
+        assertEq(shortResult, "0xacab");
     }
 }
