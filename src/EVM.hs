@@ -11,8 +11,8 @@ import Optics.State.Operators
 import Optics.Zoom
 
 import EVM.ABI
-import EVM.Expr (readStorage, writeStorage, readByte, readWord, writeWord,
-  writeByte, bufLength, indexWord, readBytes, copySlice, wordToAddr)
+import EVM.Expr (readStorage, concStoreContains, writeDeepStorage, writeStorage, readByte, readWord, writeWord,
+  writeByte, bufLength, indexWord, readBytes, copySlice, wordToAddr, maybeLitByteSimp, maybeLitWordSimp, maybeLitAddrSimp)
 import EVM.Expr qualified as Expr
 import EVM.FeeSchedule (FeeSchedule (..))
 import EVM.Op
@@ -23,7 +23,6 @@ import EVM.Types qualified as Expr (Expr(Gas))
 import EVM.Sign qualified
 import EVM.Concrete qualified as Concrete
 import EVM.CheatsTH
-import EVM.Expr (maybeLitByteSimp, maybeLitWordSimp, maybeLitAddrSimp)
 import EVM.Effects (Config (..))
 
 import Control.Monad (unless, when)
@@ -1417,8 +1416,7 @@ fetchAccountWithFallback addr fallback continue =
                 continue c
       GVar _ -> internalError "Unexpected GVar"
 
-accessStorage
-  :: (?conf :: Config, VMOps t) => Expr EAddr
+accessStorage :: forall s t . (?conf :: Config, VMOps t, Typeable t) => Expr EAddr
   -> Expr EWord
   -> (Expr EWord -> EVM t s ())
   -> EVM t s ()
@@ -1433,8 +1431,9 @@ accessStorage addr slot continue = do
       --     However, without concretization, it may not find things that are actually in the storage
       case readStorage slot c.storage of
         Just x -> case readStorage slotConc c.storage of
-          Just _ -> continue x
-          Nothing -> rpcCall c slotConc
+          Just (Lit _) -> continue x
+          Just _ | not c.external -> continue x
+          _ -> rpcCall c slotConc
         Nothing -> rpcCall c slotConc
     Nothing ->
       fetchAccount addr $ \_ ->
@@ -1447,17 +1446,22 @@ accessStorage addr slot continue = do
             -- check if the slot is cached
             use (#env % #contracts % at (LitAddr addr')) >>= \case
               Nothing -> internalError $ "contract addr " <> show addr' <> " marked external not found in cache"
-              Just fetched -> case readStorage (Lit slot') fetched.storage of
-                          Nothing -> mkQuery addr' slot'
-                          Just val -> continue val
+              Just contr -> if concStoreContains (Lit slot') contr.storage
+                then continue $ SLoad (Lit slot') contr.storage
+                else mkQuery addr' slot'
         else do
           modifying (#env % #contracts % ix addr % #storage) (writeStorage slot (Lit 0))
           continue $ Lit 0
+      mkQuery :: Addr -> W256 -> EVM t s ()
       mkQuery a s = query $ PleaseFetchSlot a s $ \x -> do
-              modifying (#cache % #fetched % ix a % #storage) (writeStorage (Lit s) (Lit x))
-              modifying (#env % #contracts % ix (LitAddr a) % #storage) (writeStorage (Lit s) (Lit x))
-              assign #result Nothing
-              continue $ Lit x
+        assign #result Nothing
+        modifying (#cache % #fetched % ix a % #storage) (writeDeepStorage (Lit s) (Lit x))
+        modifying (#env % #contracts % ix (LitAddr a) % #storage) (writeDeepStorage (Lit s) (Lit x))
+        case eqT @t @Concrete of
+          Just Refl -> continue (Lit x)
+          Nothing -> do
+            contr <- fromJust <$> gets (preview (#env % #contracts % ix (LitAddr a)))
+            continue $ SLoad (Lit s) (contr ^. #storage)
 
 accessTStorage
   :: VMOps t => Expr EAddr
