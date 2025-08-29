@@ -888,6 +888,7 @@ class VMOps (t :: VMType) where
   partial :: PartialExec -> EVM t s ()
   branch :: Maybe Int -> Expr EWord -> (Bool -> EVM t s ()) -> EVM t s ()
   manySolutions :: Maybe Int -> Expr EWord -> Int -> (Maybe W256 -> EVM t s ()) -> EVM t s ()
+  caseVMType :: EVM Symbolic s () -> EVM Concrete s () -> EVM t s ()
 
 -- Bytecode Representations ------------------------------------------------------------------------
 
