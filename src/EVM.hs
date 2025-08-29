@@ -1794,7 +1794,7 @@ cheat gas (inOffset, inSize) (outOffset, outSize) xs = do
       case Map.lookup abi' cheatActions of
         Nothing -> do
           vm <- get
-          caseVMType (partial $ CheatCodeMissing vm.state.pc abi') (finishFrame $ FrameReverted $ ConcreteBuf $ "Unknown cheat code") 
+          whenSymbolicElse (partial $ CheatCodeMissing vm.state.pc abi') (vmError $ BadCheatCode "Cannot understand cheatcode." abi') 
         Just action -> action input
 
 type CheatAction t s = Expr Buf -> EVM t s ()
@@ -3116,8 +3116,6 @@ instance VMOps Symbolic where
           Lit v -> continue $ Just v
           _ -> internalError "runAllPaths can only get concrete values here"
 
-  caseVMType s _ = s
-
 instance VMOps Concrete where
   burn' n continue = do
     available <- use (#state % #gas)
@@ -3246,7 +3244,6 @@ instance VMOps Concrete where
   partial _ = internalError "won't happen during concrete exec"
   branch _ (forceLit -> cond) continue = continue (cond > 0)
   manySolutions _ _ _ = internalError "SMT solver should never be needed in concrete mode"
-  caseVMType _ c = c
 
 -- Create symbolic VM from concrete VM
 symbolify :: VM Concrete s -> VM Symbolic s
