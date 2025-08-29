@@ -1819,7 +1819,7 @@ cheatActions = Map.fromList
                 in query (PleaseDoFFI cmd vm.osEnv cont)
               _ -> vmError (BadCheatCode "ffi(string[]) decoding of string failed" sig)
             _ -> vmError (BadCheatCode "ffi(string[]) parameter decoding failed" sig)
-        else unexpectedSymArg "ffi disabled: run again with --ffi if you want to allow tests to call external scripts" ([] :: [Expr EWord])
+        else vmError $ BadCheatCode "ffi disabled: run again with --ffi if you want to allow tests to call external scripts" sig
 
   , action "warp(uint256)" $
       \sig input -> case decodeStaticArgs 0 1 input of
